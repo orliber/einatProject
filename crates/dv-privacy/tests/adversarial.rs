@@ -90,6 +90,7 @@ fn send(text: &str, case: &str) -> Outcome {
         identities: &ids,
         practitioner: &practitioner,
         allowlisted: &allow,
+        confirmed_names: &|_: &str| false,
         today: TODAY,
     };
     let filtered = filter(text, &ctx).unwrap();
@@ -287,6 +288,7 @@ fn ordinary_words_containing_a_name_are_confirmed_not_rewritten() {
         identities: &ids,
         practitioner: &[],
         allowlisted: &never,
+        confirmed_names: &|_: &str| false,
         today: TODAY,
     };
     let out = filter("במילוי השאלון ובשאלון ASRS, אלון ענה.", &ctx).unwrap();
@@ -307,6 +309,7 @@ fn ordinary_words_containing_a_name_are_confirmed_not_rewritten() {
         identities: &ids,
         practitioner: &[],
         allowlisted: &confirmed,
+        confirmed_names: &|_: &str| false,
         today: TODAY,
     };
     let again = filter("שאלון ההורים הוחזר.", &ctx).unwrap();
@@ -325,6 +328,20 @@ fn ordinary_words_containing_a_name_are_confirmed_not_rewritten() {
         clear(&req).is_ok(),
         "confirmed ordinary word passes the gate"
     );
+
+    // The other answer: here it is the name ("סיפרה שאלון" = that Alon).
+    let is_name = |t: &str| t == normalize("שאלון");
+    let ctx = PrivacyContext {
+        case_id: "c",
+        identities: &ids,
+        practitioner: &[],
+        allowlisted: &|_: &str| false,
+        confirmed_names: &is_name,
+        today: TODAY,
+    };
+    let named = filter("הגננת סיפרה שאלון מתקשה במעברים.", &ctx).unwrap();
+    assert!(named.suspects.is_empty(), "{:?}", named.suspects);
+    assert!(named.tagged.contains("ש[ילד] מתקשה"), "{}", named.tagged);
 }
 
 #[test]
@@ -358,6 +375,7 @@ fn tags_keep_prefixes_and_restore_puts_names_back() {
         identities: &ids,
         practitioner: &[],
         allowlisted: &allow,
+        confirmed_names: &|_: &str| false,
         today: TODAY,
     };
     let out = filter("מיכל סיפרה שנועם עבר לכפר ורדים עם ד\"ר שטרן", &ctx).unwrap();
@@ -384,6 +402,7 @@ fn a_tag_from_another_case_is_blocked_by_the_gate() {
         identities: &ids,
         practitioner: &[],
         allowlisted: &allow,
+        confirmed_names: &|_: &str| false,
         today: TODAY,
     };
     let body = serde_json::json!({"messages": [{"role": "user", "content": "[אדם_1] הגיע"}]});
@@ -419,6 +438,7 @@ fn the_metadata_leak_pattern_is_caught_once_metadata_names_are_declared() {
         identities: &ids,
         practitioner: &practitioner,
         allowlisted: &allow,
+        confirmed_names: &|_: &str| false,
         today: TODAY,
     };
     let text =

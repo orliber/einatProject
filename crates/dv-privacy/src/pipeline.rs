@@ -24,6 +24,9 @@ pub struct PrivacyContext<'a> {
     pub practitioner: &'a [String],
     /// Normalized tokens the psychologist marked "not a name" / "keep as is".
     pub allowlisted: &'a dyn Fn(&str) -> bool,
+    /// Ordinary words confirmed, for this case, to be a prefix plus a declared name
+    /// ("שאלון" = ש + אלון); the name inside them is hidden.
+    pub confirmed_names: &'a dyn Fn(&str) -> bool,
     pub today: Ymd,
 }
 
@@ -367,7 +370,10 @@ pub fn filter(text: &str, ctx: &PrivacyContext<'_>) -> Result<FilterOutcome, Pri
     // Layer 2: declared identities (every case; another case's name is a suspect, not a tag).
     for m in identity_index(ctx).find(text, &tokens) {
         let whole = &tokens[m.first_token];
-        if m.prefix > 0 && LEXICON.common_words.contains(&whole.norm) {
+        if m.prefix > 0
+            && LEXICON.common_words.contains(&whole.norm)
+            && !(ctx.confirmed_names)(&whole.norm)
+        {
             // "שאלון" = ש + אלון: never rewrite an ordinary word silently.
             if !(ctx.allowlisted)(&whole.norm) {
                 suspects.push(SuspectSpan {

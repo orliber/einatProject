@@ -763,24 +763,50 @@ impl Vault {
         ))
     }
 
+    /// Remember a decision about a token. A later decision for the same case replaces it.
+    fn mark_decision(
+        &mut self,
+        case_id: Option<&str>,
+        token: &str,
+        decision: &str,
+    ) -> Result<(), VaultError> {
+        let h = self.token_hmac(token);
+        self.identity.execute(
+            "INSERT OR REPLACE INTO decisions (id, case_id, token_hmac, decision, tag, created_at)
+             VALUES (?1, ?2, ?3, ?4, NULL, ?5)",
+            params![random_id()?, case_id, h, decision, now()],
+        )?;
+        Ok(())
+    }
+
+    /// "Keep as is": for one case, or for every case when `case_id` is `None`.
     pub fn mark_not_a_name(
         &mut self,
         case_id: Option<&str>,
         token: &str,
     ) -> Result<(), VaultError> {
-        let h = self.token_hmac(token);
-        self.identity.execute(
-            "INSERT OR IGNORE INTO decisions (id, case_id, token_hmac, decision, tag, created_at)
-             VALUES (?1, ?2, ?3, 'not_a_name', NULL, ?4)",
-            params![random_id()?, case_id, h, now()],
-        )?;
-        Ok(())
+        self.mark_decision(case_id, token, "not_a_name")
+    }
+
+    /// An ordinary word that, in this case, is a prefix plus a declared name
+    /// ("שאלון" = ש + אלון). The filter then hides the name inside it.
+    pub fn mark_is_name(&mut self, case_id: &str, token: &str) -> Result<(), VaultError> {
+        self.mark_decision(Some(case_id), token, "is_name")
     }
 
     /// Token HMACs the psychologist marked as "not a name" (global and for this case).
     pub fn not_a_name_hmacs(&self, case_id: &str) -> Result<Vec<String>, VaultError> {
         let mut stmt = self.identity.prepare(
             "SELECT token_hmac FROM decisions WHERE decision = 'not_a_name' AND (case_id IS NULL OR case_id = ?1)",
+        )?;
+        let rows = stmt.query_map([case_id], |r| r.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Token HMACs confirmed as "prefix + name" for this case.
+    pub fn is_name_hmacs(&self, case_id: &str) -> Result<Vec<String>, VaultError> {
+        let mut stmt = self.identity.prepare(
+            "SELECT token_hmac FROM decisions WHERE decision = 'is_name' AND case_id = ?1",
         )?;
         let rows = stmt.query_map([case_id], |r| r.get(0))?;
         Ok(rows.collect::<Result<_, _>>()?)

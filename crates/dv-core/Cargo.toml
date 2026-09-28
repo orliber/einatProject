@@ -10,6 +10,21 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+fips = ["dv-vault/fips"]
+
 [dependencies]
+dv-ai.workspace = true
+dv-domain.workspace = true
+dv-egress.workspace = true
 dv-ipc.workspace = true
+dv-privacy.workspace = true
+dv-vault.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
+ts-rs = { version = "11", features = ["no-serde-warnings"] }
+zeroize = "1.9"
+
+[dev-dependencies]
+tempfile = "3"

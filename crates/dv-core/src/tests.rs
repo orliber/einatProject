@@ -1,0 +1,437 @@
+//! End-to-end flows through `Core`. Fabricated data only; nothing leaves the machine.
+
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+use std::sync::{Arc, Mutex};
+
+use dv_domain::{
+    Age, CaseMeta, Consent, DraftStatus, GrammaticalGender, IdentityInput, InputKind, Role,
+};
+use dv_egress::{EgressError, Transport};
+use dv_privacy::ClearedPayload;
+use serde_json::{json, Value};
+
+use super::*;
+
+const PASSWORD: &str = "כלב ירוק רץ מהר בגינה";
+
+/// Records every payload and answers like the Messages API.
+#[derive(Clone, Default)]
+struct FakeTransport {
+    sent: Arc<Mutex<Vec<String>>>,
+    answer: Arc<Mutex<Option<Value>>>,
+}
+
+impl Transport for FakeTransport {
+    fn send(&self, payload: &ClearedPayload) -> Result<Value, EgressError> {
+        let body = String::from_utf8_lossy(payload.body()).into_owned();
+        self.sent.lock().unwrap().push(body.clone());
+        if let Some(a) = self.answer.lock().unwrap().clone() {
+            return Ok(a);
+        }
+        let parsed: Value = serde_json::from_str(&body).unwrap();
+        Ok(dv_ai::demo::respond(&parsed))
+    }
+}
+
+fn api_json(v: &Value) -> Value {
+    json!({ "stop_reason": "end_turn", "content": [{ "type": "text", "text": v.to_string() }] })
+}
+
+fn consent() -> Consent {
+    Consent {
+        given_on: "2026-09-01".into(),
+        form_version: "v1".into(),
+        given_by: "שני ההורים".into(),
+    }
+}
+
+fn setup(transport: Option<FakeTransport>) -> (tempfile::TempDir, Core, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut core = Core::for_tests(
+        dir.path(),
+        transport.map(|t| Box::new(t) as Box<dyn Transport>),
+    );
+    let created = core.create_vault(PASSWORD).unwrap();
+    assert!(!created.recovery_key.is_empty());
+    core.set_practitioner(vec!["ד\"ר רותם אלמוג".into()])
+        .unwrap();
+    let meta = CaseMeta {
+        code: "TEST-0002".into(),
+        age: Some(Age {
+            years: 5,
+            months: 4,
+        }),
+        child_gender: Some(GrammaticalGender::Male),
+        consent: Some(consent()),
+        ..CaseMeta::default()
+    };
+    let case = core
+        .create_case(
+            meta,
+            vec![
+                IdentityInput {
+                    id: None,
+                    role: Role::Child,
+                    value: "אלון".into(),
+                    aliases: vec![],
+                },
+                IdentityInput {
+                    id: None,
+                    role: Role::Teacher,
+                    value: "שירה".into(),
+                    aliases: vec![],
+                },
+            ],
+        )
+        .unwrap();
+    core.add_input(
+        &case,
+        InputKind::Kindergarten,
+        "שיחה עם הגננת",
+        "שירה סיפרה כי אלון מתקשה במעברים בין פעילויות. בבוקר הוא נפרד בבכי.",
+    )
+    .unwrap();
+    core.add_input(
+        &case,
+        InputKind::Intake,
+        "אינטייק עם ההורים",
+        "ההורים מתארים כי אלון נרדם באיחור ומתעורר פעמיים בלילה.",
+    )
+    .unwrap();
+    (dir, core, case)
+}
+
+#[test]
+fn ping_reports_versions() {
+    let p = ping();
+    assert_eq!(p.ipc_version, IPC_VERSION);
+    assert!(!p.core_version.is_empty());
+}
+
+#[test]
+fn model_allow_lists_agree() {
+    assert_eq!(dv_ai::ALLOWED_MODELS, dv_egress::ALLOWED_MODELS);
+    assert!(dv_ai::ALLOWED_MODELS.contains(&dv_ai::DEFAULT_MODEL));
+}
+
+#[test]
+fn full_section_flow_sends_only_tags_and_stores_tagged() {
+    let fake = FakeTransport::default();
+    let (dir, mut core, case) = setup(Some(fake.clone()));
+
+    let prepared = core
+        .prepare_section(&case, "kindergarten", "תנסח פסקה על הוויסות הרגשי")
+        .unwrap();
+    assert!(prepared.blocked.is_empty(), "{:?}", prepared.blocked);
+    assert!(prepared.suspects.is_empty(), "{:?}", prepared.suspects);
+    assert!(!prepared.hidden.is_empty());
+    let approval = prepared.approval_id.clone().expect("approved payload");
+
+    let result = core.send_section(&approval).unwrap();
+    assert!(!result.paragraphs.is_empty());
+
+    // What left the machine: tags, never names.
+    let sent = fake.sent.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1);
+    for name in ["אלון", "שירה", "רותם", "אלמוג"] {
+        assert!(!sent[0].contains(name), "{name} left the machine");
+    }
+    assert!(sent[0].contains("[ילד]"));
+
+    // Shown to the psychologist with names restored; stored tagged.
+    let detail = core.case_detail(&case).unwrap();
+    let section = detail
+        .sections
+        .iter()
+        .find(|s| s.key == "kindergarten")
+        .unwrap();
+    assert!(!section.paragraphs.is_empty());
+    assert!(section
+        .paragraphs
+        .iter()
+        .all(|p| p.status == DraftStatus::Proposed && p.by_ai));
+    assert!(section.paragraphs.iter().any(|p| p.text.contains("אלון")));
+    assert!(section.paragraphs.iter().all(|p| !p.sources.is_empty()));
+
+    // The same approval cannot be used twice.
+    assert!(matches!(
+        core.send_section(&approval),
+        Err(CoreError::NotFound(_))
+    ));
+
+    // On disk nothing is readable.
+    core.lock();
+    for entry in std::fs::read_dir(dir.path()).unwrap().flatten() {
+        let bytes = std::fs::read(entry.path()).unwrap_or_default();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(
+            !text.contains("אלון") && !text.contains("מתקשה"),
+            "{:?}",
+            entry.path()
+        );
+    }
+}
+
+#[test]
+fn demo_mode_without_key_or_transport() {
+    let (_dir, mut core, case) = setup(None);
+    assert!(core.status().demo_mode);
+    let prepared = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    assert!(prepared.demo_mode);
+    let result = core.send_section(&prepared.approval_id.unwrap()).unwrap();
+    assert!(result.demo);
+    let chat = core.chat(&case, "kindergarten").unwrap();
+    assert_eq!(chat.len(), 2);
+    assert!(chat.iter().all(|m| m.demo));
+}
+
+#[test]
+fn no_consent_no_sending() {
+    let (_dir, mut core, case) = setup(None);
+    let mut meta = core.case_detail(&case).unwrap().meta;
+    meta.consent = None;
+    core.update_case(&case, meta).unwrap();
+    assert!(matches!(
+        core.prepare_section(&case, "kindergarten", "טיוטה"),
+        Err(CoreError::ConsentMissing)
+    ));
+    assert!(matches!(
+        core.prepare_consult(Some(&case), "שאלה"),
+        Err(CoreError::ConsentMissing)
+    ));
+    // A general consultation (no case) does not need a case's consent.
+    assert!(core
+        .prepare_consult(None, "מה ההבדל בין WPPSI-IV ל-WISC-V?")
+        .unwrap()
+        .approval_id
+        .is_some());
+}
+
+#[test]
+fn unknown_name_blocks_until_decided() {
+    let (_dir, mut core, case) = setup(None);
+    core.add_input(
+        &case,
+        InputKind::Kindergarten,
+        "שיחה נוספת",
+        "הסייעת ורד אמרה שהוא משחק לבד בחצר.",
+    )
+    .unwrap();
+    let prepared = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    assert!(prepared.approval_id.is_none());
+    let suspect = prepared
+        .suspects
+        .iter()
+        .find(|s| s.token.contains("ורד"))
+        .expect("suspect");
+
+    core.decide_suspect(
+        &case,
+        &suspect.token,
+        SuspectDecision::Hide {
+            role: Role::Assistant,
+        },
+    )
+    .unwrap();
+    let again = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    assert!(again.suspects.is_empty(), "{:?}", again.suspects);
+    assert!(again.approval_id.is_some());
+}
+
+#[test]
+fn manual_edit_with_new_name_goes_through_review() {
+    let (_dir, mut core, case) = setup(None);
+    let p = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    let para = core
+        .case_detail(&case)
+        .unwrap()
+        .sections
+        .into_iter()
+        .find(|s| s.key == "kindergarten")
+        .unwrap()
+        .paragraphs
+        .remove(0);
+    core.edit_paragraph(&case, &para.id, "לפי הסבתא זהבה, אלון רגיש לרעש.")
+        .unwrap();
+
+    let next = core
+        .prepare_section(&case, "kindergarten", "שפר/י את הניסוח")
+        .unwrap();
+    assert!(
+        next.approval_id.is_none(),
+        "an unreviewed name in a manual edit must stop the send"
+    );
+    assert!(next.suspects.iter().any(|s| s.token.contains("זהבה")));
+}
+
+#[test]
+fn model_answer_with_unknown_source_and_number_is_flagged() {
+    let fake = FakeTransport::default();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({
+        "reply": "הנה טיוטה.",
+        "paragraphs": [
+            { "text": "[ילד] מתקשה במעברים בין פעילויות.", "source_refs": ["S1"] },
+            { "text": "[ילד] קיבל ציון 85 במבחן.", "source_refs": ["S1"] },
+            { "text": "[ילד] אוהב לצייר.", "source_refs": ["S9"] }
+        ],
+        "questions": [], "missing": [], "contradictions": []
+    })));
+    let (_dir, mut core, case) = setup(Some(fake));
+    let p = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    let r = core.send_section(&p.approval_id.unwrap()).unwrap();
+    assert!(
+        r.paragraphs[0].warnings.is_empty(),
+        "{:?}",
+        r.paragraphs[0].warnings
+    );
+    assert!(!r.paragraphs[1].warnings.is_empty(), "85 is not in S1");
+    assert!(!r.paragraphs[2].warnings.is_empty(), "S9 does not exist");
+    assert!(r.paragraphs[0].text.contains("אלון"));
+}
+
+#[test]
+fn approved_sections_feed_derived_sections() {
+    let (_dir, mut core, case) = setup(None);
+    core.add_own_paragraph(&case, "kindergarten", "אלון מגיב בעוצמה למעברים.")
+        .unwrap();
+    let p = core
+        .prepare_section(&case, "summary", "טיוטה לסיכום")
+        .unwrap();
+    assert!(p.parts.iter().any(|part| part.label.contains("סעיף מאושר")));
+    assert!(
+        p.blocked.is_empty() && p.suspects.is_empty(),
+        "{:?} {:?}",
+        p.blocked,
+        p.suspects
+    );
+    assert!(p.approval_id.is_some());
+}
+
+#[test]
+fn consultation_keeps_history_until_lock() {
+    let (_dir, mut core, case) = setup(None);
+    let p = core
+        .prepare_consult(Some(&case), "איך כדאי לנסח המלצה על ליווי רגשי לאלון?")
+        .unwrap();
+    assert!(!p.hidden.is_empty());
+    let r = core.send_consult(&p.approval_id.unwrap()).unwrap();
+    assert!(r.demo && !r.answer.is_empty());
+    core.lock();
+    assert!(matches!(core.list_cases(), Err(CoreError::Locked)));
+}
+
+#[test]
+fn unlock_backoff_after_wrong_password() {
+    let (dir, mut core, _case) = setup(None);
+    core.lock();
+    assert!(core.unlock("סיסמה שגויה לגמרי כאן").is_err());
+    assert!(matches!(core.unlock(PASSWORD), Err(CoreError::Backoff(_))));
+    let mut fresh = Core::for_tests(dir.path(), None);
+    assert!(fresh.unlock(PASSWORD).unwrap().unlocked);
+}
+
+#[test]
+fn only_allowed_models() {
+    let (_dir, mut core, _case) = setup(None);
+    assert!(core.set_model("claude-sonnet-5").is_ok());
+    assert!(matches!(
+        core.set_model("some-other-model"),
+        Err(CoreError::Refused(_))
+    ));
+}
+
+#[test]
+fn full_draft_prepares_every_section_with_material() {
+    let (_dir, mut core, case) = setup(None);
+    let all = core.prepare_full_draft(&case).unwrap();
+    assert!(!all.is_empty());
+    for (key, p) in &all {
+        assert!(
+            p.approval_id.is_some(),
+            "{key}: {:?} {:?}",
+            p.blocked,
+            p.suspects
+        );
+    }
+}
+
+#[test]
+fn ambiguous_word_is_decided_once_per_case() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    core.add_input(
+        &case,
+        InputKind::Kindergarten,
+        "עדכון",
+        "הסייעת אמרה שאלון נרגע מהר יותר השבוע.",
+    )
+    .unwrap();
+    let p = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    assert!(p.approval_id.is_none());
+    let s = p
+        .suspects
+        .iter()
+        .find(|s| s.kind == dv_privacy::SuspectKind::AmbiguousWord)
+        .expect("ambiguous");
+
+    core.decide_suspect(&case, &s.token, SuspectDecision::IsName)
+        .unwrap();
+    let p = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    let id = p
+        .approval_id
+        .clone()
+        .unwrap_or_else(|| panic!("{:?} {:?}", p.blocked, p.suspects));
+    core.send_section(&id).unwrap();
+    let sent = fake.sent.lock().unwrap().clone();
+    assert!(sent[0].contains("ש[ילד] נרגע") && !sent[0].contains("אלון"));
+
+    // "Keep as is" instead, in another case with the same child name: that case asks again.
+    let other = core
+        .create_case(
+            CaseMeta {
+                code: "TEST-0003".into(),
+                consent: Some(consent()),
+                ..CaseMeta::default()
+            },
+            vec![IdentityInput {
+                id: None,
+                role: Role::Child,
+                value: "אלון".into(),
+                aliases: vec![],
+            }],
+        )
+        .unwrap();
+    core.add_input(
+        &other,
+        InputKind::Kindergarten,
+        "שאלון",
+        "שאלון ההורים הוחזר מלא.",
+    )
+    .unwrap();
+    let p = core
+        .prepare_section(&other, "kindergarten", "טיוטה")
+        .unwrap();
+    assert!(p.approval_id.is_none());
+    core.decide_suspect(&other, "שאלון", SuspectDecision::NotAName)
+        .unwrap();
+    let p = core
+        .prepare_section(&other, "kindergarten", "טיוטה")
+        .unwrap();
+    assert!(p.approval_id.is_some(), "{:?} {:?}", p.blocked, p.suspects);
+}

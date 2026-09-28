@@ -9,7 +9,7 @@ mod request;
 mod response;
 
 pub use request::{
-    build_consult_request, build_research_request, build_section_request, ConsultInput,
+    build_consult_request, build_research_request, build_section_request, nonce_from, ConsultInput,
     ModelConfig, ResearchInput, SectionInput, TaggedInput, TaggedTurn, ALLOWED_MODELS,
     DEFAULT_MODEL, RESEARCH_ALLOWED_DOMAINS,
 };

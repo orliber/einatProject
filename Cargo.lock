@@ -873,8 +873,18 @@ dependencies = [
 name = "dv-core"
 version = "0.1.0"
 dependencies = [
+ "dv-ai",
+ "dv-domain",
+ "dv-egress",
  "dv-ipc",
+ "dv-privacy",
+ "dv-vault",
+ "serde",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
+ "ts-rs",
+ "zeroize",
 ]
 
 [[package]]

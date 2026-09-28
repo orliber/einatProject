@@ -83,6 +83,19 @@ pub struct SectionInput {
     pub style_profile: Option<String>,
 }
 
+/// The per-request marker for data blocks, from 16 random bytes. Letters only: digits in
+/// outgoing text look like identifiers to the gate (a run of five digits is a "number").
+#[must_use]
+pub fn nonce_from(random: &[u8; 16]) -> String {
+    const LETTERS: &[u8; 16] = b"abcdefghjkmnpqrs";
+    let mut s = String::with_capacity(32);
+    for b in random {
+        s.push(char::from(LETTERS[usize::from(b >> 4)]));
+        s.push(char::from(LETTERS[usize::from(b & 0x0f)]));
+    }
+    s
+}
+
 /// Random per-request marker so text inside a document cannot close the data block.
 fn data_block(nonce: &str, attrs: &str, body: &str) -> String {
     let safe = body.replace(&format!("</data nonce={nonce}>"), "");
@@ -251,6 +264,16 @@ pub fn build_research_request(model: &ModelConfig, input: &ResearchInput) -> Val
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nonce_has_no_digits() {
+        let n = nonce_from(&[
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0, 0, 0, 0, 0, 0, 0, 0xff,
+        ]);
+        assert_eq!(n.len(), 32);
+        assert!(n.chars().all(|c| c.is_ascii_lowercase()));
+        assert_ne!(n, nonce_from(&[0; 16]));
+    }
 
     fn section() -> SectionInput {
         SectionInput {
