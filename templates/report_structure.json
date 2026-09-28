@@ -18,12 +18,12 @@
       "title": "חלק ב' – תוצאות אבחון",
       "sections": [
         { "key": "tools", "title": "כלי האבחון", "inputs": ["free_text"] },
-        { "key": "appearance", "title": "הופעה והתרשמות", "inputs": ["observation", "free_text"] },
+        { "key": "appearance", "title": "הופעה והתרשמות", "inputs": ["observation", "session_note", "free_text"] },
         { "key": "cognitive", "title": "פרופיל קוגניטיבי", "inputs": ["observation", "free_text"] },
         { "key": "adaptive", "title": "שאלון הסתגלות", "inputs": ["free_text"] },
-        { "key": "communication", "title": "איכויות התקשורת", "inputs": ["observation", "free_text"] },
+        { "key": "communication", "title": "איכויות התקשורת", "inputs": ["observation", "session_note", "prior_report", "free_text"] },
         { "key": "dsm", "title": "אבחנה על-פי DSM-5", "inputs": ["free_text"] },
-        { "key": "emotional", "title": "משחק ומישור רגשי", "inputs": ["observation", "free_text"] }
+        { "key": "emotional", "title": "משחק ומישור רגשי", "inputs": ["observation", "session_note", "free_text"] }
       ]
     },
     {

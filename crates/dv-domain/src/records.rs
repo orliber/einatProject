@@ -69,12 +69,35 @@ pub struct CaseSummary {
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum InputKind {
+    /// Parent intake.
     Intake,
+    /// A report by another professional (medical, speech therapy, OT, previous assessment).
     PriorReport,
+    /// A conversation with a professional.
     Professional,
+    /// Kindergarten / school: conversation or report.
     Kindergarten,
+    /// The psychologist's own observation during testing.
     Observation,
+    /// The psychologist's notes from a session.
+    SessionNote,
     FreeText,
+}
+
+impl InputKind {
+    /// How the source is named to the psychologist and in `source_refs`.
+    #[must_use]
+    pub fn label_he(self) -> &'static str {
+        match self {
+            InputKind::Intake => "אינטייק הורים",
+            InputKind::PriorReport => "דוח קודם",
+            InputKind::Professional => "שיחה עם איש מקצוע",
+            InputKind::Kindergarten => "מסגרת חינוכית",
+            InputKind::Observation => "תצפית",
+            InputKind::SessionNote => "תיעוד מפגש",
+            InputKind::FreeText => "הערה",
+        }
+    }
 }
 
 /// Raw material typed or uploaded by the psychologist (contains real names; never sent as is).

@@ -11,4 +11,13 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+dv-domain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
+regex = "1"
+aws-lc-rs = { version = "1.18", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
+ts-rs = { version = "11", features = ["no-serde-warnings"] }
+
+[dev-dependencies]
+proptest = "1"
