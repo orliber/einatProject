@@ -1,6 +1,6 @@
 [package]
 name = "dv-domain"
-description = "Cases, sections, scores and deterministic interpretation"
+description = "Cases, identities, sections and deterministic interpretation"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,4 +11,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
+ts-rs = { version = "11", features = ["no-serde-warnings"] }
