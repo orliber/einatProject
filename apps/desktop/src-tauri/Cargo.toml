@@ -28,4 +28,5 @@ tauri = { version = "2", features = [] }
 dv-core.workspace = true
 dv-domain.workspace = true
 dv-ingest.workspace = true
+dv-privacy.workspace = true
 dv-ipc.workspace = true

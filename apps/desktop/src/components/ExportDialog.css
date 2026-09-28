@@ -1,0 +1,132 @@
+.export {
+  display: flex;
+  gap: 24px;
+}
+.checklist {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.checklist li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 11px 14px;
+}
+.checklist li > span:first-child {
+  font-weight: 700;
+  width: 14px;
+}
+.checklist .ok > span:first-child {
+  color: var(--ok);
+}
+.checklist .warn {
+  background: var(--warn-paper);
+  border-color: var(--warn-line);
+}
+.checklist .warn > span:first-child {
+  color: var(--warn);
+}
+.checklist .bad {
+  background: var(--block-soft);
+  border-color: #e3b2a8;
+  color: #6e1609;
+}
+.protect {
+  padding: 16px 18px;
+  gap: 12px;
+}
+.pw {
+  font-size: 17px;
+  font-weight: 600;
+  background: var(--surface-alt);
+}
+.align-start {
+  align-self: flex-start;
+}
+.saved-path {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: var(--sand);
+  padding: 8px 12px;
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.page-preview {
+  width: 280px;
+  flex-shrink: 0;
+  background: #e9e5dc;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.mini-page {
+  width: 220px;
+  height: 311px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(27, 37, 40, 0.18);
+  padding: 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  overflow: hidden;
+}
+.mini-conf,
+.mini-foot {
+  font-family: var(--font-body);
+  font-size: 7px;
+  color: #8a9294;
+  text-align: center;
+}
+.mini-foot {
+  margin-top: auto;
+}
+.mini-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+.mini-section {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 8px;
+}
+.mini-section i {
+  height: 4px;
+  background: #eceae4;
+  border-radius: 2px;
+}
+.mini-section i.short {
+  width: 70%;
+}
+.btn-danger {
+  background: #8a1c0c;
+  border-color: #8a1c0c;
+  color: #fff;
+  font-weight: 700;
+}
+.btn-danger:hover:not(:disabled) {
+  background: #6e1609;
+}
+.danger-zone {
+  border-color: #e3b2a8;
+}
+.details {
+  overflow: auto;
+}
+.details-col {
+  width: 460px;
+  flex-shrink: 0;
+}
+.details-card {
+  padding: 16px 18px;
+}

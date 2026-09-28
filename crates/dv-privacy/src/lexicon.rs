@@ -24,6 +24,8 @@ pub enum PlaceKind {
 pub struct Lexicon {
     pub first_names: HashSet<String>,
     pub word_names: HashSet<String>,
+    /// Common surnames: flagged next to a name, after "משפחת" or after a name label.
+    pub surnames: HashSet<String>,
     pub places: PhraseIndex<PlaceKind>,
     pub latin_allow: HashSet<String>,
     /// Ordinary words that only look like prefix + name; never suspects.
@@ -76,6 +78,9 @@ pub static LEXICON: LazyLock<Lexicon> = LazyLock::new(|| {
             .map(normalize)
             .collect(),
         word_names: lines(include_str!("../data/word_names.txt"))
+            .map(normalize)
+            .collect(),
+        surnames: lines(include_str!("../data/surnames.txt"))
             .map(normalize)
             .collect(),
         places,
@@ -267,4 +272,78 @@ pub const TITLES: &[&str] = &[
     "גברת",
     "הרב",
     "עו\"ד",
+];
+
+/// Labels that introduce a person's name in forms and letters ("שם הילד: …").
+pub const NAME_LABELS: &[&str] = &[
+    "שם",
+    "שם הילד",
+    "שם הילדה",
+    "שם הילד/ה",
+    "שם המטופל",
+    "שם המטופלת",
+    "המטופל",
+    "המטופלת",
+    "מטופל",
+    "מטופלת",
+    "שם התלמיד",
+    "שם התלמידה",
+    "התלמיד",
+    "התלמידה",
+    "הנבדק",
+    "הנבדקת",
+    "נבדק",
+    "נבדקת",
+    "שם האם",
+    "שם האב",
+    "שם ההורים",
+    "הורים",
+    "ההורים",
+    "שם פרטי",
+    "שם משפחה",
+    "שם הגננת",
+    "הגננת",
+    "המחנכת",
+    "הרופא",
+    "הרופאה",
+    "רופא מטפל",
+    "רופאה מטפלת",
+    "המטפלת",
+    "המטפל",
+    "מפנה",
+    "הפונה",
+    "לכבוד",
+    "חתימה",
+    "בברכה",
+];
+
+/// Words that end a name after a label ("שם הילד: נועם, גיל 5").
+pub const NAME_STOP: &[&str] = &[
+    "גיל",
+    "בן",
+    "בת",
+    "תאריך",
+    "כיתה",
+    "גן",
+    "ת",
+    "ז",
+    "מספר",
+    "טלפון",
+    "כתובת",
+];
+
+/// Typical surname endings (Ashkenazi patronymics and similar).
+pub const SURNAME_ENDINGS: &[&str] = &[
+    "וביץ",
+    "וביץ'",
+    "ביץ",
+    "וויץ",
+    "סקי",
+    "צקי",
+    "סקה",
+    "שטיין",
+    "שטין",
+    "בוים",
+    "בלאט",
+    "זון",
 ];

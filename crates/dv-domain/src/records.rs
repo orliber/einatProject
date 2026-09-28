@@ -108,14 +108,20 @@ impl InputKind {
     /// Only a suggestion: the psychologist confirms it on the import screen.
     #[must_use]
     pub fn guess(text: &str, file_name: &str) -> InputKind {
-        let head: String = text.chars().take(600).collect();
+        let head: String = text.chars().take(800).collect();
         let hay = format!("{file_name} {head}");
         let has = |words: &[&str]| words.iter().any(|w| hay.contains(w));
-        if has(&[
+        let words = head.split_whitespace().count().max(1);
+        let numbers = head
+            .split_whitespace()
+            .filter(|w| w.chars().any(|c| c.is_ascii_digit()))
+            .count();
+        let score_words = has(&[
             "ציון תקן",
             "ציונים",
             "אחוזון",
             "תוצאות מבחנים",
+            "טבלת ציונים",
             "WISC",
             "WPPSI",
             "Vineland",
@@ -123,14 +129,26 @@ impl InputKind {
             "Conners",
             "BRIEF",
             "ADOS",
-        ]) && !has(&["סיכום ביקור", "מכתב שחרור"])
-        {
+        ]);
+        let report_words = has(&[
+            "דוח",
+            "סיכום ביקור",
+            "מכתב שחרור",
+            "אבחון",
+            "קלינאית",
+            "ריפוי בעיסוק",
+            "פיזיותרפ",
+            "נוירולוג",
+            "רופא",
+            "ד\"ר",
+            "המלצות",
+        ]);
+        // A score sheet is mostly numbers; a report that quotes scores is a report.
+        if score_words && (numbers * 5 > words || !report_words) {
             InputKind::TestScores
         } else if has(&["אינטייק", "שיחת היכרות עם ההורים", "שיחה עם ההורים"])
         {
             InputKind::Intake
-        } else if has(&["תצפית"]) {
-            InputKind::Observation
         } else if has(&[
             "סיכום מפגש",
             "סיכום פגישה",
@@ -139,6 +157,8 @@ impl InputKind {
             "פגישה מס",
         ]) {
             InputKind::SessionNote
+        } else if has(&["תצפית"]) && !report_words {
+            InputKind::Observation
         } else if has(&[
             "גננת",
             "מחנכת",
@@ -146,7 +166,8 @@ impl InputKind {
             "דוח גן",
             "מסגרת חינוכית",
             "סייעת",
-        ]) {
+        ]) && !has(&["קלינאית", "רופא", "ד\"ר"])
+        {
             InputKind::Kindergarten
         } else {
             // Most uploaded documents are other professionals' reports.

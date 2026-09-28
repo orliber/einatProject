@@ -73,6 +73,13 @@ const PROTECTED: &[&str] = &[
     "יובל",
     "דנה",
     "כהן-לוי",
+    "גולדשטיין",
+    "מזרחי",
+    "שמעוני",
+    "טננבאום",
+    "ליבוביץ",
+    "פרידמן",
+    "שרעבי",
     CANARY,
 ];
 
@@ -342,6 +349,47 @@ fn ordinary_words_containing_a_name_are_confirmed_not_rewritten() {
     let named = filter("הגננת סיפרה שאלון מתקשה במעברים.", &ctx).unwrap();
     assert!(named.suspects.is_empty(), "{:?}", named.suspects);
     assert!(named.tagged.contains("ש[ילד] מתקשה"), "{}", named.tagged);
+}
+
+#[test]
+fn surnames_and_names_after_labels_block_until_decided() {
+    // A declared first name is hidden; the family name next to it must not slip out.
+    for text in [
+        "שם הילד: נועם גולדשטיין, גיל 5:4.",
+        "נועם מזרחי הגיע לגן בשמחה.",
+        "רותם פרידמן-שרעבי סיפרה על הלילות.",
+        "לכבוד משפחת שמעוני, מצורף הדוח.",
+        "המטופלת: יעלה טננבאום",
+        "בשיחה עם מיכל ליבוביץ, הגננת, עלה קושי במעברים.",
+        "שם הילד: אלון ברקוביץ, גיל 5:4. הופנה על ידי רופאת הילדים.",
+    ] {
+        let o = send(text, CASE);
+        assert!(
+            !o.leaked.iter().any(|l| !l.is_empty()),
+            "{text}: leaked {:?}",
+            o.leaked
+        );
+        assert!(
+            !o.cleared,
+            "{text}: must block until the psychologist decides"
+        );
+    }
+}
+
+#[test]
+fn ordinary_sentences_around_names_are_not_flagged() {
+    for text in [
+        "נועם הגיע לגן בשמחה ושיחק עם חברים.",
+        "מיכל סיפרה שהוא נרגע מהר יותר השבוע.",
+        "שם המבחן: WPPSI-IV, גרסה עברית.",
+        "הילד נבדק בגיל 5:4 והתקבל ציון 102.",
+    ] {
+        let o = send(text, CASE);
+        assert!(
+            o.cleared,
+            "{text}: should pass once declared names are hidden"
+        );
+    }
 }
 
 #[test]

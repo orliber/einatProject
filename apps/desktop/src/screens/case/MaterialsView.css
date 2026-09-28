@@ -1,0 +1,90 @@
+.materials-list {
+  width: 400px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+}
+.material {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 11px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: start;
+}
+.material:hover {
+  border-color: var(--line-strong);
+}
+.material.selected {
+  border: 2px solid var(--primary);
+  padding: 10px 13px;
+}
+.material-title {
+  font-weight: 700;
+}
+.dropzone {
+  border: 2px dashed var(--field-line);
+  border-radius: 12px;
+  padding: 14px;
+  text-align: center;
+  color: var(--ink-muted);
+  background: transparent;
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  align-items: center;
+  min-height: 52px;
+}
+.dropzone.over {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.empty-materials {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.material-view {
+  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.material-head {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.material-head h2 {
+  font-size: 20px;
+}
+.material-text {
+  flex-grow: 1;
+  overflow: auto;
+  padding: 18px 22px;
+  font-size: 16.5px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+.material-foot {
+  padding: 10px 20px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-alt);
+}
+.material-empty {
+  padding: 24px;
+}
+.write-area {
+  font-size: 16px;
+  min-height: 280px;
+}

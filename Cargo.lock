@@ -980,6 +980,7 @@ dependencies = [
  "dv-domain",
  "dv-ingest",
  "dv-ipc",
+ "dv-privacy",
  "tauri",
  "tauri-build",
 ]

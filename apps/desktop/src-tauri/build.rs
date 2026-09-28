@@ -27,6 +27,7 @@ fn main() {
             "update_input",
             "delete_input",
             "import_document",
+            "preview_filter",
             "decide_suspect",
             "prepare_section",
             "prepare_full_draft",

@@ -690,12 +690,27 @@ impl Core {
             }
         }
 
-        let stem = Path::new(file_name)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or(file_name)
-            .trim()
-            .to_owned();
+        // The document's own first line ("דוח קלינאית תקשורת – אבחון שפתי") names it better
+        // than a file name ("slp2").
+        let first_line = extracted
+            .body
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .filter(|l| {
+                (3..=80).contains(&l.chars().count())
+                    && l.chars().filter(char::is_ascii_digit).count() < 6
+                    && !l.trim_end_matches('.').contains(". ")
+            })
+            .map(str::to_owned);
+        let stem = first_line.unwrap_or_else(|| {
+            Path::new(file_name)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(file_name)
+                .trim()
+                .to_owned()
+        });
         Ok(ImportPreview {
             file_name: file_name.to_owned(),
             format: match extracted.format {
@@ -1014,8 +1029,16 @@ impl Core {
                     let sid = format!("S{}", n + 1);
                     let title = run(&inp.title)?;
                     let content = run(&inp.content)?;
-                    review.add(format!("{sid} · {} · כותרת", inp.kind.label_he()), &title);
-                    review.add(format!("{sid} · {}", inp.kind.label_he()), &content);
+                    // A title with nothing to hide is shown as the source's label, not as a part.
+                    if title.original_segments.iter().any(|s| s.mark.is_some()) {
+                        review.add(format!("{sid} · {} · כותרת", inp.kind.label_he()), &title);
+                        review.add(format!("{sid} · {}", inp.kind.label_he()), &content);
+                    } else {
+                        review.add(
+                            format!("{sid} · {} · {}", inp.kind.label_he(), title.tagged),
+                            &content,
+                        );
+                    }
                     tagged_sources.push(TaggedInput {
                         input_id: inp.id.clone(),
                         kind_label: inp.kind.label_he().to_owned(),

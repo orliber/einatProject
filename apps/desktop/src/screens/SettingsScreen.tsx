@@ -1,0 +1,137 @@
+import { useEffect, useState } from "react";
+import { useApp } from "../App";
+import { TopBar } from "../components/TopBar";
+import { ErrorLine } from "../components/ui";
+import { ipc, type ReportSettings } from "../ipc/client";
+import "./SettingsScreen.css";
+
+const MODELS: [string, string][] = [
+  ["claude-opus-5", "Claude Opus 5 (מומלץ: הכי מדויק)"],
+  ["claude-sonnet-5", "Claude Sonnet 5 (מהיר יותר)"],
+  ["claude-opus-4-8", "Claude Opus 4.8"],
+];
+
+export function SettingsScreen() {
+  const { status, refresh, notify, fail } = useApp();
+  const [apiKey, setApiKey] = useState("");
+  const [minutes, setMinutes] = useState(status.lock_minutes);
+  const [names, setNames] = useState(status.practitioner.join(", "));
+  const [report, setReport] = useState<ReportSettings | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    ipc.reportSettings().then(setReport).catch((e) => setError(fail(e as never)));
+  }, [fail]);
+
+  async function run(fn: () => Promise<void>, done: string) {
+    setError(null);
+    try {
+      await fn();
+      await refresh();
+      notify(done);
+    } catch (e) {
+      setError(fail(e as never));
+    }
+  }
+
+  return (
+    <div className="page">
+      <TopBar active="settings" />
+      <main className="page-main settings">
+        <h1 className="settings-title">הגדרות</h1>
+        <ErrorLine error={error} />
+
+        <section className="card setting" aria-labelledby="s-claude">
+          <h2 id="s-claude">חיבור ל-Claude</h2>
+          <p className="muted small">
+            {status.demo_mode
+              ? "כרגע התוכנה במצב הדגמה: התשובות נבנות במחשב, ושום דבר לא נשלח. כדי לעבוד עם Claude מזינים מפתח API של חשבון עם הסכם אפס שמירת מידע (ZDR)."
+              : "מפתח API מוגדר ונשמר מוצפן בתוך הכספת. אפשר להחליף או למחוק."}
+          </p>
+          <div className="row">
+            <label htmlFor="api" className="visually-hidden">מפתח API</label>
+            <input id="api" className="input grow mono" type="password" autoComplete="off" placeholder={status.demo_mode ? "sk-ant-…" : "••••••••••••"}
+              value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+            <button type="button" className="btn btn-primary" disabled={!apiKey.trim()}
+              onClick={() => void run(async () => { await ipc.setApiKey(apiKey); setApiKey(""); }, "המפתח נשמר מוצפן.")}>שמירה</button>
+            {!status.demo_mode && (
+              <button type="button" className="btn" onClick={() => void run(() => ipc.setApiKey(""), "המפתח נמחק. התוכנה חזרה למצב הדגמה.")}>מחיקה</button>
+            )}
+          </div>
+          <div className="field">
+            <label htmlFor="model">דגם</label>
+            <select id="model" className="select" value={status.model}
+              onChange={(e) => void run(() => ipc.setModel(e.target.value), "הדגם עודכן.")}>
+              {MODELS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+            <span className="hint">רק דגמים שנכללים בהסכם אפס שמירת מידע.</span>
+          </div>
+        </section>
+
+        <section className="card setting" aria-labelledby="s-privacy">
+          <h2 id="s-privacy">פרטיות ונעילה</h2>
+          <div className="field">
+            <label htmlFor="names">השמות שלך (יוחלפו תמיד ב"המאבחנת")</label>
+            <div className="row">
+              <input id="names" className="input grow" value={names} onChange={(e) => setNames(e.target.value)} />
+              <button type="button" className="btn" onClick={() => void run(() => ipc.setPractitioner(names.split(",").map((n) => n.trim()).filter(Boolean)), "השמות נשמרו.")}>שמירה</button>
+            </div>
+          </div>
+          <div className="field">
+            <label htmlFor="lock">נעילה אוטומטית אחרי (דקות ללא פעילות)</label>
+            <div className="row">
+              <input id="lock" className="input narrow" type="number" min={1} max={60} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} />
+              <button type="button" className="btn" onClick={() => void run(() => ipc.setLockMinutes(minutes), "זמן הנעילה עודכן.")}>שמירה</button>
+            </div>
+          </div>
+          <label className="row">
+            <input type="checkbox" checked={status.review_only_suspect} disabled={!status.review_choice_available}
+              onChange={(e) => void run(() => ipc.setReviewOnlySuspect(e.target.checked), "ההגדרה עודכנה.")} />
+            <span>להציג את מסך "מה יוצא מהמחשב" רק כשיש חשד</span>
+          </label>
+          {!status.review_choice_available && <span className="hint">בשבועיים הראשונים המסך מוצג לפני כל שליחה, כדי להכיר את הסינון.</span>}
+        </section>
+
+        {report && (
+          <section className="card setting" aria-labelledby="s-report">
+            <h2 id="s-report">הדוח</h2>
+            <div className="field">
+              <label htmlFor="r-title">כותרת הדוח</label>
+              <input id="r-title" className="input" value={report.title} onChange={(e) => setReport({ ...report, title: e.target.value })} />
+            </div>
+            <div className="field">
+              <label htmlFor="r-font">גופן</label>
+              <select id="r-font" className="select" value={report.font} onChange={(e) => setReport({ ...report, font: e.target.value })}>
+                {["David", "Arial", "Narkisim", "Frank Ruehl", "Times New Roman"].map((f) => <option key={f} value={f}>{f}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="r-conf">שורת חיסיון בראש כל עמוד</label>
+              <input id="r-conf" className="input" value={report.confidentiality} onChange={(e) => setReport({ ...report, confidentiality: e.target.value })} />
+            </div>
+            <div className="field">
+              <label htmlFor="r-sig">חתימה (שורה לכל פרט: שם, תואר, מספר רישיון)</label>
+              <textarea id="r-sig" className="textarea" rows={3} value={report.signature.join("\n")}
+                onChange={(e) => setReport({ ...report, signature: e.target.value.split("\n") })} />
+            </div>
+            <button type="button" className="btn btn-primary align-start"
+              onClick={() => void run(() => ipc.setReportSettings({ ...report, signature: report.signature.filter((l) => l.trim()) }), "הגדרות הדוח נשמרו.")}>שמירה</button>
+          </section>
+        )}
+
+        <section className="card setting" aria-labelledby="s-sec">
+          <h2 id="s-sec">מצב האבטחה</h2>
+          <ul className="sec-list">
+            <li><span className="chip chip-ok">פעיל</span> הכספת מוצפנת (AES-256), ומפתח נפרד לכל תיק</li>
+            <li><span className={status.fips_active ? "chip chip-ok" : "chip chip-sand"}>{status.fips_active ? "פעיל" : "רגיל"}</span> מודול הצפנה {status.fips_active ? "מאושר FIPS 140-3" : "סטנדרטי"}</li>
+            <li>
+              <span className={status.disk_encryption === "on" ? "chip chip-ok" : "chip chip-warn"}>{status.disk_encryption === "on" ? "פעיל" : status.disk_encryption === "off" ? "כבוי" : "לא ידוע"}</span>
+              הצפנת הדיסק של המחשב (BitLocker / FileVault)
+              {status.disk_encryption !== "on" && <span className="hint">מומלץ להפעיל: כך גם קבצים אחרים במחשב מוגנים אם הוא נגנב.</span>}
+            </li>
+          </ul>
+        </section>
+      </main>
+    </div>
+  );
+}

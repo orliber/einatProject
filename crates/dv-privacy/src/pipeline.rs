@@ -9,7 +9,10 @@ use dv_domain::{Identity, Role, PRACTITIONER_TAG};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::lexicon::{is_name_context, PlaceKind, GENERIC_PLACE_WORDS, LEXICON, TITLES};
+use crate::lexicon::{
+    is_name_context, PlaceKind, GENERIC_PLACE_WORDS, LEXICON, NAME_LABELS, NAME_STOP,
+    SURNAME_ENDINGS, TITLES,
+};
 use crate::matcher::PhraseIndex;
 use crate::patterns::{self, Ymd};
 use crate::text::{normalize, prefix_splits, spelling_variants, tokenize, weak_near, Token};
@@ -253,6 +256,157 @@ const PROFESSION_CUES: &[&str] = &[
     "מנהלת",
 ];
 
+/// Names no lexicon can know: whatever follows a name label ("שם הילד: …"), the family name
+/// after "משפחת", and a surname right after a first name or a declared name ("נועם ברקוביץ",
+/// "דנה כהן-לוי"). Declared names are already replaced; what is left becomes a suspect.
+fn name_run_suspects(
+    text: &str,
+    tokens: &[Token],
+    ctx: &PrivacyContext<'_>,
+    reps: &[Replacement],
+    out: &mut Vec<SuspectSpan>,
+) {
+    let lex = &*LEXICON;
+    let hebrew = |t: &Token| {
+        t.norm
+            .chars()
+            .any(|c| ('\u{05D0}'..='\u{05EA}').contains(&c))
+    };
+    let digits = |t: &Token| t.norm.chars().any(|c| c.is_ascii_digit());
+    let gap = |a: usize, b: usize| &text[tokens[a].end..tokens[b].start];
+    let breaks = |g: &str| {
+        g.chars().any(|c| {
+            matches!(
+                c,
+                ',' | '.' | ';' | '(' | ')' | '\n' | '|' | '\t' | '·' | '–' | '—' | ':'
+            )
+        })
+    };
+    let joins =
+        |g: &str| !g.is_empty() && g.chars().all(|c| c == ' ' || c == '-' || c == '\u{05BE}');
+    let stop = |n: &str| NAME_STOP.iter().any(|s| normalize(s) == n);
+    let push = |start: usize, end: usize, message: &str, out: &mut Vec<SuspectSpan>| {
+        let token = &text[start..end];
+        if !overlaps(start, end, reps, out) && !(ctx.allowlisted)(&normalize(token)) {
+            out.push(SuspectSpan {
+                start,
+                end,
+                suspect: Suspect {
+                    token: token.to_owned(),
+                    kind: SuspectKind::UnknownName,
+                    message: message.to_owned(),
+                    suggested_role: Role::Other,
+                },
+            });
+        }
+    };
+
+    // 1. After a label: up to three words, until punctuation or a word like "גיל".
+    let labels: Vec<(Vec<String>, &str)> = NAME_LABELS
+        .iter()
+        .map(|l| {
+            (
+                normalize(l)
+                    .split(' ')
+                    .filter(|w| !w.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+                *l,
+            )
+        })
+        .collect();
+    for i in 0..tokens.len() {
+        for (words, label) in &labels {
+            let n = words.len();
+            if n == 0
+                || i + n >= tokens.len()
+                || !tokens[i..i + n]
+                    .iter()
+                    .zip(words)
+                    .all(|(t, w)| &t.norm == w)
+            {
+                continue;
+            }
+            let last = i + n - 1;
+            let g = gap(last, last + 1);
+            let direct = matches!(*label, "לכבוד" | "בברכה" | "חתימה");
+            let label_ends = if direct {
+                true
+            } else {
+                g.contains(':') && !g.contains('\n')
+            };
+            if !label_ends {
+                continue;
+            }
+            let message = format!("שם אחרי \"{label}\"");
+            let mut j = last + 1;
+            let mut taken = 0;
+            while j < tokens.len() && taken < 3 {
+                let t = &tokens[j];
+                if stop(&t.norm) || !hebrew(t) || digits(t) {
+                    break;
+                }
+                if !is_title(&t.norm) && t.norm != normalize("משפחת") {
+                    push(t.start, t.end, &message, out);
+                    taken += 1;
+                }
+                if j + 1 >= tokens.len() || breaks(gap(j, j + 1)) {
+                    break;
+                }
+                j += 1;
+            }
+        }
+    }
+
+    // 2. "משפחת כהן", "למשפחת כהן-לוי".
+    let family = normalize("משפחת");
+    for i in 0..tokens.len().saturating_sub(1) {
+        if !prefix_splits(&tokens[i].norm)
+            .iter()
+            .any(|(_, h)| *h == family)
+        {
+            continue;
+        }
+        let mut j = i + 1;
+        while j < tokens.len() && hebrew(&tokens[j]) && !digits(&tokens[j]) {
+            push(tokens[j].start, tokens[j].end, "שם משפחה", out);
+            if j + 1 >= tokens.len() || !gap(j, j + 1).contains(['-', '\u{05BE}']) {
+                break;
+            }
+            j += 1;
+        }
+    }
+
+    // 3. A surname right after a first name or a declared name.
+    let is_name = |i: usize| {
+        let t = &tokens[i];
+        reps.iter()
+            .any(|r| r.declared && r.start <= t.start && t.end <= r.end)
+            || prefix_splits(&t.norm)
+                .iter()
+                .any(|(_, h)| lex.first_names.contains(h))
+    };
+    let mut surname_at: Option<usize> = None;
+    for (i, t) in tokens.iter().enumerate().skip(1) {
+        let g = gap(i - 1, i);
+        if !joins(g) || !hebrew(t) || digits(t) {
+            continue;
+        }
+        let hyphen_after_surname = surname_at == Some(i - 1) && g.contains(['-', '\u{05BE}']);
+        let looks_like_surname = lex.surnames.contains(&t.norm)
+            || (t.norm.chars().count() >= 4
+                && SURNAME_ENDINGS
+                    .iter()
+                    .any(|e| t.norm.ends_with(&normalize(e))));
+        if hyphen_after_surname
+            || (is_name(i - 1) && looks_like_surname && !lex.common_words.contains(&t.norm))
+        {
+            push(t.start, t.end, "נראה כמו שם משפחה", out);
+            surname_at = Some(i);
+        }
+    }
+}
+
 fn find_suspects(
     text: &str,
     tokens: &[Token],
@@ -262,6 +416,7 @@ fn find_suspects(
     let lex = &*LEXICON;
     let declared = declared_words(ctx);
     let mut out: Vec<SuspectSpan> = Vec::new();
+    name_run_suspects(text, tokens, ctx, reps, &mut out);
     for (i, tok) in tokens.iter().enumerate() {
         if overlaps(tok.start, tok.end, reps, &out)
             || (ctx.allowlisted)(&tok.norm)

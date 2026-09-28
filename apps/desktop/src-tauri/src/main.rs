@@ -252,6 +252,15 @@ async fn import_document(
 }
 
 #[tauri::command]
+async fn preview_filter(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    text: String,
+) -> Res<dv_privacy::FilterOutcome> {
+    with_core(&state, move |c| c.preview_filter(&case_id, &text)).await
+}
+
+#[tauri::command]
 async fn decide_suspect(
     state: tauri::State<'_, AppState>,
     case_id: String,
@@ -412,10 +421,22 @@ async fn export_report(
     case_id: String,
     password: Option<String>,
 ) -> Res<String> {
-    let dir = app
-        .path()
-        .download_dir()
-        .map_err(|_| internal("downloads"))?;
+    // Downloads, else Documents, else the home folder, else the app's own folder.
+    let paths = app.path();
+    let dir = [
+        paths.download_dir(),
+        paths.document_dir(),
+        paths.home_dir(),
+        paths.app_local_data_dir().map(|d| d.join("exports")),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|d| std::fs::create_dir_all(d).is_ok())
+    .ok_or_else(|| UiError {
+        code: "no_folder".to_owned(),
+        message: "לא נמצאה תיקייה לשמירת הדוח (הורדות או מסמכים).".to_owned(),
+        details: Vec::new(),
+    })?;
     with_core(&state, move |c| {
         let check = c.check_export(&case_id)?;
         let bytes = c.export_report(&case_id, password.as_deref().filter(|p| !p.is_empty()))?;
@@ -477,6 +498,7 @@ fn main() {
             update_input,
             delete_input,
             import_document,
+            preview_filter,
             decide_suspect,
             prepare_section,
             prepare_full_draft,

@@ -1,30 +1,30 @@
 .lock-backdrop {
   min-height: 100%;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--topbar);
+  background: radial-gradient(ellipse at 50% 38%, #22393b 0%, var(--side) 62%);
   padding: 24px;
 }
 .lock-card {
-  width: 420px;
+  width: 440px;
   max-width: 100%;
-  padding: 40px;
+  padding: 40px 40px 28px;
   border-radius: var(--radius-xl);
   background: var(--bg);
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 22px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
 }
 .lock-icon {
-  width: 56px;
-  height: 56px;
-  border-radius: var(--radius-lg);
+  width: 60px;
+  height: 60px;
+  border-radius: 16px;
   background: var(--primary);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
 }
 .lock-heading {
   display: flex;
@@ -32,30 +32,55 @@
   gap: 6px;
 }
 .lock-heading h1 {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: 30px;
-  font-weight: 700;
+  font-size: 34px;
 }
 .lock-heading p {
-  margin: 0;
-  color: var(--ink-soft);
+  color: var(--ink-muted);
   line-height: 1.6;
 }
 .lock-form {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
-.lock-form .btn {
-  min-height: 48px;
+.lock-input {
+  min-height: 50px;
+}
+.lock-form .btn-primary {
+  min-height: 50px;
   font-size: 17px;
 }
+.link-btn {
+  align-self: center;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: underline;
+  min-height: 32px;
+}
+.lock-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+.lock-version {
+  position: absolute;
+  bottom: 20px;
+  left: 28px;
+  font-size: 12.5px;
+  color: var(--side-faint);
+  direction: ltr;
+}
 .core-status {
+  align-self: flex-start;
   margin: 0;
   font-size: 13px;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
+  padding: 4px 11px;
+  border-radius: 999px;
 }
 .core-status-ok {
   color: var(--ok);
@@ -67,4 +92,10 @@
 }
 .core-status-checking {
   color: var(--ink-muted);
+}
+.center-note {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 24px;
 }

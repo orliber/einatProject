@@ -30,6 +30,7 @@
     "allow-update-input",
     "allow-delete-input",
     "allow-import-document",
+    "allow-preview-filter",
     "allow-decide-suspect",
     "allow-prepare-section",
     "allow-prepare-full-draft",

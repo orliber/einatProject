@@ -1,0 +1,77 @@
+.topbar {
+  height: 64px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 40px;
+  background: var(--side);
+  color: var(--side-text);
+}
+.topbar-brand {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+}
+.topbar-note {
+  font-size: 13px;
+  color: var(--side-muted);
+  margin-inline-start: 8px;
+}
+.topbar-demo {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #f2c98c;
+  border: 1px solid #6b5a3a;
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+.topbar-nav {
+  margin-inline-start: auto;
+  display: flex;
+  gap: 6px;
+}
+.topbar-link {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--side-text);
+  font-weight: 600;
+}
+.topbar-link:hover {
+  background: var(--side-card);
+}
+.topbar-active {
+  background: var(--side-active);
+  color: #fff;
+  font-weight: 700;
+}
+.topbar-lock {
+  border-color: var(--side-line);
+}
+.page {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.page-main {
+  flex-grow: 1;
+  padding: 36px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+.page-head h1 {
+  font-size: 36px;
+}
