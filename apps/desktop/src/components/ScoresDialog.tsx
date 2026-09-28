@@ -202,7 +202,7 @@ export function ScoresDialog(props: {
                       <tr key={m.key} className={raw.trim() ? "filled" : undefined}>
                         <th scope="row">
                           <label htmlFor={id}>{m.name_he}</label>
-                          {m.abbr && <span className="abbr" dir="ltr">{m.abbr}</span>}
+                          {m.abbr && <span className="abbr">{m.abbr}</span>}
                         </th>
                         <td className="col-score">
                           <input id={id} className={bad ? "input num score-input bad" : "input num score-input"} inputMode="decimal" dir="ltr"

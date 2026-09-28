@@ -1,0 +1,3587 @@
+[
+  {
+    "key": "wppsi_iv",
+    "name": "WPPSI-IV",
+    "description_he": "מבחן וקסלר לילדים בגן ובתחילת בית הספר (2:6–7:7)",
+    "scale_note_he": "ציוני המדדים הם ציוני תקן (ממוצע 100, סטיית תקן 15); ציוני תת-המבחנים הם ציונים מותאמים (ממוצע 10, סטיית תקן 3).",
+    "min_age_months": 30,
+    "max_age_months": 91,
+    "measures": [
+      {
+        "key": "fsiq",
+        "name_he": "מנת משכל כללית",
+        "abbr": "FSIQ",
+        "group": "מדדים",
+        "scale": "standard",
+        "min": 40.0,
+        "max": 160.0,
+        "bands": [
+          {
+            "min": 130.0,
+            "max": 160.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 120.0,
+            "max": 129.0,
+            "label": "גבוה",
+            "level": 0
+          },
+          {
+            "min": 110.0,
+            "max": 119.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 90.0,
+            "max": 109.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 80.0,
+            "max": 89.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 79.0,
+            "label": "גבולי",
+            "level": 2
+          },
+          {
+            "min": 40.0,
+            "max": 69.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "vci",
+        "name_he": "הבנה מילולית",
+        "abbr": "VCI",
+        "group": "מדדים",
+        "scale": "standard",
+        "min": 40.0,
+        "max": 160.0,
+        "bands": [
+          {
+            "min": 130.0,
+            "max": 160.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 120.0,
+            "max": 129.0,
+            "label": "גבוה",
+            "level": 0
+          },
+          {
+            "min": 110.0,
+            "max": 119.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 90.0,
+            "max": 109.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 80.0,
+            "max": 89.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 79.0,
+            "label": "גבולי",
+            "level": 2
+          },
+          {
+            "min": 40.0,
+            "max": 69.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "vsi",
+        "name_he": "חזותי-מרחבי",
+        "abbr": "VSI",
+        "group": "מדדים",
+        "scale": "standard",
+        "min": 40.0,
+        "max": 160.0,
+        "bands": [
+          {
+            "min": 130.0,
+            "max": 160.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 120.0,
+            "max": 129.0,
+            "label": "גבוה",
+            "level": 0
+          },
+          {
+            "min": 110.0,
+            "max": 119.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 90.0,
+            "max": 109.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 80.0,
+            "max": 89.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 79.0,
+            "label": "גבולי",
+            "level": 2
+          },
+          {
+            "min": 40.0,
+            "max": 69.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "fri",
+        "name_he": "חשיבה פלואידית",
+        "abbr": "FRI",
+        "group": "מדדים",
+        "scale": "standard",
+        "min": 40.0,
+        "max": 160.0,
+        "bands": [
+          {
+            "min": 130.0,
+            "max": 160.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 120.0,
+            "max": 129.0,
+            "label": "גבוה",
+            "level": 0
+          },
+          {
+            "min": 110.0,
+            "max": 119.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 90.0,
+            "max": 109.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 80.0,
+            "max": 89.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 79.0,
+            "label": "גבולי",
+            "level": 2
+          },
+          {
+            "min": 40.0,
+            "max": 69.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "wmi",
+        "name_he": "זיכרון עבודה",
+        "abbr": "WMI",
+        "group": "מדדים",
+        "scale": "standard",
+        "min": 40.0,
+        "max": 160.0,
+        "bands": [
+          {
+            "min": 130.0,
+            "max": 160.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 120.0,
+            "max": 129.0,
+            "label": "גבוה",
+            "level": 0
+          },
+          {
+            "min": 110.0,
+            "max": 119.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 90.0,
+            "max": 109.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 80.0,
+            "max": 89.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 79.0,
+            "label": "גבולי",
+            "level": 2
+          },
+          {
+            "min": 40.0,
+            "max": 69.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "psi",
+        "name_he": "מהירות עיבוד",
+        "abbr": "PSI",
+        "group": "מדדים",
+        "scale": "standard",
+        "min": 40.0,
+        "max": 160.0,
+        "bands": [
+          {
+            "min": 130.0,
+            "max": 160.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 120.0,
+            "max": 129.0,
+            "label": "גבוה",
+            "level": 0
+          },
+          {
+            "min": 110.0,
+            "max": 119.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 90.0,
+            "max": 109.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 80.0,
+            "max": 89.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 79.0,
+            "label": "גבולי",
+            "level": 2
+          },
+          {
+            "min": 40.0,
+            "max": 69.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "information",
+        "name_he": "מידע",
+        "abbr": "IN",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "similarities",
+        "name_he": "שיתופיות",
+        "abbr": "SI",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "vocabulary",
+        "name_he": "אוצר מילים",
+        "abbr": "VC",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "comprehension",
+        "name_he": "הבנה",
+        "abbr": "CO",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "block_design",
+        "name_he": "קוביות",
+        "abbr": "BD",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "object_assembly",
+        "name_he": "הרכבת עצמים",
+        "abbr": "OA",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "matrix",
+        "name_he": "מטריצות",
+        "abbr": "MR",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "picture_concepts",
+        "name_he": "מושגים בתמונות",
+        "abbr": "PC",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "picture_memory",
+        "name_he": "זיכרון תמונות",
+        "abbr": "PM",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "zoo_locations",
+        "name_he": "מיקומים בגן החיות",
+        "abbr": "ZL",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "bug_search",
+        "name_he": "חיפוש חרקים",
+        "abbr": "BS",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "cancellation",
+        "name_he": "מחיקה",
+        "abbr": "CA",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "wisc_v",
+    "name": "WISC-V",
+    "description_he": "מבחן וקסלר לילדים (6:0–16:11)",
+    "scale_note_he": "ציוני המדדים הם ציוני תקן (ממוצע 100, סטיית תקן 15); ציוני תת-המבחנים הם ציונים מותאמים (ממוצע 10, סטיית תקן 3).",
+    "min_age_months": 72,
+    "max_age_months": 203,
+    "measures": [
+      {
+        "key": "fsiq",
+        "name_he": "מנת משכל כללית",
+        "abbr": "FSIQ",
+        "group": "מדדים",
+        "scale": "standard",
+        "min": 40.0,
+        "max": 160.0,
+        "bands": [
+          {
+            "min": 130.0,
+            "max": 160.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 120.0,
+            "max": 129.0,
+            "label": "גבוה",
+            "level": 0
+          },
+          {
+            "min": 110.0,
+            "max": 119.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 90.0,
+            "max": 109.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 80.0,
+            "max": 89.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 79.0,
+            "label": "גבולי",
+            "level": 2
+          },
+          {
+            "min": 40.0,
+            "max": 69.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "vci",
+        "name_he": "הבנה מילולית",
+        "abbr": "VCI",
+        "group": "מדדים",
+        "scale": "standard",
+        "min": 40.0,
+        "max": 160.0,
+        "bands": [
+          {
+            "min": 130.0,
+            "max": 160.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 120.0,
+            "max": 129.0,
+            "label": "גבוה",
+            "level": 0
+          },
+          {
+            "min": 110.0,
+            "max": 119.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 90.0,
+            "max": 109.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 80.0,
+            "max": 89.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 79.0,
+            "label": "גבולי",
+            "level": 2
+          },
+          {
+            "min": 40.0,
+            "max": 69.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "vsi",
+        "name_he": "חזותי-מרחבי",
+        "abbr": "VSI",
+        "group": "מדדים",
+        "scale": "standard",
+        "min": 40.0,
+        "max": 160.0,
+        "bands": [
+          {
+            "min": 130.0,
+            "max": 160.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 120.0,
+            "max": 129.0,
+            "label": "גבוה",
+            "level": 0
+          },
+          {
+            "min": 110.0,
+            "max": 119.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 90.0,
+            "max": 109.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 80.0,
+            "max": 89.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 79.0,
+            "label": "גבולי",
+            "level": 2
+          },
+          {
+            "min": 40.0,
+            "max": 69.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "fri",
+        "name_he": "חשיבה פלואידית",
+        "abbr": "FRI",
+        "group": "מדדים",
+        "scale": "standard",
+        "min": 40.0,
+        "max": 160.0,
+        "bands": [
+          {
+            "min": 130.0,
+            "max": 160.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 120.0,
+            "max": 129.0,
+            "label": "גבוה",
+            "level": 0
+          },
+          {
+            "min": 110.0,
+            "max": 119.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 90.0,
+            "max": 109.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 80.0,
+            "max": 89.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 79.0,
+            "label": "גבולי",
+            "level": 2
+          },
+          {
+            "min": 40.0,
+            "max": 69.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "wmi",
+        "name_he": "זיכרון עבודה",
+        "abbr": "WMI",
+        "group": "מדדים",
+        "scale": "standard",
+        "min": 40.0,
+        "max": 160.0,
+        "bands": [
+          {
+            "min": 130.0,
+            "max": 160.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 120.0,
+            "max": 129.0,
+            "label": "גבוה",
+            "level": 0
+          },
+          {
+            "min": 110.0,
+            "max": 119.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 90.0,
+            "max": 109.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 80.0,
+            "max": 89.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 79.0,
+            "label": "גבולי",
+            "level": 2
+          },
+          {
+            "min": 40.0,
+            "max": 69.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "psi",
+        "name_he": "מהירות עיבוד",
+        "abbr": "PSI",
+        "group": "מדדים",
+        "scale": "standard",
+        "min": 40.0,
+        "max": 160.0,
+        "bands": [
+          {
+            "min": 130.0,
+            "max": 160.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 120.0,
+            "max": 129.0,
+            "label": "גבוה",
+            "level": 0
+          },
+          {
+            "min": 110.0,
+            "max": 119.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 90.0,
+            "max": 109.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 80.0,
+            "max": 89.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 79.0,
+            "label": "גבולי",
+            "level": 2
+          },
+          {
+            "min": 40.0,
+            "max": 69.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "similarities",
+        "name_he": "שיתופיות",
+        "abbr": "SI",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "vocabulary",
+        "name_he": "אוצר מילים",
+        "abbr": "VC",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "information",
+        "name_he": "מידע",
+        "abbr": "IN",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "comprehension",
+        "name_he": "הבנה",
+        "abbr": "CO",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "block_design",
+        "name_he": "קוביות",
+        "abbr": "BD",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "visual_puzzles",
+        "name_he": "פאזלים חזותיים",
+        "abbr": "VP",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "matrix",
+        "name_he": "מטריצות",
+        "abbr": "MR",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "figure_weights",
+        "name_he": "משקלות",
+        "abbr": "FW",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "picture_concepts",
+        "name_he": "מושגים בתמונות",
+        "abbr": "PC",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "arithmetic",
+        "name_he": "חשבון",
+        "abbr": "AR",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "digit_span",
+        "name_he": "זכירת ספרות",
+        "abbr": "DS",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "picture_span",
+        "name_he": "זכירת תמונות",
+        "abbr": "PS",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "letter_number",
+        "name_he": "רצף אותיות ומספרים",
+        "abbr": "LN",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "coding",
+        "name_he": "צפנים",
+        "abbr": "CD",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "symbol_search",
+        "name_he": "חיפוש סמלים",
+        "abbr": "SS",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "cancellation",
+        "name_he": "מחיקה",
+        "abbr": "CA",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "bayley_4",
+    "name": "Bayley-4",
+    "description_he": "סולמות ביילי להתפתחות תינוקות ופעוטות (עד 42 חודשים)",
+    "scale_note_he": "ציוני המדדים הם ציוני תקן (ממוצע 100, סטיית תקן 15); ציוני תת-המבחנים הם ציונים מותאמים (ממוצע 10, סטיית תקן 3).",
+    "min_age_months": 0,
+    "max_age_months": 42,
+    "measures": [
+      {
+        "key": "cognitive",
+        "name_he": "קוגניטיבי",
+        "abbr": "COG",
+        "group": "מדדים",
+        "scale": "standard",
+        "min": 40.0,
+        "max": 160.0,
+        "bands": [
+          {
+            "min": 130.0,
+            "max": 160.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 120.0,
+            "max": 129.0,
+            "label": "גבוה",
+            "level": 0
+          },
+          {
+            "min": 110.0,
+            "max": 119.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 90.0,
+            "max": 109.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 80.0,
+            "max": 89.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 79.0,
+            "label": "גבולי",
+            "level": 2
+          },
+          {
+            "min": 40.0,
+            "max": 69.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "language",
+        "name_he": "שפה",
+        "abbr": "LANG",
+        "group": "מדדים",
+        "scale": "standard",
+        "min": 40.0,
+        "max": 160.0,
+        "bands": [
+          {
+            "min": 130.0,
+            "max": 160.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 120.0,
+            "max": 129.0,
+            "label": "גבוה",
+            "level": 0
+          },
+          {
+            "min": 110.0,
+            "max": 119.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 90.0,
+            "max": 109.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 80.0,
+            "max": 89.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 79.0,
+            "label": "גבולי",
+            "level": 2
+          },
+          {
+            "min": 40.0,
+            "max": 69.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "motor",
+        "name_he": "מוטורי",
+        "abbr": "MOT",
+        "group": "מדדים",
+        "scale": "standard",
+        "min": 40.0,
+        "max": 160.0,
+        "bands": [
+          {
+            "min": 130.0,
+            "max": 160.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 120.0,
+            "max": 129.0,
+            "label": "גבוה",
+            "level": 0
+          },
+          {
+            "min": 110.0,
+            "max": 119.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 90.0,
+            "max": 109.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 80.0,
+            "max": 89.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 79.0,
+            "label": "גבולי",
+            "level": 2
+          },
+          {
+            "min": 40.0,
+            "max": 69.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "receptive",
+        "name_he": "שפה קולטת",
+        "abbr": "RC",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "expressive",
+        "name_he": "שפה מבטאת",
+        "abbr": "EC",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "fine_motor",
+        "name_he": "מוטוריקה עדינה",
+        "abbr": "FM",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "gross_motor",
+        "name_he": "מוטוריקה גסה",
+        "abbr": "GM",
+        "group": "תת-מבחנים",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "abas_3",
+    "name": "ABAS-3",
+    "description_he": "סולם התנהגות מסתגלת (דיווח הורים או צוות המסגרת)",
+    "scale_note_he": "הציון המסתגל הכללי והאשכולות הם ציוני תקן (ממוצע 100, סטיית תקן 15); תחומי המיומנות הם ציונים מותאמים (ממוצע 10, סטיית תקן 3).",
+    "min_age_months": 0,
+    "max_age_months": 1079,
+    "measures": [
+      {
+        "key": "gac",
+        "name_he": "ציון מסתגל כללי",
+        "abbr": "GAC",
+        "group": "מדדים",
+        "scale": "standard",
+        "min": 40.0,
+        "max": 160.0,
+        "bands": [
+          {
+            "min": 130.0,
+            "max": 160.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 120.0,
+            "max": 129.0,
+            "label": "גבוה",
+            "level": 0
+          },
+          {
+            "min": 110.0,
+            "max": 119.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 90.0,
+            "max": 109.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 80.0,
+            "max": 89.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 79.0,
+            "label": "גבולי",
+            "level": 2
+          },
+          {
+            "min": 40.0,
+            "max": 69.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "conceptual",
+        "name_he": "מושגי",
+        "abbr": "CON",
+        "group": "מדדים",
+        "scale": "standard",
+        "min": 40.0,
+        "max": 160.0,
+        "bands": [
+          {
+            "min": 130.0,
+            "max": 160.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 120.0,
+            "max": 129.0,
+            "label": "גבוה",
+            "level": 0
+          },
+          {
+            "min": 110.0,
+            "max": 119.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 90.0,
+            "max": 109.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 80.0,
+            "max": 89.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 79.0,
+            "label": "גבולי",
+            "level": 2
+          },
+          {
+            "min": 40.0,
+            "max": 69.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "social",
+        "name_he": "חברתי",
+        "abbr": "SOC",
+        "group": "מדדים",
+        "scale": "standard",
+        "min": 40.0,
+        "max": 160.0,
+        "bands": [
+          {
+            "min": 130.0,
+            "max": 160.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 120.0,
+            "max": 129.0,
+            "label": "גבוה",
+            "level": 0
+          },
+          {
+            "min": 110.0,
+            "max": 119.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 90.0,
+            "max": 109.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 80.0,
+            "max": 89.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 79.0,
+            "label": "גבולי",
+            "level": 2
+          },
+          {
+            "min": 40.0,
+            "max": 69.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "practical",
+        "name_he": "מעשי",
+        "abbr": "PRA",
+        "group": "מדדים",
+        "scale": "standard",
+        "min": 40.0,
+        "max": 160.0,
+        "bands": [
+          {
+            "min": 130.0,
+            "max": 160.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 120.0,
+            "max": 129.0,
+            "label": "גבוה",
+            "level": 0
+          },
+          {
+            "min": 110.0,
+            "max": 119.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 90.0,
+            "max": 109.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 80.0,
+            "max": 89.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 79.0,
+            "label": "גבולי",
+            "level": 2
+          },
+          {
+            "min": 40.0,
+            "max": 69.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "communication",
+        "name_he": "תקשורת",
+        "abbr": "COM",
+        "group": "תחומי מיומנות",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "functional_pre_academics",
+        "name_he": "מושגים טרום-אקדמיים",
+        "abbr": "FA",
+        "group": "תחומי מיומנות",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "self_direction",
+        "name_he": "הכוונה עצמית",
+        "abbr": "SD",
+        "group": "תחומי מיומנות",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "leisure",
+        "name_he": "פנאי",
+        "abbr": "LS",
+        "group": "תחומי מיומנות",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "social_skill",
+        "name_he": "חברתי",
+        "abbr": "SO",
+        "group": "תחומי מיומנות",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "community_use",
+        "name_he": "שימוש בקהילה",
+        "abbr": "CU",
+        "group": "תחומי מיומנות",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "home_living",
+        "name_he": "תפקוד בבית / במסגרת",
+        "abbr": "HL",
+        "group": "תחומי מיומנות",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "health_safety",
+        "name_he": "בריאות ובטיחות",
+        "abbr": "HS",
+        "group": "תחומי מיומנות",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "self_care",
+        "name_he": "טיפול עצמי",
+        "abbr": "SC",
+        "group": "תחומי מיומנות",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "motor",
+        "name_he": "מוטורי",
+        "abbr": "MO",
+        "group": "תחומי מיומנות",
+        "scale": "scaled",
+        "min": 1.0,
+        "max": 19.0,
+        "bands": [
+          {
+            "min": 16.0,
+            "max": 19.0,
+            "label": "גבוה מאוד",
+            "level": 0
+          },
+          {
+            "min": 13.0,
+            "max": 15.0,
+            "label": "ממוצע גבוה",
+            "level": 0
+          },
+          {
+            "min": 8.0,
+            "max": 12.0,
+            "label": "ממוצע",
+            "level": 0
+          },
+          {
+            "min": 6.0,
+            "max": 7.0,
+            "label": "ממוצע נמוך",
+            "level": 1
+          },
+          {
+            "min": 4.0,
+            "max": 5.0,
+            "label": "נמוך",
+            "level": 2
+          },
+          {
+            "min": 1.0,
+            "max": 3.0,
+            "label": "נמוך מאוד",
+            "level": 3
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "asrs",
+    "name": "ASRS",
+    "description_he": "סולם דירוג לספקטרום האוטיסטי (הורים / גננת)",
+    "scale_note_he": "ציוני T (ממוצע 50, סטיית תקן 10). ציון T של 60 ומעלה מעלה חשד לקשיים בתחום.",
+    "min_age_months": 24,
+    "max_age_months": 227,
+    "measures": [
+      {
+        "key": "total",
+        "name_he": "ציון כולל",
+        "abbr": "T",
+        "group": "סולמות",
+        "scale": "t_concern",
+        "min": 20.0,
+        "max": 100.0,
+        "bands": [
+          {
+            "min": 20.0,
+            "max": 59.0,
+            "label": "בטווח התקין",
+            "level": 0
+          },
+          {
+            "min": 60.0,
+            "max": 64.0,
+            "label": "מעט מעל הטווח התקין",
+            "level": 1
+          },
+          {
+            "min": 65.0,
+            "max": 69.0,
+            "label": "מוגבר",
+            "level": 2
+          },
+          {
+            "min": 70.0,
+            "max": 100.0,
+            "label": "מוגבר מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "social_communication",
+        "name_he": "תקשורת חברתית",
+        "abbr": "SC",
+        "group": "סולמות",
+        "scale": "t_concern",
+        "min": 20.0,
+        "max": 100.0,
+        "bands": [
+          {
+            "min": 20.0,
+            "max": 59.0,
+            "label": "בטווח התקין",
+            "level": 0
+          },
+          {
+            "min": 60.0,
+            "max": 64.0,
+            "label": "מעט מעל הטווח התקין",
+            "level": 1
+          },
+          {
+            "min": 65.0,
+            "max": 69.0,
+            "label": "מוגבר",
+            "level": 2
+          },
+          {
+            "min": 70.0,
+            "max": 100.0,
+            "label": "מוגבר מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "unusual_behaviors",
+        "name_he": "התנהגויות חריגות",
+        "abbr": "UB",
+        "group": "סולמות",
+        "scale": "t_concern",
+        "min": 20.0,
+        "max": 100.0,
+        "bands": [
+          {
+            "min": 20.0,
+            "max": 59.0,
+            "label": "בטווח התקין",
+            "level": 0
+          },
+          {
+            "min": 60.0,
+            "max": 64.0,
+            "label": "מעט מעל הטווח התקין",
+            "level": 1
+          },
+          {
+            "min": 65.0,
+            "max": 69.0,
+            "label": "מוגבר",
+            "level": 2
+          },
+          {
+            "min": 70.0,
+            "max": 100.0,
+            "label": "מוגבר מאוד",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "dsm_scale",
+        "name_he": "סולם DSM-5",
+        "abbr": "DSM",
+        "group": "סולמות",
+        "scale": "t_concern",
+        "min": 20.0,
+        "max": 100.0,
+        "bands": [
+          {
+            "min": 20.0,
+            "max": 59.0,
+            "label": "בטווח התקין",
+            "level": 0
+          },
+          {
+            "min": 60.0,
+            "max": 64.0,
+            "label": "מעט מעל הטווח התקין",
+            "level": 1
+          },
+          {
+            "min": 65.0,
+            "max": 69.0,
+            "label": "מוגבר",
+            "level": 2
+          },
+          {
+            "min": 70.0,
+            "max": 100.0,
+            "label": "מוגבר מאוד",
+            "level": 3
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "cbcl_1_5",
+    "name": "CBCL 1½–5 (אכנבך)",
+    "description_he": "רשימת התנהגויות לילד, דיווח הורים",
+    "scale_note_he": "ציוני T. בסולמות התסמונת: 65–69 גבולי, 70 ומעלה קליני. בסולמות הרחבים: 60–63 גבולי, 64 ומעלה קליני.",
+    "min_age_months": 18,
+    "max_age_months": 71,
+    "measures": [
+      {
+        "key": "emotionally_reactive",
+        "name_he": "תגובתיות רגשית",
+        "abbr": "",
+        "group": "סולמות תסמונת",
+        "scale": "t_concern",
+        "min": 20.0,
+        "max": 100.0,
+        "bands": [
+          {
+            "min": 50.0,
+            "max": 64.0,
+            "label": "בטווח התקין",
+            "level": 0
+          },
+          {
+            "min": 65.0,
+            "max": 69.0,
+            "label": "בטווח הגבולי",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 100.0,
+            "label": "בטווח הקליני",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "anxious_depressed",
+        "name_he": "חרדה/דיכאון",
+        "abbr": "",
+        "group": "סולמות תסמונת",
+        "scale": "t_concern",
+        "min": 20.0,
+        "max": 100.0,
+        "bands": [
+          {
+            "min": 50.0,
+            "max": 64.0,
+            "label": "בטווח התקין",
+            "level": 0
+          },
+          {
+            "min": 65.0,
+            "max": 69.0,
+            "label": "בטווח הגבולי",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 100.0,
+            "label": "בטווח הקליני",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "somatic",
+        "name_he": "תלונות סומטיות",
+        "abbr": "",
+        "group": "סולמות תסמונת",
+        "scale": "t_concern",
+        "min": 20.0,
+        "max": 100.0,
+        "bands": [
+          {
+            "min": 50.0,
+            "max": 64.0,
+            "label": "בטווח התקין",
+            "level": 0
+          },
+          {
+            "min": 65.0,
+            "max": 69.0,
+            "label": "בטווח הגבולי",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 100.0,
+            "label": "בטווח הקליני",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "withdrawn",
+        "name_he": "הסתגרות",
+        "abbr": "",
+        "group": "סולמות תסמונת",
+        "scale": "t_concern",
+        "min": 20.0,
+        "max": 100.0,
+        "bands": [
+          {
+            "min": 50.0,
+            "max": 64.0,
+            "label": "בטווח התקין",
+            "level": 0
+          },
+          {
+            "min": 65.0,
+            "max": 69.0,
+            "label": "בטווח הגבולי",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 100.0,
+            "label": "בטווח הקליני",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "sleep",
+        "name_he": "בעיות שינה",
+        "abbr": "",
+        "group": "סולמות תסמונת",
+        "scale": "t_concern",
+        "min": 20.0,
+        "max": 100.0,
+        "bands": [
+          {
+            "min": 50.0,
+            "max": 64.0,
+            "label": "בטווח התקין",
+            "level": 0
+          },
+          {
+            "min": 65.0,
+            "max": 69.0,
+            "label": "בטווח הגבולי",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 100.0,
+            "label": "בטווח הקליני",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "attention",
+        "name_he": "בעיות קשב",
+        "abbr": "",
+        "group": "סולמות תסמונת",
+        "scale": "t_concern",
+        "min": 20.0,
+        "max": 100.0,
+        "bands": [
+          {
+            "min": 50.0,
+            "max": 64.0,
+            "label": "בטווח התקין",
+            "level": 0
+          },
+          {
+            "min": 65.0,
+            "max": 69.0,
+            "label": "בטווח הגבולי",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 100.0,
+            "label": "בטווח הקליני",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "aggressive",
+        "name_he": "התנהגות תוקפנית",
+        "abbr": "",
+        "group": "סולמות תסמונת",
+        "scale": "t_concern",
+        "min": 20.0,
+        "max": 100.0,
+        "bands": [
+          {
+            "min": 50.0,
+            "max": 64.0,
+            "label": "בטווח התקין",
+            "level": 0
+          },
+          {
+            "min": 65.0,
+            "max": 69.0,
+            "label": "בטווח הגבולי",
+            "level": 1
+          },
+          {
+            "min": 70.0,
+            "max": 100.0,
+            "label": "בטווח הקליני",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "internalizing",
+        "name_he": "מופנם (Internalizing)",
+        "abbr": "",
+        "group": "סולמות רחבים",
+        "scale": "t_concern",
+        "min": 20.0,
+        "max": 100.0,
+        "bands": [
+          {
+            "min": 20.0,
+            "max": 59.0,
+            "label": "בטווח התקין",
+            "level": 0
+          },
+          {
+            "min": 60.0,
+            "max": 63.0,
+            "label": "בטווח הגבולי",
+            "level": 1
+          },
+          {
+            "min": 64.0,
+            "max": 100.0,
+            "label": "בטווח הקליני",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "externalizing",
+        "name_he": "מוחצן (Externalizing)",
+        "abbr": "",
+        "group": "סולמות רחבים",
+        "scale": "t_concern",
+        "min": 20.0,
+        "max": 100.0,
+        "bands": [
+          {
+            "min": 20.0,
+            "max": 59.0,
+            "label": "בטווח התקין",
+            "level": 0
+          },
+          {
+            "min": 60.0,
+            "max": 63.0,
+            "label": "בטווח הגבולי",
+            "level": 1
+          },
+          {
+            "min": 64.0,
+            "max": 100.0,
+            "label": "בטווח הקליני",
+            "level": 3
+          }
+        ]
+      },
+      {
+        "key": "total",
+        "name_he": "ציון כולל",
+        "abbr": "",
+        "group": "סולמות רחבים",
+        "scale": "t_concern",
+        "min": 20.0,
+        "max": 100.0,
+        "bands": [
+          {
+            "min": 20.0,
+            "max": 59.0,
+            "label": "בטווח התקין",
+            "level": 0
+          },
+          {
+            "min": 60.0,
+            "max": 63.0,
+            "label": "בטווח הגבולי",
+            "level": 1
+          },
+          {
+            "min": 64.0,
+            "max": 100.0,
+            "label": "בטווח הקליני",
+            "level": 3
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "ados_2",
+    "name": "ADOS-2",
+    "description_he": "תצפית אבחנתית לספקטרום האוטיסטי; נקודת החתך לפי המודול",
+    "scale_note_he": "הציון מושווה לנקודת החתך של המודול שהועבר.",
+    "min_age_months": 12,
+    "max_age_months": 1200,
+    "measures": [
+      {
+        "key": "social_affect",
+        "name_he": "אפקט חברתי",
+        "abbr": "SA",
+        "group": "ציונים",
+        "scale": "raw_cutoff",
+        "min": 0.0,
+        "max": 30.0,
+        "bands": []
+      },
+      {
+        "key": "rrb",
+        "name_he": "התנהגויות מוגבלות וחזרתיות",
+        "abbr": "RRB",
+        "group": "ציונים",
+        "scale": "raw_cutoff",
+        "min": 0.0,
+        "max": 30.0,
+        "bands": []
+      },
+      {
+        "key": "total",
+        "name_he": "ציון כולל",
+        "abbr": "Total",
+        "group": "ציונים",
+        "scale": "raw_cutoff",
+        "min": 0.0,
+        "max": 30.0,
+        "bands": []
+      },
+      {
+        "key": "comparison",
+        "name_he": "ציון השוואה",
+        "abbr": "CSS",
+        "group": "ציונים",
+        "scale": "comparison",
+        "min": 1.0,
+        "max": 10.0,
+        "bands": [
+          {
+            "min": 1.0,
+            "max": 2.0,
+            "label": "רמה מינימלית עד היעדר עדות לתסמינים",
+            "level": 0
+          },
+          {
+            "min": 3.0,
+            "max": 4.0,
+            "label": "רמה נמוכה של תסמינים",
+            "level": 1
+          },
+          {
+            "min": 5.0,
+            "max": 7.0,
+            "label": "רמה בינונית של תסמינים",
+            "level": 2
+          },
+          {
+            "min": 8.0,
+            "max": 10.0,
+            "label": "רמה גבוהה של תסמינים",
+            "level": 3
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "key": "cars_2",
+    "name": "CARS-2",
+    "description_he": "סולם דירוג לאוטיזם בילדות (גרסה סטנדרטית)",
+    "scale_note_he": "ציון כולל: מתחת ל-30 מעט או ללא תסמינים, 30 עד 36.5 קל-בינוני, 37 ומעלה חמור.",
+    "min_age_months": 24,
+    "max_age_months": 1200,
+    "measures": [
+      {
+        "key": "total",
+        "name_he": "ציון כולל",
+        "abbr": "Total",
+        "group": "ציונים",
+        "scale": "cars",
+        "min": 15.0,
+        "max": 60.0,
+        "bands": [
+          {
+            "min": 15.0,
+            "max": 29.5,
+            "label": "מעט או ללא תסמינים של הספקטרום",
+            "level": 0
+          },
+          {
+            "min": 30.0,
+            "max": 36.5,
+            "label": "תסמינים בדרגה קלה-בינונית",
+            "level": 2
+          },
+          {
+            "min": 37.0,
+            "max": 60.0,
+            "label": "תסמינים בדרגה חמורה",
+            "level": 3
+          }
+        ]
+      }
+    ]
+  }
+]

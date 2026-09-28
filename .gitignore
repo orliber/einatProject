@@ -31,3 +31,4 @@ __pycache__/
 # Tauri / frontend build output
 apps/desktop/src-tauri/gen/
 apps/desktop/dist/
+apps/desktop/dist-preview/

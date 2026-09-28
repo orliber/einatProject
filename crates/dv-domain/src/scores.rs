@@ -728,4 +728,21 @@ mod tests {
             Some(2)
         );
     }
+
+    /// The browser preview reads the same tables (apps/desktop/src/web/instruments.json).
+    #[test]
+    fn the_browser_preview_uses_these_tables() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../apps/desktop/src/web/instruments.json"
+        );
+        let committed: Vec<Instrument> =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap_or_default())
+                .unwrap_or_default();
+        assert_eq!(
+            committed,
+            instruments(),
+            "run: cargo run -p dv-domain --example instruments_json > apps/desktop/src/web/instruments.json"
+        );
+    }
 }
