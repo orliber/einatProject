@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>כניסה לכספת</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700&amp;family=Frank+Ruhl+Libre:wght@500;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:Assistant,sans-serif;background:#1D2629;color:#1D2629}
+a{color:#1F5F5B}a:hover{color:#143F3C}
+</style>
+</helmet>
+<div dir="rtl" style="width: 1280px; height: 800px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; background: #1D2629; font-family: Assistant, sans-serif">
+<div style="width: 420px; box-sizing: border-box; padding: 40px; border-radius: 16px; background: #F4F1EA; display: flex; flex-direction: column; gap: 20px">
+<div style="width: 56px; height: 56px; border-radius: 14px; background: #1F5F5B; color: #FFFFFF; display: flex; align-items: center; justify-content: center">
+<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-family: 'Frank Ruhl Libre', serif; font-size: 30px; font-weight: 700">כספת האבחון</h1>
+<p style="margin: 0; font-size: 16px; color: #4F5A5C; line-height: 1.6">הכספת ננעלה אחרי 10 דקות ללא פעילות.</p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<label for="pw" style="font-size: 15px; font-weight: 600">סיסמה</label>
+<input id="pw" type="password" value="••••••••••••" style="height: 48px; box-sizing: border-box; padding: 0 14px; border-radius: 10px; border: 1px solid #C9C2B3; background: #FFFFFF; font-size: 16px; font-family: inherit">
+</div>
+<a href="Cases.dc.html" style="height: 48px; border-radius: 10px; background: #1F5F5B; color: #FFFFFF; display: flex; align-items: center; justify-content: center; text-decoration: none; font-size: 17px; font-weight: 600">פתיחה</a>
+<a href="Cases.dc.html" style="height: 44px; border-radius: 10px; border: 1px solid #C9C2B3; color: #1D2629; display: flex; align-items: center; justify-content: center; text-decoration: none; font-size: 15px">פתיחה עם טביעת אצבע</a>
+<p style="margin: 0; font-size: 13px; color: #4F5A5C; line-height: 1.6">כל המידע מוצפן ושמור רק במחשב הזה. אי אפשר לשחזר את הסיסמה, ולכן כדאי לשמור אותה במנהל סיסמאות.</p>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

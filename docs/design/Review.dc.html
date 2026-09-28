@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>מה יוצא מהמחשב</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700&amp;family=Frank+Ruhl+Libre:wght@500;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:Assistant,sans-serif;background:#5E6668;color:#1D2629}
+a{color:#1F5F5B}a:hover{color:#143F3C}
+button{font-family:inherit}
+</style>
+</helmet>
+<div dir="rtl" style="width: 1280px; height: 800px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; background: #5E6668; font-family: Assistant, sans-serif; color: #1D2629">
+<div style="width: 1040px; box-sizing: border-box; padding: 32px 36px; border-radius: 16px; background: #F4F1EA; display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; align-items: center; gap: 12px">
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1F5F5B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"></path></svg>
+<h1 style="margin: 0; font-family: 'Frank Ruhl Libre', serif; font-size: 26px; font-weight: 700">לפני שליחה ל-Claude</h1>
+</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px">
+<div style="background: #FFFFFF; border: 1px solid #E6E1D6; border-radius: 12px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px">
+<div style="font-size: 13px; font-weight: 700; color: #5A6466">מה שכתבת (נשאר במחשב)</div>
+<p style="margin: 0; font-size: 17px; line-height: 1.9"><mark style="background: #FBE7CF; color: #1D2629; padding: 1px 4px; border-radius: 4px">מיכל</mark> הגננת סיפרה ש<mark style="background: #FBE7CF; color: #1D2629; padding: 1px 4px; border-radius: 4px">נועם</mark> לא רצה לצאת לחצר כש<mark style="background: #FBE7CF; color: #1D2629; padding: 1px 4px; border-radius: 4px">יובל</mark> ביקש לשחק איתו ב-<mark style="background: #FBE7CF; color: #1D2629; padding: 1px 4px; border-radius: 4px">14.9</mark>, ואחר כך ישב לבד בפינת הספרים.</p>
+</div>
+<div style="background: #FFFFFF; border: 2px solid #1F5F5B; border-radius: 12px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px">
+<div style="font-size: 13px; font-weight: 700; color: #1F5F5B">מה Claude יקבל</div>
+<p style="margin: 0; font-size: 17px; line-height: 1.9"><span style="background: #E4EEEC; color: #1F5F5B; padding: 1px 4px; border-radius: 4px">[גננת]</span> סיפרה ש<span style="background: #E4EEEC; color: #1F5F5B; padding: 1px 4px; border-radius: 4px">[ילד]</span> לא רצה לצאת לחצר כש<span style="{{kidStyle}}">{{kidText}}</span> ביקש לשחק איתו <span style="background: #E4EEEC; color: #1F5F5B; padding: 1px 4px; border-radius: 4px">לפני כשבועיים</span>, ואחר כך ישב לבד בפינת הספרים.</p>
+</div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px">
+<sc-for list="{{checks}}" as="c" hint-placeholder-count="4">
+<div style="{{c.boxStyle}}">
+<div style="font-size: 14px; font-weight: 700">{{c.title}}</div>
+<div style="font-size: 13px; line-height: 1.5">{{c.detail}}</div>
+</div>
+</sc-for>
+</div>
+<sc-if value="{{unresolved}}" hint-placeholder-val="{{true}}">
+<div style="padding: 16px 20px; border-radius: 12px; background: #FBE7CF; color: #5A2A03; display: flex; align-items: center; gap: 16px">
+<div style="flex-grow: 1; font-size: 16px; line-height: 1.6">נמצא שם שלא מופיע ברשימת התיק: <strong>יובל</strong>. אולי ילד מהגן? עד שתחליטי, השליחה חסומה.</div>
+<button type="button" onClick="{{hide}}" style="height: 40px; padding: 0 16px; border-radius: 8px; border: none; background: #1F5F5B; color: #FFFFFF; font-size: 15px; font-weight: 600; cursor: pointer">להסתיר כ-[ילד_גן_1]</button>
+<button type="button" onClick="{{notName}}" style="height: 40px; padding: 0 16px; border-radius: 8px; border: 1px solid #B98A5E; background: transparent; color: #5A2A03; font-size: 15px; cursor: pointer">זה לא שם</button>
+</div>
+</sc-if>
+<div style="display: flex; gap: 12px; align-items: center">
+<sc-if value="{{resolved}}" hint-placeholder-val="{{false}}">
+<a href="Main.dc.html" style="height: 46px; padding: 0 24px; border-radius: 10px; background: #1F5F5B; color: #FFFFFF; display: flex; align-items: center; text-decoration: none; font-size: 16px; font-weight: 600">שליחה ל-Claude</a>
+</sc-if>
+<sc-if value="{{unresolved}}" hint-placeholder-val="{{true}}">
+<span style="height: 46px; padding: 0 24px; border-radius: 10px; background: #D9D4C9; color: #5A6466; display: flex; align-items: center; font-size: 16px; font-weight: 600">שליחה ל-Claude</span>
+</sc-if>
+<a href="Main.dc.html" style="height: 46px; padding: 0 20px; border-radius: 10px; border: 1px solid #C9C2B3; color: #1D2629; display: flex; align-items: center; text-decoration: none; font-size: 16px">ביטול ועריכה</a>
+<div style="flex-grow: 1"></div>
+<label style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #4F5A5C"><input type="checkbox"> להציג את המסך הזה רק כשיש חשד</label>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":800}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { choice: null };
+  }
+  renderVals() {
+    var self = this;
+    var ch = this.state.choice;
+    var ok = 'padding: 12px 14px; border-radius: 10px; background: #DCEFE0; color: #1F4A28; display: flex; flex-direction: column; gap: 4px';
+    var warn = 'padding: 12px 14px; border-radius: 10px; background: #FBE7CF; color: #5A2A03; display: flex; flex-direction: column; gap: 4px';
+    var tag = 'background: #E4EEEC; color: #1F5F5B; padding: 1px 4px; border-radius: 4px';
+    var kidText = 'יובל';
+    var kidStyle = 'background: #F6D2CC; color: #8A1C0C; padding: 1px 4px; border-radius: 4px; text-decoration: underline wavy #C0392B';
+    if (ch === 'hide') { kidText = '[ילד_גן_1]'; kidStyle = tag; }
+    if (ch === 'keep') { kidStyle = 'padding: 1px 0'; }
+    return {
+      kidText: kidText,
+      kidStyle: kidStyle,
+      unresolved: !ch,
+      resolved: !!ch,
+      hide: function () { self.setState({ choice: 'hide' }); },
+      notName: function () { self.setState({ choice: 'keep' }); },
+      checks: [
+        { title: 'שמות מהתיק', detail: 'הוחלפו 2: הילד, הגננת', boxStyle: ok },
+        { title: 'ת.ז., טלפון, תאריכים', detail: 'תאריך הוחלף ל״לפני כשבועיים״', boxStyle: ok },
+        { title: 'זיהוי שמות אוטומטי', detail: ch ? 'טופל' : 'חשד אחד: יובל', boxStyle: ch ? ok : warn },
+        { title: 'פרטים מזהים בעקיפין', detail: 'לא נמצאו', boxStyle: ok }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
