@@ -94,12 +94,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # One file to send: a per-user setup (no admin prompt) with WebView2 bundled.
           - os: windows-latest
-            bundles: nsis,msi
+            bundles: nsis
             artifact: diagnostic-vault-windows
             paths: |
               target/release/bundle/nsis/*.exe
-              target/release/bundle/msi/*.msi
+          # Ad-hoc signed (tauri.conf.json): Gatekeeper offers "Open Anyway" instead of "damaged".
           - os: macos-latest
             bundles: app,dmg
             artifact: diagnostic-vault-macos

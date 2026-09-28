@@ -153,7 +153,7 @@ pub fn build_section_request(
         input.section_title, input.section_key
     )];
     if let Some(age) = &input.age {
-        parts.push(format!("גיל בעת האבחון: {age}"));
+        parts.push(format!("בעת האבחון: {age} (שנים:חודשים)"));
     }
     if let Some(g) = input.gender {
         parts.push(match g {

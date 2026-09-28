@@ -203,7 +203,7 @@ pub fn instruments() -> Vec<Instrument> {
         Instrument {
             key: "wppsi_iv".into(),
             name: "WPPSI-IV".into(),
-            description_he: "מבחן וקסלר לגיל הרך (2:6–7:7)".into(),
+            description_he: "מבחן וקסלר לילדים בגן ובתחילת בית הספר (2:6–7:7)".into(),
             scale_note_he: STANDARD_NOTE.into(),
             min_age_months: 30,
             max_age_months: 91,
@@ -295,7 +295,7 @@ pub fn instruments() -> Vec<Instrument> {
                 m("leisure", "פנאי", "LS", "תחומי מיומנות", Scaled),
                 m("social_skill", "חברתי", "SO", "תחומי מיומנות", Scaled),
                 m("community_use", "שימוש בקהילה", "CU", "תחומי מיומנות", Scaled),
-                m("home_living", "חיים בבית / במסגרת", "HL", "תחומי מיומנות", Scaled),
+                m("home_living", "תפקוד בבית / במסגרת", "HL", "תחומי מיומנות", Scaled),
                 m("health_safety", "בריאות ובטיחות", "HS", "תחומי מיומנות", Scaled),
                 m("self_care", "טיפול עצמי", "SC", "תחומי מיומנות", Scaled),
                 m("motor", "מוטורי", "MO", "תחומי מיומנות", Scaled),

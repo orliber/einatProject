@@ -850,56 +850,55 @@ fn a_half_point_score_is_not_mistaken_for_a_date() {
     assert_eq!(outcome.tagged, text);
 }
 
-/// Fixed text (rules, style, schema, section titles, score tables) goes out with every request
-/// and is never shown in the review screen, so it must not contain any child's name, even inside
-/// another word ("שאלון" when the child is "אלון"): the gate would block the case for good.
+/// Every first name the filter knows, including names that are also words ("גיל", "חיים").
+fn lexicon_names() -> Vec<&'static str> {
+    let names: Vec<&str> = [
+        include_str!("../../dv-privacy/data/first_names.txt"),
+        include_str!("../../dv-privacy/data/word_names.txt"),
+    ]
+    .into_iter()
+    .flat_map(str::lines)
+    .map(str::trim)
+    .filter(|l| !l.is_empty() && !l.starts_with('#'))
+    .collect();
+    assert!(names.len() > 300);
+    names
+}
+
+fn child_named(name: &str) -> [dv_domain::Identity; 1] {
+    [dv_domain::Identity {
+        id: "i".into(),
+        case_id: "c".into(),
+        role: Role::Child,
+        tag: "[ילד]".into(),
+        value: name.into(),
+        aliases: vec![],
+    }]
+}
+
+/// The rules, style, schema and the builder's own words go out with every request and never
+/// reach the review screen, so they must not contain any child's name, even inside another word
+/// ("שלישי" when the child is "ישי"): the gate would block that case for good.
 #[test]
-fn fixed_text_never_collides_with_a_childs_name() {
-    use dv_domain::{Identity, ScoreEntry, ScoreSheet};
-    let mut fixed: Vec<String> = vec![
-        dv_ai::prompts::DRAFTING_RULES.into(),
-        dv_ai::prompts::DEFAULT_STYLE.into(),
-        dv_ai::prompts::OUTPUT_RULES.into(),
-        dv_ai::prompts::CONSULT_RULES.into(),
-        dv_ai::prompts::RESEARCH_RULES.into(),
-    ];
-    for part in ReportStructure::load_default().unwrap().parts {
-        fixed.push(part.title);
-        fixed.extend(
-            part.sections
-                .into_iter()
-                .map(|s| format!("סעיף: {} ({})", s.title, s.key)),
-        );
-    }
-    for key in ["expand", "shorten", "analyze", "recommend", "rephrase"] {
-        fixed.extend(dv_ai::prompts::quick_action(key).map(str::to_owned));
-    }
-    for inst in dv_domain::instruments() {
-        let entries = inst
-            .measures
-            .iter()
-            .map(|m| ScoreEntry {
-                measure: m.key.clone(),
-                value: m.min,
-                note: String::new(),
-            })
-            .collect();
-        let sheet = ScoreSheet {
-            instrument: inst.key.clone(),
-            module: String::new(),
-            cutoff: Some(1.0),
-            entries,
-            notes: String::new(),
-        };
-        fixed.push(dv_domain::format_sheet(&sheet).unwrap());
-    }
-    let mut requests = Vec::new();
+fn fixed_prompt_text_never_collides_with_a_childs_name() {
+    let mut body: Vec<Value> = [
+        dv_ai::prompts::DRAFTING_RULES,
+        dv_ai::prompts::DEFAULT_STYLE,
+        dv_ai::prompts::OUTPUT_RULES,
+        dv_ai::prompts::CONSULT_RULES,
+        dv_ai::prompts::RESEARCH_RULES,
+    ]
+    .into_iter()
+    .chain(
+        ["expand", "shorten", "analyze", "recommend", "rephrase"]
+            .into_iter()
+            .filter_map(dv_ai::prompts::quick_action),
+    )
+    .map(|t| Value::String(t.to_owned()))
+    .collect();
     // A whole section request as the builder writes it: every kind label, both grammatical
-    // genders, the data frames, the history opener and the JSON schema.
-    for (i, gender) in [GrammaticalGender::Male, GrammaticalGender::Female]
-        .into_iter()
-        .enumerate()
-    {
+    // genders, the age line, the data frames, the history opener and the JSON schema.
+    for gender in [GrammaticalGender::Male, GrammaticalGender::Female] {
         let sources = [
             InputKind::Intake,
             InputKind::PriorReport,
@@ -912,7 +911,7 @@ fn fixed_text_never_collides_with_a_childs_name() {
         ]
         .into_iter()
         .map(|k| dv_ai::TaggedInput {
-            input_id: format!("in{i}"),
+            input_id: "in".into(),
             kind_label: k.label_he().to_owned(),
             title_tagged: String::new(),
             content_tagged: String::new(),
@@ -934,31 +933,14 @@ fn fixed_text_never_collides_with_a_childs_name() {
             style_profile: None,
         };
         let nonce = dv_ai::nonce_from(&[7; 16]);
-        let (request, _) =
-            dv_ai::build_section_request(&dv_ai::ModelConfig::default(), &input, &nonce);
-        requests.push(request);
+        // Like the real gate: every string in the body, not the JSON numbers ("max_tokens").
+        body.push(dv_ai::build_section_request(&dv_ai::ModelConfig::default(), &input, &nonce).0);
     }
-    // Like the real gate: every string in the body, not the JSON numbers ("max_tokens").
-    let mut all: Vec<Value> = fixed.into_iter().map(Value::String).collect();
-    all.extend(requests);
-    let body = Value::Array(all);
-    let names: Vec<&str> = include_str!("../../dv-privacy/data/first_names.txt")
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .collect();
-    assert!(names.len() > 100);
+    let body = Value::Array(body);
     let tags: HashSet<String> = HashSet::from(["[ילד]".to_owned()]);
     let mut collisions = Vec::new();
-    for name in names {
-        let identities = [Identity {
-            id: "i".into(),
-            case_id: "c".into(),
-            role: Role::Child,
-            tag: "[ילד]".into(),
-            value: name.into(),
-            aliases: vec![],
-        }];
+    for name in lexicon_names() {
+        let identities = child_named(name);
         let ctx = PrivacyContext {
             case_id: "c",
             identities: &identities,
@@ -976,10 +958,67 @@ fn fixed_text_never_collides_with_a_childs_name() {
             max_bytes: MAX_REQUEST_BYTES,
         };
         if let Err(blocked) = clear(&req) {
-            collisions.push(format!("{name}: {:?}", blocked.reasons));
+            let found: Vec<_> = blocked
+                .reasons
+                .iter()
+                .filter_map(|r| r.detail.clone())
+                .collect();
+            collisions.push(format!("{name}: {found:?}"));
         }
     }
     assert!(collisions.is_empty(), "{collisions:#?}");
+}
+
+/// Section titles and score tables are case text: they pass the filter and the review screen,
+/// where a word like "שאלון" (child "אלון") is a question. What must never happen is a silent
+/// rewrite: "חיים בבית" turning into "[ילד] בבית" for a child named "חיים".
+#[test]
+fn score_tables_and_section_titles_are_never_rewritten_silently() {
+    use dv_domain::{ScoreEntry, ScoreSheet};
+    let mut texts: Vec<String> = ReportStructure::load_default()
+        .unwrap()
+        .parts
+        .into_iter()
+        .flat_map(|p| std::iter::once(p.title).chain(p.sections.into_iter().map(|s| s.title)))
+        .collect();
+    for inst in dv_domain::instruments() {
+        let entries = inst
+            .measures
+            .iter()
+            .map(|m| ScoreEntry {
+                measure: m.key.clone(),
+                value: m.min,
+                note: String::new(),
+            })
+            .collect();
+        let sheet = ScoreSheet {
+            instrument: inst.key.clone(),
+            module: "2".into(),
+            cutoff: Some(1.0),
+            entries,
+            notes: String::new(),
+        };
+        texts.push(dv_domain::format_sheet(&sheet).unwrap());
+    }
+    let mut rewritten = Vec::new();
+    for name in lexicon_names() {
+        let identities = child_named(name);
+        let ctx = PrivacyContext {
+            case_id: "c",
+            identities: &identities,
+            practitioner: &[],
+            allowlisted: &|_| false,
+            confirmed_names: &|_| false,
+            today: (2026, 9, 28),
+        };
+        for text in &texts {
+            let outcome = dv_privacy::filter(text, &ctx).unwrap();
+            if !outcome.hidden.is_empty() {
+                rewritten.push(format!("{name}: {:?}", outcome.hidden));
+            }
+        }
+    }
+    assert!(rewritten.is_empty(), "{rewritten:#?}");
 }
 
 #[test]

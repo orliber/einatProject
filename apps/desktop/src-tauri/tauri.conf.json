@@ -66,8 +66,14 @@
     ],
     "windows": {
       "webviewInstallMode": {
-        "type": "downloadBootstrapper"
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser"
       }
+    },
+    "macOS": {
+      "signingIdentity": "-"
     }
   }
 }
