@@ -234,7 +234,7 @@ impl Transport for AnthropicTransport {
         let body: Value = serde_json::from_slice(payload.body())
             .map_err(|e| EgressError::Policy(e.to_string()))?;
         check_policy(&body)?;
-        if !self.limit.lock().map_or(false, |mut l| l.allow()) {
+        if !self.limit.lock().is_ok_and(|mut l| l.allow()) {
             return Err(EgressError::RateLimited);
         }
         let mut delay = Duration::from_secs(2);
