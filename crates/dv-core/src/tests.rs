@@ -435,3 +435,86 @@ fn ambiguous_word_is_decided_once_per_case() {
         .unwrap();
     assert!(p.approval_id.is_some(), "{:?} {:?}", p.blocked, p.suspects);
 }
+
+fn docx(document_body: &str, header: &str, creator: &str) -> Vec<u8> {
+    use std::io::Write;
+    let w = r#"xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main""#;
+    let p = |t: &str| format!("<w:p><w:r><w:t xml:space=\"preserve\">{t}</w:t></w:r></w:p>");
+    let parts = [
+        ("word/document.xml", format!("<w:document {w}><w:body>{}</w:body></w:document>", p(document_body))),
+        ("word/header1.xml", format!("<w:hdr {w}>{}</w:hdr>", p(header))),
+        ("docProps/core.xml", format!("<cp:coreProperties xmlns:cp=\"c\" xmlns:dc=\"d\"><dc:creator>{creator}</dc:creator></cp:coreProperties>")),
+    ];
+    let mut buf = std::io::Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(&mut buf);
+    for (name, content) in parts {
+        zip.start_file(name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(content.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap();
+    buf.into_inner()
+}
+
+#[test]
+fn import_shows_body_hides_names_and_suggests_names_from_margins() {
+    let (_dir, mut core, case) = setup(None);
+    let bytes = docx(
+        "סיכום ביקור: אלון הגיע עם אמו. בבדיקה נצפה קושי במעברים.",
+        "מרכז בדוי · לידי ד\"ר רונית",
+        "יעל בדויה",
+    );
+    let p = core
+        .import_document(&case, "סיכום ביקור.docx", &bytes)
+        .unwrap();
+    assert_eq!(p.format, "docx");
+    assert_eq!(p.suggested_kind, InputKind::PriorReport);
+    assert!(
+        p.body.contains("אלון הגיע"),
+        "the stored body keeps the real text"
+    );
+    assert!(!p.body.contains("מרכז בדוי"), "the header is not imported");
+    assert!(p.left_out.iter().any(|l| l.contains("מרכז בדוי")));
+    assert!(
+        p.preview
+            .iter()
+            .any(|s| s.mark.is_some() && s.text.contains("אלון")),
+        "{:?}",
+        p.preview
+    );
+    let values: Vec<&str> = p
+        .name_suggestions
+        .iter()
+        .map(|s| s.value.as_str())
+        .collect();
+    assert!(values.contains(&"יעל בדויה"), "{values:?}");
+    assert!(values.iter().any(|v| v.contains("רונית")), "{values:?}");
+    assert!(p.warnings.iter().any(|w| w.contains("הכותרת")));
+
+    // Confirming stores the (reviewed) body as case material.
+    core.add_input(&case, p.suggested_kind, &p.title, &p.body)
+        .unwrap();
+    assert!(core
+        .case_detail(&case)
+        .unwrap()
+        .inputs
+        .iter()
+        .any(|i| i.title == "סיכום ביקור"));
+}
+
+#[test]
+fn import_refuses_what_it_cannot_read() {
+    let (_dir, mut core, case) = setup(None);
+    let err = core
+        .import_document(
+            &case,
+            "old.doc",
+            &[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1, 0, 0],
+        )
+        .unwrap_err();
+    assert!(
+        err.to_ui().message.contains(".docx"),
+        "{}",
+        err.to_ui().message
+    );
+}

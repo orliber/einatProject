@@ -1,7 +1,7 @@
 //! Shapes the UI receives. Names appear here only for local display.
 
 use dv_ai::ProposedParagraph;
-use dv_domain::{CaseInput, CaseMeta, DraftStatus, Identity};
+use dv_domain::{CaseInput, CaseMeta, DraftStatus, Identity, InputKind, Role};
 use dv_privacy::{BlockReason, Checks, Segment, Suspect};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -135,4 +135,37 @@ pub enum SuspectDecision {
     IsName,
     /// An ordinary word / keep as is; remembered for this case.
     NotAName,
+}
+
+/// A name found where it will not be imported (header, footer, file properties): the
+/// psychologist can add it to the case's names to hide in one click.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NameSuggestion {
+    pub value: String,
+    /// Where it was found ("כותרת עליונה/תחתונה", "מאפייני הקובץ · יוצר המסמך").
+    pub source: String,
+    pub role: Role,
+}
+
+/// The import screen: what was read, what will be hidden, and what was left out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ImportPreview {
+    pub file_name: String,
+    /// `docx` | `pdf` | `text`
+    pub format: String,
+    pub pages: u32,
+    pub title: String,
+    pub suggested_kind: InputKind,
+    /// The body as it will be stored (editable before saving).
+    pub body: String,
+    /// The body with what the filter would hide marked.
+    pub preview: Vec<Segment>,
+    pub suspects: Vec<Suspect>,
+    pub hidden: Vec<String>,
+    /// Lines that were not imported (headers, footers, page numbers).
+    pub left_out: Vec<String>,
+    pub name_suggestions: Vec<NameSuggestion>,
+    pub warnings: Vec<String>,
 }

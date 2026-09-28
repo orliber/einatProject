@@ -77,6 +77,8 @@ pub enum InputKind {
     Professional,
     /// Kindergarten / school: conversation or report.
     Kindergarten,
+    /// Test results: score sheets, questionnaires, norm tables.
+    TestScores,
     /// The psychologist's own observation during testing.
     Observation,
     /// The psychologist's notes from a session.
@@ -91,11 +93,64 @@ impl InputKind {
         match self {
             InputKind::Intake => "אינטייק הורים",
             InputKind::PriorReport => "דוח קודם",
+            InputKind::TestScores => "תוצאות מבחנים",
             InputKind::Professional => "שיחה עם איש מקצוע",
             InputKind::Kindergarten => "מסגרת חינוכית",
             InputKind::Observation => "תצפית",
             InputKind::SessionNote => "תיעוד מפגש",
             InputKind::FreeText => "הערה",
+        }
+    }
+}
+
+impl InputKind {
+    /// Guess the kind of an imported document from its first lines and file name.
+    /// Only a suggestion: the psychologist confirms it on the import screen.
+    #[must_use]
+    pub fn guess(text: &str, file_name: &str) -> InputKind {
+        let head: String = text.chars().take(600).collect();
+        let hay = format!("{file_name} {head}");
+        let has = |words: &[&str]| words.iter().any(|w| hay.contains(w));
+        if has(&[
+            "ציון תקן",
+            "ציונים",
+            "אחוזון",
+            "תוצאות מבחנים",
+            "WISC",
+            "WPPSI",
+            "Vineland",
+            "ABAS",
+            "Conners",
+            "BRIEF",
+            "ADOS",
+        ]) && !has(&["סיכום ביקור", "מכתב שחרור"])
+        {
+            InputKind::TestScores
+        } else if has(&["אינטייק", "שיחת היכרות עם ההורים", "שיחה עם ההורים"])
+        {
+            InputKind::Intake
+        } else if has(&["תצפית"]) {
+            InputKind::Observation
+        } else if has(&[
+            "סיכום מפגש",
+            "סיכום פגישה",
+            "תיעוד מפגש",
+            "מפגש מס",
+            "פגישה מס",
+        ]) {
+            InputKind::SessionNote
+        } else if has(&[
+            "גננת",
+            "מחנכת",
+            "יועצת בית הספר",
+            "דוח גן",
+            "מסגרת חינוכית",
+            "סייעת",
+        ]) {
+            InputKind::Kindergarten
+        } else {
+            // Most uploaded documents are other professionals' reports.
+            InputKind::PriorReport
         }
     }
 }
@@ -184,4 +239,37 @@ pub struct Transmission {
     pub payload_tagged: String,
     #[ts(type = "number")]
     pub created_at: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guesses_the_kind_of_a_document() {
+        assert_eq!(
+            InputKind::guess("טבלת ציונים: ציון תקן 85, אחוזון 16", "scores.pdf"),
+            InputKind::TestScores
+        );
+        assert_eq!(
+            InputKind::guess("סיכום ביקור במכון. בוצע WISC בעבר.", "a.pdf"),
+            InputKind::PriorReport
+        );
+        assert_eq!(
+            InputKind::guess("אינטייק: ההורים מתארים", "a.docx"),
+            InputKind::Intake
+        );
+        assert_eq!(
+            InputKind::guess("סיכום מפגש 3 – משחק חופשי", "a.docx"),
+            InputKind::SessionNote
+        );
+        assert_eq!(
+            InputKind::guess("שיחה עם הגננת", "a.docx"),
+            InputKind::Kindergarten
+        );
+        assert_eq!(
+            InputKind::guess("דוח ריפוי בעיסוק", "a.pdf"),
+            InputKind::PriorReport
+        );
+    }
 }

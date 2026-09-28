@@ -17,6 +17,11 @@ ignore = [
   # gtk-rs (glib-macros, gtk3-macros) under Tauri's GTK runtime. Not present in the
   # Windows/macOS builds and contributes no runtime code.
   { id = "RUSTSEC-2024-0370", reason = "Linux-only build-time dependency of gtk-rs via Tauri; no runtime code" },
+  # Unmaintained (no known vulnerability) font parser, a required dependency of lopdf (PDF
+  # import). It runs only inside the isolated ingest worker process: no keys, no vault, no
+  # network, killed after a time limit. Tracked in docs/DECISIONS.md (D-018): replace when
+  # the PDF stack moves to a maintained parser.
+  { id = "RUSTSEC-2026-0192", reason = "lopdf font parser; runs only in the isolated ingest worker (D-018)" },
 ]
 
 [licenses]

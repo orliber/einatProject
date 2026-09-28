@@ -12,7 +12,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use dv_ai::{ModelConfig, SectionInput, TaggedInput, TaggedTurn, ALLOWED_MODELS};
 use dv_domain::{
-    Author, CaseMeta, CaseSummary, ChatRole, DraftStatus, IdentityInput, InputKind, ReportStructure,
+    Author, CaseMeta, CaseSummary, ChatRole, DraftStatus, IdentityInput, InputKind,
+    ReportStructure, Role,
 };
 use dv_egress::{AnthropicTransport, EgressError, Transport};
 use dv_ipc::{PingResponse, IPC_VERSION};
@@ -25,8 +26,8 @@ use dv_vault::{Argon2Params, AuditEvent, Vault, VaultError};
 use serde_json::Value;
 
 pub use views::{
-    AppStatus, CaseDetail, ChatView, ConsultResult, CreatedVault, ParagraphView, Prepared,
-    ReviewPart, SectionResult, SectionView, SuspectDecision, UiError,
+    AppStatus, CaseDetail, ChatView, ConsultResult, CreatedVault, ImportPreview, NameSuggestion,
+    ParagraphView, Prepared, ReviewPart, SectionResult, SectionView, SuspectDecision, UiError,
 };
 
 const API_KEY: &str = "anthropic_api_key";
@@ -184,6 +185,8 @@ pub struct Core {
     not_before: Option<Instant>,
     disk_encryption: String,
     transport: Option<Box<dyn Transport>>,
+    /// The app's own binary, started as an isolated worker for each document.
+    ingest_exe: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for Core {
@@ -269,7 +272,15 @@ impl Core {
             not_before: None,
             disk_encryption: disk.to_owned(),
             transport: None,
+            ingest_exe: None,
         }
+    }
+
+    /// Read documents in a separate worker process (the app passes its own binary).
+    #[must_use]
+    pub fn with_ingest_worker(mut self, exe: PathBuf) -> Self {
+        self.ingest_exe = Some(exe);
+        self
     }
 
     /// Tests: cheap KDF and a fake transport.
@@ -511,6 +522,110 @@ impl Core {
 
     pub fn delete_input(&mut self, case_id: &str, input_id: &str) -> Result<(), CoreError> {
         Ok(self.vault_mut()?.delete_input(case_id, input_id)?)
+    }
+
+    /// Read a document and show what would be stored and hidden. Nothing is saved until the
+    /// psychologist confirms (then the UI calls [`Core::add_input`] with the reviewed text).
+    pub fn import_document(
+        &mut self,
+        case_id: &str,
+        file_name: &str,
+        bytes: &[u8],
+    ) -> Result<ImportPreview, CoreError> {
+        self.vault_ref()?.case_meta(case_id)?;
+        let extracted = match &self.ingest_exe {
+            Some(exe) => {
+                dv_ingest::worker::run(exe, file_name, bytes, dv_ingest::worker::DEFAULT_TIMEOUT)
+            }
+            None => dv_ingest::extract(bytes, file_name),
+        }
+        .map_err(|e| CoreError::Refused(e.message_he()))?;
+
+        let body = self.preview_filter(case_id, &extracted.body)?;
+        let margins = self.preview_filter(case_id, &extracted.margins)?;
+        let data = self.privacy_data(case_id)?;
+        let known: HashSet<String> = data
+            .identities
+            .iter()
+            .flat_map(|i| std::iter::once(i.value.clone()).chain(i.aliases.clone()))
+            .chain(data.practitioner.iter().cloned())
+            .map(|v| normalize(&v))
+            .collect();
+
+        let mut suggestions: Vec<NameSuggestion> = Vec::new();
+        let mut suggest = |value: &str, source: String, role: Role| {
+            let norm = normalize(value);
+            if !norm.is_empty()
+                && !known.contains(&norm)
+                && !suggestions.iter().any(|s| normalize(&s.value) == norm)
+            {
+                suggestions.push(NameSuggestion {
+                    value: value.trim().to_owned(),
+                    source,
+                    role,
+                });
+            }
+        };
+        for (field, value) in &extracted.metadata {
+            let (label, role) = match field.as_str() {
+                "creator" => ("יוצר המסמך", Role::Other),
+                "lastModifiedBy" => ("שמר לאחרונה", Role::Other),
+                "Manager" => ("מנהל", Role::Other),
+                "Company" => ("ארגון", Role::Institution),
+                _ => continue,
+            };
+            suggest(value, format!("מאפייני הקובץ · {label}"), role);
+        }
+        for s in &margins.suspects {
+            suggest(&s.token, "כותרת עליונה/תחתונה".to_owned(), s.suggested_role);
+        }
+        // Names the filter already knows are hidden anyway; declared names in the margins
+        // need nothing. Title / subject fields may hide names too.
+        for (field, value) in &extracted.metadata {
+            if matches!(
+                field.as_str(),
+                "title" | "subject" | "keywords" | "description"
+            ) {
+                for s in self.preview_filter(case_id, value)?.suspects {
+                    suggest(
+                        &s.token,
+                        "מאפייני הקובץ · כותרת".to_owned(),
+                        s.suggested_role,
+                    );
+                }
+            }
+        }
+
+        let stem = Path::new(file_name)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(file_name)
+            .trim()
+            .to_owned();
+        Ok(ImportPreview {
+            file_name: file_name.to_owned(),
+            format: match extracted.format {
+                dv_ingest::Format::Docx => "docx",
+                dv_ingest::Format::Pdf => "pdf",
+                dv_ingest::Format::Text => "text",
+            }
+            .to_owned(),
+            pages: extracted.pages,
+            title: stem,
+            suggested_kind: InputKind::guess(&extracted.body, file_name),
+            preview: body.original_segments,
+            suspects: body.suspects,
+            hidden: body.hidden,
+            body: extracted.body,
+            left_out: extracted
+                .margins
+                .lines()
+                .map(str::to_owned)
+                .filter(|l| !l.trim().is_empty())
+                .collect(),
+            name_suggestions: suggestions,
+            warnings: extracted.warnings,
+        })
     }
 
     fn privacy_data(&mut self, case_id: &str) -> Result<PrivacyData, CoreError> {
