@@ -1,18 +1,20 @@
 # סדר עבודה
 
-כל שלב: תוכנית קצרה ← אישור של אור ← קוד + בדיקות ← הדגמה.
+כל שלב: תוכנית קצרה ← אישור של אור ← קוד + בדיקות ← הדגמה. בכל שלב מעדכנים את `THREAT_MODEL.md` ואת `STANDARDS.md`.
 
 | # | שלב | תוצרים | תנאי מעבר |
 |---|---|---|---|
-| 0 | תכנון | `docs/THREAT_MODEL.md`, סקירת ארכיטקטורה, תוכנית לשלב 1 | אישור של אור |
-| 1 | שלד | Tauri + React (RTL) + Python sidecar, JSON-RPC "ping", CI (lint, types, tests), pre-commit | אפליקציה נפתחת ומדברת עם ה-core |
-| 2 | `vault/` | מפתחות, SQLCipher, CaseKeys, נעילה, audit עם hash-chain, env_checks (ענן, הצפנת דיסק) | בדיקות קריפטו, crypto-shredding, נעילה |
-| 3 | `privacy/` | שכבות 1–7, `variants_he.py`, NER, gate, חבילה אדוורסריאלית, canary | **0 דליפות** |
-| 4 | `ai/` | context builder, פלט מובנה, streaming, פעולות מהירות, mock | אין נתיב שליחה שעוקף את gate |
-| 5 | UI – MVP | מסכים 1–4 מ-`SCREENS.md`, טופס זהויות, חלק א' מקצה לקצה, ייצוא Word בסיסי | עינת מריצה תיק בדוי מלא של חלק א' |
-| 6 | חלק ב' | מסך 5 (ציונים), `knowledge/`, `interpretation.py`, DSM, העלאת PDF ו-OCR | טבלאות מאושרות על ידי עינת |
-| 7 | סגנון וחלק ג' | פרופיל סגנון, בדיקת זליגה, סיכום והמלצות | בדיקת זליגה עוברת |
-| 8 | הפצה | גיבוי ושחזור, מדיניות שמירה, מתקינים חתומים (Windows, Mac), `SECURITY.md`, `INCIDENT_RESPONSE.md`, `CONSENT_DRAFT.md`, `SETUP_HE.md` | התקנה נקייה על מחשב של עינת |
+| 0 | תכנון ✅ | `THREAT_MODEL.md`, `ARCHITECTURE_REVIEW.md`, `STANDARDS.md`, `DECISIONS.md`, `PHASE1_PLAN.md` | אישור של אור |
+| 1 | שלד מאובטח | Tauri 2 + React (RTL) + Rust workspace, `ping` מוקלד, הקשחת webview, CI בשלוש מערכות הפעלה, `cargo-deny`, אינווריאנטים, pre-commit (`PHASE1_PLAN.md`) | האפליקציה נפתחת, מדברת עם הליבה, ו-CI ירוק |
+| 2 | `dv-vault` | Argon2id + קשירה לחומרה (TPM/SE), היררכיית מפתחות FIPS, SQLCipher + AEAD עם AAD, CaseKeys, ערכת שחזור חובה, נעילה, יומן בשרשרת HMAC, env_checks (ענן, הצפנת דיסק) | בדיקות קריפטו, crypto-shredding, נעילה, כספת שהועתקה למכשיר אחר לא נפתחת |
+| 3 | `dv-privacy` | שכבות 1–7, `variants_he`, NER מקומי, רצפת Safe Harbor, gate ⇒ `ClearedPayload`, חבילה אדוורסריאלית, canary, property tests | **0 דליפות** |
+| 4 | `dv-ai` + `dv-egress` | context builder, פלט מובנה, streaming, פעולות מהירות, רשימות לבנות (ZDR), קשירת אישור ל-hash, שער הסכמה, mock | אין נתיב שליחה שעוקף את gate. התעבורה נחסמת כשמיירטים TLS. |
+| 5 | UI – MVP | מסכים 1–4, טופס זהויות, רישום הסכמה, חלק א' מקצה לקצה, ייצוא Word מוגן | עינת מריצה תיק בדוי מלא של חלק א' |
+| 6 | חלק ב' + ingest | מסך 5 (ציונים), `knowledge/`, `interpretation`, DSM, worker מבודד ל-PDF/DOCX/OCR, חילוץ מטא-דאטה | טבלאות מאושרות על ידי עינת. fuzzing לפרסרים. |
+| 7 | סגנון וחלק ג' | פרופיל סגנון (P-04), בדיקת זליגה, סיכום והמלצות | בדיקת זליגה עוברת |
+| 8 | הפצה ועמידה בתקנים | גיבוי ושחזור + תרגול, מדיניות שמירה, מתקינים חתומים, עדכונים חתומים, SBOM, `SECURITY.md`, `INCIDENT_RESPONSE.md`, `CONSENT_DRAFT.md`, `SETUP_HE.md`, `docs/compliance/*` (הגדרות מאגר, נוהל אבטחה, DPIA) | **מבדק חדירות חיצוני**, בדיקה משפטית ⚖️, ZDR מאושר בכתב, התקנה נקייה על מחשב של עינת |
+
+**שום מידע אמיתי לא נכנס לתוכנה לפני שכל תנאי שלב 8 מתקיימים.**
 
 ## חיסכון בשימוש (usage) בזמן הפיתוח
 - `/clear` בין משימות, ומשימה אחת בכל פעם.

@@ -1,10 +1,13 @@
-# שכבת ה-AI (`core/ai`)
+# שכבת ה-AI (`crates/dv-ai` + `crates/dv-egress`)
 
-## לקוח
-- Anthropic Python SDK. **המודל נקבע בהגדרות** (לא hardcoded).
-- Streaming ל-UI. Retry עם backoff. Timeout.
-- יציאה רק ל-`api.anthropic.com`. המפתח נשמר ב-keychain.
-- מקבל רק `ClearedPayload` מ-`privacy/gate.py`.
+## לקוח (`dv-egress`)
+- אין SDK רשמי ל-Rust, ולכן זה HTTP ישיר ל-Messages API (`reqwest` + rustls, שורשי Mozilla מובנים). הצורות נלקחות מהתיעוד הרשמי, לא מהזיכרון.
+- **המודל נבחר בהגדרות מתוך רשימה לבנה** של דגמים שזמינים תחת ZDR. Covered Models (Fable, Mythos) חסומים, כי הם דורשים שמירה ל-30 יום.
+- Streaming ל-UI. Retry עם backoff רק על 429, 5xx ושגיאות חיבור. Timeout. בדיקת `stop_reason` (כולל `refusal`) לפני קריאת התוכן.
+- יציאה רק ל-`api.anthropic.com`, endpoints `/v1/messages` ו-`/v1/messages/count_tokens`. `inference_geo: "us"`. בלי `metadata`, בלי Files/Batch/כלי שרת.
+- מקבל רק `ClearedPayload` מ-`dv-privacy::gate`, ושולח את ה-bytes שעינת אישרה, בלי סריאליזציה מחדש (קשירה ל-SHA-256).
+- **שער הסכמה:** בתיק שלא נרשמה בו הסכמת ההורים אין שליחה בכלל.
+- כל שליחה נשמרת מקומית בטבלת `transmissions` (עם תגיות, מוצפן), לצורך אחריותיות.
 
 ## בניית הקשר לכל קריאה (`context_builder.py`)
 1. **system prompt** (עם prompt caching): כללי המודל + פרופיל הסגנון + תבנית הסעיף מ-`REPORT_STRUCTURE.md`
@@ -13,7 +16,7 @@
 4. היסטוריית השיחה של הסעיף, מקוצרת (סיכום מתגלגל אחרי N הודעות)
 5. הטיוטה הנוכחית של הסעיף
 
-## פלט מובנה (tool use)
+## פלט מובנה (structured outputs)
 ```json
 {
   "reply": "טקסט לשיחה",
@@ -26,6 +29,8 @@
 }
 ```
 `draft_update` יכול להיות `null`. כל פסקה שמגיעה נכנסת כ-`proposed`, ורק עינת מאשרת אותה.
+**הסכמה עצמה קבועה בקוד, ואין בה שום תוכן מהתיק** (לא ב-`enum`, לא ב-`const`, לא ב-`pattern`): Anthropic שומרת את הסכמות במטמון עד 24 שעות. `section_key` נבדק מקומית מול רשימה סגורה.
+הפלט מוצג ב-UI **כטקסט בלבד**.
 
 ## פעולות מהירות (`actions.py`)
 הרחבה · קיצור · ניתוח מול הממצאים · הצעת המלצות · ניסוח מחדש: כל אחת היא תבנית פרומפט קבועה.
@@ -55,7 +60,8 @@
 - דוגמה לציון תקן בסולמות וקסלר (ממוצע 10, ס"ת 3): 1–3 נמוך מאוד · 4–5 גבולי · 6–7 ממוצע נמוך · 8–12 ממוצע · 13–14 ממוצע גבוה · 15+ גבוה. **לאימות מול המדריך ולאישור של עינת.**
 
 ## עלויות
-- prompt caching ל-system prompt ולפרופיל.
+- prompt caching ל-system prompt ולפרופיל (זכאי ל-ZDR: נשמר בזיכרון בלבד, למשך ה-TTL).
 - הקשר ממוקד לכל סעיף.
 - תצוגה של טוקנים לכל תיק בהגדרות.
+- תקרת עלות חודשית בהגדרות ו-circuit breaker.
 - בבדיקות: mock בלבד.
