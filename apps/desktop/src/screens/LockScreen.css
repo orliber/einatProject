@@ -1,0 +1,70 @@
+.lock-backdrop {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--topbar);
+  padding: 24px;
+}
+.lock-card {
+  width: 420px;
+  max-width: 100%;
+  padding: 40px;
+  border-radius: var(--radius-xl);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.lock-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-lg);
+  background: var(--primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.lock-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lock-heading h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 700;
+}
+.lock-heading p {
+  margin: 0;
+  color: var(--ink-soft);
+  line-height: 1.6;
+}
+.lock-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.lock-form .btn {
+  min-height: 48px;
+  font-size: 17px;
+}
+.core-status {
+  margin: 0;
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+}
+.core-status-ok {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.core-status-error {
+  color: var(--block);
+  background: var(--block-soft);
+}
+.core-status-checking {
+  color: var(--ink-muted);
+}

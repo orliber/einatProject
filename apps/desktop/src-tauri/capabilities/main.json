@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The main window may call only the application's own commands. No fs, shell, http or other plugins.",
+  "windows": ["main"],
+  "permissions": ["allow-ping"]
+}

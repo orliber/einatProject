@@ -27,3 +27,7 @@ __pycache__/
 *.tar
 *.tar.gz
 *.tgz
+
+# Tauri / frontend build output
+apps/desktop/src-tauri/gen/
+apps/desktop/dist/

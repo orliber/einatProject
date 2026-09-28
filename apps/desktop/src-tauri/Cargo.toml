@@ -1,0 +1,29 @@
+[package]
+name = "dv-desktop"
+description = "Desktop shell: window, CSP, capabilities; delegates every command to dv-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Same policy as the workspace, except `unsafe_code` is `deny` instead of `forbid`:
+# Tauri's code-generation macros must be able to opt in locally.
+[lints.rust]
+unsafe_code = "deny"
+unused_must_use = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+dv-core.workspace = true
+dv-ipc.workspace = true

@@ -1,0 +1,27 @@
+/* Design tokens from docs/SCREENS.md. */
+:root {
+  --bg: #f4f1ea;
+  --surface: #ffffff;
+  --surface-alt: #fbfaf6;
+  --ink: #1d2629;
+  --ink-muted: #5a6466;
+  --ink-soft: #4f5a5c;
+  --primary: #1f5f5b;
+  --primary-hover: #143f3c;
+  --primary-soft: #e4eeec;
+  --ok: #2e6b3a;
+  --ok-soft: #dcefe0;
+  --warn: #7a3a05;
+  --warn-soft: #fbe7cf;
+  --block: #8a1c0c;
+  --block-soft: #f6d2cc;
+  --topbar: #1d2629;
+  --line: #e6e1d6;
+  --line-strong: #c9c2b3;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 16px;
+  --font-body: "Assistant", system-ui, sans-serif;
+  --font-display: "Frank Ruhl Libre", serif;
+}

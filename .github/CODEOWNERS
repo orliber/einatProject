@@ -1,0 +1,8 @@
+# Security-critical code needs the owner's review (docs/STANDARDS.md §5.8).
+/crates/dv-privacy/  @orliber
+/crates/dv-egress/   @orliber
+/crates/dv-vault/    @orliber
+/apps/desktop/src-tauri/ @orliber
+/.github/            @orliber
+/deny.toml           @orliber
+/xtask/              @orliber
