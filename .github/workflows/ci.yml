@@ -60,6 +60,7 @@ jobs:
           go-version: stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test -p dv-vault --features fips
+      - run: cargo test -p dv-export --features fips
 
   frontend:
     name: UI – typecheck, lint, tests, build, audit

@@ -26,13 +26,15 @@ use dv_vault::{Argon2Params, AuditEvent, Vault, VaultError};
 use serde_json::Value;
 
 pub use views::{
-    AppStatus, CaseDetail, ChatView, ConsultResult, CreatedVault, ImportPreview, NameSuggestion,
-    ParagraphView, Prepared, ReviewPart, SectionResult, SectionView, SuspectDecision, UiError,
+    AppStatus, CaseDetail, ChatView, ConsultResult, CreatedVault, ExportCheck, ImportPreview,
+    NameSuggestion, ParagraphView, Prepared, ReportSettings, ReviewPart, SectionResult,
+    SectionView, SuspectDecision, UiError,
 };
 
 const API_KEY: &str = "anthropic_api_key";
 const MODEL_KEY: &str = "model";
 const LOCK_KEY: &str = "lock_minutes";
+const REPORT_KEY: &str = "report_settings";
 const MAX_REQUEST_BYTES: usize = 900_000;
 /// Sections written from other, already approved sections.
 const DERIVED_SECTIONS: &[&str] = &["dsm", "summary", "diagnoses", "recommendations"];
@@ -1257,6 +1259,200 @@ impl Core {
             answer: shown,
             demo,
         })
+    }
+
+    // ------------------------------------------------------------ Word report
+
+    pub fn report_settings(&mut self) -> Result<ReportSettings, CoreError> {
+        let v = self.vault_ref()?;
+        if let Some(json) = v.setting(REPORT_KEY)? {
+            if let Ok(s) = serde_json::from_str(&json) {
+                return Ok(s);
+            }
+        }
+        Ok(ReportSettings {
+            title: "דוח אבחון פסיכולוגי".to_owned(),
+            font: "David".to_owned(),
+            confidentiality: "חסוי – מידע רפואי. מיועד להורים ולמי שההורים אישרו בלבד.".to_owned(),
+            signature: v
+                .practitioner()?
+                .names
+                .first()
+                .cloned()
+                .into_iter()
+                .collect(),
+        })
+    }
+
+    pub fn set_report_settings(&mut self, settings: &ReportSettings) -> Result<(), CoreError> {
+        let json =
+            serde_json::to_string(settings).map_err(|e| CoreError::Internal(e.to_string()))?;
+        self.vault_mut()?.set_setting(REPORT_KEY, &json)?;
+        Ok(())
+    }
+
+    /// The report with real names, from approved paragraphs only, and what stops the export.
+    fn build_report(
+        &mut self,
+        case_id: &str,
+    ) -> Result<(dv_export::Report, ExportCheck), CoreError> {
+        let settings = self.report_settings()?;
+        let structure =
+            ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
+        let v = self.vault_ref()?;
+        let meta = v.case_meta(case_id)?;
+        let identities = v.identities(case_id)?;
+        let practitioner = v.practitioner()?.names.first().cloned();
+        let show = |t: &str| restore(t, &identities, practitioner.as_deref());
+
+        let mut blocking = Vec::new();
+        let mut empty_sections = Vec::new();
+        let mut included = 0u32;
+        let mut parts = Vec::new();
+        let mut signature = settings.signature.clone();
+        for part in &structure.parts {
+            let mut sections = Vec::new();
+            for s in &part.sections {
+                let paragraphs: Vec<String> = v
+                    .drafts(case_id, &s.key)?
+                    .into_iter()
+                    .filter(|d| d.status == DraftStatus::Approved)
+                    .map(|d| show(&d.text_tagged))
+                    .collect();
+                for p in &paragraphs {
+                    for tag in dv_privacy::restore::remaining_tags(p) {
+                        blocking.push(format!("{}: נשארה תגית {tag}", s.title));
+                    }
+                    if p.contains("[חסר") {
+                        blocking.push(format!("{}: יש מידע חסר שצריך להשלים", s.title));
+                    }
+                }
+                if s.key == "signature" {
+                    if !paragraphs.is_empty() {
+                        signature = paragraphs
+                            .iter()
+                            .flat_map(|p| p.lines().map(str::to_owned))
+                            .collect();
+                    }
+                    continue;
+                }
+                if paragraphs.is_empty() {
+                    empty_sections.push(s.title.clone());
+                } else {
+                    included += 1;
+                    sections.push(dv_export::ReportSection {
+                        title: s.title.clone(),
+                        paragraphs,
+                    });
+                }
+            }
+            if !sections.is_empty() {
+                parts.push(dv_export::ReportPart {
+                    title: part.title.clone(),
+                    sections,
+                });
+            }
+        }
+
+        let child = identities
+            .iter()
+            .find(|i| i.role == Role::Child)
+            .map(|i| i.value.clone());
+        let child_label = match meta.child_gender {
+            Some(dv_domain::GrammaticalGender::Female) => "שם הילדה",
+            Some(dv_domain::GrammaticalGender::Male) => "שם הילד",
+            None => "שם הילד/ה",
+        };
+        let (y, m, d) = today();
+        let mut info = Vec::new();
+        if let Some(name) = child {
+            info.push(dv_export::InfoLine {
+                label: child_label.to_owned(),
+                value: name,
+            });
+        }
+        if let Some(age) = meta.age {
+            info.push(dv_export::InfoLine {
+                label: "גיל בעת האבחון".to_owned(),
+                value: age.display(),
+            });
+        }
+        info.push(dv_export::InfoLine {
+            label: "תאריך הדוח".to_owned(),
+            value: format!("{d}.{m}.{y}"),
+        });
+
+        let report = dv_export::Report {
+            title: settings.title,
+            info,
+            parts,
+            signature,
+            confidentiality: settings.confidentiality,
+            font: settings.font,
+        };
+        for leftover in dv_export::leftover_placeholders(&report) {
+            let msg = format!("נשאר בדוח סימון בסוגריים מרובעים: {leftover}");
+            if !blocking.iter().any(|b| b.contains(&leftover)) {
+                blocking.push(msg);
+            }
+        }
+        if included == 0 {
+            blocking.push(
+                "אין עדיין פסקאות מאושרות. מאשרים פסקאות בטיוטה, והן נכנסות לדוח.".to_owned(),
+            );
+        }
+        let code: String = meta
+            .code
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-')
+            .collect();
+        let file_name = format!(
+            "דוח אבחון {}.docx",
+            if code.is_empty() { "תיק" } else { &code }
+        );
+        Ok((
+            report,
+            ExportCheck {
+                blocking,
+                empty_sections,
+                included_sections: included,
+                file_name,
+            },
+        ))
+    }
+
+    pub fn check_export(&mut self, case_id: &str) -> Result<ExportCheck, CoreError> {
+        Ok(self.build_report(case_id)?.1)
+    }
+
+    /// The Word file's bytes. Refused while anything blocks; with a password it is encrypted
+    /// (ECMA-376 Agile, AES-256), the way Word protects files.
+    pub fn export_report(
+        &mut self,
+        case_id: &str,
+        password: Option<&str>,
+    ) -> Result<Vec<u8>, CoreError> {
+        let (report, check) = self.build_report(case_id)?;
+        if !check.blocking.is_empty() {
+            return Err(CoreError::Refused(check.blocking.join(" · ")));
+        }
+        let docx = dv_export::render(&report).map_err(|e| CoreError::Internal(e.to_string()))?;
+        let out = match password {
+            Some(pw) => dv_export::encrypt(&docx, pw).map_err(|e| match e {
+                dv_export::ExportError::WeakPassword => CoreError::Refused(format!(
+                    "סיסמה לקובץ צריכה להיות באורך {} תווים לפחות.",
+                    dv_export::MIN_PASSWORD_CHARS
+                )),
+                other => CoreError::Internal(other.to_string()),
+            })?,
+            None => docx,
+        };
+        self.vault_mut()?.record(
+            AuditEvent::Export,
+            Some(case_id),
+            &serde_json::json!({ "protected": password.is_some(), "sections": check.included_sections }),
+        )?;
+        Ok(out)
     }
 }
 

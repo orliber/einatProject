@@ -518,3 +518,80 @@ fn import_refuses_what_it_cannot_read() {
         err.to_ui().message
     );
 }
+
+fn read_docx_text(bytes: &[u8]) -> String {
+    use std::io::Read;
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut s = String::new();
+    zip.by_name("word/document.xml")
+        .unwrap()
+        .read_to_string(&mut s)
+        .unwrap();
+    s
+}
+
+#[test]
+fn export_needs_approved_paragraphs_and_restores_names() {
+    let (_dir, mut core, case) = setup(None);
+    let check = core.check_export(&case).unwrap();
+    assert!(!check.blocking.is_empty(), "nothing approved yet");
+    assert!(matches!(
+        core.export_report(&case, None),
+        Err(CoreError::Refused(_))
+    ));
+
+    // A demo draft for the kindergarten section, then approve it.
+    let p = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    let para = core
+        .case_detail(&case)
+        .unwrap()
+        .sections
+        .into_iter()
+        .find(|s| s.key == "kindergarten")
+        .unwrap()
+        .paragraphs
+        .remove(0);
+    core.approve_paragraph(&case, &para.id).unwrap();
+    core.add_own_paragraph(&case, "referral", "ההורים של אלון פנו בשל קושי במעברים.")
+        .unwrap();
+
+    let check = core.check_export(&case).unwrap();
+    assert!(check.blocking.is_empty(), "{:?}", check.blocking);
+    assert_eq!(check.included_sections, 2);
+    assert!(
+        !check.file_name.contains("אלון"),
+        "no child name in the file name: {}",
+        check.file_name
+    );
+    assert!(check.file_name.contains("TEST-0002"));
+
+    let bytes = core.export_report(&case, None).unwrap();
+    let doc = read_docx_text(&bytes);
+    assert!(doc.contains("ההורים של אלון פנו"), "names restored");
+    assert!(doc.contains("שם הילד"), "info line");
+    assert!(!doc.contains("[ילד]") && !doc.contains("[גננת]"));
+
+    // Protected export: a Compound File, not a readable zip.
+    let protected = core.export_report(&case, Some("סיסמה-לקובץ-1")).unwrap();
+    assert!(protected.starts_with(&[0xD0, 0xCF, 0x11, 0xE0]));
+    assert!(matches!(
+        core.export_report(&case, Some("קצר")),
+        Err(CoreError::Refused(_))
+    ));
+}
+
+#[test]
+fn missing_information_marker_blocks_export() {
+    let (_dir, mut core, case) = setup(None);
+    core.add_own_paragraph(&case, "background", "ההריון תקין. [חסר: גיל ההליכה]")
+        .unwrap();
+    let check = core.check_export(&case).unwrap();
+    assert!(
+        check.blocking.iter().any(|b| b.contains("חסר")),
+        "{:?}",
+        check.blocking
+    );
+}

@@ -11,12 +11,13 @@ publish.workspace = true
 workspace = true
 
 [features]
-fips = ["dv-vault/fips"]
+fips = ["dv-vault/fips", "dv-export/fips"]
 
 [dependencies]
 dv-ai.workspace = true
 dv-domain.workspace = true
 dv-egress.workspace = true
+dv-export.workspace = true
 dv-ingest.workspace = true
 dv-ipc.workspace = true
 dv-privacy.workspace = true

@@ -169,3 +169,25 @@ pub struct ImportPreview {
     pub name_suggestions: Vec<NameSuggestion>,
     pub warnings: Vec<String>,
 }
+
+/// Before the Word file is made: what stops it and what the psychologist should know.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ExportCheck {
+    /// Must be fixed first (leftover placeholders, missing-information markers).
+    pub blocking: Vec<String>,
+    /// Sections without approved paragraphs (left out of the file).
+    pub empty_sections: Vec<String>,
+    pub included_sections: u32,
+    /// The file name, without the child's name (file names travel in e-mails).
+    pub file_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ReportSettings {
+    pub title: String,
+    pub font: String,
+    pub confidentiality: String,
+    pub signature: Vec<String>,
+}
