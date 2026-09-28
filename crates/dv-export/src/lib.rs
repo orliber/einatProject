@@ -10,37 +10,32 @@ mod agile;
 mod docx;
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 pub use agile::{encrypt, MIN_PASSWORD_CHARS};
 pub use docx::render;
 
 /// One section and its approved paragraphs.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReportSection {
     pub title: String,
     pub paragraphs: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReportPart {
     pub title: String,
     pub sections: Vec<ReportSection>,
 }
 
 /// A labeled line at the top ("שם הילד/ה", "גיל").
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InfoLine {
     pub label: String,
     pub value: String,
 }
 
 /// Everything that goes into the file.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Report {
     pub title: String,
     pub info: Vec<InfoLine>,
