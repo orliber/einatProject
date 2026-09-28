@@ -60,27 +60,25 @@
 ## מפתחות
 
 ```
-סיסמה ──Argon2id (m=1GiB יעד / 256MiB רצפה, t=3, p=4, salt 32B)──► K_pw
-סוד חומרה (256 ביט, עטוף במפתח TPM / Secure Enclave שלא ניתן לייצא) ──► K_dev
-KEK_unlock   = HKDF-SHA256(K_pw ‖ K_dev, info="dv/kek/v1")
-KEK_recovery = HKDF-SHA256(ערכת שחזור 256 ביט, info="dv/recovery/v1")
+MK (256 ביט אקראי) – עטוף בנפרד בכל "חריץ" (slot) ב-vault.header, כמו LUKS:
+   slot password      : KEK = HKDF(Argon2id(סיסמה, salt 32B, m=256MiB–1GiB, t=3, p=4))
+   slot recovery      : KEK = HKDF(ערכת שחזור 256 ביט)
+   slot windows_hello : KEK משוחרר ע"י מפתח TPM של Windows Hello (PIN / פנים)     [שלב 2ב]
+   slot macos         : KEK ב-Keychain עם access control של Touch ID / סיסמת Mac    [שלב 2ב]
 
-MK (256 ביט אקראי) ── עטוף ב-KEK_unlock, ובנפרד ב-KEK_recovery   (ב-vault.header)
-   ├ עוטף ► DEK_main      (מפתח SQLCipher ל-main.db)
-   ├ עוטף ► DEK_identity  (מפתח SQLCipher ל-identity.db)
-   ├ עוטף ► DEK_audit     (SQLCipher ל-audit.db) + K_audit_mac
-   ├ עוטף ► K_casewrap ── עוטף ► CaseKey לכל תיק  (AES-256-GCM ברמת שדה)
-   └ עוטף ► K_backup
+MK ─ HKDF ─► K_header_mac, K_audit_mac, K_index (HMAC לחיפוש)
+MK ─ עוטף ─► DEK_main, DEK_identity, DEK_audit (מפתחות SQLite), K_casewrap, K_backup
+K_casewrap ─ עוטף ─► CaseKey לכל תיק  (AES-256-GCM ברמת שדה)
 ```
 - **כל הקריפטו** חוץ מ-Argon2id רץ במודול FIPS 140-3 (`aws-lc-rs`): AES-256-GCM, HKDF, HMAC ו-DRBG.
 - **AEAD לכל שדה:** nonce אקראי של 96 ביט, AAD = `"dv/v1" ‖ table ‖ column ‖ row_id ‖ case_id`.
 - **header:** פרמטרי KDF, מפתחות עטופים ו-(seq, mac) של ראש היומן. כל ה-header מאומת ב-HMAC שנגזר מ-MK.
-- **פתיחה ביומטרית (ממתין להחלטה P-01):** עותק של K_dev שמשוחרר רק בנוכחות ביומטרית. הסיסמה נדרשת בכל הפעלה ראשונה של היום.
+- **כניסה (D-012):** Windows Hello / Touch ID ביומיום, סיסמה כגיבוי, ערכת שחזור מודפסת. כל slot הוא מימוש של `UnlockProvider`.
 - **שינוי סיסמה:** עטיפה מחדש של MK בלבד.
-- **מחשב חדש, TPM שהתאפס, שכחת סיסמה:** פתיחה עם ערכת השחזור, ואחר כך רישום מחדש של סיסמה וסוד חומרה.
+- **מחשב חדש, TPM שהתאפס, שכחת סיסמה:** פתיחה עם ערכת השחזור, ואחר כך רישום מחדש של slots.
 - **מחיקת תיק:** מחיקת CaseKey העטוף, ואז `secure_delete` ו-VACUUM. אירוע ביומן.
 - **נעילה** (ידנית, אחרי 10 דקות, בנעילת מסך או בשינה): zeroize לכל המפתחות, סגירת חיבורים, טעינה מחדש של ה-webview.
-- **ערכת שחזור:** 24 מילים (BIP-39, 256 ביט), הדפסה, ואימות של 3 מילים אקראיות לפני סיום ההתקנה.
+- **ערכת שחזור (D-016):** 256 ביט ב-Crockford Base32 (13×4 + ביקורת), הדפסה, ואימות של קבוצה אקראית לפני סיום ההתקנה.
 
 ## סכמה – main.db
 `_enc` = מוצפן ב-CaseKey עם AAD. **כל** מידע ששייך לתיק מוצפן, כולל ציונים ותאריכים.
@@ -125,7 +123,7 @@ audit(seq PK, ts, event, case_ref /* HMAC של case_id */, meta_json_enc, prev_m
 - Host יחיד: `api.anthropic.com`. TLS 1.3 בלבד, שורשי `webpki-roots` (לא של המערכת).
 - **Endpoints מותרים:** `POST /v1/messages` ו-`POST /v1/messages/count_tokens`. כל השאר לא ממומש.
 - **דגמים מותרים:** רשימה לבנה בקוד של דגמים שזמינים תחת ZDR. דגמים מסוג Covered Models (Fable, Mythos) חסומים. הדגם נבחר בהגדרות מתוך הרשימה.
-- **שדות אסורים:** `metadata`, `tools` מסוג server-tool (web_search, code_execution), Files, Batch.
+- **שדות אסורים:** `metadata`, Files, Batch, code_execution. **חריג יחיד:** `web_search_20250305` (הגרסה הבסיסית, זכאית ל-ZDR), ורק בקריאות של מצב מחקר (D-014), בלי תוכן מהתיק ועם `allowed_domains`.
 - `inference_geo: "us"` קבוע.
 - הסכמות (structured outputs / `strict`) קבועות בקוד. בדיקה אוטומטית שאין בהן תוכן מתיק.
 - מגבלת גודל payload, מגבלת קצב, תקרת עלות חודשית ו-circuit breaker.
@@ -139,7 +137,7 @@ audit(seq PK, ts, event, case_ref /* HMAC של case_id */, meta_json_enc, prev_m
 
 ## סביבה
 - **תיקייה מסונכרנת לענן:** סירוב לפעול.
-- **הצפנת דיסק כבויה:** חסימה או אזהרה (ממתין להחלטה P-02).
+- **הצפנת דיסק כבויה:** תזכורת בלבד (D-013).
 - **אין:** קבצים זמניים לא מוצפנים, לוגים עם תוכן, טלמטריה, crash reporting חיצוני.
 - **גיבוי:** `.vaultbak` = snapshot של ה-DB דרך SQLite backup API, מוצפן ב-K_backup (AES-256-GCM במקטעים). ניתן לשחזר עם הסיסמה במכשיר המקורי, או עם ערכת השחזור בכל מכשיר.
 - **Clipboard:** ניקוי אחרי 60 שניות, והחרגה מהיסטוריית הלוח.
