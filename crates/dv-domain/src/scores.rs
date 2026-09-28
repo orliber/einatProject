@@ -742,7 +742,7 @@ mod tests {
         assert_eq!(
             committed,
             instruments(),
-            "run: cargo run -p dv-domain --example instruments_json > apps/desktop/src/web/instruments.json"
+            "run: cargo run -p dv-domain --example instruments_json -- apps/desktop/src/web/instruments.json"
         );
     }
 }
