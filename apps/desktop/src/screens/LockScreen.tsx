@@ -1,3 +1,4 @@
+import { PREVIEW } from "../web/mode";
 import { useState, type FormEvent } from "react";
 import { he } from "../i18n/he";
 import { ipc, type AppStatus } from "../ipc/client";
@@ -33,7 +34,11 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
         <div className="lock-icon"><LockIcon size={28} color="#fff" /></div>
         <div className="lock-heading">
           <h1 id="lock-title">{he.appName}</h1>
-          <p>{he.lock.lockedAfterIdle(status?.lock_minutes ?? 10)}</p>
+          {PREVIEW ? (
+            <p className="preview-hint" role="note">זו הדמיה בדפדפן, עם תיקים בדויים: מקלידים כל סיסמה ולוחצים פתיחה.</p>
+          ) : (
+            <p>{he.lock.lockedAfterIdle(status?.lock_minutes ?? 10)}</p>
+          )}
         </div>
         <form className="lock-form" onSubmit={submit}>
           <div className="field">

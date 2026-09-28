@@ -92,3 +92,10 @@
   place-items: center;
   padding: 24px;
 }
+.preview-hint {
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-weight: 600;
+}
