@@ -8,6 +8,7 @@ mod views;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use dv_ai::{ModelConfig, SectionInput, TaggedInput, TaggedTurn, ALLOWED_MODELS};
@@ -175,6 +176,42 @@ struct Pending {
     kind: PendingKind,
 }
 
+/// An approved request on its way out. Holds no vault; only the payload and how to send it.
+pub struct Outgoing {
+    pending: Pending,
+    api_key: Option<zeroize::Zeroizing<String>>,
+    transport: Option<Arc<dyn Transport>>,
+}
+
+impl std::fmt::Debug for Outgoing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Outgoing")
+            .field("sha256", &self.pending.payload.sha256())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Outgoing {
+    /// Send the approved payload: the test transport, Claude (API key set), or local demo.
+    /// Returns the answer and whether it came from demo mode.
+    pub fn transmit(&self) -> Result<(Value, bool), CoreError> {
+        if let Some(t) = &self.transport {
+            return Ok((t.send(&self.pending.payload)?, false));
+        }
+        match &self.api_key {
+            Some(key) => Ok((
+                AnthropicTransport::new(key)?.send(&self.pending.payload)?,
+                false,
+            )),
+            None => {
+                let body: Value = serde_json::from_slice(self.pending.payload.body())
+                    .map_err(|e| CoreError::Internal(e.to_string()))?;
+                Ok((dv_ai::demo::respond(&body), true))
+            }
+        }
+    }
+}
+
 /// Session state. One per running app; the shell keeps it behind a mutex.
 pub struct Core {
     dir: PathBuf,
@@ -186,7 +223,7 @@ pub struct Core {
     failed_unlocks: u32,
     not_before: Option<Instant>,
     disk_encryption: String,
-    transport: Option<Box<dyn Transport>>,
+    transport: Option<Arc<dyn Transport>>,
     /// The app's own binary, started as an isolated worker for each document.
     ingest_exe: Option<PathBuf>,
 }
@@ -290,7 +327,7 @@ impl Core {
     pub fn for_tests(dir: &Path, transport: Option<Box<dyn Transport>>) -> Self {
         let mut core = Self::new(dir);
         core.argon = Some(Argon2Params::TEST);
-        core.transport = transport;
+        core.transport = transport.map(Arc::from);
         core
     }
 
@@ -311,6 +348,17 @@ impl Core {
         }
         self.last_activity = Instant::now();
         self.vault.as_mut().ok_or(CoreError::Locked)
+    }
+
+    /// Called by the shell on a timer: lock after the configured idle time even when
+    /// nothing is clicked. Returns true when it locked.
+    pub fn lock_if_idle(&mut self) -> bool {
+        let limit = Duration::from_secs(u64::from(self.lock_minutes()) * 60);
+        if self.vault.is_some() && self.last_activity.elapsed() > limit {
+            self.lock();
+            return true;
+        }
+        false
     }
 
     fn vault_ref(&mut self) -> Result<&Vault, CoreError> {
@@ -1015,37 +1063,61 @@ impl Core {
         Ok(prepared)
     }
 
-    fn transport_send(&mut self, payload: &ClearedPayload) -> Result<(Value, bool), CoreError> {
-        if let Some(t) = &self.transport {
-            return Ok((t.send(payload)?, false));
-        }
-        match self.vault_ref()?.secret(API_KEY)? {
-            Some(key) => Ok((AnthropicTransport::new(&key)?.send(payload)?, false)),
-            None => {
-                let body: Value = serde_json::from_slice(payload.body())
-                    .map_err(|e| CoreError::Internal(e.to_string()))?;
-                Ok((dv_ai::demo::respond(&body), true))
-            }
-        }
-    }
-
-    /// Send exactly what was approved, check the answer, and store it (tagged).
-    pub fn send_section(&mut self, approval_id: &str) -> Result<SectionResult, CoreError> {
+    /// Take an approved request out of the core so it can be sent without holding the
+    /// session (the app stays responsive while Claude answers).
+    pub fn begin_send(&mut self, approval_id: &str) -> Result<Outgoing, CoreError> {
+        let api_key = self.vault_ref()?.secret(API_KEY)?;
         let pending = self
             .pending
             .remove(approval_id)
             .ok_or_else(|| CoreError::NotFound("האישור פג. יש להכין את הבקשה מחדש.".to_owned()))?;
+        Ok(Outgoing {
+            pending,
+            api_key,
+            transport: self.transport.clone(),
+        })
+    }
+
+    /// A failed send is not a send: the approval stays valid for a retry.
+    fn restore_pending(&mut self, out: Outgoing) {
+        self.pending
+            .insert(out.pending.payload.sha256().to_owned(), out.pending);
+    }
+
+    /// Send exactly what was approved, check the answer, and store it (tagged).
+    pub fn send_section(&mut self, approval_id: &str) -> Result<SectionResult, CoreError> {
+        let out = self.begin_send(approval_id)?;
+        let response = out.transmit();
+        self.finish_section(out, response)
+    }
+
+    /// Check and store the answer to a section request.
+    pub fn finish_section(
+        &mut self,
+        out: Outgoing,
+        response: Result<(Value, bool), CoreError>,
+    ) -> Result<SectionResult, CoreError> {
+        if !matches!(out.pending.kind, PendingKind::Section { .. }) {
+            return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
+        }
+        let (response, demo) = match response {
+            Ok(r) => r,
+            Err(e) => {
+                self.restore_pending(out);
+                return Err(e);
+            }
+        };
+        let Pending { payload, kind } = out.pending;
         let PendingKind::Section {
             case_id,
             section_key,
             instruction_tagged,
             hidden,
             sources,
-        } = pending.kind
+        } = kind
         else {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
         };
-        let (response, demo) = self.transport_send(&pending.payload)?;
         let refs: Vec<(String, String)> = sources
             .iter()
             .map(|(sid, _, text)| (sid.clone(), text.clone()))
@@ -1090,11 +1162,11 @@ impl Core {
                 .collect();
             v.add_draft(&case_id, &section_key, &p.text, Author::Ai, &input_ids)?;
         }
-        let payload_text = String::from_utf8_lossy(pending.payload.body()).into_owned();
+        let payload_text = String::from_utf8_lossy(payload.body()).into_owned();
         v.add_transmission(
             &case_id,
             &section_key,
-            pending.payload.sha256(),
+            payload.sha256(),
             if demo { "demo" } else { &model },
             &payload_text,
         )?;
@@ -1219,18 +1291,34 @@ impl Core {
     }
 
     pub fn send_consult(&mut self, approval_id: &str) -> Result<ConsultResult, CoreError> {
-        let pending = self
-            .pending
-            .remove(approval_id)
-            .ok_or_else(|| CoreError::NotFound("האישור פג. יש לשלוח שוב.".to_owned()))?;
+        let out = self.begin_send(approval_id)?;
+        let response = out.transmit();
+        self.finish_consult(out, response)
+    }
+
+    /// Check and keep the answer to a consultation (history in memory only).
+    pub fn finish_consult(
+        &mut self,
+        out: Outgoing,
+        response: Result<(Value, bool), CoreError>,
+    ) -> Result<ConsultResult, CoreError> {
+        if !matches!(out.pending.kind, PendingKind::Consult { .. }) {
+            return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
+        }
+        let (response, demo) = match response {
+            Ok(r) => r,
+            Err(e) => {
+                self.restore_pending(out);
+                return Err(e);
+            }
+        };
         let PendingKind::Consult {
             case_id,
             message_tagged,
-        } = pending.kind
+        } = out.pending.kind
         else {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
         };
-        let (response, demo) = self.transport_send(&pending.payload)?;
         let answer = dv_ai::parse_consult(&response)?;
         let key = case_id.clone().unwrap_or_default();
         let turns = self.consult_history.entry(key).or_default();

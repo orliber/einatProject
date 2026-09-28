@@ -595,3 +595,80 @@ fn missing_information_marker_blocks_export() {
         check.blocking
     );
 }
+
+/// Offline for the first call, then answers like the demo.
+#[derive(Default)]
+struct OfflineOnce {
+    calls: std::sync::atomic::AtomicU32,
+}
+
+impl Transport for OfflineOnce {
+    fn send(&self, payload: &ClearedPayload) -> Result<Value, EgressError> {
+        if self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+            return Err(EgressError::Offline);
+        }
+        Ok(dv_ai::demo::respond(
+            &serde_json::from_slice(payload.body()).unwrap(),
+        ))
+    }
+}
+
+#[test]
+fn failed_send_keeps_the_approval_for_a_retry() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut core = Core::for_tests(dir.path(), Some(Box::new(OfflineOnce::default())));
+    core.create_vault(PASSWORD).unwrap();
+    let case = core
+        .create_case(
+            CaseMeta {
+                code: "TEST-0004".into(),
+                consent: Some(consent()),
+                ..CaseMeta::default()
+            },
+            vec![IdentityInput {
+                id: None,
+                role: Role::Child,
+                value: "אלון".into(),
+                aliases: vec![],
+            }],
+        )
+        .unwrap();
+    core.add_input(
+        &case,
+        InputKind::Kindergarten,
+        "שיחה",
+        "אלון נרגע מהר יותר השבוע.",
+    )
+    .unwrap();
+    let id = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap()
+        .approval_id
+        .unwrap();
+
+    // The shell's path: take it out, send without holding the core, then finish.
+    let out = core.begin_send(&id).unwrap();
+    let response = out.transmit();
+    let err = core.finish_section(out, response).unwrap_err();
+    assert!(
+        err.to_ui().message.contains("אין חיבור"),
+        "{}",
+        err.to_ui().message
+    );
+    assert!(
+        core.chat(&case, "kindergarten").unwrap().is_empty(),
+        "nothing stored"
+    );
+
+    let r = core.send_section(&id).unwrap();
+    assert!(!r.paragraphs.is_empty());
+}
+
+#[test]
+fn idle_session_locks_itself() {
+    let (_dir, mut core, _case) = setup(None);
+    assert!(!core.lock_if_idle());
+    core.last_activity = Instant::now() - Duration::from_secs(11 * 60);
+    assert!(core.lock_if_idle());
+    assert!(!core.status().unlocked);
+}
