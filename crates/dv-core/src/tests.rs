@@ -685,3 +685,323 @@ fn review_screen_is_always_shown_in_the_first_weeks() {
     assert!(core.set_review_only_suspect(false).is_ok());
     assert_eq!(s.practitioner, vec!["ד\"ר רותם אלמוג".to_owned()]);
 }
+
+#[test]
+fn entered_scores_feed_the_section_with_ranges_from_the_table() {
+    use dv_domain::{ScoreEntry, ScoreSheet};
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let mut sheet = ScoreSheet {
+        instrument: "wppsi_iv".into(),
+        module: String::new(),
+        cutoff: None,
+        entries: vec![
+            ScoreEntry {
+                measure: "fsiq".into(),
+                value: 104.0,
+                note: String::new(),
+            },
+            ScoreEntry {
+                measure: "vci".into(),
+                value: 112.0,
+                note: String::new(),
+            },
+            ScoreEntry {
+                measure: "psi".into(),
+                value: 88.0,
+                note: "עבד לאט ובדייקנות".into(),
+            },
+            ScoreEntry {
+                measure: "block_design".into(),
+                value: 9.0,
+                note: String::new(),
+            },
+        ],
+        notes: "אלון שיתף פעולה לאורך כל ההעברה.".into(),
+    };
+    let saved = core.save_scores(&case, None, &sheet).unwrap();
+    assert_eq!(saved.kind, InputKind::TestScores);
+    assert_eq!(saved.title, "ציוני WPPSI-IV");
+    assert!(
+        saved.content.contains("ציון 112, אחוזון 79 – ממוצע גבוה"),
+        "{}",
+        saved.content
+    );
+    assert_eq!(
+        core.score_sheet(&case, &saved.id).unwrap().as_ref(),
+        Some(&sheet)
+    );
+
+    // Editing keeps one material and replaces its text.
+    sheet.entries[1].value = 115.0;
+    let edited = core.save_scores(&case, Some(&saved.id), &sheet).unwrap();
+    assert_eq!(edited.id, saved.id);
+    let detail = core.case_detail(&case).unwrap();
+    let scores: Vec<_> = detail
+        .inputs
+        .iter()
+        .filter(|i| i.kind == InputKind::TestScores)
+        .collect();
+    assert_eq!(scores.len(), 1);
+    assert!(
+        scores[0].content.contains("ציון 115, אחוזון 84"),
+        "{}",
+        scores[0].content
+    );
+
+    // The table text passes the filter as is: abbreviations and scores are not names or ids.
+    let prepared = core.prepare_section(&case, "cognitive", "").unwrap();
+    assert!(prepared.suspects.is_empty(), "{:?}", prepared.suspects);
+    assert!(prepared.blocked.is_empty(), "{:?}", prepared.blocked);
+    core.send_section(&prepared.approval_id.unwrap()).unwrap();
+    let sent = fake.sent.lock().unwrap().join("\n");
+    assert!(
+        sent.contains("ממוצע גבוה") && sent.contains("אחוזון 84"),
+        "{sent}"
+    );
+    assert!(
+        !sent.contains("אלון"),
+        "the child's name is hidden in the notes too"
+    );
+
+    // Nonsense is refused before anything is stored.
+    let bad = ScoreSheet {
+        entries: vec![ScoreEntry {
+            measure: "vci".into(),
+            value: 12.0,
+            note: String::new(),
+        }],
+        ..sheet
+    };
+    assert!(core.save_scores(&case, None, &bad).is_err());
+    assert!(core
+        .save_scores(
+            &case,
+            Some("missing"),
+            &ScoreSheet {
+                entries: Vec::new(),
+                ..bad
+            }
+        )
+        .is_err());
+}
+
+#[test]
+fn every_instrument_sheet_passes_the_filter_without_questions() {
+    use dv_domain::{ScoreEntry, ScoreSheet};
+    let (_dir, mut core, case) = setup(None);
+    for inst in Core::score_instruments() {
+        let entries = inst
+            .measures
+            .iter()
+            .map(|m| ScoreEntry {
+                measure: m.key.clone(),
+                value: ((m.min + m.max) / 2.0).round(),
+                note: String::new(),
+            })
+            .collect();
+        let sheet = ScoreSheet {
+            instrument: inst.key.clone(),
+            module: "2".into(),
+            cutoff: Some(8.0),
+            entries,
+            notes: String::new(),
+        };
+        let text = dv_domain::format_sheet(&sheet).unwrap();
+        let outcome = core.preview_filter(&case, &text).unwrap();
+        assert_eq!(
+            outcome.tagged, text,
+            "{}: the table goes out unchanged",
+            inst.key
+        );
+        assert!(
+            outcome.suspects.is_empty(),
+            "{}: {:?}",
+            inst.key,
+            outcome.suspects
+        );
+        assert!(
+            outcome.hidden.is_empty(),
+            "{}: {:?}",
+            inst.key,
+            outcome.hidden
+        );
+    }
+}
+
+#[test]
+fn a_half_point_score_is_not_mistaken_for_a_date() {
+    use dv_domain::{ScoreEntry, ScoreSheet};
+    let (_dir, mut core, case) = setup(None);
+    let sheet = ScoreSheet {
+        instrument: "cars_2".into(),
+        module: String::new(),
+        cutoff: None,
+        entries: vec![ScoreEntry {
+            measure: "total".into(),
+            value: 29.5,
+            note: String::new(),
+        }],
+        notes: String::new(),
+    };
+    let text = dv_domain::format_sheet(&sheet).unwrap();
+    assert!(text.contains("ציון 29.5 – מעט או ללא תסמינים"), "{text}");
+    let outcome = core.preview_filter(&case, &text).unwrap();
+    assert_eq!(outcome.tagged, text);
+}
+
+/// Fixed text (rules, style, schema, section titles, score tables) goes out with every request
+/// and is never shown in the review screen, so it must not contain any child's name, even inside
+/// another word ("שאלון" when the child is "אלון"): the gate would block the case for good.
+#[test]
+fn fixed_text_never_collides_with_a_childs_name() {
+    use dv_domain::{Identity, ScoreEntry, ScoreSheet};
+    let mut fixed: Vec<String> = vec![
+        dv_ai::prompts::DRAFTING_RULES.into(),
+        dv_ai::prompts::DEFAULT_STYLE.into(),
+        dv_ai::prompts::OUTPUT_RULES.into(),
+        dv_ai::prompts::CONSULT_RULES.into(),
+        dv_ai::prompts::RESEARCH_RULES.into(),
+    ];
+    for part in ReportStructure::load_default().unwrap().parts {
+        fixed.push(part.title);
+        fixed.extend(
+            part.sections
+                .into_iter()
+                .map(|s| format!("סעיף: {} ({})", s.title, s.key)),
+        );
+    }
+    for key in ["expand", "shorten", "analyze", "recommend", "rephrase"] {
+        fixed.extend(dv_ai::prompts::quick_action(key).map(str::to_owned));
+    }
+    for inst in dv_domain::instruments() {
+        let entries = inst
+            .measures
+            .iter()
+            .map(|m| ScoreEntry {
+                measure: m.key.clone(),
+                value: m.min,
+                note: String::new(),
+            })
+            .collect();
+        let sheet = ScoreSheet {
+            instrument: inst.key.clone(),
+            module: String::new(),
+            cutoff: Some(1.0),
+            entries,
+            notes: String::new(),
+        };
+        fixed.push(dv_domain::format_sheet(&sheet).unwrap());
+    }
+    let mut requests = Vec::new();
+    // A whole section request as the builder writes it: every kind label, both grammatical
+    // genders, the data frames, the history opener and the JSON schema.
+    for (i, gender) in [GrammaticalGender::Male, GrammaticalGender::Female]
+        .into_iter()
+        .enumerate()
+    {
+        let sources = [
+            InputKind::Intake,
+            InputKind::PriorReport,
+            InputKind::TestScores,
+            InputKind::Professional,
+            InputKind::Kindergarten,
+            InputKind::Observation,
+            InputKind::SessionNote,
+            InputKind::FreeText,
+        ]
+        .into_iter()
+        .map(|k| dv_ai::TaggedInput {
+            input_id: format!("in{i}"),
+            kind_label: k.label_he().to_owned(),
+            title_tagged: String::new(),
+            content_tagged: String::new(),
+        })
+        .collect();
+        let input = dv_ai::SectionInput {
+            section_key: "cognitive".into(),
+            section_title: String::new(),
+            age: Some("5:4".into()),
+            gender: Some(gender),
+            sources,
+            approved_context: vec![(String::new(), String::new())],
+            current_draft: vec![String::new()],
+            history: vec![dv_ai::TaggedTurn {
+                role: "assistant".into(),
+                text_tagged: String::new(),
+            }],
+            instruction_tagged: String::new(),
+            style_profile: None,
+        };
+        let nonce = dv_ai::nonce_from(&[7; 16]);
+        let (request, _) =
+            dv_ai::build_section_request(&dv_ai::ModelConfig::default(), &input, &nonce);
+        requests.push(request);
+    }
+    // Like the real gate: every string in the body, not the JSON numbers ("max_tokens").
+    let mut all: Vec<Value> = fixed.into_iter().map(Value::String).collect();
+    all.extend(requests);
+    let body = Value::Array(all);
+    let names: Vec<&str> = include_str!("../../dv-privacy/data/first_names.txt")
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .collect();
+    assert!(names.len() > 100);
+    let tags: HashSet<String> = HashSet::from(["[ילד]".to_owned()]);
+    let mut collisions = Vec::new();
+    for name in names {
+        let identities = [Identity {
+            id: "i".into(),
+            case_id: "c".into(),
+            role: Role::Child,
+            tag: "[ילד]".into(),
+            value: name.into(),
+            aliases: vec![],
+        }];
+        let ctx = PrivacyContext {
+            case_id: "c",
+            identities: &identities,
+            practitioner: &[],
+            allowlisted: &|_| false,
+            confirmed_names: &|_| false,
+            today: (2026, 9, 28),
+        };
+        let req = GateRequest {
+            body: &body,
+            ctx: &ctx,
+            case_tags: &tags,
+            unresolved_suspects: 0,
+            canaries: &[],
+            max_bytes: MAX_REQUEST_BYTES,
+        };
+        if let Err(blocked) = clear(&req) {
+            collisions.push(format!("{name}: {:?}", blocked.reasons));
+        }
+    }
+    assert!(collisions.is_empty(), "{collisions:#?}");
+}
+
+#[test]
+fn a_consent_needs_a_real_past_date_and_a_signer() {
+    let (_dir, mut core, case) = setup(None);
+    let mut meta = core.case_detail(&case).unwrap().meta;
+    for (given_on, given_by) in [
+        ("2026-02-30", "ההורים"),
+        ("28.09.2026", "ההורים"),
+        ("2999-01-01", "ההורים"),
+        ("2026-09-01", " "),
+    ] {
+        meta.consent = Some(Consent {
+            given_on: given_on.into(),
+            form_version: "v1".into(),
+            given_by: given_by.into(),
+        });
+        assert!(
+            core.update_case(&case, meta.clone()).is_err(),
+            "{given_on} / {given_by:?}"
+        );
+    }
+    meta.consent = Some(consent());
+    core.update_case(&case, meta).unwrap();
+}

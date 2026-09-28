@@ -14,9 +14,11 @@ import type { Identity } from "./generated/Identity";
 import type { IdentityInput } from "./generated/IdentityInput";
 import type { ImportPreview } from "./generated/ImportPreview";
 import type { InputKind } from "./generated/InputKind";
+import type { Instrument } from "./generated/Instrument";
 import type { PingResponse } from "./generated/PingResponse";
 import type { Prepared } from "./generated/Prepared";
 import type { ReportSettings } from "./generated/ReportSettings";
+import type { ScoreSheet } from "./generated/ScoreSheet";
 import type { SectionResult } from "./generated/SectionResult";
 import type { SuspectDecision } from "./generated/SuspectDecision";
 import type { UiError } from "./generated/UiError";
@@ -73,6 +75,12 @@ export const ipc = {
   updateInput: (caseId: string, inputId: string, title: string, content: string) =>
     run("update_input", { caseId, inputId, title, content }),
   deleteInput: (caseId: string, inputId: string) => run("delete_input", { caseId, inputId }),
+  scoreInstruments: () => call<Instrument[]>("score_instruments"),
+  previewScores: (sheet: ScoreSheet) => call<string>("preview_scores", { sheet }),
+  /** Saves (or, with `inputId`, replaces) a score table as a "test scores" material. */
+  saveScores: (caseId: string, inputId: string | null, sheet: ScoreSheet) =>
+    call<CaseInput>("save_scores", { caseId, inputId, sheet }),
+  scoreSheet: (caseId: string, inputId: string) => call<ScoreSheet | null>("score_sheet", { caseId, inputId }),
   /** The file's bytes go as the raw body; nothing else of the file system is exposed. */
   importDocument: async (caseId: string, file: File): Promise<ImportPreview> => {
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -119,9 +127,11 @@ export type {
   IdentityInput,
   ImportPreview,
   InputKind,
+  Instrument,
   PingResponse,
   Prepared,
   ReportSettings,
+  ScoreSheet,
   SectionResult,
   SuspectDecision,
   UiError,

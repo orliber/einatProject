@@ -320,3 +320,32 @@ fn a_vault_copied_elsewhere_still_needs_the_secret() {
     assert!(Vault::unlock_with_password(copy.path(), "ניחוש ארוך אבל שגוי").is_err());
     assert!(Vault::unlock_with_password(copy.path(), PASSWORD).is_ok());
 }
+
+#[test]
+fn structured_data_behind_a_material_is_sealed_and_survives_relock() {
+    let (dir, mut vault, _) = new_vault();
+    let case = noam(&mut vault);
+    let input = vault
+        .add_input(
+            &case,
+            InputKind::TestScores,
+            "WPPSI-IV",
+            "הבנה מילולית: 112",
+        )
+        .unwrap();
+    assert_eq!(vault.input_data(&case, &input.id).unwrap(), None);
+    vault
+        .set_input_data(&case, &input.id, r#"{"note":"עבד לאט ובדייקנות"}"#)
+        .unwrap();
+    assert!(matches!(
+        vault.set_input_data(&case, "missing", "{}"),
+        Err(VaultError::NotFound)
+    ));
+    drop(vault);
+    assert!(!contains(&all_bytes(dir.path()), "עבד לאט ובדייקנות"));
+    let vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
+    assert_eq!(
+        vault.input_data(&case, &input.id).unwrap().as_deref(),
+        Some(r#"{"note":"עבד לאט ובדייקנות"}"#)
+    );
+}

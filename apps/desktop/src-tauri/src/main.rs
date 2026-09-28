@@ -198,6 +198,38 @@ async fn update_input(
 }
 
 #[tauri::command]
+fn score_instruments() -> Vec<dv_domain::Instrument> {
+    dv_core::Core::score_instruments()
+}
+
+#[tauri::command]
+fn preview_scores(sheet: dv_domain::ScoreSheet) -> Res<String> {
+    dv_core::Core::preview_scores(&sheet).map_err(|e| e.to_ui())
+}
+
+#[tauri::command]
+async fn save_scores(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    input_id: Option<String>,
+    sheet: dv_domain::ScoreSheet,
+) -> Res<dv_domain::CaseInput> {
+    with_core(&state, move |c| {
+        c.save_scores(&case_id, input_id.as_deref(), &sheet)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn score_sheet(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    input_id: String,
+) -> Res<Option<dv_domain::ScoreSheet>> {
+    with_core(&state, move |c| c.score_sheet(&case_id, &input_id)).await
+}
+
+#[tauri::command]
 async fn delete_input(
     state: tauri::State<'_, AppState>,
     case_id: String,
@@ -497,6 +529,10 @@ fn main() {
             add_input,
             update_input,
             delete_input,
+            score_instruments,
+            preview_scores,
+            save_scores,
+            score_sheet,
             import_document,
             preview_filter,
             decide_suspect,

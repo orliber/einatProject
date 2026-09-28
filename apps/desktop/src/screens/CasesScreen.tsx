@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useApp } from "../App";
 import { TopBar } from "../components/TopBar";
 import { NewCaseDialog } from "../components/NewCaseDialog";
+import { ageWords } from "../components/AgeField";
 import { ErrorLine } from "../components/ui";
 import { greeting } from "../i18n/he";
 import { ipc, type CaseSummary } from "../ipc/client";
@@ -76,7 +77,7 @@ export function CasesScreen() {
                 <tr>
                   <th>תיק</th>
                   <th>ילד/ה</th>
-                  <th>גיל</th>
+                  <th title="שנים:חודשים">גיל</th>
                   <th className="col-progress">הדוח</th>
                   <th>שלב</th>
                   <th>עודכן</th>
@@ -94,7 +95,7 @@ export function CasesScreen() {
                         </button>
                       </td>
                       <td className="serif case-name">{c.child_name ?? "—"}</td>
-                      <td className="num">{c.meta.age ? `${c.meta.age.years}:${c.meta.age.months}` : "—"}</td>
+                      <td className="num" title={c.meta.age ? ageWords(c.meta.age) : undefined}>{c.meta.age ? `${c.meta.age.years}:${c.meta.age.months}` : "—"}</td>
                       <td>
                         <div className="progress-row">
                           <div className="bar" role="progressbar" aria-valuemin={0} aria-valuemax={TOTAL_SECTIONS} aria-valuenow={c.approved_sections.length}>

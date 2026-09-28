@@ -32,6 +32,17 @@ export function WarnIcon() {
   );
 }
 
+export function UploadIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 16V4" />
+      <path d="m7 9 5-5 5 5" />
+      <path d="M5 20h14" />
+    </svg>
+  );
+}
+
 export function SendIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
@@ -48,6 +59,7 @@ export function Dialog(props: {
   subtitle?: ReactNode;
   icon?: ReactNode;
   narrow?: boolean;
+  wide?: boolean;
   onClose?: () => void;
   footer?: ReactNode;
   children: ReactNode;
@@ -65,7 +77,7 @@ export function Dialog(props: {
   return (
     <div className="overlay">
       <section ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={props.title}
-        className={props.narrow ? "dialog dialog-narrow" : "dialog"}>
+        className={props.narrow ? "dialog dialog-narrow" : props.wide ? "dialog dialog-wide" : "dialog"}>
         <header className="dialog-head">
           {props.icon}
           <div className="grow stack" style={{ gap: 4 }}>

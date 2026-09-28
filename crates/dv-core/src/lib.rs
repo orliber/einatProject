@@ -147,6 +147,46 @@ fn egress_he(e: &EgressError) -> String {
 }
 
 /// Today's date `(y, m, d)` in UTC, for relative dates.
+/// A consent is a record the psychologist may have to show: a real, past date and who signed.
+fn check_meta(meta: &CaseMeta) -> Result<(), CoreError> {
+    let Some(consent) = &meta.consent else {
+        return Ok(());
+    };
+    let refused = |why: &str| Err(CoreError::Refused(why.to_owned()));
+    let parts: Vec<&str> = consent.given_on.split('-').collect();
+    let date = match parts.as_slice() {
+        [y, m, d] if y.len() == 4 && m.len() == 2 && d.len() == 2 => {
+            match (y.parse::<i32>(), m.parse::<u32>(), d.parse::<u32>()) {
+                (Ok(y), Ok(m), Ok(d)) => Some((y, m, d)),
+                _ => None,
+            }
+        }
+        _ => None,
+    };
+    let Some((y, m, d)) = date.filter(|&(y, m, d)| {
+        let days = match m {
+            1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+            4 | 6 | 9 | 11 => 30,
+            2 if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) => 29,
+            2 => 28,
+            _ => 0,
+        };
+        (2000..=2200).contains(&y) && (1..=days).contains(&d)
+    }) else {
+        return refused("תאריך ההסכמה לא תקין.");
+    };
+    // Local time may already be tomorrow in UTC terms (Israel is ahead of UTC).
+    let (ty, tm, td) = today();
+    if (y, m, d) > (ty, tm, td + 1) {
+        return refused("תאריך ההסכמה עוד לא הגיע.");
+    }
+    let by = consent.given_by.trim();
+    if by.is_empty() || by.chars().count() > 60 {
+        return refused("צריך לרשום מי חתם על ההסכמה (תפקיד, עד 60 תווים).");
+    }
+    Ok(())
+}
+
 fn today() -> (i32, u32, u32) {
     let days = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -570,6 +610,7 @@ impl Core {
         meta: CaseMeta,
         identities: Vec<IdentityInput>,
     ) -> Result<String, CoreError> {
+        check_meta(&meta)?;
         let v = self.vault_mut()?;
         let id = v.create_case(&meta)?;
         v.set_identities(&id, &identities)?;
@@ -577,6 +618,7 @@ impl Core {
     }
 
     pub fn update_case(&mut self, case_id: &str, meta: CaseMeta) -> Result<(), CoreError> {
+        check_meta(&meta)?;
         Ok(self.vault_mut()?.update_case_meta(case_id, &meta)?)
     }
 
@@ -612,6 +654,70 @@ impl Core {
         Ok(self
             .vault_mut()?
             .update_input(case_id, input_id, title, content)?)
+    }
+
+    /// The instruments with their fixed tables (knowledge/instruments.md).
+    #[must_use]
+    pub fn score_instruments() -> Vec<dv_domain::Instrument> {
+        dv_domain::instruments()
+    }
+
+    /// The exact text [`Core::save_scores`] would store, for the live preview while typing.
+    pub fn preview_scores(sheet: &dv_domain::ScoreSheet) -> Result<String, CoreError> {
+        dv_domain::format_sheet(sheet).map_err(CoreError::Refused)
+    }
+
+    /// Save entered scores as a "test scores" material: the text (with ranges computed from the
+    /// fixed tables) is what feeds the sections; the sheet itself is kept sealed for editing.
+    pub fn save_scores(
+        &mut self,
+        case_id: &str,
+        input_id: Option<&str>,
+        sheet: &dv_domain::ScoreSheet,
+    ) -> Result<dv_domain::CaseInput, CoreError> {
+        if sheet.entries.is_empty() {
+            return Err(CoreError::Refused("לא הוזנו ציונים.".into()));
+        }
+        let text = dv_domain::format_sheet(sheet).map_err(CoreError::Refused)?;
+        let title = dv_domain::instruments()
+            .into_iter()
+            .find(|i| i.key == sheet.instrument)
+            .map(|i| format!("ציוני {}", i.name))
+            .unwrap_or_default();
+        let data = serde_json::to_string(sheet).map_err(|e| CoreError::Internal(e.to_string()))?;
+        let v = self.vault_mut()?;
+        let input = match input_id {
+            Some(id) => {
+                let existing = v
+                    .inputs(case_id)?
+                    .into_iter()
+                    .find(|i| i.id == id && i.kind == InputKind::TestScores)
+                    .ok_or_else(|| CoreError::NotFound("טבלת הציונים".into()))?;
+                v.update_input(case_id, id, &title, &text)?;
+                dv_domain::CaseInput {
+                    title,
+                    content: text,
+                    ..existing
+                }
+            }
+            None => v.add_input(case_id, InputKind::TestScores, &title, &text)?,
+        };
+        v.set_input_data(case_id, &input.id, &data)?;
+        Ok(input)
+    }
+
+    /// The sheet behind a scores material, if it was entered in the score table.
+    pub fn score_sheet(
+        &mut self,
+        case_id: &str,
+        input_id: &str,
+    ) -> Result<Option<dv_domain::ScoreSheet>, CoreError> {
+        let Some(data) = self.vault_ref()?.input_data(case_id, input_id)? else {
+            return Ok(None);
+        };
+        serde_json::from_str(&data)
+            .map(Some)
+            .map_err(|e| CoreError::Internal(e.to_string()))
     }
 
     pub fn delete_input(&mut self, case_id: &str, input_id: &str) -> Result<(), CoreError> {

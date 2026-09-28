@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { AgeField, parseAge } from "../../components/AgeField";
+import { DateField, todayIso } from "../../components/DateField";
 import { useApp } from "../../App";
 import { ipc } from "../../ipc/client";
 import type { GrammaticalGender } from "../../ipc/generated/GrammaticalGender";
@@ -16,7 +18,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
   const [years, setYears] = useState(m.age ? String(m.age.years) : "");
   const [months, setMonths] = useState(m.age ? String(m.age.months) : "0");
   const [consent, setConsent] = useState(m.consent !== null);
-  const [consentDate, setConsentDate] = useState(m.consent?.given_on ?? new Date().toISOString().slice(0, 10));
+  const [consentDate, setConsentDate] = useState(m.consent?.given_on ?? todayIso());
   const [consentBy, setConsentBy] = useState(m.consent?.given_by ?? "שני ההורים");
   const [rows, setRows] = useState<PersonRow[]>(() => {
     const r = detail.identities.map((i) => ({ id: i.id, role: i.role, value: i.value, aliases: i.aliases.join(", ") }));
@@ -28,14 +30,13 @@ export function DetailsView({ api }: { api: CaseApi }) {
 
   async function save() {
     setError(null);
-    const y = Number(years);
-    const mo = Number(months);
+    if (consent && !consentDate) return setError("צריך את תאריך החתימה על ההסכמה (יום.חודש.שנה).");
     try {
       await ipc.updateCase(caseId, {
         ...m,
         code: code.trim(),
         child_gender: gender,
-        age: years !== "" && y >= 0 && y < 25 && mo >= 0 && mo < 12 ? { years: y, months: mo } : null,
+        age: parseAge(years, months),
         consent: consent ? { given_on: consentDate, form_version: m.consent?.form_version ?? "v1", given_by: consentBy.trim() || "ההורים" } : null,
       });
       await ipc.setIdentities(caseId, toIdentityInputs(rows));
@@ -80,16 +81,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
                   <label className="radio"><input type="radio" name="dg" checked={gender === "female"} onChange={() => setGender("female")} /> בת</label>
                 </div>
               </fieldset>
-              <div className="field">
-                <span className="label">גיל בעת האבחון</span>
-                <div className="row">
-                  <label className="visually-hidden" htmlFor="d-y">שנים</label>
-                  <input id="d-y" className="input age" inputMode="numeric" value={years} onChange={(e) => setYears(e.target.value.replace(/\D/g, ""))} />
-                  <span>:</span>
-                  <label className="visually-hidden" htmlFor="d-m">חודשים</label>
-                  <input id="d-m" className="input age" inputMode="numeric" value={months} onChange={(e) => setMonths(e.target.value.replace(/\D/g, ""))} />
-                </div>
-              </div>
+              <AgeField idPrefix="d" years={years} months={months} onChange={(y, m) => { setYears(y); setMonths(m); }} />
             </div>
           </div>
           <div className="card consent">
@@ -99,7 +91,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
               <div className="row wrap">
                 <div className="field">
                   <label htmlFor="d-cd">תאריך</label>
-                  <input id="d-cd" className="input" type="date" value={consentDate} onChange={(e) => setConsentDate(e.target.value)} />
+                  <DateField id="d-cd" value={consentDate} onChange={setConsentDate} notAfterToday />
                 </div>
                 <div className="field grow">
                   <label htmlFor="d-cb">מי חתם (תפקיד, לא שם)</label>

@@ -39,14 +39,14 @@ Communication
 Composite
 Comprehension
 Compulsive
-Conceptual
 Concepts
+Conceptual
 Conduct
 Conners
 Criteria
 Criterion
-Deficit
 Defiant
+Deficit
 Delay
 Depression
 Design
@@ -62,6 +62,7 @@ Edition
 Emotional
 Executive
 Expressive
+Externalizing
 Extremely
 Feeding
 Fifth
@@ -83,6 +84,7 @@ Infant
 Information
 Intellectual
 Intelligence
+Internalizing
 International
 Language
 Learning
@@ -153,8 +155,8 @@ Severity
 Similarities
 Sleep
 Social
-Spatial
 Span
+Spatial
 Specific
 Specifier
 Spectrum

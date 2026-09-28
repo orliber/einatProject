@@ -295,6 +295,9 @@ p {
 .dialog-narrow {
   width: min(560px, 100%);
 }
+.dialog-wide {
+  width: min(1240px, 100%);
+}
 .dialog-head {
   padding: 20px 26px 16px;
   display: flex;
@@ -376,4 +379,88 @@ p {
   font-size: 15.5px;
   line-height: 1.75;
   white-space: pre-wrap;
+}
+
+/* ---------- typed date (components/DateField.tsx) ---------- */
+.date-field {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.date-input {
+  width: 150px;
+  text-align: center;
+  letter-spacing: 0.04em;
+}
+.date-input::placeholder {
+  letter-spacing: 0;
+}
+.input.bad {
+  border-color: var(--block);
+  background: var(--block-soft);
+}
+
+/* ---------- text-style button ---------- */
+.link-btn {
+  align-self: flex-start;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--primary);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  min-height: 32px;
+  cursor: pointer;
+}
+.link-btn:hover {
+  color: var(--primary-hover);
+}
+
+/* ---------- age at assessment (components/AgeField.tsx) ---------- */
+.age-field {
+  gap: 8px;
+}
+.age-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.age-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.age-part label {
+  font-size: 15px;
+  color: var(--ink-soft);
+}
+.input.age {
+  width: 64px;
+  text-align: center;
+}
+.age-words {
+  font-weight: 600;
+  color: var(--primary);
+}
+.age-calc {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: end;
+  gap: 12px 16px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
+}
+.age-calc-result {
+  align-self: center;
+  padding-top: 22px;
+}
+.age-calc-note {
+  grid-column: 1 / -1;
+  margin: 0;
 }

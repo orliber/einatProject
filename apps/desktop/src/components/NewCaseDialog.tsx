@@ -1,4 +1,6 @@
 import { useState, type FormEvent } from "react";
+import { AgeField, parseAge } from "./AgeField";
+import { DateField, todayIso } from "./DateField";
 import { useApp } from "../App";
 import { personRoles, roleLabel } from "../i18n/he";
 import { ipc, type IdentityInput } from "../ipc/client";
@@ -66,7 +68,7 @@ export function NewCaseDialog({ onClose, onCreated }: { onClose: () => void; onC
   const [years, setYears] = useState("");
   const [months, setMonths] = useState("0");
   const [consent, setConsent] = useState(false);
-  const [consentDate, setConsentDate] = useState(new Date().toISOString().slice(0, 10));
+  const [consentDate, setConsentDate] = useState(todayIso());
   const [consentBy, setConsentBy] = useState("שני ההורים");
   const [rows, setRows] = useState<PersonRow[]>([
     { id: null, role: "child", value: "", aliases: "" },
@@ -80,14 +82,13 @@ export function NewCaseDialog({ onClose, onCreated }: { onClose: () => void; onC
     e.preventDefault();
     setError(null);
     if (!rows[0]?.value.trim()) return setError("צריך את שם הילד/ה, כדי שיוסתר בכל מקום.");
-    const y = Number(years);
-    const m = Number(months);
+    if (consent && !consentDate) return setError("צריך את תאריך החתימה על ההסכמה (יום.חודש.שנה).");
     setBusy(true);
     try {
       const id = await ipc.createCase(
         {
           code: code.trim(),
-          age: years !== "" && y >= 0 && y < 25 && m >= 0 && m < 12 ? { years: y, months: m } : null,
+          age: parseAge(years, months),
           child_gender: gender,
           current_section: null,
           retention_until: null,
@@ -125,16 +126,7 @@ export function NewCaseDialog({ onClose, onCreated }: { onClose: () => void; onC
               <label className="radio"><input type="radio" name="g" checked={gender === "female"} onChange={() => setGender("female")} /> בת</label>
             </div>
           </fieldset>
-          <div className="field">
-            <span className="label">גיל בעת האבחון</span>
-            <div className="row">
-              <label className="visually-hidden" htmlFor="years">שנים</label>
-              <input id="years" className="input age" inputMode="numeric" placeholder="שנים" value={years} onChange={(e) => setYears(e.target.value.replace(/\D/g, ""))} />
-              <span>:</span>
-              <label className="visually-hidden" htmlFor="months">חודשים</label>
-              <input id="months" className="input age" inputMode="numeric" placeholder="חודשים" value={months} onChange={(e) => setMonths(e.target.value.replace(/\D/g, ""))} />
-            </div>
-          </div>
+          <AgeField idPrefix="nc" years={years} months={months} onChange={(y, m) => { setYears(y); setMonths(m); }} />
         </div>
 
         <div className="stack" style={{ gap: 8 }}>
@@ -151,7 +143,7 @@ export function NewCaseDialog({ onClose, onCreated }: { onClose: () => void; onC
             <div className="row wrap">
               <div className="field">
                 <label htmlFor="cdate">תאריך</label>
-                <input id="cdate" className="input" type="date" value={consentDate} onChange={(e) => setConsentDate(e.target.value)} />
+                <DateField id="cdate" value={consentDate} onChange={setConsentDate} notAfterToday />
               </div>
               <div className="field grow">
                 <label htmlFor="cby">מי חתם (תפקיד, לא שם)</label>

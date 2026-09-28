@@ -6,6 +6,7 @@ import { ReviewDialog } from "../components/ReviewDialog";
 import { ExportDialog } from "../components/ExportDialog";
 import { FullDraftDialog } from "../components/FullDraftDialog";
 import { LockIcon, ErrorLine } from "../components/ui";
+import { ageWords } from "../components/AgeField";
 import { MaterialsView } from "./case/MaterialsView";
 import { SectionWork } from "./case/SectionWork";
 import { DetailsView } from "./case/DetailsView";
@@ -81,7 +82,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
 
   const api: CaseApi = { caseId, detail, reload, review: startReview };
   const child = detail.identities.find((i) => i.role === "child")?.value ?? "";
-  const age = detail.meta.age ? `${detail.meta.age.years}:${detail.meta.age.months}` : "";
+  const age = detail.meta.age ? `גיל ${detail.meta.age.years}:${detail.meta.age.months}` : "";
   const approvedCount = detail.sections.filter((s) => s.approved).length;
   const total = detail.sections.length;
   const parts = Array.from(new Set(detail.sections.map((s) => s.part)));
@@ -97,7 +98,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         </div>
         <button type="button" className="side-case" onClick={() => go({ name: "case", id: caseId, view: "details" })}>
           <span className="side-code">{detail.meta.code}</span>
-          <span className="side-child">{child}{age && ` · ${age}`}</span>
+          <span className="side-child" title={detail.meta.age ? ageWords(detail.meta.age) : undefined}>{child}{age && ` · ${age}`}</span>
           <span className={detail.meta.consent ? "side-consent" : "side-consent missing"}>
             {detail.meta.consent ? `הסכמת הורים נרשמה · ${new Date(detail.meta.consent.given_on).toLocaleDateString("he-IL")}` : "חסרה הסכמת הורים"}
           </span>

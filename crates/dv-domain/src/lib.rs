@@ -6,6 +6,7 @@
 pub mod identity;
 pub mod records;
 pub mod report;
+pub mod scores;
 
 pub use identity::{assign_tag, Identity, IdentityInput, Role, PRACTITIONER_TAG};
 pub use records::{
@@ -13,6 +14,7 @@ pub use records::{
     DraftStatus, GrammaticalGender, InputKind, Transmission,
 };
 pub use report::{ReportPart, ReportSection, ReportStructure};
+pub use scores::{format_sheet, instruments, Instrument, ScoreEntry, ScoreSheet};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DomainError {

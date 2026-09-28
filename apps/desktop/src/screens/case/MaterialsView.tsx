@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { useApp } from "../../App";
 import { kindLabel, kindOrder } from "../../i18n/he";
-import { ipc, type CaseInput, type ImportPreview, type InputKind } from "../../ipc/client";
+import { ipc, type CaseInput, type ImportPreview, type InputKind, type ScoreSheet } from "../../ipc/client";
 import type { FilterOutcome } from "../../ipc/generated/FilterOutcome";
 import { ImportDialog } from "../../components/ImportDialog";
-import { Dialog, ErrorLine, Segments, Spinner } from "../../components/ui";
+import { ScoresDialog } from "../../components/ScoresDialog";
+import { Dialog, ErrorLine, Segments, Spinner, UploadIcon } from "../../components/ui";
 import type { CaseApi } from "../CaseScreen";
 import "./MaterialsView.css";
 
@@ -18,6 +19,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
   const [importing, setImporting] = useState<ImportPreview | null>(null);
   const [reading, setReading] = useState<string | null>(null);
   const [writing, setWriting] = useState<{ kind: InputKind; input?: CaseInput } | null>(null);
+  const [scoring, setScoring] = useState<{ input?: CaseInput; sheet?: ScoreSheet } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -57,6 +59,19 @@ export function MaterialsView({ api }: { api: CaseApi }) {
     if (file) void readFile(file);
   }
 
+  /** A score table entered here opens as a table again; any other material opens as text. */
+  async function edit(i: CaseInput) {
+    if (i.kind === "test_scores") {
+      try {
+        const sheet = await ipc.scoreSheet(caseId, i.id);
+        if (sheet) return setScoring({ input: i, sheet });
+      } catch (e) {
+        return setError(fail(e as never));
+      }
+    }
+    setWriting({ kind: i.kind, input: i });
+  }
+
   async function remove(i: CaseInput) {
     try {
       await ipc.deleteInput(caseId, i.id);
@@ -78,7 +93,8 @@ export function MaterialsView({ api }: { api: CaseApi }) {
           <p className="muted small">הכל נשמר מוצפן. ל-Claude יוצא רק טקסט אחרי הסתרה, ורק באישורך.</p>
         </div>
         <div className="row">
-          <button type="button" className="btn btn-primary" onClick={() => fileRef.current?.click()}>העלאת מסמך</button>
+          <button type="button" className="btn btn-primary" onClick={() => fileRef.current?.click()}><UploadIcon /> העלאת מסמך</button>
+          <button type="button" className="btn" onClick={() => setScoring({})}>הזנת ציונים</button>
           <button type="button" className="btn" onClick={() => setWriting({ kind: "session_note" })}>רישום מפגש</button>
           <button type="button" className="btn" onClick={() => setWriting({ kind: "free_text" })}>הדבקת טקסט</button>
           <input ref={fileRef} type="file" accept={ACCEPT} hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void readFile(f); }} />
@@ -91,6 +107,12 @@ export function MaterialsView({ api }: { api: CaseApi }) {
             <div className="card empty-materials">
               <b>עוד אין חומרים בתיק</b>
               <p className="muted small">מתחילים מהחומרים שכבר יש: דוחות של רופאים וקלינאיות, אינטייק, שיחה עם הגננת, תוצאות מבחנים והסיכומים שלך.</p>
+              <ol className="start-steps small">
+                <li><b>העלאת מסמך</b>: קובץ Word או PDF מהמחשב (אפשר גם לגרור לכאן).</li>
+                <li><b>הזנת ציונים</b>: טבלה לכל כלי, עם טווח ואחוזון מחושבים.</li>
+                <li><b>רישום מפגש</b>: מה שראית, במילים שלך.</li>
+              </ol>
+              <button type="button" className="btn btn-primary" onClick={() => fileRef.current?.click()}>העלאת מסמך מהמחשב</button>
             </div>
           )}
           {sorted.map((i) => (
@@ -105,7 +127,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
             </button>
           ))}
           <button type="button" className={dragging ? "dropzone over" : "dropzone"} onClick={() => fileRef.current?.click()}>
-            {reading ? <><Spinner /> קוראת את {reading}…</> : "גוררים לכאן קובץ Word או PDF"}
+            {reading ? <><Spinner /> קוראת את {reading}…</> : <><UploadIcon /> גוררים לכאן קובץ Word או PDF, או לוחצים לבחירה</>}
           </button>
         </section>
 
@@ -116,7 +138,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
                 <h2 className="grow">{input.title || kindLabel[input.kind]}</h2>
                 <span className="small muted">{kindLabel[input.kind]}</span>
                 {preview && preview.hidden.length > 0 && <span className="chip chip-warn">{countHidden(preview)} פרטים יוסתרו</span>}
-                <button type="button" className="btn btn-small" onClick={() => setWriting({ kind: input.kind, input })}>עריכה</button>
+                <button type="button" className="btn btn-small" onClick={() => void edit(input)}>עריכה</button>
                 <button type="button" className="btn btn-small" onClick={() => void remove(input)}>מחיקה</button>
               </div>
               <div className="material-text serif">
@@ -135,6 +157,11 @@ export function MaterialsView({ api }: { api: CaseApi }) {
       {importing && (
         <ImportDialog caseId={caseId} preview={importing} onClose={() => setImporting(null)}
           onSaved={async (id) => { setImporting(null); await reload(); setSelected(id); notify("המסמך נשמר בתיק."); }} />
+      )}
+      {scoring && (
+        <ScoresDialog caseId={caseId} age={detail.meta.age} input={scoring.input} sheet={scoring.sheet}
+          onClose={() => setScoring(null)}
+          onSaved={async (id) => { setScoring(null); await reload(); setSelected(id); notify("הציונים נשמרו בתיק."); }} />
       )}
       {writing && (
         <WriteDialog caseId={caseId} kind={writing.kind} input={writing.input} onClose={() => setWriting(null)}

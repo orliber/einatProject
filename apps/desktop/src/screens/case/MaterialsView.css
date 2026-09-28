@@ -88,3 +88,21 @@
   font-size: 16px;
   min-height: 280px;
 }
+.empty-materials .btn {
+  align-self: flex-start;
+  margin-top: 6px;
+}
+.start-steps {
+  margin: 4px 0 0;
+  padding-inline-start: 20px;
+  color: var(--ink-soft);
+  display: grid;
+  gap: 4px;
+}
+.dropzone {
+  cursor: pointer;
+}
+.dropzone:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
