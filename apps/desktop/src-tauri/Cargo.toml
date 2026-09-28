@@ -26,4 +26,6 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 dv-core.workspace = true
+dv-domain.workspace = true
+dv-ingest.workspace = true
 dv-ipc.workspace = true

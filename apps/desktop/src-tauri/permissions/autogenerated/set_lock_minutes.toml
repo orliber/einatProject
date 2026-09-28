@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-lock-minutes"
+description = "Enables the set_lock_minutes command without any pre-configured scope."
+commands.allow = ["set_lock_minutes"]
+
+[[permission]]
+identifier = "deny-set-lock-minutes"
+description = "Denies the set_lock_minutes command without any pre-configured scope."
+commands.deny = ["set_lock_minutes"]

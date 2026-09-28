@@ -672,3 +672,16 @@ fn idle_session_locks_itself() {
     assert!(core.lock_if_idle());
     assert!(!core.status().unlocked);
 }
+
+#[test]
+fn review_screen_is_always_shown_in_the_first_weeks() {
+    let (_dir, mut core, _case) = setup(None);
+    let s = core.status();
+    assert!(!s.review_only_suspect && !s.review_choice_available);
+    assert!(matches!(
+        core.set_review_only_suspect(true),
+        Err(CoreError::Refused(_))
+    ));
+    assert!(core.set_review_only_suspect(false).is_ok());
+    assert_eq!(s.practitioner, vec!["ד\"ר רותם אלמוג".to_owned()]);
+}

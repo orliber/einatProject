@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-case-detail"
+description = "Enables the case_detail command without any pre-configured scope."
+commands.allow = ["case_detail"]
+
+[[permission]]
+identifier = "deny-case-detail"
+description = "Denies the case_detail command without any pre-configured scope."
+commands.deny = ["case_detail"]

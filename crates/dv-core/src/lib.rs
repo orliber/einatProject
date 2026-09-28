@@ -35,6 +35,16 @@ pub use views::{
 const API_KEY: &str = "anthropic_api_key";
 const MODEL_KEY: &str = "model";
 const LOCK_KEY: &str = "lock_minutes";
+const FIRST_USE_KEY: &str = "first_use_day";
+const REVIEW_KEY: &str = "review_only_suspect";
+/// Days of use before "show the review only when suspicious" can be chosen (D-020).
+const REVIEW_ALWAYS_DAYS: u64 = 14;
+
+fn day_number() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() / 86_400)
+}
 const REPORT_KEY: &str = "report_settings";
 const MAX_REQUEST_BYTES: usize = 900_000;
 /// Sections written from other, already approved sections.
@@ -369,6 +379,23 @@ impl Core {
 
     pub fn status(&mut self) -> AppStatus {
         let cloud = dv_vault::env::cloud_synced_component(&self.dir);
+        let (practitioner, review_only_suspect, review_choice_available) = match &self.vault {
+            Some(v) => {
+                let first = v
+                    .setting(FIRST_USE_KEY)
+                    .ok()
+                    .flatten()
+                    .and_then(|d| d.parse::<u64>().ok())
+                    .unwrap_or_else(day_number);
+                let available = day_number().saturating_sub(first) >= REVIEW_ALWAYS_DAYS;
+                (
+                    v.practitioner().map(|p| p.names).unwrap_or_default(),
+                    available && v.setting(REVIEW_KEY).ok().flatten().as_deref() == Some("1"),
+                    available,
+                )
+            }
+            None => (Vec::new(), false, false),
+        };
         let (demo, model, integrity) = match &self.vault {
             Some(v) => (
                 v.secret(API_KEY).ok().flatten().is_none(),
@@ -391,7 +418,22 @@ impl Core {
             model,
             integrity_warning: integrity,
             lock_minutes: self.lock_minutes(),
+            practitioner,
+            review_only_suspect,
+            review_choice_available,
         }
+    }
+
+    /// After the first weeks, the review screen may be shown only when something is suspicious.
+    pub fn set_review_only_suspect(&mut self, on: bool) -> Result<(), CoreError> {
+        if on && !self.status().review_choice_available {
+            return Err(CoreError::Refused(format!(
+                "בשבועיים הראשונים ({REVIEW_ALWAYS_DAYS} ימים) מסך הבדיקה מוצג תמיד."
+            )));
+        }
+        self.vault_mut()?
+            .set_setting(REVIEW_KEY, if on { "1" } else { "0" })?;
+        Ok(())
     }
 
     fn refuse_cloud(&self) -> Result<(), CoreError> {
@@ -408,7 +450,9 @@ impl Core {
         let params = self.argon.unwrap_or_else(Argon2Params::calibrate);
         let created = Vault::create(&self.dir, password, params)?;
         let recovery_key = created.recovery_key.to_string();
-        self.vault = Some(created.vault);
+        let mut vault = created.vault;
+        vault.set_setting(FIRST_USE_KEY, &day_number().to_string())?;
+        self.vault = Some(vault);
         self.last_activity = Instant::now();
         Ok(CreatedVault { recovery_key })
     }

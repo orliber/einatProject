@@ -977,6 +977,8 @@ name = "dv-desktop"
 version = "0.1.0"
 dependencies = [
  "dv-core",
+ "dv-domain",
+ "dv-ingest",
  "dv-ipc",
  "tauri",
  "tauri-build",

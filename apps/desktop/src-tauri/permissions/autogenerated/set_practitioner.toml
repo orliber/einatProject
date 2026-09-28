@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-practitioner"
+description = "Enables the set_practitioner command without any pre-configured scope."
+commands.allow = ["set_practitioner"]
+
+[[permission]]
+identifier = "deny-set-practitioner"
+description = "Denies the set_practitioner command without any pre-configured scope."
+commands.deny = ["set_practitioner"]

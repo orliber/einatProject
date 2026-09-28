@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-edit-paragraph"
+description = "Enables the edit_paragraph command without any pre-configured scope."
+commands.allow = ["edit_paragraph"]
+
+[[permission]]
+identifier = "deny-edit-paragraph"
+description = "Denies the edit_paragraph command without any pre-configured scope."
+commands.deny = ["edit_paragraph"]

@@ -30,6 +30,12 @@ pub struct AppStatus {
     pub model: String,
     pub integrity_warning: Option<String>,
     pub lock_minutes: u32,
+    /// Names always hidden as the practitioner (shown in settings).
+    pub practitioner: Vec<String>,
+    /// Show the review screen only when something is suspicious (D-020).
+    pub review_only_suspect: bool,
+    /// The choice above opens after the first 14 days of use (D-020).
+    pub review_choice_available: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

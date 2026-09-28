@@ -20,7 +20,8 @@
         "minWidth": 1024,
         "minHeight": 680,
         "center": true,
-        "contentProtected": true
+        "contentProtected": true,
+        "dragDropEnabled": false
       }
     ],
     "security": {
@@ -64,7 +65,9 @@
       "icons/icon.ico"
     ],
     "windows": {
-      "webviewInstallMode": { "type": "downloadBootstrapper" }
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
     }
   }
 }

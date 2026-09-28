@@ -12,4 +12,16 @@ cloud_synced_folder: string | null, fips_active: boolean,
 /**
  * No API key configured: answers come from local demo mode.
  */
-demo_mode: boolean, model: string, integrity_warning: string | null, lock_minutes: number, };
+demo_mode: boolean, model: string, integrity_warning: string | null, lock_minutes: number, 
+/**
+ * Names always hidden as the practitioner (shown in settings).
+ */
+practitioner: Array<string>, 
+/**
+ * Show the review screen only when something is suspicious (D-020).
+ */
+review_only_suspect: boolean, 
+/**
+ * The choice above opens after the first 14 days of use (D-020).
+ */
+review_choice_available: boolean, };

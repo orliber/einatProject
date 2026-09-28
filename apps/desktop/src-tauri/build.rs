@@ -1,8 +1,46 @@
 fn main() {
     // Declaring the app's commands makes Tauri require an explicit permission for
     // each one; `capabilities/main.json` grants exactly these to the main window.
-    let attributes = tauri_build::Attributes::new()
-        .app_manifest(tauri_build::AppManifest::new().commands(&["ping"]));
+    let attributes =
+        tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[
+            "ping",
+            "app_status",
+            "create_vault",
+            "confirm_recovery_key",
+            "unlock",
+            "unlock_with_recovery",
+            "lock",
+            "set_api_key",
+            "set_model",
+            "set_lock_minutes",
+            "set_practitioner",
+            "set_review_only_suspect",
+            "report_settings",
+            "set_report_settings",
+            "list_cases",
+            "create_case",
+            "update_case",
+            "delete_case",
+            "set_identities",
+            "case_detail",
+            "add_input",
+            "update_input",
+            "delete_input",
+            "import_document",
+            "decide_suspect",
+            "prepare_section",
+            "prepare_full_draft",
+            "send_section",
+            "chat",
+            "approve_paragraph",
+            "reject_paragraph",
+            "edit_paragraph",
+            "add_own_paragraph",
+            "prepare_consult",
+            "send_consult",
+            "check_export",
+            "export_report",
+        ]));
     if let Err(error) = tauri_build::try_build(attributes) {
         panic!("tauri-build failed: {error:#}");
     }
