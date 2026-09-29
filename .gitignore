@@ -32,3 +32,4 @@ __pycache__/
 apps/desktop/src-tauri/gen/
 apps/desktop/dist/
 apps/desktop/dist-preview/
+tests/e2e/out/
