@@ -1,29 +1,29 @@
 /* Design tokens: the approved screens (docs/SCREENS.md, D-020 "elegant case file"). */
 :root {
-  --bg: #f5f3ee;
+  --bg: #f4f5f3;
   --surface: #ffffff;
-  --surface-alt: #faf9f6;
-  --sand: #f3efe6;
-  --ink: #1b2528;
-  --ink-muted: #5b6567;
-  --ink-soft: #3f4a4c;
-  --primary: #1f5f5b;
-  --primary-hover: #134340;
-  --primary-soft: #e2edeb;
-  --ok: #2e6b3a;
-  --ok-soft: #ddefe1;
-  --warn: #8a4b0b;
-  --warn-ink: #7a3f08;
-  --warn-soft: #fbead3;
-  --warn-line: #e9b77a;
+  --surface-alt: #fafbfa;
+  --sand: #f1f3f1;
+  --ink: #15201f;
+  --ink-muted: #4a5654;
+  --ink-soft: #34403e;
+  --primary: #1e5b56;
+  --primary-hover: #164541;
+  --primary-soft: #e6efed;
+  --ok: #2f6b45;
+  --ok-soft: #e5f1e8;
+  --warn: #8a4e0c;
+  --warn-ink: #8a4e0c;
+  --warn-soft: #fbf1e2;
+  --warn-line: #ebcb98;
   --warn-paper: #fffbf4;
-  --block: #8a1c0c;
-  --block-soft: #f7d8d2;
-  --line: #e4e0d6;
-  --line-strong: #d5d0c4;
-  --field-line: #cfc9bc;
+  --block: #a1261a;
+  --block-soft: #fbe7e3;
+  --line: #e3e6e3;
+  --line-strong: #cfd5d2;
+  --field-line: #cfd5d2;
   /* The case column ("leather binding"). */
-  --side: #17282a;
+  --side: #16272a;
   --side-card: #203537;
   --side-active: #2a4648;
   --side-line: #3f5b5d;
@@ -37,9 +37,10 @@
   --radius-md: 10px;
   --radius-lg: 14px;
   --radius-xl: 18px;
-  --shadow-paper: 0 1px 2px rgba(27, 37, 40, 0.05), 0 8px 24px rgba(27, 37, 40, 0.05);
+  --shadow-paper: 0 1px 2px rgba(21, 32, 31, 0.04);
   --shadow-dialog: 0 24px 60px rgba(0, 0, 0, 0.3);
-  --font-body: "Assistant", system-ui, sans-serif;
-  --font-display: "Frank Ruhl Libre", "David", serif;
+  --font-body: "Assistant", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Frank Ruhl Libre", "David", serif; /* the report text and the child's name only */
+  --font-ui: "Assistant", "Segoe UI", system-ui, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
 }

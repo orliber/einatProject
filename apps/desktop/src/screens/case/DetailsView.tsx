@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { AgeField, parseAge } from "../../components/AgeField";
-import { DateField, todayIso } from "../../components/DateField";
+import { DateField, isoToHe, todayIso } from "../../components/DateField";
 import { useApp } from "../../App";
 import { ipc } from "../../ipc/client";
 import type { GrammaticalGender } from "../../ipc/generated/GrammaticalGender";
@@ -20,6 +20,8 @@ export function DetailsView({ api }: { api: CaseApi }) {
   const [consent, setConsent] = useState(m.consent !== null);
   const [consentDate, setConsentDate] = useState(m.consent?.given_on ?? todayIso());
   const [consentBy, setConsentBy] = useState(m.consent?.given_by ?? "שני ההורים");
+  const [ownRetention, setOwnRetention] = useState(m.retention_until !== null);
+  const [retention, setRetention] = useState(m.retention_until ?? detail.retention_default);
   const [rows, setRows] = useState<PersonRow[]>(() => {
     const r = detail.identities.map((i) => ({ id: i.id, role: i.role, value: i.value, aliases: i.aliases.join(", ") }));
     return r.some((x) => x.role === "child") ? r : [{ id: null, role: "child", value: "", aliases: "" }, ...r];
@@ -31,6 +33,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
   async function save() {
     setError(null);
     if (consent && !consentDate) return setError("צריך את תאריך החתימה על ההסכמה (יום.חודש.שנה).");
+    if (ownRetention && !retention) return setError("צריך תאריך לתזכורת השמירה (יום.חודש.שנה).");
     try {
       await ipc.updateCase(caseId, {
         ...m,
@@ -38,6 +41,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
         child_gender: gender,
         age: parseAge(years, months),
         consent: consent ? { given_on: consentDate, form_version: m.consent?.form_version ?? "v1", given_by: consentBy.trim() || "ההורים" } : null,
+        retention_until: ownRetention ? retention : null,
       });
       await ipc.setIdentities(caseId, toIdentityInputs(rows));
       await reload();
@@ -50,7 +54,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
   async function remove() {
     try {
       await ipc.deleteCase(caseId);
-      notify("התיק נמחק לצמיתות, כולל מפתח ההצפנה שלו.");
+      notify("התיק הועבר לסל המחזור. אפשר לשחזר אותו מרשימת התיקים במשך 30 יום.");
       go({ name: "cases" });
     } catch (e) {
       setError(fail(e as never));
@@ -64,9 +68,14 @@ export function DetailsView({ api }: { api: CaseApi }) {
           <h1>פרטי התיק ושמות להסתרה</h1>
           <p className="muted small">כל שם כאן מוחלף בתפקיד לפני כל שליחה ל-Claude, גם עם תחיליות ("ולנועם", "שנועם") וכתיב שונה.</p>
         </div>
-        <button type="button" className="btn btn-primary" onClick={() => void save()}>שמירה</button>
+        <button type="button" className="btn btn-primary btn-big" onClick={() => void save()}>שמירת השינויים</button>
       </div>
       <div className="view-body details">
+        <div className="card details-card stack grow names-card">
+          <span className="label">שמות שיוסתרו</span>
+          <p className="hint">הילד/ה, ההורים, האחים, הגננת, רופאים ומטפלים, וגם מקומות (גן, יישוב). כינויים וכתיב נוסף, בפסיקים.</p>
+          <PeopleEditor rows={rows} onChange={setRows} />
+        </div>
         <div className="stack details-col">
           <div className="card details-card stack">
             <div className="row wrap">
@@ -100,16 +109,25 @@ export function DetailsView({ api }: { api: CaseApi }) {
               </div>
             )}
           </div>
+          <div className="card details-card stack">
+            <b>תקופת השמירה</b>
+            <p className="small muted">
+              {ownRetention ? "תזכורת בתאריך שבחרת." : `תזכורת ב-${isoToHe(detail.retention_default)}: 7 שנים אחרי השינוי האחרון, או כשהילד/ה בן/בת 25, המאוחר מביניהם (הצעה, ממתינה לעו"ד).`}
+              {" "}התוכנה לא מוחקת לבד: בתאריך הזה התיק יוצג ברשימת התיקים, ואת ההחלטה מקבלים ידנית.
+            </p>
+            <label className="row"><input type="checkbox" checked={ownRetention} onChange={(e) => setOwnRetention(e.target.checked)} /> תאריך אחר</label>
+            {ownRetention && (
+              <div className="field">
+                <label htmlFor="d-ret">תזכורת ב-</label>
+                <DateField id="d-ret" value={retention} onChange={setRetention} />
+              </div>
+            )}
+          </div>
           <div className="card details-card stack danger-zone">
             <b>מחיקת התיק</b>
-            <p className="small muted">מוחקת את כל החומרים, הטיוטות והשיחות, ואת מפתח ההצפנה של התיק. אי אפשר לשחזר.</p>
-            <button type="button" className="btn btn-danger" onClick={() => setConfirmDelete(true)}>מחיקת התיק לצמיתות</button>
+            <p className="small muted">התיק עובר לסל המחזור ונשמר שם מוצפן 30 יום, ואפשר לשחזר אותו. אחר כך הוא נמחק לצמיתות, כולל מפתח ההצפנה שלו.</p>
+            <button type="button" className="btn btn-danger-quiet" onClick={() => setConfirmDelete(true)}>מחיקת התיק…</button>
           </div>
-        </div>
-        <div className="card details-card stack grow">
-          <span className="label">שמות שיוסתרו</span>
-          <p className="hint">הילד/ה, ההורים, האחים, הגננת, רופאים ומטפלים, וגם מקומות (גן, יישוב). כינויים וכתיב נוסף, בפסיקים.</p>
-          <PeopleEditor rows={rows} onChange={setRows} />
         </div>
       </div>
       <ErrorLine error={error} />

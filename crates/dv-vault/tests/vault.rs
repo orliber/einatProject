@@ -5,7 +5,7 @@
 use std::fs;
 
 use dv_domain::{Author, CaseMeta, ChatRole, DraftStatus, IdentityInput, InputKind, Role};
-use dv_vault::{Argon2Params, AuditEvent, Vault, VaultError};
+use dv_vault::{Argon2Params, AuditEvent, Secret, Vault, VaultError};
 
 const PASSWORD: &str = "כלב ירוק רץ מהר בגינה";
 
@@ -255,16 +255,19 @@ fn password_change_and_recovery_rotation() {
     let (dir, mut vault, old_recovery) = new_vault();
     let new_password = "חתול כחול ישן על הספה";
     vault
-        .rekey_password(PASSWORD, new_password, Argon2Params::TEST)
+        .rekey_password(Secret::Password(PASSWORD), new_password, Argon2Params::TEST)
         .unwrap();
     assert!(vault
         .rekey_password(
-            "סיסמה שגויה לגמרי",
+            Secret::Password("סיסמה שגויה לגמרי"),
             "עוד סיסמה ארוכה וטובה",
             Argon2Params::TEST
         )
         .is_err());
-    let new_recovery = vault.rotate_recovery_key(new_password).unwrap().to_string();
+    let new_recovery = vault
+        .rotate_recovery_key(Secret::Password(new_password))
+        .unwrap()
+        .to_string();
     assert!(vault.check_recovery_key(&new_recovery));
     assert!(!vault.check_recovery_key(&old_recovery));
     drop(vault);
@@ -272,6 +275,32 @@ fn password_change_and_recovery_rotation() {
     assert!(Vault::unlock_with_password(dir.path(), new_password).is_ok());
     assert!(Vault::unlock_with_recovery(dir.path(), &old_recovery).is_err());
     assert!(Vault::unlock_with_recovery(dir.path(), &new_recovery).is_ok());
+}
+
+#[test]
+fn a_forgotten_password_is_replaced_with_the_recovery_kit() {
+    let (dir, vault, recovery) = new_vault();
+    drop(vault);
+    let mut vault = Vault::unlock_with_recovery(dir.path(), &recovery).unwrap();
+    let new_password = "חתול כחול ישן על הספה";
+    vault
+        .rekey_password(
+            Secret::Recovery(&recovery),
+            new_password,
+            Argon2Params::TEST,
+        )
+        .unwrap();
+    assert!(vault
+        .rekey_password(
+            Secret::Recovery("AAAA-BBBB"),
+            new_password,
+            Argon2Params::TEST
+        )
+        .is_err());
+    drop(vault);
+    assert!(Vault::unlock_with_password(dir.path(), new_password).is_ok());
+    // The kit still works until a new one is issued.
+    assert!(Vault::unlock_with_recovery(dir.path(), &recovery).is_ok());
 }
 
 #[test]
@@ -348,4 +377,299 @@ fn structured_data_behind_a_material_is_sealed_and_survives_relock() {
         vault.input_data(&case, &input.id).unwrap().as_deref(),
         Some(r#"{"note":"עבד לאט ובדייקנות"}"#)
     );
+}
+
+#[test]
+fn where_a_material_goes_is_sealed_and_survives_relock() {
+    let (dir, mut vault, _) = new_vault();
+    let case = noam(&mut vault);
+    let a = vault
+        .add_input(&case, InputKind::Intake, "אינטייק", "הלך בגיל שנה.")
+        .unwrap();
+    let b = vault
+        .add_input(&case, InputKind::Kindergarten, "שיחה עם הגננת", "משחק לבד.")
+        .unwrap();
+    assert_eq!(vault.input_routing(&case, &a.id).unwrap(), None);
+    let routing = r#"{"suggestion":null,"added":["סעיף-שנבחר-ביד"],"removed":[]}"#;
+    vault.set_input_routing(&case, &a.id, routing).unwrap();
+    assert!(matches!(
+        vault.set_input_routing(&case, "missing", "{}"),
+        Err(VaultError::NotFound)
+    ));
+    drop(vault);
+    assert!(!contains(&all_bytes(dir.path()), "סעיף-שנבחר-ביד"));
+    let vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
+    assert_eq!(
+        vault.input_routing(&case, &a.id).unwrap().as_deref(),
+        Some(routing)
+    );
+    // Each material has its own; nothing leaks to its neighbour.
+    assert_eq!(vault.input_routing(&case, &b.id).unwrap(), None);
+}
+
+#[test]
+fn folders_nest_hide_their_names_and_never_take_cases_with_them() {
+    let (dir, mut vault, _) = new_vault();
+    let case = noam(&mut vault);
+    let top = vault.create_folder(None, "משפחת-כהן-תיקייה").unwrap();
+    let sub = vault.create_folder(Some(&top.id), "2026").unwrap();
+    vault.move_case(&case, Some(&sub.id)).unwrap();
+    assert!(matches!(
+        vault.create_folder(Some("missing"), "x"),
+        Err(VaultError::NotFound)
+    ));
+    assert!(matches!(
+        vault.move_case(&case, Some("missing")),
+        Err(VaultError::NotFound)
+    ));
+    // No folder inside itself, directly or through a subfolder.
+    assert!(matches!(
+        vault.move_folder(&top.id, Some(&sub.id)),
+        Err(VaultError::Refused(_))
+    ));
+    assert!(matches!(
+        vault.move_folder(&top.id, Some(&top.id)),
+        Err(VaultError::Refused(_))
+    ));
+    vault.rename_folder(&sub.id, "שנת 2026").unwrap();
+
+    drop(vault);
+    assert!(!contains(&all_bytes(dir.path()), "משפחת-כהן-תיקייה"));
+    let mut vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
+    let names: Vec<String> = vault
+        .folders()
+        .unwrap()
+        .into_iter()
+        .map(|f| f.name)
+        .collect();
+    assert_eq!(names, ["משפחת-כהן-תיקייה", "שנת 2026"]);
+    assert_eq!(
+        vault.list_cases().unwrap()[0].folder_id.as_deref(),
+        Some(sub.id.as_str())
+    );
+
+    // Deleting a folder moves what is inside one level up.
+    vault.delete_folder(&sub.id).unwrap();
+    assert_eq!(
+        vault.list_cases().unwrap()[0].folder_id.as_deref(),
+        Some(top.id.as_str())
+    );
+    vault.delete_folder(&top.id).unwrap();
+    assert_eq!(vault.list_cases().unwrap()[0].folder_id, None);
+    assert!(vault.folders().unwrap().is_empty());
+}
+
+#[test]
+fn the_recycle_bin_keeps_a_case_until_it_is_restored_or_erased() {
+    let (_dir, mut vault, _) = new_vault();
+    let case = noam(&mut vault);
+    let folder = vault.create_folder(None, "תיקייה").unwrap();
+    vault.move_case(&case, Some(&folder.id)).unwrap();
+    vault.trash_case(&case).unwrap();
+    assert!(vault.list_cases().unwrap().is_empty());
+    let trash = vault.list_trash().unwrap();
+    assert_eq!(trash.len(), 1);
+    assert!(trash[0].deleted_at.is_some());
+    // Still readable: nothing is erased while it waits in the bin.
+    assert!(!vault.identities(&case).unwrap().is_empty());
+    assert!(vault.trashed_before(i64::MAX).unwrap().contains(&case));
+    assert!(vault.trashed_before(0).unwrap().is_empty());
+
+    // Its folder was deleted meanwhile: it comes back to the top level.
+    vault.delete_folder(&folder.id).unwrap();
+    vault.restore_case(&case).unwrap();
+    let back = vault.list_cases().unwrap();
+    assert_eq!((back.len(), back[0].folder_id.clone()), (1, None));
+    assert!(vault.list_trash().unwrap().is_empty());
+}
+
+#[test]
+fn the_password_can_be_checked_without_opening_the_vault_again() {
+    let (dir, _vault, _) = new_vault();
+    assert!(Vault::verify_password(dir.path(), PASSWORD).is_ok());
+    assert!(matches!(
+        Vault::verify_password(dir.path(), "ניחוש ארוך אבל שגוי"),
+        Err(VaultError::WrongSecret)
+    ));
+}
+
+#[test]
+fn a_backup_restores_on_a_new_computer_with_the_password_or_the_recovery_kit() {
+    let (dir, mut vault, recovery) = new_vault();
+    let case = noam(&mut vault);
+    let other = vault
+        .create_case(&CaseMeta {
+            code: "TEST-0002".into(),
+            ..CaseMeta::default()
+        })
+        .unwrap();
+    vault.trash_case(&other).unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("backup.vaultbak");
+    let info = vault.write_backup(&dest).unwrap();
+    let bytes = fs::read(&dest).unwrap();
+    assert_eq!(info.bytes, bytes.len() as u64);
+    // Its date and vault can be read before the password is asked for.
+    let peek = dv_vault::peek_backup(&bytes).unwrap();
+    assert_eq!(
+        (peek.created_at, peek.vault_id.as_str()),
+        (info.created_at, vault.vault_id())
+    );
+    // Nothing readable in the backup file, and no scratch left next to the vault.
+    for needle in ["נועם", "מיכל", "מתקשה", "TEST-0001", "SQLite format"] {
+        assert!(
+            !contains(&bytes, needle),
+            "{needle} is readable in the backup"
+        );
+    }
+    let leftovers: Vec<_> = fs::read_dir(dir.path())
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with('.'))
+        .collect();
+    assert!(leftovers.is_empty());
+    assert_eq!(
+        vault.audit_entries(1).unwrap()[0].event,
+        AuditEvent::BackupWritten.as_str()
+    );
+
+    for secret in [Secret::Password(PASSWORD), Secret::Recovery(&recovery)] {
+        let target = tempfile::tempdir().unwrap();
+        let (restored, check) = Vault::restore_backup(&bytes, target.path(), secret).unwrap();
+        assert_eq!(check.cases, 2);
+        assert!(check.integrity_ok);
+        assert_eq!(check.created_at, info.created_at);
+        assert_eq!(restored.list_cases().unwrap()[0].id, case);
+        assert_eq!(restored.list_trash().unwrap()[0].id, other);
+        let who = restored.identities(&case).unwrap();
+        assert!(who.iter().any(|i| i.value == "נועם"));
+        assert_eq!(
+            restored.audit_entries(1).unwrap()[0].event,
+            AuditEvent::Restored.as_str()
+        );
+        drop(restored);
+        // The restored vault is a normal vault from now on.
+        let reopened = Vault::unlock_with_password(target.path(), PASSWORD).unwrap();
+        assert!(reopened.integrity().header_ok && reopened.integrity().audit_ok);
+    }
+}
+
+#[test]
+fn a_backup_opens_only_with_the_right_secret_and_unchanged() {
+    let (_dir, mut vault, _) = new_vault();
+    noam(&mut vault);
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("backup.vaultbak");
+    vault.write_backup(&dest).unwrap();
+    let bytes = fs::read(&dest).unwrap();
+
+    let target = tempfile::tempdir().unwrap();
+    assert!(matches!(
+        Vault::restore_backup(
+            &bytes,
+            target.path(),
+            Secret::Password("ניחוש ארוך אבל שגוי")
+        ),
+        Err(VaultError::WrongSecret)
+    ));
+    // One changed byte in the sealed part, or a changed backup time: it does not open.
+    let mut flipped = bytes.clone();
+    let last = flipped.len() - 1;
+    flipped[last] ^= 1;
+    assert!(Vault::restore_backup(&flipped, target.path(), Secret::Password(PASSWORD)).is_err());
+    let header_len = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
+    let mut retimed = bytes.clone();
+    retimed[12 + header_len] ^= 1;
+    assert!(Vault::restore_backup(&retimed, target.path(), Secret::Password(PASSWORD)).is_err());
+    // A header swapped in from another vault (same password): it does not open either.
+    let (_other_dir, mut other, _) = new_vault();
+    let other_dest = out.path().join("other.vaultbak");
+    other.write_backup(&other_dest).unwrap();
+    let other_bytes = fs::read(&other_dest).unwrap();
+    let other_len = u32::from_le_bytes(other_bytes[8..12].try_into().unwrap()) as usize;
+    let mut swapped = other_bytes[..12 + other_len].to_vec();
+    swapped.extend_from_slice(&bytes[12 + header_len..]);
+    assert!(Vault::restore_backup(&swapped, target.path(), Secret::Password(PASSWORD)).is_err());
+    assert!(
+        Vault::restore_backup(b"not a backup", target.path(), Secret::Password(PASSWORD)).is_err()
+    );
+    // Failed attempts leave nothing behind.
+    assert_eq!(fs::read_dir(target.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn restoring_never_overwrites_a_vault() {
+    let (dir, mut vault, _) = new_vault();
+    noam(&mut vault);
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("backup.vaultbak");
+    vault.write_backup(&dest).unwrap();
+    let bytes = fs::read(&dest).unwrap();
+    assert!(matches!(
+        Vault::restore_backup(&bytes, dir.path(), Secret::Password(PASSWORD)),
+        Err(VaultError::AlreadyExists)
+    ));
+}
+
+#[test]
+fn the_restore_drill_checks_a_backup_without_touching_the_vault() {
+    let (dir, mut vault, _) = new_vault();
+    let case = noam(&mut vault);
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("backup.vaultbak");
+    vault.write_backup(&dest).unwrap();
+    let bytes = fs::read(&dest).unwrap();
+    // Work goes on after the backup.
+    vault.trash_case(&case).unwrap();
+
+    let check = vault
+        .check_backup(&bytes, Secret::Password(PASSWORD))
+        .unwrap();
+    assert_eq!(check.cases, 1);
+    assert!(check.integrity_ok);
+    assert!(
+        vault.list_cases().unwrap().is_empty(),
+        "the live vault is untouched"
+    );
+    assert_eq!(
+        vault.audit_entries(1).unwrap()[0].event,
+        AuditEvent::BackupChecked.as_str()
+    );
+    let names: Vec<String> = fs::read_dir(dir.path())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(names.iter().all(|n| !n.starts_with('.')), "{names:?}");
+    assert!(vault
+        .check_backup(&bytes, Secret::Password("ניחוש ארוך אבל שגוי"))
+        .is_err());
+}
+
+#[test]
+fn scratch_folders_left_by_a_crash_are_removed_at_unlock() {
+    let (dir, vault, _) = new_vault();
+    drop(vault);
+    let stale = dir.path().join(".backup-0123");
+    fs::create_dir(&stale).unwrap();
+    fs::write(stale.join("main.db"), b"encrypted copy").unwrap();
+    let _vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
+    assert!(!stale.exists());
+}
+
+#[test]
+fn the_log_reads_in_pages_and_its_chain_is_checked_on_demand() {
+    let (_dir, mut vault, _) = new_vault();
+    noam(&mut vault);
+    noam(&mut vault);
+    let all = vault.audit_entries(1000).unwrap();
+    let first = vault.audit_page(None, 3).unwrap();
+    let rest = vault.audit_page(Some(first[2].seq), 1000).unwrap();
+    assert_eq!(first.len() + rest.len(), all.len());
+    assert!(first
+        .iter()
+        .chain(&rest)
+        .map(|e| e.seq)
+        .eq(all.iter().map(|e| e.seq)));
+    assert!(vault.audit_intact().unwrap());
 }

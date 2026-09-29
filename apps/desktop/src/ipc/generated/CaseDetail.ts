@@ -2,6 +2,15 @@
 import type { CaseInput } from "./CaseInput";
 import type { CaseMeta } from "./CaseMeta";
 import type { Identity } from "./Identity";
+import type { MaterialRouting } from "./MaterialRouting";
 import type { SectionView } from "./SectionView";
 
-export type CaseDetail = { id: string, meta: CaseMeta, identities: Array<Identity>, inputs: Array<CaseInput>, sections: Array<SectionView>, };
+export type CaseDetail = { id: string, meta: CaseMeta, identities: Array<Identity>, inputs: Array<CaseInput>, 
+/**
+ * Where each material goes in the report, in the order of `inputs`.
+ */
+routing: Array<MaterialRouting>, sections: Array<SectionView>, 
+/**
+ * The proposed retention date (P-07) when `meta.retention_until` is not set.
+ */
+retention_default: string, };

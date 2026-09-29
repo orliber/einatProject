@@ -4,7 +4,7 @@ import type { Role } from "../ipc/generated/Role";
 
 export const he = {
   appName: "כספת האבחון",
-  encrypted: "מוצפן · שמור במחשב בלבד",
+  encrypted: "מוצפן, שמור במחשב הזה",
   lock: {
     lockedAfterIdle: (minutes: number) => `הכספת ננעלה אחרי ${minutes} דקות ללא פעילות.`,
     password: "סיסמה",
@@ -13,8 +13,8 @@ export const he = {
       "כל המידע מוצפן ושמור רק במחשב הזה. לנו אין עותק ואין סיסמה, ולכן אי אפשר לשחזר אותה בלי ערכת השחזור המודפסת.",
   },
   core: {
-    connected: "הליבה המאובטחת מחוברת",
-    disconnected: "אין חיבור לליבה המאובטחת",
+    connected: "התוכנה פועלת כראוי",
+    disconnected: "התוכנה לא מגיבה. כדאי לסגור ולפתוח אותה",
     checking: "בודק חיבור…",
   },
 } as const;

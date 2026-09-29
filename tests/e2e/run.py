@@ -13,6 +13,8 @@ import time
 import traceback
 
 from selenium import webdriver
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.options import ArgOptions
 from selenium.webdriver.support.ui import WebDriverWait
@@ -41,8 +43,11 @@ env.update(
     XDG_DATA_HOME=os.path.join(HOME, ".local/share"),
     XDG_DOWNLOAD_DIR=os.path.join(HOME, "Downloads"),
     XDG_CONFIG_HOME=os.path.join(HOME, ".config"),
+    # Debug builds only: stands in for the system "Save as" / "Open" window (D-024).
+    DV_E2E_DIALOG_DIR=os.path.join(OUT, "backup-drive"),
 )
 os.makedirs(os.path.join(HOME, "Downloads"), exist_ok=True)
+os.makedirs(env["DV_E2E_DIALOG_DIR"], exist_ok=True)
 
 xvfb = subprocess.Popen(["Xvfb", ":99", "-screen", "0", "1280x800x24"], stderr=subprocess.DEVNULL)
 time.sleep(1)
@@ -183,21 +188,43 @@ try:
     time.sleep(1)
     shot("materials")
 
+    # 3b. Sorting the materials into sections (D-022), through the review screen (demo mode).
+    button("מיון החומרים לסעיפים").click()
+    expect_text("לפני שליחה ל-Claude", 60)
+    time.sleep(0.5)
+    body = d.find_element(By.TAG_NAME, "body").text
+    log.append("     sorting review: unknown name 'יובל' flagged = " + str("יובל" in body and "לא מופיע" in body))
+    for _ in range(8):
+        pending = [b for b in d.find_elements(By.XPATH, "//button[normalize-space()='להסתיר את השם' or normalize-space()='זה לא שם, להשאיר' or normalize-space()='מילה רגילה, להשאיר']") if b.is_displayed()]
+        if not pending:
+            break
+        pending[0].click()
+        time.sleep(1)
+    shot("sort-review")
+    button("שליחה").click()
+    expect_text("לסעיפים", 60)
+    time.sleep(1)
+    body = d.find_element(By.TAG_NAME, "body").text
+    log.append("     sorting: materials sorted = " + str("מוינו לסעיפים" in body or "מוין לסעיפים" in body))
+    shot("sorted")
+
     # 4. A section: draft from the sources, with the review screen.
-    find("//button[contains(@class,'side-section')][.//span[normalize-space()='איכויות התקשורת']]").click()
-    button("טיוטה מהמקורות").click()
+    section = find("//button[contains(@class,'side-section')][.//span[normalize-space()='איכויות התקשורת']]")
+    d.execute_script("arguments[0].scrollIntoView({block: 'center'});", section)
+    section.click()
+    button("טיוטה מהחומרים").click()
     expect_text("לפני שליחה ל-Claude", 60)
     time.sleep(0.5)
     shot("review-suspect")
     body = d.find_element(By.TAG_NAME, "body").text
-    log.append("     review: unknown name 'יובל' flagged = " + str("יובל" in body and "לא מופיע" in body))
-    hide = [b for b in d.find_elements(By.XPATH, "//button[starts-with(normalize-space(),'להסתיר כ')]") if b.is_displayed()]
+    log.append("     section review: 'יובל' already decided in the sorting review = " + str("מי זה" not in body))
+    hide = [b for b in d.find_elements(By.XPATH, "//button[normalize-space()='להסתיר את השם']") if b.is_displayed()]
     for b in hide[:3]:
         b.click()
         time.sleep(1)
     # Any remaining suspects (e.g. ambiguous words): keep as ordinary words.
     for _ in range(5):
-        rest = [b for b in d.find_elements(By.XPATH, "//button[normalize-space()='זה לא שם' or normalize-space()='מילה רגילה']") if b.is_displayed()]
+        rest = [b for b in d.find_elements(By.XPATH, "//button[normalize-space()='זה לא שם, להשאיר' or normalize-space()='מילה רגילה, להשאיר']") if b.is_displayed()]
         if not rest:
             break
         rest[0].click()
@@ -259,10 +286,93 @@ try:
     time.sleep(0.5)
     shot("cases-list")
 
-    # 8. Lock.
+    # 7b. Folders (D-023): a new folder, the case moved into it from the "⋯" menu.
+    button("תיקייה חדשה").click()
+    find("//input[@id='folder-name']").send_keys("אבחונים פרטיים")
+    button("שמירה").click()
+    # By DOM text: WebKit's driver leaves ellipsis-clipped text out of .text.
+    find("//span[contains(@class,'folder-name')][normalize-space()='אבחונים פרטיים']")
+    # From the keyboard, as someone without a mouse would (Enter opens, arrows move).
+    find("//button[starts-with(@aria-label, 'פעולות על התיק של')]").send_keys(Keys.ENTER)
+    time.sleep(0.4)
+    item = find("//*[@role='menuitem'][contains(normalize-space(), 'העברה לתיקייה')]")
+    ActionChains(d).send_keys(Keys.ARROW_DOWN).perform()
+    time.sleep(0.2)
+    log.append("     folders: actions menu opens from the keyboard = " + str(item.is_displayed()))
+    ActionChains(d).send_keys(Keys.ENTER).perform()
+    time.sleep(0.4)
+    find("//label[contains(@class,'move-row')][.//span[normalize-space()='אבחונים פרטיים']]").click()
+    find("//section[@role='dialog']//button[normalize-space()='העברה']").click()
+    expect_text("התיק הועבר")
+    find("//button[contains(@class,'folder-open')]").click()
+    time.sleep(0.5)
+    body = d.find_element(By.TAG_NAME, "body").text
+    here = d.find_elements(By.XPATH, "//nav[@aria-label='מיקום']//*[@aria-current='page'][normalize-space()='אבחונים פרטיים']")
+    log.append("     folders: case inside the new folder = " + str("נועם" in body and len(here) == 1))
+    shot("folder")
+
+    # 7c. Backup (D-024): the reminder on the cases screen, then a restore drill in settings.
+    button("כל התיקים").click()
+    find("//div[contains(@class,'backup-reminder')]")
+    shot("backup-reminder")
+    find("//div[contains(@class,'backup-reminder')]//button[contains(normalize-space(),'גיבוי עכשיו')]").click()
+    expect_text("הגיבוי נשמר מוצפן")
+    drive = env["DV_E2E_DIALOG_DIR"]
+    files = [f for f in os.listdir(drive) if f.endswith(".vaultbak")]
+    with open(os.path.join(drive, files[0]), "rb") as fh:
+        raw = fh.read()
+    log.append(f"     backup: {files[0]} ({len(raw)} bytes), readable names = "
+               + str(any(n.encode() in raw for n in ["נועם", "דנה", "יוסי", "SQLite format"])))
+    # The toast sits over the top bar for a few seconds.
+    WebDriverWait(d, 15).until(lambda drv: not drv.find_elements(By.CLASS_NAME, "toast"))
+    button("הגדרות").click()
+    expect_text("הגיבוי האחרון: היום")
+    button("בדיקת גיבוי").click()
+    find("//input[@id='check-pw']").send_keys("כלב ירוק רץ מהר בגינה")
+    find("//section[@role='dialog']//button[normalize-space()='בדיקה']").click()
+    expect_text("הגיבוי נפתח ותקין", 60)
+    time.sleep(0.3)
+    shot("backup-drill")
+    vault_dir = os.path.join(HOME, ".local/share", "il.diagnosticvault.desktop", "vault")
+    log.append("     backup: drill opened it, one case = " + str("תיק אחד" in d.find_element(By.TAG_NAME, "body").text)
+               + ", scratch left next to the vault = " + str(any(n.startswith(".") for n in os.listdir(vault_dir))))
+    find("//section[@role='dialog']//button[normalize-space()='סגירה']").click()
+
+    # 7d. A new password: the backup made with the old one is flagged.
+    button("החלפת סיסמה").click()
+    find("//input[@id='current-secret']").send_keys("כלב ירוק רץ מהר בגינה")
+    d.find_element(By.ID, "new-pw").send_keys("שמש צהובה על הים הכחול")
+    d.find_element(By.ID, "new-pw2").send_keys("שמש צהובה על הים הכחול")
+    find("//section[@role='dialog']//button[normalize-space()='החלפה']").click()
+    expect_text("הסיסמה הוחלפה")
+    expect_text("הגיבוי הזה נפתח רק בקודמות")
+    shot("password-changed")
+
+    # 7e. The activity log: Hebrew lines, the case named only here, the chain checked.
+    WebDriverWait(d, 15).until(lambda drv: not drv.find_elements(By.CLASS_NAME, "toast"))
+    button("פתיחת היומן").click()
+    expect_text("השרשרת שלמה")
+    body = d.find_element(By.TAG_NAME, "body").text
+    log.append("     activity: password change = " + str("הסיסמה הוחלפה" in body)
+               + ", section sent = " + str("נשלח ל-Claude" in body)
+               + ", backup = " + str("גיבוי מוצפן נשמר" in body)
+               + ", case named locally = " + str(bool(d.find_elements(By.XPATH, "//span[contains(@class,'activity-case')][contains(., 'נועם')]"))))
+    shot("activity-log")
+    find("//section[@role='dialog']//button[normalize-space()='עברתי על היומן']").click()
+    expect_text("נבדק לאחרונה")
+    find("//section[@role='dialog']//button[normalize-space()='סגירה']").click()
+
+    # 8. Lock, and back in with the new password.
+    WebDriverWait(d, 15).until(lambda drv: not drv.find_elements(By.CLASS_NAME, "toast"))
     button("נעילה").click()
     find("//input[@id='pw']")
     shot("locked")
+    # The page reloads once locked (names must not stay in its memory): wait for the new one.
+    time.sleep(1.5)
+    find("//input[@id='pw']").send_keys("שמש צהובה על הים הכחול")
+    button("פתיחה").click()
+    expect_text("הסיסמה או ערכת השחזור הוחלפו אחרי הגיבוי האחרון")
+    log.append("     password: new password opens the vault, backup reminder names the change = True")
 except Exception:
     ok = False
     log.append("FAIL " + " / ".join(traceback.format_exc().splitlines()[-4:]))

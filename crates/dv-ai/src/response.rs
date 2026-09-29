@@ -54,7 +54,7 @@ struct RawReply {
 }
 
 /// Concatenated text blocks, after checking why the model stopped.
-fn text_of(response: &Value) -> Result<String, AiError> {
+pub(crate) fn text_of(response: &Value) -> Result<String, AiError> {
     match response["stop_reason"].as_str() {
         Some("refusal") => {
             let category = response["stop_details"]["category"]

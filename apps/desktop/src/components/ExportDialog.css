@@ -108,15 +108,6 @@
 .mini-section i.short {
   width: 70%;
 }
-.btn-danger {
-  background: #8a1c0c;
-  border-color: #8a1c0c;
-  color: #fff;
-  font-weight: 700;
-}
-.btn-danger:hover:not(:disabled) {
-  background: #6e1609;
-}
 .danger-zone {
   border-color: #e3b2a8;
 }
@@ -124,9 +115,19 @@
   overflow: auto;
 }
 .details-col {
-  width: 460px;
+  width: 400px;
   flex-shrink: 0;
+}
+.names-card {
+  min-width: 0;
 }
 .details-card {
   padding: 16px 18px;
+}
+.empty-list > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.empty-list[open] > summary {
+  margin-bottom: 4px;
 }

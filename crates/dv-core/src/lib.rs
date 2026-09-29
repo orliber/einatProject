@@ -4,6 +4,12 @@
 //! machine without a WebView. `Core` owns the unlocked vault and walks every request through
 //! the same path: filter → build → review → gate → (approval) → send → check → store.
 
+mod activity;
+mod backup;
+mod dates;
+mod library;
+mod retention;
+mod sorting;
 mod views;
 
 use std::collections::{HashMap, HashSet};
@@ -13,7 +19,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use dv_ai::{ModelConfig, SectionInput, TaggedInput, TaggedTurn, ALLOWED_MODELS};
 use dv_domain::{
-    Author, CaseMeta, CaseSummary, ChatRole, DraftStatus, IdentityInput, InputKind,
+    passage_ranges, Author, CaseMeta, CaseSummary, ChatRole, DraftStatus, IdentityInput, InputKind,
     ReportStructure, Role,
 };
 use dv_egress::{AnthropicTransport, EgressError, Transport};
@@ -26,10 +32,17 @@ use dv_privacy::{
 use dv_vault::{Argon2Params, AuditEvent, Vault, VaultError};
 use serde_json::Value;
 
+pub use activity::ACTIVITY_PAGE;
+pub use backup::{backup_file_name, BACKUP_DAYS, MAX_BACKUP_BYTES};
+pub(crate) use dates::today;
+pub use dv_vault::BACKUP_EXTENSION;
+pub use library::TRASH_DAYS;
+pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
 pub use views::{
-    AppStatus, CaseDetail, ChatView, ConsultResult, CreatedVault, ExportCheck, ImportPreview,
-    NameSuggestion, ParagraphView, Prepared, ReportSettings, ReviewPart, SectionResult,
-    SectionView, SuspectDecision, UiError,
+    ActivityEntry, ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail,
+    ChatView, ConsultResult, CreatedVault, ExportCheck, ImportPreview, MaterialRouting, NameMatch,
+    NameSuggestion, ParagraphView, Prepared, ReportSettings, RetentionItem, ReviewPart,
+    SectionResult, SectionView, SortResult, StagedBackup, SuspectDecision, UiError,
 };
 
 const API_KEY: &str = "anthropic_api_key";
@@ -46,6 +59,8 @@ fn day_number() -> u64 {
         .map_or(0, |d| d.as_secs() / 86_400)
 }
 const REPORT_KEY: &str = "report_settings";
+/// A gap this long between two 15-second ticks means the computer slept.
+const SLEEP_GAP: Duration = Duration::from_secs(60);
 const MAX_REQUEST_BYTES: usize = 900_000;
 /// Sections written from other, already approved sections.
 const DERIVED_SECTIONS: &[&str] = &["dsm", "summary", "diagnoses", "recommendations"];
@@ -149,30 +164,20 @@ fn egress_he(e: &EgressError) -> String {
 /// Today's date `(y, m, d)` in UTC, for relative dates.
 /// A consent is a record the psychologist may have to show: a real, past date and who signed.
 fn check_meta(meta: &CaseMeta) -> Result<(), CoreError> {
+    if meta
+        .retention_until
+        .as_deref()
+        .is_some_and(|d| dates::parse_iso(d).is_none())
+    {
+        return Err(CoreError::Refused(
+            "תאריך סוף תקופת השמירה לא תקין.".to_owned(),
+        ));
+    }
     let Some(consent) = &meta.consent else {
         return Ok(());
     };
     let refused = |why: &str| Err(CoreError::Refused(why.to_owned()));
-    let parts: Vec<&str> = consent.given_on.split('-').collect();
-    let date = match parts.as_slice() {
-        [y, m, d] if y.len() == 4 && m.len() == 2 && d.len() == 2 => {
-            match (y.parse::<i32>(), m.parse::<u32>(), d.parse::<u32>()) {
-                (Ok(y), Ok(m), Ok(d)) => Some((y, m, d)),
-                _ => None,
-            }
-        }
-        _ => None,
-    };
-    let Some((y, m, d)) = date.filter(|&(y, m, d)| {
-        let days = match m {
-            1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-            4 | 6 | 9 | 11 => 30,
-            2 if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) => 29,
-            2 => 28,
-            _ => 0,
-        };
-        (2000..=2200).contains(&y) && (1..=days).contains(&d)
-    }) else {
+    let Some((y, m, d)) = dates::parse_iso(&consent.given_on) else {
         return refused("תאריך ההסכמה לא תקין.");
     };
     // Local time may already be tomorrow in UTC terms (Israel is ahead of UTC).
@@ -187,26 +192,6 @@ fn check_meta(meta: &CaseMeta) -> Result<(), CoreError> {
     Ok(())
 }
 
-fn today() -> (i32, u32, u32) {
-    let days = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() / 86_400);
-    let z = i64::try_from(days).unwrap_or(0) + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + i64::from(m <= 2);
-    (
-        i32::try_from(y).unwrap_or(2026),
-        u32::try_from(m).unwrap_or(1),
-        u32::try_from(d).unwrap_or(1),
-    )
-}
-
 enum PendingKind {
     Section {
         case_id: String,
@@ -218,6 +203,13 @@ enum PendingKind {
     Consult {
         case_id: Option<String>,
         message_tagged: String,
+    },
+    /// Sorting materials into sections (D-022): per material its id, how many passages were
+    /// sent, and a fingerprint of its text then.
+    Sort {
+        case_id: String,
+        materials: Vec<(String, usize, u64)>,
+        sections: Vec<String>,
     },
 }
 
@@ -270,12 +262,16 @@ pub struct Core {
     pending: HashMap<String, Pending>,
     consult_history: HashMap<String, Vec<TaggedTurn>>,
     last_activity: Instant,
+    /// Wall-clock time of the shell's last timer tick (sleep detection).
+    last_tick: Option<SystemTime>,
     failed_unlocks: u32,
     not_before: Option<Instant>,
     disk_encryption: String,
     transport: Option<Arc<dyn Transport>>,
     /// The app's own binary, started as an isolated worker for each document.
     ingest_exe: Option<PathBuf>,
+    /// A backup file chosen for the drill or a restore (encrypted bytes).
+    staged_backup: Option<Vec<u8>>,
 }
 
 impl std::fmt::Debug for Core {
@@ -357,11 +353,13 @@ impl Core {
             pending: HashMap::new(),
             consult_history: HashMap::new(),
             last_activity: Instant::now(),
+            last_tick: None,
             failed_unlocks: 0,
             not_before: None,
             disk_encryption: disk.to_owned(),
             transport: None,
             ingest_exe: None,
+            staged_backup: None,
         }
     }
 
@@ -400,8 +398,25 @@ impl Core {
         self.vault.as_mut().ok_or(CoreError::Locked)
     }
 
-    /// Called by the shell on a timer: lock after the configured idle time even when
-    /// nothing is clicked. Returns true when it locked.
+    /// Called by the shell every 15 seconds. Locks after the idle time, and after the computer
+    /// slept: while it sleeps the timer does not run, so the wall clock jumps between two
+    /// ticks. (A monotonic clock does not always count sleep, so idle time alone misses it.)
+    /// Returns true when it locked.
+    pub fn tick(&mut self, now: SystemTime) -> bool {
+        let slept = self
+            .last_tick
+            .and_then(|t| now.duration_since(t).ok())
+            .is_some_and(|gap| gap > SLEEP_GAP);
+        self.last_tick = Some(now);
+        if slept && self.vault.is_some() {
+            self.lock_because(Some("sleep"));
+            return true;
+        }
+        self.lock_if_idle()
+    }
+
+    /// Lock after the configured idle time even when nothing is clicked. Returns true when it
+    /// locked.
     pub fn lock_if_idle(&mut self) -> bool {
         let limit = Duration::from_secs(u64::from(self.lock_minutes()) * 60);
         if self.vault.is_some() && self.last_activity.elapsed() > limit {
@@ -506,7 +521,13 @@ impl Core {
         }
     }
 
-    fn after_unlock(&mut self, result: Result<Vault, VaultError>) -> Result<AppStatus, CoreError> {
+    /// `purge`: erase what waited in the recycle bin past its time. Not right after a restore,
+    /// which is often done to get back something deleted by mistake.
+    fn after_unlock(
+        &mut self,
+        result: Result<Vault, VaultError>,
+        purge: bool,
+    ) -> Result<AppStatus, CoreError> {
         match result {
             Ok(mut vault) => {
                 if self.failed_unlocks > 0 {
@@ -520,6 +541,19 @@ impl Core {
                 self.not_before = None;
                 self.vault = Some(vault);
                 self.last_activity = Instant::now();
+                if purge {
+                    // Best effort: a case that fails to erase now is tried again next time, and
+                    // never keeps the vault from opening.
+                    if let Err(e) = self.purge_expired() {
+                        if let Some(v) = self.vault.as_mut() {
+                            let _ = v.record(
+                                AuditEvent::IntegrityWarning,
+                                None,
+                                &serde_json::json!({ "reason": format!("recycle bin: {e}") }),
+                            );
+                        }
+                    }
+                }
                 Ok(self.status())
             }
             Err(e) => {
@@ -537,14 +571,14 @@ impl Core {
         self.refuse_cloud()?;
         self.check_backoff()?;
         let result = Vault::unlock_with_password(&self.dir, password);
-        self.after_unlock(result)
+        self.after_unlock(result, true)
     }
 
     pub fn unlock_with_recovery(&mut self, recovery_key: &str) -> Result<AppStatus, CoreError> {
         self.refuse_cloud()?;
         self.check_backoff()?;
         let result = Vault::unlock_with_recovery(&self.dir, recovery_key);
-        self.after_unlock(result)
+        self.after_unlock(result, true)
     }
 
     pub fn confirm_recovery_key(&mut self, typed: &str) -> Result<bool, CoreError> {
@@ -553,11 +587,73 @@ impl Core {
 
     /// Wipe keys, pending approvals and consultation history from memory.
     pub fn lock(&mut self) {
+        self.lock_because(None);
+    }
+
+    fn lock_because(&mut self, reason: Option<&str>) {
         self.pending.clear();
         self.consult_history.clear();
+        self.staged_backup = None;
         if let Some(v) = self.vault.take() {
-            let _ = v.lock();
+            let _ = v.lock_because(reason);
         }
+    }
+
+    // ------------------------------------------------------------ password and kit
+
+    /// `current` is the password, or the recovery kit when the password was forgotten.
+    fn proof<'a>(current: &'a str, with_recovery: bool) -> dv_vault::Secret<'a> {
+        if with_recovery {
+            dv_vault::Secret::Recovery(current)
+        } else {
+            dv_vault::Secret::Password(current)
+        }
+    }
+
+    /// A new password. Old backups keep opening with the old one, so a new backup is asked for.
+    pub fn change_password(
+        &mut self,
+        current: &str,
+        with_recovery: bool,
+        new_password: &str,
+    ) -> Result<(), CoreError> {
+        self.check_backoff()?;
+        let params = self.argon.unwrap_or_else(Argon2Params::calibrate);
+        let result = self.vault_mut()?.rekey_password(
+            Self::proof(current, with_recovery),
+            new_password,
+            params,
+        );
+        if let Err(e) = result {
+            self.count_failure(&e);
+            return Err(e.into());
+        }
+        self.failed_unlocks = 0;
+        self.mark_secret_changed()
+    }
+
+    /// A new printed kit; the old one stops opening the vault (not old backups).
+    pub fn new_recovery_kit(
+        &mut self,
+        current: &str,
+        with_recovery: bool,
+    ) -> Result<CreatedVault, CoreError> {
+        self.check_backoff()?;
+        let result = self
+            .vault_mut()?
+            .rotate_recovery_key(Self::proof(current, with_recovery));
+        let key = match result {
+            Ok(key) => key,
+            Err(e) => {
+                self.count_failure(&e);
+                return Err(e.into());
+            }
+        };
+        self.failed_unlocks = 0;
+        self.mark_secret_changed()?;
+        Ok(CreatedVault {
+            recovery_key: key.to_string(),
+        })
     }
 
     // ------------------------------------------------------------ settings
@@ -622,10 +718,6 @@ impl Core {
         Ok(self.vault_mut()?.update_case_meta(case_id, &meta)?)
     }
 
-    pub fn delete_case(&mut self, case_id: &str) -> Result<(), CoreError> {
-        Ok(self.vault_mut()?.delete_case(case_id)?)
-    }
-
     pub fn set_identities(
         &mut self,
         case_id: &str,
@@ -651,9 +743,18 @@ impl Core {
         title: &str,
         content: &str,
     ) -> Result<(), CoreError> {
-        Ok(self
-            .vault_mut()?
-            .update_input(case_id, input_id, title, content)?)
+        let before = self
+            .vault_ref()?
+            .inputs(case_id)?
+            .into_iter()
+            .find(|i| i.id == input_id)
+            .map(|i| i.content);
+        self.vault_mut()?
+            .update_input(case_id, input_id, title, content)?;
+        if before.as_deref() != Some(content) {
+            self.forget_sorting(case_id, input_id)?;
+        }
+        Ok(())
     }
 
     /// The instruments with their fixed tables (knowledge/instruments.md).
@@ -909,6 +1010,11 @@ impl Core {
         Ok(())
     }
 
+    /// No API key and no test transport: answers are built locally and nothing is sent.
+    fn demo_mode(&mut self) -> Result<bool, CoreError> {
+        Ok(self.vault_ref()?.secret(API_KEY)?.is_none() && self.transport.is_none())
+    }
+
     fn model_config(&mut self) -> Result<ModelConfig, CoreError> {
         let model = self
             .vault_ref()?
@@ -928,6 +1034,18 @@ impl Core {
         let identities = v.identities(case_id)?;
         let inputs = v.inputs(case_id)?;
         let practitioner = v.practitioner()?.names.first().cloned();
+        let routing = Core::material_routing(v, &structure, case_id, &inputs)?;
+        let retention_default = v
+            .list_cases()?
+            .into_iter()
+            .chain(v.list_trash()?)
+            .find(|c| c.id == case_id)
+            .map(|c| retention::default_until(c.created_at, c.updated_at, c.meta.age.as_ref()))
+            .unwrap_or_default();
+        let sortable: Vec<&str> = sorting::sortable(&structure)
+            .iter()
+            .map(|s| s.key.as_str())
+            .collect();
         let mut sections = Vec::new();
         for part in &structure.parts {
             for s in &part.sections {
@@ -954,7 +1072,7 @@ impl Core {
                     })
                     .collect();
                 let source_count =
-                    u32::try_from(inputs.iter().filter(|i| s.inputs.contains(&i.kind)).count())
+                    u32::try_from(routing.iter().filter(|r| r.feeds.contains(&s.key)).count())
                         .unwrap_or(0);
                 let approved = paragraphs.iter().any(|p| p.status == DraftStatus::Approved);
                 sections.push(SectionView {
@@ -962,6 +1080,7 @@ impl Core {
                     title: s.title.clone(),
                     part: part.title.clone(),
                     source_count,
+                    sortable: sortable.contains(&s.key.as_str()),
                     paragraphs,
                     approved,
                 });
@@ -972,7 +1091,9 @@ impl Core {
             meta,
             identities,
             inputs,
+            routing,
             sections,
+            retention_default,
         })
     }
 
@@ -1101,7 +1222,7 @@ impl Core {
             .clone();
         let model = self.model_config()?;
         let data = self.privacy_data(case_id)?;
-        let demo_mode = self.vault_ref()?.secret(API_KEY)?.is_none() && self.transport.is_none();
+        let demo_mode = self.demo_mode()?;
 
         let (input, review, sources) = {
             let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
@@ -1126,24 +1247,30 @@ impl Core {
             let mut source_rows = Vec::new();
             let derived = DERIVED_SECTIONS.contains(&section_key);
             if !derived {
-                for (n, inp) in v
-                    .inputs(case_id)?
-                    .into_iter()
-                    .filter(|i| section.inputs.contains(&i.kind))
-                    .enumerate()
-                {
-                    let sid = format!("S{}", n + 1);
+                for inp in v.inputs(case_id)? {
+                    // D-022: the table, the sorting, and Einat's choice decide what goes here.
+                    let table = sorting::table_for(&structure, inp.kind);
+                    let count = passage_ranges(&inp.content).len();
+                    let Some(feed) =
+                        sorting::routing_of(v, case_id, &inp.id)?.feed(section_key, &table, count)
+                    else {
+                        continue;
+                    };
+                    let sid = format!("S{}", tagged_sources.len() + 1);
                     let title = run(&inp.title)?;
-                    let content = run(&inp.content)?;
+                    let content = sorting::section_text(&inp.content, &feed, &ctx)?;
+                    let kind = match feed {
+                        dv_domain::Feed::Whole => inp.kind.label_he().to_owned(),
+                        dv_domain::Feed::Passages(_) => {
+                            format!("{} · קטעים שנבחרו לסעיף", inp.kind.label_he())
+                        }
+                    };
                     // A title with nothing to hide is shown as the source's label, not as a part.
                     if title.original_segments.iter().any(|s| s.mark.is_some()) {
-                        review.add(format!("{sid} · {} · כותרת", inp.kind.label_he()), &title);
-                        review.add(format!("{sid} · {}", inp.kind.label_he()), &content);
+                        review.add(format!("{sid} · {kind} · כותרת"), &title);
+                        review.add(format!("{sid} · {kind}"), &content);
                     } else {
-                        review.add(
-                            format!("{sid} · {} · {}", inp.kind.label_he(), title.tagged),
-                            &content,
-                        );
+                        review.add(format!("{sid} · {kind} · {}", title.tagged), &content);
                     }
                     tagged_sources.push(TaggedInput {
                         input_id: inp.id.clone(),
@@ -1291,13 +1418,27 @@ impl Core {
         else {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
         };
+        // The request went out: record it before anything about the reply can fail.
+        let model = self.model_config()?.model;
+        let payload_text = String::from_utf8_lossy(payload.body()).into_owned();
+        let v = self.vault_mut()?;
+        v.add_transmission(
+            &case_id,
+            &section_key,
+            payload.sha256(),
+            if demo { "demo" } else { &model },
+            &payload_text,
+        )?;
+        v.record(
+            AuditEvent::Send,
+            Some(&case_id),
+            &serde_json::json!({ "section": section_key, "demo": demo }),
+        )?;
         let refs: Vec<(String, String)> = sources
             .iter()
             .map(|(sid, _, text)| (sid.clone(), text.clone()))
             .collect();
         let mut reply = dv_ai::parse_section(&response, &refs)?;
-
-        let model = self.model_config()?.model;
         let v = self.vault_mut()?;
         let identities = v.identities(&case_id)?;
         let case_tags: Vec<String> = identities.iter().map(|i| i.tag.clone()).collect();
@@ -1335,19 +1476,6 @@ impl Core {
                 .collect();
             v.add_draft(&case_id, &section_key, &p.text, Author::Ai, &input_ids)?;
         }
-        let payload_text = String::from_utf8_lossy(payload.body()).into_owned();
-        v.add_transmission(
-            &case_id,
-            &section_key,
-            payload.sha256(),
-            if demo { "demo" } else { &model },
-            &payload_text,
-        )?;
-        v.record(
-            AuditEvent::Send,
-            Some(&case_id),
-            &serde_json::json!({ "section": section_key, "demo": demo }),
-        )?;
 
         let practitioner = v.practitioner()?.names.first().cloned();
         let show = |t: &str| restore(t, &identities, practitioner.as_deref());
@@ -1375,13 +1503,20 @@ impl Core {
     ) -> Result<Vec<(String, Prepared)>, CoreError> {
         let structure =
             ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
-        let inputs = self.vault_ref()?.inputs(case_id)?;
+        let fed: HashSet<String> = {
+            let v = self.vault_ref()?;
+            let inputs = v.inputs(case_id)?;
+            Core::material_routing(v, &structure, case_id, &inputs)?
+                .into_iter()
+                .flat_map(|r| r.feeds)
+                .collect()
+        };
         let mut out = Vec::new();
         for s in structure
             .sections()
             .filter(|s| !DERIVED_SECTIONS.contains(&s.key.as_str()))
         {
-            if inputs.iter().any(|i| s.inputs.contains(&i.kind)) {
+            if fed.contains(&s.key) {
                 let p = self.prepare_section(
                     case_id,
                     &s.key,
@@ -1492,6 +1627,12 @@ impl Core {
         else {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
         };
+        // The request went out: record it before anything about the reply can fail.
+        self.vault_mut()?.record(
+            AuditEvent::Send,
+            case_id.as_deref(),
+            &serde_json::json!({ "consult": true, "demo": demo }),
+        )?;
         let answer = dv_ai::parse_consult(&response)?;
         let key = case_id.clone().unwrap_or_default();
         let turns = self.consult_history.entry(key).or_default();
@@ -1504,11 +1645,6 @@ impl Core {
             text_tagged: answer.clone(),
         });
         let v = self.vault_mut()?;
-        v.record(
-            AuditEvent::Send,
-            case_id.as_deref(),
-            &serde_json::json!({ "consult": true, "demo": demo }),
-        )?;
         let shown = match &case_id {
             Some(c) => {
                 let identities = v.identities(c)?;
@@ -1643,10 +1779,38 @@ impl Core {
             value: format!("{d}.{m}.{y}"),
         });
 
+        // Score tables entered in the table (not imported text), in the order they were added.
+        let mut tables = Vec::new();
+        for input in v
+            .inputs(case_id)?
+            .into_iter()
+            .filter(|i| i.kind == InputKind::TestScores)
+        {
+            let Some(data) = v.input_data(case_id, &input.id)? else {
+                continue;
+            };
+            let sheet: dv_domain::ScoreSheet =
+                serde_json::from_str(&data).map_err(|e| CoreError::Internal(e.to_string()))?;
+            let (title, rows, note) = dv_domain::sheet_table(&sheet).map_err(CoreError::Refused)?;
+            tables.push(dv_export::ScoreTable {
+                title,
+                columns: ["מדד", "ציון", "אחוזון", "טווח"]
+                    .map(str::to_owned)
+                    .to_vec(),
+                rows: rows
+                    .into_iter()
+                    .map(|r| vec![r.measure, r.score, r.percentile, r.range])
+                    .collect(),
+                note,
+            });
+        }
+        let score_tables = u32::try_from(tables.len()).unwrap_or(u32::MAX);
+
         let report = dv_export::Report {
             title: settings.title,
             info,
             parts,
+            tables,
             signature,
             confidentiality: settings.confidentiality,
             font: settings.font,
@@ -1677,6 +1841,7 @@ impl Core {
                 blocking,
                 empty_sections,
                 included_sections: included,
+                score_tables,
                 file_name,
             },
         ))

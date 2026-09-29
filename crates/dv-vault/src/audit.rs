@@ -23,6 +23,12 @@ pub enum AuditEvent {
     CaseCreated,
     CaseOpened,
     CaseDeleted,
+    CaseTrashed,
+    CaseRestored,
+    FoldersChanged,
+    BackupWritten,
+    BackupChecked,
+    Restored,
     IdentitiesChanged,
     Send,
     Blocked,
@@ -30,6 +36,8 @@ pub enum AuditEvent {
     Export,
     SettingsChanged,
     IntegrityWarning,
+    /// Einat went over the log (periodic review of access records).
+    AuditReviewed,
 }
 
 impl AuditEvent {
@@ -45,6 +53,12 @@ impl AuditEvent {
             AuditEvent::CaseCreated => "case_created",
             AuditEvent::CaseOpened => "case_opened",
             AuditEvent::CaseDeleted => "case_deleted",
+            AuditEvent::CaseTrashed => "case_trashed",
+            AuditEvent::CaseRestored => "case_restored",
+            AuditEvent::FoldersChanged => "folders_changed",
+            AuditEvent::BackupWritten => "backup_written",
+            AuditEvent::BackupChecked => "backup_checked",
+            AuditEvent::Restored => "restored",
             AuditEvent::IdentitiesChanged => "identities_changed",
             AuditEvent::Send => "send",
             AuditEvent::Blocked => "blocked",
@@ -52,6 +66,7 @@ impl AuditEvent {
             AuditEvent::Export => "export",
             AuditEvent::SettingsChanged => "settings_changed",
             AuditEvent::IntegrityWarning => "integrity_warning",
+            AuditEvent::AuditReviewed => "audit_reviewed",
         }
     }
 }
@@ -198,9 +213,19 @@ pub fn verify(
 }
 
 pub fn recent(conn: &Connection, limit: u32) -> Result<Vec<AuditEntry>, VaultError> {
-    let mut stmt = conn
-        .prepare("SELECT seq, ts, event, case_ref, meta FROM audit ORDER BY seq DESC LIMIT ?1")?;
-    let rows = stmt.query_map([limit], |r| {
+    page(conn, None, limit)
+}
+
+/// Newest first, starting below `before` (a `seq`) when given.
+pub fn page(
+    conn: &Connection,
+    before: Option<i64>,
+    limit: u32,
+) -> Result<Vec<AuditEntry>, VaultError> {
+    let mut stmt = conn.prepare(
+        "SELECT seq, ts, event, case_ref, meta FROM audit WHERE seq < ?1 ORDER BY seq DESC LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![before.unwrap_or(i64::MAX), limit], |r| {
         Ok(AuditEntry {
             seq: r.get(0)?,
             ts: r.get(1)?,

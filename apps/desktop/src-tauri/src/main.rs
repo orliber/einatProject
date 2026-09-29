@@ -4,19 +4,25 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod file_dialog;
+mod secret_clipboard;
+
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use dv_core::{
-    AppStatus, CaseDetail, ChatView, ConsultResult, Core, CoreError, CreatedVault, ExportCheck,
-    ImportPreview, Prepared, ReportSettings, SectionResult, SuspectDecision, UiError,
+    ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView,
+    ConsultResult, Core, CoreError, CreatedVault, ExportCheck, ImportPreview, NameMatch, Prepared,
+    ReportSettings, RetentionItem, SectionResult, SortResult, StagedBackup, SuspectDecision,
+    UiError,
 };
-use dv_domain::{CaseInput, CaseMeta, CaseSummary, Identity, IdentityInput, InputKind};
+use dv_domain::{CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind};
 use tauri::Manager;
 
 struct AppState {
     core: Arc<Mutex<Core>>,
+    clipboard: secret_clipboard::SecretClipboard,
 }
 
 type Res<T> = Result<T, UiError>;
@@ -78,6 +84,7 @@ async fn unlock_with_recovery(state: tauri::State<'_, AppState>, key: String) ->
 
 #[tauri::command]
 async fn lock(state: tauri::State<'_, AppState>) -> Res<()> {
+    state.clipboard.clear_now();
     with_core(&state, |c| {
         c.lock();
         Ok(())
@@ -344,6 +351,130 @@ async fn send_section(
     with_core(&state, move |c| c.finish_section(out, response)).await
 }
 
+/// Copy the Word file's password: kept out of clipboard history and cloud sync, and taken
+/// off the clipboard after 60 seconds or when the vault locks (STANDARDS 5.9).
+#[tauri::command]
+async fn copy_secret(state: tauri::State<'_, AppState>, text: String) -> Res<u32> {
+    let text = zeroize::Zeroizing::new(text);
+    state.clipboard.copy(&text).map_err(|_| UiError {
+        code: "clipboard".to_owned(),
+        message: "לא הצלחתי להעתיק. אפשר להקליד את הסיסמה.".to_owned(),
+        details: Vec::new(),
+    })?;
+    Ok(u32::try_from(secret_clipboard::CLEAR_AFTER.as_secs()).unwrap_or(60))
+}
+
+// ------------------------------------------------------------------ library (D-023)
+
+#[tauri::command]
+async fn list_trash(state: tauri::State<'_, AppState>) -> Res<Vec<CaseSummary>> {
+    with_core(&state, |c| c.list_trash()).await
+}
+
+#[tauri::command]
+async fn restore_case(state: tauri::State<'_, AppState>, case_id: String) -> Res<()> {
+    with_core(&state, move |c| c.restore_case(&case_id)).await
+}
+
+/// Erase a case from the recycle bin now; asks for the password again.
+#[tauri::command]
+async fn purge_case(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    password: String,
+) -> Res<()> {
+    with_core(&state, move |c| c.purge_case(&case_id, &password)).await
+}
+
+#[tauri::command]
+async fn folders(state: tauri::State<'_, AppState>) -> Res<Vec<Folder>> {
+    with_core(&state, |c| c.folders()).await
+}
+
+#[tauri::command]
+async fn create_folder(
+    state: tauri::State<'_, AppState>,
+    parent_id: Option<String>,
+    name: String,
+) -> Res<Folder> {
+    with_core(&state, move |c| {
+        c.create_folder(parent_id.as_deref(), &name)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rename_folder(state: tauri::State<'_, AppState>, id: String, name: String) -> Res<()> {
+    with_core(&state, move |c| c.rename_folder(&id, &name)).await
+}
+
+#[tauri::command]
+async fn move_folder(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    parent_id: Option<String>,
+) -> Res<()> {
+    with_core(&state, move |c| c.move_folder(&id, parent_id.as_deref())).await
+}
+
+#[tauri::command]
+async fn delete_folder(state: tauri::State<'_, AppState>, id: String) -> Res<()> {
+    with_core(&state, move |c| c.delete_folder(&id)).await
+}
+
+#[tauri::command]
+async fn move_case(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    folder_id: Option<String>,
+) -> Res<()> {
+    with_core(&state, move |c| c.move_case(&case_id, folder_id.as_deref())).await
+}
+
+#[tauri::command]
+async fn find_name_matches(
+    state: tauri::State<'_, AppState>,
+    case_id: Option<String>,
+    names: Vec<String>,
+) -> Res<Vec<NameMatch>> {
+    with_core(&state, move |c| {
+        c.find_name_matches(case_id.as_deref(), &names)
+    })
+    .await
+}
+
+/// Sorting materials into sections (D-022): everything not sorted yet, one review screen.
+#[tauri::command]
+async fn prepare_sort(state: tauri::State<'_, AppState>, case_id: String) -> Res<Prepared> {
+    with_core(&state, move |c| c.prepare_sort(&case_id)).await
+}
+
+#[tauri::command]
+async fn send_sort(state: tauri::State<'_, AppState>, approval_id: String) -> Res<SortResult> {
+    let out = with_core(&state, move |c| c.begin_send(&approval_id)).await?;
+    let (out, response) = tauri::async_runtime::spawn_blocking(move || {
+        let r = out.transmit();
+        (out, r)
+    })
+    .await
+    .map_err(|_| internal("send"))?;
+    with_core(&state, move |c| c.finish_sort(out, response)).await
+}
+
+/// Einat's choice of sections for one material; it always wins.
+#[tauri::command]
+async fn set_input_sections(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    input_id: String,
+    sections: Vec<String>,
+) -> Res<()> {
+    with_core(&state, move |c| {
+        c.set_input_sections(&case_id, &input_id, &sections)
+    })
+    .await
+}
+
 #[tauri::command]
 async fn chat(
     state: tauri::State<'_, AppState>,
@@ -479,6 +610,152 @@ async fn export_report(
     .await
 }
 
+// ------------------------------------------------------------------ activity and retention
+
+#[tauri::command]
+async fn activity(state: tauri::State<'_, AppState>, before: Option<i64>) -> Res<ActivityPage> {
+    with_core(&state, move |c| c.activity(before)).await
+}
+
+#[tauri::command]
+async fn mark_activity_reviewed(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| c.mark_activity_reviewed()).await
+}
+
+#[tauri::command]
+async fn retention_due(state: tauri::State<'_, AppState>) -> Res<Vec<RetentionItem>> {
+    with_core(&state, |c| c.retention_due()).await
+}
+
+#[tauri::command]
+async fn keep_case_longer(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    years: u8,
+) -> Res<()> {
+    with_core(&state, move |c| c.keep_case_longer(&case_id, years)).await
+}
+
+// ------------------------------------------------------------------ password and kit
+
+/// `current` is the password, or the recovery kit when `with_recovery`.
+#[tauri::command]
+async fn change_password(
+    state: tauri::State<'_, AppState>,
+    current: String,
+    with_recovery: bool,
+    new_password: String,
+) -> Res<()> {
+    let current = zeroize::Zeroizing::new(current);
+    let new_password = zeroize::Zeroizing::new(new_password);
+    with_core(&state, move |c| {
+        c.change_password(&current, with_recovery, &new_password)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn new_recovery_kit(
+    state: tauri::State<'_, AppState>,
+    current: String,
+    with_recovery: bool,
+) -> Res<CreatedVault> {
+    let current = zeroize::Zeroizing::new(current);
+    with_core(&state, move |c| c.new_recovery_kit(&current, with_recovery)).await
+}
+
+// ------------------------------------------------------------------ backup (D-024)
+
+#[tauri::command]
+async fn backup_status(state: tauri::State<'_, AppState>) -> Res<BackupStatus> {
+    with_core(&state, |c| c.backup_status()).await
+}
+
+/// Ask where to save (the system's "Save as"), then write the encrypted backup there.
+/// `None` when Einat cancelled.
+#[tauri::command]
+async fn write_backup(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Res<Option<BackupDone>> {
+    let start = with_core(&state, |c| c.backup_dir()).await?;
+    let start = start.or_else(|| app.path().document_dir().ok());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0));
+    let Some(dest) = file_dialog::save(&app, start, dv_core::backup_file_name(now)).await else {
+        return Ok(None);
+    };
+    with_core(&state, move |c| c.write_backup(&dest).map(Some)).await
+}
+
+/// Ask for a backup file (the system's "Open") and say what it is. `None` when cancelled.
+#[tauri::command]
+async fn choose_backup(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Res<Option<StagedBackup>> {
+    // Locked or no vault yet: start in Documents.
+    let start = with_core(&state, |c| Ok(c.backup_dir().ok().flatten()))
+        .await?
+        .or_else(|| app.path().document_dir().ok());
+    let Some(path) = file_dialog::open(&app, start).await else {
+        return Ok(None);
+    };
+    with_core(&state, move |c| {
+        let size = std::fs::metadata(&path)
+            .map_err(|e| CoreError::Refused(format!("אי אפשר לקרוא את הקובץ: {e}")))?
+            .len();
+        if size > dv_core::MAX_BACKUP_BYTES {
+            return Err(CoreError::Refused(
+                "הקובץ גדול מדי בשביל גיבוי של הכספת.".to_owned(),
+            ));
+        }
+        let bytes = std::fs::read(&path)
+            .map_err(|e| CoreError::Refused(format!("אי אפשר לקרוא את הקובץ: {e}")))?;
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        c.stage_backup(bytes, name).map(Some)
+    })
+    .await
+}
+
+/// Restore drill on the chosen file, with the password.
+#[tauri::command]
+async fn check_backup(state: tauri::State<'_, AppState>, password: String) -> Res<BackupCheckView> {
+    let password = zeroize::Zeroizing::new(password);
+    with_core(&state, move |c| c.check_staged_backup(&password)).await
+}
+
+/// On a computer with no vault: restore the chosen file and open it.
+#[tauri::command]
+async fn restore_backup(
+    state: tauri::State<'_, AppState>,
+    password: Option<String>,
+    recovery_key: Option<String>,
+) -> Res<AppStatus> {
+    let password = password.map(zeroize::Zeroizing::new);
+    let recovery_key = recovery_key.map(zeroize::Zeroizing::new);
+    with_core(&state, move |c| {
+        c.restore_staged_backup(
+            password.as_deref().map(String::as_str),
+            recovery_key.as_deref().map(String::as_str),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn forget_backup(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| {
+        c.forget_staged_backup();
+        Ok(())
+    })
+    .await
+}
+
 fn main() {
     // A document worker: the same binary, started by the core for one file.
     if std::env::args().nth(1).as_deref() == Some(dv_ingest::worker::WORKER_ARG) {
@@ -494,15 +771,22 @@ fn main() {
                 core = core.with_ingest_worker(exe);
             }
             let core = Arc::new(Mutex::new(core));
-            // Lock after the idle time even when nothing is clicked.
+            let clipboard = secret_clipboard::SecretClipboard::default();
+            // Lock after the idle time, or after the computer slept, even when nothing is
+            // clicked; a secret left on the clipboard goes with it.
             let timer = Arc::clone(&core);
+            let timer_clipboard = clipboard.clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(15));
-                if let Ok(mut c) = timer.lock() {
-                    c.lock_if_idle();
+                // Read the clock before waiting for the core: a long command holding it must not
+                // look like the computer slept.
+                let now = std::time::SystemTime::now();
+                let locked = timer.lock().is_ok_and(|mut c| c.tick(now));
+                if locked {
+                    timer_clipboard.clear_now();
                 }
             });
-            app.manage(AppState { core });
+            app.manage(AppState { core, clipboard });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -539,6 +823,20 @@ fn main() {
             prepare_section,
             prepare_full_draft,
             send_section,
+            prepare_sort,
+            send_sort,
+            set_input_sections,
+            list_trash,
+            restore_case,
+            purge_case,
+            folders,
+            create_folder,
+            rename_folder,
+            move_folder,
+            delete_folder,
+            move_case,
+            find_name_matches,
+            copy_secret,
             chat,
             approve_paragraph,
             reject_paragraph,
@@ -548,6 +846,18 @@ fn main() {
             send_consult,
             check_export,
             export_report,
+            activity,
+            mark_activity_reviewed,
+            retention_due,
+            keep_case_longer,
+            change_password,
+            new_recovery_kit,
+            backup_status,
+            write_backup,
+            choose_backup,
+            check_backup,
+            restore_backup,
+            forget_backup,
         ])
         .run(tauri::generate_context!());
     if result.is_err() {

@@ -2,12 +2,14 @@ import { useState, type FormEvent } from "react";
 import { he } from "../i18n/he";
 import { ipc, type AppStatus } from "../ipc/client";
 import { ErrorLine, LockIcon } from "../components/ui";
+import { RestoreFromBackup } from "../components/Backup";
+import { RecoveryKitPaper } from "../components/RecoveryKit";
 import "./SetupScreen.css";
 
-type Step = "password" | "recovery" | "me";
+type Step = "password" | "recovery" | "me" | "restore";
 
 /** First run: a password, the printed recovery kit, and the practitioner's own names. */
-export function SetupScreen({ status, onCreated, onDone }: { status: AppStatus; onCreated?: () => void; onDone: () => Promise<void> }) {
+export function SetupScreen({ status, onCreated, onDone, onRestored }: { status: AppStatus; onCreated?: () => void; onDone: () => Promise<void>; onRestored?: (s: AppStatus) => void }) {
   const [step, setStep] = useState<Step>("password");
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
@@ -16,8 +18,6 @@ export function SetupScreen({ status, onCreated, onDone }: { status: AppStatus; 
   const [names, setNames] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const groups = key.split("-").filter(Boolean);
 
   async function create(e: FormEvent) {
     e.preventDefault();
@@ -74,14 +74,14 @@ export function SetupScreen({ status, onCreated, onDone }: { status: AppStatus; 
       <header className="setup-head">
         <LockIcon size={24} color="var(--primary)" />
         <span className="brand-name">{he.appName}</span>
-        <ol className="steps" aria-label="שלבי ההגדרה">
+        {step !== "restore" && <ol className="steps" aria-label="שלבי ההגדרה">
           {(["password", "recovery", "me"] as Step[]).map((s, i) => (
             <li key={s} className={`step step-${stepState(s)}`} aria-current={stepState(s) === "current" ? "step" : undefined}>
               <span className="step-dot">{stepState(s) === "done" ? "✓" : i + 1}</span>
               {s === "password" ? "סיסמה" : s === "recovery" ? "ערכת שחזור" : "הפרטים שלך"}
             </li>
           ))}
-        </ol>
+        </ol>}
       </header>
 
       <main className="setup-main">
@@ -100,10 +100,25 @@ export function SetupScreen({ status, onCreated, onDone }: { status: AppStatus; 
               <label htmlFor="pw2">שוב, לאימות</label>
               <input id="pw2" className="input" type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} />
             </div>
+            <ul className="pw-checks" aria-label="דרישות הסיסמה">
+              <li className={pw.length >= 12 ? "met" : undefined}>{pw.length >= 12 ? "✓" : "○"} 12 תווים לפחות{pw.length > 0 && pw.length < 12 ? ` (עוד ${12 - pw.length})` : ""}</li>
+              <li className={pw2.length > 0 && pw === pw2 ? "met" : undefined}>{pw2.length > 0 && pw === pw2 ? "✓" : "○"} שתי הסיסמאות זהות</li>
+            </ul>
             <ErrorLine error={error} />
-            <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? "יוצרת כספת מוצפנת…" : "יצירת הכספת"}</button>
-            <p className="hint">ההצפנה נעשית במודול מאושר (FIPS 140-3). את הסיסמה אנחנו לא יודעים ולא שומרים.</p>
+            <button type="submit" className="btn btn-primary btn-big" disabled={busy}>{busy ? "יוצרת כספת מוצפנת…" : "יצירת הכספת"}</button>
+            <p className="hint">
+              {status.fips_active ? "ההצפנה נעשית ברכיב הצפנה מאושר ומבוקר (FIPS 140-3)." : "הכל נשמר מוצפן במחשב הזה."} את הסיסמה אף אחד לא יודע ולא שומר, גם לא אנחנו.
+            </p>
+            {onRestored && (
+              <button type="button" className="link-btn restore-link" onClick={() => { setError(null); setStep("restore"); }}>
+                מחשב חדש? יש לי גיבוי של הכספת
+              </button>
+            )}
           </form>
+        )}
+
+        {step === "restore" && onRestored && (
+          <RestoreFromBackup onRestored={onRestored} onBack={() => setStep("password")} />
         )}
 
         {step === "recovery" && (
@@ -111,18 +126,7 @@ export function SetupScreen({ status, onCreated, onDone }: { status: AppStatus; 
             <div className="stack grow">
               <h1>ערכת השחזור שלך</h1>
               <p className="lede">זו הדרך היחידה לפתוח את הכספת אם הסיסמה תישכח. מדפיסים או מעתיקים לדף, ושומרים אותו במקום בטוח, לא במחשב ולא בטלפון.</p>
-              <div className="paper kit">
-                <div className="kit-head"><span>ערכת שחזור · כספת האבחון</span><span>{new Date().toLocaleDateString("he-IL")}</span></div>
-                <div className="kit-grid" dir="ltr">
-                  {groups.map((g, i) => (
-                    <span key={i} className={i === groups.length - 1 ? "kit-check" : undefined}>{g}</span>
-                  ))}
-                </div>
-                <p className="hint">אין הבדל בין אותיות גדולות וקטנות. הקבוצה האחרונה בודקת טעויות הקלדה.</p>
-                <div className="row">
-                  <button type="button" className="btn btn-primary" onClick={() => window.print()}>הדפסה</button>
-                </div>
-              </div>
+              <RecoveryKitPaper recoveryKey={key} />
               <form className="stack" onSubmit={confirm}>
                 <div className="field">
                   <label htmlFor="typed">כדי לוודא שהערכה נשמרה, הקלידי אותה מהדף</label>
@@ -154,7 +158,7 @@ export function SetupScreen({ status, onCreated, onDone }: { status: AppStatus; 
               <textarea id="names" className="textarea" rows={3} value={names} onChange={(e) => setNames(e.target.value)} />
             </div>
             <ErrorLine error={error} />
-            <button type="submit" className="btn btn-primary" disabled={busy}>סיום וכניסה</button>
+            <button type="submit" className="btn btn-primary btn-big" disabled={busy}>סיום וכניסה</button>
           </form>
         )}
       </main>

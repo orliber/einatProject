@@ -14,6 +14,10 @@ pub struct ReportSection {
     pub key: String,
     pub title: String,
     pub inputs: Vec<InputKind>,
+    /// What belongs in the section, in a few words. Sent when materials are sorted into
+    /// sections (D-022), so it must never contain case data or a first name.
+    #[serde(default)]
+    pub about: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

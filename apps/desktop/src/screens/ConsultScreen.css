@@ -65,11 +65,19 @@
   gap: 16px;
 }
 .consult-empty {
-  max-width: 60ch;
+  max-width: 64ch;
+  margin: auto;
   display: flex;
   flex-direction: column;
+  gap: 10px;
+  padding: 24px 0;
+}
+.ideas-label {
+  margin-top: 12px;
+}
+.ideas {
+  display: grid;
   gap: 8px;
-  padding-top: 24px;
 }
 .answer {
   align-self: flex-end;

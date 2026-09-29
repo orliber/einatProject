@@ -13,6 +13,10 @@ blocking: Array<string>,
  */
 empty_sections: Array<string>, included_sections: number, 
 /**
+ * Score tables entered in the case, printed as an appendix.
+ */
+score_tables: number, 
+/**
  * The file name, without the child's name (file names travel in e-mails).
  */
 file_name: string, };

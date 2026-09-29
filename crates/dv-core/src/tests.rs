@@ -568,8 +568,31 @@ fn export_needs_approved_paragraphs_and_restores_names() {
     );
     assert!(check.file_name.contains("TEST-0002"));
 
+    assert_eq!(check.score_tables, 0);
+    // A score table entered in the case becomes an appendix table in the report.
+    let sheet = dv_domain::ScoreSheet {
+        instrument: "wppsi_iv".into(),
+        module: String::new(),
+        cutoff: None,
+        entries: vec![dv_domain::ScoreEntry {
+            measure: "vci".into(),
+            value: 112.0,
+            note: String::new(),
+        }],
+        notes: String::new(),
+    };
+    core.save_scores(&case, None, &sheet).unwrap();
+    assert_eq!(core.check_export(&case).unwrap().score_tables, 1);
     let bytes = core.export_report(&case, None).unwrap();
     let doc = read_docx_text(&bytes);
+    assert!(
+        doc.contains("נספח: טבלאות ציונים") && doc.contains("הבנה מילולית (VCI)"),
+        "score table"
+    );
+    assert!(
+        doc.contains("ממוצע גבוה") && doc.contains("79"),
+        "range and percentile in the table"
+    );
     assert!(doc.contains("ההורים של אלון פנו"), "names restored");
     assert!(doc.contains("שם הילד"), "info line");
     assert!(!doc.contains("[ילד]") && !doc.contains("[גננת]"));
@@ -887,6 +910,7 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
         dv_ai::prompts::OUTPUT_RULES,
         dv_ai::prompts::CONSULT_RULES,
         dv_ai::prompts::RESEARCH_RULES,
+        dv_ai::prompts::SORTING_RULES,
     ]
     .into_iter()
     .chain(
@@ -936,6 +960,30 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
         // Like the real gate: every string in the body, not the JSON numbers ("max_tokens").
         body.push(dv_ai::build_section_request(&dv_ai::ModelConfig::default(), &input, &nonce).0);
     }
+    // The sorting request (D-022): every section key and description of the template, the
+    // passage frames and the schema.
+    let structure = ReportStructure::load_default().unwrap();
+    let sort = dv_ai::SortInput {
+        sections: sorting::sortable(&structure)
+            .into_iter()
+            .map(|s| dv_ai::SortSection {
+                key: s.key.clone(),
+                about: s.about.clone(),
+            })
+            .collect(),
+        materials: vec![dv_ai::SortMaterial {
+            input_id: "in".into(),
+            kind_label: InputKind::Intake.label_he().to_owned(),
+            title_tagged: String::new(),
+            passages_tagged: vec![String::new(), String::new()],
+        }],
+    };
+    let nonce = dv_ai::nonce_from(&[7; 16]);
+    body.push(dv_ai::build_sort_request(
+        &dv_ai::ModelConfig::default(),
+        &sort,
+        &nonce,
+    ));
     let body = Value::Array(body);
     let tags: HashSet<String> = HashSet::from(["[ילד]".to_owned()]);
     let mut collisions = Vec::new();
@@ -1043,4 +1091,641 @@ fn a_consent_needs_a_real_past_date_and_a_signer() {
     }
     meta.consent = Some(consent());
     core.update_case(&case, meta).unwrap();
+}
+
+// ------------------------------------------------------------ D-022: sorting into sections
+
+/// A third material with three passages: pregnancy, milestones, home.
+fn add_home_intake(core: &mut Core, case: &str) -> String {
+    core.add_input(
+        case,
+        InputKind::Intake,
+        "אינטייק שני",
+        "ההריון והלידה עברו ללא סיבוכים.\n\nהלך בגיל שנה ואמר מילים ראשונות בגיל שנה וחצי.\n\nבבית אלון אוהב לבנות מגדלים ממגנטים.",
+    )
+    .unwrap()
+    .id
+}
+
+/// Claude's sorting for the three materials of the test case (S1 kindergarten talk, S2 first
+/// intake, S3 the intake above). The first intake gets nothing: it stays on the table.
+fn claude_sorting() -> Value {
+    api_json(&json!({"sections": [
+        {"section": "background", "passages": ["S3P1", "S3P2"]},
+        {"section": "parents_view", "passages": ["S3P3"]},
+        {"section": "kindergarten", "passages": ["S1P1"]},
+        {"section": "summary", "passages": ["S3P1"]},
+        {"section": "background", "passages": ["S9P1"]}
+    ]}))
+}
+
+fn section_request(core: &mut Core, fake: &FakeTransport, case: &str, key: &str) -> String {
+    *fake.answer.lock().unwrap() = None;
+    let prepared = core.prepare_section(case, key, "טיוטה").unwrap();
+    let approval = prepared.approval_id.expect("clears the gate");
+    core.send_section(&approval).unwrap();
+    fake.sent.lock().unwrap().last().unwrap().clone()
+}
+
+#[test]
+fn sorting_goes_out_filtered_and_drafts_then_get_only_their_passages() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let home = add_home_intake(&mut core, &case);
+
+    let prepared = core.prepare_sort(&case).unwrap();
+    assert!(prepared.blocked.is_empty(), "{:?}", prepared.blocked);
+    assert!(!prepared.demo_mode);
+    assert_eq!(prepared.parts.len(), 3, "one review part per material");
+    *fake.answer.lock().unwrap() = Some(claude_sorting());
+    let result = core.send_sort(&prepared.approval_id.unwrap()).unwrap();
+    assert_eq!((result.sorted, result.unchanged, result.links), (2, 1, 3));
+    // The derived section and the unknown passage are dropped, never guessed.
+    assert_eq!(result.ignored, 2);
+    assert!(!result.demo);
+
+    let sent = fake.sent.lock().unwrap()[0].clone();
+    assert!(sent.contains("id=\\\"S3P2\\\"") && sent.contains("[ילד]"));
+    for name in ["אלון", "שירה", "רותם", "אלמוג"] {
+        assert!(!sent.contains(name), "{name} left the machine");
+    }
+
+    let detail = core.case_detail(&case).unwrap();
+    let r = detail.routing.iter().find(|r| r.input_id == home).unwrap();
+    assert!(r.sorted && r.by_ai);
+    assert_eq!(r.feeds, ["background", "parents_view"]);
+    assert_eq!((r.passages, r.used_passages), (3, 3));
+    // The first intake was not placed: it keeps the table.
+    let first = &detail.routing[1];
+    assert!(!first.sorted && !first.needs_sorting);
+    assert_eq!(first.feeds, first.table);
+
+    // Background: the two chosen passages of the new intake, and the whole first intake.
+    let background = section_request(&mut core, &fake, &case, "background");
+    assert!(background.contains("ההריון") && background.contains("מילים ראשונות"));
+    assert!(
+        !background.contains("מגדלים"),
+        "a passage chosen for another section"
+    );
+    assert!(
+        background.contains("נרדם באיחור"),
+        "the unsorted intake still goes whole"
+    );
+    // Home: only the third passage.
+    let home_view = section_request(&mut core, &fake, &case, "parents_view");
+    assert!(home_view.contains("מגדלים") && !home_view.contains("ההריון"));
+    // Everything sorted: nothing new to send.
+    assert!(matches!(
+        core.prepare_sort(&case),
+        Err(CoreError::Refused(_))
+    ));
+}
+
+#[test]
+fn chosen_passages_are_shown_in_the_review_exactly_as_sent() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    add_home_intake(&mut core, &case);
+    let prepared = core.prepare_sort(&case).unwrap();
+    *fake.answer.lock().unwrap() = Some(claude_sorting());
+    core.send_sort(&prepared.approval_id.unwrap()).unwrap();
+
+    let prepared = core.prepare_section(&case, "background", "טיוטה").unwrap();
+    let part = prepared
+        .parts
+        .iter()
+        .find(|p| p.label.contains("קטעים שנבחרו לסעיף"))
+        .expect("the chosen passages are labelled");
+    let shown: String = part.outgoing.iter().map(|s| s.text.as_str()).collect();
+    assert!(shown.contains("ההריון") && shown.contains("מילים ראשונות"));
+    assert!(!shown.contains("מגדלים"));
+}
+
+#[test]
+fn einat_decides_last_and_an_edit_forgets_the_old_passages() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let home = add_home_intake(&mut core, &case);
+    let prepared = core.prepare_sort(&case).unwrap();
+    *fake.answer.lock().unwrap() = Some(claude_sorting());
+    core.send_sort(&prepared.approval_id.unwrap()).unwrap();
+
+    core.set_input_sections(&case, &home, &["parents_view".into(), "cognitive".into()])
+        .unwrap();
+    let r = |core: &mut Core| {
+        core.case_detail(&case)
+            .unwrap()
+            .routing
+            .into_iter()
+            .find(|r| r.input_id == home)
+            .unwrap()
+    };
+    let now = r(&mut core);
+    assert_eq!(now.feeds, ["parents_view", "cognitive"]);
+    assert_eq!(
+        (now.added.as_slice(), now.removed.as_slice()),
+        (
+            &["cognitive".to_owned()][..],
+            &["background".to_owned()][..]
+        )
+    );
+    // Added by hand: the whole material goes there.
+    let cognitive = section_request(&mut core, &fake, &case, "cognitive");
+    assert!(cognitive.contains("ההריון") && cognitive.contains("מגדלים"));
+    let background = section_request(&mut core, &fake, &case, "background");
+    assert!(!background.contains("ההריון"));
+
+    // Only sections written from materials can be chosen.
+    assert!(matches!(
+        core.set_input_sections(&case, &home, &["summary".into()]),
+        Err(CoreError::NotFound(_))
+    ));
+
+    // A new text has new passages: the sorting is forgotten, her choices stay.
+    core.update_input(&case, &home, "אינטייק שני", "ההורים מתארים ילד סקרן.")
+        .unwrap();
+    let after = r(&mut core);
+    assert!(!after.sorted);
+    assert_eq!(after.feeds, ["referral", "parents_view", "cognitive"]);
+}
+
+#[test]
+fn a_sorting_that_arrives_after_an_edit_is_not_applied() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let home = add_home_intake(&mut core, &case);
+    let prepared = core.prepare_sort(&case).unwrap();
+    let out = core.begin_send(&prepared.approval_id.unwrap()).unwrap();
+    // Einat edits while Claude reads (same number of passages, different text).
+    core.update_input(
+        &case,
+        &home,
+        "אינטייק שני",
+        "ההריון היה במעקב.\n\nהלך בגיל שנה.\n\nבבית משחק לבד.",
+    )
+    .unwrap();
+    let result = core
+        .finish_sort(out, Ok((claude_sorting(), false)))
+        .unwrap();
+    assert_eq!(result.sorted, 1, "only the kindergarten talk");
+    let detail = core.case_detail(&case).unwrap();
+    assert!(
+        !detail
+            .routing
+            .iter()
+            .find(|r| r.input_id == home)
+            .unwrap()
+            .sorted
+    );
+}
+
+#[test]
+fn sorting_needs_consent_and_asks_about_unknown_names_first() {
+    let (_dir, mut core, case) = setup(None);
+    core.add_input(
+        &case,
+        InputKind::SessionNote,
+        "מפגש",
+        "בפינת הבנייה סיפר שהוא משחק עם יובל.",
+    )
+    .unwrap();
+    let prepared = core.prepare_sort(&case).unwrap();
+    assert!(
+        prepared.approval_id.is_none(),
+        "an open question blocks sending"
+    );
+    assert!(prepared.suspects.iter().any(|s| s.token.contains("יובל")));
+
+    let mut meta = core.case_detail(&case).unwrap().meta;
+    meta.consent = None;
+    core.update_case(&case, meta).unwrap();
+    assert!(matches!(
+        core.prepare_sort(&case),
+        Err(CoreError::ConsentMissing)
+    ));
+}
+
+#[test]
+fn demo_sorting_runs_locally_and_says_so() {
+    let (_dir, mut core, case) = setup(None);
+    let home = add_home_intake(&mut core, &case);
+    let prepared = core.prepare_sort(&case).unwrap();
+    assert!(prepared.demo_mode);
+    let result = core.send_sort(&prepared.approval_id.unwrap()).unwrap();
+    assert!(result.demo && result.sorted >= 1);
+    let detail = core.case_detail(&case).unwrap();
+    let r = detail.routing.iter().find(|r| r.input_id == home).unwrap();
+    assert!(r.sorted && !r.by_ai);
+    assert!(r.feeds.contains(&"background".to_owned()));
+    // The section counts follow the routing.
+    let kg = detail
+        .sections
+        .iter()
+        .find(|s| s.key == "kindergarten")
+        .unwrap();
+    assert!(kg.sortable && kg.source_count >= 1);
+    assert!(
+        !detail
+            .sections
+            .iter()
+            .find(|s| s.key == "summary")
+            .unwrap()
+            .sortable
+    );
+}
+
+#[test]
+fn passages_far_apart_are_marked_with_a_gap_the_gate_accepts() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    add_home_intake(&mut core, &case);
+    let prepared = core.prepare_sort(&case).unwrap();
+    // Passages 1 and 3, not 2: the draft request carries a gap mark between them.
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({"sections": [
+        {"section": "background", "passages": ["S3P1", "S3P3"]}
+    ]})));
+    core.send_sort(&prepared.approval_id.unwrap()).unwrap();
+    let prepared = core.prepare_section(&case, "background", "טיוטה").unwrap();
+    assert!(prepared.blocked.is_empty(), "{:?}", prepared.blocked);
+    let background = section_request(&mut core, &fake, &case, "background");
+    assert!(background.contains("(…)") && !background.contains("מילים ראשונות"));
+}
+
+// ------------------------------------------------------------ D-023: library
+
+#[test]
+fn delete_goes_to_the_bin_and_erasing_needs_the_password() {
+    let (_dir, mut core, case) = setup(None);
+    core.delete_case(&case).unwrap();
+    assert!(core.list_cases().unwrap().is_empty());
+    assert_eq!(core.list_trash().unwrap().len(), 1);
+    core.restore_case(&case).unwrap();
+    assert_eq!(core.list_cases().unwrap().len(), 1);
+
+    // Only from the bin, and only with the right password.
+    assert!(matches!(
+        core.purge_case(&case, PASSWORD),
+        Err(CoreError::Refused(_))
+    ));
+    core.delete_case(&case).unwrap();
+    assert!(matches!(
+        core.purge_case(&case, "ניחוש ארוך אבל שגוי"),
+        Err(CoreError::Vault(VaultError::WrongSecret))
+    ));
+    // A wrong attempt makes the next one wait, like at unlock.
+    assert!(matches!(
+        core.purge_case(&case, PASSWORD),
+        Err(CoreError::Backoff(_))
+    ));
+    core.not_before = None;
+    core.purge_case(&case, PASSWORD).unwrap();
+    assert!(core.list_trash().unwrap().is_empty());
+    assert!(matches!(
+        core.case_detail(&case),
+        Err(CoreError::Vault(VaultError::NotFound))
+    ));
+}
+
+#[test]
+fn a_case_left_in_the_bin_past_thirty_days_is_erased_at_unlock() {
+    let (_dir, mut core, case) = setup(None);
+    core.delete_case(&case).unwrap();
+    core.purge_expired().unwrap();
+    assert_eq!(core.list_trash().unwrap().len(), 1, "still within 30 days");
+    // Pretend it was deleted 31 days ago.
+    core.vault_mut()
+        .unwrap()
+        .set_deleted_at_for_tests(&case, 1)
+        .unwrap();
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert!(core.list_trash().unwrap().is_empty());
+}
+
+#[test]
+fn folders_hold_cases_and_refuse_loops() {
+    let (_dir, mut core, case) = setup(None);
+    let parent = core.create_folder(None, "  אבחונים פרטיים  ").unwrap();
+    assert_eq!(parent.name, "אבחונים פרטיים");
+    let child = core.create_folder(Some(&parent.id), "2026").unwrap();
+    core.move_case(&case, Some(&child.id)).unwrap();
+    assert_eq!(
+        core.list_cases().unwrap()[0].folder_id.as_deref(),
+        Some(child.id.as_str())
+    );
+    assert!(matches!(
+        core.create_folder(None, "   "),
+        Err(CoreError::Refused(_))
+    ));
+    assert!(matches!(
+        core.create_folder(None, &"א".repeat(61)),
+        Err(CoreError::Refused(_))
+    ));
+    assert!(matches!(
+        core.move_folder(&parent.id, Some(&child.id)),
+        Err(CoreError::Refused(_))
+    ));
+    core.delete_folder(&parent.id).unwrap();
+    // The subfolder and its case are still there, one level up.
+    let folders = core.folders().unwrap();
+    assert_eq!(folders.len(), 1);
+    assert_eq!(folders[0].parent_id, None);
+    assert_eq!(
+        core.list_cases().unwrap()[0].folder_id.as_deref(),
+        Some(child.id.as_str())
+    );
+}
+
+#[test]
+fn a_name_seen_in_another_case_is_pointed_out() {
+    let (_dir, mut core, case) = setup(None);
+    // The test case has the child "אלון" and the teacher "שירה".
+    let found = core
+        .find_name_matches(None, &["שירה לוי".into(), "מאיה".into(), "די".into()])
+        .unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(
+        (found[0].typed.as_str(), found[0].role),
+        ("שירה לוי", Role::Teacher)
+    );
+    assert_eq!(found[0].case_id, case);
+    // Editing the same case does not match itself; a case in the bin still counts.
+    assert!(core
+        .find_name_matches(Some(&case), &["אלון".into()])
+        .unwrap()
+        .is_empty());
+    core.delete_case(&case).unwrap();
+    let found = core.find_name_matches(None, &["אלון".into()]).unwrap();
+    assert!(found[0].trashed);
+}
+
+#[test]
+fn the_vault_locks_after_the_computer_slept() {
+    let (_dir, mut core, _case) = setup(None);
+    let t0 = SystemTime::now();
+    assert!(!core.tick(t0));
+    assert!(!core.tick(t0 + Duration::from_secs(15)));
+    assert!(core.status().unlocked);
+    // Five minutes between two ticks: the timer did not run, the computer was asleep.
+    assert!(core.tick(t0 + Duration::from_secs(15 + 300)));
+    assert!(!core.status().unlocked);
+}
+
+#[test]
+fn a_backup_is_due_until_made_and_restores_on_a_new_computer() {
+    let (dir, mut core, case) = setup(None);
+    let status = core.backup_status().unwrap();
+    assert!(status.due && status.has_cases && status.last_at.is_none());
+
+    // Next to the vault protects nothing: refused.
+    assert!(matches!(
+        core.write_backup(&dir.path().join("copy.vaultbak")),
+        Err(CoreError::Refused(_))
+    ));
+    let drive = tempfile::tempdir().unwrap();
+    let done = core.write_backup(&drive.path().join("גיבוי")).unwrap();
+    assert!(done.path.ends_with("גיבוי.vaultbak"));
+    let status = core.backup_status().unwrap();
+    assert_eq!((status.due, status.days_since), (false, Some(0)));
+    assert_eq!(
+        core.backup_dir().unwrap().unwrap(),
+        drive.path().canonicalize().unwrap()
+    );
+    let bytes = std::fs::read(&done.path).unwrap();
+
+    // A new computer: no vault yet.
+    let fresh = tempfile::tempdir().unwrap();
+    let mut other = Core::for_tests(fresh.path(), None);
+    assert!(matches!(
+        other.restore_staged_backup(Some(PASSWORD), None),
+        Err(CoreError::Refused(_))
+    ));
+    let staged = other
+        .stage_backup(bytes.clone(), "גיבוי.vaultbak".into())
+        .unwrap();
+    assert_eq!(
+        (staged.created_at, staged.same_vault),
+        (done.created_at, None)
+    );
+    assert!(matches!(
+        other.restore_staged_backup(Some("ניחוש ארוך אבל שגוי"), None),
+        Err(CoreError::Vault(VaultError::WrongSecret))
+    ));
+    assert!(matches!(
+        other.restore_staged_backup(Some(PASSWORD), None),
+        Err(CoreError::Backoff(_))
+    ));
+    other.not_before = None;
+    let status = other.restore_staged_backup(Some(PASSWORD), None).unwrap();
+    assert!(status.unlocked && status.integrity_warning.is_none());
+    let detail = other.case_detail(&case).unwrap();
+    assert!(detail.identities.iter().any(|i| i.value == "אלון"));
+
+    // Never over an existing vault.
+    other.stage_backup(bytes, "גיבוי.vaultbak".into()).unwrap();
+    assert!(matches!(
+        other.restore_staged_backup(Some(PASSWORD), None),
+        Err(CoreError::Refused(_))
+    ));
+}
+
+#[test]
+fn the_restore_drill_proves_the_file_and_the_password() {
+    let (_dir, mut core, _case) = setup(None);
+    let drive = tempfile::tempdir().unwrap();
+    let done = core.write_backup(&drive.path().join("b.vaultbak")).unwrap();
+    let bytes = std::fs::read(&done.path).unwrap();
+
+    assert!(matches!(
+        core.stage_backup(b"not a backup".to_vec(), "x".into()),
+        Err(CoreError::Refused(_))
+    ));
+    let staged = core
+        .stage_backup(bytes.clone(), "b.vaultbak".into())
+        .unwrap();
+    assert_eq!(staged.same_vault, Some(true));
+    assert!(matches!(
+        core.check_staged_backup("ניחוש ארוך אבל שגוי"),
+        Err(CoreError::Vault(VaultError::WrongSecret))
+    ));
+    core.not_before = None;
+    let check = core.check_staged_backup(PASSWORD).unwrap();
+    assert_eq!((check.cases, check.integrity_ok), (1, true));
+    assert!(core.backup_status().unwrap().last_check_at.is_some());
+    assert!(
+        core.list_cases().unwrap().len() == 1,
+        "the live vault is untouched"
+    );
+
+    // A backup of another vault is named as such, and never "checked".
+    let (_other_dir, mut other, _) = setup(None);
+    let other_drive = tempfile::tempdir().unwrap();
+    let theirs = other
+        .write_backup(&other_drive.path().join("o.vaultbak"))
+        .unwrap();
+    let staged = core
+        .stage_backup(std::fs::read(&theirs.path).unwrap(), "o.vaultbak".into())
+        .unwrap();
+    assert_eq!(staged.same_vault, Some(false));
+    assert!(matches!(
+        core.check_staged_backup(PASSWORD),
+        Err(CoreError::Refused(_))
+    ));
+
+    // Locking forgets the chosen file.
+    core.stage_backup(bytes, "b.vaultbak".into()).unwrap();
+    core.lock();
+    assert!(core.staged_backup.is_none());
+}
+
+#[test]
+fn a_new_password_or_kit_asks_for_a_new_backup() {
+    let (dir, mut core, _case) = setup(None);
+    let drive = tempfile::tempdir().unwrap();
+    core.write_backup(&drive.path().join("b.vaultbak")).unwrap();
+    assert!(!core.backup_status().unwrap().due);
+
+    let new_password = "חתול כחול ישן על הספה";
+    assert!(matches!(
+        core.change_password("ניחוש ארוך אבל שגוי", false, new_password),
+        Err(CoreError::Vault(VaultError::WrongSecret))
+    ));
+    core.not_before = None;
+    assert!(matches!(
+        core.change_password(PASSWORD, false, "קצר"),
+        Err(CoreError::Vault(VaultError::Policy(_)))
+    ));
+    core.change_password(PASSWORD, false, new_password).unwrap();
+    let status = core.backup_status().unwrap();
+    assert!(status.due && status.secret_changed);
+
+    let kit = core.new_recovery_kit(new_password, false).unwrap();
+    assert!(core.confirm_recovery_key(&kit.recovery_key).unwrap());
+    // A backup made now clears it.
+    core.write_backup(&drive.path().join("c.vaultbak")).unwrap();
+    let status = core.backup_status().unwrap();
+    assert!(!status.due && !status.secret_changed);
+
+    // Forgotten password: in with the kit, then a new password from the kit.
+    core.lock();
+    core.unlock_with_recovery(&kit.recovery_key).unwrap();
+    core.change_password(&kit.recovery_key, true, "שמש צהובה על הים הכחול")
+        .unwrap();
+    core.lock();
+    assert!(core.unlock("שמש צהובה על הים הכחול").is_ok());
+    drop(dir);
+}
+
+#[test]
+fn the_activity_log_names_cases_only_here_and_reads_in_pages() {
+    let (_dir, mut core, case) = setup(None);
+    core.delete_case(&case).unwrap();
+    let page = core.activity(None).unwrap();
+    assert!(page.intact && page.reviewed_at.is_none());
+    let trashed = page
+        .entries
+        .iter()
+        .find(|e| e.event == "case_trashed")
+        .unwrap();
+    assert!(trashed.case.as_deref().unwrap().contains("אלון"));
+    assert!(trashed.case.as_deref().unwrap().contains("בסל המחזור"));
+    assert!(page.entries.iter().all(|e| !e.text.contains('_')));
+    // The program's own bookkeeping is not shown.
+    assert!(page.entries.iter().all(|e| e.text != "הגדרה עודכנה"));
+
+    core.purge_case(&case, PASSWORD).unwrap();
+    let page = core.activity(None).unwrap();
+    let created = page
+        .entries
+        .iter()
+        .find(|e| e.event == "case_created")
+        .unwrap();
+    assert_eq!(created.case.as_deref(), Some("תיק שנמחק"));
+
+    core.mark_activity_reviewed().unwrap();
+    let page = core.activity(None).unwrap();
+    assert!(page.reviewed_at.is_some());
+    assert_eq!(page.entries[0].event, "audit_reviewed");
+    assert!(!page.more && page.last_seq.is_some());
+}
+
+#[test]
+fn a_case_past_its_retention_date_is_pointed_out_and_never_erased() {
+    let (_dir, mut core, case) = setup(None);
+    assert!(core.retention_due().unwrap().is_empty());
+    let detail = core.case_detail(&case).unwrap();
+    // Age 5 at the assessment: kept until the child is 25.
+    assert!(
+        detail.retention_default.as_str() > "2045-01-01",
+        "{}",
+        detail.retention_default
+    );
+
+    let mut meta = detail.meta.clone();
+    meta.retention_until = Some("2020-01-01".into());
+    core.update_case(&case, meta).unwrap();
+    let due = core.retention_due().unwrap();
+    assert_eq!(due.len(), 1);
+    assert!(due[0].label.contains("אלון") && !due[0].by_default);
+    assert_eq!(core.list_cases().unwrap().len(), 1, "nothing is erased");
+
+    core.keep_case_longer(&case, 1).unwrap();
+    assert!(core.retention_due().unwrap().is_empty());
+    assert!(
+        core.case_detail(&case)
+            .unwrap()
+            .meta
+            .retention_until
+            .unwrap()
+            .as_str()
+            > "2027-01-01"
+    );
+}
+
+#[test]
+fn a_send_is_logged_even_when_the_reply_is_unusable() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    add_home_intake(&mut core, &case);
+    let prepared = core.prepare_sort(&case).unwrap();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({"not": "a sorting"})));
+    assert!(core.send_sort(&prepared.approval_id.unwrap()).is_err());
+    // The filtered materials did leave the computer: the log says so.
+    let page = core.activity(None).unwrap();
+    assert!(page.entries.iter().any(|e| e.event == "send"));
+}
+
+#[test]
+fn an_edited_material_that_was_placed_nowhere_is_offered_for_sorting_again() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    add_home_intake(&mut core, &case);
+    let prepared = core.prepare_sort(&case).unwrap();
+    *fake.answer.lock().unwrap() = Some(claude_sorting());
+    core.send_sort(&prepared.approval_id.unwrap()).unwrap();
+    let detail = core.case_detail(&case).unwrap();
+    let (input, routing) = (&detail.inputs[1], &detail.routing[1]);
+    assert!(!routing.sorted && !routing.needs_sorting);
+    core.update_input(
+        &case,
+        &input.id,
+        &input.title,
+        &format!("{}\nועוד שורה.", input.content),
+    )
+    .unwrap();
+    let detail = core.case_detail(&case).unwrap();
+    assert!(detail.routing[1].needs_sorting);
+}
+
+#[test]
+fn a_lock_after_sleep_is_one_entry_with_its_reason() {
+    let (_dir, mut core, _case) = setup(None);
+    let t0 = SystemTime::now();
+    core.tick(t0);
+    assert!(core.tick(t0 + Duration::from_secs(400)));
+    core.unlock(PASSWORD).unwrap();
+    let page = core.activity(None).unwrap();
+    let locks: Vec<_> = page.entries.iter().filter(|e| e.event == "lock").collect();
+    assert_eq!(locks.len(), 1, "{locks:?}");
+    assert!(locks[0].text.contains("שינה"));
 }

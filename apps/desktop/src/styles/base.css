@@ -13,8 +13,8 @@ body {
   font-family: var(--font-body);
   background: var(--bg);
   color: var(--ink);
-  font-size: 15px;
-  line-height: 1.5;
+  font-size: 16px;
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
 button,
@@ -38,8 +38,9 @@ h1,
 h2,
 h3 {
   margin: 0;
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-weight: 700;
+  letter-spacing: -0.01em;
   text-wrap: balance;
 }
 p {
@@ -60,13 +61,14 @@ p {
   color: var(--ink-muted);
 }
 .small {
-  font-size: 13.5px;
+  font-size: 14px;
 }
 
 /* ---------- buttons ---------- */
 .btn {
-  min-height: 42px;
-  padding: 0 16px;
+  min-height: 44px;
+  padding: 0 18px;
+  font-size: 16px;
   border-radius: var(--radius-md);
   border: 1px solid var(--line-strong);
   background: var(--surface);
@@ -84,28 +86,34 @@ p {
   background: var(--primary);
   border-color: var(--primary);
   color: #fff;
-  font-weight: 700;
+  font-weight: 600;
 }
 .btn-primary:hover:not(:disabled) {
   background: var(--primary-hover);
 }
 .btn-small {
-  min-height: 34px;
+  min-height: 36px;
   padding: 0 12px;
-  font-size: 14px;
+  font-size: 15px;
   border-radius: 9px;
+}
+.btn-big {
+  min-height: 48px;
+  padding: 0 22px;
+  font-size: 17px;
 }
 .btn-ghost {
   border-color: transparent;
   background: transparent;
+  color: var(--primary);
 }
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 .icon-btn {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   padding: 0;
 }
 .pill-btn {
@@ -463,4 +471,23 @@ p {
 .age-calc-note {
   grid-column: 1 / -1;
   margin: 0;
+}
+
+/* Irreversible actions (erase a case, export without a password). */
+.btn-danger {
+  background: #8a1c0c;
+  border-color: #8a1c0c;
+  color: #fff;
+  font-weight: 700;
+}
+.btn-danger:hover:not(:disabled) {
+  background: #6e1609;
+}
+.btn-danger-quiet {
+  border-color: #e3b2a8;
+  color: var(--block);
+  background: var(--surface);
+}
+.btn-danger-quiet:hover:not(:disabled) {
+  background: var(--block-soft);
 }

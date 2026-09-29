@@ -1,10 +1,18 @@
 // The only module that talks to the Rust core. Types come from Rust via ts-rs.
 import { invoke } from "@tauri-apps/api/core";
+import type { ActivityPage } from "./generated/ActivityPage";
 import type { AppStatus } from "./generated/AppStatus";
+import type { RetentionItem } from "./generated/RetentionItem";
+import type { BackupCheckView } from "./generated/BackupCheckView";
+import type { BackupDone } from "./generated/BackupDone";
+import type { BackupStatus } from "./generated/BackupStatus";
+import type { StagedBackup } from "./generated/StagedBackup";
 import type { CaseDetail } from "./generated/CaseDetail";
 import type { CaseInput } from "./generated/CaseInput";
 import type { CaseMeta } from "./generated/CaseMeta";
 import type { CaseSummary } from "./generated/CaseSummary";
+import type { Folder } from "./generated/Folder";
+import type { NameMatch } from "./generated/NameMatch";
 import type { ChatView } from "./generated/ChatView";
 import type { ConsultResult } from "./generated/ConsultResult";
 import type { CreatedVault } from "./generated/CreatedVault";
@@ -20,6 +28,8 @@ import type { Prepared } from "./generated/Prepared";
 import type { ReportSettings } from "./generated/ReportSettings";
 import type { ScoreSheet } from "./generated/ScoreSheet";
 import type { SectionResult } from "./generated/SectionResult";
+import type { SortResult } from "./generated/SortResult";
+import type { MaterialRouting } from "./generated/MaterialRouting";
 import type { SuspectDecision } from "./generated/SuspectDecision";
 import type { UiError } from "./generated/UiError";
 
@@ -65,7 +75,19 @@ export const ipc = {
   listCases: () => call<CaseSummary[]>("list_cases"),
   createCase: (meta: CaseMeta, identities: IdentityInput[]) => call<string>("create_case", { meta, identities }),
   updateCase: (caseId: string, meta: CaseMeta) => run("update_case", { caseId, meta }),
+  /** Into the recycle bin (D-023); restorable for 30 days. */
   deleteCase: (caseId: string) => run("delete_case", { caseId }),
+  listTrash: () => call<CaseSummary[]>("list_trash"),
+  restoreCase: (caseId: string) => run("restore_case", { caseId }),
+  /** Erase from the bin now; the password is asked again. */
+  purgeCase: (caseId: string, password: string) => run("purge_case", { caseId, password }),
+  folders: () => call<Folder[]>("folders"),
+  createFolder: (parentId: string | null, name: string) => call<Folder>("create_folder", { parentId, name }),
+  renameFolder: (id: string, name: string) => run("rename_folder", { id, name }),
+  moveFolder: (id: string, parentId: string | null) => run("move_folder", { id, parentId }),
+  deleteFolder: (id: string) => run("delete_folder", { id }),
+  moveCase: (caseId: string, folderId: string | null) => run("move_case", { caseId, folderId }),
+  findNameMatches: (caseId: string | null, names: string[]) => call<NameMatch[]>("find_name_matches", { caseId, names }),
   setIdentities: (caseId: string, identities: IdentityInput[]) =>
     call<Identity[]>("set_identities", { caseId, identities }),
   caseDetail: (caseId: string) => call<CaseDetail>("case_detail", { caseId }),
@@ -100,6 +122,12 @@ export const ipc = {
     call<Prepared>("prepare_section", { caseId, sectionKey, instruction }),
   prepareFullDraft: (caseId: string) => call<[string, Prepared][]>("prepare_full_draft", { caseId }),
   sendSection: (approvalId: string) => call<SectionResult>("send_section", { approvalId }),
+  /** D-022: sort every material not sorted yet into sections (one review screen). */
+  prepareSort: (caseId: string) => call<Prepared>("prepare_sort", { caseId }),
+  sendSort: (approvalId: string) => call<SortResult>("send_sort", { approvalId }),
+  /** Einat's choice of sections for one material; it always wins. */
+  setInputSections: (caseId: string, inputId: string, sections: string[]) =>
+    run("set_input_sections", { caseId, inputId, sections }),
   chat: (caseId: string, sectionKey: string) => call<ChatView[]>("chat", { caseId, sectionKey }),
   approveParagraph: (caseId: string, draftId: string) => run("approve_paragraph", { caseId, draftId }),
   rejectParagraph: (caseId: string, draftId: string) => run("reject_paragraph", { caseId, draftId }),
@@ -113,10 +141,43 @@ export const ipc = {
 
   checkExport: (caseId: string) => call<ExportCheck>("check_export", { caseId }),
   exportReport: (caseId: string, password: string | null) => call<string>("export_report", { caseId, password }),
+  /** The file password to the clipboard: out of history and cloud sync, cleared after N seconds (returned). */
+  copySecret: (text: string) => call<number>("copy_secret", { text }),
+
+  // Activity log (metadata only; cases named on this computer) and retention reminders.
+  activity: (before: number | null) => call<ActivityPage>("activity", { before }),
+  markActivityReviewed: () => run("mark_activity_reviewed"),
+  retentionDue: () => call<RetentionItem[]>("retention_due"),
+  keepCaseLonger: (caseId: string, years: number) => run("keep_case_longer", { caseId, years }),
+
+  /** `current` is the password, or the recovery kit when the password was forgotten. */
+  changePassword: (current: string, withRecovery: boolean, newPassword: string) =>
+    run("change_password", { current, withRecovery, newPassword }),
+  newRecoveryKit: (current: string, withRecovery: boolean) =>
+    call<CreatedVault>("new_recovery_kit", { current, withRecovery }),
+
+  // Encrypted backup (D-024). The system's own window picks the file; `null` = cancelled.
+  backupStatus: () => call<BackupStatus>("backup_status"),
+  writeBackup: () => call<BackupDone | null>("write_backup"),
+  chooseBackup: () => call<StagedBackup | null>("choose_backup"),
+  checkBackup: (password: string) => call<BackupCheckView>("check_backup", { password }),
+  restoreBackup: (password: string | null, recoveryKey: string | null) =>
+    call<AppStatus>("restore_backup", { password, recoveryKey }),
+  forgetBackup: () => run("forget_backup"),
 };
 
 export type {
+  ActivityPage,
   AppStatus,
+  RetentionItem,
+  BackupCheckView,
+  BackupDone,
+  BackupStatus,
+  StagedBackup,
+  Folder,
+  NameMatch,
+  MaterialRouting,
+  SortResult,
   CaseDetail,
   CaseInput,
   CaseMeta,

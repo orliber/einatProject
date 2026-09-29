@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-send-sort"
+description = "Enables the send_sort command without any pre-configured scope."
+commands.allow = ["send_sort"]
+
+[[permission]]
+identifier = "deny-send-sort"
+description = "Denies the send_sort command without any pre-configured scope."
+commands.deny = ["send_sort"]

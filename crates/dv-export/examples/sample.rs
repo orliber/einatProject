@@ -9,6 +9,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let password = args.next().unwrap_or_else(|| "דוגמה-בלבד-1234".into());
     let para = |t: &str| t.to_owned();
     let report = Report {
+        tables: vec![dv_export::ScoreTable {
+            title: "WPPSI-IV".into(),
+            columns: ["מדד", "ציון", "אחוזון", "טווח"].map(str::to_owned).to_vec(),
+            rows: [
+                ["מנת משכל כללית (FSIQ)", "102", "55", "ממוצע"],
+                ["הבנה מילולית (VCI)", "112", "79", "ממוצע גבוה"],
+                ["מהירות עיבוד (PSI)", "84", "14", "ממוצע נמוך"],
+            ]
+            .map(|r| r.map(str::to_owned).to_vec())
+            .to_vec(),
+            note: "ציוני המדדים הם ציוני תקן (ממוצע 100, סטיית תקן 15).".into(),
+        }],
         title: "דוח אבחון פסיכולוגי התפתחותי".into(),
         info: vec![
             InfoLine { label: "שם הילד".into(), value: "אלון בדוי".into() },
@@ -28,7 +40,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 sections: vec![
                     ReportSection { title: "כלי האבחון".into(), paragraphs: vec![para("WPPSI-IV (גרסה עברית), Vineland-3 (שאלון להורים), תצפית בגן ומשחק חופשי.")] },
                     ReportSection { title: "פרופיל קוגניטיבי".into(), paragraphs: vec![
-                        para("הציון הכולל נמצא בטווח הממוצע (FSIQ = 102). נמצא פער בין ההבנה המילולית (112) לבין מהירות העיבוד (88), פער שמשמעותו הקלינית נדונה בסיכום."),
+                        para("הציון הכולל נמצא בטווח הממוצע (FSIQ = 102). נמצא פער בין ההבנה המילולית (112) לבין מהירות העיבוד (84), פער שמשמעותו הקלינית נדונה בסיכום."),
                         para("במשימות חזותיות-מרחביות אלון עבד בשיטתיות, בדק את עצמו ונהנה מהאתגר."),
                     ] },
                 ],

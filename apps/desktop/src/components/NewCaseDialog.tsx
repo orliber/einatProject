@@ -1,12 +1,13 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { AgeField, parseAge } from "./AgeField";
 import { DateField, todayIso } from "./DateField";
 import { useApp } from "../App";
 import { personRoles, roleLabel } from "../i18n/he";
-import { ipc, type IdentityInput } from "../ipc/client";
+import { ipc, type IdentityInput, type NameMatch } from "../ipc/client";
 import type { GrammaticalGender } from "../ipc/generated/GrammaticalGender";
 import type { Role } from "../ipc/generated/Role";
 import { Dialog, ErrorLine } from "./ui";
+import "./NewCaseDialog.css";
 
 export interface PersonRow {
   id: string | null;
@@ -31,6 +32,9 @@ export function PeopleEditor({ rows, onChange }: { rows: PersonRow[]; onChange: 
   const set = (i: number, patch: Partial<PersonRow>) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   return (
     <div className="people">
+      <div className="person-row person-head" aria-hidden="true">
+        <span>תפקיד</span><span>שם</span><span>כינויים וכתיב נוסף</span><span />
+      </div>
       {rows.map((r, i) => (
         <div key={i} className="person-row">
           <label className="visually-hidden" htmlFor={`role-${i}`}>תפקיד</label>
@@ -41,13 +45,13 @@ export function PeopleEditor({ rows, onChange }: { rows: PersonRow[]; onChange: 
             ))}
           </select>
           <label className="visually-hidden" htmlFor={`name-${i}`}>שם</label>
-          <input id={`name-${i}`} className="input grow" placeholder="שם" value={r.value} onChange={(e) => set(i, { value: e.target.value })} />
+          <input id={`name-${i}`} className="input" placeholder={r.role === "child" ? "למשל: נועם" : "שם"} value={r.value} onChange={(e) => set(i, { value: e.target.value })} />
           <label className="visually-hidden" htmlFor={`alias-${i}`}>כינויים</label>
-          <input id={`alias-${i}`} className="input grow" placeholder="כינויים וכתיב נוסף, בפסיקים" value={r.aliases}
+          <input id={`alias-${i}`} className="input" placeholder={r.role === "child" ? "למשל: נועמי, נעמי" : "בפסיקים, לא חובה"} value={r.aliases}
             onChange={(e) => set(i, { aliases: e.target.value })} />
-          {r.role !== "child" && (
-            <button type="button" className="btn icon-btn" aria-label="הסרה" onClick={() => onChange(rows.filter((_, j) => j !== i))}>×</button>
-          )}
+          {r.role !== "child" ? (
+            <button type="button" className="btn icon-btn" aria-label={`הסרת ${roleLabel[r.role]}`} title="הסרה" onClick={() => onChange(rows.filter((_, j) => j !== i))}>×</button>
+          ) : <span />}
         </div>
       ))}
       <button type="button" className="btn btn-small add-person"
@@ -61,7 +65,45 @@ function nextCode(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export function NewCaseDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
+/** Names already in another case (D-023): a sibling, a family seen before, the same child twice. */
+export function useNameMatches(caseId: string | null, rows: PersonRow[]): NameMatch[] {
+  const [found, setFound] = useState<NameMatch[]>([]);
+  const names = rows.flatMap((r) => [r.value, ...r.aliases.split(",")]).map((n) => n.trim()).filter((n) => n.length >= 2);
+  const key = names.join("|");
+  useEffect(() => {
+    let alive = true;
+    const t = window.setTimeout(() => {
+      const list = key ? key.split("|") : [];
+      (list.length ? ipc.findNameMatches(caseId, list) : Promise.resolve([]))
+        .then((m) => alive && setFound(m))
+        .catch(() => undefined);
+    }, 350);
+    return () => {
+      alive = false;
+      window.clearTimeout(t);
+    };
+  }, [caseId, key]);
+  return found;
+}
+
+export function NameMatches({ found }: { found: NameMatch[] }) {
+  if (!found.length) return null;
+  return (
+    <div className="name-matches" role="status">
+      <b>שמות שכבר מופיעים בתיקים אחרים</b>
+      <ul>
+        {found.slice(0, 6).map((m) => (
+          <li key={`${m.case_id}-${m.typed}-${m.value}`}>
+            "{m.typed}": {roleLabel[m.role]} בתיק {m.case_code}{m.child_name ? ` (${m.child_name})` : ""}{m.trashed ? ", בסל המחזור" : ""}
+          </li>
+        ))}
+      </ul>
+      <span className="small">אם זו אותה משפחה (למשל אח או אחות), כדאי לבדוק את התיק הקודם. אם זה צירוף מקרים, אפשר להמשיך.</span>
+    </div>
+  );
+}
+
+export function NewCaseDialog({ onClose, onCreated, folderId = null }: { onClose: () => void; onCreated: (id: string) => void; folderId?: string | null }) {
   const { fail } = useApp();
   const [code, setCode] = useState(`תיק-${nextCode()}`);
   const [gender, setGender] = useState<GrammaticalGender>("male");
@@ -77,6 +119,7 @@ export function NewCaseDialog({ onClose, onCreated }: { onClose: () => void; onC
   ]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const matches = useNameMatches(null, rows);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -96,6 +139,7 @@ export function NewCaseDialog({ onClose, onCreated }: { onClose: () => void; onC
         },
         toIdentityInputs(rows),
       );
+      if (folderId) await ipc.moveCase(id, folderId);
       onCreated(id);
     } catch (err) {
       setError(fail(err as never));
@@ -133,6 +177,7 @@ export function NewCaseDialog({ onClose, onCreated }: { onClose: () => void; onC
           <span className="label">שמות שיוסתרו</span>
           <p className="hint">הילד/ה, ההורים, האחים, הגננת וכל מי שמופיע בחומרים. כינויים וכתיב נוסף ("נועמי", "נעמי") מוסתרים גם הם.</p>
           <PeopleEditor rows={rows} onChange={setRows} />
+          <NameMatches found={matches} />
         </div>
 
         <div className="card consent">

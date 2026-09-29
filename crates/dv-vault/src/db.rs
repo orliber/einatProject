@@ -107,6 +107,17 @@ pub const MAIN_MIGRATIONS: &[&str] = &[
      CREATE INDEX drafts_case ON drafts(case_id, section_key);",
     // v2: structured data behind a material (a score sheet), sealed like the rest of the row.
     "ALTER TABLE inputs ADD COLUMN data_enc BLOB;",
+    // v3: which report sections a material feeds (D-022), sealed like the rest of the row.
+    "ALTER TABLE inputs ADD COLUMN routing_enc BLOB;",
+    // v4: folders (names sealed with the settings key) and the recycle bin.
+    "CREATE TABLE folders (
+        id TEXT PRIMARY KEY,
+        parent_id TEXT REFERENCES folders(id),
+        created_at INTEGER NOT NULL,
+        name_enc BLOB NOT NULL
+     );
+     ALTER TABLE cases ADD COLUMN folder_id TEXT;
+     ALTER TABLE cases ADD COLUMN deleted_at INTEGER;",
 ];
 
 pub const IDENTITY_MIGRATIONS: &[&str] = &[

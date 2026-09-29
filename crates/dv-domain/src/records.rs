@@ -63,6 +63,23 @@ pub struct CaseSummary {
     #[ts(type = "number")]
     pub updated_at: i64,
     pub approved_sections: Vec<String>,
+    /// The folder it sits in; `None` = the top level.
+    pub folder_id: Option<String>,
+    /// Set while the case is in the recycle bin (unix seconds).
+    #[ts(type = "number | null")]
+    pub deleted_at: Option<i64>,
+}
+
+/// A folder of cases, like in a file explorer. Folders nest to any depth. The name is sealed
+/// in the vault and never leaves the computer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Folder {
+    pub id: String,
+    pub parent_id: Option<String>,
+    pub name: String,
+    #[ts(type = "number")]
+    pub created_at: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

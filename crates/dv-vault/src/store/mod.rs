@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use dv_domain::{
     assign_tag, Author, CaseInput, CaseMeta, CaseSummary, ChatMessage, ChatRole, DraftParagraph,
-    DraftStatus, Identity, IdentityInput, InputKind, Role, Transmission,
+    DraftStatus, Folder, Identity, IdentityInput, InputKind, Role, Transmission,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::de::DeserializeOwned;
@@ -22,11 +22,15 @@ use crate::header::{unwrap_mk, wrap_mk, KeySlot, VaultHeader, FORMAT, HEADER_FIL
 use crate::password::{self, Argon2Params};
 use crate::{recovery, VaultError};
 
+mod backup;
+pub use backup::{peek_backup, BackupCheck, BackupInfo, BackupPeek, BACKUP_EXTENSION};
+
 /// Raw rows as read from SQLite, before decryption.
 type IdentityRow = (String, String, String, Vec<u8>, Vec<u8>);
 type InputRow = (String, String, i64, Vec<u8>, Vec<u8>);
 type MessageRow = (String, String, bool, i64, Vec<u8>, Vec<u8>);
 type TransmissionRow = (String, String, i64, String, String, Vec<u8>);
+type SummaryRow = (String, i64, i64, Option<String>, Option<i64>);
 
 const MAIN_DB: &str = "main.db";
 const IDENTITY_DB: &str = "identity.db";
@@ -42,6 +46,8 @@ struct Keys {
     db_main: Key32,
     db_identity: Key32,
     db_audit: Key32,
+    /// Seals `.vaultbak` backups.
+    backup: Key32,
 }
 
 impl Keys {
@@ -56,6 +62,7 @@ impl Keys {
             db_main: d("db/main")?,
             db_identity: d("db/identity")?,
             db_audit: d("db/audit")?,
+            backup: d("backup")?,
         })
     }
 }
@@ -83,6 +90,59 @@ pub struct Created {
 impl std::fmt::Debug for Created {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Created { .. }")
+    }
+}
+
+/// What opens a vault (or a backup of it).
+#[derive(Clone, Copy)]
+pub enum Secret<'a> {
+    Password(&'a str),
+    Recovery(&'a str),
+}
+
+impl std::fmt::Debug for Secret<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Secret::Password(_) => "Secret::Password(..)",
+            Secret::Recovery(_) => "Secret::Recovery(..)",
+        })
+    }
+}
+
+/// The master key, unwrapped from the header's password or recovery slot.
+pub(crate) fn master_key(header: &VaultHeader, secret: Secret<'_>) -> Result<Key32, VaultError> {
+    match secret {
+        Secret::Password(password) => {
+            let (salt, params, wrapped) = header
+                .slots
+                .iter()
+                .find_map(|s| match s {
+                    KeySlot::Password {
+                        salt,
+                        params,
+                        wrapped_mk,
+                    } => Some((salt.clone(), *params, wrapped_mk.clone())),
+                    KeySlot::Recovery { .. } => None,
+                })
+                .ok_or(VaultError::Corrupt("no password slot".to_owned()))?;
+            let salt: [u8; 32] = crate::crypto::unhex(&salt)?
+                .try_into()
+                .map_err(|_| VaultError::Corrupt("salt length".to_owned()))?;
+            let kek = password::derive_kek(password, &salt, params)?;
+            unwrap_mk(&kek, "password", &header.vault_id, &wrapped)
+        }
+        Secret::Recovery(typed) => {
+            let wrapped = header
+                .slots
+                .iter()
+                .find_map(|s| match s {
+                    KeySlot::Recovery { wrapped_mk } => Some(wrapped_mk.clone()),
+                    KeySlot::Password { .. } => None,
+                })
+                .ok_or(VaultError::Corrupt("no recovery slot".to_owned()))?;
+            let kek = recovery::derive_kek(&recovery::parse(typed)?)?;
+            unwrap_mk(&kek, "recovery", &header.vault_id, &wrapped)
+        }
     }
 }
 
@@ -178,25 +238,19 @@ impl Vault {
         })
     }
 
-    pub fn unlock_with_password(dir: &Path, password: &str) -> Result<Self, VaultError> {
+    /// Check the password without opening the vault again (before an irreversible action).
+    pub fn verify_password(dir: &Path, password: &str) -> Result<(), VaultError> {
+        Self::password_mk(dir, password).map(|_| ())
+    }
+
+    fn password_mk(dir: &Path, password: &str) -> Result<(VaultHeader, Key32), VaultError> {
         let header = VaultHeader::read(dir)?;
-        let (salt, params, wrapped) = header
-            .slots
-            .iter()
-            .find_map(|s| match s {
-                KeySlot::Password {
-                    salt,
-                    params,
-                    wrapped_mk,
-                } => Some((salt.clone(), *params, wrapped_mk.clone())),
-                KeySlot::Recovery { .. } => None,
-            })
-            .ok_or(VaultError::Corrupt("no password slot".to_owned()))?;
-        let salt: [u8; 32] = crate::crypto::unhex(&salt)?
-            .try_into()
-            .map_err(|_| VaultError::Corrupt("salt length".to_owned()))?;
-        let kek = password::derive_kek(password, &salt, params)?;
-        let mk = unwrap_mk(&kek, "password", &header.vault_id, &wrapped)?;
+        let mk = master_key(&header, Secret::Password(password))?;
+        Ok((header, mk))
+    }
+
+    pub fn unlock_with_password(dir: &Path, password: &str) -> Result<Self, VaultError> {
+        let (header, mk) = Self::password_mk(dir, password)?;
         let mut vault = Self::open_with(dir, header, &mk)?;
         vault.record(
             AuditEvent::Unlock,
@@ -208,16 +262,7 @@ impl Vault {
 
     pub fn unlock_with_recovery(dir: &Path, typed: &str) -> Result<Self, VaultError> {
         let header = VaultHeader::read(dir)?;
-        let wrapped = header
-            .slots
-            .iter()
-            .find_map(|s| match s {
-                KeySlot::Recovery { wrapped_mk } => Some(wrapped_mk.clone()),
-                KeySlot::Password { .. } => None,
-            })
-            .ok_or(VaultError::Corrupt("no recovery slot".to_owned()))?;
-        let kek = recovery::derive_kek(&recovery::parse(typed)?)?;
-        let mk = unwrap_mk(&kek, "recovery", &header.vault_id, &wrapped)?;
+        let mk = master_key(&header, Secret::Recovery(typed))?;
         let mut vault = Self::open_with(dir, header, &mk)?;
         vault.record(
             AuditEvent::Unlock,
@@ -229,6 +274,7 @@ impl Vault {
 
     fn open_with(dir: &Path, mut header: VaultHeader, mk: &Key32) -> Result<Self, VaultError> {
         let keys = Keys::derive(mk)?;
+        backup::remove_stale_scratch(dir);
         let header_ok = header.verify(&keys.header).is_ok();
         let main = open_encrypted(&dir.join(MAIN_DB), &keys.db_main)?;
         migrate(&main, MAIN_MIGRATIONS)?;
@@ -283,21 +329,37 @@ impl Vault {
         &self.dir
     }
 
-    /// Lock explicitly (records the event); dropping the vault also wipes the keys.
-    pub fn lock(mut self) -> Result<(), VaultError> {
-        self.record(AuditEvent::Lock, None, &serde_json::json!({}))
+    /// Random, and public (it is in the header): tells a backup of this vault from another's.
+    #[must_use]
+    pub fn vault_id(&self) -> &str {
+        &self.header.vault_id
     }
 
-    /// Replace the password slot. Needs a fresh proof of the current password, because the
-    /// master key is not kept in memory after unlocking (only purpose-specific subkeys are).
+    /// Lock explicitly (records the event); dropping the vault also wipes the keys.
+    pub fn lock(self) -> Result<(), VaultError> {
+        self.lock_because(None)
+    }
+
+    /// Lock, recording why (for example `sleep`) in the same single log entry.
+    pub fn lock_because(mut self, reason: Option<&str>) -> Result<(), VaultError> {
+        let meta = match reason {
+            Some(r) => serde_json::json!({ "reason": r }),
+            None => serde_json::json!({}),
+        };
+        self.record(AuditEvent::Lock, None, &meta)
+    }
+
+    /// Replace the password slot. Needs a fresh proof: the current password, or the recovery
+    /// kit when the password was forgotten. The master key is not kept in memory after
+    /// unlocking (only purpose-specific subkeys are).
     pub fn rekey_password(
         &mut self,
-        current: &str,
+        current: Secret<'_>,
         new_password: &str,
         params: Argon2Params,
     ) -> Result<(), VaultError> {
         password::check_policy(new_password).map_err(VaultError::Policy)?;
-        let mk = self.unwrap_with_password(current)?;
+        let mk = master_key(&self.header, current)?;
         let salt = random_array::<32>()?;
         let kek = password::derive_kek(new_password, &salt, params)?;
         let wrapped = wrap_mk(&kek, "password", &self.header.vault_id, &mk)?;
@@ -315,12 +377,12 @@ impl Vault {
         self.record(AuditEvent::PasswordChanged, None, &serde_json::json!({}))
     }
 
-    /// Issue a new recovery key (the old one stops working). Needs the current password.
+    /// Issue a new recovery key (the old one stops working). Needs the current password or kit.
     pub fn rotate_recovery_key(
         &mut self,
-        current_password: &str,
+        current: Secret<'_>,
     ) -> Result<Zeroizing<String>, VaultError> {
-        let mk = self.unwrap_with_password(current_password)?;
+        let mk = master_key(&self.header, current)?;
         let recovery_key = Key32::random()?;
         let kek = recovery::derive_kek(&recovery_key)?;
         let wrapped = wrap_mk(&kek, "recovery", &self.header.vault_id, &mk)?;
@@ -352,24 +414,6 @@ impl Vault {
             }
             KeySlot::Password { .. } => false,
         })
-    }
-
-    fn unwrap_with_password(&self, password: &str) -> Result<Key32, VaultError> {
-        for slot in &self.header.slots {
-            if let KeySlot::Password {
-                salt,
-                params,
-                wrapped_mk,
-            } = slot
-            {
-                let salt: [u8; 32] = crate::crypto::unhex(salt)?
-                    .try_into()
-                    .map_err(|_| VaultError::Corrupt("salt length".to_owned()))?;
-                let kek = password::derive_kek(password, &salt, *params)?;
-                return unwrap_mk(&kek, "password", &self.header.vault_id, wrapped_mk);
-            }
-        }
-        Err(VaultError::Corrupt("no password slot".to_owned()))
     }
 
     // ---------------------------------------------------------------- audit
@@ -406,6 +450,27 @@ impl Vault {
 
     pub fn audit_entries(&self, limit: u32) -> Result<Vec<AuditEntry>, VaultError> {
         audit::recent(&self.audit, limit)
+    }
+
+    /// A page of the log, newest first, below `before` (a `seq`).
+    pub fn audit_page(
+        &self,
+        before: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<AuditEntry>, VaultError> {
+        audit::page(&self.audit, before, limit)
+    }
+
+    /// Walk the whole chain again now (not only at unlock).
+    pub fn audit_intact(&self) -> Result<bool, VaultError> {
+        Ok(matches!(
+            audit::verify(
+                &self.audit,
+                &self.keys.audit_mac,
+                self.header.audit_anchor.as_ref()
+            )?,
+            ChainStatus::Intact { .. } | ChainStatus::AnchorLagging { .. }
+        ))
     }
 
     // ---------------------------------------------------------------- settings
@@ -591,15 +656,30 @@ impl Vault {
         Ok(())
     }
 
+    /// Cases at work (not in the recycle bin), most recently changed first.
     pub fn list_cases(&self) -> Result<Vec<CaseSummary>, VaultError> {
-        let mut stmt = self
-            .main
-            .prepare("SELECT id, created_at, updated_at FROM cases ORDER BY updated_at DESC")?;
-        let rows: Vec<(String, i64, i64)> = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        self.summaries(false)
+    }
+
+    /// Cases in the recycle bin, most recently deleted first.
+    pub fn list_trash(&self) -> Result<Vec<CaseSummary>, VaultError> {
+        self.summaries(true)
+    }
+
+    fn summaries(&self, trashed: bool) -> Result<Vec<CaseSummary>, VaultError> {
+        let sql = if trashed {
+            "SELECT id, created_at, updated_at, folder_id, deleted_at FROM cases WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC"
+        } else {
+            "SELECT id, created_at, updated_at, folder_id, deleted_at FROM cases WHERE deleted_at IS NULL ORDER BY updated_at DESC"
+        };
+        let mut stmt = self.main.prepare(sql)?;
+        let rows: Vec<SummaryRow> = stmt
+            .query_map([], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })?
             .collect::<Result<_, _>>()?;
         rows.into_iter()
-            .map(|(id, created_at, updated_at)| {
+            .map(|(id, created_at, updated_at, folder_id, deleted_at)| {
                 let meta = self.case_meta(&id)?;
                 let child_name = self
                     .identities(&id)?
@@ -614,9 +694,203 @@ impl Vault {
                     created_at,
                     updated_at,
                     approved_sections,
+                    folder_id,
+                    deleted_at,
                 })
             })
             .collect()
+    }
+
+    /// Into the recycle bin: nothing is erased yet, and the case can be restored.
+    pub fn trash_case(&mut self, case_id: &str) -> Result<(), VaultError> {
+        self.case_key(case_id)?;
+        self.main.execute(
+            "UPDATE cases SET deleted_at = ?1 WHERE id = ?2",
+            params![now(), case_id],
+        )?;
+        self.record(
+            AuditEvent::CaseTrashed,
+            Some(case_id),
+            &serde_json::json!({}),
+        )
+    }
+
+    /// Tests elsewhere in the workspace move a deletion back in time.
+    #[doc(hidden)]
+    pub fn set_deleted_at_for_tests(&mut self, case_id: &str, at: i64) -> Result<(), VaultError> {
+        self.main.execute(
+            "UPDATE cases SET deleted_at = ?1 WHERE id = ?2",
+            params![at, case_id],
+        )?;
+        Ok(())
+    }
+
+    /// Back from the recycle bin. If its folder is gone, it returns to the top level.
+    pub fn restore_case(&mut self, case_id: &str) -> Result<(), VaultError> {
+        self.case_key(case_id)?;
+        self.main.execute(
+            "UPDATE cases SET deleted_at = NULL,
+                folder_id = (SELECT id FROM folders WHERE id = cases.folder_id)
+             WHERE id = ?1",
+            [case_id],
+        )?;
+        self.record(
+            AuditEvent::CaseRestored,
+            Some(case_id),
+            &serde_json::json!({}),
+        )
+    }
+
+    /// Cases that have been in the recycle bin since before `cutoff` (unix seconds).
+    pub fn trashed_before(&self, cutoff: i64) -> Result<Vec<String>, VaultError> {
+        let mut stmt = self
+            .main
+            .prepare("SELECT id FROM cases WHERE deleted_at IS NOT NULL AND deleted_at < ?1")?;
+        let ids = stmt
+            .query_map([cutoff], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        Ok(ids)
+    }
+
+    pub fn move_case(&mut self, case_id: &str, folder_id: Option<&str>) -> Result<(), VaultError> {
+        self.case_key(case_id)?;
+        if let Some(f) = folder_id {
+            self.folder_exists(f)?;
+        }
+        self.main.execute(
+            "UPDATE cases SET folder_id = ?1 WHERE id = ?2",
+            params![folder_id, case_id],
+        )?;
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------- folders
+
+    fn folder_exists(&self, id: &str) -> Result<(), VaultError> {
+        self.main
+            .query_row("SELECT 1 FROM folders WHERE id = ?1", [id], |_| Ok(()))
+            .optional()?
+            .ok_or(VaultError::NotFound)
+    }
+
+    pub fn folders(&self) -> Result<Vec<Folder>, VaultError> {
+        let mut stmt = self.main.prepare(
+            "SELECT id, parent_id, created_at, name_enc FROM folders ORDER BY created_at",
+        )?;
+        let rows: Vec<(String, Option<String>, i64, Vec<u8>)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+            .collect::<Result<_, _>>()?;
+        rows.into_iter()
+            .map(|(id, parent_id, created_at, name)| {
+                Ok(Folder {
+                    name: open_string(
+                        &self.keys.settings,
+                        &aad("folders", "name", &id, ""),
+                        &name,
+                    )?,
+                    id,
+                    parent_id,
+                    created_at,
+                })
+            })
+            .collect()
+    }
+
+    pub fn create_folder(
+        &mut self,
+        parent_id: Option<&str>,
+        name: &str,
+    ) -> Result<Folder, VaultError> {
+        if let Some(p) = parent_id {
+            self.folder_exists(p)?;
+        }
+        let id = random_id()?;
+        let t = now();
+        let sealed = seal_str(&self.keys.settings, &aad("folders", "name", &id, ""), name)?;
+        self.main.execute(
+            "INSERT INTO folders (id, parent_id, created_at, name_enc) VALUES (?1, ?2, ?3, ?4)",
+            params![id, parent_id, t, sealed],
+        )?;
+        self.record(
+            AuditEvent::FoldersChanged,
+            None,
+            &serde_json::json!({ "created": true }),
+        )?;
+        Ok(Folder {
+            id,
+            parent_id: parent_id.map(str::to_owned),
+            name: name.to_owned(),
+            created_at: t,
+        })
+    }
+
+    pub fn rename_folder(&mut self, id: &str, name: &str) -> Result<(), VaultError> {
+        self.folder_exists(id)?;
+        let sealed = seal_str(&self.keys.settings, &aad("folders", "name", id, ""), name)?;
+        self.main.execute(
+            "UPDATE folders SET name_enc = ?1 WHERE id = ?2",
+            params![sealed, id],
+        )?;
+        Ok(())
+    }
+
+    /// Move a folder under another (or to the top level). A folder cannot go inside itself or
+    /// inside one of its own subfolders.
+    pub fn move_folder(&mut self, id: &str, parent_id: Option<&str>) -> Result<(), VaultError> {
+        self.folder_exists(id)?;
+        if let Some(target) = parent_id {
+            let mut cur = Some(target.to_owned());
+            while let Some(c) = cur {
+                if c == id {
+                    return Err(VaultError::Refused(
+                        "a folder cannot go inside itself".to_owned(),
+                    ));
+                }
+                cur = self
+                    .main
+                    .query_row("SELECT parent_id FROM folders WHERE id = ?1", [&c], |r| {
+                        r.get(0)
+                    })
+                    .optional()?
+                    .ok_or(VaultError::NotFound)?;
+            }
+        }
+        self.main.execute(
+            "UPDATE folders SET parent_id = ?1 WHERE id = ?2",
+            params![parent_id, id],
+        )?;
+        self.record(
+            AuditEvent::FoldersChanged,
+            None,
+            &serde_json::json!({ "moved": true }),
+        )
+    }
+
+    /// Delete a folder: its subfolders and cases (also those in the recycle bin) move up to
+    /// its parent first. Nothing inside is ever deleted with it.
+    pub fn delete_folder(&mut self, id: &str) -> Result<(), VaultError> {
+        self.folder_exists(id)?;
+        let parent: Option<String> =
+            self.main
+                .query_row("SELECT parent_id FROM folders WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })?;
+        let tx = self.main.unchecked_transaction()?;
+        tx.execute(
+            "UPDATE folders SET parent_id = ?1 WHERE parent_id = ?2",
+            params![parent, id],
+        )?;
+        tx.execute(
+            "UPDATE cases SET folder_id = ?1 WHERE folder_id = ?2",
+            params![parent, id],
+        )?;
+        tx.execute("DELETE FROM folders WHERE id = ?1", [id])?;
+        tx.commit()?;
+        self.record(
+            AuditEvent::FoldersChanged,
+            None,
+            &serde_json::json!({ "deleted": true }),
+        )
     }
 
     /// Crypto-shredding: rows are deleted with `secure_delete` and the case key is gone,
@@ -904,6 +1178,48 @@ impl Vault {
             .ok_or(VaultError::NotFound)?;
         sealed
             .map(|b| open_string(&key, &aad("inputs", "data", input_id, case_id), &b))
+            .transpose()
+    }
+
+    /// Where a material goes in the report (D-022), as JSON, sealed with the case key.
+    pub fn set_input_routing(
+        &mut self,
+        case_id: &str,
+        input_id: &str,
+        routing: &str,
+    ) -> Result<(), VaultError> {
+        let key = self.case_key(case_id)?;
+        let changed = self.main.execute(
+            "UPDATE inputs SET routing_enc = ?1 WHERE id = ?2 AND case_id = ?3",
+            params![
+                seal_str(&key, &aad("inputs", "routing", input_id, case_id), routing)?,
+                input_id,
+                case_id
+            ],
+        )?;
+        if changed == 0 {
+            return Err(VaultError::NotFound);
+        }
+        Ok(())
+    }
+
+    pub fn input_routing(
+        &self,
+        case_id: &str,
+        input_id: &str,
+    ) -> Result<Option<String>, VaultError> {
+        let key = self.case_key(case_id)?;
+        let sealed: Option<Vec<u8>> = self
+            .main
+            .query_row(
+                "SELECT routing_enc FROM inputs WHERE id = ?1 AND case_id = ?2",
+                params![input_id, case_id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .ok_or(VaultError::NotFound)?;
+        sealed
+            .map(|b| open_string(&key, &aad("inputs", "routing", input_id, case_id), &b))
             .transpose()
     }
 

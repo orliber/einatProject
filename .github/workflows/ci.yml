@@ -1,17 +1,25 @@
 name: CI
 
+# Pull requests run the fast checks once (not again for the branch push). The installer
+# builds (macOS counts 10x, Windows 2x in Actions minutes) run on main and by hand only.
 on:
   push:
-    branches: [main, "claude/**"]
+    branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      fips:
+        description: "Build the installers on the FIPS 140-3 module (D-006). Verify here before it becomes the default."
+        type: boolean
+        default: false
 
 # Least privilege: read the code, nothing else. No secrets are used anywhere.
+# Every action is pinned to a commit (STANDARDS 5.8); Dependabot keeps the pins current.
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -24,10 +32,10 @@ jobs:
     name: Rust – fmt, clippy, tests, invariants, scan
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: rustup show active-toolchain
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets -- -D warnings
@@ -41,10 +49,10 @@ jobs:
     name: Supply chain – cargo-deny (advisories, licenses, bans, sources)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo install cargo-deny --locked
       - run: cargo deny check
 
@@ -52,13 +60,13 @@ jobs:
     name: FIPS 140-3 module – vault tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo test -p dv-vault --features fips
       - run: cargo test -p dv-export --features fips
 
@@ -69,13 +77,13 @@ jobs:
       run:
         working-directory: apps/desktop
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           package_json_file: apps/desktop/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
@@ -90,6 +98,8 @@ jobs:
   desktop:
     name: Desktop build – ${{ matrix.os }}
     needs: [rust, frontend]
+    # Installers: after a merge to main, or "Run workflow" on any branch (Actions tab).
+    if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:
@@ -113,7 +123,7 @@ jobs:
               target/release/bundle/deb/*.deb
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - name: Linux WebView libraries
@@ -121,23 +131,33 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev
-      - uses: Swatinem/rust-cache@v2
-      - uses: pnpm/action-setup@v4
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           package_json_file: apps/desktop/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: apps/desktop/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: apps/desktop
+      # FIPS build (aws-lc-fips-sys): Go everywhere; NASM and Ninja on Windows.
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        if: inputs.fips
+        with:
+          go-version: stable
+      - name: FIPS build tools (Windows)
+        if: inputs.fips && runner.os == 'Windows'
+        run: |
+          choco install nasm ninja -y --no-progress
+          echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - name: Clippy on the desktop shell
         run: cargo clippy -p dv-desktop -- -D warnings
       - name: Build installer (unsigned; signing is phase 8)
-        run: pnpm tauri build --bundles ${{ matrix.bundles }}
+        run: pnpm tauri build --bundles ${{ matrix.bundles }} ${{ inputs.fips && '--features fips' || '' }}
         working-directory: apps/desktop
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.paths }}

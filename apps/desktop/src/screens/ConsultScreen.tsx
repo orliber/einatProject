@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useApp } from "../App";
 import { TopBar } from "../components/TopBar";
 import { ReviewDialog } from "../components/ReviewDialog";
+import { CasePicker } from "../components/CasePicker";
 import { ErrorLine, Spinner } from "../components/ui";
 import { ipc, type CaseSummary, type Prepared } from "../ipc/client";
 import "./ConsultScreen.css";
@@ -96,20 +97,12 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
                 {scope !== null && (
                   <>
                     <label className="visually-hidden" htmlFor="consult-case">התיק</label>
-                    <select id="consult-case" className="select" value={scope} onChange={(e) => setScope(e.target.value)}>
-                      {cases.map((c) => <option key={c.id} value={c.id}>{c.meta.code}{c.child_name ? ` · ${c.child_name}` : ""}</option>)}
-                    </select>
+                    <CasePicker id="consult-case" value={scope} onChange={setScope} />
                   </>
                 )}
               </span>
             </label>
           </fieldset>
-          <div className="stack" style={{ gap: 8 }}>
-            <span className="label">רעיונות לשאלות</span>
-            {IDEAS.map((q) => (
-              <button key={q} type="button" className="idea" onClick={() => setMessage(q)}>{q}</button>
-            ))}
-          </div>
         </aside>
 
         <section className="card consult-chat" aria-label="השיחה">
@@ -118,6 +111,12 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
               <div className="consult-empty">
                 <h2>{selectedCase ? `שאלה על ${selectedCase.meta.code}` : "שאלה מקצועית"}</h2>
                 <p className="muted">כלי אבחון, ניסוח, ספרות מקצועית או שיקולים קליניים. Claude מבחין בין ידע מבוסס לדעה, וההחלטה המקצועית נשארת שלך. השיחה נשמרת רק עד נעילת התוכנה.</p>
+                <span className="label ideas-label">אפשר להתחיל מאחת מאלה</span>
+                <div className="ideas">
+                  {IDEAS.map((q) => (
+                    <button key={q} type="button" className="idea" onClick={() => setMessage(q)}>{q}</button>
+                  ))}
+                </div>
               </div>
             )}
             {list.map((t, i) =>

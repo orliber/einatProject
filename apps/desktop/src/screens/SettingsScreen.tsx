@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { useApp } from "../App";
+import { ActivitySettings } from "../components/ActivityLog";
+import { BackupSettings } from "../components/Backup";
+import { PasswordSettings } from "../components/PasswordSettings";
 import { TopBar } from "../components/TopBar";
 import { ErrorLine } from "../components/ui";
 import { ipc, type ReportSettings } from "../ipc/client";
@@ -50,7 +53,7 @@ export function SettingsScreen() {
           </p>
           <div className="row">
             <label htmlFor="api" className="visually-hidden">מפתח API</label>
-            <input id="api" className="input grow mono" type="password" autoComplete="off" placeholder={status.demo_mode ? "sk-ant-…" : "••••••••••••"}
+            <input id="api" className="input grow mono" dir="ltr" type="password" autoComplete="off" placeholder={status.demo_mode ? "sk-ant-…" : "••••••••••••"}
               value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
             <button type="button" className="btn btn-primary" disabled={!apiKey.trim()}
               onClick={() => void run(async () => { await ipc.setApiKey(apiKey); setApiKey(""); }, "המפתח נשמר מוצפן.")}>שמירה</button>
@@ -118,6 +121,12 @@ export function SettingsScreen() {
               onClick={() => void run(() => ipc.setReportSettings({ ...report, signature: report.signature.filter((l) => l.trim()) }), "הגדרות הדוח נשמרו.")}>שמירה</button>
           </section>
         )}
+
+        <BackupSettings />
+
+        <PasswordSettings />
+
+        <ActivitySettings />
 
         <section className="card setting" aria-labelledby="s-sec">
           <h2 id="s-sec">מצב האבטחה</h2>

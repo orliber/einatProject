@@ -1,0 +1,61 @@
+.backup-reminder {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border: 1px solid var(--warn-line);
+  background: var(--warn-paper);
+  color: var(--ink);
+  border-radius: 12px;
+  font-size: 15px;
+}
+.backup-reminder .icon-btn {
+  /* Keeps the 44px target (WCAG 2.5.5), without a heavy frame. */
+  border-color: transparent;
+  background: transparent;
+  margin-block: -8px;
+  margin-inline-start: -8px;
+}
+.backup-reminder .icon-btn:hover {
+  background: var(--warn-soft);
+}
+.backup-facts {
+  font-size: 15px;
+}
+.backup-result p {
+  margin: 0;
+}
+.backup-ok {
+  color: var(--ok);
+  font-weight: 600;
+}
+.backup-file {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  align-items: flex-start;
+  overflow-wrap: anywhere;
+}
+.setup-col .align-start,
+.setting .align-start {
+  align-self: flex-start;
+}
+.retention-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.retention-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}

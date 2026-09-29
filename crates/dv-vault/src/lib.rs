@@ -18,7 +18,10 @@ mod store;
 
 pub use audit::{AuditEntry, AuditEvent};
 pub use password::{Argon2Params, PolicyViolation, MIN_PASSWORD_CHARS};
-pub use store::{Created, IntegrityReport, Practitioner, Vault};
+pub use store::{
+    peek_backup, BackupCheck, BackupInfo, BackupPeek, Created, IntegrityReport, Practitioner,
+    Secret, Vault, BACKUP_EXTENSION,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum VaultError {
@@ -32,6 +35,8 @@ pub enum VaultError {
     AlreadyExists,
     #[error("not found")]
     NotFound,
+    #[error("refused: {0}")]
+    Refused(String),
     #[error("integrity check failed: {0}")]
     Integrity(&'static str),
     #[error("stored data failed authentication")]

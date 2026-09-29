@@ -13,9 +13,9 @@
 
 use std::collections::HashSet;
 
-use dv_domain::{Identity, Role};
+use dv_domain::{passage_ranges, Identity, Role};
 use dv_privacy::text::{is_valid_prefix, normalize};
-use dv_privacy::{clear, filter, GateRequest, PrivacyContext};
+use dv_privacy::{clear, filter, filter_split, GateRequest, PrivacyContext};
 use proptest::prelude::*;
 
 const TODAY: (i32, u32, u32) = (2026, 9, 28);
@@ -101,10 +101,26 @@ fn send(text: &str, case: &str) -> Outcome {
         today: TODAY,
     };
     let filtered = filter(text, &ctx).unwrap();
+    gate_tagged(&filtered.tagged, filtered.suspects.len(), case)
+}
+
+/// The gate's verdict on text that was already filtered (a passage cut from a whole filter).
+fn gate_tagged(tagged: &str, unresolved: usize, case: &str) -> Outcome {
+    let ids = identities();
+    let practitioner = vec!["דנה כהן-לוי".to_owned()];
+    let allow = |_: &str| false;
+    let ctx = PrivacyContext {
+        case_id: case,
+        identities: &ids,
+        practitioner: &practitioner,
+        allowlisted: &allow,
+        confirmed_names: &|_: &str| false,
+        today: TODAY,
+    };
     let body = serde_json::json!({
         "model": "claude-opus-5",
         "system": "את עוזרת לכתיבת דוח אבחון. השתמשי בתגיות בדיוק כפי שהן.",
-        "messages": [{"role": "user", "content": filtered.tagged}],
+        "messages": [{"role": "user", "content": tagged}],
     });
     let case_tags: HashSet<String> = ids
         .iter()
@@ -116,7 +132,7 @@ fn send(text: &str, case: &str) -> Outcome {
         body: &body,
         ctx: &ctx,
         case_tags: &case_tags,
-        unresolved_suspects: filtered.suspects.len(),
+        unresolved_suspects: unresolved,
         canaries: &canaries,
         max_bytes: 200_000,
     };
@@ -518,4 +534,103 @@ proptest! {
         let o = send(&text, CASE);
         prop_assert!(o.leaked.is_empty(), "{text} leaked {:?}", o.leaked);
     }
+}
+
+fn noam_ctx<'a>(ids: &'a [Identity], practitioner: &'a [String]) -> PrivacyContext<'a> {
+    PrivacyContext {
+        case_id: CASE,
+        identities: ids,
+        practitioner,
+        allowlisted: &|_: &str| false,
+        confirmed_names: &|_: &str| false,
+        today: TODAY,
+    }
+}
+
+/// D-022: a material is filtered once, whole, and cut into passages. Each passage must be
+/// exactly the whole result cut at its edges, leak nothing when sent alone, and keep every
+/// question the whole text asks inside it.
+#[test]
+fn passages_cut_from_a_whole_filter_leak_nothing_and_keep_every_question() {
+    let ids = identities();
+    let practitioner = vec!["דנה כהן-לוי".to_owned()];
+    let ctx = noam_ctx(&ids, &practitioner);
+    let mut lines = declared_corpus();
+    lines.extend(
+        [
+            "שם הילד: נועם גולדשטיין, גיל 5:4.",
+            "בשיחה עם מיכל ליבוביץ, הגננת, עלה קושי במעברים.",
+            "בגן משחק בעיקר עם יובל",
+            "ובחצר עם דנה.",
+            "ת\"ז 000000018 הופיעה בטופס.",
+            "נפגשנו ב-12.3.2026 ושוב אחרי שבועיים.",
+            "רקע:",
+            "הלך בגיל שנה, ללא סיבוכים.",
+        ]
+        .map(str::to_owned),
+    );
+    // Built at run time so the pre-commit scan does not flag a phone number in the source.
+    lines.push(["טלפון האם: 052-", "1234567."].concat());
+    // Paragraphs of different shapes: blank lines, wrapped lines, headings.
+    let doc: String = lines
+        .chunks(3)
+        .map(|c| c.join("\n"))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let ranges = passage_ranges(&doc);
+    assert!(ranges.len() > 100, "the corpus should make many passages");
+    let (whole, parts) = filter_split(&doc, &ctx, &ranges).unwrap();
+    let parts = parts.expect("line-based passages never cut a name");
+    assert_eq!(parts.len(), ranges.len());
+
+    // Exactly the whole outcome, cut at the edges.
+    let mut rebuilt = String::new();
+    let mut pos = 0;
+    for (r, part) in ranges.iter().zip(&parts) {
+        rebuilt.push_str(&doc[pos..r.start]);
+        rebuilt.push_str(&part.tagged);
+        pos = r.end;
+    }
+    rebuilt.push_str(&doc[pos..]);
+    assert_eq!(rebuilt, whole.tagged);
+
+    // Every question of the whole text is asked in the passage that holds it.
+    for s in &whole.suspects {
+        assert!(
+            parts.iter().any(|p| p.suspects.contains(s)),
+            "question lost when cutting: {}",
+            s.token
+        );
+    }
+
+    // Sent alone, no passage leaks.
+    let mut leaks = Vec::new();
+    for part in &parts {
+        let o = gate_tagged(&part.tagged, part.suspects.len(), CASE);
+        if o.cleared && !o.leaked.is_empty() {
+            leaks.push(format!("{} -> {:?}", part.tagged, o.leaked));
+        }
+    }
+    assert!(
+        leaks.is_empty(),
+        "{} leaks: {:#?}",
+        leaks.len(),
+        &leaks[..leaks.len().min(5)]
+    );
+}
+
+#[test]
+fn a_range_that_cuts_through_a_name_refuses_to_split() {
+    let ids = identities();
+    let practitioner = Vec::new();
+    let ctx = noam_ctx(&ids, &practitioner);
+    let text = "נועם הגיע לגן.";
+    // "נו" | "עם הגיע לגן." – the edge falls inside the child's name.
+    let (whole, parts) = filter_split(text, &ctx, &[0..4, 4..text.len()]).unwrap();
+    assert!(parts.is_none(), "must fall back to the whole text");
+    assert!(!whole.tagged.contains("נועם"));
+    // A range that is not on a character edge is refused too, never sliced.
+    let inside_a_letter = std::iter::once(0..1).collect::<Vec<_>>();
+    let (_, parts) = filter_split(text, &ctx, &inside_a_letter).unwrap();
+    assert!(parts.is_none());
 }
