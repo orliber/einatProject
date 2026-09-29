@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>הזנת ציונים</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700&amp;family=Frank+Ruhl+Libre:wght@500;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:Assistant,sans-serif;background:#F4F1EA;color:#1D2629}
+a{color:#1F5F5B}a:hover{color:#143F3C}
+input{font-family:inherit}
+</style>
+</helmet>
+<div dir="rtl" style="width: 1280px; height: 800px; box-sizing: border-box; display: flex; flex-direction: column; background: #F4F1EA; font-family: Assistant, sans-serif; color: #1D2629">
+<header style="height: 64px; box-sizing: border-box; padding: 0 24px; display: flex; align-items: center; gap: 16px; background: #1D2629; color: #F4F1EA">
+<div style="font-family: 'Frank Ruhl Libre', serif; font-size: 22px; font-weight: 700">כספת האבחון</div>
+<a href="Main.dc.html" style="color: #C9D6D4; font-size: 15px; text-decoration: none; padding: 6px 12px; border: 1px solid #3A4A4E; border-radius: 8px">חזרה לתיק 2026-014 · נועם</a>
+<div style="flex-grow: 1"></div>
+<div style="font-size: 14px; color: #A8DCD5">מוצפן · נשמר במחשב בלבד</div>
+</header>
+<div style="flex-grow: 1; display: flex; gap: 24px; padding: 28px 40px; min-height: 0">
+<div style="flex-grow: 1; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; align-items: baseline; gap: 12px">
+<h1 style="margin: 0; font-family: 'Frank Ruhl Libre', serif; font-size: 28px; font-weight: 700">WPPSI · פרופיל קוגניטיבי</h1>
+<span style="font-size: 14px; color: #5A6466">שנו ציון כדי לראות את הפרשנות מתעדכנת</span>
+</div>
+<div style="background: #FFFFFF; border: 1px solid #E6E1D6; border-radius: 14px; overflow: hidden">
+<div style="display: grid; grid-template-columns: 160px 110px 100px 150px minmax(0, 1fr); gap: 14px; padding: 12px 20px; font-size: 13px; font-weight: 700; color: #5A6466; border-bottom: 1px solid #E6E1D6">
+<div>תת-מבחן</div><div>תחום</div><div>ציון תקן</div><div>טווח (מחושב)</div><div>הערה שלך</div>
+</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="6">
+<div style="display: grid; grid-template-columns: 160px 110px 100px 150px minmax(0, 1fr); gap: 14px; align-items: center; padding: 10px 20px; border-bottom: 1px solid #F0ECE3; font-size: 15px">
+<label for="{{r.id}}" style="font-weight: 600">{{r.name}}</label>
+<div style="color: #4F5A5C">{{r.domain}}</div>
+<input id="{{r.id}}" type="number" min="1" max="19" value="{{r.score}}" onChange="{{r.change}}" style="width: 72px; height: 38px; box-sizing: border-box; padding: 0 10px; border-radius: 8px; border: 1px solid #C9C2B3; font-size: 16px; text-align: center">
+<span style="{{r.pillStyle}}">{{r.range}}</span>
+<div style="color: #4F5A5C; font-size: 14px">{{r.note}}</div>
+</div>
+</sc-for>
+</div>
+<p style="margin: 0; font-size: 13px; color: #5A6466">הטווחים מחושבים לפי טבלת פרשנות קבועה שעינת אישרה, ולא על ידי Claude. ציון תקן: ממוצע 10, סטיית תקן 3.</p>
+</div>
+<aside style="width: 320px; flex-shrink: 0; display: flex; flex-direction: column; gap: 14px">
+<div style="background: #FFFFFF; border: 1px solid #E6E1D6; border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px">
+<div style="font-size: 13px; font-weight: 700; color: #5A6466">מדדים</div>
+<div style="display: flex; justify-content: space-between; font-size: 16px"><span>מילולי</span><strong>98 · ממוצע</strong></div>
+<div style="display: flex; justify-content: space-between; font-size: 16px"><span>ביצועי</span><strong>108 · ממוצע</strong></div>
+</div>
+<div style="background: #FBFAF6; border: 1px solid #1F5F5B; border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px">
+<div style="font-size: 15px; font-weight: 700; color: #1F5F5B">Claude</div>
+<p style="margin: 0; font-size: 15px; line-height: 1.6">יש פער בין ההבנה החברתית ({{understand}}) לבין המטריצות ({{matrix}}). רוצה שאכתוב את פסקת הפרופיל הקוגניטיבי מהציונים ומההערות שלך?</p>
+<a href="Main.dc.html" style="height: 42px; border-radius: 8px; background: #1F5F5B; color: #FFFFFF; display: flex; align-items: center; justify-content: center; text-decoration: none; font-size: 15px; font-weight: 600">כתיבת טיוטה</a>
+</div>
+</aside>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":800}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { s: { vc: 10, in: 11, co: 7, bd: 9, mr: 13, pc: 11 } };
+  }
+  range(v) {
+    if (v <= 3) return ['נמוך מאוד', '#F6D2CC', '#8A1C0C'];
+    if (v <= 5) return ['גבולי', '#FBE7CF', '#6B3304'];
+    if (v <= 7) return ['ממוצע נמוך', '#FBF0D9', '#6B4A04'];
+    if (v <= 12) return ['ממוצע', '#E4EEEC', '#1F5F5B'];
+    if (v <= 14) return ['ממוצע גבוה', '#DCEFE0', '#1F4A28'];
+    return ['גבוה', '#D5E4F5', '#1B3F6B'];
+  }
+  renderVals() {
+    var self = this;
+    var s = this.state.s;
+    var defs = [
+      ['vc', 'אוצר מילים', 'מילולי', 'תשובות קצרות וקונקרטיות'],
+      ['in', 'ידיעות', 'מילולי', ''],
+      ['co', 'הבנה', 'מילולי', 'מבין חוקים, פחות סיבה ותוצאה'],
+      ['bd', 'סידור קוביות', 'ביצועי', 'קושי במעבר לדגם דו-ממדי'],
+      ['mr', 'מטריצות', 'ביצועי', 'קליטה מהירה'],
+      ['pc', 'מושגים חזותיים', 'ביצועי', '']
+    ];
+    var rows = defs.map(function (d) {
+      var v = Number(s[d[0]]) || 0;
+      var r = self.range(v);
+      return {
+        id: 'sc-' + d[0], name: d[1], domain: d[2], note: d[3], score: v, range: r[0],
+        pillStyle: 'justify-self: start; padding: 4px 12px; border-radius: 12px; font-size: 14px; background: ' + r[1] + '; color: ' + r[2],
+        change: function (e) {
+          var ns = Object.assign({}, self.state.s);
+          ns[d[0]] = e.target.value;
+          self.setState({ s: ns });
+        }
+      };
+    });
+    return {
+      rows: rows,
+      understand: this.range(Number(s.co) || 0)[0],
+      matrix: this.range(Number(s.mr) || 0)[0]
+    };
+  }
+}
+</script>
+</body>
+</html>

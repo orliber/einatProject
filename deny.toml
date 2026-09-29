@@ -1,0 +1,71 @@
+# Supply-chain policy (docs/STANDARDS.md §5.8). Enforced in CI.
+[graph]
+targets = [
+  "x86_64-pc-windows-msvc",
+  "aarch64-pc-windows-msvc",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+]
+
+[advisories]
+version = 2
+yanked = "deny"
+# Every exception needs a reason and is reviewed at each phase.
+ignore = [
+  # Unmaintained (not vulnerable) compile-time proc macro, pulled in only on Linux by
+  # gtk-rs (glib-macros, gtk3-macros) under Tauri's GTK runtime. Not present in the
+  # Windows/macOS builds and contributes no runtime code.
+  { id = "RUSTSEC-2024-0370", reason = "Linux-only build-time dependency of gtk-rs via Tauri; no runtime code" },
+  # Unmaintained (no known vulnerability) font parser, a required dependency of lopdf (PDF
+  # import). It runs only inside the isolated ingest worker process: no keys, no vault, no
+  # network, killed after a time limit. Tracked in docs/DECISIONS.md (D-018): replace when
+  # the PDF stack moves to a maintained parser.
+  { id = "RUSTSEC-2026-0192", reason = "lopdf font parser; runs only in the isolated ingest worker (D-018)" },
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# Permissive licenses only; no GPL/AGPL/LGPL in the shipped binary.
+allow = [
+  "MIT",
+  "MIT-0",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "0BSD",
+  "BSL-1.0",
+  "CC0-1.0",
+  "MPL-2.0",
+  "OpenSSL",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "CDLA-Permissive-2.0",
+]
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+deny = [
+  # Telemetry / crash reporting would send data off the machine.
+  { name = "sentry" },
+  { name = "opentelemetry" },
+  # WebView plugins that grant file, shell or network access.
+  { name = "tauri-plugin-http" },
+  { name = "tauri-plugin-fs" },
+  { name = "tauri-plugin-shell" },
+  { name = "tauri-plugin-updater" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

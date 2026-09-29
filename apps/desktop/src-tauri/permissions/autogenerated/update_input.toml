@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-input"
+description = "Enables the update_input command without any pre-configured scope."
+commands.allow = ["update_input"]
+
+[[permission]]
+identifier = "deny-update-input"
+description = "Denies the update_input command without any pre-configured scope."
+commands.deny = ["update_input"]

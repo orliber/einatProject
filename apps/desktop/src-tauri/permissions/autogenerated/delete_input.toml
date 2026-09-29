@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-delete-input"
+description = "Enables the delete_input command without any pre-configured scope."
+commands.allow = ["delete_input"]
+
+[[permission]]
+identifier = "deny-delete-input"
+description = "Denies the delete_input command without any pre-configured scope."
+commands.deny = ["delete_input"]

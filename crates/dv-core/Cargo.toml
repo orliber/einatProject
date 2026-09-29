@@ -1,0 +1,33 @@
+[package]
+name = "dv-core"
+description = "Application services used by the desktop shell (testable without a WebView)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+fips = ["dv-vault/fips", "dv-export/fips"]
+
+[dependencies]
+dv-ai.workspace = true
+dv-domain.workspace = true
+dv-egress.workspace = true
+dv-export.workspace = true
+dv-ingest.workspace = true
+dv-ipc.workspace = true
+dv-privacy.workspace = true
+dv-vault.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ts-rs = { version = "11", features = ["no-serde-warnings"] }
+zeroize = "1.9"
+
+[dev-dependencies]
+tempfile = "3"
+zip = { version = "8.6", default-features = false, features = ["deflate"] }

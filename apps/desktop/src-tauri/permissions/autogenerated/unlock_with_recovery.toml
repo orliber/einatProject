@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-unlock-with-recovery"
+description = "Enables the unlock_with_recovery command without any pre-configured scope."
+commands.allow = ["unlock_with_recovery"]
+
+[[permission]]
+identifier = "deny-unlock-with-recovery"
+description = "Denies the unlock_with_recovery command without any pre-configured scope."
+commands.deny = ["unlock_with_recovery"]

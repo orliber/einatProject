@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-identities"
+description = "Enables the set_identities command without any pre-configured scope."
+commands.allow = ["set_identities"]
+
+[[permission]]
+identifier = "deny-set-identities"
+description = "Denies the set_identities command without any pre-configured scope."
+commands.deny = ["set_identities"]

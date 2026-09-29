@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-add-own-paragraph"
+description = "Enables the add_own_paragraph command without any pre-configured scope."
+commands.allow = ["add_own_paragraph"]
+
+[[permission]]
+identifier = "deny-add-own-paragraph"
+description = "Denies the add_own_paragraph command without any pre-configured scope."
+commands.deny = ["add_own_paragraph"]

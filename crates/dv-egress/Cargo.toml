@@ -1,0 +1,21 @@
+[package]
+name = "dv-egress"
+description = "The only crate allowed to open network connections (Anthropic API)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dv-privacy.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# No default features: no system proxy detection, no OS root store, no HTTP/2 extras.
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std"] }
+webpki-roots = "1"
+zeroize = "1.9"

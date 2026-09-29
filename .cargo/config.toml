@@ -1,0 +1,6 @@
+[env]
+# ts-rs writes the TypeScript side of the IPC contract here (checked in CI).
+TS_RS_EXPORT_DIR = { value = "apps/desktop/src/ipc/generated", relative = true }
+
+[alias]
+xtask = "run --quiet --package xtask --"

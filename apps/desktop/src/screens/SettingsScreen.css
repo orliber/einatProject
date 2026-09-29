@@ -1,0 +1,36 @@
+.settings {
+  max-width: 880px;
+  overflow: auto;
+}
+.settings-title {
+  font-size: 34px;
+}
+.setting {
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.setting h2 {
+  font-size: 22px;
+}
+.narrow {
+  width: 100px;
+}
+.sec-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sec-list li {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.align-start {
+  align-self: flex-start;
+}

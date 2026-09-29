@@ -1,0 +1,29 @@
+[package]
+name = "dv-vault"
+description = "Key hierarchy, encrypted storage, audit log and environment checks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Build AES-GCM/HKDF/HMAC/DRBG on the FIPS 140-3 validated AWS-LC module (needs CMake + Go).
+fips = ["aws-lc-rs/fips"]
+
+[dependencies]
+dv-domain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+aws-lc-rs = { version = "1.18", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
+argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
+rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
+zeroize = { version = "1.9", features = ["zeroize_derive"] }
+unicode-normalization = "0.1"
+
+[dev-dependencies]
+tempfile = "3"

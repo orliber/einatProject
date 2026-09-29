@@ -1,0 +1,35 @@
+# מידע מטופלים – לעולם לא ב-git
+vault/
+*.db
+*.db-journal
+*.db-wal
+*.vaultbak
+*.docx
+!templates/*.docx
+real_data/
+
+# סודות
+.env
+*.key
+
+# build
+node_modules/
+dist/
+target/
+__pycache__/
+.venv/
+*.spec
+
+# ארכיונים וקבצים בינאריים עוקפים סריקת pre-commit – לא נכנסים לריפו
+*.zip
+*.7z
+*.rar
+*.tar
+*.tar.gz
+*.tgz
+
+# Tauri / frontend build output
+apps/desktop/src-tauri/gen/
+apps/desktop/dist/
+apps/desktop/dist-preview/
+tests/e2e/out/

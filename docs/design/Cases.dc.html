@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>רשימת תיקים</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700&amp;family=Frank+Ruhl+Libre:wght@500;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:Assistant,sans-serif;background:#F4F1EA;color:#1D2629}
+a{color:#1F5F5B}a:hover{color:#143F3C}
+</style>
+</helmet>
+<div dir="rtl" style="width: 1280px; height: 800px; box-sizing: border-box; display: flex; flex-direction: column; background: #F4F1EA; font-family: Assistant, sans-serif; color: #1D2629">
+<header style="height: 64px; box-sizing: border-box; padding: 0 24px; display: flex; align-items: center; gap: 16px; background: #1D2629; color: #F4F1EA">
+<div style="font-family: 'Frank Ruhl Libre', serif; font-size: 22px; font-weight: 700">כספת האבחון</div>
+<div style="flex-grow: 1"></div>
+<div style="font-size: 14px; color: #A8DCD5">מוצפן · נשמר במחשב בלבד</div>
+<a href="Lock.dc.html" style="height: 40px; padding: 0 14px; display: flex; align-items: center; border-radius: 8px; border: 1px solid #3A4A4E; color: #F4F1EA; text-decoration: none; font-size: 15px">נעילה</a>
+</header>
+<div style="padding: 32px 48px; display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; align-items: center; gap: 16px">
+<h1 style="margin: 0; font-family: 'Frank Ruhl Libre', serif; font-size: 32px; font-weight: 700">בוקר טוב, עינת</h1>
+<div style="flex-grow: 1"></div>
+<button type="button" style="height: 44px; padding: 0 20px; border-radius: 10px; border: none; background: #1F5F5B; color: #FFFFFF; font-family: inherit; font-size: 16px; font-weight: 600; cursor: pointer">+ תיק חדש</button>
+</div>
+<div style="padding: 12px 16px; border-radius: 10px; background: #FBE7CF; color: #6B3304; font-size: 15px">תזכורת: תיק 2026-009 הגיע לסוף תקופת השמירה שהגדרת. אפשר למחוק אותו לצמיתות או להאריך.</div>
+<div style="background: #FFFFFF; border: 1px solid #E6E1D6; border-radius: 14px; overflow: hidden">
+<div style="display: grid; grid-template-columns: 140px 200px 100px minmax(0, 1fr) 140px; gap: 16px; padding: 14px 24px; font-size: 13px; font-weight: 700; color: #5A6466; border-bottom: 1px solid #E6E1D6">
+<div>תיק</div><div>ילד</div><div>גיל</div><div>שלב</div><div>עודכן</div>
+</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="4">
+<a href="Main.dc.html" style="display: grid; grid-template-columns: 140px 200px 100px minmax(0, 1fr) 140px; gap: 16px; align-items: center; padding: 18px 24px; border-bottom: 1px solid #F0ECE3; text-decoration: none; color: #1D2629; font-size: 16px">
+<div style="font-variant-numeric: tabular-nums; color: #4F5A5C">{{r.code}}</div>
+<div style="font-weight: 600">{{r.name}}</div>
+<div>{{r.age}}</div>
+<div style="display: flex; align-items: center; gap: 10px">
+<span style="{{r.pillStyle}}">{{r.stage}}</span>
+</div>
+<div style="color: #4F5A5C; font-size: 15px">{{r.updated}}</div>
+</a>
+</sc-for>
+</div>
+<p style="margin: 0; font-size: 14px; color: #5A6466">השמות מוצגים רק כאן, במחשב שלך. Claude מקבל תמיד תגיות כמו [ילד] במקום שם.</p>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var pill = function (bg, fg) { return 'padding: 4px 12px; border-radius: 12px; font-size: 14px; background: ' + bg + '; color: ' + fg; };
+    return {
+      rows: [
+        { code: '2026-014', name: 'נועם', age: '5:4', stage: 'חלק א׳ · מסגרת חינוכית', updated: 'היום, 09:40', pillStyle: pill('#E4EEEC', '#1F5F5B') },
+        { code: '2026-013', name: 'יעל', age: '4:9', stage: 'חלק ב׳ · ADOS', updated: 'אתמול', pillStyle: pill('#E4EEEC', '#1F5F5B') },
+        { code: '2026-011', name: 'איתי', age: '6:1', stage: 'הדוח הופק', updated: '17.9', pillStyle: pill('#DCEFE0', '#2E6B3A') },
+        { code: '2026-009', name: 'שירה', age: '3:11', stage: 'סוף תקופת שמירה', updated: '02.3', pillStyle: pill('#FBE7CF', '#6B3304') }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

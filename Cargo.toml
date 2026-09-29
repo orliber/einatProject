@@ -1,0 +1,50 @@
+[workspace]
+resolver = "2"
+members = ["crates/*", "xtask", "apps/desktop/src-tauri"]
+# The desktop shell needs system WebView libraries; everything else builds and
+# tests anywhere. CI builds the shell on Windows, macOS and Linux.
+default-members = ["crates/*", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "UNLICENSED"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+mem_forget = "deny"
+
+[workspace.dependencies]
+dv-vault = { path = "crates/dv-vault" }
+dv-privacy = { path = "crates/dv-privacy" }
+dv-ai = { path = "crates/dv-ai" }
+dv-egress = { path = "crates/dv-egress" }
+dv-domain = { path = "crates/dv-domain" }
+dv-ingest = { path = "crates/dv-ingest" }
+dv-export = { path = "crates/dv-export" }
+dv-ipc = { path = "crates/dv-ipc" }
+dv-core = { path = "crates/dv-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "debuginfo"
+overflow-checks = true

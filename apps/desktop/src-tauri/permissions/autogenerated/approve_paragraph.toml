@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-approve-paragraph"
+description = "Enables the approve_paragraph command without any pre-configured scope."
+commands.allow = ["approve_paragraph"]
+
+[[permission]]
+identifier = "deny-approve-paragraph"
+description = "Denies the approve_paragraph command without any pre-configured scope."
+commands.deny = ["approve_paragraph"]

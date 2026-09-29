@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-score-sheet"
+description = "Enables the score_sheet command without any pre-configured scope."
+commands.allow = ["score_sheet"]
+
+[[permission]]
+identifier = "deny-score-sheet"
+description = "Denies the score_sheet command without any pre-configured scope."
+commands.deny = ["score_sheet"]

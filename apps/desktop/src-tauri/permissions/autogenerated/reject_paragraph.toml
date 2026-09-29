@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reject-paragraph"
+description = "Enables the reject_paragraph command without any pre-configured scope."
+commands.allow = ["reject_paragraph"]
+
+[[permission]]
+identifier = "deny-reject-paragraph"
+description = "Denies the reject_paragraph command without any pre-configured scope."
+commands.deny = ["reject_paragraph"]

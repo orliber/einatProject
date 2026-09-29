@@ -1,0 +1,491 @@
+// Browser preview only: an in-memory stand-in for the Rust core, with fabricated cases. Nothing is
+// stored and nothing leaves the page; "Claude" answers come from local demo text, like the app's
+// demo mode. The installed app is the only place where real work happens (D-021).
+import type { AppStatus } from "../ipc/generated/AppStatus";
+import type { CaseDetail } from "../ipc/generated/CaseDetail";
+import type { CaseInput } from "../ipc/generated/CaseInput";
+import type { CaseMeta } from "../ipc/generated/CaseMeta";
+import type { CaseSummary } from "../ipc/generated/CaseSummary";
+import type { ChatView } from "../ipc/generated/ChatView";
+import type { DraftStatus } from "../ipc/generated/DraftStatus";
+import type { ExportCheck } from "../ipc/generated/ExportCheck";
+import type { Identity } from "../ipc/generated/Identity";
+import type { IdentityInput } from "../ipc/generated/IdentityInput";
+import type { ImportPreview } from "../ipc/generated/ImportPreview";
+import type { InputKind } from "../ipc/generated/InputKind";
+import type { Prepared } from "../ipc/generated/Prepared";
+import type { ReportSettings } from "../ipc/generated/ReportSettings";
+import type { ReviewPart } from "../ipc/generated/ReviewPart";
+import type { Role } from "../ipc/generated/Role";
+import type { ScoreSheet } from "../ipc/generated/ScoreSheet";
+import type { SectionResult } from "../ipc/generated/SectionResult";
+import type { Suspect } from "../ipc/generated/Suspect";
+import type { SuspectDecision } from "../ipc/generated/SuspectDecision";
+import type { UiError } from "../ipc/generated/UiError";
+import { kindLabel } from "../i18n/he";
+import structure from "../../../../templates/report_structure.json";
+import { readDocx } from "./docx";
+import { filter, restore, type Person } from "./filter";
+import { formatSheet, instruments } from "./scores";
+
+type Args = Record<string, unknown>;
+
+interface Draft {
+  id: string;
+  section: string;
+  /** Tagged, like the vault stores it. */
+  text: string;
+  status: DraftStatus;
+  byAi: boolean;
+  sources: string[];
+}
+
+interface Case {
+  id: string;
+  meta: CaseMeta;
+  people: (Person & { id: string })[];
+  inputs: CaseInput[];
+  drafts: Draft[];
+  chat: Record<string, ChatView[]>;
+  sheets: Map<string, ScoreSheet>;
+  allowed: Set<string>;
+  created: number;
+  updated: number;
+}
+
+type Pending =
+  | { type: "section"; caseId: string; section: string; refs: { sid: string; label: string; tagged: string }[]; instruction: string }
+  | { type: "consult"; question: string };
+
+const SECTIONS = structure.parts.flatMap((p) => p.sections.map((s) => ({ ...s, part: p.title, inputs: s.inputs as InputKind[] })));
+const DERIVED = ["dsm", "summary", "diagnoses", "recommendations"];
+const SINGLETON: Role[] = ["child", "mother", "father", "teacher", "kindergarten", "town"];
+const TAG_BASE: Record<Role, string> = {
+  child: "ילד", mother: "אם", father: "אב", brother: "אח", sister: "אחות", teacher: "גננת", assistant: "סייעת", doctor: "רופא",
+  slp: "קלינאית", psychologist: "פסיכולוגית", therapist: "מטפלת", other_child: "ילד_גן", kindergarten: "גן", school: "בית_ספר",
+  town: "יישוב", institution: "מוסד", other: "אדם",
+};
+
+const now = () => Math.floor(Date.now() / 1000);
+let counter = 0;
+const newId = (p: string) => `${p}-${++counter}`;
+
+function fail(code: string, message: string): never {
+  const e: UiError = { code, message, details: [] };
+  throw e;
+}
+
+function sentences(text: string, n: number): string {
+  return (text.match(/[^.!?]+[.!?]?/g) ?? []).slice(0, n).join("").trim();
+}
+
+export class FakeCore {
+  private unlocked = false;
+  private practitioner = ["ד\"ר רותם בדויה"];
+  private lockMinutes = 15;
+  private model = "claude-opus-5";
+  private reviewOnlySuspect = false;
+  private report: ReportSettings = {
+    title: "דוח אבחון פסיכולוגי-התפתחותי",
+    font: "David",
+    confidentiality: "חסוי – מידע רפואי-פסיכולוגי. לשימוש הגורם המטפל בלבד.",
+    signature: ["ד\"ר רותם בדויה", "פסיכולוגית התפתחותית מומחית"],
+  };
+  private cases: Case[] = [];
+  private pending = new Map<string, Pending>();
+
+  constructor() {
+    this.seed();
+  }
+
+  // ------------------------------------------------------------------ fabricated cases
+  private seed() {
+    const a = this.newCase(
+      { code: "תיק-1024", age: { years: 5, months: 4 }, child_gender: "male", current_section: null, retention_until: null,
+        consent: { given_on: "2026-09-01", form_version: "v1", given_by: "שני ההורים" } },
+      [
+        { id: null, role: "child", value: "נועם", aliases: ["נועמי"] },
+        { id: null, role: "mother", value: "דנה", aliases: [] },
+        { id: null, role: "father", value: "יוסי", aliases: [] },
+        { id: null, role: "teacher", value: "מיכל", aliases: [] },
+      ],
+    );
+    a.created = now() - 86_400 * 12;
+    this.addInput(a, "intake", "אינטייק עם ההורים",
+      "דנה ויוסי פנו בעקבות המלצת הגננת מיכל, בשל קושי של נועם במעברים ובמשחק עם ילדים. ההריון והלידה היו תקינים. " +
+      "נועם הלך בגיל שנה ושלושה חודשים ואמר מילים ראשונות בגיל שנה וחצי. לדברי ההורים הוא ילד סקרן ואוהב פאזלים, " +
+      "אך מתקשה להירדם ומתעורר פעמיים בלילה. בבית הוא נוטה להתפרצויות כשמשנים לו תוכנית.");
+    this.addInput(a, "kindergarten", "שיחה עם הגננת",
+      "מיכל סיפרה שנועם מגיע בבוקר בשמחה ונפרד מדנה בקלות. במפגש הבוקר מתקשה לשבת לאורך זמן ומשתתף יותר בקבוצה קטנה. " +
+      "בחצר משחק בעיקר לבד או ליד ילדים, ופחות איתם. כשיש שינוי בסדר היום הוא מבקש הסבר חוזר ונרגע כשמכינים אותו מראש.");
+    this.addInput(a, "session_note", "מפגש שני",
+      "במפגש השני נועם הגיע בשמחה ונפרד מדנה בקלות. בפינת הבנייה סיפר שהוא משחק בגן בעיקר עם יובל. " +
+      "התקשה לספר רצף אירועים ונעזר בתמונות. כשביקשתי לעבור למשחק אחר, התנגד ונרגע אחרי כשתי דקות.");
+    const sheet: ScoreSheet = {
+      instrument: "wppsi_iv", module: "", cutoff: null, notes: "שיתף פעולה לאורך ההעברה, נעזר בעידוד בפריטים הקשים.",
+      entries: [
+        { measure: "fsiq", value: 102, note: "" }, { measure: "vci", value: 112, note: "" }, { measure: "vsi", value: 104, note: "" },
+        { measure: "fri", value: 106, note: "" }, { measure: "wmi", value: 95, note: "" }, { measure: "psi", value: 86, note: "עבד לאט ובדייקנות" },
+        { measure: "similarities", value: 13, note: "" }, { measure: "block_design", value: 11, note: "" }, { measure: "matrix", value: 12, note: "" },
+      ],
+    };
+    const scores = this.addInput(a, "test_scores", "ציוני WPPSI-IV", formatSheet(sheet));
+    a.sheets.set(scores.id, sheet);
+    for (const [section, text] of [
+      ["referral", "[ילד] הופנה לאבחון פסיכולוגי-התפתחותי על ידי הוריו, בעקבות המלצת [גננת], בשל קושי במעברים ובמשחק משותף עם ילדים."],
+      ["background", "ההריון והלידה היו תקינים. אבני הדרך המוטוריות והשפתיות הושגו בטווח התקין: [ילד] הלך בגיל שנה ושלושה חודשים ואמר מילים ראשונות בגיל שנה וחצי."],
+    ] as const) {
+      a.drafts.push({ id: newId("d"), section, text, status: "approved", byAi: true, sources: ["S1 · אינטייק הורים · אינטייק עם ההורים"] });
+    }
+
+    const b = this.newCase(
+      { code: "תיק-1025", age: { years: 4, months: 2 }, child_gender: "female", current_section: null, retention_until: null,
+        consent: { given_on: "2026-09-20", form_version: "v1", given_by: "האם" } },
+      [
+        { id: null, role: "child", value: "מאיה", aliases: [] },
+        { id: null, role: "mother", value: "ענבל", aliases: [] },
+      ],
+    );
+    b.created = now() - 86_400 * 3;
+    this.addInput(b, "intake", "שיחת טלפון ראשונה",
+      "ענבל פנתה בשל עיכוב בדיבור של מאיה. מאיה מבינה הוראות פשוטות ומשתמשת במשפטים של שתיים-שלוש מילים.");
+    b.updated = now() - 86_400 * 2;
+  }
+
+  private newCase(meta: CaseMeta, people: IdentityInput[]): Case {
+    const c: Case = { id: newId("case"), meta, people: [], inputs: [], drafts: [], chat: {}, sheets: new Map(), allowed: new Set(), created: now(), updated: now() };
+    this.cases.push(c);
+    this.setPeople(c, people);
+    return c;
+  }
+
+  private setPeople(c: Case, list: IdentityInput[]) {
+    const kept: Case["people"] = [];
+    for (const i of list.filter((x) => x.value.trim())) {
+      const old = i.id ? c.people.find((p) => p.id === i.id) : undefined;
+      const used = kept.map((p) => p.tag);
+      let tag = old?.role === i.role ? old.tag : "";
+      if (!tag) {
+        const base = TAG_BASE[i.role];
+        tag = SINGLETON.includes(i.role) && !used.includes(`[${base}]`) ? `[${base}]` : "";
+        for (let n = SINGLETON.includes(i.role) ? 2 : 1; !tag; n++) if (!used.includes(`[${base}_${n}]`)) tag = `[${base}_${n}]`;
+      }
+      kept.push({ id: old?.id ?? newId("p"), caseId: c.id, role: i.role, tag, value: i.value.trim(), aliases: i.aliases });
+    }
+    c.people = kept;
+  }
+
+  private addInput(c: Case, kind: InputKind, title: string, content: string): CaseInput {
+    const input: CaseInput = { id: newId("in"), case_id: c.id, kind, title, content, created_at: now() - 60 * (10 - c.inputs.length) };
+    c.inputs.push(input);
+    c.updated = now();
+    return input;
+  }
+
+  private find(id: unknown): Case {
+    return this.cases.find((c) => c.id === id) ?? fail("not_found", "התיק לא נמצא");
+  }
+
+  private allPeople(): Person[] {
+    return this.cases.flatMap((c) => c.people);
+  }
+
+  private filterFor(c: Case, text: string) {
+    return filter(text, { caseId: c.id, people: this.allPeople(), practitioner: this.practitioner, allowed: c.allowed });
+  }
+
+  status(): AppStatus {
+    return {
+      vault_exists: true, unlocked: this.unlocked, disk_encryption: "on", cloud_synced_folder: null, fips_active: true,
+      demo_mode: true, model: this.model, integrity_warning: null, lock_minutes: this.lockMinutes,
+      practitioner: this.practitioner, review_only_suspect: this.reviewOnlySuspect, review_choice_available: true,
+    };
+  }
+
+  private summary(c: Case): CaseSummary {
+    const approved = Array.from(new Set(c.drafts.filter((d) => d.status === "approved").map((d) => d.section)));
+    return { id: c.id, meta: c.meta, child_name: c.people.find((p) => p.role === "child")?.value ?? null, created_at: c.created, updated_at: c.updated, approved_sections: approved };
+  }
+
+  private detail(c: Case): CaseDetail {
+    const identities: Identity[] = c.people.map((p) => ({ id: p.id, case_id: c.id, role: p.role, tag: p.tag, value: p.value, aliases: p.aliases }));
+    return {
+      id: c.id, meta: c.meta, identities, inputs: c.inputs,
+      sections: SECTIONS.map((s) => {
+        const drafts = c.drafts.filter((d) => d.section === s.key && d.status !== "rejected" && d.status !== "superseded");
+        return {
+          key: s.key, title: s.title, part: s.part,
+          source_count: c.inputs.filter((i) => s.inputs.includes(i.kind)).length,
+          paragraphs: drafts.map((d) => ({ id: d.id, text: restore(d.text, c.people, this.practitioner), status: d.status, by_ai: d.byAi, sources: d.sources, warnings: [] })),
+          approved: drafts.some((d) => d.status === "approved"),
+        };
+      }),
+    };
+  }
+
+  private prepareSection(c: Case, key: string, instruction: string): Prepared {
+    if (!c.meta.consent) fail("consent_missing", "לפני שליחה ל-Claude צריך לרשום בתיק את הסכמת ההורים.");
+    const section = SECTIONS.find((s) => s.key === key) ?? fail("not_found", "הסעיף לא נמצא");
+    const parts: ReviewPart[] = [];
+    const suspects: Suspect[] = [];
+    const hidden = new Set<string>();
+    const checks = { declared_names: 0, patterns: 0, name_suspects: 0, indirect_suspects: 0 };
+    const refs: { sid: string; label: string; tagged: string }[] = [];
+    const take = (label: string, text: string) => {
+      const f = this.filterFor(c, text);
+      parts.push({ label, original: f.original_segments, outgoing: f.tagged_segments });
+      for (const s of f.suspects) if (!suspects.some((x) => x.token === s.token)) suspects.push(s);
+      f.hidden.forEach((h) => hidden.add(h));
+      checks.declared_names += f.checks.declared_names;
+      checks.patterns += f.checks.patterns;
+      checks.name_suspects += f.checks.name_suspects;
+      return f.tagged;
+    };
+    const sources = DERIVED.includes(key)
+      ? c.drafts.filter((d) => d.status === "approved" && !DERIVED.includes(d.section)).map((d) => ({ label: `סעיף מאושר · ${SECTIONS.find((s) => s.key === d.section)?.title ?? ""}`, text: restore(d.text, c.people, this.practitioner) }))
+      : c.inputs.filter((i) => section.inputs.includes(i.kind)).map((i) => ({ label: `${kindLabel[i.kind]} · ${i.title}`, text: i.content }));
+    sources.forEach((s, n) => {
+      const sid = `S${n + 1}`;
+      refs.push({ sid, label: `${sid} · ${s.label}`, tagged: take(`${sid} · ${s.label}`, s.text) });
+    });
+    if (instruction.trim()) take("הבקשה שלך", instruction);
+    const approval = suspects.length === 0 ? newId("approval") : null;
+    if (approval) this.pending.set(approval, { type: "section", caseId: c.id, section: key, refs, instruction });
+    return { approval_id: approval, parts, suspects, hidden: Array.from(hidden), checks, blocked: [], demo_mode: true };
+  }
+
+  private sendSection(p: Extract<Pending, { type: "section" }>): SectionResult {
+    const c = this.find(p.caseId);
+    const paragraphs = p.refs.slice(0, 3).map((r) => ({ text: sentences(r.tagged, 2), source_refs: [r.sid], warnings: [] as string[] })).filter((x) => x.text);
+    for (const d of c.drafts) if (d.section === p.section && d.status === "proposed") d.status = "superseded";
+    for (const x of paragraphs) {
+      c.drafts.push({ id: newId("d"), section: p.section, text: x.text, status: "proposed", byAi: true, sources: p.refs.filter((r) => x.source_refs.includes(r.sid)).map((r) => r.label) });
+    }
+    const reply = paragraphs.length
+      ? `מצב הדגמה: ניסחתי ${paragraphs.length} פסקאות לדוגמה מתוך המקורות. בתוכנה, עם חיבור ל-Claude, הניסוח נעשה בסגנון שלך ומצליב בין המקורות.`
+      : "מצב הדגמה: אין עדיין מקורות לסעיף הזה. אפשר להוסיף אינטייק, שיחה או מסמך.";
+    const chat = (c.chat[p.section] ??= []);
+    if (p.instruction.trim()) chat.push({ role: "user", text: p.instruction, hidden: [], demo: true });
+    chat.push({ role: "assistant", text: reply, hidden: [], demo: true });
+    c.updated = now();
+    return {
+      reply, paragraphs: paragraphs.map((x) => ({ ...x, text: restore(x.text, c.people, this.practitioner) })),
+      questions: ["האם יש מידע נוסף מהגן על ההשתתפות במפגשי הבוקר?"], missing: [], contradictions: [], demo: true,
+    };
+  }
+
+  private async importDocument(bytes: Uint8Array, headers: Record<string, string>): Promise<ImportPreview> {
+    const c = this.find(decodeURIComponent(headers["x-case-id"] ?? ""));
+    const name = decodeURIComponent(headers["x-file-name"] ?? "מסמך");
+    const ext = name.toLowerCase().split(".").pop();
+    let body = "";
+    let margins: string[] = [];
+    let author: string | null = null;
+    if (ext === "docx") {
+      try {
+        ({ body, margins, author } = await readDocx(bytes));
+      } catch {
+        fail("corrupt", "הקובץ לא נפתח כמסמך Word תקין.");
+      }
+    } else if (ext === "txt") {
+      body = new TextDecoder().decode(bytes);
+    } else if (ext === "pdf") {
+      fail("preview", "בהדמיה בדפדפן אפשר לייבא Word או טקסט. קובצי PDF נקראים בתוכנה המותקנת, בתהליך מבודד.");
+    } else {
+      fail("unsupported", "אפשר לייבא קובצי Word (docx), PDF או טקסט.");
+    }
+    if (!body.trim()) fail("empty", "לא נמצא טקסט במסמך.");
+    const f = this.filterFor(c, body);
+    const first = body.split("\n")[0]?.trim() ?? "";
+    const known = new Set(this.allPeople().flatMap((p) => [p.value, ...p.aliases]));
+    const suggestions = [
+      ...(author && !known.has(author) ? [{ value: author, source: "מאפייני הקובץ · יוצר המסמך", role: "other" as Role }] : []),
+      ...margins.flatMap((l) => (l.match(/[א-ת]+ בדוי[הא]?/g) ?? []).map((v) => ({ value: v, source: "כותרת עליונה/תחתונה", role: "other" as Role }))),
+    ].filter((s, i, all) => !known.has(s.value) && all.findIndex((x) => x.value === s.value) === i);
+    const words = body.slice(0, 400);
+    const kind: InputKind = /ציון|אחוזון|WPPSI|WISC/.test(words) && (words.match(/\d+/g)?.length ?? 0) > 6 ? "test_scores"
+      : /אינטייק|ההורים סיפרו/.test(words) ? "intake" : /גננת|בגן/.test(words.slice(0, 80)) ? "kindergarten" : "prior_report";
+    return {
+      file_name: name, format: ext === "docx" ? "docx" : "text", pages: 1,
+      title: first.length >= 3 && first.length <= 80 ? first : name.replace(/\.[^.]+$/, ""),
+      suggested_kind: kind, body, preview: f.original_segments, suspects: f.suspects, hidden: f.hidden,
+      left_out: margins.length ? [...margins, "הכותרת העליונה/התחתונה לא יובאה (יש בה לרוב שם, ת\"ז ופרטי קשר)."] : [],
+      name_suggestions: suggestions, warnings: [],
+    };
+  }
+
+  // ------------------------------------------------------------------ the IPC surface
+  async handle(cmd: string, args: unknown, options?: { headers?: Record<string, string> }): Promise<unknown> {
+    const a = (args ?? {}) as Args;
+    if (!["ping", "app_status", "unlock", "unlock_with_recovery", "create_vault", "confirm_recovery_key", "score_instruments", "preview_scores"].includes(cmd) && !this.unlocked) {
+      fail("locked", "הכספת נעולה. יש לפתוח אותה מחדש.");
+    }
+    switch (cmd) {
+      case "ping":
+        return { ipc_version: 1, core_version: "0.1.0", build_commit: "browser-preview", fips_active: false, platform: "browser" };
+      case "app_status":
+        return this.status();
+      case "unlock":
+      case "unlock_with_recovery":
+        this.unlocked = true;
+        return this.status();
+      case "create_vault":
+        return { recovery_key: "DEMO-PREV-IEWX-KEYS-ONLY-4TST" };
+      case "confirm_recovery_key":
+        return true;
+      case "lock":
+        this.unlocked = false;
+        return null;
+      case "set_api_key":
+        return fail("preview", "בהדמיה בדפדפן אין חיבור ל-Claude. מפתח API מוזן רק בתוכנה המותקנת, ונשמר בה מוצפן.");
+      case "set_model":
+        this.model = String(a.model);
+        return null;
+      case "set_lock_minutes":
+        this.lockMinutes = Number(a.minutes);
+        return null;
+      case "set_practitioner":
+        this.practitioner = a.names as string[];
+        return null;
+      case "set_review_only_suspect":
+        this.reviewOnlySuspect = Boolean(a.on);
+        return null;
+      case "report_settings":
+        return this.report;
+      case "set_report_settings":
+        this.report = a.settings as ReportSettings;
+        return null;
+      case "list_cases":
+        return this.cases.map((c) => this.summary(c));
+      case "create_case":
+        return this.newCase(a.meta as CaseMeta, a.identities as IdentityInput[]).id;
+      case "update_case": {
+        const c = this.find(a.caseId);
+        c.meta = a.meta as CaseMeta;
+        c.updated = now();
+        return null;
+      }
+      case "delete_case":
+        this.cases = this.cases.filter((c) => c.id !== a.caseId);
+        return null;
+      case "set_identities": {
+        const c = this.find(a.caseId);
+        this.setPeople(c, a.identities as IdentityInput[]);
+        return this.detail(c).identities;
+      }
+      case "case_detail":
+        return this.detail(this.find(a.caseId));
+      case "add_input":
+        return this.addInput(this.find(a.caseId), a.kind as InputKind, String(a.title), String(a.content));
+      case "update_input": {
+        const i = this.find(a.caseId).inputs.find((x) => x.id === a.inputId) ?? fail("not_found", "החומר לא נמצא");
+        i.title = String(a.title);
+        i.content = String(a.content);
+        return null;
+      }
+      case "delete_input": {
+        const c = this.find(a.caseId);
+        c.inputs = c.inputs.filter((i) => i.id !== a.inputId);
+        return null;
+      }
+      case "score_instruments":
+        return instruments;
+      case "preview_scores":
+        try {
+          return formatSheet(a.sheet as ScoreSheet);
+        } catch (e) {
+          return fail("refused", (e as Error).message);
+        }
+      case "save_scores": {
+        const c = this.find(a.caseId);
+        const sheet = a.sheet as ScoreSheet;
+        let text = "";
+        try {
+          text = formatSheet(sheet);
+        } catch (e) {
+          fail("refused", (e as Error).message);
+        }
+        const title = `ציוני ${instruments.find((i) => i.key === sheet.instrument)?.name ?? ""}`;
+        const existing = c.inputs.find((i) => i.id === a.inputId);
+        const input = existing ? Object.assign(existing, { title, content: text }) : this.addInput(c, "test_scores", title, text);
+        c.sheets.set(input.id, sheet);
+        return input;
+      }
+      case "score_sheet":
+        return this.find(a.caseId).sheets.get(String(a.inputId)) ?? null;
+      case "import_document":
+        return this.importDocument(args as Uint8Array, options?.headers ?? {});
+      case "preview_filter":
+        return this.filterFor(this.find(a.caseId), String(a.text));
+      case "decide_suspect": {
+        const c = this.find(a.caseId);
+        const token = String(a.token);
+        const d = a.decision as SuspectDecision;
+        if (d.decision === "not_a_name") c.allowed.add(token);
+        else this.setPeople(c, [...c.people.map((p) => ({ id: p.id, role: p.role, value: p.value, aliases: p.aliases })), { id: null, role: d.decision === "hide" ? d.role : "other", value: token, aliases: [] }]);
+        return null;
+      }
+      case "prepare_section":
+        return this.prepareSection(this.find(a.caseId), String(a.sectionKey), String(a.instruction ?? ""));
+      case "prepare_full_draft": {
+        const c = this.find(a.caseId);
+        return SECTIONS.filter((s) => !DERIVED.includes(s.key) && c.inputs.some((i) => s.inputs.includes(i.kind)) && !c.drafts.some((d) => d.section === s.key && d.status === "approved"))
+          .map((s) => [s.key, this.prepareSection(c, s.key, "")]);
+      }
+      case "send_section": {
+        const p = this.pending.get(String(a.approvalId));
+        if (p?.type !== "section") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
+        this.pending.delete(String(a.approvalId));
+        await new Promise((r) => setTimeout(r, 700));
+        return this.sendSection(p);
+      }
+      case "chat":
+        return this.find(a.caseId).chat[String(a.sectionKey)] ?? [];
+      case "approve_paragraph":
+      case "reject_paragraph": {
+        const d = this.find(a.caseId).drafts.find((x) => x.id === a.draftId) ?? fail("not_found", "הפסקה לא נמצאה");
+        d.status = cmd === "approve_paragraph" ? "approved" : "rejected";
+        return null;
+      }
+      case "edit_paragraph": {
+        const c = this.find(a.caseId);
+        const d = c.drafts.find((x) => x.id === a.draftId) ?? fail("not_found", "הפסקה לא נמצאה");
+        d.text = this.filterFor(c, String(a.text)).tagged;
+        d.byAi = false;
+        return null;
+      }
+      case "add_own_paragraph": {
+        const c = this.find(a.caseId);
+        c.drafts.push({ id: newId("d"), section: String(a.sectionKey), text: this.filterFor(c, String(a.text)).tagged, status: "approved", byAi: false, sources: [] });
+        return null;
+      }
+      case "prepare_consult": {
+        const c = a.caseId ? this.find(a.caseId) : null;
+        const text = String(a.message);
+        const f = c ? this.filterFor(c, text) : filter(text, { caseId: "", people: this.allPeople(), practitioner: this.practitioner, allowed: new Set() });
+        const approval = f.suspects.length === 0 ? newId("approval") : null;
+        if (approval) this.pending.set(approval, { type: "consult", question: f.tagged });
+        return { approval_id: approval, parts: [{ label: "השאלה", original: f.original_segments, outgoing: f.tagged_segments }], suspects: f.suspects, hidden: f.hidden, checks: f.checks, blocked: [], demo_mode: true } satisfies Prepared;
+      }
+      case "send_consult": {
+        const p = this.pending.get(String(a.approvalId));
+        if (p?.type !== "consult") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
+        this.pending.delete(String(a.approvalId));
+        await new Promise((r) => setTimeout(r, 700));
+        return { answer: "מצב הדגמה: כאן תופיע תשובה מקצועית של Claude, שמבחינה בין ידע מבוסס לדעה ומציינת אי-ודאות. ההחלטה המקצועית נשארת שלך.", demo: true };
+      }
+      case "check_export": {
+        const c = this.find(a.caseId);
+        const d = this.detail(c);
+        return {
+          blocking: [], empty_sections: d.sections.filter((s) => !s.approved).map((s) => s.title),
+          included_sections: d.sections.filter((s) => s.approved).length, file_name: `דוח אבחון – ${c.meta.code}.docx`,
+        } satisfies ExportCheck;
+      }
+      case "export_report":
+        return "בהדמיה בדפדפן לא נוצר קובץ. בתוכנה המותקנת הדוח נשמר בתיקיית ההורדות, מוצפן בסיסמה.";
+      default:
+        return fail("preview", `הפעולה ${cmd} לא זמינה בהדמיה בדפדפן.`);
+    }
+  }
+}

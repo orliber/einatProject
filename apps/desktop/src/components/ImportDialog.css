@@ -1,0 +1,83 @@
+.import {
+  display: flex;
+  gap: 20px;
+  min-height: 460px;
+}
+.import-side {
+  width: 400px;
+  flex-shrink: 0;
+  gap: 16px;
+}
+.kind-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.kind-chip {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  font-size: 14px;
+  cursor: pointer;
+}
+.kind-chip input {
+  margin: 0;
+  accent-color: #fff;
+}
+.kind-chip.on {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  font-weight: 600;
+}
+.kind-chip:focus-within {
+  outline: 3px solid var(--primary);
+  outline-offset: 2px;
+}
+.suggestion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+.left-out-line {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.import-text {
+  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.import-text-head {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.import-body {
+  padding: 16px 20px;
+  font-size: 16px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow: auto;
+  max-height: 56vh;
+}
+.import-edit {
+  display: flex;
+  flex-grow: 1;
+  padding: 10px;
+}
+.import-edit textarea {
+  flex-grow: 1;
+  min-height: 380px;
+  font-size: 16px;
+}

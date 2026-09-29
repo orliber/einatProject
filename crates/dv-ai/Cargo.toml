@@ -1,0 +1,18 @@
+[package]
+name = "dv-ai"
+description = "Context building, prompts and structured-output parsing (no network)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dv-domain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ts-rs = { version = "11", features = ["no-serde-warnings"] }

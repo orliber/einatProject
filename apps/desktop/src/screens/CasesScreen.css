@@ -1,0 +1,76 @@
+.btn-big {
+  min-height: 46px;
+  padding: 0 20px;
+  font-size: 16px;
+}
+.table-card {
+  overflow: hidden;
+}
+.cases {
+  width: 100%;
+  border-collapse: collapse;
+}
+.cases th {
+  background: var(--surface-alt);
+  color: var(--ink-muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: start;
+  padding: 12px 20px;
+}
+.cases td {
+  padding: 14px 20px;
+  border-top: 1px solid #eeeae1;
+}
+.cases tbody tr:hover {
+  background: #fcfbf8;
+}
+.col-progress {
+  width: 220px;
+}
+.case-link {
+  border: 0;
+  background: transparent;
+  padding: 4px 0;
+  font-weight: 700;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+.case-link:hover {
+  text-decoration: underline;
+}
+.case-name {
+  font-size: 17px;
+  font-weight: 700;
+}
+.num {
+  font-variant-numeric: tabular-nums;
+}
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.bar {
+  flex-grow: 1;
+  height: 6px;
+  background: #eeeae1;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.bar-fill {
+  height: 6px;
+  background: var(--primary);
+  border-radius: 6px;
+}
+.bar-done {
+  background: var(--ok);
+}
+.empty {
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+  max-width: 640px;
+}

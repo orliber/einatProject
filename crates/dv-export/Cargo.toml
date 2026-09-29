@@ -1,0 +1,22 @@
+[package]
+name = "dv-export"
+description = "Word report export (right-to-left DOCX) with ECMA-376 Agile password encryption"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+fips = ["aws-lc-rs/fips"]
+
+[dependencies]
+aws-lc-rs = { version = "1.18", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
+cfb = "0.15"
+serde.workspace = true
+thiserror.workspace = true
+zip = { version = "8.6", default-features = false, features = ["deflate"] }
+zeroize = "1.9"

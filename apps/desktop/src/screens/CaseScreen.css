@@ -1,0 +1,271 @@
+.case {
+  height: 100%;
+  display: flex;
+  overflow: hidden;
+}
+/* ---------- the case column ---------- */
+.side {
+  width: 272px;
+  flex-shrink: 0;
+  background: var(--side);
+  color: var(--side-text);
+  display: flex;
+  flex-direction: column;
+  padding: 18px 16px 14px;
+  gap: 14px;
+  overflow: hidden;
+}
+.side button {
+  color: inherit;
+  background: transparent;
+  border: 0;
+  text-align: start;
+}
+.side-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+}
+.side .side-case {
+  background: var(--side-card);
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.side-code {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--side-muted);
+}
+.side-child {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+}
+.side-consent {
+  font-size: 13px;
+  color: var(--side-muted);
+}
+.side-consent.missing {
+  color: #f2c98c;
+  font-weight: 600;
+}
+.side-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.side-nav button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 8px;
+  min-height: 38px;
+}
+.side-nav button:hover,
+.side-section:hover {
+  background: var(--side-card);
+}
+.side-nav button[aria-current="page"] {
+  background: var(--side-active);
+  color: #fff;
+  font-weight: 600;
+}
+.side-count {
+  font-size: 13px;
+  color: var(--side-muted);
+}
+.side-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.side-progress-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--side-muted);
+}
+.side-bar {
+  height: 4px;
+  background: #2a4244;
+  border-radius: 4px;
+}
+.side-bar div {
+  height: 4px;
+  background: var(--side-ok);
+  border-radius: 4px;
+}
+.side-sections {
+  flex-grow: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 14px;
+  margin-inline: -4px;
+  padding-inline: 4px;
+}
+.side-part {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.side .side-part-title {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--side-faint);
+  padding: 2px 10px 3px;
+}
+.side .side-section {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  min-height: 30px;
+}
+.side-section .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--side-empty);
+  flex-shrink: 0;
+}
+.st-approved .dot {
+  background: var(--side-ok);
+}
+.st-pending .dot {
+  background: var(--side-warn);
+}
+.st-empty {
+  color: var(--side-muted);
+}
+.side .side-section[aria-current="page"] {
+  background: var(--side-active);
+  color: #fff;
+  font-weight: 600;
+}
+.side-section[aria-current="page"] .dot {
+  background: transparent;
+  border: 2px solid #9cc9c3;
+}
+.side-pending {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f2c98c;
+}
+.side .side-draft {
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--side-line);
+  font-weight: 600;
+  text-align: center;
+}
+.side .side-draft:hover {
+  background: var(--side-card);
+}
+/* ---------- the workspace ---------- */
+.work {
+  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.work-head {
+  height: 60px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--line);
+}
+.crumbs {
+  font-size: 14px;
+  color: var(--ink-muted);
+  flex-grow: 1;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+.crumbs b {
+  color: var(--ink);
+}
+.crumb {
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  padding: 0;
+  font-size: 14px;
+}
+.view {
+  flex-grow: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.view-head {
+  padding: 20px 24px 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+.view-head h1 {
+  font-size: 30px;
+}
+.view-body {
+  flex-grow: 1;
+  min-height: 0;
+  display: flex;
+  gap: 20px;
+  padding: 16px 24px 20px;
+}
+/* ---------- forms shared by case views ---------- */
+.people {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.person-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.person-row .select {
+  width: 170px;
+}
+.add-person {
+  align-self: flex-start;
+}
+.row.wrap {
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+}
+.plain {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+}
+.consent {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}

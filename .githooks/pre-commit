@@ -1,0 +1,4 @@
+#!/bin/sh
+# Blocks patient data, archives and binaries before they reach git history.
+# Enable once per clone:  git config core.hooksPath .githooks
+exec cargo xtask scan --staged

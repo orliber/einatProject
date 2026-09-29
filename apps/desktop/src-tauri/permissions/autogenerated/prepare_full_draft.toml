@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-prepare-full-draft"
+description = "Enables the prepare_full_draft command without any pre-configured scope."
+commands.allow = ["prepare_full_draft"]
+
+[[permission]]
+identifier = "deny-prepare-full-draft"
+description = "Denies the prepare_full_draft command without any pre-configured scope."
+commands.deny = ["prepare_full_draft"]
