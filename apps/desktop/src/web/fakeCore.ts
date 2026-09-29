@@ -479,7 +479,7 @@ export class FakeCore {
         const d = this.detail(c);
         return {
           blocking: [], empty_sections: d.sections.filter((s) => !s.approved).map((s) => s.title),
-          included_sections: d.sections.filter((s) => s.approved).length, file_name: `דוח אבחון – ${c.meta.code}.docx`,
+          included_sections: d.sections.filter((s) => s.approved).length, score_tables: c.sheets.size, file_name: `דוח אבחון – ${c.meta.code}.docx`,
         } satisfies ExportCheck;
       }
       case "export_report":

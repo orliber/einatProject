@@ -1643,10 +1643,38 @@ impl Core {
             value: format!("{d}.{m}.{y}"),
         });
 
+        // Score tables entered in the table (not imported text), in the order they were added.
+        let mut tables = Vec::new();
+        for input in v
+            .inputs(case_id)?
+            .into_iter()
+            .filter(|i| i.kind == InputKind::TestScores)
+        {
+            let Some(data) = v.input_data(case_id, &input.id)? else {
+                continue;
+            };
+            let sheet: dv_domain::ScoreSheet =
+                serde_json::from_str(&data).map_err(|e| CoreError::Internal(e.to_string()))?;
+            let (title, rows, note) = dv_domain::sheet_table(&sheet).map_err(CoreError::Refused)?;
+            tables.push(dv_export::ScoreTable {
+                title,
+                columns: ["מדד", "ציון", "אחוזון", "טווח"]
+                    .map(str::to_owned)
+                    .to_vec(),
+                rows: rows
+                    .into_iter()
+                    .map(|r| vec![r.measure, r.score, r.percentile, r.range])
+                    .collect(),
+                note,
+            });
+        }
+        let score_tables = u32::try_from(tables.len()).unwrap_or(u32::MAX);
+
         let report = dv_export::Report {
             title: settings.title,
             info,
             parts,
+            tables,
             signature,
             confidentiality: settings.confidentiality,
             font: settings.font,
@@ -1677,6 +1705,7 @@ impl Core {
                 blocking,
                 empty_sections,
                 included_sections: included,
+                score_tables,
                 file_name,
             },
         ))

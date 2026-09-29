@@ -185,6 +185,8 @@ pub struct ExportCheck {
     /// Sections without approved paragraphs (left out of the file).
     pub empty_sections: Vec<String>,
     pub included_sections: u32,
+    /// Score tables entered in the case, printed as an appendix.
+    pub score_tables: u32,
     /// The file name, without the child's name (file names travel in e-mails).
     pub file_name: String,
 }

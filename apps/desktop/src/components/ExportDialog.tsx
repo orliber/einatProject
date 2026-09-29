@@ -95,6 +95,12 @@ export function ExportDialog({ api, onClose }: { api: CaseApi; onClose: () => vo
                 <span aria-hidden="true">{check.included_sections > 0 ? "✓" : "!"}</span>
                 <span>{check.included_sections} סעיפים עם פסקאות מאושרות</span>
               </li>
+              {check.score_tables > 0 && (
+                <li className="ok">
+                  <span aria-hidden="true">✓</span>
+                  <span>{check.score_tables === 1 ? "טבלת הציונים תצורף כנספח" : `${check.score_tables} טבלאות ציונים יצורפו כנספח`}</span>
+                </li>
+              )}
               {!blocked ? (
                 <li className="ok"><span aria-hidden="true">✓</span><span>השמות חזרו, ולא נשארו תפקידים במקום שמות או הערות "חסר מידע"</span></li>
               ) : (

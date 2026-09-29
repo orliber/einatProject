@@ -568,8 +568,31 @@ fn export_needs_approved_paragraphs_and_restores_names() {
     );
     assert!(check.file_name.contains("TEST-0002"));
 
+    assert_eq!(check.score_tables, 0);
+    // A score table entered in the case becomes an appendix table in the report.
+    let sheet = dv_domain::ScoreSheet {
+        instrument: "wppsi_iv".into(),
+        module: String::new(),
+        cutoff: None,
+        entries: vec![dv_domain::ScoreEntry {
+            measure: "vci".into(),
+            value: 112.0,
+            note: String::new(),
+        }],
+        notes: String::new(),
+    };
+    core.save_scores(&case, None, &sheet).unwrap();
+    assert_eq!(core.check_export(&case).unwrap().score_tables, 1);
     let bytes = core.export_report(&case, None).unwrap();
     let doc = read_docx_text(&bytes);
+    assert!(
+        doc.contains("נספח: טבלאות ציונים") && doc.contains("הבנה מילולית (VCI)"),
+        "score table"
+    );
+    assert!(
+        doc.contains("ממוצע גבוה") && doc.contains("79"),
+        "range and percentile in the table"
+    );
     assert!(doc.contains("ההורים של אלון פנו"), "names restored");
     assert!(doc.contains("שם הילד"), "info line");
     assert!(!doc.contains("[ילד]") && !doc.contains("[גננת]"));

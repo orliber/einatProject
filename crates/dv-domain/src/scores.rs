@@ -429,6 +429,66 @@ fn fmt_value(v: f64) -> String {
     }
 }
 
+/// The range a score falls in: from the table, or against the ADOS-2 cut-off entered.
+fn range_of(measure: &Measure, sheet: &ScoreSheet, value: f64) -> String {
+    match measure.scale {
+        ScoreScale::RawCutoff => match sheet.cutoff {
+            Some(c) if measure.key == "total" && value >= c => {
+                format!("בנקודת החתך או מעליה ({})", fmt_value(c))
+            }
+            Some(c) if measure.key == "total" => format!("מתחת לנקודת החתך ({})", fmt_value(c)),
+            _ => String::new(),
+        },
+        _ => classify(measure, value)
+            .map(|b| b.label.clone())
+            .unwrap_or_default(),
+    }
+}
+
+/// One row of the score table in the Word report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScoreRow {
+    pub measure: String,
+    pub score: String,
+    /// "—" where a percentile does not apply (questionnaires, raw scores).
+    pub percentile: String,
+    pub range: String,
+}
+
+/// A sheet as a table for the report: title, rows, and the scale sentence under it.
+pub fn sheet_table(sheet: &ScoreSheet) -> Result<(String, Vec<ScoreRow>, String), String> {
+    let all = instruments();
+    let inst = all
+        .iter()
+        .find(|i| i.key == sheet.instrument)
+        .ok_or("כלי לא מוכר")?;
+    let mut rows = Vec::new();
+    for e in &sheet.entries {
+        let Some(measure) = inst.measures.iter().find(|x| x.key == e.measure) else {
+            return Err(format!("מדד לא מוכר: {}", e.measure));
+        };
+        if e.value < measure.min || e.value > measure.max {
+            return Err(format!("{}: ציון מחוץ לטווח האפשרי", measure.name_he));
+        }
+        rows.push(ScoreRow {
+            measure: if measure.abbr.is_empty() {
+                measure.name_he.clone()
+            } else {
+                format!("{} ({})", measure.name_he, measure.abbr)
+            },
+            score: fmt_value(e.value),
+            percentile: percentile(measure, e.value).unwrap_or_else(|| "—".to_owned()),
+            range: range_of(measure, sheet, e.value),
+        });
+    }
+    let title = if sheet.module.trim().is_empty() {
+        inst.name.clone()
+    } else {
+        format!("{} · מודול {}", inst.name, sheet.module.trim())
+    };
+    Ok((title, rows, inst.scale_note_he.clone()))
+}
+
 /// The text stored as a "test scores" material: every score with its range from the table,
 /// the scale sentence, and a note on large gaps between indexes (to check in the manual).
 pub fn format_sheet(sheet: &ScoreSheet) -> Result<String, String> {
@@ -466,18 +526,7 @@ pub fn format_sheet(sheet: &ScoreSheet) -> Result<String, String> {
         } else {
             format!("{} ({})", measure.name_he, measure.abbr)
         };
-        let range = match measure.scale {
-            ScoreScale::RawCutoff => match sheet.cutoff {
-                Some(c) if measure.key == "total" && e.value >= c => {
-                    format!("בנקודת החתך או מעליה ({})", fmt_value(c))
-                }
-                Some(c) if measure.key == "total" => format!("מתחת לנקודת החתך ({})", fmt_value(c)),
-                _ => String::new(),
-            },
-            _ => classify(measure, e.value)
-                .map(|b| b.label.clone())
-                .unwrap_or_default(),
-        };
+        let range = range_of(measure, sheet, e.value);
         // "ציון" before the number: the privacy filter reads "29.5" alone as a date (29 May).
         let value = match percentile(measure, e.value) {
             Some(p) => {
@@ -743,6 +792,58 @@ mod tests {
             committed,
             instruments(),
             "run: cargo run -p dv-domain --example instruments_json -- apps/desktop/src/web/instruments.json"
+        );
+    }
+
+    #[test]
+    fn a_sheet_becomes_a_table_for_the_report() {
+        let sheet = ScoreSheet {
+            instrument: "wppsi_iv".into(),
+            module: String::new(),
+            cutoff: None,
+            entries: vec![
+                ScoreEntry {
+                    measure: "vci".into(),
+                    value: 112.0,
+                    note: String::new(),
+                },
+                ScoreEntry {
+                    measure: "psi".into(),
+                    value: 88.0,
+                    note: String::new(),
+                },
+            ],
+            notes: String::new(),
+        };
+        let (title, rows, note) = sheet_table(&sheet).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(title, "WPPSI-IV");
+        assert_eq!(
+            rows[0],
+            ScoreRow {
+                measure: "הבנה מילולית (VCI)".into(),
+                score: "112".into(),
+                percentile: "79".into(),
+                range: "ממוצע גבוה".into()
+            }
+        );
+        assert_eq!(rows[1].range, "ממוצע נמוך");
+        assert!(note.contains("ממוצע 100"));
+        let ados = ScoreSheet {
+            instrument: "ados_2".into(),
+            module: "2".into(),
+            cutoff: Some(8.0),
+            entries: vec![ScoreEntry {
+                measure: "total".into(),
+                value: 9.0,
+                note: String::new(),
+            }],
+            notes: String::new(),
+        };
+        let (title, rows, _) = sheet_table(&ados).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(title, "ADOS-2 · מודול 2");
+        assert_eq!(
+            (rows[0].percentile.as_str(), rows[0].range.as_str()),
+            ("—", "בנקודת החתך או מעליה (8)")
         );
     }
 }

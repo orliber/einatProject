@@ -34,12 +34,24 @@ pub struct InfoLine {
     pub value: String,
 }
 
+/// A score table for the appendix: header cells, then one row per measure.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScoreTable {
+    pub title: String,
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<String>>,
+    /// The scale sentence printed under the table.
+    pub note: String,
+}
+
 /// Everything that goes into the file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Report {
     pub title: String,
     pub info: Vec<InfoLine>,
     pub parts: Vec<ReportPart>,
+    /// Score tables, printed as an appendix after the sections.
+    pub tables: Vec<ScoreTable>,
     /// Signature block lines (name, title, license number).
     pub signature: Vec<String>,
     /// Printed at the top of every page.
@@ -69,6 +81,11 @@ pub fn leftover_placeholders(report: &Report) -> Vec<String> {
         for s in &part.sections {
             texts.extend(s.paragraphs.iter().map(String::as_str));
         }
+    }
+    for t in &report.tables {
+        texts.push(&t.title);
+        texts.push(&t.note);
+        texts.extend(t.rows.iter().flatten().map(String::as_str));
     }
     let mut found = Vec::new();
     for t in texts {
@@ -121,6 +138,17 @@ mod tests {
                         ],
                     },
                 ],
+            }],
+            tables: vec![ScoreTable {
+                title: "WPPSI-IV".into(),
+                columns: vec!["מדד".into(), "ציון".into(), "אחוזון".into(), "טווח".into()],
+                rows: vec![vec![
+                    "הבנה מילולית (VCI)".into(),
+                    "112".into(),
+                    "79".into(),
+                    "ממוצע גבוה".into(),
+                ]],
+                note: "ציוני תקן: ממוצע 100, סטיית תקן 15.".into(),
             }],
             signature: vec!["ד\"ר בדויה, פסיכולוגית התפתחותית".into()],
             confidentiality: "חסוי – מידע רפואי".into(),

@@ -38,6 +38,56 @@ fn para(style: &str, text: &str, bold_prefix: Option<&str>) -> String {
     p
 }
 
+/// A right-to-left table with a bold, shaded header row and thin borders.
+fn table(columns: &[String], rows: &[Vec<String>]) -> String {
+    // Text width of an A4 page with the margins above, in twentieths of a point.
+    const WIDTH: usize = 9070;
+    let n = columns.len().max(1);
+    let first = if n > 1 { WIDTH * 42 / 100 } else { WIDTH };
+    let rest = if n > 1 { (WIDTH - first) / (n - 1) } else { 0 };
+    let width = |i: usize| if i == 0 { first } else { rest };
+    let cell = |text: &str, header: bool, i: usize| {
+        let shade = if header {
+            "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"E6EFED\"/>"
+        } else {
+            ""
+        };
+        let bold = if header { "<w:b/><w:bCs/>" } else { "" };
+        format!(
+            "<w:tc><w:tcPr><w:tcW w:w=\"{}\" w:type=\"dxa\"/>{shade}</w:tcPr><w:p><w:pPr><w:pStyle w:val=\"TableText\"/><w:bidi/></w:pPr>\
+             <w:r><w:rPr>{bold}<w:rtl/></w:rPr><w:t xml:space=\"preserve\">{}</w:t></w:r></w:p></w:tc>",
+            width(i),
+            esc(text)
+        )
+    };
+    let border = |side: &str| {
+        format!("<w:{side} w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"B8C4C1\"/>")
+    };
+    let mut t = format!(
+        "<w:tbl><w:tblPr><w:bidiVisual/><w:tblW w:w=\"9070\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/><w:tblBorders>{}{}{}{}{}{}</w:tblBorders>\
+         <w:tblCellMar><w:top w:w=\"60\" w:type=\"dxa\"/><w:start w:w=\"100\" w:type=\"dxa\"/><w:bottom w:w=\"60\" w:type=\"dxa\"/><w:end w:w=\"100\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr>",
+        border("top"), border("start"), border("bottom"), border("end"), border("insideH"), border("insideV")
+    );
+    t.push_str("<w:tblGrid>");
+    for i in 0..n {
+        let _ = write!(t, "<w:gridCol w:w=\"{}\"/>", width(i));
+    }
+    t.push_str("</w:tblGrid><w:tr><w:trPr><w:tblHeader/></w:trPr>");
+    for (i, c) in columns.iter().enumerate() {
+        t.push_str(&cell(c, true, i));
+    }
+    t.push_str("</w:tr>");
+    for row in rows {
+        t.push_str("<w:tr><w:trPr><w:cantSplit/></w:trPr>");
+        for (i, c) in row.iter().enumerate() {
+            t.push_str(&cell(c, false, i));
+        }
+        t.push_str("</w:tr>");
+    }
+    t.push_str("</w:tbl>");
+    t
+}
+
 fn document(report: &Report) -> String {
     let mut body = String::new();
     body.push_str(&para("Title", &report.title, None));
@@ -59,6 +109,17 @@ fn document(report: &Report) -> String {
         body.push_str(&para("Signature", "", None));
         for line in &report.signature {
             body.push_str(&para("Signature", line, None));
+        }
+    }
+    if !report.tables.is_empty() {
+        body.push_str("<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>");
+        body.push_str(&para("Heading1", "נספח: טבלאות ציונים", None));
+        for t in &report.tables {
+            body.push_str(&para("Heading2", &t.title, None));
+            body.push_str(&table(&t.columns, &t.rows));
+            if !t.note.is_empty() {
+                body.push_str(&para("TableNote", &t.note, None));
+            }
         }
     }
     format!(
@@ -118,7 +179,7 @@ fn styles(font: &str) -> String {
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><w:styles {W_NS}>\
          <w:docDefaults><w:rPrDefault>{}</w:rPrDefault><w:pPrDefault><w:pPr><w:bidi/><w:spacing w:after=\"120\" w:line=\"300\" w:lineRule=\"auto\"/></w:pPr></w:pPrDefault></w:docDefaults>\
          <w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/><w:qFormat/><w:pPr><w:bidi/></w:pPr>{}</w:style>\
-         {}{}{}{}{}{}{}{}</w:styles>",
+         {}{}{}{}{}{}{}{}{}{}</w:styles>",
         run(24, false, None),
         run(24, false, None),
         style("Title", "Title", "<w:jc w:val=\"center\"/><w:spacing w:after=\"360\"/>", run(36, true, None)),
@@ -127,6 +188,8 @@ fn styles(font: &str) -> String {
         style("Heading2", "heading 2", "<w:keepNext/><w:spacing w:before=\"240\" w:after=\"80\"/><w:outlineLvl w:val=\"1\"/>", run(26, true, None)),
         style("BodyText", "Body Text", "<w:jc w:val=\"both\"/>", run(24, false, None)),
         style("Signature", "Signature", "<w:keepNext/><w:spacing w:after=\"0\"/>", run(24, false, None)),
+        style("TableText", "Table Text", "<w:spacing w:after=\"0\"/>", run(22, false, None)),
+        style("TableNote", "Table Note", "<w:spacing w:before=\"60\" w:after=\"200\"/>", run(18, false, Some("5B6567"))),
         style("Header", "header", "<w:jc w:val=\"center\"/>", run(18, false, Some("7A7A7A"))),
         style("Footer", "footer", "<w:jc w:val=\"center\"/>", run(18, false, Some("7A7A7A"))),
     )
@@ -199,6 +262,14 @@ mod tests {
         assert!(doc.contains("<w:bidi/>") && doc.contains("<w:rtl/>"));
         assert!(doc.contains("סיבת הפניה"));
         assert!(doc.contains("102 (טווח ממוצע) &amp; תצפית"), "escaped");
+        assert!(
+            doc.contains("נספח: טבלאות ציונים") && doc.contains("<w:bidiVisual/>"),
+            "score table"
+        );
+        assert!(
+            doc.contains("<w:tblHeader/>") && doc.contains(">79<"),
+            "{doc}"
+        );
         let core = part(&bytes, "docProps/core.xml");
         assert!(
             !core.contains("creator") && !core.contains("אלון"),

@@ -14,7 +14,9 @@ pub use records::{
     DraftStatus, GrammaticalGender, InputKind, Transmission,
 };
 pub use report::{ReportPart, ReportSection, ReportStructure};
-pub use scores::{format_sheet, instruments, Instrument, ScoreEntry, ScoreSheet};
+pub use scores::{
+    format_sheet, instruments, sheet_table, Instrument, ScoreEntry, ScoreRow, ScoreSheet,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DomainError {
