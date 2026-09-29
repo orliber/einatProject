@@ -100,9 +100,13 @@ export function SetupScreen({ status, onCreated, onDone }: { status: AppStatus; 
               <label htmlFor="pw2">שוב, לאימות</label>
               <input id="pw2" className="input" type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} />
             </div>
+            <ul className="pw-checks" aria-label="דרישות הסיסמה">
+              <li className={pw.length >= 12 ? "met" : undefined}>{pw.length >= 12 ? "✓" : "○"} 12 תווים לפחות{pw.length > 0 && pw.length < 12 ? ` (עוד ${12 - pw.length})` : ""}</li>
+              <li className={pw2.length > 0 && pw === pw2 ? "met" : undefined}>{pw2.length > 0 && pw === pw2 ? "✓" : "○"} שתי הסיסמאות זהות</li>
+            </ul>
             <ErrorLine error={error} />
-            <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? "יוצרת כספת מוצפנת…" : "יצירת הכספת"}</button>
-            <p className="hint">ההצפנה נעשית במודול מאושר (FIPS 140-3). את הסיסמה אנחנו לא יודעים ולא שומרים.</p>
+            <button type="submit" className="btn btn-primary btn-big" disabled={busy}>{busy ? "יוצרת כספת מוצפנת…" : "יצירת הכספת"}</button>
+            <p className="hint">ההצפנה נעשית ברכיב הצפנה מאושר ומבוקר. את הסיסמה אף אחד לא יודע ולא שומר, גם לא אנחנו.</p>
           </form>
         )}
 
@@ -154,7 +158,7 @@ export function SetupScreen({ status, onCreated, onDone }: { status: AppStatus; 
               <textarea id="names" className="textarea" rows={3} value={names} onChange={(e) => setNames(e.target.value)} />
             </div>
             <ErrorLine error={error} />
-            <button type="submit" className="btn btn-primary" disabled={busy}>סיום וכניסה</button>
+            <button type="submit" className="btn btn-primary btn-big" disabled={busy}>סיום וכניסה</button>
           </form>
         )}
       </main>
