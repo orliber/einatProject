@@ -149,6 +149,8 @@ fn paragraphs(xml: &str) -> Result<PartText, IngestError> {
     let mut deleted = false;
     let mut hidden = false;
     let mut cell_depth = 0u32;
+    // Where the current paragraph starts: a numbered or bulleted item gets "- " there.
+    let mut para_start = 0usize;
 
     loop {
         match reader.read_event().map_err(corrupt)? {
@@ -167,6 +169,11 @@ fn paragraphs(xml: &str) -> Result<PartText, IngestError> {
                         skip_depth = 1;
                     }
                     "r" => run_hidden = false,
+                    "p" => para_start = out.len(),
+                    // List items: keep them apart and recognisable ("- ", like the source).
+                    "numPr" if !out[para_start..].starts_with("- ") => {
+                        out.insert_str(para_start, "- ")
+                    }
                     "tc" => cell_depth += 1,
                     "rPr" => in_run_props = true,
                     "vanish" | "specVanish" if in_run_props => run_hidden = on(&e),
@@ -350,6 +357,21 @@ pub(crate) mod tests {
             ]
         );
         assert_eq!(out.warnings.len(), 4, "{:?}", out.warnings);
+    }
+
+    #[test]
+    fn list_items_stay_separate_and_marked() {
+        let item = |t: &str| {
+            format!("<w:p><w:pPr><w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"1\"/></w:numPr></w:pPr><w:r><w:t>{t}</w:t></w:r></w:p>")
+        };
+        let body = [para("המלצות:"), item("טיפול בתקשורת"), item("הדרכת הורים")].concat();
+        let bytes = build(&[("word/document.xml", document(&body))]);
+        let out = crate::extract(&bytes, "a.docx").unwrap_or_else(|e| panic!("{e}"));
+        assert!(
+            out.body.contains("המלצות:\n- טיפול בתקשורת\n- הדרכת הורים"),
+            "{:?}",
+            out.body
+        );
     }
 
     #[test]

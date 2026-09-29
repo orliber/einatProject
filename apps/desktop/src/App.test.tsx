@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { App } from "./App";
@@ -104,5 +104,25 @@ describe("App", () => {
     render(<App />);
     expect(await screen.findByRole("heading", { name: "התיק הראשון" })).toBeInTheDocument();
     expect(screen.getByText("מצב הדגמה")).toBeInTheDocument();
+  });
+
+  it("Ctrl+L locks at once", async () => {
+    let locked = false;
+    vi.useRealTimers();
+    mockIPC((cmd) => {
+      if (cmd === "app_status") return status({ vault_exists: true, unlocked: !locked });
+      if (cmd === "lock") {
+        locked = true;
+        return null;
+      }
+      if (cmd === "list_cases") return [];
+      if (cmd === "ping") return { ipc_version: 1, core_version: "0.1.0", build_commit: "t", fips_active: false, platform: "linux" };
+      return null;
+    });
+    render(<App />);
+    await screen.findByText("עוד אין תיקים");
+    fireEvent.keyDown(window, { key: "l", ctrlKey: true });
+    expect(await screen.findByRole("button", { name: "פתיחה" })).toBeInTheDocument();
+    expect(locked).toBe(true);
   });
 });

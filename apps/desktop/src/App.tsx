@@ -85,6 +85,20 @@ export function App() {
     await refresh();
   }, [refresh]);
 
+  // Ctrl+L (⌘L on Mac) locks at once: stepping away from the desk should take one key.
+  const unlocked = status?.unlocked === true;
+  useEffect(() => {
+    if (!unlocked) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "l") {
+        e.preventDefault();
+        void lockNow();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [unlocked, lockNow]);
+
   if (coreDown && !status) {
     return <main className="center-note"><p className="error">אין חיבור לליבה המאובטחת. כדאי לסגור ולפתוח את התוכנה.</p></main>;
   }

@@ -158,7 +158,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
           {status.demo_mode && <span className="chip chip-sand" title="לא הוגדר מפתח API בהגדרות">מצב הדגמה</span>}
           <button type="button" className="btn" onClick={() => go({ name: "consult", caseId })}>התייעצות</button>
           <button type="button" className="btn btn-primary" onClick={() => setExporting(true)}>הפקת דוח Word</button>
-          <button type="button" className="btn icon-btn" aria-label="נעילה" title="נעילה" onClick={() => void lockNow()}><LockIcon /></button>
+          <button type="button" className="btn icon-btn" aria-label="נעילה" title="נעילה (Ctrl+L)" onClick={() => void lockNow()}><LockIcon /></button>
         </header>
         <ErrorLine error={error} />
         {view === "materials" && <MaterialsView api={api} />}
