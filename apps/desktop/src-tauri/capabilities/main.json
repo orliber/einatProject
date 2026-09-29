@@ -62,6 +62,7 @@
     "allow-send-consult",
     "allow-check-export",
     "allow-export-report",
+    "allow-print-page",
     "allow-activity",
     "allow-mark-activity-reviewed",
     "allow-retention-due",

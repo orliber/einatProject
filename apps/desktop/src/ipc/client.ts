@@ -144,6 +144,9 @@ export const ipc = {
   /** The file password to the clipboard: out of history and cloud sync, cleared after N seconds (returned). */
   copySecret: (text: string) => call<number>("copy_secret", { text }),
 
+  /** The system's print window (the macOS webview ignores `window.print()`). */
+  printPage: () => run("print_page"),
+
   // Activity log (metadata only; cases named on this computer) and retention reminders.
   activity: (before: number | null) => call<ActivityPage>("activity", { before }),
   markActivityReviewed: () => run("mark_activity_reviewed"),

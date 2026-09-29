@@ -636,6 +636,13 @@ async fn keep_case_longer(
     with_core(&state, move |c| c.keep_case_longer(&case_id, years)).await
 }
 
+/// Print the page with the system's own print window. `window.print()` does nothing in the
+/// macOS webview, so the recovery kit could not be printed there.
+#[tauri::command]
+fn print_page(window: tauri::WebviewWindow) -> Res<()> {
+    window.print().map_err(|e| internal(&e.to_string()))
+}
+
 // ------------------------------------------------------------------ password and kit
 
 /// `current` is the password, or the recovery kit when `with_recovery`.
@@ -846,6 +853,7 @@ fn main() {
             send_consult,
             check_export,
             export_report,
+            print_page,
             activity,
             mark_activity_reviewed,
             retention_due,
