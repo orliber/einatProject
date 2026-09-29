@@ -19,7 +19,7 @@ describe("LockScreen", () => {
       throw new Error(`unexpected command ${cmd}`);
     });
     render(<LockScreen />);
-    expect(await screen.findByText(/הליבה המאובטחת מחוברת/)).toBeInTheDocument();
+    expect(await screen.findByText(/התוכנה פועלת כראוי/)).toBeInTheDocument();
   });
 
   it("shows a clear error when the core does not answer", async () => {
@@ -27,6 +27,6 @@ describe("LockScreen", () => {
       throw new Error("down");
     });
     render(<LockScreen />);
-    expect(await screen.findByText("אין חיבור לליבה המאובטחת")).toBeInTheDocument();
+    expect(await screen.findByText(/התוכנה לא מגיבה/)).toBeInTheDocument();
   });
 });

@@ -64,9 +64,14 @@ export function DetailsView({ api }: { api: CaseApi }) {
           <h1>פרטי התיק ושמות להסתרה</h1>
           <p className="muted small">כל שם כאן מוחלף בתפקיד לפני כל שליחה ל-Claude, גם עם תחיליות ("ולנועם", "שנועם") וכתיב שונה.</p>
         </div>
-        <button type="button" className="btn btn-primary" onClick={() => void save()}>שמירה</button>
+        <button type="button" className="btn btn-primary btn-big" onClick={() => void save()}>שמירת השינויים</button>
       </div>
       <div className="view-body details">
+        <div className="card details-card stack grow names-card">
+          <span className="label">שמות שיוסתרו</span>
+          <p className="hint">הילד/ה, ההורים, האחים, הגננת, רופאים ומטפלים, וגם מקומות (גן, יישוב). כינויים וכתיב נוסף, בפסיקים.</p>
+          <PeopleEditor rows={rows} onChange={setRows} />
+        </div>
         <div className="stack details-col">
           <div className="card details-card stack">
             <div className="row wrap">
@@ -103,13 +108,8 @@ export function DetailsView({ api }: { api: CaseApi }) {
           <div className="card details-card stack danger-zone">
             <b>מחיקת התיק</b>
             <p className="small muted">מוחקת את כל החומרים, הטיוטות והשיחות, ואת מפתח ההצפנה של התיק. אי אפשר לשחזר.</p>
-            <button type="button" className="btn btn-danger" onClick={() => setConfirmDelete(true)}>מחיקת התיק לצמיתות</button>
+            <button type="button" className="btn btn-danger-quiet" onClick={() => setConfirmDelete(true)}>מחיקת התיק…</button>
           </div>
-        </div>
-        <div className="card details-card stack grow">
-          <span className="label">שמות שיוסתרו</span>
-          <p className="hint">הילד/ה, ההורים, האחים, הגננת, רופאים ומטפלים, וגם מקומות (גן, יישוב). כינויים וכתיב נוסף, בפסיקים.</p>
-          <PeopleEditor rows={rows} onChange={setRows} />
         </div>
       </div>
       <ErrorLine error={error} />

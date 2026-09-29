@@ -124,9 +124,28 @@
   overflow: auto;
 }
 .details-col {
-  width: 460px;
+  width: 400px;
   flex-shrink: 0;
+}
+.names-card {
+  min-width: 0;
+}
+.btn-danger-quiet {
+  align-self: flex-start;
+  border-color: #e3b2a8;
+  color: var(--block);
+  background: var(--surface);
+}
+.btn-danger-quiet:hover:not(:disabled) {
+  background: var(--block-soft);
 }
 .details-card {
   padding: 16px 18px;
+}
+.empty-list > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.empty-list[open] > summary {
+  margin-bottom: 4px;
 }

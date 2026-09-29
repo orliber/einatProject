@@ -303,12 +303,16 @@
   gap: 8px;
 }
 .person-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1.1fr) minmax(0, 1fr) 44px;
   gap: 8px;
   align-items: center;
 }
-.person-row .select {
-  width: 170px;
+.person-head {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-muted);
+  padding-inline: 2px;
 }
 .add-person {
   align-self: flex-start;

@@ -103,7 +103,10 @@ export function ExportDialog({ api, onClose }: { api: CaseApi; onClose: () => vo
               {check.empty_sections.length > 0 && (
                 <li className="warn">
                   <span aria-hidden="true">!</span>
-                  <span className="grow">{check.empty_sections.length} סעיפים ריקים לא ייכללו: {check.empty_sections.join(", ")}</span>
+                  <details className="grow empty-list">
+                    <summary>{check.empty_sections.length === 1 ? "סעיף אחד ריק לא ייכלל בדוח" : `${check.empty_sections.length} סעיפים ריקים לא ייכללו בדוח`}</summary>
+                    <span className="small muted">{check.empty_sections.join(" · ")}</span>
+                  </details>
                 </li>
               )}
             </ul>

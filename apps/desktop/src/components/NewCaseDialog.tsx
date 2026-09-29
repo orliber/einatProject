@@ -31,6 +31,9 @@ export function PeopleEditor({ rows, onChange }: { rows: PersonRow[]; onChange: 
   const set = (i: number, patch: Partial<PersonRow>) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   return (
     <div className="people">
+      <div className="person-row person-head" aria-hidden="true">
+        <span>תפקיד</span><span>שם</span><span>כינויים וכתיב נוסף</span><span />
+      </div>
       {rows.map((r, i) => (
         <div key={i} className="person-row">
           <label className="visually-hidden" htmlFor={`role-${i}`}>תפקיד</label>
@@ -41,13 +44,13 @@ export function PeopleEditor({ rows, onChange }: { rows: PersonRow[]; onChange: 
             ))}
           </select>
           <label className="visually-hidden" htmlFor={`name-${i}`}>שם</label>
-          <input id={`name-${i}`} className="input grow" placeholder="שם" value={r.value} onChange={(e) => set(i, { value: e.target.value })} />
+          <input id={`name-${i}`} className="input" placeholder={r.role === "child" ? "למשל: נועם" : "שם"} value={r.value} onChange={(e) => set(i, { value: e.target.value })} />
           <label className="visually-hidden" htmlFor={`alias-${i}`}>כינויים</label>
-          <input id={`alias-${i}`} className="input grow" placeholder="כינויים וכתיב נוסף, בפסיקים" value={r.aliases}
+          <input id={`alias-${i}`} className="input" placeholder={r.role === "child" ? "למשל: נועמי, נעמי" : "בפסיקים, לא חובה"} value={r.aliases}
             onChange={(e) => set(i, { aliases: e.target.value })} />
-          {r.role !== "child" && (
-            <button type="button" className="btn icon-btn" aria-label="הסרה" onClick={() => onChange(rows.filter((_, j) => j !== i))}>×</button>
-          )}
+          {r.role !== "child" ? (
+            <button type="button" className="btn icon-btn" aria-label={`הסרת ${roleLabel[r.role]}`} title="הסרה" onClick={() => onChange(rows.filter((_, j) => j !== i))}>×</button>
+          ) : <span />}
         </div>
       ))}
       <button type="button" className="btn btn-small add-person"

@@ -10,10 +10,10 @@ type Section = CaseDetail["sections"][number];
 const DERIVED = ["summary", "diagnoses", "recommendations", "dsm"];
 
 const QUICK: [string, string][] = [
-  ["הרחבה", "הרחיבי את הטיוטה של הסעיף, בלי להוסיף עובדות שאינן במקורות."],
-  ["קיצור", "קצרי את הטיוטה של הסעיף ושמרי על כל הממצאים העיקריים."],
-  ["מול הממצאים", "בדקי את הטיוטה מול המקורות: מה חסר, מה סותר, ומה לא מבוסס."],
-  ["הצעת המלצות", "הציעי המלצות שנובעות מהממצאים שבמקורות, כל אחת עם הנימוק שלה."],
+  ["להרחיב", "הרחיבי את הטיוטה של הסעיף, בלי להוסיף עובדות שאינן במקורות."],
+  ["לקצר", "קצרי את הטיוטה של הסעיף ושמרי על כל הממצאים העיקריים."],
+  ["לבדוק מול המקורות", "בדקי את הטיוטה מול המקורות: מה חסר, מה סותר, ומה לא מבוסס."],
+  ["להציע המלצות", "הציעי המלצות שנובעות מהממצאים שבמקורות, כל אחת עם הנימוק שלה."],
 ];
 
 export function SectionWork({ api, section }: { api: CaseApi; section: Section }) {
@@ -110,7 +110,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
             {derived ? (
               <span className="muted">הסעיף נכתב מתוך הסעיפים שכבר אישרת.</span>
             ) : section.source_count > 0 ? (
-              <span className="muted">{section.source_count} חומרים מזינים את הסעיף</span>
+              <span className="muted">{section.source_count === 1 ? "חומר אחד מזין את הסעיף" : `${section.source_count} חומרים מזינים את הסעיף`}</span>
             ) : (
               <span className="muted">עוד אין חומרים שמזינים את הסעיף. אפשר להוסיף ב"חומרי התיק", או לכתוב בעצמך.</span>
             )}
@@ -256,7 +256,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               <textarea id="chat-msg" rows={2} className="textarea grow" placeholder="כתבי ל-Claude… שמות יוסתרו אוטומטית"
                 value={message} onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) void ask(message); }} />
-              <button type="submit" className="btn btn-primary send-btn" aria-label="לבדיקה לפני שליחה" disabled={busy || !message.trim()}><SendIcon /></button>
+              <button type="submit" className="btn btn-primary send-btn" title="תמיד מוצג קודם מה יוצא מהמחשב" disabled={busy || !message.trim()}>שליחה <SendIcon /></button>
             </div>
           </form>
         </section>

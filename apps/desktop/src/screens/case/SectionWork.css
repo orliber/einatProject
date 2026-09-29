@@ -192,7 +192,6 @@
   resize: none;
 }
 .send-btn {
-  width: 44px;
-  height: 44px;
-  padding: 0;
+  min-height: 44px;
+  padding: 0 16px;
 }
