@@ -59,6 +59,7 @@ fn main() {
             "send_consult",
             "check_export",
             "export_report",
+            "print_page",
             "activity",
             "mark_activity_reviewed",
             "retention_due",

@@ -15,6 +15,9 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
   const [pw2, setPw2] = useState("");
   const [key, setKey] = useState("");
   const [typed, setTyped] = useState("");
+  // How far the typed-back kit has come (groups of four letters or digits).
+  const kitGroups = key.split("-").filter(Boolean).length;
+  const typedGroups = Math.floor(typed.replace(/[^0-9a-z]/gi, "").length / 4);
   const [names, setNames] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -129,11 +132,17 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
               <RecoveryKitPaper recoveryKey={key} />
               <form className="stack" onSubmit={confirm}>
                 <div className="field">
-                  <label htmlFor="typed">כדי לוודא שהערכה נשמרה, הקלידי אותה מהדף</label>
+                  <label htmlFor="typed">כדי לוודא שהערכה נשמרה, הקלידי אותה מהדף (לא להעתיק מהמסך)</label>
                   <div className="row">
-                    <input id="typed" className="input grow mono" dir="ltr" placeholder="XXXX-XXXX-…" value={typed} onChange={(e) => setTyped(e.target.value)} />
-                    <button type="submit" className="btn btn-primary" disabled={typed.trim().length < 20}>המשך</button>
+                    <input id="typed" className="input grow mono" dir="ltr" placeholder="XXXX-XXXX-…" autoComplete="off" spellCheck={false}
+                      value={typed} onChange={(e) => setTyped(e.target.value)} aria-describedby="typed-count" />
+                    <button type="submit" className="btn btn-primary" disabled={typedGroups < kitGroups}>המשך</button>
                   </div>
+                  <span id="typed-count" className="hint">
+                    {typedGroups < kitGroups
+                      ? `הוקלדו ${typedGroups} מתוך ${kitGroups} קבוצות. אפשר עם מקפים או בלי, באותיות גדולות או קטנות.`
+                      : "כל הקבוצות הוקלדו. לחיצה על \"המשך\" בודקת שהן נכונות."}
+                  </span>
                 </div>
                 <ErrorLine error={error} />
               </form>

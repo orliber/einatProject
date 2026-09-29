@@ -28,7 +28,8 @@ describe("App", () => {
     expect(screen.getByText("K8XA")).toBeInTheDocument();
 
     const typed = screen.getByLabelText(/הקלידי אותה מהדף/);
-    await user.type(typed, "7K3M-WRONG-KEY-XXXX-XXXX");
+    // A wrong kit of the full length (a shorter one leaves "המשך" disabled).
+    await user.type(typed, KEY.replace(/[0-9A-Z]/g, "X"));
     await user.click(screen.getByRole("button", { name: "המשך" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("לא תואמת");
 
