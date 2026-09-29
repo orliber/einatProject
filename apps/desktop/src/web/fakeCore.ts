@@ -93,6 +93,8 @@ function sentences(text: string, n: number): string {
 
 export class FakeCore {
   private unlocked = false;
+  /** `?setup` in the address opens the first-run screens (for the demo page's pictures). */
+  private vaultExists = typeof location === "undefined" || !location.search.includes("setup");
   private practitioner = ["ד\"ר רותם בדויה"];
   private lockMinutes = 15;
   private model = "claude-opus-5";
@@ -242,7 +244,7 @@ export class FakeCore {
 
   status(): AppStatus {
     return {
-      vault_exists: true, unlocked: this.unlocked, disk_encryption: "on", cloud_synced_folder: null, fips_active: true,
+      vault_exists: this.vaultExists, unlocked: this.unlocked, disk_encryption: "on", cloud_synced_folder: null, fips_active: true,
       demo_mode: true, model: this.model, integrity_warning: null, lock_minutes: this.lockMinutes,
       practitioner: this.practitioner, review_only_suspect: this.reviewOnlySuspect, review_choice_available: true,
     };
@@ -459,6 +461,8 @@ export class FakeCore {
         this.unlocked = true;
         return this.status();
       case "create_vault":
+        this.vaultExists = true;
+        this.unlocked = true;
         return { recovery_key: "DEMO-PREV-IEWX-KEYS-ONLY-4TST" };
       case "confirm_recovery_key":
         return true;
