@@ -1681,3 +1681,51 @@ fn a_case_past_its_retention_date_is_pointed_out_and_never_erased() {
             > "2027-01-01"
     );
 }
+
+#[test]
+fn a_send_is_logged_even_when_the_reply_is_unusable() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    add_home_intake(&mut core, &case);
+    let prepared = core.prepare_sort(&case).unwrap();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({"not": "a sorting"})));
+    assert!(core.send_sort(&prepared.approval_id.unwrap()).is_err());
+    // The filtered materials did leave the computer: the log says so.
+    let page = core.activity(None).unwrap();
+    assert!(page.entries.iter().any(|e| e.event == "send"));
+}
+
+#[test]
+fn an_edited_material_that_was_placed_nowhere_is_offered_for_sorting_again() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    add_home_intake(&mut core, &case);
+    let prepared = core.prepare_sort(&case).unwrap();
+    *fake.answer.lock().unwrap() = Some(claude_sorting());
+    core.send_sort(&prepared.approval_id.unwrap()).unwrap();
+    let detail = core.case_detail(&case).unwrap();
+    let (input, routing) = (&detail.inputs[1], &detail.routing[1]);
+    assert!(!routing.sorted && !routing.needs_sorting);
+    core.update_input(
+        &case,
+        &input.id,
+        &input.title,
+        &format!("{}\nועוד שורה.", input.content),
+    )
+    .unwrap();
+    let detail = core.case_detail(&case).unwrap();
+    assert!(detail.routing[1].needs_sorting);
+}
+
+#[test]
+fn a_lock_after_sleep_is_one_entry_with_its_reason() {
+    let (_dir, mut core, _case) = setup(None);
+    let t0 = SystemTime::now();
+    core.tick(t0);
+    assert!(core.tick(t0 + Duration::from_secs(400)));
+    core.unlock(PASSWORD).unwrap();
+    let page = core.activity(None).unwrap();
+    let locks: Vec<_> = page.entries.iter().filter(|e| e.event == "lock").collect();
+    assert_eq!(locks.len(), 1, "{locks:?}");
+    assert!(locks[0].text.contains("שינה"));
+}

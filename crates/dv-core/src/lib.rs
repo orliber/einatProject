@@ -409,14 +409,7 @@ impl Core {
             .is_some_and(|gap| gap > SLEEP_GAP);
         self.last_tick = Some(now);
         if slept && self.vault.is_some() {
-            if let Some(v) = self.vault.as_mut() {
-                let _ = v.record(
-                    AuditEvent::Lock,
-                    None,
-                    &serde_json::json!({ "reason": "sleep" }),
-                );
-            }
-            self.lock();
+            self.lock_because(Some("sleep"));
             return true;
         }
         self.lock_if_idle()
@@ -528,7 +521,13 @@ impl Core {
         }
     }
 
-    fn after_unlock(&mut self, result: Result<Vault, VaultError>) -> Result<AppStatus, CoreError> {
+    /// `purge`: erase what waited in the recycle bin past its time. Not right after a restore,
+    /// which is often done to get back something deleted by mistake.
+    fn after_unlock(
+        &mut self,
+        result: Result<Vault, VaultError>,
+        purge: bool,
+    ) -> Result<AppStatus, CoreError> {
         match result {
             Ok(mut vault) => {
                 if self.failed_unlocks > 0 {
@@ -542,7 +541,19 @@ impl Core {
                 self.not_before = None;
                 self.vault = Some(vault);
                 self.last_activity = Instant::now();
-                self.purge_expired()?;
+                if purge {
+                    // Best effort: a case that fails to erase now is tried again next time, and
+                    // never keeps the vault from opening.
+                    if let Err(e) = self.purge_expired() {
+                        if let Some(v) = self.vault.as_mut() {
+                            let _ = v.record(
+                                AuditEvent::IntegrityWarning,
+                                None,
+                                &serde_json::json!({ "reason": format!("recycle bin: {e}") }),
+                            );
+                        }
+                    }
+                }
                 Ok(self.status())
             }
             Err(e) => {
@@ -560,14 +571,14 @@ impl Core {
         self.refuse_cloud()?;
         self.check_backoff()?;
         let result = Vault::unlock_with_password(&self.dir, password);
-        self.after_unlock(result)
+        self.after_unlock(result, true)
     }
 
     pub fn unlock_with_recovery(&mut self, recovery_key: &str) -> Result<AppStatus, CoreError> {
         self.refuse_cloud()?;
         self.check_backoff()?;
         let result = Vault::unlock_with_recovery(&self.dir, recovery_key);
-        self.after_unlock(result)
+        self.after_unlock(result, true)
     }
 
     pub fn confirm_recovery_key(&mut self, typed: &str) -> Result<bool, CoreError> {
@@ -576,11 +587,15 @@ impl Core {
 
     /// Wipe keys, pending approvals and consultation history from memory.
     pub fn lock(&mut self) {
+        self.lock_because(None);
+    }
+
+    fn lock_because(&mut self, reason: Option<&str>) {
         self.pending.clear();
         self.consult_history.clear();
         self.staged_backup = None;
         if let Some(v) = self.vault.take() {
-            let _ = v.lock();
+            let _ = v.lock_because(reason);
         }
     }
 
@@ -1403,13 +1418,27 @@ impl Core {
         else {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
         };
+        // The request went out: record it before anything about the reply can fail.
+        let model = self.model_config()?.model;
+        let payload_text = String::from_utf8_lossy(payload.body()).into_owned();
+        let v = self.vault_mut()?;
+        v.add_transmission(
+            &case_id,
+            &section_key,
+            payload.sha256(),
+            if demo { "demo" } else { &model },
+            &payload_text,
+        )?;
+        v.record(
+            AuditEvent::Send,
+            Some(&case_id),
+            &serde_json::json!({ "section": section_key, "demo": demo }),
+        )?;
         let refs: Vec<(String, String)> = sources
             .iter()
             .map(|(sid, _, text)| (sid.clone(), text.clone()))
             .collect();
         let mut reply = dv_ai::parse_section(&response, &refs)?;
-
-        let model = self.model_config()?.model;
         let v = self.vault_mut()?;
         let identities = v.identities(&case_id)?;
         let case_tags: Vec<String> = identities.iter().map(|i| i.tag.clone()).collect();
@@ -1447,19 +1476,6 @@ impl Core {
                 .collect();
             v.add_draft(&case_id, &section_key, &p.text, Author::Ai, &input_ids)?;
         }
-        let payload_text = String::from_utf8_lossy(payload.body()).into_owned();
-        v.add_transmission(
-            &case_id,
-            &section_key,
-            payload.sha256(),
-            if demo { "demo" } else { &model },
-            &payload_text,
-        )?;
-        v.record(
-            AuditEvent::Send,
-            Some(&case_id),
-            &serde_json::json!({ "section": section_key, "demo": demo }),
-        )?;
 
         let practitioner = v.practitioner()?.names.first().cloned();
         let show = |t: &str| restore(t, &identities, practitioner.as_deref());
@@ -1611,6 +1627,12 @@ impl Core {
         else {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
         };
+        // The request went out: record it before anything about the reply can fail.
+        self.vault_mut()?.record(
+            AuditEvent::Send,
+            case_id.as_deref(),
+            &serde_json::json!({ "consult": true, "demo": demo }),
+        )?;
         let answer = dv_ai::parse_consult(&response)?;
         let key = case_id.clone().unwrap_or_default();
         let turns = self.consult_history.entry(key).or_default();
@@ -1623,11 +1645,6 @@ impl Core {
             text_tagged: answer.clone(),
         });
         let v = self.vault_mut()?;
-        v.record(
-            AuditEvent::Send,
-            case_id.as_deref(),
-            &serde_json::json!({ "consult": true, "demo": demo }),
-        )?;
         let shown = match &case_id {
             Some(c) => {
                 let identities = v.identities(c)?;

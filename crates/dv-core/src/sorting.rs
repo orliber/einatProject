@@ -190,7 +190,7 @@ impl Core {
     ) -> Result<(), CoreError> {
         let v = self.vault_mut()?;
         let mut routing = routing_of(v, case_id, input_id)?;
-        if routing.suggestion.is_some() {
+        if routing.suggestion.is_some() || routing.unplaced.is_some() {
             routing.text_changed();
             let json =
                 serde_json::to_string(&routing).map_err(|e| CoreError::Internal(e.to_string()))?;
@@ -233,6 +233,8 @@ impl Core {
             let mut review = Review::default();
             let mut materials = Vec::new();
             let mut rows = Vec::new();
+            // Materials that cannot be cut into passages right now (see below), by title.
+            let mut uncut: Vec<String> = Vec::new();
             for inp in v.inputs(case_id)? {
                 let ranges = passage_ranges(&inp.content);
                 if ranges.is_empty()
@@ -242,7 +244,10 @@ impl Core {
                 }
                 let (whole, parts) = filter_split(&inp.content, &ctx, &ranges).map_err(internal)?;
                 // A name across a passage edge: this material stays on the table for now.
-                let Some(parts) = parts else { continue };
+                let Some(parts) = parts else {
+                    uncut.push(inp.title.clone());
+                    continue;
+                };
                 let title = filter(&inp.title, &ctx).map_err(internal)?;
                 let sid = format!("S{}", materials.len() + 1);
                 if title.original_segments.iter().any(|s| s.mark.is_some()) {
@@ -263,9 +268,16 @@ impl Core {
                 rows.push((inp.id.clone(), ranges.len(), fingerprint(&inp.content)));
             }
             if materials.is_empty() {
-                return Err(CoreError::Refused(
-                    "כל החומרים כבר ממוינים לסעיפים.".to_owned(),
-                ));
+                // Shown only here, on this computer (titles may hold names).
+                return Err(CoreError::Refused(if uncut.is_empty() {
+                    "כל החומרים כבר ממוינים לסעיפים.".to_owned()
+                } else {
+                    format!(
+                        "אי אפשר למיין אוטומטית את: {}. שם חשוד נמשך שם על פני שתי שורות, ולכן \
+                         החומר לא נחתך לקטעים. אפשר לבחור לו סעיפים בעצמך (\"שינוי הסעיפים\").",
+                        uncut.join(", ")
+                    )
+                }));
             }
             (
                 SortInput {
@@ -321,10 +333,24 @@ impl Core {
         else {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
         };
+        // The request went out: record it before anything about the reply can fail.
+        let model = self.model_config()?.model;
+        let payload_text = String::from_utf8_lossy(payload.body()).into_owned();
+        let v = self.vault_mut()?;
+        v.add_transmission(
+            &case_id,
+            "sorting",
+            payload.sha256(),
+            if demo { "demo" } else { &model },
+            &payload_text,
+        )?;
+        v.record(
+            AuditEvent::Send,
+            Some(&case_id),
+            &serde_json::json!({ "sorting": true, "demo": demo }),
+        )?;
         let counts: Vec<usize> = materials.iter().map(|(_, n, _)| *n).collect();
         let reply = dv_ai::parse_sort(&response, &counts, &sections)?;
-
-        let model = self.model_config()?.model;
         let v = self.vault_mut()?;
         let current = v.inputs(&case_id)?;
         let mut result = SortResult {
@@ -370,19 +396,6 @@ impl Core {
                 Err(e) => return Err(e.into()),
             }
         }
-        let payload_text = String::from_utf8_lossy(payload.body()).into_owned();
-        v.add_transmission(
-            &case_id,
-            "sorting",
-            payload.sha256(),
-            if demo { "demo" } else { &model },
-            &payload_text,
-        )?;
-        v.record(
-            AuditEvent::Send,
-            Some(&case_id),
-            &serde_json::json!({ "sorting": true, "demo": demo }),
-        )?;
         Ok(result)
     }
 }

@@ -132,7 +132,7 @@ export function PurgeDialog(props: { name: string; onClose: () => void; onPurge:
         <button type="button" className="btn btn-danger" disabled={busy || !pw} onClick={() => void purge()}>מחיקה לצמיתות</button>
       </>}>
       <form className="stack" onSubmit={(e) => { e.preventDefault(); if (pw) void purge(); }}>
-        <p>כל מה שבתיק יימחק ולא יהיה אפשר לשחזר אותו, גם לא מגיבוי. זה לא מוחק דוחות Word שכבר הופקו.</p>
+        <p>כל מה שבתיק יימחק מהכספת ולא יהיה אפשר לשחזר אותו ממנה. <b>גיבויים שנעשו קודם עדיין מכילים את התיק</b>: אם צריך למחוק אותו לגמרי (למשל לבקשת ההורים), מוחקים גם אותם ועושים גיבוי חדש. זה גם לא מוחק דוחות Word שכבר הופקו.</p>
         <div className="field">
           <label htmlFor="purge-pw">הסיסמה של הכספת, לאישור</label>
           <input id="purge-pw" className="input" type="password" autoComplete="current-password" autoFocus value={pw} onChange={(e) => setPw(e.target.value)} />

@@ -778,9 +778,10 @@ fn main() {
             let timer_clipboard = clipboard.clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(15));
-                let locked = timer
-                    .lock()
-                    .is_ok_and(|mut c| c.tick(std::time::SystemTime::now()));
+                // Read the clock before waiting for the core: a long command holding it must not
+                // look like the computer slept.
+                let now = std::time::SystemTime::now();
+                let locked = timer.lock().is_ok_and(|mut c| c.tick(now));
                 if locked {
                     timer_clipboard.clear_now();
                 }

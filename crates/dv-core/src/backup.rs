@@ -133,9 +133,10 @@ impl Core {
         self.staged_backup = None;
     }
 
-    fn staged(&self) -> Result<&[u8], CoreError> {
+    /// The chosen file, taken rather than copied (a backup can be large).
+    fn take_staged(&mut self) -> Result<Vec<u8>, CoreError> {
         self.staged_backup
-            .as_deref()
+            .take()
             .ok_or_else(|| CoreError::Refused("צריך לבחור קובץ גיבוי.".to_owned()))
     }
 
@@ -153,25 +154,35 @@ impl Core {
     /// it holds, and remove it again. Proves both the file and the password work.
     pub fn check_staged_backup(&mut self, password: &str) -> Result<BackupCheckView, CoreError> {
         self.check_backoff()?;
-        let bytes = self.staged()?.to_vec();
-        let v = self.vault_mut()?;
-        if peek_backup(&bytes)?.vault_id != v.vault_id() {
-            return Err(CoreError::Refused(
-                "זה גיבוי של כספת אחרת, לא של הכספת הזו.".to_owned(),
-            ));
-        }
-        let result = v.check_backup(&bytes, Secret::Password(password));
+        // Put back unless it succeeded, so Einat can try another password.
+        let bytes = self.take_staged()?;
+        let result = (|| {
+            let v = self.vault_mut()?;
+            if peek_backup(&bytes)?.vault_id != v.vault_id() {
+                return Err(CoreError::Refused(
+                    "זה גיבוי של כספת אחרת, לא של הכספת הזו.".to_owned(),
+                ));
+            }
+            Ok(v.check_backup(&bytes, Secret::Password(password)))
+        })();
+        let result = match result {
+            Ok(r) => r,
+            Err(e) => {
+                self.staged_backup = Some(bytes);
+                return Err(e);
+            }
+        };
         let check = match result {
             Ok(check) => check,
             Err(e) => {
                 self.count_failure(&e);
+                self.staged_backup = Some(bytes);
                 return Err(e.into());
             }
         };
         self.failed_unlocks = 0;
         let v = self.vault_mut()?;
         v.set_setting(LAST_CHECK_KEY, &unix_now().to_string())?;
-        self.staged_backup = None;
         Ok(BackupCheckView {
             created_at: check.created_at,
             cases: check.cases,
@@ -198,13 +209,15 @@ impl Core {
             (None, Some(r)) => Secret::Recovery(r),
             (None, None) => return Err(CoreError::Refused("צריך סיסמה או ערכת שחזור.".to_owned())),
         };
-        let bytes = self.staged()?.to_vec();
+        // Put back unless it succeeded, so Einat can try another password.
+        let bytes = self.take_staged()?;
         // A failed restore removes what it wrote; after_unlock counts a wrong secret.
         let result = Vault::restore_backup(&bytes, &self.dir, secret).map(|(v, _)| v);
-        if result.is_ok() {
-            self.staged_backup = None;
+        if result.is_err() {
+            self.staged_backup = Some(bytes);
         }
-        self.after_unlock(result)
+        // No recycle-bin purge now: a restore is often how a mistaken deletion is undone.
+        self.after_unlock(result, false)
     }
 }
 

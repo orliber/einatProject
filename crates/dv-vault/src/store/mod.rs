@@ -336,8 +336,17 @@ impl Vault {
     }
 
     /// Lock explicitly (records the event); dropping the vault also wipes the keys.
-    pub fn lock(mut self) -> Result<(), VaultError> {
-        self.record(AuditEvent::Lock, None, &serde_json::json!({}))
+    pub fn lock(self) -> Result<(), VaultError> {
+        self.lock_because(None)
+    }
+
+    /// Lock, recording why (for example `sleep`) in the same single log entry.
+    pub fn lock_because(mut self, reason: Option<&str>) -> Result<(), VaultError> {
+        let meta = match reason {
+            Some(r) => serde_json::json!({ "reason": r }),
+            None => serde_json::json!({}),
+        };
+        self.record(AuditEvent::Lock, None, &meta)
     }
 
     /// Replace the password slot. Needs a fresh proof: the current password, or the recovery
