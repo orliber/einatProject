@@ -6,10 +6,10 @@
 //! printed recovery kit that were in use when it was made.
 
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use dv_vault::{peek_backup, Secret, Vault, VaultError, BACKUP_EXTENSION};
 
+use crate::dates::unix_now;
 use crate::views::{BackupCheckView, BackupDone, BackupStatus, StagedBackup};
 use crate::{AppStatus, Core, CoreError};
 
@@ -23,32 +23,13 @@ const LAST_CHECK_KEY: &str = "backup_last_check_at";
 /// When the password or the kit last changed: backups older than this open only with the old one.
 const SECRET_CHANGED_KEY: &str = "secret_changed_at";
 
-fn unix_now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
-}
-
 /// The file name offered in the "Save as" window. A date, nothing about any case.
 #[must_use]
 pub fn backup_file_name(now: i64) -> String {
-    let days = now.div_euclid(86_400);
-    let (y, m, d) = civil_from_days(days);
-    format!("גיבוי כספת האבחון {y:04}-{m:02}-{d:02}.{BACKUP_EXTENSION}")
-}
-
-/// Days since 1970-01-01 → (year, month, day), proleptic Gregorian (H. Hinnant's algorithm).
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = u32::try_from(doy - (153 * mp + 2) / 5 + 1).unwrap_or(1);
-    let m = u32::try_from(if mp < 10 { mp + 3 } else { mp - 9 }).unwrap_or(1);
-    let y = yoe + era * 400 + i64::from(m <= 2);
-    (y, m, d)
+    format!(
+        "גיבוי כספת האבחון {}.{BACKUP_EXTENSION}",
+        crate::dates::iso(crate::dates::date_of(now))
+    )
 }
 
 impl Core {
@@ -239,6 +220,5 @@ mod tests {
             backup_file_name(1_790_683_200),
             "גיבוי כספת האבחון 2026-09-29.vaultbak"
         );
-        assert_eq!(civil_from_days(11_016), (2000, 2, 29));
     }
 }

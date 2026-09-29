@@ -1615,3 +1615,69 @@ fn a_new_password_or_kit_asks_for_a_new_backup() {
     assert!(core.unlock("שמש צהובה על הים הכחול").is_ok());
     drop(dir);
 }
+
+#[test]
+fn the_activity_log_names_cases_only_here_and_reads_in_pages() {
+    let (_dir, mut core, case) = setup(None);
+    core.delete_case(&case).unwrap();
+    let page = core.activity(None).unwrap();
+    assert!(page.intact && page.reviewed_at.is_none());
+    let trashed = page
+        .entries
+        .iter()
+        .find(|e| e.event == "case_trashed")
+        .unwrap();
+    assert!(trashed.case.as_deref().unwrap().contains("אלון"));
+    assert!(trashed.case.as_deref().unwrap().contains("בסל המחזור"));
+    assert!(page.entries.iter().all(|e| !e.text.contains('_')));
+    // The program's own bookkeeping is not shown.
+    assert!(page.entries.iter().all(|e| e.text != "הגדרה עודכנה"));
+
+    core.purge_case(&case, PASSWORD).unwrap();
+    let page = core.activity(None).unwrap();
+    let created = page
+        .entries
+        .iter()
+        .find(|e| e.event == "case_created")
+        .unwrap();
+    assert_eq!(created.case.as_deref(), Some("תיק שנמחק"));
+
+    core.mark_activity_reviewed().unwrap();
+    let page = core.activity(None).unwrap();
+    assert!(page.reviewed_at.is_some());
+    assert_eq!(page.entries[0].event, "audit_reviewed");
+    assert!(!page.more && page.last_seq.is_some());
+}
+
+#[test]
+fn a_case_past_its_retention_date_is_pointed_out_and_never_erased() {
+    let (_dir, mut core, case) = setup(None);
+    assert!(core.retention_due().unwrap().is_empty());
+    let detail = core.case_detail(&case).unwrap();
+    // Age 5 at the assessment: kept until the child is 25.
+    assert!(
+        detail.retention_default.as_str() > "2045-01-01",
+        "{}",
+        detail.retention_default
+    );
+
+    let mut meta = detail.meta.clone();
+    meta.retention_until = Some("2020-01-01".into());
+    core.update_case(&case, meta).unwrap();
+    let due = core.retention_due().unwrap();
+    assert_eq!(due.len(), 1);
+    assert!(due[0].label.contains("אלון") && !due[0].by_default);
+    assert_eq!(core.list_cases().unwrap().len(), 1, "nothing is erased");
+
+    core.keep_case_longer(&case, 1).unwrap();
+    assert!(core.retention_due().unwrap().is_empty());
+    assert!(
+        core.case_detail(&case)
+            .unwrap()
+            .meta
+            .retention_until
+            .unwrap()
+            .as_str()
+            > "2027-01-01"
+    );
+}

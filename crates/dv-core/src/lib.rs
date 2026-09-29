@@ -4,8 +4,11 @@
 //! machine without a WebView. `Core` owns the unlocked vault and walks every request through
 //! the same path: filter → build → review → gate → (approval) → send → check → store.
 
+mod activity;
 mod backup;
+mod dates;
 mod library;
+mod retention;
 mod sorting;
 mod views;
 
@@ -29,14 +32,17 @@ use dv_privacy::{
 use dv_vault::{Argon2Params, AuditEvent, Vault, VaultError};
 use serde_json::Value;
 
+pub use activity::ACTIVITY_PAGE;
 pub use backup::{backup_file_name, BACKUP_DAYS, MAX_BACKUP_BYTES};
+pub(crate) use dates::today;
 pub use dv_vault::BACKUP_EXTENSION;
 pub use library::TRASH_DAYS;
+pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
 pub use views::{
-    AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView, ConsultResult,
-    CreatedVault, ExportCheck, ImportPreview, MaterialRouting, NameMatch, NameSuggestion,
-    ParagraphView, Prepared, ReportSettings, ReviewPart, SectionResult, SectionView, SortResult,
-    StagedBackup, SuspectDecision, UiError,
+    ActivityEntry, ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail,
+    ChatView, ConsultResult, CreatedVault, ExportCheck, ImportPreview, MaterialRouting, NameMatch,
+    NameSuggestion, ParagraphView, Prepared, ReportSettings, RetentionItem, ReviewPart,
+    SectionResult, SectionView, SortResult, StagedBackup, SuspectDecision, UiError,
 };
 
 const API_KEY: &str = "anthropic_api_key";
@@ -158,30 +164,20 @@ fn egress_he(e: &EgressError) -> String {
 /// Today's date `(y, m, d)` in UTC, for relative dates.
 /// A consent is a record the psychologist may have to show: a real, past date and who signed.
 fn check_meta(meta: &CaseMeta) -> Result<(), CoreError> {
+    if meta
+        .retention_until
+        .as_deref()
+        .is_some_and(|d| dates::parse_iso(d).is_none())
+    {
+        return Err(CoreError::Refused(
+            "תאריך סוף תקופת השמירה לא תקין.".to_owned(),
+        ));
+    }
     let Some(consent) = &meta.consent else {
         return Ok(());
     };
     let refused = |why: &str| Err(CoreError::Refused(why.to_owned()));
-    let parts: Vec<&str> = consent.given_on.split('-').collect();
-    let date = match parts.as_slice() {
-        [y, m, d] if y.len() == 4 && m.len() == 2 && d.len() == 2 => {
-            match (y.parse::<i32>(), m.parse::<u32>(), d.parse::<u32>()) {
-                (Ok(y), Ok(m), Ok(d)) => Some((y, m, d)),
-                _ => None,
-            }
-        }
-        _ => None,
-    };
-    let Some((y, m, d)) = date.filter(|&(y, m, d)| {
-        let days = match m {
-            1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-            4 | 6 | 9 | 11 => 30,
-            2 if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) => 29,
-            2 => 28,
-            _ => 0,
-        };
-        (2000..=2200).contains(&y) && (1..=days).contains(&d)
-    }) else {
+    let Some((y, m, d)) = dates::parse_iso(&consent.given_on) else {
         return refused("תאריך ההסכמה לא תקין.");
     };
     // Local time may already be tomorrow in UTC terms (Israel is ahead of UTC).
@@ -194,26 +190,6 @@ fn check_meta(meta: &CaseMeta) -> Result<(), CoreError> {
         return refused("צריך לרשום מי חתם על ההסכמה (תפקיד, עד 60 תווים).");
     }
     Ok(())
-}
-
-fn today() -> (i32, u32, u32) {
-    let days = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() / 86_400);
-    let z = i64::try_from(days).unwrap_or(0) + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + i64::from(m <= 2);
-    (
-        i32::try_from(y).unwrap_or(2026),
-        u32::try_from(m).unwrap_or(1),
-        u32::try_from(d).unwrap_or(1),
-    )
 }
 
 enum PendingKind {
@@ -1044,6 +1020,13 @@ impl Core {
         let inputs = v.inputs(case_id)?;
         let practitioner = v.practitioner()?.names.first().cloned();
         let routing = Core::material_routing(v, &structure, case_id, &inputs)?;
+        let retention_default = v
+            .list_cases()?
+            .into_iter()
+            .chain(v.list_trash()?)
+            .find(|c| c.id == case_id)
+            .map(|c| retention::default_until(c.created_at, c.updated_at, c.meta.age.as_ref()))
+            .unwrap_or_default();
         let sortable: Vec<&str> = sorting::sortable(&structure)
             .iter()
             .map(|s| s.key.as_str())
@@ -1095,6 +1078,7 @@ impl Core {
             inputs,
             routing,
             sections,
+            retention_default,
         })
     }
 

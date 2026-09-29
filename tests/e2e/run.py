@@ -348,12 +348,28 @@ try:
     expect_text("הגיבוי הזה נפתח רק בקודמות")
     shot("password-changed")
 
+    # 7e. The activity log: Hebrew lines, the case named only here, the chain checked.
+    WebDriverWait(d, 15).until(lambda drv: not drv.find_elements(By.CLASS_NAME, "toast"))
+    button("פתיחת היומן").click()
+    expect_text("השרשרת שלמה")
+    body = d.find_element(By.TAG_NAME, "body").text
+    log.append("     activity: password change = " + str("הסיסמה הוחלפה" in body)
+               + ", section sent = " + str("נשלח ל-Claude" in body)
+               + ", backup = " + str("גיבוי מוצפן נשמר" in body)
+               + ", case named locally = " + str(bool(d.find_elements(By.XPATH, "//span[contains(@class,'activity-case')][contains(., 'נועם')]"))))
+    shot("activity-log")
+    find("//section[@role='dialog']//button[normalize-space()='עברתי על היומן']").click()
+    expect_text("נבדק לאחרונה")
+    find("//section[@role='dialog']//button[normalize-space()='סגירה']").click()
+
     # 8. Lock, and back in with the new password.
     WebDriverWait(d, 15).until(lambda drv: not drv.find_elements(By.CLASS_NAME, "toast"))
     button("נעילה").click()
     find("//input[@id='pw']")
     shot("locked")
-    d.find_element(By.ID, "pw").send_keys("שמש צהובה על הים הכחול")
+    # The page reloads once locked (names must not stay in its memory): wait for the new one.
+    time.sleep(1.5)
+    find("//input[@id='pw']").send_keys("שמש צהובה על הים הכחול")
     button("פתיחה").click()
     expect_text("הסיסמה או ערכת השחזור הוחלפו אחרי הגיבוי האחרון")
     log.append("     password: new password opens the vault, backup reminder names the change = True")

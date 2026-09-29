@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-retention-due"
+description = "Enables the retention_due command without any pre-configured scope."
+commands.allow = ["retention_due"]
+
+[[permission]]
+identifier = "deny-retention-due"
+description = "Denies the retention_due command without any pre-configured scope."
+commands.deny = ["retention_due"]

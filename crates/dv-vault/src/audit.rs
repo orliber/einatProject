@@ -36,6 +36,8 @@ pub enum AuditEvent {
     Export,
     SettingsChanged,
     IntegrityWarning,
+    /// Einat went over the log (periodic review of access records).
+    AuditReviewed,
 }
 
 impl AuditEvent {
@@ -64,6 +66,7 @@ impl AuditEvent {
             AuditEvent::Export => "export",
             AuditEvent::SettingsChanged => "settings_changed",
             AuditEvent::IntegrityWarning => "integrity_warning",
+            AuditEvent::AuditReviewed => "audit_reviewed",
         }
     }
 }
@@ -210,9 +213,19 @@ pub fn verify(
 }
 
 pub fn recent(conn: &Connection, limit: u32) -> Result<Vec<AuditEntry>, VaultError> {
-    let mut stmt = conn
-        .prepare("SELECT seq, ts, event, case_ref, meta FROM audit ORDER BY seq DESC LIMIT ?1")?;
-    let rows = stmt.query_map([limit], |r| {
+    page(conn, None, limit)
+}
+
+/// Newest first, starting below `before` (a `seq`) when given.
+pub fn page(
+    conn: &Connection,
+    before: Option<i64>,
+    limit: u32,
+) -> Result<Vec<AuditEntry>, VaultError> {
+    let mut stmt = conn.prepare(
+        "SELECT seq, ts, event, case_ref, meta FROM audit WHERE seq < ?1 ORDER BY seq DESC LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![before.unwrap_or(i64::MAX), limit], |r| {
         Ok(AuditEntry {
             seq: r.get(0)?,
             ts: r.get(1)?,

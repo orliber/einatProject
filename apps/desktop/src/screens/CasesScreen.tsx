@@ -2,6 +2,7 @@ import { useMemo, useState, type DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
 import { BackupReminder } from "../components/Backup";
+import { RetentionNotice } from "../components/RetentionNotice";
 import { TopBar } from "../components/TopBar";
 import { NewCaseDialog } from "../components/NewCaseDialog";
 import { ageWords } from "../components/AgeField";
@@ -167,6 +168,7 @@ export function CasesScreen() {
           <p className="error" role="alert">בדיקת השלמות של הכספת מצאה חריגה: {status.integrity_warning}</p>
         )}
         <BackupReminder />
+        <RetentionNotice />
         <ErrorLine error={error ?? (cases.error ? fail(cases.error as unknown as UiError) : null)} />
 
         <div className="library-bar">

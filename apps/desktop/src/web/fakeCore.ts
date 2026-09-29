@@ -1,6 +1,7 @@
 // Browser preview only: an in-memory stand-in for the Rust core, with fabricated cases. Nothing is
 // stored and nothing leaves the page; "Claude" answers come from local demo text, like the app's
 // demo mode. The installed app is the only place where real work happens (D-021).
+import type { ActivityEntry } from "../ipc/generated/ActivityEntry";
 import type { AppStatus } from "../ipc/generated/AppStatus";
 import type { BackupStatus } from "../ipc/generated/BackupStatus";
 import type { StagedBackup } from "../ipc/generated/StagedBackup";
@@ -101,6 +102,8 @@ export class FakeCore {
   private lastBackupAt: number | null = Math.floor(Date.now() / 1000) - 9 * 86_400;
   private lastCheckAt: number | null = null;
   private secretChanged = false;
+  private reviewedAt: number | null = null;
+  private activityLog: ActivityEntry[] = [];
   private practitioner = ["ד\"ר רותם בדויה"];
   private lockMinutes = 15;
   private model = "claude-opus-5";
@@ -117,6 +120,31 @@ export class FakeCore {
 
   constructor() {
     this.seed();
+    this.seedActivity();
+  }
+
+  /** A believable log for the preview; real entries are added as things happen. */
+  private seedActivity() {
+    const t = now();
+    const noam = "נועם · תיק-1024";
+    const rows: [number, string, string, string, boolean, string | null][] = [
+      [t - 12 * 86_400, "case_created", "case", "תיק נפתח", false, noam],
+      [t - 12 * 86_400 + 60, "identities_changed", "case", "רשימת האנשים בתיק עודכנה", false, noam],
+      [t - 9 * 86_400, "backup_written", "security", "גיבוי מוצפן נשמר", false, null],
+      [t - 3 * 86_400, "unlock_failed", "access", "ניסיון כניסה שנכשל לפני הכניסה הזו", true, null],
+      [t - 3 * 86_400 + 5, "unlock", "access", "כניסה", false, null],
+      [t - 3 * 86_400 + 600, "send", "send", "החומרים נשלחו ל-Claude למיון לסעיפים (הדגמה: לא יצא מהמחשב)", false, noam],
+      [t - 3 * 86_400 + 900, "send", "send", "הסעיף \"רקע התפתחותי\" נשלח ל-Claude (הדגמה: לא יצא מהמחשב)", false, noam],
+      [t - 2 * 86_400, "lock", "access", "נעילה (המחשב נכנס לשינה)", false, null],
+      [t - 86_400, "export", "case", "דוח Word הופק, מוגן בסיסמה", false, noam],
+      [t - 86_400 + 60, "lock", "access", "נעילה", false, null],
+    ];
+    this.activityLog = rows.map(([ts, event, kind, text, warn, c], i) => ({ seq: i + 1, ts, event, kind, text, warn, case: c }));
+  }
+
+  private logActivity(event: string, kind: string, text: string, warn = false) {
+    const seq = (this.activityLog.at(-1)?.seq ?? 0) + 1;
+    this.activityLog.push({ seq, ts: now(), event, kind, text, warn, case: null });
   }
 
   // ------------------------------------------------------------------ fabricated cases
@@ -295,6 +323,7 @@ export class FakeCore {
     const routing = this.routing(c);
     return {
       id: c.id, meta: c.meta, identities, inputs: c.inputs, routing,
+      retention_default: `${new Date(c.created * 1000).getFullYear() + Math.max(7, 25 - (c.meta.age?.years ?? 25))}-${new Date(c.created * 1000).toISOString().slice(5, 10)}`,
       sections: SECTIONS.map((s) => {
         const drafts = c.drafts.filter((d) => d.section === s.key && d.status !== "rejected" && d.status !== "superseded");
         return {
@@ -465,6 +494,7 @@ export class FakeCore {
       case "unlock":
       case "unlock_with_recovery":
         this.unlocked = true;
+        this.logActivity("unlock", "access", cmd === "unlock" ? "כניסה" : "כניסה עם ערכת השחזור", cmd !== "unlock");
         return this.status();
       case "create_vault":
         this.vaultExists = true;
@@ -707,6 +737,7 @@ export class FakeCore {
       case "write_backup": {
         this.lastBackupAt = now();
         this.secretChanged = false;
+        this.logActivity("backup_written", "security", "גיבוי מוצפן נשמר");
         const day = new Date().toISOString().slice(0, 10);
         return { path: `E:\\גיבויים\\גיבוי כספת האבחון ${day}.vaultbak (בהדמיה לא נשמר קובץ)`, bytes: 1_843_200, created_at: this.lastBackupAt };
       }
@@ -718,6 +749,7 @@ export class FakeCore {
       case "check_backup":
         if (!String(a.password ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
         this.lastCheckAt = now();
+        this.logActivity("backup_checked", "security", `תרגול שחזור: הגיבוי נפתח ותקין (${this.cases.length === 1 ? "תיק אחד" : `${this.cases.length} תיקים`})`);
         return { created_at: this.lastBackupAt ?? now(), cases: this.cases.length, integrity_ok: true };
       case "restore_backup":
         if (!String(a.password ?? a.recoveryKey ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
@@ -730,11 +762,29 @@ export class FakeCore {
         if (!String(a.current ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
         if (String(a.newPassword ?? "").length < 12) fail("weak_password", "הסיסמה קצרה או נפוצה מדי. מומלץ משפט של כמה מילים (12 תווים לפחות).");
         this.secretChanged = true;
+        this.logActivity("password_changed", "security", "הסיסמה הוחלפה");
         return null;
       case "new_recovery_kit":
         if (!String(a.current ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
         this.secretChanged = true;
+        this.logActivity("recovery_key_rotated", "security", "נוצרה ערכת שחזור חדשה");
         return { recovery_key: "DEMO-NEWK-ITXX-ONLY-PREV-IEW7" };
+      case "activity": {
+        const before = typeof a.before === "number" ? a.before : Infinity;
+        const page = [...this.activityLog].reverse().filter((e) => e.seq < before).slice(0, 50);
+        return { entries: page, more: false, last_seq: page.at(-1)?.seq ?? null, intact: true, reviewed_at: this.reviewedAt };
+      }
+      case "mark_activity_reviewed":
+        this.logActivity("audit_reviewed", "security", "היומן נבדק");
+        this.reviewedAt = now();
+        return null;
+      case "retention_due":
+        return [];
+      case "keep_case_longer": {
+        const c = this.find(a.caseId);
+        c.meta = { ...c.meta, retention_until: `${new Date().getFullYear() + Number(a.years ?? 1)}-${new Date().toISOString().slice(5, 10)}` };
+        return null;
+      }
       default:
         return fail("preview", `הפעולה ${cmd} לא זמינה בהדמיה בדפדפן.`);
     }

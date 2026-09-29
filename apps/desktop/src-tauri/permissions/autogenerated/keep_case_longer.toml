@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-keep-case-longer"
+description = "Enables the keep_case_longer command without any pre-configured scope."
+commands.allow = ["keep_case_longer"]
+
+[[permission]]
+identifier = "deny-keep-case-longer"
+description = "Denies the keep_case_longer command without any pre-configured scope."
+commands.deny = ["keep_case_longer"]

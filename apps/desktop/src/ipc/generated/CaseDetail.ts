@@ -9,4 +9,8 @@ export type CaseDetail = { id: string, meta: CaseMeta, identities: Array<Identit
 /**
  * Where each material goes in the report, in the order of `inputs`.
  */
-routing: Array<MaterialRouting>, sections: Array<SectionView>, };
+routing: Array<MaterialRouting>, sections: Array<SectionView>, 
+/**
+ * The proposed retention date (P-07) when `meta.retention_until` is not set.
+ */
+retention_default: string, };

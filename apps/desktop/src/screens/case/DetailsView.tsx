@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { AgeField, parseAge } from "../../components/AgeField";
-import { DateField, todayIso } from "../../components/DateField";
+import { DateField, isoToHe, todayIso } from "../../components/DateField";
 import { useApp } from "../../App";
 import { ipc } from "../../ipc/client";
 import type { GrammaticalGender } from "../../ipc/generated/GrammaticalGender";
@@ -20,6 +20,8 @@ export function DetailsView({ api }: { api: CaseApi }) {
   const [consent, setConsent] = useState(m.consent !== null);
   const [consentDate, setConsentDate] = useState(m.consent?.given_on ?? todayIso());
   const [consentBy, setConsentBy] = useState(m.consent?.given_by ?? "שני ההורים");
+  const [ownRetention, setOwnRetention] = useState(m.retention_until !== null);
+  const [retention, setRetention] = useState(m.retention_until ?? detail.retention_default);
   const [rows, setRows] = useState<PersonRow[]>(() => {
     const r = detail.identities.map((i) => ({ id: i.id, role: i.role, value: i.value, aliases: i.aliases.join(", ") }));
     return r.some((x) => x.role === "child") ? r : [{ id: null, role: "child", value: "", aliases: "" }, ...r];
@@ -31,6 +33,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
   async function save() {
     setError(null);
     if (consent && !consentDate) return setError("צריך את תאריך החתימה על ההסכמה (יום.חודש.שנה).");
+    if (ownRetention && !retention) return setError("צריך תאריך לתזכורת השמירה (יום.חודש.שנה).");
     try {
       await ipc.updateCase(caseId, {
         ...m,
@@ -38,6 +41,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
         child_gender: gender,
         age: parseAge(years, months),
         consent: consent ? { given_on: consentDate, form_version: m.consent?.form_version ?? "v1", given_by: consentBy.trim() || "ההורים" } : null,
+        retention_until: ownRetention ? retention : null,
       });
       await ipc.setIdentities(caseId, toIdentityInputs(rows));
       await reload();
@@ -102,6 +106,20 @@ export function DetailsView({ api }: { api: CaseApi }) {
                   <label htmlFor="d-cb">מי חתם (תפקיד, לא שם)</label>
                   <input id="d-cb" className="input" value={consentBy} onChange={(e) => setConsentBy(e.target.value)} />
                 </div>
+              </div>
+            )}
+          </div>
+          <div className="card details-card stack">
+            <b>תקופת השמירה</b>
+            <p className="small muted">
+              {ownRetention ? "תזכורת בתאריך שבחרת." : `תזכורת ב-${isoToHe(detail.retention_default)}: 7 שנים אחרי השינוי האחרון, או כשהילד/ה בן/בת 25, המאוחר מביניהם (הצעה, ממתינה לעו"ד).`}
+              {" "}התוכנה לא מוחקת לבד: בתאריך הזה התיק יוצג ברשימת התיקים, ואת ההחלטה מקבלים ידנית.
+            </p>
+            <label className="row"><input type="checkbox" checked={ownRetention} onChange={(e) => setOwnRetention(e.target.checked)} /> תאריך אחר</label>
+            {ownRetention && (
+              <div className="field">
+                <label htmlFor="d-ret">תזכורת ב-</label>
+                <DateField id="d-ret" value={retention} onChange={setRetention} />
               </div>
             )}
           </div>

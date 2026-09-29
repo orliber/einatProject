@@ -443,6 +443,27 @@ impl Vault {
         audit::recent(&self.audit, limit)
     }
 
+    /// A page of the log, newest first, below `before` (a `seq`).
+    pub fn audit_page(
+        &self,
+        before: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<AuditEntry>, VaultError> {
+        audit::page(&self.audit, before, limit)
+    }
+
+    /// Walk the whole chain again now (not only at unlock).
+    pub fn audit_intact(&self) -> Result<bool, VaultError> {
+        Ok(matches!(
+            audit::verify(
+                &self.audit,
+                &self.keys.audit_mac,
+                self.header.audit_anchor.as_ref()
+            )?,
+            ChainStatus::Intact { .. } | ChainStatus::AnchorLagging { .. }
+        ))
+    }
+
     // ---------------------------------------------------------------- settings
 
     pub fn setting(&self, key: &str) -> Result<Option<String>, VaultError> {

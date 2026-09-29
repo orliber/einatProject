@@ -1,6 +1,8 @@
 // The only module that talks to the Rust core. Types come from Rust via ts-rs.
 import { invoke } from "@tauri-apps/api/core";
+import type { ActivityPage } from "./generated/ActivityPage";
 import type { AppStatus } from "./generated/AppStatus";
+import type { RetentionItem } from "./generated/RetentionItem";
 import type { BackupCheckView } from "./generated/BackupCheckView";
 import type { BackupDone } from "./generated/BackupDone";
 import type { BackupStatus } from "./generated/BackupStatus";
@@ -142,6 +144,12 @@ export const ipc = {
   /** The file password to the clipboard: out of history and cloud sync, cleared after N seconds (returned). */
   copySecret: (text: string) => call<number>("copy_secret", { text }),
 
+  // Activity log (metadata only; cases named on this computer) and retention reminders.
+  activity: (before: number | null) => call<ActivityPage>("activity", { before }),
+  markActivityReviewed: () => run("mark_activity_reviewed"),
+  retentionDue: () => call<RetentionItem[]>("retention_due"),
+  keepCaseLonger: (caseId: string, years: number) => run("keep_case_longer", { caseId, years }),
+
   /** `current` is the password, or the recovery kit when the password was forgotten. */
   changePassword: (current: string, withRecovery: boolean, newPassword: string) =>
     run("change_password", { current, withRecovery, newPassword }),
@@ -159,7 +167,9 @@ export const ipc = {
 };
 
 export type {
+  ActivityPage,
   AppStatus,
+  RetentionItem,
   BackupCheckView,
   BackupDone,
   BackupStatus,

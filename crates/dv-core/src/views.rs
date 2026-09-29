@@ -91,6 +91,8 @@ pub struct CaseDetail {
     /// Where each material goes in the report, in the order of `inputs`.
     pub routing: Vec<MaterialRouting>,
     pub sections: Vec<SectionView>,
+    /// The proposed retention date (P-07) when `meta.retention_until` is not set.
+    pub retention_default: String,
 }
 
 /// Where one material goes in the report (D-022).
@@ -307,4 +309,49 @@ pub struct BackupCheckView {
     pub created_at: i64,
     pub cases: u32,
     pub integrity_ok: bool,
+}
+
+/// One line of the activity log, in Hebrew.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ActivityEntry {
+    #[ts(type = "number")]
+    pub seq: i64,
+    #[ts(type = "number")]
+    pub ts: i64,
+    pub event: String,
+    /// `access` | `send` | `case` | `security` (for the filter).
+    pub kind: String,
+    pub text: String,
+    /// Worth a second look (a failed entry, a recovery-kit entry, an erase, an unprotected file).
+    pub warn: bool,
+    /// The case, named on this computer only (the log holds a keyed reference).
+    pub case: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ActivityPage {
+    pub entries: Vec<ActivityEntry>,
+    pub more: bool,
+    /// Pass back as `before` for the next page.
+    #[ts(type = "number | null")]
+    pub last_seq: Option<i64>,
+    /// The chain of records was walked again now and is whole.
+    pub intact: bool,
+    #[ts(type = "number | null")]
+    pub reviewed_at: Option<i64>,
+}
+
+/// A case whose retention date has passed: pointed out, never erased on its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RetentionItem {
+    pub case_id: String,
+    /// Shown on this computer only.
+    pub label: String,
+    /// ISO date.
+    pub until: String,
+    /// The proposed default, not a date Einat chose.
+    pub by_default: bool,
 }

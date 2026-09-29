@@ -12,9 +12,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use dv_core::{
-    AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView, ConsultResult,
-    Core, CoreError, CreatedVault, ExportCheck, ImportPreview, NameMatch, Prepared, ReportSettings,
-    SectionResult, SortResult, StagedBackup, SuspectDecision, UiError,
+    ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView,
+    ConsultResult, Core, CoreError, CreatedVault, ExportCheck, ImportPreview, NameMatch, Prepared,
+    ReportSettings, RetentionItem, SectionResult, SortResult, StagedBackup, SuspectDecision,
+    UiError,
 };
 use dv_domain::{CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind};
 use tauri::Manager;
@@ -609,6 +610,32 @@ async fn export_report(
     .await
 }
 
+// ------------------------------------------------------------------ activity and retention
+
+#[tauri::command]
+async fn activity(state: tauri::State<'_, AppState>, before: Option<i64>) -> Res<ActivityPage> {
+    with_core(&state, move |c| c.activity(before)).await
+}
+
+#[tauri::command]
+async fn mark_activity_reviewed(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| c.mark_activity_reviewed()).await
+}
+
+#[tauri::command]
+async fn retention_due(state: tauri::State<'_, AppState>) -> Res<Vec<RetentionItem>> {
+    with_core(&state, |c| c.retention_due()).await
+}
+
+#[tauri::command]
+async fn keep_case_longer(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    years: u8,
+) -> Res<()> {
+    with_core(&state, move |c| c.keep_case_longer(&case_id, years)).await
+}
+
 // ------------------------------------------------------------------ password and kit
 
 /// `current` is the password, or the recovery kit when `with_recovery`.
@@ -818,6 +845,10 @@ fn main() {
             send_consult,
             check_export,
             export_report,
+            activity,
+            mark_activity_reviewed,
+            retention_due,
+            keep_case_longer,
             change_password,
             new_recovery_kit,
             backup_status,

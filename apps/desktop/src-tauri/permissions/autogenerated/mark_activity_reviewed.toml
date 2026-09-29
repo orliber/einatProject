@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-mark-activity-reviewed"
+description = "Enables the mark_activity_reviewed command without any pre-configured scope."
+commands.allow = ["mark_activity_reviewed"]
+
+[[permission]]
+identifier = "deny-mark-activity-reviewed"
+description = "Denies the mark_activity_reviewed command without any pre-configured scope."
+commands.deny = ["mark_activity_reviewed"]

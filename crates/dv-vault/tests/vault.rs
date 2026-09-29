@@ -656,3 +656,20 @@ fn scratch_folders_left_by_a_crash_are_removed_at_unlock() {
     let _vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
     assert!(!stale.exists());
 }
+
+#[test]
+fn the_log_reads_in_pages_and_its_chain_is_checked_on_demand() {
+    let (_dir, mut vault, _) = new_vault();
+    noam(&mut vault);
+    noam(&mut vault);
+    let all = vault.audit_entries(1000).unwrap();
+    let first = vault.audit_page(None, 3).unwrap();
+    let rest = vault.audit_page(Some(first[2].seq), 1000).unwrap();
+    assert_eq!(first.len() + rest.len(), all.len());
+    assert!(first
+        .iter()
+        .chain(&rest)
+        .map(|e| e.seq)
+        .eq(all.iter().map(|e| e.seq)));
+    assert!(vault.audit_intact().unwrap());
+}
