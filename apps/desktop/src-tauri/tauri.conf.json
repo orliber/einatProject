@@ -66,10 +66,19 @@
     ],
     "windows": {
       "webviewInstallMode": {
-        "type": "embedBootstrapper"
+        "type": "downloadBootstrapper",
+        "silent": true
       },
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "template": "windows/installer.nsi",
+        "languages": [
+          "Hebrew"
+        ],
+        "displayLanguageSelector": false,
+        "customLanguageFiles": {
+          "Hebrew": "windows/Hebrew.nsh"
+        }
       }
     },
     "macOS": {
