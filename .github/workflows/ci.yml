@@ -24,7 +24,7 @@ jobs:
     name: Rust – fmt, clippy, tests, invariants, scan
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: Swatinem/rust-cache@v2
@@ -41,7 +41,7 @@ jobs:
     name: Supply chain – cargo-deny (advisories, licenses, bans, sources)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: Swatinem/rust-cache@v2
@@ -52,7 +52,7 @@ jobs:
     name: FIPS 140-3 module – vault tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions/setup-go@v5
@@ -69,7 +69,7 @@ jobs:
       run:
         working-directory: apps/desktop
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@v4
@@ -113,7 +113,7 @@ jobs:
               target/release/bundle/deb/*.deb
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Linux WebView libraries
