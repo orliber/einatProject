@@ -12,4 +12,4 @@ workspace = true
 
 [dependencies]
 serde.workspace = true
-ts-rs = { version = "11", features = ["no-serde-warnings"] }
+ts-rs = { version = "12", features = ["no-serde-warnings"] }
