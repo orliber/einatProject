@@ -267,8 +267,10 @@ pub struct BackupStatus {
     pub last_at: Option<i64>,
     #[ts(type = "number | null")]
     pub days_since: Option<i64>,
-    /// No backup yet, or the last one is older than a week.
+    /// No backup yet, the last one is older than a week, or the password changed since.
     pub due: bool,
+    /// The password or the kit changed after the last backup (it opens only with the old one).
+    pub secret_changed: bool,
     /// The last successful restore drill.
     #[ts(type = "number | null")]
     pub last_check_at: Option<i64>,

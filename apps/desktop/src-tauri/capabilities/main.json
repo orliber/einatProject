@@ -62,6 +62,8 @@
     "allow-send-consult",
     "allow-check-export",
     "allow-export-report",
+    "allow-change-password",
+    "allow-new-recovery-kit",
     "allow-backup-status",
     "allow-write-backup",
     "allow-choose-backup",

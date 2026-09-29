@@ -5,9 +5,13 @@
  */
 export type BackupStatus = { last_at: number | null, days_since: number | null, 
 /**
- * No backup yet, or the last one is older than a week.
+ * No backup yet, the last one is older than a week, or the password changed since.
  */
 due: boolean, 
+/**
+ * The password or the kit changed after the last backup (it opens only with the old one).
+ */
+secret_changed: boolean, 
 /**
  * The last successful restore drill.
  */

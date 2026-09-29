@@ -59,6 +59,8 @@ fn main() {
             "send_consult",
             "check_export",
             "export_report",
+            "change_password",
+            "new_recovery_kit",
             "backup_status",
             "write_backup",
             "choose_backup",

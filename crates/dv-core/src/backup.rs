@@ -20,6 +20,8 @@ pub const MAX_BACKUP_BYTES: u64 = 1 << 30;
 const LAST_BACKUP_KEY: &str = "backup_last_at";
 const LAST_DIR_KEY: &str = "backup_last_dir";
 const LAST_CHECK_KEY: &str = "backup_last_check_at";
+/// When the password or the kit last changed: backups older than this open only with the old one.
+const SECRET_CHANGED_KEY: &str = "secret_changed_at";
 
 fn unix_now() -> i64 {
     SystemTime::now()
@@ -56,13 +58,22 @@ impl Core {
         let last_at = read(LAST_BACKUP_KEY);
         let last_check_at = read(LAST_CHECK_KEY);
         let days_since = last_at.map(|t| (unix_now() - t).max(0) / 86_400);
+        // Cleared by the next backup (see `write_backup`).
+        let secret_changed = read(SECRET_CHANGED_KEY).is_some();
         Ok(BackupStatus {
             last_at,
             days_since,
-            due: days_since.is_none_or(|d| d >= BACKUP_DAYS),
+            due: secret_changed || days_since.is_none_or(|d| d >= BACKUP_DAYS),
+            secret_changed,
             last_check_at,
             has_cases: !v.list_cases()?.is_empty() || !v.list_trash()?.is_empty(),
         })
+    }
+
+    pub(crate) fn mark_secret_changed(&mut self) -> Result<(), CoreError> {
+        self.vault_mut()?
+            .set_setting(SECRET_CHANGED_KEY, &unix_now().to_string())?;
+        Ok(())
     }
 
     /// Where the "Save as" / "Open" window starts: the folder of the last backup, if it is
@@ -112,6 +123,7 @@ impl Core {
         let info = v.write_backup(&dest)?;
         v.set_setting(LAST_BACKUP_KEY, &info.created_at.to_string())?;
         v.set_setting(LAST_DIR_KEY, &folder_real.to_string_lossy())?;
+        v.set_setting(SECRET_CHANGED_KEY, "")?;
         Ok(BackupDone {
             path: dest.display().to_string(),
             bytes: info.bytes,

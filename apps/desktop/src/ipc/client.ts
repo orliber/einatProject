@@ -142,6 +142,12 @@ export const ipc = {
   /** The file password to the clipboard: out of history and cloud sync, cleared after N seconds (returned). */
   copySecret: (text: string) => call<number>("copy_secret", { text }),
 
+  /** `current` is the password, or the recovery kit when the password was forgotten. */
+  changePassword: (current: string, withRecovery: boolean, newPassword: string) =>
+    run("change_password", { current, withRecovery, newPassword }),
+  newRecoveryKit: (current: string, withRecovery: boolean) =>
+    call<CreatedVault>("new_recovery_kit", { current, withRecovery }),
+
   // Encrypted backup (D-024). The system's own window picks the file; `null` = cancelled.
   backupStatus: () => call<BackupStatus>("backup_status"),
   writeBackup: () => call<BackupDone | null>("write_backup"),

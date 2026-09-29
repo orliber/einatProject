@@ -338,10 +338,25 @@ try:
                + ", scratch left next to the vault = " + str(any(n.startswith(".") for n in os.listdir(vault_dir))))
     find("//section[@role='dialog']//button[normalize-space()='סגירה']").click()
 
-    # 8. Lock.
+    # 7d. A new password: the backup made with the old one is flagged.
+    button("החלפת סיסמה").click()
+    find("//input[@id='current-secret']").send_keys("כלב ירוק רץ מהר בגינה")
+    d.find_element(By.ID, "new-pw").send_keys("שמש צהובה על הים הכחול")
+    d.find_element(By.ID, "new-pw2").send_keys("שמש צהובה על הים הכחול")
+    find("//section[@role='dialog']//button[normalize-space()='החלפה']").click()
+    expect_text("הסיסמה הוחלפה")
+    expect_text("הגיבוי הזה נפתח רק בקודמות")
+    shot("password-changed")
+
+    # 8. Lock, and back in with the new password.
+    WebDriverWait(d, 15).until(lambda drv: not drv.find_elements(By.CLASS_NAME, "toast"))
     button("נעילה").click()
     find("//input[@id='pw']")
     shot("locked")
+    d.find_element(By.ID, "pw").send_keys("שמש צהובה על הים הכחול")
+    button("פתיחה").click()
+    expect_text("הסיסמה או ערכת השחזור הוחלפו אחרי הגיבוי האחרון")
+    log.append("     password: new password opens the vault, backup reminder names the change = True")
 except Exception:
     ok = False
     log.append("FAIL " + " / ".join(traceback.format_exc().splitlines()[-4:]))

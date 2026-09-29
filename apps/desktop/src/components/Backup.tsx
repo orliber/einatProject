@@ -75,8 +75,9 @@ export function BackupSettings() {
       {s && (
         <ul className="sec-list backup-facts">
           <li>
-            <span className={s.due ? "chip chip-warn" : "chip chip-ok"}>{s.last_at === null ? "אין" : s.due ? "ישן" : "עדכני"}</span>
+            <span className={s.due ? "chip chip-warn" : "chip chip-ok"}>{s.last_at === null ? "אין" : s.due ? "לחדש" : "עדכני"}</span>
             {s.last_at === null ? "עוד לא נעשה גיבוי." : `הגיבוי האחרון: ${daysAgo(s.days_since ?? 0)} (${heDateTime(s.last_at)}).`}
+            {s.secret_changed && s.last_at !== null && <span className="hint">הסיסמה או ערכת השחזור הוחלפו מאז, והגיבוי הזה נפתח רק בקודמות.</span>}
           </li>
           <li>
             <span className={s.last_check_at === null ? "chip chip-sand" : "chip chip-ok"}>{s.last_check_at === null ? "לא נבדק" : "נבדק"}</span>
@@ -168,7 +169,9 @@ export function BackupReminder() {
   return (
     <div className="backup-reminder" role="status">
       <span className="grow">
-        {s.last_at === null ? "עוד לא נעשה גיבוי לכספת." : `הגיבוי האחרון היה ${daysAgo(s.days_since ?? 0)}.`}
+        {s.last_at === null ? "עוד לא נעשה גיבוי לכספת."
+          : s.secret_changed ? "הסיסמה או ערכת השחזור הוחלפו אחרי הגיבוי האחרון."
+          : `הגיבוי האחרון היה ${daysAgo(s.days_since ?? 0)}.`}
         {" "}גיבוי לדיסק נייד שומר על העבודה אם המחשב יתקלקל או ייגנב.
       </span>
       {error && <span className="error small">{error}</span>}

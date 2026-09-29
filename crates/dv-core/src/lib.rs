@@ -608,6 +608,63 @@ impl Core {
         }
     }
 
+    // ------------------------------------------------------------ password and kit
+
+    /// `current` is the password, or the recovery kit when the password was forgotten.
+    fn proof<'a>(current: &'a str, with_recovery: bool) -> dv_vault::Secret<'a> {
+        if with_recovery {
+            dv_vault::Secret::Recovery(current)
+        } else {
+            dv_vault::Secret::Password(current)
+        }
+    }
+
+    /// A new password. Old backups keep opening with the old one, so a new backup is asked for.
+    pub fn change_password(
+        &mut self,
+        current: &str,
+        with_recovery: bool,
+        new_password: &str,
+    ) -> Result<(), CoreError> {
+        self.check_backoff()?;
+        let params = self.argon.unwrap_or_else(Argon2Params::calibrate);
+        let result = self.vault_mut()?.rekey_password(
+            Self::proof(current, with_recovery),
+            new_password,
+            params,
+        );
+        if let Err(e) = result {
+            self.count_failure(&e);
+            return Err(e.into());
+        }
+        self.failed_unlocks = 0;
+        self.mark_secret_changed()
+    }
+
+    /// A new printed kit; the old one stops opening the vault (not old backups).
+    pub fn new_recovery_kit(
+        &mut self,
+        current: &str,
+        with_recovery: bool,
+    ) -> Result<CreatedVault, CoreError> {
+        self.check_backoff()?;
+        let result = self
+            .vault_mut()?
+            .rotate_recovery_key(Self::proof(current, with_recovery));
+        let key = match result {
+            Ok(key) => key,
+            Err(e) => {
+                self.count_failure(&e);
+                return Err(e.into());
+            }
+        };
+        self.failed_unlocks = 0;
+        self.mark_secret_changed()?;
+        Ok(CreatedVault {
+            recovery_key: key.to_string(),
+        })
+    }
+
     // ------------------------------------------------------------ settings
 
     pub fn set_api_key(&mut self, key: &str) -> Result<(), CoreError> {

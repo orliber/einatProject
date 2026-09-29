@@ -255,16 +255,19 @@ fn password_change_and_recovery_rotation() {
     let (dir, mut vault, old_recovery) = new_vault();
     let new_password = "חתול כחול ישן על הספה";
     vault
-        .rekey_password(PASSWORD, new_password, Argon2Params::TEST)
+        .rekey_password(Secret::Password(PASSWORD), new_password, Argon2Params::TEST)
         .unwrap();
     assert!(vault
         .rekey_password(
-            "סיסמה שגויה לגמרי",
+            Secret::Password("סיסמה שגויה לגמרי"),
             "עוד סיסמה ארוכה וטובה",
             Argon2Params::TEST
         )
         .is_err());
-    let new_recovery = vault.rotate_recovery_key(new_password).unwrap().to_string();
+    let new_recovery = vault
+        .rotate_recovery_key(Secret::Password(new_password))
+        .unwrap()
+        .to_string();
     assert!(vault.check_recovery_key(&new_recovery));
     assert!(!vault.check_recovery_key(&old_recovery));
     drop(vault);
@@ -272,6 +275,32 @@ fn password_change_and_recovery_rotation() {
     assert!(Vault::unlock_with_password(dir.path(), new_password).is_ok());
     assert!(Vault::unlock_with_recovery(dir.path(), &old_recovery).is_err());
     assert!(Vault::unlock_with_recovery(dir.path(), &new_recovery).is_ok());
+}
+
+#[test]
+fn a_forgotten_password_is_replaced_with_the_recovery_kit() {
+    let (dir, vault, recovery) = new_vault();
+    drop(vault);
+    let mut vault = Vault::unlock_with_recovery(dir.path(), &recovery).unwrap();
+    let new_password = "חתול כחול ישן על הספה";
+    vault
+        .rekey_password(
+            Secret::Recovery(&recovery),
+            new_password,
+            Argon2Params::TEST,
+        )
+        .unwrap();
+    assert!(vault
+        .rekey_password(
+            Secret::Recovery("AAAA-BBBB"),
+            new_password,
+            Argon2Params::TEST
+        )
+        .is_err());
+    drop(vault);
+    assert!(Vault::unlock_with_password(dir.path(), new_password).is_ok());
+    // The kit still works until a new one is issued.
+    assert!(Vault::unlock_with_recovery(dir.path(), &recovery).is_ok());
 }
 
 #[test]

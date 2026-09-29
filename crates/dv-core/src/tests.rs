@@ -1577,3 +1577,41 @@ fn the_restore_drill_proves_the_file_and_the_password() {
     core.lock();
     assert!(core.staged_backup.is_none());
 }
+
+#[test]
+fn a_new_password_or_kit_asks_for_a_new_backup() {
+    let (dir, mut core, _case) = setup(None);
+    let drive = tempfile::tempdir().unwrap();
+    core.write_backup(&drive.path().join("b.vaultbak")).unwrap();
+    assert!(!core.backup_status().unwrap().due);
+
+    let new_password = "חתול כחול ישן על הספה";
+    assert!(matches!(
+        core.change_password("ניחוש ארוך אבל שגוי", false, new_password),
+        Err(CoreError::Vault(VaultError::WrongSecret))
+    ));
+    core.not_before = None;
+    assert!(matches!(
+        core.change_password(PASSWORD, false, "קצר"),
+        Err(CoreError::Vault(VaultError::Policy(_)))
+    ));
+    core.change_password(PASSWORD, false, new_password).unwrap();
+    let status = core.backup_status().unwrap();
+    assert!(status.due && status.secret_changed);
+
+    let kit = core.new_recovery_kit(new_password, false).unwrap();
+    assert!(core.confirm_recovery_key(&kit.recovery_key).unwrap());
+    // A backup made now clears it.
+    core.write_backup(&drive.path().join("c.vaultbak")).unwrap();
+    let status = core.backup_status().unwrap();
+    assert!(!status.due && !status.secret_changed);
+
+    // Forgotten password: in with the kit, then a new password from the kit.
+    core.lock();
+    core.unlock_with_recovery(&kit.recovery_key).unwrap();
+    core.change_password(&kit.recovery_key, true, "שמש צהובה על הים הכחול")
+        .unwrap();
+    core.lock();
+    assert!(core.unlock("שמש צהובה על הים הכחול").is_ok());
+    drop(dir);
+}

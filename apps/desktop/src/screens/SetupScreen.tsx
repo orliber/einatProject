@@ -3,6 +3,7 @@ import { he } from "../i18n/he";
 import { ipc, type AppStatus } from "../ipc/client";
 import { ErrorLine, LockIcon } from "../components/ui";
 import { RestoreFromBackup } from "../components/Backup";
+import { RecoveryKitPaper } from "../components/RecoveryKit";
 import "./SetupScreen.css";
 
 type Step = "password" | "recovery" | "me" | "restore";
@@ -17,8 +18,6 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
   const [names, setNames] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const groups = key.split("-").filter(Boolean);
 
   async function create(e: FormEvent) {
     e.preventDefault();
@@ -127,18 +126,7 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
             <div className="stack grow">
               <h1>ערכת השחזור שלך</h1>
               <p className="lede">זו הדרך היחידה לפתוח את הכספת אם הסיסמה תישכח. מדפיסים או מעתיקים לדף, ושומרים אותו במקום בטוח, לא במחשב ולא בטלפון.</p>
-              <div className="paper kit">
-                <div className="kit-head"><span>ערכת שחזור · כספת האבחון</span><span>{new Date().toLocaleDateString("he-IL")}</span></div>
-                <div className="kit-grid" dir="ltr">
-                  {groups.map((g, i) => (
-                    <span key={i} className={i === groups.length - 1 ? "kit-check" : undefined}>{g}</span>
-                  ))}
-                </div>
-                <p className="hint">אין הבדל בין אותיות גדולות וקטנות. הקבוצה האחרונה בודקת טעויות הקלדה.</p>
-                <div className="row">
-                  <button type="button" className="btn btn-primary" onClick={() => window.print()}>הדפסה</button>
-                </div>
-              </div>
+              <RecoveryKitPaper recoveryKey={key} />
               <form className="stack" onSubmit={confirm}>
                 <div className="field">
                   <label htmlFor="typed">כדי לוודא שהערכה נשמרה, הקלידי אותה מהדף</label>

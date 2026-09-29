@@ -100,6 +100,7 @@ export class FakeCore {
   // Nine days ago, so the preview shows the weekly reminder (D-024).
   private lastBackupAt: number | null = Math.floor(Date.now() / 1000) - 9 * 86_400;
   private lastCheckAt: number | null = null;
+  private secretChanged = false;
   private practitioner = ["ד\"ר רותם בדויה"];
   private lockMinutes = 15;
   private model = "claude-opus-5";
@@ -699,12 +700,13 @@ export class FakeCore {
       case "backup_status": {
         const days = this.lastBackupAt === null ? null : Math.floor((now() - this.lastBackupAt) / 86_400);
         return {
-          last_at: this.lastBackupAt, days_since: days, due: days === null || days >= 7,
-          last_check_at: this.lastCheckAt, has_cases: this.cases.length > 0,
+          last_at: this.lastBackupAt, days_since: days, due: this.secretChanged || days === null || days >= 7,
+          secret_changed: this.secretChanged, last_check_at: this.lastCheckAt, has_cases: this.cases.length > 0,
         } satisfies BackupStatus;
       }
       case "write_backup": {
         this.lastBackupAt = now();
+        this.secretChanged = false;
         const day = new Date().toISOString().slice(0, 10);
         return { path: `E:\\גיבויים\\גיבוי כספת האבחון ${day}.vaultbak (בהדמיה לא נשמר קובץ)`, bytes: 1_843_200, created_at: this.lastBackupAt };
       }
@@ -724,6 +726,15 @@ export class FakeCore {
         return this.status();
       case "forget_backup":
         return null;
+      case "change_password":
+        if (!String(a.current ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
+        if (String(a.newPassword ?? "").length < 12) fail("weak_password", "הסיסמה קצרה או נפוצה מדי. מומלץ משפט של כמה מילים (12 תווים לפחות).");
+        this.secretChanged = true;
+        return null;
+      case "new_recovery_kit":
+        if (!String(a.current ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
+        this.secretChanged = true;
+        return { recovery_key: "DEMO-NEWK-ITXX-ONLY-PREV-IEW7" };
       default:
         return fail("preview", `הפעולה ${cmd} לא זמינה בהדמיה בדפדפן.`);
     }

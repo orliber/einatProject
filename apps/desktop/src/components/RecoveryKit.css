@@ -1,0 +1,49 @@
+.kit {
+  padding: 24px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.kit-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--ink-muted);
+  font-weight: 700;
+}
+.kit-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 10px;
+  font: 600 20px var(--font-mono);
+  text-align: center;
+}
+.kit-grid span {
+  background: var(--sand);
+  border-radius: 8px;
+  padding: 9px 0;
+}
+.kit-grid .kit-check {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+/* Printing the kit prints only the kit, from any screen. */
+@media print {
+  body.printing-kit * {
+    visibility: hidden !important;
+  }
+  body.printing-kit .kit,
+  body.printing-kit .kit * {
+    visibility: visible !important;
+  }
+  body.printing-kit .kit {
+    position: absolute;
+    inset: 0 0 auto 0;
+    box-shadow: none;
+    border: 1px solid #000;
+  }
+  body.printing-kit .kit .no-print {
+    display: none !important;
+  }
+}

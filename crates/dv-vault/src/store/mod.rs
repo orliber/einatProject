@@ -340,16 +340,17 @@ impl Vault {
         self.record(AuditEvent::Lock, None, &serde_json::json!({}))
     }
 
-    /// Replace the password slot. Needs a fresh proof of the current password, because the
-    /// master key is not kept in memory after unlocking (only purpose-specific subkeys are).
+    /// Replace the password slot. Needs a fresh proof: the current password, or the recovery
+    /// kit when the password was forgotten. The master key is not kept in memory after
+    /// unlocking (only purpose-specific subkeys are).
     pub fn rekey_password(
         &mut self,
-        current: &str,
+        current: Secret<'_>,
         new_password: &str,
         params: Argon2Params,
     ) -> Result<(), VaultError> {
         password::check_policy(new_password).map_err(VaultError::Policy)?;
-        let mk = self.unwrap_with_password(current)?;
+        let mk = master_key(&self.header, current)?;
         let salt = random_array::<32>()?;
         let kek = password::derive_kek(new_password, &salt, params)?;
         let wrapped = wrap_mk(&kek, "password", &self.header.vault_id, &mk)?;
@@ -367,12 +368,12 @@ impl Vault {
         self.record(AuditEvent::PasswordChanged, None, &serde_json::json!({}))
     }
 
-    /// Issue a new recovery key (the old one stops working). Needs the current password.
+    /// Issue a new recovery key (the old one stops working). Needs the current password or kit.
     pub fn rotate_recovery_key(
         &mut self,
-        current_password: &str,
+        current: Secret<'_>,
     ) -> Result<Zeroizing<String>, VaultError> {
-        let mk = self.unwrap_with_password(current_password)?;
+        let mk = master_key(&self.header, current)?;
         let recovery_key = Key32::random()?;
         let kek = recovery::derive_kek(&recovery_key)?;
         let wrapped = wrap_mk(&kek, "recovery", &self.header.vault_id, &mk)?;
@@ -404,24 +405,6 @@ impl Vault {
             }
             KeySlot::Password { .. } => false,
         })
-    }
-
-    fn unwrap_with_password(&self, password: &str) -> Result<Key32, VaultError> {
-        for slot in &self.header.slots {
-            if let KeySlot::Password {
-                salt,
-                params,
-                wrapped_mk,
-            } = slot
-            {
-                let salt: [u8; 32] = crate::crypto::unhex(salt)?
-                    .try_into()
-                    .map_err(|_| VaultError::Corrupt("salt length".to_owned()))?;
-                let kek = password::derive_kek(password, &salt, *params)?;
-                return unwrap_mk(&kek, "password", &self.header.vault_id, wrapped_mk);
-            }
-        }
-        Err(VaultError::Corrupt("no password slot".to_owned()))
     }
 
     // ---------------------------------------------------------------- audit
