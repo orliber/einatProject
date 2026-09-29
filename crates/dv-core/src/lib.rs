@@ -49,6 +49,8 @@ fn day_number() -> u64 {
         .map_or(0, |d| d.as_secs() / 86_400)
 }
 const REPORT_KEY: &str = "report_settings";
+/// A gap this long between two 15-second ticks means the computer slept.
+const SLEEP_GAP: Duration = Duration::from_secs(60);
 const MAX_REQUEST_BYTES: usize = 900_000;
 /// Sections written from other, already approved sections.
 const DERIVED_SECTIONS: &[&str] = &["dsm", "summary", "diagnoses", "recommendations"];
@@ -280,6 +282,8 @@ pub struct Core {
     pending: HashMap<String, Pending>,
     consult_history: HashMap<String, Vec<TaggedTurn>>,
     last_activity: Instant,
+    /// Wall-clock time of the shell's last timer tick (sleep detection).
+    last_tick: Option<SystemTime>,
     failed_unlocks: u32,
     not_before: Option<Instant>,
     disk_encryption: String,
@@ -367,6 +371,7 @@ impl Core {
             pending: HashMap::new(),
             consult_history: HashMap::new(),
             last_activity: Instant::now(),
+            last_tick: None,
             failed_unlocks: 0,
             not_before: None,
             disk_encryption: disk.to_owned(),
@@ -410,8 +415,32 @@ impl Core {
         self.vault.as_mut().ok_or(CoreError::Locked)
     }
 
-    /// Called by the shell on a timer: lock after the configured idle time even when
-    /// nothing is clicked. Returns true when it locked.
+    /// Called by the shell every 15 seconds. Locks after the idle time, and after the computer
+    /// slept: while it sleeps the timer does not run, so the wall clock jumps between two
+    /// ticks. (A monotonic clock does not always count sleep, so idle time alone misses it.)
+    /// Returns true when it locked.
+    pub fn tick(&mut self, now: SystemTime) -> bool {
+        let slept = self
+            .last_tick
+            .and_then(|t| now.duration_since(t).ok())
+            .is_some_and(|gap| gap > SLEEP_GAP);
+        self.last_tick = Some(now);
+        if slept && self.vault.is_some() {
+            if let Some(v) = self.vault.as_mut() {
+                let _ = v.record(
+                    AuditEvent::Lock,
+                    None,
+                    &serde_json::json!({ "reason": "sleep" }),
+                );
+            }
+            self.lock();
+            return true;
+        }
+        self.lock_if_idle()
+    }
+
+    /// Lock after the configured idle time even when nothing is clicked. Returns true when it
+    /// locked.
     pub fn lock_if_idle(&mut self) -> bool {
         let limit = Duration::from_secs(u64::from(self.lock_minutes()) * 60);
         if self.vault.is_some() && self.last_activity.elapsed() > limit {

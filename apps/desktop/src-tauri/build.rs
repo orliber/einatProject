@@ -49,6 +49,7 @@ fn main() {
             "delete_folder",
             "move_case",
             "find_name_matches",
+            "copy_secret",
             "chat",
             "approve_paragraph",
             "reject_paragraph",

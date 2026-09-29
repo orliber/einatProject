@@ -135,6 +135,8 @@ export const ipc = {
 
   checkExport: (caseId: string) => call<ExportCheck>("check_export", { caseId }),
   exportReport: (caseId: string, password: string | null) => call<string>("export_report", { caseId, password }),
+  /** The file password to the clipboard: out of history and cloud sync, cleared after N seconds (returned). */
+  copySecret: (text: string) => call<number>("copy_secret", { text }),
 };
 
 export type {

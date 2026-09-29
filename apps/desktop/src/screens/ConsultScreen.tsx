@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useApp } from "../App";
 import { TopBar } from "../components/TopBar";
 import { ReviewDialog } from "../components/ReviewDialog";
+import { CasePicker } from "../components/CasePicker";
 import { ErrorLine, Spinner } from "../components/ui";
 import { ipc, type CaseSummary, type Prepared } from "../ipc/client";
 import "./ConsultScreen.css";
@@ -96,9 +97,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
                 {scope !== null && (
                   <>
                     <label className="visually-hidden" htmlFor="consult-case">התיק</label>
-                    <select id="consult-case" className="select" value={scope} onChange={(e) => setScope(e.target.value)}>
-                      {cases.map((c) => <option key={c.id} value={c.id}>{c.meta.code}{c.child_name ? ` · ${c.child_name}` : ""}</option>)}
-                    </select>
+                    <CasePicker id="consult-case" value={scope} onChange={setScope} />
                   </>
                 )}
               </span>

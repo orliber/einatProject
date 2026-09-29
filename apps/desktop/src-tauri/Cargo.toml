@@ -30,6 +30,9 @@ dv-domain.workspace = true
 dv-ingest.workspace = true
 dv-privacy.workspace = true
 dv-ipc.workspace = true
+# Copying the Word file password: out of clipboard history and cloud sync, cleared after 60 s.
+arboard = { version = "3.6.1", default-features = false }
+zeroize = "1.9"
 
 [features]
 # Release builds: all encryption on the FIPS 140-3 validated module (D-006). Needs CMake + Go.

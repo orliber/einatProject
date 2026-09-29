@@ -533,6 +533,10 @@ export class FakeCore {
         c.folderId = (a.folderId as string | null) ?? null;
         return null;
       }
+      case "copy_secret":
+        // The app does this natively (out of clipboard history, cleared after 60 s).
+        await navigator.clipboard.writeText(String(a.text ?? "")).catch(() => undefined);
+        return 60;
       case "find_name_matches":
         return this.nameMatches((a.caseId as string | null) ?? null, (a.names as string[]) ?? []);
       case "create_case":

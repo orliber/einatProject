@@ -4,6 +4,8 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod secret_clipboard;
+
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -18,6 +20,7 @@ use tauri::Manager;
 
 struct AppState {
     core: Arc<Mutex<Core>>,
+    clipboard: secret_clipboard::SecretClipboard,
 }
 
 type Res<T> = Result<T, UiError>;
@@ -79,6 +82,7 @@ async fn unlock_with_recovery(state: tauri::State<'_, AppState>, key: String) ->
 
 #[tauri::command]
 async fn lock(state: tauri::State<'_, AppState>) -> Res<()> {
+    state.clipboard.clear_now();
     with_core(&state, |c| {
         c.lock();
         Ok(())
@@ -345,6 +349,19 @@ async fn send_section(
     with_core(&state, move |c| c.finish_section(out, response)).await
 }
 
+/// Copy the Word file's password: kept out of clipboard history and cloud sync, and taken
+/// off the clipboard after 60 seconds or when the vault locks (STANDARDS 5.9).
+#[tauri::command]
+async fn copy_secret(state: tauri::State<'_, AppState>, text: String) -> Res<u32> {
+    let text = zeroize::Zeroizing::new(text);
+    state.clipboard.copy(&text).map_err(|_| UiError {
+        code: "clipboard".to_owned(),
+        message: "לא הצלחתי להעתיק. אפשר להקליד את הסיסמה.".to_owned(),
+        details: Vec::new(),
+    })?;
+    Ok(u32::try_from(secret_clipboard::CLEAR_AFTER.as_secs()).unwrap_or(60))
+}
+
 // ------------------------------------------------------------------ library (D-023)
 
 #[tauri::command]
@@ -606,15 +623,21 @@ fn main() {
                 core = core.with_ingest_worker(exe);
             }
             let core = Arc::new(Mutex::new(core));
-            // Lock after the idle time even when nothing is clicked.
+            let clipboard = secret_clipboard::SecretClipboard::default();
+            // Lock after the idle time, or after the computer slept, even when nothing is
+            // clicked; a secret left on the clipboard goes with it.
             let timer = Arc::clone(&core);
+            let timer_clipboard = clipboard.clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(15));
-                if let Ok(mut c) = timer.lock() {
-                    c.lock_if_idle();
+                let locked = timer
+                    .lock()
+                    .is_ok_and(|mut c| c.tick(std::time::SystemTime::now()));
+                if locked {
+                    timer_clipboard.clear_now();
                 }
             });
-            app.manage(AppState { core });
+            app.manage(AppState { core, clipboard });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -664,6 +687,7 @@ fn main() {
             delete_folder,
             move_case,
             find_name_matches,
+            copy_secret,
             chat,
             approve_paragraph,
             reject_paragraph,

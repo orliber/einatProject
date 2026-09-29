@@ -52,6 +52,7 @@
     "allow-delete-folder",
     "allow-move-case",
     "allow-find-name-matches",
+    "allow-copy-secret",
     "allow-chat",
     "allow-approve-paragraph",
     "allow-reject-paragraph",

@@ -1458,3 +1458,15 @@ fn a_name_seen_in_another_case_is_pointed_out() {
     let found = core.find_name_matches(None, &["אלון".into()]).unwrap();
     assert!(found[0].trashed);
 }
+
+#[test]
+fn the_vault_locks_after_the_computer_slept() {
+    let (_dir, mut core, _case) = setup(None);
+    let t0 = SystemTime::now();
+    assert!(!core.tick(t0));
+    assert!(!core.tick(t0 + Duration::from_secs(15)));
+    assert!(core.status().unlocked);
+    // Five minutes between two ticks: the timer did not run, the computer was asleep.
+    assert!(core.tick(t0 + Duration::from_secs(15 + 300)));
+    assert!(!core.status().unlocked);
+}

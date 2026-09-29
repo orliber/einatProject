@@ -26,7 +26,8 @@ export function ExportDialog({ api, onClose }: { api: CaseApi; onClose: () => vo
   const [password, setPassword] = useState(makePassphrase);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  /** Seconds until the copied password is cleared from the clipboard. */
+  const [copied, setCopied] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -47,10 +48,9 @@ export function ExportDialog({ api, onClose }: { api: CaseApi; onClose: () => vo
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(password);
-      setCopied(true);
+      setCopied(await ipc.copySecret(password));
     } catch {
-      setCopied(false);
+      setCopied(null);
     }
   }
 
@@ -127,7 +127,8 @@ export function ExportDialog({ api, onClose }: { api: CaseApi; onClose: () => vo
                   <label htmlFor="exp-pw" className="visually-hidden">סיסמה לקובץ</label>
                   <input id="exp-pw" className="input grow mono pw" value={password} onChange={(e) => setPassword(e.target.value)} />
                   <button type="button" className="btn" onClick={() => void copy()}>{copied ? "הועתק" : "העתקה"}</button>
-                  <button type="button" className="btn" onClick={() => { setPassword(makePassphrase()); setCopied(false); }}>סיסמה חדשה</button>
+                  {copied && <span className="small muted" role="status">לא נשמר בהיסטוריית הלוח, ויימחק מהלוח בעוד {copied} שניות.</span>}
+                  <button type="button" className="btn" onClick={() => { setPassword(makePassphrase()); setCopied(null); }}>סיסמה חדשה</button>
                 </div>
                 <span className="small muted">את הסיסמה מוסרים להורים בטלפון, לא באותו מייל. ההצפנה היא של Word עצמו, ולכן הקובץ נפתח בכל מחשב.</span>
               </>
