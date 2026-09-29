@@ -14,6 +14,8 @@ import type { IdentityInput } from "../ipc/generated/IdentityInput";
 import type { ImportPreview } from "../ipc/generated/ImportPreview";
 import type { InputKind } from "../ipc/generated/InputKind";
 import type { MaterialRouting } from "../ipc/generated/MaterialRouting";
+import type { Folder } from "../ipc/generated/Folder";
+import type { NameMatch } from "../ipc/generated/NameMatch";
 import type { Prepared } from "../ipc/generated/Prepared";
 import type { ReportSettings } from "../ipc/generated/ReportSettings";
 import type { ReviewPart } from "../ipc/generated/ReviewPart";
@@ -54,6 +56,8 @@ interface Case {
   allowed: Set<string>;
   /** D-022: where each material goes (by input id). */
   routing: Map<string, R.Routing>;
+  folderId: string | null;
+  deletedAt: number | null;
   created: number;
   updated: number;
 }
@@ -100,6 +104,7 @@ export class FakeCore {
     signature: ["ד\"ר רותם בדויה", "פסיכולוגית התפתחותית מומחית"],
   };
   private cases: Case[] = [];
+  private folderList: Folder[] = [];
   private pending = new Map<string, Pending>();
 
   constructor() {
@@ -158,10 +163,43 @@ export class FakeCore {
     this.addInput(b, "intake", "שיחת טלפון ראשונה",
       "ענבל פנתה בשל עיכוב בדיבור של מאיה. מאיה מבינה הוראות פשוטות ומשתמשת במשפטים של שתיים-שלוש מילים.");
     b.updated = now() - 86_400 * 2;
+
+    // Folders, like in a file explorer (D-023).
+    const priv = this.addFolder(null, "אבחונים פרטיים");
+    this.addFolder(priv.id, "2026");
+    this.addFolder(null, "הפניות מהמכון");
+    b.folderId = priv.id;
+  }
+
+  private addFolder(parent: string | null, name: string): Folder {
+    const f: Folder = { id: newId("folder"), parent_id: parent, name, created_at: now() };
+    this.folderList.push(f);
+    return f;
+  }
+
+  private folderOf(id: unknown): Folder {
+    return this.folderList.find((f) => f.id === id) ?? fail("not_found", "התיקייה לא נמצאה");
+  }
+
+  private nameMatches(caseId: string | null, names: string[]): NameMatch[] {
+    const words = (v: string) => v.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3);
+    const out: NameMatch[] = [];
+    for (const c of this.cases) {
+      if (c.id === caseId) continue;
+      for (const p of c.people) {
+        const known = [p.value, ...p.aliases].flatMap(words);
+        for (const typed of names) {
+          if (words(typed).some((w) => known.includes(w)) && !out.some((m) => m.case_id === c.id && m.typed === typed && m.value === p.value)) {
+            out.push({ typed, case_id: c.id, case_code: c.meta.code, child_name: c.people.find((x) => x.role === "child")?.value ?? null, role: p.role, value: p.value, trashed: c.deletedAt !== null });
+          }
+        }
+      }
+    }
+    return out;
   }
 
   private newCase(meta: CaseMeta, people: IdentityInput[]): Case {
-    const c: Case = { id: newId("case"), meta, people: [], inputs: [], drafts: [], chat: {}, sheets: new Map(), allowed: new Set(), routing: new Map(), created: now(), updated: now() };
+    const c: Case = { id: newId("case"), meta, people: [], inputs: [], drafts: [], chat: {}, sheets: new Map(), allowed: new Set(), routing: new Map(), folderId: null, deletedAt: null, created: now(), updated: now() };
     this.cases.push(c);
     this.setPeople(c, people);
     return c;
@@ -212,7 +250,7 @@ export class FakeCore {
 
   private summary(c: Case): CaseSummary {
     const approved = Array.from(new Set(c.drafts.filter((d) => d.status === "approved").map((d) => d.section)));
-    return { id: c.id, meta: c.meta, child_name: c.people.find((p) => p.role === "child")?.value ?? null, created_at: c.created, updated_at: c.updated, approved_sections: approved };
+    return { id: c.id, meta: c.meta, child_name: c.people.find((p) => p.role === "child")?.value ?? null, created_at: c.created, updated_at: c.updated, approved_sections: approved, folder_id: c.folderId, deleted_at: c.deletedAt };
   }
 
   private tableFor(kind: InputKind): string[] {
@@ -447,7 +485,56 @@ export class FakeCore {
         this.report = a.settings as ReportSettings;
         return null;
       case "list_cases":
-        return this.cases.map((c) => this.summary(c));
+        return this.cases.filter((c) => c.deletedAt === null).map((c) => this.summary(c));
+      case "list_trash":
+        return this.cases.filter((c) => c.deletedAt !== null).map((c) => this.summary(c));
+      case "restore_case": {
+        const c = this.find(a.caseId);
+        c.deletedAt = null;
+        if (c.folderId && !this.folderList.some((f) => f.id === c.folderId)) c.folderId = null;
+        return null;
+      }
+      case "purge_case": {
+        const c = this.find(a.caseId);
+        if (c.deletedAt === null) fail("refused", "אפשר למחוק לצמיתות רק תיק שנמצא בסל המחזור.");
+        if (!String(a.password ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
+        this.cases = this.cases.filter((x) => x.id !== c.id);
+        return null;
+      }
+      case "folders":
+        return this.folderList;
+      case "create_folder": {
+        const name = String(a.name ?? "").trim();
+        if (!name) fail("refused", "צריך לתת שם לתיקייה.");
+        if (a.parentId) this.folderOf(a.parentId);
+        return this.addFolder((a.parentId as string | null) ?? null, name);
+      }
+      case "rename_folder":
+        this.folderOf(a.id).name = String(a.name ?? "").trim() || fail("refused", "צריך לתת שם לתיקייה.");
+        return null;
+      case "move_folder": {
+        const f = this.folderOf(a.id);
+        for (let p = (a.parentId as string | null) ?? null; p; p = this.folderOf(p).parent_id) {
+          if (p === f.id) fail("refused", "אי אפשר להעביר תיקייה לתוך עצמה או לתוך תיקייה שבתוכה.");
+        }
+        f.parent_id = (a.parentId as string | null) ?? null;
+        return null;
+      }
+      case "delete_folder": {
+        const f = this.folderOf(a.id);
+        for (const x of this.folderList) if (x.parent_id === f.id) x.parent_id = f.parent_id;
+        for (const c of this.cases) if (c.folderId === f.id) c.folderId = f.parent_id;
+        this.folderList = this.folderList.filter((x) => x.id !== f.id);
+        return null;
+      }
+      case "move_case": {
+        const c = this.find(a.caseId);
+        if (a.folderId) this.folderOf(a.folderId);
+        c.folderId = (a.folderId as string | null) ?? null;
+        return null;
+      }
+      case "find_name_matches":
+        return this.nameMatches((a.caseId as string | null) ?? null, (a.names as string[]) ?? []);
       case "create_case":
         return this.newCase(a.meta as CaseMeta, a.identities as IdentityInput[]).id;
       case "update_case": {
@@ -457,7 +544,7 @@ export class FakeCore {
         return null;
       }
       case "delete_case":
-        this.cases = this.cases.filter((c) => c.id !== a.caseId);
+        this.find(a.caseId).deletedAt = now();
         return null;
       case "set_identities": {
         const c = this.find(a.caseId);

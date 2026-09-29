@@ -377,3 +377,89 @@ fn where_a_material_goes_is_sealed_and_survives_relock() {
     // Each material has its own; nothing leaks to its neighbour.
     assert_eq!(vault.input_routing(&case, &b.id).unwrap(), None);
 }
+
+#[test]
+fn folders_nest_hide_their_names_and_never_take_cases_with_them() {
+    let (dir, mut vault, _) = new_vault();
+    let case = noam(&mut vault);
+    let top = vault.create_folder(None, "משפחת-כהן-תיקייה").unwrap();
+    let sub = vault.create_folder(Some(&top.id), "2026").unwrap();
+    vault.move_case(&case, Some(&sub.id)).unwrap();
+    assert!(matches!(
+        vault.create_folder(Some("missing"), "x"),
+        Err(VaultError::NotFound)
+    ));
+    assert!(matches!(
+        vault.move_case(&case, Some("missing")),
+        Err(VaultError::NotFound)
+    ));
+    // No folder inside itself, directly or through a subfolder.
+    assert!(matches!(
+        vault.move_folder(&top.id, Some(&sub.id)),
+        Err(VaultError::Refused(_))
+    ));
+    assert!(matches!(
+        vault.move_folder(&top.id, Some(&top.id)),
+        Err(VaultError::Refused(_))
+    ));
+    vault.rename_folder(&sub.id, "שנת 2026").unwrap();
+
+    drop(vault);
+    assert!(!contains(&all_bytes(dir.path()), "משפחת-כהן-תיקייה"));
+    let mut vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
+    let names: Vec<String> = vault
+        .folders()
+        .unwrap()
+        .into_iter()
+        .map(|f| f.name)
+        .collect();
+    assert_eq!(names, ["משפחת-כהן-תיקייה", "שנת 2026"]);
+    assert_eq!(
+        vault.list_cases().unwrap()[0].folder_id.as_deref(),
+        Some(sub.id.as_str())
+    );
+
+    // Deleting a folder moves what is inside one level up.
+    vault.delete_folder(&sub.id).unwrap();
+    assert_eq!(
+        vault.list_cases().unwrap()[0].folder_id.as_deref(),
+        Some(top.id.as_str())
+    );
+    vault.delete_folder(&top.id).unwrap();
+    assert_eq!(vault.list_cases().unwrap()[0].folder_id, None);
+    assert!(vault.folders().unwrap().is_empty());
+}
+
+#[test]
+fn the_recycle_bin_keeps_a_case_until_it_is_restored_or_erased() {
+    let (_dir, mut vault, _) = new_vault();
+    let case = noam(&mut vault);
+    let folder = vault.create_folder(None, "תיקייה").unwrap();
+    vault.move_case(&case, Some(&folder.id)).unwrap();
+    vault.trash_case(&case).unwrap();
+    assert!(vault.list_cases().unwrap().is_empty());
+    let trash = vault.list_trash().unwrap();
+    assert_eq!(trash.len(), 1);
+    assert!(trash[0].deleted_at.is_some());
+    // Still readable: nothing is erased while it waits in the bin.
+    assert!(!vault.identities(&case).unwrap().is_empty());
+    assert!(vault.trashed_before(i64::MAX).unwrap().contains(&case));
+    assert!(vault.trashed_before(0).unwrap().is_empty());
+
+    // Its folder was deleted meanwhile: it comes back to the top level.
+    vault.delete_folder(&folder.id).unwrap();
+    vault.restore_case(&case).unwrap();
+    let back = vault.list_cases().unwrap();
+    assert_eq!((back.len(), back[0].folder_id.clone()), (1, None));
+    assert!(vault.list_trash().unwrap().is_empty());
+}
+
+#[test]
+fn the_password_can_be_checked_without_opening_the_vault_again() {
+    let (dir, _vault, _) = new_vault();
+    assert!(Vault::verify_password(dir.path(), PASSWORD).is_ok());
+    assert!(matches!(
+        Vault::verify_password(dir.path(), "ניחוש ארוך אבל שגוי"),
+        Err(VaultError::WrongSecret)
+    ));
+}

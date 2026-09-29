@@ -50,7 +50,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
   async function remove() {
     try {
       await ipc.deleteCase(caseId);
-      notify("התיק נמחק לצמיתות, כולל מפתח ההצפנה שלו.");
+      notify("התיק הועבר לסל המחזור. אפשר לשחזר אותו מרשימת התיקים במשך 30 יום.");
       go({ name: "cases" });
     } catch (e) {
       setError(fail(e as never));
@@ -107,7 +107,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
           </div>
           <div className="card details-card stack danger-zone">
             <b>מחיקת התיק</b>
-            <p className="small muted">מוחקת את כל החומרים, הטיוטות והשיחות, ואת מפתח ההצפנה של התיק. אי אפשר לשחזר.</p>
+            <p className="small muted">התיק עובר לסל המחזור ונשמר שם מוצפן 30 יום, ואפשר לשחזר אותו. אחר כך הוא נמחק לצמיתות, כולל מפתח ההצפנה שלו.</p>
             <button type="button" className="btn btn-danger-quiet" onClick={() => setConfirmDelete(true)}>מחיקת התיק…</button>
           </div>
         </div>

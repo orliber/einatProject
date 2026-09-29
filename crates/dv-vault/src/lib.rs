@@ -32,6 +32,8 @@ pub enum VaultError {
     AlreadyExists,
     #[error("not found")]
     NotFound,
+    #[error("refused: {0}")]
+    Refused(String),
     #[error("integrity check failed: {0}")]
     Integrity(&'static str),
     #[error("stored data failed authentication")]

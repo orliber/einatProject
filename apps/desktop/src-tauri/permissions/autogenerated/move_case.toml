@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-move-case"
+description = "Enables the move_case command without any pre-configured scope."
+commands.allow = ["move_case"]
+
+[[permission]]
+identifier = "deny-move-case"
+description = "Denies the move_case command without any pre-configured scope."
+commands.deny = ["move_case"]

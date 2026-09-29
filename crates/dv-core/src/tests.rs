@@ -1350,3 +1350,111 @@ fn passages_far_apart_are_marked_with_a_gap_the_gate_accepts() {
     let background = section_request(&mut core, &fake, &case, "background");
     assert!(background.contains("(…)") && !background.contains("מילים ראשונות"));
 }
+
+// ------------------------------------------------------------ D-023: library
+
+#[test]
+fn delete_goes_to_the_bin_and_erasing_needs_the_password() {
+    let (_dir, mut core, case) = setup(None);
+    core.delete_case(&case).unwrap();
+    assert!(core.list_cases().unwrap().is_empty());
+    assert_eq!(core.list_trash().unwrap().len(), 1);
+    core.restore_case(&case).unwrap();
+    assert_eq!(core.list_cases().unwrap().len(), 1);
+
+    // Only from the bin, and only with the right password.
+    assert!(matches!(
+        core.purge_case(&case, PASSWORD),
+        Err(CoreError::Refused(_))
+    ));
+    core.delete_case(&case).unwrap();
+    assert!(matches!(
+        core.purge_case(&case, "ניחוש ארוך אבל שגוי"),
+        Err(CoreError::Vault(VaultError::WrongSecret))
+    ));
+    // A wrong attempt makes the next one wait, like at unlock.
+    assert!(matches!(
+        core.purge_case(&case, PASSWORD),
+        Err(CoreError::Backoff(_))
+    ));
+    core.not_before = None;
+    core.purge_case(&case, PASSWORD).unwrap();
+    assert!(core.list_trash().unwrap().is_empty());
+    assert!(matches!(
+        core.case_detail(&case),
+        Err(CoreError::Vault(VaultError::NotFound))
+    ));
+}
+
+#[test]
+fn a_case_left_in_the_bin_past_thirty_days_is_erased_at_unlock() {
+    let (_dir, mut core, case) = setup(None);
+    core.delete_case(&case).unwrap();
+    core.purge_expired().unwrap();
+    assert_eq!(core.list_trash().unwrap().len(), 1, "still within 30 days");
+    // Pretend it was deleted 31 days ago.
+    core.vault_mut()
+        .unwrap()
+        .set_deleted_at_for_tests(&case, 1)
+        .unwrap();
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert!(core.list_trash().unwrap().is_empty());
+}
+
+#[test]
+fn folders_hold_cases_and_refuse_loops() {
+    let (_dir, mut core, case) = setup(None);
+    let parent = core.create_folder(None, "  אבחונים פרטיים  ").unwrap();
+    assert_eq!(parent.name, "אבחונים פרטיים");
+    let child = core.create_folder(Some(&parent.id), "2026").unwrap();
+    core.move_case(&case, Some(&child.id)).unwrap();
+    assert_eq!(
+        core.list_cases().unwrap()[0].folder_id.as_deref(),
+        Some(child.id.as_str())
+    );
+    assert!(matches!(
+        core.create_folder(None, "   "),
+        Err(CoreError::Refused(_))
+    ));
+    assert!(matches!(
+        core.create_folder(None, &"א".repeat(61)),
+        Err(CoreError::Refused(_))
+    ));
+    assert!(matches!(
+        core.move_folder(&parent.id, Some(&child.id)),
+        Err(CoreError::Refused(_))
+    ));
+    core.delete_folder(&parent.id).unwrap();
+    // The subfolder and its case are still there, one level up.
+    let folders = core.folders().unwrap();
+    assert_eq!(folders.len(), 1);
+    assert_eq!(folders[0].parent_id, None);
+    assert_eq!(
+        core.list_cases().unwrap()[0].folder_id.as_deref(),
+        Some(child.id.as_str())
+    );
+}
+
+#[test]
+fn a_name_seen_in_another_case_is_pointed_out() {
+    let (_dir, mut core, case) = setup(None);
+    // The test case has the child "אלון" and the teacher "שירה".
+    let found = core
+        .find_name_matches(None, &["שירה לוי".into(), "מאיה".into(), "די".into()])
+        .unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(
+        (found[0].typed.as_str(), found[0].role),
+        ("שירה לוי", Role::Teacher)
+    );
+    assert_eq!(found[0].case_id, case);
+    // Editing the same case does not match itself; a case in the bin still counts.
+    assert!(core
+        .find_name_matches(Some(&case), &["אלון".into()])
+        .unwrap()
+        .is_empty());
+    core.delete_case(&case).unwrap();
+    let found = core.find_name_matches(None, &["אלון".into()]).unwrap();
+    assert!(found[0].trashed);
+}

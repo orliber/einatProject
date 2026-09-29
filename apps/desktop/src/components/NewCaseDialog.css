@@ -1,0 +1,14 @@
+/* A name that already appears in another case (D-023). */
+.name-matches {
+  display: grid;
+  gap: 4px;
+  padding: 10px 14px;
+  border: 1px solid var(--warn-line);
+  border-radius: var(--radius-md);
+  background: var(--warn-paper);
+  color: var(--warn-ink);
+}
+.name-matches ul {
+  margin: 0;
+  padding-inline-start: 18px;
+}

@@ -10,9 +10,10 @@ use std::time::Duration;
 
 use dv_core::{
     AppStatus, CaseDetail, ChatView, ConsultResult, Core, CoreError, CreatedVault, ExportCheck,
-    ImportPreview, Prepared, ReportSettings, SectionResult, SortResult, SuspectDecision, UiError,
+    ImportPreview, NameMatch, Prepared, ReportSettings, SectionResult, SortResult, SuspectDecision,
+    UiError,
 };
-use dv_domain::{CaseInput, CaseMeta, CaseSummary, Identity, IdentityInput, InputKind};
+use dv_domain::{CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind};
 use tauri::Manager;
 
 struct AppState {
@@ -344,6 +345,85 @@ async fn send_section(
     with_core(&state, move |c| c.finish_section(out, response)).await
 }
 
+// ------------------------------------------------------------------ library (D-023)
+
+#[tauri::command]
+async fn list_trash(state: tauri::State<'_, AppState>) -> Res<Vec<CaseSummary>> {
+    with_core(&state, |c| c.list_trash()).await
+}
+
+#[tauri::command]
+async fn restore_case(state: tauri::State<'_, AppState>, case_id: String) -> Res<()> {
+    with_core(&state, move |c| c.restore_case(&case_id)).await
+}
+
+/// Erase a case from the recycle bin now; asks for the password again.
+#[tauri::command]
+async fn purge_case(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    password: String,
+) -> Res<()> {
+    with_core(&state, move |c| c.purge_case(&case_id, &password)).await
+}
+
+#[tauri::command]
+async fn folders(state: tauri::State<'_, AppState>) -> Res<Vec<Folder>> {
+    with_core(&state, |c| c.folders()).await
+}
+
+#[tauri::command]
+async fn create_folder(
+    state: tauri::State<'_, AppState>,
+    parent_id: Option<String>,
+    name: String,
+) -> Res<Folder> {
+    with_core(&state, move |c| {
+        c.create_folder(parent_id.as_deref(), &name)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rename_folder(state: tauri::State<'_, AppState>, id: String, name: String) -> Res<()> {
+    with_core(&state, move |c| c.rename_folder(&id, &name)).await
+}
+
+#[tauri::command]
+async fn move_folder(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    parent_id: Option<String>,
+) -> Res<()> {
+    with_core(&state, move |c| c.move_folder(&id, parent_id.as_deref())).await
+}
+
+#[tauri::command]
+async fn delete_folder(state: tauri::State<'_, AppState>, id: String) -> Res<()> {
+    with_core(&state, move |c| c.delete_folder(&id)).await
+}
+
+#[tauri::command]
+async fn move_case(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    folder_id: Option<String>,
+) -> Res<()> {
+    with_core(&state, move |c| c.move_case(&case_id, folder_id.as_deref())).await
+}
+
+#[tauri::command]
+async fn find_name_matches(
+    state: tauri::State<'_, AppState>,
+    case_id: Option<String>,
+    names: Vec<String>,
+) -> Res<Vec<NameMatch>> {
+    with_core(&state, move |c| {
+        c.find_name_matches(case_id.as_deref(), &names)
+    })
+    .await
+}
+
 /// Sorting materials into sections (D-022): everything not sorted yet, one review screen.
 #[tauri::command]
 async fn prepare_sort(state: tauri::State<'_, AppState>, case_id: String) -> Res<Prepared> {
@@ -574,6 +654,16 @@ fn main() {
             prepare_sort,
             send_sort,
             set_input_sections,
+            list_trash,
+            restore_case,
+            purge_case,
+            folders,
+            create_folder,
+            rename_folder,
+            move_folder,
+            delete_folder,
+            move_case,
+            find_name_matches,
             chat,
             approve_paragraph,
             reject_paragraph,

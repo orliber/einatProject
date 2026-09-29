@@ -4,4 +4,12 @@ import type { CaseMeta } from "./CaseMeta";
 /**
  * One row of the case list. Names appear only locally.
  */
-export type CaseSummary = { id: string, meta: CaseMeta, child_name: string | null, created_at: number, updated_at: number, approved_sections: Array<string>, };
+export type CaseSummary = { id: string, meta: CaseMeta, child_name: string | null, created_at: number, updated_at: number, approved_sections: Array<string>, 
+/**
+ * The folder it sits in; `None` = the top level.
+ */
+folder_id: string | null, 
+/**
+ * Set while the case is in the recycle bin (unix seconds).
+ */
+deleted_at: number | null, };

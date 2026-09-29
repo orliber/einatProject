@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ipc, type AppStatus, type UiError } from "./ipc/client";
 import { LockScreen } from "./screens/LockScreen";
 import { SetupScreen } from "./screens/SetupScreen";
@@ -25,6 +26,11 @@ export interface AppApi {
 }
 
 export const AppContext = createContext<AppApi | null>(null);
+
+/** Data from the core, cached while the vault is open (D-023). Cleared on every lock. */
+export const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false, staleTime: 5_000 } },
+});
 
 export function useApp(): AppApi {
   const api = useContext(AppContext);
@@ -93,6 +99,8 @@ export function App() {
   const wasUnlocked = useRef(false);
   useEffect(() => {
     if (wasUnlocked.current && !unlocked && import.meta.env.PROD) window.location.reload();
+    // Names must not stay in memory once the vault is locked.
+    if (!unlocked) queryClient.clear();
     wasUnlocked.current = unlocked;
   }, [unlocked]);
   useEffect(() => {
@@ -124,6 +132,7 @@ export function App() {
 
   const api: AppApi = { status, go: setRoute, refresh, notify: setToast, fail, lockNow };
   return (
+    <QueryClientProvider client={queryClient}>
     <AppContext.Provider value={api}>
       {route.name === "cases" && <CasesScreen />}
       {route.name === "case" && <CaseScreen key={route.id} caseId={route.id} view={route.view} />}
@@ -131,5 +140,6 @@ export function App() {
       {route.name === "settings" && <SettingsScreen />}
       {toast && <Toast text={toast} onDone={() => setToast(null)} />}
     </AppContext.Provider>
+    </QueryClientProvider>
   );
 }

@@ -472,3 +472,22 @@ p {
   grid-column: 1 / -1;
   margin: 0;
 }
+
+/* Irreversible actions (erase a case, export without a password). */
+.btn-danger {
+  background: #8a1c0c;
+  border-color: #8a1c0c;
+  color: #fff;
+  font-weight: 700;
+}
+.btn-danger:hover:not(:disabled) {
+  background: #6e1609;
+}
+.btn-danger-quiet {
+  border-color: #e3b2a8;
+  color: var(--block);
+  background: var(--surface);
+}
+.btn-danger-quiet:hover:not(:disabled) {
+  background: var(--block-soft);
+}

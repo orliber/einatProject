@@ -1,0 +1,41 @@
+.menu {
+  z-index: 60;
+  min-width: 190px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 32px rgba(21, 32, 31, 0.16);
+  font-family: var(--font-ui);
+  direction: rtl;
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  font-size: 15px;
+  color: var(--ink);
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+}
+.menu-item[data-highlighted] {
+  background: var(--bg);
+}
+.menu-item[data-disabled] {
+  color: var(--ink-muted);
+  cursor: default;
+}
+.menu-item.danger {
+  color: var(--block);
+}
+.menu-trigger {
+  min-width: 40px;
+  font-size: 20px;
+  line-height: 1;
+}
+.btn-icon {
+  padding: 0 10px;
+}

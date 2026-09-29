@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use dv_domain::{
     assign_tag, Author, CaseInput, CaseMeta, CaseSummary, ChatMessage, ChatRole, DraftParagraph,
-    DraftStatus, Identity, IdentityInput, InputKind, Role, Transmission,
+    DraftStatus, Folder, Identity, IdentityInput, InputKind, Role, Transmission,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::de::DeserializeOwned;
@@ -27,6 +27,7 @@ type IdentityRow = (String, String, String, Vec<u8>, Vec<u8>);
 type InputRow = (String, String, i64, Vec<u8>, Vec<u8>);
 type MessageRow = (String, String, bool, i64, Vec<u8>, Vec<u8>);
 type TransmissionRow = (String, String, i64, String, String, Vec<u8>);
+type SummaryRow = (String, i64, i64, Option<String>, Option<i64>);
 
 const MAIN_DB: &str = "main.db";
 const IDENTITY_DB: &str = "identity.db";
@@ -178,7 +179,12 @@ impl Vault {
         })
     }
 
-    pub fn unlock_with_password(dir: &Path, password: &str) -> Result<Self, VaultError> {
+    /// Check the password without opening the vault again (before an irreversible action).
+    pub fn verify_password(dir: &Path, password: &str) -> Result<(), VaultError> {
+        Self::password_mk(dir, password).map(|_| ())
+    }
+
+    fn password_mk(dir: &Path, password: &str) -> Result<(VaultHeader, Key32), VaultError> {
         let header = VaultHeader::read(dir)?;
         let (salt, params, wrapped) = header
             .slots
@@ -197,6 +203,11 @@ impl Vault {
             .map_err(|_| VaultError::Corrupt("salt length".to_owned()))?;
         let kek = password::derive_kek(password, &salt, params)?;
         let mk = unwrap_mk(&kek, "password", &header.vault_id, &wrapped)?;
+        Ok((header, mk))
+    }
+
+    pub fn unlock_with_password(dir: &Path, password: &str) -> Result<Self, VaultError> {
+        let (header, mk) = Self::password_mk(dir, password)?;
         let mut vault = Self::open_with(dir, header, &mk)?;
         vault.record(
             AuditEvent::Unlock,
@@ -591,15 +602,30 @@ impl Vault {
         Ok(())
     }
 
+    /// Cases at work (not in the recycle bin), most recently changed first.
     pub fn list_cases(&self) -> Result<Vec<CaseSummary>, VaultError> {
-        let mut stmt = self
-            .main
-            .prepare("SELECT id, created_at, updated_at FROM cases ORDER BY updated_at DESC")?;
-        let rows: Vec<(String, i64, i64)> = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        self.summaries(false)
+    }
+
+    /// Cases in the recycle bin, most recently deleted first.
+    pub fn list_trash(&self) -> Result<Vec<CaseSummary>, VaultError> {
+        self.summaries(true)
+    }
+
+    fn summaries(&self, trashed: bool) -> Result<Vec<CaseSummary>, VaultError> {
+        let sql = if trashed {
+            "SELECT id, created_at, updated_at, folder_id, deleted_at FROM cases WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC"
+        } else {
+            "SELECT id, created_at, updated_at, folder_id, deleted_at FROM cases WHERE deleted_at IS NULL ORDER BY updated_at DESC"
+        };
+        let mut stmt = self.main.prepare(sql)?;
+        let rows: Vec<SummaryRow> = stmt
+            .query_map([], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })?
             .collect::<Result<_, _>>()?;
         rows.into_iter()
-            .map(|(id, created_at, updated_at)| {
+            .map(|(id, created_at, updated_at, folder_id, deleted_at)| {
                 let meta = self.case_meta(&id)?;
                 let child_name = self
                     .identities(&id)?
@@ -614,9 +640,203 @@ impl Vault {
                     created_at,
                     updated_at,
                     approved_sections,
+                    folder_id,
+                    deleted_at,
                 })
             })
             .collect()
+    }
+
+    /// Into the recycle bin: nothing is erased yet, and the case can be restored.
+    pub fn trash_case(&mut self, case_id: &str) -> Result<(), VaultError> {
+        self.case_key(case_id)?;
+        self.main.execute(
+            "UPDATE cases SET deleted_at = ?1 WHERE id = ?2",
+            params![now(), case_id],
+        )?;
+        self.record(
+            AuditEvent::CaseTrashed,
+            Some(case_id),
+            &serde_json::json!({}),
+        )
+    }
+
+    /// Tests elsewhere in the workspace move a deletion back in time.
+    #[doc(hidden)]
+    pub fn set_deleted_at_for_tests(&mut self, case_id: &str, at: i64) -> Result<(), VaultError> {
+        self.main.execute(
+            "UPDATE cases SET deleted_at = ?1 WHERE id = ?2",
+            params![at, case_id],
+        )?;
+        Ok(())
+    }
+
+    /// Back from the recycle bin. If its folder is gone, it returns to the top level.
+    pub fn restore_case(&mut self, case_id: &str) -> Result<(), VaultError> {
+        self.case_key(case_id)?;
+        self.main.execute(
+            "UPDATE cases SET deleted_at = NULL,
+                folder_id = (SELECT id FROM folders WHERE id = cases.folder_id)
+             WHERE id = ?1",
+            [case_id],
+        )?;
+        self.record(
+            AuditEvent::CaseRestored,
+            Some(case_id),
+            &serde_json::json!({}),
+        )
+    }
+
+    /// Cases that have been in the recycle bin since before `cutoff` (unix seconds).
+    pub fn trashed_before(&self, cutoff: i64) -> Result<Vec<String>, VaultError> {
+        let mut stmt = self
+            .main
+            .prepare("SELECT id FROM cases WHERE deleted_at IS NOT NULL AND deleted_at < ?1")?;
+        let ids = stmt
+            .query_map([cutoff], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        Ok(ids)
+    }
+
+    pub fn move_case(&mut self, case_id: &str, folder_id: Option<&str>) -> Result<(), VaultError> {
+        self.case_key(case_id)?;
+        if let Some(f) = folder_id {
+            self.folder_exists(f)?;
+        }
+        self.main.execute(
+            "UPDATE cases SET folder_id = ?1 WHERE id = ?2",
+            params![folder_id, case_id],
+        )?;
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------- folders
+
+    fn folder_exists(&self, id: &str) -> Result<(), VaultError> {
+        self.main
+            .query_row("SELECT 1 FROM folders WHERE id = ?1", [id], |_| Ok(()))
+            .optional()?
+            .ok_or(VaultError::NotFound)
+    }
+
+    pub fn folders(&self) -> Result<Vec<Folder>, VaultError> {
+        let mut stmt = self.main.prepare(
+            "SELECT id, parent_id, created_at, name_enc FROM folders ORDER BY created_at",
+        )?;
+        let rows: Vec<(String, Option<String>, i64, Vec<u8>)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+            .collect::<Result<_, _>>()?;
+        rows.into_iter()
+            .map(|(id, parent_id, created_at, name)| {
+                Ok(Folder {
+                    name: open_string(
+                        &self.keys.settings,
+                        &aad("folders", "name", &id, ""),
+                        &name,
+                    )?,
+                    id,
+                    parent_id,
+                    created_at,
+                })
+            })
+            .collect()
+    }
+
+    pub fn create_folder(
+        &mut self,
+        parent_id: Option<&str>,
+        name: &str,
+    ) -> Result<Folder, VaultError> {
+        if let Some(p) = parent_id {
+            self.folder_exists(p)?;
+        }
+        let id = random_id()?;
+        let t = now();
+        let sealed = seal_str(&self.keys.settings, &aad("folders", "name", &id, ""), name)?;
+        self.main.execute(
+            "INSERT INTO folders (id, parent_id, created_at, name_enc) VALUES (?1, ?2, ?3, ?4)",
+            params![id, parent_id, t, sealed],
+        )?;
+        self.record(
+            AuditEvent::FoldersChanged,
+            None,
+            &serde_json::json!({ "created": true }),
+        )?;
+        Ok(Folder {
+            id,
+            parent_id: parent_id.map(str::to_owned),
+            name: name.to_owned(),
+            created_at: t,
+        })
+    }
+
+    pub fn rename_folder(&mut self, id: &str, name: &str) -> Result<(), VaultError> {
+        self.folder_exists(id)?;
+        let sealed = seal_str(&self.keys.settings, &aad("folders", "name", id, ""), name)?;
+        self.main.execute(
+            "UPDATE folders SET name_enc = ?1 WHERE id = ?2",
+            params![sealed, id],
+        )?;
+        Ok(())
+    }
+
+    /// Move a folder under another (or to the top level). A folder cannot go inside itself or
+    /// inside one of its own subfolders.
+    pub fn move_folder(&mut self, id: &str, parent_id: Option<&str>) -> Result<(), VaultError> {
+        self.folder_exists(id)?;
+        if let Some(target) = parent_id {
+            let mut cur = Some(target.to_owned());
+            while let Some(c) = cur {
+                if c == id {
+                    return Err(VaultError::Refused(
+                        "a folder cannot go inside itself".to_owned(),
+                    ));
+                }
+                cur = self
+                    .main
+                    .query_row("SELECT parent_id FROM folders WHERE id = ?1", [&c], |r| {
+                        r.get(0)
+                    })
+                    .optional()?
+                    .ok_or(VaultError::NotFound)?;
+            }
+        }
+        self.main.execute(
+            "UPDATE folders SET parent_id = ?1 WHERE id = ?2",
+            params![parent_id, id],
+        )?;
+        self.record(
+            AuditEvent::FoldersChanged,
+            None,
+            &serde_json::json!({ "moved": true }),
+        )
+    }
+
+    /// Delete a folder: its subfolders and cases (also those in the recycle bin) move up to
+    /// its parent first. Nothing inside is ever deleted with it.
+    pub fn delete_folder(&mut self, id: &str) -> Result<(), VaultError> {
+        self.folder_exists(id)?;
+        let parent: Option<String> =
+            self.main
+                .query_row("SELECT parent_id FROM folders WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })?;
+        let tx = self.main.unchecked_transaction()?;
+        tx.execute(
+            "UPDATE folders SET parent_id = ?1 WHERE parent_id = ?2",
+            params![parent, id],
+        )?;
+        tx.execute(
+            "UPDATE cases SET folder_id = ?1 WHERE folder_id = ?2",
+            params![parent, id],
+        )?;
+        tx.execute("DELETE FROM folders WHERE id = ?1", [id])?;
+        tx.commit()?;
+        self.record(
+            AuditEvent::FoldersChanged,
+            None,
+            &serde_json::json!({ "deleted": true }),
+        )
     }
 
     /// Crypto-shredding: rows are deleted with `secure_delete` and the case key is gone,

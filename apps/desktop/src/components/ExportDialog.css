@@ -108,15 +108,6 @@
 .mini-section i.short {
   width: 70%;
 }
-.btn-danger {
-  background: #8a1c0c;
-  border-color: #8a1c0c;
-  color: #fff;
-  font-weight: 700;
-}
-.btn-danger:hover:not(:disabled) {
-  background: #6e1609;
-}
 .danger-zone {
   border-color: #e3b2a8;
 }
@@ -129,15 +120,6 @@
 }
 .names-card {
   min-width: 0;
-}
-.btn-danger-quiet {
-  align-self: flex-start;
-  border-color: #e3b2a8;
-  color: var(--block);
-  background: var(--surface);
-}
-.btn-danger-quiet:hover:not(:disabled) {
-  background: var(--block-soft);
 }
 .details-card {
   padding: 16px 18px;

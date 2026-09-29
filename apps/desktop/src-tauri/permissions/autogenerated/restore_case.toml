@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-restore-case"
+description = "Enables the restore_case command without any pre-configured scope."
+commands.allow = ["restore_case"]
+
+[[permission]]
+identifier = "deny-restore-case"
+description = "Denies the restore_case command without any pre-configured scope."
+commands.deny = ["restore_case"]

@@ -4,6 +4,7 @@
 //! machine without a WebView. `Core` owns the unlocked vault and walks every request through
 //! the same path: filter → build → review → gate → (approval) → send → check → store.
 
+mod library;
 mod sorting;
 mod views;
 
@@ -27,10 +28,11 @@ use dv_privacy::{
 use dv_vault::{Argon2Params, AuditEvent, Vault, VaultError};
 use serde_json::Value;
 
+pub use library::TRASH_DAYS;
 pub use views::{
     AppStatus, CaseDetail, ChatView, ConsultResult, CreatedVault, ExportCheck, ImportPreview,
-    MaterialRouting, NameSuggestion, ParagraphView, Prepared, ReportSettings, ReviewPart,
-    SectionResult, SectionView, SortResult, SuspectDecision, UiError,
+    MaterialRouting, NameMatch, NameSuggestion, ParagraphView, Prepared, ReportSettings,
+    ReviewPart, SectionResult, SectionView, SortResult, SuspectDecision, UiError,
 };
 
 const API_KEY: &str = "anthropic_api_key";
@@ -528,6 +530,7 @@ impl Core {
                 self.not_before = None;
                 self.vault = Some(vault);
                 self.last_activity = Instant::now();
+                self.purge_expired()?;
                 Ok(self.status())
             }
             Err(e) => {
@@ -628,10 +631,6 @@ impl Core {
     pub fn update_case(&mut self, case_id: &str, meta: CaseMeta) -> Result<(), CoreError> {
         check_meta(&meta)?;
         Ok(self.vault_mut()?.update_case_meta(case_id, &meta)?)
-    }
-
-    pub fn delete_case(&mut self, case_id: &str) -> Result<(), CoreError> {
-        Ok(self.vault_mut()?.delete_case(case_id)?)
     }
 
     pub fn set_identities(

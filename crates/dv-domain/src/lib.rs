@@ -12,7 +12,7 @@ pub mod scores;
 pub use identity::{assign_tag, Identity, IdentityInput, Role, PRACTITIONER_TAG};
 pub use records::{
     Age, Author, CaseInput, CaseMeta, CaseSummary, ChatMessage, ChatRole, Consent, DraftParagraph,
-    DraftStatus, GrammaticalGender, InputKind, Transmission,
+    DraftStatus, Folder, GrammaticalGender, InputKind, Transmission,
 };
 pub use report::{ReportPart, ReportSection, ReportStructure};
 pub use routing::{passage_ranges, passages, Feed, Routing, SectionPassages, Suggestion};

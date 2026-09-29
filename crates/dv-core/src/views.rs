@@ -242,3 +242,19 @@ pub struct ReportSettings {
     pub confidentiality: String,
     pub signature: Vec<String>,
 }
+
+/// A name typed for a case that already appears in another case (D-023).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct NameMatch {
+    /// What was typed.
+    pub typed: String,
+    pub case_id: String,
+    pub case_code: String,
+    pub child_name: Option<String>,
+    /// Who the name is in that case.
+    pub role: Role,
+    pub value: String,
+    /// That case is in the recycle bin.
+    pub trashed: bool,
+}

@@ -5,6 +5,8 @@ import type { CaseDetail } from "./generated/CaseDetail";
 import type { CaseInput } from "./generated/CaseInput";
 import type { CaseMeta } from "./generated/CaseMeta";
 import type { CaseSummary } from "./generated/CaseSummary";
+import type { Folder } from "./generated/Folder";
+import type { NameMatch } from "./generated/NameMatch";
 import type { ChatView } from "./generated/ChatView";
 import type { ConsultResult } from "./generated/ConsultResult";
 import type { CreatedVault } from "./generated/CreatedVault";
@@ -67,7 +69,19 @@ export const ipc = {
   listCases: () => call<CaseSummary[]>("list_cases"),
   createCase: (meta: CaseMeta, identities: IdentityInput[]) => call<string>("create_case", { meta, identities }),
   updateCase: (caseId: string, meta: CaseMeta) => run("update_case", { caseId, meta }),
+  /** Into the recycle bin (D-023); restorable for 30 days. */
   deleteCase: (caseId: string) => run("delete_case", { caseId }),
+  listTrash: () => call<CaseSummary[]>("list_trash"),
+  restoreCase: (caseId: string) => run("restore_case", { caseId }),
+  /** Erase from the bin now; the password is asked again. */
+  purgeCase: (caseId: string, password: string) => run("purge_case", { caseId, password }),
+  folders: () => call<Folder[]>("folders"),
+  createFolder: (parentId: string | null, name: string) => call<Folder>("create_folder", { parentId, name }),
+  renameFolder: (id: string, name: string) => run("rename_folder", { id, name }),
+  moveFolder: (id: string, parentId: string | null) => run("move_folder", { id, parentId }),
+  deleteFolder: (id: string) => run("delete_folder", { id }),
+  moveCase: (caseId: string, folderId: string | null) => run("move_case", { caseId, folderId }),
+  findNameMatches: (caseId: string | null, names: string[]) => call<NameMatch[]>("find_name_matches", { caseId, names }),
   setIdentities: (caseId: string, identities: IdentityInput[]) =>
     call<Identity[]>("set_identities", { caseId, identities }),
   caseDetail: (caseId: string) => call<CaseDetail>("case_detail", { caseId }),
@@ -125,6 +139,8 @@ export const ipc = {
 
 export type {
   AppStatus,
+  Folder,
+  NameMatch,
   MaterialRouting,
   SortResult,
   CaseDetail,

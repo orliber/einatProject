@@ -13,6 +13,8 @@ import time
 import traceback
 
 from selenium import webdriver
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.options import ArgOptions
 from selenium.webdriver.support.ui import WebDriverWait
@@ -280,6 +282,31 @@ try:
     expect_text("תיקים בעבודה")
     time.sleep(0.5)
     shot("cases-list")
+
+    # 7b. Folders (D-023): a new folder, the case moved into it from the "⋯" menu.
+    button("תיקייה חדשה").click()
+    find("//input[@id='folder-name']").send_keys("אבחונים פרטיים")
+    button("שמירה").click()
+    # By DOM text: WebKit's driver leaves ellipsis-clipped text out of .text.
+    find("//span[contains(@class,'folder-name')][normalize-space()='אבחונים פרטיים']")
+    # From the keyboard, as someone without a mouse would (Enter opens, arrows move).
+    find("//button[starts-with(@aria-label, 'פעולות על התיק של')]").send_keys(Keys.ENTER)
+    time.sleep(0.4)
+    item = find("//*[@role='menuitem'][contains(normalize-space(), 'העברה לתיקייה')]")
+    ActionChains(d).send_keys(Keys.ARROW_DOWN).perform()
+    time.sleep(0.2)
+    log.append("     folders: actions menu opens from the keyboard = " + str(item.is_displayed()))
+    ActionChains(d).send_keys(Keys.ENTER).perform()
+    time.sleep(0.4)
+    find("//label[contains(@class,'move-row')][.//span[normalize-space()='אבחונים פרטיים']]").click()
+    find("//section[@role='dialog']//button[normalize-space()='העברה']").click()
+    expect_text("התיק הועבר")
+    find("//button[contains(@class,'folder-open')]").click()
+    time.sleep(0.5)
+    body = d.find_element(By.TAG_NAME, "body").text
+    here = d.find_elements(By.XPATH, "//nav[@aria-label='מיקום']//*[@aria-current='page'][normalize-space()='אבחונים פרטיים']")
+    log.append("     folders: case inside the new folder = " + str("נועם" in body and len(here) == 1))
+    shot("folder")
 
     # 8. Lock.
     button("נעילה").click()
