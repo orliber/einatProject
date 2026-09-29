@@ -98,10 +98,51 @@ pub fn detect(bytes: &[u8], file_name: &str) -> Result<Format, IngestError> {
             IngestError::Encrypted
         });
     }
-    match std::str::from_utf8(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes)) {
-        Ok(s) if !s.contains('\0') => Ok(Format::Text),
+    match decode_text(bytes, file_name) {
+        Some((s, _)) if !s.contains('\0') => Ok(Format::Text),
         _ => Err(IngestError::Unsupported),
     }
+}
+
+/// UTF-8 (with or without BOM), or, for a `.txt` file only, the old Hebrew Windows encoding
+/// (Windows-1255) that older Word exports and systems still produce. Any byte that has no
+/// meaning in Windows-1255 refuses the file rather than guessing. The flag says it was 1255.
+fn decode_text(bytes: &[u8], file_name: &str) -> Option<(String, bool)> {
+    let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        return Some((s.to_owned(), false));
+    }
+    if !file_name.to_lowercase().ends_with(".txt")
+        || !bytes.iter().any(|b| (0xE0..=0xFA).contains(b))
+    {
+        return None;
+    }
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        let c = match b {
+            0x00..=0x7F => char::from(b),
+            0xE0..=0xFA => char::from_u32(0x05D0 + u32::from(b - 0xE0))?,
+            0xC0..=0xD3 => char::from_u32(0x05B0 + u32::from(b - 0xC0))?,
+            0xD4..=0xD8 => char::from_u32(0x05F0 + u32::from(b - 0xD4))?,
+            0x80 => '€',
+            0x85 => '…',
+            0x91 => '‘',
+            0x92 => '’',
+            0x93 => '“',
+            0x94 => '”',
+            0x96 => '–',
+            0x97 => '—',
+            0xA0 => ' ',
+            0xA4 => '₪',
+            0xAA => '×',
+            0xBA => '÷',
+            0xA1..=0xBF => char::from(b),
+            0xFD | 0xFE => continue, // direction marks
+            _ => return None,
+        };
+        out.push(c);
+    }
+    Some((out, true))
 }
 
 /// Extract in this process. The app calls [`worker::run`] instead, which runs this in the worker.
@@ -110,14 +151,17 @@ pub fn extract(bytes: &[u8], file_name: &str) -> Result<Extracted, IngestError> 
         Format::Docx => docx::extract(bytes)?,
         Format::Pdf => pdf::extract(bytes)?,
         Format::Text => {
-            let s = std::str::from_utf8(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes))
-                .map_err(|_| IngestError::Unsupported)?;
+            let (body, legacy) = decode_text(bytes, file_name).ok_or(IngestError::Unsupported)?;
             Extracted {
                 format: Format::Text,
-                body: s.to_owned(),
+                body,
                 margins: String::new(),
                 metadata: Vec::new(),
-                warnings: Vec::new(),
+                warnings: if legacy {
+                    vec!["הקובץ נקרא בקידוד עברית ישן (Windows-1255). כדאי לעבור על הטקסט לפני השמירה.".to_owned()]
+                } else {
+                    Vec::new()
+                },
                 pages: 1,
             }
         }
@@ -193,6 +237,16 @@ mod tests {
         assert_eq!(detect(b"PK\x03\x04rest", "x.pdf"), Ok(Format::Docx));
         assert_eq!(detect(b"%PDF-1.7", "a.docx"), Ok(Format::Pdf));
         assert_eq!(detect("שלום".as_bytes(), "a.txt"), Ok(Format::Text));
+        // "שלום, נועם" in Windows-1255; a stray undefined byte refuses the file.
+        let legacy = [0xF9, 0xEC, 0xE5, 0xED, b',', b' ', 0xF0, 0xE5, 0xF2, 0xED];
+        let out = extract(&legacy, "old.txt").unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(out.body, "שלום, נועם");
+        assert!(out.warnings.iter().any(|w| w.contains("1255")));
+        assert_eq!(detect(&legacy, "old.bin"), Err(IngestError::Unsupported));
+        assert_eq!(
+            detect(&[0xF9, 0xDB], "old.txt"),
+            Err(IngestError::Unsupported)
+        );
         let cfb = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1, 0];
         assert_eq!(detect(&cfb, "old.DOC"), Err(IngestError::LegacyDoc));
         assert_eq!(detect(&cfb, "locked.docx"), Err(IngestError::Encrypted));
