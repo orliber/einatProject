@@ -28,6 +28,8 @@ pub struct AppStatus {
     /// No API key configured: answers come from local demo mode.
     pub demo_mode: bool,
     pub model: String,
+    /// `fast` | `balanced` | `thorough`: how long Claude may think.
+    pub speed: String,
     pub integrity_warning: Option<String>,
     pub lock_minutes: u32,
     /// Names always hidden as the practitioner (shown in settings).
@@ -173,6 +175,45 @@ pub struct SectionResult {
 pub struct ConsultResult {
     pub answer: String,
     pub demo: bool,
+    /// The saved conversation this answer belongs to.
+    pub conversation_id: String,
+}
+
+/// A saved conversation in the list (like the conversation list in Claude).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ConsultationSummary {
+    pub id: String,
+    pub case_id: Option<String>,
+    /// "נועם · תיק-1024", shown on this computer only.
+    pub case_label: Option<String>,
+    /// The start of the first question.
+    pub title: String,
+    #[ts(type = "number")]
+    pub updated_at: i64,
+    pub turns: u32,
+}
+
+/// One turn of a saved conversation, as shown.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ConsultTurnView {
+    /// `user` | `assistant`.
+    pub role: String,
+    pub text: String,
+    /// What the filter hid before the question was sent.
+    pub hidden: Vec<String>,
+    pub demo: bool,
+    #[ts(type = "number")]
+    pub at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ConsultationView {
+    pub id: String,
+    pub case_id: Option<String>,
+    pub turns: Vec<ConsultTurnView>,
 }
 
 /// What the psychologist decided about a suspect.

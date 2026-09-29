@@ -6,6 +6,7 @@
 
 mod activity;
 mod backup;
+mod consultations;
 mod dates;
 mod library;
 mod retention;
@@ -40,9 +41,10 @@ pub use library::TRASH_DAYS;
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
 pub use views::{
     ActivityEntry, ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail,
-    ChatView, ConsultResult, CreatedVault, ExportCheck, ImportPreview, MaterialRouting, NameMatch,
-    NameSuggestion, ParagraphView, Prepared, ReportSettings, RetentionItem, ReviewPart,
-    SectionResult, SectionView, SortResult, StagedBackup, SuspectDecision, UiError,
+    ChatView, ConsultResult, ConsultTurnView, ConsultationSummary, ConsultationView, CreatedVault,
+    ExportCheck, ImportPreview, MaterialRouting, NameMatch, NameSuggestion, ParagraphView,
+    Prepared, ReportSettings, RetentionItem, ReviewPart, SectionResult, SectionView, SortResult,
+    StagedBackup, SuspectDecision, UiError,
 };
 
 const API_KEY: &str = "anthropic_api_key";
@@ -50,6 +52,17 @@ const MODEL_KEY: &str = "model";
 const LOCK_KEY: &str = "lock_minutes";
 const FIRST_USE_KEY: &str = "first_use_day";
 const REVIEW_KEY: &str = "review_only_suspect";
+/// How long Claude may think (see `Core::model_for`).
+const SPEED_KEY: &str = "answer_speed";
+const DEFAULT_SPEED: &str = "balanced";
+
+/// What a request to Claude is for (sets how long it may think).
+#[derive(Clone, Copy)]
+enum Task {
+    Sort,
+    Draft,
+    Consult,
+}
 /// Days of use before "show the review only when suspicious" can be chosen (D-020).
 const REVIEW_ALWAYS_DAYS: u64 = 14;
 
@@ -202,7 +215,12 @@ enum PendingKind {
     },
     Consult {
         case_id: Option<String>,
+        /// The saved conversation it continues (`None`: a new one).
+        conversation_id: Option<String>,
         message_tagged: String,
+        /// The question as typed (kept only in the vault, for display).
+        message_shown: String,
+        hidden: Vec<String>,
     },
     /// Sorting materials into sections (D-022): per material its id, how many passages were
     /// sent, and a fingerprint of its text then.
@@ -260,7 +278,6 @@ pub struct Core {
     argon: Option<Argon2Params>,
     vault: Option<Vault>,
     pending: HashMap<String, Pending>,
-    consult_history: HashMap<String, Vec<TaggedTurn>>,
     last_activity: Instant,
     /// Wall-clock time of the shell's last timer tick (sleep detection).
     last_tick: Option<SystemTime>,
@@ -324,6 +341,16 @@ impl Review {
         self.checks.indirect_suspects += out.checks.indirect_suspects;
     }
 
+    /// Show a text that goes out unchanged (Claude's earlier answer): on the review screen,
+    /// but without raising name questions about it.
+    fn add_context(&mut self, label: String, out: &FilterOutcome) {
+        self.parts.push(ReviewPart {
+            label,
+            original: out.tagged_segments.clone(),
+            outgoing: out.tagged_segments.clone(),
+        });
+    }
+
     fn into_prepared(self, demo_mode: bool) -> Prepared {
         Prepared {
             approval_id: None,
@@ -351,7 +378,6 @@ impl Core {
             argon: None,
             vault: None,
             pending: HashMap::new(),
-            consult_history: HashMap::new(),
             last_activity: Instant::now(),
             last_tick: None,
             failed_unlocks: 0,
@@ -451,6 +477,11 @@ impl Core {
             }
             None => (Vec::new(), false, false),
         };
+        let speed = self
+            .vault
+            .as_ref()
+            .and_then(|v| v.setting(SPEED_KEY).ok().flatten())
+            .unwrap_or_else(|| DEFAULT_SPEED.to_owned());
         let (demo, model, integrity) = match &self.vault {
             Some(v) => (
                 v.secret(API_KEY).ok().flatten().is_none(),
@@ -471,6 +502,7 @@ impl Core {
             fips_active: dv_vault::crypto::fips_active(),
             demo_mode: demo,
             model,
+            speed,
             integrity_warning: integrity,
             lock_minutes: self.lock_minutes(),
             practitioner,
@@ -592,7 +624,6 @@ impl Core {
 
     fn lock_because(&mut self, reason: Option<&str>) {
         self.pending.clear();
-        self.consult_history.clear();
         self.staged_backup = None;
         if let Some(v) = self.vault.take() {
             let _ = v.lock_because(reason);
@@ -1017,14 +1048,37 @@ impl Core {
     }
 
     fn model_config(&mut self) -> Result<ModelConfig, CoreError> {
-        let model = self
-            .vault_ref()?
+        self.model_for(Task::Draft)
+    }
+
+    /// How long Claude may think, by task and by the speed chosen in settings. Sorting only
+    /// classifies passages; drafting and consultation weigh more, and "thorough" asks for most.
+    fn model_for(&mut self, task: Task) -> Result<ModelConfig, CoreError> {
+        let v = self.vault_ref()?;
+        let model = v
             .setting(MODEL_KEY)?
             .unwrap_or_else(|| dv_ai::DEFAULT_MODEL.to_owned());
+        let speed = v
+            .setting(SPEED_KEY)?
+            .unwrap_or_else(|| DEFAULT_SPEED.to_owned());
+        let effort = match (task, speed.as_str()) {
+            (Task::Sort, _) | (_, "fast") => "low",
+            (_, "thorough") => "high",
+            _ => "medium",
+        };
         Ok(ModelConfig {
             model,
-            ..ModelConfig::default()
+            effort: effort.to_owned(),
         })
+    }
+
+    /// `fast` | `balanced` | `thorough`.
+    pub fn set_speed(&mut self, speed: &str) -> Result<(), CoreError> {
+        if !["fast", "balanced", "thorough"].contains(&speed) {
+            return Err(CoreError::Refused("מהירות לא מוכרת.".to_owned()));
+        }
+        self.vault_mut()?.set_setting(SPEED_KEY, speed)?;
+        Ok(())
     }
 
     pub fn case_detail(&mut self, case_id: &str) -> Result<CaseDetail, CoreError> {
@@ -1530,12 +1584,29 @@ impl Core {
     }
 
     /// Free consultation, optionally about a case (then approved sections go along, filtered).
+    /// `conversation_id`: a saved conversation to continue (its earlier turns go along, as
+    /// they were sent: filtered), or `None` for a new one.
     pub fn prepare_consult(
         &mut self,
         case_id: Option<&str>,
+        conversation_id: Option<&str>,
         message: &str,
     ) -> Result<Prepared, CoreError> {
-        let model = self.model_config()?;
+        // Earlier turns, as Einat saw them: filtered again now, with today's names and decisions,
+        // and shown on the review screen like everything else that leaves the computer.
+        let earlier = match conversation_id {
+            Some(id) => {
+                let (case_of, turns) = self.stored_consultation(id)?;
+                if case_of.as_deref() != case_id {
+                    return Err(CoreError::Refused(
+                        "השיחה הזו שייכת לתיק אחר. אפשר לפתוח שיחה חדשה.".to_owned(),
+                    ));
+                }
+                turns
+            }
+            None => Vec::new(),
+        };
+        let model = self.model_for(Task::Consult)?;
         let key = case_id.unwrap_or("").to_owned();
         let data = self.privacy_data(&key)?;
         let demo_mode = self.vault_ref()?.secret(API_KEY)?.is_none() && self.transport.is_none();
@@ -1558,6 +1629,30 @@ impl Core {
             };
             let msg = filter(message, &ctx).map_err(|e| CoreError::Internal(e.to_string()))?;
             let mut review = Review::default();
+            let mut history = Vec::new();
+            for (n, t) in earlier.iter().enumerate() {
+                let label = |who: &str| format!("{who} ({})", n / 2 + 1);
+                if t.role == "user" {
+                    // Einat's own words: filtered again, with today's names and decisions.
+                    let out =
+                        filter(&t.shown, &ctx).map_err(|e| CoreError::Internal(e.to_string()))?;
+                    review.add(label("שאלה קודמת"), &out);
+                    history.push(TaggedTurn {
+                        role: t.role.clone(),
+                        text_tagged: out.tagged,
+                    });
+                } else {
+                    // Claude's own answer goes back as it came (it only ever saw tags); shown
+                    // on the review screen, without name questions about Claude's own words.
+                    let out =
+                        filter(&t.tagged, &ctx).map_err(|e| CoreError::Internal(e.to_string()))?;
+                    review.add_context(label("תשובה קודמת"), &out);
+                    history.push(TaggedTurn {
+                        role: t.role.clone(),
+                        text_tagged: t.tagged.clone(),
+                    });
+                }
+            }
             review.add("השאלה שלך".to_owned(), &msg);
             let mut case_context = None;
             if let Some(c) = case_id {
@@ -1580,7 +1675,6 @@ impl Core {
                     case_context = Some(out.tagged);
                 }
             }
-            let history = self.consult_history.get(&key).cloned().unwrap_or_default();
             let input = dv_ai::ConsultInput {
                 history,
                 message_tagged: msg.tagged.clone(),
@@ -1593,7 +1687,10 @@ impl Core {
         let mut prepared = review.into_prepared(demo_mode);
         let kind = PendingKind::Consult {
             case_id: case_id.map(str::to_owned),
+            conversation_id: conversation_id.map(str::to_owned),
             message_tagged: input.message_tagged,
+            message_shown: message.to_owned(),
+            hidden: prepared.hidden.clone(),
         };
         self.gate(&data, &body, kind, &mut prepared)?;
         Ok(prepared)
@@ -1623,7 +1720,10 @@ impl Core {
         };
         let PendingKind::Consult {
             case_id,
+            conversation_id,
             message_tagged,
+            message_shown,
+            hidden,
         } = out.pending.kind
         else {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
@@ -1635,27 +1735,29 @@ impl Core {
             &serde_json::json!({ "consult": true, "demo": demo }),
         )?;
         let answer = dv_ai::parse_consult(&response)?;
-        let key = case_id.clone().unwrap_or_default();
-        let turns = self.consult_history.entry(key).or_default();
-        turns.push(TaggedTurn {
-            role: "user".to_owned(),
-            text_tagged: message_tagged,
-        });
-        turns.push(TaggedTurn {
-            role: "assistant".to_owned(),
-            text_tagged: answer.clone(),
-        });
-        let v = self.vault_mut()?;
         let shown = match &case_id {
             Some(c) => {
-                let identities = v.identities(c)?;
+                let identities = self.vault_ref()?.identities(c)?;
                 restore(&answer, &identities, None)
             }
-            None => answer,
+            None => answer.clone(),
         };
+        let conversation_id = self.keep_consultation(
+            conversation_id.as_deref(),
+            case_id.as_deref(),
+            consultations::Exchange {
+                question_tagged: message_tagged,
+                question_shown: message_shown,
+                hidden,
+                answer_tagged: answer,
+                answer_shown: shown.clone(),
+                demo,
+            },
+        )?;
         Ok(ConsultResult {
             answer: shown,
             demo,
+            conversation_id,
         })
     }
 

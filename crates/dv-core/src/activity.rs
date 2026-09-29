@@ -124,6 +124,7 @@ fn describe(
             true,
         ),
         "audit_reviewed" => ("security", "היומן נבדק".to_owned(), false),
+        "consultation_deleted" => ("case", "שיחת התייעצות נמחקה".to_owned(), false),
         other => ("security", other.to_owned(), false),
     })
 }
@@ -226,6 +227,7 @@ mod tests {
             "settings_changed",
             "integrity_warning",
             "audit_reviewed",
+            "consultation_deleted",
         ] {
             let (_, text, _) = describe(event, &Value::Null, structure.as_ref()).unwrap();
             assert!(!text.contains('_'), "{event} → {text}");

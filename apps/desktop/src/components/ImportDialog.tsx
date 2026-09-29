@@ -6,7 +6,7 @@ import type { NameSuggestion } from "../ipc/generated/NameSuggestion";
 import { Dialog, ErrorLine, Segments } from "./ui";
 import "./ImportDialog.css";
 
-const FORMAT: Record<string, string> = { docx: "Word", pdf: "PDF", text: "טקסט" };
+const FORMAT: Record<string, string> = { docx: "Word", odt: "ODT", pdf: "PDF", text: "טקסט" };
 
 /** What was read from a document, before anything is stored. Nothing is sent from here. */
 export function ImportDialog(props: {

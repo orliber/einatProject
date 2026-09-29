@@ -12,7 +12,11 @@ cloud_synced_folder: string | null, fips_active: boolean,
 /**
  * No API key configured: answers come from local demo mode.
  */
-demo_mode: boolean, model: string, integrity_warning: string | null, lock_minutes: number, 
+demo_mode: boolean, model: string, 
+/**
+ * `fast` | `balanced` | `thorough`: how long Claude may think.
+ */
+speed: string, integrity_warning: string | null, lock_minutes: number, 
 /**
  * Names always hidden as the practitioner (shown in settings).
  */

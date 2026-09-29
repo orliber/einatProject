@@ -67,7 +67,7 @@ interface Case {
 
 type Pending =
   | { type: "section"; caseId: string; section: string; refs: { sid: string; label: string; tagged: string }[]; instruction: string }
-  | { type: "consult"; question: string }
+  | { type: "consult"; question: string; shown: string; hidden: string[]; caseId: string | null; conversationId: string | null }
   | { type: "sort"; caseId: string; materials: { id: string; count: number; content: string }[] };
 
 const SECTIONS = structure.parts.flatMap((p) => p.sections.map((s) => ({ ...s, part: p.title, inputs: s.inputs as InputKind[] })));
@@ -103,10 +103,12 @@ export class FakeCore {
   private lastCheckAt: number | null = null;
   private secretChanged = false;
   private reviewedAt: number | null = null;
+  private convs: { id: string; caseId: string | null; updated: number; turns: { role: string; text: string; hidden: string[]; demo: boolean; at: number }[] }[] = [];
   private activityLog: ActivityEntry[] = [];
   private practitioner = ["ד\"ר רותם בדויה"];
   private lockMinutes = 15;
   private model = "claude-opus-5";
+  private speed = "balanced";
   private reviewOnlySuspect = false;
   private report: ReportSettings = {
     title: "דוח אבחון פסיכולוגי-התפתחותי",
@@ -279,7 +281,7 @@ export class FakeCore {
   status(): AppStatus {
     return {
       vault_exists: this.vaultExists, unlocked: this.unlocked, disk_encryption: "on", cloud_synced_folder: null, fips_active: true,
-      demo_mode: true, model: this.model, integrity_warning: null, lock_minutes: this.lockMinutes,
+      demo_mode: true, model: this.model, speed: this.speed, integrity_warning: null, lock_minutes: this.lockMinutes,
       practitioner: this.practitioner, review_only_suspect: this.reviewOnlySuspect, review_choice_available: true,
     };
   }
@@ -510,6 +512,9 @@ export class FakeCore {
       case "set_model":
         this.model = String(a.model);
         return null;
+      case "set_speed":
+        this.speed = String(a.speed);
+        return null;
       case "set_lock_minutes":
         this.lockMinutes = Number(a.minutes);
         return null;
@@ -707,16 +712,42 @@ export class FakeCore {
         const text = String(a.message);
         const f = c ? this.filterFor(c, text) : filter(text, { caseId: "", people: this.allPeople(), practitioner: this.practitioner, allowed: new Set() });
         const approval = f.suspects.length === 0 ? newId("approval") : null;
-        if (approval) this.pending.set(approval, { type: "consult", question: f.tagged });
+        if (approval) this.pending.set(approval, { type: "consult", question: f.tagged, shown: text, hidden: f.hidden, caseId: c?.id ?? null, conversationId: a.conversationId ? String(a.conversationId) : null });
         return { approval_id: approval, parts: [{ label: "השאלה", original: f.original_segments, outgoing: f.tagged_segments }], suspects: f.suspects, hidden: f.hidden, checks: f.checks, blocked: [], demo_mode: true } satisfies Prepared;
       }
       case "send_consult": {
         const p = this.pending.get(String(a.approvalId));
         if (p?.type !== "consult") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
         this.pending.delete(String(a.approvalId));
-        await new Promise((r) => setTimeout(r, 700));
-        return { answer: "מצב הדגמה: כאן תופיע תשובה מקצועית של Claude, שמבחינה בין ידע מבוסס לדעה ומציינת אי-ודאות. ההחלטה המקצועית נשארת שלך.", demo: true };
+        await new Promise((r) => setTimeout(r, 1400));
+        const answer = "מצב הדגמה: כאן תופיע תשובה מקצועית של Claude, שמבחינה בין ידע מבוסס לדעה ומציינת אי-ודאות. ההחלטה המקצועית נשארת שלך.";
+        const at = now();
+        let conv = p.conversationId ? this.convs.find((x) => x.id === p.conversationId) : undefined;
+        if (!conv) {
+          conv = { id: newId("conv"), caseId: p.caseId, updated: at, turns: [] };
+          this.convs.unshift(conv);
+        }
+        conv.turns.push({ role: "user", text: p.shown, hidden: p.hidden, demo: true, at }, { role: "assistant", text: answer, hidden: [], demo: true, at });
+        conv.updated = at;
+        return { answer, demo: true, conversation_id: conv.id };
       }
+      case "consultations":
+        return [...this.convs].sort((x, y) => y.updated - x.updated).map((c) => {
+          const k = c.caseId ? this.cases.find((x) => x.id === c.caseId) : undefined;
+          const first = c.turns.find((t) => t.role === "user")?.text ?? "שיחה";
+          return {
+            id: c.id, case_id: c.caseId, title: first.length > 60 ? `${first.slice(0, 60)}…` : first, updated_at: c.updated, turns: c.turns.length,
+            case_label: k ? `${k.people.find((x) => x.role === "child")?.value ?? ""} · ${k.meta.code}` : null,
+          };
+        });
+      case "consultation": {
+        const c = this.convs.find((x) => x.id === String(a.id));
+        if (!c) return fail("not_found", "לא נמצא: השיחה");
+        return { id: c.id, case_id: c.caseId, turns: c.turns };
+      }
+      case "delete_consultation":
+        this.convs = this.convs.filter((x) => x.id !== String(a.id));
+        return null;
       case "check_export": {
         const c = this.find(a.caseId);
         const d = this.detail(c);

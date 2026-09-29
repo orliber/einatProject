@@ -265,8 +265,9 @@ try:
 
     # 6. Consultation.
     button("התייעצות").click()
-    find("//textarea[@id='consult-q']").send_keys("מה ההבדל בין WPPSI-IV ל-WISC-V בגיל 6?")
-    button("שליחה").click()
+    q = find("//textarea[@id='consult-q']")
+    q.send_keys("מה ההבדל בין WPPSI-IV ל-WISC-V בגיל 6?")
+    q.send_keys(Keys.ENTER)  # Enter sends, as in any chat
     expect_text("לפני שליחה ל-Claude")
     time.sleep(0.5)
     shot("consult-review")
@@ -274,6 +275,9 @@ try:
     expect_text("הדגמה", 60)
     time.sleep(0.5)
     shot("consult")
+    # Saved, like a conversation list: it is in "שיחות קודמות".
+    find("//nav[@aria-label='שיחות קודמות']//button[contains(@class,'history-item')]")
+    log.append("     consult: conversation saved in the list = True")
 
     # 7. Settings.
     button("הגדרות").click()

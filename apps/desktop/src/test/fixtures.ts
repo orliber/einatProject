@@ -9,6 +9,7 @@ export const status = (over: Partial<AppStatus> = {}): AppStatus => ({
   fips_active: false,
   demo_mode: true,
   model: "claude-opus-5",
+  speed: "balanced",
   integrity_warning: null,
   lock_minutes: 10,
   practitioner: ["רותם בדויה"],
