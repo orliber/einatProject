@@ -107,6 +107,8 @@ pub const MAIN_MIGRATIONS: &[&str] = &[
      CREATE INDEX drafts_case ON drafts(case_id, section_key);",
     // v2: structured data behind a material (a score sheet), sealed like the rest of the row.
     "ALTER TABLE inputs ADD COLUMN data_enc BLOB;",
+    // v3: which report sections a material feeds (D-022), sealed like the rest of the row.
+    "ALTER TABLE inputs ADD COLUMN routing_enc BLOB;",
 ];
 
 pub const IDENTITY_MIGRATIONS: &[&str] = &[

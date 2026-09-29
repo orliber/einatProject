@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use dv_core::{
     AppStatus, CaseDetail, ChatView, ConsultResult, Core, CoreError, CreatedVault, ExportCheck,
-    ImportPreview, Prepared, ReportSettings, SectionResult, SuspectDecision, UiError,
+    ImportPreview, Prepared, ReportSettings, SectionResult, SortResult, SuspectDecision, UiError,
 };
 use dv_domain::{CaseInput, CaseMeta, CaseSummary, Identity, IdentityInput, InputKind};
 use tauri::Manager;
@@ -344,6 +344,38 @@ async fn send_section(
     with_core(&state, move |c| c.finish_section(out, response)).await
 }
 
+/// Sorting materials into sections (D-022): everything not sorted yet, one review screen.
+#[tauri::command]
+async fn prepare_sort(state: tauri::State<'_, AppState>, case_id: String) -> Res<Prepared> {
+    with_core(&state, move |c| c.prepare_sort(&case_id)).await
+}
+
+#[tauri::command]
+async fn send_sort(state: tauri::State<'_, AppState>, approval_id: String) -> Res<SortResult> {
+    let out = with_core(&state, move |c| c.begin_send(&approval_id)).await?;
+    let (out, response) = tauri::async_runtime::spawn_blocking(move || {
+        let r = out.transmit();
+        (out, r)
+    })
+    .await
+    .map_err(|_| internal("send"))?;
+    with_core(&state, move |c| c.finish_sort(out, response)).await
+}
+
+/// Einat's choice of sections for one material; it always wins.
+#[tauri::command]
+async fn set_input_sections(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    input_id: String,
+    sections: Vec<String>,
+) -> Res<()> {
+    with_core(&state, move |c| {
+        c.set_input_sections(&case_id, &input_id, &sections)
+    })
+    .await
+}
+
 #[tauri::command]
 async fn chat(
     state: tauri::State<'_, AppState>,
@@ -539,6 +571,9 @@ fn main() {
             prepare_section,
             prepare_full_draft,
             send_section,
+            prepare_sort,
+            send_sort,
+            set_input_sections,
             chat,
             approve_paragraph,
             reject_paragraph,

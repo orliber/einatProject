@@ -13,6 +13,7 @@ import type { Identity } from "../ipc/generated/Identity";
 import type { IdentityInput } from "../ipc/generated/IdentityInput";
 import type { ImportPreview } from "../ipc/generated/ImportPreview";
 import type { InputKind } from "../ipc/generated/InputKind";
+import type { MaterialRouting } from "../ipc/generated/MaterialRouting";
 import type { Prepared } from "../ipc/generated/Prepared";
 import type { ReportSettings } from "../ipc/generated/ReportSettings";
 import type { ReviewPart } from "../ipc/generated/ReviewPart";
@@ -58,6 +59,8 @@ type Pending =
   | { type: "consult"; question: string };
 
 const SECTIONS = structure.parts.flatMap((p) => p.sections.map((s) => ({ ...s, part: p.title, inputs: s.inputs as InputKind[] })));
+/** Sections written from materials (the rest are written from other sections). */
+const SORTABLE = SECTIONS.filter((s) => s.inputs.length > 0 && !["dsm", "summary", "diagnoses", "recommendations"].includes(s.key));
 const DERIVED = ["dsm", "summary", "diagnoses", "recommendations"];
 const SINGLETON: Role[] = ["child", "mother", "father", "teacher", "kindergarten", "town"];
 const TAG_BASE: Record<Role, string> = {
@@ -207,15 +210,26 @@ export class FakeCore {
     return { id: c.id, meta: c.meta, child_name: c.people.find((p) => p.role === "child")?.value ?? null, created_at: c.created, updated_at: c.updated, approved_sections: approved };
   }
 
+  /** Where each material goes (D-022): the fixed table by kind, until it is sorted. */
+  private routing(c: Case): MaterialRouting[] {
+    return c.inputs.map((i) => {
+      const table = SORTABLE.filter((s) => s.inputs.includes(i.kind)).map((s) => s.key);
+      const passages = i.content.split(/\n\s*\n/).filter((x) => x.trim()).length;
+      return { input_id: i.id, feeds: table, suggested: [], table, sorted: false, needs_sorting: passages > 0, by_ai: false, added: [], removed: [], passages, used_passages: passages };
+    });
+  }
+
   private detail(c: Case): CaseDetail {
     const identities: Identity[] = c.people.map((p) => ({ id: p.id, case_id: c.id, role: p.role, tag: p.tag, value: p.value, aliases: p.aliases }));
+    const routing = this.routing(c);
     return {
-      id: c.id, meta: c.meta, identities, inputs: c.inputs,
+      id: c.id, meta: c.meta, identities, inputs: c.inputs, routing,
       sections: SECTIONS.map((s) => {
         const drafts = c.drafts.filter((d) => d.section === s.key && d.status !== "rejected" && d.status !== "superseded");
         return {
           key: s.key, title: s.title, part: s.part,
-          source_count: c.inputs.filter((i) => s.inputs.includes(i.kind)).length,
+          source_count: routing.filter((r) => r.feeds.includes(s.key)).length,
+          sortable: SORTABLE.some((x) => x.key === s.key),
           paragraphs: drafts.map((d) => ({ id: d.id, text: restore(d.text, c.people, this.practitioner), status: d.status, by_ai: d.byAi, sources: d.sources, warnings: [] })),
           approved: drafts.some((d) => d.status === "approved"),
         };

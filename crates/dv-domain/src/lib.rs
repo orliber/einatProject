@@ -6,6 +6,7 @@
 pub mod identity;
 pub mod records;
 pub mod report;
+pub mod routing;
 pub mod scores;
 
 pub use identity::{assign_tag, Identity, IdentityInput, Role, PRACTITIONER_TAG};
@@ -14,6 +15,7 @@ pub use records::{
     DraftStatus, GrammaticalGender, InputKind, Transmission,
 };
 pub use report::{ReportPart, ReportSection, ReportStructure};
+pub use routing::{passage_ranges, passages, Feed, Routing, SectionPassages, Suggestion};
 pub use scores::{
     format_sheet, instruments, sheet_table, Instrument, ScoreEntry, ScoreRow, ScoreSheet,
 };

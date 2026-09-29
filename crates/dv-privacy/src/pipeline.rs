@@ -4,6 +4,7 @@
 //! plus everything the review screen needs: what was hidden, and what is suspect.
 
 use std::fmt;
+use std::ops::Range;
 
 use dv_domain::{Identity, Role, PRACTITIONER_TAG};
 use serde::{Deserialize, Serialize};
@@ -518,6 +519,114 @@ fn find_suspects(
 
 /// Run layers 2–6 on one piece of text.
 pub fn filter(text: &str, ctx: &PrivacyContext<'_>) -> Result<FilterOutcome, PrivacyError> {
+    let (reps, suspects) = analyze(text, ctx)?;
+    Ok(assemble(text, &reps, &suspects))
+}
+
+/// Filter a whole text once, so every rule sees the full context, and also return the outcome
+/// of each range on its own (passages of a material, D-022).
+///
+/// Each part is exactly the whole outcome cut at the range: the same replacements, the same
+/// suspects. When a replacement or a suspect crosses the edge of a range, the parts are `None`
+/// and the caller must send the whole text.
+pub fn filter_split(
+    text: &str,
+    ctx: &PrivacyContext<'_>,
+    ranges: &[Range<usize>],
+) -> Result<(FilterOutcome, Option<Vec<FilterOutcome>>), PrivacyError> {
+    let (reps, suspects) = analyze(text, ctx)?;
+    let whole = assemble(text, &reps, &suspects);
+    let mut parts = Vec::with_capacity(ranges.len());
+    for r in ranges {
+        let Some(piece) = text.get(r.clone()) else {
+            return Ok((whole, None));
+        };
+        let crosses = |start: usize, end: usize| {
+            start < r.end && end > r.start && (start < r.start || end > r.end)
+        };
+        if reps.iter().any(|x| crosses(x.start, x.end))
+            || suspects.iter().any(|x| crosses(x.start, x.end))
+        {
+            return Ok((whole, None));
+        }
+        let inside = |start: usize, end: usize| start >= r.start && end <= r.end;
+        let part_reps: Vec<Replacement> = reps
+            .iter()
+            .filter(|x| inside(x.start, x.end))
+            .map(|x| Replacement {
+                start: x.start - r.start,
+                end: x.end - r.start,
+                ..x.clone()
+            })
+            .collect();
+        let part_suspects: Vec<SuspectSpan> = suspects
+            .iter()
+            .filter(|x| inside(x.start, x.end))
+            .map(|x| SuspectSpan {
+                start: x.start - r.start,
+                end: x.end - r.start,
+                suspect: x.suspect.clone(),
+            })
+            .collect();
+        parts.push(assemble(piece, &part_reps, &part_suspects));
+    }
+    Ok((whole, Some(parts)))
+}
+
+impl FilterOutcome {
+    /// Several outcomes shown and sent as one text, `separator` between each two (plain text,
+    /// the same in both columns).
+    #[must_use]
+    pub fn join(parts: &[&FilterOutcome], separators: &[&str]) -> FilterOutcome {
+        let mut out = FilterOutcome {
+            tagged: String::new(),
+            original_segments: Vec::new(),
+            tagged_segments: Vec::new(),
+            suspects: Vec::new(),
+            hidden: Vec::new(),
+            checks: Checks::default(),
+        };
+        for (i, p) in parts.iter().enumerate() {
+            if i > 0 {
+                let sep = separators.get(i - 1).copied().unwrap_or("\n\n");
+                let seg = Segment {
+                    text: sep.to_owned(),
+                    mark: None,
+                    label: None,
+                };
+                out.original_segments.push(seg.clone());
+                out.tagged_segments.push(seg);
+                out.tagged.push_str(sep);
+            }
+            out.tagged.push_str(&p.tagged);
+            out.original_segments
+                .extend(p.original_segments.iter().cloned());
+            out.tagged_segments
+                .extend(p.tagged_segments.iter().cloned());
+            for s in &p.suspects {
+                if !out.suspects.contains(s) {
+                    out.suspects.push(s.clone());
+                }
+            }
+            for h in &p.hidden {
+                if !out.hidden.contains(h) {
+                    out.hidden.push(h.clone());
+                }
+            }
+            out.checks.declared_names += p.checks.declared_names;
+            out.checks.patterns += p.checks.patterns;
+            out.checks.name_suspects += p.checks.name_suspects;
+            out.checks.indirect_suspects += p.checks.indirect_suspects;
+        }
+        out
+    }
+}
+
+/// Layers 2–6: what to replace and what to ask about, as spans of `text`, sorted.
+fn analyze(
+    text: &str,
+    ctx: &PrivacyContext<'_>,
+) -> Result<(Vec<Replacement>, Vec<SuspectSpan>), PrivacyError> {
     let tokens = tokenize(text);
     let mut reps: Vec<Replacement> = Vec::new();
     let mut suspects: Vec<SuspectSpan> = Vec::new();
@@ -610,7 +719,7 @@ pub fn filter(text: &str, ctx: &PrivacyContext<'_>) -> Result<FilterOutcome, Pri
 
     reps.sort_by_key(|r| r.start);
     suspects.sort_by_key(|s| s.start);
-    Ok(assemble(text, &reps, &suspects))
+    Ok((reps, suspects))
 }
 
 fn assemble(text: &str, reps: &[Replacement], suspects: &[SuspectSpan]) -> FilterOutcome {

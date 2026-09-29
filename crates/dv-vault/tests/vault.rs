@@ -349,3 +349,31 @@ fn structured_data_behind_a_material_is_sealed_and_survives_relock() {
         Some(r#"{"note":"עבד לאט ובדייקנות"}"#)
     );
 }
+
+#[test]
+fn where_a_material_goes_is_sealed_and_survives_relock() {
+    let (dir, mut vault, _) = new_vault();
+    let case = noam(&mut vault);
+    let a = vault
+        .add_input(&case, InputKind::Intake, "אינטייק", "הלך בגיל שנה.")
+        .unwrap();
+    let b = vault
+        .add_input(&case, InputKind::Kindergarten, "שיחה עם הגננת", "משחק לבד.")
+        .unwrap();
+    assert_eq!(vault.input_routing(&case, &a.id).unwrap(), None);
+    let routing = r#"{"suggestion":null,"added":["סעיף-שנבחר-ביד"],"removed":[]}"#;
+    vault.set_input_routing(&case, &a.id, routing).unwrap();
+    assert!(matches!(
+        vault.set_input_routing(&case, "missing", "{}"),
+        Err(VaultError::NotFound)
+    ));
+    drop(vault);
+    assert!(!contains(&all_bytes(dir.path()), "סעיף-שנבחר-ביד"));
+    let vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
+    assert_eq!(
+        vault.input_routing(&case, &a.id).unwrap().as_deref(),
+        Some(routing)
+    );
+    // Each material has its own; nothing leaks to its neighbour.
+    assert_eq!(vault.input_routing(&case, &b.id).unwrap(), None);
+}

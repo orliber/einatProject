@@ -97,7 +97,7 @@ pub fn nonce_from(random: &[u8; 16]) -> String {
 }
 
 /// Random per-request marker so text inside a document cannot close the data block.
-fn data_block(nonce: &str, attrs: &str, body: &str) -> String {
+pub(crate) fn data_block(nonce: &str, attrs: &str, body: &str) -> String {
     let safe = body.replace(&format!("</data nonce={nonce}>"), "");
     format!("<data nonce={nonce} {attrs}>\n{safe}\n</data nonce={nonce}>")
 }
@@ -126,7 +126,7 @@ const SECTION_SCHEMA: &str = r#"{
   "additionalProperties": false
 }"#;
 
-fn base_body(model: &ModelConfig, system: &str, max_tokens: u32) -> Value {
+pub(crate) fn base_body(model: &ModelConfig, system: &str, max_tokens: u32) -> Value {
     json!({
         "model": model.model,
         "max_tokens": max_tokens,

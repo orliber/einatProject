@@ -4,6 +4,7 @@
 //! machine without a WebView. `Core` owns the unlocked vault and walks every request through
 //! the same path: filter → build → review → gate → (approval) → send → check → store.
 
+mod sorting;
 mod views;
 
 use std::collections::{HashMap, HashSet};
@@ -13,7 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use dv_ai::{ModelConfig, SectionInput, TaggedInput, TaggedTurn, ALLOWED_MODELS};
 use dv_domain::{
-    Author, CaseMeta, CaseSummary, ChatRole, DraftStatus, IdentityInput, InputKind,
+    passage_ranges, Author, CaseMeta, CaseSummary, ChatRole, DraftStatus, IdentityInput, InputKind,
     ReportStructure, Role,
 };
 use dv_egress::{AnthropicTransport, EgressError, Transport};
@@ -28,8 +29,8 @@ use serde_json::Value;
 
 pub use views::{
     AppStatus, CaseDetail, ChatView, ConsultResult, CreatedVault, ExportCheck, ImportPreview,
-    NameSuggestion, ParagraphView, Prepared, ReportSettings, ReviewPart, SectionResult,
-    SectionView, SuspectDecision, UiError,
+    MaterialRouting, NameSuggestion, ParagraphView, Prepared, ReportSettings, ReviewPart,
+    SectionResult, SectionView, SortResult, SuspectDecision, UiError,
 };
 
 const API_KEY: &str = "anthropic_api_key";
@@ -218,6 +219,13 @@ enum PendingKind {
     Consult {
         case_id: Option<String>,
         message_tagged: String,
+    },
+    /// Sorting materials into sections (D-022): per material its id, how many passages were
+    /// sent, and a fingerprint of its text then.
+    Sort {
+        case_id: String,
+        materials: Vec<(String, usize, u64)>,
+        sections: Vec<String>,
     },
 }
 
@@ -651,9 +659,18 @@ impl Core {
         title: &str,
         content: &str,
     ) -> Result<(), CoreError> {
-        Ok(self
-            .vault_mut()?
-            .update_input(case_id, input_id, title, content)?)
+        let before = self
+            .vault_ref()?
+            .inputs(case_id)?
+            .into_iter()
+            .find(|i| i.id == input_id)
+            .map(|i| i.content);
+        self.vault_mut()?
+            .update_input(case_id, input_id, title, content)?;
+        if before.as_deref() != Some(content) {
+            self.forget_sorting(case_id, input_id)?;
+        }
+        Ok(())
     }
 
     /// The instruments with their fixed tables (knowledge/instruments.md).
@@ -909,6 +926,11 @@ impl Core {
         Ok(())
     }
 
+    /// No API key and no test transport: answers are built locally and nothing is sent.
+    fn demo_mode(&mut self) -> Result<bool, CoreError> {
+        Ok(self.vault_ref()?.secret(API_KEY)?.is_none() && self.transport.is_none())
+    }
+
     fn model_config(&mut self) -> Result<ModelConfig, CoreError> {
         let model = self
             .vault_ref()?
@@ -928,6 +950,11 @@ impl Core {
         let identities = v.identities(case_id)?;
         let inputs = v.inputs(case_id)?;
         let practitioner = v.practitioner()?.names.first().cloned();
+        let routing = Core::material_routing(v, &structure, case_id, &inputs)?;
+        let sortable: Vec<&str> = sorting::sortable(&structure)
+            .iter()
+            .map(|s| s.key.as_str())
+            .collect();
         let mut sections = Vec::new();
         for part in &structure.parts {
             for s in &part.sections {
@@ -954,7 +981,7 @@ impl Core {
                     })
                     .collect();
                 let source_count =
-                    u32::try_from(inputs.iter().filter(|i| s.inputs.contains(&i.kind)).count())
+                    u32::try_from(routing.iter().filter(|r| r.feeds.contains(&s.key)).count())
                         .unwrap_or(0);
                 let approved = paragraphs.iter().any(|p| p.status == DraftStatus::Approved);
                 sections.push(SectionView {
@@ -962,6 +989,7 @@ impl Core {
                     title: s.title.clone(),
                     part: part.title.clone(),
                     source_count,
+                    sortable: sortable.contains(&s.key.as_str()),
                     paragraphs,
                     approved,
                 });
@@ -972,6 +1000,7 @@ impl Core {
             meta,
             identities,
             inputs,
+            routing,
             sections,
         })
     }
@@ -1101,7 +1130,7 @@ impl Core {
             .clone();
         let model = self.model_config()?;
         let data = self.privacy_data(case_id)?;
-        let demo_mode = self.vault_ref()?.secret(API_KEY)?.is_none() && self.transport.is_none();
+        let demo_mode = self.demo_mode()?;
 
         let (input, review, sources) = {
             let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
@@ -1126,24 +1155,30 @@ impl Core {
             let mut source_rows = Vec::new();
             let derived = DERIVED_SECTIONS.contains(&section_key);
             if !derived {
-                for (n, inp) in v
-                    .inputs(case_id)?
-                    .into_iter()
-                    .filter(|i| section.inputs.contains(&i.kind))
-                    .enumerate()
-                {
-                    let sid = format!("S{}", n + 1);
+                for inp in v.inputs(case_id)? {
+                    // D-022: the table, the sorting, and Einat's choice decide what goes here.
+                    let table = sorting::table_for(&structure, inp.kind);
+                    let count = passage_ranges(&inp.content).len();
+                    let Some(feed) =
+                        sorting::routing_of(v, case_id, &inp.id)?.feed(section_key, &table, count)
+                    else {
+                        continue;
+                    };
+                    let sid = format!("S{}", tagged_sources.len() + 1);
                     let title = run(&inp.title)?;
-                    let content = run(&inp.content)?;
+                    let content = sorting::section_text(&inp.content, &feed, &ctx)?;
+                    let kind = match feed {
+                        dv_domain::Feed::Whole => inp.kind.label_he().to_owned(),
+                        dv_domain::Feed::Passages(_) => {
+                            format!("{} · קטעים שנבחרו לסעיף", inp.kind.label_he())
+                        }
+                    };
                     // A title with nothing to hide is shown as the source's label, not as a part.
                     if title.original_segments.iter().any(|s| s.mark.is_some()) {
-                        review.add(format!("{sid} · {} · כותרת", inp.kind.label_he()), &title);
-                        review.add(format!("{sid} · {}", inp.kind.label_he()), &content);
+                        review.add(format!("{sid} · {kind} · כותרת"), &title);
+                        review.add(format!("{sid} · {kind}"), &content);
                     } else {
-                        review.add(
-                            format!("{sid} · {} · {}", inp.kind.label_he(), title.tagged),
-                            &content,
-                        );
+                        review.add(format!("{sid} · {kind} · {}", title.tagged), &content);
                     }
                     tagged_sources.push(TaggedInput {
                         input_id: inp.id.clone(),
@@ -1375,13 +1410,20 @@ impl Core {
     ) -> Result<Vec<(String, Prepared)>, CoreError> {
         let structure =
             ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
-        let inputs = self.vault_ref()?.inputs(case_id)?;
+        let fed: HashSet<String> = {
+            let v = self.vault_ref()?;
+            let inputs = v.inputs(case_id)?;
+            Core::material_routing(v, &structure, case_id, &inputs)?
+                .into_iter()
+                .flat_map(|r| r.feeds)
+                .collect()
+        };
         let mut out = Vec::new();
         for s in structure
             .sections()
             .filter(|s| !DERIVED_SECTIONS.contains(&s.key.as_str()))
         {
-            if inputs.iter().any(|i| s.inputs.contains(&i.kind)) {
+            if fed.contains(&s.key) {
                 let p = self.prepare_section(
                     case_id,
                     &s.key,

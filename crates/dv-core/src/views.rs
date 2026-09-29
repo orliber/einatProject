@@ -64,8 +64,10 @@ pub struct SectionView {
     pub key: String,
     pub title: String,
     pub part: String,
-    /// Input kinds that feed this section and how many inputs of those kinds exist.
+    /// How many materials feed this section (table, sorting and Einat's choice, D-022).
     pub source_count: u32,
+    /// Written from materials (not from other sections): materials can be sorted into it.
+    pub sortable: bool,
     pub paragraphs: Vec<ParagraphView>,
     pub approved: bool,
 }
@@ -86,7 +88,48 @@ pub struct CaseDetail {
     pub meta: CaseMeta,
     pub identities: Vec<Identity>,
     pub inputs: Vec<CaseInput>,
+    /// Where each material goes in the report, in the order of `inputs`.
+    pub routing: Vec<MaterialRouting>,
     pub sections: Vec<SectionView>,
+}
+
+/// Where one material goes in the report (D-022).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct MaterialRouting {
+    pub input_id: String,
+    /// Sections it feeds now, in report order.
+    pub feeds: Vec<String>,
+    /// Sections the sorting chose (empty when not sorted, or the text changed since).
+    pub suggested: Vec<String>,
+    /// Sections of the fixed table for its kind.
+    pub table: Vec<String>,
+    pub sorted: bool,
+    /// Not read by a sorting since its text last changed: offer "מיון החומרים".
+    pub needs_sorting: bool,
+    /// Sorted by Claude (false: locally, in demo mode).
+    pub by_ai: bool,
+    /// Einat's changes.
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+    pub passages: u32,
+    /// Passages that reach at least one section.
+    pub used_passages: u32,
+}
+
+/// What a sorting changed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SortResult {
+    /// Materials now sorted.
+    pub sorted: u32,
+    /// Materials left as they were (nothing placed, or edited meanwhile).
+    pub unchanged: u32,
+    /// Material-to-section links made.
+    pub links: u32,
+    /// Ids or sections in the answer that were not in the request (dropped).
+    pub ignored: u32,
+    pub demo: bool,
 }
 
 /// One piece of outgoing text as the review screen shows it.

@@ -53,6 +53,144 @@ fn api_text(text: &str) -> Value {
     })
 }
 
+/// Words that point a passage to a section, for sorting in demo mode (D-022). Deliberately
+/// simple: the real sorting reads the text; this only shows the flow without sending anything.
+const SECTION_WORDS: &[(&str, &[&str])] = &[
+    (
+        "referral",
+        &["הפני", "סיבת", "לברר", "פנו לאבחון", "פנו בשל"],
+    ),
+    (
+        "background",
+        &[
+            "הריון",
+            "לידה",
+            "נולד",
+            "אבני דרך",
+            "הלך בגיל",
+            "מילים ראשונות",
+            "אלרגי",
+            "בריאות",
+        ],
+    ),
+    (
+        "parents_view",
+        &[
+            "בבית",
+            "לדברי ההורים",
+            "לדברי האם",
+            "לדברי האב",
+            "ההורים מתארים",
+            "ההורים מספרים",
+        ],
+    ),
+    (
+        "kindergarten",
+        &[
+            "בגן",
+            "גננת",
+            "הסייעת",
+            "בכיתה",
+            "המורה",
+            "המסגרת",
+            "בחצר",
+            "מפגש בוקר",
+        ],
+    ),
+    (
+        "prior_assessments",
+        &[
+            "אבחון קודם",
+            "טיפול",
+            "קלינאית",
+            "ריפוי בעיסוק",
+            "פיזיותרפ",
+            "נוירולוג",
+            "התפתחות הילד",
+        ],
+    ),
+    (
+        "tools",
+        &[
+            "WPPSI",
+            "WISC",
+            "ABAS",
+            "ADOS",
+            "CBCL",
+            "ASRS",
+            "CARS",
+            "Bayley",
+            "הועבר",
+        ],
+    ),
+    (
+        "appearance",
+        &["הגיע", "נכנס לחדר", "נפרד", "שיתף פעולה", "במפגש", "בחדר"],
+    ),
+    (
+        "cognitive",
+        &[
+            "ציון",
+            "אחוזון",
+            "הבנה מילולית",
+            "זיכרון",
+            "מהירות עיבוד",
+            "חשיבה",
+            "VCI",
+            "FSIQ",
+            "WPPSI",
+            "WISC",
+        ],
+    ),
+    ("adaptive", &["ABAS", "הסתגלות", "תפקוד יומיומי", "עצמאות"]),
+    (
+        "communication",
+        &[
+            "שפה",
+            "דיבור",
+            "תקשורת",
+            "משפטים",
+            "קשר עין",
+            "הצבעה",
+            "ADOS",
+            "תחומי עניין",
+            "חזרתי",
+            "הדדי",
+        ],
+    ),
+    (
+        "emotional",
+        &[
+            "משחק",
+            "רגש",
+            "תסכול",
+            "חרדה",
+            "פחד",
+            "ויסות",
+            "בובות",
+            "כעס",
+        ],
+    ),
+];
+
+/// Demo-mode sorting: each passage goes to every section whose words it contains.
+fn sort_locally(request: &str, keys: &[&str]) -> Value {
+    let passages = sources_in(request);
+    let sections: Vec<Value> = SECTION_WORDS
+        .iter()
+        .filter(|(key, _)| keys.contains(key))
+        .filter_map(|(key, words)| {
+            let ids: Vec<&str> = passages
+                .iter()
+                .filter(|(_, text)| words.iter().any(|w| text.contains(w)))
+                .map(|(id, _)| id.as_str())
+                .collect();
+            (!ids.is_empty()).then(|| json!({ "section": key, "passages": ids }))
+        })
+        .collect();
+    json!({ "sections": sections })
+}
+
 /// Answer a request body the way the real API would, from local material only.
 #[must_use]
 pub fn respond(body: &Value) -> Value {
@@ -67,6 +205,13 @@ pub fn respond(body: &Value) -> Value {
             "מצב הדגמה: כאן יופיע סיכום של מקורות מקצועיים שנמצאו בחיפוש (למשל APA ו-PubMed), \
              עם ציטוט לכל טענה. חיפוש אמיתי יתאפשר אחרי הגדרת מפתח API עם ZDR.",
         );
+    }
+    let schema = &body["output_config"]["format"]["schema"];
+    if let Some(keys) =
+        schema["properties"]["sections"]["items"]["properties"]["section"]["enum"].as_array()
+    {
+        let keys: Vec<&str> = keys.iter().filter_map(Value::as_str).collect();
+        return api_text(&sort_locally(last_user, &keys).to_string());
     }
     if body["output_config"]["format"].is_null() {
         return api_text(
@@ -103,6 +248,44 @@ mod tests {
     use super::*;
     use crate::request::{build_section_request, ModelConfig, SectionInput, TaggedInput};
     use crate::response::parse_section;
+
+    #[test]
+    fn demo_sorting_parses_and_places_passages_by_their_words() {
+        use crate::sort::{build_sort_request, parse_sort, SortInput, SortMaterial, SortSection};
+        let section = |k: &str| SortSection {
+            key: k.into(),
+            about: String::new(),
+        };
+        let input = SortInput {
+            sections: vec![
+                section("background"),
+                section("kindergarten"),
+                section("cognitive"),
+            ],
+            materials: vec![SortMaterial {
+                input_id: "i1".into(),
+                kind_label: "אינטייק".into(),
+                title_tagged: String::new(),
+                passages_tagged: vec![
+                    "ההריון והלידה עברו ללא סיבוכים.".into(),
+                    "בגן [גננת] מתארת קושי במעברים.".into(),
+                    "תודה רבה.".into(),
+                ],
+            }],
+        };
+        let body = build_sort_request(&ModelConfig::default(), &input, "n");
+        let keys: Vec<String> = input.sections.iter().map(|s| s.key.clone()).collect();
+        let reply = parse_sort(&respond(&body), &[3], &keys).unwrap();
+        assert_eq!(reply.ignored, 0);
+        let got: Vec<(&str, &[u32])> = reply.materials[0]
+            .iter()
+            .map(|s| (s.section.as_str(), s.passages.as_slice()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![("background", &[1][..]), ("kindergarten", &[2][..])]
+        );
+    }
 
     #[test]
     fn demo_answers_parse_and_cite_real_sources() {

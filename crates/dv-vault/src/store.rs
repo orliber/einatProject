@@ -907,6 +907,48 @@ impl Vault {
             .transpose()
     }
 
+    /// Where a material goes in the report (D-022), as JSON, sealed with the case key.
+    pub fn set_input_routing(
+        &mut self,
+        case_id: &str,
+        input_id: &str,
+        routing: &str,
+    ) -> Result<(), VaultError> {
+        let key = self.case_key(case_id)?;
+        let changed = self.main.execute(
+            "UPDATE inputs SET routing_enc = ?1 WHERE id = ?2 AND case_id = ?3",
+            params![
+                seal_str(&key, &aad("inputs", "routing", input_id, case_id), routing)?,
+                input_id,
+                case_id
+            ],
+        )?;
+        if changed == 0 {
+            return Err(VaultError::NotFound);
+        }
+        Ok(())
+    }
+
+    pub fn input_routing(
+        &self,
+        case_id: &str,
+        input_id: &str,
+    ) -> Result<Option<String>, VaultError> {
+        let key = self.case_key(case_id)?;
+        let sealed: Option<Vec<u8>> = self
+            .main
+            .query_row(
+                "SELECT routing_enc FROM inputs WHERE id = ?1 AND case_id = ?2",
+                params![input_id, case_id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .ok_or(VaultError::NotFound)?;
+        sealed
+            .map(|b| open_string(&key, &aad("inputs", "routing", input_id, case_id), &b))
+            .transpose()
+    }
+
     pub fn delete_input(&mut self, case_id: &str, input_id: &str) -> Result<(), VaultError> {
         self.main.execute(
             "DELETE FROM inputs WHERE id = ?1 AND case_id = ?2",

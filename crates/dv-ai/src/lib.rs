@@ -7,6 +7,7 @@ pub mod demo;
 pub mod prompts;
 mod request;
 mod response;
+mod sort;
 
 pub use request::{
     build_consult_request, build_research_request, build_section_request, nonce_from, ConsultInput,
@@ -14,3 +15,6 @@ pub use request::{
     DEFAULT_MODEL, RESEARCH_ALLOWED_DOMAINS,
 };
 pub use response::{parse_consult, parse_section, AiError, ProposedParagraph, SectionReply};
+pub use sort::{
+    build_sort_request, parse_sort, passage_id, SortInput, SortMaterial, SortReply, SortSection,
+};

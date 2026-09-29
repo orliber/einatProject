@@ -3,6 +3,10 @@ import type { ParagraphView } from "./ParagraphView";
 
 export type SectionView = { key: string, title: string, part: string, 
 /**
- * Input kinds that feed this section and how many inputs of those kinds exist.
+ * How many materials feed this section (table, sorting and Einat's choice, D-022).
  */
-source_count: number, paragraphs: Array<ParagraphView>, approved: boolean, };
+source_count: number, 
+/**
+ * Written from materials (not from other sections): materials can be sorted into it.
+ */
+sortable: boolean, paragraphs: Array<ParagraphView>, approved: boolean, };
