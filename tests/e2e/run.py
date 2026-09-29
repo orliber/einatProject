@@ -187,7 +187,7 @@ try:
     section = find("//button[contains(@class,'side-section')][.//span[normalize-space()='איכויות התקשורת']]")
     d.execute_script("arguments[0].scrollIntoView({block: 'center'});", section)
     section.click()
-    button("טיוטה מהמקורות").click()
+    button("טיוטה מהחומרים").click()
     expect_text("לפני שליחה ל-Claude", 60)
     time.sleep(0.5)
     shot("review-suspect")

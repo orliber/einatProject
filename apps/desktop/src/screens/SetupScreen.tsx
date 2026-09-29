@@ -106,7 +106,9 @@ export function SetupScreen({ status, onCreated, onDone }: { status: AppStatus; 
             </ul>
             <ErrorLine error={error} />
             <button type="submit" className="btn btn-primary btn-big" disabled={busy}>{busy ? "יוצרת כספת מוצפנת…" : "יצירת הכספת"}</button>
-            <p className="hint">ההצפנה נעשית ברכיב הצפנה מאושר ומבוקר. את הסיסמה אף אחד לא יודע ולא שומר, גם לא אנחנו.</p>
+            <p className="hint">
+              {status.fips_active ? "ההצפנה נעשית ברכיב הצפנה מאושר ומבוקר (FIPS 140-3)." : "הכל נשמר מוצפן במחשב הזה."} את הסיסמה אף אחד לא יודע ולא שומר, גם לא אנחנו.
+            </p>
           </form>
         )}
 

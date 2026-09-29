@@ -262,8 +262,8 @@ export class FakeCore {
       c.drafts.push({ id: newId("d"), section: p.section, text: x.text, status: "proposed", byAi: true, sources: p.refs.filter((r) => x.source_refs.includes(r.sid)).map((r) => r.label) });
     }
     const reply = paragraphs.length
-      ? `מצב הדגמה: ניסחתי ${paragraphs.length} פסקאות לדוגמה מתוך המקורות. בתוכנה, עם חיבור ל-Claude, הניסוח נעשה בסגנון שלך ומצליב בין המקורות.`
-      : "מצב הדגמה: אין עדיין מקורות לסעיף הזה. אפשר להוסיף אינטייק, שיחה או מסמך.";
+      ? `מצב הדגמה: ניסחתי ${paragraphs.length} פסקאות לדוגמה מתוך החומרים. בתוכנה, עם חיבור ל-Claude, הניסוח נעשה בסגנון שלך ומצליב בין החומרים.`
+      : "מצב הדגמה: אין עדיין חומרים לסעיף הזה. אפשר להוסיף אינטייק, מפגש או מסמך.";
     const chat = (c.chat[p.section] ??= []);
     if (p.instruction.trim()) chat.push({ role: "user", text: p.instruction, hidden: [], demo: true });
     chat.push({ role: "assistant", text: reply, hidden: [], demo: true });

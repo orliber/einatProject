@@ -12,7 +12,7 @@ const DERIVED = ["summary", "diagnoses", "recommendations", "dsm"];
 const QUICK: [string, string][] = [
   ["להרחיב", "הרחיבי את הטיוטה של הסעיף, בלי להוסיף עובדות שאינן במקורות."],
   ["לקצר", "קצרי את הטיוטה של הסעיף ושמרי על כל הממצאים העיקריים."],
-  ["לבדוק מול המקורות", "בדקי את הטיוטה מול המקורות: מה חסר, מה סותר, ומה לא מבוסס."],
+  ["לבדוק מול החומרים", "בדקי את הטיוטה מול המקורות: מה חסר, מה סותר, ומה לא מבוסס."],
   ["להציע המלצות", "הציעי המלצות שנובעות מהממצאים שבמקורות, כל אחת עם הנימוק שלה."],
 ];
 
@@ -67,7 +67,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
           setLast(result);
           setMessage("");
           await Promise.all([reload(), loadChat()]);
-          if (result.demo) notify("מצב הדגמה: התשובה נבנתה במחשב מתוך המקורות, ושום דבר לא נשלח.");
+          if (result.demo) notify("מצב הדגמה: התשובה נבנתה במחשב מתוך החומרים, ושום דבר לא נשלח.");
         },
       });
     } catch (e) {
@@ -128,11 +128,18 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
           {visible.length === 0 && (
             <div className="draft-empty">
               <p className="serif">עוד אין טיוטה לסעיף הזה.</p>
+              <p className="hint">
+                {derived
+                  ? "Claude יכין טיוטה מהסעיפים שכבר אישרת. את קוראת ומאשרת כל פסקה."
+                  : section.source_count > 0
+                    ? "Claude יכין טיוטה מהחומרים שמזינים את הסעיף. לפני השליחה תראי בדיוק מה יוצא, ואחר כך מאשרים פסקה אחר פסקה."
+                    : "עוד אין חומרים שמזינים את הסעיף. אפשר להוסיף אותם בחומרי התיק, או לכתוב בעצמך."}
+              </p>
               <div className="row">
                 {(derived || section.source_count > 0) && (
                   <button type="button" className="btn btn-primary" disabled={busy}
                     onClick={() => void ask(derived ? "כתבי טיוטה לסעיף מתוך הסעיפים שאושרו." : "כתבי טיוטה לסעיף מתוך המקורות, עם מקור לכל פסקה.", `טיוטה לסעיף ${section.title}`)}>
-                    {derived ? "טיוטה מהסעיפים שאושרו" : "טיוטה מהמקורות"}
+                    {derived ? "טיוטה מהסעיפים שאושרו" : "טיוטה מהחומרים"}
                   </button>
                 )}
                 <button type="button" className="btn" onClick={() => setOwn("")}>כתיבה בעצמי</button>
@@ -215,7 +222,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
 
           {last && (last.questions.length > 0 || last.missing.length > 0 || last.contradictions.length > 0) && (
             <div className="notes-from-claude">
-              {last.contradictions.map((c, i) => <p key={`c${i}`}><b>סתירה בין מקורות:</b> {c}</p>)}
+              {last.contradictions.map((c, i) => <p key={`c${i}`}><b>סתירה בין החומרים:</b> {c}</p>)}
               {last.missing.map((c, i) => <p key={`m${i}`}><b>חסר מידע:</b> {c}</p>)}
               {last.questions.map((c, i) => <p key={`q${i}`}><b>שאלה:</b> {c}</p>)}
             </div>

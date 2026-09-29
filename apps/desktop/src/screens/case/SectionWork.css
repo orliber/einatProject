@@ -31,6 +31,13 @@
   font-size: 18px;
   color: var(--ink-soft);
 }
+.draft-empty p.hint {
+  margin-top: -6px;
+  max-width: 62ch;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink-muted);
+}
 .para {
   display: flex;
   flex-direction: column;
