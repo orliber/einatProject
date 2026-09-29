@@ -83,7 +83,7 @@ pub(crate) fn section_text(
             separators.push(if n == last + 1 {
                 "\n\n"
             } else {
-                "\n\n[…]\n\n"
+                "\n\n(…)\n\n"
             });
         }
         picked.push(part);

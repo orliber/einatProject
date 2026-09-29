@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { useApp } from "../../App";
 import { kindLabel, kindOrder } from "../../i18n/he";
-import { ipc, type CaseInput, type ImportPreview, type InputKind, type ScoreSheet } from "../../ipc/client";
+import { ipc, type CaseInput, type ImportPreview, type InputKind, type MaterialRouting, type ScoreSheet } from "../../ipc/client";
 import type { FilterOutcome } from "../../ipc/generated/FilterOutcome";
 import { ImportDialog } from "../../components/ImportDialog";
 import { ScoresDialog } from "../../components/ScoresDialog";
@@ -20,11 +20,15 @@ export function MaterialsView({ api }: { api: CaseApi }) {
   const [reading, setReading] = useState<string | null>(null);
   const [writing, setWriting] = useState<{ kind: InputKind; input?: CaseInput } | null>(null);
   const [scoring, setScoring] = useState<{ input?: CaseInput; sheet?: ScoreSheet } | null>(null);
+  const [choosing, setChoosing] = useState<CaseInput | null>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const input = detail.inputs.find((i) => i.id === selected) ?? null;
+  const routeOf = (id: string) => detail.routing.find((r) => r.input_id === id);
+  const route = input ? routeOf(input.id) : undefined;
+  const titleOf = (key: string) => detail.sections.find((s) => s.key === key)?.title ?? key;
 
   useEffect(() => {
     let alive = true;
@@ -122,7 +126,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
                 <span className={i.kind === "test_scores" ? "chip chip-ok" : i.kind === "session_note" ? "chip chip-sand" : "chip"}>{kindLabel[i.kind]}</span>
               </span>
               <span className="small muted">
-                {feedText(api, i.kind)} · {new Date(i.created_at * 1000).toLocaleDateString("he-IL", { day: "numeric", month: "numeric" })}
+                {feedText(routeOf(i.id), titleOf)}{routeOf(i.id)?.sorted && <span className="sorted-mark"> · מוין</span>} · {new Date(i.created_at * 1000).toLocaleDateString("he-IL", { day: "numeric", month: "numeric" })}
               </span>
             </button>
           ))}
@@ -141,6 +145,20 @@ export function MaterialsView({ api }: { api: CaseApi }) {
                 <button type="button" className="btn btn-small" onClick={() => void edit(input)}>עריכה</button>
                 <button type="button" className="btn btn-small" onClick={() => void remove(input)}>מחיקה</button>
               </div>
+              {route && (
+                <div className="material-feeds">
+                  <span className="small grow">
+                    <b>מזין בדוח: </b>
+                    {route.feeds.length ? route.feeds.map(titleOf).join(" · ") : "אף סעיף"}
+                    <span className="muted">
+                      {route.sorted
+                        ? ` (לפי המיון${route.by_ai ? " של Claude" : ""}: ${route.used_passages} מתוך ${route.passages} קטעים)`
+                        : route.added.length || route.removed.length ? " (לפי הבחירה שלך)" : " (לפי סוג החומר)"}
+                    </span>
+                  </span>
+                  <button type="button" className="btn btn-small" onClick={() => setChoosing(input)}>שינוי הסעיפים</button>
+                </div>
+              )}
               <div className="material-text serif">
                 {preview ? <Segments segments={preview.original_segments} side="original" /> : input.content}
               </div>
@@ -163,6 +181,11 @@ export function MaterialsView({ api }: { api: CaseApi }) {
           onClose={() => setScoring(null)}
           onSaved={async (id) => { setScoring(null); await reload(); setSelected(id); notify("הציונים נשמרו בתיק."); }} />
       )}
+      {choosing && routeOf(choosing.id) && (
+        <SectionsDialog api={api} input={choosing} route={routeOf(choosing.id) as MaterialRouting} titleOf={titleOf}
+          onClose={() => setChoosing(null)}
+          onSaved={async () => { setChoosing(null); await reload(); notify("הסעיפים של החומר עודכנו."); }} />
+      )}
       {writing && (
         <WriteDialog caseId={caseId} kind={writing.kind} input={writing.input} onClose={() => setWriting(null)}
           onSaved={async (id) => { setWriting(null); await reload(); if (id) setSelected(id); }} />
@@ -175,32 +198,67 @@ function countHidden(p: FilterOutcome): number {
   return p.original_segments.filter((s) => s.mark === "replaced" || s.mark === "relative").length;
 }
 
-function feedText(api: CaseApi, kind: InputKind): string {
-  const titles = api.detail.sections.filter((s) => sectionInputs(api, s.key).includes(kind)).map((s) => s.title);
+function feedText(route: MaterialRouting | undefined, titleOf: (key: string) => string): string {
+  const titles = (route?.feeds ?? []).map(titleOf);
   if (!titles.length) return "לא מזין סעיף";
   return `מזין: ${titles.slice(0, 2).join(", ")}${titles.length > 2 ? ` ועוד ${titles.length - 2}` : ""}`;
 }
 
-/** The kinds that feed each section (mirrors templates/report_structure.json). */
-const SECTION_INPUTS: Record<string, InputKind[]> = {
-  referral: ["intake", "free_text"],
-  background: ["intake"],
-  parents_view: ["intake"],
-  kindergarten: ["kindergarten"],
-  prior_assessments: ["prior_report", "professional"],
-  tools: ["test_scores", "free_text"],
-  appearance: ["observation", "session_note", "free_text"],
-  cognitive: ["test_scores", "observation", "free_text"],
-  adaptive: ["test_scores", "free_text"],
-  communication: ["observation", "session_note", "prior_report", "test_scores", "free_text"],
-  dsm: ["free_text"],
-  emotional: ["observation", "session_note", "free_text"],
-  diagnoses: ["free_text"],
-  recommendations: ["free_text"],
-};
+/** Einat picks the sections a material feeds (D-022). Her choice always wins. */
+function SectionsDialog(props: { api: CaseApi; input: CaseInput; route: MaterialRouting; titleOf: (key: string) => string; onClose: () => void; onSaved: () => Promise<void> }) {
+  const { fail } = useApp();
+  const { api, input, route } = props;
+  const [chosen, setChosen] = useState<string[]>(route.feeds);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const sortable = api.detail.sections.filter((s) => s.sortable);
+  const parts = Array.from(new Set(sortable.map((s) => s.part)));
+  const origin = (key: string) =>
+    route.sorted ? (route.suggested.includes(key) ? (route.by_ai ? "Claude הציע" : "הוצע במיון") : null) : route.table.includes(key) ? "לפי סוג החומר" : null;
 
-function sectionInputs(_api: CaseApi, key: string): InputKind[] {
-  return SECTION_INPUTS[key] ?? [];
+  async function save() {
+    setBusy(true);
+    try {
+      await ipc.setInputSections(api.caseId, input.id, chosen);
+      await props.onSaved();
+    } catch (e) {
+      setError(fail(e as never));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog narrow title="לאילו סעיפים החומר הזה מזין?" subtitle={input.title || kindLabel[input.kind]} onClose={props.onClose}
+      footer={<>
+        <button type="button" className="btn" onClick={props.onClose}>ביטול</button>
+        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void save()}>שמירה</button>
+      </>}>
+      <p className="muted small">
+        {route.sorted
+          ? "מסומנים הסעיפים שנמצאו במיון. לסעיף שתוסיפי יישלח כל החומר; לסעיף שתורידי לא יישלח ממנו דבר."
+          : "מסומנים הסעיפים שהחומר מזין לפי סוגו. אפשר להוסיף ולהוריד; הבחירה שלך קובעת."}
+      </p>
+      <ErrorLine error={error} />
+      <div className="sections-pick">
+        {parts.map((part) => (
+          <fieldset key={part} className="sections-part">
+            <legend>{part}</legend>
+            {sortable.filter((s) => s.part === part).map((s) => {
+              const tag = origin(s.key);
+              return (
+                <label key={s.key} className="check-row">
+                  <input type="checkbox" checked={chosen.includes(s.key)}
+                    onChange={(e) => setChosen(e.target.checked ? [...chosen, s.key] : chosen.filter((k) => k !== s.key))} />
+                  <span className="grow">{s.title}</span>
+                  {tag && <span className="chip small">{tag}</span>}
+                </label>
+              );
+            })}
+          </fieldset>
+        ))}
+      </div>
+    </Dialog>
+  );
 }
 
 /** Typing a session note, pasting text, or editing a saved material. */

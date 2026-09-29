@@ -183,6 +183,26 @@ try:
     time.sleep(1)
     shot("materials")
 
+    # 3b. Sorting the materials into sections (D-022), through the review screen (demo mode).
+    button("מיון החומרים לסעיפים").click()
+    expect_text("לפני שליחה ל-Claude", 60)
+    time.sleep(0.5)
+    body = d.find_element(By.TAG_NAME, "body").text
+    log.append("     sorting review: unknown name 'יובל' flagged = " + str("יובל" in body and "לא מופיע" in body))
+    for _ in range(8):
+        pending = [b for b in d.find_elements(By.XPATH, "//button[normalize-space()='להסתיר את השם' or normalize-space()='זה לא שם, להשאיר' or normalize-space()='מילה רגילה, להשאיר']") if b.is_displayed()]
+        if not pending:
+            break
+        pending[0].click()
+        time.sleep(1)
+    shot("sort-review")
+    button("שליחה").click()
+    expect_text("לסעיפים", 60)
+    time.sleep(1)
+    body = d.find_element(By.TAG_NAME, "body").text
+    log.append("     sorting: materials sorted = " + str("מוינו לסעיפים" in body or "מוין לסעיפים" in body))
+    shot("sorted")
+
     # 4. A section: draft from the sources, with the review screen.
     section = find("//button[contains(@class,'side-section')][.//span[normalize-space()='איכויות התקשורת']]")
     d.execute_script("arguments[0].scrollIntoView({block: 'center'});", section)
@@ -192,7 +212,7 @@ try:
     time.sleep(0.5)
     shot("review-suspect")
     body = d.find_element(By.TAG_NAME, "body").text
-    log.append("     review: unknown name 'יובל' flagged = " + str("יובל" in body and "לא מופיע" in body))
+    log.append("     section review: 'יובל' already decided in the sorting review = " + str("מי זה" not in body))
     hide = [b for b in d.find_elements(By.XPATH, "//button[normalize-space()='להסתיר את השם']") if b.is_displayed()]
     for b in hide[:3]:
         b.click()

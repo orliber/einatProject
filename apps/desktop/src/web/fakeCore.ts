@@ -28,6 +28,8 @@ import structure from "../../../../templates/report_structure.json";
 import { readDocx } from "./docx";
 import { filter, restore, type Person } from "./filter";
 import { formatSheet, instruments } from "./scores";
+import * as R from "./routing";
+import type { SortResult } from "../ipc/generated/SortResult";
 
 type Args = Record<string, unknown>;
 
@@ -50,13 +52,16 @@ interface Case {
   chat: Record<string, ChatView[]>;
   sheets: Map<string, ScoreSheet>;
   allowed: Set<string>;
+  /** D-022: where each material goes (by input id). */
+  routing: Map<string, R.Routing>;
   created: number;
   updated: number;
 }
 
 type Pending =
   | { type: "section"; caseId: string; section: string; refs: { sid: string; label: string; tagged: string }[]; instruction: string }
-  | { type: "consult"; question: string };
+  | { type: "consult"; question: string }
+  | { type: "sort"; caseId: string; materials: { id: string; count: number; content: string }[] };
 
 const SECTIONS = structure.parts.flatMap((p) => p.sections.map((s) => ({ ...s, part: p.title, inputs: s.inputs as InputKind[] })));
 /** Sections written from materials (the rest are written from other sections). */
@@ -156,7 +161,7 @@ export class FakeCore {
   }
 
   private newCase(meta: CaseMeta, people: IdentityInput[]): Case {
-    const c: Case = { id: newId("case"), meta, people: [], inputs: [], drafts: [], chat: {}, sheets: new Map(), allowed: new Set(), created: now(), updated: now() };
+    const c: Case = { id: newId("case"), meta, people: [], inputs: [], drafts: [], chat: {}, sheets: new Map(), allowed: new Set(), routing: new Map(), created: now(), updated: now() };
     this.cases.push(c);
     this.setPeople(c, people);
     return c;
@@ -210,12 +215,32 @@ export class FakeCore {
     return { id: c.id, meta: c.meta, child_name: c.people.find((p) => p.role === "child")?.value ?? null, created_at: c.created, updated_at: c.updated, approved_sections: approved };
   }
 
-  /** Where each material goes (D-022): the fixed table by kind, until it is sorted. */
+  private tableFor(kind: InputKind): string[] {
+    return SORTABLE.filter((s) => s.inputs.includes(kind)).map((s) => s.key);
+  }
+
+  private routingOf(c: Case, id: string): R.Routing {
+    return c.routing.get(id) ?? { added: [], removed: [] };
+  }
+
+  /** What goes from one material to one section (D-022). */
+  private feedOf(c: Case, i: CaseInput, section: string): R.Feed | null {
+    return R.feed(this.routingOf(c, i.id), section, this.tableFor(i.kind), R.passages(i.content).length);
+  }
+
+  /** Where each material goes (D-022), like the core computes it. */
   private routing(c: Case): MaterialRouting[] {
     return c.inputs.map((i) => {
-      const table = SORTABLE.filter((s) => s.inputs.includes(i.kind)).map((s) => s.key);
-      const passages = i.content.split(/\n\s*\n/).filter((x) => x.trim()).length;
-      return { input_id: i.id, feeds: table, suggested: [], table, sorted: false, needs_sorting: passages > 0, by_ai: false, added: [], removed: [], passages, used_passages: passages };
+      const r = this.routingOf(c, i.id);
+      const table = this.tableFor(i.kind);
+      const count = R.passages(i.content).length;
+      const feeds = SORTABLE.map((s) => s.key).filter((k) => R.feed(r, k, table, count) !== null);
+      const sorted = R.isSorted(r, count);
+      const used = sorted ? new Set(r.suggestion?.sections.filter((x) => feeds.includes(x.section)).flatMap((x) => x.passages)).size : count;
+      return {
+        input_id: i.id, feeds, suggested: sorted ? R.base(r, table, count) : [], table, sorted, needs_sorting: R.needsSorting(r, count),
+        by_ai: false, added: r.added, removed: r.removed, passages: count, used_passages: used,
+      };
     });
   }
 
@@ -257,7 +282,12 @@ export class FakeCore {
     };
     const sources = DERIVED.includes(key)
       ? c.drafts.filter((d) => d.status === "approved" && !DERIVED.includes(d.section)).map((d) => ({ label: `סעיף מאושר · ${SECTIONS.find((s) => s.key === d.section)?.title ?? ""}`, text: restore(d.text, c.people, this.practitioner) }))
-      : c.inputs.filter((i) => section.inputs.includes(i.kind)).map((i) => ({ label: `${kindLabel[i.kind]} · ${i.title}`, text: i.content }));
+      : c.inputs.flatMap((i) => {
+          const f = this.feedOf(c, i, section.key);
+          if (f === null) return [];
+          if (f === "whole") return [{ label: `${kindLabel[i.kind]} · ${i.title}`, text: i.content }];
+          return [{ label: `${kindLabel[i.kind]} · קטעים שנבחרו לסעיף · ${i.title}`, text: R.excerpt(R.passages(i.content), f) }];
+        });
     sources.forEach((s, n) => {
       const sid = `S${n + 1}`;
       refs.push({ sid, label: `${sid} · ${s.label}`, tagged: take(`${sid} · ${s.label}`, s.text) });
@@ -266,6 +296,53 @@ export class FakeCore {
     const approval = suspects.length === 0 ? newId("approval") : null;
     if (approval) this.pending.set(approval, { type: "section", caseId: c.id, section: key, refs, instruction });
     return { approval_id: approval, parts, suspects, hidden: Array.from(hidden), checks, blocked: [], demo_mode: true };
+  }
+
+  /** Sorting into sections (D-022): every material not sorted yet, one review. */
+  private prepareSort(c: Case): Prepared {
+    if (!c.meta.consent) fail("consent_missing", "לפני שליחה ל-Claude צריך לרשום בתיק את הסכמת ההורים.");
+    const todo = c.inputs.filter((i) => R.needsSorting(this.routingOf(c, i.id), R.passages(i.content).length));
+    if (!todo.length) fail("refused", "כל החומרים כבר ממוינים לסעיפים.");
+    const parts: ReviewPart[] = [];
+    const suspects: Suspect[] = [];
+    const hidden = new Set<string>();
+    const checks = { declared_names: 0, patterns: 0, name_suspects: 0, indirect_suspects: 0 };
+    todo.forEach((i, n) => {
+      const f = this.filterFor(c, i.content);
+      parts.push({ label: `S${n + 1} · ${kindLabel[i.kind]} · ${i.title}`, original: f.original_segments, outgoing: f.tagged_segments });
+      for (const s of f.suspects) if (!suspects.some((x) => x.token === s.token)) suspects.push(s);
+      f.hidden.forEach((h) => hidden.add(h));
+      checks.declared_names += f.checks.declared_names;
+      checks.patterns += f.checks.patterns;
+      checks.name_suspects += f.checks.name_suspects;
+    });
+    const approval = suspects.length === 0 ? newId("approval") : null;
+    if (approval) this.pending.set(approval, { type: "sort", caseId: c.id, materials: todo.map((i) => ({ id: i.id, count: R.passages(i.content).length, content: i.content })) });
+    return { approval_id: approval, parts, suspects, hidden: Array.from(hidden), checks, blocked: [], demo_mode: true };
+  }
+
+  private sendSort(p: Extract<Pending, { type: "sort" }>): SortResult {
+    const c = this.find(p.caseId);
+    const keys = SORTABLE.map((s) => s.key);
+    const result: SortResult = { sorted: 0, unchanged: 0, links: 0, ignored: 0, demo: true };
+    for (const m of p.materials) {
+      const i = c.inputs.find((x) => x.id === m.id);
+      if (!i || i.content !== m.content) {
+        result.unchanged += 1;
+        continue;
+      }
+      const r = this.routingOf(c, m.id);
+      const placed = R.sortLocally(R.passages(i.content), keys);
+      if (!placed.length) {
+        c.routing.set(m.id, { ...r, unplaced: m.count });
+        result.unchanged += 1;
+        continue;
+      }
+      c.routing.set(m.id, { ...r, suggestion: { byAi: false, passageCount: m.count, sections: placed } });
+      result.sorted += 1;
+      result.links += placed.length;
+    }
+    return result;
   }
 
   private sendSection(p: Extract<Pending, { type: "section" }>): SectionResult {
@@ -392,8 +469,13 @@ export class FakeCore {
       case "add_input":
         return this.addInput(this.find(a.caseId), a.kind as InputKind, String(a.title), String(a.content));
       case "update_input": {
-        const i = this.find(a.caseId).inputs.find((x) => x.id === a.inputId) ?? fail("not_found", "החומר לא נמצא");
+        const c = this.find(a.caseId);
+        const i = c.inputs.find((x) => x.id === a.inputId) ?? fail("not_found", "החומר לא נמצא");
         i.title = String(a.title);
+        if (i.content !== String(a.content)) {
+          const r = this.routingOf(c, i.id);
+          c.routing.set(i.id, { added: r.added, removed: r.removed });
+        }
         i.content = String(a.content);
         return null;
       }
@@ -443,7 +525,7 @@ export class FakeCore {
         return this.prepareSection(this.find(a.caseId), String(a.sectionKey), String(a.instruction ?? ""));
       case "prepare_full_draft": {
         const c = this.find(a.caseId);
-        return SECTIONS.filter((s) => !DERIVED.includes(s.key) && c.inputs.some((i) => s.inputs.includes(i.kind)) && !c.drafts.some((d) => d.section === s.key && d.status === "approved"))
+        return SECTIONS.filter((s) => !DERIVED.includes(s.key) && c.inputs.some((i) => this.feedOf(c, i, s.key) !== null) && !c.drafts.some((d) => d.section === s.key && d.status === "approved"))
           .map((s) => [s.key, this.prepareSection(c, s.key, "")]);
       }
       case "send_section": {
@@ -452,6 +534,22 @@ export class FakeCore {
         this.pending.delete(String(a.approvalId));
         await new Promise((r) => setTimeout(r, 700));
         return this.sendSection(p);
+      }
+      case "prepare_sort":
+        return this.prepareSort(this.find(a.caseId));
+      case "send_sort": {
+        const p = this.pending.get(String(a.approvalId));
+        if (p?.type !== "sort") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
+        this.pending.delete(String(a.approvalId));
+        await new Promise((r) => setTimeout(r, 700));
+        return this.sendSort(p);
+      }
+      case "set_input_sections": {
+        const c = this.find(a.caseId);
+        const i = c.inputs.find((x) => x.id === a.inputId) ?? fail("not_found", "החומר לא נמצא");
+        const chosen = (a.sections as string[]).filter((k) => SORTABLE.some((s) => s.key === k));
+        c.routing.set(i.id, R.choose(this.routingOf(c, i.id), chosen, this.tableFor(i.kind), R.passages(i.content).length));
+        return null;
       }
       case "chat":
         return this.find(a.caseId).chat[String(a.sectionKey)] ?? [];

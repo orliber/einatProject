@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useApp } from "../App";
-import { ipc, type CaseDetail, type Prepared } from "../ipc/client";
+import { ipc, type CaseDetail, type Prepared, type SortResult } from "../ipc/client";
 import { ReviewDialog } from "../components/ReviewDialog";
 import { ExportDialog } from "../components/ExportDialog";
 import { FullDraftDialog } from "../components/FullDraftDialog";
@@ -25,6 +25,17 @@ export interface CaseApi {
   reload: () => Promise<void>;
   /** Show "what leaves the computer" (or send right away when the policy allows). */
   review: (r: ReviewRequest) => Promise<void>;
+  /** Sort the materials not sorted yet into sections (D-022). */
+  sort: () => Promise<void>;
+}
+
+/** One line for the result of a sorting, in plain words. */
+export function sortSummary(r: SortResult): string {
+  const lead = r.demo ? "מצב הדגמה: המיון נעשה במחשב לפי מילות מפתח, ושום דבר לא נשלח. " : "";
+  if (r.sorted === 0) return `${lead}לא נמצאו קטעים לשייך. החומרים ממשיכים להזין את הסעיפים לפי ברירת המחדל.`;
+  const what = r.sorted === 1 ? "חומר אחד מוין" : `${r.sorted} חומרים מוינו`;
+  const rest = r.unchanged > 0 ? ` ${r.unchanged} נשארו לפי ברירת המחדל.` : "";
+  return `${lead}${what} לסעיפים. אפשר לבדוק ולשנות בכל כרטיס חומר.${rest}`;
 }
 
 type SectionState = "approved" | "pending" | "empty";
@@ -36,7 +47,7 @@ function sectionState(s: CaseDetail["sections"][number]): SectionState {
 }
 
 export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
-  const { go, fail, lockNow, status } = useApp();
+  const { go, fail, lockNow, status, notify } = useApp();
   const [detail, setDetail] = useState<CaseDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [review, setReview] = useState<ReviewRequest | null>(null);
@@ -75,11 +86,31 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     [status.review_only_suspect],
   );
 
+  const startSort = async () => {
+    setError(null);
+    try {
+      const prepared = await ipc.prepareSort(caseId);
+      await startReview({
+        title: "מיון החומרים לסעיפים",
+        prepared,
+        reprepare: () => ipc.prepareSort(caseId),
+        onSend: async (id) => {
+          const result = await ipc.sendSort(id);
+          await reload();
+          notify(sortSummary(result));
+        },
+      });
+    } catch (e) {
+      setError(fail(e as never));
+    }
+  };
+
   if (!detail) {
     return <main className="center-note">{error ? <p className="error">{error}</p> : <span aria-busy="true" />}</main>;
   }
 
-  const api: CaseApi = { caseId, detail, reload, review: startReview };
+  const api: CaseApi = { caseId, detail, reload, review: startReview, sort: startSort };
+  const unsorted = detail.routing.filter((r) => r.needs_sorting).length;
   const fed = detail.sections.filter((s) => s.source_count > 0);
   const pending = detail.sections.filter((s) => s.paragraphs.some((p) => p.status === "proposed"));
   const undrafted = fed.filter((s) => s.paragraphs.length === 0);
@@ -99,6 +130,8 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
       ? null
       : pending.length > 0
         ? { title: `${pending.reduce((n, s) => n + s.paragraphs.filter((p) => p.status === "proposed").length, 0)} פסקאות מחכות לאישור שלך.`, note: `הראשונה בסעיף "${pending[0]?.title ?? ""}".`, action: "לאישור הפסקאות", run: () => go({ name: "case", id: caseId, view: pending[0]?.key ?? "materials" }) }
+        : unsorted > 0
+          ? { title: unsorted === 1 ? "חומר אחד עוד לא מוין לסעיפים." : `${unsorted} חומרים עוד לא מוינו לסעיפים.`, note: "Claude יקרא את החומרים אחרי הסתרת השמות, ויציע לכל סעיף רק את הקטעים שנוגעים אליו. את רואה בדיוק מה יוצא, ואפשר לשנות אחר כך.", action: "מיון החומרים לסעיפים", run: () => void startSort() }
         : undrafted.length > 0
           ? { title: `יש חומר ל-${undrafted.length} סעיפים. אפשר להכין להם טיוטה.`, note: "לפני שמשהו נשלח ל-Claude תראי בדיוק מה יוצא, ושמות יוחלפו בתפקידים.", action: `הכנת טיוטה ל-${undrafted.length} סעיפים`, run: () => setFullDraft(true) }
           : allApproved

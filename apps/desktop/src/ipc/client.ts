@@ -20,6 +20,8 @@ import type { Prepared } from "./generated/Prepared";
 import type { ReportSettings } from "./generated/ReportSettings";
 import type { ScoreSheet } from "./generated/ScoreSheet";
 import type { SectionResult } from "./generated/SectionResult";
+import type { SortResult } from "./generated/SortResult";
+import type { MaterialRouting } from "./generated/MaterialRouting";
 import type { SuspectDecision } from "./generated/SuspectDecision";
 import type { UiError } from "./generated/UiError";
 
@@ -100,6 +102,12 @@ export const ipc = {
     call<Prepared>("prepare_section", { caseId, sectionKey, instruction }),
   prepareFullDraft: (caseId: string) => call<[string, Prepared][]>("prepare_full_draft", { caseId }),
   sendSection: (approvalId: string) => call<SectionResult>("send_section", { approvalId }),
+  /** D-022: sort every material not sorted yet into sections (one review screen). */
+  prepareSort: (caseId: string) => call<Prepared>("prepare_sort", { caseId }),
+  sendSort: (approvalId: string) => call<SortResult>("send_sort", { approvalId }),
+  /** Einat's choice of sections for one material; it always wins. */
+  setInputSections: (caseId: string, inputId: string, sections: string[]) =>
+    run("set_input_sections", { caseId, inputId, sections }),
   chat: (caseId: string, sectionKey: string) => call<ChatView[]>("chat", { caseId, sectionKey }),
   approveParagraph: (caseId: string, draftId: string) => run("approve_paragraph", { caseId, draftId }),
   rejectParagraph: (caseId: string, draftId: string) => run("reject_paragraph", { caseId, draftId }),
@@ -117,6 +125,8 @@ export const ipc = {
 
 export type {
   AppStatus,
+  MaterialRouting,
+  SortResult,
   CaseDetail,
   CaseInput,
   CaseMeta,

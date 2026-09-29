@@ -1333,3 +1333,20 @@ fn demo_sorting_runs_locally_and_says_so() {
             .sortable
     );
 }
+
+#[test]
+fn passages_far_apart_are_marked_with_a_gap_the_gate_accepts() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    add_home_intake(&mut core, &case);
+    let prepared = core.prepare_sort(&case).unwrap();
+    // Passages 1 and 3, not 2: the draft request carries a gap mark between them.
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({"sections": [
+        {"section": "background", "passages": ["S3P1", "S3P3"]}
+    ]})));
+    core.send_sort(&prepared.approval_id.unwrap()).unwrap();
+    let prepared = core.prepare_section(&case, "background", "טיוטה").unwrap();
+    assert!(prepared.blocked.is_empty(), "{:?}", prepared.blocked);
+    let background = section_request(&mut core, &fake, &case, "background");
+    assert!(background.contains("(…)") && !background.contains("מילים ראשונות"));
+}
