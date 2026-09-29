@@ -9,7 +9,7 @@ import { Dialog, ErrorLine, Segments, Spinner, UploadIcon } from "../../componen
 import type { CaseApi } from "../CaseScreen";
 import "./MaterialsView.css";
 
-const ACCEPT = ".docx,.pdf,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain";
+const ACCEPT = ".docx,.odt,.pdf,.txt,application/vnd.oasis.opendocument.text,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain";
 
 export function MaterialsView({ api }: { api: CaseApi }) {
   const { fail, notify } = useApp();
@@ -112,7 +112,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
               <b>עוד אין חומרים בתיק</b>
               <p className="muted small">מתחילים מהחומרים שכבר יש: דוחות של רופאים וקלינאיות, אינטייק, שיחה עם הגננת, תוצאות מבחנים והסיכומים שלך.</p>
               <ol className="start-steps small">
-                <li><b>העלאת מסמך</b>: קובץ Word או PDF מהמחשב (אפשר גם לגרור לכאן).</li>
+                <li><b>העלאת מסמך</b>: קובץ Word, ‏ODT (LibreOffice / Google Docs) או PDF מהמחשב (אפשר גם לגרור לכאן).</li>
                 <li><b>הזנת ציונים</b>: טבלה לכל כלי, עם טווח ואחוזון מחושבים.</li>
                 <li><b>רישום מפגש</b>: מה שראית, במילים שלך.</li>
               </ol>
@@ -131,7 +131,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
             </button>
           ))}
           <button type="button" className={dragging ? "dropzone over" : "dropzone"} onClick={() => fileRef.current?.click()}>
-            {reading ? <><Spinner /> קוראת את {reading}…</> : <><UploadIcon /> גוררים לכאן קובץ Word או PDF, או לוחצים לבחירה</>}
+            {reading ? <><Spinner /> קוראת את {reading}…</> : <><UploadIcon /> גוררים לכאן קובץ Word, ‏ODT או PDF, או לוחצים לבחירה</>}
           </button>
         </section>
 
