@@ -1,8 +1,10 @@
 name: CI
 
+# Pull requests run the fast checks once (not again for the branch push). The installer
+# builds (macOS counts 10x, Windows 2x in Actions minutes) run on main and by hand only.
 on:
   push:
-    branches: [main, "claude/**"]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -11,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -90,6 +92,8 @@ jobs:
   desktop:
     name: Desktop build – ${{ matrix.os }}
     needs: [rust, frontend]
+    # Installers: after a merge to main, or "Run workflow" on any branch (Actions tab).
+    if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:
