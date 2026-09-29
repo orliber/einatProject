@@ -43,8 +43,11 @@ env.update(
     XDG_DATA_HOME=os.path.join(HOME, ".local/share"),
     XDG_DOWNLOAD_DIR=os.path.join(HOME, "Downloads"),
     XDG_CONFIG_HOME=os.path.join(HOME, ".config"),
+    # Debug builds only: stands in for the system "Save as" / "Open" window (D-024).
+    DV_E2E_DIALOG_DIR=os.path.join(OUT, "backup-drive"),
 )
 os.makedirs(os.path.join(HOME, "Downloads"), exist_ok=True)
+os.makedirs(env["DV_E2E_DIALOG_DIR"], exist_ok=True)
 
 xvfb = subprocess.Popen(["Xvfb", ":99", "-screen", "0", "1280x800x24"], stderr=subprocess.DEVNULL)
 time.sleep(1)
@@ -307,6 +310,33 @@ try:
     here = d.find_elements(By.XPATH, "//nav[@aria-label='מיקום']//*[@aria-current='page'][normalize-space()='אבחונים פרטיים']")
     log.append("     folders: case inside the new folder = " + str("נועם" in body and len(here) == 1))
     shot("folder")
+
+    # 7c. Backup (D-024): the reminder on the cases screen, then a restore drill in settings.
+    button("כל התיקים").click()
+    find("//div[contains(@class,'backup-reminder')]")
+    shot("backup-reminder")
+    find("//div[contains(@class,'backup-reminder')]//button[contains(normalize-space(),'גיבוי עכשיו')]").click()
+    expect_text("הגיבוי נשמר מוצפן")
+    drive = env["DV_E2E_DIALOG_DIR"]
+    files = [f for f in os.listdir(drive) if f.endswith(".vaultbak")]
+    with open(os.path.join(drive, files[0]), "rb") as fh:
+        raw = fh.read()
+    log.append(f"     backup: {files[0]} ({len(raw)} bytes), readable names = "
+               + str(any(n.encode() in raw for n in ["נועם", "דנה", "יוסי", "SQLite format"])))
+    # The toast sits over the top bar for a few seconds.
+    WebDriverWait(d, 15).until(lambda drv: not drv.find_elements(By.CLASS_NAME, "toast"))
+    button("הגדרות").click()
+    expect_text("הגיבוי האחרון: היום")
+    button("בדיקת גיבוי").click()
+    find("//input[@id='check-pw']").send_keys("כלב ירוק רץ מהר בגינה")
+    find("//section[@role='dialog']//button[normalize-space()='בדיקה']").click()
+    expect_text("הגיבוי נפתח ותקין", 60)
+    time.sleep(0.3)
+    shot("backup-drill")
+    vault_dir = os.path.join(HOME, ".local/share", "il.diagnosticvault.desktop", "vault")
+    log.append("     backup: drill opened it, one case = " + str("תיק אחד" in d.find_element(By.TAG_NAME, "body").text)
+               + ", scratch left next to the vault = " + str(any(n.startswith(".") for n in os.listdir(vault_dir))))
+    find("//section[@role='dialog']//button[normalize-space()='סגירה']").click()
 
     # 8. Lock.
     button("נעילה").click()

@@ -258,3 +258,51 @@ pub struct NameMatch {
     /// That case is in the recycle bin.
     pub trashed: bool,
 }
+
+/// When the vault was last backed up, and whether it is time again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct BackupStatus {
+    #[ts(type = "number | null")]
+    pub last_at: Option<i64>,
+    #[ts(type = "number | null")]
+    pub days_since: Option<i64>,
+    /// No backup yet, or the last one is older than a week.
+    pub due: bool,
+    /// The last successful restore drill.
+    #[ts(type = "number | null")]
+    pub last_check_at: Option<i64>,
+    /// An empty vault has nothing to lose yet: no reminder.
+    pub has_cases: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct BackupDone {
+    pub path: String,
+    #[ts(type = "number")]
+    pub bytes: u64,
+    #[ts(type = "number")]
+    pub created_at: i64,
+}
+
+/// A backup file that was chosen, before its password is typed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct StagedBackup {
+    pub file_name: String,
+    #[ts(type = "number")]
+    pub created_at: i64,
+    /// Whether it belongs to the open vault (`None` when no vault is open).
+    pub same_vault: Option<bool>,
+}
+
+/// The result of a restore drill.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct BackupCheckView {
+    #[ts(type = "number")]
+    pub created_at: i64,
+    pub cases: u32,
+    pub integrity_ok: bool,
+}

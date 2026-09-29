@@ -123,7 +123,8 @@ export function App() {
     return (
       <SetupScreen status={status}
         onCreated={() => { setInSetup(true); void refresh(); }}
-        onDone={async () => { setInSetup(false); await refresh(); }} />
+        onDone={async () => { setInSetup(false); await refresh(); }}
+        onRestored={(s) => { setInSetup(false); setStatus(s); setRoute({ name: "cases" }); }} />
     );
   }
   if (!status.unlocked) {

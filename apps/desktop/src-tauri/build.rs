@@ -59,6 +59,12 @@ fn main() {
             "send_consult",
             "check_export",
             "export_report",
+            "backup_status",
+            "write_backup",
+            "choose_backup",
+            "check_backup",
+            "restore_backup",
+            "forget_backup",
         ]));
     if let Err(error) = tauri_build::try_build(attributes) {
         panic!("tauri-build failed: {error:#}");

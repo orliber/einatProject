@@ -2,6 +2,8 @@
 // stored and nothing leaves the page; "Claude" answers come from local demo text, like the app's
 // demo mode. The installed app is the only place where real work happens (D-021).
 import type { AppStatus } from "../ipc/generated/AppStatus";
+import type { BackupStatus } from "../ipc/generated/BackupStatus";
+import type { StagedBackup } from "../ipc/generated/StagedBackup";
 import type { CaseDetail } from "../ipc/generated/CaseDetail";
 import type { CaseInput } from "../ipc/generated/CaseInput";
 import type { CaseMeta } from "../ipc/generated/CaseMeta";
@@ -95,6 +97,9 @@ export class FakeCore {
   private unlocked = false;
   /** `?setup` in the address opens the first-run screens (for the demo page's pictures). */
   private vaultExists = typeof location === "undefined" || !location.search.includes("setup");
+  // Nine days ago, so the preview shows the weekly reminder (D-024).
+  private lastBackupAt: number | null = Math.floor(Date.now() / 1000) - 9 * 86_400;
+  private lastCheckAt: number | null = null;
   private practitioner = ["ד\"ר רותם בדויה"];
   private lockMinutes = 15;
   private model = "claude-opus-5";
@@ -448,7 +453,7 @@ export class FakeCore {
   // ------------------------------------------------------------------ the IPC surface
   async handle(cmd: string, args: unknown, options?: { headers?: Record<string, string> }): Promise<unknown> {
     const a = (args ?? {}) as Args;
-    if (!["ping", "app_status", "unlock", "unlock_with_recovery", "create_vault", "confirm_recovery_key", "score_instruments", "preview_scores"].includes(cmd) && !this.unlocked) {
+    if (!["ping", "app_status", "unlock", "unlock_with_recovery", "create_vault", "confirm_recovery_key", "score_instruments", "preview_scores", "choose_backup", "restore_backup", "forget_backup"].includes(cmd) && !this.unlocked) {
       fail("locked", "הכספת נעולה. יש לפתוח אותה מחדש.");
     }
     switch (cmd) {
@@ -691,6 +696,34 @@ export class FakeCore {
       }
       case "export_report":
         return "בהדמיה בדפדפן לא נוצר קובץ. בתוכנה המותקנת הדוח נשמר בתיקיית ההורדות, מוצפן בסיסמה.";
+      case "backup_status": {
+        const days = this.lastBackupAt === null ? null : Math.floor((now() - this.lastBackupAt) / 86_400);
+        return {
+          last_at: this.lastBackupAt, days_since: days, due: days === null || days >= 7,
+          last_check_at: this.lastCheckAt, has_cases: this.cases.length > 0,
+        } satisfies BackupStatus;
+      }
+      case "write_backup": {
+        this.lastBackupAt = now();
+        const day = new Date().toISOString().slice(0, 10);
+        return { path: `E:\\גיבויים\\גיבוי כספת האבחון ${day}.vaultbak (בהדמיה לא נשמר קובץ)`, bytes: 1_843_200, created_at: this.lastBackupAt };
+      }
+      case "choose_backup": {
+        const at = this.lastBackupAt ?? now() - 86_400;
+        const day = new Date(at * 1000).toISOString().slice(0, 10);
+        return { file_name: `גיבוי כספת האבחון ${day}.vaultbak`, created_at: at, same_vault: this.unlocked ? true : null } satisfies StagedBackup;
+      }
+      case "check_backup":
+        if (!String(a.password ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
+        this.lastCheckAt = now();
+        return { created_at: this.lastBackupAt ?? now(), cases: this.cases.length, integrity_ok: true };
+      case "restore_backup":
+        if (!String(a.password ?? a.recoveryKey ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
+        this.vaultExists = true;
+        this.unlocked = true;
+        return this.status();
+      case "forget_backup":
+        return null;
       default:
         return fail("preview", `הפעולה ${cmd} לא זמינה בהדמיה בדפדפן.`);
     }

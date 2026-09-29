@@ -33,6 +33,9 @@ dv-ipc.workspace = true
 # Copying the Word file password: out of clipboard history and cloud sync, cleared after 60 s.
 arboard = { version = "3.6.1", default-features = false }
 zeroize = "1.9"
+# The system's own "Save as" / "Open" windows for the encrypted backup (D-024). Called from Rust
+# only: nothing is exposed to the webview. On Linux it uses GTK 3, already in the tree.
+rfd = { version = "0.16", default-features = false, features = ["gtk3"] }
 
 [features]
 # Release builds: all encryption on the FIPS 140-3 validated module (D-006). Needs CMake + Go.

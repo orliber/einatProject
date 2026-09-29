@@ -1,7 +1,7 @@
 //! The case library: folders like a file explorer, the recycle bin, and the check for a name
 //! that already appears in another case (D-023). Everything here stays on the computer.
 
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use dv_domain::{CaseSummary, Folder};
 use dv_privacy::text::normalize;
@@ -71,11 +71,7 @@ impl Core {
             ));
         }
         if let Err(e) = Vault::verify_password(&self.dir, password) {
-            if matches!(e, VaultError::WrongSecret) {
-                self.failed_unlocks += 1;
-                let wait = 2u64.saturating_pow(self.failed_unlocks.min(6)).min(60);
-                self.not_before = Some(Instant::now() + Duration::from_secs(wait));
-            }
+            self.count_failure(&e);
             return Err(e.into());
         }
         self.failed_unlocks = 0;

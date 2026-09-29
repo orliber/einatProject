@@ -61,6 +61,12 @@
     "allow-prepare-consult",
     "allow-send-consult",
     "allow-check-export",
-    "allow-export-report"
+    "allow-export-report",
+    "allow-backup-status",
+    "allow-write-backup",
+    "allow-choose-backup",
+    "allow-check-backup",
+    "allow-restore-backup",
+    "allow-forget-backup"
   ]
 }

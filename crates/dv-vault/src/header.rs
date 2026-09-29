@@ -98,9 +98,13 @@ impl VaultHeader {
     }
 
     pub fn read(dir: &Path) -> Result<Self, VaultError> {
-        let text = fs::read_to_string(dir.join(HEADER_FILE))?;
+        Self::parse(&fs::read(dir.join(HEADER_FILE))?)
+    }
+
+    /// A header from its file bytes (also as kept inside a backup).
+    pub fn parse(bytes: &[u8]) -> Result<Self, VaultError> {
         let header: Self =
-            serde_json::from_str(&text).map_err(|e| VaultError::Corrupt(e.to_string()))?;
+            serde_json::from_slice(bytes).map_err(|e| VaultError::Corrupt(e.to_string()))?;
         if header.format != FORMAT {
             return Err(VaultError::Corrupt(format!(
                 "unsupported vault format {}",

@@ -1470,3 +1470,110 @@ fn the_vault_locks_after_the_computer_slept() {
     assert!(core.tick(t0 + Duration::from_secs(15 + 300)));
     assert!(!core.status().unlocked);
 }
+
+#[test]
+fn a_backup_is_due_until_made_and_restores_on_a_new_computer() {
+    let (dir, mut core, case) = setup(None);
+    let status = core.backup_status().unwrap();
+    assert!(status.due && status.has_cases && status.last_at.is_none());
+
+    // Next to the vault protects nothing: refused.
+    assert!(matches!(
+        core.write_backup(&dir.path().join("copy.vaultbak")),
+        Err(CoreError::Refused(_))
+    ));
+    let drive = tempfile::tempdir().unwrap();
+    let done = core.write_backup(&drive.path().join("גיבוי")).unwrap();
+    assert!(done.path.ends_with("גיבוי.vaultbak"));
+    let status = core.backup_status().unwrap();
+    assert_eq!((status.due, status.days_since), (false, Some(0)));
+    assert_eq!(
+        core.backup_dir().unwrap().unwrap(),
+        drive.path().canonicalize().unwrap()
+    );
+    let bytes = std::fs::read(&done.path).unwrap();
+
+    // A new computer: no vault yet.
+    let fresh = tempfile::tempdir().unwrap();
+    let mut other = Core::for_tests(fresh.path(), None);
+    assert!(matches!(
+        other.restore_staged_backup(Some(PASSWORD), None),
+        Err(CoreError::Refused(_))
+    ));
+    let staged = other
+        .stage_backup(bytes.clone(), "גיבוי.vaultbak".into())
+        .unwrap();
+    assert_eq!(
+        (staged.created_at, staged.same_vault),
+        (done.created_at, None)
+    );
+    assert!(matches!(
+        other.restore_staged_backup(Some("ניחוש ארוך אבל שגוי"), None),
+        Err(CoreError::Vault(VaultError::WrongSecret))
+    ));
+    assert!(matches!(
+        other.restore_staged_backup(Some(PASSWORD), None),
+        Err(CoreError::Backoff(_))
+    ));
+    other.not_before = None;
+    let status = other.restore_staged_backup(Some(PASSWORD), None).unwrap();
+    assert!(status.unlocked && status.integrity_warning.is_none());
+    let detail = other.case_detail(&case).unwrap();
+    assert!(detail.identities.iter().any(|i| i.value == "אלון"));
+
+    // Never over an existing vault.
+    other.stage_backup(bytes, "גיבוי.vaultbak".into()).unwrap();
+    assert!(matches!(
+        other.restore_staged_backup(Some(PASSWORD), None),
+        Err(CoreError::Refused(_))
+    ));
+}
+
+#[test]
+fn the_restore_drill_proves_the_file_and_the_password() {
+    let (_dir, mut core, _case) = setup(None);
+    let drive = tempfile::tempdir().unwrap();
+    let done = core.write_backup(&drive.path().join("b.vaultbak")).unwrap();
+    let bytes = std::fs::read(&done.path).unwrap();
+
+    assert!(matches!(
+        core.stage_backup(b"not a backup".to_vec(), "x".into()),
+        Err(CoreError::Refused(_))
+    ));
+    let staged = core
+        .stage_backup(bytes.clone(), "b.vaultbak".into())
+        .unwrap();
+    assert_eq!(staged.same_vault, Some(true));
+    assert!(matches!(
+        core.check_staged_backup("ניחוש ארוך אבל שגוי"),
+        Err(CoreError::Vault(VaultError::WrongSecret))
+    ));
+    core.not_before = None;
+    let check = core.check_staged_backup(PASSWORD).unwrap();
+    assert_eq!((check.cases, check.integrity_ok), (1, true));
+    assert!(core.backup_status().unwrap().last_check_at.is_some());
+    assert!(
+        core.list_cases().unwrap().len() == 1,
+        "the live vault is untouched"
+    );
+
+    // A backup of another vault is named as such, and never "checked".
+    let (_other_dir, mut other, _) = setup(None);
+    let other_drive = tempfile::tempdir().unwrap();
+    let theirs = other
+        .write_backup(&other_drive.path().join("o.vaultbak"))
+        .unwrap();
+    let staged = core
+        .stage_backup(std::fs::read(&theirs.path).unwrap(), "o.vaultbak".into())
+        .unwrap();
+    assert_eq!(staged.same_vault, Some(false));
+    assert!(matches!(
+        core.check_staged_backup(PASSWORD),
+        Err(CoreError::Refused(_))
+    ));
+
+    // Locking forgets the chosen file.
+    core.stage_backup(bytes, "b.vaultbak".into()).unwrap();
+    core.lock();
+    assert!(core.staged_backup.is_none());
+}

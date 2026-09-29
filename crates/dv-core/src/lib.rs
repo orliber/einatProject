@@ -4,6 +4,7 @@
 //! machine without a WebView. `Core` owns the unlocked vault and walks every request through
 //! the same path: filter → build → review → gate → (approval) → send → check → store.
 
+mod backup;
 mod library;
 mod sorting;
 mod views;
@@ -28,11 +29,14 @@ use dv_privacy::{
 use dv_vault::{Argon2Params, AuditEvent, Vault, VaultError};
 use serde_json::Value;
 
+pub use backup::{backup_file_name, BACKUP_DAYS, MAX_BACKUP_BYTES};
+pub use dv_vault::BACKUP_EXTENSION;
 pub use library::TRASH_DAYS;
 pub use views::{
-    AppStatus, CaseDetail, ChatView, ConsultResult, CreatedVault, ExportCheck, ImportPreview,
-    MaterialRouting, NameMatch, NameSuggestion, ParagraphView, Prepared, ReportSettings,
-    ReviewPart, SectionResult, SectionView, SortResult, SuspectDecision, UiError,
+    AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView, ConsultResult,
+    CreatedVault, ExportCheck, ImportPreview, MaterialRouting, NameMatch, NameSuggestion,
+    ParagraphView, Prepared, ReportSettings, ReviewPart, SectionResult, SectionView, SortResult,
+    StagedBackup, SuspectDecision, UiError,
 };
 
 const API_KEY: &str = "anthropic_api_key";
@@ -290,6 +294,8 @@ pub struct Core {
     transport: Option<Arc<dyn Transport>>,
     /// The app's own binary, started as an isolated worker for each document.
     ingest_exe: Option<PathBuf>,
+    /// A backup file chosen for the drill or a restore (encrypted bytes).
+    staged_backup: Option<Vec<u8>>,
 }
 
 impl std::fmt::Debug for Core {
@@ -377,6 +383,7 @@ impl Core {
             disk_encryption: disk.to_owned(),
             transport: None,
             ingest_exe: None,
+            staged_backup: None,
         }
     }
 
@@ -595,6 +602,7 @@ impl Core {
     pub fn lock(&mut self) {
         self.pending.clear();
         self.consult_history.clear();
+        self.staged_backup = None;
         if let Some(v) = self.vault.take() {
             let _ = v.lock();
         }

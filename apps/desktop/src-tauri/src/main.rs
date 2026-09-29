@@ -4,6 +4,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod file_dialog;
 mod secret_clipboard;
 
 use std::path::PathBuf;
@@ -11,9 +12,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use dv_core::{
-    AppStatus, CaseDetail, ChatView, ConsultResult, Core, CoreError, CreatedVault, ExportCheck,
-    ImportPreview, NameMatch, Prepared, ReportSettings, SectionResult, SortResult, SuspectDecision,
-    UiError,
+    AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView, ConsultResult,
+    Core, CoreError, CreatedVault, ExportCheck, ImportPreview, NameMatch, Prepared, ReportSettings,
+    SectionResult, SortResult, StagedBackup, SuspectDecision, UiError,
 };
 use dv_domain::{CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind};
 use tauri::Manager;
@@ -608,6 +609,98 @@ async fn export_report(
     .await
 }
 
+// ------------------------------------------------------------------ backup (D-024)
+
+#[tauri::command]
+async fn backup_status(state: tauri::State<'_, AppState>) -> Res<BackupStatus> {
+    with_core(&state, |c| c.backup_status()).await
+}
+
+/// Ask where to save (the system's "Save as"), then write the encrypted backup there.
+/// `None` when Einat cancelled.
+#[tauri::command]
+async fn write_backup(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Res<Option<BackupDone>> {
+    let start = with_core(&state, |c| c.backup_dir()).await?;
+    let start = start.or_else(|| app.path().document_dir().ok());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(0));
+    let Some(dest) = file_dialog::save(&app, start, dv_core::backup_file_name(now)).await else {
+        return Ok(None);
+    };
+    with_core(&state, move |c| c.write_backup(&dest).map(Some)).await
+}
+
+/// Ask for a backup file (the system's "Open") and say what it is. `None` when cancelled.
+#[tauri::command]
+async fn choose_backup(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Res<Option<StagedBackup>> {
+    // Locked or no vault yet: start in Documents.
+    let start = with_core(&state, |c| Ok(c.backup_dir().ok().flatten()))
+        .await?
+        .or_else(|| app.path().document_dir().ok());
+    let Some(path) = file_dialog::open(&app, start).await else {
+        return Ok(None);
+    };
+    with_core(&state, move |c| {
+        let size = std::fs::metadata(&path)
+            .map_err(|e| CoreError::Refused(format!("אי אפשר לקרוא את הקובץ: {e}")))?
+            .len();
+        if size > dv_core::MAX_BACKUP_BYTES {
+            return Err(CoreError::Refused(
+                "הקובץ גדול מדי בשביל גיבוי של הכספת.".to_owned(),
+            ));
+        }
+        let bytes = std::fs::read(&path)
+            .map_err(|e| CoreError::Refused(format!("אי אפשר לקרוא את הקובץ: {e}")))?;
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        c.stage_backup(bytes, name).map(Some)
+    })
+    .await
+}
+
+/// Restore drill on the chosen file, with the password.
+#[tauri::command]
+async fn check_backup(state: tauri::State<'_, AppState>, password: String) -> Res<BackupCheckView> {
+    let password = zeroize::Zeroizing::new(password);
+    with_core(&state, move |c| c.check_staged_backup(&password)).await
+}
+
+/// On a computer with no vault: restore the chosen file and open it.
+#[tauri::command]
+async fn restore_backup(
+    state: tauri::State<'_, AppState>,
+    password: Option<String>,
+    recovery_key: Option<String>,
+) -> Res<AppStatus> {
+    let password = password.map(zeroize::Zeroizing::new);
+    let recovery_key = recovery_key.map(zeroize::Zeroizing::new);
+    with_core(&state, move |c| {
+        c.restore_staged_backup(
+            password.as_deref().map(String::as_str),
+            recovery_key.as_deref().map(String::as_str),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn forget_backup(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| {
+        c.forget_staged_backup();
+        Ok(())
+    })
+    .await
+}
+
 fn main() {
     // A document worker: the same binary, started by the core for one file.
     if std::env::args().nth(1).as_deref() == Some(dv_ingest::worker::WORKER_ARG) {
@@ -697,6 +790,12 @@ fn main() {
             send_consult,
             check_export,
             export_report,
+            backup_status,
+            write_backup,
+            choose_backup,
+            check_backup,
+            restore_backup,
+            forget_backup,
         ])
         .run(tauri::generate_context!());
     if result.is_err() {

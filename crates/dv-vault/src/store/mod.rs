@@ -22,6 +22,9 @@ use crate::header::{unwrap_mk, wrap_mk, KeySlot, VaultHeader, FORMAT, HEADER_FIL
 use crate::password::{self, Argon2Params};
 use crate::{recovery, VaultError};
 
+mod backup;
+pub use backup::{peek_backup, BackupCheck, BackupInfo, BackupPeek, BACKUP_EXTENSION};
+
 /// Raw rows as read from SQLite, before decryption.
 type IdentityRow = (String, String, String, Vec<u8>, Vec<u8>);
 type InputRow = (String, String, i64, Vec<u8>, Vec<u8>);
@@ -43,6 +46,8 @@ struct Keys {
     db_main: Key32,
     db_identity: Key32,
     db_audit: Key32,
+    /// Seals `.vaultbak` backups.
+    backup: Key32,
 }
 
 impl Keys {
@@ -57,6 +62,7 @@ impl Keys {
             db_main: d("db/main")?,
             db_identity: d("db/identity")?,
             db_audit: d("db/audit")?,
+            backup: d("backup")?,
         })
     }
 }
@@ -84,6 +90,59 @@ pub struct Created {
 impl std::fmt::Debug for Created {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Created { .. }")
+    }
+}
+
+/// What opens a vault (or a backup of it).
+#[derive(Clone, Copy)]
+pub enum Secret<'a> {
+    Password(&'a str),
+    Recovery(&'a str),
+}
+
+impl std::fmt::Debug for Secret<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Secret::Password(_) => "Secret::Password(..)",
+            Secret::Recovery(_) => "Secret::Recovery(..)",
+        })
+    }
+}
+
+/// The master key, unwrapped from the header's password or recovery slot.
+pub(crate) fn master_key(header: &VaultHeader, secret: Secret<'_>) -> Result<Key32, VaultError> {
+    match secret {
+        Secret::Password(password) => {
+            let (salt, params, wrapped) = header
+                .slots
+                .iter()
+                .find_map(|s| match s {
+                    KeySlot::Password {
+                        salt,
+                        params,
+                        wrapped_mk,
+                    } => Some((salt.clone(), *params, wrapped_mk.clone())),
+                    KeySlot::Recovery { .. } => None,
+                })
+                .ok_or(VaultError::Corrupt("no password slot".to_owned()))?;
+            let salt: [u8; 32] = crate::crypto::unhex(&salt)?
+                .try_into()
+                .map_err(|_| VaultError::Corrupt("salt length".to_owned()))?;
+            let kek = password::derive_kek(password, &salt, params)?;
+            unwrap_mk(&kek, "password", &header.vault_id, &wrapped)
+        }
+        Secret::Recovery(typed) => {
+            let wrapped = header
+                .slots
+                .iter()
+                .find_map(|s| match s {
+                    KeySlot::Recovery { wrapped_mk } => Some(wrapped_mk.clone()),
+                    KeySlot::Password { .. } => None,
+                })
+                .ok_or(VaultError::Corrupt("no recovery slot".to_owned()))?;
+            let kek = recovery::derive_kek(&recovery::parse(typed)?)?;
+            unwrap_mk(&kek, "recovery", &header.vault_id, &wrapped)
+        }
     }
 }
 
@@ -186,23 +245,7 @@ impl Vault {
 
     fn password_mk(dir: &Path, password: &str) -> Result<(VaultHeader, Key32), VaultError> {
         let header = VaultHeader::read(dir)?;
-        let (salt, params, wrapped) = header
-            .slots
-            .iter()
-            .find_map(|s| match s {
-                KeySlot::Password {
-                    salt,
-                    params,
-                    wrapped_mk,
-                } => Some((salt.clone(), *params, wrapped_mk.clone())),
-                KeySlot::Recovery { .. } => None,
-            })
-            .ok_or(VaultError::Corrupt("no password slot".to_owned()))?;
-        let salt: [u8; 32] = crate::crypto::unhex(&salt)?
-            .try_into()
-            .map_err(|_| VaultError::Corrupt("salt length".to_owned()))?;
-        let kek = password::derive_kek(password, &salt, params)?;
-        let mk = unwrap_mk(&kek, "password", &header.vault_id, &wrapped)?;
+        let mk = master_key(&header, Secret::Password(password))?;
         Ok((header, mk))
     }
 
@@ -219,16 +262,7 @@ impl Vault {
 
     pub fn unlock_with_recovery(dir: &Path, typed: &str) -> Result<Self, VaultError> {
         let header = VaultHeader::read(dir)?;
-        let wrapped = header
-            .slots
-            .iter()
-            .find_map(|s| match s {
-                KeySlot::Recovery { wrapped_mk } => Some(wrapped_mk.clone()),
-                KeySlot::Password { .. } => None,
-            })
-            .ok_or(VaultError::Corrupt("no recovery slot".to_owned()))?;
-        let kek = recovery::derive_kek(&recovery::parse(typed)?)?;
-        let mk = unwrap_mk(&kek, "recovery", &header.vault_id, &wrapped)?;
+        let mk = master_key(&header, Secret::Recovery(typed))?;
         let mut vault = Self::open_with(dir, header, &mk)?;
         vault.record(
             AuditEvent::Unlock,
@@ -240,6 +274,7 @@ impl Vault {
 
     fn open_with(dir: &Path, mut header: VaultHeader, mk: &Key32) -> Result<Self, VaultError> {
         let keys = Keys::derive(mk)?;
+        backup::remove_stale_scratch(dir);
         let header_ok = header.verify(&keys.header).is_ok();
         let main = open_encrypted(&dir.join(MAIN_DB), &keys.db_main)?;
         migrate(&main, MAIN_MIGRATIONS)?;
@@ -292,6 +327,12 @@ impl Vault {
     #[must_use]
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    /// Random, and public (it is in the header): tells a backup of this vault from another's.
+    #[must_use]
+    pub fn vault_id(&self) -> &str {
+        &self.header.vault_id
     }
 
     /// Lock explicitly (records the event); dropping the vault also wipes the keys.

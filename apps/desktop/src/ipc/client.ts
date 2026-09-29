@@ -1,6 +1,10 @@
 // The only module that talks to the Rust core. Types come from Rust via ts-rs.
 import { invoke } from "@tauri-apps/api/core";
 import type { AppStatus } from "./generated/AppStatus";
+import type { BackupCheckView } from "./generated/BackupCheckView";
+import type { BackupDone } from "./generated/BackupDone";
+import type { BackupStatus } from "./generated/BackupStatus";
+import type { StagedBackup } from "./generated/StagedBackup";
 import type { CaseDetail } from "./generated/CaseDetail";
 import type { CaseInput } from "./generated/CaseInput";
 import type { CaseMeta } from "./generated/CaseMeta";
@@ -137,10 +141,23 @@ export const ipc = {
   exportReport: (caseId: string, password: string | null) => call<string>("export_report", { caseId, password }),
   /** The file password to the clipboard: out of history and cloud sync, cleared after N seconds (returned). */
   copySecret: (text: string) => call<number>("copy_secret", { text }),
+
+  // Encrypted backup (D-024). The system's own window picks the file; `null` = cancelled.
+  backupStatus: () => call<BackupStatus>("backup_status"),
+  writeBackup: () => call<BackupDone | null>("write_backup"),
+  chooseBackup: () => call<StagedBackup | null>("choose_backup"),
+  checkBackup: (password: string) => call<BackupCheckView>("check_backup", { password }),
+  restoreBackup: (password: string | null, recoveryKey: string | null) =>
+    call<AppStatus>("restore_backup", { password, recoveryKey }),
+  forgetBackup: () => run("forget_backup"),
 };
 
 export type {
   AppStatus,
+  BackupCheckView,
+  BackupDone,
+  BackupStatus,
+  StagedBackup,
   Folder,
   NameMatch,
   MaterialRouting,

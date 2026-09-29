@@ -2,12 +2,13 @@ import { useState, type FormEvent } from "react";
 import { he } from "../i18n/he";
 import { ipc, type AppStatus } from "../ipc/client";
 import { ErrorLine, LockIcon } from "../components/ui";
+import { RestoreFromBackup } from "../components/Backup";
 import "./SetupScreen.css";
 
-type Step = "password" | "recovery" | "me";
+type Step = "password" | "recovery" | "me" | "restore";
 
 /** First run: a password, the printed recovery kit, and the practitioner's own names. */
-export function SetupScreen({ status, onCreated, onDone }: { status: AppStatus; onCreated?: () => void; onDone: () => Promise<void> }) {
+export function SetupScreen({ status, onCreated, onDone, onRestored }: { status: AppStatus; onCreated?: () => void; onDone: () => Promise<void>; onRestored?: (s: AppStatus) => void }) {
   const [step, setStep] = useState<Step>("password");
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
@@ -74,14 +75,14 @@ export function SetupScreen({ status, onCreated, onDone }: { status: AppStatus; 
       <header className="setup-head">
         <LockIcon size={24} color="var(--primary)" />
         <span className="brand-name">{he.appName}</span>
-        <ol className="steps" aria-label="שלבי ההגדרה">
+        {step !== "restore" && <ol className="steps" aria-label="שלבי ההגדרה">
           {(["password", "recovery", "me"] as Step[]).map((s, i) => (
             <li key={s} className={`step step-${stepState(s)}`} aria-current={stepState(s) === "current" ? "step" : undefined}>
               <span className="step-dot">{stepState(s) === "done" ? "✓" : i + 1}</span>
               {s === "password" ? "סיסמה" : s === "recovery" ? "ערכת שחזור" : "הפרטים שלך"}
             </li>
           ))}
-        </ol>
+        </ol>}
       </header>
 
       <main className="setup-main">
@@ -109,7 +110,16 @@ export function SetupScreen({ status, onCreated, onDone }: { status: AppStatus; 
             <p className="hint">
               {status.fips_active ? "ההצפנה נעשית ברכיב הצפנה מאושר ומבוקר (FIPS 140-3)." : "הכל נשמר מוצפן במחשב הזה."} את הסיסמה אף אחד לא יודע ולא שומר, גם לא אנחנו.
             </p>
+            {onRestored && (
+              <button type="button" className="link-btn restore-link" onClick={() => { setError(null); setStep("restore"); }}>
+                מחשב חדש? יש לי גיבוי של הכספת
+              </button>
+            )}
           </form>
+        )}
+
+        {step === "restore" && onRestored && (
+          <RestoreFromBackup onRestored={onRestored} onBack={() => setStep("password")} />
         )}
 
         {step === "recovery" && (
