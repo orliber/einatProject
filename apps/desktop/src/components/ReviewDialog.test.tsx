@@ -42,7 +42,7 @@ describe("ReviewDialog", () => {
     expect(send).toBeDisabled();
     expect(screen.getByRole("alert")).toHaveTextContent("יובל");
 
-    await user.click(screen.getByRole("button", { name: /להסתיר כ/ }));
+    await user.click(screen.getByRole("button", { name: "להסתיר את השם" }));
     expect(decided).toEqual([{ caseId: "c1", token: "יובל", decision: { decision: "hide", role: "other_child" } }]);
     expect(reprepare).toHaveBeenCalled();
     const enabled = await screen.findByRole("button", { name: /שליחה/ });
@@ -60,7 +60,7 @@ describe("ReviewDialog", () => {
       </AppContext.Provider>,
     );
     expect(screen.getByRole("button", { name: "זה השם, להסתיר" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "מילה רגילה" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "מילה רגילה, להשאיר" })).toBeInTheDocument();
   });
 });
 

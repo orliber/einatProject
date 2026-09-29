@@ -10,11 +10,13 @@ import "./CasesScreen.css";
 
 const TOTAL_SECTIONS = 16;
 
-function stage(c: CaseSummary): { label: string; cls: string } {
+/** What to do next in a case, in one chip and one line (canvas "תיקים"). */
+function nextStep(c: CaseSummary): { chip: string; cls: string; text: string; start: boolean } {
   const n = c.approved_sections.length;
-  if (n >= TOTAL_SECTIONS) return { label: "מוכן להפקה", cls: "chip chip-ok" };
-  if (n > 0) return { label: "בכתיבה", cls: "chip chip-warn" };
-  return { label: "איסוף חומרים", cls: "chip" };
+  if (!c.meta.consent) return { chip: "הסכמה", cls: "chip chip-warn", text: "לרשום את הסכמת ההורים", start: false };
+  if (n >= TOTAL_SECTIONS) return { chip: "✓ מוכן", cls: "chip chip-ok", text: "להפיק דוח Word", start: false };
+  if (n > 0) return { chip: "בכתיבה", cls: "chip", text: `לאשר עוד ${TOTAL_SECTIONS - n} סעיפים`, start: false };
+  return { chip: "חומרים", cls: "chip chip-empty", text: "להוסיף חומרים ולהכין טיוטה", start: true };
 }
 
 function updated(ts: number): string {
@@ -43,7 +45,8 @@ export function CasesScreen() {
     };
   }, [fail]);
 
-  const name = status.practitioner[0]?.split(" ")[0];
+  // "ד\"ר רותם בדויה" → "רותם": a title is not how anyone is greeted.
+  const name = status.practitioner[0]?.split(" ").find((w) => w && !/^(ד["״']?ר|דר'|פרופ'|גב'|מר)$/.test(w));
   const inProgress = cases?.filter((c) => c.approved_sections.length < TOTAL_SECTIONS).length ?? 0;
 
   return (
@@ -53,7 +56,7 @@ export function CasesScreen() {
         <div className="page-head">
           <div className="stack" style={{ gap: 4 }}>
             <h1>{greeting()}{name ? `, ${name}` : ""}</h1>
-            <p className="muted">{cases ? (cases.length ? `${inProgress} תיקים בעבודה` : "עוד אין תיקים") : " "}</p>
+            <p className="muted">{cases ? (cases.length ? `${inProgress} תיקים בעבודה.` : "עוד אין תיקים") : " "}</p>
           </div>
           <button type="button" className="btn btn-primary btn-big" onClick={() => setCreating(true)}>+ תיק חדש</button>
         </div>
@@ -75,37 +78,42 @@ export function CasesScreen() {
             <table className="cases">
               <thead>
                 <tr>
-                  <th>תיק</th>
                   <th>ילד/ה</th>
-                  <th title="שנים:חודשים">גיל</th>
+                  <th>הצעד הבא</th>
                   <th className="col-progress">הדוח</th>
-                  <th>שלב</th>
-                  <th>עודכן</th>
+                  <th className="col-go"><span className="visually-hidden">פתיחה</span></th>
                 </tr>
               </thead>
               <tbody>
                 {cases.map((c) => {
-                  const s = stage(c);
+                  const s = nextStep(c);
                   const pct = Math.round((c.approved_sections.length / TOTAL_SECTIONS) * 100);
+                  const open = () => go({ name: "case", id: c.id, view: "materials" });
                   return (
-                    <tr key={c.id}>
+                    <tr key={c.id} onClick={open} className="case-row">
                       <td>
-                        <button type="button" className="case-link" onClick={() => go({ name: "case", id: c.id, view: "materials" })}>
-                          {c.meta.code || "ללא קוד"}
-                        </button>
-                      </td>
-                      <td className="serif case-name">{c.child_name ?? "—"}</td>
-                      <td className="num" title={c.meta.age ? ageWords(c.meta.age) : undefined}>{c.meta.age ? `${c.meta.age.years}:${c.meta.age.months}` : "—"}</td>
-                      <td>
-                        <div className="progress-row">
-                          <div className="bar" role="progressbar" aria-valuemin={0} aria-valuemax={TOTAL_SECTIONS} aria-valuenow={c.approved_sections.length}>
-                            <div className={pct >= 100 ? "bar-fill bar-done" : "bar-fill"} style={{ width: `${pct}%` }} />
-                          </div>
-                          <span className="small muted num">{c.approved_sections.length}/{TOTAL_SECTIONS}</span>
+                        <div className="case-name serif">{c.child_name ?? "ללא שם"}</div>
+                        <div className="small muted">
+                          {c.meta.age ? `${ageWords(c.meta.age)} · ` : ""}{c.meta.code || "ללא קוד"} · עודכן {updated(c.updated_at)}
                         </div>
                       </td>
-                      <td><span className={s.cls}>{s.label}</span></td>
-                      <td className="muted">{updated(c.updated_at)}</td>
+                      <td>
+                        <span className="next-cell"><span className={s.cls}>{s.chip}</span><span>{s.text}</span></span>
+                      </td>
+                      <td>
+                        <div className="progress-row">
+                          <div className="bar" role="progressbar" aria-label="סעיפים שאושרו" aria-valuemin={0} aria-valuemax={TOTAL_SECTIONS} aria-valuenow={c.approved_sections.length}>
+                            <div className={pct >= 100 ? "bar-fill bar-done" : "bar-fill"} style={{ width: `${pct}%` }} />
+                          </div>
+                          <span className="small muted num">{c.approved_sections.length} מתוך {TOTAL_SECTIONS}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <button type="button" className={s.start ? "btn" : "btn btn-primary"}
+                          onClick={(e) => { e.stopPropagation(); open(); }}>
+                          {s.start ? "פתיחה" : "להמשיך"}<span className="visually-hidden"> בתיק של {c.child_name ?? c.meta.code}</span>
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}

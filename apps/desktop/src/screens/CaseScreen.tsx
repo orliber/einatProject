@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import { useApp } from "../App";
-import { he } from "../i18n/he";
 import { ipc, type CaseDetail, type Prepared } from "../ipc/client";
 import { ReviewDialog } from "../components/ReviewDialog";
 import { ExportDialog } from "../components/ExportDialog";
@@ -81,6 +80,30 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   }
 
   const api: CaseApi = { caseId, detail, reload, review: startReview };
+  const fed = detail.sections.filter((s) => s.source_count > 0);
+  const pending = detail.sections.filter((s) => s.paragraphs.some((p) => p.status === "proposed"));
+  const undrafted = fed.filter((s) => s.paragraphs.length === 0);
+  const hasMaterials = detail.inputs.length > 0;
+  const hasDraft = detail.sections.some((s) => s.paragraphs.length > 0);
+  const allApproved = fed.length > 0 && fed.every((s) => s.approved) && pending.length === 0;
+  const steps: { label: string; done: boolean }[] = [
+    { label: "חומרים", done: hasMaterials },
+    { label: "טיוטה", done: hasDraft },
+    { label: "אישור הפסקאות", done: allApproved },
+    { label: "דוח Word", done: false },
+  ];
+  const currentStep = steps.findIndex((st) => !st.done);
+  const next: { title: string; note: string; action: string; run: () => void } | null = !detail.meta.consent
+    ? { title: "לפני שליחה ל-Claude צריך לרשום את הסכמת ההורים.", note: "אפשר להמשיך לאסוף חומרים גם בלי זה.", action: "רישום ההסכמה", run: () => go({ name: "case", id: caseId, view: "details" }) }
+    : !hasMaterials
+      ? null
+      : pending.length > 0
+        ? { title: `${pending.reduce((n, s) => n + s.paragraphs.filter((p) => p.status === "proposed").length, 0)} פסקאות מחכות לאישור שלך.`, note: `הראשונה בסעיף "${pending[0]?.title ?? ""}".`, action: "לאישור הפסקאות", run: () => go({ name: "case", id: caseId, view: pending[0]?.key ?? "materials" }) }
+        : undrafted.length > 0
+          ? { title: `יש חומר ל-${undrafted.length} סעיפים. אפשר להכין להם טיוטה.`, note: "לפני שמשהו נשלח ל-Claude תראי בדיוק מה יוצא, ושמות יוחלפו בתפקידים.", action: `הכנת טיוטה ל-${undrafted.length} סעיפים`, run: () => setFullDraft(true) }
+          : allApproved
+            ? { title: "כל הסעיפים שיש להם חומר אושרו.", note: "הדוח יוצא כקובץ Word מוגן בסיסמה.", action: "הפקת דוח Word", run: () => setExporting(true) }
+            : null;
   const child = detail.identities.find((i) => i.role === "child")?.value ?? "";
   const age = detail.meta.age ? `גיל ${detail.meta.age.years}:${detail.meta.age.months}` : "";
   const approvedCount = detail.sections.filter((s) => s.approved).length;
@@ -92,10 +115,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   return (
     <div className="case">
       <aside className="side" aria-label="התיק">
-        <div className="side-brand">
-          <LockIcon size={24} color="#9cc9c3" />
-          <span>{he.appName}</span>
-        </div>
+        <button type="button" className="side-back" onClick={() => go({ name: "cases" })}>→ כל התיקים</button>
         <button type="button" className="side-case" onClick={() => go({ name: "case", id: caseId, view: "details" })}>
           <span className="side-code">{detail.meta.code}</span>
           <span className="side-child" title={detail.meta.age ? ageWords(detail.meta.age) : undefined}>{child}{age && ` · ${age}`}</span>
@@ -150,17 +170,31 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
 
       <div className="work">
         <header className="work-head">
-          <span className="crumbs">
-            <button type="button" className="crumb" onClick={() => go({ name: "cases" })}>תיקים</button>
-            <span aria-hidden="true">‹</span> {detail.meta.code} <span aria-hidden="true">‹</span> <b>{viewTitle}</b>
-          </span>
-          <span className="encrypted"><LockIcon size={13} /> {he.encrypted}</span>
+          <ol className="case-steps" aria-label="שלבי התיק">
+            {steps.map((st, i) => (
+              <li key={st.label} className={st.done ? "cs done" : i === currentStep ? "cs current" : "cs"} aria-current={i === currentStep ? "step" : undefined}>
+                <span className="cs-dot" aria-hidden="true">{st.done ? "✓" : i + 1}</span>{st.label}
+                {st.done && <span className="visually-hidden"> (הושלם)</span>}
+              </li>
+            ))}
+          </ol>
+          <span className="visually-hidden">{viewTitle}</span>
           {status.demo_mode && <span className="chip chip-sand" title="לא הוגדר מפתח API בהגדרות">מצב הדגמה</span>}
           <button type="button" className="btn" onClick={() => go({ name: "consult", caseId })}>התייעצות</button>
           <button type="button" className="btn btn-primary" onClick={() => setExporting(true)}>הפקת דוח Word</button>
-          <button type="button" className="btn icon-btn" aria-label="נעילה" title="נעילה (Ctrl+L)" onClick={() => void lockNow()}><LockIcon /></button>
+          <button type="button" className="btn" title="נעילה (Ctrl+L)" onClick={() => void lockNow()}><LockIcon size={15} /> נעילה</button>
         </header>
         <ErrorLine error={error} />
+        {view === "materials" && next && (
+          <section className="next-step" aria-label="הצעד הבא">
+            <div className="grow stack" style={{ gap: 4 }}>
+              <span className="next-eyebrow">הצעד הבא</span>
+              <b className="next-title">{next.title}</b>
+              <span className="muted">{next.note}</span>
+            </div>
+            <button type="button" className="btn btn-primary btn-big" onClick={next.run}>{next.action}</button>
+          </section>
+        )}
         {view === "materials" && <MaterialsView api={api} />}
         {view === "details" && <DetailsView api={api} />}
         {current && <SectionWork key={current.key} api={api} section={current} />}

@@ -4,7 +4,7 @@ import type { Role } from "../ipc/generated/Role";
 
 export const he = {
   appName: "כספת האבחון",
-  encrypted: "מוצפן · שמור במחשב בלבד",
+  encrypted: "מוצפן, שמור במחשב הזה",
   lock: {
     lockedAfterIdle: (minutes: number) => `הכספת ננעלה אחרי ${minutes} דקות ללא פעילות.`,
     password: "סיסמה",

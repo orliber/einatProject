@@ -184,20 +184,22 @@ try:
     shot("materials")
 
     # 4. A section: draft from the sources, with the review screen.
-    find("//button[contains(@class,'side-section')][.//span[normalize-space()='איכויות התקשורת']]").click()
+    section = find("//button[contains(@class,'side-section')][.//span[normalize-space()='איכויות התקשורת']]")
+    d.execute_script("arguments[0].scrollIntoView({block: 'center'});", section)
+    section.click()
     button("טיוטה מהמקורות").click()
     expect_text("לפני שליחה ל-Claude", 60)
     time.sleep(0.5)
     shot("review-suspect")
     body = d.find_element(By.TAG_NAME, "body").text
     log.append("     review: unknown name 'יובל' flagged = " + str("יובל" in body and "לא מופיע" in body))
-    hide = [b for b in d.find_elements(By.XPATH, "//button[starts-with(normalize-space(),'להסתיר כ')]") if b.is_displayed()]
+    hide = [b for b in d.find_elements(By.XPATH, "//button[normalize-space()='להסתיר את השם']") if b.is_displayed()]
     for b in hide[:3]:
         b.click()
         time.sleep(1)
     # Any remaining suspects (e.g. ambiguous words): keep as ordinary words.
     for _ in range(5):
-        rest = [b for b in d.find_elements(By.XPATH, "//button[normalize-space()='זה לא שם' or normalize-space()='מילה רגילה']") if b.is_displayed()]
+        rest = [b for b in d.find_elements(By.XPATH, "//button[normalize-space()='זה לא שם, להשאיר' or normalize-space()='מילה רגילה, להשאיר']") if b.is_displayed()]
         if not rest:
             break
         rest[0].click()
