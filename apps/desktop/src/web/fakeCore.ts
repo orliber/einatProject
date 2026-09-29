@@ -455,10 +455,10 @@ export class FakeCore {
       }
     } else if (ext === "txt") {
       body = new TextDecoder().decode(bytes);
-    } else if (ext === "pdf") {
-      fail("preview", "בהדמיה בדפדפן אפשר לייבא Word או טקסט. קובצי PDF נקראים בתוכנה המותקנת, בתהליך מבודד.");
+    } else if (ext === "pdf" || ext === "odt") {
+      fail("preview", "בהדמיה בדפדפן אפשר לייבא Word או טקסט. קובצי PDF ו-ODT נקראים בתוכנה המותקנת, בתהליך מבודד.");
     } else {
-      fail("unsupported", "אפשר לייבא קובצי Word (docx), PDF או טקסט.");
+      fail("unsupported", "אפשר לייבא קובצי Word (docx), ODT, PDF או טקסט.");
     }
     if (!body.trim()) fail("empty", "לא נמצא טקסט במסמך.");
     const f = this.filterFor(c, body);

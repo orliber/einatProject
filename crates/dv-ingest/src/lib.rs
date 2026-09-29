@@ -1,4 +1,4 @@
-//! Extracts text from untrusted documents (DOCX, PDF with a text layer, plain text).
+//! Extracts text from untrusted documents (DOCX, ODT, PDF with a text layer, plain text).
 //!
 //! In the app this runs in a separate worker process (the same binary started with
 //! [`worker::WORKER_ARG`]): it gets only the file's bytes, has no keys and no network, and is
@@ -7,6 +7,7 @@
 //! comments and file properties are shown locally and used to suggest names to hide.
 
 mod docx;
+mod odt;
 mod pdf;
 pub mod rtl;
 pub mod worker;
@@ -20,6 +21,7 @@ pub const MAX_INPUT_BYTES: usize = 25 * 1024 * 1024;
 #[serde(rename_all = "snake_case")]
 pub enum Format {
     Docx,
+    Odt,
     Pdf,
     Text,
 }
@@ -71,7 +73,7 @@ impl IngestError {
             Self::LegacyDoc => "זה קובץ Word ישן (‎.doc). יש לפתוח אותו ב-Word ולשמור בשם כ-‎.docx.".to_owned(),
             Self::Scanned => "לא נמצא טקסט בקובץ – כנראה מסמך סרוק (תמונה). כרגע אפשר לייבא PDF עם טקסט, DOCX או טקסט.".to_owned(),
             Self::Empty => "הקובץ ריק.".to_owned(),
-            Self::Unsupported => "סוג הקובץ לא נתמך. אפשר לייבא DOCX, PDF או קובץ טקסט.".to_owned(),
+            Self::Unsupported => "סוג הקובץ לא נתמך. אפשר לייבא Word (DOCX), ODT, PDF או קובץ טקסט.".to_owned(),
             Self::Corrupt(_) => "לא הצלחתי לקרוא את הקובץ. ייתכן שהוא פגום.".to_owned(),
             Self::Timeout => "קריאת הקובץ לקחה יותר מדי זמן והופסקה.".to_owned(),
             Self::Worker(_) => "קריאת הקובץ נכשלה.".to_owned(),
@@ -85,7 +87,11 @@ pub fn detect(bytes: &[u8], file_name: &str) -> Result<Format, IngestError> {
         return Err(IngestError::TooLarge);
     }
     if bytes.starts_with(b"PK\x03\x04") {
-        return Ok(Format::Docx);
+        return Ok(if odt::is_odt(bytes) {
+            Format::Odt
+        } else {
+            Format::Docx
+        });
     }
     if bytes.starts_with(b"%PDF-") {
         return Ok(Format::Pdf);
@@ -149,6 +155,7 @@ fn decode_text(bytes: &[u8], file_name: &str) -> Option<(String, bool)> {
 pub fn extract(bytes: &[u8], file_name: &str) -> Result<Extracted, IngestError> {
     let mut out = match detect(bytes, file_name)? {
         Format::Docx => docx::extract(bytes)?,
+        Format::Odt => odt::extract(bytes)?,
         Format::Pdf => pdf::extract(bytes)?,
         Format::Text => {
             let (body, legacy) = decode_text(bytes, file_name).ok_or(IngestError::Unsupported)?;

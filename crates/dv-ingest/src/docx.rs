@@ -11,18 +11,18 @@ use quick_xml::Reader;
 
 use crate::{Extracted, Format, IngestError};
 
-const MAX_ENTRIES: usize = 5_000;
+pub(crate) const MAX_ENTRIES: usize = 5_000;
 const MAX_PART_BYTES: u64 = 40 * 1024 * 1024;
-const MAX_TOTAL_BYTES: u64 = 120 * 1024 * 1024;
+pub(crate) const MAX_TOTAL_BYTES: u64 = 120 * 1024 * 1024;
 
-fn corrupt(e: impl std::fmt::Display) -> IngestError {
+pub(crate) fn corrupt(e: impl std::fmt::Display) -> IngestError {
     IngestError::Corrupt(e.to_string())
 }
 
 type Archive<'a> = zip::ZipArchive<Cursor<&'a [u8]>>;
 
 /// Read one part, bounded by its own limit and by what is left of the total budget.
-fn read_part(
+pub(crate) fn read_part(
     zip: &mut Archive<'_>,
     name: &str,
     budget: &mut u64,
@@ -256,7 +256,7 @@ fn on(e: &quick_xml::events::BytesStart<'_>) -> bool {
 }
 
 /// Simple text properties (`<dc:creator>…</dc:creator>`).
-fn properties(xml: &str, fields: &[&str]) -> Result<Vec<(String, String)>, IngestError> {
+pub(crate) fn properties(xml: &str, fields: &[&str]) -> Result<Vec<(String, String)>, IngestError> {
     let mut reader = Reader::from_str(xml);
     let mut current: Option<String> = None;
     let mut out = Vec::new();

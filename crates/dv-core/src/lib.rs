@@ -922,6 +922,7 @@ impl Core {
             file_name: file_name.to_owned(),
             format: match extracted.format {
                 dv_ingest::Format::Docx => "docx",
+                dv_ingest::Format::Odt => "odt",
                 dv_ingest::Format::Pdf => "pdf",
                 dv_ingest::Format::Text => "text",
             }
