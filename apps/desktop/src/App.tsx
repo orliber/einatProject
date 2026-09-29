@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { ipc, type AppStatus, type UiError } from "./ipc/client";
 import { LockScreen } from "./screens/LockScreen";
 import { SetupScreen } from "./screens/SetupScreen";
@@ -87,6 +87,14 @@ export function App() {
 
   // Ctrl+L (⌘L on Mac) locks at once: stepping away from the desk should take one key.
   const unlocked = status?.unlocked === true;
+
+  // Once the vault locks (by hand or when idle), reload the page: names shown on screen
+  // must not stay in the page's memory. Only in the built app (tests and dev keep state).
+  const wasUnlocked = useRef(false);
+  useEffect(() => {
+    if (wasUnlocked.current && !unlocked && import.meta.env.PROD) window.location.reload();
+    wasUnlocked.current = unlocked;
+  }, [unlocked]);
   useEffect(() => {
     if (!unlocked) return;
     const onKey = (e: KeyboardEvent) => {
