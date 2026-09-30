@@ -145,8 +145,8 @@ export function CasesScreen() {
   ];
   const caseItems = (c: CaseSummary): MenuItem[] => [
     { label: "פתיחה", run: () => go({ name: "case", id: c.id, view: "materials" }) },
-    { label: "אבחון מעקב לילד/ה הזה/ו", run: () => void followUp(c) },
     { label: "העברה לתיקייה…", run: () => setModal({ kind: "move-case", c }) },
+    { label: "אבחון מעקב לילד/ה הזה/ו", run: () => void followUp(c) },
     { label: "העברה לסל המחזור", run: () => setModal({ kind: "delete-case", c }), danger: true },
   ];
   const caseName = (c: CaseSummary) => c.child_name ?? c.meta.code;
@@ -253,7 +253,7 @@ export function CasesScreen() {
                     {shownCases.map((c) => {
                       const s = nextStep(c);
                       const pct = Math.round((c.approved_sections.length / TOTAL_SECTIONS) * 100);
-                      const open = () => go({ name: "case", id: c.id, view: "materials" });
+                      const open = () => go({ name: "case", id: c.id, view: c.approved_sections.length > 0 ? "report" : "materials" });
                       return (
                         <RightClick key={c.id} items={caseItems(c)}>
                           <tr onClick={open} className="case-row" draggable onDragStart={onDragStart({ case: c.id })}>

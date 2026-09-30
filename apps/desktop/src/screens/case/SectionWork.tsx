@@ -28,6 +28,8 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [own, setOwn] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [linking, setLinking] = useState(false);
+  const [linked, setLinked] = useState(false);
   const chatEnd = useRef<HTMLDivElement>(null);
 
   const loadChat = useCallback(async () => {
@@ -133,22 +135,65 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
           <div className="row small wrap-row">
             {derived ? (
               <span className="muted">הסעיף נכתב מתוך הסעיפים שכבר אישרת.</span>
-            ) : sources.length > 0 ? (
-              <>
-                <span className="muted">Claude כותב מתוך:</span>
-                {sources.map((i) => (
-                  <button key={i.id} type="button" className="source-chip" title="פתיחה בחומרי התיק"
-                    onClick={() => go({ name: "case", id: caseId, view: "materials" })}>
-                    {kindLabel[i.kind] ?? ""} · {i.title}
-                  </button>
-                ))}
-              </>
             ) : (
-              <span className="muted">עוד אין חומרים שמזינים את הסעיף. אפשר להוסיף ב"חומרי התיק", או לכתוב בעצמך.</span>
+              <>
+                <span className="muted">{sources.length ? "Claude כותב מתוך:" : "עוד אין חומרים שמזינים את הסעיף."}</span>
+                {sources.map((i) => (
+                  <span key={i.id} className="source-chip">{kindLabel[i.kind] ?? ""} · {i.title}</span>
+                ))}
+                {section.sortable && (
+                  <button type="button" className="source-chip source-link" aria-expanded={linking} onClick={() => setLinking(!linking)}>
+                    {linking ? "סגירה" : sources.length ? "✎ שינוי החומרים" : "+ קישור חומרים לסעיף"}
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
       </div>
+
+      {linking && (
+        <section className="link-panel" aria-label="החומרים שהסעיף נכתב מהם">
+          <p className="small muted">
+            מסמנים את החומרים שהסעיף ייכתב מהם. חומר שמסומן כאן נשלח לסעיף הזה (אחרי הסתרה), והבחירה שלך גוברת על המיון.
+          </p>
+          <ul className="link-list">
+            {api.detail.inputs.map((i) => {
+              const r = api.detail.routing.find((x) => x.input_id === i.id);
+              const on = r?.feeds.includes(section.key) ?? false;
+              const others = (r?.feeds ?? []).filter((k) => k !== section.key).length;
+              return (
+                <li key={i.id}>
+                  <label className="link-row">
+                    <input type="checkbox" checked={on} disabled={!r}
+                      onChange={() => void act(async () => {
+                        if (!r) return;
+                        const feeds = on ? r.feeds.filter((k) => k !== section.key) : [...r.feeds, section.key];
+                        await ipc.setInputSections(caseId, i.id, feeds);
+                        setLinked(true);
+                      })} />
+                    <span className="grow">
+                      <b>{i.title || kindLabel[i.kind]}</b>
+                      <span className="small muted"> · {kindLabel[i.kind]}{others > 0 ? ` · מזין עוד ${others} סעיפים` : ""}</span>
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
+            {api.detail.inputs.length === 0 && <li className="muted small">עוד אין חומרים בתיק.</li>}
+          </ul>
+          {linked && visible.length > 0 && (
+            <div className="row">
+              <span className="small grow">החומרים עודכנו. כדי שהטיוטה תיכתב גם מהם:</span>
+              <button type="button" className="btn btn-small btn-primary" disabled={working}
+                onClick={() => { setLinked(false); setLinking(false); void ask(draftInstruction, `טיוטה חדשה לסעיף ${section.title}`); }}>
+                טיוטה חדשה מ-Claude
+              </button>
+            </div>
+          )}
+          <button type="button" className="link-small" onClick={() => go({ name: "case", id: caseId, view: "materials" })}>להוספת חומר חדש לתיק ←</button>
+        </section>
+      )}
 
       <div className="view-body">
         <section className="paper draft" aria-label="טיוטת הסעיף">

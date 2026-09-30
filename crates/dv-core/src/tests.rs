@@ -2098,3 +2098,95 @@ fn a_follow_up_takes_the_names_and_compares_the_scores() {
     );
     assert!(core.follow_up(&before).unwrap().is_none());
 }
+
+/// "זה לא שם, להשאיר" must stick for every kind of question: after one answer to each, the
+/// same request asks nothing again (a question that comes back looks like a frozen screen).
+#[test]
+fn every_not_a_name_answer_sticks_after_one_round() {
+    let (_dir, mut core, case) = setup(Some(FakeTransport::default()));
+    for text in [
+        // A spelling close to a declared name, behind a prefix ("ה" + "ריון" ~ "רון").
+        "ההריון עבר בשלום. ד\"ר רון בדק אותו.",
+        // A profession, flagged with the words after it.
+        "האם עובדת כמנהלת חשבונות בבנק.",
+        // A capitalized Latin word, a first name behind a prefix, a word-name in context.
+        "He likes Lego. ולשירן אין קשר. הילד שיחק עם גל בחצר.",
+        // After a label.
+        "לכבוד הצוות החינוכי, שם: פלוני אלמוני",
+    ] {
+        core.add_input(&case, InputKind::FreeText, "הערה", text)
+            .unwrap();
+    }
+    let first = core.prepare_sort(&case).unwrap();
+    assert!(!first.suspects.is_empty());
+    for s in &first.suspects {
+        core.decide_suspect(&case, &s.token, SuspectDecision::NotAName)
+            .unwrap();
+    }
+    let again = core.prepare_sort(&case).unwrap();
+    let back: Vec<&str> = again.suspects.iter().map(|s| s.token.as_str()).collect();
+    assert!(back.is_empty(), "asked again after answering: {back:?}");
+}
+
+/// A follow-up shares its names with the case before: sending from it must work, with this
+/// case's tags, and nothing personal leaves.
+#[test]
+fn a_follow_up_sends_with_its_own_tags() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, before) = setup(Some(fake.clone()));
+    let after = core.create_follow_up(&before).unwrap();
+    let mut meta = core.case_detail(&after).unwrap().meta;
+    meta.consent = Some(consent());
+    meta.age = Some(Age {
+        years: 6,
+        months: 5,
+    });
+    core.update_case(&after, meta).unwrap();
+    core.add_input(
+        &after,
+        InputKind::Kindergarten,
+        "שיחה עם המורה",
+        "שירה סיפרה כי אלון השתלב בכיתה ומשתתף בשיעורים.",
+    )
+    .unwrap();
+    let prepared = core
+        .prepare_section(&after, "kindergarten", "טיוטה")
+        .unwrap();
+    assert!(prepared.blocked.is_empty(), "{:?}", prepared.blocked);
+    let approval = prepared.approval_id.expect("clears the gate");
+    core.send_section(&approval).unwrap();
+    let sent = fake.sent.lock().unwrap().last().unwrap().clone();
+    for name in ["אלון", "שירה"] {
+        assert!(!sent.contains(name), "{name} left the machine");
+    }
+    assert!(sent.contains("[ילד]"), "this case's own tag");
+}
+
+/// "להסתיר" also settles every kind of question in one round, and the request then clears.
+#[test]
+fn every_hide_answer_sticks_after_one_round() {
+    let (_dir, mut core, case) = setup(Some(FakeTransport::default()));
+    core.add_input(
+        &case,
+        InputKind::FreeText,
+        "הערה",
+        "האם עובדת כמנהלת חשבונות בבנק. He likes Lego. ולשירן אין קשר. לכבוד הצוות, שם: פלוני אלמוני",
+    )
+    .unwrap();
+    let first = core.prepare_sort(&case).unwrap();
+    for s in &first.suspects {
+        core.decide_suspect(
+            &case,
+            &s.token,
+            SuspectDecision::Hide {
+                role: s.suggested_role,
+            },
+        )
+        .unwrap();
+    }
+    let again = core.prepare_sort(&case).unwrap();
+    let back: Vec<&str> = again.suspects.iter().map(|s| s.token.as_str()).collect();
+    assert!(back.is_empty(), "asked again after hiding: {back:?}");
+    assert!(again.blocked.is_empty(), "{:?}", again.blocked);
+    assert!(again.approval_id.is_some());
+}

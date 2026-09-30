@@ -351,3 +351,10 @@
   background: var(--surface);
   border: 1px solid var(--line);
 }
+.job-failed {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--block);
+  font-size: 14px;
+}

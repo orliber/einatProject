@@ -699,7 +699,7 @@ export class FakeCore {
         const p = this.pending.get(String(a.approvalId));
         if (p?.type !== "section") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
         this.pending.delete(String(a.approvalId));
-        await new Promise((r) => setTimeout(r, 700));
+        await new Promise((r) => setTimeout(r, 2500));
         return this.sendSection(p);
       }
       case "prepare_sort":
