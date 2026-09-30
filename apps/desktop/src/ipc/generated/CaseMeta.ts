@@ -7,4 +7,8 @@ export type CaseMeta = { code: string, age: Age | null, child_gender: Grammatica
 /**
  * ISO date after which the retention reminder appears.
  */
-retention_until: string | null, consent: Consent | null, };
+retention_until: string | null, consent: Consent | null, 
+/**
+ * A follow-up assessment: the case of the assessment before (D-029).
+ */
+follows?: string, };

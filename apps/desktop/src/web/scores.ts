@@ -3,6 +3,7 @@
 import type { Instrument } from "../ipc/generated/Instrument";
 import type { Measure } from "../ipc/generated/Measure";
 import type { ScoreSheet } from "../ipc/generated/ScoreSheet";
+import type { ComparisonRow } from "../ipc/generated/ComparisonRow";
 import tables from "./instruments.json";
 
 export const instruments = tables as Instrument[];
@@ -75,4 +76,41 @@ export function formatSheet(sheet: ScoreSheet): string {
   out += "הטווחים חושבו בתוכנה לפי טבלה קבועה, לא על ידי מודל השפה.\n";
   if (sheet.notes.trim()) out += `הערות המאבחנת: ${sheet.notes.trim()}\n`;
   return out;
+}
+
+/** The same comparison as dv_domain::compare (D-029), for the browser preview. */
+export function compareSheets(before: ScoreSheet[], after: ScoreSheet[]): ComparisonRow[] {
+  const find = (s: ScoreSheet, key: string) => {
+    const inst = instruments.find((i) => i.key === s.instrument);
+    const m = inst?.measures.find((x) => x.key === key);
+    return inst && m ? { inst, m } : null;
+  };
+  const band = (m: Measure, v: number) => m.bands.find((b) => v >= b.min && v <= b.max)?.label ?? "";
+  const rows: ComparisonRow[] = [];
+  for (const a of after) {
+    for (const e of a.entries) {
+      const now = find(a, e.measure);
+      if (!now) continue;
+      let prev: { inst: Instrument; m: Measure; v: number } | null = null;
+      for (const b of before) {
+        const f = find(b, e.measure);
+        const be = b.entries.find((x) => x.measure === e.measure);
+        if (f && be && f.m.scale === now.m.scale) { prev = { ...f, v: be.value }; break; }
+      }
+      if (!prev || rows.some((r) => r.abbr === now.m.abbr)) continue;
+      const change = e.value - prev.v;
+      const at = now.m.scale === "standard" || now.m.scale === "t_concern" ? 10 : now.m.scale === "scaled" ? 3 : Infinity;
+      rows.push({
+        measure: now.m.name_he, abbr: now.m.abbr, before_instrument: prev.inst.name, after_instrument: now.inst.name,
+        before: prev.v, after: e.value, change, before_band: band(prev.m, prev.v), after_band: band(now.m, e.value), notable: Math.abs(change) >= at,
+      });
+    }
+  }
+  return rows;
+}
+
+export function comparisonText(rows: ComparisonRow[]): string {
+  const lines = rows.map((r) => `${r.measure} (${r.abbr}): ${fmt(r.before)} ← ${fmt(r.after)} (שינוי ${r.change > 0 ? "+" : ""}${fmt(r.change)}${r.notable ? ", שינוי ששווה לבדוק" : ""}); טווח: ${r.before_band} ← ${r.after_band}${r.before_instrument === r.after_instrument ? "" : ` (${r.before_instrument} ← ${r.after_instrument})`}`);
+  const careful = rows.some((r) => r.before_instrument !== r.after_instrument) ? "המבחנים שונים בין שני האבחונים, ולכן ההשוואה זהירה." : "";
+  return ["השוואה לאבחון הקודם (מדדים שנמדדו בשני האבחונים):", ...lines, `הפרש קטן מ-10 נקודות בציון תקן (3 בציון מותאם) הוא לרוב בגבולות טעות המדידה. ${careful}`.trim()].join("\n");
 }

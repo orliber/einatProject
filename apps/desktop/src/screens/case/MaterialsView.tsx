@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { useApp } from "../../App";
 import { kindLabel, kindOrder } from "../../i18n/he";
-import { ipc, type CaseInput, type ImportPreview, type InputKind, type MaterialRouting, type ScoreSheet } from "../../ipc/client";
+import { ipc, type CaseInput, type FollowUpView, type ImportPreview, type InputKind, type MaterialRouting, type ScoreSheet } from "../../ipc/client";
 import type { FilterOutcome } from "../../ipc/generated/FilterOutcome";
 import { ImportDialog } from "../../components/ImportDialog";
 import { ScoresDialog } from "../../components/ScoresDialog";
@@ -105,6 +105,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
         </div>
       </div>
       <ErrorLine error={error} />
+      {detail.meta.follows && <FollowUpPanel api={api} />}
       <Checklist api={api}
         onAdd={(kind) => kind === "test_scores" ? setScoring({}) : kind === "upload" ? fileRef.current?.click() : setWriting({ kind })} />
       <div className="view-body">
@@ -364,6 +365,93 @@ function Checklist({ api, onAdd }: { api: CaseApi; onAdd: (kind: InputKind | "up
             );
           })}
         </ul>
+      )}
+    </section>
+  );
+}
+
+/** D-029: the scores of this follow-up next to the assessment before, by fixed rules. */
+function FollowUpPanel({ api }: { api: CaseApi }) {
+  const { fail, notify, go } = useApp();
+  const { caseId, detail, reload } = api;
+  const [view, setView] = useState<FollowUpView | null>(null);
+  const [open, setOpen] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const scoreCount = detail.inputs.filter((i) => i.kind === "test_scores").length;
+
+  useEffect(() => {
+    let alive = true;
+    ipc.followUp(caseId).then((v) => alive && setView(v)).catch((e: unknown) => alive && setError(fail(e as never)));
+    return () => {
+      alive = false;
+    };
+  }, [caseId, scoreCount, fail]);
+
+  if (!view) return <ErrorLine error={error} />;
+  const num = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
+  return (
+    <section className="followup" aria-label="השוואה לאבחון הקודם">
+      <button type="button" className="checklist-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <b className="grow">
+          אבחון מעקב{view.previous_gone ? " · האבחון הקודם נמחק" : ` · האבחון הקודם: ${view.previous_code}`}
+          {view.rows.length > 0 && ` · ${view.rows.length} מדדים להשוואה`}
+        </b>
+        {!view.previous_gone && (
+          <span role="link" tabIndex={0} className="link-small" onClick={(e) => { e.stopPropagation(); go({ name: "case", id: view.previous_id, view: "report" }); }}
+            onKeyDown={(e) => { if (e.key === "Enter") go({ name: "case", id: view.previous_id, view: "report" }); }}>
+            לדוח הקודם
+          </span>
+        )}
+        <span aria-hidden="true">{open ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <div className="followup-body">
+          {view.rows.length === 0 ? (
+            <p className="muted small">
+              {view.previous_gone ? "אין עם מה להשוות." : "ההשוואה תופיע כאן כשיוזנו כאן ציונים במבחן שנמדד גם באבחון הקודם (למשל מדדי וקסלר: FSIQ, VCI, WMI)."}
+            </p>
+          ) : (
+            <>
+              <table className="compare-table">
+                <thead>
+                  <tr><th>מדד</th><th>קודם</th><th>עכשיו</th><th>שינוי</th><th>טווח</th></tr>
+                </thead>
+                <tbody>
+                  {view.rows.map((r) => (
+                    <tr key={r.abbr + r.measure} className={r.notable ? "notable" : undefined}>
+                      <td>{r.measure} <span className="muted">({r.abbr})</span></td>
+                      <td className="num">{num(r.before)}</td>
+                      <td className="num">{num(r.after)}</td>
+                      <td className="num"><b dir="ltr">{r.change > 0 ? "+" : ""}{num(r.change)}</b>{r.notable && <span className="small"> · ששווה לבדוק</span>}</td>
+                      <td className="small">{r.before_band} ← {r.after_band}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="small muted">
+                הפרש קטן מ-10 נקודות בציון תקן (3 בציון מותאם) הוא לרוב בגבולות טעות המדידה.
+                {view.rows.some((r) => r.before_instrument !== r.after_instrument) && ` המבחנים שונים (${view.rows[0]?.before_instrument} ← ${view.rows[0]?.after_instrument}), ולכן ההשוואה זהירה.`}
+              </p>
+              <div className="row">
+                <button type="button" className="btn btn-small"
+                  onClick={async () => {
+                    setError(null);
+                    try {
+                      await ipc.addComparisonMaterial(caseId);
+                      await reload();
+                      setView(await ipc.followUp(caseId));
+                      notify("ההשוואה נוספה לחומרי התיק. הסעיפים ייכתבו גם ממנה.");
+                    } catch (e) {
+                      setError(fail(e as never));
+                    }
+                  }}>
+                  {view.in_materials ? "עדכון ההשוואה בחומרי התיק" : "הוספת ההשוואה לחומרי התיק"}
+                </button>
+              </div>
+            </>
+          )}
+          <ErrorLine error={error} />
+        </div>
       )}
     </section>
   );

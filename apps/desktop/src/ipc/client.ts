@@ -33,6 +33,7 @@ import type { SectionResult } from "./generated/SectionResult";
 import type { SortResult } from "./generated/SortResult";
 import type { MaterialRouting } from "./generated/MaterialRouting";
 import type { SuspectDecision } from "./generated/SuspectDecision";
+import type { FollowUpView } from "./generated/FollowUpView";
 import type { UiError } from "./generated/UiError";
 
 /** Every failure reaches the UI as a UiError with a Hebrew message. */
@@ -135,6 +136,10 @@ export const ipc = {
     run("set_input_sections", { caseId, inputId, sections }),
   chat: (caseId: string, sectionKey: string) => call<ChatView[]>("chat", { caseId, sectionKey }),
   approveParagraph: (caseId: string, draftId: string) => run("approve_paragraph", { caseId, draftId }),
+  /** D-029: a follow-up assessment of a case (same names and folder, a new consent). */
+  createFollowUp: (caseId: string) => call<string>("create_follow_up", { caseId }),
+  followUp: (caseId: string) => call<FollowUpView | null>("follow_up", { caseId }),
+  addComparisonMaterial: (caseId: string) => call<CaseInput>("add_comparison_material", { caseId }),
   /** Approve every paragraph waiting in the section; returns how many. */
   approveSection: (caseId: string, sectionKey: string) => call<number>("approve_section", { caseId, sectionKey }),
   rejectParagraph: (caseId: string, draftId: string) => run("reject_paragraph", { caseId, draftId }),
@@ -209,6 +214,7 @@ export type {
   PingResponse,
   Prepared,
   ReportSettings,
+  FollowUpView,
   ScoreSheet,
   SectionResult,
   SuspectDecision,

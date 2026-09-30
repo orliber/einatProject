@@ -32,7 +32,7 @@ import { kindLabel } from "../i18n/he";
 import structure from "../../../../templates/report_structure.json";
 import { readDocx } from "./docx";
 import { filter, restore, type Person } from "./filter";
-import { formatSheet, instruments } from "./scores";
+import { compareSheets, comparisonText, formatSheet, instruments } from "./scores";
 import * as R from "./routing";
 import type { SortResult } from "../ipc/generated/SortResult";
 
@@ -593,6 +593,30 @@ export class FakeCore {
         return this.nameMatches((a.caseId as string | null) ?? null, (a.names as string[]) ?? []);
       case "create_case":
         return this.newCase(a.meta as CaseMeta, a.identities as IdentityInput[]).id;
+      case "create_follow_up": {
+        const prev = this.find(a.caseId);
+        const c = this.newCase({ code: `${prev.meta.code} · מעקב`, age: null, child_gender: prev.meta.child_gender, current_section: null, retention_until: null, consent: null, follows: prev.id },
+          prev.people.map((p) => ({ id: null, role: p.role, value: p.value, aliases: p.aliases })));
+        c.folderId = prev.folderId;
+        return c.id;
+      }
+      case "follow_up": {
+        const c = this.find(a.caseId);
+        if (!c.meta.follows) return null;
+        const prev = this.cases.find((x) => x.id === c.meta.follows && x.deletedAt === null);
+        const inMaterials = c.inputs.some((i) => i.title === "השוואה לאבחון הקודם");
+        if (!prev) return { previous_id: c.meta.follows, previous_code: "", previous_gone: true, rows: [], in_materials: inMaterials };
+        return { previous_id: prev.id, previous_code: prev.meta.code, previous_gone: false, rows: compareSheets([...prev.sheets.values()], [...c.sheets.values()]), in_materials: inMaterials };
+      }
+      case "add_comparison_material": {
+        const c = this.find(a.caseId);
+        const prev = this.cases.find((x) => x.id === c.meta.follows);
+        const rows = prev ? compareSheets([...prev.sheets.values()], [...c.sheets.values()]) : [];
+        if (!rows.length) return fail("refused", "אין ציונים משותפים לשני האבחונים להשוואה.");
+        const text = comparisonText(rows);
+        const existing = c.inputs.find((i) => i.title === "השוואה לאבחון הקודם");
+        return existing ? Object.assign(existing, { content: text }) : this.addInput(c, "test_scores", "השוואה לאבחון הקודם", text);
+      }
       case "update_case": {
         const c = this.find(a.caseId);
         c.meta = a.meta as CaseMeta;

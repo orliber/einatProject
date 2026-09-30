@@ -8,6 +8,7 @@ mod activity;
 mod backup;
 mod consultations;
 mod dates;
+mod followup;
 mod library;
 mod retention;
 mod sorting;
@@ -37,6 +38,7 @@ pub use activity::ACTIVITY_PAGE;
 pub use backup::{backup_file_name, BACKUP_DAYS, MAX_BACKUP_BYTES};
 pub(crate) use dates::today;
 pub use dv_vault::BACKUP_EXTENSION;
+pub use followup::FollowUpView;
 pub use library::TRASH_DAYS;
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
 pub use views::{
@@ -747,8 +749,10 @@ impl Core {
         Ok(id)
     }
 
-    pub fn update_case(&mut self, case_id: &str, meta: CaseMeta) -> Result<(), CoreError> {
+    pub fn update_case(&mut self, case_id: &str, mut meta: CaseMeta) -> Result<(), CoreError> {
         check_meta(&meta)?;
+        // Which assessment a follow-up belongs to is set when it is opened, never edited.
+        meta.follows = self.vault_ref()?.case_meta(case_id)?.follows;
         Ok(self.vault_mut()?.update_case_meta(case_id, &meta)?)
     }
 

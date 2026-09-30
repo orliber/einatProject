@@ -491,6 +491,27 @@ async fn chat(
 }
 
 #[tauri::command]
+async fn create_follow_up(state: tauri::State<'_, AppState>, case_id: String) -> Res<String> {
+    with_core(&state, move |c| c.create_follow_up(&case_id)).await
+}
+
+#[tauri::command]
+async fn follow_up(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+) -> Res<Option<dv_core::FollowUpView>> {
+    with_core(&state, move |c| c.follow_up(&case_id)).await
+}
+
+#[tauri::command]
+async fn add_comparison_material(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+) -> Res<dv_domain::CaseInput> {
+    with_core(&state, move |c| c.add_comparison_material(&case_id)).await
+}
+
+#[tauri::command]
 async fn approve_section(
     state: tauri::State<'_, AppState>,
     case_id: String,
@@ -879,6 +900,9 @@ fn main() {
             chat,
             approve_paragraph,
             approve_section,
+            create_follow_up,
+            follow_up,
+            add_comparison_material,
             reject_paragraph,
             edit_paragraph,
             add_own_paragraph,
