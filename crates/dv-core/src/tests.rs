@@ -1822,3 +1822,142 @@ fn an_answer_to_a_deleted_conversation_is_kept_in_a_new_one() {
         .iter()
         .any(|e| e.event == "consultation_deleted"));
 }
+
+/// The sample documents Or and Einat try the app with (`tests/samples/make_samples.py`) go
+/// through the real import, filter and gate: nothing personal leaves, the name the case does
+/// not list is asked about, and the scanned page is refused.
+#[test]
+fn the_sample_documents_leak_nothing() {
+    let out = tempfile::tempdir().unwrap();
+    let script = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/samples/make_samples.py"
+    );
+    let python = if cfg!(windows) { "python" } else { "python3" };
+    let status = std::process::Command::new(python)
+        .arg(script)
+        .arg(out.path())
+        .stdout(std::process::Stdio::null())
+        .status()
+        .expect("python runs the sample generator");
+    assert!(status.success());
+
+    let fake = FakeTransport::default();
+    let (_dir, mut core, _) = setup(Some(fake.clone()));
+    let person = |role, value: &str| IdentityInput {
+        id: None,
+        role,
+        value: value.into(),
+        aliases: vec![],
+    };
+    let meta = CaseMeta {
+        code: "TEST-0003".into(),
+        age: Some(Age {
+            years: 5,
+            months: 8,
+        }),
+        child_gender: Some(GrammaticalGender::Male),
+        consent: Some(consent()),
+        ..CaseMeta::default()
+    };
+    let case = core
+        .create_case(
+            meta,
+            vec![
+                IdentityInput {
+                    aliases: vec!["בדיוני".into()],
+                    ..person(Role::Child, "אלון")
+                },
+                person(Role::Mother, "שירה"),
+                person(Role::Father, "גיא"),
+                person(Role::Sister, "נוגה"),
+                person(Role::Teacher, "אורית"),
+                person(Role::Kindergarten, "גן השקד"),
+                person(Role::Town, "גבעת הרימון"),
+                person(Role::Slp, "ליאת"),
+                person(Role::Therapist, "דפנה"),
+                person(Role::Doctor, "ד\"ר יואב רון"),
+            ],
+        )
+        .unwrap();
+
+    let follow = out.path().join("מעקב - שנה אחרי");
+    let mut files: Vec<std::path::PathBuf> = [out.path(), follow.as_path()]
+        .iter()
+        .flat_map(|d| std::fs::read_dir(d).unwrap().flatten().map(|e| e.path()))
+        .filter(|p| p.is_file() && !p.to_string_lossy().contains("קרא אותי"))
+        .collect();
+    files.sort();
+    assert!(files.len() >= 10, "{files:?}");
+    let mut stranger_asked = false;
+    for path in &files {
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let bytes = std::fs::read(path).unwrap();
+        match core.import_document(&case, &name, &bytes) {
+            Ok(p) => {
+                stranger_asked |= p.suspects.iter().any(|s| s.token.contains("עומרי"));
+                core.add_input(&case, p.suggested_kind, &p.title, &p.body)
+                    .unwrap();
+            }
+            Err(e) => assert!(name.contains("סרוק"), "{name}: {}", e.to_ui().message),
+        }
+    }
+    assert!(
+        stranger_asked,
+        "the friend the case does not list is asked about"
+    );
+
+    // Einat's answers: the friend is hidden, "שאלון" here is "that Alon", the rest are words.
+    let mut prepared = core.prepare_sort(&case).unwrap();
+    let mut asked: Vec<String> = Vec::new();
+    for _ in 0..5 {
+        if prepared.suspects.is_empty() {
+            break;
+        }
+        for s in &prepared.suspects {
+            asked.push(s.token.clone());
+            let decision = if s.token.contains("עומרי") {
+                SuspectDecision::Hide {
+                    role: Role::OtherChild,
+                }
+            } else if s.token == "שאלון" {
+                SuspectDecision::IsName
+            } else {
+                SuspectDecision::NotAName
+            };
+            core.decide_suspect(&case, &s.token, decision).unwrap();
+        }
+        prepared = core.prepare_sort(&case).unwrap();
+    }
+    assert!(asked.len() <= 4, "few questions, each once: {asked:?}");
+    assert!(prepared.blocked.is_empty(), "{:?}", prepared.blocked);
+    core.send_sort(&prepared.approval_id.expect("clears the gate"))
+        .unwrap();
+
+    let sent = fake.sent.lock().unwrap().join("\n");
+    assert!(sent.contains("[ילד]"));
+    let phone = ["050", "000", "0000"].join("-");
+    let mail = ["shira.fake", "example.com"].join("@");
+    for secret in [
+        "אלון",
+        "שירה",
+        "גיא ",
+        "נוגה",
+        "אורית",
+        "השקד",
+        "הרימון",
+        "ליאת",
+        "דפנה",
+        "יואב",
+        "עומרי",
+        "בדיוני",
+        "000000026",
+        &phone,
+        &mail,
+        "הזית 4",
+        "לא לשלוח",
+        "הפרעת קשב",
+    ] {
+        assert!(!sent.contains(secret), "{secret} left the machine");
+    }
+}
