@@ -72,7 +72,7 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
         prepared,
         reprepare: () => ipc.prepareSort(api.caseId),
         onSend: async (id) => {
-          await api.track({ label: "Claude קורא את החומרים ומשייך קטעים לסעיפים", task: "sort" }, () => ipc.sendSort(id));
+          await api.track({ label: "Claude קורא את החומרים ומשייך קטעים לסעיפים", task: "sort", approval: id }, () => ipc.sendSort(id));
           await api.reload();
         },
       });
@@ -86,7 +86,7 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
     setState((s) => ({ ...s, [key]: "writing" }));
     setStarted((s) => ({ ...s, [key]: Date.now() }));
     try {
-      await api.track({ label: `Claude כותב את "${title(key)}"`, task: "draft", section: key }, () => ipc.sendSection(approval));
+      await api.track({ label: `Claude כותב את "${title(key)}"`, task: "draft", section: key, approval }, () => ipc.sendSection(approval));
       setState((s) => ({ ...s, [key]: "done" }));
     } catch (e) {
       setError(fail(e as never));
@@ -198,7 +198,7 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
                 )}
                 {st === "done" && <button type="button" className="link-small" onClick={() => { onClose(); go({ name: "case", id: api.caseId, view: "report" }); }}>לדוח</button>}
               </div>
-              {st === "writing" && started[key] !== undefined && <ProgressLine started={started[key]} estimate={draftMs} label="" />}
+              {st === "writing" && started[key] !== undefined && <ProgressLine started={started[key]} estimate={draftMs} label="" approval={api.jobs.find((j) => j.section === key)?.approval} />}
               {open === key && (
                 <div className="run-row-body serif">
                   <p className="small muted">{p.hidden.length ? `יוסתרו: ${p.hidden.join(", ")}` : "אין פרטים מזהים"}</p>

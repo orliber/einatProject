@@ -1034,6 +1034,7 @@ dependencies = [
  "dv-ipc",
  "dv-privacy",
  "rfd",
+ "serde_json",
  "tauri",
  "tauri-build",
  "zeroize",

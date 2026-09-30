@@ -5,6 +5,7 @@ import { TopBar } from "../components/TopBar";
 import { ReviewDialog } from "../components/ReviewDialog";
 import { CasePicker } from "../components/CasePicker";
 import { ErrorLine, Spinner } from "../components/ui";
+import { useWords, wordsSoFar } from "../components/Progress";
 import { ConfirmDialog } from "./library/LibraryDialogs";
 import { ipc, type ConsultationSummary, type Prepared } from "../ipc/client";
 import "./ConsultScreen.css";
@@ -44,7 +45,8 @@ function when(at: number): string {
 }
 
 /** "Claude is writing…" with the seconds waited, so a long answer never looks stuck. */
-function Typing({ since }: { since: number }) {
+function Typing({ since, approval }: { since: number; approval: string | null }) {
+  const words = useWords(approval ?? undefined);
   const [t, setT] = useState(() => Date.now());
   useEffect(() => {
     const i = window.setInterval(() => setT(Date.now()), 1000);
@@ -56,7 +58,7 @@ function Typing({ since }: { since: number }) {
       <span className="chat-avatar" aria-hidden="true">C</span>
       <div className="chat-bubble chat-bubble-ai chat-typing">
         <span className="dots" aria-hidden="true"><i /><i /><i /></span>
-        <span className="muted small">Claude כותב{seconds >= 3 ? ` · ${seconds} שניות` : "…"}</span>
+        <span className="muted small">Claude כותב{seconds >= 3 ? ` · ${seconds} שניות` : "…"}{words >= 5 ? ` · ${wordsSoFar(words)}` : ""}</span>
         {seconds >= 25 && <span className="muted small">תשובה מעמיקה לוקחת לפעמים עד דקה. אפשר לבחור "מהיר" בהגדרות.</span>}
       </div>
     </div>
@@ -75,6 +77,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [waitingSince, setWaitingSince] = useState<number | null>(null);
+  const [sending, setSending] = useState<string | null>(null);
   const [review, setReview] = useState<{ prepared: Prepared; text: string } | null>(null);
   const [copied, setCopied] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<ConsultationSummary | null>(null);
@@ -120,6 +123,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
 
   async function send(approvalId: string, hidden: string[]) {
     setWaitingSince(Date.now());
+    setSending(approvalId);
     try {
       const r = await ipc.sendConsult(approvalId);
       setConversation(r.conversation_id);
@@ -133,6 +137,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
       setError(fail(err as never));
     } finally {
       setWaitingSince(null);
+      setSending(null);
       input.current?.focus();
     }
   }
@@ -271,7 +276,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
                 </div>
               ),
             )}
-            {waitingSince && <Typing since={waitingSince} />}
+            {waitingSince && <Typing since={waitingSince} approval={sending} />}
             {busy && !waitingSince && !review && (
               <div className="chat-row chat-row-ai">
                 <span className="chat-avatar" aria-hidden="true">C</span>

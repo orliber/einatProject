@@ -29,6 +29,8 @@ export interface Job {
   task: Task;
   /** The section it writes, if any. */
   section?: string;
+  /** The approved request on its way: its words written so far are shown. */
+  approval?: string;
   started: number;
   estimate: number;
 }
@@ -46,7 +48,7 @@ export interface CaseApi {
   sort: () => Promise<void>;
   /** Requests on their way to Claude and back. */
   jobs: Job[];
-  track: <T>(job: { label: string; task: Task; section?: string }, run: () => Promise<T>) => Promise<T>;
+  track: <T>(job: { label: string; task: Task; section?: string; approval?: string }, run: () => Promise<T>) => Promise<T>;
   /** A draft for a section, from anywhere (the report page, the section): prepare, the
    *  review, and the writing with its progress. Resolves when it is in, or she went back. */
   draft: (sectionKey: string, instruction?: string, replaces?: string) => Promise<boolean>;
@@ -113,7 +115,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const [failures, setFailures] = useState<{ id: number; label: string; section?: string; message: string }[]>([]);
 
   const track = useCallback(
-    async <T,>(job: { label: string; task: Task; section?: string }, run: () => Promise<T>): Promise<T> => {
+    async <T,>(job: { label: string; task: Task; section?: string; approval?: string }, run: () => Promise<T>): Promise<T> => {
       const j: Job = { ...job, id: ++jobSeq, started: Date.now(), estimate: estimateMs(job.task, status.speed, status.demo_mode) };
       setJobs((js) => [...js, j]);
       try {
@@ -164,7 +166,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         prepared,
         reprepare: prepare,
         onSend: async (id) => {
-          await track({ label: `Claude כותב את "${title}"`, task: "draft", section: key }, () => ipc.sendSection(id));
+          await track({ label: `Claude כותב את "${title}"`, task: "draft", section: key, approval: id }, () => ipc.sendSection(id));
           await reload();
         },
       });
@@ -181,7 +183,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         prepared,
         reprepare: () => ipc.prepareSort(caseId),
         onSend: async (id) => {
-          const result = await track({ label: "Claude קורא את החומרים ומשייך קטעים לסעיפים", task: "sort" }, () => ipc.sendSort(id));
+          const result = await track({ label: "Claude קורא את החומרים ומשייך קטעים לסעיפים", task: "sort", approval: id }, () => ipc.sendSort(id));
           await reload();
           notify(sortSummary(result));
         },
@@ -273,7 +275,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
       <ErrorLine error={error} />
       {(elsewhere.length > 0 || failures.length > 0) && (
         <section className="jobs-strip" aria-label="Claude עובד">
-          {elsewhere.map((j) => <ProgressLine key={j.id} started={j.started} estimate={j.estimate} label={j.label} />)}
+          {elsewhere.map((j) => <ProgressLine key={j.id} started={j.started} estimate={j.estimate} label={j.label} approval={j.approval} />)}
           {failures.map((f) => (
             <div key={f.id} className="job-failed" role="alert">
               <span className="grow"><b>{f.label}: לא הצליח.</b> {f.message} שום דבר לא נכנס לדוח; אפשר לנסות שוב.</span>

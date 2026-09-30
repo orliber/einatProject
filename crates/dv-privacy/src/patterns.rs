@@ -139,6 +139,8 @@ struct Compiled {
     year: Regex,
     address: Regex,
     settlement: Regex,
+    iban: Regex,
+    card: Regex,
     hebrew_numeral: Regex,
     hebrew_year: Regex,
 }
@@ -158,13 +160,18 @@ static COMPILED: LazyLock<Result<Compiled, regex::Error>> = LazyLock::new(|| {
         )?,
         // ID numbers typed in groups ("000 000 018", "0000-0001-8").
         spaced_id: Regex::new(r"\d{3,4}[\s\-]\d{3,4}[\s\-]\d{1,3}")?,
+        // Bank accounts (IBAN) and card numbers typed in groups of four.
+        iban: Regex::new(r"(?i)\bIL\d{2}(?:[ \-]?\d{1,4}){3,6}")?,
+        card: Regex::new(r"\d{4}(?:[ \-]\d{4}){2,3}")?,
         num_date: Regex::new(r"(\d{1,2})[./](\d{1,2})(?:[./](\d{4}|\d{2}))?")?,
         year: Regex::new(r"(19[5-9]\d|20[0-4]\d)")?,
         address: Regex::new(
             r#"(?:רחוב|רח'|שדרות|שד'|דרך|סמטת|כיכר|ככר)\s+[א-ת"'׳״\-]+(?:\s+[א-ת"'׳״\-]+){0,2}\s*\d{1,4}"#,
         )?,
         settlement: Regex::new(r"(?:קיבוץ|מושב|מושבה)\s+[א-ת\-]+(?:\s+[א-ת\-]+)?")?,
-        hebrew_numeral: Regex::new(r#"^[א-ת]{1,2}['"׳״]?[א-ת]?$"#)?,
+        // A day in Hebrew letters: "ט\"ו", "כ'", "יג" – two letters, or a geresh / gershayim
+        // ("כמו האב" is not a date).
+        hebrew_numeral: Regex::new(r#"^(?:[א-ת]{1,2}|[א-ת]{1,2}['"׳״][א-ת]?)$"#)?,
         hebrew_year: Regex::new(r#"^ה?תש[א-ת"'׳״]{1,4}$"#)?,
     })
 });
@@ -458,9 +465,34 @@ pub fn find(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
             );
         }
     }
+    for m in c.iban.find_iter(text).chain(c.card.find_iter(text)) {
+        if digit_bounded(text, m.start(), m.end()) {
+            push(
+                &mut hits,
+                m.start(),
+                m.end(),
+                PatternKind::Number,
+                fixed(PatternKind::Number),
+            );
+        }
+    }
     for m in c.spaced_id.find_iter(text) {
         let digits: String = m.as_str().chars().filter(char::is_ascii_digit).collect();
-        if digits.len() == 9 && digit_bounded(text, m.start(), m.end()) {
+        // Grouped with spaces, nine digits are an ID only when they pass the check digit or
+        // follow an ID label: "112 104 106" is a row of scores.
+        let labelled = {
+            let before = &text[..m.start()];
+            let from = before.char_indices().rev().nth(20).map_or(0, |(i, _)| i);
+            let near = &before[from..];
+            ["ת.ז", "ת\"ז", "ת״ז", "זהות", "ID"]
+                .iter()
+                .any(|l| near.contains(l))
+        };
+        let spaced = m.as_str().contains(' ');
+        if digits.len() == 9
+            && (!spaced || is_valid_israeli_id(&digits) || labelled)
+            && digit_bounded(text, m.start(), m.end())
+        {
             push(
                 &mut hits,
                 m.start(),

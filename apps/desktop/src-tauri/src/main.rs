@@ -25,6 +25,48 @@ struct AppState {
     clipboard: secret_clipboard::SecretClipboard,
     /// The app's data folder: the vault, and the verified installer of an update (D-033).
     dir: PathBuf,
+    /// Words Claude has written so far, per request on its way (D-035). Counts only.
+    progress: Arc<Mutex<std::collections::HashMap<String, u32>>>,
+}
+
+/// Send outside the core's lock, counting the words as the answer arrives.
+async fn transmit(
+    state: &AppState,
+    approval_id: String,
+    out: dv_core::Outgoing,
+) -> Res<(
+    dv_core::Outgoing,
+    Result<(serde_json::Value, bool), CoreError>,
+)> {
+    let progress = Arc::clone(&state.progress);
+    let done = Arc::clone(&state.progress);
+    let id = approval_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let report = |words: u32| {
+            if let Ok(mut p) = progress.lock() {
+                p.insert(id.clone(), words);
+            }
+        };
+        let r = out.transmit_with(&report);
+        (out, r)
+    })
+    .await
+    .map_err(|_| internal("send"));
+    if let Ok(mut p) = done.lock() {
+        p.remove(&approval_id);
+    }
+    result
+}
+
+/// How many words Claude has written so far for a request on its way.
+#[tauri::command]
+fn send_progress(state: tauri::State<'_, AppState>, approval_id: String) -> u32 {
+    state
+        .progress
+        .lock()
+        .ok()
+        .and_then(|p| p.get(&approval_id).copied())
+        .unwrap_or(0)
 }
 
 type Res<T> = Result<T, UiError>;
@@ -349,13 +391,9 @@ async fn send_section(
     state: tauri::State<'_, AppState>,
     approval_id: String,
 ) -> Res<SectionResult> {
-    let out = with_core(&state, move |c| c.begin_send(&approval_id)).await?;
-    let (out, response) = tauri::async_runtime::spawn_blocking(move || {
-        let r = out.transmit();
-        (out, r)
-    })
-    .await
-    .map_err(|_| internal("send"))?;
+    let id = approval_id.clone();
+    let out = with_core(&state, move |c| c.begin_send(&id)).await?;
+    let (out, response) = transmit(&state, approval_id, out).await?;
     with_core(&state, move |c| c.finish_section(out, response)).await
 }
 
@@ -459,13 +497,9 @@ async fn prepare_sort(state: tauri::State<'_, AppState>, case_id: String) -> Res
 
 #[tauri::command]
 async fn send_sort(state: tauri::State<'_, AppState>, approval_id: String) -> Res<SortResult> {
-    let out = with_core(&state, move |c| c.begin_send(&approval_id)).await?;
-    let (out, response) = tauri::async_runtime::spawn_blocking(move || {
-        let r = out.transmit();
-        (out, r)
-    })
-    .await
-    .map_err(|_| internal("send"))?;
+    let id = approval_id.clone();
+    let out = with_core(&state, move |c| c.begin_send(&id)).await?;
+    let (out, response) = transmit(&state, approval_id, out).await?;
     with_core(&state, move |c| c.finish_sort(out, response)).await
 }
 
@@ -601,13 +635,9 @@ async fn send_consult(
     state: tauri::State<'_, AppState>,
     approval_id: String,
 ) -> Res<ConsultResult> {
-    let out = with_core(&state, move |c| c.begin_send(&approval_id)).await?;
-    let (out, response) = tauri::async_runtime::spawn_blocking(move || {
-        let r = out.transmit();
-        (out, r)
-    })
-    .await
-    .map_err(|_| internal("send"))?;
+    let id = approval_id.clone();
+    let out = with_core(&state, move |c| c.begin_send(&id)).await?;
+    let (out, response) = transmit(&state, approval_id, out).await?;
     with_core(&state, move |c| c.finish_consult(out, response)).await
 }
 
@@ -897,6 +927,7 @@ fn main() {
                 core,
                 clipboard,
                 dir,
+                progress: Arc::default(),
             });
             Ok(())
         })
@@ -980,6 +1011,7 @@ fn main() {
             forget_backup,
             check_update,
             install_update,
+            send_progress,
         ])
         .run(tauri::generate_context!());
     if result.is_err() {

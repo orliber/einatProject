@@ -128,6 +128,8 @@ export const ipc = {
   prepareSection: (caseId: string, sectionKey: string, instruction: string, replaces?: string) =>
     call<Prepared>("prepare_section", { caseId, sectionKey, instruction, replaces: replaces ?? null }),
   prepareFullDraft: (caseId: string) => call<[string, Prepared][]>("prepare_full_draft", { caseId }),
+  /** Words Claude has written so far for a request on its way (streamed answers). */
+  sendProgress: (approvalId: string) => call<number>("send_progress", { approvalId }),
   sendSection: (approvalId: string) => call<SectionResult>("send_section", { approvalId }),
   /** D-022: sort every material not sorted yet into sections (one review screen). */
   prepareSort: (caseId: string) => call<Prepared>("prepare_sort", { caseId }),

@@ -1,6 +1,7 @@
 // How long Claude takes: an estimate learned from the last answers on this computer, and a
 // progress line that says how far along a request is and about how long is left.
 import { useEffect, useState } from "react";
+import { ipc } from "../ipc/client";
 import "./Progress.css";
 
 export type Task = "draft" | "sort" | "consult";
@@ -70,9 +71,32 @@ export function useNow(active: boolean): number {
   return now;
 }
 
+/** How many words Claude has written so far, asked once a second while a request is on its way. */
+export function useWords(approval: string | undefined): number {
+  const [words, setWords] = useState(0);
+  useEffect(() => {
+    if (!approval) return;
+    let alive = true;
+    const ask = () => ipc.sendProgress(approval).then((n) => alive && setWords(n)).catch(() => undefined);
+    const t = setInterval(() => void ask(), 1000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [approval]);
+  return words;
+}
+
+/** "כ-120 מילים עד עכשיו", once there are any. */
+export function wordsSoFar(n: number): string {
+  if (n < 5) return "";
+  return `נכתבו כ-${Math.round(n / 10) * 10 || n} מילים`;
+}
+
 /** A bar that fills toward the estimate and then waits, never claiming to be done early. */
-export function ProgressLine({ started, estimate, label }: { started: number; estimate: number; label: string }) {
+export function ProgressLine({ started, estimate, label, approval }: { started: number; estimate: number; label: string; approval?: string | undefined }) {
   const now = useNow(true);
+  const words = useWords(approval);
   const elapsed = now - started;
   const share = Math.min(0.95, elapsed / Math.max(estimate, 1));
   const over = elapsed > estimate;
@@ -81,7 +105,7 @@ export function ProgressLine({ started, estimate, label }: { started: number; es
       <div className="progress-text">
         <span className="progress-label">{label}</span>
         <span className="progress-time">
-          {clock(elapsed)} · {over ? "לוקח קצת יותר מהרגיל, עוד מעט" : aboutLeft(estimate - elapsed)}
+          {clock(elapsed)} · {words >= 5 ? `${wordsSoFar(words)}${over ? "" : ` · ${aboutLeft(estimate - elapsed)}`}` : over ? "לוקח קצת יותר מהרגיל, עוד מעט" : aboutLeft(estimate - elapsed)}
         </span>
       </div>
       <div className="progress-track" aria-hidden="true">

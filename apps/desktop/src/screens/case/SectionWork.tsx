@@ -76,7 +76,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
         reprepare: prepare,
         onSend: async (id) => {
           const result = await api.track(
-            { label: replaces ? "Claude מנסח את הפסקה מחדש" : `Claude כותב את "${section.title}"`, task: "draft", section: section.key },
+            { label: replaces ? "Claude מנסח את הפסקה מחדש" : `Claude כותב את "${section.title}"`, task: "draft", section: section.key, approval: id },
             () => ipc.sendSection(id),
           );
           setLast(result);
@@ -204,7 +204,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
 
           {job && (
             <div className="writing-card">
-              <ProgressLine started={job.started} estimate={job.estimate} label={job.label} />
+              <ProgressLine started={job.started} estimate={job.estimate} label={job.label} approval={job.approval} />
               <span className="small muted">
                 השמות הוסתרו והבקשה נשלחה. אפשר להמשיך לעבוד בינתיים בסעיפים אחרים; הטיוטה תופיע כאן, ותחליף את מה שעוד לא אישרת.
               </span>

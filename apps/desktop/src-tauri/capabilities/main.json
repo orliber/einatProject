@@ -84,6 +84,7 @@
     "allow-restore-backup",
     "allow-forget-backup",
     "allow-check-update",
-    "allow-install-update"
+    "allow-install-update",
+    "allow-send-progress"
   ]
 }

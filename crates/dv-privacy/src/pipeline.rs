@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::lexicon::{
-    is_name_context, PlaceKind, GENERIC_PLACE_WORDS, LEXICON, NAME_LABELS, NAME_STOP, ROLE_WORDS,
-    SURNAME_ENDINGS, TITLES,
+    is_name_context, PlaceKind, GENERIC_PLACE_WORDS, LEXICON, NAME_LABELS, NAME_STOP, PERSON_WORDS,
+    ROLE_WORDS, SURNAME_ENDINGS, TITLES,
 };
 use crate::matcher::PhraseIndex;
 use crate::patterns::{self, Ymd};
@@ -148,6 +148,22 @@ fn is_generic(word: &str) -> bool {
 
 fn is_title(word: &str) -> bool {
     TITLES.iter().any(|t| normalize(t) == word)
+}
+
+fn is_role_word(word: &str) -> bool {
+    prefix_splits(word)
+        .iter()
+        .any(|(_, h)| ROLE_WORDS.iter().any(|r| normalize(r) == *h))
+}
+
+/// A word for a person ("הגננת", "האח", "סבתא"), with or without "ה" and a prefix.
+fn is_person_word(word: &str) -> bool {
+    prefix_splits(word).iter().any(|(_, h)| {
+        let bare = h.strip_prefix('ה').unwrap_or(h);
+        PERSON_WORDS
+            .iter()
+            .any(|p| normalize(p) == *h || normalize(p) == bare)
+    })
 }
 
 /// Phrases that identify one declared name: the full name, and each significant word with
@@ -417,7 +433,94 @@ fn name_run_suspects(
         }
     }
 
-    // 3. A surname right after a first name or a declared name.
+    // 3. A name after a title: "ד\"ר קורנבליט", "הרב אלמוזנינו", "גב' ורשבסקי". Up to two words,
+    // until punctuation; a declared name there is already replaced.
+    for i in 0..tokens.len().saturating_sub(1) {
+        if !is_title(&tokens[i].norm) || breaks(gap(i, i + 1)) {
+            continue;
+        }
+        let mut j = i + 1;
+        while j < tokens.len() && j <= i + 2 {
+            let t = &tokens[j];
+            if stop(&t.norm)
+                || !hebrew(t)
+                || digits(t)
+                || is_role_word(&t.norm)
+                || lex.common_words.contains(&t.norm)
+            {
+                break;
+            }
+            push(t.start, t.end, "שם אחרי תואר", out);
+            // A second word only after a first name ("ד\"ר אבנר שטרן", not "ד\"ר כהן המליץ").
+            if j + 1 >= tokens.len() || !joins(gap(j, j + 1)) || !lex.first_names.contains(&t.norm)
+            {
+                break;
+            }
+            j += 1;
+        }
+    }
+
+    // 4. A name set off after a person word: "הגננת הקודמת, ברכה, תיארה…",
+    // "האח הגדול – יהונתן – מתגייס", "הקלינאית (אינה) המליצה". Between the marks: one or
+    // two words, which in a report can only be a name.
+    let opens = |g: &str| g.contains([',', '–', '—', '(']) && !g.contains(['.', '\n', ':']);
+    let closes = |g: &str| g.contains([',', '–', '—', ')', '.']);
+    for i in 0..tokens.len() {
+        if !is_person_word(&tokens[i].norm) {
+            continue;
+        }
+        // One adjective may follow the person word ("הקודמת", "הגדול").
+        let mut k = i;
+        if k + 1 < tokens.len() && tokens[k + 1].norm.starts_with('ה') && joins(gap(k, k + 1)) {
+            k += 1;
+        }
+        if k + 1 >= tokens.len() || !opens(gap(k, k + 1)) {
+            continue;
+        }
+        let first = k + 1;
+        let mut last = first;
+        if last + 1 < tokens.len() && joins(gap(last, last + 1)) {
+            last += 1;
+        }
+        if last + 1 >= tokens.len() || !closes(gap(last, last + 1)) {
+            if first + 1 < tokens.len() && closes(gap(first, first + 1)) {
+                last = first;
+            } else {
+                continue;
+            }
+        }
+        let words = &tokens[first..=last];
+        let known = |t: &Token| {
+            prefix_splits(&t.norm).iter().any(|(p, h)| {
+                *p == 0
+                    && (lex.first_names.contains(h)
+                        || lex.word_names.contains(h)
+                        || lex.surnames.contains(h))
+            })
+        };
+        // An unknown word counts only alone, and only if it does not read as an ordinary word
+        // with a prefix ("בשיחה", "כמו", "לדבריה") or an adverb.
+        let plausible = |t: &Token| {
+            known(t)
+                || (words.len() == 1
+                    && !t.norm.starts_with(['ב', 'כ', 'ל', 'מ', 'ו', 'ש', 'ה'])
+                    && !APPOSITIVE_STOP.iter().any(|w| normalize(w) == t.norm))
+        };
+        if words
+            .iter()
+            .all(|t| hebrew(t) && !digits(t) && !stop(&t.norm) && !is_person_word(&t.norm))
+            && !words.iter().all(|t| lex.common_words.contains(&t.norm))
+            && words
+                .iter()
+                .all(|t| plausible(t) || (words.len() == 2 && words.iter().any(&known)))
+        {
+            for t in words {
+                push(t.start, t.end, "שם שמופיע ליד תפקיד", out);
+            }
+        }
+    }
+
+    // 5. A surname right after a first name or a declared name.
     let is_name = |i: usize| {
         let t = &tokens[i];
         reps.iter()
@@ -433,11 +536,14 @@ fn name_run_suspects(
             continue;
         }
         let hyphen_after_surname = surname_at == Some(i - 1) && g.contains(['-', '\u{05BE}']);
+        let raw = &text[t.start..t.end];
         let looks_like_surname = lex.surnames.contains(&t.norm)
             || (t.norm.chars().count() >= 4
                 && SURNAME_ENDINGS
                     .iter()
-                    .any(|e| t.norm.ends_with(&normalize(e))));
+                    .any(|e| t.norm.ends_with(&normalize(e))))
+            // "אברג'יל", "חאג'": a geresh inside a Hebrew word is a borrowed sound, as in names.
+            || (raw.chars().count() >= 4 && raw.contains(['\'', '׳']) && !raw.ends_with(['\'', '׳']));
         if hyphen_after_surname
             || (is_name(i - 1) && looks_like_surname && !lex.common_words.contains(&t.norm))
         {
@@ -702,6 +808,261 @@ impl FilterOutcome {
     }
 }
 
+/// Adverbs and connectives that are set off by commas like a name ("האם, אגב, …").
+const APPOSITIVE_STOP: &[&str] = &[
+    "אגב",
+    "אולי",
+    "עדיין",
+    "גם",
+    "אמנם",
+    "שוב",
+    "היום",
+    "אז",
+    "אך",
+    "אבל",
+    "או",
+    "עכשיו",
+    "תמיד",
+    "אף",
+    "רק",
+    "יחד",
+    "ככה",
+    "זאת",
+    "אחר",
+    "אחרת",
+    "אחרים",
+    "ואז",
+    "כנראה",
+    "אחת",
+    "אחד",
+    "שניהם",
+    "שתיהן",
+    "כולם",
+    "עצמה",
+    "עצמו",
+    "ייתכן",
+    "אפילו",
+    "אלא",
+];
+
+/// Words after "גן" / "בית הספר" that describe it rather than name it.
+const INSTITUTION_STOP: &[&str] = &[
+    "הזה",
+    "הזו",
+    "הזאת",
+    "הקודם",
+    "הקודמת",
+    "החדש",
+    "החדשה",
+    "הישן",
+    "הישנה",
+    "הרגיל",
+    "הרגילה",
+    "היסודי",
+    "העירוני",
+    "העירונית",
+    "הממלכתי",
+    "הממלכתית",
+    "הדתי",
+    "הדתית",
+    "הפרטי",
+    "הפרטית",
+    "המיוחד",
+    "המיוחדת",
+    "הילדים",
+    "השכונתי",
+    "השכונתית",
+    "הקרוב",
+    "הקרובה",
+    "הוא",
+    "היא",
+    "הם",
+    "הן",
+    "היה",
+    "הייתה",
+    "היו",
+    "הכללי",
+    "הגדול",
+    "הקטן",
+    "התורני",
+    "המשותף",
+    "השני",
+    "הראשון",
+    "השנה",
+    "הבוקר",
+    "הצהריים",
+    "הספר",
+    "הזמן",
+    "הערב",
+    "הבא",
+    "הבאה",
+    "הנוכחי",
+    "הנוכחית",
+    "המקורי",
+    "האחרון",
+    "האחרונה",
+    "שלו",
+    "שלה",
+    "שלהם",
+    "הטיפולי",
+    "הטיפולית",
+    "השפתי",
+    "התקשורתי",
+    "הממ\"ד",
+    "הקהילתי",
+    "החיות",
+    "השעשועים",
+    "המשחקים",
+    "הציבורי",
+    "הלאומי",
+    "הבוטני",
+    "המדע",
+    "העיר",
+    "השכונה",
+    "הקיץ",
+    "החורף",
+    "הירוק",
+    "הגדולה",
+    "הקטנה",
+    "המקומי",
+    "המקומית",
+    "האזורי",
+    "האזורית",
+];
+
+/// "גן השקד", "בגן \"הרימונים\"", "בית ספר \"אופקים חדשים\"", "בית הספר ע\"ש רבין": the name
+/// after a word for a kindergarten or a school, as a replacement that leaves it out.
+fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
+    let lex = &*LEXICON;
+    let hebrew = |t: &Token| {
+        t.norm
+            .chars()
+            .any(|c| ('\u{05D0}'..='\u{05EA}').contains(&c))
+    };
+    let is = |t: &Token, words: &[&str]| {
+        prefix_splits(&t.norm)
+            .iter()
+            .any(|(_, h)| words.iter().any(|w| normalize(w) == *h))
+    };
+    let gap = |a: usize, b: usize| &text[tokens[a].end..tokens[b].start];
+    let quote = |g: &str| g.contains(['"', '״', '“', '”', '„']);
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        // The institution word(s): "גן", "מעון", "בית ספר", "בית הספר", "בי\"ס", "תלמוד תורה".
+        let end_word = if is(
+            &tokens[i],
+            &[
+                "גן",
+                "גנון",
+                "מעון",
+                "צהרון",
+                "משפחתון",
+                "בי\"ס",
+                "ביה\"ס",
+                "ת\"ת",
+            ],
+        ) {
+            Some(i)
+        } else if is(&tokens[i], &["בית", "תלמוד"])
+            && tokens.get(i + 1).is_some_and(|t| {
+                ["ספר", "הספר", "תורה"]
+                    .iter()
+                    .any(|w| normalize(w) == t.norm)
+            })
+        {
+            Some(i + 1)
+        } else {
+            None
+        };
+        let Some(k) = end_word else {
+            i += 1;
+            continue;
+        };
+        let mut first = k + 1;
+        if first >= tokens.len() || gap(k, first).contains(['.', ',', '\n', ':', ';', '(']) {
+            i = k + 1;
+            continue;
+        }
+        // "ע\"ש רבין": whatever follows "named after" is a name.
+        let named_after =
+            tokens[first].norm == normalize("ע\"ש") || tokens[first].norm == normalize("עש");
+        if named_after {
+            first += 1;
+        }
+        let opened = first < tokens.len() && quote(gap(first - 1, first));
+        let mut last = None;
+        if opened {
+            // Up to the closing quote, at most four words.
+            for j in first..tokens.len().min(first + 4) {
+                if !hebrew(&tokens[j]) {
+                    break;
+                }
+                let after = if j + 1 < tokens.len() {
+                    gap(j, j + 1)
+                } else {
+                    &text[tokens[j].end..]
+                };
+                if quote(after) {
+                    last = Some(j);
+                    break;
+                }
+                if after.contains(['.', ',', '\n']) {
+                    break;
+                }
+            }
+        } else if first < tokens.len() {
+            let t = &tokens[first];
+            let stop = INSTITUTION_STOP.iter().any(|w| normalize(w) == t.norm);
+            let definite_name = t.norm.starts_with('ה') && t.norm.chars().count() >= 4;
+            let known = lex.first_names.contains(&t.norm)
+                || lex.surnames.contains(&t.norm)
+                || !lex.places.find(&t.norm, &tokenize(&t.norm)).is_empty();
+            if hebrew(t)
+                && !stop
+                && !lex.common_words.contains(&t.norm)
+                && (named_after || definite_name || known)
+            {
+                last = Some(first);
+                // "גן הדקל הירוק"? One more word only after "ע\"ש" ("ע\"ש יצחק רבין").
+                if named_after
+                    && first + 1 < tokens.len()
+                    && gap(first, first + 1) == " "
+                    && hebrew(&tokens[first + 1])
+                    && lex.surnames.contains(&tokens[first + 1].norm)
+                {
+                    last = Some(first + 1);
+                }
+            }
+        }
+        if let Some(last) = last {
+            let mut end = tokens[last].end;
+            if opened {
+                // Take the closing quote too.
+                if let Some(c) = text[end..]
+                    .chars()
+                    .next()
+                    .filter(|c| ['"', '״', '“', '”'].contains(c))
+                {
+                    end += c.len_utf8();
+                }
+            }
+            out.push(Replacement {
+                start: tokens[k].end,
+                end,
+                out: String::new(),
+                label: "שם גן / בית ספר".to_owned(),
+                relative: true,
+                declared: false,
+            });
+            i = last + 1;
+        } else {
+            i = k + 1;
+        }
+    }
+    out
+}
+
 /// Layers 2–6: what to replace and what to ask about, as spans of `text`, sorted.
 fn analyze(
     text: &str,
@@ -775,6 +1136,13 @@ fn analyze(
                 label: hit.kind.label_he().to_owned(),
                 declared: false,
             });
+        }
+    }
+    // Names of kindergartens and schools: only the name is left out ("בגן השקד שבשכונה" →
+    // "בגן שבשכונה"), so the sentence still reads and nothing needs to come back.
+    for r in institution_names(text, &tokens) {
+        if !overlaps(r.start, r.end, &reps, &suspects) {
+            reps.push(r);
         }
     }
     // Places from the lexicon (localities, hospitals) are hidden automatically.

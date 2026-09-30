@@ -316,7 +316,7 @@ function A4Section({ api, section: s, showDrafts }: { api: CaseApi; section: Sec
 
       {job && (
         <div className="a4-writing">
-          <ProgressLine started={job.started} estimate={job.estimate} label={job.label} />
+          <ProgressLine started={job.started} estimate={job.estimate} label={job.label} approval={job.approval} />
         </div>
       )}
       {preparing && !job && <p className="small muted">מכינה את הבקשה…</p>}

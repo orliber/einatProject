@@ -264,12 +264,17 @@ impl Outgoing {
     /// Send the approved payload: the test transport, Claude (API key set), or local demo.
     /// Returns the answer and whether it came from demo mode.
     pub fn transmit(&self) -> Result<(Value, bool), CoreError> {
+        self.transmit_with(&|_| {})
+    }
+
+    /// The same, with the number of words Claude has written so far, as they arrive.
+    pub fn transmit_with(&self, progress: &dyn Fn(u32)) -> Result<(Value, bool), CoreError> {
         if let Some(t) = &self.transport {
-            return Ok((t.send(&self.pending.payload)?, false));
+            return Ok((t.send_streaming(&self.pending.payload, progress)?, false));
         }
         match &self.api_key {
             Some(key) => Ok((
-                AnthropicTransport::new(key)?.send(&self.pending.payload)?,
+                AnthropicTransport::new(key)?.send_streaming(&self.pending.payload, progress)?,
                 false,
             )),
             None => {
@@ -1559,8 +1564,9 @@ impl Core {
         let v = self.vault_mut()?;
         let identities = v.identities(&case_id)?;
         let case_tags: Vec<String> = identities.iter().map(|i| i.tag.clone()).collect();
+        let everyone = v.all_identities()?;
         for p in &mut reply.paragraphs {
-            for s in scan_model_output(&p.text, &case_tags) {
+            for s in scan_model_output(&p.text, &case_tags, &everyone) {
                 p.warnings.push(format!("{}: {}", s.message, s.token));
             }
         }

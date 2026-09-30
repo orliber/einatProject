@@ -837,6 +837,8 @@ export class FakeCore {
         return this.status();
       case "forget_backup":
         return null;
+      case "send_progress":
+        return 0;
       case "check_update":
         return {
           version: "0.2.0", current: "0.1.0", published: "2026-10-01", size_mb: 14, can_install: true,
