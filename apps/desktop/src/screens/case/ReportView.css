@@ -300,41 +300,65 @@
 .a4-para {
   position: relative;
 }
-/* The AI mark beside every paragraph (D-036): always there, in the margin, easy to see. */
+/* The AI mark in the margin (D-036): it shows when the mouse or the keyboard is on the
+   paragraph, or while its card is open, so only one paragraph's tools are on the page at a
+   time and they never sit on the next paragraph's. The padding on the paragraph's side keeps
+   the hover alive on the way from the text to the mark. */
 .a4-para-tool {
   position: absolute;
-  top: 0;
-  inset-inline-end: -58px;
+  top: 2px;
+  inset-inline-end: -50px;
+  padding-inline-start: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 0.14s, transform 0.14s, visibility 0s linear 0.14s;
+}
+.a4-para:hover,
+.a4-para:focus-within,
+.a4-para.is-active {
+  z-index: 2;
+}
+.a4-para:hover .a4-para-tool,
+.a4-para:focus-within .a4-para-tool,
+.a4-para.is-active .a4-para-tool {
+  visibility: visible;
+  opacity: 1;
+  transform: none;
+  transition: opacity 0.14s, transform 0.14s, visibility 0s;
 }
 .a4-ai {
-  width: 38px;
-  height: 38px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1.5px solid var(--primary);
+  border: 1px solid var(--line-strong);
   border-radius: 999px;
-  background: var(--primary-soft);
+  background: #fff;
   color: var(--primary);
+  box-shadow: 0 1px 3px rgba(21, 32, 31, 0.1);
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
-.a4-ai:hover,
+.a4-ai:hover {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
 .a4-ai[aria-expanded="true"] {
+  border-color: var(--primary);
   background: var(--primary);
   color: #fff;
 }
-.a4-para-tool {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-/* Delete: quiet until the mouse or the keyboard is on the paragraph, and asks once. */
+/* Delete: under the AI mark, shown with it, and asks once. */
 .a4-del {
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   display: flex;
   align-items: center;
@@ -344,12 +368,6 @@
   background: #fff;
   color: var(--ink-muted);
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s;
-}
-.a4-para:hover .a4-del,
-.a4-para:focus-within .a4-del {
-  opacity: 1;
 }
 .a4-del:hover {
   color: var(--block);
