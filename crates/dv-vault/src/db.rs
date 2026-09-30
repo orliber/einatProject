@@ -128,6 +128,9 @@ pub const MAIN_MIGRATIONS: &[&str] = &[
         turns_enc BLOB NOT NULL
      );
      CREATE INDEX consultations_updated ON consultations(updated_at);",
+    // v6: Claude's new wording of a paragraph she approved waits beside it; approving it
+    // retires the old one (D-032).
+    "ALTER TABLE drafts ADD COLUMN replaces TEXT;",
 ];
 
 pub const IDENTITY_MIGRATIONS: &[&str] = &[

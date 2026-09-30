@@ -8,4 +8,8 @@ export type ParagraphView = { id: string, text: string, status: DraftStatus, by_
 /**
  * Human-readable sources ("S2 · דוח קודם · אבחון נוירו-התפתחותי").
  */
-sources: Array<string>, warnings: Array<string>, };
+sources: Array<string>, warnings: Array<string>, 
+/**
+ * A new wording of this approved paragraph (its id), waiting for her approval.
+ */
+replaces: string | null, };

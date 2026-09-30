@@ -46,6 +46,8 @@ interface Draft {
   status: DraftStatus;
   byAi: boolean;
   sources: string[];
+  /** A new wording of this approved paragraph (D-032). */
+  replaces?: string;
 }
 
 interface Case {
@@ -332,7 +334,7 @@ export class FakeCore {
           key: s.key, title: s.title, part: s.part,
           source_count: routing.filter((r) => r.feeds.includes(s.key)).length,
           sortable: SORTABLE.some((x) => x.key === s.key),
-          paragraphs: drafts.map((d) => ({ id: d.id, text: restore(d.text, c.people, this.practitioner), status: d.status, by_ai: d.byAi, sources: d.sources, warnings: [] })),
+          paragraphs: drafts.map((d) => ({ id: d.id, text: restore(d.text, c.people, this.practitioner), status: d.status, by_ai: d.byAi, sources: d.sources, warnings: [], replaces: d.replaces ?? null })),
           approved: drafts.some((d) => d.status === "approved"),
         };
       }),
@@ -425,8 +427,13 @@ export class FakeCore {
   private sendSection(p: Extract<Pending, { type: "section" }>): SectionResult {
     const c = this.find(p.caseId);
     const paragraphs = p.refs.slice(0, 3).map((r) => ({ text: sentences(r.tagged, 2), source_refs: [r.sid], warnings: [] as string[] })).filter((x) => x.text);
+    const approvedTarget = p.replaces ? c.drafts.find((d) => d.id === p.replaces && d.status === "approved") : undefined;
     const target = p.replaces ? c.drafts.find((d) => d.id === p.replaces && d.status === "proposed") : undefined;
-    if (target && paragraphs.length) {
+    if (approvedTarget && paragraphs.length) {
+      for (const d of c.drafts) if (d.replaces === approvedTarget.id && d.status === "proposed") d.status = "superseded";
+      c.drafts.push({ id: newId("d"), section: p.section, text: `${paragraphs[0]?.text ?? approvedTarget.text} (ניסוח חדש)`, status: "proposed", byAi: true, sources: approvedTarget.sources, replaces: approvedTarget.id });
+      paragraphs.splice(1);
+    } else if (target && paragraphs.length) {
       // A rewrite of one paragraph stays where it is.
       target.text = `${paragraphs[0]?.text ?? target.text} (ניסוח אחר)`;
       paragraphs.splice(1);
@@ -729,6 +736,10 @@ export class FakeCore {
       case "reject_paragraph": {
         const d = this.find(a.caseId).drafts.find((x) => x.id === a.draftId) ?? fail("not_found", "הפסקה לא נמצאה");
         d.status = cmd === "approve_paragraph" ? "approved" : "rejected";
+        if (cmd === "approve_paragraph" && d.replaces) {
+          const old = this.find(a.caseId).drafts.find((x) => x.id === d.replaces);
+          if (old) old.status = "superseded";
+        }
         return null;
       }
       case "edit_paragraph": {
@@ -787,8 +798,9 @@ export class FakeCore {
       case "check_export": {
         const c = this.find(a.caseId);
         const d = this.detail(c);
+        const missing = d.sections.flatMap((s) => s.paragraphs.filter((p) => p.status === "approved").flatMap((p) => (p.text.match(/\[חסר[^\]]*\]/g) ?? []).map((m) => `${s.title}: ${m}`)));
         return {
-          blocking: [], empty_sections: d.sections.filter((s) => !s.approved).map((s) => s.title),
+          blocking: [], to_complete: missing, empty_sections: d.sections.filter((s) => !s.approved).map((s) => s.title),
           included_sections: d.sections.filter((s) => s.approved).length, score_tables: c.sheets.size, file_name: `דוח אבחון – ${c.meta.code}.docx`,
         } satisfies ExportCheck;
       }

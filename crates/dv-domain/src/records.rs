@@ -267,6 +267,9 @@ pub struct DraftParagraph {
     pub created_at: i64,
     #[ts(type = "number | null")]
     pub approved_at: Option<i64>,
+    /// A new wording of this approved paragraph (its id); approving it retires that one.
+    #[serde(default)]
+    pub replaces: Option<String>,
 }
 
 /// Exactly what left the computer for one request (tagged text), for accountability.

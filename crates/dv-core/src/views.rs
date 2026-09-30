@@ -58,6 +58,8 @@ pub struct ParagraphView {
     /// Human-readable sources ("S2 · דוח קודם · אבחון נוירו-התפתחותי").
     pub sources: Vec<String>,
     pub warnings: Vec<String>,
+    /// A new wording of this approved paragraph (its id), waiting for her approval.
+    pub replaces: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -266,8 +268,11 @@ pub struct ImportPreview {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct ExportCheck {
-    /// Must be fixed first (leftover placeholders, missing-information markers).
+    /// Must be fixed first: a tag the names could not be put back into.
     pub blocking: Vec<String>,
+    /// Worth completing, but the file can go out as it is: "[חסר: …]" markers stay in it,
+    /// highlighted, for her to fill in (in the app or in Word).
+    pub to_complete: Vec<String>,
     /// Sections without approved paragraphs (left out of the file).
     pub empty_sections: Vec<String>,
     pub included_sections: u32,

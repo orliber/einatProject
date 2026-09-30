@@ -1,12 +1,21 @@
 .finish-body {
   flex-grow: 1;
   min-height: 0;
+  display: flex;
+  gap: 0;
+}
+/* What is checked, beside the page. */
+.finish-side {
+  width: 460px;
+  flex-shrink: 0;
   overflow: auto;
-  padding: 18px 24px 24px;
+  padding: 22px 24px 24px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  max-width: 860px;
+  gap: 14px;
+}
+.finish-side h1 {
+  font-size: 28px;
 }
 .finish-checks {
   list-style: none;
@@ -18,21 +27,21 @@
 }
 .finish-checks li {
   display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 14px 18px;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
   border-radius: var(--radius-lg);
   background: var(--surface);
   border: 1px solid var(--line);
-  font-size: 16px;
+  font-size: 15px;
 }
 .finish-checks li.warn {
   background: var(--warn-paper);
   border: 1.5px solid var(--warn-line);
 }
 .finish-mark {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   flex-shrink: 0;
   border-radius: 50%;
   display: grid;
@@ -47,9 +56,56 @@
   background: var(--warn-soft);
   color: var(--warn-ink);
 }
+.info .finish-mark {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.complete-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px dashed var(--warn-line);
+  border-radius: var(--radius-md);
+  background: #fff;
+  text-align: start;
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+.complete-item:hover {
+  border-color: var(--primary);
+}
 .finish-file {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 20px 22px;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 18px 20px;
+}
+/* The file, as it will be. */
+.finish-preview {
+  flex-grow: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 22px 24px 40px;
+  background: var(--surface-alt);
+  border-inline-start: 1px solid var(--line);
+}
+.a4.a4-small {
+  width: min(680px, 100%);
+  min-height: 900px;
+  padding: 56px 60px 64px;
+  font-size: 14.5px;
+}
+.a4-small .a4-header {
+  inset-inline: 60px;
+}
+.a4-out .a4-heading {
+  color: #a0a8a6;
+}
+.a4-out-note {
+  margin: 0 0 6px;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  color: #a0a8a6;
 }

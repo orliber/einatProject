@@ -17,7 +17,7 @@ use crate::pipeline::{identity_index, PrivacyContext};
 use crate::text::{normalize, prefix_splits, tokenize};
 
 /// Generic replacements produced by the pipeline; always allowed in outgoing text.
-pub(crate) const GENERIC_TAGS: &[&str] = &[
+pub const GENERIC_TAGS: &[&str] = &[
     "[ת.ז.]",
     "[טלפון]",
     "[דוא\"ל]",

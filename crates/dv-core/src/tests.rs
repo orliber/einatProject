@@ -647,15 +647,24 @@ fn export_needs_approved_paragraphs_and_restores_names() {
 }
 
 #[test]
-fn missing_information_marker_blocks_export() {
+fn missing_information_marker_is_pointed_out_and_bracketed_words_are_plain() {
     let (_dir, mut core, case) = setup(None);
-    core.add_own_paragraph(&case, "background", "ההריון תקין. [חסר: גיל ההליכה]")
-        .unwrap();
+    core.add_own_paragraph(
+        &case,
+        "background",
+        "ההריון תקין. [חסר: גיל ההליכה] לדברי [מחנכת] הוא משתלב.",
+    )
+    .unwrap();
     let check = core.check_export(&case).unwrap();
+    assert!(check.blocking.is_empty(), "{:?}", check.blocking);
+    assert_eq!(check.to_complete.len(), 1, "{:?}", check.to_complete);
+    assert!(check.to_complete[0].contains("[חסר: גיל ההליכה]"));
+    // The file goes out; the marker stays in it, the model's brackets become plain text.
+    let bytes = core.export_report(&case, None).unwrap();
+    let text = read_docx_text(&bytes);
     assert!(
-        check.blocking.iter().any(|b| b.contains("חסר")),
-        "{:?}",
-        check.blocking
+        text.contains("[חסר: גיל ההליכה]") && text.contains("(מחנכת)"),
+        "{text}"
     );
 }
 
@@ -2278,4 +2287,56 @@ fn a_section_title_holding_the_childs_name_blocks_nothing() {
             "the child's name left inside a title"
         );
     }
+}
+
+/// Claude's new wording of an approved paragraph waits beside it: approving it takes the old
+/// one's place, removing it leaves the old one as it was (D-032).
+#[test]
+fn a_new_wording_of_an_approved_paragraph_replaces_it_only_when_approved() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    core.add_own_paragraph(&case, "kindergarten", "פסקה מקורית.")
+        .unwrap();
+    let para = |core: &mut Core| {
+        core.case_detail(&case)
+            .unwrap()
+            .sections
+            .into_iter()
+            .find(|s| s.key == "kindergarten")
+            .unwrap()
+            .paragraphs
+    };
+    let original = para(&mut core)[0].id.clone();
+    let reword = |core: &mut Core, text: &str| {
+        *fake.answer.lock().unwrap() = Some(api_json(&json!({
+            "reply": "הנה", "paragraphs": [{"text": text, "source_refs": ["S1"]}],
+            "questions": [], "missing": [], "contradictions": [],
+        })));
+        let p = core
+            .prepare_section_replacing(&case, "kindergarten", "לקצר", Some(&original))
+            .unwrap();
+        core.send_section(&p.approval_id.unwrap()).unwrap();
+    };
+
+    reword(&mut core, "ניסוח ראשון.");
+    let now = para(&mut core);
+    assert_eq!(now.len(), 2);
+    let new = now
+        .iter()
+        .find(|p| p.status == DraftStatus::Proposed)
+        .unwrap();
+    assert_eq!(new.replaces.as_deref(), Some(original.as_str()));
+    // Removing it keeps the original.
+    core.reject_paragraph(&case, &new.id.clone()).unwrap();
+    assert_eq!(para(&mut core).len(), 1);
+
+    reword(&mut core, "ניסוח שני.");
+    let new = para(&mut core)
+        .into_iter()
+        .find(|p| p.status == DraftStatus::Proposed)
+        .unwrap();
+    core.approve_paragraph(&case, &new.id).unwrap();
+    let after = para(&mut core);
+    assert_eq!(after.len(), 1, "the new wording took the old one's place");
+    assert_eq!(after[0].text, "ניסוח שני.");
 }

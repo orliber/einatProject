@@ -1537,6 +1537,7 @@ impl Vault {
             source_refs: source_refs.to_vec(),
             created_at: t,
             approved_at: None,
+            replaces: None,
         })
     }
 
@@ -1547,8 +1548,8 @@ impl Vault {
     ) -> Result<Vec<DraftParagraph>, VaultError> {
         let key = self.case_key(case_id)?;
         let mut stmt = self.main.prepare(
-            "SELECT id, position, status, author, created_at, approved_at, text_tagged_enc, source_refs_enc
-             FROM drafts WHERE case_id = ?1 AND section_key = ?2 ORDER BY position",
+            "SELECT id, position, status, author, created_at, approved_at, text_tagged_enc, source_refs_enc, replaces
+             FROM drafts WHERE case_id = ?1 AND section_key = ?2 ORDER BY position, created_at",
         )?;
         type Row = (
             String,
@@ -1559,6 +1560,7 @@ impl Vault {
             Option<i64>,
             Vec<u8>,
             Vec<u8>,
+            Option<String>,
         );
         let rows: Vec<Row> = stmt
             .query_map(params![case_id, section_key], |r| {
@@ -1571,12 +1573,13 @@ impl Vault {
                     r.get(5)?,
                     r.get(6)?,
                     r.get(7)?,
+                    r.get(8)?,
                 ))
             })?
             .collect::<Result<_, _>>()?;
         rows.into_iter()
             .map(
-                |(id, position, status, author, created_at, approved_at, text, refs)| {
+                |(id, position, status, author, created_at, approved_at, text, refs, replaces)| {
                     Ok(DraftParagraph {
                         text_tagged: open_string(
                             &key,
@@ -1596,6 +1599,7 @@ impl Vault {
                         position,
                         created_at,
                         approved_at,
+                        replaces,
                     })
                 },
             )
@@ -1616,6 +1620,15 @@ impl Vault {
         if changed == 0 {
             return Err(VaultError::NotFound);
         }
+        if status == DraftStatus::Approved {
+            // A new wording she approved takes the old one's place.
+            self.main.execute(
+                "UPDATE drafts SET status = 'superseded'
+                 WHERE case_id = ?1 AND status = 'approved'
+                   AND id = (SELECT replaces FROM drafts WHERE id = ?2 AND case_id = ?1)",
+                params![case_id, draft_id],
+            )?;
+        }
         self.touch(case_id)
     }
 
@@ -1633,6 +1646,51 @@ impl Vault {
         )?;
         self.touch(case_id)?;
         Ok(n)
+    }
+
+    /// Claude's new wording of a paragraph she approved: a proposal right beside it, which
+    /// replaces it only when approved. False when that paragraph is not approved any more.
+    pub fn propose_rewording(
+        &mut self,
+        case_id: &str,
+        draft_id: &str,
+        text_tagged: &str,
+        source_refs: &[String],
+    ) -> Result<bool, VaultError> {
+        let key = self.case_key(case_id)?;
+        let target: Option<(String, u32)> = self
+            .main
+            .query_row(
+                "SELECT section_key, position FROM drafts WHERE id = ?1 AND case_id = ?2 AND status = 'approved'",
+                params![draft_id, case_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let Some((section_key, position)) = target else {
+            return Ok(false);
+        };
+        // Only one new wording waits per paragraph.
+        self.main.execute(
+            "UPDATE drafts SET status = 'superseded' WHERE case_id = ?1 AND replaces = ?2 AND status = 'proposed'",
+            params![case_id, draft_id],
+        )?;
+        let id = random_id()?;
+        self.main.execute(
+            "INSERT INTO drafts (id, case_id, section_key, position, status, author, created_at, approved_at, text_tagged_enc, source_refs_enc, replaces)
+             VALUES (?1, ?2, ?3, ?4, 'proposed', 'ai', ?5, NULL, ?6, ?7, ?8)",
+            params![
+                id,
+                case_id,
+                section_key,
+                position,
+                now(),
+                seal_str(&key, &aad("drafts", "text", &id, case_id), text_tagged)?,
+                seal_str(&key, &aad("drafts", "refs", &id, case_id), &to_json(&source_refs)?)?,
+                draft_id
+            ],
+        )?;
+        self.touch(case_id)?;
+        Ok(true)
     }
 
     /// Claude's rewrite of one paragraph it proposed, in the same place. False when the

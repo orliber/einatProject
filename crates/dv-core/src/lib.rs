@@ -1151,6 +1151,7 @@ impl Core {
                             })
                             .collect(),
                         warnings: Vec::new(),
+                        replaces: d.replaces,
                     })
                     .collect();
                 let source_count =
@@ -1593,7 +1594,11 @@ impl Core {
                 let text: Vec<&str> = reply.paragraphs.iter().map(|p| p.text.as_str()).collect();
                 let mut refs: Vec<String> = reply.paragraphs.iter().flat_map(&input_ids).collect();
                 refs.dedup();
-                v.rewrite_proposal(&case_id, id, &text.join("\n\n"), &refs)?
+                let text = text.join("\n\n");
+                // A proposal is rewritten in place; an approved paragraph gets a new wording
+                // beside it, which replaces it only when she approves (D-032).
+                v.rewrite_proposal(&case_id, id, &text, &refs)?
+                    || v.propose_rewording(&case_id, id, &text, &refs)?
             }
             _ => false,
         };
@@ -1880,6 +1885,13 @@ impl Core {
         let show = |t: &str| restore(t, &identities, practitioner.as_deref());
 
         let mut blocking = Vec::new();
+        let mut to_complete = Vec::new();
+        let known_tags: HashSet<String> = v
+            .all_identities()?
+            .into_iter()
+            .map(|i| i.tag)
+            .chain(dv_privacy::GENERIC_TAGS.iter().map(|t| (*t).to_owned()))
+            .collect();
         let mut empty_sections = Vec::new();
         let mut included = 0u32;
         let mut parts = Vec::new();
@@ -1887,18 +1899,27 @@ impl Core {
         for part in &structure.parts {
             let mut sections = Vec::new();
             for s in &part.sections {
-                let paragraphs: Vec<String> = v
+                let mut paragraphs: Vec<String> = v
                     .drafts(case_id, &s.key)?
                     .into_iter()
                     .filter(|d| d.status == DraftStatus::Approved)
                     .map(|d| show(&d.text_tagged))
                     .collect();
-                for p in &paragraphs {
+                for p in &mut paragraphs {
                     for tag in dv_privacy::restore::remaining_tags(p) {
-                        blocking.push(format!("{}: נשארה תגית {tag}", s.title));
+                        if known_tags.contains(&tag) {
+                            // A real tag the names could not be put back into: never in a file.
+                            blocking.push(format!("{}: נשארה תגית {tag}", s.title));
+                        } else {
+                            // Words the model put in square brackets ("[מחנכת]"): plain text.
+                            let plain = format!("({})", &tag[1..tag.len() - 1]);
+                            *p = p.replace(&tag, &plain);
+                        }
                     }
-                    if p.contains("[חסר") {
-                        blocking.push(format!("{}: יש מידע חסר שצריך להשלים", s.title));
+                    for m in p.match_indices("[חסר") {
+                        let rest = &p[m.0..];
+                        let end = rest.find(']').map_or(rest.len(), |i| i + 1);
+                        to_complete.push(format!("{}: {}", s.title, &rest[..end]));
                     }
                 }
                 if s.key == "signature" {
@@ -1993,6 +2014,9 @@ impl Core {
             font: settings.font,
         };
         for leftover in dv_export::leftover_placeholders(&report) {
+            if leftover.starts_with("[חסר") {
+                continue; // Pointed out in `to_complete`; hers to fill in.
+            }
             let msg = format!("נשאר בדוח סימון בסוגריים מרובעים: {leftover}");
             if !blocking.iter().any(|b| b.contains(&leftover)) {
                 blocking.push(msg);
@@ -2016,6 +2040,7 @@ impl Core {
             report,
             ExportCheck {
                 blocking,
+                to_complete,
                 empty_sections,
                 included_sections: included,
                 score_tables,

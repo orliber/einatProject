@@ -96,6 +96,13 @@ const CHANGES: [string, string][] = [
   ["לבדוק מול החומרים", "בדקי את הטיוטה מול המקורות: מה חסר, מה סותר, ומה לא מבוסס, ותקני."],
 ];
 
+const PARA_CHANGES: [string, string][] = [
+  ["לקצר", "קצרי את הפסקה הבאה ושמרי על כל הממצאים שבה."],
+  ["לנסח אחרת", "נסחי מחדש את הפסקה הבאה, באותו תוכן ובלי להוסיף עובדות."],
+  ["להרחיב", "הרחיבי את הפסקה הבאה, רק ממה שיש במקורות."],
+  ["לפשט להורים", "נסחי את הפסקה הבאה בשפה פשוטה וברורה להורים, באותו תוכן."],
+];
+
 /** A small card next to what opened it; Escape or a click outside closes it. */
 function Popover({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -128,12 +135,17 @@ function A4Section({ api, section: s, showDrafts }: { api: CaseApi; section: Sec
   const [editing, setEditing] = useState<{ id: string | null; text: string } | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [open, setOpen] = useState<"sources" | "change" | null>(null);
+  /** The paragraph whose "✦ with Claude" card is open. */
+  const [paraPop, setParaPop] = useState<string | null>(null);
   const [wish, setWish] = useState("");
   const [sourcesChanged, setSourcesChanged] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const job = api.jobs.find((j) => j.section === s.key);
   const ok = s.paragraphs.filter((p) => p.status === "approved");
-  const pending = s.paragraphs.filter((p) => p.status === "proposed");
+  const proposed = s.paragraphs.filter((p) => p.status === "proposed");
+  // A new wording of an approved paragraph is shown beside it, not as a new draft.
+  const reworded = new Map(proposed.filter((p) => p.replaces).map((p) => [p.replaces ?? "", p]));
+  const pending = proposed.filter((p) => !p.replaces);
   const canWrite = s.source_count > 0 || !s.sortable;
   const busy = preparing || job !== undefined;
   const sources = detail.routing
@@ -151,13 +163,14 @@ function A4Section({ api, section: s, showDrafts }: { api: CaseApi; section: Sec
     }
   }
 
-  async function write(instruction?: string) {
+  async function write(instruction?: string, replaces?: string) {
     setOpen(null);
+    setParaPop(null);
     setSourcesChanged(false);
     setError(null);
     setPreparing(true);
     try {
-      await api.draft(s.key, instruction);
+      await api.draft(s.key, instruction, replaces);
     } catch (e) {
       setError(fail(e as never));
     } finally {
@@ -173,6 +186,58 @@ function A4Section({ api, section: s, showDrafts }: { api: CaseApi; section: Sec
       setEditing(null);
     });
   }
+
+  /** One paragraph on the page: click to edit, "✦" to change it with Claude. */
+  const para = (p: Section["paragraphs"][number], note?: string) =>
+    editing?.id === p.id ? (
+      <div key={p.id}>{editor}</div>
+    ) : (
+      <div key={p.id} className="a4-para">
+        <p className="a4-p a4-editable" tabIndex={0} title={note ?? "לחיצה לעריכה"}
+          onClick={() => setEditing({ id: p.id, text: p.text })}
+          onKeyDown={(e) => { if (e.key === "Enter") setEditing({ id: p.id, text: p.text }); }}>
+          {p.text}
+        </p>
+        {canWrite && !busy && (
+          <span className="a4-pop-anchor a4-para-tool">
+            <button type="button" className="a4-tool" aria-expanded={paraPop === p.id} title="לשנות את הפסקה עם Claude"
+              onClick={() => setParaPop(paraPop === p.id ? null : p.id)}>✦</button>
+            {paraPop === p.id && (
+              <Popover label="מה לשנות בפסקה" onClose={() => setParaPop(null)}>
+                <b>מה לשנות בפסקה הזאת?</b>
+                <div className="row wrap-row">
+                  {PARA_CHANGES.map(([label, text]) => (
+                    <button key={label} type="button" className="pill-btn"
+                      onClick={() => void write(`${text} הפסקה: "${p.text}"`, p.id)}>{label}</button>
+                  ))}
+                </div>
+                <label className="stack small muted" style={{ gap: 4 }}>
+                  או במילים שלך
+                  <textarea className="textarea" rows={2} value={wish} placeholder="למשל: לכתוב בלשון פשוטה יותר להורים"
+                    onChange={(e) => setWish(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && wish.trim()) { e.preventDefault(); const w = wish; setWish(""); void write(`${w} הפסקה: "${p.text}"`, p.id); } }} />
+                </label>
+                <div className="a4-pop-foot">
+                  <span className="small muted grow">{p.status === "approved" ? "הניסוח החדש יופיע ליד הקיים, ויחליף אותו רק אם תאשרי." : "הניסוח החדש יחליף את הפסקה הזאת בטיוטה."}</span>
+                  <button type="button" className="btn btn-primary btn-small" disabled={!wish.trim()}
+                    onClick={() => { const w = wish; setWish(""); void write(`${w} הפסקה: "${p.text}"`, p.id); }}>שליחה</button>
+                </div>
+              </Popover>
+            )}
+          </span>
+        )}
+        {reworded.get(p.id) && (
+          <div className="a4-reword">
+            <span className="a4-flag">ניסוח חדש של Claude לפסקה הזאת</span>
+            <p className="a4-p">{reworded.get(p.id)?.text}</p>
+            <span className="row">
+              <button type="button" className="btn btn-primary btn-small" onClick={() => void act(() => ipc.approveParagraph(caseId, reworded.get(p.id)?.id ?? ""))}>✓ להחליף</button>
+              <button type="button" className="btn btn-small" onClick={() => void act(() => ipc.rejectParagraph(caseId, reworded.get(p.id)?.id ?? ""))}>להשאיר את הקודם</button>
+            </span>
+          </div>
+        )}
+      </div>
+    );
 
   const editor = (
     <div className="a4-edit">
@@ -194,7 +259,6 @@ function A4Section({ api, section: s, showDrafts }: { api: CaseApi; section: Sec
         <h3 className="a4-heading">{s.title}</h3>
         <span className="a4-tools">
           {!editing && <button type="button" className="a4-tool" onClick={() => setEditing({ id: null, text: "" })}>+ פסקה משלי</button>}
-          <button type="button" className="a4-tool" title="השיחה עם Claude על הסעיף" onClick={() => go({ name: "case", id: caseId, view: s.key })}>שיחה על הסעיף</button>
         </span>
       </div>
 
@@ -248,17 +312,7 @@ function A4Section({ api, section: s, showDrafts }: { api: CaseApi; section: Sec
         </div>
       )}
 
-      {ok.map((p) =>
-        editing?.id === p.id ? (
-          <div key={p.id}>{editor}</div>
-        ) : (
-          <p key={p.id} className="a4-p a4-editable" tabIndex={0} title="לחיצה לעריכה"
-            onClick={() => setEditing({ id: p.id, text: p.text })}
-            onKeyDown={(e) => { if (e.key === "Enter") setEditing({ id: p.id, text: p.text }); }}>
-            {p.text}
-          </p>
-        ),
-      )}
+      {ok.map((p) => para(p))}
 
       {job && (
         <div className="a4-writing">
@@ -272,7 +326,7 @@ function A4Section({ api, section: s, showDrafts }: { api: CaseApi; section: Sec
           <div className="a4-pending-head">
             <span className="a4-flag">טיוטה של Claude · עוד לא בדוח</span>
             <span className="row">
-              <button type="button" className="btn btn-primary btn-small" onClick={() => void act(() => ipc.approveSection(caseId, s.key))}>✓ לאשר</button>
+              <button type="button" className="btn btn-primary btn-small" onClick={() => void act(async () => { for (const p of pending) await ipc.approveParagraph(caseId, p.id); })}>✓ לאשר</button>
               <span className="a4-pop-anchor">
                 <button type="button" className="btn btn-small" aria-expanded={open === "change"} disabled={busy} onClick={() => setOpen(open === "change" ? null : "change")}>✦ לשנות עם Claude</button>
                 {open === "change" && (
@@ -299,17 +353,7 @@ function A4Section({ api, section: s, showDrafts }: { api: CaseApi; section: Sec
               <button type="button" className="btn btn-small btn-ghost" onClick={() => void act(async () => { for (const p of pending) await ipc.rejectParagraph(caseId, p.id); })}>הסרה</button>
             </span>
           </div>
-          {pending.map((p) =>
-            editing?.id === p.id ? (
-              <div key={p.id}>{editor}</div>
-            ) : (
-              <p key={p.id} className="a4-p a4-editable" tabIndex={0} title="לחיצה לעריכה (העריכה מאשרת את הפסקה)"
-                onClick={() => setEditing({ id: p.id, text: p.text })}
-                onKeyDown={(e) => { if (e.key === "Enter") setEditing({ id: p.id, text: p.text }); }}>
-                {p.text}
-              </p>
-            ),
-          )}
+          {pending.map((p) => para(p, "לחיצה לעריכה (העריכה מאשרת את הפסקה)"))}
         </div>
       )}
 

@@ -5,4 +5,8 @@ import type { DraftStatus } from "./DraftStatus";
 /**
  * One paragraph of a section draft, stored with tags only.
  */
-export type DraftParagraph = { id: string, case_id: string, section_key: string, position: number, text_tagged: string, status: DraftStatus, author: Author, source_refs: Array<string>, created_at: number, approved_at: number | null, };
+export type DraftParagraph = { id: string, case_id: string, section_key: string, position: number, text_tagged: string, status: DraftStatus, author: Author, source_refs: Array<string>, created_at: number, approved_at: number | null, 
+/**
+ * A new wording of this approved paragraph (its id); approving it retires that one.
+ */
+replaces: string | null, };
