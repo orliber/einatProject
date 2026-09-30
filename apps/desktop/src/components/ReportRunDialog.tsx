@@ -146,7 +146,7 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
           {finished ? (
             <>
               <button type="button" className="btn" onClick={() => { onClose(); go({ name: "case", id: api.caseId, view: "report" }); }}>לתצוגת הדוח</button>
-              <button type="button" className="btn btn-primary" onClick={() => { const first = rows.find(([k]) => stateOf(k) === "done"); onClose(); if (first) go({ name: "case", id: api.caseId, view: first[0] }); }}>לאישור הטיוטות</button>
+              <button type="button" className="btn btn-primary" onClick={() => { onClose(); go({ name: "case", id: api.caseId, view: "report" }); }}>לאישור הטיוטות</button>
             </>
           ) : (
             <>
@@ -196,7 +196,7 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
                     {open === key ? "הסתרה" : "מה יוצא?"}
                   </button>
                 )}
-                {st === "done" && <button type="button" className="link-small" onClick={() => { onClose(); go({ name: "case", id: api.caseId, view: key }); }}>לסעיף</button>}
+                {st === "done" && <button type="button" className="link-small" onClick={() => { onClose(); go({ name: "case", id: api.caseId, view: "report" }); }}>לדוח</button>}
               </div>
               {st === "writing" && started[key] !== undefined && <ProgressLine started={started[key]} estimate={draftMs} label="" />}
               {open === key && (

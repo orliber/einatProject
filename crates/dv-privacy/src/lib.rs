@@ -13,7 +13,7 @@ mod pipeline;
 pub mod restore;
 pub mod text;
 
-pub use gate::{clear, BlockReason, Blocked, ClearedPayload, GateRequest};
+pub use gate::{clear, BlockReason, Blocked, ClearedPayload, GateRequest, GENERIC_TAGS};
 pub use pipeline::{
     filter, filter_split, Checks, FilterOutcome, Mark, PrivacyContext, Segment, Suspect,
     SuspectKind,

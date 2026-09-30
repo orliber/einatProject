@@ -14,7 +14,8 @@ const ACCEPT = ".docx,.odt,.pdf,.txt,application/vnd.oasis.opendocument.text,app
 export function MaterialsView({ api }: { api: CaseApi }) {
   const { fail, notify } = useApp();
   const { detail, caseId, reload } = api;
-  const [selected, setSelected] = useState<string | null>(detail.inputs[0]?.id ?? null);
+  // A material opens in a window when clicked; the screen itself is only the slots.
+  const [selected, setSelected] = useState<string | null>(null);
   const [previewed, setPreviewed] = useState<{ id: string; outcome: FilterOutcome } | null>(null);
   const [importing, setImporting] = useState<ImportPreview | null>(null);
   const [reading, setReading] = useState<string | null>(null);
@@ -97,13 +98,10 @@ export function MaterialsView({ api }: { api: CaseApi }) {
       <div className="view-head">
         <div className="stack" style={{ gap: 4 }}>
           <h1>מה יש בתיק</h1>
-          <p className="muted small">הכל נשמר מוצפן. ל-Claude יוצא רק טקסט אחרי הסתרה, ורק באישורך.</p>
+          <p className="muted small">גוררים קובץ לכאן, או מוסיפים ישר במשבצת שלו. הכל נשמר מוצפן, ו-Claude מקבל רק טקסט אחרי הסתרה.</p>
         </div>
         <div className="row">
-          <button type="button" className="btn btn-primary" onClick={() => fileRef.current?.click()}><UploadIcon /> העלאת מסמך</button>
-          <button type="button" className="btn" onClick={() => setScoring({})}>הזנת ציונים</button>
-          <button type="button" className="btn" onClick={() => setWriting({ kind: "session_note" })}>רישום מפגש</button>
-          <button type="button" className="btn" onClick={() => setWriting({ kind: "free_text" })}>הדבקת טקסט</button>
+          <button type="button" className="btn btn-primary btn-big" onClick={() => fileRef.current?.click()}><UploadIcon /> העלאת מסמך</button>
           <input ref={fileRef} type="file" accept={ACCEPT} hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void readFile(f); }} />
         </div>
       </div>
@@ -141,9 +139,12 @@ export function MaterialsView({ api }: { api: CaseApi }) {
           </button>
         </section>
 
-        <section className="card material-view" aria-label="תצוגת החומר">
-          {input ? (
-            <>
+      </div>
+
+      {input && (
+        <Dialog title={input.title || kindLabel[input.kind]} subtitle={kindLabel[input.kind]} onClose={() => setSelected(null)}>
+          <div className="material-view">
+<>
               <div className="material-head">
                 <h2 className="grow">{input.title || kindLabel[input.kind]}</h2>
                 <span className="small muted">{kindLabel[input.kind]}</span>
@@ -172,20 +173,17 @@ export function MaterialsView({ api }: { api: CaseApi }) {
                 <span><mark className="mark-real">מסומן</mark> = יוחלף בתפקיד לפני כל שליחה ("הילד", "האם", "לפני שבועיים")</span>
               </div>
             </>
-          ) : (
-            <p className="muted material-empty">בוחרים חומר מהרשימה כדי לראות אותו, ומה יוסתר ממנו.</p>
-          )}
-        </section>
-      </div>
-
+          </div>
+        </Dialog>
+      )}
       {importing && (
         <ImportDialog caseId={caseId} preview={importing} onClose={() => setImporting(null)}
-          onSaved={async (id) => { setImporting(null); await reload(); setSelected(id); notify("המסמך נשמר בתיק."); }} />
+          onSaved={async () => { setImporting(null); await reload(); notify("המסמך נשמר בתיק."); }} />
       )}
       {scoring && (
         <ScoresDialog caseId={caseId} age={detail.meta.age} input={scoring.input} sheet={scoring.sheet}
           onClose={() => setScoring(null)}
-          onSaved={async (id) => { setScoring(null); await reload(); setSelected(id); notify("הציונים נשמרו בתיק."); }} />
+          onSaved={async () => { setScoring(null); await reload(); notify("הציונים נשמרו בתיק."); }} />
       )}
       {choosing && routeOf(choosing.id) && (
         <SectionsDialog api={api} input={choosing} route={routeOf(choosing.id) as MaterialRouting} titleOf={titleOf}
@@ -194,7 +192,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
       )}
       {writing && (
         <WriteDialog caseId={caseId} kind={writing.kind} input={writing.input} onClose={() => setWriting(null)}
-          onSaved={async (id) => { setWriting(null); await reload(); if (id) setSelected(id); }} />
+          onSaved={async () => { setWriting(null); await reload(); notify("נשמר בתיק."); }} />
       )}
     </div>
   );

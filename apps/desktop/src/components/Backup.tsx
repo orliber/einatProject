@@ -158,14 +158,40 @@ export function CheckBackupDialog({ staged, onClose }: { staged: StagedBackup; o
   );
 }
 
-/** A quiet line on the cases screen once a week has passed without a backup. */
+/** Days before the line comes back, and how long "×" puts it away. */
+const REMIND_AFTER_DAYS = 14;
+const SNOOZE_DAYS = 7;
+const SNOOZE_KEY = "dv.backupSnoozedAt";
+
+function snoozedUntil(): number {
+  try {
+    return Number(localStorage.getItem(SNOOZE_KEY) ?? 0) + SNOOZE_DAYS * 86_400_000;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * A quiet line on the cases screen, only now and then: when there has never been a backup,
+ * two weeks after the last one, or after a password / kit change (always, the old backup no
+ * longer opens with the new secret). "×" puts it away for a week.
+ */
 export function BackupReminder() {
   const { go } = useApp();
   const status = useBackupStatus();
   const { write, busy, error } = useWriteBackup();
-  const [hidden, setHidden] = useState(false);
+  const [hidden, setHidden] = useState(() => Date.now() < snoozedUntil());
   const s = status.data;
-  if (!s || !s.due || !s.has_cases || hidden) return null;
+  const due = s && (s.secret_changed || s.last_at === null || (s.days_since ?? 0) >= REMIND_AFTER_DAYS);
+  if (!s || !due || !s.has_cases || (hidden && !s.secret_changed)) return null;
+  const snooze = () => {
+    try {
+      localStorage.setItem(SNOOZE_KEY, String(Date.now()));
+    } catch {
+      // Private storage off: hidden until the screen is opened again.
+    }
+    setHidden(true);
+  };
   return (
     <div className="backup-reminder" role="status">
       <span className="grow">
@@ -177,7 +203,7 @@ export function BackupReminder() {
       {error && <span className="error small">{error}</span>}
       <button type="button" className="btn btn-small" disabled={busy} onClick={() => void write()}>{busy ? "שומרת…" : "גיבוי עכשיו…"}</button>
       <button type="button" className="link-btn small" onClick={() => go({ name: "settings" })}>עוד על הגיבוי</button>
-      <button type="button" className="btn icon-btn" aria-label="לא עכשיו" onClick={() => setHidden(true)}>×</button>
+      <button type="button" className="btn icon-btn" aria-label="לא עכשיו (שבוע)" title="לא עכשיו: יחזור בעוד שבוע" onClick={snooze}>×</button>
     </div>
   );
 }

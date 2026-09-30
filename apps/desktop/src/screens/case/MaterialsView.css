@@ -1,10 +1,15 @@
+/* The slots fill the screen; a material opens in a window. */
 .materials-list {
-  width: 400px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-grow: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  align-content: start;
+  gap: 12px;
   overflow: auto;
+}
+.materials-list .dropzone {
+  grid-column: 1 / -1;
 }
 .material {
   background: var(--surface);
@@ -51,11 +56,9 @@
   gap: 6px;
 }
 .material-view {
-  flex-grow: 1;
-  min-width: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  min-height: 0;
 }
 .material-head {
   padding: 14px 20px;

@@ -5,9 +5,14 @@
  */
 export type ExportCheck = { 
 /**
- * Must be fixed first (leftover placeholders, missing-information markers).
+ * Must be fixed first: a tag the names could not be put back into.
  */
 blocking: Array<string>, 
+/**
+ * Worth completing, but the file can go out as it is: "[חסר: …]" markers stay in it,
+ * highlighted, for her to fill in (in the app or in Word).
+ */
+to_complete: Array<string>, 
 /**
  * Sections without approved paragraphs (left out of the file).
  */

@@ -295,3 +295,45 @@
     display: none;
   }
 }
+/* One paragraph with its "✦" beside it. */
+.a4-para {
+  position: relative;
+}
+.a4-para-tool {
+  position: absolute;
+  top: 2px;
+  inset-inline-end: -40px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.a4-para:hover .a4-para-tool,
+.a4-para:focus-within .a4-para-tool {
+  opacity: 1;
+}
+.a4-para-tool .a4-pop {
+  inset-inline-start: auto;
+  inset-inline-end: 0;
+}
+.a4-reword {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 12px;
+  padding: 8px 12px;
+  border-inline-start: 3px solid var(--primary);
+  background: var(--primary-soft);
+  font-family: var(--font-ui);
+}
+.a4-reword .a4-p {
+  font-family: var(--font-display);
+}
+.a4-mark {
+  background: #f6dfb4;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+@media print {
+  .a4-para-tool {
+    display: none;
+  }
+}
