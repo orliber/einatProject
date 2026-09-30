@@ -244,7 +244,7 @@ try:
     shot("section-approved")
 
     # 4b. The report as it will look in Word.
-    find("//nav[contains(@class,'side-nav')]//button[contains(normalize-space(),'הדוח כמו בוורד')]").click()
+    find("//nav[contains(@class,'side-nav')]//button[contains(normalize-space(),'כמו בוורד')]").click()
     expect_text("סעיפים מאושרים ייכנסו לקובץ", 30)
     body = d.find_element(By.TAG_NAME, "body").text
     log.append("     report view: approved section on the page = " + str("איכויות התקשורת" in body))

@@ -45,6 +45,9 @@ export interface CaseApi {
   /** Requests on their way to Claude and back. */
   jobs: Job[];
   track: <T>(job: { label: string; task: Task; section?: string }, run: () => Promise<T>) => Promise<T>;
+  /** A draft for a section, from anywhere (the report page, the section): prepare, the
+   *  review, and the writing with its progress. Resolves when it is in, or she went back. */
+  draft: (sectionKey: string, instruction?: string, replaces?: string) => Promise<boolean>;
 }
 
 let jobSeq = 0;
@@ -114,7 +117,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         const out = await run();
         if (!status.demo_mode) recordDuration(job.task, status.speed, Date.now() - j.started);
         const title = detailRef.current?.sections.find((s) => s.key === job.section)?.title;
-        if (job.section && viewRef.current !== job.section && title) notify(`הטיוטה ל"${title}" מוכנה לאישור. היא מחכה בסעיף.`);
+        if (job.section && viewRef.current !== job.section && viewRef.current !== "report" && title) notify(`הטיוטה ל"${title}" מוכנה לאישור. היא מחכה בסעיף.`);
         return out;
       } catch (e) {
         // Never lost silently, wherever she is by then.
@@ -145,6 +148,27 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     [status.review_only_suspect],
   );
 
+  const draft = useCallback(
+    async (key: string, instruction?: string, replaces?: string) => {
+      const section = detailRef.current?.sections.find((s) => s.key === key);
+      const title = section?.title ?? key;
+      const derivedKey = ["summary", "diagnoses", "recommendations", "dsm"].includes(key);
+      const text = instruction ?? (derivedKey ? "כתבי טיוטה לסעיף מתוך הסעיפים שאושרו." : "כתבי טיוטה לסעיף מתוך המקורות, עם מקור לכל פסקה.");
+      const prepare = () => ipc.prepareSection(caseId, key, text, replaces);
+      const prepared = await prepare();
+      return startReview({
+        title: `טיוטה לסעיף ${title}`,
+        prepared,
+        reprepare: prepare,
+        onSend: async (id) => {
+          await track({ label: `Claude כותב את "${title}"`, task: "draft", section: key }, () => ipc.sendSection(id));
+          await reload();
+        },
+      });
+    },
+    [caseId, startReview, track, reload],
+  );
+
   const startSort = async () => {
     setError(null);
     try {
@@ -168,7 +192,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     return <main className="center-note">{error ? <p className="error">{error}</p> : <span aria-busy="true" />}</main>;
   }
 
-  const api: CaseApi = { caseId, detail, reload, review: startReview, sort: startSort, jobs, track };
+  const api: CaseApi = { caseId, detail, reload, review: startReview, sort: startSort, jobs, track, draft };
   const unsorted = detail.routing.filter((r) => r.needs_sorting).length;
   const fed = detail.sections.filter((s) => s.source_count > 0);
   const pending = detail.sections.filter((s) => s.paragraphs.some((p) => p.status === "proposed"));
@@ -218,15 +242,16 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
           </span>
         </button>
         <nav className="side-nav" aria-label="חלקי התיק">
+          <button type="button" className="side-report" aria-current={view === "report" ? "page" : undefined} onClick={() => go({ name: "case", id: caseId, view: "report" })}>
+            <span>הדוח (כמו בוורד)</span><span className="side-count">{approvedCount}/{total}</span>
+          </button>
           <button type="button" aria-current={view === "materials" ? "page" : undefined} onClick={() => go({ name: "case", id: caseId, view: "materials" })}>
             <span>חומרי התיק</span><span className="side-count">{detail.inputs.length}</span>
           </button>
           <button type="button" aria-current={view === "details" ? "page" : undefined} onClick={() => go({ name: "case", id: caseId, view: "details" })}>
             <span>פרטים ושמות להסתרה</span><span className="side-count">{detail.identities.length}</span>
           </button>
-          <button type="button" aria-current={view === "report" ? "page" : undefined} onClick={() => go({ name: "case", id: caseId, view: "report" })}>
-            <span>הדוח כמו בוורד</span><span className="side-count">{approvedCount}/{total}</span>
-          </button>
+
         </nav>
         <div className="side-progress">
           <div className="side-progress-label"><span>הדוח</span><span>{approvedCount} מתוך {total} סעיפים</span></div>
