@@ -1,6 +1,5 @@
 .settings {
   max-width: 880px;
-  overflow: auto;
 }
 .settings-title {
   font-size: 34px;
@@ -33,4 +32,32 @@
 }
 .align-start {
   align-self: flex-start;
+}
+
+.settings-jump {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 0;
+  background: var(--bg);
+}
+.settings-jump-btn {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  font: 14px var(--font-body);
+  cursor: pointer;
+}
+.settings-jump-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.settings .card {
+  scroll-margin-top: 56px;
 }

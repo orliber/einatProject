@@ -15,6 +15,17 @@ const MODELS: [string, string][] = [
   ["claude-opus-4-8", "Claude Opus 4.8"],
 ];
 
+const JUMPS: [string, string][] = [
+  ["s-claude", "חיבור ל-AI"],
+  ["s-privacy", "פרטיות ונעילה"],
+  ["s-report", "הדוח"],
+  ["s-backup", "גיבוי"],
+  ["s-password", "סיסמה"],
+  ["s-activity", "יומן"],
+  ["s-update", "עדכונים"],
+  ["s-sec", "מצב האבטחה"],
+];
+
 export function SettingsScreen() {
   const { status, refresh, notify, fail } = useApp();
   const [apiKey, setApiKey] = useState("");
@@ -43,6 +54,13 @@ export function SettingsScreen() {
       <TopBar active="settings" />
       <main className="page-main settings">
         <h1 className="settings-title">הגדרות</h1>
+        {/* A long page: one row of jumps to each part. */}
+        <nav className="settings-jump" aria-label="חלקי ההגדרות">
+          {JUMPS.map(([id, label]) => (
+            <button key={id} type="button" className="settings-jump-btn"
+              onClick={() => document.getElementById(id)?.closest("section")?.scrollIntoView({ block: "start", behavior: "smooth" })}>{label}</button>
+          ))}
+        </nav>
         <ErrorLine error={error} />
 
         <section className="card setting" aria-labelledby="s-claude">

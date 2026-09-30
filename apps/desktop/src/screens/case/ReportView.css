@@ -485,3 +485,12 @@
     display: none;
   }
 }
+
+.report-hint {
+  margin: 0 auto 10px;
+  max-width: 794px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--ink-muted);
+  text-align: center;
+}

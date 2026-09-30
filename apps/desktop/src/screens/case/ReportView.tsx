@@ -21,7 +21,6 @@ type Section = CaseDetail["sections"][number];
 export function ReportView({ api, focus }: { api: CaseApi; onWriteAll: () => void; focus?: { key: string; at: number } | null }) {
   const { detail } = api;
   const [settings, setSettings] = useState<ReportSettings | null>(null);
-  const [showDrafts, setShowDrafts] = useState(true);
 
   useEffect(() => {
     ipc.reportSettings().then(setSettings).catch(() => setSettings(null));
@@ -42,28 +41,15 @@ export function ReportView({ api, focus }: { api: CaseApi; onWriteAll: () => voi
   const childLabel = detail.meta.child_gender === "female" ? "שם הילדה" : detail.meta.child_gender === "male" ? "שם הילד" : "שם הילד/ה";
   const parts = Array.from(new Set(detail.sections.map((s) => s.part)));
   const content = detail.sections.filter((s) => s.key !== "signature");
-  const approved = content.filter((s) => s.approved).length;
-  const waiting = content.filter((s) => s.paragraphs.some((p) => p.status === "proposed")).length;
-  const empty = content.filter((s) => s.paragraphs.length === 0).length;
   const signature = detail.sections.find((s) => s.key === "signature");
   const signatureLines = signature?.paragraphs.filter((p) => p.status === "approved").flatMap((p) => p.text.split("\n")) ?? [];
   const sign = signatureLines.length ? signatureLines : settings?.signature ?? [];
 
   return (
     <div className="view">
-      <div className="view-head">
-        <div className="stack" style={{ gap: 6 }}>
-          <h1>הדוח</h1>
-          <span className="muted small">
-            כמו בקובץ. כותבים, מאשרים ועורכים ישירות על הדף. {approved} סעיפים מאושרים ייכנסו לקובץ · {waiting} לאישור · {empty} ריקים
-          </span>
-        </div>
-        <label className="row small">
-          <input type="checkbox" checked={showDrafts} onChange={(e) => setShowDrafts(e.target.checked)} />
-          להראות טיוטות שעוד לא אושרו
-        </label>
-      </div>
       <div className="report-desk">
+        {/* The page is the whole screen (D-036); one quiet line says how to work on it. */}
+        <p className="report-hint">לוחצים על פסקה כדי לערוך · ✦ בשוליים לשנות עם AI · בין פסקאות: "+ פסקה משלי כאן"</p>
         <article className="a4" style={{ fontFamily: settings?.font ? `"${settings.font}", var(--font-display)` : undefined }} aria-label="הדוח, כמו בקובץ">
           <header className="a4-header">{settings?.confidentiality}</header>
           <h1 className="a4-title">{settings?.title ?? "דוח אבחון פסיכולוגי"}</h1>
@@ -76,7 +62,7 @@ export function ReportView({ api, focus }: { api: CaseApi; onWriteAll: () => voi
             <section key={part}>
               <h2 className="a4-part">{part}</h2>
               {content.filter((s) => s.part === part).map((s) => (
-                <A4Section key={s.key} api={api} section={s} showDrafts={showDrafts} />
+                <A4Section key={s.key} api={api} section={s} />
               ))}
             </section>
           ))}
@@ -131,7 +117,7 @@ function Popover({ label, onClose, children }: { label: string; onClose: () => v
   );
 }
 
-function A4Section({ api, section: s, showDrafts }: { api: CaseApi; section: Section; showDrafts: boolean }) {
+function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
   const { go, fail } = useApp();
   const { caseId, reload, detail } = api;
   /** A paragraph being edited in place, or a new one at `at`: "first", "end" or after a paragraph's id. */
@@ -359,7 +345,7 @@ function A4Section({ api, section: s, showDrafts }: { api: CaseApi; section: Sec
       )}
       {preparing && !job && <p className="small muted">מכינה את הבקשה…</p>}
 
-      {showDrafts && pending.length > 0 && !job && (
+      {pending.length > 0 && !job && (
         <div className="a4-pending">
           <div className="a4-pending-head">
             <span className="a4-flag">טיוטה של Claude · עוד לא בדוח</span>
