@@ -230,3 +230,9 @@ button.crumb:hover:not([aria-current="page"]) {
 .move-row {
   gap: 8px;
 }
+.follow-chip {
+  margin-inline-start: 8px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  vertical-align: middle;
+}

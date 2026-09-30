@@ -33,6 +33,7 @@ import type { SectionResult } from "./generated/SectionResult";
 import type { SortResult } from "./generated/SortResult";
 import type { MaterialRouting } from "./generated/MaterialRouting";
 import type { SuspectDecision } from "./generated/SuspectDecision";
+import type { FollowUpView } from "./generated/FollowUpView";
 import type { UiError } from "./generated/UiError";
 
 /** Every failure reaches the UI as a UiError with a Hebrew message. */
@@ -121,8 +122,10 @@ export const ipc = {
   decideSuspect: (caseId: string, token: string, decision: SuspectDecision) =>
     run("decide_suspect", { caseId, token, decision }),
 
-  prepareSection: (caseId: string, sectionKey: string, instruction: string) =>
-    call<Prepared>("prepare_section", { caseId, sectionKey, instruction }),
+  /** `replaces`: the one proposed paragraph the answer rewrites; otherwise the answer is the
+   *  section's new draft, in place of the paragraphs not approved yet. */
+  prepareSection: (caseId: string, sectionKey: string, instruction: string, replaces?: string) =>
+    call<Prepared>("prepare_section", { caseId, sectionKey, instruction, replaces: replaces ?? null }),
   prepareFullDraft: (caseId: string) => call<[string, Prepared][]>("prepare_full_draft", { caseId }),
   sendSection: (approvalId: string) => call<SectionResult>("send_section", { approvalId }),
   /** D-022: sort every material not sorted yet into sections (one review screen). */
@@ -133,6 +136,12 @@ export const ipc = {
     run("set_input_sections", { caseId, inputId, sections }),
   chat: (caseId: string, sectionKey: string) => call<ChatView[]>("chat", { caseId, sectionKey }),
   approveParagraph: (caseId: string, draftId: string) => run("approve_paragraph", { caseId, draftId }),
+  /** D-029: a follow-up assessment of a case (same names and folder, a new consent). */
+  createFollowUp: (caseId: string) => call<string>("create_follow_up", { caseId }),
+  followUp: (caseId: string) => call<FollowUpView | null>("follow_up", { caseId }),
+  addComparisonMaterial: (caseId: string) => call<CaseInput>("add_comparison_material", { caseId }),
+  /** Approve every paragraph waiting in the section; returns how many. */
+  approveSection: (caseId: string, sectionKey: string) => call<number>("approve_section", { caseId, sectionKey }),
   rejectParagraph: (caseId: string, draftId: string) => run("reject_paragraph", { caseId, draftId }),
   editParagraph: (caseId: string, draftId: string, text: string) =>
     run("edit_paragraph", { caseId, draftId, text }),
@@ -205,6 +214,7 @@ export type {
   PingResponse,
   Prepared,
   ReportSettings,
+  FollowUpView,
   ScoreSheet,
   SectionResult,
   SuspectDecision,

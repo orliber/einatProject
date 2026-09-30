@@ -32,7 +32,7 @@ import { kindLabel } from "../i18n/he";
 import structure from "../../../../templates/report_structure.json";
 import { readDocx } from "./docx";
 import { filter, restore, type Person } from "./filter";
-import { formatSheet, instruments } from "./scores";
+import { compareSheets, comparisonText, formatSheet, instruments } from "./scores";
 import * as R from "./routing";
 import type { SortResult } from "../ipc/generated/SortResult";
 
@@ -66,7 +66,7 @@ interface Case {
 }
 
 type Pending =
-  | { type: "section"; caseId: string; section: string; refs: { sid: string; label: string; tagged: string }[]; instruction: string }
+  | { type: "section"; caseId: string; section: string; refs: { sid: string; label: string; tagged: string }[]; instruction: string; replaces: string | null }
   | { type: "consult"; question: string; shown: string; hidden: string[]; caseId: string | null; conversationId: string | null }
   | { type: "sort"; caseId: string; materials: { id: string; count: number; content: string }[] };
 
@@ -339,7 +339,7 @@ export class FakeCore {
     };
   }
 
-  private prepareSection(c: Case, key: string, instruction: string): Prepared {
+  private prepareSection(c: Case, key: string, instruction: string, replaces: string | null = null): Prepared {
     if (!c.meta.consent) fail("consent_missing", "לפני שליחה ל-Claude צריך לרשום בתיק את הסכמת ההורים.");
     const section = SECTIONS.find((s) => s.key === key) ?? fail("not_found", "הסעיף לא נמצא");
     const parts: ReviewPart[] = [];
@@ -371,7 +371,7 @@ export class FakeCore {
     });
     if (instruction.trim()) take("הבקשה שלך", instruction);
     const approval = suspects.length === 0 ? newId("approval") : null;
-    if (approval) this.pending.set(approval, { type: "section", caseId: c.id, section: key, refs, instruction });
+    if (approval) this.pending.set(approval, { type: "section", caseId: c.id, section: key, refs, instruction, replaces });
     return { approval_id: approval, parts, suspects, hidden: Array.from(hidden), checks, blocked: [], demo_mode: true };
   }
 
@@ -425,9 +425,16 @@ export class FakeCore {
   private sendSection(p: Extract<Pending, { type: "section" }>): SectionResult {
     const c = this.find(p.caseId);
     const paragraphs = p.refs.slice(0, 3).map((r) => ({ text: sentences(r.tagged, 2), source_refs: [r.sid], warnings: [] as string[] })).filter((x) => x.text);
-    for (const d of c.drafts) if (d.section === p.section && d.status === "proposed") d.status = "superseded";
-    for (const x of paragraphs) {
-      c.drafts.push({ id: newId("d"), section: p.section, text: x.text, status: "proposed", byAi: true, sources: p.refs.filter((r) => x.source_refs.includes(r.sid)).map((r) => r.label) });
+    const target = p.replaces ? c.drafts.find((d) => d.id === p.replaces && d.status === "proposed") : undefined;
+    if (target && paragraphs.length) {
+      // A rewrite of one paragraph stays where it is.
+      target.text = `${paragraphs[0]?.text ?? target.text} (ניסוח אחר)`;
+      paragraphs.splice(1);
+    } else {
+      for (const d of c.drafts) if (d.section === p.section && d.status === "proposed" && d.byAi) d.status = "superseded";
+      for (const x of paragraphs) {
+        c.drafts.push({ id: newId("d"), section: p.section, text: x.text, status: "proposed", byAi: true, sources: p.refs.filter((r) => x.source_refs.includes(r.sid)).map((r) => r.label) });
+      }
     }
     const reply = paragraphs.length
       ? `מצב הדגמה: ניסחתי ${paragraphs.length} פסקאות לדוגמה מתוך החומרים. בתוכנה, עם חיבור ל-Claude, הניסוח נעשה בסגנון שלך ומצליב בין החומרים.`
@@ -586,6 +593,30 @@ export class FakeCore {
         return this.nameMatches((a.caseId as string | null) ?? null, (a.names as string[]) ?? []);
       case "create_case":
         return this.newCase(a.meta as CaseMeta, a.identities as IdentityInput[]).id;
+      case "create_follow_up": {
+        const prev = this.find(a.caseId);
+        const c = this.newCase({ code: `${prev.meta.code} · מעקב`, age: null, child_gender: prev.meta.child_gender, current_section: null, retention_until: null, consent: null, follows: prev.id },
+          prev.people.map((p) => ({ id: null, role: p.role, value: p.value, aliases: p.aliases })));
+        c.folderId = prev.folderId;
+        return c.id;
+      }
+      case "follow_up": {
+        const c = this.find(a.caseId);
+        if (!c.meta.follows) return null;
+        const prev = this.cases.find((x) => x.id === c.meta.follows && x.deletedAt === null);
+        const inMaterials = c.inputs.some((i) => i.title === "השוואה לאבחון הקודם");
+        if (!prev) return { previous_id: c.meta.follows, previous_code: "", previous_gone: true, rows: [], in_materials: inMaterials };
+        return { previous_id: prev.id, previous_code: prev.meta.code, previous_gone: false, rows: compareSheets([...prev.sheets.values()], [...c.sheets.values()]), in_materials: inMaterials };
+      }
+      case "add_comparison_material": {
+        const c = this.find(a.caseId);
+        const prev = this.cases.find((x) => x.id === c.meta.follows);
+        const rows = prev ? compareSheets([...prev.sheets.values()], [...c.sheets.values()]) : [];
+        if (!rows.length) return fail("refused", "אין ציונים משותפים לשני האבחונים להשוואה.");
+        const text = comparisonText(rows);
+        const existing = c.inputs.find((i) => i.title === "השוואה לאבחון הקודם");
+        return existing ? Object.assign(existing, { content: text }) : this.addInput(c, "test_scores", "השוואה לאבחון הקודם", text);
+      }
       case "update_case": {
         const c = this.find(a.caseId);
         c.meta = a.meta as CaseMeta;
@@ -658,7 +689,7 @@ export class FakeCore {
         return null;
       }
       case "prepare_section":
-        return this.prepareSection(this.find(a.caseId), String(a.sectionKey), String(a.instruction ?? ""));
+        return this.prepareSection(this.find(a.caseId), String(a.sectionKey), String(a.instruction ?? ""), a.replaces ? String(a.replaces) : null);
       case "prepare_full_draft": {
         const c = this.find(a.caseId);
         return SECTIONS.filter((s) => !DERIVED.includes(s.key) && c.inputs.some((i) => this.feedOf(c, i, s.key) !== null) && !c.drafts.some((d) => d.section === s.key && d.status === "approved"))
@@ -689,6 +720,11 @@ export class FakeCore {
       }
       case "chat":
         return this.find(a.caseId).chat[String(a.sectionKey)] ?? [];
+      case "approve_section": {
+        const waiting = this.find(a.caseId).drafts.filter((d) => d.section === a.sectionKey && d.status === "proposed");
+        waiting.forEach((d) => (d.status = "approved"));
+        return waiting.length;
+      }
       case "approve_paragraph":
       case "reject_paragraph": {
         const d = this.find(a.caseId).drafts.find((x) => x.id === a.draftId) ?? fail("not_found", "הפסקה לא נמצאה");

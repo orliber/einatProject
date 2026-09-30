@@ -212,7 +212,7 @@ try:
     section = find("//button[contains(@class,'side-section')][.//span[normalize-space()='איכויות התקשורת']]")
     d.execute_script("arguments[0].scrollIntoView({block: 'center'});", section)
     section.click()
-    button("טיוטה מהחומרים").click()
+    button("כתיבת טיוטה עם Claude").click()
     expect_text("לפני שליחה ל-Claude", 60)
     time.sleep(0.5)
     shot("review-suspect")
@@ -231,14 +231,24 @@ try:
         time.sleep(1)
     shot("review-cleared")
     button("שליחה").click()
-    expect_text("טיוטת הסעיף", 60)
-    time.sleep(1.5)
+    # The review closes at once; the section shows the progress, then the one draft.
+    expect_text("מחכה לאישורך", 90)
+    time.sleep(1)
     shot("section-draft")
-    approve = [b for b in d.find_elements(By.XPATH, "//button[normalize-space()='אישור']") if b.is_displayed()]
+    approve = [b for b in d.find_elements(By.XPATH, "//button[starts-with(normalize-space(),'אישור כל הטיוטה')]") if b.is_displayed()]
     if approve:
         approve[0].click()
         time.sleep(1)
+    body = d.find_element(By.TAG_NAME, "body").text
+    log.append("     section: draft approved in one click = " + str("הסעיף אושר" in body))
     shot("section-approved")
+
+    # 4b. The report as it will look in Word.
+    find("//nav[contains(@class,'side-nav')]//button[contains(normalize-space(),'הדוח כמו בוורד')]").click()
+    expect_text("סעיפים מאושרים ייכנסו לקובץ", 30)
+    body = d.find_element(By.TAG_NAME, "body").text
+    log.append("     report view: approved section on the page = " + str("איכויות התקשורת" in body))
+    shot("report-view")
 
     # 5. Export (from the materials view, with the approved paragraph in the report).
     button("הפקת דוח Word").click()

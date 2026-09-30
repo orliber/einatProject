@@ -325,9 +325,10 @@ async fn prepare_section(
     case_id: String,
     section_key: String,
     instruction: String,
+    replaces: Option<String>,
 ) -> Res<Prepared> {
     with_core(&state, move |c| {
-        c.prepare_section(&case_id, &section_key, &instruction)
+        c.prepare_section_replacing(&case_id, &section_key, &instruction, replaces.as_deref())
     })
     .await
 }
@@ -487,6 +488,36 @@ async fn chat(
     section_key: String,
 ) -> Res<Vec<ChatView>> {
     with_core(&state, move |c| c.chat(&case_id, &section_key)).await
+}
+
+#[tauri::command]
+async fn create_follow_up(state: tauri::State<'_, AppState>, case_id: String) -> Res<String> {
+    with_core(&state, move |c| c.create_follow_up(&case_id)).await
+}
+
+#[tauri::command]
+async fn follow_up(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+) -> Res<Option<dv_core::FollowUpView>> {
+    with_core(&state, move |c| c.follow_up(&case_id)).await
+}
+
+#[tauri::command]
+async fn add_comparison_material(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+) -> Res<dv_domain::CaseInput> {
+    with_core(&state, move |c| c.add_comparison_material(&case_id)).await
+}
+
+#[tauri::command]
+async fn approve_section(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    section_key: String,
+) -> Res<u32> {
+    with_core(&state, move |c| c.approve_section(&case_id, &section_key)).await
 }
 
 #[tauri::command]
@@ -868,6 +899,10 @@ fn main() {
             copy_secret,
             chat,
             approve_paragraph,
+            approve_section,
+            create_follow_up,
+            follow_up,
+            add_comparison_material,
             reject_paragraph,
             edit_paragraph,
             add_own_paragraph,

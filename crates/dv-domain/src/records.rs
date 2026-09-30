@@ -49,6 +49,10 @@ pub struct CaseMeta {
     /// ISO date after which the retention reminder appears.
     pub retention_until: Option<String>,
     pub consent: Option<Consent>,
+    /// A follow-up assessment: the case of the assessment before (D-029).
+    #[serde(default)]
+    #[ts(optional)]
+    pub follows: Option<String>,
 }
 
 /// One row of the case list. Names appear only locally.

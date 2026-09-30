@@ -145,10 +145,22 @@ export function CasesScreen() {
   ];
   const caseItems = (c: CaseSummary): MenuItem[] => [
     { label: "פתיחה", run: () => go({ name: "case", id: c.id, view: "materials" }) },
+    { label: "אבחון מעקב לילד/ה הזה/ו", run: () => void followUp(c) },
     { label: "העברה לתיקייה…", run: () => setModal({ kind: "move-case", c }) },
     { label: "העברה לסל המחזור", run: () => setModal({ kind: "delete-case", c }), danger: true },
   ];
   const caseName = (c: CaseSummary) => c.child_name ?? c.meta.code;
+  /** D-029: a new case for the follow-up, with the same names; it opens on its details. */
+  async function followUp(c: CaseSummary) {
+    try {
+      const id = await ipc.createFollowUp(c.id);
+      await refreshAll();
+      notify(`נפתח תיק מעקב ל${caseName(c)}. השמות הועתקו; צריך לעדכן גיל ולרשום הסכמה חדשה.`);
+      go({ name: "case", id, view: "details" });
+    } catch (e) {
+      setError(fail(e as never));
+    }
+  }
 
   return (
     <div className="page">
@@ -246,7 +258,10 @@ export function CasesScreen() {
                         <RightClick key={c.id} items={caseItems(c)}>
                           <tr onClick={open} className="case-row" draggable onDragStart={onDragStart({ case: c.id })}>
                             <td>
-                              <div className="case-name serif">{c.child_name ?? "ללא שם"}</div>
+                              <div className="case-name serif">
+                                {c.child_name ?? "ללא שם"}
+                                {c.meta.follows && <span className="chip chip-sand follow-chip">מעקב</span>}
+                              </div>
                               <div className="small muted">
                                 {c.meta.age ? `${ageWords(c.meta.age)} · ` : ""}{c.meta.code || "ללא קוד"} · עודכן {updated(c.updated_at)}
                                 {q && c.folder_id ? ` · ${pathOf(c.folder_id)}` : ""}

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-follow-up"
+description = "Enables the create_follow_up command without any pre-configured scope."
+commands.allow = ["create_follow_up"]
+
+[[permission]]
+identifier = "deny-create-follow-up"
+description = "Denies the create_follow_up command without any pre-configured scope."
+commands.deny = ["create_follow_up"]

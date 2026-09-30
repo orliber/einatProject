@@ -3,12 +3,14 @@ import { useApp } from "../App";
 import { ipc, type CaseDetail, type Prepared, type SortResult } from "../ipc/client";
 import { ReviewDialog } from "../components/ReviewDialog";
 import { ExportDialog } from "../components/ExportDialog";
-import { FullDraftDialog } from "../components/FullDraftDialog";
+import { ReportRunDialog } from "../components/ReportRunDialog";
+import { ProgressLine, estimateMs, recordDuration, type Task } from "../components/Progress";
 import { LockIcon, ErrorLine } from "../components/ui";
 import { ageWords } from "../components/AgeField";
 import { MaterialsView } from "./case/MaterialsView";
 import { SectionWork } from "./case/SectionWork";
 import { DetailsView } from "./case/DetailsView";
+import { ReportView } from "./case/ReportView";
 import "./CaseScreen.css";
 
 export interface ReviewRequest {
@@ -18,16 +20,34 @@ export interface ReviewRequest {
   onSend: (approvalId: string) => Promise<void>;
 }
 
+/** A request Claude is working on: shown with how long it has taken and about how long is left. */
+export interface Job {
+  id: number;
+  label: string;
+  task: Task;
+  /** The section it writes, if any. */
+  section?: string;
+  started: number;
+  estimate: number;
+}
+
 /** What a case view needs from the screen. */
 export interface CaseApi {
   caseId: string;
   detail: CaseDetail;
   reload: () => Promise<void>;
-  /** Show "what leaves the computer" (or send right away when the policy allows). */
-  review: (r: ReviewRequest) => Promise<void>;
+  /** Show "what leaves the computer" (or send right away when the policy allows). Resolves
+   *  once the answer is in (true) or the psychologist went back without sending (false); the
+   *  review closes as soon as she sends, and the job shows its progress meanwhile. */
+  review: (r: ReviewRequest) => Promise<boolean>;
   /** Sort the materials not sorted yet into sections (D-022). */
   sort: () => Promise<void>;
+  /** Requests on their way to Claude and back. */
+  jobs: Job[];
+  track: <T>(job: { label: string; task: Task; section?: string }, run: () => Promise<T>) => Promise<T>;
 }
+
+let jobSeq = 0;
 
 /** One line for the result of a sorting, in plain words. */
 export function sortSummary(r: SortResult): string {
@@ -50,7 +70,8 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const { go, fail, lockNow, status, notify } = useApp();
   const [detail, setDetail] = useState<CaseDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [review, setReview] = useState<ReviewRequest | null>(null);
+  const [review, setReview] = useState<{ r: ReviewRequest; done: (sent: boolean) => void; failed: (e: unknown) => void } | null>(null);
+  const [jobs, setJobs] = useState<Job[]>([]);
   const [exporting, setExporting] = useState(false);
   const [fullDraft, setFullDraft] = useState(false);
   const [openParts, setOpenParts] = useState<Record<string, boolean>>({});
@@ -74,15 +95,31 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     };
   }, [caseId, fail]);
 
-  const startReview = useCallback(
-    async (r: ReviewRequest) => {
-      const clean = r.prepared.approval_id && r.prepared.suspects.length === 0 && r.prepared.blocked.length === 0;
-      if (status.review_only_suspect && clean && r.prepared.approval_id) {
-        await r.onSend(r.prepared.approval_id);
-        return;
+  const track = useCallback(
+    async <T,>(job: { label: string; task: Task; section?: string }, run: () => Promise<T>): Promise<T> => {
+      const j: Job = { ...job, id: ++jobSeq, started: Date.now(), estimate: estimateMs(job.task, status.speed, status.demo_mode) };
+      setJobs((js) => [...js, j]);
+      try {
+        const out = await run();
+        if (!status.demo_mode) recordDuration(job.task, status.speed, Date.now() - j.started);
+        return out;
+      } finally {
+        setJobs((js) => js.filter((x) => x.id !== j.id));
       }
-      setReview(r);
     },
+    [status.speed, status.demo_mode],
+  );
+
+  const startReview = useCallback(
+    (r: ReviewRequest) =>
+      new Promise<boolean>((resolve, reject) => {
+        const clean = r.prepared.approval_id && r.prepared.suspects.length === 0 && r.prepared.blocked.length === 0;
+        if (status.review_only_suspect && clean && r.prepared.approval_id) {
+          r.onSend(r.prepared.approval_id).then(() => resolve(true), reject);
+          return;
+        }
+        setReview({ r, done: resolve, failed: reject });
+      }),
     [status.review_only_suspect],
   );
 
@@ -95,7 +132,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         prepared,
         reprepare: () => ipc.prepareSort(caseId),
         onSend: async (id) => {
-          const result = await ipc.sendSort(id);
+          const result = await track({ label: "Claude קורא את החומרים ומשייך קטעים לסעיפים", task: "sort" }, () => ipc.sendSort(id));
           await reload();
           notify(sortSummary(result));
         },
@@ -109,7 +146,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     return <main className="center-note">{error ? <p className="error">{error}</p> : <span aria-busy="true" />}</main>;
   }
 
-  const api: CaseApi = { caseId, detail, reload, review: startReview, sort: startSort };
+  const api: CaseApi = { caseId, detail, reload, review: startReview, sort: startSort, jobs, track };
   const unsorted = detail.routing.filter((r) => r.needs_sorting).length;
   const fed = detail.sections.filter((s) => s.source_count > 0);
   const pending = detail.sections.filter((s) => s.paragraphs.some((p) => p.status === "proposed"));
@@ -143,7 +180,9 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const total = detail.sections.length;
   const parts = Array.from(new Set(detail.sections.map((s) => s.part)));
   const current = detail.sections.find((s) => s.key === view);
-  const viewTitle = view === "materials" ? "חומרי התיק" : view === "details" ? "פרטי התיק ושמות" : current?.title ?? "";
+  const viewTitle = view === "materials" ? "חומרי התיק" : view === "details" ? "פרטי התיק ושמות" : view === "report" ? "הדוח" : current?.title ?? "";
+  // A section shows its own job; everything else runs in the strip under the header.
+  const elsewhere = jobs.filter((j) => !j.section || j.section !== view);
 
   return (
     <div className="case">
@@ -162,6 +201,9 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
           </button>
           <button type="button" aria-current={view === "details" ? "page" : undefined} onClick={() => go({ name: "case", id: caseId, view: "details" })}>
             <span>פרטים ושמות להסתרה</span><span className="side-count">{detail.identities.length}</span>
+          </button>
+          <button type="button" aria-current={view === "report" ? "page" : undefined} onClick={() => go({ name: "case", id: caseId, view: "report" })}>
+            <span>הדוח כמו בוורד</span><span className="side-count">{approvedCount}/{total}</span>
           </button>
         </nav>
         <div className="side-progress">
@@ -183,13 +225,14 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
                 {(open || hasCurrent) && sections.map((s) => {
                   const st = sectionState(s);
                   const pending = s.paragraphs.filter((p) => p.status === "proposed").length;
+                  const writing = jobs.some((j) => j.section === s.key);
                   return (
                     <button key={s.key} type="button" className={`side-section st-${st}`}
                       aria-current={view === s.key ? "page" : undefined}
                       onClick={() => go({ name: "case", id: caseId, view: s.key })}>
                       <span className="dot" aria-hidden="true" />
                       <span className="grow">{s.title}</span>
-                      {pending > 0 && <span className="side-pending">{pending} ממתינות</span>}
+                      {writing ? <span className="side-pending">כותב…</span> : pending > 0 && <span className="side-pending">טיוטה לאישור</span>}
                       <span className="visually-hidden">{st === "approved" ? "אושר" : st === "pending" ? "ממתין" : "ריק"}</span>
                     </button>
                   );
@@ -198,7 +241,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
             );
           })}
         </div>
-        <button type="button" className="side-draft" onClick={() => setFullDraft(true)}>הכנת טיוטה לכל הדוח</button>
+        <button type="button" className="side-draft" onClick={() => setFullDraft(true)}>כתיבת כל הדוח עם Claude</button>
       </aside>
 
       <div className="work">
@@ -218,6 +261,11 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
           <button type="button" className="btn" title="נעילה (Ctrl+L)" onClick={() => void lockNow()}><LockIcon size={15} /> נעילה</button>
         </header>
         <ErrorLine error={error} />
+        {elsewhere.length > 0 && (
+          <section className="jobs-strip" aria-label="Claude עובד">
+            {elsewhere.map((j) => <ProgressLine key={j.id} started={j.started} estimate={j.estimate} label={j.label} />)}
+          </section>
+        )}
         {view === "materials" && next && (
           <section className="next-step" aria-label="הצעד הבא">
             <div className="grow stack" style={{ gap: 4 }}>
@@ -230,19 +278,26 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         )}
         {view === "materials" && <MaterialsView api={api} />}
         {view === "details" && <DetailsView api={api} />}
+        {view === "report" && <ReportView api={api} onWriteAll={() => setFullDraft(true)} />}
         {current && <SectionWork key={current.key} api={api} section={current} />}
       </div>
 
+      {exporting && <ExportDialog api={api} onClose={() => setExporting(false)} />}
+      {fullDraft && <ReportRunDialog api={api} onClose={() => setFullDraft(false)} />}
+      {/* Last, so it opens above the dialog that asked for it. */}
       {review && (
-        <ReviewDialog title={review.title} caseId={caseId} prepared={review.prepared} reprepare={review.reprepare}
-          onClose={() => setReview(null)}
-          onSend={async (id) => {
-            await review.onSend(id);
+        <ReviewDialog title={review.r.title} caseId={caseId} prepared={review.r.prepared} reprepare={review.r.reprepare}
+          onClose={() => {
+            review.done(false);
             setReview(null);
+          }}
+          onSend={async (id) => {
+            // The review closes as soon as she sends; the progress shows where the work is.
+            const current = review;
+            setReview(null);
+            current.r.onSend(id).then(() => current.done(true), current.failed);
           }} />
       )}
-      {exporting && <ExportDialog api={api} onClose={() => setExporting(false)} />}
-      {fullDraft && <FullDraftDialog api={api} onClose={() => setFullDraft(false)} />}
     </div>
   );
 }

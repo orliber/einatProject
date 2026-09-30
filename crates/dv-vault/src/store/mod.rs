@@ -1619,6 +1619,52 @@ impl Vault {
         self.touch(case_id)
     }
 
+    /// A new draft from Claude replaces the paragraphs it proposed before and she has not
+    /// approved (they are kept, marked superseded); hers and the approved ones stay.
+    pub fn supersede_proposals(
+        &mut self,
+        case_id: &str,
+        section_key: &str,
+    ) -> Result<usize, VaultError> {
+        let n = self.main.execute(
+            "UPDATE drafts SET status = 'superseded'
+             WHERE case_id = ?1 AND section_key = ?2 AND status = 'proposed' AND author = 'ai'",
+            params![case_id, section_key],
+        )?;
+        self.touch(case_id)?;
+        Ok(n)
+    }
+
+    /// Claude's rewrite of one paragraph it proposed, in the same place. False when the
+    /// paragraph is no longer a proposal (approved, edited or removed meanwhile).
+    pub fn rewrite_proposal(
+        &mut self,
+        case_id: &str,
+        draft_id: &str,
+        text_tagged: &str,
+        source_refs: &[String],
+    ) -> Result<bool, VaultError> {
+        let key = self.case_key(case_id)?;
+        let changed = self.main.execute(
+            "UPDATE drafts SET text_tagged_enc = ?1, source_refs_enc = ?2
+             WHERE id = ?3 AND case_id = ?4 AND status = 'proposed'",
+            params![
+                seal_str(&key, &aad("drafts", "text", draft_id, case_id), text_tagged)?,
+                seal_str(
+                    &key,
+                    &aad("drafts", "refs", draft_id, case_id),
+                    &to_json(&source_refs)?
+                )?,
+                draft_id,
+                case_id
+            ],
+        )?;
+        if changed > 0 {
+            self.touch(case_id)?;
+        }
+        Ok(changed > 0)
+    }
+
     /// Manual edit by the psychologist: the paragraph becomes hers and is approved.
     pub fn edit_draft(
         &mut self,

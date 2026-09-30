@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { useApp } from "../../App";
 import { ipc, type CaseDetail, type ChatView, type SectionResult } from "../../ipc/client";
 import { ErrorLine, SendIcon, Spinner, WarnIcon } from "../../components/ui";
+import { ProgressLine } from "../../components/Progress";
+import { kindLabel } from "../../i18n/he";
 import type { CaseApi } from "../CaseScreen";
 import "./SectionWork.css";
 
@@ -17,7 +19,7 @@ const QUICK: [string, string][] = [
 ];
 
 export function SectionWork({ api, section }: { api: CaseApi; section: Section }) {
-  const { fail, notify } = useApp();
+  const { fail, notify, go } = useApp();
   const { caseId, reload } = api;
   const [chat, setChat] = useState<ChatView[]>([]);
   const [last, setLast] = useState<SectionResult | null>(null);
@@ -51,19 +53,30 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
     chatEnd.current?.scrollIntoView({ block: "end" });
   }, [chat]);
 
-  async function ask(instruction: string, title?: string) {
+  // One request at a time per section: while it is prepared, reviewed or written.
+  const job = api.jobs.find((j) => j.section === section.key);
+  const [preparing, setPreparing] = useState(false);
+  const working = preparing || busy || job !== undefined;
+
+  /** `replaces`: rewrite that one paragraph; otherwise the answer is the section's new draft. */
+  async function ask(instruction: string, title?: string, replaces?: string) {
     if (!instruction.trim()) return;
     setError(null);
-    setBusy(true);
+    setPreparing(true);
     try {
-      const prepare = () => ipc.prepareSection(caseId, section.key, instruction);
+      const prepare = () => ipc.prepareSection(caseId, section.key, instruction, replaces);
       const prepared = await prepare();
+      setPreparing(false);
+      setBusy(true);
       await api.review({
         title: title ?? `בקשה לסעיף ${section.title}`,
         prepared,
         reprepare: prepare,
         onSend: async (id) => {
-          const result = await ipc.sendSection(id);
+          const result = await api.track(
+            { label: replaces ? "Claude מנסח את הפסקה מחדש" : `Claude כותב את "${section.title}"`, task: "draft", section: section.key },
+            () => ipc.sendSection(id),
+          );
           setLast(result);
           setMessage("");
           await Promise.all([reload(), loadChat()]);
@@ -73,6 +86,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
     } catch (e) {
       setError(fail(e as never));
     } finally {
+      setPreparing(false);
       setBusy(false);
     }
   }
@@ -97,6 +111,16 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   const approved = visible.filter((p) => p.status === "approved").length;
   const pending = visible.filter((p) => p.status === "proposed").length;
   const lastWarnings = new Map((last?.paragraphs ?? []).map((p) => [p.text, p.warnings]));
+  // What the section is written from: the materials that feed it (D-022).
+  const sources = api.detail.routing
+    .filter((r) => r.feeds.includes(section.key))
+    .map((r) => api.detail.inputs.find((i) => i.id === r.input_id))
+    .filter((i) => i !== undefined);
+  const order = api.detail.sections.filter((s) => s.key !== section.key && (s.source_count > 0 || DERIVED.includes(s.key)));
+  const after = api.detail.sections.findIndex((s) => s.key === section.key);
+  const nextSection =
+    order.find((s) => api.detail.sections.indexOf(s) > after && !s.approved) ?? order.find((s) => !s.approved);
+  const draftInstruction = derived ? "כתבי טיוטה לסעיף מתוך הסעיפים שאושרו." : "כתבי טיוטה לסעיף מתוך המקורות, עם מקור לכל פסקה.";
 
   return (
     <div className="view">
@@ -109,8 +133,16 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
           <div className="row small wrap-row">
             {derived ? (
               <span className="muted">הסעיף נכתב מתוך הסעיפים שכבר אישרת.</span>
-            ) : section.source_count > 0 ? (
-              <span className="muted">{section.source_count === 1 ? "חומר אחד מזין את הסעיף" : `${section.source_count} חומרים מזינים את הסעיף`}</span>
+            ) : sources.length > 0 ? (
+              <>
+                <span className="muted">Claude כותב מתוך:</span>
+                {sources.map((i) => (
+                  <button key={i.id} type="button" className="source-chip" title="פתיחה בחומרי התיק"
+                    onClick={() => go({ name: "case", id: caseId, view: "materials" })}>
+                    {kindLabel[i.kind] ?? ""} · {i.title}
+                  </button>
+                ))}
+              </>
             ) : (
               <span className="muted">עוד אין חומרים שמזינים את הסעיף. אפשר להוסיף ב"חומרי התיק", או לכתוב בעצמך.</span>
             )}
@@ -122,10 +154,44 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
         <section className="paper draft" aria-label="טיוטת הסעיף">
           <div className="draft-head">
             <span className="draft-label">טיוטת הסעיף</span>
-            <span>{approved} אושרו · {pending} ממתינות</span>
+            <span>{approved > 0 && `${approved} פסקאות אושרו`}{approved > 0 && pending > 0 && " · "}{pending > 0 && `${pending} ממתינות לאישורך`}</span>
           </div>
 
-          {visible.length === 0 && (
+          {job && (
+            <div className="writing-card">
+              <ProgressLine started={job.started} estimate={job.estimate} label={job.label} />
+              <span className="small muted">
+                השמות הוסתרו והבקשה נשלחה. אפשר להמשיך לעבוד בינתיים בסעיפים אחרים; הטיוטה תופיע כאן, ותחליף את מה שעוד לא אישרת.
+              </span>
+            </div>
+          )}
+          {preparing && <p className="muted small"><Spinner /> מסתירה שמות ובודקת מה יוצא…</p>}
+
+          {pending > 0 && !job && (
+            <div className="draft-banner">
+              <div className="grow stack" style={{ gap: 2 }}>
+                <b>טיוטה של Claude מחכה לאישורך</b>
+                <span className="small">
+                  קוראים, ואז מאשרים את כולה או פסקה-פסקה. רק מה שאושר נכנס לדוח. בקשה חדשה (למשל "לקצר") מחליפה את הטיוטה הזאת, ומה שכבר אישרת נשאר.
+                </span>
+              </div>
+              <button type="button" className="btn btn-primary" onClick={() => void act(async () => { await ipc.approveSection(caseId, section.key); })}>
+                אישור כל הטיוטה ({pending})
+              </button>
+            </div>
+          )}
+          {pending === 0 && approved > 0 && !job && (
+            <div className="draft-banner done">
+              <span className="grow"><b>✓ הסעיף אושר.</b> הוא ייכנס לדוח כמו שהוא כאן.</span>
+              {nextSection && (
+                <button type="button" className="btn btn-primary" onClick={() => go({ name: "case", id: caseId, view: nextSection.key })}>
+                  לסעיף הבא: {nextSection.title} ←
+                </button>
+              )}
+            </div>
+          )}
+
+          {visible.length === 0 && !job && (
             <div className="draft-empty">
               <p className="serif">עוד אין טיוטה לסעיף הזה.</p>
               <p className="hint">
@@ -137,9 +203,9 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               </p>
               <div className="row">
                 {(derived || section.source_count > 0) && (
-                  <button type="button" className="btn btn-primary" disabled={busy}
-                    onClick={() => void ask(derived ? "כתבי טיוטה לסעיף מתוך הסעיפים שאושרו." : "כתבי טיוטה לסעיף מתוך המקורות, עם מקור לכל פסקה.", `טיוטה לסעיף ${section.title}`)}>
-                    {derived ? "טיוטה מהסעיפים שאושרו" : "טיוטה מהחומרים"}
+                  <button type="button" className="btn btn-primary" disabled={working}
+                    onClick={() => void ask(draftInstruction, `טיוטה לסעיף ${section.title}`)}>
+                    {derived ? "כתיבת טיוטה מהסעיפים שאושרו" : "כתיבת טיוטה עם Claude"}
                   </button>
                 )}
                 <button type="button" className="btn" onClick={() => setOwn("")}>כתיבה בעצמי</button>
@@ -166,7 +232,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               <article key={p.id} className="para pending">
                 {!isEditing && (
                   <div className="para-meta">
-                    <span className="pending-mark">ממתין לאישור{p.by_ai ? " · הצעה של Claude" : ""}</span>
+                    <span className="pending-mark">{p.by_ai ? "הצעה של Claude · ממתינה לאישור" : "ממתינה לאישור"}</span>
                     {p.sources.length > 0 && <span className="muted">מקור: {p.sources.join(" · ")}</span>}
                   </div>
                 )}
@@ -192,8 +258,8 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                   ) : (
                     <>
                       <button type="button" className="btn btn-primary btn-small" onClick={() => void act(() => ipc.approveParagraph(caseId, p.id))}>אישור</button>
-                      <button type="button" className="btn btn-small" disabled={busy}
-                        onClick={() => void ask(`נסחי מחדש את הפסקה הבאה, באותו תוכן ובלי להוסיף עובדות: "${p.text}"`, "ניסוח מחדש")}>ניסוח מחדש</button>
+                      <button type="button" className="btn btn-small" disabled={working}
+                        onClick={() => void ask(`נסחי מחדש את הפסקה הבאה, באותו תוכן ובלי להוסיף עובדות: "${p.text}"`, "ניסוח מחדש של פסקה אחת", p.id)}>ניסוח מחדש</button>
                       <button type="button" className="btn btn-small" onClick={() => setEditing({ id: p.id, text: p.text })}>עריכה</button>
                       <button type="button" className="btn btn-small btn-ghost" onClick={() => void act(() => ipc.rejectParagraph(caseId, p.id))}>הסרה</button>
                     </>
@@ -217,7 +283,15 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               </div>
             </div>
           ) : visible.length > 0 && (
-            <button type="button" className="add-own" onClick={() => setOwn("")}>+ פסקה משלי</button>
+            <div className="row wrap-row">
+              <button type="button" className="add-own" onClick={() => setOwn("")}>+ פסקה משלי</button>
+              {(derived || section.source_count > 0) && (
+                <button type="button" className="add-own" disabled={working}
+                  onClick={() => void ask(draftInstruction, `טיוטה חדשה לסעיף ${section.title}`)}>
+                  ↻ טיוטה חדשה מ-Claude (מחליפה את מה שלא אושר)
+                </button>
+              )}
+            </div>
           )}
 
           {last && (last.questions.length > 0 || last.missing.length > 0 || last.contradictions.length > 0) && (
@@ -233,7 +307,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
         <section className="chat" aria-label="שיחה על הסעיף">
           <div className="chat-head">שיחה על הסעיף</div>
           <div className="chat-body" aria-live="polite">
-            {chat.length === 0 && <p className="muted small chat-hint">כאן מבקשים מ-Claude: טיוטה, ניסוח אחר, השוואה לממצאים. כל בקשה עוברת קודם במסך "מה יוצא מהמחשב".</p>}
+            {chat.length === 0 && <p className="muted small chat-hint">כאן מבקשים מ-Claude שינויים בטיוטה: לקצר, להרחיב, להדגיש משהו. כל בקשה עוברת קודם במסך "מה יוצא מהמחשב", והתשובה מחליפה את מה שעוד לא אישרת.</p>}
             {chat.map((m, i) =>
               m.role === "user" ? (
                 <div key={i} className="msg-user">
@@ -249,13 +323,13 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                 </div>
               ),
             )}
-            {busy && <div className="bubble-claude muted"><Spinner /> מכינה…</div>}
+            {job && <div className="bubble-claude muted"><Spinner /> כותב…</div>}
             <div ref={chatEnd} />
           </div>
           <form className="chat-foot" onSubmit={submit}>
             <div className="quick">
               {QUICK.map(([label, text]) => (
-                <button key={label} type="button" className="pill-btn" disabled={busy || visible.length === 0} onClick={() => void ask(text, label)}>{label}</button>
+                <button key={label} type="button" className="pill-btn" disabled={working || visible.length === 0} onClick={() => void ask(text, label)}>{label}</button>
               ))}
             </div>
             <div className="chat-input">
@@ -263,7 +337,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               <textarea id="chat-msg" rows={2} className="textarea grow" placeholder="כתבי ל-Claude… שמות יוסתרו אוטומטית"
                 value={message} onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) void ask(message); }} />
-              <button type="submit" className="btn btn-primary send-btn" title="תמיד מוצג קודם מה יוצא מהמחשב" disabled={busy || !message.trim()}>שליחה <SendIcon /></button>
+              <button type="submit" className="btn btn-primary send-btn" title="תמיד מוצג קודם מה יוצא מהמחשב" disabled={working || !message.trim()}>שליחה <SendIcon /></button>
             </div>
           </form>
         </section>

@@ -8,6 +8,7 @@ mod activity;
 mod backup;
 mod consultations;
 mod dates;
+mod followup;
 mod library;
 mod retention;
 mod sorting;
@@ -37,6 +38,7 @@ pub use activity::ACTIVITY_PAGE;
 pub use backup::{backup_file_name, BACKUP_DAYS, MAX_BACKUP_BYTES};
 pub(crate) use dates::today;
 pub use dv_vault::BACKUP_EXTENSION;
+pub use followup::FollowUpView;
 pub use library::TRASH_DAYS;
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
 pub use views::{
@@ -212,6 +214,9 @@ enum PendingKind {
         instruction_tagged: String,
         hidden: Vec<String>,
         sources: Vec<(String, String, String)>,
+        /// The one proposed paragraph the answer rewrites ("ניסוח מחדש"); `None`: the answer
+        /// is the section's new draft and replaces the paragraphs not approved yet.
+        replaces: Option<String>,
     },
     Consult {
         case_id: Option<String>,
@@ -744,8 +749,10 @@ impl Core {
         Ok(id)
     }
 
-    pub fn update_case(&mut self, case_id: &str, meta: CaseMeta) -> Result<(), CoreError> {
+    pub fn update_case(&mut self, case_id: &str, mut meta: CaseMeta) -> Result<(), CoreError> {
         check_meta(&meta)?;
+        // Which assessment a follow-up belongs to is set when it is opened, never edited.
+        meta.follows = self.vault_ref()?.case_meta(case_id)?.follows;
         Ok(self.vault_mut()?.update_case_meta(case_id, &meta)?)
     }
 
@@ -1177,6 +1184,21 @@ impl Core {
             .set_draft_status(case_id, draft_id, DraftStatus::Approved)?)
     }
 
+    /// "אישור כל הטיוטה": every paragraph still waiting in the section, as it stands.
+    pub fn approve_section(&mut self, case_id: &str, section_key: &str) -> Result<u32, CoreError> {
+        let v = self.vault_mut()?;
+        let waiting: Vec<String> = v
+            .drafts(case_id, section_key)?
+            .into_iter()
+            .filter(|d| d.status == DraftStatus::Proposed)
+            .map(|d| d.id)
+            .collect();
+        for id in &waiting {
+            v.set_draft_status(case_id, id, DraftStatus::Approved)?;
+        }
+        Ok(u32::try_from(waiting.len()).unwrap_or(u32::MAX))
+    }
+
     pub fn reject_paragraph(&mut self, case_id: &str, draft_id: &str) -> Result<(), CoreError> {
         Ok(self
             .vault_mut()?
@@ -1268,6 +1290,19 @@ impl Core {
         case_id: &str,
         section_key: &str,
         instruction: &str,
+    ) -> Result<Prepared, CoreError> {
+        self.prepare_section_replacing(case_id, section_key, instruction, None)
+    }
+
+    /// A section request whose answer rewrites one proposed paragraph (`replaces`), or, with
+    /// `None`, becomes the section's draft in place of the paragraphs not approved yet: one
+    /// draft at a time, never a pile of versions.
+    pub fn prepare_section_replacing(
+        &mut self,
+        case_id: &str,
+        section_key: &str,
+        instruction: &str,
+        replaces: Option<&str>,
     ) -> Result<Prepared, CoreError> {
         let structure =
             ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
@@ -1413,6 +1448,7 @@ impl Core {
             instruction_tagged,
             hidden: instr_hidden,
             sources: rows,
+            replaces: replaces.map(str::to_owned),
         };
         self.gate(&data, &body, kind, &mut prepared)?;
         Ok(prepared)
@@ -1469,6 +1505,7 @@ impl Core {
             instruction_tagged,
             hidden,
             sources,
+            replaces,
         } = kind
         else {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
@@ -1518,9 +1555,8 @@ impl Core {
             &[],
             demo,
         )?;
-        for p in &reply.paragraphs {
-            let input_ids: Vec<String> = p
-                .source_refs
+        let input_ids = |p: &dv_ai::ProposedParagraph| -> Vec<String> {
+            p.source_refs
                 .iter()
                 .filter_map(|r| {
                     sources
@@ -1528,8 +1564,26 @@ impl Core {
                         .find(|(sid, _, _)| sid == r)
                         .map(|(_, id, _)| id.clone())
                 })
-                .collect();
-            v.add_draft(&case_id, &section_key, &p.text, Author::Ai, &input_ids)?;
+                .collect()
+        };
+        // A rewrite of one paragraph stays in its place; if it was approved or removed
+        // meanwhile, the answer is added as a new proposal instead of touching it.
+        let rewritten = match (&replaces, reply.paragraphs.is_empty()) {
+            (Some(id), false) => {
+                let text: Vec<&str> = reply.paragraphs.iter().map(|p| p.text.as_str()).collect();
+                let mut refs: Vec<String> = reply.paragraphs.iter().flat_map(&input_ids).collect();
+                refs.dedup();
+                v.rewrite_proposal(&case_id, id, &text.join("\n\n"), &refs)?
+            }
+            _ => false,
+        };
+        if !rewritten {
+            if replaces.is_none() && !reply.paragraphs.is_empty() {
+                v.supersede_proposals(&case_id, &section_key)?;
+            }
+            for p in &reply.paragraphs {
+                v.add_draft(&case_id, &section_key, &p.text, Author::Ai, &input_ids(p))?;
+            }
         }
 
         let practitioner = v.practitioner()?.names.first().cloned();

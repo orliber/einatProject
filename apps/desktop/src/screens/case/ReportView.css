@@ -1,0 +1,118 @@
+/* The Word page: A4 proportions on a grey desk, the way Word shows it. */
+.report-desk {
+  flex-grow: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 24px 40px;
+  background: var(--surface-alt);
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+}
+.a4 {
+  position: relative;
+  width: min(794px, 100%);
+  min-height: 1123px;
+  margin: 0 auto;
+  padding: 72px 76px 80px;
+  background: #fff;
+  color: #1b1b1b;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 8px 28px rgba(0, 0, 0, 0.1);
+  font-family: var(--font-display);
+  font-size: 16px;
+  line-height: 1.7;
+}
+.a4-header {
+  position: absolute;
+  top: 28px;
+  inset-inline: 76px;
+  text-align: center;
+  font-size: 11px;
+  color: #7a7a7a;
+}
+.a4-title {
+  text-align: center;
+  font-size: 26px;
+  margin-bottom: 18px;
+}
+.a4-info {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 14px;
+  margin: 0 0 22px;
+  font-size: 15px;
+}
+.a4-info dt {
+  font-weight: 700;
+}
+.a4-info dd {
+  margin: 0;
+}
+.a4-part {
+  font-size: 20px;
+  color: #1f3a5f;
+  margin: 26px 0 8px;
+}
+.a4-section {
+  margin-bottom: 10px;
+}
+.a4-heading {
+  font-size: 17px;
+  margin: 16px 0 4px;
+}
+.a4-heading button {
+  font: inherit;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  text-align: start;
+}
+.a4-heading button:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+.a4-p {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  text-align: justify;
+}
+.a4-pending {
+  border-inline-start: 3px solid var(--warn-line);
+  background: var(--warn-paper);
+  padding: 8px 12px;
+  margin: 4px 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+.a4-pending .a4-p {
+  color: #4a4a4a;
+}
+.a4-flag {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--warn-ink);
+}
+.a4-gap {
+  width: 100%;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: 6px;
+  background: transparent;
+  padding: 10px;
+  color: var(--ink-muted);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  text-align: center;
+}
+.a4-gap:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.a4-sign {
+  margin-top: 40px;
+}
+.a4-sign p {
+  margin: 0;
+}
