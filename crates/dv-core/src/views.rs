@@ -38,6 +38,9 @@ pub struct AppStatus {
     pub review_only_suspect: bool,
     /// The choice above opens after the first 14 days of use (D-020).
     pub review_choice_available: bool,
+    /// Screenshots and screen sharing show a blank window (D-037). Always on while the vault
+    /// is locked; she may turn it off for the open vault in settings.
+    pub screen_protection: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

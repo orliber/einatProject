@@ -55,6 +55,7 @@ const MODEL_KEY: &str = "model";
 const LOCK_KEY: &str = "lock_minutes";
 const FIRST_USE_KEY: &str = "first_use_day";
 const REVIEW_KEY: &str = "review_only_suspect";
+const SCREEN_KEY: &str = "screen_protection";
 /// How long Claude may think (see `Core::model_for`).
 const SPEED_KEY: &str = "answer_speed";
 const DEFAULT_SPEED: &str = "balanced";
@@ -542,7 +543,19 @@ impl Core {
             practitioner,
             review_only_suspect,
             review_choice_available,
+            screen_protection: self
+                .vault
+                .as_ref()
+                .is_none_or(|v| v.setting(SCREEN_KEY).ok().flatten().as_deref() != Some("0")),
         }
+    }
+
+    /// Whether screenshots and screen sharing see the open vault (D-037). Off is recorded in
+    /// the activity log; the locked screen stays protected either way.
+    pub fn set_screen_protection(&mut self, on: bool) -> Result<(), CoreError> {
+        let v = self.vault_mut()?;
+        v.set_setting(SCREEN_KEY, if on { "1" } else { "0" })?;
+        Ok(())
     }
 
     /// After the first weeks, the review screen may be shown only when something is suspicious.
@@ -1242,6 +1255,10 @@ impl Core {
         draft_id: &str,
         text: &str,
     ) -> Result<(), CoreError> {
+        // All the text deleted: the paragraph goes away (D-036).
+        if text.trim().is_empty() {
+            return self.reject_paragraph(case_id, draft_id);
+        }
         let tagged = self.preview_filter(case_id, text)?.tagged;
         Ok(self.vault_mut()?.edit_draft(case_id, draft_id, &tagged)?)
     }
@@ -1252,10 +1269,25 @@ impl Core {
         section_key: &str,
         text: &str,
     ) -> Result<(), CoreError> {
+        self.add_own_paragraph_at(case_id, section_key, text, None)
+    }
+
+    /// Her own paragraph, stored tagged and approved. `at`: `None` = at the end of the section,
+    /// `Some(None)` = first, `Some(Some(id))` = right after that paragraph (D-036).
+    pub fn add_own_paragraph_at(
+        &mut self,
+        case_id: &str,
+        section_key: &str,
+        text: &str,
+        at: Option<Option<&str>>,
+    ) -> Result<(), CoreError> {
         let tagged = self.preview_filter(case_id, text)?.tagged;
         let v = self.vault_mut()?;
         let d = v.add_draft(case_id, section_key, &tagged, Author::User, &[])?;
         v.set_draft_status(case_id, &d.id, DraftStatus::Approved)?;
+        if let Some(after) = at {
+            v.place_draft(case_id, &d.id, after)?;
+        }
         Ok(())
     }
 

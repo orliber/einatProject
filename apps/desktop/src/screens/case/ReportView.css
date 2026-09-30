@@ -160,16 +160,17 @@
   background: var(--surface-alt);
   outline: 1px dashed var(--line-strong);
 }
+/* Editing happens on the page itself: the same type, a frame around it. */
 .a4-edit {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin: 4px 0 10px;
+  gap: 8px;
+  margin: 2px -12px 10px;
+  padding: 6px 12px 10px;
+  border: 1.5px solid var(--primary);
+  border-radius: 10px;
+  background: var(--surface-alt);
   font-family: var(--font-ui);
-}
-.a4-edit textarea {
-  font-size: 16px;
-  line-height: 1.7;
 }
 .a4-pending-head {
   width: 100%;
@@ -299,16 +300,163 @@
 .a4-para {
   position: relative;
 }
+/* The AI mark beside every paragraph (D-036): always there, in the margin, easy to see. */
 .a4-para-tool {
   position: absolute;
-  top: 2px;
-  inset-inline-end: -40px;
-  opacity: 0;
-  transition: opacity 0.15s;
+  top: 0;
+  inset-inline-end: -58px;
 }
-.a4-para:hover .a4-para-tool,
-.a4-para:focus-within .a4-para-tool {
+.a4-ai {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--primary);
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.a4-ai:hover,
+.a4-ai[aria-expanded="true"] {
+  background: var(--primary);
+  color: #fff;
+}
+.a4-para-tool {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+/* Delete: quiet until the mouse or the keyboard is on the paragraph, and asks once. */
+.a4-del {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.a4-para:hover .a4-del,
+.a4-para:focus-within .a4-del {
   opacity: 1;
+}
+.a4-del:hover {
+  color: var(--block);
+  border-color: var(--block);
+}
+.a4-del-ask {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--block);
+  border-radius: 10px;
+  background: #fff;
+  font: 600 12.5px var(--font-body);
+  color: var(--block);
+  white-space: nowrap;
+}
+.a4-del-yes,
+.a4-del-no {
+  width: 40px;
+  height: 28px;
+  border-radius: 6px;
+  font: 600 13px var(--font-body);
+  cursor: pointer;
+}
+.a4-del-yes {
+  border: none;
+  background: var(--block);
+  color: #fff;
+}
+.a4-del-no {
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  color: var(--ink);
+}
+.a4-ai:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+/* A paragraph she wrote herself: a thin line at its side, so it is known without a label. */
+.a4-own {
+  box-shadow: inset -2px 0 0 var(--line-strong);
+}
+/* "+ פסקה משלי כאן" between paragraphs: faint until the mouse or the keyboard reaches it. */
+.a4-insert {
+  position: relative;
+  height: 14px;
+  margin: -4px 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.a4-insert::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 50%;
+  border-top: 1.5px dashed var(--side-muted);
+}
+.a4-insert:hover,
+.a4-insert:focus-within {
+  opacity: 1;
+}
+.a4-insert-btn {
+  position: relative;
+  height: 26px;
+  padding: 0 12px;
+  border: 1.5px solid var(--primary);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--primary);
+  font: 600 13px var(--font-body);
+  cursor: pointer;
+}
+.a4-insert-btn:disabled {
+  display: none;
+}
+.a4-edit-text {
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  border: none;
+  background: transparent;
+  font-family: var(--font-display);
+  font-size: inherit;
+  line-height: inherit;
+  color: var(--ink);
+  padding: 0;
+}
+.a4-edit-text:focus {
+  outline: none;
+}
+.a4-gap-row {
+  display: flex;
+  gap: 8px;
+}
+.a4-gap-row .a4-gap {
+  flex-grow: 1;
+}
+.a4-gap-own {
+  flex-grow: 0 !important;
+}
+.danger-text {
+  color: var(--block);
 }
 .a4-para-tool .a4-pop {
   inset-inline-start: auto;

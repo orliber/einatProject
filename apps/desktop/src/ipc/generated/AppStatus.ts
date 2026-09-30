@@ -28,4 +28,9 @@ review_only_suspect: boolean,
 /**
  * The choice above opens after the first 14 days of use (D-020).
  */
-review_choice_available: boolean, };
+review_choice_available: boolean, 
+/**
+ * Screenshots and screen sharing show a blank window (D-037). Always on while the vault
+ * is locked; she may turn it off for the open vault in settings.
+ */
+screen_protection: boolean, };

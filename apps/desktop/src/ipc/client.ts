@@ -74,6 +74,7 @@ export const ipc = {
   setLockMinutes: (minutes: number) => run("set_lock_minutes", { minutes }),
   setPractitioner: (names: string[]) => run("set_practitioner", { names }),
   setReviewOnlySuspect: (on: boolean) => run("set_review_only_suspect", { on }),
+  setScreenProtection: (on: boolean) => run("set_screen_protection", { on }),
   reportSettings: () => call<ReportSettings>("report_settings"),
   setReportSettings: (settings: ReportSettings) => run("set_report_settings", { settings }),
 
@@ -148,8 +149,9 @@ export const ipc = {
   rejectParagraph: (caseId: string, draftId: string) => run("reject_paragraph", { caseId, draftId }),
   editParagraph: (caseId: string, draftId: string, text: string) =>
     run("edit_paragraph", { caseId, draftId, text }),
-  addOwnParagraph: (caseId: string, sectionKey: string, text: string) =>
-    run("add_own_paragraph", { caseId, sectionKey, text }),
+  /** Her own paragraph. `at`: "end" (default), "first", or the id of the paragraph it follows. */
+  addOwnParagraph: (caseId: string, sectionKey: string, text: string, at: string = "end") =>
+    run("add_own_paragraph", { caseId, sectionKey, text, first: at === "first", after: at === "end" || at === "first" ? null : at }),
 
   prepareConsult: (caseId: string | null, conversationId: string | null, message: string) =>
     call<Prepared>("prepare_consult", { caseId, conversationId, message }),

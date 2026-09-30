@@ -104,6 +104,16 @@ export function SettingsScreen() {
             <span>להציג את מסך "מה יוצא מהמחשב" רק כשיש חשד</span>
           </label>
           {!status.review_choice_available && <span className="hint">בשבועיים הראשונים המסך מוצג לפני כל שליחה, כדי להכיר את הסינון.</span>}
+          <label className="row">
+            <input type="checkbox" checked={status.screen_protection}
+              onChange={(e) => void run(() => ipc.setScreenProtection(e.target.checked), e.target.checked ? "ההגנה מצילום מסך הודלקה." : "ההגנה מצילום מסך כובתה עד הנעילה הבאה של הכספת.")} />
+            <span>להסתיר את התוכנה מצילומי מסך ומשיתוף מסך (Zoom, Teams)</span>
+          </label>
+          <span className="hint">
+            {status.screen_protection
+              ? "מומלץ להשאיר דלוק: מי שמצלם או משתף מסך רואה חלון ריק."
+              : "כבוי: אפשר לצלם ולשתף את המסך. מסך הנעילה תמיד מוגן, וכדאי להדליק שוב כשמסיימים."}
+          </span>
         </section>
 
         {report && (

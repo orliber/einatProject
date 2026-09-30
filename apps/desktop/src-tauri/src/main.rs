@@ -102,8 +102,29 @@ fn ping() -> dv_ipc::PingResponse {
 }
 
 #[tauri::command]
-async fn app_status(state: tauri::State<'_, AppState>) -> Res<AppStatus> {
-    with_core(&state, |c| Ok(c.status())).await
+async fn app_status(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, AppState>,
+) -> Res<AppStatus> {
+    let status = with_core(&state, |c| Ok(c.status())).await?;
+    protect(&window, status.screen_protection);
+    Ok(status)
+}
+
+/// Screenshots and screen sharing see a blank window unless she turned that off (D-037).
+fn protect(window: &tauri::WebviewWindow, on: bool) {
+    let _ = window.set_content_protected(on);
+}
+
+#[tauri::command]
+async fn set_screen_protection(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, AppState>,
+    on: bool,
+) -> Res<()> {
+    with_core(&state, move |c| c.set_screen_protection(on)).await?;
+    protect(&window, on);
+    Ok(())
 }
 
 #[tauri::command]
@@ -127,8 +148,9 @@ async fn unlock_with_recovery(state: tauri::State<'_, AppState>, key: String) ->
 }
 
 #[tauri::command]
-async fn lock(state: tauri::State<'_, AppState>) -> Res<()> {
+async fn lock(window: tauri::WebviewWindow, state: tauri::State<'_, AppState>) -> Res<()> {
     state.clipboard.clear_now();
+    protect(&window, true);
     with_core(&state, |c| {
         c.lock();
         Ok(())
@@ -593,9 +615,17 @@ async fn add_own_paragraph(
     case_id: String,
     section_key: String,
     text: String,
+    first: Option<bool>,
+    after: Option<String>,
 ) -> Res<()> {
     with_core(&state, move |c| {
-        c.add_own_paragraph(&case_id, &section_key, &text)
+        // Where it goes (D-036): after a paragraph, first in the section, or at the end.
+        let at = match (after.as_deref(), first.unwrap_or(false)) {
+            (Some(id), _) => Some(Some(id)),
+            (None, true) => Some(None),
+            (None, false) => None,
+        };
+        c.add_own_paragraph_at(&case_id, &section_key, &text, at)
     })
     .await
 }
@@ -913,6 +943,7 @@ fn main() {
             // clicked; a secret left on the clipboard goes with it.
             let timer = Arc::clone(&core);
             let timer_clipboard = clipboard.clone();
+            let timer_window = app.get_webview_window("main");
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(15));
                 // Read the clock before waiting for the core: a long command holding it must not
@@ -921,6 +952,9 @@ fn main() {
                 let locked = timer.lock().is_ok_and(|mut c| c.tick(now));
                 if locked {
                     timer_clipboard.clear_now();
+                    if let Some(w) = &timer_window {
+                        protect(w, true);
+                    }
                 }
             });
             app.manage(AppState {
@@ -945,6 +979,7 @@ fn main() {
             set_lock_minutes,
             set_practitioner,
             set_review_only_suspect,
+            set_screen_protection,
             report_settings,
             set_report_settings,
             list_cases,

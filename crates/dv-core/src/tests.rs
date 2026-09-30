@@ -2340,3 +2340,53 @@ fn a_new_wording_of_an_approved_paragraph_replaces_it_only_when_approved() {
     assert_eq!(after.len(), 1, "the new wording took the old one's place");
     assert_eq!(after[0].text, "ניסוח שני.");
 }
+
+/// Her own paragraph goes where she put it: first, between two paragraphs, or at the end,
+/// filtered like any other text (D-036).
+#[test]
+fn her_own_paragraph_goes_where_she_put_it() {
+    let (_dir, mut core, case) = setup(None);
+    let texts = |core: &mut Core| -> Vec<String> {
+        core.case_detail(&case)
+            .unwrap()
+            .sections
+            .into_iter()
+            .find(|s| s.key == "kindergarten")
+            .unwrap()
+            .paragraphs
+            .into_iter()
+            .map(|p| p.text)
+            .collect()
+    };
+    let ids = |core: &mut Core| -> Vec<String> {
+        core.case_detail(&case)
+            .unwrap()
+            .sections
+            .into_iter()
+            .find(|s| s.key == "kindergarten")
+            .unwrap()
+            .paragraphs
+            .into_iter()
+            .map(|p| p.id)
+            .collect()
+    };
+    core.add_own_paragraph(&case, "kindergarten", "שתיים.")
+        .unwrap();
+    core.add_own_paragraph(&case, "kindergarten", "ארבע.")
+        .unwrap();
+    core.add_own_paragraph_at(&case, "kindergarten", "אחת.", Some(None))
+        .unwrap();
+    let after = ids(&mut core)[1].clone();
+    core.add_own_paragraph_at(&case, "kindergarten", "שלוש.", Some(Some(&after)))
+        .unwrap();
+    let t = texts(&mut core);
+    assert_eq!(t.len(), 4, "{t:?}");
+    assert_eq!(t[0], "אחת.");
+    assert_eq!(t[1], "שתיים.");
+    assert_eq!(t[2], "שלוש.");
+    assert_eq!(t[3], "ארבע.");
+    // Emptied and saved: gone.
+    let second = ids(&mut core)[1].clone();
+    core.edit_paragraph(&case, &second, "  \n ").unwrap();
+    assert_eq!(texts(&mut core), vec!["אחת.", "שלוש.", "ארבע."]);
+}

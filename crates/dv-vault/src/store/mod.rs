@@ -1541,6 +1541,52 @@ impl Vault {
         })
     }
 
+    /// Put a paragraph right after `after` in its section (`None`: first), and number the
+    /// section's paragraphs again in that order. Only positions change.
+    pub fn place_draft(
+        &mut self,
+        case_id: &str,
+        draft_id: &str,
+        after: Option<&str>,
+    ) -> Result<(), VaultError> {
+        let section: String = self
+            .main
+            .query_row(
+                "SELECT section_key FROM drafts WHERE id = ?1 AND case_id = ?2",
+                params![draft_id, case_id],
+                |r| r.get(0),
+            )
+            .map_err(|_| VaultError::NotFound)?;
+        let mut order: Vec<String> = {
+            let mut stmt = self.main.prepare(
+                "SELECT id FROM drafts WHERE case_id = ?1 AND section_key = ?2 AND id != ?3
+                 ORDER BY position, created_at",
+            )?;
+            let rows = stmt.query_map(params![case_id, section, draft_id], |r| r.get(0))?;
+            rows.collect::<Result<_, _>>()?
+        };
+        let at = match after {
+            None => 0,
+            Some(a) => {
+                order
+                    .iter()
+                    .position(|x| x == a)
+                    .ok_or(VaultError::NotFound)?
+                    + 1
+            }
+        };
+        order.insert(at, draft_id.to_owned());
+        let tx = self.main.transaction()?;
+        for (i, id) in order.iter().enumerate() {
+            tx.execute(
+                "UPDATE drafts SET position = ?1 WHERE id = ?2 AND case_id = ?3",
+                params![u32::try_from(i + 1).unwrap_or(u32::MAX), id, case_id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn drafts(
         &self,
         case_id: &str,
