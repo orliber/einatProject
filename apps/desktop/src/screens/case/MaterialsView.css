@@ -248,3 +248,33 @@
 .compare-table tr.notable td {
   background: var(--warn-paper);
 }
+/* Materials in their places ("מה יש בתיק"). */
+.slot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.slot.missing {
+  background: var(--warn-paper);
+  border: 1.5px dashed var(--warn-line);
+}
+.slot.optional {
+  border-style: dashed;
+}
+.slot-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.slot-add {
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+}
+.slot .material {
+  margin: 0;
+}

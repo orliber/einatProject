@@ -110,6 +110,10 @@ export function CasesScreen() {
   // "ד\"ר רותם בדויה" → "רותם": a title is not how anyone is greeted.
   const name = status.practitioner[0]?.split(" ").find((w) => w && !/^(ד["״']?ר|דר'|פרופ'|גב'|מר)$/.test(w));
   const inProgress = allCases.filter((c) => c.approved_sections.length < TOTAL_SECTIONS).length;
+  // The case she worked on last and has not finished: one click back into it.
+  const resume = [...allCases]
+    .filter((c) => c.approved_sections.length < TOTAL_SECTIONS)
+    .sort((a, b) => b.updated_at - a.updated_at)[0];
   const trashCount = trash.data?.length ?? 0;
 
   // ---------------------------------------------------------------- drag and drop
@@ -176,6 +180,25 @@ export function CasesScreen() {
             <button type="button" className="btn btn-primary btn-big" onClick={() => setCreating(true)}>+ תיק חדש</button>
           </div>
         </div>
+        {resume && !q && (
+          <section className="resume" aria-label="להמשיך איפה שהפסקת">
+            <div className="grow stack" style={{ gap: 4 }}>
+              <span className="resume-eyebrow">להמשיך איפה שהפסקת</span>
+              <span className="resume-name">{resume.child_name ?? resume.meta.code}{resume.meta.age ? ` · גיל ${resume.meta.age.years}:${resume.meta.age.months}` : ""}</span>
+              <span className="muted">{nextStep(resume).text} · עודכן {updated(resume.updated_at)}</span>
+              <div className="row resume-progress">
+                <div className="bar" aria-hidden="true">
+                  <div className="bar-fill" style={{ width: `${Math.round((resume.approved_sections.length / TOTAL_SECTIONS) * 100)}%` }} />
+                </div>
+                <span className="small muted">{resume.approved_sections.length} מתוך {TOTAL_SECTIONS} סעיפים מאושרים</span>
+              </div>
+            </div>
+            <button type="button" className="btn btn-primary btn-big"
+              onClick={() => go({ name: "case", id: resume.id, view: resume.approved_sections.length > 0 ? "report" : "materials" })}>
+              {resume.approved_sections.length > 0 ? "להמשיך לכתוב ←" : "להמשיך ←"}
+            </button>
+          </section>
+        )}
         {status.integrity_warning && (
           <p className="error" role="alert">בדיקת השלמות של הכספת מצאה חריגה: {status.integrity_warning}</p>
         )}

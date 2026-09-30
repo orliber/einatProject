@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useApp } from "../../App";
 import { ipc, type CaseDetail, type ReportSettings } from "../../ipc/client";
+import { kindLabel } from "../../i18n/he";
 import { ageWords } from "../../components/AgeField";
 import { ErrorLine } from "../../components/ui";
 import { ProgressLine } from "../../components/Progress";
@@ -15,7 +16,7 @@ type Section = CaseDetail["sections"][number];
  * Claude, approve a draft, edit any paragraph, add one of her own. Only approved paragraphs
  * go into the file; a draft waiting for approval is marked, an empty section is a gap to fill.
  */
-export function ReportView({ api, onWriteAll }: { api: CaseApi; onWriteAll: () => void }) {
+export function ReportView({ api, focus }: { api: CaseApi; onWriteAll: () => void; focus?: { key: string; at: number } | null }) {
   const { detail } = api;
   const [settings, setSettings] = useState<ReportSettings | null>(null);
   const [showDrafts, setShowDrafts] = useState(true);
@@ -23,6 +24,17 @@ export function ReportView({ api, onWriteAll }: { api: CaseApi; onWriteAll: () =
   useEffect(() => {
     ipc.reportSettings().then(setSettings).catch(() => setSettings(null));
   }, []);
+
+  // A section chosen in the contents or the next-step bar comes into view, briefly marked.
+  useEffect(() => {
+    if (!focus?.key) return;
+    const el = document.getElementById(`sec-${focus.key}`);
+    if (!el) return;
+    el.scrollIntoView({ block: "start", behavior: "smooth" });
+    el.classList.add("a4-flash");
+    const t = setTimeout(() => el.classList.remove("a4-flash"), 1600);
+    return () => clearTimeout(t);
+  }, [focus]);
 
   const child = detail.identities.find((i) => i.role === "child")?.value ?? "";
   const childLabel = detail.meta.child_gender === "female" ? "שם הילדה" : detail.meta.child_gender === "male" ? "שם הילד" : "שם הילד/ה";
@@ -41,16 +53,13 @@ export function ReportView({ api, onWriteAll }: { api: CaseApi; onWriteAll: () =
         <div className="stack" style={{ gap: 6 }}>
           <h1>הדוח</h1>
           <span className="muted small">
-            עובדים ישירות על הדף: כותבים, מאשרים ועורכים. {approved} סעיפים מאושרים ייכנסו לקובץ · {waiting} עם טיוטה לאישור · {empty} ריקים
+            כמו בקובץ. כותבים, מאשרים ועורכים ישירות על הדף. {approved} סעיפים מאושרים ייכנסו לקובץ · {waiting} לאישור · {empty} ריקים
           </span>
         </div>
-        <div className="row">
-          <label className="row small">
-            <input type="checkbox" checked={showDrafts} onChange={(e) => setShowDrafts(e.target.checked)} />
-            להראות טיוטות שעוד לא אושרו
-          </label>
-          {empty > 0 && <button type="button" className="btn btn-primary" onClick={onWriteAll}>כתיבת הסעיפים הריקים עם Claude</button>}
-        </div>
+        <label className="row small">
+          <input type="checkbox" checked={showDrafts} onChange={(e) => setShowDrafts(e.target.checked)} />
+          להראות טיוטות שעוד לא אושרו
+        </label>
       </div>
       <div className="report-desk">
         <article className="a4" style={{ fontFamily: settings?.font ? `"${settings.font}", var(--font-display)` : undefined }} aria-label="הדוח, כמו בקובץ">
@@ -80,17 +89,57 @@ export function ReportView({ api, onWriteAll }: { api: CaseApi; onWriteAll: () =
   );
 }
 
+const CHANGES: [string, string][] = [
+  ["לקצר", "קצרי את הטיוטה של הסעיף ושמרי על כל הממצאים העיקריים."],
+  ["להרחיב", "הרחיבי את הטיוטה של הסעיף, בלי להוסיף עובדות שאינן במקורות."],
+  ["לנסח אחרת", "נסחי את הטיוטה של הסעיף מחדש, באותו תוכן ובלי להוסיף עובדות."],
+  ["לבדוק מול החומרים", "בדקי את הטיוטה מול המקורות: מה חסר, מה סותר, ומה לא מבוסס, ותקני."],
+];
+
+/** A small card next to what opened it; Escape or a click outside closes it. */
+function Popover({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  useEffect(() => {
+    close.current = onClose;
+  }, [onClose]);
+  // Focus moves in once, when it opens (not on every keystroke inside it).
+  useEffect(() => {
+    ref.current?.querySelector<HTMLElement>("button, input, textarea")?.focus();
+    const away = (e: MouseEvent) => {
+      // The button that opened it (in the same anchor) toggles it itself.
+      const anchor = ref.current?.parentElement ?? ref.current;
+      if (anchor && !anchor.contains(e.target as Node)) close.current();
+    };
+    document.addEventListener("mousedown", away);
+    return () => document.removeEventListener("mousedown", away);
+  }, []);
+  return (
+    <div ref={ref} className="a4-pop" role="dialog" aria-label={label}
+      onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } }}>
+      {children}
+    </div>
+  );
+}
+
 function A4Section({ api, section: s, showDrafts }: { api: CaseApi; section: Section; showDrafts: boolean }) {
   const { go, fail } = useApp();
-  const { caseId, reload } = api;
+  const { caseId, reload, detail } = api;
   const [editing, setEditing] = useState<{ id: string | null; text: string } | null>(null);
   const [preparing, setPreparing] = useState(false);
+  const [open, setOpen] = useState<"sources" | "change" | null>(null);
+  const [wish, setWish] = useState("");
+  const [sourcesChanged, setSourcesChanged] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const job = api.jobs.find((j) => j.section === s.key);
   const ok = s.paragraphs.filter((p) => p.status === "approved");
   const pending = s.paragraphs.filter((p) => p.status === "proposed");
   const canWrite = s.source_count > 0 || !s.sortable;
   const busy = preparing || job !== undefined;
+  const sources = detail.routing
+    .filter((r) => r.feeds.includes(s.key))
+    .map((r) => detail.inputs.find((i) => i.id === r.input_id))
+    .filter((i) => i !== undefined);
 
   async function act(fn: () => Promise<unknown>) {
     setError(null);
@@ -103,6 +152,8 @@ function A4Section({ api, section: s, showDrafts }: { api: CaseApi; section: Sec
   }
 
   async function write(instruction?: string) {
+    setOpen(null);
+    setSourcesChanged(false);
     setError(null);
     setPreparing(true);
     try {
@@ -138,19 +189,64 @@ function A4Section({ api, section: s, showDrafts }: { api: CaseApi; section: Sec
   );
 
   return (
-    <div className={`a4-section${pending.length ? " has-pending" : ""}`}>
+    <div id={`sec-${s.key}`} className={`a4-section${pending.length ? " has-pending" : ""}`}>
       <div className="a4-heading-row">
         <h3 className="a4-heading">{s.title}</h3>
         <span className="a4-tools">
-          {canWrite && !busy && (
-            <button type="button" className="a4-tool" onClick={() => void write()}>
-              {s.paragraphs.length ? "↻ טיוטה חדשה" : "✦ כתיבה עם Claude"}
-            </button>
-          )}
           {!editing && <button type="button" className="a4-tool" onClick={() => setEditing({ id: null, text: "" })}>+ פסקה משלי</button>}
-          <button type="button" className="a4-tool" onClick={() => go({ name: "case", id: caseId, view: s.key })}>פתיחת הסעיף ←</button>
+          <button type="button" className="a4-tool" title="השיחה עם Claude על הסעיף" onClick={() => go({ name: "case", id: caseId, view: s.key })}>שיחה על הסעיף</button>
         </span>
       </div>
+
+      {s.sortable && (
+        <div className="a4-sources">
+          <span>{sources.length ? "נכתב מתוך:" : "אין חומרים לסעיף."}</span>
+          {sources.map((i) => <span key={i.id} className="a4-source">{i.title || kindLabel[i.kind]}</span>)}
+          <span className="a4-pop-anchor">
+            <button type="button" className="a4-source-edit" aria-expanded={open === "sources"} onClick={() => setOpen(open === "sources" ? null : "sources")}>
+              {sources.length ? "+ חומר / הסרה" : "+ קישור חומרים"}
+            </button>
+            {open === "sources" && (
+              <Popover label={`מאיזה חומרים לכתוב את "${s.title}"`} onClose={() => setOpen(null)}>
+                <b>מאיזה חומרים לכתוב את "{s.title}"?</b>
+                <span className="small muted">מסמנים ומורידים. הבחירה שלך גוברת על המיון של Claude.</span>
+                <div className="a4-pop-list">
+                  {detail.inputs.map((i) => {
+                    const r = detail.routing.find((x) => x.input_id === i.id);
+                    const on = r?.feeds.includes(s.key) ?? false;
+                    const others = (r?.feeds ?? []).filter((k) => k !== s.key).length;
+                    return (
+                      <label key={i.id} className={on ? "a4-pop-row on" : "a4-pop-row"}>
+                        <input type="checkbox" checked={on} disabled={!r}
+                          onChange={() => void act(async () => {
+                            if (!r) return;
+                            await ipc.setInputSections(caseId, i.id, on ? r.feeds.filter((k) => k !== s.key) : [...r.feeds, s.key]);
+                            setSourcesChanged(true);
+                          })} />
+                        <span className="grow stack" style={{ gap: 0 }}>
+                          <b>{i.title || kindLabel[i.kind]}</b>
+                          <span className="small muted">{kindLabel[i.kind]}{others > 0 ? ` · מזין עוד ${others} סעיפים` : ""}</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                  {detail.inputs.length === 0 && <span className="small muted">עוד אין חומרים בתיק.</span>}
+                </div>
+                <button type="button" className="link-small" onClick={() => go({ name: "case", id: caseId, view: "materials" })}>+ להעלות מסמך חדש לתיק</button>
+                <div className="a4-pop-foot">
+                  {sourcesChanged && s.paragraphs.length > 0 ? (
+                    <>
+                      <span className="small grow">החומרים השתנו. הטיוטה הנוכחית עוד לא כוללת אותם.</span>
+                      <button type="button" className="btn btn-primary btn-small" disabled={busy} onClick={() => void write()}>✦ לכתוב מחדש</button>
+                    </>
+                  ) : <span className="grow" />}
+                  <button type="button" className="btn btn-small" onClick={() => setOpen(null)}>סגירה</button>
+                </div>
+              </Popover>
+            )}
+          </span>
+        </div>
+      )}
 
       {ok.map((p) =>
         editing?.id === p.id ? (
@@ -174,14 +270,33 @@ function A4Section({ api, section: s, showDrafts }: { api: CaseApi; section: Sec
       {showDrafts && pending.length > 0 && !job && (
         <div className="a4-pending">
           <div className="a4-pending-head">
-            <span className="a4-flag">טיוטה של Claude · עוד לא אושרה ולא תיכנס לקובץ</span>
+            <span className="a4-flag">טיוטה של Claude · עוד לא בדוח</span>
             <span className="row">
-              <button type="button" className="btn btn-primary btn-small" onClick={() => void act(() => ipc.approveSection(caseId, s.key))}>
-                ✓ אישור הטיוטה
-              </button>
-              <button type="button" className="btn btn-small btn-ghost" onClick={() => void act(async () => { for (const p of pending) await ipc.rejectParagraph(caseId, p.id); })}>
-                הסרה
-              </button>
+              <button type="button" className="btn btn-primary btn-small" onClick={() => void act(() => ipc.approveSection(caseId, s.key))}>✓ לאשר</button>
+              <span className="a4-pop-anchor">
+                <button type="button" className="btn btn-small" aria-expanded={open === "change"} disabled={busy} onClick={() => setOpen(open === "change" ? null : "change")}>✦ לשנות עם Claude</button>
+                {open === "change" && (
+                  <Popover label="מה לשנות בטיוטה" onClose={() => setOpen(null)}>
+                    <b>מה לשנות בטיוטה?</b>
+                    <div className="row wrap-row">
+                      {CHANGES.map(([label, text]) => (
+                        <button key={label} type="button" className="pill-btn" onClick={() => void write(text)}>{label}</button>
+                      ))}
+                    </div>
+                    <label className="stack small muted" style={{ gap: 4 }}>
+                      או במילים שלך
+                      <textarea className="textarea" rows={2} value={wish} placeholder="למשל: להדגיש את מה שעוזר לו במעברים"
+                        onChange={(e) => setWish(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && wish.trim()) { e.preventDefault(); const w = wish; setWish(""); void write(w); } }} />
+                    </label>
+                    <div className="a4-pop-foot">
+                      <span className="small muted grow">הטיוטה החדשה תחליף את זו. מה שאישרת נשאר.</span>
+                      <button type="button" className="btn btn-primary btn-small" disabled={!wish.trim()} onClick={() => { const w = wish; setWish(""); void write(w); }}>שליחה</button>
+                    </div>
+                  </Popover>
+                )}
+              </span>
+              <button type="button" className="btn btn-small btn-ghost" onClick={() => void act(async () => { for (const p of pending) await ipc.rejectParagraph(caseId, p.id); })}>הסרה</button>
             </span>
           </div>
           {pending.map((p) =>
@@ -203,11 +318,11 @@ function A4Section({ api, section: s, showDrafts }: { api: CaseApi; section: Sec
       {s.paragraphs.length === 0 && !job && !editing && (
         canWrite ? (
           <button type="button" className="a4-gap" disabled={busy} onClick={() => void write()}>
-            ✦ הסעיף עוד לא נכתב · לכתיבה עם Claude
+            ✦ לכתוב עם Claude · או "+ פסקה משלי" למעלה
           </button>
         ) : (
-          <button type="button" className="a4-gap" onClick={() => go({ name: "case", id: caseId, view: s.key })}>
-            אין חומרים לסעיף · לקישור חומרים או לכתיבה בעצמך
+          <button type="button" className="a4-gap" onClick={() => setOpen("sources")}>
+            אין חומרים לסעיף · לקישור חומרים, או "+ פסקה משלי"
           </button>
         )
       )}

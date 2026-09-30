@@ -193,3 +193,105 @@
     display: none;
   }
 }
+/* What the section is written from, and the small cards that change it. */
+.a4-sources {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 6px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+.a4-source {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--sand);
+  color: var(--ink-soft);
+}
+.a4-source-edit {
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px dashed var(--primary);
+  background: #fff;
+  color: var(--primary);
+  font: inherit;
+  font-weight: 600;
+}
+.a4-pop-anchor {
+  position: relative;
+  display: inline-flex;
+}
+.a4-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  inset-inline-start: 0;
+  z-index: 15;
+  width: min(420px, 80vw);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  color: var(--ink);
+  text-align: start;
+}
+.a4-pop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 280px;
+  overflow: auto;
+}
+.a4-pop-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+  cursor: pointer;
+}
+.a4-pop-row.on {
+  background: var(--primary-soft);
+}
+.a4-pop-row input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--primary);
+}
+.a4-pop-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.a4-flash {
+  animation: a4-flash 1.6s ease-out;
+}
+@keyframes a4-flash {
+  0% {
+    background: var(--primary-soft);
+  }
+  100% {
+    background: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .a4-flash {
+    animation: none;
+  }
+}
+@media print {
+  .a4-sources {
+    display: none;
+  }
+}

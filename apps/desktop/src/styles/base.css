@@ -342,7 +342,9 @@ p {
 /* ---------- toast ---------- */
 .toast {
   position: fixed;
-  top: 14px;
+  /* Under the header bars, never over the tabs and buttons in them. */
+  top: 84px;
+  pointer-events: none;
   inset-inline-start: 50%;
   transform: translateX(50%);
   background: var(--side);
