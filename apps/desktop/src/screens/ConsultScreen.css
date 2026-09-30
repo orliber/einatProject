@@ -1,6 +1,13 @@
+/* The page fits the window: the conversations list stays in view and only the chat scrolls. */
+.page-fit {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
 .consult {
   flex-grow: 1;
   min-height: 0;
+  overflow: hidden;
   display: flex;
   gap: 24px;
   padding: 24px 40px;

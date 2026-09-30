@@ -47,7 +47,14 @@ p {
   margin: 0;
 }
 .visually-hidden {
+  /* Pinned to the corner: left at its place inside a scrolling list, it would stretch the
+     page and leave an empty area to scroll into. */
   position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  margin: -1px;
+  padding: 0;
+  border: 0;
   width: 1px;
   height: 1px;
   overflow: hidden;

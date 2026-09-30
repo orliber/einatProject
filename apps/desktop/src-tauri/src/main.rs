@@ -325,9 +325,10 @@ async fn prepare_section(
     case_id: String,
     section_key: String,
     instruction: String,
+    replaces: Option<String>,
 ) -> Res<Prepared> {
     with_core(&state, move |c| {
-        c.prepare_section(&case_id, &section_key, &instruction)
+        c.prepare_section_replacing(&case_id, &section_key, &instruction, replaces.as_deref())
     })
     .await
 }
@@ -487,6 +488,15 @@ async fn chat(
     section_key: String,
 ) -> Res<Vec<ChatView>> {
     with_core(&state, move |c| c.chat(&case_id, &section_key)).await
+}
+
+#[tauri::command]
+async fn approve_section(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    section_key: String,
+) -> Res<u32> {
+    with_core(&state, move |c| c.approve_section(&case_id, &section_key)).await
 }
 
 #[tauri::command]
@@ -868,6 +878,7 @@ fn main() {
             copy_secret,
             chat,
             approve_paragraph,
+            approve_section,
             reject_paragraph,
             edit_paragraph,
             add_own_paragraph,

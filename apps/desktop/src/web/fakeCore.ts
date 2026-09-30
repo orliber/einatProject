@@ -66,7 +66,7 @@ interface Case {
 }
 
 type Pending =
-  | { type: "section"; caseId: string; section: string; refs: { sid: string; label: string; tagged: string }[]; instruction: string }
+  | { type: "section"; caseId: string; section: string; refs: { sid: string; label: string; tagged: string }[]; instruction: string; replaces: string | null }
   | { type: "consult"; question: string; shown: string; hidden: string[]; caseId: string | null; conversationId: string | null }
   | { type: "sort"; caseId: string; materials: { id: string; count: number; content: string }[] };
 
@@ -339,7 +339,7 @@ export class FakeCore {
     };
   }
 
-  private prepareSection(c: Case, key: string, instruction: string): Prepared {
+  private prepareSection(c: Case, key: string, instruction: string, replaces: string | null = null): Prepared {
     if (!c.meta.consent) fail("consent_missing", "לפני שליחה ל-Claude צריך לרשום בתיק את הסכמת ההורים.");
     const section = SECTIONS.find((s) => s.key === key) ?? fail("not_found", "הסעיף לא נמצא");
     const parts: ReviewPart[] = [];
@@ -371,7 +371,7 @@ export class FakeCore {
     });
     if (instruction.trim()) take("הבקשה שלך", instruction);
     const approval = suspects.length === 0 ? newId("approval") : null;
-    if (approval) this.pending.set(approval, { type: "section", caseId: c.id, section: key, refs, instruction });
+    if (approval) this.pending.set(approval, { type: "section", caseId: c.id, section: key, refs, instruction, replaces });
     return { approval_id: approval, parts, suspects, hidden: Array.from(hidden), checks, blocked: [], demo_mode: true };
   }
 
@@ -425,9 +425,16 @@ export class FakeCore {
   private sendSection(p: Extract<Pending, { type: "section" }>): SectionResult {
     const c = this.find(p.caseId);
     const paragraphs = p.refs.slice(0, 3).map((r) => ({ text: sentences(r.tagged, 2), source_refs: [r.sid], warnings: [] as string[] })).filter((x) => x.text);
-    for (const d of c.drafts) if (d.section === p.section && d.status === "proposed") d.status = "superseded";
-    for (const x of paragraphs) {
-      c.drafts.push({ id: newId("d"), section: p.section, text: x.text, status: "proposed", byAi: true, sources: p.refs.filter((r) => x.source_refs.includes(r.sid)).map((r) => r.label) });
+    const target = p.replaces ? c.drafts.find((d) => d.id === p.replaces && d.status === "proposed") : undefined;
+    if (target && paragraphs.length) {
+      // A rewrite of one paragraph stays where it is.
+      target.text = `${paragraphs[0]?.text ?? target.text} (ניסוח אחר)`;
+      paragraphs.splice(1);
+    } else {
+      for (const d of c.drafts) if (d.section === p.section && d.status === "proposed" && d.byAi) d.status = "superseded";
+      for (const x of paragraphs) {
+        c.drafts.push({ id: newId("d"), section: p.section, text: x.text, status: "proposed", byAi: true, sources: p.refs.filter((r) => x.source_refs.includes(r.sid)).map((r) => r.label) });
+      }
     }
     const reply = paragraphs.length
       ? `מצב הדגמה: ניסחתי ${paragraphs.length} פסקאות לדוגמה מתוך החומרים. בתוכנה, עם חיבור ל-Claude, הניסוח נעשה בסגנון שלך ומצליב בין החומרים.`
@@ -658,7 +665,7 @@ export class FakeCore {
         return null;
       }
       case "prepare_section":
-        return this.prepareSection(this.find(a.caseId), String(a.sectionKey), String(a.instruction ?? ""));
+        return this.prepareSection(this.find(a.caseId), String(a.sectionKey), String(a.instruction ?? ""), a.replaces ? String(a.replaces) : null);
       case "prepare_full_draft": {
         const c = this.find(a.caseId);
         return SECTIONS.filter((s) => !DERIVED.includes(s.key) && c.inputs.some((i) => this.feedOf(c, i, s.key) !== null) && !c.drafts.some((d) => d.section === s.key && d.status === "approved"))
@@ -689,6 +696,11 @@ export class FakeCore {
       }
       case "chat":
         return this.find(a.caseId).chat[String(a.sectionKey)] ?? [];
+      case "approve_section": {
+        const waiting = this.find(a.caseId).drafts.filter((d) => d.section === a.sectionKey && d.status === "proposed");
+        waiting.forEach((d) => (d.status = "approved"));
+        return waiting.length;
+      }
       case "approve_paragraph":
       case "reject_paragraph": {
         const d = this.find(a.caseId).drafts.find((x) => x.id === a.draftId) ?? fail("not_found", "הפסקה לא נמצאה");

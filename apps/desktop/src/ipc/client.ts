@@ -121,8 +121,10 @@ export const ipc = {
   decideSuspect: (caseId: string, token: string, decision: SuspectDecision) =>
     run("decide_suspect", { caseId, token, decision }),
 
-  prepareSection: (caseId: string, sectionKey: string, instruction: string) =>
-    call<Prepared>("prepare_section", { caseId, sectionKey, instruction }),
+  /** `replaces`: the one proposed paragraph the answer rewrites; otherwise the answer is the
+   *  section's new draft, in place of the paragraphs not approved yet. */
+  prepareSection: (caseId: string, sectionKey: string, instruction: string, replaces?: string) =>
+    call<Prepared>("prepare_section", { caseId, sectionKey, instruction, replaces: replaces ?? null }),
   prepareFullDraft: (caseId: string) => call<[string, Prepared][]>("prepare_full_draft", { caseId }),
   sendSection: (approvalId: string) => call<SectionResult>("send_section", { approvalId }),
   /** D-022: sort every material not sorted yet into sections (one review screen). */
@@ -133,6 +135,8 @@ export const ipc = {
     run("set_input_sections", { caseId, inputId, sections }),
   chat: (caseId: string, sectionKey: string) => call<ChatView[]>("chat", { caseId, sectionKey }),
   approveParagraph: (caseId: string, draftId: string) => run("approve_paragraph", { caseId, draftId }),
+  /** Approve every paragraph waiting in the section; returns how many. */
+  approveSection: (caseId: string, sectionKey: string) => call<number>("approve_section", { caseId, sectionKey }),
   rejectParagraph: (caseId: string, draftId: string) => run("reject_paragraph", { caseId, draftId }),
   editParagraph: (caseId: string, draftId: string, text: string) =>
     run("edit_paragraph", { caseId, draftId, text }),

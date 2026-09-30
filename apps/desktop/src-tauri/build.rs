@@ -53,6 +53,7 @@ fn main() {
             "copy_secret",
             "chat",
             "approve_paragraph",
+            "approve_section",
             "reject_paragraph",
             "edit_paragraph",
             "add_own_paragraph",

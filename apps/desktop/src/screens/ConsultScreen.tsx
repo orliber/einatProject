@@ -182,7 +182,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   const title = selectedCase ? `שאלה על ${selectedCase.child_name ?? selectedCase.meta.code}` : "שאלה מקצועית";
 
   return (
-    <div className="page">
+    <div className="page page-fit">
       <TopBar active="consult" />
       <div className="consult">
         <aside className="consult-side">

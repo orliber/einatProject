@@ -158,3 +158,58 @@
   height: 18px;
   accent-color: var(--primary);
 }
+/* What is there and what is missing. */
+.checklist {
+  margin: 12px 24px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.checklist-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 0;
+  background: transparent;
+  text-align: start;
+}
+.checklist-items {
+  list-style: none;
+  margin: 0;
+  padding: 0 16px 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 8px;
+}
+.checklist-items li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+}
+.check-mark {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 13px;
+}
+.have .check-mark {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.missing .check-mark {
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+}
+.optional .check-mark {
+  background: var(--line);
+  color: var(--ink-muted);
+}

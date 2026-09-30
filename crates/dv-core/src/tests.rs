@@ -1961,3 +1961,77 @@ fn the_sample_documents_leak_nothing() {
         assert!(!sent.contains(secret), "{secret} left the machine");
     }
 }
+
+/// One draft at a time: a new request replaces the paragraphs not approved yet, a rewrite
+/// stays in its place, and approving the draft approves what is waiting.
+#[test]
+fn a_new_draft_replaces_the_waiting_one_and_a_rewrite_stays_in_place() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let waiting = |core: &mut Core| -> Vec<(String, String)> {
+        core.case_detail(&case)
+            .unwrap()
+            .sections
+            .into_iter()
+            .find(|s| s.key == "kindergarten")
+            .unwrap()
+            .paragraphs
+            .into_iter()
+            .filter(|p| p.status == DraftStatus::Proposed)
+            .map(|p| (p.id, p.text))
+            .collect()
+    };
+    let answer = |texts: &[&str]| {
+        api_json(&json!({
+            "reply": "הנה",
+            "paragraphs": texts.iter().map(|t| json!({"text": t, "source_refs": ["S1"]})).collect::<Vec<_>>(),
+            "questions": [], "missing": [], "contradictions": [],
+        }))
+    };
+    let send = |core: &mut Core, replaces: Option<&str>| {
+        let p = core
+            .prepare_section_replacing(&case, "kindergarten", "טיוטה", replaces)
+            .unwrap();
+        core.send_section(&p.approval_id.unwrap()).unwrap();
+    };
+
+    *fake.answer.lock().unwrap() = Some(answer(&["פסקה א", "פסקה ב"]));
+    send(&mut core, None);
+    let first = waiting(&mut core);
+    assert_eq!(first.len(), 2);
+    core.approve_paragraph(&case, &first[0].0).unwrap();
+
+    // A second draft replaces the one still waiting; the approved paragraph stays.
+    *fake.answer.lock().unwrap() = Some(answer(&["פסקה ג", "פסקה ד", "פסקה ה"]));
+    send(&mut core, None);
+    let second = waiting(&mut core);
+    assert_eq!(
+        second.iter().map(|p| p.1.as_str()).collect::<Vec<_>>(),
+        ["פסקה ג", "פסקה ד", "פסקה ה"]
+    );
+
+    // "ניסוח מחדש" rewrites one paragraph where it is.
+    *fake.answer.lock().unwrap() = Some(answer(&["פסקה ד בניסוח אחר"]));
+    send(&mut core, Some(&second[1].0));
+    let third = waiting(&mut core);
+    assert_eq!(
+        third[1],
+        (second[1].0.clone(), "פסקה ד בניסוח אחר".to_owned())
+    );
+    assert_eq!(third.len(), 3);
+
+    assert_eq!(core.approve_section(&case, "kindergarten").unwrap(), 3);
+    assert!(waiting(&mut core).is_empty());
+    let section = core
+        .case_detail(&case)
+        .unwrap()
+        .sections
+        .into_iter()
+        .find(|s| s.key == "kindergarten")
+        .unwrap();
+    assert_eq!(
+        section.paragraphs.len(),
+        4,
+        "1 + 3 approved, the replaced ones gone"
+    );
+}

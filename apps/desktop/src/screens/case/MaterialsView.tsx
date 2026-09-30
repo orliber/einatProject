@@ -105,6 +105,8 @@ export function MaterialsView({ api }: { api: CaseApi }) {
         </div>
       </div>
       <ErrorLine error={error} />
+      <Checklist api={api}
+        onAdd={(kind) => kind === "test_scores" ? setScoring({}) : kind === "upload" ? fileRef.current?.click() : setWriting({ kind })} />
       <div className="view-body">
         <section className="materials-list" aria-label="רשימת החומרים">
           {sorted.length === 0 && (
@@ -309,5 +311,60 @@ function WriteDialog(props: { caseId: string; kind: InputKind; input?: CaseInput
         <ErrorLine error={error} />
       </div>
     </Dialog>
+  );
+}
+
+type Need = {
+  label: string;
+  kinds: InputKind[];
+  /** What it gives the report, in her words. */
+  feeds: string;
+  required: boolean;
+  add: InputKind | "upload";
+  addLabel: string;
+};
+
+/** What an assessment usually rests on (docs/REPORT_STRUCTURE.md), deterministic. */
+const NEEDS: Need[] = [
+  { label: "אינטייק עם ההורים", kinds: ["intake"], feeds: "רקע, התפתחות ותיאור ההורים", required: true, add: "intake", addLabel: "רישום אינטייק" },
+  { label: "דיווח מהמסגרת החינוכית", kinds: ["kindergarten"], feeds: "סעיף המסגרת החינוכית", required: true, add: "kindergarten", addLabel: "רישום שיחה עם הגננת" },
+  { label: "ציוני מבחנים", kinds: ["test_scores"], feeds: "כלי האבחון והפרופיל הקוגניטיבי", required: true, add: "test_scores", addLabel: "הזנת ציונים" },
+  { label: "המפגשים והתצפית שלך", kinds: ["session_note", "observation"], feeds: "הופעה והתרשמות, משחק ומישור רגשי", required: true, add: "session_note", addLabel: "רישום מפגש" },
+  { label: "דוחות ואבחונים קודמים", kinds: ["prior_report", "professional"], feeds: "אבחונים וטיפולים (אם יש)", required: false, add: "upload", addLabel: "העלאת מסמך" },
+];
+
+/** "What is there and what is missing": one line per kind of material, with the next action. */
+function Checklist({ api, onAdd }: { api: CaseApi; onAdd: (kind: InputKind | "upload") => void }) {
+  const { detail } = api;
+  const count = (n: Need) => detail.inputs.filter((i) => n.kinds.includes(i.kind)).length;
+  const missing = NEEDS.filter((n) => n.required && count(n) === 0).length;
+  const [open, setOpen] = useState(missing > 0);
+  return (
+    <section className="checklist" aria-label="מה יש בתיק ומה חסר">
+      <button type="button" className="checklist-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <b className="grow">
+          {missing === 0 ? "✓ יש בתיק את כל סוגי החומרים שהדוח נשען עליהם" : `חסרים ${missing} סוגי חומרים שהדוח נשען עליהם`}
+        </b>
+        {!detail.meta.consent && <span className="chip chip-sand">חסרה הסכמת הורים</span>}
+        <span aria-hidden="true">{open ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <ul className="checklist-items">
+          {NEEDS.map((n) => {
+            const c = count(n);
+            return (
+              <li key={n.label} className={c > 0 ? "have" : n.required ? "missing" : "optional"}>
+                <span className="check-mark" aria-hidden="true">{c > 0 ? "✓" : n.required ? "!" : "–"}</span>
+                <span className="grow stack" style={{ gap: 0 }}>
+                  <b>{n.label}{c > 1 && ` (${c})`}</b>
+                  <span className="small muted">{c > 0 ? `מזין: ${n.feeds}` : n.required ? `חסר · נחוץ ל: ${n.feeds}` : `לא חובה · ${n.feeds}`}</span>
+                </span>
+                {c === 0 && <button type="button" className="btn btn-small" onClick={() => onAdd(n.add)}>{n.addLabel}</button>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }
