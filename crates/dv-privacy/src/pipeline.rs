@@ -257,6 +257,42 @@ const PROFESSION_CUES: &[&str] = &[
     "מנהלת",
 ];
 
+/// "עובדת" is a job only when a job or a workplace follows: "עובדת כמורה", "עובד בבנק",
+/// "עובדת בתור…", "עובד אצל…". "עובדת איתו על המעברים", "מנהלת הגן" are ordinary words
+/// in a report and are not asked about.
+fn is_profession_context(cue: &str, next: Option<&str>) -> bool {
+    let work = ["עובד", "עובדת", "עובדים", "מועסק", "מועסקת"]
+        .iter()
+        .any(|w| normalize(w) == cue);
+    let manager = ["מנהל", "מנהלת"].iter().any(|w| normalize(w) == cue);
+    let Some(next) = next else {
+        return !work && !manager;
+    };
+    if work {
+        return next.starts_with('כ')
+            || (next.starts_with('ב')
+                && !["בגן", "בקבוצה", "בבית", "בכיתה", "בשיתוף", "בטיפול"]
+                    .iter()
+                    .any(|w| normalize(w) == next))
+            || ["בתור", "אצל"].iter().any(|w| normalize(w) == next);
+    }
+    if manager {
+        return ![
+            "הגן",
+            "בית",
+            "המסגרת",
+            "הצהרון",
+            "המעון",
+            "הכיתה",
+            "את",
+            "שיחה",
+        ]
+        .iter()
+        .any(|w| normalize(w) == next);
+    }
+    true
+}
+
 /// Names no lexicon can know: whatever follows a name label ("שם הילד: …"), the family name
 /// after "משפחת", and a surname right after a first name or a declared name ("נועם ברקוביץ",
 /// "דנה כהן-לוי"). Declared names are already replaced; what is left becomes a suspect.
@@ -496,7 +532,9 @@ fn find_suspects(
             });
             continue;
         }
-        if PROFESSION_CUES.iter().any(|c| normalize(c) == tok.norm) {
+        if PROFESSION_CUES.iter().any(|c| normalize(c) == tok.norm)
+            && is_profession_context(&tok.norm, next)
+        {
             // Flag the cue and the next two words ("עובדת כמנהלת חשבונות").
             let end = tokens
                 .get(i + 2)
@@ -534,8 +572,34 @@ fn find_suspects(
 
 /// Run layers 2–6 on one piece of text.
 pub fn filter(text: &str, ctx: &PrivacyContext<'_>) -> Result<FilterOutcome, PrivacyError> {
+    let text = &plain_brackets(text, ctx);
     let (reps, suspects) = analyze(text, ctx)?;
     Ok(assemble(text, &reps, &suspects))
+}
+
+/// Square brackets around words that are not a tag ("[מחנכת]" written by the model, "[...]"
+/// in a document) become round ones, so the words inside are filtered like any other text and
+/// never pass for a tag. A real tag stays: this case's (already filtered), a generic one, or
+/// another case's, which the gate then refuses. Same length, so every offset still holds.
+fn plain_brackets(text: &str, ctx: &PrivacyContext<'_>) -> String {
+    static BRACKETED: std::sync::LazyLock<Option<regex::Regex>> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"\[[^\[\]\n]{1,40}\]").ok());
+    let Some(re) = BRACKETED.as_ref() else {
+        return text.to_owned();
+    };
+    let known = |t: &str| {
+        crate::gate::GENERIC_TAGS.contains(&t)
+            || t.starts_with("[חסר")
+            || ctx.identities.iter().any(|i| i.tag == t)
+    };
+    let mut out = text.to_owned();
+    for m in re.find_iter(text) {
+        if !known(m.as_str()) {
+            out.replace_range(m.start()..=m.start(), "(");
+            out.replace_range(m.end() - 1..m.end(), ")");
+        }
+    }
+    out
 }
 
 /// Filter a whole text once, so every rule sees the full context, and also return the outcome
@@ -549,6 +613,7 @@ pub fn filter_split(
     ctx: &PrivacyContext<'_>,
     ranges: &[Range<usize>],
 ) -> Result<(FilterOutcome, Option<Vec<FilterOutcome>>), PrivacyError> {
+    let text = &plain_brackets(text, ctx);
     let (reps, suspects) = analyze(text, ctx)?;
     let whole = assemble(text, &reps, &suspects);
     let mut parts = Vec::with_capacity(ranges.len());

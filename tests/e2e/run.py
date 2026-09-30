@@ -139,7 +139,7 @@ try:
     button("פתיחת התיק").click()
 
     # 3. Materials: import a Word document and a PDF.
-    expect_text("עוד אין חומרים בתיק")
+    expect_text("מה יש בתיק")
     shot("materials-empty")
     file_input = find("//input[@type='file']")
     d.execute_script("arguments[0].hidden = false;", file_input)
@@ -188,12 +188,13 @@ try:
     time.sleep(1)
     shot("materials")
 
-    # 3b. Sorting the materials into sections (D-022), through the review screen (demo mode).
-    button("מיון החומרים לסעיפים").click()
-    expect_text("לפני שליחה ל-Claude", 60)
+    # 3b. On the way to writing, the materials are sorted into sections (D-022), through the
+    # review screen (demo mode).
+    button("לכתיבת הדוח").click()
+    expect_text("שום דבר לא נשלח עד", 60)
     time.sleep(0.5)
     body = d.find_element(By.TAG_NAME, "body").text
-    log.append("     sorting review: unknown name 'יובל' flagged = " + str("יובל" in body and "לא מופיע" in body))
+    log.append("     sorting review: unknown name 'יובל' flagged = " + str("יובל" in body and "מי זה" in body))
     for _ in range(8):
         pending = [b for b in d.find_elements(By.XPATH, "//button[normalize-space()='להסתיר את השם' or normalize-space()='זה לא שם, להשאיר' or normalize-space()='מילה רגילה, להשאיר']") if b.is_displayed()]
         if not pending:
@@ -208,12 +209,14 @@ try:
     log.append("     sorting: materials sorted = " + str("מוינו לסעיפים" in body or "מוין לסעיפים" in body))
     shot("sorted")
 
-    # 4. A section: draft from the sources, with the review screen.
-    section = find("//button[contains(@class,'side-section')][.//span[normalize-space()='איכויות התקשורת']]")
-    d.execute_script("arguments[0].scrollIntoView({block: 'center'});", section)
-    section.click()
-    button("כתיבת טיוטה עם Claude").click()
-    expect_text("לפני שליחה ל-Claude", 60)
+    # 4. A section, written from the report page: the contents bring it into view.
+    find("//button[contains(@class,'contents-item')][.//span[normalize-space()='איכויות התקשורת']]").click()
+    time.sleep(1)
+    here = "//div[starts-with(@id,'sec-')][.//h3[normalize-space()='איכויות התקשורת']]"
+    gap = find(here + "//button[contains(@class,'a4-gap')]")
+    d.execute_script("arguments[0].scrollIntoView({block: 'center'});", gap)
+    gap.click()
+    expect_text("שום דבר לא נשלח עד", 60)
     time.sleep(0.5)
     shot("review-suspect")
     body = d.find_element(By.TAG_NAME, "body").text
@@ -231,27 +234,25 @@ try:
         time.sleep(1)
     shot("review-cleared")
     button("שליחה").click()
-    # The review closes at once; the section shows the progress, then the one draft.
-    expect_text("מחכה לאישורך", 90)
-    time.sleep(1)
+    # The review closes at once; the page shows the progress, then the one draft in place.
+    approve = find(here + "//button[normalize-space()='✓ לאשר']", 90)
+    time.sleep(0.5)
     shot("section-draft")
-    approve = [b for b in d.find_elements(By.XPATH, "//button[starts-with(normalize-space(),'אישור כל הטיוטה')]") if b.is_displayed()]
-    if approve:
-        approve[0].click()
-        time.sleep(1)
-    body = d.find_element(By.TAG_NAME, "body").text
-    log.append("     section: draft approved in one click = " + str("הסעיף אושר" in body))
+    d.execute_script("arguments[0].click();", approve)
+    time.sleep(1.5)
+    done = find(here)
+    log.append("     report page: draft approved in place = " + str(
+        not done.find_elements(By.CLASS_NAME, "a4-pending") and bool(done.find_elements(By.CLASS_NAME, "a4-editable"))))
     shot("section-approved")
 
-    # 4b. The report as it will look in Word.
-    find("//nav[contains(@class,'side-nav')]//button[contains(normalize-space(),'כמו בוורד')]").click()
+    # 4b. The report, as the file will look.
     expect_text("סעיפים מאושרים ייכנסו לקובץ", 30)
-    body = d.find_element(By.TAG_NAME, "body").text
-    log.append("     report view: approved section on the page = " + str("איכויות התקשורת" in body))
     shot("report-view")
 
-    # 5. Export (from the materials view, with the approved paragraph in the report).
-    button("הפקת דוח Word").click()
+    # 5. Export: the last stage checks, then the file.
+    find("//nav[@aria-label='שלבי התיק']//button[contains(normalize-space(),'הוצאת הדוח')]").click()
+    expect_text("לפני שהקובץ יוצא", 30)
+    button("הפקת הקובץ").click()
     expect_text("הפקת דוח Word")
     time.sleep(1)
     shot("export")
@@ -278,7 +279,7 @@ try:
     q = find("//textarea[@id='consult-q']")
     q.send_keys("מה ההבדל בין WPPSI-IV ל-WISC-V בגיל 6?")
     q.send_keys(Keys.ENTER)  # Enter sends, as in any chat
-    expect_text("לפני שליחה ל-Claude")
+    expect_text("שום דבר לא נשלח עד")
     time.sleep(0.5)
     shot("consult-review")
     find("//section[@role='dialog']//button[contains(normalize-space(),'שליחה')]").click()

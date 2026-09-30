@@ -236,3 +236,30 @@ button.crumb:hover:not([aria-current="page"]) {
   font-size: 12px;
   vertical-align: middle;
 }
+/* One click back into the case she worked on last. */
+.resume {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 24px 28px;
+  background: var(--surface);
+  border: 1px solid #cfe0dc;
+  border-radius: var(--radius-xl);
+}
+.resume-eyebrow {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--primary);
+}
+.resume-name {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 700;
+}
+.resume-progress {
+  margin-top: 6px;
+  align-items: center;
+}
+.resume-progress .bar {
+  width: 300px;
+}

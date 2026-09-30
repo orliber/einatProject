@@ -88,12 +88,15 @@ export function MaterialsView({ api }: { api: CaseApi }) {
   }
 
   const sorted = [...detail.inputs].sort((a, b) => b.created_at - a.created_at);
+  // Materials in their places: what an assessment rests on, and what is still missing.
+  const groups = [...NEEDS, OTHER].map((n) => ({ ...n, items: sorted.filter((i) => n.kinds.includes(i.kind)) }))
+    .filter((g) => g !== undefined && (g.kinds !== OTHER.kinds || g.items.length > 0));
 
   return (
     <div className="view" onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop}>
       <div className="view-head">
         <div className="stack" style={{ gap: 4 }}>
-          <h1>חומרי התיק</h1>
+          <h1>מה יש בתיק</h1>
           <p className="muted small">הכל נשמר מוצפן. ל-Claude יוצא רק טקסט אחרי הסתרה, ורק באישורך.</p>
         </div>
         <div className="row">
@@ -106,32 +109,32 @@ export function MaterialsView({ api }: { api: CaseApi }) {
       </div>
       <ErrorLine error={error} />
       {detail.meta.follows && <FollowUpPanel api={api} />}
-      <Checklist api={api}
-        onAdd={(kind) => kind === "test_scores" ? setScoring({}) : kind === "upload" ? fileRef.current?.click() : setWriting({ kind })} />
       <div className="view-body">
         <section className="materials-list" aria-label="רשימת החומרים">
-          {sorted.length === 0 && (
-            <div className="card empty-materials">
-              <b>עוד אין חומרים בתיק</b>
-              <p className="muted small">מתחילים מהחומרים שכבר יש: דוחות של רופאים וקלינאיות, אינטייק, שיחה עם הגננת, תוצאות מבחנים והסיכומים שלך.</p>
-              <ol className="start-steps small">
-                <li><b>העלאת מסמך</b>: קובץ Word, ‏ODT (LibreOffice / Google Docs) או PDF מהמחשב (אפשר גם לגרור לכאן).</li>
-                <li><b>הזנת ציונים</b>: טבלה לכל כלי, עם טווח ואחוזון מחושבים.</li>
-                <li><b>רישום מפגש</b>: מה שראית, במילים שלך.</li>
-              </ol>
-              <button type="button" className="btn btn-primary" onClick={() => fileRef.current?.click()}>העלאת מסמך מהמחשב</button>
+          {groups.map((g) => (
+            <div key={g.label} className={`slot ${g.items.length ? "have" : g.required ? "missing" : "optional"}`}>
+              <div className="slot-head">
+                <span className="check-mark" aria-hidden="true">{g.items.length ? "✓" : g.required ? "!" : "+"}</span>
+                <span className="grow stack" style={{ gap: 0 }}>
+                  <b>{g.label}{g.items.length > 1 && ` (${g.items.length})`}</b>
+                  <span className="small muted">{g.items.length ? `מזין: ${g.feeds}` : g.required ? `חסר · נחוץ ל: ${g.feeds}` : `לא חובה · ${g.feeds}`}</span>
+                </span>
+                {g.add && (
+                  <button type="button" className={g.items.length ? "icon-btn slot-add" : "btn btn-small"} aria-label={`${g.addLabel} (${g.label})`}
+                    onClick={() => (g.add === "test_scores" ? setScoring({}) : g.add === "upload" ? fileRef.current?.click() : g.add && setWriting({ kind: g.add }))}>
+                    {g.items.length ? "+" : g.addLabel}
+                  </button>
+                )}
+              </div>
+              {g.items.map((i) => (
+                <button key={i.id} type="button" className={i.id === selected ? "material selected" : "material"} onClick={() => setSelected(i.id)}>
+                  <span className="material-title">{i.title || kindLabel[i.kind]}</span>
+                  <span className="small muted">
+                    {feedText(routeOf(i.id), titleOf)}{routeOf(i.id)?.sorted && <span className="sorted-mark"> · מוין</span>} · {new Date(i.created_at * 1000).toLocaleDateString("he-IL", { day: "numeric", month: "numeric" })}
+                  </span>
+                </button>
+              ))}
             </div>
-          )}
-          {sorted.map((i) => (
-            <button key={i.id} type="button" className={i.id === selected ? "material selected" : "material"} onClick={() => setSelected(i.id)}>
-              <span className="row">
-                <span className="material-title grow">{i.title || kindLabel[i.kind]}</span>
-                <span className={i.kind === "test_scores" ? "chip chip-ok" : i.kind === "session_note" ? "chip chip-sand" : "chip"}>{kindLabel[i.kind]}</span>
-              </span>
-              <span className="small muted">
-                {feedText(routeOf(i.id), titleOf)}{routeOf(i.id)?.sorted && <span className="sorted-mark"> · מוין</span>} · {new Date(i.created_at * 1000).toLocaleDateString("he-IL", { day: "numeric", month: "numeric" })}
-              </span>
-            </button>
           ))}
           <button type="button" className={dragging ? "dropzone over" : "dropzone"} onClick={() => fileRef.current?.click()}>
             {reading ? <><Spinner /> קוראת את {reading}…</> : <><UploadIcon /> גוררים לכאן קובץ Word, ‏ODT או PDF, או לוחצים לבחירה</>}
@@ -321,7 +324,7 @@ type Need = {
   /** What it gives the report, in her words. */
   feeds: string;
   required: boolean;
-  add: InputKind | "upload";
+  add: InputKind | "upload" | null;
   addLabel: string;
 };
 
@@ -334,41 +337,8 @@ const NEEDS: Need[] = [
   { label: "דוחות ואבחונים קודמים", kinds: ["prior_report", "professional"], feeds: "אבחונים וטיפולים (אם יש)", required: false, add: "upload", addLabel: "העלאת מסמך" },
 ];
 
-/** "What is there and what is missing": one line per kind of material, with the next action. */
-function Checklist({ api, onAdd }: { api: CaseApi; onAdd: (kind: InputKind | "upload") => void }) {
-  const { detail } = api;
-  const count = (n: Need) => detail.inputs.filter((i) => n.kinds.includes(i.kind)).length;
-  const missing = NEEDS.filter((n) => n.required && count(n) === 0).length;
-  const [open, setOpen] = useState(missing > 0);
-  return (
-    <section className="checklist" aria-label="מה יש בתיק ומה חסר">
-      <button type="button" className="checklist-head" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <b className="grow">
-          {missing === 0 ? "✓ יש בתיק את כל סוגי החומרים שהדוח נשען עליהם" : `חסרים ${missing} סוגי חומרים שהדוח נשען עליהם`}
-        </b>
-        {!detail.meta.consent && <span className="chip chip-sand">חסרה הסכמת הורים</span>}
-        <span aria-hidden="true">{open ? "▴" : "▾"}</span>
-      </button>
-      {open && (
-        <ul className="checklist-items">
-          {NEEDS.map((n) => {
-            const c = count(n);
-            return (
-              <li key={n.label} className={c > 0 ? "have" : n.required ? "missing" : "optional"}>
-                <span className="check-mark" aria-hidden="true">{c > 0 ? "✓" : n.required ? "!" : "–"}</span>
-                <span className="grow stack" style={{ gap: 0 }}>
-                  <b>{n.label}{c > 1 && ` (${c})`}</b>
-                  <span className="small muted">{c > 0 ? `מזין: ${n.feeds}` : n.required ? `חסר · נחוץ ל: ${n.feeds}` : `לא חובה · ${n.feeds}`}</span>
-                </span>
-                {c === 0 && <button type="button" className="btn btn-small" onClick={() => onAdd(n.add)}>{n.addLabel}</button>}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </section>
-  );
-}
+/** Anything else (notes, pasted text). */
+const OTHER: Need = { label: "הערות וטקסט חופשי", kinds: ["free_text"], feeds: "לפי המיון", required: false, add: "free_text", addLabel: "הדבקת טקסט" };
 
 /** D-029: the scores of this follow-up next to the assessment before, by fixed rules. */
 function FollowUpPanel({ api }: { api: CaseApi }) {

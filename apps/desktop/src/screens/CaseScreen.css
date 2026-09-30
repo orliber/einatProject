@@ -358,3 +358,226 @@
   color: var(--block);
   font-size: 14px;
 }
+
+/* ---------- the case, in three stages (design canvas "פישוט הממשק") ---------- */
+.case.case-v2 {
+  flex-direction: column;
+}
+.case-bar {
+  height: 72px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.case-back {
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-weight: 600;
+  padding: 8px 4px;
+}
+.case-id {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  color: var(--ink);
+}
+.case-id:hover {
+  background: var(--surface-alt);
+}
+.case-child {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+}
+.case-age {
+  color: var(--ink-muted);
+  font-size: 15px;
+}
+.stages {
+  flex-grow: 1;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+.stage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+.stage:hover {
+  background: var(--surface-alt);
+}
+.stage.on {
+  background: var(--primary);
+  color: #fff;
+  font-weight: 700;
+}
+.stage-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  border: 1.5px solid var(--line-strong);
+}
+.stage.on .stage-dot {
+  background: #fff;
+  color: var(--primary);
+  border-color: #fff;
+}
+.stage-dot.done {
+  background: var(--ok-soft);
+  color: var(--ok);
+  border-color: transparent;
+}
+.case-body {
+  flex-grow: 1;
+  min-height: 0;
+  display: flex;
+}
+.case-v2 .work {
+  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.back-to-report {
+  align-self: flex-start;
+  margin: 12px 24px 0;
+  font-size: 14px;
+}
+/* The report's table of contents. */
+.contents {
+  width: 260px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 16px;
+  background: var(--surface);
+  border-inline-end: 1px solid var(--line);
+  overflow: hidden;
+}
+.contents-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.contents-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-muted);
+}
+.contents-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line);
+}
+.contents-bar > div {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--ok);
+}
+.contents-list {
+  position: relative;
+  flex-grow: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.contents-part {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.contents-part-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-muted);
+  padding: 0 8px 2px;
+}
+.contents-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14.5px;
+  text-align: start;
+}
+.contents-item:hover,
+.contents-item[aria-current="page"] {
+  background: var(--surface-alt);
+}
+.contents-item .dot {
+  width: 9px;
+  height: 9px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+.contents-item.st-approved .dot {
+  background: var(--ok);
+}
+.contents-item.st-pending {
+  background: var(--warn-soft);
+  font-weight: 700;
+}
+.contents-item.st-pending .dot {
+  background: #d38a2c;
+}
+.contents-item.st-writing .dot {
+  background: transparent;
+  border: 2px solid var(--primary);
+}
+.contents-item.st-empty {
+  color: var(--ink-muted);
+}
+.contents-tag {
+  font-size: 12px;
+  color: var(--warn-ink);
+}
+.contents-tag.writing {
+  color: var(--primary);
+}
+.contents-write {
+  border: 1.5px solid var(--primary);
+  color: var(--primary);
+  font-weight: 700;
+}
+/* The one next step, always in the same place. */
+.next-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 32px;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+.next-bar .next-title {
+  font-size: 16px;
+}

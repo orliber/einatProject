@@ -2190,3 +2190,58 @@ fn every_hide_answer_sticks_after_one_round() {
     assert!(again.blocked.is_empty(), "{:?}", again.blocked);
     assert!(again.approval_id.is_some());
 }
+
+/// Words the model put in square brackets ("[מחנכת]") and she approved are not tags: the
+/// summary, written from the approved sections, still goes out, the words filtered as text.
+#[test]
+fn bracketed_words_in_approved_text_do_not_block_the_summary() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    core.add_own_paragraph(
+        &case,
+        "kindergarten",
+        "לדברי [מחנכת] בגן, אלון משתתף יותר בקבוצה קטנה ב[גן השקד].",
+    )
+    .unwrap();
+    let prepared = core.prepare_section(&case, "summary", "טיוטה").unwrap();
+    assert!(prepared.blocked.is_empty(), "{:?}", prepared.blocked);
+    core.send_section(&prepared.approval_id.expect("clears the gate"))
+        .unwrap();
+    let sent = fake.sent.lock().unwrap().last().unwrap().clone();
+    assert!(sent.contains("(מחנכת)") && !sent.contains("אלון"), "{sent}");
+}
+
+/// "עובדת" is asked about only when a job or a workplace follows it.
+#[test]
+fn work_words_are_asked_about_only_before_a_job() {
+    let (_dir, mut core, case) = setup(Some(FakeTransport::default()));
+    core.add_input(
+        &case,
+        InputKind::FreeText,
+        "הערה",
+        "הגננת עובדת איתו על המעברים. מנהלת הגן הצטרפה לשיחה. האם עובדת כמנהלת חשבונות, והאב עובד בבנק.",
+    )
+    .unwrap();
+    let asked: Vec<String> = core
+        .prepare_sort(&case)
+        .unwrap()
+        .suspects
+        .into_iter()
+        .filter(|s| s.kind == dv_privacy::SuspectKind::Indirect)
+        .map(|s| s.token)
+        .collect();
+    assert!(
+        asked.iter().any(|t| t.starts_with("עובדת כמנהלת")),
+        "{asked:?}"
+    );
+    assert!(
+        asked.iter().any(|t| t.starts_with("עובד בבנק")),
+        "{asked:?}"
+    );
+    assert!(
+        !asked
+            .iter()
+            .any(|t| t.contains("איתו") || t.contains("הגן")),
+        "{asked:?}"
+    );
+}

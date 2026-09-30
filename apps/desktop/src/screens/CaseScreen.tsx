@@ -5,12 +5,14 @@ import { ReviewDialog } from "../components/ReviewDialog";
 import { ExportDialog } from "../components/ExportDialog";
 import { ReportRunDialog } from "../components/ReportRunDialog";
 import { ProgressLine, estimateMs, recordDuration, type Task } from "../components/Progress";
-import { LockIcon, ErrorLine } from "../components/ui";
+import { ErrorLine } from "../components/ui";
+import { ActionsMenu, type MenuItem } from "../components/Menu";
 import { ageWords } from "../components/AgeField";
 import { MaterialsView } from "./case/MaterialsView";
 import { SectionWork } from "./case/SectionWork";
 import { DetailsView } from "./case/DetailsView";
 import { ReportView } from "./case/ReportView";
+import { FinishView } from "./case/FinishView";
 import "./CaseScreen.css";
 
 export interface ReviewRequest {
@@ -81,7 +83,8 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [exporting, setExporting] = useState(false);
   const [fullDraft, setFullDraft] = useState(false);
-  const [openParts, setOpenParts] = useState<Record<string, boolean>>({});
+  /** A section to bring into view on the report page. */
+  const [focus, setFocus] = useState<{ key: string; at: number } | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -198,145 +201,116 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const pending = detail.sections.filter((s) => s.paragraphs.some((p) => p.status === "proposed"));
   const undrafted = fed.filter((s) => s.paragraphs.length === 0);
   const hasMaterials = detail.inputs.length > 0;
-  const hasDraft = detail.sections.some((s) => s.paragraphs.length > 0);
-  const allApproved = fed.length > 0 && fed.every((s) => s.approved) && pending.length === 0;
-  const steps: { label: string; done: boolean }[] = [
-    { label: "חומרים", done: hasMaterials },
-    { label: "טיוטה", done: hasDraft },
-    { label: "אישור הפסקאות", done: allApproved },
-    { label: "דוח Word", done: false },
-  ];
-  const currentStep = steps.findIndex((st) => !st.done);
-  const next: { title: string; note: string; action: string; run: () => void } | null = !detail.meta.consent
-    ? { title: "לפני שליחה ל-Claude צריך לרשום את הסכמת ההורים.", note: "אפשר להמשיך לאסוף חומרים גם בלי זה.", action: "רישום ההסכמה", run: () => go({ name: "case", id: caseId, view: "details" }) }
-    : !hasMaterials
-      ? null
-      : pending.length > 0
-        ? { title: `${pending.reduce((n, s) => n + s.paragraphs.filter((p) => p.status === "proposed").length, 0)} פסקאות מחכות לאישור שלך.`, note: `הראשונה בסעיף "${pending[0]?.title ?? ""}".`, action: "לאישור הפסקאות", run: () => go({ name: "case", id: caseId, view: pending[0]?.key ?? "materials" }) }
-        : unsorted > 0
-          ? { title: unsorted === 1 ? "חומר אחד עוד לא מוין לסעיפים." : `${unsorted} חומרים עוד לא מוינו לסעיפים.`, note: "Claude יקרא את החומרים אחרי הסתרת השמות, ויציע לכל סעיף רק את הקטעים שנוגעים אליו. את רואה בדיוק מה יוצא, ואפשר לשנות אחר כך.", action: "מיון החומרים לסעיפים", run: () => void startSort() }
-        : undrafted.length > 0
-          ? { title: `יש חומר ל-${undrafted.length} סעיפים. אפשר להכין להם טיוטה.`, note: "לפני שמשהו נשלח ל-Claude תראי בדיוק מה יוצא, ושמות יוחלפו בתפקידים.", action: `הכנת טיוטה ל-${undrafted.length} סעיפים`, run: () => setFullDraft(true) }
-          : allApproved
-            ? { title: "כל הסעיפים שיש להם חומר אושרו.", note: "הדוח יוצא כקובץ Word מוגן בסיסמה.", action: "הפקת דוח Word", run: () => setExporting(true) }
-            : null;
+  const pendingCount = pending.reduce((n, s) => n + s.paragraphs.filter((p) => p.status === "proposed").length, 0);
   const child = detail.identities.find((i) => i.role === "child")?.value ?? "";
   const age = detail.meta.age ? `גיל ${detail.meta.age.years}:${detail.meta.age.months}` : "";
-  const approvedCount = detail.sections.filter((s) => s.approved).length;
-  const total = detail.sections.length;
-  const parts = Array.from(new Set(detail.sections.map((s) => s.part)));
   const current = detail.sections.find((s) => s.key === view);
-  const viewTitle = view === "materials" ? "חומרי התיק" : view === "details" ? "פרטי התיק ושמות" : view === "report" ? "הדוח" : current?.title ?? "";
-  // A section shows its own job; everything else runs in the strip under the header.
-  const elsewhere = jobs.filter((j) => !j.section || j.section !== view);
+  // Three stages: materials, writing (the report page and each section), taking the report out.
+  const stage = view === "materials" ? 1 : view === "finish" ? 3 : view === "details" ? 0 : 2;
+  const toReport = (key?: string) => {
+    if (key) setFocus({ key, at: Date.now() });
+    go({ name: "case", id: caseId, view: "report" });
+  };
+  const toWriting = async () => {
+    // Sorting happens on the way to writing, so each section gets only its passages.
+    if (unsorted > 0 && detail.meta.consent) await startSort();
+    toReport();
+  };
+  const next: { title: string; note: string; action: string; run: () => void } | null =
+    stage === 0 || stage === 3
+      ? null
+      : !detail.meta.consent
+        ? { title: "לפני שליחה ל-Claude צריך לרשום את הסכמת ההורים.", note: "אפשר להמשיך לאסוף חומרים גם בלי זה.", action: "רישום ההסכמה", run: () => go({ name: "case", id: caseId, view: "details" }) }
+        : stage === 1
+          ? hasMaterials
+            ? { title: fed.length ? `יש חומר ל-${fed.length} סעיפים` : `${detail.inputs.length} חומרים בתיק`, note: unsorted > 0 ? "בדרך לכתיבה Claude יקרא את החומרים (אחרי הסתרה) ויסמן לכל סעיף רק את הקטעים שלו." : "הצעד הבא: טיוטה לכל סעיף, ואת מאשרת על הדף.", action: "לכתיבת הדוח ←", run: () => void toWriting() }
+            : null
+          : pendingCount > 0
+            ? { title: pendingCount === 1 ? "טיוטה אחת מחכה לאישור שלך" : `${pendingCount} פסקאות מחכות לאישור שלך`, note: "רק מה שאישרת נכנס לקובץ. לחיצה על פסקה פותחת אותה לעריכה.", action: `לטיוטה ב"${pending[0]?.title ?? ""}" ←`, run: () => toReport(pending[0]?.key) }
+            : unsorted > 0
+              ? { title: unsorted === 1 ? "חומר אחד עוד לא מוין לסעיפים" : `${unsorted} חומרים עוד לא מוינו לסעיפים`, note: "Claude יקרא אותם אחרי הסתרה, ויסמן לכל סעיף רק את הקטעים שלו.", action: "מיון החומרים", run: () => void startSort() }
+              : undrafted.length > 0
+                ? { title: `${undrafted.length} סעיפים עם חומר עוד לא נכתבו`, note: "כל סעיף נכתב בנפרד, רק מהחומרים שלו, ואת רואה בדיוק מה יוצא.", action: `✦ לכתוב את ${undrafted.length} הסעיפים`, run: () => setFullDraft(true) }
+                : fed.length > 0 && fed.every((s) => s.approved)
+                  ? { title: "כל הסעיפים שיש להם חומר אושרו", note: "הדוח יוצא כקובץ Word מוגן בסיסמה.", action: "להוצאת הדוח ←", run: () => go({ name: "case", id: caseId, view: "finish" }) }
+                  : null;
+  // A section shows its own job, and so does the report page; the rest run in the strip.
+  const elsewhere = jobs.filter((j) => !j.section || (j.section !== view && view !== "report"));
+  const stages: { n: number; label: string; view: string; done: boolean }[] = [
+    { n: 1, label: "חומרים", view: "materials", done: hasMaterials && unsorted === 0 },
+    { n: 2, label: "כתיבה", view: "report", done: fed.length > 0 && fed.every((s) => s.approved) && pendingCount === 0 },
+    { n: 3, label: "הוצאת הדוח", view: "finish", done: false },
+  ];
+  const more: MenuItem[] = [
+    { label: "פרטים ושמות להסתרה", run: () => go({ name: "case", id: caseId, view: "details" }) },
+    { label: "כתיבת כל הדוח עם Claude", run: () => setFullDraft(true) },
+    { label: "נעילה (Ctrl+L)", run: () => void lockNow() },
+  ];
 
   return (
-    <div className="case">
-      <aside className="side" aria-label="התיק">
-        <button type="button" className="side-back" onClick={() => go({ name: "cases" })}>→ כל התיקים</button>
-        <button type="button" className="side-case" onClick={() => go({ name: "case", id: caseId, view: "details" })}>
-          <span className="side-code">{detail.meta.code}</span>
-          <span className="side-child" title={detail.meta.age ? ageWords(detail.meta.age) : undefined}>{child}{age && ` · ${age}`}</span>
-          <span className={detail.meta.consent ? "side-consent" : "side-consent missing"}>
-            {detail.meta.consent ? `הסכמת הורים נרשמה · ${new Date(detail.meta.consent.given_on).toLocaleDateString("he-IL")}` : "חסרה הסכמת הורים"}
-          </span>
+    <div className="case case-v2">
+      <header className="case-bar">
+        <button type="button" className="case-back" onClick={() => go({ name: "cases" })}>→ תיקים</button>
+        <button type="button" className="case-id" title="פרטים ושמות להסתרה" onClick={() => go({ name: "case", id: caseId, view: "details" })}>
+          <span className="case-child">{child || detail.meta.code}</span>
+          {age && <span className="case-age" title={detail.meta.age ? ageWords(detail.meta.age) : undefined}>{age}</span>}
+          <span className={detail.meta.consent ? "chip chip-ok" : "chip chip-warn"}>{detail.meta.consent ? "✓ הסכמה" : "חסרה הסכמה"}</span>
+          {detail.meta.follows && <span className="chip chip-sand">מעקב</span>}
         </button>
-        <nav className="side-nav" aria-label="חלקי התיק">
-          <button type="button" className="side-report" aria-current={view === "report" ? "page" : undefined} onClick={() => go({ name: "case", id: caseId, view: "report" })}>
-            <span>הדוח (כמו בוורד)</span><span className="side-count">{approvedCount}/{total}</span>
-          </button>
-          <button type="button" aria-current={view === "materials" ? "page" : undefined} onClick={() => go({ name: "case", id: caseId, view: "materials" })}>
-            <span>חומרי התיק</span><span className="side-count">{detail.inputs.length}</span>
-          </button>
-          <button type="button" aria-current={view === "details" ? "page" : undefined} onClick={() => go({ name: "case", id: caseId, view: "details" })}>
-            <span>פרטים ושמות להסתרה</span><span className="side-count">{detail.identities.length}</span>
-          </button>
-
+        <nav className="stages" aria-label="שלבי התיק">
+          {stages.map((st) => (
+            <button key={st.n} type="button" className={stage === st.n ? "stage on" : "stage"} aria-current={stage === st.n ? "step" : undefined}
+              onClick={() => (st.n === 2 ? toReport() : go({ name: "case", id: caseId, view: st.view }))}>
+              <span className={st.done && stage !== st.n ? "stage-dot done" : "stage-dot"} aria-hidden="true">{st.done && stage !== st.n ? "✓" : st.n}</span>
+              {st.label}
+            </button>
+          ))}
         </nav>
-        <div className="side-progress">
-          <div className="side-progress-label"><span>הדוח</span><span>{approvedCount} מתוך {total} סעיפים</span></div>
-          <div className="side-bar"><div style={{ width: `${Math.round((approvedCount / Math.max(total, 1)) * 100)}%` }} /></div>
-        </div>
-        <div className="side-sections">
-          {parts.map((part) => {
-            const sections = detail.sections.filter((s) => s.part === part);
-            const hasCurrent = sections.some((s) => s.key === view);
-            const open = openParts[part] ?? true;
-            return (
-              <div key={part} className="side-part">
-                <button type="button" className="side-part-title" aria-expanded={open || hasCurrent}
-                  onClick={() => setOpenParts({ ...openParts, [part]: !open })}>
-                  <span>{part}</span>
-                  <span>{sections.filter((s) => s.approved).length}/{sections.length}</span>
-                </button>
-                {(open || hasCurrent) && sections.map((s) => {
-                  const st = sectionState(s);
-                  const pending = s.paragraphs.filter((p) => p.status === "proposed").length;
-                  const writing = jobs.some((j) => j.section === s.key);
-                  return (
-                    <button key={s.key} type="button" className={`side-section st-${st}`}
-                      aria-current={view === s.key ? "page" : undefined}
-                      onClick={() => go({ name: "case", id: caseId, view: s.key })}>
-                      <span className="dot" aria-hidden="true" />
-                      <span className="grow">{s.title}</span>
-                      {writing ? <span className="side-pending">כותב…</span> : pending > 0 && <span className="side-pending">טיוטה לאישור</span>}
-                      <span className="visually-hidden">{st === "approved" ? "אושר" : st === "pending" ? "ממתין" : "ריק"}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            );
-          })}
-        </div>
-        <button type="button" className="side-draft" onClick={() => setFullDraft(true)}>כתיבת כל הדוח עם Claude</button>
-      </aside>
-
-      <div className="work">
-        <header className="work-head">
-          <ol className="case-steps" aria-label="שלבי התיק">
-            {steps.map((st, i) => (
-              <li key={st.label} className={st.done ? "cs done" : i === currentStep ? "cs current" : "cs"} aria-current={i === currentStep ? "step" : undefined}>
-                <span className="cs-dot" aria-hidden="true">{st.done ? "✓" : i + 1}</span>{st.label}
-                {st.done && <span className="visually-hidden"> (הושלם)</span>}
-              </li>
-            ))}
-          </ol>
-          <span className="visually-hidden">{viewTitle}</span>
-          {status.demo_mode && <span className="chip chip-sand" title="לא הוגדר מפתח API בהגדרות">מצב הדגמה</span>}
-          <button type="button" className="btn" onClick={() => go({ name: "consult", caseId })}>התייעצות</button>
-          <button type="button" className="btn btn-primary" onClick={() => setExporting(true)}>הפקת דוח Word</button>
-          <button type="button" className="btn" title="נעילה (Ctrl+L)" onClick={() => void lockNow()}><LockIcon size={15} /> נעילה</button>
-        </header>
-        <ErrorLine error={error} />
-        {(elsewhere.length > 0 || failures.length > 0) && (
-          <section className="jobs-strip" aria-label="Claude עובד">
-            {elsewhere.map((j) => <ProgressLine key={j.id} started={j.started} estimate={j.estimate} label={j.label} />)}
-            {failures.map((f) => (
-              <div key={f.id} className="job-failed" role="alert">
-                <span className="grow"><b>{f.label}: לא הצליח.</b> {f.message} שום דבר לא נכנס לדוח; אפשר לנסות שוב.</span>
-                {f.section && f.section !== view && (
-                  <button type="button" className="btn btn-small" onClick={() => go({ name: "case", id: caseId, view: f.section ?? "materials" })}>לסעיף</button>
-                )}
-                <button type="button" className="icon-btn" aria-label="סגירה" onClick={() => setFailures((all) => all.filter((x) => x.id !== f.id))}>×</button>
-              </div>
-            ))}
-          </section>
-        )}
-        {view === "materials" && next && (
-          <section className="next-step" aria-label="הצעד הבא">
-            <div className="grow stack" style={{ gap: 4 }}>
-              <span className="next-eyebrow">הצעד הבא</span>
-              <b className="next-title">{next.title}</b>
-              <span className="muted">{next.note}</span>
+        {status.demo_mode && <span className="chip chip-sand" title="לא הוגדר מפתח API בהגדרות">מצב הדגמה</span>}
+        <button type="button" className="btn" onClick={() => go({ name: "consult", caseId })}>התייעצות</button>
+        <ActionsMenu items={more} label="עוד פעולות: פרטים ושמות, כתיבת כל הדוח, נעילה" />
+      </header>
+      <ErrorLine error={error} />
+      {(elsewhere.length > 0 || failures.length > 0) && (
+        <section className="jobs-strip" aria-label="Claude עובד">
+          {elsewhere.map((j) => <ProgressLine key={j.id} started={j.started} estimate={j.estimate} label={j.label} />)}
+          {failures.map((f) => (
+            <div key={f.id} className="job-failed" role="alert">
+              <span className="grow"><b>{f.label}: לא הצליח.</b> {f.message} שום דבר לא נכנס לדוח; אפשר לנסות שוב.</span>
+              {f.section && f.section !== view && (
+                <button type="button" className="btn btn-small" onClick={() => toReport(f.section)}>לסעיף</button>
+              )}
+              <button type="button" className="icon-btn" aria-label="סגירה" onClick={() => setFailures((all) => all.filter((x) => x.id !== f.id))}>×</button>
             </div>
-            <button type="button" className="btn btn-primary btn-big" onClick={next.run}>{next.action}</button>
-          </section>
-        )}
-        {view === "materials" && <MaterialsView api={api} />}
-        {view === "details" && <DetailsView api={api} />}
-        {view === "report" && <ReportView api={api} onWriteAll={() => setFullDraft(true)} />}
-        {current && <SectionWork key={current.key} api={api} section={current} />}
+          ))}
+        </section>
+      )}
+
+      <div className="case-body">
+        {stage === 2 && <Contents detail={detail} jobs={jobs} view={view} onOpen={(key) => toReport(key)} onWriteAll={() => setFullDraft(true)} />}
+        <div className="work">
+          {view === "materials" && <MaterialsView api={api} />}
+          {view === "details" && <DetailsView api={api} />}
+          {view === "report" && <ReportView api={api} onWriteAll={() => setFullDraft(true)} focus={focus} />}
+          {view === "finish" && <FinishView api={api} onExport={() => setExporting(true)} onOpen={(key) => toReport(key)} />}
+          {current && (
+            <>
+              <button type="button" className="link-small back-to-report" onClick={() => toReport(current.key)}>→ חזרה לדוח</button>
+              <SectionWork key={current.key} api={api} section={current} />
+            </>
+          )}
+        </div>
       </div>
+
+      {next && (
+        <footer className="next-bar" aria-label="הצעד הבא">
+          <div className="grow stack" style={{ gap: 2 }}>
+            <b className="next-title">{next.title}</b>
+            <span className="small muted">{next.note}</span>
+          </div>
+          <button type="button" className="btn btn-primary btn-big" onClick={next.run}>{next.action}</button>
+        </footer>
+      )}
 
       {exporting && <ExportDialog api={api} onClose={() => setExporting(false)} />}
       {fullDraft && <ReportRunDialog api={api} onClose={() => setFullDraft(false)} />}
@@ -355,5 +329,48 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
           }} />
       )}
     </div>
+  );
+}
+
+/** The report's table of contents: every section with its state, one click to it on the page. */
+function Contents(props: { detail: CaseDetail; jobs: Job[]; view: string; onOpen: (key: string) => void; onWriteAll: () => void }) {
+  const { detail, jobs, view } = props;
+  const content = detail.sections.filter((s) => s.key !== "signature");
+  const approved = content.filter((s) => s.approved && !s.paragraphs.some((p) => p.status === "proposed")).length;
+  const waiting = content.filter((s) => s.paragraphs.some((p) => p.status === "proposed")).length;
+  const empty = content.filter((s) => s.paragraphs.length === 0);
+  const writable = empty.filter((s) => s.source_count > 0 || !s.sortable).length;
+  const parts = Array.from(new Set(detail.sections.map((s) => s.part)));
+  return (
+    <aside className="contents" aria-label="תוכן הדוח">
+      <div className="contents-head">
+        <span className="contents-label">תוכן הדוח</span>
+        <div className="contents-bar" aria-hidden="true"><div style={{ width: `${Math.round((approved / Math.max(content.length, 1)) * 100)}%` }} /></div>
+        <span className="small muted">{approved} מאושרים · {waiting} לאישור · {empty.length} ריקים</span>
+      </div>
+      <nav className="contents-list">
+        {parts.map((part) => (
+          <div key={part} className="contents-part">
+            <span className="contents-part-title">{part}</span>
+            {detail.sections.filter((s) => s.part === part).map((s) => {
+              const writing = jobs.some((j) => j.section === s.key);
+              const st = writing ? "writing" : sectionState(s);
+              return (
+                <button key={s.key} type="button" className={`contents-item st-${st}`} aria-current={view === s.key ? "page" : undefined} onClick={() => props.onOpen(s.key)}>
+                  <span className="dot" aria-hidden="true" />
+                  <span className="grow">{s.title}</span>
+                  {st === "pending" && <span className="contents-tag">לאישור</span>}
+                  {st === "writing" && <span className="contents-tag writing">כותב…</span>}
+                  <span className="visually-hidden">{st === "approved" ? "אושר" : st === "pending" ? "ממתין לאישור" : st === "writing" ? "נכתב עכשיו" : "ריק"}</span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </nav>
+      {writable > 0 && (
+        <button type="button" className="btn contents-write" onClick={props.onWriteAll}>✦ לכתוב את {writable} הריקים</button>
+      )}
+    </aside>
   );
 }

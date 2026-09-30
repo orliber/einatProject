@@ -25,8 +25,6 @@ export function ReviewDialog(props: {
   const [error, setError] = useState<string | null>(null);
 
   const c = prepared.checks;
-  const nameSuspects = prepared.suspects.filter((s) => s.kind !== "indirect").length;
-  const indirect = prepared.suspects.filter((s) => s.kind === "indirect").length;
 
   async function decide(s: Suspect, kind: "hide" | "is_name" | "not_a_name") {
     if (!props.caseId) return;
@@ -66,7 +64,8 @@ export function ReviewDialog(props: {
   const context = question ? contextOf(prepared, question.token) : null;
 
   return (
-    <Dialog title="לפני שליחה ל-Claude" subtitle={<>{props.title} · שום דבר לא נשלח עד שתלחצי "שליחה"</>}
+    <Dialog title={question ? (prepared.suspects.length === 1 ? "שאלה אחת לפני ששולחים" : `${prepared.suspects.length} שאלות לפני ששולחים`) : "לפני שליחה ל-Claude"}
+      subtitle={<>{props.title} · שום דבר לא נשלח עד שתלחצי "שליחה"</>}
       icon={<span className="review-shield"><ShieldIcon /></span>}
       onClose={props.onClose}
       footer={
@@ -88,27 +87,9 @@ export function ReviewDialog(props: {
         </>
       }>
       <div className="stack review">
-        <div className="summary">
-          <div className="sum ok">
-            <span className="sum-mark" aria-hidden="true">✓</span>
-            <div><b>{c.declared_names ? `${c.declared_names} שמות הוחלפו בתפקיד` : "אין שמות מהתיק בטקסט"}</b>
-              <span className="small muted">Claude מקבל "הילד", "האם", "הגננת"</span></div>
-          </div>
-          <div className="sum ok">
-            <span className="sum-mark" aria-hidden="true">✓</span>
-            <div><b>{c.patterns ? `${c.patterns} פרטים מזהים הוחלפו` : "אין ת\"ז, טלפון או תאריך"}</b>
-              <span className="small muted">תאריכים הופכים ל"לפני כחודש"</span></div>
-          </div>
-          <div className={question ? "sum warn" : "sum ok"}>
-            <span className="sum-mark" aria-hidden="true">{question ? "?" : "✓"}</span>
-            <div><b>{question ? (prepared.suspects.length === 1 ? "שאלה אחת לפני שליחה" : `${prepared.suspects.length} שאלות לפני שליחה`) : "אין שאלות פתוחות"}</b>
-              <span className="small muted">{question ? (nameSuspects ? "שם שלא מופיע ברשימה" : indirect ? "פרט שיכול לזהות" : "מילה שדומה לשם") : "אפשר לשלוח"}</span></div>
-          </div>
-        </div>
-
+        {question && prepared.suspects.length > 1 && <span className="small muted">שאלה 1 מתוך {prepared.suspects.length}. כל תשובה נזכרת בתיק הזה.</span>}
         {question && (
           <section className="question" role="alert" aria-label="שאלה לפני שליחה">
-            {prepared.suspects.length > 1 && <span className="small muted">שאלה 1 מתוך {prepared.suspects.length}</span>}
             <h3 className="question-title">
               {question.kind === "ambiguous_word" ? <>המילה <b>{question.token}</b>: מילה רגילה או שם?</>
                 : question.kind === "indirect" ? <>{question.message}</>
@@ -150,8 +131,14 @@ export function ReviewDialog(props: {
         ))}
         <ErrorLine error={error} />
 
+        <ul className="review-checks">
+          <li><span aria-hidden="true">✓</span>{c.declared_names ? `${c.declared_names} שמות מהתיק יוחלפו בתפקיד ("הילד", "האם", "הגננת")` : "אין שמות מהתיק בטקסט"}</li>
+          <li><span aria-hidden="true">✓</span>{c.patterns ? `${c.patterns} פרטים מזהים יוחלפו (תאריכים הופכים ל"לפני כחודש")` : "אין ת\"ז, טלפון או תאריך"}</li>
+          {!question && !blockedOnly.length && <li><span aria-hidden="true">✓</span>אין שאלות פתוחות. אפשר לשלוח.</li>}
+        </ul>
+
         <details className="full-text" open={!question && prepared.parts.length <= 2}>
-          <summary>להציג את הטקסט המלא: מה כתוב בתיק מול מה ש-Claude יקבל</summary>
+          <summary>להציג בדיוק מה יוצא מהמחשב</summary>
           <div className="review-cols">
             <section className="card review-col" aria-label="מה שכתוב בתיק">
               <h4 className="col-title">מה שכתוב בתיק (נשאר במחשב)</h4>
