@@ -49,7 +49,7 @@ export function ReportView({ api, focus }: { api: CaseApi; onWriteAll: () => voi
     <div className="view">
       <div className="report-desk">
         {/* The page is the whole screen (D-036); one quiet line says how to work on it. */}
-        <p className="report-hint">לוחצים על פסקה כדי לערוך · ✦ בשוליים לשנות עם AI · בין פסקאות: "+ פסקה משלי כאן"</p>
+        <p className="report-hint">לוחצים על פסקה כדי לערוך · ✦ ליד פסקה (במעבר עכבר) לשנות עם AI · בין פסקאות: "+ פסקה משלי כאן"</p>
         <article className="a4" style={{ fontFamily: settings?.font ? `"${settings.font}", var(--font-display)` : undefined }} aria-label="הדוח, כמו בקובץ">
           <header className="a4-header">{settings?.confidentiality}</header>
           <h1 className="a4-title">{settings?.title ?? "דוח אבחון פסיכולוגי"}</h1>
@@ -189,7 +189,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
     editing?.id === p.id ? (
       <div key={p.id}>{editor}</div>
     ) : (
-      <div key={p.id} className="a4-para">
+      <div key={p.id} className={paraPop === p.id || deleting === p.id ? "a4-para is-active" : "a4-para"}>
         <p className={p.by_ai ? "a4-p a4-editable" : "a4-p a4-editable a4-own"} tabIndex={0} title={note ?? "לחיצה לעריכה"}
           onClick={() => setEditing({ id: p.id, text: p.text })}
           onKeyDown={(e) => { if (e.key === "Enter") setEditing({ id: p.id, text: p.text }); }}>
@@ -404,7 +404,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
 /** The AI mark: the same sparkle whichever model writes (D-036). */
 function SparkIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />
       <path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z" />
     </svg>
@@ -413,7 +413,7 @@ function SparkIcon() {
 
 function TrashIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M4 7h16" />
       <path d="M10 11v6M14 11v6" />
       <path d="M6 7l1 13h10l1-13" />

@@ -123,11 +123,17 @@ export function Spinner() {
   return <span className="spinner" aria-hidden="true" />;
 }
 
+/** A short confirmation that goes away by itself. The timer starts once per message:
+ *  a new `onDone` on every render of the parent must not keep it on screen. */
 export function Toast({ text, onDone }: { text: string; onDone: () => void }) {
+  const done = useRef(onDone);
   useEffect(() => {
-    const t = window.setTimeout(onDone, 6000);
+    done.current = onDone;
+  });
+  useEffect(() => {
+    const t = window.setTimeout(() => done.current(), 3500);
     return () => window.clearTimeout(t);
-  }, [onDone]);
+  }, [text]);
   return <div className="toast" role="status">{text}</div>;
 }
 
