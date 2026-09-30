@@ -12,12 +12,14 @@ const FORMAT: Record<string, string> = { docx: "Word", odt: "ODT", pdf: "PDF", t
 export function ImportDialog(props: {
   caseId: string;
   preview: ImportPreview;
+  /** Uploaded from a slot: the kind of that slot, not a guess. */
+  kind?: InputKind | undefined;
   onClose: () => void;
   onSaved: (inputId: string) => Promise<void>;
 }) {
   const { fail } = useApp();
   const p = props.preview;
-  const [kind, setKind] = useState<InputKind>(p.suggested_kind);
+  const [kind, setKind] = useState<InputKind>(props.kind ?? p.suggested_kind);
   const [title, setTitle] = useState(p.title);
   const [body, setBody] = useState(p.body);
   const [editing, setEditing] = useState(false);
@@ -63,7 +65,7 @@ export function ImportDialog(props: {
       <div className="import">
         <div className="import-side stack">
           <fieldset className="plain stack" style={{ gap: 8 }}>
-            <legend className="label">סוג החומר <span className="small muted">(הוצע לפי התוכן)</span></legend>
+            <legend className="label">סוג החומר <span className="small muted">{props.kind ? "(לפי המשבצת שממנה הועלה)" : "(הוצע לפי התוכן)"}</span></legend>
             <div className="kind-chips">
               {kindOrder.map((k) => (
                 <label key={k} className={k === kind ? "kind-chip on" : "kind-chip"}>
