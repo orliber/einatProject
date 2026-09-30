@@ -2245,3 +2245,37 @@ fn work_words_are_asked_about_only_before_a_job() {
         "{asked:?}"
     );
 }
+
+/// A section title that holds the child's name ("שאלון הסתגלות" for "אלון") is template text:
+/// the section and the summary built on it go out without a question, and the name does not.
+#[test]
+fn a_section_title_holding_the_childs_name_blocks_nothing() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let abas = core
+        .add_input(
+            &case,
+            InputKind::FreeText,
+            "הערה על ABAS",
+            "ההורים מילאו את ABAS. התפקוד המעשי בטווח הממוצע.",
+        )
+        .unwrap()
+        .id;
+    core.set_input_sections(&case, &abas, &["adaptive".to_owned()])
+        .unwrap();
+    let prepared = core.prepare_section(&case, "adaptive", "טיוטה").unwrap();
+    assert!(prepared.suspects.is_empty(), "{:?}", prepared.suspects);
+    assert!(prepared.blocked.is_empty(), "{:?}", prepared.blocked);
+    core.send_section(&prepared.approval_id.unwrap()).unwrap();
+    core.approve_section(&case, "adaptive").unwrap();
+
+    let summary = core.prepare_section(&case, "summary", "טיוטה").unwrap();
+    assert!(summary.blocked.is_empty(), "{:?}", summary.blocked);
+    core.send_section(&summary.approval_id.unwrap()).unwrap();
+    for sent in fake.sent.lock().unwrap().iter() {
+        assert!(
+            !sent.contains("אלון"),
+            "the child's name left inside a title"
+        );
+    }
+}

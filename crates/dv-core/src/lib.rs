@@ -369,6 +369,26 @@ impl Review {
     }
 }
 
+/// A section's title as Claude gets it. The title is template text, not case text, yet
+/// "שאלון הסתגלות" holds ש + "אלון" when that is the child's name: then the section's
+/// description goes instead (or nothing), so there is nothing to ask, block or leak.
+fn model_title(
+    sec: &dv_domain::ReportSection,
+    ctx: &PrivacyContext<'_>,
+) -> Result<String, CoreError> {
+    let clean = |t: &str| -> Result<bool, CoreError> {
+        let o = filter(t, ctx).map_err(|e| CoreError::Internal(e.to_string()))?;
+        Ok(o.suspects.is_empty() && o.tagged == t)
+    };
+    Ok(if clean(&sec.title)? {
+        sec.title.clone()
+    } else if clean(&sec.about)? {
+        sec.about.clone()
+    } else {
+        String::new()
+    })
+}
+
 impl Core {
     /// `dir` is the vault folder (the shell passes the OS local-app-data folder).
     #[must_use]
@@ -1331,7 +1351,7 @@ impl Core {
                 today: today(),
             };
             let run = |t: &str| filter(t, &ctx).map_err(|e| CoreError::Internal(e.to_string()));
-
+            let fixed_title = |sec: &dv_domain::ReportSection| model_title(sec, &ctx);
             let mut review = Review::default();
             let mut tagged_sources = Vec::new();
             let mut source_rows = Vec::new();
@@ -1386,7 +1406,7 @@ impl Core {
                     if !text.is_empty() {
                         let out = run(&text.join("\n"))?;
                         review.add(format!("סעיף מאושר · {}", s.title), &out);
-                        approved_context.push((s.title.clone(), out.tagged));
+                        approved_context.push((fixed_title(s)?, out.tagged));
                     }
                 }
             }
@@ -1419,7 +1439,7 @@ impl Core {
             review.add("הבקשה שלך".to_owned(), &instr);
             let input = SectionInput {
                 section_key: section.key.clone(),
-                section_title: section.title.clone(),
+                section_title: fixed_title(&section)?,
                 age: meta.age.map(dv_domain::Age::display),
                 gender: meta.child_gender,
                 sources: tagged_sources,
@@ -1719,7 +1739,7 @@ impl Core {
                         .into_iter()
                         .filter(|d| d.status == DraftStatus::Approved)
                     {
-                        lines.push(format!("{}: {}", s.title, d.text_tagged));
+                        lines.push(format!("{}: {}", model_title(s, &ctx)?, d.text_tagged));
                     }
                 }
                 if !lines.is_empty() {
