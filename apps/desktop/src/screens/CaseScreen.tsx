@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../App";
 import { ipc, type CaseDetail, type Prepared, type SortResult } from "../ipc/client";
 import { ReviewDialog } from "../components/ReviewDialog";
@@ -69,6 +69,10 @@ function sectionState(s: CaseDetail["sections"][number]): SectionState {
 export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const { go, fail, lockNow, status, notify } = useApp();
   const [detail, setDetail] = useState<CaseDetail | null>(null);
+  const detailRef = useRef<CaseDetail | null>(null);
+  useEffect(() => {
+    detailRef.current = detail;
+  }, [detail]);
   const [error, setError] = useState<string | null>(null);
   const [review, setReview] = useState<{ r: ReviewRequest; done: (sent: boolean) => void; failed: (e: unknown) => void } | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -95,6 +99,13 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     };
   }, [caseId, fail]);
 
+  // Where she is now: a job that ends while she works elsewhere says so where she is.
+  const viewRef = useRef(view);
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
+  const [failures, setFailures] = useState<{ id: number; label: string; section?: string; message: string }[]>([]);
+
   const track = useCallback(
     async <T,>(job: { label: string; task: Task; section?: string }, run: () => Promise<T>): Promise<T> => {
       const j: Job = { ...job, id: ++jobSeq, started: Date.now(), estimate: estimateMs(job.task, status.speed, status.demo_mode) };
@@ -102,12 +113,18 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
       try {
         const out = await run();
         if (!status.demo_mode) recordDuration(job.task, status.speed, Date.now() - j.started);
+        const title = detailRef.current?.sections.find((s) => s.key === job.section)?.title;
+        if (job.section && viewRef.current !== job.section && title) notify(`הטיוטה ל"${title}" מוכנה לאישור. היא מחכה בסעיף.`);
         return out;
+      } catch (e) {
+        // Never lost silently, wherever she is by then.
+        setFailures((f) => [...f, { id: j.id, label: job.label, ...(job.section ? { section: job.section } : {}), message: fail(e as never) }]);
+        throw e;
       } finally {
         setJobs((js) => js.filter((x) => x.id !== j.id));
       }
     },
-    [status.speed, status.demo_mode],
+    [status.speed, status.demo_mode, notify, fail],
   );
 
   const startReview = useCallback(
@@ -118,7 +135,12 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
           r.onSend(r.prepared.approval_id).then(() => resolve(true), reject);
           return;
         }
-        setReview({ r, done: resolve, failed: reject });
+        // One review at a time: one that is replaced counts as "went back", so whoever
+        // waited for it is never left waiting (and never stuck "busy").
+        setReview((prev) => {
+          if (prev) queueMicrotask(() => prev.done(false));
+          return { r, done: resolve, failed: reject };
+        });
       }),
     [status.review_only_suspect],
   );
@@ -261,9 +283,18 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
           <button type="button" className="btn" title="נעילה (Ctrl+L)" onClick={() => void lockNow()}><LockIcon size={15} /> נעילה</button>
         </header>
         <ErrorLine error={error} />
-        {elsewhere.length > 0 && (
+        {(elsewhere.length > 0 || failures.length > 0) && (
           <section className="jobs-strip" aria-label="Claude עובד">
             {elsewhere.map((j) => <ProgressLine key={j.id} started={j.started} estimate={j.estimate} label={j.label} />)}
+            {failures.map((f) => (
+              <div key={f.id} className="job-failed" role="alert">
+                <span className="grow"><b>{f.label}: לא הצליח.</b> {f.message} שום דבר לא נכנס לדוח; אפשר לנסות שוב.</span>
+                {f.section && f.section !== view && (
+                  <button type="button" className="btn btn-small" onClick={() => go({ name: "case", id: caseId, view: f.section ?? "materials" })}>לסעיף</button>
+                )}
+                <button type="button" className="icon-btn" aria-label="סגירה" onClick={() => setFailures((all) => all.filter((x) => x.id !== f.id))}>×</button>
+              </div>
+            ))}
           </section>
         )}
         {view === "materials" && next && (

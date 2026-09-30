@@ -517,6 +517,18 @@ fn find_suspects(
             }
         }
     }
+    // An answer "not a name / keep as is" holds for every kind of question, whatever part
+    // of the word was flagged: a question that comes back after it was answered cannot be
+    // answered at all.
+    out.retain(|s| {
+        let whole = tokens
+            .iter()
+            .filter(|t| t.start < s.end && s.start < t.end)
+            .map(|t| t.norm.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        !(ctx.allowlisted)(&normalize(&s.suspect.token)) && !(ctx.allowlisted)(&whole)
+    });
     out
 }
 

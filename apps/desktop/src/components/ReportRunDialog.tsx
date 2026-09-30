@@ -29,7 +29,9 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
 
   function apply(list: [string, Prepared][]) {
     setItems(list);
-    setState(Object.fromEntries(list.map(([k, p]) => [k, p.approval_id ? "ready" : "question"])));
+    // A section still being written (the window was closed and opened again) is not sent twice.
+    const busy = new Set(api.jobs.map((j) => j.section));
+    setState(Object.fromEntries(list.map(([k, p]) => [k, busy.has(k) ? "writing" : p.approval_id ? "ready" : "question"])));
   }
 
   async function load() {
@@ -50,10 +52,15 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
   }, []);
 
   const title = (key: string) => api.detail.sections.find((s) => s.key === key)?.title ?? key;
+  /** A section written by an earlier opening of this window is done once its job ends. */
+  const stateOf = (key: string): RowState => {
+    const st = state[key] ?? "ready";
+    return st === "writing" && started[key] === undefined && !api.jobs.some((j) => j.section === key) ? "done" : st;
+  };
   const rows = items ?? [];
-  const ready = rows.filter(([k]) => state[k] === "ready");
-  const done = rows.filter(([k]) => state[k] === "done").length;
-  const finished = items !== null && rows.length > 0 && rows.every(([k]) => state[k] === "done" || state[k] === "failed");
+  const ready = rows.filter(([k]) => stateOf(k) === "ready");
+  const done = rows.filter(([k]) => stateOf(k) === "done").length;
+  const finished = items !== null && rows.length > 0 && rows.every(([k]) => stateOf(k) === "done" || stateOf(k) === "failed");
   const totalLeft = useMemo(() => Math.ceil(ready.length / PARALLEL) * draftMs, [ready.length, draftMs]);
 
   async function sortFirst() {
@@ -139,7 +146,7 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
           {finished ? (
             <>
               <button type="button" className="btn" onClick={() => { onClose(); go({ name: "case", id: api.caseId, view: "report" }); }}>לתצוגת הדוח</button>
-              <button type="button" className="btn btn-primary" onClick={() => { const first = rows.find(([k]) => state[k] === "done"); onClose(); if (first) go({ name: "case", id: api.caseId, view: first[0] }); }}>לאישור הטיוטות</button>
+              <button type="button" className="btn btn-primary" onClick={() => { const first = rows.find(([k]) => stateOf(k) === "done"); onClose(); if (first) go({ name: "case", id: api.caseId, view: first[0] }); }}>לאישור הטיוטות</button>
             </>
           ) : (
             <>
@@ -177,7 +184,7 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
         {items && items.length === 0 && <p className="muted">אין סעיפים שמחכים לטיוטה: לכל סעיף עם חומרים כבר יש טיוטה, או שעוד אין חומרים. מוסיפים חומרים ב"חומרי התיק".</p>}
 
         {rows.map(([key, p]) => {
-          const st = state[key] ?? "ready";
+          const st = stateOf(key);
           return (
             <div key={key} className={`card run-row st-${st}`}>
               <div className="run-row-head">

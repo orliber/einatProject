@@ -35,7 +35,12 @@ export function ReviewDialog(props: {
     try {
       await ipc.decideSuspect(props.caseId, s.token,
         kind === "hide" ? { decision: "hide", role: s.suggested_role } : { decision: kind });
-      setPrepared(await props.reprepare());
+      const next = await props.reprepare();
+      setPrepared(next);
+      // A question that comes back after an answer must say so, never look frozen.
+      if (next.suspects.some((x) => x.token === s.token && x.kind === s.kind)) {
+        setError(`ההחלטה על "${s.token}" נשמרה, אבל המילה עדיין מסומנת. אפשר לבחור אפשרות אחרת, או לחזור לעריכה ולשנות את הניסוח.`);
+      }
     } catch (e) {
       setError(fail(e as never));
     } finally {
