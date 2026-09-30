@@ -129,6 +129,12 @@ export function ReviewDialog(props: {
         {blockedOnly.map((b, i) => (
           <p key={i} className="error">{b.message}{b.detail ? `: ${b.detail}` : ""}</p>
         ))}
+        {blockedOnly.length > 0 && (
+          <p className="note-sand small">
+            הבדיקה האחרונה עצרה את השליחה כדי להגן על הפרטיות, ושום דבר לא יצא. אם מה שנעצר נמצא בטקסט שלך,
+            חוזרים לעריכה ומתקנים. אם לא ברור מאיפה זה בא, אפשר להעתיק את ההודעה הזאת ולשלוח לאור.
+          </p>
+        )}
         <ErrorLine error={error} />
 
         <ul className="review-checks">
