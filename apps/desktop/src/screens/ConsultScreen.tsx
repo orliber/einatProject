@@ -8,6 +8,8 @@ import { ErrorLine, Spinner } from "../components/ui";
 import { useWords, wordsSoFar } from "../components/Progress";
 import { ConfirmDialog } from "./library/LibraryDialogs";
 import { ipc, type ConsultationSummary, type Prepared } from "../ipc/client";
+import { useRotating, useRotatingPlaceholder } from "../components/Rotating";
+import { CONSULT_HINTS, CONSULT_IDEAS } from "../i18n/suggestions";
 import "./ConsultScreen.css";
 
 interface Turn {
@@ -21,12 +23,6 @@ interface Turn {
   /** A user turn still waiting for the review screen or for the answer. */
   pending?: boolean;
 }
-
-const IDEAS = [
-  "איך לנסח המלצה לליווי רגשי בגן בלי להבהיל את ההורים?",
-  "מה ההבדל בין WPPSI-IV ל-WISC-V בגיל 6, ומתי עדיף כל אחד?",
-  "אילו שאלונים מתאימים להערכת ויסות חושי בגיל 5?",
-];
 
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -78,6 +74,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   const [busy, setBusy] = useState(false);
   const [waitingSince, setWaitingSince] = useState<number | null>(null);
   const [sending, setSending] = useState<string | null>(null);
+  const hint = `${useRotatingPlaceholder(CONSULT_HINTS, message.length > 0)} · שמות יוסתרו אוטומטית`;
   const [review, setReview] = useState<{ prepared: Prepared; text: string } | null>(null);
   const [copied, setCopied] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<ConsultationSummary | null>(null);
@@ -240,11 +237,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
                 <h2>{title}</h2>
                 <p className="muted">כלי אבחון, ניסוח, ספרות מקצועית או שיקולים קליניים. Claude מבחין בין ידע מבוסס לדעה, וההחלטה המקצועית נשארת שלך. השיחות נשמרות מוצפנות בכספת, ושיחה על תיק נמחקת יחד איתו.</p>
                 <span className="label ideas-label">אפשר להתחיל מאחת מאלה</span>
-                <div className="ideas">
-                  {IDEAS.map((q) => (
-                    <button key={q} type="button" className="idea" onClick={() => { setMessage(q); input.current?.focus(); }}>{q}</button>
-                  ))}
-                </div>
+                <Ideas onPick={(q) => { setMessage(q); input.current?.focus(); }} />
               </div>
             )}
             {turns.map((t, i) =>
@@ -288,7 +281,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
           <form className="chat-composer" onSubmit={(e) => void ask(e)}>
             <label htmlFor="consult-q" className="visually-hidden">שאלה ל-Claude</label>
             <div className="chat-input">
-              <textarea id="consult-q" ref={input} rows={1} className="grow" placeholder="כתבי שאלה… שמות יוסתרו אוטומטית"
+              <textarea id="consult-q" ref={input} rows={1} className="grow" placeholder={hint}
                 value={message} onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={(e) => {
                   // Enter sends, Shift+Enter is a new line (as in every chat).
@@ -323,6 +316,19 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
             await qc.invalidateQueries({ queryKey: ["consultations"] });
           }} />
       )}
+    </div>
+  );
+}
+
+/** Three opening ideas at a time, changing every few seconds; still while the mouse is on them. */
+function Ideas({ onPick }: { onPick: (q: string) => void }) {
+  const [hover, setHover] = useState(false);
+  const ideas = useRotating(CONSULT_IDEAS, 3, 9000, hover);
+  return (
+    <div className="ideas" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} onFocus={() => setHover(true)} onBlur={() => setHover(false)}>
+      {ideas.map((q) => (
+        <button key={q} type="button" className="idea" onClick={() => onPick(q)}>{q}</button>
+      ))}
     </div>
   );
 }

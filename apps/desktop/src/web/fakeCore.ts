@@ -112,6 +112,7 @@ export class FakeCore {
   private model = "claude-opus-5";
   private speed = "balanced";
   private reviewOnlySuspect = false;
+  private screenProtection = true;
   private report: ReportSettings = {
     title: "דוח אבחון פסיכולוגי-התפתחותי",
     font: "David",
@@ -284,7 +285,7 @@ export class FakeCore {
     return {
       vault_exists: this.vaultExists, unlocked: this.unlocked, disk_encryption: "on", cloud_synced_folder: null, fips_active: true,
       demo_mode: true, model: this.model, speed: this.speed, integrity_warning: null, lock_minutes: this.lockMinutes,
-      practitioner: this.practitioner, review_only_suspect: this.reviewOnlySuspect, review_choice_available: true,
+      practitioner: this.practitioner, review_only_suspect: this.reviewOnlySuspect, review_choice_available: true, screen_protection: !this.unlocked || this.screenProtection,
     };
   }
 
@@ -535,6 +536,9 @@ export class FakeCore {
       case "set_practitioner":
         this.practitioner = a.names as string[];
         return null;
+      case "set_screen_protection":
+        this.screenProtection = Boolean(a.on);
+        return null;
       case "set_review_only_suspect":
         this.reviewOnlySuspect = Boolean(a.on);
         return null;
@@ -745,13 +749,21 @@ export class FakeCore {
       case "edit_paragraph": {
         const c = this.find(a.caseId);
         const d = c.drafts.find((x) => x.id === a.draftId) ?? fail("not_found", "הפסקה לא נמצאה");
+        if (!String(a.text).trim()) {
+          c.drafts = c.drafts.filter((x) => x.id !== d.id);
+          return null;
+        }
         d.text = this.filterFor(c, String(a.text)).tagged;
         d.byAi = false;
         return null;
       }
       case "add_own_paragraph": {
         const c = this.find(a.caseId);
-        c.drafts.push({ id: newId("d"), section: String(a.sectionKey), text: this.filterFor(c, String(a.text)).tagged, status: "approved", byAi: false, sources: [] });
+        const d = { id: newId("d"), section: String(a.sectionKey), text: this.filterFor(c, String(a.text)).tagged, status: "approved" as const, byAi: false, sources: [] };
+        const after = a.after ? c.drafts.findIndex((x) => x.id === a.after) : -1;
+        if (after >= 0) c.drafts.splice(after + 1, 0, d);
+        else if (a.first) c.drafts.splice(Math.max(0, c.drafts.findIndex((x) => x.section === d.section)), 0, d);
+        else c.drafts.push(d);
         return null;
       }
       case "prepare_consult": {

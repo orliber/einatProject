@@ -246,7 +246,7 @@ try:
     shot("section-approved")
 
     # 4b. The report, as the file will look.
-    expect_text("סעיפים מאושרים ייכנסו לקובץ", 30)
+    expect_text("לוחצים על פסקה כדי לערוך", 30)
     shot("report-view")
 
     # 5. Export: the last stage checks, then the file.

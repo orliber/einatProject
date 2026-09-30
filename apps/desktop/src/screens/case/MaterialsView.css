@@ -295,3 +295,10 @@
 .slot .material {
   margin: 0;
 }
+
+/* A file dragged anywhere on the screen: the whole screen takes it. */
+.materials-drop {
+  outline: 2px dashed var(--primary);
+  outline-offset: -8px;
+  background: var(--primary-soft);
+}

@@ -15,6 +15,17 @@ const MODELS: [string, string][] = [
   ["claude-opus-4-8", "Claude Opus 4.8"],
 ];
 
+const JUMPS: [string, string][] = [
+  ["s-claude", "חיבור ל-AI"],
+  ["s-privacy", "פרטיות ונעילה"],
+  ["s-report", "הדוח"],
+  ["s-backup", "גיבוי"],
+  ["s-password", "סיסמה"],
+  ["s-activity", "יומן"],
+  ["s-update", "עדכונים"],
+  ["s-sec", "מצב האבטחה"],
+];
+
 export function SettingsScreen() {
   const { status, refresh, notify, fail } = useApp();
   const [apiKey, setApiKey] = useState("");
@@ -43,6 +54,13 @@ export function SettingsScreen() {
       <TopBar active="settings" />
       <main className="page-main settings">
         <h1 className="settings-title">הגדרות</h1>
+        {/* A long page: one row of jumps to each part. */}
+        <nav className="settings-jump" aria-label="חלקי ההגדרות">
+          {JUMPS.map(([id, label]) => (
+            <button key={id} type="button" className="settings-jump-btn"
+              onClick={() => document.getElementById(id)?.closest("section")?.scrollIntoView({ block: "start", behavior: "smooth" })}>{label}</button>
+          ))}
+        </nav>
         <ErrorLine error={error} />
 
         <section className="card setting" aria-labelledby="s-claude">
@@ -104,6 +122,16 @@ export function SettingsScreen() {
             <span>להציג את מסך "מה יוצא מהמחשב" רק כשיש חשד</span>
           </label>
           {!status.review_choice_available && <span className="hint">בשבועיים הראשונים המסך מוצג לפני כל שליחה, כדי להכיר את הסינון.</span>}
+          <label className="row">
+            <input type="checkbox" checked={status.screen_protection}
+              onChange={(e) => void run(() => ipc.setScreenProtection(e.target.checked), e.target.checked ? "ההגנה מצילום מסך הודלקה." : "ההגנה מצילום מסך כובתה עד הנעילה הבאה של הכספת.")} />
+            <span>להסתיר את התוכנה מצילומי מסך ומשיתוף מסך (Zoom, Teams)</span>
+          </label>
+          <span className="hint">
+            {status.screen_protection
+              ? "מומלץ להשאיר דלוק: מי שמצלם או משתף מסך רואה חלון ריק."
+              : "כבוי: אפשר לצלם ולשתף את המסך. מסך הנעילה תמיד מוגן, וכדאי להדליק שוב כשמסיימים."}
+          </span>
         </section>
 
         {report && (

@@ -117,6 +117,11 @@ fn describe(
         "settings_changed" if !text("secret_deleted").is_empty() => {
             ("security", "מפתח ה-API נמחק".to_owned(), false)
         }
+        "settings_changed" if text("key") == "screen_protection" => (
+            "security",
+            "ההגנה מצילום מסך ושיתוף מסך הודלקה או כובתה".to_owned(),
+            true,
+        ),
         "settings_changed" => ("security", "הגדרה עודכנה".to_owned(), false),
         "integrity_warning" => (
             "security",

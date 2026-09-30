@@ -4,6 +4,8 @@ import { ipc, type CaseDetail, type ChatView, type SectionResult } from "../../i
 import { ErrorLine, SendIcon, Spinner, WarnIcon } from "../../components/ui";
 import { ProgressLine } from "../../components/Progress";
 import { kindLabel } from "../../i18n/he";
+import { useRotatingPlaceholder } from "../../components/Rotating";
+import { DRAFT_HINTS } from "../../i18n/suggestions";
 import type { CaseApi } from "../CaseScreen";
 import "./SectionWork.css";
 
@@ -24,6 +26,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   const [chat, setChat] = useState<ChatView[]>([]);
   const [last, setLast] = useState<SectionResult | null>(null);
   const [message, setMessage] = useState("");
+  const chatHint = `${useRotatingPlaceholder(DRAFT_HINTS, message.length > 0)} · שמות יוסתרו אוטומטית`;
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [own, setOwn] = useState<string | null>(null);
@@ -379,7 +382,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
             </div>
             <div className="chat-input">
               <label htmlFor="chat-msg" className="visually-hidden">הודעה ל-Claude</label>
-              <textarea id="chat-msg" rows={2} className="textarea grow" placeholder="כתבי ל-Claude… שמות יוסתרו אוטומטית"
+              <textarea id="chat-msg" rows={2} className="textarea grow" placeholder={chatHint}
                 value={message} onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) void ask(message); }} />
               <button type="submit" className="btn btn-primary send-btn" title="תמיד מוצג קודם מה יוצא מהמחשב" disabled={working || !message.trim()}>שליחה <SendIcon /></button>

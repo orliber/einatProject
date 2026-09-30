@@ -112,14 +112,16 @@ export function MaterialsView({ api }: { api: CaseApi }) {
     .filter((g) => g !== undefined && (g.kinds !== OTHER.kinds || g.items.length > 0));
 
   return (
-    <div className="view" onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop}>
+    <div className={dragging ? "view materials-drop" : "view"} onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop}>
       <div className="view-head">
         <div className="stack" style={{ gap: 4 }}>
           <h1>מה יש בתיק</h1>
-          <p className="muted small">גוררים קובץ לכאן, או מוסיפים ישר במשבצת שלו. הכל נשמר מוצפן, ו-Claude מקבל רק טקסט אחרי הסתרה.</p>
+          <p className="muted small">גוררים קובץ Word, ‏PDF או ODT לכל מקום במסך, או ישר למשבצת שלו. הכל נשמר מוצפן, ולשליחה יוצא רק טקסט אחרי הסתרה.</p>
         </div>
         <div className="row">
-          <button type="button" className="btn btn-primary btn-big" onClick={() => chooseFile()}><UploadIcon /> העלאת מסמך</button>
+          <button type="button" className="btn btn-primary btn-big" disabled={reading !== null} onClick={() => chooseFile()}>
+            {reading ? <><Spinner /> קוראת את {reading}…</> : <><UploadIcon /> העלאת מסמך</>}
+          </button>
           <input ref={fileRef} type="file" accept={ACCEPT} hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; const k = uploadFor; setUploadFor(undefined); if (f) void readFile(f, k); }} />
         </div>
       </div>
@@ -136,7 +138,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
                 <span className="check-mark" aria-hidden="true">{g.items.length ? "✓" : g.required ? "!" : "+"}</span>
                 <span className="grow stack" style={{ gap: 0 }}>
                   <b>{g.label}{g.items.length > 1 && ` (${g.items.length})`}</b>
-                  <span className="small muted">{dropOn === g.label ? "לשחרר כאן: הקובץ ייכנס למשבצת הזו" : g.items.length ? `מזין: ${g.feeds}` : g.required ? `חסר · נחוץ ל: ${g.feeds}` : `לא חובה · ${g.feeds}`}</span>
+                  <span className="small muted">{dropOn === g.label ? "לשחרר כאן: הקובץ ייכנס למשבצת הזו" : g.items.length ? "" : g.required ? `חסר · נחוץ ל: ${g.feeds}` : `לא חובה · ${g.feeds}`}</span>
                 </span>
                 {g.items.length ? (
                   <AddMenu className="icon-btn slot-add" label={`הוספה ל${g.label}`} items={[
@@ -165,9 +167,6 @@ export function MaterialsView({ api }: { api: CaseApi }) {
               ))}
             </div>
           ))}
-          <button type="button" className={dragging ? "dropzone over" : "dropzone"} onClick={() => fileRef.current?.click()}>
-            {reading ? <><Spinner /> קוראת את {reading}…</> : <><UploadIcon /> גוררים לכאן קובץ Word, ‏ODT או PDF, או לוחצים לבחירה</>}
-          </button>
         </section>
 
       </div>

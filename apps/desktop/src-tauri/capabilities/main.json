@@ -19,6 +19,7 @@
     "allow-set-lock-minutes",
     "allow-set-practitioner",
     "allow-set-review-only-suspect",
+    "allow-set-screen-protection",
     "allow-report-settings",
     "allow-set-report-settings",
     "allow-list-cases",
