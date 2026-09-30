@@ -93,6 +93,16 @@ impl std::fmt::Debug for Created {
     }
 }
 
+/// A saved consultation (D-027). The turns are the caller's own JSON, sealed at rest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredConsultation {
+    pub id: String,
+    pub case_id: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub turns_json: String,
+}
+
 /// What opens a vault (or a backup of it).
 #[derive(Clone, Copy)]
 pub enum Secret<'a> {
@@ -773,6 +783,145 @@ impl Vault {
             .ok_or(VaultError::NotFound)
     }
 
+    // ---------------------------------------------------------------- consultations
+
+    /// The key a consultation is sealed with: its case's, or the settings key for a general one.
+    fn consultation_key(&self, case_id: Option<&str>) -> Result<Key32, VaultError> {
+        match case_id {
+            Some(c) => self.case_key(c),
+            None => Ok(self.keys.settings.clone()),
+        }
+    }
+
+    /// Create (`id` = None) or replace a consultation's turns (opaque JSON, sealed). Returns its id.
+    pub fn save_consultation(
+        &mut self,
+        id: Option<&str>,
+        case_id: Option<&str>,
+        turns_json: &str,
+    ) -> Result<String, VaultError> {
+        let key = self.consultation_key(case_id)?;
+        let t = now();
+        let id = match id {
+            Some(id) => id.to_owned(),
+            None => random_id()?,
+        };
+        let sealed = seal_str(
+            &key,
+            &aad("consultations", "turns", &id, case_id.unwrap_or("")),
+            turns_json,
+        )?;
+        let changed = self.main.execute(
+            "INSERT INTO consultations (id, case_id, created_at, updated_at, turns_enc)
+             VALUES (?1, ?2, ?3, ?3, ?4)
+             ON CONFLICT(id) DO UPDATE SET updated_at = ?3, turns_enc = ?4
+             WHERE consultations.case_id IS ?2",
+            params![id, case_id, t, sealed],
+        )?;
+        // A conversation never moves to another case: nothing is saved, and the caller knows.
+        if changed != 1 {
+            return Err(VaultError::Refused(
+                "the conversation belongs to another case".to_owned(),
+            ));
+        }
+        Ok(id)
+    }
+
+    /// Every saved consultation, newest first.
+    /// A consultation whose case is in the recycle bin is left out until it comes back.
+    pub fn consultations(&self) -> Result<Vec<StoredConsultation>, VaultError> {
+        let mut stmt = self.main.prepare(
+            "SELECT c.id, c.case_id, c.created_at, c.updated_at, c.turns_enc FROM consultations c
+             LEFT JOIN cases k ON k.id = c.case_id
+             WHERE c.case_id IS NULL OR (k.id IS NOT NULL AND k.deleted_at IS NULL)
+             ORDER BY c.updated_at DESC",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    StoredConsultation {
+                        id: r.get(0)?,
+                        case_id: r.get(1)?,
+                        created_at: r.get(2)?,
+                        updated_at: r.get(3)?,
+                        turns_json: String::new(),
+                    },
+                    r.get::<_, Vec<u8>>(4)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter()
+            .map(|(mut row, sealed)| {
+                let key = self.consultation_key(row.case_id.as_deref())?;
+                row.turns_json = crate::crypto::open_string(
+                    &key,
+                    &aad(
+                        "consultations",
+                        "turns",
+                        &row.id,
+                        row.case_id.as_deref().unwrap_or(""),
+                    ),
+                    &sealed,
+                )?;
+                Ok(row)
+            })
+            .collect()
+    }
+
+    /// One saved consultation: `(case_id, turns)`, or `None`. Hidden while its case is in the
+    /// recycle bin, like in the list.
+    pub fn consultation(&self, id: &str) -> Result<Option<(Option<String>, String)>, VaultError> {
+        let row: Option<(Option<String>, Vec<u8>)> = self
+            .main
+            .query_row(
+                "SELECT c.case_id, c.turns_enc FROM consultations c
+                 LEFT JOIN cases k ON k.id = c.case_id
+                 WHERE c.id = ?1 AND (c.case_id IS NULL OR (k.id IS NOT NULL AND k.deleted_at IS NULL))",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let Some((case_id, sealed)) = row else {
+            return Ok(None);
+        };
+        let key = self.consultation_key(case_id.as_deref())?;
+        let json = crate::crypto::open_string(
+            &key,
+            &aad(
+                "consultations",
+                "turns",
+                id,
+                case_id.as_deref().unwrap_or(""),
+            ),
+            &sealed,
+        )?;
+        Ok(Some((case_id, json)))
+    }
+
+    /// Erase one conversation, as thoroughly as a case: out of the write-ahead log too.
+    pub fn delete_consultation(&mut self, id: &str) -> Result<(), VaultError> {
+        let case_id: Option<Option<String>> = self
+            .main
+            .query_row(
+                "SELECT case_id FROM consultations WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(case_id) = case_id else {
+            return Err(VaultError::NotFound);
+        };
+        self.main
+            .execute("DELETE FROM consultations WHERE id = ?1", [id])?;
+        self.main
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        self.record(
+            AuditEvent::ConsultationDeleted,
+            case_id.as_deref(),
+            &serde_json::json!({}),
+        )
+    }
+
     pub fn folders(&self) -> Result<Vec<Folder>, VaultError> {
         let mut stmt = self.main.prepare(
             "SELECT id, parent_id, created_at, name_enc FROM folders ORDER BY created_at",
@@ -898,7 +1047,13 @@ impl Vault {
     pub fn delete_case(&mut self, case_id: &str) -> Result<(), VaultError> {
         self.case_key(case_id)?;
         let tx = self.main.unchecked_transaction()?;
-        for table in ["inputs", "messages", "drafts", "transmissions"] {
+        for table in [
+            "inputs",
+            "messages",
+            "drafts",
+            "transmissions",
+            "consultations",
+        ] {
             tx.execute(
                 &format!("DELETE FROM {table} WHERE case_id = ?1"),
                 [case_id],

@@ -274,6 +274,43 @@ pub const TITLES: &[&str] = &[
     "עו\"ד",
 ];
 
+/// Roles and professions in a salutation ("לכבוד הפסיכולוגית ההתפתחותית"): skipped after a
+/// label like a title, so the name that may follow them is still flagged.
+pub const ROLE_WORDS: &[&str] = &[
+    "פסיכולוג",
+    "פסיכולוגית",
+    "התפתחותי",
+    "התפתחותית",
+    "קליני",
+    "קלינית",
+    "חינוכי",
+    "חינוכית",
+    "רופא",
+    "רופאת",
+    "רופאה",
+    "ילדים",
+    "גננת",
+    "הגננת",
+    "מורה",
+    "מחנכת",
+    "מחנך",
+    "יועצת",
+    "יועץ",
+    "מנהלת",
+    "מנהל",
+    "קלינאית",
+    "תקשורת",
+    "מרפאה",
+    "מרפא",
+    "בעיסוק",
+    "פיזיותרפיסטית",
+    "עובדת",
+    "סוציאלית",
+    "צוות",
+    "הורי",
+    "ההורים",
+];
+
 /// Labels that introduce a person's name in forms and letters ("שם הילד: …").
 pub const NAME_LABELS: &[&str] = &[
     "שם",

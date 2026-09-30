@@ -13,9 +13,9 @@ use std::time::Duration;
 
 use dv_core::{
     ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView,
-    ConsultResult, Core, CoreError, CreatedVault, ExportCheck, ImportPreview, NameMatch, Prepared,
-    ReportSettings, RetentionItem, SectionResult, SortResult, StagedBackup, SuspectDecision,
-    UiError,
+    ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
+    ExportCheck, ImportPreview, NameMatch, Prepared, ReportSettings, RetentionItem, SectionResult,
+    SortResult, StagedBackup, SuspectDecision, UiError,
 };
 use dv_domain::{CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind};
 use tauri::Manager;
@@ -97,6 +97,11 @@ async fn lock(state: tauri::State<'_, AppState>) -> Res<()> {
 #[tauri::command]
 async fn set_api_key(state: tauri::State<'_, AppState>, key: String) -> Res<()> {
     with_core(&state, move |c| c.set_api_key(&key)).await
+}
+
+#[tauri::command]
+async fn set_speed(state: tauri::State<'_, AppState>, speed: String) -> Res<()> {
+    with_core(&state, move |c| c.set_speed(&speed)).await
 }
 
 #[tauri::command]
@@ -534,12 +539,28 @@ async fn add_own_paragraph(
 async fn prepare_consult(
     state: tauri::State<'_, AppState>,
     case_id: Option<String>,
+    conversation_id: Option<String>,
     message: String,
 ) -> Res<Prepared> {
     with_core(&state, move |c| {
-        c.prepare_consult(case_id.as_deref(), &message)
+        c.prepare_consult(case_id.as_deref(), conversation_id.as_deref(), &message)
     })
     .await
+}
+
+#[tauri::command]
+async fn consultations(state: tauri::State<'_, AppState>) -> Res<Vec<ConsultationSummary>> {
+    with_core(&state, |c| c.consultations()).await
+}
+
+#[tauri::command]
+async fn consultation(state: tauri::State<'_, AppState>, id: String) -> Res<ConsultationView> {
+    with_core(&state, move |c| c.consultation(&id)).await
+}
+
+#[tauri::command]
+async fn delete_consultation(state: tauri::State<'_, AppState>, id: String) -> Res<()> {
+    with_core(&state, move |c| c.delete_consultation(&id)).await
 }
 
 #[tauri::command]
@@ -806,6 +827,7 @@ fn main() {
             lock,
             set_api_key,
             set_model,
+            set_speed,
             set_lock_minutes,
             set_practitioner,
             set_review_only_suspect,
@@ -851,6 +873,9 @@ fn main() {
             add_own_paragraph,
             prepare_consult,
             send_consult,
+            consultations,
+            consultation,
+            delete_consultation,
             check_export,
             export_report,
             print_page,

@@ -199,12 +199,12 @@ fn no_consent_no_sending() {
         Err(CoreError::ConsentMissing)
     ));
     assert!(matches!(
-        core.prepare_consult(Some(&case), "שאלה"),
+        core.prepare_consult(Some(&case), None, "שאלה"),
         Err(CoreError::ConsentMissing)
     ));
     // A general consultation (no case) does not need a case's consent.
     assert!(core
-        .prepare_consult(None, "מה ההבדל בין WPPSI-IV ל-WISC-V?")
+        .prepare_consult(None, None, "מה ההבדל בין WPPSI-IV ל-WISC-V?")
         .unwrap()
         .approval_id
         .is_some());
@@ -320,16 +320,56 @@ fn approved_sections_feed_derived_sections() {
 }
 
 #[test]
-fn consultation_keeps_history_until_lock() {
-    let (_dir, mut core, case) = setup(None);
+fn consultations_are_kept_continued_and_deleted() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
     let p = core
-        .prepare_consult(Some(&case), "איך כדאי לנסח המלצה על ליווי רגשי לאלון?")
+        .prepare_consult(
+            Some(&case),
+            None,
+            "איך כדאי לנסח המלצה על ליווי רגשי לאלון?",
+        )
         .unwrap();
     assert!(!p.hidden.is_empty());
-    let r = core.send_consult(&p.approval_id.unwrap()).unwrap();
-    assert!(r.demo && !r.answer.is_empty());
+    let first = core.send_consult(&p.approval_id.unwrap()).unwrap();
+    assert!(!first.answer.is_empty());
+
+    // After locking and unlocking, the conversation is still there, with names shown.
     core.lock();
-    assert!(matches!(core.list_cases(), Err(CoreError::Locked)));
+    core.unlock(PASSWORD).unwrap();
+    let list = core.consultations().unwrap();
+    assert_eq!(list.len(), 1);
+    assert!(list[0].title.contains("אלון"));
+    assert!(list[0].case_label.as_deref().unwrap().contains("אלון"));
+    let view = core.consultation(&first.conversation_id).unwrap();
+    assert_eq!(view.turns.len(), 2);
+    assert!(view.turns[0].text.contains("אלון") && !view.turns[0].hidden.is_empty());
+
+    // Continuing sends the earlier turns as they were sent: filtered.
+    let p = core
+        .prepare_consult(Some(&case), Some(&first.conversation_id), "ומה עם שירה?")
+        .unwrap();
+    let again = core.send_consult(&p.approval_id.unwrap()).unwrap();
+    assert_eq!(again.conversation_id, first.conversation_id);
+    let sent = fake.sent.lock().unwrap().last().unwrap().clone();
+    for name in ["אלון", "שירה"] {
+        assert!(!sent.contains(name), "{name} left the machine");
+    }
+    assert_eq!(
+        core.consultation(&first.conversation_id)
+            .unwrap()
+            .turns
+            .len(),
+        4
+    );
+    // A conversation stays with its case.
+    assert!(matches!(
+        core.prepare_consult(None, Some(&first.conversation_id), "שאלה"),
+        Err(CoreError::Refused(_))
+    ));
+
+    core.delete_consultation(&first.conversation_id).unwrap();
+    assert!(core.consultations().unwrap().is_empty());
 }
 
 #[test]
@@ -1728,4 +1768,196 @@ fn a_lock_after_sleep_is_one_entry_with_its_reason() {
     let locks: Vec<_> = page.entries.iter().filter(|e| e.event == "lock").collect();
     assert_eq!(locks.len(), 1, "{locks:?}");
     assert!(locks[0].text.contains("שינה"));
+}
+
+#[test]
+fn a_general_conversation_continues_and_earlier_turns_are_reviewed() {
+    let (_dir, mut core, _case) = setup(None);
+    let p = core
+        .prepare_consult(None, None, "מה ההבדל בין WPPSI-IV ל-WISC-V?")
+        .unwrap();
+    let first = core.send_consult(&p.approval_id.unwrap()).unwrap();
+    let p = core
+        .prepare_consult(None, Some(&first.conversation_id), "ובגיל 6 בדיוק?")
+        .unwrap();
+    // The earlier question and answer are on the review screen, not only the new one.
+    let labels: Vec<&str> = p.parts.iter().map(|x| x.label.as_str()).collect();
+    assert!(
+        labels.iter().any(|l| l.starts_with("שאלה קודמת")),
+        "{labels:?}"
+    );
+    assert!(
+        labels.iter().any(|l| l.starts_with("תשובה קודמת")),
+        "{labels:?}"
+    );
+    let again = core.send_consult(&p.approval_id.unwrap()).unwrap();
+    assert_eq!(again.conversation_id, first.conversation_id);
+}
+
+#[test]
+fn an_answer_to_a_deleted_conversation_is_kept_in_a_new_one() {
+    let (_dir, mut core, case) = setup(None);
+    let p = core
+        .prepare_consult(Some(&case), None, "שאלה ראשונה")
+        .unwrap();
+    let first = core.send_consult(&p.approval_id.unwrap()).unwrap();
+    let p = core
+        .prepare_consult(Some(&case), Some(&first.conversation_id), "ועוד שאלה")
+        .unwrap();
+    // Deleted while the answer is on its way.
+    core.delete_consultation(&first.conversation_id).unwrap();
+    let answer = core.send_consult(&p.approval_id.unwrap()).unwrap();
+    assert_ne!(answer.conversation_id, first.conversation_id);
+    assert_eq!(
+        core.consultation(&answer.conversation_id)
+            .unwrap()
+            .turns
+            .len(),
+        2
+    );
+    assert!(core
+        .activity(None)
+        .unwrap()
+        .entries
+        .iter()
+        .any(|e| e.event == "consultation_deleted"));
+}
+
+/// The sample documents Or and Einat try the app with (`tests/samples/make_samples.py`) go
+/// through the real import, filter and gate: nothing personal leaves, the name the case does
+/// not list is asked about, and the scanned page is refused.
+#[test]
+fn the_sample_documents_leak_nothing() {
+    let out = tempfile::tempdir().unwrap();
+    let script = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/samples/make_samples.py"
+    );
+    let python = if cfg!(windows) { "python" } else { "python3" };
+    let status = std::process::Command::new(python)
+        .arg(script)
+        .arg(out.path())
+        .stdout(std::process::Stdio::null())
+        .status()
+        .expect("python runs the sample generator");
+    assert!(status.success());
+
+    let fake = FakeTransport::default();
+    let (_dir, mut core, _) = setup(Some(fake.clone()));
+    let person = |role, value: &str| IdentityInput {
+        id: None,
+        role,
+        value: value.into(),
+        aliases: vec![],
+    };
+    let meta = CaseMeta {
+        code: "TEST-0003".into(),
+        age: Some(Age {
+            years: 5,
+            months: 8,
+        }),
+        child_gender: Some(GrammaticalGender::Male),
+        consent: Some(consent()),
+        ..CaseMeta::default()
+    };
+    let case = core
+        .create_case(
+            meta,
+            vec![
+                IdentityInput {
+                    aliases: vec!["בדיוני".into()],
+                    ..person(Role::Child, "אלון")
+                },
+                person(Role::Mother, "שירה"),
+                person(Role::Father, "גיא"),
+                person(Role::Sister, "נוגה"),
+                person(Role::Teacher, "אורית"),
+                person(Role::Kindergarten, "גן השקד"),
+                person(Role::Town, "גבעת הרימון"),
+                person(Role::Slp, "ליאת"),
+                person(Role::Therapist, "דפנה"),
+                person(Role::Doctor, "ד\"ר יואב רון"),
+            ],
+        )
+        .unwrap();
+
+    let follow = out.path().join("מעקב - שנה אחרי");
+    let mut files: Vec<std::path::PathBuf> = [out.path(), follow.as_path()]
+        .iter()
+        .flat_map(|d| std::fs::read_dir(d).unwrap().flatten().map(|e| e.path()))
+        .filter(|p| p.is_file() && !p.to_string_lossy().contains("קרא אותי"))
+        .collect();
+    files.sort();
+    assert!(files.len() >= 10, "{files:?}");
+    let mut stranger_asked = false;
+    for path in &files {
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let bytes = std::fs::read(path).unwrap();
+        match core.import_document(&case, &name, &bytes) {
+            Ok(p) => {
+                stranger_asked |= p.suspects.iter().any(|s| s.token.contains("עומרי"));
+                core.add_input(&case, p.suggested_kind, &p.title, &p.body)
+                    .unwrap();
+            }
+            Err(e) => assert!(name.contains("סרוק"), "{name}: {}", e.to_ui().message),
+        }
+    }
+    assert!(
+        stranger_asked,
+        "the friend the case does not list is asked about"
+    );
+
+    // Einat's answers: the friend is hidden, "שאלון" here is "that Alon", the rest are words.
+    let mut prepared = core.prepare_sort(&case).unwrap();
+    let mut asked: Vec<String> = Vec::new();
+    for _ in 0..5 {
+        if prepared.suspects.is_empty() {
+            break;
+        }
+        for s in &prepared.suspects {
+            asked.push(s.token.clone());
+            let decision = if s.token.contains("עומרי") {
+                SuspectDecision::Hide {
+                    role: Role::OtherChild,
+                }
+            } else if s.token == "שאלון" {
+                SuspectDecision::IsName
+            } else {
+                SuspectDecision::NotAName
+            };
+            core.decide_suspect(&case, &s.token, decision).unwrap();
+        }
+        prepared = core.prepare_sort(&case).unwrap();
+    }
+    assert!(asked.len() <= 4, "few questions, each once: {asked:?}");
+    assert!(prepared.blocked.is_empty(), "{:?}", prepared.blocked);
+    core.send_sort(&prepared.approval_id.expect("clears the gate"))
+        .unwrap();
+
+    let sent = fake.sent.lock().unwrap().join("\n");
+    assert!(sent.contains("[ילד]"));
+    let phone = ["050", "000", "0000"].join("-");
+    let mail = ["shira.fake", "example.com"].join("@");
+    for secret in [
+        "אלון",
+        "שירה",
+        "גיא ",
+        "נוגה",
+        "אורית",
+        "השקד",
+        "הרימון",
+        "ליאת",
+        "דפנה",
+        "יואב",
+        "עומרי",
+        "בדיוני",
+        "000000026",
+        &phone,
+        &mail,
+        "הזית 4",
+        "לא לשלוח",
+        "הפרעת קשב",
+    ] {
+        assert!(!sent.contains(secret), "{secret} left the machine");
+    }
 }

@@ -118,6 +118,16 @@ pub const MAIN_MIGRATIONS: &[&str] = &[
      );
      ALTER TABLE cases ADD COLUMN folder_id TEXT;
      ALTER TABLE cases ADD COLUMN deleted_at INTEGER;",
+    // v5: saved consultations. The turns are sealed with the case key (general ones with the
+    // settings key), so a case's conversations are erased with the case.
+    "CREATE TABLE consultations (
+        id TEXT PRIMARY KEY,
+        case_id TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        turns_enc BLOB NOT NULL
+     );
+     CREATE INDEX consultations_updated ON consultations(updated_at);",
 ];
 
 pub const IDENTITY_MIGRATIONS: &[&str] = &[

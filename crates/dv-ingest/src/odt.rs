@@ -30,6 +30,12 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
     let mut budget = MAX_TOTAL_BYTES;
     let mut warnings = Vec::new();
 
+    // A password-protected ODT keeps its parts encrypted and says so in the manifest.
+    if read_part(&mut zip, "META-INF/manifest.xml", &mut budget)?
+        .is_some_and(|m| m.contains("encryption-data"))
+    {
+        return Err(IngestError::Encrypted);
+    }
     let content = read_part(&mut zip, "content.xml", &mut budget)?
         .ok_or_else(|| corrupt("not an OpenDocument text"))?;
     let doc = walk(&content, Part::Body)?;
@@ -43,6 +49,9 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
     }
     if doc.comments {
         warnings.push("ההערות במסמך לא יובאו.".to_owned());
+    }
+    if doc.hidden {
+        warnings.push("במסמך יש טקסט מוסתר. הוא לא יובא.".to_owned());
     }
 
     let mut margins = String::new();
@@ -66,6 +75,8 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
                 "subject",
                 "keyword",
                 "description",
+                "printed-by",
+                "user-defined",
             ],
         )?,
         None => Vec::new(),
@@ -94,6 +105,14 @@ struct Walked {
     notes: String,
     deleted: bool,
     comments: bool,
+    hidden: bool,
+}
+
+/// `<text:section text:display="none">` (or shown only on a condition).
+fn is_hidden_section(e: &quick_xml::events::BytesStart<'_>) -> bool {
+    e.attributes().flatten().any(|a| {
+        a.key.local_name().as_ref() == "display" && matches!(a.value.as_ref(), "none" | "condition")
+    })
 }
 
 /// Text of an ODF part. Paragraphs and headings are lines, list items get "- ", a table row
@@ -105,7 +124,10 @@ fn walk(xml: &str, part: Part) -> Result<Walked, IngestError> {
         notes: String::new(),
         deleted: false,
         comments: false,
+        hidden: false,
     };
+    // Inside a paragraph or heading: only there is text content (ODF 1.2 §6.1.2).
+    let mut para_depth = 0u32;
     // Inside something that is never imported (a comment, deleted text, a note's citation).
     let mut skip_depth = 0u32;
     // Inside a header or footer (Margins) or inside the office:text body (Body).
@@ -151,6 +173,17 @@ fn walk(xml: &str, part: Part) -> Result<Walked, IngestError> {
                         out.deleted = true;
                         skip_depth = 1;
                     }
+                    // Hidden text, a hidden paragraph, or a section set not to display: never
+                    // imported, like hidden text in Word.
+                    "hidden-text" | "hidden-paragraph" => {
+                        out.hidden = true;
+                        skip_depth = 1;
+                    }
+                    "section" if is_hidden_section(&e) => {
+                        out.hidden = true;
+                        skip_depth = 1;
+                    }
+                    "p" | "h" => para_depth += 1,
                     // The note's number in the text; its body is kept apart.
                     "note-citation" => skip_depth = 1,
                     "note-body" => note_depth += 1,
@@ -223,6 +256,9 @@ fn walk(xml: &str, part: Part) -> Result<Walked, IngestError> {
                     }
                     continue;
                 }
+                if matches!(name, "p" | "h") {
+                    para_depth = para_depth.saturating_sub(1);
+                }
                 let in_note = note_depth > 0;
                 let buf = if in_note {
                     &mut out.notes
@@ -245,13 +281,25 @@ fn walk(xml: &str, part: Part) -> Result<Walked, IngestError> {
                     _ => {}
                 }
             }
-            Event::Text(t) if skip_depth == 0 && keep_depth > 0 => {
+            Event::Text(t) if skip_depth == 0 && keep_depth > 0 && para_depth > 0 => {
                 let buf = if note_depth > 0 {
                     &mut out.notes
                 } else {
                     &mut out.text
                 };
-                buf.push_str(&t.xml10_content());
+                // Runs of white space are one space; line breaks come only from elements.
+                let mut last_space = buf.ends_with(' ');
+                for c in t.xml10_content().chars() {
+                    if c.is_whitespace() {
+                        if !last_space {
+                            buf.push(' ');
+                        }
+                        last_space = true;
+                    } else {
+                        buf.push(c);
+                        last_space = false;
+                    }
+                }
             }
             Event::GeneralRef(r) if skip_depth == 0 && keep_depth > 0 => {
                 let buf = if note_depth > 0 {
@@ -319,6 +367,9 @@ mod tests {
             r#"<?xml version="1.0"?><office:document-content {NS}><office:body><office:text>
 <text:tracked-changes><text:changed-region><text:deletion><text:p>טקסט שנמחק</text:p></text:deletion></text:changed-region></text:tracked-changes>
 <text:h>סיכום ביקור</text:h>
+<text:p>שורה
+    שנשברה בקובץ<text:hidden-text>שם מוסתר</text:hidden-text></text:p>
+<text:section text:name="פנימי" text:display="none"><text:p>הערה פנימית מוסתרת</text:p></text:section>
 <text:p>נצפה קושי<text:s text:c="2"/>במעברים &amp; ויסות.<office:annotation><text:p>הערה פנימית</text:p></office:annotation><text:note><text:note-citation>1</text:note-citation><text:note-body><text:p>לפי דיווח הגננת.</text:p></text:note-body></text:note></text:p>
 <text:list><text:list-item><text:p>משחק סימבולי</text:p></text:list-item></text:list>
 <table:table><table:table-row><table:table-cell><text:p>מבחן</text:p></table:table-cell><table:table-cell><text:p>ציון</text:p></table:table-cell></table:table-row></table:table>
@@ -346,12 +397,20 @@ mod tests {
         assert_eq!(out.format, Format::Odt);
         let body = &out.body;
         assert!(body.contains("סיכום ביקור\n"), "{body}");
+        // White space from the file's own line breaks is one space (ODF 1.2 §6.1.2).
+        assert!(body.contains("שורה שנשברה בקובץ\n"), "{body}");
         assert!(body.contains("נצפה קושי  במעברים & ויסות."), "{body}");
         assert!(body.contains("- משחק סימבולי"), "{body}");
         assert!(body.contains("מבחן\tציון"), "{body}");
         assert!(body.trim_end().ends_with("לפי דיווח הגננת."), "{body}");
-        for gone in ["טקסט שנמחק", "הערה פנימית", "מכון בדוי", "עמוד 1", "ישראלה"]
-        {
+        for gone in [
+            "טקסט שנמחק",
+            "הערה פנימית",
+            "שם מוסתר",
+            "מכון בדוי",
+            "עמוד 1",
+            "ישראלה",
+        ] {
             assert!(!body.contains(gone), "{gone} in the body");
         }
         assert!(out.margins.contains("מכון בדוי") && out.margins.contains("עמוד 1"));
@@ -359,7 +418,29 @@ mod tests {
             .metadata
             .iter()
             .any(|(k, v)| k == "initial-creator" && v == "ישראלה בדויה"));
-        assert_eq!(out.warnings.len(), 3, "{:?}", out.warnings);
+        assert_eq!(out.warnings.len(), 4, "{:?}", out.warnings);
+        assert!(out.warnings.iter().any(|w| w.contains("מוסתר")));
+    }
+
+    #[test]
+    fn a_password_protected_odt_says_so() {
+        let mut buf = Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut buf);
+            let stored = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            for (name, body) in [
+                ("mimetype", &b"application/vnd.oasis.opendocument.text"[..]),
+                ("META-INF/manifest.xml", &b"<manifest:encryption-data/>"[..]),
+                ("content.xml", &b"\x01\x02 not xml"[..]),
+            ] {
+                zip.start_file(name, stored)
+                    .unwrap_or_else(|e| panic!("{e}"));
+                zip.write_all(body).unwrap_or_else(|e| panic!("{e}"));
+            }
+            zip.finish().unwrap_or_else(|e| panic!("{e}"));
+        }
+        assert_eq!(extract(&buf.into_inner()), Err(IngestError::Encrypted));
     }
 
     #[test]

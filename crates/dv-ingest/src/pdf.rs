@@ -91,6 +91,9 @@ use rtl::is_hebrew;
 struct Line {
     text: String,
     in_margin_zone: bool,
+    /// Height on the page and font size, to tell a header apart from the text below it.
+    y: f64,
+    size: f64,
 }
 
 /// Share of the page height, at the top and at the bottom, where headers and footers sit.
@@ -147,6 +150,8 @@ fn page_lines(page: Page) -> Vec<Line> {
             Line {
                 text: logical(&visual),
                 in_margin_zone: !(MARGIN_ZONE..=1.0 - MARGIN_ZONE).contains(&rel),
+                y: line.first().map_or(0.0, |g| g.y),
+                size: line.iter().map(|g| g.size).fold(0.0, f64::max),
             }
         })
         .collect()
@@ -203,6 +208,30 @@ fn edge_key(line: &str) -> String {
         .collect()
 }
 
+/// On a single page: the lines in the margin zone at the top and at the bottom that a gap
+/// (more than 1.8 times their font size) separates from the text next to them.
+fn set_apart(page: &[Line]) -> Vec<(usize, usize)> {
+    let lines: Vec<usize> = (0..page.len())
+        .filter(|i| !page[*i].text.trim().is_empty())
+        .collect();
+    let mut out = Vec::new();
+    for order in [lines.clone(), lines.into_iter().rev().collect::<Vec<_>>()] {
+        let mut edge = Vec::new();
+        for (k, &i) in order.iter().enumerate() {
+            if !page[i].in_margin_zone {
+                break;
+            }
+            edge.push(i);
+            let Some(&next) = order.get(k + 1) else { break };
+            if (page[i].y - page[next].y).abs() > page[i].size * 1.8 {
+                out.extend(edge.iter().map(|i| (0, *i)));
+                break;
+            }
+        }
+    }
+    out
+}
+
 pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
     let doc = load(bytes)?;
     let mut positions = Positions::default();
@@ -237,21 +266,28 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
         }
     }
     let threshold = (pages.len() * 3).div_ceil(5).max(2);
-    let is_margin = |l: &Line| {
+    // A one-page letter has nothing to repeat: its letterhead and footer are the lines at the
+    // page's edge, set apart from the text by a wider gap than the text's own line spacing.
+    let lone: Vec<(usize, usize)> = match pages.as_slice() {
+        [page] => set_apart(page),
+        _ => Vec::new(),
+    };
+    let is_margin = |p: usize, i: usize, l: &Line| {
         l.in_margin_zone
-            && seen
-                .get(&edge_key(&l.text))
-                .is_some_and(|n| *n >= threshold)
+            && (lone.contains(&(p, i))
+                || seen
+                    .get(&edge_key(&l.text))
+                    .is_some_and(|n| *n >= threshold))
     };
 
     let mut body = String::new();
     let mut margins: Vec<String> = Vec::new();
-    for page in &pages {
-        for line in page {
+    for (p, page) in pages.iter().enumerate() {
+        for (i, line) in page.iter().enumerate() {
             if line.text.trim().is_empty() {
                 continue;
             }
-            if is_margin(line) {
+            if is_margin(p, i, line) {
                 let t = line.text.trim().to_owned();
                 if !margins.contains(&t) {
                     margins.push(t);
@@ -264,9 +300,7 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
         body.push('\n');
     }
     if !margins.is_empty() {
-        warnings.push(
-            "שורות שחוזרות בשולי העמוד (כותרת עליונה/תחתונה, מספרי עמודים) לא יובאו.".to_owned(),
-        );
+        warnings.push("שורות בשולי העמוד (כותרת עליונה/תחתונה, מספרי עמודים) לא יובאו.".to_owned());
     }
     Ok(Extracted {
         format: Format::Pdf,
@@ -379,6 +413,45 @@ mod tests {
         );
         assert!(out.margins.contains("מרכז בדוי"), "{}", out.margins);
         assert_eq!(out.pages, 2);
+    }
+
+    #[test]
+    fn a_one_page_letter_keeps_its_letterhead_and_footer_out() {
+        let page = vec![
+            (800.0, "יודב ןוכמ תנייפל ,הנד"),
+            (720.0, "תוליעפ ןיב םירבעמב השק"),
+            (706.0, "הנטק הצובקב רתוי ףתתשמ"),
+            (50.0, "000000018 .ז.ת"),
+        ];
+        let out = crate::extract(&tiny_pdf(&[page]), "l.pdf").unwrap_or_else(|e| panic!("{e}"));
+        assert!(out.body.contains("קשה במעברים בין פעילות"), "{}", out.body);
+        for gone in ["מכון", "000000018"] {
+            assert!(!out.body.contains(gone), "{gone} in {}", out.body);
+            assert!(out.margins.contains(gone), "{gone} not in {}", out.margins);
+        }
+    }
+
+    #[test]
+    fn a_one_page_text_that_runs_into_the_margin_zone_stays_in_the_body() {
+        // At the top, evenly spaced text runs into the margin zone: it is the body. At the
+        // bottom, two lines set far apart from the text are a footer.
+        let lines: Vec<(f64, &str)> = [812.0, 798.0, 784.0, 770.0, 756.0, 44.0, 30.0]
+            .iter()
+            .map(|y| (*y, "ףוגה ןמ הרוש איה וז"))
+            .chain([(400.0, "עצמאב הרוש")])
+            .collect();
+        let out = crate::extract(&tiny_pdf(&[lines]), "f.pdf").unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(
+            out.body.matches("זו היא שורה מן הגוף").count(),
+            5,
+            "{}",
+            out.body
+        );
+        assert!(
+            out.margins.contains("זו היא שורה מן הגוף"),
+            "{}",
+            out.margins
+        );
     }
 
     #[test]

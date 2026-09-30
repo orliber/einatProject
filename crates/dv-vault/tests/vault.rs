@@ -673,3 +673,41 @@ fn the_log_reads_in_pages_and_its_chain_is_checked_on_demand() {
         .eq(all.iter().map(|e| e.seq)));
     assert!(vault.audit_intact().unwrap());
 }
+
+#[test]
+fn consultations_are_sealed_and_go_with_their_case() {
+    let (dir, mut vault, _) = new_vault();
+    let case = noam(&mut vault);
+    let general = vault
+        .save_consultation(None, None, r#"[{"text":"שאלה כללית על WISC"}]"#)
+        .unwrap();
+    let about = vault
+        .save_consultation(None, Some(&case), r#"[{"text":"נועם מתקשה במעברים"}]"#)
+        .unwrap();
+    // Saving again replaces the turns; it cannot move a conversation to another case.
+    vault
+        .save_consultation(Some(&about), Some(&case), r#"[{"text":"נועם, המשך"}]"#)
+        .unwrap();
+    let all = vault.consultations().unwrap();
+    assert_eq!(all.len(), 2);
+    assert!(all
+        .iter()
+        .any(|c| c.id == about && c.turns_json.contains("המשך")));
+    drop(vault);
+    let bytes = all_bytes(dir.path());
+    assert!(!contains(&bytes, "WISC") && !contains(&bytes, "מתקשה"));
+
+    let mut vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
+    vault.trash_case(&case).unwrap();
+    assert_eq!(
+        vault.consultations().unwrap().len(),
+        1,
+        "hidden while in the bin"
+    );
+    vault.restore_case(&case).unwrap();
+    vault.delete_case(&case).unwrap();
+    let left = vault.consultations().unwrap();
+    assert_eq!((left.len(), left[0].id.as_str()), (1, general.as_str()));
+    vault.delete_consultation(&general).unwrap();
+    assert!(vault.consultations().unwrap().is_empty());
+}

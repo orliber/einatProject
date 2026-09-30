@@ -14,6 +14,8 @@ import type { CaseSummary } from "./generated/CaseSummary";
 import type { Folder } from "./generated/Folder";
 import type { NameMatch } from "./generated/NameMatch";
 import type { ChatView } from "./generated/ChatView";
+import type { ConsultationSummary } from "./generated/ConsultationSummary";
+import type { ConsultationView } from "./generated/ConsultationView";
 import type { ConsultResult } from "./generated/ConsultResult";
 import type { CreatedVault } from "./generated/CreatedVault";
 import type { ExportCheck } from "./generated/ExportCheck";
@@ -65,6 +67,7 @@ export const ipc = {
   lock: () => run("lock"),
 
   setApiKey: (key: string) => run("set_api_key", { key }),
+  setSpeed: (speed: "fast" | "balanced" | "thorough") => run("set_speed", { speed }),
   setModel: (model: string) => run("set_model", { model }),
   setLockMinutes: (minutes: number) => run("set_lock_minutes", { minutes }),
   setPractitioner: (names: string[]) => run("set_practitioner", { names }),
@@ -136,7 +139,12 @@ export const ipc = {
   addOwnParagraph: (caseId: string, sectionKey: string, text: string) =>
     run("add_own_paragraph", { caseId, sectionKey, text }),
 
-  prepareConsult: (caseId: string | null, message: string) => call<Prepared>("prepare_consult", { caseId, message }),
+  prepareConsult: (caseId: string | null, conversationId: string | null, message: string) =>
+    call<Prepared>("prepare_consult", { caseId, conversationId, message }),
+  /** Saved conversations, newest first; one conversation; delete one. */
+  consultations: () => call<ConsultationSummary[]>("consultations"),
+  consultation: (id: string) => call<ConsultationView>("consultation", { id }),
+  deleteConsultation: (id: string) => run("delete_consultation", { id }),
   sendConsult: (approvalId: string) => call<ConsultResult>("send_consult", { approvalId }),
 
   checkExport: (caseId: string) => call<ExportCheck>("check_export", { caseId }),
@@ -171,6 +179,8 @@ export const ipc = {
 
 export type {
   ActivityPage,
+  ConsultationSummary,
+  ConsultationView,
   AppStatus,
   RetentionItem,
   BackupCheckView,

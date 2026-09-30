@@ -69,6 +69,16 @@ export function SettingsScreen() {
             </select>
             <span className="hint">רק דגמים שנכללים בהסכם אפס שמירת מידע.</span>
           </div>
+          <div className="field">
+            <label htmlFor="speed">מהירות התשובות</label>
+            <select id="speed" className="select" value={status.speed}
+              onChange={(e) => void run(() => ipc.setSpeed(e.target.value as "fast" | "balanced" | "thorough"), "המהירות עודכנה.")}>
+              <option value="fast">מהיר: תשובות תוך שניות, פחות עמוק</option>
+              <option value="balanced">מאוזן (מומלץ)</option>
+              <option value="thorough">יסודי: Claude חושב יותר, לוקח יותר זמן</option>
+            </select>
+            <span className="hint">מיון החומרים תמיד מהיר. הבחירה משפיעה על ניסוח הסעיפים ועל ההתייעצות. גם "Claude Sonnet" מהיר יותר מ-Opus.</span>
+          </div>
         </section>
 
         <section className="card setting" aria-labelledby="s-privacy">

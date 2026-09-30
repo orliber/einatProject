@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-consultation"
+description = "Enables the consultation command without any pre-configured scope."
+commands.allow = ["consultation"]
+
+[[permission]]
+identifier = "deny-consultation"
+description = "Denies the consultation command without any pre-configured scope."
+commands.deny = ["consultation"]

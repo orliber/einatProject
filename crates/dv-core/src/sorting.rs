@@ -210,7 +210,7 @@ impl Core {
                 about: s.about.clone(),
             })
             .collect();
-        let model = self.model_config()?;
+        let model = self.model_for(crate::Task::Sort)?;
         let data = self.privacy_data(case_id)?;
         let demo_mode = self.demo_mode()?;
 

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::lexicon::{
-    is_name_context, PlaceKind, GENERIC_PLACE_WORDS, LEXICON, NAME_LABELS, NAME_STOP,
+    is_name_context, PlaceKind, GENERIC_PLACE_WORDS, LEXICON, NAME_LABELS, NAME_STOP, ROLE_WORDS,
     SURNAME_ENDINGS, TITLES,
 };
 use crate::matcher::PhraseIndex;
@@ -347,7 +347,10 @@ fn name_run_suspects(
                 if stop(&t.norm) || !hebrew(t) || digits(t) {
                     break;
                 }
-                if !is_title(&t.norm) && t.norm != normalize("משפחת") {
+                let role = prefix_splits(&t.norm)
+                    .iter()
+                    .any(|(_, h)| ROLE_WORDS.iter().any(|r| normalize(r) == *h));
+                if !is_title(&t.norm) && !role && t.norm != normalize("משפחת") {
                     push(t.start, t.end, &message, out);
                     taken += 1;
                 }

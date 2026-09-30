@@ -367,6 +367,10 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
                 replacement,
             );
         } else if hebrew_cal {
+            // "[אב]" is the father's tag, not the month: "[אם] ו[אב]" is not the 6th of Av.
+            if text[..tok.start].ends_with('[') && text[tok.end..].starts_with(']') {
+                continue;
+            }
             let numeral_before = i
                 .checked_sub(1)
                 .and_then(|j| tokens.get(j))
@@ -588,6 +592,9 @@ mod tests {
         assert!(kinds("האב סיפר שהילד בוכה").is_empty());
         assert_eq!(kinds("בספטמבר האחרון התחיל גן")[0].1, PatternKind::Date);
         assert_eq!(kinds("ה' באב תשפ\"ה")[0].1, PatternKind::Date);
+        // The father's tag after "and" is not "the 6th of Av".
+        assert!(kinds("[אם] ו[אב] מתארים ילד סקרן").is_empty());
+        assert_eq!(kinds("ו' אב תשפ\"ה")[0].1, PatternKind::Date);
         assert_eq!(kinds("seen on March 3, 2025")[0].1, PatternKind::Date);
     }
 
