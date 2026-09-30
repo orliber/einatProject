@@ -12,6 +12,9 @@ use dv_privacy::ClearedPayload;
 use serde_json::Value;
 use zeroize::Zeroizing;
 
+pub mod sse;
+pub mod update;
+
 pub const API_HOST: &str = "api.anthropic.com";
 const MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
 const API_VERSION: &str = "2023-06-01";
@@ -28,6 +31,8 @@ const ALLOWED_FIELDS: &[&str] = &[
     "inference_geo",
     "tools",
     "thinking",
+    // The same answer, delivered as it is written (real progress; D-035).
+    "stream",
 ];
 /// The only tool allowed, and only with an allow-list of domains (D-014).
 const ALLOWED_TOOL: &str = "web_search_20250305";
@@ -97,6 +102,17 @@ pub fn check_policy(body: &Value) -> Result<(), EgressError> {
 /// Anything that can answer a cleared request: the real API, or demo mode (`dv-ai::demo`).
 pub trait Transport: Send + Sync {
     fn send(&self, payload: &ClearedPayload) -> Result<Value, EgressError>;
+
+    /// The same, telling `progress` how many words were written so far (when the answer
+    /// arrives as a stream). Transports without a stream just answer.
+    fn send_streaming(
+        &self,
+        payload: &ClearedPayload,
+        progress: &dyn Fn(u32),
+    ) -> Result<Value, EgressError> {
+        let _ = progress;
+        self.send(payload)
+    }
 }
 
 /// Simple sliding-window limit: a runaway loop cannot send hundreds of requests.
@@ -119,7 +135,7 @@ impl RateLimit {
     }
 }
 
-fn tls_config() -> rustls::ClientConfig {
+pub(crate) fn tls_config() -> rustls::ClientConfig {
     let roots = rustls::RootCertStore {
         roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
     };
@@ -189,7 +205,7 @@ impl AnthropicTransport {
         })
     }
 
-    fn post_once(&self, body: &[u8]) -> Result<Value, EgressError> {
+    fn post_once(&self, body: &[u8], progress: &dyn Fn(u32)) -> Result<Value, EgressError> {
         let resp = self
             .client
             .post(&self.url)
@@ -210,6 +226,14 @@ impl AnthropicTransport {
                 }
             })?;
         let status = resp.status().as_u16();
+        let streamed = resp
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.starts_with("text/event-stream"));
+        if status == 200 && streamed {
+            return sse::assemble(std::io::BufReader::new(resp), progress);
+        }
         let text = resp
             .text()
             .map_err(|e| EgressError::Protocol(e.to_string()))?;
@@ -231,6 +255,14 @@ impl AnthropicTransport {
 
 impl Transport for AnthropicTransport {
     fn send(&self, payload: &ClearedPayload) -> Result<Value, EgressError> {
+        self.send_streaming(payload, &|_| {})
+    }
+
+    fn send_streaming(
+        &self,
+        payload: &ClearedPayload,
+        progress: &dyn Fn(u32),
+    ) -> Result<Value, EgressError> {
         let body: Value = serde_json::from_slice(payload.body())
             .map_err(|e| EgressError::Policy(e.to_string()))?;
         check_policy(&body)?;
@@ -240,7 +272,7 @@ impl Transport for AnthropicTransport {
         let mut delay = Duration::from_secs(2);
         let mut attempt = 0;
         loop {
-            match self.post_once(payload.body()) {
+            match self.post_once(payload.body(), progress) {
                 Err(EgressError::Unavailable(_) | EgressError::RateLimited) if attempt < 2 => {
                     std::thread::sleep(delay);
                     delay *= 2;
@@ -264,6 +296,9 @@ mod tests {
     #[test]
     fn allowed_request_passes_the_policy() {
         assert!(check_policy(&ok_body()).is_ok());
+        let mut b = ok_body();
+        b["stream"] = json!(true);
+        assert!(check_policy(&b).is_ok());
     }
 
     #[test]

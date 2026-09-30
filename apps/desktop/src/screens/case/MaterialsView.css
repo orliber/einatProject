@@ -278,6 +278,20 @@
   height: 32px;
   font-size: 18px;
 }
+.slot.drop {
+  border: 2px solid var(--primary);
+  background: var(--primary-soft);
+}
+.slot-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.slot-upload {
+  width: 32px;
+  height: 32px;
+}
 .slot .material {
   margin: 0;
 }

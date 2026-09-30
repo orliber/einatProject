@@ -80,6 +80,9 @@ fn main() {
             "check_backup",
             "restore_backup",
             "forget_backup",
+            "check_update",
+            "install_update",
+            "send_progress",
         ]));
     if let Err(error) = tauri_build::try_build(attributes) {
         panic!("tauri-build failed: {error:#}");

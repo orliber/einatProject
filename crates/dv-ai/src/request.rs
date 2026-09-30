@@ -133,6 +133,8 @@ pub(crate) fn base_body(model: &ModelConfig, system: &str, max_tokens: u32) -> V
         "inference_geo": "us",
         "output_config": { "effort": model.effort },
         "system": [ { "type": "text", "text": system, "cache_control": { "type": "ephemeral" } } ],
+        // Delivered as it is written: real progress, and no timeout on a long answer (D-035).
+        "stream": true,
     })
 }
 

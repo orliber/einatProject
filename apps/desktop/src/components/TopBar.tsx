@@ -1,6 +1,7 @@
 import { useApp, type Route } from "../App";
 import { he } from "../i18n/he";
 import { LockIcon } from "./ui";
+import { UpdateChip } from "./Update";
 import "./TopBar.css";
 
 /** The bar of the screens outside a case: cases, consultation, settings. */
@@ -19,6 +20,7 @@ export function TopBar({ active }: { active: Route["name"] }) {
         {tab("settings", "הגדרות", { name: "settings" })}
       </nav>
       <span className="grow" />
+      <UpdateChip />
       {status.demo_mode && <span className="topbar-demo" title="לא הוגדר מפתח API. התשובות הן דוגמאות מקומיות, ושום דבר לא נשלח.">מצב הדגמה</span>}
       <span className="topbar-safe"><span className="topbar-dot" aria-hidden="true" />{he.encrypted}</span>
       <button type="button" className="btn btn-small" title="נעילה (Ctrl+L)" onClick={() => void lockNow()}>

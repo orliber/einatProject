@@ -37,6 +37,26 @@ export function ActionsMenu({ items, label }: { items: MenuItem[]; label: string
   );
 }
 
+/** A small "+" (or any trigger) that opens a list of ways to add something. */
+export function AddMenu({ items, label, children, className }: { items: MenuItem[]; label: string; children: ReactNode; className?: string }) {
+  return (
+    <DropdownMenu.Root dir="rtl" modal={false}>
+      <DropdownMenu.Trigger asChild>
+        <button type="button" className={className} aria-label={label} title={label}>{children}</button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content className="menu" align="end" sideOffset={4}>
+          {items.map((it) => (
+            <DropdownMenu.Item key={it.label} className="menu-item" disabled={it.disabled ?? false} onSelect={it.run}>
+              {it.label}
+            </DropdownMenu.Item>
+          ))}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
+
 /** The same actions on right click over `children`. */
 export function RightClick({ items, children }: { items: MenuItem[]; children: ReactNode }) {
   return (

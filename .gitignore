@@ -34,3 +34,9 @@ apps/desktop/dist/
 apps/desktop/dist-preview/
 tests/e2e/out/
 sample-documents/
+
+# Update signing keys never enter the repository (D-033)
+*.pk8
+*.pem
+*.key
+release-out/

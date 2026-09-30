@@ -302,14 +302,95 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
     if !margins.is_empty() {
         warnings.push("שורות בשולי העמוד (כותרת עליונה/תחתונה, מספרי עמודים) לא יובאו.".to_owned());
     }
+    let (metadata, extra) = hidden_parts(&doc);
+    warnings.extend(extra);
     Ok(Extracted {
         format: Format::Pdf,
         body,
         margins: margins.join("\n"),
-        metadata: Vec::new(),
+        metadata,
         warnings,
         pages: u32::try_from(pages.len()).unwrap_or(u32::MAX),
     })
+}
+
+/// What a PDF carries besides its pages: file properties (shown locally, and used to suggest
+/// names to hide, like a Word file's), and comments or form fields, which are not imported.
+fn hidden_parts(doc: &Document) -> (Vec<(String, String)>, Vec<String>) {
+    let mut metadata = Vec::new();
+    let info = doc
+        .trailer
+        .get(b"Info")
+        .ok()
+        .and_then(|o| o.as_reference().ok())
+        .and_then(|id| doc.get_dictionary(id).ok());
+    if let Some(info) = info {
+        for (key, label) in [
+            (&b"Author"[..], "יוצר"),
+            (b"Title", "כותרת"),
+            (b"Subject", "נושא"),
+            (b"Keywords", "מילות מפתח"),
+            (b"Creator", "נוצר בתוכנה"),
+        ] {
+            if let Some(v) = info
+                .get(key)
+                .ok()
+                .and_then(|o| o.as_str().ok())
+                .map(pdf_string)
+            {
+                let v = v.trim().to_owned();
+                if !v.is_empty() && v.chars().count() <= 200 {
+                    metadata.push((label.to_owned(), v));
+                }
+            }
+        }
+    }
+    let mut warnings = Vec::new();
+    let annotated = doc.get_pages().values().any(|id| {
+        doc.get_dictionary(*id)
+            .ok()
+            .and_then(|p| p.get(b"Annots").ok())
+            .is_some()
+    });
+    if annotated {
+        warnings.push("הערות או סימונים שנוספו ל-PDF לא יובאו.".to_owned());
+    }
+    if doc
+        .catalog()
+        .ok()
+        .and_then(|c| c.get(b"AcroForm").ok())
+        .is_some()
+    {
+        warnings.push(
+            "שדות טופס שמולאו ב-PDF לא יובאו. אם צריך אותם, מעתיקים את התשובות ידנית.".to_owned(),
+        );
+    }
+    (metadata, warnings)
+}
+
+/// A PDF text string: UTF-16 with a byte-order mark, or single bytes (PDFDocEncoding, close
+/// enough to Latin-1 for names).
+fn pdf_string(bytes: &[u8]) -> String {
+    match bytes {
+        [0xFE, 0xFF, rest @ ..] => {
+            let units: Vec<u16> = rest
+                .chunks_exact(2)
+                .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                .collect();
+            String::from_utf16_lossy(&units)
+        }
+        [0xFF, 0xFE, rest @ ..] => {
+            let units: Vec<u16> = rest
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
+            String::from_utf16_lossy(&units)
+        }
+        _ => match std::str::from_utf8(bytes) {
+            Ok(s) => s.to_owned(),
+            Err(_) => bytes.iter().map(|&b| char::from(b)).collect(),
+        },
+    }
 }
 
 #[cfg(test)]
@@ -413,6 +494,57 @@ mod tests {
         );
         assert!(out.margins.contains("מרכז בדוי"), "{}", out.margins);
         assert_eq!(out.pages, 2);
+    }
+
+    #[test]
+    fn file_properties_are_shown_and_comments_and_form_fields_are_pointed_out() {
+        use pdf_extract::{Dictionary, Object, StringFormat};
+        let bytes = tiny_pdf(&[vec![
+            (720.0, "תוליעפ ןיב םירבעמב השק"),
+            (706.0, "הנטק הצובקב רתוי ףתתשמ"),
+            (692.0, "תוליעפ ןיב םירבעמב השק"),
+        ]]);
+        let mut doc = Document::load_mem(&bytes).unwrap_or_else(|e| panic!("{e}"));
+        let mut author = vec![0xFE, 0xFF];
+        for u in "רותם בדויה".encode_utf16() {
+            author.extend(u.to_be_bytes());
+        }
+        let mut info = Dictionary::new();
+        info.set("Author", Object::String(author, StringFormat::Hexadecimal));
+        info.set("Title", Object::string_literal("Report"));
+        let info_id = doc.add_object(info);
+        doc.trailer.set("Info", Object::Reference(info_id));
+        let page = *doc
+            .get_pages()
+            .values()
+            .next()
+            .unwrap_or_else(|| panic!("no page"));
+        if let Ok(p) = doc.get_dictionary_mut(page) {
+            p.set("Annots", Object::Array(vec![]));
+        }
+        if let Ok(c) = doc.catalog_mut() {
+            c.set("AcroForm", Object::Dictionary(Dictionary::new()));
+        }
+        let mut out = Vec::new();
+        doc.save_to(&mut out).unwrap_or_else(|e| panic!("{e}"));
+        let got = crate::extract(&out, "p.pdf").unwrap_or_else(|e| panic!("{e}"));
+        assert!(
+            got.metadata
+                .contains(&("יוצר".to_owned(), "רותם בדויה".to_owned())),
+            "{:?}",
+            got.metadata
+        );
+        assert!(
+            got.warnings.iter().any(|w| w.contains("הערות")),
+            "{:?}",
+            got.warnings
+        );
+        assert!(
+            got.warnings.iter().any(|w| w.contains("שדות טופס")),
+            "{:?}",
+            got.warnings
+        );
+        assert!(!got.body.contains("רותם"));
     }
 
     #[test]

@@ -1,0 +1,2 @@
+# Public key for signed updates (D-033). Written by `cargo xtask update-keygen` on Or's Mac.
+# Until a key is here, this build never offers an update.

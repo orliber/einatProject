@@ -4,6 +4,7 @@ import { kindLabel, kindOrder } from "../../i18n/he";
 import { ipc, type CaseInput, type FollowUpView, type ImportPreview, type InputKind, type MaterialRouting, type ScoreSheet } from "../../ipc/client";
 import type { FilterOutcome } from "../../ipc/generated/FilterOutcome";
 import { ImportDialog } from "../../components/ImportDialog";
+import { AddMenu } from "../../components/Menu";
 import { ScoresDialog } from "../../components/ScoresDialog";
 import { Dialog, ErrorLine, Segments, Spinner, UploadIcon } from "../../components/ui";
 import type { CaseApi } from "../CaseScreen";
@@ -17,7 +18,10 @@ export function MaterialsView({ api }: { api: CaseApi }) {
   // A material opens in a window when clicked; the screen itself is only the slots.
   const [selected, setSelected] = useState<string | null>(null);
   const [previewed, setPreviewed] = useState<{ id: string; outcome: FilterOutcome } | null>(null);
-  const [importing, setImporting] = useState<ImportPreview | null>(null);
+  const [importing, setImporting] = useState<{ preview: ImportPreview; kind?: InputKind | undefined } | null>(null);
+  // The slot a file is being chosen for (the "+" of that slot), so it lands in its place.
+  const [uploadFor, setUploadFor] = useState<InputKind | undefined>(undefined);
+  const [dropOn, setDropOn] = useState<string | null>(null);
   const [reading, setReading] = useState<string | null>(null);
   const [writing, setWriting] = useState<{ kind: InputKind; input?: CaseInput } | null>(null);
   const [scoring, setScoring] = useState<{ input?: CaseInput; sheet?: ScoreSheet } | null>(null);
@@ -45,11 +49,11 @@ export function MaterialsView({ api }: { api: CaseApi }) {
   }, [caseId, input]);
   const preview = previewed && input && previewed.id === input.id ? previewed.outcome : null;
 
-  async function readFile(file: File) {
+  async function readFile(file: File, kind?: InputKind) {
     setError(null);
     setReading(file.name);
     try {
-      setImporting(await ipc.importDocument(caseId, file));
+      setImporting({ preview: await ipc.importDocument(caseId, file), kind });
     } catch (e) {
       setError(fail(e as never));
     } finally {
@@ -57,11 +61,25 @@ export function MaterialsView({ api }: { api: CaseApi }) {
     }
   }
 
-  function onDrop(e: DragEvent) {
+  function onDrop(e: DragEvent, kind?: InputKind) {
     e.preventDefault();
+    e.stopPropagation();
     setDragging(false);
+    setDropOn(null);
     const file = e.dataTransfer.files[0];
-    if (file) void readFile(file);
+    if (file) void readFile(file, kind);
+  }
+
+  /** Choose a file for one slot (or for none: the kind is then suggested from the file). */
+  function chooseFile(kind?: InputKind) {
+    setUploadFor(kind);
+    fileRef.current?.click();
+  }
+
+  function write(g: Need) {
+    if (g.add === "test_scores") setScoring({});
+    else if (g.add === "upload") setWriting({ kind: g.kinds[0] ?? "free_text" });
+    else if (g.add) setWriting({ kind: g.add });
   }
 
   /** A score table entered here opens as a table again; any other material opens as text. */
@@ -101,8 +119,8 @@ export function MaterialsView({ api }: { api: CaseApi }) {
           <p className="muted small">גוררים קובץ לכאן, או מוסיפים ישר במשבצת שלו. הכל נשמר מוצפן, ו-Claude מקבל רק טקסט אחרי הסתרה.</p>
         </div>
         <div className="row">
-          <button type="button" className="btn btn-primary btn-big" onClick={() => fileRef.current?.click()}><UploadIcon /> העלאת מסמך</button>
-          <input ref={fileRef} type="file" accept={ACCEPT} hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void readFile(f); }} />
+          <button type="button" className="btn btn-primary btn-big" onClick={() => chooseFile()}><UploadIcon /> העלאת מסמך</button>
+          <input ref={fileRef} type="file" accept={ACCEPT} hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; const k = uploadFor; setUploadFor(undefined); if (f) void readFile(f, k); }} />
         </div>
       </div>
       <ErrorLine error={error} />
@@ -110,18 +128,31 @@ export function MaterialsView({ api }: { api: CaseApi }) {
       <div className="view-body">
         <section className="materials-list" aria-label="רשימת החומרים">
           {groups.map((g) => (
-            <div key={g.label} className={`slot ${g.items.length ? "have" : g.required ? "missing" : "optional"}`}>
+            <div key={g.label} className={`slot ${g.items.length ? "have" : g.required ? "missing" : "optional"}${dropOn === g.label ? " drop" : ""}`}
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDropOn(g.label); }}
+              onDragLeave={() => setDropOn((d) => (d === g.label ? null : d))}
+              onDrop={(e) => onDrop(e, g.kinds[0])}>
               <div className="slot-head">
                 <span className="check-mark" aria-hidden="true">{g.items.length ? "✓" : g.required ? "!" : "+"}</span>
                 <span className="grow stack" style={{ gap: 0 }}>
                   <b>{g.label}{g.items.length > 1 && ` (${g.items.length})`}</b>
-                  <span className="small muted">{g.items.length ? `מזין: ${g.feeds}` : g.required ? `חסר · נחוץ ל: ${g.feeds}` : `לא חובה · ${g.feeds}`}</span>
+                  <span className="small muted">{dropOn === g.label ? "לשחרר כאן: הקובץ ייכנס למשבצת הזו" : g.items.length ? `מזין: ${g.feeds}` : g.required ? `חסר · נחוץ ל: ${g.feeds}` : `לא חובה · ${g.feeds}`}</span>
                 </span>
-                {g.add && (
-                  <button type="button" className={g.items.length ? "icon-btn slot-add" : "btn btn-small"} aria-label={`${g.addLabel} (${g.label})`}
-                    onClick={() => (g.add === "test_scores" ? setScoring({}) : g.add === "upload" ? fileRef.current?.click() : g.add && setWriting({ kind: g.add }))}>
-                    {g.items.length ? "+" : g.addLabel}
-                  </button>
+                {g.items.length ? (
+                  <AddMenu className="icon-btn slot-add" label={`הוספה ל${g.label}`} items={[
+                    { label: g.add === "upload" ? "העלאת קובץ מהמחשב (וורד, PDF)" : g.addLabel, run: () => (g.add === "upload" ? chooseFile(g.kinds[0]) : write(g)) },
+                    g.add === "upload" ? { label: "הדבקת טקסט", run: () => write(g) } : { label: "העלאת קובץ מהמחשב (וורד, PDF)", run: () => chooseFile(g.kinds[0]) },
+                  ]}>+</AddMenu>
+                ) : (
+                  <span className="slot-actions">
+                    <button type="button" className="btn btn-small" aria-label={`${g.addLabel} (${g.label})`}
+                      onClick={() => (g.add === "upload" ? chooseFile(g.kinds[0]) : write(g))}>{g.addLabel}</button>
+                    <button type="button" className="icon-btn slot-upload" aria-label={g.add === "upload" ? `הדבקת טקסט (${g.label})` : `העלאת קובץ (${g.label})`}
+                      title={g.add === "upload" ? "הדבקת טקסט" : "העלאת קובץ Word, ‏PDF או ODT"}
+                      onClick={() => (g.add === "upload" ? write(g) : chooseFile(g.kinds[0]))}>
+                      {g.add === "upload" ? "✎" : <UploadIcon />}
+                    </button>
+                  </span>
                 )}
               </div>
               {g.items.map((i) => (
@@ -177,7 +208,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
         </Dialog>
       )}
       {importing && (
-        <ImportDialog caseId={caseId} preview={importing} onClose={() => setImporting(null)}
+        <ImportDialog caseId={caseId} preview={importing.preview} kind={importing.kind} onClose={() => setImporting(null)}
           onSaved={async () => { setImporting(null); await reload(); notify("המסמך נשמר בתיק."); }} />
       )}
       {scoring && (

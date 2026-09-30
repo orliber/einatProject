@@ -1005,6 +1005,7 @@ dependencies = [
 name = "dv-core"
 version = "0.1.0"
 dependencies = [
+ "aws-lc-rs",
  "dv-ai",
  "dv-domain",
  "dv-egress",
@@ -1033,6 +1034,7 @@ dependencies = [
  "dv-ipc",
  "dv-privacy",
  "rfd",
+ "serde_json",
  "tauri",
  "tauri-build",
  "zeroize",
@@ -1052,6 +1054,7 @@ dependencies = [
 name = "dv-egress"
 version = "0.1.0"
 dependencies = [
+ "aws-lc-rs",
  "dv-privacy",
  "reqwest",
  "rustls",
@@ -5698,7 +5701,9 @@ checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "aws-lc-rs",
  "cargo_metadata 0.23.1",
+ "dv-egress",
  "regex",
  "serde_json",
 ]

@@ -35,6 +35,7 @@ import type { MaterialRouting } from "./generated/MaterialRouting";
 import type { SuspectDecision } from "./generated/SuspectDecision";
 import type { FollowUpView } from "./generated/FollowUpView";
 import type { UiError } from "./generated/UiError";
+import type { UpdateView } from "./generated/UpdateView";
 
 /** Every failure reaches the UI as a UiError with a Hebrew message. */
 export function asUiError(e: unknown): UiError {
@@ -127,6 +128,8 @@ export const ipc = {
   prepareSection: (caseId: string, sectionKey: string, instruction: string, replaces?: string) =>
     call<Prepared>("prepare_section", { caseId, sectionKey, instruction, replaces: replaces ?? null }),
   prepareFullDraft: (caseId: string) => call<[string, Prepared][]>("prepare_full_draft", { caseId }),
+  /** Words Claude has written so far for a request on its way (streamed answers). */
+  sendProgress: (approvalId: string) => call<number>("send_progress", { approvalId }),
   sendSection: (approvalId: string) => call<SectionResult>("send_section", { approvalId }),
   /** D-022: sort every material not sorted yet into sections (one review screen). */
   prepareSort: (caseId: string) => call<Prepared>("prepare_sort", { caseId }),
@@ -184,9 +187,15 @@ export const ipc = {
   restoreBackup: (password: string | null, recoveryKey: string | null) =>
     call<AppStatus>("restore_backup", { password, recoveryKey }),
   forgetBackup: () => run("forget_backup"),
+
+  /** A newer version, signed by the developer (D-033); `null` when this is the newest. */
+  checkUpdate: () => call<UpdateView | null>("check_update"),
+  /** Download, verify, lock, run the installer; the program closes and opens again. */
+  installUpdate: () => run("install_update"),
 };
 
 export type {
+  UpdateView,
   ActivityPage,
   ConsultationSummary,
   ConsultationView,
