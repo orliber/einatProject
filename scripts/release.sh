@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# A new version for Einat's computer (D-033). Run on Or's Mac, from the repository root.
+#
+#   scripts/release.sh setup                  once: signing key + the public releases repository
+#   scripts/release.sh <version> <notes.txt>  every release, e.g. scripts/release.sh 0.2.0 notes.txt
+#
+# What a release does:
+#   1. the full checks, including the privacy suite (0 leaks)
+#   2. the version number in the three places it lives, one commit, a tag, pushed to main
+#   3. GitHub builds the Windows installer for that tag (.github/workflows/release.yml)
+#   4. the installer is downloaded here and its checksum compared
+#   5. the notice (version, notes, SHA-256) is signed HERE with the private key, and checked
+#      with the program's own verification code before anything is published
+#   6. installer + notice + signature go to the public releases repository; within a day
+#      every installed copy offers "יש גרסה חדשה"
+#
+# The private key never leaves this computer. Lose it, and installed copies cannot be updated
+# automatically any more (a new installer by hand fixes that); leak it, and follow
+# docs/RELEASE_HE.md → "אם המפתח דלף".
+set -euo pipefail
+
+SOURCE_REPO="orliber/einatProject"
+RELEASES_REPO="orliber/einat-vault-releases"
+KEY="${DV_UPDATE_KEY:-$HOME/.diagnostic-vault/update-signing.pk8}"
+OUT="release-out"
+
+say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
+die() { printf '\n\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
+
+need() { command -v "$1" >/dev/null || die "חסר $1 (brew install $2)"; }
+need gh gh
+need cargo rust
+need pnpm pnpm
+gh auth status >/dev/null 2>&1 || die "קודם: gh auth login"
+
+if [[ "${1:-}" == "setup" ]]; then
+  say "1/2 מפתח חתימה"
+  if [[ -f "$KEY" ]]; then
+    echo "כבר קיים: $KEY (לא נוצר חדש)"
+  else
+    cargo xtask update-keygen
+    echo "חשוב: לגבות את $KEY למקום בטוח ולא מחובר (למשל דיסק און קי בכספת)."
+  fi
+  say "2/2 ריפו ציבורי להתקנות בלבד"
+  if gh repo view "$RELEASES_REPO" >/dev/null 2>&1; then
+    echo "כבר קיים: $RELEASES_REPO"
+  else
+    gh repo create "$RELEASES_REPO" --public \
+      --description "Installers for Diagnostic Vault. No code, no data: signed installers only."
+    tmp="$(mktemp -d)"
+    cat > "$tmp/README.md" <<'EOF'
+# Diagnostic Vault – installers
+
+Signed Windows installers only. No source code and no data of any kind live here.
+Every release carries `latest.json` and `latest.json.sig` (Ed25519); the program installs a
+new version only if the signature matches the key built into it and the installer's SHA-256
+matches the signed notice.
+EOF
+    gh api -X PUT "repos/$RELEASES_REPO/contents/README.md" \
+      -f message="README" -f content="$(base64 < "$tmp/README.md" | tr -d '\n')" >/dev/null
+    rm -r "$tmp"
+  fi
+  say "סיום. עכשיו: git add crates/dv-egress/update_key.pub && commit && push (המפתח הציבורי בלבד)."
+  exit 0
+fi
+
+VERSION="${1:-}"
+NOTES="${2:-}"
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "שימוש: scripts/release.sh 0.2.0 notes.txt"
+[[ -f "$NOTES" ]] || die "קובץ 'מה חדש' חסר: $NOTES (שורה לכל שינוי, בעברית פשוטה לעינת)"
+[[ -f "$KEY" ]] || die "אין מפתח חתימה. קודם: scripts/release.sh setup"
+grep -Eq '^[0-9a-f]{64}$' crates/dv-egress/update_key.pub || die "אין מפתח ציבורי בקוד. קודם: scripts/release.sh setup, ואז commit"
+[[ -z "$(git status --porcelain)" ]] || die "יש שינויים שלא נשמרו ב-git. קודם commit או stash."
+[[ "$(git rev-parse --abbrev-ref HEAD)" == "main" ]] || die "משחררים רק מ-main"
+git pull --ff-only origin main
+git rev-parse "v$VERSION" >/dev/null 2>&1 && die "התגית v$VERSION כבר קיימת"
+
+say "1/6 בדיקות (כולל חבילת הדליפות)"
+cargo fmt --all --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+cargo test -p dv-privacy
+cargo xtask check-invariants
+cargo xtask scan --all
+(cd apps/desktop && pnpm install --frozen-lockfile && pnpm exec tsc --noEmit && pnpm lint && pnpm test)
+
+say "2/6 מספר גרסה $VERSION"
+perl -0pi -e "s/(\[workspace\.package\]\nversion = \")[^\"]+/\${1}$VERSION/" Cargo.toml
+for f in apps/desktop/src-tauri/tauri.conf.json apps/desktop/package.json; do
+  perl -pi -e "s/^(  \"version\": \")[^\"]+/\${1}$VERSION/ if \$. < 6" "$f"
+done
+cargo check -q -p dv-core
+git add Cargo.toml Cargo.lock apps/desktop/src-tauri/tauri.conf.json apps/desktop/package.json
+git commit -q -m "Release v$VERSION"
+git tag -a "v$VERSION" -m "v$VERSION"
+git push origin main "v$VERSION"
+
+say "3/6 GitHub בונה את המתקין ל-Windows (בערך 15 דקות)"
+sleep 20
+run_id="$(gh run list --repo "$SOURCE_REPO" --workflow release.yml --branch "v$VERSION" --limit 1 --json databaseId -q '.[0].databaseId')"
+[[ -n "$run_id" ]] || die "לא נמצאה ריצת בנייה לתגית v$VERSION"
+gh run watch "$run_id" --repo "$SOURCE_REPO" --exit-status
+
+say "4/6 הורדה ובדיקת checksum"
+rm -rf "$OUT" && mkdir -p "$OUT"
+gh release download "v$VERSION" --repo "$SOURCE_REPO" --dir "$OUT" \
+  -p DiagnosticVault-Setup.exe -p DiagnosticVault-Setup.exe.sha256
+(cd "$OUT" && shasum -a 256 -c DiagnosticVault-Setup.exe.sha256)
+
+say "5/6 חתימה ובדיקה עצמית"
+cargo xtask update-notice "$VERSION" "$OUT/DiagnosticVault-Setup.exe" "$NOTES" "$OUT"
+
+say "6/6 פרסום ב-$RELEASES_REPO"
+gh release create "v$VERSION" --repo "$RELEASES_REPO" --latest \
+  --title "כספת האבחון $VERSION" --notes-file "$NOTES" \
+  "$OUT/DiagnosticVault-Setup.exe" "$OUT/latest.json" "$OUT/latest.json.sig"
+
+say "הגרסה $VERSION פורסמה. אצל עינת היא תופיע כ'יש גרסה חדשה' בבדיקה היומית הבאה (או מיד, מ'הגדרות ← בדיקת עדכונים')."

@@ -12,6 +12,8 @@ use dv_privacy::ClearedPayload;
 use serde_json::Value;
 use zeroize::Zeroizing;
 
+pub mod update;
+
 pub const API_HOST: &str = "api.anthropic.com";
 const MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
 const API_VERSION: &str = "2023-06-01";
@@ -119,7 +121,7 @@ impl RateLimit {
     }
 }
 
-fn tls_config() -> rustls::ClientConfig {
+pub(crate) fn tls_config() -> rustls::ClientConfig {
     let roots = rustls::RootCertStore {
         roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
     };

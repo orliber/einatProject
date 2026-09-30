@@ -4,9 +4,12 @@
 //!   Tauri hardening (see `docs/ARCHITECTURE.md`).
 //! * `cargo xtask scan --staged | --all` – blocks personal data, archives and
 //!   binaries from entering the repository (pre-commit hook and CI).
+//! * `cargo xtask update-keygen` / `update-notice …` – signed updates, on the developer's
+//!   computer only (D-033, `scripts/release.sh`).
 
 mod invariants;
 mod israeli_id;
+mod release;
 mod scan;
 
 use std::io::Write;
@@ -32,6 +35,16 @@ fn report(title: &str, problems: &[String]) -> ExitCode {
     ExitCode::FAILURE
 }
 
+fn done(title: &str, result: Result<String, String>) -> ExitCode {
+    match result {
+        Ok(msg) => {
+            let _ = writeln!(std::io::stderr().lock(), "{title}: {msg}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => report(title, &[e]),
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let root = repo_root();
@@ -51,6 +64,8 @@ fn main() -> ExitCode {
                 Err(e) => report("scan", &[format!("could not run: {e}")]),
             }
         }
+        Some("update-keygen") => done("update-keygen", release::keygen(&root)),
+        Some("update-notice") => done("update-notice", release::notice(&root, &args[1..])),
         _ => report(
             "usage",
             &["cargo xtask check-invariants | cargo xtask scan [--staged|--all]".to_owned()],

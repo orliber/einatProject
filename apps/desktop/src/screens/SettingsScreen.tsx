@@ -4,6 +4,7 @@ import { ActivitySettings } from "../components/ActivityLog";
 import { BackupSettings } from "../components/Backup";
 import { PasswordSettings } from "../components/PasswordSettings";
 import { TopBar } from "../components/TopBar";
+import { UpdateSettings } from "../components/Update";
 import { ErrorLine } from "../components/ui";
 import { ipc, type ReportSettings } from "../ipc/client";
 import "./SettingsScreen.css";
@@ -137,6 +138,8 @@ export function SettingsScreen() {
         <PasswordSettings />
 
         <ActivitySettings />
+
+        <UpdateSettings />
 
         <section className="card setting" aria-labelledby="s-sec">
           <h2 id="s-sec">מצב האבטחה</h2>

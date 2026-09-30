@@ -23,6 +23,8 @@ use tauri::Manager;
 struct AppState {
     core: Arc<Mutex<Core>>,
     clipboard: secret_clipboard::SecretClipboard,
+    /// The app's data folder: the vault, and the verified installer of an update (D-033).
+    dir: PathBuf,
 }
 
 type Res<T> = Result<T, UiError>;
@@ -815,6 +817,50 @@ async fn forget_backup(state: tauri::State<'_, AppState>) -> Res<()> {
     .await
 }
 
+// ------------------------------------------------------------------ updates (D-033)
+
+/// Is there a newer version? Nothing from the vault is involved; the core's lock is not held.
+#[tauri::command]
+async fn check_update() -> Res<Option<dv_core::update::UpdateView>> {
+    tauri::async_runtime::spawn_blocking(|| dv_core::update::check().map_err(|e| e.to_ui()))
+        .await
+        .map_err(|_| internal("task"))?
+}
+
+/// Download the newest version, verify it, lock the vault and run the installer, then close.
+/// The installer (passive, update mode) replaces the program and opens it again; the vault
+/// folder is not touched.
+#[tauri::command]
+async fn install_update(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Res<()> {
+    let dir = state.dir.clone();
+    let file = tauri::async_runtime::spawn_blocking(move || dv_core::update::download(&dir))
+        .await
+        .map_err(|_| internal("task"))?
+        .map_err(|e| e.to_ui())?;
+    if !cfg!(windows) {
+        return Err(UiError {
+            code: "update".to_owned(),
+            message: "כאן העדכון לא מותקן לבד. מתקינים את הגרסה החדשה מהקישור ששלח אור.".to_owned(),
+            details: Vec::new(),
+        });
+    }
+    if !dv_core::update::still_intact(&file) {
+        return Err(internal("the installer changed after it was checked"));
+    }
+    state.clipboard.clear_now();
+    with_core(&state, |c| {
+        c.lock();
+        Ok(())
+    })
+    .await?;
+    std::process::Command::new(&file.path)
+        .args(["/P", "/UPDATE", "/R"])
+        .spawn()
+        .map_err(|_| internal("the installer did not start"))?;
+    app.exit(0);
+    Ok(())
+}
+
 fn main() {
     // A document worker: the same binary, started by the core for one file.
     if std::env::args().nth(1).as_deref() == Some(dv_ingest::worker::WORKER_ARG) {
@@ -825,6 +871,8 @@ fn main() {
         .setup(|app| {
             let dir = app.path().app_local_data_dir()?.join("vault");
             std::fs::create_dir_all(&dir)?;
+            // The installer of the last update has done its work.
+            dv_core::update::clean(&dir);
             let mut core = Core::new(&dir);
             if let Ok(exe) = std::env::current_exe() {
                 core = core.with_ingest_worker(exe);
@@ -845,7 +893,11 @@ fn main() {
                     timer_clipboard.clear_now();
                 }
             });
-            app.manage(AppState { core, clipboard });
+            app.manage(AppState {
+                core,
+                clipboard,
+                dir,
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -926,6 +978,8 @@ fn main() {
             check_backup,
             restore_backup,
             forget_backup,
+            check_update,
+            install_update,
         ])
         .run(tauri::generate_context!());
     if result.is_err() {

@@ -14,3 +14,6 @@ workspace = true
 cargo_metadata = "0.23"
 regex = "1"
 serde_json.workspace = true
+# Signing updates (D-033): the program's own verification code, and the same crypto library.
+dv-egress.workspace = true
+aws-lc-rs = { version = "1.18", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }

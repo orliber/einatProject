@@ -12,6 +12,7 @@ mod followup;
 mod library;
 mod retention;
 mod sorting;
+pub mod update;
 mod views;
 
 use std::collections::{HashMap, HashSet};
@@ -110,6 +111,8 @@ pub enum CoreError {
     Egress(#[from] EgressError),
     #[error("ai: {0}")]
     Ai(#[from] dv_ai::AiError),
+    #[error("update: {0}")]
+    Update(dv_egress::update::UpdateError),
     #[error("internal: {0}")]
     Internal(String),
 }
@@ -148,6 +151,7 @@ impl CoreError {
             ),
             CoreError::Egress(e) => ("egress", egress_he(e)),
             CoreError::Ai(e) => ("ai", format!("התשובה של Claude לא תקינה: {e}")),
+            CoreError::Update(e) => ("update", update::update_he(e)),
             CoreError::Internal(e) => ("internal", format!("שגיאה פנימית: {e}")),
         };
         UiError {
