@@ -2,11 +2,12 @@
 # A new version for Einat's computer (D-033). Run on Or's Mac, from the repository root.
 #
 #   scripts/release.sh setup                  once: signing key + the public releases repository
-#   scripts/release.sh <version> <notes.txt>  every release, e.g. scripts/release.sh 0.2.0 notes.txt
+#   scripts/release.sh bump <version>         a PR that sets the version (main is protected)
+#   scripts/release.sh <version> <notes.txt>  after that PR is merged, e.g. 0.2.0 notes.txt
 #
 # What a release does:
 #   1. the full checks, including the privacy suite (0 leaks)
-#   2. the version number in the three places it lives, one commit, a tag, pushed to main
+#   2. checks the version on main is <version>, and pushes the tag v<version>
 #   3. GitHub builds the Windows installer for that tag (.github/workflows/release.yml)
 #   4. the installer is downloaded here and its checksum compared
 #   5. the notice (version, notes, SHA-256) is signed HERE with the private key, and checked
@@ -60,7 +61,37 @@ EOF
       -f message="README" -f content="$(base64 < "$tmp/README.md" | tr -d '\n')" >/dev/null
     rm -r "$tmp"
   fi
-  say "סיום. עכשיו: git add crates/dv-egress/update_key.pub && commit && push (המפתח הציבורי בלבד)."
+  say "סיום. עכשיו מכניסים את crates/dv-egress/update_key.pub (המפתח הציבורי בלבד) ל-main ב-PR רגיל."
+  exit 0
+fi
+
+set_version() {
+  perl -0pi -e "s/(\[workspace\.package\]\nversion = \")[^\"]+/\${1}$1/" Cargo.toml
+  for f in apps/desktop/src-tauri/tauri.conf.json apps/desktop/package.json; do
+    perl -pi -e "s/^(  \"version\": \")[^\"]+/\${1}$1/ if \$. < 6" "$f"
+  done
+  cargo check -q -p dv-core
+}
+
+current_versions() {
+  grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2
+  grep -m1 '"version"' apps/desktop/src-tauri/tauri.conf.json | cut -d'"' -f4
+  grep -m1 '"version"' apps/desktop/package.json | cut -d'"' -f4
+}
+
+if [[ "${1:-}" == "bump" ]]; then
+  V="${2:-}"
+  [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "שימוש: scripts/release.sh bump 0.2.0"
+  [[ -z "$(git status --porcelain)" ]] || die "יש שינויים שלא נשמרו ב-git."
+  git fetch -q origin main
+  git checkout -q -b "release/v$V" origin/main
+  set_version "$V"
+  git add Cargo.toml Cargo.lock apps/desktop/src-tauri/tauri.conf.json apps/desktop/package.json
+  git commit -q -m "Version $V"
+  git push -q -u origin "release/v$V"
+  gh pr create --repo "$SOURCE_REPO" --base main --head "release/v$V" \
+    --title "Version $V" --body "מספר הגרסה $V בשלושת המקומות. אחרי המיזוג: scripts/release.sh $V notes.txt"
+  say "נפתח PR לגרסה $V. אחרי שהוא ממוזג: git checkout main && git pull && scripts/release.sh $V notes.txt"
   exit 0
 fi
 
@@ -84,16 +115,12 @@ cargo xtask check-invariants
 cargo xtask scan --all
 (cd apps/desktop && pnpm install --frozen-lockfile && pnpm exec tsc --noEmit && pnpm lint && pnpm test)
 
-say "2/6 מספר גרסה $VERSION"
-perl -0pi -e "s/(\[workspace\.package\]\nversion = \")[^\"]+/\${1}$VERSION/" Cargo.toml
-for f in apps/desktop/src-tauri/tauri.conf.json apps/desktop/package.json; do
-  perl -pi -e "s/^(  \"version\": \")[^\"]+/\${1}$VERSION/ if \$. < 6" "$f"
+say "2/6 גרסה $VERSION ותגית"
+for v in $(current_versions); do
+  [[ "$v" == "$VERSION" ]] || die "הגרסה ב-main היא $v ולא $VERSION. קודם: scripts/release.sh bump $VERSION (ולמזג את ה-PR)."
 done
-cargo check -q -p dv-core
-git add Cargo.toml Cargo.lock apps/desktop/src-tauri/tauri.conf.json apps/desktop/package.json
-git commit -q -m "Release v$VERSION"
 git tag -a "v$VERSION" -m "v$VERSION"
-git push origin main "v$VERSION"
+git push origin "v$VERSION"
 
 say "3/6 GitHub בונה את המתקין ל-Windows (בערך 15 דקות)"
 sleep 20
