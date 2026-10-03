@@ -13,6 +13,7 @@ mod library;
 mod retention;
 mod sorting;
 pub mod update;
+mod usage;
 mod views;
 
 use std::collections::{HashMap, HashSet};
@@ -42,6 +43,7 @@ pub use dv_vault::BACKUP_EXTENSION;
 pub use followup::FollowUpView;
 pub use library::TRASH_DAYS;
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
+pub use usage::UsageSummary;
 pub use views::{
     ActivityEntry, ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail,
     ChatView, ConsultResult, ConsultTurnView, ConsultationSummary, ConsultationView, CreatedVault,
@@ -1555,6 +1557,10 @@ impl Core {
     /// session (the app stays responsive while Claude answers).
     pub fn begin_send(&mut self, approval_id: &str) -> Result<Outgoing, CoreError> {
         let api_key = self.vault_ref()?.secret(API_KEY)?;
+        // Demo mode costs nothing; anything else stops at the monthly ceiling she set.
+        if api_key.is_some() || self.transport.is_some() {
+            self.refuse_over_cap()?;
+        }
         let pending = self
             .pending
             .remove(approval_id)
@@ -1564,6 +1570,68 @@ impl Core {
             api_key,
             transport: self.transport.clone(),
         })
+    }
+
+    fn refuse_over_cap(&mut self) -> Result<(), CoreError> {
+        let v = self.vault_ref()?;
+        let Some(cap) = v
+            .setting(usage::CAP_KEY)?
+            .and_then(|s| s.parse::<u32>().ok())
+        else {
+            return Ok(());
+        };
+        let month = usage::Month::parse(v.setting(&usage::this_month_key())?.as_deref());
+        if month.reached(cap) {
+            return Err(CoreError::Refused(format!(
+                "הגעת לתקרת ההוצאה החודשית שקבעת (${cap}). אפשר להעלות אותה בהגדרות, תחת \"שימוש ועלות\"."
+            )));
+        }
+        Ok(())
+    }
+
+    /// Count the tokens of an answer toward this month (numbers only). Never fails a send:
+    /// the answer has arrived and is worth more than the count.
+    fn note_usage(&mut self, payload: &ClearedPayload, answer: &Value, demo: bool) {
+        if demo {
+            return;
+        }
+        let model = serde_json::from_slice::<Value>(payload.body())
+            .ok()
+            .and_then(|b| b["model"].as_str().map(str::to_owned))
+            .unwrap_or_default();
+        let key = usage::this_month_key();
+        let Ok(v) = self.vault_mut() else { return };
+        let mut month = usage::Month::parse(v.setting(&key).ok().flatten().as_deref());
+        month.add(&model, usage::Tokens::from_answer(answer));
+        if let Ok(json) = serde_json::to_string(&month) {
+            let _ = v.set_setting(&key, &json);
+        }
+    }
+
+    /// This month's use of the AI and the ceiling, for settings.
+    pub fn usage_summary(&mut self) -> Result<UsageSummary, CoreError> {
+        let v = self.vault_mut()?;
+        let key = usage::this_month_key();
+        let cap = v
+            .setting(usage::CAP_KEY)?
+            .and_then(|s| s.parse::<u32>().ok());
+        Ok(usage::Month::parse(v.setting(&key)?.as_deref()).view(&key, cap))
+    }
+
+    /// The monthly ceiling in dollars; `None` removes it.
+    pub fn set_monthly_cap(&mut self, cap_usd: Option<u32>) -> Result<(), CoreError> {
+        let v = self.vault_mut()?;
+        match cap_usd {
+            Some(0) => {
+                return Err(CoreError::Refused(
+                    "תקרה של 0 תעצור כל שליחה. כדי לבטל את התקרה, משאירים את השדה ריק.".to_owned(),
+                ))
+            }
+            Some(cap) => v.set_setting(usage::CAP_KEY, &cap.to_string())?,
+            // Empty = no ceiling (it does not parse as a number).
+            None => v.set_setting(usage::CAP_KEY, "")?,
+        }
+        Ok(())
     }
 
     /// A failed send is not a send: the approval stays valid for a retry.
@@ -1595,6 +1663,7 @@ impl Core {
                 return Err(e);
             }
         };
+        self.note_usage(&out.pending.payload, &response, demo);
         let Pending { payload, kind } = out.pending;
         let PendingKind::Section {
             case_id,
@@ -1874,6 +1943,7 @@ impl Core {
                 return Err(e);
             }
         };
+        self.note_usage(&out.pending.payload, &response, demo);
         let PendingKind::Consult {
             case_id,
             conversation_id,

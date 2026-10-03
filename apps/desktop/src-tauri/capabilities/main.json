@@ -14,6 +14,8 @@
     "allow-unlock-with-recovery",
     "allow-lock",
     "allow-touch",
+    "allow-usage-summary",
+    "allow-set-monthly-cap",
     "allow-set-api-key",
     "allow-set-model",
     "allow-set-speed",

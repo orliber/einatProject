@@ -116,6 +116,53 @@ fn model_allow_lists_agree() {
 }
 
 #[test]
+fn usage_is_counted_and_the_monthly_ceiling_stops_sending() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let section = |core: &mut Core| {
+        core.prepare_section(&case, "kindergarten", "טיוטה")
+            .unwrap()
+            .approval_id
+            .unwrap()
+    };
+    let first = section(&mut core);
+    core.send_section(&first).unwrap();
+    let used = core.usage_summary().unwrap();
+    assert_eq!(used.requests, 1);
+    assert_eq!(used.cap_usd, None);
+
+    // An answer that cost more than the ceiling: the next request is refused, and stays approved.
+    *fake.answer.lock().unwrap() = None;
+    let mut month = usage::Month::default();
+    month.add(
+        dv_ai::DEFAULT_MODEL,
+        usage::Tokens {
+            requests: 1,
+            input: 3_000_000,
+            ..usage::Tokens::default()
+        },
+    );
+    core.vault_mut()
+        .unwrap()
+        .set_setting(
+            &usage::this_month_key(),
+            &serde_json::to_string(&month).unwrap(),
+        )
+        .unwrap();
+    assert!(core.set_monthly_cap(Some(0)).is_err());
+    core.set_monthly_cap(Some(10)).unwrap();
+    let second = section(&mut core);
+    let err = core.send_section(&second).unwrap_err();
+    assert_eq!(err.to_ui().code, "refused");
+    assert_eq!(fake.sent.lock().unwrap().len(), 1);
+    // Raising the ceiling lets the same approval go out.
+    core.set_monthly_cap(None).unwrap();
+    assert_eq!(core.usage_summary().unwrap().cap_usd, None);
+    core.send_section(&second).unwrap();
+    assert_eq!(fake.sent.lock().unwrap().len(), 2);
+}
+
+#[test]
 fn full_section_flow_sends_only_tags_and_stores_tagged() {
     let fake = FakeTransport::default();
     let (dir, mut core, case) = setup(Some(fake.clone()));

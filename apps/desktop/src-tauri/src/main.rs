@@ -16,7 +16,7 @@ use dv_core::{
     ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView,
     ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
     ExportCheck, ImportPreview, NameMatch, Prepared, ReportSettings, RetentionItem, SectionResult,
-    SortResult, StagedBackup, SuspectDecision, UiError,
+    SortResult, StagedBackup, SuspectDecision, UiError, UsageSummary,
 };
 use dv_domain::{CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind};
 use tauri::Manager;
@@ -170,6 +170,17 @@ async fn touch(state: tauri::State<'_, AppState>) -> Res<()> {
 }
 
 // ------------------------------------------------------------------ settings
+
+/// This month's use of the AI (numbers only) and the monthly ceiling.
+#[tauri::command]
+async fn usage_summary(state: tauri::State<'_, AppState>) -> Res<UsageSummary> {
+    with_core(&state, |c| c.usage_summary()).await
+}
+
+#[tauri::command]
+async fn set_monthly_cap(state: tauri::State<'_, AppState>, cap_usd: Option<u32>) -> Res<()> {
+    with_core(&state, move |c| c.set_monthly_cap(cap_usd)).await
+}
 
 #[tauri::command]
 async fn set_api_key(state: tauri::State<'_, AppState>, key: String) -> Res<()> {
@@ -994,6 +1005,8 @@ fn main() {
             unlock_with_recovery,
             lock,
             touch,
+            usage_summary,
+            set_monthly_cap,
             set_api_key,
             set_model,
             set_speed,

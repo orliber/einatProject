@@ -109,6 +109,7 @@ export class FakeCore {
   private activityLog: ActivityEntry[] = [];
   private practitioner = ["ד\"ר רותם בדויה"];
   private lockMinutes = 15;
+  private capUsd: number | null = null;
   private model = "claude-opus-5";
   private speed = "balanced";
   private reviewOnlySuspect = false;
@@ -520,6 +521,11 @@ export class FakeCore {
       case "confirm_recovery_key":
         return true;
       case "touch":
+        return null;
+      case "usage_summary":
+        return { month: "2026-10", requests: 0, input_tokens: 0, output_tokens: 0, estimated_cents: 0, cap_usd: this.capUsd, unpriced_models: [] };
+      case "set_monthly_cap":
+        this.capUsd = (a.capUsd as number | null) ?? null;
         return null;
       case "lock":
         this.unlocked = false;

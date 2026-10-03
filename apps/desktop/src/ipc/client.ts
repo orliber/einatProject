@@ -29,6 +29,7 @@ import type { PingResponse } from "./generated/PingResponse";
 import type { Prepared } from "./generated/Prepared";
 import type { ReportSettings } from "./generated/ReportSettings";
 import type { ScoreSheet } from "./generated/ScoreSheet";
+import type { UsageSummary } from "./generated/UsageSummary";
 import type { SectionResult } from "./generated/SectionResult";
 import type { SortResult } from "./generated/SortResult";
 import type { MaterialRouting } from "./generated/MaterialRouting";
@@ -69,6 +70,9 @@ export const ipc = {
   lock: () => run("lock"),
   /** Typing or scrolling in the window counts as activity for the idle lock. */
   touch: () => run("touch"),
+  usageSummary: () => call<UsageSummary>("usage_summary"),
+  /** Dollars; `null` removes the ceiling. */
+  setMonthlyCap: (capUsd: number | null) => run("set_monthly_cap", { capUsd }),
 
   setApiKey: (key: string) => run("set_api_key", { key }),
   setSpeed: (speed: "fast" | "balanced" | "thorough") => run("set_speed", { speed }),
@@ -200,6 +204,7 @@ export const ipc = {
 
 export type {
   UpdateView,
+  UsageSummary,
   ActivityPage,
   ConsultationSummary,
   ConsultationView,

@@ -324,6 +324,7 @@ impl Core {
                 return Err(e);
             }
         };
+        self.note_usage(&out.pending.payload, &response, demo);
         let Pending { payload, kind } = out.pending;
         let PendingKind::Sort {
             case_id,

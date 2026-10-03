@@ -5,6 +5,7 @@ import { BackupSettings } from "../components/Backup";
 import { PasswordSettings } from "../components/PasswordSettings";
 import { TopBar } from "../components/TopBar";
 import { UpdateSettings } from "../components/Update";
+import { UsageSettings } from "../components/UsageSettings";
 import { ErrorLine } from "../components/ui";
 import { ipc, type ReportSettings } from "../ipc/client";
 import "./SettingsScreen.css";
@@ -17,6 +18,7 @@ const MODELS: [string, string][] = [
 
 const JUMPS: [string, string][] = [
   ["s-claude", "חיבור ל-AI"],
+  ["s-usage", "שימוש ועלות"],
   ["s-privacy", "פרטיות ונעילה"],
   ["s-report", "הדוח"],
   ["s-backup", "גיבוי"],
@@ -99,6 +101,8 @@ export function SettingsScreen() {
             <span className="hint">מיון החומרים תמיד מהיר. הבחירה משפיעה על ניסוח הסעיפים ועל ההתייעצות. גם "Claude Sonnet" מהיר יותר מ-Opus.</span>
           </div>
         </section>
+
+        <UsageSettings />
 
         <section className="card setting" aria-labelledby="s-privacy">
           <h2 id="s-privacy">פרטיות ונעילה</h2>
