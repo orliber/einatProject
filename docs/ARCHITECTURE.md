@@ -120,7 +120,7 @@ audit(seq PK, ts, event, case_ref /* HMAC של case_id */, meta_json_enc, prev_m
 ```
 
 ## Egress – כללי יציאה (`dv-egress`)
-- Host ל-AI: `api.anthropic.com` כברירת מחדל. אם עינת בחרה בהגדרות ChatGPT או Gemini (D-038): `api.openai.com` (`POST /v1/chat/completions`) או `generativelanguage.googleapis.com` (`POST /v1beta/models/{model}:generateContent`), רק לדגמים מהרשימה הלבנה. TLS 1.3 בלבד, שורשי `webpki-roots` (לא של המערכת), אותו client לכל הספקים.
+- Host ל-AI: `api.anthropic.com` כברירת מחדל. אם עינת בחרה בהגדרות ChatGPT או Gemini (D-038): `api.openai.com` (`POST /v1/chat/completions`) `generativelanguage.googleapis.com` (`POST /v1beta/models/{model}:generateContent`) או `api.mistral.ai` (`POST /v1/chat/completions`), רק לדגמים מהרשימה הלבנה. מודל מקומי: `http://127.0.0.1:11434/api/chat` בלבד (Ollama, בלי TLS כי זה בתוך המחשב). TLS 1.3 בלבד, שורשי `webpki-roots` (לא של המערכת), אותו client לכל הספקים.
 - **ספקים אחרים (D-038, `providers.rs`):** השער מאשר תמיד את אותו גוף בקשה (בצורה של Messages API). אחרי השער, `dv-egress` מעביר את אותן מחרוזות לשדות של הספק, בלי להוסיף שום טקסט חוץ משמות שדות והגדרות קבועות (נבדק בבדיקה). מה שאין לו מקבילה מדויקת (כלים, תמונות, thinking, שדה לא מוכר) נחסם. התשובה מומרת חזרה לאותה צורה, כך שהבדיקות המקומיות של התשובה זהות לכל ספק. ל-OpenAI נשלח `store: false`.
 - **עדכוני תוכנה (D-033, `update.rs`):** GET בלבד ל-hosts של GitHub מהרשימה הלבנה (גם ב-redirect), בלי נתונים מהכספת. הודעת גרסה חתומה ב-Ed25519 במפתח ציבורי מקובע, ו-SHA-256 של המתקין. כל ספק = אין עדכון.
 - **Endpoints מותרים:** `POST /v1/messages` ו-`POST /v1/messages/count_tokens`. כל השאר לא ממומש.

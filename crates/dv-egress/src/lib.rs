@@ -18,7 +18,9 @@ pub mod providers;
 pub mod sse;
 pub mod update;
 
-pub use providers::{transport_for, Provider, GEMINI_MODELS, OPENAI_MODELS};
+pub use providers::{
+    transport_for, Provider, GEMINI_MODELS, LOCAL_MODELS, MISTRAL_MODELS, OPENAI_MODELS,
+};
 
 pub const API_HOST: &str = "api.anthropic.com";
 const MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -58,6 +60,8 @@ pub enum EgressError {
     Rejected(u16, String),
     #[error("no connection to the AI service (the rest of the program keeps working)")]
     Offline,
+    #[error("the local model does not answer (is Ollama running, with the model installed?)")]
+    LocalUnavailable,
     #[error("the secure connection failed; something on this computer may be intercepting encrypted traffic")]
     Tls,
     #[error("unexpected answer from the service: {0}")]

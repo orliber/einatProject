@@ -43,7 +43,7 @@ fn describe(
         ""
     };
     // Who answered, as recorded at the time; entries from before D-038 were all Claude.
-    let ai = ["ChatGPT", "Gemini"]
+    let ai = ["ChatGPT", "Gemini", "Mistral", "Ollama"]
         .into_iter()
         .find(|n| *n == text("ai"))
         .unwrap_or("Claude");

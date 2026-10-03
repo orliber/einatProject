@@ -15,6 +15,9 @@ pub const ANTHROPIC_MODELS: &[&str] = &["claude-opus-5", "claude-sonnet-5", "cla
 /// Must match the lists in `dv-egress` (checked by a test in dv-core).
 pub const OPENAI_MODELS: &[&str] = &["gpt-5-1", "gpt-5-mini"];
 pub const GEMINI_MODELS: &[&str] = &["gemini-2-5-pro", "gemini-2-5-flash"];
+pub const MISTRAL_MODELS: &[&str] = &["mistral-large-latest", "mistral-medium-latest"];
+/// Models run by Ollama on this computer (nothing leaves it).
+pub const LOCAL_MODELS: &[&str] = &["local-gemma", "local-qwen"];
 /// Every model that may be chosen, from all providers.
 pub const ALLOWED_MODELS: &[&str] = &[
     "claude-opus-5",
@@ -24,6 +27,10 @@ pub const ALLOWED_MODELS: &[&str] = &[
     "gpt-5-mini",
     "gemini-2-5-pro",
     "gemini-2-5-flash",
+    "mistral-large-latest",
+    "mistral-medium-latest",
+    "local-gemma",
+    "local-qwen",
 ];
 pub const DEFAULT_MODEL: &str = "claude-opus-5";
 
@@ -33,10 +40,19 @@ pub enum Provider {
     Anthropic,
     OpenAi,
     Gemini,
+    Mistral,
+    /// A model on this computer (Ollama): no key, nothing leaves.
+    Local,
 }
 
 impl Provider {
-    pub const ALL: [Provider; 3] = [Provider::Anthropic, Provider::Gemini, Provider::OpenAi];
+    pub const ALL: [Provider; 5] = [
+        Provider::Anthropic,
+        Provider::Gemini,
+        Provider::OpenAi,
+        Provider::Mistral,
+        Provider::Local,
+    ];
 
     /// Stable id used in settings and over IPC.
     #[must_use]
@@ -45,6 +61,8 @@ impl Provider {
             Provider::Anthropic => "anthropic",
             Provider::OpenAi => "openai",
             Provider::Gemini => "gemini",
+            Provider::Mistral => "mistral",
+            Provider::Local => "local",
         }
     }
 
@@ -60,6 +78,8 @@ impl Provider {
             Provider::Anthropic => "Claude",
             Provider::OpenAi => "ChatGPT",
             Provider::Gemini => "Gemini",
+            Provider::Mistral => "Mistral",
+            Provider::Local => "Ollama",
         }
     }
 
@@ -69,6 +89,8 @@ impl Provider {
             Provider::Anthropic => ANTHROPIC_MODELS,
             Provider::OpenAi => OPENAI_MODELS,
             Provider::Gemini => GEMINI_MODELS,
+            Provider::Mistral => MISTRAL_MODELS,
+            Provider::Local => LOCAL_MODELS,
         }
     }
 

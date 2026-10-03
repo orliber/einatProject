@@ -79,32 +79,37 @@ export function SettingsScreen() {
             </select>
             <span className="hint">בכל מקרה השמות והפרטים המזהים מוסתרים במחשב לפני השליחה, ומסך "מה יוצא מהמחשב" מראה בדיוק מה נשלח.</span>
           </div>
-          <p className="muted small">
-            {status.demo_mode
-              ? `כרגע אין מפתח של ${ai}, ולכן התוכנה במצב הדגמה: התשובות נבנות במחשב, ושום דבר לא נשלח.`
-              : `מפתח API של ${ai} מוגדר ונשמר מוצפן בתוך הכספת. אפשר להחליף או למחוק.`}
-            {provider.id === "anthropic" && status.demo_mode && " כדי לעבוד עם Claude מזינים מפתח API של חשבון עם הסכם אפס שמירת מידע (ZDR)."}
-          </p>
-          {provider.retention && (
-            <div className="note-sand small" role="note">
-              <b>מה {provider.company} שומרת:</b> {provider.retention}
-            </div>
-          )}
-          <div className="row">
-            <label htmlFor="api" className="visually-hidden">מפתח API של {ai}</label>
-            <input id="api" className="input grow mono" dir="ltr" type="password" autoComplete="off" placeholder={hasKey ? "••••••••••••" : provider.keyPlaceholder}
-              value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-            <button type="button" className="btn btn-primary" disabled={!apiKey.trim() || (provider.retention !== null && !ack)}
-              onClick={() => void run(async () => { await ipc.setApiKey(provider.id, apiKey, ack); setApiKey(""); setAck(false); }, "המפתח נשמר מוצפן.")}>שמירה</button>
-            {hasKey && (
-              <button type="button" className="btn" onClick={() => void run(() => ipc.setApiKey(provider.id, ""), `המפתח של ${ai} נמחק. בלי מפתח התוכנה עובדת במצב הדגמה.`)}>מחיקה</button>
-            )}
-          </div>
-          {provider.retention && (
-            <label className="row">
-              <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
-              <span>קראתי מה {provider.company} שומרת, והמפתח שייך לחשבון בתשלום</span>
-            </label>
+          {provider.setup && <p className="note-sand small" role="note">{provider.setup}</p>}
+          {provider.keyPlaceholder !== null && (
+            <>
+              <p className="muted small">
+                {status.demo_mode
+                  ? `כרגע אין מפתח של ${ai}, ולכן התוכנה במצב הדגמה: התשובות נבנות במחשב, ושום דבר לא נשלח.`
+                  : `מפתח API של ${ai} מוגדר ונשמר מוצפן בתוך הכספת. אפשר להחליף או למחוק.`}
+                {provider.id === "anthropic" && status.demo_mode && " כדי לעבוד עם Claude מזינים מפתח API של חשבון עם הסכם אפס שמירת מידע (ZDR)."}
+              </p>
+              {provider.retention && (
+                <div className="note-sand small" role="note">
+                  <b>מה {provider.company} שומרת:</b> {provider.retention}
+                </div>
+              )}
+              <div className="row">
+                <label htmlFor="api" className="visually-hidden">מפתח API של {ai}</label>
+                <input id="api" className="input grow mono" dir="ltr" type="password" autoComplete="off" placeholder={hasKey ? "••••••••••••" : provider.keyPlaceholder}
+                  value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+                <button type="button" className="btn btn-primary" disabled={!apiKey.trim() || (provider.retention !== null && !ack)}
+                  onClick={() => void run(async () => { await ipc.setApiKey(provider.id, apiKey, ack); setApiKey(""); setAck(false); }, "המפתח נשמר מוצפן.")}>שמירה</button>
+                {hasKey && (
+                  <button type="button" className="btn" onClick={() => void run(() => ipc.setApiKey(provider.id, ""), `המפתח של ${ai} נמחק. בלי מפתח התוכנה עובדת במצב הדגמה.`)}>מחיקה</button>
+                )}
+              </div>
+              {provider.retention && (
+                <label className="row">
+                  <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
+                  <span>קראתי מה {provider.company} שומרת, והמפתח שייך לחשבון בתשלום</span>
+                </label>
+              )}
+            </>
           )}
           <div className="field">
             <label htmlFor="model">דגם</label>

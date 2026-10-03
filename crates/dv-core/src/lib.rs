@@ -53,11 +53,22 @@ pub use views::{
 const API_KEY: &str = "anthropic_api_key";
 
 /// Where each company's API key is kept: the vault's encrypted secrets, like Claude's (D-038).
-fn key_name(provider: Provider) -> &'static str {
+/// The local model has none.
+fn key_name(provider: Provider) -> Option<&'static str> {
     match provider {
-        Provider::Anthropic => API_KEY,
-        Provider::OpenAi => "openai_api_key",
-        Provider::Gemini => "gemini_api_key",
+        Provider::Anthropic => Some(API_KEY),
+        Provider::OpenAi => Some("openai_api_key"),
+        Provider::Gemini => Some("gemini_api_key"),
+        Provider::Mistral => Some("mistral_api_key"),
+        Provider::Local => None,
+    }
+}
+
+/// The key to send with (`None`: no key saved, demo mode). The local model needs none.
+fn key_of(v: &Vault, provider: Provider) -> Result<Option<zeroize::Zeroizing<String>>, VaultError> {
+    match key_name(provider) {
+        Some(name) => v.secret(name),
+        None => Ok(Some(zeroize::Zeroizing::new(String::new()))),
     }
 }
 
@@ -193,6 +204,8 @@ fn egress_he(e: &EgressError, ai: &str) -> String {
         EgressError::Offline => {
             format!("אין חיבור לאינטרנט. אפשר להמשיך לעבוד, ו-{ai} יחזור כשיהיה חיבור.")
         }
+        EgressError::LocalUnavailable => "המודל המקומי לא עונה. צריך שהתוכנה Ollama תפעל במחשב, ושהמודל שנבחר יהיה מותקן בה (בהגדרות כתוב איך)."
+            .to_owned(),
         EgressError::Tls => {
             "החיבור המאובטח נכשל. ייתכן שתוכנה במחשב (למשל אנטי-וירוס) מיירטת תעבורה מוצפנת."
                 .to_owned()
@@ -545,10 +558,10 @@ impl Core {
         let provider = provider_of(&model);
         let (demo, keys, integrity) = match &self.vault {
             Some(v) => (
-                v.secret(key_name(provider)).ok().flatten().is_none(),
+                key_of(v, provider).ok().flatten().is_none(),
                 Provider::ALL
                     .into_iter()
-                    .filter(|p| v.secret(key_name(*p)).ok().flatten().is_some())
+                    .filter(|p| key_name(*p).is_some_and(|k| v.secret(k).ok().flatten().is_some()))
                     .map(|p| p.id().to_owned())
                     .collect(),
                 (!v.integrity().audit_ok || !v.integrity().header_ok)
@@ -767,7 +780,7 @@ impl Core {
     // ------------------------------------------------------------ settings
 
     /// Save (or, when empty, delete) the API key of one company (`anthropic` | `openai` |
-    /// `gemini`). ChatGPT and Gemini keys are taken only after she confirmed she read what
+    /// `gemini` | `mistral`). ChatGPT, Gemini and Mistral keys are taken only after she confirmed she read what
     /// that company keeps (D-038): their standard API terms are not Zero Data Retention.
     pub fn set_api_key(
         &mut self,
@@ -777,9 +790,11 @@ impl Core {
     ) -> Result<(), CoreError> {
         let provider = Provider::from_id(provider)
             .ok_or_else(|| CoreError::Refused("ספק לא מוכר.".to_owned()))?;
+        let name = key_name(provider)
+            .ok_or_else(|| CoreError::Refused("למודל המקומי אין מפתח.".to_owned()))?;
         let key = key.trim();
         if key.is_empty() {
-            self.vault_mut()?.delete_secret(key_name(provider))?;
+            self.vault_mut()?.delete_secret(name)?;
         } else {
             if provider != Provider::Anthropic && !retention_ack {
                 return Err(CoreError::Refused(format!(
@@ -787,7 +802,7 @@ impl Core {
                     provider.display_name()
                 )));
             }
-            self.vault_mut()?.set_secret(key_name(provider), key)?;
+            self.vault_mut()?.set_secret(name, key)?;
         }
         Ok(())
     }
@@ -1138,8 +1153,8 @@ impl Core {
     /// No API key for the chosen AI and no test transport: answers are built locally and
     /// nothing is sent.
     fn demo_mode(&mut self) -> Result<bool, CoreError> {
-        let key = key_name(self.provider());
-        Ok(self.vault_ref()?.secret(key)?.is_none() && self.transport.is_none())
+        let provider = self.provider();
+        Ok(key_of(self.vault_ref()?, provider)?.is_none() && self.transport.is_none())
     }
 
     /// The model chosen in settings (Claude Opus by default).
@@ -1594,7 +1609,7 @@ impl Core {
             .ok()
             .and_then(|b| b["model"].as_str().map(str::to_owned))
             .unwrap_or_default();
-        let api_key = self.vault_ref()?.secret(key_name(provider_of(&model)))?;
+        let api_key = key_of(self.vault_ref()?, provider_of(&model))?;
         let pending = self
             .pending
             .remove(approval_id)

@@ -1,6 +1,6 @@
 // Which AI answers (D-038). Claude stays the default; ChatGPT and Gemini are chosen in
 // settings with her own API key. Every place the program speaks of the AI uses its name.
-export type ProviderId = "anthropic" | "openai" | "gemini";
+export type ProviderId = "anthropic" | "openai" | "gemini" | "mistral" | "local";
 
 export interface ProviderInfo {
   id: ProviderId;
@@ -8,9 +8,12 @@ export interface ProviderInfo {
   company: string;
   /** `[model id, label]`, recommended first. Must match the lists in dv-ai and dv-egress. */
   models: [string, string][];
-  keyPlaceholder: string;
+  /** `null`: no key (the local model). */
+  keyPlaceholder: string | null;
   /** What the company keeps under its standard API terms (shown before a key is saved). */
   retention: string | null;
+  /** How to get it working, when that is more than a key. */
+  setup?: string;
 }
 
 const CLAUDE: ProviderInfo = {
@@ -52,6 +55,31 @@ export const PROVIDERS: ProviderInfo[] = [
     keyPlaceholder: "sk-…",
     retention:
       "בתנאים הרגילים של OpenAI API, הבקשות והתשובות נשמרות עד 30 יום לצורך זיהוי שימוש לרעה (לא לאימון). אפס שמירת מידע (ZDR) ניתן רק אחרי בקשה ואישור של OpenAI.",
+  },
+  {
+    id: "mistral",
+    name: "Mistral",
+    company: "Mistral AI",
+    models: [
+      ["mistral-large-latest", "Mistral Large (מומלץ: הכי מדויק)"],
+      ["mistral-medium-latest", "Mistral Medium (מהיר יותר)"],
+    ],
+    keyPlaceholder: "…",
+    retention:
+      "Mistral היא חברה אירופית (צרפת), כפופה ל-GDPR, והמידע מעובד באירופה. בתנאים הרגילים של ה-API שלה הבקשות נשמרות עד 30 יום לצורך זיהוי שימוש לרעה. אפס שמירת מידע ניתן רק אחרי בקשה ואישור.",
+  },
+  {
+    id: "local",
+    name: "Ollama",
+    company: "מודל מקומי במחשב שלך",
+    models: [
+      ["local-gemma", "Gemma 3 12B (מומלץ)"],
+      ["local-qwen", "Qwen 3 14B"],
+    ],
+    keyPlaceholder: null,
+    retention: null,
+    setup:
+      "המודל רץ על המחשב שלך, ושום דבר לא יוצא ממנו. צריך להתקין פעם אחת את התוכנה Ollama (מהאתר ollama.com), ואז להוריד את המודל שנבחר: בחלון פקודה כותבים ollama pull gemma3:12b (או qwen3:14b). דרוש מחשב חזק (16GB זיכרון לפחות). התשובות איטיות יותר, והעברית פחות טובה מאשר אצל הספקים בענן.",
   },
 ];
 

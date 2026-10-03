@@ -114,6 +114,8 @@ fn model_allow_lists_agree() {
     assert_eq!(dv_ai::ANTHROPIC_MODELS, dv_egress::ALLOWED_MODELS);
     assert_eq!(dv_ai::OPENAI_MODELS, dv_egress::OPENAI_MODELS);
     assert_eq!(dv_ai::GEMINI_MODELS, dv_egress::GEMINI_MODELS);
+    assert_eq!(dv_ai::MISTRAL_MODELS, dv_egress::MISTRAL_MODELS);
+    assert_eq!(dv_ai::LOCAL_MODELS, dv_egress::LOCAL_MODELS);
     assert!(dv_ai::ANTHROPIC_MODELS.contains(&dv_ai::DEFAULT_MODEL));
 }
 
@@ -147,7 +149,7 @@ fn the_chosen_ai_names_itself_keeps_its_own_key_and_still_goes_through_the_gate(
     let mut keys = core.status().keys;
     keys.sort();
     assert_eq!(keys, vec!["anthropic", "gemini"]);
-    assert!(core.set_api_key("mistral", "x", true).is_err());
+    assert!(core.set_api_key("deepseek", "x", true).is_err());
     core.set_api_key("gemini", "", false).unwrap();
     assert_eq!(core.status().keys, vec!["anthropic"]);
 
@@ -181,6 +183,15 @@ fn without_a_key_for_the_chosen_ai_it_is_demo_mode() {
     core.set_model("gpt-5-1").unwrap();
     assert!(core.status().demo_mode, "a Claude key is not a ChatGPT key");
     assert_eq!(core.status().ai_name, "ChatGPT");
+
+    // The local model needs no key: never demo mode, and no key can be saved for it.
+    core.set_model("local-gemma").unwrap();
+    assert!(!core.status().demo_mode);
+    assert_eq!(core.status().ai_name, "Ollama");
+    assert!(core.set_api_key("local", "x", true).is_err());
+    // Mistral is a company abroad like the others: its key needs the confirmation.
+    assert!(core.set_api_key("mistral", "x", false).is_err());
+    assert!(core.set_api_key("mistral", "x", true).is_ok());
 }
 
 #[test]

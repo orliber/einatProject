@@ -1,4 +1,5 @@
-//! OpenAI (ChatGPT) and Google (Gemini) as alternatives to Claude (D-038).
+//! OpenAI (ChatGPT), Google (Gemini), Mistral and a local model (Ollama on this computer) as
+//! alternatives to Claude (D-038).
 //!
 //! The rest of the program builds one request shape (the Messages API shape) and the privacy
 //! gate clears exactly that body. Here, after the gate, the cleared body is re-shaped for the
@@ -22,12 +23,18 @@ pub const OPENAI_HOST: &str = "api.openai.com";
 pub const GEMINI_HOST: &str = "generativelanguage.googleapis.com";
 const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 const GEMINI_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
+pub const MISTRAL_HOST: &str = "api.mistral.ai";
+const MISTRAL_URL: &str = "https://api.mistral.ai/v1/chat/completions";
+/// Ollama on this computer only: the loopback address, never a name that DNS could redirect.
+const LOCAL_URL: &str = "http://127.0.0.1:11434/api/chat";
 
 /// The program's names for the models. Must match `dv_ai::OPENAI_MODELS` /
 /// `dv_ai::GEMINI_MODELS` (checked by a test in dv-core). Written with dashes, like
 /// `claude-opus-4-8`: the gate reads "2.5" in an outgoing body as a possible date and stops it.
 pub const OPENAI_MODELS: &[&str] = &["gpt-5-1", "gpt-5-mini"];
 pub const GEMINI_MODELS: &[&str] = &["gemini-2-5-pro", "gemini-2-5-flash"];
+pub const MISTRAL_MODELS: &[&str] = &["mistral-large-latest", "mistral-medium-latest"];
+pub const LOCAL_MODELS: &[&str] = &["local-gemma", "local-qwen"];
 
 /// The company's own name for a model on the lists above (a fixed table, never data).
 fn api_model(model: &str) -> Option<&'static str> {
@@ -36,6 +43,10 @@ fn api_model(model: &str) -> Option<&'static str> {
         "gpt-5-mini" => "gpt-5-mini",
         "gemini-2-5-pro" => "gemini-2.5-pro",
         "gemini-2-5-flash" => "gemini-2.5-flash",
+        "mistral-large-latest" => "mistral-large-latest",
+        "mistral-medium-latest" => "mistral-medium-latest",
+        "local-gemma" => "gemma3:12b",
+        "local-qwen" => "qwen3:14b",
         _ => return None,
     })
 }
@@ -46,6 +57,9 @@ pub enum Provider {
     Anthropic,
     OpenAi,
     Gemini,
+    Mistral,
+    /// Ollama on this computer: nothing leaves it.
+    Local,
 }
 
 impl Provider {
@@ -57,13 +71,18 @@ impl Provider {
             Some(Self::OpenAi)
         } else if GEMINI_MODELS.contains(&model) {
             Some(Self::Gemini)
+        } else if MISTRAL_MODELS.contains(&model) {
+            Some(Self::Mistral)
+        } else if LOCAL_MODELS.contains(&model) {
+            Some(Self::Local)
         } else {
             None
         }
     }
 }
 
-/// The transport for the model named in the cleared body, with that company's key.
+/// The transport for the model named in the cleared body, with that company's key (the local
+/// model takes none).
 pub fn transport_for(model: &str, api_key: &str) -> Result<Box<dyn Transport>, EgressError> {
     match Provider::of_model(model) {
         Some(Provider::Anthropic) => Ok(Box::new(crate::AnthropicTransport::new(api_key)?)),
@@ -225,6 +244,56 @@ pub(crate) fn to_openai(c: &Canonical) -> Value {
     body
 }
 
+/// Mistral's Chat Completions: the OpenAI shape without OpenAI-only settings.
+pub(crate) fn to_mistral(c: &Canonical) -> Value {
+    let mut messages = Vec::new();
+    if let Some(s) = &c.system {
+        messages.push(json!({ "role": "system", "content": s }));
+    }
+    for (assistant, text) in &c.turns {
+        messages.push(json!({
+            "role": if *assistant { "assistant" } else { "user" },
+            "content": text,
+        }));
+    }
+    let mut body = json!({
+        "model": c.model,
+        "messages": messages,
+        "max_tokens": c.max_tokens,
+    });
+    if let Some(schema) = &c.schema {
+        body["response_format"] = json!({
+            "type": "json_schema",
+            "json_schema": { "name": "answer", "strict": true, "schema": schema },
+        });
+    }
+    body
+}
+
+/// Ollama's own chat API: the answer whole, held to the schema with `format`.
+pub(crate) fn to_local(c: &Canonical) -> Value {
+    let mut messages = Vec::new();
+    if let Some(s) = &c.system {
+        messages.push(json!({ "role": "system", "content": s }));
+    }
+    for (assistant, text) in &c.turns {
+        messages.push(json!({
+            "role": if *assistant { "assistant" } else { "user" },
+            "content": text,
+        }));
+    }
+    let mut body = json!({
+        "model": c.model,
+        "messages": messages,
+        "stream": false,
+        "options": { "num_predict": c.max_tokens },
+    });
+    if let Some(schema) = &c.schema {
+        body["format"] = schema.clone();
+    }
+    body
+}
+
 /// `generateContent` body. Thinking tokens count toward the output limit, so it is raised by
 /// the thinking budget.
 pub(crate) fn to_gemini(c: &Canonical) -> Value {
@@ -284,13 +353,24 @@ pub(crate) fn from_openai(model: &str, resp: &Value) -> Result<Value, EgressErro
     }
     let text = message["content"].as_str().unwrap_or("").to_owned();
     Ok(match choice["finish_reason"].as_str() {
-        Some("length") => answer(model, text, "max_tokens", None),
+        Some("length" | "model_length") => answer(model, text, "max_tokens", None),
         Some("content_filter") => answer(
             model,
             String::new(),
             "refusal",
             Some("content_filter".to_owned()),
         ),
+        _ => answer(model, text, "end_turn", None),
+    })
+}
+
+pub(crate) fn from_local(model: &str, resp: &Value) -> Result<Value, EgressError> {
+    let text = resp["message"]["content"]
+        .as_str()
+        .ok_or_else(|| EgressError::Protocol("no message in the answer".to_owned()))?
+        .to_owned();
+    Ok(match resp["done_reason"].as_str() {
+        Some("length") => answer(model, text, "max_tokens", None),
         _ => answer(model, text, "end_turn", None),
     })
 }
@@ -325,8 +405,9 @@ pub(crate) fn from_gemini(model: &str, resp: &Value) -> Result<Value, EgressErro
     })
 }
 
-/// ChatGPT or Gemini, over the same hardened client as Claude (TLS 1.3, Mozilla roots, no
-/// proxy, no redirects). The answer arrives whole (no word count while it is written).
+/// ChatGPT, Gemini or Mistral over the same hardened client as Claude (TLS 1.3, Mozilla roots,
+/// no proxy, no redirects); the local model over plain HTTP to the loopback address only. The
+/// answer arrives whole (no word count while it is written).
 pub struct ProviderTransport {
     provider: Provider,
     client: reqwest::blocking::Client,
@@ -344,7 +425,7 @@ impl std::fmt::Debug for ProviderTransport {
 
 impl ProviderTransport {
     pub fn new(provider: Provider, api_key: &str) -> Result<Self, EgressError> {
-        if api_key.trim().is_empty() {
+        if api_key.trim().is_empty() && provider != Provider::Local {
             return Err(EgressError::NoApiKey);
         }
         if provider == Provider::Anthropic {
@@ -352,7 +433,11 @@ impl ProviderTransport {
         }
         Ok(Self {
             provider,
-            client: build_client()?,
+            client: if provider == Provider::Local {
+                local_client()?
+            } else {
+                build_client()?
+            },
             api_key: Zeroizing::new(api_key.trim().to_owned()),
             limit: Mutex::new(RateLimit::per_minute(20)),
         })
@@ -364,6 +449,11 @@ impl ProviderTransport {
                 .client
                 .post(OPENAI_URL)
                 .bearer_auth(self.api_key.as_str()),
+            Provider::Mistral => self
+                .client
+                .post(MISTRAL_URL)
+                .bearer_auth(self.api_key.as_str()),
+            Provider::Local => self.client.post(LOCAL_URL),
             // A fixed name from `api_model`, so it is safe in the path.
             _ => self
                 .client
@@ -374,7 +464,10 @@ impl ProviderTransport {
             .header("content-type", "application/json")
             .body(body.to_vec())
             .send()
-            .map_err(|e| crate::send_error(&e))?;
+            .map_err(|e| match self.provider {
+                Provider::Local => EgressError::LocalUnavailable,
+                _ => crate::send_error(&e),
+            })?;
         let status = resp.status().as_u16();
         let text = resp
             .text()
@@ -383,16 +476,25 @@ impl ProviderTransport {
         let message = parsed
             .as_ref()
             .ok()
-            .and_then(|v| v["error"]["message"].as_str().map(str::to_owned))
+            .and_then(|v| {
+                v["error"]["message"]
+                    .as_str()
+                    .or_else(|| v["error"].as_str())
+                    .or_else(|| v["message"].as_str())
+                    .map(str::to_owned)
+            })
             .unwrap_or_default();
         match status {
             200 => {
                 let v = parsed.map_err(|e| EgressError::Protocol(e.to_string()))?;
                 match self.provider {
-                    Provider::OpenAi => from_openai(model, &v),
+                    Provider::OpenAi | Provider::Mistral => from_openai(model, &v),
+                    Provider::Local => from_local(model, &v),
                     _ => from_gemini(model, &v),
                 }
             }
+            // Ollama answers a model that is not installed with 404.
+            404 if self.provider == Provider::Local => Err(EgressError::LocalUnavailable),
             401 | 403 => Err(EgressError::Unauthorized),
             // Gemini answers a wrong key with 400.
             400 if message.contains("API key") => Err(EgressError::Unauthorized),
@@ -410,6 +512,8 @@ impl Transport for ProviderTransport {
         let c = canonical(&body, self.provider)?;
         let out = match self.provider {
             Provider::OpenAi => to_openai(&c),
+            Provider::Mistral => to_mistral(&c),
+            Provider::Local => to_local(&c),
             _ => to_gemini(&c),
         };
         let bytes = serde_json::to_vec(&out).map_err(|e| EgressError::Protocol(e.to_string()))?;
@@ -429,6 +533,21 @@ impl Transport for ProviderTransport {
             }
         }
     }
+}
+
+/// Plain HTTP to the loopback address only (the URL is a constant): no proxy, no redirects,
+/// and a long timeout, since a model on an ordinary computer writes slowly.
+fn local_client() -> Result<reqwest::blocking::Client, EgressError> {
+    reqwest::blocking::Client::builder()
+        // Never used for plain HTTP, but the client needs a TLS setup to be built.
+        .use_preconfigured_tls(crate::tls_config())
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(1_800))
+        .connect_timeout(Duration::from_secs(5))
+        .user_agent("diagnostic-vault")
+        .build()
+        .map_err(|e| EgressError::Protocol(e.to_string()))
 }
 
 /// Every string in a JSON value (keys excluded).
@@ -481,6 +600,9 @@ mod tests {
         "object",
         "gpt-5.1",
         "gemini-2.5-pro",
+        "system",
+        "mistral-large-latest",
+        "gemma3:12b",
     ];
 
     fn adds_nothing(canonical_body: &Value, translated: &Value) {
@@ -522,6 +644,45 @@ mod tests {
             "application/json"
         );
         assert_eq!(out["generationConfig"]["maxOutputTokens"], 16000 + 8192);
+    }
+
+    #[test]
+    fn mistral_and_local_bodies_carry_only_the_cleared_text() {
+        let b = section_body("mistral-large-latest");
+        let out = to_mistral(&canonical(&b, Provider::Mistral).unwrap());
+        adds_nothing(&b, &out);
+        assert_eq!(out["messages"][0]["role"], "system");
+        assert_eq!(out["response_format"]["type"], "json_schema");
+        assert!(out.get("reasoning_effort").is_none() && out.get("store").is_none());
+
+        let b = section_body("local-gemma");
+        let out = to_local(&canonical(&b, Provider::Local).unwrap());
+        adds_nothing(&b, &out);
+        assert_eq!(out["model"], "gemma3:12b");
+        assert_eq!(out["stream"], false);
+        assert!(out["format"].is_object());
+        let back = from_local(
+            "gemma3:12b",
+            &json!({"message": {"role": "assistant", "content": "{}"}, "done": true, "done_reason": "stop"}),
+        )
+        .unwrap();
+        assert_eq!(back["stop_reason"], "end_turn");
+        assert!(LOCAL_URL.starts_with("http://127.0.0.1:"));
+    }
+
+    /// Run by hand against Ollama (or a stand-in) on 127.0.0.1:11434:
+    /// `cargo test -p dv-egress -- --ignored local_model_round_trip`.
+    #[test]
+    #[ignore = "needs a local model server"]
+    fn local_model_round_trip() {
+        let t = ProviderTransport::new(Provider::Local, "").unwrap();
+        let body = serde_json::to_vec(&to_local(
+            &canonical(&section_body("local-gemma"), Provider::Local).unwrap(),
+        ))
+        .unwrap();
+        let answer = t.post_once("gemma3:12b", &body).unwrap();
+        assert_eq!(answer["stop_reason"], "end_turn");
+        assert!(answer["content"][0]["text"].is_string());
     }
 
     #[test]
@@ -598,6 +759,15 @@ mod tests {
         assert!(transport_for("gpt-5-1", "sk-test-not-real").is_ok());
         assert!(transport_for("gemini-2-5-flash", "test-not-real").is_ok());
         assert!(transport_for("claude-opus-5", "sk-ant-test-not-real").is_ok());
+        assert!(transport_for("mistral-large-latest", "test-not-real").is_ok());
+        assert!(
+            transport_for("local-gemma", "").is_ok(),
+            "the local model takes no key"
+        );
+        assert!(matches!(
+            transport_for("mistral-large-latest", ""),
+            Err(EgressError::NoApiKey)
+        ));
         assert!(matches!(
             transport_for("gpt-5-1", " "),
             Err(EgressError::NoApiKey)
