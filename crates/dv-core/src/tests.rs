@@ -837,6 +837,25 @@ fn the_report_file_name_never_carries_a_name() {
 }
 
 #[test]
+fn readiness_lists_what_is_missing_and_keeps_her_confirmations() {
+    let (_dir, mut core, _case) = setup(None);
+    let r = core.readiness().unwrap();
+    assert!(!r.all_done);
+    let item = |r: &Readiness, k: &str| r.items.iter().find(|i| i.key == k).unwrap().clone();
+    assert!(!item(&r, "zdr").done);
+    assert!(!item(&r, "backup").done);
+    assert!(item(&r, "backup").checked_by_program);
+    assert!(!item(&r, "api_key").done);
+    let r = core.confirm_readiness("zdr", true).unwrap();
+    assert!(item(&r, "zdr").done);
+    assert!(item(&r, "zdr").confirmed_at.is_some());
+    let r = core.confirm_readiness("zdr", false).unwrap();
+    assert!(!item(&r, "zdr").done);
+    // Items the program checks cannot be confirmed by hand.
+    assert!(core.confirm_readiness("backup", true).is_err());
+}
+
+#[test]
 fn the_vault_locks_with_the_computer() {
     let (_dir, mut core, _case) = setup(None);
     assert!(core.is_unlocked());

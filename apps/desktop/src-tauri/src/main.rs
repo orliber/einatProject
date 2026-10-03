@@ -15,8 +15,8 @@ use std::time::Duration;
 use dv_core::{
     ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView,
     ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
-    ExportCheck, ImportPreview, NameMatch, Prepared, ReportSettings, RetentionItem, SectionResult,
-    SortResult, StagedBackup, SuspectDecision, UiError, UsageSummary,
+    ExportCheck, ImportPreview, NameMatch, Prepared, Readiness, ReportSettings, RetentionItem,
+    SectionResult, SortResult, StagedBackup, SuspectDecision, UiError, UsageSummary,
 };
 use dv_domain::{CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind};
 use tauri::Manager;
@@ -170,6 +170,21 @@ async fn touch(state: tauri::State<'_, AppState>) -> Res<()> {
 }
 
 // ------------------------------------------------------------------ settings
+
+/// What must be true before real cases (stage 8): informs, never blocks.
+#[tauri::command]
+async fn readiness(state: tauri::State<'_, AppState>) -> Res<Readiness> {
+    with_core(&state, |c| c.readiness()).await
+}
+
+#[tauri::command]
+async fn confirm_readiness(
+    state: tauri::State<'_, AppState>,
+    key: String,
+    done: bool,
+) -> Res<Readiness> {
+    with_core(&state, move |c| c.confirm_readiness(&key, done)).await
+}
 
 /// This month's use of the AI (numbers only) and the monthly ceiling.
 #[tauri::command]
@@ -1008,6 +1023,8 @@ fn main() {
             unlock_with_recovery,
             lock,
             touch,
+            readiness,
+            confirm_readiness,
             usage_summary,
             set_monthly_cap,
             set_api_key,

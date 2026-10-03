@@ -10,6 +10,7 @@ mod consultations;
 mod dates;
 mod followup;
 mod library;
+mod readiness;
 mod retention;
 mod sorting;
 pub mod update;
@@ -42,6 +43,7 @@ pub(crate) use dates::today;
 pub use dv_vault::BACKUP_EXTENSION;
 pub use followup::FollowUpView;
 pub use library::TRASH_DAYS;
+pub use readiness::{Readiness, ReadinessItem};
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
 pub use usage::UsageSummary;
 pub use views::{

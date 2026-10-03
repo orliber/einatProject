@@ -14,6 +14,8 @@
     "allow-unlock-with-recovery",
     "allow-lock",
     "allow-touch",
+    "allow-readiness",
+    "allow-confirm-readiness",
     "allow-usage-summary",
     "allow-set-monthly-cap",
     "allow-set-api-key",

@@ -11,6 +11,8 @@ fn main() {
             "unlock_with_recovery",
             "lock",
             "touch",
+            "readiness",
+            "confirm_readiness",
             "usage_summary",
             "set_monthly_cap",
             "set_api_key",

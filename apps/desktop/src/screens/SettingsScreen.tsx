@@ -6,6 +6,7 @@ import { PasswordSettings } from "../components/PasswordSettings";
 import { TopBar } from "../components/TopBar";
 import { UpdateSettings } from "../components/Update";
 import { UsageSettings } from "../components/UsageSettings";
+import { ReadinessSettings } from "../components/ReadinessSettings";
 import { ErrorLine } from "../components/ui";
 import { ipc, type ReportSettings } from "../ipc/client";
 import "./SettingsScreen.css";
@@ -17,6 +18,7 @@ const MODELS: [string, string][] = [
 ];
 
 const JUMPS: [string, string][] = [
+  ["s-ready", "מוכנה לעבודה"],
   ["s-claude", "חיבור ל-AI"],
   ["s-usage", "שימוש ועלות"],
   ["s-privacy", "פרטיות ונעילה"],
@@ -64,6 +66,8 @@ export function SettingsScreen() {
           ))}
         </nav>
         <ErrorLine error={error} />
+
+        <ReadinessSettings />
 
         <section className="card setting" aria-labelledby="s-claude">
           <h2 id="s-claude">חיבור ל-Claude</h2>

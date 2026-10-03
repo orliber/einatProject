@@ -110,6 +110,7 @@ export class FakeCore {
   private practitioner = ["ד\"ר רותם בדויה"];
   private lockMinutes = 15;
   private capUsd: number | null = null;
+  private ready: Record<string, number | null> = {};
   private model = "claude-opus-5";
   private speed = "balanced";
   private reviewOnlySuspect = false;
@@ -522,6 +523,18 @@ export class FakeCore {
         return true;
       case "touch":
         return null;
+      case "readiness":
+      case "confirm_readiness": {
+        if (cmd === "confirm_readiness") this.ready[a.key as string] = a.done ? 1_790_000_000 : null;
+        const manual = ["zdr", "consent_form", "score_tables", "legal"].map((key) => ({
+          key, done: this.ready[key] != null, checked_by_program: false, confirmed_at: this.ready[key] ?? null,
+        }));
+        const items = [...manual,
+          { key: "api_key", done: false, checked_by_program: true, confirmed_at: null },
+          { key: "backup", done: false, checked_by_program: true, confirmed_at: null },
+          { key: "disk", done: true, checked_by_program: true, confirmed_at: null }];
+        return { items, all_done: false };
+      }
       case "usage_summary":
         return { month: "2026-10", requests: 0, input_tokens: 0, output_tokens: 0, estimated_cents: 0, cap_usd: this.capUsd, unpriced_models: [] };
       case "set_monthly_cap":

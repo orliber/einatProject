@@ -114,6 +114,18 @@ fn describe(
         ),
         "restored" => ("security", "הכספת שוחזרה מגיבוי".to_owned(), true),
         "settings_changed" if INTERNAL_SETTINGS.contains(&text("key")) => return None,
+        // This month's token counts change with every answer; the send itself is logged.
+        "settings_changed" if text("key").starts_with("usage/") => return None,
+        "settings_changed" if text("key") == "monthly_cap_usd" => (
+            "security",
+            "תקרת ההוצאה החודשית על AI עודכנה".to_owned(),
+            false,
+        ),
+        "settings_changed" if text("key").starts_with("ready/") => (
+            "security",
+            "עודכן אישור ברשימה \"מוכנה לעבודה אמיתית\"".to_owned(),
+            false,
+        ),
         "settings_changed" if !text("secret").is_empty() => {
             ("security", "מפתח ה-API נשמר".to_owned(), false)
         }
@@ -248,5 +260,10 @@ mod tests {
         );
         let internal = serde_json::json!({ "key": "backup_last_at" });
         assert!(describe("settings_changed", &internal, None).is_none());
+        let usage = serde_json::json!({ "key": "usage/2026-10" });
+        assert!(describe("settings_changed", &usage, None).is_none());
+        let ready = serde_json::json!({ "key": "ready/zdr" });
+        let (_, text, _) = describe("settings_changed", &ready, None).unwrap();
+        assert!(text.contains("מוכנה לעבודה אמיתית"), "{text}");
     }
 }

@@ -30,6 +30,7 @@ import type { Prepared } from "./generated/Prepared";
 import type { ReportSettings } from "./generated/ReportSettings";
 import type { ScoreSheet } from "./generated/ScoreSheet";
 import type { UsageSummary } from "./generated/UsageSummary";
+import type { Readiness } from "./generated/Readiness";
 import type { SectionResult } from "./generated/SectionResult";
 import type { SortResult } from "./generated/SortResult";
 import type { MaterialRouting } from "./generated/MaterialRouting";
@@ -70,6 +71,8 @@ export const ipc = {
   lock: () => run("lock"),
   /** Typing or scrolling in the window counts as activity for the idle lock. */
   touch: () => run("touch"),
+  readiness: () => call<Readiness>("readiness"),
+  confirmReadiness: (key: string, done: boolean) => call<Readiness>("confirm_readiness", { key, done }),
   usageSummary: () => call<UsageSummary>("usage_summary"),
   /** Dollars; `null` removes the ceiling. */
   setMonthlyCap: (capUsd: number | null) => run("set_monthly_cap", { capUsd }),
@@ -205,6 +208,7 @@ export const ipc = {
 export type {
   UpdateView,
   UsageSummary,
+  Readiness,
   ActivityPage,
   ConsultationSummary,
   ConsultationView,
