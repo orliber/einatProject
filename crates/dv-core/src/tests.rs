@@ -433,6 +433,37 @@ fn full_draft_prepares_every_section_with_material() {
     }
 }
 
+/// "Write the empty sections" writes only those: a section with a draft waiting or approved
+/// paragraphs is not drafted again beside them.
+#[test]
+fn full_draft_leaves_written_sections_alone() {
+    let (_dir, mut core, case) = setup(None);
+    let all: Vec<String> = core
+        .prepare_full_draft(&case)
+        .unwrap()
+        .into_iter()
+        .map(|(k, _)| k)
+        .collect();
+    assert!(all.len() >= 2, "{all:?}");
+    let (approved, proposed) = (&all[0], &all[1]);
+    core.add_own_paragraph(&case, approved, "פסקה שאושרה.")
+        .unwrap();
+    let p = core.prepare_section(&case, proposed, "טיוטה").unwrap();
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+
+    let again: Vec<String> = core
+        .prepare_full_draft(&case)
+        .unwrap()
+        .into_iter()
+        .map(|(k, _)| k)
+        .collect();
+    assert!(
+        !again.contains(approved) && !again.contains(proposed),
+        "{again:?}"
+    );
+    assert_eq!(again.len(), all.len() - 2);
+}
+
 #[test]
 fn ambiguous_word_is_decided_once_per_case() {
     let fake = FakeTransport::default();
@@ -1034,6 +1065,13 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
         let nonce = dv_ai::nonce_from(&[7; 16]);
         // Like the real gate: every string in the body, not the JSON numbers ("max_tokens").
         body.push(dv_ai::build_section_request(&dv_ai::ModelConfig::default(), &input, &nonce).0);
+        // A summary: written from the approved sections only, with its own opening line.
+        let derived = dv_ai::SectionInput {
+            section_key: "summary".into(),
+            sources: vec![],
+            ..input
+        };
+        body.push(dv_ai::build_section_request(&dv_ai::ModelConfig::default(), &derived, &nonce).0);
     }
     // The sorting request (D-022): every section key and description of the template, the
     // passage frames and the schema.

@@ -368,6 +368,9 @@ export class FakeCore {
           if (f === "whole") return [{ label: `${kindLabel[i.kind]} · ${i.title}`, text: i.content }];
           return [{ label: `${kindLabel[i.kind]} · קטעים שנבחרו לסעיף · ${i.title}`, text: R.excerpt(R.passages(i.content), f) }];
         });
+    if (DERIVED.includes(key) && sources.length === 0) {
+      fail("refused", "הסעיף הזה נכתב מתוך הסעיפים שכבר אישרת, ועוד לא אישרת אף סעיף. מאשרים קודם את הטיוטות בסעיפים האחרים, ואז חוזרים לכאן.");
+    }
     sources.forEach((s, n) => {
       const sid = `S${n + 1}`;
       refs.push({ sid, label: `${sid} · ${s.label}`, tagged: take(`${sid} · ${s.label}`, s.text) });
@@ -703,7 +706,7 @@ export class FakeCore {
         return this.prepareSection(this.find(a.caseId), String(a.sectionKey), String(a.instruction ?? ""), a.replaces ? String(a.replaces) : null);
       case "prepare_full_draft": {
         const c = this.find(a.caseId);
-        return SECTIONS.filter((s) => !DERIVED.includes(s.key) && c.inputs.some((i) => this.feedOf(c, i, s.key) !== null) && !c.drafts.some((d) => d.section === s.key && d.status === "approved"))
+        return SECTIONS.filter((s) => !DERIVED.includes(s.key) && c.inputs.some((i) => this.feedOf(c, i, s.key) !== null) && !c.drafts.some((d) => d.section === s.key && (d.status === "approved" || d.status === "proposed")))
           .map((s) => [s.key, this.prepareSection(c, s.key, "")]);
       }
       case "send_section": {

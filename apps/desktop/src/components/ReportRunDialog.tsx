@@ -8,6 +8,8 @@ import "./ReportRunDialog.css";
 
 /** How many sections are written at the same time. */
 const PARALLEL = 3;
+/** The request each section is sent with (the same as the core's full draft). */
+const DRAFT_INSTRUCTION = "כתוב/י טיוטה לסעיף מתוך המקורות, עם מקור לכל פסקה.";
 
 type RowState = "ready" | "question" | "waiting" | "writing" | "done" | "failed";
 
@@ -115,7 +117,7 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
       await api.review({
         title: `טיוטה לסעיף ${title(key)}`,
         prepared,
-        reprepare: () => ipc.prepareSection(api.caseId, key, ""),
+        reprepare: () => ipc.prepareSection(api.caseId, key, DRAFT_INSTRUCTION),
         onSend: async (id) => {
           setState((s) => ({ ...s, [key]: "waiting" }));
           await writeOne(key, id);

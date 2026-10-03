@@ -1694,7 +1694,9 @@ impl Core {
         })
     }
 
-    /// Prepare every section that has material (the "prepare report draft" button).
+    /// Prepare every section that has material and nothing written yet (the "write the empty
+    /// sections" button). A section with a draft or approved paragraphs is left as it is:
+    /// writing it again would put a second draft beside what she already approved.
     pub fn prepare_full_draft(
         &mut self,
         case_id: &str,
@@ -1714,7 +1716,12 @@ impl Core {
             .sections()
             .filter(|s| !DERIVED_SECTIONS.contains(&s.key.as_str()))
         {
-            if fed.contains(&s.key) {
+            let written = self
+                .vault_ref()?
+                .drafts(case_id, &s.key)?
+                .iter()
+                .any(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved));
+            if fed.contains(&s.key) && !written {
                 let p = self.prepare_section(
                     case_id,
                     &s.key,
