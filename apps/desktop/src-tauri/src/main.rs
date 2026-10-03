@@ -16,7 +16,7 @@ use dv_core::{
     ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView,
     ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
     ExportCheck, ImportPreview, NameMatch, Prepared, Readiness, ReportSettings, RetentionItem,
-    SectionResult, SortResult, StagedBackup, SuspectDecision, UiError, UsageSummary,
+    SectionResult, SortResult, StagedBackup, SuspectDecision, UiError, UnsavedEdit, UsageSummary,
 };
 use dv_domain::{CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind};
 use tauri::Manager;
@@ -184,6 +184,22 @@ async fn confirm_readiness(
     done: bool,
 ) -> Res<Readiness> {
     with_core(&state, move |c| c.confirm_readiness(&key, done)).await
+}
+
+/// The paragraph being edited now (memory only), kept in the vault if it locks meanwhile.
+#[tauri::command]
+async fn hold_unsaved(state: tauri::State<'_, AppState>, edit: Option<UnsavedEdit>) -> Res<()> {
+    with_core(&state, move |c| {
+        c.hold_unsaved(edit);
+        Ok(())
+    })
+    .await
+}
+
+/// After entering: the edit kept at the last lock, offered once.
+#[tauri::command]
+async fn take_unsaved(state: tauri::State<'_, AppState>) -> Res<Option<UnsavedEdit>> {
+    with_core(&state, |c| c.take_unsaved()).await
 }
 
 /// This month's use of the AI (numbers only) and the monthly ceiling.
@@ -1041,6 +1057,8 @@ fn main() {
             confirm_readiness,
             usage_summary,
             set_monthly_cap,
+            hold_unsaved,
+            take_unsaved,
             set_api_key,
             set_model,
             set_speed,

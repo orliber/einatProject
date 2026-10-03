@@ -3,6 +3,7 @@ import { useApp } from "../../App";
 import { ipc, type ExportCheck, type ReportSettings } from "../../ipc/client";
 import { ageWords } from "../../components/AgeField";
 import { ErrorLine, Spinner } from "../../components/ui";
+import { useHoldUnsaved } from "../../components/Unsaved";
 import type { CaseApi } from "../CaseScreen";
 import "./FinishView.css";
 
@@ -27,6 +28,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [withMarks, setWithMarks] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useHoldUnsaved(caseId, "פסקה בשלב הסיום", editing?.text ?? null);
 
   useEffect(() => {
     let alive = true;

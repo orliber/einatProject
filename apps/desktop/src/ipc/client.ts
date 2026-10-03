@@ -31,6 +31,7 @@ import type { ReportSettings } from "./generated/ReportSettings";
 import type { ScoreSheet } from "./generated/ScoreSheet";
 import type { UsageSummary } from "./generated/UsageSummary";
 import type { Readiness } from "./generated/Readiness";
+import type { UnsavedEdit } from "./generated/UnsavedEdit";
 import type { SectionResult } from "./generated/SectionResult";
 import type { SortResult } from "./generated/SortResult";
 import type { MaterialRouting } from "./generated/MaterialRouting";
@@ -71,6 +72,8 @@ export const ipc = {
   lock: () => run("lock"),
   /** Typing or scrolling in the window counts as activity for the idle lock. */
   touch: () => run("touch"),
+  holdUnsaved: (edit: UnsavedEdit | null) => run("hold_unsaved", { edit }),
+  takeUnsaved: () => call<UnsavedEdit | null>("take_unsaved"),
   readiness: () => call<Readiness>("readiness"),
   confirmReadiness: (key: string, done: boolean) => call<Readiness>("confirm_readiness", { key, done }),
   usageSummary: () => call<UsageSummary>("usage_summary"),
@@ -210,6 +213,7 @@ export type {
   UpdateView,
   UsageSummary,
   Readiness,
+  UnsavedEdit,
   ActivityPage,
   ConsultationSummary,
   ConsultationView,

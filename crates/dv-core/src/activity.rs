@@ -25,6 +25,8 @@ const INTERNAL_SETTINGS: &[&str] = &[
     "backup_last_check_at",
     "secret_changed_at",
     "first_use_day",
+    // An open edit kept at lock and given back at the next entry.
+    "unsaved_edit",
     REVIEWED_KEY,
 ];
 

@@ -524,6 +524,10 @@ export class FakeCore {
         return true;
       case "touch":
         return null;
+      case "hold_unsaved":
+        return null;
+      case "take_unsaved":
+        return null;
       case "readiness":
       case "confirm_readiness": {
         if (cmd === "confirm_readiness") this.ready[a.key as string] = a.done ? 1_790_000_000 : null;

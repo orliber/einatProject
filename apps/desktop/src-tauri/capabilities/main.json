@@ -18,6 +18,8 @@
     "allow-confirm-readiness",
     "allow-usage-summary",
     "allow-set-monthly-cap",
+    "allow-hold-unsaved",
+    "allow-take-unsaved",
     "allow-set-api-key",
     "allow-set-model",
     "allow-set-speed",

@@ -13,6 +13,7 @@ mod library;
 mod readiness;
 mod retention;
 mod sorting;
+mod unsaved;
 pub mod update;
 mod usage;
 mod views;
@@ -47,6 +48,7 @@ pub use followup::FollowUpView;
 pub use library::TRASH_DAYS;
 pub use readiness::{Readiness, ReadinessItem};
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
+pub use unsaved::UnsavedEdit;
 pub use usage::UsageSummary;
 pub use views::{
     ActivityEntry, ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail,
@@ -341,6 +343,8 @@ pub struct Core {
     staged_backup: Option<Vec<u8>>,
     /// The last automatic backup attempt this session (a failed one waits before the next).
     auto_backup_tried: Option<Instant>,
+    /// The paragraph being edited right now (memory only; kept in the vault on lock).
+    unsaved: Option<UnsavedEdit>,
 }
 
 impl std::fmt::Debug for Core {
@@ -459,6 +463,7 @@ impl Core {
             ingest_exe: None,
             staged_backup: None,
             auto_backup_tried: None,
+            unsaved: None,
         }
     }
 
@@ -743,6 +748,7 @@ impl Core {
     }
 
     fn lock_because(&mut self, reason: Option<&str>) {
+        self.keep_unsaved();
         self.pending.clear();
         self.staged_backup = None;
         if let Some(v) = self.vault.take() {

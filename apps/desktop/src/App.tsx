@@ -9,6 +9,7 @@ import { ConsultScreen } from "./screens/ConsultScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { Toast } from "./components/ui";
 import { IdleWarning } from "./components/IdleWarning";
+import { UnsavedNotice } from "./components/Unsaved";
 import { applyTextSize, readTextSize, stepTextSize } from "./textSize";
 
 export type Route =
@@ -180,6 +181,7 @@ export function App() {
       {route.name === "consult" && <ConsultScreen caseId={route.caseId} />}
       {route.name === "settings" && <SettingsScreen />}
       {toast && <Toast text={toast} onDone={() => setToast(null)} />}
+      <UnsavedNotice />
       {status.idle_lock_in != null && status.idle_lock_in <= 75 && (
         <IdleWarning seconds={status.idle_lock_in} onKeep={() => void keepWorking()} />
       )}

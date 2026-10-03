@@ -1801,6 +1801,60 @@ fn a_backup_is_made_by_itself_when_the_drive_is_there() {
 }
 
 #[test]
+fn an_open_edit_survives_the_lock_inside_the_vault() {
+    let (dir, mut core, case) = setup(None);
+    let edit = |text: &str| crate::UnsavedEdit {
+        case_id: case.clone(),
+        place: "פסקה בסעיף רקע".into(),
+        text: text.into(),
+    };
+    // Nothing kept: nothing offered.
+    assert_eq!(core.take_unsaved().unwrap(), None);
+    // An edit saved (closed) before the lock is not kept.
+    core.hold_unsaved(Some(edit("טיוטה")));
+    core.hold_unsaved(None);
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(core.take_unsaved().unwrap(), None);
+
+    let text = "הילד הגיע לאבחון בליווי אמו, ושיתף פעולה לאורך כל המפגשים.";
+    core.hold_unsaved(Some(edit(text)));
+    assert!(core.lock_with_computer());
+    // Locked: a closing editor changes nothing.
+    core.hold_unsaved(None);
+    // Not on disk outside the vault.
+    for entry in walkdir(dir.path()) {
+        let bytes = std::fs::read(&entry).unwrap();
+        assert!(
+            !bytes.windows(text.len()).any(|w| w == text.as_bytes()),
+            "{entry:?}"
+        );
+    }
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(core.take_unsaved().unwrap(), Some(edit(text)));
+    // Offered once.
+    assert_eq!(core.take_unsaved().unwrap(), None);
+    // Whitespace is not an edit worth keeping.
+    core.hold_unsaved(Some(edit("  \n")));
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(core.take_unsaved().unwrap(), None);
+}
+
+fn walkdir(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(walkdir(&p));
+        } else {
+            out.push(p);
+        }
+    }
+    out
+}
+
+#[test]
 fn a_new_password_or_kit_asks_for_a_new_backup() {
     let (dir, mut core, _case) = setup(None);
     let drive = tempfile::tempdir().unwrap();

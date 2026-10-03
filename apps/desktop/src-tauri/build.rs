@@ -11,6 +11,8 @@ fn main() {
             "unlock_with_recovery",
             "lock",
             "touch",
+            "hold_unsaved",
+            "take_unsaved",
             "readiness",
             "confirm_readiness",
             "usage_summary",
