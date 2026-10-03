@@ -40,7 +40,7 @@ Prefix letters stay outside the braces: `ל{{תמר|decl}}`, `ו{{אסתי|name|
 | `place` | hidden | locality, neighbourhood, street address |
 | `inst` | hidden | a named kindergarten, school, clinic, hospital, workplace |
 | `num` | hidden | ID, phone, e-mail, URL, health-fund or passport number, plate |
-| `date` | hidden | a calendar date, Hebrew or Gregorian, or a year (ages and durations are not dates) |
+| `date` | hidden | a calendar date, Hebrew or Gregorian, or part of one (a month, a year); ages and durations are not dates |
 | `indirect` | hidden or generalized | a parent's profession or workplace, a unique event |
 | `keep` | untouched | an ordinary word that looks like a name ("אליה", "שני ההורים", "מתן זמן") |
 

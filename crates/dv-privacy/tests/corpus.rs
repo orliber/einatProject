@@ -307,33 +307,35 @@ struct Floor {
     max_questions_per_case: f64,
 }
 
-// Measured on the filter as of v0.2.0, before the corpus existed (2026-10-03).
+// Raised with stage 2 of the filter (D-041, 2026-10-03). Measured on v0.2.0, before it:
+// dev name .727 place .604 inst .308, 11.1 false hides per 1,000 words, 20.7 questions per
+// case; test name .702 place .644 inst .227, 11.3 per 1,000, 27.2 per case.
 const DEV_FLOOR: Floor = Floor {
     min_recall: &[
-        ("decl", 0.94),
-        ("name", 0.72),
-        ("surname", 0.73),
-        ("place", 0.61),
-        ("inst", 0.30),
-        ("num", 0.98),
-        ("date", 0.96),
+        ("decl", 1.0),
+        ("name", 0.85),
+        ("surname", 0.86),
+        ("place", 0.88),
+        ("inst", 0.82),
+        ("num", 1.0),
+        ("date", 1.0),
     ],
-    max_false_per_1000: 11.2,
-    max_questions_per_case: 20.7,
+    max_false_per_1000: 2.8,
+    max_questions_per_case: 16.4,
 };
 
 const TEST_FLOOR: Floor = Floor {
     min_recall: &[
-        ("decl", 0.98),
-        ("name", 0.70),
-        ("surname", 0.82),
-        ("place", 0.64),
-        ("inst", 0.22),
+        ("decl", 0.99),
+        ("name", 0.84),
+        ("surname", 0.95),
+        ("place", 0.73),
+        ("inst", 0.68),
         ("num", 1.0),
-        ("date", 0.98),
+        ("date", 1.0),
     ],
-    max_false_per_1000: 11.4,
-    max_questions_per_case: 27.3,
+    max_false_per_1000: 5.8,
+    max_questions_per_case: 24.2,
 };
 
 fn check(split: &str, r: &Report, floor: &Floor) -> Vec<String> {
