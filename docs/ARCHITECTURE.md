@@ -133,7 +133,7 @@ audit(seq PK, ts, event, case_ref /* HMAC של case_id */, meta_json_enc, prev_m
 ## הקשחת Tauri
 - CSP: `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`.
 - Isolation pattern. capabilities: רק הפקודות שלנו. אין plugins של fs, shell או http. דיאלוגים לבחירת קבצים נפתחים מצד Rust.
-- `contentProtected: true` בהגדרות החלון, אבל ההגנה מוסרת בזמן ריצה ומוסתרת מההגדרות בינתיים (D-038; המתג של D-037 נשאר בקוד), DevTools כבויים ב-release, ניווט חיצוני חסום.
+- `contentProtected: true` בהגדרות החלון, אבל ההגנה מוסרת בזמן ריצה ומוסתרת מההגדרות בינתיים (D-039; המתג של D-037 נשאר בקוד), DevTools כבויים ב-release, ניווט חיצוני חסום.
 - פונטים (Frank Ruhl Libre, Assistant, ברישיון OFL) ארוזים מקומית.
 
 ## סביבה

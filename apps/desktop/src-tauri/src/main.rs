@@ -111,7 +111,7 @@ async fn app_status(
     Ok(status)
 }
 
-/// Hiding the window from screenshots and screen sharing is switched off for now (D-038):
+/// Hiding the window from screenshots and screen sharing is switched off for now (D-039):
 /// it blacked out Zoom and Teams. Setting this back to `true` restores D-037 as it was.
 const SCREEN_PROTECTION_ENABLED: bool = false;
 
@@ -948,7 +948,7 @@ fn main() {
             let timer = Arc::clone(&core);
             let timer_clipboard = clipboard.clone();
             let timer_window = app.get_webview_window("main");
-            // The window opens protected (tauri.conf.json); this lifts it while D-038 holds.
+            // The window opens protected (tauri.conf.json); this lifts it while D-039 holds.
             if let Some(w) = &timer_window {
                 protect(w, true);
             }

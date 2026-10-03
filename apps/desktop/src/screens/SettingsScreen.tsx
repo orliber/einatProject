@@ -9,7 +9,7 @@ import { ErrorLine } from "../components/ui";
 import { ipc, type ReportSettings } from "../ipc/client";
 import "./SettingsScreen.css";
 
-/** The screen-capture switch is hidden while that protection is off (D-038). */
+/** The screen-capture switch is hidden while that protection is off (D-039). */
 const SCREEN_PROTECTION_SETTING = false;
 
 const MODELS: [string, string][] = [
