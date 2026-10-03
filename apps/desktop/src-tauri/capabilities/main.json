@@ -89,6 +89,7 @@
     "allow-check-backup",
     "allow-restore-backup",
     "allow-forget-backup",
+    "allow-set-auto-backup",
     "allow-check-update",
     "allow-install-update",
     "allow-send-progress"

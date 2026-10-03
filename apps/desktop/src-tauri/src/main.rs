@@ -884,6 +884,12 @@ async fn choose_backup(
 }
 
 /// Restore drill on the chosen file, with the password.
+/// The automatic backup to the drive of the last backup, on or off.
+#[tauri::command]
+async fn set_auto_backup(state: tauri::State<'_, AppState>, on: bool) -> Res<BackupStatus> {
+    with_core(&state, move |c| c.set_auto_backup(on)).await
+}
+
 #[tauri::command]
 async fn check_backup(state: tauri::State<'_, AppState>, password: String) -> Res<BackupCheckView> {
     let password = zeroize::Zeroizing::new(password);
@@ -999,6 +1005,14 @@ fn main() {
                         locked = timer.lock().is_ok_and(|mut c| c.lock_with_computer());
                     }
                 }
+                // A backup that is due goes by itself to the drive of the last one, if it is
+                // connected (see `Core::auto_backup`). A failure waits and is shown nowhere: the
+                // backup reminder stays until a backup is made.
+                if !locked {
+                    if let Ok(mut c) = timer.lock() {
+                        let _ = c.auto_backup();
+                    }
+                }
                 if locked {
                     timer_clipboard.clear_now();
                     if let Some(w) = &timer_window {
@@ -1098,6 +1112,7 @@ fn main() {
             check_backup,
             restore_backup,
             forget_backup,
+            set_auto_backup,
             check_update,
             install_update,
             send_progress,

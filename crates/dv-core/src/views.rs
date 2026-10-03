@@ -329,6 +329,9 @@ pub struct BackupStatus {
     pub last_check_at: Option<i64>,
     /// An empty vault has nothing to lose yet: no reminder.
     pub has_cases: bool,
+    /// A backup is made by itself into the folder of the last one when it is due and that
+    /// folder (a removable drive) is connected.
+    pub auto: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

@@ -121,6 +121,11 @@ fn describe(
             "תקרת ההוצאה החודשית על AI עודכנה".to_owned(),
             false,
         ),
+        "settings_changed" if text("key") == "backup_auto" => (
+            "security",
+            "הגיבוי האוטומטי הודלק או כובה".to_owned(),
+            false,
+        ),
         "settings_changed" if text("key").starts_with("ready/") => (
             "security",
             "עודכן אישור ברשימה \"מוכנה לעבודה אמיתית\"".to_owned(),

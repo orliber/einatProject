@@ -1747,6 +1747,60 @@ fn the_restore_drill_proves_the_file_and_the_password() {
 }
 
 #[test]
+fn a_backup_is_made_by_itself_when_the_drive_is_there() {
+    let (_dir, mut core, _case) = setup(None);
+    // Never before she chose a folder herself.
+    assert!(core.auto_backup().unwrap().is_none());
+    let drive = tempfile::tempdir().unwrap();
+    core.write_backup(&drive.path().join("שלי.vaultbak"))
+        .unwrap();
+    // Not due: nothing.
+    assert!(core.auto_backup().unwrap().is_none());
+
+    // Older auto backups in the folder, and one of hers with a similar name.
+    for day in ["2026-01-01", "2026-02-01", "2026-03-01"] {
+        std::fs::write(
+            drive
+                .path()
+                .join(format!("גיבוי אוטומטי כספת האבחון {day}.vaultbak")),
+            b"old",
+        )
+        .unwrap();
+    }
+    std::fs::write(drive.path().join("גיבוי אוטומטי כספת האבחון.txt"), b"hers").unwrap();
+
+    // A new password makes it due; the drive is connected: a backup is made by itself.
+    core.mark_secret_changed().unwrap();
+    let done = core.auto_backup().unwrap().unwrap();
+    assert!(done.path.contains("גיבוי אוטומטי כספת האבחון"));
+    assert!(!core.backup_status().unwrap().due);
+    let mut names: Vec<String> = std::fs::read_dir(drive.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    // The oldest automatic one went; hers stayed.
+    assert_eq!(names.len(), 2 + crate::AUTO_KEEP, "{names:?}");
+    assert!(!names.iter().any(|n| n.contains("2026-01-01")));
+    assert!(names.contains(&"שלי.vaultbak".to_owned()));
+    assert!(names.contains(&"גיבוי אוטומטי כספת האבחון.txt".to_owned()));
+
+    // Turned off: nothing, even when due.
+    core.mark_secret_changed().unwrap();
+    assert!(!core.set_auto_backup(false).unwrap().auto);
+    assert!(core.auto_backup().unwrap().is_none());
+    assert!(core.set_auto_backup(true).unwrap().auto);
+
+    // The drive is out: nothing, and no error.
+    drop(drive);
+    assert!(core.auto_backup().unwrap().is_none());
+
+    // A locked vault: nothing.
+    core.lock();
+    assert!(core.auto_backup().unwrap().is_none());
+}
+
+#[test]
 fn a_new_password_or_kit_asks_for_a_new_backup() {
     let (dir, mut core, _case) = setup(None);
     let drive = tempfile::tempdir().unwrap();

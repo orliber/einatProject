@@ -104,6 +104,7 @@ export class FakeCore {
   private lastBackupAt: number | null = Math.floor(Date.now() / 1000) - 9 * 86_400;
   private lastCheckAt: number | null = null;
   private secretChanged = false;
+  private autoBackup = true;
   private reviewedAt: number | null = null;
   private convs: { id: string; caseId: string | null; updated: number; turns: { role: string; text: string; hidden: string[]; demo: boolean; at: number }[] }[] = [];
   private activityLog: ActivityEntry[] = [];
@@ -839,11 +840,16 @@ export class FakeCore {
       }
       case "export_report":
         return "בהדמיה בדפדפן לא נוצר קובץ. בתוכנה המותקנת הדוח נשמר בתיקיית ההורדות, מוצפן בסיסמה.";
+      case "set_auto_backup":
+        this.autoBackup = Boolean(a.on);
+        this.logActivity("settings_changed", "security", "הגיבוי האוטומטי הודלק או כובה");
+        return this.handle("backup_status", {});
       case "backup_status": {
         const days = this.lastBackupAt === null ? null : Math.floor((now() - this.lastBackupAt) / 86_400);
         return {
           last_at: this.lastBackupAt, days_since: days, due: this.secretChanged || days === null || days >= 7,
           secret_changed: this.secretChanged, last_check_at: this.lastCheckAt, has_cases: this.cases.length > 0,
+          auto: this.autoBackup,
         } satisfies BackupStatus;
       }
       case "write_backup": {

@@ -38,7 +38,9 @@ use dv_vault::{Argon2Params, AuditEvent, Vault, VaultError};
 use serde_json::Value;
 
 pub use activity::ACTIVITY_PAGE;
-pub use backup::{backup_file_name, BACKUP_DAYS, MAX_BACKUP_BYTES};
+pub use backup::{
+    auto_backup_file_name, backup_file_name, AUTO_KEEP, BACKUP_DAYS, MAX_BACKUP_BYTES,
+};
 pub(crate) use dates::today;
 pub use dv_vault::BACKUP_EXTENSION;
 pub use followup::FollowUpView;
@@ -337,6 +339,8 @@ pub struct Core {
     ingest_exe: Option<PathBuf>,
     /// A backup file chosen for the drill or a restore (encrypted bytes).
     staged_backup: Option<Vec<u8>>,
+    /// The last automatic backup attempt this session (a failed one waits before the next).
+    auto_backup_tried: Option<Instant>,
 }
 
 impl std::fmt::Debug for Core {
@@ -454,6 +458,7 @@ impl Core {
             transport: None,
             ingest_exe: None,
             staged_backup: None,
+            auto_backup_tried: None,
         }
     }
 

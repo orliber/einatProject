@@ -15,6 +15,7 @@ fn main() {
             "confirm_readiness",
             "usage_summary",
             "set_monthly_cap",
+            "set_auto_backup",
             "set_api_key",
             "set_model",
             "set_speed",

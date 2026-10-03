@@ -198,6 +198,7 @@ export const ipc = {
   restoreBackup: (password: string | null, recoveryKey: string | null) =>
     call<AppStatus>("restore_backup", { password, recoveryKey }),
   forgetBackup: () => run("forget_backup"),
+  setAutoBackup: (on: boolean) => call<BackupStatus>("set_auto_backup", { on }),
 
   /** A newer version, signed by the developer (D-033); `null` when this is the newest. */
   checkUpdate: () => call<UpdateView | null>("check_update"),
