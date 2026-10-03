@@ -16,7 +16,9 @@ use crate::lexicon::{
 };
 use crate::matcher::PhraseIndex;
 use crate::patterns::{self, Ymd};
-use crate::text::{normalize, prefix_splits, spelling_variants, tokenize, weak_near, Token};
+use crate::text::{
+    normalize, prefix_splits, spelling_variants, tokenize, weak_near, Token, PREFIX_LETTERS,
+};
 use crate::PrivacyError;
 
 /// Everything the pipeline and the gate need to know about the case being worked on.
@@ -186,10 +188,12 @@ pub(crate) fn name_phrases(name: &str) -> Vec<Vec<String>> {
         }
     }
     for w in significant {
-        // A defective spelling that is an ordinary word ("מכל" from "מיכל") is not a variant.
+        // A defective spelling that is an everyday word ("מכל" from "מיכל", "בלי" from
+        // "בילי"), or makes one after a prefix ("כללי" = כ + "ללי" from "לילי"), is not a
+        // variant: a guess at a misspelling never rewrites an ordinary word.
         for v in spelling_variants(w)
             .into_iter()
-            .filter(|v| v == w || !LEXICON.common_words.contains(v))
+            .filter(|v| v == w || !variant_reads_as_word(v))
         {
             out.push(vec![v]);
         }
@@ -202,6 +206,14 @@ pub(crate) fn name_phrases(name: &str) -> Vec<Vec<String>> {
         }
     }
     out
+}
+
+fn variant_reads_as_word(v: &str) -> bool {
+    LEXICON.common_words.contains(v)
+        || word_bucket(v) >= EVERYDAY
+        || PREFIX_LETTERS
+            .iter()
+            .any(|p| word_bucket(&format!("{p}{v}")) >= EVERYDAY)
 }
 
 /// Index of every declared name. Current-case identities are inserted first, so a name that
@@ -675,6 +687,60 @@ pub(crate) fn declared_reads_as_word(
                     plain_after,
                     &["דולק", "כבוי", "עמומ", "בהיר", "מהבהב", "חזק"],
                 )
+        }
+        // "ציון 112", "ציון T", "ציון כולל", "ציון מסתגל כללי": a score. Not before an
+        // adjective alone ("ציון גבוה מאחיו") or a verb ("ציון מסתגל לגן").
+        "ציונ" => {
+            plain_after.is_some_and(|w| w.starts_with(|c: char| c.is_ascii_digit()))
+                || one_of(
+                    plain_after,
+                    &[
+                        "t",
+                        "z",
+                        "iq",
+                        "כולל",
+                        "השוואה",
+                        "תקנ",
+                        "גולמי",
+                        "משוקלל",
+                        "חתכ",
+                    ],
+                )
+                || (one_of(plain_after, &["מסתגל"])
+                    && tokens.get(first + 2).is_some_and(|t| t.norm == "כללי"))
+        }
+        // "מוטוריקה עדינה": an adjective.
+        "עדינה" => one_of(
+            before,
+            &["מוטוריקה", "ומוטוריקה", "במוטוריקה", "המוטוריקה", "בצורה"],
+        ),
+        // "חרדת פרידה", "פרידה מההורה": separating, not a person.
+        "פרידה" => {
+            one_of(
+                before,
+                &[
+                    "חרדת",
+                    "קשיי",
+                    "קושי",
+                    "תגובת",
+                    "תהליכ",
+                    "רגע",
+                    "רגעי",
+                    "מצבי",
+                ],
+            ) || one_of(
+                plain_after,
+                &[
+                    "מההורה",
+                    "מההורימ",
+                    "מהאמ",
+                    "מהאב",
+                    "מאמא",
+                    "מאבא",
+                    "מאמ",
+                    "מאב",
+                ],
+            )
         }
         _ => false,
     }
@@ -2265,10 +2331,12 @@ fn analyze(
     }
     // Places from the lexicon (localities, hospitals) are hidden automatically.
     for m in LEXICON.places.find(text, &tokens) {
-        if !overlaps(m.start, m.end, &reps, &suspects)
-            && !(m.first_token == m.last_token
-                && place_reads_as_word(text, &tokens, m.first_token, m.prefix))
+        if m.first_token == m.last_token
+            && place_reads_as_word(text, &tokens, m.first_token, m.prefix)
         {
+            continue;
+        }
+        if !overlaps(m.start, m.end, &reps, &suspects) {
             let (out, label) = match m.payload {
                 PlaceKind::Locality => ("[יישוב_אחר]", "יישוב"),
                 PlaceKind::Hospital => ("[בית_חולים]", "בית חולים"),

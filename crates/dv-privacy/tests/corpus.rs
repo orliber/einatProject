@@ -307,7 +307,7 @@ struct Floor {
     max_questions_per_case: f64,
 }
 
-// Raised with stage 2 of the filter (D-041, 2026-10-03). Measured on v0.2.0, before it:
+// Raised with stage 2 of the filter (D-042, 2026-10-03). Measured on v0.2.0, before it:
 // dev name .727 place .604 inst .308, 11.1 false hides per 1,000 words, 20.7 questions per
 // case; test name .702 place .644 inst .227, 11.3 per 1,000, 27.2 per case.
 const DEV_FLOOR: Floor = Floor {

@@ -419,6 +419,10 @@ fn declared_names_that_are_words_pass_only_as_words() {
         id(case, Role::Sister, "[אחות_1]", "אלה", &[]),
         id(case, Role::Brother, "[אח_1]", "מתן", &[]),
         id(case, Role::Sister, "[אחות_2]", "אור", &[]),
+        id(case, Role::Brother, "[אח_2]", "ציון", &[]),
+        id(case, Role::Sister, "[אחות_3]", "עדינה", &[]),
+        id(case, Role::Other, "[אחר]", "פרידה", &[]),
+        id(case, Role::Sister, "[אחות_4]", "בילי", &[]),
     ];
     let practitioner = vec!["דנה כהן-לוי".to_owned()];
     let allow = |_: &str| false;
@@ -461,6 +465,12 @@ fn declared_names_that_are_words_pass_only_as_words() {
         ("אור הקטנה ישנה בחדר של ההורים.", "אור"),
         ("בוקר טוב, אור.", "אור"),
         ("הוא כתב מכתב לאור הקטנה.", "אור"),
+        ("ציון הגיע לפגישה עם אמא.", "ציון"),
+        ("ציון גבוה מאחיו.", "ציון"),
+        ("ציון מסתגל לגן החדש.", "ציון"),
+        ("עדינה ישבה ליד השולחן.", "עדינה"),
+        ("פרידה מהגן הגיעה לבקר.", "פרידה"),
+        ("בילי שיחקה בחצר.", "בילי"),
     ] {
         if let Some(body) = sent(text) {
             let words: Vec<&str> = body.split(|c: char| !c.is_alphanumeric()).collect();
@@ -478,6 +488,11 @@ fn declared_names_that_are_words_pass_only_as_words() {
         "זקוק למתן זמן נוסף.",
         "ישן רק עם אור דולק.",
         "ולאור זאת ההמלצה עומדת בעינה.",
+        "ציון 112 בסולם המילולי, ציון T של 64.",
+        "ציון כולל: 31. ציון מסתגל כללי בטווח הממוצע.",
+        "קשיים במוטוריקה עדינה.",
+        "חרדת פרידה בבוקר, פרידה מההורה בכניסה לחדר.",
+        "הגיע בלי התיק ושאל שאלות כלליות.",
     ] {
         assert!(
             sent(text).is_some(),

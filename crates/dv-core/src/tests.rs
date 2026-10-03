@@ -937,15 +937,42 @@ fn lexicon_names() -> Vec<&'static str> {
     names
 }
 
-fn child_named(name: &str) -> [dv_domain::Identity; 1] {
-    [dv_domain::Identity {
-        id: "i".into(),
+fn child_named(name: &str) -> dv_domain::Identity {
+    dv_domain::Identity {
+        id: format!("i-{name}"),
         case_id: "c".into(),
         role: Role::Child,
         tag: "[ילד]".into(),
         value: name.into(),
         aliases: vec![],
-    }]
+    }
+}
+
+/// What `found` finds with each lexicon name as the child's name, per name. The names go in a
+/// hundred at a time: every declared name is matched on its own, so a hundred names that find
+/// nothing clear each of them, and only a hundred that finds something is tried name by name.
+/// One by one, the 2,300 names took over ten minutes in a debug build.
+fn found_for_every_child_name(
+    found: impl Fn(&[dv_domain::Identity]) -> Option<String>,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for chunk in lexicon_names().chunks(100) {
+        let together: Vec<_> = chunk.iter().map(|n| child_named(n)).collect();
+        let Some(all) = found(&together) else {
+            continue;
+        };
+        let before = out.len();
+        for name in chunk {
+            if let Some(one) = found(&[child_named(name)]) {
+                out.push(format!("{name}: {one}"));
+            }
+        }
+        // A case has several names, so what they find only together counts too.
+        if out.len() == before {
+            out.push(format!("{chunk:?}: {all}"));
+        }
+    }
+    out
 }
 
 /// The rules, style, schema and the builder's own words go out with every request and never
@@ -1035,12 +1062,10 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
     ));
     let body = Value::Array(body);
     let tags: HashSet<String> = HashSet::from(["[ילד]".to_owned()]);
-    let mut collisions = Vec::new();
-    for name in lexicon_names() {
-        let identities = child_named(name);
+    let collisions = found_for_every_child_name(|identities| {
         let ctx = PrivacyContext {
             case_id: "c",
-            identities: &identities,
+            identities,
             practitioner: &[],
             allowlisted: &|_| false,
             confirmed_names: &|_| false,
@@ -1054,15 +1079,15 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
             canaries: &[],
             max_bytes: MAX_REQUEST_BYTES,
         };
-        if let Err(blocked) = clear(&req) {
+        clear(&req).err().map(|blocked| {
             let found: Vec<_> = blocked
                 .reasons
                 .iter()
                 .filter_map(|r| r.detail.clone())
                 .collect();
-            collisions.push(format!("{name}: {found:?}"));
-        }
-    }
+            format!("{found:?}")
+        })
+    });
     assert!(collisions.is_empty(), "{collisions:#?}");
 }
 
@@ -1097,24 +1122,22 @@ fn score_tables_and_section_titles_are_never_rewritten_silently() {
         };
         texts.push(dv_domain::format_sheet(&sheet).unwrap());
     }
-    let mut rewritten = Vec::new();
-    for name in lexicon_names() {
-        let identities = child_named(name);
+    let rewritten = found_for_every_child_name(|identities| {
         let ctx = PrivacyContext {
             case_id: "c",
-            identities: &identities,
+            identities,
             practitioner: &[],
             allowlisted: &|_| false,
             confirmed_names: &|_| false,
             today: (2026, 9, 28),
         };
-        for text in &texts {
-            let outcome = dv_privacy::filter(text, &ctx).unwrap();
-            if !outcome.hidden.is_empty() {
-                rewritten.push(format!("{name}: {:?}", outcome.hidden));
-            }
-        }
-    }
+        let hidden: Vec<Vec<String>> = texts
+            .iter()
+            .map(|text| dv_privacy::filter(text, &ctx).unwrap().hidden)
+            .filter(|hidden| !hidden.is_empty())
+            .collect();
+        (!hidden.is_empty()).then(|| format!("{hidden:?}"))
+    });
     assert!(rewritten.is_empty(), "{rewritten:#?}");
 }
 

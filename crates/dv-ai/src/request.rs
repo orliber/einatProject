@@ -191,7 +191,7 @@ pub fn build_section_request(
             &input.current_draft.join("\n\n"),
         ));
     }
-    parts.push(format!("בקשת הפסיכולוגית: {}", input.instruction_tagged));
+    parts.push(format!("הפסיכולוגית מבקשת: {}", input.instruction_tagged));
 
     let mut messages: Vec<Value> = input
         .history

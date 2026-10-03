@@ -505,7 +505,7 @@ const ITEMS: &[Item] = &[
         &["נרשם"],
     ),
     it("number", "מיקוד 9876543.", &["9876543"], &[]),
-    // Stage 2 of the filter (D-041): names an ordinary word can hide, institutions, labels.
+    // Stage 2 of the filter (D-042): names an ordinary word can hide, institutions, labels.
     it(
         "undeclared",
         "הילדים קוראים לה נונה, והיא גרה קרוב.",
