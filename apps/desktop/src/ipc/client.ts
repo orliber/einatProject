@@ -205,7 +205,9 @@ export const ipc = {
 
   /** A newer version, signed by the developer (D-033); `null` when this is the newest. */
   checkUpdate: () => call<UpdateView | null>("check_update"),
-  /** Download, verify, lock, run the installer; the program closes and opens again. */
+  /** In the background: fetch and verify the newest version. `true` when it waits for her click. */
+  prepareUpdate: () => call<boolean>("prepare_update"),
+  /** Lock, run the verified installer (fetched now if it is not waiting); closes and opens again. */
   installUpdate: () => run("install_update"),
 };
 
