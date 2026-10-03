@@ -111,9 +111,13 @@ async fn app_status(
     Ok(status)
 }
 
+/// Hiding the window from screenshots and screen sharing is switched off for now (D-038):
+/// it blacked out Zoom and Teams. Setting this back to `true` restores D-037 as it was.
+const SCREEN_PROTECTION_ENABLED: bool = false;
+
 /// Screenshots and screen sharing see a blank window unless she turned that off (D-037).
 fn protect(window: &tauri::WebviewWindow, on: bool) {
-    let _ = window.set_content_protected(on);
+    let _ = window.set_content_protected(SCREEN_PROTECTION_ENABLED && on);
 }
 
 #[tauri::command]
@@ -944,6 +948,10 @@ fn main() {
             let timer = Arc::clone(&core);
             let timer_clipboard = clipboard.clone();
             let timer_window = app.get_webview_window("main");
+            // The window opens protected (tauri.conf.json); this lifts it while D-038 holds.
+            if let Some(w) = &timer_window {
+                protect(w, true);
+            }
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(15));
                 // Read the clock before waiting for the core: a long command holding it must not

@@ -70,7 +70,7 @@
 |---|---|---|---|
 | UI-1 | Tampering / EoP | XSS מפלט של Claude או מטקסט של מסמך (למשל `<img onerror>`) מריץ קוד שקורא לפקודות IPC | ✅ הפלט מוצג כטקסט בלבד. אסור `dangerouslySetInnerHTML` (eslint = שגיאה). CSP: `script-src 'self'`. Tauri isolation pattern. פקודות IPC ברשימה לבנה, עם אימות סכמה ב-Rust. 📅1 |
 | UI-2 | Info disclosure | ה-webview מתחבר לרשת (פונטים, CDN, טלמטריה) | ✅ CSP עם `connect-src` רק ל-IPC. פונטים ארוזים מקומית. אין plugins של http/fs/shell. 📅1 |
-| UI-3 | Info disclosure | שיתוף מסך או צילום מסך | ✅ `contentProtected` דלוק כברירת מחדל. עינת יכולה לכבות אותו בהגדרות, אבל רק כשהכספת פתוחה: נעילה מחזירה אותו, והשינוי נרשם ביומן (D-037). 📅1 |
+| UI-3 | Info disclosure | שיתוף מסך או צילום מסך | ⚠️ כבוי בינתיים לבקשת עינת (D-038): התוכנה נראית בצילום ובשיתוף מסך. הקוד של D-037 נשאר ואפשר להחזיר אותו בשני קבועים. 📅1 |
 | UI-4 | Info disclosure | תוכן נשאר ב-DOM אחרי נעילה | ✅ בנעילה ה-webview נטען מחדש וכל ה-state נמחק. 📅2 |
 | UI-5 | Info disclosure | DevTools או תפריט הקשר בגרסת production | ✅ מושבתים ב-release. 📅1 |
 
