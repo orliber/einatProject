@@ -80,22 +80,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      # DIAGNOSTIC (temporary): which vault paths overflow the stack on Windows, and whether
-      # a bigger stack is enough (deep, not endless).
-      - name: Probe each SQLCipher step alone
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          cargo test --release -p dv-vault --test windows_probe --no-run
-          foreach ($n in "p1_plain_in_memory","p2_plain_file","p3_keyed_file","p4_keyed_file_memory_security","p5_keyed_file_secure_delete_temp_memory","p6_aws_lc_then_keyed_file","p7_all_open_pragmas_like_the_vault","p8_vault_create","p9_memory_security_with_logging_off_under_load","p10_memory_security_with_logging_on_under_load") {
-            cargo test -q --release -p dv-vault --test windows_probe -- --exact $n *> $null
-            Write-Output ("PROBE {0,-45} exit {1}" -f $n, $LASTEXITCODE)
-          }
-      - name: Vault tests with a 64 MiB stack
-        continue-on-error: true
-        env:
-          RUST_MIN_STACK: "67108864"
-        run: cargo test --release -p dv-vault --test vault
+      # Before this job, every vault test died here with STATUS_STACK_OVERFLOW (D-038).
       - run: cargo test --release -p dv-vault -p dv-egress -p dv-ingest
       - name: First run (create, close, open again; the real Argon2 cost)
         run: cargo test --release -p dv-core --test first_run -- --ignored

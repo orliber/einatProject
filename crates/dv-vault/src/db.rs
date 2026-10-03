@@ -190,3 +190,25 @@ pub const AUDIT_MIGRATIONS: &[&str] = &[
         mac TEXT NOT NULL
      );",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The Windows crash (D-038) needs SQLCipher's log to be off before memory security is on.
+    /// Windows CI proves the crash is gone; this keeps the line from being dropped elsewhere.
+    #[test]
+    fn sqlcipher_logging_is_off_with_memory_security_on() {
+        let dir = tempfile::tempdir().unwrap_or_else(|_| unreachable!());
+        let conn = open_encrypted(&dir.path().join("t.db"), &Key32::from_bytes([3; 32]))
+            .unwrap_or_else(|_| unreachable!());
+        let level: String = conn
+            .query_row("PRAGMA cipher_log_level", [], |r| r.get(0))
+            .unwrap_or_default();
+        assert_eq!(level, "NONE");
+        let security: String = conn
+            .query_row("PRAGMA cipher_memory_security", [], |r| r.get(0))
+            .unwrap_or_default();
+        assert_eq!(security, "1");
+    }
+}
