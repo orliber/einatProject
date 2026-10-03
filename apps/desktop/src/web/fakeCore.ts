@@ -856,6 +856,8 @@ export class FakeCore {
           version: "0.2.0", current: "0.1.0", published: "2026-10-01", size_mb: 14, can_install: true,
           notes: ["כפתור ה-+ בחומרים מעלה גם קבצי Word ו-PDF", "זיהוי שמות חזק יותר לפני שליחה", "הדוח נכתב מול העיניים"],
         };
+      case "prepare_update":
+        return true;
       case "install_update":
         return fail("update", "בתצוגה המקדימה לא מתקינים. בתוכנה עצמה העדכון יורד, נבדק מול החתימה ומותקן.");
       case "change_password":

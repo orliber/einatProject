@@ -5,20 +5,30 @@ import { Dialog, ErrorLine, Spinner } from "./ui";
 import "./Update.css";
 
 /**
- * New versions (D-033). Once a day, while the vault is open, the program asks the releases
- * page whether Or published a newer version. Only a notice signed with his key counts; the
- * installer is downloaded only when she clicks, checked again, and then it runs by itself.
+ * New versions (D-033, D-038). Once a day, while the vault is open, the program asks the
+ * releases page whether Or published a newer version. Only a notice signed with his key counts.
+ * A newer version is then fetched and verified in the background, so her one click only locks,
+ * restarts and installs. Nothing is installed without that click.
  */
 
 const CHECKED_KEY = "dv.updateCheckedAt";
 const AUTO_KEY = "dv.updateAuto";
 const DAY_MS = 86_400_000;
+/** While the program stays open for days, the daily check still comes around. */
+const LOOK_AGAIN_MS = 3_600_000;
 
 let found: UpdateView | null = null;
+/** The installer of `found` is on disk, verified, waiting for her click. */
+let ready = false;
+let preparing = false;
 const listeners = new Set<() => void>();
-function setFound(v: UpdateView | null) {
-  found = v;
+function notify() {
   listeners.forEach((l) => l());
+}
+function setFound(v: UpdateView | null) {
+  if (v?.version !== found?.version) ready = false;
+  found = v;
+  notify();
 }
 function subscribe(l: () => void) {
   listeners.add(l);
@@ -44,22 +54,49 @@ export function autoCheckOn(): boolean {
   return read(AUTO_KEY) !== "off";
 }
 
+/** Fetch and verify the found version in the background. Quiet: on failure, tried again later. */
+function prepareInBackground() {
+  if (!found?.can_install || ready || preparing) return;
+  preparing = true;
+  ipc
+    .prepareUpdate()
+    .then((r) => {
+      ready = r;
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      preparing = false;
+      notify();
+    });
+}
+
 /** Ask now. Quiet failures for the daily check; the settings button shows them. */
 export async function checkNow(): Promise<UpdateView | null> {
   const v = await ipc.checkUpdate();
   write(CHECKED_KEY, String(Date.now()));
   setFound(v);
+  prepareInBackground();
   return v;
 }
 
-/** The daily check, while the vault is open. */
+/** The daily check, while the vault is open, and every hour after that while it stays open. */
 export function useDailyUpdateCheck() {
   const { status } = useApp();
   useEffect(() => {
-    if (!status.unlocked || !autoCheckOn()) return;
-    const last = Number(read(CHECKED_KEY) ?? 0);
-    if (found || Date.now() - last < DAY_MS) return;
-    checkNow().catch(() => undefined);
+    if (!status.unlocked) return;
+    const look = () => {
+      if (!autoCheckOn()) return;
+      if (found) {
+        prepareInBackground();
+        return;
+      }
+      const last = Number(read(CHECKED_KEY) ?? 0);
+      if (Date.now() - last < DAY_MS) return;
+      checkNow().catch(() => undefined);
+    };
+    look();
+    const timer = window.setInterval(look, LOOK_AGAIN_MS);
+    return () => window.clearInterval(timer);
   }, [status.unlocked]);
 }
 
@@ -67,16 +104,21 @@ export function useFoundUpdate(): UpdateView | null {
   return useSyncExternalStore(subscribe, () => found);
 }
 
+export function useUpdateReady(): boolean {
+  return useSyncExternalStore(subscribe, () => ready);
+}
+
 /** "There is a new version": in the top bar, only when there is one. */
 export function UpdateChip() {
   useDailyUpdateCheck();
   const update = useFoundUpdate();
+  const isReady = useUpdateReady();
   const [open, setOpen] = useState(false);
   if (!update) return null;
   return (
     <>
       <button type="button" className="update-chip" onClick={() => setOpen(true)}>
-        <span aria-hidden="true">✦</span> יש גרסה חדשה
+        <span aria-hidden="true">✦</span> {isReady ? "גרסה חדשה מוכנה" : "יש גרסה חדשה"}
       </button>
       {open && <UpdateDialog update={update} onClose={() => setOpen(false)} />}
     </>
@@ -85,6 +127,7 @@ export function UpdateChip() {
 
 export function UpdateDialog({ update, onClose }: { update: UpdateView; onClose: () => void }) {
   const { fail } = useApp();
+  const isReady = useUpdateReady();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -107,7 +150,7 @@ export function UpdateDialog({ update, onClose }: { update: UpdateView; onClose:
           <>
             <button type="button" className="btn" disabled={busy} onClick={onClose}>אחר כך</button>
             <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void install()}>
-              {busy ? <><Spinner /> מורידה ובודקת…</> : "לעדכן עכשיו"}
+              {busy ? <><Spinner /> {isReady ? "מתעדכנת…" : "מורידה ובודקת…"}</> : isReady ? "להפעיל מחדש ולעדכן" : "לעדכן עכשיו"}
             </button>
           </>
         ) : (
@@ -123,8 +166,10 @@ export function UpdateDialog({ update, onClose }: { update: UpdateView; onClose:
         )}
         {update.can_install ? (
           <p className="muted small">
-            ההורדה ({update.size_mb} MB) נבדקת מול החתימה של אור לפני שהיא רצה. אחר כך התוכנה ננעלת, נסגרת,
-            ונפתחת מחדש בגרסה החדשה. כל התיקים נשארים כמו שהם; פותחים עם אותה סיסמה.
+            {isReady
+              ? "הגרסה כבר ירדה ונבדקה מול החתימה של אור. בלחיצה התוכנה ננעלת, נסגרת"
+              : `הגרסה (${update.size_mb} MB) יורדת ברקע ונבדקת מול החתימה של אור לפני שהיא רצה. בלחיצה היא מסיימת לרדת, ואז התוכנה ננעלת, נסגרת`}
+            {" "}ונפתחת מחדש בגרסה החדשה. כל התיקים נשארים כמו שהם; פותחים עם אותה סיסמה.
           </p>
         ) : (
           <p className="muted small">במחשב הזה העדכון לא מותקן לבד. מתקינים את הגרסה החדשה מהקישור ששלח אור.</p>
@@ -182,11 +227,11 @@ export function UpdateSettings() {
       <ErrorLine error={error} />
       <label className="row small">
         <input type="checkbox" checked={auto} onChange={(e) => { setAuto(e.target.checked); write(AUTO_KEY, e.target.checked ? "on" : "off"); }} />
-        לבדוק פעם ביום אם יש גרסה חדשה
+        לבדוק פעם ביום אם יש גרסה חדשה, ולהוריד אותה ברקע
       </label>
       <span className="hint">
-        הבדיקה פונה רק לדף ההתקנות של אור ב-GitHub, בלי שום מידע מהכספת. גרסה מותקנת רק אחרי שלחצת, ורק אם היא חתומה
-        במפתח של אור.
+        הבדיקה וההורדה פונות רק לדף ההתקנות של אור ב-GitHub, בלי שום מידע מהכספת. גרסה מותקנת רק אחרי שלחצת, ורק אם
+        היא חתומה במפתח של אור.
       </span>
       {open && update && <UpdateDialog update={update} onClose={() => setOpen(false)} />}
     </section>

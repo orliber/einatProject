@@ -27,6 +27,9 @@ struct AppState {
     dir: PathBuf,
     /// Words Claude has written so far, per request on its way (D-035). Counts only.
     progress: Arc<Mutex<std::collections::HashMap<String, u32>>>,
+    /// A newer version fetched and verified in the background, waiting for her click (D-038).
+    /// Held while it is being fetched, so two fetches never run at once.
+    prepared: Arc<Mutex<Option<dv_core::update::Downloaded>>>,
 }
 
 /// Send outside the core's lock, counting the words as the answer arrives.
@@ -887,16 +890,30 @@ async fn check_update() -> Res<Option<dv_core::update::UpdateView>> {
         .map_err(|_| internal("task"))?
 }
 
-/// Download the newest version, verify it, lock the vault and run the installer, then close.
-/// The installer (passive, update mode) replaces the program and opens it again; the vault
-/// folder is not touched.
+/// Fetch and verify the newest version in the background, so the click only restarts
+/// (D-038). Nothing is installed here. `true` when a verified installer is waiting.
+#[tauri::command]
+async fn prepare_update(state: tauri::State<'_, AppState>) -> Res<bool> {
+    if !cfg!(windows) {
+        return Ok(false);
+    }
+    let dir = state.dir.clone();
+    let prepared = Arc::clone(&state.prepared);
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut slot = prepared.lock().map_err(|_| internal("update"))?;
+        let ready = dv_core::update::prepare(&dir, slot.take()).map_err(|e| e.to_ui())?;
+        *slot = ready;
+        Ok(slot.is_some())
+    })
+    .await
+    .map_err(|_| internal("task"))?
+}
+
+/// Lock the vault and run the verified installer, then close. The installer (passive, update
+/// mode) replaces the program and opens it again; the vault folder is not touched. A version
+/// fetched in the background is used when it is still intact; otherwise it is fetched now.
 #[tauri::command]
 async fn install_update(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Res<()> {
-    let dir = state.dir.clone();
-    let file = tauri::async_runtime::spawn_blocking(move || dv_core::update::download(&dir))
-        .await
-        .map_err(|_| internal("task"))?
-        .map_err(|e| e.to_ui())?;
     if !cfg!(windows) {
         return Err(UiError {
             code: "update".to_owned(),
@@ -904,6 +921,18 @@ async fn install_update(app: tauri::AppHandle, state: tauri::State<'_, AppState>
             details: Vec::new(),
         });
     }
+    let dir = state.dir.clone();
+    let prepared = Arc::clone(&state.prepared);
+    let file = tauri::async_runtime::spawn_blocking(move || {
+        let waiting = prepared.lock().ok().and_then(|mut p| p.take());
+        match waiting {
+            Some(file) if dv_core::update::still_intact(&file) => Ok(file),
+            _ => dv_core::update::download(&dir),
+        }
+    })
+    .await
+    .map_err(|_| internal("task"))?
+    .map_err(|e| e.to_ui())?;
     if !dv_core::update::still_intact(&file) {
         return Err(internal("the installer changed after it was checked"));
     }
@@ -962,6 +991,7 @@ fn main() {
                 clipboard,
                 dir,
                 progress: Arc::default(),
+                prepared: Arc::default(),
             });
             Ok(())
         })
@@ -1045,6 +1075,7 @@ fn main() {
             restore_backup,
             forget_backup,
             check_update,
+            prepare_update,
             install_update,
             send_progress,
         ])
