@@ -88,9 +88,14 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   /** A section to bring into view on the report page. */
   const [focus, setFocus] = useState<{ key: string; at: number } | null>(null);
 
+  // Sections written side by side reload at about the same time: an answer that arrives
+  // after a newer one is older, and never puts back a section that is already there.
+  const reloadSeq = useRef(0);
   const reload = useCallback(async () => {
+    const seq = ++reloadSeq.current;
     try {
-      setDetail(await ipc.caseDetail(caseId));
+      const d = await ipc.caseDetail(caseId);
+      if (seq === reloadSeq.current) setDetail(d);
     } catch (e) {
       setError(fail(e as never));
     }

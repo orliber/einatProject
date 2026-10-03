@@ -319,6 +319,32 @@ fn approved_sections_feed_derived_sections() {
     assert!(p.approval_id.is_some());
 }
 
+/// The summary in demo mode is written from the approved sections, not answered with "no
+/// sources yet"; with nothing approved it says so before anything is prepared.
+#[test]
+fn the_summary_is_written_from_the_approved_sections_in_demo_mode() {
+    let (_dir, mut core, case) = setup(None);
+    let err = core
+        .prepare_section(&case, "summary", "טיוטה לסיכום")
+        .unwrap_err();
+    assert!(matches!(err, CoreError::Refused(_)), "{err:?}");
+
+    core.add_own_paragraph(&case, "kindergarten", "אלון מגיב בעוצמה למעברים.")
+        .unwrap();
+    let p = core
+        .prepare_section(&case, "summary", "טיוטה לסיכום")
+        .unwrap();
+    let r = core.send_section(&p.approval_id.unwrap()).unwrap();
+    assert!(r.demo);
+    assert_eq!(r.paragraphs.len(), 1, "{}", r.reply);
+    assert!(r.paragraphs[0].text.contains("מעברים"));
+    assert!(
+        r.paragraphs[0].warnings.is_empty(),
+        "{:?}",
+        r.paragraphs[0].warnings
+    );
+}
+
 #[test]
 fn consultations_are_kept_continued_and_deleted() {
     let fake = FakeTransport::default();

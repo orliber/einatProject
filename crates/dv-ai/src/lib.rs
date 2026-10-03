@@ -14,7 +14,9 @@ pub use request::{
     ModelConfig, ResearchInput, SectionInput, TaggedInput, TaggedTurn, ALLOWED_MODELS,
     DEFAULT_MODEL, RESEARCH_ALLOWED_DOMAINS,
 };
-pub use response::{parse_consult, parse_section, AiError, ProposedParagraph, SectionReply};
+pub use response::{
+    parse_consult, parse_derived_section, parse_section, AiError, ProposedParagraph, SectionReply,
+};
 pub use sort::{
     build_sort_request, parse_sort, passage_id, SortInput, SortMaterial, SortReply, SortSection,
 };

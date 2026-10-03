@@ -219,6 +219,9 @@ enum PendingKind {
         instruction_tagged: String,
         hidden: Vec<String>,
         sources: Vec<(String, String, String)>,
+        /// For a section written from the approved ones (summary…): their tagged text, which
+        /// the numbers in the answer are checked against.
+        approved: Vec<String>,
         /// The one proposed paragraph the answer rewrites ("ניסוח מחדש"); `None`: the answer
         /// is the section's new draft and replaces the paragraphs not approved yet.
         replaces: Option<String>,
@@ -1452,6 +1455,13 @@ impl Core {
                     }
                 }
             }
+            // Nothing approved yet: there is nothing to write it from, so nothing is sent.
+            if derived && approved_context.is_empty() {
+                return Err(CoreError::Refused(
+                    "הסעיף הזה נכתב מתוך הסעיפים שכבר אישרת, ועוד לא אישרת אף סעיף. מאשרים קודם את הטיוטות בסעיפים האחרים, ואז חוזרים לכאן."
+                        .to_owned(),
+                ));
+            }
             // The current draft may contain manual edits, so it goes through review too.
             let mut current = Vec::new();
             for d in v
@@ -1491,11 +1501,17 @@ impl Core {
                 instruction_tagged: instr.tagged.clone(),
                 style_profile: None,
             };
+            let approved = input
+                .approved_context
+                .iter()
+                .map(|(_, t)| t.clone())
+                .collect::<Vec<_>>();
             let sources = (
                 section.key.clone(),
                 instr.tagged,
                 instr.hidden.clone(),
                 source_rows,
+                approved,
             );
             (input, review, sources)
         };
@@ -1503,13 +1519,14 @@ impl Core {
         let nonce = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
         let (body, _refs) = dv_ai::build_section_request(&model, &input, &nonce);
         let mut prepared = review.into_prepared(demo_mode);
-        let (key, instruction_tagged, instr_hidden, rows) = sources;
+        let (key, instruction_tagged, instr_hidden, rows, approved) = sources;
         let kind = PendingKind::Section {
             case_id: case_id.to_owned(),
             section_key: key,
             instruction_tagged,
             hidden: instr_hidden,
             sources: rows,
+            approved,
             replaces: replaces.map(str::to_owned),
         };
         self.gate(&data, &body, kind, &mut prepared)?;
@@ -1567,6 +1584,7 @@ impl Core {
             instruction_tagged,
             hidden,
             sources,
+            approved,
             replaces,
         } = kind
         else {
@@ -1592,7 +1610,11 @@ impl Core {
             .iter()
             .map(|(sid, _, text)| (sid.clone(), text.clone()))
             .collect();
-        let mut reply = dv_ai::parse_section(&response, &refs)?;
+        let mut reply = if DERIVED_SECTIONS.contains(&section_key.as_str()) {
+            dv_ai::parse_derived_section(&response, &approved)?
+        } else {
+            dv_ai::parse_section(&response, &refs)?
+        };
         let v = self.vault_mut()?;
         let identities = v.identities(&case_id)?;
         let case_tags: Vec<String> = identities.iter().map(|i| i.tag.clone()).collect();

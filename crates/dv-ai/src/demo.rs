@@ -6,6 +6,18 @@ use serde_json::{json, Value};
 
 /// Pull `(id, body)` pairs out of the `<data nonce=… id="S#" …>` blocks of a request.
 fn sources_in(text: &str) -> Vec<(String, String)> {
+    blocks_with(text, "id")
+}
+
+/// `(title, body)` of the `<data nonce=… approved_section="…">` blocks: what a summary,
+/// diagnoses or recommendations section is written from.
+fn approved_in(text: &str) -> Vec<(String, String)> {
+    blocks_with(text, "approved_section")
+}
+
+/// `(value of attr, body)` for every data block that has the attribute `attr`.
+fn blocks_with(text: &str, attr: &str) -> Vec<(String, String)> {
+    let needle = format!(" {attr}=\"");
     let mut out = Vec::new();
     let mut rest = text;
     while let Some(open) = rest.find("<data nonce=") {
@@ -19,8 +31,8 @@ fn sources_in(text: &str) -> Vec<(String, String)> {
             break;
         };
         let body = &after[body_start..body_start + close];
-        if let Some(id_at) = head.find("id=\"") {
-            let id: String = head[id_at + 4..]
+        if let Some(id_at) = head.find(&needle) {
+            let id: String = head[id_at + needle.len()..]
                 .chars()
                 .take_while(|c| *c != '"')
                 .collect();
@@ -221,6 +233,24 @@ pub fn respond(body: &Value) -> Value {
     }
 
     let sources = sources_in(last_user);
+    let approved = approved_in(last_user);
+    if sources.is_empty() && !approved.is_empty() {
+        // A section written from the approved ones (summary, diagnoses, recommendations).
+        let paragraphs: Vec<Value> = approved
+            .iter()
+            .filter(|(_, body)| !body.trim().is_empty())
+            .take(3)
+            .map(|(_, body)| json!({ "text": first_sentences(body, 1), "source_refs": [] }))
+            .collect();
+        let answer = json!({
+            "reply": format!("מצב הדגמה: ניסחתי {} פסקאות לדוגמה מתוך הסעיפים שאישרת. במצב אמיתי Claude מסכם ומקשר בין הסעיפים בסגנון שלך.", paragraphs.len()),
+            "paragraphs": paragraphs,
+            "questions": [],
+            "missing": [],
+            "contradictions": []
+        });
+        return api_text(&answer.to_string());
+    }
     let paragraphs: Vec<Value> = sources
         .iter()
         .take(3)
@@ -247,7 +277,7 @@ pub fn respond(body: &Value) -> Value {
 mod tests {
     use super::*;
     use crate::request::{build_section_request, ModelConfig, SectionInput, TaggedInput};
-    use crate::response::parse_section;
+    use crate::response::{parse_derived_section, parse_section};
 
     #[test]
     fn demo_sorting_parses_and_places_passages_by_their_words() {
@@ -317,5 +347,40 @@ mod tests {
         assert_eq!(reply.paragraphs[0].source_refs, vec!["S1"]);
         assert!(reply.paragraphs[0].warnings.is_empty());
         assert!(reply.reply.starts_with("מצב הדגמה"));
+    }
+
+    #[test]
+    fn demo_summary_is_written_from_the_approved_sections() {
+        let input = SectionInput {
+            section_key: "summary".into(),
+            section_title: "סיכום".into(),
+            age: None,
+            gender: None,
+            sources: vec![],
+            approved_context: vec![
+                (
+                    "מסגרת חינוכית".into(),
+                    "[ילד] מתקשה במעברים בגן. בקבוצה קטנה משתתף יותר.".into(),
+                ),
+                (
+                    "תפקוד קוגניטיבי".into(),
+                    "אוצר מילים: 9. מטריצות: 13.".into(),
+                ),
+            ],
+            current_draft: vec![],
+            history: vec![],
+            instruction_tagged: "כתבי טיוטה לסעיף מתוך הסעיפים שאושרו.".into(),
+            style_profile: None,
+        };
+        let (body, _) = build_section_request(&ModelConfig::default(), &input, "n");
+        let approved: Vec<String> = input
+            .approved_context
+            .iter()
+            .map(|(_, t)| t.clone())
+            .collect();
+        let reply = parse_derived_section(&respond(&body), &approved).unwrap();
+        assert_eq!(reply.paragraphs.len(), 2);
+        assert!(reply.paragraphs.iter().all(|p| p.warnings.is_empty()));
+        assert!(reply.paragraphs[0].text.contains("מעברים"));
     }
 }
