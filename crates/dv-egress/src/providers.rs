@@ -1,5 +1,5 @@
 //! OpenAI (ChatGPT), Google (Gemini), Mistral and a local model (Ollama on this computer) as
-//! alternatives to Claude (D-038).
+//! alternatives to Claude (D-040).
 //!
 //! The rest of the program builds one request shape (the Messages API shape) and the privacy
 //! gate clears exactly that body. Here, after the gate, the cleared body is re-shaped for the

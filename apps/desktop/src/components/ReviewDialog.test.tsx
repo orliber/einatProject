@@ -22,7 +22,7 @@ describe("ReviewDialog", () => {
     expect(screen.getByLabelText("מה Claude יקבל")).toHaveTextContent("ילד");
   });
 
-  it("names the AI she chose (D-038)", () => {
+  it("names the AI she chose (D-040)", () => {
     render(
       <AppContext.Provider value={api({ model: "gemini-2-5-pro", provider: "gemini", ai_name: "Gemini", demo_mode: false })}>
         <ReviewDialog title="t" caseId="c1" prepared={prepared({ demo_mode: false })} reprepare={vi.fn()} onSend={vi.fn()} onClose={vi.fn()} />

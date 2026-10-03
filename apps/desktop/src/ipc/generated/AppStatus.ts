@@ -14,7 +14,7 @@ cloud_synced_folder: string | null, fips_active: boolean,
  */
 demo_mode: boolean, model: string, 
 /**
- * The company of `model`: `anthropic` | `openai` | `gemini` (D-038).
+ * The company of `model`: `anthropic` | `openai` | `gemini` (D-040).
  */
 provider: string, 
 /**

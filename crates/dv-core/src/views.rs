@@ -28,7 +28,7 @@ pub struct AppStatus {
     /// No API key configured: answers come from local demo mode.
     pub demo_mode: bool,
     pub model: String,
-    /// The company of `model`: `anthropic` | `openai` | `gemini` (D-038).
+    /// The company of `model`: `anthropic` | `openai` | `gemini` (D-040).
     pub provider: String,
     /// How the program names the AI everywhere: `Claude` | `ChatGPT` | `Gemini`.
     pub ai_name: String,

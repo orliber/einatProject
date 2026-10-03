@@ -52,7 +52,7 @@ pub use views::{
 
 const API_KEY: &str = "anthropic_api_key";
 
-/// Where each company's API key is kept: the vault's encrypted secrets, like Claude's (D-038).
+/// Where each company's API key is kept: the vault's encrypted secrets, like Claude's (D-040).
 /// The local model has none.
 fn key_name(provider: Provider) -> Option<&'static str> {
     match provider {
@@ -781,7 +781,7 @@ impl Core {
 
     /// Save (or, when empty, delete) the API key of one company (`anthropic` | `openai` |
     /// `gemini` | `mistral`). ChatGPT, Gemini and Mistral keys are taken only after she confirmed she read what
-    /// that company keeps (D-038): their standard API terms are not Zero Data Retention.
+    /// that company keeps (D-040): their standard API terms are not Zero Data Retention.
     pub fn set_api_key(
         &mut self,
         provider: &str,

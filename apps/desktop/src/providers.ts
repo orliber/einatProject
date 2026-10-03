@@ -1,4 +1,4 @@
-// Which AI answers (D-038). Claude stays the default; ChatGPT and Gemini are chosen in
+// Which AI answers (D-040). Claude stays the default; ChatGPT and Gemini are chosen in
 // settings with her own API key. Every place the program speaks of the AI uses its name.
 export type ProviderId = "anthropic" | "openai" | "gemini" | "mistral" | "local";
 

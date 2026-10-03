@@ -11,7 +11,7 @@ use crate::prompts::{CONSULT_RULES, DEFAULT_STYLE, DRAFTING_RULES, OUTPUT_RULES,
 /// Models verified as available under Zero Data Retention (STANDARDS.md §4). Covered Models
 /// that require 30-day retention (Fable, Mythos) are deliberately absent.
 pub const ANTHROPIC_MODELS: &[&str] = &["claude-opus-5", "claude-sonnet-5", "claude-opus-4-8"];
-/// OpenAI (ChatGPT) and Google (Gemini) models the psychologist may choose instead (D-038).
+/// OpenAI (ChatGPT) and Google (Gemini) models the psychologist may choose instead (D-040).
 /// Must match the lists in `dv-egress` (checked by a test in dv-core).
 pub const OPENAI_MODELS: &[&str] = &["gpt-5-1", "gpt-5-mini"];
 pub const GEMINI_MODELS: &[&str] = &["gemini-2-5-pro", "gemini-2-5-flash"];
@@ -34,7 +34,7 @@ pub const ALLOWED_MODELS: &[&str] = &[
 ];
 pub const DEFAULT_MODEL: &str = "claude-opus-5";
 
-/// The company whose AI answers (D-038). Claude stays the default.
+/// The company whose AI answers (D-040). Claude stays the default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Provider {
     Anthropic,

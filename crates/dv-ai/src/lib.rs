@@ -1,4 +1,4 @@
-//! Builds requests for the AI (Claude by default; D-038) and parses its answers. No network access (that is `dv-egress`).
+//! Builds requests for the AI (Claude by default; D-040) and parses its answers. No network access (that is `dv-egress`).
 //!
 //! Every text that goes into a request must already be filtered (tagged) by `dv-privacy`;
 //! the gate then scans the finished request body as a whole.

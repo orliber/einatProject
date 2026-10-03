@@ -4,7 +4,7 @@
 //! against the Zero-Data-Retention rules, and sends the exact bytes the psychologist
 //! approved to one host over TLS 1.3 with Mozilla's root store (not the OS store, so a
 //! locally installed intercepting root cannot read the traffic). When she chose ChatGPT or
-//! Gemini instead of Claude (D-038), [`providers`] re-shapes the same cleared text for that
+//! Gemini instead of Claude (D-040), [`providers`] re-shapes the same cleared text for that
 //! company, adding nothing.
 
 use std::sync::{Arc, Mutex};
