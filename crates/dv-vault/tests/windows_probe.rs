@@ -100,3 +100,40 @@ fn p8_vault_create() {
     )
     .unwrap();
 }
+
+#[test]
+fn p9_memory_security_with_logging_off_under_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let conn = Connection::open(dir.path().join("a.db")).unwrap();
+    let _: String = conn
+        .query_row("PRAGMA cipher_log_level = NONE", [], |r| r.get(0))
+        .unwrap();
+    conn.execute_batch(KEY).unwrap();
+    conn.execute_batch("PRAGMA cipher_memory_security = ON;")
+        .unwrap();
+    work(&conn);
+    conn.execute_batch("BEGIN; CREATE TABLE big (b BLOB);")
+        .unwrap();
+    for _ in 0..5000 {
+        conn.execute("INSERT INTO big VALUES (randomblob(4096))", [])
+            .unwrap();
+    }
+    conn.execute_batch("COMMIT;").unwrap();
+}
+
+#[test]
+fn p10_memory_security_with_logging_on_under_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let conn = Connection::open(dir.path().join("a.db")).unwrap();
+    conn.execute_batch(KEY).unwrap();
+    conn.execute_batch("PRAGMA cipher_memory_security = ON;")
+        .unwrap();
+    work(&conn);
+    conn.execute_batch("BEGIN; CREATE TABLE big (b BLOB);")
+        .unwrap();
+    for _ in 0..5000 {
+        conn.execute("INSERT INTO big VALUES (randomblob(4096))", [])
+            .unwrap();
+    }
+    conn.execute_batch("COMMIT;").unwrap();
+}

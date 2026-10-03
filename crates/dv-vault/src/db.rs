@@ -11,6 +11,7 @@ use crate::VaultError;
 /// Open (or create) an encrypted database with a raw 256-bit key (no SQLCipher KDF).
 pub fn open_encrypted(path: &Path, key: &Key32) -> Result<Connection, VaultError> {
     let conn = Connection::open(path)?;
+    quiet_sqlcipher_log(&conn)?;
     let key_hex = Zeroizing::new(hex(key.as_bytes()));
     let statement = Zeroizing::new(format!("PRAGMA key = \"x'{}'\";", key_hex.as_str()));
     conn.execute_batch(&statement)?;
@@ -27,6 +28,23 @@ pub fn open_encrypted(path: &Path, key: &Key32) -> Result<Connection, VaultError
     .map_err(|_| VaultError::WrongSecret)?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     Ok(conn)
+}
+
+/// SQLCipher logs warnings to stderr by default. On Windows, with `cipher_memory_security`,
+/// every allocation is locked in RAM (`VirtualLock`); once the process's lock quota is used
+/// up, the failure is logged, the log line is converted to UTF-16 in memory allocated through
+/// the same locking allocator, that lock fails and is logged too, and so on until the stack
+/// overflows (sqlcipher/sqlcipher#619). The program vanished on Windows the moment a vault was
+/// created or opened. Logging off breaks the loop; memory security stays on, so freed memory
+/// is still wiped. The program has no console, so nothing that was ever seen is lost.
+/// Global in SQLCipher, and set before anything else on every connection, so it is in place
+/// before memory security is first turned on.
+fn quiet_sqlcipher_log(conn: &Connection) -> Result<(), VaultError> {
+    let level: String = conn.query_row("PRAGMA cipher_log_level = NONE", [], |r| r.get(0))?;
+    if level != "NONE" {
+        return Err(VaultError::Crypto("sqlcipher log level"));
+    }
+    Ok(())
 }
 
 /// Apply migrations in order. Each entry is one schema version; never edit a released one.
