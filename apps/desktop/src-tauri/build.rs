@@ -10,6 +10,7 @@ fn main() {
             "unlock",
             "unlock_with_recovery",
             "lock",
+            "touch",
             "set_api_key",
             "set_model",
             "set_speed",

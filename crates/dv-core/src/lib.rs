@@ -476,6 +476,40 @@ impl Core {
         self.lock_if_idle()
     }
 
+    /// The psychologist is at work in the window (typing a paragraph, scrolling) without
+    /// calling the core: that counts as activity too, so a long paragraph is not lost to the
+    /// idle lock. Never reopens or extends a vault that has already passed its idle time.
+    pub fn touch(&mut self) {
+        let limit = Duration::from_secs(u64::from(self.lock_minutes()) * 60);
+        if self.vault.is_some() && self.last_activity.elapsed() <= limit {
+            self.last_activity = Instant::now();
+        }
+    }
+
+    /// The computer itself was locked (Win+L, the lock screen): lock the vault with it.
+    /// Returns true when it locked.
+    pub fn lock_with_computer(&mut self) -> bool {
+        if self.vault.is_none() {
+            return false;
+        }
+        self.lock_because(Some("computer_locked"));
+        true
+    }
+
+    #[must_use]
+    pub fn is_unlocked(&self) -> bool {
+        self.vault.is_some()
+    }
+
+    /// Seconds left before the idle lock, while the vault is open (shown as a warning in the
+    /// last minute).
+    fn idle_lock_in(&self) -> Option<u32> {
+        self.vault.as_ref()?;
+        let limit = Duration::from_secs(u64::from(self.lock_minutes()) * 60);
+        let left = limit.saturating_sub(self.last_activity.elapsed()).as_secs();
+        Some(u32::try_from(left).unwrap_or(u32::MAX))
+    }
+
     /// Lock after the configured idle time even when nothing is clicked. Returns true when it
     /// locked.
     pub fn lock_if_idle(&mut self) -> bool {
@@ -540,6 +574,7 @@ impl Core {
             speed,
             integrity_warning: integrity,
             lock_minutes: self.lock_minutes(),
+            idle_lock_in: self.idle_lock_in(),
             practitioner,
             review_only_suspect,
             review_choice_available,

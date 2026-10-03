@@ -284,7 +284,7 @@ export class FakeCore {
   status(): AppStatus {
     return {
       vault_exists: this.vaultExists, unlocked: this.unlocked, disk_encryption: "on", cloud_synced_folder: null, fips_active: true,
-      demo_mode: true, model: this.model, speed: this.speed, integrity_warning: null, lock_minutes: this.lockMinutes,
+      demo_mode: true, model: this.model, speed: this.speed, integrity_warning: null, lock_minutes: this.lockMinutes, idle_lock_in: this.unlocked ? this.lockMinutes * 60 : null,
       practitioner: this.practitioner, review_only_suspect: this.reviewOnlySuspect, review_choice_available: true, screen_protection: !this.unlocked || this.screenProtection,
     };
   }
@@ -519,6 +519,8 @@ export class FakeCore {
         return { recovery_key: "DEMO-PREV-IEWX-KEYS-ONLY-4TST" };
       case "confirm_recovery_key":
         return true;
+      case "touch":
+        return null;
       case "lock":
         this.unlocked = false;
         return null;

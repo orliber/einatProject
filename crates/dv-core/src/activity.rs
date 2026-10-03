@@ -59,6 +59,9 @@ fn describe(
         "lock" if text("reason") == "sleep" => {
             ("access", "נעילה (המחשב נכנס לשינה)".to_owned(), false)
         }
+        "lock" if text("reason") == "computer_locked" => {
+            ("access", "נעילה (המחשב ננעל)".to_owned(), false)
+        }
         "lock" => ("access", "נעילה".to_owned(), false),
         "password_changed" => ("security", "הסיסמה הוחלפה".to_owned(), false),
         "recovery_key_rotated" => ("security", "נוצרה ערכת שחזור חדשה".to_owned(), false),

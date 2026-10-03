@@ -32,6 +32,8 @@ pub struct AppStatus {
     pub speed: String,
     pub integrity_warning: Option<String>,
     pub lock_minutes: u32,
+    /// While the vault is open: seconds until the idle lock (the UI warns in the last minute).
+    pub idle_lock_in: Option<u32>,
     /// Names always hidden as the practitioner (shown in settings).
     pub practitioner: Vec<String>,
     /// Show the review screen only when something is suspicious (D-020).

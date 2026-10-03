@@ -746,6 +746,32 @@ fn idle_session_locks_itself() {
 }
 
 #[test]
+fn work_in_the_window_keeps_the_vault_open_but_never_reopens_it() {
+    let (_dir, mut core, _case) = setup(None);
+    core.last_activity = Instant::now() - Duration::from_secs(9 * 60 + 30);
+    let left = core.status().idle_lock_in.unwrap();
+    assert!(left <= 30, "{left}");
+    // Typing a paragraph counts as activity.
+    core.touch();
+    assert!(core.status().idle_lock_in.unwrap() > 9 * 60);
+    assert!(!core.lock_if_idle());
+    // Past the idle time, a late keystroke does not extend it.
+    core.last_activity = Instant::now() - Duration::from_secs(11 * 60);
+    core.touch();
+    assert!(core.lock_if_idle());
+    assert_eq!(core.status().idle_lock_in, None);
+}
+
+#[test]
+fn the_vault_locks_with_the_computer() {
+    let (_dir, mut core, _case) = setup(None);
+    assert!(core.is_unlocked());
+    assert!(core.lock_with_computer());
+    assert!(!core.is_unlocked());
+    assert!(!core.lock_with_computer());
+}
+
+#[test]
 fn review_screen_is_always_shown_in_the_first_weeks() {
     let (_dir, mut core, _case) = setup(None);
     let s = core.status();

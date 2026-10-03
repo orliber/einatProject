@@ -5,6 +5,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod file_dialog;
+mod os_lock;
 mod secret_clipboard;
 
 use std::path::PathBuf;
@@ -153,6 +154,16 @@ async fn lock(window: tauri::WebviewWindow, state: tauri::State<'_, AppState>) -
     protect(&window, true);
     with_core(&state, |c| {
         c.lock();
+        Ok(())
+    })
+    .await
+}
+
+/// The psychologist is working in the window (typing, scrolling) without calling the core.
+#[tauri::command]
+async fn touch(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| {
+        c.touch();
         Ok(())
     })
     .await
@@ -944,12 +955,21 @@ fn main() {
             let timer = Arc::clone(&core);
             let timer_clipboard = clipboard.clone();
             let timer_window = app.get_webview_window("main");
+            let mut computer = os_lock::LockWatch::default();
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(15));
                 // Read the clock before waiting for the core: a long command holding it must not
                 // look like the computer slept.
                 let now = std::time::SystemTime::now();
-                let locked = timer.lock().is_ok_and(|mut c| c.tick(now));
+                let mut locked = timer.lock().is_ok_and(|mut c| c.tick(now));
+                // The computer was locked (Win+L): the vault locks with it. Asked without
+                // holding the core, and only while the vault is open.
+                if !locked && timer.lock().is_ok_and(|c| c.is_unlocked()) {
+                    let answer = os_lock::computer_locked();
+                    if computer.just_locked(answer) {
+                        locked = timer.lock().is_ok_and(|mut c| c.lock_with_computer());
+                    }
+                }
                 if locked {
                     timer_clipboard.clear_now();
                     if let Some(w) = &timer_window {
@@ -973,6 +993,7 @@ fn main() {
             unlock,
             unlock_with_recovery,
             lock,
+            touch,
             set_api_key,
             set_model,
             set_speed,

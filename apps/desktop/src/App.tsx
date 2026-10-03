@@ -8,6 +8,7 @@ import { CaseScreen } from "./screens/CaseScreen";
 import { ConsultScreen } from "./screens/ConsultScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { Toast } from "./components/ui";
+import { IdleWarning } from "./components/IdleWarning";
 
 export type Route =
   | { name: "cases" }
@@ -115,6 +116,27 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [unlocked, lockNow]);
 
+  // Typing a long paragraph never calls the core, so the window reports activity itself
+  // (at most every 30 seconds): the idle lock must not throw away work in progress.
+  useEffect(() => {
+    if (!unlocked) return;
+    let last = 0;
+    const onActivity = () => {
+      const now = Date.now();
+      if (now - last < 30_000) return;
+      last = now;
+      void ipc.touch().catch(() => undefined);
+    };
+    const events = ["keydown", "pointerdown", "wheel", "input"] as const;
+    events.forEach((e) => window.addEventListener(e, onActivity, { passive: true }));
+    return () => events.forEach((e) => window.removeEventListener(e, onActivity));
+  }, [unlocked]);
+
+  const keepWorking = useCallback(async () => {
+    await ipc.touch().catch(() => undefined);
+    await refresh();
+  }, [refresh]);
+
   if (coreDown && !status) {
     return <main className="center-note"><p className="error">אין חיבור לליבה המאובטחת. כדאי לסגור ולפתוח את התוכנה.</p></main>;
   }
@@ -140,6 +162,9 @@ export function App() {
       {route.name === "consult" && <ConsultScreen caseId={route.caseId} />}
       {route.name === "settings" && <SettingsScreen />}
       {toast && <Toast text={toast} onDone={() => setToast(null)} />}
+      {status.idle_lock_in != null && status.idle_lock_in <= 75 && (
+        <IdleWarning seconds={status.idle_lock_in} onKeep={() => void keepWorking()} />
+      )}
     </AppContext.Provider>
     </QueryClientProvider>
   );

@@ -13,6 +13,7 @@
     "allow-unlock",
     "allow-unlock-with-recovery",
     "allow-lock",
+    "allow-touch",
     "allow-set-api-key",
     "allow-set-model",
     "allow-set-speed",

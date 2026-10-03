@@ -67,6 +67,8 @@ export const ipc = {
   unlock: (password: string) => call<AppStatus>("unlock", { password }),
   unlockWithRecovery: (key: string) => call<AppStatus>("unlock_with_recovery", { key }),
   lock: () => run("lock"),
+  /** Typing or scrolling in the window counts as activity for the idle lock. */
+  touch: () => run("touch"),
 
   setApiKey: (key: string) => run("set_api_key", { key }),
   setSpeed: (speed: "fast" | "balanced" | "thorough") => run("set_speed", { speed }),

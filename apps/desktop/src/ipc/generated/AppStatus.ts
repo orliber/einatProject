@@ -18,6 +18,10 @@ demo_mode: boolean, model: string,
  */
 speed: string, integrity_warning: string | null, lock_minutes: number, 
 /**
+ * While the vault is open: seconds until the idle lock (the UI warns in the last minute).
+ */
+idle_lock_in: number | null, 
+/**
  * Names always hidden as the practitioner (shown in settings).
  */
 practitioner: Array<string>, 
