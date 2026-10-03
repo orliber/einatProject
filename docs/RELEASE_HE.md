@@ -43,3 +43,13 @@
 1. יוצרים מפתח חדש (מזיזים את הישן ומריצים `setup`), עושים commit למפתח הציבורי החדש, ומשחררים גרסה **חתומה במפתח הישן** שכבר כוללת את החדש. זו החתימה האחרונה של המפתח הישן.
 2. אם המפתח הישן לא זמין, או שהגרסה כבר הופצה על ידי מי שהשיג אותו: עינת מסירה ומתקינה ידנית גרסה חדשה מהריפו. הכספת נשארת במחשב, והתקנה מחדש לא מוחקת אותה.
 3. לתעד ב-`docs/compliance/INCIDENT_RESPONSE.md`.
+
+## כניסה עם גוגל כששוכחים סיסמה (D-041) – הגדרה חד-פעמית
+בלי השלב הזה התוכנה פשוט לא מציגה את האפשרות. זה רישום של התוכנה אצל גוגל, לא חשבון של עינת.
+1. ב-Google Cloud Console: פרויקט חדש (למשל "DiagnosticVault").
+2. "APIs & Services ← Library": להפעיל את **Google Drive API**.
+3. "OAuth consent screen": סוג External, שם "כספת האבחון", ובהרשאות רק `openid` ו-`.../auth/drive.appdata`. במצב Testing מוסיפים את כתובת הגוגל של עינת ל-Test users (מספיק לשימוש שלה, והתוכנה לא שומרת טוקנים).
+4. "Credentials ← Create credentials ← OAuth client ID ← Desktop app".
+5. את ה-Client ID ואת ה-Client secret שמים ב-GitHub: Settings ← Secrets and variables ← Actions, בשמות `DV_GOOGLE_CLIENT_ID` ו-`DV_GOOGLE_CLIENT_SECRET`. הגרסה הבאה שתשוחרר כבר תציע את האפשרות.
+
+גוגל מתייחסת ל-secret של אפליקציית דסקטופ כגלוי, ולכן אין בעיה שהוא בתוך התוכנה. ההגנה היא PKCE, וזה שהמפתח בגוגל לבדו לא פותח את הכספת.

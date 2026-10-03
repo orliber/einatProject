@@ -39,6 +39,9 @@ pub enum AuditEvent {
     /// Einat went over the log (periodic review of access records).
     AuditReviewed,
     ConsultationDeleted,
+    /// Sign-in with Google turned on or off as the forgotten-password path (D-041).
+    GoogleRecoveryOn,
+    GoogleRecoveryOff,
 }
 
 impl AuditEvent {
@@ -69,6 +72,8 @@ impl AuditEvent {
             AuditEvent::IntegrityWarning => "integrity_warning",
             AuditEvent::AuditReviewed => "audit_reviewed",
             AuditEvent::ConsultationDeleted => "consultation_deleted",
+            AuditEvent::GoogleRecoveryOn => "google_recovery_on",
+            AuditEvent::GoogleRecoveryOff => "google_recovery_off",
         }
     }
 }

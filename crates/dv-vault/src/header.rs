@@ -29,6 +29,15 @@ pub enum KeySlot {
     Recovery {
         wrapped_mk: String,
     },
+    /// Forgot the password: sign in with her Google account (D-041). The slot opens only with
+    /// two keys together: a random key in her own Google Drive (the app's hidden folder) and
+    /// a random key sealed to her Windows account on this computer (DPAPI). `account` is a
+    /// hash of the Google account id, so another account is told apart before anything is
+    /// tried.
+    Google {
+        account: String,
+        wrapped_mk: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

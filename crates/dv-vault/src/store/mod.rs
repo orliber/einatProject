@@ -108,6 +108,12 @@ pub struct StoredConsultation {
 pub enum Secret<'a> {
     Password(&'a str),
     Recovery(&'a str),
+    /// The key kept in her Google Drive (fetched after she signed in) and the key sealed to
+    /// her Windows account on this computer (D-041). Both are needed.
+    Google {
+        drive: &'a Key32,
+        computer: &'a Key32,
+    },
 }
 
 impl std::fmt::Debug for Secret<'_> {
@@ -115,11 +121,12 @@ impl std::fmt::Debug for Secret<'_> {
         f.write_str(match self {
             Secret::Password(_) => "Secret::Password(..)",
             Secret::Recovery(_) => "Secret::Recovery(..)",
+            Secret::Google { .. } => "Secret::Google(..)",
         })
     }
 }
 
-/// The master key, unwrapped from the header's password or recovery slot.
+/// The master key, unwrapped from the header's password, recovery or Google slot.
 pub(crate) fn master_key(header: &VaultHeader, secret: Secret<'_>) -> Result<Key32, VaultError> {
     match secret {
         Secret::Password(password) => {
@@ -132,7 +139,7 @@ pub(crate) fn master_key(header: &VaultHeader, secret: Secret<'_>) -> Result<Key
                         params,
                         wrapped_mk,
                     } => Some((salt.clone(), *params, wrapped_mk.clone())),
-                    KeySlot::Recovery { .. } => None,
+                    KeySlot::Recovery { .. } | KeySlot::Google { .. } => None,
                 })
                 .ok_or(VaultError::Corrupt("no password slot".to_owned()))?;
             let salt: [u8; 32] = crate::crypto::unhex(&salt)?
@@ -147,11 +154,24 @@ pub(crate) fn master_key(header: &VaultHeader, secret: Secret<'_>) -> Result<Key
                 .iter()
                 .find_map(|s| match s {
                     KeySlot::Recovery { wrapped_mk } => Some(wrapped_mk.clone()),
-                    KeySlot::Password { .. } => None,
+                    KeySlot::Password { .. } | KeySlot::Google { .. } => None,
                 })
                 .ok_or(VaultError::Corrupt("no recovery slot".to_owned()))?;
             let kek = recovery::derive_kek(&recovery::parse(typed)?)?;
             unwrap_mk(&kek, "recovery", &header.vault_id, &wrapped)
+        }
+        Secret::Google { drive, computer } => {
+            // No Google slot (turned off, or an older backup): the key opens nothing.
+            let wrapped = header
+                .slots
+                .iter()
+                .find_map(|s| match s {
+                    KeySlot::Google { wrapped_mk, .. } => Some(wrapped_mk.clone()),
+                    KeySlot::Password { .. } | KeySlot::Recovery { .. } => None,
+                })
+                .ok_or(VaultError::WrongSecret)?;
+            let kek = recovery::derive_google_kek(drive, computer)?;
+            unwrap_mk(&kek, "google", &header.vault_id, &wrapped)
         }
     }
 }
@@ -280,6 +300,84 @@ impl Vault {
             &serde_json::json!({"method": "recovery"}),
         )?;
         Ok(vault)
+    }
+
+    /// Forgot the password: open with the key from her Google Drive and the key sealed to
+    /// this computer (D-041).
+    pub fn unlock_with_google(
+        dir: &Path,
+        drive: &Key32,
+        computer: &Key32,
+    ) -> Result<Self, VaultError> {
+        let header = VaultHeader::read(dir)?;
+        let mk = master_key(&header, Secret::Google { drive, computer })?;
+        let mut vault = Self::open_with(dir, header, &mk)?;
+        vault.record(
+            AuditEvent::Unlock,
+            None,
+            &serde_json::json!({"method": "google"}),
+        )?;
+        Ok(vault)
+    }
+
+    /// The vault's id and the tag of the Google account that can open it, read from the
+    /// header while the vault is still locked. `None` when sign-in with Google is off.
+    /// Unauthenticated until the vault opens: it only decides what the lock screen offers.
+    pub fn google_slot(dir: &Path) -> Result<(String, Option<String>), VaultError> {
+        let header = VaultHeader::read(dir)?;
+        let tag = header.slots.iter().find_map(|s| match s {
+            KeySlot::Google { account, .. } => Some(account.clone()),
+            KeySlot::Password { .. } | KeySlot::Recovery { .. } => None,
+        });
+        Ok((header.vault_id, tag))
+    }
+
+    #[must_use]
+    pub fn has_google_slot(&self) -> bool {
+        self.header
+            .slots
+            .iter()
+            .any(|s| matches!(s, KeySlot::Google { .. }))
+    }
+
+    /// Turn on sign-in with Google (or move it to another account): the master key wrapped
+    /// under the key just put in her Drive together with the key sealed to this computer.
+    /// Needs a fresh proof, like a new password.
+    pub fn set_google_slot(
+        &mut self,
+        current: Secret<'_>,
+        drive: &Key32,
+        computer: &Key32,
+        account_tag: &str,
+    ) -> Result<(), VaultError> {
+        let mk = master_key(&self.header, current)?;
+        let kek = recovery::derive_google_kek(drive, computer)?;
+        let slot = KeySlot::Google {
+            account: account_tag.to_owned(),
+            wrapped_mk: wrap_mk(&kek, "google", &self.header.vault_id, &mk)?,
+        };
+        self.header
+            .slots
+            .retain(|s| !matches!(s, KeySlot::Google { .. }));
+        self.header.slots.push(slot);
+        self.header.sign(&self.keys.header)?;
+        self.header.write(&self.dir)?;
+        self.record(AuditEvent::GoogleRecoveryOn, None, &serde_json::json!({}))
+    }
+
+    /// Turn sign-in with Google off. Needs a fresh proof. Backups written before still carry
+    /// the slot, so the Drive key should be deleted too (the core does that).
+    pub fn remove_google_slot(&mut self, current: Secret<'_>) -> Result<(), VaultError> {
+        master_key(&self.header, current)?;
+        if !self.has_google_slot() {
+            return Ok(());
+        }
+        self.header
+            .slots
+            .retain(|s| !matches!(s, KeySlot::Google { .. }));
+        self.header.sign(&self.keys.header)?;
+        self.header.write(&self.dir)?;
+        self.record(AuditEvent::GoogleRecoveryOff, None, &serde_json::json!({}))
     }
 
     fn open_with(dir: &Path, mut header: VaultHeader, mk: &Key32) -> Result<Self, VaultError> {
@@ -422,7 +520,7 @@ impl Vault {
             KeySlot::Recovery { wrapped_mk } => {
                 unwrap_mk(&kek, "recovery", &self.header.vault_id, wrapped_mk).is_ok()
             }
-            KeySlot::Password { .. } => false,
+            KeySlot::Password { .. } | KeySlot::Google { .. } => false,
         })
     }
 

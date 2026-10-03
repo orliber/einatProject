@@ -12,6 +12,7 @@ use dv_privacy::ClearedPayload;
 use serde_json::Value;
 use zeroize::Zeroizing;
 
+pub mod google;
 pub mod sse;
 pub mod update;
 
