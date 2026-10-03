@@ -950,6 +950,45 @@ async fn install_update(app: tauri::AppHandle, state: tauri::State<'_, AppState>
     Ok(())
 }
 
+/// Next to the vault folder, never inside it. Kept small.
+const CRASH_LOG: &str = "crash-log.txt";
+const CRASH_LOG_MAX: u64 = 64 * 1024;
+
+/// A release build stops at the first panic (`panic = "abort"`), and on Windows it has no
+/// console, so the program just vanished. Write where it stopped: the time, version, thread
+/// and source line, and the message only when it is fixed text in the code. A message built
+/// at run time could carry something from a case, so it is left out.
+fn remember_crashes(path: PathBuf) {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        use std::io::Write;
+        let fixed = info.payload().downcast_ref::<&'static str>().copied();
+        let line = format!(
+            "{} · v{} · thread {} · {} · {}\n",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs()),
+            env!("CARGO_PKG_VERSION"),
+            std::thread::current().name().unwrap_or("?"),
+            info.location()
+                .map_or_else(|| "?".to_owned(), |l| format!("{}:{}", l.file(), l.line())),
+            fixed.unwrap_or("(message left out)"),
+        );
+        let too_big = std::fs::metadata(&path).is_ok_and(|m| m.len() > CRASH_LOG_MAX);
+        if too_big {
+            let _ = std::fs::remove_file(&path);
+        }
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            let _ = f.write_all(line.as_bytes());
+        }
+        previous(info);
+    }));
+}
+
 fn main() {
     // A document worker: the same binary, started by the core for one file.
     if std::env::args().nth(1).as_deref() == Some(dv_ingest::worker::WORKER_ARG) {
@@ -958,7 +997,9 @@ fn main() {
 
     let result = tauri::Builder::default()
         .setup(|app| {
-            let dir = app.path().app_local_data_dir()?.join("vault");
+            let data = app.path().app_local_data_dir()?;
+            remember_crashes(data.join(CRASH_LOG));
+            let dir = data.join("vault");
             std::fs::create_dir_all(&dir)?;
             // The installer of the last update has done its work.
             dv_core::update::clean(&dir);
