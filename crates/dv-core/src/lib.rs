@@ -84,6 +84,35 @@ const MAX_REQUEST_BYTES: usize = 900_000;
 /// Sections written from other, already approved sections.
 const DERIVED_SECTIONS: &[&str] = &["dsm", "summary", "diagnoses", "recommendations"];
 
+/// The cloud-synced folder (OneDrive, Dropbox…) that holds `path`, if any. A report with real
+/// names is not saved where it would be uploaded on its own.
+#[must_use]
+pub fn cloud_synced_folder(path: &Path) -> Option<String> {
+    dv_vault::env::cloud_synced_component(path)
+}
+
+/// The Word file's name. It shows in Downloads, in "recent files" and as an e-mail
+/// attachment, so it never carries a name: a case code that holds a name declared in the
+/// case gives way to the date.
+fn report_file_name(
+    code: &str,
+    identities: &[dv_domain::Identity],
+    (y, m, d): (i32, u32, u32),
+) -> String {
+    let lower = code.to_lowercase();
+    let holds_name = identities
+        .iter()
+        .flat_map(|i| std::iter::once(&i.value).chain(i.aliases.iter()))
+        .flat_map(|n| n.split_whitespace())
+        .map(str::to_lowercase)
+        .any(|w| w.chars().count() >= 2 && lower.contains(&w));
+    if code.is_empty() || holds_name {
+        format!("דוח אבחון {y:04}-{m:02}-{d:02}.docx")
+    } else {
+        format!("דוח אבחון {code}.docx")
+    }
+}
+
 /// Answer the UI's liveness check.
 #[must_use]
 pub fn ping() -> PingResponse {
@@ -2179,10 +2208,7 @@ impl Core {
             .chars()
             .filter(|c| c.is_alphanumeric() || *c == '-')
             .collect();
-        let file_name = format!(
-            "דוח אבחון {}.docx",
-            if code.is_empty() { "תיק" } else { &code }
-        );
+        let file_name = report_file_name(&code, &identities, dates::today());
         Ok((
             report,
             ExportCheck {

@@ -810,6 +810,33 @@ fn work_in_the_window_keeps_the_vault_open_but_never_reopens_it() {
 }
 
 #[test]
+fn the_report_file_name_never_carries_a_name() {
+    let who = |value: &str, aliases: &[&str]| dv_domain::Identity {
+        id: "i".into(),
+        case_id: "c".into(),
+        role: Role::Child,
+        tag: "[ילד]".into(),
+        value: value.into(),
+        aliases: aliases.iter().map(|a| (*a).to_owned()).collect(),
+    };
+    let ids = [who("אלון כהן", &["Alon"])];
+    let day = (2026, 10, 3);
+    assert_eq!(
+        report_file_name("TEST-0002", &ids, day),
+        "דוח אבחון TEST-0002.docx"
+    );
+    assert_eq!(
+        report_file_name("אלון-5", &ids, day),
+        "דוח אבחון 2026-10-03.docx"
+    );
+    assert_eq!(
+        report_file_name("ALON2026", &ids, day),
+        "דוח אבחון 2026-10-03.docx"
+    );
+    assert_eq!(report_file_name("", &ids, day), "דוח אבחון 2026-10-03.docx");
+}
+
+#[test]
 fn the_vault_locks_with_the_computer() {
     let (_dir, mut core, _case) = setup(None);
     assert!(core.is_unlocked());

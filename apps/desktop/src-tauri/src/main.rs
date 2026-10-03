@@ -720,7 +720,9 @@ async fn export_report(
     case_id: String,
     password: Option<String>,
 ) -> Res<String> {
-    // Downloads, else Documents, else the home folder, else the app's own folder.
+    // Downloads, else Documents, else the home folder, else the app's own folder. A folder
+    // that a cloud service syncs (Documents moved to OneDrive, say) is skipped: the report
+    // holds the real names and would be uploaded on its own.
     let paths = app.path();
     let dir = [
         paths.download_dir(),
@@ -730,6 +732,7 @@ async fn export_report(
     ]
     .into_iter()
     .flatten()
+    .filter(|d| dv_core::cloud_synced_folder(d).is_none())
     .find(|d| std::fs::create_dir_all(d).is_ok())
     .ok_or_else(|| UiError {
         code: "no_folder".to_owned(),
