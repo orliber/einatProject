@@ -8,6 +8,9 @@ import "@fontsource/frank-ruhl-libre/700.css";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import { App } from "./App";
+import { applyTextSize, readTextSize } from "./textSize";
+
+applyTextSize(readTextSize());
 
 const root = document.getElementById("root");
 if (root) {

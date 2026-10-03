@@ -9,6 +9,7 @@ import { ConsultScreen } from "./screens/ConsultScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { Toast } from "./components/ui";
 import { IdleWarning } from "./components/IdleWarning";
+import { applyTextSize, readTextSize, stepTextSize } from "./textSize";
 
 export type Route =
   | { name: "cases" }
@@ -131,6 +132,23 @@ export function App() {
     events.forEach((e) => window.addEventListener(e, onActivity, { passive: true }));
     return () => events.forEach((e) => window.removeEventListener(e, onActivity));
   }, [unlocked]);
+
+  // Ctrl + / Ctrl − / Ctrl 0 change the text size, as in a browser.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const now = readTextSize();
+      let next: number | null = null;
+      if (e.key === "+" || e.key === "=") next = stepTextSize(now, 1);
+      else if (e.key === "-") next = stepTextSize(now, -1);
+      else if (e.key === "0") next = 100;
+      if (next === null) return;
+      e.preventDefault();
+      applyTextSize(next);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const keepWorking = useCallback(async () => {
     await ipc.touch().catch(() => undefined);
