@@ -78,6 +78,8 @@ fn price(model: &str) -> Option<(f64, f64, f64)> {
         "claude-opus-5-5" => (4.0, 20.0, 0.20),
         "claude-opus-5" | "claude-opus-4-8" => (5.0, 25.0, 0.50),
         "claude-sonnet-5-5" | "claude-sonnet-5" => (2.0, 10.0, 0.20),
+        // Runs on this computer (PR #29's local models): no bill.
+        "local-gemma" | "local-qwen" => (0.0, 0.0, 0.0),
         _ => return None,
     })
 }
@@ -176,6 +178,7 @@ mod tests {
         // $5 + $2.50 + $0.50 = $8.00
         assert_eq!(t.cost_ten_thousandths("claude-opus-5"), Some(80_000));
         assert_eq!(t.cost_ten_thousandths("some-other-model"), None);
+        assert_eq!(t.cost_ten_thousandths("local-gemma"), Some(0));
         // An answer without usage counts as a request with no tokens.
         assert_eq!(Tokens::from_answer(&json!({})).input, 0);
     }
