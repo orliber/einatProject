@@ -80,6 +80,31 @@ jobs:
         with:
           persist-credentials: false
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # DIAGNOSTIC (temporary): which vault paths overflow the stack on Windows, and whether
+      # a bigger stack is enough (deep, not endless).
+      - name: Each vault test alone, default stack
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          cargo test --release -p dv-vault --test vault --no-run
+          $names = cargo test -q --release -p dv-vault --test vault -- --list --format terse | ForEach-Object { ($_ -split ':')[0] }
+          foreach ($n in $names) {
+            cargo test -q --release -p dv-vault --test vault -- --exact $n *> $null
+            Write-Output ("{0,-70} exit {1}" -f $n, $LASTEXITCODE)
+          }
+      - name: Vault tests with a 64 MiB stack
+        continue-on-error: true
+        env:
+          RUST_MIN_STACK: "67108864"
+        run: cargo test --release -p dv-vault --test vault
+      - name: First run, default stack
+        continue-on-error: true
+        run: cargo test --release -p dv-core --test first_run -- --ignored --nocapture
+      - name: First run, 64 MiB stack
+        continue-on-error: true
+        env:
+          RUST_MIN_STACK: "67108864"
+        run: cargo test --release -p dv-core --test first_run -- --ignored
       - run: cargo test --release -p dv-vault -p dv-egress -p dv-ingest
       - name: First run (create, close, open again; the real Argon2 cost)
         run: cargo test --release -p dv-core --test first_run -- --ignored
