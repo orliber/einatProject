@@ -5,6 +5,7 @@ import { ipc, type ImportPreview, type InputKind } from "../ipc/client";
 import type { NameSuggestion } from "../ipc/generated/NameSuggestion";
 import { Dialog, ErrorLine, Segments } from "./ui";
 import "./ImportDialog.css";
+import { useAi } from "../ai";
 
 const FORMAT: Record<string, string> = { docx: "Word", odt: "ODT", pdf: "PDF", text: "טקסט" };
 
@@ -18,6 +19,7 @@ export function ImportDialog(props: {
   onSaved: (inputId: string) => Promise<void>;
 }) {
   const { fail } = useApp();
+  const ai = useAi();
   const p = props.preview;
   const [kind, setKind] = useState<InputKind>(props.kind ?? p.suggested_kind);
   const [title, setTitle] = useState(p.title);
@@ -100,7 +102,7 @@ export function ImportDialog(props: {
           )}
 
           {p.suspects.length > 0 && (
-            <p className="note-sand">בטקסט יש {p.suspects.length} מילים שנראות כמו שמות שלא הוגדרו בתיק. לפני שליחה ל-Claude תתבקשי להחליט לגביהן.</p>
+            <p className="note-sand">בטקסט יש {p.suspects.length} מילים שנראות כמו שמות שלא הוגדרו בתיק. לפני שליחה ל-{ai} תתבקשי להחליט לגביהן.</p>
           )}
 
           {(p.left_out.length > 0 || p.warnings.length > 0) && (

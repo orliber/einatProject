@@ -58,7 +58,7 @@ async fn transmit(
     result
 }
 
-/// How many words Claude has written so far for a request on its way.
+/// How many words the AI has written so far for a request on its way.
 #[tauri::command]
 fn send_progress(state: tauri::State<'_, AppState>, approval_id: String) -> u32 {
     state
@@ -88,7 +88,8 @@ where
     let core = Arc::clone(&state.core);
     tauri::async_runtime::spawn_blocking(move || {
         let mut c = core.lock().map_err(|_| internal("lock"))?;
-        f(&mut c).map_err(|e| e.to_ui())
+        // Errors name the AI she chose ("שגיאה בחיבור ל-Gemini").
+        f(&mut c).map_err(|e| e.to_ui_for(c.ai_name()))
     })
     .await
     .map_err(|_| internal("task"))?
@@ -161,8 +162,16 @@ async fn lock(window: tauri::WebviewWindow, state: tauri::State<'_, AppState>) -
 // ------------------------------------------------------------------ settings
 
 #[tauri::command]
-async fn set_api_key(state: tauri::State<'_, AppState>, key: String) -> Res<()> {
-    with_core(&state, move |c| c.set_api_key(&key)).await
+async fn set_api_key(
+    state: tauri::State<'_, AppState>,
+    provider: String,
+    key: String,
+    retention_ack: bool,
+) -> Res<()> {
+    with_core(&state, move |c| {
+        c.set_api_key(&provider, &key, retention_ack)
+    })
+    .await
 }
 
 #[tauri::command]

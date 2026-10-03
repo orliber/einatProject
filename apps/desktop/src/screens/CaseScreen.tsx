@@ -14,6 +14,7 @@ import { DetailsView } from "./case/DetailsView";
 import { ReportView } from "./case/ReportView";
 import { FinishView } from "./case/FinishView";
 import "./CaseScreen.css";
+import { useAi } from "../ai";
 
 export interface ReviewRequest {
   title: string;
@@ -75,6 +76,7 @@ function sectionState(s: CaseDetail["sections"][number]): SectionState {
 
 export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const { go, fail, lockNow, status, notify } = useApp();
+  const ai = useAi();
   const [detail, setDetail] = useState<CaseDetail | null>(null);
   const detailRef = useRef<CaseDetail | null>(null);
   useEffect(() => {
@@ -166,12 +168,12 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         prepared,
         reprepare: prepare,
         onSend: async (id) => {
-          await track({ label: `Claude כותב את "${title}"`, task: "draft", section: key, approval: id }, () => ipc.sendSection(id));
+          await track({ label: `${ai} כותב את "${title}"`, task: "draft", section: key, approval: id }, () => ipc.sendSection(id));
           await reload();
         },
       });
     },
-    [caseId, startReview, track, reload],
+    [caseId, startReview, track, reload, ai],
   );
 
   const startSort = async () => {
@@ -183,7 +185,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         prepared,
         reprepare: () => ipc.prepareSort(caseId),
         onSend: async (id) => {
-          const result = await track({ label: "Claude קורא את החומרים ומשייך קטעים לסעיפים", task: "sort", approval: id }, () => ipc.sendSort(id));
+          const result = await track({ label: `${ai} קורא את החומרים ומשייך קטעים לסעיפים`, task: "sort", approval: id }, () => ipc.sendSort(id));
           await reload();
           notify(sortSummary(result));
         },
@@ -222,15 +224,15 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     stage === 0 || stage === 3
       ? null
       : !detail.meta.consent
-        ? { title: "לפני שליחה ל-Claude צריך לרשום את הסכמת ההורים.", note: "אפשר להמשיך לאסוף חומרים גם בלי זה.", action: "רישום ההסכמה", run: () => go({ name: "case", id: caseId, view: "details" }) }
+        ? { title: `לפני שליחה ל-${ai} צריך לרשום את הסכמת ההורים.`, note: "אפשר להמשיך לאסוף חומרים גם בלי זה.", action: "רישום ההסכמה", run: () => go({ name: "case", id: caseId, view: "details" }) }
         : stage === 1
           ? hasMaterials
-            ? { title: fed.length ? `יש חומר ל-${fed.length} סעיפים` : `${detail.inputs.length} חומרים בתיק`, note: unsorted > 0 ? "בדרך לכתיבה Claude יקרא את החומרים (אחרי הסתרה) ויסמן לכל סעיף רק את הקטעים שלו." : "הצעד הבא: טיוטה לכל סעיף, ואת מאשרת על הדף.", action: "לכתיבת הדוח ←", run: () => void toWriting() }
+            ? { title: fed.length ? `יש חומר ל-${fed.length} סעיפים` : `${detail.inputs.length} חומרים בתיק`, note: unsorted > 0 ? `בדרך לכתיבה ${ai} יקרא את החומרים (אחרי הסתרה) ויסמן לכל סעיף רק את הקטעים שלו.` : "הצעד הבא: טיוטה לכל סעיף, ואת מאשרת על הדף.", action: "לכתיבת הדוח ←", run: () => void toWriting() }
             : null
           : pendingCount > 0
             ? { title: pendingCount === 1 ? "טיוטה אחת מחכה לאישור שלך" : `${pendingCount} פסקאות מחכות לאישור שלך`, note: "רק מה שאישרת נכנס לקובץ. לחיצה על פסקה פותחת אותה לעריכה.", action: `לטיוטה ב"${pending[0]?.title ?? ""}" ←`, run: () => toReport(pending[0]?.key) }
             : unsorted > 0
-              ? { title: unsorted === 1 ? "חומר אחד עוד לא מוין לסעיפים" : `${unsorted} חומרים עוד לא מוינו לסעיפים`, note: "Claude יקרא אותם אחרי הסתרה, ויסמן לכל סעיף רק את הקטעים שלו.", action: "מיון החומרים", run: () => void startSort() }
+              ? { title: unsorted === 1 ? "חומר אחד עוד לא מוין לסעיפים" : `${unsorted} חומרים עוד לא מוינו לסעיפים`, note: `${ai} יקרא אותם אחרי הסתרה, ויסמן לכל סעיף רק את הקטעים שלו.`, action: "מיון החומרים", run: () => void startSort() }
               : undrafted.length > 0
                 ? { title: `${undrafted.length} סעיפים עם חומר עוד לא נכתבו`, note: "כל סעיף נכתב בנפרד, רק מהחומרים שלו, ואת רואה בדיוק מה יוצא.", action: `✦ לכתוב את ${undrafted.length} הסעיפים`, run: () => setFullDraft(true) }
                 : fed.length > 0 && fed.every((s) => s.approved)
@@ -245,7 +247,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   ];
   const more: MenuItem[] = [
     { label: "פרטים ושמות להסתרה", run: () => go({ name: "case", id: caseId, view: "details" }) },
-    { label: "כתיבת כל הדוח עם Claude", run: () => setFullDraft(true) },
+    { label: `כתיבת כל הדוח עם ${ai}`, run: () => setFullDraft(true) },
     { label: "נעילה (Ctrl+L)", run: () => void lockNow() },
   ];
 
@@ -274,7 +276,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
       </header>
       <ErrorLine error={error} />
       {(elsewhere.length > 0 || failures.length > 0) && (
-        <section className="jobs-strip" aria-label="Claude עובד">
+        <section className="jobs-strip" aria-label={`${ai} עובד`}>
           {elsewhere.map((j) => <ProgressLine key={j.id} started={j.started} estimate={j.estimate} label={j.label} approval={j.approval} />)}
           {failures.map((f) => (
             <div key={f.id} className="job-failed" role="alert">

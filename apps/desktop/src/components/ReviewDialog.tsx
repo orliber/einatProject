@@ -5,6 +5,7 @@ import { ipc, type Prepared } from "../ipc/client";
 import type { Suspect } from "../ipc/generated/Suspect";
 import { Dialog, ErrorLine, Segments, ShieldIcon, Spinner } from "./ui";
 import "./ReviewDialog.css";
+import { useAi } from "../ai";
 
 /**
  * "What leaves the computer": both sides, the checks, and a decision for every suspect.
@@ -20,6 +21,7 @@ export function ReviewDialog(props: {
   onClose: () => void;
 }) {
   const { status, fail, refresh } = useApp();
+  const ai = useAi();
   const [prepared, setPrepared] = useState(props.prepared);
   const [busy, setBusy] = useState<"send" | "decide" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +66,7 @@ export function ReviewDialog(props: {
   const context = question ? contextOf(prepared, question.token) : null;
 
   return (
-    <Dialog title={question ? (prepared.suspects.length === 1 ? "שאלה אחת לפני ששולחים" : `${prepared.suspects.length} שאלות לפני ששולחים`) : "לפני שליחה ל-Claude"}
+    <Dialog title={question ? (prepared.suspects.length === 1 ? "שאלה אחת לפני ששולחים" : `${prepared.suspects.length} שאלות לפני ששולחים`) : `לפני שליחה ל-${ai}`}
       subtitle={<>{props.title} · שום דבר לא נשלח עד שתלחצי "שליחה"</>}
       icon={<span className="review-shield"><ShieldIcon /></span>}
       onClose={props.onClose}
@@ -82,7 +84,7 @@ export function ReviewDialog(props: {
           {prepared.demo_mode && <span className="chip chip-sand">מצב הדגמה: שום דבר לא יוצא מהמחשב</span>}
           <button type="button" className="btn" onClick={props.onClose}>חזרה לעריכה</button>
           <button type="button" className="btn btn-primary btn-send" disabled={!prepared.approval_id || busy !== null} onClick={() => void send()}>
-            {busy === "send" ? <><Spinner /> שולחת…</> : prepared.demo_mode ? "שליחה (הדגמה)" : "שליחה ל-Claude"}
+            {busy === "send" ? <><Spinner /> שולחת…</> : prepared.demo_mode ? "שליחה (הדגמה)" : `שליחה ל-${ai}`}
           </button>
         </>
       }>
@@ -118,7 +120,7 @@ export function ReviewDialog(props: {
               </div>
             ) : null}
             {props.caseId && question.kind !== "ambiguous_word" && question.kind !== "indirect" && (
-              <span className="small muted">אם מסתירים, Claude יקבל במקומו: "{roleLabel[question.suggested_role]}". אפשר לשנות תפקיד ב"פרטים ושמות להסתרה".</span>
+              <span className="small muted">אם מסתירים, {ai} יקבל במקומו: "{roleLabel[question.suggested_role]}". אפשר לשנות תפקיד ב"פרטים ושמות להסתרה".</span>
             )}
             {!props.caseId && (
               <p className="note-sand">בשאלה כללית אי אפשר להחליט על שמות. כדאי לנסח את השאלה בלי השם, או לשאול מתוך תיק.</p>
@@ -155,8 +157,8 @@ export function ReviewDialog(props: {
                 </div>
               ))}
             </section>
-            <section className="card review-col" aria-label="מה Claude יקבל">
-              <h4 className="col-title col-out">מה Claude יקבל</h4>
+            <section className="card review-col" aria-label={`מה ${ai} יקבל`}>
+              <h4 className="col-title col-out">מה {ai} יקבל</h4>
               {prepared.parts.map((p, i) => (
                 <div key={i} className="review-part">
                   <span className="small muted">{p.label}</span>

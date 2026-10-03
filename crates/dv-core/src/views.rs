@@ -28,7 +28,13 @@ pub struct AppStatus {
     /// No API key configured: answers come from local demo mode.
     pub demo_mode: bool,
     pub model: String,
-    /// `fast` | `balanced` | `thorough`: how long Claude may think.
+    /// The company of `model`: `anthropic` | `openai` | `gemini` (D-038).
+    pub provider: String,
+    /// How the program names the AI everywhere: `Claude` | `ChatGPT` | `Gemini`.
+    pub ai_name: String,
+    /// Companies whose API key is saved in the vault.
+    pub keys: Vec<String>,
+    /// `fast` | `balanced` | `thorough`: how long the AI may think.
     pub speed: String,
     pub integrity_warning: Option<String>,
     pub lock_minutes: u32,

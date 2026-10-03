@@ -3,7 +3,9 @@
 //! It accepts nothing but a [`ClearedPayload`] from the privacy gate, re-checks the request
 //! against the Zero-Data-Retention rules, and sends the exact bytes the psychologist
 //! approved to one host over TLS 1.3 with Mozilla's root store (not the OS store, so a
-//! locally installed intercepting root cannot read the traffic).
+//! locally installed intercepting root cannot read the traffic). When she chose ChatGPT or
+//! Gemini instead of Claude (D-038), [`providers`] re-shapes the same cleared text for that
+//! company, adding nothing.
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -12,14 +14,17 @@ use dv_privacy::ClearedPayload;
 use serde_json::Value;
 use zeroize::Zeroizing;
 
+pub mod providers;
 pub mod sse;
 pub mod update;
+
+pub use providers::{transport_for, Provider, GEMINI_MODELS, OPENAI_MODELS};
 
 pub const API_HOST: &str = "api.anthropic.com";
 const MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
 const API_VERSION: &str = "2023-06-01";
 
-/// Must match `dv_ai::ALLOWED_MODELS` (checked by a test in dv-core).
+/// Claude models. Must match `dv_ai::ANTHROPIC_MODELS` (checked by a test in dv-core).
 pub const ALLOWED_MODELS: &[&str] = &["claude-opus-5", "claude-sonnet-5", "claude-opus-4-8"];
 /// Top-level request fields that may be sent. Everything else is refused.
 const ALLOWED_FIELDS: &[&str] = &[
@@ -59,8 +64,8 @@ pub enum EgressError {
     Protocol(String),
 }
 
-/// Check the outgoing body against the ZDR rules (STANDARDS.md §4, D-009).
-pub fn check_policy(body: &Value) -> Result<(), EgressError> {
+/// The body as an object with allowed top-level fields only.
+pub(crate) fn check_fields(body: &Value) -> Result<&serde_json::Map<String, Value>, EgressError> {
     let obj = body
         .as_object()
         .ok_or_else(|| EgressError::Policy("body is not an object".to_owned()))?;
@@ -69,6 +74,12 @@ pub fn check_policy(body: &Value) -> Result<(), EgressError> {
             return Err(EgressError::Policy(format!("field `{key}` is not allowed")));
         }
     }
+    Ok(obj)
+}
+
+/// Check the outgoing body against the ZDR rules (STANDARDS.md §4, D-009).
+pub fn check_policy(body: &Value) -> Result<(), EgressError> {
+    let obj = check_fields(body)?;
     let model = obj.get("model").and_then(Value::as_str).unwrap_or("");
     if !ALLOWED_MODELS.contains(&model) {
         return Err(EgressError::Policy(format!(
@@ -117,13 +128,21 @@ pub trait Transport: Send + Sync {
 
 /// Simple sliding-window limit: a runaway loop cannot send hundreds of requests.
 #[derive(Debug)]
-struct RateLimit {
+pub(crate) struct RateLimit {
     window: Duration,
     max: usize,
     sent: Vec<Instant>,
 }
 
 impl RateLimit {
+    pub(crate) fn per_minute(max: usize) -> Self {
+        Self {
+            window: Duration::from_secs(60),
+            max,
+            sent: Vec::new(),
+        }
+    }
+
     fn allow(&mut self) -> bool {
         let now = Instant::now();
         self.sent.retain(|t| now.duration_since(*t) < self.window);
@@ -162,6 +181,30 @@ pub(crate) fn tls_config() -> rustls::ClientConfig {
     }
 }
 
+/// The one HTTP client setup for every AI provider: TLS 1.3 only, Mozilla roots, HTTPS only,
+/// no proxy, no redirects.
+pub(crate) fn build_client() -> Result<reqwest::blocking::Client, EgressError> {
+    reqwest::blocking::Client::builder()
+        .use_preconfigured_tls(tls_config())
+        .https_only(true)
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(600))
+        .connect_timeout(Duration::from_secs(20))
+        .user_agent("diagnostic-vault")
+        .build()
+        .map_err(|e| EgressError::Protocol(e.to_string()))
+}
+
+pub(crate) fn send_error(e: &reqwest::Error) -> EgressError {
+    let text = format!("{e:?}").to_lowercase();
+    if text.contains("certificate") || text.contains("tls") || text.contains("handshake") {
+        EgressError::Tls
+    } else {
+        EgressError::Offline
+    }
+}
+
 /// The real transport to the Anthropic Messages API.
 pub struct AnthropicTransport {
     client: reqwest::blocking::Client,
@@ -183,25 +226,11 @@ impl AnthropicTransport {
         if api_key.trim().is_empty() {
             return Err(EgressError::NoApiKey);
         }
-        let client = reqwest::blocking::Client::builder()
-            .use_preconfigured_tls(tls_config())
-            .https_only(true)
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(Duration::from_secs(600))
-            .connect_timeout(Duration::from_secs(20))
-            .user_agent("diagnostic-vault")
-            .build()
-            .map_err(|e| EgressError::Protocol(e.to_string()))?;
         Ok(Self {
-            client,
+            client: build_client()?,
             api_key: Zeroizing::new(api_key.trim().to_owned()),
             url: MESSAGES_URL.to_owned(),
-            limit: Mutex::new(RateLimit {
-                window: Duration::from_secs(60),
-                max: 20,
-                sent: Vec::new(),
-            }),
+            limit: Mutex::new(RateLimit::per_minute(20)),
         })
     }
 
@@ -214,17 +243,7 @@ impl AnthropicTransport {
             .header("anthropic-version", API_VERSION)
             .body(body.to_vec())
             .send()
-            .map_err(|e| {
-                let text = format!("{e:?}").to_lowercase();
-                if text.contains("certificate")
-                    || text.contains("tls")
-                    || text.contains("handshake")
-                {
-                    EgressError::Tls
-                } else {
-                    EgressError::Offline
-                }
-            })?;
+            .map_err(|e| send_error(&e))?;
         let status = resp.status().as_u16();
         let streamed = resp
             .headers()
@@ -342,11 +361,7 @@ mod tests {
 
     #[test]
     fn rate_limit_stops_runaway_loops() {
-        let mut l = RateLimit {
-            window: Duration::from_secs(60),
-            max: 3,
-            sent: Vec::new(),
-        };
+        let mut l = RateLimit::per_minute(3);
         assert!(l.allow() && l.allow() && l.allow());
         assert!(!l.allow());
     }

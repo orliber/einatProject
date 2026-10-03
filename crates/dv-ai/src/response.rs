@@ -9,7 +9,7 @@ use ts_rs::TS;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum AiError {
-    #[error("Claude declined the request ({0})")]
+    #[error("the AI declined the request ({0})")]
     Refused(String),
     #[error("the answer was cut off (max_tokens); try a shorter request")]
     Truncated,

@@ -11,7 +11,7 @@ import "./ActivityLog.css";
 const KINDS: [string, string][] = [
   ["all", "הכל"],
   ["access", "כניסות"],
-  ["send", "שליחה ל-Claude"],
+  ["send", "שליחה ל-AI"],
   ["case", "תיקים"],
   ["security", "אבטחה וגיבוי"],
 ];
@@ -91,7 +91,7 @@ export function ActivitySettings() {
     <section className="card setting" aria-labelledby="s-activity">
       <h2 id="s-activity">יומן פעולות</h2>
       <p className="muted small">
-        כל כניסה, שליחה ל-Claude, ייצוא ומחיקה נרשמים ביומן מוצפן, בלי תוכן ובלי שמות. כל רשומה חתומה יחד עם זו שלפניה,
+        כל כניסה, שליחה ל-AI (Claude, Gemini או ChatGPT), ייצוא ומחיקה נרשמים ביומן מוצפן, בלי תוכן ובלי שמות. כל רשומה חתומה יחד עם זו שלפניה,
         כך שמחיקה או שינוי מתגלים. היומן נשמר לפחות שנתיים. מומלץ לעבור עליו פעם בחודש.
       </p>
       <button type="button" className="btn align-start" onClick={() => setOpen(true)}>פתיחת היומן</button>

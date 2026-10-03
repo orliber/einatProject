@@ -161,7 +161,7 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
         {step === "me" && (
           <form className="setup-col stack" onSubmit={finish}>
             <h1>הפרטים שלך</h1>
-            <p className="lede">השם שלך ושם הקליניקה יוסתרו תמיד לפני שליחה ל-Claude, בכל התיקים, ויוחלפו ב"המאבחנת".</p>
+            <p className="lede">השם שלך ושם הקליניקה יוסתרו תמיד לפני שליחה ל-AI, בכל התיקים, ויוחלפו ב"המאבחנת".</p>
             <div className="field">
               <label htmlFor="names">השם שלך, ושמות נוספים (קליניקה, כינוי), מופרדים בפסיק</label>
               <textarea id="names" className="textarea" rows={3} value={names} onChange={(e) => setNames(e.target.value)} />

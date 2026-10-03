@@ -8,6 +8,7 @@ import { useRotatingPlaceholder } from "../../components/Rotating";
 import { DRAFT_HINTS } from "../../i18n/suggestions";
 import type { CaseApi } from "../CaseScreen";
 import "./SectionWork.css";
+import { useAi } from "../../ai";
 
 type Section = CaseDetail["sections"][number];
 
@@ -22,6 +23,7 @@ const QUICK: [string, string][] = [
 
 export function SectionWork({ api, section }: { api: CaseApi; section: Section }) {
   const { fail, notify, go } = useApp();
+  const ai = useAi();
   const { caseId, reload } = api;
   const [chat, setChat] = useState<ChatView[]>([]);
   const [last, setLast] = useState<SectionResult | null>(null);
@@ -79,7 +81,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
         reprepare: prepare,
         onSend: async (id) => {
           const result = await api.track(
-            { label: replaces ? "Claude מנסח את הפסקה מחדש" : `Claude כותב את "${section.title}"`, task: "draft", section: section.key, approval: id },
+            { label: replaces ? `${ai} מנסח את הפסקה מחדש` : `${ai} כותב את "${section.title}"`, task: "draft", section: section.key, approval: id },
             () => ipc.sendSection(id),
           );
           setLast(result);
@@ -140,7 +142,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               <span className="muted">הסעיף נכתב מתוך הסעיפים שכבר אישרת.</span>
             ) : (
               <>
-                <span className="muted">{sources.length ? "Claude כותב מתוך:" : "עוד אין חומרים שמזינים את הסעיף."}</span>
+                <span className="muted">{sources.length ? `${ai} כותב מתוך:` : "עוד אין חומרים שמזינים את הסעיף."}</span>
                 {sources.map((i) => (
                   <span key={i.id} className="source-chip">{kindLabel[i.kind] ?? ""} · {i.title}</span>
                 ))}
@@ -190,7 +192,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               <span className="small grow">החומרים עודכנו. כדי שהטיוטה תיכתב גם מהם:</span>
               <button type="button" className="btn btn-small btn-primary" disabled={working}
                 onClick={() => { setLinked(false); setLinking(false); void ask(draftInstruction, `טיוטה חדשה לסעיף ${section.title}`); }}>
-                טיוטה חדשה מ-Claude
+                טיוטה חדשה מ-{ai}
               </button>
             </div>
           )}
@@ -218,7 +220,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
           {pending > 0 && !job && (
             <div className="draft-banner">
               <div className="grow stack" style={{ gap: 2 }}>
-                <b>טיוטה של Claude מחכה לאישורך</b>
+                <b>טיוטה של {ai} מחכה לאישורך</b>
                 <span className="small">
                   קוראים, ואז מאשרים את כולה או פסקה-פסקה. רק מה שאושר נכנס לדוח. בקשה חדשה (למשל "לקצר") מחליפה את הטיוטה הזאת, ומה שכבר אישרת נשאר.
                 </span>
@@ -244,16 +246,16 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               <p className="serif">עוד אין טיוטה לסעיף הזה.</p>
               <p className="hint">
                 {derived
-                  ? "Claude יכין טיוטה מהסעיפים שכבר אישרת. את קוראת ומאשרת כל פסקה."
+                  ? `${ai} יכין טיוטה מהסעיפים שכבר אישרת. את קוראת ומאשרת כל פסקה.`
                   : section.source_count > 0
-                    ? "Claude יכין טיוטה מהחומרים שמזינים את הסעיף. לפני השליחה תראי בדיוק מה יוצא, ואחר כך מאשרים פסקה אחר פסקה."
+                    ? `${ai} יכין טיוטה מהחומרים שמזינים את הסעיף. לפני השליחה תראי בדיוק מה יוצא, ואחר כך מאשרים פסקה אחר פסקה.`
                     : "עוד אין חומרים שמזינים את הסעיף. אפשר להוסיף אותם בחומרי התיק, או לכתוב בעצמך."}
               </p>
               <div className="row">
                 {(derived || section.source_count > 0) && (
                   <button type="button" className="btn btn-primary" disabled={working}
                     onClick={() => void ask(draftInstruction, `טיוטה לסעיף ${section.title}`)}>
-                    {derived ? "כתיבת טיוטה מהסעיפים שאושרו" : "כתיבת טיוטה עם Claude"}
+                    {derived ? "כתיבת טיוטה מהסעיפים שאושרו" : `כתיבת טיוטה עם ${ai}`}
                   </button>
                 )}
                 <button type="button" className="btn" onClick={() => setOwn("")}>כתיבה בעצמי</button>
@@ -280,7 +282,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               <article key={p.id} className="para pending">
                 {!isEditing && (
                   <div className="para-meta">
-                    <span className="pending-mark">{p.by_ai ? "הצעה של Claude · ממתינה לאישור" : "ממתינה לאישור"}</span>
+                    <span className="pending-mark">{p.by_ai ? `הצעה של ${ai} · ממתינה לאישור` : "ממתינה לאישור"}</span>
                     {p.sources.length > 0 && <span className="muted">מקור: {p.sources.join(" · ")}</span>}
                   </div>
                 )}
@@ -336,7 +338,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               {(derived || section.source_count > 0) && (
                 <button type="button" className="add-own" disabled={working}
                   onClick={() => void ask(draftInstruction, `טיוטה חדשה לסעיף ${section.title}`)}>
-                  ↻ טיוטה חדשה מ-Claude (מחליפה את מה שלא אושר)
+                  ↻ טיוטה חדשה מ-{ai} (מחליפה את מה שלא אושר)
                 </button>
               )}
             </div>
@@ -355,7 +357,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
         <section className="chat" aria-label="שיחה על הסעיף">
           <div className="chat-head">שיחה על הסעיף</div>
           <div className="chat-body" aria-live="polite">
-            {chat.length === 0 && <p className="muted small chat-hint">כאן מבקשים מ-Claude שינויים בטיוטה: לקצר, להרחיב, להדגיש משהו. כל בקשה עוברת קודם במסך "מה יוצא מהמחשב", והתשובה מחליפה את מה שעוד לא אישרת.</p>}
+            {chat.length === 0 && <p className="muted small chat-hint">כאן מבקשים מ-{ai} שינויים בטיוטה: לקצר, להרחיב, להדגיש משהו. כל בקשה עוברת קודם במסך "מה יוצא מהמחשב", והתשובה מחליפה את מה שעוד לא אישרת.</p>}
             {chat.map((m, i) =>
               m.role === "user" ? (
                 <div key={i} className="msg-user">
@@ -381,7 +383,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               ))}
             </div>
             <div className="chat-input">
-              <label htmlFor="chat-msg" className="visually-hidden">הודעה ל-Claude</label>
+              <label htmlFor="chat-msg" className="visually-hidden">הודעה ל-{ai}</label>
               <textarea id="chat-msg" rows={2} className="textarea grow" placeholder={chatHint}
                 value={message} onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) void ask(message); }} />

@@ -7,10 +7,12 @@ import type { GrammaticalGender } from "../../ipc/generated/GrammaticalGender";
 import { PeopleEditor, toIdentityInputs, type PersonRow } from "../../components/NewCaseDialog";
 import { Dialog, ErrorLine } from "../../components/ui";
 import type { CaseApi } from "../CaseScreen";
+import { useAi } from "../../ai";
 
 /** The case's details, consent and the names hidden before every send. */
 export function DetailsView({ api }: { api: CaseApi }) {
   const { fail, notify, go } = useApp();
+  const ai = useAi();
   const { detail, caseId, reload } = api;
   const m = detail.meta;
   const [code, setCode] = useState(m.code);
@@ -66,7 +68,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
       <div className="view-head">
         <div className="stack" style={{ gap: 4 }}>
           <h1>פרטי התיק ושמות להסתרה</h1>
-          <p className="muted small">כל שם כאן מוחלף בתפקיד לפני כל שליחה ל-Claude, גם עם תחיליות ("ולנועם", "שנועם") וכתיב שונה.</p>
+          <p className="muted small">כל שם כאן מוחלף בתפקיד לפני כל שליחה ל-{ai}, גם עם תחיליות ("ולנועם", "שנועם") וכתיב שונה.</p>
         </div>
         <button type="button" className="btn btn-primary btn-big" onClick={() => void save()}>שמירת השינויים</button>
       </div>
@@ -95,7 +97,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
           </div>
           <div className="card consent">
             <label className="row"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-              <b>ההורים חתמו על הסכמה לשימוש ב-Claude בכתיבת הדוח</b></label>
+              <b>ההורים חתמו על הסכמה לשימוש ב-{ai} בכתיבת הדוח</b></label>
             {consent && (
               <div className="row wrap">
                 <div className="field">

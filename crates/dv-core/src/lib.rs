@@ -20,12 +20,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use dv_ai::{ModelConfig, SectionInput, TaggedInput, TaggedTurn, ALLOWED_MODELS};
+use dv_ai::{ModelConfig, Provider, SectionInput, TaggedInput, TaggedTurn, ALLOWED_MODELS};
 use dv_domain::{
     passage_ranges, Author, CaseMeta, CaseSummary, ChatRole, DraftStatus, IdentityInput, InputKind,
     ReportStructure, Role,
 };
-use dv_egress::{AnthropicTransport, EgressError, Transport};
+use dv_egress::{EgressError, Transport};
 use dv_ipc::{PingResponse, IPC_VERSION};
 use dv_privacy::restore::{restore, scan_model_output};
 use dv_privacy::text::normalize;
@@ -51,6 +51,20 @@ pub use views::{
 };
 
 const API_KEY: &str = "anthropic_api_key";
+
+/// Where each company's API key is kept: the vault's encrypted secrets, like Claude's (D-038).
+fn key_name(provider: Provider) -> &'static str {
+    match provider {
+        Provider::Anthropic => API_KEY,
+        Provider::OpenAi => "openai_api_key",
+        Provider::Gemini => "gemini_api_key",
+    }
+}
+
+/// The company of a model; anything unknown reads as Claude (the default).
+fn provider_of(model: &str) -> Provider {
+    Provider::of_model(model).unwrap_or(Provider::Anthropic)
+}
 const MODEL_KEY: &str = "model";
 const LOCK_KEY: &str = "lock_minutes";
 const FIRST_USE_KEY: &str = "first_use_day";
@@ -119,9 +133,15 @@ pub enum CoreError {
 }
 
 impl CoreError {
-    /// What the psychologist sees.
+    /// What the psychologist sees, naming Claude.
     #[must_use]
     pub fn to_ui(&self) -> UiError {
+        self.to_ui_for(Provider::Anthropic.display_name())
+    }
+
+    /// What the psychologist sees, naming the AI she chose (`Core::ai_name`).
+    #[must_use]
+    pub fn to_ui_for(&self, ai: &str) -> UiError {
         let (code, message) = match self {
             CoreError::Locked => ("locked", "הכספת נעולה. יש לפתוח אותה מחדש.".to_owned()),
             CoreError::Vault(VaultError::WrongSecret) => (
@@ -143,15 +163,15 @@ impl CoreError {
             CoreError::NotFound(what) => ("not_found", format!("לא נמצא: {what}")),
             CoreError::ConsentMissing => (
                 "consent_missing",
-                "לפני שליחה ל-Claude צריך לרשום בתיק את הסכמת ההורים.".to_owned(),
+                format!("לפני שליחה ל-{ai} צריך לרשום בתיק את הסכמת ההורים."),
             ),
             CoreError::Refused(why) => ("refused", why.clone()),
             CoreError::Backoff(s) => (
                 "backoff",
                 format!("יותר מדי ניסיונות. אפשר לנסות שוב בעוד {s} שניות."),
             ),
-            CoreError::Egress(e) => ("egress", egress_he(e)),
-            CoreError::Ai(e) => ("ai", format!("התשובה של Claude לא תקינה: {e}")),
+            CoreError::Egress(e) => ("egress", egress_he(e, ai)),
+            CoreError::Ai(e) => ("ai", format!("התשובה של {ai} לא תקינה: {e}")),
             CoreError::Update(e) => ("update", update::update_he(e)),
             CoreError::Internal(e) => ("internal", format!("שגיאה פנימית: {e}")),
         };
@@ -163,7 +183,7 @@ impl CoreError {
     }
 }
 
-fn egress_he(e: &EgressError) -> String {
+fn egress_he(e: &EgressError, ai: &str) -> String {
     match e {
         EgressError::NoApiKey => {
             "לא הוגדר מפתח API. עד שיוגדר, התוכנה עובדת במצב הדגמה.".to_owned()
@@ -171,13 +191,13 @@ fn egress_he(e: &EgressError) -> String {
         EgressError::Unauthorized => "מפתח ה-API נדחה. כדאי לבדוק אותו בהגדרות.".to_owned(),
         EgressError::RateLimited => "יותר מדי בקשות. אפשר לנסות שוב בעוד דקה.".to_owned(),
         EgressError::Offline => {
-            "אין חיבור לאינטרנט. אפשר להמשיך לעבוד, ו-Claude יחזור כשיהיה חיבור.".to_owned()
+            format!("אין חיבור לאינטרנט. אפשר להמשיך לעבוד, ו-{ai} יחזור כשיהיה חיבור.")
         }
         EgressError::Tls => {
             "החיבור המאובטח נכשל. ייתכן שתוכנה במחשב (למשל אנטי-וירוס) מיירטת תעבורה מוצפנת."
                 .to_owned()
         }
-        other => format!("שגיאה בחיבור ל-Claude: {other}"),
+        other => format!("שגיאה בחיבור ל-{ai}: {other}"),
     }
 }
 
@@ -249,6 +269,8 @@ struct Pending {
 /// An approved request on its way out. Holds no vault; only the payload and how to send it.
 pub struct Outgoing {
     pending: Pending,
+    /// The model named in the approved body: it decides the company and the key.
+    model: String,
     api_key: Option<zeroize::Zeroizing<String>>,
     transport: Option<Arc<dyn Transport>>,
 }
@@ -262,7 +284,8 @@ impl std::fmt::Debug for Outgoing {
 }
 
 impl Outgoing {
-    /// Send the approved payload: the test transport, Claude (API key set), or local demo.
+    /// Send the approved payload: the test transport, the chosen AI (its API key set), or
+    /// local demo.
     /// Returns the answer and whether it came from demo mode.
     pub fn transmit(&self) -> Result<(Value, bool), CoreError> {
         self.transmit_with(&|_| {})
@@ -275,7 +298,8 @@ impl Outgoing {
         }
         match &self.api_key {
             Some(key) => Ok((
-                AnthropicTransport::new(key)?.send_streaming(&self.pending.payload, progress)?,
+                dv_egress::transport_for(&self.model, key)?
+                    .send_streaming(&self.pending.payload, progress)?,
                 false,
             )),
             None => {
@@ -517,17 +541,20 @@ impl Core {
             .as_ref()
             .and_then(|v| v.setting(SPEED_KEY).ok().flatten())
             .unwrap_or_else(|| DEFAULT_SPEED.to_owned());
-        let (demo, model, integrity) = match &self.vault {
+        let model = self.chosen_model();
+        let provider = provider_of(&model);
+        let (demo, keys, integrity) = match &self.vault {
             Some(v) => (
-                v.secret(API_KEY).ok().flatten().is_none(),
-                v.setting(MODEL_KEY)
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(|| dv_ai::DEFAULT_MODEL.to_owned()),
+                v.secret(key_name(provider)).ok().flatten().is_none(),
+                Provider::ALL
+                    .into_iter()
+                    .filter(|p| v.secret(key_name(*p)).ok().flatten().is_some())
+                    .map(|p| p.id().to_owned())
+                    .collect(),
                 (!v.integrity().audit_ok || !v.integrity().header_ok)
                     .then(|| v.integrity().detail.clone().unwrap_or_default()),
             ),
-            None => (true, dv_ai::DEFAULT_MODEL.to_owned(), None),
+            None => (true, Vec::new(), None),
         };
         AppStatus {
             vault_exists: Vault::exists(&self.dir),
@@ -537,6 +564,9 @@ impl Core {
             fips_active: dv_vault::crypto::fips_active(),
             demo_mode: demo,
             model,
+            provider: provider.id().to_owned(),
+            ai_name: provider.display_name().to_owned(),
+            keys,
             speed,
             integrity_warning: integrity,
             lock_minutes: self.lock_minutes(),
@@ -736,21 +766,35 @@ impl Core {
 
     // ------------------------------------------------------------ settings
 
-    pub fn set_api_key(&mut self, key: &str) -> Result<(), CoreError> {
+    /// Save (or, when empty, delete) the API key of one company (`anthropic` | `openai` |
+    /// `gemini`). ChatGPT and Gemini keys are taken only after she confirmed she read what
+    /// that company keeps (D-038): their standard API terms are not Zero Data Retention.
+    pub fn set_api_key(
+        &mut self,
+        provider: &str,
+        key: &str,
+        retention_ack: bool,
+    ) -> Result<(), CoreError> {
+        let provider = Provider::from_id(provider)
+            .ok_or_else(|| CoreError::Refused("ספק לא מוכר.".to_owned()))?;
         let key = key.trim();
         if key.is_empty() {
-            self.vault_mut()?.delete_secret(API_KEY)?;
+            self.vault_mut()?.delete_secret(key_name(provider))?;
         } else {
-            self.vault_mut()?.set_secret(API_KEY, key)?;
+            if provider != Provider::Anthropic && !retention_ack {
+                return Err(CoreError::Refused(format!(
+                    "לפני שמירת מפתח של {} צריך לאשר שקראת מה החברה שומרת.",
+                    provider.display_name()
+                )));
+            }
+            self.vault_mut()?.set_secret(key_name(provider), key)?;
         }
         Ok(())
     }
 
     pub fn set_model(&mut self, model: &str) -> Result<(), CoreError> {
         if !ALLOWED_MODELS.contains(&model) {
-            return Err(CoreError::Refused(
-                "הדגם הזה לא זמין במסגרת ZDR.".to_owned(),
-            ));
+            return Err(CoreError::Refused("הדגם הזה לא ברשימה המותרת.".to_owned()));
         }
         self.vault_mut()?.set_setting(MODEL_KEY, model)?;
         Ok(())
@@ -1091,9 +1135,32 @@ impl Core {
         Ok(())
     }
 
-    /// No API key and no test transport: answers are built locally and nothing is sent.
+    /// No API key for the chosen AI and no test transport: answers are built locally and
+    /// nothing is sent.
     fn demo_mode(&mut self) -> Result<bool, CoreError> {
-        Ok(self.vault_ref()?.secret(API_KEY)?.is_none() && self.transport.is_none())
+        let key = key_name(self.provider());
+        Ok(self.vault_ref()?.secret(key)?.is_none() && self.transport.is_none())
+    }
+
+    /// The model chosen in settings (Claude Opus by default).
+    fn chosen_model(&self) -> String {
+        self.vault
+            .as_ref()
+            .and_then(|v| v.setting(MODEL_KEY).ok().flatten())
+            .filter(|m| ALLOWED_MODELS.contains(&m.as_str()))
+            .unwrap_or_else(|| dv_ai::DEFAULT_MODEL.to_owned())
+    }
+
+    /// The company of the chosen model.
+    #[must_use]
+    pub fn provider(&self) -> Provider {
+        provider_of(&self.chosen_model())
+    }
+
+    /// The name shown wherever the program speaks of the AI ("לכתוב עם Gemini").
+    #[must_use]
+    pub fn ai_name(&self) -> &'static str {
+        self.provider().display_name()
     }
 
     fn model_config(&mut self) -> Result<ModelConfig, CoreError> {
@@ -1519,13 +1586,22 @@ impl Core {
     /// Take an approved request out of the core so it can be sent without holding the
     /// session (the app stays responsive while Claude answers).
     pub fn begin_send(&mut self, approval_id: &str) -> Result<Outgoing, CoreError> {
-        let api_key = self.vault_ref()?.secret(API_KEY)?;
+        let pending = self
+            .pending
+            .get(approval_id)
+            .ok_or_else(|| CoreError::NotFound("האישור פג. יש להכין את הבקשה מחדש.".to_owned()))?;
+        let model = serde_json::from_slice::<Value>(pending.payload.body())
+            .ok()
+            .and_then(|b| b["model"].as_str().map(str::to_owned))
+            .unwrap_or_default();
+        let api_key = self.vault_ref()?.secret(key_name(provider_of(&model)))?;
         let pending = self
             .pending
             .remove(approval_id)
             .ok_or_else(|| CoreError::NotFound("האישור פג. יש להכין את הבקשה מחדש.".to_owned()))?;
         Ok(Outgoing {
             pending,
+            model,
             api_key,
             transport: self.transport.clone(),
         })
@@ -1573,7 +1649,8 @@ impl Core {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
         };
         // The request went out: record it before anything about the reply can fail.
-        let model = self.model_config()?.model;
+        let model = out.model.clone();
+        let ai = provider_of(&model).display_name();
         let payload_text = String::from_utf8_lossy(payload.body()).into_owned();
         let v = self.vault_mut()?;
         v.add_transmission(
@@ -1586,7 +1663,7 @@ impl Core {
         v.record(
             AuditEvent::Send,
             Some(&case_id),
-            &serde_json::json!({ "section": section_key, "demo": demo }),
+            &serde_json::json!({ "section": section_key, "demo": demo, "ai": ai }),
         )?;
         let refs: Vec<(String, String)> = sources
             .iter()
@@ -1599,7 +1676,8 @@ impl Core {
         let everyone = v.all_identities()?;
         for p in &mut reply.paragraphs {
             for s in scan_model_output(&p.text, &case_tags, &everyone) {
-                p.warnings.push(format!("{}: {}", s.message, s.token));
+                p.warnings
+                    .push(format!("{}: {}", s.message.replace("Claude", ai), s.token));
             }
         }
         v.add_message(
@@ -1730,7 +1808,7 @@ impl Core {
         let model = self.model_for(Task::Consult)?;
         let key = case_id.unwrap_or("").to_owned();
         let data = self.privacy_data(&key)?;
-        let demo_mode = self.vault_ref()?.secret(API_KEY)?.is_none() && self.transport.is_none();
+        let demo_mode = self.demo_mode()?;
         let (input, review) = {
             let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
             if let Some(c) = case_id {
@@ -1853,7 +1931,7 @@ impl Core {
         self.vault_mut()?.record(
             AuditEvent::Send,
             case_id.as_deref(),
-            &serde_json::json!({ "consult": true, "demo": demo }),
+            &serde_json::json!({ "consult": true, "demo": demo, "ai": provider_of(&out.model).display_name() }),
         )?;
         let answer = dv_ai::parse_consult(&response)?;
         let shown = match &case_id {

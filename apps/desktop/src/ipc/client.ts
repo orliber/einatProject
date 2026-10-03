@@ -68,7 +68,8 @@ export const ipc = {
   unlockWithRecovery: (key: string) => call<AppStatus>("unlock_with_recovery", { key }),
   lock: () => run("lock"),
 
-  setApiKey: (key: string) => run("set_api_key", { key }),
+  /** `retentionAck`: she read what ChatGPT or Gemini keeps (required for their keys; D-038). */
+  setApiKey: (provider: string, key: string, retentionAck = false) => run("set_api_key", { provider, key, retentionAck }),
   setSpeed: (speed: "fast" | "balanced" | "thorough") => run("set_speed", { speed }),
   setModel: (model: string) => run("set_model", { model }),
   setLockMinutes: (minutes: number) => run("set_lock_minutes", { minutes }),

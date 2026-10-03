@@ -6,8 +6,8 @@ import { prepared, status } from "../test/fixtures";
 import { ReviewDialog } from "./ReviewDialog";
 import { makePassphrase } from "./ExportDialog";
 
-function api(): AppApi {
-  return { status: status(), go: vi.fn(), refresh: vi.fn(async () => undefined), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn(async () => undefined) };
+function api(over: Partial<ReturnType<typeof status>> = {}): AppApi {
+  return { status: status(over), go: vi.fn(), refresh: vi.fn(async () => undefined), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn(async () => undefined) };
 }
 
 describe("ReviewDialog", () => {
@@ -20,6 +20,17 @@ describe("ReviewDialog", () => {
     expect(screen.getByLabelText("מה שכתוב בתיק")).toHaveTextContent("נועם");
     expect(screen.getByLabelText("מה Claude יקבל")).not.toHaveTextContent("נועם");
     expect(screen.getByLabelText("מה Claude יקבל")).toHaveTextContent("ילד");
+  });
+
+  it("names the AI she chose (D-038)", () => {
+    render(
+      <AppContext.Provider value={api({ model: "gemini-2-5-pro", provider: "gemini", ai_name: "Gemini", demo_mode: false })}>
+        <ReviewDialog title="t" caseId="c1" prepared={prepared({ demo_mode: false })} reprepare={vi.fn()} onSend={vi.fn()} onClose={vi.fn()} />
+      </AppContext.Provider>,
+    );
+    expect(screen.getByLabelText("מה Gemini יקבל")).toHaveTextContent("ילד");
+    expect(screen.getByRole("button", { name: "שליחה ל-Gemini" })).toBeInTheDocument();
+    expect(screen.queryByText(/Claude/)).toBeNull();
   });
 
   it("an unknown name blocks sending until it is decided", async () => {

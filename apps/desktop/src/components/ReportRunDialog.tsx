@@ -5,6 +5,7 @@ import type { CaseApi } from "../screens/CaseScreen";
 import { Dialog, ErrorLine, Segments, Spinner } from "./ui";
 import { aboutLeft, estimateMs, ProgressLine } from "./Progress";
 import "./ReportRunDialog.css";
+import { useAi } from "../ai";
 
 /** How many sections are written at the same time. */
 const PARALLEL = 3;
@@ -18,6 +19,7 @@ type RowState = "ready" | "question" | "waiting" | "writing" | "done" | "failed"
  */
 export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () => void }) {
   const { fail, status, go } = useApp();
+  const ai = useAi();
   const [items, setItems] = useState<[string, Prepared][] | null>(null);
   const [state, setState] = useState<Record<string, RowState>>({});
   const [started, setStarted] = useState<Record<string, number>>({});
@@ -72,7 +74,7 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
         prepared,
         reprepare: () => ipc.prepareSort(api.caseId),
         onSend: async (id) => {
-          await api.track({ label: "Claude קורא את החומרים ומשייך קטעים לסעיפים", task: "sort", approval: id }, () => ipc.sendSort(id));
+          await api.track({ label: `${ai} קורא את החומרים ומשייך קטעים לסעיפים`, task: "sort", approval: id }, () => ipc.sendSort(id));
           await api.reload();
         },
       });
@@ -86,7 +88,7 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
     setState((s) => ({ ...s, [key]: "writing" }));
     setStarted((s) => ({ ...s, [key]: Date.now() }));
     try {
-      await api.track({ label: `Claude כותב את "${title(key)}"`, task: "draft", section: key, approval }, () => ipc.sendSection(approval));
+      await api.track({ label: `${ai} כותב את "${title(key)}"`, task: "draft", section: key, approval }, () => ipc.sendSection(approval));
       setState((s) => ({ ...s, [key]: "done" }));
     } catch (e) {
       setError(fail(e as never));
@@ -130,13 +132,13 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
     ready: "מוכן לשליחה",
     question: "יש שאלה לפני שליחה",
     waiting: "בתור",
-    writing: "Claude כותב…",
+    writing: `${ai} כותב…`,
     done: "✓ טיוטה מוכנה לאישורך",
     failed: "לא הצליח. אפשר לנסות שוב מהסעיף",
   };
 
   return (
-    <Dialog title="כתיבת כל הדוח עם Claude" onClose={onClose}
+    <Dialog title={`כתיבת כל הדוח עם ${ai}`} onClose={onClose}
       subtitle="כל סעיף נשלח בנפרד, רק עם הקטעים שלו ואחרי הסתרת השמות. הטיוטות נכנסות לדוח רק אחרי שתאשרי."
       footer={
         <>
@@ -162,7 +164,7 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
         <ol className="run-steps">
           <li className={unsorted > 0 ? "current" : "done"}>
             <b>מיון החומרים</b>
-            <span>{unsorted > 0 ? `${unsorted} חומרים עוד לא מוינו. Claude יקרא אותם (אחרי הסתרה) ויחליט איזה קטע שייך לאיזה סעיף.` : "כל החומרים ממוינים לסעיפים."}</span>
+            <span>{unsorted > 0 ? `${unsorted} חומרים עוד לא מוינו. ${ai} יקרא אותם (אחרי הסתרה) ויחליט איזה קטע שייך לאיזה סעיף.` : "כל החומרים ממוינים לסעיפים."}</span>
           </li>
           <li className={unsorted > 0 ? "" : finished ? "done" : "current"}>
             <b>כתיבת הטיוטות</b>

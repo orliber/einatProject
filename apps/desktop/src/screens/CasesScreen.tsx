@@ -12,6 +12,7 @@ import { greeting } from "../i18n/he";
 import { ipc, type CaseSummary, type Folder, type UiError } from "../ipc/client";
 import { ConfirmDialog, FolderIcon, FolderNameDialog, MoveDialog, PurgeDialog, descendants } from "./library/LibraryDialogs";
 import "./CasesScreen.css";
+import { useAi } from "../ai";
 
 const TOTAL_SECTIONS = 16;
 const TRASH_DAYS = 30;
@@ -54,6 +55,7 @@ type Drag = { case: string } | { folder: string };
 
 export function CasesScreen() {
   const { go, fail, status, notify } = useApp();
+  const ai = useAi();
   const qc = useQueryClient();
   const cases = useQuery({ queryKey: ["cases"], queryFn: ipc.listCases });
   const folders = useQuery({ queryKey: ["folders"], queryFn: ipc.folders });
@@ -235,7 +237,7 @@ export function CasesScreen() {
             {allCases.length === 0 && allFolders.length === 0 && cases.data && (
               <div className="card empty">
                 <h2>התיק הראשון</h2>
-                <p className="muted">פותחים תיק, מוסיפים את החומרים שכבר יש (דוחות, אינטייק, סיכומי מפגשים וציונים), ו-Claude מציע טיוטה לכל סעיף בדוח. אפשר לסדר את התיקים בתיקיות, כמו במחשב.</p>
+                <p className="muted">פותחים תיק, מוסיפים את החומרים שכבר יש (דוחות, אינטייק, סיכומי מפגשים וציונים), ו-{ai} מציע טיוטה לכל סעיף בדוח. אפשר לסדר את התיקים בתיקיות, כמו במחשב.</p>
                 <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>פתיחת תיק</button>
               </div>
             )}
@@ -324,7 +326,7 @@ export function CasesScreen() {
             )}
           </>
         )}
-        <p className="small muted">השמות, גם של התיקיות, מוצגים רק כאן, במחשב שלך. Claude מקבל תמיד תפקידים ("הילד", "הגננת") במקום שמות.</p>
+        <p className="small muted">השמות, גם של התיקיות, מוצגים רק כאן, במחשב שלך. {ai} מקבל תמיד תפקידים ("הילד", "הגננת") במקום שמות.</p>
       </main>
 
       {creating && (

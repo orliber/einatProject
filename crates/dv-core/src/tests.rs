@@ -111,8 +111,76 @@ fn ping_reports_versions() {
 
 #[test]
 fn model_allow_lists_agree() {
-    assert_eq!(dv_ai::ALLOWED_MODELS, dv_egress::ALLOWED_MODELS);
-    assert!(dv_ai::ALLOWED_MODELS.contains(&dv_ai::DEFAULT_MODEL));
+    assert_eq!(dv_ai::ANTHROPIC_MODELS, dv_egress::ALLOWED_MODELS);
+    assert_eq!(dv_ai::OPENAI_MODELS, dv_egress::OPENAI_MODELS);
+    assert_eq!(dv_ai::GEMINI_MODELS, dv_egress::GEMINI_MODELS);
+    assert!(dv_ai::ANTHROPIC_MODELS.contains(&dv_ai::DEFAULT_MODEL));
+}
+
+#[test]
+fn the_chosen_ai_names_itself_keeps_its_own_key_and_still_goes_through_the_gate() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    assert_eq!(core.status().ai_name, "Claude");
+    assert_eq!(core.status().provider, "anthropic");
+
+    core.set_model("gemini-2-5-pro").unwrap();
+    let st = core.status();
+    assert_eq!(
+        (st.provider.as_str(), st.ai_name.as_str()),
+        ("gemini", "Gemini")
+    );
+    assert_eq!(core.ai_name(), "Gemini");
+    assert!(CoreError::ConsentMissing
+        .to_ui_for(core.ai_name())
+        .message
+        .contains("Gemini"));
+
+    // A ChatGPT or Gemini key needs her confirmation of what the company keeps.
+    assert!(matches!(
+        core.set_api_key("gemini", "test-not-real", false),
+        Err(CoreError::Refused(_))
+    ));
+    core.set_api_key("gemini", "test-not-real", true).unwrap();
+    core.set_api_key("anthropic", "sk-ant-test-not-real", false)
+        .unwrap();
+    let mut keys = core.status().keys;
+    keys.sort();
+    assert_eq!(keys, vec!["anthropic", "gemini"]);
+    assert!(core.set_api_key("mistral", "x", true).is_err());
+    core.set_api_key("gemini", "", false).unwrap();
+    assert_eq!(core.status().keys, vec!["anthropic"]);
+
+    // The same filtered request, with the chosen model in it: the gate cleared this body.
+    let prepared = core
+        .prepare_section(&case, "kindergarten", "תנסח פסקה על הוויסות הרגשי")
+        .unwrap();
+    assert!(prepared.blocked.is_empty(), "{:?}", prepared.blocked);
+    assert!(prepared.suspects.is_empty(), "{:?}", prepared.suspects);
+    core.send_section(&prepared.approval_id.unwrap()).unwrap();
+    let sent = fake.sent.lock().unwrap().last().cloned().unwrap();
+    let body: Value = serde_json::from_str(&sent).unwrap();
+    assert_eq!(body["model"], "gemini-2-5-pro");
+    assert!(
+        !sent.contains("אלון"),
+        "names are hidden whichever AI answers"
+    );
+    let log = core.activity(None).unwrap();
+    assert!(
+        log.entries.iter().any(|e| e.text.contains("נשלח ל-Gemini")),
+        "the log names the AI that was used"
+    );
+}
+
+#[test]
+fn without_a_key_for_the_chosen_ai_it_is_demo_mode() {
+    let (_dir, mut core, _case) = setup(None);
+    core.set_api_key("anthropic", "sk-ant-test-not-real", false)
+        .unwrap();
+    assert!(!core.status().demo_mode);
+    core.set_model("gpt-5-1").unwrap();
+    assert!(core.status().demo_mode, "a Claude key is not a ChatGPT key");
+    assert_eq!(core.status().ai_name, "ChatGPT");
 }
 
 #[test]
@@ -386,6 +454,8 @@ fn unlock_backoff_after_wrong_password() {
 fn only_allowed_models() {
     let (_dir, mut core, _case) = setup(None);
     assert!(core.set_model("claude-sonnet-5").is_ok());
+    assert!(core.set_model("gpt-5-mini").is_ok());
+    assert!(core.set_model("gemini-2-5-flash").is_ok());
     assert!(matches!(
         core.set_model("some-other-model"),
         Err(CoreError::Refused(_))
