@@ -1,5 +1,6 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
-import { useApp } from "../App";
+import { useContext, useEffect, useState, useSyncExternalStore } from "react";
+import { AppContext, useApp } from "../App";
+import type { UiError } from "../ipc/client";
 import { ipc, type UpdateView } from "../ipc/client";
 import { Dialog, ErrorLine, Spinner } from "./ui";
 import "./Update.css";
@@ -79,11 +80,13 @@ export async function checkNow(): Promise<UpdateView | null> {
   return v;
 }
 
-/** The daily check, while the vault is open, and every hour after that while it stays open. */
+/**
+ * The daily check, and every hour after that while the program stays open. It runs on the
+ * lock screen too (D-038): a version that cannot open the vault must still be able to receive
+ * the version that fixes it. Nothing from the vault is involved either way.
+ */
 export function useDailyUpdateCheck() {
-  const { status } = useApp();
   useEffect(() => {
-    if (!status.unlocked) return;
     const look = () => {
       if (!autoCheckOn()) return;
       if (found) {
@@ -97,7 +100,7 @@ export function useDailyUpdateCheck() {
     look();
     const timer = window.setInterval(look, LOOK_AGAIN_MS);
     return () => window.clearInterval(timer);
-  }, [status.unlocked]);
+  }, []);
 }
 
 export function useFoundUpdate(): UpdateView | null {
@@ -126,7 +129,9 @@ export function UpdateChip() {
 }
 
 export function UpdateDialog({ update, onClose }: { update: UpdateView; onClose: () => void }) {
-  const { fail } = useApp();
+  // Also shown on the lock screen, where there is no open vault to report errors to.
+  const app = useContext(AppContext);
+  const fail = app?.fail ?? ((e: UiError) => e.message);
   const isReady = useUpdateReady();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -177,6 +182,23 @@ export function UpdateDialog({ update, onClose }: { update: UpdateView; onClose:
         <ErrorLine error={error} />
       </div>
     </Dialog>
+  );
+}
+
+/** On the lock screen: the same daily check, and the update when one is waiting. */
+export function LockScreenUpdate() {
+  useDailyUpdateCheck();
+  const update = useFoundUpdate();
+  const isReady = useUpdateReady();
+  const [open, setOpen] = useState(false);
+  if (!update?.can_install) return null;
+  return (
+    <>
+      <button type="button" className="update-chip" onClick={() => setOpen(true)}>
+        <span aria-hidden="true">✦</span> {isReady ? `גרסה ${update.version} מוכנה` : `יש גרסה ${update.version}`}
+      </button>
+      {open && <UpdateDialog update={update} onClose={() => setOpen(false)} />}
+    </>
   );
 }
 
