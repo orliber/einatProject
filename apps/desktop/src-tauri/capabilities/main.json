@@ -93,6 +93,7 @@
     "allow-forget-backup",
     "allow-set-auto-backup",
     "allow-check-update",
+    "allow-prepare-update",
     "allow-install-update",
     "allow-send-progress"
   ]
