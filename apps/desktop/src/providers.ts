@@ -61,8 +61,8 @@ export const PROVIDERS: ProviderInfo[] = [
     name: "Mistral",
     company: "Mistral AI",
     models: [
-      ["mistral-large-latest", "Mistral Large (מומלץ: הכי מדויק)"],
-      ["mistral-medium-latest", "Mistral Medium (מהיר יותר)"],
+      ["mistral-large", "Mistral Large 24.11 (מומלץ: הכי מדויק)"],
+      ["mistral-medium", "Mistral Medium 25.08 (מהיר יותר)"],
     ],
     keyPlaceholder: "…",
     retention:

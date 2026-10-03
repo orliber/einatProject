@@ -33,7 +33,7 @@ const LOCAL_URL: &str = "http://127.0.0.1:11434/api/chat";
 /// `claude-opus-4-8`: the gate reads "2.5" in an outgoing body as a possible date and stops it.
 pub const OPENAI_MODELS: &[&str] = &["gpt-5-1", "gpt-5-mini"];
 pub const GEMINI_MODELS: &[&str] = &["gemini-2-5-pro", "gemini-2-5-flash"];
-pub const MISTRAL_MODELS: &[&str] = &["mistral-large-latest", "mistral-medium-latest"];
+pub const MISTRAL_MODELS: &[&str] = &["mistral-large", "mistral-medium"];
 pub const LOCAL_MODELS: &[&str] = &["local-gemma", "local-qwen"];
 
 /// The company's own name for a model on the lists above (a fixed table, never data).
@@ -43,8 +43,9 @@ fn api_model(model: &str) -> Option<&'static str> {
         "gpt-5-mini" => "gpt-5-mini",
         "gemini-2-5-pro" => "gemini-2.5-pro",
         "gemini-2-5-flash" => "gemini-2.5-flash",
-        "mistral-large-latest" => "mistral-large-latest",
-        "mistral-medium-latest" => "mistral-medium-latest",
+        // Dated versions, not `-latest` aliases: the model does not change under her.
+        "mistral-large" => "mistral-large-2411",
+        "mistral-medium" => "mistral-medium-2508",
         "local-gemma" => "gemma3:12b",
         "local-qwen" => "qwen3:14b",
         _ => return None,
@@ -323,6 +324,14 @@ pub(crate) fn to_gemini(c: &Canonical) -> Value {
     body
 }
 
+/// Token counts in the Messages API `usage` shape (for the monthly cost ceiling).
+fn usage(input: &Value, output: &Value) -> Value {
+    json!({
+        "input_tokens": input.as_u64().unwrap_or(0),
+        "output_tokens": output.as_u64().unwrap_or(0),
+    })
+}
+
 /// The answer in the Messages API shape the rest of the program reads.
 fn answer(model: &str, text: String, stop: &str, category: Option<String>) -> Value {
     let mut v = json!({
@@ -338,6 +347,15 @@ fn answer(model: &str, text: String, stop: &str, category: Option<String>) -> Va
 }
 
 pub(crate) fn from_openai(model: &str, resp: &Value) -> Result<Value, EgressError> {
+    let mut v = from_openai_inner(model, resp)?;
+    v["usage"] = usage(
+        &resp["usage"]["prompt_tokens"],
+        &resp["usage"]["completion_tokens"],
+    );
+    Ok(v)
+}
+
+fn from_openai_inner(model: &str, resp: &Value) -> Result<Value, EgressError> {
     let choice = &resp["choices"][0];
     if choice.is_null() {
         return Err(EgressError::Protocol("no choices in the answer".to_owned()));
@@ -365,6 +383,12 @@ pub(crate) fn from_openai(model: &str, resp: &Value) -> Result<Value, EgressErro
 }
 
 pub(crate) fn from_local(model: &str, resp: &Value) -> Result<Value, EgressError> {
+    let mut v = from_local_inner(model, resp)?;
+    v["usage"] = usage(&resp["prompt_eval_count"], &resp["eval_count"]);
+    Ok(v)
+}
+
+fn from_local_inner(model: &str, resp: &Value) -> Result<Value, EgressError> {
     let text = resp["message"]["content"]
         .as_str()
         .ok_or_else(|| EgressError::Protocol("no message in the answer".to_owned()))?
@@ -376,6 +400,16 @@ pub(crate) fn from_local(model: &str, resp: &Value) -> Result<Value, EgressError
 }
 
 pub(crate) fn from_gemini(model: &str, resp: &Value) -> Result<Value, EgressError> {
+    let mut v = from_gemini_inner(model, resp)?;
+    let meta = &resp["usageMetadata"];
+    // Thinking tokens are billed as output.
+    let output = meta["candidatesTokenCount"].as_u64().unwrap_or(0)
+        + meta["thoughtsTokenCount"].as_u64().unwrap_or(0);
+    v["usage"] = usage(&meta["promptTokenCount"], &json!(output));
+    Ok(v)
+}
+
+fn from_gemini_inner(model: &str, resp: &Value) -> Result<Value, EgressError> {
     if let Some(reason) = resp["promptFeedback"]["blockReason"].as_str() {
         return Ok(answer(
             model,
@@ -601,7 +635,7 @@ mod tests {
         "gpt-5.1",
         "gemini-2.5-pro",
         "system",
-        "mistral-large-latest",
+        "mistral-large-2411",
         "gemma3:12b",
     ];
 
@@ -648,7 +682,7 @@ mod tests {
 
     #[test]
     fn mistral_and_local_bodies_carry_only_the_cleared_text() {
-        let b = section_body("mistral-large-latest");
+        let b = section_body("mistral-large");
         let out = to_mistral(&canonical(&b, Provider::Mistral).unwrap());
         adds_nothing(&b, &out);
         assert_eq!(out["messages"][0]["role"], "system");
@@ -719,6 +753,24 @@ mod tests {
         .unwrap();
         assert_eq!(ok["stop_reason"], "end_turn");
         assert_eq!(ok["content"][0]["text"], "{\"a\":1}");
+        let counted = from_openai(
+            "gpt-5.1",
+            &json!({"choices": [{"message": {"content": "x"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 12, "completion_tokens": 3}}),
+        )
+        .unwrap();
+        assert_eq!(
+            counted["usage"],
+            json!({"input_tokens": 12, "output_tokens": 3})
+        );
+        let counted = from_gemini(
+            "gemini-2.5-pro",
+            &json!({"candidates": [{"content": {"parts": [{"text": "x"}]}, "finishReason": "STOP"}], "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 4, "thoughtsTokenCount": 6}}),
+        )
+        .unwrap();
+        assert_eq!(
+            counted["usage"],
+            json!({"input_tokens": 10, "output_tokens": 10})
+        );
         let cut = from_openai(
             "gpt-5-1",
             &json!({"choices": [{"message": {"content": "{"}, "finish_reason": "length"}]}),
@@ -759,13 +811,13 @@ mod tests {
         assert!(transport_for("gpt-5-1", "sk-test-not-real").is_ok());
         assert!(transport_for("gemini-2-5-flash", "test-not-real").is_ok());
         assert!(transport_for("claude-opus-5", "sk-ant-test-not-real").is_ok());
-        assert!(transport_for("mistral-large-latest", "test-not-real").is_ok());
+        assert!(transport_for("mistral-large", "test-not-real").is_ok());
         assert!(
             transport_for("local-gemma", "").is_ok(),
             "the local model takes no key"
         );
         assert!(matches!(
-            transport_for("mistral-large-latest", ""),
+            transport_for("mistral-large", ""),
             Err(EgressError::NoApiKey)
         ));
         assert!(matches!(

@@ -15,7 +15,7 @@ pub const ANTHROPIC_MODELS: &[&str] = &["claude-opus-5", "claude-sonnet-5", "cla
 /// Must match the lists in `dv-egress` (checked by a test in dv-core).
 pub const OPENAI_MODELS: &[&str] = &["gpt-5-1", "gpt-5-mini"];
 pub const GEMINI_MODELS: &[&str] = &["gemini-2-5-pro", "gemini-2-5-flash"];
-pub const MISTRAL_MODELS: &[&str] = &["mistral-large-latest", "mistral-medium-latest"];
+pub const MISTRAL_MODELS: &[&str] = &["mistral-large", "mistral-medium"];
 /// Models run by Ollama on this computer (nothing leaves it).
 pub const LOCAL_MODELS: &[&str] = &["local-gemma", "local-qwen"];
 /// Every model that may be chosen, from all providers.
@@ -27,8 +27,8 @@ pub const ALLOWED_MODELS: &[&str] = &[
     "gpt-5-mini",
     "gemini-2-5-pro",
     "gemini-2-5-flash",
-    "mistral-large-latest",
-    "mistral-medium-latest",
+    "mistral-large",
+    "mistral-medium",
     "local-gemma",
     "local-qwen",
 ];
