@@ -20,6 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|r| r.map(str::to_owned).to_vec())
             .to_vec(),
             note: "ציוני המדדים הם ציוני תקן (ממוצע 100, סטיית תקן 15).".into(),
+            charts: Vec::new(),
         }],
         title: "דוח אבחון פסיכולוגי התפתחותי".into(),
         info: vec![

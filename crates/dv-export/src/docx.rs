@@ -3,12 +3,14 @@
 use std::fmt::Write as _;
 use std::io::{Cursor, Write};
 
-use crate::{ExportError, Report};
+use std::collections::HashMap;
 
-const W_NS: &str = r#"xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#;
+use crate::{ExportError, Report, ScoreChart};
+
+pub(crate) const W_NS: &str = r#"xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#;
 
 /// Text as XML character data: escaped, and without characters XML 1.0 forbids.
-fn esc(s: &str) -> String {
+pub(crate) fn esc(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
@@ -25,7 +27,7 @@ fn esc(s: &str) -> String {
 }
 
 /// One right-to-left paragraph. `bold_prefix` renders a bold label before the text.
-fn para(style: &str, text: &str, bold_prefix: Option<&str>) -> String {
+pub(crate) fn para(style: &str, text: &str, bold_prefix: Option<&str>) -> String {
     let mut p = format!("<w:p><w:pPr><w:pStyle w:val=\"{style}\"/><w:bidi/></w:pPr>");
     if let Some(label) = bold_prefix {
         let _ = write!(p, "<w:r><w:rPr><w:b/><w:bCs/><w:rtl/></w:rPr><w:t xml:space=\"preserve\">{}: </w:t></w:r>", esc(label));
@@ -38,49 +40,224 @@ fn para(style: &str, text: &str, bold_prefix: Option<&str>) -> String {
     p
 }
 
-/// A right-to-left table with a bold, shaded header row and thin borders.
-fn table(columns: &[String], rows: &[Vec<String>]) -> String {
-    // Text width of an A4 page with the margins above, in twentieths of a point.
-    const WIDTH: usize = 9070;
-    let n = columns.len().max(1);
-    let first = if n > 1 { WIDTH * 42 / 100 } else { WIDTH };
-    let rest = if n > 1 { (WIDTH - first) / (n - 1) } else { 0 };
-    let width = |i: usize| if i == 0 { first } else { rest };
-    let cell = |text: &str, header: bool, i: usize| {
-        let shade = if header {
-            "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"E6EFED\"/>"
-        } else {
-            ""
-        };
-        let bold = if header { "<w:b/><w:bCs/>" } else { "" };
+/// The paragraph styles the body uses: (key, Word's style name, paragraph properties, size in
+/// half-points, bold, color). With her template, a style of hers with the same name wins.
+pub(crate) const STYLES: &[(&str, &str, &str, u32, bool, Option<&str>)] = &[
+    (
+        "Title",
+        "Title",
+        "<w:jc w:val=\"center\"/><w:spacing w:after=\"360\"/>",
+        36,
+        true,
+        None,
+    ),
+    (
+        "Info",
+        "Report Info",
+        "<w:spacing w:after=\"60\"/>",
+        24,
+        false,
+        None,
+    ),
+    (
+        "Heading1",
+        "heading 1",
+        "<w:keepNext/><w:spacing w:before=\"360\" w:after=\"120\"/><w:outlineLvl w:val=\"0\"/>",
+        30,
+        true,
+        Some("1F3A5F"),
+    ),
+    (
+        "Heading2",
+        "heading 2",
+        "<w:keepNext/><w:spacing w:before=\"240\" w:after=\"80\"/><w:outlineLvl w:val=\"1\"/>",
+        26,
+        true,
+        None,
+    ),
+    (
+        "BodyText",
+        "Body Text",
+        "<w:jc w:val=\"both\"/>",
+        24,
+        false,
+        None,
+    ),
+    (
+        "Signature",
+        "Signature",
+        "<w:keepNext/><w:spacing w:after=\"0\"/>",
+        24,
+        false,
+        None,
+    ),
+    (
+        "TableText",
+        "Table Text",
+        "<w:spacing w:after=\"0\"/>",
+        22,
+        false,
+        None,
+    ),
+    (
+        "TableNote",
+        "Table Note",
+        "<w:spacing w:before=\"60\" w:after=\"200\"/>",
+        18,
+        false,
+        Some("5B6567"),
+    ),
+    (
+        "ChartText",
+        "Chart Text",
+        "<w:spacing w:after=\"0\" w:line=\"240\" w:lineRule=\"auto\"/>",
+        16,
+        false,
+        None,
+    ),
+];
+
+/// Text width of an A4 page with the default margins, in twentieths of a point.
+pub(crate) const A4_TEXT_WIDTH: usize = 9070;
+
+/// Which style id each key maps to, and how wide the text column is.
+#[derive(Debug, Clone)]
+pub(crate) struct Layout {
+    pub ids: HashMap<&'static str, String>,
+    pub width: usize,
+}
+
+impl Layout {
+    pub fn plain() -> Self {
+        Self {
+            ids: STYLES.iter().map(|s| (s.0, s.0.to_owned())).collect(),
+            width: A4_TEXT_WIDTH,
+        }
+    }
+
+    fn id(&self, key: &'static str) -> &str {
+        self.ids.get(key).map_or(key, String::as_str)
+    }
+}
+
+/// One style definition. Without a font, the run inherits the document's (her template's).
+pub(crate) fn style_def(
+    id: &str,
+    name: &str,
+    ppr: &str,
+    size: u32,
+    bold: bool,
+    color: Option<&str>,
+    font: Option<&str>,
+) -> String {
+    format!(
+        "<w:style w:type=\"paragraph\" w:styleId=\"{}\"><w:name w:val=\"{}\"/><w:basedOn w:val=\"Normal\"/><w:qFormat/><w:pPr><w:bidi/>{ppr}</w:pPr>{}</w:style>",
+        esc(id),
+        esc(name),
+        run_props(size, bold, color, font)
+    )
+}
+
+fn run_props(size: u32, bold: bool, color: Option<&str>, font: Option<&str>) -> String {
+    let f = font
+        .map(|f| {
+            let f = esc(f);
+            format!("<w:rFonts w:ascii=\"{f}\" w:hAnsi=\"{f}\" w:cs=\"{f}\"/>")
+        })
+        .unwrap_or_default();
+    let b = if bold { "<w:b/><w:bCs/>" } else { "" };
+    let c = color
+        .map(|c| format!("<w:color w:val=\"{c}\"/>"))
+        .unwrap_or_default();
+    format!("<w:rPr>{f}{b}{c}<w:sz w:val=\"{size}\"/><w:szCs w:val=\"{size}\"/><w:lang w:val=\"he-IL\" w:bidi=\"he-IL\"/></w:rPr>")
+}
+
+/// Thin table borders; `inside_v` false leaves the bar cells of a chart without lines.
+fn borders(inside_v: bool) -> String {
+    let b = |side: &str| {
+        format!("<w:{side} w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"B8C4C1\"/>")
+    };
+    let mut out = String::from("<w:tblBorders>");
+    for side in ["top", "start", "bottom", "end", "insideH"] {
+        out.push_str(&b(side));
+    }
+    if inside_v {
+        out.push_str(&b("insideV"));
+    } else {
+        out.push_str("<w:insideV w:val=\"nil\"/>");
+    }
+    out.push_str("</w:tblBorders>");
+    out
+}
+
+/// One table cell with a single paragraph.
+fn cell(
+    width: usize,
+    span: usize,
+    fill: Option<&str>,
+    style: &str,
+    bold: bool,
+    text: &str,
+) -> String {
+    let span = if span > 1 {
+        format!("<w:gridSpan w:val=\"{span}\"/>")
+    } else {
+        String::new()
+    };
+    let shade = fill
+        .map(|f| format!("<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"{f}\"/>"))
+        .unwrap_or_default();
+    let b = if bold { "<w:b/><w:bCs/>" } else { "" };
+    let run = if text.is_empty() {
+        String::new()
+    } else {
         format!(
-            "<w:tc><w:tcPr><w:tcW w:w=\"{}\" w:type=\"dxa\"/>{shade}</w:tcPr><w:p><w:pPr><w:pStyle w:val=\"TableText\"/><w:bidi/></w:pPr>\
-             <w:r><w:rPr>{bold}<w:rtl/></w:rPr><w:t xml:space=\"preserve\">{}</w:t></w:r></w:p></w:tc>",
-            width(i),
+            "<w:r><w:rPr>{b}<w:rtl/></w:rPr><w:t xml:space=\"preserve\">{}</w:t></w:r>",
             esc(text)
         )
     };
-    let border = |side: &str| {
-        format!("<w:{side} w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"B8C4C1\"/>")
-    };
+    format!(
+        "<w:tc><w:tcPr><w:tcW w:w=\"{width}\" w:type=\"dxa\"/>{span}{shade}<w:vAlign w:val=\"center\"/></w:tcPr>\
+         <w:p><w:pPr><w:pStyle w:val=\"{}\"/><w:bidi/></w:pPr>{run}</w:p></w:tc>",
+        esc(style)
+    )
+}
+
+fn table_start(width: usize, inside_v: bool, grid: &[usize]) -> String {
     let mut t = format!(
-        "<w:tbl><w:tblPr><w:bidiVisual/><w:tblW w:w=\"9070\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/><w:tblBorders>{}{}{}{}{}{}</w:tblBorders>\
-         <w:tblCellMar><w:top w:w=\"60\" w:type=\"dxa\"/><w:start w:w=\"100\" w:type=\"dxa\"/><w:bottom w:w=\"60\" w:type=\"dxa\"/><w:end w:w=\"100\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr>",
-        border("top"), border("start"), border("bottom"), border("end"), border("insideH"), border("insideV")
+        "<w:tbl><w:tblPr><w:bidiVisual/><w:tblW w:w=\"{width}\" w:type=\"dxa\"/><w:tblLayout w:type=\"fixed\"/>{}\
+         <w:tblCellMar><w:top w:w=\"60\" w:type=\"dxa\"/><w:start w:w=\"100\" w:type=\"dxa\"/><w:bottom w:w=\"60\" w:type=\"dxa\"/><w:end w:w=\"100\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr><w:tblGrid>",
+        borders(inside_v)
     );
-    t.push_str("<w:tblGrid>");
-    for i in 0..n {
-        let _ = write!(t, "<w:gridCol w:w=\"{}\"/>", width(i));
+    for w in grid {
+        let _ = write!(t, "<w:gridCol w:w=\"{w}\"/>");
     }
-    t.push_str("</w:tblGrid><w:tr><w:trPr><w:tblHeader/></w:trPr>");
+    t.push_str("</w:tblGrid>");
+    t
+}
+
+/// A right-to-left table with a bold, shaded header row and thin borders.
+fn table(columns: &[String], rows: &[Vec<String>], l: &Layout) -> String {
+    let n = columns.len().max(1);
+    let first = if n > 1 { l.width * 42 / 100 } else { l.width };
+    let rest = if n > 1 {
+        (l.width - first) / (n - 1)
+    } else {
+        0
+    };
+    let width = |i: usize| if i == 0 { first } else { rest };
+    let grid: Vec<usize> = (0..n).map(width).collect();
+    let style = l.id("TableText");
+    let mut t = table_start(l.width, true, &grid);
+    t.push_str("<w:tr><w:trPr><w:tblHeader/></w:trPr>");
     for (i, c) in columns.iter().enumerate() {
-        t.push_str(&cell(c, true, i));
+        t.push_str(&cell(width(i), 1, Some(HEADER_FILL), style, true, c));
     }
     t.push_str("</w:tr>");
     for row in rows {
         t.push_str("<w:tr><w:trPr><w:cantSplit/></w:trPr>");
         for (i, c) in row.iter().enumerate() {
-            t.push_str(&cell(c, false, i));
+            t.push_str(&cell(width(i), 1, None, style, false, c));
         }
         t.push_str("</w:tr>");
     }
@@ -88,59 +265,182 @@ fn table(columns: &[String], rows: &[Vec<String>]) -> String {
     t
 }
 
-fn document(report: &Report) -> String {
+const HEADER_FILL: &str = "E6EFED";
+const BAR_FILL: &str = "1F3A5F";
+const BAND_FILL: &str = "EEF3F2";
+
+/// A number without a trailing ".0".
+fn num(v: f64) -> String {
+    if (v - v.round()).abs() < 1e-9 {
+        format!("{v:.0}")
+    } else {
+        format!("{v:.1}")
+    }
+}
+
+/// Bars of table cells on a fixed axis: a label and the score, then one cell per `step`,
+/// filled up to the score. The band within one standard deviation of the mean is tinted, and
+/// the header row names the axis in groups of one standard deviation.
+fn chart(c: &ScoreChart, l: &Layout) -> String {
+    let step = if c.step > 0.0 { c.step } else { 1.0 };
+    let span = (c.max - c.min).max(step);
+    // At most 60 cells: a chart wider than that is not a profile any more.
+    let cells = ((span / step).round() as usize).clamp(1, 60);
+    let label_w = l.width * 30 / 100;
+    let score_w = l.width * 8 / 100;
+    let cell_w = (l.width - label_w - score_w) / cells;
+    let mut grid = vec![label_w, score_w];
+    grid.extend(std::iter::repeat_n(cell_w, cells));
+    let width = label_w + score_w + cell_w * cells;
+    let start = |i: usize| c.min + step * i as f64;
+    let in_band = |i: usize| start(i) + step > c.mean - c.sd && start(i) < c.mean + c.sd;
+    let small = l.id("ChartText");
+    let text = l.id("TableText");
+
+    let mut t = table_start(width, false, &grid);
+    // Header: the axis in groups of one standard deviation ("85–99").
+    t.push_str("<w:tr><w:trPr><w:tblHeader/></w:trPr>");
+    t.push_str(&cell(label_w, 1, Some(HEADER_FILL), text, true, "מדד"));
+    t.push_str(&cell(score_w, 1, Some(HEADER_FILL), text, true, "ציון"));
+    let group = if c.sd > 0.0 {
+        ((c.sd / step).round() as usize).clamp(1, cells)
+    } else {
+        cells
+    };
+    let mut i = 0;
+    while i < cells {
+        let n = group.min(cells - i);
+        let last = start(i + n) - if step >= 1.0 { 1.0 } else { step / 10.0 };
+        let label = if n == 1 {
+            num(start(i))
+        } else {
+            format!("{}–{}", num(start(i)), num(last))
+        };
+        t.push_str(&cell(
+            cell_w * n,
+            n,
+            Some(HEADER_FILL),
+            small,
+            false,
+            &label,
+        ));
+        i += n;
+    }
+    t.push_str("</w:tr>");
+    for bar in &c.bars {
+        t.push_str(
+            "<w:tr><w:trPr><w:cantSplit/><w:trHeight w:val=\"340\" w:hRule=\"atLeast\"/></w:trPr>",
+        );
+        t.push_str(&cell(label_w, 1, None, text, false, &bar.label));
+        t.push_str(&cell(score_w, 1, None, text, true, &num(bar.value)));
+        let v = bar.value.clamp(c.min, c.max - step / 2.0);
+        for i in 0..cells {
+            let fill = if start(i) <= v {
+                Some(BAR_FILL)
+            } else if in_band(i) {
+                Some(BAND_FILL)
+            } else {
+                None
+            };
+            t.push_str(&cell(cell_w, 1, fill, small, false, ""));
+        }
+        t.push_str("</w:tr>");
+    }
+    t.push_str("</w:tbl>");
+    t
+}
+
+/// The body's paragraphs and tables, without the section properties.
+pub(crate) fn body(report: &Report, l: &Layout) -> String {
     let mut body = String::new();
-    body.push_str(&para("Title", &report.title, None));
+    let mut p = |key: &'static str, text: &str, label: Option<&str>| {
+        if !text.is_empty() || label.is_some() || key == "Signature" {
+            body.push_str(&para(l.id(key), text, label));
+        }
+    };
+    p("Title", &report.title, None);
     for line in &report.info {
-        body.push_str(&para("Info", &line.value, Some(&line.label)));
+        p("Info", &line.value, Some(&line.label));
     }
     for part in &report.parts {
-        body.push_str(&para("Heading1", &part.title, None));
+        p("Heading1", &part.title, None);
         for section in &part.sections {
-            body.push_str(&para("Heading2", &section.title, None));
+            p("Heading2", &section.title, None);
             for text in &section.paragraphs {
                 for piece in text.split('\n').filter(|t| !t.trim().is_empty()) {
-                    body.push_str(&para("BodyText", piece.trim(), None));
+                    p("BodyText", piece.trim(), None);
                 }
             }
         }
     }
     if !report.signature.is_empty() {
-        body.push_str(&para("Signature", "", None));
+        p("Signature", "", None);
         for line in &report.signature {
-            body.push_str(&para("Signature", line, None));
+            p("Signature", line, None);
         }
     }
     if !report.tables.is_empty() {
         body.push_str("<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>");
-        body.push_str(&para("Heading1", "נספח: טבלאות ציונים", None));
+        body.push_str(&para(l.id("Heading1"), "נספח: טבלאות ציונים", None));
         for t in &report.tables {
-            body.push_str(&para("Heading2", &t.title, None));
-            body.push_str(&table(&t.columns, &t.rows));
+            body.push_str(&para(l.id("Heading2"), &t.title, None));
+            body.push_str(&table(&t.columns, &t.rows, l));
             if !t.note.is_empty() {
-                body.push_str(&para("TableNote", &t.note, None));
+                body.push_str(&para(l.id("TableNote"), &t.note, None));
+            }
+            for c in &t.charts {
+                if c.bars.is_empty() {
+                    continue;
+                }
+                body.push_str(&para(l.id("Heading2"), &c.title, None));
+                body.push_str(&chart(c, l));
+                if !c.note.is_empty() {
+                    body.push_str(&para(l.id("TableNote"), &c.note, None));
+                }
             }
         }
     }
+    body
+}
+
+/// Page size and margins, with the header and footer of the plain document.
+const PLAIN_SECTION: &str = "<w:sectPr><w:headerReference w:type=\"default\" r:id=\"rIdHeader\"/>\
+     <w:footerReference w:type=\"default\" r:id=\"rIdFooter\"/>\
+     <w:pgSz w:w=\"11906\" w:h=\"16838\"/>\
+     <w:pgMar w:top=\"1418\" w:right=\"1418\" w:bottom=\"1418\" w:left=\"1418\" w:header=\"709\" w:footer=\"709\" w:gutter=\"0\"/>\
+     <w:bidi/></w:sectPr>";
+
+pub(crate) fn wrap_document(root_attrs: &str, body: &str) -> String {
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
-         <w:document {W_NS}><w:body>{body}\
-         <w:sectPr><w:headerReference w:type=\"default\" r:id=\"rIdHeader\"/>\
-         <w:footerReference w:type=\"default\" r:id=\"rIdFooter\"/>\
-         <w:pgSz w:w=\"11906\" w:h=\"16838\"/>\
-         <w:pgMar w:top=\"1418\" w:right=\"1418\" w:bottom=\"1418\" w:left=\"1418\" w:header=\"709\" w:footer=\"709\" w:gutter=\"0\"/>\
-         <w:bidi/></w:sectPr></w:body></w:document>"
+         <w:document {root_attrs}><w:body>{body}</w:body></w:document>"
     )
 }
 
-fn header(report: &Report) -> String {
+fn document(report: &Report) -> String {
+    let mut b = body(report, &Layout::plain());
+    b.push_str(PLAIN_SECTION);
+    wrap_document(W_NS, &b)
+}
+
+/// The confidentiality line, centered and gray, with direct formatting: it has to look the
+/// same inside a header of her template, whatever its styles are.
+pub(crate) fn confidentiality_para(text: &str) -> String {
+    format!(
+        "<w:p><w:pPr><w:jc w:val=\"center\"/><w:bidi/></w:pPr><w:r><w:rPr><w:rtl/><w:color w:val=\"7A7A7A\"/><w:sz w:val=\"18\"/><w:szCs w:val=\"18\"/></w:rPr>\
+         <w:t xml:space=\"preserve\">{}</w:t></w:r></w:p>",
+        esc(text)
+    )
+}
+
+pub(crate) fn header(report: &Report) -> String {
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><w:hdr {W_NS}>{}</w:hdr>",
-        para("Header", &report.confidentiality, None)
+        confidentiality_para(&report.confidentiality)
     )
 }
 
-fn footer() -> String {
+pub(crate) fn footer() -> String {
     let field = |code: &str| {
         format!(
             "<w:r><w:rPr><w:rtl/></w:rPr><w:fldChar w:fldCharType=\"begin\"/></w:r>\
@@ -151,11 +451,11 @@ fn footer() -> String {
         )
     };
     let text = |t: &str| {
-        format!("<w:r><w:rPr><w:rtl/></w:rPr><w:t xml:space=\"preserve\">{t}</w:t></w:r>")
+        format!("<w:r><w:rPr><w:rtl/><w:color w:val=\"7A7A7A\"/><w:sz w:val=\"18\"/><w:szCs w:val=\"18\"/></w:rPr><w:t xml:space=\"preserve\">{t}</w:t></w:r>")
     };
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><w:ftr {W_NS}>\
-         <w:p><w:pPr><w:pStyle w:val=\"Footer\"/><w:bidi/></w:pPr>{}{}{}{}</w:p></w:ftr>",
+         <w:p><w:pPr><w:jc w:val=\"center\"/><w:bidi/></w:pPr>{}{}{}{}</w:p></w:ftr>",
         text("עמוד "),
         field("PAGE"),
         text(" מתוך "),
@@ -164,51 +464,52 @@ fn footer() -> String {
 }
 
 fn styles(font: &str) -> String {
-    let f = esc(font);
-    let run = |size: u32, bold: bool, color: Option<&str>| {
-        let b = if bold { "<w:b/><w:bCs/>" } else { "" };
-        let c = color
-            .map(|c| format!("<w:color w:val=\"{c}\"/>"))
-            .unwrap_or_default();
-        format!("<w:rPr><w:rFonts w:ascii=\"{f}\" w:hAnsi=\"{f}\" w:cs=\"{f}\"/>{b}{c}<w:sz w:val=\"{size}\"/><w:szCs w:val=\"{size}\"/><w:lang w:val=\"he-IL\" w:bidi=\"he-IL\"/></w:rPr>")
-    };
-    let style = |id: &str, name: &str, ppr: &str, rpr: String| {
-        format!("<w:style w:type=\"paragraph\" w:styleId=\"{id}\"><w:name w:val=\"{name}\"/><w:basedOn w:val=\"Normal\"/><w:qFormat/><w:pPr><w:bidi/>{ppr}</w:pPr>{rpr}</w:style>")
-    };
-    format!(
+    let normal = run_props(24, false, None, Some(font));
+    let mut out = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><w:styles {W_NS}>\
-         <w:docDefaults><w:rPrDefault>{}</w:rPrDefault><w:pPrDefault><w:pPr><w:bidi/><w:spacing w:after=\"120\" w:line=\"300\" w:lineRule=\"auto\"/></w:pPr></w:pPrDefault></w:docDefaults>\
-         <w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/><w:qFormat/><w:pPr><w:bidi/></w:pPr>{}</w:style>\
-         {}{}{}{}{}{}{}{}{}{}</w:styles>",
-        run(24, false, None),
-        run(24, false, None),
-        style("Title", "Title", "<w:jc w:val=\"center\"/><w:spacing w:after=\"360\"/>", run(36, true, None)),
-        style("Info", "Report Info", "<w:spacing w:after=\"60\"/>", run(24, false, None)),
-        style("Heading1", "heading 1", "<w:keepNext/><w:spacing w:before=\"360\" w:after=\"120\"/><w:outlineLvl w:val=\"0\"/>", run(30, true, Some("1F3A5F"))),
-        style("Heading2", "heading 2", "<w:keepNext/><w:spacing w:before=\"240\" w:after=\"80\"/><w:outlineLvl w:val=\"1\"/>", run(26, true, None)),
-        style("BodyText", "Body Text", "<w:jc w:val=\"both\"/>", run(24, false, None)),
-        style("Signature", "Signature", "<w:keepNext/><w:spacing w:after=\"0\"/>", run(24, false, None)),
-        style("TableText", "Table Text", "<w:spacing w:after=\"0\"/>", run(22, false, None)),
-        style("TableNote", "Table Note", "<w:spacing w:before=\"60\" w:after=\"200\"/>", run(18, false, Some("5B6567"))),
-        style("Header", "header", "<w:jc w:val=\"center\"/>", run(18, false, Some("7A7A7A"))),
-        style("Footer", "footer", "<w:jc w:val=\"center\"/>", run(18, false, Some("7A7A7A"))),
-    )
+         <w:docDefaults><w:rPrDefault>{normal}</w:rPrDefault><w:pPrDefault><w:pPr><w:bidi/><w:spacing w:after=\"120\" w:line=\"300\" w:lineRule=\"auto\"/></w:pPr></w:pPrDefault></w:docDefaults>\
+         <w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/><w:qFormat/><w:pPr><w:bidi/></w:pPr>{normal}</w:style>"
+    );
+    for (id, name, ppr, size, bold, color) in STYLES {
+        out.push_str(&style_def(id, name, ppr, *size, *bold, *color, Some(font)));
+    }
+    out.push_str("</w:styles>");
+    out
 }
 
 const CONTENT_TYPES: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/><Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>"#;
 
-const ROOT_RELS: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>"#;
+pub(crate) const ROOT_RELS: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>"#;
 
 const DOC_RELS: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rIdSettings" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/><Relationship Id="rIdHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/><Relationship Id="rIdFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/></Relationships>"#;
 
 const SETTINGS: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:defaultTabStop w:val="720"/><w:characterSpacingControl w:val="doNotCompress"/><w:themeFontLang w:val="he-IL" w:bidi="he-IL"/><w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>"#;
 
 /// No author, no company, no dates: only a generic title.
-const CORE: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>דוח אבחון</dc:title></cp:coreProperties>"#;
+pub(crate) const CORE: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>דוח אבחון</dc:title></cp:coreProperties>"#;
 
-/// Build the DOCX package.
+/// Zip the parts in the order given, with a fixed timestamp: the file does not record when
+/// it was made.
+pub(crate) fn package(parts: &[(String, Vec<u8>)]) -> Result<Vec<u8>, ExportError> {
+    let err = |e: &dyn std::fmt::Display| ExportError::Package(e.to_string());
+    let mut buf = Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut buf);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated)
+            .last_modified_time(zip::DateTime::default());
+        for (name, content) in parts {
+            zip.start_file(name.as_str(), opts).map_err(|e| err(&e))?;
+            zip.write_all(content).map_err(|e| err(&e))?;
+        }
+        zip.finish().map_err(|e| err(&e))?;
+    }
+    Ok(buf.into_inner())
+}
+
+/// Build the DOCX package: her template when one is given (see `template`), else the plain one.
 pub fn render(report: &Report) -> Result<Vec<u8>, ExportError> {
-    let parts: [(&str, String); 8] = [
+    let parts: Vec<(String, Vec<u8>)> = [
         ("[Content_Types].xml", CONTENT_TYPES.to_owned()),
         ("_rels/.rels", ROOT_RELS.to_owned()),
         ("word/_rels/document.xml.rels", DOC_RELS.to_owned()),
@@ -217,25 +518,12 @@ pub fn render(report: &Report) -> Result<Vec<u8>, ExportError> {
         ("word/settings.xml", SETTINGS.to_owned()),
         ("word/header1.xml", header(report)),
         ("word/footer1.xml", footer()),
-    ];
-    let err = |e: &dyn std::fmt::Display| ExportError::Package(e.to_string());
-    let mut buf = Cursor::new(Vec::new());
-    {
-        let mut zip = zip::ZipWriter::new(&mut buf);
-        // Fixed timestamp: the file does not record when it was made.
-        let opts = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated)
-            .last_modified_time(zip::DateTime::default());
-        for (name, content) in parts
-            .iter()
-            .chain(std::iter::once(&("docProps/core.xml", CORE.to_owned())))
-        {
-            zip.start_file(*name, opts).map_err(|e| err(&e))?;
-            zip.write_all(content.as_bytes()).map_err(|e| err(&e))?;
-        }
-        zip.finish().map_err(|e| err(&e))?;
-    }
-    Ok(buf.into_inner())
+        ("docProps/core.xml", CORE.to_owned()),
+    ]
+    .into_iter()
+    .map(|(n, c)| (n.to_owned(), c.into_bytes()))
+    .collect();
+    package(&parts)
 }
 
 #[cfg(test)]
