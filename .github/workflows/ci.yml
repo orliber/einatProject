@@ -70,6 +70,21 @@ jobs:
       - run: cargo test -p dv-vault --features fips
       - run: cargo test -p dv-export --features fips
 
+  windows:
+    name: Windows – the vault, documents and updates, as released
+    # The clinician runs Windows; the installer is built there, but nothing ran there before a
+    # release. Release profile, so optimizations and overflow checks are what she runs.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # Before this job, every vault test died here with STATUS_STACK_OVERFLOW (D-038).
+      - run: cargo test --release -p dv-vault -p dv-egress -p dv-ingest
+      - name: First run (create, close, open again; the real Argon2 cost)
+        run: cargo test --release -p dv-core --test first_run -- --ignored
+
   frontend:
     name: UI – typecheck, lint, tests, build, audit
     runs-on: ubuntu-24.04

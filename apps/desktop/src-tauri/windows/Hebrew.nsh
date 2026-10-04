@@ -26,4 +26,5 @@ LangString webview2DownloadSuccess ${LANG_HEBREW} "מאתחל WebView2 הורד 
 LangString webview2Downloading ${LANG_HEBREW} "מוריד את רכיב התצוגה (WebView2)..."
 LangString webview2InstallError ${LANG_HEBREW} "שגיאה: התקנת WebView2 נכשלה עם קוד שגיאה $1"
 LangString webview2InstallSuccess ${LANG_HEBREW} "WebView2 הותקן בהצלחה"
-LangString deleteAppData ${LANG_HEBREW} "מחק את נתוני היישום"
+; The app data folder holds the vault itself: say so, so it is never ticked to "clean up".
+LangString deleteAppData ${LANG_HEBREW} "למחוק גם את הכספת ואת כל התיקים (בלי אפשרות לשחזר)"
