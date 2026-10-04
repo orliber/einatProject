@@ -24,6 +24,8 @@ use windows_sys::Win32::Foundation::{
     WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
+#[cfg(test)]
+use windows_sys::Win32::Security::Isolation::DeleteAppContainerProfile;
 use windows_sys::Win32::Security::Isolation::{
     CreateAppContainerProfile, DeriveAppContainerSidFromAppContainerName,
 };
@@ -100,7 +102,31 @@ impl Drop for Sid {
     }
 }
 
+/// Creating the profile is not safe to race: while one caller is still creating it, another
+/// gets an error other than "already exists" (`ERROR_BAD_ENVIRONMENT` was seen on Windows CI,
+/// with the document-reader tests starting workers in parallel on a fresh machine). So one
+/// caller at a time in this process, and a few short retries for another process doing the same.
+static CREATING: Mutex<()> = Mutex::new(());
+const CREATE_ATTEMPTS: u32 = 4;
+
 fn container_sid() -> io::Result<Sid> {
+    let _one_at_a_time = CREATING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut attempt = 1;
+    loop {
+        match create_or_derive() {
+            Ok(sid) => return Ok(sid),
+            Err(e) if attempt >= CREATE_ATTEMPTS => return Err(e),
+            Err(_) => {
+                std::thread::sleep(Duration::from_millis(50 * u64::from(attempt)));
+                attempt += 1;
+            }
+        }
+    }
+}
+
+fn create_or_derive() -> io::Result<Sid> {
     let name = wide(OsStr::new(CONTAINER));
     let mut sid: PSID = null_mut();
     // SAFETY: `name` is NUL-terminated and outlives the call; no capabilities are passed (null,
@@ -493,5 +519,27 @@ impl Contained {
         unsafe {
             TerminateJobObject(self.job.as_raw_handle(), 1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The race behind the Windows CI failure: a fresh machine (no profile yet) and several
+    /// workers starting at once. Every one of them must get the container.
+    #[test]
+    fn the_container_is_created_once_when_many_start_together() {
+        let name = wide(OsStr::new(CONTAINER));
+        // SAFETY: `name` is NUL-terminated and outlives the call. A missing profile is fine.
+        let _ = unsafe { DeleteAppContainerProfile(name.as_ptr()) };
+        let threads: Vec<_> = (0..8)
+            .map(|_| std::thread::spawn(|| container_sid().and_then(|sid| sid_string(&sid))))
+            .collect();
+        let sids: Vec<String> = threads
+            .into_iter()
+            .map(|t| t.join().expect("thread").expect("container"))
+            .collect();
+        assert!(sids.windows(2).all(|w| w[0] == w[1]), "{sids:?}");
     }
 }

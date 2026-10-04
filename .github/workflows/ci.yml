@@ -81,7 +81,7 @@ jobs:
           persist-credentials: false
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # Before this job, every vault test died here with STATUS_STACK_OVERFLOW (D-038).
-      - run: cargo test --release -p dv-vault -p dv-egress -p dv-ingest
+      - run: cargo test --release -p dv-vault -p dv-egress -p dv-ingest -p dv-sandbox
       - name: First run (create, close, open again; the real Argon2 cost)
         run: cargo test --release -p dv-core --test first_run -- --ignored
 
