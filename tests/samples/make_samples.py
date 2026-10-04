@@ -147,6 +147,10 @@ def to_pdf(odt_path, pdf_path):
                         "--convert-to", "pdf", "--outdir", tmp, odt_path],
                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         made = os.path.join(tmp, os.path.splitext(os.path.basename(odt_path))[0] + ".pdf")
+        # soffice can exit 0 without writing anything (a broken or sandboxed install):
+        # treat that like LibreOffice missing rather than failing the whole run.
+        if not os.path.exists(made):
+            return False
         shutil.move(made, pdf_path)
     return True
 
