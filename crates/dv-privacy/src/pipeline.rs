@@ -33,6 +33,9 @@ pub struct PrivacyContext<'a> {
     /// Ordinary words confirmed, for this case, to be a prefix plus a declared name
     /// ("שאלון" = ש + אלון); the name inside them is hidden.
     pub confirmed_names: &'a dyn Fn(&str) -> bool,
+    /// Names found in the psychologist's past reports ("הדוחות שלי"), known only by keyed
+    /// hash of the normalized word: hidden wherever they appear, and refused by the gate.
+    pub past_names: &'a dyn Fn(&str) -> bool,
     pub today: Ymd,
 }
 
@@ -272,8 +275,15 @@ fn found_word(identity: &Identity, phrase: &[String]) -> bool {
 }
 
 /// A name that is also an everyday word on its own ("אלה", "חן", "מימון", "אדם").
-fn everyday_name(w: &str) -> bool {
+#[must_use]
+pub fn everyday_name(w: &str) -> bool {
     LEXICON.word_names.contains(w) || LEXICON.common_words.contains(w) || word_bucket(w) >= EVERYDAY
+}
+
+/// A word that was a name in one of her past reports. Everyday words never count: they are not
+/// kept, and a lexicon change must not turn "בגיל" into a name.
+pub(crate) fn past_name(ctx: &PrivacyContext<'_>, h: &str) -> bool {
+    !everyday_name(h) && !(ctx.allowlisted)(h) && (ctx.past_names)(h)
 }
 
 /// Index of every declared name. Current-case identities are inserted first, so a name that
@@ -1310,6 +1320,25 @@ fn find_suspects(
         // "מלאה" is מ + לאה only on paper: an everyday word is read as a word, unless the
         // prefixed form is mostly the name ("לדני" is far rarer than "דני").
         let as_word = |p: usize, h: &str| p > 0 && reads_as_word(&tok.norm, h);
+        // A name from one of her past reports, in any context (D-042, stage 6).
+        if let Some((p, _)) = splits
+            .iter()
+            .find(|(p, h)| past_name(ctx, h) && !as_word(*p, h))
+        {
+            let start = span_from(*p);
+            out.push(SuspectSpan {
+                start,
+                end: tok.end,
+                suspect: Suspect {
+                    token: text[start..tok.end].to_owned(),
+                    kind: SuspectKind::UnknownName,
+                    message: "שם מדוח ישן".to_owned(),
+                    suggested_role: Role::Other,
+                },
+                known: None,
+            });
+            continue;
+        }
         let plain = splits
             .iter()
             .find(|(p, h)| lex.first_names.contains(h) && !(ctx.allowlisted)(h) && !as_word(*p, h));

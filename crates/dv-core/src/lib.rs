@@ -397,6 +397,8 @@ struct PrivacyData {
     practitioner: Vec<String>,
     allow: HashSet<String>,
     is_name: HashSet<String>,
+    /// Keyed hashes of the names in her past reports (`style`).
+    past: HashSet<String>,
 }
 
 /// Everything the review screen shows, accumulated over the outgoing texts.
@@ -1275,6 +1277,7 @@ impl Core {
             practitioner: v.practitioner()?.names,
             allow: v.not_a_name_hmacs(case_id)?.into_iter().collect(),
             is_name: v.is_name_hmacs(case_id)?.into_iter().collect(),
+            past: style::past_name_hmacs(v)?,
         })
     }
 
@@ -1288,12 +1291,14 @@ impl Core {
         let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
         let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
         let is_name = |t: &str| data.is_name.contains(&v.token_hmac(t));
+        let past = |t: &str| !data.past.is_empty() && data.past.contains(&v.token_hmac(t));
         let ctx = PrivacyContext {
             case_id: &data.case_id,
             identities: &data.identities,
             practitioner: &data.practitioner,
             allowlisted: &allow,
             confirmed_names: &is_name,
+            past_names: &past,
             today: today(),
         };
         filter(text, &ctx).map_err(|e| CoreError::Internal(e.to_string()))
@@ -1625,12 +1630,14 @@ impl Core {
         let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
         let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
         let is_name = |t: &str| data.is_name.contains(&v.token_hmac(t));
+        let past = |t: &str| !data.past.is_empty() && data.past.contains(&v.token_hmac(t));
         let ctx = PrivacyContext {
             case_id: &data.case_id,
             identities: &data.identities,
             practitioner: &data.practitioner,
             allowlisted: &allow,
             confirmed_names: &is_name,
+            past_names: &past,
             today: today(),
         };
         let mut case_tags: HashSet<String> = data
@@ -1727,12 +1734,14 @@ impl Core {
             }
             let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
             let is_name = |t: &str| data.is_name.contains(&v.token_hmac(t));
+            let past = |t: &str| !data.past.is_empty() && data.past.contains(&v.token_hmac(t));
             let ctx = PrivacyContext {
                 case_id: &data.case_id,
                 identities: &data.identities,
                 practitioner: &data.practitioner,
                 allowlisted: &allow,
                 confirmed_names: &is_name,
+                past_names: &past,
                 today: today(),
             };
             let run = |t: &str| filter(t, &ctx).map_err(|e| CoreError::Internal(e.to_string()));
@@ -2203,12 +2212,14 @@ impl Core {
             }
             let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
             let is_name = |t: &str| data.is_name.contains(&v.token_hmac(t));
+            let past = |t: &str| !data.past.is_empty() && data.past.contains(&v.token_hmac(t));
             let ctx = PrivacyContext {
                 case_id: &data.case_id,
                 identities: &data.identities,
                 practitioner: &data.practitioner,
                 allowlisted: &allow,
                 confirmed_names: &is_name,
+                past_names: &past,
                 today: today(),
             };
             let msg = filter(message, &ctx).map_err(|e| CoreError::Internal(e.to_string()))?;

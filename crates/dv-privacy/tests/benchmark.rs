@@ -609,6 +609,7 @@ fn the_filter_meets_the_benchmark() {
         practitioner: &practitioner,
         allowlisted: &allow,
         confirmed_names: &confirmed,
+        past_names: &|_: &str| false,
         today: (2026, 9, 30),
     };
 

@@ -1393,6 +1393,7 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
             practitioner: &[],
             allowlisted: &|_| false,
             confirmed_names: &|_| false,
+            past_names: &|_| false,
             today: (2026, 9, 28),
         };
         let req = GateRequest {
@@ -1458,6 +1459,7 @@ fn score_tables_and_section_titles_are_never_rewritten_silently() {
                 practitioner: &[],
                 allowlisted: &allow,
                 confirmed_names: &|_| false,
+                past_names: &|_| false,
                 today: (2026, 9, 28),
             };
             dv_privacy::filter(text, &ctx).unwrap()
