@@ -16,8 +16,9 @@ use dv_core::{
     ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView,
     ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
     ExportCheck, ImportPreview, NameMatch, Prepared, Readiness, ReportSettings, RetentionItem,
-    SectionResult, SortResult, StagedBackup, StyleAnalysisResult, StyleImportPreview, StyleOverview,
-    StyleProfileView, StyleSourceView, SuspectDecision, UiError, UnsavedEdit, UsageSummary,
+    SectionResult, SortResult, StagedBackup, StyleAnalysisResult, StyleImportPreview,
+    StyleOverview, StyleProfileView, StyleSourceView, SuspectDecision, UiError, UnsavedEdit,
+    UsageSummary,
 };
 use dv_domain::{CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind};
 use tauri::Manager;

@@ -42,7 +42,17 @@ pub(crate) fn para(style: &str, text: &str, bold_prefix: Option<&str>) -> String
 
 /// The paragraph styles the body uses: (key, Word's style name, paragraph properties, size in
 /// half-points, bold, color). With her template, a style of hers with the same name wins.
-pub(crate) const STYLES: &[(&str, &str, &str, u32, bool, Option<&str>)] = &[
+/// One row of [`STYLES`].
+pub(crate) type StyleRow = (
+    &'static str,
+    &'static str,
+    &'static str,
+    u32,
+    bool,
+    Option<&'static str>,
+);
+
+pub(crate) const STYLES: &[StyleRow] = &[
     (
         "Title",
         "Title",
