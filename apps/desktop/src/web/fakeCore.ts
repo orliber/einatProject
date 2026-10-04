@@ -517,7 +517,7 @@ export class FakeCore {
     } else if (ext === "pdf" || ext === "odt") {
       fail("preview", "בהדמיה בדפדפן אפשר לייבא Word או טקסט. קובצי PDF ו-ODT נקראים בתוכנה המותקנת, בתהליך מבודד.");
     } else {
-      fail("unsupported", "אפשר לייבא קובצי Word (docx), ODT, PDF או טקסט.");
+      fail("unsupported", "בתצוגה בדפדפן אפשר לייבא רק Word (docx) או טקסט. בתוכנה עצמה: גם DOC, ODT, RTF, PDF ותמונה של דף.");
     }
     if (!body.trim()) fail("empty", "לא נמצא טקסט במסמך.");
     // Names in the file's properties and margins are kept with the case without asking.

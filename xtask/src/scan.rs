@@ -67,6 +67,10 @@ const FORBIDDEN_EXTENSIONS: &[&str] = &[
     "jpg",
     "jpeg",
     "heic",
+    // Photos and scans of a page are importable (OCR), so they may carry patient data too.
+    "png",
+    "tif",
+    "tiff",
     "mp3",
     "m4a",
     "wav",
@@ -77,6 +81,11 @@ const FORBIDDEN_EXTENSIONS: &[&str] = &[
 fn extension_allowed(path: &str, ext: &str) -> bool {
     (ext == "docx" && path.starts_with("templates/"))
         || (ext == "csv" && path.starts_with("knowledge/"))
+        || (ext == "png"
+            && (path.starts_with("apps/desktop/src-tauri/icons/")
+                || path.starts_with("docs/design/")))
+        // Scans of an invented letter for the OCR tests (D-048).
+        || (matches!(ext, "png" | "tif") && path.starts_with("crates/dv-ingest/tests/fixtures/"))
 }
 
 /// Generated or vendored files that are scanned for size only.

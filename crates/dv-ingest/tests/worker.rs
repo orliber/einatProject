@@ -6,7 +6,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use dv_ingest::worker::{self, WORKER_ARG};
-use dv_ingest::{Format, IngestError};
+use dv_ingest::{Format, IngestError, Outcome};
 
 fn exe() -> &'static Path {
     Path::new(env!("CARGO_BIN_EXE_dv-ingest-worker"))
@@ -21,6 +21,9 @@ fn text_round_trip() {
         worker::DEFAULT_TIMEOUT,
     )
     .unwrap();
+    let Outcome::Text(out) = out else {
+        panic!("text expected")
+    };
     assert_eq!(out.format, Format::Text);
     assert_eq!(out.body, "תצפית בגן: הילד משחק לבד.");
 }

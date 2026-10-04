@@ -936,13 +936,7 @@ impl Core {
                 "אפשר לשמור עד {MAX_SOURCES} דוחות. כדאי למחוק דוח ישן לפני שמוסיפים חדש."
             )));
         }
-        let extracted = match &self.ingest_exe {
-            Some(exe) => {
-                dv_ingest::worker::run(exe, file_name, bytes, dv_ingest::worker::DEFAULT_TIMEOUT)
-            }
-            None => dv_ingest::extract(bytes, file_name),
-        }
-        .map_err(|e| CoreError::Refused(e.message_he()))?;
+        let extracted = self.read_document(file_name, bytes)?;
         let structure =
             ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
         let raw_parts = split_parts(&extracted.body, &structure);
@@ -997,13 +991,7 @@ impl Core {
                     .is_some_and(|k| DEFAULT_INCLUDED.contains(&k)),
             })
             .collect();
-        let format = match extracted.format {
-            dv_ingest::Format::Docx => "docx",
-            dv_ingest::Format::Odt => "odt",
-            dv_ingest::Format::Pdf => "pdf",
-            dv_ingest::Format::Text => "text",
-        }
-        .to_owned();
+        let format = extracted.format.name().to_owned();
         let title: String = title.chars().take(TITLE_CHARS).collect();
         self.style_staged.clear();
         self.style_staged.insert(

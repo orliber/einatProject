@@ -186,7 +186,7 @@ export function StyleScreen() {
           </div>
         </header>
 
-        <input ref={fileInput} type="file" hidden accept=".docx,.odt,.pdf,.txt"
+        <input ref={fileInput} type="file" hidden accept=".docx,.doc,.odt,.rtf,.pdf,.txt"
           onChange={(e) => { const f = e.target.files?.[0]; if (f) void pick(f); }} />
         {reading && <p className="muted"><Spinner /> קורא את הדוח ומסתיר פרטים מזהים…</p>}
         {sending && (

@@ -7,7 +7,7 @@ import { AutoHiddenCard } from "./AutoHiddenCard";
 import { Dialog, ErrorLine, Segments } from "./ui";
 import "./ImportDialog.css";
 
-const FORMAT: Record<string, string> = { docx: "Word", odt: "ODT", pdf: "PDF", text: "טקסט" };
+const FORMAT: Record<string, string> = { docx: "Word", doc: "Word ישן", odt: "ODT", rtf: "RTF", pdf: "PDF", text: "טקסט", image: "תמונה" };
 
 /** What was read from a document, before anything is stored. Nothing is sent from here. */
 export function ImportDialog(props: {
