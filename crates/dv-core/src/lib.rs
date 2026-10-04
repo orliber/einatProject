@@ -2189,6 +2189,7 @@ impl Core {
                     .map(|r| vec![r.measure, r.score, r.percentile, r.range])
                     .collect(),
                 note,
+                charts: Vec::new(),
             });
         }
         let score_tables = u32::try_from(tables.len()).unwrap_or(u32::MAX);
