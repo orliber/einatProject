@@ -50,7 +50,8 @@ struct Doc {
 
 fn parse(path: &Path) -> Doc {
     let file = path.file_name().unwrap().to_string_lossy().into_owned();
-    let raw = fs::read_to_string(path).unwrap();
+    // A Windows checkout may still turn LF into CRLF (an old clone, autocrlf).
+    let raw = fs::read_to_string(path).unwrap().replace("\r\n", "\n");
     let (head, body) = raw
         .split_once("\n---\n")
         .unwrap_or_else(|| panic!("{file}: missing --- separator"));
