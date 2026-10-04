@@ -5,8 +5,9 @@
 | # | מה | למי | מי שולח | קובץ |
 |---|---|---|---|---|
 | 1 | בקשת ZDR (אי-שמירת מידע) | Anthropic, צוות המכירות | עינת, מהחשבון הארגוני שלה. אור מכין. | [`ZDR_REQUEST.md`](ZDR_REQUEST.md) |
+| 1א | בקשת ZDR מספקים אחרים, רק אם ישמשו לתיק אמיתי | OpenAI, Google, Mistral | עינת | [`ZDR_OTHER_PROVIDERS.md`](ZDR_OTHER_PROVIDERS.md) |
 | 2 | בדיקה משפטית | עו"ד להגנת הפרטיות ורגולציה רפואית | עינת ואור | [`LEGAL_QUESTIONS.md`](LEGAL_QUESTIONS.md) |
-| 3 | טופס הסכמת הורים | קודם העו"ד, ואחר כך ההורים | עינת | [`CONSENT_DRAFT.md`](CONSENT_DRAFT.md) |
+| 3 | טופס הסכמת הורים (v2: ספק בשמו) | קודם העו"ד, ואחר כך ההורים | עינת | [`CONSENT_DRAFT.md`](CONSENT_DRAFT.md) |
 | 4 | מבדק חדירה חיצוני | חברת בדיקות | אור | [`PENTEST_SCOPE.md`](PENTEST_SCOPE.md) |
 | + | מסמכי עמידה: הגדרות מאגר, נוהל אבטחה, טיפול באירוע, DPIA | העו"ד, יחד עם השאלות | עינת ואור | [`../compliance/`](../compliance/README.md) |
 
