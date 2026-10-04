@@ -20,7 +20,9 @@ use dv_core::{
     StyleOverview, StyleProfileView, StyleSourceView, SuspectDecision, UiError, UnsavedEdit,
     UsageSummary,
 };
-use dv_domain::{CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind};
+use dv_domain::{
+    CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind, Role,
+};
 use tauri::Manager;
 
 struct AppState {
@@ -453,6 +455,31 @@ async fn decide_suspect(
         c.decide_suspect(&case_id, &token, decision)
     })
     .await
+}
+
+/// "להחזיר" on the summary card: keep what the filter hid as written, for this case.
+#[tauri::command]
+async fn restore_auto_hidden(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    token: String,
+    tag: String,
+) -> Res<()> {
+    with_core(&state, move |c| {
+        c.restore_auto_hidden(&case_id, &token, &tag)
+    })
+    .await
+}
+
+/// The card's role menu for a name the filter kept.
+#[tauri::command]
+async fn change_role(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    tag: String,
+    role: Role,
+) -> Res<Vec<Identity>> {
+    with_core(&state, move |c| c.change_role(&case_id, &tag, role)).await
 }
 
 // ------------------------------------------------------------------ drafting
@@ -1313,6 +1340,8 @@ fn main() {
             import_document,
             preview_filter,
             decide_suspect,
+            restore_auto_hidden,
+            change_role,
             prepare_section,
             prepare_full_draft,
             send_section,

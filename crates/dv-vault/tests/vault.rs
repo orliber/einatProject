@@ -4,7 +4,10 @@
 
 use std::fs;
 
-use dv_domain::{Author, CaseMeta, ChatRole, DraftStatus, IdentityInput, InputKind, Role};
+use dv_domain::{
+    Author, CaseMeta, ChatRole, DraftStatus, FoundName, IdentityInput, IdentitySource, InputKind,
+    Role,
+};
 use dv_vault::{Argon2Params, AuditEvent, Secret, Vault, VaultError};
 
 const PASSWORD: &str = "כלב ירוק רץ מהר בגינה";
@@ -168,6 +171,68 @@ fn tags_are_stable_and_identities_are_per_case() {
     let other = vault.create_case(&CaseMeta::default()).unwrap();
     assert!(vault.identities(&other).unwrap().is_empty());
     assert_eq!(vault.all_identities().unwrap().len(), 3);
+}
+
+/// A name the filter hid on its own becomes an identity of the case with its source and
+/// reason, survives a relock, keeps them through an edit of the list, and can be removed.
+#[test]
+fn found_names_are_kept_with_their_source() {
+    let (dir, mut vault, _) = new_vault();
+    let case = noam(&mut vault);
+    let found = |value: &str, role, source| FoundName {
+        value: value.into(),
+        role,
+        source,
+        reason: "אחרי 'הגננת'".into(),
+    };
+    let added = vault
+        .add_found_names(
+            &case,
+            &[
+                found("אסתי", Role::Teacher, IdentitySource::Auto),
+                found("נועם", Role::Other, IdentitySource::Auto),
+                found("רקס", Role::Other, IdentitySource::Metadata),
+                found("אסתי", Role::Other, IdentitySource::Auto),
+            ],
+        )
+        .unwrap();
+    // "נועם" is already the child; the second "אסתי" is the same name.
+    assert_eq!(added.len(), 2);
+    assert_eq!(added[0].tag, "[גננת_2]");
+    assert_eq!(added[1].tag, "[אדם_1]");
+    vault.lock().unwrap();
+
+    let mut vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
+    let ids = vault.identities(&case).unwrap();
+    assert_eq!(ids.len(), 4);
+    assert_eq!(ids[0].source, IdentitySource::Manual);
+    assert_eq!(ids[2].source, IdentitySource::Auto);
+    assert_eq!(ids[2].reason, "אחרי 'הגננת'");
+    assert_eq!(ids[3].source, IdentitySource::Metadata);
+
+    // Saving the list keeps every source, also with a changed role (a new tag).
+    let mut edit: Vec<IdentityInput> = ids
+        .iter()
+        .map(|i| IdentityInput {
+            id: Some(i.id.clone()),
+            role: i.role,
+            value: i.value.clone(),
+            aliases: i.aliases.clone(),
+        })
+        .collect();
+    edit[3].role = Role::Relative;
+    let after = vault.set_identities(&case, &edit).unwrap();
+    assert_eq!(after[2].source, IdentitySource::Auto);
+    let relative = after.iter().find(|i| i.role == Role::Relative).unwrap();
+    assert_eq!(relative.source, IdentitySource::Metadata);
+    assert_eq!(relative.tag, "[קרוב_משפחה_1]");
+
+    vault.remove_identity(&case, &after[2].id).unwrap();
+    assert!(!vault
+        .identities(&case)
+        .unwrap()
+        .iter()
+        .any(|i| i.value == "אסתי"));
 }
 
 #[test]

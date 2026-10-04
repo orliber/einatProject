@@ -2,7 +2,7 @@
 
 use dv_ai::ProposedParagraph;
 use dv_domain::{CaseInput, CaseMeta, DraftStatus, Identity, InputKind, Role};
-use dv_privacy::{BlockReason, Checks, Segment, Suspect};
+use dv_privacy::{AutoHidden, BlockReason, Checks, Segment, Suspect};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -168,7 +168,10 @@ pub struct Prepared {
     /// Bound to the approval; `send` accepts only this exact payload.
     pub approval_id: Option<String>,
     pub parts: Vec<ReviewPart>,
+    /// Always empty since the filter hides on its own (kept for older screens).
     pub suspects: Vec<Suspect>,
+    /// What the filter hid on its own, for the summary card ("להחזיר" on each).
+    pub auto_hidden: Vec<AutoHidden>,
     pub hidden: Vec<String>,
     pub checks: Checks,
     pub blocked: Vec<BlockReason>,
@@ -270,10 +273,14 @@ pub struct ImportPreview {
     pub body: String,
     /// The body with what the filter would hide marked.
     pub preview: Vec<Segment>,
+    /// Always empty since the filter hides on its own (kept for older screens).
     pub suspects: Vec<Suspect>,
+    /// What the filter hid on its own, names from the file's properties and margins included.
+    pub auto_hidden: Vec<AutoHidden>,
     pub hidden: Vec<String>,
     /// Lines that were not imported (headers, footers, page numbers).
     pub left_out: Vec<String>,
+    /// Always empty: names in the margins and properties are hidden without asking.
     pub name_suggestions: Vec<NameSuggestion>,
     pub warnings: Vec<String>,
 }

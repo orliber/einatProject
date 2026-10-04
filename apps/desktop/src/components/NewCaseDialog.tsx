@@ -14,6 +14,8 @@ export interface PersonRow {
   role: Role;
   value: string;
   aliases: string;
+  /** For a name the filter kept on its own: "נוסף אוטומטית" and why. */
+  note?: string;
 }
 
 export function toIdentityInputs(rows: PersonRow[]): IdentityInput[] {
@@ -37,6 +39,7 @@ export function PeopleEditor({ rows, onChange }: { rows: PersonRow[]; onChange: 
       </div>
       {rows.map((r, i) => (
         <div key={i} className="person-row">
+          {r.note && <span className="person-note small muted"><span className="chip chip-sand">נוסף אוטומטית</span> {r.note}</span>}
           <label className="visually-hidden" htmlFor={`role-${i}`}>תפקיד</label>
           <select id={`role-${i}`} className="select" value={r.role} onChange={(e) => set(i, { role: e.target.value as Role })}
             disabled={r.role === "child"}>

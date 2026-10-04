@@ -140,7 +140,7 @@ export function SettingsScreen() {
           <label className="row">
             <input type="checkbox" checked={status.review_only_suspect} disabled={!status.review_choice_available}
               onChange={(e) => void run(() => ipc.setReviewOnlySuspect(e.target.checked), "ההגדרה עודכנה.")} />
-            <span>להציג את מסך "מה יוצא מהמחשב" רק כשיש חשד</span>
+            <span>להציג את מסך "מה יוצא מהמחשב" רק כשמשהו הוסתר אוטומטית</span>
           </label>
           {!status.review_choice_available && <span className="hint">בשבועיים הראשונים המסך מוצג לפני כל שליחה, כדי להכיר את הסינון.</span>}
           {SCREEN_PROTECTION_SETTING && (

@@ -19,7 +19,9 @@ use std::path::Path;
 use dv_ai::{RawStyleItem, StyleExcerpt, StyleItem, StyleKind, StyleOrigin, StyleProfile};
 use dv_domain::{Author, DraftParagraph, Identity, ReportStructure, Role};
 use dv_privacy::text::normalize;
-use dv_privacy::{clear, filter, FilterOutcome, GateRequest, Mark, PrivacyContext, SuspectKind};
+use dv_privacy::{
+    clear, filter, AutoHidden, AutoKind, FilterOutcome, GateRequest, Mark, PrivacyContext,
+};
 use dv_vault::{AuditEvent, Vault};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -391,18 +393,47 @@ fn style_tags() -> HashSet<String> {
     Role::ALL.iter().map(|r| role_tag(*r)).collect()
 }
 
-/// The filter's output with every suspect hidden, every tag reduced to its role and every
-/// relative date `[תאריך]`. A suspect that is `child` (normalized) is `[ילד]`; any other name is
-/// `[אדם]` (the suggested "another child" reads wrong in a report about one child).
+/// The filter's output with every tag reduced to its role and every relative date `[תאריך]`.
+/// A name the filter found that is `child` (normalized) is `[ילד]`; another child is `[אדם]`.
 /// Returns the text and how many spans were hidden.
 fn rebuild(out: &FilterOutcome, child: Option<&str>) -> (String, u32) {
+    // A name the filter found on its own: which words it was, by its tag.
+    let found = |tag: &str| -> Vec<&AutoHidden> {
+        out.auto_hidden
+            .iter()
+            .filter(|a| a.tag == tag && matches!(a.kind, AutoKind::Name | AutoKind::OtherCase))
+            .collect()
+    };
     let mut text = String::with_capacity(out.tagged.len());
     let mut hidden = 0;
     for seg in &out.tagged_segments {
         match seg.mark {
             None | Some(Mark::Replaced) => text.push_str(&seg.text),
             Some(Mark::Tag) => {
-                text.push_str(&role_only(&seg.text));
+                let names = found(&seg.text);
+                let role = if names.is_empty() {
+                    None
+                } else if names
+                    .iter()
+                    .any(|a| child.is_some_and(|c| normalize(&a.token) == c))
+                {
+                    Some(Role::Child)
+                } else {
+                    // "Another child" reads wrong in a report about one child.
+                    Some(match names[0].role {
+                        Role::OtherChild | Role::Child => Role::Other,
+                        r => r,
+                    })
+                };
+                match role {
+                    Some(r) => text.push_str(&role_tag(r)),
+                    None => text.push_str(&role_only(&seg.text)),
+                }
+                hidden += 1;
+            }
+            // A job, generalized ("עובדת בתחום החינוך"): it stays as it is.
+            Some(Mark::Relative) if seg.label.as_deref() == Some("מקצוע") => {
+                text.push_str(&seg.text);
                 hidden += 1;
             }
             // A date, or a name left out (a kindergarten's: empty text).
@@ -413,20 +444,7 @@ fn rebuild(out: &FilterOutcome, child: Option<&str>) -> (String, u32) {
                 hidden += 1;
             }
             Some(Mark::Suspect) => {
-                let role = if child.is_some_and(|c| normalize(&seg.text) == c) {
-                    Role::Child
-                } else {
-                    match out
-                        .suspects
-                        .iter()
-                        .find(|s| s.token == seg.text)
-                        .map(|s| s.suggested_role)
-                    {
-                        Some(Role::OtherChild | Role::Child) | None => Role::Other,
-                        Some(r) => r,
-                    }
-                };
-                text.push_str(&role_tag(role));
+                text.push_str(&role_tag(Role::Other));
                 hidden += 1;
             }
         }
@@ -483,21 +501,16 @@ fn main_child(text: &str, ctx: &PrivacyContext<'_>) -> Result<Option<String>, Co
     for seg in out
         .tagged_segments
         .iter()
-        .filter(|s| s.mark == Some(Mark::Suspect))
+        .filter(|s| s.mark == Some(Mark::Tag))
     {
-        let named = out.suspects.iter().any(|s| {
-            s.token == seg.text
-                && matches!(
-                    s.kind,
-                    SuspectKind::UnknownName
-                        | SuspectKind::LatinName
-                        | SuspectKind::SimilarToDeclared
-                )
-        });
-        if !named {
+        let Some(name) = out
+            .auto_hidden
+            .iter()
+            .find(|a| a.tag == seg.text && matches!(a.kind, AutoKind::Name | AutoKind::OtherCase))
+        else {
             continue;
-        }
-        let n = normalize(&seg.text);
+        };
+        let n = normalize(&name.token);
         match counts.iter_mut().find(|(t, _)| *t == n) {
             Some(c) => c.1 += 1,
             None => counts.push((n, 1)),
@@ -522,7 +535,7 @@ fn neutralize(
     let (mut current, mut numbers) = mask_numbers(&rebuilt);
     for _ in 0..3 {
         let out = run(&current)?;
-        if out.suspects.is_empty() && out.tagged == current {
+        if out.auto_hidden.is_empty() && out.tagged == current {
             return Ok((current, hidden, numbers));
         }
         let (again, h) = rebuild(&out, child);
@@ -538,7 +551,7 @@ fn neutralize(
 
 /// A text that may go out as part of the profile: the filter leaves it exactly as it is.
 fn clean(text: &str, ctx: &PrivacyContext<'_>) -> bool {
-    filter(text, ctx).is_ok_and(|o| o.suspects.is_empty() && o.tagged == text)
+    filter(text, ctx).is_ok_and(|o| o.auto_hidden.is_empty() && o.tagged == text)
 }
 
 // ------------------------------------------------------------ sections
@@ -862,6 +875,8 @@ impl Core {
             tag: role_tag(*r),
             value: String::new(),
             aliases: Vec::new(),
+            source: dv_domain::IdentitySource::Manual,
+            reason: String::new(),
         }));
         let practitioner = v.practitioner()?.names;
         let allow: HashSet<String> = v.not_a_name_hmacs("")?.into_iter().collect();

@@ -15,8 +15,8 @@ pub mod text;
 
 pub use gate::{clear, BlockReason, Blocked, ClearedPayload, GateRequest, GENERIC_TAGS};
 pub use pipeline::{
-    filter, filter_split, Checks, FilterOutcome, Mark, PrivacyContext, Segment, Suspect,
-    SuspectKind,
+    filter, filter_split, AutoHidden, AutoKind, Checks, FilterOutcome, Mark, PrivacyContext,
+    Segment, Suspect, SuspectKind,
 };
 
 #[derive(Debug, thiserror::Error)]

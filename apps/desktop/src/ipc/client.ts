@@ -28,6 +28,7 @@ import type { Instrument } from "./generated/Instrument";
 import type { PingResponse } from "./generated/PingResponse";
 import type { Prepared } from "./generated/Prepared";
 import type { ReportSettings } from "./generated/ReportSettings";
+import type { Role } from "./generated/Role";
 import type { ScoreSheet } from "./generated/ScoreSheet";
 import type { UsageSummary } from "./generated/UsageSummary";
 import type { Readiness } from "./generated/Readiness";
@@ -147,6 +148,11 @@ export const ipc = {
   previewFilter: (caseId: string, text: string) => call<FilterOutcome>("preview_filter", { caseId, text }),
   decideSuspect: (caseId: string, token: string, decision: SuspectDecision) =>
     run("decide_suspect", { caseId, token, decision }),
+  /** "להחזיר" on the summary card: keep what the filter hid as written, for this case. */
+  restoreAutoHidden: (caseId: string, token: string, tag: string) =>
+    run("restore_auto_hidden", { caseId, token, tag }),
+  /** Who a name the filter kept is; it gets a tag for that role. */
+  changeRole: (caseId: string, tag: string, role: Role) => call<Identity[]>("change_role", { caseId, tag, role }),
 
   /** `replaces`: the one proposed paragraph the answer rewrites; otherwise the answer is the
    *  section's new draft, in place of the paragraphs not approved yet. */

@@ -21,6 +21,8 @@ fn id(role: Role, tag: &str, value: &str) -> Identity {
         tag: tag.to_owned(),
         value: value.to_owned(),
         aliases: Vec::new(),
+        source: dv_domain::IdentitySource::Manual,
+        reason: String::new(),
     }
 }
 
@@ -618,7 +620,7 @@ fn the_filter_meets_the_benchmark() {
         let tagged = normalize(&out.tagged);
         let held = |s: &str| {
             let n = normalize(s);
-            out.suspects.iter().any(|x| {
+            out.auto_hidden.iter().any(|x| {
                 let t = normalize(&x.token);
                 n.contains(&t) || t.contains(&n)
             })
