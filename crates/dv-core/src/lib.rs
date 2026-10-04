@@ -27,15 +27,16 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use dv_ai::{ModelConfig, SectionInput, TaggedInput, TaggedTurn, ALLOWED_MODELS};
 use dv_domain::{
-    passage_ranges, Author, CaseMeta, CaseSummary, ChatRole, DraftStatus, IdentityInput, InputKind,
-    ReportStructure, Role,
+    passage_ranges, Author, CaseMeta, CaseSummary, ChatRole, DraftStatus, FoundName, IdentityInput,
+    IdentitySource, InputKind, ReportStructure, Role,
 };
 use dv_egress::{AnthropicTransport, EgressError, Transport};
 use dv_ipc::{PingResponse, IPC_VERSION};
 use dv_privacy::restore::{restore, scan_model_output};
 use dv_privacy::text::normalize;
 use dv_privacy::{
-    clear, filter, Checks, ClearedPayload, FilterOutcome, GateRequest, PrivacyContext,
+    clear, filter, AutoHidden, AutoKind, Checks, ClearedPayload, FilterOutcome, GateRequest,
+    PrivacyContext,
 };
 use dv_vault::{Argon2Params, AuditEvent, Vault, VaultError};
 use serde_json::Value;
@@ -402,7 +403,7 @@ struct PrivacyData {
 #[derive(Default)]
 struct Review {
     parts: Vec<ReviewPart>,
-    suspects: Vec<dv_privacy::Suspect>,
+    auto_hidden: Vec<AutoHidden>,
     hidden: Vec<String>,
     checks: Checks,
 }
@@ -414,11 +415,7 @@ impl Review {
             original: out.original_segments.clone(),
             outgoing: out.tagged_segments.clone(),
         });
-        for s in &out.suspects {
-            if !self.suspects.iter().any(|x| x.token == s.token) {
-                self.suspects.push(s.clone());
-            }
-        }
+        self.note_hidden(out);
         for h in &out.hidden {
             if !self.hidden.contains(h) {
                 self.hidden.push(h.clone());
@@ -428,6 +425,19 @@ impl Review {
         self.checks.patterns += out.checks.patterns;
         self.checks.name_suspects += out.checks.name_suspects;
         self.checks.indirect_suspects += out.checks.indirect_suspects;
+    }
+
+    /// What the filter hid on its own in a text that goes out, shown on the card or not.
+    fn note_hidden(&mut self, out: &FilterOutcome) {
+        for a in &out.auto_hidden {
+            if !self
+                .auto_hidden
+                .iter()
+                .any(|x| x.token == a.token && x.tag == a.tag)
+            {
+                self.auto_hidden.push(a.clone());
+            }
+        }
     }
 
     /// Show a text that goes out unchanged (Claude's earlier answer): on the review screen,
@@ -444,13 +454,74 @@ impl Review {
         Prepared {
             approval_id: None,
             parts: self.parts,
-            suspects: self.suspects,
+            suspects: Vec::new(),
+            auto_hidden: self.auto_hidden,
             hidden: self.hidden,
             checks: self.checks,
             blocked: Vec::new(),
             demo_mode,
         }
     }
+}
+
+/// A value from a file's properties that may be a person or an organization, not a program
+/// or a placeholder ("Microsoft Office User", "admin", a number).
+fn person_like(value: &str) -> bool {
+    const GENERIC: &[&str] = &[
+        "user",
+        "admin",
+        "administrator",
+        "owner",
+        "office",
+        "microsoft",
+        "windows",
+        "word",
+        "author",
+        "unknown",
+        "guest",
+        "pc",
+        "משתמש",
+        "מנהל",
+        "אורח",
+    ];
+    let words: Vec<String> = normalize(value)
+        .split(' ')
+        .filter(|w| !w.is_empty())
+        .map(str::to_owned)
+        .collect();
+    (1..=4).contains(&words.len())
+        && words.iter().all(|w| {
+            w.chars().count() >= 2
+                && w.chars()
+                    .all(|c| c.is_alphabetic() || matches!(c, '\'' | '"' | '-'))
+                && !GENERIC.contains(&w.as_str())
+        })
+}
+
+/// The new names among what the filter hid (`autos`): kept as identities of the case from
+/// then on, so every text of it hides them under the same tag and the gate refuses them.
+fn found_names(data: &PrivacyData, autos: &[AutoHidden]) -> Vec<FoundName> {
+    let mut out: Vec<FoundName> = Vec::new();
+    for a in autos {
+        if !matches!(a.kind, AutoKind::Name | AutoKind::OtherCase)
+            || data
+                .identities
+                .iter()
+                .any(|i| i.case_id == data.case_id && i.tag == a.tag)
+            || out
+                .iter()
+                .any(|f| normalize(&f.value) == normalize(&a.token))
+        {
+            continue;
+        }
+        out.push(FoundName {
+            value: a.token.trim().to_owned(),
+            role: a.role,
+            source: IdentitySource::Auto,
+            reason: a.reason.clone(),
+        });
+    }
+    out
 }
 
 /// A section's title as Claude gets it. The title is template text, not case text, yet
@@ -462,7 +533,7 @@ fn model_title(
 ) -> Result<String, CoreError> {
     let clean = |t: &str| -> Result<bool, CoreError> {
         let o = filter(t, ctx).map_err(|e| CoreError::Internal(e.to_string()))?;
-        Ok(o.suspects.is_empty() && o.tagged == t)
+        Ok(o.auto_hidden.is_empty() && o.tagged == t)
     };
     Ok(if clean(&sec.title)? {
         sec.title.clone()
@@ -927,7 +998,17 @@ impl Core {
         title: &str,
         content: &str,
     ) -> Result<dv_domain::CaseInput, CoreError> {
-        Ok(self.vault_mut()?.add_input(case_id, kind, title, content)?)
+        let input = self.vault_mut()?.add_input(case_id, kind, title, content)?;
+        self.learn_input(case_id, title, content)?;
+        Ok(input)
+    }
+
+    /// A material's new names are kept with the case when it is saved, so every later text
+    /// (a request, another material) hides them under the same tag without asking.
+    fn learn_input(&mut self, case_id: &str, title: &str, content: &str) -> Result<(), CoreError> {
+        self.learn(case_id, title)?;
+        self.learn(case_id, content)?;
+        Ok(())
     }
 
     pub fn update_input(
@@ -948,7 +1029,7 @@ impl Core {
         if before.as_deref() != Some(content) {
             self.forget_sorting(case_id, input_id)?;
         }
-        Ok(())
+        self.learn_input(case_id, title, content)
     }
 
     /// The instruments with their fixed tables (knowledge/instruments.md).
@@ -998,6 +1079,7 @@ impl Core {
             None => v.add_input(case_id, InputKind::TestScores, &title, &text)?,
         };
         v.set_input_data(case_id, &input.id, &data)?;
+        self.learn_input(case_id, &input.title, &input.content)?;
         Ok(input)
     }
 
@@ -1036,28 +1118,23 @@ impl Core {
         }
         .map_err(|e| CoreError::Refused(e.message_he()))?;
 
-        let body = self.preview_filter(case_id, &extracted.body)?;
-        let margins = self.preview_filter(case_id, &extracted.margins)?;
-        let data = self.privacy_data(case_id)?;
-        let known: HashSet<String> = data
-            .identities
-            .iter()
-            .flat_map(|i| std::iter::once(i.value.clone()).chain(i.aliases.clone()))
-            .chain(data.practitioner.iter().cloned())
-            .map(|v| normalize(&v))
-            .collect();
-
-        let mut suggestions: Vec<NameSuggestion> = Vec::new();
-        let mut suggest = |value: &str, source: String, role: Role| {
-            let norm = normalize(value);
-            if !norm.is_empty()
-                && !known.contains(&norm)
-                && !suggestions.iter().any(|s| normalize(&s.value) == norm)
+        // Names in the margins and the file's properties are not imported, but they are the
+        // names most likely to appear in the body too: kept with the case first, so the body
+        // hides them under their tags (fail-closed: if the import is cancelled, they stay
+        // hidden, which costs nothing).
+        let mut found: Vec<FoundName> = Vec::new();
+        let keep = |value: &str, role: Role, reason: String, found: &mut Vec<FoundName>| {
+            let value = value.trim();
+            if person_like(value)
+                && !found
+                    .iter()
+                    .any(|f| normalize(&f.value) == normalize(value))
             {
-                suggestions.push(NameSuggestion {
-                    value: value.trim().to_owned(),
-                    source,
+                found.push(FoundName {
+                    value: value.to_owned(),
                     role,
+                    source: IdentitySource::Metadata,
+                    reason,
                 });
             }
         };
@@ -1069,25 +1146,49 @@ impl Core {
                 "Company" => ("ארגון", Role::Institution),
                 _ => continue,
             };
-            suggest(value, format!("מאפייני הקובץ · {label}"), role);
+            keep(value, role, format!("מאפייני הקובץ · {label}"), &mut found);
         }
-        for s in &margins.suspects {
-            suggest(&s.token, "כותרת עליונה/תחתונה".to_owned(), s.suggested_role);
-        }
-        // Names the filter already knows are hidden anyway; declared names in the margins
-        // need nothing. Title / subject fields may hide names too.
+        let mut texts = vec![(extracted.margins.clone(), "כותרת עליונה/תחתונה".to_owned())];
         for (field, value) in &extracted.metadata {
             if matches!(
                 field.as_str(),
                 "title" | "subject" | "keywords" | "description"
             ) {
-                for s in self.preview_filter(case_id, value)?.suspects {
-                    suggest(
-                        &s.token,
-                        "מאפייני הקובץ · כותרת".to_owned(),
-                        s.suggested_role,
-                    );
+                texts.push((value.clone(), "מאפייני הקובץ · כותרת".to_owned()));
+            }
+        }
+        for (text, reason) in &texts {
+            for a in self.preview_filter(case_id, text)?.auto_hidden {
+                if matches!(a.kind, AutoKind::Name | AutoKind::OtherCase) {
+                    keep(&a.token, a.role, reason.clone(), &mut found);
                 }
+            }
+        }
+        let practitioner: Vec<String> = self
+            .vault_ref()?
+            .practitioner()?
+            .names
+            .iter()
+            .map(|n| normalize(n))
+            .collect();
+        found.retain(|f| !practitioner.contains(&normalize(&f.value)));
+        let mut auto_hidden: Vec<AutoHidden> = self
+            .vault_mut()?
+            .add_found_names(case_id, &found)?
+            .into_iter()
+            .map(|i| AutoHidden {
+                token: i.value,
+                tag: i.tag,
+                role: i.role,
+                reason: i.reason,
+                uncertain: false,
+                kind: AutoKind::Name,
+            })
+            .collect();
+        let body = self.learn(case_id, &extracted.body)?;
+        for a in &body.auto_hidden {
+            if !auto_hidden.iter().any(|x| x.tag == a.tag) {
+                auto_hidden.push(a.clone());
             }
         }
 
@@ -1125,7 +1226,8 @@ impl Core {
             title: stem,
             suggested_kind: InputKind::guess(&extracted.body, file_name),
             preview: body.original_segments,
-            suspects: body.suspects,
+            suspects: Vec::new(),
+            auto_hidden,
             hidden: body.hidden,
             body: extracted.body,
             left_out: extracted
@@ -1134,7 +1236,7 @@ impl Core {
                 .map(str::to_owned)
                 .filter(|l| !l.trim().is_empty())
                 .collect(),
-            name_suggestions: suggestions,
+            name_suggestions: Vec::new(),
             warnings: extracted.warnings,
         })
     }
@@ -1169,6 +1271,70 @@ impl Core {
             today: today(),
         };
         filter(text, &ctx).map_err(|e| CoreError::Internal(e.to_string()))
+    }
+
+    /// Filter `text` for the case and keep the new names it found, then filter it again so
+    /// they carry their kept tags (the outcome lists them, for the card).
+    fn learn(&mut self, case_id: &str, text: &str) -> Result<FilterOutcome, CoreError> {
+        let first = self.preview_filter(case_id, text)?;
+        let data = self.privacy_data(case_id)?;
+        let found = found_names(&data, &first.auto_hidden);
+        if found.is_empty() {
+            return Ok(first);
+        }
+        self.vault_mut()?.add_found_names(case_id, &found)?;
+        self.preview_filter(case_id, text)
+    }
+
+    /// "להחזיר" on the summary card: from now on this case keeps `token` as it is written.
+    /// A name the filter kept with the case (under `tag`) is dropped from its names.
+    pub fn restore_auto_hidden(
+        &mut self,
+        case_id: &str,
+        token: &str,
+        tag: &str,
+    ) -> Result<(), CoreError> {
+        let v = self.vault_mut()?;
+        let ids = v.identities(case_id)?;
+        let value = ids
+            .iter()
+            .find(|i| i.tag == tag && i.source != IdentitySource::Manual)
+            .map(|i| normalize(&i.value));
+        // Every row the filter kept for that name (a role change keeps the earlier row, so
+        // drafts with its tag can still be restored).
+        for i in ids.iter().filter(|i| {
+            i.source != IdentitySource::Manual
+                && (i.tag == tag || Some(normalize(&i.value)) == value)
+        }) {
+            v.remove_identity(case_id, &i.id)?;
+        }
+        if let Some(value) = &value {
+            v.mark_not_a_name(Some(case_id), value)?;
+        }
+        v.mark_not_a_name(Some(case_id), &normalize(token))?;
+        Ok(())
+    }
+
+    /// The card's role menu: who a name the filter kept is ("סבתא", "המורה"). The name gets a
+    /// tag for that role; "להחזיר" still works on it.
+    pub fn change_role(
+        &mut self,
+        case_id: &str,
+        tag: &str,
+        role: Role,
+    ) -> Result<Vec<dv_domain::Identity>, CoreError> {
+        let v = self.vault_mut()?;
+        let ids: Vec<IdentityInput> = v
+            .identities(case_id)?
+            .into_iter()
+            .map(|i| IdentityInput {
+                role: if i.tag == tag { role } else { i.role },
+                id: Some(i.id),
+                value: i.value,
+                aliases: i.aliases,
+            })
+            .collect();
+        Ok(v.set_identities(case_id, &ids)?)
     }
 
     pub fn decide_suspect(
@@ -1375,7 +1541,7 @@ impl Core {
         if text.trim().is_empty() {
             return self.reject_paragraph(case_id, draft_id);
         }
-        let tagged = self.preview_filter(case_id, text)?.tagged;
+        let tagged = self.learn(case_id, text)?.tagged;
         let before = style::find_draft(self.vault_ref()?, case_id, draft_id)?;
         self.vault_mut()?.edit_draft(case_id, draft_id, &tagged)?;
         self.learn_from_draft_edit(before, &tagged);
@@ -1400,7 +1566,7 @@ impl Core {
         text: &str,
         at: Option<Option<&str>>,
     ) -> Result<(), CoreError> {
-        let tagged = self.preview_filter(case_id, text)?.tagged;
+        let tagged = self.learn(case_id, text)?.tagged;
         let v = self.vault_mut()?;
         let d = v.add_draft(case_id, section_key, &tagged, Author::User, &[])?;
         v.set_draft_status(case_id, &d.id, DraftStatus::Approved)?;
@@ -1412,13 +1578,23 @@ impl Core {
 
     // ------------------------------------------------------------ AI: prepare → approve → send
 
+    /// Clear the request, or keep the names the filter found first. `Ok(true)`: new names
+    /// were kept with the case and the caller builds the request again, so every text of it
+    /// carries their tags (a name found in two texts gets one tag, and Claude's answer can
+    /// be restored). `may_learn` is false on that second build: anything new then blocks.
     fn gate(
         &mut self,
         data: &PrivacyData,
         body: &Value,
         kind: PendingKind,
         prepared: &mut Prepared,
-    ) -> Result<(), CoreError> {
+        may_learn: bool,
+    ) -> Result<bool, CoreError> {
+        let found = found_names(data, &prepared.auto_hidden);
+        if may_learn && !data.case_id.is_empty() && !found.is_empty() {
+            self.vault_mut()?.add_found_names(&data.case_id, &found)?;
+            return Ok(true);
+        }
         let suspects = prepared.suspects.len();
         let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
         let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
@@ -1431,12 +1607,23 @@ impl Core {
             confirmed_names: &is_name,
             today: today(),
         };
-        let case_tags: HashSet<String> = data
+        let mut case_tags: HashSet<String> = data
             .identities
             .iter()
             .filter(|i| i.case_id == data.case_id)
             .map(|i| i.tag.clone())
             .collect();
+        // A consultation without a case has nowhere to keep names: the tags the filter gave
+        // them are this request's own.
+        if data.case_id.is_empty() {
+            case_tags.extend(
+                prepared
+                    .auto_hidden
+                    .iter()
+                    .filter(|a| matches!(a.kind, AutoKind::Name | AutoKind::OtherCase))
+                    .map(|a| a.tag.clone()),
+            );
+        }
         let req = GateRequest {
             body,
             ctx: &ctx,
@@ -1462,7 +1649,7 @@ impl Core {
                 prepared.blocked = blocked.reasons;
             }
         }
-        Ok(())
+        Ok(false)
     }
 
     /// Build the request for one section and everything the review screen needs.
@@ -1484,6 +1671,17 @@ impl Core {
         section_key: &str,
         instruction: &str,
         replaces: Option<&str>,
+    ) -> Result<Prepared, CoreError> {
+        self.prepare_section_once(case_id, section_key, instruction, replaces, false)
+    }
+
+    fn prepare_section_once(
+        &mut self,
+        case_id: &str,
+        section_key: &str,
+        instruction: &str,
+        replaces: Option<&str>,
+        learned: bool,
     ) -> Result<Prepared, CoreError> {
         let structure =
             ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
@@ -1589,20 +1787,21 @@ impl Core {
                 review.add("הטיוטה הנוכחית".to_owned(), &out);
                 current.push(out.tagged);
             }
-            let history: Vec<TaggedTurn> = v
-                .messages(case_id, section_key)?
-                .into_iter()
-                .map(|m| {
-                    run(&m.text_tagged).map(|o| TaggedTurn {
-                        role: if m.role == ChatRole::User {
-                            "user".to_owned()
-                        } else {
-                            "assistant".to_owned()
-                        },
-                        text_tagged: o.tagged,
-                    })
-                })
-                .collect::<Result<_, _>>()?;
+            // The conversation so far is not shown again, but what the filter hides in it is
+            // kept like everything else, so its tags belong to the case.
+            let mut history: Vec<TaggedTurn> = Vec::new();
+            for m in v.messages(case_id, section_key)? {
+                let o = run(&m.text_tagged)?;
+                review.note_hidden(&o);
+                history.push(TaggedTurn {
+                    role: if m.role == ChatRole::User {
+                        "user".to_owned()
+                    } else {
+                        "assistant".to_owned()
+                    },
+                    text_tagged: o.tagged,
+                });
+            }
             let instr = run(instruction)?;
             review.add("הבקשה שלך".to_owned(), &instr);
             // Her approved style profile (D-043), as it goes out with this case's names hidden.
@@ -1650,7 +1849,9 @@ impl Core {
             approved,
             replaces: replaces.map(str::to_owned),
         };
-        self.gate(&data, &body, kind, &mut prepared)?;
+        if self.gate(&data, &body, kind, &mut prepared, !learned)? {
+            return self.prepare_section_once(case_id, section_key, instruction, replaces, true);
+        }
         Ok(prepared)
     }
 
@@ -1939,6 +2140,16 @@ impl Core {
         conversation_id: Option<&str>,
         message: &str,
     ) -> Result<Prepared, CoreError> {
+        self.prepare_consult_once(case_id, conversation_id, message, false)
+    }
+
+    fn prepare_consult_once(
+        &mut self,
+        case_id: Option<&str>,
+        conversation_id: Option<&str>,
+        message: &str,
+        learned: bool,
+    ) -> Result<Prepared, CoreError> {
         // Earlier turns, as Einat saw them: filtered again now, with today's names and decisions,
         // and shown on the review screen like everything else that leaves the computer.
         let earlier = match conversation_id {
@@ -2039,7 +2250,9 @@ impl Core {
             message_shown: message.to_owned(),
             hidden: prepared.hidden.clone(),
         };
-        self.gate(&data, &body, kind, &mut prepared)?;
+        if self.gate(&data, &body, kind, &mut prepared, !learned)? {
+            return self.prepare_consult_once(case_id, conversation_id, message, true);
+        }
         Ok(prepared)
     }
 

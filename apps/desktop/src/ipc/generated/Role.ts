@@ -3,4 +3,4 @@
 /**
  * Who an identity is, relative to the child. Drives the tag and the UI label.
  */
-export type Role = "child" | "mother" | "father" | "brother" | "sister" | "teacher" | "assistant" | "doctor" | "slp" | "psychologist" | "therapist" | "other_child" | "kindergarten" | "school" | "town" | "institution" | "other";
+export type Role = "child" | "mother" | "father" | "brother" | "sister" | "teacher" | "assistant" | "doctor" | "slp" | "psychologist" | "therapist" | "other_child" | "kindergarten" | "school" | "town" | "institution" | "other" | "relative" | "school_teacher" | "professional" | "family";

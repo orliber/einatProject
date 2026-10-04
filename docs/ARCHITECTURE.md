@@ -109,7 +109,7 @@ settings(key PK, value)            -- בלי מידע אישי
 
 ## identity.db (סוד הקישור)
 ```sql
-identities(id PK, case_id, tag, role, value_enc, variants_enc, source /* form|metadata|review */, created_at_enc)
+identities(id PK, case_id, tag, role, value_enc, aliases_enc, source /* manual|auto|metadata */, reason /* "אחרי 'הגננת'" */, created_at)
 decisions(id PK, case_id, token_hmac, decision /* hide|not_a_name */, tag, created_at_enc)
 practitioner(id PK, value_enc, variants_enc)   -- שם עינת, שם הקליניקה, מספר רישיון
 ```

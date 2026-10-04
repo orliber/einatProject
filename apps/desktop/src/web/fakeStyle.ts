@@ -108,7 +108,7 @@ export class FakeStyle {
 
   private prepared(label: string, text: string, approval: string): Prepared {
     const seg = [{ text, mark: null, label: null }];
-    return { approval_id: approval, parts: [{ label, original: seg, outgoing: seg }], suspects: [], hidden: [], checks: { declared_names: 0, patterns: 0, name_suspects: 0, indirect_suspects: 0 }, blocked: [], demo_mode: true };
+    return { approval_id: approval, parts: [{ label, original: seg, outgoing: seg }], suspects: [], auto_hidden: [], hidden: [], checks: { declared_names: 0, patterns: 0, name_suspects: 0, indirect_suspects: 0 }, blocked: [], demo_mode: true };
   }
 
   async handle(cmd: string, a: Args, args: unknown, headers: Record<string, string>, people: Person[], practitioner: string[]): Promise<unknown> {

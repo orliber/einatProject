@@ -25,7 +25,8 @@ import type { ReviewPart } from "../ipc/generated/ReviewPart";
 import type { Role } from "../ipc/generated/Role";
 import type { ScoreSheet } from "../ipc/generated/ScoreSheet";
 import type { SectionResult } from "../ipc/generated/SectionResult";
-import type { Suspect } from "../ipc/generated/Suspect";
+import type { AutoHidden } from "../ipc/generated/AutoHidden";
+import type { IdentitySource } from "../ipc/generated/IdentitySource";
 import type { SuspectDecision } from "../ipc/generated/SuspectDecision";
 import type { UiError } from "../ipc/generated/UiError";
 import { kindLabel } from "../i18n/he";
@@ -81,7 +82,8 @@ const SINGLETON: Role[] = ["child", "mother", "father", "teacher", "kindergarten
 const TAG_BASE: Record<Role, string> = {
   child: "ילד", mother: "אם", father: "אב", brother: "אח", sister: "אחות", teacher: "גננת", assistant: "סייעת", doctor: "רופא",
   slp: "קלינאית", psychologist: "פסיכולוגית", therapist: "מטפלת", other_child: "ילד_גן", kindergarten: "גן", school: "בית_ספר",
-  town: "יישוב", institution: "מוסד", other: "אדם",
+  town: "יישוב", institution: "מוסד", other: "אדם", relative: "קרוב_משפחה", school_teacher: "מורה",
+  professional: "איש_מקצוע", family: "משפחה",
 };
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -262,7 +264,9 @@ export class FakeCore {
         tag = SINGLETON.includes(i.role) && !used.includes(`[${base}]`) ? `[${base}]` : "";
         for (let n = SINGLETON.includes(i.role) ? 2 : 1; !tag; n++) if (!used.includes(`[${base}_${n}]`)) tag = `[${base}_${n}]`;
       }
-      kept.push({ id: old?.id ?? newId("p"), caseId: c.id, role: i.role, tag, value: i.value.trim(), aliases: i.aliases });
+      const same = old?.role === i.role;
+      kept.push({ id: same ? old.id : newId("p"), caseId: c.id, role: i.role, tag, value: i.value.trim(), aliases: i.aliases,
+        source: same ? old.source : "manual", reason: same ? old.reason : "" });
     }
     c.people = kept;
   }
@@ -282,8 +286,26 @@ export class FakeCore {
     return this.cases.flatMap((c) => c.people);
   }
 
+  /** Filter for the case; new names it finds are kept with the case (as the core does), and
+   *  the text is filtered again so they carry their kept tags. */
   private filterFor(c: Case, text: string) {
-    return filter(text, { caseId: c.id, people: this.allPeople(), practitioner: this.practitioner, allowed: c.allowed });
+    const run = () => filter(text, { caseId: c.id, people: this.allPeople(), practitioner: this.practitioner, allowed: c.allowed });
+    const first = run();
+    const found = first.auto_hidden.filter((a) => (a.kind === "name" || a.kind === "other_case") && !c.people.some((p) => p.tag === a.tag));
+    if (!found.length) return first;
+    this.keepFound(c, found.map((a) => ({ value: a.token, role: a.role, source: "auto", reason: a.reason })));
+    return run();
+  }
+
+  private keepFound(c: Case, found: { value: string; role: Role; source: IdentitySource; reason: string }[]) {
+    for (const f of found) {
+      if (c.people.some((p) => p.value === f.value || p.aliases.includes(f.value))) continue;
+      const used = c.people.map((p) => p.tag);
+      const base = TAG_BASE[f.role];
+      let tag = "";
+      for (let n = 1; !tag; n++) if (!used.includes(`[${base}_${n}]`)) tag = `[${base}_${n}]`;
+      c.people.push({ id: newId("p"), caseId: c.id, role: f.role, tag, value: f.value, aliases: [], source: f.source, reason: f.reason });
+    }
   }
 
   status(): AppStatus {
@@ -329,7 +351,7 @@ export class FakeCore {
   }
 
   private detail(c: Case): CaseDetail {
-    const identities: Identity[] = c.people.map((p) => ({ id: p.id, case_id: c.id, role: p.role, tag: p.tag, value: p.value, aliases: p.aliases }));
+    const identities: Identity[] = c.people.map((p) => ({ id: p.id, case_id: c.id, role: p.role, tag: p.tag, value: p.value, aliases: p.aliases, source: p.source, reason: p.reason }));
     const routing = this.routing(c);
     return {
       id: c.id, meta: c.meta, identities, inputs: c.inputs, routing,
@@ -351,14 +373,14 @@ export class FakeCore {
     if (!c.meta.consent) fail("consent_missing", "לפני שליחה ל-Claude צריך לרשום בתיק את הסכמת ההורים.");
     const section = SECTIONS.find((s) => s.key === key) ?? fail("not_found", "הסעיף לא נמצא");
     const parts: ReviewPart[] = [];
-    const suspects: Suspect[] = [];
+    const autoHidden: AutoHidden[] = [];
     const hidden = new Set<string>();
     const checks = { declared_names: 0, patterns: 0, name_suspects: 0, indirect_suspects: 0 };
     const refs: { sid: string; label: string; tagged: string }[] = [];
     const take = (label: string, text: string) => {
       const f = this.filterFor(c, text);
       parts.push({ label, original: f.original_segments, outgoing: f.tagged_segments });
-      for (const s of f.suspects) if (!suspects.some((x) => x.token === s.token)) suspects.push(s);
+      for (const a of f.auto_hidden) if (!autoHidden.some((x) => x.token === a.token)) autoHidden.push(a);
       f.hidden.forEach((h) => hidden.add(h));
       checks.declared_names += f.checks.declared_names;
       checks.patterns += f.checks.patterns;
@@ -381,9 +403,9 @@ export class FakeCore {
       refs.push({ sid, label: `${sid} · ${s.label}`, tagged: take(`${sid} · ${s.label}`, s.text) });
     });
     if (instruction.trim()) take("הבקשה שלך", instruction);
-    const approval = suspects.length === 0 ? newId("approval") : null;
-    if (approval) this.pending.set(approval, { type: "section", caseId: c.id, section: key, refs, instruction, replaces });
-    return { approval_id: approval, parts, suspects, hidden: Array.from(hidden), checks, blocked: [], demo_mode: true };
+    const approval = newId("approval");
+    this.pending.set(approval, { type: "section", caseId: c.id, section: key, refs, instruction, replaces });
+    return { approval_id: approval, parts, suspects: [], auto_hidden: autoHidden, hidden: Array.from(hidden), checks, blocked: [], demo_mode: true };
   }
 
   /** Sorting into sections (D-022): every material not sorted yet, one review. */
@@ -392,21 +414,21 @@ export class FakeCore {
     const todo = c.inputs.filter((i) => R.needsSorting(this.routingOf(c, i.id), R.passages(i.content).length));
     if (!todo.length) fail("refused", "כל החומרים כבר ממוינים לסעיפים.");
     const parts: ReviewPart[] = [];
-    const suspects: Suspect[] = [];
+    const autoHidden: AutoHidden[] = [];
     const hidden = new Set<string>();
     const checks = { declared_names: 0, patterns: 0, name_suspects: 0, indirect_suspects: 0 };
     todo.forEach((i, n) => {
       const f = this.filterFor(c, i.content);
       parts.push({ label: `S${n + 1} · ${kindLabel[i.kind]} · ${i.title}`, original: f.original_segments, outgoing: f.tagged_segments });
-      for (const s of f.suspects) if (!suspects.some((x) => x.token === s.token)) suspects.push(s);
+      for (const a of f.auto_hidden) if (!autoHidden.some((x) => x.token === a.token)) autoHidden.push(a);
       f.hidden.forEach((h) => hidden.add(h));
       checks.declared_names += f.checks.declared_names;
       checks.patterns += f.checks.patterns;
       checks.name_suspects += f.checks.name_suspects;
     });
-    const approval = suspects.length === 0 ? newId("approval") : null;
-    if (approval) this.pending.set(approval, { type: "sort", caseId: c.id, materials: todo.map((i) => ({ id: i.id, count: R.passages(i.content).length, content: i.content })) });
-    return { approval_id: approval, parts, suspects, hidden: Array.from(hidden), checks, blocked: [], demo_mode: true };
+    const approval = newId("approval");
+    this.pending.set(approval, { type: "sort", caseId: c.id, materials: todo.map((i) => ({ id: i.id, count: R.passages(i.content).length, content: i.content })) });
+    return { approval_id: approval, parts, suspects: [], auto_hidden: autoHidden, hidden: Array.from(hidden), checks, blocked: [], demo_mode: true };
   }
 
   private sendSort(p: Extract<Pending, { type: "sort" }>): SortResult {
@@ -486,22 +508,28 @@ export class FakeCore {
       fail("unsupported", "אפשר לייבא קובצי Word (docx), ODT, PDF או טקסט.");
     }
     if (!body.trim()) fail("empty", "לא נמצא טקסט במסמך.");
+    // Names in the file's properties and margins are kept with the case without asking.
+    const known = new Set(this.allPeople().flatMap((p) => [p.value, ...p.aliases]));
+    const fromFile = [
+      ...(author && !known.has(author) ? [{ value: author, reason: "מאפייני הקובץ · יוצר המסמך" }] : []),
+      ...margins.flatMap((l) => (l.match(/[א-ת]+ בדוי[הא]?/g) ?? []).map((v) => ({ value: v, reason: "כותרת עליונה/תחתונה" }))),
+    ].filter((s, i, all) => !known.has(s.value) && all.findIndex((x) => x.value === s.value) === i);
+    this.keepFound(c, fromFile.map((s) => ({ ...s, role: "other" as Role, source: "metadata" as IdentitySource })));
     const f = this.filterFor(c, body);
     const first = body.split("\n")[0]?.trim() ?? "";
-    const known = new Set(this.allPeople().flatMap((p) => [p.value, ...p.aliases]));
-    const suggestions = [
-      ...(author && !known.has(author) ? [{ value: author, source: "מאפייני הקובץ · יוצר המסמך", role: "other" as Role }] : []),
-      ...margins.flatMap((l) => (l.match(/[א-ת]+ בדוי[הא]?/g) ?? []).map((v) => ({ value: v, source: "כותרת עליונה/תחתונה", role: "other" as Role }))),
-    ].filter((s, i, all) => !known.has(s.value) && all.findIndex((x) => x.value === s.value) === i);
+    const autoHidden: AutoHidden[] = [
+      ...c.people.filter((p) => fromFile.some((s) => s.value === p.value)).map((p) => ({ token: p.value, tag: p.tag, role: p.role, reason: p.reason, uncertain: false, kind: "name" as const })),
+      ...f.auto_hidden,
+    ];
     const words = body.slice(0, 400);
     const kind: InputKind = /ציון|אחוזון|WPPSI|WISC/.test(words) && (words.match(/\d+/g)?.length ?? 0) > 6 ? "test_scores"
       : /אינטייק|ההורים סיפרו/.test(words) ? "intake" : /גננת|בגן/.test(words.slice(0, 80)) ? "kindergarten" : "prior_report";
     return {
       file_name: name, format: ext === "docx" ? "docx" : "text", pages: 1,
       title: first.length >= 3 && first.length <= 80 ? first : name.replace(/\.[^.]+$/, ""),
-      suggested_kind: kind, body, preview: f.original_segments, suspects: f.suspects, hidden: f.hidden,
+      suggested_kind: kind, body, preview: f.original_segments, suspects: [], auto_hidden: autoHidden, hidden: f.hidden,
       left_out: margins.length ? [...margins, "הכותרת העליונה/התחתונה לא יובאה (יש בה לרוב שם, ת\"ז ופרטי קשר)."] : [],
-      name_suggestions: suggestions, warnings: [],
+      name_suggestions: [], warnings: [],
     };
   }
 
@@ -746,6 +774,17 @@ export class FakeCore {
         else this.setPeople(c, [...c.people.map((p) => ({ id: p.id, role: p.role, value: p.value, aliases: p.aliases })), { id: null, role: d.decision === "hide" ? d.role : "other", value: token, aliases: [] }]);
         return null;
       }
+      case "restore_auto_hidden": {
+        const c = this.find(a.caseId);
+        const kept = c.people.find((p) => p.tag === String(a.tag) && p.source !== "manual");
+        this.setPeople(c, c.people.filter((p) => p !== kept).map((p) => ({ id: p.id, role: p.role, value: p.value, aliases: p.aliases })));
+        c.allowed.add(String(a.token));
+        return null;
+      }
+      case "change_role": {
+        const c = this.find(a.caseId);
+        return this.setPeople(c, c.people.map((p) => ({ id: p.id, role: p.tag === String(a.tag) ? (a.role as Role) : p.role, value: p.value, aliases: p.aliases })));
+      }
       case "prepare_section":
         return this.prepareSection(this.find(a.caseId), String(a.sectionKey), String(a.instruction ?? ""), a.replaces ? String(a.replaces) : null);
       case "prepare_full_draft": {
@@ -817,9 +856,9 @@ export class FakeCore {
         const c = a.caseId ? this.find(a.caseId) : null;
         const text = String(a.message);
         const f = c ? this.filterFor(c, text) : filter(text, { caseId: "", people: this.allPeople(), practitioner: this.practitioner, allowed: new Set() });
-        const approval = f.suspects.length === 0 ? newId("approval") : null;
-        if (approval) this.pending.set(approval, { type: "consult", question: f.tagged, shown: text, hidden: f.hidden, caseId: c?.id ?? null, conversationId: a.conversationId ? String(a.conversationId) : null });
-        return { approval_id: approval, parts: [{ label: "השאלה", original: f.original_segments, outgoing: f.tagged_segments }], suspects: f.suspects, hidden: f.hidden, checks: f.checks, blocked: [], demo_mode: true } satisfies Prepared;
+        const approval = newId("approval");
+        this.pending.set(approval, { type: "consult", question: f.tagged, shown: text, hidden: f.hidden, caseId: c?.id ?? null, conversationId: a.conversationId ? String(a.conversationId) : null });
+        return { approval_id: approval, parts: [{ label: "השאלה", original: f.original_segments, outgoing: f.tagged_segments }], suspects: [], auto_hidden: f.auto_hidden, hidden: f.hidden, checks: f.checks, blocked: [], demo_mode: true } satisfies Prepared;
       }
       case "send_consult": {
         const p = this.pending.get(String(a.approvalId));

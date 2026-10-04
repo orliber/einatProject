@@ -1,9 +1,10 @@
 // Browser preview only: a small stand-in for the privacy pipeline (crates/dv-privacy), enough to
 // show what the review screen looks like. The real filter has many more layers and runs in Rust.
+import type { AutoHidden } from "../ipc/generated/AutoHidden";
 import type { FilterOutcome } from "../ipc/generated/FilterOutcome";
+import type { IdentitySource } from "../ipc/generated/IdentitySource";
 import type { Role } from "../ipc/generated/Role";
 import type { Segment } from "../ipc/generated/Segment";
-import type { Suspect } from "../ipc/generated/Suspect";
 import { roleLabel } from "../i18n/he";
 
 export interface Person {
@@ -12,6 +13,8 @@ export interface Person {
   tag: string;
   value: string;
   aliases: string[];
+  source: IdentitySource;
+  reason: string;
 }
 
 export interface FilterContext {
@@ -28,7 +31,7 @@ const PREFIX = "([והבכלמש]{0,3})";
 const KNOWN_NAMES = ["יובל", "אלון", "שירה", "נועה", "איתי", "עומר", "תמר", "רוני", "אורי", "יעל", "דניאל", "אריאל", "ליאור", "עדי", "שקד", "נגה", "הילה", "אביגיל", "יהונתן", "מיכאל", "איתמר", "עידו", "ירדן", "מאיה", "נועם", "דנה", "יוסי", "מיכל", "רותם"];
 const LATIN_OK = new Set(["WPPSI", "WISC", "ADOS", "ASRS", "CBCL", "CARS", "ABAS", "DSM", "Bayley", "Total", "Word", "PDF"]);
 
-type Hit = { start: number; end: number; mark: "replaced" | "relative" | "suspect"; out: string; label: string; suspect?: Suspect };
+type Hit = { start: number; end: number; mark: "replaced" | "relative"; out: string; label: string; auto?: AutoHidden };
 
 function escape(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -63,6 +66,17 @@ export function filter(text: string, ctx: FilterContext): FilterOutcome {
 
   // Declared names of this case (longest first), then the practitioner's own names.
   const own = ctx.people.filter((p) => p.caseId === ctx.caseId);
+  // A new tag for each name found that the case does not list (one tag per name).
+  const used = ctx.people.filter((p) => p.caseId === ctx.caseId).map((p) => p.tag);
+  const tagFor = new Map<string, string>();
+  const newTag = (token: string) => {
+    let tag = tagFor.get(token);
+    for (let n = 1; !tag; n++) if (!used.includes(`[אדם_${n}]`)) tag = `[אדם_${n}]`;
+    used.push(tag);
+    tagFor.set(token, tag);
+    return tag;
+  };
+
   const declared = own.flatMap((p) => names(p).map((n) => ({ n, p }))).sort((a, b) => b.n.length - a.n.length);
   for (const { n, p } of declared) {
     for (const m of text.matchAll(wordRe(n))) {
@@ -75,13 +89,15 @@ export function filter(text: string, ctx: FilterContext): FilterOutcome {
       add({ start: m.index, end: m.index + m[0].length, mark: "replaced", out: (m[1] ?? "") + "[מאבחנת]", label: "שם המאבחנת" });
     }
   }
-  // Another case's names: never a tag here, always a question.
+  // Another case's names: never that case's tag here, a new one of this case.
   for (const p of ctx.people.filter((x) => x.caseId !== ctx.caseId)) {
     for (const n of names(p)) {
       for (const m of text.matchAll(wordRe(n))) {
         const token = m[2] ?? m[0];
-        add({ start: m.index, end: m.index + m[0].length, mark: "suspect", out: m[0], label: "שם מתיק אחר",
-          suspect: { token, kind: "other_case_identity", message: "השם מופיע בתיק אחר", suggested_role: "other_child" } });
+        if (ctx.allowed.has(token)) continue;
+        const tag = newTag(token);
+        add({ start: m.index + (m[1]?.length ?? 0), end: m.index + m[0].length, mark: "replaced", out: tag, label: "שם אדם",
+          auto: { token, tag, role: "other", reason: "שם שמופיע בתיק אחר", uncertain: false, kind: "other_case" } });
       }
     }
   }
@@ -100,19 +116,22 @@ export function filter(text: string, ctx: FilterContext): FilterOutcome {
     if (m[0].replace(/\D/g, "").length < 5) continue;
     add({ start: m.index, end: m.index + m[0].length, mark: "replaced", out: "[מספר]", label: "מספר מזהה" });
   }
-  // Names that are not on the case's list.
+  // Names that are not on the case's list: hidden without asking, each under a new tag.
   const known = new Set(ctx.people.flatMap((p) => names(p)));
   for (const n of KNOWN_NAMES.filter((x) => !known.has(x) && !ctx.allowed.has(x))) {
     for (const m of text.matchAll(wordRe(n))) {
       const token = m[2] ?? m[0];
-      add({ start: m.index, end: m.index + m[0].length, mark: "suspect", out: m[0], label: "שם לא מוכר",
-        suspect: { token, kind: "unknown_name", message: "שם שלא מופיע ברשימת התיק", suggested_role: "other_child" } });
+      const start = m.index + (m[1]?.length ?? 0);
+      const tag = newTag(token);
+      add({ start, end: m.index + m[0].length, mark: "replaced", out: tag, label: "שם אדם",
+        auto: { token, tag, role: "other", reason: "שם פרטי", uncertain: false, kind: "name" } });
     }
   }
   for (const m of text.matchAll(/(?<![A-Za-z])[A-Z][a-z]+(?![A-Za-z])/g)) {
     if (LATIN_OK.has(m[0]) || ctx.allowed.has(m[0])) continue;
-    add({ start: m.index, end: m.index + m[0].length, mark: "suspect", out: m[0], label: "מילה באנגלית",
-      suspect: { token: m[0], kind: "latin_name", message: "מילה באנגלית שעשויה להיות שם", suggested_role: "other" } });
+    const tag = newTag(m[0]);
+    add({ start: m.index, end: m.index + m[0].length, mark: "replaced", out: tag, label: "שם אדם",
+      auto: { token: m[0], tag, role: "other", reason: "מילה באנגלית שנראית כמו שם", uncertain: true, kind: "name" } });
   }
 
   hits.sort((a, b) => a.start - b.start);
@@ -127,8 +146,8 @@ export function filter(text: string, ctx: FilterContext): FilterOutcome {
       tagged.push({ text: plain, mark: null, label: null });
       out += plain;
     }
-    original.push({ text: text.slice(h.start, h.end), mark: h.mark === "suspect" ? "suspect" : "replaced", label: h.label });
-    tagged.push({ text: h.out, mark: h.mark === "suspect" ? "suspect" : h.mark === "relative" ? "relative" : "tag", label: h.label });
+    original.push({ text: text.slice(h.start, h.end), mark: "replaced", label: h.label });
+    tagged.push({ text: h.out, mark: h.mark === "relative" ? "relative" : "tag", label: h.label });
     out += h.out;
     at = h.end;
   }
@@ -138,18 +157,18 @@ export function filter(text: string, ctx: FilterContext): FilterOutcome {
     tagged.push({ text: rest, mark: null, label: null });
     out += rest;
   }
-  const suspects: Suspect[] = [];
-  for (const h of hits) if (h.suspect && !suspects.some((s) => s.token === h.suspect?.token)) suspects.push(h.suspect);
+  const autoHidden: AutoHidden[] = [];
+  for (const h of hits) if (h.auto && !autoHidden.some((a) => a.token === h.auto?.token)) autoHidden.push(h.auto);
   return {
     tagged: out,
     original_segments: original,
     tagged_segments: tagged,
-    suspects,
-    hidden: Array.from(new Set(hits.filter((h) => h.mark !== "suspect").map((h) => h.label))),
+    auto_hidden: autoHidden,
+    hidden: Array.from(new Set(hits.map((h) => h.label))),
     checks: {
-      declared_names: hits.filter((h) => h.label.startsWith("שם ") && h.mark === "replaced").length,
+      declared_names: hits.filter((h) => h.label.startsWith("שם ") && !h.auto).length,
       patterns: hits.filter((h) => h.label === "תאריך" || h.label === "מספר מזהה").length,
-      name_suspects: suspects.length,
+      name_suspects: autoHidden.length,
       indirect_suspects: 0,
     },
   };

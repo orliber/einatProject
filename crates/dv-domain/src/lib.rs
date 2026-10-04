@@ -11,7 +11,9 @@ pub mod routing;
 pub mod scores;
 
 pub use compare::{compare, comparison_text, ComparisonRow};
-pub use identity::{assign_tag, Identity, IdentityInput, Role, PRACTITIONER_TAG};
+pub use identity::{
+    assign_tag, FoundName, Identity, IdentityInput, IdentitySource, Role, PRACTITIONER_TAG,
+};
 pub use records::{
     Age, Author, CaseInput, CaseMeta, CaseSummary, ChatMessage, ChatRole, Consent, DraftParagraph,
     DraftStatus, Folder, GrammaticalGender, InputKind, Transmission,

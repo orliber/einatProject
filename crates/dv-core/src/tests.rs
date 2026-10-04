@@ -257,9 +257,18 @@ fn no_consent_no_sending() {
         .is_some());
 }
 
+/// Everything the review screen shows as going out, joined.
+fn outgoing(p: &Prepared) -> String {
+    p.parts
+        .iter()
+        .flat_map(|part| part.outgoing.iter().map(|s| s.text.as_str()))
+        .collect()
+}
+
 #[test]
-fn unknown_name_blocks_until_decided() {
-    let (_dir, mut core, case) = setup(None);
+fn unknown_name_is_hidden_kept_and_restored_with_one_click() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
     core.add_input(
         &case,
         InputKind::Kindergarten,
@@ -267,33 +276,60 @@ fn unknown_name_blocks_until_decided() {
         "הסייעת ורד אמרה שהוא משחק לבד בחצר.",
     )
     .unwrap();
+    // Kept with the case when the material is saved, with the role its context gives.
+    let kept = core
+        .case_detail(&case)
+        .unwrap()
+        .identities
+        .into_iter()
+        .find(|i| i.value == "ורד")
+        .expect("kept");
+    assert_eq!(kept.role, Role::Assistant);
+    assert_eq!(kept.source, IdentitySource::Auto);
+    assert!(kept.reason.contains("הסייעת"), "{}", kept.reason);
+
     let prepared = core
         .prepare_section(&case, "kindergarten", "טיוטה")
         .unwrap();
-    assert!(prepared.approval_id.is_none());
-    let suspect = prepared
-        .suspects
+    let id = prepared
+        .approval_id
+        .clone()
+        .unwrap_or_else(|| panic!("{:?}", prepared.blocked));
+    assert!(prepared.suspects.is_empty());
+    let item = prepared
+        .auto_hidden
         .iter()
-        .find(|s| s.token.contains("ורד"))
-        .expect("suspect");
+        .find(|a| a.token == "ורד")
+        .expect("listed on the card");
+    assert_eq!(item.tag, kept.tag);
+    assert!(outgoing(&prepared).contains(&format!("הסייעת {}", kept.tag)));
+    core.send_section(&id).unwrap();
+    assert!(!fake.sent.lock().unwrap()[0].contains("ורד"));
 
-    core.decide_suspect(
-        &case,
-        &suspect.token,
-        SuspectDecision::Hide {
-            role: Role::Assistant,
-        },
-    )
-    .unwrap();
+    // The role menu: a teacher, not an assistant.
+    let ids = core.change_role(&case, &kept.tag, Role::Teacher).unwrap();
+    let teacher = ids
+        .iter()
+        .find(|i| i.value == "ורד" && i.role == Role::Teacher);
+    assert!(teacher.is_some(), "{ids:?}");
+
+    // "להחזיר": the word goes out as written from now on, and is not found again.
+    let tag = teacher.unwrap().tag.clone();
+    core.restore_auto_hidden(&case, "ורד", &tag).unwrap();
     let again = core
         .prepare_section(&case, "kindergarten", "טיוטה")
         .unwrap();
-    assert!(again.suspects.is_empty(), "{:?}", again.suspects);
-    assert!(again.approval_id.is_some());
+    assert!(
+        again.auto_hidden.iter().all(|a| a.token != "ורד"),
+        "{:?}",
+        again.auto_hidden
+    );
+    assert!(outgoing(&again).contains("הסייעת ורד"));
+    assert!(again.approval_id.is_some(), "{:?}", again.blocked);
 }
 
 #[test]
-fn manual_edit_with_new_name_goes_through_review() {
+fn manual_edit_with_new_name_is_hidden_before_it_goes_out() {
     let (_dir, mut core, case) = setup(None);
     let p = core
         .prepare_section(&case, "kindergarten", "טיוטה")
@@ -311,14 +347,22 @@ fn manual_edit_with_new_name_goes_through_review() {
     core.edit_paragraph(&case, &para.id, "לפי הסבתא זהבה, אלון רגיש לרעש.")
         .unwrap();
 
+    // Kept with the case when the edit is saved, so the stored draft holds only its tag.
+    let kept = core
+        .case_detail(&case)
+        .unwrap()
+        .identities
+        .into_iter()
+        .find(|i| i.value == "זהבה")
+        .expect("kept");
+    assert_eq!(kept.role, Role::Relative);
     let next = core
         .prepare_section(&case, "kindergarten", "שפר/י את הניסוח")
         .unwrap();
-    assert!(
-        next.approval_id.is_none(),
-        "an unreviewed name in a manual edit must stop the send"
-    );
-    assert!(next.suspects.iter().any(|s| s.token.contains("זהבה")));
+    assert!(next.approval_id.is_some(), "{:?}", next.blocked);
+    let out = outgoing(&next);
+    assert!(!out.contains("זהבה"), "{out}");
+    assert!(out.contains(&format!("הסבתא {}", kept.tag)), "{out}");
 }
 
 #[test]
@@ -512,7 +556,7 @@ fn full_draft_leaves_written_sections_alone() {
 }
 
 #[test]
-fn ambiguous_word_is_decided_once_per_case() {
+fn ambiguous_word_is_hidden_and_restored_once_per_case() {
     let fake = FakeTransport::default();
     let (_dir, mut core, case) = setup(Some(fake.clone()));
     core.add_input(
@@ -525,27 +569,20 @@ fn ambiguous_word_is_decided_once_per_case() {
     let p = core
         .prepare_section(&case, "kindergarten", "טיוטה")
         .unwrap();
-    assert!(p.approval_id.is_none());
-    let s = p
-        .suspects
-        .iter()
-        .find(|s| s.kind == dv_privacy::SuspectKind::AmbiguousWord)
-        .expect("ambiguous");
-
-    core.decide_suspect(&case, &s.token, SuspectDecision::IsName)
-        .unwrap();
-    let p = core
-        .prepare_section(&case, "kindergarten", "טיוטה")
-        .unwrap();
     let id = p
         .approval_id
         .clone()
-        .unwrap_or_else(|| panic!("{:?} {:?}", p.blocked, p.suspects));
+        .unwrap_or_else(|| panic!("{:?}", p.blocked));
+    assert!(p
+        .auto_hidden
+        .iter()
+        .any(|a| a.kind == dv_privacy::AutoKind::DeclaredInWord && a.token == "שאלון"));
     core.send_section(&id).unwrap();
     let sent = fake.sent.lock().unwrap().clone();
     assert!(sent[0].contains("ש[ילד] נרגע") && !sent[0].contains("אלון"));
 
-    // "Keep as is" instead, in another case with the same child name: that case asks again.
+    // Another case with the same child name, where it is the ordinary word: "להחזיר" there
+    // keeps "שאלון" as written in that case only.
     let other = core
         .create_case(
             CaseMeta {
@@ -571,13 +608,24 @@ fn ambiguous_word_is_decided_once_per_case() {
     let p = core
         .prepare_section(&other, "kindergarten", "טיוטה")
         .unwrap();
-    assert!(p.approval_id.is_none());
-    core.decide_suspect(&other, "שאלון", SuspectDecision::NotAName)
+    let item = p
+        .auto_hidden
+        .iter()
+        .find(|a| a.token == "שאלון")
+        .expect("hidden")
+        .clone();
+    core.restore_auto_hidden(&other, &item.token, &item.tag)
         .unwrap();
     let p = core
         .prepare_section(&other, "kindergarten", "טיוטה")
         .unwrap();
-    assert!(p.approval_id.is_some(), "{:?} {:?}", p.blocked, p.suspects);
+    assert!(p.approval_id.is_some(), "{:?}", p.blocked);
+    assert!(outgoing(&p).contains("שאלון ההורים"), "{}", outgoing(&p));
+    // The first case still hides it.
+    let p = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    assert!(!outgoing(&p).contains("שאלון נרגע"));
 }
 
 fn docx(document_body: &str, header: &str, creator: &str) -> Vec<u8> {
@@ -601,7 +649,7 @@ fn docx(document_body: &str, header: &str, creator: &str) -> Vec<u8> {
 }
 
 #[test]
-fn import_shows_body_hides_names_and_suggests_names_from_margins() {
+fn import_shows_body_hides_names_and_keeps_names_from_margins() {
     let (_dir, mut core, case) = setup(None);
     let bytes = docx(
         "סיכום ביקור: אלון הגיע עם אמו. בבדיקה נצפה קושי במעברים.",
@@ -626,13 +674,15 @@ fn import_shows_body_hides_names_and_suggests_names_from_margins() {
         "{:?}",
         p.preview
     );
-    let values: Vec<&str> = p
-        .name_suggestions
-        .iter()
-        .map(|s| s.value.as_str())
-        .collect();
+    // Names in the file's properties and margins are kept with the case without asking.
+    assert!(p.name_suggestions.is_empty());
+    let values: Vec<&str> = p.auto_hidden.iter().map(|a| a.token.as_str()).collect();
     assert!(values.contains(&"יעל בדויה"), "{values:?}");
     assert!(values.iter().any(|v| v.contains("רונית")), "{values:?}");
+    let kept = core.case_detail(&case).unwrap().identities;
+    assert!(kept
+        .iter()
+        .any(|i| i.value == "יעל בדויה" && i.source == IdentitySource::Metadata));
     assert!(p.warnings.iter().any(|w| w.contains("הכותרת")));
 
     // Confirming stores the (reviewed) body as case material.
@@ -875,6 +925,8 @@ fn the_report_file_name_never_carries_a_name() {
         tag: "[ילד]".into(),
         value: value.into(),
         aliases: aliases.iter().map(|a| (*a).to_owned()).collect(),
+        source: IdentitySource::Manual,
+        reason: String::new(),
     };
     let ids = [who("אלון כהן", &["Alon"])];
     let day = (2026, 10, 3);
@@ -1063,10 +1115,10 @@ fn every_instrument_sheet_passes_the_filter_without_questions() {
             inst.key
         );
         assert!(
-            outcome.suspects.is_empty(),
+            outcome.auto_hidden.is_empty(),
             "{}: {:?}",
             inst.key,
-            outcome.suspects
+            outcome.auto_hidden
         );
         assert!(
             outcome.hidden.is_empty(),
@@ -1121,6 +1173,8 @@ fn child_named(name: &str) -> dv_domain::Identity {
         tag: "[ילד]".into(),
         value: name.into(),
         aliases: vec![],
+        source: dv_domain::IdentitySource::Manual,
+        reason: String::new(),
     }
 }
 
@@ -1357,21 +1411,36 @@ fn score_tables_and_section_titles_are_never_rewritten_silently() {
         };
         texts.push(dv_domain::format_sheet(&sheet).unwrap());
     }
+    // A word that holds the name ("שאלון" for a child "אלון") or is spelled close to it may
+    // be hidden, but only as an item on the card: "להחזיר" there must bring the text back
+    // exactly. Nothing may change without being listed.
     let rewritten = found_for_every_child_name(|identities| {
-        let ctx = PrivacyContext {
-            case_id: "c",
-            identities,
-            practitioner: &[],
-            allowlisted: &|_| false,
-            confirmed_names: &|_| false,
-            today: (2026, 9, 28),
+        let filter_with = |text: &str, kept: &[String]| {
+            let allow = |t: &str| kept.iter().any(|k| normalize(k) == t);
+            let ctx = PrivacyContext {
+                case_id: "c",
+                identities,
+                practitioner: &[],
+                allowlisted: &allow,
+                confirmed_names: &|_| false,
+                today: (2026, 9, 28),
+            };
+            dv_privacy::filter(text, &ctx).unwrap()
         };
-        let hidden: Vec<Vec<String>> = texts
+        let changed: Vec<String> = texts
             .iter()
-            .map(|text| dv_privacy::filter(text, &ctx).unwrap().hidden)
-            .filter(|hidden| !hidden.is_empty())
+            .filter_map(|text| {
+                let first = filter_with(text, &[]);
+                if first.tagged == *text {
+                    return None;
+                }
+                let listed: Vec<String> =
+                    first.auto_hidden.iter().map(|a| a.token.clone()).collect();
+                let restored = filter_with(text, &listed);
+                (restored.tagged != *text).then(|| format!("{:?} {listed:?}", restored.hidden))
+            })
             .collect();
-        (!hidden.is_empty()).then(|| format!("{hidden:?}"))
+        (!changed.is_empty()).then(|| format!("{changed:?}"))
     });
     assert!(rewritten.is_empty(), "{rewritten:#?}");
 }
@@ -1587,7 +1656,7 @@ fn a_sorting_that_arrives_after_an_edit_is_not_applied() {
 }
 
 #[test]
-fn sorting_needs_consent_and_asks_about_unknown_names_first() {
+fn sorting_needs_consent_and_hides_unknown_names() {
     let (_dir, mut core, case) = setup(None);
     core.add_input(
         &case,
@@ -1597,11 +1666,9 @@ fn sorting_needs_consent_and_asks_about_unknown_names_first() {
     )
     .unwrap();
     let prepared = core.prepare_sort(&case).unwrap();
-    assert!(
-        prepared.approval_id.is_none(),
-        "an open question blocks sending"
-    );
-    assert!(prepared.suspects.iter().any(|s| s.token.contains("יובל")));
+    assert!(prepared.approval_id.is_some(), "{:?}", prepared.blocked);
+    assert!(prepared.auto_hidden.iter().any(|a| a.token == "יובל"));
+    assert!(!outgoing(&prepared).contains("יובל"));
 
     let mut meta = core.case_detail(&case).unwrap().meta;
     meta.consent = None;
@@ -2264,13 +2331,14 @@ fn the_sample_documents_leak_nothing() {
         .collect();
     files.sort();
     assert!(files.len() >= 10, "{files:?}");
-    let mut stranger_asked = false;
+    let mut stranger_hidden = false;
     for path in &files {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
         let bytes = std::fs::read(path).unwrap();
         match core.import_document(&case, &name, &bytes) {
             Ok(p) => {
-                stranger_asked |= p.suspects.iter().any(|s| s.token.contains("עומרי"));
+                assert!(p.suspects.is_empty() && p.name_suggestions.is_empty());
+                stranger_hidden |= p.auto_hidden.iter().any(|a| a.token.contains("עומרי"));
                 core.add_input(&case, p.suggested_kind, &p.title, &p.body)
                     .unwrap();
             }
@@ -2278,33 +2346,13 @@ fn the_sample_documents_leak_nothing() {
         }
     }
     assert!(
-        stranger_asked,
-        "the friend the case does not list is asked about"
+        stranger_hidden,
+        "the friend the case does not list is hidden without asking"
     );
 
-    // Einat's answers: the friend is hidden, "שאלון" here is "that Alon", the rest are words.
-    let mut prepared = core.prepare_sort(&case).unwrap();
-    let mut asked: Vec<String> = Vec::new();
-    for _ in 0..5 {
-        if prepared.suspects.is_empty() {
-            break;
-        }
-        for s in &prepared.suspects {
-            asked.push(s.token.clone());
-            let decision = if s.token.contains("עומרי") {
-                SuspectDecision::Hide {
-                    role: Role::OtherChild,
-                }
-            } else if s.token == "שאלון" {
-                SuspectDecision::IsName
-            } else {
-                SuspectDecision::NotAName
-            };
-            core.decide_suspect(&case, &s.token, decision).unwrap();
-        }
-        prepared = core.prepare_sort(&case).unwrap();
-    }
-    assert!(asked.len() <= 4, "few questions, each once: {asked:?}");
+    // Nothing to answer: the request clears as it is.
+    let prepared = core.prepare_sort(&case).unwrap();
+    assert!(prepared.suspects.is_empty());
     assert!(prepared.blocked.is_empty(), "{:?}", prepared.blocked);
     core.send_sort(&prepared.approval_id.expect("clears the gate"))
         .unwrap();
@@ -2474,10 +2522,10 @@ fn a_follow_up_takes_the_names_and_compares_the_scores() {
     assert!(core.follow_up(&before).unwrap().is_none());
 }
 
-/// "זה לא שם, להשאיר" must stick for every kind of question: after one answer to each, the
-/// same request asks nothing again (a question that comes back looks like a frozen screen).
+/// "להחזיר" must stick for every kind of hidden item: after one click on each, the same
+/// request hides none of them again (an item that comes back looks like a broken button).
 #[test]
-fn every_not_a_name_answer_sticks_after_one_round() {
+fn every_restore_sticks_after_one_round() {
     let (_dir, mut core, case) = setup(Some(FakeTransport::default()));
     for text in [
         // A spelling close to a declared name, behind a prefix ("ה" + "ריון" ~ "רון").
@@ -2493,14 +2541,14 @@ fn every_not_a_name_answer_sticks_after_one_round() {
             .unwrap();
     }
     let first = core.prepare_sort(&case).unwrap();
-    assert!(!first.suspects.is_empty());
-    for s in &first.suspects {
-        core.decide_suspect(&case, &s.token, SuspectDecision::NotAName)
-            .unwrap();
+    assert!(first.auto_hidden.len() >= 5, "{:?}", first.auto_hidden);
+    for a in &first.auto_hidden {
+        core.restore_auto_hidden(&case, &a.token, &a.tag).unwrap();
     }
     let again = core.prepare_sort(&case).unwrap();
-    let back: Vec<&str> = again.suspects.iter().map(|s| s.token.as_str()).collect();
-    assert!(back.is_empty(), "asked again after answering: {back:?}");
+    let back: Vec<&str> = again.auto_hidden.iter().map(|a| a.token.as_str()).collect();
+    assert!(back.is_empty(), "hidden again after restoring: {back:?}");
+    assert!(again.approval_id.is_some(), "{:?}", again.blocked);
 }
 
 /// A follow-up shares its names with the case before: sending from it must work, with this
@@ -2586,9 +2634,9 @@ fn bracketed_words_in_approved_text_do_not_block_the_summary() {
     assert!(sent.contains("(מחנכת)") && !sent.contains("אלון"), "{sent}");
 }
 
-/// "עובדת" is asked about only when a job or a workplace follows it.
+/// "עובדת" is generalized only when a job or a workplace follows it.
 #[test]
-fn work_words_are_asked_about_only_before_a_job() {
+fn work_words_are_generalized_only_before_a_job() {
     let (_dir, mut core, case) = setup(Some(FakeTransport::default()));
     core.add_input(
         &case,
@@ -2597,14 +2645,16 @@ fn work_words_are_asked_about_only_before_a_job() {
         "הגננת עובדת איתו על המעברים. מנהלת הגן הצטרפה לשיחה. האם עובדת כמנהלת חשבונות, והאב עובד בבנק.",
     )
     .unwrap();
-    let asked: Vec<String> = core
-        .prepare_sort(&case)
-        .unwrap()
-        .suspects
-        .into_iter()
-        .filter(|s| s.kind == dv_privacy::SuspectKind::Indirect)
-        .map(|s| s.token)
+    let prepared = core.prepare_sort(&case).unwrap();
+    let asked: Vec<String> = prepared
+        .auto_hidden
+        .iter()
+        .filter(|a| a.kind == dv_privacy::AutoKind::Indirect)
+        .map(|a| a.token.clone())
         .collect();
+    let out = outgoing(&prepared);
+    assert!(out.contains("האם עובדת בתחום הכספים"), "{out}");
+    assert!(out.contains("האב עובד בתחום הכספים"), "{out}");
     assert!(
         asked.iter().any(|t| t.starts_with("עובדת כמנהלת")),
         "{asked:?}"
@@ -2639,7 +2689,11 @@ fn a_section_title_holding_the_childs_name_blocks_nothing() {
     core.set_input_sections(&case, &abas, &["adaptive".to_owned()])
         .unwrap();
     let prepared = core.prepare_section(&case, "adaptive", "טיוטה").unwrap();
-    assert!(prepared.suspects.is_empty(), "{:?}", prepared.suspects);
+    assert!(
+        prepared.auto_hidden.is_empty(),
+        "{:?}",
+        prepared.auto_hidden
+    );
     assert!(prepared.blocked.is_empty(), "{:?}", prepared.blocked);
     core.send_section(&prepared.approval_id.unwrap()).unwrap();
     core.approve_section(&case, "adaptive").unwrap();

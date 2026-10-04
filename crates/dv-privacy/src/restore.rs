@@ -138,6 +138,8 @@ mod tests {
             tag: "[ילד]".into(),
             value: "ליאור".into(),
             aliases: vec![],
+            source: dv_domain::IdentitySource::Manual,
+            reason: String::new(),
         }];
         let text = concat!(
             "[ילד] שיחק עם לליאור ועם אביגיל. טלפון 052-",

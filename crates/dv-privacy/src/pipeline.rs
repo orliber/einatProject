@@ -6,7 +6,7 @@
 use std::fmt;
 use std::ops::Range;
 
-use dv_domain::{Identity, Role, PRACTITIONER_TAG};
+use dv_domain::{assign_tag, Identity, IdentitySource, Role, PRACTITIONER_TAG};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -74,7 +74,41 @@ pub enum SuspectKind {
     AmbiguousWord,
 }
 
-/// A span that blocks sending until the psychologist decides.
+/// What the filter hid on its own, as the summary card lists it (D-042, stage 3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum AutoKind {
+    /// A name the case did not list. It is kept as an identity of the case from then on.
+    Name,
+    /// A name of the case inside an ordinary word ("שאלון" when the child is "אלון").
+    DeclaredInWord,
+    /// A spelling close to a name of the case ("נואם" for "נועם"), hidden as that name.
+    SimilarSpelling,
+    /// A name that belongs to another case.
+    OtherCase,
+    /// A job or a workplace, generalized ("עובדת בתחום החינוך").
+    Indirect,
+}
+
+/// One thing the filter hid without asking. "להחזיר" on the card keeps it as it was written
+/// from then on, for this case.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AutoHidden {
+    /// The words as written (the whole word for a name inside a word).
+    pub token: String,
+    /// What goes out instead: a tag ("[גננת_2]") or a generalization.
+    pub tag: String,
+    pub role: Role,
+    /// Why, in a few Hebrew words ("אחרי 'הגננת'").
+    pub reason: String,
+    /// Hidden on a weaker sign (a name that is also a word, a close spelling, English).
+    pub uncertain: bool,
+    pub kind: AutoKind,
+}
+
+/// A question about a word (the model's answer scan, and the earlier review screen).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct Suspect {
@@ -121,7 +155,8 @@ pub struct FilterOutcome {
     pub tagged: String,
     pub original_segments: Vec<Segment>,
     pub tagged_segments: Vec<Segment>,
-    pub suspects: Vec<Suspect>,
+    /// What the filter hid on its own; nothing is left to ask.
+    pub auto_hidden: Vec<AutoHidden>,
     /// What was hidden, by kind ("שם הילד/ה", "תאריך"), for the line under each message.
     pub hidden: Vec<String>,
     pub checks: Checks,
@@ -137,11 +172,23 @@ struct Replacement {
     declared: bool,
 }
 
+/// A span the rules found doubtful. Every one is hidden (stage 3): as `known` when the
+/// filter already knows what goes out, otherwise with a new tag by its role.
 #[derive(Debug, Clone)]
 struct SuspectSpan {
     start: usize,
     end: usize,
     suspect: Suspect,
+    /// A declared tag (a name inside a word, a close spelling) or a generalized job.
+    known: Option<String>,
+}
+
+/// An auto-hidden item and the span of the replacement it explains.
+#[derive(Debug, Clone)]
+struct AutoSpan {
+    start: usize,
+    end: usize,
+    item: AutoHidden,
 }
 
 fn is_generic(word: &str) -> bool {
@@ -216,6 +263,19 @@ fn variant_reads_as_word(v: &str) -> bool {
             .any(|p| word_bucket(&format!("{p}{v}")) >= EVERYDAY)
 }
 
+/// A name the filter added on its own (not the psychologist) that is also an everyday word
+/// ("גיל", "שמחה", "בן") is not matched as a declared name: it was found by its context, and
+/// is found again by it (with the same tag), in the pipeline and in the gate alike. Matched
+/// everywhere it would hide "בגיל 3" and "בשמחה" in every later document of the case.
+fn found_word(identity: &Identity, phrase: &[String]) -> bool {
+    identity.source != IdentitySource::Manual && phrase.len() == 1 && everyday_name(&phrase[0])
+}
+
+/// A name that is also an everyday word on its own ("אלה", "חן", "מימון", "אדם").
+fn everyday_name(w: &str) -> bool {
+    LEXICON.word_names.contains(w) || LEXICON.common_words.contains(w) || word_bucket(w) >= EVERYDAY
+}
+
 /// Index of every declared name. Current-case identities are inserted first, so a name that
 /// exists in two cases maps to this case's tag.
 pub(crate) fn identity_index(ctx: &PrivacyContext<'_>) -> PhraseIndex<Target> {
@@ -234,7 +294,9 @@ pub(crate) fn identity_index(ctx: &PrivacyContext<'_>) -> PhraseIndex<Target> {
         };
         for name in std::iter::once(&identity.value).chain(identity.aliases.iter()) {
             for phrase in name_phrases(name) {
-                idx.insert_words(phrase, target.clone());
+                if !found_word(identity, &phrase) {
+                    idx.insert_words(phrase, target.clone());
+                }
             }
         }
     };
@@ -408,11 +470,12 @@ fn role_label(role: Role) -> String {
     format!("שם {}", role.label_he())
 }
 
-/// Declared single words of the current case, for near-miss spelling detection.
+/// Declared single words of the current case, for near-miss spelling detection. Names the
+/// filter found itself are left out: a close spelling of a guess is not evidence.
 fn declared_words(ctx: &PrivacyContext<'_>) -> Vec<(String, String)> {
     ctx.identities
         .iter()
-        .filter(|i| i.case_id == ctx.case_id)
+        .filter(|i| i.case_id == ctx.case_id && i.source != IdentitySource::Auto)
         .flat_map(|i| {
             std::iter::once(&i.value)
                 .chain(i.aliases.iter())
@@ -848,6 +911,7 @@ fn name_run_suspects(
                     message: message.to_owned(),
                     suggested_role: Role::Other,
                 },
+                known: None,
             });
         }
     };
@@ -1300,9 +1364,14 @@ fn find_suspects(
                 suspect: Suspect {
                     token: text[start..tok.end].to_owned(),
                     kind: SuspectKind::UnknownName,
-                    message: "שם שלא מופיע ברשימת התיק".to_owned(),
-                    suggested_role: Role::OtherChild,
+                    message: if plain.is_some() {
+                        "שם פרטי".to_owned()
+                    } else {
+                        "שם שהוא גם מילה, בהקשר של שם".to_owned()
+                    },
+                    suggested_role: Role::Other,
                 },
+                known: None,
             });
             continue;
         }
@@ -1340,6 +1409,7 @@ fn find_suspects(
                     message: "מילה עם גרש שנראית כמו שם".to_owned(),
                     suggested_role: Role::Other,
                 },
+                known: None,
             });
             continue;
         }
@@ -1354,9 +1424,10 @@ fn find_suspects(
                 suspect: Suspect {
                     token: raw.to_owned(),
                     kind: SuspectKind::LatinName,
-                    message: "מילה באנגלית שעשויה להיות שם".to_owned(),
+                    message: "מילה באנגלית שנראית כמו שם".to_owned(),
                     suggested_role: Role::Other,
                 },
+                known: None,
             });
             continue;
         }
@@ -1387,20 +1458,19 @@ fn find_suspects(
                 suspect: Suspect {
                     token: text[start..tok.end].to_owned(),
                     kind: SuspectKind::SimilarToDeclared,
-                    message: format!("כתיב קרוב לשם שבתיק ({tag})"),
+                    message: "כתיב קרוב לשם שבתיק".to_owned(),
                     suggested_role: Role::Other,
                 },
+                known: Some(tag),
             });
             continue;
         }
         if PROFESSION_CUES.iter().any(|c| normalize(c) == tok.norm)
             && is_profession_context(&tok.norm, next, tokens.get(i + 2).map(|t| t.norm.as_str()))
         {
-            // Flag the cue and the next two words ("עובדת כמנהלת חשבונות").
-            let end = tokens
-                .get(i + 2)
-                .or_else(|| tokens.get(i + 1))
-                .map_or(tok.end, |t| t.end);
+            // The cue and the rest of the job, up to the end of the clause ("עובדת כמורה
+            // בבית ספר יסודי"), so the generalization replaces all of it.
+            let end = tokens[job_end(text, tokens, i)].end;
             if !overlaps(tok.start, end, reps, &out) {
                 out.push(SuspectSpan {
                     start: tok.start,
@@ -1408,10 +1478,10 @@ fn find_suspects(
                     suspect: Suspect {
                         token: text[tok.start..end].to_owned(),
                         kind: SuspectKind::Indirect,
-                        message: "מקצוע או מקום עבודה – כדאי להכליל (\"עובדת בתחום החינוך\")"
-                            .to_owned(),
+                        message: "מקצוע או מקום עבודה".to_owned(),
                         suggested_role: Role::Other,
                     },
+                    known: Some(generalize_job(text, tokens, i, end)),
                 });
             }
         }
@@ -1500,16 +1570,16 @@ pub fn filter_split(
                 ..x.clone()
             })
             .collect();
-        let part_suspects: Vec<SuspectSpan> = suspects
+        let part_autos: Vec<AutoSpan> = suspects
             .iter()
             .filter(|x| inside(x.start, x.end))
-            .map(|x| SuspectSpan {
+            .map(|x| AutoSpan {
                 start: x.start - r.start,
                 end: x.end - r.start,
-                suspect: x.suspect.clone(),
+                item: x.item.clone(),
             })
             .collect();
-        parts.push(assemble(piece, &part_reps, &part_suspects));
+        parts.push(assemble(piece, &part_reps, &part_autos));
     }
     Ok((whole, Some(parts)))
 }
@@ -1523,7 +1593,7 @@ impl FilterOutcome {
             tagged: String::new(),
             original_segments: Vec::new(),
             tagged_segments: Vec::new(),
-            suspects: Vec::new(),
+            auto_hidden: Vec::new(),
             hidden: Vec::new(),
             checks: Checks::default(),
         };
@@ -1544,9 +1614,9 @@ impl FilterOutcome {
                 .extend(p.original_segments.iter().cloned());
             out.tagged_segments
                 .extend(p.tagged_segments.iter().cloned());
-            for s in &p.suspects {
-                if !out.suspects.contains(s) {
-                    out.suspects.push(s.clone());
+            for a in &p.auto_hidden {
+                if !out.auto_hidden.contains(a) {
+                    out.auto_hidden.push(a.clone());
                 }
             }
             for h in &p.hidden {
@@ -2207,7 +2277,7 @@ const PLACE_WORDS: &[&str] = &[
 fn analyze(
     text: &str,
     ctx: &PrivacyContext<'_>,
-) -> Result<(Vec<Replacement>, Vec<SuspectSpan>), PrivacyError> {
+) -> Result<(Vec<Replacement>, Vec<AutoSpan>), PrivacyError> {
     let tokens = tokenize(text);
     let mut reps: Vec<Replacement> = Vec::new();
     let mut suspects: Vec<SuspectSpan> = Vec::new();
@@ -2222,17 +2292,37 @@ fn analyze(
             && LEXICON.common_words.contains(&whole.norm)
             && !(ctx.confirmed_names)(&whole.norm)
         {
-            // "שאלון" = ש + אלון: never rewrite an ordinary word silently.
+            // "שאלון" = ש + אלון: hidden as the name (fail-closed) and listed first on the
+            // card, where "להחזיר" keeps the word; only then does the gate let it out.
+            if let (false, Target::Identity { case_id, tag, .. }) =
+                ((ctx.allowlisted)(&whole.norm), &m.payload)
+            {
+                if *case_id == ctx.case_id {
+                    suspects.push(SuspectSpan {
+                        start: m.start,
+                        end: m.end,
+                        suspect: Suspect {
+                            token: text[whole.start..whole.end].to_owned(),
+                            kind: SuspectKind::AmbiguousWord,
+                            message: "שם מהתיק בתוך מילה".to_owned(),
+                            suggested_role: Role::Other,
+                        },
+                        known: Some(tag.clone()),
+                    });
+                    continue;
+                }
+            }
             if !(ctx.allowlisted)(&whole.norm) {
                 suspects.push(SuspectSpan {
                     start: whole.start,
                     end: whole.end,
                     suspect: Suspect {
                         token: text[whole.start..whole.end].to_owned(),
-                        kind: SuspectKind::AmbiguousWord,
-                        message: "מילה רגילה שמכילה שם מהתיק – להסתיר או להשאיר?".to_owned(),
+                        kind: SuspectKind::OtherCaseIdentity,
+                        message: "שם מתיק אחר בתוך מילה".to_owned(),
                         suggested_role: Role::Other,
                     },
+                    known: None,
                 });
             }
             continue;
@@ -2255,8 +2345,9 @@ fn analyze(
                     token: text[m.start..m.end].to_owned(),
                     kind: SuspectKind::OtherCaseIdentity,
                     message: "שם שמופיע בתיק אחר".to_owned(),
-                    suggested_role: Role::OtherChild,
+                    suggested_role: Role::Other,
                 },
+                known: None,
             }),
             Target::Practitioner => reps.push(Replacement {
                 start: m.start,
@@ -2291,8 +2382,9 @@ fn analyze(
                     token: text[start..end].to_owned(),
                     kind: SuspectKind::OtherCaseIdentity,
                     message: "שם שמופיע בתיק אחר".to_owned(),
-                    suggested_role: Role::OtherChild,
+                    suggested_role: Role::Other,
                 },
+                known: None,
             }),
             Target::Practitioner => reps.push(Replacement {
                 start,
@@ -2355,21 +2447,528 @@ fn analyze(
     }
     // Layers 3, 5, 6: suspects on what is left.
     suspects.extend(find_suspects(text, &tokens, ctx, &reps));
+    // A name found once is the same name elsewhere in the text ("קוראים לה נוגה" … "נוגה
+    // צחקה").
+    let again = recurring_names(text, &tokens, ctx, &reps, &suspects);
+    suspects.extend(again);
+
+    // Nothing is asked any more: every suspect is hidden, and the card lists it.
+    let mut autos = auto_hide(text, &tokens, ctx, &suspects, &mut reps);
+    autos.extend(declared_auto(ctx, &reps));
 
     reps.sort_by_key(|r| r.start);
-    suspects.sort_by_key(|s| s.start);
-    Ok((reps, suspects))
+    autos.sort_by_key(|a| a.start);
+    Ok((reps, autos))
 }
 
-fn assemble(text: &str, reps: &[Replacement], suspects: &[SuspectSpan]) -> FilterOutcome {
-    enum Ev<'a> {
-        Rep(&'a Replacement),
-        Sus(&'a SuspectSpan),
+/// The role a person word just before a name gives it, and that word: "הגננת אסתי",
+/// "סבתא רבתא שמחה", "חבר מהגן, רועי". Up to three words back, within the sentence.
+fn role_from_context(text: &str, tokens: &[Token], start: usize) -> Option<(Role, String)> {
+    const ROLES: &[(Role, &[&str])] = &[
+        (Role::Teacher, &["גננת", "מחנכת", "מחנך"]),
+        (Role::Assistant, &["סייעת", "סייע", "מטפלת"]),
+        (Role::SchoolTeacher, &["מורה", "המורה"]),
+        (Role::Slp, &["קלינאית"]),
+        (
+            Role::Therapist,
+            &["מרפאה", "מרפא", "פיזיותרפיסטית", "פיזיותרפיסט", "מטפל"],
+        ),
+        (
+            Role::Doctor,
+            &[
+                "רופא",
+                "רופאה",
+                "רופאת",
+                "ד\"ר",
+                "דר",
+                "דוקטור",
+                "פרופ'",
+                "פרופסור",
+            ],
+        ),
+        (Role::Psychologist, &["פסיכולוגית", "פסיכולוג"]),
+        (
+            Role::Professional,
+            &[
+                "יועצת",
+                "יועץ",
+                "מנהלת",
+                "מנהל",
+                "עובדת",
+                "עו\"ס",
+                "מדריך",
+                "מדריכה",
+                "רכזת",
+                "מאבחנת",
+                "מאבחן",
+            ],
+        ),
+        (Role::Brother, &["אח", "אחיו", "אחיה", "אחי"]),
+        (Role::Sister, &["אחות", "אחותו", "אחותה", "אחותי"]),
+        (Role::Mother, &["אמא", "אמו", "אמה"]),
+        (Role::Father, &["אבא", "אביו", "אביה"]),
+        (
+            Role::Relative,
+            &[
+                "סבא",
+                "סבתא",
+                "סבו",
+                "סבתו",
+                "דוד",
+                "דודה",
+                "דודו",
+                "דודתו",
+                "נכד",
+                "נכדה",
+                "אחיין",
+                "אחיינית",
+                "בבושקה",
+                "סבתוש",
+                "דדושקה",
+                "ג'דו",
+                "ג'דה",
+                "סיתו",
+                "תיתה",
+                "בעלה",
+                "אשתו",
+                "גיס",
+                "גיסה",
+            ],
+        ),
+        (
+            Role::OtherChild,
+            &[
+                "חבר",
+                "חברה",
+                "חברו",
+                "חברתו",
+                "חברתה",
+                "ילד",
+                "ילדה",
+                "תאום",
+                "תאומה",
+            ],
+        ),
+        (Role::Family, &["משפחת", "משפ'"]),
+    ];
+    let i = tokens.iter().position(|t| t.start >= start)?;
+    for j in (i.saturating_sub(3)..i).rev() {
+        if text[tokens[j].end..tokens[j + 1].start].contains(['.', '\n', ';', '!', '?']) {
+            return None;
+        }
+        for (_, head) in prefix_splits(&tokens[j].norm) {
+            let bare = head.strip_prefix('ה').unwrap_or(&head);
+            for (role, words) in ROLES {
+                if words
+                    .iter()
+                    .any(|w| normalize(w) == head || normalize(w) == bare)
+                {
+                    return Some((*role, text[tokens[j].start..tokens[j].end].to_owned()));
+                }
+            }
+        }
     }
-    let mut events: Vec<(usize, usize, Ev<'_>)> =
-        reps.iter().map(|r| (r.start, r.end, Ev::Rep(r))).collect();
-    events.extend(suspects.iter().map(|s| (s.start, s.end, Ev::Sus(s))));
-    events.sort_by_key(|e| e.0);
+    None
+}
+
+/// Every suspect becomes a replacement: a declared tag or a generalization when the filter
+/// knows it, otherwise a new tag by the role the context gives. One name keeps one tag in the
+/// text; a name the case already has (an identity the filter added before) keeps its own.
+fn auto_hide(
+    text: &str,
+    tokens: &[Token],
+    ctx: &PrivacyContext<'_>,
+    suspects: &[SuspectSpan],
+    reps: &mut Vec<Replacement>,
+) -> Vec<AutoSpan> {
+    let case: Vec<&Identity> = ctx
+        .identities
+        .iter()
+        .filter(|i| i.case_id == ctx.case_id)
+        .collect();
+    let mut used: Vec<String> = case.iter().map(|i| i.tag.clone()).collect();
+    let mut named: Vec<(String, String, Role)> = Vec::new();
+    let mut out = Vec::new();
+    for s in suspects {
+        if overlaps(s.start, s.end, reps, &[]) {
+            continue;
+        }
+        let token = s.suspect.token.clone();
+        let (kind, uncertain) = match s.suspect.kind {
+            SuspectKind::AmbiguousWord => (AutoKind::DeclaredInWord, false),
+            SuspectKind::SimilarToDeclared => (AutoKind::SimilarSpelling, true),
+            SuspectKind::OtherCaseIdentity => (AutoKind::OtherCase, false),
+            SuspectKind::Indirect => (AutoKind::Indirect, false),
+            SuspectKind::LatinName => (AutoKind::Name, true),
+            SuspectKind::UnknownName => (
+                AutoKind::Name,
+                s.suspect.message.starts_with("שם שהוא גם מילה"),
+            ),
+        };
+        let (tag, role, reason, relative) = match (&s.known, kind) {
+            (Some(g), AutoKind::Indirect) => {
+                (g.clone(), Role::Other, s.suspect.message.clone(), true)
+            }
+            (Some(tag), _) => {
+                let role = case
+                    .iter()
+                    .find(|i| &i.tag == tag)
+                    .map_or(Role::Other, |i| i.role);
+                (tag.clone(), role, s.suspect.message.clone(), false)
+            }
+            (None, _) => {
+                let key = normalize(&text[s.start..s.end]);
+                let context = role_from_context(text, tokens, s.start);
+                let role = match &context {
+                    Some((role, _)) => *role,
+                    None if s.suspect.message.contains("שם משפחה") => Role::Family,
+                    None => Role::Other,
+                };
+                let reason = match &context {
+                    Some((_, cue)) => format!("אחרי '{cue}'"),
+                    None => s.suspect.message.clone(),
+                };
+                let tag = if let Some(i) = case.iter().find(|i| normalize(&i.value) == key) {
+                    i.tag.clone()
+                } else if let Some((_, t, _)) = named.iter().find(|(k, _, _)| *k == key) {
+                    t.clone()
+                } else {
+                    let t = assign_tag(role, &used);
+                    used.push(t.clone());
+                    named.push((key, t.clone(), role));
+                    t
+                };
+                let role = named
+                    .iter()
+                    .find(|(_, t, _)| *t == tag)
+                    .map_or(role, |(_, _, r)| *r);
+                (tag, role, reason, false)
+            }
+        };
+        reps.push(Replacement {
+            start: s.start,
+            end: s.end,
+            out: tag.clone(),
+            label: if kind == AutoKind::Indirect {
+                "מקצוע".to_owned()
+            } else {
+                role_label(role)
+            },
+            relative,
+            declared: false,
+        });
+        out.push(AutoSpan {
+            start: s.start,
+            end: s.end,
+            item: AutoHidden {
+                token,
+                tag,
+                role,
+                reason,
+                uncertain,
+                kind,
+            },
+        });
+    }
+    out
+}
+
+/// Names the filter added to the case earlier are hidden as identities now; the card still
+/// lists them, so "להחזיר" stays one click away.
+fn declared_auto(ctx: &PrivacyContext<'_>, reps: &[Replacement]) -> Vec<AutoSpan> {
+    reps.iter()
+        .filter(|r| r.declared)
+        .filter_map(|r| {
+            let i = ctx.identities.iter().find(|i| {
+                i.case_id == ctx.case_id && i.tag == r.out && i.source != IdentitySource::Manual
+            })?;
+            Some(AutoSpan {
+                start: r.start,
+                end: r.end,
+                item: AutoHidden {
+                    token: i.value.clone(),
+                    tag: i.tag.clone(),
+                    role: i.role,
+                    reason: i.reason.clone(),
+                    uncertain: false,
+                    kind: AutoKind::Name,
+                },
+            })
+        })
+        .collect()
+}
+
+/// The words of every new name found in this text, hidden wherever they recur in it (with
+/// or without a prefix, unless the prefixed form is an everyday word, "מלאה" ≠ מ + לאה).
+/// A name that is also a word ("אלה", "חן") recurs only where its context shows a name:
+/// "משימות אלה" and "בעלת חן" stay.
+fn recurring_names(
+    text: &str,
+    tokens: &[Token],
+    ctx: &PrivacyContext<'_>,
+    reps: &[Replacement],
+    suspects: &[SuspectSpan],
+) -> Vec<SuspectSpan> {
+    let mut words: Vec<String> = Vec::new();
+    for s in suspects {
+        if !matches!(
+            s.suspect.kind,
+            SuspectKind::UnknownName | SuspectKind::LatinName
+        ) {
+            continue;
+        }
+        for w in normalize(&text[s.start..s.end]).split(' ') {
+            if w.chars().count() >= 2
+                && !is_title(w)
+                && !is_person_word(w)
+                && !everyday_name(w)
+                && !words.iter().any(|x| x == w)
+            {
+                words.push(w.to_owned());
+            }
+        }
+    }
+    let mut out: Vec<SuspectSpan> = Vec::new();
+    if words.is_empty() {
+        return out;
+    }
+    for tok in tokens {
+        if overlaps(tok.start, tok.end, reps, suspects)
+            || overlaps(tok.start, tok.end, &[], &out)
+            || (ctx.allowlisted)(&tok.norm)
+        {
+            continue;
+        }
+        let raw = &text[tok.start..tok.end];
+        let hit = prefix_splits(&tok.norm).into_iter().find(|(p, h)| {
+            words.iter().any(|w| w == h) && (*p == 0 || !reads_as_word(&tok.norm, h))
+        });
+        if let Some((p, _)) = hit {
+            let start = tok.start + crate::text::byte_len_of_letters(raw, p);
+            out.push(SuspectSpan {
+                start,
+                end: tok.end,
+                suspect: Suspect {
+                    token: text[start..tok.end].to_owned(),
+                    kind: SuspectKind::UnknownName,
+                    message: "אותו שם במקום אחר בטקסט".to_owned(),
+                    suggested_role: Role::Other,
+                },
+                known: None,
+            });
+        }
+    }
+    out
+}
+
+/// A job or a workplace, generalized: the cue stays ("עובדת", "מנהל") and what follows it
+/// becomes a field ("בתחום החינוך"), or nothing when the field is unknown.
+/// The last token of a job phrase that starts at the cue `cue`: up to five words, ending
+/// at punctuation, at a word that opens a new clause ("ולכן", "כי"), or at "ו" + a word
+/// that is not part of a job ("ומגיעה"; "ומורה" goes on).
+fn job_end(text: &str, tokens: &[Token], cue: usize) -> usize {
+    const STOP: &[&str] = &[
+        "אבל",
+        "אך",
+        "כי",
+        "אולם",
+        "ולכן",
+        "לכן",
+        "כאשר",
+        "והוא",
+        "והיא",
+        "והם",
+        "ואילו",
+        "אשר",
+        "מאז",
+        "עד",
+        "אחרי",
+        "לפני",
+        "בזמן",
+        "ביום",
+        "בבוקר",
+        "בערב",
+        "שעות",
+    ];
+    let job_word = |h: &str| {
+        JOB_FIELDS
+            .iter()
+            .any(|(_, words)| words.iter().any(|w| normalize(w) == h))
+            || PROFESSION_CUES.iter().any(|c| normalize(c) == h)
+    };
+    let mut j = cue;
+    while j + 1 < tokens.len() && j - cue < 5 {
+        let gap = &text[tokens[j].end..tokens[j + 1].start];
+        if !gap
+            .chars()
+            .all(|c| matches!(c, ' ' | '-' | '–' | '־' | '"' | '״' | '\''))
+        {
+            break;
+        }
+        let next = &tokens[j + 1].norm;
+        if STOP.iter().any(|w| normalize(w) == *next)
+            || next.starts_with(|c: char| c.is_ascii_digit())
+        {
+            break;
+        }
+        if next.starts_with('ו')
+            && !prefix_splits(next)
+                .iter()
+                .any(|(p, h)| *p > 0 && job_word(h))
+        {
+            break;
+        }
+        j += 1;
+    }
+    // At least the word after the cue ("עובדת כגננת").
+    j.max((cue + 1).min(tokens.len() - 1))
+}
+
+/// Words that give a job its field, for the generalization ("עובדת בתחום החינוך").
+const JOB_FIELDS: &[(&str, &[&str])] = &[
+    (
+        "בתחום החינוך",
+        &[
+            "מורה",
+            "גננת",
+            "סייעת",
+            "מחנכת",
+            "מחנך",
+            "חינוכ",
+            "בית ספר",
+            "ספר",
+            "גנ",
+            "תיכונ",
+            "אוניברסיטה",
+            "מכללה",
+            "הוראה",
+            "חינוך",
+        ],
+    ),
+    (
+        "בתחום הבריאות",
+        &[
+            "רופא",
+            "רופאה",
+            "אח",
+            "אחות",
+            "חולימ",
+            "מרפאה",
+            "קופת",
+            "בית חולימ",
+            "רוקח",
+            "רוקחת",
+            "פיזיותרפיסט",
+            "פיזיותרפיסטית",
+            "סיעוד",
+            "רפואה",
+            "רפואי",
+        ],
+    ),
+    (
+        "בתחום ההייטק",
+        &[
+            "הייטק",
+            "מהנדס",
+            "מהנדסת",
+            "מתכנת",
+            "מתכנתת",
+            "תוכנה",
+            "סטארטאפ",
+            "סטרטאפ",
+            "מחשבימ",
+            "טכנולוגיה",
+            "חברת",
+        ],
+    ),
+    (
+        "בתחום הכספים",
+        &[
+            "חשבונות",
+            "חשבונ",
+            "בנק",
+            "רואה",
+            "רואת",
+            "כספימ",
+            "ביטוח",
+            "פיננסימ",
+            "השקעות",
+        ],
+    ),
+    (
+        "בתחום המשפט",
+        &["עורך", "עורכת", "עו\"ד", "משפט", "משפטימ", "שופט", "שופטת"],
+    ),
+    (
+        "בתחום הביטחון",
+        &[
+            "צבא",
+            "צה\"ל",
+            "משטרה",
+            "שוטר",
+            "שוטרת",
+            "קבע",
+            "ביטחונ",
+            "כבאי",
+        ],
+    ),
+    (
+        "בתחום המסחר",
+        &[
+            "חנות",
+            "מכירות",
+            "קופאי",
+            "קופאית",
+            "סופר",
+            "סופרמרקט",
+            "מוכר",
+            "מוכרת",
+            "שיווק",
+            "קניונ",
+        ],
+    ),
+    (
+        "בתחום המזון",
+        &["מסעדה", "מטבח", "טבח", "טבחית", "שף", "מאפייה", "קייטרינג"],
+    ),
+    (
+        "בתחום הבנייה",
+        &["בנייה", "בניינ", "קבלנ", "שיפוצימ", "אדריכל", "אדריכלית"],
+    ),
+    (
+        "בתחום התחבורה",
+        &["נהג", "נהגת", "הובלות", "משאית", "אוטובוס", "מונית"],
+    ),
+    ("בתחום הרווחה", &["סוציאלי", "סוציאלית", "רווחה", "עו\"ס"]),
+];
+
+fn generalize_job(text: &str, tokens: &[Token], cue: usize, end: usize) -> String {
+    let after: Vec<String> = tokens
+        .iter()
+        .filter(|t| t.start > tokens[cue].start && t.end <= end)
+        .flat_map(|t| prefix_splits(&t.norm))
+        .map(|(_, h)| h)
+        .collect();
+    let field = JOB_FIELDS.iter().find(|(_, words)| {
+        after
+            .iter()
+            .any(|h| words.iter().any(|w| normalize(w) == *h))
+    });
+    let raw_cue = &text[tokens[cue].start..tokens[cue].end];
+    let cue_word = match tokens[cue].norm.as_str() {
+        "במקצועו" => "עובד",
+        "במקצועה" => "עובדת",
+        _ => raw_cue,
+    };
+    match field {
+        Some((f, _)) => format!("{cue_word} {f}"),
+        None => cue_word.to_owned(),
+    }
+}
+
+fn assemble(text: &str, reps: &[Replacement], autos: &[AutoSpan]) -> FilterOutcome {
+    let mut events: Vec<&Replacement> = reps.iter().collect();
+    events.sort_by_key(|r| r.start);
 
     let seg = |t: &str, mark: Option<Mark>, label: Option<String>| Segment {
         text: t.to_owned(),
@@ -2379,43 +2978,26 @@ fn assemble(text: &str, reps: &[Replacement], suspects: &[SuspectSpan]) -> Filte
     let (mut original, mut tagged_segments, mut tagged) =
         (Vec::new(), Vec::new(), String::with_capacity(text.len()));
     let mut pos = 0;
-    for (start, end, ev) in &events {
-        if *start < pos {
+    for r in &events {
+        if r.start < pos {
             continue;
         }
-        let plain = &text[pos..*start];
+        let plain = &text[pos..r.start];
         if !plain.is_empty() {
             original.push(seg(plain, None, None));
             tagged_segments.push(seg(plain, None, None));
             tagged.push_str(plain);
         }
-        let piece = &text[*start..*end];
-        match ev {
-            Ev::Rep(r) => {
-                original.push(seg(piece, Some(Mark::Replaced), Some(r.label.clone())));
-                let mark = if r.relative {
-                    Mark::Relative
-                } else {
-                    Mark::Tag
-                };
-                tagged_segments.push(seg(&r.out, Some(mark), Some(r.label.clone())));
-                tagged.push_str(&r.out);
-            }
-            Ev::Sus(s) => {
-                original.push(seg(
-                    piece,
-                    Some(Mark::Suspect),
-                    Some(s.suspect.message.clone()),
-                ));
-                tagged_segments.push(seg(
-                    piece,
-                    Some(Mark::Suspect),
-                    Some(s.suspect.message.clone()),
-                ));
-                tagged.push_str(piece);
-            }
-        }
-        pos = *end;
+        let piece = &text[r.start..r.end];
+        original.push(seg(piece, Some(Mark::Replaced), Some(r.label.clone())));
+        let mark = if r.relative {
+            Mark::Relative
+        } else {
+            Mark::Tag
+        };
+        tagged_segments.push(seg(&r.out, Some(mark), Some(r.label.clone())));
+        tagged.push_str(&r.out);
+        pos = r.end;
     }
     if pos < text.len() {
         original.push(seg(&text[pos..], None, None));
@@ -2432,29 +3014,35 @@ fn assemble(text: &str, reps: &[Replacement], suspects: &[SuspectSpan]) -> Filte
     let count = |f: &dyn Fn(&Replacement) -> bool| {
         u32::try_from(reps.iter().filter(|r| f(r)).count()).unwrap_or(u32::MAX)
     };
+    let mut auto_hidden: Vec<AutoHidden> = Vec::new();
+    for a in autos {
+        if !auto_hidden
+            .iter()
+            .any(|x| normalize(&x.token) == normalize(&a.item.token) && x.tag == a.item.tag)
+        {
+            auto_hidden.push(a.item.clone());
+        }
+    }
+    let autos_of = |indirect: bool| {
+        u32::try_from(
+            autos
+                .iter()
+                .filter(|a| (a.item.kind == AutoKind::Indirect) == indirect)
+                .count(),
+        )
+        .unwrap_or(u32::MAX)
+    };
     let checks = Checks {
         declared_names: count(&|r| r.declared),
         patterns: count(&|r| !r.declared),
-        name_suspects: u32::try_from(
-            suspects
-                .iter()
-                .filter(|s| s.suspect.kind != SuspectKind::Indirect)
-                .count(),
-        )
-        .unwrap_or(u32::MAX),
-        indirect_suspects: u32::try_from(
-            suspects
-                .iter()
-                .filter(|s| s.suspect.kind == SuspectKind::Indirect)
-                .count(),
-        )
-        .unwrap_or(u32::MAX),
+        name_suspects: autos_of(false),
+        indirect_suspects: autos_of(true),
     };
     FilterOutcome {
         tagged,
         original_segments: original,
         tagged_segments,
-        suspects: suspects.iter().map(|s| s.suspect.clone()).collect(),
+        auto_hidden,
         hidden,
         checks,
     }

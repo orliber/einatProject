@@ -3,6 +3,6 @@ import type { Role } from "./Role";
 import type { SuspectKind } from "./SuspectKind";
 
 /**
- * A span that blocks sending until the psychologist decides.
+ * A question about a word (the model's answer scan, and the earlier review screen).
  */
 export type Suspect = { token: string, kind: SuspectKind, message: string, suggested_role: Role, };

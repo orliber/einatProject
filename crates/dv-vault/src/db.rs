@@ -194,6 +194,10 @@ pub const IDENTITY_MIGRATIONS: &[&str] = &[
      );
      CREATE INDEX identities_case ON identities(case_id);
      CREATE UNIQUE INDEX decisions_token ON decisions(COALESCE(case_id, ''), token_hmac);",
+    // v2: names the filter hid on its own (`auto`) or took from a file's properties
+    // (`metadata`), with the reason shown next to them.
+    "ALTER TABLE identities ADD COLUMN source TEXT NOT NULL DEFAULT 'manual';
+     ALTER TABLE identities ADD COLUMN reason TEXT NOT NULL DEFAULT '';",
 ];
 
 pub const AUDIT_MIGRATIONS: &[&str] = &[
