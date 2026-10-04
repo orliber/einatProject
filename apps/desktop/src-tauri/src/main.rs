@@ -15,10 +15,10 @@ use std::time::Duration;
 use dv_core::{
     ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView,
     ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
-    ExportCheck, ImportPreview, NameMatch, Prepared, Readiness, ReportSettings, RetentionItem,
-    SectionResult, SortResult, StagedBackup, StyleAnalysisResult, StyleImportPreview,
-    StyleOverview, StyleProfileView, StyleSourceView, SuspectDecision, TemplateView, UiError,
-    UnsavedEdit, UsageSummary,
+    ExportCheck, ImportPreview, NameMatch, ParagraphView, Prepared, Readiness, ReportSettings,
+    RetentionItem, SectionResult, SortResult, StagedBackup, StyleAnalysisResult,
+    StyleImportPreview, StyleOverview, StyleProfileView, StyleSourceView, SuspectDecision,
+    TemplateView, UiError, UnsavedEdit, UsageSummary,
 };
 use dv_domain::{
     CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind, Role,
@@ -949,19 +949,12 @@ fn free_path(dir: &std::path::Path, file_name: &str) -> PathBuf {
     path
 }
 
-/// Write the report into the Downloads folder and return where it was saved.
-#[tauri::command]
-async fn export_report(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-    case_id: String,
-    password: Option<String>,
-) -> Res<String> {
-    // Downloads, else Documents, else the home folder, else the app's own folder. A folder
-    // that a cloud service syncs (Documents moved to OneDrive, say) is skipped: the report
-    // holds the real names and would be uploaded on its own.
+/// Downloads, else Documents, else the home folder, else the app's own folder. A folder that
+/// a cloud service syncs (Documents moved to OneDrive, say) is skipped: the report holds the
+/// real names and would be uploaded on its own.
+fn export_dir(app: &tauri::AppHandle) -> Result<PathBuf, UiError> {
     let paths = app.path();
-    let dir = [
+    [
         paths.download_dir(),
         paths.document_dir(),
         paths.home_dir(),
@@ -975,11 +968,74 @@ async fn export_report(
         code: "no_folder".to_owned(),
         message: "לא נמצאה תיקייה לשמירת הדוח (הורדות או מסמכים).".to_owned(),
         details: Vec::new(),
-    })?;
+    })
+}
+
+/// Write the report into the Downloads folder and return where it was saved.
+#[tauri::command]
+async fn export_report(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    password: Option<String>,
+) -> Res<String> {
+    let dir = export_dir(&app)?;
     with_core(&state, move |c| {
         let check = c.check_export(&case_id)?;
         let bytes = c.export_report(&case_id, password.as_deref().filter(|p| !p.is_empty()))?;
         let path = free_path(&dir, &check.file_name);
+        std::fs::write(&path, bytes).map_err(|e| CoreError::Internal(e.to_string()))?;
+        Ok(path.display().to_string())
+    })
+    .await
+}
+
+/// EX-4: a short letter to the parents or the school, from the approved report.
+#[tauri::command]
+async fn prepare_letter(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    audience: String,
+    note: String,
+) -> Res<Prepared> {
+    with_core(&state, move |c| {
+        c.prepare_letter(&case_id, &audience, &note)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn letter(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    audience: String,
+) -> Res<Vec<ParagraphView>> {
+    with_core(&state, move |c| c.letter(&case_id, &audience)).await
+}
+
+/// The letter into the same folder as the report, under a name without the child's name.
+#[tauri::command]
+async fn export_letter(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    audience: String,
+    password: Option<String>,
+) -> Res<String> {
+    let dir = export_dir(&app)?;
+    with_core(&state, move |c| {
+        let check = c.check_export(&case_id)?;
+        let bytes = c.export_letter(
+            &case_id,
+            &audience,
+            password.as_deref().filter(|p| !p.is_empty()),
+        )?;
+        let who = if audience == "school" {
+            "צוות"
+        } else {
+            "הורים"
+        };
+        let path = free_path(&dir, &format!("מכתב-{who}-{}", check.file_name));
         std::fs::write(&path, bytes).map_err(|e| CoreError::Internal(e.to_string()))?;
         Ok(path.display().to_string())
     })
@@ -1418,6 +1474,9 @@ fn main() {
             dismiss_style_suggestion,
             check_export,
             export_report,
+            prepare_letter,
+            letter,
+            export_letter,
             print_page,
             activity,
             mark_activity_reviewed,

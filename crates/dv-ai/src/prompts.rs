@@ -74,6 +74,25 @@ pub const SORTING_RULES: &str = "\
 7. החזר/י JSON לפי הסכמה: sections, ובכל פריט section (מפתח הסעיף מהרשימה) ו-passages (מזהי הקטעים).
 ";
 
+/// Short letters drafted from the approved report (EX-4). They go out as the instruction of
+/// an ordinary section request, so the drafting rules above apply unchanged.
+pub const LETTER_TITLE_PARENTS: &str = "מכתב קצר להורים";
+pub const LETTER_TITLE_SCHOOL: &str = "מכתב קצר לצוות החינוכי";
+
+pub const LETTER_PARENTS: &str = "\
+כתוב/י מכתב קצר להורים, עד עמוד אחד, בשפה פשוטה וחמה, רק על סמך הסעיפים המאושרים שבבקשה.
+- בקצרה: מה עלה באבחון, בלי מונחים מקצועיים ובלי ציונים.
+- עיקר המכתב: ההמלצות, וכיצד אפשר ליישם אותן בבית.
+- פסקה לכל נושא. בלי פתיחה ובלי חתימה: הן מתווספות בקובץ.
+";
+
+pub const LETTER_SCHOOL: &str = "\
+כתוב/י מכתב קצר לצוות החינוכי, עד עמוד אחד, ענייני ומעשי, רק על סמך ההמלצות המאושרות שבבקשה.
+- רק מה שנוגע למסגרת החינוכית, וכיצד ליישם זאת בפועל.
+- בלי אבחנות, בלי ציונים ובלי רקע משפחתי או רפואי, גם אם הם מוזכרים בהמלצות.
+- פסקה לכל נושא. בלי פתיחה ובלי חתימה: הן מתווספות בקובץ.
+";
+
 /// Quick actions (docs/AI_LAYER.md → "פעולות מהירות").
 #[must_use]
 pub fn quick_action(key: &str) -> Option<&'static str> {

@@ -1307,6 +1307,10 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
         dv_ai::prompts::CONSULT_RULES,
         dv_ai::prompts::RESEARCH_RULES,
         dv_ai::prompts::SORTING_RULES,
+        dv_ai::prompts::LETTER_PARENTS,
+        dv_ai::prompts::LETTER_SCHOOL,
+        dv_ai::prompts::LETTER_TITLE_PARENTS,
+        dv_ai::prompts::LETTER_TITLE_SCHOOL,
     ]
     .into_iter()
     .chain(
@@ -2989,4 +2993,73 @@ fn a_paragraph_shows_the_passages_it_was_written_from() {
         why.iter().any(|x| x.label.contains("סעיף מאושר")),
         "{why:?}"
     );
+}
+
+#[test]
+fn letters_are_written_from_the_approved_recommendations_only() {
+    let (_dir, mut core, case) = setup(None);
+    // Nothing approved in the sections a letter is written from: nothing is sent.
+    core.add_own_paragraph(&case, "referral", "ההורים של אלון פנו בשל קושי במעברים.")
+        .unwrap();
+    assert!(matches!(
+        core.prepare_letter(&case, "school", ""),
+        Err(CoreError::Refused(_))
+    ));
+    assert!(core.prepare_letter(&case, "neighbors", "").is_err());
+    core.add_own_paragraph(
+        &case,
+        "recommendations",
+        "מומלץ שאלון יקבל הכנה מראש למעברים בגן.",
+    )
+    .unwrap();
+    core.add_own_paragraph(&case, "summary", "אלון ילד סקרן, עם קושי בוויסות רגשי.")
+        .unwrap();
+
+    // The school letter sees the recommendations, never the background or the summary.
+    let p = core
+        .prepare_letter(&case, "school", "לציין שיחה עם הגננת")
+        .unwrap();
+    let shown: Vec<String> = p
+        .parts
+        .iter()
+        .map(|r| {
+            let out: String = r.outgoing.iter().map(|s| s.text.as_str()).collect();
+            format!("{} {out}", r.label)
+        })
+        .collect();
+    let all = shown.join("\n");
+    assert!(all.contains("הכנה מראש"), "{all}");
+    assert!(
+        !all.contains("פנו בשל קושי") && !all.contains("סקרן"),
+        "{all}"
+    );
+    assert!(
+        !all.contains("אלון"),
+        "the name is hidden before it goes out: {all}"
+    );
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+
+    let letter = core.letter(&case, "school").unwrap();
+    assert!(!letter.is_empty());
+    assert!(core.letter(&case, "parents").unwrap().is_empty());
+    // The letter never enters the report.
+    assert!(core
+        .case_detail(&case)
+        .unwrap()
+        .sections
+        .iter()
+        .all(|s| !s.key.starts_with("letter_")));
+    assert!(matches!(
+        core.export_letter(&case, "school", None),
+        Err(CoreError::Refused(_))
+    ));
+    for para in &letter {
+        core.approve_paragraph(&case, &para.id).unwrap();
+    }
+    let doc = read_docx_text(&core.export_letter(&case, "school", None).unwrap());
+    assert!(
+        doc.contains("מכתב לצוות החינוכי") && doc.contains("שם הילד"),
+        "{doc}"
+    );
+    assert!(!doc.contains("סיבת הפניה"));
 }

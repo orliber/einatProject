@@ -29,6 +29,7 @@ import type { PingResponse } from "./generated/PingResponse";
 import type { Prepared } from "./generated/Prepared";
 import type { ReportSettings } from "./generated/ReportSettings";
 import type { TemplateView } from "./generated/TemplateView";
+import type { ParagraphView } from "./generated/ParagraphView";
 import type { Role } from "./generated/Role";
 import type { ScoreSheet } from "./generated/ScoreSheet";
 import type { UsageSummary } from "./generated/UsageSummary";
@@ -205,6 +206,12 @@ export const ipc = {
 
   checkExport: (caseId: string) => call<ExportCheck>("check_export", { caseId }),
   exportReport: (caseId: string, password: string | null) => call<string>("export_report", { caseId, password }),
+  /** EX-4: a short letter from the approved report, through the same review and gate. */
+  prepareLetter: (caseId: string, audience: "parents" | "school", note: string) =>
+    call<Prepared>("prepare_letter", { caseId, audience, note }),
+  letter: (caseId: string, audience: "parents" | "school") => call<ParagraphView[]>("letter", { caseId, audience }),
+  exportLetter: (caseId: string, audience: "parents" | "school", password: string | null) =>
+    call<string>("export_letter", { caseId, audience, password }),
   /** The file password to the clipboard: out of history and cloud sync, cleared after N seconds (returned). */
   copySecret: (text: string) => call<number>("copy_secret", { text }),
 
@@ -272,6 +279,7 @@ export const ipc = {
 };
 
 export type {
+  ParagraphView,
   StyleAnalysisResult,
   StyleImportPreview,
   StyleItem,

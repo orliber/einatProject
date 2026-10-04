@@ -19,7 +19,8 @@ export function makePassphrase(): string {
   return `${w(0)}-${w(1)}-${(r[4] ?? 0) % 90 + 10}-${w(2)}-${w(3)}`;
 }
 
-export function ExportDialog({ api, onClose }: { api: CaseApi; onClose: () => void }) {
+/** The report, or with `letter` the short letter (EX-4): same password and folder. */
+export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: () => void; letter?: "parents" | "school" }) {
   const { fail, go } = useApp();
   const [check, setCheck] = useState<ExportCheck | null>(null);
   const [protect, setProtect] = useState(true);
@@ -38,7 +39,8 @@ export function ExportDialog({ api, onClose }: { api: CaseApi; onClose: () => vo
     setBusy(true);
     setError(null);
     try {
-      setSaved(await ipc.exportReport(api.caseId, protect ? password : null));
+      const pw = protect ? password : null;
+      setSaved(await (letter ? ipc.exportLetter(api.caseId, letter, pw) : ipc.exportReport(api.caseId, pw)));
     } catch (e) {
       setError(fail(e as never));
     } finally {
@@ -54,12 +56,12 @@ export function ExportDialog({ api, onClose }: { api: CaseApi; onClose: () => vo
     }
   }
 
-  const blocked = (check?.blocking.length ?? 0) > 0;
+  const blocked = !letter && (check?.blocking.length ?? 0) > 0;
   const child = api.detail.identities.find((i) => i.role === "child")?.value;
 
   if (saved) {
     return (
-      <Dialog narrow title="הדוח מוכן" onClose={onClose}
+      <Dialog narrow title={letter ? "המכתב מוכן" : "הדוח מוכן"} onClose={onClose}
         footer={<><span className="grow" /><button type="button" className="btn btn-primary" onClick={onClose}>סגירה</button></>}>
         <div className="stack">
           <p>הקובץ נשמר:</p>
@@ -76,20 +78,20 @@ export function ExportDialog({ api, onClose }: { api: CaseApi; onClose: () => vo
   }
 
   return (
-    <Dialog title="הפקת דוח Word" subtitle={`${api.detail.meta.code}${child ? ` · ${child}` : ""} · רק פסקאות שאישרת נכנסות לדוח`} onClose={onClose}
+    <Dialog title={letter ? "הפקת מכתב Word" : "הפקת דוח Word"} subtitle={`${api.detail.meta.code}${child ? ` · ${child}` : ""} · רק פסקאות שאישרת נכנסות ל${letter ? "מכתב" : "דוח"}`} onClose={onClose}
       footer={
         <>
           <span className="grow" />
           <button type="button" className="btn" onClick={onClose}>ביטול</button>
           <button type="button" className="btn btn-primary" disabled={!check || blocked || busy || (protect && password.length < 10)} onClick={() => void run()}>
-            {busy ? <><Spinner /> מפיקה…</> : "הפקת הדוח"}
+            {busy ? <><Spinner /> מפיקה…</> : letter ? "הפקת המכתב" : "הפקת הדוח"}
           </button>
         </>
       }>
       <div className="export">
         <div className="stack grow">
           {!check && <p className="muted"><Spinner /> בודקת את הדוח…</p>}
-          {check && (
+          {check && !letter && (
             <ul className="checklist">
               <li className={check.included_sections > 0 ? "ok" : "bad"}>
                 <span aria-hidden="true">{check.included_sections > 0 ? "✓" : "!"}</span>
@@ -134,7 +136,7 @@ export function ExportDialog({ api, onClose }: { api: CaseApi; onClose: () => vo
               </>
             )}
           </div>
-          {check && (
+          {check && !letter && (
             <p className="small"><b>שם הקובץ:</b> {check.file_name} <span className="muted">(בלי שם הילד) · נשמר בתיקיית ההורדות</span></p>
           )}
           {blocked && (

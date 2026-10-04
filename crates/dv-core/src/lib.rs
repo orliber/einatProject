@@ -1713,10 +1713,19 @@ impl Core {
     ) -> Result<Prepared, CoreError> {
         let structure =
             ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
-        let section = structure
-            .section(section_key)
-            .ok_or_else(|| CoreError::NotFound(section_key.to_owned()))?
-            .clone();
+        let letter = Letter::of(section_key);
+        let section = match letter {
+            Some(l) => dv_domain::ReportSection {
+                key: section_key.to_owned(),
+                title: l.title().to_owned(),
+                inputs: Vec::new(),
+                about: String::new(),
+            },
+            None => structure
+                .section(section_key)
+                .ok_or_else(|| CoreError::NotFound(section_key.to_owned()))?
+                .clone(),
+        };
         let model = self.model_config()?;
         let data = self.privacy_data(case_id)?;
         let demo_mode = self.demo_mode()?;
@@ -1742,7 +1751,7 @@ impl Core {
             let mut review = Review::default();
             let mut tagged_sources = Vec::new();
             let mut source_rows = Vec::new();
-            let derived = DERIVED_SECTIONS.contains(&section_key);
+            let derived = DERIVED_SECTIONS.contains(&section_key) || letter.is_some();
             if !derived {
                 for inp in v.inputs(case_id)? {
                     // D-022: the table, the sorting, and Einat's choice decide what goes here.
@@ -1780,10 +1789,13 @@ impl Core {
             }
             let mut approved_context = Vec::new();
             if derived {
-                for s in structure
-                    .sections()
-                    .filter(|s| s.key != section_key && !DERIVED_SECTIONS.contains(&s.key.as_str()))
-                {
+                // A letter gets only the sections it is written from (EX-4): the school letter
+                // only the recommendations, never the background or the diagnoses.
+                let wanted = |key: &str| match letter {
+                    Some(l) => l.from_sections().contains(&key),
+                    None => key != section_key && !DERIVED_SECTIONS.contains(&key),
+                };
+                for s in structure.sections().filter(|s| wanted(&s.key)) {
                     let text: Vec<String> = v
                         .drafts(case_id, &s.key)?
                         .into_iter()
@@ -1798,6 +1810,11 @@ impl Core {
                 }
             }
             // Nothing approved yet: there is nothing to write it from, so nothing is sent.
+            if letter.is_some() && approved_context.is_empty() {
+                return Err(CoreError::Refused(
+                    "המכתב נכתב מתוך ההמלצות שאישרת בדוח, ועוד אין המלצות מאושרות. מאשרים קודם את סעיף ההמלצות.".to_owned(),
+                ));
+            }
             if derived && approved_context.is_empty() {
                 return Err(CoreError::Refused(
                     "הסעיף הזה נכתב מתוך הסעיפים שכבר אישרת, ועוד לא אישרת אף סעיף. מאשרים קודם את הטיוטות בסעיפים האחרים, ואז חוזרים לכאן."
@@ -1881,6 +1898,122 @@ impl Core {
             return self.prepare_section_once(case_id, section_key, instruction, replaces, true);
         }
         Ok(prepared)
+    }
+
+    /// A short letter to the parents or the school from the approved report (EX-4): an
+    /// ordinary section request (same filter, review screen and gate), whose answer is kept as
+    /// the letter's draft in this case. `note` is anything she wants to add.
+    pub fn prepare_letter(
+        &mut self,
+        case_id: &str,
+        audience: &str,
+        note: &str,
+    ) -> Result<Prepared, CoreError> {
+        let letter = Letter::from_audience(audience)?;
+        let instruction = if note.trim().is_empty() {
+            letter.instruction().to_owned()
+        } else {
+            format!("{}\nבנוסף: {}", letter.instruction(), note.trim())
+        };
+        self.prepare_section(case_id, letter.key(), &instruction)
+    }
+
+    /// The letter's paragraphs, names restored, for her to read, edit and approve.
+    pub fn letter(
+        &mut self,
+        case_id: &str,
+        audience: &str,
+    ) -> Result<Vec<ParagraphView>, CoreError> {
+        let letter = Letter::from_audience(audience)?;
+        let v = self.vault_ref()?;
+        let identities = v.identities(case_id)?;
+        let practitioner = v.practitioner()?.names.first().cloned();
+        Ok(v.drafts(case_id, letter.key())?
+            .into_iter()
+            .filter(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved))
+            .map(|d| ParagraphView {
+                id: d.id,
+                text: restore(&d.text_tagged, &identities, practitioner.as_deref()),
+                status: d.status,
+                by_ai: d.author == Author::Ai,
+                sources: Vec::new(),
+                warnings: Vec::new(),
+                replaces: d.replaces,
+            })
+            .collect())
+    }
+
+    /// The letter as a Word file (in her template when she has one): approved paragraphs
+    /// only, with the child's name and the date at the top and her signature at the end.
+    pub fn export_letter(
+        &mut self,
+        case_id: &str,
+        audience: &str,
+        password: Option<&str>,
+    ) -> Result<Vec<u8>, CoreError> {
+        let letter = Letter::from_audience(audience)?;
+        let settings = self.report_settings()?;
+        let (report, _) = self.build_report(case_id)?;
+        let paragraphs: Vec<String> = self
+            .letter(case_id, audience)?
+            .into_iter()
+            .filter(|p| p.status == DraftStatus::Approved)
+            .map(|p| p.text)
+            .collect();
+        if paragraphs.is_empty() {
+            return Err(CoreError::Refused(
+                "עוד אין במכתב פסקה מאושרת. מאשרים את הפסקאות, ואז מפיקים את הקובץ.".to_owned(),
+            ));
+        }
+        let doc = dv_export::Report {
+            title: letter.file_title().to_owned(),
+            info: report.info,
+            parts: vec![dv_export::ReportPart {
+                title: String::new(),
+                sections: vec![dv_export::ReportSection {
+                    title: String::new(),
+                    paragraphs,
+                }],
+            }],
+            tables: Vec::new(),
+            signature: report.signature,
+            confidentiality: settings.confidentiality,
+            font: settings.font,
+        };
+        let identities = self.vault_ref()?.identities(case_id)?;
+        let known: HashSet<String> = identities.iter().map(|i| i.tag.clone()).collect();
+        for p in &doc.parts[0].sections[0].paragraphs {
+            if dv_privacy::restore::remaining_tags(p)
+                .iter()
+                .any(|t| known.contains(t))
+            {
+                return Err(CoreError::Refused(
+                    "נשארה במכתב תגית במקום שם. פותחים את הפסקה ומתקנים.".to_owned(),
+                ));
+            }
+        }
+        if let Some(l) = dv_export::leftover_placeholders(&doc).into_iter().next() {
+            return Err(CoreError::Refused(format!(
+                "נשאר במכתב סימון בסוגריים מרובעים: {l}"
+            )));
+        }
+        let docx = self.render_docx(&doc)?;
+        let out = match password {
+            Some(pw) => dv_export::encrypt(&docx, pw).map_err(|e| match e {
+                dv_export::ExportError::WeakPassword => CoreError::Refused(format!(
+                    "סיסמה לקובץ צריכה להיות באורך {} תווים לפחות.",
+                    dv_export::MIN_PASSWORD_CHARS
+                )),
+                other => CoreError::Internal(other.to_string()),
+            })?,
+            None => docx,
+        };
+        self.vault_mut()?.record(
+            AuditEvent::Export,
+            Some(case_id),
+            &serde_json::json!({ "protected": password.is_some(), "letter": letter.key() }),
+        )?;
+        Ok(out)
     }
 
     /// Take an approved request out of the core so it can be sent without holding the
@@ -2649,6 +2782,69 @@ impl Core {
             &serde_json::json!({ "protected": password.is_some(), "sections": check.included_sections }),
         )?;
         Ok(out)
+    }
+}
+
+/// The two letters (EX-4). Their drafts are kept in the case under their own keys, so they
+/// are deleted with the case, and never enter the report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Letter {
+    Parents,
+    School,
+}
+
+impl Letter {
+    fn of(section_key: &str) -> Option<Self> {
+        match section_key {
+            "letter_parents" => Some(Self::Parents),
+            "letter_school" => Some(Self::School),
+            _ => None,
+        }
+    }
+
+    fn from_audience(audience: &str) -> Result<Self, CoreError> {
+        match audience {
+            "parents" => Ok(Self::Parents),
+            "school" => Ok(Self::School),
+            other => Err(CoreError::NotFound(other.to_owned())),
+        }
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Self::Parents => "letter_parents",
+            Self::School => "letter_school",
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            Self::Parents => dv_ai::prompts::LETTER_TITLE_PARENTS,
+            Self::School => dv_ai::prompts::LETTER_TITLE_SCHOOL,
+        }
+    }
+
+    fn instruction(self) -> &'static str {
+        match self {
+            Self::Parents => dv_ai::prompts::LETTER_PARENTS,
+            Self::School => dv_ai::prompts::LETTER_SCHOOL,
+        }
+    }
+
+    fn file_title(self) -> &'static str {
+        match self {
+            Self::Parents => "מכתב להורים",
+            Self::School => "מכתב לצוות החינוכי",
+        }
+    }
+
+    /// The approved sections a letter is written from (data minimization: the school gets
+    /// only what it acts on).
+    fn from_sections(self) -> &'static [&'static str] {
+        match self {
+            Self::Parents => &["summary", "diagnoses", "recommendations"],
+            Self::School => &["recommendations"],
+        }
     }
 }
 

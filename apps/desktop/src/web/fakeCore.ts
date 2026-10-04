@@ -924,6 +924,11 @@ export class FakeCore {
           included_sections: d.sections.filter((s) => s.approved).length, score_tables: c.sheets.size, file_name: `דוח אבחון – ${c.meta.code}.docx`,
         } satisfies ExportCheck;
       }
+      case "letter":
+        return [];
+      case "prepare_letter":
+        return fail("refused", "בהדמיה בדפדפן אין ניסוח מכתבים. בתוכנה המותקנת המכתב נכתב מתוך ההמלצות המאושרות.");
+      case "export_letter":
       case "export_report":
         return "בהדמיה בדפדפן לא נוצר קובץ. בתוכנה המותקנת הדוח נשמר בתיקיית ההורדות, מוצפן בסיסמה.";
       case "set_auto_backup":

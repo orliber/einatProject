@@ -392,9 +392,7 @@ type HerStyles = (HashMap<String, String>, HashSet<String>, String);
 
 /// Her paragraph styles: Word's style name (lower case) → style id, and the default one's id.
 /// Hebrew Word names its ids in Hebrew ("1" for heading 1), so the name is what matches.
-fn her_styles(
-    xml: &str,
-) -> Result<HerStyles, ExportError> {
+fn her_styles(xml: &str) -> Result<HerStyles, ExportError> {
     let mut reader = Reader::from_str(xml);
     let mut by_name = HashMap::new();
     let mut ids = HashSet::new();
