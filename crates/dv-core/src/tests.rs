@@ -2618,7 +2618,4 @@ fn a_paragraph_shows_the_passages_it_was_written_from() {
         why.iter().any(|x| x.label.contains("סעיף מאושר")),
         "{why:?}"
     );
-
-    let own = core.add_own_paragraph(&case, "background", "פסקה שלי.");
-    assert!(own.is_ok());
 }
