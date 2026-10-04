@@ -2,12 +2,13 @@
 //!
 //! The app starts itself with [`WORKER_ARG`], writes the file name and bytes to the worker's
 //! stdin, and reads one JSON result from its stdout. The worker never opens the vault, gets
-//! no environment (no proxy settings, no paths), and is killed when the time limit passes.
+//! no environment (no proxy settings, no paths), and is killed when the time limit passes. On
+//! Windows it also runs contained (`dv-sandbox`, D-044): no network, none of her files, no
+//! clipboard, one process, a memory ceiling.
 
 use std::io::{Read, Write};
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::{Extracted, IngestError, MAX_INPUT_BYTES};
 
@@ -46,33 +47,41 @@ pub fn worker_main() -> i32 {
     0
 }
 
+/// A running isolated process; dropping it ends the process.
+pub use dv_sandbox::Child as IsolatedChild;
+/// What an isolated process may have (memory ceiling, folders it may read). See D-044.
+pub use dv_sandbox::Policy as Isolation;
+/// Whether this platform contains the process (Windows: AppContainer and job object).
+pub use dv_sandbox::CONTAINED;
+
+/// The worker's ceiling: far above what a text extraction of a 50 MB file needs.
+const WORKER_MEMORY_MB: u32 = 1024;
+
+/// Start an untrusted helper process isolated: on Windows in an AppContainer with no network
+/// and no access to her files, inside a job object (one process, a memory ceiling, no clipboard,
+/// ended with the app); everywhere with an empty environment and no window. The one way the app
+/// starts a document reader (the worker, and later the OCR engine).
+pub fn spawn_isolated(
+    exe: &Path,
+    args: &[&str],
+    policy: &Isolation,
+) -> Result<IsolatedChild, IngestError> {
+    // Fail closed: a reader that cannot be isolated is not started.
+    dv_sandbox::spawn(exe, args, policy).map_err(|e| IngestError::Worker(e.to_string()))
+}
+
 /// App side: run one document through a fresh worker.
 pub fn run(exe: &Path, file_name: &str, bytes: &[u8], timeout: Duration) -> WorkerResult {
     if bytes.len() > MAX_INPUT_BYTES {
         return Err(IngestError::TooLarge);
     }
-    let mut cmd = Command::new(exe);
-    cmd.arg(WORKER_ARG)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .env_clear();
-    for keep in ["SYSTEMROOT", "WINDIR"] {
-        if let Some(v) = std::env::var_os(keep) {
-            cmd.env(keep, v);
-        }
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| IngestError::Worker(e.to_string()))?;
-    let (Some(mut stdin), Some(mut stdout)) = (child.stdin.take(), child.stdout.take()) else {
-        let _ = child.kill();
+    let policy = Isolation {
+        memory_mb: WORKER_MEMORY_MB,
+        read_dirs: Vec::new(),
+    };
+    let mut child = spawn_isolated(exe, &[WORKER_ARG], &policy)?;
+    let (Some(mut stdin), Some(mut stdout)) = (child.take_stdin(), child.take_stdout()) else {
+        child.kill();
         return Err(IngestError::Worker("pipes".to_owned()));
     };
 
@@ -90,20 +99,15 @@ pub fn run(exe: &Path, file_name: &str, bytes: &[u8], timeout: Duration) -> Work
             .map(|_| buf)
     });
 
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(IngestError::Timeout);
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(15)),
-            Err(e) => {
-                let _ = child.kill();
-                return Err(IngestError::Worker(e.to_string()));
-            }
+    let status = match child.wait_timeout(timeout) {
+        Ok(Some(status)) => status,
+        Ok(None) => {
+            child.kill();
+            return Err(IngestError::Timeout);
+        }
+        Err(e) => {
+            child.kill();
+            return Err(IngestError::Worker(e.to_string()));
         }
     };
     let _ = writer.join();

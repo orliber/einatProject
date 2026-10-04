@@ -29,8 +29,12 @@ import type { PingResponse } from "./generated/PingResponse";
 import type { Prepared } from "./generated/Prepared";
 import type { ReportSettings } from "./generated/ReportSettings";
 import type { ScoreSheet } from "./generated/ScoreSheet";
+import type { UsageSummary } from "./generated/UsageSummary";
+import type { Readiness } from "./generated/Readiness";
+import type { UnsavedEdit } from "./generated/UnsavedEdit";
 import type { SectionResult } from "./generated/SectionResult";
 import type { SortResult } from "./generated/SortResult";
+import type { SourceExcerpt } from "./generated/SourceExcerpt";
 import type { MaterialRouting } from "./generated/MaterialRouting";
 import type { SuspectDecision } from "./generated/SuspectDecision";
 import type { FollowUpView } from "./generated/FollowUpView";
@@ -75,6 +79,15 @@ export const ipc = {
   unlock: (password: string) => call<AppStatus>("unlock", { password }),
   unlockWithRecovery: (key: string) => call<AppStatus>("unlock_with_recovery", { key }),
   lock: () => run("lock"),
+  /** Typing or scrolling in the window counts as activity for the idle lock. */
+  touch: () => run("touch"),
+  holdUnsaved: (edit: UnsavedEdit | null) => run("hold_unsaved", { edit }),
+  takeUnsaved: () => call<UnsavedEdit | null>("take_unsaved"),
+  readiness: () => call<Readiness>("readiness"),
+  confirmReadiness: (key: string, done: boolean) => call<Readiness>("confirm_readiness", { key, done }),
+  usageSummary: () => call<UsageSummary>("usage_summary"),
+  /** Dollars; `null` removes the ceiling. */
+  setMonthlyCap: (capUsd: number | null) => run("set_monthly_cap", { capUsd }),
 
   setApiKey: (key: string) => run("set_api_key", { key }),
   setSpeed: (speed: "fast" | "balanced" | "thorough") => run("set_speed", { speed }),
@@ -117,6 +130,9 @@ export const ipc = {
   saveScores: (caseId: string, inputId: string | null, sheet: ScoreSheet) =>
     call<CaseInput>("save_scores", { caseId, inputId, sheet }),
   scoreSheet: (caseId: string, inputId: string) => call<ScoreSheet | null>("score_sheet", { caseId, inputId }),
+  /** "למה כתבת את זה?": the passages a paragraph leans on, best match first (stays local). */
+  paragraphSources: (caseId: string, draftId: string) =>
+    call<SourceExcerpt[]>("paragraph_sources", { caseId, draftId }),
   /** The file's bytes go as the raw body; nothing else of the file system is exposed. */
   importDocument: async (caseId: string, file: File): Promise<ImportPreview> => {
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -197,6 +213,7 @@ export const ipc = {
   restoreBackup: (password: string | null, recoveryKey: string | null) =>
     call<AppStatus>("restore_backup", { password, recoveryKey }),
   forgetBackup: () => run("forget_backup"),
+  setAutoBackup: (on: boolean) => call<BackupStatus>("set_auto_backup", { on }),
 
   // Writing style (D-043): past reports kept neutralized, the profile, learning from edits.
   styleOverview: () => call<StyleOverview>("style_overview"),
@@ -246,6 +263,9 @@ export type {
   StyleProfileView,
   StyleSourceView,
   UpdateView,
+  UsageSummary,
+  Readiness,
+  UnsavedEdit,
   ActivityPage,
   ConsultationSummary,
   ConsultationView,
@@ -259,6 +279,7 @@ export type {
   NameMatch,
   MaterialRouting,
   SortResult,
+  SourceExcerpt,
   CaseDetail,
   CaseInput,
   CaseMeta,

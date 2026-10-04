@@ -19,4 +19,9 @@ last_check_at: number | null,
 /**
  * An empty vault has nothing to lose yet: no reminder.
  */
-has_cases: boolean, };
+has_cases: boolean, 
+/**
+ * A backup is made by itself into the folder of the last one when it is due and that
+ * folder (a removable drive) is connected.
+ */
+auto: boolean, };

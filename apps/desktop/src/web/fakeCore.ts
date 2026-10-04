@@ -105,11 +105,14 @@ export class FakeCore {
   private lastBackupAt: number | null = Math.floor(Date.now() / 1000) - 9 * 86_400;
   private lastCheckAt: number | null = null;
   private secretChanged = false;
+  private autoBackup = true;
   private reviewedAt: number | null = null;
   private convs: { id: string; caseId: string | null; updated: number; turns: { role: string; text: string; hidden: string[]; demo: boolean; at: number }[] }[] = [];
   private activityLog: ActivityEntry[] = [];
   private practitioner = ["ד\"ר רותם בדויה"];
   private lockMinutes = 15;
+  private capUsd: number | null = null;
+  private ready: Record<string, number | null> = {};
   private model = "claude-opus-5";
   private speed = "balanced";
   private reviewOnlySuspect = false;
@@ -286,7 +289,7 @@ export class FakeCore {
   status(): AppStatus {
     return {
       vault_exists: this.vaultExists, unlocked: this.unlocked, disk_encryption: "on", cloud_synced_folder: null, fips_active: true,
-      demo_mode: true, model: this.model, speed: this.speed, integrity_warning: null, lock_minutes: this.lockMinutes,
+      demo_mode: true, model: this.model, speed: this.speed, integrity_warning: null, lock_minutes: this.lockMinutes, idle_lock_in: this.unlocked ? this.lockMinutes * 60 : null,
       practitioner: this.practitioner, review_only_suspect: this.reviewOnlySuspect, review_choice_available: true, screen_protection: !this.unlocked || this.screenProtection,
     };
   }
@@ -525,6 +528,29 @@ export class FakeCore {
         return { recovery_key: "DEMO-PREV-IEWX-KEYS-ONLY-4TST" };
       case "confirm_recovery_key":
         return true;
+      case "touch":
+        return null;
+      case "hold_unsaved":
+        return null;
+      case "take_unsaved":
+        return null;
+      case "readiness":
+      case "confirm_readiness": {
+        if (cmd === "confirm_readiness") this.ready[a.key as string] = a.done ? 1_790_000_000 : null;
+        const manual = ["zdr", "consent_form", "score_tables", "legal"].map((key) => ({
+          key, done: this.ready[key] != null, checked_by_program: false, confirmed_at: this.ready[key] ?? null,
+        }));
+        const items = [...manual,
+          { key: "api_key", done: false, checked_by_program: true, confirmed_at: null },
+          { key: "backup", done: false, checked_by_program: true, confirmed_at: null },
+          { key: "disk", done: true, checked_by_program: true, confirmed_at: null }];
+        return { items, all_done: false };
+      }
+      case "usage_summary":
+        return { month: "2026-10", requests: 0, input_tokens: 0, output_tokens: 0, estimated_cents: 0, cap_usd: this.capUsd, unpriced_models: [] };
+      case "set_monthly_cap":
+        this.capUsd = (a.capUsd as number | null) ?? null;
+        return null;
       case "lock":
         this.unlocked = false;
         return null;
@@ -691,6 +717,21 @@ export class FakeCore {
         c.sheets.set(input.id, sheet);
         return input;
       }
+      case "paragraph_sources": {
+        // The preview's "why": passages of the case's materials that share words with it.
+        const c = this.find(a.caseId);
+        const d = c.drafts.find((x) => x.id === String(a.draftId));
+        if (!d?.byAi) return [];
+        const words = (t: string) => new Set(t.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3));
+        const mine = words(restore(d.text, c.people, this.practitioner));
+        return c.inputs
+          .flatMap((i) => R.passages(i.content).map((text) => ({ label: `${kindLabel[i.kind]} · ${i.title}`, text })))
+          .map((x) => ({ ...x, score: [...words(x.text)].filter((w) => mine.has(w)).length }))
+          .filter((x) => x.score > 0)
+          .sort((p, q) => q.score - p.score)
+          .slice(0, 4)
+          .map(({ label, text }) => ({ label, text }));
+      }
       case "score_sheet":
         return this.find(a.caseId).sheets.get(String(a.inputId)) ?? null;
       case "import_document":
@@ -824,11 +865,16 @@ export class FakeCore {
       }
       case "export_report":
         return "בהדמיה בדפדפן לא נוצר קובץ. בתוכנה המותקנת הדוח נשמר בתיקיית ההורדות, מוצפן בסיסמה.";
+      case "set_auto_backup":
+        this.autoBackup = Boolean(a.on);
+        this.logActivity("settings_changed", "security", "הגיבוי האוטומטי הודלק או כובה");
+        return this.handle("backup_status", {});
       case "backup_status": {
         const days = this.lastBackupAt === null ? null : Math.floor((now() - this.lastBackupAt) / 86_400);
         return {
           last_at: this.lastBackupAt, days_since: days, due: this.secretChanged || days === null || days >= 7,
           secret_changed: this.secretChanged, last_check_at: this.lastCheckAt, has_cases: this.cases.length > 0,
+          auto: this.autoBackup,
         } satisfies BackupStatus;
       }
       case "write_backup": {

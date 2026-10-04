@@ -116,6 +116,53 @@ fn model_allow_lists_agree() {
 }
 
 #[test]
+fn usage_is_counted_and_the_monthly_ceiling_stops_sending() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let section = |core: &mut Core| {
+        core.prepare_section(&case, "kindergarten", "טיוטה")
+            .unwrap()
+            .approval_id
+            .unwrap()
+    };
+    let first = section(&mut core);
+    core.send_section(&first).unwrap();
+    let used = core.usage_summary().unwrap();
+    assert_eq!(used.requests, 1);
+    assert_eq!(used.cap_usd, None);
+
+    // An answer that cost more than the ceiling: the next request is refused, and stays approved.
+    *fake.answer.lock().unwrap() = None;
+    let mut month = usage::Month::default();
+    month.add(
+        dv_ai::DEFAULT_MODEL,
+        usage::Tokens {
+            requests: 1,
+            input: 3_000_000,
+            ..usage::Tokens::default()
+        },
+    );
+    core.vault_mut()
+        .unwrap()
+        .set_setting(
+            &usage::this_month_key(),
+            &serde_json::to_string(&month).unwrap(),
+        )
+        .unwrap();
+    assert!(core.set_monthly_cap(Some(0)).is_err());
+    core.set_monthly_cap(Some(10)).unwrap();
+    let second = section(&mut core);
+    let err = core.send_section(&second).unwrap_err();
+    assert_eq!(err.to_ui().code, "refused");
+    assert_eq!(fake.sent.lock().unwrap().len(), 1);
+    // Raising the ceiling lets the same approval go out.
+    core.set_monthly_cap(None).unwrap();
+    assert_eq!(core.usage_summary().unwrap().cap_usd, None);
+    core.send_section(&second).unwrap();
+    assert_eq!(fake.sent.lock().unwrap().len(), 2);
+}
+
+#[test]
 fn full_section_flow_sends_only_tags_and_stores_tagged() {
     let fake = FakeTransport::default();
     let (dir, mut core, case) = setup(Some(fake.clone()));
@@ -800,6 +847,78 @@ fn idle_session_locks_itself() {
     core.last_activity = Instant::now() - Duration::from_secs(11 * 60);
     assert!(core.lock_if_idle());
     assert!(!core.status().unlocked);
+}
+
+#[test]
+fn work_in_the_window_keeps_the_vault_open_but_never_reopens_it() {
+    let (_dir, mut core, _case) = setup(None);
+    core.last_activity = Instant::now() - Duration::from_secs(9 * 60 + 30);
+    let left = core.status().idle_lock_in.unwrap();
+    assert!(left <= 30, "{left}");
+    // Typing a paragraph counts as activity.
+    core.touch();
+    assert!(core.status().idle_lock_in.unwrap() > 9 * 60);
+    assert!(!core.lock_if_idle());
+    // Past the idle time, a late keystroke does not extend it.
+    core.last_activity = Instant::now() - Duration::from_secs(11 * 60);
+    core.touch();
+    assert!(core.lock_if_idle());
+    assert_eq!(core.status().idle_lock_in, None);
+}
+
+#[test]
+fn the_report_file_name_never_carries_a_name() {
+    let who = |value: &str, aliases: &[&str]| dv_domain::Identity {
+        id: "i".into(),
+        case_id: "c".into(),
+        role: Role::Child,
+        tag: "[ילד]".into(),
+        value: value.into(),
+        aliases: aliases.iter().map(|a| (*a).to_owned()).collect(),
+    };
+    let ids = [who("אלון כהן", &["Alon"])];
+    let day = (2026, 10, 3);
+    assert_eq!(
+        report_file_name("TEST-0002", &ids, day),
+        "דוח אבחון TEST-0002.docx"
+    );
+    assert_eq!(
+        report_file_name("אלון-5", &ids, day),
+        "דוח אבחון 2026-10-03.docx"
+    );
+    assert_eq!(
+        report_file_name("ALON2026", &ids, day),
+        "דוח אבחון 2026-10-03.docx"
+    );
+    assert_eq!(report_file_name("", &ids, day), "דוח אבחון 2026-10-03.docx");
+}
+
+#[test]
+fn readiness_lists_what_is_missing_and_keeps_her_confirmations() {
+    let (_dir, mut core, _case) = setup(None);
+    let r = core.readiness().unwrap();
+    assert!(!r.all_done);
+    let item = |r: &Readiness, k: &str| r.items.iter().find(|i| i.key == k).unwrap().clone();
+    assert!(!item(&r, "zdr").done);
+    assert!(!item(&r, "backup").done);
+    assert!(item(&r, "backup").checked_by_program);
+    assert!(!item(&r, "api_key").done);
+    let r = core.confirm_readiness("zdr", true).unwrap();
+    assert!(item(&r, "zdr").done);
+    assert!(item(&r, "zdr").confirmed_at.is_some());
+    let r = core.confirm_readiness("zdr", false).unwrap();
+    assert!(!item(&r, "zdr").done);
+    // Items the program checks cannot be confirmed by hand.
+    assert!(core.confirm_readiness("backup", true).is_err());
+}
+
+#[test]
+fn the_vault_locks_with_the_computer() {
+    let (_dir, mut core, _case) = setup(None);
+    assert!(core.is_unlocked());
+    assert!(core.lock_with_computer());
+    assert!(!core.is_unlocked());
+    assert!(!core.lock_with_computer());
 }
 
 #[test]
@@ -1767,6 +1886,114 @@ fn the_restore_drill_proves_the_file_and_the_password() {
 }
 
 #[test]
+fn a_backup_is_made_by_itself_when_the_drive_is_there() {
+    let (_dir, mut core, _case) = setup(None);
+    // Never before she chose a folder herself.
+    assert!(core.auto_backup().unwrap().is_none());
+    let drive = tempfile::tempdir().unwrap();
+    core.write_backup(&drive.path().join("שלי.vaultbak"))
+        .unwrap();
+    // Not due: nothing.
+    assert!(core.auto_backup().unwrap().is_none());
+
+    // Older auto backups in the folder, and one of hers with a similar name.
+    for day in ["2026-01-01", "2026-02-01", "2026-03-01"] {
+        std::fs::write(
+            drive
+                .path()
+                .join(format!("גיבוי אוטומטי כספת האבחון {day}.vaultbak")),
+            b"old",
+        )
+        .unwrap();
+    }
+    std::fs::write(drive.path().join("גיבוי אוטומטי כספת האבחון.txt"), b"hers").unwrap();
+
+    // A new password makes it due; the drive is connected: a backup is made by itself.
+    core.mark_secret_changed().unwrap();
+    let done = core.auto_backup().unwrap().unwrap();
+    assert!(done.path.contains("גיבוי אוטומטי כספת האבחון"));
+    assert!(!core.backup_status().unwrap().due);
+    let mut names: Vec<String> = std::fs::read_dir(drive.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    // The oldest automatic one went; hers stayed.
+    assert_eq!(names.len(), 2 + crate::AUTO_KEEP, "{names:?}");
+    assert!(!names.iter().any(|n| n.contains("2026-01-01")));
+    assert!(names.contains(&"שלי.vaultbak".to_owned()));
+    assert!(names.contains(&"גיבוי אוטומטי כספת האבחון.txt".to_owned()));
+
+    // Turned off: nothing, even when due.
+    core.mark_secret_changed().unwrap();
+    assert!(!core.set_auto_backup(false).unwrap().auto);
+    assert!(core.auto_backup().unwrap().is_none());
+    assert!(core.set_auto_backup(true).unwrap().auto);
+
+    // The drive is out: nothing, and no error.
+    drop(drive);
+    assert!(core.auto_backup().unwrap().is_none());
+
+    // A locked vault: nothing.
+    core.lock();
+    assert!(core.auto_backup().unwrap().is_none());
+}
+
+#[test]
+fn an_open_edit_survives_the_lock_inside_the_vault() {
+    let (dir, mut core, case) = setup(None);
+    let edit = |text: &str| crate::UnsavedEdit {
+        case_id: case.clone(),
+        place: "פסקה בסעיף רקע".into(),
+        text: text.into(),
+    };
+    // Nothing kept: nothing offered.
+    assert_eq!(core.take_unsaved().unwrap(), None);
+    // An edit saved (closed) before the lock is not kept.
+    core.hold_unsaved(Some(edit("טיוטה")));
+    core.hold_unsaved(None);
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(core.take_unsaved().unwrap(), None);
+
+    let text = "הילד הגיע לאבחון בליווי אמו, ושיתף פעולה לאורך כל המפגשים.";
+    core.hold_unsaved(Some(edit(text)));
+    assert!(core.lock_with_computer());
+    // Locked: a closing editor changes nothing.
+    core.hold_unsaved(None);
+    // Not on disk outside the vault.
+    for entry in walkdir(dir.path()) {
+        let bytes = std::fs::read(&entry).unwrap();
+        assert!(
+            !bytes.windows(text.len()).any(|w| w == text.as_bytes()),
+            "{entry:?}"
+        );
+    }
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(core.take_unsaved().unwrap(), Some(edit(text)));
+    // Offered once.
+    assert_eq!(core.take_unsaved().unwrap(), None);
+    // Whitespace is not an edit worth keeping.
+    core.hold_unsaved(Some(edit("  \n")));
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(core.take_unsaved().unwrap(), None);
+}
+
+fn walkdir(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(walkdir(&p));
+        } else {
+            out.push(p);
+        }
+    }
+    out
+}
+
+#[test]
 fn a_new_password_or_kit_asks_for_a_new_backup() {
     let (dir, mut core, _case) = setup(None);
     let drive = tempfile::tempdir().unwrap();
@@ -2528,4 +2755,94 @@ fn her_own_paragraph_goes_where_she_put_it() {
     let second = ids(&mut core)[1].clone();
     core.edit_paragraph(&case, &second, "  \n ").unwrap();
     assert_eq!(texts(&mut core), vec!["אחת.", "שלוש.", "ארבע."]);
+}
+
+/// AI-6: a score written in the report is checked against the score table she entered, in
+/// code, for every paragraph (hers too), each time the case is shown.
+#[test]
+fn written_scores_are_checked_against_the_score_table() {
+    let (_dir, mut core, case) = setup(None);
+    let sheet = dv_domain::ScoreSheet {
+        instrument: "wppsi_iv".into(),
+        module: String::new(),
+        cutoff: None,
+        entries: vec![dv_domain::ScoreEntry {
+            measure: "vci".into(),
+            value: 95.0,
+            note: String::new(),
+        }],
+        notes: String::new(),
+    };
+    core.save_scores(&case, None, &sheet).unwrap();
+    core.add_own_paragraph(
+        &case,
+        "cognitive",
+        "ההבנה המילולית (VCI) בטווח הממוצע (97).",
+    )
+    .unwrap();
+    core.add_own_paragraph(
+        &case,
+        "cognitive",
+        "ההבנה המילולית (VCI) בטווח הממוצע (95).",
+    )
+    .unwrap();
+    let detail = core.case_detail(&case).unwrap();
+    let paras = &detail
+        .sections
+        .iter()
+        .find(|s| s.key == "cognitive")
+        .unwrap()
+        .paragraphs;
+    assert!(
+        paras[0]
+            .warnings
+            .iter()
+            .any(|w| w.contains("97") && w.contains("95")),
+        "{:?}",
+        paras[0].warnings
+    );
+    assert!(paras[1].warnings.is_empty(), "{:?}", paras[1].warnings);
+}
+
+/// AI-7: "why did you write this?" shows the passages a paragraph was written from, with the
+/// real names (on this computer only); a summary paragraph shows the approved sections.
+#[test]
+fn a_paragraph_shows_the_passages_it_was_written_from() {
+    let (_dir, mut core, case) = setup(None);
+    let p = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    let r = core.send_section(&p.approval_id.unwrap()).unwrap();
+    assert!(!r.paragraphs.is_empty(), "{}", r.reply);
+    let detail = core.case_detail(&case).unwrap();
+    let para = detail
+        .sections
+        .iter()
+        .find(|s| s.key == "kindergarten")
+        .unwrap()
+        .paragraphs[0]
+        .clone();
+    let why = core.paragraph_sources(&case, &para.id).unwrap();
+    assert!(!why.is_empty());
+    assert!(
+        why[0].text.contains("מעברים") && why[0].text.contains("אלון"),
+        "{why:?}"
+    );
+
+    core.approve_section(&case, "kindergarten").unwrap();
+    let s = core.prepare_section(&case, "summary", "טיוטה").unwrap();
+    core.send_section(&s.approval_id.unwrap()).unwrap();
+    let summary = core.case_detail(&case).unwrap();
+    let para = summary
+        .sections
+        .iter()
+        .find(|s| s.key == "summary")
+        .unwrap()
+        .paragraphs[0]
+        .clone();
+    let why = core.paragraph_sources(&case, &para.id).unwrap();
+    assert!(
+        why.iter().any(|x| x.label.contains("סעיף מאושר")),
+        "{why:?}"
+    );
 }

@@ -6,7 +6,7 @@ members = ["crates/*", "xtask", "apps/desktop/src-tauri"]
 default-members = ["crates/*", "xtask"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 rust-version = "1.85"
 license = "UNLICENSED"
@@ -38,6 +38,7 @@ dv-ingest = { path = "crates/dv-ingest" }
 dv-export = { path = "crates/dv-export" }
 dv-ipc = { path = "crates/dv-ipc" }
 dv-core = { path = "crates/dv-core" }
+dv-sandbox = { path = "crates/dv-sandbox" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

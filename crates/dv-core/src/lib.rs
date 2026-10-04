@@ -10,11 +10,15 @@ mod consultations;
 mod dates;
 mod followup;
 mod library;
+mod readiness;
 mod retention;
 mod sorting;
 mod style;
+mod unsaved;
 pub mod update;
+mod usage;
 mod views;
+mod why;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -37,23 +41,28 @@ use dv_vault::{Argon2Params, AuditEvent, Vault, VaultError};
 use serde_json::Value;
 
 pub use activity::ACTIVITY_PAGE;
-pub use backup::{backup_file_name, BACKUP_DAYS, MAX_BACKUP_BYTES};
+pub use backup::{
+    auto_backup_file_name, backup_file_name, AUTO_KEEP, BACKUP_DAYS, MAX_BACKUP_BYTES,
+};
 pub(crate) use dates::today;
 pub use dv_ai::{StyleItem, StyleKind, StyleOrigin, StyleProfile};
 pub use dv_vault::BACKUP_EXTENSION;
 pub use followup::FollowUpView;
 pub use library::TRASH_DAYS;
+pub use readiness::{Readiness, ReadinessItem};
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
 pub use style::{
     StyleAnalysisResult, StyleImportPreview, StyleOverview, StylePartView, StyleProfileView,
     StyleSectionLabel, StyleSourceView, StyleSuggestion, StyleVersionView,
 };
+pub use unsaved::UnsavedEdit;
+pub use usage::UsageSummary;
 pub use views::{
     ActivityEntry, ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail,
     ChatView, ConsultResult, ConsultTurnView, ConsultationSummary, ConsultationView, CreatedVault,
     ExportCheck, ImportPreview, MaterialRouting, NameMatch, NameSuggestion, ParagraphView,
     Prepared, ReportSettings, RetentionItem, ReviewPart, SectionResult, SectionView, SortResult,
-    StagedBackup, SuspectDecision, UiError,
+    SourceExcerpt, StagedBackup, SuspectDecision, UiError,
 };
 
 const API_KEY: &str = "anthropic_api_key";
@@ -87,6 +96,35 @@ const SLEEP_GAP: Duration = Duration::from_secs(60);
 const MAX_REQUEST_BYTES: usize = 900_000;
 /// Sections written from other, already approved sections.
 const DERIVED_SECTIONS: &[&str] = &["dsm", "summary", "diagnoses", "recommendations"];
+
+/// The cloud-synced folder (OneDrive, Dropbox…) that holds `path`, if any. A report with real
+/// names is not saved where it would be uploaded on its own.
+#[must_use]
+pub fn cloud_synced_folder(path: &Path) -> Option<String> {
+    dv_vault::env::cloud_synced_component(path)
+}
+
+/// The Word file's name. It shows in Downloads, in "recent files" and as an e-mail
+/// attachment, so it never carries a name: a case code that holds a name declared in the
+/// case gives way to the date.
+fn report_file_name(
+    code: &str,
+    identities: &[dv_domain::Identity],
+    (y, m, d): (i32, u32, u32),
+) -> String {
+    let lower = code.to_lowercase();
+    let holds_name = identities
+        .iter()
+        .flat_map(|i| std::iter::once(&i.value).chain(i.aliases.iter()))
+        .flat_map(|n| n.split_whitespace())
+        .map(str::to_lowercase)
+        .any(|w| w.chars().count() >= 2 && lower.contains(&w));
+    if code.is_empty() || holds_name {
+        format!("דוח אבחון {y:04}-{m:02}-{d:02}.docx")
+    } else {
+        format!("דוח אבחון {code}.docx")
+    }
+}
 
 /// Answer the UI's liveness check.
 #[must_use]
@@ -185,6 +223,23 @@ fn egress_he(e: &EgressError) -> String {
         }
         other => format!("שגיאה בחיבור ל-Claude: {other}"),
     }
+}
+
+/// The score sheets entered in the case's score table (the scores the text is checked against).
+fn score_sheets(
+    v: &Vault,
+    case_id: &str,
+    inputs: &[dv_domain::CaseInput],
+) -> Result<Vec<dv_domain::ScoreSheet>, CoreError> {
+    let mut out = Vec::new();
+    for i in inputs.iter().filter(|i| i.kind == InputKind::TestScores) {
+        if let Some(data) = v.input_data(case_id, &i.id)? {
+            if let Ok(sheet) = serde_json::from_str(&data) {
+                out.push(sheet);
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Today's date `(y, m, d)` in UTC, for relative dates.
@@ -319,6 +374,10 @@ pub struct Core {
     staged_backup: Option<Vec<u8>>,
     /// A past report read for the style profile, waiting for her confirmation (D-043).
     style_staged: HashMap<String, style::StagedStyle>,
+    /// The last automatic backup attempt this session (a failed one waits before the next).
+    auto_backup_tried: Option<Instant>,
+    /// The paragraph being edited right now (memory only; kept in the vault on lock).
+    unsaved: Option<UnsavedEdit>,
 }
 
 impl std::fmt::Debug for Core {
@@ -437,6 +496,8 @@ impl Core {
             ingest_exe: None,
             staged_backup: None,
             style_staged: HashMap::new(),
+            auto_backup_tried: None,
+            unsaved: None,
         }
     }
 
@@ -490,6 +551,40 @@ impl Core {
             return true;
         }
         self.lock_if_idle()
+    }
+
+    /// The psychologist is at work in the window (typing a paragraph, scrolling) without
+    /// calling the core: that counts as activity too, so a long paragraph is not lost to the
+    /// idle lock. Never reopens or extends a vault that has already passed its idle time.
+    pub fn touch(&mut self) {
+        let limit = Duration::from_secs(u64::from(self.lock_minutes()) * 60);
+        if self.vault.is_some() && self.last_activity.elapsed() <= limit {
+            self.last_activity = Instant::now();
+        }
+    }
+
+    /// The computer itself was locked (Win+L, the lock screen): lock the vault with it.
+    /// Returns true when it locked.
+    pub fn lock_with_computer(&mut self) -> bool {
+        if self.vault.is_none() {
+            return false;
+        }
+        self.lock_because(Some("computer_locked"));
+        true
+    }
+
+    #[must_use]
+    pub fn is_unlocked(&self) -> bool {
+        self.vault.is_some()
+    }
+
+    /// Seconds left before the idle lock, while the vault is open (shown as a warning in the
+    /// last minute).
+    fn idle_lock_in(&self) -> Option<u32> {
+        self.vault.as_ref()?;
+        let limit = Duration::from_secs(u64::from(self.lock_minutes()) * 60);
+        let left = limit.saturating_sub(self.last_activity.elapsed()).as_secs();
+        Some(u32::try_from(left).unwrap_or(u32::MAX))
     }
 
     /// Lock after the configured idle time even when nothing is clicked. Returns true when it
@@ -556,6 +651,7 @@ impl Core {
             speed,
             integrity_warning: integrity,
             lock_minutes: self.lock_minutes(),
+            idle_lock_in: self.idle_lock_in(),
             practitioner,
             review_only_suspect,
             review_choice_available,
@@ -686,6 +782,7 @@ impl Core {
     }
 
     fn lock_because(&mut self, reason: Option<&str>) {
+        self.keep_unsaved();
         self.pending.clear();
         self.staged_backup = None;
         self.style_staged.clear();
@@ -1156,6 +1253,7 @@ impl Core {
         let inputs = v.inputs(case_id)?;
         let practitioner = v.practitioner()?.names.first().cloned();
         let routing = Core::material_routing(v, &structure, case_id, &inputs)?;
+        let sheets = score_sheets(v, case_id, &inputs)?;
         let retention_default = v
             .list_cases()?
             .into_iter()
@@ -1189,7 +1287,8 @@ impl Core {
                                 )
                             })
                             .collect(),
-                        warnings: Vec::new(),
+                        // Every score in the text against the score table, each time (AI-6).
+                        warnings: dv_domain::check_scores(&d.text_tagged, &sheets),
                         replaces: d.replaces,
                     })
                     .collect();
@@ -1559,6 +1658,10 @@ impl Core {
     /// session (the app stays responsive while Claude answers).
     pub fn begin_send(&mut self, approval_id: &str) -> Result<Outgoing, CoreError> {
         let api_key = self.vault_ref()?.secret(API_KEY)?;
+        // Demo mode costs nothing; anything else stops at the monthly ceiling she set.
+        if api_key.is_some() || self.transport.is_some() {
+            self.refuse_over_cap()?;
+        }
         let pending = self
             .pending
             .remove(approval_id)
@@ -1568,6 +1671,68 @@ impl Core {
             api_key,
             transport: self.transport.clone(),
         })
+    }
+
+    fn refuse_over_cap(&mut self) -> Result<(), CoreError> {
+        let v = self.vault_ref()?;
+        let Some(cap) = v
+            .setting(usage::CAP_KEY)?
+            .and_then(|s| s.parse::<u32>().ok())
+        else {
+            return Ok(());
+        };
+        let month = usage::Month::parse(v.setting(&usage::this_month_key())?.as_deref());
+        if month.reached(cap) {
+            return Err(CoreError::Refused(format!(
+                "הגעת לתקרת ההוצאה החודשית שקבעת (${cap}). אפשר להעלות אותה בהגדרות, תחת \"שימוש ועלות\"."
+            )));
+        }
+        Ok(())
+    }
+
+    /// Count the tokens of an answer toward this month (numbers only). Never fails a send:
+    /// the answer has arrived and is worth more than the count.
+    fn note_usage(&mut self, payload: &ClearedPayload, answer: &Value, demo: bool) {
+        if demo {
+            return;
+        }
+        let model = serde_json::from_slice::<Value>(payload.body())
+            .ok()
+            .and_then(|b| b["model"].as_str().map(str::to_owned))
+            .unwrap_or_default();
+        let key = usage::this_month_key();
+        let Ok(v) = self.vault_mut() else { return };
+        let mut month = usage::Month::parse(v.setting(&key).ok().flatten().as_deref());
+        month.add(&model, usage::Tokens::from_answer(answer));
+        if let Ok(json) = serde_json::to_string(&month) {
+            let _ = v.set_setting(&key, &json);
+        }
+    }
+
+    /// This month's use of the AI and the ceiling, for settings.
+    pub fn usage_summary(&mut self) -> Result<UsageSummary, CoreError> {
+        let v = self.vault_mut()?;
+        let key = usage::this_month_key();
+        let cap = v
+            .setting(usage::CAP_KEY)?
+            .and_then(|s| s.parse::<u32>().ok());
+        Ok(usage::Month::parse(v.setting(&key)?.as_deref()).view(&key, cap))
+    }
+
+    /// The monthly ceiling in dollars; `None` removes it.
+    pub fn set_monthly_cap(&mut self, cap_usd: Option<u32>) -> Result<(), CoreError> {
+        let v = self.vault_mut()?;
+        match cap_usd {
+            Some(0) => {
+                return Err(CoreError::Refused(
+                    "תקרה של 0 תעצור כל שליחה. כדי לבטל את התקרה, משאירים את השדה ריק.".to_owned(),
+                ))
+            }
+            Some(cap) => v.set_setting(usage::CAP_KEY, &cap.to_string())?,
+            // Empty = no ceiling (it does not parse as a number).
+            None => v.set_setting(usage::CAP_KEY, "")?,
+        }
+        Ok(())
     }
 
     /// A failed send is not a send: the approval stays valid for a retry.
@@ -1599,6 +1764,7 @@ impl Core {
                 return Err(e);
             }
         };
+        self.note_usage(&out.pending.payload, &response, demo);
         let Pending { payload, kind } = out.pending;
         let PendingKind::Section {
             case_id,
@@ -1641,7 +1807,10 @@ impl Core {
         let identities = v.identities(&case_id)?;
         let case_tags: Vec<String> = identities.iter().map(|i| i.tag.clone()).collect();
         let everyone = v.all_identities()?;
+        let inputs = v.inputs(&case_id)?;
+        let sheets = score_sheets(v, &case_id, &inputs)?;
         for p in &mut reply.paragraphs {
+            p.warnings.extend(dv_domain::check_scores(&p.text, &sheets));
             for s in scan_model_output(&p.text, &case_tags, &everyone) {
                 p.warnings.push(format!("{}: {}", s.message, s.token));
             }
@@ -1896,6 +2065,7 @@ impl Core {
                 return Err(e);
             }
         };
+        self.note_usage(&out.pending.payload, &response, demo);
         let PendingKind::Consult {
             case_id,
             conversation_id,
@@ -2099,6 +2269,7 @@ impl Core {
                     .map(|r| vec![r.measure, r.score, r.percentile, r.range])
                     .collect(),
                 note,
+                charts: Vec::new(),
             });
         }
         let score_tables = u32::try_from(tables.len()).unwrap_or(u32::MAX);
@@ -2131,10 +2302,7 @@ impl Core {
             .chars()
             .filter(|c| c.is_alphanumeric() || *c == '-')
             .collect();
-        let file_name = format!(
-            "דוח אבחון {}.docx",
-            if code.is_empty() { "תיק" } else { &code }
-        );
+        let file_name = report_file_name(&code, &identities, dates::today());
         Ok((
             report,
             ExportCheck {
