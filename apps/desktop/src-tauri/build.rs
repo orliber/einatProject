@@ -82,6 +82,7 @@ fn main() {
             "restore_backup",
             "forget_backup",
             "check_update",
+            "prepare_update",
             "install_update",
             "send_progress",
         ]));
