@@ -191,6 +191,98 @@ fn sort_locally(request: &str, keys: &[&str]) -> Value {
     json!({ "sections": sections })
 }
 
+/// Style markers demo mode looks for in a past report, with what each one says about the style.
+/// Deliberately simple: the real analysis reads the text; this only shows the flow.
+const STYLE_MARKERS: &[(&str, &str, &str)] = &[
+    ("עם זאת", "rule", "מבנה של חוזקה ואחריה הקושי, עם מילת מעבר"),
+    ("כך לדוגמא", "phrase", "כך לדוגמא"),
+    ("כך לדוגמה", "phrase", "כך לדוגמה"),
+    ("ניכר", "phrase", "ניכר כי"),
+    ("בשיח עימי", "rule", "גוף ראשון לתצפית של המאבחנת"),
+    ("מגיב", "rule", "גוף נסתר וזמן הווה בתיאור הילד"),
+    ("מגיבה", "rule", "גוף נסתר וזמן הווה בתיאור הילדה"),
+    ("מומלץ", "phrase", "מומלץ על"),
+    ("לסיכום", "phrase", "לסיכום,"),
+];
+
+/// Demo-mode style analysis (step 1) or synthesis (step 2), from the request only.
+fn style_locally(request: &str, synthesis: bool) -> Value {
+    if !synthesis {
+        let mut items: Vec<Value> = Vec::new();
+        for (section, text) in style_excerpts_in(request) {
+            for (marker, kind, item) in STYLE_MARKERS {
+                if text.contains(marker)
+                    && !items
+                        .iter()
+                        .any(|i| i["text"] == *item && i["kind"] == *kind)
+                {
+                    let key = if *kind == "phrase" {
+                        "general"
+                    } else {
+                        section.as_str()
+                    };
+                    items.push(json!({ "section": key, "kind": kind, "text": item }));
+                }
+            }
+        }
+        items.push(json!({
+            "section": "general",
+            "kind": "template",
+            "text": "הציג תפקוד {רמה} ({ציון}), עם זאת ניכר קושי ב{תחום}"
+        }));
+        return json!({ "items": items });
+    }
+    // Merge the analyses: an item seen in several reports counts once, with its support.
+    let mut merged: Vec<(String, String, String, u32)> = Vec::new();
+    let mut sections: Vec<String> = Vec::new();
+    for line in request.lines() {
+        let parts: Vec<&str> = line.splitn(3, " | ").collect();
+        let [section, kind, text] = parts[..] else {
+            continue;
+        };
+        if section != "general" && !sections.iter().any(|s| s == section) {
+            sections.push(section.to_owned());
+        }
+        match merged
+            .iter_mut()
+            .find(|(s, k, t, _)| s == section && k == kind && t == text)
+        {
+            Some(m) => m.3 += 1,
+            None => merged.push((section.to_owned(), kind.to_owned(), text.to_owned(), 1)),
+        }
+    }
+    let mut items: Vec<Value> = merged
+        .into_iter()
+        .map(|(s, k, t, n)| json!({ "section": s, "kind": k, "text": t, "support": n }))
+        .collect();
+    for section in sections {
+        items.push(json!({
+            "section": section,
+            "kind": "example",
+            "text": "מצב הדגמה: הילד מגיע למפגש בסקרנות ונענה לבקשות בשיתוף פעולה. עם זאת, ניכר כי במשימות ממושכות הוא זקוק לתיווך כדי להשלים אותן. כך לדוגמא, הציג תפקוד ממוצע ({מספר}) כשהמשימה חולקה לשלבים.",
+            "support": 1
+        }));
+    }
+    json!({ "items": items })
+}
+
+/// `(section, text)` of every excerpt in a style-analysis request.
+fn style_excerpts_in(request: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut rest = request;
+    while let Some(start) = rest.find("section=\"") {
+        let after = &rest[start + 9..];
+        let Some(q) = after.find('"') else { break };
+        let section = after[..q].to_owned();
+        let body_start = after.find(">\n").map_or(q, |i| i + 2);
+        let body = &after[body_start..];
+        let end = body.find("\n</data").unwrap_or(body.len());
+        out.push((section, body[..end].to_owned()));
+        rest = &body[end..];
+    }
+    out
+}
+
 /// Answer a request body the way the real API would, from local material only.
 #[must_use]
 pub fn respond(body: &Value) -> Value {
@@ -207,6 +299,12 @@ pub fn respond(body: &Value) -> Value {
         );
     }
     let schema = &body["output_config"]["format"]["schema"];
+    if let Some(kinds) =
+        schema["properties"]["items"]["items"]["properties"]["kind"]["enum"].as_array()
+    {
+        let synthesis = kinds.iter().any(|k| k == "example");
+        return api_text(&style_locally(last_user, synthesis).to_string());
+    }
     if let Some(keys) =
         schema["properties"]["sections"]["items"]["properties"]["section"]["enum"].as_array()
     {
@@ -285,6 +383,41 @@ mod tests {
             got,
             vec![("background", &[1][..]), ("kindergarten", &[2][..])]
         );
+    }
+
+    #[test]
+    fn demo_style_analysis_and_synthesis_parse_and_merge() {
+        use crate::style::{
+            build_style_analysis_request, build_style_synthesis_request, parse_style_analysis,
+            parse_style_synthesis, StyleExcerpt, StyleKind,
+        };
+        let keys: Vec<String> = vec!["cognitive".into(), "summary".into()];
+        let excerpt = |s: &str, t: &str| StyleExcerpt {
+            section: s.into(),
+            text: t.into(),
+        };
+        let body = build_style_analysis_request(
+            &ModelConfig::default(),
+            &keys,
+            &[
+                excerpt("cognitive", "[ילד] הציג תפקוד ממוצע. עם זאת, ניכר קושי."),
+                excerpt("summary", "כך לדוגמא, [ילד] מגיב לתיווך."),
+            ],
+            "n",
+        );
+        let (one, dropped) = parse_style_analysis(&respond(&body), &keys).unwrap();
+        assert_eq!(dropped, 0);
+        assert!(one.iter().any(|i| i.text == "כך לדוגמא"));
+        assert!(one
+            .iter()
+            .any(|i| i.section.as_deref() == Some("cognitive")));
+        let body =
+            build_style_synthesis_request(&ModelConfig::default(), &keys, &[one.clone(), one], "n");
+        let (profile, dropped) = parse_style_synthesis(&respond(&body), &keys).unwrap();
+        assert_eq!(dropped, 0);
+        let phrase = profile.iter().find(|i| i.text == "כך לדוגמא").unwrap();
+        assert_eq!(phrase.support, 2, "seen in both reports");
+        assert!(profile.iter().any(|i| i.kind == StyleKind::Example));
     }
 
     #[test]

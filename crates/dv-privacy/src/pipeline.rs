@@ -1832,8 +1832,10 @@ fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
         // A health fund is one of four names, also after a colon ("קופת חולים: כללית").
         let fund = is(&tokens[i], &["קופת", "קופ\"ח"]);
         let mut first = k + 1;
+        // "]": the institution word is inside a tag ("[ילד_גן] הופנה", "[גן] שלו"), so the next
+        // word is not its name. Without this, filtering a tagged draft again dropped that word.
         if first >= tokens.len()
-            || gap(k, first).contains(['.', ',', '\n', ';', '('])
+            || gap(k, first).contains(['.', ',', '\n', ';', '(', ']'])
             || (gap(k, first).contains(':') && !fund)
         {
             i = k + 1;

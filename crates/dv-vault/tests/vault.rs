@@ -711,3 +711,94 @@ fn consultations_are_sealed_and_go_with_their_case() {
     vault.delete_consultation(&general).unwrap();
     assert!(vault.consultations().unwrap().is_empty());
 }
+
+#[test]
+fn style_sources_and_profiles_are_sealed_versioned_and_erasable() {
+    let (dir, mut vault, _) = new_vault();
+    let a = vault
+        .save_style_source(None, r#"{"text":"[ילד] מגיב היטב לתיווך של המבוגר"}"#)
+        .unwrap();
+    let b = vault
+        .save_style_source(None, r#"{"text":"ניכר קושי בוויסות"}"#)
+        .unwrap();
+    assert_eq!(vault.style_sources().unwrap().len(), 2);
+    vault
+        .save_style_source(Some(&a), r#"{"text":"גרסה מעודכנת"}"#)
+        .unwrap();
+    assert!(vault
+        .style_source(&a)
+        .unwrap()
+        .unwrap()
+        .json
+        .contains("מעודכנת"));
+    assert!(matches!(
+        vault.save_style_source(Some("missing"), "{}"),
+        Err(VaultError::NotFound)
+    ));
+
+    let (_, v1) = vault
+        .add_style_profile("active", r#"{"items":["אחד"]}"#)
+        .unwrap();
+    let (_, v2) = vault
+        .add_style_profile("draft", r#"{"items":["טיוטה"]}"#)
+        .unwrap();
+    let (_, v3) = vault
+        .add_style_profile("active", r#"{"items":["שלוש"]}"#)
+        .unwrap();
+    assert_eq!((v1, v2, v3), (1, 2, 3));
+    let profiles = vault.style_profiles().unwrap();
+    assert_eq!(profiles[0].version, 3, "newest first");
+    assert_eq!(
+        profiles.iter().filter(|p| p.status == "active").count(),
+        1,
+        "approving a version retires the one before"
+    );
+    assert!(vault.add_style_profile("weird", "{}").is_err());
+    vault.delete_style_drafts().unwrap();
+    assert!(vault
+        .style_profiles()
+        .unwrap()
+        .iter()
+        .all(|p| p.status != "draft"));
+
+    vault
+        .save_style_learning(r#"{"pairs":[["מראה","מפגין",3]]}"#)
+        .unwrap();
+    vault
+        .save_style_learning(r#"{"pairs":[["מראה","מפגין",4]]}"#)
+        .unwrap();
+    assert!(vault.style_learning().unwrap().unwrap().contains('4'));
+
+    vault.delete_style_source(&b).unwrap();
+    assert_eq!(vault.style_sources().unwrap().len(), 1);
+    assert!(matches!(
+        vault.delete_style_source(&b),
+        Err(VaultError::NotFound)
+    ));
+    let events: Vec<String> = vault
+        .audit_entries(50)
+        .unwrap()
+        .into_iter()
+        .map(|e| e.event)
+        .collect();
+    for e in [
+        "style_source_added",
+        "style_source_deleted",
+        "style_profile_approved",
+    ] {
+        assert!(events.iter().any(|x| x == e), "{e} is in the log");
+    }
+    vault.reset_style().unwrap();
+    assert!(vault.style_profiles().unwrap().is_empty());
+    assert!(vault.style_learning().unwrap().is_none());
+    vault.lock().unwrap();
+
+    let bytes = all_bytes(dir.path());
+    for secret in ["מגיב היטב לתיווך", "גרסה מעודכנת", "מפגין", "שלוש"]
+    {
+        assert!(
+            !contains(&bytes, secret),
+            "{secret} found in plaintext on disk"
+        );
+    }
+}

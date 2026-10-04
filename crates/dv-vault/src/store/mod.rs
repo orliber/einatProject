@@ -23,7 +23,9 @@ use crate::password::{self, Argon2Params};
 use crate::{recovery, VaultError};
 
 mod backup;
+mod style;
 pub use backup::{peek_backup, BackupCheck, BackupInfo, BackupPeek, BACKUP_EXTENSION};
+pub use style::{StoredStyleProfile, StoredStyleSource};
 
 /// Raw rows as read from SQLite, before decryption.
 type IdentityRow = (String, String, String, Vec<u8>, Vec<u8>);

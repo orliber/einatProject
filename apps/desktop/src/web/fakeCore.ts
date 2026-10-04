@@ -32,6 +32,7 @@ import { kindLabel } from "../i18n/he";
 import structure from "../../../../templates/report_structure.json";
 import { readDocx } from "./docx";
 import { filter, restore, type Person } from "./filter";
+import { FakeStyle } from "./fakeStyle";
 import { compareSheets, comparisonText, formatSheet, instruments } from "./scores";
 import * as R from "./routing";
 import type { SortResult } from "../ipc/generated/SortResult";
@@ -122,6 +123,7 @@ export class FakeCore {
   private cases: Case[] = [];
   private folderList: Folder[] = [];
   private pending = new Map<string, Pending>();
+  private style = new FakeStyle();
 
   constructor() {
     this.seed();
@@ -503,6 +505,7 @@ export class FakeCore {
     if (!["ping", "app_status", "unlock", "unlock_with_recovery", "create_vault", "confirm_recovery_key", "score_instruments", "preview_scores", "choose_backup", "restore_backup", "forget_backup"].includes(cmd) && !this.unlocked) {
       fail("locked", "הכספת נעולה. יש לפתוח אותה מחדש.");
     }
+    if (FakeStyle.handles(cmd)) return this.style.handle(cmd, a, args, options?.headers ?? {}, this.allPeople(), this.practitioner);
     switch (cmd) {
       case "ping":
         return { ipc_version: 1, core_version: "0.1.0", build_commit: "browser-preview", fips_active: false, platform: "browser" };

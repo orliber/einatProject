@@ -4,7 +4,7 @@ import { LockIcon } from "./ui";
 import { UpdateChip } from "./Update";
 import "./TopBar.css";
 
-/** The bar of the screens outside a case: cases, consultation, settings. */
+/** The bar of the screens outside a case: cases, consultation, writing style, settings. */
 export function TopBar({ active }: { active: Route["name"] }) {
   const { go, lockNow, status } = useApp();
   const tab = (name: Route["name"], label: string, route: Route) => (
@@ -17,6 +17,7 @@ export function TopBar({ active }: { active: Route["name"] }) {
       <nav className="topbar-nav" aria-label="ניווט ראשי">
         {tab("cases", "תיקים", { name: "cases" })}
         {tab("consult", "התייעצות", { name: "consult" })}
+        {tab("style", "הסגנון שלי", { name: "style" })}
         {tab("settings", "הגדרות", { name: "settings" })}
       </nav>
       <span className="grow" />

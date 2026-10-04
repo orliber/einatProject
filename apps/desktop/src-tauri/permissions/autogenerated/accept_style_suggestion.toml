@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-accept-style-suggestion"
+description = "Enables the accept_style_suggestion command without any pre-configured scope."
+commands.allow = ["accept_style_suggestion"]
+
+[[permission]]
+identifier = "deny-accept-style-suggestion"
+description = "Denies the accept_style_suggestion command without any pre-configured scope."
+commands.deny = ["accept_style_suggestion"]

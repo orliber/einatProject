@@ -36,6 +36,14 @@ import type { SuspectDecision } from "./generated/SuspectDecision";
 import type { FollowUpView } from "./generated/FollowUpView";
 import type { UiError } from "./generated/UiError";
 import type { UpdateView } from "./generated/UpdateView";
+import type { StyleAnalysisResult } from "./generated/StyleAnalysisResult";
+import type { StyleImportPreview } from "./generated/StyleImportPreview";
+import type { StyleItem } from "./generated/StyleItem";
+import type { StyleKind } from "./generated/StyleKind";
+import type { StyleOverview } from "./generated/StyleOverview";
+import type { StyleProfile } from "./generated/StyleProfile";
+import type { StyleProfileView } from "./generated/StyleProfileView";
+import type { StyleSourceView } from "./generated/StyleSourceView";
 
 /** Every failure reaches the UI as a UiError with a Hebrew message. */
 export function asUiError(e: unknown): UiError {
@@ -190,6 +198,36 @@ export const ipc = {
     call<AppStatus>("restore_backup", { password, recoveryKey }),
   forgetBackup: () => run("forget_backup"),
 
+  // Writing style (D-043): past reports kept neutralized, the profile, learning from edits.
+  styleOverview: () => call<StyleOverview>("style_overview"),
+  /** A past report: the bytes go as the raw body. Nothing is kept until `saveStyleSource`. */
+  importStyleSource: async (file: File): Promise<StyleImportPreview> => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    try {
+      return await invoke<StyleImportPreview>("import_style_source", bytes, {
+        headers: { "x-file-name": encodeURIComponent(file.name) },
+      });
+    } catch (e) {
+      throw asUiError(e);
+    }
+  },
+  saveStyleSource: (token: string, included: number[], title: string | null) =>
+    call<StyleSourceView>("save_style_source", { token, included, title }),
+  discardStyleUpload: () => run("discard_style_upload"),
+  deleteStyleSource: (id: string) => run("delete_style_source", { id }),
+  prepareStyleAnalysis: (sourceId: string) => call<Prepared>("prepare_style_analysis", { sourceId }),
+  sendStyleAnalysis: (approvalId: string) => call<StyleAnalysisResult>("send_style_analysis", { approvalId }),
+  prepareStyleProfile: () => call<Prepared>("prepare_style_profile"),
+  sendStyleProfile: (approvalId: string) => call<StyleProfileView>("send_style_profile", { approvalId }),
+  saveStyleDraft: (profile: StyleProfile) => call<StyleProfileView>("save_style_draft", { profile }),
+  approveStyleDraft: () => call<StyleProfileView>("approve_style_draft"),
+  discardStyleDraft: () => run("discard_style_draft"),
+  restoreStyleVersion: (id: string) => call<StyleProfileView>("restore_style_version", { id }),
+  setStyleEnabled: (on: boolean) => run("set_style_enabled", { on }),
+  resetStyle: () => run("reset_style"),
+  acceptStyleSuggestion: (id: string) => call<StyleProfileView>("accept_style_suggestion", { id }),
+  dismissStyleSuggestion: (id: string) => run("dismiss_style_suggestion", { id }),
+
   /** A newer version, signed by the developer (D-033); `null` when this is the newest. */
   checkUpdate: () => call<UpdateView | null>("check_update"),
   /** In the background: fetch and verify the newest version. `true` when it waits for her click. */
@@ -199,6 +237,14 @@ export const ipc = {
 };
 
 export type {
+  StyleAnalysisResult,
+  StyleImportPreview,
+  StyleItem,
+  StyleKind,
+  StyleOverview,
+  StyleProfile,
+  StyleProfileView,
+  StyleSourceView,
   UpdateView,
   ActivityPage,
   ConsultationSummary,

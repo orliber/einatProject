@@ -789,3 +789,32 @@ fn a_range_that_cuts_through_a_name_refuses_to_split() {
     let (_, parts) = filter_split(text, &ctx, &inside_a_letter).unwrap();
     assert!(parts.is_none());
 }
+
+/// Drafts are stored tagged and filtered again before each request. An institution word inside
+/// a tag ("גן" in `[ילד_גן]`, `[גן]`) is not followed by a kindergarten's name: the next word
+/// stays. (It used to be dropped: "[ילד_גן] הופנה לאבחון" went out as "[ילד_גן לאבחון".)
+#[test]
+fn filtering_tagged_text_again_keeps_every_word() {
+    let mut ids = identities();
+    ids.push(id(CASE, Role::OtherChild, "[ילד_גן]", "דנה", &[]));
+    ids.push(id(CASE, Role::School, "[בית_ספר]", "בית ספר אופק", &[]));
+    let practitioner: Vec<String> = Vec::new();
+    let ctx = PrivacyContext {
+        case_id: CASE,
+        identities: &ids,
+        practitioner: &practitioner,
+        allowlisted: &|_: &str| false,
+        confirmed_names: &|_: &str| false,
+        today: TODAY,
+    };
+    for tagged in [
+        "[ילד_גן] הופנה לאבחון.",
+        "[ילד] משחק עם [ילד_גן] בחצר.",
+        "ב[גן] שלו יש שגרה קבועה.",
+        "ב[בית_ספר] החדש הוא משתלב.",
+    ] {
+        let again = filter(tagged, &ctx).unwrap();
+        assert_eq!(again.tagged, tagged);
+        assert!(again.suspects.is_empty(), "{tagged}: {:?}", again.suspects);
+    }
+}

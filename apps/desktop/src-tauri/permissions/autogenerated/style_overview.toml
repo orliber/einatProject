@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-style-overview"
+description = "Enables the style_overview command without any pre-configured scope."
+commands.allow = ["style_overview"]
+
+[[permission]]
+identifier = "deny-style-overview"
+description = "Denies the style_overview command without any pre-configured scope."
+commands.deny = ["style_overview"]

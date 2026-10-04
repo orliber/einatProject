@@ -12,6 +12,7 @@ mod followup;
 mod library;
 mod retention;
 mod sorting;
+mod style;
 pub mod update;
 mod views;
 
@@ -38,10 +39,15 @@ use serde_json::Value;
 pub use activity::ACTIVITY_PAGE;
 pub use backup::{backup_file_name, BACKUP_DAYS, MAX_BACKUP_BYTES};
 pub(crate) use dates::today;
+pub use dv_ai::{StyleItem, StyleKind, StyleOrigin, StyleProfile};
 pub use dv_vault::BACKUP_EXTENSION;
 pub use followup::FollowUpView;
 pub use library::TRASH_DAYS;
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
+pub use style::{
+    StyleAnalysisResult, StyleImportPreview, StyleOverview, StylePartView, StyleProfileView,
+    StyleSectionLabel, StyleSourceView, StyleSuggestion, StyleVersionView,
+};
 pub use views::{
     ActivityEntry, ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail,
     ChatView, ConsultResult, ConsultTurnView, ConsultationSummary, ConsultationView, CreatedVault,
@@ -239,6 +245,10 @@ enum PendingKind {
         materials: Vec<(String, usize, u64)>,
         sections: Vec<String>,
     },
+    /// Step 1 of the writing-style profile: one past report (D-043).
+    StyleAnalysis { source_id: String },
+    /// Step 2: the analyses of `reports` past reports.
+    StyleSynthesis { reports: u32 },
 }
 
 struct Pending {
@@ -304,6 +314,8 @@ pub struct Core {
     ingest_exe: Option<PathBuf>,
     /// A backup file chosen for the drill or a restore (encrypted bytes).
     staged_backup: Option<Vec<u8>>,
+    /// A past report read for the style profile, waiting for her confirmation (D-043).
+    style_staged: HashMap<String, style::StagedStyle>,
 }
 
 impl std::fmt::Debug for Core {
@@ -421,6 +433,7 @@ impl Core {
             transport: None,
             ingest_exe: None,
             staged_backup: None,
+            style_staged: HashMap::new(),
         }
     }
 
@@ -672,6 +685,7 @@ impl Core {
     fn lock_because(&mut self, reason: Option<&str>) {
         self.pending.clear();
         self.staged_backup = None;
+        self.style_staged.clear();
         if let Some(v) = self.vault.take() {
             let _ = v.lock_because(reason);
         }
@@ -1260,7 +1274,10 @@ impl Core {
             return self.reject_paragraph(case_id, draft_id);
         }
         let tagged = self.preview_filter(case_id, text)?.tagged;
-        Ok(self.vault_mut()?.edit_draft(case_id, draft_id, &tagged)?)
+        let before = style::find_draft(self.vault_ref()?, case_id, draft_id)?;
+        self.vault_mut()?.edit_draft(case_id, draft_id, &tagged)?;
+        self.learn_from_draft_edit(before, &tagged);
+        Ok(())
     }
 
     pub fn add_own_paragraph(
@@ -1479,6 +1496,11 @@ impl Core {
                 .collect::<Result<_, _>>()?;
             let instr = run(instruction)?;
             review.add("הבקשה שלך".to_owned(), &instr);
+            // Her approved style profile (D-043), as it goes out with this case's names hidden.
+            let style_profile = style::style_for_request(v, &ctx, section_key)?;
+            if let Some(text) = &style_profile {
+                review.add_context("פרופיל הסגנון שלך".to_owned(), &run(text)?);
+            }
             let input = SectionInput {
                 section_key: section.key.clone(),
                 section_title: fixed_title(&section)?,
@@ -1489,7 +1511,7 @@ impl Core {
                 current_draft: current,
                 history,
                 instruction_tagged: instr.tagged.clone(),
-                style_profile: None,
+                style_profile,
             };
             let sources = (
                 section.key.clone(),
@@ -1601,6 +1623,12 @@ impl Core {
             for s in scan_model_output(&p.text, &case_tags, &everyone) {
                 p.warnings.push(format!("{}: {}", s.message, s.token));
             }
+        }
+        // D-043: a paragraph that repeats a past report word for word.
+        let texts: Vec<&str> = reply.paragraphs.iter().map(|p| p.text.as_str()).collect();
+        let overlaps = style::overlap_warning(v, &texts)?;
+        for (p, w) in reply.paragraphs.iter_mut().zip(overlaps) {
+            p.warnings.extend(w);
         }
         v.add_message(
             &case_id,

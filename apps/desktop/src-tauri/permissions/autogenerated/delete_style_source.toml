@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-delete-style-source"
+description = "Enables the delete_style_source command without any pre-configured scope."
+commands.allow = ["delete_style_source"]
+
+[[permission]]
+identifier = "deny-delete-style-source"
+description = "Denies the delete_style_source command without any pre-configured scope."
+commands.deny = ["delete_style_source"]
