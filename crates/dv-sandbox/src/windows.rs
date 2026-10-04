@@ -328,14 +328,24 @@ fn command_line(exe: &Path, args: &[&str]) -> io::Result<Vec<u16>> {
     Ok(wide(&line))
 }
 
-/// `SystemRoot=…\0WINDIR=…\0\0`.
+/// The child's environment, sorted as Windows expects, double-NUL-terminated. Only what
+/// Windows itself needs: the system folder, and the profile folders that CreateProcess rewrites
+/// to the container's own (it refuses an AppContainer without them, error 203). No proxy
+/// settings, no search path, nothing of the app.
 fn environment() -> Vec<u16> {
-    let root = system_root();
+    let mut entries: Vec<(&str, OsString)> =
+        vec![("SystemRoot", system_root()), ("WINDIR", system_root())];
+    for key in ["APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "USERPROFILE"] {
+        if let Some(value) = std::env::var_os(key) {
+            entries.push((key, value));
+        }
+    }
+    entries.sort_by_key(|(k, _)| k.to_ascii_uppercase());
     let mut block = Vec::new();
-    for key in ["SystemRoot", "WINDIR"] {
+    for (key, value) in entries {
         let mut entry = OsString::from(key);
         entry.push("=");
-        entry.push(&root);
+        entry.push(value);
         block.extend(entry.encode_wide());
         block.push(0);
     }
@@ -343,12 +353,17 @@ fn environment() -> Vec<u16> {
     block
 }
 
+/// Says which step failed, for the error the app shows and logs.
+fn step<T>(name: &str, r: io::Result<T>) -> io::Result<T> {
+    r.map_err(|e| io::Error::new(e.kind(), format!("{name}: {e}")))
+}
+
 pub(crate) fn spawn(exe: &Path, args: &[&str], policy: &Policy) -> io::Result<Contained> {
-    let sid = container_sid()?;
-    let sid_text = sid_string(&sid)?;
-    grant(exe, &sid_text)?;
+    let sid = step("container", container_sid())?;
+    let sid_text = step("container", sid_string(&sid))?;
+    step("grant", grant(exe, &sid_text))?;
     for dir in &policy.read_dirs {
-        grant(dir, &sid_text)?;
+        step("grant", grant(dir, &sid_text))?;
     }
 
     let (stdin_read, stdin_write) = pipe()?;
@@ -397,23 +412,26 @@ pub(crate) fn spawn(exe: &Path, args: &[&str], policy: &Policy) -> io::Result<Co
     // CREATE_UNICODE_ENVIRONMENT says) and outlives the call; `line` is writable as required;
     // `startup` is a STARTUPINFOEXW as EXTENDED_STARTUPINFO_PRESENT says, its attribute list and
     // everything it points to are alive; `info` is a valid out-pointer.
-    check(unsafe {
-        CreateProcessW(
-            application.as_ptr(),
-            line.as_mut_ptr(),
-            null(),
-            null(),
-            1,
-            EXTENDED_STARTUPINFO_PRESENT
-                | CREATE_SUSPENDED
-                | CREATE_NO_WINDOW
-                | CREATE_UNICODE_ENVIRONMENT,
-            environment.as_ptr().cast(),
-            folder.as_ptr(),
-            &startup.StartupInfo,
-            &mut info,
-        )
-    })?;
+    step(
+        "start",
+        check(unsafe {
+            CreateProcessW(
+                application.as_ptr(),
+                line.as_mut_ptr(),
+                null(),
+                null(),
+                1,
+                EXTENDED_STARTUPINFO_PRESENT
+                    | CREATE_SUSPENDED
+                    | CREATE_NO_WINDOW
+                    | CREATE_UNICODE_ENVIRONMENT,
+                environment.as_ptr().cast(),
+                folder.as_ptr(),
+                &startup.StartupInfo,
+                &mut info,
+            )
+        }),
+    )?;
     // SAFETY: CreateProcessW succeeded: two new handles owned by nobody else.
     let (process, thread) = unsafe {
         (
