@@ -98,7 +98,10 @@ transmissions(id PK, case_id FK, payload_sha256, payload_tagged_enc,   -- בדי
               approved_by_user INTEGER, model, request_id_enc, sent_at_enc)
 drafts(id PK, case_id FK, section_key, version, text_tagged_enc,
        status, created_by, source_refs_enc, approved_at_enc)
-style_profile(id PK, content_enc /* ב-K_style */, version, updated_at)
+style_sources(id PK, created_at, data_enc)          -- D-043: קטעים מנוטרלים של דוח ישן + הניתוח שלו
+style_profiles(id PK, version, status /* draft|active|retired */, created_at, data_enc)
+style_learning(id = 1, data_enc)                    -- החלפות קצרות מהתיקונים של עינת (מקומי בלבד)
+-- שלושתן חתומות במפתח ההגדרות: לא שייכות לתיק
 kb_overrides(id PK, test, key, value, source, approved, updated_at)
 settings(key PK, value)            -- בלי מידע אישי
 ```
@@ -106,7 +109,7 @@ settings(key PK, value)            -- בלי מידע אישי
 
 ## identity.db (סוד הקישור)
 ```sql
-identities(id PK, case_id, tag, role, value_enc, variants_enc, source /* form|metadata|review */, created_at_enc)
+identities(id PK, case_id, tag, role, value_enc, aliases_enc, source /* manual|auto|metadata */, reason /* "אחרי 'הגננת'" */, created_at)
 decisions(id PK, case_id, token_hmac, decision /* hide|not_a_name */, tag, created_at_enc)
 practitioner(id PK, value_enc, variants_enc)   -- שם עינת, שם הקליניקה, מספר רישיון
 ```
@@ -134,7 +137,7 @@ audit(seq PK, ts, event, case_ref /* HMAC של case_id */, meta_json_enc, prev_m
 ## הקשחת Tauri
 - CSP: `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`.
 - Isolation pattern. capabilities: רק הפקודות שלנו. אין plugins של fs, shell או http. דיאלוגים לבחירת קבצים נפתחים מצד Rust.
-- `contentProtected: true` (מתג בהגדרות, רק כשהכספת פתוחה; D-037), DevTools כבויים ב-release, ניווט חיצוני חסום.
+- `contentProtected: true` בהגדרות החלון, אבל ההגנה מוסרת בזמן ריצה ומוסתרת מההגדרות בינתיים (D-039; המתג של D-037 נשאר בקוד), DevTools כבויים ב-release, ניווט חיצוני חסום.
 - פונטים (Frank Ruhl Libre, Assistant, ברישיון OFL) ארוזים מקומית.
 
 ## סביבה

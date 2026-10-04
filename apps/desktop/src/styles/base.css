@@ -339,6 +339,26 @@ p {
   gap: 10px;
 }
 
+/* ---------- idle lock warning ---------- */
+.idle-warning {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 24px;
+  margin-inline: auto;
+  width: fit-content;
+  max-width: calc(100% - 32px);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--warn-paper);
+  color: var(--warn-ink);
+  border: 1px solid var(--warn-line);
+  border-radius: 12px;
+  padding: 10px 16px;
+  z-index: 40;
+  box-shadow: var(--shadow-dialog);
+}
+
 /* ---------- toast ---------- */
 .toast {
   position: fixed;

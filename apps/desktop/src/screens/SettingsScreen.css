@@ -61,3 +61,34 @@
 .settings .card {
   scroll-margin-top: 56px;
 }
+
+.warn-text {
+  color: var(--warn-ink);
+}
+
+.ready-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.ready-list li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.ready-list input[type="checkbox"] {
+  margin-top: 4px;
+}
+.ready-mark {
+  width: 18px;
+  text-align: center;
+  font-weight: 700;
+}
+.ready-list li.ok .ready-mark {
+  color: var(--ok);
+}
+.ready-list li.todo .ready-mark {
+  color: var(--warn-ink);
+}

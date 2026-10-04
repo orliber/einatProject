@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-send-style-analysis"
+description = "Enables the send_style_analysis command without any pre-configured scope."
+commands.allow = ["send_style_analysis"]
+
+[[permission]]
+identifier = "deny-send-style-analysis"
+description = "Denies the send_style_analysis command without any pre-configured scope."
+commands.deny = ["send_style_analysis"]

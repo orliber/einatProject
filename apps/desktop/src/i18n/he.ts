@@ -7,6 +7,9 @@ export const he = {
   encrypted: "מוצפן, שמור במחשב הזה",
   lock: {
     lockedAfterIdle: (minutes: number) => `הכספת ננעלה אחרי ${minutes} דקות ללא פעילות.`,
+    idleSoon: (seconds: number) =>
+      seconds <= 15 ? "הכספת ננעלת עכשיו, כי לא הייתה פעילות." : `הכספת תינעל בעוד כ-${seconds} שניות, כי לא הייתה פעילות.`,
+    keepWorking: "להמשיך לעבוד",
     password: "סיסמה",
     open: "פתיחה",
     footer:
@@ -37,6 +40,10 @@ export const roleLabel: Record<Role, string> = {
   town: "יישוב",
   institution: "מוסד",
   other: "אחר",
+  relative: "קרוב/ת משפחה",
+  school_teacher: "מורה",
+  professional: "איש/אשת מקצוע",
+  family: "משפחה",
 };
 
 /** Roles offered when adding a person to a case (the child is set separately). */
@@ -52,6 +59,10 @@ export const personRoles: Role[] = [
   "therapist",
   "psychologist",
   "other_child",
+  "relative",
+  "school_teacher",
+  "professional",
+  "family",
   "kindergarten",
   "school",
   "town",

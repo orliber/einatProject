@@ -1,0 +1,47 @@
+/* "הסתרתי אוטומטית N פרטים" (D-042): the review and import screens. */
+.auto-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+.auto-title {
+  font-size: 17px;
+}
+.auto-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 34vh;
+  overflow: auto;
+}
+.auto-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+.auto-words {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+.auto-unsure {
+  margin-inline-start: 6px;
+}
+.auto-select {
+  min-height: 32px;
+  font-size: 14px;
+  max-width: 170px;
+}

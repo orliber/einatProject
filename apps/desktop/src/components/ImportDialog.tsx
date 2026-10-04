@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useApp } from "../App";
-import { kindLabel, kindOrder, roleLabel } from "../i18n/he";
+import { kindLabel, kindOrder } from "../i18n/he";
 import { ipc, type ImportPreview, type InputKind } from "../ipc/client";
-import type { NameSuggestion } from "../ipc/generated/NameSuggestion";
+import type { AutoHidden } from "../ipc/generated/AutoHidden";
+import { AutoHiddenCard } from "./AutoHiddenCard";
 import { Dialog, ErrorLine, Segments } from "./ui";
 import "./ImportDialog.css";
-import { useAi } from "../ai";
 
 const FORMAT: Record<string, string> = { docx: "Word", odt: "ODT", pdf: "PDF", text: "טקסט" };
 
@@ -19,26 +19,30 @@ export function ImportDialog(props: {
   onSaved: (inputId: string) => Promise<void>;
 }) {
   const { fail } = useApp();
-  const ai = useAi();
   const p = props.preview;
   const [kind, setKind] = useState<InputKind>(props.kind ?? p.suggested_kind);
   const [title, setTitle] = useState(p.title);
   const [body, setBody] = useState(p.body);
   const [editing, setEditing] = useState(false);
-  const [hidden, setHidden] = useState<string[]>([]);
+  const [found, setFound] = useState<AutoHidden[]>(p.auto_hidden);
+  const [segments, setSegments] = useState(p.preview);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function hide(s: NameSuggestion) {
-    setError(null);
-    try {
-      const detail = await ipc.caseDetail(props.caseId);
-      const current = detail.identities.map((i) => ({ id: i.id, role: i.role, value: i.value, aliases: i.aliases }));
-      await ipc.setIdentities(props.caseId, [...current, { id: null, role: s.role, value: s.value, aliases: [] }]);
-      setHidden([...hidden, s.value]);
-    } catch (e) {
-      setError(fail(e as never));
-    }
+  /** After "להחזיר" or a role change on the card: the text and the card as they are now. */
+  async function refilter() {
+    const [fresh, detail] = await Promise.all([ipc.previewFilter(props.caseId, p.body), ipc.caseDetail(props.caseId)]);
+    const kept = (a: AutoHidden) => detail.identities.find((i) => i.source !== "manual" && i.value === a.token);
+    const next = found.flatMap((a) => {
+      if (a.kind === "name" || a.kind === "other_case") {
+        const i = kept(a);
+        return i ? [{ ...a, tag: i.tag, role: i.role }] : [];
+      }
+      return fresh.auto_hidden.filter((x) => x.token === a.token);
+    });
+    for (const a of fresh.auto_hidden) if (!next.some((x) => x.token === a.token)) next.push(a);
+    setFound(next);
+    setSegments(fresh.original_segments);
   }
 
   async function save() {
@@ -82,28 +86,7 @@ export function ImportDialog(props: {
             <input id="imp-title" className="input" value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
 
-          {p.name_suggestions.length > 0 && (
-            <div className="stack" style={{ gap: 8 }}>
-              <span className="label">שמות שנמצאו בשולי המסמך</span>
-              {p.name_suggestions.map((s) => (
-                <div key={s.value} className="card suggestion">
-                  <div className="grow stack" style={{ gap: 0 }}>
-                    <b>{s.value}</b>
-                    <span className="small muted">{s.source} · יוסתר כ{roleLabel[s.role]}</span>
-                  </div>
-                  {hidden.includes(s.value) ? (
-                    <span className="chip chip-ok">יוסתר</span>
-                  ) : (
-                    <button type="button" className="btn btn-primary btn-small" onClick={() => void hide(s)}>להסתיר</button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {p.suspects.length > 0 && (
-            <p className="note-sand">בטקסט יש {p.suspects.length} מילים שנראות כמו שמות שלא הוגדרו בתיק. לפני שליחה ל-{ai} תתבקשי להחליט לגביהן.</p>
-          )}
+          <AutoHiddenCard items={found} caseId={props.caseId} onChanged={refilter} disabled={busy} />
 
           {(p.left_out.length > 0 || p.warnings.length > 0) && (
             <div className="note-sand stack" style={{ gap: 4 }}>
@@ -126,7 +109,7 @@ export function ImportDialog(props: {
             </label>
           ) : (
             <div className="import-body serif">
-              {body === p.body ? <Segments segments={p.preview} side="original" /> : body}
+              {body === p.body ? <Segments segments={segments} side="original" /> : body}
             </div>
           )}
         </section>

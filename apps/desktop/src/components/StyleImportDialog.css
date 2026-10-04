@@ -1,0 +1,44 @@
+.style-import-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.style-parts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.style-part {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  background: var(--surface-alt);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  opacity: 0.72;
+}
+.style-part-on {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  opacity: 1;
+}
+.style-part-head {
+  cursor: pointer;
+  flex-wrap: wrap;
+}
+.style-part-text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: var(--font-display);
+  font-size: 15px;
+  line-height: 1.75;
+  color: var(--ink-soft);
+}
+.style-more {
+  align-self: flex-start;
+}

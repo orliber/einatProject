@@ -5,13 +5,22 @@ import { BackupSettings } from "../components/Backup";
 import { PasswordSettings } from "../components/PasswordSettings";
 import { TopBar } from "../components/TopBar";
 import { UpdateSettings } from "../components/Update";
+import { UsageSettings } from "../components/UsageSettings";
+import { ReadinessSettings } from "../components/ReadinessSettings";
 import { ErrorLine } from "../components/ui";
 import { ipc, type ReportSettings } from "../ipc/client";
 import { PROVIDERS, providerOf } from "../ai";
+
+import { TEXT_SIZES, applyTextSize, readTextSize } from "../textSize";
 import "./SettingsScreen.css";
 
+/** The screen-capture switch is hidden while that protection is off (D-039). */
+const SCREEN_PROTECTION_SETTING = false;
+
 const JUMPS: [string, string][] = [
+  ["s-ready", "מוכנה לעבודה"],
   ["s-claude", "חיבור ל-AI"],
+  ["s-usage", "שימוש ועלות"],
   ["s-privacy", "פרטיות ונעילה"],
   ["s-report", "הדוח"],
   ["s-backup", "גיבוי"],
@@ -32,6 +41,7 @@ export function SettingsScreen() {
   const [names, setNames] = useState(status.practitioner.join(", "));
   const [report, setReport] = useState<ReportSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [textSize, setTextSize] = useState(readTextSize);
 
   useEffect(() => {
     ipc.reportSettings().then(setReport).catch((e) => setError(fail(e as never)));
@@ -61,6 +71,8 @@ export function SettingsScreen() {
           ))}
         </nav>
         <ErrorLine error={error} />
+
+        <ReadinessSettings />
 
         <section className="card setting" aria-labelledby="s-claude">
           <h2 id="s-claude">חיבור ל-AI</h2>
@@ -131,6 +143,8 @@ export function SettingsScreen() {
           </div>
         </section>
 
+        <UsageSettings />
+
         <section className="card setting" aria-labelledby="s-privacy">
           <h2 id="s-privacy">פרטיות ונעילה</h2>
           <div className="field">
@@ -147,22 +161,34 @@ export function SettingsScreen() {
               <button type="button" className="btn" onClick={() => void run(() => ipc.setLockMinutes(minutes), "זמן הנעילה עודכן.")}>שמירה</button>
             </div>
           </div>
+          <div className="field">
+            <label htmlFor="text-size">גודל הטקסט בתוכנה</label>
+            <select id="text-size" className="select" value={textSize}
+              onChange={(e) => { const n = Number(e.target.value); applyTextSize(n); setTextSize(n); }}>
+              {TEXT_SIZES.map((n) => <option key={n} value={n}>{n === 100 ? "רגיל (100%)" : `${n}%`}</option>)}
+            </select>
+            <span className="hint">גם במקלדת: Ctrl ו-+ להגדלה, Ctrl ו-− להקטנה, Ctrl ו-0 לחזרה לרגיל.</span>
+          </div>
           <label className="row">
             <input type="checkbox" checked={status.review_only_suspect} disabled={!status.review_choice_available}
               onChange={(e) => void run(() => ipc.setReviewOnlySuspect(e.target.checked), "ההגדרה עודכנה.")} />
-            <span>להציג את מסך "מה יוצא מהמחשב" רק כשיש חשד</span>
+            <span>להציג את מסך "מה יוצא מהמחשב" רק כשמשהו הוסתר אוטומטית</span>
           </label>
           {!status.review_choice_available && <span className="hint">בשבועיים הראשונים המסך מוצג לפני כל שליחה, כדי להכיר את הסינון.</span>}
-          <label className="row">
-            <input type="checkbox" checked={status.screen_protection}
-              onChange={(e) => void run(() => ipc.setScreenProtection(e.target.checked), e.target.checked ? "ההגנה מצילום מסך הודלקה." : "ההגנה מצילום מסך כובתה עד הנעילה הבאה של הכספת.")} />
-            <span>להסתיר את התוכנה מצילומי מסך ומשיתוף מסך (Zoom, Teams)</span>
-          </label>
-          <span className="hint">
-            {status.screen_protection
-              ? "מומלץ להשאיר דלוק: מי שמצלם או משתף מסך רואה חלון ריק."
-              : "כבוי: אפשר לצלם ולשתף את המסך. מסך הנעילה תמיד מוגן, וכדאי להדליק שוב כשמסיימים."}
-          </span>
+          {SCREEN_PROTECTION_SETTING && (
+            <>
+              <label className="row">
+                <input type="checkbox" checked={status.screen_protection}
+                  onChange={(e) => void run(() => ipc.setScreenProtection(e.target.checked), e.target.checked ? "ההגנה מצילום מסך הודלקה." : "ההגנה מצילום מסך כובתה עד הנעילה הבאה של הכספת.")} />
+                <span>להסתיר את התוכנה מצילומי מסך ומשיתוף מסך (Zoom, Teams)</span>
+              </label>
+              <span className="hint">
+                {status.screen_protection
+                  ? "מומלץ להשאיר דלוק: מי שמצלם או משתף מסך רואה חלון ריק."
+                  : "כבוי: אפשר לצלם ולשתף את המסך. מסך הנעילה תמיד מוגן, וכדאי להדליק שוב כשמסיימים."}
+              </span>
+            </>
+          )}
         </section>
 
         {report && (

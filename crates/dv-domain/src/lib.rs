@@ -11,7 +11,9 @@ pub mod routing;
 pub mod scores;
 
 pub use compare::{compare, comparison_text, ComparisonRow};
-pub use identity::{assign_tag, Identity, IdentityInput, Role, PRACTITIONER_TAG};
+pub use identity::{
+    assign_tag, FoundName, Identity, IdentityInput, IdentitySource, Role, PRACTITIONER_TAG,
+};
 pub use records::{
     Age, Author, CaseInput, CaseMeta, CaseSummary, ChatMessage, ChatRole, Consent, DraftParagraph,
     DraftStatus, Folder, GrammaticalGender, InputKind, Transmission,
@@ -19,7 +21,8 @@ pub use records::{
 pub use report::{ReportPart, ReportSection, ReportStructure};
 pub use routing::{passage_ranges, passages, Feed, Routing, SectionPassages, Suggestion};
 pub use scores::{
-    format_sheet, instruments, sheet_table, Instrument, ScoreEntry, ScoreRow, ScoreSheet,
+    check_scores, format_sheet, instruments, sheet_table, Instrument, ScoreEntry, ScoreRow,
+    ScoreSheet,
 };
 
 #[derive(Debug, thiserror::Error)]

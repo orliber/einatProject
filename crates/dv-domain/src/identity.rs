@@ -29,10 +29,18 @@ pub enum Role {
     Town,
     Institution,
     Other,
+    /// A grandparent, aunt, cousin… ("סבתא שמחה").
+    Relative,
+    /// A school teacher ("המורה X"); a kindergarten teacher is `Teacher`.
+    SchoolTeacher,
+    /// A counsellor, social worker, principal… named in a document.
+    Professional,
+    /// A family name on its own ("משפחת X").
+    Family,
 }
 
 impl Role {
-    pub const ALL: [Role; 17] = [
+    pub const ALL: [Role; 21] = [
         Role::Child,
         Role::Mother,
         Role::Father,
@@ -50,6 +58,10 @@ impl Role {
         Role::Town,
         Role::Institution,
         Role::Other,
+        Role::Relative,
+        Role::SchoolTeacher,
+        Role::Professional,
+        Role::Family,
     ];
 
     /// The word inside the tag, e.g. `ילד` in `[ילד]`.
@@ -73,6 +85,10 @@ impl Role {
             Role::Town => "יישוב",
             Role::Institution => "מוסד",
             Role::Other => "אדם",
+            Role::Relative => "קרוב_משפחה",
+            Role::SchoolTeacher => "מורה",
+            Role::Professional => "איש_מקצוע",
+            Role::Family => "משפחה",
         }
     }
 
@@ -97,6 +113,10 @@ impl Role {
             Role::Town => "יישוב",
             Role::Institution => "מוסד",
             Role::Other => "אחר",
+            Role::Relative => "קרוב/ת משפחה",
+            Role::SchoolTeacher => "מורה",
+            Role::Professional => "איש/אשת מקצוע",
+            Role::Family => "משפחה",
         }
     }
 
@@ -115,6 +135,20 @@ impl Role {
     }
 }
 
+/// Where an identity came from. Every one is hidden and refused by the gate alike.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum IdentitySource {
+    /// Entered or confirmed by the psychologist.
+    #[default]
+    Manual,
+    /// Found by the filter in the case's text and hidden without asking.
+    Auto,
+    /// Taken from a document's properties or its header and footer.
+    Metadata,
+}
+
 /// A declared identity. `value` and `aliases` never leave the computer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -125,6 +159,21 @@ pub struct Identity {
     pub tag: String,
     pub value: String,
     pub aliases: Vec<String>,
+    #[serde(default)]
+    pub source: IdentitySource,
+    /// Why the filter added it ("אחרי 'הגננת'"); empty for a manual identity.
+    #[serde(default)]
+    pub reason: String,
+}
+
+/// A name the filter hid without asking, kept from then on as an identity of the case: hidden
+/// in every text of it and refused by the gate like a declared one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FoundName {
+    pub value: String,
+    pub role: Role,
+    pub source: IdentitySource,
+    pub reason: String,
 }
 
 /// What the identity form sends to the core.

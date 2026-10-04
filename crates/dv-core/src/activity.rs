@@ -25,6 +25,8 @@ const INTERNAL_SETTINGS: &[&str] = &[
     "backup_last_check_at",
     "secret_changed_at",
     "first_use_day",
+    // An open edit kept at lock and given back at the next entry.
+    "unsaved_edit",
     REVIEWED_KEY,
 ];
 
@@ -63,6 +65,9 @@ fn describe(
         ),
         "lock" if text("reason") == "sleep" => {
             ("access", "נעילה (המחשב נכנס לשינה)".to_owned(), false)
+        }
+        "lock" if text("reason") == "computer_locked" => {
+            ("access", "נעילה (המחשב ננעל)".to_owned(), false)
         }
         "lock" => ("access", "נעילה".to_owned(), false),
         "password_changed" => ("security", "הסיסמה הוחלפה".to_owned(), false),
@@ -116,6 +121,23 @@ fn describe(
         ),
         "restored" => ("security", "הכספת שוחזרה מגיבוי".to_owned(), true),
         "settings_changed" if INTERNAL_SETTINGS.contains(&text("key")) => return None,
+        // This month's token counts change with every answer; the send itself is logged.
+        "settings_changed" if text("key").starts_with("usage/") => return None,
+        "settings_changed" if text("key") == "monthly_cap_usd" => (
+            "security",
+            "תקרת ההוצאה החודשית על AI עודכנה".to_owned(),
+            false,
+        ),
+        "settings_changed" if text("key") == "backup_auto" => (
+            "security",
+            "הגיבוי האוטומטי הודלק או כובה".to_owned(),
+            false,
+        ),
+        "settings_changed" if text("key").starts_with("ready/") => (
+            "security",
+            "עודכן אישור ברשימה \"מוכנה לעבודה אמיתית\"".to_owned(),
+            false,
+        ),
         "settings_changed" if !text("secret").is_empty() => {
             ("security", "מפתח ה-API נשמר".to_owned(), false)
         }
@@ -135,6 +157,17 @@ fn describe(
         ),
         "audit_reviewed" => ("security", "היומן נבדק".to_owned(), false),
         "consultation_deleted" => ("case", "שיחת התייעצות נמחקה".to_owned(), false),
+        "style_source_added" => (
+            "security",
+            "דוח ישן נוסף ל\"הדוחות שלי\" (נשמר רק הטקסט המנוטרל)".to_owned(),
+            false,
+        ),
+        "style_source_deleted" => ("security", "דוח ישן נמחק מ\"הדוחות שלי\"".to_owned(), false),
+        "style_profile_approved" => (
+            "security",
+            format!("פרופיל הסגנון אושר (גרסה {})", number("version")),
+            false,
+        ),
         other => ("security", other.to_owned(), false),
     })
 }
@@ -238,6 +271,9 @@ mod tests {
             "integrity_warning",
             "audit_reviewed",
             "consultation_deleted",
+            "style_source_added",
+            "style_source_deleted",
+            "style_profile_approved",
         ] {
             let (_, text, _) = describe(event, &Value::Null, structure.as_ref()).unwrap();
             assert!(!text.contains('_'), "{event} → {text}");
@@ -253,5 +289,10 @@ mod tests {
         assert!(text.contains("נשלחה ל-Gemini"), "{text}");
         let internal = serde_json::json!({ "key": "backup_last_at" });
         assert!(describe("settings_changed", &internal, None).is_none());
+        let usage = serde_json::json!({ "key": "usage/2026-10" });
+        assert!(describe("settings_changed", &usage, None).is_none());
+        let ready = serde_json::json!({ "key": "ready/zdr" });
+        let (_, text, _) = describe("settings_changed", &ready, None).unwrap();
+        assert!(text.contains("מוכנה לעבודה אמיתית"), "{text}");
     }
 }
