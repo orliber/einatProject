@@ -1060,6 +1060,58 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
         &sort,
         &nonce,
     ));
+    // The style profile (D-043): both requests' rules, frames and schemas, and the words the
+    // profile is framed with in every drafting request.
+    for rules in dv_ai::style::FIXED_TEXTS {
+        body.push(Value::String(rules.to_owned()));
+    }
+    let keys: Vec<String> = structure.sections().map(|s| s.key.clone()).collect();
+    let excerpts: Vec<dv_ai::StyleExcerpt> = keys
+        .iter()
+        .map(|k| dv_ai::StyleExcerpt {
+            section: k.clone(),
+            text: String::new(),
+        })
+        .collect();
+    body.push(dv_ai::build_style_analysis_request(
+        &dv_ai::ModelConfig::default(),
+        &keys,
+        &excerpts,
+        &nonce,
+    ));
+    body.push(dv_ai::build_style_synthesis_request(
+        &dv_ai::ModelConfig::default(),
+        &keys,
+        &[vec![]],
+        &nonce,
+    ));
+    let every_kind = [
+        dv_ai::StyleKind::Rule,
+        dv_ai::StyleKind::Phrase,
+        dv_ai::StyleKind::Avoid,
+        dv_ai::StyleKind::Template,
+        dv_ai::StyleKind::Example,
+    ];
+    let profile = dv_ai::StyleProfile {
+        reports: 1,
+        items: [None, Some("cognitive".to_owned())]
+            .into_iter()
+            .flat_map(|section| {
+                every_kind.into_iter().map(move |kind| dv_ai::StyleItem {
+                    id: "i".into(),
+                    section: section.clone(),
+                    kind,
+                    text: "-".into(),
+                    enabled: true,
+                    origin: dv_ai::StyleOrigin::Reports,
+                    support: 1,
+                })
+            })
+            .collect(),
+    };
+    body.push(Value::String(
+        dv_ai::render_for_section(&profile, "cognitive", &|_| true).unwrap(),
+    ));
     let body = Value::Array(body);
     let tags: HashSet<String> = HashSet::from(["[ילד]".to_owned()]);
     let collisions = found_for_every_child_name(|identities| {

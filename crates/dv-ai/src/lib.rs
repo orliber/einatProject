@@ -8,6 +8,7 @@ pub mod prompts;
 mod request;
 mod response;
 mod sort;
+pub mod style;
 
 pub use request::{
     build_consult_request, build_research_request, build_section_request, nonce_from, ConsultInput,
@@ -17,4 +18,9 @@ pub use request::{
 pub use response::{parse_consult, parse_section, AiError, ProposedParagraph, SectionReply};
 pub use sort::{
     build_sort_request, parse_sort, passage_id, SortInput, SortMaterial, SortReply, SortSection,
+};
+pub use style::{
+    build_style_analysis_request, build_style_synthesis_request, parse_style_analysis,
+    parse_style_synthesis, render_for_section, RawStyleItem, StyleExcerpt, StyleItem, StyleKind,
+    StyleOrigin, StyleProfile,
 };

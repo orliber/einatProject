@@ -98,7 +98,10 @@ transmissions(id PK, case_id FK, payload_sha256, payload_tagged_enc,   -- בדי
               approved_by_user INTEGER, model, request_id_enc, sent_at_enc)
 drafts(id PK, case_id FK, section_key, version, text_tagged_enc,
        status, created_by, source_refs_enc, approved_at_enc)
-style_profile(id PK, content_enc /* ב-K_style */, version, updated_at)
+style_sources(id PK, created_at, data_enc)          -- D-043: קטעים מנוטרלים של דוח ישן + הניתוח שלו
+style_profiles(id PK, version, status /* draft|active|retired */, created_at, data_enc)
+style_learning(id = 1, data_enc)                    -- החלפות קצרות מהתיקונים של עינת (מקומי בלבד)
+-- שלושתן חתומות במפתח ההגדרות: לא שייכות לתיק
 kb_overrides(id PK, test, key, value, source, approved, updated_at)
 settings(key PK, value)            -- בלי מידע אישי
 ```

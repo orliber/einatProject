@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reset-style"
+description = "Enables the reset_style command without any pre-configured scope."
+commands.allow = ["reset_style"]
+
+[[permission]]
+identifier = "deny-reset-style"
+description = "Denies the reset_style command without any pre-configured scope."
+commands.deny = ["reset_style"]

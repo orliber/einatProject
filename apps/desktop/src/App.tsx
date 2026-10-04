@@ -7,12 +7,14 @@ import { CasesScreen } from "./screens/CasesScreen";
 import { CaseScreen } from "./screens/CaseScreen";
 import { ConsultScreen } from "./screens/ConsultScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
+import { StyleScreen } from "./screens/StyleScreen";
 import { Toast } from "./components/ui";
 
 export type Route =
   | { name: "cases" }
   | { name: "case"; id: string; view: string }
   | { name: "consult"; caseId?: string }
+  | { name: "style" }
   | { name: "settings" };
 
 export interface AppApi {
@@ -138,6 +140,7 @@ export function App() {
       {route.name === "cases" && <CasesScreen />}
       {route.name === "case" && <CaseScreen key={route.id} caseId={route.id} view={route.view} />}
       {route.name === "consult" && <ConsultScreen caseId={route.caseId} />}
+      {route.name === "style" && <StyleScreen />}
       {route.name === "settings" && <SettingsScreen />}
       {toast && <Toast text={toast} onDone={() => setToast(null)} />}
     </AppContext.Provider>
