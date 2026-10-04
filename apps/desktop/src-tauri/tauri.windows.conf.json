@@ -1,5 +1,6 @@
 {
-  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "כספת האבחון",
+  "mainBinaryName": "DiagnosticVault",
   "bundle": {
     "resources": {
       "ocr/": "ocr/"
