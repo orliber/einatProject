@@ -12,4 +12,8 @@ sources: Array<string>, warnings: Array<string>,
 /**
  * A new wording of this approved paragraph (its id), waiting for her approval.
  */
-replaces: string | null, };
+replaces: string | null, 
+/**
+ * Earlier wordings are kept and can be brought back (D-043).
+ */
+has_versions: boolean, };

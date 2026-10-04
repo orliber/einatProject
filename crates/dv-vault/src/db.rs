@@ -131,6 +131,17 @@ pub const MAIN_MIGRATIONS: &[&str] = &[
     // v6: Claude's new wording of a paragraph she approved waits beside it; approving it
     // retires the old one (D-032).
     "ALTER TABLE drafts ADD COLUMN replaces TEXT;",
+    // v7: earlier wordings of a paragraph, kept when it is edited or reworded in place, so
+    // she can see them and bring one back (D-043). Sealed with the case key like the draft.
+    "CREATE TABLE draft_versions (
+        id TEXT PRIMARY KEY,
+        case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+        draft_id TEXT NOT NULL,
+        saved_at INTEGER NOT NULL,
+        author TEXT NOT NULL,
+        text_tagged_enc BLOB NOT NULL
+     );
+     CREATE INDEX draft_versions_draft ON draft_versions(case_id, draft_id);",
 ];
 
 pub const IDENTITY_MIGRATIONS: &[&str] = &[

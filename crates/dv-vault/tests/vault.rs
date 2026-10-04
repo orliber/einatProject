@@ -232,6 +232,97 @@ fn drafts_and_chat_are_stored_tagged_and_approval_is_tracked() {
 }
 
 #[test]
+fn earlier_wordings_of_a_paragraph_are_kept_sealed_and_can_be_brought_back() {
+    let (dir, mut vault, _) = new_vault();
+    let case = noam(&mut vault);
+    let p = vault
+        .add_draft(
+            &case,
+            "kindergarten",
+            "[ילד] מתקשה במעברים.",
+            Author::Ai,
+            &[],
+        )
+        .unwrap();
+    assert!(vault.draft_versions(&case, &p.id).unwrap().is_empty());
+
+    // Claude rewrites its proposal, then she edits it: both earlier wordings are kept.
+    assert!(vault
+        .rewrite_proposal(&case, &p.id, "[ילד] מתקשה מעט במעברים בין פעילויות.", &[])
+        .unwrap());
+    vault
+        .edit_draft(&case, &p.id, "[ילד] מתקשה במעברים בין פעילויות בגן.")
+        .unwrap();
+    // Saving the same text again keeps nothing new.
+    vault
+        .edit_draft(&case, &p.id, "[ילד] מתקשה במעברים בין פעילויות בגן.")
+        .unwrap();
+    let versions = vault.draft_versions(&case, &p.id).unwrap();
+    let texts: Vec<&str> = versions.iter().map(|v| v.text_tagged.as_str()).collect();
+    assert_eq!(
+        texts,
+        vec![
+            "[ילד] מתקשה מעט במעברים בין פעילויות.",
+            "[ילד] מתקשה במעברים."
+        ]
+    );
+    assert!(versions.iter().all(|v| v.author == Author::Ai));
+    assert_eq!(
+        vault.drafts_with_versions(&case).unwrap(),
+        vec![p.id.clone()]
+    );
+
+    // A new wording she approves takes the old one's history with it.
+    vault
+        .propose_rewording(&case, &p.id, "בגן, [ילד] מתקשה במעברים.", &[])
+        .unwrap();
+    let new_id = vault
+        .drafts(&case, "kindergarten")
+        .unwrap()
+        .into_iter()
+        .find(|d| d.replaces.as_deref() == Some(p.id.as_str()))
+        .unwrap()
+        .id;
+    vault
+        .set_draft_status(&case, &new_id, DraftStatus::Approved)
+        .unwrap();
+    let chain = vault.draft_versions(&case, &new_id).unwrap();
+    assert_eq!(chain.len(), 3);
+    assert_eq!(chain[0].id, p.id);
+    assert_eq!(chain[0].author, Author::User);
+
+    // Bringing back Claude's first wording: approved, Claude's again, and the current one kept.
+    let first = chain.last().unwrap().id.clone();
+    vault.restore_draft_version(&case, &new_id, &first).unwrap();
+    let now = vault
+        .drafts(&case, "kindergarten")
+        .unwrap()
+        .into_iter()
+        .find(|d| d.id == new_id)
+        .unwrap();
+    assert_eq!(now.text_tagged, "[ילד] מתקשה במעברים.");
+    assert_eq!(now.status, DraftStatus::Approved);
+    assert_eq!(now.author, Author::Ai);
+    assert_eq!(
+        vault.draft_versions(&case, &new_id).unwrap()[0].text_tagged,
+        "בגן, [ילד] מתקשה במעברים."
+    );
+    assert!(matches!(
+        vault.restore_draft_version(&case, &new_id, "not-a-version"),
+        Err(VaultError::NotFound)
+    ));
+
+    // Sealed at rest: no wording is readable in the files.
+    let bytes = all_bytes(dir.path());
+    let needle = "מתקשה מעט במעברים".as_bytes();
+    assert!(!bytes.windows(needle.len()).any(|w| w == needle));
+
+    // Erasing the case erases its versions.
+    vault.delete_case(&case).unwrap();
+    assert!(vault.draft_versions(&case, &new_id).is_err());
+}
+
+#[test]
 fn secrets_are_encrypted_and_survive_relock() {
     let (dir, mut vault, _) = new_vault();
     vault

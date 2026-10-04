@@ -7,3 +7,6 @@ afterEach(() => {
   cleanup();
   clearMocks();
 });
+
+// jsdom does not lay out the page, so it has no scrolling.
+if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => undefined;

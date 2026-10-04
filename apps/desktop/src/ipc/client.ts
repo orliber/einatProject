@@ -25,6 +25,7 @@ import type { IdentityInput } from "./generated/IdentityInput";
 import type { ImportPreview } from "./generated/ImportPreview";
 import type { InputKind } from "./generated/InputKind";
 import type { Instrument } from "./generated/Instrument";
+import type { ParagraphVersionView } from "./generated/ParagraphVersionView";
 import type { PingResponse } from "./generated/PingResponse";
 import type { Prepared } from "./generated/Prepared";
 import type { ReportSettings } from "./generated/ReportSettings";
@@ -161,6 +162,11 @@ export const ipc = {
   rejectParagraph: (caseId: string, draftId: string) => run("reject_paragraph", { caseId, draftId }),
   editParagraph: (caseId: string, draftId: string, text: string) =>
     run("edit_paragraph", { caseId, draftId, text }),
+  /** Earlier wordings of a paragraph, newest first; bring one back (D-043). */
+  paragraphVersions: (caseId: string, draftId: string) =>
+    call<ParagraphVersionView[]>("paragraph_versions", { caseId, draftId }),
+  restoreParagraphVersion: (caseId: string, draftId: string, versionId: string) =>
+    run("restore_paragraph_version", { caseId, draftId, versionId }),
   /** Her own paragraph. `at`: "end" (default), "first", or the id of the paragraph it follows. */
   addOwnParagraph: (caseId: string, sectionKey: string, text: string, at: string = "end") =>
     run("add_own_paragraph", { caseId, sectionKey, text, first: at === "first", after: at === "end" || at === "first" ? null : at }),
@@ -238,6 +244,7 @@ export type {
   ImportPreview,
   InputKind,
   Instrument,
+  ParagraphVersionView,
   PingResponse,
   Prepared,
   ReportSettings,

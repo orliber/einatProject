@@ -355,6 +355,25 @@
   background: var(--primary);
   color: #fff;
 }
+/* Earlier wordings (UX-4): under the AI mark, only on a paragraph that has them. */
+.a4-hist {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+.a4-hist:hover,
+.a4-hist[aria-expanded="true"] {
+  color: var(--primary);
+  border-color: var(--primary);
+}
 /* Delete: under the AI mark, shown with it, and asks once. */
 .a4-del {
   width: 24px;

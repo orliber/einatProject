@@ -7,6 +7,8 @@ import { useHoldUnsaved } from "../../components/Unsaved";
 import { kindLabel } from "../../i18n/he";
 import { useRotatingPlaceholder } from "../../components/Rotating";
 import { DRAFT_HINTS } from "../../i18n/suggestions";
+import { ParagraphVersions } from "../../components/ParagraphVersions";
+import { isCombo, KEYS } from "../../shortcuts";
 import type { CaseApi } from "../CaseScreen";
 import "./SectionWork.css";
 
@@ -34,6 +36,8 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   const [error, setError] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
   const [linked, setLinked] = useState(false);
+  /** The paragraph whose earlier wordings are open (UX-4). */
+  const [history, setHistory] = useState<string | null>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
 
   const loadChat = useCallback(async () => {
@@ -117,6 +121,23 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   const visible = section.paragraphs;
   const approved = visible.filter((p) => p.status === "approved").length;
   const pending = visible.filter((p) => p.status === "proposed").length;
+
+  // Ctrl+Shift+Enter: approve the whole draft waiting here (UX-5).
+  const canApproveAll = pending > 0 && !job && editing === null && own === null;
+  const approveAll = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    approveAll.current = () => void act(async () => { await ipc.approveSection(caseId, section.key); });
+  });
+  useEffect(() => {
+    if (!canApproveAll) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!isCombo(e, KEYS.approveDraft)) return;
+      e.preventDefault();
+      approveAll.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canApproveAll]);
   const lastWarnings = new Map((last?.paragraphs ?? []).map((p) => [p.text, p.warnings]));
   // What the section is written from: the materials that feed it (D-022).
   const sources = api.detail.routing
@@ -274,7 +295,13 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                     <span className="approved-mark">✓ אושר על ידך</span>
                     {p.sources.length > 0 && <span className="muted">מקור: {p.sources.join(" · ")}</span>}
                     <button type="button" className="link-small" onClick={() => setEditing({ id: p.id, text: p.text })}>עריכה</button>
+                    {p.has_versions && (
+                      <button type="button" className="link-small" aria-expanded={history === p.id} onClick={() => setHistory(history === p.id ? null : p.id)}>גרסאות קודמות</button>
+                    )}
                   </div>
+                  {history === p.id && (
+                    <ParagraphVersions caseId={caseId} draftId={p.id} onRestored={async () => { setHistory(null); await reload(); }} />
+                  )}
                 </article>
               );
             }

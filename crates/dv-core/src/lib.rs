@@ -53,9 +53,9 @@ pub use usage::UsageSummary;
 pub use views::{
     ActivityEntry, ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail,
     ChatView, ConsultResult, ConsultTurnView, ConsultationSummary, ConsultationView, CreatedVault,
-    ExportCheck, ImportPreview, MaterialRouting, NameMatch, NameSuggestion, ParagraphView,
-    Prepared, ReportSettings, RetentionItem, ReviewPart, SectionResult, SectionView, SortResult,
-    StagedBackup, SuspectDecision, UiError,
+    ExportCheck, ImportPreview, MaterialRouting, NameMatch, NameSuggestion, ParagraphVersionView,
+    ParagraphView, Prepared, ReportSettings, RetentionItem, ReviewPart, SectionResult, SectionView,
+    SortResult, StagedBackup, SuspectDecision, UiError,
 };
 
 const API_KEY: &str = "anthropic_api_key";
@@ -1229,6 +1229,7 @@ impl Core {
             .iter()
             .map(|s| s.key.as_str())
             .collect();
+        let with_versions = v.drafts_with_versions(case_id)?;
         let mut sections = Vec::new();
         for part in &structure.parts {
             for s in &part.sections {
@@ -1237,6 +1238,7 @@ impl Core {
                     .into_iter()
                     .filter(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved))
                     .map(|d| ParagraphView {
+                        has_versions: with_versions.contains(&d.id),
                         id: d.id,
                         text: restore(&d.text_tagged, &identities, practitioner.as_deref()),
                         status: d.status,
@@ -1340,6 +1342,38 @@ impl Core {
         }
         let tagged = self.preview_filter(case_id, text)?.tagged;
         Ok(self.vault_mut()?.edit_draft(case_id, draft_id, &tagged)?)
+    }
+
+    /// A paragraph's earlier wordings, newest first, names restored (D-043).
+    pub fn paragraph_versions(
+        &mut self,
+        case_id: &str,
+        draft_id: &str,
+    ) -> Result<Vec<ParagraphVersionView>, CoreError> {
+        let v = self.vault_ref()?;
+        let identities = v.identities(case_id)?;
+        let practitioner = v.practitioner()?.names.first().cloned();
+        Ok(v.draft_versions(case_id, draft_id)?
+            .into_iter()
+            .map(|d| ParagraphVersionView {
+                id: d.id,
+                saved_at: d.saved_at,
+                by_ai: d.author == Author::Ai,
+                text: restore(&d.text_tagged, &identities, practitioner.as_deref()),
+            })
+            .collect())
+    }
+
+    /// Bring back an earlier wording; the current one is kept as a version (D-043).
+    pub fn restore_paragraph_version(
+        &mut self,
+        case_id: &str,
+        draft_id: &str,
+        version_id: &str,
+    ) -> Result<(), CoreError> {
+        Ok(self
+            .vault_mut()?
+            .restore_draft_version(case_id, draft_id, version_id)?)
     }
 
     pub fn add_own_paragraph(

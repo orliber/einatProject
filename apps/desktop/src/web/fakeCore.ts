@@ -48,6 +48,25 @@ interface Draft {
   sources: string[];
   /** A new wording of this approved paragraph (D-032). */
   replaces?: string;
+  /** Earlier wordings, newest first (D-043). */
+  versions?: { id: string; at: number; byAi: boolean; text: string }[];
+}
+
+/** Keep the paragraph's wording before it changes in place (D-043). */
+function keepVersion(d: Draft, next: string) {
+  if (d.text === next) return;
+  d.versions = [{ id: newId("v"), at: Math.floor(Date.now() / 1000), byAi: d.byAi, text: d.text }, ...(d.versions ?? [])];
+}
+
+/** Its earlier wordings, then those of the approved paragraphs it took over from. */
+function versionsOf(drafts: Draft[], d: Draft): NonNullable<Draft["versions"]> {
+  const out = [...(d.versions ?? [])];
+  let from = d.replaces && d.status === "approved" ? drafts.find((x) => x.id === d.replaces) : undefined;
+  for (let i = 0; from && i < 50; i++) {
+    out.push({ id: from.id, at: 0, byAi: from.byAi, text: from.text }, ...(from.versions ?? []));
+    from = from.replaces ? drafts.find((x) => x.id === from?.replaces) : undefined;
+  }
+  return out;
 }
 
 interface Case {
@@ -338,7 +357,7 @@ export class FakeCore {
           key: s.key, title: s.title, part: s.part,
           source_count: routing.filter((r) => r.feeds.includes(s.key)).length,
           sortable: SORTABLE.some((x) => x.key === s.key),
-          paragraphs: drafts.map((d) => ({ id: d.id, text: restore(d.text, c.people, this.practitioner), status: d.status, by_ai: d.byAi, sources: d.sources, warnings: [], replaces: d.replaces ?? null })),
+          paragraphs: drafts.map((d) => ({ id: d.id, text: restore(d.text, c.people, this.practitioner), status: d.status, by_ai: d.byAi, sources: d.sources, warnings: [], replaces: d.replaces ?? null, has_versions: versionsOf(c.drafts, d).length > 0 })),
           approved: drafts.some((d) => d.status === "approved"),
         };
       }),
@@ -439,7 +458,9 @@ export class FakeCore {
       paragraphs.splice(1);
     } else if (target && paragraphs.length) {
       // A rewrite of one paragraph stays where it is.
-      target.text = `${paragraphs[0]?.text ?? target.text} (ניסוח אחר)`;
+      const next = `${paragraphs[0]?.text ?? target.text} (ניסוח אחר)`;
+      keepVersion(target, next);
+      target.text = next;
       paragraphs.splice(1);
     } else {
       for (const d of c.drafts) if (d.section === p.section && d.status === "proposed" && d.byAi) d.status = "superseded";
@@ -779,8 +800,27 @@ export class FakeCore {
           c.drafts = c.drafts.filter((x) => x.id !== d.id);
           return null;
         }
-        d.text = this.filterFor(c, String(a.text)).tagged;
+        const tagged = this.filterFor(c, String(a.text)).tagged;
+        keepVersion(d, tagged);
+        d.text = tagged;
         d.byAi = false;
+        d.status = "approved";
+        return null;
+      }
+      case "paragraph_versions": {
+        const c = this.find(a.caseId);
+        const d = c.drafts.find((x) => x.id === a.draftId) ?? fail("not_found", "הפסקה לא נמצאה");
+        return versionsOf(c.drafts, d).map((v) => ({ id: v.id, saved_at: v.at, by_ai: v.byAi, text: restore(v.text, c.people, this.practitioner) }));
+      }
+      case "restore_paragraph_version": {
+        const c = this.find(a.caseId);
+        const d = c.drafts.find((x) => x.id === a.draftId) ?? fail("not_found", "הפסקה לא נמצאה");
+        const v = versionsOf(c.drafts, d).find((x) => x.id === a.versionId) ?? fail("not_found", "הגרסה לא נמצאה");
+        keepVersion(d, v.text);
+        d.text = v.text;
+        d.byAi = v.byAi;
+        d.status = "approved";
+        for (const x of c.drafts) if (x.replaces === d.id && x.status === "proposed") x.status = "superseded";
         return null;
       }
       case "add_own_paragraph": {
