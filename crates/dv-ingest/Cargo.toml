@@ -11,6 +11,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+cfb = "0.15.0"
 pdf-extract = "0.12"
 quick-xml = "0.42"
 serde.workspace = true

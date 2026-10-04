@@ -1080,6 +1080,7 @@ dependencies = [
 name = "dv-ingest"
 version = "0.2.0"
 dependencies = [
+ "cfb 0.15.0",
  "pdf-extract",
  "quick-xml",
  "serde",
