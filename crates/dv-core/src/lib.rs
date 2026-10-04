@@ -96,6 +96,8 @@ fn provider_of(model: &str) -> Provider {
     Provider::of_model(model).unwrap_or(Provider::Anthropic)
 }
 const MODEL_KEY: &str = "model";
+/// Settings key prefix of her written zero-retention confirmation per company: `zdr/openai`.
+const ZDR_PREFIX: &str = "zdr/";
 const LOCK_KEY: &str = "lock_minutes";
 const FIRST_USE_KEY: &str = "first_use_day";
 const REVIEW_KEY: &str = "review_only_suspect";
@@ -1012,11 +1014,21 @@ impl Core {
         } else {
             if provider != Provider::Anthropic && !retention_ack {
                 return Err(CoreError::Refused(format!(
-                    "לפני שמירת מפתח של {} צריך לאשר שקראת מה החברה שומרת.",
+                    "לפני שמירת מפתח של {} צריך לאשר שיש בכתב הסכם אפס שמירת מידע (ZDR) עם החברה.",
                     provider.display_name()
                 )));
             }
             self.vault_mut()?.set_secret(name, key)?;
+        }
+        if provider != Provider::Anthropic {
+            // Her written zero-retention confirmation for this company, dated; gone with the key.
+            let value = if key.is_empty() {
+                String::new()
+            } else {
+                crate::dates::unix_now().to_string()
+            };
+            self.vault_mut()?
+                .set_setting(&format!("{ZDR_PREFIX}{}", provider.id()), &value)?;
         }
         Ok(())
     }
@@ -1977,7 +1989,27 @@ impl Core {
             .ok()
             .and_then(|b| b["model"].as_str().map(str::to_owned))
             .unwrap_or_default();
-        let api_key = key_of(self.vault_ref()?, provider_of(&model))?;
+        let provider = provider_of(&model);
+        let api_key = key_of(self.vault_ref()?, provider)?;
+        // ChatGPT, Gemini and Mistral keep what they receive unless she has a written zero-retention
+        // agreement with them; without her confirmation of one, nothing goes to them (D-040).
+        if api_key.is_some()
+            && matches!(
+                provider,
+                Provider::OpenAi | Provider::Gemini | Provider::Mistral
+            )
+        {
+            let confirmed = self
+                .vault_ref()?
+                .setting(&format!("{ZDR_PREFIX}{}", provider.id()))?
+                .is_some_and(|s| s.parse::<i64>().is_ok());
+            if !confirmed {
+                return Err(CoreError::Refused(format!(
+                    "לא נשלח: אין אישור על הסכם אפס שמירת מידע (ZDR) עם {}. אפשר לאשר בהגדרות, או לבחור Claude או מודל מקומי.",
+                    provider.display_name()
+                )));
+            }
+        }
         // Demo mode costs nothing; anything else stops at the monthly ceiling she set.
         if api_key.is_some() || self.transport.is_some() {
             self.refuse_over_cap()?;

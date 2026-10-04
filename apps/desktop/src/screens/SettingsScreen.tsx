@@ -118,7 +118,7 @@ export function SettingsScreen() {
               {provider.retention && (
                 <label className="row">
                   <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
-                  <span>קראתי מה {provider.company} שומרת, והמפתח שייך לחשבון בתשלום</span>
+                  <span>יש לי הסכם בכתב עם {provider.company} על אפס שמירת מידע (ZDR) לחשבון הזה. בלי הסכם כזה התוכנה לא תשלח אליה דבר.</span>
                 </label>
               )}
             </>

@@ -3016,3 +3016,41 @@ fn a_paragraph_shows_the_passages_it_was_written_from() {
         "{why:?}"
     );
 }
+
+#[test]
+fn nothing_goes_to_a_company_without_her_written_zero_retention_confirmation() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    core.set_model("gpt-5-1").unwrap();
+    core.set_api_key("openai", "test-not-real", true).unwrap();
+    // A key saved before the confirmation existed, or a confirmation taken back: refused.
+    core.vault_mut()
+        .unwrap()
+        .set_setting(&format!("{ZDR_PREFIX}openai"), "")
+        .unwrap();
+    let id = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap()
+        .approval_id
+        .unwrap();
+    assert!(matches!(core.send_section(&id), Err(CoreError::Refused(m)) if m.contains("ZDR")));
+    assert!(
+        fake.sent.lock().unwrap().is_empty(),
+        "nothing left the program"
+    );
+
+    // Confirmed with the key: it goes, through the same gate.
+    core.set_api_key("openai", "test-not-real", true).unwrap();
+    core.send_section(&id).unwrap();
+    assert_eq!(fake.sent.lock().unwrap().len(), 1);
+    // Deleting the key takes the confirmation with it.
+    core.set_api_key("openai", "", false).unwrap();
+    assert_eq!(
+        core.vault_ref()
+            .unwrap()
+            .setting("zdr/openai")
+            .unwrap()
+            .as_deref(),
+        Some("")
+    );
+}
