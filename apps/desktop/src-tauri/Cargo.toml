@@ -21,10 +21,10 @@ dbg_macro = "deny"
 print_stdout = "deny"
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2", features = ["isolation"] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["isolation"] }
 dv-core.workspace = true
 dv-domain.workspace = true
 dv-ingest.workspace = true
@@ -42,3 +42,9 @@ rfd = { version = "0.16", default-features = false, features = ["gtk3"] }
 [features]
 # Release builds: all encryption on the FIPS 140-3 validated module (D-006). Needs CMake + Go.
 fips = ["dv-core/fips"]
+
+# The one module that calls Windows directly (`src/win_platform.rs`, D-047): working-set quota
+# for locked memory, crash reporting, and bringing the Windows Hello prompt forward. Already in
+# the tree through Tauri's WebView2 bindings.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Diagnostics_Debug", "Win32_System_ErrorReporting", "Win32_System_Memory", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }

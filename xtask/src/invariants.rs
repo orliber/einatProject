@@ -185,7 +185,56 @@ fn unsafe_policy(root: &Path) -> Result<Vec<String>, String> {
     if !shell.contains("unsafe_code = \"deny\"") {
         problems.push("desktop shell must set unsafe_code = \"deny\"".to_owned());
     }
+    problems.extend(shell_unsafe_confined(
+        &root.join("apps/desktop/src-tauri/src"),
+    ));
     Ok(problems)
+}
+
+/// The one shell module that may call Windows directly (D-047).
+pub const UNSAFE_MODULE: &str = "win_platform.rs";
+
+/// `unsafe` in the shell only in [`UNSAFE_MODULE`], and every block there explained by a
+/// `// SAFETY:` comment just above it.
+fn shell_unsafe_confined(src: &Path) -> Vec<String> {
+    let mut problems = Vec::new();
+    let Ok(entries) = fs::read_dir(src) else {
+        return vec![format!("{}: cannot read", src.display())];
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let text = fs::read_to_string(&path).unwrap_or_default();
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+        if name.as_deref() == Some(UNSAFE_MODULE) {
+            problems.extend(
+                unexplained_unsafe(&text)
+                    .into_iter()
+                    .map(|line| format!("{}:{line}: unsafe without // SAFETY:", path.display())),
+            );
+        } else if text.contains("allow(unsafe_code)") || text.contains("unsafe {") {
+            problems.push(format!(
+                "{}: unsafe outside {UNSAFE_MODULE}",
+                path.display()
+            ));
+        }
+    }
+    problems
+}
+
+/// Line numbers of `unsafe` blocks not preceded (within three lines) by `// SAFETY:`.
+pub fn unexplained_unsafe(text: &str) -> Vec<usize> {
+    let lines: Vec<&str> = text.lines().collect();
+    lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.contains("unsafe {") && !l.trim_start().starts_with("//"))
+        .filter(|(i, _)| {
+            !lines[i.saturating_sub(3)..*i]
+                .iter()
+                .any(|l| l.contains("// SAFETY:"))
+        })
+        .map(|(i, _)| i + 1)
+        .collect()
 }
 
 /// Patterns that would render HTML or execute strings in the WebView.
@@ -265,6 +314,9 @@ pub fn tauri_config_violations(
     {
         problems.push("dangerousDisableAssetCspModification must not be set".to_owned());
     }
+    if security["pattern"]["use"] != "isolation" {
+        problems.push("security.pattern must be the isolation pattern (D-047)".to_owned());
+    }
     if conf["app"]["withGlobalTauri"] != false {
         problems.push("app.withGlobalTauri must be false".to_owned());
     }
@@ -316,7 +368,31 @@ fn tauri_hardening(shell: &Path) -> Vec<String> {
             }
         }
     }
-    tauri_config_violations(&conf, &capabilities)
+    let mut problems = tauri_config_violations(&conf, &capabilities);
+    problems.extend(isolation_allowlist(shell));
+    problems
+}
+
+/// The isolation app lets through exactly the commands `build.rs` declares (D-047).
+fn isolation_allowlist(shell: &Path) -> Vec<String> {
+    let quoted = |text: &str| -> BTreeSet<String> {
+        Regex::new(r#"(?m)^\s+"([a-z_]+)",\s*$"#).map_or_else(
+            |_| BTreeSet::new(),
+            |re| re.captures_iter(text).map(|c| c[1].to_owned()).collect(),
+        )
+    };
+    let read = |p: &Path| fs::read_to_string(p).unwrap_or_default();
+    let declared = quoted(&read(&shell.join("build.rs")));
+    let allowed = quoted(&read(&shell.join("../isolation/isolation.js")));
+    if declared.is_empty() || declared != allowed {
+        let missing: Vec<_> = declared.difference(&allowed).collect();
+        let extra: Vec<_> = allowed.difference(&declared).collect();
+        return vec![format!(
+            "isolation/isolation.js must allow exactly the commands in build.rs \
+             (missing {missing:?}, extra {extra:?})"
+        )];
+    }
+    Vec::new()
 }
 
 /// `ClearedPayload { .. }` may only be constructed inside the gate.
@@ -405,6 +481,14 @@ mod tests {
         assert!(ui_violations("const text = <p>{reply}</p>;").is_empty());
     }
 
+    #[test]
+    fn unsafe_blocks_need_a_safety_comment() {
+        let ok = "// SAFETY: fixed arguments\nlet r = unsafe { f() };";
+        assert!(unexplained_unsafe(ok).is_empty());
+        let bad = "let a = 1;\nlet b = 2;\nlet c = 3;\nlet d = 4;\nlet r = unsafe { f() };";
+        assert_eq!(unexplained_unsafe(bad), vec![5]);
+    }
+
     fn good_conf() -> serde_json::Value {
         json!({
             "app": {
@@ -412,6 +496,7 @@ mod tests {
                 "windows": [{"label": "main", "contentProtected": true}],
                 "security": {
                     "freezePrototype": true,
+                    "pattern": {"use": "isolation", "options": {"dir": "../isolation"}},
                     "csp": {
                         "default-src": "'self'", "script-src": "'self'", "object-src": "'none'",
                         "frame-ancestors": "'none'", "connect-src": "ipc: http://ipc.localhost"

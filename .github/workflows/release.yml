@@ -37,16 +37,26 @@ jobs:
           cache-dependency-path: apps/desktop/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: apps/desktop
+      # All encryption on the FIPS 140-3 validated module (D-006, D-047): Go, NASM and Ninja.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+      - name: FIPS build tools
+        run: |
+          choco install nasm ninja -y --no-progress
+          echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       # Nothing is released that leaks: the adversarial suite and canary must show 0 leaks.
       - name: Privacy suite (0 leaks)
         run: cargo test -p dv-privacy
       # What she runs, on the system she runs it on: the vault opened again after a restart.
       - name: Vault, documents and updates on Windows
         run: cargo test --release -p dv-vault -p dv-egress -p dv-ingest -p dv-sandbox
+      - name: Vault on the FIPS module
+        run: cargo test --release -p dv-vault --features fips
       - name: First run (create, close, open again; the real Argon2 cost)
         run: cargo test --release -p dv-core --test first_run -- --ignored
       - name: Build the one-click installer
-        run: pnpm tauri build --bundles nsis
+        run: pnpm tauri build --bundles nsis --features fips
         working-directory: apps/desktop
       - name: Fixed name and checksum
         shell: pwsh

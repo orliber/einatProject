@@ -20,8 +20,8 @@ use crate::crypto::{
 };
 use crate::db::{migrate, open_encrypted, AUDIT_MIGRATIONS, IDENTITY_MIGRATIONS, MAIN_MIGRATIONS};
 use crate::header::{unwrap_mk, wrap_mk, KeySlot, VaultHeader, FORMAT, HEADER_FILE};
-use crate::password::{self, Argon2Params};
 use crate::hello::{self, HelloSigner};
+use crate::password::{self, Argon2Params};
 use crate::{recovery, VaultError};
 
 mod backup;
@@ -298,7 +298,7 @@ impl Vault {
         Ok(vault)
     }
 
-    /// The everyday way in (D-043): Windows Hello signs the slot's challenge after her PIN,
+    /// The everyday way in (D-047): Windows Hello signs the slot's challenge after her PIN,
     /// face or fingerprint. Any failure (cancelled, another computer, Hello turned off) is an
     /// error and the lock screen falls back to the password.
     pub fn unlock_with_hello(dir: &Path, signer: &dyn HelloSigner) -> Result<Self, VaultError> {

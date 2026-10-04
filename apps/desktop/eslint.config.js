@@ -7,6 +7,8 @@ export default tseslint.config(
   { ignores: ["dist", "dist-preview", "src-tauri", "src/ipc/generated", "node_modules"] },
   js.configs.recommended,
   ...tseslint.configs.strict,
+  // The Tauri isolation app (D-047): plain browser script in its own frame.
+  { files: ["isolation/**/*.js"], languageOptions: { globals: { ...globals.browser }, sourceType: "script" } },
   {
     files: ["**/*.{ts,tsx}"],
     languageOptions: { globals: { ...globals.browser } },

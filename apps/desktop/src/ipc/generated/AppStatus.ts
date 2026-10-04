@@ -37,4 +37,12 @@ review_choice_available: boolean,
  * Screenshots and screen sharing show a blank window (D-037). Always on while the vault
  * is locked; she may turn it off for the open vault in settings.
  */
-screen_protection: boolean, };
+screen_protection: boolean, 
+/**
+ * Windows Hello (PIN, face or fingerprint) is set up on this computer (D-047).
+ */
+hello_available: boolean, 
+/**
+ * The vault opens with Windows Hello; the password always works too.
+ */
+hello_on: boolean, };

@@ -12,6 +12,8 @@
     "allow-confirm-recovery-key",
     "allow-unlock",
     "allow-unlock-with-recovery",
+    "allow-unlock-with-hello",
+    "allow-set-windows-hello",
     "allow-lock",
     "allow-touch",
     "allow-readiness",

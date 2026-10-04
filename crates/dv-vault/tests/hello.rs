@@ -50,7 +50,9 @@ impl HelloSigner for FakeHello {
         };
         Ok(Zeroizing::new(
             (0..256)
-                .map(|i| challenge[i % challenge.len()] ^ key ^ salt ^ u8::try_from(i % 256).unwrap())
+                .map(|i| {
+                    challenge[i % challenge.len()] ^ key ^ salt ^ u8::try_from(i % 256).unwrap()
+                })
                 .collect(),
         ))
     }
