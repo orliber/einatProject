@@ -38,6 +38,12 @@ fn is_mark(c: char) -> bool {
                 | '\u{05C4}'
                 | '\u{05C5}'
                 | '\u{05C7}'
+                // Arabic vowel signs, Quranic marks and the tatweel.
+                | '\u{0610}'..='\u{061A}'
+                | '\u{064B}'..='\u{065F}'
+                | '\u{0670}'
+                | '\u{06D6}'..='\u{06ED}'
+                | '\u{0640}'
                 | '\u{200E}'
                 | '\u{200F}'
                 | '\u{200D}'
@@ -78,6 +84,11 @@ pub fn normalize_char(c: char) -> Option<char> {
         'ץ' => 'צ',
         '\u{05F3}' | '\u{2019}' | '\u{2018}' | '`' => '\'',
         '\u{05F4}' | '\u{201C}' | '\u{201D}' => '"',
+        // Arabic: one alef, one ya, ta marbuta as ha.
+        'أ' | 'إ' | 'آ' | 'ٱ' => 'ا',
+        'ى' | 'ئ' => 'ي',
+        'ؤ' => 'و',
+        'ة' => 'ه',
         c if c.is_ascii_uppercase() => c.to_ascii_lowercase(),
         c => c,
     })

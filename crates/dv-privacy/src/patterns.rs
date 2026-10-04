@@ -108,6 +108,71 @@ const EN_MONTHS: &[(&str, u32)] = &[
     ("nov", 11),
     ("dec", 12),
 ];
+/// Words that open a two-word place name ("גבעת ברנר", "עין ורד", "בית שקמה").
+const PLACE_OPENERS: &[&str] = &[
+    "גבעת",
+    "כפר",
+    "נווה",
+    "נוה",
+    "בית",
+    "בני",
+    "עין",
+    "רמת",
+    "שדה",
+    "שדות",
+    "נאות",
+    "גני",
+    "גן",
+    "מעלה",
+    "קריית",
+    "קרית",
+    "ניר",
+    "תל",
+    "מבוא",
+    "אבן",
+    "אור",
+    "באר",
+    "רמות",
+    "מצפה",
+    "יד",
+    "גבע",
+    "הר",
+    "אלוני",
+    "משמר",
+    "מעגן",
+    "עמק",
+    "נחלת",
+    "שער",
+    "שערי",
+    "צור",
+    "גינות",
+    "נחל",
+];
+
+/// How much of "קיבוץ X Y" / "מושב X Y" is a place: the keyword and one name word, two after
+/// a word that opens a place name. "מושב כמעט לא" (sitting, in a motor report) is no place:
+/// an everyday word after the keyword is not a name unless it opens one.
+fn settlement_end(found: &str) -> Option<usize> {
+    let words: Vec<(usize, &str)> = found
+        .split_whitespace()
+        .map(|w| (w.as_ptr() as usize - found.as_ptr() as usize, w))
+        .collect();
+    let (start1, first) = *words.get(1)?;
+    let opener = PLACE_OPENERS.contains(&first);
+    if !opener && crate::lexicon::word_bucket(&crate::text::normalize(first)) >= 9 {
+        return None;
+    }
+    let end1 = start1 + first.len();
+    match words.get(2) {
+        Some((start2, second))
+            if opener || crate::lexicon::word_bucket(&crate::text::normalize(second)) < 9 =>
+        {
+            Some(start2 + second.len())
+        }
+        _ => Some(end1),
+    }
+}
+
 /// Hebrew-calendar months – always need a day or a year next to them ("אב" is also "father").
 const HEBREW_CAL_MONTHS: &[&str] = &[
     "תשרי",
@@ -139,6 +204,9 @@ struct Compiled {
     year: Regex,
     address: Regex,
     settlement: Regex,
+    quarter: Regex,
+    street_bare: Regex,
+    labeled_number: Regex,
     iban: Regex,
     card: Regex,
     hebrew_numeral: Regex,
@@ -168,7 +236,21 @@ static COMPILED: LazyLock<Result<Compiled, regex::Error>> = LazyLock::new(|| {
         address: Regex::new(
             r#"(?:רחוב|רח'|שדרות|שד'|דרך|סמטת|כיכר|ככר)\s+[א-ת"'׳״\-]+(?:\s+[א-ת"'׳״\-]+){0,2}\s*\d{1,4}"#,
         )?,
-        settlement: Regex::new(r"(?:קיבוץ|מושב|מושבה)\s+[א-ת\-]+(?:\s+[א-ת\-]+)?")?,
+        settlement: Regex::new(
+            r"(?:קיבוץ|מושב|מושבה|שכונת|בשכונת|לשכונת|משכונת)\s+[א-ת\-]+(?:\s+[א-ת\-]+)?",
+        )?,
+        // "רובע ז'" (a quarter of Ashdod), "משק 41" (a farm in a moshav).
+        quarter: Regex::new(
+            r#"(?:רובע|ברובע|לרובע|מרובע)\s+[א-ת]['׳](?:[^א-ת]|$)|(?:משק|במשק|למשק)\s+\d{1,4}"#,
+        )?,
+        // A street named without a house number ("ברחוב התשבי"); kept only when the name is
+        // not an everyday word ("ברחוב הראשי").
+        street_bare: Regex::new(r#"(?:רחוב|ברחוב|לרחוב|מרחוב|ברח'|רח')\s+([א-ת"'׳״\-]+)"#)?,
+        // Short numbers that a label marks as an identifier: a medical license ("מ.ר. 4471"),
+        // a file, a membership or a passport number.
+        labeled_number: Regex::new(
+            r#"(?:מ\.ר\.?|מ"ר|מ״ר|(?:מס'|מס׳|מספר)\s*(?:רישיון|רשיון|רישום|תיק|חבר|תלמיד|פנייה|הפניה|דרכון)|(?:רישיון|רשיון|תיק|דרכון)\s*(?:מס'|מס׳|מספר))\s*:?\s*(\d(?:[\d\-/]{0,12}\d)?)"#,
+        )?,
         // A day in Hebrew letters: "ט\"ו", "כ'", "יג" – two letters, or a geresh / gershayim
         // ("כמו האב" is not a date).
         hebrew_numeral: Regex::new(r#"^(?:[א-ת]{1,2}|[א-ת]{1,2}['"׳״][א-ת]?)$"#)?,
@@ -276,19 +358,31 @@ fn digit_bounded(text: &str, start: usize, end: usize) -> bool {
         && !char_after(text, end).is_some_and(|c| c.is_ascii_digit())
 }
 
-/// The word right before a number makes it an age or a score, not a date ("בגיל 2.5").
+/// The word right before a number makes it an age or a score, not a date ("בגיל 2.5",
+/// "אפגר 9/10"). The second end of a range follows the first ("בני 4.5–6.5").
 fn preceded_by_age_or_score(text: &str, start: usize) -> bool {
-    let last = text[..start].split_whitespace().last().unwrap_or("");
-    let last = last.trim_end_matches(['-', '־']);
+    let before = text[..start].trim_end_matches(['-', '־', '–', '—', ' ']);
+    let last = before.split_whitespace().last().unwrap_or("");
+    let dashed = text[before.len()..start].contains(['-', '־', '–', '—']);
+    if dashed
+        && last.chars().next().is_some_and(|c| c.is_ascii_digit())
+        && last.chars().all(|c| c.is_ascii_digit() || c == '.')
+    {
+        return preceded_by_age_or_score(text, before.len() - last.len());
+    }
     [
         "גיל",
+        "גילאי",
         "בן",
         "בת",
+        "בני",
+        "בנות",
         "כבן",
         "כבת",
         "ציון",
         "ממוצע",
         "סטיית",
+        "אפגר",
         "T",
         "(",
         "=",
@@ -314,6 +408,31 @@ fn push(
     }
 }
 
+/// A day of a Hebrew month in letters, 1–30, largest letter first ("ה", "טו", "כ\"ט"):
+/// "שם" and "של" are words.
+fn hebrew_day(raw: &str) -> bool {
+    let mut total = 0;
+    let mut last = u32::MAX;
+    for ch in raw
+        .chars()
+        .filter(|ch| !matches!(ch, '\'' | '"' | '׳' | '״'))
+    {
+        let value = match ch {
+            'א'..='ט' => u32::from(ch) - u32::from('א') + 1,
+            'י' => 10,
+            'כ' | 'ך' => 20,
+            'ל' => 30,
+            _ => return false,
+        };
+        if value > last {
+            return false;
+        }
+        last = value;
+        total += value;
+    }
+    (1..=30).contains(&total)
+}
+
 fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>) {
     let tokens = tokenize(text);
     let num = |i: usize| tokens.get(i).and_then(|t| t.norm.parse::<u32>().ok());
@@ -337,9 +456,11 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
             .iter()
             .find(|(m, _)| *m == tok.norm)
             .map(|(_, n)| *n);
-        let hebrew_cal = splits
-            .iter()
-            .any(|(_, w)| HEBREW_CAL_MONTHS.iter().any(|m| normalize(m) == *w));
+        // "ה' באב", "ה' אב" – never with the article: "שם האב" is the father.
+        let hebrew_cal = splits.iter().any(|(p, w)| {
+            (*p == 0 || (*p == 1 && tok.norm.starts_with('ב')))
+                && HEBREW_CAL_MONTHS.iter().any(|m| normalize(m) == *w)
+        });
 
         let (month, ambiguous) = match (gregorian, english) {
             (Some((_, m, amb)), _) => (Some(m), amb),
@@ -348,8 +469,13 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
         };
         let start_tok = if day_before.is_some() { i - 1 } else { i };
         let mut end_tok = if year_after.is_some() { i + 1 } else { i };
+        // "ביוני", "ממאי": May–July with "in" or "from" glued on are months; were the word
+        // the name יוני or יולי, hiding it is right too. Not "במרץ" ("energetically").
+        let glued_month = gregorian.is_some_and(|(p, m, _)| {
+            p == 1 && (5..=7).contains(&m) && tok.norm.starts_with(['ב', 'מ'])
+        });
         if let Some(m) = month {
-            if ambiguous && day_before.is_none() && year_after.is_none() {
+            if ambiguous && day_before.is_none() && year_after.is_none() && !glued_month {
                 continue;
             }
             if english.is_some()
@@ -378,10 +504,10 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
             if text[..tok.start].ends_with('[') && text[tok.end..].starts_with(']') {
                 continue;
             }
-            let numeral_before = i
-                .checked_sub(1)
-                .and_then(|j| tokens.get(j))
-                .filter(|t| c.hebrew_numeral.is_match(&text[t.start..t.end]));
+            let numeral_before = i.checked_sub(1).and_then(|j| tokens.get(j)).filter(|t| {
+                let raw = &text[t.start..t.end];
+                c.hebrew_numeral.is_match(raw) && hebrew_day(raw)
+            });
             let year_tok = tokens
                 .get(i + 1)
                 .filter(|t| c.hebrew_year.is_match(&text[t.start..t.end]));
@@ -445,14 +571,65 @@ pub fn find(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
             fixed(PatternKind::Address),
         );
     }
-    for m in c.settlement.find_iter(text) {
+    for caps in c.street_bare.captures_iter(text) {
+        let (Some(m), Some(name)) = (caps.get(0), caps.get(1)) else {
+            continue;
+        };
+        let word = crate::text::normalize(name.as_str());
+        if crate::lexicon::word_bucket(&word) < 9 && word.chars().count() >= 2 {
+            push(
+                &mut hits,
+                m.start(),
+                name.end(),
+                PatternKind::Address,
+                fixed(PatternKind::Address),
+            );
+        }
+    }
+    for caps in c.labeled_number.captures_iter(text) {
+        let (Some(m), Some(num)) = (caps.get(0), caps.get(1)) else {
+            continue;
+        };
+        // "80 מ\"ר" is square meters: the label follows a number there.
+        let after_number = text[..m.start()]
+            .trim_end()
+            .chars()
+            .next_back()
+            .is_some_and(|ch| ch.is_ascii_digit());
+        if !after_number && digit_bounded(text, num.start(), num.end()) {
+            push(
+                &mut hits,
+                num.start(),
+                num.end(),
+                PatternKind::Number,
+                fixed(PatternKind::Number),
+            );
+        }
+    }
+    for m in c.quarter.find_iter(text) {
+        let found = m.as_str();
+        let end = m.start()
+            + found
+                .trim_end_matches(|ch: char| !ch.is_alphanumeric() && ch != '\'' && ch != '׳')
+                .len();
         push(
             &mut hits,
             m.start(),
-            m.end(),
-            PatternKind::Settlement,
-            fixed(PatternKind::Settlement),
+            end,
+            PatternKind::Address,
+            fixed(PatternKind::Address),
         );
+    }
+    for m in c.settlement.find_iter(text) {
+        if let Some(end) = settlement_end(m.as_str()) {
+            push(
+                &mut hits,
+                m.start(),
+                m.start() + end,
+                PatternKind::Settlement,
+                fixed(PatternKind::Settlement),
+            );
+        }
     }
     for m in c.spaced_phone.find_iter(text) {
         if digit_bounded(text, m.start(), m.end()) {
@@ -505,7 +682,10 @@ pub fn find(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
     // Numeric dates first, so "14.9.2025" becomes a date and not a generic number.
     for caps in c.num_date.captures_iter(text) {
         let Some(m) = caps.get(0) else { continue };
-        if !digit_bounded(text, m.start(), m.end()) || preceded_by_age_or_score(text, m.start()) {
+        // An age or a score never carries a year: "בגיל 2.5" is not a date, "בגיל 2.5.2020" is.
+        if !digit_bounded(text, m.start(), m.end())
+            || (caps.get(3).is_none() && preceded_by_age_or_score(text, m.start()))
+        {
             continue;
         }
         let (Some(d), Some(mo)) = (caps.get(1), caps.get(2)) else {
@@ -565,6 +745,24 @@ pub fn find(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
             replacement,
         );
     }
+    // A Hebrew year on its own: "תשפ\"ה", "בשנת הלימודים התשפ״ו" (not "תשע" = nine).
+    for t in crate::text::tokenize(text) {
+        let raw = &text[t.start..t.end];
+        let bare = raw.trim_start_matches(['ב', 'ל', 'מ', 'ו', 'ה']);
+        if bare.starts_with("תש")
+            && bare.chars().filter(|c| matches!(c, '"' | '״')).count() == 1
+            && bare.chars().count() <= 6
+            && !hits.iter().any(|h| h.start < t.end && t.start < h.end)
+        {
+            push(
+                &mut hits,
+                t.start,
+                t.end,
+                PatternKind::Year,
+                fixed(PatternKind::Year),
+            );
+        }
+    }
     hits.sort_by_key(|h| h.start);
     Ok(hits)
 }
@@ -612,6 +810,17 @@ mod tests {
         assert_eq!(hits[0].2, "לפני כשבועיים");
         assert_eq!(kinds("ב14.9.2026 נבדק")[0].1, PatternKind::Date);
         assert!(kinds("בגיל 2.5 החל טיפול").is_empty());
+        assert!(kinds("אפגר 9/10, ללא סיבוכים").is_empty());
+        assert_eq!(
+            kinds("מומחית ברפואת ילדים, מ.ר. 4471")[0].1,
+            PatternKind::Number
+        );
+        assert_eq!(kinds("תיק מס' 31")[0].1, PatternKind::Number);
+        assert!(kinds("דירה של 80 מ\"ר 3 חדרים").is_empty());
+        assert!(kinds("ארבעה ילדים בני 4.5–6.5 השתתפו").is_empty());
+        // A year makes it a date whatever comes before; a range of dates stays dates.
+        assert_eq!(kinds("בגיל 2.5.2020 נבדק")[0].1, PatternKind::Date);
+        assert_eq!(kinds("בין 14.9–20.9 נבדק").len(), 2);
         assert!(kinds("תפקוד ממוצע (9) ומדד 111, מטריצות 13 12 9").is_empty());
         assert_eq!(kinds("ב-3 במרץ 2024 נבדק")[0].1, PatternKind::Date);
         assert_eq!(kinds("נולד בשנת 2021")[0].2, "לפני כ-5 שנים");
@@ -621,12 +830,18 @@ mod tests {
     #[test]
     fn ambiguous_month_words_need_a_number() {
         assert!(kinds("ילד מלא מרץ ושמחה").is_empty());
+        assert!(kinds("עובד במרץ על המשימה").is_empty());
+        assert_eq!(kinds("צפתה בו ביוני והמליצה")[0].1, PatternKind::Date);
+        assert_eq!(kinds("את התצפית ממאי.")[0].1, PatternKind::Date);
         assert!(kinds("האב סיפר שהילד בוכה").is_empty());
         assert_eq!(kinds("בספטמבר האחרון התחיל גן")[0].1, PatternKind::Date);
         assert_eq!(kinds("ה' באב תשפ\"ה")[0].1, PatternKind::Date);
         // The father's tag after "and" is not "the 6th of Av".
         assert!(kinds("[אם] ו[אב] מתארים ילד סקרן").is_empty());
         assert_eq!(kinds("ו' אב תשפ\"ה")[0].1, PatternKind::Date);
+        assert_eq!(kinds("ט\"ו באב")[0].1, PatternKind::Date);
+        assert!(kinds("שם האב: שמעון").is_empty());
+        assert!(kinds("אחיו של האב אובחן").is_empty());
         assert_eq!(kinds("seen on March 3, 2025")[0].1, PatternKind::Date);
     }
 
@@ -652,6 +867,8 @@ mod tests {
             kinds("מסתובב ברחוב עם אמא").is_empty(),
             "no house number – not an address"
         );
+        assert_eq!(kinds("השריפה ברחוב התשבי")[0].1, PatternKind::Address);
+        assert!(kinds("גרים ברחוב הראשי של העיר").is_empty());
     }
 
     #[test]
