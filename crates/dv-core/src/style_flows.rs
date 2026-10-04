@@ -555,3 +555,37 @@ fn names_from_a_past_report_are_kept_only_as_hashes_and_hidden_in_every_case() {
         "deleting the report deletes its names"
     );
 }
+
+#[test]
+fn a_paragraph_whose_sentences_are_unlike_hers_gets_a_gentle_note() {
+    // Fabricated: her past reports use sentences of 8–12 words.
+    let sentence = |n: usize| vec!["מילה"; n].join(" ");
+    let text: String = (0..40).map(|i| sentence(8 + i % 5) + ". ").collect();
+    let source = super::StoredSource {
+        title: "דוח".into(),
+        format: "text".into(),
+        parts: vec![super::StoredPart {
+            section: None,
+            heading: String::new(),
+            text,
+        }],
+        analysis: None,
+    };
+    assert!(
+        super::measure(&[]).is_none(),
+        "nothing to measure, no notes"
+    );
+    let fp = super::measure(&[source]).unwrap();
+    let long = format!("{}. {}.", sentence(30), sentence(28));
+    let note = super::style_note(&fp, &long).unwrap();
+    assert!(note.starts_with("משפטים ארוכים מהרגיל אצלך"), "{note}");
+    let short = format!("{}. {}. {}.", sentence(3), sentence(4), sentence(3));
+    assert!(super::style_note(&fp, &short)
+        .unwrap()
+        .starts_with("משפטים קצרים"));
+    assert!(super::style_note(&fp, &format!("{}. {}.", sentence(10), sentence(9))).is_none());
+    assert!(
+        super::style_note(&fp, &sentence(40)).is_none(),
+        "one sentence says little"
+    );
+}

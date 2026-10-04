@@ -872,6 +872,90 @@ pub(crate) fn overlap_warning(v: &Vault, texts: &[&str]) -> Result<Vec<Option<St
         .collect())
 }
 
+// ------------------------------------------------------------ fingerprint
+
+/// Her usual sentence length, measured locally on the parts she kept from past reports
+/// (D-042, stages 7–8). Nothing is sent for it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Fingerprint {
+    /// Words per sentence: a tenth of her sentences are shorter than `short`.
+    short: f64,
+    /// … and a tenth are longer than `long`.
+    long: f64,
+}
+
+const FINGERPRINT_KEY: &str = "style_fingerprint";
+/// Fewer sentences than this say little about her style: no notes.
+const FINGERPRINT_MIN_SENTENCES: usize = 30;
+
+/// Words in each sentence of 3 words or more.
+fn sentence_lengths(text: &str) -> Vec<usize> {
+    text.split(['.', '!', '?', '\n', ';'])
+        .map(|s| s.split_whitespace().count())
+        .filter(|n| *n >= 3)
+        .collect()
+}
+
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+fn percentile(sorted: &[usize], q: f64) -> f64 {
+    let at = ((sorted.len() - 1) as f64 * q).round() as usize;
+    sorted[at.min(sorted.len() - 1)] as f64
+}
+
+fn measure(sources: &[StoredSource]) -> Option<Fingerprint> {
+    let mut lengths: Vec<usize> = sources
+        .iter()
+        .flat_map(|s| s.parts.iter())
+        .flat_map(|p| sentence_lengths(&p.text))
+        .collect();
+    if lengths.len() < FINGERPRINT_MIN_SENTENCES {
+        return None;
+    }
+    lengths.sort_unstable();
+    Some(Fingerprint {
+        short: percentile(&lengths, 0.1),
+        long: percentile(&lengths, 0.9),
+    })
+}
+
+/// The fingerprint kept for the case screens (measured when her past reports change).
+pub(crate) fn fingerprint(v: &Vault) -> Result<Option<Fingerprint>, CoreError> {
+    if v.setting(PROFILE_OFF_KEY)?.as_deref() == Some("1") {
+        return Ok(None);
+    }
+    match v.secret(FINGERPRINT_KEY)? {
+        Some(s) => parse(&s),
+        None => Ok(None),
+    }
+}
+
+/// A gentle note on a drafted paragraph whose sentences are unlike hers, or `None`.
+#[allow(clippy::cast_precision_loss)]
+pub(crate) fn style_note(fp: &Fingerprint, text: &str) -> Option<String> {
+    let lengths = sentence_lengths(text);
+    if lengths.len() < 2 {
+        return None;
+    }
+    let mean = lengths.iter().sum::<usize>() as f64 / lengths.len() as f64;
+    if mean > fp.long {
+        Some(format!(
+            "משפטים ארוכים מהרגיל אצלך (בממוצע {mean:.0} מילים במשפט; אצלך בדרך כלל עד {:.0})",
+            fp.long
+        ))
+    } else if mean < fp.short {
+        Some(format!(
+            "משפטים קצרים מהרגיל אצלך (בממוצע {mean:.0} מילים במשפט; אצלך בדרך כלל לפחות {:.0})",
+            fp.short
+        ))
+    } else {
+        None
+    }
+}
+
 /// The draft paragraph `draft_id` of a case, from any section.
 pub(crate) fn find_draft(
     v: &Vault,
@@ -1111,7 +1195,21 @@ impl Core {
         names.insert(id.clone(), staged.names);
         self.vault_mut()?
             .set_secret(PAST_NAMES_KEY, &json(&names)?)?;
+        self.remeasure_style()?;
         Ok(Self::source_view(id, unix_now(), &stored))
+    }
+
+    /// Measure her sentences again after her past reports changed.
+    fn remeasure_style(&mut self) -> Result<(), CoreError> {
+        let sources: Vec<StoredSource> = self
+            .vault_ref()?
+            .style_sources()?
+            .iter()
+            .map(|s| parse(&s.json))
+            .collect::<Result<_, _>>()?;
+        let fp = measure(&sources);
+        self.vault_mut()?.set_secret(FINGERPRINT_KEY, &json(&fp)?)?;
+        Ok(())
     }
 
     pub fn discard_style_upload(&mut self) {
@@ -1140,7 +1238,7 @@ impl Core {
             self.vault_mut()?
                 .set_secret(PAST_NAMES_KEY, &json(&names)?)?;
         }
-        Ok(())
+        self.remeasure_style()
     }
 
     // -------------------------------------------------------- the screen
@@ -1619,6 +1717,7 @@ impl Core {
         self.vault_mut()?.reset_style()?;
         self.vault_mut()?
             .set_secret(PAST_NAMES_KEY, &json(&PastNames::new())?)?;
+        self.vault_mut()?.set_secret(FINGERPRINT_KEY, "null")?;
         Ok(())
     }
 

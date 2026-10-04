@@ -1451,6 +1451,7 @@ impl Core {
         let practitioner = v.practitioner()?.names.first().cloned();
         let routing = Core::material_routing(v, &structure, case_id, &inputs)?;
         let sheets = score_sheets(v, case_id, &inputs)?;
+        let fingerprint = style::fingerprint(v)?;
         let retention_default = v
             .list_cases()?
             .into_iter()
@@ -1486,6 +1487,9 @@ impl Core {
                             .collect(),
                         // Every score in the text against the score table, each time (AI-6).
                         warnings: dv_domain::check_scores(&d.text_tagged, &sheets),
+                        style_note: fingerprint
+                            .filter(|_| d.author == Author::Ai && d.status == DraftStatus::Proposed)
+                            .and_then(|fp| style::style_note(&fp, &d.text_tagged)),
                         replaces: d.replaces,
                     })
                     .collect();

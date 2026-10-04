@@ -65,6 +65,8 @@ pub struct ParagraphView {
     pub warnings: Vec<String>,
     /// A new wording of this approved paragraph (its id), waiting for her approval.
     pub replaces: Option<String>,
+    /// A gentle note when Claude's sentences are unlike hers ("משפטים ארוכים מהרגיל אצלך").
+    pub style_note: Option<String>,
 }
 
 /// One passage a paragraph leans on ("למה כתבת את זה?", AI-7), shown on this computer only.
