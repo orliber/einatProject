@@ -450,6 +450,32 @@ impl Review {
         });
     }
 
+    /// The review screen of a case request: the card also lists the names the filter kept
+    /// with the case earlier (from a saved material, a document, the first build of this
+    /// request) wherever their tags go out now, so each one can still be restored.
+    fn into_case_prepared(mut self, demo_mode: bool, data: &PrivacyData) -> Prepared {
+        let out: String = self
+            .parts
+            .iter()
+            .flat_map(|p| p.outgoing.iter().map(|s| s.text.as_str()))
+            .collect();
+        for i in data.identities.iter().filter(|i| {
+            i.case_id == data.case_id && i.source != IdentitySource::Manual && out.contains(&i.tag)
+        }) {
+            if !self.auto_hidden.iter().any(|a| a.tag == i.tag) {
+                self.auto_hidden.push(AutoHidden {
+                    token: i.value.clone(),
+                    tag: i.tag.clone(),
+                    role: i.role,
+                    reason: i.reason.clone(),
+                    uncertain: false,
+                    kind: AutoKind::Name,
+                });
+            }
+        }
+        self.into_prepared(demo_mode)
+    }
+
     fn into_prepared(self, demo_mode: bool) -> Prepared {
         Prepared {
             approval_id: None,
@@ -1838,7 +1864,7 @@ impl Core {
 
         let nonce = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
         let (body, _refs) = dv_ai::build_section_request(&model, &input, &nonce);
-        let mut prepared = review.into_prepared(demo_mode);
+        let mut prepared = review.into_case_prepared(demo_mode, &data);
         let (key, instruction_tagged, instr_hidden, rows, approved) = sources;
         let kind = PendingKind::Section {
             case_id: case_id.to_owned(),
@@ -2242,7 +2268,7 @@ impl Core {
         };
         let nonce = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
         let body = dv_ai::build_consult_request(&model, &input, &nonce);
-        let mut prepared = review.into_prepared(demo_mode);
+        let mut prepared = review.into_case_prepared(demo_mode, &data);
         let kind = PendingKind::Consult {
             case_id: case_id.map(str::to_owned),
             conversation_id: conversation_id.map(str::to_owned),

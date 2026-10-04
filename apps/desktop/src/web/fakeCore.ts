@@ -297,6 +297,18 @@ export class FakeCore {
     return run();
   }
 
+  /** The card also lists names kept with the case earlier, wherever their tags go out (as the core does). */
+  private withKept(c: Case | null, p: Prepared): Prepared {
+    if (!c) return p;
+    const out = p.parts.flatMap((x) => x.outgoing.map((s) => s.text)).join("");
+    const auto_hidden = [...p.auto_hidden];
+    for (const person of c.people) {
+      if (person.source === "manual" || !out.includes(person.tag) || auto_hidden.some((a) => a.tag === person.tag)) continue;
+      auto_hidden.push({ token: person.value, tag: person.tag, role: person.role, reason: person.reason, uncertain: false, kind: "name" });
+    }
+    return { ...p, auto_hidden };
+  }
+
   private keepFound(c: Case, found: { value: string; role: Role; source: IdentitySource; reason: string }[]) {
     for (const f of found) {
       if (c.people.some((p) => p.value === f.value || p.aliases.includes(f.value))) continue;
@@ -405,7 +417,7 @@ export class FakeCore {
     if (instruction.trim()) take("הבקשה שלך", instruction);
     const approval = newId("approval");
     this.pending.set(approval, { type: "section", caseId: c.id, section: key, refs, instruction, replaces });
-    return { approval_id: approval, parts, suspects: [], auto_hidden: autoHidden, hidden: Array.from(hidden), checks, blocked: [], demo_mode: true };
+    return this.withKept(c, { approval_id: approval, parts, suspects: [], auto_hidden: autoHidden, hidden: Array.from(hidden), checks, blocked: [], demo_mode: true });
   }
 
   /** Sorting into sections (D-022): every material not sorted yet, one review. */
@@ -428,7 +440,7 @@ export class FakeCore {
     });
     const approval = newId("approval");
     this.pending.set(approval, { type: "sort", caseId: c.id, materials: todo.map((i) => ({ id: i.id, count: R.passages(i.content).length, content: i.content })) });
-    return { approval_id: approval, parts, suspects: [], auto_hidden: autoHidden, hidden: Array.from(hidden), checks, blocked: [], demo_mode: true };
+    return this.withKept(c, { approval_id: approval, parts, suspects: [], auto_hidden: autoHidden, hidden: Array.from(hidden), checks, blocked: [], demo_mode: true });
   }
 
   private sendSort(p: Extract<Pending, { type: "sort" }>): SortResult {
@@ -858,7 +870,7 @@ export class FakeCore {
         const f = c ? this.filterFor(c, text) : filter(text, { caseId: "", people: this.allPeople(), practitioner: this.practitioner, allowed: new Set() });
         const approval = newId("approval");
         this.pending.set(approval, { type: "consult", question: f.tagged, shown: text, hidden: f.hidden, caseId: c?.id ?? null, conversationId: a.conversationId ? String(a.conversationId) : null });
-        return { approval_id: approval, parts: [{ label: "השאלה", original: f.original_segments, outgoing: f.tagged_segments }], suspects: [], auto_hidden: f.auto_hidden, hidden: f.hidden, checks: f.checks, blocked: [], demo_mode: true } satisfies Prepared;
+        return this.withKept(c, { approval_id: approval, parts: [{ label: "השאלה", original: f.original_segments, outgoing: f.tagged_segments }], suspects: [], auto_hidden: f.auto_hidden, hidden: f.hidden, checks: f.checks, blocked: [], demo_mode: true });
       }
       case "send_consult": {
         const p = this.pending.get(String(a.approvalId));

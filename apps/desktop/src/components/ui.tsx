@@ -115,7 +115,7 @@ export function Segments({ segments, side }: { segments: Segment[]; side: "origi
 
 /** "[ילד]" → "הילד": tags read as roles on screen. */
 export function displayTag(tag: string): string {
-  const inner = tag.replace(/^\[|\]$/g, "");
+  const inner = tag.replace(/[[\]]/g, "");
   return inner;
 }
 

@@ -95,7 +95,7 @@ export function StyleScreen() {
     setError(null);
     try {
       const prepared = await prepare(step);
-      const clean = prepared.approval_id && !prepared.suspects.length && !prepared.blocked.length;
+      const clean = prepared.approval_id && !prepared.auto_hidden.length && !prepared.blocked.length;
       if (status.review_only_suspect && clean && prepared.approval_id) await send(step, prepared.approval_id, steps);
       else setReview({ step, prepared });
     } catch (e) {

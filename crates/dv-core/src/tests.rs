@@ -329,6 +329,41 @@ fn unknown_name_is_hidden_kept_and_restored_with_one_click() {
 }
 
 #[test]
+fn names_kept_earlier_stay_on_the_card_wherever_they_go_out() {
+    let (_dir, mut core, case) = setup(Some(FakeTransport::default()));
+    core.add_input(
+        &case,
+        InputKind::Kindergarten,
+        "שיחה נוספת",
+        "הדודה מירב אוספת אותו מהגן בימי שלישי.",
+    )
+    .unwrap();
+    let kept = core
+        .case_detail(&case)
+        .unwrap()
+        .identities
+        .into_iter()
+        .find(|i| i.value == "מירב")
+        .expect("kept");
+    assert_eq!(kept.source, IdentitySource::Auto);
+    // Kept as a name of the case, so this build finds nothing new; the card still lists it.
+    let prepared = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    assert!(prepared.approval_id.is_some(), "{:?}", prepared.blocked);
+    assert!(outgoing(&prepared).contains(&kept.tag));
+    let item = prepared
+        .auto_hidden
+        .iter()
+        .find(|a| a.tag == kept.tag)
+        .expect("listed on the card");
+    assert_eq!(item.token, "מירב");
+    assert_eq!(item.reason, kept.reason);
+    // A name Einat entered herself is not on the card.
+    assert!(!prepared.auto_hidden.iter().any(|a| a.token == "שירה"));
+}
+
+#[test]
 fn manual_edit_with_new_name_is_hidden_before_it_goes_out() {
     let (_dir, mut core, case) = setup(None);
     let p = core

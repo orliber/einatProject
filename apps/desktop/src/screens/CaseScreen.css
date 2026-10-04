@@ -309,6 +309,12 @@
   gap: 8px;
   align-items: center;
 }
+.person-note {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .person-head {
   font-size: 13px;
   font-weight: 700;

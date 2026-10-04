@@ -295,7 +295,7 @@ impl Core {
 
         let nonce = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
         let body = dv_ai::build_sort_request(&model, &input, &nonce);
-        let mut prepared = review.into_prepared(demo_mode);
+        let mut prepared = review.into_case_prepared(demo_mode, &data);
         let kind = PendingKind::Sort {
             case_id: case_id.to_owned(),
             materials: rows,

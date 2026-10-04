@@ -143,7 +143,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const startReview = useCallback(
     (r: ReviewRequest) =>
       new Promise<boolean>((resolve, reject) => {
-        const clean = r.prepared.approval_id && r.prepared.suspects.length === 0 && r.prepared.blocked.length === 0;
+        const clean = r.prepared.approval_id && r.prepared.auto_hidden.length === 0 && r.prepared.blocked.length === 0;
         if (status.review_only_suspect && clean && r.prepared.approval_id) {
           r.onSend(r.prepared.approval_id).then(() => resolve(true), reject);
           return;
