@@ -691,6 +691,21 @@ export class FakeCore {
         c.sheets.set(input.id, sheet);
         return input;
       }
+      case "paragraph_sources": {
+        // The preview's "why": passages of the case's materials that share words with it.
+        const c = this.find(a.caseId);
+        const d = c.drafts.find((x) => x.id === String(a.draftId));
+        if (!d?.byAi) return [];
+        const words = (t: string) => new Set(t.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3));
+        const mine = words(restore(d.text, c.people, this.practitioner));
+        return c.inputs
+          .flatMap((i) => R.passages(i.content).map((text) => ({ label: `${kindLabel[i.kind]} · ${i.title}`, text })))
+          .map((x) => ({ ...x, score: [...words(x.text)].filter((w) => mine.has(w)).length }))
+          .filter((x) => x.score > 0)
+          .sort((p, q) => q.score - p.score)
+          .slice(0, 4)
+          .map(({ label, text }) => ({ label, text }));
+      }
       case "score_sheet":
         return this.find(a.caseId).sheets.get(String(a.inputId)) ?? null;
       case "import_document":

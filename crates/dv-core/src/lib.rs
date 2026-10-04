@@ -15,6 +15,7 @@ mod sorting;
 mod style;
 pub mod update;
 mod views;
+mod why;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -53,7 +54,7 @@ pub use views::{
     ChatView, ConsultResult, ConsultTurnView, ConsultationSummary, ConsultationView, CreatedVault,
     ExportCheck, ImportPreview, MaterialRouting, NameMatch, NameSuggestion, ParagraphView,
     Prepared, ReportSettings, RetentionItem, ReviewPart, SectionResult, SectionView, SortResult,
-    StagedBackup, SuspectDecision, UiError,
+    SourceExcerpt, StagedBackup, SuspectDecision, UiError,
 };
 
 const API_KEY: &str = "anthropic_api_key";
@@ -185,6 +186,23 @@ fn egress_he(e: &EgressError) -> String {
         }
         other => format!("שגיאה בחיבור ל-Claude: {other}"),
     }
+}
+
+/// The score sheets entered in the case's score table (the scores the text is checked against).
+fn score_sheets(
+    v: &Vault,
+    case_id: &str,
+    inputs: &[dv_domain::CaseInput],
+) -> Result<Vec<dv_domain::ScoreSheet>, CoreError> {
+    let mut out = Vec::new();
+    for i in inputs.iter().filter(|i| i.kind == InputKind::TestScores) {
+        if let Some(data) = v.input_data(case_id, &i.id)? {
+            if let Ok(sheet) = serde_json::from_str(&data) {
+                out.push(sheet);
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Today's date `(y, m, d)` in UTC, for relative dates.
@@ -1156,6 +1174,7 @@ impl Core {
         let inputs = v.inputs(case_id)?;
         let practitioner = v.practitioner()?.names.first().cloned();
         let routing = Core::material_routing(v, &structure, case_id, &inputs)?;
+        let sheets = score_sheets(v, case_id, &inputs)?;
         let retention_default = v
             .list_cases()?
             .into_iter()
@@ -1189,7 +1208,8 @@ impl Core {
                                 )
                             })
                             .collect(),
-                        warnings: Vec::new(),
+                        // Every score in the text against the score table, each time (AI-6).
+                        warnings: dv_domain::check_scores(&d.text_tagged, &sheets),
                         replaces: d.replaces,
                     })
                     .collect();
@@ -1641,7 +1661,10 @@ impl Core {
         let identities = v.identities(&case_id)?;
         let case_tags: Vec<String> = identities.iter().map(|i| i.tag.clone()).collect();
         let everyone = v.all_identities()?;
+        let inputs = v.inputs(&case_id)?;
+        let sheets = score_sheets(v, &case_id, &inputs)?;
         for p in &mut reply.paragraphs {
+            p.warnings.extend(dv_domain::check_scores(&p.text, &sheets));
             for s in scan_model_output(&p.text, &case_tags, &everyone) {
                 p.warnings.push(format!("{}: {}", s.message, s.token));
             }

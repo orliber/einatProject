@@ -2529,3 +2529,93 @@ fn her_own_paragraph_goes_where_she_put_it() {
     core.edit_paragraph(&case, &second, "  \n ").unwrap();
     assert_eq!(texts(&mut core), vec!["אחת.", "שלוש.", "ארבע."]);
 }
+
+/// AI-6: a score written in the report is checked against the score table she entered, in
+/// code, for every paragraph (hers too), each time the case is shown.
+#[test]
+fn written_scores_are_checked_against_the_score_table() {
+    let (_dir, mut core, case) = setup(None);
+    let sheet = dv_domain::ScoreSheet {
+        instrument: "wppsi_iv".into(),
+        module: String::new(),
+        cutoff: None,
+        entries: vec![dv_domain::ScoreEntry {
+            measure: "vci".into(),
+            value: 95.0,
+            note: String::new(),
+        }],
+        notes: String::new(),
+    };
+    core.save_scores(&case, None, &sheet).unwrap();
+    core.add_own_paragraph(
+        &case,
+        "cognitive",
+        "ההבנה המילולית (VCI) בטווח הממוצע (97).",
+    )
+    .unwrap();
+    core.add_own_paragraph(
+        &case,
+        "cognitive",
+        "ההבנה המילולית (VCI) בטווח הממוצע (95).",
+    )
+    .unwrap();
+    let detail = core.case_detail(&case).unwrap();
+    let paras = &detail
+        .sections
+        .iter()
+        .find(|s| s.key == "cognitive")
+        .unwrap()
+        .paragraphs;
+    assert!(
+        paras[0]
+            .warnings
+            .iter()
+            .any(|w| w.contains("97") && w.contains("95")),
+        "{:?}",
+        paras[0].warnings
+    );
+    assert!(paras[1].warnings.is_empty(), "{:?}", paras[1].warnings);
+}
+
+/// AI-7: "why did you write this?" shows the passages a paragraph was written from, with the
+/// real names (on this computer only); a summary paragraph shows the approved sections.
+#[test]
+fn a_paragraph_shows_the_passages_it_was_written_from() {
+    let (_dir, mut core, case) = setup(None);
+    let p = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    let r = core.send_section(&p.approval_id.unwrap()).unwrap();
+    assert!(!r.paragraphs.is_empty(), "{}", r.reply);
+    let detail = core.case_detail(&case).unwrap();
+    let para = detail
+        .sections
+        .iter()
+        .find(|s| s.key == "kindergarten")
+        .unwrap()
+        .paragraphs[0]
+        .clone();
+    let why = core.paragraph_sources(&case, &para.id).unwrap();
+    assert!(!why.is_empty());
+    assert!(
+        why[0].text.contains("מעברים") && why[0].text.contains("אלון"),
+        "{why:?}"
+    );
+
+    core.approve_section(&case, "kindergarten").unwrap();
+    let s = core.prepare_section(&case, "summary", "טיוטה").unwrap();
+    core.send_section(&s.approval_id.unwrap()).unwrap();
+    let summary = core.case_detail(&case).unwrap();
+    let para = summary
+        .sections
+        .iter()
+        .find(|s| s.key == "summary")
+        .unwrap()
+        .paragraphs[0]
+        .clone();
+    let why = core.paragraph_sources(&case, &para.id).unwrap();
+    assert!(
+        why.iter().any(|x| x.label.contains("סעיף מאושר")),
+        "{why:?}"
+    );
+}

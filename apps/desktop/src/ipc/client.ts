@@ -31,6 +31,7 @@ import type { ReportSettings } from "./generated/ReportSettings";
 import type { ScoreSheet } from "./generated/ScoreSheet";
 import type { SectionResult } from "./generated/SectionResult";
 import type { SortResult } from "./generated/SortResult";
+import type { SourceExcerpt } from "./generated/SourceExcerpt";
 import type { MaterialRouting } from "./generated/MaterialRouting";
 import type { SuspectDecision } from "./generated/SuspectDecision";
 import type { FollowUpView } from "./generated/FollowUpView";
@@ -117,6 +118,9 @@ export const ipc = {
   saveScores: (caseId: string, inputId: string | null, sheet: ScoreSheet) =>
     call<CaseInput>("save_scores", { caseId, inputId, sheet }),
   scoreSheet: (caseId: string, inputId: string) => call<ScoreSheet | null>("score_sheet", { caseId, inputId }),
+  /** "למה כתבת את זה?": the passages a paragraph leans on, best match first (stays local). */
+  paragraphSources: (caseId: string, draftId: string) =>
+    call<SourceExcerpt[]>("paragraph_sources", { caseId, draftId }),
   /** The file's bytes go as the raw body; nothing else of the file system is exposed. */
   importDocument: async (caseId: string, file: File): Promise<ImportPreview> => {
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -259,6 +263,7 @@ export type {
   NameMatch,
   MaterialRouting,
   SortResult,
+  SourceExcerpt,
   CaseDetail,
   CaseInput,
   CaseMeta,
