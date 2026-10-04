@@ -13,7 +13,9 @@ use ts_rs::TS;
 
 use crate::lexicon::LEXICON;
 use crate::patterns;
-use crate::pipeline::{identity_index, PrivacyContext};
+use crate::pipeline::{
+    arabic_identity_matches, declared_reads_as_word, identity_index, reads_as_word, PrivacyContext,
+};
 use crate::text::{normalize, prefix_splits, tokenize};
 
 /// Generic replacements produced by the pipeline; always allowed in outgoing text.
@@ -146,6 +148,10 @@ pub fn clear(req: &GateRequest<'_>) -> Result<ClearedPayload, Blocked> {
     for text in texts {
         let tokens = tokenize(text);
         for m in index.find(text, &tokens) {
+            // "שני ההורים", "בגיל 3": the same certain readings the pipeline leaves as words.
+            if declared_reads_as_word(text, &tokens, m.first_token, m.last_token, m.prefix) {
+                continue;
+            }
             // An ordinary word the psychologist confirmed ("שאלון" when a child is "אלון").
             let whole = &tokens[m.first_token];
             if m.prefix > 0
@@ -158,6 +164,13 @@ pub fn clear(req: &GateRequest<'_>) -> Result<ClearedPayload, Blocked> {
                 "identity",
                 "נמצא שם מוצהר בטקסט היוצא",
                 Some(text[m.start..m.end].to_owned()),
+            ));
+        }
+        for (start, end, _) in arabic_identity_matches(text, &tokens, req.ctx) {
+            reasons.push(reason(
+                "identity",
+                "נמצא שם מוצהר בטקסט היוצא",
+                Some(text[start..end].to_owned()),
             ));
         }
         match patterns::find(text, req.ctx.today) {
@@ -177,9 +190,12 @@ pub fn clear(req: &GateRequest<'_>) -> Result<ClearedPayload, Blocked> {
             )),
         }
         for t in &tokens {
-            let is_name = prefix_splits(&t.norm)
-                .iter()
-                .any(|(_, h)| LEXICON.first_names.contains(h) && !(req.ctx.allowlisted)(h));
+            // Like the pipeline: "כרים" is a word, not כ + רים.
+            let is_name = prefix_splits(&t.norm).iter().any(|(p, h)| {
+                LEXICON.first_names.contains(h)
+                    && !(req.ctx.allowlisted)(h)
+                    && !(*p > 0 && reads_as_word(&t.norm, h))
+            });
             if is_name && !(req.ctx.allowlisted)(&t.norm) && !LEXICON.common_words.contains(&t.norm)
             {
                 reasons.push(reason(

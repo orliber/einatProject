@@ -4,7 +4,10 @@
 
 use std::fs;
 
-use dv_domain::{Author, CaseMeta, ChatRole, DraftStatus, IdentityInput, InputKind, Role};
+use dv_domain::{
+    Author, CaseMeta, ChatRole, DraftStatus, FoundName, IdentityInput, IdentitySource, InputKind,
+    Role,
+};
 use dv_vault::{Argon2Params, AuditEvent, Secret, Vault, VaultError};
 
 const PASSWORD: &str = "כלב ירוק רץ מהר בגינה";
@@ -168,6 +171,68 @@ fn tags_are_stable_and_identities_are_per_case() {
     let other = vault.create_case(&CaseMeta::default()).unwrap();
     assert!(vault.identities(&other).unwrap().is_empty());
     assert_eq!(vault.all_identities().unwrap().len(), 3);
+}
+
+/// A name the filter hid on its own becomes an identity of the case with its source and
+/// reason, survives a relock, keeps them through an edit of the list, and can be removed.
+#[test]
+fn found_names_are_kept_with_their_source() {
+    let (dir, mut vault, _) = new_vault();
+    let case = noam(&mut vault);
+    let found = |value: &str, role, source| FoundName {
+        value: value.into(),
+        role,
+        source,
+        reason: "אחרי 'הגננת'".into(),
+    };
+    let added = vault
+        .add_found_names(
+            &case,
+            &[
+                found("אסתי", Role::Teacher, IdentitySource::Auto),
+                found("נועם", Role::Other, IdentitySource::Auto),
+                found("רקס", Role::Other, IdentitySource::Metadata),
+                found("אסתי", Role::Other, IdentitySource::Auto),
+            ],
+        )
+        .unwrap();
+    // "נועם" is already the child; the second "אסתי" is the same name.
+    assert_eq!(added.len(), 2);
+    assert_eq!(added[0].tag, "[גננת_2]");
+    assert_eq!(added[1].tag, "[אדם_1]");
+    vault.lock().unwrap();
+
+    let mut vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
+    let ids = vault.identities(&case).unwrap();
+    assert_eq!(ids.len(), 4);
+    assert_eq!(ids[0].source, IdentitySource::Manual);
+    assert_eq!(ids[2].source, IdentitySource::Auto);
+    assert_eq!(ids[2].reason, "אחרי 'הגננת'");
+    assert_eq!(ids[3].source, IdentitySource::Metadata);
+
+    // Saving the list keeps every source, also with a changed role (a new tag).
+    let mut edit: Vec<IdentityInput> = ids
+        .iter()
+        .map(|i| IdentityInput {
+            id: Some(i.id.clone()),
+            role: i.role,
+            value: i.value.clone(),
+            aliases: i.aliases.clone(),
+        })
+        .collect();
+    edit[3].role = Role::Relative;
+    let after = vault.set_identities(&case, &edit).unwrap();
+    assert_eq!(after[2].source, IdentitySource::Auto);
+    let relative = after.iter().find(|i| i.role == Role::Relative).unwrap();
+    assert_eq!(relative.source, IdentitySource::Metadata);
+    assert_eq!(relative.tag, "[קרוב_משפחה_1]");
+
+    vault.remove_identity(&case, &after[2].id).unwrap();
+    assert!(!vault
+        .identities(&case)
+        .unwrap()
+        .iter()
+        .any(|i| i.value == "אסתי"));
 }
 
 #[test]
@@ -710,4 +775,95 @@ fn consultations_are_sealed_and_go_with_their_case() {
     assert_eq!((left.len(), left[0].id.as_str()), (1, general.as_str()));
     vault.delete_consultation(&general).unwrap();
     assert!(vault.consultations().unwrap().is_empty());
+}
+
+#[test]
+fn style_sources_and_profiles_are_sealed_versioned_and_erasable() {
+    let (dir, mut vault, _) = new_vault();
+    let a = vault
+        .save_style_source(None, r#"{"text":"[ילד] מגיב היטב לתיווך של המבוגר"}"#)
+        .unwrap();
+    let b = vault
+        .save_style_source(None, r#"{"text":"ניכר קושי בוויסות"}"#)
+        .unwrap();
+    assert_eq!(vault.style_sources().unwrap().len(), 2);
+    vault
+        .save_style_source(Some(&a), r#"{"text":"גרסה מעודכנת"}"#)
+        .unwrap();
+    assert!(vault
+        .style_source(&a)
+        .unwrap()
+        .unwrap()
+        .json
+        .contains("מעודכנת"));
+    assert!(matches!(
+        vault.save_style_source(Some("missing"), "{}"),
+        Err(VaultError::NotFound)
+    ));
+
+    let (_, v1) = vault
+        .add_style_profile("active", r#"{"items":["אחד"]}"#)
+        .unwrap();
+    let (_, v2) = vault
+        .add_style_profile("draft", r#"{"items":["טיוטה"]}"#)
+        .unwrap();
+    let (_, v3) = vault
+        .add_style_profile("active", r#"{"items":["שלוש"]}"#)
+        .unwrap();
+    assert_eq!((v1, v2, v3), (1, 2, 3));
+    let profiles = vault.style_profiles().unwrap();
+    assert_eq!(profiles[0].version, 3, "newest first");
+    assert_eq!(
+        profiles.iter().filter(|p| p.status == "active").count(),
+        1,
+        "approving a version retires the one before"
+    );
+    assert!(vault.add_style_profile("weird", "{}").is_err());
+    vault.delete_style_drafts().unwrap();
+    assert!(vault
+        .style_profiles()
+        .unwrap()
+        .iter()
+        .all(|p| p.status != "draft"));
+
+    vault
+        .save_style_learning(r#"{"pairs":[["מראה","מפגין",3]]}"#)
+        .unwrap();
+    vault
+        .save_style_learning(r#"{"pairs":[["מראה","מפגין",4]]}"#)
+        .unwrap();
+    assert!(vault.style_learning().unwrap().unwrap().contains('4'));
+
+    vault.delete_style_source(&b).unwrap();
+    assert_eq!(vault.style_sources().unwrap().len(), 1);
+    assert!(matches!(
+        vault.delete_style_source(&b),
+        Err(VaultError::NotFound)
+    ));
+    let events: Vec<String> = vault
+        .audit_entries(50)
+        .unwrap()
+        .into_iter()
+        .map(|e| e.event)
+        .collect();
+    for e in [
+        "style_source_added",
+        "style_source_deleted",
+        "style_profile_approved",
+    ] {
+        assert!(events.iter().any(|x| x == e), "{e} is in the log");
+    }
+    vault.reset_style().unwrap();
+    assert!(vault.style_profiles().unwrap().is_empty());
+    assert!(vault.style_learning().unwrap().is_none());
+    vault.lock().unwrap();
+
+    let bytes = all_bytes(dir.path());
+    for secret in ["מגיב היטב לתיווך", "גרסה מעודכנת", "מפגין", "שלוש"]
+    {
+        assert!(
+            !contains(&bytes, secret),
+            "{secret} found in plaintext on disk"
+        );
+    }
 }

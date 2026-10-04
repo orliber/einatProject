@@ -15,7 +15,9 @@ use std::collections::HashSet;
 
 use dv_domain::{passage_ranges, Identity, Role};
 use dv_privacy::text::{is_valid_prefix, normalize};
-use dv_privacy::{clear, filter, filter_split, GateRequest, PrivacyContext};
+use dv_privacy::{
+    clear, filter, filter_split, AutoKind, FilterOutcome, GateRequest, PrivacyContext,
+};
 use proptest::prelude::*;
 
 const TODAY: (i32, u32, u32) = (2026, 9, 28);
@@ -31,6 +33,8 @@ fn id(case: &str, role: Role, tag: &str, value: &str, aliases: &[&str]) -> Ident
         tag: tag.to_owned(),
         value: value.to_owned(),
         aliases: aliases.iter().map(|a| (*a).to_owned()).collect(),
+        source: dv_domain::IdentitySource::Manual,
+        reason: String::new(),
     }
 }
 
@@ -88,35 +92,70 @@ struct Outcome {
     cleared: bool,
 }
 
-fn send(text: &str, case: &str) -> Outcome {
-    let ids = identities();
-    let practitioner = vec!["דנה כהן-לוי".to_owned()];
-    let allow = |_: &str| false;
-    let ctx = PrivacyContext {
+fn ctx_for<'a>(
+    ids: &'a [Identity],
+    practitioner: &'a [String],
+    case: &'a str,
+) -> PrivacyContext<'a> {
+    PrivacyContext {
         case_id: case,
-        identities: &ids,
-        practitioner: &practitioner,
-        allowlisted: &allow,
+        identities: ids,
+        practitioner,
+        allowlisted: &|_: &str| false,
         confirmed_names: &|_: &str| false,
         today: TODAY,
-    };
-    let filtered = filter(text, &ctx).unwrap();
-    gate_tagged(&filtered.tagged, filtered.suspects.len(), case)
+    }
 }
 
-/// The gate's verdict on text that was already filtered (a passage cut from a whole filter).
-fn gate_tagged(tagged: &str, unresolved: usize, case: &str) -> Outcome {
-    let ids = identities();
+/// What dv-core keeps from a filter: every new name it hid becomes an identity of the case,
+/// with the tag it was hidden under.
+fn found(out: &FilterOutcome, known: &[Identity], case: &str) -> Vec<Identity> {
+    let mut new: Vec<Identity> = Vec::new();
+    for a in &out.auto_hidden {
+        if !matches!(a.kind, AutoKind::Name | AutoKind::OtherCase) {
+            continue;
+        }
+        if known.iter().any(|i| i.case_id == case && i.tag == a.tag) {
+            continue;
+        }
+        if let Some(i) = new.iter_mut().find(|i| i.tag == a.tag) {
+            if normalize(&i.value) != normalize(&a.token) && !i.aliases.contains(&a.token) {
+                i.aliases.push(a.token.clone());
+            }
+            continue;
+        }
+        new.push(Identity {
+            id: format!("{case}-auto-{}", a.tag),
+            case_id: case.to_owned(),
+            role: a.role,
+            tag: a.tag.clone(),
+            value: a.token.clone(),
+            aliases: Vec::new(),
+            source: dv_domain::IdentitySource::Auto,
+            reason: a.reason.clone(),
+        });
+    }
+    new
+}
+
+/// The whole path of an input: filter, keep the names it found, filter again with them (as
+/// dv-core does), keep anything new, and send what the second pass produced.
+fn send(text: &str, case: &str) -> Outcome {
+    let mut ids = identities();
     let practitioner = vec!["דנה כהן-לוי".to_owned()];
-    let allow = |_: &str| false;
-    let ctx = PrivacyContext {
-        case_id: case,
-        identities: &ids,
-        practitioner: &practitioner,
-        allowlisted: &allow,
-        confirmed_names: &|_: &str| false,
-        today: TODAY,
-    };
+    let first = filter(text, &ctx_for(&ids, &practitioner, case)).unwrap();
+    let more = found(&first, &ids, case);
+    ids.extend(more);
+    let second = filter(text, &ctx_for(&ids, &practitioner, case)).unwrap();
+    let more = found(&second, &ids, case);
+    ids.extend(more);
+    gate_with(&second.tagged, &ids, case)
+}
+
+/// The gate's verdict on text that was already filtered, with the case's identities `ids`.
+fn gate_with(tagged: &str, ids: &[Identity], case: &str) -> Outcome {
+    let practitioner = vec!["דנה כהן-לוי".to_owned()];
+    let ctx = ctx_for(ids, &practitioner, case);
     let body = serde_json::json!({
         "model": "claude-opus-5",
         "system": "את עוזרת לכתיבת דוח אבחון. השתמשי בתגיות בדיוק כפי שהן.",
@@ -132,7 +171,7 @@ fn gate_tagged(tagged: &str, unresolved: usize, case: &str) -> Outcome {
         body: &body,
         ctx: &ctx,
         case_tags: &case_tags,
-        unresolved_suspects: unresolved,
+        unresolved_suspects: 0,
         canaries: &canaries,
         max_bytes: 200_000,
     };
@@ -284,7 +323,7 @@ fn zero_leaks_for_numbers_dates_and_contact_details() {
 }
 
 #[test]
-fn unknown_names_other_cases_and_near_misses_block_until_decided() {
+fn unknown_names_other_cases_and_near_misses_are_hidden_without_asking() {
     for s in [
         "ב-14.9 לא רצה לצאת לחצר כשיובל ביקש לשחק איתו.",
         "שיחק עם גל ועם טל בחצר.",
@@ -295,9 +334,12 @@ fn unknown_names_other_cases_and_near_misses_block_until_decided() {
         "נואם מתקשה", // near-miss spelling of the child's name
         "Yuval did not want to play.",
     ] {
+        let ids = identities();
+        let out = filter(s, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(!out.auto_hidden.is_empty(), "nothing hidden: {s}");
         let o = send(s, CASE);
-        assert!(!o.cleared, "should block until decided: {s}");
-        assert!(o.leaked.is_empty());
+        assert!(o.cleared, "should pass once hidden: {s}");
+        assert!(o.leaked.is_empty(), "{s} leaked {:?}", o.leaked);
     }
 }
 
@@ -322,9 +364,12 @@ fn ordinary_words_containing_a_name_are_confirmed_not_rewritten() {
     );
     assert!(out.tagged.contains("[ילד] ענה"));
 
+    // At the start of a sentence it may be the name: hidden, and listed so "להחזיר" can undo it.
     let bare = filter("שאלון ההורים הוחזר.", &ctx).unwrap();
-    assert_eq!(bare.suspects.len(), 1, "{:?}", bare.suspects);
-    assert!(bare.tagged.starts_with("שאלון"), "not rewritten silently");
+    assert_eq!(bare.auto_hidden.len(), 1, "{:?}", bare.auto_hidden);
+    assert_eq!(bare.auto_hidden[0].kind, AutoKind::DeclaredInWord);
+    assert_eq!(bare.auto_hidden[0].token, "שאלון");
+    assert!(bare.tagged.starts_with("ש[ילד]"), "{}", bare.tagged);
 
     let confirmed = |t: &str| t == normalize("שאלון");
     let ctx = PrivacyContext {
@@ -336,7 +381,8 @@ fn ordinary_words_containing_a_name_are_confirmed_not_rewritten() {
         today: TODAY,
     };
     let again = filter("שאלון ההורים הוחזר.", &ctx).unwrap();
-    assert!(again.suspects.is_empty());
+    assert!(again.auto_hidden.is_empty(), "{:?}", again.auto_hidden);
+    assert!(again.tagged.starts_with("שאלון"), "{}", again.tagged);
     let body = serde_json::json!({"messages": [{"role": "user", "content": again.tagged}]});
     let tags: HashSet<String> = HashSet::from(["[ילד]".to_owned()]);
     let req = GateRequest {
@@ -363,12 +409,12 @@ fn ordinary_words_containing_a_name_are_confirmed_not_rewritten() {
         today: TODAY,
     };
     let named = filter("הגננת סיפרה שאלון מתקשה במעברים.", &ctx).unwrap();
-    assert!(named.suspects.is_empty(), "{:?}", named.suspects);
+    assert!(named.auto_hidden.is_empty(), "{:?}", named.auto_hidden);
     assert!(named.tagged.contains("ש[ילד] מתקשה"), "{}", named.tagged);
 }
 
 #[test]
-fn surnames_and_names_after_labels_block_until_decided() {
+fn surnames_and_names_after_labels_are_hidden_without_asking() {
     // A declared first name is hidden; the family name next to it must not slip out.
     for text in [
         "שם הילד: נועם גולדשטיין, גיל 5:4.",
@@ -385,10 +431,7 @@ fn surnames_and_names_after_labels_block_until_decided() {
             "{text}: leaked {:?}",
             o.leaked
         );
-        assert!(
-            !o.cleared,
-            "{text}: must block until the psychologist decides"
-        );
+        assert!(o.cleared, "{text}: should pass once hidden");
     }
 }
 
@@ -406,6 +449,161 @@ fn ordinary_sentences_around_names_are_not_flagged() {
             "{text}: should pass once declared names are hidden"
         );
     }
+}
+
+/// Family names that are also everyday words ("שני", "גיל", "אלה", "מתן", "אור"): the word
+/// passes only where the grammar rules out a name; everywhere else the name is hidden.
+#[test]
+fn declared_names_that_are_words_pass_only_as_words() {
+    let case = "case-dual";
+    let ids = vec![
+        id(case, Role::Mother, "[אם]", "שני", &[]),
+        id(case, Role::Father, "[אב]", "גיל", &[]),
+        id(case, Role::Sister, "[אחות_1]", "אלה", &[]),
+        id(case, Role::Brother, "[אח_1]", "מתן", &[]),
+        id(case, Role::Sister, "[אחות_2]", "אור", &[]),
+        id(case, Role::Brother, "[אח_2]", "ציון", &[]),
+        id(case, Role::Sister, "[אחות_3]", "עדינה", &[]),
+        id(case, Role::Other, "[אחר]", "פרידה", &[]),
+        id(case, Role::Sister, "[אחות_4]", "בילי", &[]),
+    ];
+    let practitioner = vec!["דנה כהן-לוי".to_owned()];
+    let allow = |_: &str| false;
+    let ctx = PrivacyContext {
+        case_id: case,
+        identities: &ids,
+        practitioner: &practitioner,
+        allowlisted: &allow,
+        confirmed_names: &|_: &str| false,
+        today: TODAY,
+    };
+    let case_tags: HashSet<String> = ids.iter().map(|i| i.tag.clone()).collect();
+    // What the gate sends (normalized), or None when it blocks.
+    let sent = |text: &str| {
+        let out = filter(text, &ctx).unwrap();
+        let body = serde_json::json!({
+            "model": "claude-opus-5",
+            "messages": [{"role": "user", "content": out.tagged}],
+        });
+        let req = GateRequest {
+            body: &body,
+            ctx: &ctx,
+            case_tags: &case_tags,
+            unresolved_suspects: 0,
+            canaries: &[],
+            max_bytes: 200_000,
+        };
+        clear(&req)
+            .ok()
+            .map(|p| normalize(&String::from_utf8_lossy(p.body())))
+    };
+    for (text, name) in [
+        ("שני הגיעה לפגישה עם גיל.", "שני"),
+        ("שני הבינה מהר.", "שני"),
+        ("ילדים במשפחה: גיל 5, שני 3.", "גיל"),
+        ("פגע בגיל ובאלה.", "גיל"),
+        ("אלה לפעמים כועסת.", "אלה"),
+        ("שני לעיתים קרובות מרגישה עייפה.", "שני"),
+        ("מתן לקח לו את הכדור.", "מתן"),
+        ("אור הקטנה ישנה בחדר של ההורים.", "אור"),
+        ("בוקר טוב, אור.", "אור"),
+        ("הוא כתב מכתב לאור הקטנה.", "אור"),
+        ("ציון הגיע לפגישה עם אמא.", "ציון"),
+        ("ציון גבוה מאחיו.", "ציון"),
+        ("ציון מסתגל לגן החדש.", "ציון"),
+        ("עדינה ישבה ליד השולחן.", "עדינה"),
+        ("פרידה מהגן הגיעה לבקר.", "פרידה"),
+        ("בילי שיחקה בחצר.", "בילי"),
+    ] {
+        if let Some(body) = sent(text) {
+            let words: Vec<&str> = body.split(|c: char| !c.is_alphanumeric()).collect();
+            assert!(
+                !words.contains(&normalize(name).as_str()),
+                "{text}: {name} left as a name"
+            );
+        }
+    }
+    for text in [
+        "שני ההורים הגיעו לפגישה.",
+        "אלה הדברים שהכי מעניינים אותו.",
+        "ישב בגיל 7 חודשים, הלך בגיל שנה.",
+        "ביחס לגיל הכרונולוגי ולגיל שלו.",
+        "זקוק למתן זמן נוסף.",
+        "ישן רק עם אור דולק.",
+        "ולאור זאת ההמלצה עומדת בעינה.",
+        "ציון 112 בסולם המילולי, ציון T של 64.",
+        "ציון כולל: 31. ציון מסתגל כללי בטווח הממוצע.",
+        "קשיים במוטוריקה עדינה.",
+        "חרדת פרידה בבוקר, פרידה מההורה בכניסה לחדר.",
+        "הגיע בלי התיק ושאל שאלות כלליות.",
+    ] {
+        assert!(
+            sent(text).is_some(),
+            "over-blocking an ordinary word: {text}"
+        );
+    }
+}
+
+/// A name declared in Hebrew and written in Arabic in a bilingual document ("روضة جسر"),
+/// with vowel signs, the article or "and" glued on, never leaves as is.
+#[test]
+fn declared_names_in_arabic_script_never_leak() {
+    let case = "case-arabic";
+    let ids = vec![
+        id(case, Role::Child, "[ילד]", "סמאח", &[]),
+        id(case, Role::Father, "[אב]", "ג'מיל עבאסי", &[]),
+        id(case, Role::Kindergarten, "[גן]", "ג'סר", &[]),
+    ];
+    let practitioner = vec!["דנה כהן-לוי".to_owned()];
+    let allow = |_: &str| false;
+    let ctx = PrivacyContext {
+        case_id: case,
+        identities: &ids,
+        practitioner: &practitioner,
+        allowlisted: &allow,
+        confirmed_names: &|_: &str| false,
+        today: TODAY,
+    };
+    let case_tags: HashSet<String> = ids.iter().map(|i| i.tag.clone()).collect();
+    let gate = |tagged: &str| {
+        let body = serde_json::json!({
+            "model": "claude-opus-5",
+            "messages": [{"role": "user", "content": tagged}],
+        });
+        let req = GateRequest {
+            body: &body,
+            ctx: &ctx,
+            case_tags: &case_tags,
+            unresolved_suspects: 0,
+            canaries: &[],
+            max_bytes: 200_000,
+        };
+        clear(&req)
+            .ok()
+            .map(|p| normalize(&String::from_utf8_lossy(p.body())))
+    };
+    let protected = ["جسر", "سماح", "جميل", "عباسي"].map(normalize);
+    for text in [
+        "גן דו-לשוני \"ג'סר\" | روضة جسر",
+        "الطفلة سَمَاح تلعب في الحديقة.",
+        "والجسر قريب من البيت، وجميل عباسي يحضر كل يوم.",
+        "رسالة من الأب: جميل عبّاسي",
+    ] {
+        let out = filter(text, &ctx).unwrap();
+        if let Some(sent) = gate(&out.tagged) {
+            for p in &protected {
+                assert!(!sent.contains(p.as_str()), "{text}: {p} left in {sent}");
+            }
+        }
+        // The gate alone refuses the raw text too.
+        assert!(gate(text).is_none(), "gate let through: {text}");
+    }
+    let plain = "الطفل يلعب في الحديقة مع أصدقائه.";
+    let out = filter(plain, &ctx).unwrap();
+    assert!(
+        gate(&out.tagged).is_some(),
+        "over-blocking Arabic text without names"
+    );
 }
 
 #[test]
@@ -516,7 +714,7 @@ fn the_metadata_leak_pattern_is_caught_once_metadata_names_are_declared() {
             out.tagged
         );
     }
-    assert!(out.suspects.is_empty(), "{:?}", out.suspects);
+    assert!(out.auto_hidden.is_empty(), "{:?}", out.auto_hidden);
 }
 
 proptest! {
@@ -548,10 +746,10 @@ fn noam_ctx<'a>(ids: &'a [Identity], practitioner: &'a [String]) -> PrivacyConte
 }
 
 /// D-022: a material is filtered once, whole, and cut into passages. Each passage must be
-/// exactly the whole result cut at its edges, leak nothing when sent alone, and keep every
-/// question the whole text asks inside it.
+/// exactly the whole result cut at its edges, leak nothing when sent alone, and list every
+/// item the whole text hid on its own.
 #[test]
-fn passages_cut_from_a_whole_filter_leak_nothing_and_keep_every_question() {
+fn passages_cut_from_a_whole_filter_leak_nothing_and_keep_every_hidden_item() {
     let ids = identities();
     let practitioner = vec!["דנה כהן-לוי".to_owned()];
     let ctx = noam_ctx(&ids, &practitioner);
@@ -594,19 +792,22 @@ fn passages_cut_from_a_whole_filter_leak_nothing_and_keep_every_question() {
     rebuilt.push_str(&doc[pos..]);
     assert_eq!(rebuilt, whole.tagged);
 
-    // Every question of the whole text is asked in the passage that holds it.
-    for s in &whole.suspects {
+    // Every item the whole text hid is listed in a passage that holds it.
+    for a in &whole.auto_hidden {
         assert!(
-            parts.iter().any(|p| p.suspects.contains(s)),
-            "question lost when cutting: {}",
-            s.token
+            parts.iter().any(|p| p.auto_hidden.contains(a)),
+            "hidden item lost when cutting: {}",
+            a.token
         );
     }
 
-    // Sent alone, no passage leaks.
+    // Sent alone, with the names it found kept, no passage leaks.
+    let mut kept = ids.clone();
+    let more = found(&whole, &ids, CASE);
+    kept.extend(more);
     let mut leaks = Vec::new();
     for part in &parts {
-        let o = gate_tagged(&part.tagged, part.suspects.len(), CASE);
+        let o = gate_with(&part.tagged, &kept, CASE);
         if o.cleared && !o.leaked.is_empty() {
             leaks.push(format!("{} -> {:?}", part.tagged, o.leaked));
         }
@@ -633,4 +834,89 @@ fn a_range_that_cuts_through_a_name_refuses_to_split() {
     let inside_a_letter = std::iter::once(0..1).collect::<Vec<_>>();
     let (_, parts) = filter_split(text, &ctx, &inside_a_letter).unwrap();
     assert!(parts.is_none());
+}
+
+/// Drafts are stored tagged and filtered again before each request. An institution word inside
+/// a tag ("גן" in `[ילד_גן]`, `[גן]`) is not followed by a kindergarten's name: the next word
+/// stays. (It used to be dropped: "[ילד_גן] הופנה לאבחון" went out as "[ילד_גן לאבחון".)
+#[test]
+fn filtering_tagged_text_again_keeps_every_word() {
+    let mut ids = identities();
+    ids.push(id(CASE, Role::OtherChild, "[ילד_גן]", "דנה", &[]));
+    ids.push(id(CASE, Role::School, "[בית_ספר]", "בית ספר אופק", &[]));
+    let practitioner: Vec<String> = Vec::new();
+    let ctx = PrivacyContext {
+        case_id: CASE,
+        identities: &ids,
+        practitioner: &practitioner,
+        allowlisted: &|_: &str| false,
+        confirmed_names: &|_: &str| false,
+        today: TODAY,
+    };
+    for tagged in [
+        "[ילד_גן] הופנה לאבחון.",
+        "[ילד] משחק עם [ילד_גן] בחצר.",
+        "ב[גן] שלו יש שגרה קבועה.",
+        "ב[בית_ספר] החדש הוא משתלב.",
+    ] {
+        let again = filter(tagged, &ctx).unwrap();
+        assert_eq!(again.tagged, tagged);
+        assert!(
+            again.auto_hidden.is_empty(),
+            "{tagged}: {:?}",
+            again.auto_hidden
+        );
+    }
+}
+
+/// Stage 3: a new name is hidden under a tag that says who it is, keeps that tag in every
+/// later text of the case once kept, and a job is generalized, never asked about.
+#[test]
+fn found_names_get_a_role_tag_and_keep_it_in_later_texts() {
+    let mut ids = identities();
+    let practitioner: Vec<String> = Vec::new();
+    let text = "הגננת רינת סיפרה שנועם משחק עם סבתא שמחה. האם עובדת כמורה בבית ספר יסודי.";
+    let out = filter(text, &ctx_for(&ids, &practitioner, CASE)).unwrap();
+    let tag_of = |out: &FilterOutcome, token: &str| {
+        out.auto_hidden
+            .iter()
+            .find(|a| a.token == token)
+            .map(|a| (a.tag.clone(), a.role))
+    };
+    assert_eq!(
+        tag_of(&out, "רינת"),
+        Some(("[גננת_2]".to_owned(), Role::Teacher)),
+        "{:?}",
+        out.auto_hidden
+    );
+    assert_eq!(
+        tag_of(&out, "שמחה"),
+        Some(("[קרוב_משפחה_1]".to_owned(), Role::Relative))
+    );
+    assert!(
+        out.tagged.ends_with("האם עובדת בתחום החינוך."),
+        "{}",
+        out.tagged
+    );
+    assert!(!out.tagged.contains("רינת") && !out.tagged.contains("שמחה"));
+    let more = found(&out, &ids, CASE);
+    ids.extend(more);
+
+    // A later text: the kept name has the same tag, and is listed again for "להחזיר".
+    let later = filter("רינת התקשרה שוב.", &ctx_for(&ids, &practitioner, CASE)).unwrap();
+    assert!(later.tagged.starts_with("[גננת_2]"), "{}", later.tagged);
+    assert_eq!(later.auto_hidden.len(), 1, "{:?}", later.auto_hidden);
+
+    // A kept name that is also a word hides only where a name fits: "בשמחה" stays.
+    let word = filter(
+        "הגיע לגן בשמחה, וסבתא שמחה אספה אותו.",
+        &ctx_for(&ids, &practitioner, CASE),
+    )
+    .unwrap();
+    assert!(word.tagged.contains("בשמחה"), "{}", word.tagged);
+    assert!(
+        word.tagged.contains("סבתא [קרוב_משפחה_1]"),
+        "{}",
+        word.tagged
+    );
 }

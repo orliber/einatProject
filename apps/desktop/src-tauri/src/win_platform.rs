@@ -1,4 +1,4 @@
-//! The only place in the program that calls Windows directly (D-043). Everything here is a
+//! The only place in the program that calls Windows directly (D-047). Everything here is a
 //! plain Win32 call with fixed arguments; `cargo xtask check-invariants` refuses `unsafe`
 //! anywhere else, and refuses an `unsafe` block here without a `// SAFETY:` line above it.
 //!

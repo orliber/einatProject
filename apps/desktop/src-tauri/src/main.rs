@@ -16,9 +16,13 @@ use dv_core::{
     ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView,
     ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
     ExportCheck, ImportPreview, NameMatch, Prepared, Readiness, ReportSettings, RetentionItem,
-    SectionResult, SortResult, StagedBackup, SuspectDecision, UiError, UnsavedEdit, UsageSummary,
+    SectionResult, SortResult, StagedBackup, StyleAnalysisResult, StyleImportPreview,
+    StyleOverview, StyleProfileView, StyleSourceView, SuspectDecision, UiError, UnsavedEdit,
+    UsageSummary,
 };
-use dv_domain::{CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind};
+use dv_domain::{
+    CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind, Role,
+};
 use tauri::Manager;
 
 struct AppState {
@@ -115,9 +119,13 @@ async fn app_status(
     Ok(status)
 }
 
+/// Hiding the window from screenshots and screen sharing is switched off for now (D-039):
+/// it blacked out Zoom and Teams. Setting this back to `true` restores D-037 as it was.
+const SCREEN_PROTECTION_ENABLED: bool = false;
+
 /// Screenshots and screen sharing see a blank window unless she turned that off (D-037).
 fn protect(window: &tauri::WebviewWindow, on: bool) {
-    let _ = window.set_content_protected(on);
+    let _ = window.set_content_protected(SCREEN_PROTECTION_ENABLED && on);
 }
 
 #[tauri::command]
@@ -354,6 +362,16 @@ async fn save_scores(
     .await
 }
 
+/// "למה כתבת את זה?": the passages one paragraph leans on (local only).
+#[tauri::command]
+async fn paragraph_sources(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    draft_id: String,
+) -> Res<Vec<dv_core::SourceExcerpt>> {
+    with_core(&state, move |c| c.paragraph_sources(&case_id, &draft_id)).await
+}
+
 #[tauri::command]
 async fn score_sheet(
     state: tauri::State<'_, AppState>,
@@ -437,6 +455,31 @@ async fn decide_suspect(
         c.decide_suspect(&case_id, &token, decision)
     })
     .await
+}
+
+/// "להחזיר" on the summary card: keep what the filter hid as written, for this case.
+#[tauri::command]
+async fn restore_auto_hidden(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    token: String,
+    tag: String,
+) -> Res<()> {
+    with_core(&state, move |c| {
+        c.restore_auto_hidden(&case_id, &token, &tag)
+    })
+    .await
+}
+
+/// The card's role menu for a name the filter kept.
+#[tauri::command]
+async fn change_role(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    tag: String,
+    role: Role,
+) -> Res<Vec<Identity>> {
+    with_core(&state, move |c| c.change_role(&case_id, &tag, role)).await
 }
 
 // ------------------------------------------------------------------ drafting
@@ -725,6 +768,143 @@ async fn send_consult(
     let out = with_core(&state, move |c| c.begin_send(&id)).await?;
     let (out, response) = transmit(&state, approval_id, out).await?;
     with_core(&state, move |c| c.finish_consult(out, response)).await
+}
+
+// ------------------------------------------------------------------ writing style (D-043)
+
+#[tauri::command]
+async fn style_overview(state: tauri::State<'_, AppState>) -> Res<StyleOverview> {
+    with_core(&state, |c| c.style_overview()).await
+}
+
+/// A past report: the bytes arrive as the raw request body, the file name as a header.
+#[tauri::command]
+async fn import_style_source(
+    state: tauri::State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Res<StyleImportPreview> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(internal("body"));
+    };
+    let file_name = request
+        .headers()
+        .get("x-file-name")
+        .and_then(|v| v.to_str().ok())
+        .map(percent_decode)
+        .unwrap_or_default();
+    let bytes = bytes.clone();
+    with_core(&state, move |c| c.import_style_source(&file_name, &bytes)).await
+}
+
+#[tauri::command]
+async fn save_style_source(
+    state: tauri::State<'_, AppState>,
+    token: String,
+    included: Vec<u32>,
+    title: Option<String>,
+) -> Res<StyleSourceView> {
+    with_core(&state, move |c| {
+        c.save_style_source(&token, &included, title.as_deref())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn discard_style_upload(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| {
+        c.discard_style_upload();
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn delete_style_source(state: tauri::State<'_, AppState>, id: String) -> Res<()> {
+    with_core(&state, move |c| c.delete_style_source(&id)).await
+}
+
+#[tauri::command]
+async fn prepare_style_analysis(
+    state: tauri::State<'_, AppState>,
+    source_id: String,
+) -> Res<Prepared> {
+    with_core(&state, move |c| c.prepare_style_analysis(&source_id)).await
+}
+
+#[tauri::command]
+async fn send_style_analysis(
+    state: tauri::State<'_, AppState>,
+    approval_id: String,
+) -> Res<StyleAnalysisResult> {
+    let id = approval_id.clone();
+    let out = with_core(&state, move |c| c.begin_send(&id)).await?;
+    let (out, response) = transmit(&state, approval_id, out).await?;
+    with_core(&state, move |c| c.finish_style_analysis(out, response)).await
+}
+
+#[tauri::command]
+async fn prepare_style_profile(state: tauri::State<'_, AppState>) -> Res<Prepared> {
+    with_core(&state, |c| c.prepare_style_profile()).await
+}
+
+#[tauri::command]
+async fn send_style_profile(
+    state: tauri::State<'_, AppState>,
+    approval_id: String,
+) -> Res<StyleProfileView> {
+    let id = approval_id.clone();
+    let out = with_core(&state, move |c| c.begin_send(&id)).await?;
+    let (out, response) = transmit(&state, approval_id, out).await?;
+    with_core(&state, move |c| c.finish_style_profile(out, response)).await
+}
+
+#[tauri::command]
+async fn save_style_draft(
+    state: tauri::State<'_, AppState>,
+    profile: dv_core::StyleProfile,
+) -> Res<StyleProfileView> {
+    with_core(&state, move |c| c.save_style_draft(profile)).await
+}
+
+#[tauri::command]
+async fn approve_style_draft(state: tauri::State<'_, AppState>) -> Res<StyleProfileView> {
+    with_core(&state, |c| c.approve_style_draft()).await
+}
+
+#[tauri::command]
+async fn discard_style_draft(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| c.discard_style_draft()).await
+}
+
+#[tauri::command]
+async fn restore_style_version(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Res<StyleProfileView> {
+    with_core(&state, move |c| c.restore_style_version(&id)).await
+}
+
+#[tauri::command]
+async fn set_style_enabled(state: tauri::State<'_, AppState>, on: bool) -> Res<()> {
+    with_core(&state, move |c| c.set_style_enabled(on)).await
+}
+
+#[tauri::command]
+async fn reset_style(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| c.reset_style()).await
+}
+
+#[tauri::command]
+async fn accept_style_suggestion(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Res<StyleProfileView> {
+    with_core(&state, move |c| c.accept_style_suggestion(&id)).await
+}
+
+#[tauri::command]
+async fn dismiss_style_suggestion(state: tauri::State<'_, AppState>, id: String) -> Res<()> {
+    with_core(&state, move |c| c.dismiss_style_suggestion(&id)).await
 }
 
 // ------------------------------------------------------------------ Word report
@@ -1076,6 +1256,10 @@ fn main() {
             let timer = Arc::clone(&core);
             let timer_clipboard = clipboard.clone();
             let timer_window = app.get_webview_window("main");
+            // The window opens protected (tauri.conf.json); this lifts it while D-039 holds.
+            if let Some(w) = &timer_window {
+                protect(w, true);
+            }
             let mut computer = os_lock::LockWatch::default();
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(15));
@@ -1152,9 +1336,12 @@ fn main() {
             preview_scores,
             save_scores,
             score_sheet,
+            paragraph_sources,
             import_document,
             preview_filter,
             decide_suspect,
+            restore_auto_hidden,
+            change_role,
             prepare_section,
             prepare_full_draft,
             send_section,
@@ -1186,6 +1373,23 @@ fn main() {
             consultations,
             consultation,
             delete_consultation,
+            style_overview,
+            import_style_source,
+            save_style_source,
+            discard_style_upload,
+            delete_style_source,
+            prepare_style_analysis,
+            send_style_analysis,
+            prepare_style_profile,
+            send_style_profile,
+            save_style_draft,
+            approve_style_draft,
+            discard_style_draft,
+            restore_style_version,
+            set_style_enabled,
+            reset_style,
+            accept_style_suggestion,
+            dismiss_style_suggestion,
             check_export,
             export_report,
             print_page,

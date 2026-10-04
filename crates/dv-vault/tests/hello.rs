@@ -1,4 +1,4 @@
-//! The Windows Hello slot (D-043) with a stand-in for Windows Hello. Fabricated data only.
+//! The Windows Hello slot (D-047) with a stand-in for Windows Hello. Fabricated data only.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 

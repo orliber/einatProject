@@ -40,6 +40,10 @@ export const roleLabel: Record<Role, string> = {
   town: "יישוב",
   institution: "מוסד",
   other: "אחר",
+  relative: "קרוב/ת משפחה",
+  school_teacher: "מורה",
+  professional: "איש/אשת מקצוע",
+  family: "משפחה",
 };
 
 /** Roles offered when adding a person to a case (the child is set separately). */
@@ -55,6 +59,10 @@ export const personRoles: Role[] = [
   "therapist",
   "psychologist",
   "other_child",
+  "relative",
+  "school_teacher",
+  "professional",
+  "family",
   "kindergarten",
   "school",
   "town",

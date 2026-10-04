@@ -38,6 +38,7 @@ export const prepared = (over: Partial<Prepared> = {}): Prepared => ({
     },
   ],
   suspects: [],
+  auto_hidden: [],
   hidden: ["שם הילד/ה"],
   checks: { declared_names: 1, patterns: 0, name_suspects: 0, indirect_suspects: 0 },
   blocked: [],

@@ -149,6 +149,24 @@ pub const MAIN_MIGRATIONS: &[&str] = &[
     // v6: Claude's new wording of a paragraph she approved waits beside it; approving it
     // retires the old one (D-032).
     "ALTER TABLE drafts ADD COLUMN replaces TEXT;",
+    // v7: the writing-style profile (D-043). Past reports are kept only as neutralized text;
+    // nothing here belongs to a case, so all of it is sealed with the settings key.
+    "CREATE TABLE style_sources (
+        id TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL,
+        data_enc BLOB NOT NULL
+     );
+     CREATE TABLE style_profiles (
+        id TEXT PRIMARY KEY,
+        version INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        data_enc BLOB NOT NULL
+     );
+     CREATE TABLE style_learning (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        data_enc BLOB NOT NULL
+     );",
 ];
 
 pub const IDENTITY_MIGRATIONS: &[&str] = &[
@@ -176,6 +194,10 @@ pub const IDENTITY_MIGRATIONS: &[&str] = &[
      );
      CREATE INDEX identities_case ON identities(case_id);
      CREATE UNIQUE INDEX decisions_token ON decisions(COALESCE(case_id, ''), token_hmac);",
+    // v2: names the filter hid on its own (`auto`) or took from a file's properties
+    // (`metadata`), with the reason shown next to them.
+    "ALTER TABLE identities ADD COLUMN source TEXT NOT NULL DEFAULT 'manual';
+     ALTER TABLE identities ADD COLUMN reason TEXT NOT NULL DEFAULT '';",
 ];
 
 pub const AUDIT_MIGRATIONS: &[&str] = &[

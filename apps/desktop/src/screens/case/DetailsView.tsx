@@ -23,7 +23,10 @@ export function DetailsView({ api }: { api: CaseApi }) {
   const [ownRetention, setOwnRetention] = useState(m.retention_until !== null);
   const [retention, setRetention] = useState(m.retention_until ?? detail.retention_default);
   const [rows, setRows] = useState<PersonRow[]>(() => {
-    const r = detail.identities.map((i) => ({ id: i.id, role: i.role, value: i.value, aliases: i.aliases.join(", ") }));
+    const r: PersonRow[] = detail.identities.map((i) => ({
+      id: i.id, role: i.role, value: i.value, aliases: i.aliases.join(", "),
+      ...(i.source === "manual" ? {} : { note: i.source === "metadata" ? i.reason || "מתכונות הקובץ או משולי המסמך" : i.reason }),
+    }));
     return r.some((x) => x.role === "child") ? r : [{ id: null, role: "child", value: "", aliases: "" }, ...r];
   });
   const [error, setError] = useState<string | null>(null);

@@ -201,6 +201,10 @@ impl Core {
 
     /// Build the sorting request for every material not sorted yet, with its review screen.
     pub fn prepare_sort(&mut self, case_id: &str) -> Result<Prepared, CoreError> {
+        self.prepare_sort_once(case_id, false)
+    }
+
+    fn prepare_sort_once(&mut self, case_id: &str, learned: bool) -> Result<Prepared, CoreError> {
         let structure =
             ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
         let sections: Vec<SortSection> = sortable(&structure)
@@ -291,13 +295,15 @@ impl Core {
 
         let nonce = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
         let body = dv_ai::build_sort_request(&model, &input, &nonce);
-        let mut prepared = review.into_prepared(demo_mode);
+        let mut prepared = review.into_case_prepared(demo_mode, &data);
         let kind = PendingKind::Sort {
             case_id: case_id.to_owned(),
             materials: rows,
             sections: input.sections.iter().map(|s| s.key.clone()).collect(),
         };
-        self.gate(&data, &body, kind, &mut prepared)?;
+        if self.gate(&data, &body, kind, &mut prepared, !learned)? {
+            return self.prepare_sort_once(case_id, true);
+        }
         Ok(prepared)
     }
 

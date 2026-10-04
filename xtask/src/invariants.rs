@@ -166,6 +166,13 @@ fn unsafe_policy(root: &Path) -> Result<Vec<String>, String> {
     }
     for manifest in manifests {
         let text = fs::read_to_string(&manifest).map_err(|e| e.to_string())?;
+        // The one audited exception (D-044): `deny`, opted into block by block in windows.rs.
+        if manifest.ends_with("crates/dv-sandbox/Cargo.toml") {
+            if !text.contains("unsafe_code = \"deny\"") {
+                problems.push("dv-sandbox must set unsafe_code = \"deny\"".to_owned());
+            }
+            continue;
+        }
         if !text.contains("[lints]\nworkspace = true") {
             problems.push(format!(
                 "{} must inherit workspace lints",

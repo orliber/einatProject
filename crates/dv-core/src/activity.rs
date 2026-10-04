@@ -152,6 +152,17 @@ fn describe(
         ),
         "audit_reviewed" => ("security", "היומן נבדק".to_owned(), false),
         "consultation_deleted" => ("case", "שיחת התייעצות נמחקה".to_owned(), false),
+        "style_source_added" => (
+            "security",
+            "דוח ישן נוסף ל\"הדוחות שלי\" (נשמר רק הטקסט המנוטרל)".to_owned(),
+            false,
+        ),
+        "style_source_deleted" => ("security", "דוח ישן נמחק מ\"הדוחות שלי\"".to_owned(), false),
+        "style_profile_approved" => (
+            "security",
+            format!("פרופיל הסגנון אושר (גרסה {})", number("version")),
+            false,
+        ),
         other => ("security", other.to_owned(), false),
     })
 }
@@ -255,6 +266,9 @@ mod tests {
             "integrity_warning",
             "audit_reviewed",
             "consultation_deleted",
+            "style_source_added",
+            "style_source_deleted",
+            "style_profile_approved",
         ] {
             let (_, text, _) = describe(event, &Value::Null, structure.as_ref()).unwrap();
             assert!(!text.contains('_'), "{event} → {text}");

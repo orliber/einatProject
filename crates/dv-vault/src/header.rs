@@ -29,7 +29,7 @@ pub enum KeySlot {
     Recovery {
         wrapped_mk: String,
     },
-    /// Windows Hello on this computer (D-043): the master key wrapped under a key derived
+    /// Windows Hello on this computer (D-047): the master key wrapped under a key derived
     /// from Windows Hello's signature over `challenge` with the key pair named `credential`.
     WindowsHello {
         credential: String,

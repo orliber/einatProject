@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-prepare-style-analysis"
+description = "Enables the prepare_style_analysis command without any pre-configured scope."
+commands.allow = ["prepare_style_analysis"]
+
+[[permission]]
+identifier = "deny-prepare-style-analysis"
+description = "Denies the prepare_style_analysis command without any pre-configured scope."
+commands.deny = ["prepare_style_analysis"]
