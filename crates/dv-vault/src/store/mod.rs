@@ -20,6 +20,7 @@ use crate::crypto::{
 use crate::db::{migrate, open_encrypted, AUDIT_MIGRATIONS, IDENTITY_MIGRATIONS, MAIN_MIGRATIONS};
 use crate::header::{unwrap_mk, wrap_mk, KeySlot, VaultHeader, FORMAT, HEADER_FILE};
 use crate::password::{self, Argon2Params};
+use crate::hello::{self, HelloSigner};
 use crate::{recovery, VaultError};
 
 mod backup;
@@ -132,7 +133,7 @@ pub(crate) fn master_key(header: &VaultHeader, secret: Secret<'_>) -> Result<Key
                         params,
                         wrapped_mk,
                     } => Some((salt.clone(), *params, wrapped_mk.clone())),
-                    KeySlot::Recovery { .. } => None,
+                    KeySlot::Recovery { .. } | KeySlot::WindowsHello { .. } => None,
                 })
                 .ok_or(VaultError::Corrupt("no password slot".to_owned()))?;
             let salt: [u8; 32] = crate::crypto::unhex(&salt)?
@@ -147,13 +148,25 @@ pub(crate) fn master_key(header: &VaultHeader, secret: Secret<'_>) -> Result<Key
                 .iter()
                 .find_map(|s| match s {
                     KeySlot::Recovery { wrapped_mk } => Some(wrapped_mk.clone()),
-                    KeySlot::Password { .. } => None,
+                    KeySlot::Password { .. } | KeySlot::WindowsHello { .. } => None,
                 })
                 .ok_or(VaultError::Corrupt("no recovery slot".to_owned()))?;
             let kek = recovery::derive_kek(&recovery::parse(typed)?)?;
             unwrap_mk(&kek, "recovery", &header.vault_id, &wrapped)
         }
     }
+}
+
+/// The Windows Hello slot's key-pair name, challenge and wrapped master key.
+fn hello_slot_of(header: &VaultHeader) -> Option<(String, String, String)> {
+    header.slots.iter().find_map(|s| match s {
+        KeySlot::WindowsHello {
+            credential,
+            challenge,
+            wrapped_mk,
+        } => Some((credential.clone(), challenge.clone(), wrapped_mk.clone())),
+        KeySlot::Password { .. } | KeySlot::Recovery { .. } => None,
+    })
 }
 
 pub struct Vault {
@@ -280,6 +293,88 @@ impl Vault {
             &serde_json::json!({"method": "recovery"}),
         )?;
         Ok(vault)
+    }
+
+    /// The everyday way in (D-043): Windows Hello signs the slot's challenge after her PIN,
+    /// face or fingerprint. Any failure (cancelled, another computer, Hello turned off) is an
+    /// error and the lock screen falls back to the password.
+    pub fn unlock_with_hello(dir: &Path, signer: &dyn HelloSigner) -> Result<Self, VaultError> {
+        let header = VaultHeader::read(dir)?;
+        let (credential, challenge, wrapped) =
+            hello_slot_of(&header).ok_or(VaultError::NotFound)?;
+        let signature = signer.sign(&credential, &crate::crypto::unhex(&challenge)?)?;
+        let kek = hello::derive_kek(&signature)?;
+        let mk = unwrap_mk(&kek, "windows_hello", &header.vault_id, &wrapped)?;
+        let mut vault = Self::open_with(dir, header, &mk)?;
+        vault.record(
+            AuditEvent::Unlock,
+            None,
+            &serde_json::json!({"method": "windows_hello"}),
+        )?;
+        Ok(vault)
+    }
+
+    /// Read while the vault is still locked, only to decide whether the lock screen offers
+    /// Windows Hello. The header is authenticated once the vault opens.
+    pub fn offers_hello(dir: &Path) -> bool {
+        VaultHeader::read(dir).is_ok_and(|h| hello_slot_of(&h).is_some())
+    }
+
+    #[must_use]
+    pub fn has_hello_slot(&self) -> bool {
+        hello_slot_of(&self.header).is_some()
+    }
+
+    /// Turn on Windows Hello. Needs a fresh proof (the password), like a new password. A new
+    /// key pair and challenge are made each time. Two signatures over the challenge must
+    /// match, or nothing is changed: a key that does not sign the same way twice would lock
+    /// her out of this slot later.
+    pub fn set_hello_slot(
+        &mut self,
+        current: Secret<'_>,
+        signer: &dyn HelloSigner,
+    ) -> Result<(), VaultError> {
+        let mk = master_key(&self.header, current)?;
+        if !signer.available() {
+            return Err(hello::refused("not set up on this computer"));
+        }
+        let credential = hello::credential_name(&self.header.vault_id);
+        let challenge = random_array::<32>()?;
+        signer.create(&credential)?;
+        let first = signer.sign(&credential, &challenge)?;
+        let second = signer.sign(&credential, &challenge)?;
+        if !crate::crypto::constant_time_eq(&first, &second) {
+            signer.delete(&credential);
+            return Err(hello::refused("signatures differ"));
+        }
+        let kek = hello::derive_kek(&first)?;
+        let slot = KeySlot::WindowsHello {
+            credential,
+            challenge: hex(&challenge),
+            wrapped_mk: wrap_mk(&kek, "windows_hello", &self.header.vault_id, &mk)?,
+        };
+        self.header
+            .slots
+            .retain(|s| !matches!(s, KeySlot::WindowsHello { .. }));
+        self.header.slots.push(slot);
+        self.header.sign(&self.keys.header)?;
+        self.header.write(&self.dir)?;
+        self.record(AuditEvent::WindowsHelloOn, None, &serde_json::json!({}))
+    }
+
+    /// Turn Windows Hello off: the slot leaves the header and the key pair is removed from
+    /// Windows. Only ever takes a way in away, so no proof is asked.
+    pub fn remove_hello_slot(&mut self, signer: &dyn HelloSigner) -> Result<(), VaultError> {
+        let Some((credential, _, _)) = hello_slot_of(&self.header) else {
+            return Ok(());
+        };
+        self.header
+            .slots
+            .retain(|s| !matches!(s, KeySlot::WindowsHello { .. }));
+        self.header.sign(&self.keys.header)?;
+        self.header.write(&self.dir)?;
+        signer.delete(&credential);
+        self.record(AuditEvent::WindowsHelloOff, None, &serde_json::json!({}))
     }
 
     fn open_with(dir: &Path, mut header: VaultHeader, mk: &Key32) -> Result<Self, VaultError> {
@@ -422,7 +517,7 @@ impl Vault {
             KeySlot::Recovery { wrapped_mk } => {
                 unwrap_mk(&kek, "recovery", &self.header.vault_id, wrapped_mk).is_ok()
             }
-            KeySlot::Password { .. } => false,
+            KeySlot::Password { .. } | KeySlot::WindowsHello { .. } => false,
         })
     }
 

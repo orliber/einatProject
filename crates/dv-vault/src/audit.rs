@@ -39,6 +39,8 @@ pub enum AuditEvent {
     /// Einat went over the log (periodic review of access records).
     AuditReviewed,
     ConsultationDeleted,
+    WindowsHelloOn,
+    WindowsHelloOff,
 }
 
 impl AuditEvent {
@@ -69,6 +71,8 @@ impl AuditEvent {
             AuditEvent::IntegrityWarning => "integrity_warning",
             AuditEvent::AuditReviewed => "audit_reviewed",
             AuditEvent::ConsultationDeleted => "consultation_deleted",
+            AuditEvent::WindowsHelloOn => "windows_hello_on",
+            AuditEvent::WindowsHelloOff => "windows_hello_off",
         }
     }
 }

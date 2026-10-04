@@ -178,6 +178,12 @@ pub fn hmac_verify(key: &Key32, data: &[u8], tag: &[u8]) -> bool {
     hmac::verify(&k, data, tag).is_ok()
 }
 
+/// Constant-time comparison of two secrets of any length (lengths are not secret).
+#[must_use]
+pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    aws_lc_rs::constant_time::verify_slices_are_equal(a, b).is_ok()
+}
+
 #[must_use]
 pub fn sha256_hex(data: &[u8]) -> String {
     hex(digest::digest(&digest::SHA256, data).as_ref())

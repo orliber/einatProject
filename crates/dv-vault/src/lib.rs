@@ -1,7 +1,7 @@
 //! The encrypted vault (docs/ARCHITECTURE.md → "מפתחות", "סכמה").
 //!
-//! * Master key (MK) wrapped in LUKS-style key slots (password, printed recovery key; Windows
-//!   Hello / Touch ID later) in an authenticated header.
+//! * Master key (MK) wrapped in LUKS-style key slots (password, printed recovery key, Windows
+//!   Hello; Touch ID later) in an authenticated header.
 //! * Three SQLCipher databases (`main`, `identity`, `audit`) with keys derived from MK.
 //! * Inside them, every case value is sealed with the case's own key (AES-256-GCM, AAD bound
 //!   to table/column/row/case), so deleting a case is cryptographic shredding.
@@ -12,6 +12,7 @@ pub mod crypto;
 mod db;
 pub mod env;
 mod header;
+pub mod hello;
 pub mod password;
 pub mod recovery;
 mod store;
