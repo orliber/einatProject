@@ -35,11 +35,20 @@ import type { Readiness } from "./generated/Readiness";
 import type { UnsavedEdit } from "./generated/UnsavedEdit";
 import type { SectionResult } from "./generated/SectionResult";
 import type { SortResult } from "./generated/SortResult";
+import type { SourceExcerpt } from "./generated/SourceExcerpt";
 import type { MaterialRouting } from "./generated/MaterialRouting";
 import type { SuspectDecision } from "./generated/SuspectDecision";
 import type { FollowUpView } from "./generated/FollowUpView";
 import type { UiError } from "./generated/UiError";
 import type { UpdateView } from "./generated/UpdateView";
+import type { StyleAnalysisResult } from "./generated/StyleAnalysisResult";
+import type { StyleImportPreview } from "./generated/StyleImportPreview";
+import type { StyleItem } from "./generated/StyleItem";
+import type { StyleKind } from "./generated/StyleKind";
+import type { StyleOverview } from "./generated/StyleOverview";
+import type { StyleProfile } from "./generated/StyleProfile";
+import type { StyleProfileView } from "./generated/StyleProfileView";
+import type { StyleSourceView } from "./generated/StyleSourceView";
 
 /** Every failure reaches the UI as a UiError with a Hebrew message. */
 export function asUiError(e: unknown): UiError {
@@ -122,6 +131,9 @@ export const ipc = {
   saveScores: (caseId: string, inputId: string | null, sheet: ScoreSheet) =>
     call<CaseInput>("save_scores", { caseId, inputId, sheet }),
   scoreSheet: (caseId: string, inputId: string) => call<ScoreSheet | null>("score_sheet", { caseId, inputId }),
+  /** "למה כתבת את זה?": the passages a paragraph leans on, best match first (stays local). */
+  paragraphSources: (caseId: string, draftId: string) =>
+    call<SourceExcerpt[]>("paragraph_sources", { caseId, draftId }),
   /** The file's bytes go as the raw body; nothing else of the file system is exposed. */
   importDocument: async (caseId: string, file: File): Promise<ImportPreview> => {
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -162,7 +174,7 @@ export const ipc = {
   rejectParagraph: (caseId: string, draftId: string) => run("reject_paragraph", { caseId, draftId }),
   editParagraph: (caseId: string, draftId: string, text: string) =>
     run("edit_paragraph", { caseId, draftId, text }),
-  /** Earlier wordings of a paragraph, newest first; bring one back (D-043). */
+  /** Earlier wordings of a paragraph, newest first; bring one back (D-046). */
   paragraphVersions: (caseId: string, draftId: string) =>
     call<ParagraphVersionView[]>("paragraph_versions", { caseId, draftId }),
   restoreParagraphVersion: (caseId: string, draftId: string, versionId: string) =>
@@ -209,13 +221,53 @@ export const ipc = {
   forgetBackup: () => run("forget_backup"),
   setAutoBackup: (on: boolean) => call<BackupStatus>("set_auto_backup", { on }),
 
+  // Writing style (D-043): past reports kept neutralized, the profile, learning from edits.
+  styleOverview: () => call<StyleOverview>("style_overview"),
+  /** A past report: the bytes go as the raw body. Nothing is kept until `saveStyleSource`. */
+  importStyleSource: async (file: File): Promise<StyleImportPreview> => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    try {
+      return await invoke<StyleImportPreview>("import_style_source", bytes, {
+        headers: { "x-file-name": encodeURIComponent(file.name) },
+      });
+    } catch (e) {
+      throw asUiError(e);
+    }
+  },
+  saveStyleSource: (token: string, included: number[], title: string | null) =>
+    call<StyleSourceView>("save_style_source", { token, included, title }),
+  discardStyleUpload: () => run("discard_style_upload"),
+  deleteStyleSource: (id: string) => run("delete_style_source", { id }),
+  prepareStyleAnalysis: (sourceId: string) => call<Prepared>("prepare_style_analysis", { sourceId }),
+  sendStyleAnalysis: (approvalId: string) => call<StyleAnalysisResult>("send_style_analysis", { approvalId }),
+  prepareStyleProfile: () => call<Prepared>("prepare_style_profile"),
+  sendStyleProfile: (approvalId: string) => call<StyleProfileView>("send_style_profile", { approvalId }),
+  saveStyleDraft: (profile: StyleProfile) => call<StyleProfileView>("save_style_draft", { profile }),
+  approveStyleDraft: () => call<StyleProfileView>("approve_style_draft"),
+  discardStyleDraft: () => run("discard_style_draft"),
+  restoreStyleVersion: (id: string) => call<StyleProfileView>("restore_style_version", { id }),
+  setStyleEnabled: (on: boolean) => run("set_style_enabled", { on }),
+  resetStyle: () => run("reset_style"),
+  acceptStyleSuggestion: (id: string) => call<StyleProfileView>("accept_style_suggestion", { id }),
+  dismissStyleSuggestion: (id: string) => run("dismiss_style_suggestion", { id }),
+
   /** A newer version, signed by the developer (D-033); `null` when this is the newest. */
   checkUpdate: () => call<UpdateView | null>("check_update"),
-  /** Download, verify, lock, run the installer; the program closes and opens again. */
+  /** In the background: fetch and verify the newest version. `true` when it waits for her click. */
+  prepareUpdate: () => call<boolean>("prepare_update"),
+  /** Lock, run the verified installer (fetched now if it is not waiting); closes and opens again. */
   installUpdate: () => run("install_update"),
 };
 
 export type {
+  StyleAnalysisResult,
+  StyleImportPreview,
+  StyleItem,
+  StyleKind,
+  StyleOverview,
+  StyleProfile,
+  StyleProfileView,
+  StyleSourceView,
   UpdateView,
   UsageSummary,
   Readiness,
@@ -233,6 +285,7 @@ export type {
   NameMatch,
   MaterialRouting,
   SortResult,
+  SourceExcerpt,
   CaseDetail,
   CaseInput,
   CaseMeta,

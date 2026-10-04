@@ -13,10 +13,12 @@ mod library;
 mod readiness;
 mod retention;
 mod sorting;
+mod style;
 mod unsaved;
 pub mod update;
 mod usage;
 mod views;
+mod why;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -43,11 +45,16 @@ pub use backup::{
     auto_backup_file_name, backup_file_name, AUTO_KEEP, BACKUP_DAYS, MAX_BACKUP_BYTES,
 };
 pub(crate) use dates::today;
+pub use dv_ai::{StyleItem, StyleKind, StyleOrigin, StyleProfile};
 pub use dv_vault::BACKUP_EXTENSION;
 pub use followup::FollowUpView;
 pub use library::TRASH_DAYS;
 pub use readiness::{Readiness, ReadinessItem};
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
+pub use style::{
+    StyleAnalysisResult, StyleImportPreview, StyleOverview, StylePartView, StyleProfileView,
+    StyleSectionLabel, StyleSourceView, StyleSuggestion, StyleVersionView,
+};
 pub use unsaved::UnsavedEdit;
 pub use usage::UsageSummary;
 pub use views::{
@@ -55,7 +62,7 @@ pub use views::{
     ChatView, ConsultResult, ConsultTurnView, ConsultationSummary, ConsultationView, CreatedVault,
     ExportCheck, ImportPreview, MaterialRouting, NameMatch, NameSuggestion, ParagraphVersionView,
     ParagraphView, Prepared, ReportSettings, RetentionItem, ReviewPart, SectionResult, SectionView,
-    SortResult, StagedBackup, SuspectDecision, UiError,
+    SortResult, SourceExcerpt, StagedBackup, SuspectDecision, UiError,
 };
 
 const API_KEY: &str = "anthropic_api_key";
@@ -218,6 +225,23 @@ fn egress_he(e: &EgressError) -> String {
     }
 }
 
+/// The score sheets entered in the case's score table (the scores the text is checked against).
+fn score_sheets(
+    v: &Vault,
+    case_id: &str,
+    inputs: &[dv_domain::CaseInput],
+) -> Result<Vec<dv_domain::ScoreSheet>, CoreError> {
+    let mut out = Vec::new();
+    for i in inputs.iter().filter(|i| i.kind == InputKind::TestScores) {
+        if let Some(data) = v.input_data(case_id, &i.id)? {
+            if let Ok(sheet) = serde_json::from_str(&data) {
+                out.push(sheet);
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Today's date `(y, m, d)` in UTC, for relative dates.
 /// A consent is a record the psychologist may have to show: a real, past date and who signed.
 fn check_meta(meta: &CaseMeta) -> Result<(), CoreError> {
@@ -256,6 +280,9 @@ enum PendingKind {
         instruction_tagged: String,
         hidden: Vec<String>,
         sources: Vec<(String, String, String)>,
+        /// For a section written from the approved ones (summary…): their tagged text, which
+        /// the numbers in the answer are checked against.
+        approved: Vec<String>,
         /// The one proposed paragraph the answer rewrites ("ניסוח מחדש"); `None`: the answer
         /// is the section's new draft and replaces the paragraphs not approved yet.
         replaces: Option<String>,
@@ -276,6 +303,10 @@ enum PendingKind {
         materials: Vec<(String, usize, u64)>,
         sections: Vec<String>,
     },
+    /// Step 1 of the writing-style profile: one past report (D-043).
+    StyleAnalysis { source_id: String },
+    /// Step 2: the analyses of `reports` past reports.
+    StyleSynthesis { reports: u32 },
 }
 
 struct Pending {
@@ -341,6 +372,8 @@ pub struct Core {
     ingest_exe: Option<PathBuf>,
     /// A backup file chosen for the drill or a restore (encrypted bytes).
     staged_backup: Option<Vec<u8>>,
+    /// A past report read for the style profile, waiting for her confirmation (D-043).
+    style_staged: HashMap<String, style::StagedStyle>,
     /// The last automatic backup attempt this session (a failed one waits before the next).
     auto_backup_tried: Option<Instant>,
     /// The paragraph being edited right now (memory only; kept in the vault on lock).
@@ -462,6 +495,7 @@ impl Core {
             transport: None,
             ingest_exe: None,
             staged_backup: None,
+            style_staged: HashMap::new(),
             auto_backup_tried: None,
             unsaved: None,
         }
@@ -751,6 +785,7 @@ impl Core {
         self.keep_unsaved();
         self.pending.clear();
         self.staged_backup = None;
+        self.style_staged.clear();
         if let Some(v) = self.vault.take() {
             let _ = v.lock_because(reason);
         }
@@ -1218,6 +1253,7 @@ impl Core {
         let inputs = v.inputs(case_id)?;
         let practitioner = v.practitioner()?.names.first().cloned();
         let routing = Core::material_routing(v, &structure, case_id, &inputs)?;
+        let sheets = score_sheets(v, case_id, &inputs)?;
         let retention_default = v
             .list_cases()?
             .into_iter()
@@ -1253,7 +1289,8 @@ impl Core {
                                 )
                             })
                             .collect(),
-                        warnings: Vec::new(),
+                        // Every score in the text against the score table, each time (AI-6).
+                        warnings: dv_domain::check_scores(&d.text_tagged, &sheets),
                         replaces: d.replaces,
                     })
                     .collect();
@@ -1341,10 +1378,13 @@ impl Core {
             return self.reject_paragraph(case_id, draft_id);
         }
         let tagged = self.preview_filter(case_id, text)?.tagged;
-        Ok(self.vault_mut()?.edit_draft(case_id, draft_id, &tagged)?)
+        let before = style::find_draft(self.vault_ref()?, case_id, draft_id)?;
+        self.vault_mut()?.edit_draft(case_id, draft_id, &tagged)?;
+        self.learn_from_draft_edit(before, &tagged);
+        Ok(())
     }
 
-    /// A paragraph's earlier wordings, newest first, names restored (D-043).
+    /// A paragraph's earlier wordings, newest first, names restored (D-046).
     pub fn paragraph_versions(
         &mut self,
         case_id: &str,
@@ -1364,7 +1404,7 @@ impl Core {
             .collect())
     }
 
-    /// Bring back an earlier wording; the current one is kept as a version (D-043).
+    /// Bring back an earlier wording; the current one is kept as a version (D-046).
     pub fn restore_paragraph_version(
         &mut self,
         case_id: &str,
@@ -1565,6 +1605,13 @@ impl Core {
                     }
                 }
             }
+            // Nothing approved yet: there is nothing to write it from, so nothing is sent.
+            if derived && approved_context.is_empty() {
+                return Err(CoreError::Refused(
+                    "הסעיף הזה נכתב מתוך הסעיפים שכבר אישרת, ועוד לא אישרת אף סעיף. מאשרים קודם את הטיוטות בסעיפים האחרים, ואז חוזרים לכאן."
+                        .to_owned(),
+                ));
+            }
             // The current draft may contain manual edits, so it goes through review too.
             let mut current = Vec::new();
             for d in v
@@ -1592,6 +1639,11 @@ impl Core {
                 .collect::<Result<_, _>>()?;
             let instr = run(instruction)?;
             review.add("הבקשה שלך".to_owned(), &instr);
+            // Her approved style profile (D-043), as it goes out with this case's names hidden.
+            let style_profile = style::style_for_request(v, &ctx, section_key)?;
+            if let Some(text) = &style_profile {
+                review.add_context("פרופיל הסגנון שלך".to_owned(), &run(text)?);
+            }
             let input = SectionInput {
                 section_key: section.key.clone(),
                 section_title: fixed_title(&section)?,
@@ -1602,13 +1654,19 @@ impl Core {
                 current_draft: current,
                 history,
                 instruction_tagged: instr.tagged.clone(),
-                style_profile: None,
+                style_profile,
             };
+            let approved = input
+                .approved_context
+                .iter()
+                .map(|(_, t)| t.clone())
+                .collect::<Vec<_>>();
             let sources = (
                 section.key.clone(),
                 instr.tagged,
                 instr.hidden.clone(),
                 source_rows,
+                approved,
             );
             (input, review, sources)
         };
@@ -1616,13 +1674,14 @@ impl Core {
         let nonce = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
         let (body, _refs) = dv_ai::build_section_request(&model, &input, &nonce);
         let mut prepared = review.into_prepared(demo_mode);
-        let (key, instruction_tagged, instr_hidden, rows) = sources;
+        let (key, instruction_tagged, instr_hidden, rows, approved) = sources;
         let kind = PendingKind::Section {
             case_id: case_id.to_owned(),
             section_key: key,
             instruction_tagged,
             hidden: instr_hidden,
             sources: rows,
+            approved,
             replaces: replaces.map(str::to_owned),
         };
         self.gate(&data, &body, kind, &mut prepared)?;
@@ -1747,6 +1806,7 @@ impl Core {
             instruction_tagged,
             hidden,
             sources,
+            approved,
             replaces,
         } = kind
         else {
@@ -1772,15 +1832,28 @@ impl Core {
             .iter()
             .map(|(sid, _, text)| (sid.clone(), text.clone()))
             .collect();
-        let mut reply = dv_ai::parse_section(&response, &refs)?;
+        let mut reply = if DERIVED_SECTIONS.contains(&section_key.as_str()) {
+            dv_ai::parse_derived_section(&response, &approved)?
+        } else {
+            dv_ai::parse_section(&response, &refs)?
+        };
         let v = self.vault_mut()?;
         let identities = v.identities(&case_id)?;
         let case_tags: Vec<String> = identities.iter().map(|i| i.tag.clone()).collect();
         let everyone = v.all_identities()?;
+        let inputs = v.inputs(&case_id)?;
+        let sheets = score_sheets(v, &case_id, &inputs)?;
         for p in &mut reply.paragraphs {
+            p.warnings.extend(dv_domain::check_scores(&p.text, &sheets));
             for s in scan_model_output(&p.text, &case_tags, &everyone) {
                 p.warnings.push(format!("{}: {}", s.message, s.token));
             }
+        }
+        // D-043: a paragraph that repeats a past report word for word.
+        let texts: Vec<&str> = reply.paragraphs.iter().map(|p| p.text.as_str()).collect();
+        let overlaps = style::overlap_warning(v, &texts)?;
+        for (p, w) in reply.paragraphs.iter_mut().zip(overlaps) {
+            p.warnings.extend(w);
         }
         v.add_message(
             &case_id,
@@ -1852,7 +1925,9 @@ impl Core {
         })
     }
 
-    /// Prepare every section that has material (the "prepare report draft" button).
+    /// Prepare every section that has material and nothing written yet (the "write the empty
+    /// sections" button). A section with a draft or approved paragraphs is left as it is:
+    /// writing it again would put a second draft beside what she already approved.
     pub fn prepare_full_draft(
         &mut self,
         case_id: &str,
@@ -1872,7 +1947,12 @@ impl Core {
             .sections()
             .filter(|s| !DERIVED_SECTIONS.contains(&s.key.as_str()))
         {
-            if fed.contains(&s.key) {
+            let written = self
+                .vault_ref()?
+                .drafts(case_id, &s.key)?
+                .iter()
+                .any(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved));
+            if fed.contains(&s.key) && !written {
                 let p = self.prepare_section(
                     case_id,
                     &s.key,
@@ -2223,6 +2303,7 @@ impl Core {
                     .map(|r| vec![r.measure, r.score, r.percentile, r.range])
                     .collect(),
                 note,
+                charts: Vec::new(),
             });
         }
         let score_tables = u32::try_from(tables.len()).unwrap_or(u32::MAX);

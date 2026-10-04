@@ -32,6 +32,7 @@ import { kindLabel } from "../i18n/he";
 import structure from "../../../../templates/report_structure.json";
 import { readDocx } from "./docx";
 import { filter, restore, type Person } from "./filter";
+import { FakeStyle } from "./fakeStyle";
 import { compareSheets, comparisonText, formatSheet, instruments } from "./scores";
 import * as R from "./routing";
 import type { SortResult } from "../ipc/generated/SortResult";
@@ -48,11 +49,11 @@ interface Draft {
   sources: string[];
   /** A new wording of this approved paragraph (D-032). */
   replaces?: string;
-  /** Earlier wordings, newest first (D-043). */
+  /** Earlier wordings, newest first (D-046). */
   versions?: { id: string; at: number; byAi: boolean; text: string }[];
 }
 
-/** Keep the paragraph's wording before it changes in place (D-043). */
+/** Keep the paragraph's wording before it changes in place (D-046). */
 function keepVersion(d: Draft, next: string) {
   if (d.text === next) return;
   d.versions = [{ id: newId("v"), at: Math.floor(Date.now() / 1000), byAi: d.byAi, text: d.text }, ...(d.versions ?? [])];
@@ -144,6 +145,7 @@ export class FakeCore {
   private cases: Case[] = [];
   private folderList: Folder[] = [];
   private pending = new Map<string, Pending>();
+  private style = new FakeStyle();
 
   constructor() {
     this.seed();
@@ -390,6 +392,9 @@ export class FakeCore {
           if (f === "whole") return [{ label: `${kindLabel[i.kind]} · ${i.title}`, text: i.content }];
           return [{ label: `${kindLabel[i.kind]} · קטעים שנבחרו לסעיף · ${i.title}`, text: R.excerpt(R.passages(i.content), f) }];
         });
+    if (DERIVED.includes(key) && sources.length === 0) {
+      fail("refused", "הסעיף הזה נכתב מתוך הסעיפים שכבר אישרת, ועוד לא אישרת אף סעיף. מאשרים קודם את הטיוטות בסעיפים האחרים, ואז חוזרים לכאן.");
+    }
     sources.forEach((s, n) => {
       const sid = `S${n + 1}`;
       refs.push({ sid, label: `${sid} · ${s.label}`, tagged: take(`${sid} · ${s.label}`, s.text) });
@@ -527,6 +532,7 @@ export class FakeCore {
     if (!["ping", "app_status", "unlock", "unlock_with_recovery", "create_vault", "confirm_recovery_key", "score_instruments", "preview_scores", "choose_backup", "restore_backup", "forget_backup"].includes(cmd) && !this.unlocked) {
       fail("locked", "הכספת נעולה. יש לפתוח אותה מחדש.");
     }
+    if (FakeStyle.handles(cmd)) return this.style.handle(cmd, a, args, options?.headers ?? {}, this.allPeople(), this.practitioner);
     switch (cmd) {
       case "ping":
         return { ipc_version: 1, core_version: "0.1.0", build_commit: "browser-preview", fips_active: false, platform: "browser" };
@@ -732,6 +738,21 @@ export class FakeCore {
         c.sheets.set(input.id, sheet);
         return input;
       }
+      case "paragraph_sources": {
+        // The preview's "why": passages of the case's materials that share words with it.
+        const c = this.find(a.caseId);
+        const d = c.drafts.find((x) => x.id === String(a.draftId));
+        if (!d?.byAi) return [];
+        const words = (t: string) => new Set(t.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3));
+        const mine = words(restore(d.text, c.people, this.practitioner));
+        return c.inputs
+          .flatMap((i) => R.passages(i.content).map((text) => ({ label: `${kindLabel[i.kind]} · ${i.title}`, text })))
+          .map((x) => ({ ...x, score: [...words(x.text)].filter((w) => mine.has(w)).length }))
+          .filter((x) => x.score > 0)
+          .sort((p, q) => q.score - p.score)
+          .slice(0, 4)
+          .map(({ label, text }) => ({ label, text }));
+      }
       case "score_sheet":
         return this.find(a.caseId).sheets.get(String(a.inputId)) ?? null;
       case "import_document":
@@ -750,7 +771,7 @@ export class FakeCore {
         return this.prepareSection(this.find(a.caseId), String(a.sectionKey), String(a.instruction ?? ""), a.replaces ? String(a.replaces) : null);
       case "prepare_full_draft": {
         const c = this.find(a.caseId);
-        return SECTIONS.filter((s) => !DERIVED.includes(s.key) && c.inputs.some((i) => this.feedOf(c, i, s.key) !== null) && !c.drafts.some((d) => d.section === s.key && d.status === "approved"))
+        return SECTIONS.filter((s) => !DERIVED.includes(s.key) && c.inputs.some((i) => this.feedOf(c, i, s.key) !== null) && !c.drafts.some((d) => d.section === s.key && (d.status === "approved" || d.status === "proposed")))
           .map((s) => [s.key, this.prepareSection(c, s.key, "")]);
       }
       case "send_section": {
@@ -927,6 +948,8 @@ export class FakeCore {
           version: "0.2.0", current: "0.1.0", published: "2026-10-01", size_mb: 14, can_install: true,
           notes: ["כפתור ה-+ בחומרים מעלה גם קבצי Word ו-PDF", "זיהוי שמות חזק יותר לפני שליחה", "הדוח נכתב מול העיניים"],
         };
+      case "prepare_update":
+        return true;
       case "install_update":
         return fail("update", "בתצוגה המקדימה לא מתקינים. בתוכנה עצמה העדכון יורד, נבדק מול החתימה ומותקן.");
       case "change_password":

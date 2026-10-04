@@ -11,6 +11,7 @@ use crate::VaultError;
 /// Open (or create) an encrypted database with a raw 256-bit key (no SQLCipher KDF).
 pub fn open_encrypted(path: &Path, key: &Key32) -> Result<Connection, VaultError> {
     let conn = Connection::open(path)?;
+    quiet_sqlcipher_log(&conn)?;
     let key_hex = Zeroizing::new(hex(key.as_bytes()));
     let statement = Zeroizing::new(format!("PRAGMA key = \"x'{}'\";", key_hex.as_str()));
     conn.execute_batch(&statement)?;
@@ -27,6 +28,23 @@ pub fn open_encrypted(path: &Path, key: &Key32) -> Result<Connection, VaultError
     .map_err(|_| VaultError::WrongSecret)?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     Ok(conn)
+}
+
+/// SQLCipher logs warnings to stderr by default. On Windows, with `cipher_memory_security`,
+/// every allocation is locked in RAM (`VirtualLock`); once the process's lock quota is used
+/// up, the failure is logged, the log line is converted to UTF-16 in memory allocated through
+/// the same locking allocator, that lock fails and is logged too, and so on until the stack
+/// overflows (sqlcipher/sqlcipher#619). The program vanished on Windows the moment a vault was
+/// created or opened. Logging off breaks the loop; memory security stays on, so freed memory
+/// is still wiped. The program has no console, so nothing that was ever seen is lost.
+/// Global in SQLCipher, and set before anything else on every connection, so it is in place
+/// before memory security is first turned on.
+fn quiet_sqlcipher_log(conn: &Connection) -> Result<(), VaultError> {
+    let level: String = conn.query_row("PRAGMA cipher_log_level = NONE", [], |r| r.get(0))?;
+    if level != "NONE" {
+        return Err(VaultError::Crypto("sqlcipher log level"));
+    }
+    Ok(())
 }
 
 /// Apply migrations in order. Each entry is one schema version; never edit a released one.
@@ -131,8 +149,26 @@ pub const MAIN_MIGRATIONS: &[&str] = &[
     // v6: Claude's new wording of a paragraph she approved waits beside it; approving it
     // retires the old one (D-032).
     "ALTER TABLE drafts ADD COLUMN replaces TEXT;",
-    // v7: earlier wordings of a paragraph, kept when it is edited or reworded in place, so
-    // she can see them and bring one back (D-043). Sealed with the case key like the draft.
+    // v7: the writing-style profile (D-043). Past reports are kept only as neutralized text;
+    // nothing here belongs to a case, so all of it is sealed with the settings key.
+    "CREATE TABLE style_sources (
+        id TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL,
+        data_enc BLOB NOT NULL
+     );
+     CREATE TABLE style_profiles (
+        id TEXT PRIMARY KEY,
+        version INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        data_enc BLOB NOT NULL
+     );
+     CREATE TABLE style_learning (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        data_enc BLOB NOT NULL
+     );",
+    // v8: earlier wordings of a paragraph, kept when it is edited or reworded in place, so
+    // she can see them and bring one back (D-046). Sealed with the case key like the draft.
     "CREATE TABLE draft_versions (
         id TEXT PRIMARY KEY,
         case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
@@ -183,3 +219,25 @@ pub const AUDIT_MIGRATIONS: &[&str] = &[
         mac TEXT NOT NULL
      );",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The Windows crash (D-038) needs SQLCipher's log to be off before memory security is on.
+    /// Windows CI proves the crash is gone; this keeps the line from being dropped elsewhere.
+    #[test]
+    fn sqlcipher_logging_is_off_with_memory_security_on() {
+        let dir = tempfile::tempdir().unwrap_or_else(|_| unreachable!());
+        let conn = open_encrypted(&dir.path().join("t.db"), &Key32::from_bytes([3; 32]))
+            .unwrap_or_else(|_| unreachable!());
+        let level: String = conn
+            .query_row("PRAGMA cipher_log_level", [], |r| r.get(0))
+            .unwrap_or_default();
+        assert_eq!(level, "NONE");
+        let security: String = conn
+            .query_row("PRAGMA cipher_memory_security", [], |r| r.get(0))
+            .unwrap_or_default();
+        assert_eq!(security, "1");
+    }
+}

@@ -23,7 +23,9 @@ use crate::password::{self, Argon2Params};
 use crate::{recovery, VaultError};
 
 mod backup;
+mod style;
 pub use backup::{peek_backup, BackupCheck, BackupInfo, BackupPeek, BACKUP_EXTENSION};
+pub use style::{StoredStyleProfile, StoredStyleSource};
 
 /// Raw rows as read from SQLite, before decryption.
 type IdentityRow = (String, String, String, Vec<u8>, Vec<u8>);
@@ -31,11 +33,13 @@ type InputRow = (String, String, i64, Vec<u8>, Vec<u8>);
 type MessageRow = (String, String, bool, i64, Vec<u8>, Vec<u8>);
 type TransmissionRow = (String, String, i64, String, String, Vec<u8>);
 type SummaryRow = (String, i64, i64, Option<String>, Option<i64>);
+/// author, created_at, approved_at, sealed text, replaces: one link of a paragraph's history.
+type ChainRow = (String, i64, Option<i64>, Vec<u8>, Option<String>);
 
 /// How far back a paragraph's history is followed through the wordings it replaced.
 const MAX_VERSION_CHAIN: usize = 50;
 
-/// An earlier wording of a paragraph (D-043), tagged like the draft itself.
+/// An earlier wording of a paragraph (D-046), tagged like the draft itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DraftVersion {
     /// A saved version's id, or the id of the approved paragraph a new wording replaced.
@@ -1854,7 +1858,7 @@ impl Vault {
         Ok(())
     }
 
-    /// The earlier wordings of a paragraph, newest first (D-043): what it said before each edit
+    /// The earlier wordings of a paragraph, newest first (D-046): what it said before each edit
     /// or rewording in place, and, through `replaces`, the approved paragraphs it took over from.
     pub fn draft_versions(
         &self,
@@ -1867,7 +1871,7 @@ impl Vault {
         let mut first = true;
         for _ in 0..MAX_VERSION_CHAIN {
             let Some(id) = current.take() else { break };
-            let row: Option<(String, i64, Option<i64>, Vec<u8>, Option<String>)> = self
+            let row: Option<ChainRow> = self
                 .main
                 .query_row(
                     "SELECT author, created_at, approved_at, text_tagged_enc, replaces
@@ -1918,7 +1922,7 @@ impl Vault {
         Ok(out)
     }
 
-    /// Bring back an earlier wording (D-043): the current one is kept as a version, and the
+    /// Bring back an earlier wording (D-046): the current one is kept as a version, and the
     /// paragraph reads as it did then, approved by her. Who wrote it stays as it was.
     pub fn restore_draft_version(
         &mut self,

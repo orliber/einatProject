@@ -39,6 +39,11 @@ pub enum AuditEvent {
     /// Einat went over the log (periodic review of access records).
     AuditReviewed,
     ConsultationDeleted,
+    /// A past report was added to "my reports" for the writing-style profile (D-043).
+    StyleSourceAdded,
+    StyleSourceDeleted,
+    /// A version of the writing-style profile was approved (or an earlier one brought back).
+    StyleProfileApproved,
 }
 
 impl AuditEvent {
@@ -69,6 +74,9 @@ impl AuditEvent {
             AuditEvent::IntegrityWarning => "integrity_warning",
             AuditEvent::AuditReviewed => "audit_reviewed",
             AuditEvent::ConsultationDeleted => "consultation_deleted",
+            AuditEvent::StyleSourceAdded => "style_source_added",
+            AuditEvent::StyleSourceDeleted => "style_source_deleted",
+            AuditEvent::StyleProfileApproved => "style_profile_approved",
         }
     }
 }

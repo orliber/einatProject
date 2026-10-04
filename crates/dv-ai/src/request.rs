@@ -163,7 +163,16 @@ pub fn build_section_request(
             GrammaticalGender::Female => "לשון: נקבה (\"מתקשה\", \"מגיבה\")".to_owned(),
         });
     }
-    parts.push("מקורות (הפנה/י אליהם לפי המזהה, למשל S1):".to_owned());
+    if input.sources.is_empty() && !input.approved_context.is_empty() {
+        // Summary, diagnoses, recommendations: written from the approved sections, which have
+        // no S# ids, so there is nothing to cite.
+        parts.push(
+            "הסעיף נכתב מתוך הסעיפים המאושרים שלמטה. אין מקורות S, ולכן source_refs ריק בכל פסקה."
+                .to_owned(),
+        );
+    } else {
+        parts.push("מקורות (הפנה/י אליהם לפי המזהה, למשל S1):".to_owned());
+    }
     for (i, s) in input.sources.iter().enumerate() {
         let sid = format!("S{}", i + 1);
         parts.push(data_block(
@@ -191,7 +200,7 @@ pub fn build_section_request(
             &input.current_draft.join("\n\n"),
         ));
     }
-    parts.push(format!("בקשת הפסיכולוגית: {}", input.instruction_tagged));
+    parts.push(format!("הפסיכולוגית מבקשת: {}", input.instruction_tagged));
 
     let mut messages: Vec<Value> = input
         .history

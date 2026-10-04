@@ -2,6 +2,8 @@
 
 **מה זה:** Zero Data Retention. אחרי שהתשובה חוזרת, Anthropic לא שומרת את מה שנשלח. בלי אישור בכתב, **אסור** לשלוח מידע אמיתי (`STANDARDS.md` §4, §6).
 
+**עודכן 3.10.2026:** נוספו לשאלה 2 הדגמים החדשים (`claude-opus-5-5`, `claude-sonnet-5-5`, AI-2 בסקירת השדרוגים), כדי שהאישור יכסה אותם לפני שמוסיפים אותם לרשימה הלבנה. לספקים האחרים שהתוכנה מאפשרת (ChatGPT, Gemini, Mistral): `ZDR_OTHER_PROVIDERS.md`.
+
 ## לפני השליחה (אור ועינת, כ-15 דקות)
 1. ב-Console של Anthropic צריך ארגון **על שם עינת או הקליניקה**, ועינת היא הבעלים (Owner). ZDR מופעל לכל ארגון בנפרד.
 2. להעתיק את **Organization ID** (Console ← Settings ← Organization) ולהכניס אותו במקום המתאים במייל.
@@ -51,7 +53,7 @@ A desktop application that runs only on my own computer and helps me word sectio
 
 - Endpoint: `POST /v1/messages` only (`count_tokens` may be added later). The Files API, Message Batches, code execution and other server tools are not implemented.
 - One exception: a separate "research" mode sends only general professional questions (never case content) with the web search tool `web_search_20250305`, restricted by `allowed_domains` to professional sources.
-- Models: `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8`.
+- Models: `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8`. I would also like to use `claude-opus-5-5` and `claude-sonnet-5-5` once they are confirmed as ZDR-eligible.
 - `inference_geo` is always `"us"`.
 - Structured outputs with fixed schemas, and prompt caching of the fixed system prompt. Adaptive thinking may be added later.
 - Volume is low: a few dozen reports per year, roughly [estimate] requests per month.
@@ -59,7 +61,7 @@ A desktop application that runs only on my own computer and helps me word sectio
 **Please confirm in writing**
 
 1. That ZDR is enabled for the organization above, from which date, and that it covers every API key in the organization, including keys created later.
-2. Which of the models listed above are covered by ZDR. If any is not, which models are.
+2. Which of the models listed above are covered by ZDR, including `claude-opus-5-5` and `claude-sonnet-5-5`. If any is not, which models are.
 3. Whether these features are covered: structured outputs (`output_config`), prompt caching, adaptive thinking, `count_tokens`, and the web search tool `web_search_20250305`.
 4. Which exceptions still apply under ZDR (for example content flagged by Trust & Safety, or legal requirements), and the retention period for each.
 5. Whether `inference_geo: "us"` means the content is processed only in the United States, including any content retained under those exceptions.

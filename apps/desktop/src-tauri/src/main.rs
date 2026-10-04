@@ -16,8 +16,9 @@ use dv_core::{
     ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView,
     ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
     ExportCheck, ImportPreview, NameMatch, ParagraphVersionView, Prepared, Readiness,
-    ReportSettings, RetentionItem, SectionResult, SortResult, StagedBackup, SuspectDecision,
-    UiError, UnsavedEdit, UsageSummary,
+    ReportSettings, RetentionItem, SectionResult, SortResult, StagedBackup, StyleAnalysisResult,
+    StyleImportPreview, StyleOverview, StyleProfileView, StyleSourceView, SuspectDecision, UiError,
+    UnsavedEdit, UsageSummary,
 };
 use dv_domain::{CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind};
 use tauri::Manager;
@@ -29,6 +30,9 @@ struct AppState {
     dir: PathBuf,
     /// Words Claude has written so far, per request on its way (D-035). Counts only.
     progress: Arc<Mutex<std::collections::HashMap<String, u32>>>,
+    /// A newer version fetched and verified in the background, waiting for her click (D-038).
+    /// Held while it is being fetched, so two fetches never run at once.
+    prepared: Arc<Mutex<Option<dv_core::update::Downloaded>>>,
 }
 
 /// Send outside the core's lock, counting the words as the answer arrives.
@@ -113,9 +117,13 @@ async fn app_status(
     Ok(status)
 }
 
+/// Hiding the window from screenshots and screen sharing is switched off for now (D-039):
+/// it blacked out Zoom and Teams. Setting this back to `true` restores D-037 as it was.
+const SCREEN_PROTECTION_ENABLED: bool = false;
+
 /// Screenshots and screen sharing see a blank window unless she turned that off (D-037).
 fn protect(window: &tauri::WebviewWindow, on: bool) {
-    let _ = window.set_content_protected(on);
+    let _ = window.set_content_protected(SCREEN_PROTECTION_ENABLED && on);
 }
 
 #[tauri::command]
@@ -350,6 +358,16 @@ async fn save_scores(
         c.save_scores(&case_id, input_id.as_deref(), &sheet)
     })
     .await
+}
+
+/// "למה כתבת את זה?": the passages one paragraph leans on (local only).
+#[tauri::command]
+async fn paragraph_sources(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    draft_id: String,
+) -> Res<Vec<dv_core::SourceExcerpt>> {
+    with_core(&state, move |c| c.paragraph_sources(&case_id, &draft_id)).await
 }
 
 #[tauri::command]
@@ -747,6 +765,143 @@ async fn send_consult(
     with_core(&state, move |c| c.finish_consult(out, response)).await
 }
 
+// ------------------------------------------------------------------ writing style (D-043)
+
+#[tauri::command]
+async fn style_overview(state: tauri::State<'_, AppState>) -> Res<StyleOverview> {
+    with_core(&state, |c| c.style_overview()).await
+}
+
+/// A past report: the bytes arrive as the raw request body, the file name as a header.
+#[tauri::command]
+async fn import_style_source(
+    state: tauri::State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Res<StyleImportPreview> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(internal("body"));
+    };
+    let file_name = request
+        .headers()
+        .get("x-file-name")
+        .and_then(|v| v.to_str().ok())
+        .map(percent_decode)
+        .unwrap_or_default();
+    let bytes = bytes.clone();
+    with_core(&state, move |c| c.import_style_source(&file_name, &bytes)).await
+}
+
+#[tauri::command]
+async fn save_style_source(
+    state: tauri::State<'_, AppState>,
+    token: String,
+    included: Vec<u32>,
+    title: Option<String>,
+) -> Res<StyleSourceView> {
+    with_core(&state, move |c| {
+        c.save_style_source(&token, &included, title.as_deref())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn discard_style_upload(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| {
+        c.discard_style_upload();
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn delete_style_source(state: tauri::State<'_, AppState>, id: String) -> Res<()> {
+    with_core(&state, move |c| c.delete_style_source(&id)).await
+}
+
+#[tauri::command]
+async fn prepare_style_analysis(
+    state: tauri::State<'_, AppState>,
+    source_id: String,
+) -> Res<Prepared> {
+    with_core(&state, move |c| c.prepare_style_analysis(&source_id)).await
+}
+
+#[tauri::command]
+async fn send_style_analysis(
+    state: tauri::State<'_, AppState>,
+    approval_id: String,
+) -> Res<StyleAnalysisResult> {
+    let id = approval_id.clone();
+    let out = with_core(&state, move |c| c.begin_send(&id)).await?;
+    let (out, response) = transmit(&state, approval_id, out).await?;
+    with_core(&state, move |c| c.finish_style_analysis(out, response)).await
+}
+
+#[tauri::command]
+async fn prepare_style_profile(state: tauri::State<'_, AppState>) -> Res<Prepared> {
+    with_core(&state, |c| c.prepare_style_profile()).await
+}
+
+#[tauri::command]
+async fn send_style_profile(
+    state: tauri::State<'_, AppState>,
+    approval_id: String,
+) -> Res<StyleProfileView> {
+    let id = approval_id.clone();
+    let out = with_core(&state, move |c| c.begin_send(&id)).await?;
+    let (out, response) = transmit(&state, approval_id, out).await?;
+    with_core(&state, move |c| c.finish_style_profile(out, response)).await
+}
+
+#[tauri::command]
+async fn save_style_draft(
+    state: tauri::State<'_, AppState>,
+    profile: dv_core::StyleProfile,
+) -> Res<StyleProfileView> {
+    with_core(&state, move |c| c.save_style_draft(profile)).await
+}
+
+#[tauri::command]
+async fn approve_style_draft(state: tauri::State<'_, AppState>) -> Res<StyleProfileView> {
+    with_core(&state, |c| c.approve_style_draft()).await
+}
+
+#[tauri::command]
+async fn discard_style_draft(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| c.discard_style_draft()).await
+}
+
+#[tauri::command]
+async fn restore_style_version(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Res<StyleProfileView> {
+    with_core(&state, move |c| c.restore_style_version(&id)).await
+}
+
+#[tauri::command]
+async fn set_style_enabled(state: tauri::State<'_, AppState>, on: bool) -> Res<()> {
+    with_core(&state, move |c| c.set_style_enabled(on)).await
+}
+
+#[tauri::command]
+async fn reset_style(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| c.reset_style()).await
+}
+
+#[tauri::command]
+async fn accept_style_suggestion(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Res<StyleProfileView> {
+    with_core(&state, move |c| c.accept_style_suggestion(&id)).await
+}
+
+#[tauri::command]
+async fn dismiss_style_suggestion(state: tauri::State<'_, AppState>, id: String) -> Res<()> {
+    with_core(&state, move |c| c.dismiss_style_suggestion(&id)).await
+}
+
 // ------------------------------------------------------------------ Word report
 
 #[tauri::command]
@@ -972,16 +1127,30 @@ async fn check_update() -> Res<Option<dv_core::update::UpdateView>> {
         .map_err(|_| internal("task"))?
 }
 
-/// Download the newest version, verify it, lock the vault and run the installer, then close.
-/// The installer (passive, update mode) replaces the program and opens it again; the vault
-/// folder is not touched.
+/// Fetch and verify the newest version in the background, so the click only restarts
+/// (D-038). Nothing is installed here. `true` when a verified installer is waiting.
+#[tauri::command]
+async fn prepare_update(state: tauri::State<'_, AppState>) -> Res<bool> {
+    if !cfg!(windows) {
+        return Ok(false);
+    }
+    let dir = state.dir.clone();
+    let prepared = Arc::clone(&state.prepared);
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut slot = prepared.lock().map_err(|_| internal("update"))?;
+        let ready = dv_core::update::prepare(&dir, slot.take()).map_err(|e| e.to_ui())?;
+        *slot = ready;
+        Ok(slot.is_some())
+    })
+    .await
+    .map_err(|_| internal("task"))?
+}
+
+/// Lock the vault and run the verified installer, then close. The installer (passive, update
+/// mode) replaces the program and opens it again; the vault folder is not touched. A version
+/// fetched in the background is used when it is still intact; otherwise it is fetched now.
 #[tauri::command]
 async fn install_update(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Res<()> {
-    let dir = state.dir.clone();
-    let file = tauri::async_runtime::spawn_blocking(move || dv_core::update::download(&dir))
-        .await
-        .map_err(|_| internal("task"))?
-        .map_err(|e| e.to_ui())?;
     if !cfg!(windows) {
         return Err(UiError {
             code: "update".to_owned(),
@@ -989,6 +1158,18 @@ async fn install_update(app: tauri::AppHandle, state: tauri::State<'_, AppState>
             details: Vec::new(),
         });
     }
+    let dir = state.dir.clone();
+    let prepared = Arc::clone(&state.prepared);
+    let file = tauri::async_runtime::spawn_blocking(move || {
+        let waiting = prepared.lock().ok().and_then(|mut p| p.take());
+        match waiting {
+            Some(file) if dv_core::update::still_intact(&file) => Ok(file),
+            _ => dv_core::update::download(&dir),
+        }
+    })
+    .await
+    .map_err(|_| internal("task"))?
+    .map_err(|e| e.to_ui())?;
     if !dv_core::update::still_intact(&file) {
         return Err(internal("the installer changed after it was checked"));
     }
@@ -1006,6 +1187,45 @@ async fn install_update(app: tauri::AppHandle, state: tauri::State<'_, AppState>
     Ok(())
 }
 
+/// Next to the vault folder, never inside it. Kept small.
+const CRASH_LOG: &str = "crash-log.txt";
+const CRASH_LOG_MAX: u64 = 64 * 1024;
+
+/// A release build stops at the first panic (`panic = "abort"`), and on Windows it has no
+/// console, so the program just vanished. Write where it stopped: the time, version, thread
+/// and source line, and the message only when it is fixed text in the code. A message built
+/// at run time could carry something from a case, so it is left out.
+fn remember_crashes(path: PathBuf) {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        use std::io::Write;
+        let fixed = info.payload().downcast_ref::<&'static str>().copied();
+        let line = format!(
+            "{} · v{} · thread {} · {} · {}\n",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs()),
+            env!("CARGO_PKG_VERSION"),
+            std::thread::current().name().unwrap_or("?"),
+            info.location()
+                .map_or_else(|| "?".to_owned(), |l| format!("{}:{}", l.file(), l.line())),
+            fixed.unwrap_or("(message left out)"),
+        );
+        let too_big = std::fs::metadata(&path).is_ok_and(|m| m.len() > CRASH_LOG_MAX);
+        if too_big {
+            let _ = std::fs::remove_file(&path);
+        }
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            let _ = f.write_all(line.as_bytes());
+        }
+        previous(info);
+    }));
+}
+
 fn main() {
     // A document worker: the same binary, started by the core for one file.
     if std::env::args().nth(1).as_deref() == Some(dv_ingest::worker::WORKER_ARG) {
@@ -1014,7 +1234,9 @@ fn main() {
 
     let result = tauri::Builder::default()
         .setup(|app| {
-            let dir = app.path().app_local_data_dir()?.join("vault");
+            let data = app.path().app_local_data_dir()?;
+            remember_crashes(data.join(CRASH_LOG));
+            let dir = data.join("vault");
             std::fs::create_dir_all(&dir)?;
             // The installer of the last update has done its work.
             dv_core::update::clean(&dir);
@@ -1029,6 +1251,10 @@ fn main() {
             let timer = Arc::clone(&core);
             let timer_clipboard = clipboard.clone();
             let timer_window = app.get_webview_window("main");
+            // The window opens protected (tauri.conf.json); this lifts it while D-039 holds.
+            if let Some(w) = &timer_window {
+                protect(w, true);
+            }
             let mut computer = os_lock::LockWatch::default();
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(15));
@@ -1064,6 +1290,7 @@ fn main() {
                 clipboard,
                 dir,
                 progress: Arc::default(),
+                prepared: Arc::default(),
             });
             Ok(())
         })
@@ -1104,6 +1331,7 @@ fn main() {
             preview_scores,
             save_scores,
             score_sheet,
+            paragraph_sources,
             import_document,
             preview_filter,
             decide_suspect,
@@ -1140,6 +1368,23 @@ fn main() {
             consultations,
             consultation,
             delete_consultation,
+            style_overview,
+            import_style_source,
+            save_style_source,
+            discard_style_upload,
+            delete_style_source,
+            prepare_style_analysis,
+            send_style_analysis,
+            prepare_style_profile,
+            send_style_profile,
+            save_style_draft,
+            approve_style_draft,
+            discard_style_draft,
+            restore_style_version,
+            set_style_enabled,
+            reset_style,
+            accept_style_suggestion,
+            dismiss_style_suggestion,
             check_export,
             export_report,
             print_page,
@@ -1157,6 +1402,7 @@ fn main() {
             forget_backup,
             set_auto_backup,
             check_update,
+            prepare_update,
             install_update,
             send_progress,
         ])

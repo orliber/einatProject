@@ -9,7 +9,7 @@ function when(seconds: number): string {
 }
 
 /**
- * Earlier wordings of one paragraph, newest first (UX-4, D-043). Each can be brought back:
+ * Earlier wordings of one paragraph, newest first (UX-4, D-046). Each can be brought back:
  * the current wording is kept as a version in turn, so nothing she wrote is lost.
  * The text is shown as plain text, never as HTML.
  */

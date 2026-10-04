@@ -3,6 +3,9 @@
 //! Nothing here touches the vault. The check and the download run without the core's lock, so
 //! work continues while the file arrives. The installer is written next to the vault folder
 //! (`updates/`), checked again just before it runs, and deleted on the next start.
+//!
+//! D-038: when a newer version is found it is fetched in the background (`prepare`), so the
+//! click only restarts. Nothing is installed without that click.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -33,6 +36,7 @@ pub struct UpdateView {
 /// Checked, ready to run.
 #[derive(Debug)]
 pub struct Downloaded {
+    pub version: String,
     pub path: PathBuf,
     pub sha256: [u8; 32],
 }
@@ -81,7 +85,44 @@ pub fn download_with(
 ) -> Result<Downloaded, CoreError> {
     let info = update::check(fetch, current, key)?
         .ok_or_else(|| CoreError::Refused("זו כבר הגרסה החדשה ביותר.".to_owned()))?;
-    let bytes = update::download(fetch, &info)?;
+    write_installer(fetch, &info, dir)
+}
+
+/// In the background, before she is asked (D-038): fetch the newest installer, verified, so
+/// the click only restarts. The notice is verified again here. A file fetched earlier for the
+/// same version is kept when it is still the one the notice names; anything else is fetched
+/// again. `None` (and nothing on disk) when there is no newer version.
+pub fn prepare(dir: &Path, earlier: Option<Downloaded>) -> Result<Option<Downloaded>, CoreError> {
+    let fetch = GitHubFetch::new()?;
+    prepare_with(&fetch, &key()?, CURRENT_VERSION, dir, earlier)
+}
+
+pub fn prepare_with(
+    fetch: &dyn Fetch,
+    key: &[u8; 32],
+    current: &str,
+    dir: &Path,
+    earlier: Option<Downloaded>,
+) -> Result<Option<Downloaded>, CoreError> {
+    let Some(info) = update::check(fetch, current, key)? else {
+        clean(dir);
+        return Ok(None);
+    };
+    if let Some(file) = earlier {
+        if file.version == info.version && file.sha256 == info.sha256 && still_intact(&file) {
+            return Ok(Some(file));
+        }
+    }
+    write_installer(fetch, &info, dir).map(Some)
+}
+
+/// The installer of a verified notice, written only after its hash matched.
+fn write_installer(
+    fetch: &dyn Fetch,
+    info: &UpdateInfo,
+    dir: &Path,
+) -> Result<Downloaded, CoreError> {
+    let bytes = update::download(fetch, info)?;
     let folder = dir.join(FOLDER);
     fs::create_dir_all(&folder).map_err(|e| CoreError::Internal(e.to_string()))?;
     // Only digits and dots reach the file name (the version was parsed as x.y.z).
@@ -92,6 +133,7 @@ pub fn download_with(
     let path = folder.join(name);
     fs::write(&path, &bytes).map_err(|e| CoreError::Internal(e.to_string()))?;
     Ok(Downloaded {
+        version: info.version.clone(),
         path,
         sha256: info.sha256,
     })
@@ -191,10 +233,48 @@ mod tests {
     }
 
     #[test]
+    fn a_prepared_installer_is_kept_while_it_is_still_the_newest() {
+        let dir = tempfile::tempdir().unwrap();
+        let (t, key) = server(b"MZ installer", b"MZ installer");
+        let first = prepare_with(&t, &key, "0.2.9", dir.path(), None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.version, "0.3.0");
+        let path = first.path.clone();
+
+        // The same version again: the file on disk is reused, not fetched twice.
+        let mut quiet = Table(t.0.clone());
+        quiet
+            .0
+            .retain(|url, _| url.ends_with(".json") || url.ends_with(".sig"));
+        let again = prepare_with(&quiet, &key, "0.2.9", dir.path(), Some(first))
+            .unwrap()
+            .unwrap();
+        assert_eq!(again.path, path);
+
+        // Changed on disk since: fetched again, and verified again.
+        fs::write(&path, b"MZ swapped").unwrap();
+        assert!(prepare_with(&quiet, &key, "0.2.9", dir.path(), Some(again)).is_err());
+        let fresh = prepare_with(&t, &key, "0.2.9", dir.path(), None)
+            .unwrap()
+            .unwrap();
+        assert!(still_intact(&fresh));
+
+        // Already the newest: nothing prepared, nothing left on disk.
+        assert!(prepare_with(&t, &key, "0.3.0", dir.path(), Some(fresh))
+            .unwrap()
+            .is_none());
+        assert!(!dir.path().join(FOLDER).exists());
+    }
+
+    #[test]
     fn a_changed_installer_is_never_written() {
         let dir = tempfile::tempdir().unwrap();
         let (t, key) = server(b"MZ installer", b"MZ evil");
         let err = download_with(&t, &key, "0.2.9", dir.path()).unwrap_err();
+        assert_eq!(err.to_ui().code, "update");
+        assert!(!dir.path().join(FOLDER).exists());
+        let err = prepare_with(&t, &key, "0.2.9", dir.path(), None).unwrap_err();
         assert_eq!(err.to_ui().code, "update");
         assert!(!dir.path().join(FOLDER).exists());
     }

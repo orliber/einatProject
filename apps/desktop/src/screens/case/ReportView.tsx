@@ -3,7 +3,8 @@ import { useApp } from "../../App";
 import { ipc, type CaseDetail, type ReportSettings } from "../../ipc/client";
 import { kindLabel } from "../../i18n/he";
 import { ageWords } from "../../components/AgeField";
-import { ErrorLine } from "../../components/ui";
+import { ErrorLine, WarnIcon } from "../../components/ui";
+import { Why } from "../../components/Why";
 import { ProgressLine } from "../../components/Progress";
 import { useHoldUnsaved } from "../../components/Unsaved";
 import { useRotatingPlaceholder } from "../../components/Rotating";
@@ -133,6 +134,8 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
   const [paraPop, setParaPop] = useState<string | null>(null);
   /** The paragraph whose earlier wordings are open (UX-4). */
   const [history, setHistory] = useState<string | null>(null);
+  /** The paragraph whose "why did you write this?" card is open (AI-7). */
+  const [whyPop, setWhyPop] = useState<string | null>(null);
   /** The paragraph whose delete button asks "למחוק?". */
   const [deleting, setDeleting] = useState<string | null>(null);
   useHoldUnsaved(caseId, `פסקה בסעיף "${s.title}"`, editing?.text ?? null);
@@ -205,8 +208,19 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
           onKeyDown={(e) => paraKey(e, p)}>
           {p.text}
         </p>
+        {p.warnings.map((w, i) => (
+          <div key={i} className="note-warn small"><WarnIcon /><span>{w}</span></div>
+        ))}
         {!busy && (
           <span className="a4-pop-anchor a4-para-tool">
+            {p.by_ai && <button type="button" className="a4-why" aria-expanded={whyPop === p.id} aria-label="למה כתבת את זה?" title="למה כתבת את זה? (המקורות של הפסקה)"
+              onClick={() => { setParaPop(null); setWhyPop(whyPop === p.id ? null : p.id); }}>?</button>}
+            {whyPop === p.id && (
+              <Popover label="המקורות של הפסקה" onClose={() => setWhyPop(null)}>
+                <b>למה כתבתי את זה?</b>
+                <Why caseId={caseId} draftId={p.id} />
+              </Popover>
+            )}
             {canWrite && <button type="button" className="a4-ai" aria-expanded={paraPop === p.id} aria-label="לשנות את הפסקה עם AI" title="לשנות את הפסקה עם AI"
               onClick={() => setParaPop(paraPop === p.id ? null : p.id)}><SparkIcon /></button>}
             {p.has_versions && (

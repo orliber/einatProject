@@ -1,11 +1,15 @@
 // Component tests of the main screens over the in-memory demo core (Q-4, UX-7).
 // Every name and detail comes from the fake core's invented cases.
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { App } from "../App";
 import { FakeCore } from "../web/fakeCore";
 import { a11yViolations } from "../test/a11y";
+
+// The whole app over the demo core takes a moment to settle in jsdom.
+configure({ asyncUtilTimeout: 5000 });
+vi.setConfig({ testTimeout: 30_000 });
 
 async function openApp(unlock = true) {
   const core = new FakeCore();
@@ -21,7 +25,7 @@ async function openApp(unlock = true) {
 }
 
 async function openCase(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole("button", { name: "להמשיך בתיק של נועם" }));
+  await user.click(await screen.findByRole("button", { name: /בתיק של נועם$/ }));
   return screen.findByRole("article", { name: "הדוח, כמו בקובץ" });
 }
 
@@ -34,7 +38,7 @@ describe("main screens", () => {
 
   it("the cases screen passes the accessibility check", async () => {
     const { view } = await openApp();
-    expect(await screen.findByRole("button", { name: "להמשיך בתיק של נועם" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /בתיק של נועם$/ })).toBeInTheDocument();
     expect(await a11yViolations(view.container)).toEqual([]);
   });
 
@@ -56,7 +60,7 @@ describe("main screens", () => {
 
   it("the page is Hebrew and right-to-left", async () => {
     await openApp();
-    await screen.findByRole("button", { name: "להמשיך בתיק של נועם" });
+    await screen.findByRole("button", { name: /בתיק של נועם$/ });
     // index.html sets these for the real window; the test checks the screens do not fight them.
     expect(document.querySelector("[dir='ltr'] input, [dir='ltr'] textarea")).toBeNull();
   });
@@ -69,7 +73,7 @@ describe("writing the report", () => {
     const write = within(page).getAllByRole("button", { name: "✦ לכתוב עם Claude" })[0];
     if (!write) throw new Error("no empty section to write");
     await user.click(write);
-    const review = await screen.findByRole("dialog", { name: /טיוטה לסעיף/ });
+    const review = await screen.findByRole("dialog", { name: "לפני שליחה ל-Claude" });
     expect(calls).toContain("prepare_section");
     expect(calls).not.toContain("send_section");
     // Names are shown as they will leave: as roles, not as names.
@@ -106,7 +110,7 @@ describe("writing the report", () => {
     const { user, view } = await openApp();
     await openCase(user);
     await user.click(screen.getByRole("button", { name: /הוצאת הדוח/ }));
-    expect(await screen.findByText(/מוגן בסיסמה|סיסמה/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/סיסמה/)).length).toBeGreaterThan(0);
     expect(await a11yViolations(view.container)).toEqual([]);
   });
 });
@@ -114,7 +118,7 @@ describe("writing the report", () => {
 describe("keyboard", () => {
   it("F1 opens the shortcuts sheet, and Escape closes it", async () => {
     await openApp();
-    await screen.findByRole("button", { name: "להמשיך בתיק של נועם" });
+    await screen.findByRole("button", { name: /בתיק של נועם$/ });
     fireEvent.keyDown(window, { key: "F1", code: "F1" });
     const sheet = await screen.findByRole("dialog", { name: "קיצורי מקלדת" });
     expect(within(sheet).getByText("Ctrl+L")).toBeInTheDocument();
@@ -125,7 +129,7 @@ describe("keyboard", () => {
 
   it("Ctrl+L locks with the Hebrew layout on (the key types ך)", async () => {
     const { calls } = await openApp();
-    await screen.findByRole("button", { name: "להמשיך בתיק של נועם" });
+    await screen.findByRole("button", { name: /בתיק של נועם$/ });
     fireEvent.keyDown(window, { key: "ך", code: "KeyL", ctrlKey: true });
     await waitFor(() => expect(calls).toContain("lock"));
   });

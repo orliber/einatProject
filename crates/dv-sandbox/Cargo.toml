@@ -1,0 +1,40 @@
+[package]
+name = "dv-sandbox"
+description = "Starts an untrusted worker process with no network, no user files and no clipboard (D-044)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The one audited exception to `unsafe_code = "forbid"` (D-044): the Windows calls that put a
+# process in an AppContainer and a job object have no safe wrapper in std. Every `unsafe` block
+# is in `src/windows.rs`, carries `#[allow(unsafe_code)]` and a `// SAFETY:` comment, and
+# `cargo xtask check-invariants` checks both. Otherwise the same lints as the workspace.
+[lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+unused_must_use = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+mem_forget = "deny"
+
+[target.'cfg(windows)'.dependencies]
+# Raw bindings only (already in the tree through Tauri's dependencies); no wrapper crate.
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Security_Isolation",
+  "Win32_System_JobObjects",
+  "Win32_System_Pipes",
+  "Win32_System_Threading",
+] }

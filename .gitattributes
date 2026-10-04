@@ -1,0 +1,4 @@
+# The privacy suite's data and gold corpus are read byte for byte (separators, span offsets):
+# the same line endings on every machine, also on Windows checkouts (core.autocrlf).
+crates/dv-privacy/data/** text eol=lf
+crates/dv-privacy/tests/corpus/** text eol=lf

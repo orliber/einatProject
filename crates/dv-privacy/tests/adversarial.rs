@@ -408,6 +408,161 @@ fn ordinary_sentences_around_names_are_not_flagged() {
     }
 }
 
+/// Family names that are also everyday words ("שני", "גיל", "אלה", "מתן", "אור"): the word
+/// passes only where the grammar rules out a name; everywhere else the name is hidden.
+#[test]
+fn declared_names_that_are_words_pass_only_as_words() {
+    let case = "case-dual";
+    let ids = vec![
+        id(case, Role::Mother, "[אם]", "שני", &[]),
+        id(case, Role::Father, "[אב]", "גיל", &[]),
+        id(case, Role::Sister, "[אחות_1]", "אלה", &[]),
+        id(case, Role::Brother, "[אח_1]", "מתן", &[]),
+        id(case, Role::Sister, "[אחות_2]", "אור", &[]),
+        id(case, Role::Brother, "[אח_2]", "ציון", &[]),
+        id(case, Role::Sister, "[אחות_3]", "עדינה", &[]),
+        id(case, Role::Other, "[אחר]", "פרידה", &[]),
+        id(case, Role::Sister, "[אחות_4]", "בילי", &[]),
+    ];
+    let practitioner = vec!["דנה כהן-לוי".to_owned()];
+    let allow = |_: &str| false;
+    let ctx = PrivacyContext {
+        case_id: case,
+        identities: &ids,
+        practitioner: &practitioner,
+        allowlisted: &allow,
+        confirmed_names: &|_: &str| false,
+        today: TODAY,
+    };
+    let case_tags: HashSet<String> = ids.iter().map(|i| i.tag.clone()).collect();
+    // What the gate sends (normalized), or None when it blocks.
+    let sent = |text: &str| {
+        let out = filter(text, &ctx).unwrap();
+        let body = serde_json::json!({
+            "model": "claude-opus-5",
+            "messages": [{"role": "user", "content": out.tagged}],
+        });
+        let req = GateRequest {
+            body: &body,
+            ctx: &ctx,
+            case_tags: &case_tags,
+            unresolved_suspects: out.suspects.len(),
+            canaries: &[],
+            max_bytes: 200_000,
+        };
+        clear(&req)
+            .ok()
+            .map(|p| normalize(&String::from_utf8_lossy(p.body())))
+    };
+    for (text, name) in [
+        ("שני הגיעה לפגישה עם גיל.", "שני"),
+        ("שני הבינה מהר.", "שני"),
+        ("ילדים במשפחה: גיל 5, שני 3.", "גיל"),
+        ("פגע בגיל ובאלה.", "גיל"),
+        ("אלה לפעמים כועסת.", "אלה"),
+        ("שני לעיתים קרובות מרגישה עייפה.", "שני"),
+        ("מתן לקח לו את הכדור.", "מתן"),
+        ("אור הקטנה ישנה בחדר של ההורים.", "אור"),
+        ("בוקר טוב, אור.", "אור"),
+        ("הוא כתב מכתב לאור הקטנה.", "אור"),
+        ("ציון הגיע לפגישה עם אמא.", "ציון"),
+        ("ציון גבוה מאחיו.", "ציון"),
+        ("ציון מסתגל לגן החדש.", "ציון"),
+        ("עדינה ישבה ליד השולחן.", "עדינה"),
+        ("פרידה מהגן הגיעה לבקר.", "פרידה"),
+        ("בילי שיחקה בחצר.", "בילי"),
+    ] {
+        if let Some(body) = sent(text) {
+            let words: Vec<&str> = body.split(|c: char| !c.is_alphanumeric()).collect();
+            assert!(
+                !words.contains(&normalize(name).as_str()),
+                "{text}: {name} left as a name"
+            );
+        }
+    }
+    for text in [
+        "שני ההורים הגיעו לפגישה.",
+        "אלה הדברים שהכי מעניינים אותו.",
+        "ישב בגיל 7 חודשים, הלך בגיל שנה.",
+        "ביחס לגיל הכרונולוגי ולגיל שלו.",
+        "זקוק למתן זמן נוסף.",
+        "ישן רק עם אור דולק.",
+        "ולאור זאת ההמלצה עומדת בעינה.",
+        "ציון 112 בסולם המילולי, ציון T של 64.",
+        "ציון כולל: 31. ציון מסתגל כללי בטווח הממוצע.",
+        "קשיים במוטוריקה עדינה.",
+        "חרדת פרידה בבוקר, פרידה מההורה בכניסה לחדר.",
+        "הגיע בלי התיק ושאל שאלות כלליות.",
+    ] {
+        assert!(
+            sent(text).is_some(),
+            "over-blocking an ordinary word: {text}"
+        );
+    }
+}
+
+/// A name declared in Hebrew and written in Arabic in a bilingual document ("روضة جسر"),
+/// with vowel signs, the article or "and" glued on, never leaves as is.
+#[test]
+fn declared_names_in_arabic_script_never_leak() {
+    let case = "case-arabic";
+    let ids = vec![
+        id(case, Role::Child, "[ילד]", "סמאח", &[]),
+        id(case, Role::Father, "[אב]", "ג'מיל עבאסי", &[]),
+        id(case, Role::Kindergarten, "[גן]", "ג'סר", &[]),
+    ];
+    let practitioner = vec!["דנה כהן-לוי".to_owned()];
+    let allow = |_: &str| false;
+    let ctx = PrivacyContext {
+        case_id: case,
+        identities: &ids,
+        practitioner: &practitioner,
+        allowlisted: &allow,
+        confirmed_names: &|_: &str| false,
+        today: TODAY,
+    };
+    let case_tags: HashSet<String> = ids.iter().map(|i| i.tag.clone()).collect();
+    let gate = |tagged: &str, unresolved: usize| {
+        let body = serde_json::json!({
+            "model": "claude-opus-5",
+            "messages": [{"role": "user", "content": tagged}],
+        });
+        let req = GateRequest {
+            body: &body,
+            ctx: &ctx,
+            case_tags: &case_tags,
+            unresolved_suspects: unresolved,
+            canaries: &[],
+            max_bytes: 200_000,
+        };
+        clear(&req)
+            .ok()
+            .map(|p| normalize(&String::from_utf8_lossy(p.body())))
+    };
+    let protected = ["جسر", "سماح", "جميل", "عباسي"].map(normalize);
+    for text in [
+        "גן דו-לשוני \"ג'סר\" | روضة جسر",
+        "الطفلة سَمَاح تلعب في الحديقة.",
+        "والجسر قريب من البيت، وجميل عباسي يحضر كل يوم.",
+        "رسالة من الأب: جميل عبّاسي",
+    ] {
+        let out = filter(text, &ctx).unwrap();
+        if let Some(sent) = gate(&out.tagged, out.suspects.len()) {
+            for p in &protected {
+                assert!(!sent.contains(p.as_str()), "{text}: {p} left in {sent}");
+            }
+        }
+        // The gate alone refuses the raw text too.
+        assert!(gate(text, 0).is_none(), "gate let through: {text}");
+    }
+    let plain = "الطفل يلعب في الحديقة مع أصدقائه.";
+    let out = filter(plain, &ctx).unwrap();
+    assert!(
+        gate(&out.tagged, out.suspects.len()).is_some(),
+        "over-blocking Arabic text without names"
+    );
+}
+
 #[test]
 fn canaries_always_block() {
     let o = send(&format!("{CANARY} היא מחרוזת מלכודת"), CASE);
@@ -633,4 +788,33 @@ fn a_range_that_cuts_through_a_name_refuses_to_split() {
     let inside_a_letter = std::iter::once(0..1).collect::<Vec<_>>();
     let (_, parts) = filter_split(text, &ctx, &inside_a_letter).unwrap();
     assert!(parts.is_none());
+}
+
+/// Drafts are stored tagged and filtered again before each request. An institution word inside
+/// a tag ("גן" in `[ילד_גן]`, `[גן]`) is not followed by a kindergarten's name: the next word
+/// stays. (It used to be dropped: "[ילד_גן] הופנה לאבחון" went out as "[ילד_גן לאבחון".)
+#[test]
+fn filtering_tagged_text_again_keeps_every_word() {
+    let mut ids = identities();
+    ids.push(id(CASE, Role::OtherChild, "[ילד_גן]", "דנה", &[]));
+    ids.push(id(CASE, Role::School, "[בית_ספר]", "בית ספר אופק", &[]));
+    let practitioner: Vec<String> = Vec::new();
+    let ctx = PrivacyContext {
+        case_id: CASE,
+        identities: &ids,
+        practitioner: &practitioner,
+        allowlisted: &|_: &str| false,
+        confirmed_names: &|_: &str| false,
+        today: TODAY,
+    };
+    for tagged in [
+        "[ילד_גן] הופנה לאבחון.",
+        "[ילד] משחק עם [ילד_גן] בחצר.",
+        "ב[גן] שלו יש שגרה קבועה.",
+        "ב[בית_ספר] החדש הוא משתלב.",
+    ] {
+        let again = filter(tagged, &ctx).unwrap();
+        assert_eq!(again.tagged, tagged);
+        assert!(again.suspects.is_empty(), "{tagged}: {:?}", again.suspects);
+    }
 }

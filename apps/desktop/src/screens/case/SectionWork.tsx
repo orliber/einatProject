@@ -3,6 +3,7 @@ import { useApp } from "../../App";
 import { ipc, type CaseDetail, type ChatView, type SectionResult } from "../../ipc/client";
 import { ErrorLine, SendIcon, Spinner, WarnIcon } from "../../components/ui";
 import { ProgressLine } from "../../components/Progress";
+import { Why } from "../../components/Why";
 import { useHoldUnsaved } from "../../components/Unsaved";
 import { kindLabel } from "../../i18n/he";
 import { useRotatingPlaceholder } from "../../components/Rotating";
@@ -38,6 +39,8 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   const [linked, setLinked] = useState(false);
   /** The paragraph whose earlier wordings are open (UX-4). */
   const [history, setHistory] = useState<string | null>(null);
+  /** Paragraphs whose sources are open ("למה כתבת את זה?", AI-7). */
+  const [why, setWhy] = useState<string | null>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
 
   const loadChat = useCallback(async () => {
@@ -114,7 +117,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    void ask(message);
+    if (!working) void ask(message);
   }
 
   const derived = DERIVED.includes(section.key);
@@ -294,6 +297,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                   <div className="para-meta">
                     <span className="approved-mark">✓ אושר על ידך</span>
                     {p.sources.length > 0 && <span className="muted">מקור: {p.sources.join(" · ")}</span>}
+                    {p.by_ai && <button type="button" className="link-small" aria-expanded={why === p.id} onClick={() => setWhy(why === p.id ? null : p.id)}>למה כתבת את זה?</button>}
                     <button type="button" className="link-small" onClick={() => setEditing({ id: p.id, text: p.text })}>עריכה</button>
                     {p.has_versions && (
                       <button type="button" className="link-small" aria-expanded={history === p.id} onClick={() => setHistory(history === p.id ? null : p.id)}>גרסאות קודמות</button>
@@ -302,6 +306,10 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                   {history === p.id && (
                     <ParagraphVersions caseId={caseId} draftId={p.id} onRestored={async () => { setHistory(null); await reload(); }} />
                   )}
+                  {warnings.map((w, i) => (
+                    <div key={i} className="note-warn"><WarnIcon /><span>{w}</span></div>
+                  ))}
+                  {why === p.id && <Why caseId={caseId} draftId={p.id} />}
                 </article>
               );
             }
@@ -311,8 +319,10 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                   <div className="para-meta">
                     <span className="pending-mark">{p.by_ai ? "הצעה של Claude · ממתינה לאישור" : "ממתינה לאישור"}</span>
                     {p.sources.length > 0 && <span className="muted">מקור: {p.sources.join(" · ")}</span>}
+                    {p.by_ai && <button type="button" className="link-small" aria-expanded={why === p.id} onClick={() => setWhy(why === p.id ? null : p.id)}>למה כתבת את זה?</button>}
                   </div>
                 )}
+                {!isEditing && why === p.id && <Why caseId={caseId} draftId={p.id} />}
                 {isEditing ? (
                   <label className="edit-box">
                     <span className="visually-hidden">עריכת הפסקה</span>
@@ -413,7 +423,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               <label htmlFor="chat-msg" className="visually-hidden">הודעה ל-Claude</label>
               <textarea id="chat-msg" rows={2} className="textarea grow" placeholder={chatHint}
                 value={message} onChange={(e) => setMessage(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) void ask(message); }} />
+                onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !working) void ask(message); }} />
               <button type="submit" className="btn btn-primary send-btn" title="תמיד מוצג קודם מה יוצא מהמחשב" disabled={working || !message.trim()}>שליחה <SendIcon /></button>
             </div>
           </form>

@@ -1,0 +1,28 @@
+.why {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.why-item {
+  margin: 0;
+  padding: 8px 12px;
+  border-inline-start: 3px solid var(--line-strong);
+  background: var(--surface-alt);
+  border-radius: 6px;
+}
+
+.why-label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--ink-muted);
+  margin-bottom: 2px;
+}
+
+.why-text {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.6;
+}

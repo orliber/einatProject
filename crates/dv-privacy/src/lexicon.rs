@@ -30,6 +30,8 @@ pub struct Lexicon {
     pub latin_allow: HashSet<String>,
     /// Ordinary words that only look like prefix + name; never suspects.
     pub common_words: HashSet<String>,
+    /// A first name → the other members of its nickname group ("שמעון" → "שימי").
+    pub nicknames: std::collections::HashMap<String, Vec<String>>,
 }
 
 /// Hospitals that identify a region; hidden as [בית_חולים].
@@ -90,8 +92,89 @@ pub static LEXICON: LazyLock<Lexicon> = LazyLock::new(|| {
         common_words: lines(include_str!("../data/common_words.txt"))
             .map(normalize)
             .collect(),
+        nicknames: nickname_groups(include_str!("../data/nicknames.txt")),
     }
 });
+
+fn nickname_groups(data: &str) -> std::collections::HashMap<String, Vec<String>> {
+    let mut out: std::collections::HashMap<String, Vec<String>> = Default::default();
+    for line in lines(data) {
+        let group: Vec<String> = line.split_whitespace().map(normalize).collect();
+        for member in &group {
+            let others = out.entry(member.clone()).or_default();
+            for other in &group {
+                if other != member && !others.contains(other) {
+                    others.push(other.clone());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// A sorted `key<TAB>value` table embedded in the binary (data/*.tsv), searched in place:
+/// only the line offsets are kept, so 300,000 word forms cost about 2 MB of memory.
+#[derive(Debug)]
+pub struct SortedTable {
+    data: &'static str,
+    /// (start of the line, end of the key) for every data line, in key order.
+    lines: Vec<(u32, u32)>,
+}
+
+impl SortedTable {
+    fn new(data: &'static str) -> Self {
+        let mut lines = Vec::new();
+        let mut start = 0usize;
+        for line in data.split_inclusive('\n') {
+            if !line.starts_with('#') && !line.trim().is_empty() {
+                let key_len = line.find('\t').unwrap_or(line.trim_end().len());
+                if let (Ok(s), Ok(e)) = (u32::try_from(start), u32::try_from(start + key_len)) {
+                    lines.push((s, e));
+                }
+            }
+            start += line.len();
+        }
+        Self { data, lines }
+    }
+
+    /// The value column(s) for `key`, if present.
+    #[must_use]
+    pub fn get(&self, key: &str) -> Option<&'static str> {
+        let data = self.data;
+        let i = self
+            .lines
+            .binary_search_by(|&(s, e)| data[s as usize..e as usize].cmp(key))
+            .ok()?;
+        let (_, e) = self.lines[i];
+        let rest = &self.data[e as usize..];
+        let line_end = rest.find('\n').unwrap_or(rest.len());
+        Some(rest[..line_end].trim_start_matches('\t'))
+    }
+}
+
+/// Hebrew word forms from open corpora with how common they are (scripts/build_lexicons.py),
+/// in sorted shards of under 1 MB each (the repository's file-size limit).
+pub static WORDS: LazyLock<[SortedTable; 6]> = LazyLock::new(|| {
+    [
+        SortedTable::new(include_str!("../data/words-1.tsv")),
+        SortedTable::new(include_str!("../data/words-2.tsv")),
+        SortedTable::new(include_str!("../data/words-3.tsv")),
+        SortedTable::new(include_str!("../data/words-4.tsv")),
+        SortedTable::new(include_str!("../data/words-5.tsv")),
+        SortedTable::new(include_str!("../data/words-6.tsv")),
+    ]
+});
+
+/// How common a normalized form is as a written word: 0 = never seen, else 1 + log2(count)
+/// in a corpus of about 200 million words (≥ 12 is an everyday word).
+#[must_use]
+pub fn word_bucket(norm: &str) -> u8 {
+    WORDS
+        .iter()
+        .find_map(|t| t.get(norm))
+        .and_then(|v| v.trim().parse().ok())
+        .unwrap_or(0)
+}
 
 /// Words before a name: prepositions, relations, titles, reporting verbs (VSO order).
 pub const NAME_CONTEXT_PREV: &[&str] = &[
@@ -272,6 +355,7 @@ pub const TITLES: &[&str] = &[
     "גברת",
     "הרב",
     "עו\"ד",
+    "עו\"ס",
     "פרופ",
 ];
 
@@ -358,6 +442,35 @@ pub const PERSON_WORDS: &[&str] = &[
     "בת זוג",
     "תאום",
     "תאומה",
+    "סייע",
+    "מדריך",
+    "מדריכה",
+    "ילד",
+    "ילדה",
+    "נכד",
+    "נכדה",
+    "אחיין",
+    "אחיינית",
+    "מאבחנת",
+    "מאבחן",
+    "כלב",
+    "כלבה",
+    "חתול",
+    "חתולה",
+    "חברתה",
+    "אחותי",
+    "אחי",
+    "בעלה",
+    "אשתו",
+    "נהג",
+    "נהגת",
+    "בבושקה",
+    "סבתוש",
+    "דדושקה",
+    "ג'דו",
+    "ג'דה",
+    "סיתו",
+    "תיתה",
 ];
 
 /// Labels that introduce a person's name in forms and letters ("שם הילד: …").
@@ -438,3 +551,28 @@ pub const SURNAME_ENDINGS: &[&str] = &[
     "ונוב",
     "ייב",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sorted_table_finds_keys_and_values() {
+        let t = SortedTable::new("# comment\nא\t1\nבית\t12\nזמנ\t15\n");
+        assert_eq!(t.get("א"), Some("1"));
+        assert_eq!(t.get("בית"), Some("12"));
+        assert_eq!(t.get("זמנ"), Some("15"));
+        assert_eq!(t.get("ב"), None);
+        assert_eq!(t.get("זמן"), None);
+    }
+
+    #[test]
+    fn word_statistics_know_ordinary_words() {
+        // Everyday words, including ones that look like prefix + name or like a name.
+        for w in ["זמנ", "מתנ", "אליה", "איתה", "מלאה", "דמיונ", "שאלונ"]
+        {
+            assert!(word_bucket(w) >= 8, "{w}: {}", word_bucket(w));
+        }
+        assert_eq!(word_bucket("קסלפטרונ"), 0);
+    }
+}

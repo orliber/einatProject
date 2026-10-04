@@ -407,6 +407,32 @@ fn approved_sections_feed_derived_sections() {
     assert!(p.approval_id.is_some());
 }
 
+/// The summary in demo mode is written from the approved sections, not answered with "no
+/// sources yet"; with nothing approved it says so before anything is prepared.
+#[test]
+fn the_summary_is_written_from_the_approved_sections_in_demo_mode() {
+    let (_dir, mut core, case) = setup(None);
+    let err = core
+        .prepare_section(&case, "summary", "טיוטה לסיכום")
+        .unwrap_err();
+    assert!(matches!(err, CoreError::Refused(_)), "{err:?}");
+
+    core.add_own_paragraph(&case, "kindergarten", "אלון מגיב בעוצמה למעברים.")
+        .unwrap();
+    let p = core
+        .prepare_section(&case, "summary", "טיוטה לסיכום")
+        .unwrap();
+    let r = core.send_section(&p.approval_id.unwrap()).unwrap();
+    assert!(r.demo);
+    assert_eq!(r.paragraphs.len(), 1, "{}", r.reply);
+    assert!(r.paragraphs[0].text.contains("מעברים"));
+    assert!(
+        r.paragraphs[0].warnings.is_empty(),
+        "{:?}",
+        r.paragraphs[0].warnings
+    );
+}
+
 #[test]
 fn consultations_are_kept_continued_and_deleted() {
     let fake = FakeTransport::default();
@@ -493,6 +519,37 @@ fn full_draft_prepares_every_section_with_material() {
             p.suspects
         );
     }
+}
+
+/// "Write the empty sections" writes only those: a section with a draft waiting or approved
+/// paragraphs is not drafted again beside them.
+#[test]
+fn full_draft_leaves_written_sections_alone() {
+    let (_dir, mut core, case) = setup(None);
+    let all: Vec<String> = core
+        .prepare_full_draft(&case)
+        .unwrap()
+        .into_iter()
+        .map(|(k, _)| k)
+        .collect();
+    assert!(all.len() >= 2, "{all:?}");
+    let (approved, proposed) = (&all[0], &all[1]);
+    core.add_own_paragraph(&case, approved, "פסקה שאושרה.")
+        .unwrap();
+    let p = core.prepare_section(&case, proposed, "טיוטה").unwrap();
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+
+    let again: Vec<String> = core
+        .prepare_full_draft(&case)
+        .unwrap()
+        .into_iter()
+        .map(|(k, _)| k)
+        .collect();
+    assert!(
+        !again.contains(approved) && !again.contains(proposed),
+        "{again:?}"
+    );
+    assert_eq!(again.len(), all.len() - 2);
 }
 
 #[test]
@@ -1097,15 +1154,42 @@ fn lexicon_names() -> Vec<&'static str> {
     names
 }
 
-fn child_named(name: &str) -> [dv_domain::Identity; 1] {
-    [dv_domain::Identity {
-        id: "i".into(),
+fn child_named(name: &str) -> dv_domain::Identity {
+    dv_domain::Identity {
+        id: format!("i-{name}"),
         case_id: "c".into(),
         role: Role::Child,
         tag: "[ילד]".into(),
         value: name.into(),
         aliases: vec![],
-    }]
+    }
+}
+
+/// What `found` finds with each lexicon name as the child's name, per name. The names go in a
+/// hundred at a time: every declared name is matched on its own, so a hundred names that find
+/// nothing clear each of them, and only a hundred that finds something is tried name by name.
+/// One by one, the 2,300 names took over ten minutes in a debug build.
+fn found_for_every_child_name(
+    found: impl Fn(&[dv_domain::Identity]) -> Option<String>,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for chunk in lexicon_names().chunks(100) {
+        let together: Vec<_> = chunk.iter().map(|n| child_named(n)).collect();
+        let Some(all) = found(&together) else {
+            continue;
+        };
+        let before = out.len();
+        for name in chunk {
+            if let Some(one) = found(&[child_named(name)]) {
+                out.push(format!("{name}: {one}"));
+            }
+        }
+        // A case has several names, so what they find only together counts too.
+        if out.len() == before {
+            out.push(format!("{chunk:?}: {all}"));
+        }
+    }
+    out
 }
 
 /// The rules, style, schema and the builder's own words go out with every request and never
@@ -1168,6 +1252,13 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
         let nonce = dv_ai::nonce_from(&[7; 16]);
         // Like the real gate: every string in the body, not the JSON numbers ("max_tokens").
         body.push(dv_ai::build_section_request(&dv_ai::ModelConfig::default(), &input, &nonce).0);
+        // A summary: written from the approved sections only, with its own opening line.
+        let derived = dv_ai::SectionInput {
+            section_key: "summary".into(),
+            sources: vec![],
+            ..input
+        };
+        body.push(dv_ai::build_section_request(&dv_ai::ModelConfig::default(), &derived, &nonce).0);
     }
     // The sorting request (D-022): every section key and description of the template, the
     // passage frames and the schema.
@@ -1193,14 +1284,64 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
         &sort,
         &nonce,
     ));
+    // The style profile (D-043): both requests' rules, frames and schemas, and the words the
+    // profile is framed with in every drafting request.
+    for rules in dv_ai::style::FIXED_TEXTS {
+        body.push(Value::String(rules.to_owned()));
+    }
+    let keys: Vec<String> = structure.sections().map(|s| s.key.clone()).collect();
+    let excerpts: Vec<dv_ai::StyleExcerpt> = keys
+        .iter()
+        .map(|k| dv_ai::StyleExcerpt {
+            section: k.clone(),
+            text: String::new(),
+        })
+        .collect();
+    body.push(dv_ai::build_style_analysis_request(
+        &dv_ai::ModelConfig::default(),
+        &keys,
+        &excerpts,
+        &nonce,
+    ));
+    body.push(dv_ai::build_style_synthesis_request(
+        &dv_ai::ModelConfig::default(),
+        &keys,
+        &[vec![]],
+        &nonce,
+    ));
+    let every_kind = [
+        dv_ai::StyleKind::Rule,
+        dv_ai::StyleKind::Phrase,
+        dv_ai::StyleKind::Avoid,
+        dv_ai::StyleKind::Template,
+        dv_ai::StyleKind::Example,
+    ];
+    let profile = dv_ai::StyleProfile {
+        reports: 1,
+        items: [None, Some("cognitive".to_owned())]
+            .into_iter()
+            .flat_map(|section| {
+                every_kind.into_iter().map(move |kind| dv_ai::StyleItem {
+                    id: "i".into(),
+                    section: section.clone(),
+                    kind,
+                    text: "-".into(),
+                    enabled: true,
+                    origin: dv_ai::StyleOrigin::Reports,
+                    support: 1,
+                })
+            })
+            .collect(),
+    };
+    body.push(Value::String(
+        dv_ai::render_for_section(&profile, "cognitive", &|_| true).unwrap(),
+    ));
     let body = Value::Array(body);
     let tags: HashSet<String> = HashSet::from(["[ילד]".to_owned()]);
-    let mut collisions = Vec::new();
-    for name in lexicon_names() {
-        let identities = child_named(name);
+    let collisions = found_for_every_child_name(|identities| {
         let ctx = PrivacyContext {
             case_id: "c",
-            identities: &identities,
+            identities,
             practitioner: &[],
             allowlisted: &|_| false,
             confirmed_names: &|_| false,
@@ -1214,15 +1355,15 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
             canaries: &[],
             max_bytes: MAX_REQUEST_BYTES,
         };
-        if let Err(blocked) = clear(&req) {
+        clear(&req).err().map(|blocked| {
             let found: Vec<_> = blocked
                 .reasons
                 .iter()
                 .filter_map(|r| r.detail.clone())
                 .collect();
-            collisions.push(format!("{name}: {found:?}"));
-        }
-    }
+            format!("{found:?}")
+        })
+    });
     assert!(collisions.is_empty(), "{collisions:#?}");
 }
 
@@ -1257,24 +1398,22 @@ fn score_tables_and_section_titles_are_never_rewritten_silently() {
         };
         texts.push(dv_domain::format_sheet(&sheet).unwrap());
     }
-    let mut rewritten = Vec::new();
-    for name in lexicon_names() {
-        let identities = child_named(name);
+    let rewritten = found_for_every_child_name(|identities| {
         let ctx = PrivacyContext {
             case_id: "c",
-            identities: &identities,
+            identities,
             practitioner: &[],
             allowlisted: &|_| false,
             confirmed_names: &|_| false,
             today: (2026, 9, 28),
         };
-        for text in &texts {
-            let outcome = dv_privacy::filter(text, &ctx).unwrap();
-            if !outcome.hidden.is_empty() {
-                rewritten.push(format!("{name}: {:?}", outcome.hidden));
-            }
-        }
-    }
+        let hidden: Vec<Vec<String>> = texts
+            .iter()
+            .map(|text| dv_privacy::filter(text, &ctx).unwrap().hidden)
+            .filter(|hidden| !hidden.is_empty())
+            .collect();
+        (!hidden.is_empty()).then(|| format!("{hidden:?}"))
+    });
     assert!(rewritten.is_empty(), "{rewritten:#?}");
 }
 
@@ -2657,4 +2796,94 @@ fn her_own_paragraph_goes_where_she_put_it() {
     let second = ids(&mut core)[1].clone();
     core.edit_paragraph(&case, &second, "  \n ").unwrap();
     assert_eq!(texts(&mut core), vec!["אחת.", "שלוש.", "ארבע."]);
+}
+
+/// AI-6: a score written in the report is checked against the score table she entered, in
+/// code, for every paragraph (hers too), each time the case is shown.
+#[test]
+fn written_scores_are_checked_against_the_score_table() {
+    let (_dir, mut core, case) = setup(None);
+    let sheet = dv_domain::ScoreSheet {
+        instrument: "wppsi_iv".into(),
+        module: String::new(),
+        cutoff: None,
+        entries: vec![dv_domain::ScoreEntry {
+            measure: "vci".into(),
+            value: 95.0,
+            note: String::new(),
+        }],
+        notes: String::new(),
+    };
+    core.save_scores(&case, None, &sheet).unwrap();
+    core.add_own_paragraph(
+        &case,
+        "cognitive",
+        "ההבנה המילולית (VCI) בטווח הממוצע (97).",
+    )
+    .unwrap();
+    core.add_own_paragraph(
+        &case,
+        "cognitive",
+        "ההבנה המילולית (VCI) בטווח הממוצע (95).",
+    )
+    .unwrap();
+    let detail = core.case_detail(&case).unwrap();
+    let paras = &detail
+        .sections
+        .iter()
+        .find(|s| s.key == "cognitive")
+        .unwrap()
+        .paragraphs;
+    assert!(
+        paras[0]
+            .warnings
+            .iter()
+            .any(|w| w.contains("97") && w.contains("95")),
+        "{:?}",
+        paras[0].warnings
+    );
+    assert!(paras[1].warnings.is_empty(), "{:?}", paras[1].warnings);
+}
+
+/// AI-7: "why did you write this?" shows the passages a paragraph was written from, with the
+/// real names (on this computer only); a summary paragraph shows the approved sections.
+#[test]
+fn a_paragraph_shows_the_passages_it_was_written_from() {
+    let (_dir, mut core, case) = setup(None);
+    let p = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    let r = core.send_section(&p.approval_id.unwrap()).unwrap();
+    assert!(!r.paragraphs.is_empty(), "{}", r.reply);
+    let detail = core.case_detail(&case).unwrap();
+    let para = detail
+        .sections
+        .iter()
+        .find(|s| s.key == "kindergarten")
+        .unwrap()
+        .paragraphs[0]
+        .clone();
+    let why = core.paragraph_sources(&case, &para.id).unwrap();
+    assert!(!why.is_empty());
+    assert!(
+        why[0].text.contains("מעברים") && why[0].text.contains("אלון"),
+        "{why:?}"
+    );
+
+    core.approve_section(&case, "kindergarten").unwrap();
+    let s = core.prepare_section(&case, "summary", "טיוטה").unwrap();
+    core.send_section(&s.approval_id.unwrap()).unwrap();
+    let summary = core.case_detail(&case).unwrap();
+    let para = summary
+        .sections
+        .iter()
+        .find(|s| s.key == "summary")
+        .unwrap()
+        .paragraphs[0]
+        .clone();
+    let why = core.paragraph_sources(&case, &para.id).unwrap();
+    assert!(
+        why.iter().any(|x| x.label.contains("סעיף מאושר")),
+        "{why:?}"
+    );
 }

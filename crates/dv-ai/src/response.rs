@@ -147,6 +147,30 @@ pub fn parse_section(
     })
 }
 
+/// Parse an answer for a section written from the approved sections (summary, diagnoses,
+/// recommendations, DSM). Those are sent without `S#` sources, so a paragraph citing none is
+/// expected; every number it states must still appear in an approved section that was sent.
+pub fn parse_derived_section(
+    response: &Value,
+    approved: &[String],
+) -> Result<SectionReply, AiError> {
+    let mut reply = parse_section(response, &[])?;
+    for p in &mut reply.paragraphs {
+        p.warnings = p
+            .source_refs
+            .iter()
+            .map(|r| format!("מקור לא קיים: {r}"))
+            .collect();
+        for n in numbers(&p.text) {
+            if !approved.iter().any(|t| numbers(t).contains(&n)) {
+                p.warnings
+                    .push(format!("המספר {n} לא מופיע בסעיפים שאושרו – לבדוק"));
+            }
+        }
+    }
+    Ok(reply)
+}
+
 /// Plain-text answer (consultation, research).
 pub fn parse_consult(response: &Value) -> Result<String, AiError> {
     text_of(response)
@@ -159,6 +183,24 @@ mod tests {
 
     fn api(text: &str) -> Value {
         json!({"stop_reason": "end_turn", "content": [{"type": "text", "text": text}]})
+    }
+
+    #[test]
+    fn derived_sections_check_numbers_against_the_approved_sections() {
+        let reply = json!({
+            "reply": "סיכמתי",
+            "paragraphs": [
+                {"text": "[ילד] הציג תפקוד ממוצע (9) באוצר מילים.", "source_refs": []},
+                {"text": "ציון כולל של 83.", "source_refs": []},
+                {"text": "לפי S1.", "source_refs": ["S1"]}
+            ],
+            "questions": [], "missing": [], "contradictions": []
+        });
+        let approved = vec!["אוצר מילים: 9.".to_owned()];
+        let out = parse_derived_section(&api(&reply.to_string()), &approved).unwrap();
+        assert!(out.paragraphs[0].warnings.is_empty());
+        assert!(out.paragraphs[1].warnings.iter().any(|w| w.contains("83")));
+        assert!(out.paragraphs[2].warnings.iter().any(|w| w.contains("S1")));
     }
 
     #[test]

@@ -89,9 +89,14 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   /** A section to bring into view on the report page. */
   const [focus, setFocus] = useState<{ key: string; at: number } | null>(null);
 
+  // Sections written side by side reload at about the same time: an answer that arrives
+  // after a newer one is older, and never puts back a section that is already there.
+  const reloadSeq = useRef(0);
   const reload = useCallback(async () => {
+    const seq = ++reloadSeq.current;
     try {
-      setDetail(await ipc.caseDetail(caseId));
+      const d = await ipc.caseDetail(caseId);
+      if (seq === reloadSeq.current) setDetail(d);
     } catch (e) {
       setError(fail(e as never));
     }
@@ -229,7 +234,8 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const unsorted = detail.routing.filter((r) => r.needs_sorting).length;
   const fed = detail.sections.filter((s) => s.source_count > 0);
   const pending = detail.sections.filter((s) => s.paragraphs.some((p) => p.status === "proposed"));
-  const undrafted = fed.filter((s) => s.paragraphs.length === 0);
+  // What "write the whole report" writes: sections from materials with nothing written yet.
+  const undrafted = fed.filter((s) => s.sortable && s.paragraphs.length === 0);
   const hasMaterials = detail.inputs.length > 0;
   const pendingCount = pending.reduce((n, s) => n + s.paragraphs.filter((p) => p.status === "proposed").length, 0);
   const child = detail.identities.find((i) => i.role === "child")?.value ?? "";
@@ -370,7 +376,9 @@ function Contents(props: { detail: CaseDetail; jobs: Job[]; view: string; onOpen
   const approved = content.filter((s) => s.approved && !s.paragraphs.some((p) => p.status === "proposed")).length;
   const waiting = content.filter((s) => s.paragraphs.some((p) => p.status === "proposed")).length;
   const empty = content.filter((s) => s.paragraphs.length === 0);
-  const writable = empty.filter((s) => s.source_count > 0 || !s.sortable).length;
+  // The same sections "write the whole report" writes (the summary and the like come after
+  // approval, from the approved sections).
+  const writable = empty.filter((s) => s.sortable && s.source_count > 0).length;
   const parts = Array.from(new Set(detail.sections.map((s) => s.part)));
   return (
     <aside className="contents" aria-label="תוכן הדוח">
