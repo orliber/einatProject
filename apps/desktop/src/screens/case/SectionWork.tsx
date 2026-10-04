@@ -108,7 +108,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    void ask(message);
+    if (!working) void ask(message);
   }
 
   const derived = DERIVED.includes(section.key);
@@ -384,7 +384,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               <label htmlFor="chat-msg" className="visually-hidden">הודעה ל-Claude</label>
               <textarea id="chat-msg" rows={2} className="textarea grow" placeholder={chatHint}
                 value={message} onChange={(e) => setMessage(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) void ask(message); }} />
+                onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !working) void ask(message); }} />
               <button type="submit" className="btn btn-primary send-btn" title="תמיד מוצג קודם מה יוצא מהמחשב" disabled={working || !message.trim()}>שליחה <SendIcon /></button>
             </div>
           </form>

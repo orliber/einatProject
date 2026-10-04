@@ -8,6 +8,8 @@ import "./ReportRunDialog.css";
 
 /** How many sections are written at the same time. */
 const PARALLEL = 3;
+/** The request each section is sent with (the same as the core's full draft). */
+const DRAFT_INSTRUCTION = "כתוב/י טיוטה לסעיף מתוך המקורות, עם מקור לכל פסקה.";
 
 type RowState = "ready" | "question" | "waiting" | "writing" | "done" | "failed";
 
@@ -88,6 +90,8 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
     try {
       await api.track({ label: `Claude כותב את "${title(key)}"`, task: "draft", section: key, approval }, () => ipc.sendSection(approval));
       setState((s) => ({ ...s, [key]: "done" }));
+      // Each section shows up in the report as soon as it is written, not when the last one is.
+      await api.reload();
     } catch (e) {
       setError(fail(e as never));
       setState((s) => ({ ...s, [key]: "failed" }));
@@ -103,7 +107,6 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
       for (let next = queue.shift(); next; next = queue.shift()) await writeOne(next[0], next[1]);
     };
     await Promise.all(Array.from({ length: Math.min(PARALLEL, queue.length) }, worker));
-    await api.reload();
     setRunning(false);
   }
 
@@ -114,11 +117,10 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
       await api.review({
         title: `טיוטה לסעיף ${title(key)}`,
         prepared,
-        reprepare: () => ipc.prepareSection(api.caseId, key, ""),
+        reprepare: () => ipc.prepareSection(api.caseId, key, DRAFT_INSTRUCTION),
         onSend: async (id) => {
           setState((s) => ({ ...s, [key]: "waiting" }));
           await writeOne(key, id);
-          await api.reload();
         },
       });
     } catch (e) {
