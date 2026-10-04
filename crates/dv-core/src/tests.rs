@@ -822,9 +822,64 @@ fn export_needs_approved_paragraphs_and_restores_names() {
         doc.contains("ממוצע גבוה") && doc.contains("79"),
         "range and percentile in the table"
     );
+    assert!(doc.contains("פרופיל המדדים"), "score chart under the table");
     assert!(doc.contains("ההורים של אלון פנו"), "names restored");
     assert!(doc.contains("שם הילד"), "info line");
     assert!(!doc.contains("[ילד]") && !doc.contains("[גננת]"));
+
+    // Her template: refused with a sentence she can act on, else every export goes into it.
+    assert!(matches!(
+        core.set_report_template(b"not a docx"),
+        Err(CoreError::Refused(_))
+    ));
+    assert!(core.report_template().unwrap().is_none());
+    let template = {
+        use std::io::Write;
+        let mut buf = std::io::Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(&mut buf);
+        let opts = zip::write::SimpleFileOptions::default();
+        for (name, xml) in [
+            (
+                "[Content_Types].xml",
+                r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/></Types>"#,
+            ),
+            (
+                "word/document.xml",
+                r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p/><w:sectPr><w:headerReference w:type="default" r:id="rId1"/></w:sectPr></w:body></w:document>"#,
+            ),
+            (
+                "word/_rels/document.xml.rels",
+                r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/></Relationships>"#,
+            ),
+            (
+                "word/header1.xml",
+                r#"<?xml version="1.0"?><w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>נייר מכתבים בדוי</w:t></w:r></w:p></w:hdr>"#,
+            ),
+        ] {
+            zip.start_file(name, opts).unwrap();
+            zip.write_all(xml.as_bytes()).unwrap();
+        }
+        zip.finish().unwrap();
+        buf.into_inner()
+    };
+    assert_eq!(core.set_report_template(&template).unwrap().headers, 1);
+    let bytes = core.export_report(&case, None).unwrap();
+    let mut header = String::new();
+    std::io::Read::read_to_string(
+        &mut zip::ZipArchive::new(std::io::Cursor::new(&bytes))
+            .unwrap()
+            .by_name("word/header1.xml")
+            .unwrap(),
+        &mut header,
+    )
+    .unwrap();
+    assert!(
+        header.contains("נייר מכתבים בדוי") && header.contains("חסוי"),
+        "{header}"
+    );
+    assert!(read_docx_text(&bytes).contains("ההורים של אלון פנו"));
+    core.clear_report_template().unwrap();
+    assert!(core.report_template().unwrap().is_none());
 
     // Protected export: a Compound File, not a readable zip.
     let protected = core.export_report(&case, Some("סיסמה-לקובץ-1")).unwrap();

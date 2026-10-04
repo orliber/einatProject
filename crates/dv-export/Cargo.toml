@@ -16,6 +16,7 @@ fips = ["aws-lc-rs/fips"]
 [dependencies]
 aws-lc-rs = { version = "1.18", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
 cfb = "0.15"
+quick-xml = "0.42"
 serde.workspace = true
 thiserror.workspace = true
 zip = { version = "8.6", default-features = false, features = ["deflate"] }

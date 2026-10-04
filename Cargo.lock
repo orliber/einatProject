@@ -1070,6 +1070,7 @@ version = "0.4.0"
 dependencies = [
  "aws-lc-rs",
  "cfb 0.15.0",
+ "quick-xml",
  "serde",
  "thiserror 2.0.21",
  "zeroize",

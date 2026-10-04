@@ -473,7 +473,7 @@ pub(crate) fn footer() -> String {
     )
 }
 
-fn styles(font: &str) -> String {
+pub(crate) fn styles(font: &str) -> String {
     let normal = run_props(24, false, None, Some(font));
     let mut out = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><w:styles {W_NS}>\
@@ -580,5 +580,32 @@ mod tests {
     #[test]
     fn deterministic() {
         assert_eq!(render(&sample()).ok(), render(&sample()).ok());
+    }
+
+    #[test]
+    fn score_chart_is_drawn_with_cells() {
+        let mut r = sample();
+        r.tables[0].charts.push(crate::ScoreChart {
+            title: "פרופיל המדדים".into(),
+            min: 40.0,
+            max: 160.0,
+            step: 5.0,
+            mean: 100.0,
+            sd: 15.0,
+            bars: vec![crate::ChartBar {
+                label: "הבנה מילולית (VCI)".into(),
+                value: 112.0,
+            }],
+            note: "הרקע הבהיר: סטיית תקן אחת.".into(),
+        });
+        let doc = part(&render(&r).unwrap(), "word/document.xml");
+        assert!(
+            doc.contains("פרופיל המדדים") && doc.contains("85–99"),
+            "{doc}"
+        );
+        // 40..110 filled: 15 bar cells; 115 is tinted (the band ends below 115).
+        assert_eq!(doc.matches("w:fill=\"1F3A5F\"").count(), 15);
+        assert_eq!(doc.matches("w:fill=\"EEF3F2\"").count(), 0);
+        assert!(doc.contains("<w:gridSpan w:val=\"3\"/>"));
     }
 }

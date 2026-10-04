@@ -17,8 +17,8 @@ use dv_core::{
     ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
     ExportCheck, ImportPreview, NameMatch, Prepared, Readiness, ReportSettings, RetentionItem,
     SectionResult, SortResult, StagedBackup, StyleAnalysisResult, StyleImportPreview,
-    StyleOverview, StyleProfileView, StyleSourceView, SuspectDecision, UiError, UnsavedEdit,
-    UsageSummary,
+    StyleOverview, StyleProfileView, StyleSourceView, SuspectDecision, TemplateView, UiError,
+    UnsavedEdit, UsageSummary,
 };
 use dv_domain::{
     CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind, Role,
@@ -265,6 +265,29 @@ async fn set_report_settings(
     settings: ReportSettings,
 ) -> Res<()> {
     with_core(&state, move |c| c.set_report_settings(&settings)).await
+}
+
+/// Her Word template: the file's bytes are the raw body, like an imported document.
+#[tauri::command]
+async fn set_report_template(
+    state: tauri::State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Res<TemplateView> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(internal("body"));
+    };
+    let bytes = bytes.clone();
+    with_core(&state, move |c| c.set_report_template(&bytes)).await
+}
+
+#[tauri::command]
+async fn clear_report_template(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| c.clear_report_template()).await
+}
+
+#[tauri::command]
+async fn report_template(state: tauri::State<'_, AppState>) -> Res<Option<TemplateView>> {
+    with_core(&state, |c| c.report_template()).await
 }
 
 // ------------------------------------------------------------------ cases
@@ -1323,6 +1346,9 @@ fn main() {
             set_screen_protection,
             report_settings,
             set_report_settings,
+            set_report_template,
+            clear_report_template,
+            report_template,
             list_cases,
             create_case,
             update_case,

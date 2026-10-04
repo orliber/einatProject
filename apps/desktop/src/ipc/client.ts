@@ -28,6 +28,7 @@ import type { Instrument } from "./generated/Instrument";
 import type { PingResponse } from "./generated/PingResponse";
 import type { Prepared } from "./generated/Prepared";
 import type { ReportSettings } from "./generated/ReportSettings";
+import type { TemplateView } from "./generated/TemplateView";
 import type { Role } from "./generated/Role";
 import type { ScoreSheet } from "./generated/ScoreSheet";
 import type { UsageSummary } from "./generated/UsageSummary";
@@ -99,6 +100,17 @@ export const ipc = {
   setScreenProtection: (on: boolean) => run("set_screen_protection", { on }),
   reportSettings: () => call<ReportSettings>("report_settings"),
   setReportSettings: (settings: ReportSettings) => run("set_report_settings", { settings }),
+  /** Her Word template (EX-1): the file's bytes go as the raw body. */
+  setReportTemplate: async (file: File): Promise<TemplateView> => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    try {
+      return await invoke<TemplateView>("set_report_template", bytes);
+    } catch (e) {
+      throw asUiError(e);
+    }
+  },
+  clearReportTemplate: () => run("clear_report_template"),
+  reportTemplate: () => call<TemplateView | null>("report_template"),
 
   listCases: () => call<CaseSummary[]>("list_cases"),
   createCase: (meta: CaseMeta, identities: IdentityInput[]) => call<string>("create_case", { meta, identities }),
@@ -300,6 +312,7 @@ export type {
   PingResponse,
   Prepared,
   ReportSettings,
+  TemplateView,
   FollowUpView,
   ScoreSheet,
   SectionResult,

@@ -8,11 +8,15 @@
 
 mod agile;
 mod docx;
+mod template;
 
 use serde::{Deserialize, Serialize};
 
 pub use agile::{encrypt, MIN_PASSWORD_CHARS};
 pub use docx::render;
+pub use template::{
+    check_template, render_with_template, TemplateSummary, MARKER, MAX_TEMPLATE_BYTES,
+};
 
 /// One section and its approved paragraphs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,6 +98,9 @@ pub enum ExportError {
     Crypto,
     #[error("package: {0}")]
     Package(String),
+    /// Her template cannot be used; the message says what to do, in Hebrew.
+    #[error("{0}")]
+    Template(String),
 }
 
 /// Defense in depth before writing a file: bracketed placeholders that must not reach the

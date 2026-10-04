@@ -63,7 +63,7 @@ pub use views::{
     ChatView, ConsultResult, ConsultTurnView, ConsultationSummary, ConsultationView, CreatedVault,
     ExportCheck, ImportPreview, MaterialRouting, NameMatch, NameSuggestion, ParagraphView,
     Prepared, ReportSettings, RetentionItem, ReviewPart, SectionResult, SectionView, SortResult,
-    SourceExcerpt, StagedBackup, SuspectDecision, UiError,
+    SourceExcerpt, StagedBackup, SuspectDecision, TemplateView, UiError,
 };
 
 const API_KEY: &str = "anthropic_api_key";
@@ -92,6 +92,8 @@ fn day_number() -> u64 {
         .map_or(0, |d| d.as_secs() / 86_400)
 }
 const REPORT_KEY: &str = "report_settings";
+/// Her Word template (EX-1), hex-encoded inside the encrypted vault.
+const TEMPLATE_KEY: &str = "report_template";
 /// A gap this long between two 15-second ticks means the computer slept.
 const SLEEP_GAP: Duration = Duration::from_secs(60);
 const MAX_REQUEST_BYTES: usize = 900_000;
@@ -2378,6 +2380,48 @@ impl Core {
         Ok(())
     }
 
+    /// Her Word template, checked: refused with a sentence she can act on, or kept and
+    /// described. Every report and letter after this is written into it.
+    pub fn set_report_template(&mut self, bytes: &[u8]) -> Result<TemplateView, CoreError> {
+        let view = template_view(bytes)?;
+        self.vault_mut()?
+            .set_setting(TEMPLATE_KEY, &dv_vault::crypto::hex(bytes))?;
+        Ok(view)
+    }
+
+    /// Back to the plain report.
+    pub fn clear_report_template(&mut self) -> Result<(), CoreError> {
+        self.vault_mut()?.set_setting(TEMPLATE_KEY, "")?;
+        Ok(())
+    }
+
+    pub fn report_template(&mut self) -> Result<Option<TemplateView>, CoreError> {
+        self.template_bytes()?
+            .map(|b| template_view(&b))
+            .transpose()
+    }
+
+    fn template_bytes(&mut self) -> Result<Option<Vec<u8>>, CoreError> {
+        match self.vault_ref()?.setting(TEMPLATE_KEY)? {
+            Some(h) if !h.is_empty() => Ok(Some(
+                dv_vault::crypto::unhex(&h).map_err(|e| CoreError::Internal(e.to_string()))?,
+            )),
+            _ => Ok(None),
+        }
+    }
+
+    /// The Word file: in her template when she has one.
+    fn render_docx(&mut self, report: &dv_export::Report) -> Result<Vec<u8>, CoreError> {
+        let out = match self.template_bytes()? {
+            Some(t) => dv_export::render_with_template(report, &t),
+            None => dv_export::render(report),
+        };
+        out.map_err(|e| match e {
+            dv_export::ExportError::Template(m) => CoreError::Refused(m),
+            other => CoreError::Internal(other.to_string()),
+        })
+    }
+
     /// The report with real names, from approved paragraphs only, and what stops the export.
     fn build_report(
         &mut self,
@@ -2498,6 +2542,24 @@ impl Core {
             let sheet: dv_domain::ScoreSheet =
                 serde_json::from_str(&data).map_err(|e| CoreError::Internal(e.to_string()))?;
             let (title, rows, note) = dv_domain::sheet_table(&sheet).map_err(CoreError::Refused)?;
+            let charts = dv_domain::sheet_profiles(&sheet)
+                .map_err(CoreError::Refused)?
+                .into_iter()
+                .map(|p| dv_export::ScoreChart {
+                    title: p.title,
+                    min: p.min,
+                    max: p.max,
+                    step: p.step,
+                    mean: p.mean,
+                    sd: p.sd,
+                    bars: p
+                        .bars
+                        .into_iter()
+                        .map(|(label, value)| dv_export::ChartBar { label, value })
+                        .collect(),
+                    note: p.note,
+                })
+                .collect();
             tables.push(dv_export::ScoreTable {
                 title,
                 columns: ["מדד", "ציון", "אחוזון", "טווח"]
@@ -2508,7 +2570,7 @@ impl Core {
                     .map(|r| vec![r.measure, r.score, r.percentile, r.range])
                     .collect(),
                 note,
-                charts: Vec::new(),
+                charts,
             });
         }
         let score_tables = u32::try_from(tables.len()).unwrap_or(u32::MAX);
@@ -2570,7 +2632,7 @@ impl Core {
         if !check.blocking.is_empty() {
             return Err(CoreError::Refused(check.blocking.join(" · ")));
         }
-        let docx = dv_export::render(&report).map_err(|e| CoreError::Internal(e.to_string()))?;
+        let docx = self.render_docx(&report)?;
         let out = match password {
             Some(pw) => dv_export::encrypt(&docx, pw).map_err(|e| match e {
                 dv_export::ExportError::WeakPassword => CoreError::Refused(format!(
@@ -2588,6 +2650,22 @@ impl Core {
         )?;
         Ok(out)
     }
+}
+
+fn template_view(bytes: &[u8]) -> Result<TemplateView, CoreError> {
+    let s = dv_export::check_template(bytes).map_err(|e| match e {
+        dv_export::ExportError::Template(m) => CoreError::Refused(m),
+        other => CoreError::Internal(other.to_string()),
+    })?;
+    Ok(TemplateView {
+        has_marker: s.has_marker,
+        headers: s.headers,
+        footers: s.footers,
+        images: s.images,
+        styles_matched: s.styles_matched,
+        styles_total: s.styles_total,
+        size_kb: u32::try_from(bytes.len().div_ceil(1024)).unwrap_or(u32::MAX),
+    })
 }
 
 #[cfg(test)]

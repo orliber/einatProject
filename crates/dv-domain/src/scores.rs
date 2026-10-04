@@ -513,6 +513,69 @@ pub fn sheet_table(sheet: &ScoreSheet) -> Result<(String, Vec<ScoreRow>, String)
     Ok((title, rows, inst.scale_note_he.clone()))
 }
 
+/// A bar profile for the report (EX-2): one bar per score on a fixed axis.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScoreProfile {
+    pub title: String,
+    pub min: f64,
+    pub max: f64,
+    pub step: f64,
+    pub mean: f64,
+    pub sd: f64,
+    /// (label, score), in the sheet's order.
+    pub bars: Vec<(String, f64)>,
+    pub note: String,
+}
+
+/// Profiles of a sheet: index scores (mean 100, SD 15) and subtest scaled scores (mean 10,
+/// SD 3), each on its own axis. Other scales (T scores, cut-offs) are not drawn: a bar there
+/// would suggest a comparison the scale does not support.
+pub fn sheet_profiles(sheet: &ScoreSheet) -> Result<Vec<ScoreProfile>, String> {
+    let (_, entries) = checked(sheet)?;
+    let mut out = Vec::new();
+    for (scale, title, min, max, step, mean, sd, note) in [
+        (
+            ScoreScale::Standard,
+            "פרופיל המדדים",
+            40.0,
+            160.0,
+            5.0,
+            100.0,
+            15.0,
+            "הרקע הבהיר: טווח של סטיית תקן אחת סביב הממוצע (85–115).",
+        ),
+        (
+            ScoreScale::Scaled,
+            "פרופיל תת-המבחנים",
+            1.0,
+            20.0,
+            1.0,
+            10.0,
+            3.0,
+            "הרקע הבהיר: טווח של סטיית תקן אחת סביב הממוצע (7–13).",
+        ),
+    ] {
+        let bars: Vec<(String, f64)> = entries
+            .iter()
+            .filter(|(m, _)| m.scale == scale)
+            .map(|(m, e)| (measure_label(m), e.value))
+            .collect();
+        if !bars.is_empty() {
+            out.push(ScoreProfile {
+                title: title.to_owned(),
+                min,
+                max,
+                step,
+                mean,
+                sd,
+                bars,
+                note: note.to_owned(),
+            });
+        }
+    }
+    Ok(out)
+}
+
 /// The text stored as a "test scores" material: every score with its range from the table,
 /// the scale sentence, and a note on large gaps between indexes (to check in the manual).
 pub fn format_sheet(sheet: &ScoreSheet) -> Result<String, String> {
@@ -1023,5 +1086,17 @@ mod tests {
             (rows[0].percentile.as_str(), rows[0].range.as_str()),
             ("—", "בנקודת החתך או מעליה (8)")
         );
+    }
+
+    #[test]
+    fn profiles_split_indexes_from_subtests() {
+        let sheet = wppsi(&[("fsiq", 102.0), ("vci", 112.0), ("block_design", 9.0)]);
+        let p = sheet_profiles(&sheet).unwrap();
+        assert_eq!(p.len(), 2);
+        assert_eq!((p[0].mean, p[0].sd), (100.0, 15.0));
+        assert_eq!(p[0].bars.len(), 2);
+        assert_eq!(p[0].bars[1], ("הבנה מילולית (VCI)".to_owned(), 112.0));
+        assert_eq!((p[1].mean, p[1].bars.len()), (10.0, 1));
+        assert!(sheet_profiles(&wppsi(&[])).unwrap().is_empty());
     }
 }

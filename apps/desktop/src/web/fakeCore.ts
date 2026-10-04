@@ -21,6 +21,7 @@ import type { Folder } from "../ipc/generated/Folder";
 import type { NameMatch } from "../ipc/generated/NameMatch";
 import type { Prepared } from "../ipc/generated/Prepared";
 import type { ReportSettings } from "../ipc/generated/ReportSettings";
+import type { TemplateView } from "../ipc/generated/TemplateView";
 import type { ReviewPart } from "../ipc/generated/ReviewPart";
 import type { Role } from "../ipc/generated/Role";
 import type { ScoreSheet } from "../ipc/generated/ScoreSheet";
@@ -119,6 +120,7 @@ export class FakeCore {
   private speed = "balanced";
   private reviewOnlySuspect = false;
   private screenProtection = true;
+  private template: TemplateView | null = null;
   private report: ReportSettings = {
     title: "דוח אבחון פסיכולוגי-התפתחותי",
     font: "David",
@@ -618,6 +620,14 @@ export class FakeCore {
         return this.report;
       case "set_report_settings":
         this.report = a.settings as ReportSettings;
+        return null;
+      case "report_template":
+        return this.template;
+      case "set_report_template":
+        this.template = { has_marker: false, headers: 1, footers: 0, images: 1, styles_matched: 2, styles_total: 9, size_kb: 24 };
+        return this.template;
+      case "clear_report_template":
+        this.template = null;
         return null;
       case "list_cases":
         return this.cases.filter((c) => c.deletedAt === null).map((c) => this.summary(c));

@@ -312,6 +312,20 @@ pub struct ReportSettings {
     pub signature: Vec<String>,
 }
 
+/// Her Word template (EX-1), as checked when she chose it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TemplateView {
+    /// The report goes where `{{הדוח}}` is written; otherwise it replaces the template's body.
+    pub has_marker: bool,
+    pub headers: u32,
+    pub footers: u32,
+    pub images: u32,
+    pub styles_matched: u32,
+    pub styles_total: u32,
+    pub size_kb: u32,
+}
+
 /// A name typed for a case that already appears in another case (D-023).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
