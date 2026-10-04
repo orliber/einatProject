@@ -155,7 +155,7 @@
 |---|---|---|---|
 | הצפנת דיסק | US-2, IL-8 | בדיקה ב-`env_checks`: FileVault / BitLocker / Device Encryption. **תזכורת בלבד** (D-013, סטייה מתועדת) | 2 |
 | תיקייה מסונכרנת לענן | IL-2 | סירוב לפעול (Dropbox, OneDrive, iCloud, Google Drive) | 2 |
-| צילום מסך ושיתוף מסך | GDPR 32 | `contentProtected`: החלון לא נקלט בצילום ובשיתוף מסך. אפשר לבטל בהגדרות, עם סיסמה. | 1 |
+| צילום מסך ושיתוף מסך | GDPR 32 | `contentProtected`: כבוי בינתיים לבקשת עינת (D-039). הקוד נשאר וחוזר בשני קבועים. | 1 |
 | לוח העתקה | ASVS | ניקוי אחרי 60 שניות, ובלי היסטוריית לוח (ExcludeClipboardContentFromMonitorProcessing ב-Windows) | 5 |
 | קובצי Word שיוצאו | IL-1 | סיסמה לקובץ (הצפנת Agile של ECMA-376). אזהרה על שמירה אוטומטית ל-OneDrive ב-Word. הדרכה ב-`SETUP_HE.md`. | 5, 8 |
 
