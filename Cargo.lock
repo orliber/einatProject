@@ -1080,6 +1080,7 @@ dependencies = [
 name = "dv-ingest"
 version = "0.3.0"
 dependencies = [
+ "dv-sandbox",
  "pdf-extract",
  "quick-xml",
  "serde",
@@ -1108,6 +1109,13 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "ts-rs",
+]
+
+[[package]]
+name = "dv-sandbox"
+version = "0.2.0"
+dependencies = [
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

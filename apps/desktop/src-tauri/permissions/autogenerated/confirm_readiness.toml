@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-confirm-readiness"
+description = "Enables the confirm_readiness command without any pre-configured scope."
+commands.allow = ["confirm_readiness"]
+
+[[permission]]
+identifier = "deny-confirm-readiness"
+description = "Denies the confirm_readiness command without any pre-configured scope."
+commands.deny = ["confirm_readiness"]

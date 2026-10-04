@@ -5,6 +5,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod file_dialog;
+mod os_lock;
 mod secret_clipboard;
 
 use std::path::PathBuf;
@@ -14,9 +15,9 @@ use std::time::Duration;
 use dv_core::{
     ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView,
     ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
-    ExportCheck, ImportPreview, NameMatch, Prepared, ReportSettings, RetentionItem, SectionResult,
-    SortResult, StagedBackup, StyleAnalysisResult, StyleImportPreview, StyleOverview,
-    StyleProfileView, StyleSourceView, SuspectDecision, UiError,
+    ExportCheck, ImportPreview, NameMatch, Prepared, Readiness, ReportSettings, RetentionItem,
+    SectionResult, SortResult, StagedBackup, StyleAnalysisResult, StyleImportPreview, StyleOverview,
+    StyleProfileView, StyleSourceView, SuspectDecision, UiError, UnsavedEdit, UsageSummary,
 };
 use dv_domain::{CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind};
 use tauri::Manager;
@@ -166,7 +167,59 @@ async fn lock(window: tauri::WebviewWindow, state: tauri::State<'_, AppState>) -
     .await
 }
 
+/// The psychologist is working in the window (typing, scrolling) without calling the core.
+#[tauri::command]
+async fn touch(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| {
+        c.touch();
+        Ok(())
+    })
+    .await
+}
+
 // ------------------------------------------------------------------ settings
+
+/// What must be true before real cases (stage 8): informs, never blocks.
+#[tauri::command]
+async fn readiness(state: tauri::State<'_, AppState>) -> Res<Readiness> {
+    with_core(&state, |c| c.readiness()).await
+}
+
+#[tauri::command]
+async fn confirm_readiness(
+    state: tauri::State<'_, AppState>,
+    key: String,
+    done: bool,
+) -> Res<Readiness> {
+    with_core(&state, move |c| c.confirm_readiness(&key, done)).await
+}
+
+/// The paragraph being edited now (memory only), kept in the vault if it locks meanwhile.
+#[tauri::command]
+async fn hold_unsaved(state: tauri::State<'_, AppState>, edit: Option<UnsavedEdit>) -> Res<()> {
+    with_core(&state, move |c| {
+        c.hold_unsaved(edit);
+        Ok(())
+    })
+    .await
+}
+
+/// After entering: the edit kept at the last lock, offered once.
+#[tauri::command]
+async fn take_unsaved(state: tauri::State<'_, AppState>) -> Res<Option<UnsavedEdit>> {
+    with_core(&state, |c| c.take_unsaved()).await
+}
+
+/// This month's use of the AI (numbers only) and the monthly ceiling.
+#[tauri::command]
+async fn usage_summary(state: tauri::State<'_, AppState>) -> Res<UsageSummary> {
+    with_core(&state, |c| c.usage_summary()).await
+}
+
+#[tauri::command]
+async fn set_monthly_cap(state: tauri::State<'_, AppState>, cap_usd: Option<u32>) -> Res<()> {
+    with_core(&state, move |c| c.set_monthly_cap(cap_usd)).await
+}
 
 #[tauri::command]
 async fn set_api_key(state: tauri::State<'_, AppState>, key: String) -> Res<()> {
@@ -853,7 +906,9 @@ async fn export_report(
     case_id: String,
     password: Option<String>,
 ) -> Res<String> {
-    // Downloads, else Documents, else the home folder, else the app's own folder.
+    // Downloads, else Documents, else the home folder, else the app's own folder. A folder
+    // that a cloud service syncs (Documents moved to OneDrive, say) is skipped: the report
+    // holds the real names and would be uploaded on its own.
     let paths = app.path();
     let dir = [
         paths.download_dir(),
@@ -863,6 +918,7 @@ async fn export_report(
     ]
     .into_iter()
     .flatten()
+    .filter(|d| dv_core::cloud_synced_folder(d).is_none())
     .find(|d| std::fs::create_dir_all(d).is_ok())
     .ok_or_else(|| UiError {
         code: "no_folder".to_owned(),
@@ -999,6 +1055,12 @@ async fn choose_backup(
 }
 
 /// Restore drill on the chosen file, with the password.
+/// The automatic backup to the drive of the last backup, on or off.
+#[tauri::command]
+async fn set_auto_backup(state: tauri::State<'_, AppState>, on: bool) -> Res<BackupStatus> {
+    with_core(&state, move |c| c.set_auto_backup(on)).await
+}
+
 #[tauri::command]
 async fn check_backup(state: tauri::State<'_, AppState>, password: String) -> Res<BackupCheckView> {
     let password = zeroize::Zeroizing::new(password);
@@ -1170,12 +1232,29 @@ fn main() {
             if let Some(w) = &timer_window {
                 protect(w, true);
             }
+            let mut computer = os_lock::LockWatch::default();
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(15));
                 // Read the clock before waiting for the core: a long command holding it must not
                 // look like the computer slept.
                 let now = std::time::SystemTime::now();
-                let locked = timer.lock().is_ok_and(|mut c| c.tick(now));
+                let mut locked = timer.lock().is_ok_and(|mut c| c.tick(now));
+                // The computer was locked (Win+L): the vault locks with it. Asked without
+                // holding the core, and only while the vault is open.
+                if !locked && timer.lock().is_ok_and(|c| c.is_unlocked()) {
+                    let answer = os_lock::computer_locked();
+                    if computer.just_locked(answer) {
+                        locked = timer.lock().is_ok_and(|mut c| c.lock_with_computer());
+                    }
+                }
+                // A backup that is due goes by itself to the drive of the last one, if it is
+                // connected (see `Core::auto_backup`). A failure waits and is shown nowhere: the
+                // backup reminder stays until a backup is made.
+                if !locked {
+                    if let Ok(mut c) = timer.lock() {
+                        let _ = c.auto_backup();
+                    }
+                }
                 if locked {
                     timer_clipboard.clear_now();
                     if let Some(w) = &timer_window {
@@ -1200,6 +1279,13 @@ fn main() {
             unlock,
             unlock_with_recovery,
             lock,
+            touch,
+            readiness,
+            confirm_readiness,
+            usage_summary,
+            set_monthly_cap,
+            hold_unsaved,
+            take_unsaved,
             set_api_key,
             set_model,
             set_speed,
@@ -1289,6 +1375,7 @@ fn main() {
             check_backup,
             restore_backup,
             forget_backup,
+            set_auto_backup,
             check_update,
             prepare_update,
             install_update,

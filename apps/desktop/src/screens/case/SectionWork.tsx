@@ -4,6 +4,7 @@ import { ipc, type CaseDetail, type ChatView, type SectionResult } from "../../i
 import { ErrorLine, SendIcon, Spinner, WarnIcon } from "../../components/ui";
 import { ProgressLine } from "../../components/Progress";
 import { Why } from "../../components/Why";
+import { useHoldUnsaved } from "../../components/Unsaved";
 import { kindLabel } from "../../i18n/he";
 import { useRotatingPlaceholder } from "../../components/Rotating";
 import { DRAFT_HINTS } from "../../i18n/suggestions";
@@ -63,6 +64,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
 
   // One request at a time per section: while it is prepared, reviewed or written.
   const job = api.jobs.find((j) => j.section === section.key);
+  useHoldUnsaved(caseId, `פסקה בסעיף "${section.title}"`, editing?.text ?? own);
   const [preparing, setPreparing] = useState(false);
   const working = preparing || busy || job !== undefined;
 

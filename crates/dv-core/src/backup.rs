@@ -22,6 +22,14 @@ const LAST_DIR_KEY: &str = "backup_last_dir";
 const LAST_CHECK_KEY: &str = "backup_last_check_at";
 /// When the password or the kit last changed: backups older than this open only with the old one.
 const SECRET_CHANGED_KEY: &str = "secret_changed_at";
+/// "0" turns the automatic backup off; anything else (or nothing) leaves it on.
+pub(crate) const AUTO_KEY: &str = "backup_auto";
+/// The start of an automatic backup's file name. Only files named so are ever removed.
+const AUTO_PREFIX: &str = "גיבוי אוטומטי כספת האבחון ";
+/// Automatic backups kept in the folder; older ones are removed (hers never are).
+pub const AUTO_KEEP: usize = 3;
+/// After a failed automatic backup (a full drive), the next try waits this long.
+const AUTO_RETRY: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 
 /// The file name offered in the "Save as" window. A date, nothing about any case.
 #[must_use]
@@ -30,6 +38,39 @@ pub fn backup_file_name(now: i64) -> String {
         "גיבוי כספת האבחון {}.{BACKUP_EXTENSION}",
         crate::dates::iso(crate::dates::date_of(now))
     )
+}
+
+/// The name of an automatic backup. A date, nothing about any case.
+#[must_use]
+pub fn auto_backup_file_name(now: i64) -> String {
+    format!(
+        "{AUTO_PREFIX}{}.{BACKUP_EXTENSION}",
+        crate::dates::iso(crate::dates::date_of(now))
+    )
+}
+
+/// Remove the automatic backups in `dir` beyond the newest `AUTO_KEEP` (the date in the name
+/// sorts them). Files she saved herself are not touched.
+fn prune_auto_backups(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let suffix = format!(".{BACKUP_EXTENSION}");
+    let mut ours: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .filter(|e| {
+            e.file_name()
+                .to_str()
+                .is_some_and(|n| n.starts_with(AUTO_PREFIX) && n.ends_with(&suffix))
+        })
+        .map(|e| e.path())
+        .collect();
+    ours.sort();
+    let extra = ours.len().saturating_sub(AUTO_KEEP);
+    for old in ours.into_iter().take(extra) {
+        let _ = std::fs::remove_file(old);
+    }
 }
 
 impl Core {
@@ -48,7 +89,42 @@ impl Core {
             secret_changed,
             last_check_at,
             has_cases: !v.list_cases()?.is_empty() || !v.list_trash()?.is_empty(),
+            auto: v.setting(AUTO_KEY)?.as_deref() != Some("0"),
         })
+    }
+
+    pub fn set_auto_backup(&mut self, on: bool) -> Result<BackupStatus, CoreError> {
+        self.vault_mut()?
+            .set_setting(AUTO_KEY, if on { "1" } else { "0" })?;
+        self.backup_status()
+    }
+
+    /// Called by the shell's timer. When a backup is due, the vault has cases, the automatic
+    /// backup is on, and the folder of the last backup is there (the removable drive is
+    /// connected), write one there and keep the newest few. `None` when nothing was done.
+    ///
+    /// The first backup is always hers: it chooses the folder, and the checks of
+    /// `write_backup` (not in the cloud, not next to the vault) apply to every automatic one.
+    pub fn auto_backup(&mut self) -> Result<Option<BackupDone>, CoreError> {
+        if self.vault.is_none()
+            || self
+                .auto_backup_tried
+                .is_some_and(|t| t.elapsed() < AUTO_RETRY)
+        {
+            return Ok(None);
+        }
+        let status = self.backup_status()?;
+        if !(status.auto && status.due && status.has_cases) {
+            return Ok(None);
+        }
+        let Some(dir) = self.backup_dir()? else {
+            return Ok(None);
+        };
+        self.auto_backup_tried = Some(std::time::Instant::now());
+        let done = self.write_backup(&dir.join(auto_backup_file_name(unix_now())))?;
+        prune_auto_backups(&dir);
+        self.auto_backup_tried = None;
+        Ok(Some(done))
     }
 
     pub(crate) fn mark_secret_changed(&mut self) -> Result<(), CoreError> {

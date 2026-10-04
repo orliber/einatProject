@@ -6,6 +6,7 @@ import { ageWords } from "../../components/AgeField";
 import { ErrorLine, WarnIcon } from "../../components/ui";
 import { Why } from "../../components/Why";
 import { ProgressLine } from "../../components/Progress";
+import { useHoldUnsaved } from "../../components/Unsaved";
 import { useRotatingPlaceholder } from "../../components/Rotating";
 import { DRAFT_HINTS, PARAGRAPH_HINTS } from "../../i18n/suggestions";
 import type { CaseApi } from "../CaseScreen";
@@ -131,6 +132,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
   const [whyPop, setWhyPop] = useState<string | null>(null);
   /** The paragraph whose delete button asks "למחוק?". */
   const [deleting, setDeleting] = useState<string | null>(null);
+  useHoldUnsaved(caseId, `פסקה בסעיף "${s.title}"`, editing?.text ?? null);
   const [wish, setWish] = useState("");
   const paraHint = useRotatingPlaceholder(PARAGRAPH_HINTS, wish.length > 0);
   const draftHint = useRotatingPlaceholder(DRAFT_HINTS, wish.length > 0);

@@ -280,3 +280,103 @@ mod tests {
         assert_eq!(detect(&big, "a.txt"), Err(IngestError::TooLarge));
     }
 }
+
+/// A hostile or damaged file must end in an error, never a crash: thousands of mutated
+/// documents (flipped bytes, cut short, garbage) through the same `extract` the worker runs.
+/// Deterministic, so a failure reproduces. PDF is left out: its parser is a dependency whose
+/// crashes the isolated worker contains (`tests/worker.rs`).
+#[cfg(test)]
+mod robustness {
+    use super::extract;
+
+    /// xorshift64*: enough randomness for mutations, no dependency, same run every time.
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 >> 12;
+            self.0 ^= self.0 << 25;
+            self.0 ^= self.0 >> 27;
+            self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        }
+        fn below(&mut self, n: usize) -> usize {
+            usize::try_from(self.next() % (n.max(1) as u64)).unwrap_or(0)
+        }
+    }
+
+    fn mutate(rng: &mut Rng, seed: &[u8]) -> Vec<u8> {
+        let mut b = seed.to_vec();
+        match rng.below(4) {
+            0 => {
+                for _ in 0..=rng.below(8) {
+                    let i = rng.below(b.len());
+                    b[i] ^= u8::try_from(rng.next() & 0xFF).unwrap_or(1) | 1;
+                }
+            }
+            1 => b.truncate(rng.below(b.len())),
+            2 => {
+                let i = rng.below(b.len());
+                let junk: Vec<u8> = (0..rng.below(64))
+                    .map(|_| u8::try_from(rng.next() & 0xFF).unwrap_or(0))
+                    .collect();
+                b.splice(i..i, junk);
+            }
+            _ => {
+                let (i, j) = (rng.below(b.len()), rng.below(b.len()));
+                b.swap(i, j);
+            }
+        }
+        b
+    }
+
+    fn never_panics(name: &str, seed: &[u8], rounds: usize) {
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ seed.len() as u64);
+        for round in 0..rounds {
+            let bytes = mutate(&mut rng, seed);
+            let r = std::panic::catch_unwind(|| extract(&bytes, name));
+            assert!(r.is_ok(), "{name}: round {round} crashed the parser");
+        }
+    }
+
+    #[test]
+    fn damaged_word_files_are_refused_not_crashed_on() {
+        use crate::docx::tests::{build, document, para};
+        let seed = build(&[(
+            "word/document.xml",
+            document(&format!(
+                "{}{}",
+                para("שורה ראשונה"),
+                para("שורה שנייה עם <b>")
+            )),
+        )]);
+        never_panics("a.docx", &seed, 3_000);
+    }
+
+    #[test]
+    fn damaged_odt_files_are_refused_not_crashed_on() {
+        let ns = crate::odt::tests::NS;
+        let content = format!(
+            "<office:document-content {ns}><office:body><office:text><text:p>שורה</text:p></office:text></office:body></office:document-content>"
+        );
+        let seed = crate::odt::tests::build(&content, "<x/>", "<x/>");
+        never_panics("a.odt", &seed, 3_000);
+    }
+
+    #[test]
+    fn garbage_and_odd_text_are_refused_not_crashed_on() {
+        let mut rng = Rng(42);
+        for round in 0..3_000 {
+            let len = rng.below(512);
+            let bytes: Vec<u8> = (0..len)
+                .map(|_| u8::try_from(rng.next() & 0xFF).unwrap_or(0))
+                .collect();
+            let name = ["a.txt", "a.docx", "a.odt", "a.doc", "x"][round % 5];
+            let r = std::panic::catch_unwind(|| extract(&bytes, name));
+            assert!(r.is_ok(), "{name}: round {round} crashed");
+        }
+        never_panics(
+            "a.txt",
+            "שורה\r\nשורה ‏עם כיווניות\u{200f}".as_bytes(),
+            2_000,
+        );
+    }
+}

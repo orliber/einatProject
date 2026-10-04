@@ -7,6 +7,9 @@ export const he = {
   encrypted: "מוצפן, שמור במחשב הזה",
   lock: {
     lockedAfterIdle: (minutes: number) => `הכספת ננעלה אחרי ${minutes} דקות ללא פעילות.`,
+    idleSoon: (seconds: number) =>
+      seconds <= 15 ? "הכספת ננעלת עכשיו, כי לא הייתה פעילות." : `הכספת תינעל בעוד כ-${seconds} שניות, כי לא הייתה פעילות.`,
+    keepWorking: "להמשיך לעבוד",
     password: "סיסמה",
     open: "פתיחה",
     footer:

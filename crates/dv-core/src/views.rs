@@ -32,6 +32,8 @@ pub struct AppStatus {
     pub speed: String,
     pub integrity_warning: Option<String>,
     pub lock_minutes: u32,
+    /// While the vault is open: seconds until the idle lock (the UI warns in the last minute).
+    pub idle_lock_in: Option<u32>,
     /// Names always hidden as the practitioner (shown in settings).
     pub practitioner: Vec<String>,
     /// Show the review screen only when something is suspicious (D-020).
@@ -336,6 +338,9 @@ pub struct BackupStatus {
     pub last_check_at: Option<i64>,
     /// An empty vault has nothing to lose yet: no reminder.
     pub has_cases: bool,
+    /// A backup is made by itself into the folder of the last one when it is due and that
+    /// folder (a removable drive) is connected.
+    pub auto: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

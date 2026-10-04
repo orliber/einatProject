@@ -5,8 +5,11 @@ import { BackupSettings } from "../components/Backup";
 import { PasswordSettings } from "../components/PasswordSettings";
 import { TopBar } from "../components/TopBar";
 import { UpdateSettings } from "../components/Update";
+import { UsageSettings } from "../components/UsageSettings";
+import { ReadinessSettings } from "../components/ReadinessSettings";
 import { ErrorLine } from "../components/ui";
 import { ipc, type ReportSettings } from "../ipc/client";
+import { TEXT_SIZES, applyTextSize, readTextSize } from "../textSize";
 import "./SettingsScreen.css";
 
 /** The screen-capture switch is hidden while that protection is off (D-039). */
@@ -19,7 +22,9 @@ const MODELS: [string, string][] = [
 ];
 
 const JUMPS: [string, string][] = [
+  ["s-ready", "מוכנה לעבודה"],
   ["s-claude", "חיבור ל-AI"],
+  ["s-usage", "שימוש ועלות"],
   ["s-privacy", "פרטיות ונעילה"],
   ["s-report", "הדוח"],
   ["s-backup", "גיבוי"],
@@ -36,6 +41,7 @@ export function SettingsScreen() {
   const [names, setNames] = useState(status.practitioner.join(", "));
   const [report, setReport] = useState<ReportSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [textSize, setTextSize] = useState(readTextSize);
 
   useEffect(() => {
     ipc.reportSettings().then(setReport).catch((e) => setError(fail(e as never)));
@@ -65,6 +71,8 @@ export function SettingsScreen() {
           ))}
         </nav>
         <ErrorLine error={error} />
+
+        <ReadinessSettings />
 
         <section className="card setting" aria-labelledby="s-claude">
           <h2 id="s-claude">חיבור ל-Claude</h2>
@@ -103,6 +111,8 @@ export function SettingsScreen() {
           </div>
         </section>
 
+        <UsageSettings />
+
         <section className="card setting" aria-labelledby="s-privacy">
           <h2 id="s-privacy">פרטיות ונעילה</h2>
           <div className="field">
@@ -118,6 +128,14 @@ export function SettingsScreen() {
               <input id="lock" className="input narrow" type="number" min={1} max={60} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} />
               <button type="button" className="btn" onClick={() => void run(() => ipc.setLockMinutes(minutes), "זמן הנעילה עודכן.")}>שמירה</button>
             </div>
+          </div>
+          <div className="field">
+            <label htmlFor="text-size">גודל הטקסט בתוכנה</label>
+            <select id="text-size" className="select" value={textSize}
+              onChange={(e) => { const n = Number(e.target.value); applyTextSize(n); setTextSize(n); }}>
+              {TEXT_SIZES.map((n) => <option key={n} value={n}>{n === 100 ? "רגיל (100%)" : `${n}%`}</option>)}
+            </select>
+            <span className="hint">גם במקלדת: Ctrl ו-+ להגדלה, Ctrl ו-− להקטנה, Ctrl ו-0 לחזרה לרגיל.</span>
           </div>
           <label className="row">
             <input type="checkbox" checked={status.review_only_suspect} disabled={!status.review_choice_available}

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-monthly-cap"
+description = "Enables the set_monthly_cap command without any pre-configured scope."
+commands.allow = ["set_monthly_cap"]
+
+[[permission]]
+identifier = "deny-set-monthly-cap"
+description = "Denies the set_monthly_cap command without any pre-configured scope."
+commands.deny = ["set_monthly_cap"]
