@@ -2,12 +2,13 @@
 #   apps/desktop/src-tauri/ocr/tesseract.exe
 #   apps/desktop/src-tauri/ocr/tessdata/{heb,eng,osd}.traineddata
 #
-# Tesseract is built from its upstream sources by vcpkg at a pinned release (static: one
-# program, no DLLs), not downloaded as someone else's build. The language data is checked
+# Tesseract is built from its upstream sources by vcpkg (static: one program, no DLLs), not
+# downloaded as someone else's build. vcpkg's port files pin every source archive by SHA-512.
+# The runner's own vcpkg is used: an old pinned vcpkg breaks when its build-tool downloads
+# (MSYS2 packages) disappear from the mirrors. Its commit is printed for the record. The language data is checked
 # against pinned SHA-256 hashes. Nothing here runs on her computer; it runs in CI only.
 $ErrorActionPreference = 'Stop'
 
-$VcpkgTag = '2025.01.13'
 $TessdataTag = '4.1.0'
 $Languages = @{
   'heb' = 'dbaa827aea6bc21215638447f17783a1004987c2d0bf5573d111fee397abdae5'
@@ -20,13 +21,9 @@ $data = Join-Path $dest 'tessdata'
 New-Item -ItemType Directory -Force -Path $data | Out-Null
 
 # 1. The engine.
-$vcpkg = Join-Path $env:RUNNER_TEMP 'vcpkg'
-if (-not (Test-Path (Join-Path $vcpkg 'vcpkg.exe'))) {
-  git clone --quiet --depth 1 --branch $VcpkgTag https://github.com/microsoft/vcpkg $vcpkg
-  if ($LASTEXITCODE -ne 0) { throw 'vcpkg clone failed' }
-  & (Join-Path $vcpkg 'bootstrap-vcpkg.bat') -disableMetrics
-  if ($LASTEXITCODE -ne 0) { throw 'vcpkg bootstrap failed' }
-}
+$vcpkg = $env:VCPKG_INSTALLATION_ROOT
+if (-not $vcpkg -or -not (Test-Path (Join-Path $vcpkg 'vcpkg.exe'))) { throw 'vcpkg not found on this runner' }
+Write-Host "vcpkg commit: $(git -C $vcpkg rev-parse HEAD)"
 & (Join-Path $vcpkg 'vcpkg.exe') install 'tesseract:x64-windows-static' --clean-after-build --disable-metrics
 if ($LASTEXITCODE -ne 0) { throw 'tesseract build failed' }
 $exe = Get-ChildItem -Recurse -Filter 'tesseract.exe' (Join-Path $vcpkg 'installed\x64-windows-static\tools') | Select-Object -First 1
