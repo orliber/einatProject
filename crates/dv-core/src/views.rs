@@ -65,6 +65,15 @@ pub struct ParagraphView {
     pub replaces: Option<String>,
 }
 
+/// One passage a paragraph leans on ("למה כתבת את זה?", AI-7), shown on this computer only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SourceExcerpt {
+    /// Where it comes from ("שאלון קליטה · הורים", "סעיף מאושר · רקע התפתחותי").
+    pub label: String,
+    pub text: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SectionView {

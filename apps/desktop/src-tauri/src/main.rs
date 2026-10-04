@@ -302,6 +302,16 @@ async fn save_scores(
     .await
 }
 
+/// "למה כתבת את זה?": the passages one paragraph leans on (local only).
+#[tauri::command]
+async fn paragraph_sources(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    draft_id: String,
+) -> Res<Vec<dv_core::SourceExcerpt>> {
+    with_core(&state, move |c| c.paragraph_sources(&case_id, &draft_id)).await
+}
+
 #[tauri::command]
 async fn score_sheet(
     state: tauri::State<'_, AppState>,
@@ -1204,6 +1214,7 @@ fn main() {
             preview_scores,
             save_scores,
             score_sheet,
+            paragraph_sources,
             import_document,
             preview_filter,
             decide_suspect,

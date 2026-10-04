@@ -3,6 +3,7 @@ import { useApp } from "../../App";
 import { ipc, type CaseDetail, type ChatView, type SectionResult } from "../../ipc/client";
 import { ErrorLine, SendIcon, Spinner, WarnIcon } from "../../components/ui";
 import { ProgressLine } from "../../components/Progress";
+import { Why } from "../../components/Why";
 import { kindLabel } from "../../i18n/he";
 import { useRotatingPlaceholder } from "../../components/Rotating";
 import { DRAFT_HINTS } from "../../i18n/suggestions";
@@ -33,6 +34,8 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   const [error, setError] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
   const [linked, setLinked] = useState(false);
+  /** Paragraphs whose sources are open ("למה כתבת את זה?", AI-7). */
+  const [why, setWhy] = useState<string | null>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
 
   const loadChat = useCallback(async () => {
@@ -271,8 +274,13 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                   <div className="para-meta">
                     <span className="approved-mark">✓ אושר על ידך</span>
                     {p.sources.length > 0 && <span className="muted">מקור: {p.sources.join(" · ")}</span>}
+                    {p.by_ai && <button type="button" className="link-small" aria-expanded={why === p.id} onClick={() => setWhy(why === p.id ? null : p.id)}>למה כתבת את זה?</button>}
                     <button type="button" className="link-small" onClick={() => setEditing({ id: p.id, text: p.text })}>עריכה</button>
                   </div>
+                  {warnings.map((w, i) => (
+                    <div key={i} className="note-warn"><WarnIcon /><span>{w}</span></div>
+                  ))}
+                  {why === p.id && <Why caseId={caseId} draftId={p.id} />}
                 </article>
               );
             }
@@ -282,8 +290,10 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                   <div className="para-meta">
                     <span className="pending-mark">{p.by_ai ? "הצעה של Claude · ממתינה לאישור" : "ממתינה לאישור"}</span>
                     {p.sources.length > 0 && <span className="muted">מקור: {p.sources.join(" · ")}</span>}
+                    {p.by_ai && <button type="button" className="link-small" aria-expanded={why === p.id} onClick={() => setWhy(why === p.id ? null : p.id)}>למה כתבת את זה?</button>}
                   </div>
                 )}
+                {!isEditing && why === p.id && <Why caseId={caseId} draftId={p.id} />}
                 {isEditing ? (
                   <label className="edit-box">
                     <span className="visually-hidden">עריכת הפסקה</span>

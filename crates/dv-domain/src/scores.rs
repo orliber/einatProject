@@ -579,6 +579,135 @@ pub fn format_sheet(sheet: &ScoreSheet) -> Result<String, String> {
     Ok(out)
 }
 
+/// What one entered score may be written as: its value, and its percentile when it has one.
+struct Known {
+    label: String,
+    value: String,
+    percentile: Option<String>,
+}
+
+/// Where a measure is named in a sentence: by its abbreviation ("VCI"), or by a Hebrew name of
+/// two words or five letters and more, as a whole word (with one prefix letter, "ובאוצר").
+/// Short names ("מידע", "הבנה", "שפה") are ordinary words too, so only their abbreviation counts.
+fn mentions(sentence: &str, measure: &Measure) -> bool {
+    let words: Vec<&str> = sentence
+        .split(|c: char| !(c.is_alphanumeric() || c == '-' || c == '"' || c == '\''))
+        .filter(|w| !w.is_empty())
+        .collect();
+    if measure.abbr.chars().count() >= 2 && words.iter().any(|w| *w == measure.abbr) {
+        return true;
+    }
+    let name: Vec<&str> = measure.name_he.split_whitespace().collect();
+    let long = name.len() >= 2 || measure.name_he.chars().count() >= 5;
+    if !long
+        || name
+            .iter()
+            .any(|w| !w.chars().all(|c| ('\u{05d0}'..='\u{05ea}').contains(&c)))
+    {
+        return false;
+    }
+    let first_ok = |w: &str| {
+        w == name[0]
+            || w.strip_prefix(['ו', 'ב', 'ה', 'ל', 'מ', 'ש', 'כ'])
+                .is_some_and(|rest| {
+                    rest == name[0] || rest.strip_prefix(['ב', 'ה', 'ל', 'מ']) == Some(name[0])
+                })
+    };
+    words
+        .windows(name.len())
+        .any(|win| first_ok(win[0]) && win[1..] == name[1..])
+}
+
+/// Numbers in a sentence that could be scores: not part of a test's name ("ADOS-2",
+/// "WPPSI-IV"), not an age or a time ("5:4"), not inside a word.
+fn score_numbers(sentence: &str) -> Vec<String> {
+    let chars: Vec<char> = sentence.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if !chars[i].is_ascii_digit() {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < chars.len()
+            && (chars[i].is_ascii_digit()
+                || (chars[i] == '.' && chars.get(i + 1).is_some_and(char::is_ascii_digit)))
+        {
+            i += 1;
+        }
+        let before = start.checked_sub(1).map(|j| chars[j]);
+        let after = chars.get(i).copied();
+        let in_name = before == Some('-') && start >= 2 && chars[start - 2].is_ascii_alphabetic();
+        let glued =
+            before.is_some_and(char::is_alphabetic) || after.is_some_and(char::is_alphabetic);
+        let time = after == Some(':') || before == Some(':');
+        if !(in_name || glued || time) {
+            out.push(chars[start..i].iter().collect());
+        }
+    }
+    out
+}
+
+/// Every score written in `text` checked against the score sheets she entered, in code (not by
+/// the model). A sentence that names a measure and holds a number that is none of the named
+/// measures' scores or percentiles gets one line: what is written and what was entered.
+#[must_use]
+pub fn check_scores(text: &str, sheets: &[ScoreSheet]) -> Vec<String> {
+    let mut entered: Vec<(Measure, Known)> = Vec::new();
+    for sheet in sheets {
+        let Ok((_, entries)) = checked(sheet) else {
+            continue;
+        };
+        for (measure, e) in entries {
+            entered.push((
+                measure.clone(),
+                Known {
+                    label: measure_label(&measure),
+                    value: fmt_value(e.value),
+                    percentile: percentile(&measure, e.value),
+                },
+            ));
+        }
+    }
+    let mut out = Vec::new();
+    for sentence in text
+        .split(['\n', '!', '?', ';'])
+        .flat_map(|s| s.split(". "))
+    {
+        let named: Vec<&(Measure, Known)> = entered
+            .iter()
+            .filter(|(m, _)| mentions(sentence, m))
+            .collect();
+        if named.is_empty() {
+            continue;
+        }
+        for n in score_numbers(sentence) {
+            let fits = named
+                .iter()
+                .any(|(_, k)| k.value == n || k.percentile.as_deref() == Some(n.as_str()));
+            if fits {
+                continue;
+            }
+            let entered: Vec<String> = named
+                .iter()
+                .map(|(_, k)| match &k.percentile {
+                    Some(p) => format!("{} {} (אחוזון {p})", k.label, k.value),
+                    None => format!("{} {}", k.label, k.value),
+                })
+                .collect();
+            let line = format!(
+                "המספר {n} לא תואם את טבלת הציונים: {} – לבדוק",
+                entered.join(", ")
+            );
+            if !out.contains(&line) {
+                out.push(line);
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -589,6 +718,51 @@ mod tests {
             .find(|i| i.key == inst)
             .and_then(|i| i.measures.into_iter().find(|m| m.key == key))
             .unwrap_or_else(|| panic!("{inst}/{key}"))
+    }
+
+    fn wppsi(entries: &[(&str, f64)]) -> ScoreSheet {
+        ScoreSheet {
+            instrument: "wppsi_iv".into(),
+            module: String::new(),
+            cutoff: None,
+            entries: entries
+                .iter()
+                .map(|(k, v)| ScoreEntry {
+                    measure: (*k).into(),
+                    value: *v,
+                    note: String::new(),
+                })
+                .collect(),
+            notes: String::new(),
+        }
+    }
+
+    #[test]
+    fn written_scores_are_checked_against_the_sheet() {
+        let sheets = [wppsi(&[
+            ("vci", 95.0),
+            ("matrix", 13.0),
+            ("vocabulary", 9.0),
+        ])];
+        // Right score, right percentile, the measure by name or abbreviation: nothing to say.
+        assert!(check_scores(
+            "ההבנה המילולית (VCI) בטווח הממוצע (95, אחוזון 37).",
+            &sheets
+        )
+        .is_empty());
+        assert!(check_scores("[ילד] הציג תפקוד ממוצע (9) במטלת אוצר מילים.", &sheets).is_empty());
+        assert!(check_scores("במטריצות הושג ציון ממוצע גבוה (13).", &sheets).is_empty());
+        // A wrong number next to a named measure.
+        let w = check_scores("הבנה מילולית (VCI) ממוצעת (97).", &sheets);
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(w[0].contains("97") && w[0].contains("95"), "{w:?}");
+        // Numbers that are not scores: a test's name, an age, a sentence with no measure.
+        assert!(check_scores("הועבר WPPSI-4 ו-ADOS-2 בגיל 5:4.", &sheets).is_empty());
+        assert!(check_scores("[ילד] בן 5 ומגיע לגן 3 פעמים בשבוע.", &sheets).is_empty());
+        // Short names are ordinary words: "מידע" alone is not a measure.
+        assert!(
+            check_scores("נמסר מידע מ-2 מקורות.", &[wppsi(&[("information", 8.0)])]).is_empty()
+        );
     }
 
     #[test]
