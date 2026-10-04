@@ -42,7 +42,7 @@ jobs:
         run: cargo test -p dv-privacy
       # What she runs, on the system she runs it on: the vault opened again after a restart.
       - name: Vault, documents and updates on Windows
-        run: cargo test --release -p dv-vault -p dv-egress -p dv-ingest
+        run: cargo test --release -p dv-vault -p dv-egress -p dv-ingest -p dv-sandbox
       - name: First run (create, close, open again; the real Argon2 cost)
         run: cargo test --release -p dv-core --test first_run -- --ignored
       - name: Build the one-click installer
