@@ -364,6 +364,45 @@ fn names_kept_earlier_stay_on_the_card_wherever_they_go_out() {
 }
 
 #[test]
+fn an_ocr_misread_of_the_childs_name_is_kept_as_its_spelling_and_can_come_back() {
+    let (_dir, mut core, case) = setup(Some(FakeTransport::default()));
+    // Fabricated scan text: "אלון" read as "אלוז".
+    let scan = "אלוז שיחק בחול עם הילדים.";
+    let found = core.learn_ocr_misreads(&case, scan).unwrap();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].token, "אלוז");
+    assert_eq!(found[0].kind, AutoKind::SimilarSpelling);
+    let child = |core: &mut Core| {
+        core.case_detail(&case)
+            .unwrap()
+            .identities
+            .into_iter()
+            .find(|i| i.value == "אלון")
+            .expect("child")
+    };
+    let tag = child(&mut core).tag;
+    assert_eq!(found[0].tag, tag);
+    assert!(child(&mut core).aliases.contains(&"אלוז".to_owned()));
+    // Typed text later in the case hides it too, under the child's tag.
+    let out = core.preview_filter(&case, "אחר כך אלוז נרגע.").unwrap();
+    assert!(
+        !out.tagged.contains("אלוז") && out.tagged.contains(&tag),
+        "{}",
+        out.tagged
+    );
+
+    // "להחזיר" takes only that spelling off; the name itself stays hidden.
+    core.restore_auto_hidden(&case, "אלוז", &tag).unwrap();
+    assert!(child(&mut core).aliases.is_empty());
+    let out = core.preview_filter(&case, "אלוז ואלון שיחקו.").unwrap();
+    assert!(
+        out.tagged.contains("אלוז") && !out.tagged.contains("אלון"),
+        "{}",
+        out.tagged
+    );
+}
+
+#[test]
 fn manual_edit_with_new_name_is_hidden_before_it_goes_out() {
     let (_dir, mut core, case) = setup(None);
     let p = core

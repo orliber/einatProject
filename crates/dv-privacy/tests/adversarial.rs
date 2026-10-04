@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use dv_domain::{passage_ranges, Identity, Role};
 use dv_privacy::text::{is_valid_prefix, normalize};
 use dv_privacy::{
-    clear, filter, filter_split, AutoKind, FilterOutcome, GateRequest, PrivacyContext,
+    clear, filter, filter_split, ocr_misreads, AutoKind, FilterOutcome, GateRequest, PrivacyContext,
 };
 use proptest::prelude::*;
 
@@ -973,4 +973,38 @@ fn names_from_past_reports_are_hidden_and_refused_by_the_gate() {
         "{:?}",
         blocked.reasons
     );
+}
+
+#[test]
+fn ocr_misreads_of_a_declared_name_are_found_one_letter_away() {
+    // Fabricated scan text: OCR read "אלון" as "אלוו" (ו for ן) and "אלוז".
+    let practitioner = vec!["דנה כהן-לוי".to_owned()];
+    let ids = vec![id("c1", Role::Child, "[ילד]", "אלון", &[])];
+    let ctx = ctx_for(&ids, &practitioner, "c1");
+    let scan = "ואלוו הגיע לגן. אלוז שיחק בחול. אלון צייר. האלוף ניצח.";
+    let found: Vec<(String, String)> = ocr_misreads(scan, &ctx)
+        .into_iter()
+        .map(|m| (m.written, m.tag))
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            ("אלוו".to_owned(), "[ילד]".to_owned()),
+            ("אלוז".to_owned(), "[ילד]".to_owned())
+        ]
+    );
+    // Typed text keeps the stricter near-spelling rule: ז is not a weak letter.
+    assert!(filter(scan, &ctx).unwrap().tagged.contains("אלוז"));
+
+    // Kept as spellings of the name, they are hidden everywhere and refused by the gate.
+    let ids = vec![id("c1", Role::Child, "[ילד]", "אלון", &["אלוו", "אלוז"])];
+    let ctx = ctx_for(&ids, &practitioner, "c1");
+    let out = filter(scan, &ctx).unwrap();
+    assert!(
+        !out.tagged.contains("אלוו") && !out.tagged.contains("אלוז"),
+        "{}",
+        out.tagged
+    );
+    assert!(out.tagged.contains("האלוף"), "{}", out.tagged);
+    assert!(!gate_with("אלוז שיחק בחול.", &ids, "c1").cleared);
 }

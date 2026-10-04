@@ -194,11 +194,11 @@ struct AutoSpan {
     item: AutoHidden,
 }
 
-fn is_generic(word: &str) -> bool {
+pub(crate) fn is_generic(word: &str) -> bool {
     GENERIC_PLACE_WORDS.iter().any(|g| normalize(g) == word)
 }
 
-fn is_title(word: &str) -> bool {
+pub(crate) fn is_title(word: &str) -> bool {
     TITLES.iter().any(|t| normalize(t) == word)
 }
 

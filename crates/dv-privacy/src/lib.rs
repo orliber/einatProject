@@ -8,12 +8,14 @@
 pub mod gate;
 mod lexicon;
 mod matcher;
+mod misread;
 pub mod patterns;
 mod pipeline;
 pub mod restore;
 pub mod text;
 
 pub use gate::{clear, BlockReason, Blocked, ClearedPayload, GateRequest, GENERIC_TAGS};
+pub use misread::{ocr_misreads, Misread};
 pub use pipeline::{
     everyday_name, filter, filter_split, AutoHidden, AutoKind, Checks, FilterOutcome, Mark,
     PrivacyContext, Segment, Suspect, SuspectKind,
