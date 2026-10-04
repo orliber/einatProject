@@ -11,6 +11,8 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+# Starts the worker contained: AppContainer and job object on Windows (D-044).
+dv-sandbox.workspace = true
 pdf-extract = "0.12"
 quick-xml = "0.42"
 serde.workspace = true
