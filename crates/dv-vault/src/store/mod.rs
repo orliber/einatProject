@@ -6,7 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use dv_domain::{
     assign_tag, Author, CaseInput, CaseMeta, CaseSummary, ChatMessage, ChatRole, DraftParagraph,
-    DraftStatus, Folder, Identity, IdentityInput, InputKind, Role, Transmission,
+    DraftStatus, Folder, FoundName, Identity, IdentityInput, IdentitySource, InputKind, Role,
+    Transmission,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::de::DeserializeOwned;
@@ -23,10 +24,12 @@ use crate::password::{self, Argon2Params};
 use crate::{recovery, VaultError};
 
 mod backup;
+mod style;
 pub use backup::{peek_backup, BackupCheck, BackupInfo, BackupPeek, BACKUP_EXTENSION};
+pub use style::{StoredStyleProfile, StoredStyleSource};
 
 /// Raw rows as read from SQLite, before decryption.
-type IdentityRow = (String, String, String, Vec<u8>, Vec<u8>);
+type IdentityRow = (String, String, String, Vec<u8>, Vec<u8>, String, String);
 type InputRow = (String, String, i64, Vec<u8>, Vec<u8>);
 type MessageRow = (String, String, bool, i64, Vec<u8>, Vec<u8>);
 type TransmissionRow = (String, String, i64, String, String, Vec<u8>);
@@ -1179,15 +1182,24 @@ impl Vault {
     pub fn identities(&self, case_id: &str) -> Result<Vec<Identity>, VaultError> {
         let key = self.case_key(case_id)?;
         let mut stmt = self.identity.prepare(
-            "SELECT id, role, tag, value_enc, aliases_enc FROM identities WHERE case_id = ?1 ORDER BY rowid",
+            "SELECT id, role, tag, value_enc, aliases_enc, source, reason FROM identities
+             WHERE case_id = ?1 ORDER BY rowid",
         )?;
         let rows: Vec<IdentityRow> = stmt
             .query_map([case_id], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                ))
             })?
             .collect::<Result<_, _>>()?;
         rows.into_iter()
-            .map(|(id, role, tag, value, aliases)| {
+            .map(|(id, role, tag, value, aliases, source, reason)| {
                 Ok(Identity {
                     value: open_string(&key, &aad("identities", "value", &id, case_id), &value)?,
                     aliases: from_json(&open_string(
@@ -1199,6 +1211,8 @@ impl Vault {
                     case_id: case_id.to_owned(),
                     id,
                     tag,
+                    source: enum_from(&source)?,
+                    reason,
                 })
             })
             .collect()
@@ -1217,7 +1231,8 @@ impl Vault {
         Ok(all)
     }
 
-    /// Replace the case's identity list. Existing identities keep their tags (tags are stable).
+    /// Replace the case's identity list. Existing identities keep their tags (tags are stable),
+    /// and their source while the role stays: a role the psychologist changes is hers.
     pub fn set_identities(
         &mut self,
         case_id: &str,
@@ -1249,12 +1264,20 @@ impl Vault {
                 .id
                 .as_ref()
                 .and_then(|id| existing.iter().find(|e| &e.id == id));
-            let (id, tag) = match previous {
-                Some(p) if p.role == input.role => (p.id.clone(), p.tag.clone()),
+            let (id, tag, source, reason) = match previous {
+                Some(p) if p.role == input.role => {
+                    (p.id.clone(), p.tag.clone(), p.source, p.reason.clone())
+                }
+                // A new role gets a new tag; where the name came from stays as it was.
                 _ => {
                     let tag = assign_tag(input.role, &used);
                     used.push(tag.clone());
-                    (random_id()?, tag)
+                    (
+                        random_id()?,
+                        tag,
+                        previous.map_or(IdentitySource::Manual, |p| p.source),
+                        previous.map_or_else(String::new, |p| p.reason.clone()),
+                    )
                 }
             };
             let value_enc = seal_str(&key, &aad("identities", "value", &id, case_id), value)?;
@@ -1264,11 +1287,23 @@ impl Vault {
                 &to_json(&aliases)?,
             )?;
             tx.execute(
-                "INSERT INTO identities (id, case_id, role, tag, created_at, value_enc, aliases_enc)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                "INSERT INTO identities
+                    (id, case_id, role, tag, created_at, value_enc, aliases_enc, source, reason)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT(id) DO UPDATE SET role = excluded.role, tag = excluded.tag,
-                    value_enc = excluded.value_enc, aliases_enc = excluded.aliases_enc",
-                params![id, case_id, enum_str(&input.role)?, tag, t, value_enc, aliases_enc],
+                    value_enc = excluded.value_enc, aliases_enc = excluded.aliases_enc,
+                    source = excluded.source, reason = excluded.reason",
+                params![
+                    id,
+                    case_id,
+                    enum_str(&input.role)?,
+                    tag,
+                    t,
+                    value_enc,
+                    aliases_enc,
+                    enum_str(&source)?,
+                    reason
+                ],
             )?;
         }
         tx.commit()?;
@@ -1279,6 +1314,89 @@ impl Vault {
             &serde_json::json!({ "count": inputs.len() }),
         )?;
         self.identities(case_id)
+    }
+
+    /// Keep names the filter hid on its own as identities of the case, each with a new tag.
+    /// A value the case already has (as a value or an alias) is skipped. Returns the identities
+    /// added.
+    pub fn add_found_names(
+        &mut self,
+        case_id: &str,
+        names: &[FoundName],
+    ) -> Result<Vec<Identity>, VaultError> {
+        let key = self.case_key(case_id)?;
+        let existing = self.identities(case_id)?;
+        let mut used: Vec<String> = existing.iter().map(|i| i.tag.clone()).collect();
+        let mut known: Vec<String> = existing
+            .iter()
+            .flat_map(|i| std::iter::once(i.value.clone()).chain(i.aliases.iter().cloned()))
+            .map(|v| v.trim().to_owned())
+            .collect();
+        let t = now();
+        let tx = self.identity.unchecked_transaction()?;
+        let mut added = Vec::new();
+        for name in names {
+            let value = name.value.trim();
+            if value.is_empty() || known.iter().any(|k| k == value) {
+                continue;
+            }
+            known.push(value.to_owned());
+            let tag = assign_tag(name.role, &used);
+            used.push(tag.clone());
+            let id = random_id()?;
+            let value_enc = seal_str(&key, &aad("identities", "value", &id, case_id), value)?;
+            let aliases_enc = seal_str(&key, &aad("identities", "aliases", &id, case_id), "[]")?;
+            tx.execute(
+                "INSERT INTO identities
+                    (id, case_id, role, tag, created_at, value_enc, aliases_enc, source, reason)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    id,
+                    case_id,
+                    enum_str(&name.role)?,
+                    tag,
+                    t,
+                    value_enc,
+                    aliases_enc,
+                    enum_str(&name.source)?,
+                    name.reason
+                ],
+            )?;
+            added.push(Identity {
+                id,
+                case_id: case_id.to_owned(),
+                role: name.role,
+                tag,
+                value: value.to_owned(),
+                aliases: Vec::new(),
+                source: name.source,
+                reason: name.reason.clone(),
+            });
+        }
+        tx.commit()?;
+        if !added.is_empty() {
+            self.touch(case_id)?;
+            self.record(
+                AuditEvent::IdentitiesChanged,
+                Some(case_id),
+                &serde_json::json!({ "found": added.len() }),
+            )?;
+        }
+        Ok(added)
+    }
+
+    /// Remove one identity of the case (a name the filter added that is not a name).
+    pub fn remove_identity(&mut self, case_id: &str, identity_id: &str) -> Result<(), VaultError> {
+        self.identity.execute(
+            "DELETE FROM identities WHERE id = ?1 AND case_id = ?2",
+            params![identity_id, case_id],
+        )?;
+        self.touch(case_id)?;
+        self.record(
+            AuditEvent::IdentitiesChanged,
+            Some(case_id),
+            &serde_json::json!({ "removed": 1 }),
+        )
     }
 
     /// Keyed hash of a normalized token, for the "this is not a name" allow-list.

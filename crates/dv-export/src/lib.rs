@@ -35,17 +35,43 @@ pub struct InfoLine {
 }
 
 /// A score table for the appendix: header cells, then one row per measure.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScoreTable {
     pub title: String,
     pub columns: Vec<String>,
     pub rows: Vec<Vec<String>>,
     /// The scale sentence printed under the table.
     pub note: String,
+    /// Score profiles drawn under the table (EX-2), computed from the scores in code.
+    #[serde(default)]
+    pub charts: Vec<ScoreChart>,
+}
+
+/// A horizontal bar profile on a fixed scale, drawn with table cells: it looks the same in
+/// Word, LibreOffice and on paper, and needs no picture or drawing part.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScoreChart {
+    pub title: String,
+    /// The axis: `min` up to `max`, one cell per `step`.
+    pub min: f64,
+    pub max: f64,
+    pub step: f64,
+    /// Cells within one standard deviation of the mean are tinted.
+    pub mean: f64,
+    pub sd: f64,
+    pub bars: Vec<ChartBar>,
+    /// The sentence printed under the chart.
+    pub note: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChartBar {
+    pub label: String,
+    pub value: f64,
 }
 
 /// Everything that goes into the file.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Report {
     pub title: String,
     pub info: Vec<InfoLine>,
@@ -149,6 +175,7 @@ mod tests {
                     "ממוצע גבוה".into(),
                 ]],
                 note: "ציוני תקן: ממוצע 100, סטיית תקן 15.".into(),
+                charts: Vec::new(),
             }],
             signature: vec!["ד\"ר בדויה, פסיכולוגית התפתחותית".into()],
             confidentiality: "חסוי – מידע רפואי".into(),

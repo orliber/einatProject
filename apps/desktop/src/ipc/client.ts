@@ -29,14 +29,27 @@ import type { Instrument } from "./generated/Instrument";
 import type { PingResponse } from "./generated/PingResponse";
 import type { Prepared } from "./generated/Prepared";
 import type { ReportSettings } from "./generated/ReportSettings";
+import type { Role } from "./generated/Role";
 import type { ScoreSheet } from "./generated/ScoreSheet";
+import type { UsageSummary } from "./generated/UsageSummary";
+import type { Readiness } from "./generated/Readiness";
+import type { UnsavedEdit } from "./generated/UnsavedEdit";
 import type { SectionResult } from "./generated/SectionResult";
 import type { SortResult } from "./generated/SortResult";
+import type { SourceExcerpt } from "./generated/SourceExcerpt";
 import type { MaterialRouting } from "./generated/MaterialRouting";
 import type { SuspectDecision } from "./generated/SuspectDecision";
 import type { FollowUpView } from "./generated/FollowUpView";
 import type { UiError } from "./generated/UiError";
 import type { UpdateView } from "./generated/UpdateView";
+import type { StyleAnalysisResult } from "./generated/StyleAnalysisResult";
+import type { StyleImportPreview } from "./generated/StyleImportPreview";
+import type { StyleItem } from "./generated/StyleItem";
+import type { StyleKind } from "./generated/StyleKind";
+import type { StyleOverview } from "./generated/StyleOverview";
+import type { StyleProfile } from "./generated/StyleProfile";
+import type { StyleProfileView } from "./generated/StyleProfileView";
+import type { StyleSourceView } from "./generated/StyleSourceView";
 
 /** Every failure reaches the UI as a UiError with a Hebrew message. */
 export function asUiError(e: unknown): UiError {
@@ -68,6 +81,15 @@ export const ipc = {
   unlock: (password: string) => call<AppStatus>("unlock", { password }),
   unlockWithRecovery: (key: string) => call<AppStatus>("unlock_with_recovery", { key }),
   lock: () => run("lock"),
+  /** Typing or scrolling in the window counts as activity for the idle lock. */
+  touch: () => run("touch"),
+  holdUnsaved: (edit: UnsavedEdit | null) => run("hold_unsaved", { edit }),
+  takeUnsaved: () => call<UnsavedEdit | null>("take_unsaved"),
+  readiness: () => call<Readiness>("readiness"),
+  confirmReadiness: (key: string, done: boolean) => call<Readiness>("confirm_readiness", { key, done }),
+  usageSummary: () => call<UsageSummary>("usage_summary"),
+  /** Dollars; `null` removes the ceiling. */
+  setMonthlyCap: (capUsd: number | null) => run("set_monthly_cap", { capUsd }),
 
   setApiKey: (key: string) => run("set_api_key", { key }),
   setSpeed: (speed: "fast" | "balanced" | "thorough") => run("set_speed", { speed }),
@@ -110,6 +132,9 @@ export const ipc = {
   saveScores: (caseId: string, inputId: string | null, sheet: ScoreSheet) =>
     call<CaseInput>("save_scores", { caseId, inputId, sheet }),
   scoreSheet: (caseId: string, inputId: string) => call<ScoreSheet | null>("score_sheet", { caseId, inputId }),
+  /** "למה כתבת את זה?": the passages a paragraph leans on, best match first (stays local). */
+  paragraphSources: (caseId: string, draftId: string) =>
+    call<SourceExcerpt[]>("paragraph_sources", { caseId, draftId }),
   /** The file's bytes go as the raw body; nothing else of the file system is exposed. */
   importDocument: async (caseId: string, file: File): Promise<ImportPreview> => {
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -124,6 +149,11 @@ export const ipc = {
   previewFilter: (caseId: string, text: string) => call<FilterOutcome>("preview_filter", { caseId, text }),
   decideSuspect: (caseId: string, token: string, decision: SuspectDecision) =>
     run("decide_suspect", { caseId, token, decision }),
+  /** "להחזיר" on the summary card: keep what the filter hid as written, for this case. */
+  restoreAutoHidden: (caseId: string, token: string, tag: string) =>
+    run("restore_auto_hidden", { caseId, token, tag }),
+  /** Who a name the filter kept is; it gets a tag for that role. */
+  changeRole: (caseId: string, tag: string, role: Role) => call<Identity[]>("change_role", { caseId, tag, role }),
 
   /** `replaces`: the one proposed paragraph the answer rewrites; otherwise the answer is the
    *  section's new draft, in place of the paragraphs not approved yet. */
@@ -200,6 +230,37 @@ export const ipc = {
   restoreBackup: (password: string | null, recoveryKey: string | null) =>
     call<AppStatus>("restore_backup", { password, recoveryKey }),
   forgetBackup: () => run("forget_backup"),
+  setAutoBackup: (on: boolean) => call<BackupStatus>("set_auto_backup", { on }),
+
+  // Writing style (D-043): past reports kept neutralized, the profile, learning from edits.
+  styleOverview: () => call<StyleOverview>("style_overview"),
+  /** A past report: the bytes go as the raw body. Nothing is kept until `saveStyleSource`. */
+  importStyleSource: async (file: File): Promise<StyleImportPreview> => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    try {
+      return await invoke<StyleImportPreview>("import_style_source", bytes, {
+        headers: { "x-file-name": encodeURIComponent(file.name) },
+      });
+    } catch (e) {
+      throw asUiError(e);
+    }
+  },
+  saveStyleSource: (token: string, included: number[], title: string | null) =>
+    call<StyleSourceView>("save_style_source", { token, included, title }),
+  discardStyleUpload: () => run("discard_style_upload"),
+  deleteStyleSource: (id: string) => run("delete_style_source", { id }),
+  prepareStyleAnalysis: (sourceId: string) => call<Prepared>("prepare_style_analysis", { sourceId }),
+  sendStyleAnalysis: (approvalId: string) => call<StyleAnalysisResult>("send_style_analysis", { approvalId }),
+  prepareStyleProfile: () => call<Prepared>("prepare_style_profile"),
+  sendStyleProfile: (approvalId: string) => call<StyleProfileView>("send_style_profile", { approvalId }),
+  saveStyleDraft: (profile: StyleProfile) => call<StyleProfileView>("save_style_draft", { profile }),
+  approveStyleDraft: () => call<StyleProfileView>("approve_style_draft"),
+  discardStyleDraft: () => run("discard_style_draft"),
+  restoreStyleVersion: (id: string) => call<StyleProfileView>("restore_style_version", { id }),
+  setStyleEnabled: (on: boolean) => run("set_style_enabled", { on }),
+  resetStyle: () => run("reset_style"),
+  acceptStyleSuggestion: (id: string) => call<StyleProfileView>("accept_style_suggestion", { id }),
+  dismissStyleSuggestion: (id: string) => run("dismiss_style_suggestion", { id }),
 
   /** A newer version, signed by the developer (D-033); `null` when this is the newest. */
   checkUpdate: () => call<UpdateView | null>("check_update"),
@@ -210,7 +271,18 @@ export const ipc = {
 };
 
 export type {
+  StyleAnalysisResult,
+  StyleImportPreview,
+  StyleItem,
+  StyleKind,
+  StyleOverview,
+  StyleProfile,
+  StyleProfileView,
+  StyleSourceView,
   UpdateView,
+  UsageSummary,
+  Readiness,
+  UnsavedEdit,
   ActivityPage,
   ConsultationSummary,
   ConsultationView,
@@ -225,6 +297,7 @@ export type {
   NameMatch,
   MaterialRouting,
   SortResult,
+  SourceExcerpt,
   CaseDetail,
   CaseInput,
   CaseMeta,

@@ -150,7 +150,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
     setMessage("");
     try {
       const prepared = await ipc.prepareConsult(scope, conversation, text);
-      const clean = prepared.approval_id && !prepared.suspects.length && !prepared.blocked.length;
+      const clean = prepared.approval_id && !prepared.auto_hidden.length && !prepared.blocked.length;
       if (status.review_only_suspect && clean && prepared.approval_id) {
         await send(prepared.approval_id, prepared.hidden);
       } else {

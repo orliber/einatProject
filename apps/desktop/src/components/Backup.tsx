@@ -7,6 +7,9 @@ import { ipc, type AppStatus, type BackupCheckView, type StagedBackup } from "..
 import { Dialog, ErrorLine } from "./ui";
 import "./Backup.css";
 
+/** Automatic backups kept on the drive (dv-core `AUTO_KEEP`). */
+const AUTO_KEEP = 3;
+
 export function heDateTime(unix: number): string {
   const d = new Date(unix * 1000);
   return `${d.toLocaleDateString("he-IL")}, ${d.toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}`;
@@ -52,9 +55,19 @@ export function BackupSettings() {
   const status = useBackupStatus();
   const { write, busy, error } = useWriteBackup();
   const { fail } = useApp();
+  const qc = useQueryClient();
   const [staged, setStaged] = useState<StagedBackup | null>(null);
   const [chooseError, setChooseError] = useState<string | null>(null);
   const s = status.data;
+
+  async function setAuto(on: boolean) {
+    setChooseError(null);
+    try {
+      qc.setQueryData(["backup"], await ipc.setAutoBackup(on));
+    } catch (e) {
+      setChooseError(fail(e as never));
+    }
+  }
 
   async function choose() {
     setChooseError(null);
@@ -86,6 +99,15 @@ export function BackupSettings() {
               : `בדיקת השחזור האחרונה: ${heDateTime(s.last_check_at)}.`}
           </li>
         </ul>
+      )}
+      {s && (
+        <label className="row">
+          <input type="checkbox" checked={s.auto} onChange={(e) => void setAuto(e.target.checked)} />
+          <span>
+            גיבוי אוטומטי: כשמגיע זמן גיבוי והדיסק של הגיבוי האחרון מחובר, התוכנה שומרת שם גיבוי מוצפן בעצמה
+            ומשאירה את {AUTO_KEEP} האוטומטיים האחרונים. הגיבוי הראשון תמיד נעשה ידנית, כדי לבחור את הדיסק.
+          </span>
+        </label>
       )}
       <div className="row">
         <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void write()}>

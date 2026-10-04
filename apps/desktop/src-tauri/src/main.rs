@@ -5,6 +5,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod file_dialog;
+mod os_lock;
 mod secret_clipboard;
 
 use std::path::PathBuf;
@@ -14,10 +15,14 @@ use std::time::Duration;
 use dv_core::{
     ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView,
     ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
-    ExportCheck, ImportPreview, NameMatch, Prepared, ReportSettings, RetentionItem, SectionResult,
-    SortResult, StagedBackup, SuspectDecision, UiError,
+    ExportCheck, ImportPreview, NameMatch, Prepared, Readiness, ReportSettings, RetentionItem,
+    SectionResult, SortResult, StagedBackup, StyleAnalysisResult, StyleImportPreview,
+    StyleOverview, StyleProfileView, StyleSourceView, SuspectDecision, UiError, UnsavedEdit,
+    UsageSummary,
 };
-use dv_domain::{CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind};
+use dv_domain::{
+    CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind, Role,
+};
 use tauri::Manager;
 
 struct AppState {
@@ -114,9 +119,13 @@ async fn app_status(
     Ok(status)
 }
 
+/// Hiding the window from screenshots and screen sharing is switched off for now (D-039):
+/// it blacked out Zoom and Teams. Setting this back to `true` restores D-037 as it was.
+const SCREEN_PROTECTION_ENABLED: bool = false;
+
 /// Screenshots and screen sharing see a blank window unless she turned that off (D-037).
 fn protect(window: &tauri::WebviewWindow, on: bool) {
-    let _ = window.set_content_protected(on);
+    let _ = window.set_content_protected(SCREEN_PROTECTION_ENABLED && on);
 }
 
 #[tauri::command]
@@ -161,7 +170,59 @@ async fn lock(window: tauri::WebviewWindow, state: tauri::State<'_, AppState>) -
     .await
 }
 
+/// The psychologist is working in the window (typing, scrolling) without calling the core.
+#[tauri::command]
+async fn touch(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| {
+        c.touch();
+        Ok(())
+    })
+    .await
+}
+
 // ------------------------------------------------------------------ settings
+
+/// What must be true before real cases (stage 8): informs, never blocks.
+#[tauri::command]
+async fn readiness(state: tauri::State<'_, AppState>) -> Res<Readiness> {
+    with_core(&state, |c| c.readiness()).await
+}
+
+#[tauri::command]
+async fn confirm_readiness(
+    state: tauri::State<'_, AppState>,
+    key: String,
+    done: bool,
+) -> Res<Readiness> {
+    with_core(&state, move |c| c.confirm_readiness(&key, done)).await
+}
+
+/// The paragraph being edited now (memory only), kept in the vault if it locks meanwhile.
+#[tauri::command]
+async fn hold_unsaved(state: tauri::State<'_, AppState>, edit: Option<UnsavedEdit>) -> Res<()> {
+    with_core(&state, move |c| {
+        c.hold_unsaved(edit);
+        Ok(())
+    })
+    .await
+}
+
+/// After entering: the edit kept at the last lock, offered once.
+#[tauri::command]
+async fn take_unsaved(state: tauri::State<'_, AppState>) -> Res<Option<UnsavedEdit>> {
+    with_core(&state, |c| c.take_unsaved()).await
+}
+
+/// This month's use of the AI (numbers only) and the monthly ceiling.
+#[tauri::command]
+async fn usage_summary(state: tauri::State<'_, AppState>) -> Res<UsageSummary> {
+    with_core(&state, |c| c.usage_summary()).await
+}
+
+#[tauri::command]
+async fn set_monthly_cap(state: tauri::State<'_, AppState>, cap_usd: Option<u32>) -> Res<()> {
+    with_core(&state, move |c| c.set_monthly_cap(cap_usd)).await
+}
 
 #[tauri::command]
 async fn set_api_key(state: tauri::State<'_, AppState>, key: String) -> Res<()> {
@@ -301,6 +362,16 @@ async fn save_scores(
     .await
 }
 
+/// "למה כתבת את זה?": the passages one paragraph leans on (local only).
+#[tauri::command]
+async fn paragraph_sources(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    draft_id: String,
+) -> Res<Vec<dv_core::SourceExcerpt>> {
+    with_core(&state, move |c| c.paragraph_sources(&case_id, &draft_id)).await
+}
+
 #[tauri::command]
 async fn score_sheet(
     state: tauri::State<'_, AppState>,
@@ -384,6 +455,31 @@ async fn decide_suspect(
         c.decide_suspect(&case_id, &token, decision)
     })
     .await
+}
+
+/// "להחזיר" on the summary card: keep what the filter hid as written, for this case.
+#[tauri::command]
+async fn restore_auto_hidden(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    token: String,
+    tag: String,
+) -> Res<()> {
+    with_core(&state, move |c| {
+        c.restore_auto_hidden(&case_id, &token, &tag)
+    })
+    .await
+}
+
+/// The card's role menu for a name the filter kept.
+#[tauri::command]
+async fn change_role(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    tag: String,
+    role: Role,
+) -> Res<Vec<Identity>> {
+    with_core(&state, move |c| c.change_role(&case_id, &tag, role)).await
 }
 
 // ------------------------------------------------------------------ drafting
@@ -674,6 +770,143 @@ async fn send_consult(
     with_core(&state, move |c| c.finish_consult(out, response)).await
 }
 
+// ------------------------------------------------------------------ writing style (D-043)
+
+#[tauri::command]
+async fn style_overview(state: tauri::State<'_, AppState>) -> Res<StyleOverview> {
+    with_core(&state, |c| c.style_overview()).await
+}
+
+/// A past report: the bytes arrive as the raw request body, the file name as a header.
+#[tauri::command]
+async fn import_style_source(
+    state: tauri::State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Res<StyleImportPreview> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(internal("body"));
+    };
+    let file_name = request
+        .headers()
+        .get("x-file-name")
+        .and_then(|v| v.to_str().ok())
+        .map(percent_decode)
+        .unwrap_or_default();
+    let bytes = bytes.clone();
+    with_core(&state, move |c| c.import_style_source(&file_name, &bytes)).await
+}
+
+#[tauri::command]
+async fn save_style_source(
+    state: tauri::State<'_, AppState>,
+    token: String,
+    included: Vec<u32>,
+    title: Option<String>,
+) -> Res<StyleSourceView> {
+    with_core(&state, move |c| {
+        c.save_style_source(&token, &included, title.as_deref())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn discard_style_upload(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| {
+        c.discard_style_upload();
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn delete_style_source(state: tauri::State<'_, AppState>, id: String) -> Res<()> {
+    with_core(&state, move |c| c.delete_style_source(&id)).await
+}
+
+#[tauri::command]
+async fn prepare_style_analysis(
+    state: tauri::State<'_, AppState>,
+    source_id: String,
+) -> Res<Prepared> {
+    with_core(&state, move |c| c.prepare_style_analysis(&source_id)).await
+}
+
+#[tauri::command]
+async fn send_style_analysis(
+    state: tauri::State<'_, AppState>,
+    approval_id: String,
+) -> Res<StyleAnalysisResult> {
+    let id = approval_id.clone();
+    let out = with_core(&state, move |c| c.begin_send(&id)).await?;
+    let (out, response) = transmit(&state, approval_id, out).await?;
+    with_core(&state, move |c| c.finish_style_analysis(out, response)).await
+}
+
+#[tauri::command]
+async fn prepare_style_profile(state: tauri::State<'_, AppState>) -> Res<Prepared> {
+    with_core(&state, |c| c.prepare_style_profile()).await
+}
+
+#[tauri::command]
+async fn send_style_profile(
+    state: tauri::State<'_, AppState>,
+    approval_id: String,
+) -> Res<StyleProfileView> {
+    let id = approval_id.clone();
+    let out = with_core(&state, move |c| c.begin_send(&id)).await?;
+    let (out, response) = transmit(&state, approval_id, out).await?;
+    with_core(&state, move |c| c.finish_style_profile(out, response)).await
+}
+
+#[tauri::command]
+async fn save_style_draft(
+    state: tauri::State<'_, AppState>,
+    profile: dv_core::StyleProfile,
+) -> Res<StyleProfileView> {
+    with_core(&state, move |c| c.save_style_draft(profile)).await
+}
+
+#[tauri::command]
+async fn approve_style_draft(state: tauri::State<'_, AppState>) -> Res<StyleProfileView> {
+    with_core(&state, |c| c.approve_style_draft()).await
+}
+
+#[tauri::command]
+async fn discard_style_draft(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| c.discard_style_draft()).await
+}
+
+#[tauri::command]
+async fn restore_style_version(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Res<StyleProfileView> {
+    with_core(&state, move |c| c.restore_style_version(&id)).await
+}
+
+#[tauri::command]
+async fn set_style_enabled(state: tauri::State<'_, AppState>, on: bool) -> Res<()> {
+    with_core(&state, move |c| c.set_style_enabled(on)).await
+}
+
+#[tauri::command]
+async fn reset_style(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| c.reset_style()).await
+}
+
+#[tauri::command]
+async fn accept_style_suggestion(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Res<StyleProfileView> {
+    with_core(&state, move |c| c.accept_style_suggestion(&id)).await
+}
+
+#[tauri::command]
+async fn dismiss_style_suggestion(state: tauri::State<'_, AppState>, id: String) -> Res<()> {
+    with_core(&state, move |c| c.dismiss_style_suggestion(&id)).await
+}
+
 // ------------------------------------------------------------------ Word report
 
 #[tauri::command]
@@ -701,7 +934,9 @@ async fn export_report(
     case_id: String,
     password: Option<String>,
 ) -> Res<String> {
-    // Downloads, else Documents, else the home folder, else the app's own folder.
+    // Downloads, else Documents, else the home folder, else the app's own folder. A folder
+    // that a cloud service syncs (Documents moved to OneDrive, say) is skipped: the report
+    // holds the real names and would be uploaded on its own.
     let paths = app.path();
     let dir = [
         paths.download_dir(),
@@ -711,6 +946,7 @@ async fn export_report(
     ]
     .into_iter()
     .flatten()
+    .filter(|d| dv_core::cloud_synced_folder(d).is_none())
     .find(|d| std::fs::create_dir_all(d).is_ok())
     .ok_or_else(|| UiError {
         code: "no_folder".to_owned(),
@@ -984,6 +1220,12 @@ async fn choose_backup(
 }
 
 /// Restore drill on the chosen file, with the password.
+/// The automatic backup to the drive of the last backup, on or off.
+#[tauri::command]
+async fn set_auto_backup(state: tauri::State<'_, AppState>, on: bool) -> Res<BackupStatus> {
+    with_core(&state, move |c| c.set_auto_backup(on)).await
+}
+
 #[tauri::command]
 async fn check_backup(state: tauri::State<'_, AppState>, password: String) -> Res<BackupCheckView> {
     let password = zeroize::Zeroizing::new(password);
@@ -1151,12 +1393,33 @@ fn main() {
             let timer = Arc::clone(&core);
             let timer_clipboard = clipboard.clone();
             let timer_window = app.get_webview_window("main");
+            // The window opens protected (tauri.conf.json); this lifts it while D-039 holds.
+            if let Some(w) = &timer_window {
+                protect(w, true);
+            }
+            let mut computer = os_lock::LockWatch::default();
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(15));
                 // Read the clock before waiting for the core: a long command holding it must not
                 // look like the computer slept.
                 let now = std::time::SystemTime::now();
-                let locked = timer.lock().is_ok_and(|mut c| c.tick(now));
+                let mut locked = timer.lock().is_ok_and(|mut c| c.tick(now));
+                // The computer was locked (Win+L): the vault locks with it. Asked without
+                // holding the core, and only while the vault is open.
+                if !locked && timer.lock().is_ok_and(|c| c.is_unlocked()) {
+                    let answer = os_lock::computer_locked();
+                    if computer.just_locked(answer) {
+                        locked = timer.lock().is_ok_and(|mut c| c.lock_with_computer());
+                    }
+                }
+                // A backup that is due goes by itself to the drive of the last one, if it is
+                // connected (see `Core::auto_backup`). A failure waits and is shown nowhere: the
+                // backup reminder stays until a backup is made.
+                if !locked {
+                    if let Ok(mut c) = timer.lock() {
+                        let _ = c.auto_backup();
+                    }
+                }
                 if locked {
                     timer_clipboard.clear_now();
                     if let Some(w) = &timer_window {
@@ -1181,6 +1444,13 @@ fn main() {
             unlock,
             unlock_with_recovery,
             lock,
+            touch,
+            readiness,
+            confirm_readiness,
+            usage_summary,
+            set_monthly_cap,
+            hold_unsaved,
+            take_unsaved,
             set_api_key,
             set_model,
             set_speed,
@@ -1203,9 +1473,12 @@ fn main() {
             preview_scores,
             save_scores,
             score_sheet,
+            paragraph_sources,
             import_document,
             preview_filter,
             decide_suspect,
+            restore_auto_hidden,
+            change_role,
             prepare_section,
             prepare_full_draft,
             send_section,
@@ -1237,6 +1510,23 @@ fn main() {
             consultations,
             consultation,
             delete_consultation,
+            style_overview,
+            import_style_source,
+            save_style_source,
+            discard_style_upload,
+            delete_style_source,
+            prepare_style_analysis,
+            send_style_analysis,
+            prepare_style_profile,
+            send_style_profile,
+            save_style_draft,
+            approve_style_draft,
+            discard_style_draft,
+            restore_style_version,
+            set_style_enabled,
+            reset_style,
+            accept_style_suggestion,
+            dismiss_style_suggestion,
             check_export,
             export_report,
             print_page,
@@ -1257,6 +1547,7 @@ fn main() {
             check_backup,
             restore_backup,
             forget_backup,
+            set_auto_backup,
             check_update,
             prepare_update,
             install_update,

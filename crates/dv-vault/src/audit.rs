@@ -42,6 +42,11 @@ pub enum AuditEvent {
     /// Sign-in with Google turned on or off as the forgotten-password path (D-041).
     GoogleRecoveryOn,
     GoogleRecoveryOff,
+    /// A past report was added to "my reports" for the writing-style profile (D-043).
+    StyleSourceAdded,
+    StyleSourceDeleted,
+    /// A version of the writing-style profile was approved (or an earlier one brought back).
+    StyleProfileApproved,
 }
 
 impl AuditEvent {
@@ -74,6 +79,9 @@ impl AuditEvent {
             AuditEvent::ConsultationDeleted => "consultation_deleted",
             AuditEvent::GoogleRecoveryOn => "google_recovery_on",
             AuditEvent::GoogleRecoveryOff => "google_recovery_off",
+            AuditEvent::StyleSourceAdded => "style_source_added",
+            AuditEvent::StyleSourceDeleted => "style_source_deleted",
+            AuditEvent::StyleProfileApproved => "style_profile_approved",
         }
     }
 }
