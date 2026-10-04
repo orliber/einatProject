@@ -5,6 +5,7 @@ import { ipc, type AppStatus } from "../ipc/client";
 import { CoreStatus } from "../components/CoreStatus";
 import { ErrorLine, LockIcon } from "../components/ui";
 import { GoogleRecoverForm } from "../components/GoogleRecovery";
+import { LockScreenUpdate } from "../components/Update";
 import "./LockScreen.css";
 
 export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnlocked?: (s: AppStatus) => void }) {
@@ -17,6 +18,10 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [version, setVersion] = useState<string | null>(null);
+  useEffect(() => {
+    ipc.ping().then((p) => setVersion(p.core_version)).catch(() => setVersion(null));
+  }, []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -72,9 +77,10 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
         <div className="lock-foot">
           <p className="hint">{he.lock.footer}</p>
           <CoreStatus />
+          {!PREVIEW && <LockScreenUpdate />}
         </div>
       </section>
-      <span className="lock-version">v0.1{status?.fips_active ? " · FIPS 140-3" : ""}</span>
+      <span className="lock-version">{version ? `v${version}` : ""}{status?.fips_active ? " · FIPS 140-3" : ""}</span>
     </main>
   );
 }

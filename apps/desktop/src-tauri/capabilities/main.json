@@ -90,6 +90,7 @@
     "allow-restore-backup",
     "allow-forget-backup",
     "allow-check-update",
+    "allow-prepare-update",
     "allow-install-update",
     "allow-send-progress"
   ]

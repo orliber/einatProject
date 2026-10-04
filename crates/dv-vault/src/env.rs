@@ -54,8 +54,18 @@ pub fn disk_encryption() -> DiskEncryption {
     }
     if cfg!(target_os = "windows") {
         let script = "(New-Object -ComObject Shell.Application).NameSpace('C:').Self.ExtendedProperty('System.Volume.BitLockerProtection')";
+        // By its full path, so a `powershell.exe` elsewhere on PATH is never the one that runs.
+        let powershell = std::env::var_os("SystemRoot").map_or_else(
+            || "powershell".to_owned(),
+            |root| {
+                Path::new(&root)
+                    .join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
+                    .to_string_lossy()
+                    .into_owned()
+            },
+        );
         return match run(
-            "powershell",
+            &powershell,
             &["-NoProfile", "-NonInteractive", "-Command", script],
         )
         .as_deref()
@@ -75,7 +85,17 @@ pub fn disk_encryption() -> DiskEncryption {
 }
 
 fn run(program: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new(program).args(args).output().ok()?;
+    let mut cmd = Command::new(program);
+    cmd.args(args);
+    // The program has no console on Windows, so without this a black window flashes on
+    // every start while PowerShell answers.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = cmd.output().ok()?;
     out.status
         .success()
         .then(|| String::from_utf8_lossy(&out.stdout).into_owned())

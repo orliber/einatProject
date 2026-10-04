@@ -40,6 +40,11 @@ jobs:
       # Nothing is released that leaks: the adversarial suite and canary must show 0 leaks.
       - name: Privacy suite (0 leaks)
         run: cargo test -p dv-privacy
+      # What she runs, on the system she runs it on: the vault opened again after a restart.
+      - name: Vault, documents and updates on Windows
+        run: cargo test --release -p dv-vault -p dv-egress -p dv-ingest
+      - name: First run (create, close, open again; the real Argon2 cost)
+        run: cargo test --release -p dv-core --test first_run -- --ignored
       - name: Build the one-click installer
         run: pnpm tauri build --bundles nsis
         working-directory: apps/desktop
