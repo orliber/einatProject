@@ -127,6 +127,7 @@ export class FakeCore {
   private lastBackupAt: number | null = Math.floor(Date.now() / 1000) - 9 * 86_400;
   private lastCheckAt: number | null = null;
   private secretChanged = false;
+  private googleOn = false;
   private autoBackup = true;
   private reviewedAt: number | null = null;
   private convs: { id: string; caseId: string | null; updated: number; turns: { role: string; text: string; hidden: string[]; demo: boolean; at: number }[] }[] = [];
@@ -1015,6 +1016,27 @@ export class FakeCore {
         this.secretChanged = true;
         this.logActivity("password_changed", "security", "הסיסמה הוחלפה");
         return null;
+      // Forgot the password → Google (D-041). The preview has no browser sign-in.
+      case "google_status":
+        return { available: true, on: this.googleOn, needs_setup_here: false };
+      case "google_turn_on":
+        if (!String(a.password ?? "")) fail("wrong_secret", "הסיסמה לא נכונה.");
+        this.googleOn = true;
+        this.logActivity("google_recovery_on", "security", "הופעלה כניסה עם גוגל למקרה ששוכחים את הסיסמה", true);
+        return null;
+      case "google_turn_off":
+        if (!String(a.password ?? "")) fail("wrong_secret", "הסיסמה לא נכונה.");
+        this.googleOn = false;
+        this.logActivity("google_recovery_off", "security", "בוטלה הכניסה עם גוגל למקרה ששוכחים את הסיסמה", true);
+        return null;
+      case "google_cancel":
+        return null;
+      case "google_recover":
+        if (!this.googleOn) fail("refused", "הכניסה עם גוגל לא מופעלת במחשב הזה.");
+        this.unlocked = true;
+        this.secretChanged = true;
+        this.logActivity("unlock", "access", "כניסה עם חשבון הגוגל (הסיסמה נשכחה) ובחירת סיסמה חדשה", true);
+        return this.status();
       case "new_recovery_kit":
         if (!String(a.current ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
         this.secretChanged = true;

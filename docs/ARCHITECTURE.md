@@ -63,6 +63,7 @@
 MK (256 ביט אקראי) – עטוף בנפרד בכל "חריץ" (slot) ב-vault.header, כמו LUKS:
    slot password      : KEK = HKDF(Argon2id(סיסמה, salt 32B, m=256MiB–1GiB, t=3, p=4))
    slot recovery      : KEK = HKDF(ערכת שחזור 256 ביט)
+   slot google        : KEK = HKDF(מפתח בגוגל דרייב ‖ מפתח חתום ב-DPAPI במחשב)   (D-041)
    slot windows_hello : KEK = HKDF(חתימת Windows Hello על אתגר אקראי), מפתח ב-TPM   (D-047)
    slot macos         : KEK ב-Keychain עם access control של Touch ID / סיסמת Mac    [שלב 2ב]
 
@@ -126,6 +127,7 @@ audit(seq PK, ts, event, case_ref /* HMAC של case_id */, meta_json_enc, prev_m
 - Host ל-AI: `api.anthropic.com` כברירת מחדל. אם עינת בחרה בהגדרות ChatGPT או Gemini (D-040): `api.openai.com` (`POST /v1/chat/completions`), `generativelanguage.googleapis.com` (`POST /v1beta/models/{model}:generateContent`) או `api.mistral.ai` (`POST /v1/chat/completions`), רק לדגמים מהרשימה הלבנה. מודל מקומי: `http://127.0.0.1:11434/api/chat` בלבד (Ollama, בלי TLS כי זה בתוך המחשב). TLS 1.3 בלבד, שורשי `webpki-roots` (לא של המערכת), אותו client לכל הספקים.
 - **ספקים אחרים (D-040, `providers.rs`):** השער מאשר תמיד את אותו גוף בקשה (בצורה של Messages API). אחרי השער, `dv-egress` מעביר את אותן מחרוזות לשדות של הספק, בלי להוסיף שום טקסט חוץ משמות שדות והגדרות קבועות (נבדק בבדיקה). מה שאין לו מקבילה מדויקת (כלים, תמונות, thinking, שדה לא מוכר) נחסם. התשובה מומרת חזרה לאותה צורה, כך שהבדיקות המקומיות של התשובה זהות לכל ספק. ל-OpenAI נשלח `store: false`.
 - **עדכוני תוכנה (D-033, `update.rs`):** GET בלבד ל-hosts של GitHub מהרשימה הלבנה (גם ב-redirect), בלי נתונים מהכספת. הודעת גרסה חתומה ב-Ed25519 במפתח ציבורי מקובע, ו-SHA-256 של המתקין. כל ספק = אין עדכון. גרסה חדשה יורדת ונבדקת ברקע, ומותקנת רק בלחיצה (D-038).
+- **שכחתי סיסמה, גוגל (D-041, `google.rs`):** רק `oauth2.googleapis.com` ו-`www.googleapis.com`, הרשאת `drive.appdata` + `openid`, PKCE ומאזין חד-פעמי על 127.0.0.1. הטוקן בזיכרון לפעולה אחת ומבוטל בסופה. נשלח רק מפתח אקראי ושם קובץ מהמזהה האקראי של הכספת.
 - **Endpoints מותרים:** `POST /v1/messages` ו-`POST /v1/messages/count_tokens`. כל השאר לא ממומש.
 - **דגמים מותרים:** רשימה לבנה בקוד של דגמים שזמינים תחת ZDR. דגמים מסוג Covered Models (Fable, Mythos) חסומים. הדגם נבחר בהגדרות מתוך הרשימה.
 - **שדות אסורים:** `metadata`, Files, Batch, code_execution. **חריג יחיד:** `web_search_20250305` (הגרסה הבסיסית, זכאית ל-ZDR), ורק בקריאות של מצב מחקר (D-014), בלי תוכן מהתיק ועם `allowed_domains`.

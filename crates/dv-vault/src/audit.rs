@@ -39,6 +39,9 @@ pub enum AuditEvent {
     /// Einat went over the log (periodic review of access records).
     AuditReviewed,
     ConsultationDeleted,
+    /// Sign-in with Google turned on or off as the forgotten-password path (D-041).
+    GoogleRecoveryOn,
+    GoogleRecoveryOff,
     /// A past report was added to "my reports" for the writing-style profile (D-043).
     StyleSourceAdded,
     StyleSourceDeleted,
@@ -77,6 +80,8 @@ impl AuditEvent {
             AuditEvent::IntegrityWarning => "integrity_warning",
             AuditEvent::AuditReviewed => "audit_reviewed",
             AuditEvent::ConsultationDeleted => "consultation_deleted",
+            AuditEvent::GoogleRecoveryOn => "google_recovery_on",
+            AuditEvent::GoogleRecoveryOff => "google_recovery_off",
             AuditEvent::StyleSourceAdded => "style_source_added",
             AuditEvent::StyleSourceDeleted => "style_source_deleted",
             AuditEvent::StyleProfileApproved => "style_profile_approved",

@@ -8,6 +8,7 @@
 //! * Tamper-evident audit log (HMAC chain + anchor in the header), metadata only.
 
 mod audit;
+pub mod computer_key;
 pub mod crypto;
 mod db;
 pub mod env;

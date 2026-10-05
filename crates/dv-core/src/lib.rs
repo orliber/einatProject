@@ -9,6 +9,7 @@ mod backup;
 mod consultations;
 mod dates;
 mod followup;
+pub mod google;
 mod library;
 mod readiness;
 mod retention;

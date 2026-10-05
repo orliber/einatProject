@@ -12,6 +12,7 @@ import type { CaseInput } from "./generated/CaseInput";
 import type { CaseMeta } from "./generated/CaseMeta";
 import type { CaseSummary } from "./generated/CaseSummary";
 import type { Folder } from "./generated/Folder";
+import type { GoogleStatus } from "./generated/GoogleStatus";
 import type { NameMatch } from "./generated/NameMatch";
 import type { ChatView } from "./generated/ChatView";
 import type { ConsultationSummary } from "./generated/ConsultationSummary";
@@ -221,6 +222,16 @@ export const ipc = {
   newRecoveryKit: (current: string, withRecovery: boolean) =>
     call<CreatedVault>("new_recovery_kit", { current, withRecovery }),
 
+  /** Forgot the password → sign in with Google (D-041). Readable while locked. */
+  googleStatus: () => call<GoogleStatus>("google_status"),
+  /** Opens Google in her browser; resolves when she is back and the slot is written. */
+  googleTurnOn: (password: string) => run("google_turn_on", { password }),
+  googleTurnOff: (password: string) => run("google_turn_off", { password }),
+  /** Stop a sign-in that waits for the browser. */
+  googleCancel: () => run("google_cancel"),
+  /** Locked, password forgotten: sign in with Google, open, and set `newPassword` at once. */
+  googleRecover: (newPassword: string) => call<AppStatus>("google_recover", { newPassword }),
+
   // Encrypted backup (D-024). The system's own window picks the file; `null` = cancelled.
   backupStatus: () => call<BackupStatus>("backup_status"),
   writeBackup: () => call<BackupDone | null>("write_backup"),
@@ -292,6 +303,7 @@ export type {
   BackupStatus,
   StagedBackup,
   Folder,
+  GoogleStatus,
   NameMatch,
   MaterialRouting,
   SortResult,

@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
 import { ipc } from "../ipc/client";
 import { RecoveryKitPaper } from "./RecoveryKit";
+import { GoogleSettings } from "./GoogleRecovery";
 import { Dialog, ErrorLine } from "./ui";
 
 /** The current password, or the recovery kit for whoever forgot it. */
@@ -225,6 +226,7 @@ function HelloSetting() {
 export function PasswordSettings() {
   const [open, setOpen] = useState<"password" | "kit" | null>(null);
   return (
+    <>
     <section className="card setting" aria-labelledby="s-password">
       <h2 id="s-password">סיסמה וערכת שחזור</h2>
       <p className="muted small">הסיסמה פותחת את הכספת ביומיום; ערכת השחזור המודפסת פותחת אותה אם הסיסמה נשכחה. אחרי החלפה של אחת מהן כדאי לגבות מחדש.</p>
@@ -236,5 +238,7 @@ export function PasswordSettings() {
       {open === "password" && <ChangePasswordDialog onClose={() => setOpen(null)} />}
       {open === "kit" && <NewKitDialog onClose={() => setOpen(null)} />}
     </section>
+    <GoogleSettings />
+    </>
   );
 }

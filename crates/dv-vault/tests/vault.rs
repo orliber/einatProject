@@ -130,6 +130,131 @@ fn wrong_secrets_are_rejected() {
 }
 
 #[test]
+fn sign_in_with_google_needs_both_keys_and_resets_the_password() {
+    use dv_vault::crypto::Key32;
+    use dv_vault::recovery::google_account_tag;
+
+    let (dir, mut vault, _) = new_vault();
+    let case = noam(&mut vault);
+    assert!(!vault.has_google_slot());
+    assert_eq!(Vault::google_slot(dir.path()).unwrap().1, None);
+
+    // Turning it on needs the current password.
+    let drive = Key32::random().unwrap();
+    let computer = Key32::random().unwrap();
+    let tag = google_account_tag(vault.vault_id(), "google-account-1");
+    assert!(vault
+        .set_google_slot(
+            Secret::Password("סיסמה שגויה לגמרי"),
+            &drive,
+            &computer,
+            &tag
+        )
+        .is_err());
+    vault
+        .set_google_slot(Secret::Password(PASSWORD), &drive, &computer, &tag)
+        .unwrap();
+    assert!(vault.has_google_slot());
+    drop(vault);
+    assert_eq!(Vault::google_slot(dir.path()).unwrap().1, Some(tag.clone()));
+
+    // Nothing in the vault folder is the Drive key.
+    assert!(!contains(
+        &all_bytes(dir.path()),
+        &dv_vault::recovery::drive_key_text(&drive)
+    ));
+
+    // The Drive key alone (a broken-into Google account) opens nothing, nor does the
+    // computer key alone, nor another key.
+    let other = Key32::random().unwrap();
+    for (d, c) in [(&drive, &other), (&other, &computer), (&computer, &drive)] {
+        assert!(matches!(
+            Vault::unlock_with_google(dir.path(), d, c),
+            Err(VaultError::WrongSecret)
+        ));
+    }
+    let mut vault = Vault::unlock_with_google(dir.path(), &drive, &computer).unwrap();
+    assert_eq!(vault.identities(&case).unwrap()[0].value, "נועם");
+    assert!(vault.integrity().header_ok && vault.integrity().audit_ok);
+    let new_password = "חתול כחול ישן על הגדר";
+    vault
+        .rekey_password(
+            Secret::Google {
+                drive: &drive,
+                computer: &computer,
+            },
+            new_password,
+            Argon2Params::TEST,
+        )
+        .unwrap();
+    drop(vault);
+    assert!(Vault::unlock_with_password(dir.path(), PASSWORD).is_err());
+    let mut vault = Vault::unlock_with_password(dir.path(), new_password).unwrap();
+
+    // A second account replaces the first; turning it off removes the slot.
+    let second = Key32::random().unwrap();
+    vault
+        .set_google_slot(Secret::Password(new_password), &second, &computer, "other")
+        .unwrap();
+    drop(vault);
+    assert!(Vault::unlock_with_google(dir.path(), &drive, &computer).is_err());
+    let mut vault = Vault::unlock_with_google(dir.path(), &second, &computer).unwrap();
+    vault
+        .remove_google_slot(Secret::Password(new_password))
+        .unwrap();
+    assert!(!vault.has_google_slot());
+    drop(vault);
+    assert!(matches!(
+        Vault::unlock_with_google(dir.path(), &second, &computer),
+        Err(VaultError::WrongSecret)
+    ));
+    assert_eq!(Vault::google_slot(dir.path()).unwrap().1, None);
+}
+
+#[test]
+fn a_backup_with_a_google_slot_does_not_open_with_the_drive_key_alone() {
+    use dv_vault::crypto::Key32;
+    let (_dir, mut vault, _) = new_vault();
+    let drive = Key32::random().unwrap();
+    let computer = Key32::random().unwrap();
+    vault
+        .set_google_slot(Secret::Password(PASSWORD), &drive, &computer, "tag")
+        .unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("b.vaultbak");
+    vault.write_backup(&dest).unwrap();
+    let bytes = fs::read(&dest).unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let guess = Key32::random().unwrap();
+    assert!(Vault::restore_backup(
+        &bytes,
+        target.path(),
+        Secret::Google {
+            drive: &drive,
+            computer: &guess
+        }
+    )
+    .is_err());
+}
+
+#[test]
+fn a_changed_google_slot_is_caught_by_the_header_check() {
+    use dv_vault::crypto::Key32;
+    let (dir, mut vault, _) = new_vault();
+    let key = Key32::random().unwrap();
+    vault
+        .set_google_slot(Secret::Password(PASSWORD), &key, &key, "tag")
+        .unwrap();
+    drop(vault);
+    // Someone swaps the account tag (to make the lock screen offer another account).
+    let path = dir.path().join("vault.header");
+    let text = fs::read_to_string(&path).unwrap();
+    fs::write(&path, text.replace("\"tag\"", "\"evil\"")).unwrap();
+    let vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
+    assert!(!vault.integrity().header_ok);
+}
+
+#[test]
 fn weak_passwords_are_refused_at_creation() {
     let dir = tempfile::tempdir().unwrap();
     assert!(matches!(

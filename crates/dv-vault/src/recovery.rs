@@ -100,6 +100,39 @@ pub fn derive_kek(recovery: &Key32) -> Result<Key32, VaultError> {
     hkdf(recovery.as_bytes(), "dv/slot/recovery/v1")
 }
 
+/// Key-encryption key for the Google slot (D-041): the key kept in her Google Drive AND the
+/// key sealed to her Windows account on this computer. Neither alone opens the slot, so a
+/// broken-into Google account with a stolen backup reads nothing.
+pub fn derive_google_kek(drive_key: &Key32, computer_key: &Key32) -> Result<Key32, VaultError> {
+    let mut both = Zeroizing::new([0u8; 64]);
+    both[..32].copy_from_slice(drive_key.as_bytes());
+    both[32..].copy_from_slice(computer_key.as_bytes());
+    hkdf(both.as_slice(), "dv/slot/google/v1")
+}
+
+/// Who the Google slot belongs to: the account id, hashed with this vault's id so the header
+/// never carries the id itself and two vaults never share a value.
+#[must_use]
+pub fn google_account_tag(vault_id: &str, google_account_id: &str) -> String {
+    sha256_hex(format!("dv/google-account/v1|{vault_id}|{google_account_id}").as_bytes())
+}
+
+/// The key as it is kept in the Drive file: 64 hex characters, nothing else.
+#[must_use]
+pub fn drive_key_text(drive_key: &Key32) -> Zeroizing<String> {
+    Zeroizing::new(crate::crypto::hex(drive_key.as_bytes()))
+}
+
+pub fn parse_drive_key(text: &str) -> Result<Key32, VaultError> {
+    let bytes =
+        Zeroizing::new(crate::crypto::unhex(text.trim()).map_err(|_| VaultError::WrongSecret)?);
+    let arr: [u8; 32] = bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| VaultError::WrongSecret)?;
+    Ok(Key32::from_bytes(arr))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

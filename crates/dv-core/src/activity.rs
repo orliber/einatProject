@@ -54,6 +54,11 @@ fn describe(
         "unlock" if text("method") == "recovery" => {
             ("access", "כניסה עם ערכת השחזור".to_owned(), true)
         }
+        "unlock" if text("method") == "google" => (
+            "access",
+            "כניסה עם חשבון הגוגל (הסיסמה נשכחה) ובחירת סיסמה חדשה".to_owned(),
+            true,
+        ),
         "unlock" => ("access", "כניסה".to_owned(), false),
         "unlock_failed" => (
             "access",
@@ -72,6 +77,16 @@ fn describe(
         "lock" => ("access", "נעילה".to_owned(), false),
         "password_changed" => ("security", "הסיסמה הוחלפה".to_owned(), false),
         "recovery_key_rotated" => ("security", "נוצרה ערכת שחזור חדשה".to_owned(), false),
+        "google_recovery_on" => (
+            "security",
+            "הופעלה כניסה עם גוגל למקרה ששוכחים את הסיסמה".to_owned(),
+            true,
+        ),
+        "google_recovery_off" => (
+            "security",
+            "בוטלה הכניסה עם גוגל למקרה ששוכחים את הסיסמה".to_owned(),
+            true,
+        ),
         "case_created" => ("case", "תיק נפתח".to_owned(), false),
         "case_opened" => ("case", "תיק נפתח לצפייה".to_owned(), false),
         "case_trashed" => ("case", "תיק הועבר לסל המחזור".to_owned(), false),
@@ -253,6 +268,8 @@ mod tests {
             "lock",
             "password_changed",
             "recovery_key_rotated",
+            "google_recovery_on",
+            "google_recovery_off",
             "case_created",
             "case_opened",
             "case_trashed",
