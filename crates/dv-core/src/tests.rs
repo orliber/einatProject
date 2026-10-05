@@ -896,14 +896,10 @@ fn import_shows_body_hides_names_and_keeps_names_from_margins() {
 fn import_refuses_what_it_cannot_read() {
     let (_dir, mut core, case) = setup(None);
     let err = core
-        .import_document(
-            &case,
-            "old.doc",
-            &[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1, 0, 0],
-        )
+        .import_document(&case, "IMG_0001.HEIC", b"\0\0\0\x18ftypheic\0\0\0\0")
         .unwrap_err();
     assert!(
-        err.to_ui().message.contains(".docx"),
+        err.to_ui().message.contains("JPG"),
         "{}",
         err.to_ui().message
     );

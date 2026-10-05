@@ -289,7 +289,7 @@ pub struct NameSuggestion {
 #[ts(export)]
 pub struct ImportPreview {
     pub file_name: String,
-    /// `docx` | `pdf` | `text`
+    /// `docx` | `odt` | `pdf` | `text` | `rtf` | `doc` | `image`
     pub format: String,
     pub pages: u32,
     pub title: String,

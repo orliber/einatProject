@@ -11,7 +11,7 @@ import type { CaseApi } from "../CaseScreen";
 import "./MaterialsView.css";
 import { useAi } from "../../ai";
 
-const ACCEPT = ".docx,.odt,.pdf,.txt,application/vnd.oasis.opendocument.text,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain";
+const ACCEPT = ".docx,.doc,.odt,.rtf,.pdf,.txt,.jpg,.jpeg,.png,.tif,.tiff,.heic,application/vnd.oasis.opendocument.text,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/rtf,text/plain,image/jpeg,image/png,image/tiff";
 
 export function MaterialsView({ api }: { api: CaseApi }) {
   const { fail, notify } = useApp();

@@ -1,4 +1,9 @@
 {
   "productName": "כספת האבחון",
-  "mainBinaryName": "DiagnosticVault"
+  "mainBinaryName": "DiagnosticVault",
+  "bundle": {
+    "resources": {
+      "ocr/": "ocr/"
+    }
+  }
 }

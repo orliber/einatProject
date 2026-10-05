@@ -1,0 +1,42 @@
+name: OCR on Windows
+
+# The OCR engine as the installer ships it (built from source by windows/fetch-ocr.ps1), run
+# inside the real sandbox (AppContainer, job object) on an invented scanned letter. Only when
+# the readers, the sandbox or the engine build change: the build takes a while (D-048).
+on:
+  pull_request:
+    paths:
+      - crates/dv-ingest/**
+      - crates/dv-sandbox/**
+      - apps/desktop/src-tauri/windows/fetch-ocr.ps1
+      - .github/workflows/ocr-windows.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ocr-windows-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  ocr:
+    name: OCR in the sandbox, as released
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: OCR engine
+        shell: pwsh
+        run: apps/desktop/src-tauri/windows/fetch-ocr.ps1
+      - name: Scans and photos through the sandboxed engine
+        run: cargo test --release -p dv-ingest --test ocr
+        env:
+          DV_TEST_OCR_DIR: ${{ github.workspace }}\apps\desktop\src-tauri\ocr
+          DV_REQUIRE_OCR: "1"

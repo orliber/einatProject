@@ -45,6 +45,16 @@ jobs:
         run: |
           choco install nasm ninja -y --no-progress
           echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      # The local OCR engine goes into the installer (D-048), and is tested where it runs:
+      # inside the sandbox, on Windows, on an invented scanned letter.
+      - name: OCR engine
+        shell: pwsh
+        run: apps/desktop/src-tauri/windows/fetch-ocr.ps1
+      - name: OCR in the sandbox
+        run: cargo test --release -p dv-ingest --test ocr
+        env:
+          DV_TEST_OCR_DIR: ${{ github.workspace }}\apps\desktop\src-tauri\ocr
+          DV_REQUIRE_OCR: "1"
       # Nothing is released that leaks: the adversarial suite and canary must show 0 leaks.
       - name: Privacy suite (0 leaks)
         run: cargo test -p dv-privacy

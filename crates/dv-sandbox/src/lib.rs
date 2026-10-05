@@ -37,6 +37,9 @@ pub struct Policy {
     pub memory_mb: u32,
     /// Folders the process may read (for example a language-data folder). Nothing else.
     pub read_dirs: Vec<PathBuf>,
+    /// Tell an OpenMP program (the OCR engine) to use one thread: its busy-waiting threads
+    /// otherwise starve each other and the app (`OMP_THREAD_LIMIT=1`, the only variable added).
+    pub single_thread: bool,
 }
 
 impl Default for Policy {
@@ -44,6 +47,7 @@ impl Default for Policy {
         Self {
             memory_mb: 1024,
             read_dirs: Vec::new(),
+            single_thread: false,
         }
     }
 }
@@ -74,13 +78,13 @@ pub fn spawn(exe: &Path, args: &[&str], policy: &Policy) -> io::Result<Child> {
     }
     #[cfg(not(windows))]
     {
-        let _ = policy;
         let inner = std::process::Command::new(exe)
             .args(args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
             .env_clear()
+            .envs(policy.single_thread.then_some(("OMP_THREAD_LIMIT", "1")))
             .spawn()?;
         Ok(Child { inner })
     }

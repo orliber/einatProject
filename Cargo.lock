@@ -1117,6 +1117,7 @@ version = "0.4.0"
 dependencies = [
  "cfb 0.15.0",
  "dv-sandbox",
+ "flate2",
  "pdf-extract",
  "quick-xml",
  "serde",

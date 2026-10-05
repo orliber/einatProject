@@ -357,10 +357,13 @@ fn command_line(exe: &Path, args: &[&str]) -> io::Result<Vec<u16>> {
 /// The child's environment, sorted as Windows expects, double-NUL-terminated. Only what
 /// Windows itself needs: the system folder, and the profile folders that CreateProcess rewrites
 /// to the container's own (it refuses an AppContainer without them, error 203). No proxy
-/// settings, no search path, nothing of the app.
-fn environment() -> Vec<u16> {
+/// settings, no search path, nothing of the app. `OMP_THREAD_LIMIT=1` when the policy asks.
+fn environment(policy: &Policy) -> Vec<u16> {
     let mut entries: Vec<(&str, OsString)> =
         vec![("SystemRoot", system_root()), ("WINDIR", system_root())];
+    if policy.single_thread {
+        entries.push(("OMP_THREAD_LIMIT", OsString::from("1")));
+    }
     for key in ["APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "USERPROFILE"] {
         if let Some(value) = std::env::var_os(key) {
             entries.push((key, value));
@@ -431,7 +434,7 @@ pub(crate) fn spawn(exe: &Path, args: &[&str], policy: &Policy) -> io::Result<Co
 
     let application = wide(exe.as_os_str());
     let mut line = command_line(exe, args)?;
-    let environment = environment();
+    let environment = environment(policy);
     let folder = wide(system32().as_os_str());
     let mut info = PROCESS_INFORMATION::default();
     // SAFETY: every string is NUL-terminated (the environment double-NUL-terminated, UTF-16 as

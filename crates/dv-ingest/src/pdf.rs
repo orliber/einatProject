@@ -1,4 +1,4 @@
-//! PDF with a text layer. Scanned PDFs (images only) are refused with a clear message.
+//! PDF with a text layer. A scanned PDF (images only) goes to OCR instead (`scan`).
 //!
 //! Producers store Hebrew in different orders (LibreOffice, Word and browsers all differ), so
 //! the text order in the file cannot be trusted. Every character's position on the page is
@@ -311,6 +311,25 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
         metadata,
         warnings,
         pages: u32::try_from(pages.len()).unwrap_or(u32::MAX),
+        ocr: false,
+    })
+}
+
+/// A PDF without a text layer: its page images, for OCR. No readable image refuses it.
+pub(crate) fn scan(bytes: &[u8]) -> Result<crate::Scan, IngestError> {
+    let doc = load(bytes)?;
+    let (images, mut warnings) = crate::scan::from_pdf(&doc)?;
+    if images.is_empty() {
+        return Err(IngestError::Scanned);
+    }
+    let (metadata, extra) = hidden_parts(&doc);
+    warnings.extend(extra);
+    Ok(crate::Scan {
+        format: Format::Pdf,
+        images,
+        metadata,
+        warnings,
+        pages: u32::try_from(doc.get_pages().len()).unwrap_or(u32::MAX),
     })
 }
 

@@ -416,6 +416,8 @@ pub struct Core {
     transport: Option<Arc<dyn Transport>>,
     /// The app's own binary, started as an isolated worker for each document.
     ingest_exe: Option<PathBuf>,
+    /// The local OCR engine shipped next to the app, for scans and photos (D-048).
+    ocr: Option<dv_ingest::ocr::Engine>,
     /// A backup file chosen for the drill or a restore (encrypted bytes).
     staged_backup: Option<Vec<u8>>,
     /// A past report read for the style profile, waiting for her confirmation (D-043).
@@ -639,6 +641,7 @@ impl Core {
             disk_encryption: disk.to_owned(),
             transport: None,
             ingest_exe: None,
+            ocr: None,
             staged_backup: None,
             style_staged: HashMap::new(),
             auto_backup_tried: None,
@@ -649,8 +652,24 @@ impl Core {
     /// Read documents in a separate worker process (the app passes its own binary).
     #[must_use]
     pub fn with_ingest_worker(mut self, exe: PathBuf) -> Self {
+        self.ocr = dv_ingest::ocr::Engine::locate(&exe);
         self.ingest_exe = Some(exe);
         self
+    }
+
+    /// Read a document: in the isolated worker when the app set one, then OCR for a scan.
+    pub(crate) fn read_document(
+        &self,
+        file_name: &str,
+        bytes: &[u8],
+    ) -> Result<dv_ingest::Extracted, CoreError> {
+        dv_ingest::import(
+            self.ingest_exe.as_deref(),
+            self.ocr.as_ref(),
+            file_name,
+            bytes,
+        )
+        .map_err(|e| CoreError::Refused(e.message_he()))
     }
 
     /// Tests: cheap KDF and a fake transport.
@@ -1263,13 +1282,7 @@ impl Core {
         bytes: &[u8],
     ) -> Result<ImportPreview, CoreError> {
         self.vault_ref()?.case_meta(case_id)?;
-        let extracted = match &self.ingest_exe {
-            Some(exe) => {
-                dv_ingest::worker::run(exe, file_name, bytes, dv_ingest::worker::DEFAULT_TIMEOUT)
-            }
-            None => dv_ingest::extract(bytes, file_name),
-        }
-        .map_err(|e| CoreError::Refused(e.message_he()))?;
+        let extracted = self.read_document(file_name, bytes)?;
 
         // Names in the margins and the file's properties are not imported, but they are the
         // names most likely to appear in the body too: kept with the case first, so the body
@@ -1368,13 +1381,7 @@ impl Core {
         });
         Ok(ImportPreview {
             file_name: file_name.to_owned(),
-            format: match extracted.format {
-                dv_ingest::Format::Docx => "docx",
-                dv_ingest::Format::Odt => "odt",
-                dv_ingest::Format::Pdf => "pdf",
-                dv_ingest::Format::Text => "text",
-            }
-            .to_owned(),
+            format: extracted.format.name().to_owned(),
             pages: extracted.pages,
             title: stem,
             suggested_kind: InputKind::guess(&extracted.body, file_name),
