@@ -91,6 +91,9 @@ pub struct Extracted {
     /// Things the psychologist should know ("comments were not imported").
     pub warnings: Vec<String>,
     pub pages: u32,
+    /// The text was read from a scan or photo by OCR: a name may be misread by a letter.
+    #[serde(default)]
+    pub ocr: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
@@ -264,6 +267,7 @@ pub fn read(bytes: &[u8], file_name: &str) -> Result<Outcome, IngestError> {
                     Vec::new()
                 },
                 pages: 1,
+                ocr: false,
             }
         }
     };

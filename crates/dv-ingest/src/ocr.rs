@@ -254,6 +254,7 @@ pub fn recognize(engine: &Engine, scan: Scan) -> Result<Extracted, IngestError> 
         metadata: scan.metadata,
         warnings,
         pages: scan.pages,
+        ocr: true,
     })
 }
 

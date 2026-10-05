@@ -89,6 +89,7 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
         metadata,
         warnings,
         pages: 0,
+        ocr: false,
     })
 }
 

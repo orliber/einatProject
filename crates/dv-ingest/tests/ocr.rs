@@ -192,6 +192,7 @@ fn photo_of_a_page_is_read() {
     )
     .unwrap();
     assert_eq!(out.format, Format::Image);
+    assert!(out.ocr);
     assert_letter(&out.body);
     assert!(out.warnings[0].contains("OCR"), "{:?}", out.warnings);
 }

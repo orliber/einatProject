@@ -311,6 +311,7 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
         metadata,
         warnings,
         pages: u32::try_from(pages.len()).unwrap_or(u32::MAX),
+        ocr: false,
     })
 }
 

@@ -175,6 +175,7 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
         metadata: Vec::new(),
         warnings,
         pages: 1,
+        ocr: false,
     })
 }
 
