@@ -14,7 +14,8 @@ use ts_rs::TS;
 use crate::lexicon::LEXICON;
 use crate::patterns;
 use crate::pipeline::{
-    arabic_identity_matches, declared_reads_as_word, identity_index, reads_as_word, PrivacyContext,
+    arabic_identity_matches, declared_reads_as_word, identity_index, past_name, reads_as_word,
+    PrivacyContext,
 };
 use crate::text::{normalize, prefix_splits, tokenize};
 
@@ -201,6 +202,18 @@ pub fn clear(req: &GateRequest<'_>) -> Result<ClearedPayload, Blocked> {
                 reasons.push(reason(
                     "unknown_name",
                     "נמצא שם שלא הוחלט לגביו",
+                    Some(text[t.start..t.end].to_owned()),
+                ));
+            }
+        }
+        for t in &tokens {
+            let past = prefix_splits(&t.norm)
+                .iter()
+                .any(|(p, h)| past_name(req.ctx, h) && !(*p > 0 && reads_as_word(&t.norm, h)));
+            if past && !(req.ctx.allowlisted)(&t.norm) {
+                reasons.push(reason(
+                    "past_report_name",
+                    "נמצא שם מדוח ישן",
                     Some(text[t.start..t.end].to_owned()),
                 ));
             }

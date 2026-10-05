@@ -252,6 +252,7 @@ fn measure(docs: &[Doc]) -> Report {
                 practitioner: &practitioner,
                 allowlisted: &allow,
                 confirmed_names: &confirmed,
+                past_names: &|_: &str| false,
                 today: (2026, 10, 3),
             };
             (filter(&doc.text, &ctx).unwrap(), ids)

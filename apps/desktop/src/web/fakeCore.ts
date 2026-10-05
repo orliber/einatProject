@@ -393,7 +393,7 @@ export class FakeCore {
           key: s.key, title: s.title, part: s.part,
           source_count: routing.filter((r) => r.feeds.includes(s.key)).length,
           sortable: SORTABLE.some((x) => x.key === s.key),
-          paragraphs: drafts.map((d) => ({ id: d.id, text: restore(d.text, c.people, this.practitioner), status: d.status, by_ai: d.byAi, sources: d.sources, warnings: [], replaces: d.replaces ?? null, has_versions: versionsOf(c.drafts, d).length > 0 })),
+          paragraphs: drafts.map((d) => ({ id: d.id, text: restore(d.text, c.people, this.practitioner), status: d.status, by_ai: d.byAi, sources: d.sources, warnings: [], replaces: d.replaces ?? null, has_versions: versionsOf(c.drafts, d).length > 0, style_note: null })),
           approved: drafts.some((d) => d.status === "approved"),
         };
       }),

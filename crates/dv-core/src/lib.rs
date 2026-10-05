@@ -35,8 +35,8 @@ use dv_ipc::{PingResponse, IPC_VERSION};
 use dv_privacy::restore::{restore, scan_model_output};
 use dv_privacy::text::normalize;
 use dv_privacy::{
-    clear, filter, AutoHidden, AutoKind, Checks, ClearedPayload, FilterOutcome, GateRequest,
-    PrivacyContext,
+    clear, filter, ocr_misreads, AutoHidden, AutoKind, Checks, ClearedPayload, FilterOutcome,
+    GateRequest, PrivacyContext,
 };
 use dv_vault::{Argon2Params, AuditEvent, Vault, VaultError};
 use serde_json::Value;
@@ -397,6 +397,8 @@ struct PrivacyData {
     practitioner: Vec<String>,
     allow: HashSet<String>,
     is_name: HashSet<String>,
+    /// Keyed hashes of the names in her past reports (`style`).
+    past: HashSet<String>,
 }
 
 /// Everything the review screen shows, accumulated over the outgoing texts.
@@ -1275,6 +1277,7 @@ impl Core {
             practitioner: v.practitioner()?.names,
             allow: v.not_a_name_hmacs(case_id)?.into_iter().collect(),
             is_name: v.is_name_hmacs(case_id)?.into_iter().collect(),
+            past: style::past_name_hmacs(v)?,
         })
     }
 
@@ -1288,12 +1291,14 @@ impl Core {
         let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
         let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
         let is_name = |t: &str| data.is_name.contains(&v.token_hmac(t));
+        let past = |t: &str| !data.past.is_empty() && data.past.contains(&v.token_hmac(t));
         let ctx = PrivacyContext {
             case_id: &data.case_id,
             identities: &data.identities,
             practitioner: &data.practitioner,
             allowlisted: &allow,
             confirmed_names: &is_name,
+            past_names: &past,
             today: today(),
         };
         filter(text, &ctx).map_err(|e| CoreError::Internal(e.to_string()))
@@ -1312,6 +1317,62 @@ impl Core {
         self.preview_filter(case_id, text)
     }
 
+    /// Scanned text (OCR) can misread a name by one letter ("אלוו" for "אלון"). Call this for
+    /// OCR-sourced text only, before the text is filtered: each misread is kept as one more
+    /// spelling of that name, so every later text hides it and the gate refuses it (D-048).
+    /// Returned for the card, where "להחזיר" takes the spelling off again.
+    pub fn learn_ocr_misreads(
+        &mut self,
+        case_id: &str,
+        text: &str,
+    ) -> Result<Vec<AutoHidden>, CoreError> {
+        let data = self.privacy_data(case_id)?;
+        let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
+        let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
+        let none = |_: &str| false;
+        let ctx = PrivacyContext {
+            case_id: &data.case_id,
+            identities: &data.identities,
+            practitioner: &data.practitioner,
+            allowlisted: &allow,
+            confirmed_names: &none,
+            past_names: &none,
+            today: today(),
+        };
+        let misreads = ocr_misreads(text, &ctx);
+        if misreads.is_empty() {
+            return Ok(Vec::new());
+        }
+        let v = self.vault_mut()?;
+        let mut ids = v.identities(case_id)?;
+        let mut out = Vec::new();
+        for m in misreads {
+            let Some(i) = ids.iter_mut().find(|i| i.tag == m.tag) else {
+                continue;
+            };
+            i.aliases.push(m.written.clone());
+            out.push(AutoHidden {
+                token: m.written,
+                tag: m.tag,
+                role: i.role,
+                reason: format!("בסריקה, אות אחת שונה מ-{}", i.value),
+                uncertain: true,
+                kind: AutoKind::SimilarSpelling,
+            });
+        }
+        let ids: Vec<IdentityInput> = ids
+            .into_iter()
+            .map(|i| IdentityInput {
+                role: i.role,
+                id: Some(i.id),
+                value: i.value,
+                aliases: i.aliases,
+            })
+            .collect();
+        v.set_identities(case_id, &ids)?;
+        Ok(out)
+    }
+
     /// "להחזיר" on the summary card: from now on this case keeps `token` as it is written.
     /// A name the filter kept with the case (under `tag`) is dropped from its names.
     pub fn restore_auto_hidden(
@@ -1322,6 +1383,34 @@ impl Core {
     ) -> Result<(), CoreError> {
         let v = self.vault_mut()?;
         let ids = v.identities(case_id)?;
+        let tok = normalize(token);
+        // A spelling of the name rather than the name ("אלוו", kept from a scan, or "נואם"
+        // next to "נועם"): only that spelling comes back, the name stays hidden.
+        if !ids.iter().any(|i| {
+            let value = normalize(&i.value);
+            i.tag == tag && (value == tok || value.split(' ').any(|w| w == tok))
+        }) && ids.iter().any(|i| i.tag == tag)
+        {
+            let ids: Vec<IdentityInput> = ids
+                .into_iter()
+                .map(|i| IdentityInput {
+                    aliases: if i.tag == tag {
+                        i.aliases
+                            .into_iter()
+                            .filter(|a| normalize(a) != tok)
+                            .collect()
+                    } else {
+                        i.aliases
+                    },
+                    role: i.role,
+                    id: Some(i.id),
+                    value: i.value,
+                })
+                .collect();
+            v.set_identities(case_id, &ids)?;
+            v.mark_not_a_name(Some(case_id), &tok)?;
+            return Ok(());
+        }
         let value = ids
             .iter()
             .find(|i| i.tag == tag && i.source != IdentitySource::Manual)
@@ -1446,6 +1535,7 @@ impl Core {
         let practitioner = v.practitioner()?.names.first().cloned();
         let routing = Core::material_routing(v, &structure, case_id, &inputs)?;
         let sheets = score_sheets(v, case_id, &inputs)?;
+        let fingerprint = style::fingerprint(v)?;
         let retention_default = v
             .list_cases()?
             .into_iter()
@@ -1483,6 +1573,9 @@ impl Core {
                             .collect(),
                         // Every score in the text against the score table, each time (AI-6).
                         warnings: dv_domain::check_scores(&d.text_tagged, &sheets),
+                        style_note: fingerprint
+                            .filter(|_| d.author == Author::Ai && d.status == DraftStatus::Proposed)
+                            .and_then(|fp| style::style_note(&fp, &d.text_tagged)),
                         replaces: d.replaces,
                     })
                     .collect();
@@ -1659,12 +1752,14 @@ impl Core {
         let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
         let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
         let is_name = |t: &str| data.is_name.contains(&v.token_hmac(t));
+        let past = |t: &str| !data.past.is_empty() && data.past.contains(&v.token_hmac(t));
         let ctx = PrivacyContext {
             case_id: &data.case_id,
             identities: &data.identities,
             practitioner: &data.practitioner,
             allowlisted: &allow,
             confirmed_names: &is_name,
+            past_names: &past,
             today: today(),
         };
         let mut case_tags: HashSet<String> = data
@@ -1761,12 +1856,14 @@ impl Core {
             }
             let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
             let is_name = |t: &str| data.is_name.contains(&v.token_hmac(t));
+            let past = |t: &str| !data.past.is_empty() && data.past.contains(&v.token_hmac(t));
             let ctx = PrivacyContext {
                 case_id: &data.case_id,
                 identities: &data.identities,
                 practitioner: &data.practitioner,
                 allowlisted: &allow,
                 confirmed_names: &is_name,
+                past_names: &past,
                 today: today(),
             };
             let run = |t: &str| filter(t, &ctx).map_err(|e| CoreError::Internal(e.to_string()));
@@ -2237,12 +2334,14 @@ impl Core {
             }
             let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
             let is_name = |t: &str| data.is_name.contains(&v.token_hmac(t));
+            let past = |t: &str| !data.past.is_empty() && data.past.contains(&v.token_hmac(t));
             let ctx = PrivacyContext {
                 case_id: &data.case_id,
                 identities: &data.identities,
                 practitioner: &data.practitioner,
                 allowlisted: &allow,
                 confirmed_names: &is_name,
+                past_names: &past,
                 today: today(),
             };
             let msg = filter(message, &ctx).map_err(|e| CoreError::Internal(e.to_string()))?;

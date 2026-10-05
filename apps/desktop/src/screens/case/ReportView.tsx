@@ -211,6 +211,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
         {p.warnings.map((w, i) => (
           <div key={i} className="note-warn small"><WarnIcon /><span>{w}</span></div>
         ))}
+        {p.style_note && <span className="small muted style-note">{p.style_note}</span>}
         {!busy && (
           <span className="a4-pop-anchor a4-para-tool">
             {p.by_ai && <button type="button" className="a4-why" aria-expanded={whyPop === p.id} aria-label="למה כתבת את זה?" title="למה כתבת את זה? (המקורות של הפסקה)"

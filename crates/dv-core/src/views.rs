@@ -67,6 +67,8 @@ pub struct ParagraphView {
     pub replaces: Option<String>,
     /// Earlier wordings are kept and can be brought back (D-046).
     pub has_versions: bool,
+    /// A gentle note when Claude's sentences are unlike hers ("משפטים ארוכים מהרגיל אצלך").
+    pub style_note: Option<String>,
 }
 
 /// An earlier wording of a paragraph, names restored for display (D-046).

@@ -13,14 +13,15 @@
 //! * In a drafting request, each item is filtered with the case's names first: one that would
 //!   stop the gate (a word holding the child's name) is left out of that request.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 use dv_ai::{RawStyleItem, StyleExcerpt, StyleItem, StyleKind, StyleOrigin, StyleProfile};
 use dv_domain::{Author, DraftParagraph, Identity, ReportStructure, Role};
 use dv_privacy::text::normalize;
 use dv_privacy::{
-    clear, filter, AutoHidden, AutoKind, FilterOutcome, GateRequest, Mark, PrivacyContext,
+    clear, everyday_name, filter, AutoHidden, AutoKind, FilterOutcome, GateRequest, Mark,
+    PrivacyContext,
 };
 use dv_vault::{AuditEvent, Vault};
 use serde::{Deserialize, Serialize};
@@ -341,6 +342,49 @@ pub(crate) struct StagedStyle {
     title: String,
     format: String,
     parts: Vec<StoredPart>,
+    /// Keyed hashes of the names found in the report (its child, people, the margins).
+    names: Vec<String>,
+}
+
+/// Keyed hashes of the names in her past reports, by report: hidden in every case and
+/// refused by the gate ("שם מדוח ישן"). No name text is kept.
+const PAST_NAMES_KEY: &str = "style_past_names";
+
+type PastNames = BTreeMap<String, Vec<String>>;
+
+fn past_names(v: &Vault) -> Result<PastNames, CoreError> {
+    match v.secret(PAST_NAMES_KEY)? {
+        Some(s) => parse(&s),
+        None => Ok(PastNames::new()),
+    }
+}
+
+/// Every past-report name hash, for a privacy context.
+pub(crate) fn past_name_hmacs(v: &Vault) -> Result<HashSet<String>, CoreError> {
+    Ok(past_names(v)?.into_values().flatten().collect())
+}
+
+/// The words of the names the filter found in a past report, as keyed hashes. Everyday words
+/// ("גיל", "שמחה") are left out, as for names found in a case.
+fn report_names(outs: &[FilterOutcome], child: Option<&str>, v: &Vault) -> Vec<String> {
+    let mut words: Vec<String> = outs
+        .iter()
+        .flat_map(|o| o.auto_hidden.iter())
+        .filter(|a| matches!(a.kind, AutoKind::Name | AutoKind::OtherCase))
+        .flat_map(|a| {
+            a.token
+                .split_whitespace()
+                .map(normalize)
+                .collect::<Vec<_>>()
+        })
+        .chain(child.map(normalize))
+        .filter(|w| w.chars().count() >= 2 && !everyday_name(w))
+        .collect();
+    words.sort();
+    words.dedup();
+    let mut hashes: Vec<String> = words.iter().map(|w| v.token_hmac(w)).collect();
+    hashes.sort();
+    hashes
 }
 
 fn json<T: Serialize>(v: &T) -> Result<String, CoreError> {
@@ -828,6 +872,90 @@ pub(crate) fn overlap_warning(v: &Vault, texts: &[&str]) -> Result<Vec<Option<St
         .collect())
 }
 
+// ------------------------------------------------------------ fingerprint
+
+/// Her usual sentence length, measured locally on the parts she kept from past reports
+/// (D-042, stages 7–8). Nothing is sent for it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Fingerprint {
+    /// Words per sentence: a tenth of her sentences are shorter than `short`.
+    short: f64,
+    /// … and a tenth are longer than `long`.
+    long: f64,
+}
+
+const FINGERPRINT_KEY: &str = "style_fingerprint";
+/// Fewer sentences than this say little about her style: no notes.
+const FINGERPRINT_MIN_SENTENCES: usize = 30;
+
+/// Words in each sentence of 3 words or more.
+fn sentence_lengths(text: &str) -> Vec<usize> {
+    text.split(['.', '!', '?', '\n', ';'])
+        .map(|s| s.split_whitespace().count())
+        .filter(|n| *n >= 3)
+        .collect()
+}
+
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+fn percentile(sorted: &[usize], q: f64) -> f64 {
+    let at = ((sorted.len() - 1) as f64 * q).round() as usize;
+    sorted[at.min(sorted.len() - 1)] as f64
+}
+
+fn measure(sources: &[StoredSource]) -> Option<Fingerprint> {
+    let mut lengths: Vec<usize> = sources
+        .iter()
+        .flat_map(|s| s.parts.iter())
+        .flat_map(|p| sentence_lengths(&p.text))
+        .collect();
+    if lengths.len() < FINGERPRINT_MIN_SENTENCES {
+        return None;
+    }
+    lengths.sort_unstable();
+    Some(Fingerprint {
+        short: percentile(&lengths, 0.1),
+        long: percentile(&lengths, 0.9),
+    })
+}
+
+/// The fingerprint kept for the case screens (measured when her past reports change).
+pub(crate) fn fingerprint(v: &Vault) -> Result<Option<Fingerprint>, CoreError> {
+    if v.setting(PROFILE_OFF_KEY)?.as_deref() == Some("1") {
+        return Ok(None);
+    }
+    match v.secret(FINGERPRINT_KEY)? {
+        Some(s) => parse(&s),
+        None => Ok(None),
+    }
+}
+
+/// A gentle note on a drafted paragraph whose sentences are unlike hers, or `None`.
+#[allow(clippy::cast_precision_loss)]
+pub(crate) fn style_note(fp: &Fingerprint, text: &str) -> Option<String> {
+    let lengths = sentence_lengths(text);
+    if lengths.len() < 2 {
+        return None;
+    }
+    let mean = lengths.iter().sum::<usize>() as f64 / lengths.len() as f64;
+    if mean > fp.long {
+        Some(format!(
+            "משפטים ארוכים מהרגיל אצלך (בממוצע {mean:.0} מילים במשפט; אצלך בדרך כלל עד {:.0})",
+            fp.long
+        ))
+    } else if mean < fp.short {
+        Some(format!(
+            "משפטים קצרים מהרגיל אצלך (בממוצע {mean:.0} מילים במשפט; אצלך בדרך כלל לפחות {:.0})",
+            fp.short
+        ))
+    } else {
+        None
+    }
+}
+
 /// The draft paragraph `draft_id` of a case, from any section.
 pub(crate) fn find_draft(
     v: &Vault,
@@ -889,6 +1017,7 @@ impl Core {
             practitioner: &practitioner,
             allowlisted: &allowed,
             confirmed_names: &none,
+            past_names: &none,
             today: today(),
         };
         f(&ctx, v)
@@ -952,9 +1081,12 @@ impl Core {
             .unwrap_or("דוח")
             .to_owned();
         let body = extracted.body.clone();
-        let (parts, title, hidden, numbers) = self.with_style_ctx(|ctx, _| {
+        let margins = extracted.margins.clone();
+        let (parts, title, hidden, numbers, names) = self.with_style_ctx(|ctx, v| {
             let child = main_child(&body, ctx)?;
             let child = child.as_deref();
+            let run = |t: &str| filter(t, ctx).map_err(|e| CoreError::Internal(e.to_string()));
+            let names = report_names(&[run(&body)?, run(&margins)?], child, v);
             let (mut hidden, mut numbers) = (0, 0);
             let mut parts = Vec::new();
             for p in raw_parts {
@@ -969,7 +1101,7 @@ impl Core {
                 });
             }
             let (title, _, _) = neutralize(&stem, ctx, child)?;
-            Ok((parts, title, hidden, numbers))
+            Ok((parts, title, hidden, numbers, names))
         })?;
         let mut warnings = extracted.warnings.clone();
         if parts.iter().all(|p| p.section.is_none()) {
@@ -1012,6 +1144,7 @@ impl Core {
                 title: title.clone(),
                 format: format.clone(),
                 parts,
+                names,
             },
         );
         Ok(StyleImportPreview {
@@ -1058,7 +1191,25 @@ impl Core {
             analysis: None,
         };
         let id = self.vault_mut()?.save_style_source(None, &json(&stored)?)?;
+        let mut names = past_names(self.vault_ref()?)?;
+        names.insert(id.clone(), staged.names);
+        self.vault_mut()?
+            .set_secret(PAST_NAMES_KEY, &json(&names)?)?;
+        self.remeasure_style()?;
         Ok(Self::source_view(id, unix_now(), &stored))
+    }
+
+    /// Measure her sentences again after her past reports changed.
+    fn remeasure_style(&mut self) -> Result<(), CoreError> {
+        let sources: Vec<StoredSource> = self
+            .vault_ref()?
+            .style_sources()?
+            .iter()
+            .map(|s| parse(&s.json))
+            .collect::<Result<_, _>>()?;
+        let fp = measure(&sources);
+        self.vault_mut()?.set_secret(FINGERPRINT_KEY, &json(&fp)?)?;
+        Ok(())
     }
 
     pub fn discard_style_upload(&mut self) {
@@ -1081,7 +1232,13 @@ impl Core {
 
     /// Erase a past report. A profile already approved stays as it is until rebuilt.
     pub fn delete_style_source(&mut self, id: &str) -> Result<(), CoreError> {
-        Ok(self.vault_mut()?.delete_style_source(id)?)
+        self.vault_mut()?.delete_style_source(id)?;
+        let mut names = past_names(self.vault_ref()?)?;
+        if names.remove(id).is_some() {
+            self.vault_mut()?
+                .set_secret(PAST_NAMES_KEY, &json(&names)?)?;
+        }
+        self.remeasure_style()
     }
 
     // -------------------------------------------------------- the screen
@@ -1557,7 +1714,11 @@ impl Core {
 
     /// Erase every profile version and everything learned from her edits. Past reports stay.
     pub fn reset_style(&mut self) -> Result<(), CoreError> {
-        Ok(self.vault_mut()?.reset_style()?)
+        self.vault_mut()?.reset_style()?;
+        self.vault_mut()?
+            .set_secret(PAST_NAMES_KEY, &json(&PastNames::new())?)?;
+        self.vault_mut()?.set_secret(FINGERPRINT_KEY, "null")?;
+        Ok(())
     }
 
     // -------------------------------------------------------- learning from edits

@@ -335,6 +335,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                 {warnings.map((w, i) => (
                   <div key={i} className="note-warn"><WarnIcon /><span>{w}</span></div>
                 ))}
+                {!isEditing && p.style_note && <span className="small muted style-note">{p.style_note}</span>}
                 <div className="row wrap-row">
                   {isEditing ? (
                     <>

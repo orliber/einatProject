@@ -225,12 +225,14 @@ impl Core {
             }
             let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
             let is_name = |t: &str| data.is_name.contains(&v.token_hmac(t));
+            let past = |t: &str| !data.past.is_empty() && data.past.contains(&v.token_hmac(t));
             let ctx = PrivacyContext {
                 case_id: &data.case_id,
                 identities: &data.identities,
                 practitioner: &data.practitioner,
                 allowlisted: &allow,
                 confirmed_names: &is_name,
+                past_names: &past,
                 today: today(),
             };
             let internal = |e: dv_privacy::PrivacyError| CoreError::Internal(e.to_string());

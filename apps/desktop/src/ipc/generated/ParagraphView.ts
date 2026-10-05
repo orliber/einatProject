@@ -16,4 +16,8 @@ replaces: string | null,
 /**
  * Earlier wordings are kept and can be brought back (D-046).
  */
-has_versions: boolean, };
+has_versions: boolean, 
+/**
+ * A gentle note when Claude's sentences are unlike hers ("משפטים ארוכים מהרגיל אצלך").
+ */
+style_note: string | null, };
