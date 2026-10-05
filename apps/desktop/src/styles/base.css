@@ -520,3 +520,65 @@ p {
 .btn-danger-quiet:hover:not(:disabled) {
   background: var(--block-soft);
 }
+
+/* Earlier wordings of a paragraph (UX-4). */
+.versions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 460px;
+}
+.versions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.version {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.version-text {
+  margin: 0;
+  font-family: var(--font-display);
+  white-space: pre-wrap;
+}
+
+/* The keyboard shortcuts sheet (UX-5). */
+.shortcuts-group h3 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+}
+.shortcuts {
+  margin: 0 0 16px;
+  display: grid;
+  gap: 6px;
+}
+.shortcut-row {
+  display: grid;
+  grid-template-columns: minmax(150px, auto) 1fr;
+  gap: 12px;
+  align-items: baseline;
+}
+.shortcut-row dd {
+  margin: 0;
+}
+kbd {
+  font-family: inherit;
+  font-size: 0.9em;
+  padding: 1px 6px;
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--surface);
+  white-space: nowrap;
+}

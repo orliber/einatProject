@@ -401,6 +401,47 @@ fn manual_edit_with_new_name_is_hidden_before_it_goes_out() {
 }
 
 #[test]
+fn earlier_wording_of_a_paragraph_comes_back_with_names() {
+    let (_dir, mut core, case) = setup(None);
+    let p = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    let para = |core: &mut Core| {
+        core.case_detail(&case)
+            .unwrap()
+            .sections
+            .into_iter()
+            .find(|s| s.key == "kindergarten")
+            .unwrap()
+            .paragraphs
+            .remove(0)
+    };
+    let first = para(&mut core);
+    assert!(!first.has_versions);
+    core.edit_paragraph(&case, &first.id, "אלון רגיש לרעש בגן.")
+        .unwrap();
+    let edited = para(&mut core);
+    assert!(edited.has_versions);
+    assert!(!edited.by_ai);
+
+    let versions = core.paragraph_versions(&case, &first.id).unwrap();
+    assert_eq!(versions.len(), 1);
+    assert_eq!(versions[0].text, first.text);
+    assert!(versions[0].by_ai);
+
+    core.restore_paragraph_version(&case, &first.id, &versions[0].id)
+        .unwrap();
+    let back = para(&mut core);
+    assert_eq!(back.text, first.text);
+    assert_eq!(back.status, DraftStatus::Approved);
+    assert!(back.by_ai);
+    // Her edit is now an earlier wording, names shown as she wrote them.
+    let after = core.paragraph_versions(&case, &first.id).unwrap();
+    assert_eq!(after[0].text, "אלון רגיש לרעש בגן.");
+}
+
+#[test]
 fn model_answer_with_unknown_source_and_number_is_flagged() {
     let fake = FakeTransport::default();
     *fake.answer.lock().unwrap() = Some(api_json(&json!({

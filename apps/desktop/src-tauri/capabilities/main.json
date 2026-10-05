@@ -70,6 +70,8 @@
     "allow-add-comparison-material",
     "allow-reject-paragraph",
     "allow-edit-paragraph",
+    "allow-paragraph-versions",
+    "allow-restore-paragraph-version",
     "allow-add-own-paragraph",
     "allow-prepare-consult",
     "allow-send-consult",

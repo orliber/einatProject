@@ -68,6 +68,8 @@ fn main() {
             "add_comparison_material",
             "reject_paragraph",
             "edit_paragraph",
+            "paragraph_versions",
+            "restore_paragraph_version",
             "add_own_paragraph",
             "prepare_consult",
             "send_consult",

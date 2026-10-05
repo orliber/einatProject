@@ -34,6 +34,21 @@ type InputRow = (String, String, i64, Vec<u8>, Vec<u8>);
 type MessageRow = (String, String, bool, i64, Vec<u8>, Vec<u8>);
 type TransmissionRow = (String, String, i64, String, String, Vec<u8>);
 type SummaryRow = (String, i64, i64, Option<String>, Option<i64>);
+/// author, created_at, approved_at, sealed text, replaces: one link of a paragraph's history.
+type ChainRow = (String, i64, Option<i64>, Vec<u8>, Option<String>);
+
+/// How far back a paragraph's history is followed through the wordings it replaced.
+const MAX_VERSION_CHAIN: usize = 50;
+
+/// An earlier wording of a paragraph (D-046), tagged like the draft itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DraftVersion {
+    /// A saved version's id, or the id of the approved paragraph a new wording replaced.
+    pub id: String,
+    pub saved_at: i64,
+    pub author: Author,
+    pub text_tagged: String,
+}
 
 const MAIN_DB: &str = "main.db";
 const IDENTITY_DB: &str = "identity.db";
@@ -1054,6 +1069,7 @@ impl Vault {
             "inputs",
             "messages",
             "drafts",
+            "draft_versions",
             "transmissions",
             "consultations",
         ] {
@@ -1867,6 +1883,17 @@ impl Vault {
         source_refs: &[String],
     ) -> Result<bool, VaultError> {
         let key = self.case_key(case_id)?;
+        let proposed: Option<String> = self
+            .main
+            .query_row(
+                "SELECT status FROM drafts WHERE id = ?1 AND case_id = ?2",
+                params![draft_id, case_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if proposed.as_deref() == Some("proposed") {
+            self.keep_version(case_id, draft_id, Some(text_tagged))?;
+        }
         let changed = self.main.execute(
             "UPDATE drafts SET text_tagged_enc = ?1, source_refs_enc = ?2
              WHERE id = ?3 AND case_id = ?4 AND status = 'proposed'",
@@ -1895,6 +1922,7 @@ impl Vault {
         text_tagged: &str,
     ) -> Result<(), VaultError> {
         let key = self.case_key(case_id)?;
+        self.keep_version(case_id, draft_id, Some(text_tagged))?;
         let changed = self.main.execute(
             "UPDATE drafts SET text_tagged_enc = ?1, author = 'user', status = 'approved', approved_at = ?2
              WHERE id = ?3 AND case_id = ?4",
@@ -1904,6 +1932,158 @@ impl Vault {
             return Err(VaultError::NotFound);
         }
         self.touch(case_id)
+    }
+
+    /// Keep the paragraph's current wording as a version before it changes in place. Nothing
+    /// is kept when the new text is the same (`unchanged_if`), or when the paragraph is gone.
+    fn keep_version(
+        &mut self,
+        case_id: &str,
+        draft_id: &str,
+        unchanged_if: Option<&str>,
+    ) -> Result<(), VaultError> {
+        let key = self.case_key(case_id)?;
+        let row: Option<(String, Vec<u8>)> = self
+            .main
+            .query_row(
+                "SELECT author, text_tagged_enc FROM drafts WHERE id = ?1 AND case_id = ?2",
+                params![draft_id, case_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let Some((author, sealed)) = row else {
+            return Ok(());
+        };
+        let current = open_string(&key, &aad("drafts", "text", draft_id, case_id), &sealed)?;
+        if unchanged_if == Some(current.as_str()) {
+            return Ok(());
+        }
+        let id = random_id()?;
+        self.main.execute(
+            "INSERT INTO draft_versions (id, case_id, draft_id, saved_at, author, text_tagged_enc)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                id,
+                case_id,
+                draft_id,
+                now(),
+                author,
+                seal_str(&key, &aad("draft_versions", "text", &id, case_id), &current)?
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// The earlier wordings of a paragraph, newest first (D-046): what it said before each edit
+    /// or rewording in place, and, through `replaces`, the approved paragraphs it took over from.
+    pub fn draft_versions(
+        &self,
+        case_id: &str,
+        draft_id: &str,
+    ) -> Result<Vec<DraftVersion>, VaultError> {
+        let key = self.case_key(case_id)?;
+        let mut out = Vec::new();
+        let mut current = Some(draft_id.to_owned());
+        let mut first = true;
+        for _ in 0..MAX_VERSION_CHAIN {
+            let Some(id) = current.take() else { break };
+            let row: Option<ChainRow> = self
+                .main
+                .query_row(
+                    "SELECT author, created_at, approved_at, text_tagged_enc, replaces
+                     FROM drafts WHERE id = ?1 AND case_id = ?2",
+                    params![id, case_id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                )
+                .optional()?;
+            let Some((author, created_at, approved_at, sealed, replaces)) = row else {
+                if first {
+                    return Err(VaultError::NotFound);
+                }
+                break;
+            };
+            if !first {
+                // The approved paragraph that a new wording replaced, as it last read.
+                out.push(DraftVersion {
+                    id: id.clone(),
+                    saved_at: approved_at.unwrap_or(created_at),
+                    author: enum_from(&author)?,
+                    text_tagged: open_string(&key, &aad("drafts", "text", &id, case_id), &sealed)?,
+                });
+            }
+            let mut stmt = self.main.prepare(
+                "SELECT id, saved_at, author, text_tagged_enc FROM draft_versions
+                 WHERE case_id = ?1 AND draft_id = ?2 ORDER BY saved_at DESC, rowid DESC",
+            )?;
+            let rows: Vec<(String, i64, String, Vec<u8>)> = stmt
+                .query_map(params![case_id, id], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                })?
+                .collect::<Result<_, _>>()?;
+            for (vid, saved_at, author, sealed) in rows {
+                out.push(DraftVersion {
+                    text_tagged: open_string(
+                        &key,
+                        &aad("draft_versions", "text", &vid, case_id),
+                        &sealed,
+                    )?,
+                    author: enum_from(&author)?,
+                    id: vid,
+                    saved_at,
+                });
+            }
+            first = false;
+            current = replaces;
+        }
+        Ok(out)
+    }
+
+    /// Bring back an earlier wording (D-046): the current one is kept as a version, and the
+    /// paragraph reads as it did then, approved by her. Who wrote it stays as it was.
+    pub fn restore_draft_version(
+        &mut self,
+        case_id: &str,
+        draft_id: &str,
+        version_id: &str,
+    ) -> Result<(), VaultError> {
+        let version = self
+            .draft_versions(case_id, draft_id)?
+            .into_iter()
+            .find(|v| v.id == version_id)
+            .ok_or(VaultError::NotFound)?;
+        let key = self.case_key(case_id)?;
+        self.keep_version(case_id, draft_id, Some(&version.text_tagged))?;
+        let changed = self.main.execute(
+            "UPDATE drafts SET text_tagged_enc = ?1, author = ?2, status = 'approved', approved_at = ?3
+             WHERE id = ?4 AND case_id = ?5 AND status IN ('approved', 'proposed')",
+            params![
+                seal_str(&key, &aad("drafts", "text", draft_id, case_id), &version.text_tagged)?,
+                enum_str(&version.author)?,
+                now(),
+                draft_id,
+                case_id
+            ],
+        )?;
+        if changed == 0 {
+            return Err(VaultError::NotFound);
+        }
+        // A new wording that waited beside it would replace what she just chose.
+        self.main.execute(
+            "UPDATE drafts SET status = 'superseded' WHERE case_id = ?1 AND replaces = ?2 AND status = 'proposed'",
+            params![case_id, draft_id],
+        )?;
+        self.touch(case_id)
+    }
+
+    /// Which of these paragraphs have earlier wordings to show.
+    pub fn drafts_with_versions(&self, case_id: &str) -> Result<Vec<String>, VaultError> {
+        let mut stmt = self.main.prepare(
+            "SELECT DISTINCT draft_id FROM draft_versions WHERE case_id = ?1
+             UNION SELECT id FROM drafts WHERE case_id = ?1 AND replaces IS NOT NULL
+               AND status = 'approved'",
+        )?;
+        let rows = stmt.query_map([case_id], |r| r.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     pub fn approved_sections(&self, case_id: &str) -> Result<Vec<String>, VaultError> {

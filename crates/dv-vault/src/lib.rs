@@ -19,8 +19,9 @@ mod store;
 pub use audit::{AuditEntry, AuditEvent};
 pub use password::{Argon2Params, PolicyViolation, MIN_PASSWORD_CHARS};
 pub use store::{
-    peek_backup, BackupCheck, BackupInfo, BackupPeek, Created, IntegrityReport, Practitioner,
-    Secret, StoredConsultation, StoredStyleProfile, StoredStyleSource, Vault, BACKUP_EXTENSION,
+    peek_backup, BackupCheck, BackupInfo, BackupPeek, Created, DraftVersion, IntegrityReport,
+    Practitioner, Secret, StoredConsultation, StoredStyleProfile, StoredStyleSource, Vault,
+    BACKUP_EXTENSION,
 };
 
 #[derive(Debug, thiserror::Error)]

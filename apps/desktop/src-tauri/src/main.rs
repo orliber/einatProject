@@ -15,10 +15,10 @@ use std::time::Duration;
 use dv_core::{
     ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView,
     ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
-    ExportCheck, ImportPreview, NameMatch, Prepared, Readiness, ReportSettings, RetentionItem,
-    SectionResult, SortResult, StagedBackup, StyleAnalysisResult, StyleImportPreview,
-    StyleOverview, StyleProfileView, StyleSourceView, SuspectDecision, UiError, UnsavedEdit,
-    UsageSummary,
+    ExportCheck, ImportPreview, NameMatch, ParagraphVersionView, Prepared, Readiness,
+    ReportSettings, RetentionItem, SectionResult, SortResult, StagedBackup, StyleAnalysisResult,
+    StyleImportPreview, StyleOverview, StyleProfileView, StyleSourceView, SuspectDecision, UiError,
+    UnsavedEdit, UsageSummary,
 };
 use dv_domain::{
     CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind, Role,
@@ -709,6 +709,28 @@ async fn edit_paragraph(
 }
 
 #[tauri::command]
+async fn paragraph_versions(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    draft_id: String,
+) -> Res<Vec<ParagraphVersionView>> {
+    with_core(&state, move |c| c.paragraph_versions(&case_id, &draft_id)).await
+}
+
+#[tauri::command]
+async fn restore_paragraph_version(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    draft_id: String,
+    version_id: String,
+) -> Res<()> {
+    with_core(&state, move |c| {
+        c.restore_paragraph_version(&case_id, &draft_id, &version_id)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn add_own_paragraph(
     state: tauri::State<'_, AppState>,
     case_id: String,
@@ -1367,6 +1389,8 @@ fn main() {
             add_comparison_material,
             reject_paragraph,
             edit_paragraph,
+            paragraph_versions,
+            restore_paragraph_version,
             add_own_paragraph,
             prepare_consult,
             send_consult,

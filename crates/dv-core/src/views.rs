@@ -65,6 +65,19 @@ pub struct ParagraphView {
     pub warnings: Vec<String>,
     /// A new wording of this approved paragraph (its id), waiting for her approval.
     pub replaces: Option<String>,
+    /// Earlier wordings are kept and can be brought back (D-046).
+    pub has_versions: bool,
+}
+
+/// An earlier wording of a paragraph, names restored for display (D-046).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ParagraphVersionView {
+    pub id: String,
+    #[ts(type = "number")]
+    pub saved_at: i64,
+    pub by_ai: bool,
+    pub text: String,
 }
 
 /// One passage a paragraph leans on ("למה כתבת את זה?", AI-7), shown on this computer only.

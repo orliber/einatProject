@@ -13,6 +13,7 @@ import { SectionWork } from "./case/SectionWork";
 import { DetailsView } from "./case/DetailsView";
 import { ReportView } from "./case/ReportView";
 import { FinishView } from "./case/FinishView";
+import { isCombo, KEYS } from "../shortcuts";
 import "./CaseScreen.css";
 
 export interface ReviewRequest {
@@ -74,7 +75,7 @@ function sectionState(s: CaseDetail["sections"][number]): SectionState {
 }
 
 export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
-  const { go, fail, lockNow, status, notify } = useApp();
+  const { go, fail, lockNow, status, notify, showShortcuts } = useApp();
   const [detail, setDetail] = useState<CaseDetail | null>(null);
   const detailRef = useRef<CaseDetail | null>(null);
   useEffect(() => {
@@ -117,6 +118,33 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   useEffect(() => {
     viewRef.current = view;
   }, [view]);
+  // Alt+↓ / Alt+↑: the next or previous section, on the report page or section by section (UX-5).
+  const focusRef = useRef(focus);
+  useEffect(() => {
+    focusRef.current = focus;
+  }, [focus]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const down = isCombo(e, KEYS.nextSection);
+      if (!down && !isCombo(e, KEYS.prevSection)) return;
+      const d = detailRef.current;
+      const v = viewRef.current;
+      const keys = (d?.sections ?? []).filter((s) => s.key !== "signature").map((s) => s.key);
+      if (!keys.length || (v !== "report" && !keys.includes(v))) return;
+      e.preventDefault();
+      const from = keys.includes(v) ? v : focusRef.current?.key;
+      const at = from ? keys.indexOf(from) + (down ? 1 : -1) : 0;
+      const key = keys[Math.max(0, Math.min(keys.length - 1, at))] ?? keys[0] ?? "";
+      if (v === "report") {
+        setFocus({ key, at: Date.now() });
+      } else {
+        go({ name: "case", id: caseId, view: key });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [caseId, go]);
+
   const [failures, setFailures] = useState<{ id: number; label: string; section?: string; message: string }[]>([]);
 
   const track = useCallback(
@@ -252,6 +280,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const more: MenuItem[] = [
     { label: "פרטים ושמות להסתרה", run: () => go({ name: "case", id: caseId, view: "details" }) },
     { label: "כתיבת כל הדוח עם Claude", run: () => setFullDraft(true) },
+    ...(showShortcuts ? [{ label: "קיצורי מקלדת (F1)", run: showShortcuts }] : []),
     { label: "נעילה (Ctrl+L)", run: () => void lockNow() },
   ];
 
