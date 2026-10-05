@@ -13,6 +13,7 @@ import { ParagraphVersions } from "../../components/ParagraphVersions";
 import { isCombo, KEYS } from "../../shortcuts";
 import type { CaseApi } from "../CaseScreen";
 import "./ReportView.css";
+import { useAi } from "../../ai";
 
 type Section = CaseDetail["sections"][number];
 
@@ -125,6 +126,7 @@ function Popover({ label, onClose, children }: { label: string; onClose: () => v
 
 function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
   const { go, fail } = useApp();
+  const ai = useAi();
   const { caseId, reload, detail } = api;
   /** A paragraph being edited in place, or a new one at `at`: "first", "end" or after a paragraph's id. */
   const [editing, setEditing] = useState<{ id: string | null; text: string; at?: string } | null>(null);
@@ -268,7 +270,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
         )}
         {reworded.get(p.id) && (
           <div className="a4-reword">
-            <span className="a4-flag">ניסוח חדש של Claude לפסקה הזאת</span>
+            <span className="a4-flag">ניסוח חדש של {ai} לפסקה הזאת</span>
             <p className="a4-p">{reworded.get(p.id)?.text}</p>
             <span className="row">
               <button type="button" className="btn btn-primary btn-small" onClick={() => void act(() => ipc.approveParagraph(caseId, reworded.get(p.id)?.id ?? ""))}>✓ להחליף</button>
@@ -353,7 +355,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
             {open === "sources" && (
               <Popover label={`מאיזה חומרים לכתוב את "${s.title}"`} onClose={() => setOpen(null)}>
                 <b>מאיזה חומרים לכתוב את "{s.title}"?</b>
-                <span className="small muted">מסמנים ומורידים. הבחירה שלך גוברת על המיון של Claude.</span>
+                <span className="small muted">מסמנים ומורידים. הבחירה שלך גוברת על המיון של {ai}.</span>
                 <div className="a4-pop-list">
                   {detail.inputs.map((i) => {
                     const r = detail.routing.find((x) => x.input_id === i.id);
@@ -405,11 +407,11 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
       {pending.length > 0 && !job && (
         <div className="a4-pending">
           <div className="a4-pending-head">
-            <span className="a4-flag">טיוטה של Claude · עוד לא בדוח</span>
+            <span className="a4-flag">טיוטה של {ai} · עוד לא בדוח</span>
             <span className="row">
               <button type="button" className="btn btn-primary btn-small" onClick={() => void act(async () => { for (const p of pending) await ipc.approveParagraph(caseId, p.id); })}>✓ לאשר</button>
               <span className="a4-pop-anchor">
-                <button type="button" className="btn btn-small" aria-expanded={open === "change"} disabled={busy} onClick={() => setOpen(open === "change" ? null : "change")}>✦ לשנות עם Claude</button>
+                <button type="button" className="btn btn-small" aria-expanded={open === "change"} disabled={busy} onClick={() => setOpen(open === "change" ? null : "change")}>✦ לשנות עם {ai}</button>
                 {open === "change" && (
                   <Popover label="מה לשנות בטיוטה" onClose={() => setOpen(null)}>
                     <b>מה לשנות בטיוטה?</b>
@@ -443,7 +445,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
       {s.paragraphs.length === 0 && !job && !editing && (
         canWrite ? (
           <span className="a4-gap-row">
-            <button type="button" className="a4-gap" disabled={busy} onClick={() => void write()}>✦ לכתוב עם Claude</button>
+            <button type="button" className="a4-gap" disabled={busy} onClick={() => void write()}>✦ לכתוב עם {ai}</button>
             <button type="button" className="a4-gap a4-gap-own" onClick={() => setEditing({ id: null, text: "", at: "end" })}>+ פסקה משלי</button>
           </span>
         ) : (

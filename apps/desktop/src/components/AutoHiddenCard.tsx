@@ -6,6 +6,7 @@ import type { AutoHidden } from "../ipc/generated/AutoHidden";
 import type { Role } from "../ipc/generated/Role";
 import { displayTag, ErrorLine, Spinner } from "./ui";
 import "./AutoHiddenCard.css";
+import { useAi } from "../ai";
 
 /** Who a name the filter kept can be, in the card's role menu. */
 export const foundRoles: Role[] = [
@@ -47,6 +48,7 @@ export function AutoHiddenCard(props: {
   disabled?: boolean;
 }) {
   const { fail } = useApp();
+  const ai = useAi();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const items = cardOrder(props.items);
@@ -72,7 +74,7 @@ export function AutoHiddenCard(props: {
       <h3 className="auto-title">{items.length === 1 ? "הסתרתי אוטומטית פרט אחד" : `הסתרתי אוטומטית ${items.length} פרטים`}</h3>
       <span className="small muted">
         {caseId
-          ? "Claude מקבל את מה שמופיע אחרי החץ. \"להחזיר\" משאיר את המילה כמו שכתוב, מעכשיו ובכל התיק."
+          ? `${ai} מקבל את מה שמופיע אחרי החץ. "להחזיר" משאיר את המילה כמו שכתוב, מעכשיו ובכל התיק.`
           : "בשאלה כללית אי אפשר להחזיר מילה שהוסתרה. אם צריך, כדאי לשאול מתוך תיק."}
       </span>
       <ul className="auto-list">

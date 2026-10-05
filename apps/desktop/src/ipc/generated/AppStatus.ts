@@ -14,7 +14,19 @@ cloud_synced_folder: string | null, fips_active: boolean,
  */
 demo_mode: boolean, model: string, 
 /**
- * `fast` | `balanced` | `thorough`: how long Claude may think.
+ * The company of `model`: `anthropic` | `openai` | `gemini` (D-040).
+ */
+provider: string, 
+/**
+ * How the program names the AI everywhere: `Claude` | `ChatGPT` | `Gemini`.
+ */
+ai_name: string, 
+/**
+ * Companies whose API key is saved in the vault.
+ */
+keys: Array<string>, 
+/**
+ * `fast` | `balanced` | `thorough`: how long the AI may think.
  */
 speed: string, integrity_warning: string | null, lock_minutes: number, 
 /**

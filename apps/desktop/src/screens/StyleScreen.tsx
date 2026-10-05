@@ -22,6 +22,7 @@ import {
 } from "../ipc/client";
 import { ConfirmDialog } from "./library/LibraryDialogs";
 import "./StyleScreen.css";
+import { useAi } from "../ai";
 
 const KIND_LABEL: Record<StyleKind, string> = {
   rule: "כללי כתיבה",
@@ -35,7 +36,7 @@ const KIND_HINT: Record<StyleKind, string> = {
   phrase: "עד 5 מילים.",
   avoid: "",
   template: "במקום התוכן באים סוגריים מסולסלים, למשל {תחום}.",
-  example: "פסקאות על ילד בדוי. הן מראות ל-Claude את הסגנון, ואין בהן שום דבר מהדוחות.",
+  example: "פסקאות על ילד בדוי. הן מראות ל-AI את הסגנון, ואין בהן שום דבר מהדוחות.",
 };
 const KINDS: StyleKind[] = ["rule", "phrase", "avoid", "template", "example"];
 const RECOMMENDED = 3;
@@ -48,6 +49,7 @@ function dateOf(unix: number): string {
 
 export function StyleScreen() {
   const { status, fail, notify } = useApp();
+  const ai = useAi();
   const qc = useQueryClient();
   const overview = useQuery({ queryKey: ["style"], queryFn: ipc.styleOverview });
   const fileInput = useRef<HTMLInputElement>(null);
@@ -157,7 +159,7 @@ export function StyleScreen() {
           <div className="stack grow">
             <h1>הסגנון שלי</h1>
             <p className="style-lead">
-              Claude לומד לכתוב כמוך מתוך דוחות ישנים שלך. לפני שמשהו נשמר, שמות, מקומות, תאריכים ומספרים מוסתרים, ונשמרים רק הקטעים שבחרת.
+              {ai} לומד לכתוב כמוך מתוך דוחות ישנים שלך. לפני שמשהו נשמר, שמות, מקומות, תאריכים ומספרים מוסתרים, ונשמרים רק הקטעים שבחרת.
               אחר כך כל דוח נשלח לניתוח בנפרד, במסך "מה יוצא מהמחשב", ובכל ניסוח חדש נשלח רק הפרופיל שאישרת.
             </p>
             <ol className="style-steps" aria-label="שלבים">
@@ -180,7 +182,7 @@ export function StyleScreen() {
             {stage === 2 && <a className="btn btn-primary btn-big" href="#style-profile">עיון בטיוטה ואישור</a>}
             {stage === 3 && <span className="chip chip-ok">הפרופיל בשימוש · גרסה {o.active?.version}</span>}
             {o.sources.length > 0 && o.sources.length < RECOMMENDED && (
-              <span className="hint">מומלץ {RECOMMENDED} דוחות לפחות, כדי ש-Claude יבחין במה שחוזר אצלך ולא במקרי.</span>
+              <span className="hint">מומלץ {RECOMMENDED} דוחות לפחות, כדי ש-{ai} יבחין במה שחוזר אצלך ולא במקרי.</span>
             )}
             {o.demo_mode && <span className="hint">מצב הדגמה: הניתוח נעשה במחשב, כדוגמה. עם מפתח API הוא נעשה באמת.</span>}
           </div>
@@ -290,6 +292,7 @@ function Sources(props: {
 
 function Suggestions({ o }: { o: StyleOverview }) {
   const { fail, notify } = useApp();
+  const ai = useAi();
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   async function act(f: () => Promise<unknown>, done?: string) {
@@ -305,7 +308,7 @@ function Suggestions({ o }: { o: StyleOverview }) {
   return (
     <section className="card style-card" aria-labelledby="style-sugg">
       <h2 id="style-sugg">מה למדתי מהתיקונים שלך</h2>
-      <p className="hint">כשאת מתקנת פסקה ש-Claude כתב, התוכנה רושמת במחשב שלך החלפות קצרות שחוזרות. שום דבר מזה לא נשלח עד שאת מוסיפה אותו לפרופיל.</p>
+      <p className="hint">כשאת מתקנת פסקה ש-{ai} כתב, התוכנה רושמת במחשב שלך החלפות קצרות שחוזרות. שום דבר מזה לא נשלח עד שאת מוסיפה אותו לפרופיל.</p>
       <ul className="style-suggestions">
         {o.suggestions.map((s) => (
           <li key={s.id} className="row">
@@ -324,6 +327,7 @@ function Suggestions({ o }: { o: StyleOverview }) {
 
 function ProfileEditor({ view, o }: { view: StyleProfileView; o: StyleOverview }) {
   const { fail, notify } = useApp();
+  const ai = useAi();
   const qc = useQueryClient();
   const [items, setItems] = useState<StyleItem[]>(view.profile.items);
   const [dirty, setDirty] = useState(false);
@@ -381,7 +385,7 @@ function ProfileEditor({ view, o }: { view: StyleProfileView; o: StyleOverview }
         {isDraft
           ? "עברי על הפריטים: אפשר לכבות, לערוך, למחוק ולהוסיף. רק מה שמסומן ייכנס. הפרופיל ישפיע על הניסוח רק אחרי האישור."
           : "כל שינוי נשמר כטיוטה, ומשפיע על הניסוח אחרי שתאשרי אותו."}
-        {view.dropped > 0 && ` ${view.dropped} פריטים שחזרו מ-Claude לא נשמרו, כי נראו כמו העתקה מדוח או כמו פרט מזהה.`}
+        {view.dropped > 0 && ` ${view.dropped} פריטים שחזרו מ-${ai} לא נשמרו, כי נראו כמו העתקה מדוח או כמו פרט מזהה.`}
       </p>
 
       {groups.map((g) => (
@@ -431,7 +435,7 @@ function ProfileEditor({ view, o }: { view: StyleProfileView; o: StyleOverview }
         )}
         {(isDraft || dirty) && (
           <button type="button" className="btn btn-primary" disabled={busy || enabledCount === 0}
-            onClick={() => void act(async () => { if (dirty) await ipc.saveStyleDraft(profile()); await ipc.approveStyleDraft(); }, "הפרופיל אושר. מעכשיו Claude כותב בסגנון שלך.")}>
+            onClick={() => void act(async () => { if (dirty) await ipc.saveStyleDraft(profile()); await ipc.approveStyleDraft(); }, `הפרופיל אושר. מעכשיו ${ai} כותב בסגנון שלך.`)}>
             אישור הפרופיל
           </button>
         )}

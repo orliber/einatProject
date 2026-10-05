@@ -44,6 +44,11 @@ fn describe(
     } else {
         ""
     };
+    // Who answered, as recorded at the time; entries from before D-040 were all Claude.
+    let ai = ["ChatGPT", "Gemini", "Mistral", "Ollama"]
+        .into_iter()
+        .find(|n| *n == text("ai"))
+        .unwrap_or("Claude");
     Some(match event {
         "vault_created" => ("security", "הכספת נוצרה".to_owned(), false),
         "unlock" if text("method") == "recovery" => {
@@ -79,10 +84,10 @@ fn describe(
             ("case", "השמות שלך עודכנו".to_owned(), false)
         }
         "identities_changed" => ("case", "רשימת האנשים בתיק עודכנה".to_owned(), false),
-        "send" if flag("consult") => ("send", format!("התייעצות נשלחה ל-Claude{demo}"), false),
+        "send" if flag("consult") => ("send", format!("התייעצות נשלחה ל-{ai}{demo}"), false),
         "send" if flag("sorting") => (
             "send",
-            format!("החומרים נשלחו ל-Claude למיון לסעיפים{demo}"),
+            format!("החומרים נשלחו ל-{ai} למיון לסעיפים{demo}"),
             false,
         ),
         "send" => {
@@ -92,7 +97,7 @@ fn describe(
                 .map_or(key, |s| s.title.as_str());
             (
                 "send",
-                format!("הסעיף \"{title}\" נשלח ל-Claude{demo}"),
+                format!("הסעיף \"{title}\" נשלח ל-{ai}{demo}"),
                 false,
             )
         }
@@ -279,6 +284,9 @@ mod tests {
             text.contains("נשלח ל-Claude") && text.contains("הדגמה"),
             "{text}"
         );
+        let consult = serde_json::json!({ "consult": true, "ai": "Gemini" });
+        let (_, text, _) = describe("send", &consult, None).unwrap();
+        assert!(text.contains("נשלחה ל-Gemini"), "{text}");
         let internal = serde_json::json!({ "key": "backup_last_at" });
         assert!(describe("settings_changed", &internal, None).is_none());
         let usage = serde_json::json!({ "key": "usage/2026-10" });

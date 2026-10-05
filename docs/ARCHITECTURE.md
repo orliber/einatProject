@@ -44,7 +44,7 @@
 | `dv-vault` | KDF, מפתחות, SQLCipher, AEAD, נעילה, יומן, env_checks, קשירה לחומרה | `aws-lc-rs` (fips), `argon2`, `rusqlite` (sqlcipher), `zeroize`, `secrecy`, `keyring` | רשת |
 | `dv-privacy` | שכבות 1–7, `variants_he`, NER (`ort` + `tokenizers`), **gate** ⇒ `ClearedPayload` | `ort`, `tokenizers`, `aho-corasick`, `regex` | רשת |
 | `dv-ai` | context builder, פרומפטים, סכמות, פעולות מהירות, פענוח פלט | `serde` | רשת. **בונה בקשות בלבד** |
-| `dv-egress` | שליחה ל-Anthropic: רשימה לבנה של endpoints ודגמים, streaming, retry, מגבלות | `reqwest` (rustls, בלי שורשי מערכת), `webpki-roots` | כל דבר חוץ מ-`ClearedPayload` |
+| `dv-egress` | שליחה ל-AI שנבחר (Anthropic כברירת מחדל, או OpenAI / Google לפי D-040): רשימה לבנה של endpoints ודגמים, streaming, retry, מגבלות | `reqwest` (rustls, בלי שורשי מערכת), `webpki-roots` | כל דבר חוץ מ-`ClearedPayload` |
 | `dv-domain` | תיקים, סעיפים, ציונים, `interpretation`, DSM | — | רשת |
 | `dv-ingest` | ה-worker: pdfium, DOCX (`zip` + `quick-xml`), OCR, חילוץ מטא-דאטה | `pdfium-render` | רשת, מפתחות |
 | `dv-export` | DOCX מתבנית, הצפנת ECMA-376 Agile, `restore` | `zip`, `quick-xml`, `cfb` | רשת |
@@ -123,7 +123,8 @@ audit(seq PK, ts, event, case_ref /* HMAC של case_id */, meta_json_enc, prev_m
 ```
 
 ## Egress – כללי יציאה (`dv-egress`)
-- Host יחיד ל-AI: `api.anthropic.com`. TLS 1.3 בלבד, שורשי `webpki-roots` (לא של המערכת).
+- Host ל-AI: `api.anthropic.com` כברירת מחדל. אם עינת בחרה בהגדרות ChatGPT או Gemini (D-040): `api.openai.com` (`POST /v1/chat/completions`), `generativelanguage.googleapis.com` (`POST /v1beta/models/{model}:generateContent`) או `api.mistral.ai` (`POST /v1/chat/completions`), רק לדגמים מהרשימה הלבנה. מודל מקומי: `http://127.0.0.1:11434/api/chat` בלבד (Ollama, בלי TLS כי זה בתוך המחשב). TLS 1.3 בלבד, שורשי `webpki-roots` (לא של המערכת), אותו client לכל הספקים.
+- **ספקים אחרים (D-040, `providers.rs`):** השער מאשר תמיד את אותו גוף בקשה (בצורה של Messages API). אחרי השער, `dv-egress` מעביר את אותן מחרוזות לשדות של הספק, בלי להוסיף שום טקסט חוץ משמות שדות והגדרות קבועות (נבדק בבדיקה). מה שאין לו מקבילה מדויקת (כלים, תמונות, thinking, שדה לא מוכר) נחסם. התשובה מומרת חזרה לאותה צורה, כך שהבדיקות המקומיות של התשובה זהות לכל ספק. ל-OpenAI נשלח `store: false`.
 - **עדכוני תוכנה (D-033, `update.rs`):** GET בלבד ל-hosts של GitHub מהרשימה הלבנה (גם ב-redirect), בלי נתונים מהכספת. הודעת גרסה חתומה ב-Ed25519 במפתח ציבורי מקובע, ו-SHA-256 של המתקין. כל ספק = אין עדכון. גרסה חדשה יורדת ונבדקת ברקע, ומותקנת רק בלחיצה (D-038).
 - **Endpoints מותרים:** `POST /v1/messages` ו-`POST /v1/messages/count_tokens`. כל השאר לא ממומש.
 - **דגמים מותרים:** רשימה לבנה בקוד של דגמים שזמינים תחת ZDR. דגמים מסוג Covered Models (Fable, Mythos) חסומים. הדגם נבחר בהגדרות מתוך הרשימה.

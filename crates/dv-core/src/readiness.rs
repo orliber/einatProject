@@ -40,8 +40,10 @@ impl Core {
     pub fn readiness(&mut self) -> Result<Readiness, CoreError> {
         let backup = self.backup_status()?;
         let disk_on = self.status().disk_encryption == "on";
+        let provider = self.provider();
         let v = self.vault_ref()?;
-        let api_key = v.secret(crate::API_KEY)?.is_some();
+        // A key for the AI she chose (the local model needs none; D-040).
+        let api_key = crate::key_of(v, provider)?.is_some();
         let mut items = Vec::new();
         for key in CONFIRMED {
             let confirmed_at = v

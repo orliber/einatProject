@@ -36,6 +36,7 @@ import { filter, restore, type Person } from "./filter";
 import { FakeStyle } from "./fakeStyle";
 import { compareSheets, comparisonText, formatSheet, instruments } from "./scores";
 import * as R from "./routing";
+import { PROVIDERS, providerOf } from "../providers";
 import type { SortResult } from "../ipc/generated/SortResult";
 
 type Args = Record<string, unknown>;
@@ -135,6 +136,9 @@ export class FakeCore {
   private capUsd: number | null = null;
   private ready: Record<string, number | null> = {};
   private model = "claude-opus-5";
+  private get ai() {
+    return providerOf(this.model).name;
+  }
   private speed = "balanced";
   private reviewOnlySuspect = false;
   private screenProtection = true;
@@ -342,7 +346,7 @@ export class FakeCore {
   status(): AppStatus {
     return {
       vault_exists: this.vaultExists, unlocked: this.unlocked, disk_encryption: "on", cloud_synced_folder: null, fips_active: true,
-      demo_mode: true, model: this.model, speed: this.speed, integrity_warning: null, lock_minutes: this.lockMinutes, idle_lock_in: this.unlocked ? this.lockMinutes * 60 : null,
+      demo_mode: true, model: this.model, provider: providerOf(this.model).id, ai_name: this.ai, keys: [], speed: this.speed, integrity_warning: null, lock_minutes: this.lockMinutes, idle_lock_in: this.unlocked ? this.lockMinutes * 60 : null,
       practitioner: this.practitioner, review_only_suspect: this.reviewOnlySuspect, review_choice_available: true, screen_protection: !this.unlocked || this.screenProtection,
       hello_available: false, hello_on: false,
     };
@@ -402,7 +406,7 @@ export class FakeCore {
   }
 
   private prepareSection(c: Case, key: string, instruction: string, replaces: string | null = null): Prepared {
-    if (!c.meta.consent) fail("consent_missing", "לפני שליחה ל-Claude צריך לרשום בתיק את הסכמת ההורים.");
+    if (!c.meta.consent) fail("consent_missing", `לפני שליחה ל-${this.ai} צריך לרשום בתיק את הסכמת ההורים.`);
     const section = SECTIONS.find((s) => s.key === key) ?? fail("not_found", "הסעיף לא נמצא");
     const parts: ReviewPart[] = [];
     const autoHidden: AutoHidden[] = [];
@@ -442,7 +446,7 @@ export class FakeCore {
 
   /** Sorting into sections (D-022): every material not sorted yet, one review. */
   private prepareSort(c: Case): Prepared {
-    if (!c.meta.consent) fail("consent_missing", "לפני שליחה ל-Claude צריך לרשום בתיק את הסכמת ההורים.");
+    if (!c.meta.consent) fail("consent_missing", `לפני שליחה ל-${this.ai} צריך לרשום בתיק את הסכמת ההורים.`);
     const todo = c.inputs.filter((i) => R.needsSorting(this.routingOf(c, i.id), R.passages(i.content).length));
     if (!todo.length) fail("refused", "כל החומרים כבר ממוינים לסעיפים.");
     const parts: ReviewPart[] = [];
@@ -509,7 +513,7 @@ export class FakeCore {
       }
     }
     const reply = paragraphs.length
-      ? `מצב הדגמה: ניסחתי ${paragraphs.length} פסקאות לדוגמה מתוך החומרים. בתוכנה, עם חיבור ל-Claude, הניסוח נעשה בסגנון שלך ומצליב בין החומרים.`
+      ? `מצב הדגמה: ניסחתי ${paragraphs.length} פסקאות לדוגמה מתוך החומרים. בתוכנה, עם חיבור ל-${this.ai}, הניסוח נעשה בסגנון שלך ומצליב בין החומרים.`
       : "מצב הדגמה: אין עדיין חומרים לסעיף הזה. אפשר להוסיף אינטייק, מפגש או מסמך.";
     const chat = (c.chat[p.section] ??= []);
     if (p.instruction.trim()) chat.push({ role: "user", text: p.instruction, hidden: [], demo: true });
@@ -617,8 +621,9 @@ export class FakeCore {
         this.unlocked = false;
         return null;
       case "set_api_key":
-        return fail("preview", "בהדמיה בדפדפן אין חיבור ל-Claude. מפתח API מוזן רק בתוכנה המותקנת, ונשמר בה מוצפן.");
+        return fail("preview", `בהדמיה בדפדפן אין חיבור ל-${this.ai}. מפתח API מוזן רק בתוכנה המותקנת, ונשמר בה מוצפן.`);
       case "set_model":
+        if (!PROVIDERS.some((p) => p.models.some(([m]) => m === a.model))) return fail("refused", "הדגם הזה לא ברשימה המותרת.");
         this.model = String(a.model);
         return null;
       case "set_speed":
@@ -918,7 +923,7 @@ export class FakeCore {
         if (p?.type !== "consult") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
         this.pending.delete(String(a.approvalId));
         await new Promise((r) => setTimeout(r, 1400));
-        const answer = "מצב הדגמה: כאן תופיע תשובה מקצועית של Claude, שמבחינה בין ידע מבוסס לדעה ומציינת אי-ודאות. ההחלטה המקצועית נשארת שלך.";
+        const answer = `מצב הדגמה: כאן תופיע תשובה מקצועית של ${this.ai}, שמבחינה בין ידע מבוסס לדעה ומציינת אי-ודאות. ההחלטה המקצועית נשארת שלך.`;
         const at = now();
         let conv = p.conversationId ? this.convs.find((x) => x.id === p.conversationId) : undefined;
         if (!conv) {

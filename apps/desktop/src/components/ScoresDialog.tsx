@@ -6,6 +6,7 @@ import type { Band } from "../ipc/generated/Band";
 import type { Measure } from "../ipc/generated/Measure";
 import { Dialog, ErrorLine, Spinner } from "./ui";
 import "./ScoresDialog.css";
+import { useAi } from "../ai";
 
 type Entry = { value: string; note: string };
 
@@ -44,6 +45,7 @@ export function ScoresDialog(props: {
   onSaved: (id: string) => Promise<void>;
 }) {
   const { fail } = useApp();
+  const ai = useAi();
   const [instruments, setInstruments] = useState<Instrument[] | null>(null);
   const [key, setKey] = useState(props.sheet?.instrument ?? "wppsi_iv");
   const [entries, setEntries] = useState<Record<string, Entry>>(() => toEntries(props.sheet));
@@ -126,7 +128,7 @@ export function ScoresDialog(props: {
 
   return (
     <Dialog wide title={props.input ? "עריכת ציונים" : "הזנת ציונים"}
-      subtitle="הטווח והאחוזון מחושבים בתוכנה לפי טבלה קבועה. Claude מקבל את הטקסט המוכן ואינו מפרש ציונים בעצמו."
+      subtitle={`הטווח והאחוזון מחושבים בתוכנה לפי טבלה קבועה. ${ai} מקבל את הטקסט המוכן ואינו מפרש ציונים בעצמו.`}
       onClose={props.onClose}
       footer={
         <>

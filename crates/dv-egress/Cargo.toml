@@ -1,6 +1,6 @@
 [package]
 name = "dv-egress"
-description = "The only crate allowed to open network connections (Anthropic API)"
+description = "The only crate allowed to open network connections (the AI provider APIs, updates)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -9,11 +9,13 @@ import { ScoresDialog } from "../../components/ScoresDialog";
 import { Dialog, ErrorLine, Segments, Spinner, UploadIcon } from "../../components/ui";
 import type { CaseApi } from "../CaseScreen";
 import "./MaterialsView.css";
+import { useAi } from "../../ai";
 
 const ACCEPT = ".docx,.odt,.pdf,.txt,application/vnd.oasis.opendocument.text,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain";
 
 export function MaterialsView({ api }: { api: CaseApi }) {
   const { fail, notify } = useApp();
+  const ai = useAi();
   const { detail, caseId, reload } = api;
   // A material opens in a window when clicked; the screen itself is only the slots.
   const [selected, setSelected] = useState<string | null>(null);
@@ -189,7 +191,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
                     {route.feeds.length ? route.feeds.map(titleOf).join(" · ") : "אף סעיף"}
                     <span className="muted">
                       {route.sorted
-                        ? ` (לפי המיון${route.by_ai ? " של Claude" : ""}: ${route.used_passages} מתוך ${route.passages} קטעים)`
+                        ? ` (לפי המיון${route.by_ai ? ` של ${ai}` : ""}: ${route.used_passages} מתוך ${route.passages} קטעים)`
                         : route.added.length || route.removed.length ? " (לפי הבחירה שלך)" : " (לפי סוג החומר)"}
                     </span>
                   </span>
@@ -241,6 +243,7 @@ function feedText(route: MaterialRouting | undefined, titleOf: (key: string) => 
 /** Einat picks the sections a material feeds (D-022). Her choice always wins. */
 function SectionsDialog(props: { api: CaseApi; input: CaseInput; route: MaterialRouting; titleOf: (key: string) => string; onClose: () => void; onSaved: () => Promise<void> }) {
   const { fail } = useApp();
+  const ai = useAi();
   const { api, input, route } = props;
   const [chosen, setChosen] = useState<string[]>(route.feeds);
   const [busy, setBusy] = useState(false);
@@ -248,7 +251,7 @@ function SectionsDialog(props: { api: CaseApi; input: CaseInput; route: Material
   const sortable = api.detail.sections.filter((s) => s.sortable);
   const parts = Array.from(new Set(sortable.map((s) => s.part)));
   const origin = (key: string) =>
-    route.sorted ? (route.suggested.includes(key) ? (route.by_ai ? "Claude הציע" : "הוצע במיון") : null) : route.table.includes(key) ? "לפי סוג החומר" : null;
+    route.sorted ? (route.suggested.includes(key) ? (route.by_ai ? `${ai} הציע` : "הוצע במיון") : null) : route.table.includes(key) ? "לפי סוג החומר" : null;
 
   async function save() {
     setBusy(true);

@@ -303,6 +303,11 @@ pub fn respond(body: &Value) -> Value {
         .and_then(|m| m.iter().rev().find(|x| x["role"] == "user"))
         .and_then(|m| m["content"].as_str())
         .unwrap_or("");
+    let ai = body["model"]
+        .as_str()
+        .and_then(crate::Provider::of_model)
+        .unwrap_or(crate::Provider::Anthropic)
+        .display_name();
 
     if body.get("tools").is_some() {
         return api_text(
@@ -324,10 +329,10 @@ pub fn respond(body: &Value) -> Value {
         return api_text(&sort_locally(last_user, &keys).to_string());
     }
     if body["output_config"]["format"].is_null() {
-        return api_text(
-            "מצב הדגמה: אני עונה כאן תשובה לדוגמה. בהתייעצות אמיתית Claude יענה על השאלה המקצועית, \
-             יבחין בין ידע מבוסס לדעה, ויציין כשיש אי-ודאות. ההחלטה המקצועית נשארת שלך.",
-        );
+        return api_text(&format!(
+            "מצב הדגמה: אני עונה כאן תשובה לדוגמה. בהתייעצות אמיתית {ai} יענה על השאלה המקצועית, \
+             יבחין בין ידע מבוסס לדעה, ויציין כשיש אי-ודאות. ההחלטה המקצועית נשארת שלך."
+        ));
     }
 
     let sources = sources_in(last_user);
@@ -341,7 +346,7 @@ pub fn respond(body: &Value) -> Value {
             .map(|(_, body)| json!({ "text": first_sentences(body, 1), "source_refs": [] }))
             .collect();
         let answer = json!({
-            "reply": format!("מצב הדגמה: ניסחתי {} פסקאות לדוגמה מתוך הסעיפים שאישרת. במצב אמיתי Claude מסכם ומקשר בין הסעיפים בסגנון שלך.", paragraphs.len()),
+            "reply": format!("מצב הדגמה: ניסחתי {} פסקאות לדוגמה מתוך הסעיפים שאישרת. במצב אמיתי {ai} מסכם ומקשר בין הסעיפים בסגנון שלך.", paragraphs.len()),
             "paragraphs": paragraphs,
             "questions": [],
             "missing": [],
@@ -359,7 +364,7 @@ pub fn respond(body: &Value) -> Value {
         "מצב הדגמה: אין עדיין מקורות לסעיף הזה. הוסיפי אינטייק, שיחה או מסמך, ואנסח טיוטה על סמכם."
             .to_owned()
     } else {
-        format!("מצב הדגמה: ניסחתי {} פסקאות לדוגמה מתוך המקורות. במצב אמיתי Claude מנסח בסגנון שלך ומצליב בין המקורות.", paragraphs.len())
+        format!("מצב הדגמה: ניסחתי {} פסקאות לדוגמה מתוך המקורות. במצב אמיתי {ai} מנסח בסגנון שלך ומצליב בין המקורות.", paragraphs.len())
     };
     let answer = json!({
         "reply": reply,

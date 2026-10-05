@@ -9,17 +9,13 @@ import { UsageSettings } from "../components/UsageSettings";
 import { ReadinessSettings } from "../components/ReadinessSettings";
 import { ErrorLine } from "../components/ui";
 import { ipc, type ReportSettings } from "../ipc/client";
+import { PROVIDERS, providerOf } from "../ai";
+
 import { TEXT_SIZES, applyTextSize, readTextSize } from "../textSize";
 import "./SettingsScreen.css";
 
 /** The screen-capture switch is hidden while that protection is off (D-039). */
 const SCREEN_PROTECTION_SETTING = false;
-
-const MODELS: [string, string][] = [
-  ["claude-opus-5", "Claude Opus 5 (מומלץ: הכי מדויק)"],
-  ["claude-sonnet-5", "Claude Sonnet 5 (מהיר יותר)"],
-  ["claude-opus-4-8", "Claude Opus 4.8"],
-];
 
 const JUMPS: [string, string][] = [
   ["s-ready", "מוכנה לעבודה"],
@@ -37,6 +33,10 @@ const JUMPS: [string, string][] = [
 export function SettingsScreen() {
   const { status, refresh, notify, fail } = useApp();
   const [apiKey, setApiKey] = useState("");
+  const [ack, setAck] = useState(false);
+  const provider = providerOf(status.model);
+  const ai = provider.name;
+  const hasKey = status.keys.includes(provider.id);
   const [minutes, setMinutes] = useState(status.lock_minutes);
   const [names, setNames] = useState(status.practitioner.join(", "));
   const [report, setReport] = useState<ReportSettings | null>(null);
@@ -75,29 +75,61 @@ export function SettingsScreen() {
         <ReadinessSettings />
 
         <section className="card setting" aria-labelledby="s-claude">
-          <h2 id="s-claude">חיבור ל-Claude</h2>
-          <p className="muted small">
-            {status.demo_mode
-              ? "כרגע התוכנה במצב הדגמה: התשובות נבנות במחשב, ושום דבר לא נשלח. כדי לעבוד עם Claude מזינים מפתח API של חשבון עם הסכם אפס שמירת מידע (ZDR)."
-              : "מפתח API מוגדר ונשמר מוצפן בתוך הכספת. אפשר להחליף או למחוק."}
-          </p>
-          <div className="row">
-            <label htmlFor="api" className="visually-hidden">מפתח API</label>
-            <input id="api" className="input grow mono" dir="ltr" type="password" autoComplete="off" placeholder={status.demo_mode ? "sk-ant-…" : "••••••••••••"}
-              value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-            <button type="button" className="btn btn-primary" disabled={!apiKey.trim()}
-              onClick={() => void run(async () => { await ipc.setApiKey(apiKey); setApiKey(""); }, "המפתח נשמר מוצפן.")}>שמירה</button>
-            {!status.demo_mode && (
-              <button type="button" className="btn" onClick={() => void run(() => ipc.setApiKey(""), "המפתח נמחק. התוכנה חזרה למצב הדגמה.")}>מחיקה</button>
-            )}
+          <h2 id="s-claude">חיבור ל-AI</h2>
+          <div className="field">
+            <label htmlFor="provider">עם איזה AI לעבוד</label>
+            <select id="provider" className="select" value={provider.id}
+              onChange={(e) => {
+                const next = PROVIDERS.find((p) => p.id === e.target.value);
+                const model = next?.models[0]?.[0];
+                if (!next || !model) return;
+                setApiKey("");
+                setAck(false);
+                void run(() => ipc.setModel(model), `מעכשיו עובדים עם ${next.name}.`);
+              }}>
+              {PROVIDERS.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.company}){p.id === "anthropic" ? " · מומלץ" : ""}</option>)}
+            </select>
+            <span className="hint">בכל מקרה השמות והפרטים המזהים מוסתרים במחשב לפני השליחה, ומסך "מה יוצא מהמחשב" מראה בדיוק מה נשלח.</span>
           </div>
+          {provider.setup && <p className="note-sand small" role="note">{provider.setup}</p>}
+          {provider.keyPlaceholder !== null && (
+            <>
+              <p className="muted small">
+                {status.demo_mode
+                  ? `כרגע אין מפתח של ${ai}, ולכן התוכנה במצב הדגמה: התשובות נבנות במחשב, ושום דבר לא נשלח.`
+                  : `מפתח API של ${ai} מוגדר ונשמר מוצפן בתוך הכספת. אפשר להחליף או למחוק.`}
+                {provider.id === "anthropic" && status.demo_mode && " כדי לעבוד עם Claude מזינים מפתח API של חשבון עם הסכם אפס שמירת מידע (ZDR)."}
+              </p>
+              {provider.retention && (
+                <div className="note-sand small" role="note">
+                  <b>מה {provider.company} שומרת:</b> {provider.retention}
+                </div>
+              )}
+              <div className="row">
+                <label htmlFor="api" className="visually-hidden">מפתח API של {ai}</label>
+                <input id="api" className="input grow mono" dir="ltr" type="password" autoComplete="off" placeholder={hasKey ? "••••••••••••" : provider.keyPlaceholder}
+                  value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+                <button type="button" className="btn btn-primary" disabled={!apiKey.trim() || (provider.retention !== null && !ack)}
+                  onClick={() => void run(async () => { await ipc.setApiKey(provider.id, apiKey, ack); setApiKey(""); setAck(false); }, "המפתח נשמר מוצפן.")}>שמירה</button>
+                {hasKey && (
+                  <button type="button" className="btn" onClick={() => void run(() => ipc.setApiKey(provider.id, ""), `המפתח של ${ai} נמחק. בלי מפתח התוכנה עובדת במצב הדגמה.`)}>מחיקה</button>
+                )}
+              </div>
+              {provider.retention && (
+                <label className="row">
+                  <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
+                  <span>יש לי הסכם בכתב עם {provider.company} על אפס שמירת מידע (ZDR) לחשבון הזה. בלי הסכם כזה התוכנה לא תשלח אליה דבר.</span>
+                </label>
+              )}
+            </>
+          )}
           <div className="field">
             <label htmlFor="model">דגם</label>
             <select id="model" className="select" value={status.model}
               onChange={(e) => void run(() => ipc.setModel(e.target.value), "הדגם עודכן.")}>
-              {MODELS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              {provider.models.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
-            <span className="hint">רק דגמים שנכללים בהסכם אפס שמירת מידע.</span>
+            {provider.id === "anthropic" && <span className="hint">רק דגמים שנכללים בהסכם אפס שמירת מידע.</span>}
           </div>
           <div className="field">
             <label htmlFor="speed">מהירות התשובות</label>
@@ -105,9 +137,9 @@ export function SettingsScreen() {
               onChange={(e) => void run(() => ipc.setSpeed(e.target.value as "fast" | "balanced" | "thorough"), "המהירות עודכנה.")}>
               <option value="fast">מהיר: תשובות תוך שניות, פחות עמוק</option>
               <option value="balanced">מאוזן (מומלץ)</option>
-              <option value="thorough">יסודי: Claude חושב יותר, לוקח יותר זמן</option>
+              <option value="thorough">יסודי: {ai} חושב יותר, לוקח יותר זמן</option>
             </select>
-            <span className="hint">מיון החומרים תמיד מהיר. הבחירה משפיעה על ניסוח הסעיפים ועל ההתייעצות. גם "Claude Sonnet" מהיר יותר מ-Opus.</span>
+            <span className="hint">מיון החומרים תמיד מהיר. הבחירה משפיעה על ניסוח הסעיפים ועל ההתייעצות. גם דגם "מהיר יותר" מקצר את הזמן.</span>
           </div>
         </section>
 
