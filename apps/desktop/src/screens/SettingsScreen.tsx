@@ -41,6 +41,7 @@ export function SettingsScreen() {
   const [names, setNames] = useState(status.practitioner.join(", "));
   const [report, setReport] = useState<ReportSettings | null>(null);
   const [template, setTemplate] = useState<TemplateView | null>(null);
+  const [original, setOriginal] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [textSize, setTextSize] = useState(readTextSize);
 
@@ -213,6 +214,23 @@ export function SettingsScreen() {
                     onClick={() => void run(async () => { await ipc.clearReportTemplate(); setTemplate(null); }, "חזרה לעיצוב הרגיל של הדוח.")}>בלי תבנית</button>
                 )}
               </div>
+            </div>
+            <div className="field">
+              <span className="label">בדיקת מקוריות של PDF</span>
+              <span className="hint">בוחרים קובץ PDF שהופק כאן. אם לא שונה בו אף בית, תופיע השעה שבה הופק.</span>
+              <label className="btn btn-small align-start">
+                בחירת PDF לבדיקה
+                <input type="file" accept=".pdf" hidden
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = "";
+                    if (f) void run(async () => {
+                      const at = await ipc.checkOriginal(f);
+                      setOriginal(at === null ? "הקובץ הזה לא הופק בכספת הזו, או ששונה אחרי שהופק." : `זה הקובץ המקורי: הופק ב-${new Date(at * 1000).toLocaleString("he-IL")}, ולא שונה מאז.`);
+                    }, "הבדיקה הסתיימה.");
+                  }} />
+              </label>
+              {original && <span className="hint" role="status">{original}</span>}
             </div>
           </section>
         )}

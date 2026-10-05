@@ -8,12 +8,14 @@
 
 mod agile;
 mod docx;
+mod pdf;
 mod template;
 
 use serde::{Deserialize, Serialize};
 
 pub use agile::{encrypt, MIN_PASSWORD_CHARS};
 pub use docx::render;
+pub use pdf::{render_pdf, PdfFonts};
 pub use template::{
     check_template, render_with_template, TemplateSummary, MARKER, MAX_TEMPLATE_BYTES,
 };
@@ -98,6 +100,9 @@ pub enum ExportError {
     Crypto,
     #[error("package: {0}")]
     Package(String),
+    /// The PDF cannot be made with this font; the message says why, in Hebrew.
+    #[error("{0}")]
+    Pdf(String),
     /// Her template cannot be used; the message says what to do, in Hebrew.
     #[error("{0}")]
     Template(String),

@@ -926,6 +926,10 @@ export class FakeCore {
       }
       case "letter":
         return [];
+      case "export_pdf":
+        return "בהדמיה בדפדפן לא נוצר קובץ. בתוכנה המותקנת נשמר PDF נעול בסיסמה בתיקיית ההורדות.";
+      case "check_original":
+        return null;
       case "prepare_letter":
         return fail("refused", "בהדמיה בדפדפן אין ניסוח מכתבים. בתוכנה המותקנת המכתב נכתב מתוך ההמלצות המאושרות.");
       case "export_letter":

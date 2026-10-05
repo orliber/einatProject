@@ -280,7 +280,7 @@ const BAR_FILL: &str = "1F3A5F";
 const BAND_FILL: &str = "EEF3F2";
 
 /// A number without a trailing ".0".
-fn num(v: f64) -> String {
+pub(crate) fn num(v: f64) -> String {
     if (v - v.round()).abs() < 1e-9 {
         format!("{v:.0}")
     } else {

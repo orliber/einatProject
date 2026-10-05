@@ -153,7 +153,7 @@ crates/  dv-vault/ dv-privacy/ dv-ai/ dv-egress/ dv-domain/ dv-ingest/ dv-export
 apps/desktop/  src/ (React+TS+Vite)   src-tauri/
 xtask/                     בדיקות אינווריאנטים, סריקת pre-commit (Rust, בלי Python)
 knowledge/                 *.yaml (status: pending|approved)
-templates/report.docx
+templates/report_structure.json   (תבנית ה-Word של עינת נשמרת בכספת, D-049)
 tests/fixtures/            נתונים בדויים בלבד
 tools/dev-only/            כלי אימות לפיתוח (למשל msoffcrypto). לא נארזים.
 docs/

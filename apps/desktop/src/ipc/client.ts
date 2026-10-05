@@ -206,6 +206,17 @@ export const ipc = {
 
   checkExport: (caseId: string) => call<ExportCheck>("check_export", { caseId }),
   exportReport: (caseId: string, password: string | null) => call<string>("export_report", { caseId, password }),
+  /** EX-3: a locked PDF (opens with the password, prints, cannot be changed). */
+  exportPdf: (caseId: string, password: string) => call<string>("export_pdf", { caseId, password }),
+  /** When this vault exported exactly this PDF, or `null` (changed, or not made here). */
+  checkOriginal: async (file: File): Promise<number | null> => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    try {
+      return await invoke<number | null>("check_original", bytes);
+    } catch (e) {
+      throw asUiError(e);
+    }
+  },
   /** EX-4: a short letter from the approved report, through the same review and gate. */
   prepareLetter: (caseId: string, audience: "parents" | "school", note: string) =>
     call<Prepared>("prepare_letter", { caseId, audience, note }),

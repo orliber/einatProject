@@ -990,6 +990,42 @@ async fn export_report(
     .await
 }
 
+/// EX-3: the report as a locked PDF, into the same folder as the Word file.
+#[tauri::command]
+async fn export_pdf(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    password: String,
+) -> Res<String> {
+    let dir = export_dir(&app)?;
+    with_core(&state, move |c| {
+        let check = c.check_export(&case_id)?;
+        let bytes = c.export_pdf(&case_id, &password)?;
+        let stem = check
+            .file_name
+            .rsplit_once('.')
+            .map_or(check.file_name.as_str(), |(s, _)| s);
+        let path = free_path(&dir, &format!("{stem}.pdf"));
+        std::fs::write(&path, bytes).map_err(|e| CoreError::Internal(e.to_string()))?;
+        Ok(path.display().to_string())
+    })
+    .await
+}
+
+/// Whether a PDF is one this vault exported, unchanged: when it was made, or `None`.
+#[tauri::command]
+async fn check_original(
+    state: tauri::State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Res<Option<i64>> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(internal("body"));
+    };
+    let bytes = bytes.clone();
+    with_core(&state, move |c| c.check_original(&bytes)).await
+}
+
 /// EX-4: a short letter to the parents or the school, from the approved report.
 #[tauri::command]
 async fn prepare_letter(
@@ -1474,6 +1510,8 @@ fn main() {
             dismiss_style_suggestion,
             check_export,
             export_report,
+            export_pdf,
+            check_original,
             prepare_letter,
             letter,
             export_letter,

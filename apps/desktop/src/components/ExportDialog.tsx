@@ -24,6 +24,7 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
   const { fail, go } = useApp();
   const [check, setCheck] = useState<ExportCheck | null>(null);
   const [protect, setProtect] = useState(true);
+  const [pdf, setPdf] = useState(false);
   const [password, setPassword] = useState(makePassphrase);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
@@ -40,7 +41,7 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
     setError(null);
     try {
       const pw = protect ? password : null;
-      setSaved(await (letter ? ipc.exportLetter(api.caseId, letter, pw) : ipc.exportReport(api.caseId, pw)));
+      setSaved(await (letter ? ipc.exportLetter(api.caseId, letter, pw) : pdf ? ipc.exportPdf(api.caseId, password) : ipc.exportReport(api.caseId, pw)));
     } catch (e) {
       setError(fail(e as never));
     } finally {
@@ -120,8 +121,15 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
             </ul>
           )}
 
+          {!letter && (
+            <div className="row" role="radiogroup" aria-label="סוג הקובץ">
+              <label className="row small"><input type="radio" checked={!pdf} onChange={() => setPdf(false)} /> Word (אפשר להמשיך לערוך)</label>
+              <label className="row small"><input type="radio" checked={pdf} onChange={() => { setPdf(true); setProtect(true); }} /> PDF נעול (להדפסה בלבד, בלי שינויים)</label>
+            </div>
+          )}
+          {pdf && <span className="small muted">ה-PDF נפתח רק בסיסמה ואי אפשר לשנות אותו. טביעת האצבע שלו נשמרת בכספת, ובהגדרות אפשר לבדוק אם עותק שחזר אלייך הוא המקורי.</span>}
           <div className="card protect stack">
-            <label className="row"><input type="checkbox" checked={protect} onChange={(e) => setProtect(e.target.checked)} />
+            <label className="row"><input type="checkbox" checked={protect} disabled={pdf} onChange={(e) => setProtect(e.target.checked)} />
               <b>הגנה בסיסמה</b> <span className="muted">(מומלץ כששולחים במייל)</span></label>
             {protect && (
               <>

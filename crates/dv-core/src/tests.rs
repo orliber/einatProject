@@ -3063,3 +3063,27 @@ fn letters_are_written_from_the_approved_recommendations_only() {
     );
     assert!(!doc.contains("סיבת הפניה"));
 }
+
+#[test]
+fn locked_pdf_is_recognised_as_the_original() {
+    let (_dir, mut core, case) = setup(None);
+    core.add_own_paragraph(&case, "referral", "ההורים של אלון פנו בשל קושי במעברים.")
+        .unwrap();
+    let pdf = match core.export_pdf(&case, "נהר-ענן-42-שקד-אורן") {
+        Ok(pdf) => pdf,
+        // No Hebrew font on this computer (a bare build machine): nothing to check.
+        Err(CoreError::Refused(m)) if m.contains("גופן") => return,
+        Err(e) => panic!("{e:?}"),
+    };
+    assert!(pdf.starts_with(b"%PDF-2.0"));
+    assert!(!String::from_utf8_lossy(&pdf).contains("אלון"));
+    assert!(core.check_original(&pdf).unwrap().is_some());
+    let mut changed = pdf.clone();
+    let last = changed.len() - 20;
+    changed[last] ^= 1;
+    assert!(core.check_original(&changed).unwrap().is_none());
+    assert!(matches!(
+        core.export_pdf(&case, "abc-אבג-12345"),
+        Err(CoreError::Refused(_))
+    ));
+}

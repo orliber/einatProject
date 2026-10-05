@@ -1792,7 +1792,7 @@ impl Core {
                 // A letter gets only the sections it is written from (EX-4): the school letter
                 // only the recommendations, never the background or the diagnoses.
                 let wanted = |key: &str| match letter {
-                    Some(l) => l.from_sections().contains(&key),
+                    Some(l) => l.written_from().contains(&key),
                     None => key != section_key && !DERIVED_SECTIONS.contains(&key),
                 };
                 for s in structure.sections().filter(|s| wanted(&s.key)) {
@@ -1898,6 +1898,56 @@ impl Core {
             return self.prepare_section_once(case_id, section_key, instruction, replaces, true);
         }
         Ok(prepared)
+    }
+
+    /// The report as a locked PDF (EX-3, D-049): it opens with `password`, can be printed but
+    /// not changed, and its SHA-256 goes into the audit log so a copy can be checked later.
+    pub fn export_pdf(&mut self, case_id: &str, password: &str) -> Result<Vec<u8>, CoreError> {
+        let (report, check) = self.build_report(case_id)?;
+        if !check.blocking.is_empty() {
+            return Err(CoreError::Refused(check.blocking.join(" · ")));
+        }
+        let (regular, bold) = system_fonts(&report.font).ok_or_else(|| {
+            CoreError::Refused(
+                "לא נמצא במחשב גופן עברי ליצירת PDF (למשל David או Arial).".to_owned(),
+            )
+        })?;
+        let pdf = dv_export::render_pdf(
+            &report,
+            dv_export::PdfFonts {
+                regular: &regular,
+                bold: bold.as_deref(),
+            },
+            password,
+        )
+        .map_err(|e| match e {
+            dv_export::ExportError::WeakPassword => CoreError::Refused(format!(
+                "סיסמה לקובץ צריכה להיות באורך {} תווים לפחות.",
+                dv_export::MIN_PASSWORD_CHARS
+            )),
+            dv_export::ExportError::Pdf(m) => CoreError::Refused(m),
+            other => CoreError::Internal(other.to_string()),
+        })?;
+        let sha256 = dv_vault::crypto::sha256_hex(&pdf);
+        self.vault_mut()?.record(
+            AuditEvent::Export,
+            Some(case_id),
+            &serde_json::json!({ "protected": true, "pdf": true, "sha256": sha256, "sections": check.included_sections }),
+        )?;
+        Ok(pdf)
+    }
+
+    /// Whether a PDF is exactly one this vault exported (its fingerprint is in the audit log):
+    /// when, or `None` for a file that was changed or not made here.
+    pub fn check_original(&mut self, bytes: &[u8]) -> Result<Option<i64>, CoreError> {
+        let sha256 = dv_vault::crypto::sha256_hex(bytes);
+        let needle = format!("\"sha256\":\"{sha256}\"");
+        Ok(self
+            .vault_ref()?
+            .audit_entries(u32::MAX)?
+            .into_iter()
+            .find(|e| e.event == "export" && e.meta.contains(&needle))
+            .map(|e| e.ts))
     }
 
     /// A short letter to the parents or the school from the approved report (EX-4): an
@@ -2785,6 +2835,42 @@ impl Core {
     }
 }
 
+/// The report's font from the computer's own fonts (regular, and bold when there is one),
+/// else Arial, else a common font with Hebrew letters. Read only, never copied anywhere but
+/// into the PDF.
+fn system_fonts(name: &str) -> Option<(Vec<u8>, Option<Vec<u8>>)> {
+    let windows = std::env::var_os("WINDIR")
+        .map(|w| std::path::PathBuf::from(w).join("Fonts"))
+        .unwrap_or_else(|| std::path::PathBuf::from("C:\\Windows\\Fonts"));
+    let files: &[(&str, &str)] = match name {
+        "David" => &[("david.ttf", "davidbd.ttf")],
+        "Narkisim" => &[("nrkis.ttf", "")],
+        "Frank Ruehl" => &[("frank.ttf", "")],
+        "Times New Roman" => &[("times.ttf", "timesbd.ttf")],
+        _ => &[],
+    };
+    let dirs = [
+        windows,
+        std::path::PathBuf::from("/System/Library/Fonts/Supplemental"),
+        std::path::PathBuf::from("/Library/Fonts"),
+        std::path::PathBuf::from("/usr/share/fonts/truetype/dejavu"),
+    ];
+    let fallbacks: &[(&str, &str)] = &[
+        ("arial.ttf", "arialbd.ttf"),
+        ("Arial.ttf", "Arial Bold.ttf"),
+        ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf"),
+    ];
+    files.iter().chain(fallbacks).find_map(|(regular, bold)| {
+        dirs.iter().find_map(|d| {
+            let r = std::fs::read(d.join(regular)).ok()?;
+            let b = (!bold.is_empty())
+                .then(|| std::fs::read(d.join(bold)).ok())
+                .flatten();
+            Some((r, b))
+        })
+    })
+}
+
 /// The two letters (EX-4). Their drafts are kept in the case under their own keys, so they
 /// are deleted with the case, and never enter the report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2840,7 +2926,7 @@ impl Letter {
 
     /// The approved sections a letter is written from (data minimization: the school gets
     /// only what it acts on).
-    fn from_sections(self) -> &'static [&'static str] {
+    fn written_from(self) -> &'static [&'static str] {
         match self {
             Self::Parents => &["summary", "diagnoses", "recommendations"],
             Self::School => &["recommendations"],
