@@ -43,6 +43,10 @@ pub struct AppStatus {
     /// Screenshots and screen sharing show a blank window (D-037). Always on while the vault
     /// is locked; she may turn it off for the open vault in settings.
     pub screen_protection: bool,
+    /// Windows Hello (PIN, face or fingerprint) is set up on this computer (D-047).
+    pub hello_available: bool,
+    /// The vault opens with Windows Hello; the password always works too.
+    pub hello_on: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

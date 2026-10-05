@@ -87,7 +87,7 @@
 | V-1 | Info disclosure | T1 גונב את המחשב או את כונן הגיבוי ומריץ brute-force offline | ✅ Argon2id עם זיכרון גבוה לסיסמה. slot של Windows Hello / Touch ID קשור לחומרה. הגיבוי מוצפן. ⚠️ סיסמה חלשה בחריץ `password` נשארת נקודת תורפה offline, ולכן נדרשים 12 תווים לפחות וחסימה של סיסמאות נפוצות. 📅2 |
 | V-2 | Info disclosure | T3 מעתיק את תיקיית הכספת | ✅ כמו V-1: המידע מוצפן, ופריצה דורשת ניחוש של הסיסמה מול Argon2id. |
 | V-3 | Info disclosure | T3 מקליט את הסיסמה (keylogger) וגם משתמש ב-TPM מאותו מחשב | ⚠️ **סיכון שארית**: נוזקה עם הרשאות המשתמש, בזמן שעינת עובדת, יכולה לפתוח את הכספת. צמצום: ביומטריה (דורשת נוכחות), נעילה אוטומטית, הדרכה (`SETUP_HE.md`), המלצה ל-EDR. |
-| V-4 | Info disclosure | מפתחות בקובץ swap, hibernation או crash dump | ✅ mlock, zeroize, ביטול core dumps והחרגה מ-WER. ⚠️ hibernation מכוסה רק בהצפנת דיסק, ולכן `env_checks`. 📅2 |
+| V-4 | Info disclosure | מפתחות בקובץ swap, hibernation או crash dump | ✅ zeroize. ב-Windows (D-047): מכסת נעילה מוגדלת כך ש-SQLCipher באמת נועל את הדפים, החרגה מ-WER ודוחות בלי heap, ומחיקת דוחות הקריסה של WebView2. ⚠️ hibernation ו-LocalDumps שמנהל מערכת הגדיר מכוסים רק בהצפנת דיסק, ולכן `env_checks`. 📅2 |
 | V-5 | Tampering | החלפת ערכים מוצפנים בין שורות או תיקים | ✅ AAD = (טבלה, עמודה, מזהה שורה, מזהה תיק, גרסה). 📅2 |
 | V-6 | Tampering / Repudiation | עריכה או מחיקה של היומן | ✅ שרשרת HMAC עם מפתח שלא נגיש בלי פתיחה. ראש השרשרת מעוגן ב-header המאומת. 📅2 |
 | V-7 | DoS | שכחת סיסמה, תקלה ב-TPM, מחשב שהתקלקל | ✅ ערכת שחזור **חובה** + גיבוי + תרגול שחזור. 📅2/8 |

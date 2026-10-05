@@ -80,6 +80,9 @@ export const ipc = {
   confirmRecoveryKey: (typed: string) => call<boolean>("confirm_recovery_key", { typed }),
   unlock: (password: string) => call<AppStatus>("unlock", { password }),
   unlockWithRecovery: (key: string) => call<AppStatus>("unlock_with_recovery", { key }),
+  /** Windows Hello: her PIN, face or fingerprint (D-047). */
+  unlockWithHello: () => call<AppStatus>("unlock_with_hello"),
+  setWindowsHello: (on: boolean, password: string) => call<AppStatus>("set_windows_hello", { on, password }),
   lock: () => run("lock"),
   /** Typing or scrolling in the window counts as activity for the idle lock. */
   touch: () => run("touch"),

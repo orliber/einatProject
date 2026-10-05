@@ -44,6 +44,9 @@ pub enum AuditEvent {
     StyleSourceDeleted,
     /// A version of the writing-style profile was approved (or an earlier one brought back).
     StyleProfileApproved,
+    /// Windows Hello was turned on or off as a way in (D-047).
+    WindowsHelloOn,
+    WindowsHelloOff,
 }
 
 impl AuditEvent {
@@ -77,6 +80,8 @@ impl AuditEvent {
             AuditEvent::StyleSourceAdded => "style_source_added",
             AuditEvent::StyleSourceDeleted => "style_source_deleted",
             AuditEvent::StyleProfileApproved => "style_profile_approved",
+            AuditEvent::WindowsHelloOn => "windows_hello_on",
+            AuditEvent::WindowsHelloOff => "windows_hello_off",
         }
     }
 }

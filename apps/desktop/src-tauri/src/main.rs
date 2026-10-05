@@ -7,6 +7,7 @@
 mod file_dialog;
 mod os_lock;
 mod secret_clipboard;
+mod win_platform;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -157,6 +158,26 @@ async fn unlock(state: tauri::State<'_, AppState>, password: String) -> Res<AppS
 #[tauri::command]
 async fn unlock_with_recovery(state: tauri::State<'_, AppState>, key: String) -> Res<AppStatus> {
     with_core(&state, move |c| c.unlock_with_recovery(&key)).await
+}
+
+/// Windows Hello (D-047). Its prompt can open behind the window; it is brought forward.
+#[tauri::command]
+async fn unlock_with_hello(state: tauri::State<'_, AppState>) -> Res<AppStatus> {
+    win_platform::bring_hello_prompt_forward(15_000);
+    with_core(&state, Core::unlock_with_hello).await
+}
+
+#[tauri::command]
+async fn set_windows_hello(
+    state: tauri::State<'_, AppState>,
+    on: bool,
+    password: String,
+) -> Res<AppStatus> {
+    let password = zeroize::Zeroizing::new(password);
+    if on {
+        win_platform::bring_hello_prompt_forward(30_000);
+    }
+    with_core(&state, move |c| c.set_windows_hello(on, &password)).await
 }
 
 #[tauri::command]
@@ -1254,6 +1275,9 @@ fn remember_crashes(path: PathBuf) {
 }
 
 fn main() {
+    // Before anything holds case data: room to lock the vault's memory in RAM, and no crash
+    // dump with the heap in it (D-047). The document worker below gets the same.
+    let _ = win_platform::harden_process();
     // A document worker: the same binary, started by the core for one file.
     if std::env::args().nth(1).as_deref() == Some(dv_ingest::worker::WORKER_ARG) {
         std::process::exit(dv_ingest::worker::worker_main());
@@ -1263,6 +1287,10 @@ fn main() {
         .setup(|app| {
             let data = app.path().app_local_data_dir()?;
             remember_crashes(data.join(CRASH_LOG));
+            // The window's own crash reports (WebView2 keeps them under its data folder) could
+            // hold what was on screen. They are never sent; they are deleted at every start.
+            let _ =
+                std::fs::remove_dir_all(data.join("EBWebView").join("Crashpad").join("reports"));
             let dir = data.join("vault");
             std::fs::create_dir_all(&dir)?;
             // The installer of the last update has done its work.
@@ -1328,6 +1356,8 @@ fn main() {
             confirm_recovery_key,
             unlock,
             unlock_with_recovery,
+            unlock_with_hello,
+            set_windows_hello,
             lock,
             touch,
             readiness,

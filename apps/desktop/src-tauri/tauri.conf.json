@@ -26,6 +26,12 @@
     ],
     "security": {
       "freezePrototype": true,
+      "pattern": {
+        "use": "isolation",
+        "options": {
+          "dir": "../isolation"
+        }
+      },
       "csp": {
         "default-src": "'self'",
         "script-src": "'self'",

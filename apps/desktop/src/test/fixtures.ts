@@ -7,6 +7,8 @@ export const status = (over: Partial<AppStatus> = {}): AppStatus => ({
   disk_encryption: "on",
   cloud_synced_folder: null,
   screen_protection: true,
+  hello_available: false,
+  hello_on: false,
   fips_active: false,
   demo_mode: true,
   model: "claude-opus-5",

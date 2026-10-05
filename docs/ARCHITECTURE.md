@@ -63,7 +63,7 @@
 MK (256 ביט אקראי) – עטוף בנפרד בכל "חריץ" (slot) ב-vault.header, כמו LUKS:
    slot password      : KEK = HKDF(Argon2id(סיסמה, salt 32B, m=256MiB–1GiB, t=3, p=4))
    slot recovery      : KEK = HKDF(ערכת שחזור 256 ביט)
-   slot windows_hello : KEK משוחרר ע"י מפתח TPM של Windows Hello (PIN / פנים)     [שלב 2ב]
+   slot windows_hello : KEK = HKDF(חתימת Windows Hello על אתגר אקראי), מפתח ב-TPM   (D-047)
    slot macos         : KEK ב-Keychain עם access control של Touch ID / סיסמת Mac    [שלב 2ב]
 
 MK ─ HKDF ─► K_header_mac, K_audit_mac, K_index (HMAC לחיפוש)
@@ -135,7 +135,7 @@ audit(seq PK, ts, event, case_ref /* HMAC של case_id */, meta_json_enc, prev_m
 
 ## הקשחת Tauri
 - CSP: `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`.
-- Isolation pattern. capabilities: רק הפקודות שלנו. אין plugins של fs, shell או http. דיאלוגים לבחירת קבצים נפתחים מצד Rust.
+- Isolation pattern (D-047): `apps/desktop/isolation/` מעביר רק את הפקודות של `build.rs`. capabilities: רק הפקודות שלנו. אין plugins של fs, shell או http. דיאלוגים לבחירת קבצים נפתחים מצד Rust.
 - `contentProtected: true` בהגדרות החלון, אבל ההגנה מוסרת בזמן ריצה ומוסתרת מההגדרות בינתיים (D-039; המתג של D-037 נשאר בקוד), DevTools כבויים ב-release, ניווט חיצוני חסום.
 - פונטים (Frank Ruhl Libre, Assistant, ברישיון OFL) ארוזים מקומית.
 
