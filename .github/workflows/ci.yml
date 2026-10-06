@@ -121,6 +121,12 @@ jobs:
       - run: pnpm build
         working-directory: apps/desktop
       - run: cargo test --release -p dv-vault --features fips
+      # Tauri checks that bundled resources exist even when nothing is bundled. This job builds
+      # no installer, so an empty folder stands in for the OCR engine (D-048); the installer
+      # jobs (desktop, release) fetch the real one.
+      - name: OCR resource folder (no installer here)
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force apps/desktop/src-tauri/ocr/tessdata | Out-Null
       - run: cargo clippy -p dv-desktop --features fips -- -D warnings
       - run: cargo test --release -p dv-desktop --features fips
 
