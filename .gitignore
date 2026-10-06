@@ -40,3 +40,6 @@ sample-documents/
 *.pem
 *.key
 release-out/
+
+# The OCR engine is fetched and built in CI (windows/fetch-ocr.ps1), never committed
+apps/desktop/src-tauri/ocr/

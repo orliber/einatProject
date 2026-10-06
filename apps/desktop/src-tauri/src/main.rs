@@ -7,6 +7,7 @@
 mod file_dialog;
 mod os_lock;
 mod secret_clipboard;
+mod win_platform;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -15,10 +16,10 @@ use std::time::Duration;
 use dv_core::{
     ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView,
     ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
-    ExportCheck, ImportPreview, NameMatch, Prepared, Readiness, ReportSettings, RetentionItem,
-    SectionResult, SortResult, StagedBackup, StyleAnalysisResult, StyleImportPreview,
-    StyleOverview, StyleProfileView, StyleSourceView, SuspectDecision, UiError, UnsavedEdit,
-    UsageSummary,
+    ExportCheck, ImportPreview, NameMatch, ParagraphVersionView, ParagraphView, Prepared,
+    Readiness, ReportSettings, RetentionItem, SectionResult, SortResult, StagedBackup,
+    StyleAnalysisResult, StyleImportPreview, StyleOverview, StyleProfileView, StyleSourceView,
+    SuspectDecision, TemplateView, UiError, UnsavedEdit, UsageSummary,
 };
 use dv_domain::{
     CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind, Role,
@@ -66,7 +67,7 @@ async fn transmit(
     result
 }
 
-/// How many words Claude has written so far for a request on its way.
+/// How many words the AI has written so far for a request on its way.
 #[tauri::command]
 fn send_progress(state: tauri::State<'_, AppState>, approval_id: String) -> u32 {
     state
@@ -96,7 +97,8 @@ where
     let core = Arc::clone(&state.core);
     tauri::async_runtime::spawn_blocking(move || {
         let mut c = core.lock().map_err(|_| internal("lock"))?;
-        f(&mut c).map_err(|e| e.to_ui())
+        // Errors name the AI she chose ("שגיאה בחיבור ל-Gemini").
+        f(&mut c).map_err(|e| e.to_ui_for(c.ai_name()))
     })
     .await
     .map_err(|_| internal("task"))?
@@ -157,6 +159,26 @@ async fn unlock(state: tauri::State<'_, AppState>, password: String) -> Res<AppS
 #[tauri::command]
 async fn unlock_with_recovery(state: tauri::State<'_, AppState>, key: String) -> Res<AppStatus> {
     with_core(&state, move |c| c.unlock_with_recovery(&key)).await
+}
+
+/// Windows Hello (D-047). Its prompt can open behind the window; it is brought forward.
+#[tauri::command]
+async fn unlock_with_hello(state: tauri::State<'_, AppState>) -> Res<AppStatus> {
+    win_platform::bring_hello_prompt_forward(15_000);
+    with_core(&state, Core::unlock_with_hello).await
+}
+
+#[tauri::command]
+async fn set_windows_hello(
+    state: tauri::State<'_, AppState>,
+    on: bool,
+    password: String,
+) -> Res<AppStatus> {
+    let password = zeroize::Zeroizing::new(password);
+    if on {
+        win_platform::bring_hello_prompt_forward(30_000);
+    }
+    with_core(&state, move |c| c.set_windows_hello(on, &password)).await
 }
 
 #[tauri::command]
@@ -225,8 +247,16 @@ async fn set_monthly_cap(state: tauri::State<'_, AppState>, cap_usd: Option<u32>
 }
 
 #[tauri::command]
-async fn set_api_key(state: tauri::State<'_, AppState>, key: String) -> Res<()> {
-    with_core(&state, move |c| c.set_api_key(&key)).await
+async fn set_api_key(
+    state: tauri::State<'_, AppState>,
+    provider: String,
+    key: String,
+    retention_ack: bool,
+) -> Res<()> {
+    with_core(&state, move |c| {
+        c.set_api_key(&provider, &key, retention_ack)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -265,6 +295,29 @@ async fn set_report_settings(
     settings: ReportSettings,
 ) -> Res<()> {
     with_core(&state, move |c| c.set_report_settings(&settings)).await
+}
+
+/// Her Word template: the file's bytes are the raw body, like an imported document.
+#[tauri::command]
+async fn set_report_template(
+    state: tauri::State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Res<TemplateView> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(internal("body"));
+    };
+    let bytes = bytes.clone();
+    with_core(&state, move |c| c.set_report_template(&bytes)).await
+}
+
+#[tauri::command]
+async fn clear_report_template(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| c.clear_report_template()).await
+}
+
+#[tauri::command]
+async fn report_template(state: tauri::State<'_, AppState>) -> Res<Option<TemplateView>> {
+    with_core(&state, |c| c.report_template()).await
 }
 
 // ------------------------------------------------------------------ cases
@@ -709,6 +762,28 @@ async fn edit_paragraph(
 }
 
 #[tauri::command]
+async fn paragraph_versions(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    draft_id: String,
+) -> Res<Vec<ParagraphVersionView>> {
+    with_core(&state, move |c| c.paragraph_versions(&case_id, &draft_id)).await
+}
+
+#[tauri::command]
+async fn restore_paragraph_version(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    draft_id: String,
+    version_id: String,
+) -> Res<()> {
+    with_core(&state, move |c| {
+        c.restore_paragraph_version(&case_id, &draft_id, &version_id)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn add_own_paragraph(
     state: tauri::State<'_, AppState>,
     case_id: String,
@@ -926,19 +1001,12 @@ fn free_path(dir: &std::path::Path, file_name: &str) -> PathBuf {
     path
 }
 
-/// Write the report into the Downloads folder and return where it was saved.
-#[tauri::command]
-async fn export_report(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-    case_id: String,
-    password: Option<String>,
-) -> Res<String> {
-    // Downloads, else Documents, else the home folder, else the app's own folder. A folder
-    // that a cloud service syncs (Documents moved to OneDrive, say) is skipped: the report
-    // holds the real names and would be uploaded on its own.
+/// Downloads, else Documents, else the home folder, else the app's own folder. A folder that
+/// a cloud service syncs (Documents moved to OneDrive, say) is skipped: the report holds the
+/// real names and would be uploaded on its own.
+fn export_dir(app: &tauri::AppHandle) -> Result<PathBuf, UiError> {
     let paths = app.path();
-    let dir = [
+    [
         paths.download_dir(),
         paths.document_dir(),
         paths.home_dir(),
@@ -952,11 +1020,110 @@ async fn export_report(
         code: "no_folder".to_owned(),
         message: "לא נמצאה תיקייה לשמירת הדוח (הורדות או מסמכים).".to_owned(),
         details: Vec::new(),
-    })?;
+    })
+}
+
+/// Write the report into the Downloads folder and return where it was saved.
+#[tauri::command]
+async fn export_report(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    password: Option<String>,
+) -> Res<String> {
+    let dir = export_dir(&app)?;
     with_core(&state, move |c| {
         let check = c.check_export(&case_id)?;
         let bytes = c.export_report(&case_id, password.as_deref().filter(|p| !p.is_empty()))?;
         let path = free_path(&dir, &check.file_name);
+        std::fs::write(&path, bytes).map_err(|e| CoreError::Internal(e.to_string()))?;
+        Ok(path.display().to_string())
+    })
+    .await
+}
+
+/// EX-3: the report as a locked PDF, into the same folder as the Word file.
+#[tauri::command]
+async fn export_pdf(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    password: String,
+) -> Res<String> {
+    let dir = export_dir(&app)?;
+    with_core(&state, move |c| {
+        let check = c.check_export(&case_id)?;
+        let bytes = c.export_pdf(&case_id, &password)?;
+        let stem = check
+            .file_name
+            .rsplit_once('.')
+            .map_or(check.file_name.as_str(), |(s, _)| s);
+        let path = free_path(&dir, &format!("{stem}.pdf"));
+        std::fs::write(&path, bytes).map_err(|e| CoreError::Internal(e.to_string()))?;
+        Ok(path.display().to_string())
+    })
+    .await
+}
+
+/// Whether a PDF is one this vault exported, unchanged: when it was made, or `None`.
+#[tauri::command]
+async fn check_original(
+    state: tauri::State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Res<Option<i64>> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(internal("body"));
+    };
+    let bytes = bytes.clone();
+    with_core(&state, move |c| c.check_original(&bytes)).await
+}
+
+/// EX-4: a short letter to the parents or the school, from the approved report.
+#[tauri::command]
+async fn prepare_letter(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    audience: String,
+    note: String,
+) -> Res<Prepared> {
+    with_core(&state, move |c| {
+        c.prepare_letter(&case_id, &audience, &note)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn letter(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    audience: String,
+) -> Res<Vec<ParagraphView>> {
+    with_core(&state, move |c| c.letter(&case_id, &audience)).await
+}
+
+/// The letter into the same folder as the report, under a name without the child's name.
+#[tauri::command]
+async fn export_letter(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    audience: String,
+    password: Option<String>,
+) -> Res<String> {
+    let dir = export_dir(&app)?;
+    with_core(&state, move |c| {
+        let check = c.check_export(&case_id)?;
+        let bytes = c.export_letter(
+            &case_id,
+            &audience,
+            password.as_deref().filter(|p| !p.is_empty()),
+        )?;
+        let who = if audience == "school" {
+            "צוות"
+        } else {
+            "הורים"
+        };
+        let path = free_path(&dir, &format!("מכתב-{who}-{}", check.file_name));
         std::fs::write(&path, bytes).map_err(|e| CoreError::Internal(e.to_string()))?;
         Ok(path.display().to_string())
     })
@@ -1022,6 +1189,143 @@ async fn new_recovery_kit(
 ) -> Res<CreatedVault> {
     let current = zeroize::Zeroizing::new(current);
     with_core(&state, move |c| c.new_recovery_kit(&current, with_recovery)).await
+}
+
+// ------------------------------------------------------------------ forgot password: Google (D-041)
+
+/// Open Google's sign-in page in her default browser (never inside the program). Only that
+/// fixed address is ever opened from here.
+fn open_in_browser(url: &str) -> Result<(), CoreError> {
+    if !url.starts_with(dv_core::google::AUTH_URL) || url.contains(['"', '\'', ' ', '\n']) {
+        return Err(CoreError::Internal(
+            "refused to open an unexpected address".to_owned(),
+        ));
+    }
+    let opened = if cfg!(windows) {
+        // By full path; `url.dll` takes the address as one argument, no shell in between.
+        let rundll = std::env::var_os("SystemRoot").map_or_else(
+            || PathBuf::from("rundll32.exe"),
+            |root| PathBuf::from(root).join(r"System32\rundll32.exe"),
+        );
+        std::process::Command::new(rundll)
+            .args(["url.dll,FileProtocolHandler", url])
+            .spawn()
+    } else if cfg!(target_os = "macos") {
+        std::process::Command::new("/usr/bin/open").arg(url).spawn()
+    } else {
+        std::process::Command::new("xdg-open").arg(url).spawn()
+    };
+    opened
+        .map(|_| ())
+        .map_err(|_| CoreError::Refused("הדפדפן לא נפתח. אפשר לנסות שוב.".to_owned()))
+}
+
+/// Sign in outside the core's lock, then run `then` with the session (still outside it).
+async fn with_google<T, F>(then: F) -> Res<T>
+where
+    T: Send + 'static,
+    F: FnOnce(&dv_core::google::GoogleHttp, dv_core::google::Session) -> Result<T, CoreError>
+        + Send
+        + 'static,
+{
+    tauri::async_runtime::spawn_blocking(move || {
+        let (http, session) = dv_core::google::sign_in(&open_in_browser).map_err(|e| e.to_ui())?;
+        then(&http, session).map_err(|e| e.to_ui())
+    })
+    .await
+    .map_err(|_| internal("task"))?
+}
+
+#[tauri::command]
+async fn google_status(state: tauri::State<'_, AppState>) -> Res<dv_core::google::GoogleStatus> {
+    with_core(&state, |c| {
+        Ok(c.google_status(&dv_core::google::WindowsAccount))
+    })
+    .await
+}
+
+/// Stop a sign-in that waits for the browser.
+#[tauri::command]
+fn google_cancel() {
+    dv_core::google::cancel();
+}
+
+/// Turn on "forgot password → sign in with Google": check the password, sign in, put a new
+/// key in her Drive's hidden app folder, write the slot, delete older keys.
+#[tauri::command]
+async fn google_turn_on(state: tauri::State<'_, AppState>, password: String) -> Res<()> {
+    let password = zeroize::Zeroizing::new(password);
+    let check = password.clone();
+    let vault_id = with_core(&state, move |c| c.google_turn_on_check(&check)).await?;
+    let (drive, account, new_id, older, http_session) = with_google(move |http, session| {
+        match dv_core::google::put_new_key(http, &session, &vault_id) {
+            Ok((key, id, older)) => Ok((key, session.account_id.clone(), id, older, Some(session))),
+            Err(e) => {
+                dv_core::google::tidy_up(http, session, &[]);
+                Err(e)
+            }
+        }
+    })
+    .await?;
+    let finished = with_core(&state, move |c| {
+        c.google_turn_on_finish(
+            &dv_core::google::WindowsAccount,
+            &password,
+            &drive,
+            &account,
+        )
+    })
+    .await;
+    // Clean up at Google: on success the older keys, on failure the new one.
+    let stale = if finished.is_ok() {
+        older
+    } else {
+        vec![new_id]
+    };
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        if let (Ok(http), Some(session)) = (dv_core::google::GoogleHttp::new(), http_session) {
+            dv_core::google::tidy_up(&http, session, &stale);
+        }
+    })
+    .await;
+    finished
+}
+
+#[tauri::command]
+async fn google_turn_off(state: tauri::State<'_, AppState>, password: String) -> Res<()> {
+    let password = zeroize::Zeroizing::new(password);
+    with_core(&state, move |c| {
+        c.google_turn_off(&dv_core::google::WindowsAccount, &password)
+    })
+    .await
+}
+
+/// Forgot the password: sign in with the connected Google account on this computer, open
+/// the vault and set `new_password` at once.
+#[tauri::command]
+async fn google_recover(state: tauri::State<'_, AppState>, new_password: String) -> Res<AppStatus> {
+    let new_password = zeroize::Zeroizing::new(new_password);
+    let check = new_password.clone();
+    let (vault_id, tag) = with_core(&state, move |c| {
+        c.google_recover_check(&dv_core::google::WindowsAccount, &check)
+    })
+    .await?;
+    let keys = with_google(move |http, session| {
+        let result = if dv_core::google::same_account(&vault_id, &tag, &session) {
+            dv_core::google::read_keys(http, &session, &vault_id)
+        } else {
+            Err(CoreError::Refused(
+                "זה לא חשבון הגוגל שחובר לכספת. אפשר לנסות שוב ולבחור את החשבון שחובר.".to_owned(),
+            ))
+        };
+        dv_core::google::tidy_up(http, session, &[]);
+        result
+    })
+    .await?;
+    with_core(&state, move |c| {
+        c.google_recover_finish(&dv_core::google::WindowsAccount, &keys, &new_password)
+    })
+    .await
 }
 
 // ------------------------------------------------------------------ backup (D-024)
@@ -1232,6 +1536,9 @@ fn remember_crashes(path: PathBuf) {
 }
 
 fn main() {
+    // Before anything holds case data: room to lock the vault's memory in RAM, and no crash
+    // dump with the heap in it (D-047). The document worker below gets the same.
+    let _ = win_platform::harden_process();
     // A document worker: the same binary, started by the core for one file.
     if std::env::args().nth(1).as_deref() == Some(dv_ingest::worker::WORKER_ARG) {
         std::process::exit(dv_ingest::worker::worker_main());
@@ -1241,6 +1548,10 @@ fn main() {
         .setup(|app| {
             let data = app.path().app_local_data_dir()?;
             remember_crashes(data.join(CRASH_LOG));
+            // The window's own crash reports (WebView2 keeps them under its data folder) could
+            // hold what was on screen. They are never sent; they are deleted at every start.
+            let _ =
+                std::fs::remove_dir_all(data.join("EBWebView").join("Crashpad").join("reports"));
             let dir = data.join("vault");
             std::fs::create_dir_all(&dir)?;
             // The installer of the last update has done its work.
@@ -1306,6 +1617,8 @@ fn main() {
             confirm_recovery_key,
             unlock,
             unlock_with_recovery,
+            unlock_with_hello,
+            set_windows_hello,
             lock,
             touch,
             readiness,
@@ -1323,6 +1636,9 @@ fn main() {
             set_screen_protection,
             report_settings,
             set_report_settings,
+            set_report_template,
+            clear_report_template,
+            report_template,
             list_cases,
             create_case,
             update_case,
@@ -1367,6 +1683,8 @@ fn main() {
             add_comparison_material,
             reject_paragraph,
             edit_paragraph,
+            paragraph_versions,
+            restore_paragraph_version,
             add_own_paragraph,
             prepare_consult,
             send_consult,
@@ -1392,6 +1710,11 @@ fn main() {
             dismiss_style_suggestion,
             check_export,
             export_report,
+            export_pdf,
+            check_original,
+            prepare_letter,
+            letter,
+            export_letter,
             print_page,
             activity,
             mark_activity_reviewed,
@@ -1399,6 +1722,11 @@ fn main() {
             keep_case_longer,
             change_password,
             new_recovery_kit,
+            google_status,
+            google_cancel,
+            google_turn_on,
+            google_turn_off,
+            google_recover,
             backup_status,
             write_backup,
             choose_backup,

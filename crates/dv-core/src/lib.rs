@@ -9,6 +9,7 @@ mod backup;
 mod consultations;
 mod dates;
 mod followup;
+pub mod google;
 mod library;
 mod readiness;
 mod retention;
@@ -25,18 +26,18 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use dv_ai::{ModelConfig, SectionInput, TaggedInput, TaggedTurn, ALLOWED_MODELS};
+use dv_ai::{ModelConfig, Provider, SectionInput, TaggedInput, TaggedTurn, ALLOWED_MODELS};
 use dv_domain::{
     passage_ranges, Author, CaseMeta, CaseSummary, ChatRole, DraftStatus, FoundName, IdentityInput,
     IdentitySource, InputKind, ReportStructure, Role,
 };
-use dv_egress::{AnthropicTransport, EgressError, Transport};
+use dv_egress::{EgressError, Transport};
 use dv_ipc::{PingResponse, IPC_VERSION};
 use dv_privacy::restore::{restore, scan_model_output};
 use dv_privacy::text::normalize;
 use dv_privacy::{
-    clear, filter, AutoHidden, AutoKind, Checks, ClearedPayload, FilterOutcome, GateRequest,
-    PrivacyContext,
+    clear, filter, ocr_misreads, AutoHidden, AutoKind, Checks, ClearedPayload, FilterOutcome,
+    GateRequest, PrivacyContext,
 };
 use dv_vault::{Argon2Params, AuditEvent, Vault, VaultError};
 use serde_json::Value;
@@ -61,13 +62,43 @@ pub use usage::UsageSummary;
 pub use views::{
     ActivityEntry, ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail,
     ChatView, ConsultResult, ConsultTurnView, ConsultationSummary, ConsultationView, CreatedVault,
-    ExportCheck, ImportPreview, MaterialRouting, NameMatch, NameSuggestion, ParagraphView,
-    Prepared, ReportSettings, RetentionItem, ReviewPart, SectionResult, SectionView, SortResult,
-    SourceExcerpt, StagedBackup, SuspectDecision, UiError,
+    ExportCheck, ImportPreview, MaterialRouting, NameMatch, NameSuggestion, ParagraphVersionView,
+    ParagraphView, Prepared, ReportSettings, RetentionItem, ReviewPart, SectionResult, SectionView,
+    SortResult, SourceExcerpt, StagedBackup, SuspectDecision, TemplateView, UiError,
 };
 
 const API_KEY: &str = "anthropic_api_key";
+
+/// Where each company's API key is kept: the vault's encrypted secrets, like Claude's (D-040).
+/// The local model has none.
+fn key_name(provider: Provider) -> Option<&'static str> {
+    match provider {
+        Provider::Anthropic => Some(API_KEY),
+        Provider::OpenAi => Some("openai_api_key"),
+        Provider::Gemini => Some("gemini_api_key"),
+        Provider::Mistral => Some("mistral_api_key"),
+        Provider::Local => None,
+    }
+}
+
+/// The key to send with (`None`: no key saved, demo mode). The local model needs none.
+pub(crate) fn key_of(
+    v: &Vault,
+    provider: Provider,
+) -> Result<Option<zeroize::Zeroizing<String>>, VaultError> {
+    match key_name(provider) {
+        Some(name) => v.secret(name),
+        None => Ok(Some(zeroize::Zeroizing::new(String::new()))),
+    }
+}
+
+/// The company of a model; anything unknown reads as Claude (the default).
+fn provider_of(model: &str) -> Provider {
+    Provider::of_model(model).unwrap_or(Provider::Anthropic)
+}
 const MODEL_KEY: &str = "model";
+/// Settings key prefix of her written zero-retention confirmation per company: `zdr/openai`.
+const ZDR_PREFIX: &str = "zdr/";
 const LOCK_KEY: &str = "lock_minutes";
 const FIRST_USE_KEY: &str = "first_use_day";
 const REVIEW_KEY: &str = "review_only_suspect";
@@ -92,6 +123,8 @@ fn day_number() -> u64 {
         .map_or(0, |d| d.as_secs() / 86_400)
 }
 const REPORT_KEY: &str = "report_settings";
+/// Her Word template (EX-1), hex-encoded inside the encrypted vault.
+const TEMPLATE_KEY: &str = "report_template";
 /// A gap this long between two 15-second ticks means the computer slept.
 const SLEEP_GAP: Duration = Duration::from_secs(60);
 const MAX_REQUEST_BYTES: usize = 900_000;
@@ -164,9 +197,15 @@ pub enum CoreError {
 }
 
 impl CoreError {
-    /// What the psychologist sees.
+    /// What the psychologist sees, naming Claude.
     #[must_use]
     pub fn to_ui(&self) -> UiError {
+        self.to_ui_for(Provider::Anthropic.display_name())
+    }
+
+    /// What the psychologist sees, naming the AI she chose (`Core::ai_name`).
+    #[must_use]
+    pub fn to_ui_for(&self, ai: &str) -> UiError {
         let (code, message) = match self {
             CoreError::Locked => ("locked", "הכספת נעולה. יש לפתוח אותה מחדש.".to_owned()),
             CoreError::Vault(VaultError::WrongSecret) => (
@@ -188,15 +227,15 @@ impl CoreError {
             CoreError::NotFound(what) => ("not_found", format!("לא נמצא: {what}")),
             CoreError::ConsentMissing => (
                 "consent_missing",
-                "לפני שליחה ל-Claude צריך לרשום בתיק את הסכמת ההורים.".to_owned(),
+                format!("לפני שליחה ל-{ai} צריך לרשום בתיק את הסכמת ההורים."),
             ),
             CoreError::Refused(why) => ("refused", why.clone()),
             CoreError::Backoff(s) => (
                 "backoff",
                 format!("יותר מדי ניסיונות. אפשר לנסות שוב בעוד {s} שניות."),
             ),
-            CoreError::Egress(e) => ("egress", egress_he(e)),
-            CoreError::Ai(e) => ("ai", format!("התשובה של Claude לא תקינה: {e}")),
+            CoreError::Egress(e) => ("egress", egress_he(e, ai)),
+            CoreError::Ai(e) => ("ai", format!("התשובה של {ai} לא תקינה: {e}")),
             CoreError::Update(e) => ("update", update::update_he(e)),
             CoreError::Internal(e) => ("internal", format!("שגיאה פנימית: {e}")),
         };
@@ -208,7 +247,7 @@ impl CoreError {
     }
 }
 
-fn egress_he(e: &EgressError) -> String {
+fn egress_he(e: &EgressError, ai: &str) -> String {
     match e {
         EgressError::NoApiKey => {
             "לא הוגדר מפתח API. עד שיוגדר, התוכנה עובדת במצב הדגמה.".to_owned()
@@ -216,13 +255,15 @@ fn egress_he(e: &EgressError) -> String {
         EgressError::Unauthorized => "מפתח ה-API נדחה. כדאי לבדוק אותו בהגדרות.".to_owned(),
         EgressError::RateLimited => "יותר מדי בקשות. אפשר לנסות שוב בעוד דקה.".to_owned(),
         EgressError::Offline => {
-            "אין חיבור לאינטרנט. אפשר להמשיך לעבוד, ו-Claude יחזור כשיהיה חיבור.".to_owned()
+            format!("אין חיבור לאינטרנט. אפשר להמשיך לעבוד, ו-{ai} יחזור כשיהיה חיבור.")
         }
+        EgressError::LocalUnavailable => "המודל המקומי לא עונה. צריך שהתוכנה Ollama תפעל במחשב, ושהמודל שנבחר יהיה מותקן בה (בהגדרות כתוב איך)."
+            .to_owned(),
         EgressError::Tls => {
             "החיבור המאובטח נכשל. ייתכן שתוכנה במחשב (למשל אנטי-וירוס) מיירטת תעבורה מוצפנת."
                 .to_owned()
         }
-        other => format!("שגיאה בחיבור ל-Claude: {other}"),
+        other => format!("שגיאה בחיבור ל-{ai}: {other}"),
     }
 }
 
@@ -318,6 +359,8 @@ struct Pending {
 /// An approved request on its way out. Holds no vault; only the payload and how to send it.
 pub struct Outgoing {
     pending: Pending,
+    /// The model named in the approved body: it decides the company and the key.
+    model: String,
     api_key: Option<zeroize::Zeroizing<String>>,
     transport: Option<Arc<dyn Transport>>,
 }
@@ -331,7 +374,8 @@ impl std::fmt::Debug for Outgoing {
 }
 
 impl Outgoing {
-    /// Send the approved payload: the test transport, Claude (API key set), or local demo.
+    /// Send the approved payload: the test transport, the chosen AI (its API key set), or
+    /// local demo.
     /// Returns the answer and whether it came from demo mode.
     pub fn transmit(&self) -> Result<(Value, bool), CoreError> {
         self.transmit_with(&|_| {})
@@ -344,7 +388,8 @@ impl Outgoing {
         }
         match &self.api_key {
             Some(key) => Ok((
-                AnthropicTransport::new(key)?.send_streaming(&self.pending.payload, progress)?,
+                dv_egress::transport_for(&self.model, key)?
+                    .send_streaming(&self.pending.payload, progress)?,
                 false,
             )),
             None => {
@@ -366,11 +411,15 @@ pub struct Core {
     /// Wall-clock time of the shell's last timer tick (sleep detection).
     last_tick: Option<SystemTime>,
     failed_unlocks: u32,
+    /// Windows Hello is set up on this computer; asked once (D-047).
+    hello_available: Option<bool>,
     not_before: Option<Instant>,
     disk_encryption: String,
     transport: Option<Arc<dyn Transport>>,
     /// The app's own binary, started as an isolated worker for each document.
     ingest_exe: Option<PathBuf>,
+    /// The local OCR engine shipped next to the app, for scans and photos (D-048).
+    ocr: Option<dv_ingest::ocr::Engine>,
     /// A backup file chosen for the drill or a restore (encrypted bytes).
     staged_backup: Option<Vec<u8>>,
     /// A past report read for the style profile, waiting for her confirmation (D-043).
@@ -397,6 +446,8 @@ struct PrivacyData {
     practitioner: Vec<String>,
     allow: HashSet<String>,
     is_name: HashSet<String>,
+    /// Keyed hashes of the names in her past reports (`style`).
+    past: HashSet<String>,
 }
 
 /// Everything the review screen shows, accumulated over the outgoing texts.
@@ -587,10 +638,12 @@ impl Core {
             last_activity: Instant::now(),
             last_tick: None,
             failed_unlocks: 0,
+            hello_available: None,
             not_before: None,
             disk_encryption: disk.to_owned(),
             transport: None,
             ingest_exe: None,
+            ocr: None,
             staged_backup: None,
             style_staged: HashMap::new(),
             auto_backup_tried: None,
@@ -601,8 +654,24 @@ impl Core {
     /// Read documents in a separate worker process (the app passes its own binary).
     #[must_use]
     pub fn with_ingest_worker(mut self, exe: PathBuf) -> Self {
+        self.ocr = dv_ingest::ocr::Engine::locate(&exe);
         self.ingest_exe = Some(exe);
         self
+    }
+
+    /// Read a document: in the isolated worker when the app set one, then OCR for a scan.
+    pub(crate) fn read_document(
+        &self,
+        file_name: &str,
+        bytes: &[u8],
+    ) -> Result<dv_ingest::Extracted, CoreError> {
+        dv_ingest::import(
+            self.ingest_exe.as_deref(),
+            self.ocr.as_ref(),
+            file_name,
+            bytes,
+        )
+        .map_err(|e| CoreError::Refused(e.message_he()))
     }
 
     /// Tests: cheap KDF and a fake transport.
@@ -725,19 +794,28 @@ impl Core {
             .as_ref()
             .and_then(|v| v.setting(SPEED_KEY).ok().flatten())
             .unwrap_or_else(|| DEFAULT_SPEED.to_owned());
-        let (demo, model, integrity) = match &self.vault {
+        let model = self.chosen_model();
+        let provider = provider_of(&model);
+        let (demo, keys, integrity) = match &self.vault {
             Some(v) => (
-                v.secret(API_KEY).ok().flatten().is_none(),
-                v.setting(MODEL_KEY)
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(|| dv_ai::DEFAULT_MODEL.to_owned()),
+                key_of(v, provider).ok().flatten().is_none(),
+                Provider::ALL
+                    .into_iter()
+                    .filter(|p| key_name(*p).is_some_and(|k| v.secret(k).ok().flatten().is_some()))
+                    .map(|p| p.id().to_owned())
+                    .collect(),
                 (!v.integrity().audit_ok || !v.integrity().header_ok)
                     .then(|| v.integrity().detail.clone().unwrap_or_default()),
             ),
-            None => (true, dv_ai::DEFAULT_MODEL.to_owned(), None),
+            None => (true, Vec::new(), None),
+        };
+        let hello_on = match &self.vault {
+            Some(v) => v.has_hello_slot(),
+            None => Vault::offers_hello(&self.dir),
         };
         AppStatus {
+            hello_available: self.hello_available(),
+            hello_on,
             vault_exists: Vault::exists(&self.dir),
             unlocked: self.vault.is_some(),
             disk_encryption: self.disk_encryption.clone(),
@@ -745,6 +823,9 @@ impl Core {
             fips_active: dv_vault::crypto::fips_active(),
             demo_mode: demo,
             model,
+            provider: provider.id().to_owned(),
+            ai_name: provider.display_name().to_owned(),
+            keys,
             speed,
             integrity_warning: integrity,
             lock_minutes: self.lock_minutes(),
@@ -869,6 +950,47 @@ impl Core {
         self.after_unlock(result, true)
     }
 
+    /// The everyday way in (D-047): her Windows Hello PIN, face or fingerprint. Windows
+    /// counts and throttles wrong PINs itself, so a cancelled or failed prompt does not add
+    /// to the password's waiting time; the password is always there instead.
+    pub fn unlock_with_hello(&mut self) -> Result<AppStatus, CoreError> {
+        self.refuse_cloud()?;
+        self.check_backoff()?;
+        let result = Vault::unlock_with_hello(&self.dir, &dv_vault::hello::WindowsHello);
+        let result = result.map_err(|e| match e {
+            VaultError::WrongSecret => VaultError::Refused("windows hello: no match".to_owned()),
+            other => other,
+        });
+        self.after_unlock(result, true)
+    }
+
+    /// Windows Hello on (needs the password, like a new password) or off.
+    pub fn set_windows_hello(&mut self, on: bool, password: &str) -> Result<AppStatus, CoreError> {
+        let hello = dv_vault::hello::WindowsHello;
+        if on {
+            self.check_backoff()?;
+            let result = self
+                .vault_mut()?
+                .set_hello_slot(dv_vault::Secret::Password(password), &hello);
+            if let Err(e) = result {
+                self.count_failure(&e);
+                return Err(e.into());
+            }
+            self.failed_unlocks = 0;
+        } else {
+            self.vault_mut()?.remove_hello_slot(&hello)?;
+        }
+        Ok(self.status())
+    }
+
+    /// Asked once per run: Windows Hello is set up on this computer.
+    fn hello_available(&mut self) -> bool {
+        use dv_vault::hello::HelloSigner;
+        *self
+            .hello_available
+            .get_or_insert_with(|| dv_vault::hello::WindowsHello.available())
+    }
+
     pub fn confirm_recovery_key(&mut self, typed: &str) -> Result<bool, CoreError> {
         Ok(self.vault_ref()?.check_recovery_key(typed))
     }
@@ -947,21 +1069,47 @@ impl Core {
 
     // ------------------------------------------------------------ settings
 
-    pub fn set_api_key(&mut self, key: &str) -> Result<(), CoreError> {
+    /// Save (or, when empty, delete) the API key of one company (`anthropic` | `openai` |
+    /// `gemini` | `mistral`). ChatGPT, Gemini and Mistral keys are taken only after she confirmed she read what
+    /// that company keeps (D-040): their standard API terms are not Zero Data Retention.
+    pub fn set_api_key(
+        &mut self,
+        provider: &str,
+        key: &str,
+        retention_ack: bool,
+    ) -> Result<(), CoreError> {
+        let provider = Provider::from_id(provider)
+            .ok_or_else(|| CoreError::Refused("ספק לא מוכר.".to_owned()))?;
+        let name = key_name(provider)
+            .ok_or_else(|| CoreError::Refused("למודל המקומי אין מפתח.".to_owned()))?;
         let key = key.trim();
         if key.is_empty() {
-            self.vault_mut()?.delete_secret(API_KEY)?;
+            self.vault_mut()?.delete_secret(name)?;
         } else {
-            self.vault_mut()?.set_secret(API_KEY, key)?;
+            if provider != Provider::Anthropic && !retention_ack {
+                return Err(CoreError::Refused(format!(
+                    "לפני שמירת מפתח של {} צריך לאשר שיש בכתב הסכם אפס שמירת מידע (ZDR) עם החברה.",
+                    provider.display_name()
+                )));
+            }
+            self.vault_mut()?.set_secret(name, key)?;
+        }
+        if provider != Provider::Anthropic {
+            // Her written zero-retention confirmation for this company, dated; gone with the key.
+            let value = if key.is_empty() {
+                String::new()
+            } else {
+                crate::dates::unix_now().to_string()
+            };
+            self.vault_mut()?
+                .set_setting(&format!("{ZDR_PREFIX}{}", provider.id()), &value)?;
         }
         Ok(())
     }
 
     pub fn set_model(&mut self, model: &str) -> Result<(), CoreError> {
         if !ALLOWED_MODELS.contains(&model) {
-            return Err(CoreError::Refused(
-                "הדגם הזה לא זמין במסגרת ZDR.".to_owned(),
-            ));
+            return Err(CoreError::Refused("הדגם הזה לא ברשימה המותרת.".to_owned()));
         }
         self.vault_mut()?.set_setting(MODEL_KEY, model)?;
         Ok(())
@@ -1136,13 +1284,7 @@ impl Core {
         bytes: &[u8],
     ) -> Result<ImportPreview, CoreError> {
         self.vault_ref()?.case_meta(case_id)?;
-        let extracted = match &self.ingest_exe {
-            Some(exe) => {
-                dv_ingest::worker::run(exe, file_name, bytes, dv_ingest::worker::DEFAULT_TIMEOUT)
-            }
-            None => dv_ingest::extract(bytes, file_name),
-        }
-        .map_err(|e| CoreError::Refused(e.message_he()))?;
+        let extracted = self.read_document(file_name, bytes)?;
 
         // Names in the margins and the file's properties are not imported, but they are the
         // names most likely to appear in the body too: kept with the case first, so the body
@@ -1241,13 +1383,7 @@ impl Core {
         });
         Ok(ImportPreview {
             file_name: file_name.to_owned(),
-            format: match extracted.format {
-                dv_ingest::Format::Docx => "docx",
-                dv_ingest::Format::Odt => "odt",
-                dv_ingest::Format::Pdf => "pdf",
-                dv_ingest::Format::Text => "text",
-            }
-            .to_owned(),
+            format: extracted.format.name().to_owned(),
             pages: extracted.pages,
             title: stem,
             suggested_kind: InputKind::guess(&extracted.body, file_name),
@@ -1275,6 +1411,7 @@ impl Core {
             practitioner: v.practitioner()?.names,
             allow: v.not_a_name_hmacs(case_id)?.into_iter().collect(),
             is_name: v.is_name_hmacs(case_id)?.into_iter().collect(),
+            past: style::past_name_hmacs(v)?,
         })
     }
 
@@ -1288,12 +1425,14 @@ impl Core {
         let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
         let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
         let is_name = |t: &str| data.is_name.contains(&v.token_hmac(t));
+        let past = |t: &str| !data.past.is_empty() && data.past.contains(&v.token_hmac(t));
         let ctx = PrivacyContext {
             case_id: &data.case_id,
             identities: &data.identities,
             practitioner: &data.practitioner,
             allowlisted: &allow,
             confirmed_names: &is_name,
+            past_names: &past,
             today: today(),
         };
         filter(text, &ctx).map_err(|e| CoreError::Internal(e.to_string()))
@@ -1312,6 +1451,62 @@ impl Core {
         self.preview_filter(case_id, text)
     }
 
+    /// Scanned text (OCR) can misread a name by one letter ("אלוו" for "אלון"). Call this for
+    /// OCR-sourced text only, before the text is filtered: each misread is kept as one more
+    /// spelling of that name, so every later text hides it and the gate refuses it (D-048).
+    /// Returned for the card, where "להחזיר" takes the spelling off again.
+    pub fn learn_ocr_misreads(
+        &mut self,
+        case_id: &str,
+        text: &str,
+    ) -> Result<Vec<AutoHidden>, CoreError> {
+        let data = self.privacy_data(case_id)?;
+        let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
+        let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
+        let none = |_: &str| false;
+        let ctx = PrivacyContext {
+            case_id: &data.case_id,
+            identities: &data.identities,
+            practitioner: &data.practitioner,
+            allowlisted: &allow,
+            confirmed_names: &none,
+            past_names: &none,
+            today: today(),
+        };
+        let misreads = ocr_misreads(text, &ctx);
+        if misreads.is_empty() {
+            return Ok(Vec::new());
+        }
+        let v = self.vault_mut()?;
+        let mut ids = v.identities(case_id)?;
+        let mut out = Vec::new();
+        for m in misreads {
+            let Some(i) = ids.iter_mut().find(|i| i.tag == m.tag) else {
+                continue;
+            };
+            i.aliases.push(m.written.clone());
+            out.push(AutoHidden {
+                token: m.written,
+                tag: m.tag,
+                role: i.role,
+                reason: format!("בסריקה, אות אחת שונה מ-{}", i.value),
+                uncertain: true,
+                kind: AutoKind::SimilarSpelling,
+            });
+        }
+        let ids: Vec<IdentityInput> = ids
+            .into_iter()
+            .map(|i| IdentityInput {
+                role: i.role,
+                id: Some(i.id),
+                value: i.value,
+                aliases: i.aliases,
+            })
+            .collect();
+        v.set_identities(case_id, &ids)?;
+        Ok(out)
+    }
+
     /// "להחזיר" on the summary card: from now on this case keeps `token` as it is written.
     /// A name the filter kept with the case (under `tag`) is dropped from its names.
     pub fn restore_auto_hidden(
@@ -1322,6 +1517,34 @@ impl Core {
     ) -> Result<(), CoreError> {
         let v = self.vault_mut()?;
         let ids = v.identities(case_id)?;
+        let tok = normalize(token);
+        // A spelling of the name rather than the name ("אלוו", kept from a scan, or "נואם"
+        // next to "נועם"): only that spelling comes back, the name stays hidden.
+        if !ids.iter().any(|i| {
+            let value = normalize(&i.value);
+            i.tag == tag && (value == tok || value.split(' ').any(|w| w == tok))
+        }) && ids.iter().any(|i| i.tag == tag)
+        {
+            let ids: Vec<IdentityInput> = ids
+                .into_iter()
+                .map(|i| IdentityInput {
+                    aliases: if i.tag == tag {
+                        i.aliases
+                            .into_iter()
+                            .filter(|a| normalize(a) != tok)
+                            .collect()
+                    } else {
+                        i.aliases
+                    },
+                    role: i.role,
+                    id: Some(i.id),
+                    value: i.value,
+                })
+                .collect();
+            v.set_identities(case_id, &ids)?;
+            v.mark_not_a_name(Some(case_id), &tok)?;
+            return Ok(());
+        }
         let value = ids
             .iter()
             .find(|i| i.tag == tag && i.source != IdentitySource::Manual)
@@ -1397,9 +1620,32 @@ impl Core {
         Ok(())
     }
 
-    /// No API key and no test transport: answers are built locally and nothing is sent.
+    /// No API key for the chosen AI and no test transport: answers are built locally and
+    /// nothing is sent.
     fn demo_mode(&mut self) -> Result<bool, CoreError> {
-        Ok(self.vault_ref()?.secret(API_KEY)?.is_none() && self.transport.is_none())
+        let provider = self.provider();
+        Ok(key_of(self.vault_ref()?, provider)?.is_none() && self.transport.is_none())
+    }
+
+    /// The model chosen in settings (Claude Opus by default).
+    fn chosen_model(&self) -> String {
+        self.vault
+            .as_ref()
+            .and_then(|v| v.setting(MODEL_KEY).ok().flatten())
+            .filter(|m| ALLOWED_MODELS.contains(&m.as_str()))
+            .unwrap_or_else(|| dv_ai::DEFAULT_MODEL.to_owned())
+    }
+
+    /// The company of the chosen model.
+    #[must_use]
+    pub fn provider(&self) -> Provider {
+        provider_of(&self.chosen_model())
+    }
+
+    /// The name shown wherever the program speaks of the AI ("לכתוב עם Gemini").
+    #[must_use]
+    pub fn ai_name(&self) -> &'static str {
+        self.provider().display_name()
     }
 
     fn model_config(&mut self) -> Result<ModelConfig, CoreError> {
@@ -1446,6 +1692,7 @@ impl Core {
         let practitioner = v.practitioner()?.names.first().cloned();
         let routing = Core::material_routing(v, &structure, case_id, &inputs)?;
         let sheets = score_sheets(v, case_id, &inputs)?;
+        let fingerprint = style::fingerprint(v)?;
         let retention_default = v
             .list_cases()?
             .into_iter()
@@ -1457,6 +1704,7 @@ impl Core {
             .iter()
             .map(|s| s.key.as_str())
             .collect();
+        let with_versions = v.drafts_with_versions(case_id)?;
         let mut sections = Vec::new();
         for part in &structure.parts {
             for s in &part.sections {
@@ -1465,6 +1713,7 @@ impl Core {
                     .into_iter()
                     .filter(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved))
                     .map(|d| ParagraphView {
+                        has_versions: with_versions.contains(&d.id),
                         id: d.id,
                         text: restore(&d.text_tagged, &identities, practitioner.as_deref()),
                         status: d.status,
@@ -1481,6 +1730,9 @@ impl Core {
                             .collect(),
                         // Every score in the text against the score table, each time (AI-6).
                         warnings: dv_domain::check_scores(&d.text_tagged, &sheets),
+                        style_note: fingerprint
+                            .filter(|_| d.author == Author::Ai && d.status == DraftStatus::Proposed)
+                            .and_then(|fp| style::style_note(&fp, &d.text_tagged)),
                         replaces: d.replaces,
                     })
                     .collect();
@@ -1574,6 +1826,38 @@ impl Core {
         Ok(())
     }
 
+    /// A paragraph's earlier wordings, newest first, names restored (D-046).
+    pub fn paragraph_versions(
+        &mut self,
+        case_id: &str,
+        draft_id: &str,
+    ) -> Result<Vec<ParagraphVersionView>, CoreError> {
+        let v = self.vault_ref()?;
+        let identities = v.identities(case_id)?;
+        let practitioner = v.practitioner()?.names.first().cloned();
+        Ok(v.draft_versions(case_id, draft_id)?
+            .into_iter()
+            .map(|d| ParagraphVersionView {
+                id: d.id,
+                saved_at: d.saved_at,
+                by_ai: d.author == Author::Ai,
+                text: restore(&d.text_tagged, &identities, practitioner.as_deref()),
+            })
+            .collect())
+    }
+
+    /// Bring back an earlier wording; the current one is kept as a version (D-046).
+    pub fn restore_paragraph_version(
+        &mut self,
+        case_id: &str,
+        draft_id: &str,
+        version_id: &str,
+    ) -> Result<(), CoreError> {
+        Ok(self
+            .vault_mut()?
+            .restore_draft_version(case_id, draft_id, version_id)?)
+    }
+
     pub fn add_own_paragraph(
         &mut self,
         case_id: &str,
@@ -1625,12 +1909,14 @@ impl Core {
         let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
         let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
         let is_name = |t: &str| data.is_name.contains(&v.token_hmac(t));
+        let past = |t: &str| !data.past.is_empty() && data.past.contains(&v.token_hmac(t));
         let ctx = PrivacyContext {
             case_id: &data.case_id,
             identities: &data.identities,
             practitioner: &data.practitioner,
             allowlisted: &allow,
             confirmed_names: &is_name,
+            past_names: &past,
             today: today(),
         };
         let mut case_tags: HashSet<String> = data
@@ -1711,10 +1997,19 @@ impl Core {
     ) -> Result<Prepared, CoreError> {
         let structure =
             ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
-        let section = structure
-            .section(section_key)
-            .ok_or_else(|| CoreError::NotFound(section_key.to_owned()))?
-            .clone();
+        let letter = Letter::of(section_key);
+        let section = match letter {
+            Some(l) => dv_domain::ReportSection {
+                key: section_key.to_owned(),
+                title: l.title().to_owned(),
+                inputs: Vec::new(),
+                about: String::new(),
+            },
+            None => structure
+                .section(section_key)
+                .ok_or_else(|| CoreError::NotFound(section_key.to_owned()))?
+                .clone(),
+        };
         let model = self.model_config()?;
         let data = self.privacy_data(case_id)?;
         let demo_mode = self.demo_mode()?;
@@ -1727,12 +2022,14 @@ impl Core {
             }
             let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
             let is_name = |t: &str| data.is_name.contains(&v.token_hmac(t));
+            let past = |t: &str| !data.past.is_empty() && data.past.contains(&v.token_hmac(t));
             let ctx = PrivacyContext {
                 case_id: &data.case_id,
                 identities: &data.identities,
                 practitioner: &data.practitioner,
                 allowlisted: &allow,
                 confirmed_names: &is_name,
+                past_names: &past,
                 today: today(),
             };
             let run = |t: &str| filter(t, &ctx).map_err(|e| CoreError::Internal(e.to_string()));
@@ -1740,7 +2037,7 @@ impl Core {
             let mut review = Review::default();
             let mut tagged_sources = Vec::new();
             let mut source_rows = Vec::new();
-            let derived = DERIVED_SECTIONS.contains(&section_key);
+            let derived = DERIVED_SECTIONS.contains(&section_key) || letter.is_some();
             if !derived {
                 for inp in v.inputs(case_id)? {
                     // D-022: the table, the sorting, and Einat's choice decide what goes here.
@@ -1778,10 +2075,13 @@ impl Core {
             }
             let mut approved_context = Vec::new();
             if derived {
-                for s in structure
-                    .sections()
-                    .filter(|s| s.key != section_key && !DERIVED_SECTIONS.contains(&s.key.as_str()))
-                {
+                // A letter gets only the sections it is written from (EX-4): the school letter
+                // only the recommendations, never the background or the diagnoses.
+                let wanted = |key: &str| match letter {
+                    Some(l) => l.written_from().contains(&key),
+                    None => key != section_key && !DERIVED_SECTIONS.contains(&key),
+                };
+                for s in structure.sections().filter(|s| wanted(&s.key)) {
                     let text: Vec<String> = v
                         .drafts(case_id, &s.key)?
                         .into_iter()
@@ -1796,6 +2096,11 @@ impl Core {
                 }
             }
             // Nothing approved yet: there is nothing to write it from, so nothing is sent.
+            if letter.is_some() && approved_context.is_empty() {
+                return Err(CoreError::Refused(
+                    "המכתב נכתב מתוך ההמלצות שאישרת בדוח, ועוד אין המלצות מאושרות. מאשרים קודם את סעיף ההמלצות.".to_owned(),
+                ));
+            }
             if derived && approved_context.is_empty() {
                 return Err(CoreError::Refused(
                     "הסעיף הזה נכתב מתוך הסעיפים שכבר אישרת, ועוד לא אישרת אף סעיף. מאשרים קודם את הטיוטות בסעיפים האחרים, ואז חוזרים לכאן."
@@ -1881,10 +2186,208 @@ impl Core {
         Ok(prepared)
     }
 
+    /// The report as a locked PDF (EX-3, D-049): it opens with `password`, can be printed but
+    /// not changed, and its SHA-256 goes into the audit log so a copy can be checked later.
+    pub fn export_pdf(&mut self, case_id: &str, password: &str) -> Result<Vec<u8>, CoreError> {
+        let (report, check) = self.build_report(case_id)?;
+        if !check.blocking.is_empty() {
+            return Err(CoreError::Refused(check.blocking.join(" · ")));
+        }
+        let (regular, bold) = system_fonts(&report.font).ok_or_else(|| {
+            CoreError::Refused(
+                "לא נמצא במחשב גופן עברי ליצירת PDF (למשל David או Arial).".to_owned(),
+            )
+        })?;
+        let pdf = dv_export::render_pdf(
+            &report,
+            dv_export::PdfFonts {
+                regular: &regular,
+                bold: bold.as_deref(),
+            },
+            password,
+        )
+        .map_err(|e| match e {
+            dv_export::ExportError::WeakPassword => CoreError::Refused(format!(
+                "סיסמה לקובץ צריכה להיות באורך {} תווים לפחות.",
+                dv_export::MIN_PASSWORD_CHARS
+            )),
+            dv_export::ExportError::Pdf(m) => CoreError::Refused(m),
+            other => CoreError::Internal(other.to_string()),
+        })?;
+        let sha256 = dv_vault::crypto::sha256_hex(&pdf);
+        self.vault_mut()?.record(
+            AuditEvent::Export,
+            Some(case_id),
+            &serde_json::json!({ "protected": true, "pdf": true, "sha256": sha256, "sections": check.included_sections }),
+        )?;
+        Ok(pdf)
+    }
+
+    /// Whether a PDF is exactly one this vault exported (its fingerprint is in the audit log):
+    /// when, or `None` for a file that was changed or not made here.
+    pub fn check_original(&mut self, bytes: &[u8]) -> Result<Option<i64>, CoreError> {
+        let sha256 = dv_vault::crypto::sha256_hex(bytes);
+        let needle = format!("\"sha256\":\"{sha256}\"");
+        Ok(self
+            .vault_ref()?
+            .audit_entries(u32::MAX)?
+            .into_iter()
+            .find(|e| e.event == "export" && e.meta.contains(&needle))
+            .map(|e| e.ts))
+    }
+
+    /// A short letter to the parents or the school from the approved report (EX-4): an
+    /// ordinary section request (same filter, review screen and gate), whose answer is kept as
+    /// the letter's draft in this case. `note` is anything she wants to add.
+    pub fn prepare_letter(
+        &mut self,
+        case_id: &str,
+        audience: &str,
+        note: &str,
+    ) -> Result<Prepared, CoreError> {
+        let letter = Letter::from_audience(audience)?;
+        let instruction = if note.trim().is_empty() {
+            letter.instruction().to_owned()
+        } else {
+            format!("{}\nבנוסף: {}", letter.instruction(), note.trim())
+        };
+        self.prepare_section(case_id, letter.key(), &instruction)
+    }
+
+    /// The letter's paragraphs, names restored, for her to read, edit and approve.
+    pub fn letter(
+        &mut self,
+        case_id: &str,
+        audience: &str,
+    ) -> Result<Vec<ParagraphView>, CoreError> {
+        let letter = Letter::from_audience(audience)?;
+        let v = self.vault_ref()?;
+        let identities = v.identities(case_id)?;
+        let practitioner = v.practitioner()?.names.first().cloned();
+        let with_versions = v.drafts_with_versions(case_id)?;
+        Ok(v.drafts(case_id, letter.key())?
+            .into_iter()
+            .filter(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved))
+            .map(|d| ParagraphView {
+                has_versions: with_versions.contains(&d.id),
+                // A letter is short and written from approved text: no style note (D-043).
+                style_note: None,
+                id: d.id,
+                text: restore(&d.text_tagged, &identities, practitioner.as_deref()),
+                status: d.status,
+                by_ai: d.author == Author::Ai,
+                sources: Vec::new(),
+                warnings: Vec::new(),
+                replaces: d.replaces,
+            })
+            .collect())
+    }
+
+    /// The letter as a Word file (in her template when she has one): approved paragraphs
+    /// only, with the child's name and the date at the top and her signature at the end.
+    pub fn export_letter(
+        &mut self,
+        case_id: &str,
+        audience: &str,
+        password: Option<&str>,
+    ) -> Result<Vec<u8>, CoreError> {
+        let letter = Letter::from_audience(audience)?;
+        let settings = self.report_settings()?;
+        let (report, _) = self.build_report(case_id)?;
+        let paragraphs: Vec<String> = self
+            .letter(case_id, audience)?
+            .into_iter()
+            .filter(|p| p.status == DraftStatus::Approved)
+            .map(|p| p.text)
+            .collect();
+        if paragraphs.is_empty() {
+            return Err(CoreError::Refused(
+                "עוד אין במכתב פסקה מאושרת. מאשרים את הפסקאות, ואז מפיקים את הקובץ.".to_owned(),
+            ));
+        }
+        let doc = dv_export::Report {
+            title: letter.file_title().to_owned(),
+            info: report.info,
+            parts: vec![dv_export::ReportPart {
+                title: String::new(),
+                sections: vec![dv_export::ReportSection {
+                    title: String::new(),
+                    paragraphs,
+                }],
+            }],
+            tables: Vec::new(),
+            signature: report.signature,
+            confidentiality: settings.confidentiality,
+            font: settings.font,
+        };
+        let identities = self.vault_ref()?.identities(case_id)?;
+        let known: HashSet<String> = identities.iter().map(|i| i.tag.clone()).collect();
+        for p in &doc.parts[0].sections[0].paragraphs {
+            if dv_privacy::restore::remaining_tags(p)
+                .iter()
+                .any(|t| known.contains(t))
+            {
+                return Err(CoreError::Refused(
+                    "נשארה במכתב תגית במקום שם. פותחים את הפסקה ומתקנים.".to_owned(),
+                ));
+            }
+        }
+        if let Some(l) = dv_export::leftover_placeholders(&doc).into_iter().next() {
+            return Err(CoreError::Refused(format!(
+                "נשאר במכתב סימון בסוגריים מרובעים: {l}"
+            )));
+        }
+        let docx = self.render_docx(&doc)?;
+        let out = match password {
+            Some(pw) => dv_export::encrypt(&docx, pw).map_err(|e| match e {
+                dv_export::ExportError::WeakPassword => CoreError::Refused(format!(
+                    "סיסמה לקובץ צריכה להיות באורך {} תווים לפחות.",
+                    dv_export::MIN_PASSWORD_CHARS
+                )),
+                other => CoreError::Internal(other.to_string()),
+            })?,
+            None => docx,
+        };
+        self.vault_mut()?.record(
+            AuditEvent::Export,
+            Some(case_id),
+            &serde_json::json!({ "protected": password.is_some(), "letter": letter.key() }),
+        )?;
+        Ok(out)
+    }
+
     /// Take an approved request out of the core so it can be sent without holding the
     /// session (the app stays responsive while Claude answers).
     pub fn begin_send(&mut self, approval_id: &str) -> Result<Outgoing, CoreError> {
-        let api_key = self.vault_ref()?.secret(API_KEY)?;
+        let pending = self
+            .pending
+            .get(approval_id)
+            .ok_or_else(|| CoreError::NotFound("האישור פג. יש להכין את הבקשה מחדש.".to_owned()))?;
+        let model = serde_json::from_slice::<Value>(pending.payload.body())
+            .ok()
+            .and_then(|b| b["model"].as_str().map(str::to_owned))
+            .unwrap_or_default();
+        let provider = provider_of(&model);
+        let api_key = key_of(self.vault_ref()?, provider)?;
+        // ChatGPT, Gemini and Mistral keep what they receive unless she has a written zero-retention
+        // agreement with them; without her confirmation of one, nothing goes to them (D-040).
+        if api_key.is_some()
+            && matches!(
+                provider,
+                Provider::OpenAi | Provider::Gemini | Provider::Mistral
+            )
+        {
+            let confirmed = self
+                .vault_ref()?
+                .setting(&format!("{ZDR_PREFIX}{}", provider.id()))?
+                .is_some_and(|s| s.parse::<i64>().is_ok());
+            if !confirmed {
+                return Err(CoreError::Refused(format!(
+                    "לא נשלח: אין אישור על הסכם אפס שמירת מידע (ZDR) עם {}. אפשר לאשר בהגדרות, או לבחור Claude או מודל מקומי.",
+                    provider.display_name()
+                )));
+            }
+        }
         // Demo mode costs nothing; anything else stops at the monthly ceiling she set.
         if api_key.is_some() || self.transport.is_some() {
             self.refuse_over_cap()?;
@@ -1895,6 +2398,7 @@ impl Core {
             .ok_or_else(|| CoreError::NotFound("האישור פג. יש להכין את הבקשה מחדש.".to_owned()))?;
         Ok(Outgoing {
             pending,
+            model,
             api_key,
             transport: self.transport.clone(),
         })
@@ -2006,7 +2510,8 @@ impl Core {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
         };
         // The request went out: record it before anything about the reply can fail.
-        let model = self.model_config()?.model;
+        let model = out.model.clone();
+        let ai = provider_of(&model).display_name();
         let payload_text = String::from_utf8_lossy(payload.body()).into_owned();
         let v = self.vault_mut()?;
         v.add_transmission(
@@ -2019,7 +2524,7 @@ impl Core {
         v.record(
             AuditEvent::Send,
             Some(&case_id),
-            &serde_json::json!({ "section": section_key, "demo": demo }),
+            &serde_json::json!({ "section": section_key, "demo": demo, "ai": ai }),
         )?;
         let refs: Vec<(String, String)> = sources
             .iter()
@@ -2039,7 +2544,8 @@ impl Core {
         for p in &mut reply.paragraphs {
             p.warnings.extend(dv_domain::check_scores(&p.text, &sheets));
             for s in scan_model_output(&p.text, &case_tags, &everyone) {
-                p.warnings.push(format!("{}: {}", s.message, s.token));
+                p.warnings
+                    .push(format!("{}: {}", s.message.replace("Claude", ai), s.token));
             }
         }
         // D-043: a paragraph that repeats a past report word for word.
@@ -2193,7 +2699,7 @@ impl Core {
         let model = self.model_for(Task::Consult)?;
         let key = case_id.unwrap_or("").to_owned();
         let data = self.privacy_data(&key)?;
-        let demo_mode = self.vault_ref()?.secret(API_KEY)?.is_none() && self.transport.is_none();
+        let demo_mode = self.demo_mode()?;
         let (input, review) = {
             let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
             if let Some(c) = case_id {
@@ -2203,12 +2709,14 @@ impl Core {
             }
             let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
             let is_name = |t: &str| data.is_name.contains(&v.token_hmac(t));
+            let past = |t: &str| !data.past.is_empty() && data.past.contains(&v.token_hmac(t));
             let ctx = PrivacyContext {
                 case_id: &data.case_id,
                 identities: &data.identities,
                 practitioner: &data.practitioner,
                 allowlisted: &allow,
                 confirmed_names: &is_name,
+                past_names: &past,
                 today: today(),
             };
             let msg = filter(message, &ctx).map_err(|e| CoreError::Internal(e.to_string()))?;
@@ -2319,7 +2827,7 @@ impl Core {
         self.vault_mut()?.record(
             AuditEvent::Send,
             case_id.as_deref(),
-            &serde_json::json!({ "consult": true, "demo": demo }),
+            &serde_json::json!({ "consult": true, "demo": demo, "ai": provider_of(&out.model).display_name() }),
         )?;
         let answer = dv_ai::parse_consult(&response)?;
         let shown = match &case_id {
@@ -2376,6 +2884,48 @@ impl Core {
             serde_json::to_string(settings).map_err(|e| CoreError::Internal(e.to_string()))?;
         self.vault_mut()?.set_setting(REPORT_KEY, &json)?;
         Ok(())
+    }
+
+    /// Her Word template, checked: refused with a sentence she can act on, or kept and
+    /// described. Every report and letter after this is written into it.
+    pub fn set_report_template(&mut self, bytes: &[u8]) -> Result<TemplateView, CoreError> {
+        let view = template_view(bytes)?;
+        self.vault_mut()?
+            .set_setting(TEMPLATE_KEY, &dv_vault::crypto::hex(bytes))?;
+        Ok(view)
+    }
+
+    /// Back to the plain report.
+    pub fn clear_report_template(&mut self) -> Result<(), CoreError> {
+        self.vault_mut()?.set_setting(TEMPLATE_KEY, "")?;
+        Ok(())
+    }
+
+    pub fn report_template(&mut self) -> Result<Option<TemplateView>, CoreError> {
+        self.template_bytes()?
+            .map(|b| template_view(&b))
+            .transpose()
+    }
+
+    fn template_bytes(&mut self) -> Result<Option<Vec<u8>>, CoreError> {
+        match self.vault_ref()?.setting(TEMPLATE_KEY)? {
+            Some(h) if !h.is_empty() => Ok(Some(
+                dv_vault::crypto::unhex(&h).map_err(|e| CoreError::Internal(e.to_string()))?,
+            )),
+            _ => Ok(None),
+        }
+    }
+
+    /// The Word file: in her template when she has one.
+    fn render_docx(&mut self, report: &dv_export::Report) -> Result<Vec<u8>, CoreError> {
+        let out = match self.template_bytes()? {
+            Some(t) => dv_export::render_with_template(report, &t),
+            None => dv_export::render(report),
+        };
+        out.map_err(|e| match e {
+            dv_export::ExportError::Template(m) => CoreError::Refused(m),
+            other => CoreError::Internal(other.to_string()),
+        })
     }
 
     /// The report with real names, from approved paragraphs only, and what stops the export.
@@ -2498,6 +3048,24 @@ impl Core {
             let sheet: dv_domain::ScoreSheet =
                 serde_json::from_str(&data).map_err(|e| CoreError::Internal(e.to_string()))?;
             let (title, rows, note) = dv_domain::sheet_table(&sheet).map_err(CoreError::Refused)?;
+            let charts = dv_domain::sheet_profiles(&sheet)
+                .map_err(CoreError::Refused)?
+                .into_iter()
+                .map(|p| dv_export::ScoreChart {
+                    title: p.title,
+                    min: p.min,
+                    max: p.max,
+                    step: p.step,
+                    mean: p.mean,
+                    sd: p.sd,
+                    bars: p
+                        .bars
+                        .into_iter()
+                        .map(|(label, value)| dv_export::ChartBar { label, value })
+                        .collect(),
+                    note: p.note,
+                })
+                .collect();
             tables.push(dv_export::ScoreTable {
                 title,
                 columns: ["מדד", "ציון", "אחוזון", "טווח"]
@@ -2508,7 +3076,7 @@ impl Core {
                     .map(|r| vec![r.measure, r.score, r.percentile, r.range])
                     .collect(),
                 note,
-                charts: Vec::new(),
+                charts,
             });
         }
         let score_tables = u32::try_from(tables.len()).unwrap_or(u32::MAX);
@@ -2570,7 +3138,7 @@ impl Core {
         if !check.blocking.is_empty() {
             return Err(CoreError::Refused(check.blocking.join(" · ")));
         }
-        let docx = dv_export::render(&report).map_err(|e| CoreError::Internal(e.to_string()))?;
+        let docx = self.render_docx(&report)?;
         let out = match password {
             Some(pw) => dv_export::encrypt(&docx, pw).map_err(|e| match e {
                 dv_export::ExportError::WeakPassword => CoreError::Refused(format!(
@@ -2588,6 +3156,121 @@ impl Core {
         )?;
         Ok(out)
     }
+}
+
+/// The report's font from the computer's own fonts (regular, and bold when there is one),
+/// else Arial, else a common font with Hebrew letters. Read only, never copied anywhere but
+/// into the PDF.
+fn system_fonts(name: &str) -> Option<(Vec<u8>, Option<Vec<u8>>)> {
+    let windows = std::env::var_os("WINDIR")
+        .map(|w| std::path::PathBuf::from(w).join("Fonts"))
+        .unwrap_or_else(|| std::path::PathBuf::from("C:\\Windows\\Fonts"));
+    let files: &[(&str, &str)] = match name {
+        "David" => &[("david.ttf", "davidbd.ttf")],
+        "Narkisim" => &[("nrkis.ttf", "")],
+        "Frank Ruehl" => &[("frank.ttf", "")],
+        "Times New Roman" => &[("times.ttf", "timesbd.ttf")],
+        _ => &[],
+    };
+    let dirs = [
+        windows,
+        std::path::PathBuf::from("/System/Library/Fonts/Supplemental"),
+        std::path::PathBuf::from("/Library/Fonts"),
+        std::path::PathBuf::from("/usr/share/fonts/truetype/dejavu"),
+    ];
+    let fallbacks: &[(&str, &str)] = &[
+        ("arial.ttf", "arialbd.ttf"),
+        ("Arial.ttf", "Arial Bold.ttf"),
+        ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf"),
+    ];
+    files.iter().chain(fallbacks).find_map(|(regular, bold)| {
+        dirs.iter().find_map(|d| {
+            let r = std::fs::read(d.join(regular)).ok()?;
+            let b = (!bold.is_empty())
+                .then(|| std::fs::read(d.join(bold)).ok())
+                .flatten();
+            Some((r, b))
+        })
+    })
+}
+
+/// The two letters (EX-4). Their drafts are kept in the case under their own keys, so they
+/// are deleted with the case, and never enter the report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Letter {
+    Parents,
+    School,
+}
+
+impl Letter {
+    fn of(section_key: &str) -> Option<Self> {
+        match section_key {
+            "letter_parents" => Some(Self::Parents),
+            "letter_school" => Some(Self::School),
+            _ => None,
+        }
+    }
+
+    fn from_audience(audience: &str) -> Result<Self, CoreError> {
+        match audience {
+            "parents" => Ok(Self::Parents),
+            "school" => Ok(Self::School),
+            other => Err(CoreError::NotFound(other.to_owned())),
+        }
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Self::Parents => "letter_parents",
+            Self::School => "letter_school",
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            Self::Parents => dv_ai::prompts::LETTER_TITLE_PARENTS,
+            Self::School => dv_ai::prompts::LETTER_TITLE_SCHOOL,
+        }
+    }
+
+    fn instruction(self) -> &'static str {
+        match self {
+            Self::Parents => dv_ai::prompts::LETTER_PARENTS,
+            Self::School => dv_ai::prompts::LETTER_SCHOOL,
+        }
+    }
+
+    fn file_title(self) -> &'static str {
+        match self {
+            Self::Parents => "מכתב להורים",
+            Self::School => "מכתב לצוות החינוכי",
+        }
+    }
+
+    /// The approved sections a letter is written from (data minimization: the school gets
+    /// only what it acts on).
+    fn written_from(self) -> &'static [&'static str] {
+        match self {
+            Self::Parents => &["summary", "diagnoses", "recommendations"],
+            Self::School => &["recommendations"],
+        }
+    }
+}
+
+fn template_view(bytes: &[u8]) -> Result<TemplateView, CoreError> {
+    let s = dv_export::check_template(bytes).map_err(|e| match e {
+        dv_export::ExportError::Template(m) => CoreError::Refused(m),
+        other => CoreError::Internal(other.to_string()),
+    })?;
+    Ok(TemplateView {
+        has_marker: s.has_marker,
+        headers: s.headers,
+        footers: s.footers,
+        images: s.images,
+        styles_matched: s.styles_matched,
+        styles_total: s.styles_total,
+        size_kb: u32::try_from(bytes.len().div_ceil(1024)).unwrap_or(u32::MAX),
+    })
 }
 
 #[cfg(test)]

@@ -10,7 +10,7 @@ import type { Suspect } from "./Suspect";
  */
 export type ImportPreview = { file_name: string, 
 /**
- * `docx` | `pdf` | `text`
+ * `docx` | `odt` | `pdf` | `text` | `rtf` | `doc` | `image`
  */
 format: string, pages: number, title: string, suggested_kind: InputKind, 
 /**

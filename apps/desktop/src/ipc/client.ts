@@ -12,6 +12,7 @@ import type { CaseInput } from "./generated/CaseInput";
 import type { CaseMeta } from "./generated/CaseMeta";
 import type { CaseSummary } from "./generated/CaseSummary";
 import type { Folder } from "./generated/Folder";
+import type { GoogleStatus } from "./generated/GoogleStatus";
 import type { NameMatch } from "./generated/NameMatch";
 import type { ChatView } from "./generated/ChatView";
 import type { ConsultationSummary } from "./generated/ConsultationSummary";
@@ -25,9 +26,12 @@ import type { IdentityInput } from "./generated/IdentityInput";
 import type { ImportPreview } from "./generated/ImportPreview";
 import type { InputKind } from "./generated/InputKind";
 import type { Instrument } from "./generated/Instrument";
+import type { ParagraphVersionView } from "./generated/ParagraphVersionView";
 import type { PingResponse } from "./generated/PingResponse";
 import type { Prepared } from "./generated/Prepared";
 import type { ReportSettings } from "./generated/ReportSettings";
+import type { TemplateView } from "./generated/TemplateView";
+import type { ParagraphView } from "./generated/ParagraphView";
 import type { Role } from "./generated/Role";
 import type { ScoreSheet } from "./generated/ScoreSheet";
 import type { UsageSummary } from "./generated/UsageSummary";
@@ -79,6 +83,9 @@ export const ipc = {
   confirmRecoveryKey: (typed: string) => call<boolean>("confirm_recovery_key", { typed }),
   unlock: (password: string) => call<AppStatus>("unlock", { password }),
   unlockWithRecovery: (key: string) => call<AppStatus>("unlock_with_recovery", { key }),
+  /** Windows Hello: her PIN, face or fingerprint (D-047). */
+  unlockWithHello: () => call<AppStatus>("unlock_with_hello"),
+  setWindowsHello: (on: boolean, password: string) => call<AppStatus>("set_windows_hello", { on, password }),
   lock: () => run("lock"),
   /** Typing or scrolling in the window counts as activity for the idle lock. */
   touch: () => run("touch"),
@@ -90,7 +97,8 @@ export const ipc = {
   /** Dollars; `null` removes the ceiling. */
   setMonthlyCap: (capUsd: number | null) => run("set_monthly_cap", { capUsd }),
 
-  setApiKey: (key: string) => run("set_api_key", { key }),
+  /** `retentionAck`: she read what ChatGPT or Gemini keeps (required for their keys; D-040). */
+  setApiKey: (provider: string, key: string, retentionAck = false) => run("set_api_key", { provider, key, retentionAck }),
   setSpeed: (speed: "fast" | "balanced" | "thorough") => run("set_speed", { speed }),
   setModel: (model: string) => run("set_model", { model }),
   setLockMinutes: (minutes: number) => run("set_lock_minutes", { minutes }),
@@ -99,6 +107,17 @@ export const ipc = {
   setScreenProtection: (on: boolean) => run("set_screen_protection", { on }),
   reportSettings: () => call<ReportSettings>("report_settings"),
   setReportSettings: (settings: ReportSettings) => run("set_report_settings", { settings }),
+  /** Her Word template (EX-1): the file's bytes go as the raw body. */
+  setReportTemplate: async (file: File): Promise<TemplateView> => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    try {
+      return await invoke<TemplateView>("set_report_template", bytes);
+    } catch (e) {
+      throw asUiError(e);
+    }
+  },
+  clearReportTemplate: () => run("clear_report_template"),
+  reportTemplate: () => call<TemplateView | null>("report_template"),
 
   listCases: () => call<CaseSummary[]>("list_cases"),
   createCase: (meta: CaseMeta, identities: IdentityInput[]) => call<string>("create_case", { meta, identities }),
@@ -179,6 +198,11 @@ export const ipc = {
   rejectParagraph: (caseId: string, draftId: string) => run("reject_paragraph", { caseId, draftId }),
   editParagraph: (caseId: string, draftId: string, text: string) =>
     run("edit_paragraph", { caseId, draftId, text }),
+  /** Earlier wordings of a paragraph, newest first; bring one back (D-046). */
+  paragraphVersions: (caseId: string, draftId: string) =>
+    call<ParagraphVersionView[]>("paragraph_versions", { caseId, draftId }),
+  restoreParagraphVersion: (caseId: string, draftId: string, versionId: string) =>
+    run("restore_paragraph_version", { caseId, draftId, versionId }),
   /** Her own paragraph. `at`: "end" (default), "first", or the id of the paragraph it follows. */
   addOwnParagraph: (caseId: string, sectionKey: string, text: string, at: string = "end") =>
     run("add_own_paragraph", { caseId, sectionKey, text, first: at === "first", after: at === "end" || at === "first" ? null : at }),
@@ -193,6 +217,23 @@ export const ipc = {
 
   checkExport: (caseId: string) => call<ExportCheck>("check_export", { caseId }),
   exportReport: (caseId: string, password: string | null) => call<string>("export_report", { caseId, password }),
+  /** EX-3: a locked PDF (opens with the password, prints, cannot be changed). */
+  exportPdf: (caseId: string, password: string) => call<string>("export_pdf", { caseId, password }),
+  /** When this vault exported exactly this PDF, or `null` (changed, or not made here). */
+  checkOriginal: async (file: File): Promise<number | null> => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    try {
+      return await invoke<number | null>("check_original", bytes);
+    } catch (e) {
+      throw asUiError(e);
+    }
+  },
+  /** EX-4: a short letter from the approved report, through the same review and gate. */
+  prepareLetter: (caseId: string, audience: "parents" | "school", note: string) =>
+    call<Prepared>("prepare_letter", { caseId, audience, note }),
+  letter: (caseId: string, audience: "parents" | "school") => call<ParagraphView[]>("letter", { caseId, audience }),
+  exportLetter: (caseId: string, audience: "parents" | "school", password: string | null) =>
+    call<string>("export_letter", { caseId, audience, password }),
   /** The file password to the clipboard: out of history and cloud sync, cleared after N seconds (returned). */
   copySecret: (text: string) => call<number>("copy_secret", { text }),
 
@@ -210,6 +251,16 @@ export const ipc = {
     run("change_password", { current, withRecovery, newPassword }),
   newRecoveryKit: (current: string, withRecovery: boolean) =>
     call<CreatedVault>("new_recovery_kit", { current, withRecovery }),
+
+  /** Forgot the password → sign in with Google (D-041). Readable while locked. */
+  googleStatus: () => call<GoogleStatus>("google_status"),
+  /** Opens Google in her browser; resolves when she is back and the slot is written. */
+  googleTurnOn: (password: string) => run("google_turn_on", { password }),
+  googleTurnOff: (password: string) => run("google_turn_off", { password }),
+  /** Stop a sign-in that waits for the browser. */
+  googleCancel: () => run("google_cancel"),
+  /** Locked, password forgotten: sign in with Google, open, and set `newPassword` at once. */
+  googleRecover: (newPassword: string) => call<AppStatus>("google_recover", { newPassword }),
 
   // Encrypted backup (D-024). The system's own window picks the file; `null` = cancelled.
   backupStatus: () => call<BackupStatus>("backup_status"),
@@ -260,6 +311,7 @@ export const ipc = {
 };
 
 export type {
+  ParagraphView,
   StyleAnalysisResult,
   StyleImportPreview,
   StyleItem,
@@ -282,6 +334,7 @@ export type {
   BackupStatus,
   StagedBackup,
   Folder,
+  GoogleStatus,
   NameMatch,
   MaterialRouting,
   SortResult,
@@ -297,9 +350,11 @@ export type {
   ImportPreview,
   InputKind,
   Instrument,
+  ParagraphVersionView,
   PingResponse,
   Prepared,
   ReportSettings,
+  TemplateView,
   FollowUpView,
   ScoreSheet,
   SectionResult,

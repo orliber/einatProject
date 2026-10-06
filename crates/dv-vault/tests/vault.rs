@@ -130,6 +130,131 @@ fn wrong_secrets_are_rejected() {
 }
 
 #[test]
+fn sign_in_with_google_needs_both_keys_and_resets_the_password() {
+    use dv_vault::crypto::Key32;
+    use dv_vault::recovery::google_account_tag;
+
+    let (dir, mut vault, _) = new_vault();
+    let case = noam(&mut vault);
+    assert!(!vault.has_google_slot());
+    assert_eq!(Vault::google_slot(dir.path()).unwrap().1, None);
+
+    // Turning it on needs the current password.
+    let drive = Key32::random().unwrap();
+    let computer = Key32::random().unwrap();
+    let tag = google_account_tag(vault.vault_id(), "google-account-1");
+    assert!(vault
+        .set_google_slot(
+            Secret::Password("סיסמה שגויה לגמרי"),
+            &drive,
+            &computer,
+            &tag
+        )
+        .is_err());
+    vault
+        .set_google_slot(Secret::Password(PASSWORD), &drive, &computer, &tag)
+        .unwrap();
+    assert!(vault.has_google_slot());
+    drop(vault);
+    assert_eq!(Vault::google_slot(dir.path()).unwrap().1, Some(tag.clone()));
+
+    // Nothing in the vault folder is the Drive key.
+    assert!(!contains(
+        &all_bytes(dir.path()),
+        &dv_vault::recovery::drive_key_text(&drive)
+    ));
+
+    // The Drive key alone (a broken-into Google account) opens nothing, nor does the
+    // computer key alone, nor another key.
+    let other = Key32::random().unwrap();
+    for (d, c) in [(&drive, &other), (&other, &computer), (&computer, &drive)] {
+        assert!(matches!(
+            Vault::unlock_with_google(dir.path(), d, c),
+            Err(VaultError::WrongSecret)
+        ));
+    }
+    let mut vault = Vault::unlock_with_google(dir.path(), &drive, &computer).unwrap();
+    assert_eq!(vault.identities(&case).unwrap()[0].value, "נועם");
+    assert!(vault.integrity().header_ok && vault.integrity().audit_ok);
+    let new_password = "חתול כחול ישן על הגדר";
+    vault
+        .rekey_password(
+            Secret::Google {
+                drive: &drive,
+                computer: &computer,
+            },
+            new_password,
+            Argon2Params::TEST,
+        )
+        .unwrap();
+    drop(vault);
+    assert!(Vault::unlock_with_password(dir.path(), PASSWORD).is_err());
+    let mut vault = Vault::unlock_with_password(dir.path(), new_password).unwrap();
+
+    // A second account replaces the first; turning it off removes the slot.
+    let second = Key32::random().unwrap();
+    vault
+        .set_google_slot(Secret::Password(new_password), &second, &computer, "other")
+        .unwrap();
+    drop(vault);
+    assert!(Vault::unlock_with_google(dir.path(), &drive, &computer).is_err());
+    let mut vault = Vault::unlock_with_google(dir.path(), &second, &computer).unwrap();
+    vault
+        .remove_google_slot(Secret::Password(new_password))
+        .unwrap();
+    assert!(!vault.has_google_slot());
+    drop(vault);
+    assert!(matches!(
+        Vault::unlock_with_google(dir.path(), &second, &computer),
+        Err(VaultError::WrongSecret)
+    ));
+    assert_eq!(Vault::google_slot(dir.path()).unwrap().1, None);
+}
+
+#[test]
+fn a_backup_with_a_google_slot_does_not_open_with_the_drive_key_alone() {
+    use dv_vault::crypto::Key32;
+    let (_dir, mut vault, _) = new_vault();
+    let drive = Key32::random().unwrap();
+    let computer = Key32::random().unwrap();
+    vault
+        .set_google_slot(Secret::Password(PASSWORD), &drive, &computer, "tag")
+        .unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("b.vaultbak");
+    vault.write_backup(&dest).unwrap();
+    let bytes = fs::read(&dest).unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let guess = Key32::random().unwrap();
+    assert!(Vault::restore_backup(
+        &bytes,
+        target.path(),
+        Secret::Google {
+            drive: &drive,
+            computer: &guess
+        }
+    )
+    .is_err());
+}
+
+#[test]
+fn a_changed_google_slot_is_caught_by_the_header_check() {
+    use dv_vault::crypto::Key32;
+    let (dir, mut vault, _) = new_vault();
+    let key = Key32::random().unwrap();
+    vault
+        .set_google_slot(Secret::Password(PASSWORD), &key, &key, "tag")
+        .unwrap();
+    drop(vault);
+    // Someone swaps the account tag (to make the lock screen offer another account).
+    let path = dir.path().join("vault.header");
+    let text = fs::read_to_string(&path).unwrap();
+    fs::write(&path, text.replace("\"tag\"", "\"evil\"")).unwrap();
+    let vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
+    assert!(!vault.integrity().header_ok);
+}
+
+#[test]
 fn weak_passwords_are_refused_at_creation() {
     let dir = tempfile::tempdir().unwrap();
     assert!(matches!(
@@ -294,6 +419,97 @@ fn drafts_and_chat_are_stored_tagged_and_approval_is_tracked() {
     let summary = &vault.list_cases().unwrap()[0];
     assert_eq!(summary.child_name.as_deref(), Some("נועם"));
     assert_eq!(summary.approved_sections, vec!["kindergarten".to_owned()]);
+}
+
+#[test]
+fn earlier_wordings_of_a_paragraph_are_kept_sealed_and_can_be_brought_back() {
+    let (dir, mut vault, _) = new_vault();
+    let case = noam(&mut vault);
+    let p = vault
+        .add_draft(
+            &case,
+            "kindergarten",
+            "[ילד] מתקשה במעברים.",
+            Author::Ai,
+            &[],
+        )
+        .unwrap();
+    assert!(vault.draft_versions(&case, &p.id).unwrap().is_empty());
+
+    // Claude rewrites its proposal, then she edits it: both earlier wordings are kept.
+    assert!(vault
+        .rewrite_proposal(&case, &p.id, "[ילד] מתקשה מעט במעברים בין פעילויות.", &[])
+        .unwrap());
+    vault
+        .edit_draft(&case, &p.id, "[ילד] מתקשה במעברים בין פעילויות בגן.")
+        .unwrap();
+    // Saving the same text again keeps nothing new.
+    vault
+        .edit_draft(&case, &p.id, "[ילד] מתקשה במעברים בין פעילויות בגן.")
+        .unwrap();
+    let versions = vault.draft_versions(&case, &p.id).unwrap();
+    let texts: Vec<&str> = versions.iter().map(|v| v.text_tagged.as_str()).collect();
+    assert_eq!(
+        texts,
+        vec![
+            "[ילד] מתקשה מעט במעברים בין פעילויות.",
+            "[ילד] מתקשה במעברים."
+        ]
+    );
+    assert!(versions.iter().all(|v| v.author == Author::Ai));
+    assert_eq!(
+        vault.drafts_with_versions(&case).unwrap(),
+        vec![p.id.clone()]
+    );
+
+    // A new wording she approves takes the old one's history with it.
+    vault
+        .propose_rewording(&case, &p.id, "בגן, [ילד] מתקשה במעברים.", &[])
+        .unwrap();
+    let new_id = vault
+        .drafts(&case, "kindergarten")
+        .unwrap()
+        .into_iter()
+        .find(|d| d.replaces.as_deref() == Some(p.id.as_str()))
+        .unwrap()
+        .id;
+    vault
+        .set_draft_status(&case, &new_id, DraftStatus::Approved)
+        .unwrap();
+    let chain = vault.draft_versions(&case, &new_id).unwrap();
+    assert_eq!(chain.len(), 3);
+    assert_eq!(chain[0].id, p.id);
+    assert_eq!(chain[0].author, Author::User);
+
+    // Bringing back Claude's first wording: approved, Claude's again, and the current one kept.
+    let first = chain.last().unwrap().id.clone();
+    vault.restore_draft_version(&case, &new_id, &first).unwrap();
+    let now = vault
+        .drafts(&case, "kindergarten")
+        .unwrap()
+        .into_iter()
+        .find(|d| d.id == new_id)
+        .unwrap();
+    assert_eq!(now.text_tagged, "[ילד] מתקשה במעברים.");
+    assert_eq!(now.status, DraftStatus::Approved);
+    assert_eq!(now.author, Author::Ai);
+    assert_eq!(
+        vault.draft_versions(&case, &new_id).unwrap()[0].text_tagged,
+        "בגן, [ילד] מתקשה במעברים."
+    );
+    assert!(matches!(
+        vault.restore_draft_version(&case, &new_id, "not-a-version"),
+        Err(VaultError::NotFound)
+    ));
+
+    // Sealed at rest: no wording is readable in the files.
+    let bytes = all_bytes(dir.path());
+    let needle = "מתקשה מעט במעברים".as_bytes();
+    assert!(!bytes.windows(needle.len()).any(|w| w == needle));
+
+    // Erasing the case erases its versions.
+    vault.delete_case(&case).unwrap();
+    assert!(vault.draft_versions(&case, &new_id).is_err());
 }
 
 #[test]

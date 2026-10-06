@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-paragraph-versions"
+description = "Enables the paragraph_versions command without any pre-configured scope."
+commands.allow = ["paragraph_versions"]
+
+[[permission]]
+identifier = "deny-paragraph-versions"
+description = "Denies the paragraph_versions command without any pre-configured scope."
+commands.deny = ["paragraph_versions"]

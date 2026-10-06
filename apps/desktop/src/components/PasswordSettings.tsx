@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
 import { ipc } from "../ipc/client";
 import { RecoveryKitPaper } from "./RecoveryKit";
+import { GoogleSettings } from "./GoogleRecovery";
 import { Dialog, ErrorLine } from "./ui";
 
 /** The current password, or the recovery kit for whoever forgot it. */
@@ -152,9 +153,80 @@ function NewKitDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** Windows Hello on: the password proves it is her, then Windows asks for her PIN or face. */
+function HelloDialog({ onClose }: { onClose: () => void }) {
+  const { notify, refresh } = useApp();
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function turnOn(e?: FormEvent) {
+    e?.preventDefault();
+    if (!password) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await ipc.setWindowsHello(true, password);
+      setPassword("");
+      await refresh();
+      notify("מעכשיו אפשר לפתוח את הכספת עם Windows Hello. הסיסמה ממשיכה לעבוד.");
+      onClose();
+    } catch (err) {
+      setError((err as { message?: string }).message ?? "ההפעלה נכשלה.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Dialog narrow title="פתיחה עם Windows Hello" onClose={onClose}
+      footer={<>
+        <button type="button" className="btn" onClick={onClose}>ביטול</button>
+        <button type="button" className="btn btn-primary" disabled={busy || !password} onClick={() => void turnOn()}>{busy ? "מפעילה…" : "הפעלה"}</button>
+      </>}>
+      <form className="stack" onSubmit={(e) => void turnOn(e)}>
+        <p>הכספת תיפתח עם קוד ה-PIN, הפנים או טביעת האצבע של Windows, רק במחשב הזה. הסיסמה וערכת השחזור ממשיכות לעבוד, וכדאי לזכור את הסיסמה: במחשב אחר או אחרי שחזור מגיבוי רק היא פותחת.</p>
+        <div className="field">
+          <label htmlFor="hello-password">הסיסמה הנוכחית</label>
+          <input id="hello-password" className="input" type="password" autoComplete="current-password" autoFocus
+            value={password} onChange={(e) => setPassword(e.target.value)} />
+        </div>
+        <ErrorLine error={error} />
+      </form>
+    </Dialog>
+  );
+}
+
+function HelloSetting() {
+  const { status, refresh, notify, fail } = useApp();
+  const [open, setOpen] = useState(false);
+  if (!status.hello_available && !status.hello_on) return null;
+  async function turnOff() {
+    try {
+      await ipc.setWindowsHello(false, "");
+      await refresh();
+      notify("Windows Hello כבר לא פותח את הכספת. הסיסמה פותחת אותה.");
+    } catch (err) {
+      fail(err as never);
+    }
+  }
+  return (
+    <div className="row">
+      {status.hello_on ? (
+        <>
+          <span>פתיחה עם Windows Hello: פעילה</span>
+          <button type="button" className="btn" onClick={() => void turnOff()}>כיבוי</button>
+        </>
+      ) : (
+        <button type="button" className="btn" onClick={() => setOpen(true)}>פתיחה עם Windows Hello…</button>
+      )}
+      {open && <HelloDialog onClose={() => setOpen(false)} />}
+    </div>
+  );
+}
+
 export function PasswordSettings() {
   const [open, setOpen] = useState<"password" | "kit" | null>(null);
   return (
+    <>
     <section className="card setting" aria-labelledby="s-password">
       <h2 id="s-password">סיסמה וערכת שחזור</h2>
       <p className="muted small">הסיסמה פותחת את הכספת ביומיום; ערכת השחזור המודפסת פותחת אותה אם הסיסמה נשכחה. אחרי החלפה של אחת מהן כדאי לגבות מחדש.</p>
@@ -162,8 +234,11 @@ export function PasswordSettings() {
         <button type="button" className="btn" onClick={() => setOpen("password")}>החלפת סיסמה…</button>
         <button type="button" className="btn" onClick={() => setOpen("kit")}>ערכת שחזור חדשה…</button>
       </div>
+      <HelloSetting />
       {open === "password" && <ChangePasswordDialog onClose={() => setOpen(null)} />}
       {open === "kit" && <NewKitDialog onClose={() => setOpen(null)} />}
     </section>
+    <GoogleSettings />
+    </>
   );
 }

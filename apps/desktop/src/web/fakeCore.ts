@@ -21,6 +21,7 @@ import type { Folder } from "../ipc/generated/Folder";
 import type { NameMatch } from "../ipc/generated/NameMatch";
 import type { Prepared } from "../ipc/generated/Prepared";
 import type { ReportSettings } from "../ipc/generated/ReportSettings";
+import type { TemplateView } from "../ipc/generated/TemplateView";
 import type { ReviewPart } from "../ipc/generated/ReviewPart";
 import type { Role } from "../ipc/generated/Role";
 import type { ScoreSheet } from "../ipc/generated/ScoreSheet";
@@ -36,6 +37,7 @@ import { filter, restore, type Person } from "./filter";
 import { FakeStyle } from "./fakeStyle";
 import { compareSheets, comparisonText, formatSheet, instruments } from "./scores";
 import * as R from "./routing";
+import { PROVIDERS, providerOf } from "../providers";
 import type { SortResult } from "../ipc/generated/SortResult";
 
 type Args = Record<string, unknown>;
@@ -50,6 +52,25 @@ interface Draft {
   sources: string[];
   /** A new wording of this approved paragraph (D-032). */
   replaces?: string;
+  /** Earlier wordings, newest first (D-046). */
+  versions?: { id: string; at: number; byAi: boolean; text: string }[];
+}
+
+/** Keep the paragraph's wording before it changes in place (D-046). */
+function keepVersion(d: Draft, next: string) {
+  if (d.text === next) return;
+  d.versions = [{ id: newId("v"), at: Math.floor(Date.now() / 1000), byAi: d.byAi, text: d.text }, ...(d.versions ?? [])];
+}
+
+/** Its earlier wordings, then those of the approved paragraphs it took over from. */
+function versionsOf(drafts: Draft[], d: Draft): NonNullable<Draft["versions"]> {
+  const out = [...(d.versions ?? [])];
+  let from = d.replaces && d.status === "approved" ? drafts.find((x) => x.id === d.replaces) : undefined;
+  for (let i = 0; from && i < 50; i++) {
+    out.push({ id: from.id, at: 0, byAi: from.byAi, text: from.text }, ...(from.versions ?? []));
+    from = from.replaces ? drafts.find((x) => x.id === from?.replaces) : undefined;
+  }
+  return out;
 }
 
 interface Case {
@@ -107,6 +128,7 @@ export class FakeCore {
   private lastBackupAt: number | null = Math.floor(Date.now() / 1000) - 9 * 86_400;
   private lastCheckAt: number | null = null;
   private secretChanged = false;
+  private googleOn = false;
   private autoBackup = true;
   private reviewedAt: number | null = null;
   private convs: { id: string; caseId: string | null; updated: number; turns: { role: string; text: string; hidden: string[]; demo: boolean; at: number }[] }[] = [];
@@ -116,9 +138,13 @@ export class FakeCore {
   private capUsd: number | null = null;
   private ready: Record<string, number | null> = {};
   private model = "claude-opus-5";
+  private get ai() {
+    return providerOf(this.model).name;
+  }
   private speed = "balanced";
   private reviewOnlySuspect = false;
   private screenProtection = true;
+  private template: TemplateView | null = null;
   private report: ReportSettings = {
     title: "דוח אבחון פסיכולוגי-התפתחותי",
     font: "David",
@@ -323,8 +349,9 @@ export class FakeCore {
   status(): AppStatus {
     return {
       vault_exists: this.vaultExists, unlocked: this.unlocked, disk_encryption: "on", cloud_synced_folder: null, fips_active: true,
-      demo_mode: true, model: this.model, speed: this.speed, integrity_warning: null, lock_minutes: this.lockMinutes, idle_lock_in: this.unlocked ? this.lockMinutes * 60 : null,
+      demo_mode: true, model: this.model, provider: providerOf(this.model).id, ai_name: this.ai, keys: [], speed: this.speed, integrity_warning: null, lock_minutes: this.lockMinutes, idle_lock_in: this.unlocked ? this.lockMinutes * 60 : null,
       practitioner: this.practitioner, review_only_suspect: this.reviewOnlySuspect, review_choice_available: true, screen_protection: !this.unlocked || this.screenProtection,
+      hello_available: false, hello_on: false,
     };
   }
 
@@ -374,7 +401,7 @@ export class FakeCore {
           key: s.key, title: s.title, part: s.part,
           source_count: routing.filter((r) => r.feeds.includes(s.key)).length,
           sortable: SORTABLE.some((x) => x.key === s.key),
-          paragraphs: drafts.map((d) => ({ id: d.id, text: restore(d.text, c.people, this.practitioner), status: d.status, by_ai: d.byAi, sources: d.sources, warnings: [], replaces: d.replaces ?? null })),
+          paragraphs: drafts.map((d) => ({ id: d.id, text: restore(d.text, c.people, this.practitioner), status: d.status, by_ai: d.byAi, sources: d.sources, warnings: [], replaces: d.replaces ?? null, has_versions: versionsOf(c.drafts, d).length > 0, style_note: null })),
           approved: drafts.some((d) => d.status === "approved"),
         };
       }),
@@ -382,7 +409,7 @@ export class FakeCore {
   }
 
   private prepareSection(c: Case, key: string, instruction: string, replaces: string | null = null): Prepared {
-    if (!c.meta.consent) fail("consent_missing", "לפני שליחה ל-Claude צריך לרשום בתיק את הסכמת ההורים.");
+    if (!c.meta.consent) fail("consent_missing", `לפני שליחה ל-${this.ai} צריך לרשום בתיק את הסכמת ההורים.`);
     const section = SECTIONS.find((s) => s.key === key) ?? fail("not_found", "הסעיף לא נמצא");
     const parts: ReviewPart[] = [];
     const autoHidden: AutoHidden[] = [];
@@ -422,7 +449,7 @@ export class FakeCore {
 
   /** Sorting into sections (D-022): every material not sorted yet, one review. */
   private prepareSort(c: Case): Prepared {
-    if (!c.meta.consent) fail("consent_missing", "לפני שליחה ל-Claude צריך לרשום בתיק את הסכמת ההורים.");
+    if (!c.meta.consent) fail("consent_missing", `לפני שליחה ל-${this.ai} צריך לרשום בתיק את הסכמת ההורים.`);
     const todo = c.inputs.filter((i) => R.needsSorting(this.routingOf(c, i.id), R.passages(i.content).length));
     if (!todo.length) fail("refused", "כל החומרים כבר ממוינים לסעיפים.");
     const parts: ReviewPart[] = [];
@@ -478,7 +505,9 @@ export class FakeCore {
       paragraphs.splice(1);
     } else if (target && paragraphs.length) {
       // A rewrite of one paragraph stays where it is.
-      target.text = `${paragraphs[0]?.text ?? target.text} (ניסוח אחר)`;
+      const next = `${paragraphs[0]?.text ?? target.text} (ניסוח אחר)`;
+      keepVersion(target, next);
+      target.text = next;
       paragraphs.splice(1);
     } else {
       for (const d of c.drafts) if (d.section === p.section && d.status === "proposed" && d.byAi) d.status = "superseded";
@@ -487,7 +516,7 @@ export class FakeCore {
       }
     }
     const reply = paragraphs.length
-      ? `מצב הדגמה: ניסחתי ${paragraphs.length} פסקאות לדוגמה מתוך החומרים. בתוכנה, עם חיבור ל-Claude, הניסוח נעשה בסגנון שלך ומצליב בין החומרים.`
+      ? `מצב הדגמה: ניסחתי ${paragraphs.length} פסקאות לדוגמה מתוך החומרים. בתוכנה, עם חיבור ל-${this.ai}, הניסוח נעשה בסגנון שלך ומצליב בין החומרים.`
       : "מצב הדגמה: אין עדיין חומרים לסעיף הזה. אפשר להוסיף אינטייק, מפגש או מסמך.";
     const chat = (c.chat[p.section] ??= []);
     if (p.instruction.trim()) chat.push({ role: "user", text: p.instruction, hidden: [], demo: true });
@@ -517,7 +546,7 @@ export class FakeCore {
     } else if (ext === "pdf" || ext === "odt") {
       fail("preview", "בהדמיה בדפדפן אפשר לייבא Word או טקסט. קובצי PDF ו-ODT נקראים בתוכנה המותקנת, בתהליך מבודד.");
     } else {
-      fail("unsupported", "אפשר לייבא קובצי Word (docx), ODT, PDF או טקסט.");
+      fail("unsupported", "בתצוגה בדפדפן אפשר לייבא רק Word (docx) או טקסט. בתוכנה עצמה: גם DOC, ODT, RTF, PDF ותמונה של דף.");
     }
     if (!body.trim()) fail("empty", "לא נמצא טקסט במסמך.");
     // Names in the file's properties and margins are kept with the case without asking.
@@ -595,8 +624,9 @@ export class FakeCore {
         this.unlocked = false;
         return null;
       case "set_api_key":
-        return fail("preview", "בהדמיה בדפדפן אין חיבור ל-Claude. מפתח API מוזן רק בתוכנה המותקנת, ונשמר בה מוצפן.");
+        return fail("preview", `בהדמיה בדפדפן אין חיבור ל-${this.ai}. מפתח API מוזן רק בתוכנה המותקנת, ונשמר בה מוצפן.`);
       case "set_model":
+        if (!PROVIDERS.some((p) => p.models.some(([m]) => m === a.model))) return fail("refused", "הדגם הזה לא ברשימה המותרת.");
         this.model = String(a.model);
         return null;
       case "set_speed":
@@ -618,6 +648,14 @@ export class FakeCore {
         return this.report;
       case "set_report_settings":
         this.report = a.settings as ReportSettings;
+        return null;
+      case "report_template":
+        return this.template;
+      case "set_report_template":
+        this.template = { has_marker: false, headers: 1, footers: 0, images: 1, styles_matched: 2, styles_total: 9, size_kb: 24 };
+        return this.template;
+      case "clear_report_template":
+        this.template = null;
         return null;
       case "list_cases":
         return this.cases.filter((c) => c.deletedAt === null).map((c) => this.summary(c));
@@ -851,8 +889,27 @@ export class FakeCore {
           c.drafts = c.drafts.filter((x) => x.id !== d.id);
           return null;
         }
-        d.text = this.filterFor(c, String(a.text)).tagged;
+        const tagged = this.filterFor(c, String(a.text)).tagged;
+        keepVersion(d, tagged);
+        d.text = tagged;
         d.byAi = false;
+        d.status = "approved";
+        return null;
+      }
+      case "paragraph_versions": {
+        const c = this.find(a.caseId);
+        const d = c.drafts.find((x) => x.id === a.draftId) ?? fail("not_found", "הפסקה לא נמצאה");
+        return versionsOf(c.drafts, d).map((v) => ({ id: v.id, saved_at: v.at, by_ai: v.byAi, text: restore(v.text, c.people, this.practitioner) }));
+      }
+      case "restore_paragraph_version": {
+        const c = this.find(a.caseId);
+        const d = c.drafts.find((x) => x.id === a.draftId) ?? fail("not_found", "הפסקה לא נמצאה");
+        const v = versionsOf(c.drafts, d).find((x) => x.id === a.versionId) ?? fail("not_found", "הגרסה לא נמצאה");
+        keepVersion(d, v.text);
+        d.text = v.text;
+        d.byAi = v.byAi;
+        d.status = "approved";
+        for (const x of c.drafts) if (x.replaces === d.id && x.status === "proposed") x.status = "superseded";
         return null;
       }
       case "add_own_paragraph": {
@@ -877,7 +934,7 @@ export class FakeCore {
         if (p?.type !== "consult") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
         this.pending.delete(String(a.approvalId));
         await new Promise((r) => setTimeout(r, 1400));
-        const answer = "מצב הדגמה: כאן תופיע תשובה מקצועית של Claude, שמבחינה בין ידע מבוסס לדעה ומציינת אי-ודאות. ההחלטה המקצועית נשארת שלך.";
+        const answer = `מצב הדגמה: כאן תופיע תשובה מקצועית של ${this.ai}, שמבחינה בין ידע מבוסס לדעה ומציינת אי-ודאות. ההחלטה המקצועית נשארת שלך.`;
         const at = now();
         let conv = p.conversationId ? this.convs.find((x) => x.id === p.conversationId) : undefined;
         if (!conv) {
@@ -914,6 +971,15 @@ export class FakeCore {
           included_sections: d.sections.filter((s) => s.approved).length, score_tables: c.sheets.size, file_name: `דוח אבחון – ${c.meta.code}.docx`,
         } satisfies ExportCheck;
       }
+      case "letter":
+        return [];
+      case "export_pdf":
+        return "בהדמיה בדפדפן לא נוצר קובץ. בתוכנה המותקנת נשמר PDF נעול בסיסמה בתיקיית ההורדות.";
+      case "check_original":
+        return null;
+      case "prepare_letter":
+        return fail("refused", "בהדמיה בדפדפן אין ניסוח מכתבים. בתוכנה המותקנת המכתב נכתב מתוך ההמלצות המאושרות.");
+      case "export_letter":
       case "export_report":
         return "בהדמיה בדפדפן לא נוצר קובץ. בתוכנה המותקנת הדוח נשמר בתיקיית ההורדות, מוצפן בסיסמה.";
       case "set_auto_backup":
@@ -969,6 +1035,27 @@ export class FakeCore {
         this.secretChanged = true;
         this.logActivity("password_changed", "security", "הסיסמה הוחלפה");
         return null;
+      // Forgot the password → Google (D-041). The preview has no browser sign-in.
+      case "google_status":
+        return { available: true, on: this.googleOn, needs_setup_here: false };
+      case "google_turn_on":
+        if (!String(a.password ?? "")) fail("wrong_secret", "הסיסמה לא נכונה.");
+        this.googleOn = true;
+        this.logActivity("google_recovery_on", "security", "הופעלה כניסה עם גוגל למקרה ששוכחים את הסיסמה", true);
+        return null;
+      case "google_turn_off":
+        if (!String(a.password ?? "")) fail("wrong_secret", "הסיסמה לא נכונה.");
+        this.googleOn = false;
+        this.logActivity("google_recovery_off", "security", "בוטלה הכניסה עם גוגל למקרה ששוכחים את הסיסמה", true);
+        return null;
+      case "google_cancel":
+        return null;
+      case "google_recover":
+        if (!this.googleOn) fail("refused", "הכניסה עם גוגל לא מופעלת במחשב הזה.");
+        this.unlocked = true;
+        this.secretChanged = true;
+        this.logActivity("unlock", "access", "כניסה עם חשבון הגוגל (הסיסמה נשכחה) ובחירת סיסמה חדשה", true);
+        return this.status();
       case "new_recovery_kit":
         if (!String(a.current ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
         this.secretChanged = true;

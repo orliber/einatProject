@@ -20,6 +20,7 @@ use crate::crypto::{
 };
 use crate::db::{migrate, open_encrypted, AUDIT_MIGRATIONS, IDENTITY_MIGRATIONS, MAIN_MIGRATIONS};
 use crate::header::{unwrap_mk, wrap_mk, KeySlot, VaultHeader, FORMAT, HEADER_FILE};
+use crate::hello::{self, HelloSigner};
 use crate::password::{self, Argon2Params};
 use crate::{recovery, VaultError};
 
@@ -34,6 +35,21 @@ type InputRow = (String, String, i64, Vec<u8>, Vec<u8>);
 type MessageRow = (String, String, bool, i64, Vec<u8>, Vec<u8>);
 type TransmissionRow = (String, String, i64, String, String, Vec<u8>);
 type SummaryRow = (String, i64, i64, Option<String>, Option<i64>);
+/// author, created_at, approved_at, sealed text, replaces: one link of a paragraph's history.
+type ChainRow = (String, i64, Option<i64>, Vec<u8>, Option<String>);
+
+/// How far back a paragraph's history is followed through the wordings it replaced.
+const MAX_VERSION_CHAIN: usize = 50;
+
+/// An earlier wording of a paragraph (D-046), tagged like the draft itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DraftVersion {
+    /// A saved version's id, or the id of the approved paragraph a new wording replaced.
+    pub id: String,
+    pub saved_at: i64,
+    pub author: Author,
+    pub text_tagged: String,
+}
 
 const MAIN_DB: &str = "main.db";
 const IDENTITY_DB: &str = "identity.db";
@@ -111,6 +127,12 @@ pub struct StoredConsultation {
 pub enum Secret<'a> {
     Password(&'a str),
     Recovery(&'a str),
+    /// The key kept in her Google Drive (fetched after she signed in) and the key sealed to
+    /// her Windows account on this computer (D-041). Both are needed.
+    Google {
+        drive: &'a Key32,
+        computer: &'a Key32,
+    },
 }
 
 impl std::fmt::Debug for Secret<'_> {
@@ -118,11 +140,12 @@ impl std::fmt::Debug for Secret<'_> {
         f.write_str(match self {
             Secret::Password(_) => "Secret::Password(..)",
             Secret::Recovery(_) => "Secret::Recovery(..)",
+            Secret::Google { .. } => "Secret::Google(..)",
         })
     }
 }
 
-/// The master key, unwrapped from the header's password or recovery slot.
+/// The master key, unwrapped from the header's password, recovery or Google slot.
 pub(crate) fn master_key(header: &VaultHeader, secret: Secret<'_>) -> Result<Key32, VaultError> {
     match secret {
         Secret::Password(password) => {
@@ -135,7 +158,9 @@ pub(crate) fn master_key(header: &VaultHeader, secret: Secret<'_>) -> Result<Key
                         params,
                         wrapped_mk,
                     } => Some((salt.clone(), *params, wrapped_mk.clone())),
-                    KeySlot::Recovery { .. } => None,
+                    KeySlot::Recovery { .. }
+                    | KeySlot::WindowsHello { .. }
+                    | KeySlot::Google { .. } => None,
                 })
                 .ok_or(VaultError::Corrupt("no password slot".to_owned()))?;
             let salt: [u8; 32] = crate::crypto::unhex(&salt)?
@@ -150,13 +175,42 @@ pub(crate) fn master_key(header: &VaultHeader, secret: Secret<'_>) -> Result<Key
                 .iter()
                 .find_map(|s| match s {
                     KeySlot::Recovery { wrapped_mk } => Some(wrapped_mk.clone()),
-                    KeySlot::Password { .. } => None,
+                    KeySlot::Password { .. }
+                    | KeySlot::WindowsHello { .. }
+                    | KeySlot::Google { .. } => None,
                 })
                 .ok_or(VaultError::Corrupt("no recovery slot".to_owned()))?;
             let kek = recovery::derive_kek(&recovery::parse(typed)?)?;
             unwrap_mk(&kek, "recovery", &header.vault_id, &wrapped)
         }
+        Secret::Google { drive, computer } => {
+            // No Google slot (turned off, or an older backup): the key opens nothing.
+            let wrapped = header
+                .slots
+                .iter()
+                .find_map(|s| match s {
+                    KeySlot::Google { wrapped_mk, .. } => Some(wrapped_mk.clone()),
+                    KeySlot::Password { .. }
+                    | KeySlot::Recovery { .. }
+                    | KeySlot::WindowsHello { .. } => None,
+                })
+                .ok_or(VaultError::WrongSecret)?;
+            let kek = recovery::derive_google_kek(drive, computer)?;
+            unwrap_mk(&kek, "google", &header.vault_id, &wrapped)
+        }
     }
+}
+
+/// The Windows Hello slot's key-pair name, challenge and wrapped master key.
+fn hello_slot_of(header: &VaultHeader) -> Option<(String, String, String)> {
+    header.slots.iter().find_map(|s| match s {
+        KeySlot::WindowsHello {
+            credential,
+            challenge,
+            wrapped_mk,
+        } => Some((credential.clone(), challenge.clone(), wrapped_mk.clone())),
+        KeySlot::Password { .. } | KeySlot::Recovery { .. } | KeySlot::Google { .. } => None,
+    })
 }
 
 pub struct Vault {
@@ -283,6 +337,168 @@ impl Vault {
             &serde_json::json!({"method": "recovery"}),
         )?;
         Ok(vault)
+    }
+
+    /// The everyday way in (D-047): Windows Hello signs the slot's challenge after her PIN,
+    /// face or fingerprint. Any failure (cancelled, another computer, Hello turned off) is an
+    /// error and the lock screen falls back to the password.
+    pub fn unlock_with_hello(dir: &Path, signer: &dyn HelloSigner) -> Result<Self, VaultError> {
+        let header = VaultHeader::read(dir)?;
+        let (credential, challenge, wrapped) =
+            hello_slot_of(&header).ok_or(VaultError::NotFound)?;
+        let signature = signer.sign(&credential, &crate::crypto::unhex(&challenge)?)?;
+        let kek = hello::derive_kek(&signature)?;
+        let mk = unwrap_mk(&kek, "windows_hello", &header.vault_id, &wrapped)?;
+        let mut vault = Self::open_with(dir, header, &mk)?;
+        vault.record(
+            AuditEvent::Unlock,
+            None,
+            &serde_json::json!({"method": "windows_hello"}),
+        )?;
+        Ok(vault)
+    }
+
+    /// Forgot the password: open with the key from her Google Drive and the key sealed to
+    /// this computer (D-041).
+    pub fn unlock_with_google(
+        dir: &Path,
+        drive: &Key32,
+        computer: &Key32,
+    ) -> Result<Self, VaultError> {
+        let header = VaultHeader::read(dir)?;
+        let mk = master_key(&header, Secret::Google { drive, computer })?;
+        let mut vault = Self::open_with(dir, header, &mk)?;
+        vault.record(
+            AuditEvent::Unlock,
+            None,
+            &serde_json::json!({"method": "google"}),
+        )?;
+        Ok(vault)
+    }
+
+    /// Read while the vault is still locked, only to decide whether the lock screen offers
+    /// Windows Hello. The header is authenticated once the vault opens.
+    pub fn offers_hello(dir: &Path) -> bool {
+        VaultHeader::read(dir).is_ok_and(|h| hello_slot_of(&h).is_some())
+    }
+
+    #[must_use]
+    pub fn has_hello_slot(&self) -> bool {
+        hello_slot_of(&self.header).is_some()
+    }
+
+    /// Turn on Windows Hello. Needs a fresh proof (the password), like a new password. A new
+    /// key pair and challenge are made each time. Two signatures over the challenge must
+    /// match, or nothing is changed: a key that does not sign the same way twice would lock
+    /// her out of this slot later.
+    pub fn set_hello_slot(
+        &mut self,
+        current: Secret<'_>,
+        signer: &dyn HelloSigner,
+    ) -> Result<(), VaultError> {
+        let mk = master_key(&self.header, current)?;
+        if !signer.available() {
+            return Err(hello::refused("not set up on this computer"));
+        }
+        let credential = hello::credential_name(&self.header.vault_id);
+        let challenge = random_array::<32>()?;
+        signer.create(&credential)?;
+        let first = signer.sign(&credential, &challenge)?;
+        let second = signer.sign(&credential, &challenge)?;
+        if !crate::crypto::constant_time_eq(&first, &second) {
+            signer.delete(&credential);
+            return Err(hello::refused("signatures differ"));
+        }
+        let kek = hello::derive_kek(&first)?;
+        let slot = KeySlot::WindowsHello {
+            credential,
+            challenge: hex(&challenge),
+            wrapped_mk: wrap_mk(&kek, "windows_hello", &self.header.vault_id, &mk)?,
+        };
+        self.header
+            .slots
+            .retain(|s| !matches!(s, KeySlot::WindowsHello { .. }));
+        self.header.slots.push(slot);
+        self.header.sign(&self.keys.header)?;
+        self.header.write(&self.dir)?;
+        self.record(AuditEvent::WindowsHelloOn, None, &serde_json::json!({}))
+    }
+
+    /// Turn Windows Hello off: the slot leaves the header and the key pair is removed from
+    /// Windows. Only ever takes a way in away, so no proof is asked.
+    pub fn remove_hello_slot(&mut self, signer: &dyn HelloSigner) -> Result<(), VaultError> {
+        let Some((credential, _, _)) = hello_slot_of(&self.header) else {
+            return Ok(());
+        };
+        self.header
+            .slots
+            .retain(|s| !matches!(s, KeySlot::WindowsHello { .. }));
+        self.header.sign(&self.keys.header)?;
+        self.header.write(&self.dir)?;
+        signer.delete(&credential);
+        self.record(AuditEvent::WindowsHelloOff, None, &serde_json::json!({}))
+    }
+
+    /// The vault's id and the tag of the Google account that can open it, read from the
+    /// header while the vault is still locked. `None` when sign-in with Google is off.
+    /// Unauthenticated until the vault opens: it only decides what the lock screen offers.
+    pub fn google_slot(dir: &Path) -> Result<(String, Option<String>), VaultError> {
+        let header = VaultHeader::read(dir)?;
+        let tag = header.slots.iter().find_map(|s| match s {
+            KeySlot::Google { account, .. } => Some(account.clone()),
+            KeySlot::Password { .. } | KeySlot::Recovery { .. } | KeySlot::WindowsHello { .. } => {
+                None
+            }
+        });
+        Ok((header.vault_id, tag))
+    }
+
+    #[must_use]
+    pub fn has_google_slot(&self) -> bool {
+        self.header
+            .slots
+            .iter()
+            .any(|s| matches!(s, KeySlot::Google { .. }))
+    }
+
+    /// Turn on sign-in with Google (or move it to another account): the master key wrapped
+    /// under the key just put in her Drive together with the key sealed to this computer.
+    /// Needs a fresh proof, like a new password.
+    pub fn set_google_slot(
+        &mut self,
+        current: Secret<'_>,
+        drive: &Key32,
+        computer: &Key32,
+        account_tag: &str,
+    ) -> Result<(), VaultError> {
+        let mk = master_key(&self.header, current)?;
+        let kek = recovery::derive_google_kek(drive, computer)?;
+        let slot = KeySlot::Google {
+            account: account_tag.to_owned(),
+            wrapped_mk: wrap_mk(&kek, "google", &self.header.vault_id, &mk)?,
+        };
+        self.header
+            .slots
+            .retain(|s| !matches!(s, KeySlot::Google { .. }));
+        self.header.slots.push(slot);
+        self.header.sign(&self.keys.header)?;
+        self.header.write(&self.dir)?;
+        self.record(AuditEvent::GoogleRecoveryOn, None, &serde_json::json!({}))
+    }
+
+    /// Turn sign-in with Google off. Needs a fresh proof. Backups written before still carry
+    /// the slot, so the Drive key should be deleted too (the core does that).
+    pub fn remove_google_slot(&mut self, current: Secret<'_>) -> Result<(), VaultError> {
+        master_key(&self.header, current)?;
+        if !self.has_google_slot() {
+            return Ok(());
+        }
+        self.header
+            .slots
+            .retain(|s| !matches!(s, KeySlot::Google { .. }));
+        self.header.sign(&self.keys.header)?;
+        self.header.write(&self.dir)?;
+        self.record(AuditEvent::GoogleRecoveryOff, None, &serde_json::json!({}))
     }
 
     fn open_with(dir: &Path, mut header: VaultHeader, mk: &Key32) -> Result<Self, VaultError> {
@@ -425,7 +641,9 @@ impl Vault {
             KeySlot::Recovery { wrapped_mk } => {
                 unwrap_mk(&kek, "recovery", &self.header.vault_id, wrapped_mk).is_ok()
             }
-            KeySlot::Password { .. } => false,
+            KeySlot::Password { .. } | KeySlot::WindowsHello { .. } | KeySlot::Google { .. } => {
+                false
+            }
         })
     }
 
@@ -1054,6 +1272,7 @@ impl Vault {
             "inputs",
             "messages",
             "drafts",
+            "draft_versions",
             "transmissions",
             "consultations",
         ] {
@@ -1867,6 +2086,17 @@ impl Vault {
         source_refs: &[String],
     ) -> Result<bool, VaultError> {
         let key = self.case_key(case_id)?;
+        let proposed: Option<String> = self
+            .main
+            .query_row(
+                "SELECT status FROM drafts WHERE id = ?1 AND case_id = ?2",
+                params![draft_id, case_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if proposed.as_deref() == Some("proposed") {
+            self.keep_version(case_id, draft_id, Some(text_tagged))?;
+        }
         let changed = self.main.execute(
             "UPDATE drafts SET text_tagged_enc = ?1, source_refs_enc = ?2
              WHERE id = ?3 AND case_id = ?4 AND status = 'proposed'",
@@ -1895,6 +2125,7 @@ impl Vault {
         text_tagged: &str,
     ) -> Result<(), VaultError> {
         let key = self.case_key(case_id)?;
+        self.keep_version(case_id, draft_id, Some(text_tagged))?;
         let changed = self.main.execute(
             "UPDATE drafts SET text_tagged_enc = ?1, author = 'user', status = 'approved', approved_at = ?2
              WHERE id = ?3 AND case_id = ?4",
@@ -1904,6 +2135,158 @@ impl Vault {
             return Err(VaultError::NotFound);
         }
         self.touch(case_id)
+    }
+
+    /// Keep the paragraph's current wording as a version before it changes in place. Nothing
+    /// is kept when the new text is the same (`unchanged_if`), or when the paragraph is gone.
+    fn keep_version(
+        &mut self,
+        case_id: &str,
+        draft_id: &str,
+        unchanged_if: Option<&str>,
+    ) -> Result<(), VaultError> {
+        let key = self.case_key(case_id)?;
+        let row: Option<(String, Vec<u8>)> = self
+            .main
+            .query_row(
+                "SELECT author, text_tagged_enc FROM drafts WHERE id = ?1 AND case_id = ?2",
+                params![draft_id, case_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let Some((author, sealed)) = row else {
+            return Ok(());
+        };
+        let current = open_string(&key, &aad("drafts", "text", draft_id, case_id), &sealed)?;
+        if unchanged_if == Some(current.as_str()) {
+            return Ok(());
+        }
+        let id = random_id()?;
+        self.main.execute(
+            "INSERT INTO draft_versions (id, case_id, draft_id, saved_at, author, text_tagged_enc)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                id,
+                case_id,
+                draft_id,
+                now(),
+                author,
+                seal_str(&key, &aad("draft_versions", "text", &id, case_id), &current)?
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// The earlier wordings of a paragraph, newest first (D-046): what it said before each edit
+    /// or rewording in place, and, through `replaces`, the approved paragraphs it took over from.
+    pub fn draft_versions(
+        &self,
+        case_id: &str,
+        draft_id: &str,
+    ) -> Result<Vec<DraftVersion>, VaultError> {
+        let key = self.case_key(case_id)?;
+        let mut out = Vec::new();
+        let mut current = Some(draft_id.to_owned());
+        let mut first = true;
+        for _ in 0..MAX_VERSION_CHAIN {
+            let Some(id) = current.take() else { break };
+            let row: Option<ChainRow> = self
+                .main
+                .query_row(
+                    "SELECT author, created_at, approved_at, text_tagged_enc, replaces
+                     FROM drafts WHERE id = ?1 AND case_id = ?2",
+                    params![id, case_id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                )
+                .optional()?;
+            let Some((author, created_at, approved_at, sealed, replaces)) = row else {
+                if first {
+                    return Err(VaultError::NotFound);
+                }
+                break;
+            };
+            if !first {
+                // The approved paragraph that a new wording replaced, as it last read.
+                out.push(DraftVersion {
+                    id: id.clone(),
+                    saved_at: approved_at.unwrap_or(created_at),
+                    author: enum_from(&author)?,
+                    text_tagged: open_string(&key, &aad("drafts", "text", &id, case_id), &sealed)?,
+                });
+            }
+            let mut stmt = self.main.prepare(
+                "SELECT id, saved_at, author, text_tagged_enc FROM draft_versions
+                 WHERE case_id = ?1 AND draft_id = ?2 ORDER BY saved_at DESC, rowid DESC",
+            )?;
+            let rows: Vec<(String, i64, String, Vec<u8>)> = stmt
+                .query_map(params![case_id, id], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                })?
+                .collect::<Result<_, _>>()?;
+            for (vid, saved_at, author, sealed) in rows {
+                out.push(DraftVersion {
+                    text_tagged: open_string(
+                        &key,
+                        &aad("draft_versions", "text", &vid, case_id),
+                        &sealed,
+                    )?,
+                    author: enum_from(&author)?,
+                    id: vid,
+                    saved_at,
+                });
+            }
+            first = false;
+            current = replaces;
+        }
+        Ok(out)
+    }
+
+    /// Bring back an earlier wording (D-046): the current one is kept as a version, and the
+    /// paragraph reads as it did then, approved by her. Who wrote it stays as it was.
+    pub fn restore_draft_version(
+        &mut self,
+        case_id: &str,
+        draft_id: &str,
+        version_id: &str,
+    ) -> Result<(), VaultError> {
+        let version = self
+            .draft_versions(case_id, draft_id)?
+            .into_iter()
+            .find(|v| v.id == version_id)
+            .ok_or(VaultError::NotFound)?;
+        let key = self.case_key(case_id)?;
+        self.keep_version(case_id, draft_id, Some(&version.text_tagged))?;
+        let changed = self.main.execute(
+            "UPDATE drafts SET text_tagged_enc = ?1, author = ?2, status = 'approved', approved_at = ?3
+             WHERE id = ?4 AND case_id = ?5 AND status IN ('approved', 'proposed')",
+            params![
+                seal_str(&key, &aad("drafts", "text", draft_id, case_id), &version.text_tagged)?,
+                enum_str(&version.author)?,
+                now(),
+                draft_id,
+                case_id
+            ],
+        )?;
+        if changed == 0 {
+            return Err(VaultError::NotFound);
+        }
+        // A new wording that waited beside it would replace what she just chose.
+        self.main.execute(
+            "UPDATE drafts SET status = 'superseded' WHERE case_id = ?1 AND replaces = ?2 AND status = 'proposed'",
+            params![case_id, draft_id],
+        )?;
+        self.touch(case_id)
+    }
+
+    /// Which of these paragraphs have earlier wordings to show.
+    pub fn drafts_with_versions(&self, case_id: &str) -> Result<Vec<String>, VaultError> {
+        let mut stmt = self.main.prepare(
+            "SELECT DISTINCT draft_id FROM draft_versions WHERE case_id = ?1
+             UNION SELECT id FROM drafts WHERE case_id = ?1 AND replaces IS NOT NULL
+               AND status = 'approved'",
+        )?;
+        let rows = stmt.query_map([case_id], |r| r.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     pub fn approved_sections(&self, case_id: &str) -> Result<Vec<String>, VaultError> {

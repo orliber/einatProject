@@ -10,14 +10,15 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::time::Duration;
 
-use crate::{Extracted, IngestError, MAX_INPUT_BYTES};
+use crate::{IngestError, Outcome, MAX_INPUT_BYTES};
 
 /// First argument that turns the app binary into a worker.
 pub const WORKER_ARG: &str = "--dv-ingest-worker";
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(45);
-const MAX_OUTPUT_BYTES: u64 = 64 * 1024 * 1024;
+/// Text, or a scan's page images (base64): up to about 215 MB for the largest scan allowed.
+const MAX_OUTPUT_BYTES: u64 = 224 * 1024 * 1024;
 
-type WorkerResult = Result<Extracted, IngestError>;
+type WorkerResult = Result<Outcome, IngestError>;
 
 /// Worker side: stdin → extract → JSON on stdout. Returns the process exit code.
 #[must_use]
@@ -36,7 +37,7 @@ pub fn worker_main() -> i32 {
         return 2;
     };
     let name = String::from_utf8_lossy(&input[..newline]).into_owned();
-    let result: WorkerResult = crate::extract(&input[newline + 1..], &name);
+    let result: WorkerResult = crate::read(&input[newline + 1..], &name);
     let Ok(json) = serde_json::to_vec(&result) else {
         return 3;
     };
@@ -70,7 +71,8 @@ pub fn spawn_isolated(
     dv_sandbox::spawn(exe, args, policy).map_err(|e| IngestError::Worker(e.to_string()))
 }
 
-/// App side: run one document through a fresh worker.
+/// App side: run one document through a fresh worker. A scan comes back as page images, which
+/// the app reads with the OCR engine ([`crate::import`] does both).
 pub fn run(exe: &Path, file_name: &str, bytes: &[u8], timeout: Duration) -> WorkerResult {
     if bytes.len() > MAX_INPUT_BYTES {
         return Err(IngestError::TooLarge);
@@ -78,6 +80,7 @@ pub fn run(exe: &Path, file_name: &str, bytes: &[u8], timeout: Duration) -> Work
     let policy = Isolation {
         memory_mb: WORKER_MEMORY_MB,
         read_dirs: Vec::new(),
+        single_thread: false,
     };
     let mut child = spawn_isolated(exe, &[WORKER_ARG], &policy)?;
     let (Some(mut stdin), Some(mut stdout)) = (child.take_stdin(), child.take_stdout()) else {

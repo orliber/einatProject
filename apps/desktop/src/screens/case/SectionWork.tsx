@@ -8,8 +8,11 @@ import { useHoldUnsaved } from "../../components/Unsaved";
 import { kindLabel } from "../../i18n/he";
 import { useRotatingPlaceholder } from "../../components/Rotating";
 import { DRAFT_HINTS } from "../../i18n/suggestions";
+import { ParagraphVersions } from "../../components/ParagraphVersions";
+import { isCombo, KEYS } from "../../shortcuts";
 import type { CaseApi } from "../CaseScreen";
 import "./SectionWork.css";
+import { useAi } from "../../ai";
 
 type Section = CaseDetail["sections"][number];
 
@@ -24,6 +27,7 @@ const QUICK: [string, string][] = [
 
 export function SectionWork({ api, section }: { api: CaseApi; section: Section }) {
   const { fail, notify, go } = useApp();
+  const ai = useAi();
   const { caseId, reload } = api;
   const [chat, setChat] = useState<ChatView[]>([]);
   const [last, setLast] = useState<SectionResult | null>(null);
@@ -35,6 +39,8 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   const [error, setError] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
   const [linked, setLinked] = useState(false);
+  /** The paragraph whose earlier wordings are open (UX-4). */
+  const [history, setHistory] = useState<string | null>(null);
   /** Paragraphs whose sources are open ("למה כתבת את זה?", AI-7). */
   const [why, setWhy] = useState<string | null>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
@@ -84,7 +90,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
         reprepare: prepare,
         onSend: async (id) => {
           const result = await api.track(
-            { label: replaces ? "Claude מנסח את הפסקה מחדש" : `Claude כותב את "${section.title}"`, task: "draft", section: section.key, approval: id },
+            { label: replaces ? `${ai} מנסח את הפסקה מחדש` : `${ai} כותב את "${section.title}"`, task: "draft", section: section.key, approval: id },
             () => ipc.sendSection(id),
           );
           setLast(result);
@@ -120,6 +126,23 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   const visible = section.paragraphs;
   const approved = visible.filter((p) => p.status === "approved").length;
   const pending = visible.filter((p) => p.status === "proposed").length;
+
+  // Ctrl+Shift+Enter: approve the whole draft waiting here (UX-5).
+  const canApproveAll = pending > 0 && !job && editing === null && own === null;
+  const approveAll = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    approveAll.current = () => void act(async () => { await ipc.approveSection(caseId, section.key); });
+  });
+  useEffect(() => {
+    if (!canApproveAll) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!isCombo(e, KEYS.approveDraft)) return;
+      e.preventDefault();
+      approveAll.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canApproveAll]);
   const lastWarnings = new Map((last?.paragraphs ?? []).map((p) => [p.text, p.warnings]));
   // What the section is written from: the materials that feed it (D-022).
   const sources = api.detail.routing
@@ -145,7 +168,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               <span className="muted">הסעיף נכתב מתוך הסעיפים שכבר אישרת.</span>
             ) : (
               <>
-                <span className="muted">{sources.length ? "Claude כותב מתוך:" : "עוד אין חומרים שמזינים את הסעיף."}</span>
+                <span className="muted">{sources.length ? `${ai} כותב מתוך:` : "עוד אין חומרים שמזינים את הסעיף."}</span>
                 {sources.map((i) => (
                   <span key={i.id} className="source-chip">{kindLabel[i.kind] ?? ""} · {i.title}</span>
                 ))}
@@ -195,7 +218,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               <span className="small grow">החומרים עודכנו. כדי שהטיוטה תיכתב גם מהם:</span>
               <button type="button" className="btn btn-small btn-primary" disabled={working}
                 onClick={() => { setLinked(false); setLinking(false); void ask(draftInstruction, `טיוטה חדשה לסעיף ${section.title}`); }}>
-                טיוטה חדשה מ-Claude
+                טיוטה חדשה מ-{ai}
               </button>
             </div>
           )}
@@ -223,7 +246,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
           {pending > 0 && !job && (
             <div className="draft-banner">
               <div className="grow stack" style={{ gap: 2 }}>
-                <b>טיוטה של Claude מחכה לאישורך</b>
+                <b>טיוטה של {ai} מחכה לאישורך</b>
                 <span className="small">
                   קוראים, ואז מאשרים את כולה או פסקה-פסקה. רק מה שאושר נכנס לדוח. בקשה חדשה (למשל "לקצר") מחליפה את הטיוטה הזאת, ומה שכבר אישרת נשאר.
                 </span>
@@ -249,16 +272,16 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               <p className="serif">עוד אין טיוטה לסעיף הזה.</p>
               <p className="hint">
                 {derived
-                  ? "Claude יכין טיוטה מהסעיפים שכבר אישרת. את קוראת ומאשרת כל פסקה."
+                  ? `${ai} יכין טיוטה מהסעיפים שכבר אישרת. את קוראת ומאשרת כל פסקה.`
                   : section.source_count > 0
-                    ? "Claude יכין טיוטה מהחומרים שמזינים את הסעיף. לפני השליחה תראי בדיוק מה יוצא, ואחר כך מאשרים פסקה אחר פסקה."
+                    ? `${ai} יכין טיוטה מהחומרים שמזינים את הסעיף. לפני השליחה תראי בדיוק מה יוצא, ואחר כך מאשרים פסקה אחר פסקה.`
                     : "עוד אין חומרים שמזינים את הסעיף. אפשר להוסיף אותם בחומרי התיק, או לכתוב בעצמך."}
               </p>
               <div className="row">
                 {(derived || section.source_count > 0) && (
                   <button type="button" className="btn btn-primary" disabled={working}
                     onClick={() => void ask(draftInstruction, `טיוטה לסעיף ${section.title}`)}>
-                    {derived ? "כתיבת טיוטה מהסעיפים שאושרו" : "כתיבת טיוטה עם Claude"}
+                    {derived ? "כתיבת טיוטה מהסעיפים שאושרו" : `כתיבת טיוטה עם ${ai}`}
                   </button>
                 )}
                 <button type="button" className="btn" onClick={() => setOwn("")}>כתיבה בעצמי</button>
@@ -278,7 +301,13 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                     {p.sources.length > 0 && <span className="muted">מקור: {p.sources.join(" · ")}</span>}
                     {p.by_ai && <button type="button" className="link-small" aria-expanded={why === p.id} onClick={() => setWhy(why === p.id ? null : p.id)}>למה כתבת את זה?</button>}
                     <button type="button" className="link-small" onClick={() => setEditing({ id: p.id, text: p.text })}>עריכה</button>
+                    {p.has_versions && (
+                      <button type="button" className="link-small" aria-expanded={history === p.id} onClick={() => setHistory(history === p.id ? null : p.id)}>גרסאות קודמות</button>
+                    )}
                   </div>
+                  {history === p.id && (
+                    <ParagraphVersions caseId={caseId} draftId={p.id} onRestored={async () => { setHistory(null); await reload(); }} />
+                  )}
                   {warnings.map((w, i) => (
                     <div key={i} className="note-warn"><WarnIcon /><span>{w}</span></div>
                   ))}
@@ -290,7 +319,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               <article key={p.id} className="para pending">
                 {!isEditing && (
                   <div className="para-meta">
-                    <span className="pending-mark">{p.by_ai ? "הצעה של Claude · ממתינה לאישור" : "ממתינה לאישור"}</span>
+                    <span className="pending-mark">{p.by_ai ? `הצעה של ${ai} · ממתינה לאישור` : "ממתינה לאישור"}</span>
                     {p.sources.length > 0 && <span className="muted">מקור: {p.sources.join(" · ")}</span>}
                     {p.by_ai && <button type="button" className="link-small" aria-expanded={why === p.id} onClick={() => setWhy(why === p.id ? null : p.id)}>למה כתבת את זה?</button>}
                   </div>
@@ -308,6 +337,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                 {warnings.map((w, i) => (
                   <div key={i} className="note-warn"><WarnIcon /><span>{w}</span></div>
                 ))}
+                {!isEditing && p.style_note && <span className="small muted style-note">{p.style_note}</span>}
                 <div className="row wrap-row">
                   {isEditing ? (
                     <>
@@ -348,7 +378,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               {(derived || section.source_count > 0) && (
                 <button type="button" className="add-own" disabled={working}
                   onClick={() => void ask(draftInstruction, `טיוטה חדשה לסעיף ${section.title}`)}>
-                  ↻ טיוטה חדשה מ-Claude (מחליפה את מה שלא אושר)
+                  ↻ טיוטה חדשה מ-{ai} (מחליפה את מה שלא אושר)
                 </button>
               )}
             </div>
@@ -367,7 +397,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
         <section className="chat" aria-label="שיחה על הסעיף">
           <div className="chat-head">שיחה על הסעיף</div>
           <div className="chat-body" aria-live="polite">
-            {chat.length === 0 && <p className="muted small chat-hint">כאן מבקשים מ-Claude שינויים בטיוטה: לקצר, להרחיב, להדגיש משהו. כל בקשה עוברת קודם במסך "מה יוצא מהמחשב", והתשובה מחליפה את מה שעוד לא אישרת.</p>}
+            {chat.length === 0 && <p className="muted small chat-hint">כאן מבקשים מ-{ai} שינויים בטיוטה: לקצר, להרחיב, להדגיש משהו. כל בקשה עוברת קודם במסך "מה יוצא מהמחשב", והתשובה מחליפה את מה שעוד לא אישרת.</p>}
             {chat.map((m, i) =>
               m.role === "user" ? (
                 <div key={i} className="msg-user">
@@ -393,7 +423,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               ))}
             </div>
             <div className="chat-input">
-              <label htmlFor="chat-msg" className="visually-hidden">הודעה ל-Claude</label>
+              <label htmlFor="chat-msg" className="visually-hidden">הודעה ל-{ai}</label>
               <textarea id="chat-msg" rows={2} className="textarea grow" placeholder={chatHint}
                 value={message} onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !working) void ask(message); }} />

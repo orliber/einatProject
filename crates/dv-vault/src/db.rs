@@ -167,6 +167,17 @@ pub const MAIN_MIGRATIONS: &[&str] = &[
         id INTEGER PRIMARY KEY CHECK (id = 1),
         data_enc BLOB NOT NULL
      );",
+    // v8: earlier wordings of a paragraph, kept when it is edited or reworded in place, so
+    // she can see them and bring one back (D-046). Sealed with the case key like the draft.
+    "CREATE TABLE draft_versions (
+        id TEXT PRIMARY KEY,
+        case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+        draft_id TEXT NOT NULL,
+        saved_at INTEGER NOT NULL,
+        author TEXT NOT NULL,
+        text_tagged_enc BLOB NOT NULL
+     );
+     CREATE INDEX draft_versions_draft ON draft_versions(case_id, draft_id);",
 ];
 
 pub const IDENTITY_MIGRATIONS: &[&str] = &[

@@ -28,7 +28,13 @@ pub struct AppStatus {
     /// No API key configured: answers come from local demo mode.
     pub demo_mode: bool,
     pub model: String,
-    /// `fast` | `balanced` | `thorough`: how long Claude may think.
+    /// The company of `model`: `anthropic` | `openai` | `gemini` (D-040).
+    pub provider: String,
+    /// How the program names the AI everywhere: `Claude` | `ChatGPT` | `Gemini`.
+    pub ai_name: String,
+    /// Companies whose API key is saved in the vault.
+    pub keys: Vec<String>,
+    /// `fast` | `balanced` | `thorough`: how long the AI may think.
     pub speed: String,
     pub integrity_warning: Option<String>,
     pub lock_minutes: u32,
@@ -43,6 +49,10 @@ pub struct AppStatus {
     /// Screenshots and screen sharing show a blank window (D-037). Always on while the vault
     /// is locked; she may turn it off for the open vault in settings.
     pub screen_protection: bool,
+    /// Windows Hello (PIN, face or fingerprint) is set up on this computer (D-047).
+    pub hello_available: bool,
+    /// The vault opens with Windows Hello; the password always works too.
+    pub hello_on: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -65,6 +75,21 @@ pub struct ParagraphView {
     pub warnings: Vec<String>,
     /// A new wording of this approved paragraph (its id), waiting for her approval.
     pub replaces: Option<String>,
+    /// Earlier wordings are kept and can be brought back (D-046).
+    pub has_versions: bool,
+    /// A gentle note when Claude's sentences are unlike hers ("משפטים ארוכים מהרגיל אצלך").
+    pub style_note: Option<String>,
+}
+
+/// An earlier wording of a paragraph, names restored for display (D-046).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ParagraphVersionView {
+    pub id: String,
+    #[ts(type = "number")]
+    pub saved_at: i64,
+    pub by_ai: bool,
+    pub text: String,
 }
 
 /// One passage a paragraph leans on ("למה כתבת את זה?", AI-7), shown on this computer only.
@@ -264,7 +289,7 @@ pub struct NameSuggestion {
 #[ts(export)]
 pub struct ImportPreview {
     pub file_name: String,
-    /// `docx` | `pdf` | `text`
+    /// `docx` | `odt` | `pdf` | `text` | `rtf` | `doc` | `image`
     pub format: String,
     pub pages: u32,
     pub title: String,
@@ -310,6 +335,20 @@ pub struct ReportSettings {
     pub font: String,
     pub confidentiality: String,
     pub signature: Vec<String>,
+}
+
+/// Her Word template (EX-1), as checked when she chose it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TemplateView {
+    /// The report goes where `{{הדוח}}` is written; otherwise it replaces the template's body.
+    pub has_marker: bool,
+    pub headers: u32,
+    pub footers: u32,
+    pub images: u32,
+    pub styles_matched: u32,
+    pub styles_total: u32,
+    pub size_kb: u32,
 }
 
 /// A name typed for a case that already appears in another case (D-023).

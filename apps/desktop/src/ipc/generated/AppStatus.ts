@@ -14,7 +14,19 @@ cloud_synced_folder: string | null, fips_active: boolean,
  */
 demo_mode: boolean, model: string, 
 /**
- * `fast` | `balanced` | `thorough`: how long Claude may think.
+ * The company of `model`: `anthropic` | `openai` | `gemini` (D-040).
+ */
+provider: string, 
+/**
+ * How the program names the AI everywhere: `Claude` | `ChatGPT` | `Gemini`.
+ */
+ai_name: string, 
+/**
+ * Companies whose API key is saved in the vault.
+ */
+keys: Array<string>, 
+/**
+ * `fast` | `balanced` | `thorough`: how long the AI may think.
  */
 speed: string, integrity_warning: string | null, lock_minutes: number, 
 /**
@@ -37,4 +49,12 @@ review_choice_available: boolean,
  * Screenshots and screen sharing show a blank window (D-037). Always on while the vault
  * is locked; she may turn it off for the open vault in settings.
  */
-screen_protection: boolean, };
+screen_protection: boolean, 
+/**
+ * Windows Hello (PIN, face or fingerprint) is set up on this computer (D-047).
+ */
+hello_available: boolean, 
+/**
+ * The vault opens with Windows Hello; the password always works too.
+ */
+hello_on: boolean, };

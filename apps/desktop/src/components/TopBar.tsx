@@ -6,7 +6,7 @@ import "./TopBar.css";
 
 /** The bar of the screens outside a case: cases, consultation, writing style, settings. */
 export function TopBar({ active }: { active: Route["name"] }) {
-  const { go, lockNow, status } = useApp();
+  const { go, lockNow, status, showShortcuts } = useApp();
   const tab = (name: Route["name"], label: string, route: Route) => (
     <button type="button" className={active === name ? "topbar-link topbar-active" : "topbar-link"}
       aria-current={active === name ? "page" : undefined} onClick={() => go(route)}>{label}</button>
@@ -24,6 +24,9 @@ export function TopBar({ active }: { active: Route["name"] }) {
       <UpdateChip />
       {status.demo_mode && <span className="topbar-demo" title="לא הוגדר מפתח API. התשובות הן דוגמאות מקומיות, ושום דבר לא נשלח.">מצב הדגמה</span>}
       <span className="topbar-safe"><span className="topbar-dot" aria-hidden="true" />{he.encrypted}</span>
+      {showShortcuts && (
+        <button type="button" className="btn btn-small icon-btn" aria-label="קיצורי מקלדת (F1)" title="קיצורי מקלדת (F1)" onClick={showShortcuts}>?</button>
+      )}
       <button type="button" className="btn btn-small" title="נעילה (Ctrl+L)" onClick={() => void lockNow()}>
         <LockIcon size={15} /> נעילה
       </button>

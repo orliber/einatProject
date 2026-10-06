@@ -132,7 +132,8 @@ say "4/6 הורדה ובדיקת checksum"
 rm -rf "$OUT" && mkdir -p "$OUT"
 gh release download "v$VERSION" --repo "$SOURCE_REPO" --dir "$OUT" \
   -p DiagnosticVault-Setup.exe -p DiagnosticVault-Setup.exe.sha256
-(cd "$OUT" && shasum -a 256 -c DiagnosticVault-Setup.exe.sha256)
+# The checksum file is written on Windows (CRLF): without the CR, shasum looks for the right name.
+(cd "$OUT" && tr -d '\r' < DiagnosticVault-Setup.exe.sha256 | shasum -a 256 -c -)
 
 say "5/6 חתימה ובדיקה עצמית"
 cargo xtask update-notice "$VERSION" "$OUT/DiagnosticVault-Setup.exe" "$NOTES" "$OUT"

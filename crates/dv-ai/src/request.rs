@@ -10,8 +10,101 @@ use crate::prompts::{CONSULT_RULES, DEFAULT_STYLE, DRAFTING_RULES, OUTPUT_RULES,
 
 /// Models verified as available under Zero Data Retention (STANDARDS.md §4). Covered Models
 /// that require 30-day retention (Fable, Mythos) are deliberately absent.
-pub const ALLOWED_MODELS: &[&str] = &["claude-opus-5", "claude-sonnet-5", "claude-opus-4-8"];
+pub const ANTHROPIC_MODELS: &[&str] = &["claude-opus-5", "claude-sonnet-5", "claude-opus-4-8"];
+/// OpenAI (ChatGPT) and Google (Gemini) models the psychologist may choose instead (D-040).
+/// Must match the lists in `dv-egress` (checked by a test in dv-core).
+pub const OPENAI_MODELS: &[&str] = &["gpt-5-1", "gpt-5-mini"];
+pub const GEMINI_MODELS: &[&str] = &["gemini-2-5-pro", "gemini-2-5-flash"];
+pub const MISTRAL_MODELS: &[&str] = &["mistral-large", "mistral-medium"];
+/// Models run by Ollama on this computer (nothing leaves it).
+pub const LOCAL_MODELS: &[&str] = &["local-gemma", "local-qwen"];
+/// Every model that may be chosen, from all providers.
+pub const ALLOWED_MODELS: &[&str] = &[
+    "claude-opus-5",
+    "claude-sonnet-5",
+    "claude-opus-4-8",
+    "gpt-5-1",
+    "gpt-5-mini",
+    "gemini-2-5-pro",
+    "gemini-2-5-flash",
+    "mistral-large",
+    "mistral-medium",
+    "local-gemma",
+    "local-qwen",
+];
 pub const DEFAULT_MODEL: &str = "claude-opus-5";
+
+/// The company whose AI answers (D-040). Claude stays the default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Provider {
+    Anthropic,
+    OpenAi,
+    Gemini,
+    Mistral,
+    /// A model on this computer (Ollama): no key, nothing leaves.
+    Local,
+}
+
+impl Provider {
+    pub const ALL: [Provider; 5] = [
+        Provider::Anthropic,
+        Provider::Gemini,
+        Provider::OpenAi,
+        Provider::Mistral,
+        Provider::Local,
+    ];
+
+    /// Stable id used in settings and over IPC.
+    #[must_use]
+    pub fn id(self) -> &'static str {
+        match self {
+            Provider::Anthropic => "anthropic",
+            Provider::OpenAi => "openai",
+            Provider::Gemini => "gemini",
+            Provider::Mistral => "mistral",
+            Provider::Local => "local",
+        }
+    }
+
+    #[must_use]
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|p| p.id() == id)
+    }
+
+    /// The name the psychologist sees ("לכתוב עם Claude", "לכתוב עם Gemini").
+    #[must_use]
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Provider::Anthropic => "Claude",
+            Provider::OpenAi => "ChatGPT",
+            Provider::Gemini => "Gemini",
+            Provider::Mistral => "Mistral",
+            Provider::Local => "Ollama",
+        }
+    }
+
+    #[must_use]
+    pub fn models(self) -> &'static [&'static str] {
+        match self {
+            Provider::Anthropic => ANTHROPIC_MODELS,
+            Provider::OpenAi => OPENAI_MODELS,
+            Provider::Gemini => GEMINI_MODELS,
+            Provider::Mistral => MISTRAL_MODELS,
+            Provider::Local => LOCAL_MODELS,
+        }
+    }
+
+    #[must_use]
+    pub fn default_model(self) -> &'static str {
+        self.models().first().copied().unwrap_or(DEFAULT_MODEL)
+    }
+
+    /// The provider of an allowed model; `None` for anything off the lists.
+    #[must_use]
+    pub fn of_model(model: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|p| p.models().contains(&model))
+    }
+}
 
 /// Professional sources the research mode may search (D-014). Editable in settings later.
 pub const RESEARCH_ALLOWED_DOMAINS: &[&str] = &[
@@ -347,6 +440,26 @@ mod tests {
         );
         assert_eq!(body["tools"][0]["type"], "web_search_20250305");
         assert_eq!(body["tools"][0]["max_uses"], 8);
+    }
+
+    #[test]
+    fn every_model_has_exactly_one_provider() {
+        let mut all: Vec<&str> = Provider::ALL
+            .iter()
+            .flat_map(|p| p.models())
+            .copied()
+            .collect();
+        all.sort_unstable();
+        let mut allowed = ALLOWED_MODELS.to_vec();
+        allowed.sort_unstable();
+        assert_eq!(all, allowed);
+        assert_eq!(Provider::of_model(DEFAULT_MODEL), Some(Provider::Anthropic));
+        assert_eq!(Provider::of_model("gpt-5-1"), Some(Provider::OpenAi));
+        assert_eq!(Provider::of_model("gemini-2-5-pro"), Some(Provider::Gemini));
+        assert_eq!(Provider::of_model("gpt-4o"), None);
+        for p in Provider::ALL {
+            assert_eq!(Provider::from_id(p.id()), Some(p));
+        }
     }
 
     #[test]

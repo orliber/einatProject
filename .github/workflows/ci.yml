@@ -39,7 +39,12 @@ jobs:
       - run: rustup show active-toolchain
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets -- -D warnings
+      # Local OCR (D-048): the scan tests run against the real engine with Hebrew.
+      - name: Tesseract with Hebrew
+        run: sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-heb
       - run: cargo test
+        env:
+          DV_REQUIRE_OCR: "1"
       - name: IPC TypeScript bindings are up to date
         run: git diff --exit-code -- apps/desktop/src/ipc/generated
       - run: cargo xtask check-invariants
@@ -84,6 +89,40 @@ jobs:
       - run: cargo test --release -p dv-vault -p dv-egress -p dv-ingest -p dv-sandbox
       - name: First run (create, close, open again; the real Argon2 cost)
         run: cargo test --release -p dv-core --test first_run -- --ignored
+
+  windows-shell:
+    name: Windows – desktop shell on the FIPS module, as released
+    # D-047: the release is built on the FIPS 140-3 module (S-6), and the shell's only native
+    # Windows code (locked memory, crash reports, Windows Hello) runs here before it ships.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+      - name: FIPS build tools
+        run: |
+          choco install nasm ninja -y --no-progress
+          echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: apps/desktop/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: apps/desktop
+      # The shell embeds the built UI at compile time.
+      - run: pnpm build
+        working-directory: apps/desktop
+      - run: cargo test --release -p dv-vault --features fips
+      - run: cargo clippy -p dv-desktop --features fips -- -D warnings
+      - run: cargo test --release -p dv-desktop --features fips
 
   frontend:
     name: UI – typecheck, lint, tests, build, audit
@@ -167,6 +206,11 @@ jobs:
         run: |
           choco install nasm ninja -y --no-progress
           echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      # The installer carries the OCR engine (D-048); built from source, pinned.
+      - name: OCR engine (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: apps/desktop/src-tauri/windows/fetch-ocr.ps1
       - name: Clippy on the desktop shell
         run: cargo clippy -p dv-desktop -- -D warnings
       - name: Build installer (unsigned; signing is phase 8)

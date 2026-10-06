@@ -8,6 +8,7 @@ import type { GrammaticalGender } from "../ipc/generated/GrammaticalGender";
 import type { Role } from "../ipc/generated/Role";
 import { Dialog, ErrorLine } from "./ui";
 import "./NewCaseDialog.css";
+import { useAi } from "../ai";
 
 export interface PersonRow {
   id: string | null;
@@ -108,6 +109,7 @@ export function NameMatches({ found }: { found: NameMatch[] }) {
 
 export function NewCaseDialog({ onClose, onCreated, folderId = null }: { onClose: () => void; onCreated: (id: string) => void; folderId?: string | null }) {
   const { fail } = useApp();
+  const ai = useAi();
   const [code, setCode] = useState(`תיק-${nextCode()}`);
   const [gender, setGender] = useState<GrammaticalGender>("male");
   const [years, setYears] = useState("");
@@ -152,7 +154,7 @@ export function NewCaseDialog({ onClose, onCreated, folderId = null }: { onClose
   }
 
   return (
-    <Dialog title="תיק חדש" subtitle="השמות נשמרים מוצפנים ומוסתרים לפני כל שליחה ל-Claude." onClose={onClose}
+    <Dialog title="תיק חדש" subtitle={`השמות נשמרים מוצפנים ומוסתרים לפני כל שליחה ל-${ai}.`} onClose={onClose}
       footer={
         <>
           <span className="grow" />
@@ -185,8 +187,8 @@ export function NewCaseDialog({ onClose, onCreated, folderId = null }: { onClose
 
         <div className="card consent">
           <label className="row"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-            <b>ההורים חתמו על הסכמה לשימוש ב-Claude בכתיבת הדוח</b></label>
-          <p className="hint">בלי הסכמה רשומה אפשר לעבוד בתיק, אבל לא לשלוח ממנו ל-Claude.</p>
+            <b>ההורים חתמו על הסכמה לשימוש ב-{ai} בכתיבת הדוח</b></label>
+          <p className="hint">בלי הסכמה רשומה אפשר לעבוד בתיק, אבל לא לשלוח ממנו ל-{ai}.</p>
           {consent && (
             <div className="row wrap">
               <div className="field">

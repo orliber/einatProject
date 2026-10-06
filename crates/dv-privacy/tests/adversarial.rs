@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use dv_domain::{passage_ranges, Identity, Role};
 use dv_privacy::text::{is_valid_prefix, normalize};
 use dv_privacy::{
-    clear, filter, filter_split, AutoKind, FilterOutcome, GateRequest, PrivacyContext,
+    clear, filter, filter_split, ocr_misreads, AutoKind, FilterOutcome, GateRequest, PrivacyContext,
 };
 use proptest::prelude::*;
 
@@ -103,6 +103,7 @@ fn ctx_for<'a>(
         practitioner,
         allowlisted: &|_: &str| false,
         confirmed_names: &|_: &str| false,
+        past_names: &|_: &str| false,
         today: TODAY,
     }
 }
@@ -354,6 +355,7 @@ fn ordinary_words_containing_a_name_are_confirmed_not_rewritten() {
         practitioner: &[],
         allowlisted: &never,
         confirmed_names: &|_: &str| false,
+        past_names: &|_: &str| false,
         today: TODAY,
     };
     let out = filter("במילוי השאלון ובשאלון ASRS, אלון ענה.", &ctx).unwrap();
@@ -378,6 +380,7 @@ fn ordinary_words_containing_a_name_are_confirmed_not_rewritten() {
         practitioner: &[],
         allowlisted: &confirmed,
         confirmed_names: &|_: &str| false,
+        past_names: &|_: &str| false,
         today: TODAY,
     };
     let again = filter("שאלון ההורים הוחזר.", &ctx).unwrap();
@@ -406,6 +409,7 @@ fn ordinary_words_containing_a_name_are_confirmed_not_rewritten() {
         practitioner: &[],
         allowlisted: &|_: &str| false,
         confirmed_names: &is_name,
+        past_names: &|_: &str| false,
         today: TODAY,
     };
     let named = filter("הגננת סיפרה שאלון מתקשה במעברים.", &ctx).unwrap();
@@ -475,6 +479,7 @@ fn declared_names_that_are_words_pass_only_as_words() {
         practitioner: &practitioner,
         allowlisted: &allow,
         confirmed_names: &|_: &str| false,
+        past_names: &|_: &str| false,
         today: TODAY,
     };
     let case_tags: HashSet<String> = ids.iter().map(|i| i.tag.clone()).collect();
@@ -562,6 +567,7 @@ fn declared_names_in_arabic_script_never_leak() {
         practitioner: &practitioner,
         allowlisted: &allow,
         confirmed_names: &|_: &str| false,
+        past_names: &|_: &str| false,
         today: TODAY,
     };
     let case_tags: HashSet<String> = ids.iter().map(|i| i.tag.clone()).collect();
@@ -638,6 +644,7 @@ fn tags_keep_prefixes_and_restore_puts_names_back() {
         practitioner: &[],
         allowlisted: &allow,
         confirmed_names: &|_: &str| false,
+        past_names: &|_: &str| false,
         today: TODAY,
     };
     let out = filter("מיכל סיפרה שנועם עבר לכפר ורדים עם ד\"ר שטרן", &ctx).unwrap();
@@ -665,6 +672,7 @@ fn a_tag_from_another_case_is_blocked_by_the_gate() {
         practitioner: &[],
         allowlisted: &allow,
         confirmed_names: &|_: &str| false,
+        past_names: &|_: &str| false,
         today: TODAY,
     };
     let body = serde_json::json!({"messages": [{"role": "user", "content": "[אדם_1] הגיע"}]});
@@ -701,6 +709,7 @@ fn the_metadata_leak_pattern_is_caught_once_metadata_names_are_declared() {
         practitioner: &practitioner,
         allowlisted: &allow,
         confirmed_names: &|_: &str| false,
+        past_names: &|_: &str| false,
         today: TODAY,
     };
     let text =
@@ -741,6 +750,7 @@ fn noam_ctx<'a>(ids: &'a [Identity], practitioner: &'a [String]) -> PrivacyConte
         practitioner,
         allowlisted: &|_: &str| false,
         confirmed_names: &|_: &str| false,
+        past_names: &|_: &str| false,
         today: TODAY,
     }
 }
@@ -851,6 +861,7 @@ fn filtering_tagged_text_again_keeps_every_word() {
         practitioner: &practitioner,
         allowlisted: &|_: &str| false,
         confirmed_names: &|_: &str| false,
+        past_names: &|_: &str| false,
         today: TODAY,
     };
     for tagged in [
@@ -919,4 +930,81 @@ fn found_names_get_a_role_tag_and_keep_it_in_later_texts() {
         "{}",
         word.tagged
     );
+}
+
+#[test]
+fn names_from_past_reports_are_hidden_and_refused_by_the_gate() {
+    // A fabricated name the lexicon does not know, known only from a past report.
+    let past = |t: &str| t == normalize("תמוזי") || t == normalize("גיל");
+    let practitioner = vec!["דנה כהן-לוי".to_owned()];
+    let ids = vec![id("c1", Role::Child, "[ילד]", "אלון", &[])];
+    let ctx = PrivacyContext {
+        past_names: &past,
+        ..ctx_for(&ids, &practitioner, "c1")
+    };
+    for text in ["אלון סיפר שתמוזי בא לבקר.", "הוא נתן את הכדור ולתמוזי."]
+    {
+        let out = filter(text, &ctx).unwrap();
+        assert!(!out.tagged.contains("תמוזי"), "{}", out.tagged);
+        assert!(
+            out.auto_hidden.iter().any(|a| a.reason == "שם מדוח ישן"),
+            "{:?}",
+            out.auto_hidden
+        );
+    }
+    // An everyday word is never a past name: "בגיל 3" stays.
+    let out = filter("בגיל 3 הוא הלך.", &ctx).unwrap();
+    assert!(out.tagged.contains("בגיל 3"), "{}", out.tagged);
+
+    // The gate refuses one that reaches it unhidden.
+    let body = serde_json::json!({"messages": [{"role": "user", "content": "תמוזי בא לבקר."}]});
+    let case_tags: HashSet<String> = ["[ילד]".to_owned()].into();
+    let req = GateRequest {
+        body: &body,
+        ctx: &ctx,
+        case_tags: &case_tags,
+        unresolved_suspects: 0,
+        canaries: &[],
+        max_bytes: 200_000,
+    };
+    let blocked = clear(&req).unwrap_err();
+    assert!(
+        blocked.reasons.iter().any(|r| r.code == "past_report_name"),
+        "{:?}",
+        blocked.reasons
+    );
+}
+
+#[test]
+fn ocr_misreads_of_a_declared_name_are_found_one_letter_away() {
+    // Fabricated scan text: OCR read "אלון" as "אלוו" (ו for ן) and "אלוז".
+    let practitioner = vec!["דנה כהן-לוי".to_owned()];
+    let ids = vec![id("c1", Role::Child, "[ילד]", "אלון", &[])];
+    let ctx = ctx_for(&ids, &practitioner, "c1");
+    let scan = "ואלוו הגיע לגן. אלוז שיחק בחול. אלון צייר. האלוף ניצח.";
+    let found: Vec<(String, String)> = ocr_misreads(scan, &ctx)
+        .into_iter()
+        .map(|m| (m.written, m.tag))
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            ("אלוו".to_owned(), "[ילד]".to_owned()),
+            ("אלוז".to_owned(), "[ילד]".to_owned())
+        ]
+    );
+    // Typed text keeps the stricter near-spelling rule: ז is not a weak letter.
+    assert!(filter(scan, &ctx).unwrap().tagged.contains("אלוז"));
+
+    // Kept as spellings of the name, they are hidden everywhere and refused by the gate.
+    let ids = vec![id("c1", Role::Child, "[ילד]", "אלון", &["אלוו", "אלוז"])];
+    let ctx = ctx_for(&ids, &practitioner, "c1");
+    let out = filter(scan, &ctx).unwrap();
+    assert!(
+        !out.tagged.contains("אלוו") && !out.tagged.contains("אלוז"),
+        "{}",
+        out.tagged
+    );
+    assert!(out.tagged.contains("האלוף"), "{}", out.tagged);
+    assert!(!gate_with("אלוז שיחק בחול.", &ids, "c1").cleared);
 }

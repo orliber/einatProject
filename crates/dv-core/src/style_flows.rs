@@ -8,6 +8,7 @@ use dv_domain::{
     Age, Author, CaseMeta, Consent, GrammaticalGender, IdentityInput, InputKind, Role,
 };
 use dv_egress::{EgressError, Transport};
+use dv_privacy::text::normalize;
 use dv_privacy::ClearedPayload;
 use serde_json::{json, Value};
 
@@ -517,4 +518,74 @@ fn deleting_and_resetting() {
     core.reset_style().unwrap();
     let o = core.style_overview().unwrap();
     assert!(o.active.is_none() && o.versions.is_empty());
+}
+
+#[test]
+fn names_from_a_past_report_are_kept_only_as_hashes_and_hidden_in_every_case() {
+    let (_dir, mut core) = vault(None);
+    let source = upload(&mut core);
+    let hashes =
+        |core: &mut Core| crate::style::past_name_hmacs(core.vault_ref().unwrap()).unwrap();
+    let kept = hashes(&mut core);
+    let hmac = |core: &mut Core, w: &str| core.vault_ref().unwrap().token_hmac(&normalize(w));
+    for name in ["יואב", "מירב", "אורית"] {
+        assert!(kept.contains(&hmac(&mut core, name)), "{name}");
+    }
+    // Everyday words are never kept, or "בגיל" would be hidden everywhere.
+    assert!(!kept.contains(&hmac(&mut core, "גיל")));
+
+    // A new case, a material that mentions the past report's child: hidden, and not sent.
+    let case_id = case(&mut core);
+    let prepared = core
+        .preview_filter(&case_id, "בהפסקה הוא שיחק שוב עם יואב.")
+        .unwrap();
+    assert!(!prepared.tagged.contains("יואב"), "{}", prepared.tagged);
+    assert!(
+        prepared
+            .auto_hidden
+            .iter()
+            .any(|a| a.token == "יואב" && a.reason == "שם מדוח ישן"),
+        "{:?}",
+        prepared.auto_hidden
+    );
+
+    core.delete_style_source(&source.id).unwrap();
+    assert!(
+        hashes(&mut core).is_empty(),
+        "deleting the report deletes its names"
+    );
+}
+
+#[test]
+fn a_paragraph_whose_sentences_are_unlike_hers_gets_a_gentle_note() {
+    // Fabricated: her past reports use sentences of 8–12 words.
+    let sentence = |n: usize| vec!["מילה"; n].join(" ");
+    let text: String = (0..40).map(|i| sentence(8 + i % 5) + ". ").collect();
+    let source = super::StoredSource {
+        title: "דוח".into(),
+        format: "text".into(),
+        parts: vec![super::StoredPart {
+            section: None,
+            heading: String::new(),
+            text,
+        }],
+        analysis: None,
+    };
+    assert!(
+        super::measure(&[]).is_none(),
+        "nothing to measure, no notes"
+    );
+    let fp = super::measure(&[source]).unwrap();
+    let long = format!("{}. {}.", sentence(30), sentence(28));
+    let note = super::style_note(&fp, &long).unwrap();
+    assert!(note.starts_with("משפטים ארוכים מהרגיל אצלך"), "{note}");
+    let short = format!("{}. {}. {}.", sentence(3), sentence(4), sentence(3));
+    assert!(super::style_note(&fp, &short)
+        .unwrap()
+        .starts_with("משפטים קצרים"));
+    assert!(super::style_note(&fp, &format!("{}. {}.", sentence(10), sentence(9))).is_none());
+    assert!(
+        super::style_note(&fp, &sentence(40)).is_none(),
+        "one sentence says little"
+    );
 }

@@ -12,6 +12,8 @@ import { Toast } from "./components/ui";
 import { IdleWarning } from "./components/IdleWarning";
 import { UnsavedNotice } from "./components/Unsaved";
 import { applyTextSize, readTextSize, stepTextSize } from "./textSize";
+import { ShortcutsSheet, useShortcutsSheet } from "./components/ShortcutsSheet";
+import { isCombo, KEYS } from "./shortcuts";
 
 export type Route =
   | { name: "cases" }
@@ -28,6 +30,8 @@ export interface AppApi {
   /** Shows the error; a "locked" error returns to the lock screen. */
   fail: (e: UiError) => string;
   lockNow: () => Promise<void>;
+  /** The keyboard shortcuts sheet (also F1). */
+  showShortcuts?: () => void;
 }
 
 export const AppContext = createContext<AppApi | null>(null);
@@ -111,7 +115,8 @@ export function App() {
   useEffect(() => {
     if (!unlocked) return;
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "l") {
+      // By the physical key: with the Hebrew layout on, Ctrl+L is "ך" (UX-5).
+      if (isCombo(e, KEYS.lock)) {
         e.preventDefault();
         void lockNow();
       }
@@ -142,9 +147,9 @@ export function App() {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
       const now = readTextSize();
       let next: number | null = null;
-      if (e.key === "+" || e.key === "=") next = stepTextSize(now, 1);
-      else if (e.key === "-") next = stepTextSize(now, -1);
-      else if (e.key === "0") next = 100;
+      if (e.key === "+" || e.key === "=" || e.code === "Equal" || e.code === "NumpadAdd") next = stepTextSize(now, 1);
+      else if (e.key === "-" || e.code === "Minus" || e.code === "NumpadSubtract") next = stepTextSize(now, -1);
+      else if (e.key === "0" || e.code === "Digit0" || e.code === "Numpad0") next = 100;
       if (next === null) return;
       e.preventDefault();
       applyTextSize(next);
@@ -152,6 +157,8 @@ export function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  const sheet = useShortcutsSheet(unlocked);
 
   const keepWorking = useCallback(async () => {
     await ipc.touch().catch(() => undefined);
@@ -174,7 +181,7 @@ export function App() {
     return <LockScreen status={status} onUnlocked={(s) => { setStatus(s); setRoute({ name: "cases" }); }} />;
   }
 
-  const api: AppApi = { status, go: setRoute, refresh, notify: setToast, fail, lockNow };
+  const api: AppApi = { status, go: setRoute, refresh, notify: setToast, fail, lockNow, showShortcuts: sheet.show };
   return (
     <QueryClientProvider client={queryClient}>
     <AppContext.Provider value={api}>
@@ -185,6 +192,7 @@ export function App() {
       {route.name === "settings" && <SettingsScreen />}
       {toast && <Toast text={toast} onDone={() => setToast(null)} />}
       <UnsavedNotice />
+      {sheet.open && <ShortcutsSheet onClose={sheet.close} />}
       {status.idle_lock_in != null && status.idle_lock_in <= 75 && (
         <IdleWarning seconds={status.idle_lock_in} onKeep={() => void keepWorking()} />
       )}

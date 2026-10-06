@@ -18,6 +18,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aead"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d122413f284cf2d62fb1b7db97e02edb8cda96d769b16e443a4f6195e35662b0"
+dependencies = [
+ "crypto-common 0.1.7",
+ "generic-array",
+]
+
+[[package]]
 name = "aes"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -26,6 +36,20 @@ dependencies = [
  "cfg-if",
  "cipher",
  "cpufeatures 0.2.17",
+]
+
+[[package]]
+name = "aes-gcm"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "831010a0f742e1209b3bcea8fab6a8e149051ba6099432c8cb2cc117dec3ead1"
+dependencies = [
+ "aead",
+ "aes",
+ "cipher",
+ "ctr",
+ "ghash",
+ "subtle",
 ]
 
 [[package]]
@@ -701,6 +725,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78c8292055d1c1df0cce5d180393dc8cce0abec0a7102adb6c7b1eef6016d60a"
 dependencies = [
  "generic-array",
+ "rand_core 0.6.4",
  "typenum",
 ]
 
@@ -741,6 +766,15 @@ name = "ctor"
 version = "1.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "914a755b7c2d4af2bdcff7ce1739e2db9a1b81a9b07123d8015786ae03c0980d"
+
+[[package]]
+name = "ctr"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0369ee1ad671834580515889b80f2ea915f23b8be8d0daa4bbaf2ac5c7590835"
+dependencies = [
+ "cipher",
+]
 
 [[package]]
 name = "ctutils"
@@ -992,7 +1026,7 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
 name = "dv-ai"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "dv-domain",
  "serde",
@@ -1003,7 +1037,7 @@ dependencies = [
 
 [[package]]
 name = "dv-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "aws-lc-rs",
  "dv-ai",
@@ -1025,7 +1059,7 @@ dependencies = [
 
 [[package]]
 name = "dv-desktop"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "arboard",
  "dv-core",
@@ -1037,12 +1071,13 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-build",
+ "windows",
  "zeroize",
 ]
 
 [[package]]
 name = "dv-domain"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1052,7 +1087,7 @@ dependencies = [
 
 [[package]]
 name = "dv-egress"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "aws-lc-rs",
  "dv-privacy",
@@ -1066,22 +1101,26 @@ dependencies = [
 
 [[package]]
 name = "dv-export"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "aws-lc-rs",
  "cfb 0.15.0",
+ "lopdf",
+ "quick-xml",
  "serde",
  "thiserror 2.0.21",
+ "ttf-parser",
  "zeroize",
  "zip",
 ]
 
 [[package]]
 name = "dv-ingest"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "cfb 0.15.0",
  "dv-sandbox",
+ "flate2",
  "pdf-extract",
  "quick-xml",
  "serde",
@@ -1092,7 +1131,7 @@ dependencies = [
 
 [[package]]
 name = "dv-ipc"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "ts-rs",
@@ -1100,7 +1139,7 @@ dependencies = [
 
 [[package]]
 name = "dv-privacy"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "aws-lc-rs",
  "dv-domain",
@@ -1114,14 +1153,14 @@ dependencies = [
 
 [[package]]
 name = "dv-sandbox"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "dv-vault"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "argon2",
  "aws-lc-rs",
@@ -1132,6 +1171,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "unicode-normalization",
+ "windows",
  "zeroize",
 ]
 
@@ -1566,6 +1606,16 @@ dependencies = [
  "r-efi 6.0.0",
  "rand_core 0.10.1",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "ghash"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0d8a4362ccb29cb0b265253fb0a2728f592895ee6854fd9bc13f2ffda266ff1"
+dependencies = [
+ "opaque-debug",
+ "polyval",
 ]
 
 [[package]]
@@ -2831,6 +2881,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
+name = "opaque-debug"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
+
+[[package]]
 name = "openssl-probe"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3059,6 +3115,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "polyval"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d1fe60d06143b2430aa532c94cfe9e29783047f06c0d7fd359a9a51b729fa25"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.2.17",
+ "opaque-debug",
+ "universal-hash",
+]
+
+[[package]]
 name = "pom"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3271,6 +3339,15 @@ checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
 dependencies = [
  "ppv-lite86",
  "rand_core 0.9.5",
+]
+
+[[package]]
+name = "rand_core"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
+dependencies = [
+ "getrandom 0.2.17",
 ]
 
 [[package]]
@@ -4250,6 +4327,7 @@ dependencies = [
  "tokio",
  "tray-icon",
  "url",
+ "uuid",
  "webkit2gtk",
  "webview2-com",
  "window-vibrancy",
@@ -4272,6 +4350,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "tauri-codegen",
  "tauri-utils",
  "tauri-winres",
  "walkdir",
@@ -4375,12 +4454,14 @@ version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4dd257082deff79550de3409ed146104aeaf86fe38649615b04a304144939677"
 dependencies = [
+ "aes-gcm",
  "anyhow",
  "brotli",
  "cargo_metadata 0.19.2",
  "ctor",
  "dom_query",
  "dunce",
+ "getrandom 0.3.4",
  "glob",
  "http",
  "infer",
@@ -4398,6 +4479,7 @@ dependencies = [
  "serde-untagged",
  "serde_json",
  "serde_with",
+ "serialize-to-javascript",
  "swift-rs",
  "thiserror 2.0.21",
  "toml 1.1.6+spec-1.1.0",
@@ -4853,6 +4935,16 @@ name = "unicode-segmentation"
 version = "1.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
+
+[[package]]
+name = "universal-hash"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc1de2c688dc15305988b563c3854064043356019f97a4b46276fe734c4f07ea"
+dependencies = [
+ "crypto-common 0.1.7",
+ "subtle",
+]
 
 [[package]]
 name = "untrusted"
@@ -5708,7 +5800,7 @@ checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
 
 [[package]]
 name = "xtask"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "aws-lc-rs",
  "cargo_metadata 0.23.1",

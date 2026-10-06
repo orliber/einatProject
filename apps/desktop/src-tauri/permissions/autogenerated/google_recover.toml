@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-google-recover"
+description = "Enables the google_recover command without any pre-configured scope."
+commands.allow = ["google_recover"]
+
+[[permission]]
+identifier = "deny-google-recover"
+description = "Denies the google_recover command without any pre-configured scope."
+commands.deny = ["google_recover"]

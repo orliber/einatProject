@@ -14,6 +14,8 @@ workspace = true
 # Starts the worker contained: AppContainer and job object on Windows (D-044).
 dv-sandbox.workspace = true
 cfb = "0.15.0"
+# Bounded inflate of scanned page images (already in the tree through lopdf).
+flate2 = "1.1"
 pdf-extract = "0.12"
 quick-xml = "0.42"
 serde.workspace = true

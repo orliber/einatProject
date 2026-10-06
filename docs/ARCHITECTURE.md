@@ -44,7 +44,7 @@
 | `dv-vault` | KDF, מפתחות, SQLCipher, AEAD, נעילה, יומן, env_checks, קשירה לחומרה | `aws-lc-rs` (fips), `argon2`, `rusqlite` (sqlcipher), `zeroize`, `secrecy`, `keyring` | רשת |
 | `dv-privacy` | שכבות 1–7, `variants_he`, NER (`ort` + `tokenizers`), **gate** ⇒ `ClearedPayload` | `ort`, `tokenizers`, `aho-corasick`, `regex` | רשת |
 | `dv-ai` | context builder, פרומפטים, סכמות, פעולות מהירות, פענוח פלט | `serde` | רשת. **בונה בקשות בלבד** |
-| `dv-egress` | שליחה ל-Anthropic: רשימה לבנה של endpoints ודגמים, streaming, retry, מגבלות | `reqwest` (rustls, בלי שורשי מערכת), `webpki-roots` | כל דבר חוץ מ-`ClearedPayload` |
+| `dv-egress` | שליחה ל-AI שנבחר (Anthropic כברירת מחדל, או OpenAI / Google לפי D-040): רשימה לבנה של endpoints ודגמים, streaming, retry, מגבלות | `reqwest` (rustls, בלי שורשי מערכת), `webpki-roots` | כל דבר חוץ מ-`ClearedPayload` |
 | `dv-domain` | תיקים, סעיפים, ציונים, `interpretation`, DSM | — | רשת |
 | `dv-ingest` | ה-worker: pdfium, DOCX (`zip` + `quick-xml`), OCR, חילוץ מטא-דאטה | `pdfium-render` | רשת, מפתחות |
 | `dv-export` | DOCX מתבנית, הצפנת ECMA-376 Agile, `restore` | `zip`, `quick-xml`, `cfb` | רשת |
@@ -63,7 +63,8 @@
 MK (256 ביט אקראי) – עטוף בנפרד בכל "חריץ" (slot) ב-vault.header, כמו LUKS:
    slot password      : KEK = HKDF(Argon2id(סיסמה, salt 32B, m=256MiB–1GiB, t=3, p=4))
    slot recovery      : KEK = HKDF(ערכת שחזור 256 ביט)
-   slot windows_hello : KEK משוחרר ע"י מפתח TPM של Windows Hello (PIN / פנים)     [שלב 2ב]
+   slot google        : KEK = HKDF(מפתח בגוגל דרייב ‖ מפתח חתום ב-DPAPI במחשב)   (D-041)
+   slot windows_hello : KEK = HKDF(חתימת Windows Hello על אתגר אקראי), מפתח ב-TPM   (D-047)
    slot macos         : KEK ב-Keychain עם access control של Touch ID / סיסמת Mac    [שלב 2ב]
 
 MK ─ HKDF ─► K_header_mac, K_audit_mac, K_index (HMAC לחיפוש)
@@ -123,8 +124,10 @@ audit(seq PK, ts, event, case_ref /* HMAC של case_id */, meta_json_enc, prev_m
 ```
 
 ## Egress – כללי יציאה (`dv-egress`)
-- Host יחיד ל-AI: `api.anthropic.com`. TLS 1.3 בלבד, שורשי `webpki-roots` (לא של המערכת).
+- Host ל-AI: `api.anthropic.com` כברירת מחדל. אם עינת בחרה בהגדרות ChatGPT או Gemini (D-040): `api.openai.com` (`POST /v1/chat/completions`), `generativelanguage.googleapis.com` (`POST /v1beta/models/{model}:generateContent`) או `api.mistral.ai` (`POST /v1/chat/completions`), רק לדגמים מהרשימה הלבנה. מודל מקומי: `http://127.0.0.1:11434/api/chat` בלבד (Ollama, בלי TLS כי זה בתוך המחשב). TLS 1.3 בלבד, שורשי `webpki-roots` (לא של המערכת), אותו client לכל הספקים.
+- **ספקים אחרים (D-040, `providers.rs`):** השער מאשר תמיד את אותו גוף בקשה (בצורה של Messages API). אחרי השער, `dv-egress` מעביר את אותן מחרוזות לשדות של הספק, בלי להוסיף שום טקסט חוץ משמות שדות והגדרות קבועות (נבדק בבדיקה). מה שאין לו מקבילה מדויקת (כלים, תמונות, thinking, שדה לא מוכר) נחסם. התשובה מומרת חזרה לאותה צורה, כך שהבדיקות המקומיות של התשובה זהות לכל ספק. ל-OpenAI נשלח `store: false`.
 - **עדכוני תוכנה (D-033, `update.rs`):** GET בלבד ל-hosts של GitHub מהרשימה הלבנה (גם ב-redirect), בלי נתונים מהכספת. הודעת גרסה חתומה ב-Ed25519 במפתח ציבורי מקובע, ו-SHA-256 של המתקין. כל ספק = אין עדכון. גרסה חדשה יורדת ונבדקת ברקע, ומותקנת רק בלחיצה (D-038).
+- **שכחתי סיסמה, גוגל (D-041, `google.rs`):** רק `oauth2.googleapis.com` ו-`www.googleapis.com`, הרשאת `drive.appdata` + `openid`, PKCE ומאזין חד-פעמי על 127.0.0.1. הטוקן בזיכרון לפעולה אחת ומבוטל בסופה. נשלח רק מפתח אקראי ושם קובץ מהמזהה האקראי של הכספת.
 - **Endpoints מותרים:** `POST /v1/messages` ו-`POST /v1/messages/count_tokens`. כל השאר לא ממומש.
 - **דגמים מותרים:** רשימה לבנה בקוד של דגמים שזמינים תחת ZDR. דגמים מסוג Covered Models (Fable, Mythos) חסומים. הדגם נבחר בהגדרות מתוך הרשימה.
 - **שדות אסורים:** `metadata`, Files, Batch, code_execution. **חריג יחיד:** `web_search_20250305` (הגרסה הבסיסית, זכאית ל-ZDR), ורק בקריאות של מצב מחקר (D-014), בלי תוכן מהתיק ועם `allowed_domains`.
@@ -135,7 +138,7 @@ audit(seq PK, ts, event, case_ref /* HMAC של case_id */, meta_json_enc, prev_m
 
 ## הקשחת Tauri
 - CSP: `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`.
-- Isolation pattern. capabilities: רק הפקודות שלנו. אין plugins של fs, shell או http. דיאלוגים לבחירת קבצים נפתחים מצד Rust.
+- Isolation pattern (D-047): `apps/desktop/isolation/` מעביר רק את הפקודות של `build.rs`. capabilities: רק הפקודות שלנו. אין plugins של fs, shell או http. דיאלוגים לבחירת קבצים נפתחים מצד Rust.
 - `contentProtected: true` בהגדרות החלון, אבל ההגנה מוסרת בזמן ריצה ומוסתרת מההגדרות בינתיים (D-039; המתג של D-037 נשאר בקוד), DevTools כבויים ב-release, ניווט חיצוני חסום.
 - פונטים (Frank Ruhl Libre, Assistant, ברישיון OFL) ארוזים מקומית.
 
@@ -153,7 +156,7 @@ crates/  dv-vault/ dv-privacy/ dv-ai/ dv-egress/ dv-domain/ dv-ingest/ dv-export
 apps/desktop/  src/ (React+TS+Vite)   src-tauri/
 xtask/                     בדיקות אינווריאנטים, סריקת pre-commit (Rust, בלי Python)
 knowledge/                 *.yaml (status: pending|approved)
-templates/report.docx
+templates/report_structure.json   (תבנית ה-Word של עינת נשמרת בכספת, D-049)
 tests/fixtures/            נתונים בדויים בלבד
 tools/dev-only/            כלי אימות לפיתוח (למשל msoffcrypto). לא נארזים.
 docs/

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useApp } from "../../App";
 import { ipc, type CaseDetail, type ReportSettings } from "../../ipc/client";
 import { kindLabel } from "../../i18n/he";
@@ -9,8 +9,11 @@ import { ProgressLine } from "../../components/Progress";
 import { useHoldUnsaved } from "../../components/Unsaved";
 import { useRotatingPlaceholder } from "../../components/Rotating";
 import { DRAFT_HINTS, PARAGRAPH_HINTS } from "../../i18n/suggestions";
+import { ParagraphVersions } from "../../components/ParagraphVersions";
+import { isCombo, KEYS } from "../../shortcuts";
 import type { CaseApi } from "../CaseScreen";
 import "./ReportView.css";
+import { useAi } from "../../ai";
 
 type Section = CaseDetail["sections"][number];
 
@@ -35,6 +38,8 @@ export function ReportView({ api, focus }: { api: CaseApi; onWriteAll: () => voi
     if (!el) return;
     el.scrollIntoView({ block: "start", behavior: "smooth" });
     el.classList.add("a4-flash");
+    // The keyboard follows the eye: focus lands on the section's heading (UX-5, UX-7).
+    el.querySelector<HTMLElement>(".a4-heading")?.focus({ preventScroll: true });
     const t = setTimeout(() => el.classList.remove("a4-flash"), 1600);
     return () => clearTimeout(t);
   }, [focus]);
@@ -51,7 +56,7 @@ export function ReportView({ api, focus }: { api: CaseApi; onWriteAll: () => voi
     <div className="view">
       <div className="report-desk">
         {/* The page is the whole screen (D-036); one quiet line says how to work on it. */}
-        <p className="report-hint">לוחצים על פסקה כדי לערוך · ✦ ליד פסקה (במעבר עכבר) לשנות עם AI · בין פסקאות: "+ פסקה משלי כאן"</p>
+        <p className="report-hint">לוחצים על פסקה כדי לערוך · ✦ ליד פסקה (במעבר עכבר) לשנות עם AI · בין פסקאות: "+ פסקה משלי כאן" · F1: קיצורי מקלדת</p>
         <article className="a4" style={{ fontFamily: settings?.font ? `"${settings.font}", var(--font-display)` : undefined }} aria-label="הדוח, כמו בקובץ">
           <header className="a4-header">{settings?.confidentiality}</header>
           <h1 className="a4-title">{settings?.title ?? "דוח אבחון פסיכולוגי"}</h1>
@@ -121,6 +126,7 @@ function Popover({ label, onClose, children }: { label: string; onClose: () => v
 
 function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
   const { go, fail } = useApp();
+  const ai = useAi();
   const { caseId, reload, detail } = api;
   /** A paragraph being edited in place, or a new one at `at`: "first", "end" or after a paragraph's id. */
   const [editing, setEditing] = useState<{ id: string | null; text: string; at?: string } | null>(null);
@@ -128,6 +134,8 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
   const [open, setOpen] = useState<"sources" | "change" | null>(null);
   /** The paragraph whose "✦ with Claude" card is open. */
   const [paraPop, setParaPop] = useState<string | null>(null);
+  /** The paragraph whose earlier wordings are open (UX-4). */
+  const [history, setHistory] = useState<string | null>(null);
   /** The paragraph whose "why did you write this?" card is open (AI-7). */
   const [whyPop, setWhyPop] = useState<string | null>(null);
   /** The paragraph whose delete button asks "למחוק?". */
@@ -194,15 +202,18 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
     editing?.id === p.id ? (
       <div key={p.id}>{editor}</div>
     ) : (
-      <div key={p.id} className={paraPop === p.id || deleting === p.id ? "a4-para is-active" : "a4-para"}>
+      <div key={p.id} className={paraPop === p.id || deleting === p.id || history === p.id ? "a4-para is-active" : "a4-para"}>
         <p className={p.by_ai ? "a4-p a4-editable" : "a4-p a4-editable a4-own"} tabIndex={0} title={note ?? "לחיצה לעריכה"}
+          aria-label={`${p.status === "proposed" ? "טיוטה שממתינה לאישור" : "פסקה"}${p.by_ai ? " (AI)" : ""}: ${p.text}`}
+          aria-describedby={`keys-${s.key}`}
           onClick={() => setEditing({ id: p.id, text: p.text })}
-          onKeyDown={(e) => { if (e.key === "Enter") setEditing({ id: p.id, text: p.text }); }}>
+          onKeyDown={(e) => paraKey(e, p)}>
           {p.text}
         </p>
         {p.warnings.map((w, i) => (
           <div key={i} className="note-warn small"><WarnIcon /><span>{w}</span></div>
         ))}
+        {p.style_note && <span className="small muted style-note">{p.style_note}</span>}
         {!busy && (
           <span className="a4-pop-anchor a4-para-tool">
             {p.by_ai && <button type="button" className="a4-why" aria-expanded={whyPop === p.id} aria-label="למה כתבת את זה?" title="למה כתבת את זה? (המקורות של הפסקה)"
@@ -215,6 +226,15 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
             )}
             {canWrite && <button type="button" className="a4-ai" aria-expanded={paraPop === p.id} aria-label="לשנות את הפסקה עם AI" title="לשנות את הפסקה עם AI"
               onClick={() => setParaPop(paraPop === p.id ? null : p.id)}><SparkIcon /></button>}
+            {p.has_versions && (
+              <button type="button" className="a4-hist" aria-expanded={history === p.id} aria-label="גרסאות קודמות של הפסקה" title="גרסאות קודמות (Ctrl+Shift+H)"
+                onClick={() => { setParaPop(null); setHistory(history === p.id ? null : p.id); }}><HistoryIcon /></button>
+            )}
+            {history === p.id && (
+              <Popover label="גרסאות קודמות של הפסקה" onClose={() => setHistory(null)}>
+                <ParagraphVersions caseId={caseId} draftId={p.id} onRestored={async () => { setHistory(null); await reload(); }} />
+              </Popover>
+            )}
             {deleting === p.id ? (
               <span className="a4-del-ask" role="group" aria-label="מחיקת הפסקה">
                 <span>למחוק?</span>
@@ -250,7 +270,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
         )}
         {reworded.get(p.id) && (
           <div className="a4-reword">
-            <span className="a4-flag">ניסוח חדש של Claude לפסקה הזאת</span>
+            <span className="a4-flag">ניסוח חדש של {ai} לפסקה הזאת</span>
             <p className="a4-p">{reworded.get(p.id)?.text}</p>
             <span className="row">
               <button type="button" className="btn btn-primary btn-small" onClick={() => void act(() => ipc.approveParagraph(caseId, reworded.get(p.id)?.id ?? ""))}>✓ להחליף</button>
@@ -260,6 +280,28 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
         )}
       </div>
     );
+
+  /** Keys on a paragraph that has the focus (UX-5). */
+  function paraKey(e: ReactKeyboardEvent, p: Section["paragraphs"][number]) {
+    if (e.target !== e.currentTarget) return;
+    const ev = e.nativeEvent;
+    if (isCombo(ev, KEYS.approveDraft) && pending.length > 0) {
+      e.preventDefault();
+      void act(async () => { for (const x of pending) await ipc.approveParagraph(caseId, x.id); });
+    } else if (isCombo(ev, KEYS.approve)) {
+      e.preventDefault();
+      if (p.status === "proposed") void act(() => ipc.approveParagraph(caseId, p.id));
+    } else if (isCombo(ev, KEYS.changeWithAi)) {
+      e.preventDefault();
+      if (canWrite && !busy) { setHistory(null); setParaPop(p.id); }
+    } else if (isCombo(ev, KEYS.versions)) {
+      e.preventDefault();
+      if (p.has_versions && !busy) { setParaPop(null); setHistory(p.id); }
+    } else if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      setEditing({ id: p.id, text: p.text });
+    }
+  }
 
   const editor = (
     <div className="a4-edit">
@@ -295,7 +337,8 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
   return (
     <div id={`sec-${s.key}`} className={`a4-section${pending.length ? " has-pending" : ""}`}>
       <div className="a4-heading-row">
-        <h3 className="a4-heading">{s.title}</h3>
+        <h3 className="a4-heading" tabIndex={-1}>{s.title}</h3>
+        <span id={`keys-${s.key}`} className="visually-hidden">Enter לעריכה, Ctrl+Enter לאישור, Ctrl+K לשינוי עם AI</span>
         <span className="a4-tools">
 
         </span>
@@ -312,7 +355,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
             {open === "sources" && (
               <Popover label={`מאיזה חומרים לכתוב את "${s.title}"`} onClose={() => setOpen(null)}>
                 <b>מאיזה חומרים לכתוב את "{s.title}"?</b>
-                <span className="small muted">מסמנים ומורידים. הבחירה שלך גוברת על המיון של Claude.</span>
+                <span className="small muted">מסמנים ומורידים. הבחירה שלך גוברת על המיון של {ai}.</span>
                 <div className="a4-pop-list">
                   {detail.inputs.map((i) => {
                     const r = detail.routing.find((x) => x.input_id === i.id);
@@ -364,11 +407,11 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
       {pending.length > 0 && !job && (
         <div className="a4-pending">
           <div className="a4-pending-head">
-            <span className="a4-flag">טיוטה של Claude · עוד לא בדוח</span>
+            <span className="a4-flag">טיוטה של {ai} · עוד לא בדוח</span>
             <span className="row">
               <button type="button" className="btn btn-primary btn-small" onClick={() => void act(async () => { for (const p of pending) await ipc.approveParagraph(caseId, p.id); })}>✓ לאשר</button>
               <span className="a4-pop-anchor">
-                <button type="button" className="btn btn-small" aria-expanded={open === "change"} disabled={busy} onClick={() => setOpen(open === "change" ? null : "change")}>✦ לשנות עם Claude</button>
+                <button type="button" className="btn btn-small" aria-expanded={open === "change"} disabled={busy} onClick={() => setOpen(open === "change" ? null : "change")}>✦ לשנות עם {ai}</button>
                 {open === "change" && (
                   <Popover label="מה לשנות בטיוטה" onClose={() => setOpen(null)}>
                     <b>מה לשנות בטיוטה?</b>
@@ -402,7 +445,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
       {s.paragraphs.length === 0 && !job && !editing && (
         canWrite ? (
           <span className="a4-gap-row">
-            <button type="button" className="a4-gap" disabled={busy} onClick={() => void write()}>✦ לכתוב עם Claude</button>
+            <button type="button" className="a4-gap" disabled={busy} onClick={() => void write()}>✦ לכתוב עם {ai}</button>
             <button type="button" className="a4-gap a4-gap-own" onClick={() => setEditing({ id: null, text: "", at: "end" })}>+ פסקה משלי</button>
           </span>
         ) : (
@@ -423,6 +466,16 @@ function SparkIcon() {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />
       <path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z" />
+    </svg>
+  );
+}
+
+function HistoryIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 12a9 9 0 1 0 3-6.7" />
+      <path d="M3 4v5h5" />
+      <path d="M12 8v4l3 2" />
     </svg>
   );
 }

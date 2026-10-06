@@ -1,17 +1,19 @@
 //! The encrypted vault (docs/ARCHITECTURE.md → "מפתחות", "סכמה").
 //!
-//! * Master key (MK) wrapped in LUKS-style key slots (password, printed recovery key; Windows
-//!   Hello / Touch ID later) in an authenticated header.
+//! * Master key (MK) wrapped in LUKS-style key slots (password, printed recovery key, Windows
+//!   Hello; Touch ID later) in an authenticated header.
 //! * Three SQLCipher databases (`main`, `identity`, `audit`) with keys derived from MK.
 //! * Inside them, every case value is sealed with the case's own key (AES-256-GCM, AAD bound
 //!   to table/column/row/case), so deleting a case is cryptographic shredding.
 //! * Tamper-evident audit log (HMAC chain + anchor in the header), metadata only.
 
 mod audit;
+pub mod computer_key;
 pub mod crypto;
 mod db;
 pub mod env;
 mod header;
+pub mod hello;
 pub mod password;
 pub mod recovery;
 mod store;
@@ -19,8 +21,9 @@ mod store;
 pub use audit::{AuditEntry, AuditEvent};
 pub use password::{Argon2Params, PolicyViolation, MIN_PASSWORD_CHARS};
 pub use store::{
-    peek_backup, BackupCheck, BackupInfo, BackupPeek, Created, IntegrityReport, Practitioner,
-    Secret, StoredConsultation, StoredStyleProfile, StoredStyleSource, Vault, BACKUP_EXTENSION,
+    peek_backup, BackupCheck, BackupInfo, BackupPeek, Created, DraftVersion, IntegrityReport,
+    Practitioner, Secret, StoredConsultation, StoredStyleProfile, StoredStyleSource, Vault,
+    BACKUP_EXTENSION,
 };
 
 #[derive(Debug, thiserror::Error)]

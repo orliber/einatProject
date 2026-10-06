@@ -11,6 +11,7 @@ import { ipc, type ConsultationSummary, type Prepared } from "../ipc/client";
 import { useRotating, useRotatingPlaceholder } from "../components/Rotating";
 import { CONSULT_HINTS, CONSULT_IDEAS } from "../i18n/suggestions";
 import "./ConsultScreen.css";
+import { useAi } from "../ai";
 
 interface Turn {
   role: "user" | "assistant";
@@ -42,6 +43,7 @@ function when(at: number): string {
 
 /** "Claude is writing…" with the seconds waited, so a long answer never looks stuck. */
 function Typing({ since, approval }: { since: number; approval: string | null }) {
+  const ai = useAi();
   const words = useWords(approval ?? undefined);
   const [t, setT] = useState(() => Date.now());
   useEffect(() => {
@@ -51,10 +53,10 @@ function Typing({ since, approval }: { since: number; approval: string | null })
   const seconds = Math.max(0, Math.round((t - since) / 1000));
   return (
     <div className="chat-row chat-row-ai" role="status">
-      <span className="chat-avatar" aria-hidden="true">C</span>
+      <span className="chat-avatar" aria-hidden="true">{ai.charAt(0)}</span>
       <div className="chat-bubble chat-bubble-ai chat-typing">
         <span className="dots" aria-hidden="true"><i /><i /><i /></span>
-        <span className="muted small">Claude כותב{seconds >= 3 ? ` · ${seconds} שניות` : "…"}{words >= 5 ? ` · ${wordsSoFar(words)}` : ""}</span>
+        <span className="muted small">{ai} כותב{seconds >= 3 ? ` · ${seconds} שניות` : "…"}{words >= 5 ? ` · ${wordsSoFar(words)}` : ""}</span>
         {seconds >= 25 && <span className="muted small">תשובה מעמיקה לוקחת לפעמים עד דקה. אפשר לבחור "מהיר" בהגדרות.</span>}
       </div>
     </div>
@@ -63,6 +65,7 @@ function Typing({ since, approval }: { since: number; approval: string | null })
 
 export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   const { fail, status } = useApp();
+  const ai = useAi();
   const qc = useQueryClient();
   const cases = useQuery({ queryKey: ["cases"], queryFn: ipc.listCases });
   const saved = useQuery({ queryKey: ["consultations"], queryFn: ipc.consultations });
@@ -235,7 +238,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
             {turns.length === 0 && (
               <div className="consult-empty">
                 <h2>{title}</h2>
-                <p className="muted">כלי אבחון, ניסוח, ספרות מקצועית או שיקולים קליניים. Claude מבחין בין ידע מבוסס לדעה, וההחלטה המקצועית נשארת שלך. השיחות נשמרות מוצפנות בכספת, ושיחה על תיק נמחקת יחד איתו.</p>
+                <p className="muted">כלי אבחון, ניסוח, ספרות מקצועית או שיקולים קליניים. {ai} מבחין בין ידע מבוסס לדעה, וההחלטה המקצועית נשארת שלך. השיחות נשמרות מוצפנות בכספת, ושיחה על תיק נמחקת יחד איתו.</p>
                 <span className="label ideas-label">אפשר להתחיל מאחת מאלה</span>
                 <Ideas onPick={(q) => { setMessage(q); input.current?.focus(); }} />
               </div>
@@ -255,14 +258,14 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
                 </div>
               ) : (
                 <div key={i} className="chat-row chat-row-ai">
-                  <span className="chat-avatar" aria-hidden="true">C</span>
+                  <span className="chat-avatar" aria-hidden="true">{ai.charAt(0)}</span>
                   <div className="chat-col">
                     <div className="chat-bubble chat-bubble-ai serif">
                       {t.demo && <span className="chip chip-sand chat-demo">הדגמה</span>}
                       {t.text.split(/\n{2,}/).map((p, j) => <p key={j}>{p}</p>)}
                     </div>
                     <span className="chat-meta">
-                      Claude · {clock(t.at)}
+                      {ai} · {clock(t.at)}
                       <button type="button" className="link-btn chat-copy" onClick={() => void copy(i, t.text)}>{copied === i ? "הועתק ✓" : "העתקה"}</button>
                     </span>
                   </div>
@@ -272,14 +275,14 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
             {waitingSince && <Typing since={waitingSince} approval={sending} />}
             {busy && !waitingSince && !review && (
               <div className="chat-row chat-row-ai">
-                <span className="chat-avatar" aria-hidden="true">C</span>
+                <span className="chat-avatar" aria-hidden="true">{ai.charAt(0)}</span>
                 <div className="chat-bubble chat-bubble-ai chat-typing"><Spinner /> <span className="muted small">בודקת מה יוצא מהמחשב…</span></div>
               </div>
             )}
             <div ref={end} />
           </div>
           <form className="chat-composer" onSubmit={(e) => void ask(e)}>
-            <label htmlFor="consult-q" className="visually-hidden">שאלה ל-Claude</label>
+            <label htmlFor="consult-q" className="visually-hidden">שאלה ל-{ai}</label>
             <div className="chat-input">
               <textarea id="consult-q" ref={input} rows={1} className="grow" placeholder={hint}
                 value={message} onChange={(e) => setMessage(e.target.value)}
