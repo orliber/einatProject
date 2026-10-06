@@ -9,6 +9,12 @@ body,
   height: 100%;
   margin: 0;
 }
+/* Tauri's isolation frame (D-047). Tauri hides it with an inline <style>, which the strict
+   CSP (style-src 'self') blocks, so the frame showed as an empty 300×150 box. It must stay
+   in the page (every command passes through it); it only must not be seen. */
+#__tauri_isolation__ {
+  display: none !important;
+}
 body {
   font-family: var(--font-body);
   background: var(--bg);
