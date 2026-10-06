@@ -601,6 +601,41 @@ fn found_names(data: &PrivacyData, autos: &[AutoHidden]) -> Vec<FoundName> {
     out
 }
 
+/// Names the program kept with the case by itself (not typed by her) that the gate refused
+/// in the outgoing text. They get "להחזיר" on the summary card like any other: without it a
+/// word kept by mistake ("אח") left only "חזרה לעריכה", with nothing on screen to fix.
+fn refused_auto_names(data: &PrivacyData, reasons: &[dv_privacy::BlockReason]) -> Vec<AutoHidden> {
+    let mut out: Vec<AutoHidden> = Vec::new();
+    for r in reasons.iter().filter(|r| r.code == "identity") {
+        let Some(found) = r.detail.as_deref().map(normalize) else {
+            continue;
+        };
+        for i in data.identities.iter().filter(|i| {
+            i.case_id == data.case_id
+                && i.source != IdentitySource::Manual
+                && std::iter::once(&i.value)
+                    .chain(i.aliases.iter())
+                    .any(|v| normalize(v) == found || normalize(v).split(' ').any(|w| w == found))
+        }) {
+            if !out.iter().any(|a| a.tag == i.tag) {
+                out.push(AutoHidden {
+                    token: i.value.clone(),
+                    tag: i.tag.clone(),
+                    role: i.role,
+                    reason: if i.reason.is_empty() {
+                        "נשמר בתיק כשם, ועצר את השליחה".to_owned()
+                    } else {
+                        format!("{} · עצר את השליחה", i.reason)
+                    },
+                    uncertain: true,
+                    kind: AutoKind::Name,
+                });
+            }
+        }
+    }
+    out
+}
+
 /// A section's title as Claude gets it. The title is template text, not case text, yet
 /// "שאלון הסתגלות" holds ש + "אלון" when that is the child's name: then the section's
 /// description goes instead (or nothing), so there is nothing to ask, block or leak.
@@ -1958,6 +1993,11 @@ impl Core {
                     case_opt,
                     &serde_json::json!({ "codes": codes }),
                 )?;
+                for a in refused_auto_names(data, &blocked.reasons) {
+                    if !prepared.auto_hidden.iter().any(|x| x.tag == a.tag) {
+                        prepared.auto_hidden.push(a);
+                    }
+                }
                 prepared.blocked = blocked.reasons;
             }
         }

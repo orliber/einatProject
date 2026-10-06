@@ -3284,3 +3284,41 @@ fn locked_pdf_is_recognised_as_the_original() {
         Err(CoreError::Refused(_))
     ));
 }
+
+/// A word the program kept with the case by itself, refused by the gate: it gets "להחזיר" on
+/// the card instead of leaving her with only "חזרה לעריכה". A name she typed stays refused.
+#[test]
+fn a_kept_word_the_gate_refuses_can_be_restored_from_the_card() {
+    let ident = |value: &str, tag: &str, source: IdentitySource| dv_domain::Identity {
+        id: tag.into(),
+        case_id: "c1".into(),
+        role: Role::Brother,
+        tag: tag.into(),
+        value: value.into(),
+        aliases: vec![],
+        source,
+        reason: "אחרי 'אחות'".into(),
+    };
+    let data = PrivacyData {
+        case_id: "c1".into(),
+        identities: vec![
+            ident("אח", "[אח_1]", IdentitySource::Auto),
+            ident("יואב", "[אח_2]", IdentitySource::Manual),
+        ],
+        practitioner: vec![],
+        allow: HashSet::new(),
+        is_name: HashSet::new(),
+        past: HashSet::new(),
+    };
+    let reason = |detail: &str| dv_privacy::BlockReason {
+        code: "identity".into(),
+        message: "נמצא שם מוצהר בטקסט היוצא".into(),
+        detail: Some(detail.into()),
+    };
+    let offered = refused_auto_names(&data, &[reason("אח"), reason("יואב")]);
+    assert_eq!(offered.len(), 1, "{offered:?}");
+    assert_eq!(
+        (offered[0].token.as_str(), offered[0].tag.as_str()),
+        ("אח", "[אח_1]")
+    );
+}
