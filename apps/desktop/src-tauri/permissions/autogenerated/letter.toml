@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-letter"
+description = "Enables the letter command without any pre-configured scope."
+commands.allow = ["letter"]
+
+[[permission]]
+identifier = "deny-letter"
+description = "Denies the letter command without any pre-configured scope."
+commands.deny = ["letter"]
