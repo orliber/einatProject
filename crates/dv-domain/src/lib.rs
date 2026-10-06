@@ -21,8 +21,8 @@ pub use records::{
 pub use report::{ReportPart, ReportSection, ReportStructure};
 pub use routing::{passage_ranges, passages, Feed, Routing, SectionPassages, Suggestion};
 pub use scores::{
-    check_scores, format_sheet, instruments, sheet_table, Instrument, ScoreEntry, ScoreRow,
-    ScoreSheet,
+    check_scores, format_sheet, instruments, sheet_profiles, sheet_table, Instrument, ScoreEntry,
+    ScoreProfile, ScoreRow, ScoreSheet,
 };
 
 #[derive(Debug, thiserror::Error)]

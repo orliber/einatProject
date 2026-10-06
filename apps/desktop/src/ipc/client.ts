@@ -30,6 +30,8 @@ import type { ParagraphVersionView } from "./generated/ParagraphVersionView";
 import type { PingResponse } from "./generated/PingResponse";
 import type { Prepared } from "./generated/Prepared";
 import type { ReportSettings } from "./generated/ReportSettings";
+import type { TemplateView } from "./generated/TemplateView";
+import type { ParagraphView } from "./generated/ParagraphView";
 import type { Role } from "./generated/Role";
 import type { ScoreSheet } from "./generated/ScoreSheet";
 import type { UsageSummary } from "./generated/UsageSummary";
@@ -105,6 +107,17 @@ export const ipc = {
   setScreenProtection: (on: boolean) => run("set_screen_protection", { on }),
   reportSettings: () => call<ReportSettings>("report_settings"),
   setReportSettings: (settings: ReportSettings) => run("set_report_settings", { settings }),
+  /** Her Word template (EX-1): the file's bytes go as the raw body. */
+  setReportTemplate: async (file: File): Promise<TemplateView> => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    try {
+      return await invoke<TemplateView>("set_report_template", bytes);
+    } catch (e) {
+      throw asUiError(e);
+    }
+  },
+  clearReportTemplate: () => run("clear_report_template"),
+  reportTemplate: () => call<TemplateView | null>("report_template"),
 
   listCases: () => call<CaseSummary[]>("list_cases"),
   createCase: (meta: CaseMeta, identities: IdentityInput[]) => call<string>("create_case", { meta, identities }),
@@ -204,6 +217,23 @@ export const ipc = {
 
   checkExport: (caseId: string) => call<ExportCheck>("check_export", { caseId }),
   exportReport: (caseId: string, password: string | null) => call<string>("export_report", { caseId, password }),
+  /** EX-3: a locked PDF (opens with the password, prints, cannot be changed). */
+  exportPdf: (caseId: string, password: string) => call<string>("export_pdf", { caseId, password }),
+  /** When this vault exported exactly this PDF, or `null` (changed, or not made here). */
+  checkOriginal: async (file: File): Promise<number | null> => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    try {
+      return await invoke<number | null>("check_original", bytes);
+    } catch (e) {
+      throw asUiError(e);
+    }
+  },
+  /** EX-4: a short letter from the approved report, through the same review and gate. */
+  prepareLetter: (caseId: string, audience: "parents" | "school", note: string) =>
+    call<Prepared>("prepare_letter", { caseId, audience, note }),
+  letter: (caseId: string, audience: "parents" | "school") => call<ParagraphView[]>("letter", { caseId, audience }),
+  exportLetter: (caseId: string, audience: "parents" | "school", password: string | null) =>
+    call<string>("export_letter", { caseId, audience, password }),
   /** The file password to the clipboard: out of history and cloud sync, cleared after N seconds (returned). */
   copySecret: (text: string) => call<number>("copy_secret", { text }),
 
@@ -281,6 +311,7 @@ export const ipc = {
 };
 
 export type {
+  ParagraphView,
   StyleAnalysisResult,
   StyleImportPreview,
   StyleItem,
@@ -323,6 +354,7 @@ export type {
   PingResponse,
   Prepared,
   ReportSettings,
+  TemplateView,
   FollowUpView,
   ScoreSheet,
   SectionResult,

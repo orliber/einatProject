@@ -21,7 +21,6 @@ import type { Folder } from "../ipc/generated/Folder";
 import type { NameMatch } from "../ipc/generated/NameMatch";
 import type { Prepared } from "../ipc/generated/Prepared";
 import type { ReportSettings } from "../ipc/generated/ReportSettings";
-import type { TemplateView } from "../ipc/generated/TemplateView";
 import type { ReviewPart } from "../ipc/generated/ReviewPart";
 import type { Role } from "../ipc/generated/Role";
 import type { ScoreSheet } from "../ipc/generated/ScoreSheet";
@@ -144,7 +143,6 @@ export class FakeCore {
   private speed = "balanced";
   private reviewOnlySuspect = false;
   private screenProtection = true;
-  private template: TemplateView | null = null;
   private report: ReportSettings = {
     title: "דוח אבחון פסיכולוגי-התפתחותי",
     font: "David",
@@ -546,7 +544,7 @@ export class FakeCore {
     } else if (ext === "pdf" || ext === "odt") {
       fail("preview", "בהדמיה בדפדפן אפשר לייבא Word או טקסט. קובצי PDF ו-ODT נקראים בתוכנה המותקנת, בתהליך מבודד.");
     } else {
-      fail("unsupported", "בתצוגה בדפדפן אפשר לייבא רק Word (docx) או טקסט. בתוכנה עצמה: גם DOC, ODT, RTF, PDF ותמונה של דף.");
+      fail("unsupported", "אפשר לייבא קובצי Word (docx), ODT, PDF או טקסט.");
     }
     if (!body.trim()) fail("empty", "לא נמצא טקסט במסמך.");
     // Names in the file's properties and margins are kept with the case without asking.
@@ -648,14 +646,6 @@ export class FakeCore {
         return this.report;
       case "set_report_settings":
         this.report = a.settings as ReportSettings;
-        return null;
-      case "report_template":
-        return this.template;
-      case "set_report_template":
-        this.template = { has_marker: false, headers: 1, footers: 0, images: 1, styles_matched: 2, styles_total: 9, size_kb: 24 };
-        return this.template;
-      case "clear_report_template":
-        this.template = null;
         return null;
       case "list_cases":
         return this.cases.filter((c) => c.deletedAt === null).map((c) => this.summary(c));
@@ -971,15 +961,6 @@ export class FakeCore {
           included_sections: d.sections.filter((s) => s.approved).length, score_tables: c.sheets.size, file_name: `דוח אבחון – ${c.meta.code}.docx`,
         } satisfies ExportCheck;
       }
-      case "letter":
-        return [];
-      case "export_pdf":
-        return "בהדמיה בדפדפן לא נוצר קובץ. בתוכנה המותקנת נשמר PDF נעול בסיסמה בתיקיית ההורדות.";
-      case "check_original":
-        return null;
-      case "prepare_letter":
-        return fail("refused", "בהדמיה בדפדפן אין ניסוח מכתבים. בתוכנה המותקנת המכתב נכתב מתוך ההמלצות המאושרות.");
-      case "export_letter":
       case "export_report":
         return "בהדמיה בדפדפן לא נוצר קובץ. בתוכנה המותקנת הדוח נשמר בתיקיית ההורדות, מוצפן בסיסמה.";
       case "set_auto_backup":

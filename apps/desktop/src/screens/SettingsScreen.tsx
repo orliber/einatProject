@@ -8,7 +8,7 @@ import { UpdateSettings } from "../components/Update";
 import { UsageSettings } from "../components/UsageSettings";
 import { ReadinessSettings } from "../components/ReadinessSettings";
 import { ErrorLine } from "../components/ui";
-import { ipc, type ReportSettings } from "../ipc/client";
+import { ipc, type ReportSettings, type TemplateView } from "../ipc/client";
 import { PROVIDERS, providerOf } from "../ai";
 
 import { TEXT_SIZES, applyTextSize, readTextSize } from "../textSize";
@@ -40,11 +40,14 @@ export function SettingsScreen() {
   const [minutes, setMinutes] = useState(status.lock_minutes);
   const [names, setNames] = useState(status.practitioner.join(", "));
   const [report, setReport] = useState<ReportSettings | null>(null);
+  const [template, setTemplate] = useState<TemplateView | null>(null);
+  const [original, setOriginal] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [textSize, setTextSize] = useState(readTextSize);
 
   useEffect(() => {
     ipc.reportSettings().then(setReport).catch((e) => setError(fail(e as never)));
+    ipc.reportTemplate().then(setTemplate).catch(() => setTemplate(null));
   }, [fail]);
 
   async function run(fn: () => Promise<void>, done: string) {
@@ -215,6 +218,52 @@ export function SettingsScreen() {
             </div>
             <button type="button" className="btn btn-primary align-start"
               onClick={() => void run(() => ipc.setReportSettings({ ...report, signature: report.signature.filter((l) => l.trim()) }), "הגדרות הדוח נשמרו.")}>שמירה</button>
+            <div className="field">
+              <span className="label">התבנית שלי (Word)</span>
+              {template ? (
+                <span className="hint">
+                  הדוח והמכתבים נכתבים לתוך התבנית שלך: {template.headers > 0 ? "נייר המכתבים והכותרת העליונה" : "העיצוב"}
+                  {template.images > 0 ? ", הלוגו" : ""} והגופנים שלך.{" "}
+                  {template.has_marker ? "הדוח נכנס במקום שכתוב בו {{הדוח}}." : "הדוח מחליף את גוף התבנית; מה שבכותרות העליונה והתחתונה נשמר."}
+                </span>
+              ) : (
+                <span className="hint">
+                  אפשר לבחור פעם אחת קובץ Word ריק עם נייר המכתבים, הלוגו והגופנים שלך. כדי לשמור גם טקסט קבוע בגוף הקובץ (פתיחה, חתימה), כותבים בשורה נפרדת {"{{הדוח}}"} במקום שבו הדוח נכנס.
+                </span>
+              )}
+              <div className="row">
+                <label className="btn btn-small">
+                  {template ? "החלפת התבנית" : "בחירת תבנית"}
+                  <input type="file" accept=".docx,.dotx" hidden
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = "";
+                      if (f) void run(async () => setTemplate(await ipc.setReportTemplate(f)), "התבנית נשמרה. הדוח הבא ייכתב לתוכה.");
+                    }} />
+                </label>
+                {template && (
+                  <button type="button" className="btn btn-small"
+                    onClick={() => void run(async () => { await ipc.clearReportTemplate(); setTemplate(null); }, "חזרה לעיצוב הרגיל של הדוח.")}>בלי תבנית</button>
+                )}
+              </div>
+            </div>
+            <div className="field">
+              <span className="label">בדיקת מקוריות של PDF</span>
+              <span className="hint">בוחרים קובץ PDF שהופק כאן. אם לא שונה בו אף בית, תופיע השעה שבה הופק.</span>
+              <label className="btn btn-small align-start">
+                בחירת PDF לבדיקה
+                <input type="file" accept=".pdf" hidden
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = "";
+                    if (f) void run(async () => {
+                      const at = await ipc.checkOriginal(f);
+                      setOriginal(at === null ? "הקובץ הזה לא הופק בכספת הזו, או ששונה אחרי שהופק." : `זה הקובץ המקורי: הופק ב-${new Date(at * 1000).toLocaleString("he-IL")}, ולא שונה מאז.`);
+                    }, "הבדיקה הסתיימה.");
+                  }} />
+              </label>
+              {original && <span className="hint" role="status">{original}</span>}
+            </div>
           </section>
         )}
 

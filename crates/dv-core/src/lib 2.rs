@@ -64,7 +64,7 @@ pub use views::{
     ChatView, ConsultResult, ConsultTurnView, ConsultationSummary, ConsultationView, CreatedVault,
     ExportCheck, ImportPreview, MaterialRouting, NameMatch, NameSuggestion, ParagraphVersionView,
     ParagraphView, Prepared, ReportSettings, RetentionItem, ReviewPart, SectionResult, SectionView,
-    SortResult, SourceExcerpt, StagedBackup, SuspectDecision, TemplateView, UiError,
+    SortResult, SourceExcerpt, StagedBackup, SuspectDecision, UiError,
 };
 
 const API_KEY: &str = "anthropic_api_key";
@@ -123,8 +123,6 @@ fn day_number() -> u64 {
         .map_or(0, |d| d.as_secs() / 86_400)
 }
 const REPORT_KEY: &str = "report_settings";
-/// Her Word template (EX-1), hex-encoded inside the encrypted vault.
-const TEMPLATE_KEY: &str = "report_template";
 /// A gap this long between two 15-second ticks means the computer slept.
 const SLEEP_GAP: Duration = Duration::from_secs(60);
 const MAX_REQUEST_BYTES: usize = 900_000;
@@ -418,8 +416,6 @@ pub struct Core {
     transport: Option<Arc<dyn Transport>>,
     /// The app's own binary, started as an isolated worker for each document.
     ingest_exe: Option<PathBuf>,
-    /// The local OCR engine shipped next to the app, for scans and photos (D-048).
-    ocr: Option<dv_ingest::ocr::Engine>,
     /// A backup file chosen for the drill or a restore (encrypted bytes).
     staged_backup: Option<Vec<u8>>,
     /// A past report read for the style profile, waiting for her confirmation (D-043).
@@ -643,7 +639,6 @@ impl Core {
             disk_encryption: disk.to_owned(),
             transport: None,
             ingest_exe: None,
-            ocr: None,
             staged_backup: None,
             style_staged: HashMap::new(),
             auto_backup_tried: None,
@@ -654,24 +649,8 @@ impl Core {
     /// Read documents in a separate worker process (the app passes its own binary).
     #[must_use]
     pub fn with_ingest_worker(mut self, exe: PathBuf) -> Self {
-        self.ocr = dv_ingest::ocr::Engine::locate(&exe);
         self.ingest_exe = Some(exe);
         self
-    }
-
-    /// Read a document: in the isolated worker when the app set one, then OCR for a scan.
-    pub(crate) fn read_document(
-        &self,
-        file_name: &str,
-        bytes: &[u8],
-    ) -> Result<dv_ingest::Extracted, CoreError> {
-        dv_ingest::import(
-            self.ingest_exe.as_deref(),
-            self.ocr.as_ref(),
-            file_name,
-            bytes,
-        )
-        .map_err(|e| CoreError::Refused(e.message_he()))
     }
 
     /// Tests: cheap KDF and a fake transport.
@@ -1284,7 +1263,13 @@ impl Core {
         bytes: &[u8],
     ) -> Result<ImportPreview, CoreError> {
         self.vault_ref()?.case_meta(case_id)?;
-        let extracted = self.read_document(file_name, bytes)?;
+        let extracted = match &self.ingest_exe {
+            Some(exe) => {
+                dv_ingest::worker::run(exe, file_name, bytes, dv_ingest::worker::DEFAULT_TIMEOUT)
+            }
+            None => dv_ingest::extract(bytes, file_name),
+        }
+        .map_err(|e| CoreError::Refused(e.message_he()))?;
 
         // Names in the margins and the file's properties are not imported, but they are the
         // names most likely to appear in the body too: kept with the case first, so the body
@@ -1383,7 +1368,13 @@ impl Core {
         });
         Ok(ImportPreview {
             file_name: file_name.to_owned(),
-            format: extracted.format.name().to_owned(),
+            format: match extracted.format {
+                dv_ingest::Format::Docx => "docx",
+                dv_ingest::Format::Odt => "odt",
+                dv_ingest::Format::Pdf => "pdf",
+                dv_ingest::Format::Text => "text",
+            }
+            .to_owned(),
             pages: extracted.pages,
             title: stem,
             suggested_kind: InputKind::guess(&extracted.body, file_name),
@@ -1997,19 +1988,10 @@ impl Core {
     ) -> Result<Prepared, CoreError> {
         let structure =
             ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
-        let letter = Letter::of(section_key);
-        let section = match letter {
-            Some(l) => dv_domain::ReportSection {
-                key: section_key.to_owned(),
-                title: l.title().to_owned(),
-                inputs: Vec::new(),
-                about: String::new(),
-            },
-            None => structure
-                .section(section_key)
-                .ok_or_else(|| CoreError::NotFound(section_key.to_owned()))?
-                .clone(),
-        };
+        let section = structure
+            .section(section_key)
+            .ok_or_else(|| CoreError::NotFound(section_key.to_owned()))?
+            .clone();
         let model = self.model_config()?;
         let data = self.privacy_data(case_id)?;
         let demo_mode = self.demo_mode()?;
@@ -2037,7 +2019,7 @@ impl Core {
             let mut review = Review::default();
             let mut tagged_sources = Vec::new();
             let mut source_rows = Vec::new();
-            let derived = DERIVED_SECTIONS.contains(&section_key) || letter.is_some();
+            let derived = DERIVED_SECTIONS.contains(&section_key);
             if !derived {
                 for inp in v.inputs(case_id)? {
                     // D-022: the table, the sorting, and Einat's choice decide what goes here.
@@ -2075,13 +2057,10 @@ impl Core {
             }
             let mut approved_context = Vec::new();
             if derived {
-                // A letter gets only the sections it is written from (EX-4): the school letter
-                // only the recommendations, never the background or the diagnoses.
-                let wanted = |key: &str| match letter {
-                    Some(l) => l.written_from().contains(&key),
-                    None => key != section_key && !DERIVED_SECTIONS.contains(&key),
-                };
-                for s in structure.sections().filter(|s| wanted(&s.key)) {
+                for s in structure
+                    .sections()
+                    .filter(|s| s.key != section_key && !DERIVED_SECTIONS.contains(&s.key.as_str()))
+                {
                     let text: Vec<String> = v
                         .drafts(case_id, &s.key)?
                         .into_iter()
@@ -2096,11 +2075,6 @@ impl Core {
                 }
             }
             // Nothing approved yet: there is nothing to write it from, so nothing is sent.
-            if letter.is_some() && approved_context.is_empty() {
-                return Err(CoreError::Refused(
-                    "המכתב נכתב מתוך ההמלצות שאישרת בדוח, ועוד אין המלצות מאושרות. מאשרים קודם את סעיף ההמלצות.".to_owned(),
-                ));
-            }
             if derived && approved_context.is_empty() {
                 return Err(CoreError::Refused(
                     "הסעיף הזה נכתב מתוך הסעיפים שכבר אישרת, ועוד לא אישרת אף סעיף. מאשרים קודם את הטיוטות בסעיפים האחרים, ואז חוזרים לכאן."
@@ -2184,176 +2158,6 @@ impl Core {
             return self.prepare_section_once(case_id, section_key, instruction, replaces, true);
         }
         Ok(prepared)
-    }
-
-    /// The report as a locked PDF (EX-3, D-049): it opens with `password`, can be printed but
-    /// not changed, and its SHA-256 goes into the audit log so a copy can be checked later.
-    pub fn export_pdf(&mut self, case_id: &str, password: &str) -> Result<Vec<u8>, CoreError> {
-        let (report, check) = self.build_report(case_id)?;
-        if !check.blocking.is_empty() {
-            return Err(CoreError::Refused(check.blocking.join(" · ")));
-        }
-        let (regular, bold) = system_fonts(&report.font).ok_or_else(|| {
-            CoreError::Refused(
-                "לא נמצא במחשב גופן עברי ליצירת PDF (למשל David או Arial).".to_owned(),
-            )
-        })?;
-        let pdf = dv_export::render_pdf(
-            &report,
-            dv_export::PdfFonts {
-                regular: &regular,
-                bold: bold.as_deref(),
-            },
-            password,
-        )
-        .map_err(|e| match e {
-            dv_export::ExportError::WeakPassword => CoreError::Refused(format!(
-                "סיסמה לקובץ צריכה להיות באורך {} תווים לפחות.",
-                dv_export::MIN_PASSWORD_CHARS
-            )),
-            dv_export::ExportError::Pdf(m) => CoreError::Refused(m),
-            other => CoreError::Internal(other.to_string()),
-        })?;
-        let sha256 = dv_vault::crypto::sha256_hex(&pdf);
-        self.vault_mut()?.record(
-            AuditEvent::Export,
-            Some(case_id),
-            &serde_json::json!({ "protected": true, "pdf": true, "sha256": sha256, "sections": check.included_sections }),
-        )?;
-        Ok(pdf)
-    }
-
-    /// Whether a PDF is exactly one this vault exported (its fingerprint is in the audit log):
-    /// when, or `None` for a file that was changed or not made here.
-    pub fn check_original(&mut self, bytes: &[u8]) -> Result<Option<i64>, CoreError> {
-        let sha256 = dv_vault::crypto::sha256_hex(bytes);
-        let needle = format!("\"sha256\":\"{sha256}\"");
-        Ok(self
-            .vault_ref()?
-            .audit_entries(u32::MAX)?
-            .into_iter()
-            .find(|e| e.event == "export" && e.meta.contains(&needle))
-            .map(|e| e.ts))
-    }
-
-    /// A short letter to the parents or the school from the approved report (EX-4): an
-    /// ordinary section request (same filter, review screen and gate), whose answer is kept as
-    /// the letter's draft in this case. `note` is anything she wants to add.
-    pub fn prepare_letter(
-        &mut self,
-        case_id: &str,
-        audience: &str,
-        note: &str,
-    ) -> Result<Prepared, CoreError> {
-        let letter = Letter::from_audience(audience)?;
-        let instruction = if note.trim().is_empty() {
-            letter.instruction().to_owned()
-        } else {
-            format!("{}\nבנוסף: {}", letter.instruction(), note.trim())
-        };
-        self.prepare_section(case_id, letter.key(), &instruction)
-    }
-
-    /// The letter's paragraphs, names restored, for her to read, edit and approve.
-    pub fn letter(
-        &mut self,
-        case_id: &str,
-        audience: &str,
-    ) -> Result<Vec<ParagraphView>, CoreError> {
-        let letter = Letter::from_audience(audience)?;
-        let v = self.vault_ref()?;
-        let identities = v.identities(case_id)?;
-        let practitioner = v.practitioner()?.names.first().cloned();
-        let with_versions = v.drafts_with_versions(case_id)?;
-        Ok(v.drafts(case_id, letter.key())?
-            .into_iter()
-            .filter(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved))
-            .map(|d| ParagraphView {
-                has_versions: with_versions.contains(&d.id),
-                // A letter is short and written from approved text: no style note (D-043).
-                style_note: None,
-                id: d.id,
-                text: restore(&d.text_tagged, &identities, practitioner.as_deref()),
-                status: d.status,
-                by_ai: d.author == Author::Ai,
-                sources: Vec::new(),
-                warnings: Vec::new(),
-                replaces: d.replaces,
-            })
-            .collect())
-    }
-
-    /// The letter as a Word file (in her template when she has one): approved paragraphs
-    /// only, with the child's name and the date at the top and her signature at the end.
-    pub fn export_letter(
-        &mut self,
-        case_id: &str,
-        audience: &str,
-        password: Option<&str>,
-    ) -> Result<Vec<u8>, CoreError> {
-        let letter = Letter::from_audience(audience)?;
-        let settings = self.report_settings()?;
-        let (report, _) = self.build_report(case_id)?;
-        let paragraphs: Vec<String> = self
-            .letter(case_id, audience)?
-            .into_iter()
-            .filter(|p| p.status == DraftStatus::Approved)
-            .map(|p| p.text)
-            .collect();
-        if paragraphs.is_empty() {
-            return Err(CoreError::Refused(
-                "עוד אין במכתב פסקה מאושרת. מאשרים את הפסקאות, ואז מפיקים את הקובץ.".to_owned(),
-            ));
-        }
-        let doc = dv_export::Report {
-            title: letter.file_title().to_owned(),
-            info: report.info,
-            parts: vec![dv_export::ReportPart {
-                title: String::new(),
-                sections: vec![dv_export::ReportSection {
-                    title: String::new(),
-                    paragraphs,
-                }],
-            }],
-            tables: Vec::new(),
-            signature: report.signature,
-            confidentiality: settings.confidentiality,
-            font: settings.font,
-        };
-        let identities = self.vault_ref()?.identities(case_id)?;
-        let known: HashSet<String> = identities.iter().map(|i| i.tag.clone()).collect();
-        for p in &doc.parts[0].sections[0].paragraphs {
-            if dv_privacy::restore::remaining_tags(p)
-                .iter()
-                .any(|t| known.contains(t))
-            {
-                return Err(CoreError::Refused(
-                    "נשארה במכתב תגית במקום שם. פותחים את הפסקה ומתקנים.".to_owned(),
-                ));
-            }
-        }
-        if let Some(l) = dv_export::leftover_placeholders(&doc).into_iter().next() {
-            return Err(CoreError::Refused(format!(
-                "נשאר במכתב סימון בסוגריים מרובעים: {l}"
-            )));
-        }
-        let docx = self.render_docx(&doc)?;
-        let out = match password {
-            Some(pw) => dv_export::encrypt(&docx, pw).map_err(|e| match e {
-                dv_export::ExportError::WeakPassword => CoreError::Refused(format!(
-                    "סיסמה לקובץ צריכה להיות באורך {} תווים לפחות.",
-                    dv_export::MIN_PASSWORD_CHARS
-                )),
-                other => CoreError::Internal(other.to_string()),
-            })?,
-            None => docx,
-        };
-        self.vault_mut()?.record(
-            AuditEvent::Export,
-            Some(case_id),
-            &serde_json::json!({ "protected": password.is_some(), "letter": letter.key() }),
-        )?;
-        Ok(out)
     }
 
     /// Take an approved request out of the core so it can be sent without holding the
@@ -2886,48 +2690,6 @@ impl Core {
         Ok(())
     }
 
-    /// Her Word template, checked: refused with a sentence she can act on, or kept and
-    /// described. Every report and letter after this is written into it.
-    pub fn set_report_template(&mut self, bytes: &[u8]) -> Result<TemplateView, CoreError> {
-        let view = template_view(bytes)?;
-        self.vault_mut()?
-            .set_setting(TEMPLATE_KEY, &dv_vault::crypto::hex(bytes))?;
-        Ok(view)
-    }
-
-    /// Back to the plain report.
-    pub fn clear_report_template(&mut self) -> Result<(), CoreError> {
-        self.vault_mut()?.set_setting(TEMPLATE_KEY, "")?;
-        Ok(())
-    }
-
-    pub fn report_template(&mut self) -> Result<Option<TemplateView>, CoreError> {
-        self.template_bytes()?
-            .map(|b| template_view(&b))
-            .transpose()
-    }
-
-    fn template_bytes(&mut self) -> Result<Option<Vec<u8>>, CoreError> {
-        match self.vault_ref()?.setting(TEMPLATE_KEY)? {
-            Some(h) if !h.is_empty() => Ok(Some(
-                dv_vault::crypto::unhex(&h).map_err(|e| CoreError::Internal(e.to_string()))?,
-            )),
-            _ => Ok(None),
-        }
-    }
-
-    /// The Word file: in her template when she has one.
-    fn render_docx(&mut self, report: &dv_export::Report) -> Result<Vec<u8>, CoreError> {
-        let out = match self.template_bytes()? {
-            Some(t) => dv_export::render_with_template(report, &t),
-            None => dv_export::render(report),
-        };
-        out.map_err(|e| match e {
-            dv_export::ExportError::Template(m) => CoreError::Refused(m),
-            other => CoreError::Internal(other.to_string()),
-        })
-    }
-
     /// The report with real names, from approved paragraphs only, and what stops the export.
     fn build_report(
         &mut self,
@@ -3048,24 +2810,6 @@ impl Core {
             let sheet: dv_domain::ScoreSheet =
                 serde_json::from_str(&data).map_err(|e| CoreError::Internal(e.to_string()))?;
             let (title, rows, note) = dv_domain::sheet_table(&sheet).map_err(CoreError::Refused)?;
-            let charts = dv_domain::sheet_profiles(&sheet)
-                .map_err(CoreError::Refused)?
-                .into_iter()
-                .map(|p| dv_export::ScoreChart {
-                    title: p.title,
-                    min: p.min,
-                    max: p.max,
-                    step: p.step,
-                    mean: p.mean,
-                    sd: p.sd,
-                    bars: p
-                        .bars
-                        .into_iter()
-                        .map(|(label, value)| dv_export::ChartBar { label, value })
-                        .collect(),
-                    note: p.note,
-                })
-                .collect();
             tables.push(dv_export::ScoreTable {
                 title,
                 columns: ["מדד", "ציון", "אחוזון", "טווח"]
@@ -3076,7 +2820,7 @@ impl Core {
                     .map(|r| vec![r.measure, r.score, r.percentile, r.range])
                     .collect(),
                 note,
-                charts,
+                charts: Vec::new(),
             });
         }
         let score_tables = u32::try_from(tables.len()).unwrap_or(u32::MAX);
@@ -3138,7 +2882,7 @@ impl Core {
         if !check.blocking.is_empty() {
             return Err(CoreError::Refused(check.blocking.join(" · ")));
         }
-        let docx = self.render_docx(&report)?;
+        let docx = dv_export::render(&report).map_err(|e| CoreError::Internal(e.to_string()))?;
         let out = match password {
             Some(pw) => dv_export::encrypt(&docx, pw).map_err(|e| match e {
                 dv_export::ExportError::WeakPassword => CoreError::Refused(format!(
@@ -3156,121 +2900,6 @@ impl Core {
         )?;
         Ok(out)
     }
-}
-
-/// The report's font from the computer's own fonts (regular, and bold when there is one),
-/// else Arial, else a common font with Hebrew letters. Read only, never copied anywhere but
-/// into the PDF.
-fn system_fonts(name: &str) -> Option<(Vec<u8>, Option<Vec<u8>>)> {
-    let windows = std::env::var_os("WINDIR")
-        .map(|w| std::path::PathBuf::from(w).join("Fonts"))
-        .unwrap_or_else(|| std::path::PathBuf::from("C:\\Windows\\Fonts"));
-    let files: &[(&str, &str)] = match name {
-        "David" => &[("david.ttf", "davidbd.ttf")],
-        "Narkisim" => &[("nrkis.ttf", "")],
-        "Frank Ruehl" => &[("frank.ttf", "")],
-        "Times New Roman" => &[("times.ttf", "timesbd.ttf")],
-        _ => &[],
-    };
-    let dirs = [
-        windows,
-        std::path::PathBuf::from("/System/Library/Fonts/Supplemental"),
-        std::path::PathBuf::from("/Library/Fonts"),
-        std::path::PathBuf::from("/usr/share/fonts/truetype/dejavu"),
-    ];
-    let fallbacks: &[(&str, &str)] = &[
-        ("arial.ttf", "arialbd.ttf"),
-        ("Arial.ttf", "Arial Bold.ttf"),
-        ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf"),
-    ];
-    files.iter().chain(fallbacks).find_map(|(regular, bold)| {
-        dirs.iter().find_map(|d| {
-            let r = std::fs::read(d.join(regular)).ok()?;
-            let b = (!bold.is_empty())
-                .then(|| std::fs::read(d.join(bold)).ok())
-                .flatten();
-            Some((r, b))
-        })
-    })
-}
-
-/// The two letters (EX-4). Their drafts are kept in the case under their own keys, so they
-/// are deleted with the case, and never enter the report.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Letter {
-    Parents,
-    School,
-}
-
-impl Letter {
-    fn of(section_key: &str) -> Option<Self> {
-        match section_key {
-            "letter_parents" => Some(Self::Parents),
-            "letter_school" => Some(Self::School),
-            _ => None,
-        }
-    }
-
-    fn from_audience(audience: &str) -> Result<Self, CoreError> {
-        match audience {
-            "parents" => Ok(Self::Parents),
-            "school" => Ok(Self::School),
-            other => Err(CoreError::NotFound(other.to_owned())),
-        }
-    }
-
-    fn key(self) -> &'static str {
-        match self {
-            Self::Parents => "letter_parents",
-            Self::School => "letter_school",
-        }
-    }
-
-    fn title(self) -> &'static str {
-        match self {
-            Self::Parents => dv_ai::prompts::LETTER_TITLE_PARENTS,
-            Self::School => dv_ai::prompts::LETTER_TITLE_SCHOOL,
-        }
-    }
-
-    fn instruction(self) -> &'static str {
-        match self {
-            Self::Parents => dv_ai::prompts::LETTER_PARENTS,
-            Self::School => dv_ai::prompts::LETTER_SCHOOL,
-        }
-    }
-
-    fn file_title(self) -> &'static str {
-        match self {
-            Self::Parents => "מכתב להורים",
-            Self::School => "מכתב לצוות החינוכי",
-        }
-    }
-
-    /// The approved sections a letter is written from (data minimization: the school gets
-    /// only what it acts on).
-    fn written_from(self) -> &'static [&'static str] {
-        match self {
-            Self::Parents => &["summary", "diagnoses", "recommendations"],
-            Self::School => &["recommendations"],
-        }
-    }
-}
-
-fn template_view(bytes: &[u8]) -> Result<TemplateView, CoreError> {
-    let s = dv_export::check_template(bytes).map_err(|e| match e {
-        dv_export::ExportError::Template(m) => CoreError::Refused(m),
-        other => CoreError::Internal(other.to_string()),
-    })?;
-    Ok(TemplateView {
-        has_marker: s.has_marker,
-        headers: s.headers,
-        footers: s.footers,
-        images: s.images,
-        styles_matched: s.styles_matched,
-        styles_total: s.styles_total,
-        size_kb: u32::try_from(bytes.len().div_ceil(1024)).unwrap_or(u32::MAX),
-    })
 }
 
 #[cfg(test)]

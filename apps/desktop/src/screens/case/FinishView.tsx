@@ -5,6 +5,7 @@ import { ageWords } from "../../components/AgeField";
 import { ErrorLine, Spinner } from "../../components/ui";
 import { useHoldUnsaved } from "../../components/Unsaved";
 import type { CaseApi } from "../CaseScreen";
+import { LetterCard } from "./LetterCard";
 import "./FinishView.css";
 
 const MARK = /\[חסר[^\]]*\]/;
@@ -147,6 +148,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
               </span>
             )}
           </section>
+          <LetterCard api={api} />
         </section>
 
         <div className="finish-preview" aria-label="תצוגה מקדימה של הקובץ">

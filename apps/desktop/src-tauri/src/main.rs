@@ -16,10 +16,10 @@ use std::time::Duration;
 use dv_core::{
     ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView,
     ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
-    ExportCheck, ImportPreview, NameMatch, ParagraphVersionView, Prepared, Readiness,
-    ReportSettings, RetentionItem, SectionResult, SortResult, StagedBackup, StyleAnalysisResult,
-    StyleImportPreview, StyleOverview, StyleProfileView, StyleSourceView, SuspectDecision, UiError,
-    UnsavedEdit, UsageSummary,
+    ExportCheck, ImportPreview, NameMatch, ParagraphVersionView, ParagraphView, Prepared,
+    Readiness, ReportSettings, RetentionItem, SectionResult, SortResult, StagedBackup,
+    StyleAnalysisResult, StyleImportPreview, StyleOverview, StyleProfileView, StyleSourceView,
+    SuspectDecision, TemplateView, UiError, UnsavedEdit, UsageSummary,
 };
 use dv_domain::{
     CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind, Role,
@@ -295,6 +295,29 @@ async fn set_report_settings(
     settings: ReportSettings,
 ) -> Res<()> {
     with_core(&state, move |c| c.set_report_settings(&settings)).await
+}
+
+/// Her Word template: the file's bytes are the raw body, like an imported document.
+#[tauri::command]
+async fn set_report_template(
+    state: tauri::State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Res<TemplateView> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(internal("body"));
+    };
+    let bytes = bytes.clone();
+    with_core(&state, move |c| c.set_report_template(&bytes)).await
+}
+
+#[tauri::command]
+async fn clear_report_template(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| c.clear_report_template()).await
+}
+
+#[tauri::command]
+async fn report_template(state: tauri::State<'_, AppState>) -> Res<Option<TemplateView>> {
+    with_core(&state, |c| c.report_template()).await
 }
 
 // ------------------------------------------------------------------ cases
@@ -978,19 +1001,12 @@ fn free_path(dir: &std::path::Path, file_name: &str) -> PathBuf {
     path
 }
 
-/// Write the report into the Downloads folder and return where it was saved.
-#[tauri::command]
-async fn export_report(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-    case_id: String,
-    password: Option<String>,
-) -> Res<String> {
-    // Downloads, else Documents, else the home folder, else the app's own folder. A folder
-    // that a cloud service syncs (Documents moved to OneDrive, say) is skipped: the report
-    // holds the real names and would be uploaded on its own.
+/// Downloads, else Documents, else the home folder, else the app's own folder. A folder that
+/// a cloud service syncs (Documents moved to OneDrive, say) is skipped: the report holds the
+/// real names and would be uploaded on its own.
+fn export_dir(app: &tauri::AppHandle) -> Result<PathBuf, UiError> {
     let paths = app.path();
-    let dir = [
+    [
         paths.download_dir(),
         paths.document_dir(),
         paths.home_dir(),
@@ -1004,11 +1020,110 @@ async fn export_report(
         code: "no_folder".to_owned(),
         message: "לא נמצאה תיקייה לשמירת הדוח (הורדות או מסמכים).".to_owned(),
         details: Vec::new(),
-    })?;
+    })
+}
+
+/// Write the report into the Downloads folder and return where it was saved.
+#[tauri::command]
+async fn export_report(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    password: Option<String>,
+) -> Res<String> {
+    let dir = export_dir(&app)?;
     with_core(&state, move |c| {
         let check = c.check_export(&case_id)?;
         let bytes = c.export_report(&case_id, password.as_deref().filter(|p| !p.is_empty()))?;
         let path = free_path(&dir, &check.file_name);
+        std::fs::write(&path, bytes).map_err(|e| CoreError::Internal(e.to_string()))?;
+        Ok(path.display().to_string())
+    })
+    .await
+}
+
+/// EX-3: the report as a locked PDF, into the same folder as the Word file.
+#[tauri::command]
+async fn export_pdf(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    password: String,
+) -> Res<String> {
+    let dir = export_dir(&app)?;
+    with_core(&state, move |c| {
+        let check = c.check_export(&case_id)?;
+        let bytes = c.export_pdf(&case_id, &password)?;
+        let stem = check
+            .file_name
+            .rsplit_once('.')
+            .map_or(check.file_name.as_str(), |(s, _)| s);
+        let path = free_path(&dir, &format!("{stem}.pdf"));
+        std::fs::write(&path, bytes).map_err(|e| CoreError::Internal(e.to_string()))?;
+        Ok(path.display().to_string())
+    })
+    .await
+}
+
+/// Whether a PDF is one this vault exported, unchanged: when it was made, or `None`.
+#[tauri::command]
+async fn check_original(
+    state: tauri::State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Res<Option<i64>> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(internal("body"));
+    };
+    let bytes = bytes.clone();
+    with_core(&state, move |c| c.check_original(&bytes)).await
+}
+
+/// EX-4: a short letter to the parents or the school, from the approved report.
+#[tauri::command]
+async fn prepare_letter(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    audience: String,
+    note: String,
+) -> Res<Prepared> {
+    with_core(&state, move |c| {
+        c.prepare_letter(&case_id, &audience, &note)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn letter(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    audience: String,
+) -> Res<Vec<ParagraphView>> {
+    with_core(&state, move |c| c.letter(&case_id, &audience)).await
+}
+
+/// The letter into the same folder as the report, under a name without the child's name.
+#[tauri::command]
+async fn export_letter(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    audience: String,
+    password: Option<String>,
+) -> Res<String> {
+    let dir = export_dir(&app)?;
+    with_core(&state, move |c| {
+        let check = c.check_export(&case_id)?;
+        let bytes = c.export_letter(
+            &case_id,
+            &audience,
+            password.as_deref().filter(|p| !p.is_empty()),
+        )?;
+        let who = if audience == "school" {
+            "צוות"
+        } else {
+            "הורים"
+        };
+        let path = free_path(&dir, &format!("מכתב-{who}-{}", check.file_name));
         std::fs::write(&path, bytes).map_err(|e| CoreError::Internal(e.to_string()))?;
         Ok(path.display().to_string())
     })
@@ -1521,6 +1636,9 @@ fn main() {
             set_screen_protection,
             report_settings,
             set_report_settings,
+            set_report_template,
+            clear_report_template,
+            report_template,
             list_cases,
             create_case,
             update_case,
@@ -1592,6 +1710,11 @@ fn main() {
             dismiss_style_suggestion,
             check_export,
             export_report,
+            export_pdf,
+            check_original,
+            prepare_letter,
+            letter,
+            export_letter,
             print_page,
             activity,
             mark_activity_reviewed,

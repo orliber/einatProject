@@ -1,5 +1,6 @@
 //! Writes a fabricated sample report (plain and password-protected) for checking the
-//! rendering in Word or LibreOffice: `cargo run -p dv-export --example sample -- <dir> <password>`.
+//! rendering in Word or LibreOffice: `cargo run -p dv-export --example sample -- <dir> <password>
+//! [template.docx]`. With a template, a third file is written into it.
 
 use dv_export::{encrypt, render, InfoLine, Report, ReportPart, ReportSection};
 
@@ -20,7 +21,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|r| r.map(str::to_owned).to_vec())
             .to_vec(),
             note: "ציוני המדדים הם ציוני תקן (ממוצע 100, סטיית תקן 15).".into(),
-            charts: Vec::new(),
+            charts: vec![dv_export::ScoreChart {
+                title: "פרופיל המדדים".into(),
+                min: 40.0,
+                max: 160.0,
+                step: 5.0,
+                mean: 100.0,
+                sd: 15.0,
+                bars: [("מנת משכל כללית (FSIQ)", 102.0), ("הבנה מילולית (VCI)", 112.0), ("מהירות עיבוד (PSI)", 84.0)]
+                    .map(|(l, v)| dv_export::ChartBar { label: l.into(), value: v })
+                    .to_vec(),
+                note: "הרקע הבהיר: טווח של סטיית תקן אחת סביב הממוצע (85–115).".into(),
+            }],
         }],
         title: "דוח אבחון פסיכולוגי התפתחותי".into(),
         info: vec![
@@ -57,5 +69,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         dir.join("sample-report-protected.docx"),
         encrypt(&docx, &password)?,
     )?;
+    if let Some(template) = args.next() {
+        let template = std::fs::read(template)?;
+        std::fs::write(
+            dir.join("sample-report-template.docx"),
+            dv_export::render_with_template(&report, &template)?,
+        )?;
+    }
     Ok(())
 }

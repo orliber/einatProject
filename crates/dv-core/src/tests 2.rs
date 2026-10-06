@@ -896,10 +896,14 @@ fn import_shows_body_hides_names_and_keeps_names_from_margins() {
 fn import_refuses_what_it_cannot_read() {
     let (_dir, mut core, case) = setup(None);
     let err = core
-        .import_document(&case, "IMG_0001.HEIC", b"\0\0\0\x18ftypheic\0\0\0\0")
+        .import_document(
+            &case,
+            "old.doc",
+            &[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1, 0, 0],
+        )
         .unwrap_err();
     assert!(
-        err.to_ui().message.contains("JPG"),
+        err.to_ui().message.contains(".docx"),
         "{}",
         err.to_ui().message
     );
@@ -979,64 +983,9 @@ fn export_needs_approved_paragraphs_and_restores_names() {
         doc.contains("ממוצע גבוה") && doc.contains("79"),
         "range and percentile in the table"
     );
-    assert!(doc.contains("פרופיל המדדים"), "score chart under the table");
     assert!(doc.contains("ההורים של אלון פנו"), "names restored");
     assert!(doc.contains("שם הילד"), "info line");
     assert!(!doc.contains("[ילד]") && !doc.contains("[גננת]"));
-
-    // Her template: refused with a sentence she can act on, else every export goes into it.
-    assert!(matches!(
-        core.set_report_template(b"not a docx"),
-        Err(CoreError::Refused(_))
-    ));
-    assert!(core.report_template().unwrap().is_none());
-    let template = {
-        use std::io::Write;
-        let mut buf = std::io::Cursor::new(Vec::new());
-        let mut zip = zip::ZipWriter::new(&mut buf);
-        let opts = zip::write::SimpleFileOptions::default();
-        for (name, xml) in [
-            (
-                "[Content_Types].xml",
-                r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/></Types>"#,
-            ),
-            (
-                "word/document.xml",
-                r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body><w:p/><w:sectPr><w:headerReference w:type="default" r:id="rId1"/></w:sectPr></w:body></w:document>"#,
-            ),
-            (
-                "word/_rels/document.xml.rels",
-                r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/></Relationships>"#,
-            ),
-            (
-                "word/header1.xml",
-                r#"<?xml version="1.0"?><w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>נייר מכתבים בדוי</w:t></w:r></w:p></w:hdr>"#,
-            ),
-        ] {
-            zip.start_file(name, opts).unwrap();
-            zip.write_all(xml.as_bytes()).unwrap();
-        }
-        zip.finish().unwrap();
-        buf.into_inner()
-    };
-    assert_eq!(core.set_report_template(&template).unwrap().headers, 1);
-    let bytes = core.export_report(&case, None).unwrap();
-    let mut header = String::new();
-    std::io::Read::read_to_string(
-        &mut zip::ZipArchive::new(std::io::Cursor::new(&bytes))
-            .unwrap()
-            .by_name("word/header1.xml")
-            .unwrap(),
-        &mut header,
-    )
-    .unwrap();
-    assert!(
-        header.contains("נייר מכתבים בדוי") && header.contains("חסוי"),
-        "{header}"
-    );
-    assert!(read_docx_text(&bytes).contains("ההורים של אלון פנו"));
-    core.clear_report_template().unwrap();
-    assert!(core.report_template().unwrap().is_none());
 
     // Protected export: a Compound File, not a readable zip.
     let protected = core.export_report(&case, Some("סיסמה-לקובץ-1")).unwrap();
@@ -1464,10 +1413,6 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
         dv_ai::prompts::CONSULT_RULES,
         dv_ai::prompts::RESEARCH_RULES,
         dv_ai::prompts::SORTING_RULES,
-        dv_ai::prompts::LETTER_PARENTS,
-        dv_ai::prompts::LETTER_SCHOOL,
-        dv_ai::prompts::LETTER_TITLE_PARENTS,
-        dv_ai::prompts::LETTER_TITLE_SCHOOL,
     ]
     .into_iter()
     .chain(
@@ -3190,97 +3135,4 @@ fn nothing_goes_to_a_company_without_her_written_zero_retention_confirmation() {
             .as_deref(),
         Some("")
     );
-}
-
-#[test]
-fn letters_are_written_from_the_approved_recommendations_only() {
-    let (_dir, mut core, case) = setup(None);
-    // Nothing approved in the sections a letter is written from: nothing is sent.
-    core.add_own_paragraph(&case, "referral", "ההורים של אלון פנו בשל קושי במעברים.")
-        .unwrap();
-    assert!(matches!(
-        core.prepare_letter(&case, "school", ""),
-        Err(CoreError::Refused(_))
-    ));
-    assert!(core.prepare_letter(&case, "neighbors", "").is_err());
-    core.add_own_paragraph(
-        &case,
-        "recommendations",
-        "מומלץ שאלון יקבל הכנה מראש למעברים בגן.",
-    )
-    .unwrap();
-    core.add_own_paragraph(&case, "summary", "אלון ילד סקרן, עם קושי בוויסות רגשי.")
-        .unwrap();
-
-    // The school letter sees the recommendations, never the background or the summary.
-    let p = core
-        .prepare_letter(&case, "school", "לציין שיחה עם הגננת")
-        .unwrap();
-    let shown: Vec<String> = p
-        .parts
-        .iter()
-        .map(|r| {
-            let out: String = r.outgoing.iter().map(|s| s.text.as_str()).collect();
-            format!("{} {out}", r.label)
-        })
-        .collect();
-    let all = shown.join("\n");
-    assert!(all.contains("הכנה מראש"), "{all}");
-    assert!(
-        !all.contains("פנו בשל קושי") && !all.contains("סקרן"),
-        "{all}"
-    );
-    assert!(
-        !all.contains("אלון"),
-        "the name is hidden before it goes out: {all}"
-    );
-    core.send_section(&p.approval_id.unwrap()).unwrap();
-
-    let letter = core.letter(&case, "school").unwrap();
-    assert!(!letter.is_empty());
-    assert!(core.letter(&case, "parents").unwrap().is_empty());
-    // The letter never enters the report.
-    assert!(core
-        .case_detail(&case)
-        .unwrap()
-        .sections
-        .iter()
-        .all(|s| !s.key.starts_with("letter_")));
-    assert!(matches!(
-        core.export_letter(&case, "school", None),
-        Err(CoreError::Refused(_))
-    ));
-    for para in &letter {
-        core.approve_paragraph(&case, &para.id).unwrap();
-    }
-    let doc = read_docx_text(&core.export_letter(&case, "school", None).unwrap());
-    assert!(
-        doc.contains("מכתב לצוות החינוכי") && doc.contains("שם הילד"),
-        "{doc}"
-    );
-    assert!(!doc.contains("סיבת הפניה"));
-}
-
-#[test]
-fn locked_pdf_is_recognised_as_the_original() {
-    let (_dir, mut core, case) = setup(None);
-    core.add_own_paragraph(&case, "referral", "ההורים של אלון פנו בשל קושי במעברים.")
-        .unwrap();
-    let pdf = match core.export_pdf(&case, "נהר-ענן-42-שקד-אורן") {
-        Ok(pdf) => pdf,
-        // No Hebrew font on this computer (a bare build machine): nothing to check.
-        Err(CoreError::Refused(m)) if m.contains("גופן") => return,
-        Err(e) => panic!("{e:?}"),
-    };
-    assert!(pdf.starts_with(b"%PDF-2.0"));
-    assert!(!String::from_utf8_lossy(&pdf).contains("אלון"));
-    assert!(core.check_original(&pdf).unwrap().is_some());
-    let mut changed = pdf.clone();
-    let last = changed.len() - 20;
-    changed[last] ^= 1;
-    assert!(core.check_original(&changed).unwrap().is_none());
-    assert!(matches!(
-        core.export_pdf(&case, "abc-אבג-12345"),
-        Err(CoreError::Refused(_))
-    ));
 }

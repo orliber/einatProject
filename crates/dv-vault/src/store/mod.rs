@@ -158,7 +158,9 @@ pub(crate) fn master_key(header: &VaultHeader, secret: Secret<'_>) -> Result<Key
                         params,
                         wrapped_mk,
                     } => Some((salt.clone(), *params, wrapped_mk.clone())),
-                    KeySlot::Recovery { .. } | KeySlot::WindowsHello { .. } | KeySlot::Google { .. } => None,
+                    KeySlot::Recovery { .. }
+                    | KeySlot::WindowsHello { .. }
+                    | KeySlot::Google { .. } => None,
                 })
                 .ok_or(VaultError::Corrupt("no password slot".to_owned()))?;
             let salt: [u8; 32] = crate::crypto::unhex(&salt)?
@@ -173,7 +175,9 @@ pub(crate) fn master_key(header: &VaultHeader, secret: Secret<'_>) -> Result<Key
                 .iter()
                 .find_map(|s| match s {
                     KeySlot::Recovery { wrapped_mk } => Some(wrapped_mk.clone()),
-                    KeySlot::Password { .. } | KeySlot::WindowsHello { .. } | KeySlot::Google { .. } => None,
+                    KeySlot::Password { .. }
+                    | KeySlot::WindowsHello { .. }
+                    | KeySlot::Google { .. } => None,
                 })
                 .ok_or(VaultError::Corrupt("no recovery slot".to_owned()))?;
             let kek = recovery::derive_kek(&recovery::parse(typed)?)?;
@@ -186,7 +190,9 @@ pub(crate) fn master_key(header: &VaultHeader, secret: Secret<'_>) -> Result<Key
                 .iter()
                 .find_map(|s| match s {
                     KeySlot::Google { wrapped_mk, .. } => Some(wrapped_mk.clone()),
-                    KeySlot::Password { .. } | KeySlot::Recovery { .. } | KeySlot::WindowsHello { .. } => None,
+                    KeySlot::Password { .. }
+                    | KeySlot::Recovery { .. }
+                    | KeySlot::WindowsHello { .. } => None,
                 })
                 .ok_or(VaultError::WrongSecret)?;
             let kek = recovery::derive_google_kek(drive, computer)?;
@@ -440,7 +446,9 @@ impl Vault {
         let header = VaultHeader::read(dir)?;
         let tag = header.slots.iter().find_map(|s| match s {
             KeySlot::Google { account, .. } => Some(account.clone()),
-            KeySlot::Password { .. } | KeySlot::Recovery { .. } | KeySlot::WindowsHello { .. } => None,
+            KeySlot::Password { .. } | KeySlot::Recovery { .. } | KeySlot::WindowsHello { .. } => {
+                None
+            }
         });
         Ok((header.vault_id, tag))
     }
@@ -633,7 +641,9 @@ impl Vault {
             KeySlot::Recovery { wrapped_mk } => {
                 unwrap_mk(&kek, "recovery", &self.header.vault_id, wrapped_mk).is_ok()
             }
-            KeySlot::Password { .. } | KeySlot::WindowsHello { .. } | KeySlot::Google { .. } => false,
+            KeySlot::Password { .. } | KeySlot::WindowsHello { .. } | KeySlot::Google { .. } => {
+                false
+            }
         })
     }
 
