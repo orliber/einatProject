@@ -438,7 +438,7 @@ fn check(split: &str, r: &Report, floor: &Floor) -> Vec<String> {
     problems
 }
 
-// ---------------------------------------------------------------- the whole flow (D-049, A)
+// ---------------------------------------------------------------- the whole flow (D-050, A)
 
 /// What the app does with a case's documents, measured: every document filtered with every
 /// case's names (as dv-core passes them), the names found kept with the case, and the final
@@ -549,8 +549,27 @@ fn measure_flow(docs: &[Doc]) -> Flow {
             }
             if !hit(false) {
                 flow.false_hides += 1;
-                flow.details
-                    .push(format!("{}: «{piece}» hidden (not gold)", doc.file));
+                let around = |a: usize, b: usize| {
+                    doc.text[a..b]
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                };
+                let before = doc.text[..ms]
+                    .char_indices()
+                    .rev()
+                    .nth(24)
+                    .map_or(0, |(i, _)| i);
+                let after = doc.text[me..]
+                    .char_indices()
+                    .nth(24)
+                    .map_or(doc.text.len(), |(i, _)| me + i);
+                flow.details.push(format!(
+                    "{}: «{piece}» hidden (not gold) · {} ‹{piece}› {}",
+                    doc.file,
+                    around(before, ms),
+                    around(me, after)
+                ));
             }
         }
         let mine = own(&kept);
@@ -644,7 +663,7 @@ fn print_flow(split: &str, f: &Flow, details: bool) {
     let _ = split;
 }
 
-/// Floors of the whole flow: they may only go down. Stage B of D-049 brings dead ends to 0.
+/// Floors of the whole flow: they may only go down. Stage B of D-050 brings dead ends to 0.
 struct FlowFloor {
     max_blocked: usize,
     max_dead_ends: usize,
@@ -683,21 +702,23 @@ fn check_flow(split: &str, f: &Flow, floor: &FlowFloor) -> Vec<String> {
     out
 }
 
-// Baseline of the whole flow, 2026-10-09, before D-049 stage B. With every case's names in
-// the context, as the app runs, a name typed in one case that is also a word ("גיל", "אלה",
-// "שירה", "אור") is hidden in every other case and kept there as a name: about four times
-// the false hides the per-case measure above shows.
+// The whole flow. Baseline 2026-10-09, before D-050 stage B: with every case's names in the
+// context, as the app runs, a name typed in one case that is also a word ("גיל", "אלה",
+// "שירה", "אור") was hidden in every other case and kept there as a name, about four times
+// the false hides the per-case measure above shows (dev 9.33 and 62 kept, test 10.67 and
+// 84). Stage B reads such a name as the word on positive evidence only ("בגיל", "משימות
+// אלה"); what is left ("קשר עין", "שני הבנים", "גיל: 37") needs the morphology of stage C.
 const DEV_FLOW: FlowFloor = FlowFloor {
     max_blocked: 0,
     max_dead_ends: 0,
-    max_kept_wrong: 62,
-    max_false_per_1000: 9.33,
+    max_kept_wrong: 43,
+    max_false_per_1000: 6.25,
 };
 const TEST_FLOW: FlowFloor = FlowFloor {
     max_blocked: 0,
     max_dead_ends: 0,
-    max_kept_wrong: 84,
-    max_false_per_1000: 10.67,
+    max_kept_wrong: 65,
+    max_false_per_1000: 8.74,
 };
 const HARD_FLOW: FlowFloor = FlowFloor {
     max_blocked: 0,
@@ -720,7 +741,7 @@ fn corpus_measures_the_filter_on_whole_documents() {
     print_flow("dev", &fd, true);
     print("test", &rt, show_test);
     print_flow("test", &ft, show_test);
-    // The hard cases (patterns seen in use, D-049) are measured apart: no recall floor, so
+    // The hard cases (patterns seen in use, D-050) are measured apart: no recall floor, so
     // they never lower the dev and test numbers, only the flow floors below.
     print("hard", &rh, true);
     print_flow("hard", &fh, true);

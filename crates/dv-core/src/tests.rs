@@ -3392,3 +3392,54 @@ fn a_word_kept_in_another_case_is_offered_and_restored_there() {
         "only the kept word left case 2"
     );
 }
+
+/// "להחזיר" on another case's name in this case ("שירה" is the first case's kindergarten
+/// teacher, here the singing): the next send lets the word out. It used to be hidden again
+/// on every send, so the button did nothing (D-050). The first case still hides its name.
+#[test]
+fn restoring_another_cases_name_holds_on_the_next_send() {
+    let (_dir, mut core, case1) = setup(None);
+    let case2 = core
+        .create_case(
+            CaseMeta {
+                code: "TEST-0098".into(),
+                consent: Some(consent()),
+                ..CaseMeta::default()
+            },
+            vec![IdentityInput {
+                id: None,
+                role: Role::Child,
+                value: "נועם".into(),
+                aliases: vec![],
+            }],
+        )
+        .unwrap();
+    core.add_input(
+        &case2,
+        InputKind::Kindergarten,
+        "עדכון",
+        "נועם אוהב שירה ומוזיקה, ושר כל היום.",
+    )
+    .unwrap();
+    let p = core
+        .prepare_section(&case2, "kindergarten", "טיוטה")
+        .unwrap();
+    let item = p
+        .auto_hidden
+        .iter()
+        .find(|a| a.token == "שירה")
+        .unwrap_or_else(|| panic!("hidden first: {}", outgoing(&p)))
+        .clone();
+    core.restore_auto_hidden(&case2, &item.token, &item.tag)
+        .unwrap();
+    let p = core
+        .prepare_section(&case2, "kindergarten", "טיוטה")
+        .unwrap();
+    assert!(p.approval_id.is_some(), "{:?}", p.blocked);
+    assert!(outgoing(&p).contains("שירה ומוזיקה"), "{}", outgoing(&p));
+    let p = core
+        .prepare_section(&case1, "kindergarten", "טיוטה")
+        .unwrap();
+    assert!(p.approval_id.is_some(), "{:?}", p.blocked);
+    assert!(!outgoing(&p).contains("שירה"), "{}", outgoing(&p));
+}

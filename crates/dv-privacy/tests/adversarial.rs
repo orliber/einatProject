@@ -1008,3 +1008,153 @@ fn ocr_misreads_of_a_declared_name_are_found_one_letter_away() {
     assert!(out.tagged.contains("האלוף"), "{}", out.tagged);
     assert!(!gate_with("אלוז שיחק בחול.", &ids, "c1").cleared);
 }
+
+/// Names of other cases that are also everyday words (D-050): "גיל", "שירה", "אור", "שני".
+fn word_name_identities() -> Vec<Identity> {
+    let mut ids = identities();
+    ids.extend([
+        id("case-gil", Role::Child, "[ילד]", "גיל", &[]),
+        id("case-gil", Role::Mother, "[אם]", "אור", &[]),
+        id("case-gil", Role::Sister, "[אחות_1]", "שני", &[]),
+        id("case-gil", Role::Teacher, "[גננת]", "נוגה", &[]),
+        id("case-gil", Role::Other, "[אדם_1]", "עין", &[]),
+    ]);
+    ids
+}
+
+/// The app's flow on `text` with "not a name" answers `allow`: two filters keeping what they
+/// found, then the gate on what the second let out. `None`: the gate refused it.
+fn flow_with(text: &str, base: &[Identity], case: &str, allow: &[&str]) -> Option<String> {
+    let practitioner = vec!["דנה כהן-לוי".to_owned()];
+    let allow: HashSet<String> = allow.iter().map(|a| normalize(a)).collect();
+    let allowed = |t: &str| allow.contains(t);
+    let mut ids = base.to_vec();
+    let mut tagged = String::new();
+    for _ in 0..2 {
+        let ctx = PrivacyContext {
+            allowlisted: &allowed,
+            ..ctx_for(&ids, &practitioner, case)
+        };
+        let out = filter(text, &ctx).unwrap();
+        let more = found(&out, &ids, case);
+        ids.extend(more);
+        tagged = out.tagged;
+    }
+    let ctx = PrivacyContext {
+        allowlisted: &allowed,
+        ..ctx_for(&ids, &practitioner, case)
+    };
+    let body = serde_json::json!({"messages": [{"role": "user", "content": tagged}]});
+    let case_tags: HashSet<String> = ids
+        .iter()
+        .filter(|i| i.case_id == case)
+        .map(|i| i.tag.clone())
+        .collect();
+    clear(&GateRequest {
+        body: &body,
+        ctx: &ctx,
+        case_tags: &case_tags,
+        unresolved_suspects: 0,
+        canaries: &[],
+        max_bytes: 200_000,
+    })
+    .ok()
+    .map(|_| tagged)
+}
+
+/// Another case's name is hidden in a name's place, also where only the comma and a person
+/// word after it say so, and stays the word it is elsewhere ("בגיל 3", "משימות אלה").
+#[test]
+fn another_cases_word_name_is_read_by_its_place() {
+    let ids = word_name_identities();
+    let hidden = [
+        "אלון, הילד מהתיק השני, הוזכר.",
+        "נוגה, הגננת, סיפרה שהוא שמח.",
+        "גיל הגיע לגן באיחור.",
+        "שיחקתי עם שני.",
+        "אחותו אור עזרה לו.",
+    ];
+    for text in hidden {
+        let tagged =
+            flow_with(text, &ids, CASE, &[]).unwrap_or_else(|| panic!("dead end on «{text}»"));
+        let name = ["אלון", "נוגה", "גיל", "שני", "אור"]
+            .into_iter()
+            .find(|n| text.contains(n))
+            .unwrap();
+        assert!(!tagged.contains(name), "«{text}» let out {name}: {tagged}");
+    }
+    let words = [
+        ("הוא אוהב לשחק עם ילדים בגיל 3.", "בגיל"),
+        ("משימות אלה חיזקו אותו.", "אלה"),
+        ("הוא ישן רק לאור מנורה.", "לאור"),
+    ];
+    for (text, word) in words {
+        let tagged =
+            flow_with(text, &ids, CASE, &[]).unwrap_or_else(|| panic!("dead end on «{text}»"));
+        assert!(tagged.contains(word), "«{text}» hid {word}: {tagged}");
+    }
+}
+
+/// "להחזיר" on another case's name in this case: the word goes out from then on wherever it
+/// is not in a name's place, and is still hidden where it is (it used to come back hidden
+/// on the next send, so the button did nothing).
+#[test]
+fn restoring_another_cases_name_frees_the_word_only_outside_a_names_place() {
+    let ids = word_name_identities();
+    let free = flow_with("נועם אוהב שירה ומוזיקה.", &ids, CASE, &["שירה"]).unwrap();
+    assert!(free.contains("שירה ומוזיקה"), "{free}");
+    let named = flow_with("שירה סיפרה שנועם שמח.", &ids, CASE, &["שירה"]).unwrap();
+    assert!(!named.contains("שירה"), "{named}");
+    // Only in this case: elsewhere the same text still hides it.
+    let other = flow_with("הוא אוהב שירה ומוזיקה.", &ids, "case-gil", &[]).unwrap();
+    assert!(!other.contains("שירה"), "{other}");
+}
+
+/// Context that changes once names become tags ("נועם גיל" → "[ילד] גיל") never ends in a
+/// refusal: the filter hides whatever the gate would refuse in its own output (D-050).
+#[test]
+fn a_name_next_to_a_tag_is_never_a_dead_end() {
+    let ids = word_name_identities();
+    for text in [
+        // Found by the property test below with the fixed point turned off.
+        "אבא וגיל נועם",
+        "נועם גיל ונוגה שיחקו.",
+        "נועם, גיל, שני ואור.",
+        "אחות של נועם, נוגה עזרה.",
+        "גיל נועם: 5 שנים.",
+        "הגננת מיכל ושני הבנים.",
+        "עם נועם ואור.",
+    ] {
+        assert!(
+            flow_with(text, &ids, CASE, &[]).is_some(),
+            "dead end on «{text}»"
+        );
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 300, ..ProptestConfig::default() })]
+
+    /// D-050: whatever the filter lets out, the gate clears. Random sentences of names (this
+    /// case, other cases, the lexicon, words that are names), person words, verbs and marks.
+    #[test]
+    fn the_gate_never_refuses_what_the_filter_let_out(
+        words in prop::collection::vec(prop::sample::select(vec![
+            "נועם", "רותם", "מיכל", "גיל", "שירה", "אור", "שני", "נוגה", "עין", "אלה", "אלון",
+            "יובל", "דנה", "בן", "חן", "הילד", "אחות", "אחותו", "הגננת", "אבא", "אמא", "סבא",
+            "סיפרה", "הגיע", "עובד", "אוהב", "קשר", "ומוזיקה", "בגן", "הבנים", "מאוד",
+            ",", ".", ":", "(", ")", "עם", "של", "את",
+        ]), 1..10),
+        prefixes in prop::collection::vec(prop::sample::select(vec!["", "", "", "ו", "ה", "ב", "ל", "ש", "מ"]), 10),
+        allow in prop::sample::select(vec![vec![], vec!["שירה"], vec!["גיל", "אור"]]),
+    ) {
+        let text: Vec<String> = words
+            .iter()
+            .zip(&prefixes)
+            .map(|(w, p)| if w.chars().all(char::is_alphabetic) { format!("{p}{w}") } else { (*w).to_owned() })
+            .collect();
+        let text = text.join(" ");
+        let ids = word_name_identities();
+        prop_assert!(flow_with(&text, &ids, CASE, &allow).is_some(), "dead end on «{text}»");
+    }
+}
