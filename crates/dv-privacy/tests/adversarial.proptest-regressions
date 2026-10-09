@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 5441eddd7eea510c386dddf3f8e807270d7d25cedd6566a4b8091745765854bb # shrinks to prefix = "מה", name = "מיכל", before = [], after = []
+cc 137ffa41b02b2b44c9cc744dcac2a1a2db9de768e7001214d42835b4d11316bd # shrinks to words = ["אבא", "גיל", "נועם"], prefixes = ["", "ו", "", "", "", "", "", "", "", ""], allow = []

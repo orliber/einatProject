@@ -1,4 +1,4 @@
-//! Generated probes (D-049, stage A): every first name of the lexicon put into sentences where
+//! Generated probes (D-050, stage A): every first name of the lexicon put into sentences where
 //! it can only be a name, and every name that is also a word into sentences where it can only
 //! be that word. Invented sentences only. Prints the rates and fails below the floors, which
 //! may only rise. Stage C replaces the lexicon with the CBS names and adds the morphology.
@@ -87,7 +87,7 @@ fn every_lexicon_name_is_hidden_where_it_can_only_be_a_name() {
     for m in &missed {
         println!("   MISS  {m}");
     }
-    // Baseline 2026-10-09 (stage A of D-049).
+    // Baseline 2026-10-09 (stage A of D-050).
     assert!(
         rate + 1e-9 >= FLOOR_NAMES,
         "names hidden {rate:.4}, floor {FLOOR_NAMES}"
