@@ -21,6 +21,8 @@ use crate::text::{
 };
 use crate::PrivacyError;
 
+mod context;
+
 /// Everything the pipeline and the gate need to know about the case being worked on.
 pub struct PrivacyContext<'a> {
     pub case_id: &'a str,
@@ -2561,8 +2563,15 @@ fn analyze(
             });
         }
     }
+    // Where a child was born or came from ("נולד בחרקוב"), when it is not an everyday word.
+    for r in context::origin_places(text, &tokens, &reps, &suspects) {
+        reps.push(r);
+    }
     // Layers 3, 5, 6: suspects on what is left.
     suspects.extend(find_suspects(text, &tokens, ctx, &reps));
+    // Names that are also words, in a context that leaves no other reading (D-049).
+    let strong = context::strong_names(text, &tokens, ctx.allowlisted, &reps, &suspects);
+    suspects.extend(strong);
     // A name found once is the same name elsewhere in the text ("קוראים לה נוגה" … "נוגה
     // צחקה").
     let again = recurring_names(text, &tokens, ctx, &reps, &suspects);
