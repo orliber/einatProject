@@ -601,6 +601,95 @@ fn found_names(data: &PrivacyData, autos: &[AutoHidden]) -> Vec<FoundName> {
     out
 }
 
+/// The card's tag for a word kept as a name in another case: never a tag of this case, so
+/// "להחזיר" on it can only mean that other case.
+const OTHER_CASE_TAG: &str = "[תיק_אחר]";
+
+/// Names the gate refused in the outgoing text that the program kept by itself (not typed by
+/// her): they get "להחזיר" on the summary card like any other, in this case or in another
+/// one ("אח" kept by mistake in another case blocked every case). Without this she saw only
+/// a red line and "חזרה לעריכה". `code_of` names a case for the card.
+fn refused_auto_names(
+    data: &PrivacyData,
+    reasons: &[dv_privacy::BlockReason],
+    code_of: &dyn Fn(&str) -> String,
+) -> Vec<AutoHidden> {
+    let mut out: Vec<AutoHidden> = Vec::new();
+    for r in reasons.iter().filter(|r| r.code == "identity") {
+        let Some(found) = r.detail.as_deref().map(normalize) else {
+            continue;
+        };
+        for i in data.identities.iter().filter(|i| {
+            i.source != IdentitySource::Manual
+                && std::iter::once(&i.value)
+                    .chain(i.aliases.iter())
+                    .any(|v| normalize(v) == found || normalize(v).split(' ').any(|w| w == found))
+        }) {
+            let here = i.case_id == data.case_id;
+            let tag = if here {
+                i.tag.clone()
+            } else {
+                OTHER_CASE_TAG.to_owned()
+            };
+            if out
+                .iter()
+                .any(|a| a.tag == tag && normalize(&a.token) == normalize(&i.value))
+            {
+                continue;
+            }
+            out.push(AutoHidden {
+                token: i.value.clone(),
+                tag,
+                role: i.role,
+                reason: if here {
+                    "נשמר בתיק כשם, ועצר את השליחה".to_owned()
+                } else {
+                    format!(
+                        "נשמר אוטומטית כשם בתיק «{}», ועצר את השליחה",
+                        code_of(&i.case_id)
+                    )
+                },
+                uncertain: true,
+                kind: if here {
+                    AutoKind::Name
+                } else {
+                    AutoKind::OtherCase
+                },
+            });
+        }
+    }
+    out
+}
+
+/// A refused name she typed in another case is a real name there: it is not offered for
+/// "להחזיר", but the red line says where it is, so she can look.
+fn locate_refused_names(
+    data: &PrivacyData,
+    reasons: &mut [dv_privacy::BlockReason],
+    code_of: &dyn Fn(&str) -> String,
+) {
+    for r in reasons.iter_mut().filter(|r| r.code == "identity") {
+        let Some(found) = r.detail.as_deref().map(normalize) else {
+            continue;
+        };
+        let cases: Vec<String> = data
+            .identities
+            .iter()
+            .filter(|i| {
+                i.case_id != data.case_id
+                    && i.source == IdentitySource::Manual
+                    && std::iter::once(&i.value).chain(i.aliases.iter()).any(|v| {
+                        normalize(v) == found || normalize(v).split(' ').any(|w| w == found)
+                    })
+            })
+            .map(|i| code_of(&i.case_id))
+            .collect();
+        if !cases.is_empty() {
+            r.message = format!("{} (רשום כשם בתיק «{}»)", r.message, cases.join("», «"));
+        }
+    }
+}
+
 /// A section's title as Claude gets it. The title is template text, not case text, yet
 /// "שאלון הסתגלות" holds ש + "אלון" when that is the child's name: then the section's
 /// description goes instead (or nothing), so there is nothing to ask, block or leak.
@@ -1516,8 +1605,21 @@ impl Core {
         tag: &str,
     ) -> Result<(), CoreError> {
         let v = self.vault_mut()?;
-        let ids = v.identities(case_id)?;
         let tok = normalize(token);
+        // A word the program kept as a name in another case (OTHER_CASE_TAG on the card):
+        // it leaves that case's names, and is "not a name" there from now on.
+        if tag == OTHER_CASE_TAG {
+            for i in v.all_identities()?.into_iter().filter(|i| {
+                i.case_id != case_id
+                    && i.source != IdentitySource::Manual
+                    && normalize(&i.value) == tok
+            }) {
+                v.remove_identity(&i.case_id, &i.id)?;
+                v.mark_not_a_name(Some(&i.case_id), &tok)?;
+            }
+            return Ok(());
+        }
+        let ids = v.identities(case_id)?;
         // A spelling of the name rather than the name ("אלוו", kept from a scan, or "נואם"
         // next to "נועם"): only that spelling comes back, the name stays hidden.
         if !ids.iter().any(|i| {
@@ -1958,7 +2060,20 @@ impl Core {
                     case_opt,
                     &serde_json::json!({ "codes": codes }),
                 )?;
-                prepared.blocked = blocked.reasons;
+                let mut reasons = blocked.reasons;
+                let v = self.vault_ref()?;
+                let code_of = |case: &str| v.case_meta(case).map(|m| m.code).unwrap_or_default();
+                for a in refused_auto_names(data, &reasons, &code_of) {
+                    if !prepared
+                        .auto_hidden
+                        .iter()
+                        .any(|x| x.tag == a.tag && normalize(&x.token) == normalize(&a.token))
+                    {
+                        prepared.auto_hidden.push(a);
+                    }
+                }
+                locate_refused_names(data, &mut reasons, &code_of);
+                prepared.blocked = reasons;
             }
         }
         Ok(false)

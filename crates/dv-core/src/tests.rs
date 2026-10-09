@@ -3284,3 +3284,111 @@ fn locked_pdf_is_recognised_as_the_original() {
         Err(CoreError::Refused(_))
     ));
 }
+
+/// A word the program kept with the case by itself, refused by the gate: it gets "להחזיר" on
+/// the card instead of leaving her with only "חזרה לעריכה". A name she typed stays refused.
+#[test]
+fn a_kept_word_the_gate_refuses_can_be_restored_from_the_card() {
+    let ident = |value: &str, tag: &str, source: IdentitySource| dv_domain::Identity {
+        id: tag.into(),
+        case_id: "c1".into(),
+        role: Role::Brother,
+        tag: tag.into(),
+        value: value.into(),
+        aliases: vec![],
+        source,
+        reason: "אחרי 'אחות'".into(),
+    };
+    let data = PrivacyData {
+        case_id: "c1".into(),
+        identities: vec![
+            ident("אח", "[אח_1]", IdentitySource::Auto),
+            ident("יואב", "[אח_2]", IdentitySource::Manual),
+        ],
+        practitioner: vec![],
+        allow: HashSet::new(),
+        is_name: HashSet::new(),
+        past: HashSet::new(),
+    };
+    let reason = |detail: &str| dv_privacy::BlockReason {
+        code: "identity".into(),
+        message: "נמצא שם מוצהר בטקסט היוצא".into(),
+        detail: Some(detail.into()),
+    };
+    let offered = refused_auto_names(&data, &[reason("אח"), reason("יואב")], &|_| {
+        "2026-1".to_owned()
+    });
+    assert_eq!(offered.len(), 1, "{offered:?}");
+    assert_eq!(
+        (offered[0].token.as_str(), offered[0].tag.as_str()),
+        ("אח", "[אח_1]")
+    );
+}
+
+/// A word kept as a name in another case ("אח" from case 2) blocked every case: the card
+/// offers "להחזיר", which takes it out of that case's names. A name typed there stays, and
+/// the red line says which case it is in.
+#[test]
+fn a_word_kept_in_another_case_is_offered_and_restored_there() {
+    let (_dir, mut core, case1) = setup(None);
+    let case2 = core
+        .create_case(
+            CaseMeta {
+                code: "TEST-0099".into(),
+                consent: Some(consent()),
+                ..CaseMeta::default()
+            },
+            vec![IdentityInput {
+                id: None,
+                role: Role::Brother,
+                value: "גלעד".into(),
+                aliases: vec![],
+            }],
+        )
+        .unwrap();
+    core.vault_mut()
+        .unwrap()
+        .add_found_names(
+            &case2,
+            &[dv_domain::FoundName {
+                value: "אח".into(),
+                role: Role::Brother,
+                source: IdentitySource::Auto,
+                reason: "אחרי 'אחות'".into(),
+            }],
+        )
+        .unwrap();
+    let data = core.privacy_data(&case1).unwrap();
+    let reason = |detail: &str| dv_privacy::BlockReason {
+        code: "identity".into(),
+        message: "נמצא שם מוצהר בטקסט היוצא".into(),
+        detail: Some(detail.into()),
+    };
+    let offered = refused_auto_names(&data, &[reason("אח")], &|_| "TEST-0099".to_owned());
+    assert_eq!(offered.len(), 1, "{offered:?}");
+    assert_eq!(offered[0].tag, OTHER_CASE_TAG);
+    assert!(offered[0].reason.contains("TEST-0099"));
+    let mut reasons = vec![reason("גלעד")];
+    locate_refused_names(&data, &mut reasons, &|_| "TEST-0099".to_owned());
+    assert!(
+        reasons[0].message.contains("TEST-0099"),
+        "{}",
+        reasons[0].message
+    );
+
+    core.restore_auto_hidden(&case1, "אח", OTHER_CASE_TAG)
+        .unwrap();
+    let left: Vec<String> = core
+        .vault_ref()
+        .unwrap()
+        .identities(&case2)
+        .unwrap()
+        .into_iter()
+        .map(|i| i.value)
+        .collect();
+    assert_eq!(
+        left,
+        vec!["גלעד".to_owned()],
+        "only the kept word left case 2"
+    );
+}
