@@ -3370,9 +3370,14 @@ fn a_word_kept_in_another_case_is_offered_and_restored_there() {
     assert!(offered[0].reason.contains("TEST-0099"));
     let mut reasons = vec![reason("גלעד")];
     locate_refused_names(&data, &mut reasons, &|_| "TEST-0099".to_owned());
-    assert!(reasons[0].message.contains("TEST-0099"), "{}", reasons[0].message);
+    assert!(
+        reasons[0].message.contains("TEST-0099"),
+        "{}",
+        reasons[0].message
+    );
 
-    core.restore_auto_hidden(&case1, "אח", OTHER_CASE_TAG).unwrap();
+    core.restore_auto_hidden(&case1, "אח", OTHER_CASE_TAG)
+        .unwrap();
     let left: Vec<String> = core
         .vault_ref()
         .unwrap()
@@ -3381,5 +3386,9 @@ fn a_word_kept_in_another_case_is_offered_and_restored_there() {
         .into_iter()
         .map(|i| i.value)
         .collect();
-    assert_eq!(left, vec!["גלעד".to_owned()], "only the kept word left case 2");
+    assert_eq!(
+        left,
+        vec!["גלעד".to_owned()],
+        "only the kept word left case 2"
+    );
 }
