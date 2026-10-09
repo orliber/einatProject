@@ -13,7 +13,9 @@ use dv_privacy::text::normalize;
 use dv_privacy::{filter, PrivacyContext};
 
 fn list(file: &str) -> Vec<String> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data").join(file);
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("data")
+        .join(file);
     fs::read_to_string(path)
         .unwrap()
         .lines()
@@ -78,12 +80,18 @@ fn every_lexicon_name_is_hidden_where_it_can_only_be_a_name() {
         ],
     );
     let rate = f64::from(hit) / f64::from(total.max(1));
-    println!("\n== probe/names: {hit}/{total} hidden ({:.2}%)", 100.0 * rate);
+    println!(
+        "\n== probe/names: {hit}/{total} hidden ({:.2}%)",
+        100.0 * rate
+    );
     for m in &missed {
         println!("   MISS  {m}");
     }
     // Baseline 2026-10-09 (stage A of D-049).
-    assert!(rate + 1e-9 >= FLOOR_NAMES, "names hidden {rate:.4}, floor {FLOOR_NAMES}");
+    assert!(
+        rate + 1e-9 >= FLOOR_NAMES,
+        "names hidden {rate:.4}, floor {FLOOR_NAMES}"
+    );
 }
 
 /// Only names the lexicon already has, so it is close to 1; stage C measures names it lacks.
