@@ -1285,7 +1285,16 @@ impl Core {
     ) -> Result<ImportPreview, CoreError> {
         self.vault_ref()?.case_meta(case_id)?;
         let extracted = self.read_document(file_name, bytes)?;
+        self.preview_extracted(case_id, file_name, extracted)
+    }
 
+    /// The upload preview for a document already read (OCR'd text included).
+    pub(crate) fn preview_extracted(
+        &mut self,
+        case_id: &str,
+        file_name: &str,
+        extracted: dv_ingest::Extracted,
+    ) -> Result<ImportPreview, CoreError> {
         // Names in the margins and the file's properties are not imported, but they are the
         // names most likely to appear in the body too: kept with the case first, so the body
         // hides them under their tags (fail-closed: if the import is cancelled, they stay
@@ -1353,6 +1362,11 @@ impl Core {
                 kind: AutoKind::Name,
             })
             .collect();
+        // A scan can misread a name by a letter ("אלוו" for "אלון"): kept as that name's
+        // spelling first, so the body hides it under the name's tag.
+        if extracted.ocr {
+            auto_hidden.extend(self.learn_ocr_misreads(case_id, &extracted.body)?);
+        }
         let body = self.learn(case_id, &extracted.body)?;
         for a in &body.auto_hidden {
             if !auto_hidden.iter().any(|x| x.tag == a.tag) {

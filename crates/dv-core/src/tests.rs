@@ -443,6 +443,46 @@ fn names_kept_earlier_stay_on_the_card_wherever_they_go_out() {
 }
 
 #[test]
+fn a_scanned_upload_hides_a_misread_of_the_childs_name_but_a_typed_one_does_not() {
+    let (_dir, mut core, case) = setup(None);
+    // Fabricated OCR output: "אלון" read as "אלוז".
+    let extracted = |ocr: bool| dv_ingest::Extracted {
+        format: if ocr {
+            dv_ingest::Format::Image
+        } else {
+            dv_ingest::Format::Text
+        },
+        body: "אלוז שיחק בחול עם הילדים.".to_owned(),
+        margins: String::new(),
+        metadata: Vec::new(),
+        warnings: Vec::new(),
+        pages: 1,
+        ocr,
+    };
+    let typed = core
+        .preview_extracted(&case, "שיחה.txt", extracted(false))
+        .unwrap();
+    assert!(
+        !typed.auto_hidden.iter().any(|a| a.token == "אלוז"),
+        "{:?}",
+        typed.auto_hidden
+    );
+    let scan = core
+        .preview_extracted(&case, "סריקה.png", extracted(true))
+        .unwrap();
+    let item = scan
+        .auto_hidden
+        .iter()
+        .find(|a| a.token == "אלוז")
+        .expect("on the card");
+    assert!(item.uncertain);
+    assert!(scan
+        .preview
+        .iter()
+        .all(|s| !(s.text.contains("אלוז") && s.mark.is_none())));
+}
+
+#[test]
 fn an_ocr_misread_of_the_childs_name_is_kept_as_its_spelling_and_can_come_back() {
     let (_dir, mut core, case) = setup(Some(FakeTransport::default()));
     // Fabricated scan text: "אלון" read as "אלוז".
