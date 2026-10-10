@@ -1353,6 +1353,9 @@ impl Core {
                 kind: AutoKind::Name,
             })
             .collect();
+        if extracted.ocr {
+            auto_hidden.extend(self.learn_ocr_misreads(case_id, &extracted.body)?);
+        }
         let body = self.learn(case_id, &extracted.body)?;
         for a in &body.auto_hidden {
             if !auto_hidden.iter().any(|x| x.tag == a.tag) {
