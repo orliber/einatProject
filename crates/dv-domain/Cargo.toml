@@ -15,3 +15,6 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 ts-rs = { version = "12", features = ["no-serde-warnings"] }
+
+[dev-dependencies]
+proptest = "1"

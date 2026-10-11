@@ -1080,6 +1080,7 @@ dependencies = [
 name = "dv-domain"
 version = "0.5.1"
 dependencies = [
+ "proptest",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
