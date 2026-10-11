@@ -6,6 +6,7 @@ import { ReviewDialog } from "../components/ReviewDialog";
 import { CasePicker } from "../components/CasePicker";
 import { ErrorLine, Spinner, CloseIcon } from "../components/ui";
 import { useWords, wordsSoFar } from "../components/Progress";
+import { useHoldUnsaved } from "../components/Unsaved";
 import { ConfirmDialog } from "./library/LibraryDialogs";
 import { ipc, type ConsultationSummary, type Prepared } from "../ipc/client";
 import { useRotating, useRotatingPlaceholder } from "../components/Rotating";
@@ -79,6 +80,9 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   const [sending, setSending] = useState<string | null>(null);
   const hint = `${useRotatingPlaceholder(CONSULT_HINTS, message.length > 0)} · שמות יוסתרו אוטומטית`;
   const [review, setReview] = useState<{ prepared: Prepared; text: string } | null>(null);
+  // A question typed (or waiting in the review) is kept in the vault if it locks meanwhile.
+  const typed = message.trim() ? message : (review?.text ?? null);
+  useHoldUnsaved(scope, `שאלה בשיחה עם ${ai}`, typed, "consult");
   const [copied, setCopied] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<ConsultationSummary | null>(null);
   const [error, setError] = useState<string | null>(null);

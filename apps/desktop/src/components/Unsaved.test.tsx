@@ -20,7 +20,7 @@ describe("an edit open when the vault locks", () => {
     rerender({ text: "ט" });
     rerender({ text: "טיוטה" });
     await act(async () => { vi.advanceTimersByTime(1000); });
-    expect(calls).toEqual([{ case_id: "c1", place: "פסקה", text: "טיוטה" }]);
+    expect(calls).toEqual([{ case_id: "c1", place: "פסקה", view: "report", text: "טיוטה" }]);
     rerender({ text: null });
     expect(calls.at(-1)).toBeNull();
     unmount();
@@ -36,5 +36,21 @@ describe("an edit open when the vault locks", () => {
     fireEvent.click(screen.getByRole("button", { name: "מעבר לתיק" }));
     expect(go).toHaveBeenCalledWith({ name: "case", id: "c1", view: "report" });
     expect(screen.queryByDisplayValue("הטקסט שלא נשמר")).toBeNull();
+  });
+
+  it("returns to the materials for a session note, and to the conversation for a question", async () => {
+    for (const [view, route] of [
+      ["materials", { name: "case", id: "c1", view: "materials" }],
+      ["consult", { name: "consult", caseId: "c1" }],
+    ] as const) {
+      mockIPC((cmd) => (cmd === "take_unsaved" ? { case_id: "c1", place: "רישום מפגש", view, text: `טקסט ${view}` } : null));
+      const go = vi.fn();
+      const api: AppApi = { status: status(), go, refresh: vi.fn(), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn() };
+      const { unmount } = render(<AppContext.Provider value={api}><UnsavedNotice /></AppContext.Provider>);
+      await screen.findByDisplayValue(`טקסט ${view}`);
+      fireEvent.click(screen.getByRole("button", { name: "מעבר לתיק" }));
+      expect(go).toHaveBeenCalledWith(route);
+      unmount();
+    }
   });
 });

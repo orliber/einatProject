@@ -261,6 +261,7 @@ fn main() {
             add_input,
             update_input,
             delete_input,
+            restore_input,
             score_instruments,
             preview_scores,
             save_scores,

@@ -46,6 +46,7 @@ const ALLOWED = new Set([
   "delete_consultation",
   "delete_folder",
   "delete_input",
+  "restore_input",
   "delete_style_source",
   "discard_style_draft",
   "discard_style_upload",

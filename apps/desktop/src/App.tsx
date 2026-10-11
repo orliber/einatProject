@@ -8,7 +8,7 @@ import { CaseScreen } from "./screens/CaseScreen";
 import { ConsultScreen } from "./screens/ConsultScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { StyleScreen } from "./screens/StyleScreen";
-import { Toast } from "./components/ui";
+import { Toast, type ToastAction } from "./components/ui";
 import { IdleWarning } from "./components/IdleWarning";
 import { UnsavedNotice } from "./components/Unsaved";
 import { applyTextSize, readTextSize, stepTextSize } from "./textSize";
@@ -29,7 +29,8 @@ export interface AppApi {
   route?: Route;
   go: (r: Route) => void;
   refresh: () => Promise<void>;
-  notify: (text: string) => void;
+  /** A short notice; with an action (such as "ביטול") it stays longer. */
+  notify: (text: string, action?: ToastAction) => void;
   /** Shows the error; a "locked" error returns to the lock screen. */
   fail: (e: UiError) => string;
   lockNow: () => Promise<void>;
@@ -53,7 +54,7 @@ export function useApp(): AppApi {
 export function App() {
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [route, setRoute] = useState<Route>({ name: "cases" });
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ text: string; action?: ToastAction | undefined } | null>(null);
   const [coreDown, setCoreDown] = useState(false);
   // Setup stays on screen until it is finished, even though the vault exists (and is
   // unlocked) as soon as it is created: the recovery kit must never be skipped.
@@ -185,7 +186,7 @@ export function App() {
     return <LockScreen status={status} onUnlocked={(s) => { setStatus(s); setRoute({ name: "cases" }); }} />;
   }
 
-  const api: AppApi = { status, route, go: setRoute, refresh, notify: setToast, fail, lockNow, showShortcuts: sheet.show };
+  const api: AppApi = { status, route, go: setRoute, refresh, notify: (text, action) => setToast({ text, action }), fail, lockNow, showShortcuts: sheet.show };
   return (
     <QueryClientProvider client={queryClient}>
     <AppContext.Provider value={api}>
@@ -194,7 +195,7 @@ export function App() {
       {route.name === "consult" && <ConsultScreen caseId={route.caseId} />}
       {route.name === "style" && <StyleScreen />}
       {route.name === "settings" && <SettingsScreen />}
-      {toast && <Toast text={toast} onDone={() => setToast(null)} />}
+      {toast && <Toast text={toast.text} action={toast.action} onDone={() => setToast(null)} />}
       <UnsavedNotice />
       {sheet.open && <ShortcutsSheet onClose={sheet.close} />}
       {status.idle_lock_in != null && status.idle_lock_in <= 75 && (

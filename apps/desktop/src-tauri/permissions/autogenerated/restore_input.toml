@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-restore-input"
+description = "Enables the restore_input command without any pre-configured scope."
+commands.allow = ["restore_input"]
+
+[[permission]]
+identifier = "deny-restore-input"
+description = "Denies the restore_input command without any pre-configured scope."
+commands.deny = ["restore_input"]
