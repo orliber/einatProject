@@ -101,11 +101,12 @@
   inset-inline: 60px;
 }
 .a4-out .a4-heading {
-  color: var(--ink-faint);
+  /* Quieter than a section that goes in, but still readable (WCAG 1.4.3: 4.5:1). */
+  color: var(--ink-muted);
 }
 .a4-out-note {
   margin: 0 0 6px;
   font-family: var(--font-ui);
   font-size: var(--text-xs);
-  color: var(--ink-faint);
+  color: var(--ink-muted);
 }
