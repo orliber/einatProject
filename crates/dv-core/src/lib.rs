@@ -117,6 +117,17 @@ const LOCK_KEY: &str = "lock_minutes";
 const FIRST_USE_KEY: &str = "first_use_day";
 const REVIEW_KEY: &str = "review_only_suspect";
 const SCREEN_KEY: &str = "screen_protection";
+/// The day (since 1970) she last opened the vault with her password (D-047).
+const PASSWORD_DAY_KEY: &str = "password_day";
+/// With Windows Hello on, the password is asked for again after this many days (D-047).
+const HELLO_PASSWORD_DAYS: u64 = 14;
+const PASSWORD_DUE_HE: &str =
+    "עברו שבועיים מאז הפעם האחרונה שהכספת נפתחה בסיסמה. הפעם פותחים בסיסמה, כדי שלא תישכח.";
+
+/// True when the password is due again (never recorded counts as due).
+fn password_due(last_password_day: Option<u64>, today: u64) -> bool {
+    last_password_day.is_none_or(|d| today.saturating_sub(d) >= HELLO_PASSWORD_DAYS)
+}
 /// How long Claude may think (see `Core::model_for`).
 const SPEED_KEY: &str = "answer_speed";
 const DEFAULT_SPEED: &str = "balanced";

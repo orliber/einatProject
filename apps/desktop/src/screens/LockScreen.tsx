@@ -23,15 +23,23 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
     ipc.ping().then((p) => setVersion(p.core_version)).catch(() => setVersion(null));
   }, []);
 
-  const offerHello = !!status?.hello_on && !!status?.hello_available && mode === "password";
+  // Every two weeks the core asks for the password instead (D-047); then only the password shows.
+  const [passwordDue, setPasswordDue] = useState(false);
+  const offerHello = !!status?.hello_on && !!status?.hello_available && mode === "password" && !passwordDue;
 
   async function hello() {
     setBusy(true);
     setError(null);
     try {
       onUnlocked?.(await ipc.unlockWithHello());
-    } catch {
-      setError("Windows Hello לא פתח את הכספת. אפשר לנסות שוב, או להקליד את הסיסמה.");
+    } catch (err) {
+      const e = err as { code?: string; message?: string };
+      if (e.code === "refused" && e.message) {
+        setPasswordDue(true);
+        setError(e.message);
+      } else {
+        setError("Windows Hello לא פתח את הכספת. אפשר לנסות שוב, או להקליד את הסיסמה.");
+      }
     } finally {
       setBusy(false);
     }

@@ -3677,3 +3677,29 @@ fn restoring_another_cases_name_holds_on_the_next_send() {
     assert!(p.approval_id.is_some(), "{:?}", p.blocked);
     assert!(!outgoing(&p).contains("שירה"), "{}", outgoing(&p));
 }
+
+#[test]
+fn with_windows_hello_the_password_is_asked_for_every_two_weeks() {
+    assert!(password_due(None, 20_000), "never recorded counts as due");
+    assert!(!password_due(Some(20_000), 20_000));
+    assert!(!password_due(Some(20_000), 20_013));
+    assert!(password_due(Some(20_000), 20_014));
+    // A clock set back never makes it due early, and never overflows.
+    assert!(!password_due(Some(20_000), 19_000));
+}
+
+#[test]
+fn opening_with_the_password_records_the_day() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut core = Core::for_tests(dir.path(), None);
+    core.create_vault("כלב ירוק רץ מהר בגינה").unwrap();
+    core.lock();
+    core.unlock("כלב ירוק רץ מהר בגינה").unwrap();
+    let day = core
+        .vault_ref()
+        .unwrap()
+        .setting(PASSWORD_DAY_KEY)
+        .unwrap()
+        .unwrap();
+    assert_eq!(day, day_number().to_string());
+}

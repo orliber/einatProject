@@ -314,7 +314,17 @@ impl Core {
         self.refuse_cloud()?;
         self.check_backoff()?;
         let result = Vault::unlock_with_password(&self.dir, password);
-        self.after_unlock(result, true)
+        let status = self.after_unlock(result, true)?;
+        self.note_password_day();
+        Ok(status)
+    }
+
+    /// The day she last opened the vault with her password, kept inside the vault, so the
+    /// two-week check below cannot be moved from outside.
+    fn note_password_day(&mut self) {
+        if let Some(v) = self.vault.as_mut() {
+            let _ = v.set_setting(PASSWORD_DAY_KEY, &day_number().to_string());
+        }
     }
 
     pub fn unlock_with_recovery(&mut self, recovery_key: &str) -> Result<AppStatus, CoreError> {
@@ -335,7 +345,22 @@ impl Core {
             VaultError::WrongSecret => VaultError::Refused("windows hello: no match".to_owned()),
             other => other,
         });
-        self.after_unlock(result, true)
+        let vault = match result {
+            Ok(vault) => vault,
+            Err(e) => return self.after_unlock(Err(e), true),
+        };
+        // Once every two weeks the password is asked for instead, so it is not forgotten:
+        // on another computer, or after restoring a backup, only the password opens.
+        let last = vault
+            .setting(PASSWORD_DAY_KEY)
+            .ok()
+            .flatten()
+            .and_then(|d| d.parse::<u64>().ok());
+        if password_due(last, day_number()) {
+            let _ = vault.lock();
+            return Err(CoreError::Refused(PASSWORD_DUE_HE.to_owned()));
+        }
+        self.after_unlock(Ok(vault), true)
     }
 
     /// Windows Hello on (needs the password, like a new password) or off.
@@ -351,6 +376,7 @@ impl Core {
                 return Err(e.into());
             }
             self.failed_unlocks = 0;
+            self.note_password_day();
         } else {
             self.vault_mut()?.remove_hello_slot(&hello)?;
         }
