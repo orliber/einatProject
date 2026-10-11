@@ -26,3 +26,5 @@ mod backup;
 pub(crate) use backup::*;
 mod updates;
 pub(crate) use updates::*;
+mod verify;
+pub(crate) use verify::*;

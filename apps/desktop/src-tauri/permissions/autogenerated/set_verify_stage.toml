@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-verify-stage"
+description = "Enables the set_verify_stage command without any pre-configured scope."
+commands.allow = ["set_verify_stage"]
+
+[[permission]]
+identifier = "deny-set-verify-stage"
+description = "Denies the set_verify_stage command without any pre-configured scope."
+commands.deny = ["set_verify_stage"]

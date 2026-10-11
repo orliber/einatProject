@@ -29,7 +29,9 @@ const ALLOWED = new Set([
   "choose_backup",
   "clear_report_template",
   "confirm_readiness",
+  "prepare_verify",
   "security_status",
+  "send_verify",
   "set_send_stopped",
   "confirm_recovery_key",
   "consultation",
@@ -126,6 +128,7 @@ const ALLOWED = new Set([
   "set_screen_protection",
   "set_speed",
   "set_style_enabled",
+  "set_verify_stage",
   "set_windows_hello",
   "style_overview",
   "take_unsaved",
@@ -136,6 +139,7 @@ const ALLOWED = new Set([
   "update_case",
   "update_input",
   "usage_summary",
+  "verify_stage_on",
   "write_backup",
 ]);
 
