@@ -1,0 +1,18 @@
+[package]
+name = "dv-style"
+description = "Local, explainable learning of Einat's writing style (no network, no model download)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dv-privacy.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

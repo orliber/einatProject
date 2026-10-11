@@ -19,6 +19,7 @@ import {
   type StyleProfile,
   type StyleProfileView,
   type StyleSourceView,
+  type StyleSuggestion,
 } from "../ipc/client";
 import { ConfirmDialog } from "./library/LibraryDialogs";
 import "./StyleScreen.css";
@@ -307,12 +308,15 @@ function Suggestions({ o }: { o: StyleOverview }) {
   }
   return (
     <section className="card style-card" aria-labelledby="style-sugg">
-      <h2 id="style-sugg">מה למדתי מהתיקונים שלך</h2>
-      <p className="hint">כשאת מתקנת פסקה ש-{ai} כתב, התוכנה רושמת במחשב שלך החלפות קצרות שחוזרות. שום דבר מזה לא נשלח עד שאת מוסיפה אותו לפרופיל.</p>
+      <h2 id="style-sugg">מה למדתי ממך</h2>
+      <p className="hint">התוכנה לומדת במחשב שלך מהתיקונים שלך לפסקאות ש-{ai} כתב ומהדוחות הקודמים שלך. שום דבר מזה לא נשלח עד שאת מוסיפה אותו לפרופיל.</p>
       <ul className="style-suggestions">
         {o.suggestions.map((s) => (
           <li key={s.id} className="row">
-            <span className="grow">במקום <q>{s.from}</q> את כותבת <q>{s.to}</q> <span className="muted small">({s.count} פעמים)</span></span>
+            <span className="grow">
+              <SuggestionText s={s} />{" "}
+              <span className="muted small">({suggestionDetail(s, o)})</span>
+            </span>
             <button type="button" className="btn btn-small btn-primary" onClick={() => void act(() => ipc.acceptStyleSuggestion(s.id), "נוסף לפרופיל.")}>להוסיף לפרופיל</button>
             <button type="button" className="btn btn-small btn-ghost" onClick={() => void act(() => ipc.dismissStyleSuggestion(s.id))}>לא צריך</button>
           </li>
@@ -321,6 +325,23 @@ function Suggestions({ o }: { o: StyleOverview }) {
       <ErrorLine error={error} />
     </section>
   );
+}
+
+function SuggestionText({ s }: { s: StyleSuggestion }) {
+  switch (s.kind) {
+    case "replace":
+      return <>במקום <q>{s.from}</q> את כותבת <q>{s.to}</q></>;
+    case "avoid":
+      return <>את מוחקת <q>{s.from}</q></>;
+    case "phrase":
+      return <>ביטוי שחוזר בדוחות שלך: <q>{s.from}</q></>;
+  }
+}
+
+function suggestionDetail(s: StyleSuggestion, o: StyleOverview): string {
+  const title = s.section ? o.sections.find((x) => x.key === s.section)?.title : undefined;
+  const where = title ? ` · בסעיף ${title}` : "";
+  return s.kind === "phrase" ? `ב-${s.count} דוחות${where}` : `${s.count} פעמים${where}`;
 }
 
 // ------------------------------------------------------------------ the profile
