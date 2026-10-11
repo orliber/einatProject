@@ -295,6 +295,29 @@ fn style_excerpts_in(request: &str) -> Vec<(String, String)> {
     out
 }
 
+/// The check against the sources in demo mode and with no AI: only what code can know. A
+/// number in a paragraph that no source has is "unsupported"; anything else is "partial",
+/// never "supported", because reading for meaning is what the real check is for.
+fn verify_locally(text: &str) -> Value {
+    let sources = sources_in(text);
+    let results: Vec<Value> = blocks_with(text, "paragraph")
+        .into_iter()
+        .map(|(pid, body)| {
+            let missing: Vec<String> = crate::response::numbers(&body)
+                .into_iter()
+                .filter(|n| !sources.iter().any(|(_, s)| crate::response::numbers(s).contains(n)))
+                .collect();
+            let notes: Vec<Value> = missing
+                .iter()
+                .map(|n| json!({ "note": format!("המספר {n} לא מופיע באף מקור"), "source_refs": [] }))
+                .collect();
+            let verdict = if missing.is_empty() { "partial" } else { "unsupported" };
+            json!({ "paragraph": pid, "verdict": verdict, "notes": notes })
+        })
+        .collect();
+    json!({ "results": results })
+}
+
 /// Answer a request body the way the real API would, from local material only.
 #[must_use]
 pub fn respond(body: &Value) -> Value {
@@ -321,6 +344,9 @@ pub fn respond(body: &Value) -> Value {
     {
         let synthesis = kinds.iter().any(|k| k == "example");
         return api_text(&style_locally(last_user, synthesis).to_string());
+    }
+    if schema["properties"]["results"]["items"]["properties"]["verdict"]["enum"].is_array() {
+        return api_text(&verify_locally(last_user).to_string());
     }
     if let Some(keys) =
         schema["properties"]["sections"]["items"]["properties"]["section"]["enum"].as_array()

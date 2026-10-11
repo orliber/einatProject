@@ -28,6 +28,7 @@ mod style;
 mod unsaved;
 pub mod update;
 mod usage;
+mod verify;
 mod views;
 mod why;
 
@@ -70,6 +71,7 @@ pub use style::{
 };
 pub use unsaved::UnsavedEdit;
 pub use usage::UsageSummary;
+pub use verify::VerifyResult;
 pub use views::{
     ActivityEntry, ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail,
     ChatView, ConsultResult, ConsultTurnView, ConsultationSummary, ConsultationView, CreatedVault,
@@ -376,6 +378,14 @@ enum PendingKind {
     StyleAnalysis { source_id: String },
     /// Step 2: the analyses of `reports` past reports.
     StyleSynthesis { reports: u32 },
+    /// The check of a section's proposed paragraphs against its sources: the drafts in the
+    /// order of `P1`…, and the `S#` ids that were sent.
+    Verify {
+        case_id: String,
+        section_key: String,
+        draft_ids: Vec<String>,
+        source_ids: Vec<String>,
+    },
 }
 
 struct Pending {

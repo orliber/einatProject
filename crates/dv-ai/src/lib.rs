@@ -9,6 +9,7 @@ mod request;
 mod response;
 mod sort;
 pub mod style;
+mod verify;
 
 pub use request::{
     build_consult_request, build_research_request, build_section_request, nonce_from, ConsultInput,
@@ -26,4 +27,7 @@ pub use style::{
     build_style_analysis_request, build_style_synthesis_request, parse_style_analysis,
     parse_style_synthesis, render_for_section, RawStyleItem, StyleExcerpt, StyleItem, StyleKind,
     StyleOrigin, StyleProfile,
+};
+pub use verify::{
+    build_verify_request, parse_verify, ParagraphCheck, Verdict, VerifyInput, VerifyNote,
 };
