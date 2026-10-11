@@ -316,8 +316,22 @@ impl Core {
         self.finish_sort(out, response)
     }
 
-    /// Check Claude's sorting against what was sent and store it, material by material.
+    /// Check Claude's sorting against what was sent and store it, material by material. A
+    /// failure marks the case as stuck, like a section's.
     pub fn finish_sort(
+        &mut self,
+        out: Outgoing,
+        response: Result<(Value, bool), CoreError>,
+    ) -> Result<SortResult, CoreError> {
+        let case_id = out.pending.kind.failing_case().map(str::to_owned);
+        let result = self.store_sort(out, response);
+        if let Some(case_id) = case_id {
+            self.note_send_outcome(&case_id, result.is_ok());
+        }
+        result
+    }
+
+    fn store_sort(
         &mut self,
         out: Outgoing,
         response: Result<(Value, bool), CoreError>,

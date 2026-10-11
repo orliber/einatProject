@@ -437,8 +437,22 @@ impl Core {
         self.finish_section(out, response)
     }
 
-    /// Check and store the answer to a section request.
+    /// Check and store the answer to a section request. A failure marks the case as stuck
+    /// in the case list, and the next success for the case clears it.
     pub fn finish_section(
+        &mut self,
+        out: Outgoing,
+        response: Result<(Value, bool), CoreError>,
+    ) -> Result<SectionResult, CoreError> {
+        let case_id = out.pending.kind.failing_case().map(str::to_owned);
+        let result = self.store_section(out, response);
+        if let Some(case_id) = case_id {
+            self.note_send_outcome(&case_id, result.is_ok());
+        }
+        result
+    }
+
+    fn store_section(
         &mut self,
         out: Outgoing,
         response: Result<(Value, bool), CoreError>,
