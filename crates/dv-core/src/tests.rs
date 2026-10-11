@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 
 use super::*;
 
+mod sample_flows;
 mod surfaces;
 
 const PASSWORD: &str = "כלב ירוק רץ מהר בגינה";

@@ -42,9 +42,13 @@ jobs:
       # Local OCR (D-048): the scan tests run against the real engine with Hebrew.
       - name: Tesseract with Hebrew
         run: sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-heb
+      # The sample cases' PDFs (tests/samples/make_samples.py) go through the whole flow.
+      - name: LibreOffice for the sample PDFs
+        run: sudo apt-get install -y --no-install-recommends libreoffice-writer-nogui fonts-dejavu-core
       - run: cargo test
         env:
           DV_REQUIRE_OCR: "1"
+          DV_REQUIRE_SAMPLE_PDF: "1"
       - name: IPC TypeScript bindings are up to date
         run: git diff --exit-code -- apps/desktop/src/ipc/generated
       - run: cargo xtask check-invariants
