@@ -138,6 +138,8 @@ export class FakeCore {
   private capUsd: number | null = null;
   private ready: Record<string, number | null> = {};
   private sendStopped = false;
+  /** The material deleted last, for "ביטול" (forgotten on lock, as in the core). */
+  private removedInput: { caseId: string; input: CaseInput; at: number } | null = null;
   private model = "claude-opus-5";
   private get ai() {
     return providerOf(this.model).name;
@@ -633,6 +635,7 @@ export class FakeCore {
         return null;
       case "lock":
         this.unlocked = false;
+        this.removedInput = null;
         return null;
       case "set_api_key":
         return fail("preview", `בהדמיה בדפדפן אין חיבור ל-${this.ai}. מפתח API מוזן רק בתוכנה המותקנת, ונשמר בה מוצפן.`);
@@ -780,7 +783,16 @@ export class FakeCore {
       }
       case "delete_input": {
         const c = this.find(a.caseId);
+        const gone = c.inputs.find((i) => i.id === a.inputId);
+        if (gone) this.removedInput = { caseId: String(a.caseId), input: gone, at: c.inputs.indexOf(gone) };
         c.inputs = c.inputs.filter((i) => i.id !== a.inputId);
+        return null;
+      }
+      case "restore_input": {
+        const held = this.removedInput;
+        if (!held || held.caseId !== a.caseId || held.input.id !== a.inputId) fail("refused", "אי אפשר להחזיר את החומר הזה עוד. אפשר להוסיף אותו מחדש.");
+        this.removedInput = null;
+        this.find(held.caseId).inputs.splice(held.at, 0, held.input);
         return null;
       }
       case "score_instruments":

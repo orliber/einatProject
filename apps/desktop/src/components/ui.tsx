@@ -196,7 +196,7 @@ export interface ToastAction {
  * A short notice under the header. With an action it stays longer (7s instead of 3.5s) and holds
  * while the pointer or focus is on it, so the action can be reached in time.
  */
-export function Toast({ text, onDone, action }: { text: string; onDone: () => void; action?: ToastAction }) {
+export function Toast({ text, onDone, action }: { text: string; onDone: () => void; action?: ToastAction | undefined }) {
   const done = useRef(onDone);
   const [held, setHeld] = useState(false);
   useEffect(() => {

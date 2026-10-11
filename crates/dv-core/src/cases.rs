@@ -145,7 +145,27 @@ impl Core {
             .map_err(|e| CoreError::Internal(e.to_string()))
     }
 
+    /// Deletes a material. The last one deleted can be put back with `restore_input` until
+    /// another is deleted or the vault locks; it is held in memory only, still sealed.
     pub fn delete_input(&mut self, case_id: &str, input_id: &str) -> Result<(), CoreError> {
-        Ok(self.vault_mut()?.delete_input(case_id, input_id)?)
+        let removed = self.vault_mut()?.take_input(case_id, input_id)?;
+        if removed.is_some() {
+            self.removed_input = removed;
+        }
+        Ok(())
+    }
+
+    /// Undoes the last `delete_input` of this material.
+    pub fn restore_input(&mut self, case_id: &str, input_id: &str) -> Result<(), CoreError> {
+        let held = self
+            .removed_input
+            .take_if(|r| r.case_id == case_id && r.id == input_id);
+        let Some(row) = held else {
+            return Err(CoreError::Refused(
+                "אי אפשר להחזיר את החומר הזה עוד. אפשר להוסיף אותו מחדש.".to_owned(),
+            ));
+        };
+        self.vault_mut()?.restore_input(&row)?;
+        Ok(())
     }
 }

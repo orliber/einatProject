@@ -148,6 +148,8 @@ export const ipc = {
   updateInput: (caseId: string, inputId: string, title: string, content: string) =>
     run("update_input", { caseId, inputId, title, content }),
   deleteInput: (caseId: string, inputId: string) => run("delete_input", { caseId, inputId }),
+  /** Undoes the last deletion of this material (until another is deleted or the vault locks). */
+  restoreInput: (caseId: string, inputId: string) => run("restore_input", { caseId, inputId }),
   scoreInstruments: () => call<Instrument[]>("score_instruments"),
   previewScores: (sheet: ScoreSheet) => call<string>("preview_scores", { sheet }),
   /** Saves (or, with `inputId`, replaces) a score table as a "test scores" material. */

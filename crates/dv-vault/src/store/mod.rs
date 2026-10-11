@@ -32,6 +32,26 @@ pub use style::{StoredStyleProfile, StoredStyleSource};
 /// Raw rows as read from SQLite, before decryption.
 type IdentityRow = (String, String, String, Vec<u8>, Vec<u8>, String, String);
 type InputRow = (String, String, i64, Vec<u8>, Vec<u8>);
+
+/// A material just deleted, kept (sealed, in memory only) so the deletion can be undone.
+pub struct RemovedInput {
+    pub id: String,
+    pub case_id: String,
+    kind: String,
+    created_at: i64,
+    title_enc: Vec<u8>,
+    content_enc: Vec<u8>,
+    data_enc: Option<Vec<u8>>,
+    routing_enc: Option<Vec<u8>>,
+}
+
+impl std::fmt::Debug for RemovedInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RemovedInput")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
 type MessageRow = (String, String, bool, i64, Vec<u8>, Vec<u8>);
 type TransmissionRow = (String, String, i64, String, String, Vec<u8>);
 type SummaryRow = (String, i64, i64, Option<String>, Option<i64>);
@@ -1726,6 +1746,58 @@ impl Vault {
             params![input_id, case_id],
         )?;
         self.touch(case_id)
+    }
+
+    /// Deletes a material and hands back its row exactly as stored (still sealed), so the
+    /// deletion can be undone right after. `None` when there was no such material.
+    pub fn take_input(
+        &mut self,
+        case_id: &str,
+        input_id: &str,
+    ) -> Result<Option<RemovedInput>, VaultError> {
+        let row = self
+            .main
+            .query_row(
+                "SELECT kind, created_at, title_enc, content_enc, data_enc, routing_enc
+                 FROM inputs WHERE id = ?1 AND case_id = ?2",
+                params![input_id, case_id],
+                |r| {
+                    Ok(RemovedInput {
+                        id: input_id.to_owned(),
+                        case_id: case_id.to_owned(),
+                        kind: r.get(0)?,
+                        created_at: r.get(1)?,
+                        title_enc: r.get(2)?,
+                        content_enc: r.get(3)?,
+                        data_enc: r.get(4)?,
+                        routing_enc: r.get(5)?,
+                    })
+                },
+            )
+            .optional()?;
+        if row.is_some() {
+            self.delete_input(case_id, input_id)?;
+        }
+        Ok(row)
+    }
+
+    /// Puts back a material removed by `take_input`, with its id, time and sealed contents.
+    pub fn restore_input(&mut self, row: &RemovedInput) -> Result<(), VaultError> {
+        self.main.execute(
+            "INSERT INTO inputs (id, case_id, kind, created_at, title_enc, content_enc, data_enc, routing_enc)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                row.id,
+                row.case_id,
+                row.kind,
+                row.created_at,
+                row.title_enc,
+                row.content_enc,
+                row.data_enc,
+                row.routing_enc
+            ],
+        )?;
+        self.touch(&row.case_id)
     }
 
     pub fn inputs(&self, case_id: &str) -> Result<Vec<CaseInput>, VaultError> {

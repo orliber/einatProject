@@ -126,6 +126,15 @@ pub(crate) async fn delete_input(
     with_core(&state, move |c| c.delete_input(&case_id, &input_id)).await
 }
 
+#[tauri::command]
+pub(crate) async fn restore_input(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    input_id: String,
+) -> Res<()> {
+    with_core(&state, move |c| c.restore_input(&case_id, &input_id)).await
+}
+
 /// Percent-decoding for the (ASCII-only) IPC headers that carry a Hebrew file name.
 pub(crate) fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();

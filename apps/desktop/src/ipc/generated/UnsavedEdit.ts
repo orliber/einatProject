@@ -4,4 +4,9 @@ export type UnsavedEdit = { case_id: string,
 /**
  * Where it was being written, as the page names it ("פסקה בסעיף רקע").
  */
-place: string, text: string, };
+place: string, 
+/**
+ * The case view to open for it ("report", "materials", "consult"). Empty in edits kept by
+ * earlier versions, which were always paragraphs.
+ */
+view: string, text: string, };

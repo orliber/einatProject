@@ -46,6 +46,14 @@
 .lock-input {
   min-height: 50px;
 }
+.lock-wait {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+  font-variant-numeric: tabular-nums;
+}
 .lock-form .btn-primary {
   min-height: 50px;
   font-size: var(--text-lg);

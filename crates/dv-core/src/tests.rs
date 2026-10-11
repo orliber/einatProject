@@ -2308,6 +2308,7 @@ fn an_open_edit_survives_the_lock_inside_the_vault() {
     let edit = |text: &str| crate::UnsavedEdit {
         case_id: case.clone(),
         place: "פסקה בסעיף רקע".into(),
+        view: "report".into(),
         text: text.into(),
     };
     // Nothing kept: nothing offered.
@@ -2341,6 +2342,10 @@ fn an_open_edit_survives_the_lock_inside_the_vault() {
     core.lock();
     core.unlock(PASSWORD).unwrap();
     assert_eq!(core.take_unsaved().unwrap(), None);
+    // An edit kept by an earlier version (no view) still comes back.
+    let old: crate::UnsavedEdit =
+        serde_json::from_str(r#"{"case_id":"c","place":"פסקה","text":"טקסט"}"#).unwrap();
+    assert_eq!(old.view, "");
 }
 
 fn walkdir(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
@@ -3434,4 +3439,72 @@ fn a_word_kept_in_another_case_is_offered_and_restored_there() {
         vec!["גלעד".to_owned()],
         "only the kept word left case 2"
     );
+}
+
+#[test]
+fn a_deleted_material_comes_back_whole_until_the_lock() {
+    let (_dir, mut core, case) = setup(None);
+    let input = core
+        .add_input(
+            &case,
+            InputKind::SessionNote,
+            "מפגש ראשון",
+            "אלון בנה מגדל.",
+        )
+        .unwrap();
+    core.vault_mut()
+        .unwrap()
+        .set_input_data(&case, &input.id, "{\"a\":1}")
+        .unwrap();
+    core.set_input_sections(&case, &input.id, &["cognitive".into()])
+        .unwrap();
+    let routing = core
+        .vault_mut()
+        .unwrap()
+        .input_routing(&case, &input.id)
+        .unwrap();
+    let before = core.vault_mut().unwrap().inputs(&case).unwrap();
+
+    core.delete_input(&case, &input.id).unwrap();
+    assert!(core
+        .vault_mut()
+        .unwrap()
+        .inputs(&case)
+        .unwrap()
+        .iter()
+        .all(|i| i.id != input.id));
+    // Only this material, in this case.
+    assert!(core.restore_input(&case, "other").is_err());
+    core.restore_input(&case, &input.id).unwrap();
+    assert_eq!(core.vault_mut().unwrap().inputs(&case).unwrap(), before);
+    assert_eq!(
+        core.vault_mut()
+            .unwrap()
+            .input_routing(&case, &input.id)
+            .unwrap(),
+        routing
+    );
+    assert_eq!(
+        core.vault_mut()
+            .unwrap()
+            .input_data(&case, &input.id)
+            .unwrap()
+            .as_deref(),
+        Some("{\"a\":1}")
+    );
+    // Once.
+    assert!(core.restore_input(&case, &input.id).is_err());
+
+    // A lock forgets it: the deletion stands.
+    core.delete_input(&case, &input.id).unwrap();
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert!(core.restore_input(&case, &input.id).is_err());
+    assert!(core
+        .vault_mut()
+        .unwrap()
+        .inputs(&case)
+        .unwrap()
+        .iter()
+        .all(|i| i.id != input.id));
 }

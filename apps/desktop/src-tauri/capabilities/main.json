@@ -42,6 +42,7 @@
     "allow-add-input",
     "allow-update-input",
     "allow-delete-input",
+    "allow-restore-input",
     "allow-score-instruments",
     "allow-preview-scores",
     "allow-save-scores",

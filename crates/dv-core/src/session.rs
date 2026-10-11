@@ -29,6 +29,7 @@ impl Core {
             style_staged: HashMap::new(),
             auto_backup_tried: None,
             unsaved: None,
+            removed_input: None,
             seal_dir: seal::default_dir(),
             rollback_warning: None,
         }
@@ -379,6 +380,7 @@ impl Core {
         self.pending.clear();
         self.staged_backup = None;
         self.style_staged.clear();
+        self.removed_input = None;
         if let Some(v) = self.vault.take() {
             let _ = v.lock_because(reason);
         }
