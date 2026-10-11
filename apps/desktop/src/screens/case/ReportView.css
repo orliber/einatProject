@@ -14,11 +14,11 @@
   min-height: 1123px;
   margin: 0 auto;
   padding: 72px 76px 80px;
-  background: #fff;
-  color: #1b1b1b;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 8px 28px rgba(0, 0, 0, 0.1);
+  background: var(--surface);
+  color: var(--paper-ink);
+  box-shadow: var(--shadow-page);
   font-family: var(--font-display);
-  font-size: 16px;
+  font-size: var(--text-md);
   line-height: 1.7;
 }
 .a4-header {
@@ -27,19 +27,19 @@
   inset-inline: 76px;
   text-align: center;
   font-size: 11px;
-  color: #7a7a7a;
+  color: var(--paper-faint);
 }
 .a4-title {
   text-align: center;
-  font-size: 26px;
+  font-size: var(--text-3xl);
   margin-bottom: 18px;
 }
 .a4-info {
   display: grid;
   grid-template-columns: max-content 1fr;
   gap: 2px 14px;
-  margin: 0 0 22px;
-  font-size: 15px;
+  margin: 0 0 24px;
+  font-size: var(--text-base);
 }
 .a4-info dt {
   font-weight: 700;
@@ -48,15 +48,15 @@
   margin: 0;
 }
 .a4-part {
-  font-size: 20px;
-  color: #1f3a5f;
+  font-size: var(--text-xl);
+  color: var(--paper-heading);
   margin: 26px 0 8px;
 }
 .a4-section {
   margin-bottom: 10px;
 }
 .a4-heading {
-  font-size: 17px;
+  font-size: var(--text-lg);
   margin: 16px 0 4px;
 }
 .a4-heading button {
@@ -87,11 +87,11 @@
   align-items: flex-start;
 }
 .a4-pending .a4-p {
-  color: #4a4a4a;
+  color: var(--paper-muted);
 }
 .a4-flag {
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 700;
   color: var(--warn-ink);
 }
@@ -103,7 +103,7 @@
   padding: 10px;
   color: var(--ink-muted);
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: var(--text-sm);
   text-align: center;
 }
 .a4-gap:hover {
@@ -140,10 +140,10 @@
 }
 .a4-tool {
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--surface);
   border-radius: 999px;
   padding: 2px 10px;
-  font-size: 12.5px;
+  font-size: var(--text-xs);
   color: var(--primary);
 }
 .a4-tool:hover {
@@ -202,7 +202,7 @@
   gap: 6px;
   margin: 2px 0 6px;
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--ink-muted);
 }
 .a4-source {
@@ -215,7 +215,7 @@
   padding: 2px 10px;
   border-radius: 999px;
   border: 1px dashed var(--primary);
-  background: #fff;
+  background: var(--surface);
   color: var(--primary);
   font: inherit;
   font-weight: 600;
@@ -237,9 +237,9 @@
   background: var(--surface);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-lg);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-2);
   font-family: var(--font-ui);
-  font-size: 15px;
+  font-size: var(--text-base);
   color: var(--ink);
   text-align: start;
 }
@@ -340,9 +340,9 @@
   justify-content: center;
   border: 1px solid var(--line-strong);
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
   color: var(--primary);
-  box-shadow: 0 1px 3px rgba(21, 32, 31, 0.1);
+  box-shadow: var(--shadow-1);
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
@@ -353,7 +353,7 @@
 .a4-ai[aria-expanded="true"] {
   border-color: var(--primary);
   background: var(--primary);
-  color: #fff;
+  color: var(--on-primary);
 }
 /* Earlier wordings (UX-4): under the AI mark, only on a paragraph that has them. */
 .a4-hist {
@@ -365,7 +365,7 @@
   justify-content: center;
   border: 1px solid var(--line-strong);
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
   color: var(--ink-muted);
   cursor: pointer;
 }
@@ -381,7 +381,7 @@
   padding: 0;
   border: 1px solid var(--line-strong);
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
   color: var(--primary);
   font-weight: 700;
   cursor: pointer;
@@ -401,7 +401,7 @@
   justify-content: center;
   border: 1px solid var(--line-strong);
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
   color: var(--ink-muted);
   cursor: pointer;
 }
@@ -417,7 +417,7 @@
   padding: 6px;
   border: 1px solid var(--block);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
   font: 600 12.5px var(--font-body);
   color: var(--block);
   white-space: nowrap;
@@ -433,11 +433,11 @@
 .a4-del-yes {
   border: none;
   background: var(--block);
-  color: #fff;
+  color: var(--on-primary);
 }
 .a4-del-no {
   border: 1px solid var(--line-strong);
-  background: #fff;
+  background: var(--surface);
   color: var(--ink);
 }
 .a4-ai:focus-visible {
@@ -476,7 +476,7 @@
   padding: 0 12px;
   border: 1.5px solid var(--primary);
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
   color: var(--primary);
   font: 600 13px var(--font-body);
   cursor: pointer;
@@ -530,7 +530,7 @@
   font-family: var(--font-display);
 }
 .a4-mark {
-  background: #f6dfb4;
+  background: var(--mark);
   border-radius: 3px;
   padding: 0 2px;
 }
@@ -544,7 +544,7 @@
   margin: 0 auto 10px;
   max-width: 794px;
   font-family: var(--font-body);
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--ink-muted);
   text-align: center;
 }

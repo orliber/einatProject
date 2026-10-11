@@ -7,6 +7,7 @@ import "@fontsource/frank-ruhl-libre/500.css";
 import "@fontsource/frank-ruhl-libre/700.css";
 import "./styles/tokens.css";
 import "./styles/base.css";
+import "./styles/motion.css";
 import { App } from "./App";
 import { applyTextSize, readTextSize } from "./textSize";
 

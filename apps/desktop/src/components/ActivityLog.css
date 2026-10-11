@@ -2,7 +2,7 @@
   display: inline-flex;
   align-items: center;
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 .activity-kinds .pill-btn.on {
   background: var(--primary-soft);
@@ -29,9 +29,9 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 9px 14px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--line);
-  font-size: 15px;
+  font-size: var(--text-base);
 }
 .activity-list li:last-child {
   border-bottom: 0;

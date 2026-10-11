@@ -4,11 +4,12 @@
   gap: 6px;
   padding: 4px 12px;
   border-radius: 999px;
-  border: 1px solid var(--primary);
+  border: 1px solid var(--primary-line);
   background: var(--primary-soft);
   color: var(--primary);
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--text-sm);
+  min-height: 28px;
 }
 .update-chip:hover {
   background: var(--surface);

@@ -6,7 +6,7 @@ import { personRoles, roleLabel } from "../i18n/he";
 import { ipc, type IdentityInput, type NameMatch } from "../ipc/client";
 import type { GrammaticalGender } from "../ipc/generated/GrammaticalGender";
 import type { Role } from "../ipc/generated/Role";
-import { Dialog, ErrorLine } from "./ui";
+import { CloseIcon, Dialog, ErrorLine } from "./ui";
 import "./NewCaseDialog.css";
 import { useAi } from "../ai";
 
@@ -54,7 +54,7 @@ export function PeopleEditor({ rows, onChange }: { rows: PersonRow[]; onChange: 
           <input id={`alias-${i}`} className="input" placeholder={r.role === "child" ? "למשל: נועמי, נעמי" : "בפסיקים, לא חובה"} value={r.aliases}
             onChange={(e) => set(i, { aliases: e.target.value })} />
           {r.role !== "child" ? (
-            <button type="button" className="btn icon-btn" aria-label={`הסרת ${roleLabel[r.role]}`} title="הסרה" onClick={() => onChange(rows.filter((_, j) => j !== i))}>×</button>
+            <button type="button" className="btn icon-btn" aria-label={`הסרת ${roleLabel[r.role]}`} title="הסרה" onClick={() => onChange(rows.filter((_, j) => j !== i))}><CloseIcon /></button>
           ) : <span />}
         </div>
       ))}

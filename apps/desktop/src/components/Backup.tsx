@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
 import { ipc, type AppStatus, type BackupCheckView, type StagedBackup } from "../ipc/client";
-import { Dialog, ErrorLine } from "./ui";
+import { Dialog, ErrorLine, CloseIcon } from "./ui";
 import "./Backup.css";
 
 /** Automatic backups kept on the drive (dv-core `AUTO_KEEP`). */
@@ -225,7 +225,7 @@ export function BackupReminder() {
       {error && <span className="error small">{error}</span>}
       <button type="button" className="btn btn-small" disabled={busy} onClick={() => void write()}>{busy ? "שומרת…" : "גיבוי עכשיו…"}</button>
       <button type="button" className="link-btn small" onClick={() => go({ name: "settings" })}>עוד על הגיבוי</button>
-      <button type="button" className="btn icon-btn" aria-label="לא עכשיו (שבוע)" title="לא עכשיו: יחזור בעוד שבוע" onClick={snooze}>×</button>
+      <button type="button" className="btn icon-btn" aria-label="לא עכשיו (שבוע)" title="לא עכשיו: יחזור בעוד שבוע" onClick={snooze}><CloseIcon /></button>
     </div>
   );
 }

@@ -2,16 +2,16 @@
   max-width: 880px;
 }
 .settings-title {
-  font-size: 34px;
+  font-size: var(--text-4xl);
 }
 .setting {
-  padding: 22px 24px;
+  padding: 24px 24px;
   display: flex;
   flex-direction: column;
   gap: 14px;
 }
 .setting h2 {
-  font-size: 22px;
+  font-size: var(--text-2xl);
 }
 .narrow {
   width: 100px;

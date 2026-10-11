@@ -8,7 +8,7 @@
   background: var(--warn-paper);
   color: var(--ink);
   border-radius: 12px;
-  font-size: 15px;
+  font-size: var(--text-base);
 }
 .backup-reminder .icon-btn {
   /* Keeps the 44px target (WCAG 2.5.5), without a heavy frame. */
@@ -21,7 +21,7 @@
   background: var(--warn-soft);
 }
 .backup-facts {
-  font-size: 15px;
+  font-size: var(--text-base);
 }
 .backup-result p {
   margin: 0;

@@ -16,12 +16,12 @@
   border-radius: var(--radius-md);
   border: 1px solid var(--line);
   background: var(--surface);
-  font-size: 14px;
+  font-size: var(--text-base);
   color: var(--ink-muted);
 }
 .run-steps li b {
   color: var(--ink);
-  font-size: 15px;
+  font-size: var(--text-base);
 }
 .run-steps li b::before {
   content: counter(step) ". ";
@@ -62,7 +62,7 @@
 .run-row-body {
   border-top: 1px solid var(--line);
   padding-top: 8px;
-  font-size: 15px;
+  font-size: var(--text-base);
   line-height: 1.7;
 }
 @media (max-width: 760px) {
