@@ -6,6 +6,7 @@
 import type { ReactNode } from "react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { MoreIcon } from "./ui";
 import "./Menu.css";
 
 export interface MenuItem {
@@ -21,7 +22,7 @@ export function ActionsMenu({ items, label }: { items: MenuItem[]; label: string
     <DropdownMenu.Root dir="rtl" modal={false}>
       <DropdownMenu.Trigger asChild>
         <button type="button" className="btn btn-icon menu-trigger" aria-label={label} onClick={(e) => e.stopPropagation()}>
-          ⋯
+          <MoreIcon />
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>

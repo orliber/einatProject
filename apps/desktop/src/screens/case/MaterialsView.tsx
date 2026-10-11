@@ -6,7 +6,7 @@ import type { FilterOutcome } from "../../ipc/generated/FilterOutcome";
 import { ImportDialog } from "../../components/ImportDialog";
 import { AddMenu } from "../../components/Menu";
 import { ScoresDialog } from "../../components/ScoresDialog";
-import { Dialog, ErrorLine, Segments, Spinner, UploadIcon } from "../../components/ui";
+import { Dialog, ErrorLine, Segments, Spinner, UploadIcon, PlusIcon, EditIcon } from "../../components/ui";
 import type { CaseApi } from "../CaseScreen";
 import "./MaterialsView.css";
 import { useAi } from "../../ai";
@@ -146,7 +146,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
                   <AddMenu className="icon-btn slot-add" label={`הוספה ל${g.label}`} items={[
                     { label: g.add === "upload" ? "העלאת קובץ מהמחשב (וורד, PDF)" : g.addLabel, run: () => (g.add === "upload" ? chooseFile(g.kinds[0]) : write(g)) },
                     g.add === "upload" ? { label: "הדבקת טקסט", run: () => write(g) } : { label: "העלאת קובץ מהמחשב (וורד, PDF)", run: () => chooseFile(g.kinds[0]) },
-                  ]}>+</AddMenu>
+                  ]}><PlusIcon /></AddMenu>
                 ) : (
                   <span className="slot-actions">
                     <button type="button" className="btn btn-small" aria-label={`${g.addLabel} (${g.label})`}
@@ -154,7 +154,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
                     <button type="button" className="icon-btn slot-upload" aria-label={g.add === "upload" ? `הדבקת טקסט (${g.label})` : `העלאת קובץ (${g.label})`}
                       title={g.add === "upload" ? "הדבקת טקסט" : "העלאת קובץ Word, ‏PDF או ODT"}
                       onClick={() => (g.add === "upload" ? write(g) : chooseFile(g.kinds[0]))}>
-                      {g.add === "upload" ? "✎" : <UploadIcon />}
+                      {g.add === "upload" ? <EditIcon /> : <UploadIcon />}
                     </button>
                   </span>
                 )}

@@ -33,8 +33,15 @@
 }
 .menu-trigger {
   min-width: 40px;
-  font-size: var(--text-xl);
   line-height: 1;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-muted);
+}
+.menu-trigger:hover:not(:disabled),
+.menu-trigger[data-state="open"] {
+  background: var(--sand);
+  color: var(--ink);
 }
 .btn-icon {
   padding: 0 10px;

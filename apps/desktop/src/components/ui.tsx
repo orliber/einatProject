@@ -53,6 +53,41 @@ export function SendIcon() {
   );
 }
 
+function Glyph({ size, children }: { size: number; children: ReactNode }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="glyph">
+      {children}
+    </svg>
+  );
+}
+
+export function CloseIcon({ size = 18 }: { size?: number }) {
+  return <Glyph size={size}><path d="M18 6 6 18" /><path d="m6 6 12 12" /></Glyph>;
+}
+
+export function MoreIcon({ size = 18 }: { size?: number }) {
+  return (
+    <Glyph size={size}>
+      <circle cx="5" cy="12" r="1" fill="currentColor" />
+      <circle cx="12" cy="12" r="1" fill="currentColor" />
+      <circle cx="19" cy="12" r="1" fill="currentColor" />
+    </Glyph>
+  );
+}
+
+export function PlusIcon({ size = 17 }: { size?: number }) {
+  return <Glyph size={size}><path d="M12 5v14" /><path d="M5 12h14" /></Glyph>;
+}
+
+export function EditIcon({ size = 17 }: { size?: number }) {
+  return <Glyph size={size}><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></Glyph>;
+}
+
+export function SparkIcon({ size = 14 }: { size?: number }) {
+  return <Glyph size={size}><path d="M12 3c.5 4.5 2.5 6.5 7 7-4.5.5-6.5 2.5-7 7-.5-4.5-2.5-6.5-7-7 4.5-.5 6.5-2.5 7-7Z" fill="currentColor" /></Glyph>;
+}
+
 /** A modal frame. Escape closes it; focus moves into it when it opens. */
 export function Dialog(props: {
   title: string;
@@ -85,7 +120,7 @@ export function Dialog(props: {
             {props.subtitle && <span className="muted small">{props.subtitle}</span>}
           </div>
           {onClose && (
-            <button type="button" className="btn icon-btn" aria-label="סגירה" onClick={onClose}>×</button>
+            <button type="button" className="btn icon-btn" aria-label="סגירה" onClick={onClose}><CloseIcon /></button>
           )}
         </header>
         <div className="dialog-body">{props.children}</div>

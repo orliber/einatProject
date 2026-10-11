@@ -128,6 +128,22 @@ p {
   width: 44px;
   height: 44px;
   padding: 0;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  /* Quiet: an icon button never outweighs the content next to it. */
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ink-muted);
+}
+.icon-btn:hover:not(:disabled) {
+  background: var(--sand);
+  color: var(--ink);
+}
+.btn-small.icon-btn {
+  width: 36px;
+  height: 36px;
 }
 .pill-btn {
   min-height: 32px;
