@@ -500,8 +500,9 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
                 replacement,
             );
         } else if hebrew_cal {
-            // "[אב]" is the father's tag, not the month: "[אם] ו[אב]" is not the 6th of Av.
-            if text[..tok.start].ends_with('[') && text[tok.end..].starts_with(']') {
+            // "[אב]" is the father's tag, not the month: "[אם] ו[אב]" is not the 6th of Av,
+            // nor "ו[אב_2]" (a second father) the 2nd.
+            if inside_tag(text, tok.start, tok.end) {
                 continue;
             }
             let numeral_before = i.checked_sub(1).and_then(|j| tokens.get(j)).filter(|t| {
@@ -525,6 +526,15 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
             );
         }
     }
+}
+
+/// The word at `start..end` is part of a tag the filter wrote ("[אב]", "[אב_2]", "[בית_ספר_1]").
+fn inside_tag(text: &str, start: usize, end: usize) -> bool {
+    let (Some(open), Some(close)) = (text[..start].rfind('['), text[end..].find(']')) else {
+        return false;
+    };
+    let inner = &text[open + 1..end + close];
+    inner.chars().count() <= 40 && inner.chars().all(|c| c.is_alphanumeric() || c == '_')
 }
 
 /// All pattern identifiers in `text`, non-overlapping, sorted by position.
@@ -838,11 +848,43 @@ mod tests {
         assert_eq!(kinds("ה' באב תשפ\"ה")[0].1, PatternKind::Date);
         // The father's tag after "and" is not "the 6th of Av".
         assert!(kinds("[אם] ו[אב] מתארים ילד סקרן").is_empty());
+        assert!(kinds("אבא ו[אב_2] [ילד]").is_empty());
         assert_eq!(kinds("ו' אב תשפ\"ה")[0].1, PatternKind::Date);
         assert_eq!(kinds("ט\"ו באב")[0].1, PatternKind::Date);
         assert!(kinds("שם האב: שמעון").is_empty());
         assert!(kinds("אחיו של האב אובחן").is_empty());
         assert_eq!(kinds("seen on March 3, 2025")[0].1, PatternKind::Date);
+    }
+
+    /// Every tag the filter can write, glued to any prefix and after a Hebrew numeral, is
+    /// never read as a date, a number or anything else: the gate would refuse the filter's
+    /// own output, and she could do nothing about it (D-050).
+    #[test]
+    fn the_filters_own_tags_are_never_patterns() {
+        let mut tags: Vec<String> = crate::gate::GENERIC_TAGS
+            .iter()
+            .map(|t| (*t).to_owned())
+            .collect();
+        for role in dv_domain::Role::ALL {
+            let base = role.tag_base();
+            tags.push(format!("[{base}]"));
+            tags.extend((1..=12).map(|n| format!("[{base}_{n}]")));
+        }
+        for tag in &tags {
+            for prefix in ["", "ו", "ה", "ב", "ל", "מ", "ש", "וב", "ו-"] {
+                for before in ["", "ה' ", "ו ", "ט\"ו ", "[אם] ", "אבא "] {
+                    for after in ["", " תשפ\"ה", " 2", " ו-3"] {
+                        let text = format!("{before}{prefix}{tag}{after}");
+                        let at = before.len() + prefix.len();
+                        let own = find(&text, TODAY)
+                            .unwrap()
+                            .into_iter()
+                            .any(|h| h.start < at + tag.len() && at < h.end);
+                        assert!(!own, "{text}: {:?}", kinds(&text));
+                    }
+                }
+            }
+        }
     }
 
     #[test]
