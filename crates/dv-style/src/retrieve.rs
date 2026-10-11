@@ -4,7 +4,7 @@
 //! section (already filtered, on her computer); the items closest to it are kept within a
 //! budget, and the rest keep their order. Nothing is sent by this module.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::text::{has, words, FUNCTION_SET, GENERIC};
 
@@ -58,7 +58,10 @@ pub fn bm25(docs: &[&str], query: &str) -> Vec<f64> {
             *df.entry(t).or_default() += 1.0;
         }
     }
-    let q: HashSet<String> = terms(query).into_iter().collect();
+    // Ordered, so each score is summed in the same order every time: a `HashSet` changes its
+    // order from one call to the next, and the float sum with it (in the last bit), which could
+    // break a tie between two items differently from run to run.
+    let q: BTreeSet<String> = terms(query).into_iter().collect();
     docs.iter()
         .map(|d| {
             let len = d.len() as f64;
