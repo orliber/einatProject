@@ -17,9 +17,9 @@ use dv_core::{
     ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView,
     ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
     ExportCheck, ImportPreview, NameMatch, ParagraphVersionView, ParagraphView, Prepared,
-    Readiness, ReportSettings, RetentionItem, SectionResult, SortResult, StagedBackup,
-    StyleAnalysisResult, StyleImportPreview, StyleOverview, StyleProfileView, StyleSourceView,
-    SuspectDecision, TemplateView, UiError, UnsavedEdit, UsageSummary,
+    Readiness, ReportSettings, RetentionItem, SectionResult, SecurityStatus, SortResult,
+    StagedBackup, StyleAnalysisResult, StyleImportPreview, StyleOverview, StyleProfileView,
+    StyleSourceView, SuspectDecision, TemplateView, UiError, UnsavedEdit, UsageSummary,
 };
 use dv_domain::{
     CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind, Role,
@@ -217,6 +217,18 @@ async fn confirm_readiness(
     done: bool,
 ) -> Res<Readiness> {
     with_core(&state, move |c| c.confirm_readiness(&key, done)).await
+}
+
+/// The security status list (S4): what is on, what is not.
+#[tauri::command]
+async fn security_status(state: tauri::State<'_, AppState>) -> Res<SecurityStatus> {
+    with_core(&state, |c| Ok(c.security_status())).await
+}
+
+/// The emergency stop for sending to an outside AI (S7). Needs no unlocked vault.
+#[tauri::command]
+async fn set_send_stopped(state: tauri::State<'_, AppState>, stopped: bool) -> Res<SecurityStatus> {
+    with_core(&state, move |c| Ok(c.set_send_stopped(stopped))).await
 }
 
 /// The paragraph being edited now (memory only), kept in the vault if it locks meanwhile.
@@ -1623,6 +1635,8 @@ fn main() {
             touch,
             readiness,
             confirm_readiness,
+            security_status,
+            set_send_stopped,
             usage_summary,
             set_monthly_cap,
             hold_unsaved,

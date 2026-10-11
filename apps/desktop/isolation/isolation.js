@@ -26,6 +26,8 @@ const ALLOWED = new Set([
   "check_update",
   "choose_backup",
   "confirm_readiness",
+  "security_status",
+  "set_send_stopped",
   "confirm_recovery_key",
   "consultation",
   "consultations",

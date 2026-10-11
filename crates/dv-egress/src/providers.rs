@@ -17,7 +17,7 @@ use dv_privacy::ClearedPayload;
 use serde_json::{json, Value};
 use zeroize::Zeroizing;
 
-use crate::{build_client, check_fields, EgressError, RateLimit, Transport};
+use crate::{admit, build_client, check_fields, EgressError, RateLimit, Transport};
 
 pub const OPENAI_HOST: &str = "api.openai.com";
 pub const GEMINI_HOST: &str = "generativelanguage.googleapis.com";
@@ -551,6 +551,7 @@ impl Transport for ProviderTransport {
             _ => to_gemini(&c),
         };
         let bytes = serde_json::to_vec(&out).map_err(|e| EgressError::Protocol(e.to_string()))?;
+        admit(bytes.len(), self.provider != Provider::Local)?;
         if !self.limit.lock().is_ok_and(|mut l| l.allow()) {
             return Err(EgressError::RateLimited);
         }

@@ -36,6 +36,8 @@ import type { Role } from "./generated/Role";
 import type { ScoreSheet } from "./generated/ScoreSheet";
 import type { UsageSummary } from "./generated/UsageSummary";
 import type { Readiness } from "./generated/Readiness";
+import type { SecurityItem } from "./generated/SecurityItem";
+import type { SecurityStatus } from "./generated/SecurityStatus";
 import type { UnsavedEdit } from "./generated/UnsavedEdit";
 import type { SectionResult } from "./generated/SectionResult";
 import type { SortResult } from "./generated/SortResult";
@@ -92,6 +94,8 @@ export const ipc = {
   holdUnsaved: (edit: UnsavedEdit | null) => run("hold_unsaved", { edit }),
   takeUnsaved: () => call<UnsavedEdit | null>("take_unsaved"),
   readiness: () => call<Readiness>("readiness"),
+  securityStatus: () => call<SecurityStatus>("security_status"),
+  setSendStopped: (stopped: boolean) => call<SecurityStatus>("set_send_stopped", { stopped }),
   confirmReadiness: (key: string, done: boolean) => call<Readiness>("confirm_readiness", { key, done }),
   usageSummary: () => call<UsageSummary>("usage_summary"),
   /** Dollars; `null` removes the ceiling. */
@@ -323,6 +327,8 @@ export type {
   UpdateView,
   UsageSummary,
   Readiness,
+  SecurityItem,
+  SecurityStatus,
   UnsavedEdit,
   ActivityPage,
   ConsultationSummary,

@@ -13,6 +13,8 @@ pub mod google;
 mod library;
 mod readiness;
 mod retention;
+mod seal;
+mod security;
 mod sorting;
 mod style;
 mod unsaved;
@@ -53,6 +55,7 @@ pub use followup::FollowUpView;
 pub use library::TRASH_DAYS;
 pub use readiness::{Readiness, ReadinessItem};
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
+pub use security::{SecurityItem, SecurityStatus};
 pub use style::{
     StyleAnalysisResult, StyleImportPreview, StyleOverview, StylePartView, StyleProfileView,
     StyleSectionLabel, StyleSourceView, StyleSuggestion, StyleVersionView,
@@ -275,6 +278,10 @@ fn egress_he(e: &EgressError, ai: &str) -> String {
             "החיבור המאובטח נכשל. ייתכן שתוכנה במחשב (למשל אנטי-וירוס) מיירטת תעבורה מוצפנת."
                 .to_owned()
         }
+        EgressError::Stopped => "השליחה כבויה (עצירת חירום). אפשר להפעיל אותה מחדש במסך מצב האבטחה."
+            .to_owned(),
+        EgressError::TooLarge => "הבקשה גדולה מדי. כדאי לשלוח פחות חומרים בבת אחת.".to_owned(),
+        EgressError::DailyLimit => "הגעת למכסת הבקשות היומית. אפשר להמשיך מחר.".to_owned(),
         other => format!("שגיאה בחיבור ל-{ai}: {other}"),
     }
 }
@@ -440,6 +447,10 @@ pub struct Core {
     auto_backup_tried: Option<Instant>,
     /// The paragraph being edited right now (memory only; kept in the vault on lock).
     unsaved: Option<UnsavedEdit>,
+    /// Where the rollback seal is kept (outside the vault folder); `None` turns it off.
+    seal_dir: Option<PathBuf>,
+    /// Set at unlock when the vault is older than this computer has seen (S6).
+    rollback_warning: Option<String>,
 }
 
 impl std::fmt::Debug for Core {
@@ -660,6 +671,8 @@ impl Core {
             style_staged: HashMap::new(),
             auto_backup_tried: None,
             unsaved: None,
+            seal_dir: seal::default_dir(),
+            rollback_warning: None,
         }
     }
 
@@ -691,6 +704,7 @@ impl Core {
     pub fn for_tests(dir: &Path, transport: Option<Box<dyn Transport>>) -> Self {
         let mut core = Self::new(dir);
         core.argon = Some(Argon2Params::TEST);
+        core.seal_dir = None;
         core.transport = transport.map(Arc::from);
         core
     }
@@ -817,7 +831,8 @@ impl Core {
                     .map(|p| p.id().to_owned())
                     .collect(),
                 (!v.integrity().audit_ok || !v.integrity().header_ok)
-                    .then(|| v.integrity().detail.clone().unwrap_or_default()),
+                    .then(|| v.integrity().detail.clone().unwrap_or_default())
+                    .or_else(|| self.rollback_warning.clone()),
             ),
             None => (true, Vec::new(), None),
         };
@@ -920,6 +935,10 @@ impl Core {
                 }
                 self.failed_unlocks = 0;
                 self.not_before = None;
+                self.rollback_warning = self
+                    .seal_dir
+                    .as_deref()
+                    .and_then(|d| seal::check(d, &self.dir, vault.audit_seq()));
                 self.vault = Some(vault);
                 self.last_activity = Instant::now();
                 if purge {

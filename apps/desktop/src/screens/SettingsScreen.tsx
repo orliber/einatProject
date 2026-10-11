@@ -7,6 +7,7 @@ import { TopBar } from "../components/TopBar";
 import { UpdateSettings } from "../components/Update";
 import { UsageSettings } from "../components/UsageSettings";
 import { ReadinessSettings } from "../components/ReadinessSettings";
+import { SecuritySettings } from "../components/SecuritySettings";
 import { ErrorLine } from "../components/ui";
 import { ipc, type ReportSettings, type TemplateView } from "../ipc/client";
 import { PROVIDERS, providerOf } from "../ai";
@@ -275,18 +276,7 @@ export function SettingsScreen() {
 
         <UpdateSettings />
 
-        <section className="card setting" aria-labelledby="s-sec">
-          <h2 id="s-sec">מצב האבטחה</h2>
-          <ul className="sec-list">
-            <li><span className="chip chip-ok">פעיל</span> הכספת מוצפנת (AES-256), ומפתח נפרד לכל תיק</li>
-            <li><span className={status.fips_active ? "chip chip-ok" : "chip chip-sand"}>{status.fips_active ? "פעיל" : "רגיל"}</span> מודול הצפנה {status.fips_active ? "מאושר FIPS 140-3" : "סטנדרטי"}</li>
-            <li>
-              <span className={status.disk_encryption === "on" ? "chip chip-ok" : "chip chip-warn"}>{status.disk_encryption === "on" ? "פעיל" : status.disk_encryption === "off" ? "כבוי" : "לא ידוע"}</span>
-              הצפנת הדיסק של המחשב (BitLocker / FileVault)
-              {status.disk_encryption !== "on" && <span className="hint">מומלץ להפעיל: כך גם קבצים אחרים במחשב מוגנים אם הוא נגנב.</span>}
-            </li>
-          </ul>
-        </section>
+        <SecuritySettings />
       </main>
     </div>
   );

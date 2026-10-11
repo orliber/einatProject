@@ -13,6 +13,8 @@ use serde_json::{json, Value};
 
 use super::*;
 
+mod surfaces;
+
 const PASSWORD: &str = "כלב ירוק רץ מהר בגינה";
 
 /// Records every payload and answers like the Messages API.
