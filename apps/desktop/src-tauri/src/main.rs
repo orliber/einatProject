@@ -22,6 +22,7 @@ use dv_core::{
     Readiness, ReportSettings, RetentionItem, SectionResult, SecurityStatus, SortResult,
     StagedBackup, StyleAnalysisResult, StyleImportPreview, StyleOverview, StyleProfileView,
     StyleSourceView, SuspectDecision, TemplateView, UiError, UnsavedEdit, UsageSummary,
+    VerifyResult,
 };
 use dv_domain::{
     CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind, Role,
@@ -273,6 +274,10 @@ fn main() {
             prepare_section,
             prepare_full_draft,
             send_section,
+            verify_stage_on,
+            set_verify_stage,
+            prepare_verify,
+            send_verify,
             prepare_sort,
             send_sort,
             set_input_sections,

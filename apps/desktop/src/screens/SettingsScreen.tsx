@@ -6,6 +6,7 @@ import { PasswordSettings } from "../components/PasswordSettings";
 import { TopBar } from "../components/TopBar";
 import { UpdateSettings } from "../components/Update";
 import { UsageSettings } from "../components/UsageSettings";
+import { VerifySettings } from "../components/VerifySettings";
 import { ReadinessSettings } from "../components/ReadinessSettings";
 import { SecuritySettings } from "../components/SecuritySettings";
 import { ErrorLine } from "../components/ui";
@@ -148,6 +149,8 @@ export function SettingsScreen() {
         </section>
 
         <UsageSettings />
+
+        <VerifySettings />
 
         <section className="card setting" aria-labelledby="s-privacy">
           <h2 id="s-privacy">פרטיות ונעילה</h2>

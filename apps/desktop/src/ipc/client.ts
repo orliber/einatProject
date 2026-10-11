@@ -40,6 +40,9 @@ import type { SecurityItem } from "./generated/SecurityItem";
 import type { SecurityStatus } from "./generated/SecurityStatus";
 import type { UnsavedEdit } from "./generated/UnsavedEdit";
 import type { SectionResult } from "./generated/SectionResult";
+import type { ParagraphCheck } from "./generated/ParagraphCheck";
+import type { Verdict } from "./generated/Verdict";
+import type { VerifyResult } from "./generated/VerifyResult";
 import type { SortResult } from "./generated/SortResult";
 import type { SourceExcerpt } from "./generated/SourceExcerpt";
 import type { MaterialRouting } from "./generated/MaterialRouting";
@@ -186,6 +189,11 @@ export const ipc = {
   /** Words Claude has written so far for a request on its way (streamed answers). */
   sendProgress: (approvalId: string) => call<number>("send_progress", { approvalId }),
   sendSection: (approvalId: string) => call<SectionResult>("send_section", { approvalId }),
+  /** The check of a draft against its sources: off until switched on in settings. */
+  verifyStageOn: () => call<boolean>("verify_stage_on"),
+  setVerifyStage: (on: boolean) => run("set_verify_stage", { on }),
+  prepareVerify: (caseId: string, sectionKey: string) => call<Prepared>("prepare_verify", { caseId, sectionKey }),
+  sendVerify: (approvalId: string) => call<VerifyResult>("send_verify", { approvalId }),
   /** D-022: sort every material not sorted yet into sections (one review screen). */
   prepareSort: (caseId: string) => call<Prepared>("prepare_sort", { caseId }),
   sendSort: (approvalId: string) => call<SortResult>("send_sort", { approvalId }),
@@ -368,4 +376,7 @@ export type {
   SectionResult,
   SuspectDecision,
   UiError,
+  ParagraphCheck,
+  Verdict,
+  VerifyResult,
 };
