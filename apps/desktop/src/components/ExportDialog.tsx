@@ -140,6 +140,7 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
                   {copied && <span className="small muted" role="status">לא נשמר בהיסטוריית הלוח, ויימחק מהלוח בעוד {copied} שניות.</span>}
                   <button type="button" className="btn" onClick={() => { setPassword(makePassphrase()); setCopied(null); }}>סיסמה חדשה</button>
                 </div>
+                {password.length < 10 && <span className="small" role="status">הסיסמה צריכה להיות באורך 10 תווים לפחות (עכשיו {password.length}). אפשר ללחוץ "סיסמה חדשה".</span>}
                 <span className="small muted">את הסיסמה מוסרים להורים בטלפון, לא באותו מייל. ההצפנה היא של Word עצמו, ולכן הקובץ נפתח בכל מחשב.</span>
               </>
             )}

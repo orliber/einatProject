@@ -59,7 +59,7 @@ export function ImportDialog(props: {
 
   const pages = p.pages > 0 ? ` · ${p.pages} עמודים` : "";
   return (
-    <Dialog title="ייבוא מסמך" onClose={props.onClose}
+    <Dialog title="ייבוא מסמך" onClose={props.onClose} dirty={title !== p.title || body !== p.body}
       subtitle={`${p.file_name} · ${FORMAT[p.format] ?? p.format}${pages} · שום דבר לא נשלח בשלב הזה`}
       footer={
         <>

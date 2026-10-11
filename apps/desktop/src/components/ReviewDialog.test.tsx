@@ -4,6 +4,7 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import { AppContext, type AppApi } from "../App";
 import { prepared, status } from "../test/fixtures";
 import { ReviewDialog } from "./ReviewDialog";
+import { Dialog } from "./ui";
 import { makePassphrase } from "./ExportDialog";
 
 function api(over: Partial<ReturnType<typeof status>> = {}): AppApi {
@@ -106,5 +107,35 @@ describe("makePassphrase", () => {
     expect(a.length).toBeGreaterThanOrEqual(10);
     expect(a.split("-")).toHaveLength(5);
     expect(new Set(Array.from({ length: 20 }, makePassphrase)).size).toBeGreaterThan(15);
+  });
+
+  it("a blocked name can be decided on the spot, then the request is rebuilt (F1)", async () => {
+    const calls: { cmd: string; args: unknown }[] = [];
+    mockIPC((cmd, args) => {
+      calls.push({ cmd, args });
+      return null;
+    });
+    const blocked = prepared({ approval_id: null, blocked: [{ code: "unknown_name", message: "נמצא שם שלא הוחלט לגביו", detail: "דנה" }] });
+    const reprepare = vi.fn(async () => prepared());
+    const user = userEvent.setup();
+    render(
+      <AppContext.Provider value={api()}>
+        <ReviewDialog title="t" caseId="c1" prepared={blocked} reprepare={reprepare} onSend={vi.fn()} onClose={vi.fn()} />
+      </AppContext.Provider>,
+    );
+    await user.click(screen.getByRole("button", { name: "זה שם: להסתיר ולהמשיך" }));
+    expect(calls.find((c) => c.cmd === "decide_suspect")?.args).toMatchObject({ caseId: "c1", token: "דנה", decision: { decision: "hide" } });
+    expect(reprepare).toHaveBeenCalled();
+    expect(screen.queryByText(/נמצא שם שלא הוחלט/)).toBeNull();
+  });
+
+  it("Escape asks before dropping typed text (F6)", async () => {
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(<Dialog title="d" onClose={onClose} dirty><p>x</p></Dialog>);
+    await user.keyboard("{Escape}");
+    expect(onClose).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "לסגור בלי לשמור" }));
+    expect(onClose).toHaveBeenCalled();
   });
 });

@@ -206,6 +206,7 @@ impl CoreError {
     /// What the psychologist sees, naming the AI she chose (`Core::ai_name`).
     #[must_use]
     pub fn to_ui_for(&self, ai: &str) -> UiError {
+        let mut details = Vec::new();
         let (code, message) = match self {
             CoreError::Locked => ("locked", "הכספת נעולה. יש לפתוח אותה מחדש.".to_owned()),
             CoreError::Vault(VaultError::WrongSecret) => (
@@ -223,7 +224,10 @@ impl CoreError {
             CoreError::Vault(VaultError::AlreadyExists) => {
                 ("exists", "כבר קיימת כספת במחשב הזה.".to_owned())
             }
-            CoreError::Vault(e) => ("vault", format!("שגיאה בכספת: {e}")),
+            CoreError::Vault(e) => {
+                details.push(e.to_string());
+                ("vault", TECHNICAL_HE.to_owned())
+            }
             CoreError::NotFound(what) => ("not_found", format!("לא נמצא: {what}")),
             CoreError::ConsentMissing => (
                 "consent_missing",
@@ -237,15 +241,23 @@ impl CoreError {
             CoreError::Egress(e) => ("egress", egress_he(e, ai)),
             CoreError::Ai(e) => ("ai", format!("התשובה של {ai} לא תקינה: {e}")),
             CoreError::Update(e) => ("update", update::update_he(e)),
-            CoreError::Internal(e) => ("internal", format!("שגיאה פנימית: {e}")),
+            CoreError::Internal(e) => {
+                details.push(e.clone());
+                ("internal", TECHNICAL_HE.to_owned())
+            }
         };
         UiError {
             code: code.to_owned(),
             message,
-            details: Vec::new(),
+            details,
         }
     }
 }
+
+/// One calm sentence for failures only the developer can read; the raw text rides in
+/// `UiError::details` behind a "copy details" button (F5).
+const TECHNICAL_HE: &str =
+    "משהו השתבש בתוכנה. שום דבר לא נשלח והחומרים שמורים. אפשר להעתיק את הפרטים ולשלוח לאור.";
 
 fn egress_he(e: &EgressError, ai: &str) -> String {
     match e {

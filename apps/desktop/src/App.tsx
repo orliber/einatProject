@@ -14,6 +14,7 @@ import { UnsavedNotice } from "./components/Unsaved";
 import { applyTextSize, readTextSize, stepTextSize } from "./textSize";
 import { ShortcutsSheet, useShortcutsSheet } from "./components/ShortcutsSheet";
 import { isCombo, KEYS } from "./shortcuts";
+import { rememberFailure } from "./errors";
 
 export type Route =
   | { name: "cases" }
@@ -24,6 +25,8 @@ export type Route =
 
 export interface AppApi {
   status: AppStatus;
+  /** Where she is now; lets an error offer the next step on this case. */
+  route?: Route;
   go: (r: Route) => void;
   refresh: () => Promise<void>;
   notify: (text: string) => void;
@@ -88,6 +91,7 @@ export function App() {
 
   const fail = useCallback(
     (e: UiError) => {
+      rememberFailure(e);
       if (e.code === "locked") void refresh();
       return e.message;
     },
@@ -181,7 +185,7 @@ export function App() {
     return <LockScreen status={status} onUnlocked={(s) => { setStatus(s); setRoute({ name: "cases" }); }} />;
   }
 
-  const api: AppApi = { status, go: setRoute, refresh, notify: setToast, fail, lockNow, showShortcuts: sheet.show };
+  const api: AppApi = { status, route, go: setRoute, refresh, notify: setToast, fail, lockNow, showShortcuts: sheet.show };
   return (
     <QueryClientProvider client={queryClient}>
     <AppContext.Provider value={api}>

@@ -54,6 +54,7 @@ export function ScoresDialog(props: {
   const [notes, setNotes] = useState(props.sheet?.notes ?? "");
   const [preview, setPreview] = useState<{ text: string; error: string | null }>({ text: "", error: null });
   const [saving, setSaving] = useState(false);
+  const [initialEntries] = useState(() => JSON.stringify(entries));
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -130,6 +131,7 @@ export function ScoresDialog(props: {
     <Dialog wide title={props.input ? "עריכת ציונים" : "הזנת ציונים"}
       subtitle={`הטווח והאחוזון מחושבים בתוכנה לפי טבלה קבועה. ${ai} מקבל את הטקסט המוכן ואינו מפרש ציונים בעצמו.`}
       onClose={props.onClose}
+      dirty={!saving && JSON.stringify(entries) !== initialEntries}
       footer={
         <>
           <span className="small muted grow">{filled ? `${filled} ציונים הוזנו` : "ממלאים רק את מה שהועבר. שורות ריקות לא נשמרות."}</span>
