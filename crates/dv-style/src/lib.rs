@@ -9,6 +9,7 @@
 //!   against how often the phrase appeared and she left it, and become a suggestion only when
 //!   the lower bound of a confidence interval says she changes it most of the time.
 //! * [`phrases`]: expressions that recur across her past reports, found without any AI.
+//! * [`retrieve`]: which of her profile items fit a request best (BM25), within a budget.
 //!
 //! Nothing here reaches the network, and nothing goes into a request until Einat adds it to her
 //! profile, where the usual filter, overlap check and gate apply.
@@ -17,6 +18,7 @@
 
 pub mod edits;
 pub mod phrases;
+pub mod retrieve;
 pub mod stylometry;
 pub mod text;
 
