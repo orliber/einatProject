@@ -86,6 +86,22 @@ describe("writing the report", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "✓ לאשר" })).toBeNull());
   });
 
+  it("previous reports can be summarized by topics through the same review screen", async () => {
+    const { user, calls, core } = await openApp();
+    const cases = (await core.handle("list_cases", {})) as { id: string }[];
+    const id = cases[0]?.id ?? "";
+    await core.handle("add_input", { caseId: id, kind: "prior_report", title: "דוח קלינאית", content: "דוח בדוי על שפה וקשב." });
+    await user.click(await screen.findByRole("button", { name: /בתיק של נועם$/ }));
+    await screen.findByRole("article", { name: "הדוח, כמו בקובץ" });
+    await user.click((screen.getAllByRole("button", { name: /חומרים/ })[0] as HTMLElement));
+    await user.click(await screen.findByRole("button", { name: /סיכום כל דוח לפי נושאים/ }));
+    await user.click(screen.getByRole("button", { name: "המלצות" }));
+    await user.click(screen.getByRole("button", { name: "בדיקה לפני שליחה" }));
+    await screen.findByRole("dialog", { name: /לפני שליחה/ });
+    expect(calls).toContain("prepare_section");
+    expect(calls).not.toContain("send_section");
+  });
+
   it("an edited paragraph keeps its earlier wording, and it can be brought back", async () => {
     const { user } = await openApp();
     const page = await openCase(user);
