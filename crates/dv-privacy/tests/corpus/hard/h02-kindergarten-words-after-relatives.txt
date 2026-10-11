@@ -1,0 +1,8 @@
+case: hard-a
+type: kindergarten_report
+declared: child=תמר דמיוני; mother=רחל; father=אליעזר
+---
+{{תמר|decl}} משחקת בעיקר עם {{עלמה|name|other_child}}, וגם עם {{אח|keep}}יה הגדולים של חברותיה.
+הגננת {{אסתר|name|teacher}} מספרת שכשאבא {{עובד|keep}} עד מאוחר, {{תמר|decl}} מתקשה בפרידה.
+האם סיפרה שהסבתא {{עובדת|keep}} בבית חולים ומגיעה לאסוף בימי שלישי.
+בגן יש ילד בשם {{בן|name|other_child}}, ו{{תמר|decl}} משחקת איתו בחצר.
