@@ -48,6 +48,7 @@
 | `dv-domain` | תיקים, סעיפים, ציונים, `interpretation`, DSM | — | רשת |
 | `dv-ingest` | ה-worker: pdfium, DOCX (`zip` + `quick-xml`), OCR, חילוץ מטא-דאטה | `pdfium-render` | רשת, מפתחות |
 | `dv-export` | DOCX מתבנית, הצפנת ECMA-376 Agile, `restore` | `zip`, `quick-xml`, `cfb` | רשת |
+| `dv-style` | למידת סגנון מקומית: מודל סטטיסטי לפי סעיף, למידה מתיקונים, ביטויים חוזרים (D-052) | `dv-privacy`, `serde` | רשת |
 | `dv-ipc` | הגדרות פקודות, סכמות, יצירת טיפוסי TS (`specta`) | `serde`, `specta` | |
 | `apps/desktop/src-tauri` | מעטפת דקה: חלון, CSP, capabilities, העברת פקודות ל-crates | `tauri` | plugins של fs/shell/http |
 

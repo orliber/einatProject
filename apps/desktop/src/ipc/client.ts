@@ -40,6 +40,9 @@ import type { SecurityItem } from "./generated/SecurityItem";
 import type { SecurityStatus } from "./generated/SecurityStatus";
 import type { UnsavedEdit } from "./generated/UnsavedEdit";
 import type { SectionResult } from "./generated/SectionResult";
+import type { ParagraphCheck } from "./generated/ParagraphCheck";
+import type { Verdict } from "./generated/Verdict";
+import type { VerifyResult } from "./generated/VerifyResult";
 import type { SortResult } from "./generated/SortResult";
 import type { SourceExcerpt } from "./generated/SourceExcerpt";
 import type { MaterialRouting } from "./generated/MaterialRouting";
@@ -55,6 +58,7 @@ import type { StyleOverview } from "./generated/StyleOverview";
 import type { StyleProfile } from "./generated/StyleProfile";
 import type { StyleProfileView } from "./generated/StyleProfileView";
 import type { StyleSourceView } from "./generated/StyleSourceView";
+import type { StyleSuggestion } from "./generated/StyleSuggestion";
 
 /** Every failure reaches the UI as a UiError with a Hebrew message. */
 export function asUiError(e: unknown): UiError {
@@ -148,6 +152,8 @@ export const ipc = {
   updateInput: (caseId: string, inputId: string, title: string, content: string) =>
     run("update_input", { caseId, inputId, title, content }),
   deleteInput: (caseId: string, inputId: string) => run("delete_input", { caseId, inputId }),
+  /** Undoes the last deletion of this material (until another is deleted or the vault locks). */
+  restoreInput: (caseId: string, inputId: string) => run("restore_input", { caseId, inputId }),
   scoreInstruments: () => call<Instrument[]>("score_instruments"),
   previewScores: (sheet: ScoreSheet) => call<string>("preview_scores", { sheet }),
   /** Saves (or, with `inputId`, replaces) a score table as a "test scores" material. */
@@ -185,6 +191,11 @@ export const ipc = {
   /** Words Claude has written so far for a request on its way (streamed answers). */
   sendProgress: (approvalId: string) => call<number>("send_progress", { approvalId }),
   sendSection: (approvalId: string) => call<SectionResult>("send_section", { approvalId }),
+  /** The check of a draft against its sources: off until switched on in settings. */
+  verifyStageOn: () => call<boolean>("verify_stage_on"),
+  setVerifyStage: (on: boolean) => run("set_verify_stage", { on }),
+  prepareVerify: (caseId: string, sectionKey: string) => call<Prepared>("prepare_verify", { caseId, sectionKey }),
+  sendVerify: (approvalId: string) => call<VerifyResult>("send_verify", { approvalId }),
   /** D-022: sort every material not sorted yet into sections (one review screen). */
   prepareSort: (caseId: string) => call<Prepared>("prepare_sort", { caseId }),
   sendSort: (approvalId: string) => call<SortResult>("send_sort", { approvalId }),
@@ -324,6 +335,7 @@ export type {
   StyleProfile,
   StyleProfileView,
   StyleSourceView,
+  StyleSuggestion,
   UpdateView,
   UsageSummary,
   Readiness,
@@ -366,4 +378,7 @@ export type {
   SectionResult,
   SuspectDecision,
   UiError,
+  ParagraphCheck,
+  Verdict,
+  VerifyResult,
 };

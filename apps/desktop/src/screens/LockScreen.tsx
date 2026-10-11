@@ -23,6 +23,21 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
     ipc.ping().then((p) => setVersion(p.core_version)).catch(() => setVersion(null));
   }, []);
 
+  // Too many wrong tries: the core says how long to wait. The wait counts down here and the
+  // button comes back by itself, instead of a fixed number that is already wrong a second later.
+  const [waitUntil, setWaitUntil] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (waitUntil === null) return;
+    const t = window.setInterval(() => {
+      const n = Date.now();
+      setNow(n);
+      if (n >= waitUntil) setWaitUntil(null);
+    }, 250);
+    return () => window.clearInterval(t);
+  }, [waitUntil]);
+  const waitSeconds = waitUntil === null ? 0 : Math.max(1, Math.ceil((waitUntil - now) / 1000));
+
   const offerHello = !!status?.hello_on && !!status?.hello_available && mode === "password";
 
   async function hello() {
@@ -47,7 +62,14 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
       setSecret("");
       onUnlocked?.(s);
     } catch (err) {
-      setError((err as { message?: string }).message ?? "הפתיחה נכשלה.");
+      const e = err as { code?: string; message?: string };
+      const seconds = e.code === "backoff" ? Number(/\d+/.exec(e.message ?? "")?.[0]) : NaN;
+      if (seconds > 0) {
+        setNow(Date.now());
+        setWaitUntil(Date.now() + seconds * 1000);
+      } else {
+        setError(e.message ?? "הפתיחה נכשלה.");
+      }
     } finally {
       setBusy(false);
     }
@@ -86,8 +108,12 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
               placeholder={mode === "recovery" ? "7K3M-Q9WD-…" : undefined}
               value={secret} onChange={(e) => setSecret(e.target.value)} />
           </div>
-          <ErrorLine error={error} />
-          <button type="submit" className={offerHello ? "btn" : "btn btn-primary"} disabled={busy}>{busy ? "פותחת…" : he.lock.open}</button>
+          {waitUntil !== null ? (
+            <p className="lock-wait" role="status">היו כמה ניסיונות שגויים. אפשר לנסות שוב בעוד {waitSeconds} {waitSeconds === 1 ? "שנייה" : "שניות"}.</p>
+          ) : (
+            <ErrorLine error={error} />
+          )}
+          <button type="submit" className={offerHello ? "btn" : "btn btn-primary"} disabled={busy || waitUntil !== null}>{busy ? "פותחת…" : he.lock.open}</button>
           <button type="button" className="link-btn" onClick={() => { setMode(mode === "password" ? (googleOn ? "google" : "recovery") : "password"); setSecret(""); setError(null); }}>
             {mode === "password" ? (googleOn ? "שכחתי את הסיסמה · כניסה עם גוגל" : "שכחתי את הסיסמה · פתיחה עם ערכת השחזור") : "חזרה לפתיחה עם סיסמה"}
           </button>

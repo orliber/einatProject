@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-send-verify"
+description = "Enables the send_verify command without any pre-configured scope."
+commands.allow = ["send_verify"]
+
+[[permission]]
+identifier = "deny-send-verify"
+description = "Denies the send_verify command without any pre-configured scope."
+commands.deny = ["send_verify"]

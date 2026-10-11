@@ -203,24 +203,31 @@ pub const UNSAFE_MODULE: &str = "win_platform.rs";
 /// `// SAFETY:` comment just above it.
 fn shell_unsafe_confined(src: &Path) -> Vec<String> {
     let mut problems = Vec::new();
-    let Ok(entries) = fs::read_dir(src) else {
-        return vec![format!("{}: cannot read", src.display())];
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let text = fs::read_to_string(&path).unwrap_or_default();
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
-        if name.as_deref() == Some(UNSAFE_MODULE) {
-            problems.extend(
-                unexplained_unsafe(&text)
-                    .into_iter()
-                    .map(|line| format!("{}:{line}: unsafe without // SAFETY:", path.display())),
-            );
-        } else if text.contains("allow(unsafe_code)") || text.contains("unsafe {") {
-            problems.push(format!(
-                "{}: unsafe outside {UNSAFE_MODULE}",
-                path.display()
-            ));
+    let mut stack = vec![src.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            return vec![format!("{}: cannot read", dir.display())];
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let text = fs::read_to_string(&path).unwrap_or_default();
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+            if name.as_deref() == Some(UNSAFE_MODULE) {
+                problems.extend(
+                    unexplained_unsafe(&text).into_iter().map(|line| {
+                        format!("{}:{line}: unsafe without // SAFETY:", path.display())
+                    }),
+                );
+            } else if text.contains("allow(unsafe_code)") || text.contains("unsafe {") {
+                problems.push(format!(
+                    "{}: unsafe outside {UNSAFE_MODULE}",
+                    path.display()
+                ));
+            }
         }
     }
     problems
@@ -375,6 +382,60 @@ fn tauri_hardening(shell: &Path) -> Vec<String> {
     }
     let mut problems = tauri_config_violations(&conf, &capabilities);
     problems.extend(isolation_allowlist(shell));
+    problems.extend(command_lists(shell, &capabilities));
+    problems
+}
+
+/// Every command the shell registers (`generate_handler!` in `main.rs`) is declared in
+/// `build.rs` and granted in the capabilities, and nothing more. A command missing from either
+/// is refused at run time, so its button silently does nothing (0.5.0: "להחזיר", letters).
+fn command_lists(shell: &Path, capabilities: &[serde_json::Value]) -> Vec<String> {
+    let read = |p: &Path| fs::read_to_string(p).unwrap_or_default();
+    let main = read(&shell.join("src/main.rs"));
+    let handlers: BTreeSet<String> = main
+        .split_once("generate_handler![")
+        .and_then(|(_, rest)| rest.split_once(']'))
+        .map(|(list, _)| {
+            list.split(',')
+                .map(|w| w.trim().to_owned())
+                .filter(|w| !w.is_empty() && !w.starts_with("//"))
+                .collect()
+        })
+        .unwrap_or_default();
+    let declared: BTreeSet<String> = Regex::new(r#"(?m)^\s+"([a-z_]+)",\s*$"#).map_or_else(
+        |_| BTreeSet::new(),
+        |re| {
+            re.captures_iter(&read(&shell.join("build.rs")))
+                .map(|c| c[1].to_owned())
+                .collect()
+        },
+    );
+    let granted: BTreeSet<String> = capabilities
+        .iter()
+        .flat_map(|c| c["permissions"].as_array().cloned().unwrap_or_default())
+        .filter_map(|p| p.as_str().map(str::to_owned))
+        .filter_map(|p| p.strip_prefix("allow-").map(|c| c.replace('-', "_")))
+        .collect();
+    let mut problems = Vec::new();
+    if handlers.is_empty() {
+        problems.push("no generate_handler! list found in src-tauri/src/main.rs".to_owned());
+    }
+    if handlers != declared {
+        let missing: Vec<_> = handlers.difference(&declared).collect();
+        let extra: Vec<_> = declared.difference(&handlers).collect();
+        problems.push(format!(
+            "build.rs must declare exactly the commands main.rs registers \
+             (missing {missing:?}, extra {extra:?})"
+        ));
+    }
+    if declared != granted {
+        let missing: Vec<_> = declared.difference(&granted).collect();
+        let extra: Vec<_> = granted.difference(&declared).collect();
+        problems.push(format!(
+            "capabilities must allow exactly the commands in build.rs \
+             (missing {missing:?}, extra {extra:?})"
+        ));
+    }
     problems
 }
 

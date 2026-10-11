@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { LockScreen } from "./LockScreen";
 
@@ -28,5 +28,29 @@ describe("LockScreen", () => {
     });
     render(<LockScreen />);
     expect(await screen.findByText(/התוכנה לא מגיבה/)).toBeInTheDocument();
+  });
+});
+
+describe("too many wrong tries", () => {
+  it("counts the wait down and gives the button back by itself", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    mockIPC((cmd) => {
+      if (cmd === "unlock") throw { code: "backoff", message: "יותר מדי ניסיונות. אפשר לנסות שוב בעוד 3 שניות.", details: [] };
+      if (cmd === "ping") return { ipc_version: 1, core_version: "0.1.0", build_commit: "test", fips_active: false, platform: "linux" };
+      if (cmd === "google_status") return { on: false };
+      return null;
+    });
+    render(<LockScreen />);
+    fireEvent.change(screen.getByLabelText("סיסמה"), { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: "פתיחה" }));
+    expect(await screen.findByText(/בעוד 3 שניות/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "פתיחה" })).toBeDisabled();
+    await act(async () => {}); // the countdown's timer starts after the render
+    await act(async () => { vi.advanceTimersByTime(1100); });
+    expect(screen.getByText(/בעוד 2 שניות/)).toBeInTheDocument();
+    await act(async () => { vi.advanceTimersByTime(2500); });
+    expect(screen.queryByText(/ניסיונות שגויים/)).toBeNull();
+    expect(screen.getByRole("button", { name: "פתיחה" })).toBeEnabled();
+    vi.useRealTimers();
   });
 });

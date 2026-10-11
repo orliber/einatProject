@@ -23,7 +23,7 @@ use dv_privacy::text::normalize;
 use dv_privacy::{filter_with_hints, AutoKind, FilterOutcome, Mark, NameHint, PrivacyContext};
 
 const JOIN_MARK: char = '¦';
-const PRACTITIONER: &str = "ישראלה בדויה";
+pub const PRACTITIONER: &str = "ישראלה בדויה";
 
 /// Groups whose spans must be hidden (or, for `indirect`, at least generalized or held).
 const HIDE: &[&str] = &[
@@ -131,7 +131,7 @@ pub fn load(corpus: &Path, split: &str) -> Vec<Doc> {
     files.iter().map(|p| parse(p)).collect()
 }
 
-fn identities(doc: &Doc) -> Vec<Identity> {
+pub fn identities(doc: &Doc) -> Vec<Identity> {
     let mut used: Vec<String> = Vec::new();
     doc.declared
         .iter()
@@ -192,7 +192,7 @@ impl Report {
 }
 
 /// The names dv-core would keep from `out`: new tags only, a recurring form as an alias.
-fn keep_found(out: &FilterOutcome, case: &str, kept: &mut Vec<Identity>, known: &[Identity]) {
+pub fn keep_found(out: &FilterOutcome, case: &str, kept: &mut Vec<Identity>, known: &[Identity]) {
     for a in &out.auto_hidden {
         if !matches!(a.kind, AutoKind::Name | AutoKind::OtherCase) {
             continue;
@@ -217,6 +217,33 @@ fn keep_found(out: &FilterOutcome, case: &str, kept: &mut Vec<Identity>, known: 
             reason: a.reason.clone(),
         });
     }
+}
+
+/// Byte ranges of the original text that were hidden; adjacent hides count as one ("רוני
+/// דמיוני" → "[אדם_1] [משפחה_1]" is one hide, as it was one question before).
+pub fn marked_ranges(doc: &Doc, out: &FilterOutcome) -> Vec<(usize, usize, String)> {
+    let mut marked: Vec<(usize, usize, String)> = Vec::new();
+    let mut pos = 0;
+    for seg in &out.original_segments {
+        let end = pos + seg.text.len();
+        if matches!(seg.mark, Some(Mark::Replaced | Mark::Suspect)) {
+            match marked.last_mut() {
+                Some(last) if doc.text[last.1..pos].trim().is_empty() => {
+                    last.1 = end;
+                    last.2 = doc.text[last.0..end].to_owned();
+                }
+                _ => marked.push((pos, end, seg.text.clone())),
+            }
+        }
+        pos = end;
+    }
+    assert_eq!(
+        pos,
+        doc.text.len(),
+        "{}: segments do not cover the text",
+        doc.file
+    );
+    marked
 }
 
 /// Filter every document as its case would; `hints` stands in for a local name model.
@@ -262,30 +289,7 @@ pub fn measure(docs: &[Doc], hints: &dyn Fn(&str) -> Vec<NameHint>) -> Report {
         let (out, ids) = pass(kept);
         keep_found(&out, &doc.case, kept, &ids);
 
-        // Byte ranges of the original text that were replaced or held as a question.
-        let mut marked: Vec<(usize, usize, String)> = Vec::new();
-        let mut pos = 0;
-        for seg in &out.original_segments {
-            let end = pos + seg.text.len();
-            if matches!(seg.mark, Some(Mark::Replaced | Mark::Suspect)) {
-                // One phrase hidden as two tags ("רוני דמיוני" → "[אדם_1] [משפחה_1]") is one
-                // hide, as it was one question before.
-                match marked.last_mut() {
-                    Some(last) if doc.text[last.1..pos].trim().is_empty() => {
-                        last.1 = end;
-                        last.2 = doc.text[last.0..end].to_owned();
-                    }
-                    _ => marked.push((pos, end, seg.text.clone())),
-                }
-            }
-            pos = end;
-        }
-        assert_eq!(
-            pos,
-            doc.text.len(),
-            "{}: segments do not cover the text",
-            doc.file
-        );
+        let marked = marked_ranges(doc, &out);
 
         let overlaps = |s: usize, e: usize| marked.iter().any(|(ms, me, _)| *ms < e && s < *me);
         for span in &doc.spans {

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useApp } from "../../App";
-import { ipc, type CaseDetail, type ChatView, type SectionResult } from "../../ipc/client";
+import { ipc, type CaseDetail, type ChatView, type ParagraphCheck, type SectionResult } from "../../ipc/client";
+import { useQuery } from "@tanstack/react-query";
+import { VerdictNote } from "../../components/VerdictNote";
 import { ErrorLine, SendIcon, Spinner, WarnIcon } from "../../components/ui";
 import { ProgressLine } from "../../components/Progress";
 import { Why } from "../../components/Why";
@@ -43,6 +45,9 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   const [history, setHistory] = useState<string | null>(null);
   /** Paragraphs whose sources are open ("למה כתבת את זה?", AI-7). */
   const [why, setWhy] = useState<string | null>(null);
+  /** What the check against the sources said, per proposed paragraph (until the draft changes). */
+  const [checks, setChecks] = useState<Map<string, ParagraphCheck>>(new Map());
+  const verifyOn = useQuery({ queryKey: ["verify-stage"], queryFn: ipc.verifyStageOn }).data === true;
   const chatEnd = useRef<HTMLDivElement>(null);
 
   const loadChat = useCallback(async () => {
@@ -97,6 +102,36 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
           setMessage("");
           await Promise.all([reload(), loadChat()]);
           if (result.demo) notify("מצב הדגמה: התשובה נבנתה במחשב מתוך החומרים, ושום דבר לא נשלח.");
+        },
+      });
+    } catch (e) {
+      setError(fail(e as never));
+    } finally {
+      setPreparing(false);
+      setBusy(false);
+    }
+  }
+
+  /** The check of the proposed paragraphs against the sources: its own request and review. */
+  async function verify() {
+    setError(null);
+    setPreparing(true);
+    try {
+      const prepare = () => ipc.prepareVerify(caseId, section.key);
+      const prepared = await prepare();
+      setPreparing(false);
+      setBusy(true);
+      await api.review({
+        title: `בדיקת הטיוטה של ${section.title} מול המקורות`,
+        prepared,
+        reprepare: prepare,
+        onSend: async (id) => {
+          const result = await api.track(
+            { label: `${ai} בודק את "${section.title}" מול המקורות`, task: "draft", approval: id },
+            () => ipc.sendVerify(id),
+          );
+          setChecks(new Map(result.draft_ids.map((d, i) => [d, result.checks[i]] as [string, ParagraphCheck])));
+          if (result.demo) notify("מצב הדגמה: הבדיקה נעשתה במחשב ומוצאת רק מספרים שאין במקורות. שום דבר לא נשלח.");
         },
       });
     } catch (e) {
@@ -251,6 +286,11 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                   קוראים, ואז מאשרים את כולה או פסקה-פסקה. רק מה שאושר נכנס לדוח. בקשה חדשה (למשל "לקצר") מחליפה את הטיוטה הזאת, ומה שכבר אישרת נשאר.
                 </span>
               </div>
+              {verifyOn && !derived && (
+                <button type="button" className="btn" disabled={working} onClick={() => void verify()}>
+                  בדיקה מול המקורות
+                </button>
+              )}
               <button type="button" className="btn btn-primary" onClick={() => void act(async () => { await ipc.approveSection(caseId, section.key); })}>
                 אישור כל הטיוטה ({pending})
               </button>
@@ -292,6 +332,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
           {visible.map((p) => {
             const warnings = p.warnings.length ? p.warnings : lastWarnings.get(p.text) ?? [];
             const isEditing = editing?.id === p.id;
+            const check = checks.get(p.id);
             if (p.status === "approved" && !isEditing) {
               return (
                 <article key={p.id} className="para">
@@ -325,6 +366,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                   </div>
                 )}
                 {!isEditing && why === p.id && <Why caseId={caseId} draftId={p.id} />}
+                {!isEditing && check && <VerdictNote check={check} />}
                 {isEditing ? (
                   <label className="edit-box">
                     <span className="visually-hidden">עריכת הפסקה</span>

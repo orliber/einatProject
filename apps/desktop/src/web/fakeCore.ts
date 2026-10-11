@@ -91,6 +91,7 @@ interface Case {
 }
 
 type Pending =
+  | { type: "verify"; caseId: string; section: string; draftIds: string[] }
   | { type: "section"; caseId: string; section: string; refs: { sid: string; label: string; tagged: string }[]; instruction: string; replaces: string | null }
   | { type: "consult"; question: string; shown: string; hidden: string[]; caseId: string | null; conversationId: string | null }
   | { type: "sort"; caseId: string; materials: { id: string; count: number; content: string }[] };
@@ -136,8 +137,11 @@ export class FakeCore {
   private practitioner = ["ד\"ר רותם בדויה"];
   private lockMinutes = 15;
   private capUsd: number | null = null;
+  private verifyOn = false;
   private ready: Record<string, number | null> = {};
   private sendStopped = false;
+  /** The material deleted last, for "ביטול" (forgotten on lock, as in the core). */
+  private removedInput: { caseId: string; input: CaseInput; at: number } | null = null;
   private model = "claude-opus-5";
   private get ai() {
     return providerOf(this.model).name;
@@ -358,7 +362,7 @@ export class FakeCore {
 
   private summary(c: Case): CaseSummary {
     const approved = Array.from(new Set(c.drafts.filter((d) => d.status === "approved").map((d) => d.section)));
-    return { id: c.id, meta: c.meta, child_name: c.people.find((p) => p.role === "child")?.value ?? null, created_at: c.created, updated_at: c.updated, approved_sections: approved, folder_id: c.folderId, deleted_at: c.deletedAt };
+    return { id: c.id, meta: c.meta, child_name: c.people.find((p) => p.role === "child")?.value ?? null, created_at: c.created, updated_at: c.updated, approved_sections: approved, folder_id: c.folderId, deleted_at: c.deletedAt, failed_at: null };
   }
 
   private tableFor(kind: InputKind): string[] {
@@ -446,6 +450,24 @@ export class FakeCore {
     const approval = newId("approval");
     this.pending.set(approval, { type: "section", caseId: c.id, section: key, refs, instruction, replaces });
     return this.withKept(c, { approval_id: approval, parts, suspects: [], auto_hidden: autoHidden, hidden: Array.from(hidden), checks, blocked: [], demo_mode: true });
+  }
+
+  /** The check of the proposed paragraphs against the sources: its own review. */
+  private prepareVerify(c: Case, key: string): Prepared {
+    if (!this.verifyOn) fail("refused", "הבדיקה מול המקורות כבויה. אפשר להפעיל אותה בהגדרות.");
+    if (DERIVED.includes(key)) fail("refused", "הבדיקה מול המקורות מיועדת לסעיפים שנכתבים מחומרי התיק.");
+    const drafts = c.drafts.filter((d) => d.section === key && d.status === "proposed");
+    if (!drafts.length) fail("refused", "אין טיוטות מוצעות לבדיקה בסעיף הזה.");
+    const base = this.prepareSection(c, key, "");
+    this.pending.delete(base.approval_id ?? "");
+    const parts = [...base.parts];
+    for (const d of drafts) {
+      const f = this.filterFor(c, d.text);
+      parts.push({ label: "פסקה לבדיקה", original: f.original_segments, outgoing: f.tagged_segments });
+    }
+    const approval = newId("approval");
+    this.pending.set(approval, { type: "verify", caseId: c.id, section: key, draftIds: drafts.map((d) => d.id) });
+    return { ...base, approval_id: approval, parts };
   }
 
   /** Sorting into sections (D-022): every material not sorted yet, one review. */
@@ -626,6 +648,25 @@ export class FakeCore {
           { key: "disk", done: true, checked_by_program: true, confirmed_at: null }];
         return { items, all_done: false };
       }
+      case "verify_stage_on":
+        return this.verifyOn;
+      case "set_verify_stage":
+        this.verifyOn = Boolean(a.on);
+        return null;
+      case "prepare_verify":
+        return this.prepareVerify(this.find(a.caseId), String(a.sectionKey));
+      case "send_verify": {
+        const p = this.pending.get(String(a.approvalId));
+        if (p?.type !== "verify") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
+        this.pending.delete(String(a.approvalId));
+        await new Promise((r) => setTimeout(r, 900));
+        // Like the demo check: only numbers that no source has are found; nothing is "supported".
+        return {
+          draft_ids: p.draftIds,
+          checks: p.draftIds.map((_, i) => ({ paragraph: `P${i + 1}`, verdict: "partial", notes: [] })),
+          demo: true,
+        };
+      }
       case "usage_summary":
         return { month: "2026-10", requests: 0, input_tokens: 0, output_tokens: 0, estimated_cents: 0, cap_usd: this.capUsd, unpriced_models: [] };
       case "set_monthly_cap":
@@ -633,6 +674,7 @@ export class FakeCore {
         return null;
       case "lock":
         this.unlocked = false;
+        this.removedInput = null;
         return null;
       case "set_api_key":
         return fail("preview", `בהדמיה בדפדפן אין חיבור ל-${this.ai}. מפתח API מוזן רק בתוכנה המותקנת, ונשמר בה מוצפן.`);
@@ -780,7 +822,16 @@ export class FakeCore {
       }
       case "delete_input": {
         const c = this.find(a.caseId);
+        const gone = c.inputs.find((i) => i.id === a.inputId);
+        if (gone) this.removedInput = { caseId: String(a.caseId), input: gone, at: c.inputs.indexOf(gone) };
         c.inputs = c.inputs.filter((i) => i.id !== a.inputId);
+        return null;
+      }
+      case "restore_input": {
+        const held = this.removedInput;
+        if (!held || held.caseId !== a.caseId || held.input.id !== a.inputId) fail("refused", "אי אפשר להחזיר את החומר הזה עוד. אפשר להוסיף אותו מחדש.");
+        this.removedInput = null;
+        this.find(held.caseId).inputs.splice(held.at, 0, held.input);
         return null;
       }
       case "score_instruments":

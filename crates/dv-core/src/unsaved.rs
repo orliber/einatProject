@@ -1,4 +1,5 @@
-//! A paragraph she was editing when the vault locked (idle, sleep, or the computer locked).
+//! Text she was typing when the vault locked (idle, sleep, or the computer locked): a paragraph,
+//! a session note or other material, or a question to the AI.
 //!
 //! While she edits, the page hands the text to the core, which keeps it in memory only. When
 //! the vault locks, the text is written into the vault (encrypted) just before it closes, and
@@ -21,6 +22,10 @@ pub struct UnsavedEdit {
     pub case_id: String,
     /// Where it was being written, as the page names it ("פסקה בסעיף רקע").
     pub place: String,
+    /// The case view to open for it ("report", "materials", "consult"). Empty in edits kept by
+    /// earlier versions, which were always paragraphs.
+    #[serde(default)]
+    pub view: String,
     pub text: String,
 }
 

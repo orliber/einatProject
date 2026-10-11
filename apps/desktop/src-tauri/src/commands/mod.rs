@@ -1,0 +1,30 @@
+//! The shell's commands, grouped by area. Each delegates to `dv-core`.
+
+mod session;
+pub(crate) use session::*;
+mod settings;
+pub(crate) use settings::*;
+mod cases;
+pub(crate) use cases::*;
+mod drafting;
+pub(crate) use drafting::*;
+mod library;
+pub(crate) use library::*;
+mod consultation;
+pub(crate) use consultation::*;
+mod style;
+pub(crate) use style::*;
+mod report;
+pub(crate) use report::*;
+mod activity;
+pub(crate) use activity::*;
+mod password;
+pub(crate) use password::*;
+mod recovery;
+pub(crate) use recovery::*;
+mod backup;
+pub(crate) use backup::*;
+mod updates;
+pub(crate) use updates::*;
+mod verify;
+pub(crate) use verify::*;

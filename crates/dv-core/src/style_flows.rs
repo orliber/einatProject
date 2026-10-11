@@ -558,34 +558,173 @@ fn names_from_a_past_report_are_kept_only_as_hashes_and_hidden_in_every_case() {
 
 #[test]
 fn a_paragraph_whose_sentences_are_unlike_hers_gets_a_gentle_note() {
-    // Fabricated: her past reports use sentences of 8–12 words.
+    // Fabricated: her past reports use paragraphs of three sentences of 8–12 words.
     let sentence = |n: usize| vec!["מילה"; n].join(" ");
-    let text: String = (0..40).map(|i| sentence(8 + i % 5) + ". ").collect();
+    let text: String = (0..20)
+        .map(|i| {
+            format!(
+                "{}. {}. {}.\n",
+                sentence(8 + i % 5),
+                sentence(9 + i % 3),
+                sentence(12 - i % 4)
+            )
+        })
+        .collect();
     let source = super::StoredSource {
         title: "דוח".into(),
         format: "text".into(),
         parts: vec![super::StoredPart {
-            section: None,
+            section: Some("observation".into()),
             heading: String::new(),
             text,
         }],
         analysis: None,
     };
+    let mut empty = super::LocalStyle::default();
+    super::fit_reports(&mut empty, &[]);
+    let long = format!("{}. {}.", sentence(30), sentence(28));
     assert!(
-        super::measure(&[]).is_none(),
+        super::style_note(&empty.model, "observation", &long).is_none(),
         "nothing to measure, no notes"
     );
-    let fp = super::measure(&[source]).unwrap();
-    let long = format!("{}. {}.", sentence(30), sentence(28));
-    let note = super::style_note(&fp, &long).unwrap();
+    let mut local = super::LocalStyle::default();
+    super::fit_reports(&mut local, &[source]);
+    let m = &local.model;
+    let note = super::style_note(m, "observation", &long).unwrap();
     assert!(note.starts_with("משפטים ארוכים מהרגיל אצלך"), "{note}");
     let short = format!("{}. {}. {}.", sentence(3), sentence(4), sentence(3));
-    assert!(super::style_note(&fp, &short)
+    assert!(super::style_note(m, "observation", &short)
         .unwrap()
         .starts_with("משפטים קצרים"));
-    assert!(super::style_note(&fp, &format!("{}. {}.", sentence(10), sentence(9))).is_none());
+    let usual = format!("{}. {}. {}.", sentence(10), sentence(9), sentence(11));
+    assert!(super::style_note(m, "observation", &usual).is_none());
     assert!(
-        super::style_note(&fp, &sentence(40)).is_none(),
+        super::style_note(m, "observation", &sentence(40)).is_none(),
         "one sentence says little"
+    );
+}
+
+#[test]
+fn phrases_that_recur_in_her_reports_are_offered_without_any_request() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core) = vault(Some(fake.clone()));
+    for n in 0..3 {
+        let preview = core
+            .import_style_source(&format!("דוח {n}.txt"), PAST_REPORT.as_bytes())
+            .unwrap();
+        let keep: Vec<u32> = preview
+            .parts
+            .iter()
+            .filter(|p| p.included)
+            .map(|p| p.index)
+            .collect();
+        core.save_style_source(&preview.token, &keep, None).unwrap();
+    }
+    assert!(fake.sent.lock().unwrap().is_empty(), "learned locally");
+    let shown = core.style_overview().unwrap().suggestions;
+    let phrases: Vec<&crate::StyleSuggestion> = shown
+        .iter()
+        .filter(|s| s.kind == crate::StyleSuggestionKind::Phrase)
+        .collect();
+    assert!(!phrases.is_empty(), "{shown:?}");
+    for p in &phrases {
+        no_secrets(&p.from, "a phrase");
+        assert!(!p.from.contains('['), "{}", p.from);
+        assert_eq!((p.count, p.confidence), (3, 100));
+    }
+    let first = phrases[0].clone();
+    let active = core.accept_style_suggestion(&first.id).unwrap();
+    assert!(active.profile.items.iter().any(|i| i.text == first.from
+        && i.kind == dv_ai::StyleKind::Phrase
+        && i.origin == dv_ai::StyleOrigin::Reports
+        && i.section == first.section));
+    assert!(
+        !core
+            .style_overview()
+            .unwrap()
+            .suggestions
+            .iter()
+            .any(|s| s.id == first.id),
+        "an accepted phrase is not offered again"
+    );
+    let second = core
+        .style_overview()
+        .unwrap()
+        .suggestions
+        .into_iter()
+        .find(|s| s.kind == crate::StyleSuggestionKind::Phrase)
+        .unwrap();
+    core.dismiss_style_suggestion(&second.id).unwrap();
+    assert!(!core
+        .style_overview()
+        .unwrap()
+        .suggestions
+        .iter()
+        .any(|s| s.id == second.id));
+}
+
+#[test]
+fn what_she_deletes_becomes_an_avoid_and_what_she_keeps_is_not_suggested() {
+    let (_dir, mut core) = vault(Some(FakeTransport::default()));
+    let case_id = case(&mut core);
+    let add = |core: &mut Core, text: &str| {
+        core.vault
+            .as_mut()
+            .unwrap()
+            .add_draft(&case_id, "appearance", text, Author::Ai, &[])
+            .unwrap()
+    };
+    for n in ["א", "ב", "ג"] {
+        let d = add(
+            &mut core,
+            &format!("חשוב לציין כי [ילד] רגוע ומפגין סקרנות במשימה {n}."),
+        );
+        core.edit_paragraph(
+            &case_id,
+            &d.id,
+            &format!("אלון רגוע ומפגין סקרנות במשימה {n}."),
+        )
+        .unwrap();
+    }
+    let shown = core.style_overview().unwrap().suggestions;
+    let avoid = shown
+        .iter()
+        .find(|s| s.kind == crate::StyleSuggestionKind::Avoid)
+        .unwrap_or_else(|| panic!("{shown:?}"))
+        .clone();
+    assert_eq!(avoid.from, "חשוב לציין כי");
+    assert_eq!(avoid.section.as_deref(), Some("appearance"));
+    let active = core.accept_style_suggestion(&avoid.id).unwrap();
+    assert!(active
+        .profile
+        .items
+        .iter()
+        .any(|i| i.text == "לא לכתוב «חשוב לציין כי»"
+            && i.kind == dv_ai::StyleKind::Avoid
+            && i.section.as_deref() == Some("appearance")));
+
+    // "מפגין" was changed three times, then approved as written many more: not her rule.
+    let (_dir2, mut core) = vault(Some(FakeTransport::default()));
+    let case_id = case(&mut core);
+    let add = |core: &mut Core, text: &str| {
+        core.vault
+            .as_mut()
+            .unwrap()
+            .add_draft(&case_id, "appearance", text, Author::Ai, &[])
+            .unwrap()
+    };
+    for n in ["א", "ב", "ג"] {
+        let d = add(&mut core, &format!("[ילד] מפגין סקרנות במשימה {n}."));
+        core.edit_paragraph(&case_id, &d.id, &format!("אלון מראה סקרנות במשימה {n}."))
+            .unwrap();
+    }
+    assert_eq!(core.style_overview().unwrap().suggestions.len(), 1);
+    for _ in 0..12 {
+        let d = add(&mut core, "[ילד] מפגין סקרנות רבה בכל משימה.");
+        core.approve_paragraph(&case_id, &d.id).unwrap();
+    }
+    assert!(
+        core.style_overview().unwrap().suggestions.is_empty(),
+        "she keeps it most of the time"
     );
 }

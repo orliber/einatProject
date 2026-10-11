@@ -72,6 +72,10 @@ pub struct CaseSummary {
     /// Set while the case is in the recycle bin (unix seconds).
     #[ts(type = "number | null")]
     pub deleted_at: Option<i64>,
+    /// When a send for the case last failed, while none has succeeded since (unix seconds).
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub failed_at: Option<i64>,
 }
 
 /// A folder of cases, like in a file explorer. Folders nest to any depth. The name is sealed
@@ -167,8 +171,16 @@ impl InputKind {
         // A score sheet is mostly numbers; a report that quotes scores is a report.
         if score_words && (numbers * 5 > words || !report_words) {
             InputKind::TestScores
-        } else if has(&["אינטייק", "שיחת היכרות עם ההורים", "שיחה עם ההורים"])
+        } else if has(&[
+            "אינטייק",
+            "שיחת היכרות עם ההורים",
+            "שיחה עם ההורים",
+            "שאלון קליטה",
+            "טופס פנייה",
+            "שאלון הורים",
+        ]) || (file_name.contains("הורים") && !file_name.contains("הדרכת הורים"))
         {
+            // What the parents wrote or told (a form, a questionnaire, an e-mail from them).
             InputKind::Intake
         } else if has(&[
             "סיכום מפגש",
@@ -187,6 +199,8 @@ impl InputKind {
             "דוח גן",
             "מסגרת חינוכית",
             "סייעת",
+            "מעון",
+            "המטפלת במעון",
         ]) && !has(&["קלינאית", "רופא", "ד\"ר"])
         {
             InputKind::Kindergarten
@@ -314,6 +328,26 @@ mod tests {
         );
         assert_eq!(
             InputKind::guess("דוח ריפוי בעיסוק", "a.pdf"),
+            InputKind::PriorReport
+        );
+        // The sample cases (tests/samples): what the parents wrote, and the nursery's report.
+        assert_eq!(
+            InputKind::guess("טופס פנייה לאבחון התפתחותי", "01 טופס פנייה מההורים.docx"),
+            InputKind::Intake
+        );
+        assert_eq!(
+            InputKind::guess("שלום, תודה על הפגישה.", "05 מייל מההורים אחרי הפגישה.txt"),
+            InputKind::Intake
+        );
+        assert_eq!(
+            InputKind::guess(
+                "דיווח מהמעון לקראת אבחון. נפרדת מההורים בקלות.",
+                "02 דיווח המטפלת במעון.odt"
+            ),
+            InputKind::Kindergarten
+        );
+        assert_eq!(
+            InputKind::guess("סיכום הדרכת הורים. המלצות", "הדרכת הורים - קלינאית.pdf"),
             InputKind::PriorReport
         );
     }

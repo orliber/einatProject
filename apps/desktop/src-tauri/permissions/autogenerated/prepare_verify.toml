@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-prepare-verify"
+description = "Enables the prepare_verify command without any pre-configured scope."
+commands.allow = ["prepare_verify"]
+
+[[permission]]
+identifier = "deny-prepare-verify"
+description = "Denies the prepare_verify command without any pre-configured scope."
+commands.deny = ["prepare_verify"]

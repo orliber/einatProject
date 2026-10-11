@@ -75,15 +75,17 @@ impl Core {
             return Err(e.into());
         }
         self.failed_unlocks = 0;
-        Ok(self.vault_mut()?.delete_case(case_id)?)
+        self.vault_mut()?.delete_case(case_id)?;
+        self.forget_failure(case_id)
     }
 
     /// Erase what has waited in the recycle bin longer than [`TRASH_DAYS`]. Runs at unlock.
     pub(crate) fn purge_expired(&mut self) -> Result<(), CoreError> {
         let cutoff = unix_now() - TRASH_DAYS * 86_400;
-        let v = self.vault_mut()?;
-        for id in v.trashed_before(cutoff)? {
-            v.delete_case(&id)?;
+        let expired = self.vault_ref()?.trashed_before(cutoff)?;
+        for id in expired {
+            self.vault_mut()?.delete_case(&id)?;
+            self.forget_failure(&id)?;
         }
         Ok(())
     }

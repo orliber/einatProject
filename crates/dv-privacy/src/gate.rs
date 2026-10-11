@@ -14,8 +14,8 @@ use ts_rs::TS;
 use crate::lexicon::LEXICON;
 use crate::patterns;
 use crate::pipeline::{
-    arabic_identity_matches, declared_reads_as_word, identity_index, past_name, reads_as_word,
-    PrivacyContext,
+    arabic_identity_matches, declared_reads_as_word, identity_index, other_case_word, past_name,
+    reads_as_word, PrivacyContext, Target,
 };
 use crate::text::{normalize, prefix_splits, tokenize};
 
@@ -122,6 +122,80 @@ fn reason(code: &str, message: &str, detail: Option<String>) -> BlockReason {
     }
 }
 
+/// A name the gate refuses in `text`: a declared or kept name (`identity`), a lexicon first
+/// name (`unknown_name`) or a name from her past reports (`past_report_name`), with its byte
+/// span. The pipeline runs exactly this on its own output and hides what it finds (D-050), so
+/// what leaves the filter passes here: a refusal on a name is a bug, never a dead end for her.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Finding {
+    pub start: usize,
+    pub end: usize,
+    pub code: &'static str,
+}
+
+pub(crate) fn name_findings(text: &str, ctx: &PrivacyContext<'_>) -> Vec<Finding> {
+    let tokens = tokenize(text);
+    let mut out = Vec::new();
+    for m in identity_index(ctx).find(text, &tokens) {
+        // "שני ההורים", "בגיל 3": the same certain readings the pipeline leaves as words.
+        if declared_reads_as_word(text, &tokens, m.first_token, m.last_token, m.prefix) {
+            continue;
+        }
+        // Another case's name read as the word it also is, as the pipeline reads it.
+        if matches!(&m.payload, Target::Identity { case_id, .. } if *case_id != ctx.case_id)
+            && other_case_word(text, &tokens, ctx, m.first_token, m.last_token, m.prefix)
+        {
+            continue;
+        }
+        // An ordinary word the psychologist confirmed ("שאלון" when a child is "אלון").
+        let whole = &tokens[m.first_token];
+        if m.prefix > 0
+            && LEXICON.common_words.contains(&whole.norm)
+            && (ctx.allowlisted)(&whole.norm)
+        {
+            continue;
+        }
+        out.push(Finding {
+            start: m.start,
+            end: m.end,
+            code: "identity",
+        });
+    }
+    for (start, end, _) in arabic_identity_matches(text, &tokens, ctx) {
+        out.push(Finding {
+            start,
+            end,
+            code: "identity",
+        });
+    }
+    for t in &tokens {
+        // Like the pipeline: "כרים" is a word, not כ + רים.
+        let is_name = prefix_splits(&t.norm).iter().any(|(p, h)| {
+            LEXICON.first_names.contains(h)
+                && !(ctx.allowlisted)(h)
+                && !(*p > 0 && reads_as_word(&t.norm, h))
+        });
+        if is_name && !(ctx.allowlisted)(&t.norm) && !LEXICON.common_words.contains(&t.norm) {
+            out.push(Finding {
+                start: t.start,
+                end: t.end,
+                code: "unknown_name",
+            });
+        }
+        let past = prefix_splits(&t.norm)
+            .iter()
+            .any(|(p, h)| past_name(ctx, h) && !(*p > 0 && reads_as_word(&t.norm, h)));
+        if past && !(ctx.allowlisted)(&t.norm) {
+            out.push(Finding {
+                start: t.start,
+                end: t.end,
+                code: "past_report_name",
+            });
+        }
+    }
+    out
+}
+
 /// Scan the whole request. Any finding blocks; there is no override in code.
 pub fn clear(req: &GateRequest<'_>) -> Result<ClearedPayload, Blocked> {
     let mut reasons = Vec::new();
@@ -143,35 +217,19 @@ pub fn clear(req: &GateRequest<'_>) -> Result<ClearedPayload, Blocked> {
         ));
     }
 
-    let index = identity_index(req.ctx);
     let mut texts = Vec::new();
     strings(req.body, &mut texts);
     for text in texts {
-        let tokens = tokenize(text);
-        for m in index.find(text, &tokens) {
-            // "שני ההורים", "בגיל 3": the same certain readings the pipeline leaves as words.
-            if declared_reads_as_word(text, &tokens, m.first_token, m.last_token, m.prefix) {
-                continue;
-            }
-            // An ordinary word the psychologist confirmed ("שאלון" when a child is "אלון").
-            let whole = &tokens[m.first_token];
-            if m.prefix > 0
-                && LEXICON.common_words.contains(&whole.norm)
-                && (req.ctx.allowlisted)(&whole.norm)
-            {
-                continue;
-            }
+        for f in name_findings(text, req.ctx) {
+            let message = match f.code {
+                "identity" => "נמצא שם מוצהר בטקסט היוצא",
+                "unknown_name" => "נמצא שם שלא הוחלט לגביו",
+                _ => "נמצא שם מדוח ישן",
+            };
             reasons.push(reason(
-                "identity",
-                "נמצא שם מוצהר בטקסט היוצא",
-                Some(text[m.start..m.end].to_owned()),
-            ));
-        }
-        for (start, end, _) in arabic_identity_matches(text, &tokens, req.ctx) {
-            reasons.push(reason(
-                "identity",
-                "נמצא שם מוצהר בטקסט היוצא",
-                Some(text[start..end].to_owned()),
+                f.code,
+                message,
+                Some(text[f.start..f.end].to_owned()),
             ));
         }
         match patterns::find(text, req.ctx.today) {
@@ -189,34 +247,6 @@ pub fn clear(req: &GateRequest<'_>) -> Result<ClearedPayload, Blocked> {
                 "שגיאה פנימית בסריקה",
                 Some(e.to_string()),
             )),
-        }
-        for t in &tokens {
-            // Like the pipeline: "כרים" is a word, not כ + רים.
-            let is_name = prefix_splits(&t.norm).iter().any(|(p, h)| {
-                LEXICON.first_names.contains(h)
-                    && !(req.ctx.allowlisted)(h)
-                    && !(*p > 0 && reads_as_word(&t.norm, h))
-            });
-            if is_name && !(req.ctx.allowlisted)(&t.norm) && !LEXICON.common_words.contains(&t.norm)
-            {
-                reasons.push(reason(
-                    "unknown_name",
-                    "נמצא שם שלא הוחלט לגביו",
-                    Some(text[t.start..t.end].to_owned()),
-                ));
-            }
-        }
-        for t in &tokens {
-            let past = prefix_splits(&t.norm)
-                .iter()
-                .any(|(p, h)| past_name(req.ctx, h) && !(*p > 0 && reads_as_word(&t.norm, h)));
-            if past && !(req.ctx.allowlisted)(&t.norm) {
-                reasons.push(reason(
-                    "past_report_name",
-                    "נמצא שם מדוח ישן",
-                    Some(text[t.start..t.end].to_owned()),
-                ));
-            }
         }
         if let Some(re) = TAG_RE.as_ref() {
             for m in re.find_iter(text) {

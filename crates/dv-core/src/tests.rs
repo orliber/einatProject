@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 
 use super::*;
 
+mod sample_flows;
 mod surfaces;
 
 const PASSWORD: &str = "כלב ירוק רץ מהר בגינה";
@@ -1174,9 +1175,47 @@ fn failed_send_keeps_the_approval_for_a_retry() {
         core.chat(&case, "kindergarten").unwrap().is_empty(),
         "nothing stored"
     );
+    let failed_at = |core: &mut Core| {
+        core.list_cases()
+            .unwrap()
+            .into_iter()
+            .find(|c| c.id == case)
+            .unwrap()
+            .failed_at
+    };
+    assert!(
+        failed_at(&mut core).is_some(),
+        "the case list shows it got stuck"
+    );
 
     let r = core.send_section(&id).unwrap();
     assert!(!r.paragraphs.is_empty());
+    assert_eq!(
+        failed_at(&mut core),
+        None,
+        "a send that works clears the mark"
+    );
+}
+
+#[test]
+fn erasing_a_case_forgets_its_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut core = Core::for_tests(dir.path(), None);
+    core.create_vault(PASSWORD).unwrap();
+    let case = core
+        .create_case(
+            CaseMeta {
+                code: "TEST-0005".into(),
+                ..CaseMeta::default()
+            },
+            vec![],
+        )
+        .unwrap();
+    core.note_send_outcome(&case, false);
+    assert!(core.list_cases().unwrap()[0].failed_at.is_some());
+    core.delete_case(&case).unwrap();
+    core.purge_case(&case, PASSWORD).unwrap();
+    assert!(core.failed_sends().unwrap().is_empty());
 }
 
 #[test]
@@ -1506,6 +1545,7 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
         dv_ai::prompts::CONSULT_RULES,
         dv_ai::prompts::RESEARCH_RULES,
         dv_ai::prompts::SORTING_RULES,
+        dv_ai::prompts::VERIFY_RULES,
         dv_ai::prompts::LETTER_PARENTS,
         dv_ai::prompts::LETTER_SCHOOL,
         dv_ai::prompts::LETTER_TITLE_PARENTS,
@@ -1590,6 +1630,24 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
         &sort,
         &nonce,
     ));
+    // The check against the sources: its frames and schema.
+    body.push(
+        dv_ai::build_verify_request(
+            &dv_ai::ModelConfig::default(),
+            &dv_ai::VerifyInput {
+                section_title: String::new(),
+                sources: vec![dv_ai::TaggedInput {
+                    input_id: "in".into(),
+                    kind_label: InputKind::Intake.label_he().to_owned(),
+                    title_tagged: String::new(),
+                    content_tagged: String::new(),
+                }],
+                paragraphs: vec![String::new()],
+            },
+            &nonce,
+        )
+        .0,
+    );
     // The style profile (D-043): both requests' rules, frames and schemas, and the words the
     // profile is framed with in every drafting request.
     for rules in dv_ai::style::FIXED_TEXTS {
@@ -2307,6 +2365,7 @@ fn an_open_edit_survives_the_lock_inside_the_vault() {
     let edit = |text: &str| crate::UnsavedEdit {
         case_id: case.clone(),
         place: "פסקה בסעיף רקע".into(),
+        view: "report".into(),
         text: text.into(),
     };
     // Nothing kept: nothing offered.
@@ -2340,6 +2399,10 @@ fn an_open_edit_survives_the_lock_inside_the_vault() {
     core.lock();
     core.unlock(PASSWORD).unwrap();
     assert_eq!(core.take_unsaved().unwrap(), None);
+    // An edit kept by an earlier version (no view) still comes back.
+    let old: crate::UnsavedEdit =
+        serde_json::from_str(r#"{"case_id":"c","place":"פסקה","text":"טקסט"}"#).unwrap();
+    assert_eq!(old.view, "");
 }
 
 fn walkdir(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
@@ -3325,4 +3388,365 @@ fn locked_pdf_is_recognised_as_the_original() {
         core.export_pdf(&case, "abc-אבג-12345"),
         Err(CoreError::Refused(_))
     ));
+}
+
+/// A word the program kept with the case by itself, refused by the gate: it gets "להחזיר" on
+/// the card instead of leaving her with only "חזרה לעריכה". A name she typed stays refused.
+#[test]
+fn a_kept_word_the_gate_refuses_can_be_restored_from_the_card() {
+    let ident = |value: &str, tag: &str, source: IdentitySource| dv_domain::Identity {
+        id: tag.into(),
+        case_id: "c1".into(),
+        role: Role::Brother,
+        tag: tag.into(),
+        value: value.into(),
+        aliases: vec![],
+        source,
+        reason: "אחרי 'אחות'".into(),
+    };
+    let data = PrivacyData {
+        case_id: "c1".into(),
+        identities: vec![
+            ident("אח", "[אח_1]", IdentitySource::Auto),
+            ident("יואב", "[אח_2]", IdentitySource::Manual),
+        ],
+        practitioner: vec![],
+        allow: HashSet::new(),
+        is_name: HashSet::new(),
+        past: HashSet::new(),
+    };
+    let reason = |detail: &str| dv_privacy::BlockReason {
+        code: "identity".into(),
+        message: "נמצא שם מוצהר בטקסט היוצא".into(),
+        detail: Some(detail.into()),
+    };
+    let offered = refused_auto_names(&data, &[reason("אח"), reason("יואב")], &|_| {
+        "2026-1".to_owned()
+    });
+    assert_eq!(offered.len(), 1, "{offered:?}");
+    assert_eq!(
+        (offered[0].token.as_str(), offered[0].tag.as_str()),
+        ("אח", "[אח_1]")
+    );
+}
+
+/// A word kept as a name in another case ("אח" from case 2) blocked every case: the card
+/// offers "להחזיר", which takes it out of that case's names. A name typed there stays, and
+/// the red line says which case it is in.
+#[test]
+fn a_word_kept_in_another_case_is_offered_and_restored_there() {
+    let (_dir, mut core, case1) = setup(None);
+    let case2 = core
+        .create_case(
+            CaseMeta {
+                code: "TEST-0099".into(),
+                consent: Some(consent()),
+                ..CaseMeta::default()
+            },
+            vec![IdentityInput {
+                id: None,
+                role: Role::Brother,
+                value: "גלעד".into(),
+                aliases: vec![],
+            }],
+        )
+        .unwrap();
+    core.vault_mut()
+        .unwrap()
+        .add_found_names(
+            &case2,
+            &[dv_domain::FoundName {
+                value: "אח".into(),
+                role: Role::Brother,
+                source: IdentitySource::Auto,
+                reason: "אחרי 'אחות'".into(),
+            }],
+        )
+        .unwrap();
+    let data = core.privacy_data(&case1).unwrap();
+    let reason = |detail: &str| dv_privacy::BlockReason {
+        code: "identity".into(),
+        message: "נמצא שם מוצהר בטקסט היוצא".into(),
+        detail: Some(detail.into()),
+    };
+    let offered = refused_auto_names(&data, &[reason("אח")], &|_| "TEST-0099".to_owned());
+    assert_eq!(offered.len(), 1, "{offered:?}");
+    assert_eq!(offered[0].tag, OTHER_CASE_TAG);
+    assert!(offered[0].reason.contains("TEST-0099"));
+    let mut reasons = vec![reason("גלעד")];
+    locate_refused_names(&data, &mut reasons, &|_| "TEST-0099".to_owned());
+    assert!(
+        reasons[0].message.contains("TEST-0099"),
+        "{}",
+        reasons[0].message
+    );
+
+    core.restore_auto_hidden(&case1, "אח", OTHER_CASE_TAG)
+        .unwrap();
+    let left: Vec<String> = core
+        .vault_ref()
+        .unwrap()
+        .identities(&case2)
+        .unwrap()
+        .into_iter()
+        .map(|i| i.value)
+        .collect();
+    assert_eq!(
+        left,
+        vec!["גלעד".to_owned()],
+        "only the kept word left case 2"
+    );
+}
+
+#[test]
+fn a_deleted_material_comes_back_whole_until_the_lock() {
+    let (_dir, mut core, case) = setup(None);
+    let input = core
+        .add_input(
+            &case,
+            InputKind::SessionNote,
+            "מפגש ראשון",
+            "אלון בנה מגדל.",
+        )
+        .unwrap();
+    core.vault_mut()
+        .unwrap()
+        .set_input_data(&case, &input.id, "{\"a\":1}")
+        .unwrap();
+    core.set_input_sections(&case, &input.id, &["cognitive".into()])
+        .unwrap();
+    let routing = core
+        .vault_mut()
+        .unwrap()
+        .input_routing(&case, &input.id)
+        .unwrap();
+    let before = core.vault_mut().unwrap().inputs(&case).unwrap();
+
+    core.delete_input(&case, &input.id).unwrap();
+    assert!(core
+        .vault_mut()
+        .unwrap()
+        .inputs(&case)
+        .unwrap()
+        .iter()
+        .all(|i| i.id != input.id));
+    // Only this material, in this case.
+    assert!(core.restore_input(&case, "other").is_err());
+    core.restore_input(&case, &input.id).unwrap();
+    assert_eq!(core.vault_mut().unwrap().inputs(&case).unwrap(), before);
+    assert_eq!(
+        core.vault_mut()
+            .unwrap()
+            .input_routing(&case, &input.id)
+            .unwrap(),
+        routing
+    );
+    assert_eq!(
+        core.vault_mut()
+            .unwrap()
+            .input_data(&case, &input.id)
+            .unwrap()
+            .as_deref(),
+        Some("{\"a\":1}")
+    );
+    // Once.
+    assert!(core.restore_input(&case, &input.id).is_err());
+
+    // A lock forgets it: the deletion stands.
+    core.delete_input(&case, &input.id).unwrap();
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert!(core.restore_input(&case, &input.id).is_err());
+    assert!(core
+        .vault_mut()
+        .unwrap()
+        .inputs(&case)
+        .unwrap()
+        .iter()
+        .all(|i| i.id != input.id));
+}
+
+// ---------------------------------------------------------------- the check against the sources
+
+fn drafted(core: &mut Core, case: &str) {
+    let id = core
+        .prepare_section(case, "kindergarten", "תנסח פסקה על המעברים")
+        .unwrap()
+        .approval_id
+        .unwrap();
+    core.send_section(&id).unwrap();
+}
+
+fn proposed_count(core: &mut Core, case: &str) -> usize {
+    let detail = core.case_detail(case).unwrap();
+    detail
+        .sections
+        .iter()
+        .find(|s| s.key == "kindergarten")
+        .unwrap()
+        .paragraphs
+        .iter()
+        .filter(|p| p.status == DraftStatus::Proposed)
+        .count()
+}
+
+#[test]
+fn the_check_against_the_sources_is_off_until_she_turns_it_on() {
+    let (_dir, mut core, case) = setup(Some(FakeTransport::default()));
+    drafted(&mut core, &case);
+    assert!(!core.verify_stage_on().unwrap());
+    assert!(matches!(
+        core.prepare_verify(&case, "kindergarten"),
+        Err(CoreError::Refused(_))
+    ));
+    core.set_verify_stage(true).unwrap();
+    assert!(core.prepare_verify(&case, "kindergarten").is_ok());
+}
+
+#[test]
+fn the_check_goes_through_the_gate_with_tags_only_and_changes_nothing() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    drafted(&mut core, &case);
+    core.set_verify_stage(true).unwrap();
+    let before = proposed_count(&mut core, &case);
+    assert!(before > 0);
+
+    let prepared = core.prepare_verify(&case, "kindergarten").unwrap();
+    assert!(prepared.blocked.is_empty(), "{:?}", prepared.blocked);
+    let id = prepared.approval_id.clone().expect("cleared by the gate");
+    let result = core.send_verify(&id).unwrap();
+
+    assert_eq!(result.checks.len(), before);
+    assert_eq!(result.draft_ids.len(), before);
+    // The demo check reads for numbers only, so it never says "supported" by itself.
+    assert!(result
+        .checks
+        .iter()
+        .all(|c| c.verdict != dv_ai::Verdict::Supported));
+
+    let sent = fake.sent.lock().unwrap().clone();
+    assert_eq!(sent.len(), 2, "the draft and the check are two requests");
+    for name in ["אלון", "שירה", "רותם", "אלמוג"] {
+        assert!(!sent[1].contains(name), "{name} left the machine");
+    }
+    assert!(sent[1].contains("[ילד]"));
+    assert!(
+        sent[1].contains("paragraph=\\\"P1\\\"") && sent[1].contains("id=\\\"S1\\\""),
+        "paragraphs and sources go out"
+    );
+
+    // Only a verdict: the paragraphs are as they were, still proposed.
+    assert_eq!(proposed_count(&mut core, &case), before);
+    // The approval is one use only, like every other.
+    assert!(matches!(core.send_verify(&id), Err(CoreError::NotFound(_))));
+}
+
+#[test]
+fn the_check_works_in_demo_mode_without_a_key_or_a_transport() {
+    let (_dir, mut core, case) = setup(None);
+    drafted(&mut core, &case);
+    core.set_verify_stage(true).unwrap();
+    let prepared = core.prepare_verify(&case, "kindergarten").unwrap();
+    assert!(prepared.demo_mode);
+    let result = core.send_verify(&prepared.approval_id.unwrap()).unwrap();
+    assert!(result.demo && !result.checks.is_empty());
+}
+
+#[test]
+fn a_verdict_note_is_shown_with_names_and_a_failed_send_keeps_the_approval() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    drafted(&mut core, &case);
+    core.set_verify_stage(true).unwrap();
+    let id = core
+        .prepare_verify(&case, "kindergarten")
+        .unwrap()
+        .approval_id
+        .unwrap();
+
+    // A failed send is not a send.
+    let out = core.begin_send(&id).unwrap();
+    let failed = core.finish_verify(out, Err(CoreError::Internal("x".into())));
+    assert!(failed.is_err());
+
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({ "results": [
+        { "paragraph": "P1", "verdict": "contradicted",
+          "notes": [{ "note": "[ילד] מתואר אחרת במקור", "source_refs": ["S1", "S9"] }] }
+    ]})));
+    let result = core.send_verify(&id).unwrap();
+    assert_eq!(result.checks[0].verdict, dv_ai::Verdict::Contradicted);
+    assert_eq!(result.checks[0].notes[0].note, "אלון מתואר אחרת במקור");
+    assert_eq!(
+        result.checks[0].notes[0].source_refs,
+        vec!["S1".to_owned()],
+        "a source that was not sent is dropped"
+    );
+}
+
+#[test]
+fn nothing_to_check_means_nothing_is_sent() {
+    let (_dir, mut core, case) = setup(Some(FakeTransport::default()));
+    core.set_verify_stage(true).unwrap();
+    // No draft yet.
+    assert!(matches!(
+        core.prepare_verify(&case, "kindergarten"),
+        Err(CoreError::Refused(_))
+    ));
+    // A section written from the approved ones has no sources to check against.
+    assert!(matches!(
+        core.prepare_verify(&case, "summary"),
+        Err(CoreError::Refused(_))
+    ));
+}
+
+/// "להחזיר" on another case's name in this case ("שירה" is the first case's kindergarten
+/// teacher, here the singing): the next send lets the word out. It used to be hidden again
+/// on every send, so the button did nothing (D-050). The first case still hides its name.
+#[test]
+fn restoring_another_cases_name_holds_on_the_next_send() {
+    let (_dir, mut core, case1) = setup(None);
+    let case2 = core
+        .create_case(
+            CaseMeta {
+                code: "TEST-0098".into(),
+                consent: Some(consent()),
+                ..CaseMeta::default()
+            },
+            vec![IdentityInput {
+                id: None,
+                role: Role::Child,
+                value: "נועם".into(),
+                aliases: vec![],
+            }],
+        )
+        .unwrap();
+    core.add_input(
+        &case2,
+        InputKind::Kindergarten,
+        "עדכון",
+        "נועם אוהב שירה ומוזיקה, ושר כל היום.",
+    )
+    .unwrap();
+    let p = core
+        .prepare_section(&case2, "kindergarten", "טיוטה")
+        .unwrap();
+    let item = p
+        .auto_hidden
+        .iter()
+        .find(|a| a.token == "שירה")
+        .unwrap_or_else(|| panic!("hidden first: {}", outgoing(&p)))
+        .clone();
+    core.restore_auto_hidden(&case2, &item.token, &item.tag)
+        .unwrap();
+    let p = core
+        .prepare_section(&case2, "kindergarten", "טיוטה")
+        .unwrap();
+    assert!(p.approval_id.is_some(), "{:?}", p.blocked);
+    assert!(outgoing(&p).contains("שירה ומוזיקה"), "{}", outgoing(&p));
+    let p = core
+        .prepare_section(&case1, "kindergarten", "טיוטה")
+        .unwrap();
+    assert!(p.approval_id.is_some(), "{:?}", p.blocked);
+    assert!(!outgoing(&p).contains("שירה"), "{}", outgoing(&p));
 }

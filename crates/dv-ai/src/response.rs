@@ -77,7 +77,7 @@ pub(crate) fn text_of(response: &Value) -> Result<String, AiError> {
 }
 
 /// Numbers written in `text` (scores, ages such as 5:4, T-scores).
-fn numbers(text: &str) -> Vec<String> {
+pub(crate) fn numbers(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
     for c in text.chars().chain(std::iter::once(' ')) {

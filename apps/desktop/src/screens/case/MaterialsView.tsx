@@ -6,6 +6,7 @@ import type { FilterOutcome } from "../../ipc/generated/FilterOutcome";
 import { ImportDialog } from "../../components/ImportDialog";
 import { AddMenu } from "../../components/Menu";
 import { ScoresDialog } from "../../components/ScoresDialog";
+import { useHoldUnsaved } from "../../components/Unsaved";
 import { Dialog, ErrorLine, Segments, Spinner, UploadIcon, PlusIcon, EditIcon } from "../../components/ui";
 import type { CaseApi } from "../CaseScreen";
 import "./MaterialsView.css";
@@ -116,7 +117,17 @@ export function MaterialsView({ api }: { api: CaseApi }) {
       await ipc.deleteInput(caseId, i.id);
       setSelected(null);
       await reload();
-      notify("החומר נמחק מהתיק.");
+      notify("החומר נמחק מהתיק.", { label: "ביטול", run: () => void restore(i) });
+    } catch (e) {
+      setError(fail(e as never));
+    }
+  }
+
+  async function restore(i: CaseInput) {
+    try {
+      await ipc.restoreInput(caseId, i.id);
+      await reload();
+      notify("החומר הוחזר לתיק.");
     } catch (e) {
       setError(fail(e as never));
     }
@@ -340,9 +351,14 @@ function WriteDialog(props: { caseId: string; kind: InputKind; input?: CaseInput
   const [title, setTitle] = useState(props.input?.title ?? (props.kind === "session_note" ? `מפגש ${new Date().toLocaleDateString("he-IL")}` : ""));
   const [content, setContent] = useState(props.input?.content ?? "");
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const changed = content !== (props.input?.content ?? "");
+  // A long session note must survive Escape and the automatic lock.
+  useHoldUnsaved(props.caseId, title.trim() || kindLabel[kind], changed && content.trim() ? content : null, "materials");
 
   async function save() {
     if (!content.trim()) return setError("אין טקסט לשמור.");
+    setSaving(true);
     try {
       if (props.input) {
         await ipc.updateInput(props.caseId, props.input.id, title.trim(), content);
@@ -353,14 +369,15 @@ function WriteDialog(props: { caseId: string; kind: InputKind; input?: CaseInput
       }
     } catch (e) {
       setError(fail(e as never));
+      setSaving(false);
     }
   }
 
   return (
     <Dialog title={props.input ? "עריכת חומר" : kind === "session_note" ? "רישום מפגש" : "הוספת טקסט"}
       subtitle="אפשר לכתוב עם שמות אמיתיים. הם נשמרים מוצפנים ומוסתרים לפני כל שליחה."
-      onClose={props.onClose}
-      footer={<><span className="grow" /><button type="button" className="btn" onClick={props.onClose}>ביטול</button><button type="button" className="btn btn-primary" onClick={() => void save()}>שמירה בתיק</button></>}>
+      onClose={props.onClose} dirty={!saving && changed && content.trim() !== ""}
+      footer={<><span className="grow" /><button type="button" className="btn" onClick={props.onClose}>ביטול</button><button type="button" className="btn btn-primary" disabled={saving} onClick={() => void save()}>שמירה בתיק</button></>}>
       <div className="stack">
         {!props.input && (
           <div className="field">
