@@ -128,15 +128,25 @@ impl Core {
                 (3..=80).contains(&l.chars().count())
                     && l.chars().filter(char::is_ascii_digit).count() < 6
                     && !l.trim_end_matches('.').contains(". ")
+                    // A greeting ("שלום,", "לכבוד ד\"ר …,") names a letter worse than its file.
+                    && !l.ends_with(',')
             })
             .map(str::to_owned);
         let stem = first_line.unwrap_or_else(|| {
-            Path::new(file_name)
+            let stem = Path::new(file_name)
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or(file_name)
-                .trim()
-                .to_owned()
+                .trim();
+            // "05 מייל מההורים" → "מייל מההורים": the number only orders her folder.
+            let unnumbered = stem
+                .trim_start_matches(|c: char| c.is_ascii_digit())
+                .trim_start_matches([' ', '-', '_', '.']);
+            if unnumbered.is_empty() || unnumbered.len() == stem.len() {
+                stem.to_owned()
+            } else {
+                unnumbered.to_owned()
+            }
         });
         Ok(ImportPreview {
             file_name: file_name.to_owned(),
