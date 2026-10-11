@@ -1,10 +1,21 @@
 import { useState } from "react";
 import { useApp } from "../App";
 import { ipc, type Prepared } from "../ipc/client";
+import type { SuspectDecision } from "../ipc/generated/SuspectDecision";
 import { AutoHiddenCard } from "./AutoHiddenCard";
 import { Dialog, ErrorLine, Segments, ShieldIcon, Spinner } from "./ui";
 import "./ReviewDialog.css";
 import { useAi } from "../ai";
+
+/** What each block means and what to do next, in her words. */
+const guidance: Record<string, string> = {
+  unknown_name: "המילה נראית כמו שם שהתוכנה לא יודעת לאיזה תפקיד הוא שייך. אפשר להכריע כאן.",
+  past_report_name: "המילה מופיעה כשם בדוח ישן. אפשר להכריע כאן.",
+  foreign_tag: "יש תגית של תיק אחר. חוזרים לעריכה ומוחקים אותה מהטקסט.",
+  identity: "נמצא שם או מזהה מהתיק שלא הוסתר. חוזרים לעריכה, ואם הוא חוזר, בודקים את הרשומה בפרטי התיק.",
+  pattern: "נמצא פרט מזהה (ת\"ז, טלפון, מייל). חוזרים לעריכה ומסירים אותו.",
+  too_large: "הבקשה גדולה מדי. חוזרים לעריכה ומקצרים את ההוראה או את החומר.",
+};
 
 /**
  * "What leaves the computer": both sides, the checks, and the card of what was hidden without
@@ -23,7 +34,7 @@ export function ReviewDialog(props: {
   const { status, fail, refresh } = useApp();
   const ai = useAi();
   const [prepared, setPrepared] = useState(props.prepared);
-  const [busy, setBusy] = useState<"send" | null>(null);
+  const [busy, setBusy] = useState<"send" | "decide" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const c = prepared.checks;
@@ -45,6 +56,21 @@ export function ReviewDialog(props: {
   }
 
   const blocked = prepared.blocked;
+
+  /** One block, one answer: she says what the flagged word is and the request is rebuilt (F1). */
+  async function decide(token: string, decision: SuspectDecision) {
+    if (!props.caseId) return;
+    setBusy("decide");
+    setError(null);
+    try {
+      await ipc.decideSuspect(props.caseId, token, decision);
+      await rebuild();
+    } catch (e) {
+      setError(fail(e as never));
+    } finally {
+      setBusy(null);
+    }
+  }
 
   return (
     <Dialog title={`לפני שליחה ל-${ai}`}
@@ -73,7 +99,22 @@ export function ReviewDialog(props: {
         <AutoHiddenCard items={prepared.auto_hidden} caseId={props.caseId} onChanged={rebuild} disabled={busy !== null} />
 
         {blocked.map((b, i) => (
-          <p key={i} className="error">{b.message}{b.detail ? `: ${b.detail}` : ""}</p>
+          <div key={i} className="stack" style={{ gap: 6 }}>
+            <p className="error">{b.message}{b.detail ? `: ${b.detail}` : ""}</p>
+            {guidance[b.code] && <span className="small muted">{guidance[b.code]}</span>}
+            {props.caseId && b.detail && (b.code === "unknown_name" || b.code === "past_report_name") && (
+              <div className="row">
+                <button type="button" className="btn btn-small" disabled={busy !== null}
+                  onClick={() => void decide(b.detail as string, { decision: "hide", role: "other" })}>
+                  זה שם: להסתיר ולהמשיך
+                </button>
+                <button type="button" className="btn btn-small" disabled={busy !== null}
+                  onClick={() => void decide(b.detail as string, { decision: "not_a_name" })}>
+                  זה לא שם: להמשיך
+                </button>
+              </div>
+            )}
+          </div>
         ))}
         {blocked.length > 0 && (
           <p className="note-sand small">

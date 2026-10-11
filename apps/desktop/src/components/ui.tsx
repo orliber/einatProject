@@ -1,5 +1,7 @@
 // Small shared pieces: icons, dialog frame, marked text, toast.
-import { useEffect, useRef, type ReactNode } from "react";
+import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { AppContext } from "../App";
+import { failureFor } from "../errors";
 import type { Segment } from "../ipc/generated/Segment";
 
 export function LockIcon({ size = 18, color = "currentColor" }: { size?: number; color?: string }) {
@@ -61,19 +63,35 @@ export function Dialog(props: {
   narrow?: boolean;
   wide?: boolean;
   onClose?: () => void;
+  /** Typed text that closing would lose: Escape and × ask first (F6). */
+  dirty?: boolean;
   footer?: ReactNode;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLElement>(null);
-  const { onClose } = props;
+  const { onClose, dirty } = props;
+  const [confirming, setConfirming] = useState(false);
+  const close = onClose && (dirty ? () => setConfirming(true) : onClose);
+  const closeRef = useRef(close);
+  const confirmingRef = useRef(confirming);
+  useEffect(() => {
+    closeRef.current = close;
+    confirmingRef.current = confirming;
+  });
+  const closable = onClose !== undefined;
   useEffect(() => {
     ref.current?.focus();
+  }, []);
+  useEffect(() => {
+    if (!closable) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && onClose) onClose();
+      if (e.key !== "Escape") return;
+      if (confirmingRef.current) setConfirming(false);
+      else closeRef.current?.();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [closable]);
   return (
     <div className="overlay">
       <section ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={props.title}
@@ -85,11 +103,19 @@ export function Dialog(props: {
             {props.subtitle && <span className="muted small">{props.subtitle}</span>}
           </div>
           {onClose && (
-            <button type="button" className="btn icon-btn" aria-label="סגירה" onClick={onClose}>×</button>
+            <button type="button" className="btn icon-btn" aria-label="סגירה" onClick={close}>×</button>
           )}
         </header>
         <div className="dialog-body">{props.children}</div>
-        {props.footer && <footer className="dialog-foot">{props.footer}</footer>}
+        {confirming ? (
+          <footer className="dialog-foot" role="alertdialog" aria-label="לסגור בלי לשמור">
+            <span className="grow">מה שהקלדת עדיין לא נשמר. לסגור בכל זאת?</span>
+            <button type="button" className="btn btn-primary" autoFocus onClick={() => setConfirming(false)}>להמשיך לערוך</button>
+            <button type="button" className="btn" onClick={onClose}>לסגור בלי לשמור</button>
+          </footer>
+        ) : (
+          props.footer && <footer className="dialog-foot">{props.footer}</footer>
+        )}
       </section>
     </div>
   );
@@ -137,7 +163,41 @@ export function Toast({ text, onDone }: { text: string; onDone: () => void }) {
   return <div className="toast" role="status">{text}</div>;
 }
 
+/** An error with the next step beside it: a missing consent opens the consent form, a bad
+ *  key opens the settings, a technical failure can be copied for Or (F2, F4, F5). */
 export function ErrorLine({ error }: { error: string | null }) {
+  const app = useContext(AppContext);
+  const [copied, setCopied] = useState(false);
   if (!error) return null;
-  return <p className="error" role="alert">{error}</p>;
+  const f = failureFor(error);
+  const route = app?.route;
+  const actions: { label: string; run: () => void }[] = [];
+  if (f && app) {
+    if (f.code === "consent_missing" && route?.name === "case") {
+      const id = route.id;
+      actions.push({ label: "רישום ההסכמה", run: () => app.go({ name: "case", id, view: "details" }) });
+    }
+    if (f.code === "egress" && f.message.includes("מפתח")) {
+      actions.push({ label: "פתיחת ההגדרות", run: () => app.go({ name: "settings" }) });
+    }
+  }
+  const details = f?.details.length ? f.details.join("\n") : null;
+  return (
+    <div className="error-line">
+      <p className="error" role="alert">{error}</p>
+      {(actions.length > 0 || details) && (
+        <div className="row error-actions">
+          {actions.map((a) => (
+            <button key={a.label} type="button" className="btn btn-small" onClick={a.run}>{a.label}</button>
+          ))}
+          {details && (
+            <button type="button" className="btn btn-small"
+              onClick={() => void navigator.clipboard.writeText(details).then(() => setCopied(true), () => undefined)}>
+              {copied ? "הועתק" : "העתקת פרטים לאור"}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
