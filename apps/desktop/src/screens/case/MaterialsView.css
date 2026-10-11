@@ -302,3 +302,9 @@
   outline-offset: -8px;
   background: var(--primary-soft);
 }
+
+.prior-ask { padding: 6px 12px 10px; }
+.prior-ask .stack { margin-top: 8px; }
+.prior-ask textarea { width: 100%; }
+.prior-ask .chip { cursor: pointer; border: 1px solid var(--primary); background: transparent; }
+.prior-ask .chip.on { background: var(--primary); color: #fff; }
