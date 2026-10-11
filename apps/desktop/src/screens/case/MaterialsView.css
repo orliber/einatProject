@@ -3,7 +3,7 @@
   flex-grow: 1;
   min-width: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   align-content: start;
   gap: 12px;
   overflow: auto;
@@ -262,25 +262,34 @@
   border: 1px solid var(--line);
 }
 .slot.missing {
-  background: var(--warn-paper);
-  border: 1.5px dashed var(--warn-line);
+  /* Missing is the normal start of a case, not a fault: a calm card, the dot carries the signal. */
+  border: 1px dashed var(--line-strong);
 }
 .slot.optional {
   border-style: dashed;
 }
 .slot-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
 }
+.slot-head > .grow {
+  flex-basis: 180px;
+}
 .slot-add {
-  width: 32px;
-  height: 32px;
-  font-size: var(--text-lg);
+  width: 36px;
+  height: 36px;
 }
 .slot.drop {
   border: 2px solid var(--primary);
   background: var(--primary-soft);
+}
+.slot.missing .slot-actions,
+.slot.optional .slot-actions {
+  /* The actions go under the title so it never breaks into three lines. */
+  flex-basis: 100%;
+  padding-inline-start: 34px;
 }
 .slot-actions {
   display: inline-flex;
@@ -289,8 +298,8 @@
   flex-shrink: 0;
 }
 .slot-upload {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
 }
 .slot .material {
   margin: 0;

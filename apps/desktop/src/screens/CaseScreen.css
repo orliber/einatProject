@@ -534,9 +534,15 @@
   font-size: var(--text-base);
   text-align: start;
 }
-.contents-item:hover,
-.contents-item[aria-current="page"] {
+.contents-item:hover {
   background: var(--surface-alt);
+}
+.contents-item[aria-current="page"] {
+  /* Where I am: unmistakable, not just a hover color. */
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-weight: 600;
+  box-shadow: inset -3px 0 0 var(--primary);
 }
 .contents-item .dot {
   width: 9px;

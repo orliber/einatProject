@@ -245,6 +245,7 @@ button.crumb:hover:not([aria-current="page"]) {
   background: var(--surface);
   border: 1px solid var(--primary-line);
   border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-1);
 }
 .resume-eyebrow {
   font-size: var(--text-base);

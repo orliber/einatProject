@@ -146,6 +146,27 @@
 .full-text[open] > summary {
   margin-bottom: 12px;
 }
+.full-text > summary {
+  gap: 10px;
+  list-style: none;
+}
+.full-text > summary::-webkit-details-marker {
+  display: none;
+}
+.full-text > summary::before {
+  /* A chevron, so the line reads as something that opens: left (RTL) closed, down open. */
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-right: 2px solid var(--ink-muted);
+  border-bottom: 2px solid var(--ink-muted);
+  transform: rotate(135deg);
+  transition: transform var(--dur-enter) var(--ease-out);
+}
+.full-text[open] > summary::before {
+  transform: rotate(45deg);
+}
 .btn-send {
   min-width: 140px;
 }
