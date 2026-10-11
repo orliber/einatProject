@@ -345,6 +345,43 @@ fn unknown_names_other_cases_and_near_misses_are_hidden_without_asking() {
 }
 
 #[test]
+fn names_that_are_words_are_hidden_in_a_context_with_no_other_reading() {
+    // D-049: a name that is also an everyday word ("שירה", "ים", "הודיה") is hidden only
+    // where nothing else can be meant, and the same words stay words elsewhere.
+    let ids = vec![
+        id("c", Role::Child, "[ילד]", "ארטיום", &[]),
+        id("c", Role::Teacher, "[גננת]", "סמאח", &[]),
+    ];
+    let ctx = ctx_for(&ids, &[], "c");
+    for (s, name) in [
+        ("הודיה מתקרבת ושואלת מה את מציירת.", "הודיה"),
+        ("שירה אמרה לי השבוע שהוא תמיד מחליט לבד.", "שירה"),
+        ("מרינה (המרפאה בעיסוק שלו) נתנה לנו מחזיק עיפרון.", "מרינה"),
+        ("עם שירה ואביתר נוצר משחק משותף קצר.", "שירה"),
+        ("בהפסקות משחק עם ים ומתן. היועצת מציינת.", "מתן"),
+        ("בגן הוא משחק בעיקר עם מתן ועם ג'סיקה.", "מתן"),
+        ("הגננות: סמאח ונוגה. טלפון של הגן.", "נוגה"),
+        ("הגננת הקודמת שלו שולי שאלה עליו אתמול.", "שולי"),
+        ("ביום ההולדת של ים התפוצץ בלון לידו.", " ים "),
+        ("מר שמחה אוחיון, מנהל הלשכה", "אוחיון"),
+        ("ארטיום נולד בחרקוב ועלה לארץ.", "חרקוב"),
+    ] {
+        let out = filter(s, &ctx).unwrap();
+        assert!(!out.tagged.contains(name), "{name} leaked: {}", out.tagged);
+    }
+    for s in [
+        "הוא אוהב שירה ומוזיקה. מתן הוראות כתובות. כל אדם שפוגש אותו.",
+        "ישיבה קרובה למורה ומתן תזכורות שקטות. טיול לים. בשיעורים האלה הקשב טוב.",
+        "בבית היא לא מפסיקה לדבר, שרה, מספרת סיפורים.",
+        "נולדה בשבוע 35 ונולד ברכב בדרך לבית החולים.",
+        "בשמחה רבה. תודה והודיה. ההורים אמרו שהוא שמח.",
+    ] {
+        let out = filter(s, &ctx).unwrap();
+        assert_eq!(out.tagged, s, "an ordinary word was hidden");
+    }
+}
+
+#[test]
 fn ordinary_words_containing_a_name_are_confirmed_not_rewritten() {
     // A child called אלון, and the everyday word "שאלון" (questionnaire) = ש + אלון.
     let ids = vec![id("c", Role::Child, "[ילד]", "אלון", &[])];
