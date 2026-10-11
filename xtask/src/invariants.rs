@@ -203,24 +203,31 @@ pub const UNSAFE_MODULE: &str = "win_platform.rs";
 /// `// SAFETY:` comment just above it.
 fn shell_unsafe_confined(src: &Path) -> Vec<String> {
     let mut problems = Vec::new();
-    let Ok(entries) = fs::read_dir(src) else {
-        return vec![format!("{}: cannot read", src.display())];
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let text = fs::read_to_string(&path).unwrap_or_default();
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
-        if name.as_deref() == Some(UNSAFE_MODULE) {
-            problems.extend(
-                unexplained_unsafe(&text)
-                    .into_iter()
-                    .map(|line| format!("{}:{line}: unsafe without // SAFETY:", path.display())),
-            );
-        } else if text.contains("allow(unsafe_code)") || text.contains("unsafe {") {
-            problems.push(format!(
-                "{}: unsafe outside {UNSAFE_MODULE}",
-                path.display()
-            ));
+    let mut stack = vec![src.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            return vec![format!("{}: cannot read", dir.display())];
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let text = fs::read_to_string(&path).unwrap_or_default();
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+            if name.as_deref() == Some(UNSAFE_MODULE) {
+                problems.extend(
+                    unexplained_unsafe(&text).into_iter().map(|line| {
+                        format!("{}:{line}: unsafe without // SAFETY:", path.display())
+                    }),
+                );
+            } else if text.contains("allow(unsafe_code)") || text.contains("unsafe {") {
+                problems.push(format!(
+                    "{}: unsafe outside {UNSAFE_MODULE}",
+                    path.display()
+                ));
+            }
         }
     }
     problems
