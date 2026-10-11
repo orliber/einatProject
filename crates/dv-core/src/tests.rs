@@ -1174,9 +1174,47 @@ fn failed_send_keeps_the_approval_for_a_retry() {
         core.chat(&case, "kindergarten").unwrap().is_empty(),
         "nothing stored"
     );
+    let failed_at = |core: &mut Core| {
+        core.list_cases()
+            .unwrap()
+            .into_iter()
+            .find(|c| c.id == case)
+            .unwrap()
+            .failed_at
+    };
+    assert!(
+        failed_at(&mut core).is_some(),
+        "the case list shows it got stuck"
+    );
 
     let r = core.send_section(&id).unwrap();
     assert!(!r.paragraphs.is_empty());
+    assert_eq!(
+        failed_at(&mut core),
+        None,
+        "a send that works clears the mark"
+    );
+}
+
+#[test]
+fn erasing_a_case_forgets_its_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut core = Core::for_tests(dir.path(), None);
+    core.create_vault(PASSWORD).unwrap();
+    let case = core
+        .create_case(
+            CaseMeta {
+                code: "TEST-0005".into(),
+                ..CaseMeta::default()
+            },
+            vec![],
+        )
+        .unwrap();
+    core.note_send_outcome(&case, false);
+    assert!(core.list_cases().unwrap()[0].failed_at.is_some());
+    core.delete_case(&case).unwrap();
+    core.purge_case(&case, PASSWORD).unwrap();
+    assert!(core.failed_sends().unwrap().is_empty());
 }
 
 #[test]

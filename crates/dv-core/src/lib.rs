@@ -12,6 +12,7 @@ mod consultations;
 mod dates;
 mod drafts;
 mod export;
+mod failures;
 mod followup;
 pub mod google;
 mod intake;

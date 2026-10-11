@@ -6,6 +6,7 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import { App } from "../App";
 import { FakeCore } from "../web/fakeCore";
 import { a11yViolations } from "../test/a11y";
+import type { CaseSummary } from "../ipc/generated/CaseSummary";
 
 // The whole app over the demo core takes a moment to settle in jsdom.
 configure({ asyncUtilTimeout: 5000 });
@@ -39,6 +40,21 @@ describe("main screens", () => {
   it("the cases screen passes the accessibility check", async () => {
     const { view } = await openApp();
     expect(await screen.findByRole("button", { name: /בתיק של נועם$/ })).toBeInTheDocument();
+    expect(await a11yViolations(view.container)).toEqual([]);
+  });
+
+  it("a case whose last send failed shows 'נכשל' in the list", async () => {
+    const core = new FakeCore();
+    await core.handle("unlock", { password: "x" });
+    mockIPC(async (cmd, args) => {
+      const out = await core.handle(cmd, args);
+      if (cmd !== "list_cases") return out;
+      return (out as CaseSummary[]).map((c) => (c.child_name === "נועם" ? { ...c, failed_at: 1_700_000_000 } : c));
+    });
+    const view = render(<App />);
+    const row = (await screen.findByRole("button", { name: /בתיק של נועם$/ })).closest("tr") as HTMLElement;
+    expect(within(row).getByText("נכשל")).toBeInTheDocument();
+    expect(within(row).getByText(/השליחה האחרונה לא הצליחה/)).toBeInTheDocument();
     expect(await a11yViolations(view.container)).toEqual([]);
   });
 
