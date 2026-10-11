@@ -1532,8 +1532,32 @@ fn find_suspects(
 
 /// Run layers 2–6 on one piece of text.
 pub fn filter(text: &str, ctx: &PrivacyContext<'_>) -> Result<FilterOutcome, PrivacyError> {
+    filter_with_hints(text, ctx, &[])
+}
+
+/// A span a local name model (`dv-ner`) reads as a person, as a byte range of the text given
+/// to the filter. A hint can only add a hide: whatever a rule already hid or kept stays.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NameHint {
+    pub start: usize,
+    pub end: usize,
+    /// The model's confidence, 0–1. Below [`NAME_HINT_SURE`] the card marks it uncertain.
+    pub score: f32,
+}
+
+/// From this confidence up a model hint is listed as certain.
+pub const NAME_HINT_SURE: f32 = 0.9;
+const HINT_SURE: &str = "זוהה כשם לפי ההקשר";
+const HINT_UNSURE: &str = "ייתכן שם, לפי ההקשר";
+
+/// [`filter`], with the person spans of a local name model as one more voter (stage 5).
+pub fn filter_with_hints(
+    text: &str,
+    ctx: &PrivacyContext<'_>,
+    hints: &[NameHint],
+) -> Result<FilterOutcome, PrivacyError> {
     let text = &plain_brackets(text, ctx);
-    let (reps, suspects) = analyze(text, ctx)?;
+    let (reps, suspects) = analyze(text, ctx, hints)?;
     Ok(assemble(text, &reps, &suspects))
 }
 
@@ -1573,8 +1597,18 @@ pub fn filter_split(
     ctx: &PrivacyContext<'_>,
     ranges: &[Range<usize>],
 ) -> Result<(FilterOutcome, Option<Vec<FilterOutcome>>), PrivacyError> {
+    filter_split_with_hints(text, ctx, ranges, &[])
+}
+
+/// [`filter_split`], with a local name model's person spans as hints ([`filter_with_hints`]).
+pub fn filter_split_with_hints(
+    text: &str,
+    ctx: &PrivacyContext<'_>,
+    ranges: &[Range<usize>],
+    hints: &[NameHint],
+) -> Result<(FilterOutcome, Option<Vec<FilterOutcome>>), PrivacyError> {
     let text = &plain_brackets(text, ctx);
-    let (reps, suspects) = analyze(text, ctx)?;
+    let (reps, suspects) = analyze(text, ctx, hints)?;
     let whole = assemble(text, &reps, &suspects);
     let mut parts = Vec::with_capacity(ranges.len());
     for r in ranges {
@@ -2306,6 +2340,7 @@ const PLACE_WORDS: &[&str] = &[
 fn analyze(
     text: &str,
     ctx: &PrivacyContext<'_>,
+    hints: &[NameHint],
 ) -> Result<(Vec<Replacement>, Vec<AutoSpan>), PrivacyError> {
     let tokens = tokenize(text);
     let mut reps: Vec<Replacement> = Vec::new();
@@ -2476,6 +2511,9 @@ fn analyze(
     }
     // Layers 3, 5, 6: suspects on what is left.
     suspects.extend(find_suspects(text, &tokens, ctx, &reps));
+    // Layer 5b: what a local name model reads as a person, where no rule decided (stage 5).
+    let hinted = hint_suspects(text, &tokens, ctx, hints, &reps, &suspects);
+    suspects.extend(hinted);
     // A name found once is the same name elsewhere in the text ("קוראים לה נוגה" … "נוגה
     // צחקה").
     let again = recurring_names(text, &tokens, ctx, &reps, &suspects);
@@ -2488,6 +2526,70 @@ fn analyze(
     reps.sort_by_key(|r| r.start);
     autos.sort_by_key(|a| a.start);
     Ok((reps, autos))
+}
+
+/// A model's person spans as suspects, on whole words: a hint that starts inside a word keeps
+/// only Hebrew prefix letters out ("ו" + "אסתי"), anything else widens to the word, and so
+/// does a hint that ends inside one, so no part of a name is left showing. Titles and person
+/// words at the edges ("ד\"ר", "הגננת") stay, as the rules handle them. A hint on text a rule
+/// already hid or held, or on a word the psychologist kept, adds nothing.
+fn hint_suspects(
+    text: &str,
+    tokens: &[Token],
+    ctx: &PrivacyContext<'_>,
+    hints: &[NameHint],
+    reps: &[Replacement],
+    suspects: &[SuspectSpan],
+) -> Vec<SuspectSpan> {
+    let mut out: Vec<SuspectSpan> = Vec::new();
+    for h in hints {
+        let inside: Vec<&Token> = tokens
+            .iter()
+            .filter(|t| t.start < h.end && h.start < t.end)
+            .filter(|t| !is_title(&t.norm) && !is_person_word(&t.norm) && !is_role_word(&t.norm))
+            .collect();
+        let (Some(first), Some(last)) = (inside.first(), inside.last()) else {
+            continue;
+        };
+        let lead = text
+            .get(first.start..h.start.max(first.start))
+            .unwrap_or("");
+        let start = if !lead.is_empty() && crate::text::is_valid_prefix(lead) && h.start < first.end
+        {
+            h.start
+        } else {
+            first.start
+        };
+        let end = last.end;
+        if start >= end
+            || overlaps(start, end, reps, suspects)
+            || overlaps(start, end, &[], &out)
+            || inside.iter().any(|t| (ctx.allowlisted)(&t.norm))
+        {
+            continue;
+        }
+        let words = normalize(&text[start..end]);
+        if (ctx.allowlisted)(&words) {
+            continue;
+        }
+        out.push(SuspectSpan {
+            start,
+            end,
+            suspect: Suspect {
+                token: text[start..end].to_owned(),
+                kind: SuspectKind::UnknownName,
+                message: if h.score >= NAME_HINT_SURE {
+                    HINT_SURE
+                } else {
+                    HINT_UNSURE
+                }
+                .to_owned(),
+                suggested_role: Role::Other,
+            },
+            known: None,
+        });
+    }
+    out
 }
 
 /// The role a person word just before a name gives it, and that word: "הגננת אסתי",
@@ -2631,7 +2733,8 @@ fn auto_hide(
             SuspectKind::LatinName => (AutoKind::Name, true),
             SuspectKind::UnknownName => (
                 AutoKind::Name,
-                s.suspect.message.starts_with("שם שהוא גם מילה"),
+                s.suspect.message.starts_with("שם שהוא גם מילה")
+                    || s.suspect.message == HINT_UNSURE,
             ),
         };
         let (tag, role, reason, relative) = match (&s.known, kind) {

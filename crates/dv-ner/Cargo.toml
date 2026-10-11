@@ -1,0 +1,26 @@
+[package]
+name = "dv-ner"
+description = "Local Hebrew name detection (DictaBERT-NER) as an extra voter for the filter; trial, not shipped"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# Pure-Rust inference on the CPU: no ONNX runtime, no native code, no network.
+candle-core = { version = "0.9", default-features = false }
+candle-nn = { version = "0.9", default-features = false }
+candle-transformers = { version = "0.9", default-features = false }
+# Only the pure-Rust regex backend; the default features pull C (onig) and C++ (esaxx).
+tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
+
+[dev-dependencies]
+dv-domain.workspace = true
+dv-privacy.workspace = true
