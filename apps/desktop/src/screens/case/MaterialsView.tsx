@@ -6,7 +6,7 @@ import type { FilterOutcome } from "../../ipc/generated/FilterOutcome";
 import { ImportDialog } from "../../components/ImportDialog";
 import { AddMenu } from "../../components/Menu";
 import { ScoresDialog } from "../../components/ScoresDialog";
-import { Dialog, ErrorLine, Segments, Spinner, UploadIcon } from "../../components/ui";
+import { Dialog, ErrorLine, Segments, Spinner, UploadIcon, PlusIcon, EditIcon } from "../../components/ui";
 import type { CaseApi } from "../CaseScreen";
 import "./MaterialsView.css";
 import { useAi } from "../../ai";
@@ -180,7 +180,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
                   <AddMenu className="icon-btn slot-add" label={`הוספה ל${g.label}`} items={[
                     { label: g.add === "upload" ? "העלאת קובץ מהמחשב (וורד, PDF)" : g.addLabel, run: () => (g.add === "upload" ? chooseFile(g.kinds[0]) : write(g)) },
                     g.add === "upload" ? { label: "הדבקת טקסט", run: () => write(g) } : { label: "העלאת קובץ מהמחשב (וורד, PDF)", run: () => chooseFile(g.kinds[0]) },
-                  ]}>+</AddMenu>
+                  ]}><PlusIcon /></AddMenu>
                 ) : (
                   <span className="slot-actions">
                     <button type="button" className="btn btn-small" aria-label={`${g.addLabel} (${g.label})`}
@@ -188,11 +188,12 @@ export function MaterialsView({ api }: { api: CaseApi }) {
                     <button type="button" className="icon-btn slot-upload" aria-label={g.add === "upload" ? `הדבקת טקסט (${g.label})` : `העלאת קובץ (${g.label})`}
                       title={g.add === "upload" ? "הדבקת טקסט" : "העלאת קובץ Word, ‏PDF או ODT"}
                       onClick={() => (g.add === "upload" ? write(g) : chooseFile(g.kinds[0]))}>
-                      {g.add === "upload" ? "✎" : <UploadIcon />}
+                      {g.add === "upload" ? <EditIcon /> : <UploadIcon />}
                     </button>
                   </span>
                 )}
               </div>
+              {g.kinds.includes("prior_report") && g.items.length > 0 && <PriorReportsAsk api={api} />}
               {g.items.map((i) => (
                 <button key={i.id} type="button" className={i.id === selected ? "material selected" : "material"} onClick={() => setSelected(i.id)}>
                   <span className="material-title">{i.title || kindLabel[i.kind]}</span>
@@ -404,6 +405,64 @@ const NEEDS: Need[] = [
 
 /** Anything else (notes, pasted text). */
 const OTHER: Need = { label: "הערות וטקסט חופשי", kinds: ["free_text"], feeds: "לפי המיון", required: false, add: "free_text", addLabel: "הדבקת טקסט" };
+
+const PRIOR_TOPICS = ["אבחנות", "ממצאים עיקריים", "המלצות", "טיפולים שניתנו", "חוזקות", "קשיים", "מבחנים וציונים"];
+
+/** A free instruction about the previous reports ("summarize each by these topics"). It goes
+ *  through the same preparation, review and gate as every section request; the answer is the
+ *  draft of the "previous assessments" section, kept in the vault like any other draft. */
+function PriorReportsAsk({ api }: { api: CaseApi }) {
+  const ai = useAi();
+  const [open, setOpen] = useState(false);
+  const [topics, setTopics] = useState<string[]>([]);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const { fail } = useApp();
+  const [error, setError] = useState<string | null>(null);
+  const chosen = [...topics, ...(text.trim() ? [text.trim()] : [])];
+  const toggle = (t: string) => setTopics((c) => (c.includes(t) ? c.filter((x) => x !== t) : [...c, t]));
+  async function go() {
+    setError(null);
+    setBusy(true);
+    try {
+      await api.draft(
+        "prior_assessments",
+        `סכמי כל אחד מהדוחות והאבחונים הקודמים בנפרד, תחת כותרת עם שם המסמך, לפי הנושאים האלה: ${chosen.join(", ")}. ` +
+          "כללי: רק מה שכתוב במקורות, בלי להוסיף ממצאים, ועם מקור לכל פסקה.",
+      );
+    } catch (e) {
+      setError(fail(e as never));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="prior-ask">
+      <button type="button" className="btn btn-small" aria-expanded={open} onClick={() => setOpen(!open)}>
+        ✦ סיכום כל דוח לפי נושאים
+      </button>
+      {open && (
+        <div className="stack">
+          <div className="row" role="group" aria-label="נושאים מוצעים">
+            {PRIOR_TOPICS.map((t) => (
+              <button key={t} type="button" className={topics.includes(t) ? "chip on" : "chip"} aria-pressed={topics.includes(t)} onClick={() => toggle(t)}>{t}</button>
+            ))}
+          </div>
+          <textarea rows={2} value={text} onChange={(e) => setText(e.target.value)}
+            aria-label="הוראה חופשית על הדוחות הקודמים"
+            placeholder="או לכתוב בחופשיות: למשל, סכמי כל דוח לפי תפקוד שפתי, קשב ורגש" />
+          <p className="small muted">לפני השליחה ל-{ai} תראי בדיוק מה יוצא, ושמות יוסתרו. התשובה נשמרת כטיוטה בסעיף "אבחונים וטיפולים".</p>
+          <div className="row">
+            <button type="button" className="btn btn-primary btn-small" disabled={busy || chosen.length === 0} onClick={() => void go()}>
+              {busy ? "מכינה…" : "בדיקה לפני שליחה"}
+            </button>
+          </div>
+          <ErrorLine error={error} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** D-029: the scores of this follow-up next to the assessment before, by fixed rules. */
 function FollowUpPanel({ api }: { api: CaseApi }) {

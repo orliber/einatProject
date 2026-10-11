@@ -19,6 +19,15 @@
   --warn-paper: #fffbf4;
   --block: #a1261a;
   --block-soft: #fbe7e3;
+  --ink-faint: #a0a8a6;
+  --on-primary: #ffffff;
+  --sand-strong: #e9ecea;
+  --primary-line: #cfe0dc;
+  --block-line: #e3b2a8;
+  --block-ink: #6e1609;
+  --block-strong: #8a1c0c;
+  --warn-dot: #d38a2c;
+  --mark: #fbe3b8;
   --line: #e3e6e3;
   --line-strong: #cfd5d2;
   --field-line: #cfd5d2;
@@ -33,14 +42,55 @@
   --side-ok: #7fc3a1;
   --side-warn: #e0a955;
   --side-empty: #3c5557;
+  --side-warn-ink: #f2c98c;
+  --side-ring: #9cc9c3;
+  --side-glow: #22393b;
+  --side-muted-light: #c9d6d4;
+  /* The report page (print colors, not the app's). */
+  --paper-ink: #1b1b1b;
+  --paper-muted: #4a4a4a;
+  --paper-faint: #7a7a7a;
+  --paper-heading: #1f3a5f;
+  --paper-sand: #e9e5dc;
   --radius-sm: 8px;
   --radius-md: 10px;
   --radius-lg: 14px;
   --radius-xl: 18px;
   --shadow-paper: 0 1px 2px rgba(21, 32, 31, 0.04);
+  --shadow-1: 0 1px 3px rgba(21, 32, 31, 0.1);
+  --shadow-2: 0 12px 32px rgba(21, 32, 31, 0.16);
+  --shadow-page: 0 1px 3px rgba(0, 0, 0, 0.12), 0 8px 28px rgba(0, 0, 0, 0.1);
   --shadow-dialog: 0 24px 60px rgba(0, 0, 0, 0.3);
+  /* Type scale: nine steps, nothing in between. */
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  --text-3xl: 28px;
+  --text-4xl: 34px;
+  /* Spacing: a 4px grid. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
   --font-body: "Assistant", "Segoe UI", system-ui, sans-serif;
   --font-display: "Frank Ruhl Libre", "David", serif; /* the report text and the child's name only */
   --font-ui: "Assistant", "Segoe UI", system-ui, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+
+/* Motion (styling only): strong ease-out curves, short durations. */
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --dur-press: 140ms;
+  --dur-hover: 150ms;
+  --dur-enter: 200ms;
+  --dur-exit: 140ms;
 }

@@ -4,7 +4,7 @@ import { useApp } from "../App";
 import { TopBar } from "../components/TopBar";
 import { ReviewDialog } from "../components/ReviewDialog";
 import { CasePicker } from "../components/CasePicker";
-import { ErrorLine, Spinner } from "../components/ui";
+import { ErrorLine, Spinner, CloseIcon } from "../components/ui";
 import { useWords, wordsSoFar } from "../components/Progress";
 import { ConfirmDialog } from "./library/LibraryDialogs";
 import { ipc, type ConsultationSummary, type Prepared } from "../ipc/client";
@@ -226,7 +226,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
                     <span className="history-title">{c.title || "שיחה"}</span>
                     <span className="history-meta">{c.case_label ?? "כללי"} · {when(c.updated_at)}</span>
                   </button>
-                  <button type="button" className="icon-btn history-delete" disabled={inFlight} aria-label={`מחיקת השיחה ${c.title}`} onClick={() => setDeleting(c)}>×</button>
+                  <button type="button" className="icon-btn history-delete" disabled={inFlight} aria-label={`מחיקת השיחה ${c.title}`} onClick={() => setDeleting(c)}><CloseIcon /></button>
                 </li>
               ))}
             </ul>

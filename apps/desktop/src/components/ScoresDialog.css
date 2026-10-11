@@ -2,7 +2,7 @@
 .scores {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 22px;
+  gap: 24px;
   align-items: start;
 }
 .inst-picker {
@@ -18,7 +18,7 @@
   background: var(--surface);
   color: var(--ink-soft);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
   cursor: pointer;
   direction: ltr;
@@ -30,7 +30,7 @@
 .inst.on {
   background: var(--primary);
   border-color: var(--primary);
-  color: #fff;
+  color: var(--on-primary);
 }
 .inst:disabled {
   opacity: 0.4;
@@ -55,7 +55,7 @@
 .score-table caption {
   text-align: start;
   font-weight: 700;
-  font-size: 13px;
+  font-size: var(--text-sm);
   letter-spacing: 0.02em;
   color: var(--ink-muted);
   padding: 0 4px 6px;
@@ -73,7 +73,7 @@
 }
 .score-table thead th {
   background: var(--surface-alt);
-  font-size: 12.5px;
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--ink-muted);
 }
@@ -89,7 +89,7 @@
 }
 .abbr {
   margin-inline-start: 8px;
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--ink-muted);
   font-family: var(--font-mono);
 }
@@ -115,9 +115,9 @@
 }
 .band {
   display: inline-block;
-  padding: 3px 10px;
+  padding: 4px 10px;
   border-radius: 999px;
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -152,13 +152,13 @@
   box-shadow: var(--shadow-paper);
 }
 .scores-preview h3 {
-  font-size: 17px;
+  font-size: var(--text-lg);
   margin-bottom: 4px;
 }
 .preview-text {
   margin: 12px 0 0;
   white-space: pre-wrap;
-  font-size: 15px;
+  font-size: var(--text-base);
   line-height: 1.7;
   color: var(--ink);
 }

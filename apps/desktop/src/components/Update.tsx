@@ -2,7 +2,7 @@ import { useContext, useEffect, useState, useSyncExternalStore } from "react";
 import { AppContext, useApp } from "../App";
 import type { UiError } from "../ipc/client";
 import { ipc, type UpdateView } from "../ipc/client";
-import { Dialog, ErrorLine, Spinner } from "./ui";
+import { Dialog, ErrorLine, Spinner, SparkIcon } from "./ui";
 import "./Update.css";
 
 /**
@@ -121,7 +121,7 @@ export function UpdateChip() {
   return (
     <>
       <button type="button" className="update-chip" onClick={() => setOpen(true)}>
-        <span aria-hidden="true">✦</span> {isReady ? "גרסה חדשה מוכנה" : "יש גרסה חדשה"}
+        <SparkIcon /> {isReady ? "גרסה חדשה מוכנה" : "יש גרסה חדשה"}
       </button>
       {open && <UpdateDialog update={update} onClose={() => setOpen(false)} />}
     </>
@@ -195,7 +195,7 @@ export function LockScreenUpdate() {
   return (
     <>
       <button type="button" className="update-chip" onClick={() => setOpen(true)}>
-        <span aria-hidden="true">✦</span> {isReady ? `גרסה ${update.version} מוכנה` : `יש גרסה ${update.version}`}
+        <SparkIcon /> {isReady ? `גרסה ${update.version} מוכנה` : `יש גרסה ${update.version}`}
       </button>
       {open && <UpdateDialog update={update} onClose={() => setOpen(false)} />}
     </>

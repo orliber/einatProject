@@ -19,7 +19,7 @@ body {
   font-family: var(--font-body);
   background: var(--bg);
   color: var(--ink);
-  font-size: 16px;
+  font-size: var(--text-md);
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
@@ -74,14 +74,14 @@ p {
   color: var(--ink-muted);
 }
 .small {
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 /* ---------- buttons ---------- */
 .btn {
   min-height: 44px;
   padding: 0 18px;
-  font-size: 16px;
+  font-size: var(--text-md);
   border-radius: var(--radius-md);
   border: 1px solid var(--line-strong);
   background: var(--surface);
@@ -98,7 +98,7 @@ p {
 .btn-primary {
   background: var(--primary);
   border-color: var(--primary);
-  color: #fff;
+  color: var(--on-primary);
   font-weight: 600;
 }
 .btn-primary:hover:not(:disabled) {
@@ -107,13 +107,13 @@ p {
 .btn-small {
   min-height: 36px;
   padding: 0 12px;
-  font-size: 15px;
+  font-size: var(--text-base);
   border-radius: 9px;
 }
 .btn-big {
   min-height: 48px;
-  padding: 0 22px;
-  font-size: 17px;
+  padding: 0 24px;
+  font-size: var(--text-lg);
 }
 .btn-ghost {
   border-color: transparent;
@@ -128,25 +128,41 @@ p {
   width: 44px;
   height: 44px;
   padding: 0;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  /* Quiet: an icon button never outweighs the content next to it. */
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ink-muted);
+}
+.icon-btn:hover:not(:disabled) {
+  background: var(--sand);
+  color: var(--ink);
+}
+.btn-small.icon-btn {
+  width: 36px;
+  height: 36px;
 }
 .pill-btn {
   min-height: 32px;
-  padding: 0 11px;
+  padding: 0 12px;
   border-radius: 999px;
   border: 1px solid var(--line-strong);
   background: var(--surface);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 /* ---------- forms ---------- */
 .field {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 8px;
 }
 .field > label,
 .label {
-  font-size: 15px;
+  font-size: var(--text-base);
   font-weight: 600;
 }
 .input,
@@ -158,6 +174,15 @@ p {
   border: 1px solid var(--field-line);
   background: var(--surface);
 }
+select.select {
+  /* One chevron, at the end of the field in RTL, the same on every machine. */
+  appearance: none;
+  padding-inline-end: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%234a5654' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: left 12px center;
+}
+
 .textarea {
   padding: 10px 12px;
   resize: vertical;
@@ -165,7 +190,7 @@ p {
 }
 .hint {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--ink-muted);
   line-height: 1.6;
 }
@@ -175,7 +200,7 @@ p {
   background: var(--block-soft);
   border-radius: var(--radius-sm);
   padding: 8px 12px;
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 .row {
   display: flex;
@@ -196,10 +221,10 @@ p {
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   border-radius: 999px;
   padding: 1px 10px;
-  font-size: 12.5px;
+  font-size: var(--text-xs);
   font-weight: 600;
   background: var(--primary-soft);
   color: var(--primary);
@@ -222,7 +247,7 @@ p {
   color: var(--ink-muted);
   border: 1px solid var(--line-strong);
   border-radius: 5px;
-  padding: 0 5px;
+  padding: 0 4px;
 }
 
 /* ---------- cards & notes ---------- */
@@ -241,15 +266,15 @@ p {
   display: flex;
   gap: 8px;
   align-items: flex-start;
-  font-size: 13.5px;
+  font-size: var(--text-sm);
   background: var(--warn-soft);
   color: var(--warn-ink);
   border-radius: var(--radius-sm);
-  padding: 7px 10px;
+  padding: 8px 10px;
 }
 .note-block {
   background: var(--block-soft);
-  color: #6e1609;
+  color: var(--block-ink);
   border-radius: 12px;
   padding: 12px 16px;
 }
@@ -257,14 +282,14 @@ p {
   background: var(--sand);
   border-radius: 12px;
   padding: 10px 14px;
-  font-size: 13.5px;
+  font-size: var(--text-sm);
   color: var(--ink-soft);
 }
 .encrypted {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--ok);
   background: var(--ok-soft);
   border-radius: 999px;
@@ -276,7 +301,7 @@ p {
 .mark-real {
   background: var(--warn-soft);
   border-radius: 4px;
-  padding: 0 3px;
+  padding: 0 4px;
 }
 .mark-role {
   background: var(--primary-soft);
@@ -328,7 +353,7 @@ p {
   border-bottom: 1px solid var(--line);
 }
 .dialog-head h2 {
-  font-size: 26px;
+  font-size: var(--text-3xl);
 }
 .dialog-body {
   padding: 18px 26px;
@@ -381,6 +406,30 @@ p {
   box-shadow: var(--shadow-dialog);
   max-width: 640px;
 }
+.toast-action {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-block: 8px;
+  padding-inline-end: 8px;
+}
+.toast-btn {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--side-active);
+  color: var(--on-primary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.toast-btn:hover {
+  background: var(--side-line);
+}
+.toast-btn:focus-visible {
+  outline-color: var(--side-ok);
+}
 .spinner {
   width: 16px;
   height: 16px;
@@ -419,7 +468,7 @@ p {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  font-size: 15.5px;
+  font-size: var(--text-base);
   line-height: 1.75;
   white-space: pre-wrap;
 }
@@ -451,7 +500,7 @@ p {
   background: transparent;
   color: var(--primary);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -478,7 +527,7 @@ p {
   gap: 8px;
 }
 .age-part label {
-  font-size: 15px;
+  font-size: var(--text-base);
   color: var(--ink-soft);
 }
 .input.age {
@@ -501,7 +550,7 @@ p {
 }
 .age-calc-result {
   align-self: center;
-  padding-top: 22px;
+  padding-top: 24px;
 }
 .age-calc-note {
   grid-column: 1 / -1;
@@ -510,16 +559,16 @@ p {
 
 /* Irreversible actions (erase a case, export without a password). */
 .btn-danger {
-  background: #8a1c0c;
-  border-color: #8a1c0c;
-  color: #fff;
+  background: var(--block-strong);
+  border-color: var(--block-strong);
+  color: var(--on-primary);
   font-weight: 700;
 }
 .btn-danger:hover:not(:disabled) {
-  background: #6e1609;
+  background: var(--block-ink);
 }
 .btn-danger-quiet {
-  border-color: #e3b2a8;
+  border-color: var(--block-line);
   color: var(--block);
   background: var(--surface);
 }

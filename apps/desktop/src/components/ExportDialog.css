@@ -17,7 +17,7 @@
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 11px 14px;
+  padding: 12px 14px;
 }
 .checklist li > span:first-child {
   font-weight: 700;
@@ -35,15 +35,15 @@
 }
 .checklist .bad {
   background: var(--block-soft);
-  border-color: #e3b2a8;
-  color: #6e1609;
+  border-color: var(--block-line);
+  color: var(--block-ink);
 }
 .protect {
   padding: 16px 18px;
   gap: 12px;
 }
 .pw {
-  font-size: 17px;
+  font-size: var(--text-lg);
   font-weight: 600;
   background: var(--surface-alt);
 }
@@ -52,7 +52,7 @@
 }
 .saved-path {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-sm);
   background: var(--sand);
   padding: 8px 12px;
   border-radius: 8px;
@@ -61,7 +61,7 @@
 .page-preview {
   width: 280px;
   flex-shrink: 0;
-  background: #e9e5dc;
+  background: var(--paper-sand);
   border-radius: 12px;
   display: flex;
   align-items: center;
@@ -71,45 +71,45 @@
 .mini-page {
   width: 220px;
   height: 311px;
-  background: #fff;
-  box-shadow: 0 10px 30px rgba(27, 37, 40, 0.18);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
   padding: 18px 16px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 8px;
   overflow: hidden;
 }
 .mini-conf,
 .mini-foot {
   font-family: var(--font-body);
   font-size: 7px;
-  color: #8a9294;
+  color: var(--paper-faint);
   text-align: center;
 }
 .mini-foot {
   margin-top: auto;
 }
 .mini-title {
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 700;
   text-align: center;
 }
 .mini-section {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   font-size: 8px;
 }
 .mini-section i {
   height: 4px;
-  background: #eceae4;
+  background: var(--paper-sand);
   border-radius: 2px;
 }
 .mini-section i.short {
   width: 70%;
 }
 .danger-zone {
-  border-color: #e3b2a8;
+  border-color: var(--block-line);
 }
 .details {
   overflow: auto;

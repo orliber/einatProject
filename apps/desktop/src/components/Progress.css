@@ -14,7 +14,7 @@
   font-weight: 700;
 }
 .progress-time {
-  font-size: 14px;
+  font-size: var(--text-base);
   color: var(--ink-muted);
   font-variant-numeric: tabular-nums;
 }
@@ -28,7 +28,7 @@
   height: 100%;
   border-radius: 999px;
   background: var(--primary);
-  transition: width 0.5s linear;
+  transition: width 0.5s var(--ease-out);
 }
 .progress-fill.waiting {
   animation: progress-pulse 1.4s ease-in-out infinite;

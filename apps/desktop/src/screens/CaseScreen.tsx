@@ -5,7 +5,7 @@ import { ReviewDialog } from "../components/ReviewDialog";
 import { ExportDialog } from "../components/ExportDialog";
 import { ReportRunDialog } from "../components/ReportRunDialog";
 import { ProgressLine, estimateMs, recordDuration, type Task } from "../components/Progress";
-import { ErrorLine } from "../components/ui";
+import { ErrorLine, CloseIcon } from "../components/ui";
 import { ActionsMenu, type MenuItem } from "../components/Menu";
 import { ageWords } from "../components/AgeField";
 import { MaterialsView } from "./case/MaterialsView";
@@ -319,7 +319,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
               {f.section && f.section !== view && (
                 <button type="button" className="btn btn-small" onClick={() => toReport(f.section)}>לסעיף</button>
               )}
-              <button type="button" className="icon-btn" aria-label="סגירה" onClick={() => setFailures((all) => all.filter((x) => x.id !== f.id))}>×</button>
+              <button type="button" className="icon-btn" aria-label="סגירה" onClick={() => setFailures((all) => all.filter((x) => x.id !== f.id))}><CloseIcon /></button>
             </div>
           ))}
         </section>

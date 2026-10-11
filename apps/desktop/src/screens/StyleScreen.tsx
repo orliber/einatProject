@@ -8,7 +8,7 @@ import { estimateMs, ProgressLine, recordDuration } from "../components/Progress
 import { ReviewDialog } from "../components/ReviewDialog";
 import { StyleImportDialog } from "../components/StyleImportDialog";
 import { TopBar } from "../components/TopBar";
-import { ErrorLine, Spinner, UploadIcon } from "../components/ui";
+import { ErrorLine, Spinner, UploadIcon, CloseIcon } from "../components/ui";
 import {
   ipc,
   type Prepared,
@@ -413,7 +413,7 @@ function ProfileEditor({ view, o }: { view: StyleProfileView; o: StyleOverview }
                       {item.origin === "edits" && <span className="chip chip-sand">מהתיקונים שלך</span>}
                       {item.origin === "manual" && <span className="chip chip-sand">שלך</span>}
                       {item.origin === "reports" && item.support > 1 && <span className="chip">ב-{item.support} דוחות</span>}
-                      <button type="button" className="btn icon-btn" aria-label="מחיקה" onClick={() => change((all) => all.filter((x) => x.id !== item.id))}>×</button>
+                      <button type="button" className="btn icon-btn" aria-label="מחיקה" onClick={() => change((all) => all.filter((x) => x.id !== item.id))}><CloseIcon /></button>
                     </li>
                   ))}
                 </ul>

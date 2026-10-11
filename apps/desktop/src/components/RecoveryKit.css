@@ -7,7 +7,7 @@
 .kit-head {
   display: flex;
   justify-content: space-between;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--ink-muted);
   font-weight: 700;
 }
@@ -21,7 +21,7 @@
 .kit-grid span {
   background: var(--sand);
   border-radius: 8px;
-  padding: 9px 0;
+  padding: 8px 0;
 }
 .kit-grid .kit-check {
   background: var(--primary-soft);

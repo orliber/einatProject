@@ -55,6 +55,41 @@ export function SendIcon() {
   );
 }
 
+function Glyph({ size, children }: { size: number; children: ReactNode }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="glyph">
+      {children}
+    </svg>
+  );
+}
+
+export function CloseIcon({ size = 18 }: { size?: number }) {
+  return <Glyph size={size}><path d="M18 6 6 18" /><path d="m6 6 12 12" /></Glyph>;
+}
+
+export function MoreIcon({ size = 18 }: { size?: number }) {
+  return (
+    <Glyph size={size}>
+      <circle cx="5" cy="12" r="1" fill="currentColor" />
+      <circle cx="12" cy="12" r="1" fill="currentColor" />
+      <circle cx="19" cy="12" r="1" fill="currentColor" />
+    </Glyph>
+  );
+}
+
+export function PlusIcon({ size = 17 }: { size?: number }) {
+  return <Glyph size={size}><path d="M12 5v14" /><path d="M5 12h14" /></Glyph>;
+}
+
+export function EditIcon({ size = 17 }: { size?: number }) {
+  return <Glyph size={size}><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></Glyph>;
+}
+
+export function SparkIcon({ size = 14 }: { size?: number }) {
+  return <Glyph size={size}><path d="M12 3c.5 4.5 2.5 6.5 7 7-4.5.5-6.5 2.5-7 7-.5-4.5-2.5-6.5-7-7 4.5-.5 6.5-2.5 7-7Z" fill="currentColor" /></Glyph>;
+}
+
 /** A modal frame. Escape closes it; focus moves into it when it opens. */
 export function Dialog(props: {
   title: string;
@@ -103,7 +138,7 @@ export function Dialog(props: {
             {props.subtitle && <span className="muted small">{props.subtitle}</span>}
           </div>
           {onClose && (
-            <button type="button" className="btn icon-btn" aria-label="סגירה" onClick={close}>×</button>
+            <button type="button" className="btn icon-btn" aria-label="סגירה" onClick={close}><CloseIcon /></button>
           )}
         </header>
         <div className="dialog-body">{props.children}</div>
@@ -151,16 +186,36 @@ export function Spinner() {
 
 /** A short confirmation that goes away by itself. The timer starts once per message:
  *  a new `onDone` on every render of the parent must not keep it on screen. */
-export function Toast({ text, onDone }: { text: string; onDone: () => void }) {
+/** An action offered on a toast, such as "ביטול" right after something was saved or removed. */
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
+/**
+ * A short notice under the header. With an action it stays longer (7s instead of 3.5s) and holds
+ * while the pointer or focus is on it, so the action can be reached in time.
+ */
+export function Toast({ text, onDone, action }: { text: string; onDone: () => void; action?: ToastAction }) {
   const done = useRef(onDone);
+  const [held, setHeld] = useState(false);
   useEffect(() => {
     done.current = onDone;
   });
   useEffect(() => {
-    const t = window.setTimeout(() => done.current(), 3500);
+    if (held) return;
+    const t = window.setTimeout(() => done.current(), action ? 7000 : 3500);
     return () => window.clearTimeout(t);
-  }, [text]);
-  return <div className="toast" role="status">{text}</div>;
+  }, [text, action, held]);
+  if (!action) return <div className="toast" role="status">{text}</div>;
+  return (
+    <div className="toast toast-action" role="status"
+      onPointerEnter={() => setHeld(true)} onPointerLeave={() => setHeld(false)}
+      onFocus={() => setHeld(true)} onBlur={() => setHeld(false)}>
+      <span>{text}</span>
+      <button type="button" className="toast-btn" onClick={() => { action.run(); done.current(); }}>{action.label}</button>
+    </div>
+  );
 }
 
 /** An error with the next step beside it: a missing consent opens the consent form, a bad

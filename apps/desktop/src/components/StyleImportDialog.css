@@ -35,7 +35,7 @@
   margin: 0;
   white-space: pre-wrap;
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: var(--text-base);
   line-height: 1.75;
   color: var(--ink-soft);
 }

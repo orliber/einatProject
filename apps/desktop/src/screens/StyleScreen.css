@@ -2,7 +2,7 @@
   max-width: 980px;
 }
 .style h2 {
-  font-size: 22px;
+  font-size: var(--text-2xl);
 }
 
 /* ---------- the head: what this is, the steps, one action ---------- */
@@ -13,7 +13,7 @@
   align-items: flex-start;
 }
 .style-hero h1 {
-  font-size: 32px;
+  font-size: var(--text-4xl);
 }
 .style-lead {
   margin: 0;
@@ -32,8 +32,8 @@
 .style-steps li {
   border: 1px solid var(--line-strong);
   border-radius: 999px;
-  padding: 3px 12px;
-  font-size: 13.5px;
+  padding: 4px 12px;
+  font-size: var(--text-sm);
   color: var(--ink-muted);
   background: var(--surface);
 }
@@ -60,7 +60,7 @@
 
 /* ---------- cards ---------- */
 .style-card {
-  padding: 22px 24px;
+  padding: 24px 24px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -114,7 +114,7 @@
 }
 .style-group h3 {
   margin: 0;
-  font-size: 17px;
+  font-size: var(--text-lg);
 }
 .style-kind {
   display: flex;
@@ -122,7 +122,7 @@
   gap: 6px;
 }
 .style-kind-title {
-  font-size: 13.5px;
+  font-size: var(--text-sm);
   font-weight: 700;
   color: var(--ink-soft);
 }
@@ -145,7 +145,7 @@
   background: var(--sand);
 }
 .style-item input[type="checkbox"] {
-  margin-top: 5px;
+  margin-top: 4px;
 }
 .style-item-off .style-item-text {
   color: var(--ink-muted);
@@ -163,7 +163,7 @@
 }
 .style-example {
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: var(--text-base);
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
