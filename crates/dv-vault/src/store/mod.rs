@@ -20,7 +20,7 @@ use crate::crypto::{
 };
 use crate::db::{migrate, open_encrypted, AUDIT_MIGRATIONS, IDENTITY_MIGRATIONS, MAIN_MIGRATIONS};
 use crate::header::{unwrap_mk, wrap_mk, KeySlot, VaultHeader, FORMAT, HEADER_FILE};
-use crate::hello::{self, HelloSigner};
+use crate::hello;
 use crate::password::{self, Argon2Params};
 use crate::{recovery, VaultError};
 
@@ -359,25 +359,6 @@ impl Vault {
         Ok(vault)
     }
 
-    /// The everyday way in (D-047): Windows Hello signs the slot's challenge after her PIN,
-    /// face or fingerprint. Any failure (cancelled, another computer, Hello turned off) is an
-    /// error and the lock screen falls back to the password.
-    pub fn unlock_with_hello(dir: &Path, signer: &dyn HelloSigner) -> Result<Self, VaultError> {
-        let header = VaultHeader::read(dir)?;
-        let (credential, challenge, wrapped) =
-            hello_slot_of(&header).ok_or(VaultError::NotFound)?;
-        let signature = signer.sign(&credential, &crate::crypto::unhex(&challenge)?)?;
-        let kek = hello::derive_kek(&signature)?;
-        let mk = unwrap_mk(&kek, "windows_hello", &header.vault_id, &wrapped)?;
-        let mut vault = Self::open_with(dir, header, &mk)?;
-        vault.record(
-            AuditEvent::Unlock,
-            None,
-            &serde_json::json!({"method": "windows_hello"}),
-        )?;
-        Ok(vault)
-    }
-
     /// Forgot the password: open with the key from her Google Drive and the key sealed to
     /// this computer (D-041).
     pub fn unlock_with_google(
@@ -396,57 +377,15 @@ impl Vault {
         Ok(vault)
     }
 
-    /// Read while the vault is still locked, only to decide whether the lock screen offers
-    /// Windows Hello. The header is authenticated once the vault opens.
-    pub fn offers_hello(dir: &Path) -> bool {
-        VaultHeader::read(dir).is_ok_and(|h| hello_slot_of(&h).is_some())
-    }
-
     #[must_use]
     pub fn has_hello_slot(&self) -> bool {
         hello_slot_of(&self.header).is_some()
     }
 
-    /// Turn on Windows Hello. Needs a fresh proof (the password), like a new password. A new
-    /// key pair and challenge are made each time. Two signatures over the challenge must
-    /// match, or nothing is changed: a key that does not sign the same way twice would lock
-    /// her out of this slot later.
-    pub fn set_hello_slot(
-        &mut self,
-        current: Secret<'_>,
-        signer: &dyn HelloSigner,
-    ) -> Result<(), VaultError> {
-        let mk = master_key(&self.header, current)?;
-        if !signer.available() {
-            return Err(hello::refused("not set up on this computer"));
-        }
-        let credential = hello::credential_name(&self.header.vault_id);
-        let challenge = random_array::<32>()?;
-        signer.create(&credential)?;
-        let first = signer.sign(&credential, &challenge)?;
-        let second = signer.sign(&credential, &challenge)?;
-        if !crate::crypto::constant_time_eq(&first, &second) {
-            signer.delete(&credential);
-            return Err(hello::refused("signatures differ"));
-        }
-        let kek = hello::derive_kek(&first)?;
-        let slot = KeySlot::WindowsHello {
-            credential,
-            challenge: hex(&challenge),
-            wrapped_mk: wrap_mk(&kek, "windows_hello", &self.header.vault_id, &mk)?,
-        };
-        self.header
-            .slots
-            .retain(|s| !matches!(s, KeySlot::WindowsHello { .. }));
-        self.header.slots.push(slot);
-        self.header.sign(&self.keys.header)?;
-        self.header.write(&self.dir)?;
-        self.record(AuditEvent::WindowsHelloOn, None, &serde_json::json!({}))
-    }
-
-    /// Turn Windows Hello off: the slot leaves the header and the key pair is removed from
-    /// Windows. Only ever takes a way in away, so no proof is asked.
-    pub fn remove_hello_slot(&mut self, signer: &dyn HelloSigner) -> Result<(), VaultError> {
+    /// Windows Hello was taken out of the program (D-054). A vault that had it turned on
+    /// keeps opening with the password; the first time it opens, the old slot leaves the
+    /// header and the key pair is removed from Windows. Only ever takes a way in away.
+    pub fn remove_hello_slot(&mut self) -> Result<(), VaultError> {
         let Some((credential, _, _)) = hello_slot_of(&self.header) else {
             return Ok(());
         };
@@ -455,7 +394,7 @@ impl Vault {
             .retain(|s| !matches!(s, KeySlot::WindowsHello { .. }));
         self.header.sign(&self.keys.header)?;
         self.header.write(&self.dir)?;
-        signer.delete(&credential);
+        hello::delete_key_pair(&credential);
         self.record(AuditEvent::WindowsHelloOff, None, &serde_json::json!({}))
     }
 
