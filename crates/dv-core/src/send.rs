@@ -232,7 +232,14 @@ impl Core {
             let instr = run(instruction)?;
             review.add("הבקשה שלך".to_owned(), &instr);
             // Her approved style profile (D-043), as it goes out with this case's names hidden.
-            let style_profile = style::style_for_request(v, &ctx, section_key)?;
+            // The items that fit this section's material best go out (D-052).
+            let query: String = tagged_sources
+                .iter()
+                .map(|s| s.content_tagged.as_str())
+                .chain([instr.tagged.as_str()])
+                .collect::<Vec<_>>()
+                .join("\n");
+            let style_profile = style::style_for_request(v, &ctx, section_key, &query)?;
             if let Some(text) = &style_profile {
                 review.add_context("פרופיל הסגנון שלך".to_owned(), &run(text)?);
             }

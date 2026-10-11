@@ -773,6 +773,7 @@ pub(crate) fn style_for_request(
     v: &Vault,
     ctx: &PrivacyContext<'_>,
     section_key: &str,
+    query: &str,
 ) -> Result<Option<String>, CoreError> {
     if v.setting(PROFILE_OFF_KEY)?.as_deref() == Some("1") {
         return Ok(None);
@@ -786,7 +787,8 @@ pub(crate) fn style_for_request(
     };
     let stored: StoredProfile = parse(&active.json)?;
     let keep = |t: &str| clean(t, ctx);
-    let Some(text) = dv_ai::render_for_section(&stored.profile, section_key, &keep) else {
+    let focused = focus(&stored.profile, section_key, query);
+    let Some(text) = dv_ai::render_for_section(&focused, section_key, &keep) else {
         return Ok(None);
     };
     // Learned only from her edits: her rules come on top of the default style.
@@ -795,6 +797,50 @@ pub(crate) fn style_for_request(
     } else {
         text
     }))
+}
+
+/// How many items of a kind go into one request, for the section and for the whole report
+/// each. Rules and things to avoid always go: they are short and they are her word.
+const REQUEST_BUDGET: [(StyleKind, usize); 3] = [
+    (StyleKind::Example, 2),
+    (StyleKind::Template, 6),
+    (StyleKind::Phrase, 12),
+];
+
+/// The profile with only the examples, templates and phrases that fit this request best
+/// (BM25 against the case's filtered text for the section, on her computer; D-052).
+fn focus(profile: &StyleProfile, section_key: &str, query: &str) -> StyleProfile {
+    let mut drop: HashSet<usize> = HashSet::new();
+    for scope in [Some(section_key), None] {
+        for (kind, budget) in REQUEST_BUDGET {
+            let group: Vec<usize> = profile
+                .items
+                .iter()
+                .enumerate()
+                .filter(|(_, i)| i.enabled && i.kind == kind && i.section.as_deref() == scope)
+                .map(|(n, _)| n)
+                .collect();
+            let texts: Vec<&str> = group
+                .iter()
+                .map(|n| profile.items[*n].text.as_str())
+                .collect();
+            let kept: HashSet<usize> = dv_style::retrieve::best(&texts, query, budget)
+                .into_iter()
+                .map(|k| group[k])
+                .collect();
+            drop.extend(group.into_iter().filter(|n| !kept.contains(n)));
+        }
+    }
+    StyleProfile {
+        items: profile
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(n, _)| !drop.contains(n))
+            .map(|(_, i)| i.clone())
+            .collect(),
+        reports: profile.reports,
+    }
 }
 
 /// A warning for a drafted paragraph that repeats a past report word for word.
@@ -1862,6 +1908,47 @@ mod unit {
         let index = ngrams("[ילד] מגיב היטב לתיווך של המבוגר בחדר", 5);
         assert!(shared_run("גם [ילד] מגיב היטב לתיווך של המבוגר", 5, &index).is_some());
         assert!(shared_run("מגיב היטב לתיווך בכל מצב", 5, &index).is_none());
+    }
+
+    #[test]
+    fn a_request_gets_the_items_closest_to_its_material() {
+        let item = |n: usize, kind: StyleKind, text: String| StyleItem {
+            id: format!("i{n}"),
+            section: Some("observation".into()),
+            kind,
+            text,
+            enabled: true,
+            origin: StyleOrigin::Reports,
+            support: 1,
+        };
+        let topics = [
+            "ציור",
+            "שפה",
+            "ריצה",
+            "קשב",
+            "משחק",
+            "שינה",
+            "אכילה",
+            "חברים",
+        ];
+        let mut items: Vec<StyleItem> = topics
+            .iter()
+            .enumerate()
+            .map(|(n, t)| item(n, StyleKind::Template, format!("בתחום ה{t} ניכר {{רמה}}.")))
+            .collect();
+        items.push(item(99, StyleKind::Rule, "משפטים קצרים.".into()));
+        let profile = StyleProfile { items, reports: 3 };
+        let focused = focus(&profile, "observation", "הגננת מספרת על קושי בשינה ובאכילה");
+        let texts: Vec<&str> = focused.items.iter().map(|i| i.text.as_str()).collect();
+        assert_eq!(
+            focused.items.len(),
+            7,
+            "six templates and the rule: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t.contains("שינה")) && texts.iter().any(|t| t.contains("אכילה"))
+        );
+        assert!(texts.contains(&"משפטים קצרים."));
     }
 
     #[test]
