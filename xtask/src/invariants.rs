@@ -50,6 +50,7 @@ pub fn check_all(root: &Path) -> Result<Vec<String>, String> {
     problems.extend(ui_rules(&root.join("apps/desktop/src")));
     problems.extend(tauri_hardening(&root.join("apps/desktop/src-tauri")));
     problems.extend(cleared_payload_construction(&root.join("crates")));
+    problems.extend(advisory_expiry(root));
     problems.extend(no_stray_output(&[
         root.join("crates"),
         root.join("apps/desktop/src-tauri/src"),
@@ -432,6 +433,53 @@ fn cleared_payload_construction(crates: &Path) -> Vec<String> {
     problems
 }
 
+/// Days since 1970-01-01 for a civil date (Howard Hinnant's algorithm).
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// Advisory exceptions in `deny.toml` that carry no `review-by YYYY-MM-DD`, or whose date has
+/// passed. `today` is days since 1970-01-01. (S10: an exception is never forever.)
+pub fn advisory_problems(deny_toml: &str, today: i64) -> Vec<String> {
+    let Ok(re) = Regex::new(r"review-by (\d{4})-(\d{2})-(\d{2})") else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for line in deny_toml.lines().filter(|l| l.contains("id = \"RUSTSEC")) {
+        match re.captures(line) {
+            None => out.push(format!(
+                "advisory exception without a review-by date: {}",
+                line.trim()
+            )),
+            Some(c) => {
+                let n = |i: usize| c[i].parse::<i64>().unwrap_or(0);
+                if days_from_civil(n(1), n(2), n(3)) < today {
+                    out.push(format!(
+                        "advisory exception is past its review date: {}",
+                        line.trim()
+                    ));
+                }
+            }
+        }
+    }
+    out
+}
+
+fn advisory_expiry(root: &Path) -> Vec<String> {
+    let Ok(text) = fs::read_to_string(root.join("deny.toml")) else {
+        return vec!["deny.toml is missing".to_owned()];
+    };
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    advisory_problems(&text, i64::try_from(secs / 86_400).unwrap_or(0))
+}
+
 /// Calls that would write case data where it should not go: the console (a log file, a
 /// terminal history) or the shared temp folder (plain files that outlive the program).
 const STRAY_OUTPUT: &[&str] = &["println!", "eprintln!", "dbg!", "temp_dir("];
@@ -495,6 +543,18 @@ fn no_stray_output(roots: &[PathBuf]) -> Vec<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn advisory_exceptions_need_a_future_review_date() {
+        let today = days_from_civil(2026, 10, 11);
+        let ok = r#"{ id = "RUSTSEC-1", reason = "x (review-by 2027-01-11)" },"#;
+        let old = r#"{ id = "RUSTSEC-2", reason = "x (review-by 2026-01-01)" },"#;
+        let none = r#"{ id = "RUSTSEC-3", reason = "x" },"#;
+        assert!(advisory_problems(ok, today).is_empty());
+        assert_eq!(advisory_problems(old, today).len(), 1);
+        assert_eq!(advisory_problems(none, today).len(), 1);
+        assert_eq!(days_from_civil(1970, 1, 2), 1);
+    }
 
     #[test]
     fn console_output_and_temp_folder_are_found_outside_tests_only() {

@@ -693,6 +693,11 @@ impl Vault {
     }
 
     /// Walk the whole chain again now (not only at unlock).
+    /// The number of the newest log entry (0 when the log is empty), for the rollback seal.
+    pub fn audit_seq(&self) -> i64 {
+        self.header.audit_anchor.as_ref().map_or(0, |a| a.seq)
+    }
+
     pub fn audit_intact(&self) -> Result<bool, VaultError> {
         Ok(matches!(
             audit::verify(
