@@ -29,8 +29,8 @@ pub enum KeySlot {
     Recovery {
         wrapped_mk: String,
     },
-    /// Windows Hello on this computer (D-047): the master key wrapped under a key derived
-    /// from Windows Hello's signature over `challenge` with the key pair named `credential`.
+    /// Windows Hello (D-047), taken out of the program in D-054. Still read, so a vault that
+    /// had it keeps opening with the password; removed from the header on the first unlock.
     WindowsHello {
         credential: String,
         challenge: String,

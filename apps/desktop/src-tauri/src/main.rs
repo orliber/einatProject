@@ -228,8 +228,6 @@ fn main() {
             confirm_recovery_key,
             unlock,
             unlock_with_recovery,
-            unlock_with_hello,
-            set_windows_hello,
             lock,
             touch,
             readiness,
