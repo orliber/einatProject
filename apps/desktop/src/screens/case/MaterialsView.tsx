@@ -30,6 +30,8 @@ export function MaterialsView({ api }: { api: CaseApi }) {
   const [choosing, setChoosing] = useState<CaseInput | null>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** A clean import saved without the review window, with a way back (F7). */
+  const [autoSaved, setAutoSaved] = useState<{ id: string; title: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const input = detail.inputs.find((i) => i.id === selected) ?? null;
@@ -55,7 +57,19 @@ export function MaterialsView({ api }: { api: CaseApi }) {
     setError(null);
     setReading(file.name);
     try {
-      setImporting({ preview: await ipc.importDocument(caseId, file), kind });
+      const preview = await ipc.importDocument(caseId, file);
+      // Nothing hidden, nothing left out, no warnings: there is nothing to review, so it is
+      // saved at once (encrypted, nothing leaves the computer) with "ביטול" beside it.
+      const clean = preview.body.trim() !== "" && preview.auto_hidden.length === 0
+        && preview.left_out.length === 0 && preview.warnings.length === 0;
+      if (clean) {
+        const saved = await ipc.addInput(caseId, kind ?? preview.suggested_kind, preview.title.trim(), preview.body);
+        setAutoSaved({ id: saved.id, title: preview.title.trim() || file.name });
+        await reload();
+      } else {
+        setAutoSaved(null);
+        setImporting({ preview, kind });
+      }
     } catch (e) {
       setError(fail(e as never));
     } finally {
@@ -108,6 +122,19 @@ export function MaterialsView({ api }: { api: CaseApi }) {
     }
   }
 
+  async function undoAutoSave() {
+    if (!autoSaved) return;
+    const { id } = autoSaved;
+    setAutoSaved(null);
+    try {
+      await ipc.deleteInput(caseId, id);
+      await reload();
+      notify("הייבוא בוטל.");
+    } catch (e) {
+      setError(fail(e as never));
+    }
+  }
+
   const sorted = [...detail.inputs].sort((a, b) => b.created_at - a.created_at);
   // Materials in their places: what an assessment rests on, and what is still missing.
   const groups = [...NEEDS, OTHER].map((n) => ({ ...n, items: sorted.filter((i) => n.kinds.includes(i.kind)) }))
@@ -128,6 +155,13 @@ export function MaterialsView({ api }: { api: CaseApi }) {
         </div>
       </div>
       <ErrorLine error={error} />
+      {autoSaved && (
+        <div className="note-sand row" role="status">
+          <span className="grow">"{autoSaved.title}" נשמר בתיק. לא היה בו מה להסתיר מעבר לשמות שכבר בתיק.</span>
+          <button type="button" className="btn btn-small" onClick={() => { setSelected(autoSaved.id); setAutoSaved(null); }}>לבדיקה</button>
+          <button type="button" className="btn btn-small" onClick={() => void undoAutoSave()}>ביטול</button>
+        </div>
+      )}
       {detail.meta.follows && <FollowUpPanel api={api} />}
       <div className="view-body">
         <section className="materials-list" aria-label="רשימת החומרים">
