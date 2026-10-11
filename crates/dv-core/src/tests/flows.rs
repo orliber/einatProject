@@ -1113,6 +1113,25 @@ fn the_requests_use_the_chosen_model_and_speed() {
 // ------------------------------------------------------------ regressions
 
 #[test]
+fn a_model_kept_from_before_it_left_the_allow_list_is_not_put_in_requests() {
+    // The status showed the default model while the request still named the stored one,
+    // which the egress allow-list then refused on every send.
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    core.vault_mut()
+        .unwrap()
+        .set_setting(MODEL_KEY, "claude-retired-1")
+        .unwrap();
+    assert_eq!(core.status().model, dv_ai::DEFAULT_MODEL);
+    let id = approval(&mut core, &case);
+    core.send_section(&id).unwrap();
+    let body: Value =
+        serde_json::from_str(&fake.sent.lock().unwrap().last().cloned().unwrap()).unwrap();
+    assert_eq!(body["model"], dv_ai::DEFAULT_MODEL);
+    assert!(dv_egress::ALLOWED_MODELS.contains(&dv_ai::DEFAULT_MODEL));
+}
+
+#[test]
 fn a_lock_while_a_request_is_on_its_way_does_not_bring_its_approval_back() {
     // A send that failed after the vault locked put its approval back in memory, so it
     // outlived the lock and could be sent again after the next unlock.

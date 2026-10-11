@@ -104,8 +104,11 @@ impl Core {
     /// classifies passages; drafting and consultation weigh more, and "thorough" asks for most.
     pub(crate) fn model_for(&mut self, task: Task) -> Result<ModelConfig, CoreError> {
         let v = self.vault_ref()?;
+        // The same model the status shows: one kept from before it left the allow-list gives
+        // way to the default, rather than every request being refused at the door.
         let model = v
             .setting(MODEL_KEY)?
+            .filter(|m| ALLOWED_MODELS.contains(&m.as_str()))
             .unwrap_or_else(|| dv_ai::DEFAULT_MODEL.to_owned());
         let speed = v
             .setting(SPEED_KEY)?
