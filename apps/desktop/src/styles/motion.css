@@ -1,0 +1,164 @@
+/* Look and feel: press, hover and focus feedback, dialog and list entrances.
+   Presentation only. Frequent keyboard-driven actions get no movement. */
+
+/* Smooth color changes on everything pressable; named properties only. */
+.btn,
+.pill-btn,
+.chip,
+.inst,
+.kind-chip,
+.stage,
+.scope,
+.idea,
+.folder,
+.case-row,
+.case-link,
+.source-chip,
+.topbar-link,
+.link-btn,
+.a4-tool,
+.a4-ai,
+.a4-insert,
+.complete-item,
+.check-row,
+.material,
+.dropzone,
+.side-nav button,
+.side-section,
+.input,
+.textarea,
+.select {
+  transition:
+    background-color var(--dur-hover) var(--ease-out),
+    border-color var(--dur-hover) var(--ease-out),
+    color var(--dur-hover) var(--ease-out),
+    box-shadow var(--dur-hover) var(--ease-out),
+    transform var(--dur-press) var(--ease-out);
+}
+
+/* Pressed state: instant physical feedback. */
+.btn:active:not(:disabled),
+.pill-btn:active:not(:disabled),
+.inst:active:not(:disabled),
+.stage:active,
+.scope:active:not(:disabled),
+.idea:active,
+.source-chip:active,
+.a4-tool:active,
+.a4-ai:active,
+.side-nav button:active {
+  transform: scale(0.97);
+}
+.case-row:active,
+.folder:active,
+.complete-item:active {
+  transform: scale(0.995);
+}
+.link-btn:active,
+.topbar-link:active {
+  opacity: 0.75;
+}
+
+/* Hover only where a real pointer exists (no stuck hover on touch). */
+@media (hover: none), (pointer: coarse) {
+  .btn:hover:not(:disabled) {
+    background: var(--surface);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--primary);
+  }
+}
+
+/* Focus: a soft halo in addition to the ring, fields too. */
+.input:focus-visible,
+.textarea:focus-visible,
+.select:focus-visible {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px var(--primary-soft);
+}
+:focus-visible {
+  transition: outline-offset 120ms var(--ease-out);
+}
+
+/* Dialogs: fade the scrim, scale the panel from slightly smaller (modal: center origin). */
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+}
+.overlay {
+  animation: scrim-in var(--dur-enter) var(--ease-out);
+}
+.overlay > .dialog {
+  transform-origin: center;
+  animation: dialog-in var(--dur-enter) var(--ease-out);
+}
+
+/* Lists: gentle stagger on first render only (first 8 rows, 40ms apart). */
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.cases tbody > tr,
+.materials-list > * {
+  animation: row-in 260ms var(--ease-out) backwards;
+}
+.cases tbody > tr:nth-child(2),
+.materials-list > :nth-child(2) { animation-delay: 40ms; }
+.cases tbody > tr:nth-child(3),
+.materials-list > :nth-child(3) { animation-delay: 80ms; }
+.cases tbody > tr:nth-child(4),
+.materials-list > :nth-child(4) { animation-delay: 120ms; }
+.cases tbody > tr:nth-child(5),
+.materials-list > :nth-child(5) { animation-delay: 160ms; }
+.cases tbody > tr:nth-child(6),
+.materials-list > :nth-child(6) { animation-delay: 200ms; }
+.cases tbody > tr:nth-child(7),
+.materials-list > :nth-child(7) { animation-delay: 240ms; }
+.cases tbody > tr:nth-child(n + 8),
+.materials-list > :nth-child(n + 8) { animation-delay: 280ms; }
+
+/* Type: sharper numerals and wrapping. */
+body {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+p,
+li {
+  text-wrap: pretty;
+}
+
+/* Reduced motion: keep fades and color changes, drop movement. */
+@media (prefers-reduced-motion: reduce) {
+  .btn:active:not(:disabled),
+  .pill-btn:active:not(:disabled),
+  .inst:active:not(:disabled),
+  .stage:active,
+  .scope:active:not(:disabled),
+  .idea:active,
+  .source-chip:active,
+  .a4-tool:active,
+  .a4-ai:active,
+  .side-nav button:active,
+  .case-row:active,
+  .folder:active,
+  .complete-item:active {
+    transform: none;
+  }
+  .overlay > .dialog {
+    animation: scrim-in var(--dur-enter) linear;
+  }
+  .cases tbody > tr,
+  .materials-list > * {
+    animation: scrim-in var(--dur-enter) linear backwards;
+    animation-delay: 0ms !important;
+  }
+}
