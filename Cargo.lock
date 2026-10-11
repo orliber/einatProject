@@ -1029,6 +1029,7 @@ name = "dv-ai"
 version = "0.5.1"
 dependencies = [
  "dv-domain",
+ "proptest",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
