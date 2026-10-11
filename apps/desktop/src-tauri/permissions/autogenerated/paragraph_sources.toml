@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-paragraph-sources"
+description = "Enables the paragraph_sources command without any pre-configured scope."
+commands.allow = ["paragraph_sources"]
+
+[[permission]]
+identifier = "deny-paragraph-sources"
+description = "Denies the paragraph_sources command without any pre-configured scope."
+commands.deny = ["paragraph_sources"]
