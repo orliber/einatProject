@@ -1,0 +1,24 @@
+name: fuzz-nightly
+
+# Long mutation-fuzz run over every document reader (S3, D-051). The short run is part of the
+# ordinary test suite; this one only looks for what the short run missed.
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Fuzz the document readers
+        env:
+          DV_FUZZ_ROUNDS: "300000"
+          DV_FUZZ_SEED: ${{ github.run_number }}
+        run: cargo test --release -p dv-ingest --test fuzz -- --nocapture

@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use cargo_metadata::{DependencyKind, MetadataCommand, PackageId};
 use regex::Regex;
@@ -50,6 +50,10 @@ pub fn check_all(root: &Path) -> Result<Vec<String>, String> {
     problems.extend(ui_rules(&root.join("apps/desktop/src")));
     problems.extend(tauri_hardening(&root.join("apps/desktop/src-tauri")));
     problems.extend(cleared_payload_construction(&root.join("crates")));
+    problems.extend(no_stray_output(&[
+        root.join("crates"),
+        root.join("apps/desktop/src-tauri/src"),
+    ]));
     Ok(problems)
 }
 
@@ -428,10 +432,80 @@ fn cleared_payload_construction(crates: &Path) -> Vec<String> {
     problems
 }
 
+/// Calls that would write case data where it should not go: the console (a log file, a
+/// terminal history) or the shared temp folder (plain files that outlive the program).
+const STRAY_OUTPUT: &[&str] = &["println!", "eprintln!", "dbg!", "temp_dir("];
+
+/// The offending lines of one production source file; test code (from `#[cfg(test)]` on) and
+/// comments are not looked at.
+pub fn stray_output(text: &str) -> Vec<(usize, &'static str)> {
+    let mut found = Vec::new();
+    for (n, line) in text.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("#[cfg(test)]") {
+            break;
+        }
+        if trimmed.starts_with("//") {
+            continue;
+        }
+        for what in STRAY_OUTPUT {
+            if line.contains(what) {
+                found.push((n + 1, *what));
+            }
+        }
+    }
+    found
+}
+
+/// No console output and no shared temp folder in production code (S1).
+fn no_stray_output(roots: &[PathBuf]) -> Vec<String> {
+    let mut problems = Vec::new();
+    let mut stack: Vec<PathBuf> = roots.to_vec();
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if path.is_dir() {
+                // Test folders and the build tool's own sources may print.
+                if name != "tests" && name != "target" && name != "xtask" {
+                    stack.push(path);
+                }
+            } else if path.extension().is_some_and(|e| e == "rs")
+                && !name.starts_with("tests")
+                && !name.ends_with("_tests.rs")
+                && path.components().all(|c| c.as_os_str() != "bin")
+            {
+                let text = fs::read_to_string(&path).unwrap_or_default();
+                for (line, what) in stray_output(&text) {
+                    problems.push(format!(
+                        "{}:{line}: `{what}` in production code",
+                        path.display()
+                    ));
+                }
+            }
+        }
+    }
+    problems
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn console_output_and_temp_folder_are_found_outside_tests_only() {
+        let src = "fn a() {\n    println!(\"x\");\n}\n// dbg!(y)\n#[cfg(test)]\nmod t { fn b() { eprintln!(\"z\"); } }\n";
+        assert_eq!(stray_output(src), vec![(2, "println!")]);
+        assert_eq!(
+            stray_output("let d = std::env::temp_dir();"),
+            vec![(1, "temp_dir(")]
+        );
+        assert!(stray_output("let ok = 1;").is_empty());
+    }
 
     fn graph(edges: &[(&str, &str)]) -> Graph {
         let mut g = Graph::default();
