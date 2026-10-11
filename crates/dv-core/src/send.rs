@@ -73,7 +73,20 @@ impl Core {
                     case_opt,
                     &serde_json::json!({ "codes": codes }),
                 )?;
-                prepared.blocked = blocked.reasons;
+                let mut reasons = blocked.reasons;
+                let v = self.vault_ref()?;
+                let code_of = |case: &str| v.case_meta(case).map(|m| m.code).unwrap_or_default();
+                for a in refused_auto_names(data, &reasons, &code_of) {
+                    if !prepared
+                        .auto_hidden
+                        .iter()
+                        .any(|x| x.tag == a.tag && normalize(&x.token) == normalize(&a.token))
+                    {
+                        prepared.auto_hidden.push(a);
+                    }
+                }
+                locate_refused_names(data, &mut reasons, &code_of);
+                prepared.blocked = reasons;
             }
         }
         Ok(false)

@@ -273,8 +273,21 @@ impl Core {
         tag: &str,
     ) -> Result<(), CoreError> {
         let v = self.vault_mut()?;
-        let ids = v.identities(case_id)?;
         let tok = normalize(token);
+        // A word the program kept as a name in another case (OTHER_CASE_TAG on the card):
+        // it leaves that case's names, and is "not a name" there from now on.
+        if tag == OTHER_CASE_TAG {
+            for i in v.all_identities()?.into_iter().filter(|i| {
+                i.case_id != case_id
+                    && i.source != IdentitySource::Manual
+                    && normalize(&i.value) == tok
+            }) {
+                v.remove_identity(&i.case_id, &i.id)?;
+                v.mark_not_a_name(Some(&i.case_id), &tok)?;
+            }
+            return Ok(());
+        }
+        let ids = v.identities(case_id)?;
         // A spelling of the name rather than the name ("אלוו", kept from a scan, or "נואם"
         // next to "נועם"): only that spelling comes back, the name stays hidden.
         if !ids.iter().any(|i| {
