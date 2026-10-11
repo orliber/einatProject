@@ -15,7 +15,7 @@
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 11px 14px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -69,13 +69,13 @@
   flex-wrap: wrap;
 }
 .material-head h2 {
-  font-size: 20px;
+  font-size: var(--text-xl);
 }
 .material-text {
   flex-grow: 1;
   overflow: auto;
-  padding: 18px 22px;
-  font-size: 16.5px;
+  padding: 18px 24px;
+  font-size: var(--text-md);
   line-height: 1.8;
   white-space: pre-wrap;
 }
@@ -88,7 +88,7 @@
   padding: 24px;
 }
 .write-area {
-  font-size: 16px;
+  font-size: var(--text-md);
   min-height: 280px;
 }
 .empty-materials .btn {
@@ -140,7 +140,7 @@
 }
 .sections-part legend {
   font-weight: 700;
-  font-size: 14px;
+  font-size: var(--text-base);
   color: var(--ink-muted);
   margin-bottom: 4px;
 }
@@ -202,7 +202,7 @@
   display: grid;
   place-items: center;
   font-weight: 700;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 .have .check-mark {
   background: var(--ok-soft);
@@ -231,17 +231,17 @@
 }
 .compare-table {
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: var(--text-base);
   width: 100%;
 }
 .compare-table th,
 .compare-table td {
-  padding: 5px 8px;
+  padding: 4px 8px;
   border-bottom: 1px solid var(--line);
   text-align: start;
 }
 .compare-table th {
-  font-size: 12.5px;
+  font-size: var(--text-xs);
   color: var(--ink-muted);
   font-weight: 600;
 }
@@ -276,7 +276,7 @@
 .slot-add {
   width: 32px;
   height: 32px;
-  font-size: 18px;
+  font-size: var(--text-lg);
 }
 .slot.drop {
   border: 2px solid var(--primary);

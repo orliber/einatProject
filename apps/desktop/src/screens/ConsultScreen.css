@@ -20,7 +20,7 @@
   gap: 16px;
 }
 .consult-side h1 {
-  font-size: 30px;
+  font-size: var(--text-3xl);
 }
 .consult-legend {
   margin-bottom: 8px;
@@ -54,7 +54,7 @@
 }
 .scope.on {
   border: 2px solid var(--primary);
-  padding: 11px 13px;
+  padding: 12px 13px;
   background: var(--primary-soft);
 }
 .scope:disabled:not(.on) {
@@ -107,10 +107,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 15px;
+  font-size: var(--text-base);
 }
 .history-meta {
-  font-size: 12.5px;
+  font-size: var(--text-xs);
   color: var(--ink-muted);
 }
 .history-delete {
@@ -150,7 +150,7 @@
 .consult-body {
   flex-grow: 1;
   overflow: auto;
-  padding: 22px 26px;
+  padding: 24px 26px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -204,18 +204,18 @@
   line-height: 1.75;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 16px;
+  font-size: var(--text-md);
 }
 .chat-bubble-me {
   background: var(--primary);
-  color: #fff;
+  color: var(--on-primary);
   border-radius: 18px 18px 6px 18px;
 }
 .chat-bubble-ai {
   background: var(--surface-alt);
   border: 1px solid var(--line);
   border-radius: 18px 18px 18px 6px;
-  font-size: 16.5px;
+  font-size: var(--text-md);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -236,10 +236,10 @@
   background: var(--primary-soft);
   color: var(--primary);
   font-weight: 700;
-  font-size: 15px;
+  font-size: var(--text-base);
 }
 .chat-meta {
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--ink-muted);
   display: flex;
   gap: 8px;
@@ -248,7 +248,7 @@
   padding-inline: 6px;
 }
 .chat-copy {
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 .chat-typing {
   flex-direction: row;
@@ -311,7 +311,7 @@
   resize: none;
   background: transparent;
   font: inherit;
-  font-size: 16px;
+  font-size: var(--text-md);
   line-height: 1.5;
   padding: 8px 0;
   min-height: 24px;
@@ -325,7 +325,7 @@
   border-radius: 50%;
   border: 0;
   background: var(--primary);
-  color: #fff;
+  color: var(--on-primary);
   display: grid;
   place-items: center;
   cursor: pointer;

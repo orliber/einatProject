@@ -26,7 +26,7 @@
 }
 .col-title {
   font-family: var(--font-body);
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--ink-muted);
 }
 .col-out {
@@ -38,7 +38,7 @@
   gap: 4px;
 }
 .review-text {
-  font-size: 16.5px;
+  font-size: var(--text-md);
   line-height: 1.8;
   white-space: pre-wrap;
 }
@@ -55,7 +55,7 @@
   gap: 2px;
 }
 .check span {
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 .check.ok {
   background: var(--ok-soft);
@@ -93,7 +93,7 @@
   gap: 2px;
 }
 .sum-mark {
-  font-size: 18px;
+  font-size: var(--text-lg);
   font-weight: 700;
   color: var(--ok);
 }
@@ -108,21 +108,21 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 22px 24px;
+  padding: 24px 24px;
   background: var(--surface);
   border: 2px solid var(--warn-line);
   border-radius: var(--radius-lg);
 }
 .question-title {
-  font-size: 20px;
+  font-size: var(--text-xl);
 }
 .question-context {
-  font-size: 18px;
+  font-size: var(--text-lg);
   line-height: 1.7;
 }
 .question-context mark {
-  background: #fbe3b8;
-  padding: 0 3px;
+  background: var(--mark);
+  padding: 0 4px;
   border-radius: 4px;
 }
 .question-actions {
@@ -161,7 +161,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 15px;
+  font-size: var(--text-base);
 }
 .review-checks li {
   display: flex;

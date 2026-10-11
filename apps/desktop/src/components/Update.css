@@ -8,7 +8,7 @@
   background: var(--primary-soft);
   color: var(--primary);
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 .update-chip:hover {
   background: var(--surface);

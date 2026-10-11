@@ -14,7 +14,7 @@
   font-weight: 700;
 }
 .progress-time {
-  font-size: 14px;
+  font-size: var(--text-base);
   color: var(--ink-muted);
   font-variant-numeric: tabular-nums;
 }

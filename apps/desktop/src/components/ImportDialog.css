@@ -22,17 +22,17 @@
   border-radius: 999px;
   border: 1px solid var(--line-strong);
   background: var(--surface);
-  font-size: 14px;
+  font-size: var(--text-base);
   cursor: pointer;
 }
 .kind-chip input {
   margin: 0;
-  accent-color: #fff;
+  accent-color: var(--on-primary);
 }
 .kind-chip.on {
   background: var(--primary);
   border-color: var(--primary);
-  color: #fff;
+  color: var(--on-primary);
   font-weight: 600;
 }
 .kind-chip:focus-within {
@@ -46,7 +46,7 @@
   padding: 10px 12px;
 }
 .left-out-line {
-  font-size: 13px;
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
 .import-text {
@@ -65,7 +65,7 @@
 }
 .import-body {
   padding: 16px 20px;
-  font-size: 16px;
+  font-size: var(--text-md);
   line-height: 1.8;
   white-space: pre-wrap;
   overflow: auto;
@@ -79,5 +79,5 @@
 .import-edit textarea {
   flex-grow: 1;
   min-height: 380px;
-  font-size: 16px;
+  font-size: var(--text-md);
 }
