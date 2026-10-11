@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 
 use super::*;
 
+mod flows;
 mod sample_flows;
 mod surfaces;
 
