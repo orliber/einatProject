@@ -460,7 +460,8 @@ fn checked(sheet: &ScoreSheet) -> Result<Checked<'_>, String> {
         let Some(measure) = inst.measures.iter().find(|x| x.key == e.measure) else {
             return Err(format!("מדד לא מוכר: {}", e.measure));
         };
-        if e.value < measure.min || e.value > measure.max {
+        // Written as "not inside" so that NaN, which compares false with everything, is refused.
+        if !(measure.min..=measure.max).contains(&e.value) {
             return Err(format!(
                 "{}: הציון {} מחוץ לטווח האפשרי ({}–{})",
                 measure.name_he,
