@@ -334,6 +334,7 @@ impl Core {
             model,
             api_key,
             transport: self.transport.clone(),
+            session: self.session,
         })
     }
 
@@ -399,8 +400,12 @@ impl Core {
         Ok(())
     }
 
-    /// A failed send is not a send: the approval stays valid for a retry.
+    /// A failed send is not a send: the approval stays valid for a retry. Not when the vault
+    /// locked meanwhile: a lock wipes every approval, including one that was on its way out.
     pub(crate) fn restore_pending(&mut self, out: Outgoing) {
+        if self.vault.is_none() || out.session != self.session {
+            return;
+        }
         self.pending
             .insert(out.pending.payload.sha256().to_owned(), out.pending);
     }

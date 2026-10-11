@@ -401,6 +401,8 @@ pub struct Outgoing {
     model: String,
     api_key: Option<zeroize::Zeroizing<String>>,
     transport: Option<Arc<dyn Transport>>,
+    /// The session it was approved in (`Core::session`): a lock in between ends it.
+    session: u64,
 }
 
 impl std::fmt::Debug for Outgoing {
@@ -470,6 +472,8 @@ pub struct Core {
     seal_dir: Option<PathBuf>,
     /// Set at unlock when the vault is older than this computer has seen (S6).
     rollback_warning: Option<String>,
+    /// Counts the locks. An approval taken out before a lock never comes back after it.
+    session: u64,
 }
 
 impl std::fmt::Debug for Core {

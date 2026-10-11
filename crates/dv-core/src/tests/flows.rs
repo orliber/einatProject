@@ -1109,3 +1109,59 @@ fn the_requests_use_the_chosen_model_and_speed() {
         );
     }
 }
+
+// ------------------------------------------------------------ regressions
+
+#[test]
+fn a_lock_while_a_request_is_on_its_way_does_not_bring_its_approval_back() {
+    // A send that failed after the vault locked put its approval back in memory, so it
+    // outlived the lock and could be sent again after the next unlock.
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let offline = || Err(CoreError::Egress(EgressError::Offline));
+
+    // Locked while it was out, and still locked when the failure arrives.
+    let id = approval(&mut core, &case);
+    let out = core.begin_send(&id).unwrap();
+    core.lock();
+    assert!(core.finish_section(out, offline()).is_err());
+    core.unlock(PASSWORD).unwrap();
+    assert!(matches!(
+        core.send_section(&id),
+        Err(CoreError::NotFound(_))
+    ));
+
+    // Locked and opened again before the failure arrives (the computer slept and woke).
+    let id = approval(&mut core, &case);
+    let out = core.begin_send(&id).unwrap();
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert!(core.finish_section(out, offline()).is_err());
+    assert!(matches!(
+        core.send_section(&id),
+        Err(CoreError::NotFound(_))
+    ));
+
+    // The same for a consultation.
+    let ask = core
+        .prepare_consult(Some(&case), None, "איך מנסחים המלצה?")
+        .unwrap()
+        .approval_id
+        .unwrap();
+    let out = core.begin_send(&ask).unwrap();
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert!(core.finish_consult(out, offline()).is_err());
+    assert!(matches!(
+        core.send_consult(&ask),
+        Err(CoreError::NotFound(_))
+    ));
+    assert!(fake.sent.lock().unwrap().is_empty());
+
+    // Without a lock in between, a failure still keeps the approval for a retry.
+    let id = approval(&mut core, &case);
+    let out = core.begin_send(&id).unwrap();
+    assert!(core.finish_section(out, offline()).is_err());
+    core.send_section(&id).unwrap();
+    assert_eq!(fake.sent.lock().unwrap().len(), 1);
+}
