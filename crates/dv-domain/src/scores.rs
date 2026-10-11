@@ -185,6 +185,8 @@ pub fn instruments() -> Vec<Instrument> {
     .iter()
     .map(|(k, n)| {
         let mut x = m(k, n, "", "סולמות תסמונת", TConcern);
+        // Achenbach syndrome T scores start at 50: a lower one cannot exist and is refused.
+        x.min = 50.0;
         x.bands = cbcl_syndrome_bands();
         x
     })

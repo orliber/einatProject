@@ -3184,7 +3184,7 @@
         "abbr": "",
         "group": "סולמות תסמונת",
         "scale": "t_concern",
-        "min": 20.0,
+        "min": 50.0,
         "max": 100.0,
         "bands": [
           {
@@ -3213,7 +3213,7 @@
         "abbr": "",
         "group": "סולמות תסמונת",
         "scale": "t_concern",
-        "min": 20.0,
+        "min": 50.0,
         "max": 100.0,
         "bands": [
           {
@@ -3242,7 +3242,7 @@
         "abbr": "",
         "group": "סולמות תסמונת",
         "scale": "t_concern",
-        "min": 20.0,
+        "min": 50.0,
         "max": 100.0,
         "bands": [
           {
@@ -3271,7 +3271,7 @@
         "abbr": "",
         "group": "סולמות תסמונת",
         "scale": "t_concern",
-        "min": 20.0,
+        "min": 50.0,
         "max": 100.0,
         "bands": [
           {
@@ -3300,7 +3300,7 @@
         "abbr": "",
         "group": "סולמות תסמונת",
         "scale": "t_concern",
-        "min": 20.0,
+        "min": 50.0,
         "max": 100.0,
         "bands": [
           {
@@ -3329,7 +3329,7 @@
         "abbr": "",
         "group": "סולמות תסמונת",
         "scale": "t_concern",
-        "min": 20.0,
+        "min": 50.0,
         "max": 100.0,
         "bands": [
           {
@@ -3358,7 +3358,7 @@
         "abbr": "",
         "group": "סולמות תסמונת",
         "scale": "t_concern",
-        "min": 20.0,
+        "min": 50.0,
         "max": 100.0,
         "bands": [
           {
