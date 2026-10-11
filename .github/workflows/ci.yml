@@ -44,7 +44,9 @@ jobs:
         run: sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-heb
       # The sample cases' PDFs (tests/samples/make_samples.py) go through the whole flow.
       - name: LibreOffice for the sample PDFs
-        run: sudo apt-get install -y --no-install-recommends libreoffice-writer-nogui fonts-dejavu-core
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libreoffice-writer-nogui fonts-dejavu-core
       - run: cargo test
         env:
           DV_REQUIRE_OCR: "1"
