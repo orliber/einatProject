@@ -200,6 +200,10 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
                     {open === key ? "הסתרה" : "מה יוצא?"}
                   </button>
                 )}
+                {st === "failed" && p.approval_id && (
+                  <button type="button" className="btn btn-small" disabled={running}
+                    onClick={() => { setError(null); void writeOne(key, p.approval_id ?? ""); }}>נסי שוב</button>
+                )}
                 {st === "done" && <button type="button" className="link-small" onClick={() => { onClose(); go({ name: "case", id: api.caseId, view: "report" }); }}>לדוח</button>}
               </div>
               {st === "writing" && started[key] !== undefined && <ProgressLine started={started[key]} estimate={draftMs} label="" approval={api.jobs.find((j) => j.section === key)?.approval} />}
