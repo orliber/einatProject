@@ -1,0 +1,610 @@
+//! Building a request (through the privacy gate), sending it, and storing the answer.
+
+use super::*;
+
+impl Core {
+    /// Clear the request, or keep the names the filter found first. `Ok(true)`: new names
+    /// were kept with the case and the caller builds the request again, so every text of it
+    /// carries their tags (a name found in two texts gets one tag, and Claude's answer can
+    /// be restored). `may_learn` is false on that second build: anything new then blocks.
+    pub(crate) fn gate(
+        &mut self,
+        data: &PrivacyData,
+        body: &Value,
+        kind: PendingKind,
+        prepared: &mut Prepared,
+        may_learn: bool,
+    ) -> Result<bool, CoreError> {
+        let found = found_names(data, &prepared.auto_hidden);
+        if may_learn && !data.case_id.is_empty() && !found.is_empty() {
+            self.vault_mut()?.add_found_names(&data.case_id, &found)?;
+            return Ok(true);
+        }
+        let suspects = prepared.suspects.len();
+        let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
+        let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
+        let is_name = |t: &str| data.is_name.contains(&v.token_hmac(t));
+        let past = |t: &str| !data.past.is_empty() && data.past.contains(&v.token_hmac(t));
+        let ctx = PrivacyContext {
+            case_id: &data.case_id,
+            identities: &data.identities,
+            practitioner: &data.practitioner,
+            allowlisted: &allow,
+            confirmed_names: &is_name,
+            past_names: &past,
+            today: today(),
+        };
+        let mut case_tags: HashSet<String> = data
+            .identities
+            .iter()
+            .filter(|i| i.case_id == data.case_id)
+            .map(|i| i.tag.clone())
+            .collect();
+        // A consultation without a case has nowhere to keep names: the tags the filter gave
+        // them are this request's own.
+        if data.case_id.is_empty() {
+            case_tags.extend(
+                prepared
+                    .auto_hidden
+                    .iter()
+                    .filter(|a| matches!(a.kind, AutoKind::Name | AutoKind::OtherCase))
+                    .map(|a| a.tag.clone()),
+            );
+        }
+        let req = GateRequest {
+            body,
+            ctx: &ctx,
+            case_tags: &case_tags,
+            unresolved_suspects: suspects,
+            canaries: &[],
+            max_bytes: MAX_REQUEST_BYTES,
+        };
+        match clear(&req) {
+            Ok(payload) => {
+                let id = payload.sha256().to_owned();
+                prepared.approval_id = Some(id.clone());
+                self.pending.insert(id, Pending { payload, kind });
+            }
+            Err(blocked) => {
+                let codes: Vec<String> = blocked.reasons.iter().map(|r| r.code.clone()).collect();
+                let case_opt = (!data.case_id.is_empty()).then_some(data.case_id.as_str());
+                self.vault_mut()?.record(
+                    AuditEvent::Blocked,
+                    case_opt,
+                    &serde_json::json!({ "codes": codes }),
+                )?;
+                prepared.blocked = blocked.reasons;
+            }
+        }
+        Ok(false)
+    }
+
+    /// Build the request for one section and everything the review screen needs.
+    pub fn prepare_section(
+        &mut self,
+        case_id: &str,
+        section_key: &str,
+        instruction: &str,
+    ) -> Result<Prepared, CoreError> {
+        self.prepare_section_replacing(case_id, section_key, instruction, None)
+    }
+
+    /// A section request whose answer rewrites one proposed paragraph (`replaces`), or, with
+    /// `None`, becomes the section's draft in place of the paragraphs not approved yet: one
+    /// draft at a time, never a pile of versions.
+    pub fn prepare_section_replacing(
+        &mut self,
+        case_id: &str,
+        section_key: &str,
+        instruction: &str,
+        replaces: Option<&str>,
+    ) -> Result<Prepared, CoreError> {
+        self.prepare_section_once(case_id, section_key, instruction, replaces, false)
+    }
+
+    pub(crate) fn prepare_section_once(
+        &mut self,
+        case_id: &str,
+        section_key: &str,
+        instruction: &str,
+        replaces: Option<&str>,
+        learned: bool,
+    ) -> Result<Prepared, CoreError> {
+        let structure =
+            ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
+        let letter = Letter::of(section_key);
+        let section = match letter {
+            Some(l) => dv_domain::ReportSection {
+                key: section_key.to_owned(),
+                title: l.title().to_owned(),
+                inputs: Vec::new(),
+                about: String::new(),
+            },
+            None => structure
+                .section(section_key)
+                .ok_or_else(|| CoreError::NotFound(section_key.to_owned()))?
+                .clone(),
+        };
+        let model = self.model_config()?;
+        let data = self.privacy_data(case_id)?;
+        let demo_mode = self.demo_mode()?;
+
+        let (input, review, sources) = {
+            let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
+            let meta = v.case_meta(case_id)?;
+            if meta.consent.is_none() {
+                return Err(CoreError::ConsentMissing);
+            }
+            let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
+            let is_name = |t: &str| data.is_name.contains(&v.token_hmac(t));
+            let past = |t: &str| !data.past.is_empty() && data.past.contains(&v.token_hmac(t));
+            let ctx = PrivacyContext {
+                case_id: &data.case_id,
+                identities: &data.identities,
+                practitioner: &data.practitioner,
+                allowlisted: &allow,
+                confirmed_names: &is_name,
+                past_names: &past,
+                today: today(),
+            };
+            let run = |t: &str| filter(t, &ctx).map_err(|e| CoreError::Internal(e.to_string()));
+            let fixed_title = |sec: &dv_domain::ReportSection| model_title(sec, &ctx);
+            let mut review = Review::default();
+            let mut tagged_sources = Vec::new();
+            let mut source_rows = Vec::new();
+            let derived = DERIVED_SECTIONS.contains(&section_key) || letter.is_some();
+            if !derived {
+                for inp in v.inputs(case_id)? {
+                    // D-022: the table, the sorting, and Einat's choice decide what goes here.
+                    let table = sorting::table_for(&structure, inp.kind);
+                    let count = passage_ranges(&inp.content).len();
+                    let Some(feed) =
+                        sorting::routing_of(v, case_id, &inp.id)?.feed(section_key, &table, count)
+                    else {
+                        continue;
+                    };
+                    let sid = format!("S{}", tagged_sources.len() + 1);
+                    let title = run(&inp.title)?;
+                    let content = sorting::section_text(&inp.content, &feed, &ctx)?;
+                    let kind = match feed {
+                        dv_domain::Feed::Whole => inp.kind.label_he().to_owned(),
+                        dv_domain::Feed::Passages(_) => {
+                            format!("{} · קטעים שנבחרו לסעיף", inp.kind.label_he())
+                        }
+                    };
+                    // A title with nothing to hide is shown as the source's label, not as a part.
+                    if title.original_segments.iter().any(|s| s.mark.is_some()) {
+                        review.add(format!("{sid} · {kind} · כותרת"), &title);
+                        review.add(format!("{sid} · {kind}"), &content);
+                    } else {
+                        review.add(format!("{sid} · {kind} · {}", title.tagged), &content);
+                    }
+                    tagged_sources.push(TaggedInput {
+                        input_id: inp.id.clone(),
+                        kind_label: inp.kind.label_he().to_owned(),
+                        title_tagged: title.tagged,
+                        content_tagged: content.tagged.clone(),
+                    });
+                    source_rows.push((sid, inp.id, content.tagged));
+                }
+            }
+            let mut approved_context = Vec::new();
+            if derived {
+                // A letter gets only the sections it is written from (EX-4): the school letter
+                // only the recommendations, never the background or the diagnoses.
+                let wanted = |key: &str| match letter {
+                    Some(l) => l.written_from().contains(&key),
+                    None => key != section_key && !DERIVED_SECTIONS.contains(&key),
+                };
+                for s in structure.sections().filter(|s| wanted(&s.key)) {
+                    let text: Vec<String> = v
+                        .drafts(case_id, &s.key)?
+                        .into_iter()
+                        .filter(|d| d.status == DraftStatus::Approved)
+                        .map(|d| d.text_tagged)
+                        .collect();
+                    if !text.is_empty() {
+                        let out = run(&text.join("\n"))?;
+                        review.add(format!("סעיף מאושר · {}", s.title), &out);
+                        approved_context.push((fixed_title(s)?, out.tagged));
+                    }
+                }
+            }
+            // Nothing approved yet: there is nothing to write it from, so nothing is sent.
+            if letter.is_some() && approved_context.is_empty() {
+                return Err(CoreError::Refused(
+                    "המכתב נכתב מתוך ההמלצות שאישרת בדוח, ועוד אין המלצות מאושרות. מאשרים קודם את סעיף ההמלצות.".to_owned(),
+                ));
+            }
+            if derived && approved_context.is_empty() {
+                return Err(CoreError::Refused(
+                    "הסעיף הזה נכתב מתוך הסעיפים שכבר אישרת, ועוד לא אישרת אף סעיף. מאשרים קודם את הטיוטות בסעיפים האחרים, ואז חוזרים לכאן."
+                        .to_owned(),
+                ));
+            }
+            // The current draft may contain manual edits, so it goes through review too.
+            let mut current = Vec::new();
+            for d in v
+                .drafts(case_id, section_key)?
+                .into_iter()
+                .filter(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved))
+            {
+                let out = run(&d.text_tagged)?;
+                review.add("הטיוטה הנוכחית".to_owned(), &out);
+                current.push(out.tagged);
+            }
+            // The conversation so far is not shown again, but what the filter hides in it is
+            // kept like everything else, so its tags belong to the case.
+            let mut history: Vec<TaggedTurn> = Vec::new();
+            for m in v.messages(case_id, section_key)? {
+                let o = run(&m.text_tagged)?;
+                review.note_hidden(&o);
+                history.push(TaggedTurn {
+                    role: if m.role == ChatRole::User {
+                        "user".to_owned()
+                    } else {
+                        "assistant".to_owned()
+                    },
+                    text_tagged: o.tagged,
+                });
+            }
+            let instr = run(instruction)?;
+            review.add("הבקשה שלך".to_owned(), &instr);
+            // Her approved style profile (D-043), as it goes out with this case's names hidden.
+            let style_profile = style::style_for_request(v, &ctx, section_key)?;
+            if let Some(text) = &style_profile {
+                review.add_context("פרופיל הסגנון שלך".to_owned(), &run(text)?);
+            }
+            let input = SectionInput {
+                section_key: section.key.clone(),
+                section_title: fixed_title(&section)?,
+                age: meta.age.map(dv_domain::Age::display),
+                gender: meta.child_gender,
+                sources: tagged_sources,
+                approved_context,
+                current_draft: current,
+                history,
+                instruction_tagged: instr.tagged.clone(),
+                style_profile,
+            };
+            let approved = input
+                .approved_context
+                .iter()
+                .map(|(_, t)| t.clone())
+                .collect::<Vec<_>>();
+            let sources = (
+                section.key.clone(),
+                instr.tagged,
+                instr.hidden.clone(),
+                source_rows,
+                approved,
+            );
+            (input, review, sources)
+        };
+
+        let nonce = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
+        let (body, _refs) = dv_ai::build_section_request(&model, &input, &nonce);
+        let mut prepared = review.into_case_prepared(demo_mode, &data);
+        let (key, instruction_tagged, instr_hidden, rows, approved) = sources;
+        let kind = PendingKind::Section {
+            case_id: case_id.to_owned(),
+            section_key: key,
+            instruction_tagged,
+            hidden: instr_hidden,
+            sources: rows,
+            approved,
+            replaces: replaces.map(str::to_owned),
+        };
+        if self.gate(&data, &body, kind, &mut prepared, !learned)? {
+            return self.prepare_section_once(case_id, section_key, instruction, replaces, true);
+        }
+        Ok(prepared)
+    }
+
+    /// Take an approved request out of the core so it can be sent without holding the
+    /// session (the app stays responsive while Claude answers).
+    pub fn begin_send(&mut self, approval_id: &str) -> Result<Outgoing, CoreError> {
+        let pending = self
+            .pending
+            .get(approval_id)
+            .ok_or_else(|| CoreError::NotFound("האישור פג. יש להכין את הבקשה מחדש.".to_owned()))?;
+        let model = serde_json::from_slice::<Value>(pending.payload.body())
+            .ok()
+            .and_then(|b| b["model"].as_str().map(str::to_owned))
+            .unwrap_or_default();
+        let provider = provider_of(&model);
+        let api_key = key_of(self.vault_ref()?, provider)?;
+        // ChatGPT, Gemini and Mistral keep what they receive unless she has a written zero-retention
+        // agreement with them; without her confirmation of one, nothing goes to them (D-040).
+        if api_key.is_some()
+            && matches!(
+                provider,
+                Provider::OpenAi | Provider::Gemini | Provider::Mistral
+            )
+        {
+            let confirmed = self
+                .vault_ref()?
+                .setting(&format!("{ZDR_PREFIX}{}", provider.id()))?
+                .is_some_and(|s| s.parse::<i64>().is_ok());
+            if !confirmed {
+                return Err(CoreError::Refused(format!(
+                    "לא נשלח: אין אישור על הסכם אפס שמירת מידע (ZDR) עם {}. אפשר לאשר בהגדרות, או לבחור Claude או מודל מקומי.",
+                    provider.display_name()
+                )));
+            }
+        }
+        // Demo mode costs nothing; anything else stops at the monthly ceiling she set.
+        if api_key.is_some() || self.transport.is_some() {
+            self.refuse_over_cap()?;
+        }
+        let pending = self
+            .pending
+            .remove(approval_id)
+            .ok_or_else(|| CoreError::NotFound("האישור פג. יש להכין את הבקשה מחדש.".to_owned()))?;
+        Ok(Outgoing {
+            pending,
+            model,
+            api_key,
+            transport: self.transport.clone(),
+        })
+    }
+
+    pub(crate) fn refuse_over_cap(&mut self) -> Result<(), CoreError> {
+        let v = self.vault_ref()?;
+        let Some(cap) = v
+            .setting(usage::CAP_KEY)?
+            .and_then(|s| s.parse::<u32>().ok())
+        else {
+            return Ok(());
+        };
+        let month = usage::Month::parse(v.setting(&usage::this_month_key())?.as_deref());
+        if month.reached(cap) {
+            return Err(CoreError::Refused(format!(
+                "הגעת לתקרת ההוצאה החודשית שקבעת (${cap}). אפשר להעלות אותה בהגדרות, תחת \"שימוש ועלות\"."
+            )));
+        }
+        Ok(())
+    }
+
+    /// Count the tokens of an answer toward this month (numbers only). Never fails a send:
+    /// the answer has arrived and is worth more than the count.
+    pub(crate) fn note_usage(&mut self, payload: &ClearedPayload, answer: &Value, demo: bool) {
+        if demo {
+            return;
+        }
+        let model = serde_json::from_slice::<Value>(payload.body())
+            .ok()
+            .and_then(|b| b["model"].as_str().map(str::to_owned))
+            .unwrap_or_default();
+        let key = usage::this_month_key();
+        let Ok(v) = self.vault_mut() else { return };
+        let mut month = usage::Month::parse(v.setting(&key).ok().flatten().as_deref());
+        month.add(&model, usage::Tokens::from_answer(answer));
+        if let Ok(json) = serde_json::to_string(&month) {
+            let _ = v.set_setting(&key, &json);
+        }
+    }
+
+    /// This month's use of the AI and the ceiling, for settings.
+    pub fn usage_summary(&mut self) -> Result<UsageSummary, CoreError> {
+        let v = self.vault_mut()?;
+        let key = usage::this_month_key();
+        let cap = v
+            .setting(usage::CAP_KEY)?
+            .and_then(|s| s.parse::<u32>().ok());
+        Ok(usage::Month::parse(v.setting(&key)?.as_deref()).view(&key, cap))
+    }
+
+    /// The monthly ceiling in dollars; `None` removes it.
+    pub fn set_monthly_cap(&mut self, cap_usd: Option<u32>) -> Result<(), CoreError> {
+        let v = self.vault_mut()?;
+        match cap_usd {
+            Some(0) => {
+                return Err(CoreError::Refused(
+                    "תקרה של 0 תעצור כל שליחה. כדי לבטל את התקרה, משאירים את השדה ריק.".to_owned(),
+                ))
+            }
+            Some(cap) => v.set_setting(usage::CAP_KEY, &cap.to_string())?,
+            // Empty = no ceiling (it does not parse as a number).
+            None => v.set_setting(usage::CAP_KEY, "")?,
+        }
+        Ok(())
+    }
+
+    /// A failed send is not a send: the approval stays valid for a retry.
+    pub(crate) fn restore_pending(&mut self, out: Outgoing) {
+        self.pending
+            .insert(out.pending.payload.sha256().to_owned(), out.pending);
+    }
+
+    /// Send exactly what was approved, check the answer, and store it (tagged).
+    pub fn send_section(&mut self, approval_id: &str) -> Result<SectionResult, CoreError> {
+        let out = self.begin_send(approval_id)?;
+        let response = out.transmit();
+        self.finish_section(out, response)
+    }
+
+    /// Check and store the answer to a section request.
+    pub fn finish_section(
+        &mut self,
+        out: Outgoing,
+        response: Result<(Value, bool), CoreError>,
+    ) -> Result<SectionResult, CoreError> {
+        if !matches!(out.pending.kind, PendingKind::Section { .. }) {
+            return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
+        }
+        let (response, demo) = match response {
+            Ok(r) => r,
+            Err(e) => {
+                self.restore_pending(out);
+                return Err(e);
+            }
+        };
+        self.note_usage(&out.pending.payload, &response, demo);
+        let Pending { payload, kind } = out.pending;
+        let PendingKind::Section {
+            case_id,
+            section_key,
+            instruction_tagged,
+            hidden,
+            sources,
+            approved,
+            replaces,
+        } = kind
+        else {
+            return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
+        };
+        // The request went out: record it before anything about the reply can fail.
+        let model = out.model.clone();
+        let ai = provider_of(&model).display_name();
+        let payload_text = String::from_utf8_lossy(payload.body()).into_owned();
+        let v = self.vault_mut()?;
+        v.add_transmission(
+            &case_id,
+            &section_key,
+            payload.sha256(),
+            if demo { "demo" } else { &model },
+            &payload_text,
+        )?;
+        v.record(
+            AuditEvent::Send,
+            Some(&case_id),
+            &serde_json::json!({ "section": section_key, "demo": demo, "ai": ai }),
+        )?;
+        let refs: Vec<(String, String)> = sources
+            .iter()
+            .map(|(sid, _, text)| (sid.clone(), text.clone()))
+            .collect();
+        let mut reply = if DERIVED_SECTIONS.contains(&section_key.as_str()) {
+            dv_ai::parse_derived_section(&response, &approved)?
+        } else {
+            dv_ai::parse_section(&response, &refs)?
+        };
+        let v = self.vault_mut()?;
+        let identities = v.identities(&case_id)?;
+        let case_tags: Vec<String> = identities.iter().map(|i| i.tag.clone()).collect();
+        let everyone = v.all_identities()?;
+        let inputs = v.inputs(&case_id)?;
+        let sheets = score_sheets(v, &case_id, &inputs)?;
+        for p in &mut reply.paragraphs {
+            p.warnings.extend(dv_domain::check_scores(&p.text, &sheets));
+            for s in scan_model_output(&p.text, &case_tags, &everyone) {
+                p.warnings
+                    .push(format!("{}: {}", s.message.replace("Claude", ai), s.token));
+            }
+        }
+        // D-043: a paragraph that repeats a past report word for word.
+        let texts: Vec<&str> = reply.paragraphs.iter().map(|p| p.text.as_str()).collect();
+        let overlaps = style::overlap_warning(v, &texts)?;
+        for (p, w) in reply.paragraphs.iter_mut().zip(overlaps) {
+            p.warnings.extend(w);
+        }
+        v.add_message(
+            &case_id,
+            &section_key,
+            ChatRole::User,
+            &instruction_tagged,
+            &hidden,
+            demo,
+        )?;
+        v.add_message(
+            &case_id,
+            &section_key,
+            ChatRole::Assistant,
+            &reply.reply,
+            &[],
+            demo,
+        )?;
+        let input_ids = |p: &dv_ai::ProposedParagraph| -> Vec<String> {
+            p.source_refs
+                .iter()
+                .filter_map(|r| {
+                    sources
+                        .iter()
+                        .find(|(sid, _, _)| sid == r)
+                        .map(|(_, id, _)| id.clone())
+                })
+                .collect()
+        };
+        // A rewrite of one paragraph stays in its place; if it was approved or removed
+        // meanwhile, the answer is added as a new proposal instead of touching it.
+        let rewritten = match (&replaces, reply.paragraphs.is_empty()) {
+            (Some(id), false) => {
+                let text: Vec<&str> = reply.paragraphs.iter().map(|p| p.text.as_str()).collect();
+                let mut refs: Vec<String> = reply.paragraphs.iter().flat_map(&input_ids).collect();
+                refs.dedup();
+                let text = text.join("\n\n");
+                // A proposal is rewritten in place; an approved paragraph gets a new wording
+                // beside it, which replaces it only when she approves (D-032).
+                v.rewrite_proposal(&case_id, id, &text, &refs)?
+                    || v.propose_rewording(&case_id, id, &text, &refs)?
+            }
+            _ => false,
+        };
+        if !rewritten {
+            if replaces.is_none() && !reply.paragraphs.is_empty() {
+                v.supersede_proposals(&case_id, &section_key)?;
+            }
+            for p in &reply.paragraphs {
+                v.add_draft(&case_id, &section_key, &p.text, Author::Ai, &input_ids(p))?;
+            }
+        }
+
+        let practitioner = v.practitioner()?.names.first().cloned();
+        let show = |t: &str| restore(t, &identities, practitioner.as_deref());
+        Ok(SectionResult {
+            reply: show(&reply.reply),
+            paragraphs: reply
+                .paragraphs
+                .into_iter()
+                .map(|mut p| {
+                    p.text = show(&p.text);
+                    p
+                })
+                .collect(),
+            questions: reply.questions.iter().map(|q| show(q)).collect(),
+            missing: reply.missing.iter().map(|q| show(q)).collect(),
+            contradictions: reply.contradictions.iter().map(|q| show(q)).collect(),
+            demo,
+        })
+    }
+
+    /// Prepare every section that has material and nothing written yet (the "write the empty
+    /// sections" button). A section with a draft or approved paragraphs is left as it is:
+    /// writing it again would put a second draft beside what she already approved.
+    pub fn prepare_full_draft(
+        &mut self,
+        case_id: &str,
+    ) -> Result<Vec<(String, Prepared)>, CoreError> {
+        let structure =
+            ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
+        let fed: HashSet<String> = {
+            let v = self.vault_ref()?;
+            let inputs = v.inputs(case_id)?;
+            Core::material_routing(v, &structure, case_id, &inputs)?
+                .into_iter()
+                .flat_map(|r| r.feeds)
+                .collect()
+        };
+        let mut out = Vec::new();
+        for s in structure
+            .sections()
+            .filter(|s| !DERIVED_SECTIONS.contains(&s.key.as_str()))
+        {
+            let written = self
+                .vault_ref()?
+                .drafts(case_id, &s.key)?
+                .iter()
+                .any(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved));
+            if fed.contains(&s.key) && !written {
+                let p = self.prepare_section(
+                    case_id,
+                    &s.key,
+                    "כתוב/י טיוטה לסעיף מתוך המקורות, עם מקור לכל פסקה.",
+                )?;
+                out.push((s.key.clone(), p));
+            }
+        }
+        Ok(out)
+    }
+}
