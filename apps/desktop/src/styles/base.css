@@ -406,6 +406,30 @@ select.select {
   box-shadow: var(--shadow-dialog);
   max-width: 640px;
 }
+.toast-action {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-block: 8px;
+  padding-inline-end: 8px;
+}
+.toast-btn {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--side-active);
+  color: var(--on-primary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.toast-btn:hover {
+  background: var(--side-line);
+}
+.toast-btn:focus-visible {
+  outline-color: var(--side-ok);
+}
 .spinner {
   width: 16px;
   height: 16px;

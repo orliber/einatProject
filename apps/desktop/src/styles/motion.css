@@ -126,6 +126,50 @@
 .cases tbody > tr:nth-child(n + 8),
 .materials-list > :nth-child(n + 8) { animation-delay: 280ms; }
 
+/* Menus: scale in from the button that opened them (Radix gives the origin), fast. */
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+.menu {
+  transform-origin: var(
+    --radix-dropdown-menu-content-transform-origin,
+    var(--radix-context-menu-content-transform-origin, top)
+  );
+}
+.menu[data-state="open"] {
+  animation: menu-in 150ms var(--ease-out);
+}
+
+/* Moving between the case's stages: a short fade, no movement. */
+.view-body {
+  animation: scrim-in 150ms var(--ease-out);
+}
+
+/* Progress bars fill smoothly instead of jumping. */
+.bar-fill {
+  transition: width 400ms var(--ease-out);
+}
+
+/* Toasts drop in from just above (they sit under the header); translateX keeps them centered. */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(50%) translateY(-8px);
+  }
+}
+.toast {
+  animation: toast-in 220ms var(--ease-out);
+}
+.toast-btn {
+  transition: background-color var(--dur-hover) var(--ease-out), transform var(--dur-press) var(--ease-out);
+}
+.toast-btn:active {
+  transform: scale(0.97);
+}
+
 /* Type: sharper numerals and wrapping. */
 body {
   -webkit-font-smoothing: antialiased;
@@ -150,11 +194,17 @@ li {
   .side-nav button:active,
   .case-row:active,
   .folder:active,
-  .complete-item:active {
+  .complete-item:active,
+  .toast-btn:active {
     transform: none;
   }
-  .overlay > .dialog {
+  .overlay > .dialog,
+  .menu[data-state="open"],
+  .toast {
     animation: scrim-in var(--dur-enter) linear;
+  }
+  .bar-fill {
+    transition: none;
   }
   .cases tbody > tr,
   .materials-list > * {

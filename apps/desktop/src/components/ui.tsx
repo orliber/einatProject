@@ -1,5 +1,5 @@
 // Small shared pieces: icons, dialog frame, marked text, toast.
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Segment } from "../ipc/generated/Segment";
 
 export function LockIcon({ size = 18, color = "currentColor" }: { size?: number; color?: string }) {
@@ -160,16 +160,36 @@ export function Spinner() {
 
 /** A short confirmation that goes away by itself. The timer starts once per message:
  *  a new `onDone` on every render of the parent must not keep it on screen. */
-export function Toast({ text, onDone }: { text: string; onDone: () => void }) {
+/** An action offered on a toast, such as "ביטול" right after something was saved or removed. */
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
+/**
+ * A short notice under the header. With an action it stays longer (7s instead of 3.5s) and holds
+ * while the pointer or focus is on it, so the action can be reached in time.
+ */
+export function Toast({ text, onDone, action }: { text: string; onDone: () => void; action?: ToastAction }) {
   const done = useRef(onDone);
+  const [held, setHeld] = useState(false);
   useEffect(() => {
     done.current = onDone;
   });
   useEffect(() => {
-    const t = window.setTimeout(() => done.current(), 3500);
+    if (held) return;
+    const t = window.setTimeout(() => done.current(), action ? 7000 : 3500);
     return () => window.clearTimeout(t);
-  }, [text]);
-  return <div className="toast" role="status">{text}</div>;
+  }, [text, action, held]);
+  if (!action) return <div className="toast" role="status">{text}</div>;
+  return (
+    <div className="toast toast-action" role="status"
+      onPointerEnter={() => setHeld(true)} onPointerLeave={() => setHeld(false)}
+      onFocus={() => setHeld(true)} onBlur={() => setHeld(false)}>
+      <span>{text}</span>
+      <button type="button" className="toast-btn" onClick={() => { action.run(); done.current(); }}>{action.label}</button>
+    </div>
+  );
 }
 
 export function ErrorLine({ error }: { error: string | null }) {
