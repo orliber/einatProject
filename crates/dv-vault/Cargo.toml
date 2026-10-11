@@ -25,10 +25,10 @@ rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"]
 zeroize = { version = "1.9", features = ["zeroize_derive"] }
 unicode-normalization = "0.1"
 
-# Windows Hello (D-043): the Windows Runtime key-credential API. Already in the tree through
-# Tauri's WebView2 bindings; only the safe Windows Runtime part is used here.
+# Removing the Windows Hello key pair of a vault that had it turned on (D-047, taken out in
+# D-054). Already in the tree through Tauri's WebView2 bindings; only safe calls are used.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", default-features = false, features = ["std", "Foundation", "Security_Credentials", "Security_Cryptography", "Storage_Streams"] }
+windows = { version = "0.62", default-features = false, features = ["std", "Foundation", "Security_Credentials"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -65,7 +65,7 @@ MK (256 ביט אקראי) – עטוף בנפרד בכל "חריץ" (slot) ב-v
    slot password      : KEK = HKDF(Argon2id(סיסמה, salt 32B, m=256MiB–1GiB, t=3, p=4))
    slot recovery      : KEK = HKDF(ערכת שחזור 256 ביט)
    slot google        : KEK = HKDF(מפתח בגוגל דרייב ‖ מפתח חתום ב-DPAPI במחשב)   (D-041)
-   slot windows_hello : KEK = HKDF(חתימת Windows Hello על אתגר אקראי), מפתח ב-TPM   (D-047)
+   slot windows_hello : הוסר (D-054). נקרא בכותרת ישנה ונמחק בפתיחה הראשונה
    slot macos         : KEK ב-Keychain עם access control של Touch ID / סיסמת Mac    [שלב 2ב]
 
 MK ─ HKDF ─► K_header_mac, K_audit_mac, K_index (HMAC לחיפוש)

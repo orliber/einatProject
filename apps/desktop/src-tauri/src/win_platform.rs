@@ -9,8 +9,6 @@
 //!   crashed v0.2.0, D-038). The minimum is raised at start, so the vault's pages fit.
 //! * No crash dumps with case data (S-5): a crash of this program is kept out of Windows Error
 //!   Reporting, its reports carry no heap, and no "stopped working" window waits on screen.
-//! * Windows Hello (S-2): its prompt, started from a desktop program, can open behind the
-//!   window. It is brought to the front.
 #![allow(unsafe_code)]
 
 /// What [`harden_process`] managed to do, for the crash-free startup log in tests.
@@ -43,22 +41,9 @@ pub fn harden_process() -> Hardening {
     }
 }
 
-/// While Windows Hello is asking (for up to `for_ms`), bring its prompt in front of the
-/// program's window as soon as it appears.
-pub fn bring_hello_prompt_forward(for_ms: u64) {
-    #[cfg(windows)]
-    {
-        std::thread::spawn(move || windows_impl::hello_forward(for_ms));
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = for_ms;
-    }
-}
-
 #[cfg(windows)]
 mod windows_impl {
-    use windows::core::{w, HSTRING, PCWSTR};
+    use windows::core::{HSTRING, PCWSTR};
     use windows::Win32::System::Diagnostics::Debug::{
         SetErrorMode, SEM_FAILCRITICALERRORS, SEM_NOGPFAULTERRORBOX, SEM_NOOPENFILEERRORBOX,
     };
@@ -70,7 +55,6 @@ mod windows_impl {
         QUOTA_LIMITS_HARDWS_MIN_DISABLE,
     };
     use windows::Win32::System::Threading::GetCurrentProcess;
-    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, SetForegroundWindow};
 
     use super::{Hardening, QUOTA_STEPS_MIB};
 
@@ -119,22 +103,6 @@ mod windows_impl {
             }
         }
         None
-    }
-
-    pub fn hello_forward(for_ms: u64) {
-        let step = 100;
-        for _ in 0..for_ms / step {
-            // SAFETY: both strings are static NUL-terminated literals; a missing window is
-            // an error value, not a fault.
-            let found = unsafe { FindWindowW(w!("Credential Dialog Xaml Host"), PCWSTR::null()) };
-            if let Ok(hwnd) = found {
-                // SAFETY: `hwnd` was just returned by FindWindowW; a stale handle only makes
-                // the call return false.
-                let _ = unsafe { SetForegroundWindow(hwnd) };
-                return;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(step));
-        }
     }
 
     #[cfg(test)]
