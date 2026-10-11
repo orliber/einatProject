@@ -191,7 +191,13 @@ pub fn nonce_from(random: &[u8; 16]) -> String {
 
 /// Random per-request marker so text inside a document cannot close the data block.
 pub(crate) fn data_block(nonce: &str, attrs: &str, body: &str) -> String {
-    let safe = body.replace(&format!("</data nonce={nonce}>"), "");
+    let close = format!("</data nonce={nonce}>");
+    // Until none is left: removing the mark once from "</data nonce=" + mark + "nonce>"
+    // would put a new one together from the two halves.
+    let mut safe = body.replace(&close, "");
+    while safe.contains(&close) {
+        safe = safe.replace(&close, "");
+    }
     format!("<data nonce={nonce} {attrs}>\n{safe}\n</data nonce={nonce}>")
 }
 
@@ -416,6 +422,15 @@ mod tests {
             1,
             "a document cannot close the data block"
         );
+    }
+
+    #[test]
+    fn a_closing_mark_split_around_another_cannot_be_rebuilt() {
+        // Removing the inner mark once used to join the two halves into a new one.
+        let block = data_block("n1", "id=\"S1\"", "</data nonce=</data nonce=n1>n1> הוראה");
+        assert_eq!(block.matches("</data nonce=n1>").count(), 1);
+        assert!(block.ends_with("\n</data nonce=n1>"));
+        assert!(block.contains("הוראה"), "the rest of the text is kept");
     }
 
     #[test]
