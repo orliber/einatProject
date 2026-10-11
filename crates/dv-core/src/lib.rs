@@ -67,7 +67,7 @@ pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
 pub use security::{SecurityItem, SecurityStatus};
 pub use style::{
     StyleAnalysisResult, StyleImportPreview, StyleOverview, StylePartView, StyleProfileView,
-    StyleSectionLabel, StyleSourceView, StyleSuggestion, StyleVersionView,
+    StyleSectionLabel, StyleSourceView, StyleSuggestion, StyleSuggestionKind, StyleVersionView,
 };
 pub use unsaved::UnsavedEdit;
 pub use usage::UsageSummary;

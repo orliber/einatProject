@@ -13,7 +13,7 @@ impl Core {
         let practitioner = v.practitioner()?.names.first().cloned();
         let routing = Core::material_routing(v, &structure, case_id, &inputs)?;
         let sheets = score_sheets(v, case_id, &inputs)?;
-        let fingerprint = style::fingerprint(v)?;
+        let style_model = style::style_model(v)?;
         let retention_default = v
             .list_cases()?
             .into_iter()
@@ -51,9 +51,10 @@ impl Core {
                             .collect(),
                         // Every score in the text against the score table, each time (AI-6).
                         warnings: dv_domain::check_scores(&d.text_tagged, &sheets),
-                        style_note: fingerprint
+                        style_note: style_model
+                            .as_ref()
                             .filter(|_| d.author == Author::Ai && d.status == DraftStatus::Proposed)
-                            .and_then(|fp| style::style_note(&fp, &d.text_tagged)),
+                            .and_then(|m| style::style_note(m, &s.key, &d.text_tagged)),
                         replaces: d.replaces,
                     })
                     .collect();
@@ -103,23 +104,27 @@ impl Core {
     }
 
     pub fn approve_paragraph(&mut self, case_id: &str, draft_id: &str) -> Result<(), CoreError> {
-        Ok(self
-            .vault_mut()?
-            .set_draft_status(case_id, draft_id, DraftStatus::Approved)?)
+        // Approved as written: what the AI wrote was accepted (learned once, while waiting).
+        let draft = style::find_draft(self.vault_ref()?, case_id, draft_id)?
+            .filter(|d| d.status == DraftStatus::Proposed);
+        self.vault_mut()?
+            .set_draft_status(case_id, draft_id, DraftStatus::Approved)?;
+        self.learn_from_approval(&draft.into_iter().collect::<Vec<_>>());
+        Ok(())
     }
 
     /// "אישור כל הטיוטה": every paragraph still waiting in the section, as it stands.
     pub fn approve_section(&mut self, case_id: &str, section_key: &str) -> Result<u32, CoreError> {
         let v = self.vault_mut()?;
-        let waiting: Vec<String> = v
+        let waiting: Vec<dv_domain::DraftParagraph> = v
             .drafts(case_id, section_key)?
             .into_iter()
             .filter(|d| d.status == DraftStatus::Proposed)
-            .map(|d| d.id)
             .collect();
-        for id in &waiting {
-            v.set_draft_status(case_id, id, DraftStatus::Approved)?;
+        for d in &waiting {
+            v.set_draft_status(case_id, &d.id, DraftStatus::Approved)?;
         }
+        self.learn_from_approval(&waiting);
         Ok(u32::try_from(waiting.len()).unwrap_or(u32::MAX))
     }
 

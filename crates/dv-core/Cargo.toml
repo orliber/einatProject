@@ -21,6 +21,7 @@ dv-export.workspace = true
 dv-ingest.workspace = true
 dv-ipc.workspace = true
 dv-privacy.workspace = true
+dv-style.workspace = true
 dv-vault.workspace = true
 serde.workspace = true
 serde_json.workspace = true
