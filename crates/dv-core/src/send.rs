@@ -163,44 +163,12 @@ impl Core {
             let run = |t: &str| filter(t, &ctx).map_err(|e| CoreError::Internal(e.to_string()));
             let fixed_title = |sec: &dv_domain::ReportSection| model_title(sec, &ctx);
             let mut review = Review::default();
-            let mut tagged_sources = Vec::new();
-            let mut source_rows = Vec::new();
             let derived = DERIVED_SECTIONS.contains(&section_key) || letter.is_some();
-            if !derived {
-                for inp in v.inputs(case_id)? {
-                    // D-022: the table, the sorting, and Einat's choice decide what goes here.
-                    let table = sorting::table_for(&structure, inp.kind);
-                    let count = passage_ranges(&inp.content).len();
-                    let Some(feed) =
-                        sorting::routing_of(v, case_id, &inp.id)?.feed(section_key, &table, count)
-                    else {
-                        continue;
-                    };
-                    let sid = format!("S{}", tagged_sources.len() + 1);
-                    let title = run(&inp.title)?;
-                    let content = sorting::section_text(&inp.content, &feed, &ctx)?;
-                    let kind = match feed {
-                        dv_domain::Feed::Whole => inp.kind.label_he().to_owned(),
-                        dv_domain::Feed::Passages(_) => {
-                            format!("{} · קטעים שנבחרו לסעיף", inp.kind.label_he())
-                        }
-                    };
-                    // A title with nothing to hide is shown as the source's label, not as a part.
-                    if title.original_segments.iter().any(|s| s.mark.is_some()) {
-                        review.add(format!("{sid} · {kind} · כותרת"), &title);
-                        review.add(format!("{sid} · {kind}"), &content);
-                    } else {
-                        review.add(format!("{sid} · {kind} · {}", title.tagged), &content);
-                    }
-                    tagged_sources.push(TaggedInput {
-                        input_id: inp.id.clone(),
-                        kind_label: inp.kind.label_he().to_owned(),
-                        title_tagged: title.tagged,
-                        content_tagged: content.tagged.clone(),
-                    });
-                    source_rows.push((sid, inp.id, content.tagged));
-                }
-            }
+            let (tagged_sources, source_rows) = if derived {
+                (Vec::new(), Vec::new())
+            } else {
+                collect_sources(v, &structure, &ctx, case_id, section_key, &mut review)?
+            };
             let mut approved_context = Vec::new();
             if derived {
                 // A letter gets only the sections it is written from (EX-4): the school letter
@@ -437,8 +405,22 @@ impl Core {
         self.finish_section(out, response)
     }
 
-    /// Check and store the answer to a section request.
+    /// Check and store the answer to a section request. A failure marks the case as stuck
+    /// in the case list, and the next success for the case clears it.
     pub fn finish_section(
+        &mut self,
+        out: Outgoing,
+        response: Result<(Value, bool), CoreError>,
+    ) -> Result<SectionResult, CoreError> {
+        let case_id = out.pending.kind.failing_case().map(str::to_owned);
+        let result = self.store_section(out, response);
+        if let Some(case_id) = case_id {
+            self.note_send_outcome(&case_id, result.is_ok());
+        }
+        result
+    }
+
+    fn store_section(
         &mut self,
         out: Outgoing,
         response: Result<(Value, bool), CoreError>,
@@ -620,4 +602,55 @@ impl Core {
         }
         Ok(out)
     }
+}
+
+/// The sources a section is written from, filtered: for each material the passages routed to
+/// this section (D-022). Returns the tagged inputs and, per `S#`, the material's id and
+/// tagged text. Each is also added to the review screen.
+pub(crate) type SectionSources = (Vec<TaggedInput>, Vec<(String, String, String)>);
+
+pub(crate) fn collect_sources(
+    v: &Vault,
+    structure: &ReportStructure,
+    ctx: &PrivacyContext<'_>,
+    case_id: &str,
+    section_key: &str,
+    review: &mut Review,
+) -> Result<SectionSources, CoreError> {
+    let run = |t: &str| filter(t, ctx).map_err(|e| CoreError::Internal(e.to_string()));
+    let mut tagged_sources = Vec::new();
+    let mut source_rows = Vec::new();
+    for inp in v.inputs(case_id)? {
+        // D-022: the table, the sorting, and Einat's choice decide what goes here.
+        let table = sorting::table_for(structure, inp.kind);
+        let count = passage_ranges(&inp.content).len();
+        let Some(feed) = sorting::routing_of(v, case_id, &inp.id)?.feed(section_key, &table, count)
+        else {
+            continue;
+        };
+        let sid = format!("S{}", tagged_sources.len() + 1);
+        let title = run(&inp.title)?;
+        let content = sorting::section_text(&inp.content, &feed, ctx)?;
+        let kind = match feed {
+            dv_domain::Feed::Whole => inp.kind.label_he().to_owned(),
+            dv_domain::Feed::Passages(_) => {
+                format!("{} · קטעים שנבחרו לסעיף", inp.kind.label_he())
+            }
+        };
+        // A title with nothing to hide is shown as the source's label, not as a part.
+        if title.original_segments.iter().any(|s| s.mark.is_some()) {
+            review.add(format!("{sid} · {kind} · כותרת"), &title);
+            review.add(format!("{sid} · {kind}"), &content);
+        } else {
+            review.add(format!("{sid} · {kind} · {}", title.tagged), &content);
+        }
+        tagged_sources.push(TaggedInput {
+            input_id: inp.id.clone(),
+            kind_label: inp.kind.label_he().to_owned(),
+            title_tagged: title.tagged,
+            content_tagged: content.tagged.clone(),
+        });
+        source_rows.push((sid, inp.id, content.tagged));
+    }
+    Ok((tagged_sources, source_rows))
 }

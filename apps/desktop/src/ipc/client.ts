@@ -55,6 +55,7 @@ import type { StyleOverview } from "./generated/StyleOverview";
 import type { StyleProfile } from "./generated/StyleProfile";
 import type { StyleProfileView } from "./generated/StyleProfileView";
 import type { StyleSourceView } from "./generated/StyleSourceView";
+import type { StyleSuggestion } from "./generated/StyleSuggestion";
 
 /** Every failure reaches the UI as a UiError with a Hebrew message. */
 export function asUiError(e: unknown): UiError {
@@ -326,6 +327,7 @@ export type {
   StyleProfile,
   StyleProfileView,
   StyleSourceView,
+  StyleSuggestion,
   UpdateView,
   UsageSummary,
   Readiness,

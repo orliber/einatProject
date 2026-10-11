@@ -4,7 +4,8 @@ use super::*;
 
 impl Core {
     pub fn list_cases(&mut self) -> Result<Vec<CaseSummary>, CoreError> {
-        Ok(self.vault_ref()?.list_cases()?)
+        let cases = self.vault_ref()?.list_cases()?;
+        self.with_failures(cases)
     }
 
     pub fn create_case(

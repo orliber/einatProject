@@ -280,6 +280,88 @@ pub fn everyday_name(w: &str) -> bool {
     LEXICON.word_names.contains(w) || LEXICON.common_words.contains(w) || word_bucket(w) >= EVERYDAY
 }
 
+/// The place of token `i` is where a name goes: after a word for a person or a naming word
+/// ("הגננת", "עם", "בשם"), before a reporting verb ("סיפרה", "הגיע"), next to another name, or
+/// "with X" ending its clause ("משחקת עם אלה."). Used for a name that is also a word: only
+/// here is it read as the name.
+pub(crate) fn name_context_at(text: &str, tokens: &[Token], i: usize) -> bool {
+    let lex = &*LEXICON;
+    let prev = i
+        .checked_sub(1)
+        .and_then(|j| tokens.get(j))
+        .map(|t| t.norm.as_str());
+    let next = tokens.get(i + 1).map(|t| t.norm.as_str());
+    let in_list =
+        |w: Option<&str>, list: &[&str]| w.is_some_and(|w| list.iter().any(|l| normalize(l) == w));
+    let after_prev =
+        in_list(prev, crate::lexicon::NAME_CONTEXT_PREV) || prev.is_some_and(is_person_word);
+    let before_next = in_list(next, crate::lexicon::NAME_CONTEXT_NEXT);
+    let next_is_name = tokens.get(i + 1).is_some_and(|t| {
+        lex.first_names.contains(&t.norm)
+            || lex.surnames.contains(&t.norm)
+            || t.norm
+                .strip_prefix('ו')
+                .is_some_and(|h| lex.first_names.contains(h))
+    });
+    let definite_next = next.is_some_and(|n| n.starts_with('ה') && word_bucket(n) >= EVERYDAY);
+    let ends_clause = tokens
+        .get(i + 1)
+        .is_none_or(|t| text[tokens[i].end..t.start].contains([',', '.', ';', ')', '\n']));
+    let with = in_list(prev, &["עם", "ועם", "אצל", "ואצל"]);
+    // "אלון, הילד מהתיק השני," / "נוגה, אחותו": a person word right after a comma.
+    let apposition = tokens.get(i + 1).is_some_and(|t| {
+        text[tokens[i].end..t.start].trim() == ","
+            && is_person_word(t.norm.strip_prefix('ה').unwrap_or(&t.norm))
+    });
+    before_next
+        || next_is_name
+        || apposition
+        || (after_prev && !definite_next)
+        || (with && ends_clause)
+}
+
+/// Another case's name matched here is the everyday word it also is (D-050), on positive
+/// evidence only, never in a name's place:
+/// * an ordinary word that merely contains it ("שאלון" when another child is "אלון");
+/// * a preposition or article glued on, where the joined form is itself everyday ("בגיל",
+///   "לאור", "האור");
+/// * "אלה"/"אלו" right after a plural noun ("משימות אלה");
+/// * she pressed "להחזיר" on it in this case (it is "not a name" here): without this the next
+///   filter hid it again and the button did nothing.
+///
+/// Otherwise it is hidden, fail-closed ("אלון, הילד מהתיק השני"). Such names used to be hidden
+/// everywhere, and kept as names in every case. The pipeline and the gate both use this.
+/// The case's own names are not affected: what she typed for this case stays hidden.
+pub(crate) fn other_case_word(
+    text: &str,
+    tokens: &[Token],
+    ctx: &PrivacyContext<'_>,
+    first: usize,
+    last: usize,
+    prefix: usize,
+) -> bool {
+    if first != last || name_context_at(text, tokens, first) {
+        return false;
+    }
+    let whole = &tokens[first];
+    let head: String = whole.norm.chars().skip(prefix).collect();
+    if (ctx.allowlisted)(&whole.norm) || (ctx.allowlisted)(&head) {
+        return true;
+    }
+    if prefix > 0
+        && (LEXICON.common_words.contains(&whole.norm) || reads_as_word(&whole.norm, &head))
+    {
+        return true;
+    }
+    let plural_before = first.checked_sub(1).is_some_and(|j| {
+        let w = tokens[j].norm.strip_prefix('ה').unwrap_or(&tokens[j].norm);
+        &text[tokens[j].end..whole.start] == " "
+            && (w.ends_with("ימ") || w.ends_with("ות"))
+            && word_bucket(w) >= EVERYDAY
+    });
+    prefix == 0 && matches!(head.as_str(), "אלה" | "אלו") && plural_before
+}
+
 /// A word that was a name in one of her past reports. Everyday words never count: they are not
 /// kept, and a lexicon change must not turn "בגיל" into a name.
 pub(crate) fn past_name(ctx: &PrivacyContext<'_>, h: &str) -> bool {
@@ -2316,6 +2398,11 @@ fn analyze(
         if declared_reads_as_word(text, &tokens, m.first_token, m.last_token, m.prefix) {
             continue;
         }
+        if matches!(&m.payload, Target::Identity { case_id, .. } if *case_id != ctx.case_id)
+            && other_case_word(text, &tokens, ctx, m.first_token, m.last_token, m.prefix)
+        {
+            continue;
+        }
         let whole = &tokens[m.first_token];
         if m.prefix > 0
             && LEXICON.common_words.contains(&whole.norm)
@@ -2485,9 +2572,66 @@ fn analyze(
     let mut autos = auto_hide(text, &tokens, ctx, &suspects, &mut reps);
     autos.extend(declared_auto(ctx, &reps));
 
+    // A fixed point with the gate (D-050): what would go out is checked by the gate's own name
+    // test, and whatever it would refuse is hidden here, on the card, with "להחזיר". So the
+    // gate never refuses a name this filter let out, and she is never left at a dead end.
+    for _ in 0..3 {
+        reps.sort_by_key(|r| r.start);
+        autos.sort_by_key(|a| a.start);
+        let out = assemble(text, &reps, &autos);
+        let found = crate::gate::name_findings(&out.tagged, ctx);
+        let extra: Vec<SuspectSpan> = found
+            .iter()
+            .filter_map(|f| to_original(&out, f.start, f.end))
+            .filter(|(s, e)| !overlaps(*s, *e, &reps, &[]))
+            .map(|(start, end)| SuspectSpan {
+                start,
+                end,
+                suspect: Suspect {
+                    token: text[start..end].to_owned(),
+                    kind: SuspectKind::OtherCaseIdentity,
+                    message: "שם שהבדיקה האחרונה זיהתה בטקסט היוצא".to_owned(),
+                    suggested_role: Role::Other,
+                },
+                known: None,
+            })
+            .collect();
+        if extra.is_empty() {
+            break;
+        }
+        autos.extend(auto_hide(text, &tokens, ctx, &extra, &mut reps));
+    }
+
     reps.sort_by_key(|r| r.start);
     autos.sort_by_key(|a| a.start);
     Ok((reps, autos))
+}
+
+/// A span of the outgoing text back to the original: within one segment kept as written, by
+/// offset; a span that touches a tag or crosses segments takes the whole original pieces it
+/// touches (fail-closed: more is hidden, never less).
+fn to_original(out: &FilterOutcome, start: usize, end: usize) -> Option<(usize, usize)> {
+    let (mut o, mut t) = (0usize, 0usize);
+    let mut range: Option<(usize, usize)> = None;
+    for (orig, tagged) in out.original_segments.iter().zip(&out.tagged_segments) {
+        let (ol, tl) = (orig.text.len(), tagged.text.len());
+        if t < end && start < t + tl {
+            let piece = if orig.mark.is_none() && tagged.text == orig.text {
+                let s = o + start.saturating_sub(t);
+                let e = o + (end - t).min(tl);
+                (s, e)
+            } else {
+                (o, o + ol)
+            };
+            range = Some(match range {
+                Some((s, e)) => (s.min(piece.0), e.max(piece.1)),
+                None => piece,
+            });
+        }
+        o += ol;
+        t += tl;
+    }
+    range.filter(|(s, e)| s < e)
 }
 
 /// The role a person word just before a name gives it, and that word: "הגננת אסתי",

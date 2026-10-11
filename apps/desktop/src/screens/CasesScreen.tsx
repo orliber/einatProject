@@ -26,6 +26,7 @@ function rememberFolder(id: string | null) {
 /** What to do next in a case, in one chip and one line (canvas "תיקים"). */
 function nextStep(c: CaseSummary): { chip: string; cls: string; text: string; start: boolean } {
   const n = c.approved_sections.length;
+  if (c.failed_at) return { chip: "נכשל", cls: "chip chip-fail", text: "השליחה האחרונה לא הצליחה. לפתוח ולנסות שוב", start: false };
   if (!c.meta.consent) return { chip: "הסכמה", cls: "chip chip-warn", text: "לרשום את הסכמת ההורים", start: false };
   if (n >= TOTAL_SECTIONS) return { chip: "✓ מוכן", cls: "chip chip-ok", text: "להפיק דוח Word", start: false };
   if (n > 0) return { chip: "בכתיבה", cls: "chip", text: `לאשר עוד ${TOTAL_SECTIONS - n} סעיפים`, start: false };

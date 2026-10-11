@@ -360,7 +360,7 @@ export class FakeCore {
 
   private summary(c: Case): CaseSummary {
     const approved = Array.from(new Set(c.drafts.filter((d) => d.status === "approved").map((d) => d.section)));
-    return { id: c.id, meta: c.meta, child_name: c.people.find((p) => p.role === "child")?.value ?? null, created_at: c.created, updated_at: c.updated, approved_sections: approved, folder_id: c.folderId, deleted_at: c.deletedAt };
+    return { id: c.id, meta: c.meta, child_name: c.people.find((p) => p.role === "child")?.value ?? null, created_at: c.created, updated_at: c.updated, approved_sections: approved, folder_id: c.folderId, deleted_at: c.deletedAt, failed_at: null };
   }
 
   private tableFor(kind: InputKind): string[] {

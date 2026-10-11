@@ -72,6 +72,10 @@ pub struct CaseSummary {
     /// Set while the case is in the recycle bin (unix seconds).
     #[ts(type = "number | null")]
     pub deleted_at: Option<i64>,
+    /// When a send for the case last failed, while none has succeeded since (unix seconds).
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub failed_at: Option<i64>,
 }
 
 /// A folder of cases, like in a file explorer. Folders nest to any depth. The name is sealed

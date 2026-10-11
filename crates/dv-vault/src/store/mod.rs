@@ -952,6 +952,7 @@ impl Vault {
                     approved_sections,
                     folder_id,
                     deleted_at,
+                    failed_at: None,
                 })
             })
             .collect()

@@ -43,13 +43,9 @@ pub const PROFILE_NGRAM: usize = 5;
 /// A run this long shared with a past report puts a warning on a drafted paragraph. Higher than
 /// [`PROFILE_NGRAM`]: her own expressions of 5–7 words are exactly the style that is wanted.
 pub const DRAFT_NGRAM: usize = 8;
-/// An edit seen this many times becomes a suggestion.
-pub const SUGGEST_AT: u32 = 3;
 const MAX_SOURCES: usize = 40;
 /// Excerpts sent for one report (characters).
 const MAX_EXCERPT_CHARS: usize = 60_000;
-const MAX_PAIRS: usize = 500;
-const MAX_DIFF_WORDS: usize = 400;
 const TITLE_CHARS: usize = 80;
 
 /// Sections included by default: where her style shows most and identifying detail least.
@@ -216,14 +212,35 @@ pub struct StyleVersionView {
     pub reports: u32,
 }
 
-/// "Instead of «from» you write «to»" (seen `count` times in her edits).
+/// What a suggestion is (D-052).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum StyleSuggestionKind {
+    /// In her edits: "instead of «from» you write «to»".
+    Replace,
+    /// In her edits: she deletes «from».
+    Avoid,
+    /// In her past reports: «from» recurs across reports.
+    Phrase,
+}
+
+/// Something learned on her computer, waiting for her yes. Nothing of it is sent until then.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct StyleSuggestion {
     pub id: String,
+    pub kind: StyleSuggestionKind,
     pub from: String,
+    /// Empty unless `kind` is `replace`.
     pub to: String,
+    /// Times she made the change, or reports the phrase is in.
     pub count: u32,
+    /// How sure: of the times the AI wrote it, she changed it at least this often (edits), or
+    /// the share of her reports that hold it (phrases). 0 to 100.
+    pub confidence: u32,
+    /// A template section key, or `None` for the whole report.
+    pub section: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -321,20 +338,16 @@ struct StoredProfile {
     demo: bool,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct Pair {
-    from: String,
-    to: String,
-    count: u32,
-    #[serde(default)]
-    dismissed: bool,
-    #[serde(default)]
-    accepted: bool,
-}
+/// What was learned from her edits (the document keeps the earlier `pairs` shape).
+type Learning = dv_style::EditModel;
 
+/// The local style model and the phrases of her reports, kept in one sealed secret (D-052).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct Learning {
-    pairs: Vec<Pair>,
+pub(crate) struct LocalStyle {
+    #[serde(default)]
+    model: dv_style::StyleModel,
+    #[serde(default)]
+    phrases: Vec<dv_style::PhraseCandidate>,
 }
 
 /// An upload waiting for her confirmation (memory only, cleared at lock).
@@ -752,74 +765,6 @@ fn source_index(sources: &[StoredSource], n: usize) -> HashSet<String> {
         .collect()
 }
 
-// ------------------------------------------------------------ learning from edits
-
-/// Short replacements between Claude's paragraph and her edit: `(from, to)`, up to three words
-/// on each side, no tags or numbers.
-fn replacements(before: &str, after: &str) -> Vec<(String, String)> {
-    let clean_word = |w: &str| w.trim_matches(|c: char| !c.is_alphanumeric()).to_owned();
-    let a: Vec<String> = before
-        .split_whitespace()
-        .map(clean_word)
-        .filter(|w| !w.is_empty())
-        .collect();
-    let b: Vec<String> = after
-        .split_whitespace()
-        .map(clean_word)
-        .filter(|w| !w.is_empty())
-        .collect();
-    if a.len() > MAX_DIFF_WORDS || b.len() > MAX_DIFF_WORDS {
-        return Vec::new();
-    }
-    // Longest common subsequence, then walk it to find the changed runs.
-    let (n, m) = (a.len(), b.len());
-    let mut lcs = vec![vec![0u16; m + 1]; n + 1];
-    for i in (0..n).rev() {
-        for j in (0..m).rev() {
-            lcs[i][j] = if normalize(&a[i]) == normalize(&b[j]) {
-                lcs[i + 1][j + 1] + 1
-            } else {
-                lcs[i + 1][j].max(lcs[i][j + 1])
-            };
-        }
-    }
-    let mut out = Vec::new();
-    let (mut i, mut j) = (0, 0);
-    let (mut del, mut ins): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
-    let mut flush = |del: &mut Vec<&str>, ins: &mut Vec<&str>| {
-        let ok = |run: &[&str]| {
-            (1..=3).contains(&run.len())
-                && run
-                    .iter()
-                    .all(|w| !w.contains('[') && !w.chars().any(|c| c.is_ascii_digit()))
-        };
-        if ok(del) && ok(ins) && normalize(&del.join(" ")) != normalize(&ins.join(" ")) {
-            out.push((del.join(" "), ins.join(" ")));
-        }
-        del.clear();
-        ins.clear();
-    };
-    while i < n || j < m {
-        if i < n && j < m && normalize(&a[i]) == normalize(&b[j]) {
-            flush(&mut del, &mut ins);
-            i += 1;
-            j += 1;
-        } else if j < m && (i == n || lcs[i][j + 1] >= lcs[i + 1][j]) {
-            ins.push(&b[j]);
-            j += 1;
-        } else {
-            del.push(&a[i]);
-            i += 1;
-        }
-    }
-    flush(&mut del, &mut ins);
-    out
-}
-
-fn suggestion_id(p: &Pair) -> String {
-    format!("{}→{}", normalize(&p.from), normalize(&p.to))
-}
-
 // ------------------------------------------------------------ use in drafting
 
 /// The approved profile as it goes into a drafting request for `section_key`, with every item
@@ -872,88 +817,55 @@ pub(crate) fn overlap_warning(v: &Vault, texts: &[&str]) -> Result<Vec<Option<St
         .collect())
 }
 
-// ------------------------------------------------------------ fingerprint
+// ------------------------------------------------------------ local style model
 
-/// Her usual sentence length, measured locally on the parts she kept from past reports
-/// (D-042, stages 7–8). Nothing is sent for it.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub(crate) struct Fingerprint {
-    /// Words per sentence: a tenth of her sentences are shorter than `short`.
-    short: f64,
-    /// … and a tenth are longer than `long`.
-    long: f64,
-}
+const LOCAL_STYLE_KEY: &str = "style_local";
+/// Where an earlier version kept sentence lengths only (cleared when it is re-measured).
+const OLD_FINGERPRINT_KEY: &str = "style_fingerprint";
 
-const FINGERPRINT_KEY: &str = "style_fingerprint";
-/// Fewer sentences than this say little about her style: no notes.
-const FINGERPRINT_MIN_SENTENCES: usize = 30;
-
-/// Words in each sentence of 3 words or more.
-fn sentence_lengths(text: &str) -> Vec<usize> {
-    text.split(['.', '!', '?', '\n', ';'])
-        .map(|s| s.split_whitespace().count())
-        .filter(|n| *n >= 3)
-        .collect()
-}
-
-#[allow(
-    clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
-)]
-fn percentile(sorted: &[usize], q: f64) -> f64 {
-    let at = ((sorted.len() - 1) as f64 * q).round() as usize;
-    sorted[at.min(sorted.len() - 1)] as f64
-}
-
-fn measure(sources: &[StoredSource]) -> Option<Fingerprint> {
-    let mut lengths: Vec<usize> = sources
-        .iter()
-        .flat_map(|s| s.parts.iter())
-        .flat_map(|p| sentence_lengths(&p.text))
-        .collect();
-    if lengths.len() < FINGERPRINT_MIN_SENTENCES {
-        return None;
+fn local_style(v: &Vault) -> Result<LocalStyle, CoreError> {
+    match v.secret(LOCAL_STYLE_KEY)? {
+        // An unreadable document only loses what was learned: start over rather than fail.
+        Some(s) => Ok(parse(&s).unwrap_or_default()),
+        None => Ok(LocalStyle::default()),
     }
-    lengths.sort_unstable();
-    Some(Fingerprint {
-        short: percentile(&lengths, 0.1),
-        long: percentile(&lengths, 0.9),
-    })
 }
 
-/// The fingerprint kept for the case screens (measured when her past reports change).
-pub(crate) fn fingerprint(v: &Vault) -> Result<Option<Fingerprint>, CoreError> {
+/// Her style model for the case screens, or `None` when the profile is switched off.
+pub(crate) fn style_model(v: &Vault) -> Result<Option<dv_style::StyleModel>, CoreError> {
     if v.setting(PROFILE_OFF_KEY)?.as_deref() == Some("1") {
         return Ok(None);
     }
-    match v.secret(FINGERPRINT_KEY)? {
-        Some(s) => parse(&s),
-        None => Ok(None),
-    }
+    Ok(Some(local_style(v)?.model))
 }
 
-/// A gentle note on a drafted paragraph whose sentences are unlike hers, or `None`.
-#[allow(clippy::cast_precision_loss)]
-pub(crate) fn style_note(fp: &Fingerprint, text: &str) -> Option<String> {
-    let lengths = sentence_lengths(text);
-    if lengths.len() < 2 {
-        return None;
-    }
-    let mean = lengths.iter().sum::<usize>() as f64 / lengths.len() as f64;
-    if mean > fp.long {
-        Some(format!(
-            "משפטים ארוכים מהרגיל אצלך (בממוצע {mean:.0} מילים במשפט; אצלך בדרך כלל עד {:.0})",
-            fp.long
-        ))
-    } else if mean < fp.short {
-        Some(format!(
-            "משפטים קצרים מהרגיל אצלך (בממוצע {mean:.0} מילים במשפט; אצלך בדרך כלל לפחות {:.0})",
-            fp.short
-        ))
-    } else {
-        None
-    }
+/// A gentle note on a drafted paragraph in `section` that reads unlike her, or `None`.
+pub(crate) fn style_note(
+    model: &dv_style::StyleModel,
+    section: &str,
+    text: &str,
+) -> Option<String> {
+    model.note(section, text)
+}
+
+/// Re-learn from her past reports: the model's report half and the recurring phrases.
+fn fit_reports(local: &mut LocalStyle, sources: &[StoredSource]) {
+    local.model.fit_reports(
+        sources
+            .iter()
+            .flat_map(|s| s.parts.iter())
+            .map(|p| (p.section.as_deref(), p.text.as_str())),
+    );
+    let reports: Vec<dv_style::ReportParts<'_>> = sources
+        .iter()
+        .map(|s| {
+            s.parts
+                .iter()
+                .map(|p| (p.section.as_deref(), p.text.as_str()))
+                .collect()
+        })
+        .collect();
+    local.phrases = dv_style::mine_phrases(&reports);
 }
 
 /// The draft paragraph `draft_id` of a case, from any section.
@@ -1187,7 +1099,7 @@ impl Core {
         Ok(Self::source_view(id, unix_now(), &stored))
     }
 
-    /// Measure her sentences again after her past reports changed.
+    /// Learn again from her past reports after they changed (D-052).
     fn remeasure_style(&mut self) -> Result<(), CoreError> {
         let sources: Vec<StoredSource> = self
             .vault_ref()?
@@ -1195,8 +1107,11 @@ impl Core {
             .iter()
             .map(|s| parse(&s.json))
             .collect::<Result<_, _>>()?;
-        let fp = measure(&sources);
-        self.vault_mut()?.set_secret(FINGERPRINT_KEY, &json(&fp)?)?;
+        let mut local = local_style(self.vault_ref()?)?;
+        fit_reports(&mut local, &sources);
+        let v = self.vault_mut()?;
+        v.set_secret(LOCAL_STYLE_KEY, &json(&local)?)?;
+        v.set_secret(OLD_FINGERPRINT_KEY, "null")?;
         Ok(())
     }
 
@@ -1264,17 +1179,7 @@ impl Core {
                 _ => {}
             }
         }
-        let suggestions = learning
-            .pairs
-            .iter()
-            .filter(|p| p.count >= SUGGEST_AT && !p.dismissed && !p.accepted)
-            .map(|p| StyleSuggestion {
-                id: suggestion_id(p),
-                from: p.from.clone(),
-                to: p.to.clone(),
-                count: p.count,
-            })
-            .collect();
+        let suggestions = suggestions(&learning, &local_style(v)?, active.as_ref());
         Ok(StyleOverview {
             sources,
             active,
@@ -1705,38 +1610,29 @@ impl Core {
         self.vault_mut()?.reset_style()?;
         self.vault_mut()?
             .set_secret(PAST_NAMES_KEY, &json(&PastNames::new())?)?;
-        self.vault_mut()?.set_secret(FINGERPRINT_KEY, "null")?;
+        self.vault_mut()?
+            .set_secret(LOCAL_STYLE_KEY, &json(&LocalStyle::default())?)?;
+        self.vault_mut()?.set_secret(OLD_FINGERPRINT_KEY, "null")?;
         Ok(())
     }
 
     // -------------------------------------------------------- learning from edits
 
-    /// Remember short replacements between Claude's paragraph and her edit. Local only.
-    pub(crate) fn learn_from_edit(&mut self, before: &str, after: &str) -> Result<(), CoreError> {
-        let found = replacements(before, after);
-        if found.is_empty() {
-            return Ok(());
-        }
+    /// Learn from her edit of the AI's paragraph in `section`: the changes she made, and her
+    /// final wording into the style model. Local only (D-052).
+    pub(crate) fn learn_from_edit(
+        &mut self,
+        section: &str,
+        before: &str,
+        after: &str,
+    ) -> Result<(), CoreError> {
         let mut learning = self.learning()?;
-        for (from, to) in found {
-            let key = format!("{}→{}", normalize(&from), normalize(&to));
-            match learning.pairs.iter_mut().find(|p| suggestion_id(p) == key) {
-                Some(p) => p.count = p.count.saturating_add(1),
-                None => learning.pairs.push(Pair {
-                    from,
-                    to,
-                    count: 1,
-                    ..Pair::default()
-                }),
-            }
-        }
-        if learning.pairs.len() > MAX_PAIRS {
-            learning.pairs.sort_by(|a, b| {
-                (b.accepted || b.dismissed, b.count).cmp(&(a.accepted || a.dismissed, a.count))
-            });
-            learning.pairs.truncate(MAX_PAIRS);
-        }
-        self.vault_mut()?.save_style_learning(&json(&learning)?)?;
+        learning.observe_edit(section, before, after);
+        let mut local = local_style(self.vault_ref()?)?;
+        local.model.observe_edit(section, after);
+        let v = self.vault_mut()?;
+        v.save_style_learning(&json(&learning)?)?;
+        v.set_secret(LOCAL_STYLE_KEY, &json(&local)?)?;
         Ok(())
     }
 
@@ -1744,20 +1640,70 @@ impl Core {
     pub(crate) fn learn_from_draft_edit(&mut self, old: Option<DraftParagraph>, new_tagged: &str) {
         if let Some(old) = old.filter(|d| d.author == Author::Ai) {
             // Learning is a convenience: an error here must not lose her edit.
-            let _ = self.learn_from_edit(&old.text_tagged, new_tagged);
+            let _ = self.learn_from_edit(&old.section_key, &old.text_tagged, new_tagged);
+        }
+    }
+
+    /// She approved the AI's paragraphs as written: the phrases in them were accepted. Never
+    /// blocks the approval.
+    pub(crate) fn learn_from_approval(&mut self, approved: &[DraftParagraph]) {
+        let texts: Vec<&str> = approved
+            .iter()
+            .filter(|d| d.author == Author::Ai)
+            .map(|d| d.text_tagged.as_str())
+            .collect();
+        if texts.is_empty() {
+            return;
+        }
+        let Ok(mut learning) = self.learning() else {
+            return;
+        };
+        for t in texts {
+            learning.observe_approval(t);
+        }
+        if let (Ok(doc), Ok(v)) = (json(&learning), self.vault_mut()) {
+            let _ = v.save_style_learning(&doc);
         }
     }
 
     /// Add a suggestion to the profile in use, as a new version (her click is the approval).
     pub fn accept_style_suggestion(&mut self, id: &str) -> Result<StyleProfileView, CoreError> {
         let mut learning = self.learning()?;
-        let pair = learning
-            .pairs
-            .iter_mut()
-            .find(|p| suggestion_id(p) == id)
-            .ok_or_else(|| CoreError::NotFound("ההצעה".to_owned()))?;
-        let text = format!("לכתוב «{}» ולא «{}»", pair.to, pair.from);
-        pair.accepted = true;
+        let local = local_style(self.vault_ref()?)?;
+        let not_found = || CoreError::NotFound("ההצעה".to_owned());
+        let item = if let Some(norm) = id.strip_prefix(PHRASE_ID) {
+            let p = local
+                .phrases
+                .iter()
+                .find(|p| p.norm == norm)
+                .ok_or_else(not_found)?;
+            learning.dismissed_phrases.push(p.norm.clone());
+            (
+                p.section.clone(),
+                StyleKind::Phrase,
+                p.text.clone(),
+                StyleOrigin::Reports,
+                p.reports,
+            )
+        } else {
+            let section = learning
+                .suggestions()
+                .into_iter()
+                .find(|s| s.id == id)
+                .and_then(|s| s.section);
+            let pair = learning.find_mut(id).ok_or_else(not_found)?;
+            pair.accepted = true;
+            let (kind, text) = if pair.is_deletion() {
+                (StyleKind::Avoid, format!("לא לכתוב «{}»", pair.from))
+            } else {
+                (
+                    StyleKind::Rule,
+                    format!("לכתוב «{}» ולא «{}»", pair.to, pair.from),
+                )
+            };
+            (section, kind, text, StyleOrigin::Edits, 0)
+        };
+        let (section, kind, text, origin, support) = item;
         let mut stored = self.active_profile()?.unwrap_or(StoredProfile {
             profile: StyleProfile::default(),
             dropped: 0,
@@ -1765,12 +1711,12 @@ impl Core {
         });
         stored.profile.items.push(StyleItem {
             id: dv_vault::crypto::random_id()?,
-            section: None,
-            kind: StyleKind::Rule,
+            section,
+            kind,
             text,
             enabled: true,
-            origin: StyleOrigin::Edits,
-            support: 0,
+            origin,
+            support,
         });
         self.check_items(&mut stored.profile)?;
         let v = self.vault_mut()?;
@@ -1786,15 +1732,65 @@ impl Core {
 
     pub fn dismiss_style_suggestion(&mut self, id: &str) -> Result<(), CoreError> {
         let mut learning = self.learning()?;
-        let pair = learning
-            .pairs
-            .iter_mut()
-            .find(|p| suggestion_id(p) == id)
-            .ok_or_else(|| CoreError::NotFound("ההצעה".to_owned()))?;
-        pair.dismissed = true;
+        if let Some(norm) = id.strip_prefix(PHRASE_ID) {
+            learning.dismissed_phrases.push(norm.to_owned());
+        } else {
+            learning
+                .find_mut(id)
+                .ok_or_else(|| CoreError::NotFound("ההצעה".to_owned()))?
+                .dismissed = true;
+        }
         self.vault_mut()?.save_style_learning(&json(&learning)?)?;
         Ok(())
     }
+}
+
+/// Suggestion ids of phrases from her reports start with this.
+const PHRASE_ID: &str = "phrase:";
+
+/// What to offer her: her usual edits, then phrases of her reports not yet in the profile.
+fn suggestions(
+    learning: &Learning,
+    local: &LocalStyle,
+    active: Option<&StyleProfileView>,
+) -> Vec<StyleSuggestion> {
+    let mut out: Vec<StyleSuggestion> = learning
+        .suggestions()
+        .into_iter()
+        .map(|s| StyleSuggestion {
+            kind: if s.to.is_empty() {
+                StyleSuggestionKind::Avoid
+            } else {
+                StyleSuggestionKind::Replace
+            },
+            id: s.id,
+            from: s.from,
+            to: s.to,
+            count: s.count,
+            confidence: s.confidence,
+            section: s.section,
+        })
+        .collect();
+    let in_profile: Vec<String> = active
+        .map(|a| a.profile.items.iter().map(|i| normalize(&i.text)).collect())
+        .unwrap_or_default();
+    out.extend(
+        local
+            .phrases
+            .iter()
+            .filter(|p| !learning.dismissed_phrases.contains(&p.norm))
+            .filter(|p| !in_profile.iter().any(|t| t.contains(&p.norm)))
+            .map(|p| StyleSuggestion {
+                id: format!("{PHRASE_ID}{}", p.norm),
+                kind: StyleSuggestionKind::Phrase,
+                from: p.text.clone(),
+                to: String::new(),
+                count: p.reports,
+                confidence: p.share,
+                section: p.section.clone(),
+            }),
+    );
+    out
 }
 
 #[cfg(test)]
@@ -1870,24 +1866,21 @@ mod unit {
 
     #[test]
     fn edits_yield_short_replacements_only() {
-        let r = replacements(
-            "[ילד] מראה קושי בוויסות, ונראה כי הוא זקוק לתיווך רב.",
-            "[ילד] מפגין קושי בוויסות, וניכר כי הוא זקוק לתיווך רב.",
-        );
+        let r = |a: &str, b: &str| dv_style::edits::changes(a, b).0;
         assert_eq!(
-            r,
+            r(
+                "[ילד] מראה קושי בוויסות, ונראה כי הוא זקוק לתיווך רב.",
+                "[ילד] מפגין קושי בוויסות, וניכר כי הוא זקוק לתיווך רב.",
+            ),
             vec![
                 ("מראה".to_owned(), "מפגין".to_owned()),
                 ("ונראה".to_owned(), "וניכר".to_owned())
             ]
         );
+        assert!(r("ציון 9", "ציון 11").is_empty(), "numbers are not style");
+        assert!(r("[ילד] הגיע", "[ילד_2] הגיע").is_empty());
         assert!(
-            replacements("ציון 9", "ציון 11").is_empty(),
-            "numbers are not style"
-        );
-        assert!(replacements("[ילד] הגיע", "[ילד_2] הגיע").is_empty());
-        assert!(
-            replacements("א ב ג ד ה ו", "ז ח ט י כ ל").is_empty(),
+            r("א ב ג ד ה ו", "ז ח ט י כ ל").is_empty(),
             "a rewritten sentence is not a replacement"
         );
     }

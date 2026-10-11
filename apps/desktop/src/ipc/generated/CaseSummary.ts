@@ -12,4 +12,8 @@ folder_id: string | null,
 /**
  * Set while the case is in the recycle bin (unix seconds).
  */
-deleted_at: number | null, };
+deleted_at: number | null, 
+/**
+ * When a send for the case last failed, while none has succeeded since (unix seconds).
+ */
+failed_at: number | null, };

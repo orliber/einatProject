@@ -238,6 +238,10 @@ select.select {
   background: var(--warn-soft);
   color: var(--warn);
 }
+.chip-fail {
+  background: var(--block-soft);
+  color: var(--block);
+}
 .chip-sand {
   background: var(--sand);
   color: var(--ink-soft);
