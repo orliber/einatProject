@@ -1,6 +1,6 @@
-// Text being typed when the vault locks (a paragraph, a session note, a question) is not lost: the core keeps it in memory while
-// she types, writes it into the vault (encrypted) as it locks, and offers it back once at the
-// next entry. The page itself keeps nothing: it is reloaded on lock.
+// Text being typed when the vault locks (a paragraph, a session note, a question) is not lost:
+// the core keeps it in memory while she types, writes it into the vault (encrypted) as it
+// locks, and offers it back once at the next entry. The page itself keeps nothing: it is reloaded on lock.
 import { useEffect, useRef, useState } from "react";
 import { useApp, type Route } from "../App";
 import { ipc, type UnsavedEdit } from "../ipc/client";
