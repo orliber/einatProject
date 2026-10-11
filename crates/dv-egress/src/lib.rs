@@ -7,6 +7,7 @@
 //! Gemini instead of Claude (D-040), [`providers`] re-shapes the same cleared text for that
 //! company, adding nothing.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -67,6 +68,12 @@ pub enum EgressError {
     Tls,
     #[error("unexpected answer from the service: {0}")]
     Protocol(String),
+    #[error("sending is switched off (emergency stop)")]
+    Stopped,
+    #[error("the request is larger than any report should need")]
+    TooLarge,
+    #[error("the daily limit of requests was reached")]
+    DailyLimit,
 }
 
 /// The body as an object with allowed top-level fields only.
@@ -129,6 +136,49 @@ pub trait Transport: Send + Sync {
         let _ = progress;
         self.send(payload)
     }
+}
+
+/// Largest request body that leaves the machine. A whole case with every document is far below
+/// this; anything above means a runaway loop or a bug, and is refused (fail-closed, S7).
+pub const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
+/// Most requests to a remote service in 24 hours, for the whole process.
+pub const DAILY_REQUESTS: usize = 400;
+
+static STOPPED: AtomicBool = AtomicBool::new(false);
+static DAILY: Mutex<Vec<Instant>> = Mutex::new(Vec::new());
+
+/// The emergency stop: while on, no request leaves the machine (local models still work).
+/// Memory only, so a restart clears it; the shell flips it from one visible button.
+pub fn set_stopped(on: bool) {
+    STOPPED.store(on, Ordering::SeqCst);
+}
+
+pub fn is_stopped() -> bool {
+    STOPPED.load(Ordering::SeqCst)
+}
+
+/// Last check before the wire: the emergency stop, the size limit and the daily limit.
+pub(crate) fn admit(body_len: usize, remote: bool) -> Result<(), EgressError> {
+    if body_len > MAX_BODY_BYTES {
+        return Err(EgressError::TooLarge);
+    }
+    if !remote {
+        return Ok(());
+    }
+    if is_stopped() {
+        return Err(EgressError::Stopped);
+    }
+    let mut day = DAILY.lock().map_err(|_| EgressError::DailyLimit)?;
+    admit_daily(&mut day, DAILY_REQUESTS, Instant::now())
+}
+
+fn admit_daily(sent: &mut Vec<Instant>, max: usize, now: Instant) -> Result<(), EgressError> {
+    sent.retain(|t| now.duration_since(*t) < Duration::from_secs(24 * 3600));
+    if sent.len() >= max {
+        return Err(EgressError::DailyLimit);
+    }
+    sent.push(now);
+    Ok(())
 }
 
 /// Simple sliding-window limit: a runaway loop cannot send hundreds of requests.
@@ -290,6 +340,7 @@ impl Transport for AnthropicTransport {
         let body: Value = serde_json::from_slice(payload.body())
             .map_err(|e| EgressError::Policy(e.to_string()))?;
         check_policy(&body)?;
+        admit(payload.body().len(), true)?;
         if !self.limit.lock().is_ok_and(|mut l| l.allow()) {
             return Err(EgressError::RateLimited);
         }
@@ -362,6 +413,27 @@ mod tests {
             Err(EgressError::NoApiKey)
         ));
         assert!(AnthropicTransport::new("sk-ant-test-not-real").is_ok());
+    }
+
+    #[test]
+    fn size_and_daily_limits_refuse_before_the_wire() {
+        assert_eq!(admit(MAX_BODY_BYTES + 1, false), Err(EgressError::TooLarge));
+        assert_eq!(admit(MAX_BODY_BYTES + 1, true), Err(EgressError::TooLarge));
+        let mut day = Vec::new();
+        let now = Instant::now();
+        assert!(admit_daily(&mut day, 2, now).is_ok());
+        assert!(admit_daily(&mut day, 2, now).is_ok());
+        assert_eq!(admit_daily(&mut day, 2, now), Err(EgressError::DailyLimit));
+    }
+
+    #[test]
+    fn emergency_stop_blocks_remote_but_not_local() {
+        set_stopped(true);
+        let remote = admit(10, true);
+        let local = admit(10, false);
+        set_stopped(false);
+        assert_eq!(remote, Err(EgressError::Stopped));
+        assert!(local.is_ok());
     }
 
     #[test]

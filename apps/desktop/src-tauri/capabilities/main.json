@@ -18,6 +18,8 @@
     "allow-touch",
     "allow-readiness",
     "allow-confirm-readiness",
+    "allow-security-status",
+    "allow-set-send-stopped",
     "allow-usage-summary",
     "allow-set-monthly-cap",
     "allow-hold-unsaved",

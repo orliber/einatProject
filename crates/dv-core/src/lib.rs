@@ -13,6 +13,7 @@ pub mod google;
 mod library;
 mod readiness;
 mod retention;
+mod security;
 mod sorting;
 mod style;
 mod unsaved;
@@ -53,6 +54,7 @@ pub use followup::FollowUpView;
 pub use library::TRASH_DAYS;
 pub use readiness::{Readiness, ReadinessItem};
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
+pub use security::{SecurityItem, SecurityStatus};
 pub use style::{
     StyleAnalysisResult, StyleImportPreview, StyleOverview, StylePartView, StyleProfileView,
     StyleSectionLabel, StyleSourceView, StyleSuggestion, StyleVersionView,
@@ -263,6 +265,10 @@ fn egress_he(e: &EgressError, ai: &str) -> String {
             "החיבור המאובטח נכשל. ייתכן שתוכנה במחשב (למשל אנטי-וירוס) מיירטת תעבורה מוצפנת."
                 .to_owned()
         }
+        EgressError::Stopped => "השליחה כבויה (עצירת חירום). אפשר להפעיל אותה מחדש במסך מצב האבטחה."
+            .to_owned(),
+        EgressError::TooLarge => "הבקשה גדולה מדי. כדאי לשלוח פחות חומרים בבת אחת.".to_owned(),
+        EgressError::DailyLimit => "הגעת למכסת הבקשות היומית. אפשר להמשיך מחר.".to_owned(),
         other => format!("שגיאה בחיבור ל-{ai}: {other}"),
     }
 }

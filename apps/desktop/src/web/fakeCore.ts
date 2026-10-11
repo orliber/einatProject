@@ -137,6 +137,7 @@ export class FakeCore {
   private lockMinutes = 15;
   private capUsd: number | null = null;
   private ready: Record<string, number | null> = {};
+  private sendStopped = false;
   private model = "claude-opus-5";
   private get ai() {
     return providerOf(this.model).name;
@@ -603,6 +604,16 @@ export class FakeCore {
         return null;
       case "take_unsaved":
         return null;
+      case "security_status":
+      case "set_send_stopped": {
+        if (cmd === "set_send_stopped") this.sendStopped = Boolean(a.stopped);
+        const ok = (key: string, state = "ok", detail: string | null = null) => ({ key, state, detail });
+        return {
+          items: [ok("encrypted"), ok("fips", "info"), ok("disk"), ok("cloud_folder"), ok("log_integrity"),
+            ok("auto_lock", "ok", "10"), ok("screen"), ok("hello", "info"), ok("send", this.sendStopped ? "warn" : "ok"), ok("isolation")],
+          send_stopped: this.sendStopped, daily_limit: 400, max_request_kb: 2048,
+        };
+      }
       case "readiness":
       case "confirm_readiness": {
         if (cmd === "confirm_readiness") this.ready[a.key as string] = a.done ? 1_790_000_000 : null;

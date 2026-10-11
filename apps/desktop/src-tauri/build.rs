@@ -17,6 +17,8 @@ fn main() {
             "take_unsaved",
             "readiness",
             "confirm_readiness",
+            "security_status",
+            "set_send_stopped",
             "usage_summary",
             "set_monthly_cap",
             "set_auto_backup",
