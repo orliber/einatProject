@@ -1142,6 +1142,8 @@ export class FakeCore {
         };
       case "prepare_update":
         return true;
+      case "open_releases_page":
+        return null;
       case "install_update":
         return fail("update", "בתצוגה המקדימה לא מתקינים. בתוכנה עצמה העדכון יורד, נבדק מול החתימה ומותקן.");
       case "change_password":

@@ -189,6 +189,14 @@ pub const MAIN_MIGRATIONS: &[&str] = &[
         text_tagged_enc BLOB NOT NULL
      );
      CREATE INDEX draft_versions_draft ON draft_versions(case_id, draft_id);",
+    // v9: the name model's person spans for a material (R4), so it reads each text once, not
+    // once per unlock. Keyed by a keyed hash of the model revision and the text; offsets only.
+    "CREATE TABLE name_hints (
+        key TEXT PRIMARY KEY,
+        case_id TEXT NOT NULL,
+        hints TEXT NOT NULL
+     );
+     CREATE INDEX name_hints_case ON name_hints(case_id);",
 ];
 
 pub const IDENTITY_MIGRATIONS: &[&str] = &[
@@ -238,6 +246,47 @@ pub const AUDIT_MIGRATIONS: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// R7: a version that cannot open the vault is replaced by the one before it. That only
+    /// works while every migration adds and never changes or drops, so the older code still
+    /// finds every table and column it reads.
+    #[test]
+    fn migrations_only_add_so_the_version_before_still_opens_the_vault() {
+        for list in [MAIN_MIGRATIONS, IDENTITY_MIGRATIONS, AUDIT_MIGRATIONS] {
+            for sql in list {
+                for stmt in sql
+                    .split(';')
+                    .map(str::trim)
+                    .filter(|s: &&str| !s.is_empty())
+                {
+                    let upper = stmt.to_uppercase();
+                    let adds = upper.starts_with("CREATE TABLE")
+                        || upper.starts_with("CREATE INDEX")
+                        || upper.starts_with("CREATE UNIQUE INDEX")
+                        || (upper.starts_with("ALTER TABLE") && upper.contains(" ADD COLUMN "));
+                    assert!(adds, "a migration that does not only add: {stmt}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_vault_from_a_newer_version_opens_and_keeps_what_it_added() {
+        let dir = tempfile::tempdir().unwrap_or_else(|_| unreachable!());
+        let conn = open_encrypted(&dir.path().join("t.db"), &Key32::from_bytes([4; 32]))
+            .unwrap_or_else(|_| unreachable!());
+        migrate(&conn, MAIN_MIGRATIONS).unwrap_or_else(|_| unreachable!());
+        let later = i64::try_from(MAIN_MIGRATIONS.len() + 1).unwrap_or(i64::MAX);
+        conn.execute_batch("CREATE TABLE from_the_future (x INTEGER);")
+            .unwrap_or_else(|_| unreachable!());
+        conn.execute("INSERT INTO schema_version (version) VALUES (?1)", [later])
+            .unwrap_or_else(|_| unreachable!());
+        assert!(migrate(&conn, MAIN_MIGRATIONS).is_ok());
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM from_the_future", [], |r| r.get(0))
+            .unwrap_or(-1);
+        assert_eq!(n, 0, "the newer table is still there");
+    }
 
     /// The Windows crash (D-038) needs SQLCipher's log to be off before memory security is on.
     /// Windows CI proves the crash is gone; this keeps the line from being dropped elsewhere.

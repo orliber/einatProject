@@ -11,6 +11,8 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+# The model runs in its own contained process, like the document readers (SEC2, D-044).
+dv-sandbox.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

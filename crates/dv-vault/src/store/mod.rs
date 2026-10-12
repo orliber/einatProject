@@ -693,6 +693,64 @@ impl Vault {
         )
     }
 
+    /// The key under which the name model's spans for `text` are kept: a keyed hash, so the
+    /// table says nothing about the text without the vault's keys.
+    #[must_use]
+    pub fn name_hints_key(&self, revision: &str, text: &str) -> String {
+        hex(&hmac_sha256(
+            &self.keys.index,
+            format!("name_hints|{revision}|{text}").as_bytes(),
+        ))
+    }
+
+    /// The name model's spans kept for a text (JSON), if it read it before.
+    pub fn name_hints(&self, key: &str) -> Result<Option<String>, VaultError> {
+        Ok(self
+            .main
+            .query_row("SELECT hints FROM name_hints WHERE key = ?1", [key], |r| {
+                r.get(0)
+            })
+            .optional()?)
+    }
+
+    pub fn set_name_hints(
+        &mut self,
+        key: &str,
+        case_id: &str,
+        hints: &str,
+    ) -> Result<(), VaultError> {
+        self.main.execute(
+            "INSERT OR REPLACE INTO name_hints (key, case_id, hints) VALUES (?1, ?2, ?3)",
+            params![key, case_id, hints],
+        )?;
+        Ok(())
+    }
+
+    /// Drop every kept span whose key is not in `keep` (texts that are gone); returns how many.
+    pub fn keep_name_hints(
+        &mut self,
+        keep: &std::collections::HashSet<String>,
+    ) -> Result<usize, VaultError> {
+        let keys: Vec<String> = self
+            .main
+            .prepare("SELECT key FROM name_hints")?
+            .query_map([], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        let tx = self.main.unchecked_transaction()?;
+        let mut n = 0;
+        for k in keys.iter().filter(|k| !keep.contains(*k)) {
+            n += tx.execute("DELETE FROM name_hints WHERE key = ?1", [k])?;
+        }
+        tx.commit()?;
+        Ok(n)
+    }
+
+    /// Forget every kept span (the model was turned off).
+    pub fn clear_name_hints(&mut self) -> Result<(), VaultError> {
+        self.main.execute("DELETE FROM name_hints", [])?;
+        Ok(())
+    }
+
     /// Secrets (e.g. the API key) are stored encrypted inside the vault.
     pub fn secret(&self, key: &str) -> Result<Option<Zeroizing<String>>, VaultError> {
         let row: Option<Vec<u8>> = self
@@ -1242,6 +1300,7 @@ impl Vault {
             "draft_versions",
             "transmissions",
             "consultations",
+            "name_hints",
         ] {
             tx.execute(
                 &format!("DELETE FROM {table} WHERE case_id = ?1"),

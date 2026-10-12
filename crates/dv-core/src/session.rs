@@ -34,6 +34,7 @@ impl Core {
             session: 0,
             models_dir: None,
             ner: None,
+            ner_exe: None,
             ner_problem: None,
             hint_cache: HashMap::new(),
         }
@@ -301,6 +302,11 @@ impl Core {
                         }
                     }
                 }
+                // The name model's kept spans of materials that are gone go too (R4). Only
+                // a saving: a failure here never keeps the vault from opening.
+                if self.name_model_on() {
+                    let _ = self.prune_name_hints();
+                }
                 Ok(self.status())
             }
             Err(e) => {
@@ -345,6 +351,9 @@ impl Core {
         self.style_staged.clear();
         self.removed_input = None;
         self.hint_cache.clear();
+        // The model's process held texts of this session in its memory: it ends with the lock.
+        self.ner = None;
+        self.ner_problem = None;
         if let Some(v) = self.vault.take() {
             let _ = v.lock_because(reason);
         }

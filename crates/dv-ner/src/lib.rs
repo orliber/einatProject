@@ -6,6 +6,8 @@
 //! files are downloaded by `dv-egress` only when she turns the model on. Its spans are hints
 //! only: `dv-privacy` may add a hide for them, never remove one a rule made.
 
+pub mod worker;
+
 use std::fmt;
 use std::path::Path;
 

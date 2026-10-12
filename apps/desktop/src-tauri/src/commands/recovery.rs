@@ -2,10 +2,12 @@
 
 use crate::*;
 
-/// Open Google's sign-in page in her default browser (never inside the program). Only that
-/// fixed address is ever opened from here.
+/// Open Google's sign-in page, or the page of released versions (R7), in her default browser
+/// (never inside the program). Only those fixed addresses are ever opened from here.
 pub(crate) fn open_in_browser(url: &str) -> Result<(), CoreError> {
-    if !url.starts_with(dv_core::google::AUTH_URL) || url.contains(['"', '\'', ' ', '\n']) {
+    let allowed =
+        url.starts_with(dv_core::google::AUTH_URL) || url == dv_core::update::RELEASES_PAGE;
+    if !allowed || url.contains(['"', '\'', ' ', '\n']) {
         return Err(CoreError::Internal(
             "refused to open an unexpected address".to_owned(),
         ));

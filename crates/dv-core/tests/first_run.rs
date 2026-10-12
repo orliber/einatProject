@@ -44,3 +44,30 @@ fn the_vault_opens_again_after_the_program_closes() {
     assert!(core.unlock_with_recovery(&recovery).unwrap().unlocked);
     core.lock();
 }
+
+/// R6: opening, as she waits for it: the Argon2 cost this computer picked, the vault, the
+/// list of cases. The cost is picked so the key takes about a second on the computer that
+/// created the vault (`Argon2Params::calibrate`); the whole opening must stay under 3 seconds.
+#[test]
+#[ignore = "slow: the real Argon2 cost; run with --ignored"]
+fn opening_the_vault_takes_under_three_seconds() {
+    use std::time::{Duration, Instant};
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault");
+    std::fs::create_dir_all(&vault).unwrap();
+    {
+        let mut core = Core::new(&vault);
+        core.create_vault(PASSWORD).unwrap();
+        core.lock();
+    }
+    let mut core = Core::new(&vault);
+    let started = Instant::now();
+    assert!(core.unlock(PASSWORD).unwrap().unlocked);
+    core.list_cases().unwrap();
+    let took = started.elapsed();
+    let _ = std::io::Write::write_fmt(
+        &mut std::io::stderr(),
+        format_args!("R6: opening took {took:?}\n"),
+    );
+    assert!(took < Duration::from_secs(3), "opening took {took:?}");
+}

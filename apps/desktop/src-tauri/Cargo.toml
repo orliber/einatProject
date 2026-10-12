@@ -28,6 +28,8 @@ tauri = { version = "2", features = ["isolation"] }
 dv-core.workspace = true
 dv-domain.workspace = true
 dv-ingest.workspace = true
+# The name model worker (SEC2): the app binary turns into it, like the document worker.
+dv-ner.workspace = true
 dv-privacy.workspace = true
 dv-ipc.workspace = true
 # Copying the Word file password: out of clipboard history and cloud sync, cleared after 60 s.

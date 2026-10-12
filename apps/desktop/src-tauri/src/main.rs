@@ -158,6 +158,12 @@ fn main() {
     if std::env::args().nth(1).as_deref() == Some(dv_ingest::worker::WORKER_ARG) {
         std::process::exit(dv_ingest::worker::worker_main());
     }
+    // The name model worker (SEC2): the same binary, started by the core once per unlock with
+    // the model folder, contained like the document worker.
+    if std::env::args().nth(1).as_deref() == Some(dv_ner::worker::WORKER_ARG) {
+        let dir = std::env::args().nth(2).unwrap_or_default();
+        std::process::exit(dv_ner::worker::worker_main(std::path::Path::new(&dir)));
+    }
 
     let result = tauri::Builder::default()
         .setup(|app| {
@@ -174,7 +180,9 @@ fn main() {
             let models = data.join("models");
             let mut core = Core::new(&dir).with_models_dir(models.clone());
             if let Ok(exe) = std::env::current_exe() {
-                core = core.with_ingest_worker(exe);
+                core = core
+                    .with_ingest_worker(exe.clone())
+                    .with_name_model_worker(exe);
             }
             let core = Arc::new(Mutex::new(core));
             let clipboard = secret_clipboard::SecretClipboard::default();
@@ -370,6 +378,7 @@ fn main() {
             check_update,
             prepare_update,
             install_update,
+            open_releases_page,
             send_progress,
         ])
         .run(tauri::generate_context!());

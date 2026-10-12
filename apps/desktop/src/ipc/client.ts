@@ -343,6 +343,8 @@ export const ipc = {
   prepareUpdate: () => call<boolean>("prepare_update"),
   /** Lock, run the verified installer (fetched now if it is not waiting); closes and opens again. */
   installUpdate: () => run("install_update"),
+  /** R7: the page of released versions, in her browser, to go back one version. */
+  openReleasesPage: () => run("open_releases_page"),
 };
 
 export type {

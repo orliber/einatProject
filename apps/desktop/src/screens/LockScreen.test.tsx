@@ -54,3 +54,28 @@ describe("too many wrong tries", () => {
     vi.useRealTimers();
   });
 });
+
+describe("a version that cannot open the vault (R7)", () => {
+  it("says the vault is safe and opens the page of versions; a wrong password does not", async () => {
+    const calls: string[] = [];
+    let code = "vault";
+    mockIPC((cmd) => {
+      calls.push(cmd);
+      if (cmd === "unlock") throw { code, message: "תקלה טכנית.", details: [] };
+      if (cmd === "ping") return { ipc_version: 1, core_version: "0.6.0", build_commit: "test", fips_active: false, platform: "linux" };
+      if (cmd === "google_status") return { on: false };
+      return null;
+    });
+    render(<LockScreen />);
+    fireEvent.change(screen.getByLabelText("סיסמה"), { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: "פתיחה" }));
+    expect(await screen.findByText(/הכספת נשארת במחשב ולא נמחקת/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /לדף הגרסאות/ }));
+    expect(calls).toContain("open_releases_page");
+    code = "wrong_secret";
+    fireEvent.change(screen.getByLabelText("סיסמה"), { target: { value: "y" } });
+    fireEvent.click(screen.getByRole("button", { name: "פתיחה" }));
+    await act(async () => {});
+    expect(screen.queryByText(/הכספת נשארת במחשב/)).toBeNull();
+  });
+});
