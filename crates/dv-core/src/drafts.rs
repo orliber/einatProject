@@ -50,7 +50,11 @@ impl Core {
                             })
                             .collect(),
                         // Every score in the text against the score table, each time (AI-6).
-                        warnings: dv_domain::check_scores(&d.text_tagged, &sheets),
+                        // And an age that is not the child's age in the details.
+                        warnings: dv_domain::check_scores(&d.text_tagged, &sheets)
+                            .into_iter()
+                            .chain(dv_domain::check_age(&d.text_tagged, meta.age))
+                            .collect(),
                         style_note: style_model
                             .as_ref()
                             .filter(|_| d.author == Author::Ai && d.status == DraftStatus::Proposed)

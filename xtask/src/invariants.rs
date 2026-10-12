@@ -383,6 +383,7 @@ fn tauri_hardening(shell: &Path) -> Vec<String> {
     let mut problems = tauri_config_violations(&conf, &capabilities);
     problems.extend(isolation_allowlist(shell));
     problems.extend(command_lists(shell, &capabilities));
+    problems.extend(preview_commands(shell));
     problems
 }
 
@@ -437,6 +438,41 @@ fn command_lists(shell: &Path, capabilities: &[serde_json::Value]) -> Vec<String
         ));
     }
     problems
+}
+
+/// Commands that only the desktop shell can do, so the browser preview has no stand-in.
+const DESKTOP_ONLY: &[&str] = &["print_page"];
+
+/// The browser preview (`web/fakeCore.ts`, `web/fakeStyle.ts`) answers every command the shell
+/// declares, so the UI tests and the demo exercise each button; and it answers nothing the
+/// shell does not have. A command with no stand-in shows "לא זמינה בהדמיה" in the demo.
+fn preview_commands(shell: &Path) -> Vec<String> {
+    let read = |p: &Path| fs::read_to_string(p).unwrap_or_default();
+    let quoted = |text: &str, pattern: &str| -> BTreeSet<String> {
+        Regex::new(pattern).map_or_else(
+            |_| BTreeSet::new(),
+            |re| re.captures_iter(text).map(|c| c[1].to_owned()).collect(),
+        )
+    };
+    let declared = quoted(
+        &read(&shell.join("build.rs")),
+        r#"(?m)^\s+"([a-z_]+)",\s*$"#,
+    );
+    let web = shell.join("../src/web");
+    let preview_text = read(&web.join("fakeCore.ts")) + &read(&web.join("fakeStyle.ts"));
+    let preview = quoted(&preview_text, r#"case "([a-z_]+)""#);
+    let missing: Vec<&String> = declared
+        .iter()
+        .filter(|c| !preview.contains(*c) && !DESKTOP_ONLY.contains(&c.as_str()))
+        .collect();
+    let extra: Vec<&String> = preview.difference(&declared).collect();
+    if declared.is_empty() || !missing.is_empty() || !extra.is_empty() {
+        return vec![format!(
+            "the browser preview (web/fakeCore.ts, web/fakeStyle.ts) must answer exactly the \
+             commands in build.rs, or list one in DESKTOP_ONLY (missing {missing:?}, extra {extra:?})"
+        )];
+    }
+    Vec::new()
 }
 
 /// The isolation app lets through exactly the commands `build.rs` declares (D-047).

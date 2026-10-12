@@ -728,3 +728,18 @@ fn what_she_deletes_becomes_an_avoid_and_what_she_keeps_is_not_suggested() {
         "she keeps it most of the time"
     );
 }
+
+#[test]
+fn the_style_requests_count_toward_the_month_like_every_other_request() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core) = vault(Some(fake.clone()));
+    upload(&mut core);
+    assert_eq!(core.usage_summary().unwrap().requests, 0);
+    build(&mut core);
+    // One analysis and one profile: both went out, so both are counted (and so stop at the
+    // monthly ceiling she set), as a section draft is.
+    assert_eq!(
+        core.usage_summary().unwrap().requests,
+        u32::try_from(fake.sent.lock().unwrap().len()).unwrap()
+    );
+}

@@ -155,44 +155,22 @@ impl Core {
         out: Outgoing,
         response: Result<(Value, bool), CoreError>,
     ) -> Result<VerifyResult, CoreError> {
-        if !matches!(out.pending.kind, PendingKind::Verify { .. }) {
-            return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
-        }
-        let (response, demo) = match response {
-            Ok(r) => r,
-            Err(e) => {
-                self.restore_pending(out);
-                return Err(e);
-            }
-        };
-        self.note_usage(&out.pending.payload, &response, demo);
-        let model = out.model.clone();
-        let Pending { payload, kind } = out.pending;
+        let crate::stage::Received {
+            kind,
+            response,
+            demo,
+            ..
+        } = self.receive(out, response, crate::stage::Stage::Verify)?;
         let PendingKind::Verify {
             case_id,
-            section_key,
+            section_key: _,
             draft_ids,
             source_ids,
         } = kind
         else {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
         };
-        // The request went out: record it before anything about the reply can fail.
-        let payload_text = String::from_utf8_lossy(payload.body()).into_owned();
-        let ai = provider_of(&model).display_name();
         let v = self.vault_mut()?;
-        v.add_transmission(
-            &case_id,
-            &section_key,
-            payload.sha256(),
-            if demo { "demo" } else { &model },
-            &payload_text,
-        )?;
-        v.record(
-            AuditEvent::Send,
-            Some(&case_id),
-            &serde_json::json!({ "section": section_key, "stage": "verify", "demo": demo, "ai": ai }),
-        )?;
         let paragraph_ids: Vec<String> = (1..=draft_ids.len()).map(|i| format!("P{i}")).collect();
         let mut checks = dv_ai::parse_verify(&response, &paragraph_ids, &source_ids)?;
         // Notes may carry tags; she reads the names. A note is shown, never stored or sent.
