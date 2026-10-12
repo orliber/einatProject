@@ -29,6 +29,8 @@ pub const MIN_PARAGRAPHS: f64 = 12.0;
 const PRIOR: f64 = 8.0;
 /// A feature is worth a note from this many standard deviations away.
 const Z_NOTE: f64 = 2.0;
+/// ...and worth a line under the closeness figure, or a request to the AI, from this many.
+const Z_HINT: f64 = 1.0;
 /// Weight of her final wording of an edited paragraph.
 pub const EDIT_WEIGHT: f64 = 0.5;
 
@@ -38,6 +40,9 @@ struct Feature {
     /// (more than usual, less than usual); `{x}` is her usual figure, `{v}` this paragraph's.
     more: &'static str,
     less: Option<&'static str>,
+    /// What to ask the AI for when it is (more, less) than usual; `{x}` is her usual figure.
+    ask_more: Option<&'static str>,
+    ask_less: Option<&'static str>,
 }
 
 const FEATURES: [Feature; N] = [
@@ -45,51 +50,71 @@ const FEATURES: [Feature; N] = [
         floor: 2.0,
         more: "משפטים ארוכים מהרגיל אצלך (בממוצע {v} מילים במשפט; אצלך בדרך כלל כ-{x})",
         less: Some("משפטים קצרים מהרגיל אצלך (בממוצע {v} מילים במשפט; אצלך בדרך כלל כ-{x})"),
+        ask_more: Some("משפטים קצרים יותר, כ-{x} מילים במשפט"),
+        ask_less: Some("משפטים מעט ארוכים יותר, כ-{x} מילים במשפט"),
     },
     Feature {
         floor: 1.5,
         more: "אורך המשפטים משתנה יותר מהרגיל אצלך",
         less: None,
+        ask_more: Some("משפטים באורך אחיד יותר"),
+        ask_less: None,
     },
     Feature {
         floor: 0.8,
         more: "יותר משפטים בפסקה מהרגיל אצלך ({v}; אצלך בדרך כלל כ-{x})",
         less: Some("פחות משפטים בפסקה מהרגיל אצלך ({v}; אצלך בדרך כלל כ-{x})"),
+        ask_more: Some("פחות משפטים בפסקה, כ-{x}"),
+        ask_less: Some("יותר משפטים בפסקה, כ-{x}"),
     },
     Feature {
         floor: 0.25,
         more: "ניסוח כבד מהרגיל אצלך (מילים ארוכות)",
         less: None,
+        ask_more: Some("מילים פשוטות וקצרות יותר"),
+        ask_less: None,
     },
     Feature {
         floor: 0.4,
         more: "יותר פסיקים מהרגיל אצלך",
         less: None,
+        ask_more: Some("פחות פסיקים ומשפטים פשוטים יותר"),
+        ask_less: None,
     },
     Feature {
         floor: 1.0,
         more: "יותר סוגריים מהרגיל אצלך",
         less: None,
+        ask_more: Some("בלי סוגריים, או מעט מאוד"),
+        ask_less: None,
     },
     Feature {
         floor: 0.15,
         more: "יותר מילות ניגוד («אך», «עם זאת») מהרגיל אצלך",
         less: None,
+        ask_more: Some("פחות מילות ניגוד כמו «אך» ו«עם זאת»"),
+        ask_less: None,
     },
     Feature {
         floor: 0.15,
         more: "יותר הסתייגויות («נראה», «ניכר») מהרגיל אצלך",
         less: Some("פחות הסתייגויות («נראה», «ניכר») מהרגיל אצלך"),
+        ask_more: Some("פחות הסתייגויות כמו «נראה» ו«ניכר»"),
+        ask_less: Some("יותר ניסוח זהיר, כמו «נראה» ו«ניכר»"),
     },
     Feature {
         floor: 0.12,
         more: "יותר גוף ראשון («התרשמתי») מהרגיל אצלך",
         less: Some("פחות גוף ראשון («התרשמתי») מהרגיל אצלך"),
+        ask_more: Some("פחות גוף ראשון"),
+        ask_less: Some("יותר גוף ראשון, כמו «התרשמתי»"),
     },
     Feature {
         floor: 0.1,
         more: "בחירת המילים הקטנות («של», «כי», «אשר») שונה מהרגיל אצלך",
         less: None,
+        ask_more: None,
+        ask_less: None,
     },
 ];
 
@@ -459,38 +484,70 @@ impl StyleModel {
         self.combined().global.first().map_or(0.0, |m| m.n)
     }
 
+    /// Features of a paragraph at least `z_min` of her usual spreads away, furthest first:
+    /// (feature, z, her usual figure, this paragraph's).
+    fn unusual(&self, section: &str, text: &str, z_min: f64) -> Vec<(usize, f64, f64, f64)> {
+        let mut found: Vec<_> = self
+            .zs(section, text)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(_, z, _, _)| z.abs() >= z_min)
+            .collect();
+        found.sort_by(|a, b| b.1.abs().total_cmp(&a.1.abs()));
+        found
+    }
+
+    /// The features of a paragraph at least `z_min` away, in words (her figures filled in).
+    fn described(&self, section: &str, text: &str, z_min: f64) -> Vec<String> {
+        self.unusual(section, text, z_min)
+            .into_iter()
+            .filter_map(|(i, z, mean, x)| {
+                let spec = &FEATURES[i];
+                let t = if z > 0.0 { Some(spec.more) } else { spec.less }?;
+                Some(
+                    t.replace("{v}", &format!("{x:.0}"))
+                        .replace("{x}", &format!("{mean:.0}")),
+                )
+            })
+            .collect()
+    }
+
     /// A gentle note on a drafted paragraph in `section` whose writing is unlike hers: the one
     /// or two features furthest from her usual figures, in words. `None` when it reads like her
     /// or when there is too little to go on.
     #[must_use]
     pub fn note(&self, section: &str, text: &str) -> Option<String> {
-        let mut found: Vec<(f64, String)> = Vec::new();
-        for (i, z, mean, x) in self.zs(section, text)? {
-            let spec = &FEATURES[i];
-            let text = if z >= Z_NOTE {
-                Some(spec.more)
-            } else if z <= -Z_NOTE {
-                spec.less
-            } else {
-                None
-            };
-            if let Some(t) = text {
-                found.push((
-                    z.abs(),
-                    t.replace("{v}", &format!("{x:.0}"))
-                        .replace("{x}", &format!("{mean:.0}")),
-                ));
-            }
-        }
-        found.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let mut found = self.described(section, text, Z_NOTE);
         found.truncate(2);
-        (!found.is_empty()).then(|| {
-            found
-                .into_iter()
-                .map(|(_, t)| t)
-                .collect::<Vec<_>>()
-                .join("; ")
-        })
+        (!found.is_empty()).then(|| found.join("; "))
+    }
+
+    /// Everything in a paragraph that is noticeably unlike her (one of her usual spreads away),
+    /// furthest first, in words: what she reads under the closeness figure.
+    #[must_use]
+    pub fn differences(&self, section: &str, text: &str) -> Vec<String> {
+        self.described(section, text, Z_HINT)
+    }
+
+    /// What to ask the AI so the paragraph reads more like her, as one line of requests, or
+    /// `None` when nothing is far enough off. Only her usual figures go into it, never text.
+    #[must_use]
+    pub fn closer_ask(&self, section: &str, text: &str) -> Option<String> {
+        let asks: Vec<String> = self
+            .unusual(section, text, Z_HINT)
+            .into_iter()
+            .filter_map(|(i, z, mean, _)| {
+                let spec = &FEATURES[i];
+                let t = if z > 0.0 {
+                    spec.ask_more
+                } else {
+                    spec.ask_less
+                }?;
+                Some(t.replace("{x}", &format!("{mean:.0}")))
+            })
+            .take(3)
+            .collect();
+        (!asks.is_empty()).then(|| asks.join("; "))
     }
 }
 

@@ -75,6 +75,32 @@ pub struct ParagraphView {
     pub has_versions: bool,
     /// A gentle note when Claude's sentences are unlike hers ("משפטים ארוכים מהרגיל אצלך").
     pub style_note: Option<String>,
+    /// How a proposed paragraph of the AI compares with her writing; `None` for her own
+    /// paragraphs, approved ones, or when the profile is off.
+    pub style: Option<StyleHint>,
+}
+
+/// Next to a proposed paragraph of the AI: how close it is to her writing and what to do
+/// about it. All of it is worked out on her computer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct StyleHint {
+    /// 0 to 100; `None` until enough of her writing was learned.
+    pub fit: Option<u32>,
+    /// What is noticeably unlike her, in words, furthest first.
+    pub details: Vec<String>,
+    /// What "לקרב לסגנון שלי" asks of the AI ("משפטים קצרים יותר, כ-14 מילים במשפט").
+    pub ask: Option<String>,
+    /// Phrases here that she usually changes, with what she writes instead.
+    pub marks: Vec<StyleMark>,
+}
+
+/// A phrase she usually changes. `to` empty: she usually deletes it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct StyleMark {
+    pub from: String,
+    pub to: String,
 }
 
 /// An earlier wording of a paragraph, names restored for display (D-046).

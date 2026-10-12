@@ -90,6 +90,7 @@ impl Core {
                 has_versions: with_versions.contains(&d.id),
                 // A letter is short and written from approved text: no style note (D-043).
                 style_note: None,
+                style: None,
                 id: d.id,
                 text: restore(&d.text_tagged, &identities, practitioner.as_deref()),
                 status: d.status,

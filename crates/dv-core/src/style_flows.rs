@@ -787,3 +787,101 @@ fn the_style_requests_count_toward_the_month_like_every_other_request() {
         u32::try_from(fake.sent.lock().unwrap().len()).unwrap()
     );
 }
+
+#[test]
+fn a_proposed_paragraph_shows_her_usual_changes_and_nothing_with_the_profile_off() {
+    let (_dir, mut core) = vault(Some(FakeTransport::default()));
+    let case_id = case(&mut core);
+    for n in ["א", "ב", "ג"] {
+        let d = core
+            .vault
+            .as_mut()
+            .unwrap()
+            .add_draft(
+                &case_id,
+                "appearance",
+                &format!("[ילד] מראה קושי במשימה {n}."),
+                Author::Ai,
+                &[],
+            )
+            .unwrap();
+        core.edit_paragraph(&case_id, &d.id, &format!("אלון מפגין קושי במשימה {n}."))
+            .unwrap();
+    }
+    core.vault
+        .as_mut()
+        .unwrap()
+        .add_draft(
+            &case_id,
+            "appearance",
+            "[ילד] מראה עניין במשחק.",
+            Author::Ai,
+            &[],
+        )
+        .unwrap();
+    let hint = |core: &mut Core| {
+        core.case_detail(&case_id)
+            .unwrap()
+            .sections
+            .into_iter()
+            .flat_map(|s| s.paragraphs)
+            .find(|p| p.status == dv_domain::DraftStatus::Proposed)
+            .unwrap()
+            .style
+    };
+    let style = hint(&mut core).expect("a proposed paragraph of the AI");
+    assert_eq!(
+        style.marks,
+        vec![crate::StyleMark {
+            from: "מראה".into(),
+            to: "מפגין".into()
+        }]
+    );
+    assert_eq!(style.fit, None, "no past reports: too little to measure");
+    assert!(style.details.is_empty() && style.ask.is_none());
+    core.set_style_enabled(false).unwrap();
+    assert!(hint(&mut core).is_none());
+}
+
+#[test]
+fn the_closeness_figure_comes_with_its_reasons_and_what_to_ask() {
+    let sentence = |n: usize| vec!["מילה"; n].join(" ");
+    let text: String = (0..20)
+        .map(|i| {
+            format!(
+                "{}. {}. {}.\n",
+                sentence(8 + i % 5),
+                sentence(9 + i % 3),
+                sentence(12 - i % 4)
+            )
+        })
+        .collect();
+    let mut local = super::LocalStyle::default();
+    super::fit_reports(
+        &mut local,
+        &[super::StoredSource {
+            title: "דוח".into(),
+            format: "text".into(),
+            parts: vec![super::StoredPart {
+                section: Some("observation".into()),
+                heading: String::new(),
+                text,
+            }],
+            analysis: None,
+        }],
+    );
+    let m = &local.model;
+    let long = format!("{}. {}.", sentence(30), sentence(28));
+    let usual = format!("{}. {}. {}.", sentence(10), sentence(9), sentence(11));
+    assert!(m.fidelity("observation", &long).unwrap() < m.fidelity("observation", &usual).unwrap());
+    let details = m.differences("observation", &long);
+    assert!(
+        details[0].starts_with("משפטים ארוכים מהרגיל אצלך"),
+        "{details:?}"
+    );
+    let ask = m.closer_ask("observation", &long).unwrap();
+    assert!(ask.starts_with("משפטים קצרים יותר, כ-1"), "{ask}");
+    assert!(!ask.contains("מילה מילה"), "only her figures, never text");
+    assert!(m.closer_ask("observation", &usual).is_none());
+    assert!(m.differences("observation", &usual).is_empty());
+}

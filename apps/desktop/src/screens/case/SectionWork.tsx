@@ -12,6 +12,7 @@ import { kindLabel } from "../../i18n/he";
 import { useRotatingPlaceholder } from "../../components/Rotating";
 import { DRAFT_HINTS } from "../../i18n/suggestions";
 import { ParagraphVersions } from "../../components/ParagraphVersions";
+import { MarkedText, StyleHintView, applyMark } from "./StyleHintView";
 import { isCombo, KEYS } from "../../shortcuts";
 import type { CaseApi } from "../CaseScreen";
 import "./SectionWork.css";
@@ -381,12 +382,16 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                       onChange={(e) => setEditing({ id: p.id, text: e.target.value })} />
                   </label>
                 ) : (
-                  <p className="serif para-text">{p.text}</p>
+                  <p className="serif para-text"><MarkedText text={p.text} marks={p.style?.marks ?? []} /></p>
                 )}
                 {warnings.map((w, i) => (
                   <div key={i} className="note-warn"><WarnIcon /><span>{w}</span></div>
                 ))}
-                {!isEditing && p.style_note && <span className="small muted style-note">{p.style_note}</span>}
+                {!isEditing && p.style && (
+                  <StyleHintView hint={p.style} busy={working}
+                    onCloser={(how) => void ask(`נסחי מחדש את הפסקה הבאה כך שתישמע כמו הכתיבה שלי: ${how}. באותו תוכן ובלי להוסיף עובדות: "${p.text}"`, "קירוב פסקה לסגנון שלך", p.id)}
+                    onApply={(m) => void act(() => ipc.editParagraph(caseId, p.id, applyMark(p.text, m)))} />
+                )}
                 <div className="row wrap-row">
                   {isEditing ? (
                     <>
