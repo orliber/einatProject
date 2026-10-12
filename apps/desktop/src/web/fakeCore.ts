@@ -416,7 +416,7 @@ export class FakeCore {
           key: s.key, title: s.title, part: s.part,
           source_count: routing.filter((r) => r.feeds.includes(s.key)).length,
           sortable: SORTABLE.some((x) => x.key === s.key),
-          paragraphs: drafts.map((d) => ({ id: d.id, text: restore(d.text, c.people, this.practitioner), status: d.status, by_ai: d.byAi, sources: d.sources, warnings: [], replaces: d.replaces ?? null, has_versions: versionsOf(c.drafts, d).length > 0, style_note: null })),
+          paragraphs: drafts.map((d) => ({ id: d.id, text: restore(d.text, c.people, this.practitioner), status: d.status, by_ai: d.byAi, sources: d.sources, warnings: [], replaces: d.replaces ?? null, has_versions: versionsOf(c.drafts, d).length > 0, style_note: null, style: fakeStyleHint(d) })),
           approved: drafts.some((d) => d.status === "approved"),
         };
       }),
@@ -1170,4 +1170,16 @@ export class FakeCore {
         return fail("preview", `הפעולה ${cmd} לא זמינה בהדמיה בדפדפן.`);
     }
   }
+}
+
+/** The preview's stand-in for the style figures the core works out (ST7–ST9). */
+function fakeStyleHint(d: { byAi: boolean; status: string; text: string }) {
+  if (!d.byAi || d.status !== "proposed") return null;
+  const long = d.text.split(/[.!?]/).some((x) => x.trim().split(/\s+/).length > 18);
+  return {
+    fit: long ? 62 : 84,
+    details: long ? ["משפטים ארוכים מהרגיל אצלך (בממוצע 22 מילים במשפט; אצלך בדרך כלל כ-14)"] : [],
+    ask: long ? "משפטים קצרים יותר, כ-14 מילים במשפט" : null,
+    marks: d.text.includes("מפגין") ? [{ from: "מפגין", to: "מראה" }] : [],
+  };
 }

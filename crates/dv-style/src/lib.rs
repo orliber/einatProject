@@ -23,7 +23,7 @@ pub mod retrieve;
 pub mod stylometry;
 pub mod text;
 
-pub use edits::{EditModel, EditSuggestion, Pattern};
+pub use edits::{EditMark, EditModel, EditSuggestion, Pattern};
 pub use phrases::{mine_phrases, PhraseCandidate, ReportParts};
 pub use stylometry::{Measures, StyleModel};
 

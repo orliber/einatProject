@@ -6,6 +6,12 @@ impl Core {
     pub fn case_detail(&mut self, case_id: &str) -> Result<CaseDetail, CoreError> {
         let structure =
             ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
+        // What she usually changes in the AI's wording (ST9); only with the profile on.
+        let habits = if style::style_model(self.vault_ref()?)?.is_some() {
+            self.style_habits().unwrap_or_default()
+        } else {
+            dv_style::EditModel::default()
+        };
         let v = self.vault_ref()?;
         let meta = v.case_meta(case_id)?;
         let identities = v.identities(case_id)?;
@@ -59,6 +65,26 @@ impl Core {
                             .as_ref()
                             .filter(|_| d.author == Author::Ai && d.status == DraftStatus::Proposed)
                             .and_then(|m| style::style_note(m, &s.key, &d.text_tagged)),
+                        style: style_model
+                            .as_ref()
+                            .filter(|_| d.author == Author::Ai && d.status == DraftStatus::Proposed)
+                            .map(|m| {
+                                let shown =
+                                    |t: &str| restore(t, &identities, practitioner.as_deref());
+                                StyleHint {
+                                    fit: m.fidelity(&s.key, &d.text_tagged),
+                                    details: m.differences(&s.key, &d.text_tagged),
+                                    ask: m.closer_ask(&s.key, &d.text_tagged),
+                                    marks: habits
+                                        .marks(&d.text_tagged)
+                                        .into_iter()
+                                        .map(|k| StyleMark {
+                                            from: shown(&k.from),
+                                            to: shown(&k.to),
+                                        })
+                                        .collect(),
+                                }
+                            }),
                         replaces: d.replaces,
                     })
                     .collect();

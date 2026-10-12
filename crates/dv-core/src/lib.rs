@@ -81,7 +81,8 @@ pub use views::{
     ChatView, ConsultResult, ConsultTurnView, ConsultationSummary, ConsultationView, CreatedVault,
     ExportCheck, ImportPreview, MaterialRouting, NameMatch, NameSuggestion, ParagraphVersionView,
     ParagraphView, Prepared, ReportSettings, RetentionItem, ReviewPart, SectionResult, SectionView,
-    SortResult, SourceExcerpt, StagedBackup, SuspectDecision, TemplateView, UiError,
+    SortResult, SourceExcerpt, StagedBackup, StyleHint, StyleMark, SuspectDecision, TemplateView,
+    UiError,
 };
 
 const API_KEY: &str = "anthropic_api_key";

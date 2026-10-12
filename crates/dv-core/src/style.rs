@@ -1085,6 +1085,11 @@ impl Core {
         })
     }
 
+    /// What was learned from her edits, for marking her usual changes in a draft.
+    pub(crate) fn style_habits(&mut self) -> Result<Learning, CoreError> {
+        self.learning()
+    }
+
     fn learning(&mut self) -> Result<Learning, CoreError> {
         match self.vault_ref()?.style_learning()? {
             Some(j) => parse(&j),

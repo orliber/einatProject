@@ -117,6 +117,30 @@ pub struct EditSuggestion {
     pub section: Option<String>,
 }
 
+/// How many of her usual changes are marked in one paragraph.
+pub const MAX_MARKS: usize = 5;
+
+/// A phrase in a paragraph of the AI that she usually changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditMark {
+    pub from: String,
+    /// Empty: she deletes it.
+    pub to: String,
+}
+
+/// `phrase` in `text`, not as part of a longer word.
+fn contains_words(text: &str, phrase: &str) -> bool {
+    let phrase = phrase.trim();
+    if phrase.is_empty() {
+        return false;
+    }
+    text.match_indices(phrase).any(|(at, m)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + m.len()..].chars().next();
+        !before.is_some_and(char::is_alphanumeric) && !after.is_some_and(char::is_alphanumeric)
+    })
+}
+
 /// Lower bound of the Wilson score interval for `k` successes in `n` trials.
 #[must_use]
 pub fn wilson_lower(k: u32, n: u32) -> f64 {
@@ -313,6 +337,31 @@ impl EditModel {
         out.into_iter().map(|(_, s)| s).collect()
     }
 
+    /// Her usual changes that appear in `text` as whole words: what to mark in a paragraph of
+    /// the AI, with what she usually writes instead (empty: she deletes it). The same bar as a
+    /// suggestion; one she said no to is never marked. At most [`MAX_MARKS`], most certain first.
+    #[must_use]
+    pub fn marks(&self, text: &str) -> Vec<EditMark> {
+        let mut found: Vec<(f64, EditMark)> = self
+            .pairs
+            .iter()
+            .filter(|p| !p.dismissed && p.count >= MIN_CHANGES && p.confidence() >= MIN_RATE)
+            .filter(|p| contains_words(text, &p.from))
+            .map(|p| {
+                (
+                    p.confidence(),
+                    EditMark {
+                        from: p.from.clone(),
+                        to: p.to.clone(),
+                    },
+                )
+            })
+            .collect();
+        found.sort_by(|a, b| b.0.total_cmp(&a.0));
+        found.dedup_by(|a, b| a.1.from == b.1.from);
+        found.into_iter().take(MAX_MARKS).map(|(_, m)| m).collect()
+    }
+
     pub fn find_mut(&mut self, id: &str) -> Option<&mut Pattern> {
         self.pairs.iter_mut().find(|p| p.id() == id)
     }
@@ -327,6 +376,34 @@ pub(crate) fn percent(x: f64) -> u32 {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    #[test]
+    fn her_usual_changes_are_marked_only_as_whole_words_and_never_once_dismissed() {
+        let mut m = EditModel::default();
+        for _ in 0..4 {
+            m.observe_edit(
+                "observation",
+                "הילד מפגין סקרנות רבה במשחק.",
+                "הילד מראה סקרנות רבה במשחק.",
+            );
+        }
+        let marks = m.marks("בהמשך הילד מפגין עניין.");
+        assert_eq!(
+            marks,
+            vec![EditMark {
+                from: "מפגין".into(),
+                to: "מראה".into()
+            }]
+        );
+        assert!(
+            m.marks("הילדה מפגינה עניין.").is_empty(),
+            "part of a longer word"
+        );
+        assert!(m.marks("שום דבר כזה.").is_empty());
+        let id = m.suggestions()[0].id.clone();
+        m.find_mut(&id).unwrap().dismissed = true;
+        assert!(m.marks("בהמשך הילד מפגין עניין.").is_empty());
+    }
 
     const AI: &str = "חשוב לציין כי הילד מפגין סקרנות רבה ומשתף פעולה עם הבודקת לאורך המפגש.";
     const HERS: &str = "הילד מראה סקרנות רבה ומשתף פעולה עם הבודקת לאורך המפגש.";
