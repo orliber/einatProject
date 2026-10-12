@@ -388,3 +388,30 @@ proptest! {
         prop_assert!(scan_model_output(&filler.join(" "), &tags, &ids).is_empty());
     }
 }
+
+/// A tag after an institution word and a quote (`לגן " [ילד] "`, a draft stored tagged) was
+/// taken for the kindergarten's name: filtering it again cut the tag to `לגן]`. Found by
+/// `filtering_is_deterministic_and_idempotent`.
+#[test]
+fn a_tag_after_an_institution_word_and_a_quote_stays_whole() {
+    let ids = identities();
+    let c = ctx(&ids, CASE);
+    for text in [
+        "הגיע לגן \" [ילד] \" שוב",
+        "הגיע לגן \"[ילד]\" שוב",
+        "הגיע לגן \" [אם] \" שוב",
+        "הגיע לגן \" ו[ילד] שוב",
+    ] {
+        let out = filter(text, &c).unwrap();
+        assert_eq!(out.tagged, text);
+    }
+    // A tag inside the quotes is never part of an institution's name, wherever it sits.
+    for text in [
+        "הגיע לגן \" מתקשה [ילד] \" שוב",
+        "הגיע לגן \"שוב [ילד]\" שוב",
+    ] {
+        let once = filter(text, &c).unwrap().tagged;
+        assert!(once.contains("[ילד]"), "{once}");
+        assert_eq!(filter(&once, &c).unwrap().tagged, once);
+    }
+}
