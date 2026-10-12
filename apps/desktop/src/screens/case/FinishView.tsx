@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useState } from "react";
 import { useApp } from "../../App";
 import { ipc, type ExportCheck, type ReportSettings } from "../../ipc/client";
+import type { ParagraphCheck } from "../../ipc/generated/ParagraphCheck";
+import { getKept } from "../../kept";
 import { ageWords } from "../../components/AgeField";
 import { ErrorLine, Spinner } from "../../components/ui";
 import { useHoldUnsaved } from "../../components/Unsaved";
@@ -48,6 +50,23 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
   const toComplete = content.flatMap((s) =>
     s.paragraphs.filter((p) => p.status === "approved" && MARK.test(p.text)).map((p) => ({ section: s, p })),
   );
+  // Approved paragraphs with something worth a second look: a number unlike the score table,
+  // a word the answer scan flagged, a sentence from an old report, or what the check against
+  // the sources said in this session. None of these stops the file; she decides.
+  const flagged = content.flatMap((s) => {
+    const checks = getKept<Map<string, ParagraphCheck>>(`case:${caseId}:section:${s.key}:checks`, new Map());
+    return s.paragraphs
+      .filter((p) => p.status === "approved")
+      .flatMap((p) => {
+        const verdict = checks.get(p.id)?.verdict;
+        const notes = [
+          ...p.warnings,
+          ...(verdict === "contradicted" ? ["בבדיקה מול המקורות: סותרת את החומרים"] : []),
+          ...(verdict === "unsupported" ? ["בבדיקה מול המקורות: לא נמצא לה בסיס בחומרים"] : []),
+        ];
+        return notes.length ? [{ section: s, p, notes }] : [];
+      });
+  });
   const child = detail.identities.find((i) => i.role === "child")?.value ?? "";
   const blocked = (check?.blocking.length ?? 0) > 0;
   const nothing = check !== null && check.included_sections === 0;
@@ -90,6 +109,20 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
                   <span className="finish-mark" aria-hidden="true">i</span>
                   <span className="grow">טיוטות שעוד לא אושרו לא ייכנסו: {waiting.map((s) => s.title).join(", ")}.</span>
                   <button type="button" className="link-small" onClick={() => onOpen(waiting[0]?.key ?? "")}>לאישור</button>
+                </li>
+              )}
+              {flagged.length > 0 && (
+                <li className="info">
+                  <span className="finish-mark" aria-hidden="true">i</span>
+                  <div className="grow stack" style={{ gap: 6 }}>
+                    <span>{flagged.length === 1 ? "פסקה מאושרת אחת עם הערה ששווה מבט נוסף:" : `${flagged.length} פסקאות מאושרות עם הערה ששווה מבט נוסף:`}</span>
+                    {flagged.map(({ section, p, notes }) => (
+                      <button key={p.id} type="button" className="complete-item" onClick={() => onOpen(section.key)}>
+                        <span className="small muted">{section.title} · {notes.join(" · ")}</span>
+                        <span className="serif">{p.text.length > 140 ? `${p.text.slice(0, 140)}…` : p.text}</span>
+                      </button>
+                    ))}
+                  </div>
                 </li>
               )}
               {check.blocking.map((b) => (

@@ -7,6 +7,7 @@ import { App } from "../App";
 import { FakeCore } from "../web/fakeCore";
 import { a11yViolations } from "../test/a11y";
 import type { CaseSummary } from "../ipc/generated/CaseSummary";
+import type { CaseDetail } from "../ipc/generated/CaseDetail";
 
 // The whole app over the demo core takes a moment to settle in jsdom.
 configure({ asyncUtilTimeout: 5000 });
@@ -41,6 +42,35 @@ describe("main screens", () => {
     const { view } = await openApp();
     expect(await screen.findByRole("button", { name: /בתיק של נועם$/ })).toBeInTheDocument();
     expect(await a11yViolations(view.container)).toEqual([]);
+  });
+
+  it("before the file goes out, an approved paragraph with a note is listed, one click from it", async () => {
+    const core = new FakeCore();
+    await core.handle("unlock", { password: "x" });
+    mockIPC(async (cmd, args) => {
+      const out = await core.handle(cmd, args);
+      if (cmd !== "case_detail") return out;
+      const d = out as CaseDetail;
+      let marked = false;
+      return {
+        ...d,
+        sections: d.sections.map((s) => ({
+          ...s,
+          paragraphs: s.paragraphs.map((p) => {
+            if (marked || p.status !== "approved" || s.key === "signature") return p;
+            marked = true;
+            return { ...p, warnings: ["כתוב 85, ובטבלה 95"] };
+          }),
+        })),
+      };
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await openCase(user);
+    await user.click(screen.getByRole("button", { name: /הוצאת הדוח/ }));
+    const side = await screen.findByRole("region", { name: "לפני שהקובץ יוצא" });
+    expect(await within(side).findByText("פסקה מאושרת אחת עם הערה ששווה מבט נוסף:")).toBeInTheDocument();
+    expect(within(side).getByText(/כתוב 85, ובטבלה 95/)).toBeInTheDocument();
   });
 
   it("a case whose last send failed shows 'נכשל' in the list", async () => {
