@@ -525,8 +525,10 @@ pub fn find_keys(http: &dyn Http, s: &Session, vault_id: &str) -> Result<Vec<Str
                 .iter()
                 .filter_map(|f| f.get("id").and_then(Value::as_str))
                 .filter(|id| {
-                    id.chars()
-                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                    !id.is_empty()
+                        && id
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
                 })
                 .take(MAX_KEYS)
                 .map(str::to_owned)
@@ -814,6 +816,20 @@ mod tests {
         // The revoke carries the token in its body, not as a bearer.
         assert!(seen[4].1.starts_with(REVOKE_URL));
         assert_eq!(seen[4].2, None);
+    }
+
+    #[test]
+    fn an_empty_file_id_is_not_a_key() {
+        // It used to pass the id check: "files/?alt=media" is the file list, not a key file.
+        let session = Session {
+            token: Zeroizing::new("ya29.token".to_owned()),
+            account_id: "1".to_owned(),
+        };
+        let fake = Fake::new(vec![(
+            200,
+            br#"{"files":[{"id":""},{"id":"file-1"}]}"#.to_vec(),
+        )]);
+        assert_eq!(find_keys(&fake, &session, "V1").unwrap(), vec!["file-1"]);
     }
 
     #[test]
