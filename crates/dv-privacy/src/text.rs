@@ -27,7 +27,7 @@ fn is_hebrew_letter(c: char) -> bool {
 }
 
 /// Points, cantillation and other marks that do not change the letters.
-fn is_mark(c: char) -> bool {
+pub(crate) fn is_mark(c: char) -> bool {
     matches!(
         c,
         '\u{0591}'
@@ -44,10 +44,16 @@ fn is_mark(c: char) -> bool {
                 | '\u{0670}'
                 | '\u{06D6}'..='\u{06ED}'
                 | '\u{0640}'
-                | '\u{200E}'
-                | '\u{200F}'
-                | '\u{200D}'
-                | '\u{200C}'
+                // Invisible format characters: a zero-width space, joiners, direction marks,
+                // embeddings, overrides and isolates, the word joiner, a soft hyphen, the
+                // combining grapheme joiner, the BOM. None shows on screen, so inside a word
+                // they must not split it: "נו\u{200B}עם" reads as "נועם".
+                | '\u{00AD}'
+                | '\u{034F}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{2069}'
                 | '\u{FEFF}'
     )
 }
@@ -76,6 +82,11 @@ pub fn normalize_char(c: char) -> Option<char> {
     if is_mark(c) {
         return None;
     }
+    // Full-width forms ("Ｎｏａｍ", "１２３") compare as the ASCII they look like.
+    let c = match c {
+        '\u{FF01}'..='\u{FF5E}' => char::from_u32(u32::from(c) - 0xFEE0).unwrap_or(c),
+        c => c,
+    };
     Some(match c {
         'ך' => 'כ',
         'ם' => 'מ',

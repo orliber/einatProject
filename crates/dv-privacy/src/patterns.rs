@@ -537,8 +537,62 @@ fn inside_tag(text: &str, start: usize, end: usize) -> bool {
     inner.chars().count() <= 40 && inner.chars().all(|c| c.is_alphanumeric() || c == '_')
 }
 
+/// The ASCII digit a decimal digit of another script stands for ("٣", "３", "𝟑" → '3').
+fn ascii_digit(c: char) -> Option<char> {
+    // The zero of each run of ten decimal digits a document may hold: Arabic-Indic, Persian,
+    // N'Ko, the Indic scripts, Thai, Lao, Tibetan, Myanmar, Khmer, Mongolian, full-width,
+    // and the mathematical digits (bold, double-struck, sans-serif, monospace).
+    const ZEROS: &[u32] = &[
+        0x0660, 0x06F0, 0x07C0, 0x0966, 0x09E6, 0x0A66, 0x0AE6, 0x0B66, 0x0BE6, 0x0C66, 0x0CE6,
+        0x0D66, 0x0DE6, 0x0E50, 0x0ED0, 0x0F20, 0x1040, 0x1090, 0x17E0, 0x1810, 0xFF10, 0x1D7CE,
+        0x1D7D8, 0x1D7E2, 0x1D7EC, 0x1D7F6,
+    ];
+    let code = u32::from(c);
+    ZEROS
+        .iter()
+        .find(|z| (**z..*z + 10).contains(&code))
+        .and_then(|z| char::from_digit(code - z, 10))
+}
+
+/// `text` as the rules read it, and for each byte of it the span of the original character
+/// it came from. Digits of other scripts become ASCII digits and full-width forms become
+/// ASCII ("０５４", "ת.ז. ١٢٣…" are a phone and an ID on screen); invisible characters and
+/// points are dropped, so a zero-width space or a direction mark inside a number or a street
+/// name does not hide it from every rule.
+fn fold(text: &str) -> (String, Vec<(usize, usize)>) {
+    let mut out = String::with_capacity(text.len());
+    let mut spans = Vec::with_capacity(text.len());
+    for (i, c) in text.char_indices() {
+        if crate::text::is_mark(c) {
+            continue;
+        }
+        let folded = ascii_digit(c).unwrap_or(match c {
+            '\u{FF01}'..='\u{FF5E}' => char::from_u32(u32::from(c) - 0xFEE0).unwrap_or(c),
+            c => c,
+        });
+        out.push(folded);
+        spans.resize(out.len(), (i, i + c.len_utf8()));
+    }
+    (out, spans)
+}
+
 /// All pattern identifiers in `text`, non-overlapping, sorted by position.
 pub fn find(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
+    let (folded, spans) = fold(text);
+    if folded == text {
+        return find_plain(text, today);
+    }
+    Ok(find_plain(&folded, today)?
+        .into_iter()
+        .filter_map(|h| {
+            let start = spans.get(h.start)?.0;
+            let end = spans.get(h.end.checked_sub(1)?)?.1;
+            Some(PatternHit { start, end, ..h })
+        })
+        .collect())
+}
+
+fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
     let c = COMPILED.as_ref().map_err(Clone::clone)?;
     let mut hits = Vec::new();
     let fixed = |k: PatternKind| k.fixed_replacement().to_owned();

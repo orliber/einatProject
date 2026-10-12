@@ -542,3 +542,113 @@ fn bank_accounts_and_card_numbers_are_hidden() {
         assert_hidden(&text, &value);
     }
 }
+
+// ---------------------------------------------------------------- invisible characters, other scripts
+
+/// Characters that show nothing on screen. Inside a name, a number or a street they used to
+/// split it, so the filter and the gate both missed what the reader (and the model) sees.
+const INVISIBLE: &[char] = &[
+    '\u{200B}', '\u{2060}', '\u{00AD}', '\u{034F}', '\u{202A}', '\u{202B}', '\u{202C}', '\u{202D}',
+    '\u{202E}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}', '\u{2061}',
+];
+
+#[test]
+fn an_invisible_character_inside_a_name_does_not_hide_it() {
+    let ids = identities();
+    for &z in INVISIBLE {
+        for (name, tag) in [("נועם", "[ילד]"), ("אביטל", "[גננת]"), ("Noam", "[ילד]")]
+        {
+            let mut spelled: Vec<char> = name.chars().collect();
+            spelled.insert(2, z);
+            let spelled: String = spelled.into_iter().collect();
+            let text = format!("הבוקר {spelled} הגיע.");
+            assert!(
+                gate_text(&text, &ids, CASE).is_err(),
+                "raw cleared: {text:?}"
+            );
+            let out = filter(&text, &ctx(&ids, CASE)).unwrap();
+            assert_eq!(out.tagged, format!("הבוקר {tag} הגיע."), "{text:?}");
+            assert!(gate_text(&out.tagged, &ids, CASE).is_ok());
+        }
+    }
+}
+
+#[test]
+fn an_invisible_character_inside_a_number_or_a_street_does_not_hide_it() {
+    let idn = valid_id("31415926");
+    let phone = mobile(4, "7654321");
+    for &z in INVISIBLE {
+        for (text, value) in [
+            (format!("ת.ז. {}{z}{}", &idn[..4], &idn[4..]), idn.clone()),
+            (
+                format!("טלפון {}{z}{}", &phone[..3], &phone[3..]),
+                phone.clone(),
+            ),
+            (format!("גרים ברחוב ה{z}רצל 12"), "רצל".to_owned()),
+            (format!("נולד ב-1.1.20{z}20"), "2020".to_owned()),
+        ] {
+            let ids = identities();
+            assert!(
+                gate_text(&text, &ids, CASE).is_err(),
+                "raw cleared: {text:?}"
+            );
+            let out = filter(&text, &ctx(&ids, CASE)).unwrap();
+            let kept: String = out
+                .tagged
+                .chars()
+                .filter(|c| !INVISIBLE.contains(c))
+                .collect();
+            assert!(!kept.contains(&value), "{value} kept: {:?}", out.tagged);
+            assert!(!digits(&out.tagged).contains("4765"), "{:?}", out.tagged);
+            assert!(
+                gate_text(&out.tagged, &ids, CASE).is_ok(),
+                "{:?}",
+                out.tagged
+            );
+        }
+    }
+}
+
+#[test]
+fn digits_of_other_scripts_and_full_width_forms_are_read_as_what_they_show() {
+    // Arabic-Indic, Persian, full-width and mathematical bold digits.
+    let zeros = [0x0660, 0x06F0, 0xFF10, 0x1D7CE];
+    let idn = valid_id("27182818");
+    let phone = mobile(3, "1112223");
+    for zero in zeros {
+        for (text, value) in [
+            (
+                format!("ת.ז. {}", shift_digits(&idn, zero)),
+                shift_digits(&idn, zero),
+            ),
+            (
+                format!("טלפון {}", shift_digits(&phone, zero)),
+                shift_digits(&phone, zero),
+            ),
+            (
+                format!("נולד ב-{}", shift_digits("3.9.2020", zero)),
+                shift_digits("2020", zero),
+            ),
+            (
+                format!("נולד בשנת {}", shift_digits("2019", zero)),
+                shift_digits("2019", zero),
+            ),
+        ] {
+            let ids = identities();
+            assert!(gate_text(&text, &ids, CASE).is_err(), "raw cleared: {text}");
+            let out = filter(&text, &ctx(&ids, CASE)).unwrap();
+            assert!(!out.tagged.contains(&value), "{value} kept: {}", out.tagged);
+            assert!(gate_text(&out.tagged, &ids, CASE).is_ok(), "{}", out.tagged);
+        }
+    }
+    // Full-width Latin letters and a full-width at sign.
+    let ids = identities();
+    let text = "Ｎｏａｍ came.";
+    assert!(gate_text(text, &ids, CASE).is_err());
+    assert_eq!(
+        filter(text, &ctx(&ids, CASE)).unwrap().tagged,
+        "[ילד] came."
+    );
+    let mail = ["ruth", "\u{FF20}", "example.org"].concat();
+    assert_hidden(&format!("מייל {mail}"), &mail);
+}
