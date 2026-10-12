@@ -67,7 +67,10 @@ pub(crate) async fn send_style_analysis(
     approval_id: String,
 ) -> Res<StyleAnalysisResult> {
     let id = approval_id.clone();
-    let out = with_core(&state, move |c| c.begin_send(&id)).await?;
+    let out = with_core(&state, move |c| {
+        c.begin_send(&id, dv_core::SendKind::StyleAnalysis)
+    })
+    .await?;
     let (out, response) = transmit(&state, approval_id, out).await?;
     with_core(&state, move |c| c.finish_style_analysis(out, response)).await
 }
@@ -83,7 +86,10 @@ pub(crate) async fn send_style_profile(
     approval_id: String,
 ) -> Res<StyleProfileView> {
     let id = approval_id.clone();
-    let out = with_core(&state, move |c| c.begin_send(&id)).await?;
+    let out = with_core(&state, move |c| {
+        c.begin_send(&id, dv_core::SendKind::StyleSynthesis)
+    })
+    .await?;
     let (out, response) = transmit(&state, approval_id, out).await?;
     with_core(&state, move |c| c.finish_style_profile(out, response)).await
 }

@@ -1346,7 +1346,7 @@ impl Core {
         &mut self,
         approval_id: &str,
     ) -> Result<StyleAnalysisResult, CoreError> {
-        let out = self.begin_send(approval_id)?;
+        let out = self.begin_send(approval_id, crate::SendKind::StyleAnalysis)?;
         let response = out.transmit();
         self.finish_style_analysis(out, response)
     }
@@ -1468,7 +1468,7 @@ impl Core {
     }
 
     pub fn send_style_profile(&mut self, approval_id: &str) -> Result<StyleProfileView, CoreError> {
-        let out = self.begin_send(approval_id)?;
+        let out = self.begin_send(approval_id, crate::SendKind::StyleSynthesis)?;
         let response = out.transmit();
         self.finish_style_profile(out, response)
     }

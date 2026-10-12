@@ -291,10 +291,13 @@ impl Core {
 
     /// Take an approved request out of the core so it can be sent without holding the
     /// session (the app stays responsive while Claude answers).
-    pub fn begin_send(&mut self, approval_id: &str) -> Result<Outgoing, CoreError> {
+    /// `kind` is what the calling command sends; an approval for anything else is refused
+    /// here, before any byte leaves, and stays waiting for its own command.
+    pub fn begin_send(&mut self, approval_id: &str, kind: SendKind) -> Result<Outgoing, CoreError> {
         let pending = self
             .pending
             .get(approval_id)
+            .filter(|p| p.kind.send_kind() == kind)
             .ok_or_else(|| CoreError::NotFound("האישור פג. יש להכין את הבקשה מחדש.".to_owned()))?;
         let model = serde_json::from_slice::<Value>(pending.payload.body())
             .ok()
@@ -412,7 +415,7 @@ impl Core {
 
     /// Send exactly what was approved, check the answer, and store it (tagged).
     pub fn send_section(&mut self, approval_id: &str) -> Result<SectionResult, CoreError> {
-        let out = self.begin_send(approval_id)?;
+        let out = self.begin_send(approval_id, SendKind::Section)?;
         let response = out.transmit();
         self.finish_section(out, response)
     }

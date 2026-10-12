@@ -98,7 +98,7 @@ pub(crate) async fn send_sort(
     approval_id: String,
 ) -> Res<SortResult> {
     let id = approval_id.clone();
-    let out = with_core(&state, move |c| c.begin_send(&id)).await?;
+    let out = with_core(&state, move |c| c.begin_send(&id, dv_core::SendKind::Sort)).await?;
     let (out, response) = transmit(&state, approval_id, out).await?;
     with_core(&state, move |c| c.finish_sort(out, response)).await
 }

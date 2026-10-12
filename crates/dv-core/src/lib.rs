@@ -389,6 +389,31 @@ enum PendingKind {
     },
 }
 
+/// What an approval is expected to be for. `Core::begin_send` checks it before anything
+/// leaves, so an approval for one kind of request is never sent by the command for another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendKind {
+    Section,
+    Consult,
+    Sort,
+    StyleAnalysis,
+    StyleSynthesis,
+    Verify,
+}
+
+impl PendingKind {
+    fn send_kind(&self) -> SendKind {
+        match self {
+            PendingKind::Section { .. } => SendKind::Section,
+            PendingKind::Consult { .. } => SendKind::Consult,
+            PendingKind::Sort { .. } => SendKind::Sort,
+            PendingKind::StyleAnalysis { .. } => SendKind::StyleAnalysis,
+            PendingKind::StyleSynthesis { .. } => SendKind::StyleSynthesis,
+            PendingKind::Verify { .. } => SendKind::Verify,
+        }
+    }
+}
+
 struct Pending {
     payload: ClearedPayload,
     kind: PendingKind,

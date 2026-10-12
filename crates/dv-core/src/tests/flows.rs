@@ -125,7 +125,10 @@ fn an_approval_sends_exactly_the_cleared_bytes_once_and_is_kept_under_their_hash
         core.send_section(&id),
         Err(CoreError::NotFound(_))
     ));
-    assert!(matches!(core.begin_send(&id), Err(CoreError::NotFound(_))));
+    assert!(matches!(
+        core.begin_send(&id, SendKind::Section),
+        Err(CoreError::NotFound(_))
+    ));
     assert_eq!(fake.sent.lock().unwrap().len(), 1);
     assert_eq!(
         core.vault_ref()
@@ -1229,7 +1232,7 @@ fn a_lock_while_a_request_is_on_its_way_does_not_bring_its_approval_back() {
 
     // Locked while it was out, and still locked when the failure arrives.
     let id = approval(&mut core, &case);
-    let out = core.begin_send(&id).unwrap();
+    let out = core.begin_send(&id, SendKind::Section).unwrap();
     core.lock();
     assert!(core.finish_section(out, offline()).is_err());
     core.unlock(PASSWORD).unwrap();
@@ -1240,7 +1243,7 @@ fn a_lock_while_a_request_is_on_its_way_does_not_bring_its_approval_back() {
 
     // Locked and opened again before the failure arrives (the computer slept and woke).
     let id = approval(&mut core, &case);
-    let out = core.begin_send(&id).unwrap();
+    let out = core.begin_send(&id, SendKind::Section).unwrap();
     core.lock();
     core.unlock(PASSWORD).unwrap();
     assert!(core.finish_section(out, offline()).is_err());
@@ -1255,7 +1258,7 @@ fn a_lock_while_a_request_is_on_its_way_does_not_bring_its_approval_back() {
         .unwrap()
         .approval_id
         .unwrap();
-    let out = core.begin_send(&ask).unwrap();
+    let out = core.begin_send(&ask, SendKind::Consult).unwrap();
     core.lock();
     core.unlock(PASSWORD).unwrap();
     assert!(core.finish_consult(out, offline()).is_err());
@@ -1267,8 +1270,54 @@ fn a_lock_while_a_request_is_on_its_way_does_not_bring_its_approval_back() {
 
     // Without a lock in between, a failure still keeps the approval for a retry.
     let id = approval(&mut core, &case);
-    let out = core.begin_send(&id).unwrap();
+    let out = core.begin_send(&id, SendKind::Section).unwrap();
     assert!(core.finish_section(out, offline()).is_err());
     core.send_section(&id).unwrap();
     assert_eq!(fake.sent.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn an_approval_for_one_kind_of_request_is_not_sent_by_the_command_for_another() {
+    let t = Scripted::default();
+    let (_dir, mut core, case) = scripted_setup(&t);
+    let id = approval(&mut core, &case);
+
+    // A section approval handed to every other command: refused before anything leaves.
+    assert!(matches!(
+        core.send_consult(&id),
+        Err(CoreError::NotFound(_))
+    ));
+    assert!(matches!(core.send_sort(&id), Err(CoreError::NotFound(_))));
+    assert!(matches!(core.send_verify(&id), Err(CoreError::NotFound(_))));
+    assert!(matches!(
+        core.send_style_profile(&id),
+        Err(CoreError::NotFound(_))
+    ));
+    for kind in [
+        SendKind::Consult,
+        SendKind::Sort,
+        SendKind::Verify,
+        SendKind::StyleAnalysis,
+        SendKind::StyleSynthesis,
+    ] {
+        assert!(matches!(
+            core.begin_send(&id, kind),
+            Err(CoreError::NotFound(_))
+        ));
+    }
+    assert!(t.attempts().is_empty(), "nothing may reach the network");
+    assert_eq!(sends_logged(&mut core), 0);
+
+    // The approval still waits for its own command, which sends it once and records it.
+    core.send_section(&id).unwrap();
+    assert_eq!(t.attempts().len(), 1);
+    assert_eq!(sends_logged(&mut core), 1);
+    assert_eq!(
+        core.vault_ref()
+            .unwrap()
+            .transmissions(&case)
+            .unwrap()
+            .len(),
+        1
+    );
 }

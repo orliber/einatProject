@@ -137,7 +137,7 @@ impl Core {
 
     /// Send exactly what was approved and read the verdicts.
     pub fn send_verify(&mut self, approval_id: &str) -> Result<VerifyResult, CoreError> {
-        let out = self.begin_send(approval_id)?;
+        let out = self.begin_send(approval_id, SendKind::Verify)?;
         let response = out.transmit();
         self.finish_verify(out, response)
     }

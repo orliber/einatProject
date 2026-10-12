@@ -28,7 +28,10 @@ pub(crate) async fn send_verify(
     approval_id: String,
 ) -> Res<VerifyResult> {
     let id = approval_id.clone();
-    let out = with_core(&state, move |c| c.begin_send(&id)).await?;
+    let out = with_core(&state, move |c| {
+        c.begin_send(&id, dv_core::SendKind::Verify)
+    })
+    .await?;
     let (out, response) = transmit(&state, approval_id, out).await?;
     with_core(&state, move |c| c.finish_verify(out, response)).await
 }

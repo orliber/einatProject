@@ -1164,7 +1164,7 @@ fn failed_send_keeps_the_approval_for_a_retry() {
         .unwrap();
 
     // The shell's path: take it out, send without holding the core, then finish.
-    let out = core.begin_send(&id).unwrap();
+    let out = core.begin_send(&id, SendKind::Section).unwrap();
     let response = out.transmit();
     let err = core.finish_section(out, response).unwrap_err();
     assert!(
@@ -1985,7 +1985,9 @@ fn a_sorting_that_arrives_after_an_edit_is_not_applied() {
     let (_dir, mut core, case) = setup(Some(fake.clone()));
     let home = add_home_intake(&mut core, &case);
     let prepared = core.prepare_sort(&case).unwrap();
-    let out = core.begin_send(&prepared.approval_id.unwrap()).unwrap();
+    let out = core
+        .begin_send(&prepared.approval_id.unwrap(), SendKind::Sort)
+        .unwrap();
     // Einat edits while Claude reads (same number of passages, different text).
     core.update_input(
         &case,
@@ -3667,7 +3669,7 @@ fn a_verdict_note_is_shown_with_names_and_a_failed_send_keeps_the_approval() {
         .unwrap();
 
     // A failed send is not a send.
-    let out = core.begin_send(&id).unwrap();
+    let out = core.begin_send(&id, SendKind::Verify).unwrap();
     let failed = core.finish_verify(out, Err(CoreError::Internal("x".into())));
     assert!(failed.is_err());
 
