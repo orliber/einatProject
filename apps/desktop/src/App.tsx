@@ -15,6 +15,7 @@ import { applyTextSize, readTextSize, stepTextSize } from "./textSize";
 import { ShortcutsSheet, useShortcutsSheet } from "./components/ShortcutsSheet";
 import { isCombo, KEYS } from "./shortcuts";
 import { rememberFailure } from "./errors";
+import { clearKept } from "./kept";
 
 export type Route =
   | { name: "cases" }
@@ -114,7 +115,10 @@ export function App() {
   useEffect(() => {
     if (wasUnlocked.current && !unlocked && import.meta.env.PROD) window.location.reload();
     // Names must not stay in memory once the vault is locked.
-    if (!unlocked) queryClient.clear();
+    if (!unlocked) {
+      queryClient.clear();
+      clearKept();
+    }
     wasUnlocked.current = unlocked;
   }, [unlocked]);
   useEffect(() => {
