@@ -850,4 +850,336 @@ mod tests {
             "diagnostic-vault-xornamey.key"
         );
     }
+
+    // ---------------------------------------------------------- the sign-in address and answer
+
+    #[test]
+    fn the_sign_in_address_carries_exactly_the_expected_parameters_and_no_secret() {
+        let s = begin(&cfg()).unwrap();
+        let url = reqwest::Url::parse(&s.url).unwrap();
+        assert_eq!(url.scheme(), "https");
+        assert_eq!(url.host_str(), Some("accounts.google.com"));
+        let q: std::collections::HashMap<String, String> = url.query_pairs().into_owned().collect();
+        let mut names: Vec<&str> = q.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            [
+                "client_id",
+                "code_challenge",
+                "code_challenge_method",
+                "prompt",
+                "redirect_uri",
+                "response_type",
+                "scope",
+                "state"
+            ]
+        );
+        assert!(
+            !s.url.contains(&cfg().client_secret),
+            "the secret stays out of the browser"
+        );
+        assert_eq!(q["response_type"], "code");
+        assert_eq!(q["prompt"], "select_account");
+        // PKCE: the challenge is the hash of a verifier of the length RFC 7636 asks for.
+        assert_eq!(s.verifier.len(), 43);
+        assert!(s.verifier.bytes().all(|b| B64.contains(&b)));
+        let challenge = b64url(
+            aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, s.verifier.as_bytes()).as_ref(),
+        );
+        assert_eq!(q["code_challenge"], challenge);
+        // The answer comes back to the listener itself, on the loopback address only.
+        let addr = s.listener.local_addr().unwrap();
+        assert!(addr.ip().is_loopback());
+        assert_eq!(
+            q["redirect_uri"],
+            format!("http://127.0.0.1:{}", addr.port())
+        );
+        assert_eq!(s.redirect, q["redirect_uri"]);
+    }
+
+    #[test]
+    fn every_sign_in_gets_a_fresh_state_and_verifier() {
+        let a = begin(&cfg()).unwrap();
+        let b = begin(&cfg()).unwrap();
+        assert_ne!(a.state, b.state);
+        assert_ne!(a.verifier.as_str(), b.verifier.as_str());
+        assert!(a.state.len() >= 22, "128 random bits");
+    }
+
+    #[test]
+    fn answers_without_our_state_or_with_an_error_never_yield_a_code() {
+        let cases = [
+            ("GET /?code=1 HTTP/1.1", Answer::Other),
+            ("GET /?state=&code=1 HTTP/1.1", Answer::Other),
+            ("GET /?state=ab&code=1 HTTP/1.1", Answer::Other),
+            ("GET /?state=abcd&code=1 HTTP/1.1", Answer::Other),
+            ("GET /?state=ABC&code=1 HTTP/1.1", Answer::Other),
+            ("GET /?state=abc HTTP/1.1", Answer::Refused),
+            ("GET /?state=abc&code= HTTP/1.1", Answer::Refused),
+            ("GET /?state=abc&code=1&error=x HTTP/1.1", Answer::Refused),
+            ("HEAD /?state=abc&code=1 HTTP/1.1", Answer::Other),
+            ("GET", Answer::Other),
+            ("", Answer::Other),
+            ("\u{0}\u{1}garbage", Answer::Other),
+        ];
+        for (line, want) in cases {
+            assert_eq!(parse_answer(line, "abc"), want, "{line:?}");
+        }
+    }
+
+    #[test]
+    fn a_wait_without_an_answer_times_out() {
+        let s = begin(&cfg()).unwrap();
+        let started = Instant::now();
+        assert_eq!(
+            wait(&s, &AtomicBool::new(false), Duration::from_millis(250)).unwrap_err(),
+            GoogleError::TimedOut
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn a_wrong_state_is_answered_empty_and_a_refusal_ends_the_wait() {
+        let s = begin(&cfg()).unwrap();
+        let addr = s.redirect.trim_start_matches("http://").to_owned();
+        let state = s.state.clone();
+        let browser = std::thread::spawn(move || {
+            let mut pages = Vec::new();
+            for path in [
+                "/?state=someone-else&code=stolen".to_owned(),
+                format!("/?state={state}&error=access_denied"),
+            ] {
+                let mut c = TcpStream::connect(&addr).unwrap();
+                c.write_all(format!("GET {path} HTTP/1.1\r\nHost: x\r\n\r\n").as_bytes())
+                    .unwrap();
+                let mut out = String::new();
+                let _ = c.read_to_string(&mut out);
+                pages.push(out);
+            }
+            pages
+        });
+        let got = wait(&s, &AtomicBool::new(false), Duration::from_secs(10));
+        let pages = browser.join().unwrap();
+        assert_eq!(got.unwrap_err(), GoogleError::Cancelled);
+        assert!(
+            pages[0].ends_with("\r\n\r\n"),
+            "an empty page for a stranger"
+        );
+        assert!(pages[1].contains("no-store") && pages[1].contains("<h1>"));
+    }
+
+    // ---------------------------------------------------------- what the program sends
+
+    #[test]
+    fn a_host_off_the_list_is_refused_before_any_connection() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let http = GoogleHttp::new().unwrap();
+        for url in [
+            format!("https://127.0.0.1:{port}/token"),
+            format!("http://127.0.0.1:{port}/token"),
+            format!("https://localhost:{port}/token"),
+            "http://oauth2.googleapis.com/token".to_owned(),
+            AUTH_URL.to_owned(),
+            "https://oauth2.googleapis.com.evil.example/token".to_owned(),
+            "https://evil.example/?x=https://oauth2.googleapis.com/".to_owned(),
+            "not a url".to_owned(),
+        ] {
+            let got = http.send(Request {
+                method: Method::Post,
+                url: url.clone(),
+                bearer: Some(Zeroizing::new("ya29.token".to_owned())),
+                content_type: None,
+                body: b"secret".to_vec(),
+            });
+            assert!(
+                matches!(got, Err(GoogleError::Protocol(_))),
+                "{url}: {got:?}"
+            );
+        }
+        assert!(
+            matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+            "a refused request reached the wire"
+        );
+    }
+
+    #[test]
+    fn the_token_exchange_sends_this_sign_ins_verifier_and_redirect_without_a_bearer() {
+        let s = begin(&cfg()).unwrap();
+        let answer = serde_json::json!({
+            "access_token": "ya29.token",
+            "id_token": id_token("accounts.google.com", &cfg().client_id, "42"),
+        });
+        let fake = Fake::new(vec![(200, answer.to_string().into_bytes())]);
+        finish(&fake, &cfg(), &s, "the-code").unwrap();
+        let seen = fake.seen.lock().unwrap();
+        assert_eq!(seen[0].0, Method::Post);
+        assert_eq!(seen[0].1, TOKEN_URL);
+        assert_eq!(seen[0].2, None);
+        let body = String::from_utf8(seen[0].3.clone()).unwrap();
+        let pairs: std::collections::HashMap<String, String> =
+            reqwest::Url::parse(&format!("http://x.invalid/?{body}"))
+                .unwrap()
+                .query_pairs()
+                .into_owned()
+                .collect();
+        assert_eq!(pairs["code_verifier"], s.verifier.as_str());
+        assert_eq!(pairs["redirect_uri"], s.redirect);
+        assert_eq!(pairs["code"], "the-code");
+    }
+
+    #[test]
+    fn a_failed_or_incomplete_token_answer_is_no_session() {
+        let s = begin(&cfg()).unwrap();
+        let good_id = id_token("https://accounts.google.com", &cfg().client_id, "42");
+        let answers = [
+            (400, serde_json::json!({"error": "invalid_grant"})),
+            (
+                500,
+                serde_json::json!({"access_token": "t", "id_token": good_id}),
+            ),
+            (200, serde_json::json!({"id_token": good_id})),
+            (200, serde_json::json!({"access_token": "t"})),
+            (
+                200,
+                serde_json::json!({"access_token": "t", "id_token": id_token("https://accounts.google.com", &cfg().client_id, "")}),
+            ),
+            (
+                200,
+                serde_json::json!({"access_token": "t", "id_token": id_token("https://accounts.google.com.evil.example", &cfg().client_id, "1")}),
+            ),
+        ];
+        for (status, body) in answers {
+            let fake = Fake::new(vec![(status, body.to_string().into_bytes())]);
+            assert!(finish(&fake, &cfg(), &s, "c").is_err(), "{status} {body}");
+        }
+        let fake = Fake::new(vec![(200, b"<html>".to_vec())]);
+        assert!(finish(&fake, &cfg(), &s, "c").is_err());
+    }
+
+    #[test]
+    fn key_lists_are_capped_and_hold_only_safe_ids() {
+        let session = Session {
+            token: Zeroizing::new("ya29.token".to_owned()),
+            account_id: "1".to_owned(),
+        };
+        let files: Vec<serde_json::Value> = [
+            "a/../b", "ok-1", "x?y", "ok_2", "", "ok3", "ok4", "ok5", "ok6",
+        ]
+        .iter()
+        .map(|id| serde_json::json!({"id": id}))
+        .collect();
+        let fake = Fake::new(vec![(
+            200,
+            serde_json::json!({ "files": files })
+                .to_string()
+                .into_bytes(),
+        )]);
+        let ids = find_keys(&fake, &session, "V1").unwrap();
+        assert_eq!(ids, ["ok-1", "ok_2", "ok3", "ok4", "ok5"]);
+        let fake = Fake::new(vec![(403, Vec::new())]);
+        assert!(find_keys(&fake, &session, "V1").is_err());
+        let fake = Fake::new(vec![(500, Vec::new())]);
+        assert!(delete_key(&fake, &session, "ok-1").is_err());
+        let fake = Fake::new(vec![(404, Vec::new())]);
+        assert!(
+            delete_key(&fake, &session, "ok-1").is_ok(),
+            "already gone is fine"
+        );
+        let fake = Fake::new(vec![(200, vec![0xff, 0xfe])]);
+        assert!(
+            read_key(&fake, &session, "ok-1").is_err(),
+            "a key file is text"
+        );
+    }
+
+    #[test]
+    fn the_upload_names_its_own_boundary_and_carries_only_the_name_and_the_key() {
+        let session = Session {
+            token: Zeroizing::new("ya29.token".to_owned()),
+            account_id: "1".to_owned(),
+        };
+        let fake = Fake::new(vec![(200, br#"{"id":"f"}"#.to_vec())]);
+        put_key(&fake, &session, "V1", "00ff").unwrap();
+        let seen = fake.seen.lock().unwrap();
+        let body = String::from_utf8(seen[0].3.clone()).unwrap();
+        let boundary = body
+            .lines()
+            .next()
+            .unwrap()
+            .trim_start_matches("--")
+            .to_owned();
+        assert!(boundary.starts_with("dv-"));
+        assert!(body.ends_with(&format!("--{boundary}--\r\n")));
+        let meta_line = body.lines().find(|l| l.starts_with('{')).unwrap();
+        let meta: serde_json::Value = serde_json::from_str(meta_line).unwrap();
+        assert_eq!(
+            meta,
+            serde_json::json!({"name": "diagnostic-vault-V1.key", "parents": ["appDataFolder"]})
+        );
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(128))]
+
+        /// Only an answer that carries exactly our state can ever give a code, and then the
+        /// code comes back as it was sent.
+        #[test]
+        fn only_our_exact_state_yields_the_code(
+            ours in "[A-Za-z0-9_-]{1,24}",
+            theirs in "[A-Za-z0-9_-]{0,24}",
+            code in "[A-Za-z0-9/._~-]{1,40}",
+        ) {
+            let enc = |s: &str| form(&[("v", s)]).strip_prefix("v=").unwrap_or_default().to_owned();
+            let line = format!("GET /?state={}&code={} HTTP/1.1", enc(&theirs), enc(&code));
+            let got = parse_answer(&line, &ours);
+            if theirs == ours {
+                proptest::prop_assert_eq!(got, Answer::Code(code));
+            } else {
+                proptest::prop_assert_eq!(got, Answer::Other);
+            }
+        }
+
+        /// No file id, however strange, can move a key request to another host.
+        #[test]
+        fn a_file_id_never_changes_the_host(id in "\\PC{0,30}") {
+            let session = Session {
+                token: Zeroizing::new("ya29.token".to_owned()),
+                account_id: "1".to_owned(),
+            };
+            let fake = Fake::new(vec![(200, b"k".to_vec()), (204, Vec::new())]);
+            let _ = read_key(&fake, &session, &id);
+            let _ = delete_key(&fake, &session, &id);
+            for (_, url, _, _) in fake.seen.lock().unwrap().iter() {
+                let parsed = reqwest::Url::parse(url).unwrap();
+                proptest::prop_assert_eq!(parsed.host_str(), Some("www.googleapis.com"));
+                proptest::prop_assert_eq!(parsed.scheme(), "https");
+            }
+        }
+
+        /// The file name, and so the Drive query built from it, holds letters and digits of
+        /// the vault id only.
+        #[test]
+        fn key_file_names_hold_only_letters_and_digits(id in "\\PC{0,40}") {
+            let name = key_file_name(&id);
+            let middle = name
+                .strip_prefix("diagnostic-vault-")
+                .and_then(|n| n.strip_suffix(".key"))
+                .unwrap();
+            proptest::prop_assert!(middle.chars().all(|c| c.is_ascii_alphanumeric()));
+        }
+
+        #[test]
+        fn base64url_round_trips_and_decoding_garbage_never_panics(
+            bytes in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..100),
+            garbage in "\\PC{0,60}",
+        ) {
+            let text = b64url(&bytes);
+            proptest::prop_assert!(!text.contains('=') && !text.contains('+') && !text.contains('/'));
+            proptest::prop_assert_eq!(b64url_decode(&text), Some(bytes));
+            let _ = b64url_decode(&garbage);
+        }
+    }
 }
