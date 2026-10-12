@@ -348,13 +348,18 @@ function SuggestionText({ s }: { s: StyleSuggestion }) {
       return <>את מוחקת <q>{s.from}</q></>;
     case "phrase":
       return <>ביטוי שחוזר בדוחות שלך: <q>{s.from}</q></>;
+    case "opening":
+      return <>כך את פותחת את הסעיף בדרך כלל: <q>{s.from}…</q></>;
+    case "closing":
+      return <>כך את מסיימת את הסעיף בדרך כלל: <q>{s.from}…</q></>;
   }
 }
 
 function suggestionDetail(s: StyleSuggestion, o: StyleOverview): string {
   const title = s.section ? o.sections.find((x) => x.key === s.section)?.title : undefined;
   const where = title ? ` · בסעיף ${title}` : "";
-  return s.kind === "phrase" ? `ב-${s.count} דוחות${where}` : `${s.count} פעמים${where}`;
+  const fromReports = s.kind === "phrase" || s.kind === "opening" || s.kind === "closing";
+  return fromReports ? `ב-${s.count} דוחות${where}` : `${s.count} פעמים${where}`;
 }
 
 // ------------------------------------------------------------------ what was measured

@@ -3,4 +3,4 @@
 /**
  * What a suggestion is (D-052).
  */
-export type StyleSuggestionKind = "replace" | "avoid" | "phrase";
+export type StyleSuggestionKind = "replace" | "avoid" | "phrase" | "opening" | "closing";

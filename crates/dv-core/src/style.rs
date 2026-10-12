@@ -223,6 +223,10 @@ pub enum StyleSuggestionKind {
     Avoid,
     /// In her past reports: «from» recurs across reports.
     Phrase,
+    /// In her past reports: a section usually opens with «from».
+    Opening,
+    /// In her past reports: a section usually closes with «from».
+    Closing,
 }
 
 /// Something learned on her computer, waiting for her yes. Nothing of it is sent until then.
@@ -406,6 +410,12 @@ pub(crate) struct LocalStyle {
     /// The same figures by month ("2026-10" → (sum, count)), the latest [`MONTHS_KEPT`] (ST12).
     #[serde(default)]
     fit_months: BTreeMap<String, (u32, u32)>,
+    /// Her usual name for terms that have several, from her past reports (ST10).
+    #[serde(default)]
+    terms: BTreeMap<String, String>,
+    /// How she usually opens and closes each section, from her past reports (ST11).
+    #[serde(default)]
+    shapes: Vec<dv_style::Shape>,
 }
 
 /// How many months of closeness figures are kept for the trend.
@@ -1019,6 +1029,11 @@ pub(crate) fn style_model(v: &Vault) -> Result<Option<dv_style::StyleModel>, Cor
     Ok(Some(local_style(v)?.model))
 }
 
+/// Her usual name for terms that have several, learned from her past reports (ST10).
+pub(crate) fn style_terms(v: &Vault) -> Result<BTreeMap<String, String>, CoreError> {
+    Ok(local_style(v)?.terms)
+}
+
 /// A gentle note on a drafted paragraph in `section` that reads unlike her, or `None`.
 pub(crate) fn style_note(
     model: &dv_style::StyleModel,
@@ -1050,6 +1065,14 @@ fn fit_reports(local: &mut LocalStyle, sources: &[StoredSource]) {
         })
         .collect();
     local.phrases = dv_style::mine_phrases(&reports);
+    local.shapes = dv_style::mine_shapes(&reports);
+    local.terms = dv_style::terms::usual(
+        sources
+            .iter()
+            .flat_map(|s| s.parts.iter())
+            .map(|p| p.text.as_str()),
+        2,
+    );
 }
 
 /// The draft paragraph `draft_id` of a case, from any section.
@@ -1947,7 +1970,25 @@ impl Core {
         let mut learning = self.learning()?;
         let local = local_style(self.vault_ref()?)?;
         let not_found = || CoreError::NotFound("ההצעה".to_owned());
-        let item = if let Some(norm) = id.strip_prefix(PHRASE_ID) {
+        let item = if let Some(key) = id.strip_prefix(SHAPE_ID) {
+            let shape = local
+                .shapes
+                .iter()
+                .find(|s| shape_key(s) == key)
+                .ok_or_else(not_found)?;
+            learning.dismissed_phrases.push(id.to_owned());
+            let verb = match shape.place {
+                dv_style::Place::Opening => "לפתוח",
+                dv_style::Place::Closing => "לסיים",
+            };
+            (
+                Some(shape.section.clone()),
+                StyleKind::Rule,
+                format!("{verb} את הסעיף ב«{}…»", shape.text),
+                StyleOrigin::Reports,
+                shape.reports,
+            )
+        } else if let Some(norm) = id.strip_prefix(PHRASE_ID) {
             let p = local
                 .phrases
                 .iter()
@@ -2008,7 +2049,9 @@ impl Core {
 
     pub fn dismiss_style_suggestion(&mut self, id: &str) -> Result<(), CoreError> {
         let mut learning = self.learning()?;
-        if let Some(norm) = id.strip_prefix(PHRASE_ID) {
+        if id.starts_with(SHAPE_ID) {
+            learning.dismissed_phrases.push(id.to_owned());
+        } else if let Some(norm) = id.strip_prefix(PHRASE_ID) {
             learning.dismissed_phrases.push(norm.to_owned());
         } else {
             learning
@@ -2023,6 +2066,17 @@ impl Core {
 
 /// Suggestion ids of phrases from her reports start with this.
 const PHRASE_ID: &str = "phrase:";
+/// ...and of the openings and closings of her sections with this (the whole id is kept when
+/// she answers, among the dismissed phrases).
+const SHAPE_ID: &str = "shape:";
+
+fn shape_key(s: &dv_style::Shape) -> String {
+    let place = match s.place {
+        dv_style::Place::Opening => "opening",
+        dv_style::Place::Closing => "closing",
+    };
+    format!("{place}:{}:{}", s.section, s.norm)
+}
 
 /// What to offer her: her usual edits, then phrases of her reports not yet in the profile.
 fn suggestions(
@@ -2064,6 +2118,26 @@ fn suggestions(
                 count: p.reports,
                 confidence: p.share,
                 section: p.section.clone(),
+            }),
+    );
+    out.extend(
+        local
+            .shapes
+            .iter()
+            .map(|sh| (format!("{SHAPE_ID}{}", shape_key(sh)), sh))
+            .filter(|(id, _)| !learning.dismissed_phrases.contains(id))
+            .filter(|(_, sh)| !in_profile.iter().any(|t| t.contains(&sh.norm)))
+            .map(|(id, sh)| StyleSuggestion {
+                id,
+                kind: match sh.place {
+                    dv_style::Place::Opening => StyleSuggestionKind::Opening,
+                    dv_style::Place::Closing => StyleSuggestionKind::Closing,
+                },
+                from: sh.text.clone(),
+                to: String::new(),
+                count: sh.reports,
+                confidence: sh.share,
+                section: Some(sh.section.clone()),
             }),
     );
     out

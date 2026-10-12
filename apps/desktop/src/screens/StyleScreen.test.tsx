@@ -143,6 +143,34 @@ describe("what the program measured", () => {
   });
 });
 
+describe("suggestions from her reports", () => {
+  it("offers how she opens and closes a section, and adds it on her yes", async () => {
+    const calls: unknown[] = [];
+    mockIPC((cmd, args) => {
+      if (cmd === "style_overview") {
+        return overview({
+          sources: [source],
+          suggestions: [
+            { id: "shape:opening:summary:x", kind: "opening", from: "לסיכום, נראה כי", to: "", count: 4, confidence: 80, section: "summary" },
+            { id: "shape:closing:summary:y", kind: "closing", from: "מומלץ להמשיך", to: "", count: 3, confidence: 60, section: "summary" },
+          ],
+        });
+      }
+      calls.push([cmd, args]);
+      return null;
+    });
+    const user = userEvent.setup();
+    wrap(<StyleScreen />);
+    expect(await screen.findByText("לסיכום, נראה כי…")).toBeInTheDocument();
+    expect(screen.getByText(/כך את פותחת את הסעיף בדרך כלל/)).toBeInTheDocument();
+    expect(screen.getByText(/כך את מסיימת את הסעיף בדרך כלל/)).toBeInTheDocument();
+    expect(screen.getByText("(ב-4 דוחות · בסעיף סיכום)")).toBeInTheDocument();
+    const [first] = screen.getAllByRole("button", { name: "להוסיף לפרופיל" });
+    if (first) await user.click(first);
+    await vi.waitFor(() => expect(calls).toContainEqual(["accept_style_suggestion", { id: "shape:opening:summary:x" }]));
+  });
+});
+
 describe("StyleImportDialog", () => {
   it("shows hidden details as roles and keeps only the parts she chose", async () => {
     const saved: unknown[] = [];
