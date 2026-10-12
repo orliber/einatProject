@@ -1268,6 +1268,7 @@ dependencies = [
  "dv-export",
  "dv-ingest",
  "dv-ipc",
+ "dv-ner",
  "dv-privacy",
  "dv-style",
  "dv-vault",

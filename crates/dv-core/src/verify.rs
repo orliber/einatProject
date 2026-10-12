@@ -66,6 +66,7 @@ impl Core {
             .clone();
         let model = self.model_for(Task::Draft)?;
         let data = self.privacy_data(case_id)?;
+        let hints = self.case_hints(case_id, &[])?;
         let demo_mode = self.demo_mode()?;
 
         let (input, review, draft_ids) = {
@@ -86,8 +87,15 @@ impl Core {
                 today: today(),
             };
             let mut review = Review::default();
-            let (sources, _rows) =
-                collect_sources(v, &structure, &ctx, case_id, section_key, &mut review)?;
+            let (sources, _rows) = collect_sources(
+                v,
+                &structure,
+                &ctx,
+                &hints,
+                case_id,
+                section_key,
+                &mut review,
+            )?;
             if sources.is_empty() {
                 return Err(CoreError::Refused(
                     "אין לסעיף הזה חומרים לבדוק מולם.".to_owned(),

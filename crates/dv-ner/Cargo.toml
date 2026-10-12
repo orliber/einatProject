@@ -1,6 +1,6 @@
 [package]
 name = "dv-ner"
-description = "Local Hebrew name detection (DictaBERT-NER) as an extra voter for the filter; trial, not shipped"
+description = "Local Hebrew name detection (DictaBERT-NER) as an extra voter for the filter; optional, downloaded when turned on"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -39,6 +39,10 @@ struct AppState {
     /// A newer version fetched and verified in the background, waiting for her click (D-038).
     /// Held while it is being fetched, so two fetches never run at once.
     prepared: Arc<Mutex<Option<dv_core::update::Downloaded>>>,
+    /// Where the optional name model is downloaded (next to the vault, not inside it; D-053).
+    models: PathBuf,
+    /// Bytes done and total while the name model downloads; held for the whole download.
+    model_progress: Arc<Mutex<Option<(u64, u64)>>>,
 }
 
 /// Send outside the core's lock, counting the words as the answer arrives.
@@ -167,7 +171,8 @@ fn main() {
             std::fs::create_dir_all(&dir)?;
             // The installer of the last update has done its work.
             dv_core::update::clean(&dir);
-            let mut core = Core::new(&dir);
+            let models = data.join("models");
+            let mut core = Core::new(&dir).with_models_dir(models.clone());
             if let Ok(exe) = std::env::current_exe() {
                 core = core.with_ingest_worker(exe);
             }
@@ -218,6 +223,8 @@ fn main() {
                 dir,
                 progress: Arc::default(),
                 prepared: Arc::default(),
+                models,
+                model_progress: Arc::default(),
             });
             Ok(())
         })
@@ -277,6 +284,10 @@ fn main() {
             send_section,
             verify_stage_on,
             set_verify_stage,
+            name_model_status,
+            download_name_model,
+            name_model_progress,
+            set_name_model,
             prepare_verify,
             send_verify,
             prepare_sort,

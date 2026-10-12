@@ -16,6 +16,7 @@ use serde_json::Value;
 use zeroize::Zeroizing;
 
 pub mod google;
+pub mod name_model;
 pub mod providers;
 pub mod sse;
 pub mod update;

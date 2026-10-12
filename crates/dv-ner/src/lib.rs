@@ -1,10 +1,10 @@
-//! Local name detection with a Hebrew NER model (plan stage 5, D-049: a trial, not shipped).
+//! Local name detection with a Hebrew NER model (plan stage 5, D-053: optional, off by default).
 //!
 //! The model (DictaBERT-NER by default: a BERT token classifier) is read from a folder on
 //! disk with `config.json`, `tokenizer.json` and `model.safetensors`, and runs on the CPU in
-//! pure Rust (`candle`). Nothing is downloaded at run time and this crate has no network
-//! code (`cargo xtask check-invariants`). Its spans are hints only: `dv-privacy` may add a
-//! hide for them, never remove one a rule made.
+//! pure Rust (`candle`). This crate has no network code (`cargo xtask check-invariants`); the
+//! files are downloaded by `dv-egress` only when she turns the model on. Its spans are hints
+//! only: `dv-privacy` may add a hide for them, never remove one a rule made.
 
 use std::fmt;
 use std::path::Path;
