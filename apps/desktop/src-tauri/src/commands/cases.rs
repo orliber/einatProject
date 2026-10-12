@@ -17,6 +17,11 @@ pub(crate) async fn create_case(
 }
 
 #[tauri::command]
+pub(crate) async fn create_sample_case(state: tauri::State<'_, AppState>) -> Res<String> {
+    with_core(&state, |c| c.create_sample_case()).await
+}
+
+#[tauri::command]
 pub(crate) async fn update_case(
     state: tauri::State<'_, AppState>,
     case_id: String,
@@ -212,6 +217,19 @@ pub(crate) async fn settle_foreign_tags(
 }
 
 /// "להחזיר" on the summary card: keep what the filter hid as written, for this case.
+#[tauri::command]
+pub(crate) async fn confirm_auto_hidden(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    token: String,
+    tag: String,
+) -> Res<()> {
+    with_core(&state, move |c| {
+        c.confirm_auto_hidden(&case_id, &token, &tag)
+    })
+    .await
+}
+
 #[tauri::command]
 pub(crate) async fn restore_auto_hidden(
     state: tauri::State<'_, AppState>,

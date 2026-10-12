@@ -87,7 +87,45 @@ struct Flow {
     /// hides of what must pass ("keep") and hides of anything not gold, as the app does them
     keep_broken: u32,
     false_hides: u32,
+    /// The rows of the summary card for each case, as the app groups them (U2): one row per
+    /// person, one per generalized wording. Which of them ask for a look (a name inside a
+    /// word, a close spelling, a weaker sign).
+    card: BTreeMap<String, BTreeSet<String>>,
+    card_look: BTreeMap<String, BTreeSet<String>>,
     details: Vec<String>,
+}
+
+impl Flow {
+    /// The card rows a case shows, on average over the cases, and at most.
+    fn card_per_case(&self) -> (f64, usize) {
+        let n = self.card.len().max(1);
+        let total: usize = self.card.values().map(BTreeSet::len).sum();
+        let most = self.card.values().map(BTreeSet::len).max().unwrap_or(0);
+        (total as f64 / n as f64, most)
+    }
+
+    fn look_per_case(&self) -> f64 {
+        let total: usize = self.card_look.values().map(BTreeSet::len).sum();
+        total as f64 / self.card.len().max(1) as f64
+    }
+
+    fn note_card(&mut self, case: &str, items: &[dv_privacy::AutoHidden]) {
+        use dv_privacy::AutoKind;
+        let rows = self.card.entry(case.to_owned()).or_default();
+        let look = self.card_look.entry(case.to_owned()).or_default();
+        for a in items {
+            let key = if a.kind == AutoKind::Indirect {
+                format!("{:?}|{}|{}", a.kind, normalize(&a.token), a.tag)
+            } else {
+                format!("{:?}|{}", a.kind, a.tag)
+            };
+            if a.uncertain || matches!(a.kind, AutoKind::DeclaredInWord | AutoKind::SimilarSpelling)
+            {
+                look.insert(key.clone());
+            }
+            rows.insert(key);
+        }
+    }
 }
 
 /// The words of every span that must be hidden in a case, normalized.
@@ -156,6 +194,7 @@ fn measure_flow(docs: &[Doc]) -> Flow {
                 today: (2026, 10, 3),
             };
             let o = filter(&doc.text, &ctx).unwrap();
+            flow.note_card(&doc.case, &o.auto_hidden);
             keep_found(
                 &o,
                 &doc.case,
@@ -288,7 +327,11 @@ fn print_flow(split: &str, f: &Flow, details: bool) {
             println!("   KEPT  {k}");
         }
     }
-    let _ = split;
+    let (card, most) = f.card_per_case();
+    println!(
+        "   card ({split}): {card:.1} rows per case (most {most}), {:.2} of them worth a look · target below 8",
+        f.look_per_case()
+    );
 }
 
 /// Floors of the whole flow: they may only go down. Stage B of D-050 brings dead ends to 0.
@@ -297,7 +340,12 @@ struct FlowFloor {
     max_dead_ends: usize,
     max_kept_wrong: usize,
     max_false_per_1000: f64,
+    /// Rows of the summary card that ask for a look, per case on average (U2, target below 8).
+    max_card_look: f64,
 }
+
+/// What the card may ask her to look at in one case, whatever the floors say (U2).
+const CARD_LOOK_TARGET: f64 = 8.0;
 
 fn check_flow(split: &str, f: &Flow, floor: &FlowFloor) -> Vec<String> {
     let mut out = Vec::new();
@@ -321,6 +369,13 @@ fn check_flow(split: &str, f: &Flow, floor: &FlowFloor) -> Vec<String> {
             floor.max_kept_wrong
         ));
     }
+    let look = f.look_per_case();
+    if look > floor.max_card_look + 1e-9 || look >= CARD_LOOK_TARGET {
+        out.push(format!(
+            "{split}: {look:.2} card rows worth a look per case, floor {}, target below {CARD_LOOK_TARGET}",
+            floor.max_card_look
+        ));
+    }
     if false_rate > floor.max_false_per_1000 + 1e-9 {
         out.push(format!(
             "{split}: flow false hides {false_rate:.2} per 1,000 words, floor {}",
@@ -330,6 +385,10 @@ fn check_flow(split: &str, f: &Flow, floor: &FlowFloor) -> Vec<String> {
     out
 }
 
+// The card (U2), 2026-10-12: rows grouped by person as the app shows them. Dev 25.0 rows per
+// case and test 33.4, nearly all hidden with confidence and folded under one line; the rows
+// that ask for a look are 1.33 and 3.0 per case, under the target of 8.
+//
 // The whole flow. Baseline 2026-10-09, before D-050 stage B: with every case's names in the
 // context, as the app runs, a name typed in one case that is also a word ("גיל", "אלה",
 // "שירה", "אור") was hidden in every other case and kept there as a name, about four times
@@ -341,18 +400,21 @@ const DEV_FLOW: FlowFloor = FlowFloor {
     max_dead_ends: 0,
     max_kept_wrong: 43,
     max_false_per_1000: 6.25,
+    max_card_look: 1.34,
 };
 const TEST_FLOW: FlowFloor = FlowFloor {
     max_blocked: 0,
     max_dead_ends: 0,
     max_kept_wrong: 67,
     max_false_per_1000: 8.90,
+    max_card_look: 3.0,
 };
 const HARD_FLOW: FlowFloor = FlowFloor {
     max_blocked: 0,
     max_dead_ends: 0,
     max_kept_wrong: 1,
     max_false_per_1000: 34.1,
+    max_card_look: 0.67,
 };
 
 #[test]

@@ -132,6 +132,7 @@ export const ipc = {
 
   listCases: () => call<CaseSummary[]>("list_cases"),
   createCase: (meta: CaseMeta, identities: IdentityInput[]) => call<string>("create_case", { meta, identities }),
+  createSampleCase: () => call<string>("create_sample_case"),
   updateCase: (caseId: string, meta: CaseMeta) => run("update_case", { caseId, meta }),
   /** Into the recycle bin (D-023); restorable for 30 days. */
   deleteCase: (caseId: string) => run("delete_case", { caseId }),
@@ -184,6 +185,9 @@ export const ipc = {
   /** "להחזיר" on the summary card: keep what the filter hid as written, for this case. */
   restoreAutoHidden: (caseId: string, token: string, tag: string) =>
     run("restore_auto_hidden", { caseId, token, tag }),
+  /** "נכון, תמיד להסתיר": a name the filter kept is confirmed for the whole case. */
+  confirmAutoHidden: (caseId: string, token: string, tag: string) =>
+    run("confirm_auto_hidden", { caseId, token, tag }),
   /** Who a name the filter kept is; it gets a tag for that role. */
   changeRole: (caseId: string, tag: string, role: Role) => call<Identity[]>("change_role", { caseId, tag, role }),
 

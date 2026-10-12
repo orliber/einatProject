@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AutoHidden } from "../ipc/generated/AutoHidden";
-import { cardRows } from "./AutoHiddenCard";
+import { cardRows, confirmable } from "./AutoHiddenCard";
 
 const item = (token: string, tag: string, extra: Partial<AutoHidden> = {}): AutoHidden => ({
   token, tag, role: "teacher", reason: "אחרי 'הגננת'", uncertain: false, kind: "name", ...extra,
@@ -27,5 +27,16 @@ describe("the card's rows", () => {
     const rows = cardRows([item("שירה", "[ילדה_2]"), item("ושירה", "[ילדה_2]", { uncertain: true })]);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.uncertain).toBe(true);
+  });
+
+  it("offers to confirm only a person of this case or a close spelling of one", () => {
+    const rows = cardRows([
+      item("רוני", "[גננת_1]"),
+      item("רונני", "[גננת_1]", { kind: "similar_spelling", uncertain: true }),
+      item("גננת", "עובדת בתחום החינוך", { kind: "indirect" }),
+      item("אח", "[תיק_אחר]", { kind: "other_case" }),
+      item("שאלון", "שא[ילד_1]", { kind: "declared_in_word" }),
+    ]);
+    expect(rows.filter(confirmable).map((r) => r.tokens[0]).sort()).toEqual(["רוני", "רונני"]);
   });
 });

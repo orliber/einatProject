@@ -13,4 +13,8 @@ routing: Array<MaterialRouting>, sections: Array<SectionView>,
 /**
  * The proposed retention date (P-07) when `meta.retention_until` is not set.
  */
-retention_default: string, };
+retention_default: string, 
+/**
+ * The made-up case to try the program on (U3).
+ */
+sample: boolean, };

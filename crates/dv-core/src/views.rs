@@ -158,6 +158,8 @@ pub struct CaseDetail {
     pub sections: Vec<SectionView>,
     /// The proposed retention date (P-07) when `meta.retention_until` is not set.
     pub retention_default: String,
+    /// The made-up case to try the program on (U3).
+    pub sample: bool,
 }
 
 /// Where one material goes in the report (D-022).

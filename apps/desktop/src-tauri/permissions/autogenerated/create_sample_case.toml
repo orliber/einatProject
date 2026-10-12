@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-sample-case"
+description = "Enables the create_sample_case command without any pre-configured scope."
+commands.allow = ["create_sample_case"]
+
+[[permission]]
+identifier = "deny-create-sample-case"
+description = "Denies the create_sample_case command without any pre-configured scope."
+commands.deny = ["create_sample_case"]

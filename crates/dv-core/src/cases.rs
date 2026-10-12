@@ -2,6 +2,28 @@
 
 use super::*;
 
+/// The id of the made-up case (U3).
+const SAMPLE_KEY: &str = "sample_case_id";
+
+/// The made-up case's materials. Every word is invented.
+const SAMPLE_INPUTS: &[(InputKind, &str, &str)] = &[
+    (
+        InputKind::Intake,
+        "שיחה עם ההורים",
+        "ההורים פנו בשל קושי של תמר להישאר בפעילות אחת לאורך זמן בגן. לדבריהם היא ילדה חברותית ושמחה, אוהבת לצייר ולשמוע סיפורים. ההתפתחות המוטורית והשפתית תקינה לדבריהם. בבית היא מתקשה לסיים משימה כשיש רעש סביבה, ומבקשת עזרה בהתארגנות בבוקר.",
+    ),
+    (
+        InputKind::Kindergarten,
+        "שיחה עם הגננת",
+        "הגננת מתארת ילדה נעימה ומעורבת חברתית. במפגש הבוקר היא מתקשה לשבת עד הסוף וקמה כמה פעמים. בפינת היצירה היא מתמידה זמן רב. היא נעזרת בתזכורת קצרה כדי לעבור בין פעילויות.",
+    ),
+    (
+        InputKind::Observation,
+        "התרשמות מהמפגש",
+        "תמר נכנסה לחדר בחיוך ונענתה בשמחה למשימות. במשימות קצרות עבדה בריכוז ובקצב טוב. במשימות ארוכות יותר הסתכלה סביב ונזקקה להכוונה כדי לחזור למשימה. היא הגיבה היטב לעידוד ולחלוקת המשימה לשלבים.",
+    ),
+];
+
 impl Core {
     pub fn list_cases(&mut self) -> Result<Vec<CaseSummary>, CoreError> {
         let cases = self.vault_ref()?.list_cases()?;
@@ -18,6 +40,57 @@ impl Core {
         let id = v.create_case(&meta)?;
         v.set_identities(&id, &identities)?;
         Ok(id)
+    }
+
+    /// A made-up case to try the program on (U3): an invented child and three invented
+    /// materials. Opened once; while it is still in the case list, the same one is returned.
+    pub fn create_sample_case(&mut self) -> Result<String, CoreError> {
+        let existing = self.vault_ref()?.setting(SAMPLE_KEY)?;
+        if let Some(id) = existing {
+            let live = self
+                .vault_ref()?
+                .list_cases()?
+                .iter()
+                .any(|c| c.id == id && c.deleted_at.is_none());
+            if live {
+                return Ok(id);
+            }
+        }
+        let meta = CaseMeta {
+            code: "דוגמה".into(),
+            age: Some(dv_domain::Age {
+                years: 5,
+                months: 6,
+            }),
+            child_gender: Some(dv_domain::GrammaticalGender::Female),
+            current_section: None,
+            retention_until: None,
+            consent: Some(dv_domain::Consent {
+                given_on: dates::iso(dates::today()),
+                form_version: "תיק לדוגמה".into(),
+                given_by: "תיק בדוי".into(),
+            }),
+            follows: None,
+        };
+        let id = self.create_case(
+            meta,
+            vec![IdentityInput {
+                id: None,
+                role: dv_domain::Role::Child,
+                value: "תמר".into(),
+                aliases: vec![],
+            }],
+        )?;
+        for (kind, title, text) in SAMPLE_INPUTS {
+            self.add_input(&id, *kind, title, text)?;
+        }
+        self.vault_mut()?.set_setting(SAMPLE_KEY, &id)?;
+        Ok(id)
+    }
+
+    /// Is `case_id` the made-up case?
+    pub(crate) fn is_sample(&mut self, case_id: &str) -> Result<bool, CoreError> {
+        Ok(self.vault_ref()?.setting(SAMPLE_KEY)?.as_deref() == Some(case_id))
     }
 
     pub fn update_case(&mut self, case_id: &str, mut meta: CaseMeta) -> Result<(), CoreError> {

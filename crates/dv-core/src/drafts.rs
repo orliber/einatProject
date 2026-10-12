@@ -12,6 +12,7 @@ impl Core {
         } else {
             dv_style::EditModel::default()
         };
+        let sample = self.is_sample(case_id)?;
         let v = self.vault_ref()?;
         let meta = v.case_meta(case_id)?;
         let identities = v.identities(case_id)?;
@@ -128,6 +129,7 @@ impl Core {
             routing,
             sections,
             retention_default,
+            sample,
         })
     }
 

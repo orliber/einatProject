@@ -80,6 +80,11 @@ export function CasesScreen() {
   };
 
   const refreshAll = () => Promise.all(["cases", "folders", "trash"].map((k) => qc.invalidateQueries({ queryKey: [k] })));
+  const sample = useMutation({
+    mutationFn: ipc.createSampleCase,
+    onSuccess: (id) => { void refreshAll(); go({ name: "case", id, view: "materials" }); },
+    onError: (e: UiError) => fail(e),
+  });
   const act = useMutation({
     mutationFn: (f: () => Promise<unknown>) => f(),
     onSuccess: () => refreshAll(),
@@ -245,7 +250,11 @@ export function CasesScreen() {
               <div className="card empty">
                 <h2>התיק הראשון</h2>
                 <p className="muted">פותחים תיק, מוסיפים את החומרים שכבר יש (דוחות, אינטייק, סיכומי מפגשים וציונים), ו-{ai} מציע טיוטה לכל סעיף בדוח. אפשר לסדר את התיקים בתיקיות, כמו במחשב.</p>
-                <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>פתיחת תיק</button>
+                <div className="row wrap-row">
+                  <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>פתיחת תיק</button>
+                  <button type="button" className="btn" disabled={sample.isPending} onClick={() => sample.mutate()}>לנסות קודם על תיק לדוגמה</button>
+                </div>
+                <p className="small muted">תיק לדוגמה הוא תיק בדוי עם שלושה חומרים קצרים, כדי לראות איך העבודה נראית לפני שפותחים תיק אמיתי. אפשר למחוק אותו בכל רגע.</p>
               </div>
             )}
 

@@ -695,3 +695,53 @@ kbd {
   background: var(--surface);
   white-space: nowrap;
 }
+
+/* ---------- search inside a case (U7) ---------- */
+.search-group h3 {
+  margin: 12px 0 6px;
+}
+.search-hits {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.search-hit {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.search-hit:hover,
+.search-hit:focus-visible {
+  border-color: var(--primary-line);
+  background: var(--primary-soft);
+}
+.search-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.search-snippet mark {
+  background: var(--mark);
+  color: inherit;
+}
+
+/* The made-up case (U3). */
+.sample-guide {
+  margin: 8px 16px 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--sand);
+  border: 1px solid var(--line-strong);
+}
+.sample-guide p { margin: 0 0 8px; }
