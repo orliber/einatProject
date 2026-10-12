@@ -32,6 +32,10 @@ impl Core {
             seal_dir: seal::default_dir(),
             rollback_warning: None,
             session: 0,
+            models_dir: None,
+            ner: None,
+            ner_problem: None,
+            hint_cache: HashMap::new(),
         }
     }
 
@@ -340,6 +344,7 @@ impl Core {
         self.staged_backup = None;
         self.style_staged.clear();
         self.removed_input = None;
+        self.hint_cache.clear();
         if let Some(v) = self.vault.take() {
             let _ = v.lock_because(reason);
         }

@@ -138,6 +138,7 @@ export class FakeCore {
   private lockMinutes = 15;
   private capUsd: number | null = null;
   private verifyOn = false;
+  private nameModel = { enabled: false, downloaded: false, size_mb: 705, problem: null as string | null };
   private ready: Record<string, number | null> = {};
   private sendStopped = false;
   /** The material deleted last, for "ביטול" (forgotten on lock, as in the core). */
@@ -659,6 +660,16 @@ export class FakeCore {
           { key: "disk", done: true, checked_by_program: true, confirmed_at: null }];
         return { items, all_done: false };
       }
+      case "name_model_status":
+        return { ...this.nameModel };
+      case "download_name_model":
+        this.nameModel = { ...this.nameModel, enabled: true, downloaded: true };
+        return { ...this.nameModel };
+      case "name_model_progress":
+        return null;
+      case "set_name_model":
+        this.nameModel = { ...this.nameModel, enabled: Boolean(a.on), downloaded: Boolean(a.on) && this.nameModel.downloaded };
+        return { ...this.nameModel };
       case "verify_stage_on":
         return this.verifyOn;
       case "set_verify_stage":

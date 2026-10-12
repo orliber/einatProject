@@ -140,6 +140,7 @@ impl Core {
         };
         let model = self.model_config()?;
         let data = self.privacy_data(case_id)?;
+        let hints = self.case_hints(case_id, &[])?;
         let demo_mode = self.demo_mode()?;
 
         let (input, review, sources) = {
@@ -160,14 +161,26 @@ impl Core {
                 past_names: &past,
                 today: today(),
             };
-            let run = |t: &str| filter(t, &ctx).map_err(|e| CoreError::Internal(e.to_string()));
+            let run = |t: &str| {
+                hints
+                    .filter(t, &ctx)
+                    .map_err(|e| CoreError::Internal(e.to_string()))
+            };
             let fixed_title = |sec: &dv_domain::ReportSection| model_title(sec, &ctx);
             let mut review = Review::default();
             let derived = DERIVED_SECTIONS.contains(&section_key) || letter.is_some();
             let (tagged_sources, source_rows) = if derived {
                 (Vec::new(), Vec::new())
             } else {
-                collect_sources(v, &structure, &ctx, case_id, section_key, &mut review)?
+                collect_sources(
+                    v,
+                    &structure,
+                    &ctx,
+                    &hints,
+                    case_id,
+                    section_key,
+                    &mut review,
+                )?
             };
             let mut approved_context = Vec::new();
             if derived {
@@ -628,11 +641,16 @@ pub(crate) fn collect_sources(
     v: &Vault,
     structure: &ReportStructure,
     ctx: &PrivacyContext<'_>,
+    hints: &NameHints,
     case_id: &str,
     section_key: &str,
     review: &mut Review,
 ) -> Result<SectionSources, CoreError> {
-    let run = |t: &str| filter(t, ctx).map_err(|e| CoreError::Internal(e.to_string()));
+    let run = |t: &str| {
+        hints
+            .filter(t, ctx)
+            .map_err(|e| CoreError::Internal(e.to_string()))
+    };
     let mut tagged_sources = Vec::new();
     let mut source_rows = Vec::new();
     for inp in v.inputs(case_id)? {
@@ -645,7 +663,7 @@ pub(crate) fn collect_sources(
         };
         let sid = format!("S{}", tagged_sources.len() + 1);
         let title = run(&inp.title)?;
-        let content = sorting::section_text(&inp.content, &feed, ctx)?;
+        let content = sorting::section_text(&inp.content, &feed, ctx, hints)?;
         let kind = match feed {
             dv_domain::Feed::Whole => inp.kind.label_he().to_owned(),
             dv_domain::Feed::Passages(_) => {

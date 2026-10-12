@@ -7,6 +7,7 @@ import { TopBar } from "../components/TopBar";
 import { UpdateSettings } from "../components/Update";
 import { UsageSettings } from "../components/UsageSettings";
 import { VerifySettings } from "../components/VerifySettings";
+import { NameModelSettings } from "../components/NameModelSettings";
 import { ReadinessSettings } from "../components/ReadinessSettings";
 import { SecuritySettings } from "../components/SecuritySettings";
 import { ErrorLine } from "../components/ui";
@@ -24,6 +25,7 @@ const JUMPS: [string, string][] = [
   ["s-claude", "חיבור ל-AI"],
   ["s-usage", "שימוש ועלות"],
   ["s-privacy", "פרטיות ונעילה"],
+  ["s-names", "זיהוי שמות"],
   ["s-report", "הדוח"],
   ["s-backup", "גיבוי"],
   ["s-password", "סיסמה"],
@@ -197,6 +199,8 @@ export function SettingsScreen() {
             </>
           )}
         </section>
+
+        <NameModelSettings />
 
         {report && (
           <section className="card setting" aria-labelledby="s-report">

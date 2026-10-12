@@ -12,10 +12,11 @@ use dv_ai::{SortInput, SortMaterial, SortSection};
 use dv_domain::{
     passage_ranges, Feed, InputKind, ReportSection, ReportStructure, Routing, Suggestion,
 };
-use dv_privacy::{filter, filter_split, FilterOutcome, PrivacyContext};
+use dv_privacy::{FilterOutcome, PrivacyContext};
 use dv_vault::{AuditEvent, Vault, VaultError};
 use serde_json::Value;
 
+use crate::name_model::NameHints;
 use crate::views::{MaterialRouting, Prepared, SortResult};
 use crate::{today, Core, CoreError, Outgoing, Pending, PendingKind, Review, DERIVED_SECTIONS};
 
@@ -57,13 +58,16 @@ pub(crate) fn section_text(
     content: &str,
     feed: &Feed,
     ctx: &PrivacyContext<'_>,
+    hints: &NameHints,
 ) -> Result<FilterOutcome, CoreError> {
     let internal = |e: dv_privacy::PrivacyError| CoreError::Internal(e.to_string());
     let Feed::Passages(chosen) = feed else {
-        return filter(content, ctx).map_err(internal);
+        return hints.filter(content, ctx).map_err(internal);
     };
     let ranges = passage_ranges(content);
-    let (whole, parts) = filter_split(content, ctx, &ranges).map_err(internal)?;
+    let (whole, parts) = hints
+        .filter_split(content, ctx, &ranges)
+        .map_err(internal)?;
     let Some(parts) = parts else {
         return Ok(whole);
     };
@@ -216,6 +220,7 @@ impl Core {
             .collect();
         let model = self.model_for(crate::Task::Sort)?;
         let data = self.privacy_data(case_id)?;
+        let hints = self.case_hints(case_id, &[])?;
         let demo_mode = self.demo_mode()?;
 
         let (input, review, rows) = {
@@ -248,13 +253,15 @@ impl Core {
                 {
                     continue;
                 }
-                let (whole, parts) = filter_split(&inp.content, &ctx, &ranges).map_err(internal)?;
+                let (whole, parts) = hints
+                    .filter_split(&inp.content, &ctx, &ranges)
+                    .map_err(internal)?;
                 // A name across a passage edge: this material stays on the table for now.
                 let Some(parts) = parts else {
                     uncut.push(inp.title.clone());
                     continue;
                 };
-                let title = filter(&inp.title, &ctx).map_err(internal)?;
+                let title = hints.filter(&inp.title, &ctx).map_err(internal)?;
                 let sid = format!("S{}", materials.len() + 1);
                 if title.original_segments.iter().any(|s| s.mark.is_some()) {
                     review.add(format!("{sid} · {} · כותרת", inp.kind.label_he()), &title);

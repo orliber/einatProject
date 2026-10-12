@@ -17,8 +17,9 @@ pub mod text;
 pub use gate::{clear, BlockReason, Blocked, ClearedPayload, GateRequest, GENERIC_TAGS};
 pub use misread::{ocr_misreads, Misread};
 pub use pipeline::{
-    everyday_name, filter, filter_split, AutoHidden, AutoKind, Checks, FilterOutcome, Mark,
-    PrivacyContext, Segment, Suspect, SuspectKind,
+    everyday_name, filter, filter_split, filter_split_with_hints, filter_with_hints, AutoHidden,
+    AutoKind, Checks, FilterOutcome, Mark, NameHint, PrivacyContext, Segment, Suspect, SuspectKind,
+    NAME_HINT_SURE,
 };
 
 #[derive(Debug, thiserror::Error)]

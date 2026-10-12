@@ -188,6 +188,16 @@ impl Core {
         case_id: &str,
         text: &str,
     ) -> Result<FilterOutcome, CoreError> {
+        self.filter_hinted(case_id, text, &[])
+    }
+
+    /// [`Self::preview_filter`] with the name model's hints (none when it is off).
+    fn filter_hinted(
+        &mut self,
+        case_id: &str,
+        text: &str,
+        hints: &[NameHint],
+    ) -> Result<FilterOutcome, CoreError> {
         let data = self.privacy_data(case_id)?;
         let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
         let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
@@ -202,20 +212,22 @@ impl Core {
             past_names: &past,
             today: today(),
         };
-        filter(text, &ctx).map_err(|e| CoreError::Internal(e.to_string()))
+        filter_with_hints(text, &ctx, hints).map_err(|e| CoreError::Internal(e.to_string()))
     }
 
     /// Filter `text` for the case and keep the new names it found, then filter it again so
-    /// they carry their kept tags (the outcome lists them, for the card).
+    /// they carry their kept tags (the outcome lists them, for the card). When the name model
+    /// is on (D-053), its hints join both passes, and what it found is kept with the case.
     pub(crate) fn learn(&mut self, case_id: &str, text: &str) -> Result<FilterOutcome, CoreError> {
-        let first = self.preview_filter(case_id, text)?;
+        let hints = self.name_hints(text);
+        let first = self.filter_hinted(case_id, text, &hints)?;
         let data = self.privacy_data(case_id)?;
         let found = found_names(&data, &first.auto_hidden);
         if found.is_empty() {
             return Ok(first);
         }
         self.vault_mut()?.add_found_names(case_id, &found)?;
-        self.preview_filter(case_id, text)
+        self.filter_hinted(case_id, text, &hints)
     }
 
     /// Scanned text (OCR) can misread a name by one letter ("אלוו" for "אלון"). Call this for

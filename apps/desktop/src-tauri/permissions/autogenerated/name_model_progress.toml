@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-name-model-progress"
+description = "Enables the name_model_progress command without any pre-configured scope."
+commands.allow = ["name_model_progress"]
+
+[[permission]]
+identifier = "deny-name-model-progress"
+description = "Denies the name_model_progress command without any pre-configured scope."
+commands.deny = ["name_model_progress"]
