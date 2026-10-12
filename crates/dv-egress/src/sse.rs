@@ -7,7 +7,7 @@ use std::io::BufRead;
 
 use serde_json::{json, Map, Value};
 
-use crate::EgressError;
+use crate::{EgressError, MAX_ANSWER_BYTES};
 
 /// Rebuild the final message from the event stream. `progress` gets the number of words
 /// written so far (text only, not the model's thinking).
@@ -114,8 +114,15 @@ pub fn assemble(reader: impl BufRead, progress: &dyn Fn(u32)) -> Result<Value, E
         Ok(())
     };
 
+    // The caller reads at most one byte past the limit, so one line cannot fill the memory;
+    // here a stream that reaches the limit is refused rather than read as cut short.
+    let mut total: usize = 0;
     for line in reader.lines() {
         let line = line.map_err(|_| EgressError::Offline)?;
+        total = total.saturating_add(line.len() + 1);
+        if total > MAX_ANSWER_BYTES {
+            return Err(too_large());
+        }
         if line.is_empty() {
             if !data.is_empty() {
                 handle(
@@ -161,9 +168,17 @@ fn index(ev: &Value) -> Result<usize, EgressError> {
         .ok_or_else(|| EgressError::Protocol("event without a valid index".to_owned()))
 }
 
+fn too_large() -> EgressError {
+    EgressError::Protocol(format!("answer over {MAX_ANSWER_BYTES} bytes"))
+}
+
+/// Adds in place: a long answer arrives in thousands of small pieces.
 fn append(block: &mut Value, field: &str, piece: &str) {
-    let now = block[field].as_str().unwrap_or("").to_owned();
-    block[field] = Value::String(now + piece);
+    if let Some(Value::String(now)) = block.get_mut(field) {
+        now.push_str(piece);
+    } else {
+        block[field] = Value::String(piece.to_owned());
+    }
 }
 
 #[cfg(test)]

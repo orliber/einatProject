@@ -1,6 +1,7 @@
 name: fuzz-nightly
 
-# Long mutation-fuzz run over every document reader (S3, D-051). The short run is part of the
+# Long mutation-fuzz run over every document reader, the stream reader and the readers of
+# the AI's answers (S3, D-051). The short run is part of the
 # ordinary test suite; this one only looks for what the short run missed.
 on:
   schedule:
@@ -22,3 +23,13 @@ jobs:
           DV_FUZZ_ROUNDS: "300000"
           DV_FUZZ_SEED: ${{ github.run_number }}
         run: cargo test --release -p dv-ingest --test fuzz -- --nocapture
+      - name: Fuzz the stream reader
+        env:
+          DV_FUZZ_ROUNDS: "300000"
+          DV_FUZZ_SEED: ${{ github.run_number }}
+        run: cargo test --release -p dv-egress --test fuzz_sse -- --nocapture
+      - name: Fuzz the readers of the AI's answers
+        env:
+          DV_FUZZ_ROUNDS: "300000"
+          DV_FUZZ_SEED: ${{ github.run_number }}
+        run: cargo test --release -p dv-ai --test fuzz_answers -- --nocapture

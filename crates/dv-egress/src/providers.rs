@@ -503,9 +503,7 @@ impl ProviderTransport {
                 _ => crate::send_error(&e),
             })?;
         let status = resp.status().as_u16();
-        let text = resp
-            .text()
-            .map_err(|e| EgressError::Protocol(e.to_string()))?;
+        let text = crate::read_answer(resp)?;
         let parsed = serde_json::from_str::<Value>(&text);
         let message = parsed
             .as_ref()

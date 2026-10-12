@@ -7,6 +7,7 @@
 //! Gemini instead of Claude (D-040), [`providers`] re-shapes the same cleared text for that
 //! company, adding nothing.
 
+use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -142,6 +143,29 @@ pub trait Transport: Send + Sync {
 /// Largest request body that leaves the machine. A whole case with every document is far below
 /// this; anything above means a runaway loop or a bug, and is refused (fail-closed, S7).
 pub const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
+/// Largest answer read back. A whole report with the model's thinking is far below this; an
+/// answer that does not end means a broken or hostile server, and is refused.
+pub const MAX_ANSWER_BYTES: usize = 16 * 1024 * 1024;
+
+/// Reads an answer up to the limit (one byte past it is enough to know it is over).
+pub(crate) fn capped(from: impl std::io::Read) -> std::io::Take<impl std::io::Read> {
+    from.take(MAX_ANSWER_BYTES as u64 + 1)
+}
+
+/// The whole (non-streamed) answer as text, refused past the limit.
+pub(crate) fn read_answer(from: impl std::io::Read) -> Result<String, EgressError> {
+    let mut bytes = Vec::new();
+    capped(from)
+        .read_to_end(&mut bytes)
+        .map_err(|e| EgressError::Protocol(e.to_string()))?;
+    if bytes.len() > MAX_ANSWER_BYTES {
+        return Err(EgressError::Protocol(format!(
+            "answer over {MAX_ANSWER_BYTES} bytes"
+        )));
+    }
+    String::from_utf8(bytes).map_err(|e| EgressError::Protocol(e.to_string()))
+}
+
 /// Most requests to a remote service in 24 hours, for the whole process.
 pub const DAILY_REQUESTS: usize = 400;
 
@@ -307,11 +331,9 @@ impl AnthropicTransport {
             .and_then(|v| v.to_str().ok())
             .is_some_and(|v| v.starts_with("text/event-stream"));
         if status == 200 && streamed {
-            return sse::assemble(std::io::BufReader::new(resp), progress);
+            return sse::assemble(std::io::BufReader::new(capped(resp)), progress);
         }
-        let text = resp
-            .text()
-            .map_err(|e| EgressError::Protocol(e.to_string()))?;
+        let text = read_answer(resp)?;
         match status {
             200 => serde_json::from_str(&text).map_err(|e| EgressError::Protocol(e.to_string())),
             401 | 403 => Err(EgressError::Unauthorized),
