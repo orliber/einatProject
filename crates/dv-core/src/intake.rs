@@ -272,7 +272,7 @@ impl Core {
     /// they carry their kept tags (the outcome lists them, for the card). When the name model
     /// is on (D-053), its hints join both passes, and what it found is kept with the case.
     pub(crate) fn learn(&mut self, case_id: &str, text: &str) -> Result<FilterOutcome, CoreError> {
-        let hints = self.name_hints(text);
+        let hints = self.name_hints(case_id, text);
         let first = self.filter_hinted(case_id, text, &hints)?;
         let data = self.privacy_data(case_id)?;
         let found = found_names(&data, &first.auto_hidden);

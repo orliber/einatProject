@@ -545,8 +545,10 @@ pub struct Core {
     session: u64,
     /// Where the optional name model is downloaded (D-053); `None` keeps it off.
     models_dir: Option<PathBuf>,
-    /// The name model, loaded on first use while it is on.
-    ner: Option<Arc<dv_ner::NerModel>>,
+    /// The name model, started on first use while it is on (ended on lock).
+    ner: Option<name_model::NameFinder>,
+    /// The app's binary, started as the name model's isolated worker (SEC2).
+    ner_exe: Option<PathBuf>,
     /// Why the name model is not in use right now (shown in Settings).
     ner_problem: Option<String>,
     /// The name model's hints by text, so a material is read once (dropped on lock).

@@ -15,6 +15,11 @@ use dv_ner::NerModel;
 const WORDS: &[&str] = &["שלום", "הגננת", "אסתי", "סיפרה", "ש", "נוגה", "שיחקה"];
 
 fn write_model() -> PathBuf {
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(write_model_once).clone()
+}
+
+fn write_model_once() -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("dv-ner-tiny");
     std::fs::create_dir_all(&dir).unwrap();
     let config = serde_json::json!({
@@ -79,4 +84,47 @@ fn every_word_comes_back_with_its_byte_range_across_windows() {
 fn missing_files_are_an_error_not_a_panic() {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("dv-ner-none");
     assert!(NerModel::load(&dir).is_err());
+}
+
+fn worker_exe() -> &'static std::path::Path {
+    std::path::Path::new(env!("CARGO_BIN_EXE_dv-ner-worker"))
+}
+
+/// SEC2: the same answers from the isolated worker, many texts on one loaded model.
+#[test]
+fn the_worker_answers_like_the_model_and_keeps_running_between_texts() {
+    use dv_ner::worker::NerWorker;
+    let dir = write_model();
+    let model = NerModel::load(&dir).unwrap();
+    let mut worker = NerWorker::start(worker_exe(), &dir).unwrap();
+    for text in [
+        "שלום נוגה",
+        "הגננת אסתי סיפרה ש נוגה שיחקה",
+        "",
+        "שלום\nשלום",
+    ] {
+        let want: Vec<(usize, usize)> = model
+            .people(text)
+            .unwrap()
+            .iter()
+            .map(|s| (s.start, s.end))
+            .collect();
+        let got: Vec<(usize, usize)> = worker
+            .people(text)
+            .unwrap()
+            .iter()
+            .map(|p| (p.start, p.end))
+            .collect();
+        assert_eq!(got, want, "{text}");
+    }
+}
+
+#[test]
+fn a_worker_without_model_files_does_not_start() {
+    use dv_ner::worker::{NerWorker, WorkerError};
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("dv-ner-none");
+    assert!(matches!(
+        NerWorker::start(worker_exe(), &dir),
+        Err(WorkerError::Load(_))
+    ));
 }

@@ -14,6 +14,9 @@ import { useAi } from "../../ai";
 
 const ACCEPT = ".docx,.doc,.odt,.rtf,.pdf,.txt,.jpg,.jpeg,.png,.tif,.tiff,.heic,application/vnd.oasis.opendocument.text,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/rtf,text/plain,image/jpeg,image/png,image/tiff";
 
+/** Materials shown in a slot before "עוד" (R5). */
+const SLOT_SHOWN = 8;
+
 export function MaterialsView({ api }: { api: CaseApi }) {
   const { fail, notify } = useApp();
   const ai = useAi();
@@ -31,6 +34,8 @@ export function MaterialsView({ api }: { api: CaseApi }) {
   const [choosing, setChoosing] = useState<CaseInput | null>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // R5: a slot with many materials shows the newest first, the rest on request.
+  const [opened, setOpened] = useState<Set<string>>(() => new Set());
   /** A clean import saved without the review window, with a way back (F7). */
   const [autoSaved, setAutoSaved] = useState<{ id: string; title: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -205,7 +210,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
                 )}
               </div>
               {g.kinds.includes("prior_report") && g.items.length > 0 && <PriorReportsAsk api={api} />}
-              {g.items.map((i) => (
+              {(opened.has(g.label) ? g.items : g.items.slice(0, SLOT_SHOWN)).map((i) => (
                 <button key={i.id} type="button" className={i.id === selected ? "material selected" : "material"} onClick={() => setSelected(i.id)}>
                   <span className="material-title">{i.title || kindLabel[i.kind]}</span>
                   <span className="small muted">
@@ -213,6 +218,11 @@ export function MaterialsView({ api }: { api: CaseApi }) {
                   </span>
                 </button>
               ))}
+              {g.items.length > SLOT_SHOWN && !opened.has(g.label) && (
+                <button type="button" className="link-btn slot-more" onClick={() => setOpened((o) => new Set(o).add(g.label))}>
+                  עוד {g.items.length - SLOT_SHOWN} ב{g.label}
+                </button>
+              )}
             </div>
           ))}
         </section>

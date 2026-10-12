@@ -71,6 +71,7 @@ const ALLOWED = new Set([
   "import_document",
   "import_style_source",
   "install_update",
+  "open_releases_page",
   "keep_case_longer",
   "letter",
   "list_cases",

@@ -8,11 +8,12 @@
 //! The model never blocks work: when it cannot be read, documents are filtered on the rules
 //! alone, as before it was turned on, and Settings says what went wrong.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use dv_egress::name_model::{self, HuggingFaceFetch, ModelError, ModelFetch};
+use dv_ner::worker::NerWorker;
 use dv_ner::NerModel;
 use dv_privacy::{FilterOutcome, NameHint, PrivacyContext, PrivacyError};
 use serde::{Deserialize, Serialize};
@@ -35,6 +36,83 @@ pub struct NameModelView {
     pub size_mb: u32,
     /// Why it is not in use right now, in Hebrew.
     pub problem: Option<String>,
+}
+
+/// The model, in its isolated process (the app) or in this one (tests, development).
+#[derive(Debug)]
+pub(crate) enum NameFinder {
+    InProcess(Arc<NerModel>),
+    Isolated(NerWorker),
+}
+
+impl NameFinder {
+    fn people(&mut self, text: &str) -> Result<Vec<NameHint>, ()> {
+        match self {
+            Self::InProcess(m) => m
+                .people(text)
+                .map(|p| {
+                    p.into_iter()
+                        .map(|p| NameHint {
+                            start: p.start,
+                            end: p.end,
+                            score: p.score,
+                        })
+                        .collect()
+                })
+                .map_err(|_| ()),
+            Self::Isolated(w) => w
+                .people(text)
+                .map(|p| {
+                    p.into_iter()
+                        .map(|p| NameHint {
+                            start: p.start,
+                            end: p.end,
+                            score: p.score,
+                        })
+                        .collect()
+                })
+                .map_err(|_| ()),
+        }
+    }
+}
+
+/// A span as kept in the vault.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+struct KeptHint {
+    s: usize,
+    e: usize,
+    p: f32,
+}
+
+impl From<&NameHint> for KeptHint {
+    fn from(h: &NameHint) -> Self {
+        Self {
+            s: h.start,
+            e: h.end,
+            p: h.score,
+        }
+    }
+}
+
+impl From<KeptHint> for NameHint {
+    fn from(h: KeptHint) -> Self {
+        Self {
+            start: h.s,
+            end: h.e,
+            score: h.p,
+        }
+    }
+}
+
+/// Kept spans that fit the text (anything else is read again by the model).
+fn valid(kept: &[KeptHint], text: &str) -> bool {
+    kept.iter().all(|h| {
+        h.s < h.e
+            && h.e <= text.len()
+            && text.is_char_boundary(h.s)
+            && text.is_char_boundary(h.e)
+            && h.p.is_finite()
+    })
 }
 
 /// The model's hints for the texts of one request, by exact text. Empty when the model is off,
@@ -111,7 +189,15 @@ impl Core {
         self
     }
 
-    fn name_model_on(&mut self) -> bool {
+    /// Run the model in its own isolated process: `exe` is the app's binary, which turns into
+    /// the worker when started with [`dv_ner::worker::WORKER_ARG`] (SEC2).
+    #[must_use]
+    pub fn with_name_model_worker(mut self, exe: PathBuf) -> Self {
+        self.ner_exe = Some(exe);
+        self
+    }
+
+    pub(crate) fn name_model_on(&mut self) -> bool {
         self.vault_ref()
             .ok()
             .and_then(|v| v.setting(NAME_MODEL_KEY).ok().flatten())
@@ -147,6 +233,8 @@ impl Core {
             self.vault_mut()?.set_setting(NAME_MODEL_KEY, "on")?;
         } else {
             self.vault_mut()?.set_setting(NAME_MODEL_KEY, "")?;
+            self.vault_mut()?.clear_name_hints()?;
+            self.hint_cache.clear();
             self.ner = None;
             if let Some(d) = dir.as_deref() {
                 name_model::remove(&folder(d)).map_err(model_error)?;
@@ -156,67 +244,98 @@ impl Core {
         self.name_model_status()
     }
 
-    /// The model, loaded once per run after its files pass their pinned hashes. `None` when it
-    /// is off or cannot be read (then `ner_problem` says why).
-    fn name_model(&mut self) -> Option<Arc<NerModel>> {
+    /// The model, started once per unlock after its files pass their pinned hashes: in its
+    /// own isolated process when the app gave one ([`Core::with_name_model_worker`], SEC2),
+    /// in this process otherwise (tests, development). `None` when it is off or cannot be
+    /// read (then `ner_problem` says why).
+    fn name_model(&mut self) -> Option<&mut NameFinder> {
         if !self.name_model_on() {
             return None;
         }
-        if let Some(m) = &self.ner {
-            return Some(Arc::clone(m));
-        }
-        if self.ner_problem.is_some() {
-            return None;
-        }
-        let dir = folder(self.models_dir.as_deref()?);
-        let loaded = name_model::verify(&dir)
-            .map_err(|_| "קובצי המודל במחשב השתנו. כדאי לכבות ולהדליק אותו שוב.".to_owned())
-            .and_then(|()| {
-                NerModel::load(&dir).map_err(|_| "לא הצלחתי לקרוא את המודל.".to_owned())
-            });
-        match loaded {
-            Ok(m) => {
-                let m = Arc::new(m);
-                self.ner = Some(Arc::clone(&m));
-                Some(m)
-            }
-            Err(why) => {
-                self.ner_problem = Some(why);
-                None
+        if self.ner.is_none() && self.ner_problem.is_none() {
+            let dir = folder(self.models_dir.as_deref()?);
+            let loaded = name_model::verify(&dir)
+                .map_err(|_| "קובצי המודל במחשב השתנו. כדאי לכבות ולהדליק אותו שוב.".to_owned())
+                .and_then(|()| match &self.ner_exe {
+                    Some(exe) => NerWorker::start(exe, &dir)
+                        .map(NameFinder::Isolated)
+                        .map_err(|_| "לא הצלחתי להפעיל את המודל בתהליך מבודד.".to_owned()),
+                    None => NerModel::load(&dir)
+                        .map(|m| NameFinder::InProcess(Arc::new(m)))
+                        .map_err(|_| "לא הצלחתי לקרוא את המודל.".to_owned()),
+                });
+            match loaded {
+                Ok(m) => self.ner = Some(m),
+                Err(why) => self.ner_problem = Some(why),
             }
         }
+        self.ner.as_mut()
     }
 
     /// The model's person spans in `text`, as hints for the filter. Empty when it is off.
-    /// Kept in memory until the vault locks, so a material is read by the model once.
-    pub(crate) fn name_hints(&mut self, text: &str) -> Vec<NameHint> {
-        if text.trim().is_empty() {
+    /// Kept in memory until the vault locks, and in the vault for a case's texts (R4), so a
+    /// material is read by the model once, not once per unlock.
+    pub(crate) fn name_hints(&mut self, case_id: &str, text: &str) -> Vec<NameHint> {
+        if text.trim().is_empty() || !self.name_model_on() {
             return Vec::new();
+        }
+        if let Some(h) = self.hint_cache.get(text) {
+            return h.clone();
+        }
+        let key = self
+            .vault_ref()
+            .ok()
+            .map(|v| v.name_hints_key(name_model::MODEL_REVISION, text));
+        let kept = key.as_deref().and_then(|k| {
+            self.vault_ref()
+                .ok()?
+                .name_hints(k)
+                .ok()
+                .flatten()
+                .and_then(|j| serde_json::from_str::<Vec<KeptHint>>(&j).ok())
+        });
+        if let Some(kept) = kept.filter(|k| valid(k, text)) {
+            let hints: Vec<NameHint> = kept.into_iter().map(NameHint::from).collect();
+            self.hint_cache.insert(text.to_owned(), hints.clone());
+            return hints;
         }
         let Some(model) = self.name_model() else {
             return Vec::new();
         };
-        if let Some(h) = self.hint_cache.get(text) {
-            return h.clone();
-        }
         match model.people(text) {
-            Ok(people) => {
-                let hints: Vec<NameHint> = people
-                    .into_iter()
-                    .map(|p| NameHint {
-                        start: p.start,
-                        end: p.end,
-                        score: p.score,
-                    })
-                    .collect();
+            Ok(hints) => {
                 self.hint_cache.insert(text.to_owned(), hints.clone());
+                if let (Some(k), false) = (key, case_id.is_empty()) {
+                    let kept: Vec<KeptHint> = hints.iter().map(KeptHint::from).collect();
+                    if let (Ok(json), Ok(v)) = (serde_json::to_string(&kept), self.vault_mut()) {
+                        // Only a saving: when it fails, the model reads the text again later.
+                        let _ = v.set_name_hints(&k, case_id, &json);
+                    }
+                }
                 hints
             }
-            Err(_) => {
+            Err(()) => {
+                // A worker that failed is not used again until the next unlock.
+                self.ner = None;
                 self.ner_problem = Some("המודל לא הצליח לקרוא מסמך.".to_owned());
                 Vec::new()
             }
         }
+    }
+
+    /// At unlock: forget the spans of texts that are no longer materials of any case.
+    pub(crate) fn prune_name_hints(&mut self) -> Result<(), CoreError> {
+        let v = self.vault_mut()?;
+        let mut keep = HashSet::new();
+        for case in v.list_cases()? {
+            for inp in v.inputs(&case.id)? {
+                for t in [&inp.title, &inp.content] {
+                    keep.insert(v.name_hints_key(name_model::MODEL_REVISION, t));
+                }
+            }
+        }
+        v.keep_name_hints(&keep)?;
+        Ok(())
     }
 
     /// Hints for every material of the case (title and text) and for `extra` texts: what a
@@ -238,7 +357,7 @@ impl Core {
         }
         let mut out = HashMap::new();
         for t in texts {
-            let h = self.name_hints(&t);
+            let h = self.name_hints(case_id, &t);
             if !h.is_empty() {
                 out.insert(t, h);
             }
@@ -281,7 +400,7 @@ mod tests {
         assert!(!s.enabled && !s.downloaded);
         assert_eq!(s.size_mb, 705);
         assert!(matches!(c.set_name_model(true), Err(CoreError::Refused(_))));
-        assert!(c.name_hints("רוני הגיע עם אמא").is_empty());
+        assert!(c.name_hints("", "רוני הגיע עם אמא").is_empty());
     }
 
     #[test]
@@ -306,7 +425,7 @@ mod tests {
         }
         assert!(c.name_model_status().unwrap().downloaded);
         assert!(c.set_name_model(true).unwrap().enabled);
-        assert!(c.name_hints("רוני הגיע עם אמא").is_empty());
+        assert!(c.name_hints("", "רוני הגיע עם אמא").is_empty());
         assert!(c.name_model_status().unwrap().problem.is_some());
     }
 
@@ -362,9 +481,14 @@ mod tests {
             text,
         )
         .unwrap();
-        // What would go out for the section, after a lock: the model reads the material again.
+        // What would go out for the section, after a lock: the spans kept in the vault (R4)
+        // stand in for the model, which is not even started.
         c.lock();
         c.unlock("correct horse battery staple 1").unwrap();
+        let worker = std::env::var_os("DV_NER_WORKER").map(PathBuf::from);
+        if let Some(exe) = &worker {
+            c.ner_exe = Some(exe.clone());
+        }
         let prepared = c
             .prepare_section(&case, "kindergarten", "תנסח פסקה על החברים בגן")
             .unwrap();
@@ -379,5 +503,58 @@ mod tests {
             assert!(!out.contains(name), "{out}");
         }
         assert!(c.name_model_status().unwrap().problem.is_none());
+        assert!(c.ner.is_none(), "kept spans, no model run after the unlock");
+        // A new text in the same case runs the model, in the worker when one is given.
+        let more = "גם נוגה הגיעה למסיבה.";
+        assert!(!c.name_hints(&case, more).is_empty());
+        if worker.is_some() {
+            assert!(matches!(c.ner, Some(NameFinder::Isolated(_))));
+        }
+    }
+
+    /// R4: spans are kept per text and case; a deleted case takes them along, and turning the
+    /// model off forgets them all.
+    #[test]
+    fn kept_spans_follow_the_case_and_go_when_the_model_is_off() {
+        let (d, mut c) = core();
+        let f = folder(&d.path().join("models"));
+        std::fs::create_dir_all(&f).unwrap();
+        for file in name_model::MODEL_FILES {
+            std::fs::write(f.join(file.name), b"").unwrap();
+        }
+        c.vault_mut()
+            .unwrap()
+            .set_setting(NAME_MODEL_KEY, "on")
+            .unwrap();
+        let text = "נוגה הגיעה";
+        let key = c
+            .vault_ref()
+            .unwrap()
+            .name_hints_key(name_model::MODEL_REVISION, text);
+        c.vault_mut()
+            .unwrap()
+            .set_name_hints(&key, "case-1", r#"[{"s":0,"e":8,"p":0.95}]"#)
+            .unwrap();
+        // Kept spans are used without the model (its files here are empty, it cannot load).
+        let h = c.name_hints("case-1", text);
+        assert_eq!((h.len(), h[0].start, h[0].end), (1, 0, 8));
+        assert!(c.ner_problem.is_none(), "the model was never started");
+        // Spans that do not fit the text are never used.
+        let other = "אבג";
+        let k2 = c
+            .vault_ref()
+            .unwrap()
+            .name_hints_key(name_model::MODEL_REVISION, other);
+        c.vault_mut()
+            .unwrap()
+            .set_name_hints(&k2, "case-1", r#"[{"s":1,"e":2,"p":0.9}]"#)
+            .unwrap();
+        c.hint_cache.clear();
+        assert!(
+            c.name_hints("case-1", other).is_empty(),
+            "not on a character boundary"
+        );
+        c.set_name_model(false).unwrap();
+        assert_eq!(c.vault_ref().unwrap().name_hints(&key).unwrap(), None);
     }
 }

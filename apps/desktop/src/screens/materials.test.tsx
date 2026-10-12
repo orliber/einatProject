@@ -11,9 +11,10 @@ import { a11yViolations } from "../test/a11y";
 configure({ asyncUtilTimeout: 5000 });
 vi.setConfig({ testTimeout: 30_000 });
 
-async function openCase() {
+async function openCase(prepare?: (core: FakeCore) => Promise<void>) {
   const core = new FakeCore();
   await core.handle("unlock", { password: "x" });
+  await prepare?.(core);
   const calls: { cmd: string; args: Record<string, unknown> }[] = [];
   mockIPC((cmd, args) => {
     calls.push({ cmd, args: (args ?? {}) as Record<string, unknown> });
@@ -62,6 +63,22 @@ describe("materials", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("נשמר בתיק.");
     expect(await within(slot).findByRole("button", { name: /דוח קלינאית בדוי/ })).toBeInTheDocument();
     expect(within(slot).queryByText(/לא חובה/)).toBeNull();
+  });
+
+  it("a slot with many materials shows eight and the rest on request (R5)", async () => {
+    const { user } = await openCase(async (core) => {
+      const cases = (await core.handle("list_cases", {})) as { id: string; meta: { code: string } }[];
+      for (const c of cases) {
+        for (let i = 0; i < 12; i++) {
+          await core.handle("add_input", { caseId: c.id, kind: "prior_report", title: `דוח בדוי ${i}`, content: "טקסט בדוי." });
+        }
+      }
+    });
+    const list = await toMaterials(user);
+    const slot = within(list).getByText("דוחות ואבחונים קודמים (12)").closest(".slot") as HTMLElement;
+    expect(within(slot).getAllByRole("button", { name: /^דוח בדוי/ })).toHaveLength(8);
+    await user.click(within(slot).getByRole("button", { name: "עוד 4 בדוחות ואבחונים קודמים" }));
+    expect(within(slot).getAllByRole("button", { name: /^דוח בדוי/ })).toHaveLength(12);
   });
 
   it("a deleted material can be brought back from the notice", async () => {

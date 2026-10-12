@@ -18,6 +18,8 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The vault did not open for a reason that is not the password (R7): often a new version.
+  const [broken, setBroken] = useState(false);
   const [version, setVersion] = useState<string | null>(null);
   useEffect(() => {
     ipc.ping().then((p) => setVersion(p.core_version)).catch(() => setVersion(null));
@@ -43,6 +45,7 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
     if (!secret.trim()) return;
     setBusy(true);
     setError(null);
+    setBroken(false);
     try {
       const s = mode === "password" ? await ipc.unlock(secret) : await ipc.unlockWithRecovery(secret);
       setSecret("");
@@ -55,6 +58,7 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
         setWaitUntil(Date.now() + seconds * 1000);
       } else {
         setError(e.message ?? "הפתיחה נכשלה.");
+        setBroken(e.code === "vault" || e.code === "internal");
       }
     } finally {
       setBusy(false);
@@ -94,6 +98,7 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
           ) : (
             <ErrorLine error={error} />
           )}
+          {broken && <VersionTrouble version={version} />}
           <button type="submit" className="btn btn-primary" disabled={busy || waitUntil !== null}>{busy ? "פותחת…" : he.lock.open}</button>
           <button type="button" className="link-btn" onClick={() => { setMode(mode === "password" ? (googleOn ? "google" : "recovery") : "password"); setSecret(""); setError(null); }}>
             {mode === "password" ? (googleOn ? "שכחתי את הסיסמה · כניסה עם גוגל" : "שכחתי את הסיסמה · פתיחה עם ערכת השחזור") : "חזרה לפתיחה עם סיסמה"}
@@ -108,5 +113,26 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
       </section>
       <span className="lock-version">{version ? `v${version}` : ""}{status?.fips_active ? " · FIPS 140-3" : ""}</span>
     </main>
+  );
+}
+
+/**
+ * R7: a version that cannot open the vault never leaves her stuck. The vault stays on the
+ * computer untouched by a reinstall, and the version before can be installed over this one.
+ */
+function VersionTrouble({ version }: { version: string | null }) {
+  const [problem, setProblem] = useState<string | null>(null);
+  return (
+    <div className="lock-trouble" role="note">
+      <p>
+        <strong>הכספת לא נפתחה בגרסה הזו{version ? ` (${version})` : ""}.</strong> הכספת נשארת במחשב ולא נמחקת.
+        אם זה התחיל אחרי עדכון, אפשר להתקין את הגרסה הקודמת מעל זו, והכספת תיפתח בה. כדאי גם לספר לאור.
+      </p>
+      <button type="button" className="btn" onClick={() => {
+        setProblem(null);
+        ipc.openReleasesPage().catch((e: { message?: string }) => setProblem(e.message ?? "הדף לא נפתח."));
+      }}>לדף הגרסאות (נפתח בדפדפן)</button>
+      <ErrorLine error={problem} />
+    </div>
   );
 }

@@ -18,6 +18,9 @@ use crate::CoreError;
 
 /// The version running now.
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Every released version, for going back one when a new version cannot open the vault (R7).
+/// The only page besides Google's sign-in the program ever opens in her browser.
+pub const RELEASES_PAGE: &str = "https://github.com/orliber/einat-vault-releases/releases";
 const FOLDER: &str = "updates";
 
 /// A newer version, shown to her before anything is downloaded.
@@ -179,6 +182,14 @@ pub(crate) fn update_he(e: &UpdateError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_releases_page_is_the_releases_repository() {
+        assert_eq!(
+            RELEASES_PAGE,
+            format!("https://github.com/{}/releases", update::RELEASES_REPO)
+        );
+    }
     use aws_lc_rs::rand::SystemRandom;
     use aws_lc_rs::signature::{Ed25519KeyPair, KeyPair};
     use dv_egress::update::{signed_bytes, to_hex, PRODUCT};

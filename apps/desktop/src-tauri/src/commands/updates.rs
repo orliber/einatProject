@@ -10,6 +10,13 @@ pub(crate) async fn check_update() -> Res<Option<dv_core::update::UpdateView>> {
         .map_err(|_| internal("task"))?
 }
 
+/// A version that cannot open the vault (R7): the page of released versions, in her browser,
+/// to install the one before. Works with the vault locked; nothing from it is involved.
+#[tauri::command]
+pub(crate) fn open_releases_page() -> Res<()> {
+    super::recovery::open_in_browser(dv_core::update::RELEASES_PAGE).map_err(|e| e.to_ui())
+}
+
 /// Fetch and verify the newest version in the background, so the click only restarts
 /// (D-038). Nothing is installed here. `true` when a verified installer is waiting.
 #[tauri::command]

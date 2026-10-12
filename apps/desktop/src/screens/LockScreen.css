@@ -107,3 +107,17 @@
   color: var(--primary);
   font-weight: 600;
 }
+
+/* R7: the vault did not open in this version. */
+.lock-trouble {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--sand);
+  text-align: start;
+}
+.lock-trouble p {
+  margin: 0 0 8px;
+  line-height: 1.5;
+}
