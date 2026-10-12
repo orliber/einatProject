@@ -19,7 +19,8 @@ pub(crate) fn esc(s: &str) -> String {
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
             '\t' | '\n' | '\r' => out.push(' '),
-            c if c.is_control() => {}
+            // Not XML characters at all (XML 1.0 §2.2), even escaped: Word refuses the file.
+            c if c.is_control() || c == '\u{FFFE}' || c == '\u{FFFF}' => {}
             c => out.push(c),
         }
     }
@@ -575,6 +576,11 @@ mod tests {
         );
         assert!(part(&bytes, "word/header1.xml").contains("חסוי"));
         assert!(part(&bytes, "word/footer1.xml").contains("NUMPAGES"));
+    }
+
+    #[test]
+    fn noncharacters_xml_forbids_are_dropped() {
+        assert_eq!(esc("a\u{FFFE}b\u{FFFF}c\u{0}d\u{FFFD}"), "abcd\u{FFFD}");
     }
 
     #[test]
