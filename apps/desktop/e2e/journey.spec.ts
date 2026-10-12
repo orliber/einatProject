@@ -35,6 +35,8 @@ test("home → new case → materials → review before sending → report page"
   await page.getByRole("button", { name: "רישום אינטייק (אינטייק עם ההורים)" }).click();
   const write = page.getByRole("dialog", { name: "הוספת טקסט" });
   await expect(write).toBeVisible();
+  // The text box has the focus: she can start typing at once.
+  await expect(write.getByLabel("הטקסט")).toBeFocused();
   await expectAccessible(page, "[role=dialog]");
   await write.getByLabel("כותרת").fill("אינטייק בדוי");
   await write.getByLabel("הטקסט").fill(INTAKE);
