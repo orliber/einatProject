@@ -21,6 +21,12 @@ ignore = [
   # import). It runs only inside the isolated ingest worker process: no keys, no vault, no
   # network, killed after a time limit. Tracked in docs/DECISIONS.md (D-018): replace when
   # the PDF stack moves to a maintained parser.
+  # Unmaintained (no known vulnerability) compile-time proc macro, pulled in by gemm (the
+  # matrix code under candle) and tokenizers, which dv-ner uses for the optional local name
+  # model (D-053: off by default, downloaded only when she turns it on). It runs only at
+  # compile time; nothing of it is in the program. No release of gemm drops it yet (candle
+  # 0.11 too).
+  { id = "RUSTSEC-2024-0436", reason = "paste: build-time macro under candle/tokenizers, used by dv-ner for the optional name model (D-053) (review-by 2027-01-11)" },
   { id = "RUSTSEC-2026-0192", reason = "lopdf font parser; runs only in the isolated ingest worker (D-018) (review-by 2027-01-11)" },
 ]
 

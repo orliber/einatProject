@@ -39,6 +39,7 @@ impl Core {
         let model = self.model_for(Task::Consult)?;
         let key = case_id.unwrap_or("").to_owned();
         let data = self.privacy_data(&key)?;
+        let hints = self.case_hints(&key, &[message])?;
         let demo_mode = self.demo_mode()?;
         let (input, review) = {
             let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
@@ -59,7 +60,9 @@ impl Core {
                 past_names: &past,
                 today: today(),
             };
-            let msg = filter(message, &ctx).map_err(|e| CoreError::Internal(e.to_string()))?;
+            let msg = hints
+                .filter(message, &ctx)
+                .map_err(|e| CoreError::Internal(e.to_string()))?;
             let mut review = Review::default();
             let mut history = Vec::new();
             for (n, t) in earlier.iter().enumerate() {

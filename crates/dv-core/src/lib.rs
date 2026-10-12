@@ -17,6 +17,8 @@ mod followup;
 pub mod google;
 mod intake;
 mod library;
+pub mod name_model;
+use name_model::NameHints;
 mod readiness;
 mod retention;
 mod seal;
@@ -48,8 +50,8 @@ use dv_ipc::{PingResponse, IPC_VERSION};
 use dv_privacy::restore::{restore, scan_model_output};
 use dv_privacy::text::normalize;
 use dv_privacy::{
-    clear, filter, ocr_misreads, AutoHidden, AutoKind, Checks, ClearedPayload, FilterOutcome,
-    GateRequest, PrivacyContext,
+    clear, filter, filter_with_hints, ocr_misreads, AutoHidden, AutoKind, Checks, ClearedPayload,
+    FilterOutcome, GateRequest, NameHint, PrivacyContext,
 };
 use dv_vault::{Argon2Params, AuditEvent, Vault, VaultError};
 use serde_json::Value;
@@ -470,6 +472,14 @@ pub struct Core {
     seal_dir: Option<PathBuf>,
     /// Set at unlock when the vault is older than this computer has seen (S6).
     rollback_warning: Option<String>,
+    /// Where the optional name model is downloaded (D-053); `None` keeps it off.
+    models_dir: Option<PathBuf>,
+    /// The name model, loaded on first use while it is on.
+    ner: Option<Arc<dv_ner::NerModel>>,
+    /// Why the name model is not in use right now (shown in Settings).
+    ner_problem: Option<String>,
+    /// The name model's hints by text, so a material is read once (dropped on lock).
+    hint_cache: HashMap<String, Vec<dv_privacy::NameHint>>,
 }
 
 impl std::fmt::Debug for Core {

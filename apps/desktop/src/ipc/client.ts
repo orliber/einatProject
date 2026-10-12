@@ -50,6 +50,7 @@ import type { SuspectDecision } from "./generated/SuspectDecision";
 import type { FollowUpView } from "./generated/FollowUpView";
 import type { UiError } from "./generated/UiError";
 import type { UpdateView } from "./generated/UpdateView";
+import type { NameModelView } from "./generated/NameModelView";
 import type { StyleAnalysisResult } from "./generated/StyleAnalysisResult";
 import type { StyleImportPreview } from "./generated/StyleImportPreview";
 import type { StyleItem } from "./generated/StyleItem";
@@ -191,6 +192,14 @@ export const ipc = {
   /** The check of a draft against its sources: off until switched on in settings. */
   verifyStageOn: () => call<boolean>("verify_stage_on"),
   setVerifyStage: (on: boolean) => run("set_verify_stage", { on }),
+  /** The optional name model (D-053): off by default, downloaded only when turned on. */
+  nameModelStatus: () => call<NameModelView>("name_model_status"),
+  /** Download it once (pinned files, checked), then turn it on. */
+  downloadNameModel: () => call<NameModelView>("download_name_model"),
+  /** Bytes done and total while it downloads. */
+  nameModelProgress: () => call<[number, number] | null>("name_model_progress"),
+  /** Off deletes its files. */
+  setNameModel: (on: boolean) => call<NameModelView>("set_name_model", { on }),
   prepareVerify: (caseId: string, sectionKey: string) => call<Prepared>("prepare_verify", { caseId, sectionKey }),
   sendVerify: (approvalId: string) => call<VerifyResult>("send_verify", { approvalId }),
   /** D-022: sort every material not sorted yet into sections (one review screen). */
