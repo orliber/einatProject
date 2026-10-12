@@ -105,7 +105,7 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
                 </li>
               )}
               {!blocked ? (
-                <li className="ok"><span aria-hidden="true">✓</span><span>השמות חזרו, ולא נשארו תפקידים במקום שמות או הערות "חסר מידע"</span></li>
+                <li className="ok"><span aria-hidden="true">✓</span><span>השמות חזרו, ולא נשארו תפקידים או "חסר מידע"</span></li>
               ) : (
                 check.blocking.map((b, i) => <li key={i} className="bad"><span aria-hidden="true">!</span><span>{b}</span></li>)
               )}
@@ -127,7 +127,7 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
               <label className="row small"><input type="radio" checked={pdf} onChange={() => { setPdf(true); setProtect(true); }} /> PDF נעול (להדפסה בלבד, בלי שינויים)</label>
             </div>
           )}
-          {pdf && <span className="small muted">ה-PDF נפתח רק בסיסמה ואי אפשר לשנות אותו. טביעת האצבע שלו נשמרת בכספת, ובהגדרות אפשר לבדוק אם עותק שחזר אלייך הוא המקורי.</span>}
+          {pdf && <span className="small muted">ה-PDF נפתח רק בסיסמה ואי אפשר לשנות אותו. בהגדרות אפשר לבדוק אם עותק הוא המקורי.</span>}
           <div className="card protect stack">
             <label className="row"><input type="checkbox" checked={protect} disabled={pdf} onChange={(e) => setProtect(e.target.checked)} />
               <b>הגנה בסיסמה</b> <span className="muted">(מומלץ כששולחים במייל)</span></label>
@@ -137,11 +137,11 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
                   <label htmlFor="exp-pw" className="visually-hidden">סיסמה לקובץ</label>
                   <input id="exp-pw" className="input grow mono pw" value={password} onChange={(e) => setPassword(e.target.value)} />
                   <button type="button" className="btn" onClick={() => void copy()}>{copied ? "הועתק" : "העתקה"}</button>
-                  {copied && <span className="small muted" role="status">לא נשמר בהיסטוריית הלוח, ויימחק מהלוח בעוד {copied} שניות.</span>}
+                  {copied && <span className="small muted" role="status">יימחק מהלוח בעוד {copied} שניות.</span>}
                   <button type="button" className="btn" onClick={() => { setPassword(makePassphrase()); setCopied(null); }}>סיסמה חדשה</button>
                 </div>
-                {password.length < 10 && <span className="small" role="status">הסיסמה צריכה להיות באורך 10 תווים לפחות (עכשיו {password.length}). אפשר ללחוץ "סיסמה חדשה".</span>}
-                <span className="small muted">את הסיסמה מוסרים להורים בטלפון, לא באותו מייל. ההצפנה היא של Word עצמו, ולכן הקובץ נפתח בכל מחשב.</span>
+                {password.length < 10 && <span className="small" role="status">לפחות 10 תווים (עכשיו {password.length}).</span>}
+                <span className="small muted">את הסיסמה מוסרים להורים בטלפון, לא באותו מייל.</span>
               </>
             )}
           </div>

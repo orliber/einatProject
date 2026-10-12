@@ -129,12 +129,12 @@ export function ScoresDialog(props: {
 
   return (
     <Dialog wide title={props.input ? "עריכת ציונים" : "הזנת ציונים"}
-      subtitle={`הטווח והאחוזון מחושבים בתוכנה לפי טבלה קבועה. ${ai} מקבל את הטקסט המוכן ואינו מפרש ציונים בעצמו.`}
+      subtitle={`הטווח והאחוזון מחושבים בתוכנה. ${ai} לא מפרש ציונים.`}
       onClose={props.onClose}
       dirty={!saving && JSON.stringify(entries) !== initialEntries}
       footer={
         <>
-          <span className="small muted grow">{filled ? `${filled} ציונים הוזנו` : "ממלאים רק את מה שהועבר. שורות ריקות לא נשמרות."}</span>
+          <span className="small muted grow">{filled ? `${filled} ציונים הוזנו` : "ממלאים רק את מה שהועבר."}</span>
           <button type="button" className="btn" onClick={props.onClose}>ביטול</button>
           <button type="button" className="btn btn-primary" disabled={saving || filled === 0} onClick={() => void save()}>
             {saving ? <><Spinner /> שומרת…</> : "שמירה בתיק"}
@@ -244,9 +244,9 @@ export function ScoresDialog(props: {
 
           <aside className="scores-preview" aria-label="מה יישמר בתיק">
             <h3>מה יישמר בתיק</h3>
-            <p className="small muted">זה הטקסט שיזין את הסעיפים. שמות בהערות יוסתרו לפני כל שליחה.</p>
+            <p className="small muted">הטקסט שיזין את הסעיפים.</p>
             {filled === 0 ? (
-              <p className="muted small preview-empty">ממלאים ציון אחד לפחות כדי לראות כאן את הניסוח.</p>
+              <p className="muted small preview-empty">ממלאים ציון כדי לראות את הניסוח.</p>
             ) : (
               <pre className="preview-text serif">{preview.text}</pre>
             )}

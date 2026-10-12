@@ -111,7 +111,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
           // Only the request that was sent is cleared, not one she typed meanwhile.
           setMessage((m) => (m === instruction ? "" : m));
           await Promise.all([reload(), loadChat()]);
-          if (result.demo) notify("מצב הדגמה: התשובה נבנתה במחשב מתוך החומרים, ושום דבר לא נשלח.");
+          if (result.demo) notify("מצב הדגמה: התשובה נבנתה במחשב, בלי שליחה.");
         },
       });
     } catch (e) {
@@ -141,7 +141,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
             () => ipc.sendVerify(id),
           );
           setChecks(new Map(result.draft_ids.map((d, i) => [d, result.checks[i]] as [string, ParagraphCheck])));
-          if (result.demo) notify("מצב הדגמה: הבדיקה נעשתה במחשב ומוצאת רק מספרים שאין במקורות. שום דבר לא נשלח.");
+          if (result.demo) notify("מצב הדגמה: נבדקו רק מספרים שאין במקורות, בלי שליחה.");
         },
       });
     } catch (e) {
@@ -231,7 +231,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
       {linking && (
         <section className="link-panel" aria-label="החומרים שהסעיף נכתב מהם">
           <p className="small muted">
-            מסמנים את החומרים שהסעיף ייכתב מהם. חומר שמסומן כאן נשלח לסעיף הזה (אחרי הסתרה), והבחירה שלך גוברת על המיון.
+            מסמנים את החומרים לסעיף. הבחירה שלך גוברת על המיון.
           </p>
           <ul className="link-list">
             {api.detail.inputs.map((i) => {
@@ -282,7 +282,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
             <div className="writing-card">
               <ProgressLine started={job.started} estimate={job.estimate} label={job.label} approval={job.approval} />
               <span className="small muted">
-                השמות הוסתרו והבקשה נשלחה. אפשר להמשיך לעבוד בינתיים בסעיפים אחרים; הטיוטה תופיע כאן, ותחליף את מה שעוד לא אישרת.
+                הבקשה נשלחה (בלי שמות). אפשר לעבוד בינתיים בסעיפים אחרים.
               </span>
             </div>
           )}
@@ -293,7 +293,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               <div className="grow stack" style={{ gap: 2 }}>
                 <b>טיוטה של {ai} מחכה לאישורך</b>
                 <span className="small">
-                  קוראים, ואז מאשרים את כולה או פסקה-פסקה. רק מה שאושר נכנס לדוח. בקשה חדשה (למשל "לקצר") מחליפה את הטיוטה הזאת, ומה שכבר אישרת נשאר.
+                  מאשרים את כולה או פסקה-פסקה. רק מה שאושר נכנס לדוח.
                 </span>
               </div>
               {verifyOn && !derived && (
@@ -308,7 +308,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
           )}
           {pending === 0 && approved > 0 && !job && (
             <div className="draft-banner done">
-              <span className="grow"><b>✓ הסעיף אושר.</b> הוא ייכנס לדוח כמו שהוא כאן.</span>
+              <span className="grow"><b>✓ הסעיף אושר.</b></span>
               {nextSection && (
                 <button type="button" className="btn btn-primary" onClick={() => go({ name: "case", id: caseId, view: nextSection.key })}>
                   לסעיף הבא: {nextSection.title} ←
@@ -322,10 +322,10 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               <p className="serif">עוד אין טיוטה לסעיף הזה.</p>
               <p className="hint">
                 {derived
-                  ? `${ai} יכין טיוטה מהסעיפים שכבר אישרת. את קוראת ומאשרת כל פסקה.`
+                  ? `${ai} יכין טיוטה מהסעיפים שאישרת.`
                   : section.source_count > 0
-                    ? `${ai} יכין טיוטה מהחומרים שמזינים את הסעיף. לפני השליחה תראי בדיוק מה יוצא, ואחר כך מאשרים פסקה אחר פסקה.`
-                    : "עוד אין חומרים שמזינים את הסעיף. אפשר להוסיף אותם בחומרי התיק, או לכתוב בעצמך."}
+                    ? `${ai} יכין טיוטה מהחומרים של הסעיף. לפני השליחה תראי מה יוצא.`
+                    : "אין עדיין חומרים לסעיף. מוסיפים בחומרי התיק, או כותבים לבד."}
               </p>
               <div className="row">
                 {(derived || section.source_count > 0) && (
@@ -422,7 +422,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
             <div className="para pending">
               <label className="edit-box">
                 <span className="visually-hidden">פסקה חדשה</span>
-                <textarea className="textarea serif" rows={4} value={own} autoFocus placeholder="כתבי כאן. שמות אמיתיים נשמרים מוצפנים ומוסתרים לפני כל שליחה."
+                <textarea className="textarea serif" rows={4} value={own} autoFocus placeholder="כתבי כאן. שמות מוסתרים לפני כל שליחה."
                   onChange={(e) => setOwn(e.target.value)} />
               </label>
               <div className="row">
@@ -456,13 +456,13 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
         <section className="chat" aria-label="שיחה על הסעיף">
           <div className="chat-head">שיחה על הסעיף</div>
           <div className="chat-body" aria-live="polite">
-            {chat.length === 0 && <p className="muted small chat-hint">כאן מבקשים מ-{ai} שינויים בטיוטה: לקצר, להרחיב, להדגיש משהו. כל בקשה עוברת קודם במסך "מה יוצא מהמחשב", והתשובה מחליפה את מה שעוד לא אישרת.</p>}
+            {chat.length === 0 && <p className="muted small chat-hint">כאן מבקשים מ-{ai} שינויים בטיוטה: לקצר, להרחיב, להדגיש.</p>}
             {chat.map((m, i) =>
               m.role === "user" ? (
                 <div key={i} className="msg-user">
                   <div className="bubble-user">{m.text}</div>
                   <span className="shield-line">
-                    {m.hidden.length ? `לפני השליחה הוסתרו ${m.hidden.length} פרטים: ${m.hidden.join(", ")}` : "לא נמצאו פרטים מזהים"}
+                    {m.hidden.length ? `הוסתרו ${m.hidden.length}: ${m.hidden.join(", ")}` : "לא נמצאו פרטים מזהים"}
                   </span>
                 </div>
               ) : (

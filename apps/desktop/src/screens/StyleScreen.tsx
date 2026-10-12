@@ -117,7 +117,7 @@ export function StyleScreen() {
     try {
       if (step.kind === "analysis") {
         const r = await ipc.sendStyleAnalysis(approval);
-        if (r.dropped > 0) notify(`${r.kept} פריטים נשמרו, ${r.dropped} לא נשמרו (נראו כמו העתקה או פרט מזהה).`);
+        if (r.dropped > 0) notify(`${r.kept} פריטים נשמרו, ${r.dropped} נפסלו (העתקה או פרט מזהה).`);
       } else {
         await ipc.sendStyleProfile(approval);
         notify("טיוטת הפרופיל מוכנה. כדאי לעבור עליה ולאשר.");
@@ -165,8 +165,8 @@ export function StyleScreen() {
           <div className="stack grow">
             <h1>הסגנון שלי</h1>
             <p className="style-lead">
-              {ai} לומד לכתוב כמוך מתוך דוחות ישנים שלך. לפני שמשהו נשמר, שמות, מקומות, תאריכים ומספרים מוסתרים, ונשמרים רק הקטעים שבחרת.
-              אחר כך כל דוח נשלח לניתוח בנפרד, במסך "מה יוצא מהמחשב", ובכל ניסוח חדש נשלח רק הפרופיל שאישרת.
+              {ai} לומד לכתוב כמוך מדוחות ישנים שלך. נשמרים רק הקטעים שבחרת, בלי פרטים מזהים.
+              בכל ניסוח נשלח רק הפרופיל שאישרת.
             </p>
             <ol className="style-steps" aria-label="שלבים">
               <li className={stage === 0 ? "now" : "done"}>1. דוחות ישנים</li>
@@ -188,9 +188,9 @@ export function StyleScreen() {
             {stage === 2 && <a className="btn btn-primary btn-big" href="#style-profile">עיון בטיוטה ואישור</a>}
             {stage === 3 && <span className="chip chip-ok">הפרופיל בשימוש · גרסה {o.active?.version}</span>}
             {o.sources.length > 0 && o.sources.length < RECOMMENDED && (
-              <span className="hint">מומלץ {RECOMMENDED} דוחות לפחות, כדי ש-{ai} יבחין במה שחוזר אצלך ולא במקרי.</span>
+              <span className="hint">מומלץ {RECOMMENDED} דוחות לפחות.</span>
             )}
-            {o.demo_mode && <span className="hint">מצב הדגמה: הניתוח נעשה במחשב, כדוגמה. עם מפתח API הוא נעשה באמת.</span>}
+            {o.demo_mode && <span className="hint">מצב הדגמה: ניתוח לדוגמה בלבד.</span>}
           </div>
         </header>
 
@@ -227,19 +227,19 @@ export function StyleScreen() {
       )}
       {deleting && (
         <ConfirmDialog danger title="מחיקת דוח" action="מחיקה"
-          text={`"${deleting.title}" יימחק מ"הדוחות שלי". פרופיל שכבר אושר לא משתנה עד שבונים אותו מחדש.`}
+          text={`"${deleting.title}" יימחק. הפרופיל שאושר לא משתנה עד בנייה מחדש.`}
           onClose={() => setDeleting(null)}
           onConfirm={async () => { await ipc.deleteStyleSource(deleting.id); setDeleting(null); await reload(); }} />
       )}
       {forgetting && (
         <ConfirmDialog danger title="לשכוח את מה שנלמד" action="לשכוח"
-          text="מה שהתוכנה למדה מהתיקונים שלך ומהדוחות שסיימת בתוכנה יימחק: ההצעות, המדידות והמעקב אחרי הטיוטות. הדוחות הישנים והפרופיל שאישרת נשארים."
+          text="מה שנלמד מהתיקונים שלך יימחק. הדוחות הישנים והפרופיל נשארים."
           onClose={() => setForgetting(false)}
           onConfirm={async () => { await ipc.forgetStyleLearning(); setForgetting(false); notify("מה שנלמד נמחק."); await reload(); }} />
       )}
       {resetting && (
         <ConfirmDialog danger title="מחיקת הפרופיל" action="מחיקת הפרופיל והלמידה"
-          text="כל הגרסאות של פרופיל הסגנון, ומה שנלמד מהתיקונים שלך, יימחקו. הדוחות הישנים נשארים, ואפשר לבנות פרופיל חדש. הניסוח יחזור לסגנון ברירת המחדל."
+          text="הפרופיל ומה שנלמד מהתיקונים יימחקו. הדוחות הישנים נשארים."
           onClose={() => setResetting(false)}
           onConfirm={async () => { await ipc.resetStyle(); setResetting(false); await reload(); }} />
       )}
@@ -297,7 +297,7 @@ function Sources(props: {
           </li>
         ))}
       </ul>
-      <p className="hint">נשמר רק הטקסט המנוטרל של הקטעים שבחרת. הקבצים עצמם לא נשמרים בכספת.</p>
+      <p className="hint">נשמר רק הטקסט המנוטרל, לא הקובץ.</p>
     </section>
   );
 }
@@ -306,7 +306,6 @@ function Sources(props: {
 
 function Suggestions({ o }: { o: StyleOverview }) {
   const { fail, notify } = useApp();
-  const ai = useAi();
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   async function act(f: () => Promise<unknown>, done?: string) {
@@ -322,7 +321,7 @@ function Suggestions({ o }: { o: StyleOverview }) {
   return (
     <section className="card style-card" aria-labelledby="style-sugg">
       <h2 id="style-sugg">מה למדתי ממך</h2>
-      <p className="hint">התוכנה לומדת במחשב שלך מהתיקונים שלך לפסקאות ש-{ai} כתב ומהדוחות הקודמים שלך. שום דבר מזה לא נשלח עד שאת מוסיפה אותו לפרופיל.</p>
+      <p className="hint">נלמד במחשב מהתיקונים שלך. לא נשלח עד שתוסיפי לפרופיל.</p>
       <ul className="style-suggestions">
         {o.suggestions.map((s) => (
           <li key={s.id} className="row">
@@ -505,9 +504,9 @@ function ProfileEditor({ view, o }: { view: StyleProfileView; o: StyleOverview }
       )}
       <p className="hint">
         {isDraft
-          ? "עברי על הפריטים: אפשר לכבות, לערוך, למחוק ולהוסיף. רק מה שמסומן ייכנס. הפרופיל ישפיע על הניסוח רק אחרי האישור."
-          : "כל שינוי נשמר כטיוטה, ומשפיע על הניסוח אחרי שתאשרי אותו."}
-        {view.dropped > 0 && ` ${view.dropped} פריטים שחזרו מ-${ai} לא נשמרו, כי נראו כמו העתקה מדוח או כמו פרט מזהה.`}
+          ? "עברי על הפריטים. רק מה שמסומן ייכנס, ורק אחרי האישור."
+          : "כל שינוי משפיע רק אחרי אישור."}
+        {view.dropped > 0 && ` ${view.dropped} פריטים נפסלו (העתקה או פרט מזהה).`}
       </p>
 
       {groups.map((g) => (

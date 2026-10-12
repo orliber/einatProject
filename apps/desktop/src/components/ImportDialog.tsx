@@ -63,7 +63,7 @@ export function ImportDialog(props: {
       subtitle={`${p.file_name} · ${FORMAT[p.format] ?? p.format}${pages} · שום דבר לא נשלח בשלב הזה`}
       footer={
         <>
-          <span className="small muted grow">רק הטקסט שבצד שמאל נשמר בתיק, מוצפן.</span>
+          <span className="small muted grow">נשמר רק הטקסט שמשמאל, מוצפן.</span>
           <button type="button" className="btn" onClick={props.onClose}>ביטול</button>
           <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void save()}>שמירה בתיק</button>
         </>

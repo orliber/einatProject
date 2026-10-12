@@ -91,7 +91,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
         <section className="finish-side" aria-label="לפני שהקובץ יוצא">
           <div className="stack" style={{ gap: 4 }}>
             <h1>{ready ? "הדוח מוכן להוצאה" : nothing ? "עוד אין מה להוציא" : "כמעט מוכן"}</h1>
-            <span className="muted">משמאל: הדוח כמו שייצא. כאן: מה עוד כדאי לעשות לפני שהקובץ יוצא.</span>
+            <span className="muted">משמאל: הדוח כמו שייצא. כאן: מה עוד לעשות.</span>
           </div>
           {!check && !error && <p className="muted"><Spinner /> בודקת…</p>}
           {check && (
@@ -99,7 +99,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
               <li className={check.included_sections > 0 ? "ok" : "warn"}>
                 <span className="finish-mark" aria-hidden="true">{check.included_sections > 0 ? "✓" : "!"}</span>
                 <span className="grow">
-                  {check.included_sections > 0 ? `${check.included_sections} סעיפים מאושרים ייכנסו לקובץ.` : "עוד אין סעיף מאושר. רק מה שאישרת נכנס לקובץ."}
+                  {check.included_sections > 0 ? `${check.included_sections} סעיפים מאושרים ייכנסו לקובץ.` : "עוד אין סעיף מאושר."}
                   {check.empty_sections.length > 0 && <span className="small muted"> {check.empty_sections.length} ריקים לא ייכנסו.</span>}
                 </span>
                 <button type="button" className="link-small" onClick={() => onOpen("")}>לדוח</button>
@@ -115,7 +115,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
                 <li className="info">
                   <span className="finish-mark" aria-hidden="true">i</span>
                   <div className="grow stack" style={{ gap: 6 }}>
-                    <span>{flagged.length === 1 ? "פסקה מאושרת אחת עם הערה ששווה מבט נוסף:" : `${flagged.length} פסקאות מאושרות עם הערה ששווה מבט נוסף:`}</span>
+                    <span>{flagged.length === 1 ? "פסקה מאושרת אחת שווה מבט נוסף:" : `${flagged.length} פסקאות מאושרות שוות מבט נוסף:`}</span>
                     {flagged.map(({ section, p, notes }) => (
                       <button key={p.id} type="button" className="complete-item" onClick={() => onOpen(section.key)}>
                         <span className="small muted">{section.title} · {notes.join(" · ")}</span>
@@ -173,7 +173,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
           <ErrorLine error={error} />
           <section className="card finish-file">
             <b>קובץ Word מוגן בסיסמה</b>
-            <span className="muted small">הסיסמה נוצרת לבד. שולחים אותה להורים בנפרד מהקובץ, למשל בהודעה.</span>
+            <span className="muted small">את הסיסמה שולחים להורים בנפרד מהקובץ.</span>
             <button type="button" className="btn btn-primary btn-big" disabled={!ready} onClick={onExport}>הפקת הקובץ</button>
             {!ready && check && (
               <span className="small muted">

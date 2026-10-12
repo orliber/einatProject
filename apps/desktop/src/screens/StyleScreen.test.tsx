@@ -94,7 +94,7 @@ describe("StyleScreen", () => {
     const user = userEvent.setup();
     wrap(<StyleScreen />);
     expect(await screen.findByText("טיוטה · עוד לא בשימוש")).toBeInTheDocument();
-    expect(screen.getByText(/1 פריטים שחזרו מ-Claude לא נשמרו/)).toBeInTheDocument();
+    expect(screen.getByText(/1 פריטים נפסלו/)).toBeInTheDocument();
     const [, template] = screen.getAllByRole("checkbox", { name: "להשתמש בפריט" });
     if (!template) throw new Error("the template's checkbox");
     await user.click(template);

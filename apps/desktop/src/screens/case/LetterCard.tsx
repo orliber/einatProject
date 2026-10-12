@@ -56,7 +56,7 @@ export function LetterCard({ api }: { api: CaseApi }) {
     <section className="card finish-file letter-card">
       <b>מכתב קצר</b>
       <span className="muted small">
-        גרסה קצרה ופשוטה מתוך הדוח המאושר. למסגרת החינוכית נשלחות רק ההמלצות, בלי רקע, אבחנות או ציונים.
+        גרסה קצרה מהדוח המאושר. למסגרת החינוכית: רק ההמלצות.
       </span>
       <div className="row" role="radiogroup" aria-label="למי המכתב">
         <label className="row small"><input type="radio" checked={audience === "parents"} onChange={() => setAudience("parents")} /> להורים</label>
