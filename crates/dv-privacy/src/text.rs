@@ -76,17 +76,49 @@ fn is_inner_quote(c: char) -> bool {
     )
 }
 
+/// The plain character a compatibility form shows: full-width ASCII ("Ｎｏａｍ", "１２３") as
+/// ASCII, and Hebrew presentation forms (wide letters, letters with a dagesh or a shin dot,
+/// as PDF text often holds them: "ﬠ", "שׁ", "וֹ") as the bare letter.
+#[must_use]
+pub(crate) fn compat_char(c: char) -> char {
+    match c {
+        '\u{FF01}'..='\u{FF5E}' => char::from_u32(u32::from(c) - 0xFEE0).unwrap_or(c),
+        '\u{FB1D}' | '\u{FB39}' => 'י',
+        '\u{FB20}' => 'ע',
+        '\u{FB21}' | '\u{FB2E}' | '\u{FB2F}' | '\u{FB30}' => 'א',
+        '\u{FB22}' | '\u{FB33}' => 'ד',
+        '\u{FB23}' | '\u{FB34}' => 'ה',
+        '\u{FB24}' | '\u{FB3B}' | '\u{FB4D}' => 'כ',
+        '\u{FB25}' | '\u{FB3C}' => 'ל',
+        '\u{FB26}' => 'ם',
+        '\u{FB27}' | '\u{FB48}' => 'ר',
+        '\u{FB28}' | '\u{FB4A}' => 'ת',
+        '\u{FB29}' => '+',
+        '\u{FB2A}'..='\u{FB2D}' | '\u{FB49}' => 'ש',
+        '\u{FB31}' | '\u{FB4C}' => 'ב',
+        '\u{FB32}' => 'ג',
+        '\u{FB35}' | '\u{FB4B}' => 'ו',
+        '\u{FB36}' => 'ז',
+        '\u{FB38}' => 'ט',
+        '\u{FB3A}' => 'ך',
+        '\u{FB3E}' => 'מ',
+        '\u{FB40}' => 'נ',
+        '\u{FB41}' => 'ס',
+        '\u{FB43}' => 'ף',
+        '\u{FB44}' | '\u{FB4E}' => 'פ',
+        '\u{FB46}' => 'צ',
+        '\u{FB47}' => 'ק',
+        c => c,
+    }
+}
+
 /// Map one character for comparison; `None` drops it.
 #[must_use]
 pub fn normalize_char(c: char) -> Option<char> {
     if is_mark(c) {
         return None;
     }
-    // Full-width forms ("Ｎｏａｍ", "１２３") compare as the ASCII they look like.
-    let c = match c {
-        '\u{FF01}'..='\u{FF5E}' => char::from_u32(u32::from(c) - 0xFEE0).unwrap_or(c),
-        c => c,
-    };
+    let c = compat_char(c);
     Some(match c {
         'ך' => 'כ',
         'ם' => 'מ',

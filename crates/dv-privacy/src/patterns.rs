@@ -558,10 +558,10 @@ fn ascii_digit(c: char) -> Option<char> {
 }
 
 /// `text` as the rules read it, and for each byte of it the span of the original character
-/// it came from. Digits of other scripts become ASCII digits and full-width forms become
-/// ASCII ("０５４", "ת.ז. ١٢٣…" are a phone and an ID on screen); invisible characters and
-/// points are dropped, so a zero-width space or a direction mark inside a number or a street
-/// name does not hide it from every rule.
+/// it came from. Digits of other scripts become ASCII digits, full-width forms ASCII and
+/// Hebrew presentation forms bare letters ("０５４", "ת.ז. ١٢٣…" are a phone and an ID on
+/// screen); invisible characters and points are dropped, so a zero-width space or a direction
+/// mark inside a number or a street name does not hide it from every rule.
 fn fold(text: &str) -> (String, Vec<(usize, usize)>) {
     let mut out = String::with_capacity(text.len());
     let mut spans = Vec::with_capacity(text.len());
@@ -569,10 +569,7 @@ fn fold(text: &str) -> (String, Vec<(usize, usize)>) {
         if crate::text::is_mark(c) {
             continue;
         }
-        let folded = ascii_digit(c).unwrap_or(match c {
-            '\u{FF01}'..='\u{FF5E}' => char::from_u32(u32::from(c) - 0xFEE0).unwrap_or(c),
-            c => c,
-        });
+        let folded = ascii_digit(c).unwrap_or_else(|| crate::text::compat_char(c));
         out.push(folded);
         spans.resize(out.len(), (i, i + c.len_utf8()));
     }

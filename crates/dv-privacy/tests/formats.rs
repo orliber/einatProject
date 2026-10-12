@@ -653,6 +653,34 @@ fn digits_of_other_scripts_and_full_width_forms_are_read_as_what_they_show() {
     assert_hidden(&format!("מייל {mail}"), &mail);
 }
 
+/// Hebrew presentation forms (a wide ayin, letters with a dagesh or a shin dot), as text
+/// taken from a PDF often holds them. Such a name used to clear the gate raw.
+#[test]
+fn hebrew_presentation_forms_are_read_as_the_letters_they_show() {
+    let ids = identities();
+    for (text, expected) in [
+        ("נו\u{FB20}ם הגיע.", "[ילד] הגיע."),
+        ("נ\u{FB4B}עם הגיע.", "[ילד] הגיע."),
+        (
+            "\u{FB31}\u{FB4B}קר טוב, \u{FB2A}לום ל\u{FB3A}ם, עי\u{FB33}ו.",
+            "\u{FB31}\u{FB4B}קר טוב, \u{FB2A}לום ל\u{FB3A}ם, [אב].",
+        ),
+        ("ו\u{FB3C}רותם יש.", "ו\u{FB3C}[אם] יש."),
+    ] {
+        assert!(gate_text(text, &ids, CASE).is_err(), "raw cleared: {text}");
+        let out = filter(text, &ctx(&ids, CASE)).unwrap();
+        assert_eq!(out.tagged, expected, "{text}");
+        assert!(gate_text(&out.tagged, &ids, CASE).is_ok(), "{}", out.tagged);
+    }
+    // A street in presentation forms is an address.
+    let text = "גרים \u{FB31}רחוב הרצל 12";
+    assert!(gate_text(text, &ids, CASE).is_err());
+    assert!(!filter(text, &ctx(&ids, CASE))
+        .unwrap()
+        .tagged
+        .contains("הרצל"));
+}
+
 // ---------------------------------------------------------------- quotes glued to a name
 
 /// A name in quotes, after a prefix and a quote, or with an English possessive. The tokenizer
