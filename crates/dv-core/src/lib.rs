@@ -392,6 +392,31 @@ enum PendingKind {
     },
 }
 
+/// What an approval is expected to be for. `Core::begin_send` checks it before anything
+/// leaves, so an approval for one kind of request is never sent by the command for another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendKind {
+    Section,
+    Consult,
+    Sort,
+    StyleAnalysis,
+    StyleSynthesis,
+    Verify,
+}
+
+impl PendingKind {
+    fn send_kind(&self) -> SendKind {
+        match self {
+            PendingKind::Section { .. } => SendKind::Section,
+            PendingKind::Consult { .. } => SendKind::Consult,
+            PendingKind::Sort { .. } => SendKind::Sort,
+            PendingKind::StyleAnalysis { .. } => SendKind::StyleAnalysis,
+            PendingKind::StyleSynthesis { .. } => SendKind::StyleSynthesis,
+            PendingKind::Verify { .. } => SendKind::Verify,
+        }
+    }
+}
+
 struct Pending {
     payload: ClearedPayload,
     kind: PendingKind,
@@ -404,6 +429,8 @@ pub struct Outgoing {
     model: String,
     api_key: Option<zeroize::Zeroizing<String>>,
     transport: Option<Arc<dyn Transport>>,
+    /// The session it was approved in (`Core::session`): a lock in between ends it.
+    session: u64,
 }
 
 impl std::fmt::Debug for Outgoing {
@@ -473,6 +500,8 @@ pub struct Core {
     seal_dir: Option<PathBuf>,
     /// Set at unlock when the vault is older than this computer has seen (S6).
     rollback_warning: Option<String>,
+    /// Counts the locks. An approval taken out before a lock never comes back after it.
+    session: u64,
     /// Where the optional name model is downloaded (D-053); `None` keeps it off.
     models_dir: Option<PathBuf>,
     /// The name model, loaded on first use while it is on.

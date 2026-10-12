@@ -1,6 +1,7 @@
 //! SQLCipher databases (whole-file encryption) with versioned migrations.
 
 use std::path::Path;
+use std::sync::Once;
 
 use rusqlite::Connection;
 use zeroize::Zeroizing;
@@ -8,8 +9,18 @@ use zeroize::Zeroizing;
 use crate::crypto::{hex, Key32};
 use crate::VaultError;
 
+/// SQLCipher registers `sqlcipher_export` (which backups use) from SQLite's extra-init hook,
+/// after SQLite has already marked itself initialized. A database opened on another thread in
+/// that window never gets the function, and its backups fail with "no such function:
+/// sqlcipher_export". The process's first connection is therefore opened alone.
+static SQLCIPHER_READY: Once = Once::new();
+
 /// Open (or create) an encrypted database with a raw 256-bit key (no SQLCipher KDF).
 pub fn open_encrypted(path: &Path, key: &Key32) -> Result<Connection, VaultError> {
+    SQLCIPHER_READY.call_once(|| {
+        // Opening any connection runs SQLite's (and SQLCipher's) initialization to the end.
+        drop(Connection::open_in_memory());
+    });
     let conn = Connection::open(path)?;
     quiet_sqlcipher_log(&conn)?;
     let key_hex = Zeroizing::new(hex(key.as_bytes()));

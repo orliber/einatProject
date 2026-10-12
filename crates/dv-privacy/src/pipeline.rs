@@ -2050,9 +2050,10 @@ fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
         let fund = is(&tokens[i], &["קופת", "קופ\"ח"]);
         let mut first = k + 1;
         // "]": the institution word is inside a tag ("[ילד_גן] הופנה", "[גן] שלו"), so the next
-        // word is not its name. Without this, filtering a tagged draft again dropped that word.
+        // word is not its name. "[": the next word opens a tag (`לגן "[ילד]"`), already hidden.
+        // Without these, filtering a tagged draft again dropped that word or cut the tag.
         if first >= tokens.len()
-            || gap(k, first).contains(['.', ',', '\n', ';', '(', ']'])
+            || gap(k, first).contains(['.', ',', '\n', ';', '(', ']', '['])
             || (gap(k, first).contains(':') && !fund)
         {
             i = k + 1;
@@ -2113,6 +2114,11 @@ fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
                 } else {
                     &text[tokens[j].end..]
                 };
+                // A tag inside the quotes (a tagged draft, `לגן " [ילד] "`): not a name, as
+                // on the first filtering, where the declared name took that span.
+                if after.contains('[') {
+                    break;
+                }
                 if quote(after) {
                     last = Some(j);
                     break;

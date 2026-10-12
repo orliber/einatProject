@@ -115,7 +115,10 @@ export function Dialog(props: {
   });
   const closable = onClose !== undefined;
   useEffect(() => {
-    ref.current?.focus();
+    // A field marked autoFocus inside has already taken focus (React applies it before effects):
+    // keep it there, so she can type at once. Otherwise the frame takes focus.
+    const frame = ref.current;
+    if (frame && !frame.contains(document.activeElement)) frame.focus();
   }, []);
   useEffect(() => {
     if (!closable) return;

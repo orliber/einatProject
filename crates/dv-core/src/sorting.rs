@@ -318,7 +318,7 @@ impl Core {
 
     /// Send exactly what was approved and store the sorting.
     pub fn send_sort(&mut self, approval_id: &str) -> Result<SortResult, CoreError> {
-        let out = self.begin_send(approval_id)?;
+        let out = self.begin_send(approval_id, crate::SendKind::Sort)?;
         let response = out.transmit();
         self.finish_sort(out, response)
     }

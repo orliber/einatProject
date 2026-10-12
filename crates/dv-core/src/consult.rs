@@ -134,7 +134,7 @@ impl Core {
     }
 
     pub fn send_consult(&mut self, approval_id: &str) -> Result<ConsultResult, CoreError> {
-        let out = self.begin_send(approval_id)?;
+        let out = self.begin_send(approval_id, SendKind::Consult)?;
         let response = out.transmit();
         self.finish_consult(out, response)
     }

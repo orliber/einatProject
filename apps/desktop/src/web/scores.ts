@@ -41,7 +41,7 @@ export function formatSheet(sheet: ScoreSheet): string {
   for (const e of sheet.entries) {
     const m = inst.measures.find((x) => x.key === e.measure);
     if (!m) throw new Error(`מדד לא מוכר: ${e.measure}`);
-    if (e.value < m.min || e.value > m.max) {
+    if (!(e.value >= m.min && e.value <= m.max)) {
       throw new Error(`${m.name_he}: הציון ${fmt(e.value)} מחוץ לטווח האפשרי (${fmt(m.min)}–${fmt(m.max)})`);
     }
     if (m.group !== group) {

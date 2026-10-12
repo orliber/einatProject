@@ -31,6 +31,7 @@ impl Core {
             removed_input: None,
             seal_dir: seal::default_dir(),
             rollback_warning: None,
+            session: 0,
             models_dir: None,
             ner: None,
             ner_problem: None,
@@ -339,6 +340,7 @@ impl Core {
     pub(crate) fn lock_because(&mut self, reason: Option<&str>) {
         self.keep_unsaved();
         self.pending.clear();
+        self.session = self.session.wrapping_add(1);
         self.staged_backup = None;
         self.style_staged.clear();
         self.removed_input = None;

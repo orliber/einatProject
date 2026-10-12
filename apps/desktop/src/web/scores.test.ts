@@ -22,4 +22,9 @@ describe("browser preview score text matches the core", () => {
     expect(one(29.5)).toContain("ציון 29.5 – מעט או ללא תסמינים");
     expect(() => one(80)).toThrow(/מחוץ לטווח/);
   });
+  it("refuses a score that is not a number, like the core does", () => {
+    const one = (v: number) => formatSheet({ instrument: "cars_2", module: "", cutoff: null, notes: "", entries: [{ measure: "total", value: v, note: "" }] });
+    expect(() => one(Number.NaN)).toThrow(/מחוץ לטווח/);
+    expect(() => one(Number.POSITIVE_INFINITY)).toThrow(/מחוץ לטווח/);
+  });
 });

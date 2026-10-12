@@ -47,6 +47,9 @@ const ALLOWED_FIELDS: &[&str] = &[
 ];
 /// The only tool allowed, and only with an allow-list of domains (D-014).
 const ALLOWED_TOOL: &str = "web_search_20250305";
+/// The fields that tool may carry. Anything else (`user_location`, `blocked_domains`…) is
+/// refused rather than passed on unchecked.
+const ALLOWED_TOOL_FIELDS: &[&str] = &["type", "name", "max_uses", "allowed_domains"];
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum EgressError {
@@ -106,11 +109,18 @@ pub fn check_policy(body: &Value) -> Result<(), EgressError> {
         ));
     }
     if let Some(tools) = obj.get("tools") {
-        for tool in tools.as_array().into_iter().flatten() {
-            let ok = tool["type"] == ALLOWED_TOOL
+        // A `tools` value that is not a list is refused, not skipped.
+        let tools = tools
+            .as_array()
+            .ok_or_else(|| EgressError::Policy("tools is not a list".to_owned()))?;
+        for tool in tools {
+            let ok = tool
+                .as_object()
+                .is_some_and(|t| t.keys().all(|k| ALLOWED_TOOL_FIELDS.contains(&k.as_str())))
+                && tool["type"] == ALLOWED_TOOL
                 && tool["allowed_domains"]
                     .as_array()
-                    .is_some_and(|d| !d.is_empty())
+                    .is_some_and(|d| !d.is_empty() && d.iter().all(Value::is_string))
                 && tool["max_uses"]
                     .as_u64()
                     .is_some_and(|n| (1..=8).contains(&n));
@@ -383,6 +393,9 @@ impl Transport for AnthropicTransport {
 }
 
 #[cfg(test)]
+mod wire_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
@@ -426,6 +439,29 @@ mod tests {
 
         let mut b = ok_body();
         b["tools"] = json!([{"type": "web_search_20250305", "name": "web_search", "max_uses": 3, "allowed_domains": ["apa.org"]}]);
+        assert!(check_policy(&b).is_ok());
+    }
+
+    #[test]
+    fn a_tools_value_that_is_not_a_list_or_a_tool_with_extra_fields_is_refused() {
+        // Both used to pass: a non-list `tools` was skipped, and fields beyond the checked
+        // ones (a location, say) went out with the allowed search tool.
+        let search = json!({"type": "web_search_20250305", "name": "web_search", "max_uses": 3, "allowed_domains": ["apa.org"]});
+        for tools in [
+            json!({"type": "code_execution_20250825", "name": "code_execution"}),
+            json!("web_search_20250305"),
+            json!(null),
+            json!([{"type": "web_search_20250305", "name": "web_search", "max_uses": 3, "allowed_domains": ["apa.org"], "user_location": {"type": "approximate", "city": "x"}}]),
+            json!([{"type": "web_search_20250305", "name": "web_search", "max_uses": 3, "allowed_domains": ["apa.org"], "blocked_domains": ["x.org"]}]),
+            json!([{"type": "web_search_20250305", "name": "web_search", "max_uses": 3, "allowed_domains": [7]}]),
+            json!(["web_search_20250305"]),
+        ] {
+            let mut b = ok_body();
+            b["tools"] = tools.clone();
+            assert!(check_policy(&b).is_err(), "{tools}");
+        }
+        let mut b = ok_body();
+        b["tools"] = json!([search]);
         assert!(check_policy(&b).is_ok());
     }
 

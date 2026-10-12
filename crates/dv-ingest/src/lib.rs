@@ -479,6 +479,27 @@ mod robustness {
     }
 
     #[test]
+    fn damaged_old_word_files_are_refused_not_crashed_on() {
+        // A valid Word 97 file (Compound File, piece table, header after the body), so the
+        // mutations reach the piece table and the text, not only the container's signature.
+        let seed = crate::doc::tests::build(
+            "שורה ראשונה בדויה.\r\u{13} PAGE \u{14}1\u{15}\rא\u{07}ב\u{07}\u{07}",
+            "כותרת בדויה\r",
+            0,
+        );
+        assert!(extract(&seed, "a.doc").is_ok(), "the undamaged seed reads");
+        never_panics("a.doc", &seed, 3_000);
+    }
+
+    #[test]
+    fn damaged_rtf_files_are_refused_not_crashed_on() {
+        // RTF as Word writes it: code pages, font charsets, info, header, fields.
+        let seed = crate::rtf::tests::WORD_STYLE.as_bytes();
+        assert!(extract(seed, "a.rtf").is_ok(), "the undamaged seed reads");
+        never_panics("a.rtf", seed, 3_000);
+    }
+
+    #[test]
     fn garbage_and_odd_text_are_refused_not_crashed_on() {
         let mut rng = Rng(42);
         for round in 0..3_000 {

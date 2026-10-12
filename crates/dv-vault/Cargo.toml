@@ -31,4 +31,5 @@ unicode-normalization = "0.1"
 windows = { version = "0.62", default-features = false, features = ["std", "Foundation", "Security_Credentials"] }
 
 [dev-dependencies]
+proptest = "1"
 tempfile = "3"

@@ -320,6 +320,16 @@ export class FakeCore {
 
   /** Filter for the case; new names it finds are kept with the case (as the core does), and
    *  the text is filtered again so they carry their kept tags. */
+  /** A material's title goes through the filter like its text, as in the core (send.rs): with
+   *  something to hide it is its own part of the review; otherwise it is the part's label. */
+  private titledLabel(c: Case, parts: ReviewPart[], label: string, title: string): string {
+    if (!title.trim()) return label;
+    const t = this.filterFor(c, title);
+    if (!t.original_segments.some((x) => x.mark)) return `${label} · ${title}`;
+    parts.push({ label: `${label} · כותרת`, original: t.original_segments, outgoing: t.tagged_segments });
+    return label;
+  }
+
   private filterFor(c: Case, text: string) {
     const run = () => filter(text, { caseId: c.id, people: this.allPeople(), practitioner: this.practitioner, allowed: c.allowed });
     const first = run();
@@ -431,20 +441,21 @@ export class FakeCore {
       checks.name_suspects += f.checks.name_suspects;
       return f.tagged;
     };
-    const sources = DERIVED.includes(key)
+    const sources: { label: string; title?: string; text: string }[] = DERIVED.includes(key)
       ? c.drafts.filter((d) => d.status === "approved" && !DERIVED.includes(d.section)).map((d) => ({ label: `סעיף מאושר · ${SECTIONS.find((s) => s.key === d.section)?.title ?? ""}`, text: restore(d.text, c.people, this.practitioner) }))
       : c.inputs.flatMap((i) => {
           const f = this.feedOf(c, i, section.key);
           if (f === null) return [];
-          if (f === "whole") return [{ label: `${kindLabel[i.kind]} · ${i.title}`, text: i.content }];
-          return [{ label: `${kindLabel[i.kind]} · קטעים שנבחרו לסעיף · ${i.title}`, text: R.excerpt(R.passages(i.content), f) }];
+          if (f === "whole") return [{ label: kindLabel[i.kind], title: i.title, text: i.content }];
+          return [{ label: `${kindLabel[i.kind]} · קטעים שנבחרו לסעיף`, title: i.title, text: R.excerpt(R.passages(i.content), f) }];
         });
     if (DERIVED.includes(key) && sources.length === 0) {
       fail("refused", "הסעיף הזה נכתב מתוך הסעיפים שכבר אישרת, ועוד לא אישרת אף סעיף. מאשרים קודם את הטיוטות בסעיפים האחרים, ואז חוזרים לכאן.");
     }
     sources.forEach((s, n) => {
       const sid = `S${n + 1}`;
-      refs.push({ sid, label: `${sid} · ${s.label}`, tagged: take(`${sid} · ${s.label}`, s.text) });
+      const label = s.title !== undefined ? this.titledLabel(c, parts, `${sid} · ${s.label}`, s.title) : `${sid} · ${s.label}`;
+      refs.push({ sid, label, tagged: take(label, s.text) });
     });
     if (instruction.trim()) take("הבקשה שלך", instruction);
     const approval = newId("approval");
@@ -480,8 +491,9 @@ export class FakeCore {
     const hidden = new Set<string>();
     const checks = { declared_names: 0, patterns: 0, name_suspects: 0, indirect_suspects: 0 };
     todo.forEach((i, n) => {
+      const label = this.titledLabel(c, parts, `S${n + 1} · ${kindLabel[i.kind]}`, i.title);
       const f = this.filterFor(c, i.content);
-      parts.push({ label: `S${n + 1} · ${kindLabel[i.kind]} · ${i.title}`, original: f.original_segments, outgoing: f.tagged_segments });
+      parts.push({ label, original: f.original_segments, outgoing: f.tagged_segments });
       for (const a of f.auto_hidden) if (!autoHidden.some((x) => x.token === a.token)) autoHidden.push(a);
       f.hidden.forEach((h) => hidden.add(h));
       checks.declared_names += f.checks.declared_names;

@@ -13,3 +13,6 @@ workspace = true
 [dependencies]
 serde.workspace = true
 ts-rs = { version = "12", features = ["no-serde-warnings"] }
+
+[dev-dependencies]
+serde_json.workspace = true

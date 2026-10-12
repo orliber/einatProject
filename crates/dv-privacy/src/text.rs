@@ -27,7 +27,7 @@ fn is_hebrew_letter(c: char) -> bool {
 }
 
 /// Points, cantillation and other marks that do not change the letters.
-fn is_mark(c: char) -> bool {
+pub(crate) fn is_mark(c: char) -> bool {
     matches!(
         c,
         '\u{0591}'
@@ -44,10 +44,16 @@ fn is_mark(c: char) -> bool {
                 | '\u{0670}'
                 | '\u{06D6}'..='\u{06ED}'
                 | '\u{0640}'
-                | '\u{200E}'
-                | '\u{200F}'
-                | '\u{200D}'
-                | '\u{200C}'
+                // Invisible format characters: a zero-width space, joiners, direction marks,
+                // embeddings, overrides and isolates, the word joiner, a soft hyphen, the
+                // combining grapheme joiner, the BOM. None shows on screen, so inside a word
+                // they must not split it: "נו\u{200B}עם" reads as "נועם".
+                | '\u{00AD}'
+                | '\u{034F}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{2069}'
                 | '\u{FEFF}'
     )
 }
@@ -70,12 +76,49 @@ fn is_inner_quote(c: char) -> bool {
     )
 }
 
+/// The plain character a compatibility form shows: full-width ASCII ("Ｎｏａｍ", "１２３") as
+/// ASCII, and Hebrew presentation forms (wide letters, letters with a dagesh or a shin dot,
+/// as PDF text often holds them: "ﬠ", "שׁ", "וֹ") as the bare letter.
+#[must_use]
+pub(crate) fn compat_char(c: char) -> char {
+    match c {
+        '\u{FF01}'..='\u{FF5E}' => char::from_u32(u32::from(c) - 0xFEE0).unwrap_or(c),
+        '\u{FB1D}' | '\u{FB39}' => 'י',
+        '\u{FB20}' => 'ע',
+        '\u{FB21}' | '\u{FB2E}' | '\u{FB2F}' | '\u{FB30}' => 'א',
+        '\u{FB22}' | '\u{FB33}' => 'ד',
+        '\u{FB23}' | '\u{FB34}' => 'ה',
+        '\u{FB24}' | '\u{FB3B}' | '\u{FB4D}' => 'כ',
+        '\u{FB25}' | '\u{FB3C}' => 'ל',
+        '\u{FB26}' => 'ם',
+        '\u{FB27}' | '\u{FB48}' => 'ר',
+        '\u{FB28}' | '\u{FB4A}' => 'ת',
+        '\u{FB29}' => '+',
+        '\u{FB2A}'..='\u{FB2D}' | '\u{FB49}' => 'ש',
+        '\u{FB31}' | '\u{FB4C}' => 'ב',
+        '\u{FB32}' => 'ג',
+        '\u{FB35}' | '\u{FB4B}' => 'ו',
+        '\u{FB36}' => 'ז',
+        '\u{FB38}' => 'ט',
+        '\u{FB3A}' => 'ך',
+        '\u{FB3E}' => 'מ',
+        '\u{FB40}' => 'נ',
+        '\u{FB41}' => 'ס',
+        '\u{FB43}' => 'ף',
+        '\u{FB44}' | '\u{FB4E}' => 'פ',
+        '\u{FB46}' => 'צ',
+        '\u{FB47}' => 'ק',
+        c => c,
+    }
+}
+
 /// Map one character for comparison; `None` drops it.
 #[must_use]
 pub fn normalize_char(c: char) -> Option<char> {
     if is_mark(c) {
         return None;
     }
+    let c = compat_char(c);
     Some(match c {
         'ך' => 'כ',
         'ם' => 'מ',
@@ -175,6 +218,12 @@ pub fn prefix_splits(norm: &str) -> Vec<(usize, String)> {
         }
         if is_valid_prefix(&chars[..n].iter().collect::<String>()) {
             out.push((n, chars[n..].iter().collect()));
+            // A prefix before a quoted word: ל"נועם", ב״גן הדקל״, ו'מיכל'. The tokenizer keeps
+            // the opening quote inside the word, and the quote counts as one more character
+            // split off, so the remainder still starts where the name does.
+            if chars.len() >= n + 3 && matches!(chars[n], '"' | '\'') {
+                out.push((n + 1, chars[n + 1..].iter().collect()));
+            }
         }
     }
     out

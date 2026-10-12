@@ -806,6 +806,78 @@ mod tests {
     }
 
     #[test]
+    fn every_provider_address_is_https_to_its_own_host_or_plain_loopback() {
+        for (address, host) in [
+            (OPENAI_URL, OPENAI_HOST),
+            (GEMINI_URL, GEMINI_HOST),
+            (MISTRAL_URL, MISTRAL_HOST),
+        ] {
+            let url = reqwest::Url::parse(address).unwrap();
+            assert_eq!(url.scheme(), "https", "{address}");
+            assert_eq!(url.host_str(), Some(host), "{address}");
+            assert_eq!(url.port(), None, "{address}");
+            assert!(url.username().is_empty() && url.query().is_none());
+        }
+        let local = reqwest::Url::parse(LOCAL_URL).unwrap();
+        assert_eq!(
+            local.host_str(),
+            Some("127.0.0.1"),
+            "an IP, not a name DNS could move"
+        );
+    }
+
+    #[test]
+    fn only_listed_models_have_an_api_name_and_it_is_a_fixed_safe_path_segment() {
+        let listed: Vec<&str> = OPENAI_MODELS
+            .iter()
+            .chain(GEMINI_MODELS)
+            .chain(MISTRAL_MODELS)
+            .chain(LOCAL_MODELS)
+            .copied()
+            .collect();
+        for m in &listed {
+            let api = api_model(m).unwrap();
+            // Gemini puts the name in the URL path: nothing in it may change the address.
+            assert!(
+                api.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || ".-:".contains(c)),
+                "{api}"
+            );
+        }
+        for m in crate::ALLOWED_MODELS.iter().chain(&[
+            "gpt-4o",
+            "gemini-2.5-pro",
+            "../x",
+            "gpt-5-1 ",
+            "GPT-5-1",
+            "",
+        ]) {
+            assert_eq!(api_model(m), None, "{m}");
+        }
+    }
+
+    #[test]
+    fn max_tokens_out_of_range_or_missing_is_refused() {
+        for v in [json!(0), json!(64_001), json!(-1), json!("100"), json!(1.5)] {
+            let mut b = section_body("gpt-5-1");
+            b["max_tokens"] = v.clone();
+            assert!(canonical(&b, Provider::OpenAi).is_err(), "{v}");
+        }
+        let mut b = section_body("gpt-5-1");
+        b.as_object_mut().unwrap().remove("max_tokens");
+        assert!(canonical(&b, Provider::OpenAi).is_err());
+        let mut b = section_body("gpt-5-1");
+        b["thinking"] = json!({"type": "adaptive"});
+        assert!(
+            canonical(&b, Provider::OpenAi).is_err(),
+            "thinking is not translated"
+        );
+        let mut b = section_body("gpt-5-1");
+        b["system"] = json!([{"type": "document", "source": {"type": "file", "file_id": "f"}}]);
+        assert!(canonical(&b, Provider::OpenAi).is_err(), "only text blocks");
+    }
+
+    #[test]
     fn transports_follow_the_model_and_need_a_key() {
         assert!(transport_for("gpt-5-1", "sk-test-not-real").is_ok());
         assert!(transport_for("gemini-2-5-flash", "test-not-real").is_ok());
