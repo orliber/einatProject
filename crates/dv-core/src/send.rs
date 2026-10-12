@@ -294,7 +294,18 @@ impl Core {
             (input, review, sources)
         };
 
-        let nonce = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
+        let nonce = match self
+            .section_nonces
+            .get(&(case_id.to_owned(), input.section_key.clone()))
+        {
+            Some(n) => n.clone(),
+            None => {
+                let n = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
+                self.section_nonces
+                    .insert((case_id.to_owned(), input.section_key.clone()), n.clone());
+                n
+            }
+        };
         let (body, _refs) = dv_ai::build_section_request(&model, &input, &nonce);
         let mut prepared = review.into_case_prepared(demo_mode, &data);
         let (key, instruction_tagged, instr_hidden, rows, approved) = sources;

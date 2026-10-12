@@ -551,6 +551,9 @@ pub struct Core {
     ner_exe: Option<PathBuf>,
     /// Why the name model is not in use right now (shown in Settings).
     ner_problem: Option<String>,
+    /// One data-block mark per section conversation (case, section), so its materials are the
+    /// same bytes on every turn and the API's cache can serve them (dropped on lock).
+    section_nonces: HashMap<(String, String), String>,
     /// The name model's hints by text, so a material is read once (dropped on lock).
     hint_cache: HashMap<String, Vec<dv_privacy::NameHint>>,
 }
@@ -939,6 +942,9 @@ fn template_view(bytes: &[u8]) -> Result<TemplateView, CoreError> {
         dv_export::ExportError::Template(m) => CoreError::Refused(m),
         other => CoreError::Internal(other.to_string()),
     })?;
+    // Only how it looks; a template the export accepted never fails here, and if it did the
+    // page would simply keep its own look.
+    let look = dv_export::template_look(bytes).unwrap_or_default();
     Ok(TemplateView {
         has_marker: s.has_marker,
         headers: s.headers,
@@ -947,6 +953,11 @@ fn template_view(bytes: &[u8]) -> Result<TemplateView, CoreError> {
         styles_matched: s.styles_matched,
         styles_total: s.styles_total,
         size_kb: u32::try_from(bytes.len().div_ceil(1024)).unwrap_or(u32::MAX),
+        font: look.font,
+        size_half_points: look.size_half_points,
+        heading_font: look.heading_font,
+        page_twips: look.page.map(|(w, h)| [w, h]),
+        margins_twips: look.margins,
     })
 }
 

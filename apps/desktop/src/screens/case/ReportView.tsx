@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useApp } from "../../App";
-import { ipc, type CaseDetail, type ReportSettings } from "../../ipc/client";
+import { ipc, type CaseDetail, type ReportSettings, type TemplateView } from "../../ipc/client";
 import { kindLabel } from "../../i18n/he";
 import { ageWords } from "../../components/AgeField";
 import { ErrorLine, WarnIcon } from "../../components/ui";
@@ -30,6 +30,12 @@ export function ReportView({ api, focus }: { api: CaseApi; onWriteAll: () => voi
   useEffect(() => {
     ipc.reportSettings().then(setSettings).catch(() => setSettings(null));
   }, []);
+  // V4: the page in her template's fonts, size and margins, when she has one.
+  const [template, setTemplate] = useState<TemplateView | null>(null);
+  useEffect(() => {
+    ipc.reportTemplate().then(setTemplate).catch(() => setTemplate(null));
+  }, []);
+  const look = pageLook(template, settings?.font ?? null);
 
   // A section chosen in the contents or the next-step bar comes into view, briefly marked.
   useEffect(() => {
@@ -56,8 +62,8 @@ export function ReportView({ api, focus }: { api: CaseApi; onWriteAll: () => voi
     <div className="view">
       <div className="report-desk">
         {/* The page is the whole screen (D-036); one quiet line says how to work on it. */}
-        <p className="report-hint">לוחצים על פסקה כדי לערוך · ✦ ליד פסקה (במעבר עכבר) לשנות עם AI · בין פסקאות: "+ פסקה משלי כאן" · F1: קיצורי מקלדת</p>
-        <article className="a4" style={{ fontFamily: settings?.font ? `"${settings.font}", var(--font-display)` : undefined }} aria-label="הדוח, כמו בקובץ">
+        <p className="report-hint">לוחצים על פסקה כדי לערוך · ✦ ליד פסקה (במעבר עכבר) לשנות עם AI · בין פסקאות: "+ פסקה משלי כאן" · F1: קיצורי מקלדת{look.fromTemplate && " · הדף בגופן ובשוליים של התבנית שלך"}</p>
+        <article className="a4" style={look.style} aria-label="הדוח, כמו בקובץ">
           <header className="a4-header">{settings?.confidentiality}</header>
           <h1 className="a4-title">{settings?.title ?? "דוח אבחון פסיכולוגי"}</h1>
           <dl className="a4-info">
@@ -82,6 +88,32 @@ export function ReportView({ api, focus }: { api: CaseApi; onWriteAll: () => voi
       </div>
     </div>
   );
+}
+
+/** Twentieths of a point to screen pixels (96 per inch, 1440 twentieths per inch). */
+const TWIPS_PER_PX = 15;
+
+/**
+ * The page's look: her template's font, text size, page width and margins where it says them,
+ * else the font chosen in Settings, else the app's own. Font names arrive checked by the core
+ * (letters, digits, spaces); they are quoted, and only ever set as a style value.
+ */
+export function pageLook(template: TemplateView | null, settingsFont: string | null): { style: CSSProperties; fromTemplate: boolean } {
+  const style: CSSProperties & Record<string, string> = {};
+  const font = template?.font ?? settingsFont;
+  if (font) style.fontFamily = `"${font.replace(/"/g, "")}", var(--font-display)`;
+  if (template?.size_half_points) style.fontSize = `${template.size_half_points / 2}pt`;
+  if (template?.heading_font) style["--a4-heading-font"] = `"${template.heading_font.replace(/"/g, "")}"`;
+  if (template?.page_twips) {
+    style.width = `min(${Math.round(template.page_twips[0] / TWIPS_PER_PX)}px, 100%)`;
+    style.minHeight = `${Math.round(template.page_twips[1] / TWIPS_PER_PX)}px`;
+  }
+  if (template?.margins_twips) {
+    const [t, r, b, l] = template.margins_twips.map((m) => `${Math.round(m / TWIPS_PER_PX)}px`);
+    style.padding = `${t} ${r} ${b} ${l}`;
+  }
+  const fromTemplate = Boolean(template && (template.font || template.size_half_points || template.margins_twips || template.page_twips));
+  return { style, fromTemplate };
 }
 
 const CHANGES: [string, string][] = [

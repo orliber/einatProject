@@ -8,6 +8,7 @@
 
 mod agile;
 mod docx;
+mod look;
 mod pdf;
 mod template;
 
@@ -15,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 pub use agile::{encrypt, MIN_PASSWORD_CHARS};
 pub use docx::render;
+pub use look::{template_look, TemplateLook};
 pub use pdf::{render_pdf, PdfFonts};
 pub use template::{
     check_template, render_with_template, TemplateSummary, MARKER, MAX_TEMPLATE_BYTES,

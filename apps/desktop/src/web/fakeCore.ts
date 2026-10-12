@@ -164,8 +164,28 @@ export class FakeCore {
   private style = new FakeStyle();
 
   constructor() {
-    this.seed();
+    // `?cases=empty` and `?cases=many` (V2): the edges of the cases screen, for the tests.
+    const cases = typeof location === "undefined" ? null : new URLSearchParams(location.search).get("cases");
+    if (cases !== "empty") this.seed();
+    if (cases === "many") this.seedMany(48);
     this.seedActivity();
+  }
+
+  /** Many cases with long, mixed Hebrew and English names (all invented), for V2. */
+  private seedMany(n: number) {
+    const first = ["אלכסנדרה-מרגריטה", "יהונתן", "Daniel-Alexander", "שירה אביגיל", "נתנאל"];
+    const last = ["בן-שושן-רוזנבלום", "Weissberg-Abramovich", "כהן", "אבוטבול-גרינשטיין"];
+    for (let i = 0; i < n; i++) {
+      const name = `${first[i % first.length]} ${last[i % last.length]}`;
+      const c = this.newCase(
+        { code: `תיק-${2000 + i} ${i % 3 === 0 ? "Follow-up assessment with a very long English code" : ""}`.trim(), age: { years: 3 + (i % 9), months: i % 12 },
+          child_gender: i % 2 ? "female" : "male", current_section: null, retention_until: null,
+          consent: { given_on: "2026-09-01", form_version: "v1", given_by: "שני ההורים" } },
+        [{ id: null, role: "child", value: name, aliases: [] }],
+      );
+      c.created = now() - 86_400 * (i + 1);
+      c.updated = c.created;
+    }
   }
 
   /** A believable log for the preview; real entries are added as things happen. */
@@ -730,7 +750,10 @@ export class FakeCore {
       case "report_template":
         return this.template;
       case "set_report_template":
-        this.template = { has_marker: false, headers: 1, footers: 0, images: 1, styles_matched: 2, styles_total: 9, size_kb: 24 };
+        this.template = {
+          has_marker: false, headers: 1, footers: 0, images: 1, styles_matched: 2, styles_total: 9, size_kb: 24,
+          font: "David", size_half_points: 24, heading_font: null, page_twips: [11906, 16838], margins_twips: [1440, 1300, 1440, 1300],
+        };
         return this.template;
       case "clear_report_template":
         this.template = null;

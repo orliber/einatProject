@@ -58,10 +58,10 @@ fn bad(e: impl std::fmt::Display) -> ExportError {
     ))
 }
 
-type Parts = Vec<(String, Vec<u8>)>;
+pub(crate) type Parts = Vec<(String, Vec<u8>)>;
 
 /// Read the archive with limits: a "zip bomb" cannot exhaust memory.
-fn unpack(bytes: &[u8]) -> Result<Parts, ExportError> {
+pub(crate) fn unpack(bytes: &[u8]) -> Result<Parts, ExportError> {
     if bytes.len() > MAX_TEMPLATE_BYTES {
         return Err(refuse(
             "התבנית גדולה מדי (עד 5MB). בדרך כלל זו תמונה גדולה בכותרת: מקטינים אותה ושומרים מחדש.",
@@ -155,7 +155,7 @@ struct Rel {
     external: bool,
 }
 
-fn attr(e: &BytesStart<'_>, name: &str) -> Option<String> {
+pub(crate) fn attr(e: &BytesStart<'_>, name: &str) -> Option<String> {
     e.try_get_attribute(name).ok().flatten().and_then(|a| {
         a.normalized_value(quick_xml::XmlVersion::Explicit1_0)
             .ok()
@@ -205,7 +205,7 @@ fn rels_xml(rels: &[Rel]) -> String {
     out
 }
 
-fn text(bytes: &[u8]) -> Result<&str, ExportError> {
+pub(crate) fn text(bytes: &[u8]) -> Result<&str, ExportError> {
     std::str::from_utf8(bytes).map_err(bad)
 }
 
@@ -888,6 +888,30 @@ mod tests {
         let mut s = String::new();
         zip.by_name(name).ok()?.read_to_string(&mut s).unwrap();
         Some(s)
+    }
+
+    /// V4: the fictional template's fonts, size and margins come out as numbers and names.
+    #[test]
+    fn the_look_of_her_template_is_read() {
+        let tpl = fixture(|_, c| Some(c));
+        let look = crate::template_look(&tpl).unwrap();
+        assert_eq!(look.font.as_deref(), Some("Narkisim"));
+        assert_eq!(look.size_half_points, Some(24));
+        assert_eq!(look.page, Some((11906, 16838)));
+        assert_eq!(look.margins, Some([1800, 1300, 1440, 1300]));
+        // A font name that is not a name is dropped, the rest stays.
+        let odd = fixture(|n, c| {
+            Some(if n == "word/styles.xml" {
+                c.replace("w:cs=\"Narkisim\"", "w:cs=\"x;}\"")
+                    .replace("w:ascii=\"Narkisim\"", "w:ascii=\"x;}\"")
+                    .replace("w:hAnsi=\"Narkisim\"", "w:hAnsi=\"x;}\"")
+            } else {
+                c
+            })
+        });
+        let look = crate::template_look(&odd).unwrap();
+        assert_eq!(look.font, None);
+        assert_eq!(look.margins, Some([1800, 1300, 1440, 1300]));
     }
 
     #[test]

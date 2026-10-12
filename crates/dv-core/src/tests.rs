@@ -313,6 +313,31 @@ fn full_section_flow_sends_only_tags_and_stores_tagged() {
     }
 }
 
+/// Prompt caching: the second turn about the same section starts with the very same
+/// materials block, marked for the cache, so the API serves it from there.
+#[test]
+fn a_second_turn_on_a_section_starts_with_the_same_cached_materials() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    for ask in ["תנסח פסקה על הוויסות הרגשי", "לקצר את הפסקה"] {
+        let prepared = core.prepare_section(&case, "kindergarten", ask).unwrap();
+        core.send_section(&prepared.approval_id.unwrap()).unwrap();
+    }
+    let sent = fake.sent.lock().unwrap().clone();
+    assert_eq!(sent.len(), 2);
+    let first_block = |b: &str| {
+        let v: Value = serde_json::from_str(b).unwrap();
+        v["messages"][0]["content"][0].clone()
+    };
+    let (a, b) = (first_block(&sent[0]), first_block(&sent[1]));
+    assert_eq!(a["cache_control"]["type"], "ephemeral");
+    assert_eq!(
+        a, b,
+        "the cached materials are the same bytes on the next turn"
+    );
+    assert!(sent[1].contains("לקצר"));
+}
+
 #[test]
 fn demo_mode_without_key_or_transport() {
     let (_dir, mut core, case) = setup(None);

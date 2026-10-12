@@ -12,10 +12,10 @@ pub mod style;
 mod verify;
 
 pub use request::{
-    build_consult_request, build_research_request, build_section_request, nonce_from, ConsultInput,
-    ModelConfig, Provider, ResearchInput, SectionInput, TaggedInput, TaggedTurn, ALLOWED_MODELS,
-    ANTHROPIC_MODELS, DEFAULT_MODEL, GEMINI_MODELS, LOCAL_MODELS, MISTRAL_MODELS, OPENAI_MODELS,
-    RESEARCH_ALLOWED_DOMAINS,
+    build_consult_request, build_research_request, build_section_request, content_text, nonce_from,
+    ConsultInput, ModelConfig, Provider, ResearchInput, SectionInput, TaggedInput, TaggedTurn,
+    ALLOWED_MODELS, ANTHROPIC_MODELS, DEFAULT_MODEL, GEMINI_MODELS, LOCAL_MODELS, MISTRAL_MODELS,
+    OPENAI_MODELS, RESEARCH_ALLOWED_DOMAINS,
 };
 pub use response::{
     parse_consult, parse_derived_section, parse_section, AiError, ProposedParagraph, SectionReply,

@@ -29,6 +29,12 @@
   font-size: 11px;
   color: var(--paper-faint);
 }
+/* V4: her template's heading font, when it names one. */
+.a4-title,
+.a4-part,
+.a4-heading {
+  font-family: var(--a4-heading-font, inherit);
+}
 .a4-title {
   text-align: center;
   font-size: var(--text-3xl);

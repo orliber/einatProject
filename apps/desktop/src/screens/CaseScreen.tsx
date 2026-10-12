@@ -306,7 +306,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
       <header className="case-bar">
         <button type="button" className="case-back" onClick={() => go({ name: "cases" })}>→ תיקים</button>
         <button type="button" className="case-id" title="פרטים ושמות להסתרה" onClick={() => go({ name: "case", id: caseId, view: "details" })}>
-          <span className="case-child">{child || detail.meta.code}</span>
+          <span className="case-child" title={child || detail.meta.code}>{child || detail.meta.code}</span>
           {age && <span className="case-age" title={detail.meta.age ? ageWords(detail.meta.age) : undefined}>{age}</span>}
           <span className={detail.meta.consent ? "chip chip-ok" : "chip chip-warn"}>{detail.meta.consent ? "✓ הסכמה" : "חסרה הסכמה"}</span>
           {detail.meta.follows && <span className="chip chip-sand">מעקב</span>}
