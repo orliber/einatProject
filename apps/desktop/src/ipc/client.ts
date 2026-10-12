@@ -32,6 +32,8 @@ import type { Prepared } from "./generated/Prepared";
 import type { ReportSettings } from "./generated/ReportSettings";
 import type { TemplateView } from "./generated/TemplateView";
 import type { ParagraphView } from "./generated/ParagraphView";
+import type { SimilarParagraph } from "./generated/SimilarParagraph";
+import type { FitMonth } from "./generated/FitMonth";
 import type { Role } from "./generated/Role";
 import type { ScoreSheet } from "./generated/ScoreSheet";
 import type { UsageSummary } from "./generated/UsageSummary";
@@ -226,6 +228,9 @@ export const ipc = {
   /** Earlier wordings of a paragraph, newest first; bring one back (D-046). */
   paragraphVersions: (caseId: string, draftId: string) =>
     call<ParagraphVersionView[]>("paragraph_versions", { caseId, draftId }),
+  /** The paragraph of her past reports closest to this one (ST2); worked out locally. */
+  similarParagraph: (caseId: string, draftId: string) =>
+    call<SimilarParagraph | null>("similar_paragraph", { caseId, draftId }),
   restoreParagraphVersion: (caseId: string, draftId: string, versionId: string) =>
     run("restore_paragraph_version", { caseId, draftId, versionId }),
   /** Her own paragraph. `at`: "end" (default), "first", or the id of the paragraph it follows. */
@@ -337,7 +342,9 @@ export const ipc = {
 };
 
 export type {
+  FitMonth,
   ParagraphView,
+  SimilarParagraph,
   StyleAnalysisResult,
   StyleImportPreview,
   StyleItem,

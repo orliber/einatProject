@@ -116,6 +116,7 @@ export class FakeStyle {
       words_per_sentence: has ? 13.4 : null, sentences_per_paragraph: has ? 3.2 : null, commas_per_sentence: has ? 1.1 : null,
       hedges: has ? 22 : null, contrasts: has ? 9 : null, first_person: has ? 4 : null,
       fit_recent: has ? 81 : null, fit_earlier: has ? 72 : null, fit_count: has ? 40 : 0,
+      fit_by_month: has ? [{ month: "2026-08", average: 68, count: 12 }, { month: "2026-09", average: 74, count: 15 }, { month: "2026-10", average: 81, count: 13 }] : [],
     };
   }
 

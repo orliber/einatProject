@@ -274,6 +274,30 @@ pub struct StyleLearned {
     pub fit_recent: Option<u32>,
     pub fit_earlier: Option<u32>,
     pub fit_count: u32,
+    /// The same figure by month, oldest first: is drafting getting closer to her (ST12)?
+    pub fit_by_month: Vec<FitMonth>,
+}
+
+/// A paragraph of her past reports, beside a draft paragraph (ST2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SimilarParagraph {
+    /// As kept: neutralized, with roles in place of names.
+    pub text: String,
+    /// The report's title as she saved it.
+    pub report: String,
+    /// From the same section of that report.
+    pub same_section: bool,
+}
+
+/// The average closeness of the AI's paragraphs in one month.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FitMonth {
+    /// "2026-10".
+    pub month: String,
+    pub average: u32,
+    pub count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -379,7 +403,13 @@ pub(crate) struct LocalStyle {
     /// first, at most [`FIT_KEPT`]. Numbers only.
     #[serde(default)]
     draft_fit: Vec<u8>,
+    /// The same figures by month ("2026-10" → (sum, count)), the latest [`MONTHS_KEPT`] (ST12).
+    #[serde(default)]
+    fit_months: BTreeMap<String, (u32, u32)>,
 }
+
+/// How many months of closeness figures are kept for the trend.
+const MONTHS_KEPT: usize = 12;
 
 /// How many closeness figures are kept, and how many make "the latest".
 const FIT_KEPT: usize = 120;
@@ -388,7 +418,18 @@ const FIT_WINDOW: usize = 30;
 impl LocalStyle {
     /// Notes how close a paragraph the AI wrote is to her writing, before learning from it.
     fn note_fit(&mut self, section: &str, ai_text: &str) {
+        let (y, m, _) = crate::dates::today();
+        self.note_fit_in(section, ai_text, &format!("{y:04}-{m:02}"));
+    }
+
+    fn note_fit_in(&mut self, section: &str, ai_text: &str, month: &str) {
         if let Some(f) = self.model.fidelity(section, ai_text) {
+            let e = self.fit_months.entry(month.to_owned()).or_insert((0, 0));
+            e.0 = e.0.saturating_add(f.min(100));
+            e.1 = e.1.saturating_add(1);
+            while self.fit_months.len() > MONTHS_KEPT {
+                self.fit_months.pop_first();
+            }
             self.draft_fit.push(u8::try_from(f.min(100)).unwrap_or(100));
             if self.draft_fit.len() > FIT_KEPT {
                 let extra = self.draft_fit.len() - FIT_KEPT;
@@ -423,6 +464,16 @@ impl LocalStyle {
             fit_recent: mean(&self.draft_fit[split..]),
             fit_earlier: mean(&self.draft_fit[earlier_from..split]),
             fit_count: u32::try_from(n).unwrap_or(u32::MAX),
+            fit_by_month: self
+                .fit_months
+                .iter()
+                .filter(|(_, (_, count))| *count > 0)
+                .map(|(month, (sum, count))| FitMonth {
+                    month: month.clone(),
+                    average: (f64::from(*sum) / f64::from(*count)).round() as u32,
+                    count: *count,
+                })
+                .collect(),
         }
     }
 }
@@ -979,12 +1030,16 @@ pub(crate) fn style_note(
 
 /// Re-learn from her past reports: the model's report half and the recurring phrases.
 fn fit_reports(local: &mut LocalStyle, sources: &[StoredSource]) {
-    local.model.fit_reports(
-        sources
-            .iter()
-            .flat_map(|s| s.parts.iter())
-            .map(|p| (p.section.as_deref(), p.text.as_str())),
-    );
+    // The newest report counts in full; each earlier one a little less (ST5).
+    let n = sources.len();
+    local
+        .model
+        .fit_reports_weighted(sources.iter().enumerate().flat_map(|(i, s)| {
+            let w = dv_style::report_weight(n - 1 - i);
+            s.parts
+                .iter()
+                .map(move |p| (p.section.as_deref(), p.text.as_str(), w))
+        }));
     let reports: Vec<dv_style::ReportParts<'_>> = sources
         .iter()
         .map(|s| {
@@ -1083,6 +1138,38 @@ impl Core {
             dropped: stored.dropped,
             demo: stored.demo,
         })
+    }
+
+    /// The paragraph of her past reports closest to a draft paragraph (ST2), to read beside it
+    /// while she edits. Her reports are kept neutralized, so it shows roles, not names. Shown
+    /// on her computer only; it never goes into a request.
+    pub fn similar_paragraph(
+        &mut self,
+        case_id: &str,
+        draft_id: &str,
+    ) -> Result<Option<SimilarParagraph>, CoreError> {
+        let draft = find_draft(self.vault_ref()?, case_id, draft_id)?
+            .ok_or_else(|| CoreError::NotFound("הפסקה".into()))?;
+        let sources = self.stored_sources()?;
+        let mut docs: Vec<(Option<&str>, &str)> = Vec::new();
+        let mut from: Vec<(&str, Option<&str>)> = Vec::new();
+        for (_, _, s) in &sources {
+            for p in &s.parts {
+                for para in dv_style::text::paragraphs(&p.text) {
+                    docs.push((p.section.as_deref(), para));
+                    from.push((s.title.as_str(), p.section.as_deref()));
+                }
+            }
+        }
+        Ok(
+            dv_style::retrieve::closest(&docs, &draft.section_key, &draft.text_tagged).map(|i| {
+                SimilarParagraph {
+                    text: docs[i].1.to_owned(),
+                    report: from[i].0.to_owned(),
+                    same_section: from[i].1 == Some(draft.section_key.as_str()),
+                }
+            }),
+        )
     }
 
     /// What was learned from her edits, for marking her usual changes in a draft.
@@ -1843,6 +1930,7 @@ impl Core {
         let mut local = local_style(self.vault_ref()?)?;
         local.model.forget_learning();
         local.draft_fit.clear();
+        local.fit_months.clear();
         let v = self.vault_mut()?;
         v.save_style_learning(&json(&Learning::default())?)?;
         v.set_secret(LOCAL_STYLE_KEY, &json(&local)?)?;

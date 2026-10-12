@@ -83,6 +83,7 @@ const ALLOWED = new Set([
   "new_recovery_kit",
   "paragraph_sources",
   "paragraph_versions",
+  "similar_paragraph",
   "ping",
   "recent_crashes",
   "prepare_consult",

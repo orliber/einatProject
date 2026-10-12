@@ -84,6 +84,7 @@
     "allow-reject-paragraph",
     "allow-edit-paragraph",
     "allow-paragraph-versions",
+    "allow-similar-paragraph",
     "allow-restore-paragraph-version",
     "allow-add-own-paragraph",
     "allow-prepare-consult",

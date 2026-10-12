@@ -196,3 +196,38 @@
 .style-fit {
   margin: 0;
 }
+
+/* ---------- the closeness figure over time (ST12) ---------- */
+.fit-trend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fit-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  height: 120px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fit-bar {
+  display: flex;
+  flex: 0 1 36px;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+}
+.fit-fill {
+  width: 100%;
+  border-radius: 4px 4px 0 0;
+  background: var(--primary);
+}
+.fit-value,
+.fit-month {
+  font-size: 12px;
+  color: var(--ink-muted);
+}

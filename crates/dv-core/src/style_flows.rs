@@ -622,6 +622,26 @@ fn a_paragraph_whose_sentences_are_unlike_hers_gets_a_gentle_note() {
         local.note_fit("observation", &usual);
     }
     assert_eq!(local.learned().fit_count, super::FIT_KEPT as u32);
+
+    // By month (ST12): oldest first, at most a year kept.
+    let mut local2 = super::LocalStyle {
+        model: local.model.clone(),
+        ..Default::default()
+    };
+    for m in 1..=14 {
+        let month = format!("2025-{m:02}");
+        let month = if m > 12 {
+            format!("2026-{:02}", m - 12)
+        } else {
+            month
+        };
+        local2.note_fit_in("observation", if m < 13 { &long } else { &usual }, &month);
+    }
+    let by_month = local2.learned().fit_by_month;
+    assert_eq!(by_month.len(), super::MONTHS_KEPT);
+    assert_eq!(by_month[0].month, "2025-03");
+    assert_eq!(by_month.last().unwrap().month, "2026-02");
+    assert!(by_month.last().unwrap().average > by_month[0].average);
 }
 
 #[test]
@@ -884,4 +904,40 @@ fn the_closeness_figure_comes_with_its_reasons_and_what_to_ask() {
     assert!(!ask.contains("מילה מילה"), "only her figures, never text");
     assert!(m.closer_ask("observation", &usual).is_none());
     assert!(m.differences("observation", &usual).is_empty());
+}
+
+#[test]
+fn the_closest_paragraph_of_her_reports_is_shown_without_names() {
+    let (_dir, mut core) = vault(None);
+    let case_id = case(&mut core);
+    let draft = core
+        .vault
+        .as_mut()
+        .unwrap()
+        .add_draft(
+            &case_id,
+            "appearance",
+            "[ילד] הגיע למפגש בשמחה ושיתף פעולה לאורך כל המפגש.",
+            Author::Ai,
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        core.similar_paragraph(&case_id, &draft.id).unwrap(),
+        None,
+        "no past reports yet"
+    );
+    upload(&mut core);
+    let similar = core
+        .similar_paragraph(&case_id, &draft.id)
+        .unwrap()
+        .expect("a close paragraph");
+    assert!(
+        similar.text.contains("שיתף פעולה לאורך כל המפגש"),
+        "{}",
+        similar.text
+    );
+    no_secrets(&similar.text, "the similar paragraph");
+    no_secrets(&similar.report, "its report's title");
+    assert!(core.similar_paragraph(&case_id, "no-such-draft").is_err());
 }
