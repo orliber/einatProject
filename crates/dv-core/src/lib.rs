@@ -137,9 +137,9 @@ enum Task {
 const REVIEW_ALWAYS_DAYS: u64 = 14;
 
 fn day_number() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() / 86_400)
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| {
+        d.as_secs() / dv_domain::dates::DAY_SECS.unsigned_abs()
+    })
 }
 const REPORT_KEY: &str = "report_settings";
 /// Her Word template (EX-1), hex-encoded inside the encrypted vault.
