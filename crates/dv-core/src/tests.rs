@@ -350,6 +350,64 @@ fn outgoing(p: &Prepared) -> String {
 }
 
 #[test]
+fn a_name_confirmed_for_the_case_leaves_the_card_and_stays_hidden() {
+    let (_dir, mut core, case) = setup(None);
+    core.add_input(
+        &case,
+        InputKind::Kindergarten,
+        "שיחה נוספת",
+        "הסייעת ורד אמרה שהוא משחק לבד בחצר.",
+    )
+    .unwrap();
+    let prepared = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    let item = prepared
+        .auto_hidden
+        .iter()
+        .find(|a| a.token == "ורד")
+        .expect("listed on the card")
+        .clone();
+
+    core.confirm_auto_hidden(&case, &item.token, &item.tag)
+        .unwrap();
+    let again = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    assert!(again.approval_id.is_some(), "{:?}", again.blocked);
+    assert!(
+        again.auto_hidden.iter().all(|a| a.tag != item.tag),
+        "{:?}",
+        again.auto_hidden
+    );
+    assert!(!outgoing(&again).contains("ורד"));
+    let kept = core
+        .case_detail(&case)
+        .unwrap()
+        .identities
+        .into_iter()
+        .find(|i| i.value == "ורד")
+        .expect("still a name of the case");
+    assert_eq!(kept.source, IdentitySource::Manual);
+
+    // A close spelling becomes one of the name's forms.
+    core.confirm_auto_hidden(&case, "ורדד", &item.tag).unwrap();
+    let kept = core
+        .case_detail(&case)
+        .unwrap()
+        .identities
+        .into_iter()
+        .find(|i| i.value == "ורד")
+        .unwrap();
+    assert!(kept.aliases.contains(&"ורדד".to_owned()));
+    // Only a person of the case can be confirmed.
+    assert!(matches!(
+        core.confirm_auto_hidden(&case, "עובדת בתחום החינוך", "עובדת בתחום החינוך"),
+        Err(CoreError::Refused(_))
+    ));
+}
+
+#[test]
 fn unknown_name_is_hidden_kept_and_restored_with_one_click() {
     let fake = FakeTransport::default();
     let (_dir, mut core, case) = setup(Some(fake.clone()));
@@ -2083,6 +2141,28 @@ fn passages_far_apart_are_marked_with_a_gap_the_gate_accepts() {
 }
 
 // ------------------------------------------------------------ D-023: library
+
+#[test]
+fn the_sample_case_is_made_once_and_its_child_is_hidden_like_any_other() {
+    let (_dir, mut core, case) = setup(None);
+    assert!(!core.case_detail(&case).unwrap().sample);
+    let sample = core.create_sample_case().unwrap();
+    assert_eq!(core.create_sample_case().unwrap(), sample, "opened once");
+    let detail = core.case_detail(&sample).unwrap();
+    assert!(detail.sample);
+    assert_eq!(detail.inputs.len(), 3);
+    assert!(detail.meta.consent.is_some());
+    let prepared = core
+        .prepare_section(&sample, "background", "טיוטה")
+        .unwrap();
+    assert!(prepared.blocked.is_empty(), "{:?}", prepared.blocked);
+
+    // Thrown away, a new one is made on request.
+    core.delete_case(&sample).unwrap();
+    let again = core.create_sample_case().unwrap();
+    assert_ne!(again, sample);
+    assert!(core.case_detail(&again).unwrap().sample);
+}
 
 #[test]
 fn delete_goes_to_the_bin_and_erasing_needs_the_password() {

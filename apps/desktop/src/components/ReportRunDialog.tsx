@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../App";
 import { ipc, type Prepared } from "../ipc/client";
 import type { CaseApi } from "../screens/CaseScreen";
@@ -28,6 +28,9 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
   const [open, setOpen] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** "לעצור": the sections still in the queue are not sent; those being written finish. */
+  const stopping = useRef(false);
+  const [stopped, setStopped] = useState(false);
   const unsorted = api.detail.routing.filter((r) => r.needs_sorting).length;
   const draftMs = estimateMs("draft", status.speed, status.demo_mode);
 
@@ -103,13 +106,36 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
   async function writeAll() {
     setRunning(true);
     setError(null);
+    stopping.current = false;
+    setStopped(false);
     const queue = ready.map(([k, p]) => [k, p.approval_id ?? ""] as const);
     setState((s) => ({ ...s, ...Object.fromEntries(queue.map(([k]) => [k, "waiting"])) }));
     const worker = async () => {
-      for (let next = queue.shift(); next; next = queue.shift()) await writeOne(next[0], next[1]);
+      for (let next = queue.shift(); next && !stopping.current; next = queue.shift()) await writeOne(next[0], next[1]);
     };
     await Promise.all(Array.from({ length: Math.min(PARALLEL, queue.length) }, worker));
+    // Stopped: what was still waiting goes back to "ready", to send later from here.
+    setState((s) => Object.fromEntries(Object.entries(s).map(([k, v]) => [k, v === "waiting" ? "ready" : v])));
     setRunning(false);
+  }
+
+  function stop() {
+    stopping.current = true;
+    setStopped(true);
+  }
+
+  /** A section that failed (the network dropped, the answer did not pass): a fresh request for
+   *  it alone, through the review when it has a question, and written like the rest. */
+  async function retry(key: string) {
+    setError(null);
+    try {
+      const prepared = await ipc.prepareSection(api.caseId, key, DRAFT_INSTRUCTION);
+      setItems((list) => (list ?? []).map(([k, p]) => [k, k === key ? prepared : p] as [string, Prepared]));
+      if (prepared.approval_id) await writeOne(key, prepared.approval_id);
+      else await answer(key, prepared);
+    } catch (e) {
+      setError(fail(e as never));
+    }
   }
 
   /** A section with a question: decide in the usual review, then it is written like the rest. */
@@ -136,7 +162,7 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
     waiting: "בתור",
     writing: `${ai} כותב…`,
     done: "✓ טיוטה מוכנה לאישורך",
-    failed: "לא הצליח. אפשר לנסות שוב מהסעיף",
+    failed: "לא הצליח. אפשר לנסות שוב, רק את הסעיף הזה",
   };
 
   return (
@@ -154,6 +180,11 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
             </>
           ) : (
             <>
+              {running && (
+                <button type="button" className="btn" disabled={stopped} onClick={stop}>
+                  {stopped ? "עוצר אחרי הסעיפים שכבר נשלחו…" : "לעצור את מה שעוד לא נשלח"}
+                </button>
+              )}
               <button type="button" className="btn" onClick={onClose}>{running ? "סגירה (הכתיבה ממשיכה)" : "ביטול"}</button>
               <button type="button" className="btn btn-primary" hidden={items === null} disabled={!ready.length || running} onClick={() => void writeAll()}>
                 {running ? <><Spinner /> כותב…</> : `שליחה וכתיבת ${ready.length} סעיפים`}
@@ -187,6 +218,11 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
         {unsorted === 0 && !items && !error && <p className="muted"><Spinner /> מכינה את הבקשות ובודקת מה יוצא…</p>}
         {items && items.length === 0 && <p className="muted">אין סעיפים שמחכים לטיוטה: לכל סעיף עם חומרים כבר יש טיוטה, או שעוד אין חומרים. מוסיפים חומרים ב"חומרי התיק".</p>}
 
+        {running && rows.length > 0 && (
+          <div className="run-total">
+            <progress max={rows.length} value={done} aria-label={`נכתבו ${done} מתוך ${rows.length} סעיפים`} />
+          </div>
+        )}
         {rows.map(([key, p]) => {
           const st = stateOf(key);
           return (
@@ -200,9 +236,8 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
                     {open === key ? "הסתרה" : "מה יוצא?"}
                   </button>
                 )}
-                {st === "failed" && p.approval_id && (
-                  <button type="button" className="btn btn-small" disabled={running}
-                    onClick={() => { setError(null); void writeOne(key, p.approval_id ?? ""); }}>נסי שוב</button>
+                {st === "failed" && (
+                  <button type="button" className="btn btn-small" disabled={running} onClick={() => void retry(key)}>לנסות שוב</button>
                 )}
                 {st === "done" && <button type="button" className="link-small" onClick={() => { onClose(); go({ name: "case", id: api.caseId, view: "report" }); }}>לדוח</button>}
               </div>

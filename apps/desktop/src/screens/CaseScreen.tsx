@@ -7,6 +7,8 @@ import { ReportRunDialog } from "../components/ReportRunDialog";
 import { ProgressLine, estimateMs, recordDuration, type Task } from "../components/Progress";
 import { ErrorLine, CloseIcon, Skeleton } from "../components/ui";
 import { ActionsMenu, type MenuItem } from "../components/Menu";
+import { SampleGuide } from "./case/SampleGuide";
+import { CaseSearch } from "./case/CaseSearch";
 import { ageWords } from "../components/AgeField";
 import { MaterialsView } from "./case/MaterialsView";
 import { SectionWork } from "./case/SectionWork";
@@ -93,6 +95,8 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const [fullDraft, setFullDraft] = useState(false);
   /** A section to bring into view on the report page. */
   const [focus, setFocus] = useState<{ key: string; at: number } | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [throwing, setThrowing] = useState(false);
 
   // Sections written side by side reload at about the same time: an answer that arrives
   // after a newer one is older, and never puts back a section that is already there.
@@ -317,10 +321,19 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
           ))}
         </nav>
         {status.demo_mode && <span className="chip chip-sand" title="לא הוגדר מפתח API בהגדרות">מצב הדגמה</span>}
+        <button type="button" className="btn" onClick={() => setSearching(true)}>חיפוש</button>
         <button type="button" className="btn" onClick={() => go({ name: "consult", caseId })}>התייעצות</button>
         <ActionsMenu items={more} label="עוד פעולות: פרטים ושמות, כתיבת כל הדוח, נעילה" />
       </header>
       <ErrorLine error={error} />
+      {detail.sample && (
+        <SampleGuide view={view} busy={throwing}
+          onNext={(from) => (from === "details" ? go({ name: "case", id: caseId, view: "materials" }) : from === "materials" ? toReport() : go({ name: "case", id: caseId, view: "finish" }))}
+          onDelete={() => {
+            setThrowing(true);
+            ipc.deleteCase(caseId).then(() => go({ name: "cases" }), (e: unknown) => { setThrowing(false); setError(fail(e as never)); });
+          }} />
+      )}
       {(elsewhere.length > 0 || failures.length > 0) && (
         <section className="jobs-strip" aria-label={`${ai} עובד`}>
           {elsewhere.map((j) => <ProgressLine key={j.id} started={j.started} estimate={j.estimate} label={j.label} approval={j.approval} />)}
@@ -343,6 +356,14 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
           {view === "details" && <DetailsView api={api} />}
           {view === "report" && <ReportView api={api} onWriteAll={() => setFullDraft(true)} focus={focus} />}
           {view === "finish" && <FinishView api={api} onExport={() => setExporting(true)} onOpen={(key) => toReport(key)} />}
+          {searching && (
+            <CaseSearch detail={detail} onClose={() => setSearching(false)}
+              onOpen={(hit) => {
+                setSearching(false);
+                if (hit.where === "paragraph") toReport(hit.target);
+                else go({ name: "case", id: caseId, view: "materials" });
+              }} />
+          )}
           {current && (
             <>
               <button type="button" className="link-small back-to-report" onClick={() => toReport(current.key)}>→ חזרה לדוח</button>

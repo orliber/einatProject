@@ -1487,6 +1487,24 @@ impl Vault {
         )
     }
 
+    /// The psychologist confirms a name the filter kept by itself: it is hers from now on,
+    /// like one she typed (U2). Its tag, value and aliases stay; only the source changes.
+    pub fn confirm_identity(&mut self, case_id: &str, identity_id: &str) -> Result<(), VaultError> {
+        let changed = self.identity.execute(
+            "UPDATE identities SET source = ?1 WHERE id = ?2 AND case_id = ?3",
+            params![enum_str(&IdentitySource::Manual)?, identity_id, case_id],
+        )?;
+        if changed == 0 {
+            return Err(VaultError::NotFound);
+        }
+        self.touch(case_id)?;
+        self.record(
+            AuditEvent::IdentitiesChanged,
+            Some(case_id),
+            &serde_json::json!({ "confirmed": 1 }),
+        )
+    }
+
     /// Keyed hash of a normalized token, for the "this is not a name" allow-list.
     #[must_use]
     pub fn token_hmac(&self, token: &str) -> String {

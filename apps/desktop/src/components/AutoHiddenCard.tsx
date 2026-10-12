@@ -28,6 +28,13 @@ export const foundRoles: Role[] = [
   "other",
 ];
 
+/** The card's tag for a name kept in another case (dv-core): confirmed there, not here. */
+const OTHER_CASE_TAG = "[תיק_אחר]";
+
+/** A row that can be confirmed for the whole case: a person of this case, or a close spelling of one. */
+export const confirmable = (r: CardRow) =>
+  (r.kind === "name" || r.kind === "similar_spelling") && r.tag.startsWith("[") && r.tag !== OTHER_CASE_TAG;
+
 /** A name inside a word first, then the weaker signs, then the rest (D-042). */
 export function cardOrder(items: AutoHidden[]): AutoHidden[] {
   const rank = (a: AutoHidden) => (a.kind === "declared_in_word" ? 0 : a.uncertain ? 1 : 2);
@@ -122,6 +129,15 @@ export function AutoHiddenCard(props: {
             </select>
           </label>
         )}
+        {caseId && confirmable(r) && (
+          <button type="button" className="btn btn-small btn-ghost" disabled={off} aria-label={`${words(r)}: נכון, תמיד להסתיר בתיק הזה`}
+            title="לא יופיע כאן שוב בתיק הזה, וימשיך להיות מוסתר. אפשר לשנות בפרטי התיק."
+            onClick={() => void act(`${r.key}:ok`, async () => {
+              for (const t of r.tokens) await ipc.confirmAutoHidden(caseId, t, r.tag);
+            })}>
+            {busy === `${r.key}:ok` ? <Spinner /> : "נכון, תמיד להסתיר"}
+          </button>
+        )}
         {caseId && (
           <button type="button" className="btn btn-small" disabled={off} aria-label={`להחזיר את ${words(r)}`}
             onClick={() => void act(r.key, async () => {
@@ -139,14 +155,19 @@ export function AutoHiddenCard(props: {
       <h3 className="auto-title">{rows.length === 1 ? "הסתרתי אוטומטית פרט אחד" : `הסתרתי אוטומטית ${rows.length} פרטים`}</h3>
       <span className="small muted">
         {caseId
-          ? `${ai} מקבל את מה שמופיע אחרי החץ. "להחזיר" משאיר את המילה כמו שכתוב, מעכשיו ובכל התיק.`
+          ? `${ai} מקבל את מה שמופיע אחרי החץ. "להחזיר" משאיר את המילה כמו שכתוב, ו"נכון, תמיד להסתיר" מוריד אותה מהכרטיס. שניהם חלים על כל התיק.`
           : "בשאלה כללית אי אפשר להחזיר מילה שהוסתרה. אם צריך, כדאי לשאול מתוך תיק."}
       </span>
       {look.length > 0 && <ul className="auto-list">{look.map(row)}</ul>}
       {sure.length > 0 && (
-        look.length > 0 ? (
+        // What the filter is sure of is only counted; a short card shows it as is.
+        look.length > 0 || sure.length > 3 ? (
           <details className="auto-more">
-            <summary>{sure.length === 1 ? "ועוד פרט אחד שהוסתר בביטחון" : `ועוד ${sure.length} פרטים שהוסתרו בביטחון`}</summary>
+            <summary>
+              {look.length > 0
+                ? (sure.length === 1 ? "ועוד פרט אחד שהוסתר בביטחון" : `ועוד ${sure.length} פרטים שהוסתרו בביטחון`)
+                : (sure.length === 1 ? "פרט אחד הוסתר בביטחון" : `${sure.length} פרטים הוסתרו בביטחון`)}
+            </summary>
             <ul className="auto-list">{sure.map(row)}</ul>
           </details>
         ) : (

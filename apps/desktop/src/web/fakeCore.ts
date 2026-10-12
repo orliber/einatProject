@@ -158,6 +158,7 @@ export class FakeCore {
     signature: ["ד\"ר רותם בדויה", "פסיכולוגית התפתחותית מומחית"],
   };
   private cases: Case[] = [];
+  private sampleId: string | null = null;
   private folderList: Folder[] = [];
   private pending = new Map<string, Pending>();
   private style = new FakeStyle();
@@ -408,7 +409,7 @@ export class FakeCore {
     const identities: Identity[] = c.people.map((p) => ({ id: p.id, case_id: c.id, role: p.role, tag: p.tag, value: p.value, aliases: p.aliases, source: p.source, reason: p.reason }));
     const routing = this.routing(c);
     return {
-      id: c.id, meta: c.meta, identities, inputs: c.inputs, routing,
+      id: c.id, meta: c.meta, identities, inputs: c.inputs, routing, sample: c.id === this.sampleId,
       retention_default: `${new Date(c.created * 1000).getFullYear() + Math.max(7, 25 - (c.meta.age?.years ?? 25))}-${new Date(c.created * 1000).toISOString().slice(5, 10)}`,
       sections: SECTIONS.map((s) => {
         const drafts = c.drafts.filter((d) => d.section === s.key && d.status !== "rejected" && d.status !== "superseded");
@@ -791,6 +792,18 @@ export class FakeCore {
         return this.nameMatches((a.caseId as string | null) ?? null, (a.names as string[]) ?? []);
       case "create_case":
         return this.newCase(a.meta as CaseMeta, a.identities as IdentityInput[]).id;
+      case "create_sample_case": {
+        const live = this.cases.find((c) => c.id === this.sampleId && c.deletedAt === null);
+        if (live) return live.id;
+        const c = this.newCase({ code: "דוגמה", age: { years: 5, months: 6 }, child_gender: "female", current_section: null, retention_until: null,
+          consent: { given_on: new Date().toISOString().slice(0, 10), form_version: "תיק לדוגמה", given_by: "תיק בדוי" } },
+          [{ id: null, role: "child", value: "תמר", aliases: [] }]);
+        this.addInput(c, "intake", "שיחה עם ההורים", "ההורים פנו בשל קושי של תמר להישאר בפעילות אחת לאורך זמן בגן. לדבריהם היא ילדה חברותית ושמחה, אוהבת לצייר ולשמוע סיפורים.");
+        this.addInput(c, "kindergarten", "שיחה עם הגננת", "הגננת מתארת ילדה נעימה ומעורבת חברתית. במפגש הבוקר היא מתקשה לשבת עד הסוף וקמה כמה פעמים.");
+        this.addInput(c, "observation", "התרשמות מהמפגש", "תמר נכנסה לחדר בחיוך ונענתה בשמחה למשימות. במשימות ארוכות יותר נזקקה להכוונה כדי לחזור למשימה.");
+        this.sampleId = c.id;
+        return c.id;
+      }
       case "create_follow_up": {
         const prev = this.find(a.caseId);
         const c = this.newCase({ code: `${prev.meta.code} · מעקב`, age: null, child_gender: prev.meta.child_gender, current_section: null, retention_until: null, consent: null, follows: prev.id },
@@ -918,6 +931,14 @@ export class FakeCore {
         const kept = c.people.find((p) => p.tag === String(a.tag) && p.source !== "manual");
         this.setPeople(c, c.people.filter((p) => p !== kept).map((p) => ({ id: p.id, role: p.role, value: p.value, aliases: p.aliases })));
         c.allowed.add(String(a.token));
+        return null;
+      }
+      case "confirm_auto_hidden": {
+        const c = this.find(a.caseId);
+        const person = c.people.find((p) => p.tag === String(a.tag)) ?? fail("refused", "אפשר לאשר כאן רק שם של אדם מהתיק");
+        const token = String(a.token).trim();
+        if (token && person.value !== token && !person.aliases.includes(token)) person.aliases.push(token);
+        person.source = "manual";
         return null;
       }
       case "change_role": {

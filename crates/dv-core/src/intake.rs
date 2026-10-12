@@ -418,6 +418,52 @@ impl Core {
 
     /// The card's role menu: who a name the filter kept is ("סבתא", "המורה"). The name gets a
     /// tag for that role; "להחזיר" still works on it.
+    /// "נכון, תמיד להסתיר": a name the filter hid without asking is confirmed for the whole
+    /// case (U2). The kept name becomes hers, like one she typed, and a close spelling becomes
+    /// one of its forms, so neither is listed on the card again. Nothing is hidden less.
+    pub fn confirm_auto_hidden(
+        &mut self,
+        case_id: &str,
+        token: &str,
+        tag: &str,
+    ) -> Result<(), CoreError> {
+        let v = self.vault_mut()?;
+        let ids = v.identities(case_id)?;
+        let Some(person) = ids.iter().find(|i| i.tag == tag) else {
+            return Err(CoreError::Refused(
+                "אפשר לאשר כאן רק שם של אדם מהתיק".to_owned(),
+            ));
+        };
+        let tok = normalize(token);
+        let known = std::iter::once(&person.value)
+            .chain(person.aliases.iter())
+            .any(|x| normalize(x) == tok);
+        if !known && !token.trim().is_empty() {
+            let inputs: Vec<IdentityInput> = ids
+                .iter()
+                .map(|i| IdentityInput {
+                    id: Some(i.id.clone()),
+                    role: i.role,
+                    value: i.value.clone(),
+                    aliases: if i.tag == tag {
+                        i.aliases
+                            .iter()
+                            .cloned()
+                            .chain(std::iter::once(token.trim().to_owned()))
+                            .collect()
+                    } else {
+                        i.aliases.clone()
+                    },
+                })
+                .collect();
+            v.set_identities(case_id, &inputs)?;
+        }
+        if person.source != IdentitySource::Manual {
+            v.confirm_identity(case_id, &person.id)?;
+        }
+        Ok(())
+    }
+
     pub fn change_role(
         &mut self,
         case_id: &str,

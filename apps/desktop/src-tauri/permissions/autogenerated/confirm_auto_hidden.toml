@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-confirm-auto-hidden"
+description = "Enables the confirm_auto_hidden command without any pre-configured scope."
+commands.allow = ["confirm_auto_hidden"]
+
+[[permission]]
+identifier = "deny-confirm-auto-hidden"
+description = "Denies the confirm_auto_hidden command without any pre-configured scope."
+commands.deny = ["confirm_auto_hidden"]
