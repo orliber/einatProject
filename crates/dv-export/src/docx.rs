@@ -289,6 +289,18 @@ pub(crate) fn num(v: f64) -> String {
     }
 }
 
+/// Where a bar ends on the axis: `value` held within `min..=hi`. Unlike `f64::clamp` it never
+/// panics (an axis narrower than one step, or a NaN bound); a NaN value draws no bar.
+pub(crate) fn bar_end(value: f64, min: f64, hi: f64) -> f64 {
+    if value < min {
+        min
+    } else if value > hi {
+        hi
+    } else {
+        value
+    }
+}
+
 /// Bars of table cells on a fixed axis: a label and the score, then one cell per `step`,
 /// filled up to the score. The band within one standard deviation of the mean is tinted, and
 /// the header row names the axis in groups of one standard deviation.
@@ -344,7 +356,7 @@ fn chart(c: &ScoreChart, l: &Layout) -> String {
         );
         t.push_str(&cell(label_w, 1, None, text, false, &bar.label));
         t.push_str(&cell(score_w, 1, None, text, true, &num(bar.value)));
-        let v = bar.value.clamp(c.min, c.max - step / 2.0);
+        let v = bar_end(bar.value, c.min, c.max - step / 2.0);
         for i in 0..cells {
             let fill = if start(i) <= v {
                 Some(BAR_FILL)
@@ -581,6 +593,30 @@ mod tests {
     #[test]
     fn noncharacters_xml_forbids_are_dropped() {
         assert_eq!(esc("a\u{FFFE}b\u{FFFF}c\u{0}d\u{FFFD}"), "abcd\u{FFFD}");
+    }
+
+    #[test]
+    fn a_chart_narrower_than_one_step_does_not_panic() {
+        let mut r = sample();
+        r.tables[0].charts.push(crate::ScoreChart {
+            title: "פרופיל".into(),
+            min: 0.0,
+            max: 0.0,
+            step: 0.0,
+            mean: 0.0,
+            sd: 0.0,
+            bars: vec![crate::ChartBar {
+                label: "מדד".into(),
+                value: 0.0,
+            }],
+            note: String::new(),
+        });
+        assert!(render(&r).is_ok());
+        // Within an ordinary axis it is `clamp`.
+        for (v, want) in [(5.0, 5.0), (-1.0, 0.0), (11.0, 10.0)] {
+            assert!((bar_end(v, 0.0, 10.0) - want).abs() < f64::EPSILON);
+        }
+        assert!(bar_end(f64::NAN, 0.0, 10.0).is_nan());
     }
 
     #[test]
