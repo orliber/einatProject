@@ -4,7 +4,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
 
 export default tseslint.config(
-  { ignores: ["dist", "dist-preview", "src-tauri", "src/ipc/generated", "node_modules"] },
+  { ignores: ["dist", "dist-preview", "test-results", "playwright-report", "src-tauri", "src/ipc/generated", "node_modules"] },
   js.configs.recommended,
   ...tseslint.configs.strict,
   // The Tauri isolation app (D-047): plain browser script in its own frame.
