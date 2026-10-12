@@ -4,6 +4,7 @@
 import { useState } from "react";
 import type { StyleHint } from "../../ipc/generated/StyleHint";
 import type { StyleMark } from "../../ipc/generated/StyleMark";
+import "./StyleHintView.css";
 
 const LETTER = /[\p{L}\p{N}]/u;
 

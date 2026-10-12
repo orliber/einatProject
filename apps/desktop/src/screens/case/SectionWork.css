@@ -276,34 +276,3 @@
   width: 18px;
   height: 18px;
 }
-
-/* ---------- her style next to a proposed paragraph (ST7–ST9) ---------- */
-.style-hint {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.style-fit-chip {
-  cursor: pointer;
-  border: 1px solid transparent;
-  font: inherit;
-  font-size: 13px;
-}
-.style-fit-chip:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-}
-.style-details {
-  margin: 0;
-  padding-inline-start: 18px;
-}
-.style-habits {
-  align-items: center;
-  gap: 6px;
-}
-mark.habit {
-  background: transparent;
-  color: inherit;
-  text-decoration: underline wavy var(--warn-dot);
-  text-underline-offset: 4px;
-}
