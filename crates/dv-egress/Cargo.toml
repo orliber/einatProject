@@ -21,3 +21,7 @@ webpki-roots = "1"
 # Update signatures (Ed25519) and hashes (D-033): the same library rustls and the vault already use.
 aws-lc-rs = { version = "1.18", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
 zeroize = "1.9"
+
+[dev-dependencies]
+proptest = "1"
+serde.workspace = true

@@ -1093,8 +1093,10 @@ version = "0.5.1"
 dependencies = [
  "aws-lc-rs",
  "dv-privacy",
+ "proptest",
  "reqwest",
  "rustls",
+ "serde",
  "serde_json",
  "thiserror 2.0.21",
  "webpki-roots",
