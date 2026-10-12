@@ -180,6 +180,21 @@ fn model_error(e: ModelError) -> CoreError {
     CoreError::Refused(he)
 }
 
+/// Check the pinned files, then start the model: in its isolated worker when `exe` is given
+/// (the app, SEC2), in this process otherwise (tests, development).
+fn load(dir: &Path, exe: Option<&Path>) -> Result<NameFinder, String> {
+    name_model::verify(dir)
+        .map_err(|_| "קובצי המודל במחשב השתנו. כדאי לכבות ולהדליק אותו שוב.".to_owned())?;
+    match exe {
+        Some(exe) => NerWorker::start(exe, dir)
+            .map(NameFinder::Isolated)
+            .map_err(|_| "לא הצלחתי להפעיל את המודל בתהליך מבודד.".to_owned()),
+        None => NerModel::load(dir)
+            .map(|m| NameFinder::InProcess(Arc::new(m)))
+            .map_err(|_| "לא הצלחתי לקרוא את המודל.".to_owned()),
+    }
+}
+
 impl Core {
     /// Where downloaded models live (the app passes a folder next to the vault, not inside it,
     /// so a backup never carries them). Without one the model stays off.
@@ -231,14 +246,20 @@ impl Core {
                 return Err(CoreError::Refused("קודם צריך להוריד את המודל.".to_owned()));
             }
             self.vault_mut()?.set_setting(NAME_MODEL_KEY, "on")?;
-        } else {
-            self.vault_mut()?.set_setting(NAME_MODEL_KEY, "")?;
-            self.vault_mut()?.clear_name_hints()?;
-            self.hint_cache.clear();
-            self.ner = None;
-            if let Some(d) = dir.as_deref() {
-                name_model::remove(&folder(d)).map_err(model_error)?;
-            }
+            self.ner_problem = None;
+            self.preload_name_model();
+            return self.name_model_status();
+        }
+        self.vault_mut()?.set_setting(NAME_MODEL_KEY, "")?;
+        self.vault_mut()?.clear_name_hints()?;
+        self.hint_cache.clear();
+        self.ner = None;
+        // A worker still loading holds the files open: let it finish, then end it.
+        if let Some(h) = self.ner_loading.take() {
+            drop(h.join());
+        }
+        if let Some(d) = dir.as_deref() {
+            name_model::remove(&folder(d)).map_err(model_error)?;
         }
         self.ner_problem = None;
         self.name_model_status()
@@ -253,23 +274,38 @@ impl Core {
             return None;
         }
         if self.ner.is_none() && self.ner_problem.is_none() {
-            let dir = folder(self.models_dir.as_deref()?);
-            let loaded = name_model::verify(&dir)
-                .map_err(|_| "קובצי המודל במחשב השתנו. כדאי לכבות ולהדליק אותו שוב.".to_owned())
-                .and_then(|()| match &self.ner_exe {
-                    Some(exe) => NerWorker::start(exe, &dir)
-                        .map(NameFinder::Isolated)
-                        .map_err(|_| "לא הצלחתי להפעיל את המודל בתהליך מבודד.".to_owned()),
-                    None => NerModel::load(&dir)
-                        .map(|m| NameFinder::InProcess(Arc::new(m)))
-                        .map_err(|_| "לא הצלחתי לקרוא את המודל.".to_owned()),
-                });
+            let loaded = match self.ner_loading.take() {
+                Some(h) => h
+                    .join()
+                    .unwrap_or_else(|_| Err("לא הצלחתי להפעיל את המודל.".to_owned())),
+                None => load(
+                    &folder(self.models_dir.as_deref()?),
+                    self.ner_exe.as_deref(),
+                ),
+            };
             match loaded {
                 Ok(m) => self.ner = Some(m),
                 Err(why) => self.ner_problem = Some(why),
             }
         }
         self.ner.as_mut()
+    }
+
+    /// Right after unlock, check the files and start the isolated worker in the background,
+    /// so the first request finds the model loaded instead of waiting for it. Only for the
+    /// app's worker process; a lock drops the handle and the worker ends with it.
+    pub(crate) fn preload_name_model(&mut self) {
+        if self.ner.is_some() || self.ner_loading.is_some() || self.ner_problem.is_some() {
+            return;
+        }
+        let (Some(exe), Some(dir)) = (self.ner_exe.clone(), self.models_dir.as_deref()) else {
+            return;
+        };
+        let dir = folder(dir);
+        self.ner_loading = std::thread::Builder::new()
+            .name("name-model-load".to_owned())
+            .spawn(move || load(&dir, Some(&exe)))
+            .ok();
     }
 
     /// The model's person spans in `text`, as hints for the filter. Empty when it is off.

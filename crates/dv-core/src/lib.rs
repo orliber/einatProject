@@ -547,6 +547,9 @@ pub struct Core {
     models_dir: Option<PathBuf>,
     /// The name model, started on first use while it is on (ended on lock).
     ner: Option<name_model::NameFinder>,
+    /// The worker being checked and started in the background right after unlock, so the
+    /// first request does not wait for the model to load (dropped on lock, which ends it).
+    ner_loading: Option<std::thread::JoinHandle<Result<name_model::NameFinder, String>>>,
     /// The app's binary, started as the name model's isolated worker (SEC2).
     ner_exe: Option<PathBuf>,
     /// Why the name model is not in use right now (shown in Settings).

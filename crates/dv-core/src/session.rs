@@ -34,6 +34,7 @@ impl Core {
             session: 0,
             models_dir: None,
             ner: None,
+            ner_loading: None,
             ner_exe: None,
             ner_problem: None,
             hint_cache: HashMap::new(),
@@ -307,6 +308,7 @@ impl Core {
                 // a saving: a failure here never keeps the vault from opening.
                 if self.name_model_on() {
                     let _ = self.prune_name_hints();
+                    self.preload_name_model();
                 }
                 Ok(self.status())
             }
@@ -355,6 +357,7 @@ impl Core {
         self.section_nonces.clear();
         // The model's process held texts of this session in its memory: it ends with the lock.
         self.ner = None;
+        self.ner_loading = None;
         self.ner_problem = None;
         if let Some(v) = self.vault.take() {
             let _ = v.lock_because(reason);

@@ -17,7 +17,8 @@ use crate::lexicon::{
 use crate::matcher::PhraseIndex;
 use crate::patterns::{self, Ymd};
 use crate::text::{
-    normalize, prefix_splits, spelling_variants, tokenize, weak_near, Token, PREFIX_LETTERS,
+    norm_eq, norm_set, normalize, prefix_splits, spelling_variants, tokenize, weak_near, Token,
+    PREFIX_LETTERS,
 };
 use crate::PrivacyError;
 
@@ -197,26 +198,25 @@ struct AutoSpan {
 }
 
 pub(crate) fn is_generic(word: &str) -> bool {
-    GENERIC_PLACE_WORDS.iter().any(|g| normalize(g) == word)
+    norm_set(GENERIC_PLACE_WORDS).contains(word)
 }
 
 pub(crate) fn is_title(word: &str) -> bool {
-    TITLES.iter().any(|t| normalize(t) == word)
+    norm_set(TITLES).contains(word)
 }
 
 fn is_role_word(word: &str) -> bool {
     prefix_splits(word)
         .iter()
-        .any(|(_, h)| ROLE_WORDS.iter().any(|r| normalize(r) == *h))
+        .any(|(_, h)| norm_set(ROLE_WORDS).contains(h))
 }
 
 /// A word for a person ("הגננת", "האח", "סבתא"), with or without "ה" and a prefix.
 fn is_person_word(word: &str) -> bool {
     prefix_splits(word).iter().any(|(_, h)| {
         let bare = h.strip_prefix('ה').unwrap_or(h);
-        PERSON_WORDS
-            .iter()
-            .any(|p| normalize(p) == *h || normalize(p) == bare)
+        let set = norm_set(PERSON_WORDS);
+        set.contains(h) || set.contains(bare)
     })
 }
 
@@ -293,8 +293,9 @@ pub(crate) fn name_context_at(text: &str, tokens: &[Token], i: usize) -> bool {
         .and_then(|j| tokens.get(j))
         .map(|t| t.norm.as_str());
     let next = tokens.get(i + 1).map(|t| t.norm.as_str());
-    let in_list =
-        |w: Option<&str>, list: &[&str]| w.is_some_and(|w| list.iter().any(|l| normalize(l) == w));
+    let in_list = |w: Option<&str>, list: &'static [&'static str]| {
+        w.is_some_and(|w| norm_set(list).contains(w))
+    };
     let after_prev =
         in_list(prev, crate::lexicon::NAME_CONTEXT_PREV) || prev.is_some_and(is_person_word);
     let before_next = in_list(next, crate::lexicon::NAME_CONTEXT_NEXT);
@@ -602,8 +603,8 @@ const PROFESSION_CUES: &[&str] = &[
 fn is_profession_context(cue: &str, next: Option<&str>, after: Option<&str>) -> bool {
     let work = ["עובד", "עובדת", "עובדים", "מועסק", "מועסקת"]
         .iter()
-        .any(|w| normalize(w) == cue);
-    let manager = ["מנהל", "מנהלת"].iter().any(|w| normalize(w) == cue);
+        .any(|w| norm_eq(w, &cue));
+    let manager = ["מנהל", "מנהלת"].iter().any(|w| norm_eq(w, &cue));
     let Some(next) = next else {
         return !work && !manager;
     };
@@ -634,7 +635,7 @@ fn is_profession_context(cue: &str, next: Option<&str>, after: Option<&str>) -> 
             "כמו",
         ]
         .iter()
-        .any(|w| normalize(w) == next)
+        .any(|w| norm_eq(w, &next))
     {
         // "עובד בלילות ופחות זמין" is a schedule; "עובד במשמרות בנמל" still names the place.
         return after.is_some_and(|a| a.starts_with(['ב', 'כ']) && a != normalize("בבית"));
@@ -644,8 +645,8 @@ fn is_profession_context(cue: &str, next: Option<&str>, after: Option<&str>) -> 
             || (next.starts_with('ב')
                 && !["בגן", "בקבוצה", "בבית", "בכיתה", "בשיתוף", "בטיפול"]
                     .iter()
-                    .any(|w| normalize(w) == next))
-            || ["בתור", "אצל"].iter().any(|w| normalize(w) == next);
+                    .any(|w| norm_eq(w, &next)))
+            || ["בתור", "אצל"].iter().any(|w| norm_eq(w, &next));
     }
     if manager {
         return ![
@@ -662,7 +663,7 @@ fn is_profession_context(cue: &str, next: Option<&str>, after: Option<&str>) -> 
             "שיחה",
         ]
         .iter()
-        .any(|w| normalize(w) == next);
+        .any(|w| norm_eq(w, &next));
     }
     true
 }
@@ -719,7 +720,7 @@ pub(crate) fn declared_reads_as_word(
         .map(|j| tokens[j].norm.as_str())
         .filter(|_| first > 0 && &text[tokens[first - 1].end..whole.start] == " ");
     let one_of =
-        |w: Option<&str>, list: &[&str]| w.is_some_and(|w| list.iter().any(|l| normalize(l) == w));
+        |w: Option<&str>, list: &[&str]| w.is_some_and(|w| list.iter().any(|l| norm_eq(l, &w)));
     const NUMBER_WORDS: &[&str] = &[
         "שלוש",
         "שלושה",
@@ -992,7 +993,7 @@ fn name_run_suspects(
     };
     let joins =
         |g: &str| !g.is_empty() && g.chars().all(|c| c == ' ' || c == '-' || c == '\u{05BE}');
-    let stop = |n: &str| NAME_STOP.iter().any(|s| normalize(s) == n);
+    let stop = |n: &str| NAME_STOP.iter().any(|s| norm_eq(s, &n));
     let push = |start: usize, end: usize, message: &str, out: &mut Vec<SuspectSpan>| {
         let token = &text[start..end];
         if !overlaps(start, end, reps, out) && !(ctx.allowlisted)(&normalize(token)) {
@@ -1062,7 +1063,7 @@ fn name_run_suspects(
                 }
                 let role = prefix_splits(&t.norm)
                     .iter()
-                    .any(|(_, h)| ROLE_WORDS.iter().any(|r| normalize(r) == *h));
+                    .any(|(_, h)| norm_set(ROLE_WORDS).contains(h));
                 if !is_title(&t.norm)
                     && !role
                     && !is_person_word(&t.norm)
@@ -1178,7 +1179,7 @@ fn name_run_suspects(
                 || (words.len() == 1
                     && !t.norm.starts_with(['ב', 'כ', 'ל', 'מ', 'ו', 'ש', 'ה'])
                     && word_bucket(&t.norm) < EVERYDAY
-                    && !APPOSITIVE_STOP.iter().any(|w| normalize(w) == t.norm))
+                    && !APPOSITIVE_STOP.iter().any(|w| norm_eq(w, &t.norm)))
         };
         if words
             .iter()
@@ -1208,7 +1209,7 @@ fn name_run_suspects(
             && (possessive.contains(&tokens[j].norm)
                 || ["רבתא", "רבא", "רבה"]
                     .iter()
-                    .any(|w| normalize(w) == tokens[j].norm)
+                    .any(|w| norm_eq(w, &tokens[j].norm))
                 || (tokens[j].norm.starts_with(['ה', 'ל'])
                     && word_bucket(&tokens[j].norm) >= EVERYDAY
                     && !is_person_word(&tokens[j].norm)))
@@ -1245,7 +1246,7 @@ fn name_run_suspects(
             gap(j, j + 1) == " "
                 && ["לו", "לה", "לי", "לנו", "להם", "להן", "לך"]
                     .iter()
-                    .any(|w| normalize(w) == n.norm)
+                    .any(|w| norm_eq(w, &n.norm))
         });
         let known = known && !(dative && word_bucket(&t.norm) >= EVERYDAY);
         if hebrew(t)
@@ -1450,20 +1451,17 @@ fn find_suspects(
             let after_prev = prev.is_some_and(|p| {
                 crate::lexicon::NAME_CONTEXT_PREV
                     .iter()
-                    .any(|l| normalize(l) == p)
+                    .any(|l| norm_eq(l, &p))
             });
             let before_next = next.is_some_and(|n| {
                 crate::lexicon::NAME_CONTEXT_NEXT
                     .iter()
-                    .any(|l| normalize(l) == n)
+                    .any(|l| norm_eq(l, &n))
             });
             if very_common {
                 // "את אלה." is "these"; only "with" or a person word says a person follows.
                 let with = prev.is_some_and(|p| {
-                    ["עם", "ועם", "אצל", "ואצל"]
-                        .iter()
-                        .any(|w| normalize(w) == p)
-                        || is_person_word(p)
+                    ["עם", "ועם", "אצל", "ואצל"].iter().any(|w| norm_eq(w, &p)) || is_person_word(p)
                 });
                 return before_next || next_is_name || (with && ends_clause);
             }
@@ -1506,7 +1504,7 @@ fn find_suspects(
             || prev.is_some_and(|p| {
                 ["הוא", "היא", "שמו", "שמה", "בשם", "קוראים"]
                     .iter()
-                    .any(|w| normalize(w) == p)
+                    .any(|w| norm_eq(w, &p))
             });
         if inner_geresh
             && geresh_context
@@ -1578,7 +1576,7 @@ fn find_suspects(
             });
             continue;
         }
-        if PROFESSION_CUES.iter().any(|c| normalize(c) == tok.norm)
+        if PROFESSION_CUES.iter().any(|c| norm_eq(c, &tok.norm))
             && is_profession_context(&tok.norm, next, tokens.get(i + 2).map(|t| t.norm.as_str()))
         {
             // The cue and the rest of the job, up to the end of the clause ("עובדת כמורה
@@ -2037,7 +2035,7 @@ fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
     let is = |t: &Token, words: &[&str]| {
         prefix_splits(&t.norm)
             .iter()
-            .any(|(_, h)| words.iter().any(|w| normalize(w) == *h))
+            .any(|(_, h)| words.iter().any(|w| norm_eq(w, h)))
     };
     let gap = |a: usize, b: usize| &text[tokens[a].end..tokens[b].start];
     let quote = |g: &str| g.contains(['"', '״', '“', '”', '„']);
@@ -2052,7 +2050,7 @@ fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
         let next_is = |words: &[&str]| {
             tokens
                 .get(i + 1)
-                .is_some_and(|t| words.iter().any(|w| normalize(w) == t.norm))
+                .is_some_and(|t| words.iter().any(|w| norm_eq(w, &t.norm)))
         };
         // `broad`: clinics, institutes and the like, whose descriptions are often ordinary
         // nouns ("מכון שמיעה"), so an unquoted name must not be an everyday word.
@@ -2130,11 +2128,7 @@ fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
             i = k + 1;
             continue;
         }
-        if fund
-            && HEALTH_FUNDS
-                .iter()
-                .any(|f| normalize(f) == tokens[first].norm)
-        {
+        if fund && HEALTH_FUNDS.iter().any(|f| norm_eq(f, &tokens[first].norm)) {
             // Left out, like a kindergarten's name: "קופ\"ח מכבי, מס' חבר" → "קופ\"ח, מס' חבר".
             out.push(Replacement {
                 start: tokens[k].end,
@@ -2200,7 +2194,7 @@ fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
             }
         } else if first < tokens.len() {
             let t = &tokens[first];
-            let stop = INSTITUTION_STOP.iter().any(|w| normalize(w) == t.norm);
+            let stop = INSTITUTION_STOP.iter().any(|w| norm_eq(w, &t.norm));
             let everyday = |w: &str| crate::lexicon::word_bucket(w) >= EVERYDAY;
             let stem = &t.norm[t.norm.char_indices().nth(1).map_or(0, |(b, _)| b)..];
             // "גן הדקל": the word without the article is at least as common as with it; not
@@ -2323,14 +2317,14 @@ fn letterhead_name(text: &str, tokens: &[Token], first: usize) -> Option<usize> 
         let described = prefix_splits(&t.norm).iter().any(|(p, h)| {
             *p == 1
                 && t.norm.starts_with('ל')
-                && (DESCRIPTION_HEADS.iter().any(|d| normalize(d) == *h)
+                && (DESCRIPTION_HEADS.iter().any(|d| norm_eq(d, h))
                     || (h.starts_with('ה') && word_bucket(h) >= EVERYDAY))
         });
         if !hebrew
             || (j == first && (t.norm.starts_with('ה') || described))
             || word_bucket(&t.norm) >= 14
             || lex.common_words.contains(&t.norm)
-            || INSTITUTION_STOP.iter().any(|w| normalize(w) == t.norm)
+            || INSTITUTION_STOP.iter().any(|w| norm_eq(w, &t.norm))
         {
             return None;
         }
@@ -2446,7 +2440,7 @@ fn place_reads_as_word(text: &str, tokens: &[Token], i: usize, prefix: usize) ->
                 "עברו",
             ]
             .iter()
-            .any(|w| normalize(w) == t.norm)
+            .any(|w| norm_eq(w, &t.norm))
         });
     if place_word {
         return false;
@@ -2469,7 +2463,7 @@ fn place_reads_as_word(text: &str, tokens: &[Token], i: usize, prefix: usize) ->
             return true;
         }
     }
-    if !PLACE_WORDS.iter().any(|p| normalize(p) == head) {
+    if !PLACE_WORDS.iter().any(|p| norm_eq(p, &head)) {
         return false;
     }
     prefix == 0 || word_bucket(&whole.norm) >= hb
@@ -2920,10 +2914,7 @@ fn role_from_context(text: &str, tokens: &[Token], start: usize) -> Option<(Role
         for (_, head) in prefix_splits(&tokens[j].norm) {
             let bare = head.strip_prefix('ה').unwrap_or(&head);
             for (role, words) in ROLES {
-                if words
-                    .iter()
-                    .any(|w| normalize(w) == head || normalize(w) == bare)
-                {
+                if words.iter().any(|w| norm_eq(w, &head) || norm_eq(w, &bare)) {
                     return Some((*role, text[tokens[j].start..tokens[j].end].to_owned()));
                 }
             }
@@ -3155,8 +3146,8 @@ fn job_end(text: &str, tokens: &[Token], cue: usize) -> usize {
     let job_word = |h: &str| {
         JOB_FIELDS
             .iter()
-            .any(|(_, words)| words.iter().any(|w| normalize(w) == h))
-            || PROFESSION_CUES.iter().any(|c| normalize(c) == h)
+            .any(|(_, words)| words.iter().any(|w| norm_eq(w, &h)))
+            || PROFESSION_CUES.iter().any(|c| norm_eq(c, &h))
     };
     let mut j = cue;
     while j + 1 < tokens.len() && j - cue < 5 {
@@ -3168,9 +3159,7 @@ fn job_end(text: &str, tokens: &[Token], cue: usize) -> usize {
             break;
         }
         let next = &tokens[j + 1].norm;
-        if STOP.iter().any(|w| normalize(w) == *next)
-            || next.starts_with(|c: char| c.is_ascii_digit())
-        {
+        if STOP.iter().any(|w| norm_eq(w, next)) || next.starts_with(|c: char| c.is_ascii_digit()) {
             break;
         }
         if next.starts_with('ו')
@@ -3311,11 +3300,9 @@ fn generalize_job(text: &str, tokens: &[Token], cue: usize, end: usize) -> Strin
         .flat_map(|t| prefix_splits(&t.norm))
         .map(|(_, h)| h)
         .collect();
-    let field = JOB_FIELDS.iter().find(|(_, words)| {
-        after
-            .iter()
-            .any(|h| words.iter().any(|w| normalize(w) == *h))
-    });
+    let field = JOB_FIELDS
+        .iter()
+        .find(|(_, words)| after.iter().any(|h| words.iter().any(|w| norm_eq(w, h))));
     let raw_cue = &text[tokens[cue].start..tokens[cue].end];
     let cue_word = match tokens[cue].norm.as_str() {
         "במקצועו" => "עובד",

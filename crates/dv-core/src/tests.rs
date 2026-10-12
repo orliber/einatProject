@@ -18,6 +18,7 @@ mod hostile;
 mod import_export;
 mod large_case;
 mod library;
+mod perf_profile;
 mod sample_flows;
 mod sort_flows;
 mod surfaces;
