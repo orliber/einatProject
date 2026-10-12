@@ -1132,6 +1132,94 @@ fn a_model_kept_from_before_it_left_the_allow_list_is_not_put_in_requests() {
 }
 
 #[test]
+fn the_wait_after_wrong_secrets_doubles_up_to_a_minute_and_counts_down_exactly() {
+    // The lock screen counts the wait down from the seconds in `Backoff` (7651f2b), so
+    // they must be the real wait: 2, 4, 8 … seconds, never more than a minute.
+    let (_dir, mut core, _case) = setup(None);
+    core.lock();
+    for (attempt, expected) in [
+        (1u32, 2u64),
+        (2, 4),
+        (3, 8),
+        (4, 16),
+        (5, 32),
+        (6, 60),
+        (7, 60),
+    ] {
+        core.not_before = None;
+        let wrong = if attempt % 2 == 0 {
+            core.unlock_with_recovery("AAAA-BBBB-CCCC").unwrap_err()
+        } else {
+            core.unlock("ניחוש ארוך אבל שגוי").unwrap_err()
+        };
+        assert!(matches!(wrong, CoreError::Vault(_)), "{wrong:?}");
+        let Err(CoreError::Backoff(s)) = core.unlock(PASSWORD) else {
+            panic!("attempt {attempt}: the right password must wait too");
+        };
+        assert!(
+            (expected..=expected + 1).contains(&s),
+            "attempt {attempt}: {s}s"
+        );
+        assert!(!core.status().unlocked);
+    }
+    // The right secret after the wait clears the count: the next mistake waits 2 seconds again.
+    core.not_before = None;
+    core.unlock(PASSWORD).unwrap();
+    core.lock();
+    assert!(core.unlock("ניחוש ארוך אבל שגוי").is_err());
+    let Err(CoreError::Backoff(s)) = core.unlock(PASSWORD) else {
+        panic!("a wait after the first mistake");
+    };
+    assert!(s <= 3, "{s}");
+}
+
+#[test]
+fn only_the_material_deleted_last_can_be_put_back() {
+    let (_dir, mut core, case) = setup(None);
+    let inputs = core.vault_ref().unwrap().inputs(&case).unwrap();
+    let (first, second) = (inputs[0].id.clone(), inputs[1].id.clone());
+    core.delete_input(&case, &first).unwrap();
+    core.delete_input(&case, &second).unwrap();
+    // Deleting something that is not there does not drop what is held.
+    core.delete_input(&case, "no-such-material").unwrap_or(());
+    assert!(core.restore_input(&case, &first).is_err());
+    core.restore_input(&case, &second).unwrap();
+    let left: Vec<String> = core
+        .vault_ref()
+        .unwrap()
+        .inputs(&case)
+        .unwrap()
+        .into_iter()
+        .map(|i| i.id)
+        .collect();
+    assert_eq!(left, vec![second]);
+}
+
+#[test]
+fn the_emergency_stop_works_while_locked_and_shows_on_the_security_screen() {
+    let (_dir, mut core, _case) = setup(None);
+    core.lock();
+    let stopped = core.set_send_stopped(true);
+    let send = |s: &SecurityStatus| {
+        s.items
+            .iter()
+            .find(|i| i.key == "send")
+            .unwrap()
+            .state
+            .clone()
+    };
+    let on = (stopped.send_stopped, send(&stopped));
+    let resumed = core.set_send_stopped(false);
+    assert_eq!(on, (true, "warn".to_owned()));
+    assert!(!resumed.send_stopped);
+    assert_eq!(send(&resumed), "ok");
+    assert!(
+        !core.is_unlocked(),
+        "stopping never needs, or opens, the vault"
+    );
+}
+
+#[test]
 fn a_lock_while_a_request_is_on_its_way_does_not_bring_its_approval_back() {
     // A send that failed after the vault locked put its approval back in memory, so it
     // outlived the lock and could be sent again after the next unlock.
