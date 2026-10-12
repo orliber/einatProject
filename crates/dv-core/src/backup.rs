@@ -178,6 +178,16 @@ impl Core {
         }
         let v = self.vault_mut()?;
         let info = v.write_backup(&dest)?;
+        // Read back from where it went and opened: a backup counts only once it is known to
+        // open. Until then the next one stays due.
+        v.verify_backup_file(&dest).map_err(|_| {
+            CoreError::Refused(
+                "הגיבוי נכתב, אבל בבדיקה הוא לא נפתח כמו שצריך. כדאי לנסות שוב, ואם זה חוזר, \
+                 לנסות דיסק אחר."
+                    .to_owned(),
+            )
+        })?;
+        v.set_setting(LAST_CHECK_KEY, &unix_now().to_string())?;
         v.set_setting(LAST_BACKUP_KEY, &info.created_at.to_string())?;
         v.set_setting(LAST_DIR_KEY, &folder_real.to_string_lossy())?;
         v.set_setting(SECRET_CHANGED_KEY, "")?;

@@ -928,6 +928,48 @@ fn the_restore_drill_checks_a_backup_without_touching_the_vault() {
 }
 
 #[test]
+fn a_backup_just_written_is_read_back_and_opened_without_the_password() {
+    let (dir, mut vault, _) = new_vault();
+    noam(&mut vault);
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("backup.vaultbak");
+    vault.write_backup(&dest).unwrap();
+
+    let check = vault.verify_backup_file(&dest).unwrap();
+    assert_eq!(check.cases, 1);
+    assert!(check.integrity_ok);
+    assert_eq!(
+        vault.audit_entries(1).unwrap()[0].event,
+        AuditEvent::BackupChecked.as_str()
+    );
+    let names: Vec<String> = fs::read_dir(dir.path())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        names.iter().all(|n| !n.starts_with('.')),
+        "no scratch left: {names:?}"
+    );
+
+    // One changed byte on the disk, and the backup does not count.
+    let mut bytes = fs::read(&dest).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 1;
+    fs::write(&dest, &bytes).unwrap();
+    assert!(vault.verify_backup_file(&dest).is_err());
+
+    // Another vault's backup is not this vault's backup.
+    let (_other_dir, mut other, _) = new_vault();
+    let theirs = out.path().join("theirs.vaultbak");
+    other.write_backup(&theirs).unwrap();
+    assert!(matches!(
+        vault.verify_backup_file(&theirs),
+        Err(VaultError::Integrity(_))
+    ));
+}
+
+#[test]
 fn scratch_folders_left_by_a_crash_are_removed_at_unlock() {
     let (dir, vault, _) = new_vault();
     drop(vault);

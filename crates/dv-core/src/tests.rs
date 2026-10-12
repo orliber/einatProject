@@ -15,6 +15,7 @@ use super::*;
 
 mod sample_flows;
 mod surfaces;
+mod upgrade;
 
 const PASSWORD: &str = "כלב ירוק רץ מהר בגינה";
 
