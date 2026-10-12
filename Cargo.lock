@@ -1029,6 +1029,7 @@ name = "dv-ai"
 version = "0.5.1"
 dependencies = [
  "dv-domain",
+ "proptest",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -1093,8 +1094,10 @@ version = "0.5.1"
 dependencies = [
  "aws-lc-rs",
  "dv-privacy",
+ "proptest",
  "reqwest",
  "rustls",
+ "serde",
  "serde_json",
  "thiserror 2.0.21",
  "webpki-roots",
