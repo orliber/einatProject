@@ -151,7 +151,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
           <LetterCard api={api} />
         </section>
 
-        <div className="finish-preview" aria-label="תצוגה מקדימה של הקובץ">
+        <div className="finish-preview" role="region" tabIndex={0} aria-label="תצוגה מקדימה של הקובץ">
           <article className="a4 a4-small" style={{ fontFamily: settings?.font ? `"${settings.font}", var(--font-display)` : undefined }}>
             <header className="a4-header">{settings?.confidentiality}</header>
             <h1 className="a4-title">{settings?.title ?? "דוח אבחון פסיכולוגי"}</h1>
