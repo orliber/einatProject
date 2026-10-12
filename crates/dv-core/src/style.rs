@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 use dv_ai::{RawStyleItem, StyleExcerpt, StyleItem, StyleKind, StyleOrigin, StyleProfile};
-use dv_domain::{Author, DraftParagraph, Identity, ReportStructure, Role};
+use dv_domain::{Author, DraftParagraph, DraftStatus, Identity, ReportStructure, Role};
 use dv_privacy::text::normalize;
 use dv_privacy::{
     clear, everyday_name, filter, AutoHidden, AutoKind, FilterOutcome, GateRequest, Mark,
@@ -250,7 +250,33 @@ pub struct StyleSectionLabel {
     pub title: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+/// What the program measured in her writing, numbers only (D-052): the screen "what the
+/// program learned".
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct StyleLearned {
+    /// Paragraphs learned from: her past reports, her edits (half weight each), and the
+    /// reports she finished here.
+    pub from_reports: u32,
+    pub from_edits: u32,
+    pub from_finals: u32,
+    pub finished_reports: u32,
+    /// Her usual figures; `None` with too little to go on.
+    pub words_per_sentence: Option<f64>,
+    pub sentences_per_paragraph: Option<f64>,
+    pub commas_per_sentence: Option<f64>,
+    /// Out of 100 sentences.
+    pub hedges: Option<f64>,
+    pub contrasts: Option<f64>,
+    pub first_person: Option<f64>,
+    /// How close the AI's paragraphs were to her writing as it wrote them, 0 to 100: the
+    /// latest ones, and the ones before them (to see whether the profile helps).
+    pub fit_recent: Option<u32>,
+    pub fit_earlier: Option<u32>,
+    pub fit_count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct StyleOverview {
     pub sources: Vec<StyleSourceView>,
@@ -262,6 +288,7 @@ pub struct StyleOverview {
     pub enabled: bool,
     pub sections: Vec<StyleSectionLabel>,
     pub demo_mode: bool,
+    pub learned: StyleLearned,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -348,6 +375,56 @@ pub(crate) struct LocalStyle {
     model: dv_style::StyleModel,
     #[serde(default)]
     phrases: Vec<dv_style::PhraseCandidate>,
+    /// How close each of the AI's latest paragraphs was to her writing (0 to 100), oldest
+    /// first, at most [`FIT_KEPT`]. Numbers only.
+    #[serde(default)]
+    draft_fit: Vec<u8>,
+}
+
+/// How many closeness figures are kept, and how many make "the latest".
+const FIT_KEPT: usize = 120;
+const FIT_WINDOW: usize = 30;
+
+impl LocalStyle {
+    /// Notes how close a paragraph the AI wrote is to her writing, before learning from it.
+    fn note_fit(&mut self, section: &str, ai_text: &str) {
+        if let Some(f) = self.model.fidelity(section, ai_text) {
+            self.draft_fit.push(u8::try_from(f.min(100)).unwrap_or(100));
+            if self.draft_fit.len() > FIT_KEPT {
+                let extra = self.draft_fit.len() - FIT_KEPT;
+                self.draft_fit.drain(..extra);
+            }
+        }
+    }
+
+    fn learned(&self) -> StyleLearned {
+        let m = self.model.measures();
+        let whole = |x: f64| u32::try_from(x.round() as i64).unwrap_or(0);
+        let mean = |xs: &[u8]| {
+            (!xs.is_empty()).then(|| {
+                let sum: u32 = xs.iter().map(|x| u32::from(*x)).sum();
+                (f64::from(sum) / xs.len() as f64).round() as u32
+            })
+        };
+        let n = self.draft_fit.len();
+        let split = n.saturating_sub(FIT_WINDOW);
+        let earlier_from = split.saturating_sub(FIT_WINDOW);
+        StyleLearned {
+            from_reports: whole(m.from_reports),
+            from_edits: whole(m.from_edits),
+            from_finals: whole(m.from_finals),
+            finished_reports: u32::try_from(m.finished_reports).unwrap_or(u32::MAX),
+            words_per_sentence: m.words_per_sentence,
+            sentences_per_paragraph: m.sentences_per_paragraph,
+            commas_per_sentence: m.commas_per_sentence,
+            hedges: m.hedges,
+            contrasts: m.contrasts,
+            first_person: m.first_person,
+            fit_recent: mean(&self.draft_fit[split..]),
+            fit_earlier: mean(&self.draft_fit[earlier_from..split]),
+            fit_count: u32::try_from(n).unwrap_or(u32::MAX),
+        }
+    }
 }
 
 /// An upload waiting for her confirmation (memory only, cleared at lock).
@@ -877,6 +954,12 @@ fn local_style(v: &Vault) -> Result<LocalStyle, CoreError> {
     }
 }
 
+/// The key a finished report is learned under: a keyed hash, so the style secret does not
+/// name the case.
+fn final_key(v: &Vault, case_id: &str) -> String {
+    v.token_hmac(&format!("final|{case_id}"))
+}
+
 /// Her style model for the case screens, or `None` when the profile is switched off.
 pub(crate) fn style_model(v: &Vault) -> Result<Option<dv_style::StyleModel>, CoreError> {
     if v.setting(PROFILE_OFF_KEY)?.as_deref() == Some("1") {
@@ -1225,7 +1308,8 @@ impl Core {
                 _ => {}
             }
         }
-        let suggestions = suggestions(&learning, &local_style(v)?, active.as_ref());
+        let local = local_style(v)?;
+        let suggestions = suggestions(&learning, &local, active.as_ref());
         Ok(StyleOverview {
             sources,
             active,
@@ -1242,6 +1326,7 @@ impl Core {
                 })
                 .collect(),
             demo_mode,
+            learned: local.learned(),
         })
     }
 
@@ -1658,6 +1743,7 @@ impl Core {
         let mut learning = self.learning()?;
         learning.observe_edit(section, before, after);
         let mut local = local_style(self.vault_ref()?)?;
+        local.note_fit(section, before);
         local.model.observe_edit(section, after);
         let v = self.vault_mut()?;
         v.save_style_learning(&json(&learning)?)?;
@@ -1676,23 +1762,91 @@ impl Core {
     /// She approved the AI's paragraphs as written: the phrases in them were accepted. Never
     /// blocks the approval.
     pub(crate) fn learn_from_approval(&mut self, approved: &[DraftParagraph]) {
-        let texts: Vec<&str> = approved
-            .iter()
-            .filter(|d| d.author == Author::Ai)
-            .map(|d| d.text_tagged.as_str())
-            .collect();
-        if texts.is_empty() {
+        let ai: Vec<&DraftParagraph> = approved.iter().filter(|d| d.author == Author::Ai).collect();
+        if ai.is_empty() {
             return;
         }
         let Ok(mut learning) = self.learning() else {
             return;
         };
-        for t in texts {
-            learning.observe_approval(t);
+        for d in &ai {
+            learning.observe_approval(&d.text_tagged);
         }
         if let (Ok(doc), Ok(v)) = (json(&learning), self.vault_mut()) {
             let _ = v.save_style_learning(&doc);
         }
+        // How close they were to her writing, as written.
+        let Ok(mut local) = self.vault_ref().and_then(local_style) else {
+            return;
+        };
+        for d in &ai {
+            local.note_fit(&d.section_key, &d.text_tagged);
+        }
+        if let (Ok(doc), Ok(v)) = (json(&local), self.vault_mut()) {
+            let _ = v.set_secret(LOCAL_STYLE_KEY, &doc);
+        }
+    }
+
+    /// The report she finished (exported): every approved paragraph teaches the style model
+    /// at full weight, once per case. Numbers only; never blocks the export.
+    pub(crate) fn learn_from_final(&mut self, case_id: &str) {
+        let _ = self.try_learn_from_final(case_id);
+    }
+
+    fn try_learn_from_final(&mut self, case_id: &str) -> Result<(), CoreError> {
+        let structure =
+            ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
+        let v = self.vault_ref()?;
+        let mut parts: Vec<(String, String)> = Vec::new();
+        for section in structure.sections().filter(|s| s.key != "signature") {
+            for d in v.drafts(case_id, &section.key)? {
+                if d.status == DraftStatus::Approved {
+                    parts.push((section.key.clone(), d.text_tagged));
+                }
+            }
+        }
+        let key = final_key(v, case_id);
+        let mut local = local_style(v)?;
+        local.model.observe_final(
+            &key,
+            parts.iter().map(|(s, t)| (Some(s.as_str()), t.as_str())),
+        );
+        self.vault_mut()?
+            .set_secret(LOCAL_STYLE_KEY, &json(&local)?)?;
+        Ok(())
+    }
+
+    /// A case erased for good no longer teaches the style model. Never blocks the erasure.
+    pub(crate) fn forget_final_style(&mut self, case_id: &str) {
+        let Ok(v) = self.vault_ref() else {
+            return;
+        };
+        let key = final_key(v, case_id);
+        let Ok(mut local) = local_style(v) else {
+            return;
+        };
+        if local.model.forget_final(&key) {
+            if let (Ok(doc), Ok(v)) = (json(&local), self.vault_mut()) {
+                let _ = v.set_secret(LOCAL_STYLE_KEY, &doc);
+            }
+        }
+    }
+
+    /// Forget what was learned from her edits and finished reports (the suggestions, the
+    /// figures and the closeness record). Her past reports and her profile stay.
+    pub fn forget_style_learning(&mut self) -> Result<(), CoreError> {
+        let mut local = local_style(self.vault_ref()?)?;
+        local.model.forget_learning();
+        local.draft_fit.clear();
+        let v = self.vault_mut()?;
+        v.save_style_learning(&json(&Learning::default())?)?;
+        v.set_secret(LOCAL_STYLE_KEY, &json(&local)?)?;
+        v.record(
+            AuditEvent::SettingsChanged,
+            None,
+            &serde_json::json!({ "key": "style_learning_forgotten" }),
+        )?;
+        Ok(())
     }
 
     /// Add a suggestion to the profile in use, as a new version (her click is the approval).

@@ -6,9 +6,11 @@
 //! (empirical-Bayes shrinkage). The function-word profile is compared with Burrows' Delta, the
 //! classic measure of authorship.
 //!
-//! Two sources feed the model separately and are merged when it is used: her past reports
-//! (re-measured whenever they change) and her final wording of the paragraphs she edits
-//! (learned one edit at a time, half weight, because part of it may still be the AI's).
+//! Three sources feed the model separately and are merged when it is used: her past reports
+//! (re-measured whenever they change), her final wording of the paragraphs she edits
+//! (learned one edit at a time, half weight, because part of it may still be the AI's), and
+//! the reports she finished in the program (full weight, one entry per case, replaced when
+//! the case is exported again).
 
 use std::collections::BTreeMap;
 
@@ -177,13 +179,35 @@ impl Part {
     }
 }
 
-/// Her style model: what her past reports and her edits taught, kept apart.
+/// Her style model: what her past reports, her edits and her finished reports taught, kept
+/// apart.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct StyleModel {
     #[serde(default)]
     pub reports: Part,
     #[serde(default)]
     pub edits: Part,
+    /// One entry per finished report, by a keyed hash of its case (numbers only).
+    #[serde(default)]
+    pub finals: BTreeMap<String, Part>,
+}
+
+/// Her usual figures, for the screen that shows what the program learned. `None` for a
+/// figure with too little behind it.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Measures {
+    /// Paragraphs learned from: past reports, her edits (weighted), finished reports.
+    pub from_reports: f64,
+    pub from_edits: f64,
+    pub from_finals: f64,
+    pub finished_reports: usize,
+    pub words_per_sentence: Option<f64>,
+    pub sentences_per_paragraph: Option<f64>,
+    pub commas_per_sentence: Option<f64>,
+    /// Out of 100 sentences.
+    pub hedges: Option<f64>,
+    pub contrasts: Option<f64>,
+    pub first_person: Option<f64>,
 }
 
 /// The raw features of a paragraph, without Delta (which needs her figures).
@@ -251,6 +275,38 @@ fn delta(rates: &[f64], function: &[Moments]) -> Option<f64> {
     (k > 0.0).then(|| sum / k)
 }
 
+/// Measures every paragraph of `parts` into one source's figures, at full weight. Delta is
+/// taken against `against` when given, else against the parts' own function-word profile.
+fn fit<'a>(
+    parts: impl IntoIterator<Item = (Option<&'a str>, &'a str)>,
+    against: Option<&[Moments]>,
+) -> Part {
+    let measured: Vec<(Option<&str>, [f64; N], Vec<f64>)> = parts
+        .into_iter()
+        .flat_map(|(s, t)| paragraphs(t).into_iter().map(move |p| (s, p)))
+        .filter_map(|(s, p)| measure(p).map(|(f, r)| (s, f, r)))
+        .collect();
+    let mut part = Part::default();
+    for (s, f, r) in &measured {
+        add(&mut part, *s, f, r, 1.0);
+    }
+    // Second pass: how far each paragraph is from her function-word profile.
+    let function = match against {
+        Some(f) if f.iter().any(|m| m.n >= 2.0) => f.to_vec(),
+        _ => part.function.clone(),
+    };
+    for (s, _, r) in measured {
+        if let Some(d) = delta(&r, &function) {
+            let key = s.unwrap_or(GENERAL).to_owned();
+            part.global[DELTA].add(d, 1.0);
+            if let Some(sec) = part.sections.get_mut(&key) {
+                sec[DELTA].add(d, 1.0);
+            }
+        }
+    }
+    part
+}
+
 fn add(part: &mut Part, section: Option<&str>, f: &[f64; N], rates: &[f64], w: f64) {
     part.ensure();
     let key = section.unwrap_or(GENERAL).to_owned();
@@ -271,27 +327,35 @@ fn add(part: &mut Part, section: Option<&str>, f: &[f64; N], rates: &[f64], w: f
 impl StyleModel {
     /// Re-learn from her past reports: `(section, text)` for every part she kept.
     pub fn fit_reports<'a>(&mut self, parts: impl IntoIterator<Item = (Option<&'a str>, &'a str)>) {
-        let measured: Vec<(Option<&str>, [f64; N], Vec<f64>)> = parts
-            .into_iter()
-            .flat_map(|(s, t)| paragraphs(t).into_iter().map(move |p| (s, p)))
-            .filter_map(|(s, p)| measure(p).map(|(f, r)| (s, f, r)))
-            .collect();
-        let mut part = Part::default();
-        for (s, f, r) in &measured {
-            add(&mut part, *s, f, r, 1.0);
+        self.reports = fit(parts, None);
+    }
+
+    /// Learn from a report she finished in the program, at full weight: `(section, text)` for
+    /// every approved paragraph. `key` names the case (a keyed hash); exporting the same case
+    /// again replaces what it taught, so a report never counts twice.
+    pub fn observe_final<'a>(
+        &mut self,
+        key: &str,
+        parts: impl IntoIterator<Item = (Option<&'a str>, &'a str)>,
+    ) {
+        self.finals.remove(key);
+        // Delta against what she wrote elsewhere: the report itself would pull it to zero.
+        let function = self.combined().function;
+        let part = fit(parts, Some(&function));
+        if part.global.first().is_some_and(|m| m.n > 0.0) {
+            self.finals.insert(key.to_owned(), part);
         }
-        // Second pass: how far her own paragraphs are from her function-word profile.
-        let function = part.function.clone();
-        for (s, _, r) in measured {
-            if let Some(d) = delta(&r, &function) {
-                let key = s.unwrap_or(GENERAL).to_owned();
-                part.global[DELTA].add(d, 1.0);
-                if let Some(sec) = part.sections.get_mut(&key) {
-                    sec[DELTA].add(d, 1.0);
-                }
-            }
-        }
-        self.reports = part;
+    }
+
+    /// The finished report of a case that was erased is no longer learned from.
+    pub fn forget_final(&mut self, key: &str) -> bool {
+        self.finals.remove(key).is_some()
+    }
+
+    /// Everything learned from her edits and finished reports; her past reports stay.
+    pub fn forget_learning(&mut self) {
+        self.edits = Part::default();
+        self.finals.clear();
     }
 
     /// Learn from her final wording of a paragraph in `section`.
@@ -308,21 +372,56 @@ impl StyleModel {
 
     fn combined(&self) -> Part {
         let mut p = self.reports.merge(&self.edits);
+        for f in self.finals.values() {
+            p = p.merge(f);
+        }
         p.ensure();
         p
     }
 
-    /// How many paragraphs (weighted) the model has learned from.
+    /// Her usual figures, in words she can check.
     #[must_use]
-    pub fn paragraphs(&self) -> f64 {
-        self.combined().global.first().map_or(0.0, |m| m.n)
+    pub fn measures(&self) -> Measures {
+        let part = self.combined();
+        let n = |p: &Part| p.global.first().map_or(0.0, |m| m.n);
+        let usual = |i: usize, scale: f64| {
+            let m = part.global[i];
+            (m.n >= MIN_PARAGRAPHS).then_some(m.mean * scale)
+        };
+        Measures {
+            from_reports: n(&self.reports),
+            from_edits: n(&self.edits),
+            from_finals: self.finals.values().map(n).sum(),
+            finished_reports: self.finals.len(),
+            words_per_sentence: usual(0, 1.0),
+            sentences_per_paragraph: usual(2, 1.0),
+            commas_per_sentence: usual(4, 1.0),
+            hedges: usual(7, 100.0),
+            contrasts: usual(6, 100.0),
+            first_person: usual(8, 100.0),
+        }
     }
 
-    /// A gentle note on a drafted paragraph in `section` whose writing is unlike hers: the one
-    /// or two features furthest from her usual figures, in words. `None` when it reads like her
-    /// or when there is too little to go on.
+    /// How close a paragraph is to her writing, 0–100: for every feature, how many of her
+    /// usual spreads away it is (0 at her usual figure, nothing left at twice the distance of
+    /// a note), averaged. `None` when there is too little to go on. The same figures as
+    /// [`StyleModel::note`], as one number that can follow the drafts over time.
     #[must_use]
-    pub fn note(&self, section: &str, text: &str) -> Option<String> {
+    pub fn fidelity(&self, section: &str, text: &str) -> Option<u32> {
+        let zs = self.zs(section, text)?;
+        if zs.is_empty() {
+            return None;
+        }
+        let close: f64 = zs
+            .iter()
+            .map(|(_, z, _, _)| (1.0 - z.abs() / (2.0 * Z_NOTE)).max(0.0))
+            .sum::<f64>()
+            / zs.len() as f64;
+        Some((close * 100.0).round() as u32)
+    }
+
+    /// For each feature of a paragraph: (feature, z, her usual figure, this paragraph's).
+    fn zs(&self, section: &str, text: &str) -> Option<Vec<(usize, f64, f64, f64)>> {
         let part = self.combined();
         if part.global.first().map_or(0.0, |m| m.n) < MIN_PARAGRAPHS {
             return None;
@@ -333,7 +432,7 @@ impl StyleModel {
         }
         f[DELTA] = delta(&rates, &part.function).unwrap_or(f64::NAN);
         let sec = part.sections.get(section);
-        let mut found: Vec<(f64, String)> = Vec::new();
+        let mut out = Vec::new();
         for (i, spec) in FEATURES.iter().enumerate() {
             let g = part.global[i];
             let (mean, var) = match sec.map(|s| s[i]).filter(|s| s.n > 0.0) {
@@ -349,7 +448,25 @@ impl StyleModel {
             if !x.is_finite() || g.n < 2.0 {
                 continue;
             }
-            let z = (x - mean) / sd;
+            out.push((i, (x - mean) / sd, mean, x));
+        }
+        Some(out)
+    }
+
+    /// How many paragraphs (weighted) the model has learned from.
+    #[must_use]
+    pub fn paragraphs(&self) -> f64 {
+        self.combined().global.first().map_or(0.0, |m| m.n)
+    }
+
+    /// A gentle note on a drafted paragraph in `section` whose writing is unlike hers: the one
+    /// or two features furthest from her usual figures, in words. `None` when it reads like her
+    /// or when there is too little to go on.
+    #[must_use]
+    pub fn note(&self, section: &str, text: &str) -> Option<String> {
+        let mut found: Vec<(f64, String)> = Vec::new();
+        for (i, z, mean, x) in self.zs(section, text)? {
+            let spec = &FEATURES[i];
             let text = if z >= Z_NOTE {
                 Some(spec.more)
             } else if z <= -Z_NOTE {
@@ -451,5 +568,59 @@ mod tests {
         let before = m.paragraphs();
         m.observe_edit("observation", &hers(2));
         assert!((m.paragraphs() - before - EDIT_WEIGHT).abs() < 1e-9);
+    }
+
+    #[test]
+    fn her_writing_is_closer_than_a_stranger_s() {
+        let m = model();
+        let close = m.fidelity("observation", &hers(4)).unwrap();
+        let other = "הילד הציג תפקוד שהוא בהחלט תואם את גילו הכרונולוגי ברוב התחומים שנבדקו במהלך האבחון הנוכחי וגם בתחומים נוספים שעלו בשיחה עם ההורים ועם הצוות החינוכי של המסגרת. \
+                     בנוסף לכך הוא הפגין יכולת להתמיד במשימות לאורך זמן ממושך יחסית גם כאשר הן היו קשות עבורו ודרשו ממנו מאמץ רב ושימוש באסטרטגיות שונות ומגוונות של פתרון בעיות.";
+        let theirs = m.fidelity("observation", other).unwrap();
+        assert!(close >= 80, "{close}");
+        assert!(theirs + 20 < close, "{theirs} vs {close}");
+        assert_eq!(
+            StyleModel::default().fidelity("observation", &hers(0)),
+            None
+        );
+    }
+
+    #[test]
+    fn a_finished_report_counts_once_and_can_be_forgotten() {
+        let mut m = model();
+        let base = m.paragraphs();
+        let report: Vec<String> = (0..3).map(hers).collect();
+        let parts = || report.iter().map(|t| (Some("observation"), t.as_str()));
+        m.observe_final("case-a", parts());
+        assert!((m.paragraphs() - base - 3.0).abs() < 1e-9);
+        // Exported again: replaced, not added.
+        m.observe_final("case-a", parts());
+        assert!((m.paragraphs() - base - 3.0).abs() < 1e-9);
+        assert_eq!(m.measures().finished_reports, 1);
+        assert!(m.forget_final("case-a"));
+        assert!((m.paragraphs() - base).abs() < 1e-9);
+        m.observe_edit("observation", &hers(2));
+        m.observe_final("case-b", parts());
+        m.forget_learning();
+        assert!((m.paragraphs() - base).abs() < 1e-9);
+    }
+
+    #[test]
+    fn measures_say_nothing_on_too_little() {
+        let m = model();
+        let usual = m.measures();
+        assert!((usual.from_reports - 20.0).abs() < 1e-9);
+        assert!(usual
+            .words_per_sentence
+            .is_some_and(|w| w > 8.0 && w < 20.0));
+        assert!(usual.hedges.is_some());
+        assert_eq!(StyleModel::default().measures().words_per_sentence, None);
+    }
+
+    #[test]
+    fn an_older_model_without_finished_reports_still_reads() {
+        let old = serde_json::json!({"reports": Part::default(), "edits": Part::default()});
+        let m: StyleModel = serde_json::from_value(old).unwrap();
+        assert!(m.finals.is_empty());
     }
 }

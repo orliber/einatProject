@@ -99,6 +99,36 @@ describe("ReviewDialog", () => {
     expect(screen.getByText(/תגית שלא שייכת לתיק הזה/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /שליחה/ })).toBeDisabled();
   });
+
+  it("every block has a button that fixes it or leads to where it is fixed", async () => {
+    const calls: string[] = [];
+    mockIPC((cmd) => {
+      calls.push(cmd);
+      return 1;
+    });
+    const app = api();
+    const onClose = vi.fn();
+    const reprepare = vi.fn(async () => prepared());
+    const blocked = [
+      { code: "foreign_tag", message: "תגית שלא שייכת לתיק הזה", detail: "[מוסד_1]" },
+      { code: "identity", message: "נמצא שם מוצהר בטקסט היוצא", detail: "נועם" },
+      { code: "too_large", message: "הבקשה גדולה מהמותר", detail: "3000000" },
+    ];
+    const user = userEvent.setup();
+    render(
+      <AppContext.Provider value={app}>
+        <ReviewDialog title="t" caseId="c1" prepared={prepared({ approval_id: null, blocked })}
+          reprepare={reprepare} onSend={vi.fn()} onClose={onClose} />
+      </AppContext.Provider>,
+    );
+    expect(screen.getAllByRole("button", { name: "חזרה לעריכה" }).length).toBe(2);
+    await user.click(screen.getByRole("button", { name: "לפרטי התיק" }));
+    expect(app.go).toHaveBeenCalledWith({ name: "case", id: "c1", view: "details" });
+    await user.click(screen.getByRole("button", { name: "להחליף במילה רגילה ולהמשיך" }));
+    await vi.waitFor(() => expect(calls).toContain("settle_foreign_tags"));
+    expect(reprepare).toHaveBeenCalled();
+    expect(screen.queryByText(/תגית שלא שייכת/)).toBeNull();
+  });
 });
 
 describe("makePassphrase", () => {

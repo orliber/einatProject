@@ -11,10 +11,10 @@ import { useAi } from "../ai";
 const guidance: Record<string, string> = {
   unknown_name: "המילה נראית כמו שם שהתוכנה לא יודעת לאיזה תפקיד הוא שייך. אפשר להכריע כאן.",
   past_report_name: "המילה מופיעה כשם בדוח ישן. אפשר להכריע כאן.",
-  foreign_tag: "יש תגית של תיק אחר. חוזרים לעריכה ומוחקים אותה מהטקסט.",
-  identity: "נמצא שם או מזהה מהתיק שלא הוסתר. חוזרים לעריכה, ואם הוא חוזר, בודקים את הרשומה בפרטי התיק.",
-  pattern: "נמצא פרט מזהה (ת\"ז, טלפון, מייל). חוזרים לעריכה ומסירים אותו.",
-  too_large: "הבקשה גדולה מדי. חוזרים לעריכה ומקצרים את ההוראה או את החומר.",
+  foreign_tag: "זו תגית שנשארה בטקסט מפעם קודמת (למשל אחרי \"להחזיר\"). הכפתור מחליף אותה במילה רגילה בכל התיק ובודק שוב.",
+  identity: "נמצא שם מהתיק שלא הוסתר. הכפתור פותח את פרטי התיק, שם בודקים את הרשומה שלו.",
+  pattern: "נמצא פרט מזהה (ת\"ז, טלפון, מייל) בטקסט שכתבת עכשיו. חוזרים לעריכה ומסירים אותו.",
+  too_large: "הבקשה גדולה מדי. חוזרים לעריכה ומקצרים את ההוראה, או מסמנים פחות חומרים.",
 };
 
 /**
@@ -31,7 +31,7 @@ export function ReviewDialog(props: {
   onSend: (approvalId: string) => Promise<void>;
   onClose: () => void;
 }) {
-  const { status, fail, refresh } = useApp();
+  const { status, fail, refresh, go } = useApp();
   const ai = useAi();
   const [prepared, setPrepared] = useState(props.prepared);
   const [busy, setBusy] = useState<"send" | "decide" | null>(null);
@@ -64,6 +64,21 @@ export function ReviewDialog(props: {
     setError(null);
     try {
       await ipc.decideSuspect(props.caseId, token, decision);
+      await rebuild();
+    } catch (e) {
+      setError(fail(e as never));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** A tag left in the case's text: it becomes its plain word everywhere, and the check runs again. */
+  async function settleTags() {
+    if (!props.caseId) return;
+    setBusy("decide");
+    setError(null);
+    try {
+      await ipc.settleForeignTags(props.caseId);
       await rebuild();
     } catch (e) {
       setError(fail(e as never));
@@ -114,12 +129,32 @@ export function ReviewDialog(props: {
                 </button>
               </div>
             )}
+            {props.caseId && b.code === "foreign_tag" && (
+              <div className="row">
+                <button type="button" className="btn btn-small" disabled={busy !== null} onClick={() => void settleTags()}>
+                  להחליף במילה רגילה ולהמשיך
+                </button>
+              </div>
+            )}
+            {props.caseId && b.code === "identity" && (
+              <div className="row">
+                <button type="button" className="btn btn-small" disabled={busy !== null}
+                  onClick={() => { const id = props.caseId as string; props.onClose(); go({ name: "case", id, view: "details" }); }}>
+                  לפרטי התיק
+                </button>
+              </div>
+            )}
+            {!["unknown_name", "past_report_name", "foreign_tag", "identity"].includes(b.code) && (
+              <div className="row">
+                <button type="button" className="btn btn-small" onClick={props.onClose}>חזרה לעריכה</button>
+              </div>
+            )}
           </div>
         ))}
         {blocked.length > 0 && (
           <p className="note-sand small">
-            הבדיקה האחרונה עצרה את השליחה כדי להגן על הפרטיות, ושום דבר לא יצא. אם מה שנעצר נמצא בטקסט שלך,
-            חוזרים לעריכה ומתקנים. אם לא ברור מאיפה זה בא, אפשר להעתיק את ההודעה הזאת ולשלוח לאור.
+            הבדיקה האחרונה עצרה את השליחה כדי להגן על הפרטיות, ושום דבר לא יצא. ליד כל עצירה יש כפתור
+            שמתקן אותה או מוביל למקום שבו מתקנים. אם זה לא עוזר, אפשר להעתיק את ההודעה הזאת ולשלוח לאור.
           </p>
         )}
         <ErrorLine error={error} />

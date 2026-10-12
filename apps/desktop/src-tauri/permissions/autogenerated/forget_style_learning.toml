@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-forget-style-learning"
+description = "Enables the forget_style_learning command without any pre-configured scope."
+commands.allow = ["forget_style_learning"]
+
+[[permission]]
+identifier = "deny-forget-style-learning"
+description = "Denies the forget_style_learning command without any pre-configured scope."
+commands.deny = ["forget_style_learning"]

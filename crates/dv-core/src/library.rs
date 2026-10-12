@@ -76,6 +76,7 @@ impl Core {
         }
         self.failed_unlocks = 0;
         self.vault_mut()?.delete_case(case_id)?;
+        self.forget_final_style(case_id);
         self.forget_failure(case_id)
     }
 
@@ -85,6 +86,7 @@ impl Core {
         let expired = self.vault_ref()?.trashed_before(cutoff)?;
         for id in expired {
             self.vault_mut()?.delete_case(&id)?;
+            self.forget_final_style(&id);
             self.forget_failure(&id)?;
         }
         Ok(())
