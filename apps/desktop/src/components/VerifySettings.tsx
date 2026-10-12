@@ -24,11 +24,10 @@ export function VerifySettings() {
       <label className="row">
         <input type="checkbox" checked={on.data ?? false} disabled={on.data === undefined}
           onChange={(e) => void change(e.target.checked)} />
-        <span>לאפשר בדיקה של טיוטה מול החומרים שממנו נכתבה</span>
+        <span>לאפשר בדיקה של טיוטה מול החומרים</span>
       </label>
       <span className="hint">
-        בסעיף עם טיוטה מופיע כפתור שמבקש מה-AI לסמן, לכל פסקה, אם הטענות בה נתמכות בחומרים. זו בקשה נוספת: היא עוברת
-        את אותה הסתרת שמות ואת אותו מסך "מה יוצא מהמחשב", ונספרת בעלות. הבדיקה רק מסמנת, ולא משנה ולא מאשרת שום פסקה.
+        ה-AI מסמן לכל פסקה אם היא נתמכת בחומרים. בקשה נוספת, באותו סינון, ובלי לשנות שום פסקה.
       </span>
     </section>
   );

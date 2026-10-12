@@ -262,7 +262,7 @@ export function ErrorLine({ error, retry, report: always }: { error: string | nu
     }
     // The key, the zero-retention confirmation, the monthly ceiling: all fixed in settings.
     if ((f.code === "egress" && f.message.includes("מפתח")) || f.message.includes("בהגדרות")) {
-      actions.push({ label: "פתיחת ההגדרות", run: () => app.go({ name: "settings" }) });
+      actions.push({ label: "פתיחת ההגדרות", run: () => app.go({ name: "settings", pane: "ai" }) });
     }
   }
   if (retry) actions.push({ label: "לנסות שוב", run: retry });

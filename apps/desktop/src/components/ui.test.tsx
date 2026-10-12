@@ -101,7 +101,7 @@ describe("ErrorLine", () => {
       </AppContext.Provider>,
     );
     await user.click(screen.getByRole("button", { name: "פתיחת ההגדרות" }));
-    expect(go).toHaveBeenCalledWith({ name: "settings" });
+    expect(go).toHaveBeenCalledWith({ name: "settings", pane: "ai" });
     await user.click(screen.getByRole("button", { name: "דוח תקלה לאור" }));
     const box = await screen.findByRole("textbox", { name: "תוכן הדוח" });
     const text = (box as HTMLTextAreaElement).value;

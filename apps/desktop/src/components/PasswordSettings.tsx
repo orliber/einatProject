@@ -163,7 +163,7 @@ export function PasswordSettings() {
     <>
     <section className="card setting" aria-labelledby="s-password">
       <h2 id="s-password">סיסמה וערכת שחזור</h2>
-      <p className="muted small">הסיסמה פותחת את הכספת ביומיום; ערכת השחזור המודפסת פותחת אותה אם הסיסמה נשכחה. אחרי החלפה של אחת מהן כדאי לגבות מחדש.</p>
+      <p className="muted small">אחרי החלפה כדאי לגבות מחדש.</p>
       <div className="row">
         <button type="button" className="btn" onClick={() => setOpen("password")}>החלפת סיסמה…</button>
         <button type="button" className="btn" onClick={() => setOpen("kit")}>ערכת שחזור חדשה…</button>

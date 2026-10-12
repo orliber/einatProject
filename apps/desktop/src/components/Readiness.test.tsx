@@ -39,11 +39,11 @@ describe("ready for real cases", () => {
       };
     });
     render(wrap(<ReadinessSettings />));
-    expect(await screen.findByText(/חסרים עוד 3 פריטים/)).toBeInTheDocument();
+    expect(await screen.findByText(/חסרים 3 פריטים/)).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText(/ZDR/));
     await vi.waitFor(() => expect(calls.some(([c]) => c === "confirm_readiness")).toBe(true));
     expect(calls.find(([c]) => c === "confirm_readiness")?.[1]).toMatchObject({ key: "zdr", done: true });
-    expect(await screen.findByText(/חסרים עוד 2 פריטים/)).toBeInTheDocument();
+    expect(await screen.findByText(/חסרים 2 פריטים/)).toBeInTheDocument();
   });
 });
 

@@ -16,13 +16,14 @@ import { ShortcutsSheet, useShortcutsSheet } from "./components/ShortcutsSheet";
 import { isCombo, KEYS } from "./shortcuts";
 import { rememberFailure } from "./errors";
 import { clearKept } from "./kept";
+import type { SettingsPane } from "./screens/settingsPanes";
 
 export type Route =
   | { name: "cases" }
   | { name: "case"; id: string; view: string }
   | { name: "consult"; caseId?: string }
   | { name: "style" }
-  | { name: "settings" };
+  | { name: "settings"; pane?: SettingsPane };
 
 export interface AppApi {
   status: AppStatus;
@@ -198,7 +199,7 @@ export function App() {
       {route.name === "case" && <CaseScreen key={route.id} caseId={route.id} view={route.view} />}
       {route.name === "consult" && <ConsultScreen caseId={route.caseId} />}
       {route.name === "style" && <StyleScreen />}
-      {route.name === "settings" && <SettingsScreen />}
+      {route.name === "settings" && <SettingsScreen key={route.pane ?? ""} pane={route.pane} />}
       {toast && <Toast text={toast.text} action={toast.action} onDone={() => setToast(null)} />}
       <UnsavedNotice />
       {sheet.open && <ShortcutsSheet onClose={sheet.close} />}
