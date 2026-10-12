@@ -55,6 +55,9 @@ jobs:
         env:
           DV_TEST_OCR_DIR: ${{ github.workspace }}\apps\desktop\src-tauri\ocr
           DV_REQUIRE_OCR: "1"
+      # SEC8: invariants, the data scan, pinned parser versions, the update key and the SBOM.
+      - name: Self audit
+        run: cargo xtask self-audit
       # Nothing is released that leaks: the adversarial suite and canary must show 0 leaks.
       - name: Privacy suite (0 leaks)
         run: cargo test -p dv-privacy
@@ -78,12 +81,19 @@ jobs:
           $exe = Get-ChildItem target/release/bundle/nsis/*.exe | Select-Object -First 1
           Copy-Item $exe.FullName DiagnosticVault-Setup.exe
           (Get-FileHash DiagnosticVault-Setup.exe -Algorithm SHA256).Hash.ToLower() + "  DiagnosticVault-Setup.exe" | Out-File -Encoding ascii DiagnosticVault-Setup.exe.sha256
+      # SEC6: what went into this installer (CycloneDX), with its own checksum. A signed
+      # provenance attestation is left out: on a private repository it needs a paid plan.
+      - name: Software bill of materials
+        shell: pwsh
+        run: |
+          cargo xtask sbom DiagnosticVault-sbom.cdx.json
+          (Get-FileHash DiagnosticVault-sbom.cdx.json -Algorithm SHA256).Hash.ToLower() + "  DiagnosticVault-sbom.cdx.json" | Out-File -Encoding ascii DiagnosticVault-sbom.cdx.json.sha256
       - name: Publish the release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          files="DiagnosticVault-Setup.exe DiagnosticVault-Setup.exe.sha256"
+          files="DiagnosticVault-Setup.exe DiagnosticVault-Setup.exe.sha256 DiagnosticVault-sbom.cdx.json DiagnosticVault-sbom.cdx.json.sha256"
           # A release drafted in the GitHub page already exists: attach to it.
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" $files --repo "$GITHUB_REPOSITORY" --clobber

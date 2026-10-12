@@ -6573,8 +6573,10 @@ dependencies = [
  "aws-lc-rs",
  "cargo_metadata 0.23.1",
  "dv-egress",
+ "dv-vault",
  "regex",
  "serde_json",
+ "zeroize",
 ]
 
 [[package]]

@@ -16,4 +16,7 @@ regex = "1"
 serde_json.workspace = true
 # Signing updates (D-033): the program's own verification code, and the same crypto library.
 dv-egress.workspace = true
+# The encrypted copy of the signing key (SEC5): the vault's own password KDF and sealing.
+dv-vault.workspace = true
+zeroize = "1.9"
 aws-lc-rs = { version = "1.18", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
