@@ -1124,6 +1124,7 @@ dependencies = [
  "dv-sandbox",
  "flate2",
  "pdf-extract",
+ "proptest",
  "quick-xml",
  "serde",
  "serde_json",
