@@ -357,7 +357,6 @@ export class FakeCore {
       vault_exists: this.vaultExists, unlocked: this.unlocked, disk_encryption: "on", cloud_synced_folder: null, fips_active: true,
       demo_mode: true, model: this.model, provider: providerOf(this.model).id, ai_name: this.ai, keys: [], speed: this.speed, integrity_warning: null, lock_minutes: this.lockMinutes, idle_lock_in: this.unlocked ? this.lockMinutes * 60 : null,
       practitioner: this.practitioner, review_only_suspect: this.reviewOnlySuspect, review_choice_available: true, screen_protection: !this.unlocked || this.screenProtection,
-      hello_available: false, hello_on: false,
     };
   }
 
@@ -633,7 +632,7 @@ export class FakeCore {
         const ok = (key: string, state = "ok", detail: string | null = null) => ({ key, state, detail });
         return {
           items: [ok("encrypted"), ok("fips", "info"), ok("disk"), ok("cloud_folder"), ok("log_integrity"),
-            ok("auto_lock", "ok", "10"), ok("screen"), ok("hello", "info"), ok("send", this.sendStopped ? "warn" : "ok"), ok("isolation")],
+            ok("auto_lock", "ok", "10"), ok("screen"), ok("send", this.sendStopped ? "warn" : "ok"), ok("isolation")],
           send_stopped: this.sendStopped, daily_limit: 400, max_request_kb: 2048,
         };
       }

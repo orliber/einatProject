@@ -19,7 +19,6 @@ impl Core {
             last_activity: Instant::now(),
             last_tick: None,
             failed_unlocks: 0,
-            hello_available: None,
             not_before: None,
             disk_encryption: disk.to_owned(),
             transport: None,
@@ -184,13 +183,7 @@ impl Core {
             ),
             None => (true, Vec::new(), None),
         };
-        let hello_on = match &self.vault {
-            Some(v) => v.has_hello_slot(),
-            None => Vault::offers_hello(&self.dir),
-        };
         AppStatus {
-            hello_available: self.hello_available(),
-            hello_on,
             vault_exists: Vault::exists(&self.dir),
             unlocked: self.vault.is_some(),
             disk_encryption: self.disk_encryption.clone(),
@@ -287,6 +280,11 @@ impl Core {
                     .seal_dir
                     .as_deref()
                     .and_then(|d| seal::check(d, &self.dir, vault.audit_seq()));
+                // Windows Hello was taken out (D-054): a vault that had it turned on loses the
+                // old slot here. Best effort; the password opens either way.
+                if vault.has_hello_slot() {
+                    let _ = vault.remove_hello_slot();
+                }
                 self.vault = Some(vault);
                 self.last_activity = Instant::now();
                 if purge {
@@ -327,47 +325,6 @@ impl Core {
         self.check_backoff()?;
         let result = Vault::unlock_with_recovery(&self.dir, recovery_key);
         self.after_unlock(result, true)
-    }
-
-    /// The everyday way in (D-047): her Windows Hello PIN, face or fingerprint. Windows
-    /// counts and throttles wrong PINs itself, so a cancelled or failed prompt does not add
-    /// to the password's waiting time; the password is always there instead.
-    pub fn unlock_with_hello(&mut self) -> Result<AppStatus, CoreError> {
-        self.refuse_cloud()?;
-        self.check_backoff()?;
-        let result = Vault::unlock_with_hello(&self.dir, &dv_vault::hello::WindowsHello);
-        let result = result.map_err(|e| match e {
-            VaultError::WrongSecret => VaultError::Refused("windows hello: no match".to_owned()),
-            other => other,
-        });
-        self.after_unlock(result, true)
-    }
-
-    /// Windows Hello on (needs the password, like a new password) or off.
-    pub fn set_windows_hello(&mut self, on: bool, password: &str) -> Result<AppStatus, CoreError> {
-        let hello = dv_vault::hello::WindowsHello;
-        if on {
-            self.check_backoff()?;
-            let result = self
-                .vault_mut()?
-                .set_hello_slot(dv_vault::Secret::Password(password), &hello);
-            if let Err(e) = result {
-                self.count_failure(&e);
-                return Err(e.into());
-            }
-            self.failed_unlocks = 0;
-        } else {
-            self.vault_mut()?.remove_hello_slot(&hello)?;
-        }
-        Ok(self.status())
-    }
-
-    /// Asked once per run: Windows Hello is set up on this computer.
-    pub(crate) fn hello_available(&mut self) -> bool {
-        use dv_vault::hello::HelloSigner;
-        *self
-            .hello_available
-            .get_or_insert_with(|| dv_vault::hello::WindowsHello.available())
     }
 
     pub fn confirm_recovery_key(&mut self, typed: &str) -> Result<bool, CoreError> {

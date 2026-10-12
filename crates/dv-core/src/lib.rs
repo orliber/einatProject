@@ -451,8 +451,6 @@ pub struct Core {
     /// Wall-clock time of the shell's last timer tick (sleep detection).
     last_tick: Option<SystemTime>,
     failed_unlocks: u32,
-    /// Windows Hello is set up on this computer; asked once (D-047).
-    hello_available: Option<bool>,
     not_before: Option<Instant>,
     disk_encryption: String,
     transport: Option<Arc<dyn Transport>>,

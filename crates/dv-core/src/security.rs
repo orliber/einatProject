@@ -71,7 +71,6 @@ pub(crate) fn build(s: &AppStatus, send_stopped: bool) -> SecurityStatus {
         // stuck window cannot keep the vault open (S5).
         item("auto_lock", "ok", Some(s.lock_minutes.to_string())),
         item("screen", on(s.screen_protection), None),
-        item("hello", if s.hello_on { "ok" } else { "info" }, None),
         item("send", on(!send_stopped), None),
     ];
     // The document readers run in a restricted process only on Windows (D-047).
@@ -124,8 +123,6 @@ mod tests {
             review_only_suspect: false,
             review_choice_available: false,
             screen_protection: true,
-            hello_available: false,
-            hello_on: false,
         }
     }
 

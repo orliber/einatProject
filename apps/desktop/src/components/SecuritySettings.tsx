@@ -14,7 +14,6 @@ const LABELS: Record<string, (d: string | null) => string> = {
   log_integrity: (d) => (d ? `יומן הפעילות: ${d}` : "יומן הפעילות שלם ולא שונה"),
   auto_lock: (d) => `נעילה אוטומטית אחרי ${d} דקות, גם כשהחלון תקוע, וכשנועלים את המחשב או הוא נרדם`,
   screen: () => "צילום מסך ושיתוף מסך מציגים חלון ריק",
-  hello: () => "פתיחה עם Windows Hello",
   send: () => "השליחה ל-AI",
   isolation: () => "קריאת מסמכים בתהליך מבודד",
 };
@@ -29,7 +28,6 @@ const STATE_TEXT: Record<string, { chip: string; text: string }> = {
 function suffix(i: SecurityItem): string {
   if (i.key === "send") return i.state === "ok" ? " פעילה, עם תקרה יומית וגודל מקסימלי" : " כבויה: עצירת חירום";
   if (i.key === "fips") return i.state === "ok" ? " מאושר FIPS 140-3" : " סטנדרטי";
-  if (i.key === "hello") return i.state === "ok" ? "" : " (לא מופעלת)";
   if (i.key === "isolation") return i.state === "ok" ? "" : " (במחשב הזה אין בידוד כזה)";
   return "";
 }

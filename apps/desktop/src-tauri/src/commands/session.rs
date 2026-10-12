@@ -66,26 +66,6 @@ pub(crate) async fn unlock_with_recovery(
     with_core(&state, move |c| c.unlock_with_recovery(&key)).await
 }
 
-/// Windows Hello (D-047). Its prompt can open behind the window; it is brought forward.
-#[tauri::command]
-pub(crate) async fn unlock_with_hello(state: tauri::State<'_, AppState>) -> Res<AppStatus> {
-    win_platform::bring_hello_prompt_forward(15_000);
-    with_core(&state, Core::unlock_with_hello).await
-}
-
-#[tauri::command]
-pub(crate) async fn set_windows_hello(
-    state: tauri::State<'_, AppState>,
-    on: bool,
-    password: String,
-) -> Res<AppStatus> {
-    let password = zeroize::Zeroizing::new(password);
-    if on {
-        win_platform::bring_hello_prompt_forward(30_000);
-    }
-    with_core(&state, move |c| c.set_windows_hello(on, &password)).await
-}
-
 #[tauri::command]
 pub(crate) async fn lock(
     window: tauri::WebviewWindow,
