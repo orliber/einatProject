@@ -157,6 +157,11 @@ pub fn run_all(root: &Path, args: &[String]) -> Vec<String> {
             Ok(p) => problems.extend(p.into_iter().map(|p| format!("invariants: {p}"))),
             Err(e) => problems.push(format!("invariants: could not run: {e}")),
         }
+        eprintln_step("parser pins");
+        match crate::supply::check_parsers(root) {
+            Ok(p) => problems.extend(p.into_iter().map(|p| format!("parser pins: {p}"))),
+            Err(e) => problems.push(format!("parser pins: could not run: {e}")),
+        }
         eprintln_step("scan");
         match crate::scan::run(root, crate::scan::Mode::All) {
             Ok(p) => problems.extend(p.into_iter().map(|p| format!("scan: {p}"))),

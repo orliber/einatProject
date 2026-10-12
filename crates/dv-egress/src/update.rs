@@ -74,19 +74,45 @@ pub trait Fetch {
     fn get(&self, url: &str, max: u64) -> Result<Vec<u8>, UpdateError>;
 }
 
-/// The pinned key, when this build has one.
+/// At most this many keys are pinned: the one in use and the next one (SEC5).
+pub const MAX_KEYS: usize = 2;
+
+/// The pinned keys, when this build has any: the key in use first, then the next one, so a
+/// release signed with the next key is accepted the day the first is retired or lost.
+#[must_use]
+pub fn pinned_keys() -> Vec<[u8; 32]> {
+    parse_keys(PINNED_KEY)
+}
+
+/// The key in use (the first one pinned).
+#[must_use]
 pub fn pinned_key() -> Option<[u8; 32]> {
-    parse_key(PINNED_KEY)
+    pinned_keys().first().copied()
 }
 
 /// A key file: the first line that is not a comment, 64 hex digits.
+#[must_use]
 pub fn parse_key(text: &str) -> Option<[u8; 32]> {
-    let line = text
+    parse_keys(text).first().copied()
+}
+
+/// Every key line of a key file (64 hex digits each), at most [`MAX_KEYS`]. A file with a
+/// line that is not a key, or with more keys than that, pins none: fail closed.
+#[must_use]
+pub fn parse_keys(text: &str) -> Vec<[u8; 32]> {
+    let lines: Vec<&str> = text
         .lines()
         .map(str::trim)
-        .find(|l| !l.is_empty() && !l.starts_with('#'))?;
-    let bytes = from_hex(line)?;
-    bytes.try_into().ok()
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .collect();
+    let keys: Option<Vec<[u8; 32]>> = lines
+        .iter()
+        .map(|l| from_hex(l).and_then(|b| b.try_into().ok()))
+        .collect();
+    match keys {
+        Some(k) if k.len() <= MAX_KEYS => k,
+        _ => Vec::new(),
+    }
 }
 
 /// The bytes that are signed for a notice.
@@ -101,15 +127,21 @@ pub fn signed_bytes(notice: &[u8]) -> Vec<u8> {
 pub fn check(
     fetch: &dyn Fetch,
     current: &str,
-    key: &[u8; 32],
+    keys: &[[u8; 32]],
 ) -> Result<Option<UpdateInfo>, UpdateError> {
     let notice = fetch.get(MANIFEST_URL, MAX_NOTICE)?;
     let sig_text = fetch.get(SIGNATURE_URL, 1024)?;
     let sig =
         from_hex(String::from_utf8_lossy(&sig_text).trim()).ok_or(UpdateError::BadSignature)?;
-    signature::UnparsedPublicKey::new(&signature::ED25519, key)
-        .verify(&signed_bytes(&notice), &sig)
-        .map_err(|_| UpdateError::BadSignature)?;
+    let signed = signed_bytes(&notice);
+    let by_a_pinned_key = keys.iter().take(MAX_KEYS).any(|key| {
+        signature::UnparsedPublicKey::new(&signature::ED25519, key)
+            .verify(&signed, &sig)
+            .is_ok()
+    });
+    if !by_a_pinned_key {
+        return Err(UpdateError::BadSignature);
+    }
     let info = parse_notice(&notice)?;
     let newer = match (parse_version(&info.version), parse_version(current)) {
         (Some(new), Some(now)) => new > now,
@@ -337,7 +369,7 @@ mod tests {
     fn a_signed_newer_version_is_offered_and_its_installer_verified() {
         let k = keypair();
         let t = server(&k, notice("0.2.0"), INSTALLER);
-        let Ok(Some(info)) = check(&t, "0.1.0", &public(&k)) else {
+        let Ok(Some(info)) = check(&t, "0.1.0", &[public(&k)]) else {
             panic!("no update")
         };
         assert_eq!(info.version, "0.2.0");
@@ -349,8 +381,8 @@ mod tests {
     fn the_same_or_an_older_version_is_not_offered() {
         let k = keypair();
         let t = server(&k, notice("0.2.0"), INSTALLER);
-        assert_eq!(check(&t, "0.2.0", &public(&k)), Ok(None));
-        assert_eq!(check(&t, "0.10.0", &public(&k)), Ok(None));
+        assert_eq!(check(&t, "0.2.0", &[public(&k)]), Ok(None));
+        assert_eq!(check(&t, "0.10.0", &[public(&k)]), Ok(None));
     }
 
     #[test]
@@ -359,14 +391,14 @@ mod tests {
         let other = keypair();
         let t = server(&other, notice("0.2.0"), INSTALLER);
         assert_eq!(
-            check(&t, "0.1.0", &public(&k)),
+            check(&t, "0.1.0", &[public(&k)]),
             Err(UpdateError::BadSignature)
         );
 
         let mut t = server(&k, notice("0.2.0"), INSTALLER);
         t.0.insert(MANIFEST_URL.to_owned(), notice("9.9.9"));
         assert_eq!(
-            check(&t, "0.1.0", &public(&k)),
+            check(&t, "0.1.0", &[public(&k)]),
             Err(UpdateError::BadSignature)
         );
 
@@ -377,7 +409,7 @@ mod tests {
             to_hex(k.sign(&notice("0.2.0")).as_ref()).into_bytes(),
         );
         assert_eq!(
-            check(&t, "0.1.0", &public(&k)),
+            check(&t, "0.1.0", &[public(&k)]),
             Err(UpdateError::BadSignature)
         );
     }
@@ -386,7 +418,7 @@ mod tests {
     fn a_changed_installer_is_refused() {
         let k = keypair();
         let t = server(&k, notice("0.2.0"), b"MZ evil installer bytes");
-        let Ok(Some(info)) = check(&t, "0.1.0", &public(&k)) else {
+        let Ok(Some(info)) = check(&t, "0.1.0", &[public(&k)]) else {
             panic!("no update")
         };
         assert_eq!(download(&t, &info), Err(UpdateError::Tampered));
@@ -399,7 +431,7 @@ mod tests {
         n["product"] = json!("something.else");
         let t = server(&k, serde_json::to_vec(&n).unwrap_or_default(), INSTALLER);
         assert!(matches!(
-            check(&t, "0.1.0", &public(&k)),
+            check(&t, "0.1.0", &[public(&k)]),
             Err(UpdateError::BadNotice(_))
         ));
 
@@ -407,7 +439,7 @@ mod tests {
         n["installer"]["url"] = json!("https://evil.example/Setup.exe");
         let t = server(&k, serde_json::to_vec(&n).unwrap_or_default(), INSTALLER);
         assert!(matches!(
-            check(&t, "0.1.0", &public(&k)),
+            check(&t, "0.1.0", &[public(&k)]),
             Err(UpdateError::BadNotice(_))
         ));
     }

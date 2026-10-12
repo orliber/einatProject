@@ -4,15 +4,19 @@
 //!   Tauri hardening (see `docs/ARCHITECTURE.md`).
 //! * `cargo xtask scan --staged | --all` – blocks personal data, archives and
 //!   binaries from entering the repository (pre-commit hook and CI).
-//! * `cargo xtask update-keygen` / `update-notice …` – signed updates, on the developer's
+//! * `cargo xtask update-keygen [--next]` / `update-notice …` / `update-key-backup …` /
+//!   `update-key-restore …` – signed updates, on the developer's
 //!   computer only (D-033, `scripts/release.sh`).
 //! * `cargo xtask ci [--e2e] [--rust|--ui]` – the CI checks, on this computer, in one command.
+//! * `cargo xtask check-parsers` / `sbom <out.json>` / `self-audit [--full]` – the supply
+//!   chain (SEC6–SEC8, `supply.rs`).
 
 mod ci;
 mod invariants;
 mod israeli_id;
 mod release;
 mod scan;
+mod supply;
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -66,8 +70,16 @@ fn main() -> ExitCode {
                 Err(e) => report("scan", &[format!("could not run: {e}")]),
             }
         }
+        Some("check-parsers") => match supply::check_parsers(&root) {
+            Ok(problems) => report("parser pins", &problems),
+            Err(e) => report("parser pins", &[format!("could not run: {e}")]),
+        },
+        Some("sbom") => done("sbom", supply::sbom(&root, &args[1..])),
+        Some("self-audit") => report("self-audit", &supply::self_audit(&root, &args[1..])),
         Some("ci") => report("ci", &ci::run_all(&root, &args[1..])),
-        Some("update-keygen") => done("update-keygen", release::keygen(&root)),
+        Some("update-keygen") => done("update-keygen", release::keygen(&root, &args[1..])),
+        Some("update-key-backup") => done("update-key-backup", release::key_backup(&root, &args[1..])),
+        Some("update-key-restore") => done("update-key-restore", release::key_restore(&root, &args[1..])),
         Some("update-notice") => done("update-notice", release::notice(&root, &args[1..])),
         _ => report(
             "usage",

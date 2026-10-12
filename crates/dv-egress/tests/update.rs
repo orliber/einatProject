@@ -80,7 +80,10 @@ fn signed(k: &Ed25519KeyPair, notice: &Value, installer: &[u8]) -> Server {
 fn the_pinned_key_is_present_and_a_notice_from_any_other_key_fails_against_it() {
     let pinned = pinned_key().expect("this build pins an update key");
     let t = signed(&keypair(), &notice_value("9.0.0"), INSTALLER);
-    assert_eq!(check(&t, "0.1.0", &pinned), Err(UpdateError::BadSignature));
+    assert_eq!(
+        check(&t, "0.1.0", &[pinned]),
+        Err(UpdateError::BadSignature)
+    );
 }
 
 #[test]
@@ -89,7 +92,7 @@ fn an_unsigned_notice_is_refused() {
     let mut t = signed(&k, &notice_value("9.0.0"), INSTALLER);
     t.signature = None;
     assert_eq!(
-        check(&t, "0.1.0", &public(&k)),
+        check(&t, "0.1.0", &[public(&k)]),
         Err(UpdateError::Server(404))
     );
     for sig in [
@@ -102,7 +105,7 @@ fn an_unsigned_notice_is_refused() {
     ] {
         t.signature = Some(sig.clone().into_bytes());
         assert_eq!(
-            check(&t, "0.1.0", &public(&k)),
+            check(&t, "0.1.0", &[public(&k)]),
             Err(UpdateError::BadSignature),
             "{sig:?}"
         );
@@ -121,7 +124,7 @@ fn any_changed_bit_of_the_notice_or_the_signature_is_refused() {
         n[i] ^= 0x01;
         t.notice = Some(n);
         assert_eq!(
-            check(&t, "0.1.0", &public(&k)),
+            check(&t, "0.1.0", &[public(&k)]),
             Err(UpdateError::BadSignature)
         );
     }
@@ -131,14 +134,14 @@ fn any_changed_bit_of_the_notice_or_the_signature_is_refused() {
         s[i] = if s[i] == b'0' { b'1' } else { b'0' };
         t.signature = Some(s);
         assert_eq!(
-            check(&t, "0.1.0", &public(&k)),
+            check(&t, "0.1.0", &[public(&k)]),
             Err(UpdateError::BadSignature)
         );
     }
     // Surrounding whitespace in the signature file is fine (a trailing newline is usual).
     let mut t = signed(&k, &notice_value("9.0.0"), INSTALLER);
     t.signature = Some(format!("  {sig}\n").into_bytes());
-    assert!(matches!(check(&t, "0.1.0", &public(&k)), Ok(Some(_))));
+    assert!(matches!(check(&t, "0.1.0", &[public(&k)]), Ok(Some(_))));
 }
 
 #[test]
@@ -191,7 +194,7 @@ fn a_signed_notice_with_a_broken_field_is_refused() {
         change(&mut n);
         let t = signed(&k, &n, INSTALLER);
         assert_eq!(
-            check(&t, "0.1.0", &public(&k)),
+            check(&t, "0.1.0", &[public(&k)]),
             Err(UpdateError::BadNotice(what.to_owned())),
             "{n}"
         );
@@ -201,7 +204,7 @@ fn a_signed_notice_with_a_broken_field_is_refused() {
     t.signature = Some(to_hex(k.sign(&signed_bytes(&raw)).as_ref()).into_bytes());
     t.notice = Some(raw);
     assert_eq!(
-        check(&t, "0.1.0", &public(&k)),
+        check(&t, "0.1.0", &[public(&k)]),
         Err(UpdateError::BadNotice("json".to_owned()))
     );
 }
@@ -211,7 +214,7 @@ fn a_current_version_that_does_not_parse_offers_nothing() {
     let k = keypair();
     let t = signed(&k, &notice_value("9.0.0"), INSTALLER);
     assert!(matches!(
-        check(&t, "dev", &public(&k)),
+        check(&t, "dev", &[public(&k)]),
         Err(UpdateError::BadNotice(_))
     ));
 }
@@ -222,7 +225,10 @@ fn a_notice_larger_than_the_limit_is_not_read() {
     let mut n = notice_value("9.0.0");
     n["padding"] = json!("x".repeat(64 * 1024));
     let t = signed(&k, &n, INSTALLER);
-    assert_eq!(check(&t, "0.1.0", &public(&k)), Err(UpdateError::TooLarge));
+    assert_eq!(
+        check(&t, "0.1.0", &[public(&k)]),
+        Err(UpdateError::TooLarge)
+    );
 }
 
 #[test]
@@ -231,7 +237,7 @@ fn notes_are_capped_in_number_and_length() {
     let mut n = notice_value("9.0.0");
     n["notes"] = json!((0..30).map(|_| "א".repeat(400)).collect::<Vec<_>>());
     let t = signed(&k, &n, INSTALLER);
-    let info = check(&t, "0.1.0", &public(&k)).unwrap().unwrap();
+    let info = check(&t, "0.1.0", &[public(&k)]).unwrap().unwrap();
     assert_eq!(info.notes.len(), 20);
     assert!(info.notes.iter().all(|l| l.chars().count() == 300));
     assert_eq!(info.published, "2026-10-01");
@@ -260,7 +266,7 @@ fn an_installer_off_the_release_address_is_refused_before_it_is_fetched() {
 fn an_installer_of_another_size_or_hash_is_refused() {
     let k = keypair();
     let t = signed(&k, &notice_value("9.0.0"), INSTALLER);
-    let info = check(&t, "0.1.0", &public(&k)).unwrap().unwrap();
+    let info = check(&t, "0.1.0", &[public(&k)]).unwrap().unwrap();
     // Longer than signed: not even read past the signed size.
     let mut longer = signed(&k, &notice_value("9.0.0"), INSTALLER);
     longer.files.insert(
@@ -304,7 +310,7 @@ proptest! {
         let k = keypair();
         let v = |(a, b, c): (u32, u32, u32)| format!("{a}.{b}.{c}");
         let t = signed(&k, &notice_value(&v(new)), INSTALLER);
-        let got = check(&t, &v(now), &public(&k)).unwrap();
+        let got = check(&t, &v(now), &[public(&k)]).unwrap();
         prop_assert_eq!(got.is_some(), new > now, "{} vs {}", v(new), v(now));
     }
 
@@ -320,10 +326,15 @@ proptest! {
     /// A key file holds exactly 64 hex digits on its first line that is not a comment.
     #[test]
     fn key_files_parse_only_with_exactly_32_bytes(hex in "[0-9a-fA-F]{0,70}", junk in "\\PC{0,20}") {
-        let key = parse_key(&format!("# public key\n\n  {hex}  \n{junk}"));
+        let key = parse_key(&format!("# public key\n\n  {hex}  \n# {junk}"));
         prop_assert_eq!(key.is_some(), hex.len() == 64);
         if let Some(k) = key {
             prop_assert_eq!(to_hex(&k), hex.to_lowercase());
+        }
+        // A line that is neither a key nor a comment makes the whole file pin nothing.
+        if !junk.trim().is_empty() && !junk.trim().starts_with('#') {
+            let file = format!("{hex}\n{junk}");
+            prop_assert!(parse_key(&file).is_none());
         }
     }
 
@@ -333,4 +344,32 @@ proptest! {
         prop_assert_eq!(parse_version(&format!("v{a}.{b}.{c}")), Some((a, b, c)));
         prop_assert_eq!(parse_version(&format!("{a}.{b}.{c}.0")), None);
     }
+}
+
+/// SEC5: two keys are pinned, the one in use and the next. A notice signed with either is
+/// accepted; a third key, or a key file that is not all keys, pins nothing.
+#[test]
+fn a_notice_signed_with_the_next_key_is_accepted_and_a_bad_key_file_pins_nothing() {
+    use dv_egress::update::{parse_keys, MAX_KEYS};
+    let (now, next, stranger) = (keypair(), keypair(), keypair());
+    let pinned = [public(&now), public(&next)];
+    for k in [&now, &next] {
+        let t = signed(k, &notice_value("9.0.0"), INSTALLER);
+        assert!(matches!(check(&t, "0.1.0", &pinned), Ok(Some(_))));
+    }
+    let t = signed(&stranger, &notice_value("9.0.0"), INSTALLER);
+    assert_eq!(check(&t, "0.1.0", &pinned), Err(UpdateError::BadSignature));
+    assert_eq!(check(&t, "0.1.0", &[]), Err(UpdateError::BadSignature));
+
+    let line = |k: &[u8; 32]| to_hex(k);
+    let two = format!("# keys\n{}\n{}\n", line(&pinned[0]), line(&pinned[1]));
+    assert_eq!(parse_keys(&two), pinned.to_vec());
+    let three = format!("{two}{}\n", line(&public(&stranger)));
+    assert!(parse_keys(&three).is_empty(), "more than {MAX_KEYS} keys");
+    assert!(parse_keys(&format!("{two}not a key\n")).is_empty());
+    assert_eq!(
+        dv_egress::update::pinned_keys().len(),
+        1,
+        "this build pins one key"
+    );
 }
