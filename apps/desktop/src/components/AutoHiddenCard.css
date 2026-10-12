@@ -45,3 +45,11 @@
   font-size: var(--text-base);
   max-width: 170px;
 }
+.auto-more > summary {
+  cursor: pointer;
+  padding: 4px 2px;
+  color: var(--ink-muted);
+}
+.auto-more[open] > summary {
+  margin-bottom: 6px;
+}
