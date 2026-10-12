@@ -96,3 +96,30 @@ fn every_lexicon_name_is_hidden_where_it_can_only_be_a_name() {
 
 /// Only names the lexicon already has, so it is close to 1; stage C measures names it lacks.
 const FLOOR_NAMES: f64 = 0.9995;
+
+/// "מספרת" is a hair salon and also "tells". The verb keeps the word after it; a salon's name
+/// is still left out.
+#[test]
+fn tells_keeps_the_next_word_and_a_salon_name_is_still_left_out() {
+    let ids = child();
+    let ctx = PrivacyContext {
+        case_id: "c",
+        identities: &ids,
+        practitioner: &[],
+        allowlisted: &|_: &str| false,
+        confirmed_names: &|_: &str| false,
+        past_names: &|_: &str| false,
+        today: (2026, 10, 9),
+    };
+    for text in [
+        "הגננת מספרת שבמפגש הבוקר היא מתקשה.",
+        "האם מספרת שבבית היא רגועה.",
+        "המורה מספרת על קושי במעברים.",
+        "היא מספרת כי בגן קשה לה.",
+    ] {
+        let out = filter(text, &ctx).unwrap();
+        assert_eq!(out.tagged, text, "nothing is dropped");
+    }
+    let out = filter("אמה עובדת במספרת רוזמרין בעיר.", &ctx).unwrap();
+    assert!(!out.tagged.contains("רוזמרין"), "{}", out.tagged);
+}

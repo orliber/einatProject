@@ -96,6 +96,31 @@ pub fn best(docs: &[&str], query: &str, budget: usize) -> Vec<usize> {
     order
 }
 
+/// The passages of a long material that bear on `query`, within `words` words (G4): the best
+/// first, then kept in their order. A passage that shares no word with the query is left out;
+/// when none shares a word, all are kept (nothing to go by).
+#[must_use]
+pub fn within_words(passages: &[&str], query: &str, words: usize) -> Vec<usize> {
+    let scores = bm25(passages, query);
+    if scores.iter().all(|s| *s <= 0.0) {
+        return (0..passages.len()).collect();
+    }
+    let mut order: Vec<usize> = (0..passages.len()).filter(|i| scores[*i] > 0.0).collect();
+    order.sort_by(|a, b| scores[*b].total_cmp(&scores[*a]).then(a.cmp(b)));
+    let mut used = 0;
+    let mut out = Vec::new();
+    for i in order {
+        let n = passages[i].split_whitespace().count();
+        if !out.is_empty() && used + n > words {
+            continue;
+        }
+        used += n;
+        out.push(i);
+    }
+    out.sort_unstable();
+    out
+}
+
 /// A paragraph of her reports is shown next to a draft only with at least this many words.
 const MIN_SIMILAR_WORDS: usize = 8;
 /// A paragraph from the same section scores this much more.
@@ -174,5 +199,22 @@ mod tests {
     fn tags_and_numbers_never_match() {
         let s = bm25(&["[ילד] קיבל 12"], "[ילד] 12");
         assert!(s[0].abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn a_long_material_keeps_what_bears_on_the_section_within_the_budget() {
+        let passages = [
+            "בגן הוא משחק עם חברים ומשתף בצעצועים.",
+            "ההריון והלידה עברו ללא סיבוכים מיוחדים.",
+            "בחצר הגן הוא מעדיף משחק ליד חברים ולא איתם.",
+            "הוא אוכל מגוון מצומצם של מאכלים.",
+        ];
+        assert_eq!(within_words(&passages, "גן חברים משחק", 100), vec![0, 2]);
+        let one = within_words(&passages, "גן חברים משחק", 8);
+        assert!(
+            one == vec![0] || one == vec![2],
+            "the best one only: {one:?}"
+        );
+        assert_eq!(within_words(&passages, "מטוס", 100), vec![0, 1, 2, 3]);
     }
 }

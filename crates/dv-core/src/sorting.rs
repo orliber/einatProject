@@ -51,6 +51,78 @@ fn fingerprint(text: &str) -> u64 {
     h.finish()
 }
 
+/// A material sent whole to a section is cut to the passages that bear on it above this many
+/// words (G4), within [`TRIM_WORDS`]. Less of the case leaves, and the request is shorter.
+const TRIM_ABOVE: usize = 700;
+const TRIM_WORDS: usize = 500;
+
+/// Words a passage about each section tends to use, besides its title (G4).
+const SECTION_WORDS: &[(&str, &str)] = &[
+    (
+        "referral",
+        "הפניה פנו פנייה סיבה קושי קשיים שאלה בקשה אבחון",
+    ),
+    (
+        "background",
+        "הריון לידה שבוע משקל התפתחות ישב הלך מילים ראשונות אכילה שינה בריאות רפואי",
+    ),
+    (
+        "parents_view",
+        "בבית הורים אמא אבא התנהגות משחק אחים שינה אכילה מעברים כעס",
+    ),
+    (
+        "kindergarten",
+        "גן גננת סייעת כיתה מורה חברים חצר מפגש פעילות קבוצה בית ספר",
+    ),
+    (
+        "prior_assessments",
+        "אבחון טיפול קלינאית ריפוי בעיסוק נוירולוג פסיכולוג הערכה דוח",
+    ),
+    (
+        "appearance",
+        "הגיע נכנס חדר מפגש קשר עין הופעה שיתף פעולה נפרד התרשמות",
+    ),
+    (
+        "cognitive",
+        "משימה מבחן ציון קשב ריכוז זיכרון חשיבה הבנה מילולי חזותי",
+    ),
+    (
+        "adaptive",
+        "שאלון הסתגלות עצמאות התלבשות אכילה מיומנויות יומיום",
+    ),
+    (
+        "communication",
+        "תקשורת שפה דיבור קשר עין הדדיות שיח משפטים אוצר מילים מחוות",
+    ),
+    (
+        "emotional",
+        "רגשי משחק סמלי ויסות תסכול חרדה פחד ביטחון עצמי רגשות",
+    ),
+];
+
+/// The passages of a long material sent whole to `section_key` that bear on it, or `None`
+/// when it is short, cut into few passages, or the section has no words to go by (G4).
+pub(crate) fn trimmed(content: &str, section_key: &str, title: &str) -> Option<(Vec<u32>, usize)> {
+    if content.split_whitespace().count() <= TRIM_ABOVE {
+        return None;
+    }
+    let words = SECTION_WORDS.iter().find(|(k, _)| *k == section_key)?.1;
+    let ranges = passage_ranges(content);
+    if ranges.len() < 3 {
+        return None;
+    }
+    let passages: Vec<&str> = ranges.iter().map(|r| &content[r.clone()]).collect();
+    let keep = dv_style::retrieve::within_words(&passages, &format!("{title} {words}"), TRIM_WORDS);
+    if keep.len() == passages.len() {
+        return None;
+    }
+    let chosen = keep
+        .into_iter()
+        .filter_map(|i| u32::try_from(i + 1).ok())
+        .collect();
+    Some((chosen, passages.len()))
+}
+
 /// What goes from one material to one section, filtered with the whole material as context.
 /// `None` when nothing goes. Falls back to the whole material when the passages cannot be cut
 /// safely (a name across an edge).

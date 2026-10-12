@@ -1966,6 +1966,65 @@ fn address_fields(text: &str) -> Vec<Replacement> {
     out
 }
 
+/// Is "מספרת" at `i` the verb ("tells")? A speaker right before it (a tag, a pronoun, a
+/// person's role) or a clause right after it ("ש…" with a prefix, "כי", "על", "לי").
+fn telling(text: &str, tokens: &[Token], i: usize) -> bool {
+    const SPEAKERS: &[&str] = &[
+        "היא",
+        "אמה",
+        "אמו",
+        "האם",
+        "האמא",
+        "אמא",
+        "הגננת",
+        "גננת",
+        "המורה",
+        "הסייעת",
+        "המטפלת",
+        "הקלינאית",
+        "המרפאה",
+        "הסבתא",
+        "האחות",
+        "המחנכת",
+        "ההורים",
+        "היועצת",
+    ];
+    const AFTER: &[&str] = &[
+        "כי",
+        "על",
+        "את",
+        "לי",
+        "לנו",
+        "לה",
+        "לו",
+        "להם",
+        "גם",
+        "היום",
+        "שהוא",
+        "שהיא",
+        "שלא",
+        "שיש",
+        "שאין",
+        "שהם",
+        "שלפעמים",
+        "שכאשר",
+        "שלאחרונה",
+    ];
+    let tag_before = text[..tokens[i].start].trim_end().ends_with(']');
+    let before = tag_before
+        || i.checked_sub(1)
+            .and_then(|j| tokens.get(j))
+            .is_some_and(|t| SPEAKERS.contains(&t.norm.as_str()));
+    let after = tokens.get(i + 1).is_some_and(|t| {
+        let n = t.norm.as_str();
+        AFTER.contains(&n)
+            || n.strip_prefix('ש')
+                .and_then(|r| r.chars().next())
+                .is_some_and(|c| matches!(c, 'ב' | 'ה'))
+    });
+    before || after
+}
+
 /// "גן השקד", "בגן \"הרימונים\"", "בית ספר \"אופקים חדשים\"", "בית הספר ע\"ש רבין": the name
 /// after a word for a kindergarten or a school, as a replacement that leaves it out.
 fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
@@ -2049,6 +2108,10 @@ fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
         } else {
             (None, false)
         };
+        // "מספרת" is a hair salon and also "tells": "הגננת מספרת שבמפגש…" dropped the word
+        // after it. The verb has a speaker before it or a clause after it.
+        let end_word =
+            end_word.filter(|_| !(tokens[i].norm == "מספרת" && telling(text, tokens, i)));
         let Some(k) = end_word else {
             i += 1;
             continue;
