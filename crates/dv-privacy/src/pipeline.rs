@@ -1904,6 +1904,14 @@ const INSTITUTION_STOP: &[&str] = &[
     "האזורית",
 ];
 
+/// Where the values of address fields are, for the gate.
+pub(crate) fn address_field_spans(text: &str) -> Vec<(usize, usize)> {
+    address_fields(text)
+        .into_iter()
+        .map(|r| (r.start, r.end))
+        .collect()
+}
+
 fn address_fields(text: &str) -> Vec<Replacement> {
     const LABELS: &[&str] = &["כתובת", "כתובת מגורים", "כתובת המשפחה", "כתובת הבית", "מען"];
     let mut out = Vec::new();

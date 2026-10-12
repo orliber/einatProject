@@ -224,8 +224,11 @@ static COMPILED: LazyLock<Result<Compiled, regex::Error>> = LazyLock::new(|| {
         // Digits joined by at most one - / . between them (IDs, phones, file numbers). No spaces,
         // so score lists such as "12 13 9" are never merged.
         digit_run: Regex::new(r"\+?\d(?:[\-./]?\d)+")?,
+        // A phone typed in groups. Between them a space (also a non-breaking one), a hyphen or
+        // any dash ("054‑1234567" with a non-breaking hyphen, "054–1234567"); the area code
+        // may be in parentheses ("(054) 123-4567", "(03)1234567"), and then it is part of it.
         spaced_phone: Regex::new(
-            r"(?:\+972[\s\-]?|0)(?:5\d|[2-4]|[89]|7\d)[\s\-]\d{3}[\s\-]?\d{4}",
+            r"(?:(?:\+972[\s\-‐-―−]?|0)(?:5\d|[2-4]|[89]|7\d)[\s\-‐-―−]|(?:\+972\s?)?\(\s?0?(?:5\d|[2-4]|[89]|7\d)\s?\)[\s\-‐-―−]?)\d{3}[\s\-‐-―−]?\d{4}",
         )?,
         // ID numbers typed in groups ("000 000 018", "0000-0001-8").
         spaced_id: Regex::new(r"\d{3,4}[\s\-]\d{3,4}[\s\-]\d{1,3}")?,
@@ -889,6 +892,32 @@ mod tests {
                 PatternKind::Number
             ]
         );
+    }
+
+    #[test]
+    fn phones_with_the_area_code_in_parentheses_or_other_dashes_are_hidden_whole() {
+        for text in [
+            "טלפון (054) 123-4567 בערב",
+            "טלפון (054)1234567 בערב",
+            "טלפון (03) 1234567 בערב",
+            "טלפון 054\u{2011}1234567 בערב",
+            "טלפון 054\u{2013}123\u{2013}4567 בערב",
+            "טלפון 054\u{00A0}123\u{00A0}4567 בערב",
+            "טלפון +972 (54) 123-4567 בערב",
+        ] {
+            let hits = kinds(text);
+            assert_eq!(hits.len(), 1, "{text}: {hits:?}");
+            assert_eq!(hits[0].1, PatternKind::Phone, "{text}");
+            let start = text
+                .find(|c: char| c == '(' || c == '+' || c.is_ascii_digit())
+                .unwrap();
+            let end = text.rfind(|c: char| c.is_ascii_digit()).unwrap() + 1;
+            assert_eq!(hits[0].0, &text[start..end], "{text}: the whole number");
+        }
+        // Score ranges with a dash are not phones.
+        assert!(kinds("טווח ממוצע 85–115, ציון 92")
+            .iter()
+            .all(|h| h.1 != PatternKind::Phone));
     }
 
     #[test]
