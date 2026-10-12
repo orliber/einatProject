@@ -186,6 +186,12 @@ pub fn prefix_splits(norm: &str) -> Vec<(usize, String)> {
         }
         if is_valid_prefix(&chars[..n].iter().collect::<String>()) {
             out.push((n, chars[n..].iter().collect()));
+            // A prefix before a quoted word: ל"נועם", ב״גן הדקל״, ו'מיכל'. The tokenizer keeps
+            // the opening quote inside the word, and the quote counts as one more character
+            // split off, so the remainder still starts where the name does.
+            if chars.len() >= n + 3 && matches!(chars[n], '"' | '\'') {
+                out.push((n + 1, chars[n + 1..].iter().collect()));
+            }
         }
     }
     out

@@ -652,3 +652,53 @@ fn digits_of_other_scripts_and_full_width_forms_are_read_as_what_they_show() {
     let mail = ["ruth", "\u{FF20}", "example.org"].concat();
     assert_hidden(&format!("מייל {mail}"), &mail);
 }
+
+// ---------------------------------------------------------------- quotes glued to a name
+
+/// A name in quotes, after a prefix and a quote, or with an English possessive. The tokenizer
+/// keeps a final geresh and an opening quote in a word (for "ג'ורג'", "ד\"ר"), so "'נועם'"
+/// was the word "נועמ'" and "ל\"נועם\"" the word "ל\"נועמ": neither matched a name, and both
+/// cleared the gate raw.
+#[test]
+fn a_closing_quote_or_possessive_glued_to_a_name_does_not_hide_it() {
+    let ids = identities();
+    for (text, expected) in [
+        ("'נועם' הגיע.", "'[ילד]' הגיע."),
+        ("\u{2018}נועם\u{2019} הגיע.", "\u{2018}[ילד]\u{2019} הגיע."),
+        ("הגננת 'אביטל' אמרה.", "הגננת '[גננת]' אמרה."),
+        ("ול'אביטל' אמרתי.", "ול'[גננת]' אמרתי."),
+        // A prefix before a quoted name, as Hebrew writes it.
+        ("אמרתי ל\"נועם\" שלום.", "אמרתי ל\"[ילד]\" שלום."),
+        ("אמרתי ל״נועם״ שלום.", "אמרתי ל״[ילד]״ שלום."),
+        (
+            "אמרתי ל\u{201C}נועם\u{201D} שלום.",
+            "אמרתי ל\u{201C}[ילד]\u{201D} שלום.",
+        ),
+        ("ו\"אביטל\" אמרה.", "ו\"[גננת]\" אמרה."),
+        ("כש\"רותם\" הגיעה.", "כש\"[אם]\" הגיעה."),
+        ("שוחחתי עם 'ד\"ר אבנר שטרן'.", "שוחחתי עם '[רופא_1]'."),
+        ("with Noam's mother", "with [ילד]'s mother"),
+        ("'רותם', 'עידו'.", "'[אם]', '[אב]'."),
+    ] {
+        assert!(gate_text(text, &ids, CASE).is_err(), "raw cleared: {text}");
+        let out = filter(text, &ctx(&ids, CASE)).unwrap();
+        assert_eq!(out.tagged, expected, "{text}");
+        assert!(gate_text(&out.tagged, &ids, CASE).is_ok(), "{}", out.tagged);
+        // Restoring gives back the text, quotes in place ("Noam" comes back as the declared
+        // Hebrew name, as any alias does).
+        let restored = dv_privacy::restore::restore(&out.tagged, &ids, None);
+        assert_eq!(restored, text.replace("Noam", "נועם"));
+    }
+    // A lexicon name in quotes is hidden and refused raw too.
+    let text = "שיחק עם 'יובל' בחצר.";
+    assert!(gate_text(text, &ids, CASE).is_err());
+    let out = filter(text, &ctx(&ids, CASE)).unwrap();
+    assert!(!out.tagged.contains("יובל"), "{}", out.tagged);
+    // An abbreviation with a geresh is no closing quote: "טל'" (phone) stays as written.
+    let text = "טל' 03 בבית, ומס' החדר 4.";
+    assert_eq!(filter(text, &ctx(&ids, CASE)).unwrap().tagged, text);
+    // Names that end in a geresh keep matching as written.
+    let ids = vec![id("c", Role::Child, "[ילד]", "ג'ורג'", &[])];
+    let out = filter("ג'ורג' ו'ג'ורג'' הגיעו.", &ctx(&ids, "c")).unwrap();
+    assert!(!out.tagged.contains("ורג"), "{}", out.tagged);
+}
