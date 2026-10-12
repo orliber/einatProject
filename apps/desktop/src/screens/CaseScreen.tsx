@@ -14,6 +14,7 @@ import { DetailsView } from "./case/DetailsView";
 import { ReportView } from "./case/ReportView";
 import { FinishView } from "./case/FinishView";
 import { isCombo, KEYS } from "../shortcuts";
+import { useKept } from "../kept";
 import "./CaseScreen.css";
 import { useAi } from "../ai";
 
@@ -85,7 +86,9 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   }, [detail]);
   const [error, setError] = useState<string | null>(null);
   const [review, setReview] = useState<{ r: ReviewRequest; done: (sent: boolean) => void; failed: (e: unknown) => void } | null>(null);
-  const [jobs, setJobs] = useState<Job[]>([]);
+  // Kept while she is in another case or screen: the requests still running there, so they
+  // show (and one section is not asked twice) when she comes back.
+  const [jobs, setJobs] = useKept<Job[]>(`case:${caseId}:jobs`, []);
   const [exporting, setExporting] = useState(false);
   const [fullDraft, setFullDraft] = useState(false);
   /** A section to bring into view on the report page. */
@@ -147,7 +150,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [caseId, go]);
 
-  const [failures, setFailures] = useState<{ id: number; label: string; section?: string; message: string }[]>([]);
+  const [failures, setFailures] = useKept<{ id: number; label: string; section?: string; message: string }[]>(`case:${caseId}:failures`, []);
 
   const track = useCallback(
     async <T,>(job: { label: string; task: Task; section?: string; approval?: string }, run: () => Promise<T>): Promise<T> => {
@@ -167,7 +170,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         setJobs((js) => js.filter((x) => x.id !== j.id));
       }
     },
-    [status.speed, status.demo_mode, notify, fail],
+    [status.speed, status.demo_mode, notify, fail, setJobs, setFailures],
   );
 
   const startReview = useCallback(

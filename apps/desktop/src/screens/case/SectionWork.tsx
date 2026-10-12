@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useKept } from "../../kept";
 import { useApp } from "../../App";
 import { ipc, type CaseDetail, type ChatView, type ParagraphCheck, type SectionResult } from "../../ipc/client";
 import { useQuery } from "@tanstack/react-query";
@@ -32,8 +33,12 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   const ai = useAi();
   const { caseId, reload } = api;
   const [chat, setChat] = useState<ChatView[]>([]);
-  const [last, setLast] = useState<SectionResult | null>(null);
-  const [message, setMessage] = useState("");
+  // Kept while she works in another section or screen (the answer arrives there too):
+  // the request she typed, the one on its way, and what came back with the last answer.
+  const keep = `case:${caseId}:section:${section.key}`;
+  const [last, setLast] = useKept<SectionResult | null>(`${keep}:last`, null);
+  const [message, setMessage] = useKept(`${keep}:message`, "");
+  const [asked, setAsked] = useKept<string | null>(`${keep}:asked`, null);
   const chatHint = `${useRotatingPlaceholder(DRAFT_HINTS, message.length > 0)} · שמות יוסתרו אוטומטית`;
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
@@ -46,7 +51,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   /** Paragraphs whose sources are open ("למה כתבת את זה?", AI-7). */
   const [why, setWhy] = useState<string | null>(null);
   /** What the check against the sources said, per proposed paragraph (until the draft changes). */
-  const [checks, setChecks] = useState<Map<string, ParagraphCheck>>(new Map());
+  const [checks, setChecks] = useKept<Map<string, ParagraphCheck>>(`${keep}:checks`, new Map());
   const verifyOn = useQuery({ queryKey: ["verify-stage"], queryFn: ipc.verifyStageOn }).data === true;
   const chatEnd = useRef<HTMLDivElement>(null);
 
@@ -94,12 +99,14 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
         prepared,
         reprepare: prepare,
         onSend: async (id) => {
+          setAsked(instruction);
           const result = await api.track(
             { label: replaces ? `${ai} מנסח את הפסקה מחדש` : `${ai} כותב את "${section.title}"`, task: "draft", section: section.key, approval: id },
             () => ipc.sendSection(id),
-          );
+          ).finally(() => setAsked(null));
           setLast(result);
-          setMessage("");
+          // Only the request that was sent is cleared, not one she typed meanwhile.
+          setMessage((m) => (m === instruction ? "" : m));
           await Promise.all([reload(), loadChat()]);
           if (result.demo) notify("מצב הדגמה: התשובה נבנתה במחשב מתוך החומרים, ושום דבר לא נשלח.");
         },
@@ -454,6 +461,12 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                   <span>{m.text}</span>
                 </div>
               ),
+            )}
+            {job && asked && (
+              <div className="msg-user">
+                <div className="bubble-user">{asked}</div>
+                <span className="shield-line">נשלחה, מחכה לתשובה</span>
+              </div>
             )}
             {job && <div className="bubble-claude muted"><Spinner /> כותב…</div>}
             <div ref={chatEnd} />

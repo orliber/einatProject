@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { getKept, useKept } from "../kept";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
 import { TopBar } from "../components/TopBar";
@@ -71,21 +72,23 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   const cases = useQuery({ queryKey: ["cases"], queryFn: ipc.listCases });
   const saved = useQuery({ queryKey: ["consultations"], queryFn: ipc.consultations });
   // The case a new conversation is about (null: a general question).
-  const [scope, setScope] = useState<string | null>(caseId ?? null);
-  const [conversation, setConversation] = useState<string | null>(null);
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [waitingSince, setWaitingSince] = useState<number | null>(null);
-  const [sending, setSending] = useState<string | null>(null);
+  // Kept while she works elsewhere: a question on its way, and its answer, are here when she
+  // comes back (the answer arrives even if this screen is closed).
+  const [scope, setScope] = useKept<string | null>("consult:scope", caseId ?? null);
+  const [conversation, setConversation] = useKept<string | null>("consult:conversation", null);
+  const [turns, setTurns] = useKept<Turn[]>("consult:turns", []);
+  const [message, setMessage] = useKept("consult:message", "");
+  const [busy, setBusy] = useKept("consult:busy", false);
+  const [waitingSince, setWaitingSince] = useKept<number | null>("consult:waiting", null);
+  const [sending, setSending] = useKept<string | null>("consult:sending", null);
   const hint = `${useRotatingPlaceholder(CONSULT_HINTS, message.length > 0)} · שמות יוסתרו אוטומטית`;
-  const [review, setReview] = useState<{ prepared: Prepared; text: string } | null>(null);
+  const [review, setReview] = useKept<{ prepared: Prepared; text: string } | null>("consult:review", null);
   // A question typed (or waiting in the review) is kept in the vault if it locks meanwhile.
   const typed = message.trim() ? message : (review?.text ?? null);
   useHoldUnsaved(scope, `שאלה בשיחה עם ${ai}`, typed, "consult");
   const [copied, setCopied] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<ConsultationSummary | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useKept<string | null>("consult:error", null);
   const end = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const caseList = cases.data ?? [];
@@ -110,6 +113,16 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
     setError(null);
     input.current?.focus();
   }
+
+  // Opened from another case: a new conversation about it, unless a question is still on its way.
+  useEffect(() => {
+    if (caseId === undefined || caseId === getKept<string | null>("consult:scope", null)) return;
+    if (getKept("consult:busy", false) || getKept<number | null>("consult:waiting", null) !== null || getKept<unknown>("consult:review", null) !== null) return;
+    setConversation(null);
+    setTurns([]);
+    setScope(caseId);
+    setError(null);
+  }, [caseId, setConversation, setTurns, setScope, setError]);
 
   async function open(c: ConsultationSummary) {
     setError(null);

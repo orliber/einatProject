@@ -6,7 +6,9 @@
 //!   binaries from entering the repository (pre-commit hook and CI).
 //! * `cargo xtask update-keygen` / `update-notice …` – signed updates, on the developer's
 //!   computer only (D-033, `scripts/release.sh`).
+//! * `cargo xtask ci [--e2e] [--rust|--ui]` – the CI checks, on this computer, in one command.
 
+mod ci;
 mod invariants;
 mod israeli_id;
 mod release;
@@ -64,11 +66,12 @@ fn main() -> ExitCode {
                 Err(e) => report("scan", &[format!("could not run: {e}")]),
             }
         }
+        Some("ci") => report("ci", &ci::run_all(&root, &args[1..])),
         Some("update-keygen") => done("update-keygen", release::keygen(&root)),
         Some("update-notice") => done("update-notice", release::notice(&root, &args[1..])),
         _ => report(
             "usage",
-            &["cargo xtask check-invariants | cargo xtask scan [--staged|--all]".to_owned()],
+            &["cargo xtask check-invariants | cargo xtask scan [--staged|--all] | cargo xtask ci [--e2e] [--rust|--ui]".to_owned()],
         ),
     }
 }

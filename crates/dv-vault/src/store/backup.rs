@@ -24,6 +24,7 @@ use zeroize::Zeroizing;
 use super::{master_key, now, Keys, Secret, Vault, AUDIT_DB, IDENTITY_DB, MAIN_DB};
 use crate::audit::AuditEvent;
 use crate::crypto::{hex, open, random_id, seal, Key32};
+use crate::db::open_encrypted;
 use crate::header::{VaultHeader, HEADER_FILE};
 use crate::VaultError;
 
@@ -142,6 +143,28 @@ fn parse(backup: &[u8]) -> Result<Parsed<'_>, VaultError> {
 }
 
 /// Remove scratch folders that a crash may have left behind (they hold only encrypted copies).
+/// The container's files, by name; exactly the three databases.
+fn entries(container: &[u8]) -> Result<Vec<(String, &[u8])>, VaultError> {
+    let mut rest: &[u8] = container;
+    let mut files = Vec::new();
+    while !rest.is_empty() {
+        let name_len = u32_at(&mut rest)?;
+        let name = std::str::from_utf8(take(&mut rest, name_len)?)
+            .map_err(|_| corrupt("name"))?
+            .to_owned();
+        let len = u64_at(&mut rest)?;
+        files.push((name, take(&mut rest, len)?));
+    }
+    let mut names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
+    names.sort_unstable();
+    let mut expected = FILES.to_vec();
+    expected.sort_unstable();
+    if names != expected {
+        return Err(corrupt("unexpected contents"));
+    }
+    Ok(files)
+}
+
 pub(super) fn remove_stale_scratch(dir: &Path) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
@@ -149,7 +172,9 @@ pub(super) fn remove_stale_scratch(dir: &Path) {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if (name.starts_with(".backup-") || name.starts_with(".drill-"))
+        if (name.starts_with(".backup-")
+            || name.starts_with(".drill-")
+            || name.starts_with(".verify-"))
             && entry.file_type().is_ok_and(|t| t.is_dir())
         {
             let _ = fs::remove_dir_all(entry.path());
@@ -233,23 +258,7 @@ impl Vault {
         )
         .map_err(|_| VaultError::Integrity("the backup was changed or is not from this vault"))?;
 
-        let mut rest: &[u8] = &container;
-        let mut files = Vec::new();
-        while !rest.is_empty() {
-            let name_len = u32_at(&mut rest)?;
-            let name = std::str::from_utf8(take(&mut rest, name_len)?)
-                .map_err(|_| corrupt("name"))?
-                .to_owned();
-            let len = u64_at(&mut rest)?;
-            files.push((name, take(&mut rest, len)?));
-        }
-        let mut names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
-        names.sort_unstable();
-        let mut expected = FILES.to_vec();
-        expected.sort_unstable();
-        if names != expected {
-            return Err(corrupt("unexpected contents"));
-        }
+        let files = entries(&container)?;
 
         fs::create_dir_all(target)?;
         let opened = (|| -> Result<Vault, VaultError> {
@@ -306,5 +315,68 @@ impl Vault {
             &serde_json::json!({ "cases": check.cases, "ok": check.integrity_ok }),
         )?;
         Ok(check)
+    }
+
+    /// Read back a backup this vault has just written, from the disk it went to, and open it:
+    /// the seal, each database with its own key (`PRAGMA integrity_check`), and as many cases
+    /// as the vault has now. Needs no password, so it runs after every backup, automatic ones
+    /// too. The snapshots are opened in a scratch folder next to the vault, still encrypted,
+    /// and removed.
+    pub fn verify_backup_file(&mut self, path: &Path) -> Result<BackupCheck, VaultError> {
+        let bytes = fs::read(path)?;
+        let parsed = parse(&bytes)?;
+        if parsed.header.vault_id != self.header.vault_id {
+            return Err(VaultError::Integrity("the backup is not from this vault"));
+        }
+        let container = open(
+            &self.keys.backup,
+            &aad(&parsed.header.vault_id, parsed.created_at),
+            parsed.sealed,
+        )
+        .map_err(|_| VaultError::Integrity("the backup was changed or is not from this vault"))?;
+        let files = entries(&container)?;
+        let scratch = self.dir.join(format!(".verify-{}", random_id()?));
+        fs::create_dir(&scratch)?;
+        let opened = (|| -> Result<i64, VaultError> {
+            let mut cases = None;
+            for (name, data) in &files {
+                let key = match name.as_str() {
+                    MAIN_DB => &self.keys.db_main,
+                    IDENTITY_DB => &self.keys.db_identity,
+                    _ => &self.keys.db_audit,
+                };
+                let file = scratch.join(name);
+                fs::write(&file, data)?;
+                let conn = open_encrypted(&file, key)?;
+                let check: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
+                if check != "ok" {
+                    return Err(VaultError::Integrity("a database in the backup is damaged"));
+                }
+                if name == MAIN_DB {
+                    cases = Some(conn.query_row("SELECT count(*) FROM cases", [], |r| r.get(0))?);
+                }
+            }
+            cases.ok_or_else(|| corrupt("no main database"))
+        })();
+        let _ = fs::remove_dir_all(&scratch);
+        let cases = opened?;
+        let live: i64 = self
+            .main
+            .query_row("SELECT count(*) FROM cases", [], |r| r.get(0))?;
+        if cases != live {
+            return Err(VaultError::Integrity(
+                "the backup holds fewer cases than the vault",
+            ));
+        }
+        self.record(
+            AuditEvent::BackupChecked,
+            None,
+            &serde_json::json!({ "cases": cases, "ok": true, "auto": true }),
+        )?;
+        Ok(BackupCheck {
+            created_at: parsed.created_at,
+            cases: u32::try_from(cases).unwrap_or(u32::MAX),
+            integrity_ok: true,
+        })
     }
 }
