@@ -392,12 +392,16 @@ struct Floor {
 // Stage 3 (2026-10-04): no questions; names found are kept with the case. Adjacent hides
 // count as one (stage 2 on that count: dev 2.6, test 4.9 per 1,000). Test gains 5 names
 // for 4 more false hides (5.3), from names carried to the case's later documents.
+// Strong contexts for names that are also words (2026-10-11, pipeline/context.rs): dev
+// name .852 → .931, place .887 → .925 at the same false hides; test (not looked at) name
+// .860 → .891, place .733 → .800 for one more false hide and two more words kept as names.
+// Leaks weigh more than false hides, so the trade is taken.
 const DEV_FLOOR: Floor = Floor {
     min_recall: &[
         ("decl", 1.0),
-        ("name", 0.85),
+        ("name", 0.93),
         ("surname", 1.0),
-        ("place", 0.88),
+        ("place", 0.92),
         ("inst", 0.82),
         ("num", 1.0),
         ("date", 1.0),
@@ -408,14 +412,14 @@ const DEV_FLOOR: Floor = Floor {
 const TEST_FLOOR: Floor = Floor {
     min_recall: &[
         ("decl", 0.99),
-        ("name", 0.86),
+        ("name", 0.89),
         ("surname", 0.96),
-        ("place", 0.73),
+        ("place", 0.80),
         ("inst", 0.68),
         ("num", 1.0),
         ("date", 1.0),
     ],
-    max_false_per_1000: 5.3,
+    max_false_per_1000: 5.42,
 };
 
 fn check(split: &str, r: &Report, floor: &Floor) -> Vec<String> {
@@ -717,8 +721,8 @@ const DEV_FLOW: FlowFloor = FlowFloor {
 const TEST_FLOW: FlowFloor = FlowFloor {
     max_blocked: 0,
     max_dead_ends: 0,
-    max_kept_wrong: 65,
-    max_false_per_1000: 8.74,
+    max_kept_wrong: 67,
+    max_false_per_1000: 8.90,
 };
 const HARD_FLOW: FlowFloor = FlowFloor {
     max_blocked: 0,
