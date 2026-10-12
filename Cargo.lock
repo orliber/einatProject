@@ -1135,6 +1135,7 @@ name = "dv-ipc"
 version = "0.5.1"
 dependencies = [
  "serde",
+ "serde_json",
  "ts-rs",
 ]
 
