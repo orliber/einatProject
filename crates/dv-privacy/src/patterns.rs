@@ -200,6 +200,7 @@ struct Compiled {
     digit_run: Regex,
     spaced_phone: Regex,
     spaced_id: Regex,
+    single_digits: Regex,
     num_date: Regex,
     year: Regex,
     address: Regex,
@@ -228,6 +229,8 @@ static COMPILED: LazyLock<Result<Compiled, regex::Error>> = LazyLock::new(|| {
         )?,
         // ID numbers typed in groups ("000 000 018", "0000-0001-8").
         spaced_id: Regex::new(r"\d{3,4}[\s\-]\d{3,4}[\s\-]\d{1,3}")?,
+        // Nine or ten digits one at a time, each followed by one space or hyphen.
+        single_digits: Regex::new(r"\d(?:[ \-]\d){8,9}")?,
         // Bank accounts (IBAN) and card numbers typed in groups of four.
         iban: Regex::new(r"(?i)\bIL\d{2}(?:[ \-]?\d{1,4}){3,6}")?,
         card: Regex::new(r"\d{4}(?:[ \-]\d{4}){2,3}")?,
@@ -741,6 +744,30 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
                 PatternKind::IdNumber,
                 fixed(PatternKind::IdNumber),
             );
+        }
+    }
+    // One digit at a time ("1 2 3 4 5 6 7 8 2"): a form with a box per digit, as OCR reads
+    // it. Nine digits are an ID when the check digit fits or a label is near; ten digits
+    // from 0 are a phone. Longer runs and rows of scores stay.
+    for m in c.single_digits.find_iter(text) {
+        let digits: String = m.as_str().chars().filter(char::is_ascii_digit).collect();
+        let before = text[..m.start()].trim_end_matches([' ', '-']);
+        let after = text[m.end()..].trim_start_matches([' ', '-']);
+        let alone = !before.ends_with(|ch: char| ch.is_ascii_digit())
+            && !after.starts_with(|ch: char| ch.is_ascii_digit());
+        let labelled = {
+            let from = before.char_indices().rev().nth(20).map_or(0, |(i, _)| i);
+            ["ת.ז", "ת\"ז", "ת״ז", "זהות", "ID"]
+                .iter()
+                .any(|l| before[from..].contains(l))
+        };
+        let kind = match digits.len() {
+            9 if is_valid_israeli_id(&digits) || labelled => PatternKind::IdNumber,
+            10 if digits.starts_with('0') && !digits.starts_with("00") => PatternKind::Phone,
+            _ => continue,
+        };
+        if alone {
+            push(&mut hits, m.start(), m.end(), kind, fixed(kind));
         }
     }
     // Numeric dates first, so "14.9.2025" becomes a date and not a generic number.

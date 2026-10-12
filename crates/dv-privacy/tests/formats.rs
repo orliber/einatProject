@@ -702,3 +702,57 @@ fn a_closing_quote_or_possessive_glued_to_a_name_does_not_hide_it() {
     let out = filter("ג'ורג' ו'ג'ורג'' הגיעו.", &ctx(&ids, "c")).unwrap();
     assert!(!out.tagged.contains("ורג"), "{}", out.tagged);
 }
+
+// ---------------------------------------------------------------- one digit per box
+
+/// A form with a box per digit comes out of OCR as "1 2 3 4 5 6 7 8 2". Such an ID or phone
+/// used to clear the gate raw: no rule read single digits as one number.
+#[test]
+fn an_id_or_phone_typed_one_digit_at_a_time_is_hidden() {
+    let one_by_one = |s: &str, sep: &str| {
+        s.chars()
+            .map(|c| c.to_string())
+            .collect::<Vec<_>>()
+            .join(sep)
+    };
+    let idn = valid_id("20406081");
+    let phone = mobile(8, "3141592");
+    for sep in [" ", "-"] {
+        for (text, value) in [
+            (
+                format!("ת.ז. {}", one_by_one(&idn, sep)),
+                one_by_one(&idn, sep),
+            ),
+            (
+                format!("מספר: {} .", one_by_one(&idn, sep)),
+                one_by_one(&idn, sep),
+            ),
+            (
+                format!("טלפון {}", one_by_one(&phone, sep)),
+                one_by_one(&phone, sep),
+            ),
+        ] {
+            assert_hidden(&text, &value);
+        }
+    }
+    // With a label, nine digits are an ID whatever the check digit.
+    let mut wrong = idn.clone().into_bytes();
+    wrong[8] = b'0' + (wrong[8] - b'0' + 1) % 10;
+    let wrong = String::from_utf8(wrong).unwrap();
+    assert_hidden(&format!("ת\"ז {}", one_by_one(&wrong, " ")), &wrong);
+    // A row of single-digit scores with no label and no valid check digit stays, and so
+    // do longer rows.
+    let mut row = String::from("987654321");
+    while is_valid_israeli_id(&row) {
+        row = (row.parse::<u64>().unwrap() - 1).to_string();
+    }
+    let ids = identities();
+    for text in [
+        format!("ציונים מותאמים: {}", one_by_one(&row, " ")),
+        format!("ציונים: {}", one_by_one(&format!("{idn}77"), " ")),
+    ] {
+        let out = filter(&text, &ctx(&ids, CASE)).unwrap();
+        assert_eq!(out.tagged, text);
+        assert!(gate_text(&text, &ids, CASE).is_ok(), "{text}");
+    }
+}
