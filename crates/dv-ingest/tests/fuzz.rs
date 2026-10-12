@@ -79,8 +79,78 @@ fn seeds() -> Vec<(&'static str, Vec<u8>)> {
         ("a.doc", doc),
         ("a.txt", "תצפית בדויה: הילד משחק לבד.".as_bytes().to_vec()),
         ("a.png", png),
+        ("b.docx", rich_docx()),
+        ("b.odt", rich_odt()),
+        ("b.rtf", WORD_RTF.as_bytes().to_vec()),
+        ("b.txt", CP1255_TXT.to_vec()),
     ]
 }
+
+/// A Word document with what hides around the body: headers, footnotes, comments, properties,
+/// tracked changes, hidden text, fields, a list and a table.
+fn rich_docx() -> Vec<u8> {
+    const W: &str = r#"xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main""#;
+    let body = concat!(
+        r#"<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>פריט ברשימה</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:t>נצפה </w:t></w:r><w:del><w:r><w:delText>נמחק</w:delText></w:r></w:del><w:r><w:rPr><w:vanish/></w:rPr><w:t>מוסתר</w:t></w:r></w:p>"#,
+        r#"<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText> DATE </w:instrText></w:r><w:r><w:t>שדה</w:t></w:r></w:p>"#,
+        r#"<w:tbl><w:tr><w:tc><w:p><w:r><w:t>מבחן</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>102</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"#,
+    );
+    let document =
+        format!(r#"<?xml version="1.0"?><w:document {W}><w:body>{body}</w:body></w:document>"#);
+    let header = format!("<w:hdr {W}><w:p><w:r><w:t>מכון בדוי</w:t></w:r></w:p></w:hdr>");
+    let notes = format!(
+        "<w:footnotes {W}><w:footnote><w:p><w:r><w:t>הערת שוליים בדויה</w:t></w:r></w:p></w:footnote></w:footnotes>"
+    );
+    let comments = format!("<w:comments {W}/>");
+    zip_of(&[
+        ("word/document.xml", document.as_str()),
+        ("word/header1.xml", header.as_str()),
+        ("word/footer1.xml", header.as_str()),
+        ("word/footnotes.xml", notes.as_str()),
+        ("word/comments.xml", comments.as_str()),
+        (
+            "docProps/core.xml",
+            r#"<cp:coreProperties xmlns:cp="x" xmlns:dc="y"><dc:creator>יוצר בדוי</dc:creator></cp:coreProperties>"#,
+        ),
+        (
+            "docProps/app.xml",
+            "<Properties><Company>חברה בדויה</Company></Properties>",
+        ),
+    ])
+}
+
+/// An ODT with a header in its styles, properties, a comment, a note, tracked changes and a
+/// hidden section.
+fn rich_odt() -> Vec<u8> {
+    const NS: &str = r#"xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0""#;
+    let content = format!(
+        r#"<?xml version="1.0"?><office:document-content {NS}><office:body><office:text><text:tracked-changes><text:changed-region><text:deletion><text:p>נמחק</text:p></text:deletion></text:changed-region></text:tracked-changes><text:p>גוף<text:s text:c="3"/>בדוי<office:annotation><text:p>הערה</text:p></office:annotation><text:note><text:note-body><text:p>הערה בסוף</text:p></text:note-body></text:note></text:p><text:section text:display="none"><text:p>מוסתר</text:p></text:section><table:table><table:table-row><table:table-cell><text:p>תא</text:p></table:table-cell></table:table-row></table:table></office:text></office:body></office:document-content>"#
+    );
+    let styles = format!(
+        r#"<?xml version="1.0"?><office:document-styles {NS}><office:master-styles><style:master-page><style:header><text:p>כותרת בדויה</text:p></style:header></style:master-page></office:master-styles></office:document-styles>"#
+    );
+    let meta = format!(
+        r#"<?xml version="1.0"?><office:document-meta {NS}><office:meta><meta:initial-creator>יוצרת בדויה</meta:initial-creator></office:meta></office:document-meta>"#
+    );
+    zip_of(&[
+        ("mimetype", "application/vnd.oasis.opendocument.text"),
+        ("content.xml", content.as_str()),
+        ("styles.xml", styles.as_str()),
+        ("meta.xml", meta.as_str()),
+        ("META-INF/manifest.xml", "<manifest:manifest/>"),
+    ])
+}
+
+/// RTF as Word writes it: a font table with charsets, an info group, a header, text as `\uN`
+/// and as `\'xx`, a field, a table row, a skipped destination and a Western-font run.
+const WORD_RTF: &str = r"{\rtf1\adeflang1037\ansi\ansicpg1255\uc1{\fonttbl{\f0\fbidi\froman\fcharset177 Times;}{\f1\fswiss\fcharset0 Arial;}}{\info{\title \'e3\'e5\'e7}{\author \'e1\'e3\'e5\'e9}}{\header \pard \'ee\'f8\'f4\'e0\'e4\par}{\*\generator Word;}\pard\rtlch\f0 \'e4\'e9\'ec\'e3 \u1513?\u1500?\u1493?\u1501? {\field{\*\fldinst DATE}{\fldrslt 1.1.2000}}\par\trowd\cellx1000 \'e0\cell 85\cell\row{\*\annotation \'e4\'f2\'f8\'e4}\par}";
+
+/// "שלום, נועם – ₪ 12" in Windows-1255, as an old system would save a note.
+const CP1255_TXT: &[u8] = &[
+    0xF9, 0xEC, 0xE5, 0xED, b',', b' ', 0xF0, 0xE5, 0xF2, 0xED, b' ', 0x96, b' ', 0xA4, b' ', b'1',
+    b'2',
+];
 
 fn mutate(rng: &mut Rng, original: &[u8]) -> Vec<u8> {
     let mut b = original.to_vec();
@@ -139,9 +209,13 @@ fn damaged_documents_never_panic_or_hang() {
     for (name, original) in seeds() {
         // The undamaged seed must read (or be refused) without a panic as well.
         let clean = dv_ingest::read(&original, name);
-        if ["a.docx", "a.odt", "a.rtf", "a.txt"].contains(&name) {
+        if [
+            "a.docx", "a.odt", "a.rtf", "a.txt", "b.docx", "b.odt", "b.rtf", "b.txt",
+        ]
+        .contains(&name)
+        {
             assert!(
-                clean.is_ok(),
+                matches!(clean, Ok(dv_ingest::Outcome::Text(_))),
                 "the undamaged {name} seed must read: {clean:?}"
             );
         }

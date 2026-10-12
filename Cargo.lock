@@ -1080,6 +1080,7 @@ dependencies = [
 name = "dv-domain"
 version = "0.5.1"
 dependencies = [
+ "proptest",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -1123,6 +1124,7 @@ dependencies = [
  "dv-sandbox",
  "flate2",
  "pdf-extract",
+ "proptest",
  "quick-xml",
  "serde",
  "serde_json",
@@ -1165,6 +1167,7 @@ name = "dv-style"
 version = "0.5.1"
 dependencies = [
  "dv-privacy",
+ "proptest",
  "serde",
  "serde_json",
 ]
