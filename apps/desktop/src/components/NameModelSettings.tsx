@@ -49,7 +49,7 @@ export function NameModelSettings() {
       <label className="row">
         <input type="checkbox" checked={s?.enabled ?? false} disabled={!s || downloading}
           onChange={(e) => void change(e.target.checked)} />
-        <span>לזהות גם שמות שלא הוזנו בתיק, בעזרת מודל שרץ במחשב</span>
+        <span>לזהות גם שמות שלא הוזנו בתיק (מודל שרץ במחשב)</span>
       </label>
       {downloading && (
         <span className="hint" role="status" aria-live="polite">
@@ -57,10 +57,8 @@ export function NameModelSettings() {
         </span>
       )}
       <span className="hint">
-        כשמדליקים, מורידים פעם אחת מודל של כ-{s?.size_mb ?? 700}MB מאתר Hugging Face. ההורדה לא שולחת שום דבר מהתיקים,
-        והקובץ נבדק מול חתימה קבועה לפני שמשתמשים בו. המודל קורא כל חומר שמוסיפים, כאן במחשב, ומוסיף להסתרה שמות שאף כלל
-        לא מכיר. זה לוקח עוד 2–3 שניות לכל עמוד, ולפעמים מוסתרת מילה רגילה שהיא גם שם; היא מופיעה בכרטיס עם "להחזיר".
-        כשמכבים, המודל נמחק מהמחשב. המודל: DictaBERT-NER של Dicta, ברישיון CC BY 4.0.
+        הורדה חד-פעמית של {s?.size_mb ?? 700}MB, בלי לשלוח שום דבר מהתיקים. מוסיף 2–3 שניות לכל עמוד שמוסיפים.
+        כיבוי מוחק את המודל. (DictaBERT-NER של Dicta, CC BY 4.0)
       </span>
       {s?.problem && <ErrorLine error={s.problem} />}
       <ErrorLine error={error} />

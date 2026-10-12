@@ -5,35 +5,33 @@ import { useState } from "react";
 import { useApp } from "../App";
 import { ipc, type Readiness } from "../ipc/client";
 import { ErrorLine } from "./ui";
+import type { SettingsPane } from "../screens/settingsPanes";
 
-const ITEMS: Record<string, { label: string; hint: string; jump?: string }> = {
+const ITEMS: Record<string, { label: string; hint: string; jump?: SettingsPane }> = {
   zdr: {
-    label: "יש אישור בכתב מספק ה-AI שהמידע לא נשמר אצלו (ZDR)",
-    hint: "בלי אישור כזה, הספק שומר את מה שנשלח לתקופה מסוימת. נוסח הבקשה ל-Anthropic מוכן אצל המפתח.",
+    label: "אישור בכתב מספק ה-AI שהמידע לא נשמר אצלו (ZDR)",
+    hint: "נוסח הבקשה ל-Anthropic מוכן אצל המפתח.",
   },
   consent_form: {
-    label: "טופס הסכמת ההורים לשימוש ב-AI מעודכן, ומזכיר את הספק שנבחר",
-    hint: "ההסכמה נרשמת בכל תיק לפני השליחה הראשונה.",
+    label: "טופס הסכמת ההורים מעודכן ומזכיר את ספק ה-AI",
+    hint: "",
   },
   score_tables: {
-    label: "עברתי על טבלאות הציונים ואישרתי את תיאורי הטווחים",
-    hint: "התוכנה מפרשת ציונים לפי הטבלאות האלה, ו-AI מקבל את הטקסט המוכן.",
+    label: "עברתי על טבלאות הציונים ואישרתי אותן",
+    hint: "",
   },
   legal: {
-    label: "התייעצתי עם יועץ משפטי או יועץ פרטיות על השימוש בתוכנה",
-    hint: "חוק הגנת הפרטיות (תיקון 13) וחובת הסודיות המקצועית. רשימת שאלות מוכנה אצל המפתח.",
+    label: "התייעצתי עם יועץ משפטי או יועץ פרטיות",
+    hint: "רשימת שאלות מוכנה אצל המפתח.",
   },
-  api_key: { label: "מוגדר מפתח API לחשבון של AI", hint: "בלי מפתח התוכנה במצב הדגמה.", jump: "s-claude" },
-  backup: { label: "יש גיבוי מוצפן מהשבועיים האחרונים", hint: "מומלץ לשמור אותו על דיסק נייד.", jump: "s-backup" },
-  disk: { label: "הצפנת הדיסק של המחשב (BitLocker) דלוקה", hint: "מגינה גם על קבצים אחרים אם המחשב נגנב.", jump: "s-sec" },
+  api_key: { label: "מוגדר מפתח API", hint: "", jump: "ai" },
+  backup: { label: "יש גיבוי מהשבועיים האחרונים", hint: "", jump: "backup" },
+  disk: { label: "הצפנת הדיסק (BitLocker) דלוקה", hint: "", jump: "security" },
 };
 
-function jumpTo(id: string) {
-  document.getElementById(id)?.closest("section")?.scrollIntoView({ block: "start", behavior: "smooth" });
-}
 
 export function ReadinessSettings() {
-  const { fail } = useApp();
+  const { fail, go } = useApp();
   const qc = useQueryClient();
   const ready = useQuery({ queryKey: ["readiness"], queryFn: ipc.readiness });
   const [error, setError] = useState<string | null>(null);
@@ -51,12 +49,12 @@ export function ReadinessSettings() {
   const missing = r?.items.filter((i) => !i.done).length ?? 0;
   return (
     <section className="card setting" aria-labelledby="s-ready">
-      <h2 id="s-ready">מוכנה לעבודה עם תיקים אמיתיים?</h2>
+      <h2 id="s-ready">מוכנה לתיקים אמיתיים?</h2>
       {r && (
         <p className={r.all_done ? "" : "warn-text"}>
           {r.all_done
-            ? "הכל מוכן. אפשר לעבוד עם תיקים אמיתיים."
-            : `חסרים עוד ${missing === 1 ? "פריט אחד" : `${missing} פריטים`} לפני שמכניסים מידע אמיתי על ילדים. עד אז מומלץ לעבוד רק עם תיקים בדויים.`}
+            ? "הכל מוכן."
+            : `חסרים ${missing === 1 ? "פריט אחד" : `${missing} פריטים`}. עד אז, רק תיקים בדויים.`}
         </p>
       )}
       <ul className="ready-list">
@@ -73,12 +71,14 @@ export function ReadinessSettings() {
               )}
               <div className="stack">
                 <label htmlFor={i.checked_by_program ? undefined : `ready-${i.key}`}>{item.label}</label>
-                <span className="hint">
-                  {item.hint}
-                  {i.confirmed_at != null && ` אושר ב-${new Date(i.confirmed_at * 1000).toLocaleDateString("he-IL")}.`}
-                </span>
+                {(item.hint || i.confirmed_at != null) && (
+                  <span className="hint">
+                    {item.hint}
+                    {i.confirmed_at != null && ` אושר ב-${new Date(i.confirmed_at * 1000).toLocaleDateString("he-IL")}.`}
+                  </span>
+                )}
                 {!i.done && item.jump && (
-                  <button type="button" className="link-small align-start" onClick={() => jumpTo(item.jump ?? "")}>לתיקון</button>
+                  <button type="button" className="link-small align-start" onClick={() => go({ name: "settings", pane: item.jump ?? "general" })}>לתיקון</button>
                 )}
               </div>
             </li>

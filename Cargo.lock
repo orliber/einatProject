@@ -1249,7 +1249,7 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
 name = "dv-ai"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "dv-domain",
  "proptest",
@@ -1261,7 +1261,7 @@ dependencies = [
 
 [[package]]
 name = "dv-core"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "aws-lc-rs",
  "dv-ai",
@@ -1285,7 +1285,7 @@ dependencies = [
 
 [[package]]
 name = "dv-desktop"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "arboard",
  "dv-core",
@@ -1304,7 +1304,7 @@ dependencies = [
 
 [[package]]
 name = "dv-domain"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "proptest",
  "serde",
@@ -1315,7 +1315,7 @@ dependencies = [
 
 [[package]]
 name = "dv-egress"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "aws-lc-rs",
  "dv-privacy",
@@ -1331,7 +1331,7 @@ dependencies = [
 
 [[package]]
 name = "dv-export"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "aws-lc-rs",
  "cfb 0.15.0",
@@ -1347,7 +1347,7 @@ dependencies = [
 
 [[package]]
 name = "dv-ingest"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "cfb 0.15.0",
  "dv-sandbox",
@@ -1363,7 +1363,7 @@ dependencies = [
 
 [[package]]
 name = "dv-ipc"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1372,7 +1372,7 @@ dependencies = [
 
 [[package]]
 name = "dv-ner"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "candle-core",
  "candle-nn",
@@ -1388,7 +1388,7 @@ dependencies = [
 
 [[package]]
 name = "dv-privacy"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "aws-lc-rs",
  "dv-domain",
@@ -1402,14 +1402,14 @@ dependencies = [
 
 [[package]]
 name = "dv-sandbox"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "dv-style"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "dv-privacy",
  "proptest",
@@ -1419,7 +1419,7 @@ dependencies = [
 
 [[package]]
 name = "dv-vault"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "argon2",
  "aws-lc-rs",
@@ -6571,7 +6571,7 @@ checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
 
 [[package]]
 name = "xtask"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "aws-lc-rs",
  "cargo_metadata 0.23.1",

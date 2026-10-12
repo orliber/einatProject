@@ -105,7 +105,7 @@ export function BugReportSettings() {
   return (
     <section className="card setting" aria-labelledby="s-bug">
       <h2 id="s-bug">משהו לא עובד?</h2>
-      <p className="hint">דוח קצר לאור: הגרסה, המערכת והקריסות האחרונות. שום דבר מהתיקים. רואים את כולו לפני ההעתקה.</p>
+      <p className="hint">דוח קצר לאור, בלי שום דבר מהתיקים. רואים אותו לפני ההעתקה.</p>
       <button type="button" className="btn align-start" onClick={() => setOpen(true)}>דוח תקלה לאור</button>
       {open && <BugReportDialog failure={null} onClose={() => setOpen(false)} />}
     </section>

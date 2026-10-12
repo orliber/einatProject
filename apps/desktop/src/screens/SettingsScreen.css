@@ -1,17 +1,126 @@
+/* Settings as in other professional programs: the parts in a quiet column on the side,
+   one part at a time, and inside it plain rows divided by thin lines instead of cards. */
 .settings {
-  max-width: 880px;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 48px;
+  max-width: 1080px;
 }
-.settings-title {
-  font-size: var(--text-4xl);
-}
-.setting {
-  padding: 24px 24px;
+.settings-nav {
+  position: sticky;
+  top: 24px;
+  flex: 0 0 200px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 2px;
 }
-.setting h2 {
+.settings-title {
   font-size: var(--text-2xl);
+  margin: 0 12px 16px;
+}
+.settings-nav-btn {
+  height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-soft);
+  font: var(--text-base) var(--font-body);
+  text-align: start;
+  cursor: pointer;
+  transition: background-color 160ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+@media (hover: hover) and (pointer: fine) {
+  .settings-nav-btn:hover {
+    background: var(--sand-strong);
+    color: var(--ink);
+  }
+}
+.settings-nav-btn[aria-current="page"] {
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-weight: 600;
+}
+.settings-nav-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+.settings-pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 680px;
+  display: flex;
+  flex-direction: column;
+}
+.settings-pane-title {
+  font-size: var(--text-3xl);
+  padding-bottom: 8px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .settings-pane > * {
+    animation: settings-in 180ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+}
+@keyframes settings-in {
+  from {
+    opacity: 0;
+  }
+}
+/* Each group: a small heading and its rows, a thin line between groups. */
+.settings .setting {
+  padding: 24px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+}
+.settings .setting:last-child {
+  border-bottom: 0;
+}
+.settings .setting h2 {
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+.set-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.set-row-label {
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+.set-row-control {
+  flex-shrink: 0;
+}
+.set-row-control .select {
+  min-width: 200px;
+}
+@media (max-width: 900px) {
+  .settings {
+    flex-direction: column;
+    gap: 16px;
+  }
+  .settings-nav {
+    position: static;
+    flex: none;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .settings-title {
+    width: 100%;
+  }
 }
 .narrow {
   width: 100px;
@@ -32,34 +141,6 @@
 }
 .align-start {
   align-self: flex-start;
-}
-
-.settings-jump {
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 0;
-  background: var(--bg);
-}
-.settings-jump-btn {
-  height: 32px;
-  padding: 0 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--ink-soft);
-  font: 14px var(--font-body);
-  cursor: pointer;
-}
-.settings-jump-btn:hover {
-  border-color: var(--primary);
-  color: var(--primary);
-}
-.settings .card {
-  scroll-margin-top: 56px;
 }
 
 .warn-text {
@@ -91,4 +172,14 @@
 }
 .ready-list li.todo .ready-mark {
   color: var(--warn-ink);
+}
+.ready-list .link-small {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--primary);
+  font: 600 var(--text-sm) var(--font-body);
+  opacity: 1;
+  text-decoration: underline;
+  cursor: pointer;
 }

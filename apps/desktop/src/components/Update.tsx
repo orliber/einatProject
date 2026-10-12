@@ -249,12 +249,9 @@ export function UpdateSettings() {
       <ErrorLine error={error} />
       <label className="row small">
         <input type="checkbox" checked={auto} onChange={(e) => { setAuto(e.target.checked); write(AUTO_KEY, e.target.checked ? "on" : "off"); }} />
-        לבדוק פעם ביום אם יש גרסה חדשה, ולהוריד אותה ברקע
+        לבדוק פעם ביום אם יש גרסה חדשה
       </label>
-      <span className="hint">
-        הבדיקה וההורדה פונות רק לדף ההתקנות של אור ב-GitHub, בלי שום מידע מהכספת. גרסה מותקנת רק אחרי שלחצת, ורק אם
-        היא חתומה במפתח של אור.
-      </span>
+      <span className="hint">בלי שום מידע מהכספת. מתקינים רק בלחיצה, ורק גרסה חתומה.</span>
       {open && update && <UpdateDialog update={update} onClose={() => setOpen(false)} />}
     </section>
   );

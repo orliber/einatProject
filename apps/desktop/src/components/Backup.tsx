@@ -81,10 +81,7 @@ export function BackupSettings() {
   return (
     <section className="card setting" aria-labelledby="s-backup">
       <h2 id="s-backup">גיבוי</h2>
-      <p className="muted small">
-        הגיבוי הוא קובץ אחד, מוצפן, שנפתח רק בסיסמה של הכספת (או בערכת השחזור) כפי שהיו ביום הגיבוי.
-        כדאי לשמור אותו בדיסק נייד שנשמר במקום אחר, ולא בתיקייה שמסונכרנת לענן: התוכנה לא תשמור לשם.
-      </p>
+      <p className="muted small">קובץ מוצפן אחד, לדיסק נייד (לא לענן). נפתח בסיסמה או בערכת השחזור של יום הגיבוי.</p>
       {s && (
         <ul className="sec-list backup-facts">
           <li>
@@ -95,7 +92,7 @@ export function BackupSettings() {
           <li>
             <span className={s.last_check_at === null ? "chip chip-sand" : "chip chip-ok"}>{s.last_check_at === null ? "לא נבדק" : "נבדק"}</span>
             {s.last_check_at === null
-              ? "גיבוי שלא נבדק הוא הבטחה. בדיקה פותחת אותו בצד, סופרת את התיקים, ולא נוגעת בכספת."
+              ? "עוד לא נבדק שהגיבוי נפתח."
               : `בדיקת השחזור האחרונה: ${heDateTime(s.last_check_at)}.`}
           </li>
         </ul>
@@ -104,8 +101,7 @@ export function BackupSettings() {
         <label className="row">
           <input type="checkbox" checked={s.auto} onChange={(e) => void setAuto(e.target.checked)} />
           <span>
-            גיבוי אוטומטי: כשמגיע זמן גיבוי והדיסק של הגיבוי האחרון מחובר, התוכנה שומרת שם גיבוי מוצפן בעצמה
-            ומשאירה את {AUTO_KEEP} האוטומטיים האחרונים. הגיבוי הראשון תמיד נעשה ידנית, כדי לבחור את הדיסק.
+            גיבוי אוטומטי כשהדיסק מחובר (נשמרים {AUTO_KEEP} אחרונים)
           </span>
         </label>
       )}
@@ -224,7 +220,7 @@ export function BackupReminder() {
       </span>
       {error && <span className="error small">{error}</span>}
       <button type="button" className="btn btn-small" disabled={busy} onClick={() => void write()}>{busy ? "שומרת…" : "גיבוי עכשיו…"}</button>
-      <button type="button" className="link-btn small" onClick={() => go({ name: "settings" })}>עוד על הגיבוי</button>
+      <button type="button" className="link-btn small" onClick={() => go({ name: "settings", pane: "backup" })}>עוד על הגיבוי</button>
       <button type="button" className="btn icon-btn" aria-label="לא עכשיו (שבוע)" title="לא עכשיו: יחזור בעוד שבוע" onClick={snooze}><CloseIcon /></button>
     </div>
   );

@@ -131,13 +131,13 @@ export function GoogleSettings() {
   if (!status?.available) return null;
   return (
     <section className="card setting" aria-labelledby="s-google">
-      <h2 id="s-google">כניסה עם גוגל אם שוכחים את הסיסמה</h2>
+      <h2 id="s-google">כניסה עם גוגל כששוכחים סיסמה</h2>
       {status.on ? (
-        <p className="muted small"><span className="chip chip-ok">פעיל</span> אם הסיסמה תישכח, לוחצים במסך הכניסה "שכחתי את הסיסמה" ונכנסים עם חשבון הגוגל, מהמחשב הזה.</p>
+        <p className="muted small"><span className="chip chip-ok">פעיל</span> במסך הכניסה: "שכחתי את הסיסמה".</p>
       ) : status.needs_setup_here ? (
-        <p className="muted small">הכניסה עם גוגל הופעלה במחשב אחר. כדי שתעבוד גם כאן, מחברים אותה שוב.</p>
+        <p className="muted small">הופעלה במחשב אחר. כדי שתעבוד כאן, מחברים שוב.</p>
       ) : (
-        <p className="muted small">במקום להקליד את ערכת השחזור, נכנסים עם חשבון הגוגל ובוחרים סיסמה חדשה. עובד רק מהמחשב הזה, וגוגל לבדה לא פותחת את הכספת.</p>
+        <p className="muted small">במקום ערכת השחזור, נכנסים עם גוגל ובוחרים סיסמה חדשה. רק מהמחשב הזה.</p>
       )}
       <div className="row">
         {status.on ? (

@@ -10,7 +10,7 @@ function dollars(cents: number): string {
 }
 
 export function UsageSettings() {
-  const { status, notify, fail } = useApp();
+  const { notify, fail } = useApp();
   const qc = useQueryClient();
   const usage = useQuery({ queryKey: ["usage"], queryFn: ipc.usageSummary });
   const [cap, setCap] = useState<string | null>(null);
@@ -53,16 +53,13 @@ export function UsageSettings() {
         <span className="hint">לחלק מהדגמים אין כאן מחיר ({u.unpriced_models.join(", ")}), ולכן הם נספרים רק במספר הבקשות.</span>
       )}
       <div className="field">
-        <label htmlFor="cap">תקרת הוצאה חודשית (דולרים, ריק = בלי תקרה)</label>
+        <label htmlFor="cap">תקרה חודשית בדולרים (ריק: בלי תקרה)</label>
         <div className="row">
           <input id="cap" className="input narrow" type="number" min={1} inputMode="numeric" value={capText}
             onChange={(e) => setCap(e.target.value)} />
           <button type="button" className="btn" onClick={() => void save()}>שמירה</button>
         </div>
-        <span className="hint">
-          הערכה לפי המחירון הרשמי. החשבון עצמו מופיע במסוף של ספק ה-AI, ושם כדאי להגדיר גם תקרה משלו.
-          {status.demo_mode && " במצב הדגמה שום דבר לא נשלח ואין עלות."}
-        </span>
+        <span className="hint">הערכה לפי המחירון. החשבון המדויק במסוף של ספק ה-AI.</span>
       </div>
       <ErrorLine error={error} />
     </section>
