@@ -50,7 +50,7 @@ struct Count {
     by_section: HashMap<String, u32>,
 }
 
-fn candidate_ok(norms: &[&str]) -> bool {
+pub(crate) fn candidate_ok(norms: &[&str]) -> bool {
     norms
         .iter()
         .any(|w| !has(&FUNCTION_SET, w) && !has(&GENERIC, w))

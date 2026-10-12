@@ -32,6 +32,18 @@ impl Core {
             .map(|s| s.key.as_str())
             .collect();
         let with_versions = v.drafts_with_versions(case_id)?;
+        // One name for one thing (ST10): hers from her past reports, else the report's own.
+        let her_terms = style::style_terms(v)?;
+        let mut report_texts = Vec::new();
+        for s in structure.sections() {
+            report_texts.extend(
+                v.drafts(case_id, &s.key)?
+                    .into_iter()
+                    .filter(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved))
+                    .map(|d| d.text_tagged),
+            );
+        }
+        let report_terms = dv_style::terms::usual(report_texts.iter().map(String::as_str), 1);
         let mut sections = Vec::new();
         for part in &structure.parts {
             for s in &part.sections {
@@ -60,6 +72,11 @@ impl Core {
                         warnings: dv_domain::check_scores(&d.text_tagged, &sheets)
                             .into_iter()
                             .chain(dv_domain::check_age(&d.text_tagged, meta.age))
+                            .chain(dv_style::terms::notes(
+                                &d.text_tagged,
+                                &her_terms,
+                                &report_terms,
+                            ))
                             .collect(),
                         style_note: style_model
                             .as_ref()

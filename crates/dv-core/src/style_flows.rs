@@ -941,3 +941,60 @@ fn the_closest_paragraph_of_her_reports_is_shown_without_names() {
     no_secrets(&similar.report, "its report's title");
     assert!(core.similar_paragraph(&case_id, "no-such-draft").is_err());
 }
+
+#[test]
+fn a_report_that_names_one_thing_two_ways_gets_a_note_on_the_odd_one() {
+    let (_dir, mut core) = vault(None);
+    let case_id = case(&mut core);
+    let v = core.vault.as_mut().unwrap();
+    for t in ["ל[ילד] זכרון עבודה טוב.", "זכרון עבודה נמדד שוב."]
+    {
+        v.add_draft(&case_id, "appearance", t, Author::Ai, &[])
+            .unwrap();
+    }
+    v.add_draft(
+        &case_id,
+        "appearance",
+        "בזיכרון עבודה ניכר שיפור.",
+        Author::Ai,
+        &[],
+    )
+    .unwrap();
+    let warnings: Vec<String> = core
+        .case_detail(&case_id)
+        .unwrap()
+        .sections
+        .into_iter()
+        .flat_map(|s| s.paragraphs)
+        .flat_map(|p| p.warnings)
+        .collect();
+    assert_eq!(
+        warnings,
+        vec!["כתוב «זיכרון עבודה»; בשאר הדוח «זכרון עבודה»".to_owned()]
+    );
+}
+
+#[test]
+fn her_usual_openings_are_offered_once_and_not_after_she_answers() {
+    let local = super::LocalStyle {
+        shapes: vec![dv_style::Shape {
+            place: dv_style::Place::Opening,
+            section: "observation".into(),
+            text: "במהלך המפגש".into(),
+            norm: "במהלך המפגש".into(),
+            reports: 4,
+            share: 80,
+        }],
+        ..Default::default()
+    };
+    let mut learning = super::Learning::default();
+    let found = super::suggestions(&learning, &local, None);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].kind, super::StyleSuggestionKind::Opening);
+    assert_eq!(
+        (found[0].from.as_str(), found[0].section.as_deref()),
+        ("במהלך המפגש", Some("observation"))
+    );
+    learning.dismissed_phrases.push(found[0].id.clone());
+    assert!(super::suggestions(&learning, &local, None).is_empty());
+}
