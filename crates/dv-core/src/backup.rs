@@ -79,7 +79,7 @@ impl Core {
         let read = |key: &str| -> Option<i64> { v.setting(key).ok().flatten()?.parse().ok() };
         let last_at = read(LAST_BACKUP_KEY);
         let last_check_at = read(LAST_CHECK_KEY);
-        let days_since = last_at.map(|t| (unix_now() - t).max(0) / 86_400);
+        let days_since = last_at.map(|t| (unix_now() - t).max(0) / dv_domain::dates::DAY_SECS);
         // Cleared by the next backup (see `write_backup`).
         let secret_changed = read(SECRET_CHANGED_KEY).is_some();
         Ok(BackupStatus {

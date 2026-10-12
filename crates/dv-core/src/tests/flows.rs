@@ -590,7 +590,7 @@ fn the_bin_erases_only_what_waited_past_thirty_days() {
     let kept = plain_case(&mut core, "TEST-0723", Some("2020-01-01"));
     core.delete_case(&stale).unwrap();
     core.delete_case(&fresh).unwrap();
-    let edge = (dates::unix_now() - (TRASH_DAYS * 86_400)) + 3_600;
+    let edge = (dates::unix_now() - (TRASH_DAYS * dv_domain::dates::DAY_SECS)) + 3_600;
     core.vault_mut()
         .unwrap()
         .set_deleted_at_for_tests(&stale, 1)

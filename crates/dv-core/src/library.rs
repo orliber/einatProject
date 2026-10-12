@@ -82,7 +82,7 @@ impl Core {
 
     /// Erase what has waited in the recycle bin longer than [`TRASH_DAYS`]. Runs at unlock.
     pub(crate) fn purge_expired(&mut self) -> Result<(), CoreError> {
-        let cutoff = unix_now() - TRASH_DAYS * 86_400;
+        let cutoff = unix_now() - TRASH_DAYS * dv_domain::dates::DAY_SECS;
         let expired = self.vault_ref()?.trashed_before(cutoff)?;
         for id in expired {
             self.vault_mut()?.delete_case(&id)?;

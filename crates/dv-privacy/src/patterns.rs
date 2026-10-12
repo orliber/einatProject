@@ -63,8 +63,9 @@ pub struct PatternHit {
     pub replacement: String,
 }
 
+use dv_domain::dates::days_from_civil;
 /// A calendar date `(year, month, day)`.
-pub type Ymd = (i32, u32, u32);
+pub use dv_domain::dates::Ymd;
 
 /// Gregorian months in Hebrew; `true` = also an ordinary word or name, so a number must be adjacent.
 const HE_MONTHS: &[(&str, u32, bool)] = &[
@@ -284,20 +285,10 @@ pub fn is_valid_israeli_id(digits: &str) -> bool {
     sum % 10 == 0
 }
 
-fn days_from_civil(y: i32, m: u32, d: u32) -> i64 {
-    let y = i64::from(if m <= 2 { y - 1 } else { y });
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400;
-    let m = i64::from(m);
-    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + i64::from(d) - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
-}
-
 /// "לפני כשבועיים", "לפני כ-3 חודשים", "בעוד כחודש"… relative to `today`.
 #[must_use]
 pub fn relative_he(date: Ymd, today: Ymd) -> String {
-    let diff = days_from_civil(today.0, today.1, today.2) - days_from_civil(date.0, date.1, date.2);
+    let diff = days_from_civil(today) - days_from_civil(date);
     let (past, days) = (diff >= 0, diff.unsigned_abs());
     let amount = match days {
         0..=3 => {

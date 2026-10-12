@@ -79,7 +79,7 @@ impl Core {
 mod tests {
     use super::*;
 
-    const DAY: i64 = 86_400;
+    const DAY: i64 = dv_domain::dates::DAY_SECS;
 
     #[test]
     fn the_later_of_seven_years_and_age_twenty_five() {

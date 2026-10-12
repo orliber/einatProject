@@ -5,6 +5,7 @@
 
 pub mod compare;
 pub mod consistency;
+pub mod dates;
 pub mod identity;
 pub mod records;
 pub mod report;
