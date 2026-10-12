@@ -13,12 +13,12 @@ use dv_domain::{
     passage_ranges, Feed, InputKind, ReportSection, ReportStructure, Routing, Suggestion,
 };
 use dv_privacy::{FilterOutcome, PrivacyContext};
-use dv_vault::{AuditEvent, Vault, VaultError};
+use dv_vault::{Vault, VaultError};
 use serde_json::Value;
 
 use crate::name_model::NameHints;
 use crate::views::{MaterialRouting, Prepared, SortResult};
-use crate::{today, Core, CoreError, Outgoing, Pending, PendingKind, Review, DERIVED_SECTIONS};
+use crate::{today, Core, CoreError, Outgoing, PendingKind, Review, DERIVED_SECTIONS};
 
 /// Sections that are written from materials (not from other sections, not the signature).
 pub(crate) fn sortable(structure: &ReportStructure) -> Vec<&ReportSection> {
@@ -343,18 +343,12 @@ impl Core {
         out: Outgoing,
         response: Result<(Value, bool), CoreError>,
     ) -> Result<SortResult, CoreError> {
-        if !matches!(out.pending.kind, PendingKind::Sort { .. }) {
-            return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
-        }
-        let (response, demo) = match response {
-            Ok(r) => r,
-            Err(e) => {
-                self.restore_pending(out);
-                return Err(e);
-            }
-        };
-        self.note_usage(&out.pending.payload, &response, demo);
-        let Pending { payload, kind } = out.pending;
+        let crate::stage::Received {
+            kind,
+            response,
+            demo,
+            ..
+        } = self.receive(out, response, crate::stage::Stage::Sort)?;
         let PendingKind::Sort {
             case_id,
             materials,
@@ -363,23 +357,6 @@ impl Core {
         else {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
         };
-        // The request went out: record it before anything about the reply can fail.
-        let model = out.model;
-        let ai = crate::provider_of(&model).display_name();
-        let payload_text = String::from_utf8_lossy(payload.body()).into_owned();
-        let v = self.vault_mut()?;
-        v.add_transmission(
-            &case_id,
-            "sorting",
-            payload.sha256(),
-            if demo { "demo" } else { &model },
-            &payload_text,
-        )?;
-        v.record(
-            AuditEvent::Send,
-            Some(&case_id),
-            &serde_json::json!({ "sorting": true, "demo": demo, "ai": ai }),
-        )?;
         let counts: Vec<usize> = materials.iter().map(|(_, n, _)| *n).collect();
         let reply = dv_ai::parse_sort(&response, &counts, &sections)?;
         let v = self.vault_mut()?;

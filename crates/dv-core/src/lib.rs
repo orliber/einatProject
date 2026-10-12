@@ -27,6 +27,7 @@ mod send;
 mod session;
 mod settings;
 mod sorting;
+mod stage;
 mod style;
 mod unsaved;
 pub mod update;

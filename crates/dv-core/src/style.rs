@@ -1378,24 +1378,16 @@ impl Core {
         out: Outgoing,
         response: Result<(Value, bool), CoreError>,
     ) -> Result<StyleAnalysisResult, CoreError> {
-        if !matches!(out.pending.kind, PendingKind::StyleAnalysis { .. }) {
-            return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
-        }
-        let (response, demo) = match response {
-            Ok(r) => r,
-            Err(e) => {
-                self.restore_pending(out);
-                return Err(e);
-            }
-        };
-        let PendingKind::StyleAnalysis { source_id } = out.pending.kind else {
+        // Counted toward the month now too (it was not before the stages shared `receive`).
+        let crate::stage::Received {
+            kind,
+            response,
+            demo,
+            ..
+        } = self.receive(out, response, crate::stage::Stage::StyleAnalysis)?;
+        let PendingKind::StyleAnalysis { source_id } = kind else {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
         };
-        self.vault_mut()?.record(
-            AuditEvent::Send,
-            None,
-            &serde_json::json!({ "style": "analysis", "demo": demo }),
-        )?;
         let structure =
             ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
         let (items, shape_dropped) =
@@ -1480,24 +1472,15 @@ impl Core {
         out: Outgoing,
         response: Result<(Value, bool), CoreError>,
     ) -> Result<StyleProfileView, CoreError> {
-        if !matches!(out.pending.kind, PendingKind::StyleSynthesis { .. }) {
-            return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
-        }
-        let (response, demo) = match response {
-            Ok(r) => r,
-            Err(e) => {
-                self.restore_pending(out);
-                return Err(e);
-            }
-        };
-        let PendingKind::StyleSynthesis { reports } = out.pending.kind else {
+        let crate::stage::Received {
+            kind,
+            response,
+            demo,
+            ..
+        } = self.receive(out, response, crate::stage::Stage::StyleSynthesis)?;
+        let PendingKind::StyleSynthesis { reports } = kind else {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
         };
-        self.vault_mut()?.record(
-            AuditEvent::Send,
-            None,
-            &serde_json::json!({ "style": "profile", "demo": demo }),
-        )?;
         let structure =
             ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
         let (items, shape_dropped) =

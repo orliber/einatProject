@@ -445,18 +445,12 @@ impl Core {
         out: Outgoing,
         response: Result<(Value, bool), CoreError>,
     ) -> Result<SectionResult, CoreError> {
-        if !matches!(out.pending.kind, PendingKind::Section { .. }) {
-            return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
-        }
-        let (response, demo) = match response {
-            Ok(r) => r,
-            Err(e) => {
-                self.restore_pending(out);
-                return Err(e);
-            }
-        };
-        self.note_usage(&out.pending.payload, &response, demo);
-        let Pending { payload, kind } = out.pending;
+        let crate::stage::Received {
+            kind,
+            response,
+            demo,
+            model,
+        } = self.receive(out, response, crate::stage::Stage::Section)?;
         let PendingKind::Section {
             case_id,
             section_key,
@@ -469,23 +463,7 @@ impl Core {
         else {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
         };
-        // The request went out: record it before anything about the reply can fail.
-        let model = out.model.clone();
         let ai = provider_of(&model).display_name();
-        let payload_text = String::from_utf8_lossy(payload.body()).into_owned();
-        let v = self.vault_mut()?;
-        v.add_transmission(
-            &case_id,
-            &section_key,
-            payload.sha256(),
-            if demo { "demo" } else { &model },
-            &payload_text,
-        )?;
-        v.record(
-            AuditEvent::Send,
-            Some(&case_id),
-            &serde_json::json!({ "section": section_key, "demo": demo, "ai": ai }),
-        )?;
         let refs: Vec<(String, String)> = sources
             .iter()
             .map(|(sid, _, text)| (sid.clone(), text.clone()))

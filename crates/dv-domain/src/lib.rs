@@ -4,6 +4,7 @@
 //! derives [`ts_rs::TS`] so the UI gets the same shapes.
 
 pub mod compare;
+pub mod consistency;
 pub mod identity;
 pub mod records;
 pub mod report;
@@ -11,6 +12,7 @@ pub mod routing;
 pub mod scores;
 
 pub use compare::{compare, comparison_text, ComparisonRow};
+pub use consistency::check_age;
 pub use identity::{
     assign_tag, FoundName, Identity, IdentityInput, IdentitySource, Role, PRACTITIONER_TAG,
 };

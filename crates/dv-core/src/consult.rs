@@ -145,33 +145,22 @@ impl Core {
         out: Outgoing,
         response: Result<(Value, bool), CoreError>,
     ) -> Result<ConsultResult, CoreError> {
-        if !matches!(out.pending.kind, PendingKind::Consult { .. }) {
-            return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
-        }
-        let (response, demo) = match response {
-            Ok(r) => r,
-            Err(e) => {
-                self.restore_pending(out);
-                return Err(e);
-            }
-        };
-        self.note_usage(&out.pending.payload, &response, demo);
+        let crate::stage::Received {
+            kind,
+            response,
+            demo,
+            ..
+        } = self.receive(out, response, crate::stage::Stage::Consult)?;
         let PendingKind::Consult {
             case_id,
             conversation_id,
             message_tagged,
             message_shown,
             hidden,
-        } = out.pending.kind
+        } = kind
         else {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
         };
-        // The request went out: record it before anything about the reply can fail.
-        self.vault_mut()?.record(
-            AuditEvent::Send,
-            case_id.as_deref(),
-            &serde_json::json!({ "consult": true, "demo": demo, "ai": provider_of(&out.model).display_name() }),
-        )?;
         let answer = dv_ai::parse_consult(&response)?;
         let shown = match &case_id {
             Some(c) => {
