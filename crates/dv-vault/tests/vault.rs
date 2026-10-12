@@ -237,6 +237,38 @@ fn a_backup_with_a_google_slot_does_not_open_with_the_drive_key_alone() {
     .is_err());
 }
 
+/// SEC3: the half of the Google key on this computer never travels in a backup. The file is
+/// in the vault folder, and the backup is built from the databases and the header only.
+#[test]
+fn the_computer_half_of_the_google_key_is_not_in_a_backup() {
+    use dv_vault::crypto::Key32;
+    let (dir, mut vault, _) = new_vault();
+    let computer = Key32::random().unwrap();
+    vault
+        .set_google_slot(
+            Secret::Password(PASSWORD),
+            &Key32::random().unwrap(),
+            &computer,
+            "tag",
+        )
+        .unwrap();
+    let marker = "google-computer-half-marker";
+    fs::write(
+        dv_vault::computer_key::path(dir.path()),
+        [marker.as_bytes(), computer.as_bytes()].concat(),
+    )
+    .unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("b.vaultbak");
+    vault.write_backup(&dest).unwrap();
+    let bytes = fs::read(&dest).unwrap();
+    assert!(!contains(&bytes, marker));
+    assert!(!bytes.windows(32).any(|w| w == computer.as_bytes()));
+    let target = tempfile::tempdir().unwrap();
+    Vault::restore_backup(&bytes, target.path(), Secret::Password(PASSWORD)).unwrap();
+    assert!(!dv_vault::computer_key::path(target.path()).exists());
+}
+
 #[test]
 fn a_changed_google_slot_is_caught_by_the_header_check() {
     use dv_vault::crypto::Key32;

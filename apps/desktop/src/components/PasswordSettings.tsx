@@ -49,6 +49,8 @@ function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
     } catch (err) {
       setError((err as { message?: string }).message ?? "הסיסמה לא הוחלפה.");
       setCurrent("");
+      setPw("");
+      setPw2("");
       setBusy(false);
     }
   }
@@ -113,7 +115,9 @@ function NewKitDialog({ onClose }: { onClose: () => void }) {
     setError(null);
     const ok = await ipc.confirmRecoveryKey(typed).catch(() => false);
     if (!ok) return setError("הערכה שהוקלדה לא תואמת. כדאי לבדוק את הדף ולנסות שוב.");
+    // Nothing secret stays in the screen's memory once it served (SEC10).
     setKit(null);
+    setTyped("");
     notify("ערכת השחזור החדשה נשמרה. כדאי לגבות עכשיו.");
     onClose();
   }

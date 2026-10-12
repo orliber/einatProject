@@ -134,7 +134,8 @@ fn form(pairs: &[(&str, &str)]) -> String {
 
 /// A sign-in waiting for her browser: the address to open and the one-time listener.
 pub struct SignIn {
-    listener: TcpListener,
+    /// Closed on the first answer (or a refusal, a cancel, the timeout): one attempt only.
+    listener: Option<TcpListener>,
     verifier: Zeroizing<String>,
     state: String,
     redirect: String,
@@ -177,7 +178,7 @@ pub fn begin(cfg: &ClientConfig) -> Result<SignIn, GoogleError> {
     .map_err(|e| GoogleError::Protocol(e.to_string()))?
     .to_string();
     Ok(SignIn {
-        listener,
+        listener: Some(listener),
         verifier,
         state,
         redirect,
@@ -260,13 +261,27 @@ fn read_request_line(stream: &TcpStream) -> Option<String> {
 }
 
 /// Wait for her browser to come back with the sign-in answer. `cancel` stops the wait.
+/// However it ends, the listener on 127.0.0.1 is closed before this returns, so nothing can
+/// answer a second time.
 pub fn wait(
-    sign_in: &SignIn,
+    sign_in: &mut SignIn,
     cancel: &AtomicBool,
     timeout: Duration,
 ) -> Result<Zeroizing<String>, GoogleError> {
-    sign_in
+    let listener = sign_in
         .listener
+        .take()
+        .ok_or_else(|| GoogleError::Protocol("this sign-in was already answered".to_owned()))?;
+    listen(&listener, &sign_in.state, cancel, timeout)
+}
+
+fn listen(
+    listener: &TcpListener,
+    state: &str,
+    cancel: &AtomicBool,
+    timeout: Duration,
+) -> Result<Zeroizing<String>, GoogleError> {
+    listener
         .set_nonblocking(true)
         .map_err(|e| GoogleError::Protocol(format!("listener: {e}")))?;
     let deadline = Instant::now() + timeout;
@@ -277,14 +292,14 @@ pub fn wait(
         if Instant::now() >= deadline {
             return Err(GoogleError::TimedOut);
         }
-        match sign_in.listener.accept() {
+        match listener.accept() {
             Ok((stream, peer)) => {
                 if !peer.ip().is_loopback() {
                     continue;
                 }
                 let _ = stream.set_nonblocking(false);
                 let line = read_request_line(&stream).unwrap_or_default();
-                match parse_answer(&line, &sign_in.state) {
+                match parse_answer(&line, state) {
                     Answer::Code(code) => {
                         respond(&stream, PAGE_DONE);
                         return Ok(Zeroizing::new(code));
@@ -719,7 +734,7 @@ mod tests {
 
     #[test]
     fn the_browser_answer_reaches_the_listener() {
-        let s = begin(&cfg()).unwrap();
+        let mut s = begin(&cfg()).unwrap();
         let redirect = s.redirect.clone();
         let state = s.state.clone();
         let browser = std::thread::spawn(move || {
@@ -736,16 +751,20 @@ mod tests {
                 let _ = c.read_to_string(&mut out);
             }
         });
-        let code = wait(&s, &AtomicBool::new(false), Duration::from_secs(10)).unwrap();
+        let code = wait(&mut s, &AtomicBool::new(false), Duration::from_secs(10)).unwrap();
         browser.join().unwrap();
         assert_eq!(code.as_str(), "the-code");
+        // One attempt: the port is closed once the answer is in, and a second wait refuses.
+        let addr = s.redirect.trim_start_matches("http://").to_owned();
+        assert!(TcpStream::connect(&addr).is_err(), "the listener is closed");
+        assert!(wait(&mut s, &AtomicBool::new(false), Duration::from_secs(1)).is_err());
     }
 
     #[test]
     fn a_cancelled_wait_stops() {
-        let s = begin(&cfg()).unwrap();
+        let mut s = begin(&cfg()).unwrap();
         assert_eq!(
-            wait(&s, &AtomicBool::new(true), Duration::from_secs(10)).unwrap_err(),
+            wait(&mut s, &AtomicBool::new(true), Duration::from_secs(10)).unwrap_err(),
             GoogleError::Cancelled
         );
     }
@@ -889,7 +908,7 @@ mod tests {
         );
         assert_eq!(q["code_challenge"], challenge);
         // The answer comes back to the listener itself, on the loopback address only.
-        let addr = s.listener.local_addr().unwrap();
+        let addr = s.listener.as_ref().unwrap().local_addr().unwrap();
         assert!(addr.ip().is_loopback());
         assert_eq!(
             q["redirect_uri"],
@@ -930,10 +949,10 @@ mod tests {
 
     #[test]
     fn a_wait_without_an_answer_times_out() {
-        let s = begin(&cfg()).unwrap();
+        let mut s = begin(&cfg()).unwrap();
         let started = Instant::now();
         assert_eq!(
-            wait(&s, &AtomicBool::new(false), Duration::from_millis(250)).unwrap_err(),
+            wait(&mut s, &AtomicBool::new(false), Duration::from_millis(250)).unwrap_err(),
             GoogleError::TimedOut
         );
         assert!(started.elapsed() < Duration::from_secs(5));
@@ -941,7 +960,7 @@ mod tests {
 
     #[test]
     fn a_wrong_state_is_answered_empty_and_a_refusal_ends_the_wait() {
-        let s = begin(&cfg()).unwrap();
+        let mut s = begin(&cfg()).unwrap();
         let addr = s.redirect.trim_start_matches("http://").to_owned();
         let state = s.state.clone();
         let browser = std::thread::spawn(move || {
@@ -959,7 +978,7 @@ mod tests {
             }
             pages
         });
-        let got = wait(&s, &AtomicBool::new(false), Duration::from_secs(10));
+        let got = wait(&mut s, &AtomicBool::new(false), Duration::from_secs(10));
         let pages = browser.join().unwrap();
         assert_eq!(got.unwrap_err(), GoogleError::Cancelled);
         assert!(
