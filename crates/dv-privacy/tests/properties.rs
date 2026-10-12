@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use common::*;
 use dv_domain::{Identity, PRACTITIONER_TAG};
-use dv_privacy::restore::{remaining_tags, restore};
+use dv_privacy::restore::{remaining_tags, restore, scan_model_output};
 use dv_privacy::text::{normalize, prefix_splits, tokenize};
 use dv_privacy::{clear, filter, AutoKind, GateRequest, PrivacyContext};
 use proptest::prelude::*;
@@ -352,4 +352,39 @@ fn a_tag_inside_brackets_written_by_someone_else_is_not_trusted() {
     let ids = identities();
     let out = filter("[הערה של נועם] ו[מחנכת]", &ctx(&ids, CASE)).unwrap();
     assert_eq!(out.tagged, "(הערה של [ילד]) ו(מחנכת)");
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
+
+    /// The model only ever saw tags: a declared name of any case in its answer (any prefix,
+    /// niqqud, an invisible character inside), an identifier, or a tag this case does not
+    /// have is always pointed out; this case's tags and generic tags never are.
+    #[test]
+    fn the_answer_scan_points_out_every_name_identifier_and_foreign_tag(
+        name in prop::sample::select(vec!["נועם", "רותם", "עידו", "אביטל", "ינאי", "אסנת"]),
+        prefix in prop::sample::select(vec!["", "ו", "ל", "ש", "וכש"]),
+        inside in prop::sample::select(vec!["", "\u{05B9}", "\u{200B}", "\u{200F}"]),
+        foreign in prop::sample::select(vec!["[גננת_4]", "[ילד_גן_2]", "[אדם_9]"]),
+        filler in prop::collection::vec(prop::sample::select(FILLER.to_vec()), 0..6),
+    ) {
+        let ids = identities();
+        let tags: Vec<String> = case_tags(&ids, CASE).into_iter().collect();
+        let mut spelled: Vec<char> = name.chars().collect();
+        spelled.insert(2, inside.chars().next().unwrap_or('\u{05B0}'));
+        let spelled: String = spelled.into_iter().collect();
+        let answer = format!("[ילד] {} {prefix}{spelled} ו[אם] [ת.ז.] {}", filler.join(" "), filler.join(" "));
+        let found = scan_model_output(&answer, &tags, &ids);
+        prop_assert!(
+            found.iter().any(|s| normalize(&s.token).contains(&normalize(name))),
+            "{name} not pointed out in {answer:?}: {found:?}"
+        );
+        prop_assert!(!found.iter().any(|s| s.token == "[ילד]" || s.token == "[אם]" || s.token == "[ת.ז.]"));
+        let with_tag = format!("{} {foreign}", filler.join(" "));
+        prop_assert!(scan_model_output(&with_tag, &tags, &ids).iter().any(|s| s.token == foreign));
+        let idn = valid_id("55443322");
+        let with_id = format!("{} {idn}", filler.join(" "));
+        prop_assert!(scan_model_output(&with_id, &tags, &ids).iter().any(|s| s.token.contains(&idn)));
+        prop_assert!(scan_model_output(&filler.join(" "), &tags, &ids).is_empty());
+    }
 }
