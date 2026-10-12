@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::lexicon::LEXICON;
+use crate::matcher::{quote_bytes, quote_opened, strip_quote_tail};
 use crate::patterns;
 use crate::pipeline::{
     arabic_identity_matches, declared_reads_as_word, identity_index, other_case_word, past_name,
@@ -169,28 +170,37 @@ pub(crate) fn name_findings(text: &str, ctx: &PrivacyContext<'_>) -> Vec<Finding
         });
     }
     for t in &tokens {
-        // Like the pipeline: "כרים" is a word, not כ + רים.
-        let is_name = prefix_splits(&t.norm).iter().any(|(p, h)| {
-            LEXICON.first_names.contains(h)
-                && !(ctx.allowlisted)(h)
-                && !(*p > 0 && reads_as_word(&t.norm, h))
-        });
-        if is_name && !(ctx.allowlisted)(&t.norm) && !LEXICON.common_words.contains(&t.norm) {
-            out.push(Finding {
-                start: t.start,
-                end: t.end,
-                code: "unknown_name",
-            });
+        // The word as written, and without a closing quote glued to it ("'יובל'").
+        let (bare, quoted) = strip_quote_tail(&t.norm, quote_opened(text, t, 0));
+        let mut forms = vec![(t.norm.as_str(), t.end)];
+        if quoted > 0 {
+            forms.push((bare, t.end - quote_bytes(text, t, quoted)));
         }
-        let past = prefix_splits(&t.norm)
-            .iter()
-            .any(|(p, h)| past_name(ctx, h) && !(*p > 0 && reads_as_word(&t.norm, h)));
-        if past && !(ctx.allowlisted)(&t.norm) {
-            out.push(Finding {
-                start: t.start,
-                end: t.end,
-                code: "past_report_name",
+        let mut found = |end: usize, code: &'static str| {
+            if !out.iter().any(|f| f.start == t.start && f.code == code) {
+                out.push(Finding {
+                    start: t.start,
+                    end,
+                    code,
+                });
+            }
+        };
+        for (norm, end) in forms {
+            // Like the pipeline: "כרים" is a word, not כ + רים.
+            let is_name = prefix_splits(norm).iter().any(|(p, h)| {
+                LEXICON.first_names.contains(h)
+                    && !(ctx.allowlisted)(h)
+                    && !(*p > 0 && reads_as_word(norm, h))
             });
+            if is_name && !(ctx.allowlisted)(norm) && !LEXICON.common_words.contains(norm) {
+                found(end, "unknown_name");
+            }
+            let past = prefix_splits(norm)
+                .iter()
+                .any(|(p, h)| past_name(ctx, h) && !(*p > 0 && reads_as_word(norm, h)));
+            if past && !(ctx.allowlisted)(norm) {
+                found(end, "past_report_name");
+            }
         }
     }
     out

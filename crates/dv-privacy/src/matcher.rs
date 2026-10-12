@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::text::{byte_len_of_letters, normalize, prefix_splits, Token};
+use crate::text::{byte_len_of_letters, normalize, normalize_char, prefix_splits, Token};
 
 /// A phrase occurrence. `start` is after any prefix letters, so "ל" in "לנועם" stays in the text.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,35 +56,52 @@ impl<T: Clone> PhraseIndex<T> {
         let mut out = Vec::new();
         let mut i = 0;
         while i < tokens.len() {
-            let mut best: Option<(usize, usize, T)> = None; // (words, prefix letters, payload)
+            // (words, prefix letters, bytes of a closing quote left out of the match, payload)
+            let mut best: Option<(usize, usize, usize, T)> = None;
             for (prefix, head) in prefix_splits(&tokens[i].norm) {
-                let Some(candidates) = self.by_first.get(&head) else {
-                    continue;
-                };
-                for (words, payload) in candidates {
-                    let n = words.len();
-                    if i + n > tokens.len() {
+                let opened = quote_opened(text, &tokens[i], prefix);
+                let (bare, quoted) = strip_quote_tail(&head, opened);
+                let keys = std::iter::once((head.as_str(), false))
+                    .chain((quoted > 0).then_some((bare, true)));
+                for (key, stripped) in keys {
+                    let Some(candidates) = self.by_first.get(key) else {
                         continue;
-                    }
-                    let rest_matches = words[1..]
-                        .iter()
-                        .zip(&tokens[i + 1..i + n])
-                        .all(|(w, t)| *w == t.norm);
-                    let better = match &best {
-                        None => true,
-                        Some((bn, bp, _)) => n > *bn || (n == *bn && prefix < *bp),
                     };
-                    if rest_matches && better {
-                        best = Some((n, prefix, payload.clone()));
+                    for (words, payload) in candidates {
+                        let n = words.len();
+                        // A quote closes the word it follows: a stripped first word ends the phrase.
+                        if i + n > tokens.len() || (stripped && n > 1) {
+                            continue;
+                        }
+                        let middle =
+                            (1..n.saturating_sub(1)).all(|k| words[k] == tokens[i + k].norm);
+                        let tail = match (n, stripped) {
+                            (1, false) => Some(0),
+                            (1, true) => Some(quote_bytes(text, &tokens[i], quoted)),
+                            _ => last_word_tail(text, &tokens[i + n - 1], &words[n - 1], opened),
+                        };
+                        let Some(tail) = tail.filter(|_| middle) else {
+                            continue;
+                        };
+                        let better = match &best {
+                            None => true,
+                            Some((bn, bp, bt, _)) => {
+                                n > *bn
+                                    || (n == *bn && (prefix < *bp || (prefix == *bp && tail < *bt)))
+                            }
+                        };
+                        if better {
+                            best = Some((n, prefix, tail, payload.clone()));
+                        }
                     }
                 }
             }
-            if let Some((n, prefix, payload)) = best {
+            if let Some((n, prefix, tail, payload)) = best {
                 let tok = &tokens[i];
                 let start = tok.start + byte_len_of_letters(&text[tok.start..tok.end], prefix);
                 out.push(PhraseMatch {
                     start,
-                    end: tokens[i + n - 1].end,
+                    end: tokens[i + n - 1].end - tail,
                     first_token: i,
                     last_token: i + n - 1,
                     prefix,
@@ -96,6 +113,58 @@ impl<T: Clone> PhraseIndex<T> {
             }
         }
         out
+    }
+}
+
+/// A normalized word without a closing quote or an English possessive glued to it, and how
+/// many characters that took off (0: none). The tokenizer keeps a final geresh in a word, as
+/// names such as "ג'ורג'" need, and a closing curly quote too, so a name in quotes ("'נועם'",
+/// "“נועם”", "ל'נועם'") or "Noam's" was not matched at all. A final geresh is a closing
+/// quote only when a quote `opened` before the word: "טל'" (phone) and "גב'" stay as written.
+pub(crate) fn strip_quote_tail(norm: &str, opened: bool) -> (&str, usize) {
+    let long_enough = |b: &&str| b.chars().count() >= 2;
+    if let Some(bare) = norm.strip_suffix("'s").filter(long_enough) {
+        return (bare, 2);
+    }
+    if let Some(bare) = norm.strip_suffix('"').filter(long_enough) {
+        return (bare, 1);
+    }
+    match norm.strip_suffix('\'').filter(long_enough) {
+        Some(bare) if opened => (bare, 1),
+        _ => (norm, 0),
+    }
+}
+
+/// A quote opens right before the word: before the token, or between its prefix letters and
+/// the rest ("ל'נועם'", split as ל + ' + נועם').
+pub(crate) fn quote_opened(text: &str, tok: &Token, prefix: usize) -> bool {
+    let is_quote = |c: char| matches!(normalize_char(c), Some('\'' | '"'));
+    text[..tok.start].chars().next_back().is_some_and(is_quote)
+        || prefix
+            .checked_sub(1)
+            .and_then(|k| tok.norm.chars().nth(k))
+            .is_some_and(is_quote)
+}
+
+/// Bytes of the last `chars` characters of the token as written.
+pub(crate) fn quote_bytes(text: &str, tok: &Token, chars: usize) -> usize {
+    text[tok.start..tok.end]
+        .chars()
+        .rev()
+        .take(chars)
+        .map(char::len_utf8)
+        .sum()
+}
+
+/// How the last word of a phrase matches its token: exactly (0), or with a closing quote
+/// left out (its bytes).
+fn last_word_tail(text: &str, tok: &Token, word: &str, opened: bool) -> Option<usize> {
+    if tok.norm == word {
+        return Some(0);
+    }
+    match strip_quote_tail(&tok.norm, opened) {
+        (bare, n) if n > 0 && bare == word => Some(quote_bytes(text, tok, n)),
+        _ => None,
     }
 }
 
