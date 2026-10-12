@@ -23,7 +23,7 @@ function RetentionDialog({ items, onClose }: { items: RetentionItem[]; onClose: 
   }
   return (
     <Dialog title="תיקים שעברו את תקופת השמירה" onClose={onClose}
-      subtitle="התוכנה לא מוחקת לבד. לכל תיק מחליטים: להשאיר עוד, או להעביר לסל המחזור (שם הוא נשמר 30 יום, ומחיקה לצמיתות דורשת סיסמה)."
+      subtitle="התוכנה לא מוחקת לבד. לכל תיק: להשאיר, או לסל המחזור (30 יום)."
       footer={<button type="button" className="btn btn-primary" onClick={onClose}>סגירה</button>}>
       <ul className="retention-list">
         {items.map((it) => (
@@ -53,7 +53,7 @@ export function RetentionNotice() {
   return (
     <div className="backup-reminder" role="status">
       <span className="grow">
-        {items.length === 1 ? "תיק אחד עבר" : `${items.length} תיקים עברו`} את תקופת השמירה. התוכנה לא מוחקת לבד: כדאי לעבור ולהחליט.
+        {items.length === 1 ? "תיק אחד עבר" : `${items.length} תיקים עברו`} את תקופת השמירה. כדאי להחליט מה לעשות.
       </span>
       <button type="button" className="btn btn-small" onClick={() => setOpen(true)}>לעבור עליהם</button>
       {open && <RetentionDialog items={items} onClose={() => setOpen(false)} />}

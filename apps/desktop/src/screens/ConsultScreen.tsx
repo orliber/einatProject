@@ -59,7 +59,7 @@ function Typing({ since, approval }: { since: number; approval: string | null })
       <div className="chat-bubble chat-bubble-ai chat-typing">
         <span className="dots" aria-hidden="true"><i /><i /><i /></span>
         <span className="muted small">{ai} כותב{seconds >= 3 ? ` · ${seconds} שניות` : "…"}{words >= 5 ? ` · ${wordsSoFar(words)}` : ""}</span>
-        {seconds >= 25 && <span className="muted small">תשובה מעמיקה לוקחת לפעמים עד דקה. אפשר לבחור "מהיר" בהגדרות.</span>}
+        {seconds >= 25 && <span className="muted small">תשובה מעמיקה לוקחת עד דקה.</span>}
       </div>
     </div>
   );
@@ -255,7 +255,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
             {turns.length === 0 && (
               <div className="consult-empty">
                 <h2>{title}</h2>
-                <p className="muted">כלי אבחון, ניסוח, ספרות מקצועית או שיקולים קליניים. {ai} מבחין בין ידע מבוסס לדעה, וההחלטה המקצועית נשארת שלך. השיחות נשמרות מוצפנות בכספת, ושיחה על תיק נמחקת יחד איתו.</p>
+                <p className="muted">כלי אבחון, ניסוח, ספרות או שיקולים קליניים. ההחלטה המקצועית נשארת שלך.</p>
                 <span className="label ideas-label">אפשר להתחיל מאחת מאלה</span>
                 <Ideas onPick={(q) => { setMessage(q); input.current?.focus(); }} />
               </div>
@@ -314,7 +314,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
               </button>
             </div>
-            <span className="chat-hint muted small">Enter לשליחה · Shift+Enter לשורה חדשה · לפני כל שליחה עוברים על מה שיוצא מהמחשב</span>
+            <span className="chat-hint muted small">Enter לשליחה · Shift+Enter לשורה חדשה</span>
           </form>
           <ErrorLine error={error} />
         </section>

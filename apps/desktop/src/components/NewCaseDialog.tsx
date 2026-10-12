@@ -102,7 +102,7 @@ export function NameMatches({ found }: { found: NameMatch[] }) {
           </li>
         ))}
       </ul>
-      <span className="small">אם זו אותה משפחה (למשל אח או אחות), כדאי לבדוק את התיק הקודם. אם זה צירוף מקרים, אפשר להמשיך.</span>
+      <span className="small">אם זו אותה משפחה, כדאי לבדוק את התיק הקודם.</span>
     </div>
   );
 }
@@ -181,7 +181,7 @@ export function NewCaseDialog({ onClose, onCreated, folderId = null }: { onClose
 
         <div className="stack" style={{ gap: 8 }}>
           <span className="label">שמות שיוסתרו</span>
-          <p className="hint">הילד/ה, ההורים, האחים, הגננת וכל מי שמופיע בחומרים. כינויים וכתיב נוסף ("נועמי", "נעמי") מוסתרים גם הם.</p>
+          <p className="hint">כל מי שמופיע בחומרים. גם כינויים וכתיב נוסף מוסתרים.</p>
           <PeopleEditor rows={rows} onChange={setRows} />
           <NameMatches found={matches} />
         </div>
@@ -189,7 +189,7 @@ export function NewCaseDialog({ onClose, onCreated, folderId = null }: { onClose
         <div className="card consent">
           <label className="row"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
             <b>ההורים חתמו על הסכמה לשימוש ב-{ai} בכתיבת הדוח</b></label>
-          <p className="hint">בלי הסכמה רשומה אפשר לעבוד בתיק, אבל לא לשלוח ממנו ל-{ai}.</p>
+          <p className="hint">בלי הסכמה אין שליחה ל-{ai}.</p>
           {consent && (
             <div className="row wrap">
               <div className="field">

@@ -26,7 +26,7 @@ function rememberFolder(id: string | null) {
 /** What to do next in a case, in one chip and one line (canvas "תיקים"). */
 function nextStep(c: CaseSummary): { chip: string; cls: string; text: string; start: boolean } {
   const n = c.approved_sections.length;
-  if (c.failed_at) return { chip: "נכשל", cls: "chip chip-fail", text: "השליחה האחרונה לא הצליחה. לפתוח ולנסות שוב", start: false };
+  if (c.failed_at) return { chip: "נכשל", cls: "chip chip-fail", text: "השליחה האחרונה נכשלה. לפתוח ולנסות שוב", start: false };
   if (!c.meta.consent) return { chip: "הסכמה", cls: "chip chip-warn", text: "לרשום את הסכמת ההורים", start: false };
   if (n >= TOTAL_SECTIONS) return { chip: "✓ מוכן", cls: "chip chip-ok", text: "להפיק דוח Word", start: false };
   if (n > 0) return { chip: "בכתיבה", cls: "chip", text: `לאשר עוד ${TOTAL_SECTIONS - n} סעיפים`, start: false };
@@ -167,7 +167,7 @@ export function CasesScreen() {
     try {
       const id = await ipc.createFollowUp(c.id);
       await refreshAll();
-      notify(`נפתח תיק מעקב ל${caseName(c)}. השמות הועתקו; צריך לעדכן גיל ולרשום הסכמה חדשה.`);
+      notify(`נפתח תיק מעקב ל${caseName(c)}. לעדכן גיל ולרשום הסכמה חדשה.`);
       go({ name: "case", id, view: "details" });
     } catch (e) {
       setError(fail(e as never));
@@ -249,12 +249,12 @@ export function CasesScreen() {
             {allCases.length === 0 && allFolders.length === 0 && cases.data && (
               <div className="card empty">
                 <h2>התיק הראשון</h2>
-                <p className="muted">פותחים תיק, מוסיפים את החומרים שכבר יש (דוחות, אינטייק, סיכומי מפגשים וציונים), ו-{ai} מציע טיוטה לכל סעיף בדוח. אפשר לסדר את התיקים בתיקיות, כמו במחשב.</p>
+                <p className="muted">פותחים תיק, מוסיפים חומרים, ו-{ai} מציע טיוטה לכל סעיף.</p>
                 <div className="row wrap-row">
                   <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>פתיחת תיק</button>
                   <button type="button" className="btn" disabled={sample.isPending} onClick={() => sample.mutate()}>לנסות קודם על תיק לדוגמה</button>
                 </div>
-                <p className="small muted">תיק לדוגמה הוא תיק בדוי עם שלושה חומרים קצרים, כדי לראות איך העבודה נראית לפני שפותחים תיק אמיתי. אפשר למחוק אותו בכל רגע.</p>
+                <p className="small muted">תיק בדוי קצר, כדי לראות איך זה עובד. אפשר למחוק אותו בכל רגע.</p>
               </div>
             )}
 
@@ -338,11 +338,11 @@ export function CasesScreen() {
             )}
 
             {cases.data && (allCases.length > 0 || allFolders.length > 0) && shownCases.length === 0 && shownFolders.length === 0 && (
-              <p className="muted empty-folder">{q ? "לא נמצאו תיקים או תיקיות בשם הזה." : "התיקייה ריקה. אפשר לגרור לכאן תיקים, או לפתוח תיק חדש כשהתיקייה פתוחה."}</p>
+              <p className="muted empty-folder">{q ? "לא נמצא תיק או תיקייה בשם הזה." : "התיקייה ריקה. גוררים לכאן תיקים, או פותחים תיק חדש."}</p>
             )}
           </>
         )}
-        <p className="small muted">השמות, גם של התיקיות, מוצגים רק כאן, במחשב שלך. {ai} מקבל תמיד תפקידים ("הילד", "הגננת") במקום שמות.</p>
+        <p className="small muted">השמות נשארים במחשב. {ai} מקבל תפקידים ("הילד", "הגננת") במקום שמות.</p>
       </main>
 
       {creating && (
@@ -370,14 +370,14 @@ export function CasesScreen() {
       {modal?.kind === "delete-folder" && (
         <ConfirmDialog title={`מחיקת התיקייה "${modal.folder.name}"`} action="מחיקת התיקייה"
           text={countIn(modal.folder.id) > 0 || allFolders.some((f) => f.parent_id === modal.folder.id)
-            ? "רק התיקייה נמחקת. התיקים והתיקיות שבתוכה יעברו לתיקייה שמעליה, ושום תיק לא יימחק."
+            ? "רק התיקייה נמחקת. מה שבתוכה עובר לתיקייה שמעליה."
             : "התיקייה ריקה ותימחק."}
           onClose={() => setModal(null)}
           onConfirm={async () => { await ipc.deleteFolder(modal.folder.id); await refreshAll(); setModal(null); }} />
       )}
       {modal?.kind === "delete-case" && (
         <ConfirmDialog title={`העברת התיק של ${caseName(modal.c)} לסל המחזור`} action="העברה לסל המחזור" danger
-          text={`התיק יישמר בסל המחזור ${TRASH_DAYS} יום, מוצפן כמו כל תיק, ואפשר לשחזר אותו. אחרי ${TRASH_DAYS} יום הוא יימחק לצמיתות.`}
+          text={`התיק נשמר בסל ${TRASH_DAYS} יום, מוצפן, ואפשר לשחזר אותו. אחר כך נמחק לצמיתות.`}
           onClose={() => setModal(null)}
           onConfirm={async () => { await ipc.deleteCase(modal.c.id); await refreshAll(); setModal(null); notify("התיק הועבר לסל המחזור."); }} />
       )}
@@ -393,11 +393,11 @@ function TrashList(props: { cases: CaseSummary[]; pathOf: (id: string | null) =>
   const [now] = useState(() => Date.now() / 1000);
   const daysLeft = (c: CaseSummary) => Math.max(0, TRASH_DAYS - Math.floor((now - (c.deleted_at ?? 0)) / 86_400));
   if (!props.cases.length) {
-    return <p className="muted empty-folder">סל המחזור ריק. תיק שנמחק נשמר כאן {TRASH_DAYS} יום, ואפשר לשחזר אותו.</p>;
+    return <p className="muted empty-folder">סל המחזור ריק. תיק שנמחק נשמר כאן {TRASH_DAYS} יום.</p>;
   }
   return (
     <div className="card table-card">
-      <p className="small muted trash-note">תיקים בסל נשמרים מוצפנים {TRASH_DAYS} יום ואז נמחקים לצמיתות. מחיקה לצמיתות לפני כן דורשת את הסיסמה.</p>
+      <p className="small muted trash-note">נמחקים לצמיתות אחרי {TRASH_DAYS} יום. מחיקה מוקדמת דורשת סיסמה.</p>
       <table className="cases">
         <thead><tr><th>ילד/ה</th><th>נמחק</th><th className="col-go"><span className="visually-hidden">פעולות</span></th></tr></thead>
         <tbody>

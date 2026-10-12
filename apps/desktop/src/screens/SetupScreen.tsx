@@ -25,7 +25,7 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
   async function create(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    if (pw.length < 12) return setError("הסיסמה צריכה להיות באורך 12 תווים לפחות. מומלץ משפט של כמה מילים.");
+    if (pw.length < 12) return setError("לפחות 12 תווים. מומלץ משפט קצר.");
     if (pw !== pw2) return setError("שתי הסיסמאות לא זהות.");
     setBusy(true);
     try {
@@ -46,7 +46,7 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
     e.preventDefault();
     setError(null);
     const ok = await ipc.confirmRecoveryKey(typed).catch(() => false);
-    if (!ok) return setError("הערכה שהוקלדה לא תואמת. כדאי לבדוק את הדף ולנסות שוב.");
+    if (!ok) return setError("הערכה לא תואמת. בודקים את הדף ומנסים שוב.");
     // Nothing secret stays in the screen's memory once it served (SEC10).
     setKey("");
     setTyped("");
@@ -93,7 +93,7 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
         {step === "password" && (
           <form className="setup-col stack" onSubmit={create}>
             <h1>ברוכה הבאה לכספת האבחון</h1>
-            <p className="lede">כל התיקים יישמרו כאן, במחשב הזה בלבד, מוצפנים. בוחרים סיסמה לפתיחה: משפט קצר שקל לזכור, 12 תווים לפחות.</p>
+            <p className="lede">התיקים נשמרים מוצפנים במחשב הזה בלבד. בוחרים סיסמה: משפט קצר, 12 תווים לפחות.</p>
             {status.cloud_synced_folder && (
               <ErrorLine error={`תיקיית הכספת נמצאת בתוך תיקייה שמסונכרנת לענן (${status.cloud_synced_folder}). אי אפשר ליצור בה כספת. אור יכול לעזור להעביר אותה.`} report />
             )}
@@ -112,7 +112,7 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
             <ErrorLine error={error} />
             <button type="submit" className="btn btn-primary btn-big" disabled={busy}>{busy ? "יוצרת כספת מוצפנת…" : "יצירת הכספת"}</button>
             <p className="hint">
-              {status.fips_active ? "ההצפנה נעשית ברכיב הצפנה מאושר ומבוקר (FIPS 140-3)." : "הכל נשמר מוצפן במחשב הזה."} את הסיסמה אף אחד לא יודע ולא שומר, גם לא אנחנו.
+              {status.fips_active ? "ההצפנה נעשית ברכיב הצפנה מאושר ומבוקר (FIPS 140-3)." : "הכל נשמר מוצפן במחשב הזה."} אף אחד לא שומר את הסיסמה.
             </p>
             {onRestored && (
               <button type="button" className="link-btn restore-link" onClick={() => { setError(null); setStep("restore"); }}>
@@ -130,7 +130,7 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
           <div className="setup-two">
             <div className="stack grow">
               <h1>ערכת השחזור שלך</h1>
-              <p className="lede">זו הדרך היחידה לפתוח את הכספת אם הסיסמה תישכח. מדפיסים או מעתיקים לדף, ושומרים אותו במקום בטוח, לא במחשב ולא בטלפון.</p>
+              <p className="lede">הדרך היחידה לפתוח אם הסיסמה תישכח. מדפיסים ושומרים במקום בטוח, לא במחשב ולא בטלפון.</p>
               <RecoveryKitPaper recoveryKey={key} />
               <form className="stack" onSubmit={confirm}>
                 <div className="field">
@@ -142,8 +142,8 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
                   </div>
                   <span id="typed-count" className="hint">
                     {typedGroups < kitGroups
-                      ? `הוקלדו ${typedGroups} מתוך ${kitGroups} קבוצות. אפשר עם מקפים או בלי, באותיות גדולות או קטנות.`
-                      : "כל הקבוצות הוקלדו. לחיצה על \"המשך\" בודקת שהן נכונות."}
+                      ? `הוקלדו ${typedGroups} מתוך ${kitGroups} קבוצות.`
+                      : "כל הקבוצות הוקלדו."}
                   </span>
                 </div>
                 <ErrorLine error={error} />
@@ -163,7 +163,7 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
         {step === "me" && (
           <form className="setup-col stack" onSubmit={finish}>
             <h1>הפרטים שלך</h1>
-            <p className="lede">השם שלך ושם הקליניקה יוסתרו תמיד לפני שליחה ל-AI, בכל התיקים, ויוחלפו ב"המאבחנת".</p>
+            <p className="lede">השם שלך ושם הקליניקה יוחלפו תמיד ב"המאבחנת" לפני שליחה.</p>
             <div className="field">
               <label htmlFor="names">השם שלך, ושמות נוספים (קליניקה, כינוי), מופרדים בפסיק</label>
               <textarea id="names" className="textarea" rows={3} value={names} onChange={(e) => setNames(e.target.value)} />

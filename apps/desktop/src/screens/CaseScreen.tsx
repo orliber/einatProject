@@ -63,11 +63,11 @@ let jobSeq = 0;
 
 /** One line for the result of a sorting, in plain words. */
 export function sortSummary(r: SortResult): string {
-  const lead = r.demo ? "מצב הדגמה: המיון נעשה במחשב לפי מילות מפתח, ושום דבר לא נשלח. " : "";
-  if (r.sorted === 0) return `${lead}לא נמצאו קטעים לשייך. החומרים ממשיכים להזין את הסעיפים לפי ברירת המחדל.`;
+  const lead = r.demo ? "מצב הדגמה: מיון לפי מילות מפתח, בלי שליחה. " : "";
+  if (r.sorted === 0) return `${lead}לא נמצאו קטעים לשייך. החומרים נשארים בסעיפי ברירת המחדל.`;
   const what = r.sorted === 1 ? "חומר אחד מוין" : `${r.sorted} חומרים מוינו`;
   const rest = r.unchanged > 0 ? ` ${r.unchanged} נשארו לפי ברירת המחדל.` : "";
-  return `${lead}${what} לסעיפים. אפשר לבדוק ולשנות בכל כרטיס חומר.${rest}`;
+  return `${lead}${what} לסעיפים. אפשר לשנות בכרטיס החומר.${rest}`;
 }
 
 type SectionState = "approved" | "pending" | "empty";
@@ -164,7 +164,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         const out = await run();
         if (!status.demo_mode) recordDuration(job.task, status.speed, Date.now() - j.started);
         const title = detailRef.current?.sections.find((s) => s.key === job.section)?.title;
-        if (job.section && viewRef.current !== job.section && viewRef.current !== "report" && title) notify(`הטיוטה ל"${title}" מוכנה לאישור. היא מחכה בסעיף.`);
+        if (job.section && viewRef.current !== job.section && viewRef.current !== "report" && title) notify(`הטיוטה ל"${title}" מוכנה לאישור.`);
         return out;
       } catch (e) {
         // Never lost silently, wherever she is by then.
@@ -273,19 +273,19 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     stage === 0 || stage === 3
       ? null
       : !detail.meta.consent
-        ? { title: `לפני שליחה ל-${ai} צריך לרשום את הסכמת ההורים.`, note: "אפשר להמשיך לאסוף חומרים גם בלי זה.", action: "רישום ההסכמה", run: () => go({ name: "case", id: caseId, view: "details" }) }
+        ? { title: `לפני שליחה ל-${ai} צריך לרשום את הסכמת ההורים.`, note: "אפשר להמשיך לאסוף חומרים בינתיים.", action: "רישום ההסכמה", run: () => go({ name: "case", id: caseId, view: "details" }) }
         : stage === 1
           ? hasMaterials
-            ? { title: fed.length ? `יש חומר ל-${fed.length} סעיפים` : `${detail.inputs.length} חומרים בתיק`, note: unsorted > 0 ? `בדרך לכתיבה ${ai} יקרא את החומרים (אחרי הסתרה) ויסמן לכל סעיף רק את הקטעים שלו.` : "הצעד הבא: טיוטה לכל סעיף, ואת מאשרת על הדף.", action: "לכתיבת הדוח ←", run: () => void toWriting() }
+            ? { title: fed.length ? `יש חומר ל-${fed.length} סעיפים` : `${detail.inputs.length} חומרים בתיק`, note: unsorted > 0 ? `${ai} ימיין את החומרים (אחרי הסתרה) לסעיפים.` : "הבא: טיוטה לכל סעיף, ואת מאשרת.", action: "לכתיבת הדוח ←", run: () => void toWriting() }
             : null
           : pendingCount > 0
-            ? { title: pendingCount === 1 ? "טיוטה אחת מחכה לאישור שלך" : `${pendingCount} פסקאות מחכות לאישור שלך`, note: "רק מה שאישרת נכנס לקובץ. לחיצה על פסקה פותחת אותה לעריכה.", action: `לטיוטה ב"${pending[0]?.title ?? ""}" ←`, run: () => toReport(pending[0]?.key) }
+            ? { title: pendingCount === 1 ? "טיוטה אחת מחכה לאישור שלך" : `${pendingCount} פסקאות מחכות לאישור שלך`, note: "רק מה שאישרת נכנס לקובץ.", action: `לטיוטה ב"${pending[0]?.title ?? ""}" ←`, run: () => toReport(pending[0]?.key) }
             : unsorted > 0
-              ? { title: unsorted === 1 ? "חומר אחד עוד לא מוין לסעיפים" : `${unsorted} חומרים עוד לא מוינו לסעיפים`, note: `${ai} יקרא אותם אחרי הסתרה, ויסמן לכל סעיף רק את הקטעים שלו.`, action: "מיון החומרים", run: () => void startSort() }
+              ? { title: unsorted === 1 ? "חומר אחד עוד לא מוין לסעיפים" : `${unsorted} חומרים עוד לא מוינו לסעיפים`, note: `${ai} ימיין אותם (אחרי הסתרה) לסעיפים.`, action: "מיון החומרים", run: () => void startSort() }
               : undrafted.length > 0
-                ? { title: `${undrafted.length} סעיפים עם חומר עוד לא נכתבו`, note: "כל סעיף נכתב בנפרד, רק מהחומרים שלו, ואת רואה בדיוק מה יוצא.", action: `✦ לכתוב את ${undrafted.length} הסעיפים`, run: () => setFullDraft(true) }
+                ? { title: `${undrafted.length} סעיפים עם חומר עוד לא נכתבו`, note: "כל סעיף נכתב רק מהחומרים שלו, ואת רואה מה יוצא.", action: `✦ לכתוב את ${undrafted.length} הסעיפים`, run: () => setFullDraft(true) }
                 : fed.length > 0 && fed.every((s) => s.approved)
-                  ? { title: "כל הסעיפים שיש להם חומר אושרו", note: "הדוח יוצא כקובץ Word מוגן בסיסמה.", action: "להוצאת הדוח ←", run: () => go({ name: "case", id: caseId, view: "finish" }) }
+                  ? { title: "כל הסעיפים שיש להם חומר אושרו", note: "הדוח יוצא כ-Word מוגן בסיסמה.", action: "להוצאת הדוח ←", run: () => go({ name: "case", id: caseId, view: "finish" }) }
                   : null;
   // A section shows its own job, and so does the report page; the rest run in the strip.
   const elsewhere = jobs.filter((j) => !j.section || (j.section !== view && view !== "report"));
@@ -339,7 +339,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
           {elsewhere.map((j) => <ProgressLine key={j.id} started={j.started} estimate={j.estimate} label={j.label} approval={j.approval} />)}
           {failures.map((f) => (
             <div key={f.id} className="job-failed" role="alert">
-              <span className="grow"><b>{f.label}: לא הצליח.</b> {f.message} שום דבר לא נכנס לדוח; אפשר לנסות שוב.</span>
+              <span className="grow"><b>{f.label}: לא הצליח.</b> {f.message} שום דבר לא נכנס לדוח.</span>
               {f.section && f.section !== view && (
                 <button type="button" className="btn btn-small" onClick={() => toReport(f.section)}>לסעיף</button>
               )}

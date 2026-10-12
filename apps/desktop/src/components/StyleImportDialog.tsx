@@ -76,7 +76,7 @@ export function StyleImportDialog(props: {
         <div className="style-import-summary">
           <span className="chip chip-ok">הוסתרו {p.hidden} פרטים מזהים</span>
           {p.numbers > 0 && <span className="chip chip-ok">{p.numbers} מספרים הפכו ל"מספר"</span>}
-          <span className="hint">שמות, מקומות, תאריכים ומספרים הוחלפו בתפקיד (למשל "ילד"). שום שאלה לא נשאלת: כל חשד מוסתר.</span>
+          <span className="hint">פרטים מזהים הוחלפו (למשל "ילד"). כל חשד מוסתר.</span>
         </div>
         {p.warnings.map((w) => <p key={w} className="note-warn">{w}</p>)}
         <div className="field">
@@ -85,8 +85,8 @@ export function StyleImportDialog(props: {
           <span className="hint">גם השם עובר סינון לפני שהוא נשמר.</span>
         </div>
         <p className="hint">
-          סימנתי מראש את הקטעים שמראים הכי טוב איך את כותבת (התרשמות, ממצאים, סיכום והמלצות). רקע, הריון ולידה ותיאור ההורים לא מסומנים:
-          יש בהם יותר פרטים אישיים, ופחות סגנון. אפשר לשנות.
+          סימנתי את הקטעים שמראים הכי טוב איך את כותבת. רקע ותיאור ההורים לא מסומנים, כי יש בהם יותר פרטים אישיים.
+          אפשר לשנות.
         </p>
         <ul className="style-parts">
           {p.parts.map((part) => {

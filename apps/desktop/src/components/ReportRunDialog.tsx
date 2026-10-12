@@ -162,12 +162,12 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
     waiting: "בתור",
     writing: `${ai} כותב…`,
     done: "✓ טיוטה מוכנה לאישורך",
-    failed: "לא הצליח. אפשר לנסות שוב, רק את הסעיף הזה",
+    failed: "נכשל. אפשר לנסות שוב את הסעיף הזה",
   };
 
   return (
     <Dialog title={`כתיבת כל הדוח עם ${ai}`} onClose={onClose}
-      subtitle="כל סעיף נשלח בנפרד, רק עם הקטעים שלו ואחרי הסתרת השמות. הטיוטות נכנסות לדוח רק אחרי שתאשרי."
+      subtitle="כל סעיף נשלח בנפרד, בלי שמות. נכנס לדוח רק באישורך."
       footer={
         <>
           <span className="grow small muted">
@@ -197,7 +197,7 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
         <ol className="run-steps">
           <li className={unsorted > 0 ? "current" : "done"}>
             <b>מיון החומרים</b>
-            <span>{unsorted > 0 ? `${unsorted} חומרים עוד לא מוינו. ${ai} יקרא אותם (אחרי הסתרה) ויחליט איזה קטע שייך לאיזה סעיף.` : "כל החומרים ממוינים לסעיפים."}</span>
+            <span>{unsorted > 0 ? `${unsorted} חומרים עוד לא מוינו. ${ai} ימיין אותם (אחרי הסתרה).` : "כל החומרים ממוינים לסעיפים."}</span>
           </li>
           <li className={unsorted > 0 ? "" : finished ? "done" : "current"}>
             <b>כתיבת הטיוטות</b>
@@ -205,18 +205,18 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
           </li>
           <li className={finished ? "current" : ""}>
             <b>האישור שלך</b>
-            <span>עוברים סעיף אחר סעיף: מאשרים, עורכים או מבקשים ניסוח אחר.</span>
+            <span>אחר כך: מאשרים, עורכים או מבקשים ניסוח אחר.</span>
           </li>
         </ol>
 
         {unsorted > 0 && (
           <div className="run-sort">
-            <span className="grow">קודם ממיינים, כדי שכל סעיף יקבל רק את מה ששייך אליו. אחרי המיון הטיוטות מוכנות לשליחה כאן.</span>
+            <span className="grow">קודם ממיינים, כדי שכל סעיף יקבל רק את שלו.</span>
             <button type="button" className="btn btn-primary" onClick={() => void sortFirst()}>מיון החומרים</button>
           </div>
         )}
         {unsorted === 0 && !items && !error && <p className="muted"><Spinner /> מכינה את הבקשות ובודקת מה יוצא…</p>}
-        {items && items.length === 0 && <p className="muted">אין סעיפים שמחכים לטיוטה: לכל סעיף עם חומרים כבר יש טיוטה, או שעוד אין חומרים. מוסיפים חומרים ב"חומרי התיק".</p>}
+        {items && items.length === 0 && <p className="muted">אין סעיפים שמחכים לטיוטה. מוסיפים חומרים ב"חומרי התיק".</p>}
 
         {running && rows.length > 0 && (
           <div className="run-total">

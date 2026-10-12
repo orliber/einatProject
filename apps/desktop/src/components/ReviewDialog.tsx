@@ -9,12 +9,12 @@ import { useAi } from "../ai";
 
 /** What each block means and what to do next, in her words. */
 const guidance: Record<string, string> = {
-  unknown_name: "המילה נראית כמו שם שהתוכנה לא יודעת לאיזה תפקיד הוא שייך. אפשר להכריע כאן.",
+  unknown_name: "נראה כמו שם בלי תפקיד ידוע. אפשר להכריע כאן.",
   past_report_name: "המילה מופיעה כשם בדוח ישן. אפשר להכריע כאן.",
-  foreign_tag: "זו תגית שנשארה בטקסט מפעם קודמת (למשל אחרי \"להחזיר\"). הכפתור מחליף אותה במילה רגילה בכל התיק ובודק שוב.",
-  identity: "נמצא שם מהתיק שלא הוסתר. הכפתור פותח את פרטי התיק, שם בודקים את הרשומה שלו.",
-  pattern: "נמצא פרט מזהה (ת\"ז, טלפון, מייל) בטקסט שכתבת עכשיו. חוזרים לעריכה ומסירים אותו.",
-  too_large: "הבקשה גדולה מדי. חוזרים לעריכה ומקצרים את ההוראה, או מסמנים פחות חומרים.",
+  foreign_tag: "תגית שנשארה מפעם קודמת. הכפתור מחליף אותה במילה רגילה ובודק שוב.",
+  identity: "שם מהתיק לא הוסתר. הכפתור פותח את פרטי התיק לבדיקה.",
+  pattern: "יש פרט מזהה (ת\"ז, טלפון, מייל) בטקסט. מסירים אותו בעריכה.",
+  too_large: "הבקשה גדולה מדי. מקצרים, או מסמנים פחות חומרים.",
 };
 
 /**
@@ -101,7 +101,7 @@ export function ReviewDialog(props: {
                   onChange={(e) => void ipc.setReviewOnlySuspect(e.target.checked).then(refresh)} />
                 להציג את המסך הזה רק כשמשהו הוסתר אוטומטית
               </label>
-            ) : "בשבועיים הראשונים המסך הזה מוצג לפני כל שליחה."}
+            ) : "בשבועיים הראשונים המסך מוצג לפני כל שליחה."}
           </span>
           {prepared.demo_mode && <span className="chip chip-sand">מצב הדגמה: שום דבר לא יוצא מהמחשב</span>}
           <button type="button" className="btn" onClick={props.onClose}>חזרה לעריכה</button>
@@ -153,15 +153,15 @@ export function ReviewDialog(props: {
         ))}
         {blocked.length > 0 && (
           <p className="note-sand small">
-            הבדיקה האחרונה עצרה את השליחה כדי להגן על הפרטיות, ושום דבר לא יצא. ליד כל עצירה יש כפתור
-            שמתקן אותה או מוביל למקום שבו מתקנים. אם זה לא עוזר, אפשר להעתיק את ההודעה הזאת ולשלוח לאור.
+            השליחה נעצרה להגנת הפרטיות, ושום דבר לא יצא. ליד כל עצירה יש כפתור לתיקון.
+            אם זה לא עוזר, מעתיקים את ההודעה ושולחים לאור.
           </p>
         )}
         <ErrorLine error={error} />
 
         <ul className="review-checks">
-          <li><span aria-hidden="true">✓</span>{c.declared_names ? `${c.declared_names} שמות מהתיק יוחלפו בתפקיד ("הילד", "האם", "הגננת")` : "אין שמות מהתיק בטקסט"}</li>
-          <li><span aria-hidden="true">✓</span>{c.patterns ? `${c.patterns} פרטים מזהים יוחלפו (תאריכים הופכים ל"לפני כחודש")` : "אין ת\"ז, טלפון או תאריך"}</li>
+          <li><span aria-hidden="true">✓</span>{c.declared_names ? `${c.declared_names} שמות יוחלפו בתפקיד ("הילד", "האם")` : "אין שמות מהתיק בטקסט"}</li>
+          <li><span aria-hidden="true">✓</span>{c.patterns ? `${c.patterns} פרטים מזהים יוחלפו (תאריך: "לפני כחודש")` : "אין ת\"ז, טלפון או תאריך"}</li>
           {prepared.approval_id && <li><span aria-hidden="true">✓</span>הבדיקה האחרונה עברה. אפשר לשלוח.</li>}
         </ul>
 

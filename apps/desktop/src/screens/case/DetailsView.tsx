@@ -59,7 +59,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
   async function remove() {
     try {
       await ipc.deleteCase(caseId);
-      notify("התיק הועבר לסל המחזור. אפשר לשחזר אותו מרשימת התיקים במשך 30 יום.");
+      notify("התיק הועבר לסל המחזור (30 יום לשחזור).");
       go({ name: "cases" });
     } catch (e) {
       setError(fail(e as never));
@@ -71,14 +71,14 @@ export function DetailsView({ api }: { api: CaseApi }) {
       <div className="view-head">
         <div className="stack" style={{ gap: 4 }}>
           <h1>פרטי התיק ושמות להסתרה</h1>
-          <p className="muted small">כל שם כאן מוחלף בתפקיד לפני כל שליחה ל-{ai}, גם עם תחיליות ("ולנועם", "שנועם") וכתיב שונה.</p>
+          <p className="muted small">כל שם כאן מוחלף בתפקיד לפני שליחה, גם עם תחיליות וכתיב שונה.</p>
         </div>
         <button type="button" className="btn btn-primary btn-big" onClick={() => void save()}>שמירת השינויים</button>
       </div>
       <div className="view-body details">
         <div className="card details-card stack grow names-card">
           <span className="label">שמות שיוסתרו</span>
-          <p className="hint">הילד/ה, ההורים, האחים, הגננת, רופאים ומטפלים, וגם מקומות (גן, יישוב). כינויים וכתיב נוסף, בפסיקים.</p>
+          <p className="hint">אנשים ומקומות (גן, יישוב). כינויים וכתיב נוסף בפסיקים.</p>
           <PeopleEditor rows={rows} onChange={setRows} />
         </div>
         <div className="stack details-col">
@@ -117,8 +117,8 @@ export function DetailsView({ api }: { api: CaseApi }) {
           <div className="card details-card stack">
             <b>תקופת השמירה</b>
             <p className="small muted">
-              {ownRetention ? "תזכורת בתאריך שבחרת." : `תזכורת ב-${isoToHe(detail.retention_default)}: 7 שנים אחרי השינוי האחרון, או כשהילד/ה בן/בת 25, המאוחר מביניהם (הצעה, ממתינה לעו"ד).`}
-              {" "}התוכנה לא מוחקת לבד: בתאריך הזה התיק יוצג ברשימת התיקים, ואת ההחלטה מקבלים ידנית.
+              {ownRetention ? "תזכורת בתאריך שבחרת." : `תזכורת ב-${isoToHe(detail.retention_default)} (7 שנים, או גיל 25, המאוחר).`}
+              {" "}התוכנה לא מוחקת לבד.
             </p>
             <label className="row"><input type="checkbox" checked={ownRetention} onChange={(e) => setOwnRetention(e.target.checked)} /> תאריך אחר</label>
             {ownRetention && (
@@ -130,7 +130,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
           </div>
           <div className="card details-card stack danger-zone">
             <b>מחיקת התיק</b>
-            <p className="small muted">התיק עובר לסל המחזור ונשמר שם מוצפן 30 יום, ואפשר לשחזר אותו. אחר כך הוא נמחק לצמיתות, כולל מפתח ההצפנה שלו.</p>
+            <p className="small muted">נשמר בסל המחזור 30 יום, ואז נמחק לצמיתות.</p>
             <button type="button" className="btn btn-danger-quiet" onClick={() => setConfirmDelete(true)}>מחיקת התיק…</button>
           </div>
         </div>

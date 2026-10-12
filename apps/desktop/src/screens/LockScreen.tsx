@@ -94,7 +94,7 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
               value={secret} onChange={(e) => setSecret(e.target.value)} />
           </div>
           {waitUntil !== null ? (
-            <p className="lock-wait" role="status">היו כמה ניסיונות שגויים. אפשר לנסות שוב בעוד {waitSeconds} {waitSeconds === 1 ? "שנייה" : "שניות"}.</p>
+            <p className="lock-wait" role="status">ניסיונות שגויים. אפשר לנסות שוב בעוד {waitSeconds} {waitSeconds === 1 ? "שנייה" : "שניות"}.</p>
           ) : (
             <ErrorLine error={error} />
           )}
@@ -126,7 +126,7 @@ function VersionTrouble({ version }: { version: string | null }) {
     <div className="lock-trouble" role="note">
       <p>
         <strong>הכספת לא נפתחה בגרסה הזו{version ? ` (${version})` : ""}.</strong> הכספת נשארת במחשב ולא נמחקת.
-        אם זה התחיל אחרי עדכון, אפשר להתקין את הגרסה הקודמת מעל זו, והכספת תיפתח בה. כדאי גם לספר לאור.
+        אם זה התחיל אחרי עדכון, מתקינים את הגרסה הקודמת ומספרים לאור.
       </p>
       <button type="button" className="btn" onClick={() => {
         setProblem(null);

@@ -69,7 +69,7 @@ describe("main screens", () => {
     await openCase(user);
     await user.click(screen.getByRole("button", { name: /הוצאת הדוח/ }));
     const side = await screen.findByRole("region", { name: "לפני שהקובץ יוצא" });
-    expect(await within(side).findByText("פסקה מאושרת אחת עם הערה ששווה מבט נוסף:")).toBeInTheDocument();
+    expect(await within(side).findByText("פסקה מאושרת אחת שווה מבט נוסף:")).toBeInTheDocument();
     expect(within(side).getByText(/כתוב 85, ובטבלה 95/)).toBeInTheDocument();
   });
 
@@ -84,7 +84,7 @@ describe("main screens", () => {
     const view = render(<App />);
     const row = (await screen.findByRole("button", { name: /בתיק של נועם$/ })).closest("tr") as HTMLElement;
     expect(within(row).getByText("נכשל")).toBeInTheDocument();
-    expect(within(row).getByText(/השליחה האחרונה לא הצליחה/)).toBeInTheDocument();
+    expect(within(row).getByText(/השליחה האחרונה נכשלה/)).toBeInTheDocument();
     expect(await a11yViolations(view.container)).toEqual([]);
   });
 

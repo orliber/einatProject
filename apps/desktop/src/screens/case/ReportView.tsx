@@ -63,7 +63,7 @@ export function ReportView({ api, focus }: { api: CaseApi; onWriteAll: () => voi
     <div className="view">
       <div className="report-desk">
         {/* The page is the whole screen (D-036); one quiet line says how to work on it. */}
-        <p className="report-hint">לוחצים על פסקה כדי לערוך · ✦ ליד פסקה (במעבר עכבר) לשנות עם AI · בין פסקאות: "+ פסקה משלי כאן" · F1: קיצורי מקלדת{look.fromTemplate && " · הדף בגופן ובשוליים של התבנית שלך"}</p>
+        <p className="report-hint">לחיצה על פסקה: עריכה · ✦: שינוי עם AI · F1: קיצורים{look.fromTemplate && " · בגופן התבנית שלך"}</p>
         <article className="a4" style={look.style} aria-label="הדוח, כמו בקובץ">
           <header className="a4-header">{settings?.confidentiality}</header>
           <h1 className="a4-title">{settings?.title ?? "דוח אבחון פסיכולוגי"}</h1>
@@ -298,7 +298,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
                     onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && wish.trim()) { e.preventDefault(); const w = wish; setWish(""); void write(`${w} הפסקה: "${p.text}"`, p.id); } }} />
                 </label>
                 <div className="a4-pop-foot">
-                  <span className="small muted grow">{p.status === "approved" ? "הניסוח החדש יופיע ליד הקיים, ויחליף אותו רק אם תאשרי." : "הניסוח החדש יחליף את הפסקה הזאת בטיוטה."}</span>
+                  <span className="small muted grow">{p.status === "approved" ? "יופיע ליד הקיים, ויחליף אותו רק באישורך." : "יחליף את הפסקה בטיוטה."}</span>
                   <button type="button" className="btn btn-primary btn-small" disabled={!wish.trim()}
                     onClick={() => { const w = wish; setWish(""); void write(`${w} הפסקה: "${p.text}"`, p.id); }}>שליחה</button>
                 </div>
@@ -345,7 +345,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
     <div className="a4-edit">
       <textarea className="a4-edit-text" rows={Math.max(2, Math.ceil((editing?.text.length ?? 0) / 70) + (editing?.text.split("\n").length ?? 1) - 1)} autoFocus
         aria-label={editing?.id ? `עריכת פסקה בסעיף ${s.title}` : `פסקה חדשה בסעיף ${s.title}`} value={editing?.text ?? ""}
-        placeholder="כותבים כאן, כמו בוורד. שמות אמיתיים נשמרים מוצפנים ומוסתרים לפני כל שליחה."
+        placeholder="כותבים כאן, כמו בוורד. שמות מוסתרים לפני כל שליחה."
         onChange={(e) => setEditing(editing && { ...editing, text: e.target.value })}
         onKeyDown={(e) => { if (e.key === "Escape") setEditing(null); if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void save(); }} />
       <div className="row">
@@ -393,7 +393,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
             {open === "sources" && (
               <Popover label={`מאיזה חומרים לכתוב את "${s.title}"`} onClose={() => setOpen(null)}>
                 <b>מאיזה חומרים לכתוב את "{s.title}"?</b>
-                <span className="small muted">מסמנים ומורידים. הבחירה שלך גוברת על המיון של {ai}.</span>
+                <span className="small muted">הבחירה שלך גוברת על המיון.</span>
                 <div className="a4-pop-list">
                   {detail.inputs.map((i) => {
                     const r = detail.routing.find((x) => x.input_id === i.id);
@@ -420,7 +420,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
                 <div className="a4-pop-foot">
                   {sourcesChanged && s.paragraphs.length > 0 ? (
                     <>
-                      <span className="small grow">החומרים השתנו. הטיוטה הנוכחית עוד לא כוללת אותם.</span>
+                      <span className="small grow">החומרים השתנו מאז הטיוטה.</span>
                       <button type="button" className="btn btn-primary btn-small" disabled={busy} onClick={() => void write()}>✦ לכתוב מחדש</button>
                     </>
                   ) : <span className="grow" />}

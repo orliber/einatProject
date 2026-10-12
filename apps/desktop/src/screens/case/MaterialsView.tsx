@@ -161,7 +161,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
       <div className="view-head">
         <div className="stack" style={{ gap: 4 }}>
           <h1>מה יש בתיק</h1>
-          <p className="muted small">גוררים קובץ Word, ‏PDF או ODT לכל מקום במסך, או ישר למשבצת שלו. הכל נשמר מוצפן, ולשליחה יוצא רק טקסט אחרי הסתרה.</p>
+          <p className="muted small">גוררים לכאן Word, ‏PDF או ODT. הכל נשמר מוצפן.</p>
         </div>
         <div className="row">
           <button type="button" className="btn btn-primary btn-big" disabled={reading !== null} onClick={() => chooseFile()}>
@@ -173,7 +173,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
       <ErrorLine error={error} />
       {autoSaved && (
         <div className="note-sand row" role="status">
-          <span className="grow">"{autoSaved.title}" נשמר בתיק. לא היה בו מה להסתיר מעבר לשמות שכבר בתיק.</span>
+          <span className="grow">"{autoSaved.title}" נשמר בתיק. לא היה בו מה להסתיר.</span>
           <button type="button" className="btn btn-small" onClick={() => { setSelected(autoSaved.id); setAutoSaved(null); }}>לבדיקה</button>
           <button type="button" className="btn btn-small" onClick={() => void undoAutoSave()}>ביטול</button>
         </div>
@@ -190,7 +190,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
                 <span className="check-mark" aria-hidden="true">{g.items.length ? "✓" : g.required ? "!" : "+"}</span>
                 <span className="grow stack" style={{ gap: 0 }}>
                   <b>{g.label}{g.items.length > 1 && ` (${g.items.length})`}</b>
-                  <span className="small muted">{dropOn === g.label ? "לשחרר כאן: הקובץ ייכנס למשבצת הזו" : g.items.length ? "" : g.required ? `חסר · נחוץ ל: ${g.feeds}` : `לא חובה · ${g.feeds}`}</span>
+                  <span className="small muted">{dropOn === g.label ? "לשחרר כאן" : g.items.length ? "" : g.required ? `חסר · נחוץ ל: ${g.feeds}` : `לא חובה · ${g.feeds}`}</span>
                 </span>
                 {g.items.length ? (
                   <AddMenu className="icon-btn slot-add" label={`הוספה ל${g.label}`} items={[
@@ -258,7 +258,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
                 {preview ? <Segments segments={preview.original_segments} side="original" /> : input.content}
               </div>
               <div className="material-foot small muted">
-                <span><mark className="mark-real">מסומן</mark> = יוחלף בתפקיד לפני כל שליחה ("הילד", "האם", "לפני שבועיים")</span>
+                <span><mark className="mark-real">מסומן</mark> = יוחלף לפני שליחה ("הילד", "לפני שבועיים")</span>
               </div>
             </>
           </div>
@@ -328,8 +328,8 @@ function SectionsDialog(props: { api: CaseApi; input: CaseInput; route: Material
       </>}>
       <p className="muted small">
         {route.sorted
-          ? "מסומנים הסעיפים שנמצאו במיון. לסעיף שתוסיפי יישלח כל החומר; לסעיף שתורידי לא יישלח ממנו דבר."
-          : "מסומנים הסעיפים שהחומר מזין לפי סוגו. אפשר להוסיף ולהוריד; הבחירה שלך קובעת."}
+          ? "מסומנים הסעיפים מהמיון. הבחירה שלך קובעת."
+          : "מסומנים לפי סוג החומר. הבחירה שלך קובעת."}
       </p>
       <ErrorLine error={error} />
       <div className="sections-pick">
@@ -385,7 +385,7 @@ function WriteDialog(props: { caseId: string; kind: InputKind; input?: CaseInput
 
   return (
     <Dialog title={props.input ? "עריכת חומר" : kind === "session_note" ? "רישום מפגש" : "הוספת טקסט"}
-      subtitle="אפשר לכתוב עם שמות אמיתיים. הם נשמרים מוצפנים ומוסתרים לפני כל שליחה."
+      subtitle="אפשר לכתוב עם שמות. הם מוסתרים לפני כל שליחה."
       onClose={props.onClose} dirty={!saving && changed && content.trim() !== ""}
       footer={<><span className="grow" /><button type="button" className="btn" onClick={props.onClose}>ביטול</button><button type="button" className="btn btn-primary" disabled={saving} onClick={() => void save()}>שמירה בתיק</button></>}>
       <div className="stack">
@@ -439,7 +439,6 @@ const PRIOR_TOPICS = ["אבחנות", "ממצאים עיקריים", "המלצו
  *  through the same preparation, review and gate as every section request; the answer is the
  *  draft of the "previous assessments" section, kept in the vault like any other draft. */
 function PriorReportsAsk({ api }: { api: CaseApi }) {
-  const ai = useAi();
   const [open, setOpen] = useState(false);
   const [topics, setTopics] = useState<string[]>([]);
   const [text, setText] = useState("");
@@ -478,7 +477,7 @@ function PriorReportsAsk({ api }: { api: CaseApi }) {
           <textarea rows={2} value={text} onChange={(e) => setText(e.target.value)}
             aria-label="הוראה חופשית על הדוחות הקודמים"
             placeholder="או לכתוב בחופשיות: למשל, סכמי כל דוח לפי תפקוד שפתי, קשב ורגש" />
-          <p className="small muted">לפני השליחה ל-{ai} תראי בדיוק מה יוצא, ושמות יוסתרו. התשובה נשמרת כטיוטה בסעיף "אבחונים וטיפולים".</p>
+          <p className="small muted">התשובה נשמרת כטיוטה ב"אבחונים וטיפולים".</p>
           <div className="row">
             <button type="button" className="btn btn-primary btn-small" disabled={busy || chosen.length === 0} onClick={() => void go()}>
               {busy ? "מכינה…" : "בדיקה לפני שליחה"}
@@ -529,7 +528,7 @@ function FollowUpPanel({ api }: { api: CaseApi }) {
         <div className="followup-body">
           {view.rows.length === 0 ? (
             <p className="muted small">
-              {view.previous_gone ? "אין עם מה להשוות." : "ההשוואה תופיע כאן כשיוזנו כאן ציונים במבחן שנמדד גם באבחון הקודם (למשל מדדי וקסלר: FSIQ, VCI, WMI)."}
+              {view.previous_gone ? "אין עם מה להשוות." : "ההשוואה תופיע כשיוזנו ציונים במבחן שנמדד גם קודם (למשל FSIQ)."}
             </p>
           ) : (
             <>
@@ -550,7 +549,7 @@ function FollowUpPanel({ api }: { api: CaseApi }) {
                 </tbody>
               </table>
               <p className="small muted">
-                הפרש קטן מ-10 נקודות בציון תקן (3 בציון מותאם) הוא לרוב בגבולות טעות המדידה.
+                הפרש של פחות מ-10 בציון תקן (3 במותאם) הוא לרוב טעות מדידה.
                 {view.rows.some((r) => r.before_instrument !== r.after_instrument) && ` המבחנים שונים (${view.rows[0]?.before_instrument} ← ${view.rows[0]?.after_instrument}), ולכן ההשוואה זהירה.`}
               </p>
               <div className="row">
@@ -561,7 +560,7 @@ function FollowUpPanel({ api }: { api: CaseApi }) {
                       await ipc.addComparisonMaterial(caseId);
                       await reload();
                       setView(await ipc.followUp(caseId));
-                      notify("ההשוואה נוספה לחומרי התיק. הסעיפים ייכתבו גם ממנה.");
+                      notify("ההשוואה נוספה לחומרי התיק.");
                     } catch (e) {
                       setError(fail(e as never));
                     }

@@ -28,7 +28,7 @@ export function FolderNameDialog(props: { title: string; initial?: string; onClo
           <label htmlFor="folder-name">שם התיקייה</label>
           <input id="folder-name" className="input" autoFocus maxLength={60} value={name} onChange={(e) => setName(e.target.value)} />
         </div>
-        <p className="hint">השם נשמר מוצפן במחשב הזה ולא נשלח לשום מקום, גם אם הוא כולל שם משפחה.</p>
+        <p className="hint">השם נשמר מוצפן ולא נשלח לשום מקום.</p>
         <ErrorLine error={error} />
       </form>
     </Dialog>
@@ -132,7 +132,7 @@ export function PurgeDialog(props: { name: string; onClose: () => void; onPurge:
         <button type="button" className="btn btn-danger" disabled={busy || !pw} onClick={() => void purge()}>מחיקה לצמיתות</button>
       </>}>
       <form className="stack" onSubmit={(e) => { e.preventDefault(); if (pw) void purge(); }}>
-        <p>כל מה שבתיק יימחק מהכספת ולא יהיה אפשר לשחזר אותו ממנה. <b>גיבויים שנעשו קודם עדיין מכילים את התיק</b>: אם צריך למחוק אותו לגמרי (למשל לבקשת ההורים), מוחקים גם אותם ועושים גיבוי חדש. זה גם לא מוחק דוחות Word שכבר הופקו.</p>
+        <p>התיק יימחק מהכספת ולא יהיה אפשר לשחזר אותו. <b>גיבויים קודמים עדיין מכילים אותו</b>, וגם דוחות Word שהופקו נשארים.</p>
         <div className="field">
           <label htmlFor="purge-pw">הסיסמה של הכספת, לאישור</label>
           <input id="purge-pw" className="input" type="password" autoComplete="current-password" autoFocus value={pw} onChange={(e) => setPw(e.target.value)} />
