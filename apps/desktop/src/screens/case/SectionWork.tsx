@@ -7,6 +7,7 @@ import { VerdictNote } from "../../components/VerdictNote";
 import { ErrorLine, SendIcon, Spinner, WarnIcon } from "../../components/ui";
 import { ProgressLine } from "../../components/Progress";
 import { Why } from "../../components/Why";
+import { Similar } from "../../components/Similar";
 import { useHoldUnsaved } from "../../components/Unsaved";
 import { kindLabel } from "../../i18n/he";
 import { useRotatingPlaceholder } from "../../components/Rotating";
@@ -51,6 +52,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   const [history, setHistory] = useState<string | null>(null);
   /** Paragraphs whose sources are open ("למה כתבת את זה?", AI-7). */
   const [why, setWhy] = useState<string | null>(null);
+  const [similar, setSimilar] = useState<string | null>(null);
   /** What the check against the sources said, per proposed paragraph (until the draft changes). */
   const [checks, setChecks] = useKept<Map<string, ParagraphCheck>>(`${keep}:checks`, new Map());
   const verifyOn = useQuery({ queryKey: ["verify-stage"], queryFn: ipc.verifyStageOn }).data === true;
@@ -371,9 +373,11 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                     <span className="pending-mark">{p.by_ai ? `הצעה של ${ai} · ממתינה לאישור` : "ממתינה לאישור"}</span>
                     {p.sources.length > 0 && <span className="muted">מקור: {p.sources.join(" · ")}</span>}
                     {p.by_ai && <button type="button" className="link-small" aria-expanded={why === p.id} onClick={() => setWhy(why === p.id ? null : p.id)}>למה כתבת את זה?</button>}
+                    <button type="button" className="link-small" aria-expanded={similar === p.id} onClick={() => setSimilar(similar === p.id ? null : p.id)}>פסקה דומה מהדוחות שלי</button>
                   </div>
                 )}
                 {!isEditing && why === p.id && <Why caseId={caseId} draftId={p.id} />}
+                {similar === p.id && <Similar caseId={caseId} draftId={p.id} />}
                 {!isEditing && check && <VerdictNote check={check} />}
                 {isEditing ? (
                   <label className="edit-box">
@@ -398,6 +402,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                       <button type="button" className="btn btn-primary btn-small"
                         onClick={() => void act(async () => { await ipc.editParagraph(caseId, p.id, editing.text); await ipc.approveParagraph(caseId, p.id); setEditing(null); })}>שמירה ואישור</button>
                       <button type="button" className="btn btn-small" onClick={() => setEditing(null)}>ביטול</button>
+                      <button type="button" className="link-small" aria-expanded={similar === p.id} onClick={() => setSimilar(similar === p.id ? null : p.id)}>פסקה דומה מהדוחות שלי</button>
                     </>
                   ) : (
                     <>

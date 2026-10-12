@@ -34,7 +34,7 @@ const overview = (over: Partial<StyleOverview> = {}): StyleOverview => ({
   learned: {
     from_reports: 0, from_edits: 0, from_finals: 0, finished_reports: 0,
     words_per_sentence: null, sentences_per_paragraph: null, commas_per_sentence: null,
-    hedges: null, contrasts: null, first_person: null, fit_recent: null, fit_earlier: null, fit_count: 0,
+    hedges: null, contrasts: null, first_person: null, fit_recent: null, fit_earlier: null, fit_count: 0, fit_by_month: [],
   },
   ...over,
 });
@@ -114,6 +114,7 @@ describe("what the program measured", () => {
       from_reports: 40, from_edits: 3, finished_reports: 1, from_finals: 12,
       words_per_sentence: 13.4, sentences_per_paragraph: 3.2, commas_per_sentence: 1.1,
       hedges: 22, contrasts: 9, first_person: 4, fit_recent: 81, fit_earlier: 72, fit_count: 60,
+      fit_by_month: [{ month: "2026-09", average: 70, count: 20 }, { month: "2026-10", average: 81, count: 40 }],
     };
     mockIPC((cmd) => {
       calls.push(cmd);
@@ -126,6 +127,9 @@ describe("what the program measured", () => {
     expect(screen.getByText(/40 פסקאות מהדוחות הישנים, 3 מהתיקונים שלך, דוח אחד שסיימת בתוכנה/)).toBeInTheDocument();
     expect(screen.getByText("81 מתוך 100")).toBeInTheDocument();
     expect(screen.getByText(/לעומת 72/)).toBeInTheDocument();
+    // ST12: by month, each bar named in words for a screen reader.
+    expect(screen.getByLabelText("ספטמבר 2026: 70 (20 פסקאות)")).toBeInTheDocument();
+    expect(screen.getByLabelText("אוקטובר 2026: 81 (40 פסקאות)")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /לשכוח את מה שנלמד/ }));
     await user.click(screen.getByRole("button", { name: "לשכוח" }));
     await vi.waitFor(() => expect(calls).toContain("forget_style_learning"));

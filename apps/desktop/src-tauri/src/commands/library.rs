@@ -199,6 +199,16 @@ pub(crate) async fn paragraph_versions(
     with_core(&state, move |c| c.paragraph_versions(&case_id, &draft_id)).await
 }
 
+/// The paragraph of her past reports closest to a draft paragraph (ST2). Local only.
+#[tauri::command]
+pub(crate) async fn similar_paragraph(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    draft_id: String,
+) -> Res<Option<dv_core::SimilarParagraph>> {
+    with_core(&state, move |c| c.similar_paragraph(&case_id, &draft_id)).await
+}
+
 #[tauri::command]
 pub(crate) async fn restore_paragraph_version(
     state: tauri::State<'_, AppState>,

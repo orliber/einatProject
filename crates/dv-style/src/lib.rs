@@ -25,7 +25,7 @@ pub mod text;
 
 pub use edits::{EditMark, EditModel, EditSuggestion, Pattern};
 pub use phrases::{mine_phrases, PhraseCandidate, ReportParts};
-pub use stylometry::{Measures, StyleModel};
+pub use stylometry::{report_weight, Measures, StyleModel};
 
 /// The key for what holds across the whole report (same as `dv_ai::style::GENERAL`).
 pub const GENERAL: &str = "general";

@@ -96,8 +96,59 @@ pub fn best(docs: &[&str], query: &str, budget: usize) -> Vec<usize> {
     order
 }
 
+/// A paragraph of her reports is shown next to a draft only with at least this many words.
+const MIN_SIMILAR_WORDS: usize = 8;
+/// A paragraph from the same section scores this much more.
+const SAME_SECTION: f64 = 1.5;
+
+/// The paragraph of her reports closest to `query` (ST2): BM25, a paragraph of the same
+/// section counted [`SAME_SECTION`] times, and none that shares no word with it or is too
+/// short to show. `docs` are (section, paragraph).
+#[must_use]
+pub fn closest(docs: &[(Option<&str>, &str)], section: &str, query: &str) -> Option<usize> {
+    let texts: Vec<&str> = docs.iter().map(|(_, t)| *t).collect();
+    let scores = bm25(&texts, query);
+    docs.iter()
+        .zip(scores)
+        .enumerate()
+        .filter(|(_, ((_, t), score))| {
+            *score > 0.0 && crate::text::words(t).len() >= MIN_SIMILAR_WORDS
+        })
+        .map(|(i, ((s, _), score))| {
+            (
+                i,
+                if *s == Some(section) {
+                    score * SAME_SECTION
+                } else {
+                    score
+                },
+            )
+        })
+        .max_by(|a, b| a.1.total_cmp(&b.1).then(b.0.cmp(&a.0)))
+        .map(|(i, _)| i)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_closest_paragraph_prefers_its_section_and_needs_a_shared_word() {
+        let docs = [
+            (
+                Some("play"),
+                "הילד בנה מגדל קוביות גבוה ושמח מאוד כשהמגדל עמד יציב על השולחן.",
+            ),
+            (
+                Some("language"),
+                "השפה של הילד עשירה והוא סיפר על המגדל שבנה מקוביות בבית.",
+            ),
+            (Some("play"), "קצר מדי."),
+        ];
+        assert_eq!(closest(&docs, "play", "מגדל קוביות"), Some(0));
+        assert_eq!(closest(&docs, "language", "סיפר על המגדל"), Some(1));
+        assert_eq!(closest(&docs, "play", "שום מילה משותפת"), None);
+        assert_eq!(closest(&[], "play", "מגדל"), None);
+    }
+
     use super::*;
 
     #[test]

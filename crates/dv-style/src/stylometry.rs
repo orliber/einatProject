@@ -33,6 +33,22 @@ const Z_NOTE: f64 = 2.0;
 const Z_HINT: f64 = 1.0;
 /// Weight of her final wording of an edited paragraph.
 pub const EDIT_WEIGHT: f64 = 0.5;
+/// Gradual forgetting (ST5). Every new edit leaves the earlier ones at this share (half after
+/// about 140 edits); every newly finished report leaves the earlier ones at this share (half
+/// after about 7 reports).
+const EDIT_FADE: f64 = 0.995;
+const FINAL_FADE: f64 = 0.9;
+/// A past report counts this much less for each report she uploaded after it, and never less
+/// than [`REPORT_FLOOR`].
+const REPORT_FADE: f64 = 0.9;
+const REPORT_FLOOR: f64 = 0.4;
+
+/// The weight of a past report with `newer` of her reports uploaded after it (ST5).
+#[must_use]
+pub fn report_weight(newer: usize) -> f64 {
+    let newer = i32::try_from(newer).unwrap_or(i32::MAX);
+    REPORT_FADE.powi(newer).max(REPORT_FLOOR)
+}
 
 struct Feature {
     /// Smallest standard deviation used (a feature she never varies would flag everything).
@@ -152,6 +168,12 @@ impl Moments {
         }
     }
 
+    /// The same mean and spread, worth `f` times as much: older observations fade (ST5).
+    pub fn fade(&mut self, f: f64) {
+        self.n *= f;
+        self.m2 *= f;
+    }
+
     #[must_use]
     pub fn var(&self) -> f64 {
         if self.n > 1.0 {
@@ -177,6 +199,17 @@ impl Part {
         self.function.resize(FUNCTION.len(), Moments::default());
         for v in self.sections.values_mut() {
             v.resize(N, Moments::default());
+        }
+    }
+
+    fn fade(&mut self, f: f64) {
+        for m in self
+            .global
+            .iter_mut()
+            .chain(self.function.iter_mut())
+            .chain(self.sections.values_mut().flatten())
+        {
+            m.fade(f);
         }
     }
 
@@ -306,26 +339,36 @@ fn fit<'a>(
     parts: impl IntoIterator<Item = (Option<&'a str>, &'a str)>,
     against: Option<&[Moments]>,
 ) -> Part {
-    let measured: Vec<(Option<&str>, [f64; N], Vec<f64>)> = parts
+    fit_weighted(parts.into_iter().map(|(s, t)| (s, t, 1.0)), against)
+}
+
+/// One measured paragraph: (section, features, function-word rates, weight).
+type Measured<'a> = (Option<&'a str>, [f64; N], Vec<f64>, f64);
+
+fn fit_weighted<'a>(
+    parts: impl IntoIterator<Item = (Option<&'a str>, &'a str, f64)>,
+    against: Option<&[Moments]>,
+) -> Part {
+    let measured: Vec<Measured<'_>> = parts
         .into_iter()
-        .flat_map(|(s, t)| paragraphs(t).into_iter().map(move |p| (s, p)))
-        .filter_map(|(s, p)| measure(p).map(|(f, r)| (s, f, r)))
+        .flat_map(|(s, t, w)| paragraphs(t).into_iter().map(move |p| (s, p, w)))
+        .filter_map(|(s, p, w)| measure(p).map(|(f, r)| (s, f, r, w)))
         .collect();
     let mut part = Part::default();
-    for (s, f, r) in &measured {
-        add(&mut part, *s, f, r, 1.0);
+    for (s, f, r, w) in &measured {
+        add(&mut part, *s, f, r, *w);
     }
     // Second pass: how far each paragraph is from her function-word profile.
     let function = match against {
         Some(f) if f.iter().any(|m| m.n >= 2.0) => f.to_vec(),
         _ => part.function.clone(),
     };
-    for (s, _, r) in measured {
+    for (s, _, r, w) in measured {
         if let Some(d) = delta(&r, &function) {
             let key = s.unwrap_or(GENERAL).to_owned();
-            part.global[DELTA].add(d, 1.0);
+            part.global[DELTA].add(d, w);
             if let Some(sec) = part.sections.get_mut(&key) {
-                sec[DELTA].add(d, 1.0);
+                sec[DELTA].add(d, w);
             }
         }
     }
@@ -355,6 +398,16 @@ impl StyleModel {
         self.reports = fit(parts, None);
     }
 
+    /// Re-learn from her past reports, each part with the weight of its report
+    /// ([`report_weight`]): the newer reports count more, so the model follows her as her
+    /// writing changes (ST5).
+    pub fn fit_reports_weighted<'a>(
+        &mut self,
+        parts: impl IntoIterator<Item = (Option<&'a str>, &'a str, f64)>,
+    ) {
+        self.reports = fit_weighted(parts, None);
+    }
+
     /// Learn from a report she finished in the program, at full weight: `(section, text)` for
     /// every approved paragraph. `key` names the case (a keyed hash); exporting the same case
     /// again replaces what it taught, so a report never counts twice.
@@ -364,6 +417,10 @@ impl StyleModel {
         parts: impl IntoIterator<Item = (Option<&'a str>, &'a str)>,
     ) {
         self.finals.remove(key);
+        // Earlier finished reports fade a little with every new one (ST5).
+        for f in self.finals.values_mut() {
+            f.fade(FINAL_FADE);
+        }
         // Delta against what she wrote elsewhere: the report itself would pull it to zero.
         let function = self.combined().function;
         let part = fit(parts, Some(&function));
@@ -392,6 +449,8 @@ impl StyleModel {
         if let Some(d) = delta(&r, &combined.function) {
             f[DELTA] = d;
         }
+        // What she edited long ago fades, a little with every new edit (ST5).
+        self.edits.fade(EDIT_FADE);
         add(&mut self.edits, Some(section), &f, &r, EDIT_WEIGHT);
     }
 
@@ -565,6 +624,34 @@ mod tests {
              במהלך המפגש התרשמתי מילד סקרן ומשתף פעולה, אשר נעזר בתיווך מבוגר. \
              כאשר המשימה התארכה הוא ביקש הפסקה קצרה וחזר לעבודה."
         )
+    }
+
+    #[test]
+    fn older_writing_fades_but_keeps_its_figures() {
+        let mut m = Moments::default();
+        for x in [10.0, 12.0, 14.0] {
+            m.add(x, 1.0);
+        }
+        let (mean, var) = (m.mean, m.var());
+        m.fade(0.5);
+        assert!((m.mean - mean).abs() < 1e-12 && (m.n - 1.5).abs() < 1e-12);
+        assert!((m.m2 - var * 2.0 * 0.5).abs() < 1e-9, "the spread is kept");
+        assert!((report_weight(0) - 1.0).abs() < 1e-12);
+        assert!(report_weight(1) < 1.0 && report_weight(1) > report_weight(3));
+        assert!((report_weight(100) - REPORT_FLOOR).abs() < 1e-12);
+
+        // Her newer edits pull her figures further than her older ones.
+        let words = |n: usize| vec!["מילה"; n].join(" ");
+        let para = |n: usize| format!("{}. {}. {}.", words(n), words(n), words(n));
+        let mut m = StyleModel::default();
+        for _ in 0..300 {
+            m.observe_edit("observation", &para(20));
+        }
+        for _ in 0..300 {
+            m.observe_edit("observation", &para(8));
+        }
+        let wps = m.edits.global[0].mean;
+        assert!(wps < 14.0, "the newer, shorter sentences weigh more: {wps}");
     }
 
     fn model() -> StyleModel {

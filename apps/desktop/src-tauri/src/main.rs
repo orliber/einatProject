@@ -313,6 +313,7 @@ fn main() {
             reject_paragraph,
             edit_paragraph,
             paragraph_versions,
+            similar_paragraph,
             restore_paragraph_version,
             add_own_paragraph,
             prepare_consult,

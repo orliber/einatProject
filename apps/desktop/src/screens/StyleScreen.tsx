@@ -11,6 +11,7 @@ import { TopBar } from "../components/TopBar";
 import { ErrorLine, Skeleton, Spinner, UploadIcon, CloseIcon } from "../components/ui";
 import {
   ipc,
+  type FitMonth,
   type Prepared,
   type StyleImportPreview,
   type StyleItem,
@@ -371,6 +372,36 @@ export function learnedLines(l: StyleLearned): string[] {
   return out;
 }
 
+const MONTHS_HE = ["ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני", "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר"];
+
+/** "2026-10" → ["אוק׳ 26" as a short label, "אוקטובר 2026" in full]. */
+export function monthLabel(month: string): { short: string; full: string } {
+  const [y = "", m = "1"] = month.split("-");
+  const name = MONTHS_HE[Number(m) - 1] ?? month;
+  return { short: `${Number(m)}.${y.slice(2)}`, full: `${name} ${y}` };
+}
+
+/** ST12: the average closeness by month, oldest first: is drafting getting closer to her? */
+function FitTrend({ months }: { months: FitMonth[] }) {
+  return (
+    <div className="fit-trend">
+      <span className="small muted">לאורך זמן (ממוצע לחודש, מתוך 100):</span>
+      <ol className="fit-bars">
+        {months.map((m) => {
+          const { short, full } = monthLabel(m.month);
+          return (
+            <li key={m.month} className="fit-bar" aria-label={`${full}: ${m.average} (${m.count} פסקאות)`}>
+              <span className="fit-value" aria-hidden="true">{m.average}</span>
+              <span className="fit-fill" style={{ height: `${Math.max(3, Math.round(m.average * 0.8))}px` }} aria-hidden="true" />
+              <span className="fit-month" aria-hidden="true">{short}</span>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
 function Learned({ o, onForget }: { o: StyleOverview; onForget: () => void }) {
   const ai = useAi();
   const l = o.learned;
@@ -399,6 +430,7 @@ function Learned({ o, onForget }: { o: StyleOverview; onForget: () => void }) {
             : ` (${l.fit_count} פסקאות עד עכשיו).`}
         </p>
       )}
+      {l.fit_by_month.length >= 2 && <FitTrend months={l.fit_by_month} />}
       {canForget && (
         <div className="row">
           <button type="button" className="btn btn-small btn-danger-quiet" onClick={onForget}>לשכוח את מה שנלמד מהתיקונים ומהדוחות שסיימתי</button>
