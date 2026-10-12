@@ -5,7 +5,7 @@ import { ReviewDialog } from "../components/ReviewDialog";
 import { ExportDialog } from "../components/ExportDialog";
 import { ReportRunDialog } from "../components/ReportRunDialog";
 import { ProgressLine, estimateMs, recordDuration, type Task } from "../components/Progress";
-import { ErrorLine, CloseIcon } from "../components/ui";
+import { ErrorLine, CloseIcon, Skeleton } from "../components/ui";
 import { ActionsMenu, type MenuItem } from "../components/Menu";
 import { ageWords } from "../components/AgeField";
 import { MaterialsView } from "./case/MaterialsView";
@@ -232,7 +232,15 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   };
 
   if (!detail) {
-    return <main className="center-note">{error ? <p className="error">{error}</p> : <span aria-busy="true" />}</main>;
+    return error ? (
+      <main className="center-note"><ErrorLine error={error} retry={() => { setError(null); void reload(); }} /></main>
+    ) : (
+      <main className="skeleton-page" aria-label="טוען את התיק">
+        <Skeleton lines={2} label="טוען את התיק" />
+        <Skeleton card lines={5} label="טוען" />
+        <Skeleton card lines={3} label="טוען" />
+      </main>
+    );
   }
 
   const api: CaseApi = { caseId, detail, reload, review: startReview, sort: startSort, jobs, track, draft };

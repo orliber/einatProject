@@ -230,6 +230,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             ping,
+            recent_crashes,
             app_status,
             create_vault,
             confirm_recovery_key,

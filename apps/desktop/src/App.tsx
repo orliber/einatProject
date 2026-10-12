@@ -8,7 +8,7 @@ import { CaseScreen } from "./screens/CaseScreen";
 import { ConsultScreen } from "./screens/ConsultScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { StyleScreen } from "./screens/StyleScreen";
-import { Toast, type ToastAction } from "./components/ui";
+import { ErrorLine, Toast, type ToastAction } from "./components/ui";
 import { IdleWarning } from "./components/IdleWarning";
 import { UnsavedNotice } from "./components/Unsaved";
 import { applyTextSize, readTextSize, stepTextSize } from "./textSize";
@@ -175,7 +175,7 @@ export function App() {
   }, [refresh]);
 
   if (coreDown && !status) {
-    return <main className="center-note"><p className="error">אין חיבור לליבה המאובטחת. כדאי לסגור ולפתוח את התוכנה.</p></main>;
+    return <main className="center-note"><ErrorLine error="אין חיבור לליבה המאובטחת. אפשר לנסות שוב, ואם זה חוזר, לסגור ולפתוח את התוכנה." retry={() => window.location.reload()} report /></main>;
   }
   if (!status) return <main className="center-note" aria-busy="true" />;
   if (!status.vault_exists || inSetup) {

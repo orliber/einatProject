@@ -8,7 +8,7 @@ import { estimateMs, ProgressLine, recordDuration } from "../components/Progress
 import { ReviewDialog } from "../components/ReviewDialog";
 import { StyleImportDialog } from "../components/StyleImportDialog";
 import { TopBar } from "../components/TopBar";
-import { ErrorLine, Spinner, UploadIcon, CloseIcon } from "../components/ui";
+import { ErrorLine, Skeleton, Spinner, UploadIcon, CloseIcon } from "../components/ui";
 import {
   ipc,
   type Prepared,
@@ -143,7 +143,9 @@ export function StyleScreen() {
     return (
       <div className="page">
         <TopBar active="style" />
-        <main className="page-main style">{overview.error ? <ErrorLine error={fail(overview.error as never)} /> : <Spinner />}</main>
+        <main className="page-main style">{overview.error
+          ? <ErrorLine error={fail(overview.error as never)} retry={() => void qc.invalidateQueries({ queryKey: ["style"] })} />
+          : <div className="stack" style={{ gap: 16 }}><Skeleton card lines={4} label="טוען את הסגנון" /><Skeleton card lines={3} label="טוען" /></div>}</main>
       </div>
     );
   }

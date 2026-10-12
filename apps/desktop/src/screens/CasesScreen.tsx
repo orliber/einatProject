@@ -7,7 +7,7 @@ import { TopBar } from "../components/TopBar";
 import { NewCaseDialog } from "../components/NewCaseDialog";
 import { ageWords } from "../components/AgeField";
 import { ActionsMenu, RightClick, type MenuItem } from "../components/Menu";
-import { ErrorLine } from "../components/ui";
+import { ErrorLine, Skeleton } from "../components/ui";
 import { greeting } from "../i18n/he";
 import { ipc, type CaseSummary, type Folder, type UiError } from "../ipc/client";
 import { ConfirmDialog, FolderIcon, FolderNameDialog, MoveDialog, PurgeDialog, descendants } from "./library/LibraryDialogs";
@@ -203,11 +203,12 @@ export function CasesScreen() {
           </section>
         )}
         {status.integrity_warning && (
-          <p className="error" role="alert">בדיקת השלמות של הכספת מצאה חריגה: {status.integrity_warning}</p>
+          <ErrorLine error={`בדיקת השלמות של הכספת מצאה חריגה: ${status.integrity_warning}`} report />
         )}
         <BackupReminder />
         <RetentionNotice />
-        <ErrorLine error={error ?? (cases.error ? fail(cases.error as unknown as UiError) : null)} />
+        <ErrorLine error={error ?? (cases.error ? fail(cases.error as unknown as UiError) : null)}
+          retry={!error && cases.error ? () => void qc.invalidateQueries({ queryKey: ["cases"] }) : undefined} />
 
         <div className="library-bar">
           <nav className="crumbs" aria-label="מיקום">
@@ -235,6 +236,11 @@ export function CasesScreen() {
             onPurge={(c) => setModal({ kind: "purge", c })} />
         ) : (
           <>
+            {!cases.data && !cases.error && (
+              <div className="stack" style={{ gap: 12 }}>
+                <Skeleton card lines={4} label="טוען את התיקים" />
+              </div>
+            )}
             {allCases.length === 0 && allFolders.length === 0 && cases.data && (
               <div className="card empty">
                 <h2>התיק הראשון</h2>

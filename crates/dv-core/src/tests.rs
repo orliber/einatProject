@@ -3812,3 +3812,25 @@ fn a_tag_left_by_a_name_brought_back_no_longer_blocks_the_case() {
     );
     assert_eq!(kept[0].status, DraftStatus::Approved);
 }
+
+#[test]
+fn a_bug_report_carries_only_crash_lines_in_the_hooks_own_shape() {
+    let mut log = String::new();
+    for i in 0..7 {
+        log.push_str(&format!(
+            "17000000{i} · v0.5.1 · thread main · crates/dv-core/src/lib.rs:{i}0 · (message left out)\n"
+        ));
+    }
+    log.push_str("garbage someone wrote\n");
+    log.push_str("1700000099 · v0.5.1 · thread main · דוח של נועם.docx:3 · x\n");
+    log.push_str("1700000099 · v0.5.1 · thread ילד · a.rs:3 · x\n");
+    log.push_str("1700000099 · v0.5.1 · thread main · a.rs:3 · x · y\n");
+    let kept = recent_crashes(&log);
+    assert_eq!(kept.len(), 5);
+    assert!(kept[0].starts_with("170000002 "));
+    assert!(kept[4].starts_with("170000006 "));
+    assert!(kept
+        .iter()
+        .all(|l| !l.contains("נועם") && !l.contains("ילד")));
+    assert!(recent_crashes("").is_empty());
+}

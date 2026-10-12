@@ -2,6 +2,7 @@
 import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { AppContext } from "../App";
 import { failureFor } from "../errors";
+import { BugReportDialog } from "./BugReport";
 import type { Segment } from "../ipc/generated/Segment";
 
 export function LockIcon({ size = 18, color = "currentColor" }: { size?: number; color?: string }) {
@@ -187,6 +188,23 @@ export function Spinner() {
   return <span className="spinner" aria-hidden="true" />;
 }
 
+const SKELETON_WIDTHS = [92, 76, 85, 64, 88, 70];
+
+/**
+ * The shape of what is loading, in place of an empty screen (V1). Grey bars that shimmer
+ * gently; with reduced motion they stay still.
+ */
+export function Skeleton({ lines = 3, label = "טוען", card = false }: { lines?: number; label?: string; card?: boolean }) {
+  return (
+    <div className={card ? "card skeleton" : "skeleton"} role="status" aria-busy="true" aria-label={label}>
+      {Array.from({ length: lines }, (_, i) => (
+        <span key={i} className={i === 0 && card ? "skeleton-line skeleton-title" : "skeleton-line"}
+          style={{ width: `${SKELETON_WIDTHS[i % SKELETON_WIDTHS.length] ?? 80}%` }} />
+      ))}
+    </div>
+  );
+}
+
 /** A short confirmation that goes away by itself. The timer starts once per message:
  *  a new `onDone` on every render of the parent must not keep it on screen. */
 /** An action offered on a toast, such as "ביטול" right after something was saved or removed. */
@@ -223,9 +241,16 @@ export function Toast({ text, onDone, action }: { text: string; onDone: () => vo
 
 /** An error with the next step beside it: a missing consent opens the consent form, a bad
  *  key opens the settings, a technical failure can be copied for Or (F2, F4, F5). */
-export function ErrorLine({ error }: { error: string | null }) {
+/** Failures that are her own input, fixed where she types; no bug report for these. */
+const OWN_SLIPS = new Set(["wrong_secret", "recovery_invalid", "weak_password", "exists", "backoff", "locked", "not_found", "refused"]);
+
+/**
+ * Every error on screen, with the next step (U5): the place that fixes it when there is one,
+ * "לנסות שוב" when the caller can retry, and otherwise a bug report for Or. Never a dead end.
+ */
+export function ErrorLine({ error, retry, report: always }: { error: string | null; retry?: (() => void) | undefined; report?: boolean }) {
   const app = useContext(AppContext);
-  const [copied, setCopied] = useState(false);
+  const [reporting, setReporting] = useState(false);
   if (!error) return null;
   const f = failureFor(error);
   const route = app?.route;
@@ -240,22 +265,23 @@ export function ErrorLine({ error }: { error: string | null }) {
       actions.push({ label: "פתיחת ההגדרות", run: () => app.go({ name: "settings" }) });
     }
   }
-  const details = f?.details.length ? f.details.join("\n") : null;
+  if (retry) actions.push({ label: "לנסות שוב", run: retry });
+  // A fault only Or can read, or a failure from the core with nothing else to offer: the report
+  // for him. Her own slips (a wrong password, a field left empty) are not faults.
+  const report = always === true || (f !== null && (f.details.length > 0 || (actions.length === 0 && !OWN_SLIPS.has(f.code))));
   return (
     <div className="error-line">
       <p className="error" role="alert">{error}</p>
-      {(actions.length > 0 || details) && (
-        <div className="row error-actions">
-          {actions.map((a) => (
-            <button key={a.label} type="button" className="btn btn-small" onClick={a.run}>{a.label}</button>
-          ))}
-          {details && (
-            <button type="button" className="btn btn-small"
-              onClick={() => void navigator.clipboard.writeText(details).then(() => setCopied(true), () => undefined)}>
-              {copied ? "הועתק" : "העתקת פרטים לאור"}
-            </button>
-          )}
-        </div>
+      {(actions.length > 0 || report) && <div className="row error-actions">
+        {actions.map((a) => (
+          <button key={a.label} type="button" className="btn btn-small" onClick={a.run}>{a.label}</button>
+        ))}
+        {report && (
+          <button type="button" className="btn btn-small" onClick={() => setReporting(true)}>דוח תקלה לאור</button>
+        )}
+      </div>}
+      {reporting && (
+        <BugReportDialog failure={f ? { code: f.code, details: f.details } : null} onClose={() => setReporting(false)} />
       )}
     </div>
   );

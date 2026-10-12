@@ -453,6 +453,60 @@ select.select {
   }
 }
 
+/* ---------- loading skeleton (V1) ---------- */
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-block: 8px;
+}
+.skeleton.card {
+  padding: 20px 22px;
+}
+.skeleton-line {
+  display: block;
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--sand-strong) 0%, var(--sand) 50%, var(--sand-strong) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+.skeleton-title {
+  height: 18px;
+  max-width: 40%;
+}
+.skeleton-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: min(880px, 100%);
+  margin-inline: auto;
+  padding: 32px 24px;
+}
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-line {
+    animation: none;
+  }
+}
+
+/* ---------- bug report for Or (U6) ---------- */
+.bug-report {
+  width: 100%;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre;
+  overflow-x: auto;
+}
+
 /* ---------- expandable rows ---------- */
 .draft-row {
   overflow: hidden;

@@ -84,6 +84,7 @@ const ALLOWED = new Set([
   "paragraph_sources",
   "paragraph_versions",
   "ping",
+  "recent_crashes",
   "prepare_consult",
   "prepare_full_draft",
   "prepare_letter",

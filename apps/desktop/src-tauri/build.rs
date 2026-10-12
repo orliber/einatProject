@@ -4,6 +4,7 @@ fn main() {
     let attributes =
         tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[
             "ping",
+            "recent_crashes",
             "app_status",
             "create_vault",
             "confirm_recovery_key",

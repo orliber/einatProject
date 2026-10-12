@@ -86,6 +86,8 @@ async function run(cmd: string, args?: Record<string, unknown>): Promise<undefin
 
 export const ipc = {
   ping: () => call<PingResponse>("ping"),
+  /** The last crashes, in the crash log's own fixed shape, for the bug report (U6). */
+  recentCrashes: () => call<string[]>("recent_crashes"),
   status: () => call<AppStatus>("app_status"),
   createVault: (password: string) => call<CreatedVault>("create_vault", { password }),
   confirmRecoveryKey: (typed: string) => call<boolean>("confirm_recovery_key", { typed }),
