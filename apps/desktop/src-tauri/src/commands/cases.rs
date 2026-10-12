@@ -202,6 +202,15 @@ pub(crate) async fn decide_suspect(
     .await
 }
 
+/// The button on a request stopped for a tag that is not the case's.
+#[tauri::command]
+pub(crate) async fn settle_foreign_tags(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+) -> Res<usize> {
+    with_core(&state, move |c| c.settle_foreign_tags(&case_id)).await
+}
+
 /// "להחזיר" on the summary card: keep what the filter hid as written, for this case.
 #[tauri::command]
 pub(crate) async fn restore_auto_hidden(

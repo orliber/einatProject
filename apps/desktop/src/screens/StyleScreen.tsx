@@ -15,6 +15,7 @@ import {
   type StyleImportPreview,
   type StyleItem,
   type StyleKind,
+  type StyleLearned,
   type StyleOverview,
   type StyleProfile,
   type StyleProfileView,
@@ -59,6 +60,7 @@ export function StyleScreen() {
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<StyleSourceView | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [forgetting, setForgetting] = useState(false);
   // The run: what is left to send, the review on screen, and the request on its way.
   const [queue, setQueue] = useState<Step[]>([]);
   const [review, setReview] = useState<{ step: Step; prepared: Prepared } | null>(null);
@@ -203,6 +205,8 @@ export function StyleScreen() {
 
         {o.suggestions.length > 0 && <Suggestions o={o} />}
 
+        <Learned o={o} onForget={() => setForgetting(true)} />
+
         {shown && <ProfileEditor key={`${shown.id}`} view={shown} o={o} />}
 
         {o.versions.length > 0 && <Versions o={o} onReset={() => setResetting(true)} />}
@@ -223,6 +227,12 @@ export function StyleScreen() {
           text={`"${deleting.title}" יימחק מ"הדוחות שלי". פרופיל שכבר אושר לא משתנה עד שבונים אותו מחדש.`}
           onClose={() => setDeleting(null)}
           onConfirm={async () => { await ipc.deleteStyleSource(deleting.id); setDeleting(null); await reload(); }} />
+      )}
+      {forgetting && (
+        <ConfirmDialog danger title="לשכוח את מה שנלמד" action="לשכוח"
+          text="מה שהתוכנה למדה מהתיקונים שלך ומהדוחות שסיימת בתוכנה יימחק: ההצעות, המדידות והמעקב אחרי הטיוטות. הדוחות הישנים והפרופיל שאישרת נשארים."
+          onClose={() => setForgetting(false)}
+          onConfirm={async () => { await ipc.forgetStyleLearning(); setForgetting(false); notify("מה שנלמד נמחק."); await reload(); }} />
       )}
       {resetting && (
         <ConfirmDialog danger title="מחיקת הפרופיל" action="מחיקת הפרופיל והלמידה"
@@ -342,6 +352,58 @@ function suggestionDetail(s: StyleSuggestion, o: StyleOverview): string {
   const title = s.section ? o.sections.find((x) => x.key === s.section)?.title : undefined;
   const where = title ? ` · בסעיף ${title}` : "";
   return s.kind === "phrase" ? `ב-${s.count} דוחות${where}` : `${s.count} פעמים${where}`;
+}
+
+// ------------------------------------------------------------------ what was measured
+
+/** Her usual figures, in words: what the program measured, numbers only. */
+export function learnedLines(l: StyleLearned): string[] {
+  const out: string[] = [];
+  const round = (x: number) => Math.round(x);
+  if (l.words_per_sentence != null) out.push(`בממוצע ${round(l.words_per_sentence)} מילים במשפט`);
+  if (l.sentences_per_paragraph != null) out.push(`בדרך כלל ${round(l.sentences_per_paragraph)} משפטים בפסקה`);
+  if (l.commas_per_sentence != null) out.push(`כ-${l.commas_per_sentence.toFixed(1)} פסיקים במשפט`);
+  if (l.hedges != null) out.push(`הסתייגות («נראה», «ניכר») ב-${round(l.hedges)} מכל 100 משפטים`);
+  if (l.contrasts != null) out.push(`מילת ניגוד («אך», «עם זאת») ב-${round(l.contrasts)} מכל 100 משפטים`);
+  if (l.first_person != null) out.push(`גוף ראשון («התרשמתי») ב-${round(l.first_person)} מכל 100 משפטים`);
+  return out;
+}
+
+function Learned({ o, onForget }: { o: StyleOverview; onForget: () => void }) {
+  const ai = useAi();
+  const l = o.learned;
+  const lines = learnedLines(l);
+  const from = [
+    l.from_reports > 0 && `${l.from_reports} פסקאות מהדוחות הישנים`,
+    l.from_edits > 0 && `${l.from_edits} מהתיקונים שלך`,
+    l.finished_reports > 0 && (l.finished_reports === 1 ? "דוח אחד שסיימת בתוכנה" : `${l.finished_reports} דוחות שסיימת בתוכנה`),
+  ].filter(Boolean) as string[];
+  const canForget = l.from_edits > 0 || l.finished_reports > 0 || l.fit_count > 0;
+  if (from.length === 0 && l.fit_count === 0) return null;
+  return (
+    <section className="card style-card" aria-labelledby="style-learned">
+      <h2 id="style-learned">מה התוכנה מדדה בכתיבה שלך</h2>
+      <p className="hint">נמדד במחשב שלך, ונשמרים רק מספרים. {from.length > 0 && `נלמד מ${from.join(", ")}.`}</p>
+      {lines.length > 0 ? (
+        <ul className="style-learned">{lines.map((t) => <li key={t}>{t}</li>)}</ul>
+      ) : (
+        <p className="muted small">עוד אין מספיק פסקאות כדי לומר מה אופייני לך (צריך לפחות 12).</p>
+      )}
+      {l.fit_recent != null && (
+        <p className="style-fit">
+          כמה הפסקאות ש-{ai} כתב קרובות לסגנון שלך: <b>{l.fit_recent} מתוך 100</b>
+          {l.fit_earlier != null
+            ? ` ב-30 הפסקאות האחרונות, לעומת ${l.fit_earlier} ב-30 שלפניהן.`
+            : ` (${l.fit_count} פסקאות עד עכשיו).`}
+        </p>
+      )}
+      {canForget && (
+        <div className="row">
+          <button type="button" className="btn btn-small btn-danger-quiet" onClick={onForget}>לשכוח את מה שנלמד מהתיקונים ומהדוחות שסיימתי</button>
+        </div>
+      )}
+    </section>
+  );
 }
 
 // ------------------------------------------------------------------ the profile

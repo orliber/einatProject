@@ -14,7 +14,10 @@ mod pipeline;
 pub mod restore;
 pub mod text;
 
-pub use gate::{clear, BlockReason, Blocked, ClearedPayload, GateRequest, GENERIC_TAGS};
+pub use gate::{
+    clear, replace_foreign_tags, tag_word, BlockReason, Blocked, ClearedPayload, GateRequest,
+    GENERIC_TAGS,
+};
 pub use misread::{ocr_misreads, Misread};
 pub use pipeline::{
     everyday_name, filter, filter_split, filter_split_with_hints, filter_with_hints, AutoHidden,

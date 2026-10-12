@@ -186,3 +186,13 @@
 .style-reset {
   align-self: flex-start;
 }
+
+.style-learned {
+  margin: 0;
+  padding-inline-start: 1.2em;
+  display: grid;
+  gap: 4px;
+}
+.style-fit {
+  margin: 0;
+}

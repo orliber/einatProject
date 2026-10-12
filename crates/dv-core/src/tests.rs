@@ -3754,3 +3754,61 @@ fn restoring_another_cases_name_holds_on_the_next_send() {
     assert!(p.approval_id.is_some(), "{:?}", p.blocked);
     assert!(!outgoing(&p).contains("שירה"), "{}", outgoing(&p));
 }
+
+#[test]
+fn a_finished_report_teaches_the_style_once_and_is_forgotten_with_its_case() {
+    let (_dir, mut core, case) = setup(None);
+    core.add_own_paragraph(
+        &case,
+        "referral",
+        "ההורים פנו בשל קושי במעברים בגן. נראה כי הקושי בולט בעיקר בבקרים.",
+    )
+    .unwrap();
+    let learned = |core: &mut Core| core.style_overview().unwrap().learned;
+    assert_eq!(learned(&mut core).finished_reports, 0);
+    core.export_report(&case, None).unwrap();
+    let after = learned(&mut core);
+    assert_eq!(after.finished_reports, 1);
+    assert_eq!(after.from_finals, 1, "one paragraph: {after:?}");
+    // Exported again: still one report.
+    core.export_report(&case, None).unwrap();
+    assert_eq!(learned(&mut core).finished_reports, 1);
+    // Erased for good: no longer learned from.
+    core.delete_case(&case).unwrap();
+    core.purge_case(&case, PASSWORD).unwrap();
+    assert_eq!(learned(&mut core).finished_reports, 0);
+}
+
+#[test]
+fn a_tag_left_by_a_name_brought_back_no_longer_blocks_the_case() {
+    let (_dir, mut core, case) = setup(Some(FakeTransport::default()));
+    // An approved paragraph written while a word was kept as an institution, whose row is
+    // gone since (she pressed "להחזיר" on it in an older version).
+    let v = core.vault_mut().unwrap();
+    let d = v
+        .add_draft(
+            &case,
+            "kindergarten",
+            "[ילד] משתלב היטב ב[מוסד_1] ומשתף פעולה עם הצוות.",
+            Author::Ai,
+            &[],
+        )
+        .unwrap();
+    v.set_draft_status(&case, &d.id, DraftStatus::Approved)
+        .unwrap();
+    let prepared = core
+        .prepare_section(&case, "recommendations", "המלצות")
+        .unwrap();
+    assert!(prepared.approval_id.is_some(), "{:?}", prepared.blocked);
+    assert!(outgoing(&prepared).contains("משתלב היטב במוסד"));
+    let kept = core
+        .vault_ref()
+        .unwrap()
+        .drafts(&case, "kindergarten")
+        .unwrap();
+    assert_eq!(
+        kept[0].text_tagged,
+        "[ילד] משתלב היטב במוסד ומשתף פעולה עם הצוות."
+    );
+    assert_eq!(kept[0].status, DraftStatus::Approved);
+}

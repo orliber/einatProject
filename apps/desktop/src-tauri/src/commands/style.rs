@@ -128,6 +128,11 @@ pub(crate) async fn set_style_enabled(state: tauri::State<'_, AppState>, on: boo
 }
 
 #[tauri::command]
+pub(crate) async fn forget_style_learning(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| c.forget_style_learning()).await
+}
+
+#[tauri::command]
 pub(crate) async fn reset_style(state: tauri::State<'_, AppState>) -> Res<()> {
     with_core(&state, |c| c.reset_style()).await
 }

@@ -171,6 +171,10 @@ impl Core {
     }
 
     pub(crate) fn privacy_data(&mut self, case_id: &str) -> Result<PrivacyData, CoreError> {
+        if !case_id.is_empty() {
+            // Learning is not needed here; a failure leaves the tag, and the gate blocks.
+            let _ = self.settle_stale_tags(case_id, &HashMap::new());
+        }
         let v = self.vault_ref()?;
         Ok(PrivacyData {
             case_id: case_id.to_owned(),
@@ -180,6 +184,53 @@ impl Core {
             is_name: v.is_name_hmacs(case_id)?.into_iter().collect(),
             past: style::past_name_hmacs(v)?,
         })
+    }
+
+    /// A tag in the case's stored text that no longer belongs to the case (a name she brought
+    /// back, whose row is gone) would block every later request. It reads as the word she
+    /// brought back when it is known (`known`: tag to word), else as the tag's plain word
+    /// ("[מוסד_1]" becomes "מוסד"). What it becomes still goes through the filter and the
+    /// gate like any text.
+    pub(crate) fn settle_stale_tags(
+        &mut self,
+        case_id: &str,
+        known: &HashMap<String, String>,
+    ) -> Result<usize, CoreError> {
+        let v = self.vault_mut()?;
+        let tags: HashSet<String> = v.identities(case_id)?.into_iter().map(|i| i.tag).collect();
+        let change = |text: &str| {
+            dv_privacy::replace_foreign_tags(text, &tags, |t| {
+                known
+                    .get(t)
+                    .cloned()
+                    .unwrap_or_else(|| dv_privacy::tag_word(t))
+            })
+        };
+        Ok(v.rewrite_case_texts(case_id, &change)?)
+    }
+
+    /// The button on a request stopped for a tag that is not the case's: every such tag in
+    /// the case's text, its materials included, becomes its plain word. Returns how many
+    /// texts changed; what remains is in what she is writing now.
+    pub fn settle_foreign_tags(&mut self, case_id: &str) -> Result<usize, CoreError> {
+        let mut changed = self.settle_stale_tags(case_id, &HashMap::new())?;
+        let v = self.vault_mut()?;
+        let tags: HashSet<String> = v.identities(case_id)?.into_iter().map(|i| i.tag).collect();
+        let settle = |t: &str| dv_privacy::replace_foreign_tags(t, &tags, dv_privacy::tag_word);
+        for input in v.inputs(case_id)? {
+            let title = settle(&input.title);
+            let content = settle(&input.content);
+            if title.is_some() || content.is_some() {
+                v.update_input(
+                    case_id,
+                    &input.id,
+                    title.as_deref().unwrap_or(&input.title),
+                    content.as_deref().unwrap_or(&input.content),
+                )?;
+                changed += 1;
+            }
+        }
+        Ok(changed)
     }
 
     /// Filter one text for the case (used by the upload preview and the review screen).
@@ -299,6 +350,7 @@ impl Core {
         // A word the program kept as a name in another case (OTHER_CASE_TAG on the card):
         // it leaves that case's names, and is "not a name" there from now on.
         if tag == OTHER_CASE_TAG {
+            let mut removed = Vec::new();
             for i in v.all_identities()?.into_iter().filter(|i| {
                 i.case_id != case_id
                     && i.source != IdentitySource::Manual
@@ -306,6 +358,10 @@ impl Core {
             }) {
                 v.remove_identity(&i.case_id, &i.id)?;
                 v.mark_not_a_name(Some(&i.case_id), &tok)?;
+                removed.push(i);
+            }
+            for i in removed {
+                self.settle_stale_tags(&i.case_id, &[(i.tag, i.value)].into())?;
             }
             return Ok(());
         }
@@ -343,16 +399,20 @@ impl Core {
             .map(|i| normalize(&i.value));
         // Every row the filter kept for that name (a role change keeps the earlier row, so
         // drafts with its tag can still be restored).
+        let mut removed = HashMap::new();
         for i in ids.iter().filter(|i| {
             i.source != IdentitySource::Manual
                 && (i.tag == tag || Some(normalize(&i.value)) == value)
         }) {
             v.remove_identity(case_id, &i.id)?;
+            removed.insert(i.tag.clone(), i.value.clone());
         }
         if let Some(value) = &value {
             v.mark_not_a_name(Some(case_id), value)?;
         }
         v.mark_not_a_name(Some(case_id), &normalize(token))?;
+        // The paragraphs and conversations already written with its tag read the word again.
+        self.settle_stale_tags(case_id, &removed)?;
         Ok(())
     }
 

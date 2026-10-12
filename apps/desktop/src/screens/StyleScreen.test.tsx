@@ -31,6 +31,11 @@ const overview = (over: Partial<StyleOverview> = {}): StyleOverview => ({
   enabled: true,
   sections: [{ key: "cognitive", title: "פרופיל קוגניטיבי" }, { key: "summary", title: "סיכום" }],
   demo_mode: true,
+  learned: {
+    from_reports: 0, from_edits: 0, from_finals: 0, finished_reports: 0,
+    words_per_sentence: null, sentences_per_paragraph: null, commas_per_sentence: null,
+    hedges: null, contrasts: null, first_person: null, fit_recent: null, fit_earlier: null, fit_count: 0,
+  },
   ...over,
 });
 
@@ -98,6 +103,39 @@ describe("StyleScreen", () => {
     const profile = (saved[0] as { profile: StyleProfileView["profile"] }).profile;
     expect(profile.items.find((i) => i.id === "b")?.enabled).toBe(false);
     expect(profile.items.find((i) => i.id === "a")?.enabled).toBe(true);
+  });
+});
+
+describe("what the program measured", () => {
+  it("shows her usual figures and how close the drafts were, and can forget the learning", async () => {
+    const calls: string[] = [];
+    const learned = {
+      ...overview().learned,
+      from_reports: 40, from_edits: 3, finished_reports: 1, from_finals: 12,
+      words_per_sentence: 13.4, sentences_per_paragraph: 3.2, commas_per_sentence: 1.1,
+      hedges: 22, contrasts: 9, first_person: 4, fit_recent: 81, fit_earlier: 72, fit_count: 60,
+    };
+    mockIPC((cmd) => {
+      calls.push(cmd);
+      if (cmd === "style_overview") return overview({ sources: [source], learned });
+      return null;
+    });
+    const user = userEvent.setup();
+    wrap(<StyleScreen />);
+    expect(await screen.findByText("בממוצע 13 מילים במשפט")).toBeInTheDocument();
+    expect(screen.getByText(/40 פסקאות מהדוחות הישנים, 3 מהתיקונים שלך, דוח אחד שסיימת בתוכנה/)).toBeInTheDocument();
+    expect(screen.getByText("81 מתוך 100")).toBeInTheDocument();
+    expect(screen.getByText(/לעומת 72/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /לשכוח את מה שנלמד/ }));
+    await user.click(screen.getByRole("button", { name: "לשכוח" }));
+    await vi.waitFor(() => expect(calls).toContain("forget_style_learning"));
+  });
+
+  it("says nothing before there is anything to measure", async () => {
+    mockIPC((cmd) => (cmd === "style_overview" ? overview() : null));
+    wrap(<StyleScreen />);
+    await screen.findByRole("button", { name: /הוספת דוח ישן/ });
+    expect(screen.queryByText("מה התוכנה מדדה בכתיבה שלך")).not.toBeInTheDocument();
   });
 });
 

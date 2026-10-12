@@ -908,6 +908,9 @@ export class FakeCore {
         else this.setPeople(c, [...c.people.map((p) => ({ id: p.id, role: p.role, value: p.value, aliases: p.aliases })), { id: null, role: d.decision === "hide" ? d.role : "other", value: token, aliases: [] }]);
         return null;
       }
+      case "settle_foreign_tags":
+        this.find(a.caseId);
+        return 0;
       case "restore_auto_hidden": {
         const c = this.find(a.caseId);
         const kept = c.people.find((p) => p.tag === String(a.tag) && p.source !== "manual");

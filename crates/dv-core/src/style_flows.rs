@@ -602,6 +602,50 @@ fn a_paragraph_whose_sentences_are_unlike_hers_gets_a_gentle_note() {
         super::style_note(m, "observation", &sentence(40)).is_none(),
         "one sentence says little"
     );
+
+    // The same figures follow the AI's paragraphs over time: the latest 30, and those before.
+    assert_eq!(local.learned().fit_recent, None);
+    for _ in 0..10 {
+        local.note_fit("observation", &long);
+    }
+    for _ in 0..30 {
+        local.note_fit("observation", &usual);
+    }
+    let learned = local.learned();
+    assert_eq!(learned.fit_count, 40);
+    let (recent, earlier) = (learned.fit_recent.unwrap(), learned.fit_earlier.unwrap());
+    assert!(recent > earlier, "{recent} vs {earlier}");
+    assert!(learned
+        .words_per_sentence
+        .is_some_and(|w| (9.0..11.0).contains(&w)));
+    for _ in 0..200 {
+        local.note_fit("observation", &usual);
+    }
+    assert_eq!(local.learned().fit_count, super::FIT_KEPT as u32);
+}
+
+#[test]
+fn forgetting_what_was_learned_keeps_her_reports_and_profile() {
+    let (_dir, mut core) = vault(None);
+    upload(&mut core);
+    build(&mut core);
+    core.approve_style_draft().unwrap();
+    core.learn_from_edit(
+        "observation",
+        "הילד שיתף פעולה באופן מלא לאורך כל המפגש.",
+        "נראה כי הילד שיתף פעולה לאורך רוב המפגש.",
+    )
+    .unwrap();
+    assert!(core.style_overview().unwrap().learned.from_edits > 0);
+    core.forget_style_learning().unwrap();
+    let o = core.style_overview().unwrap();
+    assert_eq!(o.learned.from_edits, 0);
+    assert_eq!(o.learned.fit_count, 0);
+    assert!(o
+        .suggestions
+        .iter()
+        .all(|s| s.kind == super::StyleSuggestionKind::Phrase));
+    assert!(o.active.is_some() && !o.sources.is_empty());
 }
 
 #[test]

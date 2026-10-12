@@ -37,6 +37,7 @@ impl Core {
             Some(case_id),
             &serde_json::json!({ "protected": true, "pdf": true, "sha256": sha256, "sections": check.included_sections }),
         )?;
+        self.learn_from_final(case_id);
         Ok(pdf)
     }
 
@@ -248,6 +249,9 @@ impl Core {
         &mut self,
         case_id: &str,
     ) -> Result<(dv_export::Report, ExportCheck), CoreError> {
+        // A tag left by a name she brought back reads as its word, not as a block. A failure
+        // leaves it, and the check below still blocks.
+        let _ = self.settle_stale_tags(case_id, &HashMap::new());
         let settings = self.report_settings()?;
         let structure =
             ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
@@ -469,6 +473,7 @@ impl Core {
             Some(case_id),
             &serde_json::json!({ "protected": password.is_some(), "sections": check.included_sections }),
         )?;
+        self.learn_from_final(case_id);
         Ok(out)
     }
 }

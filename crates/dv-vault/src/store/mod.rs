@@ -2156,6 +2156,50 @@ impl Vault {
         self.touch(case_id)
     }
 
+    /// Rewrites the case's stored tagged text (paragraphs, their earlier wordings, the
+    /// conversations) where `change` returns a new text. Status, author and versions stay:
+    /// this settles placeholders, it is not her edit. Returns how many texts changed.
+    pub fn rewrite_case_texts(
+        &mut self,
+        case_id: &str,
+        change: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<usize, VaultError> {
+        let key = self.case_key(case_id)?;
+        let tx = self.main.unchecked_transaction()?;
+        let mut changed = 0;
+        for table in ["drafts", "draft_versions", "messages"] {
+            let rows: Vec<(String, Vec<u8>)> = {
+                let mut stmt = tx.prepare(&format!(
+                    "SELECT id, text_tagged_enc FROM {table} WHERE case_id = ?1"
+                ))?;
+                let rows = stmt
+                    .query_map(params![case_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+                    .collect::<Result<_, _>>()?;
+                rows
+            };
+            for (id, sealed) in rows {
+                let aad = aad(table, "text", &id, case_id);
+                let text = open_string(&key, &aad, &sealed)?;
+                if let Some(new) = change(&text) {
+                    tx.execute(
+                        &format!("UPDATE {table} SET text_tagged_enc = ?1 WHERE id = ?2 AND case_id = ?3"),
+                        params![seal_str(&key, &aad, &new)?, id, case_id],
+                    )?;
+                    changed += 1;
+                }
+            }
+        }
+        tx.commit()?;
+        if changed > 0 {
+            self.record(
+                AuditEvent::IdentitiesChanged,
+                Some(case_id),
+                &serde_json::json!({ "settled_tags": changed }),
+            )?;
+        }
+        Ok(changed)
+    }
+
     /// Keep the paragraph's current wording as a version before it changes in place. Nothing
     /// is kept when the new text is the same (`unchanged_if`), or when the paragraph is gone.
     fn keep_version(

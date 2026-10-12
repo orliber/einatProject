@@ -77,6 +77,14 @@ fn the_style_model_keeps_numbers_never_words() {
     let mut m = StyleModel::default();
     m.fit_reports(texts.iter().map(|t| (Some("observation"), t.as_str())));
     m.observe_edit("cognitive", &paragraph(7, &people[0].0, &people[0].1));
+    // A finished report is kept under a keyed hash of its case (here a stand-in).
+    m.observe_final(
+        "c0ffee",
+        [(
+            Some("observation"),
+            paragraph(9, &people[1].0, &people[1].1).as_str(),
+        )],
+    );
     assert!(m.paragraphs() > 20.0, "the model did learn");
 
     let json = serde_json::to_value(&m).unwrap();
@@ -86,6 +94,8 @@ fn the_style_model_keeps_numbers_never_words() {
     let allowed = [
         "reports",
         "edits",
+        "finals",
+        "c0ffee",
         "global",
         "sections",
         "function",

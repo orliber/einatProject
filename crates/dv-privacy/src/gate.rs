@@ -37,6 +37,51 @@ pub const GENERIC_TAGS: &[&str] = &[
 
 static TAG_RE: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(r"\[[^\[\]\n]{1,40}\]").ok());
 
+/// A tag the gate lets through: one of the case's, a generic one, or a "missing" note.
+fn tag_allowed(tag: &str, case_tags: &HashSet<String>) -> bool {
+    case_tags.contains(tag) || GENERIC_TAGS.contains(&tag) || tag.starts_with("[חסר")
+}
+
+/// The text with every tag the gate would refuse replaced by `with(tag)`, or `None` when it
+/// has none. For the case's own stored text only: a tag left there by a name she brought
+/// back ("להחזיר"), whose row is gone, would otherwise block every later request of the case.
+/// The replacement is checked by the gate like any other text.
+#[must_use]
+pub fn replace_foreign_tags(
+    text: &str,
+    case_tags: &HashSet<String>,
+    with: impl Fn(&str) -> String,
+) -> Option<String> {
+    let re = TAG_RE.as_ref()?;
+    let mut out = String::with_capacity(text.len());
+    let mut last = 0;
+    let mut changed = false;
+    for m in re.find_iter(text) {
+        if tag_allowed(m.as_str(), case_tags) {
+            continue;
+        }
+        out.push_str(&text[last..m.start()]);
+        out.push_str(&with(m.as_str()));
+        last = m.end();
+        changed = true;
+    }
+    changed.then(|| {
+        out.push_str(&text[last..]);
+        out
+    })
+}
+
+/// The plain word of a tag: `[מוסד_1]` reads "מוסד", `[ילד_גן_2]` "ילד גן". Hebrew joins
+/// its prefixes to it ("ב[מוסד_1]" becomes "במוסד").
+#[must_use]
+pub fn tag_word(tag: &str) -> String {
+    let inner = tag.trim_start_matches('[').trim_end_matches(']');
+    let inner = inner
+        .trim_end_matches(|c: char| c.is_ascii_digit())
+        .trim_end_matches('_');
+    inner.replace('_', " ")
+}
+
 /// Request bytes that passed every check. Fields are private: only this module builds one.
 pub struct ClearedPayload {
     case_id: String,
@@ -261,10 +306,7 @@ pub fn clear(req: &GateRequest<'_>) -> Result<ClearedPayload, Blocked> {
         if let Some(re) = TAG_RE.as_ref() {
             for m in re.find_iter(text) {
                 let tag = m.as_str();
-                let allowed = req.case_tags.contains(tag)
-                    || GENERIC_TAGS.contains(&tag)
-                    || tag.starts_with("[חסר");
-                if !allowed {
+                if !tag_allowed(tag, req.case_tags) {
                     reasons.push(reason(
                         "foreign_tag",
                         "תגית שלא שייכת לתיק הזה",
@@ -295,5 +337,22 @@ pub fn clear(req: &GateRequest<'_>) -> Result<ClearedPayload, Blocked> {
     } else {
         reasons.dedup();
         Err(Blocked { reasons })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    #[test]
+    fn foreign_tags_in_her_own_text_become_plain_words() {
+        let tags: HashSet<String> = ["[ילד]".to_owned()].into_iter().collect();
+        let text = "[ילד] למד ב[מוסד_1] עם [ילד_גן_2] ו[מספר] ילדים [חסר: גיל].";
+        assert_eq!(
+            replace_foreign_tags(text, &tags, tag_word).as_deref(),
+            Some("[ילד] למד במוסד עם ילד גן ו[מספר] ילדים [חסר: גיל].")
+        );
+        assert_eq!(replace_foreign_tags("[ילד] משחק.", &tags, tag_word), None);
     }
 }

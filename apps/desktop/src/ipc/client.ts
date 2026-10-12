@@ -55,6 +55,7 @@ import type { StyleAnalysisResult } from "./generated/StyleAnalysisResult";
 import type { StyleImportPreview } from "./generated/StyleImportPreview";
 import type { StyleItem } from "./generated/StyleItem";
 import type { StyleKind } from "./generated/StyleKind";
+import type { StyleLearned } from "./generated/StyleLearned";
 import type { StyleOverview } from "./generated/StyleOverview";
 import type { StyleProfile } from "./generated/StyleProfile";
 import type { StyleProfileView } from "./generated/StyleProfileView";
@@ -175,6 +176,7 @@ export const ipc = {
   previewFilter: (caseId: string, text: string) => call<FilterOutcome>("preview_filter", { caseId, text }),
   decideSuspect: (caseId: string, token: string, decision: SuspectDecision) =>
     run("decide_suspect", { caseId, token, decision }),
+  settleForeignTags: (caseId: string) => call<number>("settle_foreign_tags", { caseId }),
   /** "להחזיר" on the summary card: keep what the filter hid as written, for this case. */
   restoreAutoHidden: (caseId: string, token: string, tag: string) =>
     run("restore_auto_hidden", { caseId, token, tag }),
@@ -320,6 +322,7 @@ export const ipc = {
   restoreStyleVersion: (id: string) => call<StyleProfileView>("restore_style_version", { id }),
   setStyleEnabled: (on: boolean) => run("set_style_enabled", { on }),
   resetStyle: () => run("reset_style"),
+  forgetStyleLearning: () => run("forget_style_learning"),
   acceptStyleSuggestion: (id: string) => call<StyleProfileView>("accept_style_suggestion", { id }),
   dismissStyleSuggestion: (id: string) => run("dismiss_style_suggestion", { id }),
 
@@ -337,6 +340,7 @@ export type {
   StyleImportPreview,
   StyleItem,
   StyleKind,
+  StyleLearned,
   StyleOverview,
   StyleProfile,
   StyleProfileView,

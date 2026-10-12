@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-settle-foreign-tags"
+description = "Enables the settle_foreign_tags command without any pre-configured scope."
+commands.allow = ["settle_foreign_tags"]
+
+[[permission]]
+identifier = "deny-settle-foreign-tags"
+description = "Denies the settle_foreign_tags command without any pre-configured scope."
+commands.deny = ["settle_foreign_tags"]

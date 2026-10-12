@@ -235,7 +235,8 @@ export function ErrorLine({ error }: { error: string | null }) {
       const id = route.id;
       actions.push({ label: "רישום ההסכמה", run: () => app.go({ name: "case", id, view: "details" }) });
     }
-    if (f.code === "egress" && f.message.includes("מפתח")) {
+    // The key, the zero-retention confirmation, the monthly ceiling: all fixed in settings.
+    if ((f.code === "egress" && f.message.includes("מפתח")) || f.message.includes("בהגדרות")) {
       actions.push({ label: "פתיחת ההגדרות", run: () => app.go({ name: "settings" }) });
     }
   }

@@ -4,6 +4,7 @@ import type { Prepared } from "../ipc/generated/Prepared";
 import type { StyleImportPreview } from "../ipc/generated/StyleImportPreview";
 import type { StyleItem } from "../ipc/generated/StyleItem";
 import type { StyleKind } from "../ipc/generated/StyleKind";
+import type { StyleLearned } from "../ipc/generated/StyleLearned";
 import type { StyleOverview } from "../ipc/generated/StyleOverview";
 import type { StylePartView } from "../ipc/generated/StylePartView";
 import type { StyleProfile } from "../ipc/generated/StyleProfile";
@@ -106,6 +107,18 @@ export class FakeStyle {
     return this.profileView(v);
   }
 
+  /** Invented figures for the preview, once there is a report to learn from. */
+  private learned(): StyleLearned {
+    const n = this.sources.length;
+    const has = n > 0;
+    return {
+      from_reports: 14 * n, from_edits: has ? 3 : 0, from_finals: 0, finished_reports: 0,
+      words_per_sentence: has ? 13.4 : null, sentences_per_paragraph: has ? 3.2 : null, commas_per_sentence: has ? 1.1 : null,
+      hedges: has ? 22 : null, contrasts: has ? 9 : null, first_person: has ? 4 : null,
+      fit_recent: has ? 81 : null, fit_earlier: has ? 72 : null, fit_count: has ? 40 : 0,
+    };
+  }
+
   private prepared(label: string, text: string, approval: string): Prepared {
     const seg = [{ text, mark: null, label: null }];
     return { approval_id: approval, parts: [{ label, original: seg, outgoing: seg }], suspects: [], auto_hidden: [], hidden: [], checks: { declared_names: 0, patterns: 0, name_suspects: 0, indirect_suspects: 0 }, blocked: [], demo_mode: true };
@@ -125,6 +138,7 @@ export class FakeStyle {
           enabled: this.enabled,
           sections: SECTIONS.map((s) => ({ key: s.key, title: s.title })),
           demo_mode: true,
+          learned: this.learned(),
         } satisfies StyleOverview;
       }
       case "import_style_source": {
@@ -245,6 +259,8 @@ export class FakeStyle {
         return null;
       case "reset_style":
         this.versions = [];
+        return null;
+      case "forget_style_learning":
         return null;
       case "accept_style_suggestion":
       case "dismiss_style_suggestion":
