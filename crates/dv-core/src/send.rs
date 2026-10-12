@@ -641,13 +641,34 @@ pub(crate) fn collect_sources(
         };
         let sid = format!("S{}", tagged_sources.len() + 1);
         let title = run(&inp.title)?;
-        let content = sorting::section_text(&inp.content, &feed, ctx, hints)?;
-        let kind = match feed {
-            dv_domain::Feed::Whole => inp.kind.label_he().to_owned(),
-            dv_domain::Feed::Passages(_) => {
-                format!("{} · קטעים שנבחרו לסעיף", inp.kind.label_he())
+        // G4: a long material sent whole goes with the passages that bear on the section.
+        let section_title = structure
+            .sections()
+            .find(|s| s.key == section_key)
+            .map_or("", |s| s.title.as_str());
+        let cut = match feed {
+            dv_domain::Feed::Whole if inp.kind != InputKind::TestScores => {
+                sorting::trimmed(&inp.content, section_key, section_title)
+            }
+            _ => None,
+        };
+        let (feed, kind) = match (feed, cut) {
+            (dv_domain::Feed::Whole, Some((chosen, total))) => (
+                dv_domain::Feed::Passages(chosen.clone()),
+                format!(
+                    "{} · {} מתוך {total} קטעים, אלה שנוגעים לסעיף (השאר נשאר במחשב)",
+                    inp.kind.label_he(),
+                    chosen.len()
+                ),
+            ),
+            (dv_domain::Feed::Whole, None) => {
+                (dv_domain::Feed::Whole, inp.kind.label_he().to_owned())
+            }
+            (f @ dv_domain::Feed::Passages(_), _) => {
+                (f, format!("{} · קטעים שנבחרו לסעיף", inp.kind.label_he()))
             }
         };
+        let content = sorting::section_text(&inp.content, &feed, ctx, hints)?;
         // A title with nothing to hide is shown as the source's label, not as a part.
         if title.original_segments.iter().any(|s| s.mark.is_some()) {
             review.add(format!("{sid} · {kind} · כותרת"), &title);

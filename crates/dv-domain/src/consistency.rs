@@ -1,7 +1,7 @@
 //! Checks of a paragraph against the case's own details, in code (no AI): a gentle note,
 //! never a block. She decides.
 
-use crate::Age;
+use crate::{Age, GrammaticalGender};
 
 /// An age written in the text that is not the child's age in the case details.
 ///
@@ -85,6 +85,181 @@ fn number(s: &str) -> Option<u8> {
     s.parse().ok()
 }
 
+/// A word for the child in the other grammatical gender than the case details ("בן 5" for a
+/// girl, "הילדה" for a boy). Only the plain cases: an age phrase and the word for the child.
+#[must_use]
+pub fn check_gender(text: &str, gender: Option<GrammaticalGender>) -> Vec<String> {
+    let Some(gender) = gender else {
+        return Vec::new();
+    };
+    let (wrong_age, wrong_child, right) = match gender {
+        GrammaticalGender::Female => (["בן", "כבן"], "הילד", "בת"),
+        GrammaticalGender::Male => (["בת", "כבת"], "הילדה", "בן"),
+    };
+    let words: Vec<&str> = text
+        .split_whitespace()
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+        .collect();
+    let mut out = Vec::new();
+    for (i, w) in words.iter().enumerate() {
+        let age_after = words
+            .get(i + 1)
+            .is_some_and(|n| n.chars().next().is_some_and(|c| c.is_ascii_digit()));
+        let note = if wrong_age.contains(w) && age_after {
+            Some(format!(
+                "כתוב «{w}», ובפרטי התיק הילד{} {right}",
+                if right == "בת" { "ה" } else { "" }
+            ))
+        } else if *w == wrong_child {
+            Some(format!(
+                "כתוב «{w}», ובפרטי התיק {}",
+                if right == "בת" {
+                    "זו ילדה"
+                } else {
+                    "זה ילד"
+                }
+            ))
+        } else {
+            None
+        };
+        if let Some(n) = note {
+            if !out.contains(&n) {
+                out.push(n);
+            }
+        }
+    }
+    out
+}
+
+/// The letters of the grades, in order.
+const GRADES: &[&str] = &["א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט"];
+
+/// The grade a paragraph says the child is in now: "לומד בכיתה ב'", "תלמידת כיתה ג".
+fn current_grade(text: &str) -> Option<&'static str> {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    for (i, w) in words.iter().enumerate() {
+        let w = w.trim_matches(|c: char| !c.is_alphanumeric());
+        let class = matches!(w, "כיתה" | "בכיתה");
+        if !class || i == 0 {
+            continue;
+        }
+        let before = words[i - 1].trim_matches(|c: char| !c.is_alphanumeric());
+        let now = matches!(
+            before,
+            "לומד"
+                | "לומדת"
+                | "תלמיד"
+                | "תלמידת"
+                | "משובץ"
+                | "משובצת"
+                | "כעת"
+                | "היום"
+        );
+        if !now {
+            continue;
+        }
+        let letter = words
+            .get(i + 1)?
+            .trim_matches(|c: char| !c.is_alphanumeric());
+        if let Some(g) = GRADES.iter().find(|g| **g == letter) {
+            return Some(g);
+        }
+    }
+    None
+}
+
+/// A grade the paragraph gives that another paragraph of the report gives otherwise.
+#[must_use]
+pub fn check_grade(text: &str, others: &[&str]) -> Vec<String> {
+    let Some(mine) = current_grade(text) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for o in others {
+        if let Some(g) = current_grade(o).filter(|g| *g != mine) {
+            let n = format!("כתוב כיתה {mine}', ובמקום אחר בדוח כיתה {g}'");
+            if !out.contains(&n) {
+                out.push(n);
+            }
+        }
+    }
+    out
+}
+
+/// What a recommendation is about, and words in the body of the report that are a basis
+/// for it. A recommendation with none of them in the body is pointed out.
+const RECOMMENDATIONS: &[(&str, &[&str], &[&str])] = &[
+    (
+        "ריפוי בעיסוק",
+        &["ריפוי בעיסוק", "מרפאה בעיסוק"],
+        &[
+            "מוטורי",
+            "גרפו",
+            "כתיבה",
+            "ויסות חושי",
+            "תחושתי",
+            "אחיזה",
+            "ריפוי בעיסוק",
+        ],
+    ),
+    (
+        "טיפול בתקשורת",
+        &["קלינאית תקשורת", "טיפול בתקשורת", "קלינאות תקשורת"],
+        &[
+            "שפה",
+            "שפתי",
+            "דיבור",
+            "הגייה",
+            "היגוי",
+            "אוצר מילים",
+            "תקשורת",
+        ],
+    ),
+    (
+        "טיפול רגשי",
+        &["טיפול רגשי", "טיפול במשחק", "פסיכותרפיה", "הדרכת הורים"],
+        &[
+            "רגשי",
+            "רגשית",
+            "חרדה",
+            "ויסות",
+            "התנהגות",
+            "תסכול",
+            "הורים",
+        ],
+    ),
+    (
+        "הערכה נוירולוגית",
+        &["נוירולוג", "נוירולוגית", "הערכה רפואית"],
+        &["קשב", "ריכוז", "נוירולוג", "רפואי", "התפתחות"],
+    ),
+    (
+        "הערכה פסיכיאטרית",
+        &["פסיכיאטר", "פסיכיאטרית"],
+        &["קשב", "חרדה", "רגשי", "התנהגות", "פסיכיאטר"],
+    ),
+    (
+        "פיזיותרפיה",
+        &["פיזיותרפיה", "פיזיותרפיסט"],
+        &["מוטוריקה גסה", "מוטורי", "יציבה", "שיווי משקל", "טונוס"],
+    ),
+];
+
+/// A recommendation in `text` whose subject the body of the report (`body`) never comes near.
+#[must_use]
+pub fn check_recommendations(text: &str, body: &[&str]) -> Vec<String> {
+    let mut out = Vec::new();
+    for (what, asks, basis) in RECOMMENDATIONS {
+        if !asks.iter().any(|a| text.contains(a)) {
+            continue;
+        }
+        if !body.iter().any(|b| basis.iter().any(|w| b.contains(w))) {
+            out.push(format!("המלצה על {what}, ואין לה בסיס בגוף הדוח"));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,5 +298,50 @@ mod tests {
     #[test]
     fn without_an_age_in_the_details_nothing_is_said() {
         assert!(check_age("בן 6:2", None).is_empty());
+    }
+
+    #[test]
+    fn a_word_for_the_child_in_the_other_gender_is_pointed_out() {
+        let girl = Some(GrammaticalGender::Female);
+        assert!(check_gender("הילדה, בת 5:4, שיתפה פעולה.", girl).is_empty());
+        assert_eq!(
+            check_gender("הילד, בן 5:4, שיתף פעולה.", girl),
+            vec![
+                "כתוב «הילד», ובפרטי התיק זו ילדה".to_owned(),
+                "כתוב «בן», ובפרטי התיק הילדה בת".to_owned(),
+            ]
+        );
+        assert!(
+            check_gender("אחיה בן הדוד שיחק", girl).is_empty(),
+            "only before an age"
+        );
+        assert!(check_gender("הילדה", None).is_empty());
+    }
+
+    #[test]
+    fn two_grades_now_are_pointed_out_and_a_past_grade_is_not() {
+        let others = [
+            "בכיתה א' התקשה בקריאה.",
+            "היא לומדת בכיתה ג' בבית ספר יסודי.",
+        ];
+        assert_eq!(
+            check_grade("כיום היא תלמידת כיתה ב'.", &others),
+            vec!["כתוב כיתה ב', ובמקום אחר בדוח כיתה ג'".to_owned()]
+        );
+        assert!(check_grade("היא לומדת בכיתה ג'.", &others).is_empty());
+        assert!(check_grade("בכיתה ב' עברה דירה.", &others).is_empty());
+    }
+
+    #[test]
+    fn a_recommendation_without_a_basis_in_the_body_is_pointed_out() {
+        let body = ["נצפו קשיים במוטוריקה עדינה ובאחיזת עיפרון."];
+        assert!(check_recommendations("מומלץ ריפוי בעיסוק.", &body).is_empty());
+        assert_eq!(
+            check_recommendations("מומלץ טיפול רגשי ופנייה לקלינאית תקשורת.", &body),
+            vec![
+                "המלצה על טיפול בתקשורת, ואין לה בסיס בגוף הדוח".to_owned(),
+                "המלצה על טיפול רגשי, ואין לה בסיס בגוף הדוח".to_owned(),
+            ]
+        );
     }
 }

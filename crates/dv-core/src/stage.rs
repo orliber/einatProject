@@ -9,27 +9,13 @@
 
 use super::*;
 
-/// Which step a request belongs to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Stage {
-    Section,
-    Consult,
-    Sort,
-    StyleAnalysis,
-    StyleSynthesis,
-    Verify,
-}
+/// Which step a request belongs to: the same kind an approval is checked against when it is
+/// taken out (`begin_send`), so the road out and the road back name a step one way (A1).
+pub(crate) type Stage = SendKind;
 
 impl PendingKind {
     pub(crate) fn stage(&self) -> Stage {
-        match self {
-            PendingKind::Section { .. } => Stage::Section,
-            PendingKind::Consult { .. } => Stage::Consult,
-            PendingKind::Sort { .. } => Stage::Sort,
-            PendingKind::StyleAnalysis { .. } => Stage::StyleAnalysis,
-            PendingKind::StyleSynthesis { .. } => Stage::StyleSynthesis,
-            PendingKind::Verify { .. } => Stage::Verify,
-        }
+        self.send_kind()
     }
 
     /// The case and the log's words for this request; and, for a request about a case's

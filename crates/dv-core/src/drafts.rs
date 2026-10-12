@@ -2,6 +2,15 @@
 
 use super::*;
 
+/// Sections that sum up the body rather than add to it (G2).
+const CLOSING_SECTIONS: &[&str] = &[
+    "summary",
+    "diagnoses",
+    "recommendations",
+    "signature",
+    "dsm",
+];
+
 impl Core {
     pub fn case_detail(&mut self, case_id: &str) -> Result<CaseDetail, CoreError> {
         let structure =
@@ -35,15 +44,22 @@ impl Core {
         let with_versions = v.drafts_with_versions(case_id)?;
         // One name for one thing (ST10): hers from her past reports, else the report's own.
         let her_terms = style::style_terms(v)?;
-        let mut report_texts = Vec::new();
+        let mut report: Vec<(String, String, String)> = Vec::new();
         for s in structure.sections() {
-            report_texts.extend(
+            report.extend(
                 v.drafts(case_id, &s.key)?
                     .into_iter()
                     .filter(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved))
-                    .map(|d| d.text_tagged),
+                    .map(|d| (s.key.clone(), d.id, d.text_tagged)),
             );
         }
+        let report_texts: Vec<String> = report.iter().map(|(_, _, t)| t.clone()).collect();
+        // What the body of the report says (G2): the sections a recommendation rests on.
+        let body: Vec<&str> = report
+            .iter()
+            .filter(|(k, _, _)| !CLOSING_SECTIONS.contains(&k.as_str()))
+            .map(|(_, _, t)| t.as_str())
+            .collect();
         let report_terms = dv_style::terms::usual(report_texts.iter().map(String::as_str), 1);
         let mut sections = Vec::new();
         for part in &structure.parts {
@@ -73,6 +89,20 @@ impl Core {
                         warnings: dv_domain::check_scores(&d.text_tagged, &sheets)
                             .into_iter()
                             .chain(dv_domain::check_age(&d.text_tagged, meta.age))
+                            .chain(dv_domain::check_gender(&d.text_tagged, meta.child_gender))
+                            .chain(dv_domain::check_grade(
+                                &d.text_tagged,
+                                &report
+                                    .iter()
+                                    .filter(|(_, _, t)| *t != d.text_tagged)
+                                    .map(|(_, _, t)| t.as_str())
+                                    .collect::<Vec<_>>(),
+                            ))
+                            .chain(if s.key == "recommendations" {
+                                dv_domain::check_recommendations(&d.text_tagged, &body)
+                            } else {
+                                Vec::new()
+                            })
                             .chain(dv_style::terms::notes(
                                 &d.text_tagged,
                                 &her_terms,

@@ -12,7 +12,7 @@ pub mod routing;
 pub mod scores;
 
 pub use compare::{compare, comparison_text, ComparisonRow};
-pub use consistency::check_age;
+pub use consistency::{check_age, check_gender, check_grade, check_recommendations};
 pub use identity::{
     assign_tag, FoundName, Identity, IdentityInput, IdentitySource, Role, PRACTITIONER_TAG,
 };

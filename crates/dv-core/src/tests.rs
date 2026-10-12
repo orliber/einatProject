@@ -3914,3 +3914,83 @@ fn a_bug_report_carries_only_crash_lines_in_the_hooks_own_shape() {
         .all(|l| !l.contains("נועם") && !l.contains("ילד")));
     assert!(recent_crashes("").is_empty());
 }
+
+#[test]
+fn the_report_is_checked_against_itself_and_the_details() {
+    let (_dir, mut core, case) = setup(None);
+    core.add_own_paragraph(&case, "kindergarten", "הוא לומד בכיתה א' בבית ספר שכונתי.")
+        .unwrap();
+    core.add_own_paragraph(
+        &case,
+        "appearance",
+        "הילדה הגיעה בשמחה. היום הוא תלמיד כיתה ב'.",
+    )
+    .unwrap();
+    core.add_own_paragraph(
+        &case,
+        "recommendations",
+        "מומלץ טיפול בתקשורת אצל קלינאית תקשורת.",
+    )
+    .unwrap();
+    let detail = core.case_detail(&case).unwrap();
+    let notes = |key: &str| -> Vec<String> {
+        detail
+            .sections
+            .iter()
+            .find(|s| s.key == key)
+            .unwrap()
+            .paragraphs
+            .iter()
+            .flat_map(|p| p.warnings.clone())
+            .collect()
+    };
+    let seen = notes("appearance");
+    assert!(seen.iter().any(|n| n.contains("זה ילד")), "{seen:?}");
+    assert!(seen.iter().any(|n| n.contains("כיתה ב'")), "{seen:?}");
+    let rec = notes("recommendations");
+    assert_eq!(
+        rec,
+        vec!["המלצה על טיפול בתקשורת, ואין לה בסיס בגוף הדוח".to_owned()]
+    );
+}
+
+#[test]
+fn a_long_material_goes_to_a_section_with_the_passages_that_bear_on_it() {
+    let (_dir, mut core, case) = setup(None);
+    let mut text = String::new();
+    for i in 0..40 {
+        text.push_str(&format!(
+            "בגן הוא משחק ליד חברים בחצר, והגננת מספרת שבמפגש הבוקר הוא מתקשה לשבת עד הסוף, פעם {i}.\n\n"
+        ));
+        text.push_str(&format!(
+            "ההריון עבר ללא סיבוכים והלידה הייתה בשבוע ארבעים, והמשקל בלידה היה תקין, פעם {i}.\n\n"
+        ));
+    }
+    core.add_input(&case, InputKind::FreeText, "סיכום ארוך", &text)
+        .unwrap();
+    let id = core
+        .case_detail(&case)
+        .unwrap()
+        .inputs
+        .last()
+        .unwrap()
+        .id
+        .clone();
+    core.set_input_sections(&case, &id, &["kindergarten".to_owned()])
+        .unwrap();
+    let prepared = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    let label = prepared
+        .parts
+        .iter()
+        .map(|p| p.label.clone())
+        .find(|l| l.contains("סיכום ארוך"))
+        .expect("the material goes");
+    assert!(label.contains("מתוך 80 קטעים"), "{label}");
+    let out = outgoing(&prepared);
+    assert!(
+        out.contains("במפגש הבוקר") && !out.contains("ההריון"),
+        "{out}"
+    );
+}
