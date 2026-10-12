@@ -373,6 +373,16 @@ pub struct TemplateView {
     pub styles_matched: u32,
     pub styles_total: u32,
     pub size_kb: u32,
+    /// How it looks (V4), for the report page in the app: what the template does not say
+    /// is `None`, and the page keeps its own.
+    pub font: Option<String>,
+    /// Body text size, in half points (24 = 12pt).
+    pub size_half_points: Option<u32>,
+    pub heading_font: Option<String>,
+    /// Page width and height, in twentieths of a point.
+    pub page_twips: Option<[u32; 2]>,
+    /// Top, right, bottom, left margins, in twentieths of a point.
+    pub margins_twips: Option<[u32; 4]>,
 }
 
 /// A name typed for a case that already appears in another case (D-023).

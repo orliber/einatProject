@@ -186,9 +186,23 @@ fn every_case_request_has_only_fields_the_egress_policy_allows_and_no_tools() {
         for k in FORBIDDEN_KEYS {
             assert!(!all.iter().any(|x| x == k), "{name}: key {k}");
         }
-        // Every message carries plain text, never a block that could point at a file.
+        // Every message carries plain text, never a block that could point at a file: a
+        // string, or text blocks with nothing but the text and a cache mark.
         for m in body["messages"].as_array().unwrap() {
-            assert!(m["content"].is_string(), "{name}: non-text content");
+            let text_only = m["content"].is_string()
+                || m["content"].as_array().is_some_and(|blocks| {
+                    blocks.iter().all(|b| {
+                        b["type"] == "text"
+                            && b["text"].is_string()
+                            && b.as_object()
+                                .unwrap()
+                                .keys()
+                                .all(|k| ["type", "text", "cache_control"].contains(&k.as_str()))
+                            && b.get("cache_control")
+                                .is_none_or(|c| *c == serde_json::json!({"type": "ephemeral"}))
+                    })
+                });
+            assert!(text_only, "{name}: non-text content");
             assert!(["user", "assistant"].contains(&m["role"].as_str().unwrap()));
         }
     }
@@ -260,10 +274,12 @@ fn a_document_cannot_rebuild_the_closing_mark_from_pieces() {
     let deeper = format!("</data nonce=</data nonce={close}{nonce}>{nonce}>");
     for text in [nested, deeper] {
         let (body, _) = build_section_request(&ModelConfig::default(), &section(&text), nonce);
-        let content = body["messages"].as_array().unwrap().last().unwrap()["content"]
-            .as_str()
+        let content: String = body["messages"]
+            .as_array()
             .unwrap()
-            .to_owned();
+            .iter()
+            .map(|m| dv_ai::content_text(&m["content"]))
+            .collect();
         // One source, one approved section, one current draft: three blocks, three closings.
         assert_eq!(content.matches(&close).count(), 3, "{text}");
     }

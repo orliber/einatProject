@@ -37,6 +37,7 @@ impl Core {
             ner_exe: None,
             ner_problem: None,
             hint_cache: HashMap::new(),
+            section_nonces: HashMap::new(),
         }
     }
 
@@ -351,6 +352,7 @@ impl Core {
         self.style_staged.clear();
         self.removed_input = None;
         self.hint_cache.clear();
+        self.section_nonces.clear();
         // The model's process held texts of this session in its memory: it ends with the lock.
         self.ner = None;
         self.ner_problem = None;

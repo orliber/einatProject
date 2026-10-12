@@ -7,4 +7,21 @@ export type TemplateView = {
 /**
  * The report goes where `{{הדוח}}` is written; otherwise it replaces the template's body.
  */
-has_marker: boolean, headers: number, footers: number, images: number, styles_matched: number, styles_total: number, size_kb: number, };
+has_marker: boolean, headers: number, footers: number, images: number, styles_matched: number, styles_total: number, size_kb: number, 
+/**
+ * How it looks (V4), for the report page in the app: what the template does not say
+ * is `None`, and the page keeps its own.
+ */
+font: string | null, 
+/**
+ * Body text size, in half points (24 = 12pt).
+ */
+size_half_points: number | null, heading_font: string | null, 
+/**
+ * Page width and height, in twentieths of a point.
+ */
+page_twips: [number, number] | null, 
+/**
+ * Top, right, bottom, left margins, in twentieths of a point.
+ */
+margins_twips: [number, number, number, number] | null, };

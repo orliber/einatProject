@@ -189,6 +189,20 @@ pub fn nonce_from(random: &[u8; 16]) -> String {
     s
 }
 
+/// The text of a message's content: a string, or its text blocks joined.
+#[must_use]
+pub fn content_text(content: &Value) -> String {
+    match content {
+        Value::String(s) => s.clone(),
+        Value::Array(blocks) => blocks
+            .iter()
+            .filter_map(|b| b["text"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+        _ => String::new(),
+    }
+}
+
 /// Random per-request marker so text inside a document cannot close the data block.
 pub(crate) fn data_block(nonce: &str, attrs: &str, body: &str) -> String {
     let close = format!("</data nonce={nonce}>");
@@ -292,14 +306,20 @@ pub fn build_section_request(
             text,
         ));
     }
+    // What stays the same through a conversation about the section (its materials and the
+    // approved sections) comes first and is marked for the cache, so the next turn reads it
+    // from there instead of paying for it again. Same text, same gate; only the order moved.
+    let context = parts.join("\n\n");
+    let mut rest = Vec::new();
     if !input.current_draft.is_empty() {
-        parts.push(data_block(
+        rest.push(data_block(
             nonce,
             "current_draft=\"true\"",
             &input.current_draft.join("\n\n"),
         ));
     }
-    parts.push(format!("הפסיכולוגית מבקשת: {}", input.instruction_tagged));
+    rest.push(format!("הפסיכולוגית מבקשת: {}", input.instruction_tagged));
+    let rest = rest.join("\n\n");
 
     let mut messages: Vec<Value> = input
         .history
@@ -310,7 +330,20 @@ pub fn build_section_request(
     if messages.first().is_some_and(|m| m["role"] == "assistant") {
         messages.insert(0, json!({"role": "user", "content": "המשך שיחה על הסעיף."}));
     }
-    messages.push(json!({ "role": "user", "content": parts.join("\n\n") }));
+    let cached =
+        json!({ "type": "text", "text": context, "cache_control": { "type": "ephemeral" } });
+    match messages.first_mut() {
+        Some(first) => {
+            let said = first["content"].as_str().unwrap_or_default().to_owned();
+            first["content"] = json!([cached, { "type": "text", "text": said }]);
+            messages.push(json!({ "role": "user", "content": rest }));
+        }
+        None => {
+            messages.push(
+                json!({ "role": "user", "content": [cached, { "type": "text", "text": rest }] }),
+            );
+        }
+    }
     body["messages"] = Value::Array(messages);
     if let Ok(schema) = serde_json::from_str::<Value>(SECTION_SCHEMA) {
         body["output_config"]["format"] = json!({ "type": "json_schema", "schema": schema });
@@ -414,7 +447,7 @@ mod tests {
         assert_eq!(body["output_config"]["format"]["type"], "json_schema");
         assert!(body.get("metadata").is_none() && body.get("tools").is_none());
         assert_eq!(refs, vec![("S1".to_owned(), "abc".to_owned())]);
-        let text = body["messages"][0]["content"].as_str().unwrap();
+        let text = content_text(&body["messages"][0]["content"]);
         assert!(text.contains("id=\"S1\""));
         assert!(!text.contains("abc"), "internal ids never leave");
         assert_eq!(
@@ -422,6 +455,35 @@ mod tests {
             1,
             "a document cannot close the data block"
         );
+    }
+
+    /// The materials go first, marked for the cache, and are the same text on the next turn
+    /// of the same conversation; what changes (the request, the draft) comes after them.
+    #[test]
+    fn the_materials_are_cached_first_and_stay_the_same_across_turns() {
+        let first = section();
+        let (a, _) = build_section_request(&ModelConfig::default(), &first, "n1");
+        let mut next = section();
+        next.history = vec![
+            TaggedTurn {
+                role: "user".into(),
+                text_tagged: "נסח/י פסקה".into(),
+            },
+            TaggedTurn {
+                role: "assistant".into(),
+                text_tagged: "{\"reply\":\"הנה\"}".into(),
+            },
+        ];
+        next.current_draft = vec!["[ילד] מתקשה במעברים.".into()];
+        next.instruction_tagged = "לקצר".into();
+        let (b, _) = build_section_request(&ModelConfig::default(), &next, "n1");
+        let block = |v: &Value| v["messages"][0]["content"][0].clone();
+        assert_eq!(block(&a), block(&b), "the cached part did not change");
+        assert_eq!(block(&a)["cache_control"]["type"], "ephemeral");
+        assert!(block(&a)["text"].as_str().unwrap().contains("id=\"S1\""));
+        let last = content_text(&b["messages"][2]["content"]);
+        assert!(last.contains("לקצר") && last.contains("current_draft"));
+        assert_eq!(b["messages"][1]["role"], "assistant");
     }
 
     #[test]

@@ -324,8 +324,9 @@ pub fn respond(body: &Value) -> Value {
     let last_user = body["messages"]
         .as_array()
         .and_then(|m| m.iter().rev().find(|x| x["role"] == "user"))
-        .and_then(|m| m["content"].as_str())
-        .unwrap_or("");
+        .map(|m| crate::request::content_text(&m["content"]))
+        .unwrap_or_default();
+    let last_user = last_user.as_str();
     let ai = body["model"]
         .as_str()
         .and_then(crate::Provider::of_model)
