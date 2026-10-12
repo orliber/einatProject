@@ -23,3 +23,6 @@ thiserror.workspace = true
 ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 zeroize = "1.9"
+
+[dev-dependencies]
+proptest = "1"

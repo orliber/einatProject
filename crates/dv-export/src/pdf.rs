@@ -462,7 +462,7 @@ impl<'a> Pages<'a> {
                     self.rect(cell_x(i), top - row_h, cw, row_h, BAND_FILL);
                 }
             }
-            let v = bar.value.clamp(c.min, c.max - step / 2.0);
+            let v = crate::docx::bar_end(bar.value, c.min, c.max - step / 2.0);
             let filled = (0..cells).filter(|&i| start(i) <= v).count();
             if filled > 0 {
                 self.rect(
@@ -934,6 +934,33 @@ mod tests {
         assert_eq!(visual("WISC-V מלא"), "אלמ WISC-V");
         assert_eq!(visual("הבנה מילולית (VCI)"), "(VCI) תילולימ הנבה");
         assert_eq!(visual("FSIQ = 102 בטווח"), "חווטב FSIQ = 102");
+    }
+
+    #[test]
+    fn a_chart_narrower_than_one_step_does_not_panic() {
+        let Some(font) = system_font() else {
+            eprintln!("no Hebrew font on this computer; skipped");
+            return;
+        };
+        let mut r = sample();
+        r.tables[0].charts.push(ScoreChart {
+            title: "פרופיל".into(),
+            min: 0.0,
+            max: 0.0,
+            step: 0.0,
+            mean: 0.0,
+            sd: 0.0,
+            bars: vec![crate::ChartBar {
+                label: "מדד".into(),
+                value: 0.0,
+            }],
+            note: String::new(),
+        });
+        let fonts = PdfFonts {
+            regular: &font,
+            bold: None,
+        };
+        assert!(build(&r, fonts).is_ok());
     }
 
     #[test]

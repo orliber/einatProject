@@ -26,6 +26,8 @@ use crate::{recovery, VaultError};
 
 mod backup;
 mod style;
+#[cfg(test)]
+mod tests;
 pub use backup::{peek_backup, BackupCheck, BackupInfo, BackupPeek, BACKUP_EXTENSION};
 pub use style::{StoredStyleProfile, StoredStyleSource};
 
