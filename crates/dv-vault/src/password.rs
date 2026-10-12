@@ -158,6 +158,23 @@ pub fn check_policy(password: &str) -> Result<(), PolicyViolation> {
 mod tests {
     use super::*;
 
+    /// The lanes are computed in parallel (one core each) and the key stays exactly the same:
+    /// vaults made before still open, and the cost to an attacker is unchanged.
+    #[test]
+    fn four_lanes_give_the_same_key_as_before() {
+        let params = Argon2Params {
+            m_kib: 8 * 1024,
+            t: 3,
+            p: 4,
+        };
+        let raw = derive_raw(b"correct horse battery staple", &[7u8; 32], params).unwrap();
+        let hex: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            hex,
+            "71e56e28750994c5f60a22cf65f34230d4e788d38e8feca0c27fae070254e095"
+        );
+    }
+
     #[test]
     fn policy_accepts_passphrases_and_rejects_weak_passwords() {
         assert!(check_policy("כלב ירוק רץ מהר בגינה").is_ok());

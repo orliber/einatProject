@@ -7,7 +7,7 @@ use dv_domain::Role;
 
 use super::{is_person_word, overlaps, Replacement, Suspect, SuspectKind, SuspectSpan, EVERYDAY};
 use crate::lexicon::{word_bucket, LEXICON};
-use crate::text::{byte_len_of_letters, normalize, prefix_splits, Token};
+use crate::text::{byte_len_of_letters, norm_eq, normalize, prefix_splits, Token};
 
 /// Verbs that make the word before them a person: "שירה אמרה", "הודיה מתקרבת ושואלת".
 const ACTION_NEXT: &[&str] = &[
@@ -156,7 +156,7 @@ fn boundary(gap: &str) -> bool {
 }
 
 fn is_in(norm: &str, words: &[&str]) -> bool {
-    words.iter().any(|w| normalize(w) == norm)
+    words.iter().any(|w| norm_eq(w, &norm))
 }
 
 /// The name inside a token: the whole word, or after "ו" when `vav` allows it.

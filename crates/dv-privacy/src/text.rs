@@ -9,17 +9,25 @@ const MAX_PREFIX: usize = 4;
 /// "בשאלון" is not read as ב+ש+"אלון" (בש is not a Hebrew prefix).
 #[must_use]
 pub fn is_valid_prefix(prefix: &str) -> bool {
-    const CONJ: [&str; 2] = ["", "ו"];
-    const REL: [&str; 5] = ["", "ש", "כש", "לכש", "מש"];
-    const PREP: [&str; 5] = ["", "ב", "ל", "כ", "מ"];
-    const ART: [&str; 2] = ["", "ה"];
-    !prefix.is_empty()
-        && CONJ.iter().any(|c| {
-            REL.iter().any(|r| {
-                PREP.iter()
-                    .any(|p| ART.iter().any(|a| format!("{c}{r}{p}{a}") == prefix))
-            })
-        })
+    static VALID: std::sync::LazyLock<std::collections::HashSet<String>> =
+        std::sync::LazyLock::new(|| {
+            const CONJ: [&str; 2] = ["", "ו"];
+            const REL: [&str; 5] = ["", "ש", "כש", "לכש", "מש"];
+            const PREP: [&str; 5] = ["", "ב", "ל", "כ", "מ"];
+            const ART: [&str; 2] = ["", "ה"];
+            let mut all = std::collections::HashSet::new();
+            for c in CONJ {
+                for r in REL {
+                    for p in PREP {
+                        for a in ART {
+                            all.insert(format!("{c}{r}{p}{a}"));
+                        }
+                    }
+                }
+            }
+            all
+        });
+    !prefix.is_empty() && VALID.contains(prefix)
 }
 
 fn is_hebrew_letter(c: char) -> bool {
@@ -190,6 +198,48 @@ pub fn normalize(s: &str) -> String {
         }
     }
     out.trim_end().to_owned()
+}
+
+/// `normalize(raw) == norm`, without building the normalized string: the hot comparison of
+/// a fixed word against a token, which mostly fails on the first letter.
+#[must_use]
+pub fn norm_eq<T: AsRef<str> + ?Sized>(raw: &str, norm: &T) -> bool {
+    let mut want = norm.as_ref().chars();
+    let mut space = false;
+    let mut started = false;
+    for c in raw.chars().filter_map(normalize_char) {
+        if c.is_whitespace() || c == '\u{05BE}' || c == '-' {
+            space = started;
+            continue;
+        }
+        if space && want.next() != Some(' ') {
+            return false;
+        }
+        space = false;
+        started = true;
+        if want.next() != Some(c) {
+            return false;
+        }
+    }
+    want.next().is_none()
+}
+
+/// The normalized forms of a fixed word list, built once per list: `norm_set(L).contains(w)`
+/// is `L.iter().any(|l| normalize(l) == w)` without normalizing the list on every word.
+#[must_use]
+pub fn norm_set(list: &'static [&'static str]) -> &'static std::collections::HashSet<String> {
+    type Sets =
+        std::collections::HashMap<(usize, usize), &'static std::collections::HashSet<String>>;
+    static SETS: std::sync::LazyLock<std::sync::Mutex<Sets>> =
+        std::sync::LazyLock::new(|| std::sync::Mutex::new(Sets::new()));
+    let key = (list.as_ptr() as usize, list.len());
+    let mut sets = SETS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    sets.entry(key).or_insert_with(|| {
+        // Once per list in the program, never freed: the lists are constants.
+        Box::leak(Box::new(list.iter().map(|w| normalize(w)).collect()))
+    })
 }
 
 /// A word in the original text (`start..end` are byte offsets) and its normalized form.
@@ -409,6 +459,120 @@ pub fn weak_near(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `norm_eq` is exactly `normalize(a) == b`, for every pair of these texts.
+    #[test]
+    fn norm_eq_agrees_with_normalize() {
+        let texts = [
+            "",
+            " ",
+            "  ",
+            "נוֹעַם",
+            "נועמ",
+            "נועם",
+            "ד״ר  שטרן",
+            "ד\"ר שטרנ",
+            "בית ספר",
+            " בית\u{00A0}ספר ",
+            "בית-ספר",
+            "בית\u{05BE}ספר",
+            "בית ספר ",
+            "ביתספר",
+            "ABC",
+            "abc",
+            "גן\u{200B}",
+            "גנ",
+            "ג",
+            "ג ן",
+            "\tגן\n",
+            "ע״ש",
+            "ע\"ש",
+            "עש",
+            "ב'",
+            "ב׳",
+            "ب",
+            "أحمد",
+            "احمد",
+            "ז'ורז'",
+            "ז׳ורז׳",
+        ];
+        for a in texts {
+            for b in texts {
+                let want = normalize(a) == b;
+                assert_eq!(norm_eq(a, b), want, "{a:?} vs {b:?}");
+                let nb = normalize(b);
+                assert_eq!(
+                    norm_eq(a, &nb),
+                    normalize(a) == nb,
+                    "{a:?} vs normalized {b:?}"
+                );
+            }
+        }
+        for list in [
+            crate::lexicon::PERSON_WORDS,
+            crate::lexicon::TITLES,
+            crate::lexicon::NAME_CONTEXT_PREV,
+            crate::lexicon::GENERIC_PLACE_WORDS,
+        ] {
+            for w in list {
+                assert!(norm_eq(w, &normalize(w)), "{w}");
+            }
+        }
+    }
+
+    /// `norm_set(L).contains(w)` is exactly `L.iter().any(|l| normalize(l) == w)`.
+    #[test]
+    fn norm_set_agrees_with_normalizing_the_list() {
+        for list in [
+            crate::lexicon::PERSON_WORDS,
+            crate::lexicon::TITLES,
+            crate::lexicon::GENERIC_PLACE_WORDS,
+        ] {
+            let set = norm_set(list);
+            assert!(std::ptr::eq(set, norm_set(list)), "built once");
+            for w in list
+                .iter()
+                .chain(["", "נועם", "בית", "גננת", "הגננת", "ד״ר"].iter())
+            {
+                let n = normalize(w);
+                assert_eq!(
+                    set.contains(&n),
+                    list.iter().any(|l| normalize(l) == n),
+                    "{w}"
+                );
+                assert_eq!(
+                    set.contains(*w),
+                    list.iter().any(|l| normalize(l) == *w),
+                    "{w}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn valid_prefixes_are_the_ordered_stacks() {
+        for p in [
+            "ו",
+            "ה",
+            "ב",
+            "ל",
+            "כ",
+            "מ",
+            "ש",
+            "וה",
+            "וב",
+            "ושב",
+            "וכשה",
+            "ולכשבה",
+            "מה",
+            "שה",
+        ] {
+            assert!(is_valid_prefix(p), "{p}");
+        }
+        for p in ["", "בש", "הב", "בו", "ששש", "x"] {
+            assert!(!is_valid_prefix(p), "{p}");
+        }
+    }
 
     #[test]
     fn normalization_removes_points_and_final_letters() {

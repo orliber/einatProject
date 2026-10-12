@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use crate::matcher::PhraseIndex;
-use crate::text::normalize;
+use crate::text::{norm_set, normalize};
 
 fn lines(data: &str) -> impl Iterator<Item = &str> {
     data.lines()
@@ -306,7 +306,7 @@ pub const NAME_CONTEXT_NEXT: &[&str] = &[
 
 #[must_use]
 pub fn is_name_context(prev: Option<&str>, next: Option<&str>) -> bool {
-    let norm_in = |w: &str, list: &[&str]| list.iter().any(|l| normalize(l) == w);
+    let norm_in = |w: &str, list: &'static [&'static str]| norm_set(list).contains(w);
     prev.is_some_and(|p| norm_in(p, NAME_CONTEXT_PREV))
         || next.is_some_and(|n| norm_in(n, NAME_CONTEXT_NEXT))
 }

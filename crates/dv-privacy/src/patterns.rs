@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::text::{normalize, prefix_splits, tokenize};
+use crate::text::{norm_eq, prefix_splits, tokenize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PatternKind {
@@ -446,7 +446,7 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
         let gregorian = splits.iter().find_map(|(p, w)| {
             HE_MONTHS
                 .iter()
-                .find(|(m, _, _)| normalize(m) == *w)
+                .find(|(m, _, _)| norm_eq(m, w))
                 .map(|(_, n, amb)| (*p, *n, *amb))
         });
         let english = EN_MONTHS
@@ -456,7 +456,7 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
         // "ה' באב", "ה' אב" – never with the article: "שם האב" is the father.
         let hebrew_cal = splits.iter().any(|(p, w)| {
             (*p == 0 || (*p == 1 && tok.norm.starts_with('ב')))
-                && HEBREW_CAL_MONTHS.iter().any(|m| normalize(m) == *w)
+                && HEBREW_CAL_MONTHS.iter().any(|m| norm_eq(m, w))
         });
 
         let (month, ambiguous) = match (gregorian, english) {
