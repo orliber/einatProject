@@ -257,6 +257,24 @@ fn read_request_line(stream: &TcpStream) -> Option<String> {
             _ => break,
         }
     }
+    // The headers are read too, up to the empty line and within the same cap: a socket closed
+    // with unread bytes is reset on macOS, and the browser then loses the page we send.
+    let mut rest = 0usize;
+    let mut line_len = 0usize;
+    while rest < 8 * 1024 {
+        match reader.read(&mut byte) {
+            Ok(1) => {
+                rest += 1;
+                match byte[0] {
+                    b'\n' if line_len == 0 => break,
+                    b'\n' => line_len = 0,
+                    b'\r' => {}
+                    _ => line_len += 1,
+                }
+            }
+            _ => break,
+        }
+    }
     String::from_utf8(buf).ok().map(|s| s.trim_end().to_owned())
 }
 
