@@ -108,6 +108,41 @@ pub(crate) fn compat_char(c: char) -> char {
         '\u{FB44}' | '\u{FB4E}' => 'פ',
         '\u{FB46}' => 'צ',
         '\u{FB47}' => 'ק',
+        c => lookalike(c),
+    }
+}
+
+/// A Cyrillic or Greek letter that looks like a Latin one ("Nоam" with a Cyrillic о) reads
+/// as that Latin letter, so a name typed with one does not slip past every rule.
+fn lookalike(c: char) -> char {
+    match c {
+        'а' | 'α' => 'a',
+        'А' | 'Α' => 'A',
+        'В' | 'Β' => 'B',
+        'с' | 'ϲ' => 'c',
+        'С' | 'Ϲ' => 'C',
+        'е' => 'e',
+        'Е' | 'Ε' => 'E',
+        'Н' | 'Η' => 'H',
+        'і' | 'ι' => 'i',
+        'І' | 'Ι' => 'I',
+        'ј' => 'j',
+        'Ј' => 'J',
+        'К' | 'Κ' => 'K',
+        'М' | 'Μ' => 'M',
+        'Ν' => 'N',
+        'о' | 'ο' => 'o',
+        'О' | 'Ο' => 'O',
+        'р' | 'ρ' => 'p',
+        'Р' | 'Ρ' => 'P',
+        'ѕ' => 's',
+        'Ѕ' => 'S',
+        'Т' | 'Τ' => 'T',
+        'у' => 'y',
+        'Υ' | 'Ү' => 'Y',
+        'х' | 'χ' => 'x',
+        'Х' | 'Χ' => 'X',
+        'Ζ' => 'Z',
         c => c,
     }
 }
@@ -203,7 +238,53 @@ pub fn tokenize(text: &str) -> Vec<Token> {
         }
         i = j;
     }
-    tokens
+    join_spaced_letters(text, tokens)
+}
+
+/// Fewest single letters in a row that are read as one word.
+const SPACED_MIN: usize = 3;
+
+/// A word typed with a space between its letters ("נ ו ע ם", "N o a m") is one word: three
+/// or more single letters, each one space (or two) from the next, on one line. Without this
+/// a name spelled out that way reads as letters and passes every rule.
+fn join_spaced_letters(text: &str, tokens: Vec<Token>) -> Vec<Token> {
+    let single = |t: &Token| {
+        let mut chars = t.norm.chars();
+        matches!((chars.next(), chars.next()), (Some(c), None) if c.is_alphabetic())
+    };
+    let close = |a: &Token, b: &Token| {
+        let gap = &text[a.end..b.start];
+        (1..=2).contains(&gap.len()) && gap.chars().all(|c| c == ' ' || c == '\u{00A0}')
+    };
+    // The first letter may carry a prefix: "שנ ו ע ם" is ש + "נועם".
+    let starter = |t: &Token| {
+        let chars: Vec<char> = t.norm.chars().collect();
+        single(t)
+            || ((2..=MAX_PREFIX + 1).contains(&chars.len())
+                && chars.last().is_some_and(|c| c.is_alphabetic())
+                && is_valid_prefix(&chars[..chars.len() - 1].iter().collect::<String>()))
+    };
+    let mut out: Vec<Token> = Vec::with_capacity(tokens.len());
+    let mut i = 0;
+    while i < tokens.len() {
+        let mut j = i + 1;
+        if starter(&tokens[i]) {
+            while j < tokens.len() && single(&tokens[j]) && close(&tokens[j - 1], &tokens[j]) {
+                j += 1;
+            }
+        }
+        if j - i >= SPACED_MIN {
+            out.push(Token {
+                start: tokens[i].start,
+                end: tokens[j - 1].end,
+                norm: tokens[i..j].iter().map(|t| t.norm.as_str()).collect(),
+            });
+        } else {
+            out.extend(tokens[i..j].iter().cloned());
+        }
+        i = j;
+    }
+    out
 }
 
 /// The word itself and the word with 1–3 leading prefix letters removed (remainder ≥ 2 letters).

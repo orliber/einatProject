@@ -1195,3 +1195,65 @@ proptest! {
         prop_assert!(flow_with(&text, &ids, CASE, &allow).is_some(), "dead end on «{text}»");
     }
 }
+
+/// A declared name typed with a space between its letters ("נ ו ע ם", "N o a m") is hidden
+/// like the name, by the filter and by the gate.
+#[test]
+fn zero_leaks_for_names_typed_with_spaced_letters() {
+    let spaced = |name: &str, gap: &str| {
+        name.chars()
+            .map(|c| c.to_string())
+            .collect::<Vec<_>>()
+            .join(gap)
+    };
+    let mut leaks = Vec::new();
+    for name in ["נועם", "רותם", "מאיה", "Noam", "שטרן"] {
+        for gap in [" ", "  ", "\u{00A0}"] {
+            let typed = spaced(name, gap);
+            for t in TEMPLATES {
+                let text = t.replace("{}", &typed);
+                let mut ids = identities();
+                let practitioner = vec!["דנה כהן-לוי".to_owned()];
+                let out = filter(&text, &ctx_for(&ids, &practitioner, CASE)).unwrap();
+                ids.extend(found(&out, &ids, CASE));
+                let joined: String = out.tagged.chars().filter(|c| !c.is_whitespace()).collect();
+                if out.tagged.contains(&typed) || normalize(&joined).contains(&normalize(name)) {
+                    leaks.push(format!("filter: {text} → {}", out.tagged));
+                }
+                // The gate on the raw text (a path that skipped the filter) refuses it.
+                if gate_with(&text, &ids, CASE).cleared {
+                    leaks.push(format!("gate: {text}"));
+                }
+            }
+        }
+    }
+    assert!(
+        leaks.is_empty(),
+        "{} leaks:\n{}",
+        leaks.len(),
+        leaks.join("\n")
+    );
+}
+
+/// A declared Latin name typed with Cyrillic or Greek look-alike letters is hidden too.
+#[test]
+fn zero_leaks_for_names_with_look_alike_letters() {
+    let mut leaks = Vec::new();
+    for typed in ["Nоam", "NОAM", "Νoam", "nοam", "Νοаm"] {
+        for t in TEMPLATES {
+            let text = t.replace("{}", typed);
+            let ids = identities();
+            let practitioner = vec!["דנה כהן-לוי".to_owned()];
+            let out = filter(&text, &ctx_for(&ids, &practitioner, CASE)).unwrap();
+            if out.tagged.contains(typed) || gate_with(&text, &ids, CASE).cleared {
+                leaks.push(format!("{text} → {}", out.tagged));
+            }
+        }
+    }
+    assert!(
+        leaks.is_empty(),
+        "{} leaks:\n{}",
+        leaks.len(),
+        leaks.join("\n")
+    );
+}

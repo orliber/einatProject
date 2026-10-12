@@ -303,6 +303,19 @@ pub fn clear(req: &GateRequest<'_>) -> Result<ClearedPayload, Blocked> {
                 Some(e.to_string()),
             )),
         }
+        // An address field ("כתובת: מסדה 33, חיפה"), as the filter reads it: the filter hides
+        // each part whole, or the tag of what it hid there first ("שכונת [יישוב_אחר]") stays
+        // in it, so a part without any tag was never filtered.
+        for (start, end) in crate::pipeline::address_field_spans(text) {
+            let part = &text[start..end];
+            if !TAG_RE.as_ref().is_some_and(|re| re.is_match(part)) {
+                reasons.push(reason(
+                    "pattern",
+                    "נמצא פרט מזהה (מספר, תאריך, כתובת…)",
+                    Some("כתובת".to_owned()),
+                ));
+            }
+        }
         if let Some(re) = TAG_RE.as_ref() {
             for m in re.find_iter(text) {
                 let tag = m.as_str();
@@ -354,5 +367,33 @@ mod tests {
             Some("[ילד] למד במוסד עם ילד גן ו[מספר] ילדים [חסר: גיל].")
         );
         assert_eq!(replace_foreign_tags("[ילד] משחק.", &tags, tag_word), None);
+    }
+
+    #[test]
+    fn an_address_field_the_filter_missed_is_refused() {
+        let body = serde_json::json!({"messages": [{"role": "user", "content": "פרטים\nכתובת: מסדה 33, חיפה\n"}]});
+        let filtered = serde_json::json!({"messages": [{"role": "user", "content": "פרטים\nכתובת: [כתובת], [יישוב_אחר]\n"}]});
+        let tags = HashSet::new();
+        let none = |_: &str| false;
+        let ctx = crate::PrivacyContext {
+            case_id: "c1",
+            identities: &[],
+            practitioner: &[],
+            allowlisted: &none,
+            confirmed_names: &none,
+            past_names: &none,
+            today: (2026, 10, 12),
+        };
+        let req = |body| GateRequest {
+            body,
+            ctx: &ctx,
+            case_tags: &tags,
+            unresolved_suspects: 0,
+            canaries: &[],
+            max_bytes: 100_000,
+        };
+        let refused = clear(&req(&body)).err().unwrap();
+        assert!(refused.reasons.iter().any(|r| r.code == "pattern"));
+        assert!(clear(&req(&filtered)).is_ok());
     }
 }
