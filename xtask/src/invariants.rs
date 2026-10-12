@@ -170,7 +170,10 @@ fn unsafe_policy(root: &Path) -> Result<Vec<String>, String> {
         manifests.extend(entries.flatten().map(|e| e.path().join("Cargo.toml")));
     }
     for manifest in manifests {
-        let text = fs::read_to_string(&manifest).map_err(|e| e.to_string())?;
+        // A Windows checkout has CRLF line endings (core.autocrlf); the check reads lines.
+        let text = fs::read_to_string(&manifest)
+            .map_err(|e| e.to_string())?
+            .replace("\r\n", "\n");
         // The one audited exception (D-044): `deny`, opted into block by block in windows.rs.
         if manifest.ends_with("crates/dv-sandbox/Cargo.toml") {
             if !text.contains("unsafe_code = \"deny\"") {
