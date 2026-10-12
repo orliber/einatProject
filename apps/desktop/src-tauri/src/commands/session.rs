@@ -7,6 +7,23 @@ pub(crate) fn ping() -> dv_ipc::PingResponse {
     dv_core::ping()
 }
 
+/// The last crashes, for the bug report she copies for Or. Read from the crash log next to the
+/// vault folder (see `remember_crashes`); works while the vault is locked.
+#[tauri::command]
+pub(crate) fn recent_crashes(state: tauri::State<'_, AppState>) -> Vec<String> {
+    use std::io::Read;
+    let Some(path) = state.dir.parent().map(|d| d.join(CRASH_LOG)) else {
+        return Vec::new();
+    };
+    let mut bytes = Vec::new();
+    let read =
+        std::fs::File::open(path).and_then(|f| f.take(CRASH_LOG_MAX * 2).read_to_end(&mut bytes));
+    if read.is_err() {
+        return Vec::new();
+    }
+    dv_core::recent_crashes(&String::from_utf8_lossy(&bytes))
+}
+
 #[tauri::command]
 pub(crate) async fn app_status(
     window: tauri::WebviewWindow,

@@ -93,7 +93,7 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
             <h1>ברוכה הבאה לכספת האבחון</h1>
             <p className="lede">כל התיקים יישמרו כאן, במחשב הזה בלבד, מוצפנים. בוחרים סיסמה לפתיחה: משפט קצר שקל לזכור, 12 תווים לפחות.</p>
             {status.cloud_synced_folder && (
-              <p className="error">תיקיית הכספת נמצאת בתוך תיקייה שמסונכרנת לענן ({status.cloud_synced_folder}). אי אפשר ליצור בה כספת.</p>
+              <ErrorLine error={`תיקיית הכספת נמצאת בתוך תיקייה שמסונכרנת לענן (${status.cloud_synced_folder}). אי אפשר ליצור בה כספת. אור יכול לעזור להעביר אותה.`} report />
             )}
             <div className="field">
               <label htmlFor="pw1">סיסמה</label>

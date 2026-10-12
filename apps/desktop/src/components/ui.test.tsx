@@ -6,7 +6,8 @@ import { AppContext, type AppApi } from "../App";
 import { rememberFailure } from "../errors";
 import { status } from "../test/fixtures";
 import { a11yViolations } from "../test/a11y";
-import { Dialog, ErrorLine, Segments, displayTag } from "./ui";
+import { mockIPC } from "@tauri-apps/api/mocks";
+import { Dialog, ErrorLine, Segments, Skeleton, displayTag } from "./ui";
 
 const PAYLOAD = '<img src=x onerror="window.__xss=1"><script>window.__xss=2</script>';
 
@@ -82,26 +83,57 @@ describe("ErrorLine", () => {
     expect(go).toHaveBeenCalledWith({ name: "case", id: "c9", view: "details" });
   });
 
-  it("a bad key opens the settings; technical details can be copied for Or", async () => {
+  it("a bad key opens the settings; the report for Or is shown in full before it is copied", async () => {
     const go = vi.fn();
     const writeText = vi.fn(async () => undefined);
     const user = userEvent.setup();
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    mockIPC((cmd) => {
+      if (cmd === "ping") return { ipc_version: 1, core_version: "0.5.1", build_commit: "abc123", fips_active: false, platform: "windows" };
+      if (cmd === "recent_crashes") return ["1700000000 · v0.5.1 · thread main · crates/x.rs:3 · (message left out)"];
+      throw new Error(cmd);
+    });
     const message = "המפתח לא התקבל אצל הספק.";
     rememberFailure({ code: "egress", message, details: ["401 from provider", "request id r-1"] });
     render(
-      <AppContext.Provider value={api({ go, route: { name: "cases" } })}>
+      <AppContext.Provider value={api({ go, route: { name: "case", id: "c-secret", view: "report" } })}>
         <ErrorLine error={message} />
       </AppContext.Provider>,
     );
     await user.click(screen.getByRole("button", { name: "פתיחת ההגדרות" }));
     expect(go).toHaveBeenCalledWith({ name: "settings" });
-    await user.click(screen.getByRole("button", { name: "העתקת פרטים לאור" }));
-    expect(writeText).toHaveBeenCalledWith("401 from provider\nrequest id r-1");
-    expect(await screen.findByRole("button", { name: "הועתק" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "דוח תקלה לאור" }));
+    const box = await screen.findByRole("textbox", { name: "תוכן הדוח" });
+    const text = (box as HTMLTextAreaElement).value;
+    for (const part of ["0.5.1 (abc123)", "windows", "תיק (לשונית report)", "קוד שגיאה: egress", "401 from provider", "crates/x.rs:3"]) {
+      expect(text).toContain(part);
+    }
+    expect(text).not.toContain("c-secret");
+    expect(text).not.toContain(message);
+    // She may delete a line first; only what is in the box is copied.
+    await user.clear(box);
+    await user.type(box, "רק זה");
+    await user.click(screen.getByRole("button", { name: "העתקה" }));
+    expect(writeText).toHaveBeenCalledWith("רק זה");
+    expect(await screen.findByText(/הועתק/)).toBeInTheDocument();
   });
 
-  it("a message that is not the remembered failure gets no actions", () => {
+  it("an error with nothing to fix it gets a retry when the caller can retry, else the report for a fault", async () => {
+    const retry = vi.fn();
+    const { unmount } = render(<ErrorLine error="לא הצלחתי לטעון." retry={retry} />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "לנסות שוב" }));
+    expect(retry).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "דוח תקלה לאור" })).toBeNull();
+    unmount();
+    const { unmount: again } = render(<ErrorLine error="אין טקסט לשמור." />);
+    expect(screen.queryByRole("button")).toBeNull();
+    again();
+    rememberFailure({ code: "ai", message: "התשובה לא תקינה.", details: [] });
+    render(<ErrorLine error="התשובה לא תקינה." />);
+    expect(screen.getByRole("button", { name: "דוח תקלה לאור" })).toBeInTheDocument();
+  });
+
+  it("a message that is not the remembered failure never offers that failure's fix", () => {
     rememberFailure({ code: "consent_missing", message: "הודעה אחרת", details: ["x"] });
     render(
       <AppContext.Provider value={api({ route: { name: "case", id: "c1", view: "report" } })}>
@@ -109,7 +141,16 @@ describe("ErrorLine", () => {
       </AppContext.Provider>,
     );
     expect(screen.getByRole("alert")).toHaveTextContent("אין טקסט לשמור.");
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: "רישום ההסכמה" })).toBeNull();
+  });
+});
+
+describe("Skeleton", () => {
+  it("is announced as loading and draws the given number of bars", () => {
+    render(<Skeleton lines={4} label="טוען תיקים" card />);
+    const s = screen.getByRole("status", { name: "טוען תיקים" });
+    expect(s).toHaveAttribute("aria-busy", "true");
+    expect(s.querySelectorAll(".skeleton-line")).toHaveLength(4);
   });
 });
 

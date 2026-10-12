@@ -62,7 +62,7 @@ function ActivityDialog({ onClose }: { onClose: () => void }) {
             </label>
           ))}
         </div>
-        {first && !first.intact && <p className="error" role="alert">בדיקת השלמות של היומן מצאה חריגה. כדאי לפנות לאור לפני שממשיכים לעבוד.</p>}
+        {first && !first.intact && <ErrorLine error="בדיקת השלמות של היומן מצאה חריגה. כדאי לפנות לאור לפני שממשיכים לעבוד." report />}
         <ol className="activity-list" aria-label="פעולות, מהחדשה לישנה">
           {entries.map((e) => (
             <li key={e.seq} className={e.warn ? "warn" : undefined}>

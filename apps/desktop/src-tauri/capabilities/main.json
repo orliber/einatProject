@@ -7,6 +7,7 @@
   ],
   "permissions": [
     "allow-ping",
+    "allow-recent-crashes",
     "allow-app-status",
     "allow-create-vault",
     "allow-confirm-recovery-key",

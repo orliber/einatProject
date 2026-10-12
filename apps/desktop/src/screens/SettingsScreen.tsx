@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { BugReportSettings } from "../components/BugReport";
 import { useApp } from "../App";
 import { ActivitySettings } from "../components/ActivityLog";
 import { BackupSettings } from "../components/Backup";
@@ -284,6 +285,8 @@ export function SettingsScreen() {
         <UpdateSettings />
 
         <SecuritySettings />
+
+        <BugReportSettings />
       </main>
     </div>
   );

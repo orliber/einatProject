@@ -189,6 +189,45 @@ pub fn ping() -> PingResponse {
     }
 }
 
+/// How many crash lines a bug report carries.
+const CRASHES_SHOWN: usize = 5;
+
+/// The last crashes from the desktop's crash log, for the bug report she copies for the
+/// developer. Only lines in the hook's own shape are kept
+/// (`<seconds> · v<version> · thread <name> · <file>:<line> · <fixed text>`); anything else in
+/// the file is dropped, so nothing but what the hook wrote can reach the report.
+#[must_use]
+pub fn recent_crashes(log: &str) -> Vec<String> {
+    fn well_formed(line: &str) -> bool {
+        let parts: Vec<&str> = line.split(" · ").collect();
+        let [at, version, thread, place, text] = parts.as_slice() else {
+            return false;
+        };
+        let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+        let place_ok = place == &"?"
+            || place
+                .rsplit_once(':')
+                .is_some_and(|(file, n)| digits(n) && file.is_ascii() && !file.contains(' '));
+        line.chars().count() <= 300
+            && digits(at)
+            && version.strip_prefix('v').is_some_and(|v| {
+                v.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+            })
+            && thread.strip_prefix("thread ").is_some_and(|t| t.is_ascii())
+            && place_ok
+            && !text.is_empty()
+            && !line.chars().any(char::is_control)
+    }
+    let kept: Vec<String> = log
+        .lines()
+        .map(str::trim_end)
+        .filter(|l| well_formed(l))
+        .map(str::to_owned)
+        .collect();
+    kept[kept.len().saturating_sub(CRASHES_SHOWN)..].to_vec()
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
     #[error("locked")]
