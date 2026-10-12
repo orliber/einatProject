@@ -88,6 +88,48 @@ describe("main screens", () => {
     expect(await a11yViolations(view.container)).toEqual([]);
   });
 
+  it("the report page shows how close a draft of the AI is to her style, and only for drafts", async () => {
+    const core = new FakeCore();
+    await core.handle("unlock", { password: "x" });
+    const prepared: Record<string, unknown>[] = [];
+    const style = { fit: 82, details: ["משפטים ארוכים מהרגיל אצלך"], ask: "משפטים קצרים יותר", marks: [{ from: "מפגין", to: "מראה" }] };
+    mockIPC(async (cmd, args) => {
+      if (cmd === "prepare_section") prepared.push(args as Record<string, unknown>);
+      const out = await core.handle(cmd, args);
+      if (cmd !== "case_detail") return out;
+      const d = out as CaseDetail;
+      return {
+        ...d,
+        sections: d.sections.map((s) => s.key !== "kindergarten" ? s : {
+          ...s,
+          paragraphs: [
+            { id: "p-ok", text: "פסקה מאושרת שבה הילד מפגין סקרנות.", status: "approved", by_ai: true, sources: [], warnings: [], replaces: null, has_versions: false, style_note: null, style },
+            { id: "p-new", text: "בגן הילד מפגין עניין במשחק.", status: "proposed", by_ai: true, sources: [], warnings: [], replaces: null, has_versions: false, style_note: null, style },
+            { id: "p-plain", text: "פסקה בלי ציון.", status: "proposed", by_ai: true, sources: [], warnings: [], replaces: null, has_versions: false, style_note: null, style: null },
+          ],
+        }),
+      };
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await openCase(user);
+    const chips = await screen.findAllByRole("button", { name: "קרוב לסגנון שלך: 82" });
+    expect(chips).toHaveLength(1);
+    // Her usual change is marked in the draft only, as text.
+    const marks = Array.from(document.querySelectorAll("mark.habit"));
+    expect(marks).toHaveLength(1);
+    expect(marks[0]?.closest(".a4-pending")).not.toBeNull();
+    await user.click(chips[0] as HTMLElement);
+    expect(chips[0]).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("משפטים ארוכים מהרגיל אצלך")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "לקרב לסגנון שלי" }));
+    await waitFor(() => expect(prepared).toHaveLength(1));
+    const req = prepared[0] as { instruction: string; replaces: string; sectionKey: string };
+    expect(req.instruction).toContain("משפטים קצרים יותר");
+    expect(req.instruction).toContain("בגן הילד מפגין עניין במשחק.");
+    expect(req.replaces).toBe("p-new");
+  });
+
   it("the report page passes the accessibility check", async () => {
     const { user, view } = await openApp();
     await openCase(user);

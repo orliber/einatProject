@@ -13,6 +13,7 @@ import { ParagraphVersions } from "../../components/ParagraphVersions";
 import { isCombo, KEYS } from "../../shortcuts";
 import type { CaseApi } from "../CaseScreen";
 import "./ReportView.css";
+import { MarkedText, StyleHintView, applyMark } from "./StyleHintView";
 import { useAi } from "../../ai";
 
 type Section = CaseDetail["sections"][number];
@@ -240,11 +241,16 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
           aria-describedby={`keys-${s.key}`}
           onClick={() => setEditing({ id: p.id, text: p.text })}
           onKeyDown={(e) => paraKey(e, p)}>
-          {p.text}
+          <MarkedText text={p.text} marks={p.status === "proposed" ? p.style?.marks ?? [] : []} />
         </p>
         {p.warnings.map((w, i) => (
           <div key={i} className="note-warn small"><WarnIcon /><span>{w}</span></div>
         ))}
+        {p.status === "proposed" && p.style && (
+          <StyleHintView hint={p.style} busy={busy}
+            onCloser={(how) => void write(`נסחי מחדש את הפסקה הבאה כך שתישמע כמו הכתיבה שלי: ${how}. באותו תוכן ובלי להוסיף עובדות: "${p.text}"`, p.id)}
+            onApply={(m) => void act(() => ipc.editParagraph(caseId, p.id, applyMark(p.text, m)))} />
+        )}
         {p.style_note && <span className="small muted style-note">{p.style_note}</span>}
         {!busy && (
           <span className="a4-pop-anchor a4-para-tool">
