@@ -47,7 +47,9 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
     setError(null);
     const ok = await ipc.confirmRecoveryKey(typed).catch(() => false);
     if (!ok) return setError("הערכה שהוקלדה לא תואמת. כדאי לבדוק את הדף ולנסות שוב.");
+    // Nothing secret stays in the screen's memory once it served (SEC10).
     setKey("");
+    setTyped("");
     setStep("me");
   }
 

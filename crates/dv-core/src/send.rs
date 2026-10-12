@@ -112,6 +112,17 @@ impl Core {
         instruction: &str,
         replaces: Option<&str>,
     ) -> Result<Prepared, CoreError> {
+        // Only a paragraph of this section in this case can be rewritten (SEC9).
+        if let Some(id) = replaces {
+            let ours = self
+                .vault_ref()?
+                .drafts(case_id, section_key)?
+                .iter()
+                .any(|d| d.id == id);
+            if !ours {
+                return Err(CoreError::NotFound("הפסקה".to_owned()));
+            }
+        }
         self.prepare_section_once(case_id, section_key, instruction, replaces, false)
     }
 

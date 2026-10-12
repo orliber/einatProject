@@ -114,9 +114,9 @@ pub fn sign_in(
     CANCEL.store(false, Ordering::SeqCst);
     let result = (|| {
         let http = GoogleHttp::new().map_err(|e| from_google(&e))?;
-        let pending = google::begin(&cfg).map_err(|e| from_google(&e))?;
+        let mut pending = google::begin(&cfg).map_err(|e| from_google(&e))?;
         open(&pending.url)?;
-        let code = google::wait(&pending, &CANCEL, google::SIGN_IN_TIMEOUT)
+        let code = google::wait(&mut pending, &CANCEL, google::SIGN_IN_TIMEOUT)
             .map_err(|e| from_google(&e))?;
         let session = google::finish(&http, &cfg, &pending, &code).map_err(|e| from_google(&e))?;
         Ok((http, session))
@@ -383,6 +383,15 @@ mod tests {
             )
             .unwrap();
         assert!(status.unlocked);
+        // The way in and turning it on are both in the activity log, marked for a second look.
+        let log = core.activity(None).unwrap().entries;
+        for event in ["unlock", "google_recovery_on"] {
+            let e = log
+                .iter()
+                .find(|e| e.event == event && e.warn)
+                .unwrap_or_else(|| panic!("{event} not in the log"));
+            assert!(e.text.contains("גוגל"), "{}", e.text);
+        }
         core.lock();
         assert!(core.unlock(PASSWORD).is_err());
         core.not_before = None;
