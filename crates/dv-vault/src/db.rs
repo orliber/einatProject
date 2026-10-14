@@ -270,6 +270,67 @@ mod tests {
         }
     }
 
+    /// Every migration's SHA-256 (first 16 hex digits), in order. A released one never
+    /// changes: a vault that already ran it would not run the new text (F7). A new migration
+    /// goes at the end of its list, and its hash here, in the same change.
+    const PINNED: &[(&str, &[&str])] = &[
+        (
+            "main",
+            &[
+                "c7185f7c0b2c3359",
+                "0875175f7b3fe0fa",
+                "c69d16e6c5753077",
+                "5af9a553384f7c52",
+                "811bb7b6e88a80d7",
+                "3f439fe33652efeb",
+                "f2a949fd4a472698",
+                "c450369d36db7b57",
+                "319cc0d373ae4523",
+            ],
+        ),
+        ("identity", &["98e79c9e2d976424", "59aa5787b56ebc78"]),
+        ("audit", &["922ed57e6a2659e3"]),
+    ];
+
+    #[test]
+    fn a_migration_once_written_never_changes() {
+        let now: Vec<(&str, Vec<String>)> = [
+            ("main", MAIN_MIGRATIONS),
+            ("identity", IDENTITY_MIGRATIONS),
+            ("audit", AUDIT_MIGRATIONS),
+        ]
+        .into_iter()
+        .map(|(name, list)| {
+            let hashes = list
+                .iter()
+                .map(|sql| {
+                    crate::crypto::sha256_hex(sql.as_bytes())
+                        .chars()
+                        .take(16)
+                        .collect()
+                })
+                .collect();
+            (name, hashes)
+        })
+        .collect();
+        for ((name, hashes), (pinned_name, pinned)) in now.iter().zip(PINNED) {
+            assert_eq!(name, pinned_name);
+            for (i, (h, p)) in hashes.iter().zip(pinned.iter()).enumerate() {
+                assert_eq!(
+                    h,
+                    p,
+                    "{name} migration {} changed after it was written: add a new one at the end",
+                    i + 1
+                );
+            }
+            assert_eq!(
+                hashes.len(),
+                pinned.len(),
+                "{name}: pin every migration here ({hashes:?})"
+            );
+        }
+    }
+
     #[test]
     fn a_vault_from_a_newer_version_opens_and_keeps_what_it_added() {
         let dir = tempfile::tempdir().unwrap_or_else(|_| unreachable!());
