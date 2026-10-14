@@ -58,11 +58,11 @@ pub fn random_id() -> Result<String, VaultError> {
 
 #[must_use]
 pub fn hex(bytes: &[u8]) -> String {
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut s = String::with_capacity(bytes.len() * 2);
     for b in bytes {
-        s.push(char::from(DIGITS[usize::from(b >> 4)]));
-        s.push(char::from(DIGITS[usize::from(b & 0x0f)]));
+        for nibble in [b >> 4, b & 0x0f] {
+            s.extend(char::from_digit(u32::from(nibble), 16));
+        }
     }
     s
 }
@@ -133,14 +133,14 @@ pub fn seal(key: &Key32, aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, VaultE
 
 /// Inverse of [`seal`]. Fails if the key, the AAD or any byte is wrong.
 pub fn open(key: &Key32, aad: &[u8], sealed: &[u8]) -> Result<Zeroizing<Vec<u8>>, VaultError> {
-    if sealed.len() < 1 + NONCE_LEN + TAG_LEN || sealed[0] != SEAL_VERSION {
-        return Err(VaultError::Corrupt(
-            "sealed value has an unknown format".to_owned(),
-        ));
+    let unknown = || VaultError::Corrupt("sealed value has an unknown format".to_owned());
+    let (&version, rest) = sealed.split_first().ok_or_else(unknown)?;
+    if version != SEAL_VERSION || rest.len() < NONCE_LEN + TAG_LEN {
+        return Err(unknown());
     }
-    let mut nonce = [0u8; NONCE_LEN];
-    nonce.copy_from_slice(&sealed[1..=NONCE_LEN]);
-    let mut body = Zeroizing::new(sealed[1 + NONCE_LEN..].to_vec());
+    let (nonce, body) = rest.split_at_checked(NONCE_LEN).ok_or_else(unknown)?;
+    let nonce: [u8; NONCE_LEN] = nonce.try_into().map_err(|_| unknown())?;
+    let mut body = Zeroizing::new(body.to_vec());
     let len = aead_key(key)?
         .open_in_place(
             aead::Nonce::assume_unique_for_key(nonce),

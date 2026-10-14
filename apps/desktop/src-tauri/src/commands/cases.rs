@@ -144,19 +144,23 @@ pub(crate) async fn restore_input(
 
 /// Percent-decoding for the (ASCII-only) IPC headers that carry a Hebrew file name.
 pub(crate) fn percent_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(b) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+    let mut out = Vec::with_capacity(s.len());
+    let mut rest = s.as_bytes();
+    while let Some((&b, tail)) = rest.split_first() {
+        let pair = match tail {
+            [hi, lo, ..] if b == b'%' => (*hi as char).to_digit(16).zip((*lo as char).to_digit(16)),
+            _ => None,
+        };
+        match pair {
+            Some((hi, lo)) => {
+                out.push((hi * 16 + lo) as u8);
+                rest = tail.get(2..).unwrap_or_default();
+            }
+            None => {
                 out.push(b);
-                i += 3;
-                continue;
+                rest = tail;
             }
         }
-        out.push(bytes[i]);
-        i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
 }
@@ -265,4 +269,22 @@ pub(crate) async fn change_role(
     role: Role,
 ) -> Res<Vec<Identity>> {
     with_core(&state, move |c| c.change_role(&case_id, &tag, role)).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::percent_decode;
+
+    #[test]
+    fn headers_decode_hebrew_and_never_trip_on_a_broken_escape() {
+        assert_eq!(
+            percent_decode("%D7%93%D7%95%D7%97%20%D7%92%D7%9F%3F.docx"),
+            "דוח גן?.docx"
+        );
+        // A cut or invalid escape stays as written; nothing past the end is read.
+        for s in ["%", "%D", "a%", "%zz", "%+f", "100%"] {
+            assert_eq!(percent_decode(s), s);
+        }
+        assert_eq!(percent_decode("%D7"), "\u{FFFD}");
+    }
 }
