@@ -8,6 +8,7 @@ import { CasePicker } from "../components/CasePicker";
 import { ErrorLine, Spinner, CloseIcon } from "../components/ui";
 import { useWords, wordsSoFar } from "../components/Progress";
 import { useHoldUnsaved } from "../components/Unsaved";
+import { LocalText, type LocalTextHandle } from "../components/LocalText";
 import { ConfirmDialog } from "./library/LibraryDialogs";
 import { ipc, type ConsultationSummary, type Prepared } from "../ipc/client";
 import { useRotating, useRotatingPlaceholder } from "../components/Rotating";
@@ -77,11 +78,15 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   const [scope, setScope] = useKept<string | null>("consult:scope", caseId ?? null);
   const [conversation, setConversation] = useKept<string | null>("consult:conversation", null);
   const [turns, setTurns] = useKept<Turn[]>("consult:turns", []);
+  // The question being typed lives in its box (F1a); `message` is the kept, debounced copy.
   const [message, setMessage] = useKept("consult:message", "");
+  const [messageEmpty, setMessageEmpty] = useState(() => !message.trim());
+  /** The last text the box reported, to tell its own reports from changes made elsewhere. */
+  const reported = useRef(message);
   const [busy, setBusy] = useKept("consult:busy", false);
   const [waitingSince, setWaitingSince] = useKept<number | null>("consult:waiting", null);
   const [sending, setSending] = useKept<string | null>("consult:sending", null);
-  const hint = `${useRotatingPlaceholder(CONSULT_HINTS, message.length > 0)} · שמות יוסתרו אוטומטית`;
+  const hint = `${useRotatingPlaceholder(CONSULT_HINTS, !messageEmpty)} · שמות יוסתרו אוטומטית`;
   const [review, setReview] = useKept<{ prepared: Prepared; text: string } | null>("consult:review", null);
   // A question typed (or waiting in the review) is kept in the vault if it locks meanwhile.
   const typed = message.trim() ? message : (review?.text ?? null);
@@ -90,7 +95,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   const [deleting, setDeleting] = useState<ConsultationSummary | null>(null);
   const [error, setError] = useKept<string | null>("consult:error", null);
   const end = useRef<HTMLDivElement>(null);
-  const input = useRef<HTMLTextAreaElement>(null);
+  const input = useRef<LocalTextHandle>(null);
   const caseList = cases.data ?? [];
   const selectedCase = caseList.find((c) => c.id === scope);
 
@@ -98,12 +103,13 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }, [turns.length, waitingSince]);
-  // The box grows with the text, up to a few lines.
+  // The kept question changed elsewhere (given back after a failed preparation, maybe while
+  // another visit of this screen was open): the box takes it, unless she has typed in it since.
   useEffect(() => {
-    const el = input.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+    const box = input.current;
+    if (!box || message === reported.current) return;
+    if (box.value() === reported.current) box.set(message);
+    else reported.current = message;
   }, [message]);
 
   function startNew(nextScope: string | null = scope) {
@@ -161,13 +167,15 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
 
   async function ask(e?: FormEvent) {
     e?.preventDefault();
-    const text = message.trim();
+    // What is in the box now, never the debounced copy.
+    const text = (input.current?.value() ?? message).trim();
     if (!text || busy || waitingSince) return;
     setError(null);
     setBusy(true);
     // The question shows at once, as in any chat; it is marked until it is sent.
     setTurns((all) => [...all, { role: "user", text, at: now(), pending: true }]);
-    setMessage("");
+    if (input.current) input.current.set("");
+    else setMessage("");
     try {
       const prepared = await ipc.prepareConsult(scope, conversation, text);
       const clean = prepared.approval_id && !prepared.auto_hidden.length && !prepared.blocked.length;
@@ -257,7 +265,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
                 <h2>{title}</h2>
                 <p className="muted">כלי אבחון, ניסוח, ספרות או שיקולים קליניים. ההחלטה המקצועית נשארת שלך.</p>
                 <span className="label ideas-label">אפשר להתחיל מאחת מאלה</span>
-                <Ideas onPick={(q) => { setMessage(q); input.current?.focus(); }} />
+                <Ideas onPick={(q) => { if (input.current) input.current.set(q); else setMessage(q); input.current?.focus(); }} />
               </div>
             )}
             {turns.map((t, i) =>
@@ -301,8 +309,9 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
           <form className="chat-composer" onSubmit={(e) => void ask(e)}>
             <label htmlFor="consult-q" className="visually-hidden">שאלה ל-{ai}</label>
             <div className="chat-input">
-              <textarea id="consult-q" ref={input} rows={1} className="grow" placeholder={hint}
-                value={message} onChange={(e) => setMessage(e.target.value)}
+              <LocalText id="consult-q" ref={input} rows={1} className="grow" placeholder={hint}
+                initial={message} resize={fitHeight} onEmptyChange={setMessageEmpty}
+                onText={(text) => { reported.current = text; setMessage(text); }}
                 onKeyDown={(e) => {
                   // Enter sends, Shift+Enter is a new line (as in every chat).
                   if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -310,7 +319,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
                     void ask();
                   }
                 }} />
-              <button type="submit" className="chat-send" aria-label="שליחה" disabled={busy || !!waitingSince || !message.trim()}>
+              <button type="submit" className="chat-send" aria-label="שליחה" disabled={busy || !!waitingSince || messageEmpty}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
               </button>
             </div>
@@ -322,7 +331,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
       {review && (
         <ReviewDialog title={scope ? "שאלה על תיק" : "שאלה כללית"} caseId={scope} prepared={review.prepared}
           reprepare={() => ipc.prepareConsult(scope, conversation, review.text)}
-          onClose={() => { dropPending(); setMessage(review.text); setReview(null); }}
+          onClose={() => { dropPending(); if (input.current) input.current.set(review.text); else setMessage(review.text); setReview(null); }}
           onSend={async (id) => { const hidden = review.prepared.hidden; setReview(null); await send(id, hidden); }} />
       )}
       {deleting && (
@@ -338,6 +347,12 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
       )}
     </div>
   );
+}
+
+/** The question box grows with the text, up to a few lines. */
+function fitHeight(box: HTMLTextAreaElement) {
+  box.style.height = "auto";
+  box.style.height = `${Math.min(box.scrollHeight, 180)}px`;
 }
 
 /** Three opening ideas at a time, changing every few seconds; still while the mouse is on them. */

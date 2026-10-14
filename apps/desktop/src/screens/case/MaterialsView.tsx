@@ -7,6 +7,7 @@ import { ImportDialog } from "../../components/ImportDialog";
 import { AddMenu } from "../../components/Menu";
 import { ScoresDialog } from "../../components/ScoresDialog";
 import { useHoldUnsaved } from "../../components/Unsaved";
+import { LocalText, type LocalTextHandle } from "../../components/LocalText";
 import { Dialog, ErrorLine, Segments, Spinner, UploadIcon, PlusIcon, EditIcon } from "../../components/ui";
 import type { CaseApi } from "../CaseScreen";
 import "./MaterialsView.css";
@@ -359,22 +360,28 @@ function WriteDialog(props: { caseId: string; kind: InputKind; input?: CaseInput
   const { fail } = useApp();
   const [kind, setKind] = useState<InputKind>(props.input?.kind ?? props.kind);
   const [title, setTitle] = useState(props.input?.title ?? (props.kind === "session_note" ? `מפגש ${new Date().toLocaleDateString("he-IL")}` : ""));
+  // The text being typed lives in its box (F1a): `content` is its debounced copy (for the lock),
+  // and `changed` / `empty` follow the box only when they flip (for "closing would lose it").
   const [content, setContent] = useState(props.input?.content ?? "");
+  const [changed, setChanged] = useState(false);
+  const [empty, setEmpty] = useState(() => !(props.input?.content ?? "").trim());
+  const box = useRef<LocalTextHandle>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const changed = content !== (props.input?.content ?? "");
   // A long session note must survive Escape and the automatic lock.
   useHoldUnsaved(props.caseId, title.trim() || kindLabel[kind], changed && content.trim() ? content : null, "materials");
 
   async function save() {
-    if (!content.trim()) return setError("אין טקסט לשמור.");
+    // What is in the box now, not the debounced copy.
+    const text = box.current?.value() ?? content;
+    if (!text.trim()) return setError("אין טקסט לשמור.");
     setSaving(true);
     try {
       if (props.input) {
-        await ipc.updateInput(props.caseId, props.input.id, title.trim(), content);
+        await ipc.updateInput(props.caseId, props.input.id, title.trim(), text);
         await props.onSaved(props.input.id);
       } else {
-        const saved = await ipc.addInput(props.caseId, kind, title.trim(), content);
+        const saved = await ipc.addInput(props.caseId, kind, title.trim(), text);
         await props.onSaved(saved.id);
       }
     } catch (e) {
@@ -386,7 +393,7 @@ function WriteDialog(props: { caseId: string; kind: InputKind; input?: CaseInput
   return (
     <Dialog title={props.input ? "עריכת חומר" : kind === "session_note" ? "רישום מפגש" : "הוספת טקסט"}
       subtitle="אפשר לכתוב עם שמות. הם מוסתרים לפני כל שליחה."
-      onClose={props.onClose} dirty={!saving && changed && content.trim() !== ""}
+      onClose={props.onClose} dirty={!saving && changed && !empty}
       footer={<><span className="grow" /><button type="button" className="btn" onClick={props.onClose}>ביטול</button><button type="button" className="btn btn-primary" disabled={saving} onClick={() => void save()}>שמירה בתיק</button></>}>
       <div className="stack">
         {!props.input && (
@@ -403,7 +410,8 @@ function WriteDialog(props: { caseId: string; kind: InputKind; input?: CaseInput
         </div>
         <div className="field">
           <label htmlFor="w-text">הטקסט</label>
-          <textarea id="w-text" className="textarea serif write-area" rows={14} value={content} onChange={(e) => setContent(e.target.value)} autoFocus />
+          <LocalText id="w-text" ref={box} className="textarea serif write-area" rows={14} initial={props.input?.content ?? ""} autoFocus
+            onText={setContent} onEditedChange={setChanged} onEmptyChange={setEmpty} />
         </div>
         <ErrorLine error={error} />
       </div>

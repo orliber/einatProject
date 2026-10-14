@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { useApp } from "../../App";
 import { ipc, type CaseDetail, type ReportSettings, type TemplateView } from "../../ipc/client";
 import { kindLabel } from "../../i18n/he";
@@ -7,6 +7,7 @@ import { ErrorLine, WarnIcon } from "../../components/ui";
 import { Why } from "../../components/Why";
 import { ProgressLine } from "../../components/Progress";
 import { useHoldUnsaved } from "../../components/Unsaved";
+import { LocalText, type LocalTextHandle } from "../../components/LocalText";
 import { useRotatingPlaceholder } from "../../components/Rotating";
 import { DRAFT_HINTS, PARAGRAPH_HINTS } from "../../i18n/suggestions";
 import { ParagraphVersions } from "../../components/ParagraphVersions";
@@ -161,8 +162,12 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
   const { go, fail } = useApp();
   const ai = useAi();
   const { caseId, reload, detail } = api;
-  /** A paragraph being edited in place, or a new one at `at`: "first", "end" or after a paragraph's id. */
-  const [editing, setEditing] = useState<{ id: string | null; text: string; at?: string } | null>(null);
+  /** A paragraph being edited in place, or a new one at `at`: "first", "end" or after a paragraph's id.
+   *  The text being typed lives in the box (`editBox`); `text` is its debounced copy, for the
+   *  vault lock, and `empty` follows the box only when it turns empty or back (F1a). */
+  const [editing, setEditing] = useState<{ id: string | null; text: string; at?: string | undefined; empty: boolean } | null>(null);
+  const editBox = useRef<LocalTextHandle>(null);
+  const edit = (id: string | null, text: string, at?: string) => setEditing({ id, text, at, empty: !text.trim() });
   const [preparing, setPreparing] = useState(false);
   const [open, setOpen] = useState<"sources" | "change" | null>(null);
   /** The paragraph whose "✦ with Claude" card is open. */
@@ -174,9 +179,13 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
   /** The paragraph whose delete button asks "למחוק?". */
   const [deleting, setDeleting] = useState<string | null>(null);
   useHoldUnsaved(caseId, `פסקה בסעיף "${s.title}"`, editing?.text ?? null);
+  // "In your own words" for Claude: one wish, kept while a card closes and another opens.
   const [wish, setWish] = useState("");
-  const paraHint = useRotatingPlaceholder(PARAGRAPH_HINTS, wish.length > 0);
-  const draftHint = useRotatingPlaceholder(DRAFT_HINTS, wish.length > 0);
+  const [wishEmpty, setWishEmpty] = useState(true);
+  const paraWish = useRef<LocalTextHandle>(null);
+  const draftWish = useRef<LocalTextHandle>(null);
+  const paraHint = useRotatingPlaceholder(PARAGRAPH_HINTS, !wishEmpty);
+  const draftHint = useRotatingPlaceholder(DRAFT_HINTS, !wishEmpty);
   const [sourcesChanged, setSourcesChanged] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const job = api.jobs.find((j) => j.section === s.key);
@@ -217,15 +226,26 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
     }
   }
 
+  /** The wish in a box, taken out of it to be sent; `null` when there is nothing to send. */
+  function takeWish(box: RefObject<LocalTextHandle | null>): string | null {
+    const w = box.current?.value() ?? "";
+    if (!w.trim()) return null;
+    box.current?.set("");
+    return w;
+  }
+
   async function save() {
     if (!editing) return;
+    // What is in the box now, not the debounced copy.
+    const text = editBox.current?.value() ?? editing.text;
+    const { id, at } = editing;
     // A new paragraph left empty is just not added.
-    if (!editing.text.trim() && !editing.id) return setEditing(null);
+    if (!text.trim() && !id) return setEditing(null);
     await act(async () => {
       // All the text deleted and saved: the paragraph goes away.
-      if (editing.id && !editing.text.trim()) await ipc.rejectParagraph(caseId, editing.id);
-      else if (editing.id) await ipc.editParagraph(caseId, editing.id, editing.text);
-      else await ipc.addOwnParagraph(caseId, s.key, editing.text, editing.at ?? "end");
+      if (id && !text.trim()) await ipc.rejectParagraph(caseId, id);
+      else if (id) await ipc.editParagraph(caseId, id, text);
+      else await ipc.addOwnParagraph(caseId, s.key, text, at ?? "end");
       setEditing(null);
     });
   }
@@ -239,7 +259,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
         <p className={p.by_ai ? "a4-p a4-editable" : "a4-p a4-editable a4-own"} tabIndex={0} title={note ?? "לחיצה לעריכה"}
           aria-label={`${p.status === "proposed" ? "טיוטה שממתינה לאישור" : "פסקה"}${p.by_ai ? " (AI)" : ""}: ${p.text}`}
           aria-describedby={`keys-${s.key}`}
-          onClick={() => setEditing({ id: p.id, text: p.text })}
+          onClick={() => edit(p.id, p.text)}
           onKeyDown={(e) => paraKey(e, p)}>
           <MarkedText text={p.text} marks={p.status === "proposed" ? p.style?.marks ?? [] : []} />
         </p>
@@ -293,14 +313,20 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
                 </div>
                 <label className="stack small muted" style={{ gap: 4 }}>
                   או במילים שלך
-                  <textarea className="textarea" rows={2} value={wish} placeholder={paraHint}
-                    onChange={(e) => setWish(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && wish.trim()) { e.preventDefault(); const w = wish; setWish(""); void write(`${w} הפסקה: "${p.text}"`, p.id); } }} />
+                  <LocalText ref={paraWish} className="textarea" rows={2} initial={wish} placeholder={paraHint}
+                    onText={setWish} onEmptyChange={setWishEmpty}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" || e.shiftKey) return;
+                      const w = takeWish(paraWish);
+                      if (w === null) return;
+                      e.preventDefault();
+                      void write(`${w} הפסקה: "${p.text}"`, p.id);
+                    }} />
                 </label>
                 <div className="a4-pop-foot">
                   <span className="small muted grow">{p.status === "approved" ? "יופיע ליד הקיים, ויחליף אותו רק באישורך." : "יחליף את הפסקה בטיוטה."}</span>
-                  <button type="button" className="btn btn-primary btn-small" disabled={!wish.trim()}
-                    onClick={() => { const w = wish; setWish(""); void write(`${w} הפסקה: "${p.text}"`, p.id); }}>שליחה</button>
+                  <button type="button" className="btn btn-primary btn-small" disabled={wishEmpty}
+                    onClick={() => { const w = takeWish(paraWish); if (w !== null) void write(`${w} הפסקה: "${p.text}"`, p.id); }}>שליחה</button>
                 </div>
               </Popover>
             )}
@@ -337,24 +363,27 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
       if (p.has_versions && !busy) { setParaPop(null); setHistory(p.id); }
     } else if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
-      setEditing({ id: p.id, text: p.text });
+      edit(p.id, p.text);
     }
   }
 
-  const editor = (
+  /** The box being typed in. Its text stays in the box; the page re-renders only when it turns
+   *  empty or back, and when the debounced copy for the vault lock arrives (F1a). */
+  const editor = editing && (
     <div className="a4-edit">
-      <textarea className="a4-edit-text" rows={Math.max(2, Math.ceil((editing?.text.length ?? 0) / 70) + (editing?.text.split("\n").length ?? 1) - 1)} autoFocus
-        aria-label={editing?.id ? `עריכת פסקה בסעיף ${s.title}` : `פסקה חדשה בסעיף ${s.title}`} value={editing?.text ?? ""}
+      <LocalText key={editing.id ?? `new-${editing.at ?? "end"}`} ref={editBox} className="a4-edit-text" resize={fitRows} autoFocus
+        aria-label={editing.id ? `עריכת פסקה בסעיף ${s.title}` : `פסקה חדשה בסעיף ${s.title}`} initial={editing.text}
         placeholder="כותבים כאן, כמו בוורד. שמות מוסתרים לפני כל שליחה."
-        onChange={(e) => setEditing(editing && { ...editing, text: e.target.value })}
+        onText={(text) => { const { id, at } = editing; setEditing((e) => (e && e.id === id && e.at === at ? { ...e, text } : e)); }}
+        onEmptyChange={(empty) => { const { id, at } = editing; setEditing((e) => (e && e.id === id && e.at === at ? { ...e, empty } : e)); }}
         onKeyDown={(e) => { if (e.key === "Escape") setEditing(null); if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void save(); }} />
       <div className="row">
-        <button type="button" className="btn btn-primary btn-small" disabled={!editing?.id && !editing?.text.trim()} onClick={() => void save()}>
-          {editing?.id && !editing.text.trim() ? "שמירה (הפסקה תימחק)" : "שמירה"}
+        <button type="button" className="btn btn-primary btn-small" disabled={!editing.id && editing.empty} onClick={() => void save()}>
+          {editing.id && editing.empty ? "שמירה (הפסקה תימחק)" : "שמירה"}
         </button>
         <button type="button" className="btn btn-small" onClick={() => setEditing(null)}>ביטול</button>
         <span className="small muted grow">Ctrl+Enter לשמירה · Esc לביטול</span>
-        {editing?.id && (
+        {editing.id && (
           <button type="button" className="link-btn small danger-text" onClick={() => { const id = editing.id ?? ""; void act(async () => { await ipc.rejectParagraph(caseId, id); setEditing(null); }); }}>מחיקת הפסקה</button>
         )}
       </div>
@@ -368,7 +397,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
     ) : (
       <div key={`slot-${at}`} className="a4-insert">
         <button type="button" className="a4-insert-btn" disabled={editing !== null} aria-label="הוספת פסקה משלי כאן"
-          onClick={() => setEditing({ id: null, text: "", at })}>+ פסקה משלי כאן</button>
+          onClick={() => edit(null, "", at)}>+ פסקה משלי כאן</button>
       </div>
     );
 
@@ -460,13 +489,19 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
                     </div>
                     <label className="stack small muted" style={{ gap: 4 }}>
                       או במילים שלך
-                      <textarea className="textarea" rows={2} value={wish} placeholder={draftHint}
-                        onChange={(e) => setWish(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && wish.trim()) { e.preventDefault(); const w = wish; setWish(""); void write(w); } }} />
+                      <LocalText ref={draftWish} className="textarea" rows={2} initial={wish} placeholder={draftHint}
+                        onText={setWish} onEmptyChange={setWishEmpty}
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter" || e.shiftKey) return;
+                          const w = takeWish(draftWish);
+                          if (w === null) return;
+                          e.preventDefault();
+                          void write(w);
+                        }} />
                     </label>
                     <div className="a4-pop-foot">
                       <span className="small muted grow">הטיוטה החדשה תחליף את זו. מה שאישרת נשאר.</span>
-                      <button type="button" className="btn btn-primary btn-small" disabled={!wish.trim()} onClick={() => { const w = wish; setWish(""); void write(w); }}>שליחה</button>
+                      <button type="button" className="btn btn-primary btn-small" disabled={wishEmpty} onClick={() => { const w = takeWish(draftWish); if (w !== null) void write(w); }}>שליחה</button>
                     </div>
                   </Popover>
                 )}
@@ -484,18 +519,24 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
         canWrite ? (
           <span className="a4-gap-row">
             <button type="button" className="a4-gap" disabled={busy} onClick={() => void write()}>✦ לכתוב עם {ai}</button>
-            <button type="button" className="a4-gap a4-gap-own" onClick={() => setEditing({ id: null, text: "", at: "end" })}>+ פסקה משלי</button>
+            <button type="button" className="a4-gap a4-gap-own" onClick={() => edit(null, "", "end")}>+ פסקה משלי</button>
           </span>
         ) : (
           <span className="a4-gap-row">
             <button type="button" className="a4-gap" onClick={() => setOpen("sources")}>אין חומרים לסעיף · לקישור חומרים</button>
-            <button type="button" className="a4-gap a4-gap-own" onClick={() => setEditing({ id: null, text: "", at: "end" })}>+ פסקה משלי</button>
+            <button type="button" className="a4-gap a4-gap-own" onClick={() => edit(null, "", "end")}>+ פסקה משלי</button>
           </span>
         )
       )}
       <ErrorLine error={error} />
     </div>
   );
+}
+
+/** The paragraph box grows with its text, as on the page: a line per ~70 letters and per line break. */
+function fitRows(box: HTMLTextAreaElement) {
+  const text = box.value;
+  box.rows = Math.max(2, Math.ceil(text.length / 70) + text.split("\n").length - 1);
 }
 
 /** The AI mark: the same sparkle whichever model writes (D-036). */

@@ -7,7 +7,11 @@ import { ipc, type UnsavedEdit } from "../ipc/client";
 import { Dialog } from "./ui";
 
 /** Report the open editor's text (or `null` when none is open) to the core. `view` is where
- *  in the case it is written ("report", "materials", "consult"), to return there after entering. */
+ *  in the case it is written ("report", "materials", "consult"), to return there after entering.
+ *  The editors already hand over their text at most every 800 ms (LocalText), so this waits
+ *  only a moment on top: what reaches the core is never much older than the last pause. */
+const HOLD_WAIT_MS = 100;
+
 export function useHoldUnsaved(caseId: string | null, place: string, text: string | null, view = "report") {
   const held = useRef(false);
   useEffect(() => {
@@ -19,7 +23,7 @@ export function useHoldUnsaved(caseId: string | null, place: string, text: strin
     const t = window.setTimeout(() => {
       held.current = true;
       void ipc.holdUnsaved({ case_id: caseId, place, view, text }).catch(() => undefined);
-    }, 800);
+    }, HOLD_WAIT_MS);
     return () => window.clearTimeout(t);
   }, [caseId, place, text, view]);
   useEffect(() => () => {

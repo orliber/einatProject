@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useApp } from "../../App";
 import { ipc, type ExportCheck, type ReportSettings } from "../../ipc/client";
 import type { ParagraphCheck } from "../../ipc/generated/ParagraphCheck";
@@ -6,6 +6,7 @@ import { getKept } from "../../kept";
 import { ageWords } from "../../components/AgeField";
 import { ErrorLine, Spinner } from "../../components/ui";
 import { useHoldUnsaved } from "../../components/Unsaved";
+import { LocalText, type LocalTextHandle } from "../../components/LocalText";
 import type { CaseApi } from "../CaseScreen";
 import { LetterCard } from "./LetterCard";
 import "./FinishView.css";
@@ -28,7 +29,9 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
   const { detail, caseId, reload } = api;
   const [check, setCheck] = useState<ExportCheck | null>(null);
   const [settings, setSettings] = useState<ReportSettings | null>(null);
+  /** A marked paragraph being completed: the text is in `editBox`; `text` is its debounced copy, for the lock. */
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const editBox = useRef<LocalTextHandle>(null);
   const [withMarks, setWithMarks] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useHoldUnsaved(caseId, "פסקה בשלב הסיום", editing?.text ?? null);
@@ -75,9 +78,10 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
 
   async function save() {
     if (!editing) return;
+    const text = editBox.current?.value() ?? editing.text;
     setError(null);
     try {
-      await ipc.editParagraph(caseId, editing.id, editing.text);
+      await ipc.editParagraph(caseId, editing.id, text);
       setEditing(null);
       await reload();
     } catch (e) {
@@ -141,8 +145,8 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
                       editing?.id === p.id ? (
                         <div key={p.id} className="stack" style={{ gap: 6 }}>
                           <span className="small muted">{section.title}</span>
-                          <textarea className="textarea serif" rows={4} autoFocus value={editing.text}
-                            onChange={(e) => setEditing({ id: p.id, text: e.target.value })} />
+                          <LocalText key={p.id} ref={editBox} className="textarea serif" rows={4} autoFocus initial={editing.text}
+                            onText={(text) => setEditing((e) => (e?.id === p.id ? { id: p.id, text } : e))} />
                           <div className="row">
                             <button type="button" className="btn btn-primary btn-small" onClick={() => void save()}>שמירה</button>
                             <button type="button" className="btn btn-small" onClick={() => setEditing(null)}>ביטול</button>
