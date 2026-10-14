@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { mockIPC } from "@tauri-apps/api/mocks";
+import { emit } from "@tauri-apps/api/event";
 import { App, sameStatus } from "./App";
 import { status } from "./test/fixtures";
 
@@ -156,6 +157,47 @@ describe("App", () => {
     // The warning shows, and the cases screen was not mounted again (it lists once).
     expect(await screen.findByRole("alert")).toHaveTextContent("70");
     expect(listed).toBe(1);
+    vi.useRealTimers();
+  });
+
+  it("a lock reaches the window by the core's event, without waiting for the poll (D-060)", async () => {
+    let unlocked = true;
+    mockIPC(
+      (cmd) => {
+        if (cmd === "app_status") return status({ unlocked });
+        if (cmd === "list_cases") return [];
+      if (cmd === "ping") return { ipc_version: 1, core_version: "0.1.0", build_commit: "t", fips_active: false, platform: "linux" };
+        if (cmd === "ping") return { ipc_version: 1, core_version: "0.1.0", build_commit: "t", fips_active: false, platform: "linux" };
+        return null;
+      },
+      { shouldMockEvents: true },
+    );
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "התיק הראשון" })).toBeInTheDocument();
+    unlocked = false;
+    await act(async () => {
+      await emit("core", { kind: "locked" });
+    });
+    expect(await screen.findByLabelText("סיסמה")).toBeInTheDocument();
+  });
+
+  it("when events cannot reach the window, a lock still shows within 15 seconds (D-060)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let unlocked = true;
+    mockIPC((cmd) => {
+      if (cmd === "plugin:event|listen") throw new Error("event.listen not allowed");
+      if (cmd === "app_status") return status({ unlocked });
+      if (cmd === "list_cases") return [];
+      if (cmd === "ping") return { ipc_version: 1, core_version: "0.1.0", build_commit: "t", fips_active: false, platform: "linux" };
+      return null;
+    });
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "התיק הראשון" })).toBeInTheDocument();
+    unlocked = false;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_500);
+    });
+    expect(await screen.findByLabelText("סיסמה")).toBeInTheDocument();
     vi.useRealTimers();
   });
 });

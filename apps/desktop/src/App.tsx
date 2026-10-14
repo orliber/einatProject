@@ -55,8 +55,10 @@ export function sameStatus(a: AppStatus | null, b: AppStatus): boolean {
   return without(a) === without(b);
 }
 
-/** The poll is a safety net only; the core announces a lock or the last minute by event. */
-const STATUS_POLL_MS = 60_000;
+/** With events, the poll is a safety net only: the core announces a lock or the last minute.
+ *  Without them (a refused grant, the preview) the poll is all there is, so it runs often. */
+export const STATUS_POLL_MS = 60_000;
+export const STATUS_POLL_NO_EVENTS_MS = 15_000;
 
 export function useApp(): AppApi {
   const api = useContext(AppContext);
@@ -98,16 +100,22 @@ export function App() {
         .then((s) => alive && apply(s))
         .catch(() => alive && setCoreDown(true));
     void tick();
-    // The core says when it locks or when the last minute starts; the poll only backs it up.
-    const t = window.setInterval(() => void tick(), STATUS_POLL_MS);
+    // Poll often until events are known to arrive; then the poll only backs them up.
+    let t = window.setInterval(() => void tick(), STATUS_POLL_NO_EVENTS_MS);
     let stop: (() => void) | null = null;
     void onCoreEvent((e) => {
       if (!alive) return;
       if (e.kind === "idle_soon") setIdleIn(e.seconds);
       void tick();
     }).then((unlisten) => {
-      if (alive) stop = unlisten;
-      else unlisten();
+      if (unlisten === null) return;
+      if (!alive) {
+        unlisten();
+        return;
+      }
+      stop = unlisten;
+      window.clearInterval(t);
+      t = window.setInterval(() => void tick(), STATUS_POLL_MS);
     });
     return () => {
       alive = false;

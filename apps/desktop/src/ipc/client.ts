@@ -104,13 +104,14 @@ export type CoreEvent =
   | { kind: "idle_soon"; seconds: number }
   | { kind: "backed_up" };
 
-/** Listen to the core's events. Resolves to the function that stops listening. In the
- *  browser preview and in tests there are no events, and the window keeps its slow poll. */
-export async function onCoreEvent(handler: (e: CoreEvent) => void): Promise<() => void> {
+/** Listen to the core's events. Resolves to the function that stops listening, or to null
+ *  when events cannot reach the window (the browser preview, tests, or a refused grant): the
+ *  caller then polls often, so a lock never shows late (F2). */
+export async function onCoreEvent(handler: (e: CoreEvent) => void): Promise<(() => void) | null> {
   try {
     return await listen<CoreEvent>("core", (e) => handler(e.payload));
   } catch {
-    return () => undefined;
+    return null;
   }
 }
 

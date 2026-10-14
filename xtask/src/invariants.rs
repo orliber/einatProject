@@ -358,13 +358,36 @@ pub fn tauri_config_violations(
                 .as_str()
                 .or_else(|| permission["identifier"].as_str())
                 .unwrap_or("");
-            if !id.starts_with("allow-") {
+            if !id.starts_with("allow-") && !EVENT_PERMISSIONS.contains(&id) {
                 problems.push(format!("capability grants non-app permission `{id}`"));
             }
         }
     }
+    let main = capabilities.iter().find(|c| {
+        c["identifier"] == "main"
+            || c["windows"]
+                .as_array()
+                .is_some_and(|w| w.iter().any(|w| w == "main"))
+    });
+    let grants = |id: &str| {
+        main.and_then(|c| c["permissions"].as_array())
+            .is_some_and(|ps| ps.iter().any(|p| p.as_str() == Some(id)))
+    };
+    for id in EVENT_PERMISSIONS {
+        if !grants(id) {
+            problems.push(format!(
+                "the main window must be granted `{id}`, or a lock reaches it only by poll (D-060)"
+            ));
+        }
+    }
     problems
 }
+
+/// The only grants outside the app's own commands: listening to the core's one event, which
+/// carries no case data (D-060). Not `emit`: the window cannot raise events.
+const EVENT_PERMISSIONS: [&str; 2] = ["core:event:allow-listen", "core:event:allow-unlisten"];
+/// What the isolation app lets through for them, and only for the event named `core`.
+const EVENT_COMMANDS: [&str; 2] = ["plugin:event|listen", "plugin:event|unlisten"];
 
 fn tauri_hardening(shell: &Path) -> Vec<String> {
     let read_json = |p: &Path| -> Result<serde_json::Value, String> {
@@ -489,7 +512,23 @@ fn isolation_allowlist(shell: &Path) -> Vec<String> {
     };
     let read = |p: &Path| fs::read_to_string(p).unwrap_or_default();
     let declared = quoted(&read(&shell.join("build.rs")));
-    let allowed = quoted(&read(&shell.join("../isolation/isolation.js")));
+    let isolation = read(&shell.join("../isolation/isolation.js"));
+    let allowed = quoted(&isolation);
+    let events: BTreeSet<String> = Regex::new(r#""(plugin:[a-z_]+\|[a-z_]+)""#).map_or_else(
+        |_| BTreeSet::new(),
+        |re| {
+            re.captures_iter(&isolation)
+                .map(|c| c[1].to_owned())
+                .collect()
+        },
+    );
+    let expected: BTreeSet<String> = EVENT_COMMANDS.iter().map(|c| (*c).to_owned()).collect();
+    if events != expected {
+        return vec![format!(
+            "isolation/isolation.js must let through exactly the plugin commands {expected:?} \
+             (found {events:?})"
+        )];
+    }
     if declared.is_empty() || declared != allowed {
         let missing: Vec<_> = declared.difference(&allowed).collect();
         let extra: Vec<_> = allowed.difference(&declared).collect();
@@ -741,9 +780,17 @@ mod tests {
         })
     }
 
+    fn main_cap(permissions: &[&str]) -> serde_json::Value {
+        json!({"identifier": "main", "windows": ["main"], "permissions": permissions})
+    }
+
     #[test]
     fn hardened_config_passes() {
-        let caps = vec![json!({"permissions": ["allow-ping"]})];
+        let caps = vec![main_cap(&[
+            "allow-ping",
+            "core:event:allow-listen",
+            "core:event:allow-unlisten",
+        ])];
         assert!(tauri_config_violations(&good_conf(), &caps).is_empty());
     }
 
@@ -752,8 +799,59 @@ mod tests {
         let mut conf = good_conf();
         conf["app"]["security"]["csp"]["connect-src"] = json!("ipc: http://ipc.localhost https:");
         conf["app"]["windows"][0]["contentProtected"] = json!(false);
-        let caps = vec![json!({"permissions": ["fs:default", "allow-ping"]})];
+        let caps = vec![main_cap(&[
+            "fs:default",
+            "allow-ping",
+            "core:event:allow-listen",
+            "core:event:allow-unlisten",
+        ])];
         let problems = tauri_config_violations(&conf, &caps);
         assert_eq!(problems.len(), 3, "{problems:?}");
+    }
+
+    #[test]
+    fn only_listening_to_the_core_event_is_granted_besides_the_commands() {
+        // Without the two grants the window never hears a lock (D-060).
+        let problems = tauri_config_violations(&good_conf(), &[main_cap(&["allow-ping"])]);
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        // Anything wider from the event plugin, or any other core permission, is refused.
+        for wider in [
+            "core:event:allow-emit",
+            "core:event:default",
+            "core:default",
+            "core:window:allow-close",
+        ] {
+            let caps = vec![main_cap(&[
+                "allow-ping",
+                "core:event:allow-listen",
+                "core:event:allow-unlisten",
+                wider,
+            ])];
+            let problems = tauri_config_violations(&good_conf(), &caps);
+            assert_eq!(problems.len(), 1, "{wider}: {problems:?}");
+        }
+    }
+
+    #[test]
+    fn the_shipped_main_window_can_hear_the_core() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let text = fs::read_to_string(root.join("apps/desktop/src-tauri/capabilities/main.json"))
+            .expect("main capability");
+        let cap: serde_json::Value = serde_json::from_str(&text).expect("json");
+        let granted: Vec<&str> = cap["permissions"]
+            .as_array()
+            .expect("permissions")
+            .iter()
+            .filter_map(|p| p.as_str())
+            .collect();
+        for id in EVENT_PERMISSIONS {
+            assert!(granted.contains(&id), "{id}");
+        }
+        let isolation = fs::read_to_string(root.join("apps/desktop/isolation/isolation.js"))
+            .expect("isolation app");
+        for cmd in EVENT_COMMANDS {
+            assert!(isolation.contains(&format!("\"{cmd}\"")), "{cmd}");
+        }
+        assert!(isolation.contains("payload.payload.event === CORE_EVENT"));
     }
 }

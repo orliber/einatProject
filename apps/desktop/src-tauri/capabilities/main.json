@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "The main window may call only the application's own commands. No fs, shell, http or other plugins.",
+  "description": "The main window may call only the application's own commands, and listen to the core's one event (D-060). No fs, shell, http or other plugins.",
   "windows": [
     "main"
   ],
@@ -148,6 +148,8 @@
     "allow-prepare-update",
     "allow-install-update",
     "allow-open-releases-page",
-    "allow-send-progress"
+    "allow-send-progress",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
   ]
 }

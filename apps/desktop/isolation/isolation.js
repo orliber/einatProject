@@ -153,6 +153,11 @@ const ALLOWED = new Set([
   "write_backup",
 ]);
 
+// The window may also listen to the core's one event, and to no other (D-060). Must match the
+// two `core:event:` grants in `src-tauri/capabilities/main.json`.
+const EVENT_COMMANDS = new Set(["plugin:event|listen", "plugin:event|unlisten"]);
+const CORE_EVENT = "core";
+
 const REFUSED = "refused_by_isolation";
 
 /** Plain data only: no functions, no prototypes other than Object/Array, bounded depth. */
@@ -174,12 +179,22 @@ function isBytes(value) {
 }
 
 window.__TAURI_ISOLATION_HOOK__ = (payload) => {
-  const ok =
+  const command =
     payload !== null &&
     typeof payload === "object" &&
     typeof payload.cmd === "string" &&
     ALLOWED.has(payload.cmd) &&
     (isBytes(payload.payload) || plain(payload.payload === undefined ? null : payload.payload, 0));
+  const event =
+    payload !== null &&
+    typeof payload === "object" &&
+    typeof payload.cmd === "string" &&
+    EVENT_COMMANDS.has(payload.cmd) &&
+    payload.payload !== null &&
+    typeof payload.payload === "object" &&
+    payload.payload.event === CORE_EVENT &&
+    plain(payload.payload, 0);
+  const ok = command || event;
   if (!ok) {
     payload.cmd = REFUSED;
     payload.payload = {};
