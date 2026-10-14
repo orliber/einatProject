@@ -168,10 +168,11 @@ mod windows_impl {
     mod tests {
         use windows::Win32::System::Memory::{VirtualLock, VirtualUnlock};
 
-        /// The test runs in an unlocked session, so Windows answers "not locked".
+        /// The test runs in an unlocked session: Windows answers "not locked", or cannot
+        /// tell (a service session with no desktop), but never "locked".
         #[test]
         fn this_session_is_not_locked() {
-            assert_eq!(super::session_locked(), Some(false));
+            assert_ne!(super::session_locked(), Some(true));
         }
 
         /// The vault's locked pages fit: with the default quota (about 200 KiB) locking

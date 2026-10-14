@@ -38,23 +38,24 @@ pub(crate) async fn app_status(
 /// it blacked out Zoom and Teams. Setting this back to `true` restores D-037 as it was.
 pub(crate) const SCREEN_PROTECTION_ENABLED: bool = false;
 
-/// What the window was last told: 0 nothing yet, 1 not protected, 2 protected.
-static PROTECTED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+/// What the window was last told: `None` nothing yet (or the last call failed).
+/// Held while Windows is told, so two callers (the lock timer, a command) cannot leave the
+/// window in one state and this in the other.
+static PROTECTED: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
 
 /// Screenshots and screen sharing see a blank window unless she turned that off (D-037).
 /// The status is read every 15 seconds; Windows is told only when the answer changes, so
 /// the window is not touched while she types.
 pub(crate) fn protect(window: &tauri::WebviewWindow, on: bool) {
-    use std::sync::atomic::Ordering;
     let on = SCREEN_PROTECTION_ENABLED && on;
-    let state = if on { 2 } else { 1 };
-    if PROTECTED.swap(state, Ordering::SeqCst) == state {
+    let mut told = PROTECTED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if *told == Some(on) {
         return;
     }
-    if window.set_content_protected(on).is_err() {
-        // Try again next time.
-        PROTECTED.store(0, Ordering::SeqCst);
-    }
+    // A failure is tried again next time.
+    *told = window.set_content_protected(on).is_ok().then_some(on);
 }
 
 #[tauri::command]
