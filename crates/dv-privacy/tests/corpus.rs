@@ -14,7 +14,8 @@
     clippy::unwrap_used,
     clippy::print_stdout,
     clippy::panic,
-    clippy::expect_used
+    clippy::expect_used,
+    clippy::indexing_slicing
 )]
 
 #[path = "support/corpus.rs"]

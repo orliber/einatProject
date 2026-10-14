@@ -8,7 +8,8 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    clippy::print_stdout
+    clippy::print_stdout,
+    clippy::indexing_slicing
 )]
 
 use std::collections::HashSet;
