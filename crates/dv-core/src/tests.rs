@@ -118,6 +118,62 @@ fn setup(transport: Option<FakeTransport>) -> (tempfile::TempDir, Core, String) 
     (dir, core, case)
 }
 
+/// F6: every error offers one next step, and the one that fits it.
+#[test]
+fn every_error_has_a_next_step_that_fits_it() {
+    let cases: Vec<(CoreError, ErrorAction)> = vec![
+        (CoreError::Locked, ErrorAction::Unlock),
+        (CoreError::ConsentMissing, ErrorAction::Consent),
+        (
+            CoreError::Backoff(8),
+            ErrorAction::Retry { after_seconds: 8 },
+        ),
+        (
+            CoreError::Egress(EgressError::NoApiKey),
+            ErrorAction::settings("ai"),
+        ),
+        (
+            CoreError::Egress(EgressError::Unauthorized),
+            ErrorAction::settings("ai"),
+        ),
+        (
+            CoreError::Egress(EgressError::Stopped),
+            ErrorAction::settings("security"),
+        ),
+        (
+            CoreError::Egress(EgressError::Offline),
+            ErrorAction::retry(),
+        ),
+        (
+            CoreError::Egress(EgressError::RateLimited),
+            ErrorAction::Retry { after_seconds: 60 },
+        ),
+        (
+            CoreError::Egress(EgressError::TooLarge),
+            ErrorAction::Dismiss,
+        ),
+        (CoreError::Internal("x".into()), ErrorAction::Report),
+        (
+            CoreError::Vault(VaultError::Corrupt("x".into())),
+            ErrorAction::Report,
+        ),
+        (
+            CoreError::Vault(VaultError::WrongSecret),
+            ErrorAction::Dismiss,
+        ),
+        (CoreError::Refused("x".into()), ErrorAction::Dismiss),
+        (
+            CoreError::Needs("x".into(), ErrorAction::retry()),
+            ErrorAction::retry(),
+        ),
+    ];
+    for (e, want) in cases {
+        let ui = e.to_ui();
+        assert_eq!(ui.action, want, "{e:?}");
+        assert!(!ui.message.is_empty());
+    }
+}
+
 #[test]
 fn ping_reports_versions() {
     let p = ping();

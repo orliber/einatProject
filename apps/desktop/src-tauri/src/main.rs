@@ -92,6 +92,7 @@ fn internal(what: &str) -> UiError {
         code: "internal".to_owned(),
         message: format!("שגיאה פנימית: {what}"),
         details: Vec::new(),
+        action: dv_core::ErrorAction::Report,
     }
 }
 

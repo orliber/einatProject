@@ -50,6 +50,7 @@ pub(crate) async fn copy_secret(state: tauri::State<'_, AppState>, text: String)
         code: "clipboard".to_owned(),
         message: "לא הצלחתי להעתיק. אפשר להקליד את הסיסמה.".to_owned(),
         details: Vec::new(),
+        action: dv_core::ErrorAction::retry(),
     })?;
     Ok(u32::try_from(secret_clipboard::CLEAR_AFTER.as_secs()).unwrap_or(60))
 }

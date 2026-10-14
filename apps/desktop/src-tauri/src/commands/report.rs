@@ -41,6 +41,7 @@ pub(crate) fn export_dir(app: &tauri::AppHandle) -> Result<PathBuf, UiError> {
         code: "no_folder".to_owned(),
         message: "לא נמצאה תיקייה לשמירת הדוח (הורדות או מסמכים).".to_owned(),
         details: Vec::new(),
+        action: dv_core::ErrorAction::Report,
     })
 }
 

@@ -19,7 +19,7 @@ use dv_privacy::{FilterOutcome, NameHint, PrivacyContext, PrivacyError};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{Core, CoreError};
+use crate::{Core, CoreError, ErrorAction};
 
 /// Vault setting: "on" when she turned the model on.
 pub(crate) const NAME_MODEL_KEY: &str = "name_model";
@@ -418,7 +418,10 @@ impl Core {
                 .as_deref()
                 .is_some_and(|d| name_model::present(&folder(d)));
             if !ready {
-                return Err(CoreError::Refused("קודם צריך להוריד את המודל.".to_owned()));
+                return Err(CoreError::Needs(
+                    "קודם צריך להוריד את המודל.".to_owned(),
+                    ErrorAction::settings("privacy"),
+                ));
             }
             self.vault_mut()?.set_setting(NAME_MODEL_KEY, "on")?;
             // A model that failed before gets another try.
@@ -673,7 +676,10 @@ mod tests {
         let s = c.name_model_status().unwrap();
         assert!(!s.enabled && !s.downloaded);
         assert_eq!(s.size_mb, 705);
-        assert!(matches!(c.set_name_model(true), Err(CoreError::Refused(_))));
+        assert!(matches!(
+            c.set_name_model(true),
+            Err(CoreError::Needs(_, ErrorAction::Settings { ref pane })) if pane == "privacy"
+        ));
         assert!(c.name_hints("", "רוני הגיע עם אמא").is_empty());
     }
 

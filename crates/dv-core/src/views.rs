@@ -6,13 +6,49 @@ use dv_privacy::{AutoHidden, BlockReason, Checks, Segment, Suspect};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-/// The error the UI shows: a stable `code` and a Hebrew `message`.
+/// The error the UI shows: a stable `code`, a Hebrew `message`, and the one next step it
+/// offers (F6). Every error has a next step; none is a dead end.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct UiError {
     pub code: String,
     pub message: String,
     pub details: Vec<String>,
+    pub action: ErrorAction,
+}
+
+/// What the button under an error does (F6).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export)]
+pub enum ErrorAction {
+    /// Try the same thing again, after `after_seconds` (0: now). Nothing is prepared again: a
+    /// failed send keeps its approval.
+    Retry { after_seconds: u32 },
+    /// Fixed in Settings, in this pane (`ai`, `privacy`, `backup`, `security`, ...).
+    Settings { pane: String },
+    /// The parents' consent is missing: the case details, where it is recorded.
+    Consent,
+    /// The vault locked: open it again.
+    Unlock,
+    /// A fault only Or can read: the report for him.
+    Report,
+    /// Something of hers to change, as the message says: the button closes the message.
+    Dismiss,
+}
+
+impl ErrorAction {
+    #[must_use]
+    pub fn retry() -> Self {
+        Self::Retry { after_seconds: 0 }
+    }
+
+    #[must_use]
+    pub fn settings(pane: &str) -> Self {
+        Self::Settings {
+            pane: pane.to_owned(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

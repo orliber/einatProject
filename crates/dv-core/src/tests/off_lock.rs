@@ -110,7 +110,7 @@ fn a_new_password_is_made_while_the_core_works_and_lands_only_in_its_session() {
     c.unlock(new_password).unwrap();
     assert!(matches!(
         c.finish_change_password(made),
-        Err(CoreError::Refused(_))
+        Err(CoreError::Needs(_, ErrorAction::Unlock))
     ));
     c.lock();
     c.unlock(new_password).unwrap();

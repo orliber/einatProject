@@ -158,8 +158,9 @@ impl Core {
         }
         let (Ok(folder_real), Ok(vault_real)) = (folder.canonicalize(), self.dir.canonicalize())
         else {
-            return Err(CoreError::Refused(
+            return Err(CoreError::Needs(
                 "התיקייה שנבחרה לא נמצאה. אם זה דיסק נייד, כדאי לבדוק שהוא מחובר.".to_owned(),
+                crate::ErrorAction::retry(),
             ));
         };
         if folder_real.starts_with(&vault_real) {

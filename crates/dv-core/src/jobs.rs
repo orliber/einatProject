@@ -19,7 +19,7 @@ use dv_vault::{Argon2Params, NewSlot, Secret, Vault, VaultError};
 use zeroize::Zeroizing;
 
 use crate::views::{BackupCheckView, BackupDone, CreatedVault};
-use crate::{AppStatus, Core, CoreError};
+use crate::{AppStatus, Core, CoreError, ErrorAction};
 
 /// The password or the printed kit, owned, so it can travel to the job's thread.
 enum Proof {
@@ -124,13 +124,21 @@ impl BackupTask {
         let done = self
             .job
             .write(&self.dest)
-            .map_err(CoreError::from)
+            .map_err(|_| {
+                CoreError::Needs(
+                    "לא הצלחתי לכתוב את הגיבוי לתיקייה שנבחרה. אם זה דיסק נייד, כדאי לבדוק שהוא \
+                     מחובר ושיש בו מקום."
+                        .to_owned(),
+                    ErrorAction::retry(),
+                )
+            })
             .and_then(|w| {
                 w.verify().map_err(|_| {
-                    CoreError::Refused(
+                    CoreError::Needs(
                         "הגיבוי נכתב, אבל בבדיקה הוא לא נפתח כמו שצריך. כדאי לנסות שוב, ואם זה \
                          חוזר, לנסות דיסק אחר."
                             .to_owned(),
+                        ErrorAction::retry(),
                     )
                 })
             });
@@ -374,7 +382,10 @@ opaque_debug!(
 
 /// The vault locked while the work ran: its result is dropped.
 fn locked_meanwhile() -> CoreError {
-    CoreError::Refused("הכספת ננעלה באמצע. אפשר לפתוח אותה ולנסות שוב.".to_owned())
+    CoreError::Needs(
+        "הכספת ננעלה באמצע. אפשר לפתוח אותה ולנסות שוב.".to_owned(),
+        ErrorAction::Unlock,
+    )
 }
 
 impl Core {
@@ -510,9 +521,10 @@ impl Core {
         };
         self.vault_mut()?.apply_slot(slot).map_err(|e| match e {
             // Changed twice at once: the other change stands, and this one can be done again.
-            VaultError::Integrity(_) => {
-                CoreError::Refused("הסיסמה או הערכה השתנו בינתיים. אפשר לנסות שוב.".to_owned())
-            }
+            VaultError::Integrity(_) => CoreError::Needs(
+                "הסיסמה או הערכה השתנו בינתיים. אפשר לנסות שוב.".to_owned(),
+                ErrorAction::retry(),
+            ),
             other => other.into(),
         })?;
         self.failed_unlocks = 0;

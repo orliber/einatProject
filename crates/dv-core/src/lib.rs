@@ -83,6 +83,7 @@ pub use style::{
 pub use unsaved::UnsavedEdit;
 pub use usage::UsageSummary;
 pub use verify::VerifyResult;
+pub use views::ErrorAction;
 pub use views::{
     ActivityEntry, ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail,
     ChatView, ConsultResult, ConsultTurnView, ConsultationSummary, ConsultationView, CreatedVault,
@@ -248,6 +249,9 @@ pub enum CoreError {
     ConsentMissing,
     #[error("refused: {0}")]
     Refused(String),
+    /// A refusal with its own next step (F6): the place that fixes it, or a retry.
+    #[error("refused: {0}")]
+    Needs(String, ErrorAction),
     #[error("wait {0}s")]
     Backoff(u64),
     #[error("egress: {0}")]
@@ -297,7 +301,7 @@ impl CoreError {
                 "consent_missing",
                 format!("לפני שליחה ל-{ai} צריך לרשום בתיק את הסכמת ההורים."),
             ),
-            CoreError::Refused(why) => ("refused", why.clone()),
+            CoreError::Refused(why) | CoreError::Needs(why, _) => ("refused", why.clone()),
             CoreError::Backoff(s) => (
                 "backoff",
                 format!("יותר מדי ניסיונות. אפשר לנסות שוב בעוד {s} שניות."),
@@ -314,7 +318,46 @@ impl CoreError {
             code: code.to_owned(),
             message,
             details,
+            action: self.action(),
         }
+    }
+
+    /// The one next step this error offers (F6).
+    #[must_use]
+    pub fn action(&self) -> ErrorAction {
+        match self {
+            CoreError::Locked => ErrorAction::Unlock,
+            CoreError::Vault(
+                VaultError::WrongSecret
+                | VaultError::RecoveryKeyInvalid
+                | VaultError::Policy(_)
+                | VaultError::AlreadyExists,
+            )
+            | CoreError::NotFound(_)
+            | CoreError::Refused(_) => ErrorAction::Dismiss,
+            CoreError::Vault(_) | CoreError::Internal(_) => ErrorAction::Report,
+            CoreError::ConsentMissing => ErrorAction::Consent,
+            CoreError::Needs(_, action) => action.clone(),
+            CoreError::Backoff(s) => ErrorAction::Retry {
+                after_seconds: u32::try_from(*s).unwrap_or(u32::MAX),
+            },
+            CoreError::Egress(e) => egress_action(e),
+            CoreError::Ai(_) | CoreError::Update(_) => ErrorAction::retry(),
+        }
+    }
+}
+
+/// Where a failed connection is fixed: her key and her choice of AI in Settings, the emergency
+/// stop on the security page, a retry for what passes by itself.
+fn egress_action(e: &EgressError) -> ErrorAction {
+    match e {
+        EgressError::NoApiKey | EgressError::Unauthorized | EgressError::LocalUnavailable => {
+            ErrorAction::settings("ai")
+        }
+        EgressError::Stopped => ErrorAction::settings("security"),
+        EgressError::RateLimited => ErrorAction::Retry { after_seconds: 60 },
+        EgressError::TooLarge | EgressError::DailyLimit => ErrorAction::Dismiss,
+        _ => ErrorAction::retry(),
     }
 }
 

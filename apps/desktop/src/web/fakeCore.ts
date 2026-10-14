@@ -112,8 +112,16 @@ const now = () => Math.floor(Date.now() / 1000);
 let counter = 0;
 const newId = (p: string) => `${p}-${++counter}`;
 
-function fail(code: string, message: string): never {
-  const e: UiError = { code, message, details: [] };
+/** The next step the real core gives each kind of failure (F6). */
+function actionFor(code: string, message: string): UiError["action"] {
+  if (code === "locked") return { kind: "unlock" };
+  if (code === "consent_missing") return { kind: "consent" };
+  if (message.includes("בהגדרות")) return { kind: "settings", pane: "ai" };
+  return { kind: "dismiss" };
+}
+
+function fail(code: string, message: string, action: UiError["action"] = actionFor(code, message)): never {
+  const e: UiError = { code, message, details: [], action };
   throw e;
 }
 

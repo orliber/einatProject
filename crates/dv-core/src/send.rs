@@ -353,10 +353,13 @@ impl Core {
                 .setting(&format!("{ZDR_PREFIX}{}", provider.id()))?
                 .is_some_and(|s| s.parse::<i64>().is_ok());
             if !confirmed {
-                return Err(CoreError::Refused(format!(
-                    "לא נשלח: אין אישור על הסכם אפס שמירת מידע (ZDR) עם {}. אפשר לאשר בהגדרות, או לבחור Claude או מודל מקומי.",
-                    provider.display_name()
-                )));
+                return Err(CoreError::Needs(
+                    format!(
+                        "לא נשלח: אין אישור על הסכם אפס שמירת מידע (ZDR) עם {}. אפשר לאשר בהגדרות, או לבחור Claude או מודל מקומי.",
+                        provider.display_name()
+                    ),
+                    ErrorAction::settings("ai"),
+                ));
             }
         }
         // Demo mode costs nothing; anything else stops at the monthly ceiling she set.
@@ -386,9 +389,12 @@ impl Core {
         };
         let month = usage::Month::parse(v.setting(&usage::this_month_key())?.as_deref());
         if month.reached(cap) {
-            return Err(CoreError::Refused(format!(
-                "הגעת לתקרת ההוצאה החודשית שקבעת (${cap}). אפשר להעלות אותה בהגדרות, תחת \"שימוש ועלות\"."
-            )));
+            return Err(CoreError::Needs(
+                format!(
+                    "הגעת לתקרת ההוצאה החודשית שקבעת (${cap}). אפשר להעלות אותה בהגדרות, תחת \"שימוש ועלות\"."
+                ),
+                ErrorAction::settings("ai"),
+            ));
         }
         Ok(())
     }

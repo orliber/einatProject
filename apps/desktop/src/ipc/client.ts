@@ -1,5 +1,6 @@
 // The only module that talks to the Rust core. Types come from Rust via ts-rs.
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, type InvokeArgs, type InvokeOptions } from "@tauri-apps/api/core";
+import { rememberReplay } from "../errors";
 import { listen } from "@tauri-apps/api/event";
 import type { ActivityPage } from "./generated/ActivityPage";
 import type { AppStatus } from "./generated/AppStatus";
@@ -65,24 +66,29 @@ import type { StyleProfileView } from "./generated/StyleProfileView";
 import type { StyleSourceView } from "./generated/StyleSourceView";
 import type { StyleSuggestion } from "./generated/StyleSuggestion";
 
-/** Every failure reaches the UI as a UiError with a Hebrew message. */
+/** Every failure reaches the UI as a UiError with a Hebrew message and its next step (F6). */
 export function asUiError(e: unknown): UiError {
   if (e && typeof e === "object" && "message" in e && "code" in e) {
-    return e as UiError;
+    const u = e as Partial<UiError> & { code: string; message: string };
+    if (u.action && u.details) return u as UiError;
+    return { ...u, details: u.details ?? [], action: u.action ?? { kind: "report" } };
   }
-  return { code: "internal", message: "משהו השתבש. אפשר לנסות שוב.", details: [String(e)] };
+  return { code: "internal", message: "משהו השתבש. אפשר לנסות שוב.", details: [String(e)], action: { kind: "retry", after_seconds: 0 } };
 }
 
-async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+async function call<T>(cmd: string, args?: InvokeArgs, options?: InvokeOptions): Promise<T> {
   try {
-    return await invoke<T>(cmd, args);
+    return await (options === undefined ? invoke<T>(cmd, args) : invoke<T>(cmd, args, options));
   } catch (e) {
-    throw asUiError(e);
+    const err = asUiError(e);
+    // "לנסות שוב" runs this same call again (F6).
+    rememberReplay(err, () => (options === undefined ? invoke(cmd, args) : invoke(cmd, args, options)));
+    throw err;
   }
 }
 
 /** A command that answers nothing. */
-async function run(cmd: string, args?: Record<string, unknown>): Promise<undefined> {
+async function run(cmd: string, args?: InvokeArgs): Promise<undefined> {
   await call<unknown>(cmd, args);
   return undefined;
 }
@@ -138,11 +144,7 @@ export const ipc = {
   /** Her Word template (EX-1): the file's bytes go as the raw body. */
   setReportTemplate: async (file: File): Promise<TemplateView> => {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    try {
-      return await invoke<TemplateView>("set_report_template", bytes);
-    } catch (e) {
-      throw asUiError(e);
-    }
+    return await call<TemplateView>("set_report_template", bytes);
   },
   clearReportTemplate: () => run("clear_report_template"),
   reportTemplate: () => call<TemplateView | null>("report_template"),
@@ -187,13 +189,9 @@ export const ipc = {
   /** The file's bytes go as the raw body; nothing else of the file system is exposed. */
   importDocument: async (caseId: string, file: File): Promise<ImportPreview> => {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    try {
-      return await invoke<ImportPreview>("import_document", bytes, {
-        headers: { "x-case-id": encodeURIComponent(caseId), "x-file-name": encodeURIComponent(file.name) },
-      });
-    } catch (e) {
-      throw asUiError(e);
-    }
+    return await call<ImportPreview>("import_document", bytes, {
+      headers: { "x-case-id": encodeURIComponent(caseId), "x-file-name": encodeURIComponent(file.name) },
+    });
   },
   previewFilter: (caseId: string, text: string) => call<FilterOutcome>("preview_filter", { caseId, text }),
   decideSuspect: (caseId: string, token: string, decision: SuspectDecision) =>
@@ -273,11 +271,7 @@ export const ipc = {
   /** When this vault exported exactly this PDF, or `null` (changed, or not made here). */
   checkOriginal: async (file: File): Promise<number | null> => {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    try {
-      return await invoke<number | null>("check_original", bytes);
-    } catch (e) {
-      throw asUiError(e);
-    }
+    return await call<number | null>("check_original", bytes);
   },
   /** EX-4: a short letter from the approved report, through the same review and gate. */
   prepareLetter: (caseId: string, audience: "parents" | "school", note: string) =>
@@ -328,13 +322,9 @@ export const ipc = {
   /** A past report: the bytes go as the raw body. Nothing is kept until `saveStyleSource`. */
   importStyleSource: async (file: File): Promise<StyleImportPreview> => {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    try {
-      return await invoke<StyleImportPreview>("import_style_source", bytes, {
-        headers: { "x-file-name": encodeURIComponent(file.name) },
-      });
-    } catch (e) {
-      throw asUiError(e);
-    }
+    return await call<StyleImportPreview>("import_style_source", bytes, {
+      headers: { "x-file-name": encodeURIComponent(file.name) },
+    });
   },
   saveStyleSource: (token: string, included: number[], title: string | null) =>
     call<StyleSourceView>("save_style_source", { token, included, title }),

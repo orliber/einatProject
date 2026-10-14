@@ -20,6 +20,7 @@ pub(crate) async fn download_name_model(state: tauri::State<'_, AppState>) -> Re
                 code: "refused".to_owned(),
                 message: "ההורדה כבר רצה.".to_owned(),
                 details: Vec::new(),
+                action: dv_core::ErrorAction::Dismiss,
             });
         };
         *slot = Some((0, 0));
