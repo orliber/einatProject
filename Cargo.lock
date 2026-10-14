@@ -6580,6 +6580,7 @@ dependencies = [
  "dv-vault",
  "regex",
  "serde_json",
+ "syn 2.0.119",
  "zeroize",
 ]
 

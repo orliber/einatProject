@@ -1,5 +1,6 @@
 // The only module that talks to the Rust core. Types come from Rust via ts-rs.
-import { invoke, type InvokeArgs, type InvokeOptions } from "@tauri-apps/api/core";
+import { invoke, type InvokeOptions } from "@tauri-apps/api/core";
+import type { Commands } from "./generated/commands";
 import { rememberReplay } from "../errors";
 import { listen } from "@tauri-apps/api/event";
 import type { ActivityPage } from "./generated/ActivityPage";
@@ -19,10 +20,7 @@ import type { NameMatch } from "./generated/NameMatch";
 import type { ChatView } from "./generated/ChatView";
 import type { ConsultationSummary } from "./generated/ConsultationSummary";
 import type { ConsultationView } from "./generated/ConsultationView";
-import type { ConsultResult } from "./generated/ConsultResult";
-import type { CreatedVault } from "./generated/CreatedVault";
 import type { ExportCheck } from "./generated/ExportCheck";
-import type { FilterOutcome } from "./generated/FilterOutcome";
 import type { Identity } from "./generated/Identity";
 import type { IdentityInput } from "./generated/IdentityInput";
 import type { ImportPreview } from "./generated/ImportPreview";
@@ -54,7 +52,6 @@ import type { SuspectDecision } from "./generated/SuspectDecision";
 import type { FollowUpView } from "./generated/FollowUpView";
 import type { UiError } from "./generated/UiError";
 import type { UpdateView } from "./generated/UpdateView";
-import type { NameModelView } from "./generated/NameModelView";
 import type { StyleAnalysisResult } from "./generated/StyleAnalysisResult";
 import type { StyleImportPreview } from "./generated/StyleImportPreview";
 import type { StyleItem } from "./generated/StyleItem";
@@ -76,20 +73,28 @@ export function asUiError(e: unknown): UiError {
   return { code: "internal", message: "משהו השתבש. אפשר לנסות שוב.", details: [String(e)], action: { kind: "retry", after_seconds: 0 } };
 }
 
-async function call<T>(cmd: string, args?: InvokeArgs, options?: InvokeOptions): Promise<T> {
+type Command = keyof Commands;
+/** A command that takes nothing is called with no arguments; any other with exactly its own. */
+type CallArgs<K extends Command> = Commands[K]["args"] extends undefined
+  ? [args?: undefined, options?: InvokeOptions]
+  : [args: Commands[K]["args"], options?: InvokeOptions];
+
+/** One command, checked by `tsc` against the Rust signature it was generated from (F5). */
+async function call<K extends Command>(cmd: K, ...[args, options]: CallArgs<K>): Promise<Commands[K]["returns"]> {
+  const send = () => (options === undefined ? invoke<Commands[K]["returns"]>(cmd, args) : invoke<Commands[K]["returns"]>(cmd, args, options));
   try {
-    return await (options === undefined ? invoke<T>(cmd, args) : invoke<T>(cmd, args, options));
+    return await send();
   } catch (e) {
     const err = asUiError(e);
     // "לנסות שוב" runs this same call again (F6).
-    rememberReplay(err, () => (options === undefined ? invoke(cmd, args) : invoke(cmd, args, options)));
+    rememberReplay(err, send);
     throw err;
   }
 }
 
 /** A command that answers nothing. */
-async function run(cmd: string, args?: InvokeArgs): Promise<undefined> {
-  await call<unknown>(cmd, args);
+async function run<K extends Command>(cmd: K, ...rest: CallArgs<K>): Promise<undefined> {
+  await call(cmd, ...rest);
   return undefined;
 }
 
@@ -110,24 +115,24 @@ export async function onCoreEvent(handler: (e: CoreEvent) => void): Promise<() =
 }
 
 export const ipc = {
-  ping: () => call<PingResponse>("ping"),
+  ping: () => call("ping"),
   /** The last crashes, in the crash log's own fixed shape, for the bug report (U6). */
-  recentCrashes: () => call<string[]>("recent_crashes"),
-  status: () => call<AppStatus>("app_status"),
-  createVault: (password: string) => call<CreatedVault>("create_vault", { password }),
-  confirmRecoveryKey: (typed: string) => call<boolean>("confirm_recovery_key", { typed }),
-  unlock: (password: string) => call<AppStatus>("unlock", { password }),
-  unlockWithRecovery: (key: string) => call<AppStatus>("unlock_with_recovery", { key }),
+  recentCrashes: () => call("recent_crashes"),
+  status: () => call("app_status"),
+  createVault: (password: string) => call("create_vault", { password }),
+  confirmRecoveryKey: (typed: string) => call("confirm_recovery_key", { typed }),
+  unlock: (password: string) => call("unlock", { password }),
+  unlockWithRecovery: (key: string) => call("unlock_with_recovery", { key }),
   lock: () => run("lock"),
   /** Typing or scrolling in the window counts as activity for the idle lock. */
   touch: () => run("touch"),
   holdUnsaved: (edit: UnsavedEdit | null) => run("hold_unsaved", { edit }),
-  takeUnsaved: () => call<UnsavedEdit | null>("take_unsaved"),
-  readiness: () => call<Readiness>("readiness"),
-  securityStatus: () => call<SecurityStatus>("security_status"),
-  setSendStopped: (stopped: boolean) => call<SecurityStatus>("set_send_stopped", { stopped }),
-  confirmReadiness: (key: string, done: boolean) => call<Readiness>("confirm_readiness", { key, done }),
-  usageSummary: () => call<UsageSummary>("usage_summary"),
+  takeUnsaved: () => call("take_unsaved"),
+  readiness: () => call("readiness"),
+  securityStatus: () => call("security_status"),
+  setSendStopped: (stopped: boolean) => call("set_send_stopped", { stopped }),
+  confirmReadiness: (key: string, done: boolean) => call("confirm_readiness", { key, done }),
+  usageSummary: () => call("usage_summary"),
   /** Dollars; `null` removes the ceiling. */
   setMonthlyCap: (capUsd: number | null) => run("set_monthly_cap", { capUsd }),
 
@@ -139,64 +144,64 @@ export const ipc = {
   setPractitioner: (names: string[]) => run("set_practitioner", { names }),
   setReviewOnlySuspect: (on: boolean) => run("set_review_only_suspect", { on }),
   setScreenProtection: (on: boolean) => run("set_screen_protection", { on }),
-  reportSettings: () => call<ReportSettings>("report_settings"),
+  reportSettings: () => call("report_settings"),
   setReportSettings: (settings: ReportSettings) => run("set_report_settings", { settings }),
   /** Her Word template (EX-1): the file's bytes go as the raw body. */
   setReportTemplate: async (file: File): Promise<TemplateView> => {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    return await call<TemplateView>("set_report_template", bytes);
+    return await call("set_report_template", bytes);
   },
   clearReportTemplate: () => run("clear_report_template"),
-  reportTemplate: () => call<TemplateView | null>("report_template"),
+  reportTemplate: () => call("report_template"),
 
-  listCases: () => call<CaseSummary[]>("list_cases"),
-  createCase: (meta: CaseMeta, identities: IdentityInput[]) => call<string>("create_case", { meta, identities }),
-  createSampleCase: () => call<string>("create_sample_case"),
+  listCases: () => call("list_cases"),
+  createCase: (meta: CaseMeta, identities: IdentityInput[]) => call("create_case", { meta, identities }),
+  createSampleCase: () => call("create_sample_case"),
   updateCase: (caseId: string, meta: CaseMeta) => run("update_case", { caseId, meta }),
   /** Into the recycle bin (D-023); restorable for 30 days. */
   deleteCase: (caseId: string) => run("delete_case", { caseId }),
-  listTrash: () => call<CaseSummary[]>("list_trash"),
+  listTrash: () => call("list_trash"),
   restoreCase: (caseId: string) => run("restore_case", { caseId }),
   /** Erase from the bin now; the password is asked again. */
   purgeCase: (caseId: string, password: string) => run("purge_case", { caseId, password }),
-  folders: () => call<Folder[]>("folders"),
-  createFolder: (parentId: string | null, name: string) => call<Folder>("create_folder", { parentId, name }),
+  folders: () => call("folders"),
+  createFolder: (parentId: string | null, name: string) => call("create_folder", { parentId, name }),
   renameFolder: (id: string, name: string) => run("rename_folder", { id, name }),
   moveFolder: (id: string, parentId: string | null) => run("move_folder", { id, parentId }),
   deleteFolder: (id: string) => run("delete_folder", { id }),
   moveCase: (caseId: string, folderId: string | null) => run("move_case", { caseId, folderId }),
-  findNameMatches: (caseId: string | null, names: string[]) => call<NameMatch[]>("find_name_matches", { caseId, names }),
+  findNameMatches: (caseId: string | null, names: string[]) => call("find_name_matches", { caseId, names }),
   setIdentities: (caseId: string, identities: IdentityInput[]) =>
-    call<Identity[]>("set_identities", { caseId, identities }),
-  caseDetail: (caseId: string) => call<CaseDetail>("case_detail", { caseId }),
+    call("set_identities", { caseId, identities }),
+  caseDetail: (caseId: string) => call("case_detail", { caseId }),
 
   addInput: (caseId: string, kind: InputKind, title: string, content: string) =>
-    call<CaseInput>("add_input", { caseId, kind, title, content }),
+    call("add_input", { caseId, kind, title, content }),
   updateInput: (caseId: string, inputId: string, title: string, content: string) =>
     run("update_input", { caseId, inputId, title, content }),
   deleteInput: (caseId: string, inputId: string) => run("delete_input", { caseId, inputId }),
   /** Undoes the last deletion of this material (until another is deleted or the vault locks). */
   restoreInput: (caseId: string, inputId: string) => run("restore_input", { caseId, inputId }),
-  scoreInstruments: () => call<Instrument[]>("score_instruments"),
-  previewScores: (sheet: ScoreSheet) => call<string>("preview_scores", { sheet }),
+  scoreInstruments: () => call("score_instruments"),
+  previewScores: (sheet: ScoreSheet) => call("preview_scores", { sheet }),
   /** Saves (or, with `inputId`, replaces) a score table as a "test scores" material. */
   saveScores: (caseId: string, inputId: string | null, sheet: ScoreSheet) =>
-    call<CaseInput>("save_scores", { caseId, inputId, sheet }),
-  scoreSheet: (caseId: string, inputId: string) => call<ScoreSheet | null>("score_sheet", { caseId, inputId }),
+    call("save_scores", { caseId, inputId, sheet }),
+  scoreSheet: (caseId: string, inputId: string) => call("score_sheet", { caseId, inputId }),
   /** "למה כתבת את זה?": the passages a paragraph leans on, best match first (stays local). */
   paragraphSources: (caseId: string, draftId: string) =>
-    call<SourceExcerpt[]>("paragraph_sources", { caseId, draftId }),
+    call("paragraph_sources", { caseId, draftId }),
   /** The file's bytes go as the raw body; nothing else of the file system is exposed. */
   importDocument: async (caseId: string, file: File): Promise<ImportPreview> => {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    return await call<ImportPreview>("import_document", bytes, {
+    return await call("import_document", bytes, {
       headers: { "x-case-id": encodeURIComponent(caseId), "x-file-name": encodeURIComponent(file.name) },
     });
   },
-  previewFilter: (caseId: string, text: string) => call<FilterOutcome>("preview_filter", { caseId, text }),
+  previewFilter: (caseId: string, text: string) => call("preview_filter", { caseId, text }),
   decideSuspect: (caseId: string, token: string, decision: SuspectDecision) =>
     run("decide_suspect", { caseId, token, decision }),
-  settleForeignTags: (caseId: string) => call<number>("settle_foreign_tags", { caseId }),
+  settleForeignTags: (caseId: string) => call("settle_foreign_tags", { caseId }),
   /** "להחזיר" on the summary card: keep what the filter hid as written, for this case. */
   restoreAutoHidden: (caseId: string, token: string, tag: string) =>
     run("restore_auto_hidden", { caseId, token, tag }),
@@ -204,52 +209,52 @@ export const ipc = {
   confirmAutoHidden: (caseId: string, token: string, tag: string) =>
     run("confirm_auto_hidden", { caseId, token, tag }),
   /** Who a name the filter kept is; it gets a tag for that role. */
-  changeRole: (caseId: string, tag: string, role: Role) => call<Identity[]>("change_role", { caseId, tag, role }),
+  changeRole: (caseId: string, tag: string, role: Role) => call("change_role", { caseId, tag, role }),
 
   /** `replaces`: the one proposed paragraph the answer rewrites; otherwise the answer is the
    *  section's new draft, in place of the paragraphs not approved yet. */
   prepareSection: (caseId: string, sectionKey: string, instruction: string, replaces?: string) =>
-    call<Prepared>("prepare_section", { caseId, sectionKey, instruction, replaces: replaces ?? null }),
-  prepareFullDraft: (caseId: string) => call<[string, Prepared][]>("prepare_full_draft", { caseId }),
+    call("prepare_section", { caseId, sectionKey, instruction, replaces: replaces ?? null }),
+  prepareFullDraft: (caseId: string) => call("prepare_full_draft", { caseId }),
   /** Words Claude has written so far for a request on its way (streamed answers). */
-  sendProgress: (approvalId: string) => call<number>("send_progress", { approvalId }),
-  sendSection: (approvalId: string) => call<SectionResult>("send_section", { approvalId }),
+  sendProgress: (approvalId: string) => call("send_progress", { approvalId }),
+  sendSection: (approvalId: string) => call("send_section", { approvalId }),
   /** The check of a draft against its sources: off until switched on in settings. */
-  verifyStageOn: () => call<boolean>("verify_stage_on"),
+  verifyStageOn: () => call("verify_stage_on"),
   setVerifyStage: (on: boolean) => run("set_verify_stage", { on }),
   /** The optional name model (D-053): off by default, downloaded only when turned on. */
-  nameModelStatus: () => call<NameModelView>("name_model_status"),
+  nameModelStatus: () => call("name_model_status"),
   /** Download it once (pinned files, checked), then turn it on. */
-  downloadNameModel: () => call<NameModelView>("download_name_model"),
+  downloadNameModel: () => call("download_name_model"),
   /** Bytes done and total while it downloads. */
-  nameModelProgress: () => call<[number, number] | null>("name_model_progress"),
+  nameModelProgress: () => call("name_model_progress"),
   /** Off deletes its files. */
-  setNameModel: (on: boolean) => call<NameModelView>("set_name_model", { on }),
-  prepareVerify: (caseId: string, sectionKey: string) => call<Prepared>("prepare_verify", { caseId, sectionKey }),
-  sendVerify: (approvalId: string) => call<VerifyResult>("send_verify", { approvalId }),
+  setNameModel: (on: boolean) => call("set_name_model", { on }),
+  prepareVerify: (caseId: string, sectionKey: string) => call("prepare_verify", { caseId, sectionKey }),
+  sendVerify: (approvalId: string) => call("send_verify", { approvalId }),
   /** D-022: sort every material not sorted yet into sections (one review screen). */
-  prepareSort: (caseId: string) => call<Prepared>("prepare_sort", { caseId }),
-  sendSort: (approvalId: string) => call<SortResult>("send_sort", { approvalId }),
+  prepareSort: (caseId: string) => call("prepare_sort", { caseId }),
+  sendSort: (approvalId: string) => call("send_sort", { approvalId }),
   /** Einat's choice of sections for one material; it always wins. */
   setInputSections: (caseId: string, inputId: string, sections: string[]) =>
     run("set_input_sections", { caseId, inputId, sections }),
-  chat: (caseId: string, sectionKey: string) => call<ChatView[]>("chat", { caseId, sectionKey }),
+  chat: (caseId: string, sectionKey: string) => call("chat", { caseId, sectionKey }),
   approveParagraph: (caseId: string, draftId: string) => run("approve_paragraph", { caseId, draftId }),
   /** D-029: a follow-up assessment of a case (same names and folder, a new consent). */
-  createFollowUp: (caseId: string) => call<string>("create_follow_up", { caseId }),
-  followUp: (caseId: string) => call<FollowUpView | null>("follow_up", { caseId }),
-  addComparisonMaterial: (caseId: string) => call<CaseInput>("add_comparison_material", { caseId }),
+  createFollowUp: (caseId: string) => call("create_follow_up", { caseId }),
+  followUp: (caseId: string) => call("follow_up", { caseId }),
+  addComparisonMaterial: (caseId: string) => call("add_comparison_material", { caseId }),
   /** Approve every paragraph waiting in the section; returns how many. */
-  approveSection: (caseId: string, sectionKey: string) => call<number>("approve_section", { caseId, sectionKey }),
+  approveSection: (caseId: string, sectionKey: string) => call("approve_section", { caseId, sectionKey }),
   rejectParagraph: (caseId: string, draftId: string) => run("reject_paragraph", { caseId, draftId }),
   editParagraph: (caseId: string, draftId: string, text: string) =>
     run("edit_paragraph", { caseId, draftId, text }),
   /** Earlier wordings of a paragraph, newest first; bring one back (D-046). */
   paragraphVersions: (caseId: string, draftId: string) =>
-    call<ParagraphVersionView[]>("paragraph_versions", { caseId, draftId }),
+    call("paragraph_versions", { caseId, draftId }),
   /** The paragraph of her past reports closest to this one (ST2); worked out locally. */
   similarParagraph: (caseId: string, draftId: string) =>
-    call<SimilarParagraph | null>("similar_paragraph", { caseId, draftId }),
+    call("similar_paragraph", { caseId, draftId }),
   restoreParagraphVersion: (caseId: string, draftId: string, versionId: string) =>
     run("restore_paragraph_version", { caseId, draftId, versionId }),
   /** Her own paragraph. `at`: "end" (default), "first", or the id of the paragraph it follows. */
@@ -257,97 +262,97 @@ export const ipc = {
     run("add_own_paragraph", { caseId, sectionKey, text, first: at === "first", after: at === "end" || at === "first" ? null : at }),
 
   prepareConsult: (caseId: string | null, conversationId: string | null, message: string) =>
-    call<Prepared>("prepare_consult", { caseId, conversationId, message }),
+    call("prepare_consult", { caseId, conversationId, message }),
   /** Saved conversations, newest first; one conversation; delete one. */
-  consultations: () => call<ConsultationSummary[]>("consultations"),
-  consultation: (id: string) => call<ConsultationView>("consultation", { id }),
+  consultations: () => call("consultations"),
+  consultation: (id: string) => call("consultation", { id }),
   deleteConsultation: (id: string) => run("delete_consultation", { id }),
-  sendConsult: (approvalId: string) => call<ConsultResult>("send_consult", { approvalId }),
+  sendConsult: (approvalId: string) => call("send_consult", { approvalId }),
 
-  checkExport: (caseId: string) => call<ExportCheck>("check_export", { caseId }),
-  exportReport: (caseId: string, password: string | null) => call<string>("export_report", { caseId, password }),
+  checkExport: (caseId: string) => call("check_export", { caseId }),
+  exportReport: (caseId: string, password: string | null) => call("export_report", { caseId, password }),
   /** EX-3: a locked PDF (opens with the password, prints, cannot be changed). */
-  exportPdf: (caseId: string, password: string) => call<string>("export_pdf", { caseId, password }),
+  exportPdf: (caseId: string, password: string) => call("export_pdf", { caseId, password }),
   /** When this vault exported exactly this PDF, or `null` (changed, or not made here). */
   checkOriginal: async (file: File): Promise<number | null> => {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    return await call<number | null>("check_original", bytes);
+    return await call("check_original", bytes);
   },
   /** EX-4: a short letter from the approved report, through the same review and gate. */
   prepareLetter: (caseId: string, audience: "parents" | "school", note: string) =>
-    call<Prepared>("prepare_letter", { caseId, audience, note }),
-  letter: (caseId: string, audience: "parents" | "school") => call<ParagraphView[]>("letter", { caseId, audience }),
+    call("prepare_letter", { caseId, audience, note }),
+  letter: (caseId: string, audience: "parents" | "school") => call("letter", { caseId, audience }),
   exportLetter: (caseId: string, audience: "parents" | "school", password: string | null) =>
-    call<string>("export_letter", { caseId, audience, password }),
+    call("export_letter", { caseId, audience, password }),
   /** The file password to the clipboard: out of history and cloud sync, cleared after N seconds (returned). */
-  copySecret: (text: string) => call<number>("copy_secret", { text }),
+  copySecret: (text: string) => call("copy_secret", { text }),
 
   /** The system's print window (the macOS webview ignores `window.print()`). */
   printPage: () => run("print_page"),
 
   // Activity log (metadata only; cases named on this computer) and retention reminders.
-  activity: (before: number | null) => call<ActivityPage>("activity", { before }),
+  activity: (before: number | null) => call("activity", { before }),
   markActivityReviewed: () => run("mark_activity_reviewed"),
-  retentionDue: () => call<RetentionItem[]>("retention_due"),
+  retentionDue: () => call("retention_due"),
   keepCaseLonger: (caseId: string, years: number) => run("keep_case_longer", { caseId, years }),
 
   /** `current` is the password, or the recovery kit when the password was forgotten. */
   changePassword: (current: string, withRecovery: boolean, newPassword: string) =>
     run("change_password", { current, withRecovery, newPassword }),
   newRecoveryKit: (current: string, withRecovery: boolean) =>
-    call<CreatedVault>("new_recovery_kit", { current, withRecovery }),
+    call("new_recovery_kit", { current, withRecovery }),
 
   /** Forgot the password → sign in with Google (D-041). Readable while locked. */
-  googleStatus: () => call<GoogleStatus>("google_status"),
+  googleStatus: () => call("google_status"),
   /** Opens Google in her browser; resolves when she is back and the slot is written. */
   googleTurnOn: (password: string) => run("google_turn_on", { password }),
   googleTurnOff: (password: string) => run("google_turn_off", { password }),
   /** Stop a sign-in that waits for the browser. */
   googleCancel: () => run("google_cancel"),
   /** Locked, password forgotten: sign in with Google, open, and set `newPassword` at once. */
-  googleRecover: (newPassword: string) => call<AppStatus>("google_recover", { newPassword }),
+  googleRecover: (newPassword: string) => call("google_recover", { newPassword }),
 
   // Encrypted backup (D-024). The system's own window picks the file; `null` = cancelled.
-  backupStatus: () => call<BackupStatus>("backup_status"),
-  writeBackup: () => call<BackupDone | null>("write_backup"),
-  chooseBackup: () => call<StagedBackup | null>("choose_backup"),
-  checkBackup: (password: string) => call<BackupCheckView>("check_backup", { password }),
+  backupStatus: () => call("backup_status"),
+  writeBackup: () => call("write_backup"),
+  chooseBackup: () => call("choose_backup"),
+  checkBackup: (password: string) => call("check_backup", { password }),
   restoreBackup: (password: string | null, recoveryKey: string | null) =>
-    call<AppStatus>("restore_backup", { password, recoveryKey }),
+    call("restore_backup", { password, recoveryKey }),
   forgetBackup: () => run("forget_backup"),
-  setAutoBackup: (on: boolean) => call<BackupStatus>("set_auto_backup", { on }),
+  setAutoBackup: (on: boolean) => call("set_auto_backup", { on }),
 
   // Writing style (D-043): past reports kept neutralized, the profile, learning from edits.
-  styleOverview: () => call<StyleOverview>("style_overview"),
+  styleOverview: () => call("style_overview"),
   /** A past report: the bytes go as the raw body. Nothing is kept until `saveStyleSource`. */
   importStyleSource: async (file: File): Promise<StyleImportPreview> => {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    return await call<StyleImportPreview>("import_style_source", bytes, {
+    return await call("import_style_source", bytes, {
       headers: { "x-file-name": encodeURIComponent(file.name) },
     });
   },
   saveStyleSource: (token: string, included: number[], title: string | null) =>
-    call<StyleSourceView>("save_style_source", { token, included, title }),
+    call("save_style_source", { token, included, title }),
   discardStyleUpload: () => run("discard_style_upload"),
   deleteStyleSource: (id: string) => run("delete_style_source", { id }),
-  prepareStyleAnalysis: (sourceId: string) => call<Prepared>("prepare_style_analysis", { sourceId }),
-  sendStyleAnalysis: (approvalId: string) => call<StyleAnalysisResult>("send_style_analysis", { approvalId }),
-  prepareStyleProfile: () => call<Prepared>("prepare_style_profile"),
-  sendStyleProfile: (approvalId: string) => call<StyleProfileView>("send_style_profile", { approvalId }),
-  saveStyleDraft: (profile: StyleProfile) => call<StyleProfileView>("save_style_draft", { profile }),
-  approveStyleDraft: () => call<StyleProfileView>("approve_style_draft"),
+  prepareStyleAnalysis: (sourceId: string) => call("prepare_style_analysis", { sourceId }),
+  sendStyleAnalysis: (approvalId: string) => call("send_style_analysis", { approvalId }),
+  prepareStyleProfile: () => call("prepare_style_profile"),
+  sendStyleProfile: (approvalId: string) => call("send_style_profile", { approvalId }),
+  saveStyleDraft: (profile: StyleProfile) => call("save_style_draft", { profile }),
+  approveStyleDraft: () => call("approve_style_draft"),
   discardStyleDraft: () => run("discard_style_draft"),
-  restoreStyleVersion: (id: string) => call<StyleProfileView>("restore_style_version", { id }),
+  restoreStyleVersion: (id: string) => call("restore_style_version", { id }),
   setStyleEnabled: (on: boolean) => run("set_style_enabled", { on }),
   resetStyle: () => run("reset_style"),
   forgetStyleLearning: () => run("forget_style_learning"),
-  acceptStyleSuggestion: (id: string) => call<StyleProfileView>("accept_style_suggestion", { id }),
+  acceptStyleSuggestion: (id: string) => call("accept_style_suggestion", { id }),
   dismissStyleSuggestion: (id: string) => run("dismiss_style_suggestion", { id }),
 
   /** A newer version, signed by the developer (D-033); `null` when this is the newest. */
-  checkUpdate: () => call<UpdateView | null>("check_update"),
+  checkUpdate: () => call("check_update"),
   /** In the background: fetch and verify the newest version. `true` when it waits for her click. */
-  prepareUpdate: () => call<boolean>("prepare_update"),
+  prepareUpdate: () => call("prepare_update"),
   /** Lock, run the verified installer (fetched now if it is not waiting); closes and opens again. */
   installUpdate: () => run("install_update"),
   /** R7: the page of released versions, in her browser, to go back one version. */

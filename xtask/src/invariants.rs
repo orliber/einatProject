@@ -51,6 +51,7 @@ pub fn check_all(root: &Path) -> Result<Vec<String>, String> {
     problems.extend(tauri_hardening(&root.join("apps/desktop/src-tauri")));
     problems.extend(cleared_payload_construction(&root.join("crates")));
     problems.extend(advisory_expiry(root));
+    problems.extend(crate::ipc::stale(root));
     problems.extend(no_stray_output(&[
         root.join("crates"),
         root.join("apps/desktop/src-tauri/src"),

@@ -13,6 +13,9 @@ workspace = true
 [dependencies]
 cargo_metadata = "0.23"
 regex = "1"
+# Reading the shell's command signatures for the generated IPC types (F5). Already in the
+# tree through serde and thiserror; no new crate.
+syn = { version = "2", default-features = false, features = ["full", "parsing"] }
 serde_json.workspace = true
 # Signing updates (D-033): the program's own verification code, and the same crypto library.
 dv-egress.workspace = true

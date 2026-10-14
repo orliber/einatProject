@@ -7,12 +7,14 @@
 //! * `cargo xtask update-keygen [--next]` / `update-notice …` / `update-key-backup …` /
 //!   `update-key-restore …` – signed updates, on the developer's
 //!   computer only (D-033, `scripts/release.sh`).
+//! * `cargo xtask gen-ipc` – the TypeScript of every command, from the shell (`ipc.rs`).
 //! * `cargo xtask ci [--e2e] [--rust|--ui]` – the CI checks, on this computer, in one command.
 //! * `cargo xtask check-parsers` / `sbom <out.json>` / `self-audit [--full]` – the supply
 //!   chain (SEC6–SEC8, `supply.rs`).
 
 mod ci;
 mod invariants;
+mod ipc;
 mod israeli_id;
 mod release;
 mod scan;
@@ -74,6 +76,7 @@ fn main() -> ExitCode {
             Ok(problems) => report("parser pins", &problems),
             Err(e) => report("parser pins", &[format!("could not run: {e}")]),
         },
+        Some("gen-ipc") => done("gen-ipc", ipc::write(&root)),
         Some("sbom") => done("sbom", supply::sbom(&root, &args[1..])),
         Some("self-audit") => report("self-audit", &supply::self_audit(&root, &args[1..])),
         Some("ci") => report("ci", &ci::run_all(&root, &args[1..])),
