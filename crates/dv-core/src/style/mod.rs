@@ -440,6 +440,7 @@ impl StyleData {
             confirmed_names: &none,
             past_names: &none,
             today: today(),
+            masks: None,
         };
         f(&ctx, &self.hasher)
     }

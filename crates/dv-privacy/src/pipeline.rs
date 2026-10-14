@@ -40,6 +40,9 @@ pub struct PrivacyContext<'a> {
     /// hash of the normalized word: hidden wherever they appear, and refused by the gate.
     pub past_names: &'a dyn Fn(&str) -> bool,
     pub today: Ymd,
+    /// The case's mask book: numbers, dates, addresses and places get numbered tags that come
+    /// back in the answer. `None`: the fixed tag of each kind (`[תאריך]`), which stays.
+    pub masks: Option<&'a crate::MaskBook>,
 }
 
 impl fmt::Debug for PrivacyContext<'_> {
@@ -1710,8 +1713,28 @@ pub fn filter_with_hints(
     hints: &[NameHint],
 ) -> Result<FilterOutcome, PrivacyError> {
     let text = &plain_brackets(text, ctx);
-    let (reps, suspects) = analyze(text, ctx, hints)?;
+    let (mut reps, suspects) = analyze(text, ctx, hints)?;
+    number_masks(text, ctx, &mut reps)?;
     assemble(text, &reps, &suspects)
+}
+
+/// With the case's mask book, each fixed tag of a kind (`[תאריך]`) becomes the numbered tag of
+/// those words (`[תאריך_2]`), so the answer can be given back as she wrote it. The same span is
+/// hidden either way; only the tag's name changes.
+fn number_masks(
+    text: &str,
+    ctx: &PrivacyContext<'_>,
+    reps: &mut [Replacement],
+) -> Result<(), PrivacyError> {
+    let Some(book) = ctx.masks else {
+        return Ok(());
+    };
+    for r in reps.iter_mut().filter(|r| !r.declared && !r.relative) {
+        if let Some(base) = crate::masks::mask_base(&r.out) {
+            r.out = book.tag_for(base, span_text(text, r.start, r.end)?);
+        }
+    }
+    Ok(())
 }
 
 /// Square brackets around words that are not a tag ("[מחנכת]" written by the model, "[...]"
@@ -1725,7 +1748,7 @@ fn plain_brackets(text: &str, ctx: &PrivacyContext<'_>) -> String {
         return text.to_owned();
     };
     let known = |t: &str| {
-        crate::gate::GENERIC_TAGS.contains(&t)
+        crate::masks::is_generic_tag(t)
             || t.starts_with("[חסר")
             || ctx.identities.iter().any(|i| i.tag == t)
     };
@@ -1761,7 +1784,8 @@ pub fn filter_split_with_hints(
     hints: &[NameHint],
 ) -> Result<(FilterOutcome, Option<Vec<FilterOutcome>>), PrivacyError> {
     let text = &plain_brackets(text, ctx);
-    let (reps, suspects) = analyze(text, ctx, hints)?;
+    let (mut reps, suspects) = analyze(text, ctx, hints)?;
+    number_masks(text, ctx, &mut reps)?;
     let whole = assemble(text, &reps, &suspects)?;
     let mut parts = Vec::with_capacity(ranges.len());
     for r in ranges {

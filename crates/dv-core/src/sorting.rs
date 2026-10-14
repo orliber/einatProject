@@ -314,6 +314,7 @@ impl Core {
                 confirmed_names: &is_name,
                 past_names: &past,
                 today: today(),
+                masks: Some(&data.masks),
             };
             let internal = |e: dv_privacy::PrivacyError| CoreError::Internal(e.to_string());
             let mut review = Review::default();

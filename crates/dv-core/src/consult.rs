@@ -59,6 +59,7 @@ impl Core {
                 confirmed_names: &is_name,
                 past_names: &past,
                 today: today(),
+                masks: Some(&data.masks),
             };
             let msg = hints
                 .filter(message, &ctx)
@@ -126,6 +127,7 @@ impl Core {
             message_tagged: input.message_tagged,
             message_shown: message.to_owned(),
             hidden: prepared.hidden.clone(),
+            masks: data.masks.entries(),
         };
         if self.gate(&data, &body, kind, &mut prepared, !learned)? {
             return self.prepare_consult_once(case_id, conversation_id, message, true);
@@ -157,18 +159,19 @@ impl Core {
             message_tagged,
             message_shown,
             hidden,
+            masks,
         } = kind
         else {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
         };
         let answer = dv_ai::parse_consult(&response)?;
-        let shown = match &case_id {
-            Some(c) => {
-                let identities = self.vault_ref()?.identities(c)?;
-                restore(&answer, &identities, None)
-            }
-            None => answer.clone(),
+        // The numbers, dates and places of the question come back as she wrote them, with a
+        // case or without one (its mask book lives only in this request then).
+        let identities = match &case_id {
+            Some(c) => self.vault_ref()?.identities(c)?,
+            None => Vec::new(),
         };
+        let shown = restore(&answer, &identities, None, &masks);
         let conversation_id = self.keep_consultation(
             conversation_id.as_deref(),
             case_id.as_deref(),

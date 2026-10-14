@@ -19,7 +19,7 @@ pub use identity::{
 };
 pub use records::{
     Age, Author, CaseInput, CaseMeta, CaseSummary, ChatMessage, ChatRole, Consent, DraftParagraph,
-    DraftStatus, Folder, GrammaticalGender, InputKind, Transmission,
+    DraftStatus, Folder, GrammaticalGender, InputKind, MaskEntry, Transmission,
 };
 pub use report::{ReportPart, ReportSection, ReportStructure};
 pub use routing::{passage_ranges, passages, Feed, Routing, SectionPassages, Suggestion};

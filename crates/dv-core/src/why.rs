@@ -59,8 +59,9 @@ impl Core {
             ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
         let v = self.vault_ref()?;
         let identities = v.identities(case_id)?;
+        let masks = v.masks(case_id)?;
         let practitioner = v.practitioner()?.names.first().cloned();
-        let show = |t: &str| restore(t, &identities, practitioner.as_deref());
+        let show = |t: &str| restore(t, &identities, practitioner.as_deref(), &masks);
         let mut found = None;
         for s in structure.sections() {
             if let Some(d) = v

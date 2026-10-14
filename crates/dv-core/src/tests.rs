@@ -18,6 +18,7 @@ mod hostile;
 mod import_export;
 mod large_case;
 mod library;
+mod masks;
 mod off_lock;
 mod perf_profile;
 mod sample_flows;
@@ -1645,6 +1646,7 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
             confirmed_names: &|_| false,
             past_names: &|_| false,
             today: (2026, 9, 28),
+            masks: None,
         };
         let req = GateRequest {
             body: &body,
@@ -1711,6 +1713,7 @@ fn score_tables_and_section_titles_are_never_rewritten_silently() {
                 confirmed_names: &|_| false,
                 past_names: &|_| false,
                 today: (2026, 9, 28),
+                masks: None,
             };
             dv_privacy::filter(text, &ctx).unwrap()
         };

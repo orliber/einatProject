@@ -25,6 +25,7 @@ impl Core {
         let v = self.vault_ref()?;
         let meta = v.case_meta(case_id)?;
         let identities = v.identities(case_id)?;
+        let masks = v.masks(case_id)?;
         let inputs = v.inputs(case_id)?;
         let practitioner = v.practitioner()?.names.first().cloned();
         let routing = Core::material_routing(v, &structure, case_id, &inputs)?;
@@ -71,7 +72,7 @@ impl Core {
                     .map(|d| ParagraphView {
                         has_versions: with_versions.contains(&d.id),
                         id: d.id,
-                        text: restore(&d.text_tagged, &identities, practitioner.as_deref()),
+                        text: restore(&d.text_tagged, &identities, practitioner.as_deref(), &masks),
                         status: d.status,
                         by_ai: d.author == Author::Ai,
                         sources: d
@@ -117,8 +118,9 @@ impl Core {
                             .as_ref()
                             .filter(|_| d.author == Author::Ai && d.status == DraftStatus::Proposed)
                             .map(|m| {
-                                let shown =
-                                    |t: &str| restore(t, &identities, practitioner.as_deref());
+                                let shown = |t: &str| {
+                                    restore(t, &identities, practitioner.as_deref(), &masks)
+                                };
                                 StyleHint {
                                     fit: m.fidelity(&s.key, &d.text_tagged),
                                     details: m.differences(&s.key, &d.text_tagged),
@@ -166,6 +168,7 @@ impl Core {
     pub fn chat(&mut self, case_id: &str, section_key: &str) -> Result<Vec<ChatView>, CoreError> {
         let v = self.vault_ref()?;
         let identities = v.identities(case_id)?;
+        let masks = v.masks(case_id)?;
         let practitioner = v.practitioner()?.names.first().cloned();
         Ok(v.messages(case_id, section_key)?
             .into_iter()
@@ -175,7 +178,7 @@ impl Core {
                 } else {
                     "assistant".to_owned()
                 },
-                text: restore(&m.text_tagged, &identities, practitioner.as_deref()),
+                text: restore(&m.text_tagged, &identities, practitioner.as_deref(), &masks),
                 hidden: m.hidden,
                 demo: m.demo,
             })
@@ -239,6 +242,7 @@ impl Core {
     ) -> Result<Vec<ParagraphVersionView>, CoreError> {
         let v = self.vault_ref()?;
         let identities = v.identities(case_id)?;
+        let masks = v.masks(case_id)?;
         let practitioner = v.practitioner()?.names.first().cloned();
         Ok(v.draft_versions(case_id, draft_id)?
             .into_iter()
@@ -246,7 +250,7 @@ impl Core {
                 id: d.id,
                 saved_at: d.saved_at,
                 by_ai: d.author == Author::Ai,
-                text: restore(&d.text_tagged, &identities, practitioner.as_deref()),
+                text: restore(&d.text_tagged, &identities, practitioner.as_deref(), &masks),
             })
             .collect())
     }

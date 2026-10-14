@@ -33,6 +33,7 @@ impl Core {
             confirmed_names: &is_name,
             past_names: &past,
             today: today(),
+            masks: None,
         };
         let mut case_tags: HashSet<String> = data
             .identities
@@ -61,6 +62,12 @@ impl Core {
         };
         match clear(&req) {
             Ok(payload) => {
+                // The numbered tags this request gave keep their words with the case, so the
+                // answer, and every later request of the case, reads them the same way.
+                if !data.case_id.is_empty() {
+                    self.vault_mut()?
+                        .add_masks(&data.case_id, &data.masks.added())?;
+                }
                 let id = payload.sha256().to_owned();
                 prepared.approval_id = Some(id.clone());
                 self.pending.insert(id, Pending { payload, kind });
@@ -171,6 +178,7 @@ impl Core {
                 confirmed_names: &is_name,
                 past_names: &past,
                 today: today(),
+                masks: Some(&data.masks),
             };
             let run = |t: &str| {
                 hints
@@ -511,6 +519,7 @@ impl Core {
         };
         let v = self.vault_mut()?;
         let identities = v.identities(&case_id)?;
+        let masks = v.masks(&case_id)?;
         let case_tags: Vec<String> = identities.iter().map(|i| i.tag.clone()).collect();
         let everyone = v.all_identities()?;
         let inputs = v.inputs(&case_id)?;
@@ -580,7 +589,7 @@ impl Core {
         }
 
         let practitioner = v.practitioner()?.names.first().cloned();
-        let show = |t: &str| restore(t, &identities, practitioner.as_deref());
+        let show = |t: &str| restore(t, &identities, practitioner.as_deref(), &masks);
         Ok(SectionResult {
             reply: show(&reply.reply),
             paragraphs: reply

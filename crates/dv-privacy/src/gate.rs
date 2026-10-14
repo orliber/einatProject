@@ -39,7 +39,7 @@ static TAG_RE: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(r"\[[^\[\]\
 
 /// A tag the gate lets through: one of the case's, a generic one, or a "missing" note.
 fn tag_allowed(tag: &str, case_tags: &HashSet<String>) -> bool {
-    case_tags.contains(tag) || GENERIC_TAGS.contains(&tag) || tag.starts_with("[חסר")
+    case_tags.contains(tag) || crate::masks::is_generic_tag(tag) || tag.starts_with("[חסר")
 }
 
 /// The text with every tag the gate would refuse replaced by `with(tag)`, or `None` when it
@@ -384,6 +384,7 @@ mod tests {
             confirmed_names: &none,
             past_names: &none,
             today: (2026, 10, 12),
+            masks: None,
         };
         let req = |body| GateRequest {
             body,

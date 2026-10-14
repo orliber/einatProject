@@ -6,8 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use dv_domain::{
     assign_tag, Author, CaseInput, CaseMeta, CaseSummary, ChatMessage, ChatRole, DraftParagraph,
-    DraftStatus, Folder, FoundName, Identity, IdentityInput, IdentitySource, InputKind, Role,
-    Transmission,
+    DraftStatus, Folder, FoundName, Identity, IdentityInput, IdentitySource, InputKind, MaskEntry,
+    Role, Transmission,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::de::DeserializeOwned;
@@ -1304,6 +1304,7 @@ impl Vault {
             "transmissions",
             "consultations",
             "name_hints",
+            "masks",
         ] {
             tx.execute(
                 &format!("DELETE FROM {table} WHERE case_id = ?1"),
@@ -2479,6 +2480,56 @@ impl Vault {
             payload_tagged: payload_tagged.to_owned(),
             created_at: t,
         })
+    }
+
+    /// The case's mask book, in the order its tags were given.
+    pub fn masks(&self, case_id: &str) -> Result<Vec<MaskEntry>, VaultError> {
+        let key = self.case_key(case_id)?;
+        let mut stmt = self.main.prepare(
+            "SELECT tag, kind, original_enc FROM masks WHERE case_id = ?1 ORDER BY created_at, rowid",
+        )?;
+        let rows: Vec<(String, String, Vec<u8>)> = stmt
+            .query_map([case_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<Result<_, _>>()?;
+        rows.into_iter()
+            .map(|(tag, kind, enc)| {
+                Ok(MaskEntry {
+                    original: open_string(&key, &aad("masks", "original", &tag, case_id), &enc)?,
+                    tag,
+                    kind,
+                })
+            })
+            .collect()
+    }
+
+    /// Keep new tags of the case's mask book. A tag it already holds keeps its words: a tag
+    /// once given never comes to mean other words.
+    pub fn add_masks(&mut self, case_id: &str, entries: &[MaskEntry]) -> Result<(), VaultError> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        let key = self.case_key(case_id)?;
+        let t = now();
+        let tx = self.main.unchecked_transaction()?;
+        for e in entries {
+            tx.execute(
+                "INSERT OR IGNORE INTO masks (case_id, tag, kind, created_at, original_enc)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    case_id,
+                    e.tag,
+                    e.kind,
+                    t,
+                    seal_str(
+                        &key,
+                        &aad("masks", "original", &e.tag, case_id),
+                        &e.original
+                    )?
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn transmissions(&self, case_id: &str) -> Result<Vec<Transmission>, VaultError> {

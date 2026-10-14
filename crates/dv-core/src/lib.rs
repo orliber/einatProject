@@ -472,6 +472,8 @@ enum PendingKind {
         /// The question as typed (kept only in the vault, for display).
         message_shown: String,
         hidden: Vec<String>,
+        /// The request's mask book, to give the answer back as she wrote the question.
+        masks: Vec<dv_domain::MaskEntry>,
     },
     /// Sorting materials into sections (D-022): per material its id, how many passages were
     /// sent, and a fingerprint of its text then.
@@ -644,6 +646,9 @@ struct PrivacyData {
     is_name: HashSet<String>,
     /// Keyed hashes of the names in her past reports (`style`).
     past: HashSet<String>,
+    /// The case's mask book while this request is built (round 25): what it keeps, and the
+    /// numbered tags this request adds, kept with the case once the gate clears it.
+    masks: dv_privacy::MaskBook,
 }
 
 /// Everything the review screen shows, accumulated over the outgoing texts.

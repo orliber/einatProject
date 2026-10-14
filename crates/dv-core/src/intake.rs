@@ -157,6 +157,11 @@ impl Core {
             allow: v.not_a_name_hmacs(case_id)?.into_iter().collect(),
             is_name: v.is_name_hmacs(case_id)?.into_iter().collect(),
             past: style::past_name_hmacs(v)?,
+            masks: dv_privacy::MaskBook::new(if case_id.is_empty() {
+                Vec::new()
+            } else {
+                v.masks(case_id)?
+            }),
         })
     }
 
@@ -236,6 +241,7 @@ impl Core {
             confirmed_names: &is_name,
             past_names: &past,
             today: today(),
+            masks: None,
         };
         filter_with_hints(text, &ctx, hints).map_err(|e| CoreError::Internal(e.to_string()))
     }
@@ -276,6 +282,7 @@ impl Core {
             confirmed_names: &none,
             past_names: &none,
             today: today(),
+            masks: None,
         };
         let misreads = ocr_misreads(text, &ctx);
         if misreads.is_empty() {
