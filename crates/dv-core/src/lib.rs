@@ -577,6 +577,8 @@ pub struct Core {
     secret_work: Option<(u64, Instant)>,
     /// Numbers the checks, so only the check that took the place frees it.
     secret_ticket: u64,
+    /// Set by the next lock, for the jobs begun before it (F2).
+    cancel: jobs::Cancel,
     disk_encryption: String,
     transport: Option<Arc<dyn Transport>>,
     /// The app's own binary, started as an isolated worker for each document.

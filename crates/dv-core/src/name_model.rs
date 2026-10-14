@@ -203,6 +203,7 @@ impl NerCell {
 /// Texts of a case the model has not read yet, read by a job while the core is free (F2).
 pub struct HintJob {
     session: u64,
+    cancel: crate::jobs::Cancel,
     case_id: String,
     cell: Arc<NerCell>,
     texts: Vec<String>,
@@ -234,6 +235,11 @@ impl HintJob {
     pub fn run(self) -> HintsRead {
         let mut found = Vec::new();
         for text in self.texts {
+            // Locked meanwhile: the model ended with the lock, and the texts go now.
+            if self.cancel.is_set() {
+                found.clear();
+                break;
+            }
             match self.cell.with(|m| m.people(&text)) {
                 Ok(Ok(hints)) => found.push((text, hints)),
                 Ok(Err(())) => {
@@ -584,6 +590,7 @@ impl Core {
         };
         Ok(Some(HintJob {
             session: self.session,
+            cancel: self.cancel.clone(),
             case_id: case_id.to_owned(),
             cell,
             texts: missing,

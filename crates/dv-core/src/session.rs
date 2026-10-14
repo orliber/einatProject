@@ -26,6 +26,7 @@ impl Core {
             not_before: None,
             secret_work: None,
             secret_ticket: 0,
+            cancel: jobs::Cancel::default(),
             disk_encryption: disk.to_owned(),
             transport: None,
             ingest_exe: None,
@@ -247,6 +248,8 @@ impl Core {
 
     pub fn create_vault(&mut self, password: &str) -> Result<CreatedVault, CoreError> {
         self.refuse_cloud()?;
+        // Not while a restore writes the same folder (or an unlock reads it).
+        self.refuse_secret_work_running()?;
         let params = self.argon.unwrap_or_else(Argon2Params::calibrate);
         let created = Vault::create(&self.dir, password, params)?;
         let recovery_key = created.recovery_key.to_string();
@@ -375,6 +378,8 @@ impl Core {
         self.keep_unsaved();
         self.pending.clear();
         self.session = self.session.wrapping_add(1);
+        self.cancel.set();
+        self.cancel = jobs::Cancel::default();
         self.staged_backup = None;
         self.style_staged.clear();
         self.removed_input = None;

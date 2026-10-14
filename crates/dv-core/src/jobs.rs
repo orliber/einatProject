@@ -10,16 +10,44 @@
 //!
 //! A job remembers the session it began in. When the vault locked in between, `finish_*`
 //! drops the result and says so: work begun for one opening of the vault never lands in
-//! another. The one-call versions (`Core::unlock`, `Core::write_backup`, ...) are the three
+//! another. A lock also sets the jobs' [`Cancel`]: a job still running stops at its next
+//! step and drops (and wipes) the texts it holds, instead of keeping them in memory until it
+//! ends. The one-call versions (`Core::unlock`, `Core::write_backup`, ...) are the three
 //! steps in a row, for tests and callers that hold no lock.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use dv_vault::{Argon2Params, NewSlot, Secret, Vault, VaultError};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::views::{BackupCheckView, BackupDone, CreatedVault};
 use crate::{AppStatus, Core, CoreError, ErrorAction};
+
+/// Set by a lock, for every job begun before it. Each lock starts a new one.
+#[derive(Clone, Default)]
+pub(crate) struct Cancel(Arc<AtomicBool>);
+
+impl Cancel {
+    pub(crate) fn set(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn is_set(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
+/// What a document read holds: its text, wiped when it is dropped unused.
+fn wipe(e: &mut dv_ingest::Extracted) {
+    e.body.zeroize();
+    e.margins.zeroize();
+    for (k, v) in &mut e.metadata {
+        k.zeroize();
+        v.zeroize();
+    }
+}
 
 /// The password or the printed kit, owned, so it can travel to the job's thread.
 enum Proof {
@@ -114,6 +142,7 @@ impl SlotJob {
 /// back run in the job.
 pub struct BackupTask {
     session: u64,
+    cancel: Cancel,
     /// The header the backup holds; its key slots say which password and kit open it.
     header: dv_vault::VaultHeader,
     job: dv_vault::BackupJob,
@@ -135,9 +164,23 @@ pub struct BackupRun {
 impl BackupTask {
     #[must_use]
     pub fn run(self) -> BackupRun {
-        let done = self
-            .job
-            .write(&self.dest)
+        let done = if self.cancel.is_set() {
+            Err(locked_meanwhile())
+        } else {
+            Self::write(self.job, &self.dest)
+        };
+        BackupRun {
+            session: self.session,
+            header: self.header,
+            dest: self.dest,
+            folder: self.folder,
+            auto: self.auto,
+            done,
+        }
+    }
+
+    fn write(job: dv_vault::BackupJob, dest: &Path) -> Result<dv_vault::BackupWritten, CoreError> {
+        job.write(dest)
             .map_err(|_| {
                 CoreError::Needs(
                     "לא הצלחתי לכתוב את הגיבוי לתיקייה שנבחרה. אם זה דיסק נייד, כדאי לבדוק שהוא \
@@ -155,15 +198,7 @@ impl BackupTask {
                         ErrorAction::retry(),
                     )
                 })
-            });
-        BackupRun {
-            session: self.session,
-            header: self.header,
-            dest: self.dest,
-            folder: self.folder,
-            auto: self.auto,
-            done,
-        }
+            })
     }
 }
 
@@ -200,12 +235,16 @@ pub struct RestoreJob {
     dir: PathBuf,
     bytes: Vec<u8>,
     proof: Proof,
+    /// A restore writes the vault folder (and removes it again when it fails), so it takes
+    /// the same single place as an unlock: nothing else creates or opens a vault meanwhile.
+    ticket: u64,
 }
 
 /// The restored vault (or why not), waiting for [`Core::finish_restore`].
 pub struct Restored {
     bytes: Vec<u8>,
     vault: Result<Vault, VaultError>,
+    ticket: u64,
 }
 
 impl RestoreJob {
@@ -217,6 +256,7 @@ impl RestoreJob {
         Restored {
             bytes: self.bytes,
             vault,
+            ticket: self.ticket,
         }
     }
 }
@@ -225,10 +265,12 @@ impl RestoreJob {
 /// seconds for a long scan), run in the job.
 pub struct ReadJob {
     session: u64,
+    cancel: Cancel,
     exe: Option<PathBuf>,
     ocr: Option<dv_ingest::ocr::Engine>,
     file_name: String,
-    bytes: Vec<u8>,
+    /// The file as she brought it: wiped when the job ends.
+    bytes: Zeroizing<Vec<u8>>,
     /// For one of her past reports: what neutralizing it needs, done in the job too.
     style: Option<crate::style::StyleData>,
 }
@@ -237,13 +279,30 @@ pub struct ReadJob {
 pub struct DocumentRead {
     session: u64,
     file_name: String,
+    /// Taken by `finish_*`; whatever is left (a result that lands after a lock) is wiped.
     extracted: Result<dv_ingest::Extracted, CoreError>,
     style: Option<Result<crate::style::StyleWork, CoreError>>,
 }
 
+impl Drop for DocumentRead {
+    fn drop(&mut self) {
+        if let Ok(e) = &mut self.extracted {
+            wipe(e);
+        }
+    }
+}
+
 impl DocumentRead {
-    /// The texts the import filters (the body, and the title the file gives), for the name
-    /// model to read first. Empty when the file could not be read.
+    /// The text read, leaving nothing behind to wipe.
+    fn take(&mut self) -> Result<dv_ingest::Extracted, CoreError> {
+        std::mem::replace(
+            &mut self.extracted,
+            Err(CoreError::Internal("taken".to_owned())),
+        )
+    }
+
+    /// The text the import filters (the body; the margins and file properties are never
+    /// sent), for the name model to read first. Empty when the file could not be read.
     #[must_use]
     pub fn texts(&self) -> Vec<String> {
         self.extracted
@@ -256,13 +315,24 @@ impl DocumentRead {
 impl ReadJob {
     #[must_use]
     pub fn run(self) -> DocumentRead {
-        let extracted = dv_ingest::import(
-            self.exe.as_deref(),
-            self.ocr.as_ref(),
-            &self.file_name,
-            &self.bytes,
-        )
-        .map_err(|e| CoreError::Refused(e.message_he()));
+        let mut extracted = if self.cancel.is_set() {
+            Err(locked_meanwhile())
+        } else {
+            dv_ingest::import(
+                self.exe.as_deref(),
+                self.ocr.as_ref(),
+                &self.file_name,
+                &self.bytes,
+            )
+            .map_err(|e| CoreError::Refused(e.message_he()))
+        };
+        // Locked while it was read (OCR can take long): the text goes now, not later.
+        if self.cancel.is_set() {
+            if let Ok(e) = &mut extracted {
+                wipe(e);
+            }
+            extracted = Err(locked_meanwhile());
+        }
         let style = match (&self.style, &extracted) {
             (Some(data), Ok(e)) => Some(crate::style::style_work(data, &self.file_name, e)),
             _ => None,
@@ -291,6 +361,7 @@ enum ExportFormat {
 /// rendered (Word or PDF, and encrypted) in the job.
 pub struct ExportJob {
     session: u64,
+    cancel: Cancel,
     case_id: String,
     report: dv_export::Report,
     check: crate::ExportCheck,
@@ -304,7 +375,8 @@ pub struct Exported {
     check: crate::ExportCheck,
     pdf: bool,
     protected: bool,
-    bytes: Result<Vec<u8>, CoreError>,
+    /// The report as a file, wiped if it is dropped unsaved (it landed after a lock).
+    bytes: Result<Zeroizing<Vec<u8>>, CoreError>,
 }
 
 fn export_error(e: dv_export::ExportError) -> CoreError {
@@ -320,10 +392,40 @@ fn export_error(e: dv_export::ExportError) -> CoreError {
     }
 }
 
+impl Exported {
+    /// The file was made (not dropped because the vault locked while it was).
+    #[must_use]
+    pub fn rendered(&self) -> bool {
+        self.bytes.is_ok()
+    }
+}
+
 impl ExportJob {
     #[must_use]
     pub fn run(self) -> Exported {
-        let (pdf, protected, bytes) = match &self.format {
+        let (pdf, protected, bytes) = self.render();
+        // Locked while it was rendered: the file is wiped now, and nothing is saved.
+        let bytes = if self.cancel.is_set() {
+            Err(locked_meanwhile())
+        } else {
+            bytes.map(Zeroizing::new)
+        };
+        Exported {
+            session: self.session,
+            case_id: self.case_id,
+            check: self.check,
+            pdf,
+            protected,
+            bytes,
+        }
+    }
+
+    fn render(&self) -> (bool, bool, Result<Vec<u8>, CoreError>) {
+        if self.cancel.is_set() {
+            let pdf = matches!(self.format, ExportFormat::Pdf { .. });
+            return (pdf, false, Err(locked_meanwhile()));
+        }
+        match &self.format {
             ExportFormat::Word { template, password } => {
                 let docx = match template {
                     Some(t) => dv_export::render_with_template(&self.report, t),
@@ -331,7 +433,10 @@ impl ExportJob {
                 }
                 .map_err(export_error);
                 let bytes = docx.and_then(|d| match password {
-                    Some(pw) => dv_export::encrypt(&d, pw).map_err(export_error),
+                    Some(pw) => {
+                        let d = Zeroizing::new(d);
+                        dv_export::encrypt(&d, pw).map_err(export_error)
+                    }
                     None => Ok(d),
                 });
                 (false, password.is_some(), bytes)
@@ -356,14 +461,6 @@ impl ExportJob {
                     });
                 (true, true, bytes)
             }
-        };
-        Exported {
-            session: self.session,
-            case_id: self.case_id,
-            check: self.check,
-            pdf,
-            protected,
-            bytes,
         }
     }
 }
@@ -567,6 +664,7 @@ impl Core {
         let job = self.vault_mut()?.begin_backup()?;
         Ok(BackupTask {
             session: self.session,
+            cancel: self.cancel.clone(),
             header,
             job,
             dest,
@@ -716,22 +814,30 @@ impl Core {
             (None, Some(r)) => Proof::new(r, true),
             (None, None) => return Err(CoreError::Refused("צריך סיסמה או ערכת שחזור.".to_owned())),
         };
+        let bytes = self.take_staged()?;
+        let ticket = match self.claim_secret_work() {
+            Ok(t) => t,
+            Err(e) => {
+                self.staged_backup = Some(bytes);
+                return Err(e);
+            }
+        };
         Ok(RestoreJob {
             dir: self.dir.clone(),
-            bytes: self.take_staged()?,
+            bytes,
             proof,
+            ticket,
         })
     }
 
     pub fn finish_restore(&mut self, restored: Restored) -> Result<AppStatus, CoreError> {
+        self.release_secret_work(restored.ticket);
         if restored.vault.is_err() {
             // Put back unless it succeeded, so Einat can try another password.
             self.staged_backup = Some(restored.bytes);
         }
         if self.vault.is_some() {
-            if let Ok(extra) = restored.vault {
-                let _ = extra.lock();
-            }
+            drop(restored.vault);
             return Ok(self.status());
         }
         // No recycle-bin purge now: a restore is often how a mistaken deletion is undone.
@@ -753,10 +859,11 @@ impl Core {
     fn read_job(&self, file_name: &str, bytes: Vec<u8>) -> ReadJob {
         ReadJob {
             session: self.session,
+            cancel: self.cancel.clone(),
             exe: self.ingest_exe.clone(),
             ocr: self.ocr.clone(),
             file_name: file_name.to_owned(),
-            bytes,
+            bytes: Zeroizing::new(bytes),
             style: None,
         }
     }
@@ -776,10 +883,11 @@ impl Core {
     pub fn finish_import_document(
         &mut self,
         case_id: &str,
-        read: DocumentRead,
+        mut read: DocumentRead,
     ) -> Result<crate::ImportPreview, CoreError> {
         self.same_session(read.session)?;
-        self.preview_extracted(case_id, &read.file_name, read.extracted?)
+        let extracted = read.take()?;
+        self.preview_extracted(case_id, &read.file_name, extracted)
     }
 
     /// Read a document and show what would be stored and hidden. Nothing is saved until the
@@ -809,12 +917,12 @@ impl Core {
 
     pub fn finish_import_style_source(
         &mut self,
-        read: DocumentRead,
+        mut read: DocumentRead,
     ) -> Result<crate::StyleImportPreview, CoreError> {
         self.same_session(read.session)?;
         self.style_room()?;
-        let extracted = read.extracted?;
-        let work = match read.style {
+        let extracted = read.take()?;
+        let work = match read.style.take() {
             Some(work) => work?,
             None => crate::style::style_work(&self.style_data()?, &read.file_name, &extracted)?,
         };
@@ -842,6 +950,7 @@ impl Core {
         }
         Ok(ExportJob {
             session: self.session,
+            cancel: self.cancel.clone(),
             case_id: case_id.to_owned(),
             report,
             check,
@@ -888,7 +997,8 @@ impl Core {
         exported: Exported,
     ) -> Result<(Vec<u8>, crate::ExportCheck), CoreError> {
         self.same_session(exported.session)?;
-        let bytes = exported.bytes?;
+        // Moved out, not copied: no second copy is left to wipe.
+        let bytes = std::mem::take(&mut *exported.bytes?);
         let sections = exported.check.included_sections;
         let meta = if exported.pdf {
             serde_json::json!({

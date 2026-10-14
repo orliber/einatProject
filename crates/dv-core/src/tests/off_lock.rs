@@ -331,3 +331,51 @@ fn a_backup_written_while_the_password_changed_still_asks_for_a_new_one() {
     c.finish_backup(task.run()).unwrap();
     assert!(!c.backup_status().unwrap().secret_changed);
 }
+
+#[test]
+fn work_still_running_when_the_vault_locks_drops_what_it_holds() {
+    let (_dir, mut c, case) = setup(None);
+    let out = tempfile::tempdir().unwrap();
+    let bytes = super::import_export::docx("אלון הגיע עם אמו. נצפה קושי במעברים.", "", "");
+
+    // Each job begun before the lock runs after it: none reads, renders or writes anything.
+    let read = c
+        .begin_import_document(&case, "סיכום.docx", bytes.clone())
+        .unwrap();
+    approved_case(&mut c, &case);
+    let export = c.begin_export_report(&case, None).unwrap();
+    let backup = c.begin_backup(&out.path().join("גיבוי")).unwrap();
+    c.lock();
+
+    let read = read.run();
+    assert!(
+        read.texts().is_empty(),
+        "the document was not read after the lock"
+    );
+    let exported = export.run();
+    assert!(
+        !exported.rendered(),
+        "the report was not made after the lock"
+    );
+    let ran = backup.run();
+    assert_eq!(
+        std::fs::read_dir(out.path()).unwrap().count(),
+        0,
+        "nothing was written"
+    );
+
+    c.unlock(PASSWORD).unwrap();
+    assert!(matches!(
+        c.finish_import_document(&case, read),
+        Err(CoreError::Needs(_, ErrorAction::Unlock))
+    ));
+    assert!(c.finish_export(exported).is_err());
+    assert!(c.finish_backup(ran).is_err());
+
+    // Work begun after the opening runs as before.
+    let read = c
+        .begin_import_document(&case, "סיכום.docx", bytes)
+        .unwrap()
+        .run();
+    assert!(!read.texts().is_empty());
+}

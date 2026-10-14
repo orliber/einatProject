@@ -723,7 +723,18 @@ fn a_failed_restore_leaves_no_vault_behind_and_keeps_the_file_for_another_try() 
         .is_err());
     assert!(!Vault::exists(fresh.path()));
     other.not_before = None;
-    other.restore_staged_backup(Some(PASSWORD), None).unwrap();
+    // While it is restored, nothing else creates or opens a vault in that folder (a failed
+    // restore removes what it wrote, and would take the other with it).
+    let job = other.begin_restore(Some(PASSWORD), None).unwrap();
+    assert!(matches!(
+        other.create_vault("סיסמה אחרת וארוכה מאוד"),
+        Err(CoreError::Needs(_, ErrorAction::Dismiss))
+    ));
+    assert!(matches!(
+        other.begin_unlock(PASSWORD),
+        Err(CoreError::Needs(_, ErrorAction::Dismiss))
+    ));
+    other.finish_restore(job.run()).unwrap();
     assert!(other.case_detail(&case).is_ok());
 
     // A damaged file (one byte flipped near the end) does not restore anything.
