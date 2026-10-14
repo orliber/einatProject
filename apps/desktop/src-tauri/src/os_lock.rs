@@ -1,28 +1,21 @@
 //! Is the computer itself locked (Win+L, the lock screen, switching user)? Asked every 15
 //! seconds by the lock timer, so the vault locks with the computer (THREAT_MODEL T2).
 //!
-//! No native calls (`forbid(unsafe_code)`): Windows shows its lock screen in `LogonUI.exe`,
-//! which runs only while the computer is locked; on a Mac, the session reports
+//! On Windows the session's lock state is asked of Windows itself (`win_platform`): starting
+//! `tasklist.exe` every 15 seconds to look for `LogonUI.exe`, as before, is a likely reason
+//! the field she was typing in kept losing the keyboard. On a Mac, the session reports
 //! `CGSSessionScreenIsLocked`. The timer acts only when the answer changes from "not locked"
 //! to "locked" while the vault is open, so a machine where the check always answers "locked"
 //! can never keep the vault from opening.
 
+#[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
 
 /// `None` when this computer cannot tell.
 pub fn computer_locked() -> Option<bool> {
     #[cfg(windows)]
     {
-        let root = std::env::var_os("SystemRoot")?;
-        let tasklist = std::path::Path::new(&root).join(r"System32\tasklist.exe");
-        let out = run(Command::new(tasklist).args([
-            "/FI",
-            "IMAGENAME eq LogonUI.exe",
-            "/FO",
-            "CSV",
-            "/NH",
-        ]))?;
-        Some(out.to_lowercase().contains("logonui.exe"))
+        crate::win_platform::session_locked()
     }
     #[cfg(target_os = "macos")]
     {
@@ -35,16 +28,9 @@ pub fn computer_locked() -> Option<bool> {
     }
 }
 
-#[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
+#[cfg(target_os = "macos")]
 fn run(cmd: &mut Command) -> Option<String> {
     cmd.stdin(Stdio::null()).stderr(Stdio::null());
-    // The program has no console on Windows: without this a black window would flash.
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
     let out = cmd.output().ok()?;
     out.status
         .success()

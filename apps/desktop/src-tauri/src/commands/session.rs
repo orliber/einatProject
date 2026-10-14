@@ -38,9 +38,23 @@ pub(crate) async fn app_status(
 /// it blacked out Zoom and Teams. Setting this back to `true` restores D-037 as it was.
 pub(crate) const SCREEN_PROTECTION_ENABLED: bool = false;
 
+/// What the window was last told: 0 nothing yet, 1 not protected, 2 protected.
+static PROTECTED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
 /// Screenshots and screen sharing see a blank window unless she turned that off (D-037).
+/// The status is read every 15 seconds; Windows is told only when the answer changes, so
+/// the window is not touched while she types.
 pub(crate) fn protect(window: &tauri::WebviewWindow, on: bool) {
-    let _ = window.set_content_protected(SCREEN_PROTECTION_ENABLED && on);
+    use std::sync::atomic::Ordering;
+    let on = SCREEN_PROTECTION_ENABLED && on;
+    let state = if on { 2 } else { 1 };
+    if PROTECTED.swap(state, Ordering::SeqCst) == state {
+        return;
+    }
+    if window.set_content_protected(on).is_err() {
+        // Try again next time.
+        PROTECTED.store(0, Ordering::SeqCst);
+    }
 }
 
 #[tauri::command]
