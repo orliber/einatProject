@@ -9,6 +9,12 @@ pub(crate) async fn prepare_consult(
     conversation_id: Option<String>,
     message: String,
 ) -> Res<Prepared> {
+    warm_names(
+        &state,
+        case_id.as_deref().unwrap_or(""),
+        vec![message.clone()],
+    )
+    .await;
     with_core(&state, move |c| {
         c.prepare_consult(case_id.as_deref(), conversation_id.as_deref(), &message)
     })

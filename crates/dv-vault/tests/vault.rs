@@ -1157,3 +1157,130 @@ fn style_sources_and_profiles_are_sealed_versioned_and_erasable() {
         );
     }
 }
+
+#[test]
+fn a_backup_job_is_written_and_checked_away_from_the_vault() {
+    let (_dir, mut vault, _) = new_vault();
+    noam(&mut vault);
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("job.vaultbak");
+    let job = vault.begin_backup().unwrap();
+    // The vault keeps working while the job writes (it holds no borrow of the vault).
+    let worker = std::thread::spawn(move || job.write(&dest).unwrap().verify());
+    noam(&mut vault);
+    let done = worker.join().unwrap().unwrap();
+    assert_eq!(
+        done.cases, 1,
+        "the snapshot's own count, not the vault's later one"
+    );
+    vault.finish_backup(&done).unwrap();
+    let events: Vec<String> = vault
+        .audit_entries(2)
+        .unwrap()
+        .into_iter()
+        .map(|e| e.event)
+        .collect();
+    assert!(events.contains(&AuditEvent::BackupWritten.as_str().to_owned()));
+    assert!(events.contains(&AuditEvent::BackupChecked.as_str().to_owned()));
+
+    // A file changed on the disk between writing and reading back does not count.
+    let dest = out.path().join("changed.vaultbak");
+    let written = vault.begin_backup().unwrap().write(&dest).unwrap();
+    let mut bytes = fs::read(&dest).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 1;
+    fs::write(&dest, &bytes).unwrap();
+    assert!(written.verify().is_err());
+
+    // Another backup in its place is not this one.
+    let dest = out.path().join("swapped.vaultbak");
+    let first = vault.begin_backup().unwrap().write(&dest).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let second = vault.begin_backup().unwrap().write(&dest).unwrap();
+    assert!(first.verify().is_err());
+    assert!(second.verify().is_ok());
+}
+
+#[test]
+fn a_restore_drill_runs_without_the_vault_and_is_logged_after() {
+    let (dir, mut vault, _) = new_vault();
+    noam(&mut vault);
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("b.vaultbak");
+    vault.write_backup(&dest).unwrap();
+    let bytes = fs::read(&dest).unwrap();
+    let check = dv_vault::drill_backup(dir.path(), &bytes, Secret::Password(PASSWORD)).unwrap();
+    assert_eq!(check.cases, 1);
+    assert!(matches!(
+        dv_vault::drill_backup(dir.path(), &bytes, Secret::Password("ניחוש ארוך אבל שגוי")),
+        Err(VaultError::WrongSecret)
+    ));
+    vault.record_drill(&check).unwrap();
+    assert_eq!(
+        vault.audit_entries(1).unwrap()[0].event,
+        AuditEvent::BackupChecked.as_str()
+    );
+}
+
+#[test]
+fn a_new_slot_is_made_away_from_the_vault_and_applies_only_where_it_was_made() {
+    let (dir, mut vault, _) = new_vault();
+    let header = vault.header_copy();
+    let new_password = "סיסמה חדשה וארוכה מאוד";
+    // A wrong proof makes no slot.
+    assert!(matches!(
+        dv_vault::NewSlot::password(
+            &header,
+            Secret::Password("ניחוש ארוך אבל שגוי"),
+            new_password,
+            Argon2Params::TEST
+        ),
+        Err(VaultError::WrongSecret)
+    ));
+    let slot = dv_vault::NewSlot::password(
+        &header,
+        Secret::Password(PASSWORD),
+        new_password,
+        Argon2Params::TEST,
+    )
+    .unwrap();
+    // Made for this vault: another vault refuses it.
+    let (_other_dir, mut other, _) = new_vault();
+    let stale = dv_vault::NewSlot::password(
+        &header,
+        Secret::Password(PASSWORD),
+        "עוד סיסמה חדשה וארוכה",
+        Argon2Params::TEST,
+    )
+    .unwrap();
+    assert!(matches!(
+        other.apply_slot(stale),
+        Err(VaultError::Integrity(_))
+    ));
+
+    vault.apply_slot(slot).unwrap();
+    assert_eq!(
+        vault.audit_entries(1).unwrap()[0].event,
+        AuditEvent::PasswordChanged.as_str()
+    );
+    // A second slot made from the old header no longer applies: the slot changed since.
+    let late = dv_vault::NewSlot::password(
+        &header,
+        Secret::Password(PASSWORD),
+        "עוד סיסמה חדשה וארוכה",
+        Argon2Params::TEST,
+    )
+    .unwrap();
+    assert!(matches!(
+        vault.apply_slot(late),
+        Err(VaultError::Integrity(_))
+    ));
+    drop(vault);
+    assert!(Vault::unlock_with_password(dir.path(), PASSWORD).is_err());
+    let mut vault = Vault::unlock_with_password(dir.path(), new_password).unwrap();
+
+    let (kit_slot, kit) =
+        dv_vault::NewSlot::recovery(&vault.header_copy(), Secret::Password(new_password)).unwrap();
+    vault.apply_slot(kit_slot).unwrap();
+    assert!(vault.check_recovery_key(&kit));
+}

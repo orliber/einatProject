@@ -19,11 +19,13 @@ pub mod recovery;
 mod store;
 
 pub use audit::{AuditEntry, AuditEvent};
+pub use header::VaultHeader;
 pub use password::{Argon2Params, PolicyViolation, MIN_PASSWORD_CHARS};
 pub use store::{
-    peek_backup, BackupCheck, BackupInfo, BackupPeek, Created, DraftVersion, IntegrityReport,
-    Practitioner, RemovedInput, Secret, StoredConsultation, StoredStyleProfile, StoredStyleSource,
-    Vault, BACKUP_EXTENSION,
+    drill_backup, peek_backup, BackupCheck, BackupInfo, BackupJob, BackupPeek, BackupWritten,
+    Created, DraftVersion, IntegrityReport, NewSlot, Practitioner, RemovedInput, Secret,
+    StoredConsultation, StoredStyleProfile, StoredStyleSource, TokenHasher, Vault, WrittenBackup,
+    BACKUP_EXTENSION,
 };
 
 #[derive(Debug, thiserror::Error)]

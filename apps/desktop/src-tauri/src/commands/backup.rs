@@ -22,7 +22,13 @@ pub(crate) async fn write_backup(
     let Some(dest) = file_dialog::save(&app, start, dv_core::backup_file_name(now)).await else {
         return Ok(None);
     };
-    with_core(&state, move |c| c.write_backup(&dest).map(Some)).await
+    off_lock(
+        &state,
+        move |c| c.begin_backup(&dest),
+        |task| task.run(),
+        |c, run| c.finish_backup(run).map(Some),
+    )
+    .await
 }
 
 /// Ask for a backup file (the system's "Open") and say what it is. `None` when cancelled.
@@ -74,7 +80,13 @@ pub(crate) async fn check_backup(
     password: String,
 ) -> Res<BackupCheckView> {
     let password = zeroize::Zeroizing::new(password);
-    with_core(&state, move |c| c.check_staged_backup(&password)).await
+    off_lock(
+        &state,
+        move |c| c.begin_check_backup(&password),
+        |job| job.run(),
+        |c, drilled| c.finish_check_backup(drilled),
+    )
+    .await
 }
 
 /// On a computer with no vault: restore the chosen file and open it.
@@ -86,12 +98,17 @@ pub(crate) async fn restore_backup(
 ) -> Res<AppStatus> {
     let password = password.map(zeroize::Zeroizing::new);
     let recovery_key = recovery_key.map(zeroize::Zeroizing::new);
-    with_core(&state, move |c| {
-        c.restore_staged_backup(
-            password.as_deref().map(String::as_str),
-            recovery_key.as_deref().map(String::as_str),
-        )
-    })
+    off_lock(
+        &state,
+        move |c| {
+            c.begin_restore(
+                password.as_deref().map(String::as_str),
+                recovery_key.as_deref().map(String::as_str),
+            )
+        },
+        |job| job.run(),
+        |c, restored| c.finish_restore(restored),
+    )
     .await
 }
 

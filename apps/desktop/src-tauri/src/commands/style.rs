@@ -23,7 +23,13 @@ pub(crate) async fn import_style_source(
         .map(percent_decode)
         .unwrap_or_default();
     let bytes = bytes.clone();
-    with_core(&state, move |c| c.import_style_source(&file_name, &bytes)).await
+    off_lock(
+        &state,
+        move |c| c.begin_import_style_source(&file_name, bytes),
+        |job| job.run(),
+        |c, read| c.finish_import_style_source(read),
+    )
+    .await
 }
 
 #[tauri::command]

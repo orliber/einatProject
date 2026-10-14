@@ -19,6 +19,7 @@ mod intake;
 mod library;
 pub mod name_model;
 use name_model::NameHints;
+mod jobs;
 mod readiness;
 mod retention;
 mod seal;
@@ -65,7 +66,12 @@ pub(crate) use dates::today;
 pub use dv_ai::{StyleItem, StyleKind, StyleOrigin, StyleProfile};
 pub use dv_vault::BACKUP_EXTENSION;
 pub use followup::FollowUpView;
+pub use jobs::{
+    BackupRun, BackupTask, DocumentRead, DrillJob, Drilled, ExportJob, Exported, ReadJob,
+    RestoreJob, Restored, SlotJob, SlotMade, UnlockJob, Unlocked,
+};
 pub use library::TRASH_DAYS;
+pub use name_model::{HintJob, HintsRead};
 pub use readiness::{Readiness, ReadinessItem};
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
 pub use security::{SecurityItem, SecurityStatus};
@@ -545,15 +551,11 @@ pub struct Core {
     session: u64,
     /// Where the optional name model is downloaded (D-053); `None` keeps it off.
     models_dir: Option<PathBuf>,
-    /// The name model, started on first use while it is on (ended on lock).
-    ner: Option<name_model::NameFinder>,
-    /// The worker being checked and started in the background right after unlock, so the
-    /// first request does not wait for the model to load (dropped on lock, which ends it).
-    ner_loading: Option<std::thread::JoinHandle<Result<name_model::NameFinder, String>>>,
+    /// The name model, started on first use or right after unlock while it is on, and
+    /// shared with the job that reads a case's texts while the core is free (ended on lock).
+    ner: Option<Arc<name_model::NerCell>>,
     /// The app's binary, started as the name model's isolated worker (SEC2).
     ner_exe: Option<PathBuf>,
-    /// Why the name model is not in use right now (shown in Settings).
-    ner_problem: Option<String>,
     /// One data-block mark per section conversation (case, section), so its materials are the
     /// same bytes on every turn and the API's cache can serve them (dropped on lock).
     section_nonces: HashMap<(String, String), String>,
@@ -844,7 +846,7 @@ fn model_title(
 /// The report's font from the computer's own fonts (regular, and bold when there is one),
 /// else Arial, else a common font with Hebrew letters. Read only, never copied anywhere but
 /// into the PDF.
-fn system_fonts(name: &str) -> Option<(Vec<u8>, Option<Vec<u8>>)> {
+pub(crate) fn system_fonts(name: &str) -> Option<(Vec<u8>, Option<Vec<u8>>)> {
     let windows = std::env::var_os("WINDIR")
         .map(|w| std::path::PathBuf::from(w).join("Fonts"))
         .unwrap_or_else(|| std::path::PathBuf::from("C:\\Windows\\Fonts"));

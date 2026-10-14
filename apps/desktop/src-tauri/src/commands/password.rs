@@ -12,9 +12,12 @@ pub(crate) async fn change_password(
 ) -> Res<()> {
     let current = zeroize::Zeroizing::new(current);
     let new_password = zeroize::Zeroizing::new(new_password);
-    with_core(&state, move |c| {
-        c.change_password(&current, with_recovery, &new_password)
-    })
+    off_lock(
+        &state,
+        move |c| c.begin_change_password(&current, with_recovery, &new_password),
+        |job| job.run(),
+        |c, made| c.finish_change_password(made),
+    )
     .await
 }
 
@@ -25,5 +28,11 @@ pub(crate) async fn new_recovery_kit(
     with_recovery: bool,
 ) -> Res<CreatedVault> {
     let current = zeroize::Zeroizing::new(current);
-    with_core(&state, move |c| c.new_recovery_kit(&current, with_recovery)).await
+    off_lock(
+        &state,
+        move |c| c.begin_new_recovery_kit(&current, with_recovery),
+        |job| job.run(),
+        |c, made| c.finish_new_recovery_kit(made),
+    )
+    .await
 }

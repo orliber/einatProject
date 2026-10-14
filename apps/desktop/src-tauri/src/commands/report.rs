@@ -53,14 +53,29 @@ pub(crate) async fn export_report(
     password: Option<String>,
 ) -> Res<String> {
     let dir = export_dir(&app)?;
-    with_core(&state, move |c| {
-        let check = c.check_export(&case_id)?;
-        let bytes = c.export_report(&case_id, password.as_deref().filter(|p| !p.is_empty()))?;
-        let path = free_path(&dir, &check.file_name);
-        std::fs::write(&path, bytes).map_err(|e| CoreError::Internal(e.to_string()))?;
+    let password = password
+        .filter(|p| !p.is_empty())
+        .map(zeroize::Zeroizing::new);
+    // Rendering, encrypting and writing the file run with the core free (F2).
+    let (bytes, check) = off_lock(
+        &state,
+        move |c| c.begin_export_report(&case_id, password.as_deref().map(String::as_str)),
+        |job| job.run(),
+        |c, exported| c.finish_export(exported),
+    )
+    .await?;
+    save_export(dir, check.file_name, bytes).await
+}
+
+/// Write an exported file into `dir` under a free name, off the core.
+async fn save_export(dir: PathBuf, file_name: String, bytes: Vec<u8>) -> Res<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = free_path(&dir, &file_name);
+        std::fs::write(&path, bytes).map_err(|e| CoreError::Internal(e.to_string()).to_ui())?;
         Ok(path.display().to_string())
     })
     .await
+    .map_err(|_| internal("task"))?
 }
 
 /// EX-3: the report as a locked PDF, into the same folder as the Word file.
@@ -72,18 +87,19 @@ pub(crate) async fn export_pdf(
     password: String,
 ) -> Res<String> {
     let dir = export_dir(&app)?;
-    with_core(&state, move |c| {
-        let check = c.check_export(&case_id)?;
-        let bytes = c.export_pdf(&case_id, &password)?;
-        let stem = check
-            .file_name
-            .rsplit_once('.')
-            .map_or(check.file_name.as_str(), |(s, _)| s);
-        let path = free_path(&dir, &format!("{stem}.pdf"));
-        std::fs::write(&path, bytes).map_err(|e| CoreError::Internal(e.to_string()))?;
-        Ok(path.display().to_string())
-    })
-    .await
+    let password = zeroize::Zeroizing::new(password);
+    let (bytes, check) = off_lock(
+        &state,
+        move |c| c.begin_export_pdf(&case_id, &password),
+        |job| job.run(),
+        |c, exported| c.finish_export(exported),
+    )
+    .await?;
+    let stem = check
+        .file_name
+        .rsplit_once('.')
+        .map_or(check.file_name.as_str(), |(s, _)| s);
+    save_export(dir, format!("{stem}.pdf"), bytes).await
 }
 
 /// Whether a PDF is one this vault exported, unchanged: when it was made, or `None`.

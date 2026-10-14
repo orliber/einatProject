@@ -111,6 +111,46 @@ where
     .map_err(|_| internal("task"))?
 }
 
+/// Long work away from the core (F2): `begin` takes what it needs under the lock, `run` does
+/// the slow part on a worker thread while every other command goes on, and `finish` writes the
+/// result back under the lock.
+async fn off_lock<J, D, T>(
+    state: &AppState,
+    begin: impl FnOnce(&mut Core) -> Result<J, CoreError> + Send + 'static,
+    run: impl FnOnce(J) -> D + Send + 'static,
+    finish: impl FnOnce(&mut Core, D) -> Result<T, CoreError> + Send + 'static,
+) -> Res<T>
+where
+    J: Send + 'static,
+    D: Send + 'static,
+    T: Send + 'static,
+{
+    let job = with_core(state, begin).await?;
+    let done = tauri::async_runtime::spawn_blocking(move || run(job))
+        .await
+        .map_err(|_| internal("task"))?;
+    with_core(state, move |c| finish(c, done)).await
+}
+
+/// Let the name model read a case's new texts (and `extra`) while the core is free (F2),
+/// before a command that filters them. Only a head start: the command reads anything still
+/// missing itself, so filtering never depends on it. Nothing happens when the model is off.
+async fn warm_names(state: &AppState, case_id: &str, extra: Vec<String>) {
+    let core = Arc::clone(&state.core);
+    let case_id = case_id.to_owned();
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        let job = core
+            .lock()
+            .ok()?
+            .begin_name_hints(&case_id, &extra)
+            .ok()??;
+        let read = job.run();
+        core.lock().ok()?.finish_name_hints(read);
+        Some(())
+    })
+    .await;
+}
+
 /// Next to the vault folder, never inside it. Kept small.
 const CRASH_LOG: &str = "crash-log.txt";
 
@@ -236,10 +276,19 @@ fn main() {
                 // A backup that is due goes by itself to the drive of the last one, if it is
                 // connected (see `Core::auto_backup`). A failure waits and is shown nowhere: the
                 // backup reminder stays until a backup is made.
+                // Only the snapshot holds the core; writing to the drive and reading it back
+                // run with the core free (F2).
                 let mut backed_up = false;
                 if !locked {
-                    if let Ok(mut c) = timer.lock() {
-                        backed_up = c.auto_backup().ok().flatten().is_some();
+                    let task = timer
+                        .lock()
+                        .ok()
+                        .and_then(|mut c| c.begin_auto_backup().ok().flatten());
+                    if let Some(task) = task {
+                        let run = task.run();
+                        if let Ok(mut c) = timer.lock() {
+                            backed_up = c.finish_backup(run).is_ok();
+                        }
                     }
                 }
                 if locked {

@@ -86,7 +86,14 @@ pub(crate) async fn confirm_recovery_key(
 
 #[tauri::command]
 pub(crate) async fn unlock(state: tauri::State<'_, AppState>, password: String) -> Res<AppStatus> {
-    with_core(&state, move |c| c.unlock(&password)).await
+    let password = zeroize::Zeroizing::new(password);
+    off_lock(
+        &state,
+        move |c| c.begin_unlock(&password),
+        |job| job.run(),
+        |c, opened| c.finish_unlock(opened),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -94,7 +101,14 @@ pub(crate) async fn unlock_with_recovery(
     state: tauri::State<'_, AppState>,
     key: String,
 ) -> Res<AppStatus> {
-    with_core(&state, move |c| c.unlock_with_recovery(&key)).await
+    let key = zeroize::Zeroizing::new(key);
+    off_lock(
+        &state,
+        move |c| c.begin_unlock_with_recovery(&key),
+        |job| job.run(),
+        |c, opened| c.finish_unlock(opened),
+    )
+    .await
 }
 
 #[tauri::command]

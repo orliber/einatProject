@@ -60,6 +60,7 @@ pub(crate) async fn add_input(
     title: String,
     content: String,
 ) -> Res<CaseInput> {
+    warm_names(&state, &case_id, vec![title.clone(), content.clone()]).await;
     with_core(&state, move |c| {
         c.add_input(&case_id, kind, &title, &content)
     })
@@ -74,6 +75,7 @@ pub(crate) async fn update_input(
     title: String,
     content: String,
 ) -> Res<()> {
+    warm_names(&state, &case_id, vec![title.clone(), content.clone()]).await;
     with_core(&state, move |c| {
         c.update_input(&case_id, &input_id, &title, &content)
     })
@@ -179,10 +181,20 @@ pub(crate) async fn import_document(
     let case_id = header("x-case-id").ok_or_else(|| internal("case"))?;
     let file_name = header("x-file-name").unwrap_or_default();
     let bytes = bytes.clone();
-    with_core(&state, move |c| {
-        c.import_document(&case_id, &file_name, &bytes)
-    })
-    .await
+    // Reading the file (and OCR for a scan) runs with the core free (F2), and so does the
+    // name model on what was read.
+    let job = {
+        let case_id = case_id.clone();
+        with_core(&state, move |c| {
+            c.begin_import_document(&case_id, &file_name, bytes)
+        })
+        .await?
+    };
+    let read = tauri::async_runtime::spawn_blocking(move || job.run())
+        .await
+        .map_err(|_| internal("task"))?;
+    warm_names(&state, &case_id, read.texts()).await;
+    with_core(&state, move |c| c.finish_import_document(&case_id, read)).await
 }
 
 #[tauri::command]
@@ -191,6 +203,7 @@ pub(crate) async fn preview_filter(
     case_id: String,
     text: String,
 ) -> Res<dv_privacy::FilterOutcome> {
+    warm_names(&state, &case_id, vec![text.clone()]).await;
     with_core(&state, move |c| c.preview_filter(&case_id, &text)).await
 }
 

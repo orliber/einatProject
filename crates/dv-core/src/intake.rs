@@ -3,34 +3,6 @@
 use super::*;
 
 impl Core {
-    /// Read a document: in the isolated worker when the app set one, then OCR for a scan.
-    pub(crate) fn read_document(
-        &self,
-        file_name: &str,
-        bytes: &[u8],
-    ) -> Result<dv_ingest::Extracted, CoreError> {
-        dv_ingest::import(
-            self.ingest_exe.as_deref(),
-            self.ocr.as_ref(),
-            file_name,
-            bytes,
-        )
-        .map_err(|e| CoreError::Refused(e.message_he()))
-    }
-
-    /// Read a document and show what would be stored and hidden. Nothing is saved until the
-    /// psychologist confirms (then the UI calls [`Core::add_input`] with the reviewed text).
-    pub fn import_document(
-        &mut self,
-        case_id: &str,
-        file_name: &str,
-        bytes: &[u8],
-    ) -> Result<ImportPreview, CoreError> {
-        self.vault_ref()?.case_meta(case_id)?;
-        let extracted = self.read_document(file_name, bytes)?;
-        self.preview_extracted(case_id, file_name, extracted)
-    }
-
     /// The upload preview for a document already read (OCR'd text included).
     pub(crate) fn preview_extracted(
         &mut self,

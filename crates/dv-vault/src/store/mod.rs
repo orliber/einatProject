@@ -25,10 +25,15 @@ use crate::password::{self, Argon2Params};
 use crate::{recovery, VaultError};
 
 mod backup;
+mod slots;
 mod style;
 #[cfg(test)]
 mod tests;
-pub use backup::{peek_backup, BackupCheck, BackupInfo, BackupPeek, BACKUP_EXTENSION};
+pub use backup::{
+    drill_backup, peek_backup, BackupCheck, BackupInfo, BackupJob, BackupPeek, BackupWritten,
+    WrittenBackup, BACKUP_EXTENSION,
+};
+pub use slots::NewSlot;
 pub use style::{StoredStyleProfile, StoredStyleSource};
 
 /// Raw rows as read from SQLite, before decryption.
@@ -76,6 +81,29 @@ pub struct DraftVersion {
 const MAIN_DB: &str = "main.db";
 const IDENTITY_DB: &str = "identity.db";
 const AUDIT_DB: &str = "audit.db";
+
+fn token_hmac(key: &Key32, token: &str) -> String {
+    hex(&hmac_sha256(
+        key,
+        format!("token|{}", token.trim()).as_bytes(),
+    ))
+}
+
+/// [`Vault::token_hmac`] away from the open vault.
+pub struct TokenHasher(Key32);
+
+impl TokenHasher {
+    #[must_use]
+    pub fn token_hmac(&self, token: &str) -> String {
+        token_hmac(&self.0, token)
+    }
+}
+
+impl std::fmt::Debug for TokenHasher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("TokenHasher")
+    }
+}
 
 /// Subkeys derived from the master key, one per purpose.
 struct Keys {
@@ -548,23 +576,8 @@ impl Vault {
         new_password: &str,
         params: Argon2Params,
     ) -> Result<(), VaultError> {
-        password::check_policy(new_password).map_err(VaultError::Policy)?;
-        let mk = master_key(&self.header, current)?;
-        let salt = random_array::<32>()?;
-        let kek = password::derive_kek(new_password, &salt, params)?;
-        let wrapped = wrap_mk(&kek, "password", &self.header.vault_id, &mk)?;
-        for slot in &mut self.header.slots {
-            if let KeySlot::Password { .. } = slot {
-                *slot = KeySlot::Password {
-                    salt: hex(&salt),
-                    params,
-                    wrapped_mk: wrapped.clone(),
-                };
-            }
-        }
-        self.header.sign(&self.keys.header)?;
-        self.header.write(&self.dir)?;
-        self.record(AuditEvent::PasswordChanged, None, &serde_json::json!({}))
+        let slot = NewSlot::password(&self.header, current, new_password, params)?;
+        self.apply_slot(slot)
     }
 
     /// Issue a new recovery key (the old one stops working). Needs the current password or kit.
@@ -572,21 +585,9 @@ impl Vault {
         &mut self,
         current: Secret<'_>,
     ) -> Result<Zeroizing<String>, VaultError> {
-        let mk = master_key(&self.header, current)?;
-        let recovery_key = Key32::random()?;
-        let kek = recovery::derive_kek(&recovery_key)?;
-        let wrapped = wrap_mk(&kek, "recovery", &self.header.vault_id, &mk)?;
-        for slot in &mut self.header.slots {
-            if let KeySlot::Recovery { .. } = slot {
-                *slot = KeySlot::Recovery {
-                    wrapped_mk: wrapped.clone(),
-                };
-            }
-        }
-        self.header.sign(&self.keys.header)?;
-        self.header.write(&self.dir)?;
-        self.record(AuditEvent::RecoveryKeyRotated, None, &serde_json::json!({}))?;
-        Ok(recovery::format(&recovery_key))
+        let (slot, kit) = NewSlot::recovery(&self.header, current)?;
+        self.apply_slot(slot)?;
+        Ok(kit)
     }
 
     /// True if `typed` opens this vault's recovery slot (used to confirm the printout).
@@ -1567,10 +1568,14 @@ impl Vault {
     /// Keyed hash of a normalized token, for the "this is not a name" allow-list.
     #[must_use]
     pub fn token_hmac(&self, token: &str) -> String {
-        hex(&hmac_sha256(
-            &self.keys.index,
-            format!("token|{}", token.trim()).as_bytes(),
-        ))
+        token_hmac(&self.keys.index, token)
+    }
+
+    /// The same keyed hash of a word, for work away from the open vault (F2). It holds a copy
+    /// of the index key, wiped when it is dropped.
+    #[must_use]
+    pub fn token_hasher(&self) -> TokenHasher {
+        TokenHasher(self.keys.index.clone())
     }
 
     /// Remember a decision about a token. A later decision for the same case replaces it.

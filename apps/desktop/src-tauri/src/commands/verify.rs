@@ -18,6 +18,7 @@ pub(crate) async fn prepare_verify(
     case_id: String,
     section_key: String,
 ) -> Res<Prepared> {
+    warm_names(&state, &case_id, Vec::new()).await;
     with_core(&state, move |c| c.prepare_verify(&case_id, &section_key)).await
 }
 

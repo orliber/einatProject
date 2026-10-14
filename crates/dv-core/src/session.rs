@@ -34,9 +34,7 @@ impl Core {
             session: 0,
             models_dir: None,
             ner: None,
-            ner_loading: None,
             ner_exe: None,
-            ner_problem: None,
             hint_cache: HashMap::new(),
             section_nonces: HashMap::new(),
         }
@@ -323,20 +321,6 @@ impl Core {
         }
     }
 
-    pub fn unlock(&mut self, password: &str) -> Result<AppStatus, CoreError> {
-        self.refuse_cloud()?;
-        self.check_backoff()?;
-        let result = Vault::unlock_with_password(&self.dir, password);
-        self.after_unlock(result, true)
-    }
-
-    pub fn unlock_with_recovery(&mut self, recovery_key: &str) -> Result<AppStatus, CoreError> {
-        self.refuse_cloud()?;
-        self.check_backoff()?;
-        let result = Vault::unlock_with_recovery(&self.dir, recovery_key);
-        self.after_unlock(result, true)
-    }
-
     pub fn confirm_recovery_key(&mut self, typed: &str) -> Result<bool, CoreError> {
         Ok(self.vault_ref()?.check_recovery_key(typed))
     }
@@ -356,70 +340,13 @@ impl Core {
         self.hint_cache.clear();
         self.section_nonces.clear();
         // The model's process held texts of this session in its memory: it ends with the lock.
-        self.ner = None;
-        self.ner_loading = None;
-        self.ner_problem = None;
+        self.end_name_model();
         if let Some(v) = self.vault.take() {
             let _ = v.lock_because(reason);
         }
     }
 
     // ------------------------------------------------------------ password and kit
-
-    /// `current` is the password, or the recovery kit when the password was forgotten.
-    pub(crate) fn proof<'a>(current: &'a str, with_recovery: bool) -> dv_vault::Secret<'a> {
-        if with_recovery {
-            dv_vault::Secret::Recovery(current)
-        } else {
-            dv_vault::Secret::Password(current)
-        }
-    }
-
-    /// A new password. Old backups keep opening with the old one, so a new backup is asked for.
-    pub fn change_password(
-        &mut self,
-        current: &str,
-        with_recovery: bool,
-        new_password: &str,
-    ) -> Result<(), CoreError> {
-        self.check_backoff()?;
-        let params = self.argon.unwrap_or_else(Argon2Params::calibrate);
-        let result = self.vault_mut()?.rekey_password(
-            Self::proof(current, with_recovery),
-            new_password,
-            params,
-        );
-        if let Err(e) = result {
-            self.count_failure(&e);
-            return Err(e.into());
-        }
-        self.failed_unlocks = 0;
-        self.mark_secret_changed()
-    }
-
-    /// A new printed kit; the old one stops opening the vault (not old backups).
-    pub fn new_recovery_kit(
-        &mut self,
-        current: &str,
-        with_recovery: bool,
-    ) -> Result<CreatedVault, CoreError> {
-        self.check_backoff()?;
-        let result = self
-            .vault_mut()?
-            .rotate_recovery_key(Self::proof(current, with_recovery));
-        let key = match result {
-            Ok(key) => key,
-            Err(e) => {
-                self.count_failure(&e);
-                return Err(e.into());
-            }
-        };
-        self.failed_unlocks = 0;
-        self.mark_secret_changed()?;
-        Ok(CreatedVault {
-            recovery_key: key.to_string(),
-        })
-    }
 
     // ------------------------------------------------------------ settings
 }

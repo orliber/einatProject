@@ -10,6 +10,7 @@ pub(crate) async fn prepare_section(
     instruction: String,
     replaces: Option<String>,
 ) -> Res<Prepared> {
+    warm_names(&state, &case_id, Vec::new()).await;
     with_core(&state, move |c| {
         c.prepare_section_replacing(&case_id, &section_key, &instruction, replaces.as_deref())
     })
@@ -21,6 +22,7 @@ pub(crate) async fn prepare_full_draft(
     state: tauri::State<'_, AppState>,
     case_id: String,
 ) -> Res<Vec<(String, Prepared)>> {
+    warm_names(&state, &case_id, Vec::new()).await;
     with_core(&state, move |c| c.prepare_full_draft(&case_id)).await
 }
 

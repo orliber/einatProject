@@ -182,9 +182,185 @@ pub(super) fn remove_stale_scratch(dir: &Path) {
     }
 }
 
+/// The keys a backup is checked with once it is on the disk: copies, wiped when the job ends.
+struct CheckKeys {
+    backup: Key32,
+    db_main: Key32,
+    db_identity: Key32,
+    db_audit: Key32,
+}
+
+impl CheckKeys {
+    fn of(keys: &Keys) -> Self {
+        Self {
+            backup: keys.backup.clone(),
+            db_main: keys.db_main.clone(),
+            db_identity: keys.db_identity.clone(),
+            db_audit: keys.db_audit.clone(),
+        }
+    }
+}
+
+/// A backup taken from the open vault, to be written and read back away from it (F2): the
+/// drive may be a slow removable one, and the check opens every database. Made by
+/// [`Vault::begin_backup`] in a moment; [`BackupJob::write`] and [`WrittenBackup::verify`] do
+/// the slow part; [`Vault::finish_backup`] records it. It holds only the sealed file and
+/// copies of the keys that check it, wiped when it is dropped.
+pub struct BackupJob {
+    file: Vec<u8>,
+    created_at: i64,
+    vault_id: String,
+    /// The vault folder: the check's scratch folder goes next to the vault.
+    dir: std::path::PathBuf,
+    keys: CheckKeys,
+    /// Cases in the vault when the snapshot was taken.
+    live_cases: i64,
+}
+
+/// A backup on the disk, not yet read back.
+#[derive(Debug)]
+pub struct WrittenBackup {
+    job: BackupJob,
+    path: std::path::PathBuf,
+}
+
+/// A backup written and opened again from where it went: ready to be recorded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupWritten {
+    pub info: BackupInfo,
+    pub cases: u32,
+}
+
+impl std::fmt::Debug for BackupJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BackupJob")
+            .field("bytes", &self.file.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl BackupJob {
+    #[must_use]
+    pub fn bytes(&self) -> u64 {
+        u64::try_from(self.file.len()).unwrap_or(u64::MAX)
+    }
+
+    /// Write the file to `dest`, replaced atomically.
+    pub fn write(self, dest: &Path) -> Result<WrittenBackup, VaultError> {
+        let part = dest.with_extension(format!("{BACKUP_EXTENSION}.part"));
+        let written = (|| -> Result<(), VaultError> {
+            let mut f = fs::File::create(&part)?;
+            f.write_all(&self.file)?;
+            f.sync_all()?;
+            fs::rename(&part, dest)?;
+            Ok(())
+        })();
+        if written.is_err() {
+            let _ = fs::remove_file(&part);
+        }
+        written?;
+        Ok(WrittenBackup {
+            job: self,
+            path: dest.to_path_buf(),
+        })
+    }
+}
+
+impl WrittenBackup {
+    /// Read the backup back from the disk it went to and open it: the seal, each database
+    /// with its own key (`PRAGMA integrity_check`), and as many cases as the vault had. A
+    /// backup counts only once it is known to open.
+    pub fn verify(self) -> Result<BackupWritten, VaultError> {
+        let job = &self.job;
+        let bytes = fs::read(&self.path)?;
+        let (created_at, cases) = check_file(&bytes, &job.vault_id, &job.keys, &job.dir)?;
+        if created_at != job.created_at {
+            return Err(VaultError::Integrity(
+                "the backup on the disk is another one",
+            ));
+        }
+        if cases != job.live_cases {
+            return Err(VaultError::Integrity(
+                "the backup holds fewer cases than the vault",
+            ));
+        }
+        Ok(BackupWritten {
+            info: BackupInfo {
+                bytes: job.bytes(),
+                created_at,
+            },
+            cases: u32::try_from(cases).unwrap_or(u32::MAX),
+        })
+    }
+}
+
+/// Open a backup file with this vault's keys in a scratch folder next to the vault, and count
+/// its cases. The snapshots stay encrypted, and the folder is removed.
+fn check_file(
+    bytes: &[u8],
+    vault_id: &str,
+    keys: &CheckKeys,
+    dir: &Path,
+) -> Result<(i64, i64), VaultError> {
+    let parsed = parse(bytes)?;
+    if parsed.header.vault_id != vault_id {
+        return Err(VaultError::Integrity("the backup is not from this vault"));
+    }
+    let container = open(
+        &keys.backup,
+        &aad(&parsed.header.vault_id, parsed.created_at),
+        parsed.sealed,
+    )
+    .map_err(|_| VaultError::Integrity("the backup was changed or is not from this vault"))?;
+    let files = entries(&container)?;
+    let scratch = dir.join(format!(".verify-{}", random_id()?));
+    fs::create_dir(&scratch)?;
+    let opened = (|| -> Result<i64, VaultError> {
+        let mut cases = None;
+        for (name, data) in &files {
+            let key = match name.as_str() {
+                MAIN_DB => &keys.db_main,
+                IDENTITY_DB => &keys.db_identity,
+                _ => &keys.db_audit,
+            };
+            let file = scratch.join(name);
+            fs::write(&file, data)?;
+            let conn = open_encrypted(&file, key)?;
+            let check: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
+            if check != "ok" {
+                return Err(VaultError::Integrity("a database in the backup is damaged"));
+            }
+            if name == MAIN_DB {
+                cases = Some(conn.query_row("SELECT count(*) FROM cases", [], |r| r.get(0))?);
+            }
+        }
+        cases.ok_or_else(|| corrupt("no main database"))
+    })();
+    let _ = fs::remove_dir_all(&scratch);
+    Ok((parsed.created_at, opened?))
+}
+
+/// Restore drill on a backup file, without the open vault: open it in a scratch folder next
+/// to the vault in `dir`, count what it holds, and remove it. Proves both the file and the
+/// secret work. The slow part (the key derivation) runs here; [`Vault::record_drill`] logs it.
+pub fn drill_backup(
+    dir: &Path,
+    backup: &[u8],
+    secret: Secret<'_>,
+) -> Result<BackupCheck, VaultError> {
+    let scratch = dir.join(format!(".drill-{}", random_id()?));
+    let result = Vault::restore_backup(backup, &scratch, secret).map(|(v, check)| {
+        drop(v);
+        check
+    });
+    let _ = fs::remove_dir_all(&scratch);
+    result
+}
+
 impl Vault {
-    /// Write an encrypted backup of the whole vault to `dest` (replaced atomically).
-    pub fn write_backup(&mut self, dest: &Path) -> Result<BackupInfo, VaultError> {
+    /// Take a consistent snapshot of the three databases and seal it: the part of a backup
+    /// that needs the vault. Writing it out and reading it back is the job's.
+    pub fn begin_backup(&mut self) -> Result<BackupJob, VaultError> {
         // A scratch folder next to the vault, for the encrypted snapshots only.
         let scratch = self.dir.join(format!(".backup-{}", random_id()?));
         fs::create_dir(&scratch)?;
@@ -203,6 +379,9 @@ impl Vault {
         })();
         let _ = fs::remove_dir_all(&scratch);
         let container = snapshots?;
+        let live_cases: i64 = self
+            .main
+            .query_row("SELECT count(*) FROM cases", [], |r| r.get(0))?;
 
         let header_bytes = fs::read(self.dir.join(HEADER_FILE))?;
         let created_at = now();
@@ -211,31 +390,55 @@ impl Vault {
             &aad(&self.header.vault_id, created_at),
             &container,
         )?;
-        let mut out = Vec::with_capacity(MAGIC.len() + 4 + header_bytes.len() + 8 + sealed.len());
-        out.extend_from_slice(MAGIC);
-        out.extend_from_slice(
+        let mut file = Vec::with_capacity(MAGIC.len() + 4 + header_bytes.len() + 8 + sealed.len());
+        file.extend_from_slice(MAGIC);
+        file.extend_from_slice(
             &u32::try_from(header_bytes.len())
                 .map_err(|_| corrupt("header size"))?
                 .to_le_bytes(),
         );
-        out.extend_from_slice(&header_bytes);
-        out.extend_from_slice(&created_at.to_le_bytes());
-        out.extend_from_slice(&sealed);
+        file.extend_from_slice(&header_bytes);
+        file.extend_from_slice(&created_at.to_le_bytes());
+        file.extend_from_slice(&sealed);
+        Ok(BackupJob {
+            file,
+            created_at,
+            vault_id: self.header.vault_id.clone(),
+            dir: self.dir.clone(),
+            keys: CheckKeys::of(&self.keys),
+            live_cases,
+        })
+    }
 
-        let part = dest.with_extension(format!("{BACKUP_EXTENSION}.part"));
-        {
-            let mut f = fs::File::create(&part)?;
-            f.write_all(&out)?;
-            f.sync_all()?;
-        }
-        fs::rename(&part, dest)?;
-        let bytes = u64::try_from(out.len()).unwrap_or(u64::MAX);
+    /// Record a backup that was written and read back.
+    pub fn finish_backup(&mut self, done: &BackupWritten) -> Result<(), VaultError> {
         self.record(
             AuditEvent::BackupWritten,
             None,
-            &serde_json::json!({ "bytes": bytes }),
+            &serde_json::json!({ "bytes": done.info.bytes }),
         )?;
-        Ok(BackupInfo { bytes, created_at })
+        self.record(
+            AuditEvent::BackupChecked,
+            None,
+            &serde_json::json!({ "cases": done.cases, "ok": true, "auto": true }),
+        )
+    }
+
+    /// Write an encrypted backup of the whole vault to `dest` (replaced atomically), without
+    /// reading it back.
+    pub fn write_backup(&mut self, dest: &Path) -> Result<BackupInfo, VaultError> {
+        let job = self.begin_backup()?;
+        let info = BackupInfo {
+            bytes: job.bytes(),
+            created_at: job.created_at,
+        };
+        job.write(dest)?;
+        self.record(
+            AuditEvent::BackupWritten,
+            None,
+            &serde_json::json!({ "bytes": info.bytes }),
+        )?;
+        Ok(info)
     }
 
     /// Open a backup into `target` (which must not hold a vault) and return the opened vault.
@@ -302,64 +505,28 @@ impl Vault {
         backup: &[u8],
         secret: Secret<'_>,
     ) -> Result<BackupCheck, VaultError> {
-        let scratch = self.dir.join(format!(".drill-{}", random_id()?));
-        let result = Vault::restore_backup(backup, &scratch, secret).map(|(v, check)| {
-            drop(v);
-            check
-        });
-        let _ = fs::remove_dir_all(&scratch);
-        let check = result?;
+        let check = drill_backup(&self.dir, backup, secret)?;
+        self.record_drill(&check)?;
+        Ok(check)
+    }
+
+    /// Log a restore drill made with [`drill_backup`].
+    pub fn record_drill(&mut self, check: &BackupCheck) -> Result<(), VaultError> {
         self.record(
             AuditEvent::BackupChecked,
             None,
             &serde_json::json!({ "cases": check.cases, "ok": check.integrity_ok }),
-        )?;
-        Ok(check)
+        )
     }
 
-    /// Read back a backup this vault has just written, from the disk it went to, and open it:
-    /// the seal, each database with its own key (`PRAGMA integrity_check`), and as many cases
-    /// as the vault has now. Needs no password, so it runs after every backup, automatic ones
-    /// too. The snapshots are opened in a scratch folder next to the vault, still encrypted,
-    /// and removed.
+    /// Read back a backup this vault has written, from the disk it went to, and open it: the
+    /// seal, each database with its own key, and as many cases as the vault has now. Needs no
+    /// password. The snapshots are opened in a scratch folder next to the vault, still
+    /// encrypted, and removed.
     pub fn verify_backup_file(&mut self, path: &Path) -> Result<BackupCheck, VaultError> {
         let bytes = fs::read(path)?;
-        let parsed = parse(&bytes)?;
-        if parsed.header.vault_id != self.header.vault_id {
-            return Err(VaultError::Integrity("the backup is not from this vault"));
-        }
-        let container = open(
-            &self.keys.backup,
-            &aad(&parsed.header.vault_id, parsed.created_at),
-            parsed.sealed,
-        )
-        .map_err(|_| VaultError::Integrity("the backup was changed or is not from this vault"))?;
-        let files = entries(&container)?;
-        let scratch = self.dir.join(format!(".verify-{}", random_id()?));
-        fs::create_dir(&scratch)?;
-        let opened = (|| -> Result<i64, VaultError> {
-            let mut cases = None;
-            for (name, data) in &files {
-                let key = match name.as_str() {
-                    MAIN_DB => &self.keys.db_main,
-                    IDENTITY_DB => &self.keys.db_identity,
-                    _ => &self.keys.db_audit,
-                };
-                let file = scratch.join(name);
-                fs::write(&file, data)?;
-                let conn = open_encrypted(&file, key)?;
-                let check: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
-                if check != "ok" {
-                    return Err(VaultError::Integrity("a database in the backup is damaged"));
-                }
-                if name == MAIN_DB {
-                    cases = Some(conn.query_row("SELECT count(*) FROM cases", [], |r| r.get(0))?);
-                }
-            }
-            cases.ok_or_else(|| corrupt("no main database"))
-        })();
-        let _ = fs::remove_dir_all(&scratch);
-        let cases = opened?;
+        let keys = CheckKeys::of(&self.keys);
+        let (created_at, cases) = check_file(&bytes, &self.header.vault_id, &keys, &self.dir)?;
         let live: i64 = self
             .main
             .query_row("SELECT count(*) FROM cases", [], |r| r.get(0))?;
@@ -374,7 +541,7 @@ impl Vault {
             &serde_json::json!({ "cases": cases, "ok": true, "auto": true }),
         )?;
         Ok(BackupCheck {
-            created_at: parsed.created_at,
+            created_at,
             cases: u32::try_from(cases).unwrap_or(u32::MAX),
             integrity_ok: true,
         })

@@ -2,7 +2,7 @@
 
 use super::*;
 
-fn docx(document_body: &str, header: &str, creator: &str) -> Vec<u8> {
+pub(super) fn docx(document_body: &str, header: &str, creator: &str) -> Vec<u8> {
     use std::io::Write;
     let w = r#"xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main""#;
     let p = |t: &str| format!("<w:p><w:r><w:t xml:space=\"preserve\">{t}</w:t></w:r></w:p>");
