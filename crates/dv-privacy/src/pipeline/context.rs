@@ -173,34 +173,38 @@ struct Scan<'a> {
     tokens: &'a [Token],
 }
 
+// Every index passed here is a token of `tokens`. Were one not, the reading that keeps
+// looking for a name is taken: words count as joined and a clause as starting.
 impl Scan<'_> {
-    fn gap(&self, a: usize, b: usize) -> &str {
-        &self.text[self.tokens[a].end..self.tokens[b].start]
+    fn gap(&self, a: usize, b: usize) -> Option<&str> {
+        let (a, b) = (self.tokens.get(a)?, self.tokens.get(b)?);
+        self.text.get(a.end..b.start)
     }
 
     fn joined(&self, a: usize, b: usize) -> bool {
-        self.gap(a, b).trim().is_empty()
+        self.gap(a, b).is_none_or(|g| g.trim().is_empty())
     }
 
     fn norm(&self, i: usize) -> &str {
-        &self.tokens[i].norm
+        self.tokens.get(i).map_or("", |t| t.norm.as_str())
     }
 
     /// The first word after `i`, past a parenthesis: "מרינה (המרפאה בעיסוק שלו) נתנה".
     fn next_word(&self, i: usize) -> Option<usize> {
         let j = i + 1;
-        self.tokens.get(j)?;
-        let gap = self.gap(i, j);
+        let gap = self.gap(i, j)?;
         if !gap.contains('(') {
             // "לדבר, שרה, מספרת סיפורים": a verb after a comma is the next item in a list.
             return gap.trim().is_empty().then_some(j);
         }
-        let close = self.text[self.tokens[i].end..].find(')')? + self.tokens[i].end;
-        (j..self.tokens.len()).find(|&k| self.tokens[k].start > close)
+        let from = self.tokens.get(i)?.end;
+        let close = self.text.get(from..)?.find(')')? + from;
+        let mut after = self.tokens.iter().enumerate().skip(j);
+        after.find(|(_, t)| t.start > close).map(|(k, _)| k)
     }
 
     fn starts_clause(&self, i: usize) -> bool {
-        i == 0 || boundary(self.gap(i - 1, i))
+        i == 0 || self.gap(i - 1, i).is_none_or(boundary)
     }
 
     /// A person word before `i`, joined to it, with up to two words such as "הקודמת שלו"
@@ -240,12 +244,15 @@ pub(super) fn strong_names(
     let s = Scan { text, tokens };
     let mut out: Vec<SuspectSpan> = Vec::new();
     let taken = |i: usize, out: &[SuspectSpan]| {
-        let t = &tokens[i];
-        overlaps(t.start, t.end, reps, suspects) || overlaps(t.start, t.end, &[], out)
+        tokens.get(i).is_some_and(|t| {
+            overlaps(t.start, t.end, reps, suspects) || overlaps(t.start, t.end, &[], out)
+        })
     };
     // A person already hidden at `i`: a name found by the rules or a declared person.
     let person_at = |i: usize, out: &[SuspectSpan]| {
-        let t = &tokens[i];
+        let Some(t) = tokens.get(i) else {
+            return false;
+        };
         let hit = |a: usize, b: usize| t.start < b && a < t.end;
         suspects
             .iter()
@@ -261,18 +268,22 @@ pub(super) fn strong_names(
     };
     // `any`: the word need not be on the name lists ("הנהג אבי פרץ": a family name follows).
     let push_word = |i: usize, why: &str, any: bool, out: &mut Vec<SuspectSpan>| {
-        let found = name_in(&tokens[i], true);
+        // No token at `i`: no word there to hide.
+        let Some(tok) = tokens.get(i) else {
+            return;
+        };
+        let found = name_in(tok, true);
         let (p, head) = match found {
             Some(f) => f,
-            None if any => (0, tokens[i].norm.clone()),
+            None if any => (0, tok.norm.clone()),
             None => return,
         };
-        if taken(i, out) || allowlisted(&head) || allowlisted(&tokens[i].norm) {
+        if taken(i, out) || allowlisted(&head) || allowlisted(&tok.norm) {
             return;
         }
-        let raw = &text[tokens[i].start..tokens[i].end];
-        let start = tokens[i].start + byte_len_of_letters(raw, p);
-        let mut end = tokens[i].end;
+        let raw = &text[tok.start..tok.end];
+        let start = tok.start + byte_len_of_letters(raw, p);
+        let mut end = tok.end;
         // A family name right after it: "מר שמחה אוחיון", "הנהג אבי פרץ".
         if let Some(n) = tokens.get(i + 1) {
             if s.joined(i, i + 1)
@@ -307,7 +318,7 @@ pub(super) fn strong_names(
         })
     };
 
-    for i in 0..tokens.len() {
+    for (i, tok) in tokens.iter().enumerate() {
         if taken(i, &out) {
             continue;
         }
@@ -316,12 +327,12 @@ pub(super) fn strong_names(
         let addressed = i > 0 && s.joined(i - 1, i) && is_in(s.norm(i - 1), ADDRESS);
         if (s.person_before(i) || addressed)
             && surname_after(i)
-            && !lex.common_words.contains(&tokens[i].norm)
+            && !lex.common_words.contains(&tok.norm)
         {
             push_word(i, "שם ושם משפחה", true, &mut out);
             continue;
         }
-        let Some((p, head)) = name_in(&tokens[i], true) else {
+        let Some((p, head)) = name_in(tok, true) else {
             continue;
         };
         let bare = p == 0;
@@ -345,7 +356,9 @@ pub(super) fn strong_names(
 
         // "הגננות: סמאח ונוגה", "עם ים ומתן", "עם מתן ועם ג'סיקה".
         let pair_with = |j: usize, out: &[SuspectSpan]| {
-            tokens.get(j).is_some() && (person_at(j, out) || name_in(&tokens[j], true).is_some())
+            tokens
+                .get(j)
+                .is_some_and(|t| person_at(j, out) || name_in(t, true).is_some())
         };
         if bare && i + 1 < tokens.len() && s.joined(i, i + 1) {
             let (partner, via) = if s.norm(i + 1) == normalize("ועם") {
@@ -361,7 +374,7 @@ pub(super) fn strong_names(
                 .checked_sub(1)
                 .is_some_and(|k| s.joined(k, i) && is_in(s.norm(k), &["עם", "ועם"]));
             let anchored = with
-                || (i > 0 && s.gap(i - 1, i).contains(':'))
+                || (i > 0 && s.gap(i - 1, i).is_none_or(|g| g.contains(':')))
                 || person_at(partner.min(tokens.len() - 1), &out)
                 || lex.first_names.contains(&head);
             if partner_ok && anchored && (with || !very_common) {

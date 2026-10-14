@@ -464,7 +464,11 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
             (None, Some(m)) => (Some(m), m == 5),
             (None, None) => (None, true),
         };
-        let start_tok = if day_before.is_some() { i - 1 } else { i };
+        let start_tok = if day_before.is_some() {
+            i.saturating_sub(1)
+        } else {
+            i
+        };
         let mut end_tok = if year_after.is_some() { i + 1 } else { i };
         // "ביוני", "ממאי": May–July with "in" or "from" glued on are months; were the word
         // the name יוני or יולי, hiding it is right too. Not "במרץ" ("energetically").
@@ -489,10 +493,13 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
                 (None, Some(y)) => relative_he((y, m, 15), today),
                 _ => PatternKind::Date.fixed_replacement().to_owned(),
             };
+            // The day and the year were read from these tokens; were one missing, the month
+            // itself is still hidden.
+            let span_tok = |k: usize| tokens.get(k).unwrap_or(tok);
             push(
                 hits,
-                tokens[start_tok].start,
-                tokens[end_tok].end,
+                span_tok(start_tok).start,
+                span_tok(end_tok).end,
                 PatternKind::Date,
                 replacement,
             );

@@ -252,7 +252,10 @@ pub(crate) fn name_phrases(name: &str) -> Vec<Vec<String>> {
         // The same person by a nickname or the full form ("שמעון" ↔ "שימי", "ולדה" ↔
         // "ולדימיר"): hidden, and refused by the gate, like the declared spelling.
         for nick in LEXICON.nicknames.get(w).into_iter().flatten() {
-            if !out.iter().any(|p| p.len() == 1 && &p[0] == nick) {
+            if !out
+                .iter()
+                .any(|p| matches!(p.as_slice(), [only] if only == nick))
+            {
                 out.push(vec![nick.clone()]);
             }
         }
@@ -273,7 +276,7 @@ fn variant_reads_as_word(v: &str) -> bool {
 /// is found again by it (with the same tag), in the pipeline and in the gate alike. Matched
 /// everywhere it would hide "בגיל 3" and "בשמחה" in every later document of the case.
 fn found_word(identity: &Identity, phrase: &[String]) -> bool {
-    identity.source != IdentitySource::Manual && phrase.len() == 1 && everyday_name(&phrase[0])
+    identity.source != IdentitySource::Manual && matches!(phrase, [w] if everyday_name(w))
 }
 
 /// A name that is also an everyday word on its own ("אלה", "חן", "מימון", "אדם").
@@ -288,6 +291,10 @@ pub fn everyday_name(w: &str) -> bool {
 /// here is it read as the name.
 pub(crate) fn name_context_at(text: &str, tokens: &[Token], i: usize) -> bool {
     let lex = &*LEXICON;
+    // No token at `i`: a name's place, so the word stays hidden.
+    let Some(here) = tokens.get(i) else {
+        return true;
+    };
     let prev = i
         .checked_sub(1)
         .and_then(|j| tokens.get(j))
@@ -309,11 +316,11 @@ pub(crate) fn name_context_at(text: &str, tokens: &[Token], i: usize) -> bool {
     let definite_next = next.is_some_and(|n| n.starts_with('ה') && word_bucket(n) >= EVERYDAY);
     let ends_clause = tokens
         .get(i + 1)
-        .is_none_or(|t| text[tokens[i].end..t.start].contains([',', '.', ';', ')', '\n']));
+        .is_none_or(|t| text[here.end..t.start].contains([',', '.', ';', ')', '\n']));
     let with = in_list(prev, &["עם", "ועם", "אצל", "ואצל"]);
     // "אלון, הילד מהתיק השני," / "נוגה, אחותו": a person word right after a comma.
     let apposition = tokens.get(i + 1).is_some_and(|t| {
-        text[tokens[i].end..t.start].trim() == ","
+        text[here.end..t.start].trim() == ","
             && is_person_word(t.norm.strip_prefix('ה').unwrap_or(&t.norm))
     });
     before_next
@@ -346,7 +353,10 @@ pub(crate) fn other_case_word(
     if first != last || name_context_at(text, tokens, first) {
         return false;
     }
-    let whole = &tokens[first];
+    // No token at `first`: not shown to be a word, so it stays hidden.
+    let Some(whole) = tokens.get(first) else {
+        return false;
+    };
     let head: String = whole.norm.chars().skip(prefix).collect();
     if (ctx.allowlisted)(&whole.norm) || (ctx.allowlisted)(&head) {
         return true;
@@ -356,9 +366,10 @@ pub(crate) fn other_case_word(
     {
         return true;
     }
-    let plural_before = first.checked_sub(1).is_some_and(|j| {
-        let w = tokens[j].norm.strip_prefix('ה').unwrap_or(&tokens[j].norm);
-        &text[tokens[j].end..whole.start] == " "
+    let before = first.checked_sub(1).and_then(|j| tokens.get(j));
+    let plural_before = before.is_some_and(|t| {
+        let w = t.norm.strip_prefix('ה').unwrap_or(&t.norm);
+        &text[t.end..whole.start] == " "
             && (w.ends_with("ימ") || w.ends_with("ות"))
             && word_bucket(w) >= EVERYDAY
     });
@@ -417,8 +428,7 @@ fn consonants(word: &str, arabic: bool) -> Option<String> {
     let chars: Vec<char> = word.chars().collect();
     let mut out = String::new();
     let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
+    while let Some(&c) = chars.get(i) {
         let geresh = chars.get(i + 1).is_some_and(|n| *n == '\'');
         let last = i + 1 == chars.len() || (geresh && i + 2 == chars.len());
         let class = if arabic {
@@ -533,7 +543,7 @@ pub(crate) fn arabic_identity_matches(
         // Prefixes: "و", "ال", "ب", "ل", "ك", "ف" and their combinations.
         let chars: Vec<char> = t.norm.chars().collect();
         for skip in 0..chars.len().min(4) {
-            let glued: String = chars[..skip].iter().collect();
+            let glued: String = chars.iter().take(skip).collect();
             if ![
                 "", "و", "ال", "وال", "ب", "بال", "ل", "لل", "ول", "وب", "ك", "ف",
             ]
@@ -541,7 +551,7 @@ pub(crate) fn arabic_identity_matches(
             {
                 continue;
             }
-            let rest: String = chars[skip..].iter().collect();
+            let rest: String = chars.iter().skip(skip).collect();
             let Some(k) = consonants(&rest, true) else {
                 continue;
             };
@@ -694,14 +704,19 @@ pub(crate) fn declared_reads_as_word(
     if first != last {
         return false;
     }
-    let whole = &tokens[first];
+    // No token at `first`: not shown to be a word, so the name stays hidden.
+    let Some(whole) = tokens.get(first) else {
+        return false;
+    };
     let letters: Vec<char> = whole.norm.chars().collect();
-    let head: String = letters[prefix.min(letters.len())..].iter().collect();
+    let head: String = letters.iter().skip(prefix).collect();
     if word_bucket(&head) < EVERYDAY {
         return false;
     }
+    // The last prefix letter glued on, if any.
+    let glued_last = prefix.checked_sub(1).and_then(|k| letters.get(k)).copied();
     // "בגיל", "לגיל", "מגיל", "כגיל": a preposition glued on.
-    let preposition = prefix > 0 && matches!(letters[prefix - 1], 'ב' | 'ל' | 'מ' | 'כ');
+    let preposition = matches!(glued_last, Some('ב' | 'ל' | 'מ' | 'כ'));
     let plain_after = tokens
         .get(first + 1)
         .filter(|n| &text[whole.end..n.start] == " ")
@@ -717,8 +732,9 @@ pub(crate) fn declared_reads_as_word(
         .map(|n| n.norm.as_str());
     let before = first
         .checked_sub(1)
-        .map(|j| tokens[j].norm.as_str())
-        .filter(|_| first > 0 && &text[tokens[first - 1].end..whole.start] == " ");
+        .and_then(|j| tokens.get(j))
+        .filter(|t| &text[t.end..whole.start] == " ")
+        .map(|t| t.norm.as_str());
     let one_of =
         |w: Option<&str>, list: &[&str]| w.is_some_and(|w| list.iter().any(|l| norm_eq(l, &w)));
     const NUMBER_WORDS: &[&str] = &[
@@ -818,8 +834,7 @@ pub(crate) fn declared_reads_as_word(
         ),
         "אור" => {
             // "לאור זאת", "ולאור הממצאים": "in light of".
-            let in_light_of = prefix > 0
-                && letters[prefix - 1] == 'ל'
+            let in_light_of = glued_last == Some('ל')
                 && one_of(
                     plain_after,
                     &[
@@ -942,10 +957,31 @@ fn differs_at_end(a: &str, b: &str) -> bool {
         (&b, &a)
     };
     match long.len() - short.len() {
-        0 => long.len() > 1 && long[..long.len() - 1] == short[..short.len() - 1],
-        1 => long[..short.len()] == short[..] || (long[0] == 'ה' && long[1..] == short[..]),
+        // The same but for the last letter (and more than that letter).
+        0 => matches!(
+            (long.split_last(), short.split_last()),
+            (Some((_, a)), Some((_, b))) if !a.is_empty() && a == b
+        ),
+        // A letter added at the end, or the article at the start.
+        1 => {
+            long.starts_with(short)
+                || long
+                    .split_first()
+                    .is_some_and(|(&c, rest)| c == 'ה' && rest == short.as_slice())
+        }
         _ => false,
     }
+}
+
+/// The text between two words, `a` before `b`.
+fn between<'t>(text: &'t str, a: &Token, b: &Token) -> &'t str {
+    &text[a.end..b.start]
+}
+
+/// A word the filter located itself is missing. Never expected; if it happens the whole
+/// filtering fails (fail-closed) rather than guess what to hide.
+fn out_of_range() -> PrivacyError {
+    PrivacyError::Internal("token index out of range".to_owned())
 }
 
 /// Only spaces, a bullet or a list number between the start of the line (or a table cell)
@@ -974,7 +1010,7 @@ fn name_run_suspects(
     ctx: &PrivacyContext<'_>,
     reps: &[Replacement],
     out: &mut Vec<SuspectSpan>,
-) {
+) -> Result<(), PrivacyError> {
     let lex = &*LEXICON;
     let hebrew = |t: &Token| {
         t.norm
@@ -982,7 +1018,8 @@ fn name_run_suspects(
             .any(|c| ('\u{05D0}'..='\u{05EA}').contains(&c))
     };
     let digits = |t: &Token| t.norm.chars().any(|c| c.is_ascii_digit());
-    let gap = |a: usize, b: usize| &text[tokens[a].end..tokens[b].start];
+    // The text between tokens `a` and `b`; `None` when either is past the last word.
+    let gap = |a: usize, b: usize| Some(between(text, tokens.get(a)?, tokens.get(b)?));
     let breaks = |g: &str| {
         g.chars().any(|c| {
             matches!(
@@ -1025,25 +1062,25 @@ fn name_run_suspects(
             )
         })
         .collect();
-    for i in 0..tokens.len() {
+    for (i, tok) in tokens.iter().enumerate() {
         for (words, label) in &labels {
             let n = words.len();
-            if n == 0
-                || i + n >= tokens.len()
-                || !tokens[i..i + n]
-                    .iter()
-                    .zip(words)
-                    .all(|(t, w)| &t.norm == w)
-            {
+            // The label's words, and the word right after them.
+            let (Some(run), Some(after)) = (tokens.get(i..i + n), tokens.get(i + n)) else {
+                continue;
+            };
+            let Some(last) = run.last() else {
+                continue; // an empty label
+            };
+            if !run.iter().zip(words).all(|(t, w)| &t.norm == w) {
                 continue;
             }
             // A form field starts its line (or a table cell): "הדרכת הורים: מתן זמן" is
             // a sentence, not the field "הורים:".
-            if !starts_line(text, tokens[i].start) {
+            if !starts_line(text, tok.start) {
                 continue;
             }
-            let last = i + n - 1;
-            let g = gap(last, last + 1);
+            let g = between(text, last, after);
             let direct = matches!(*label, "לכבוד" | "בברכה" | "חתימה");
             let label_ends = if direct {
                 true
@@ -1054,10 +1091,12 @@ fn name_run_suspects(
                 continue;
             }
             let message = format!("שם אחרי \"{label}\"");
-            let mut j = last + 1;
+            let mut j = i + n;
             let mut taken = 0;
-            while j < tokens.len() && taken < 3 {
-                let t = &tokens[j];
+            while taken < 3 {
+                let Some(t) = tokens.get(j) else {
+                    break;
+                };
                 if stop(&t.norm) || !hebrew(t) || digits(t) {
                     break;
                 }
@@ -1072,42 +1111,41 @@ fn name_run_suspects(
                     push(t.start, t.end, &message, out);
                     taken += 1;
                 }
-                if j + 1 >= tokens.len() || breaks(gap(j, j + 1)) {
-                    break;
+                match tokens.get(j + 1) {
+                    Some(next) if !breaks(between(text, t, next)) => j += 1,
+                    _ => break,
                 }
-                j += 1;
             }
         }
     }
 
     // 2. "משפחת כהן", "למשפחת כהן-לוי".
     let family = normalize("משפחת");
-    for i in 0..tokens.len().saturating_sub(1) {
-        if !prefix_splits(&tokens[i].norm)
-            .iter()
-            .any(|(_, h)| *h == family)
-        {
+    for (i, tok) in tokens.iter().enumerate() {
+        if !prefix_splits(&tok.norm).iter().any(|(_, h)| *h == family) {
             continue;
         }
         let mut j = i + 1;
-        while j < tokens.len() && hebrew(&tokens[j]) && !digits(&tokens[j]) {
-            push(tokens[j].start, tokens[j].end, "שם משפחה", out);
-            if j + 1 >= tokens.len() || !gap(j, j + 1).contains(['-', '\u{05BE}']) {
-                break;
+        while let Some(t) = tokens.get(j).filter(|t| hebrew(t) && !digits(t)) {
+            push(t.start, t.end, "שם משפחה", out);
+            match tokens.get(j + 1) {
+                Some(next) if between(text, t, next).contains(['-', '\u{05BE}']) => j += 1,
+                _ => break,
             }
-            j += 1;
         }
     }
 
     // 3. A name after a title: "ד\"ר קורנבליט", "הרב אלמוזנינו", "גב' ורשבסקי". Up to two words,
     // until punctuation; a declared name there is already replaced.
-    for i in 0..tokens.len().saturating_sub(1) {
-        if !is_title(&tokens[i].norm) || breaks(gap(i, i + 1)) {
+    for (i, (tok, next)) in tokens.iter().zip(tokens.iter().skip(1)).enumerate() {
+        if !is_title(&tok.norm) || breaks(between(text, tok, next)) {
             continue;
         }
         let mut j = i + 1;
-        while j < tokens.len() && j <= i + 2 {
-            let t = &tokens[j];
+        while j <= i + 2 {
+            let Some(t) = tokens.get(j) else {
+                break;
+            };
             if stop(&t.norm)
                 || !hebrew(t)
                 || digits(t)
@@ -1118,11 +1156,12 @@ fn name_run_suspects(
             }
             push(t.start, t.end, "שם אחרי תואר", out);
             // A second word only after a first name ("ד\"ר אבנר שטרן", not "ד\"ר כהן המליץ").
-            if j + 1 >= tokens.len() || !joins(gap(j, j + 1)) || !lex.first_names.contains(&t.norm)
-            {
-                break;
+            match tokens.get(j + 1) {
+                Some(n) if joins(between(text, t, n)) && lex.first_names.contains(&t.norm) => {
+                    j += 1;
+                }
+                _ => break,
             }
-            j += 1;
         }
     }
 
@@ -1133,37 +1172,36 @@ fn name_run_suspects(
     // two words, which in a report can only be a name.
     let opens = |g: &str| g.contains([',', '–', '—', '(']) && !g.contains(['.', '\n', ':']);
     let closes = |g: &str| g.contains([',', '–', '—', ')', '.']);
-    for i in 0..tokens.len() {
-        if !is_person_word(&tokens[i].norm) {
+    for (i, tok) in tokens.iter().enumerate() {
+        if !is_person_word(&tok.norm) {
             continue;
         }
         // One adjective, possessive or "from the …" may follow the person word ("הקודמת",
         // "שלהם", "חברתה מהגן").
         let mut k = i;
-        if k + 1 < tokens.len()
-            && (tokens[k + 1].norm.starts_with('ה')
-                || possessive.contains(&tokens[k + 1].norm)
-                || tokens[k + 1].norm.starts_with("מה"))
-            && joins(gap(k, k + 1))
+        if tokens.get(k + 1).is_some_and(|n| {
+            n.norm.starts_with('ה') || possessive.contains(&n.norm) || n.norm.starts_with("מה")
+        }) && gap(k, k + 1).is_some_and(joins)
         {
             k += 1;
         }
-        if k + 1 >= tokens.len() || !opens(gap(k, k + 1)) {
+        if !gap(k, k + 1).is_some_and(opens) {
             continue;
         }
         let first = k + 1;
         let mut last = first;
-        if last + 1 < tokens.len() && joins(gap(last, last + 1)) {
+        if gap(last, last + 1).is_some_and(joins) {
             last += 1;
         }
-        if last + 1 >= tokens.len() || !closes(gap(last, last + 1)) {
-            if first + 1 < tokens.len() && closes(gap(first, first + 1)) {
+        if !gap(last, last + 1).is_some_and(closes) {
+            if gap(first, first + 1).is_some_and(closes) {
                 last = first;
             } else {
                 continue;
             }
         }
-        let words = &tokens[first..=last];
+        // Both ends were read just above.
+        let words = tokens.get(first..=last).ok_or_else(out_of_range)?;
         let known = |t: &Token| {
             prefix_splits(&t.norm).iter().any(|(p, h)| {
                 *p == 0
@@ -1198,22 +1236,20 @@ fn name_run_suspects(
     // 5. A name right after a word for a person, with no punctuation: "הגננת אסתי",
     // "סבא מוטי", "דודה שלו ולדה", "הסייעת החדשה רבקה", "המורה לאנגלית שירלי". What follows
     // must look like a name: a known name, or a word that is not an everyday word.
-    for i in 0..tokens.len() {
-        if !is_person_word(&tokens[i].norm) {
+    for (i, tok) in tokens.iter().enumerate() {
+        if !is_person_word(&tok.norm) {
             continue;
         }
         let mut j = i + 1;
         // One modifier may come between: "שלו", "הקודמת", "לאנגלית".
-        if j + 1 < tokens.len()
-            && gap(i, j) == " "
-            && (possessive.contains(&tokens[j].norm)
-                || ["רבתא", "רבא", "רבה"]
-                    .iter()
-                    .any(|w| norm_eq(w, &tokens[j].norm))
-                || (tokens[j].norm.starts_with(['ה', 'ל'])
-                    && word_bucket(&tokens[j].norm) >= EVERYDAY
-                    && !is_person_word(&tokens[j].norm)))
-        {
+        let modifier = |m: &Token| {
+            possessive.contains(&m.norm)
+                || ["רבתא", "רבא", "רבה"].iter().any(|w| norm_eq(w, &m.norm))
+                || (m.norm.starts_with(['ה', 'ל'])
+                    && word_bucket(&m.norm) >= EVERYDAY
+                    && !is_person_word(&m.norm))
+        };
+        if j + 1 < tokens.len() && gap(i, j) == Some(" ") && tokens.get(j).is_some_and(modifier) {
             j += 1;
         }
         // A nickname may be quoted: סבתא שלה "נונה".
@@ -1222,10 +1258,12 @@ fn name_run_suspects(
                 && g.chars()
                     .all(|c| c == ' ' || matches!(c, '"' | '״' | '“' | '”' | '\''))
         };
-        if j >= tokens.len() || !plain_gap(gap(j - 1, j)) {
+        let Some(t) = tokens.get(j) else {
+            continue;
+        };
+        if !gap(j - 1, j).is_some_and(plain_gap) {
             continue;
         }
-        let t = &tokens[j];
         let known = lex.first_names.contains(&t.norm)
             || lex.word_names.contains(&t.norm)
             || lex.surnames.contains(&t.norm);
@@ -1243,7 +1281,7 @@ fn name_run_suspects(
         // "סבתא שרה לו", "הגננת קראה לה": a word that is also a name, followed by "לו" / "לה",
         // is the verb.
         let dative = tokens.get(j + 1).is_some_and(|n| {
-            gap(j, j + 1) == " "
+            between(text, t, n) == " "
                 && ["לו", "לה", "לי", "לנו", "להם", "להן", "לך"]
                     .iter()
                     .any(|w| norm_eq(w, &n.norm))
@@ -1289,19 +1327,21 @@ fn name_run_suspects(
     for i in 0..tokens.len() {
         for phrase in &naming {
             let n = phrase.len();
-            if i + n >= tokens.len()
-                || !tokens[i..i + n]
-                    .iter()
-                    .zip(phrase)
-                    .all(|(t, w)| t.norm == *w || (n == 1 && t.norm == format!("ו{w}")))
+            // The phrase's words, and the word right after them.
+            let (Some(run), Some(t)) = (tokens.get(i..i + n), tokens.get(i + n)) else {
+                continue;
+            };
+            if !run
+                .iter()
+                .zip(phrase)
+                .all(|(t, w)| t.norm == *w || (n == 1 && t.norm == format!("ו{w}")))
             {
                 continue;
             }
-            let j = i + n;
-            let t = &tokens[j];
-            let plain = gap(j - 1, j)
-                .chars()
-                .all(|c| c == ' ' || matches!(c, '"' | '״' | '“' | '”' | '\'' | ':'));
+            let plain = gap((i + n).saturating_sub(1), i + n).is_some_and(|g| {
+                g.chars()
+                    .all(|c| c == ' ' || matches!(c, '"' | '״' | '“' | '”' | '\'' | ':'))
+            });
             if plain
                 && hebrew(t)
                 && !digits(t)
@@ -1320,12 +1360,11 @@ fn name_run_suspects(
     // 7. Two parts of one name joined by a hyphen, one of them a known name and the other
     // not an everyday word: "אביבה-טגסט", "שרה-לי". Ordinary compounds ("דו-לשוני",
     // "אי-שקט") have everyday words on both sides.
-    for i in 0..tokens.len().saturating_sub(1) {
-        let g = gap(i, i + 1);
+    for (a, b) in tokens.iter().zip(tokens.iter().skip(1)) {
+        let g = between(text, a, b);
         if g != "-" && g != "\u{05BE}" {
             continue;
         }
-        let (a, b) = (&tokens[i], &tokens[i + 1]);
         if !hebrew(a) || !hebrew(b) || digits(a) || digits(b) {
             continue;
         }
@@ -1343,8 +1382,7 @@ fn name_run_suspects(
     }
 
     // 8. A surname right after a first name, a declared name or a name found above.
-    let is_name = |i: usize, out: &[SuspectSpan]| {
-        let t = &tokens[i];
+    let is_name = |t: &Token, out: &[SuspectSpan]| {
         reps.iter()
             .any(|r| r.declared && r.start <= t.start && t.end <= r.end)
             || out.iter().any(|s| s.start <= t.start && t.end <= s.end)
@@ -1353,12 +1391,13 @@ fn name_run_suspects(
                 .any(|(_, h)| lex.first_names.contains(h))
     };
     let mut surname_at: Option<usize> = None;
-    for (i, t) in tokens.iter().enumerate().skip(1) {
-        let g = gap(i - 1, i);
+    for (k, (prev, t)) in tokens.iter().zip(tokens.iter().skip(1)).enumerate() {
+        let i = k + 1;
+        let g = between(text, prev, t);
         if !joins(g) || !hebrew(t) || digits(t) {
             continue;
         }
-        let hyphen_after_surname = surname_at == Some(i - 1) && g.contains(['-', '\u{05BE}']);
+        let hyphen_after_surname = surname_at == Some(k) && g.contains(['-', '\u{05BE}']);
         let raw = &text[t.start..t.end];
         let looks_like_surname = lex.surnames.contains(&t.norm)
             || (t.norm.chars().count() >= 4
@@ -1368,12 +1407,13 @@ fn name_run_suspects(
             // "אברג'יל", "חאג'": a geresh inside a Hebrew word is a borrowed sound, as in names.
             || (raw.chars().count() >= 4 && raw.contains(['\'', '׳']) && !raw.ends_with(['\'', '׳']));
         if hyphen_after_surname
-            || (is_name(i - 1, out) && looks_like_surname && !lex.common_words.contains(&t.norm))
+            || (is_name(prev, out) && looks_like_surname && !lex.common_words.contains(&t.norm))
         {
             push(t.start, t.end, "נראה כמו שם משפחה", out);
             surname_at = Some(i);
         }
     }
+    Ok(())
 }
 
 fn find_suspects(
@@ -1381,11 +1421,11 @@ fn find_suspects(
     tokens: &[Token],
     ctx: &PrivacyContext<'_>,
     reps: &[Replacement],
-) -> Vec<SuspectSpan> {
+) -> Result<Vec<SuspectSpan>, PrivacyError> {
     let lex = &*LEXICON;
     let declared = declared_words(ctx);
     let mut out: Vec<SuspectSpan> = Vec::new();
-    name_run_suspects(text, tokens, ctx, reps, &mut out);
+    name_run_suspects(text, tokens, ctx, reps, &mut out)?;
     for (i, tok) in tokens.iter().enumerate() {
         if overlaps(tok.start, tok.end, reps, &out)
             || (ctx.allowlisted)(&tok.norm)
@@ -1491,9 +1531,9 @@ fn find_suspects(
         // Loanwords have it too ("צ'אט", "ג'ינס"), so only where a name is expected.
         let letters: Vec<char> = raw.chars().collect();
         let inner_geresh = letters.len() >= 3
-            && letters[..letters.len() - 1]
-                .iter()
-                .any(|c| matches!(c, '\'' | '׳'))
+            && letters
+                .split_last()
+                .is_some_and(|(_, head)| head.iter().any(|c| matches!(c, '\'' | '׳')))
             && letters
                 .iter()
                 .filter(|c| ('\u{05D0}'..='\u{05EA}').contains(*c))
@@ -1581,7 +1621,7 @@ fn find_suspects(
         {
             // The cue and the rest of the job, up to the end of the clause ("עובדת כמורה
             // בבית ספר יסודי"), so the generalization replaces all of it.
-            let end = tokens[job_end(text, tokens, i)].end;
+            let end = job_end(text, tokens, i);
             if !overlaps(tok.start, end, reps, &out) {
                 out.push(SuspectSpan {
                     start: tok.start,
@@ -1592,7 +1632,7 @@ fn find_suspects(
                         message: "מקצוע או מקום עבודה".to_owned(),
                         suggested_role: Role::Other,
                     },
-                    known: Some(generalize_job(text, tokens, i, end)),
+                    known: Some(generalize_job(text, tokens, tok, end)),
                 });
             }
         }
@@ -1609,7 +1649,7 @@ fn find_suspects(
             .join(" ");
         !(ctx.allowlisted)(&normalize(&s.suspect.token)) && !(ctx.allowlisted)(&whole)
     });
-    out
+    Ok(out)
 }
 
 /// Run layers 2–6 on one piece of text.
@@ -2008,7 +2048,9 @@ fn telling(text: &str, tokens: &[Token], i: usize) -> bool {
         "שכאשר",
         "שלאחרונה",
     ];
-    let tag_before = text[..tokens[i].start].trim_end().ends_with(']');
+    let tag_before = tokens
+        .get(i)
+        .is_some_and(|t| text[..t.start].trim_end().ends_with(']'));
     let before = tag_before
         || i.checked_sub(1)
             .and_then(|j| tokens.get(j))
@@ -2025,7 +2067,7 @@ fn telling(text: &str, tokens: &[Token], i: usize) -> bool {
 
 /// "גן השקד", "בגן \"הרימונים\"", "בית ספר \"אופקים חדשים\"", "בית הספר ע\"ש רבין": the name
 /// after a word for a kindergarten or a school, as a replacement that leaves it out.
-fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
+fn institution_names(text: &str, tokens: &[Token]) -> Result<Vec<Replacement>, PrivacyError> {
     let lex = &*LEXICON;
     let hebrew = |t: &Token| {
         t.norm
@@ -2037,7 +2079,8 @@ fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
             .iter()
             .any(|(_, h)| words.iter().any(|w| norm_eq(w, h)))
     };
-    let gap = |a: usize, b: usize| &text[tokens[a].end..tokens[b].start];
+    // The text between tokens `a` and `b`; `None` when either is past the last word.
+    let gap = |a: usize, b: usize| Some(between(text, tokens.get(a)?, tokens.get(b)?));
     let quote = |g: &str| g.contains(['"', '״', '“', '”', '„']);
     let mut out = Vec::new();
     // Token ranges of the names found, and whether they may be hidden wherever they recur.
@@ -2045,7 +2088,7 @@ fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
     // Positions of the institution words, so a name found once is also taken after them.
     let mut keywords: Vec<usize> = Vec::new();
     let mut i = 0;
-    while i < tokens.len() {
+    while let Some(tok) = tokens.get(i) {
         // The institution word(s): "גן", "מעון", "בית ספר", "בית הספר", "בי\"ס", "תלמוד תורה".
         let next_is = |words: &[&str]| {
             tokens
@@ -2055,7 +2098,7 @@ fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
         // `broad`: clinics, institutes and the like, whose descriptions are often ordinary
         // nouns ("מכון שמיעה"), so an unquoted name must not be an everyday word.
         let (end_word, broad) = if is(
-            &tokens[i],
+            tok,
             &[
                 "גן",
                 "גנון",
@@ -2068,17 +2111,17 @@ fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
             ],
         ) {
             (Some(i), false)
-        } else if is(&tokens[i], &["בית", "תלמוד"]) && next_is(&["ספר", "הספר", "תורה"])
+        } else if is(tok, &["בית", "תלמוד"]) && next_is(&["ספר", "הספר", "תורה"])
         {
             (Some(i + 1), false)
-        } else if (is(&tokens[i], &["בית"]) && next_is(&["חולים", "החולים", "מרקחת", "המרקחת"]))
-            || (is(&tokens[i], &["מרכז", "המרכז"]) && next_is(&["רפואי", "הרפואי"]))
-            || (is(&tokens[i], &["מרפאת"]) && next_is(&["ילדים", "הילדים"]))
-            || (is(&tokens[i], &["קופת"]) && next_is(&["חולים"]))
+        } else if (is(tok, &["בית"]) && next_is(&["חולים", "החולים", "מרקחת", "המרקחת"]))
+            || (is(tok, &["מרכז", "המרכז"]) && next_is(&["רפואי", "הרפואי"]))
+            || (is(tok, &["מרפאת"]) && next_is(&["ילדים", "הילדים"]))
+            || (is(tok, &["קופת"]) && next_is(&["חולים"]))
         {
             (Some(i + 1), true)
         } else if is(
-            &tokens[i],
+            tok,
             &[
                 "מכון",
                 "מרכז",
@@ -2108,31 +2151,34 @@ fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
         };
         // "מספרת" is a hair salon and also "tells": "הגננת מספרת שבמפגש…" dropped the word
         // after it. The verb has a speaker before it or a clause after it.
-        let end_word =
-            end_word.filter(|_| !(tokens[i].norm == "מספרת" && telling(text, tokens, i)));
+        let end_word = end_word.filter(|_| !(tok.norm == "מספרת" && telling(text, tokens, i)));
         let Some(k) = end_word else {
             i += 1;
             continue;
         };
         keywords.push(k);
         // A health fund is one of four names, also after a colon ("קופת חולים: כללית").
-        let fund = is(&tokens[i], &["קופת", "קופ\"ח"]);
+        let fund = is(tok, &["קופת", "קופ\"ח"]);
+        // The institution word was read above (`i`, or the word after it).
+        let keyword = tokens.get(k).ok_or_else(out_of_range)?;
         let mut first = k + 1;
         // "]": the institution word is inside a tag ("[ילד_גן] הופנה", "[גן] שלו"), so the next
         // word is not its name. "[": the next word opens a tag (`לגן "[ילד]"`), already hidden.
         // Without these, filtering a tagged draft again dropped that word or cut the tag.
-        if first >= tokens.len()
-            || gap(k, first).contains(['.', ',', '\n', ';', '(', ']', '['])
-            || (gap(k, first).contains(':') && !fund)
-        {
+        let Some(first_tok) = tokens.get(first) else {
+            i = k + 1;
+            continue;
+        };
+        let g = between(text, keyword, first_tok);
+        if g.contains(['.', ',', '\n', ';', '(', ']', '[']) || (g.contains(':') && !fund) {
             i = k + 1;
             continue;
         }
-        if fund && HEALTH_FUNDS.iter().any(|f| norm_eq(f, &tokens[first].norm)) {
+        if fund && HEALTH_FUNDS.iter().any(|f| norm_eq(f, &first_tok.norm)) {
             // Left out, like a kindergarten's name: "קופ\"ח מכבי, מס' חבר" → "קופ\"ח, מס' חבר".
             out.push(Replacement {
-                start: tokens[k].end,
-                end: tokens[first].end,
+                start: keyword.end,
+                end: first_tok.end,
                 out: String::new(),
                 label: "קופת חולים".to_owned(),
                 relative: true,
@@ -2145,11 +2191,11 @@ fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
         // A letterhead: the institution word starts the line and its name runs up to a
         // dash, a bar or the end of the line ("מכון צמיחה – היחידה להתפתחות הילד",
         // "מרפאת ילדים אופק | רחוב…"). There even an ordinary word is the name.
-        if broad && starts_line(text, tokens[i].start) {
-            if let Some(last) = letterhead_name(text, tokens, first) {
+        if broad && starts_line(text, tok.start) {
+            if let Some((last, last_end)) = letterhead_name(text, tokens, first) {
                 out.push(Replacement {
-                    start: tokens[k].end,
-                    end: tokens[last].end,
+                    start: keyword.end,
+                    end: last_end,
                     out: String::new(),
                     label: "שם מוסד".to_owned(),
                     relative: true,
@@ -2161,23 +2207,22 @@ fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
             }
         }
         // "ע\"ש רבין": whatever follows "named after" is a name.
-        let named_after =
-            tokens[first].norm == normalize("ע\"ש") || tokens[first].norm == normalize("עש");
+        let named_after = first_tok.norm == normalize("ע\"ש") || first_tok.norm == normalize("עש");
         if named_after {
             first += 1;
         }
-        let opened = first < tokens.len() && quote(gap(first - 1, first));
-        let mut last = None;
+        let opened = gap(first - 1, first).is_some_and(quote);
+        // The last word of the name, and where it ends.
+        let mut last: Option<(usize, usize)> = None;
         if opened {
             // Up to the closing quote, at most four words.
-            for j in first..tokens.len().min(first + 4) {
-                if !hebrew(&tokens[j]) {
+            for (j, t) in tokens.iter().enumerate().skip(first).take(4) {
+                if !hebrew(t) {
                     break;
                 }
-                let after = if j + 1 < tokens.len() {
-                    gap(j, j + 1)
-                } else {
-                    &text[tokens[j].end..]
+                let after = match tokens.get(j + 1) {
+                    Some(n) => between(text, t, n),
+                    None => &text[t.end..],
                 };
                 // A tag inside the quotes (a tagged draft, `לגן " [ילד] "`): not a name, as
                 // on the first filtering, where the declared name took that span.
@@ -2185,15 +2230,14 @@ fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
                     break;
                 }
                 if quote(after) {
-                    last = Some(j);
+                    last = Some((j, t.end));
                     break;
                 }
                 if after.contains(['.', ',', '\n']) {
                     break;
                 }
             }
-        } else if first < tokens.len() {
-            let t = &tokens[first];
+        } else if let Some(t) = tokens.get(first) {
             let stop = INSTITUTION_STOP.iter().any(|w| norm_eq(w, &t.norm));
             let everyday = |w: &str| crate::lexicon::word_bucket(w) >= EVERYDAY;
             let stem = &t.norm[t.norm.char_indices().nth(1).map_or(0, |(b, _)| b)..];
@@ -2216,20 +2260,19 @@ fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
                 && !lex.common_words.contains(&t.norm)
                 && (named_after || definite_name || known || rare_name)
             {
-                last = Some(first);
+                last = Some((first, t.end));
                 // "גן הדקל הירוק"? One more word only after "ע\"ש" ("ע\"ש יצחק רבין").
-                if named_after
-                    && first + 1 < tokens.len()
-                    && gap(first, first + 1) == " "
-                    && hebrew(&tokens[first + 1])
-                    && lex.surnames.contains(&tokens[first + 1].norm)
-                {
-                    last = Some(first + 1);
+                if let Some(n) = tokens.get(first + 1).filter(|n| {
+                    named_after
+                        && between(text, t, n) == " "
+                        && hebrew(n)
+                        && lex.surnames.contains(&n.norm)
+                }) {
+                    last = Some((first + 1, n.end));
                 }
             }
         }
-        if let Some(last) = last {
-            let mut end = tokens[last].end;
+        if let Some((last, mut end)) = last {
             if opened {
                 // Take the closing quote too.
                 if let Some(c) = text[end..]
@@ -2241,7 +2284,7 @@ fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
                 }
             }
             out.push(Replacement {
-                start: tokens[k].end,
+                start: keyword.end,
                 end,
                 out: String::new(),
                 label: "שם גן / בית ספר".to_owned(),
@@ -2250,17 +2293,20 @@ fn institution_names(text: &str, tokens: &[Token]) -> Vec<Replacement> {
             });
             // A quoted name, a name of two words or an unusual word is the name wherever
             // it recurs; a single ordinary word ("גן פרפר") only after an institution word.
+            // (`first` is a word of the name here: `last` is at or after it.)
             let strong = opened
                 || last > first
-                || crate::lexicon::word_bucket(&tokens[first].norm) < EVERYDAY;
+                || tokens
+                    .get(first)
+                    .is_none_or(|t| crate::lexicon::word_bucket(&t.norm) < EVERYDAY);
             names.push((first, last, strong));
             i = last + 1;
         } else {
             i = k + 1;
         }
     }
-    recurring_institutions(text, tokens, &names, &keywords, &mut out);
-    out
+    recurring_institutions(text, tokens, &names, &keywords, &mut out)?;
+    Ok(out)
 }
 
 /// The four health funds; after "קופ\"ח" or "קופת חולים" one of them is the member's fund.
@@ -2304,12 +2350,12 @@ const DESCRIPTION_HEADS: &[&str] = &[
 /// The name in a letterhead line: one to three words after the institution word, ending at
 /// a dash, a bar, an opening parenthesis or the end of the line. Not a description: the first
 /// word has no article and is not "ל" + a purpose ("מרכז להתפתחות הילד"); no function words.
-/// Later words may be in construct ("המרכז הרפואי גבעות החוף").
-fn letterhead_name(text: &str, tokens: &[Token], first: usize) -> Option<usize> {
+/// Later words may be in construct ("המרכז הרפואי גבעות החוף"). Returns the last word of
+/// the name and where it ends.
+fn letterhead_name(text: &str, tokens: &[Token], first: usize) -> Option<(usize, usize)> {
     let lex = &*LEXICON;
     let mut last = None;
-    for j in first..tokens.len().min(first + 3) {
-        let t = &tokens[j];
+    for (j, t) in tokens.iter().enumerate().skip(first).take(3) {
         let hebrew = t
             .norm
             .chars()
@@ -2335,7 +2381,7 @@ fn letterhead_name(text: &str, tokens: &[Token], first: usize) -> Option<usize> 
             || after.contains(" - ")
             || j + 1 == tokens.len()
         {
-            last = Some(j);
+            last = Some((j, t.end));
             break;
         }
         if after != " " {
@@ -2353,44 +2399,54 @@ fn recurring_institutions(
     names: &[(usize, usize, bool)],
     keywords: &[usize],
     out: &mut Vec<Replacement>,
-) {
+) -> Result<(), PrivacyError> {
     let quotes = ['"', '״', '“', '”', '„'];
     for (first, last, strong) in names {
-        let words: Vec<&str> = tokens[*first..=*last]
+        // The name's words, as found in this text just before.
+        let words: Vec<&str> = tokens
+            .get(*first..=*last)
+            .ok_or_else(out_of_range)?
             .iter()
             .map(|t| t.norm.as_str())
             .collect();
-        for j in 0..tokens.len() {
-            if j + words.len() > tokens.len() {
-                break;
-            }
-            let t = &tokens[j];
+        let Some(&first_word) = words.first() else {
+            return Err(out_of_range());
+        };
+        // Every run of as many words as the name.
+        for (j, window) in tokens.windows(words.len()).enumerate() {
+            let [t, rest @ ..] = window else {
+                return Err(out_of_range());
+            };
             // The first word may carry a prefix and an opening quote glued on (מ"צעדים).
             let lead = prefix_splits(&t.norm).into_iter().find_map(|(p, h)| {
                 let bare = h.trim_start_matches(quotes);
-                (bare == words[0]).then(|| {
+                (bare == first_word).then(|| {
                     let raw = &text[t.start..t.end];
                     let pre = crate::text::byte_len_of_letters(raw, p);
                     pre + (raw[pre..].len() - raw[pre..].trim_start_matches(quotes).len())
                 })
             });
             let Some(lead) = lead else { continue };
-            let rest_matches = (1..words.len()).all(|n| {
-                tokens[j + n].norm == words[n]
-                    && &text[tokens[j + n - 1].end..tokens[j + n].start] == " "
+            // Each later word in turn, with the word before it.
+            let rest_matches = words.iter().skip(1).zip(window.windows(2)).all(|(w, pair)| {
+                matches!(pair, [prev, cur] if cur.norm == *w && between(text, prev, cur) == " ")
             });
             let start = t.start + lead;
-            let end = tokens[j + words.len() - 1].end;
-            let after_keyword = j > 0 && keywords.contains(&(j - 1)) && lead == 0;
+            let end = rest.last().unwrap_or(t).end;
+            // The institution word right before, when the name has no prefix of its own.
+            let keyword_before = j
+                .checked_sub(1)
+                .filter(|k| lead == 0 && keywords.contains(k))
+                .and_then(|k| tokens.get(k));
+            let after_keyword = keyword_before.is_some();
             if rest_matches
                 && (*strong || after_keyword)
                 && !out.iter().any(|r| r.start < end && start < r.end)
             {
                 // After "ממכון" the name is just left out; elsewhere it reads "המוסד".
-                let (start, text_out) = if after_keyword {
-                    (tokens[j - 1].end, String::new())
-                } else {
-                    (start, INSTITUTION_WORD.to_owned())
+                let (start, text_out) = match keyword_before {
+                    Some(keyword) => (keyword.end, String::new()),
+                    None => (start, INSTITUTION_WORD.to_owned()),
                 };
                 out.push(Replacement {
                     start,
@@ -2403,6 +2459,7 @@ fn recurring_institutions(
             }
         }
     }
+    Ok(())
 }
 
 /// A one-word place that is read as an ordinary word here. A place takes no article and
@@ -2412,10 +2469,13 @@ fn recurring_institutions(
 /// prefixed form is rarer than the bare word ("במעלות", not "באזור"), or after a word for a
 /// place ("מושב אלונים", "גרים"). Anything else stays hidden.
 fn place_reads_as_word(text: &str, tokens: &[Token], i: usize, prefix: usize) -> bool {
-    let whole = &tokens[i];
+    // No token at `i`: not shown to be a word, so the place stays hidden.
+    let Some(whole) = tokens.get(i) else {
+        return false;
+    };
     let letters: Vec<char> = whole.norm.chars().collect();
-    let head: String = letters[prefix.min(letters.len())..].iter().collect();
-    let glued: String = letters[..prefix.min(letters.len())].iter().collect();
+    let head: String = letters.iter().skip(prefix).collect();
+    let glued: String = letters.iter().take(prefix).collect();
     let place_word = i
         .checked_sub(1)
         .and_then(|j| tokens.get(j))
@@ -2511,7 +2571,8 @@ fn analyze(
         {
             continue;
         }
-        let whole = &tokens[m.first_token];
+        // The match was found on these tokens.
+        let whole = tokens.get(m.first_token).ok_or_else(out_of_range)?;
         if m.prefix > 0
             && LEXICON.common_words.contains(&whole.norm)
             && !(ctx.confirmed_names)(&whole.norm)
@@ -2642,7 +2703,7 @@ fn analyze(
     }
     // Names of kindergartens and schools: only the name is left out ("בגן השקד שבשכונה" →
     // "בגן שבשכונה"), so the sentence still reads and nothing needs to come back.
-    for r in institution_names(text, &tokens) {
+    for r in institution_names(text, &tokens)? {
         if !overlaps(r.start, r.end, &reps, &suspects) {
             reps.push(r);
         }
@@ -2674,7 +2735,7 @@ fn analyze(
         reps.push(r);
     }
     // Layers 3, 5, 6: suspects on what is left.
-    suspects.extend(find_suspects(text, &tokens, ctx, &reps));
+    suspects.extend(find_suspects(text, &tokens, ctx, &reps)?);
     // Names that are also words, in a context that leaves no other reading (D-049).
     let strong = context::strong_names(text, &tokens, ctx.allowlisted, &reps, &suspects);
     suspects.extend(strong);
@@ -2907,15 +2968,20 @@ fn role_from_context(text: &str, tokens: &[Token], start: usize) -> Option<(Role
         (Role::Family, &["משפחת", "משפ'"]),
     ];
     let i = tokens.iter().position(|t| t.start >= start)?;
-    for j in (i.saturating_sub(3)..i).rev() {
-        if text[tokens[j].end..tokens[j + 1].start].contains(['.', '\n', ';', '!', '?']) {
+    // Up to three words back, each with the word after it.
+    let back = tokens.get(i.saturating_sub(3)..=i)?;
+    for pair in back.windows(2).rev() {
+        let [t, next] = pair else {
+            continue;
+        };
+        if between(text, t, next).contains(['.', '\n', ';', '!', '?']) {
             return None;
         }
-        for (_, head) in prefix_splits(&tokens[j].norm) {
+        for (_, head) in prefix_splits(&t.norm) {
             let bare = head.strip_prefix('ה').unwrap_or(&head);
             for (role, words) in ROLES {
                 if words.iter().any(|w| norm_eq(w, &head) || norm_eq(w, &bare)) {
-                    return Some((*role, text[tokens[j].start..tokens[j].end].to_owned()));
+                    return Some((*role, text[t.start..t.end].to_owned()));
                 }
             }
         }
@@ -3116,9 +3182,9 @@ fn recurring_names(
 
 /// A job or a workplace, generalized: the cue stays ("עובדת", "מנהל") and what follows it
 /// becomes a field ("בתחום החינוך"), or nothing when the field is unknown.
-/// The last token of a job phrase that starts at the cue `cue`: up to five words, ending
-/// at punctuation, at a word that opens a new clause ("ולכן", "כי"), or at "ו" + a word
-/// that is not part of a job ("ומגיעה"; "ומורה" goes on).
+/// Where a job phrase that starts at the cue `cue` ends (the end of its last token): up to
+/// five words, ending at punctuation, at a word that opens a new clause ("ולכן", "כי"), or
+/// at "ו" + a word that is not part of a job ("ומגיעה"; "ומורה" goes on).
 fn job_end(text: &str, tokens: &[Token], cue: usize) -> usize {
     const STOP: &[&str] = &[
         "אבל",
@@ -3149,16 +3215,18 @@ fn job_end(text: &str, tokens: &[Token], cue: usize) -> usize {
             .any(|(_, words)| words.iter().any(|w| norm_eq(w, &h)))
             || PROFESSION_CUES.iter().any(|c| norm_eq(c, &h))
     };
-    let mut j = cue;
-    while j + 1 < tokens.len() && j - cue < 5 {
-        let gap = &text[tokens[j].end..tokens[j + 1].start];
+    // The last word taken after the cue.
+    let mut last: Option<&Token> = None;
+    let pairs = tokens.iter().skip(cue).zip(tokens.iter().skip(cue + 1));
+    for (t, next_tok) in pairs.take(5) {
+        let gap = between(text, t, next_tok);
         if !gap
             .chars()
             .all(|c| matches!(c, ' ' | '-' | '–' | '־' | '"' | '״' | '\''))
         {
             break;
         }
-        let next = &tokens[j + 1].norm;
+        let next = &next_tok.norm;
         if STOP.iter().any(|w| norm_eq(w, next)) || next.starts_with(|c: char| c.is_ascii_digit()) {
             break;
         }
@@ -3169,10 +3237,13 @@ fn job_end(text: &str, tokens: &[Token], cue: usize) -> usize {
         {
             break;
         }
-        j += 1;
+        last = Some(next_tok);
     }
-    // At least the word after the cue ("עובדת כגננת").
-    j.max((cue + 1).min(tokens.len() - 1))
+    // At least the word after the cue ("עובדת כגננת"), or the cue when it ends the text.
+    // With no word at all, everything to the end of the text is taken (fail-closed).
+    last.or_else(|| tokens.get(cue + 1))
+        .or_else(|| tokens.last())
+        .map_or(text.len(), |t| t.end)
 }
 
 /// Words that give a job its field, for the generalization ("עובדת בתחום החינוך").
@@ -3293,18 +3364,18 @@ const JOB_FIELDS: &[(&str, &[&str])] = &[
     ("בתחום הרווחה", &["סוציאלי", "סוציאלית", "רווחה", "עו\"ס"]),
 ];
 
-fn generalize_job(text: &str, tokens: &[Token], cue: usize, end: usize) -> String {
+fn generalize_job(text: &str, tokens: &[Token], cue: &Token, end: usize) -> String {
     let after: Vec<String> = tokens
         .iter()
-        .filter(|t| t.start > tokens[cue].start && t.end <= end)
+        .filter(|t| t.start > cue.start && t.end <= end)
         .flat_map(|t| prefix_splits(&t.norm))
         .map(|(_, h)| h)
         .collect();
     let field = JOB_FIELDS
         .iter()
         .find(|(_, words)| after.iter().any(|h| words.iter().any(|w| norm_eq(w, h))));
-    let raw_cue = &text[tokens[cue].start..tokens[cue].end];
-    let cue_word = match tokens[cue].norm.as_str() {
+    let raw_cue = &text[cue.start..cue.end];
+    let cue_word = match cue.norm.as_str() {
         "במקצועו" => "עובד",
         "במקצועה" => "עובדת",
         _ => raw_cue,

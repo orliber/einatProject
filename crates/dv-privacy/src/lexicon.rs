@@ -145,8 +145,8 @@ impl SortedTable {
             .lines
             .binary_search_by(|&(s, e)| data[s as usize..e as usize].cmp(key))
             .ok()?;
-        let (_, e) = self.lines[i];
-        let rest = &self.data[e as usize..];
+        let &(_, e) = self.lines.get(i)?;
+        let rest = self.data.get(e as usize..)?;
         let line_end = rest.find('\n').unwrap_or(rest.len());
         Some(rest[..line_end].trim_start_matches('\t'))
     }

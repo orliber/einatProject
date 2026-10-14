@@ -55,11 +55,12 @@ impl<T: Clone> PhraseIndex<T> {
     pub fn find(&self, text: &str, tokens: &[Token]) -> Vec<PhraseMatch<T>> {
         let mut out = Vec::new();
         let mut i = 0;
-        while i < tokens.len() {
-            // (words, prefix letters, bytes of a closing quote left out of the match, payload)
-            let mut best: Option<(usize, usize, usize, T)> = None;
-            for (prefix, head) in prefix_splits(&tokens[i].norm) {
-                let opened = quote_opened(text, &tokens[i], prefix);
+        while let Some(tok) = tokens.get(i) {
+            // (words, prefix letters, bytes of a closing quote left out of the match, payload,
+            // end of the last word)
+            let mut best: Option<(usize, usize, usize, T, usize)> = None;
+            for (prefix, head) in prefix_splits(&tok.norm) {
+                let opened = quote_opened(text, tok, prefix);
                 let (bare, quoted) = strip_quote_tail(&head, opened);
                 let keys = std::iter::once((head.as_str(), false))
                     .chain((quoted > 0).then_some((bare, true)));
@@ -69,39 +70,51 @@ impl<T: Clone> PhraseIndex<T> {
                     };
                     for (words, payload) in candidates {
                         let n = words.len();
+                        // The tokens the phrase would cover, from this one on.
+                        let Some(window) = tokens.get(i..i + n) else {
+                            continue;
+                        };
                         // A quote closes the word it follows: a stripped first word ends the phrase.
-                        if i + n > tokens.len() || (stripped && n > 1) {
+                        if stripped && n > 1 {
                             continue;
                         }
-                        let middle =
-                            (1..n.saturating_sub(1)).all(|k| words[k] == tokens[i + k].norm);
+                        let Some(last) = window.last() else {
+                            continue;
+                        };
+                        let middle = words
+                            .iter()
+                            .zip(window)
+                            .take(n.saturating_sub(1))
+                            .skip(1)
+                            .all(|(w, t)| *w == t.norm);
                         let tail = match (n, stripped) {
                             (1, false) => Some(0),
-                            (1, true) => Some(quote_bytes(text, &tokens[i], quoted)),
-                            _ => last_word_tail(text, &tokens[i + n - 1], &words[n - 1], opened),
+                            (1, true) => Some(quote_bytes(text, tok, quoted)),
+                            _ => words
+                                .last()
+                                .and_then(|w| last_word_tail(text, last, w, opened)),
                         };
                         let Some(tail) = tail.filter(|_| middle) else {
                             continue;
                         };
                         let better = match &best {
                             None => true,
-                            Some((bn, bp, bt, _)) => {
+                            Some((bn, bp, bt, _, _)) => {
                                 n > *bn
                                     || (n == *bn && (prefix < *bp || (prefix == *bp && tail < *bt)))
                             }
                         };
                         if better {
-                            best = Some((n, prefix, tail, payload.clone()));
+                            best = Some((n, prefix, tail, payload.clone(), last.end));
                         }
                     }
                 }
             }
-            if let Some((n, prefix, tail, payload)) = best {
-                let tok = &tokens[i];
+            if let Some((n, prefix, tail, payload, last_end)) = best {
                 let start = tok.start + byte_len_of_letters(&text[tok.start..tok.end], prefix);
                 out.push(PhraseMatch {
                     start,
-                    end: tokens[i + n - 1].end - tail,
+                    end: last_end - tail,
                     first_token: i,
                     last_token: i + n - 1,
                     prefix,

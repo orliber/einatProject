@@ -18,7 +18,7 @@ use crate::pipeline::{
     arabic_identity_matches, declared_reads_as_word, identity_index, other_case_word, past_name,
     reads_as_word, PrivacyContext, Target,
 };
-use crate::text::{normalize, prefix_splits, tokenize};
+use crate::text::{normalize, prefix_splits, tokenize, Token};
 
 /// Generic replacements produced by the pipeline; always allowed in outgoing text.
 pub const GENERIC_TAGS: &[&str] = &[
@@ -194,11 +194,11 @@ pub(crate) fn name_findings(text: &str, ctx: &PrivacyContext<'_>) -> Vec<Finding
             continue;
         }
         // An ordinary word the psychologist confirmed ("שאלון" when a child is "אלון").
-        let whole = &tokens[m.first_token];
-        if m.prefix > 0
-            && LEXICON.common_words.contains(&whole.norm)
-            && (ctx.allowlisted)(&whole.norm)
-        {
+        // A token the match does not point at is no confirmed word: the finding stands.
+        let confirmed_word = |whole: &Token| {
+            LEXICON.common_words.contains(&whole.norm) && (ctx.allowlisted)(&whole.norm)
+        };
+        if m.prefix > 0 && tokens.get(m.first_token).is_some_and(confirmed_word) {
             continue;
         }
         out.push(Finding {
