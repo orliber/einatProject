@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use ts_rs::TS;
 
 use crate::prompts::VERIFY_RULES;
-use crate::request::{base_body, data_block, ModelConfig, TaggedInput};
+use crate::request::{base_body, data_block, set, set_schema, ModelConfig, TaggedInput};
 use crate::response::{text_of, AiError};
 
 /// What one verification request is made of. Every text is already filtered (tagged).
@@ -113,9 +113,13 @@ pub fn build_verify_request(
         parts.push(data_block(nonce, &format!("paragraph=\"{pid}\""), text));
         paragraph_ids.push(pid);
     }
-    body["messages"] = json!([{ "role": "user", "content": parts.join("\n\n") }]);
+    set(
+        &mut body,
+        "messages",
+        json!([{ "role": "user", "content": parts.join("\n\n") }]),
+    );
     if let Ok(schema) = serde_json::from_str::<Value>(VERIFY_SCHEMA) {
-        body["output_config"]["format"] = json!({ "type": "json_schema", "schema": schema });
+        set_schema(&mut body, schema);
     }
     (body, paragraph_ids, source_ids)
 }

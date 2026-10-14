@@ -183,8 +183,12 @@ pub fn nonce_from(random: &[u8; 16]) -> String {
     const LETTERS: &[u8; 16] = b"abcdefghjkmnpqrs";
     let mut s = String::with_capacity(32);
     for b in random {
-        s.push(char::from(LETTERS[usize::from(b >> 4)]));
-        s.push(char::from(LETTERS[usize::from(b & 0x0f)]));
+        // A nibble is below 16, so every one has its letter.
+        for nibble in [b >> 4, b & 0x0f] {
+            if let Some(c) = LETTERS.get(usize::from(nibble)) {
+                s.push(char::from(*c));
+            }
+        }
     }
     s
 }
@@ -249,6 +253,25 @@ pub(crate) fn base_body(model: &ModelConfig, system: &str, max_tokens: u32) -> V
         // Delivered as it is written: real progress, and no timeout on a long answer (D-035).
         "stream": true,
     })
+}
+
+/// `body[key] = value`, for a body from [`base_body`] (always an object). Indexing would
+/// panic on any other value; this leaves it as it is, and the API then refuses the request.
+pub(crate) fn set(body: &mut Value, key: &str, value: Value) {
+    if let Some(fields) = body.as_object_mut() {
+        fields.insert(key.to_owned(), value);
+    }
+}
+
+/// Asks for an answer in `schema` (`output_config.format`). The body is from [`base_body`],
+/// which always has `output_config`; without it the answer is not JSON and fails to parse.
+pub(crate) fn set_schema(body: &mut Value, schema: Value) {
+    if let Some(config) = body.get_mut("output_config").and_then(Value::as_object_mut) {
+        config.insert(
+            "format".to_owned(),
+            json!({ "type": "json_schema", "schema": schema }),
+        );
+    }
 }
 
 /// Section drafting / conversation. Returns the body and the `S#` → input-id map.
@@ -335,7 +358,10 @@ pub fn build_section_request(
     match messages.first_mut() {
         Some(first) => {
             let said = first["content"].as_str().unwrap_or_default().to_owned();
-            first["content"] = json!([cached, { "type": "text", "text": said }]);
+            *first = json!({
+                "role": first["role"],
+                "content": [cached, { "type": "text", "text": said }],
+            });
             messages.push(json!({ "role": "user", "content": rest }));
         }
         None => {
@@ -344,9 +370,9 @@ pub fn build_section_request(
             );
         }
     }
-    body["messages"] = Value::Array(messages);
+    set(&mut body, "messages", Value::Array(messages));
     if let Ok(schema) = serde_json::from_str::<Value>(SECTION_SCHEMA) {
-        body["output_config"]["format"] = json!({ "type": "json_schema", "schema": schema });
+        set_schema(&mut body, schema);
     }
     (body, refs)
 }
@@ -377,7 +403,7 @@ pub fn build_consult_request(model: &ModelConfig, input: &ConsultInput, nonce: &
         None => input.message_tagged.clone(),
     };
     messages.push(json!({ "role": "user", "content": content }));
-    body["messages"] = Value::Array(messages);
+    set(&mut body, "messages", Value::Array(messages));
     body
 }
 
@@ -394,13 +420,21 @@ pub struct ResearchInput {
 #[must_use]
 pub fn build_research_request(model: &ModelConfig, input: &ResearchInput) -> Value {
     let mut body = base_body(model, RESEARCH_RULES, 8_000);
-    body["tools"] = json!([{
-        "type": "web_search_20250305",
-        "name": "web_search",
-        "max_uses": input.max_searches.clamp(1, 8),
-        "allowed_domains": input.allowed_domains,
-    }]);
-    body["messages"] = json!([{ "role": "user", "content": input.question }]);
+    set(
+        &mut body,
+        "tools",
+        json!([{
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "max_uses": input.max_searches.clamp(1, 8),
+            "allowed_domains": input.allowed_domains,
+        }]),
+    );
+    set(
+        &mut body,
+        "messages",
+        json!([{ "role": "user", "content": input.question }]),
+    );
     body
 }
 
@@ -414,6 +448,7 @@ mod tests {
             0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0, 0, 0, 0, 0, 0, 0, 0xff,
         ]);
         assert_eq!(n.len(), 32);
+        assert_eq!(n, "abcdefghjkmnpqrsaaaaaaaaaaaaaass");
         assert!(n.chars().all(|c| c.is_ascii_lowercase()));
         assert_ne!(n, nonce_from(&[0; 16]));
     }
@@ -481,6 +516,8 @@ mod tests {
         assert_eq!(block(&a), block(&b), "the cached part did not change");
         assert_eq!(block(&a)["cache_control"]["type"], "ephemeral");
         assert!(block(&a)["text"].as_str().unwrap().contains("id=\"S1\""));
+        assert_eq!(b["messages"][0]["role"], "user");
+        assert_eq!(b["messages"][0]["content"][1]["text"], "נסח/י פסקה");
         let last = content_text(&b["messages"][2]["content"]);
         assert!(last.contains("לקצר") && last.contains("current_draft"));
         assert_eq!(b["messages"][1]["role"], "assistant");

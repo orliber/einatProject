@@ -55,7 +55,9 @@ fn beginnings(sentence: &str) -> Vec<(String, String)> {
     let ws = words(sentence);
     let mut out = Vec::new();
     for n in MIN_WORDS..=MAX_WORDS.min(ws.len()) {
-        let head = &ws[..n];
+        let Some(head) = ws.get(..n) else {
+            break;
+        };
         if head.iter().any(crate::text::Word::is_masked) {
             break;
         }

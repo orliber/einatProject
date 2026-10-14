@@ -21,24 +21,21 @@ fn blocks_with(text: &str, attr: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let mut rest = text;
     while let Some(open) = rest.find("<data nonce=") {
-        let after = &rest[open..];
-        let Some(head_end) = after.find(">\n") else {
+        let Some(after) = rest.get(open..) else {
             break;
         };
-        let head = &after[..head_end];
-        let body_start = head_end + 2;
-        let Some(close) = after[body_start..].find("\n</data nonce=") else {
+        let Some((head, tail)) = after.split_once(">\n") else {
             break;
         };
-        let body = &after[body_start..body_start + close];
-        if let Some(id_at) = head.find(&needle) {
-            let id: String = head[id_at + needle.len()..]
-                .chars()
-                .take_while(|c| *c != '"')
-                .collect();
+        let Some((body, next)) = tail.split_once("\n</data nonce=") else {
+            break;
+        };
+        if let Some((_, value)) = head.split_once(&needle) {
+            let id: String = value.chars().take_while(|c| *c != '"').collect();
             out.push((id, body.to_owned()));
         }
-        rest = &after[body_start + close + 1..];
+        // Past the closing mark, which holds no opening one.
+        rest = next;
     }
     out
 }
@@ -282,15 +279,18 @@ fn style_locally(request: &str, synthesis: bool) -> Value {
 fn style_excerpts_in(request: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let mut rest = request;
-    while let Some(start) = rest.find("section=\"") {
-        let after = &rest[start + 9..];
+    while let Some((_, after)) = rest.split_once("section=\"") {
         let Some(q) = after.find('"') else { break };
-        let section = after[..q].to_owned();
         let body_start = after.find(">\n").map_or(q, |i| i + 2);
-        let body = &after[body_start..];
+        let (Some(section), Some(body)) = (after.get(..q), after.get(body_start..)) else {
+            break;
+        };
         let end = body.find("\n</data").unwrap_or(body.len());
-        out.push((section, body[..end].to_owned()));
-        rest = &body[end..];
+        let Some((text, next)) = body.split_at_checked(end) else {
+            break;
+        };
+        out.push((section.to_owned(), text.to_owned()));
+        rest = next;
     }
     out
 }
@@ -339,23 +339,28 @@ pub fn respond(body: &Value) -> Value {
              עם ציטוט לכל טענה. חיפוש אמיתי יתאפשר אחרי הגדרת מפתח API עם ZDR.",
         );
     }
-    let schema = &body["output_config"]["format"]["schema"];
+    let format = body.pointer("/output_config/format");
+    let in_schema = |path: &str| {
+        format
+            .and_then(|f| f.get("schema"))
+            .and_then(|s| s.pointer(path))
+    };
     if let Some(kinds) =
-        schema["properties"]["items"]["items"]["properties"]["kind"]["enum"].as_array()
+        in_schema("/properties/items/items/properties/kind/enum").and_then(Value::as_array)
     {
         let synthesis = kinds.iter().any(|k| k == "example");
         return api_text(&style_locally(last_user, synthesis).to_string());
     }
-    if schema["properties"]["results"]["items"]["properties"]["verdict"]["enum"].is_array() {
+    if in_schema("/properties/results/items/properties/verdict/enum").is_some_and(Value::is_array) {
         return api_text(&verify_locally(last_user).to_string());
     }
     if let Some(keys) =
-        schema["properties"]["sections"]["items"]["properties"]["section"]["enum"].as_array()
+        in_schema("/properties/sections/items/properties/section/enum").and_then(Value::as_array)
     {
         let keys: Vec<&str> = keys.iter().filter_map(Value::as_str).collect();
         return api_text(&sort_locally(last_user, &keys).to_string());
     }
-    if body["output_config"]["format"].is_null() {
+    if format.is_none_or(Value::is_null) {
         return api_text(&format!(
             "מצב הדגמה: אני עונה כאן תשובה לדוגמה. בהתייעצות אמיתית {ai} יענה על השאלה המקצועית, \
              יבחין בין ידע מבוסס לדעה, ויציין כשיש אי-ודאות. ההחלטה המקצועית נשארת שלך."

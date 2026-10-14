@@ -259,6 +259,24 @@ fn empty_and_oversized_paragraphs_are_not_aligned() {
 }
 
 #[test]
+fn changes_at_either_end_of_a_paragraph_are_aligned() {
+    // Words added only at the end teach no change, and every word of the AI's was kept.
+    let (found, kept) = changes("הילד מראה סקרנות", "הילד מראה סקרנות במשחק החופשי");
+    assert!(found.is_empty(), "{found:?}");
+    assert_eq!(kept, Some(1.0));
+    // A word replaced at the start and one deleted at the end.
+    let (found, kept) = changes("הילד מפגין סקרנות ניכרת", "הילד מראה סקרנות");
+    assert_eq!(
+        found,
+        vec![
+            ("מפגין".to_owned(), "מראה".to_owned()),
+            ("ניכרת".to_owned(), String::new())
+        ]
+    );
+    assert_eq!(kept, Some(0.5));
+}
+
+#[test]
 fn the_learned_list_stays_bounded() {
     // 700 different one-word replacements: the list never grows past its ceiling, and what
     // she already decided on is kept.

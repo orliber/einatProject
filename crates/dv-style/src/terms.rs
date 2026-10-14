@@ -35,11 +35,15 @@ fn letter(c: char) -> bool {
 
 /// Is `text[at..at+len]` a whole word, allowing up to two prefix letters before it?
 fn whole(text: &str, at: usize, len: usize) -> bool {
-    let after = text[at + len..].chars().next();
+    // Off the text or off a letter's boundary: not a word found there.
+    let (Some(head), Some(tail)) = (text.get(..at), text.get(at.saturating_add(len)..)) else {
+        return false;
+    };
+    let after = tail.chars().next();
     if after.is_some_and(letter) {
         return false;
     }
-    let mut before = text[..at].chars().rev();
+    let mut before = head.chars().rev();
     for _ in 0..3 {
         match before.next() {
             None => return true,
@@ -85,9 +89,11 @@ pub fn usual<'a>(texts: impl IntoIterator<Item = &'a str>, min: u32) -> BTreeMap
         .filter_map(|(g, vs)| {
             let mut vs: Vec<(&str, u32)> = vs.into_iter().collect();
             vs.sort_by(|a, b| b.1.cmp(&a.1));
-            let (best, n) = vs[0];
-            let clear = vs.get(1).is_none_or(|(_, m)| *m < n);
-            (n >= min && clear).then(|| (g.to_owned(), best.to_owned()))
+            let [(best, n), rest @ ..] = vs.as_slice() else {
+                return None;
+            };
+            let clear = rest.first().is_none_or(|(_, m)| m < n);
+            (*n >= min && clear).then(|| (g.to_owned(), (*best).to_owned()))
         })
         .collect()
 }

@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::prompts::SORTING_RULES;
-use crate::request::{base_body, data_block, ModelConfig};
+use crate::request::{base_body, data_block, set, set_schema, ModelConfig};
 use crate::response::{text_of, AiError};
 
 /// A section Claude may sort into. Key and description come from the report template, never
@@ -101,9 +101,12 @@ pub fn build_sort_request(model: &ModelConfig, input: &SortInput, nonce: &str) -
             parts.push(data_block(nonce, &attrs, text));
         }
     }
-    body["messages"] = json!([{ "role": "user", "content": parts.join("\n\n") }]);
-    body["output_config"]["format"] =
-        json!({ "type": "json_schema", "schema": schema(&input.sections) });
+    set(
+        &mut body,
+        "messages",
+        json!([{ "role": "user", "content": parts.join("\n\n") }]),
+    );
+    set_schema(&mut body, schema(&input.sections));
     body
 }
 

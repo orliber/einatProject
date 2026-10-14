@@ -88,10 +88,10 @@ pub fn best(docs: &[&str], query: &str, budget: usize) -> Vec<usize> {
     if docs.len() <= budget {
         return (0..docs.len()).collect();
     }
-    let scores = bm25(docs, query);
-    let mut order: Vec<usize> = (0..docs.len()).collect();
-    order.sort_by(|a, b| scores[*b].total_cmp(&scores[*a]).then(a.cmp(b)));
+    let mut order: Vec<(usize, f64)> = bm25(docs, query).into_iter().enumerate().collect();
+    order.sort_by(|(a, sa), (b, sb)| sb.total_cmp(sa).then(a.cmp(b)));
     order.truncate(budget);
+    let mut order: Vec<usize> = order.into_iter().map(|(i, _)| i).collect();
     order.sort_unstable();
     order
 }
@@ -105,12 +105,18 @@ pub fn within_words(passages: &[&str], query: &str, words: usize) -> Vec<usize> 
     if scores.iter().all(|s| *s <= 0.0) {
         return (0..passages.len()).collect();
     }
-    let mut order: Vec<usize> = (0..passages.len()).filter(|i| scores[*i] > 0.0).collect();
-    order.sort_by(|a, b| scores[*b].total_cmp(&scores[*a]).then(a.cmp(b)));
+    let mut order: Vec<(usize, f64, &str)> = scores
+        .into_iter()
+        .zip(passages)
+        .enumerate()
+        .filter(|(_, (s, _))| *s > 0.0)
+        .map(|(i, (s, p))| (i, s, *p))
+        .collect();
+    order.sort_by(|(a, sa, _), (b, sb, _)| sb.total_cmp(sa).then(a.cmp(b)));
     let mut used = 0;
     let mut out = Vec::new();
-    for i in order {
-        let n = passages[i].split_whitespace().count();
+    for (i, _, passage) in order {
+        let n = passage.split_whitespace().count();
         if !out.is_empty() && used + n > words {
             continue;
         }
