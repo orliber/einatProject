@@ -73,6 +73,11 @@ impl Reader<'_> {
         self.bytes.get(self.pos).copied()
     }
 
+    /// The bytes read since `from` (empty when `from` is not behind the current position).
+    fn since(&self, from: usize) -> &[u8] {
+        self.bytes.get(from..self.pos).unwrap_or_default()
+    }
+
     /// After a backslash: a control word with its optional number, or a control symbol.
     fn control(&mut self) -> (String, Option<i32>) {
         let start = self.pos;
@@ -86,7 +91,7 @@ impl Reader<'_> {
             self.pos += 1;
             return (sym, None);
         }
-        let word = String::from_utf8_lossy(&self.bytes[start..self.pos]).into_owned();
+        let word = String::from_utf8_lossy(self.since(start)).into_owned();
         let num_start = self.pos;
         if self.peek() == Some(b'-') {
             self.pos += 1;
@@ -94,7 +99,7 @@ impl Reader<'_> {
         while self.peek().is_some_and(|b| b.is_ascii_digit()) && self.pos - num_start < 11 {
             self.pos += 1;
         }
-        let num = std::str::from_utf8(&self.bytes[num_start..self.pos])
+        let num = std::str::from_utf8(self.since(num_start))
             .ok()
             .and_then(|s| s.parse::<i32>().ok());
         if self.peek() == Some(b' ') {

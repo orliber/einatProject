@@ -35,10 +35,10 @@ fn ages_in(text: &str) -> Vec<(u8, u8)> {
         let word = word.trim_start_matches(|c: char| !c.is_ascii_digit());
         // `5:4` / `5;4`, not right after "שעה" / "בשעה".
         if let Some((y, m)) = word.split_once([':', ';']) {
-            let after_hour = i > 0 && {
-                let prev = words[i - 1];
-                prev.ends_with("שעה") || prev.ends_with("השעה")
-            };
+            let after_hour = i
+                .checked_sub(1)
+                .and_then(|j| words.get(j))
+                .is_some_and(|prev| prev.ends_with("שעה") || prev.ends_with("השעה"));
             let clock = m.len() == 2 && m.starts_with('0');
             if !(after_hour || clock) {
                 if let (Some(y), Some(m)) = (number(y), number(m)) {
@@ -140,10 +140,13 @@ fn current_grade(text: &str) -> Option<&'static str> {
     for (i, w) in words.iter().enumerate() {
         let w = w.trim_matches(|c: char| !c.is_alphanumeric());
         let class = matches!(w, "כיתה" | "בכיתה");
-        if !class || i == 0 {
+        if !class {
             continue;
         }
-        let before = words[i - 1].trim_matches(|c: char| !c.is_alphanumeric());
+        let Some(before) = i.checked_sub(1).and_then(|j| words.get(j)) else {
+            continue;
+        };
+        let before = before.trim_matches(|c: char| !c.is_alphanumeric());
         let now = matches!(
             before,
             "לומד"

@@ -55,14 +55,16 @@ fn read_stream(
 }
 
 fn u16_at(b: &[u8], at: usize) -> Result<u16, IngestError> {
-    b.get(at..at + 2)
-        .map(|s| u16::from_le_bytes([s[0], s[1]]))
+    b.get(at..)
+        .and_then(<[u8]>::first_chunk::<2>)
+        .map(|s| u16::from_le_bytes(*s))
         .ok_or_else(|| corrupt("short"))
 }
 
 fn u32_at(b: &[u8], at: usize) -> Result<u32, IngestError> {
-    b.get(at..at + 4)
-        .map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
+    b.get(at..)
+        .and_then(<[u8]>::first_chunk::<4>)
+        .map(|s| u32::from_le_bytes(*s))
         .ok_or_else(|| corrupt("short"))
 }
 
@@ -133,12 +135,12 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
         .ok_or_else(|| corrupt("piece table"))?;
     let units = characters(&word, clx)?;
 
-    // Split by part, in storage order.
-    let mut at = 0usize;
+    // Split by part, in storage order. A part longer than what is left takes the rest.
+    let mut rest: &[u16] = &units;
     let mut take = |n: usize| {
-        let start = at.min(units.len());
-        at = at.saturating_add(n);
-        &units[start..at.min(units.len())]
+        let (part, after) = rest.split_at_checked(n).unwrap_or((rest, &[]));
+        rest = after;
+        part
     };
     let text = take(parts.text);
     let footnotes = take(parts.footnotes);
@@ -237,7 +239,8 @@ fn characters(word: &[u8], clx: &[u8]) -> Result<Vec<u16>, IngestError> {
             out.extend(
                 bytes
                     .chunks_exact(2)
-                    .map(|p| u16::from_le_bytes([p[0], p[1]])),
+                    .filter_map(|p| <[u8; 2]>::try_from(p).ok())
+                    .map(u16::from_le_bytes),
             );
         }
     }

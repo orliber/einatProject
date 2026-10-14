@@ -28,22 +28,26 @@ pub fn reverse_line(line: &str) -> String {
     }
     let is_sep = |s: &str| s == " " || s == "\t";
     let mut out = String::with_capacity(line.len());
-    let mut i = 0;
-    while i < items.len() {
-        if !is_ltr_token(&items[i]) {
-            out.push_str(&items[i]);
-            i += 1;
+    let mut rest: &[String] = &items;
+    while let Some((item, after)) = rest.split_first() {
+        if !is_ltr_token(item) {
+            out.push_str(item);
+            rest = after;
             continue;
         }
         // A group of LTR words joined by single spaces ("V CSIW" → "WISC V"); a tab (table
         // column) ends the group.
-        let mut j = i;
-        while j + 2 < items.len() && items[j + 1] == " " && is_ltr_token(&items[j + 2]) {
-            j += 2;
+        let mut len = 1;
+        while let Some([sep, word]) = rest.get(len..len + 2) {
+            if sep != " " || !is_ltr_token(word) {
+                break;
+            }
+            len += 2;
         }
         // Only the span from the first to the last letter/digit: punctuation around it
         // ("5:4." / "(WISC") belongs to the right-to-left text and is already in place.
-        let group: Vec<char> = items[i..=j].concat().chars().collect();
+        let group: Vec<char> = rest.iter().take(len).flat_map(|s| s.chars()).collect();
+        rest = rest.get(len..).unwrap_or_default();
         let first = group
             .iter()
             .position(char::is_ascii_alphanumeric)
@@ -52,13 +56,10 @@ pub fn reverse_line(line: &str) -> String {
             .iter()
             .rposition(char::is_ascii_alphanumeric)
             .unwrap_or(0);
-        out.extend(&group[..first]);
-        out.extend(group[first..=last].iter().rev());
-        out.extend(&group[last + 1..]);
-        debug_assert!(items
-            .get(j + 1)
-            .is_none_or(|x| is_sep(x) || !is_ltr_token(x)));
-        i = j + 1;
+        out.extend(group.iter().take(first));
+        out.extend(group.iter().take(last + 1).skip(first).rev());
+        out.extend(group.iter().skip(last + 1));
+        debug_assert!(rest.first().is_none_or(|x| is_sep(x) || !is_ltr_token(x)));
     }
     out
 }

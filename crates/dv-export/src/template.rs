@@ -706,10 +706,10 @@ fn build(report: &Report, template: &[u8]) -> Result<Built, ExportError> {
         width: text_width(&sect),
     };
     let mut matched = 0u32;
-    let styles_at = out.iter().position(|(n, _)| n == "word/styles.xml");
+    let styles_at = out.iter_mut().find(|(n, _)| n == "word/styles.xml");
     match styles_at {
-        Some(i) => {
-            let xml = text(&out[i].1)?.to_owned();
+        Some(styles) => {
+            let xml = text(&styles.1)?.to_owned();
             let (by_name, ids, normal) = her_styles(&xml)?;
             let mut extra = String::new();
             for (key, name, ppr, size, bold, color) in STYLES {
@@ -731,8 +731,10 @@ fn build(report: &Report, template: &[u8]) -> Result<Built, ExportError> {
                     layout.ids.insert(key, id);
                 }
             }
-            let at = xml.rfind("</w:styles>").ok_or_else(|| bad("styles"))?;
-            out[i].1 = format!("{}{extra}{}", &xml[..at], &xml[at..]).into_bytes();
+            let (head, tail) = xml
+                .rsplit_once("</w:styles>")
+                .ok_or_else(|| bad("styles"))?;
+            styles.1 = format!("{head}{extra}</w:styles>{tail}").into_bytes();
         }
         None => {
             layout = Layout {

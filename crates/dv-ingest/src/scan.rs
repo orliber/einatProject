@@ -83,21 +83,22 @@ fn dimensions(kind: ImageKind, b: &[u8]) -> Option<(u64, u64)> {
             Some((u64::from(w), u64::from(h)))
         }
         ImageKind::Jpeg => {
+            // A segment: 0xFF, its marker, its length, then (in a frame header) precision,
+            // height and width. At least ten bytes must be left to read one.
             let mut i = 2;
-            while i + 9 < b.len() {
-                if b[i] != 0xFF {
+            while let Some(&[ff, marker, l0, l1, _, h0, h1, w0, w1, _, ..]) = b.get(i..) {
+                if ff != 0xFF {
                     return None;
                 }
-                let marker = b[i + 1];
                 if marker == 0xFF {
                     i += 1;
                     continue;
                 }
-                let len = usize::from(u16::from_be_bytes([b[i + 2], b[i + 3]]));
+                let len = usize::from(u16::from_be_bytes([l0, l1]));
                 // Start of frame (any kind except DHT, JPG and DAC).
                 if (0xC0..=0xCF).contains(&marker) && !matches!(marker, 0xC4 | 0xC8 | 0xCC) {
-                    let h = u16::from_be_bytes([b[i + 5], b[i + 6]]);
-                    let w = u16::from_be_bytes([b[i + 7], b[i + 8]]);
+                    let h = u16::from_be_bytes([h0, h1]);
+                    let w = u16::from_be_bytes([w0, w1]);
                     return Some((u64::from(w), u64::from(h)));
                 }
                 i += 2 + len;
@@ -375,16 +376,18 @@ fn unpredict(data: Vec<u8>, p: &pdf_extract::Dictionary) -> Result<Vec<u8>, Inge
     let bpp = (colors * bpc).div_ceil(8).max(1);
     let mut out = Vec::with_capacity(data.len());
     let mut prev = vec![0u8; row];
-    for chunk in data.chunks(row + 1) {
-        if chunk.len() < row + 1 {
+    // A cut-short last row is dropped, as are bytes after the last whole row.
+    for chunk in data.chunks_exact(row + 1) {
+        let Some((&kind, bytes)) = chunk.split_first() else {
             break;
-        }
-        let kind = chunk[0];
-        let mut cur = chunk[1..].to_vec();
+        };
+        let mut cur = bytes.to_vec();
         for i in 0..row {
-            let a = if i >= bpp { cur[i - bpp] } else { 0 };
-            let b = prev[i];
-            let c = if i >= bpp { prev[i - bpp] } else { 0 };
+            // The byte `bpp` to the left (0 before the row starts) and the one above.
+            let left = |r: &[u8]| i.checked_sub(bpp).and_then(|j| r.get(j)).copied();
+            let a = left(&cur).unwrap_or(0);
+            let b = prev.get(i).copied().unwrap_or(0);
+            let c = left(&prev).unwrap_or(0);
             let add = match kind {
                 0 => 0,
                 1 => a,
@@ -406,7 +409,9 @@ fn unpredict(data: Vec<u8>, p: &pdf_extract::Dictionary) -> Result<Vec<u8>, Inge
                 }
                 _ => return Err(corrupt("row filter")),
             };
-            cur[i] = cur[i].wrapping_add(add);
+            if let Some(x) = cur.get_mut(i) {
+                *x = x.wrapping_add(add);
+            }
         }
         out.extend_from_slice(&cur);
         prev = cur;
@@ -529,22 +534,29 @@ fn raw(
     }
 
     // Black and white: PBM, where 1 is black. In a PDF, 0 is black (or "paint" in a mask).
+    // Row `r` of the pixel data (the length was checked above).
+    let line_at = |r: usize| {
+        data.get(r * row..(r + 1) * row)
+            .ok_or_else(|| corrupt("image data cut short"))
+    };
     if bpc == 1 && matches!(cs, Colors::Gray) {
         let mut out = format!("P4\n{wu} {hu}\n").into_bytes();
         for r in 0..hu {
-            let line = &data[r * row..(r + 1) * row];
+            let line = line_at(r)?;
             out.extend(line.iter().map(|b| if inverted { *b } else { !*b }));
         }
         return Ok(Some((out, w)));
     }
 
-    let sample = |line: &[u8], i: usize| -> u8 {
-        match bpc {
-            8 => line[i],
-            16 => line[i * 2],
+    let sample = |line: &[u8], i: usize| -> Result<u8, IngestError> {
+        let short = || corrupt("image data cut short");
+        Ok(match bpc {
+            8 => *line.get(i).ok_or_else(short)?,
+            16 => *line.get(i * 2).ok_or_else(short)?,
             _ => {
                 let bit = i * bpc;
-                let v = (line[bit / 8] >> (8 - bpc - bit % 8)) & ((1u8 << bpc) - 1);
+                let byte = *line.get(bit / 8).ok_or_else(short)?;
+                let v = (byte >> (8 - bpc - bit % 8)) & ((1u8 << bpc) - 1);
                 if matches!(cs, Colors::Indexed { .. }) {
                     v
                 } else {
@@ -552,50 +564,56 @@ fn raw(
                     (u16::from(v) * 255 / ((1u16 << bpc) - 1)) as u8
                 }
             }
-        }
+        })
     };
     let gray = matches!(&cs, Colors::Gray)
         || matches!(&cs, Colors::Indexed { base, .. } if matches!(**base, Colors::Gray));
     let mut out = format!("{}\n{wu} {hu}\n255\n", if gray { "P5" } else { "P6" }).into_bytes();
     out.reserve(wu * hu * if gray { 1 } else { 3 });
     for r in 0..hu {
-        let line = &data[r * row..(r + 1) * row];
+        let line = line_at(r)?;
         for x in 0..wu {
             match &cs {
                 Colors::Gray => {
-                    let v = sample(line, x);
+                    let v = sample(line, x)?;
                     out.push(if inverted { 255 - v } else { v });
                 }
                 Colors::Rgb => {
                     for c in 0..3 {
-                        out.push(sample(line, x * 3 + c));
+                        out.push(sample(line, x * 3 + c)?);
                     }
                 }
                 Colors::Cmyk => {
-                    let k = u16::from(sample(line, x * 4 + 3));
+                    let k = u16::from(sample(line, x * 4 + 3)?);
                     for c in 0..3 {
-                        let v = u16::from(sample(line, x * 4 + c));
+                        let v = u16::from(sample(line, x * 4 + c)?);
                         out.push((255u16.saturating_sub((v + k).min(255))) as u8);
                     }
                 }
                 Colors::Indexed { base, palette } => {
-                    let idx = usize::from(sample(line, x));
+                    const BLACK: [u8; 4] = [0; 4];
+                    let idx = usize::from(sample(line, x)?);
                     let n = base.comps();
+                    // An index past the palette's end is drawn black.
                     let entry = palette
                         .get(idx * n..idx * n + n)
-                        .unwrap_or(&[0, 0, 0, 0][..n]);
-                    match **base {
-                        Colors::Gray => out.push(entry[0]),
-                        Colors::Rgb => out.extend_from_slice(entry),
-                        Colors::Cmyk => {
-                            let k = u16::from(entry[3]);
-                            for v in &entry[..3] {
+                        .or_else(|| BLACK.get(..n))
+                        .ok_or_else(|| corrupt("image palette"))?;
+                    match (&**base, entry) {
+                        (Colors::Gray, [v, ..]) => out.push(*v),
+                        (Colors::Rgb, _) => out.extend_from_slice(entry),
+                        (Colors::Cmyk, [c, m, y, k, ..]) => {
+                            let k = u16::from(*k);
+                            for v in [c, m, y] {
                                 out.push(
                                     (255u16.saturating_sub((u16::from(*v) + k).min(255))) as u8,
                                 );
                             }
                         }
-                        Colors::Indexed { .. } => out.extend_from_slice(&[0, 0, 0]),
+                        (Colors::Indexed { .. }, _) => out.extend_from_slice(&[0, 0, 0]),
+                        (Colors::Gray | Colors::Cmyk, _) => {
+                            return Err(corrupt("image palette"));
+                        }
                     }
                 }
             }
@@ -679,21 +697,29 @@ mod base64 {
     pub fn serialize<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
         let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
         for chunk in bytes.chunks(3) {
-            let b = [
-                chunk[0],
-                chunk.get(1).copied().unwrap_or(0),
-                chunk.get(2).copied().unwrap_or(0),
-            ];
-            let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+            let byte = |i: usize| u32::from(chunk.get(i).copied().unwrap_or(0));
+            let n = (byte(0) << 16) | (byte(1) << 8) | byte(2);
             for i in 0..4 {
                 if i <= chunk.len() {
-                    out.push(char::from(ABC[((n >> (18 - 6 * i)) & 63) as usize]));
+                    out.push(digit(n >> (18 - 6 * i)));
                 } else {
                     out.push('=');
                 }
             }
         }
         s.serialize_str(&out)
+    }
+
+    /// The base64 digit for the low six bits of `v`.
+    fn digit(v: u32) -> char {
+        let v = (v & 63) as u8;
+        char::from(match v {
+            0..=25 => b'A' + v,
+            26..=51 => b'a' + (v - 26),
+            52..=61 => b'0' + (v - 52),
+            62 => b'+',
+            _ => b'/',
+        })
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
