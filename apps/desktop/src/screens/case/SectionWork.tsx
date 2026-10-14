@@ -87,35 +87,69 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   const [preparing, setPreparing] = useState(false);
   const working = preparing || busy || job !== undefined;
 
+  /** The send of the last request, kept while it failed: "לנסות שוב" sends the same approved
+   *  request again and takes in its answer like the first time (the core kept the approval). */
+  const sending = useRef<(() => Promise<void>) | null>(null);
+  const [resend, setResend] = useState<(() => void) | null>(null);
+
+  function failed(e: unknown) {
+    const again = sending.current;
+    setResend(() => (again ? () => void sendAgain(again) : null));
+    setError(fail(e as never));
+  }
+
+  async function sendAgain(send: () => Promise<void>) {
+    setError(null);
+    setResend(null);
+    setBusy(true);
+    try {
+      await send();
+      sending.current = null;
+    } catch (e) {
+      failed(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   /** `replaces`: rewrite that one paragraph; otherwise the answer is the section's new draft. */
   async function ask(instruction: string, title?: string, replaces?: string) {
     if (!instruction.trim()) return;
     setError(null);
+    setResend(null);
+    sending.current = null;
     setPreparing(true);
     try {
       const prepare = () => ipc.prepareSection(caseId, section.key, instruction, replaces);
       const prepared = await prepare();
       setPreparing(false);
       setBusy(true);
+      const send = async (id: string) => {
+        setAsked(instruction);
+        await api.track(
+          { label: replaces ? `${ai} מנסח את הפסקה מחדש` : `${ai} כותב את "${section.title}"`, task: "draft", section: section.key, approval: id },
+          () => ipc.sendSection(id),
+          async (result) => {
+            setLast(result);
+            // Only the request that was sent is cleared, not one she typed meanwhile.
+            setMessage((m) => (m === instruction ? "" : m));
+            await Promise.all([reload(), loadChat()]);
+            if (result.demo) notify("מצב הדגמה: התשובה נבנתה במחשב, בלי שליחה.");
+          },
+        ).finally(() => setAsked(null));
+      };
       await api.review({
         title: title ?? `בקשה לסעיף ${section.title}`,
         prepared,
         reprepare: prepare,
         onSend: async (id) => {
-          setAsked(instruction);
-          const result = await api.track(
-            { label: replaces ? `${ai} מנסח את הפסקה מחדש` : `${ai} כותב את "${section.title}"`, task: "draft", section: section.key, approval: id },
-            () => ipc.sendSection(id),
-          ).finally(() => setAsked(null));
-          setLast(result);
-          // Only the request that was sent is cleared, not one she typed meanwhile.
-          setMessage((m) => (m === instruction ? "" : m));
-          await Promise.all([reload(), loadChat()]);
-          if (result.demo) notify("מצב הדגמה: התשובה נבנתה במחשב, בלי שליחה.");
+          sending.current = () => send(id);
+          await send(id);
+          sending.current = null;
         },
       });
     } catch (e) {
-      setError(fail(e as never));
+      failed(e);
     } finally {
       setPreparing(false);
       setBusy(false);
@@ -125,6 +159,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   /** The check of the proposed paragraphs against the sources: its own request and review. */
   async function verify() {
     setError(null);
+    setResend(null);
     setPreparing(true);
     try {
       const prepare = () => ipc.prepareVerify(caseId, section.key);
@@ -136,12 +171,14 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
         prepared,
         reprepare: prepare,
         onSend: async (id) => {
-          const result = await api.track(
+          await api.track(
             { label: `${ai} בודק את "${section.title}" מול המקורות`, task: "draft", approval: id },
             () => ipc.sendVerify(id),
+            (result) => {
+              setChecks(new Map(result.draft_ids.map((d, i) => [d, result.checks[i]] as [string, ParagraphCheck])));
+              if (result.demo) notify("מצב הדגמה: נבדקו רק מספרים שאין במקורות, בלי שליחה.");
+            },
           );
-          setChecks(new Map(result.draft_ids.map((d, i) => [d, result.checks[i]] as [string, ParagraphCheck])));
-          if (result.demo) notify("מצב הדגמה: נבדקו רק מספרים שאין במקורות, בלי שליחה.");
         },
       });
     } catch (e) {
@@ -450,7 +487,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               {last.questions.map((c, i) => <p key={`q${i}`}><b>שאלה:</b> {c}</p>)}
             </div>
           )}
-          <ErrorLine error={error} />
+          <ErrorLine error={error} retry={resend ?? undefined} />
         </section>
 
         <section className="chat" aria-label="שיחה על הסעיף">

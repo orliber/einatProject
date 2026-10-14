@@ -2,7 +2,7 @@
 // mock, so these tests check exactly what crosses the bridge and how failures come back.
 import { invoke } from "@tauri-apps/api/core";
 import { asUiError, ipc } from "./client";
-import { replayFor } from "../errors";
+import { forgetFailures, replayFor } from "../errors";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 const mocked = vi.mocked(invoke);
@@ -27,8 +27,9 @@ describe("asUiError", () => {
     expect(asUiError({ code: "x", message: "y" }).action).toEqual({ kind: "report" });
   });
 
-  it("turns anything else into a Hebrew 'internal' error, keeping the text for Or", () => {
-    expect(asUiError("panic at core")).toEqual({ code: "internal", message: "משהו השתבש. אפשר לנסות שוב.", details: ["panic at core"], action: { kind: "retry", after_seconds: 0 } });
+  it("turns anything else into a Hebrew 'internal' error for Or, keeping the text", () => {
+    // Not the core's answer: trying the same again rarely helps, so it goes to Or (F6).
+    expect(asUiError("panic at core")).toEqual({ code: "internal", message: "משהו השתבש. אפשר לשלוח לאור דוח תקלה.", details: ["panic at core"], action: { kind: "report" } });
     expect(asUiError(new Error("boom")).details).toEqual(["Error: boom"]);
     expect(asUiError(undefined).code).toBe("internal");
     // A message without a code is not a core error (it could be anything thrown in the webview).
@@ -85,7 +86,7 @@ describe("ipc", () => {
   it("an unknown failure reaches the UI as a Hebrew message, never as a raw exception", async () => {
     mocked.mockRejectedValueOnce("command import_document not allowed by the capability");
     const err = await ipc.listCases().catch((x: unknown) => x);
-    expect(err).toEqual({ code: "internal", message: "משהו השתבש. אפשר לנסות שוב.", details: ["command import_document not allowed by the capability"], action: { kind: "retry", after_seconds: 0 } });
+    expect(err).toEqual({ code: "internal", message: "משהו השתבש. אפשר לשלוח לאור דוח תקלה.", details: ["command import_document not allowed by the capability"], action: { kind: "report" } });
   });
 
   it("a document goes as raw bytes; the case id and file name only as encoded headers", async () => {
@@ -99,19 +100,36 @@ describe("ipc", () => {
     expect(decodeURIComponent((options as { headers: Record<string, string> }).headers["x-file-name"] ?? "")).toBe("דוח גן?.docx");
   });
 
-  it("a failure that offers a retry keeps the call itself, so it runs again exactly (F6)", async () => {
-    const e = { code: "egress", message: "אין חיבור.", details: [], action: { kind: "retry", after_seconds: 0 } };
+  it("a failure that offers a retry keeps the call itself, so it runs again exactly, once (F6)", async () => {
+    const e = { code: "busy", message: "רגע.", details: [], action: { kind: "retry", after_seconds: 0 } };
     mocked.mockRejectedValueOnce(e);
-    const err = await ipc.sendSection("a7").catch((x: unknown) => x as typeof e);
+    const err = await ipc.setLockMinutes(10).catch((x: unknown) => x as typeof e);
     const again = replayFor(err as never);
     expect(again).not.toBeNull();
-    mocked.mockResolvedValueOnce({ draft_ids: ["d1"], demo: false });
-    await expect(again?.()).resolves.toEqual({ draft_ids: ["d1"], demo: false });
-    expect(mocked).toHaveBeenLastCalledWith("send_section", { approvalId: "a7" });
+    await expect(again?.()).resolves.toBeNull();
+    expect(mocked).toHaveBeenLastCalledWith("set_lock_minutes", { minutes: 10 });
+    // Once it worked, nothing is left to run again.
+    expect(replayFor(err as never)).toBeNull();
     // A failure that is hers to fix keeps nothing to run again.
     mocked.mockRejectedValueOnce({ code: "refused", message: "לא.", details: [], action: { kind: "dismiss" } });
-    const other = await ipc.listCases().catch((x: unknown) => x);
+    const other = await ipc.setModel("m").catch((x: unknown) => x);
     expect(replayFor(other as never)).toBeNull();
+  });
+
+  it("never keeps a call that carries a password, a key or a file, nor one whose answer the screen needs", async () => {
+    const e = { code: "egress", message: "אין חיבור.", details: [], action: { kind: "retry", after_seconds: 0 } };
+    const kept = async (p: Promise<unknown>) => replayFor((await p.catch((x: unknown) => x)) as never);
+    mocked.mockRejectedValue(e);
+    expect(await kept(ipc.setApiKey("anthropic", "sk-בדוי"))).toBeNull();
+    expect(await kept(ipc.changePassword("ישנה וארוכה מאוד", false, "חדשה וארוכה מאוד"))).toBeNull();
+    expect(await kept(ipc.unlock("סיסמה בדויה"))).toBeNull();
+    expect(await kept(ipc.importDocument("c1", file("a.docx", [1])))).toBeNull();
+    expect(await kept(ipc.sendSection("a7"))).toBeNull();
+    // And a lock forgets what was kept.
+    expect(await kept(ipc.setLockMinutes(5))).not.toBeNull();
+    const err = await ipc.setLockMinutes(5).catch((x: unknown) => x);
+    forgetFailures();
+    expect(replayFor(err as never)).toBeNull();
   });
 
   it("raw-body commands also turn failures into a UiError", async () => {

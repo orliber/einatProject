@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../App";
-import { ipc, type CaseDetail, type Prepared, type SortResult } from "../ipc/client";
+import { ipc, type CaseDetail, type Prepared, type SortResult, type UiError } from "../ipc/client";
 import { ReviewDialog } from "../components/ReviewDialog";
 import { ExportDialog } from "../components/ExportDialog";
 import { ReportRunDialog } from "../components/ReportRunDialog";
@@ -53,13 +53,21 @@ export interface CaseApi {
   sort: () => Promise<void>;
   /** Requests on their way to Claude and back. */
   jobs: Job[];
-  track: <T>(job: { label: string; task: Task; section?: string; approval?: string }, run: () => Promise<T>) => Promise<T>;
+  /** `then`: what the screen does with the answer. A failure that offers a retry can then be
+   *  sent again from the strip, and its answer is taken in the same way (F6). */
+  track: <T>(job: { label: string; task: Task; section?: string; approval?: string }, run: () => Promise<T>, then?: (out: T) => Promise<void> | void) => Promise<T>;
   /** A draft for a section, from anywhere (the report page, the section): prepare, the
    *  review, and the writing with its progress. Resolves when it is in, or she went back. */
   draft: (sectionKey: string, instruction?: string, replaces?: string) => Promise<boolean>;
 }
 
 let jobSeq = 0;
+/** "לנסות שוב" for a failure in the strip, by its id: memory only, so it survives leaving the
+ *  case and coming back (as the strip does), but not a reload. */
+const retries = new Map<number, () => void>();
+
+/** The screen's `track`, for a retry from the strip after she left the case and came back. */
+let currentTrack: CaseApi["track"] | null = null;
 
 /** One line for the result of a sorting, in plain words. */
 export function sortSummary(r: SortResult): string {
@@ -154,21 +162,30 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [caseId, go]);
 
-  const [failures, setFailures] = useKept<{ id: number; label: string; section?: string; message: string }[]>(`case:${caseId}:failures`, []);
-
+  const [failures, setFailures] = useKept<{ id: number; label: string; section?: string; approval?: string; message: string }[]>(`case:${caseId}:failures`, []);
   const track = useCallback(
-    async <T,>(job: { label: string; task: Task; section?: string; approval?: string }, run: () => Promise<T>): Promise<T> => {
+    async <T,>(job: { label: string; task: Task; section?: string; approval?: string }, run: () => Promise<T>, then?: (out: T) => Promise<void> | void): Promise<T> => {
       const j: Job = { ...job, id: ++jobSeq, started: Date.now(), estimate: estimateMs(job.task, status.speed, status.demo_mode) };
       setJobs((js) => [...js, j]);
+      let answered = false;
       try {
         const out = await run();
+        answered = true;
         if (!status.demo_mode) recordDuration(job.task, status.speed, Date.now() - j.started);
         const title = detailRef.current?.sections.find((s) => s.key === job.section)?.title;
         if (job.section && viewRef.current !== job.section && viewRef.current !== "report" && title) notify(`הטיוטה ל"${title}" מוכנה לאישור.`);
+        // The same request sent again and answered: its earlier failure is over.
+        if (job.approval) setFailures((f) => f.filter((x) => x.approval !== job.approval));
+        await then?.(out);
         return out;
       } catch (e) {
-        // Never lost silently, wherever she is by then.
-        setFailures((f) => [...f, { id: j.id, label: job.label, ...(job.section ? { section: job.section } : {}), message: fail(e as never) }]);
+        // A failure taking in the answer is the screen's, not the request's.
+        if (answered) throw e;
+        // Never lost silently, wherever she is by then. A send the core kept the approval
+        // for can go again from the strip, and its answer is taken in by the same `then` (F6).
+        const err = e as UiError;
+        if (err.action?.kind === "retry") retries.set(j.id, () => void currentTrack?.(job, run, then).catch(() => undefined));
+        setFailures((f) => [...f, { id: j.id, label: job.label, ...(job.section ? { section: job.section } : {}), ...(job.approval ? { approval: job.approval } : {}), message: fail(e as never) }]);
         throw e;
       } finally {
         setJobs((js) => js.filter((x) => x.id !== j.id));
@@ -176,6 +193,9 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     },
     [status.speed, status.demo_mode, notify, fail, setJobs, setFailures],
   );
+  useEffect(() => {
+    currentTrack = track;
+  }, [track]);
 
   const startReview = useCallback(
     (r: ReviewRequest) =>
@@ -208,8 +228,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         prepared,
         reprepare: prepare,
         onSend: async (id) => {
-          await track({ label: `${ai} כותב את "${title}"`, task: "draft", section: key, approval: id }, () => ipc.sendSection(id));
-          await reload();
+          await track({ label: `${ai} כותב את "${title}"`, task: "draft", section: key, approval: id }, () => ipc.sendSection(id), () => reload());
         },
       });
     },
@@ -225,9 +244,10 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         prepared,
         reprepare: () => ipc.prepareSort(caseId),
         onSend: async (id) => {
-          const result = await track({ label: `${ai} קורא את החומרים ומשייך קטעים לסעיפים`, task: "sort", approval: id }, () => ipc.sendSort(id));
-          await reload();
-          notify(sortSummary(result));
+          await track({ label: `${ai} קורא את החומרים ומשייך קטעים לסעיפים`, task: "sort", approval: id }, () => ipc.sendSort(id), async (result) => {
+            await reload();
+            notify(sortSummary(result));
+          });
         },
       });
     } catch (e) {
@@ -343,7 +363,18 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
               {f.section && f.section !== view && (
                 <button type="button" className="btn btn-small" onClick={() => toReport(f.section)}>לסעיף</button>
               )}
-              <button type="button" className="icon-btn" aria-label="סגירה" onClick={() => setFailures((all) => all.filter((x) => x.id !== f.id))}><CloseIcon /></button>
+              {retries.has(f.id) && (
+                <button type="button" className="btn btn-small" onClick={() => {
+                  const again = retries.get(f.id);
+                  retries.delete(f.id);
+                  setFailures((all) => all.filter((x) => x.id !== f.id));
+                  again?.();
+                }}>לנסות שוב</button>
+              )}
+              <button type="button" className="icon-btn" aria-label="סגירה" onClick={() => {
+                retries.delete(f.id);
+                setFailures((all) => all.filter((x) => x.id !== f.id));
+              }}><CloseIcon /></button>
             </div>
           ))}
         </section>

@@ -174,6 +174,34 @@ describe("writing the report", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "✓ לאשר" })).toBeNull());
   });
 
+  it("a send that failed is sent again from the section, and its draft arrives like the first time (F6)", async () => {
+    const core = new FakeCore();
+    await core.handle("unlock", { password: "x" });
+    const calls: string[] = [];
+    let sends = 0;
+    mockIPC((cmd, args) => {
+      calls.push(cmd);
+      if (cmd === "send_section" && ++sends === 1) {
+        throw { code: "egress", message: "אין חיבור לאינטרנט.", details: [], action: { kind: "retry", after_seconds: 0 } };
+      }
+      return core.handle(cmd, args);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const page = await openCase(user);
+    const write = within(page).getAllByRole("button", { name: "✦ לכתוב עם Claude" })[0];
+    if (!write) throw new Error("no empty section to write");
+    await user.click(write);
+    const review = await screen.findByRole("dialog", { name: "לפני שליחה ל-Claude" });
+    await user.click(within(review).getByRole("button", { name: /שליחה/ }));
+    const again = await screen.findByRole("button", { name: "לנסות שוב" });
+    await user.click(again);
+    // The same approved request goes again (nothing prepared again), and the draft shows.
+    await screen.findByRole("button", { name: "✓ לאשר" }, { timeout: 6000 });
+    expect(sends).toBe(2);
+    expect(calls.filter((c) => c === "prepare_section")).toHaveLength(1);
+  });
+
   it("previous reports can be summarized by topics through the same review screen", async () => {
     const { user, calls, core } = await openApp();
     const cases = (await core.handle("list_cases", {})) as { id: string }[];

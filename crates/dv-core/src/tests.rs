@@ -152,6 +152,33 @@ fn every_error_has_a_next_step_that_fits_it() {
             CoreError::Egress(EgressError::TooLarge),
             ErrorAction::Dismiss,
         ),
+        // Only what passes by itself offers a retry; the rest would fail the same way.
+        (
+            CoreError::Egress(EgressError::Unavailable(529)),
+            ErrorAction::retry(),
+        ),
+        (
+            CoreError::Egress(EgressError::Rejected(408, "x".into())),
+            ErrorAction::retry(),
+        ),
+        (
+            CoreError::Egress(EgressError::Rejected(400, "x".into())),
+            ErrorAction::Report,
+        ),
+        (
+            CoreError::Egress(EgressError::Policy("x".into())),
+            ErrorAction::Report,
+        ),
+        (CoreError::Egress(EgressError::Tls), ErrorAction::Report),
+        (
+            CoreError::Egress(EgressError::Protocol("x".into())),
+            ErrorAction::Report,
+        ),
+        // A spent approval: sending it again would do nothing.
+        (
+            CoreError::Ai(dv_ai::AiError::Format("x".into())),
+            ErrorAction::Dismiss,
+        ),
         (CoreError::Internal("x".into()), ErrorAction::Report),
         (
             CoreError::Vault(VaultError::Corrupt("x".into())),

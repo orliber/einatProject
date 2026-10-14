@@ -70,7 +70,19 @@ export function asUiError(e: unknown): UiError {
     if (u.action && u.details) return u as UiError;
     return { ...u, details: u.details ?? [], action: u.action ?? { kind: "report" } };
   }
-  return { code: "internal", message: "משהו השתבש. אפשר לנסות שוב.", details: [String(e)], action: { kind: "retry", after_seconds: 0 } };
+  // Not the core's answer (a refused grant, a fault in the window): trying the same again
+  // rarely helps, so it goes to Or with what was thrown.
+  return { code: "internal", message: "משהו השתבש. אפשר לשלוח לאור דוח תקלה.", details: [String(e)], action: { kind: "report" } };
+}
+
+/** An argument that is a password, a key or a typed kit: such a call is never kept in memory
+ *  for "לנסות שוב" (F6). Matched by name, so a new command is covered as well. */
+const SECRET_ARG = /password|secret|key|current|typed/i;
+
+function keepsNoSecret(args: unknown): boolean {
+  if (args === undefined || args === null) return true;
+  if (args instanceof Uint8Array || args instanceof ArrayBuffer) return false;
+  return typeof args === "object" && !Object.keys(args).some((k) => SECRET_ARG.test(k));
 }
 
 type Command = keyof Commands;
@@ -79,22 +91,32 @@ type CallArgs<K extends Command> = Commands[K]["args"] extends undefined
   ? [args?: undefined, options?: InvokeOptions]
   : [args: Commands[K]["args"], options?: InvokeOptions];
 
-/** One command, checked by `tsc` against the Rust signature it was generated from (F5). */
+function send<K extends Command>(cmd: K, args: unknown, options: InvokeOptions | undefined): Promise<Commands[K]["returns"]> {
+  return options === undefined ? invoke<Commands[K]["returns"]>(cmd, args as never) : invoke<Commands[K]["returns"]>(cmd, args as never, options);
+}
+
+/** One command, checked by `tsc` against the Rust signature it was generated from (F5). Its
+ *  answer is for the screen that asked, so a failure keeps nothing to run again: running it
+ *  from the error line would drop the answer. */
 async function call<K extends Command>(cmd: K, ...[args, options]: CallArgs<K>): Promise<Commands[K]["returns"]> {
-  const send = () => (options === undefined ? invoke<Commands[K]["returns"]>(cmd, args) : invoke<Commands[K]["returns"]>(cmd, args, options));
   try {
-    return await send();
+    return await send(cmd, args, options);
   } catch (e) {
-    const err = asUiError(e);
-    // "לנסות שוב" runs this same call again (F6).
-    rememberReplay(err, send);
-    throw err;
+    throw asUiError(e);
   }
 }
 
-/** A command that answers nothing. */
-async function run<K extends Command>(cmd: K, ...rest: CallArgs<K>): Promise<undefined> {
-  await call(cmd, ...rest);
+/** A command that answers nothing. "לנסות שוב" runs this same call again (F6), unless it
+ *  carries a password, a key or a file. */
+async function run<K extends Command>(cmd: K, ...[args, options]: CallArgs<K>): Promise<undefined> {
+  const again = () => send(cmd, args, options);
+  try {
+    await again();
+  } catch (e) {
+    const err = asUiError(e);
+    if (keepsNoSecret(args)) rememberReplay(err, again);
+    throw err;
+  }
   return undefined;
 }
 

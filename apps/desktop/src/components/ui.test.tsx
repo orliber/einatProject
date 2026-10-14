@@ -140,16 +140,15 @@ describe("ErrorLine", () => {
   it("a retry runs the failed call itself again, and the line goes once it worked (F6)", async () => {
     let calls = 0;
     mockIPC((cmd) => {
-      if (cmd === "send_section") {
+      if (cmd === "set_lock_minutes") {
         calls += 1;
-        if (calls === 1) throw { code: "egress", message: "אין חיבור לאינטרנט.", details: [], action: { kind: "retry", after_seconds: 0 } };
-        return { draft_ids: [], demo: false };
+        if (calls === 1) throw { code: "internal_busy", message: "הכספת עסוקה.", details: [], action: { kind: "retry", after_seconds: 0 } };
       }
       return null;
     });
     const refresh = vi.fn(async () => undefined);
-    const error = await ipc.sendSection("a1").then(() => null, (e: UiError) => { rememberFailure(e); return e.message; });
-    expect(error).toBe("אין חיבור לאינטרנט.");
+    const error = await ipc.setLockMinutes(10).then(() => null, (e: UiError) => { rememberFailure(e); return e.message; });
+    expect(error).toBe("הכספת עסוקה.");
     render(
       <AppContext.Provider value={api({ refresh })}>
         <ErrorLine error={error} />
@@ -159,6 +158,47 @@ describe("ErrorLine", () => {
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     expect(calls).toBe(2);
     expect(refresh).toHaveBeenCalled();
+  });
+
+  it("a retry that fails again shows the new failure, not the old line as if nothing happened", async () => {
+    let calls = 0;
+    mockIPC((cmd) => {
+      if (cmd === "set_lock_minutes") {
+        calls += 1;
+        if (calls === 1) throw { code: "internal_busy", message: "הכספת עסוקה.", details: [], action: { kind: "retry", after_seconds: 0 } };
+        throw { code: "refused", message: "לא אפשרי כרגע.", details: [], action: { kind: "dismiss" } };
+      }
+      return null;
+    });
+    const fail = (e: UiError) => {
+      rememberFailure(e);
+      return e.message;
+    };
+    const error = await ipc.setLockMinutes(10).then(() => null, (e: UiError) => fail(e));
+    render(
+      <AppContext.Provider value={api({ fail })}>
+        <ErrorLine error={error} />
+      </AppContext.Provider>,
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: "לנסות שוב" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("לא אפשרי כרגע.");
+    // Its own next step: hers to dismiss, and nothing to run again.
+    expect(screen.getByRole("button", { name: "הבנתי" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "לנסות שוב" })).toBeNull();
+  });
+
+  it("a call whose answer the screen takes in is not run again from the line, only by the screen's own retry", async () => {
+    mockIPC((cmd) => {
+      if (cmd === "send_section") throw { code: "egress", message: "אין חיבור לאינטרנט.", details: [], action: { kind: "retry", after_seconds: 0 } };
+      return null;
+    });
+    const error = await ipc.sendSection("a1").then(() => null, (e: UiError) => { rememberFailure(e); return e.message; });
+    const { rerender } = render(<ErrorLine error={error} />);
+    expect(screen.queryByRole("button", { name: "לנסות שוב" })).toBeNull();
+    const retry = vi.fn();
+    rerender(<ErrorLine error={error} retry={retry} />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "לנסות שוב" }));
+    expect(retry).toHaveBeenCalled();
   });
 
   it("a retry that must wait counts down first (F6)", () => {

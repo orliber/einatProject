@@ -343,13 +343,18 @@ impl CoreError {
                 after_seconds: u32::try_from(*s).unwrap_or(u32::MAX),
             },
             CoreError::Egress(e) => egress_action(e),
-            CoreError::Ai(_) | CoreError::Update(_) => ErrorAction::retry(),
+            // The answer came and was not usable; its approval is spent, so sending "again"
+            // would do nothing. She asks again from the screen (a new request).
+            CoreError::Ai(_) => ErrorAction::Dismiss,
+            CoreError::Update(_) => ErrorAction::retry(),
         }
     }
 }
 
 /// Where a failed connection is fixed: her key and her choice of AI in Settings, the emergency
-/// stop on the security page, a retry for what passes by itself.
+/// stop on the security page, a retry only for what passes by itself, and a report for Or for
+/// what no retry can fix (a refused or broken request, an intercepted connection). Every
+/// variant is named, so a new one needs its own answer.
 fn egress_action(e: &EgressError) -> ErrorAction {
     match e {
         EgressError::NoApiKey | EgressError::Unauthorized | EgressError::LocalUnavailable => {
@@ -357,8 +362,14 @@ fn egress_action(e: &EgressError) -> ErrorAction {
         }
         EgressError::Stopped => ErrorAction::settings("security"),
         EgressError::RateLimited => ErrorAction::Retry { after_seconds: 60 },
+        EgressError::Offline | EgressError::Unavailable(_) => ErrorAction::retry(),
+        // A timeout or a conflict passes by itself; any other refusal comes back the same.
+        EgressError::Rejected(408 | 409, _) => ErrorAction::retry(),
+        EgressError::Rejected(..)
+        | EgressError::Policy(_)
+        | EgressError::Tls
+        | EgressError::Protocol(_) => ErrorAction::Report,
         EgressError::TooLarge | EgressError::DailyLimit => ErrorAction::Dismiss,
-        _ => ErrorAction::retry(),
     }
 }
 

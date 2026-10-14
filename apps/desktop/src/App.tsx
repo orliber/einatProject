@@ -14,7 +14,7 @@ import { UnsavedNotice } from "./components/Unsaved";
 import { applyTextSize, readTextSize, stepTextSize } from "./textSize";
 import { ShortcutsSheet, useShortcutsSheet } from "./components/ShortcutsSheet";
 import { isCombo, KEYS } from "./shortcuts";
-import { rememberFailure } from "./errors";
+import { forgetFailures, rememberFailure } from "./errors";
 import { clearKept } from "./kept";
 import type { SettingsPane } from "./screens/settingsPanes";
 
@@ -151,6 +151,8 @@ export function App() {
     if (!unlocked) {
       queryClient.clear();
       clearKept();
+      // And the failures kept for "לנסות שוב": they were for the vault just closed.
+      forgetFailures();
     }
     wasUnlocked.current = unlocked;
   }, [unlocked]);

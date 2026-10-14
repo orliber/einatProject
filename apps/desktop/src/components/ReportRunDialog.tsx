@@ -79,8 +79,7 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
         prepared,
         reprepare: () => ipc.prepareSort(api.caseId),
         onSend: async (id) => {
-          await api.track({ label: `${ai} קורא את החומרים ומשייך קטעים לסעיפים`, task: "sort", approval: id }, () => ipc.sendSort(id));
-          await api.reload();
+          await api.track({ label: `${ai} קורא את החומרים ומשייך קטעים לסעיפים`, task: "sort", approval: id }, () => ipc.sendSort(id), () => api.reload());
         },
       });
       if (sent) await load();
@@ -93,10 +92,11 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
     setState((s) => ({ ...s, [key]: "writing" }));
     setStarted((s) => ({ ...s, [key]: Date.now() }));
     try {
-      await api.track({ label: `${ai} כותב את "${title(key)}"`, task: "draft", section: key, approval }, () => ipc.sendSection(approval));
-      setState((s) => ({ ...s, [key]: "done" }));
-      // Each section shows up in the report as soon as it is written, not when the last one is.
-      await api.reload();
+      await api.track({ label: `${ai} כותב את "${title(key)}"`, task: "draft", section: key, approval }, () => ipc.sendSection(approval), async () => {
+        setState((s) => ({ ...s, [key]: "done" }));
+        // Each section shows up in the report as soon as it is written, not when the last one is.
+        await api.reload();
+      });
     } catch (e) {
       setError(fail(e as never));
       setState((s) => ({ ...s, [key]: "failed" }));

@@ -2,7 +2,8 @@
 import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppContext } from "../App";
-import { failureFor, replayFor } from "../errors";
+import { failureFor, rememberFailure, replayFor } from "../errors";
+import { asUiError } from "../ipc/client";
 import { SETTINGS_PANES, type SettingsPane } from "../screens/settingsPanes";
 import { BugReportDialog } from "./BugReport";
 import type { Segment } from "../ipc/generated/Segment";
@@ -249,27 +250,38 @@ export function Toast({ text, onDone, action }: { text: string; onDone: () => vo
  * "הבנתי". A message that is not the remembered failure (written by the screen itself) gets
  * the caller's retry when there is one, else "הבנתי". Never a dead end.
  */
-export function ErrorLine({ error, retry, report: always }: { error: string | null; retry?: (() => void) | undefined; report?: boolean }) {
+export function ErrorLine({ error: given, retry, report: always }: { error: string | null; retry?: (() => void) | undefined; report?: boolean }) {
   const app = useContext(AppContext);
   const qc = useOptionalQueryClient();
   const [reporting, setReporting] = useState(false);
   const [closed, setClosed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // A try again that failed shows its own failure, with its own next step, in place of the
+  // first (never the old line as if nothing happened).
+  const [again_, setAgain] = useState<{ after: string; message: string } | null>(null);
+  const error = given !== null && again_?.after === given ? again_.message : given;
   const f = error ? failureFor(error) : null;
   const action = f?.action ?? null;
-  if (!error || closed === error) return null;
+  if (!error || given === null || closed === given) return null;
   const route = app?.route;
   const replay = replayFor(f);
   const buttons: { label: string; run: () => void; wait?: number }[] = [];
+  const first = given;
   const again = retry ?? (replay ? () => {
     setBusy(true);
     void replay()
       .then(() => {
-        setClosed(error);
+        setClosed(first);
         void qc?.invalidateQueries();
         void app?.refresh();
       })
-      .catch(() => undefined)
+      .catch((e: unknown) => {
+        const u = asUiError(e);
+        let message = u.message;
+        if (app) message = app.fail(u);
+        else rememberFailure(u);
+        setAgain({ after: first, message });
+      })
       .finally(() => setBusy(false));
   } : undefined);
   switch (action?.kind) {
@@ -294,7 +306,7 @@ export function ErrorLine({ error, retry, report: always }: { error: string | nu
       if (!f && retry) buttons.push({ label: "לנסות שוב", run: retry });
   }
   const report = always === true || action?.kind === "report" || (f !== null && f.details.length > 0);
-  if (buttons.length === 0 && !report) buttons.push({ label: "הבנתי", run: () => setClosed(error) });
+  if (buttons.length === 0 && !report) buttons.push({ label: "הבנתי", run: () => setClosed(first) });
   return (
     <div className="error-line">
       <p className="error" role="alert">{error}</p>
