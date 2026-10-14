@@ -6,7 +6,12 @@
 //! written; the old Hebrew code page round-trips and anything else is refused, not guessed; and
 //! a PDF with no text layer is never imported as if it had one.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use std::io::{Cursor, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};

@@ -12,6 +12,10 @@
 //! * `cargo xtask check-parsers` / `sbom <out.json>` / `self-audit [--full]` – the supply
 //!   chain (SEC6–SEC8, `supply.rs`).
 
+// A developer's tool on Or's computer and in CI, never shipped: an index past the end here is
+// an error on his screen, not a crash in front of her (F4 covers what ships).
+#![allow(clippy::indexing_slicing)]
+
 mod ci;
 mod invariants;
 mod ipc;

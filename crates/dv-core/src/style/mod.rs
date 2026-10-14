@@ -402,8 +402,8 @@ impl LocalStyle {
             hedges: m.hedges,
             contrasts: m.contrasts,
             first_person: m.first_person,
-            fit_recent: mean(&self.draft_fit[split..]),
-            fit_earlier: mean(&self.draft_fit[earlier_from..split]),
+            fit_recent: mean(self.draft_fit.get(split..).unwrap_or_default()),
+            fit_earlier: mean(self.draft_fit.get(earlier_from..split).unwrap_or_default()),
             fit_count: u32::try_from(n).unwrap_or(u32::MAX),
             fit_by_month: self
                 .fit_months
@@ -651,19 +651,20 @@ fn rebuild(out: &FilterOutcome, child: Option<&str>) -> (String, u32) {
             None | Some(Mark::Replaced) => text.push_str(&seg.text),
             Some(Mark::Tag) => {
                 let names = found(&seg.text);
-                let role = if names.is_empty() {
-                    None
-                } else if names
-                    .iter()
-                    .any(|a| child.is_some_and(|c| normalize(&a.token) == c))
-                {
-                    Some(Role::Child)
-                } else {
+                let role = match names.first() {
+                    None => None,
+                    Some(_)
+                        if names
+                            .iter()
+                            .any(|a| child.is_some_and(|c| normalize(&a.token) == c)) =>
+                    {
+                        Some(Role::Child)
+                    }
                     // "Another child" reads wrong in a report about one child.
-                    Some(match names[0].role {
+                    Some(first) => Some(match first.role {
                         Role::OtherChild | Role::Child => Role::Other,
                         r => r,
-                    })
+                    }),
                 };
                 match role {
                     Some(r) => text.push_str(&role_tag(r)),
@@ -698,29 +699,30 @@ fn mask_numbers(text: &str) -> (String, u32) {
     let mut out = String::with_capacity(text.len());
     let mut masked = 0;
     let mut depth = 0u32;
+    let at = |k: usize| chars.get(k).copied();
     let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
+    while let Some(c) = at(i) {
         match c {
             '[' => depth += 1,
             ']' => depth = depth.saturating_sub(1),
             _ => {}
         }
         if depth == 0 && c.is_ascii_digit() {
-            let latin_before = i > 0
-                && (chars[i - 1].is_ascii_alphabetic()
-                    || (chars[i - 1] == '-' && i > 1 && chars[i - 2].is_ascii_alphabetic()));
+            let before = |back: usize| i.checked_sub(back).and_then(at);
+            let latin_before = before(1).is_some_and(|p| {
+                p.is_ascii_alphabetic()
+                    || (p == '-' && before(2).is_some_and(|q| q.is_ascii_alphabetic()))
+            });
             let mut j = i;
-            while j < chars.len()
-                && (chars[j].is_ascii_digit()
-                    || (matches!(chars[j], '.' | ':' | '/' | '-' | ',')
-                        && j + 1 < chars.len()
-                        && chars[j + 1].is_ascii_digit()))
-            {
+            while at(j).is_some_and(|d| {
+                d.is_ascii_digit()
+                    || (matches!(d, '.' | ':' | '/' | '-' | ',')
+                        && at(j + 1).is_some_and(|e| e.is_ascii_digit()))
+            }) {
                 j += 1;
             }
             if latin_before {
-                out.extend(&chars[i..j]);
+                out.extend(chars.get(i..j).unwrap_or_default());
             } else {
                 out.push_str("[מספר]");
                 masked += 1;
@@ -895,11 +897,11 @@ fn focus(profile: &StyleProfile, section_key: &str, query: &str) -> StyleProfile
                 .collect();
             let texts: Vec<&str> = group
                 .iter()
-                .map(|n| profile.items[*n].text.as_str())
+                .filter_map(|n| profile.items.get(*n).map(|i| i.text.as_str()))
                 .collect();
             let kept: HashSet<usize> = dv_style::retrieve::best(&texts, query, budget)
                 .into_iter()
-                .map(|k| group[k])
+                .filter_map(|k| group.get(k).copied())
                 .collect();
             drop.extend(group.into_iter().filter(|n| !kept.contains(n)));
         }
@@ -1116,13 +1118,13 @@ impl Core {
             }
         }
         Ok(
-            dv_style::retrieve::closest(&docs, &draft.section_key, &draft.text_tagged).map(|i| {
-                SimilarParagraph {
-                    text: docs[i].1.to_owned(),
-                    report: from[i].0.to_owned(),
-                    same_section: from[i].1 == Some(draft.section_key.as_str()),
-                }
-            }),
+            dv_style::retrieve::closest(&docs, &draft.section_key, &draft.text_tagged)
+                .and_then(|i| docs.get(i).zip(from.get(i)))
+                .map(|((_, text), (report, section))| SimilarParagraph {
+                    text: (*text).to_owned(),
+                    report: (*report).to_owned(),
+                    same_section: *section == Some(draft.section_key.as_str()),
+                }),
         )
     }
 

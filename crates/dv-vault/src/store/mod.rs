@@ -617,8 +617,10 @@ impl Vault {
         hex(&hmac_sha256(
             &self.keys.index,
             format!("case|{case_id}").as_bytes(),
-        ))[..16]
-            .to_owned()
+        ))
+        .chars()
+        .take(16)
+        .collect()
     }
 
     pub fn record(

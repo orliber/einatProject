@@ -36,8 +36,10 @@ impl Tokens {
     /// The `usage` block of one answer (Messages API shape).
     pub(crate) fn from_answer(answer: &Value) -> Self {
         let n = |k: &str| {
-            answer["usage"][k]
-                .as_u64()
+            answer
+                .get("usage")
+                .and_then(|u| u.get(k))
+                .and_then(Value::as_u64)
                 .map_or(0, |v| u32::try_from(v).unwrap_or(u32::MAX))
         };
         Self {

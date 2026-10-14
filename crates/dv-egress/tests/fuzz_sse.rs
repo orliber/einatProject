@@ -3,7 +3,12 @@
 //! the app sees it. It may be refused, but must never panic and never run away.
 //! Deterministic (the seed is printed); `DV_FUZZ_ROUNDS` raises the rounds.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::{Duration, Instant};

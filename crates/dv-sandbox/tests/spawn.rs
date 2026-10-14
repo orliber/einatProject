@@ -2,7 +2,12 @@
 //! is waited for and ended. The Windows containment has its own tests in `src/windows.rs`.
 
 #![cfg(unix)]
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use std::io::{Read, Write};
 use std::path::Path;

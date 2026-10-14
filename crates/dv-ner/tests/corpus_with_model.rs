@@ -13,7 +13,8 @@
     clippy::unwrap_used,
     clippy::print_stdout,
     clippy::panic,
-    clippy::expect_used
+    clippy::expect_used,
+    clippy::indexing_slicing
 )]
 
 #[path = "../../dv-privacy/tests/support/corpus.rs"]

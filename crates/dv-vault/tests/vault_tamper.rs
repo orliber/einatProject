@@ -2,7 +2,12 @@
 //! open nothing without the secret, and change nothing without it being refused or reported.
 //! Fabricated data only.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use std::collections::BTreeMap;
 use std::fs;

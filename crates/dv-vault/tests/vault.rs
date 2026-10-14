@@ -1,6 +1,11 @@
 //! End-to-end tests of the vault's security properties. Fabricated data only.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use std::fs;
 

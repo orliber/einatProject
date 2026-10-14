@@ -2,7 +2,12 @@
 //! answer, nothing in a material is lost when it is cut into passages, and Einat's choice of
 //! sections always wins. Invented text and scores only.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use dv_domain::compare::notable;
 use dv_domain::scores::{classify, ScoreScale};

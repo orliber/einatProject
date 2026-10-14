@@ -111,7 +111,10 @@ pub(crate) fn trimmed(content: &str, section_key: &str, title: &str) -> Option<(
     if ranges.len() < 3 {
         return None;
     }
-    let passages: Vec<&str> = ranges.iter().map(|r| &content[r.clone()]).collect();
+    let passages: Vec<&str> = ranges
+        .iter()
+        .map(|r| content.get(r.clone()).unwrap_or_default())
+        .collect();
     let keep = dv_style::retrieve::within_words(&passages, &format!("{title} {words}"), TRIM_WORDS);
     if keep.len() == passages.len() {
         return None;

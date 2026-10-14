@@ -2,7 +2,12 @@
 //! pinned key, for this product, for a strictly newer version, with an installer on the
 //! release address whose size and SHA-256 match, is ever offered or accepted.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use std::cell::RefCell;
 use std::collections::HashMap;

@@ -1,6 +1,11 @@
 //! The process boundary: results, crashes and timeouts. Fabricated text only.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use std::path::Path;
 use std::time::Duration;

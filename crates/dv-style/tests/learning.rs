@@ -3,7 +3,12 @@
 //! is already neutralized (names are tags), and never hold a tag or a number. Every name and
 //! number below is generated at run time from a fixed seed: nothing here is a real person.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use dv_style::edits::{changes, wilson_lower, MIN_CHANGES};
 use dv_style::retrieve::{best, bm25};

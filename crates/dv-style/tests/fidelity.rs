@@ -12,7 +12,8 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    clippy::cast_precision_loss
+    clippy::cast_precision_loss,
+    clippy::indexing_slicing
 )]
 
 use dv_style::StyleModel;

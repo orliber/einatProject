@@ -2,7 +2,12 @@
 //! Every case value in the vault goes through `seal`/`open`, so these are the properties the
 //! rest of the vault stands on. Fabricated data only.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use std::collections::HashSet;
 

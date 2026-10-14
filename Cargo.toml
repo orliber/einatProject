@@ -22,6 +22,8 @@ all = { level = "deny", priority = -1 }
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
+# Release builds abort on a panic, so an index past the end closes the app mid-work (F4).
+indexing_slicing = "deny"
 dbg_macro = "deny"
 todo = "deny"
 print_stdout = "deny"

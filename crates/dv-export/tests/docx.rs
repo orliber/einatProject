@@ -1,7 +1,12 @@
 //! The Word report: well-formed, right to left, and report text (written by the model or
 //! taken from documents) is only ever text, never markup. Fabricated data only.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 mod common;
 

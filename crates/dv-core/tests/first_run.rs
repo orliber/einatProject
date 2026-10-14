@@ -4,7 +4,12 @@
 //! (`cargo test --release -p dv-core --test first_run -- --ignored`), on each desktop OS in CI.
 //! It exists because the vault was never opened on real Windows before a release.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use std::time::SystemTime;
 

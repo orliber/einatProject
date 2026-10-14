@@ -3,7 +3,12 @@
 //! back the exact package, a wrong one is refused by the verifier, and a changed byte is
 //! caught by the HMAC. Fabricated data only.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 mod common;
 

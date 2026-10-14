@@ -4,7 +4,12 @@
 //! where the pieces were cut. A stream that is cut short, broken or hostile must end in an
 //! error, never in a panic or a half answer read as a whole one.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use std::cell::RefCell;
 use std::io::{BufReader, Read};

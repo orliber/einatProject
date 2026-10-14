@@ -336,7 +336,7 @@ impl Core {
             .ok_or_else(|| CoreError::NotFound("האישור פג. יש להכין את הבקשה מחדש.".to_owned()))?;
         let model = serde_json::from_slice::<Value>(pending.payload.body())
             .ok()
-            .and_then(|b| b["model"].as_str().map(str::to_owned))
+            .and_then(|b| b.get("model")?.as_str().map(str::to_owned))
             .unwrap_or_default();
         let provider = provider_of(&model);
         let api_key = key_of(self.vault_ref()?, provider)?;
@@ -407,7 +407,7 @@ impl Core {
         }
         let model = serde_json::from_slice::<Value>(payload.body())
             .ok()
-            .and_then(|b| b["model"].as_str().map(str::to_owned))
+            .and_then(|b| b.get("model")?.as_str().map(str::to_owned))
             .unwrap_or_default();
         let key = usage::this_month_key();
         let Ok(v) = self.vault_mut() else { return };

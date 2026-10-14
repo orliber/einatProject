@@ -172,7 +172,11 @@ fn paragraphs(xml: &str) -> Result<PartText, IngestError> {
                     "r" => run_hidden = false,
                     "p" => para_start = out.len(),
                     // List items: keep them apart and recognisable ("- ", like the source).
-                    "numPr" if !out[para_start..].starts_with("- ") => {
+                    "numPr"
+                        if out
+                            .get(para_start..)
+                            .is_some_and(|para| !para.starts_with("- ")) =>
+                    {
                         out.insert_str(para_start, "- ")
                     }
                     "tc" => cell_depth += 1,

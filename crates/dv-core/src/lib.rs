@@ -234,7 +234,8 @@ pub fn recent_crashes(log: &str) -> Vec<String> {
         .filter(|l| well_formed(l))
         .map(str::to_owned)
         .collect();
-    kept[kept.len().saturating_sub(CRASHES_SHOWN)..].to_vec()
+    let skip = kept.len().saturating_sub(CRASHES_SHOWN);
+    kept.into_iter().skip(skip).collect()
 }
 
 #[derive(Debug, thiserror::Error)]

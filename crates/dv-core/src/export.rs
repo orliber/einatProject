@@ -103,7 +103,12 @@ impl Core {
         };
         let identities = self.vault_ref()?.identities(case_id)?;
         let known: HashSet<String> = identities.iter().map(|i| i.tag.clone()).collect();
-        for p in &doc.parts[0].sections[0].paragraphs {
+        for p in doc
+            .parts
+            .iter()
+            .flat_map(|part| &part.sections)
+            .flat_map(|s| &s.paragraphs)
+        {
             if dv_privacy::restore::remaining_tags(p)
                 .iter()
                 .any(|t| known.contains(t))
@@ -252,14 +257,19 @@ impl Core {
                             blocking.push(format!("{}: נשארה תגית {tag}", s.title));
                         } else {
                             // Words the model put in square brackets ("[מחנכת]"): plain text.
-                            let plain = format!("({})", &tag[1..tag.len() - 1]);
+                            let inner = tag
+                                .strip_prefix('[')
+                                .and_then(|t| t.strip_suffix(']'))
+                                .unwrap_or(&tag);
+                            let plain = format!("({inner})");
                             *p = p.replace(&tag, &plain);
                         }
                     }
-                    for m in p.match_indices("[חסר") {
-                        let rest = &p[m.0..];
-                        let end = rest.find(']').map_or(rest.len(), |i| i + 1);
-                        to_complete.push(format!("{}: {}", s.title, &rest[..end]));
+                    for (at, _) in p.match_indices("[חסר") {
+                        // The marker up to its closing bracket, or to the end of the paragraph.
+                        let rest = p.get(at..).unwrap_or_default();
+                        let marker = rest.split_inclusive(']').next().unwrap_or(rest);
+                        to_complete.push(format!("{}: {marker}", s.title));
                     }
                 }
                 if s.key == "signature" {

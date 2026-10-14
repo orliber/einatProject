@@ -140,7 +140,9 @@ pub fn parse_pnpm_lock(text: &str) -> Vec<(String, String, Option<String>)> {
                 out.push((name.to_owned(), version.to_owned(), None));
             }
         } else if let (Some(last), Some(i)) = (out.last_mut(), line.find("integrity: sha512-")) {
-            let b64 = line[i + "integrity: sha512-".len()..]
+            let b64 = line
+                .get(i + "integrity: sha512-".len()..)
+                .unwrap_or_default()
                 .trim_end_matches(['}', ' ', ','])
                 .trim();
             last.2 = base64_to_hex(b64);

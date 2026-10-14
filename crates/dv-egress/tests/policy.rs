@@ -1,7 +1,12 @@
 //! The Zero-Data-Retention policy checked on every outgoing body, and the type boundary that
 //! makes the privacy gate the only source of sendable bytes.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use std::marker::PhantomData;
 

@@ -148,6 +148,8 @@ fn main() {
             "send_progress",
         ]));
     if let Err(error) = tauri_build::try_build(attributes) {
-        panic!("tauri-build failed: {error:#}");
+        // The build stops with the reason; the program itself never panics (F4).
+        eprintln!("tauri-build failed: {error:#}");
+        std::process::exit(1);
     }
 }
