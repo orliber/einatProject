@@ -171,17 +171,21 @@ impl Core {
         Ok((dest, folder_real))
     }
 
-    /// A backup in `folder` was written and read back: it counts from now on.
+    /// A backup in `folder` was written and read back: it counts from now on. `current`: it
+    /// opens with today's password and kit (none changed while it was written).
     pub(crate) fn backup_recorded(
         &mut self,
         folder: &Path,
         created_at: i64,
+        current: bool,
     ) -> Result<(), CoreError> {
         let v = self.vault_mut()?;
         v.set_setting(LAST_CHECK_KEY, &unix_now().to_string())?;
         v.set_setting(LAST_BACKUP_KEY, &created_at.to_string())?;
         v.set_setting(LAST_DIR_KEY, &folder.to_string_lossy())?;
-        v.set_setting(SECRET_CHANGED_KEY, "")?;
+        if current {
+            v.set_setting(SECRET_CHANGED_KEY, "")?;
+        }
         Ok(())
     }
 

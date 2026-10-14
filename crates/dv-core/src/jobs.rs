@@ -114,6 +114,8 @@ impl SlotJob {
 /// back run in the job.
 pub struct BackupTask {
     session: u64,
+    /// The header the backup holds; its key slots say which password and kit open it.
+    header: dv_vault::VaultHeader,
     job: dv_vault::BackupJob,
     dest: PathBuf,
     folder: PathBuf,
@@ -123,6 +125,7 @@ pub struct BackupTask {
 /// A backup written and read back (or why not), waiting for [`Core::finish_backup`].
 pub struct BackupRun {
     session: u64,
+    header: dv_vault::VaultHeader,
     dest: PathBuf,
     folder: PathBuf,
     auto: bool,
@@ -155,6 +158,7 @@ impl BackupTask {
             });
         BackupRun {
             session: self.session,
+            header: self.header,
             dest: self.dest,
             folder: self.folder,
             auto: self.auto,
@@ -559,9 +563,11 @@ impl Core {
     /// Check where the backup goes and take the snapshot. Writing it out is the task's.
     pub fn begin_backup(&mut self, dest: &Path) -> Result<BackupTask, CoreError> {
         let (dest, folder) = self.backup_destination(dest)?;
+        let header = self.vault_ref()?.header_copy();
         let job = self.vault_mut()?.begin_backup()?;
         Ok(BackupTask {
             session: self.session,
+            header,
             job,
             dest,
             folder,
@@ -584,7 +590,10 @@ impl Core {
         let done = run.done?;
         self.same_session(run.session)?;
         self.vault_mut()?.finish_backup(&done)?;
-        self.backup_recorded(&run.folder, done.info.created_at)?;
+        // A password or kit changed while it was written: the backup still opens only with the
+        // old one, so the reminder to make a new backup stays.
+        let current = self.vault_ref()?.header_copy().slots == run.header.slots;
+        self.backup_recorded(&run.folder, done.info.created_at, current)?;
         if run.auto {
             crate::backup::prune_auto_backups(&run.folder);
         }

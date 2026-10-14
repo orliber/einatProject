@@ -313,3 +313,21 @@ fn a_past_report_read_before_a_new_name_is_neutralized_with_it() {
     let all: String = preview.parts.iter().map(|p| p.text.clone()).collect();
     assert!(!all.contains("פרפר"), "{all}");
 }
+
+#[test]
+fn a_backup_written_while_the_password_changed_still_asks_for_a_new_one() {
+    let (_dir, mut c, _case) = setup(None);
+    let out = tempfile::tempdir().unwrap();
+    let new_password = "סיסמה חדשה וארוכה מאוד לכספת";
+    // The backup's snapshot is taken, then the password changes before it lands.
+    let task = c.begin_backup(&out.path().join("גיבוי")).unwrap();
+    c.change_password(PASSWORD, false, new_password).unwrap();
+    assert!(c.backup_status().unwrap().secret_changed);
+    c.finish_backup(task.run()).unwrap();
+    // It opens only with the old password, so the reminder stays.
+    assert!(c.backup_status().unwrap().secret_changed);
+    // A backup taken after the change clears it.
+    let task = c.begin_backup(&out.path().join("גיבוי")).unwrap();
+    c.finish_backup(task.run()).unwrap();
+    assert!(!c.backup_status().unwrap().secret_changed);
+}
