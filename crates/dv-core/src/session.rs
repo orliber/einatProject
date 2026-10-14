@@ -2,6 +2,10 @@
 
 use super::*;
 
+/// A password or kit check (Argon2id, seconds at most) that has not come back after this
+/// long is taken as lost, so the vault can never stay unopenable.
+const SECRET_WORK_STALE: Duration = Duration::from_secs(120);
+
 impl Core {
     /// `dir` is the vault folder (the shell passes the OS local-app-data folder).
     #[must_use]
@@ -20,6 +24,8 @@ impl Core {
             last_tick: None,
             failed_unlocks: 0,
             not_before: None,
+            secret_work: None,
+            secret_ticket: 0,
             disk_encryption: disk.to_owned(),
             transport: None,
             ingest_exe: None,
@@ -260,6 +266,41 @@ impl Core {
         }
     }
 
+    /// Take the one place for checking a password or kit off the lock, or refuse while
+    /// another check runs. A check that never came back (a lost job) frees it after a while.
+    /// Returns the ticket the job hands back to [`Self::release_secret_work`].
+    pub(crate) fn claim_secret_work(&mut self) -> Result<u64, CoreError> {
+        self.refuse_secret_work_running()?;
+        self.secret_ticket = self.secret_ticket.wrapping_add(1);
+        self.secret_work = Some((self.secret_ticket, Instant::now()));
+        Ok(self.secret_ticket)
+    }
+
+    pub(crate) fn refuse_secret_work_running(&self) -> Result<(), CoreError> {
+        match self.secret_work {
+            Some((_, since)) if since.elapsed() < SECRET_WORK_STALE => Err(CoreError::Needs(
+                "הסיסמה עדיין נבדקת. רגע אחד.".to_owned(),
+                ErrorAction::Dismiss,
+            )),
+            _ => Ok(()),
+        }
+    }
+
+    /// Frees the place, unless a newer check took it meanwhile (after a lock or the stale wait).
+    pub(crate) fn release_secret_work(&mut self, ticket: u64) {
+        if self.secret_work.is_some_and(|(t, _)| t == ticket) {
+            self.secret_work = None;
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn age_secret_work(&mut self) {
+        if let Some((t, _)) = self.secret_work {
+            let old = Instant::now().checked_sub(SECRET_WORK_STALE + Duration::from_secs(1));
+            self.secret_work = old.map(|since| (t, since));
+        }
+    }
+
     /// `purge`: erase what waited in the recycle bin past its time. Not right after a restore,
     /// which is often done to get back something deleted by mistake.
     pub(crate) fn after_unlock(
@@ -342,6 +383,9 @@ impl Core {
         // The model's process held texts of this session in its memory: it ends with the lock.
         self.end_name_model();
         if let Some(v) = self.vault.take() {
+            // A new password or kit begun while open lands as "locked meanwhile"; its check
+            // must not keep her from opening the vault again.
+            self.secret_work = None;
             let _ = v.lock_because(reason);
         }
     }

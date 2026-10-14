@@ -1289,3 +1289,33 @@ fn a_new_slot_is_made_away_from_the_vault_and_applies_only_where_it_was_made() {
     vault.apply_slot(kit_slot).unwrap();
     assert!(vault.check_recovery_key(&kit));
 }
+
+#[test]
+fn header_writes_at_the_same_time_never_mix_and_leave_no_temp_file() {
+    // Two openings or two password changes at once used to fill the same temp file (F5).
+    const THREADS: usize = 8;
+    let dir = tempfile::tempdir().unwrap();
+    let created = Vault::create(dir.path(), PASSWORD, Argon2Params::TEST).unwrap();
+    created.vault.lock().unwrap();
+    let header = dv_vault::VaultHeader::read(dir.path()).unwrap();
+    let barrier = std::sync::Barrier::new(THREADS);
+    std::thread::scope(|s| {
+        for _ in 0..THREADS {
+            s.spawn(|| {
+                barrier.wait();
+                for _ in 0..25 {
+                    header.write(dir.path()).unwrap();
+                }
+            });
+        }
+    });
+    dv_vault::VaultHeader::read(dir.path()).unwrap();
+    Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
+    let left: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".tmp"))
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
+}

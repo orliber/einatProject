@@ -6,6 +6,7 @@
 use std::fs;
 use std::io::Write;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -130,17 +131,25 @@ impl VaultHeader {
         Ok(header)
     }
 
-    /// Atomic replace: write a temp file, flush to disk, rename over the old header.
+    /// Atomic replace: write a temp file, flush to disk, rename over the old header. Each
+    /// write has its own temp file, so two writes never fill the same one and rename half of
+    /// one and half of the other into place; the last rename wins whole.
     pub fn write(&self, dir: &Path) -> Result<(), VaultError> {
-        let tmp = dir.join(format!("{HEADER_FILE}.tmp"));
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let tmp = dir.join(format!("{HEADER_FILE}.{}.{n}.tmp", std::process::id()));
         let json =
             serde_json::to_vec_pretty(self).map_err(|e| VaultError::Corrupt(e.to_string()))?;
-        {
+        let written = (|| -> Result<(), VaultError> {
             let mut f = fs::File::create(&tmp)?;
             f.write_all(&json)?;
             f.sync_all()?;
+            fs::rename(&tmp, dir.join(HEADER_FILE))?;
+            Ok(())
+        })();
+        if written.is_err() {
+            let _ = fs::remove_file(&tmp);
         }
-        fs::rename(&tmp, dir.join(HEADER_FILE))?;
-        Ok(())
+        written
     }
 }

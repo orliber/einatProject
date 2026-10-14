@@ -49,24 +49,33 @@ impl Proof {
 pub struct UnlockJob {
     dir: PathBuf,
     proof: Proof,
+    ticket: u64,
 }
 
 /// An opened vault (or why not), waiting for [`Core::finish_unlock`].
-pub struct Unlocked(Result<Vault, VaultError>);
+pub struct Unlocked {
+    opened: Result<Vault, VaultError>,
+    ticket: u64,
+}
 
 impl UnlockJob {
     #[must_use]
     pub fn run(self) -> Unlocked {
-        Unlocked(match &self.proof {
+        let opened = match &self.proof {
             Proof::Password(p) => Vault::unlock_with_password(&self.dir, p),
             Proof::Recovery(r) => Vault::unlock_with_recovery(&self.dir, r),
-        })
+        };
+        Unlocked {
+            opened,
+            ticket: self.ticket,
+        }
     }
 }
 
 /// A new password or a new printed kit: the proof and the new slot are made in the job.
 pub struct SlotJob {
     session: u64,
+    ticket: u64,
     header: dv_vault::VaultHeader,
     proof: Proof,
     /// `Some` for a new password; `None` for a new kit.
@@ -77,6 +86,7 @@ pub struct SlotJob {
 /// The slot made by a [`SlotJob`] (or why not), and the new kit when it was one.
 pub struct SlotMade {
     session: u64,
+    ticket: u64,
     made: Result<(NewSlot, Option<Zeroizing<String>>), VaultError>,
 }
 
@@ -94,6 +104,7 @@ impl SlotJob {
         };
         SlotMade {
             session: self.session,
+            ticket: self.ticket,
             made,
         }
     }
@@ -404,8 +415,10 @@ impl Core {
     pub fn begin_unlock(&mut self, password: &str) -> Result<UnlockJob, CoreError> {
         self.refuse_cloud()?;
         self.check_backoff()?;
+        let ticket = self.claim_secret_work()?;
         Ok(UnlockJob {
             dir: self.dir.clone(),
+            ticket,
             proof: Proof::new(password, false),
         })
     }
@@ -413,22 +426,24 @@ impl Core {
     pub fn begin_unlock_with_recovery(&mut self, typed: &str) -> Result<UnlockJob, CoreError> {
         self.refuse_cloud()?;
         self.check_backoff()?;
+        let ticket = self.claim_secret_work()?;
         Ok(UnlockJob {
             dir: self.dir.clone(),
+            ticket,
             proof: Proof::new(typed, true),
         })
     }
 
-    /// Keep the opened vault. When another opening won meanwhile (two clicks), this one is
-    /// closed again and the vault already open stays.
+    /// Keep the opened vault. When one is already open (an opening that came back after the
+    /// stale wait), this one is dropped, which wipes its keys, without writing anything: the
+    /// vault already open stays as it is.
     pub fn finish_unlock(&mut self, opened: Unlocked) -> Result<AppStatus, CoreError> {
+        self.release_secret_work(opened.ticket);
         if self.vault.is_some() {
-            if let Ok(extra) = opened.0 {
-                let _ = extra.lock();
-            }
+            drop(opened);
             return Ok(self.status());
         }
-        self.after_unlock(opened.0, true)
+        self.after_unlock(opened.opened, true)
     }
 
     pub fn unlock(&mut self, password: &str) -> Result<AppStatus, CoreError> {
@@ -453,9 +468,12 @@ impl Core {
         self.check_backoff()?;
         // The policy first, so a weak password is refused before any slow work.
         dv_vault::password::check_policy(new_password).map_err(VaultError::Policy)?;
+        let header = self.vault_ref()?.header_copy();
+        let ticket = self.claim_secret_work()?;
         Ok(SlotJob {
             session: self.session,
-            header: self.vault_ref()?.header_copy(),
+            ticket,
+            header,
             proof: Proof::new(current, with_recovery),
             new_password: Some(Zeroizing::new(new_password.to_owned())),
             params: self.argon,
@@ -483,9 +501,12 @@ impl Core {
         with_recovery: bool,
     ) -> Result<SlotJob, CoreError> {
         self.check_backoff()?;
+        let header = self.vault_ref()?.header_copy();
+        let ticket = self.claim_secret_work()?;
         Ok(SlotJob {
             session: self.session,
-            header: self.vault_ref()?.header_copy(),
+            ticket,
+            header,
             proof: Proof::new(current, with_recovery),
             new_password: None,
             params: None,
@@ -511,6 +532,7 @@ impl Core {
     }
 
     fn finish_slot(&mut self, made: SlotMade) -> Result<Option<Zeroizing<String>>, CoreError> {
+        self.release_secret_work(made.ticket);
         self.same_session(made.session)?;
         let (slot, kit) = match made.made {
             Ok(m) => m,

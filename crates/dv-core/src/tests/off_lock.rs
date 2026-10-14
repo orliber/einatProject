@@ -53,19 +53,51 @@ fn unlocking_derives_the_key_while_the_core_answers() {
     assert!(c.finish_unlock(opened).unwrap().unlocked);
     assert!(c.case_detail(&case).is_ok());
 
-    // Two clicks: the second opening finds the vault open and closes its own copy.
+    // Two clicks: the second waits for the first, so two openings never run side by side.
     c.lock();
-    let first = c.begin_unlock(PASSWORD).unwrap().run();
-    let second = c.begin_unlock(PASSWORD).unwrap().run();
-    assert!(c.finish_unlock(first).unwrap().unlocked);
-    assert!(c.finish_unlock(second).unwrap().unlocked);
+    let first = c.begin_unlock(PASSWORD).unwrap();
+    assert!(matches!(
+        c.begin_unlock(PASSWORD),
+        Err(CoreError::Needs(_, ErrorAction::Dismiss))
+    ));
+    assert!(matches!(
+        c.begin_unlock_with_recovery("ABCD"),
+        Err(CoreError::Needs(_, ErrorAction::Dismiss))
+    ));
+    assert!(c.finish_unlock(first.run()).unwrap().unlocked);
     assert!(c.case_detail(&case).is_ok());
 
-    // A wrong password counts toward the waiting time, as before.
+    // An opening that never came back frees the place after a while, and when it does come
+    // back after another opened the vault, its copy is dropped and the open vault stays.
     c.lock();
-    let wrong = c.begin_unlock("ניחוש ארוך אבל שגוי לגמרי").unwrap().run();
+    let lost = c.begin_unlock(PASSWORD).unwrap();
+    c.age_secret_work();
+    let opened = c.begin_unlock(PASSWORD).unwrap().run();
+    assert!(c.finish_unlock(opened).unwrap().unlocked);
+    assert!(c.finish_unlock(lost.run()).unwrap().unlocked);
+    assert!(c.case_detail(&case).is_ok());
+    // A late one never frees the place of the newer check that took it.
+    c.lock();
+    let lost = c.begin_unlock(PASSWORD).unwrap();
+    c.age_secret_work();
+    let opened = c.begin_unlock(PASSWORD).unwrap();
+    assert!(c.finish_unlock(lost.run()).unwrap().unlocked);
     assert!(matches!(
-        c.finish_unlock(wrong),
+        c.begin_unlock(PASSWORD),
+        Err(CoreError::Needs(_, ErrorAction::Dismiss))
+    ));
+    assert!(c.finish_unlock(opened.run()).unwrap().unlocked);
+
+    // A wrong password counts toward the waiting time, as before, and guesses cannot be
+    // sent side by side to slip past it: the second waits for the first's answer.
+    c.lock();
+    let wrong = c.begin_unlock("ניחוש ארוך אבל שגוי לגמרי").unwrap();
+    assert!(matches!(
+        c.begin_unlock("ניחוש שני, גם הוא שגוי"),
+        Err(CoreError::Needs(_, ErrorAction::Dismiss))
+    ));
+    assert!(matches!(
+        c.finish_unlock(wrong.run()),
         Err(CoreError::Vault(VaultError::WrongSecret))
     ));
     assert!(matches!(
@@ -87,6 +119,11 @@ fn a_new_password_is_made_while_the_core_works_and_lands_only_in_its_session() {
     let made = while_running(&core, job, SlotJob::run, |c| {
         c.add_input(&case, InputKind::Observation, "תצפית", "אלון שיחק בחצר.")
             .unwrap();
+        // One password or kit at a time: two would each write the header.
+        assert!(matches!(
+            c.begin_new_recovery_kit(PASSWORD, false),
+            Err(CoreError::Needs(_, ErrorAction::Dismiss))
+        ));
     });
     let mut c = core.lock().unwrap();
     c.finish_change_password(made).unwrap();

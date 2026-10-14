@@ -571,6 +571,12 @@ pub struct Core {
     last_tick: Option<SystemTime>,
     failed_unlocks: u32,
     not_before: Option<Instant>,
+    /// Since when a password or kit is being checked off the lock (an unlock, a new password
+    /// or kit). One at a time: a second click never runs a second Argon2 in parallel, never
+    /// slips past the wait after wrong tries, and never writes the header at the same time.
+    secret_work: Option<(u64, Instant)>,
+    /// Numbers the checks, so only the check that took the place frees it.
+    secret_ticket: u64,
     disk_encryption: String,
     transport: Option<Arc<dyn Transport>>,
     /// The app's own binary, started as an isolated worker for each document.

@@ -268,6 +268,14 @@ impl Core {
     ) -> Result<crate::AppStatus, CoreError> {
         self.refuse_cloud()?;
         self.check_backoff()?;
+        // Not while a password or kit is being checked: the two would race to open the
+        // vault and to write its header.
+        self.refuse_secret_work_running()?;
+        if self.vault.is_some() {
+            return Err(refused(
+                "הכספת כבר פתוחה. את הסיסמה אפשר להחליף בהגדרות, בלי גוגל.",
+            ));
+        }
         let computer = keys.load(&self.dir)?;
         let mut opened = Err(VaultError::WrongSecret);
         let mut used = None;
