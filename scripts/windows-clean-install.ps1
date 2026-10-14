@@ -26,8 +26,7 @@ foreach ($f in Get-ChildItem $kept.FullName -Filter *.txt) {
     }
     [IO.File]::WriteAllBytes((Join-Path $vault $f.BaseName), $bytes)
 }
-$before = Get-ChildItem $vault -File | Sort-Object Name | ForEach-Object { "$($_.Name) $((Get-FileHash $_.FullName).Hash)" }
-Write-Host "kept vault $($kept.Name): $($before.Count) files"
+Write-Host "kept vault $($kept.Name): $((Get-ChildItem $vault -File).Count) files"
 
 # 2. Silent install, for this user only (no administrator).
 $setup = Start-Process -FilePath $Installer -ArgumentList "/S" -Wait -PassThru
@@ -36,9 +35,13 @@ $exe = Get-ChildItem $installDir -Filter *.exe | Where-Object { $_.Name -ne "uni
 if (-not $exe) { throw "nothing was installed in $installDir" }
 Write-Host "installed $($exe.FullName)"
 
-# 3. It starts and stays up beside the old vault, and writes no crash.
+# 3. It starts and stays up beside the old vault, opens it, takes 500 Hebrew characters typed
+#    in its real window (F1), and writes no crash.
 $app = Start-Process -FilePath $exe.FullName -PassThru
-Start-Sleep -Seconds 25
+Start-Sleep -Seconds 10
+if ($app.HasExited) { throw "the app closed by itself (exit $($app.ExitCode))" }
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "windows-typing.ps1") -ProcessId $app.Id
+if ($LASTEXITCODE -ne 0) { throw "typing in the window failed (see above)" }
 if ($app.HasExited) { throw "the app closed by itself (exit $($app.ExitCode))" }
 Stop-Process -Id $app.Id -Force
 Get-Process | Where-Object { $_.Path -like "$installDir*" } | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -48,10 +51,12 @@ if ((Test-Path $crashes) -and (Get-Item $crashes).Length -gt 0) {
     throw "the app wrote a crash: $(Get-Content $crashes -Raw)"
 }
 
-# 4. The uninstaller removes the program and leaves her vault as it was.
+# 4. The uninstaller removes the program and leaves her vault as it was (as the app left it:
+#    opening it wrote to its log).
+$before = Get-ChildItem $vault -File | Sort-Object Name | ForEach-Object { "$($_.Name) $((Get-FileHash $_.FullName).Hash)" }
 Start-Process -FilePath (Join-Path $installDir "uninstall.exe") -ArgumentList "/S" -Wait | Out-Null
 for ($i = 0; $i -lt 60 -and (Test-Path $exe.FullName); $i++) { Start-Sleep -Seconds 1 }
 if (Test-Path $exe.FullName) { throw "the uninstaller left the program in place" }
 $after = Get-ChildItem $vault -File | Sort-Object Name | ForEach-Object { "$($_.Name) $((Get-FileHash $_.FullName).Hash)" }
 if (Compare-Object $before $after) { throw "the vault changed: $($before -join ', ') / $($after -join ', ')" }
-Write-Host "clean install: ok (installed, started beside a $($kept.Name) vault, uninstalled, vault kept)"
+Write-Host "clean install: ok (installed, opened a $($kept.Name) vault and typed in it, uninstalled, vault kept)"

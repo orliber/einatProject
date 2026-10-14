@@ -94,7 +94,8 @@ jobs:
           Copy-Item $exe.FullName DiagnosticVault-Setup.exe
           (Get-FileHash DiagnosticVault-Setup.exe -Algorithm SHA256).Hash.ToLower() + "  DiagnosticVault-Setup.exe" | Out-File -Encoding ascii DiagnosticVault-Setup.exe.sha256
       # F7, R8: installed silently on this account (which never had the app), started beside
-      # a kept vault, uninstalled; her vault stays byte for byte.
+      # a kept vault, opened, 500 Hebrew characters typed in its real window with none lost
+      # (F1), uninstalled; her vault stays byte for byte.
       - name: Clean install
         shell: pwsh
         run: scripts/windows-clean-install.ps1 -Installer DiagnosticVault-Setup.exe
