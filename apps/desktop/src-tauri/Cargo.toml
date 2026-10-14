@@ -19,6 +19,8 @@ unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
 indexing_slicing = "deny"
+# Cutting a string inside a Hebrew letter panics the same way (F4).
+string_slice = "deny"
 dbg_macro = "deny"
 print_stdout = "deny"
 

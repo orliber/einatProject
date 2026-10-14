@@ -14,7 +14,7 @@
 
 // A developer's tool on Or's computer and in CI, never shipped: an index past the end here is
 // an error on his screen, not a crash in front of her (F4 covers what ships).
-#![allow(clippy::indexing_slicing)]
+#![allow(clippy::indexing_slicing, clippy::string_slice)]
 
 mod ci;
 mod invariants;

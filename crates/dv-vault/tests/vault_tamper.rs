@@ -2,6 +2,7 @@
 //! open nothing without the secret, and change nothing without it being refused or reported.
 //! Fabricated data only.
 
+#![allow(clippy::string_slice)]
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

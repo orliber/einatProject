@@ -211,6 +211,7 @@ impl Routing {
 }
 
 #[cfg(test)]
+#[allow(clippy::string_slice)]
 mod tests {
     use super::*;
 

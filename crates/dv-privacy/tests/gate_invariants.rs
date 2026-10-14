@@ -3,6 +3,7 @@
 //! gate hands back (the payload, its hash, the audit codes) leaks nothing on its own.
 //! All data is invented; identifiers are generated at run time (see `common`).
 
+#![allow(clippy::string_slice)]
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

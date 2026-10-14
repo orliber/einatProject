@@ -48,7 +48,6 @@ pub fn ocr_misreads(text: &str, ctx: &PrivacyContext<'_>) -> Vec<Misread> {
         if (ctx.allowlisted)(&tok.norm) || known_word(&tok.norm) {
             continue;
         }
-        let raw = &text[tok.start..tok.end];
         let hit = prefix_splits(&tok.norm).into_iter().find_map(|(p, h)| {
             if h.chars().count() < 3 || known_word(&h) || (ctx.allowlisted)(&h) {
                 return None;
@@ -56,10 +55,15 @@ pub fn ocr_misreads(text: &str, ctx: &PrivacyContext<'_>) -> Vec<Misread> {
             names
                 .iter()
                 .find(|(w, _)| edit_distance(&h, w, 1) == 1)
-                .map(|(_, tag)| (p, (*tag).to_owned()))
+                .map(|(_, tag)| (p, h, (*tag).to_owned()))
         });
-        let Some((p, tag)) = hit else { continue };
-        let written = raw[crate::text::byte_len_of_letters(raw, p)..].to_owned();
+        let Some((p, head, tag)) = hit else { continue };
+        // As written; a word that cannot be read so (never expected) is still listed, in
+        // its normalized form.
+        let written = text
+            .get(tok.start..tok.end)
+            .and_then(|raw| raw.get(crate::text::byte_len_of_letters(raw, p)..))
+            .map_or(head, str::to_owned);
         if !out.iter().any(|m| m.written == written && m.tag == tag) {
             out.push(Misread { written, tag });
         }

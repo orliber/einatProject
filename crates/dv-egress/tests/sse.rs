@@ -4,6 +4,7 @@
 //! where the pieces were cut. A stream that is cut short, broken or hostile must end in an
 //! error, never in a panic or a half answer read as a whole one.
 
+#![allow(clippy::string_slice)]
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

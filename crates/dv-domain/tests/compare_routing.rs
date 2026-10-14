@@ -2,6 +2,7 @@
 //! answer, nothing in a material is lost when it is cut into passages, and Einat's choice of
 //! sections always wins. Invented text and scores only.
 
+#![allow(clippy::string_slice)]
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

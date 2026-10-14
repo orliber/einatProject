@@ -10,6 +10,7 @@
 //! filter shows up as a number. `test/` is sealed: its misses are listed only with
 //! `CORPUS_SHOW_TEST=1`, for the final review, never for tuning.
 
+#![allow(clippy::string_slice)]
 #![allow(
     clippy::unwrap_used,
     clippy::print_stdout,

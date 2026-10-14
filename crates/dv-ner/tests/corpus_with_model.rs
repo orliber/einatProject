@@ -9,6 +9,7 @@
 //! `DV_NER_MIN_SCORE` (0–1) drops hints below that confidence, to see the trade-off. `test/`
 //! stays sealed: its misses are listed only with `CORPUS_SHOW_TEST=1`.
 
+#![allow(clippy::string_slice)]
 #![allow(
     clippy::unwrap_used,
     clippy::print_stdout,

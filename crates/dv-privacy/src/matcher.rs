@@ -111,7 +111,11 @@ impl<T: Clone> PhraseIndex<T> {
                 }
             }
             if let Some((n, prefix, tail, payload, last_end)) = best {
-                let start = tok.start + byte_len_of_letters(&text[tok.start..tok.end], prefix);
+                // A token that cannot be read (never expected) is matched whole, prefix and all.
+                let start = tok.start
+                    + text
+                        .get(tok.start..tok.end)
+                        .map_or(0, |w| byte_len_of_letters(w, prefix));
                 out.push(PhraseMatch {
                     start,
                     end: last_end - tail,
@@ -149,24 +153,23 @@ pub(crate) fn strip_quote_tail(norm: &str, opened: bool) -> (&str, usize) {
 }
 
 /// A quote opens right before the word: before the token, or between its prefix letters and
-/// the rest ("ל'נועם'", split as ל + ' + נועם').
+/// the rest ("ל'נועם'", split as ל + ' + נועם'). Text that cannot be read before the word
+/// (never expected) counts as a quote: the word is then also tried without its last quote.
 pub(crate) fn quote_opened(text: &str, tok: &Token, prefix: usize) -> bool {
     let is_quote = |c: char| matches!(normalize_char(c), Some('\'' | '"'));
-    text[..tok.start].chars().next_back().is_some_and(is_quote)
+    text.get(..tok.start)
+        .is_none_or(|before| before.chars().next_back().is_some_and(is_quote))
         || prefix
             .checked_sub(1)
             .and_then(|k| tok.norm.chars().nth(k))
             .is_some_and(is_quote)
 }
 
-/// Bytes of the last `chars` characters of the token as written.
+/// Bytes of the last `chars` characters of the token as written; 0 for a token that cannot
+/// be read (never expected), so the match keeps the whole token.
 pub(crate) fn quote_bytes(text: &str, tok: &Token, chars: usize) -> usize {
-    text[tok.start..tok.end]
-        .chars()
-        .rev()
-        .take(chars)
-        .map(char::len_utf8)
-        .sum()
+    text.get(tok.start..tok.end)
+        .map_or(0, |w| w.chars().rev().take(chars).map(char::len_utf8).sum())
 }
 
 /// How the last word of a phrase matches its token: exactly (0), or with a closing quote
@@ -182,6 +185,7 @@ fn last_word_tail(text: &str, tok: &Token, word: &str, opened: bool) -> Option<u
 }
 
 #[cfg(test)]
+#[allow(clippy::string_slice)]
 mod tests {
     use super::*;
     use crate::text::tokenize;

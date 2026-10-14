@@ -5,9 +5,12 @@
 
 use dv_domain::Role;
 
-use super::{is_person_word, overlaps, Replacement, Suspect, SuspectKind, SuspectSpan, EVERYDAY};
+use super::{
+    is_person_word, overlaps, span_text, Replacement, Suspect, SuspectKind, SuspectSpan, EVERYDAY,
+};
 use crate::lexicon::{word_bucket, LEXICON};
 use crate::text::{byte_len_of_letters, norm_eq, normalize, prefix_splits, Token};
+use crate::PrivacyError;
 
 /// Verbs that make the word before them a person: "שירה אמרה", "הודיה מתקרבת ושואלת".
 const ACTION_NEXT: &[&str] = &[
@@ -232,14 +235,15 @@ impl Scan<'_> {
 }
 
 /// Names that are also words, read from a context that leaves no other reading. Runs after
-/// the general rules, on what they left.
+/// the general rules, on what they left. A word that cannot be cut out of the text (never
+/// expected) fails the whole filtering, so nothing is sent.
 pub(super) fn strong_names(
     text: &str,
     tokens: &[Token],
     allowlisted: &dyn Fn(&str) -> bool,
     reps: &[Replacement],
     suspects: &[SuspectSpan],
-) -> Vec<SuspectSpan> {
+) -> Result<Vec<SuspectSpan>, PrivacyError> {
     let lex = &*LEXICON;
     let s = Scan { text, tokens };
     let mut out: Vec<SuspectSpan> = Vec::new();
@@ -267,46 +271,48 @@ pub(super) fn strong_names(
             })
     };
     // `any`: the word need not be on the name lists ("הנהג אבי פרץ": a family name follows).
-    let push_word = |i: usize, why: &str, any: bool, out: &mut Vec<SuspectSpan>| {
-        // No token at `i`: no word there to hide.
-        let Some(tok) = tokens.get(i) else {
-            return;
-        };
-        let found = name_in(tok, true);
-        let (p, head) = match found {
-            Some(f) => f,
-            None if any => (0, tok.norm.clone()),
-            None => return,
-        };
-        if taken(i, out) || allowlisted(&head) || allowlisted(&tok.norm) {
-            return;
-        }
-        let raw = &text[tok.start..tok.end];
-        let start = tok.start + byte_len_of_letters(raw, p);
-        let mut end = tok.end;
-        // A family name right after it: "מר שמחה אוחיון", "הנהג אבי פרץ".
-        if let Some(n) = tokens.get(i + 1) {
-            if s.joined(i, i + 1)
-                && lex.surnames.contains(&n.norm)
-                && !lex.common_words.contains(&n.norm)
-                && word_bucket(&n.norm) < EVERYDAY
-                && !overlaps(n.start, n.end, reps, suspects)
-            {
-                end = n.end;
+    let push_word =
+        |i: usize, why: &str, any: bool, out: &mut Vec<SuspectSpan>| -> Result<(), PrivacyError> {
+            // No token at `i`: no word there to hide.
+            let Some(tok) = tokens.get(i) else {
+                return Ok(());
+            };
+            let found = name_in(tok, true);
+            let (p, head) = match found {
+                Some(f) => f,
+                None if any => (0, tok.norm.clone()),
+                None => return Ok(()),
+            };
+            if taken(i, out) || allowlisted(&head) || allowlisted(&tok.norm) {
+                return Ok(());
             }
-        }
-        out.push(SuspectSpan {
-            start,
-            end,
-            suspect: Suspect {
-                token: text[start..end].to_owned(),
-                kind: SuspectKind::UnknownName,
-                message: why.to_owned(),
-                suggested_role: Role::Other,
-            },
-            known: None,
-        });
-    };
+            let raw = span_text(text, tok.start, tok.end)?;
+            let start = tok.start + byte_len_of_letters(raw, p);
+            let mut end = tok.end;
+            // A family name right after it: "מר שמחה אוחיון", "הנהג אבי פרץ".
+            if let Some(n) = tokens.get(i + 1) {
+                if s.joined(i, i + 1)
+                    && lex.surnames.contains(&n.norm)
+                    && !lex.common_words.contains(&n.norm)
+                    && word_bucket(&n.norm) < EVERYDAY
+                    && !overlaps(n.start, n.end, reps, suspects)
+                {
+                    end = n.end;
+                }
+            }
+            out.push(SuspectSpan {
+                start,
+                end,
+                suspect: Suspect {
+                    token: span_text(text, start, end)?.to_owned(),
+                    kind: SuspectKind::UnknownName,
+                    message: why.to_owned(),
+                    suggested_role: Role::Other,
+                },
+                known: None,
+            });
+            Ok(())
+        };
     let push = |i: usize, why: &str, out: &mut Vec<SuspectSpan>| push_word(i, why, false, out);
     // A rare family name joined to the word after `i`.
     let surname_after = |i: usize| {
@@ -329,7 +335,7 @@ pub(super) fn strong_names(
             && surname_after(i)
             && !lex.common_words.contains(&tok.norm)
         {
-            push_word(i, "שם ושם משפחה", true, &mut out);
+            push_word(i, "שם ושם משפחה", true, &mut out)?;
             continue;
         }
         let Some((p, head)) = name_in(tok, true) else {
@@ -344,13 +350,13 @@ pub(super) fn strong_names(
 
         // "ליבי גורדון, B.O.T.": a name and a family name opening a line or a clause.
         if bare && s.starts_clause(i) && surname_after(i) {
-            push(i, "שם ושם משפחה", &mut out);
+            push(i, "שם ושם משפחה", &mut out)?;
             continue;
         }
 
         // "שירה אמרה לי", "סבא מוטי מביא אותו".
         if bare && next_is(ACTION_NEXT) && (s.starts_clause(i) || s.person_before(i)) {
-            push(i, "שם לפני פועל", &mut out);
+            push(i, "שם לפני פועל", &mut out)?;
             continue;
         }
 
@@ -378,16 +384,16 @@ pub(super) fn strong_names(
                 || person_at(partner.min(tokens.len() - 1), &out)
                 || lex.first_names.contains(&head);
             if partner_ok && anchored && (with || !very_common) {
-                push(i, "שם ליד שם אחר", &mut out);
+                push(i, "שם ליד שם אחר", &mut out)?;
                 if !person_at(partner, &out) {
-                    push(partner, "שם ליד שם אחר", &mut out);
+                    push(partner, "שם ליד שם אחר", &mut out)?;
                 }
                 continue;
             }
         }
         // The second of a pair whose first is already hidden: "[גננת] ונוגה".
         if p == 1 && i > 0 && s.joined(i - 1, i) && person_at(i - 1, &out) && !very_common {
-            push(i, "שם ליד שם אחר", &mut out);
+            push(i, "שם ליד שם אחר", &mut out)?;
             continue;
         }
 
@@ -399,7 +405,7 @@ pub(super) fn strong_names(
             && s.norm(i - 1) == normalize("של")
             && is_in(s.norm(i - 2), OF_PERSON)
         {
-            push(i, "שם אחרי \"של\"", &mut out);
+            push(i, "שם אחרי \"של\"", &mut out)?;
             continue;
         }
 
@@ -408,20 +414,21 @@ pub(super) fn strong_names(
             && i > 0
             && is_in(s.norm(i - 1), &["בן", "הבן", "בני", "לבן", "כבן", "מבן"]);
         if bare && s.person_before(i) && !very_common && !idiom && !next_is(DEGREE_NEXT) {
-            push(i, "שם אחרי מילה לאדם", &mut out);
+            push(i, "שם אחרי מילה לאדם", &mut out)?;
         }
     }
-    out
+    Ok(out)
 }
 
 /// "נולד בחרקוב", "עלתה מגונדר": the place of birth or of origin, when it is not an
-/// everyday word ("נולד בשבוע 36", "נולדה ברכב").
+/// everyday word ("נולד בשבוע 36", "נולדה ברכב"). A word that cannot be cut out of the text
+/// (never expected) fails the whole filtering.
 pub(super) fn origin_places(
     text: &str,
     tokens: &[Token],
     reps: &[Replacement],
     suspects: &[SuspectSpan],
-) -> Vec<Replacement> {
+) -> Result<Vec<Replacement>, PrivacyError> {
     let lex = &*LEXICON;
     let s = Scan { text, tokens };
     let mut out = Vec::new();
@@ -453,7 +460,7 @@ pub(super) fn origin_places(
         {
             continue;
         }
-        let raw = &text[t.start..t.end];
+        let raw = span_text(text, t.start, t.end)?;
         out.push(Replacement {
             start: t.start + byte_len_of_letters(raw, 1),
             end: t.end,
@@ -463,5 +470,5 @@ pub(super) fn origin_places(
             declared: false,
         });
     }
-    out
+    Ok(out)
 }

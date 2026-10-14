@@ -283,7 +283,19 @@ pub fn tokenize(text: &str) -> Vec<Token> {
             }
         }
         let end = chars.get(j).map_or(text.len(), |(b, _)| *b);
-        let norm = normalize(&text[start..end]);
+        // `start` and `end` come from `char_indices`; were the cut ever refused, the same
+        // characters are read one by one, so no word is lost.
+        let norm = match text.get(start..end) {
+            Some(word) => normalize(word),
+            None => normalize(
+                &chars
+                    .iter()
+                    .skip(i)
+                    .take(j.saturating_sub(i))
+                    .map(|&(_, c)| c)
+                    .collect::<String>(),
+            ),
+        };
         if !norm.is_empty() {
             tokens.push(Token { start, end, norm });
         }
@@ -303,9 +315,11 @@ fn join_spaced_letters(text: &str, tokens: Vec<Token>) -> Vec<Token> {
         let mut chars = t.norm.chars();
         matches!((chars.next(), chars.next()), (Some(c), None) if c.is_alphabetic())
     };
+    // A gap that cannot be read (never expected) joins: the letters are read as one word.
     let close = |a: &Token, b: &Token| {
-        let gap = &text[a.end..b.start];
-        (1..=2).contains(&gap.len()) && gap.chars().all(|c| c == ' ' || c == '\u{00A0}')
+        text.get(a.end..b.start).is_none_or(|gap| {
+            (1..=2).contains(&gap.len()) && gap.chars().all(|c| c == ' ' || c == '\u{00A0}')
+        })
     };
     // The first letter may carry a prefix: "שנ ו ע ם" is ש + "נועם".
     let starter = |t: &Token| {

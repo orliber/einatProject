@@ -3,6 +3,7 @@
 //! direction marks on names, gershayim in titles, OCR misreads and lexicon edge cases.
 //! Every value that could look real is generated at run time (see `common`).
 
+#![allow(clippy::string_slice)]
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

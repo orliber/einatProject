@@ -4,6 +4,7 @@
 //! Blocking is never a leak (it costs the psychologist a click, not a child's privacy).
 //! All data is fabricated (tests/fixtures/fake_case_noam.yaml, fake_case_metadata_leak.yaml).
 
+#![allow(clippy::string_slice)]
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
