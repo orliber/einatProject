@@ -1295,6 +1295,7 @@ dependencies = [
  "dv-ner",
  "dv-privacy",
  "rfd",
+ "serde",
  "serde_json",
  "tauri",
  "tauri-build",

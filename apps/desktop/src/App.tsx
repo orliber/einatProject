@@ -1,6 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ipc, type AppStatus, type UiError } from "./ipc/client";
+import { ipc, onCoreEvent, type AppStatus, type UiError } from "./ipc/client";
 import { LockScreen } from "./screens/LockScreen";
 import { SetupScreen } from "./screens/SetupScreen";
 import { CasesScreen } from "./screens/CasesScreen";
@@ -47,6 +47,17 @@ export const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false, staleTime: 5_000 } },
 });
 
+/** The idle countdown changes on every read; everything else in the status changes rarely.
+ *  Two statuses that differ only in the countdown are the same for the screens (F3). */
+export function sameStatus(a: AppStatus | null, b: AppStatus): boolean {
+  if (a === null) return false;
+  const without = (s: AppStatus) => JSON.stringify({ ...s, idle_lock_in: null });
+  return without(a) === without(b);
+}
+
+/** The poll is a safety net only; the core announces a lock or the last minute by event. */
+const STATUS_POLL_MS = 60_000;
+
 export function useApp(): AppApi {
   const api = useContext(AppContext);
   if (!api) throw new Error("useApp outside App");
@@ -62,35 +73,48 @@ export function App() {
   // unlocked) as soon as it is created: the recovery kit must never be skipped.
   const [inSetup, setInSetup] = useState(false);
 
+  // The seconds before the idle lock live apart from the status: a changing countdown must
+  // not redraw every screen, and a field she is typing in must never lose the keyboard.
+  const [idleIn, setIdleIn] = useState<number | null>(null);
+  const apply = useCallback((s: AppStatus) => {
+    setIdleIn(s.idle_lock_in);
+    setStatus((prev) => (sameStatus(prev, s) ? prev : s));
+    setCoreDown(false);
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
-      setStatus(await ipc.status());
-      setCoreDown(false);
+      apply(await ipc.status());
     } catch {
       setCoreDown(true);
     }
-  }, []);
+  }, [apply]);
 
   useEffect(() => {
     let alive = true;
     const tick = () =>
       ipc
         .status()
-        .then((s) => {
-          if (alive) {
-            setStatus(s);
-            setCoreDown(false);
-          }
-        })
+        .then((s) => alive && apply(s))
         .catch(() => alive && setCoreDown(true));
     void tick();
-    // The core locks itself when idle; notice it without waiting for a click.
-    const t = window.setInterval(() => void tick(), 15000);
+    // The core says when it locks or when the last minute starts; the poll only backs it up.
+    const t = window.setInterval(() => void tick(), STATUS_POLL_MS);
+    let stop: (() => void) | null = null;
+    void onCoreEvent((e) => {
+      if (!alive) return;
+      if (e.kind === "idle_soon") setIdleIn(e.seconds);
+      void tick();
+    }).then((unlisten) => {
+      if (alive) stop = unlisten;
+      else unlisten();
+    });
     return () => {
       alive = false;
       window.clearInterval(t);
+      stop?.();
     };
-  }, []);
+  }, [apply]);
 
   const fail = useCallback(
     (e: UiError) => {
@@ -191,7 +215,34 @@ export function App() {
     return <LockScreen status={status} onUnlocked={(s) => { setStatus(s); setRoute({ name: "cases" }); }} />;
   }
 
-  const api: AppApi = { status, route, go: setRoute, refresh, notify: (text, action) => setToast({ text, action }), fail, lockNow, showShortcuts: sheet.show };
+  return (
+    <Shell status={status} route={route} setRoute={setRoute} refresh={refresh} setToast={setToast} fail={fail} lockNow={lockNow}
+      showShortcuts={sheet.show} toast={toast} sheet={sheet} idleIn={idleIn} keepWorking={keepWorking} />
+  );
+}
+
+/** The unlocked app. The context value is kept while nothing in it changed, so a toast or a
+ *  countdown does not redraw the case she is working in. */
+function Shell(props: {
+  status: AppStatus;
+  route: Route;
+  setRoute: (r: Route) => void;
+  refresh: () => Promise<void>;
+  setToast: (t: { text: string; action?: ToastAction | undefined } | null) => void;
+  fail: (e: UiError) => string;
+  lockNow: () => Promise<void>;
+  showShortcuts: () => void;
+  toast: { text: string; action?: ToastAction | undefined } | null;
+  sheet: { open: boolean; close: () => void };
+  idleIn: number | null;
+  keepWorking: () => Promise<void>;
+}) {
+  const { status, route, setRoute, refresh, setToast, fail, lockNow, showShortcuts, toast, sheet, idleIn, keepWorking } = props;
+  const notify = useCallback((text: string, action?: ToastAction) => setToast({ text, action }), [setToast]);
+  const api = useMemo<AppApi>(
+    () => ({ status, route, go: setRoute, refresh, notify, fail, lockNow, showShortcuts }),
+    [status, route, setRoute, refresh, notify, fail, lockNow, showShortcuts],
+  );
   return (
     <QueryClientProvider client={queryClient}>
     <AppContext.Provider value={api}>
@@ -203,9 +254,7 @@ export function App() {
       {toast && <Toast text={toast.text} action={toast.action} onDone={() => setToast(null)} />}
       <UnsavedNotice />
       {sheet.open && <ShortcutsSheet onClose={sheet.close} />}
-      {status.idle_lock_in != null && status.idle_lock_in <= 75 && (
-        <IdleWarning seconds={status.idle_lock_in} onKeep={() => void keepWorking()} />
-      )}
+      {idleIn != null && idleIn <= 75 && <IdleWarning seconds={idleIn} onKeep={() => void keepWorking()} />}
     </AppContext.Provider>
     </QueryClientProvider>
   );

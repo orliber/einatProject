@@ -633,11 +633,16 @@ export class FakeCore {
   // ------------------------------------------------------------------ the IPC surface
   async handle(cmd: string, args: unknown, options?: { headers?: Record<string, string> }): Promise<unknown> {
     const a = (args ?? {}) as Args;
-    if (!["ping", "recent_crashes", "app_status", "unlock", "unlock_with_recovery", "create_vault", "confirm_recovery_key", "score_instruments", "preview_scores", "choose_backup", "restore_backup", "forget_backup"].includes(cmd) && !this.unlocked) {
+    if (!["plugin:event|listen", "plugin:event|unlisten", "ping", "recent_crashes", "app_status", "unlock", "unlock_with_recovery", "create_vault", "confirm_recovery_key", "score_instruments", "preview_scores", "choose_backup", "restore_backup", "forget_backup"].includes(cmd) && !this.unlocked) {
       fail("locked", "הכספת נעולה. יש לפתוח אותה מחדש.");
     }
     if (FakeStyle.handles(cmd)) return this.style.handle(cmd, a, args, options?.headers ?? {}, this.allPeople(), this.practitioner);
     switch (cmd) {
+      // The window listens to the core's events; the preview has none to send.
+      case "plugin:event|listen":
+        return 0;
+      case "plugin:event|unlisten":
+        return undefined;
       case "recent_crashes":
         return [];
       case "ping":

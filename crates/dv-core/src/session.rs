@@ -123,7 +123,7 @@ impl Core {
 
     /// Seconds left before the idle lock, while the vault is open (shown as a warning in the
     /// last minute).
-    pub(crate) fn idle_lock_in(&self) -> Option<u32> {
+    pub fn idle_lock_in(&self) -> Option<u32> {
         self.vault.as_ref()?;
         let limit = Duration::from_secs(u64::from(self.lock_minutes()) * 60);
         let left = limit.saturating_sub(self.last_activity.elapsed()).as_secs();

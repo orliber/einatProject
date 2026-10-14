@@ -1,5 +1,6 @@
 // The only module that talks to the Rust core. Types come from Rust via ts-rs.
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { ActivityPage } from "./generated/ActivityPage";
 import type { AppStatus } from "./generated/AppStatus";
 import type { RetentionItem } from "./generated/RetentionItem";
@@ -84,6 +85,22 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 async function run(cmd: string, args?: Record<string, unknown>): Promise<undefined> {
   await call<unknown>(cmd, args);
   return undefined;
+}
+
+/** What the core tells the window on its own (F3): no case data, only that something changed. */
+export type CoreEvent =
+  | { kind: "locked" }
+  | { kind: "idle_soon"; seconds: number }
+  | { kind: "backed_up" };
+
+/** Listen to the core's events. Resolves to the function that stops listening. In the
+ *  browser preview and in tests there are no events, and the window keeps its slow poll. */
+export async function onCoreEvent(handler: (e: CoreEvent) => void): Promise<() => void> {
+  try {
+    return await listen<CoreEvent>("core", (e) => handler(e.payload));
+  } catch {
+    return () => undefined;
+  }
 }
 
 export const ipc = {
