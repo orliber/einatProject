@@ -507,16 +507,17 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
                 (None, Some(y)) => relative_he((y, m, 15), today),
                 _ => PatternKind::Date.fixed_replacement().to_owned(),
             };
-            // The day and the year were read from these tokens; were one missing, the month
-            // itself is still hidden.
-            let span_tok = |k: usize| tokens.get(k).unwrap_or(tok);
-            push(
-                hits,
-                span_tok(start_tok).start,
-                span_tok(end_tok).end,
-                PatternKind::Date,
-                replacement,
-            );
+            // The day and the year were read from these tokens; were one missing (never
+            // expected), everything up to the text's edge on that side is hidden with it.
+            let start = tokens
+                .get(start_tok)
+                .or(tokens.first())
+                .map_or(tok.start, |t| t.start.min(tok.start));
+            let end = tokens
+                .get(end_tok)
+                .or(tokens.last())
+                .map_or(tok.end, |t| t.end.max(tok.end));
+            push(hits, start, end, PatternKind::Date, replacement);
         } else if hebrew_cal {
             // "[אב]" is the father's tag, not the month: "[אם] ו[אב]" is not the 6th of Av,
             // nor "ו[אב_2]" (a second father) the 2nd.
