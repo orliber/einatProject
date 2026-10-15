@@ -647,6 +647,11 @@ impl Vault {
         audit::recent(&self.audit, limit)
     }
 
+    /// The newest entry of `event` whose details hold `needle`, without reading the whole log.
+    pub fn audit_find(&self, event: &str, needle: &str) -> Result<Option<AuditEntry>, VaultError> {
+        audit::find(&self.audit, event, needle)
+    }
+
     /// A page of the log, newest first, below `before` (a `seq`).
     pub fn audit_page(
         &self,
@@ -912,6 +917,14 @@ impl Vault {
             params![now(), case_id],
         )?;
         Ok(())
+    }
+
+    /// Whether the vault holds a case at all, at work or in the recycle bin: one query and no
+    /// decryption, since the backup timer asks every 15 seconds.
+    pub fn has_cases(&self) -> Result<bool, VaultError> {
+        Ok(self
+            .main
+            .query_row("SELECT EXISTS(SELECT 1 FROM cases)", [], |r| r.get(0))?)
     }
 
     /// Cases at work (not in the recycle bin), most recently changed first.

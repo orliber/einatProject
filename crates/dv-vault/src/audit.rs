@@ -236,6 +236,27 @@ pub fn recent(conn: &Connection, limit: u32) -> Result<Vec<AuditEntry>, VaultErr
     page(conn, None, limit)
 }
 
+/// The newest entry of `event` whose `meta` holds `needle` (a fingerprint), or `None`.
+pub fn find(
+    conn: &Connection,
+    event: &str,
+    needle: &str,
+) -> Result<Option<AuditEntry>, VaultError> {
+    let mut stmt = conn.prepare(
+        "SELECT seq, ts, event, case_ref, meta FROM audit WHERE event = ?1 AND instr(meta, ?2) > 0 ORDER BY seq DESC LIMIT 1",
+    )?;
+    let mut rows = stmt.query_map(params![event, needle], |r| {
+        Ok(AuditEntry {
+            seq: r.get(0)?,
+            ts: r.get(1)?,
+            event: r.get(2)?,
+            case_ref: r.get(3)?,
+            meta: r.get(4)?,
+        })
+    })?;
+    rows.next().transpose().map_err(VaultError::from)
+}
+
 /// Newest first, starting below `before` (a `seq`) when given.
 pub fn page(
     conn: &Connection,

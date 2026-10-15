@@ -1319,3 +1319,48 @@ fn header_writes_at_the_same_time_never_mix_and_leave_no_temp_file() {
         .collect();
     assert!(left.is_empty(), "{left:?}");
 }
+
+#[test]
+fn the_backup_timer_asks_cheaply_whether_there_is_a_case_at_all() {
+    let (_dir, mut vault, _) = new_vault();
+    assert!(!vault.has_cases().unwrap());
+    let case = noam(&mut vault);
+    assert!(vault.has_cases().unwrap());
+    // A case in the recycle bin still counts: it is in the vault, and in a backup.
+    vault.trash_case(&case).unwrap();
+    assert!(vault.has_cases().unwrap());
+}
+
+#[test]
+fn an_export_is_found_by_its_fingerprint_without_reading_the_whole_log() {
+    let (_dir, mut vault, _) = new_vault();
+    let case = noam(&mut vault);
+    vault
+        .record(
+            AuditEvent::Export,
+            Some(&case),
+            &serde_json::json!({ "sha256": "abc123", "pages": 2 }),
+        )
+        .unwrap();
+    vault
+        .record(
+            AuditEvent::Export,
+            Some(&case),
+            &serde_json::json!({ "sha256": "def456", "pages": 3 }),
+        )
+        .unwrap();
+    let found = vault
+        .audit_find("export", "\"sha256\":\"abc123\"")
+        .unwrap()
+        .unwrap();
+    assert_eq!(found.event, "export");
+    assert!(found.meta.contains("abc123"));
+    assert!(vault
+        .audit_find("export", "\"sha256\":\"zzz\"")
+        .unwrap()
+        .is_none());
+    assert!(vault
+        .audit_find("unlock", "\"sha256\":\"abc123\"")
+        .unwrap()
+        .is_none());
+}
