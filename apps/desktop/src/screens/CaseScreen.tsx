@@ -14,9 +14,9 @@ import { MaterialsView } from "./case/MaterialsView";
 import { SectionWork } from "./case/SectionWork";
 import { DetailsView } from "./case/DetailsView";
 import { SentHistoryDialog } from "../components/SentHistory";
-import { ReportView } from "./case/ReportView";
+import { ReportView, firstFocus } from "./case/ReportView";
 import { FinishView } from "./case/FinishView";
-import { isCombo, KEYS } from "../shortcuts";
+import { isCombo, KEYS, MOD } from "../shortcuts";
 import { useKept } from "../kept";
 import "./CaseScreen.css";
 import { useAi } from "../ai";
@@ -117,8 +117,8 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const [fullDraft, setFullDraft] = useState(false);
   /** "מה יצא מהמחשב": open for one section (its key), or the whole case (""). */
   const [sentFor, setSentFor] = useState<string | null>(null);
-  /** A section to bring into view on the report page. */
-  const [focus, setFocus] = useState<{ key: string; at: number } | null>(null);
+  /** The section in focus on the report page (round 48); `move` brings it into view. */
+  const [focus, setFocus] = useState<{ key: string; at: number; move: boolean } | null>(null);
   const [searching, setSearching] = useState(false);
   const [throwing, setThrowing] = useState(false);
   // Round 42: "full page" hides the contents beside the report, for every case until she
@@ -176,11 +176,11 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
       const keys = (d?.sections ?? []).filter((s) => s.key !== "signature").map((s) => s.key);
       if (!keys.length || (v !== "report" && !keys.includes(v))) return;
       e.preventDefault();
-      const from = keys.includes(v) ? v : focusRef.current?.key;
+      const from = keys.includes(v) ? v : focusRef.current?.key ?? firstFocus(d?.sections ?? []);
       const at = from ? keys.indexOf(from) + (down ? 1 : -1) : 0;
       const key = keys[Math.max(0, Math.min(keys.length - 1, at))] ?? keys[0] ?? "";
       if (v === "report") {
-        setFocus({ key, at: Date.now() });
+        setFocus({ key, at: Date.now(), move: true });
       } else {
         go({ name: "case", id: caseId, view: key });
       }
@@ -379,7 +379,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   // Three stages: materials, writing (the report page and each section), taking the report out.
   const stage = view === "materials" ? 1 : view === "finish" ? 3 : view === "details" ? 0 : 2;
   const toReport = (key?: string) => {
-    if (key) setFocus({ key, at: Date.now() });
+    if (key) setFocus({ key, at: Date.now(), move: true });
     go({ name: "case", id: caseId, view: "report" });
   };
   const toWriting = async () => {
@@ -387,13 +387,16 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     if (unsorted > 0 && detail.meta.consent) await startSort();
     toReport();
   };
+  // The section in focus on the report page: the one she chose, else the first draft waiting.
+  const focusKey = focus && detail.sections.some((s) => s.key === focus.key) ? focus.key : firstFocus(detail.sections);
   const next: { title: string; note: string; action: string; run: () => void; sends?: boolean } | null =
     stage === 0 || stage === 3
       ? null
       : !detail.meta.consent
         ? { title: `לפני שליחה ל-${ai} צריך לרשום את הסכמת ההורים.`, note: "", action: "רישום ההסכמה", run: () => go({ name: "case", id: caseId, view: "details" }) }
-        : stage === 1
-          // Round 49: on the materials page, "לכתיבת הדוח ←" sits at the top of the page.
+        // Round 49: on the materials page, "לכתיבת הדוח ←" sits at the top of the page; round 48:
+        // on the report page what is next is in the contents beside it.
+        : stage === 1 || view === "report"
           ? null
           : pendingCount > 0
             ? { title: pendingCount === 1 ? "טיוטה אחת מחכה לאישור שלך" : `${pendingCount} פסקאות מחכות לאישור שלך`, note: "", action: `לטיוטה ב"${pending[0]?.title ?? ""}" ←`, run: () => toReport(pending[0]?.key) }
@@ -502,11 +505,15 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
       )}
 
       <div className="case-body">
-        {stage === 2 && !fullPage && <Contents detail={detail} jobs={jobs} view={view} onOpen={(key) => toReport(key)} onWriteAll={running ? undefined : writeAll} />}
+        {stage === 2 && !fullPage && (
+          <Contents detail={detail} jobs={jobs} view={view} current={view === "report" ? focusKey : null} onOpen={(key) => toReport(key)} onWriteAll={running ? undefined : writeAll}
+            onSort={running ? undefined : () => void startSort()} onFinish={() => go({ name: "case", id: caseId, view: "finish" })} />
+        )}
         <div className="work">
           {view === "materials" && <MaterialsView api={api} onWrite={() => void toWriting()} />}
           {view === "details" && <DetailsView api={api} />}
-          {view === "report" && <ReportView api={api} onWriteAll={writeAll} focus={focus} />}
+          {view === "report" && <ReportView api={api} onWriteAll={writeAll} focus={focus} current={focusKey}
+            onPick={(key, move = false) => setFocus({ key, at: Date.now(), move })} />}
           {view === "finish" && <FinishView api={api} onExport={() => setExporting(true)} onOpen={(key) => toReport(key)} />}
           {searching && (
             <CaseSearch detail={detail} onClose={() => setSearching(false)}
@@ -557,8 +564,20 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   );
 }
 
-/** The report's table of contents: every section with its state, one click to it on the page. */
-function Contents(props: { detail: CaseDetail; jobs: Job[]; view: string; onOpen: (key: string) => void; onWriteAll: (() => void) | undefined }) {
+/** The report's table of contents (round 48): every section with its state, one click to it on
+ *  the page. At the top how far the report is, at the bottom what is left and the two keys. */
+function Contents(props: {
+  detail: CaseDetail;
+  jobs: Job[];
+  view: string;
+  /** The section in focus on the report page. */
+  current: string | null;
+  onOpen: (key: string) => void;
+  /** Absent while the whole report is written: nothing here sends a second request. */
+  onWriteAll: (() => void) | undefined;
+  onSort: (() => void) | undefined;
+  onFinish: () => void;
+}) {
   const { detail, jobs, view } = props;
   const content = detail.sections.filter((s) => s.key !== "signature");
   const approved = content.filter((s) => s.approved && !s.paragraphs.some((p) => p.status === "proposed")).length;
@@ -567,13 +586,17 @@ function Contents(props: { detail: CaseDetail; jobs: Job[]; view: string; onOpen
   // The same sections "write the whole report" writes (the summary and the like come after
   // approval, from the approved sections).
   const writable = empty.filter((s) => s.sortable && s.source_count > 0).length;
+  const unsorted = detail.routing.filter((r) => r.needs_sorting).length;
+  const fed = detail.sections.filter((s) => s.source_count > 0);
+  const done = fed.length > 0 && fed.every((s) => s.approved) && waiting === 0;
   const parts = Array.from(new Set(detail.sections.map((s) => s.part)));
   return (
     <aside className="contents" aria-label="תוכן הדוח">
       <div className="contents-head">
         <span className="contents-label">תוכן הדוח</span>
+        <span className="contents-count"><b>{approved}</b> / {content.length} מאושרים</span>
         <div className="contents-bar" aria-hidden="true"><div style={{ width: `${Math.round((approved / Math.max(content.length, 1)) * 100)}%` }} /></div>
-        <span className="small muted">{approved} מאושרים · {waiting} לאישור · {empty.length} ריקים</span>
+        {waiting > 0 && <span className="contents-waiting">{waiting === 1 ? "טיוטה אחת מחכה לך" : `${waiting} טיוטות מחכות לך`}</span>}
       </div>
       <nav className="contents-list">
         {parts.map((part) => (
@@ -581,23 +604,39 @@ function Contents(props: { detail: CaseDetail; jobs: Job[]; view: string; onOpen
             <span className="contents-part-title">{part}</span>
             {detail.sections.filter((s) => s.part === part).map((s) => {
               const writing = jobs.some((j) => j.section === s.key);
-              const st = writing ? "writing" : sectionState(s);
+              const state = sectionState(s);
+              const st = writing ? "writing" : state === "empty" && s.mode === "self" ? "mine" : state;
+              const noMaterial = st === "empty" && s.sortable && s.source_count === 0;
+              const here = view === s.key || props.current === s.key;
               return (
-                <button key={s.key} type="button" className={`contents-item st-${st}`} aria-current={view === s.key ? "page" : undefined} onClick={() => props.onOpen(s.key)}>
+                <button key={s.key} type="button" className={`contents-item st-${st}`} aria-current={here ? "location" : undefined} onClick={() => props.onOpen(s.key)}>
                   <span className="dot" aria-hidden="true" />
                   <span className="grow">{s.title}</span>
                   {st === "pending" && <span className="contents-tag">לאישור</span>}
                   {st === "writing" && <span className="contents-tag writing">כותב…</span>}
-                  <span className="visually-hidden">{st === "approved" ? "אושר" : st === "pending" ? "ממתין לאישור" : st === "writing" ? "נכתב עכשיו" : "ריק"}</span>
+                  {noMaterial && <span className="contents-tag missing">חסר חומר</span>}
+                  <span className="visually-hidden">{st === "approved" ? "אושר" : st === "pending" ? "ממתין לאישור" : st === "writing" ? "נכתב עכשיו" : st === "mine" ? "את כותבת" : "ריק"}</span>
                 </button>
               );
             })}
           </div>
         ))}
       </nav>
-      {writable > 0 && props.onWriteAll && (
-        <button type="button" className="btn contents-write" onClick={props.onWriteAll}>✦ לכתוב את {writable} הריקים</button>
-      )}
+      <div className="contents-foot">
+        {writable > 0 && props.onWriteAll && (
+          <button type="button" className="btn contents-write" onClick={props.onWriteAll}>✦ לכתוב את {writable} הריקים</button>
+        )}
+        {done && <button type="button" className="btn btn-primary" onClick={props.onFinish}>להוצאת הדוח ←</button>}
+        {unsorted > 0 && detail.meta.consent && props.onSort && (
+          <button type="button" className="link-small contents-unsorted" onClick={props.onSort}>
+            {unsorted === 1 ? "חומר אחד עוד לא מוין" : `${unsorted} חומרים עוד לא מוינו`} · למיין
+          </button>
+        )}
+        <p className="contents-keys">
+          <span><kbd>Enter</kbd> לאשר ולעבור הלאה</span>
+          <span><kbd>{MOD}+Enter</kbd> לשנות</span>
+        </p>
+      </div>
     </aside>
   );
 }

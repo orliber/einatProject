@@ -73,7 +73,7 @@ test("home → new case → materials → review before sending → report page"
   await expectAccessible(page);
 
   // Write one section through the same review, then approve the draft on the page.
-  await report.getByRole("button", { name: "✦ לכתוב עם Claude" }).first().click();
+  await report.getByRole("button", { name: "✦ לנסח" }).first().click();
   const sectionReview = page.getByRole("dialog", { name: /^לפני שליחה ל-Claude/ });
   await expect(sectionReview).toBeVisible();
   await expect(sectionReview.getByLabel("מה Claude יקבל")).not.toContainText("יונתן");
@@ -122,14 +122,39 @@ test("the report page opens a section's guide and her own section's points", asy
   await createCase(page, CHILD);
   await stage(page, /כתיבה/).click();
   await expect(page.getByRole("article", { name: "הדוח, כמו בקובץ" })).toBeVisible();
-  await page.getByRole("button", { name: "איך לכתוב את הסעיף ←" }).first().click();
+  // The guide is beside the brief of the section in focus (round 48).
+  await page.getByRole("button", { name: "איך לכתוב את הסעיף ←" }).click();
   // The link opens the guide on arrival.
   await expect(page.getByText(/הנוסח של המכון|הנוסח שלך, לכל התיקים/)).toBeVisible();
   await page.getByRole("button", { name: "→ חזרה לדוח" }).click();
-  await page.getByRole("button", { name: "הסעיף שלך: נקודות לניסוח ←" }).first().click();
+  await page.getByRole("button", { name: "✦ לנסח מהנקודות שלי ←" }).first().click();
   await expect(page.getByRole("region", { name: "הסעיף שלך" })).toBeVisible();
   await expect(page.getByLabel("הנקודות שלך")).toBeVisible();
   await expectAccessible(page);
+});
+
+// Round 48: the report page as the document. The section in focus asks what matters here, the
+// draft comes with one row of buttons, and Enter approves it without leaving the page.
+test("the report page writes and approves the section in focus with the keyboard", async ({ page }) => {
+  await unlock(page);
+  await page.getByRole("button", { name: /בתיק של נועם$/ }).click();
+  const report = page.getByRole("article", { name: "הדוח, כמו בקובץ" });
+  await expect(report).toBeVisible();
+  const section = report.locator(".a4-section.is-focus");
+  await expect(section).toHaveCount(1);
+  const brief = section.getByLabel("מה חשוב לך שייכתב כאן?");
+  await brief.fill("להתחיל מהקשר עם הצוות");
+  await brief.press("Enter");
+  const review = page.getByRole("dialog", { name: /^לפני שליחה ל-Claude/ });
+  const draft = section.getByRole("group", { name: /^הטיוטה של/ });
+  await expect(review.or(draft)).toBeVisible({ timeout: 20_000 });
+  if (await review.isVisible()) await review.getByRole("button", { name: /שליחה/ }).click();
+  await expect(draft).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "✓ לאשר" })).toHaveCount(1);
+  await expectAccessible(page);
+  await section.getByRole("heading", { level: 3 }).press("Enter");
+  await expect(page.getByRole("button", { name: "✓ לאשר" })).toHaveCount(0);
+  await expect(page.getByRole("complementary", { name: "תוכן הדוח" })).toContainText("מאושרים");
 });
 
 // Round 46: from the tab to approving one thing is two clicks, and the page stays accessible
