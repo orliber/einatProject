@@ -61,20 +61,6 @@ function Show-Names($root) {
     $names | Select-Object -First 200 | ForEach-Object { Write-Host $_ }
 }
 
-# The first element whose name matches, waiting for the window to show it.
-function Find-Named($root, [string] $pattern, [string] $what, [int] $seconds = 60) {
-    $deadline = (Get-Date).AddSeconds($seconds)
-    while ((Get-Date) -lt $deadline) {
-        $all = $root.FindAll($Tree, [System.Windows.Automation.Condition]::TrueCondition)
-        foreach ($e in $all) {
-            if ($e.Current.Name -match $pattern) { return $e }
-        }
-        Start-Sleep -Milliseconds 300
-    }
-    Show-Names $root
-    throw "not found: $what ($pattern)"
-}
-
 # The first text field whose name matches. A label shows the same name ("סיסמה" above the
 # field) and cannot take the keyboard, so only an edit control that can is taken.
 function Find-Field($root, [string] $pattern, [string] $what, [int] $seconds = 60) {
@@ -92,10 +78,26 @@ function Find-Field($root, [string] $pattern, [string] $what, [int] $seconds = 6
     throw "not found: $what ($pattern)"
 }
 
-function Invoke-Named($root, [string] $pattern, [string] $what) {
-    $e = Find-Named $root $pattern $what
-    $e.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Write-Host "pressed: $($e.Current.Name)"
+# The first element whose name matches and that can be pressed. Text inside a button (or a
+# heading with the same words) shows the same name and cannot, so only one that can is taken.
+function Invoke-Named($root, [string] $pattern, [string] $what, [int] $seconds = 60) {
+    $invoke = [System.Windows.Automation.InvokePattern]::Pattern
+    $deadline = (Get-Date).AddSeconds($seconds)
+    while ((Get-Date) -lt $deadline) {
+        $all = $root.FindAll($Tree, [System.Windows.Automation.Condition]::TrueCondition)
+        foreach ($e in $all) {
+            if ($e.Current.Name -notmatch $pattern) { continue }
+            $p = $null
+            if ($e.TryGetCurrentPattern($invoke, [ref] $p)) {
+                $p.Invoke()
+                Write-Host "pressed: $($e.Current.Name)"
+                return
+            }
+        }
+        Start-Sleep -Milliseconds 300
+    }
+    Show-Names $root
+    throw "nothing to press: $what ($pattern)"
 }
 
 function Type-Into($element, [string] $text, [int] $pauseMs) {
@@ -107,8 +109,17 @@ function Type-Into($element, [string] $text, [int] $pauseMs) {
     }
 }
 
+# The text in a field: its value, or for a long text box that offers only the text pattern,
+# the whole of its text.
 function Value-Of($element) {
-    $element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+    $p = $null
+    if ($element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref] $p)) {
+        return $p.Current.Value
+    }
+    if ($element.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref] $p)) {
+        return $p.DocumentRange.GetText(-1)
+    }
+    throw "the text field offers neither its value nor its text"
 }
 
 $window = Get-Window
