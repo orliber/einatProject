@@ -24,6 +24,7 @@ mod masks;
 mod off_lock;
 mod own;
 mod perf_profile;
+mod reading;
 mod sample_flows;
 mod sort_flows;
 mod surfaces;
@@ -1599,6 +1600,7 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
             style_profile: None,
             guide_tagged: String::new(),
             points_only: false,
+            sources_in_order: false,
         };
         let nonce = dv_ai::nonce_from(&[7; 16]);
         // Like the real gate: every string in the body, not the JSON numbers ("max_tokens").
@@ -1613,6 +1615,7 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
             sources: vec![],
             guide_tagged: "[ילד]\n[ילד]".into(),
             points_only: false,
+            sources_in_order: false,
             ..input
         };
         // What the institute's sections are about goes out in its sorting request (D-066).
@@ -1626,6 +1629,8 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
             ..derived
         };
         body.push(dv_ai::build_section_request(&dv_ai::ModelConfig::default(), &points, &nonce).0);
+        // Previous assessments, in the order fixed in code (round 31).
+        body.push(Value::String(dv_ai::ORDER_LINE.to_owned()));
     }
     // The sorting request (D-022): every section key and description of the template, the
     // passage frames and the schema.

@@ -506,7 +506,9 @@ enum PendingKind {
     /// sent, and a fingerprint of its text then.
     Sort {
         case_id: String,
-        materials: Vec<(String, usize, u64)>,
+        /// Per material: id, passage count, fingerprint of the text, and the text as sent
+        /// (tagged), which the numbers of its summary are checked against (round 31).
+        materials: Vec<(String, usize, u64, String)>,
         sections: Vec<String>,
     },
     /// Step 1 of the writing-style profile: one past report (D-043).

@@ -28,6 +28,28 @@ impl Core {
         let inputs = v.inputs(case_id)?;
         let practitioner = v.practitioner()?.names.first().cloned();
         let routing = Core::material_routing(v, &structure, case_id, &inputs)?;
+        // Round 31: what no material feeds yet, and the order of the previous assessments.
+        let missing: Vec<String> = sorting::sortable(&structure)
+            .iter()
+            .filter(|s| !routing.iter().any(|r| r.feeds.contains(&s.key)))
+            .map(|s| s.title.clone())
+            .collect();
+        let with_record: Vec<&dv_domain::CaseInput> = inputs
+            .iter()
+            .filter(|i| {
+                routing
+                    .iter()
+                    .any(|r| r.input_id == i.id && r.record.is_some())
+            })
+            .collect();
+        let keys = with_record
+            .iter()
+            .map(|i| sorting::prior_key(v, case_id, i))
+            .collect::<Result<Vec<_>, _>>()?;
+        let prior_order: Vec<String> = dv_domain::record_order(&keys)
+            .into_iter()
+            .filter_map(|k| with_record.get(k).map(|i| i.id.clone()))
+            .collect();
         let sheets = score_sheets(v, case_id, &inputs)?;
         let style_model = style::style_model(v)?;
         let retention_default = v
@@ -166,6 +188,8 @@ impl Core {
             sections,
             retention_default,
             sample,
+            missing,
+            prior_order,
         })
     }
 

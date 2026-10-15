@@ -185,6 +185,45 @@ const SECTION_WORDS: &[(&str, &[&str])] = &[
 /// Demo-mode sorting: each passage goes to every section whose words it contains.
 fn sort_locally(request: &str, keys: &[&str]) -> Value {
     let passages = sources_in(request);
+    // Round 31: a summary of each material, its first sentences; a record for a report.
+    let kinds = blocks_with(request, "kind");
+    let mut materials: Vec<Value> = Vec::new();
+    for ((id, text), (kind, _)) in passages.iter().zip(&kinds) {
+        let Some(m) = id
+            .strip_prefix('S')
+            .and_then(|r| r.split_once('P'))
+            .and_then(|(m, _)| m.parse::<u64>().ok())
+        else {
+            continue;
+        };
+        if materials.iter().any(|x| x["material"] == m) {
+            continue;
+        }
+        let summary = first_sentences(text, 2);
+        let mut item = json!({ "material": m, "summary": summary });
+        if kind == "דוח קודם" || kind == "שיחה עם איש מקצוע" {
+            let all: Vec<&str> = passages
+                .iter()
+                .filter(|(pid, _)| pid.starts_with(&format!("S{m}P")))
+                .map(|(_, t)| t.as_str())
+                .collect();
+            let recommendations = all
+                .iter()
+                .find(|t| t.contains("מומלץ") || t.contains("המלצ"))
+                .map_or_else(String::new, |t| first_sentences(t, 1));
+            let record = json!({
+                "kind": kind,
+                "by": "",
+                "setting": "unknown",
+                "findings": first_sentences(all.get(1).or(all.first()).copied().unwrap_or(""), 1),
+                "recommendations": recommendations,
+            });
+            if let Some(o) = item.as_object_mut() {
+                o.insert("record".to_owned(), record);
+            }
+        }
+        materials.push(item);
+    }
     let sections: Vec<Value> = SECTION_WORDS
         .iter()
         .filter(|(key, _)| keys.contains(key))
@@ -197,7 +236,7 @@ fn sort_locally(request: &str, keys: &[&str]) -> Value {
             (!ids.is_empty()).then(|| json!({ "section": key, "passages": ids }))
         })
         .collect();
-    json!({ "sections": sections })
+    json!({ "sections": sections, "materials": materials })
 }
 
 /// Style markers demo mode looks for in a past report, with what each one says about the style.
@@ -450,21 +489,40 @@ mod tests {
                 section("kindergarten"),
                 section("cognitive"),
             ],
-            materials: vec![SortMaterial {
-                input_id: "i1".into(),
-                kind_label: "אינטייק".into(),
-                title_tagged: String::new(),
-                passages_tagged: vec![
-                    "ההריון והלידה עברו ללא סיבוכים.".into(),
-                    "בגן [גננת] מתארת קושי במעברים.".into(),
-                    "תודה רבה.".into(),
-                ],
-            }],
+            materials: vec![
+                SortMaterial {
+                    input_id: "i1".into(),
+                    kind_label: "אינטייק".into(),
+                    title_tagged: String::new(),
+                    passages_tagged: vec![
+                        "ההריון והלידה עברו ללא סיבוכים.".into(),
+                        "בגן [גננת] מתארת קושי במעברים.".into(),
+                        "תודה רבה.".into(),
+                    ],
+                },
+                SortMaterial {
+                    input_id: "i2".into(),
+                    kind_label: "דוח קודם".into(),
+                    title_tagged: "אבחון".into(),
+                    passages_tagged: vec![
+                        "נבדק במכון.".into(),
+                        "נמצא עיכוב בשפה.".into(),
+                        "מומלץ על טיפול.".into(),
+                    ],
+                },
+            ],
         };
         let body = build_sort_request(&ModelConfig::default(), &input, "n");
         let keys: Vec<String> = input.sections.iter().map(|s| s.key.clone()).collect();
-        let reply = parse_sort(&respond(&body), &[3], &keys).unwrap();
+        let reply = parse_sort(&respond(&body), &[3, 3], &keys).unwrap();
         assert_eq!(reply.ignored, 0);
+        // Round 31: each material summed up, and the report recorded.
+        let first = reply.readings[0].as_ref().unwrap();
+        assert!(first.summary.starts_with("ההריון") && first.record.is_none());
+        let report = reply.readings[1].as_ref().unwrap();
+        let record = report.record.as_ref().expect("a report gets a record");
+        assert_eq!(record.findings, "נמצא עיכוב בשפה.");
+        assert_eq!(record.recommendations, "מומלץ על טיפול.");
         let got: Vec<(&str, &[u32])> = reply.materials[0]
             .iter()
             .map(|s| (s.section.as_str(), s.passages.as_slice()))
@@ -531,6 +589,7 @@ mod tests {
             style_profile: None,
             guide_tagged: String::new(),
             points_only: false,
+            sources_in_order: false,
         };
         let (body, refs) = build_section_request(&ModelConfig::default(), &input, "n");
         let sources: Vec<(String, String)> = refs
@@ -568,6 +627,7 @@ mod tests {
             style_profile: None,
             guide_tagged: String::new(),
             points_only: false,
+            sources_in_order: false,
         };
         let (body, _) = build_section_request(&ModelConfig::default(), &input, "n");
         let approved: Vec<String> = input

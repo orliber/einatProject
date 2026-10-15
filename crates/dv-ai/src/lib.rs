@@ -16,15 +16,16 @@ pub use request::{
     build_consult_request, build_research_request, build_section_request, content_text,
     guide_lines, nonce_from, ConsultInput, ModelConfig, Provider, ResearchInput, SectionInput,
     TaggedInput, TaggedTurn, ALLOWED_MODELS, ANTHROPIC_MODELS, DEFAULT_MODEL, GEMINI_MODELS,
-    LOCAL_MODELS, MISTRAL_MODELS, OPENAI_MODELS, POINTS_LINE, RESEARCH_ALLOWED_DOMAINS,
+    LOCAL_MODELS, MISTRAL_MODELS, OPENAI_MODELS, ORDER_LINE, POINTS_LINE, RESEARCH_ALLOWED_DOMAINS,
 };
 pub use response::{
-    parse_consult, parse_derived_section, parse_points_section, parse_section, AiError,
-    ProposedParagraph, SectionReply,
+    numbers_not_in, parse_consult, parse_derived_section, parse_points_section, parse_section,
+    AiError, ProposedParagraph, SectionReply,
 };
 pub use shrink::{shrink_to_fit, Cut};
 pub use sort::{
-    build_sort_request, parse_sort, passage_id, SortInput, SortMaterial, SortReply, SortSection,
+    build_sort_request, parse_sort, passage_id, Reading, SortInput, SortMaterial, SortReply,
+    SortSection,
 };
 pub use style::{
     build_style_analysis_request, build_style_synthesis_request, parse_style_analysis,

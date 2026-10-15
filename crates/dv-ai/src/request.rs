@@ -180,7 +180,13 @@ pub struct SectionInput {
     /// A section she writes herself, worded from her points only (round 30): her request is
     /// the points, and nothing else of the case goes with it.
     pub points_only: bool,
+    /// The sources come in the order the section is written in (round 31: previous
+    /// assessments, the institute first, then the community, newest first), fixed in code.
+    pub sources_in_order: bool,
 }
+
+/// What the request says when the order of the sources is fixed in code (round 31).
+pub const ORDER_LINE: &str = "המקורות מסודרים לפי הסדר שבו הם נכתבים בסעיף, והסדר נקבע במחשב. כתוב/י עליהם באותו סדר שבו הם מופיעים, פסקה לכל מקור.";
 
 /// The opening of a request worded from her points (round 30): the builder's own words.
 pub const POINTS_LINE: &str = "את הסעיף הזה הפסיכולוגית כותבת בעצמה. נסח/י אותו רק מתוך הנקודות שבבקשה שלה, בלי להוסיף שום עובדה, התרשמות או פרשנות שאינן בהן. אין מקורות S, ולכן source_refs ריק בכל פסקה.";
@@ -344,6 +350,9 @@ pub fn build_section_request(
         );
     } else {
         parts.push("מקורות (הפנה/י אליהם לפי המזהה, למשל S1):".to_owned());
+        if input.sources_in_order && input.sources.len() > 1 {
+            parts.push(ORDER_LINE.to_owned());
+        }
     }
     for (i, s) in input.sources.iter().enumerate() {
         let sid = format!("S{}", i + 1);
@@ -509,6 +518,7 @@ mod tests {
             style_profile: None,
             guide_tagged: String::new(),
             points_only: false,
+            sources_in_order: false,
         }
     }
 

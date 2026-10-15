@@ -206,6 +206,12 @@ pub struct CaseDetail {
     pub retention_default: String,
     /// The made-up case to try the program on (U3).
     pub sample: bool,
+    /// Sections written from materials that no material feeds yet (round 31), by title, in
+    /// report order. Computed here, never by the AI.
+    pub missing: Vec<String>,
+    /// The materials with a record of a previous assessment, in the order "אבחונים וטיפולים
+    /// קודמים" is written in (the institute first, then the community, newest first).
+    pub prior_order: Vec<String>,
 }
 
 /// Where one material goes in the report (D-022).
@@ -230,6 +236,25 @@ pub struct MaterialRouting {
     pub passages: u32,
     /// Passages that reach at least one section.
     pub used_passages: u32,
+    /// What the reading said about it (round 31), restored: plain text. Empty: not read yet.
+    pub summary: String,
+    /// A report by another professional: what, by whom, where, findings, recommendations.
+    pub record: Option<PriorRecordView>,
+    /// Numbers in the summary or the record that are not in the material ("לבדוק").
+    pub summary_notes: Vec<String>,
+}
+
+/// A previous assessment or treatment as the materials screen shows it (round 31).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PriorRecordView {
+    pub kind: String,
+    pub by: String,
+    pub setting: dv_domain::Setting,
+    pub findings: String,
+    pub recommendations: String,
+    /// Month and year as written in the document ("3/2024"), read here; empty when none.
+    pub date: String,
 }
 
 /// What a sorting changed.

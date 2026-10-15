@@ -7,6 +7,7 @@ pub mod compare;
 pub mod consistency;
 pub mod dates;
 pub mod identity;
+pub mod prior;
 pub mod records;
 pub mod report;
 pub mod routing;
@@ -16,6 +17,9 @@ pub use compare::{compare, comparison_text, ComparisonRow};
 pub use consistency::{check_age, check_gender, check_grade, check_recommendations};
 pub use identity::{
     assign_tag, FoundName, Identity, IdentityInput, IdentitySource, Role, PRACTITIONER_TAG,
+};
+pub use prior::{
+    date_text, document_date, record_order, DocDate, MaterialSummary, PriorRecord, Setting,
 };
 pub use records::{
     Age, Author, CaseInput, CaseMeta, CaseSummary, ChatMessage, ChatRole, Consent, DraftParagraph,

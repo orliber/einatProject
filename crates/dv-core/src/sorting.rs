@@ -10,17 +10,42 @@ use std::hash::{Hash, Hasher};
 
 use dv_ai::{SortInput, SortMaterial, SortSection};
 use dv_domain::{
-    passage_ranges, Feed, InputKind, ReportSection, ReportStructure, Routing, Suggestion,
+    passage_ranges, CaseInput, DocDate, Feed, InputKind, MaterialSummary, ReportSection,
+    ReportStructure, Routing, Setting, Suggestion,
 };
 use dv_privacy::{FilterOutcome, PrivacyContext};
 use dv_vault::{Vault, VaultError};
 use serde_json::Value;
 
 use crate::name_model::NameHints;
-use crate::views::{MaterialRouting, Prepared, SortResult};
+use crate::views::{MaterialRouting, Prepared, PriorRecordView, SortResult};
 use crate::{
-    structure_for, today, Core, CoreError, Outgoing, PendingKind, Review, DERIVED_SECTIONS,
+    restore, scan_model_output, structure_for, today, Core, CoreError, Outgoing, PendingKind,
+    Review, DERIVED_SECTIONS,
 };
+
+/// The section of previous assessments, written in an order fixed in code (round 31).
+pub(crate) const PRIOR_SECTION: &str = "prior_assessments";
+
+/// Materials whose reading includes a record of a previous assessment or treatment.
+fn has_record(kind: InputKind) -> bool {
+    matches!(kind, InputKind::PriorReport | InputKind::Professional)
+}
+
+/// Where a material stands in "אבחונים וטיפולים קודמים": the setting its record names, and
+/// the date read from the document here.
+pub(crate) fn prior_key(
+    v: &Vault,
+    case_id: &str,
+    input: &CaseInput,
+) -> Result<(Setting, Option<DocDate>), CoreError> {
+    let count = passage_ranges(&input.content).len();
+    let setting = routing_of(v, case_id, &input.id)?
+        .summary_of(count)
+        .and_then(|s| s.record.as_ref())
+        .map_or(Setting::Unknown, |r| r.setting);
+    Ok((setting, dv_domain::document_date(&input.content)))
+}
 
 /// Sections that are written from materials (not from other sections, not the signature).
 pub(crate) fn sortable(structure: &ReportStructure) -> Vec<&ReportSection> {
@@ -191,6 +216,10 @@ impl Core {
         inputs: &[dv_domain::CaseInput],
     ) -> Result<Vec<MaterialRouting>, CoreError> {
         let order: Vec<String> = sortable(structure).iter().map(|s| s.key.clone()).collect();
+        let identities = v.identities(case_id)?;
+        let masks = v.masks(case_id)?;
+        let practitioner = v.practitioner()?.names.first().cloned();
+        let show = |t: &str| restore(t, &identities, practitioner.as_deref(), &masks);
         inputs
             .iter()
             .map(|inp| {
@@ -216,7 +245,25 @@ impl Core {
                     used.sort_unstable();
                     used.dedup();
                 }
+                let read = routing.summary_of(count);
+                let record = read
+                    .and_then(|s| s.record.as_ref())
+                    .filter(|_| has_record(inp.kind))
+                    .map(|r| PriorRecordView {
+                        kind: show(&r.kind),
+                        by: show(&r.by),
+                        setting: r.setting,
+                        findings: show(&r.findings),
+                        recommendations: show(&r.recommendations),
+                        date: dv_domain::document_date(&inp.content)
+                            .map(dv_domain::date_text)
+                            .unwrap_or_default(),
+                    });
+                let summary_notes = read.map(|s| s.notes.clone()).unwrap_or_default();
                 Ok(MaterialRouting {
+                    summary: read.map(|s| show(&s.text)).unwrap_or_default(),
+                    record,
+                    summary_notes,
                     input_id: inp.id.clone(),
                     passages: u32::try_from(count).unwrap_or(u32::MAX),
                     used_passages: if sorted {
@@ -354,13 +401,19 @@ impl Core {
                         &whole,
                     );
                 }
+                let passages_tagged: Vec<String> = parts.into_iter().map(|p| p.tagged).collect();
+                rows.push((
+                    inp.id.clone(),
+                    ranges.len(),
+                    fingerprint(&inp.content),
+                    passages_tagged.join("\n\n"),
+                ));
                 materials.push(SortMaterial {
                     input_id: inp.id.clone(),
                     kind_label: inp.kind.label_he().to_owned(),
                     title_tagged: title.tagged,
-                    passages_tagged: parts.into_iter().map(|p| p.tagged).collect(),
+                    passages_tagged,
                 });
-                rows.push((inp.id.clone(), ranges.len(), fingerprint(&inp.content)));
             }
             if materials.is_empty() {
                 // Shown only here, on this computer (titles may hold names).
@@ -439,10 +492,12 @@ impl Core {
         else {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
         };
-        let counts: Vec<usize> = materials.iter().map(|(_, n, _)| *n).collect();
+        let counts: Vec<usize> = materials.iter().map(|(_, n, _, _)| *n).collect();
         let reply = dv_ai::parse_sort(&response, &counts, &sections)?;
         let v = self.vault_mut()?;
         let current = v.inputs(&case_id)?;
+        let case_tags: Vec<String> = v.identities(&case_id)?.into_iter().map(|i| i.tag).collect();
+        let everyone = v.all_identities()?;
         let mut result = SortResult {
             sorted: 0,
             unchanged: 0,
@@ -450,39 +505,66 @@ impl Core {
             ignored: reply.ignored,
             demo,
         };
-        for ((input_id, count, print), placed) in materials.iter().zip(reply.materials) {
+        for (((input_id, count, print, sent), placed), reading) in
+            materials.iter().zip(reply.materials).zip(reply.readings)
+        {
             // Edited or deleted while Claude was reading: the answer is about another text.
-            let still_same = current
+            let Some(input) = current
                 .iter()
-                .any(|i| &i.id == input_id && fingerprint(&i.content) == *print);
-            if !still_same {
+                .find(|i| &i.id == input_id && fingerprint(&i.content) == *print)
+            else {
                 result.unchanged += 1;
                 continue;
-            }
+            };
             let mut routing = routing_of(v, &case_id, input_id)?;
-            if placed.is_empty() {
-                // Read and nothing found: keep the table, do not offer it again.
-                routing.unplaced = Some(u32::try_from(*count).unwrap_or(u32::MAX));
-                let json = serde_json::to_string(&routing)
-                    .map_err(|e| CoreError::Internal(e.to_string()))?;
-                match v.set_input_routing(&case_id, input_id, &json) {
-                    Ok(()) | Err(VaultError::NotFound) => {}
-                    Err(e) => return Err(e.into()),
+            let passage_count = u32::try_from(*count).unwrap_or(u32::MAX);
+            // Round 31: what it says, kept with the text it was read from. Read and summed up
+            // even when the answer said nothing about it, so it is not offered again.
+            let reading = reading.unwrap_or_default();
+            let record = reading.record.filter(|_| has_record(input.kind));
+            let mut notes = Vec::new();
+            let written = [
+                Some(&reading.summary),
+                record.as_ref().map(|r| &r.findings),
+                record.as_ref().map(|r| &r.recommendations),
+            ];
+            let mut note = |n: String| {
+                if !notes.contains(&n) {
+                    notes.push(n);
                 }
-                result.unchanged += 1;
-                continue;
+            };
+            for text in written.into_iter().flatten() {
+                for found in scan_model_output(text, &case_tags, &everyone) {
+                    note(format!("{}: {}", found.message, found.token));
+                }
+                // A number that is neither in what was sent nor in the material itself.
+                for n in dv_ai::numbers_not_in(text, &[sent, &input.content]) {
+                    note(format!("המספר {n} לא מופיע בחומר – לבדוק"));
+                }
             }
-            result.links += u32::try_from(placed.len()).unwrap_or(u32::MAX);
-            routing.suggestion = Some(Suggestion {
-                by_ai: !demo,
-                passage_count: u32::try_from(*count).unwrap_or(u32::MAX),
-                sections: placed,
+            routing.summary = Some(MaterialSummary {
+                passage_count,
+                text: reading.summary,
+                record,
+                notes,
             });
+            let placed_any = !placed.is_empty();
+            if placed_any {
+                result.links += u32::try_from(placed.len()).unwrap_or(u32::MAX);
+                routing.suggestion = Some(Suggestion {
+                    by_ai: !demo,
+                    passage_count,
+                    sections: placed,
+                });
+            } else {
+                // Read and nothing found: keep the table, do not offer it again.
+                routing.unplaced = Some(passage_count);
+            }
             let json =
                 serde_json::to_string(&routing).map_err(|e| CoreError::Internal(e.to_string()))?;
             match v.set_input_routing(&case_id, input_id, &json) {
-                Ok(()) => result.sorted += 1,
-                Err(VaultError::NotFound) => result.unchanged += 1,
+                Ok(()) if placed_any => result.sorted += 1,
+                Ok(()) | Err(VaultError::NotFound) => result.unchanged += 1,
                 Err(e) => return Err(e.into()),
             }
         }

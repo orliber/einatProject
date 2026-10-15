@@ -189,6 +189,7 @@ mod tests {
             style_profile: None,
             guide_tagged: String::new(),
             points_only: false,
+            sources_in_order: false,
         }
     }
 

@@ -110,6 +110,10 @@ pub struct Routing {
     /// and it is not offered for sorting again until the text changes.
     #[serde(default)]
     pub unplaced: Option<u32>,
+    /// What the reading said about the material (round 31), for the text it was made from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub summary: Option<crate::prior::MaterialSummary>,
 }
 
 impl Routing {
@@ -140,13 +144,23 @@ impl Routing {
         self.fresh(passage_count).is_some()
     }
 
-    /// Not read by a sorting since its text last changed.
+    /// Not read by a sorting since its text last changed, or read before the reading also
+    /// summed it up (round 31).
     #[must_use]
     pub fn needs_sorting(&self, passage_count: usize) -> bool {
-        !self.is_sorted(passage_count)
-            && self
+        let placed = self.is_sorted(passage_count)
+            || self
                 .unplaced
-                .is_none_or(|n| usize::try_from(n).is_ok_and(|n| n != passage_count))
+                .is_some_and(|n| usize::try_from(n).is_ok_and(|n| n == passage_count));
+        !placed || self.summary_of(passage_count).is_none()
+    }
+
+    /// The reading's summary, if it still fits the material's current text.
+    #[must_use]
+    pub fn summary_of(&self, passage_count: usize) -> Option<&crate::prior::MaterialSummary> {
+        self.summary
+            .as_ref()
+            .filter(|s| usize::try_from(s.passage_count).is_ok_and(|n| n == passage_count))
     }
 
     /// What goes from this material to `section`, or `None`.
@@ -207,6 +221,7 @@ impl Routing {
     pub fn text_changed(&mut self) {
         self.suggestion = None;
         self.unplaced = None;
+        self.summary = None;
     }
 }
 
@@ -333,12 +348,41 @@ mod tests {
     fn a_material_with_nothing_placed_keeps_the_table_and_is_not_offered_again() {
         let r = Routing {
             unplaced: Some(3),
+            summary: Some(read(3)),
             ..Routing::default()
         };
         let table = s(&["background"]);
         assert_eq!(r.feed("background", &table, 3), Some(Feed::Whole));
         assert!(!r.needs_sorting(3));
         assert!(r.needs_sorting(4), "a new text is offered again");
+    }
+
+    fn read(count: u32) -> crate::MaterialSummary {
+        crate::MaterialSummary {
+            passage_count: count,
+            text: "סיכום.".into(),
+            record: None,
+            notes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_material_sorted_before_it_was_summed_up_is_read_again_and_an_edit_forgets_the_summary() {
+        let mut r = sorted(&[("cognitive", &[1])], 3);
+        assert!(r.is_sorted(3));
+        assert!(
+            r.needs_sorting(3),
+            "sorted by an older version, never summed up"
+        );
+        r.summary = Some(read(3));
+        assert!(!r.needs_sorting(3));
+        assert!(r.summary_of(3).is_some());
+        assert!(
+            r.summary_of(4).is_none(),
+            "a summary of another text is not shown"
+        );
+        r.text_changed();
+        assert!(r.summary.is_none() && r.needs_sorting(3));
     }
 
     #[test]

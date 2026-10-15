@@ -1,10 +1,11 @@
 //! Sorting materials into report sections (D-022).
 //!
 //! Claude reads the filtered materials once, cut into numbered passages, and answers with
-//! passage ids for each section: no text, no summary. Everything it returns is checked here
-//! against what was sent; an unknown section or passage is dropped, never guessed.
+//! passage ids for each section, and (round 31) a short summary of each material, with a
+//! record for a report by another professional. Everything it returns is checked here against
+//! what was sent; an unknown section, passage or material is dropped, never guessed.
 
-use dv_domain::SectionPassages;
+use dv_domain::{PriorRecord, SectionPassages, Setting};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -70,16 +71,45 @@ fn schema(sections: &[SortSection]) -> Value {
                     "required": ["section", "passages"],
                     "additionalProperties": false
                 }
+            },
+            "materials": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "material": {"type": "integer"},
+                        "summary": {"type": "string"},
+                        "record": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {"type": "string"},
+                                "by": {"type": "string"},
+                                "setting": {"type": "string", "enum": ["institute", "community", "unknown"]},
+                                "findings": {"type": "string"},
+                                "recommendations": {"type": "string"}
+                            },
+                            "required": ["kind", "by", "setting", "findings", "recommendations"],
+                            "additionalProperties": false
+                        }
+                    },
+                    "required": ["material", "summary"],
+                    "additionalProperties": false
+                }
             }
         },
-        "required": ["sections"],
+        "required": ["sections", "materials"],
         "additionalProperties": false
     })
 }
 
+/// The longest summary kept, and the longest field of a record, in characters. Longer is not
+/// a summary: it is dropped (and counted as ignored), never cut in the middle.
+pub const SUMMARY_MAX: usize = 1_500;
+pub const RECORD_FIELD_MAX: usize = 1_000;
+
 #[must_use]
 pub fn build_sort_request(model: &ModelConfig, input: &SortInput, nonce: &str) -> Value {
-    let mut body = base_body(model, SORTING_RULES, 8_000);
+    let mut body = base_body(model, SORTING_RULES, 12_000);
     let mut parts = vec!["סעיפי הדוח (מפתח: מה שייך לסעיף):".to_owned()];
     for s in &input.sections {
         parts.push(format!("- {}: {}", s.key, s.about));
@@ -110,12 +140,22 @@ pub fn build_sort_request(model: &ModelConfig, input: &SortInput, nonce: &str) -
     body
 }
 
+/// What the reading says about one material (round 31). Text is tagged.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Reading {
+    pub summary: String,
+    pub record: Option<PriorRecord>,
+}
+
 /// Claude's sorting, checked against what was sent.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SortReply {
     /// One entry per material sent, in order. Empty when nothing of it was placed.
     pub materials: Vec<Vec<SectionPassages>>,
-    /// Ids or sections in the answer that were not in the request (dropped).
+    /// One entry per material sent, in order. `None` when the answer said nothing about it.
+    pub readings: Vec<Option<Reading>>,
+    /// Ids, sections or materials in the answer that were not in the request, or text too
+    /// long to be what was asked (dropped).
     pub ignored: u32,
 }
 
@@ -126,8 +166,63 @@ struct RawItem {
 }
 
 #[derive(Deserialize)]
+struct RawRecord {
+    kind: String,
+    by: String,
+    setting: String,
+    findings: String,
+    recommendations: String,
+}
+
+#[derive(Deserialize)]
+struct RawMaterial {
+    material: u64,
+    summary: String,
+    #[serde(default)]
+    record: Option<RawRecord>,
+}
+
+#[derive(Deserialize)]
 struct RawSort {
     sections: Vec<RawItem>,
+    /// Missing in an answer to an older request: no summaries then.
+    #[serde(default)]
+    materials: Vec<RawMaterial>,
+}
+
+/// A field as kept: trimmed, and within `max` characters (else `None`).
+fn bounded(text: &str, max: usize) -> Option<String> {
+    let t = text.trim();
+    (t.chars().count() <= max).then(|| t.to_owned())
+}
+
+fn reading_of(raw: RawMaterial, ignored: &mut u32) -> Reading {
+    let mut drop = || *ignored = ignored.saturating_add(1);
+    let summary = bounded(&raw.summary, SUMMARY_MAX).unwrap_or_else(|| {
+        drop();
+        String::new()
+    });
+    let record = raw.record.and_then(|r| {
+        let fields = [
+            bounded(&r.kind, RECORD_FIELD_MAX),
+            bounded(&r.by, RECORD_FIELD_MAX),
+            bounded(&r.findings, RECORD_FIELD_MAX),
+            bounded(&r.recommendations, RECORD_FIELD_MAX),
+        ];
+        let [Some(kind), Some(by), Some(findings), Some(recommendations)] = fields else {
+            drop();
+            return None;
+        };
+        // A record that says neither what nor what was found is no record.
+        (!kind.is_empty() || !findings.is_empty()).then(|| PriorRecord {
+            kind,
+            by,
+            setting: Setting::from_key(r.setting.trim()),
+            findings,
+            recommendations,
+        })
+    });
+    Reading { summary, record }
 }
 
 /// `passage_counts[i]` is how many passages material `i + 1` had in the request.
@@ -140,8 +235,21 @@ pub fn parse_sort(
     let raw: RawSort = serde_json::from_str(&text).map_err(|e| AiError::Format(e.to_string()))?;
     let mut reply = SortReply {
         materials: vec![Vec::new(); passage_counts.len()],
+        readings: vec![None; passage_counts.len()],
         ignored: 0,
     };
+    for raw in raw.materials {
+        let slot = usize::try_from(raw.material)
+            .ok()
+            .and_then(|m| m.checked_sub(1))
+            .and_then(|i| reply.readings.get_mut(i));
+        // An unknown material, or a second answer about one (the first stands).
+        let Some(slot @ None) = slot else {
+            reply.ignored = reply.ignored.saturating_add(1);
+            continue;
+        };
+        *slot = Some(reading_of(raw, &mut reply.ignored));
+    }
     for item in raw.sections {
         if !sections.contains(&item.section) {
             reply.ignored = reply.ignored.saturating_add(1);
@@ -288,6 +396,54 @@ mod tests {
         );
         // S1P9, S3P1, s1p1, S01P1x and the invented section.
         assert_eq!(r.ignored, 5);
+    }
+
+    #[test]
+    fn each_material_is_summed_up_and_a_report_gets_a_record_checked_against_the_request() {
+        let long = "א".repeat(SUMMARY_MAX + 1);
+        let answer = json!({
+            "sections": [{"section": "background", "passages": ["S1P1"]}],
+            "materials": [
+                {"material": 1, "summary": "  אבחון קודם של [ילד].  ", "record": {
+                    "kind": "אבחון פסיכו-דידקטי", "by": "פסיכולוגית חינוכית",
+                    "setting": "community", "findings": "קושי בקשב.", "recommendations": "ריפוי בעיסוק."
+                }},
+                {"material": 1, "summary": "תשובה שנייה על אותו חומר"},
+                {"material": 3, "summary": "חומר שלא נשלח"},
+                {"material": 0, "summary": "אפס"},
+                {"material": 2, "summary": long, "record": {
+                    "kind": "", "by": "", "setting": "x", "findings": "", "recommendations": ""
+                }}
+            ]
+        });
+        let r = parse_sort(&api(&answer), &[2, 1], &["background".into()]).unwrap();
+        let first = r.readings[0].as_ref().unwrap();
+        assert_eq!(first.summary, "אבחון קודם של [ילד].");
+        let rec = first.record.as_ref().unwrap();
+        assert_eq!(rec.setting, Setting::Community);
+        assert_eq!(rec.recommendations, "ריפוי בעיסוק.");
+        // Too long: dropped, not cut. An empty record is no record.
+        let second = r.readings[1].as_ref().unwrap();
+        assert!(second.summary.is_empty() && second.record.is_none());
+        // The second answer on material 1, material 3, material 0 and the long summary.
+        assert_eq!(r.ignored, 4);
+        // An answer with no materials (an older request) still sorts.
+        let old = json!({"sections": [{"section": "background", "passages": ["S1P1"]}]});
+        let r = parse_sort(&api(&old), &[1], &["background".into()]).unwrap();
+        assert_eq!(r.readings, vec![None]);
+        assert_eq!(r.materials[0].len(), 1);
+    }
+
+    #[test]
+    fn the_schema_asks_for_summaries_with_fixed_keys_only() {
+        let body = build_sort_request(&ModelConfig::default(), &input(), "nonce");
+        let schema = &body["output_config"]["format"]["schema"];
+        assert_eq!(schema["required"], json!(["sections", "materials"]));
+        let record = &schema["properties"]["materials"]["items"]["properties"]["record"];
+        assert_eq!(
+            record["properties"]["setting"]["enum"],
+            json!(["institute", "community", "unknown"])
+        );
     }
 
     #[test]

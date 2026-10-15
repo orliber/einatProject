@@ -379,6 +379,7 @@ impl Core {
                 style_profile,
                 guide_tagged,
                 points_only: points,
+                sources_in_order: section_key == sorting::PRIOR_SECTION && !points,
             };
             // From her points, the numbers in the answer are checked against the points.
             let approved = if points {
@@ -804,7 +805,19 @@ pub(crate) fn collect_sources(
     };
     let mut tagged_sources = Vec::new();
     let mut source_rows = Vec::new();
-    for inp in v.inputs(case_id)? {
+    let mut inputs = v.inputs(case_id)?;
+    if section_key == sorting::PRIOR_SECTION {
+        // Round 31: the institute first, then the community, newest first, fixed here.
+        let keys = inputs
+            .iter()
+            .map(|i| sorting::prior_key(v, case_id, i))
+            .collect::<Result<Vec<_>, _>>()?;
+        inputs = dv_domain::record_order(&keys)
+            .into_iter()
+            .filter_map(|k| inputs.get(k).cloned())
+            .collect();
+    }
+    for inp in inputs {
         // D-022: the table, the sorting, and Einat's choice decide what goes here.
         let table = sorting::table_for(structure, inp.kind);
         let count = passage_ranges(&inp.content).len();

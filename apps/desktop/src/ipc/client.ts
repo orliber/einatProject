@@ -49,6 +49,8 @@ import type { VerifyResult } from "./generated/VerifyResult";
 import type { SortResult } from "./generated/SortResult";
 import type { SourceExcerpt } from "./generated/SourceExcerpt";
 import type { MaterialRouting } from "./generated/MaterialRouting";
+import type { PriorRecordView } from "./generated/PriorRecordView";
+import type { Setting } from "./generated/Setting";
 import type { SuspectDecision } from "./generated/SuspectDecision";
 import type { FollowUpView } from "./generated/FollowUpView";
 import type { UiError } from "./generated/UiError";
@@ -429,6 +431,8 @@ export type {
   GoogleStatus,
   NameMatch,
   MaterialRouting,
+  PriorRecordView,
+  Setting,
   SortResult,
   SourceExcerpt,
   CaseDetail,

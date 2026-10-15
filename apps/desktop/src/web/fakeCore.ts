@@ -138,6 +138,17 @@ function fail(code: string, message: string, action: UiError["action"] = actionF
   throw e;
 }
 
+/** The institute first, then the community, newest first; undated last (round 31). */
+function priorOrder(inputs: CaseInput[], routing: MaterialRouting[]): string[] {
+  const rank = { institute: 0, community: 1, unknown: 2 } as const;
+  const rows = inputs.flatMap((i) => {
+    const rec = routing.find((r) => r.input_id === i.id)?.record;
+    return rec ? [{ id: i.id, rank: rank[rec.setting], date: R.documentDate(i.content) }] : [];
+  });
+  const at = (d: [number, number] | null) => (d ? d[0] * 12 + d[1] : -1);
+  return rows.sort((a, b) => a.rank - b.rank || at(b.date) - at(a.date)).map((r) => r.id);
+}
+
 function sentences(text: string, n: number): string {
   return (text.match(/[^.!?]+[.!?]?/g) ?? []).slice(0, n).join("").trim();
 }
@@ -445,9 +456,14 @@ export class FakeCore {
       const feeds = SORTABLE.map((s) => s.key).filter((k) => R.feed(r, k, table, count) !== null);
       const sorted = R.isSorted(r, count);
       const used = sorted ? new Set(r.suggestion?.sections.filter((x) => feeds.includes(x.section)).flatMap((x) => x.passages)).size : count;
+      const read = R.readingOf(r, count);
+      const date = R.documentDate(i.content);
       return {
         input_id: i.id, feeds, suggested: sorted ? R.base(r, table, count) : [], table, sorted, needs_sorting: R.needsSorting(r, count),
         by_ai: false, added: r.added, removed: r.removed, passages: count, used_passages: used,
+        summary: read ? restore(read.text, c.people, this.practitioner) : "",
+        record: read?.record ? { ...read.record, date: date ? `${date[1]}/${date[0]}` : "" } : null,
+        summary_notes: [],
       };
     });
   }
@@ -457,6 +473,9 @@ export class FakeCore {
     const routing = this.routing(c);
     return {
       id: c.id, meta: c.meta, identities, inputs: c.inputs, routing, sample: c.id === this.sampleId,
+      // Round 31: what no material feeds yet, and the previous assessments in the report's order.
+      missing: SORTABLE.filter((s) => !routing.some((r) => r.feeds.includes(s.key))).map((s) => s.title),
+      prior_order: priorOrder(c.inputs, routing),
       retention_default: `${new Date(c.created * 1000).getFullYear() + Math.max(7, 25 - (c.meta.age?.years ?? 25))}-${new Date(c.created * 1000).toISOString().slice(5, 10)}`,
       sections: SECTIONS.map((s) => {
         const drafts = c.drafts.filter((d) => d.section === s.key && d.status !== "rejected" && d.status !== "superseded");
@@ -605,8 +624,17 @@ export class FakeCore {
         result.unchanged += 1;
         continue;
       }
-      const r = this.routingOf(c, m.id);
-      const placed = R.sortLocally(R.passages(i.content), keys);
+      const parts = R.passages(i.content);
+      // Round 31: the same reading sums each material up, with a record for a report.
+      const report = i.kind === "prior_report" || i.kind === "professional";
+      const advice = parts.find((x) => x.includes("מומלץ") || x.includes("המלצ"));
+      const reading: R.Reading = {
+        passageCount: m.count,
+        text: sentences(parts.join(" "), 2),
+        ...(report ? { record: { kind: kindLabel[i.kind], by: "", setting: "unknown" as const, findings: sentences(parts[1] ?? parts[0] ?? "", 1), recommendations: advice ? sentences(advice, 1) : "" } } : {}),
+      };
+      const r = { ...this.routingOf(c, m.id), reading };
+      const placed = R.sortLocally(parts, keys);
       if (!placed.length) {
         c.routing.set(m.id, { ...r, unplaced: m.count });
         result.unchanged += 1;

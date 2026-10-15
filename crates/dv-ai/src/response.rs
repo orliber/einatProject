@@ -100,6 +100,16 @@ pub(crate) fn numbers(text: &str) -> Vec<String> {
     out
 }
 
+/// The numbers written in `text` that appear in none of `sources`: what a summary may have
+/// added (round 31). Shown as a note, never fixed silently.
+#[must_use]
+pub fn numbers_not_in(text: &str, sources: &[&str]) -> Vec<String> {
+    numbers(text)
+        .into_iter()
+        .filter(|n| !sources.iter().any(|s| numbers(s).contains(n)))
+        .collect()
+}
+
 /// Parse a section answer and verify it against the sources that were sent.
 ///
 /// `sources` maps `S#` to the tagged text of that source.
