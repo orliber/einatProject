@@ -96,8 +96,9 @@ $window = Get-Window
 [Keys]::SetForegroundWindow([IntPtr]$window.Current.NativeWindowHandle) | Out-Null
 
 # 1. Open the vault.
-$password = Find-Named $window '^סיסמה$' "the password field" 90
-Type-Into $password $Password 0
+# Not `$password`: PowerShell names ignore case, and that is the [string] parameter above.
+$passwordField = Find-Named $window '^סיסמה$' "the password field" 90
+Type-Into $passwordField $Password 0
 [Keys]::Enter()
 
 # 2. The case, then its materials, then "הדבקת טקסט" for one of them.
