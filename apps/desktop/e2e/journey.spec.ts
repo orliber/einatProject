@@ -123,7 +123,7 @@ test("the report page opens a section's guide and her own section's points", asy
   await stage(page, /כתיבה/).click();
   await expect(page.getByRole("article", { name: "הדוח, כמו בקובץ" })).toBeVisible();
   await page.getByRole("button", { name: "איך לכתוב את הסעיף ←" }).first().click();
-  await page.getByText("איך לכתוב את הסעיף הזה").click();
+  // The link opens the guide on arrival.
   await expect(page.getByText(/הנוסח של המכון|הנוסח שלך, לכל התיקים/)).toBeVisible();
   await page.getByRole("button", { name: "→ חזרה לדוח" }).click();
   await page.getByRole("button", { name: "הסעיף שלך: נקודות לניסוח ←" }).first().click();

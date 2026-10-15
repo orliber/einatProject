@@ -49,6 +49,11 @@ export function useKept<T>(key: string, initial: T): [T, SetKept<T>] {
   return [value, set];
 }
 
+/** Read a kept value without giving it a default: `undefined` until a screen keeps one. */
+export function useKeptValue<T>(key: string): T | undefined {
+  return useSyncExternalStore(subscribe, () => kept.get(key) as T | undefined);
+}
+
 /** Forget one kept value: the next screen that reads it starts from its own default. */
 export function forgetKept(key: string) {
   if (kept.delete(key)) emit();

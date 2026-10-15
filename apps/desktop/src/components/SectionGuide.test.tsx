@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { AppContext, type AppApi } from "../App";
@@ -85,5 +85,29 @@ describe("SectionGuide", () => {
     rerender(view("חדש"));
     await user.click(screen.getByRole("button", { name: "עריכה" }));
     expect(screen.getByLabelText("ההנחיה לסעיף, לכל התיקים")).toHaveValue("חדש");
+  });
+
+  it("lets go of the held text when the editor closes, and stays open on what she saved", async () => {
+    const calls: [string, unknown][] = [];
+    mockIPC((cmd, args) => {
+      calls.push([cmd, args]);
+      return null;
+    });
+    const user = userEvent.setup();
+    render(
+      <AppContext.Provider value={api()}>
+        <SectionGuide caseId="c1" sectionKey="background" guide="שורה" isDefault caseGuide="" onSaved={vi.fn()} />
+      </AppContext.Provider>,
+    );
+    await user.click(screen.getByText("איך לכתוב את הסעיף הזה"));
+    await user.click(screen.getByRole("button", { name: "עריכה" }));
+    await user.type(screen.getByLabelText("ההנחיה לסעיף, לכל התיקים"), " נוספת");
+    const holds = () => calls.filter(([cmd]) => cmd === "hold_unsaved").map(([, a]) => a);
+    await waitFor(() => expect(holds().at(-1)).toMatchObject({ edit: { text: "שורה נוספת", view: "background" } }));
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(holds().at(-1)).toEqual({ edit: null }));
+    // The guide is still open after the editor closed.
+    expect(screen.getByRole("button", { name: "עריכה" })).toBeVisible();
+    expect(screen.getByRole("group")).toHaveAttribute("open");
   });
 });

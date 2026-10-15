@@ -305,9 +305,6 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
         </div>
       </div>
 
-      <SectionGuide caseId={caseId} sectionKey={section.key} guide={section.guide} isDefault={section.guide_is_default}
-        caseGuide={section.case_guide} onSaved={reload} />
-
       {linking && (
         <section className="link-panel" aria-label="החומרים שהסעיף נכתב מהם">
           <p className="small muted">
@@ -357,6 +354,10 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
             <span className="draft-label">טיוטת הסעיף</span>
             <span>{approved > 0 && `${approved} פסקאות אושרו`}{approved > 0 && pending > 0 && " · "}{pending > 0 && `${pending} ממתינות לאישורך`}</span>
           </div>
+          {/* Inside the scrolling draft: on a laptop the open guide never pushes the
+              conversation's foot off the screen (the review of stage 3). */}
+          <SectionGuide caseId={caseId} sectionKey={section.key} guide={section.guide} isDefault={section.guide_is_default}
+            caseGuide={section.case_guide} onSaved={reload} />
 
           {job && (
             <div className="writing-card">

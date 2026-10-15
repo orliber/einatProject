@@ -1,5 +1,6 @@
 .section-guide {
-  margin: 0 0 12px;
+  flex-shrink: 0;
+  margin: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--surface-alt);
@@ -33,9 +34,4 @@
   gap: 4px;
   padding-top: 8px;
   border-top: 1px solid var(--line);
-}
-/* On a laptop the open guide never takes the draft's room: it scrolls by itself. */
-.section-guide[open] .guide-body {
-  max-height: 30vh;
-  overflow-y: auto;
 }

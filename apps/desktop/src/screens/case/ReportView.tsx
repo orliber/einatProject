@@ -7,7 +7,8 @@ import { ErrorLine, WarnIcon } from "../../components/ui";
 import { Why } from "../../components/Why";
 import { ProgressLine } from "../../components/Progress";
 import { useHoldUnsaved } from "../../components/Unsaved";
-import { useKept } from "../../kept";
+import { setKept, useKept } from "../../kept";
+import { guideOpenKey } from "../../components/SectionGuide";
 import { LocalText, type LocalTextHandle } from "../../components/LocalText";
 import { useRotatingPlaceholder } from "../../components/Rotating";
 import { DRAFT_HINTS, PARAGRAPH_HINTS } from "../../i18n/suggestions";
@@ -416,7 +417,11 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
 
         </span>
         {/* The section's own screen: the guide, and for her sections the points to word. */}
-        <button type="button" className="link-small a4-open" onClick={() => go({ name: "case", id: caseId, view: s.key })}>
+        <button type="button" className="link-small a4-open" onClick={() => {
+          // Her points are at the top of her section; elsewhere the guide opens on arrival.
+          if (!mine) setKept(guideOpenKey(caseId, s.key), false)(true);
+          go({ name: "case", id: caseId, view: s.key });
+        }}>
           {mine ? "הסעיף שלך: נקודות לניסוח ←" : "איך לכתוב את הסעיף ←"}
         </button>
       </div>

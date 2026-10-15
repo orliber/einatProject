@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { useApp } from "../App";
 import { ipc } from "../ipc/client";
-import { forgetKept, useKept } from "../kept";
+import { forgetKept, useKept, useKeptValue } from "../kept";
 import { useHoldUnsaved } from "./Unsaved";
 import { ErrorLine } from "./ui";
 import "./SectionGuide.css";
@@ -30,12 +30,10 @@ function Lines({ text }: { text: string }) {
 }
 
 /** One editor: a box, save and cancel. What she types is kept while she moves to another
- *  stage and comes back, and held for the automatic lock like a paragraph (the review of
- *  stage 3). Esc cancels, Ctrl/⌘+Enter saves. */
-function Editor(props: { caseId: string; keptKey: string; id: string; label: string; initial: string; onSave: (text: string) => Promise<void>; onCancel: () => void }) {
+ *  stage and comes back. Esc cancels, Ctrl/⌘+Enter saves. */
+function Editor(props: { keptKey: string; id: string; label: string; initial: string; onSave: (text: string) => Promise<void>; onCancel: () => void }) {
   const [text, setText] = useKept(props.keptKey, props.initial);
   const [busy, setBusy] = useState(false);
-  useHoldUnsaved(props.caseId, props.label, text === props.initial ? null : text);
   const submit = () => {
     setBusy(true);
     void props.onSave(text).finally(() => setBusy(false));
@@ -65,16 +63,33 @@ function Editor(props: { caseId: string; keptKey: string; id: string; label: str
   );
 }
 
+/** Where the guide's open state is kept: the report page's link opens it on arrival. */
+export function guideOpenKey(caseId: string, sectionKey: string): string {
+  return `case:${caseId}:guide:${sectionKey}:open`;
+}
+
 export function SectionGuide(props: Props) {
   const { fail } = useApp();
   const base = `case:${props.caseId}:guide:${props.sectionKey}`;
   const [editing, setEditingKept] = useKept<"general" | "case" | null>(`${base}:editing`, null);
+  // Open or closed as she left it, also across stages; opened by the report page's link.
+  const [open, setOpen] = useKept(guideOpenKey(props.caseId, props.sectionKey), false);
   // Opening an editor forgets what was typed in an earlier one (saved or cancelled): it opens
   // on the text as it is now. What she types stays while she moves around the app.
   const setEditing = (next: "general" | "case" | null) => {
-    if (next !== null) forgetKept(`${base}:${next}`);
+    if (next !== null) {
+      forgetKept(`${base}:${next}`);
+      setOpen(true);
+    }
     setEditingKept(next);
   };
+  // The open editor's text is held for the automatic lock like a paragraph, here and not in
+  // the editor, so that closing it (saved or cancelled) lets go of the text (the review of
+  // stage 3); leaving the stage with the editor open keeps it held.
+  const typed = useKeptValue<string>(`${base}:${editing ?? "none"}`);
+  const initial = editing === "case" ? props.caseGuide : props.guide;
+  useHoldUnsaved(props.caseId, editing === "case" ? "תוספת לתיק הזה בלבד" : "ההנחיה לסעיף, לכל התיקים",
+    editing === null || typed === undefined || typed === initial ? null : typed, props.sectionKey);
   const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const save = async (run: () => Promise<unknown>) => {
@@ -90,11 +105,11 @@ export function SectionGuide(props: Props) {
   };
   const empty = !props.guide.trim() && !props.caseGuide.trim();
   return (
-    <details className="section-guide" open={editing !== null || undefined}>
+    <details className="section-guide" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary>איך לכתוב את הסעיף הזה</summary>
       <div className="stack guide-body">
         {editing === "general" ? (
-          <Editor caseId={props.caseId} keptKey={`${base}:general`} id={`guide-general-${props.sectionKey}`} label="ההנחיה לסעיף, לכל התיקים" initial={props.guide}
+          <Editor keptKey={`${base}:general`} id={`guide-general-${props.sectionKey}`} label="ההנחיה לסעיף, לכל התיקים" initial={props.guide}
             onSave={(t) => save(() => ipc.setSectionGuide(props.sectionKey, t))} onCancel={() => setEditing(null)} />
         ) : (
           <>
@@ -118,7 +133,7 @@ export function SectionGuide(props: Props) {
           </>
         )}
         {editing === "case" ? (
-          <Editor caseId={props.caseId} keptKey={`${base}:case`} id={`guide-case-${props.sectionKey}`} label="תוספת לתיק הזה בלבד" initial={props.caseGuide}
+          <Editor keptKey={`${base}:case`} id={`guide-case-${props.sectionKey}`} label="תוספת לתיק הזה בלבד" initial={props.caseGuide}
             onSave={(t) => save(() => ipc.setCaseGuide(props.caseId, props.sectionKey, t))} onCancel={() => setEditing(null)} />
         ) : props.caseGuide.trim() ? (
           <div className="stack guide-case">
