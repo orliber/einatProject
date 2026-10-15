@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>שכבות ההגנה</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f4f5f3}
+a{color:#1e5b56}a:hover{color:#164541}
+.btn{font:inherit;font-size:15px;font-weight:600;border-radius:10px;padding:0 16px;min-height:44px;border:1px solid #cfd5d2;background:#fff;color:#15201f;cursor:pointer;display:inline-flex;align-items:center;gap:8px;text-decoration:none}
+.tab{font:inherit;font-size:15px;color:#4a5654;background:none;border:0;padding:0 4px;min-height:56px;border-bottom:2px solid transparent;cursor:pointer;display:inline-flex;align-items:center;text-decoration:none}
+.tab-on{color:#15201f;font-weight:700;border-bottom-color:#1e5b56}
+.side{font:inherit;font-size:15px;background:none;border:0;width:100%;text-align:right;padding:10px 14px;border-radius:10px;cursor:pointer;color:#34403e;display:flex;align-items:center;gap:10px;min-height:40px;text-decoration:none}
+.side-on{background:#e6efed;color:#15201f;font-weight:700}
+.layer{background:#fff;border:1px solid #e3e6e3;border-radius:14px;padding:14px 18px;display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:14px;align-items:center}
+.layer strong{display:block;font-size:16px}
+.layer span{color:#4a5654;font-size:14px}
+.ok{width:28px;height:28px;border-radius:50%;background:#e5f1e8;color:#2f6b45;display:flex;align-items:center;justify-content:center;font-weight:700}
+.you{background:#fffbf4;border-color:#ebcb98}
+.you .ok{background:#fbf1e2;color:#8a4e0c}
+.tag{font-size:12px;border-radius:999px;padding:3px 10px;background:#f1f3f1;color:#34403e;white-space:nowrap}
+</style>
+</helmet>
+<div style="font-family:Assistant,system-ui,sans-serif;color:#15201f;background:#f4f5f3;min-height:900px;width:100%;font-size:16px">
+  <header style="background:#fff;border-bottom:1px solid #e3e6e3;padding:0 32px;display:flex;align-items:center;gap:32px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+      כספת האבחון
+    </div>
+    <nav aria-label="ראשי" style="display:flex;gap:24px">
+      <a class="tab" href="Main.dc.html">תיקים</a>
+      <a class="tab" href="Style.dc.html">הסגנון שלי</a>
+      <a class="tab" href="Consult.dc.html">התייעצות</a>
+      <button class="tab tab-on" aria-current="page">הגדרות</button>
+    </nav>
+  </header>
+
+  <div style="max-width:1120px;margin:0 auto;padding:32px;display:flex;gap:28px;flex-wrap:wrap;box-sizing:border-box">
+    <aside aria-label="חלקי ההגדרות" style="flex:0 0 220px;display:flex;flex-direction:column;gap:2px">
+      <h1 style="margin:0 14px 12px;font-size:24px">הגדרות</h1>
+      <button class="side">כללי</button>
+      <button class="side">חיבור ל-AI</button>
+      <a class="side" href="Privacy.dc.html">פרטיות</a>
+      <button class="side">הדוח</button>
+      <button class="side">גיבוי</button>
+      <button class="side side-on" aria-current="page">אבטחה</button>
+      <button class="side">עדכונים ועזרה</button>
+    </aside>
+
+    <main style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap">
+        <div>
+          <h2 style="margin:0;font-size:26px">עשר שכבות הגנה, כולן תקינות</h2>
+          <p style="margin:6px 0 0;color:#4a5654">נבדקו עכשיו, בפתיחת הכספת. שלוש תלויות בך.</p>
+        </div>
+        <div style="margin-inline-start:auto;display:flex;gap:8px">
+          <button class="btn">לבדוק שוב</button>
+          <button class="btn">לשמור כ-PDF להורים</button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+        <div class="layer"><span class="ok">✓</span><div><strong>הכספת מוצפנת</strong><span>AES-256, מפתח נפרד לכל תיק</span></div><span class="tag">בכל פתיחה</span></div>
+        <div class="layer"><span class="ok">✓</span><div><strong>הסיסמה עובדת רק במחשב הזה</strong><span>עותק של הכספת במחשב אחר לא נפתח בסיסמה</span></div><span class="tag">בכל פתיחה</span></div>
+        <div class="layer"><span class="ok">✓</span><div><strong>שם בדוי נחסם לפני יציאה</strong><span>התוכנה ניסתה לשלוח "דנה כהן" ונחסמה</span></div><span class="tag">עכשיו, 09:58</span></div>
+        <div class="layer"><span class="ok">✓</span><div><strong>רשת רק לשירות ה-AI</strong><span>עם תעודה מהגורמים המוכרים שלו בלבד</span></div><span class="tag">בכל שליחה</span></div>
+        <div class="layer"><span class="ok">✓</span><div><strong>יומן פעילות שלם</strong><span>כל פתיחת תיק וכל שליחה נרשמות, ולא נמחקות</span></div><span class="tag">תמיד</span></div>
+        <div class="layer"><span class="ok">✓</span><div><strong>נעילה אחרי 15 דקות</strong><span>וגם כשנועלים את המחשב או כשהוא נרדם</span></div><span class="tag">תמיד</span></div>
+        <div class="layer"><span class="ok">✓</span><div><strong>הכספת לא בתיקיית ענן</strong><span>לא OneDrive, לא Google Drive</span></div><span class="tag">בכל פתיחה</span></div>
+        <div class="layer you"><span class="ok">את</span><div><strong>הדיסק מוצפן (BitLocker)</strong><span>פעיל. אם ייכבה, התוכנה תגיד לך בכניסה</span></div><span class="tag">נבדק עכשיו</span></div>
+        <div class="layer you"><span class="ok">את</span><div><strong>ערכת השחזור המודפסת</strong><span>נבדקה לפני 3 חודשים. לבדוק שוב בעוד 9</span></div><a class="tag" href="#">לבדוק</a></div>
+        <div class="layer you"><span class="ok">את</span><div><strong>גיבוי מהשבוע האחרון</strong><span>האחרון: אתמול, 18:40, לכונן החיצוני</span></div><span class="tag">אתמול</span></div>
+      </div>
+
+      <details style="background:#fff;border:1px solid #e3e6e3;border-radius:14px;padding:14px 18px">
+        <summary style="cursor:pointer;font-weight:600">מה קורה אם שכבה נכשלת</summary>
+        <p style="margin:10px 0 0;color:#34403e;line-height:1.6">אם הבדיקה של השם הבדוי נכשלת, השליחה נעצרת מיד ולא יוצאת שום בקשה עד שאור בודק. אם שכבה שתלויה בך נכשלת, מופיעה הודעה אחת בכניסה עם כפתור למקום שבו מתקנים.</p>
+      </details>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1366,"height":900}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

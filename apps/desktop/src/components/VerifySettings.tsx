@@ -2,6 +2,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
 import { ipc } from "../ipc/client";
+import { Switch } from "./Switch";
 
 export function VerifySettings() {
   const { notify, fail } = useApp();
@@ -21,14 +22,9 @@ export function VerifySettings() {
   return (
     <section className="card setting" aria-labelledby="s-verify">
       <h2 id="s-verify">בדיקה מול המקורות</h2>
-      <label className="row">
-        <input type="checkbox" checked={on.data ?? false} disabled={on.data === undefined}
-          onChange={(e) => void change(e.target.checked)} />
-        <span>לאפשר בדיקה של טיוטה מול החומרים</span>
-      </label>
-      <span className="hint">
-        ה-AI מסמן לכל פסקה אם היא נתמכת בחומרים. בקשה נוספת, באותו סינון, ובלי לשנות שום פסקה.
-      </span>
+      <Switch id="verify-stage" label="לאפשר בדיקה של טיוטה מול החומרים" checked={on.data ?? false} disabled={on.data === undefined}
+        hint="ה-AI מסמן לכל פסקה אם היא נתמכת בחומרים. בקשה נוספת, באותו סינון, ובלי לשנות שום פסקה."
+        onChange={(v) => void change(v)} />
     </section>
   );
 }

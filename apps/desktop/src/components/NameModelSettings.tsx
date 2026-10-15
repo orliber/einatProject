@@ -5,7 +5,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
 import { ipc } from "../ipc/client";
 import { ErrorLine } from "./ui";
+import { Switch } from "./Switch";
 
+/** One switch row, for the "before every send" group of the privacy page (round 50). */
 export function NameModelSettings() {
   const { notify, fail } = useApp();
   const qc = useQueryClient();
@@ -43,25 +45,16 @@ export function NameModelSettings() {
 
   const s = status.data;
   const percent = done && done[1] > 0 ? Math.floor((done[0] * 100) / done[1]) : 0;
+  const hint = downloading
+    ? `מוריד את המודל: ${percent}% מתוך ${s?.size_mb ?? 0}MB. אפשר להמשיך לעבוד בינתיים.`
+    : `מודל קטן שרץ במחשב, בלי לשלוח שום דבר מהתיקים. הורדה חד-פעמית של ${s?.size_mb ?? 700}MB, מוסיף 2–3 שניות לכל עמוד. כיבוי מוחק אותו.`;
   return (
-    <section className="card setting" aria-labelledby="s-names">
-      <h2 id="s-names">זיהוי שמות חכם</h2>
-      <label className="row">
-        <input type="checkbox" checked={s?.enabled ?? false} disabled={!s || downloading}
-          onChange={(e) => void change(e.target.checked)} />
-        <span>לזהות גם שמות שלא הוזנו בתיק (מודל שרץ במחשב)</span>
-      </label>
-      {downloading && (
-        <span className="hint" role="status" aria-live="polite">
-          מוריד את המודל: {percent}% מתוך {s?.size_mb ?? 0}MB. אפשר להמשיך לעבוד בינתיים.
-        </span>
-      )}
-      <span className="hint">
-        הורדה חד-פעמית של {s?.size_mb ?? 700}MB, בלי לשלוח שום דבר מהתיקים. מוסיף 2–3 שניות לכל עמוד שמוסיפים.
-        כיבוי מוחק את המודל. (DictaBERT-NER של Dicta, CC BY 4.0)
-      </span>
+    <>
+      <Switch id="name-model" label="זיהוי שמות שלא הוזנו בתיק" checked={s?.enabled ?? false} disabled={!s || downloading}
+        hint={<span role={downloading ? "status" : undefined} aria-live={downloading ? "polite" : undefined} title="DictaBERT-NER של Dicta, CC BY 4.0">{hint}</span>}
+        onChange={(on) => void change(on)} />
       {s?.problem && <ErrorLine error={s.problem} />}
       <ErrorLine error={error} />
-    </section>
+    </>
   );
 }

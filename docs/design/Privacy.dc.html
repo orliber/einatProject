@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>הגדרות: פרטיות</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f4f5f3}
+a{color:#1e5b56}a:hover{color:#164541}
+.btn{font:inherit;font-size:15px;font-weight:600;border-radius:10px;padding:0 16px;min-height:44px;border:1px solid #cfd5d2;background:#fff;color:#15201f;cursor:pointer;display:inline-flex;align-items:center;gap:8px;text-decoration:none}
+.tab{font:inherit;font-size:15px;color:#4a5654;background:none;border:0;padding:0 4px;min-height:56px;border-bottom:2px solid transparent;cursor:pointer;display:inline-flex;align-items:center;text-decoration:none}
+.tab-on{color:#15201f;font-weight:700;border-bottom-color:#1e5b56}
+.side{font:inherit;font-size:15px;background:none;border:0;width:100%;text-align:right;padding:10px 14px;border-radius:10px;cursor:pointer;color:#34403e;display:flex;align-items:center;gap:10px;min-height:40px;text-decoration:none}
+.side-on{background:#e6efed;color:#15201f;font-weight:700}
+.card{background:#fff;border:1px solid #e3e6e3;border-radius:16px;padding:20px 24px;display:flex;flex-direction:column;gap:12px}
+.card h2{margin:0;font-size:18px}
+.sw{position:relative;width:48px;height:28px;border-radius:14px;background:#cfd5d2;border:0;cursor:pointer;flex:none}
+.sw::after{content:"";position:absolute;top:3px;inset-inline-start:3px;width:22px;height:22px;border-radius:50%;background:#fff}
+.sw-on{background:#1e5b56}
+.sw-on::after{inset-inline-start:23px}
+.opt{display:flex;align-items:center;gap:14px;padding:10px 0}
+.opt+.opt{border-top:1px solid #e3e6e3}
+</style>
+</helmet>
+<div style="font-family:Assistant,system-ui,sans-serif;color:#15201f;background:#f4f5f3;min-height:820px;width:100%;font-size:16px">
+  <header style="background:#fff;border-bottom:1px solid #e3e6e3;padding:0 32px;display:flex;align-items:center;gap:32px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+      כספת האבחון
+    </div>
+    <nav aria-label="ראשי" style="display:flex;gap:24px">
+      <a class="tab" href="Main.dc.html">תיקים</a>
+      <a class="tab" href="Style.dc.html">הסגנון שלי</a>
+      <a class="tab" href="Consult.dc.html">התייעצות</a>
+      <button class="tab tab-on" aria-current="page">הגדרות</button>
+    </nav>
+  </header>
+
+  <div style="max-width:1120px;margin:0 auto;padding:32px;display:flex;gap:28px;flex-wrap:wrap;box-sizing:border-box">
+    <aside aria-label="חלקי ההגדרות" style="flex:0 0 220px;display:flex;flex-direction:column;gap:2px">
+      <h1 style="margin:0 14px 12px;font-size:24px">הגדרות</h1>
+      <button class="side">כללי</button>
+      <button class="side">חיבור ל-AI</button>
+      <button class="side side-on" aria-current="page">פרטיות</button>
+      <button class="side">הדוח</button>
+      <button class="side">גיבוי</button>
+      <a class="side" href="Layers.dc.html">אבטחה</a>
+      <button class="side">עדכונים ועזרה</button>
+    </aside>
+
+    <main style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:16px">
+      <section class="card" style="background:#e6efed;border-color:#cfe0dc;flex-direction:row;align-items:center;gap:16px;flex-wrap:wrap">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"></path><path d="m9 12 2 2 4-4"></path></svg>
+        <div style="flex:1 1 300px"><strong style="font-size:17px">שום שם לא יצא מהמחשב.</strong><div style="color:#34403e">38 בקשות יצאו החודש, כולן אחרי הסתרה. הבדיקה העצמית האחרונה: היום, 09:58, תקינה.</div></div>
+        <a class="btn" href="#">מה יצא מהמחשב</a>
+      </section>
+
+      <section class="card">
+        <h2>לפני כל שליחה</h2>
+        <div class="opt">
+          <div style="flex:1"><strong style="display:block">להראות לי כל בקשה לפני שהיא יוצאת</strong><span style="color:#4a5654">כבוי: התוכנה מסתירה ושולחת לבד. מה שיצא נשמר ברשימה למעלה.</span></div>
+          <button class="sw" role="switch" aria-checked="false" aria-label="להראות לי כל בקשה לפני שהיא יוצאת"></button>
+        </div>
+        <div class="opt">
+          <div style="flex:1"><strong style="display:block">זיהוי שמות שלא הוזנו בתיק</strong><span style="color:#4a5654">מודל קטן שרץ במחשב. הורדה חד-פעמית של 705MB, מוסיף 2–3 שניות לכל עמוד.</span></div>
+          <button class="sw sw-on" role="switch" aria-checked="true" aria-label="זיהוי שמות שלא הוזנו בתיק"></button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>נעילה</h2>
+        <div class="opt">
+          <div style="flex:1"><strong style="display:block">נעילה אוטומטית אחרי</strong><span style="color:#4a5654">דקות בלי פעילות. Ctrl+L נועל מיד.</span></div>
+          <div style="display:flex;gap:6px" role="radiogroup" aria-label="נעילה אוטומטית אחרי">
+            <button class="btn" style="min-height:40px;padding:0 14px">5</button>
+            <button class="btn" style="min-height:40px;padding:0 14px">10</button>
+            <button class="btn" style="min-height:40px;padding:0 14px;background:#15201f;border-color:#15201f;color:#fff" aria-pressed="true">15</button>
+            <button class="btn" style="min-height:40px;padding:0 14px">30</button>
+          </div>
+        </div>
+      </section>
+
+      <p style="margin:0;color:#4a5654;font-size:14px">כל הגדרה נשמרת מיד. מה שלא כתוב כאן, התוכנה בוחרת את האפשרות המחמירה.</p>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1366,"height":820}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

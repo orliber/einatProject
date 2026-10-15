@@ -24,12 +24,14 @@ const view = (stopped: boolean) => ({
   daily_limit: 400,
   max_request_kb: 2048,
 });
+const backup = { last_at: 1_760_000_000, days_since: 2, due: false, secret_changed: false, last_check_at: null, has_cases: true, auto: false };
 
-describe("security status", () => {
-  it("shows a missing protection, and the emergency stop goes to the core", async () => {
+describe("the layers of protection", () => {
+  it("counts the layers, names the one to look at, and the emergency stop goes to the core", async () => {
     const calls: [string, unknown][] = [];
     mockIPC((cmd, args) => {
       calls.push([cmd, args]);
+      if (cmd === "backup_status") return backup;
       return view(cmd === "set_send_stopped");
     });
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -40,8 +42,11 @@ describe("security status", () => {
         </AppContext.Provider>
       </QueryClientProvider>,
     );
-    expect(await screen.findByText(/נעילה אוטומטית אחרי 10 דקות/)).toBeInTheDocument();
-    expect(screen.getByText("לבדוק")).toBeInTheDocument();
+    // Three from the core and the backup: 3 of 4 fine, the disk named.
+    expect(await screen.findByRole("heading", { name: /3 מתוך 4 תקינות: הדיסק מוצפן/ })).toBeInTheDocument();
+    expect(screen.getByText("נעילה אחרי 10 דקות")).toBeInTheDocument();
+    expect(screen.getByText(/שתיים תלויות בך/)).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(4);
     fireEvent.click(screen.getByRole("button", { name: /עצירת חירום/ }));
     expect(await screen.findByRole("button", { name: /להפעיל שליחה מחדש/ })).toBeInTheDocument();
     expect(calls.find(([c]) => c === "set_send_stopped")?.[1]).toMatchObject({ stopped: true });
