@@ -278,6 +278,11 @@ fn style_locally(request: &str, synthesis: bool) -> Value {
             "kind": "template",
             "text": "הציג תפקוד {רמה} ({ציון}), עם זאת ניכר קושי ב{תחום}"
         }));
+        items.push(json!({
+            "section": "general",
+            "kind": "argument",
+            "text": "מצב הדגמה: קודם היכולת, אחר כך הקושי אחרי «עם זאת», ואז דוגמה מהתצפית."
+        }));
         return json!({ "items": items });
     }
     // Merge the analyses: an item seen in several reports counts once, with its support.

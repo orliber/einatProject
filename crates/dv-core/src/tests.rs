@@ -1765,6 +1765,9 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
         dv_ai::StyleKind::Avoid,
         dv_ai::StyleKind::Template,
         dv_ai::StyleKind::Example,
+        dv_ai::StyleKind::Argument,
+        dv_ai::StyleKind::Integration,
+        dv_ai::StyleKind::Criterion,
     ];
     let profile = dv_ai::StyleProfile {
         reports: 1,

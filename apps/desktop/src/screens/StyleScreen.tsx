@@ -35,6 +35,9 @@ const KIND_LABEL: Record<StyleKind, string> = {
   avoid: "מה את לא כותבת",
   template: "תבניות משפט",
   example: "דוגמאות בדויות",
+  argument: "מבנה הטיעון",
+  integration: "חיבור בין כלים וסעיפים",
+  criterion: "ניסוח קריטריונים (DSM-5)",
 };
 const KIND_HINT: Record<StyleKind, string> = {
   rule: "",
@@ -42,8 +45,11 @@ const KIND_HINT: Record<StyleKind, string> = {
   avoid: "",
   template: "במקום התוכן באים סוגריים מסולסלים, למשל {תחום}.",
   example: "פסקאות על ילד בדוי. הן מראות ל-AI את הסגנון, ואין בהן שום דבר מהדוחות.",
+  argument: "השלבים של פסקה, לפי הסדר.",
+  integration: "",
+  criterion: "איך את מנסחת קריטריון, ואיזה סוג ממצא את קושרת אליו.",
 };
-const KINDS: StyleKind[] = ["rule", "phrase", "avoid", "template", "example"];
+const KINDS: StyleKind[] = ["rule", "phrase", "avoid", "template", "argument", "integration", "criterion", "example"];
 const RECOMMENDED = 3;
 
 type Step = { kind: "analysis"; source: StyleSourceView } | { kind: "profile" } | { kind: "interpret" };
