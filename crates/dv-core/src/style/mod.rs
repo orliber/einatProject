@@ -36,6 +36,7 @@ mod learning;
 mod library;
 mod requests;
 
+pub(crate) use interpret::{interpretations_for_request, InterpretationCheck};
 pub use interpret::{InterpretationResult, InterpretationView};
 pub use library::{LibraryLine, SectionLibrary, SimilarReport};
 

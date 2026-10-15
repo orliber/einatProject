@@ -36,6 +36,93 @@ pub struct InterpretationResult {
     pub demo: bool,
 }
 
+/// A run of this many words of an interpretation in a paragraph means it was used there.
+const USED_NGRAM: usize = 4;
+
+/// Her approved interpretations that fit this case's scores, as they go into the drafting
+/// request of a section written from the scores (round 37): for each score, the measure in
+/// general, its range, and a relative strength or weakness. `None`: none fits, or the profile
+/// is switched off.
+pub(crate) fn interpretations_for_request(
+    v: &Vault,
+    sheets: &[dv_domain::ScoreSheet],
+) -> Result<Option<String>, CoreError> {
+    if v.setting(PROFILE_OFF_KEY)?.as_deref() == Some("1") {
+        return Ok(None);
+    }
+    let scores: Vec<dv_domain::ScoreCases> =
+        sheets.iter().flat_map(dv_domain::sheet_cases).collect();
+    let fits = |i: &Interpretation| {
+        scores.iter().any(|c| {
+            c.instrument == i.instrument && c.measure == i.measure && c.cases.contains(&i.case)
+        })
+    };
+    let items: Vec<Interpretation> = local_style(v)?
+        .interpretations
+        .into_iter()
+        .filter(|i| i.approved && i.enabled && fits(i))
+        .collect();
+    Ok(dv_ai::render_interpretations(&items, &|inst, measure| {
+        scores
+            .iter()
+            .find(|c| c.instrument == inst && c.measure == measure)
+            .map(|c| c.label.clone())
+    }))
+}
+
+/// Her approved interpretations written for a case this child's score is not, to note in a
+/// paragraph that uses one (round 37).
+pub(crate) struct InterpretationCheck {
+    /// (the interpretation's runs of words, its case, the score's label, the score's range).
+    misfits: Vec<(HashSet<String>, String, String, Option<String>)>,
+}
+
+impl InterpretationCheck {
+    pub(crate) fn new(v: &Vault, sheets: &[dv_domain::ScoreSheet]) -> Result<Self, CoreError> {
+        let scores: Vec<dv_domain::ScoreCases> =
+            sheets.iter().flat_map(dv_domain::sheet_cases).collect();
+        let mut misfits = Vec::new();
+        if !scores.is_empty() {
+            for i in local_style(v)?.interpretations {
+                if !i.approved || !i.enabled || i.case == dv_domain::GENERAL_CASE {
+                    continue;
+                }
+                let Some(score) = scores
+                    .iter()
+                    .find(|c| c.instrument == i.instrument && c.measure == i.measure)
+                else {
+                    continue;
+                };
+                if !score.cases.contains(&i.case) {
+                    misfits.push((
+                        ngrams(&i.text, USED_NGRAM),
+                        i.case,
+                        score.label.clone(),
+                        score.band.clone(),
+                    ));
+                }
+            }
+        }
+        Ok(Self { misfits })
+    }
+
+    /// A note for each interpretation in `text` that was written for another case.
+    pub(crate) fn notes(&self, text: &str) -> Vec<String> {
+        self.misfits
+            .iter()
+            .filter(|(grams, ..)| shared_run(text, USED_NGRAM, grams).is_some())
+            .map(|(_, case, label, band)| match band {
+                Some(b) => format!(
+                    "בפסקה יש פרשנות שכתבת ל«{case}» ב{label}, אבל כאן התוצאה בטווח «{b}». כדאי לבדוק שהיא מתאימה."
+                ),
+                None => format!(
+                    "בפסקה יש פרשנות שכתבת ל«{case}» ב{label}, והיא לא מתאימה לתוצאה כאן. כדאי לבדוק."
+                ),
+            })
+            .collect()
+    }
+}
+
 /// "WPPSI-IV", "קוביות" for the keys of the fixed tables.
 pub(crate) fn measure_names(instrument: &str, measure: &str) -> Option<(String, String)> {
     dv_domain::instruments()

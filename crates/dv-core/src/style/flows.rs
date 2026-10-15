@@ -1549,3 +1549,84 @@ fn her_recommendations_come_with_how_often_she_gave_them_in_reports_like_this_ca
     assert!(fake.sent.lock().unwrap().is_empty(), "nothing was sent");
     assert!(core.section_library(&id, "nothing").is_err());
 }
+
+#[test]
+fn her_approved_interpretations_that_fit_the_scores_go_out_and_a_misfit_is_noted() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core) = vault(Some(fake.clone()));
+    upload_scored(&mut core);
+    let p = core.prepare_interpretations().unwrap();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({"items": [
+        {"measure": "wppsi_iv/bug_search", "case": "ממוצע נמוך",
+         "text": "תוצאה נמוכה מתפרשת אצלה כקושי במהירות העבודה, ולא בהבנה.", "support": 2},
+        {"measure": "wppsi_iv/block_design", "case": "כללי",
+         "text": "היא בודקת את התוצאה לצד העבודה השיטתית שנצפתה.", "support": 1},
+        {"measure": "wppsi_iv/matrix", "case": "חוזקה יחסית",
+         "text": "חוזקה בחשיבה החזותית נקשרת אצלה ליכולת ללמוד מהתבוננות.", "support": 1}
+    ]})));
+    core.send_interpretations(&p.approval_id.unwrap()).unwrap();
+    *fake.answer.lock().unwrap() = None;
+    for i in core.style_overview().unwrap().interpretations {
+        core.update_interpretation(&i.item.id, None, Some(true), None)
+            .unwrap();
+    }
+    let id = case(&mut core);
+    let entry = |measure: &str, value: f64| dv_domain::ScoreEntry {
+        measure: measure.into(),
+        value,
+        note: String::new(),
+    };
+    let sheet = dv_domain::ScoreSheet {
+        instrument: "wppsi_iv".into(),
+        module: String::new(),
+        cutoff: None,
+        entries: vec![
+            entry("block_design", 9.0),
+            entry("matrix", 10.0),
+            entry("bug_search", 12.0),
+            entry("information", 10.0),
+        ],
+        notes: String::new(),
+    };
+    core.save_scores(&id, None, &sheet).unwrap();
+    let p = core.prepare_section(&id, "cognitive", "נסחי").unwrap();
+    assert!(p.blocked.is_empty(), "{:?}", p.blocked);
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    let body = last_sent(&fake);
+    assert!(body.contains("איך הפסיכולוגית מפרשת תוצאות"), "{body}");
+    assert!(
+        body.contains("העבודה השיטתית שנצפתה"),
+        "the general one fits every score"
+    );
+    assert!(
+        !body.contains("במהירות העבודה") && !body.contains("ללמוד מהתבוננות"),
+        "a low-range or strength reading does not fit these scores"
+    );
+    // A paragraph that uses one written for a low range, beside an average score, is noted.
+    core.add_own_paragraph(
+        &id,
+        "cognitive",
+        "בחיפוש חרקים נראה כי תוצאה נמוכה מתפרשת אצלה כקושי במהירות העבודה.",
+    )
+    .unwrap();
+    let d = core.case_detail(&id).unwrap();
+    let warnings: Vec<String> = d
+        .sections
+        .iter()
+        .filter(|s| s.key == "cognitive")
+        .flat_map(|s| s.paragraphs.iter().flat_map(|p| p.warnings.clone()))
+        .collect();
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("שכתבת ל«ממוצע נמוך» בWPPSI-IV · חיפוש חרקים")),
+        "{warnings:?}"
+    );
+    core.set_style_enabled(false).unwrap();
+    let p = core.prepare_section(&id, "cognitive", "נסחי").unwrap();
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    assert!(
+        !last_sent(&fake).contains("איך הפסיכולוגית מפרשת תוצאות"),
+        "switched off"
+    );
+}

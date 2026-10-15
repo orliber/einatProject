@@ -1515,6 +1515,57 @@ pub fn interpretation_cases(instrument: &str, measure: &str) -> Vec<String> {
 /// The case of an interpretation that holds whatever the score.
 pub const GENERAL_CASE: &str = "כללי";
 
+/// One score of a case and the interpretation cases it fits: the measure in general, its range
+/// in the table, and for a subtest a relative strength or weakness against the child's own
+/// subtest mean (three subtests or more, [`RELATIVE_POINTS`] away).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScoreCases {
+    pub instrument: String,
+    pub measure: String,
+    /// "WPPSI-IV · קוביות".
+    pub label: String,
+    /// The range label, when the table has one.
+    pub band: Option<String>,
+    pub cases: Vec<String>,
+}
+
+/// The interpretation cases each score of `sheet` fits. A sheet that does not check is none.
+#[must_use]
+pub fn sheet_cases(sheet: &ScoreSheet) -> Vec<ScoreCases> {
+    let Ok((inst, entries)) = checked(sheet) else {
+        return Vec::new();
+    };
+    let scaled: Vec<f64> = entries
+        .iter()
+        .filter(|(m, _)| m.scale == ScoreScale::Scaled)
+        .map(|(_, e)| e.value)
+        .collect();
+    #[allow(clippy::cast_precision_loss)]
+    let mean = (scaled.len() >= 3).then(|| scaled.iter().sum::<f64>() / scaled.len() as f64);
+    entries
+        .iter()
+        .map(|(m, e)| {
+            let band = classify(m, e.value).map(|b| b.label.clone());
+            let mut cases = vec![GENERAL_CASE.to_owned()];
+            cases.extend(band.clone());
+            if let (ScoreScale::Scaled, Some(mean)) = (m.scale, mean) {
+                if e.value - mean >= RELATIVE_POINTS {
+                    cases.push(Relative::Strength.label_he().to_owned());
+                } else if mean - e.value >= RELATIVE_POINTS {
+                    cases.push(Relative::Weakness.label_he().to_owned());
+                }
+            }
+            ScoreCases {
+                instrument: inst.key.clone(),
+                measure: m.key.clone(),
+                label: format!("{} · {}", inst.name, m.name_he),
+                band,
+                cases,
+            }
+        })
+        .collect()
+}
+
 /// What she leaves out beside scores in her reports (K12), so the scores material does not
 /// send what she does not write. Learned from the score tags of her past reports.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1723,6 +1774,43 @@ mod tests {
             "{hers}"
         );
         assert!(hers.contains("ציון 98, אחוזון"), "{hers}");
+    }
+
+    #[test]
+    fn each_score_fits_its_range_and_a_relative_place_among_the_childs_subtests() {
+        let entry = |measure: &str, value: f64| ScoreEntry {
+            measure: measure.into(),
+            value,
+            note: String::new(),
+        };
+        let sheet = ScoreSheet {
+            instrument: "wppsi_iv".into(),
+            module: String::new(),
+            cutoff: None,
+            entries: vec![
+                entry("block_design", 6.0),
+                entry("matrix", 13.0),
+                entry("information", 10.0),
+                entry("fsiq", 98.0),
+            ],
+            notes: String::new(),
+        };
+        let cases = sheet_cases(&sheet);
+        let of = |m: &str| cases.iter().find(|c| c.measure == m).unwrap().cases.clone();
+        assert!(of("block_design").contains(&"חולשה יחסית".to_owned()));
+        assert!(of("matrix").contains(&"חוזקה יחסית".to_owned()));
+        assert_eq!(of("information").len(), 2, "general and its range");
+        assert!(
+            !of("fsiq").iter().any(|c| c.ends_with("יחסית")),
+            "an index is not relative"
+        );
+        assert!(cases
+            .iter()
+            .all(|c| c.cases.first().map(String::as_str) == Some(GENERAL_CASE)));
+        assert_eq!(
+            cases.first().map(|c| c.label.as_str()),
+            Some("WPPSI-IV · קוביות")
+        );
     }
 
     #[test]
