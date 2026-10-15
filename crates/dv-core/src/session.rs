@@ -459,6 +459,8 @@ impl Core {
         self.since_last = None;
         // The model's process held texts of this session in its memory: it ends with the lock.
         self.end_name_model();
+        // The filter's index of every case's names, kept between requests, goes too.
+        dv_privacy::forget_identity_index();
         if let Some(v) = self.vault.take() {
             // A new password or kit begun while open lands as "locked meanwhile"; its check
             // must not keep her from opening the vault again.

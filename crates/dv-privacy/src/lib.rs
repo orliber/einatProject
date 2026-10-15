@@ -25,9 +25,9 @@ pub use gate::{
 pub use masks::{is_generic_tag, is_mask_tag, MaskBook, MaskEntry, MASK_BASES};
 pub use misread::{ocr_misreads, Misread};
 pub use pipeline::{
-    everyday_name, filter, filter_split, filter_split_with_hints, filter_with_hints, AutoHidden,
-    AutoKind, Checks, FilterOutcome, Mark, NameHint, PrivacyContext, Segment, Suspect, SuspectKind,
-    NAME_HINT_SURE,
+    everyday_name, filter, filter_split, filter_split_with_hints, filter_with_hints,
+    forget_identity_index, AutoHidden, AutoKind, Checks, FilterOutcome, Mark, NameHint,
+    PrivacyContext, Segment, Suspect, SuspectKind, NAME_HINT_SURE,
 };
 pub use self_check::gate_self_check;
 

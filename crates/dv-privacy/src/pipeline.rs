@@ -5,6 +5,7 @@
 
 use std::fmt;
 use std::ops::Range;
+use std::sync::{Arc, Mutex};
 
 use dv_domain::{assign_tag, Identity, IdentitySource, Role, PRACTITIONER_TAG};
 use serde::{Deserialize, Serialize};
@@ -388,9 +389,55 @@ pub(crate) fn past_name(ctx: &PrivacyContext<'_>, h: &str) -> bool {
     !everyday_name(h) && !(ctx.allowlisted)(h) && (ctx.past_names)(h)
 }
 
+/// The last index built, with exactly what it was built from. The filter and the gate ask
+/// for it 30–60 times while one section is prepared, each time with the same names, and a
+/// build walks every name of every case (the review of the night's rounds). A different case,
+/// name, alias or practitioner builds a new one. Equality of the inputs, not a hash, decides,
+/// so what comes back is always what a fresh build would give. Cleared when the vault locks
+/// ([`forget_identity_index`]).
+struct BuiltIndex {
+    case_id: String,
+    identities: Vec<Identity>,
+    practitioner: Vec<String>,
+    index: Arc<PhraseIndex<Target>>,
+}
+
+static LAST_INDEX: Mutex<Option<BuiltIndex>> = Mutex::new(None);
+
+/// Index of every declared name (see [`build_identity_index`]), built once for the same names.
+pub(crate) fn identity_index(ctx: &PrivacyContext<'_>) -> Arc<PhraseIndex<Target>> {
+    // A poisoned lock is never trusted: the index is built afresh.
+    if let Ok(last) = LAST_INDEX.lock() {
+        if let Some(b) = last.as_ref().filter(|b| {
+            b.case_id == ctx.case_id
+                && b.identities.as_slice() == ctx.identities
+                && b.practitioner.as_slice() == ctx.practitioner
+        }) {
+            return Arc::clone(&b.index);
+        }
+    }
+    let index = Arc::new(build_identity_index(ctx));
+    if let Ok(mut last) = LAST_INDEX.lock() {
+        *last = Some(BuiltIndex {
+            case_id: ctx.case_id.to_owned(),
+            identities: ctx.identities.to_vec(),
+            practitioner: ctx.practitioner.to_vec(),
+            index: Arc::clone(&index),
+        });
+    }
+    index
+}
+
+/// Drops the kept index and the names it was built from (the vault locked).
+pub fn forget_identity_index() {
+    if let Ok(mut last) = LAST_INDEX.lock() {
+        *last = None;
+    }
+}
+
 /// Index of every declared name. Current-case identities are inserted first, so a name that
 /// exists in two cases maps to this case's tag.
-pub(crate) fn identity_index(ctx: &PrivacyContext<'_>) -> PhraseIndex<Target> {
+fn build_identity_index(ctx: &PrivacyContext<'_>) -> PhraseIndex<Target> {
     let mut idx = PhraseIndex::default();
     let mut ordered: Vec<&Identity> = ctx
         .identities
@@ -3618,6 +3665,75 @@ fn assemble(
 
 #[cfg(test)]
 mod tests {
+
+    /// The kept index answers exactly as a fresh build, through a change of names, of aliases,
+    /// of the practitioner and of the case, and after it is forgotten.
+    #[test]
+    fn the_kept_index_is_always_the_one_a_fresh_build_gives() {
+        let ident = |id: &str, case: &str, value: &str, aliases: &[&str]| Identity {
+            id: id.into(),
+            case_id: case.into(),
+            role: Role::Child,
+            tag: "[ילד]".into(),
+            value: value.into(),
+            aliases: aliases.iter().map(|a| (*a).to_owned()).collect(),
+            source: IdentitySource::Manual,
+            reason: String::new(),
+        };
+        let text = "נועם ונועמי שיחקו עם עידו ועם ד\"ר כרמלה, ואחר כך ינאי הגיע";
+        let tokens = tokenize(text);
+        let no = |_: &str| false;
+        let first = vec![ident("1", "a", "נועם", &[])];
+        let alias = vec![ident("1", "a", "נועם", &["נועמי"])];
+        let more = vec![
+            ident("1", "a", "נועם", &["נועמי"]),
+            ident("2", "b", "עידו", &[]),
+        ];
+        let fewer = vec![ident("2", "b", "עידו", &[])];
+        let doctor = vec!["כרמלה".to_owned()];
+        let steps: [(&str, &[Identity], &[String]); 6] = [
+            ("a", &first, &[]),
+            ("a", &alias, &[]),
+            ("a", &more, &[]),
+            ("b", &more, &[]),
+            ("b", &more, &doctor),
+            ("b", &fewer, &doctor),
+        ];
+        for (case_id, identities, practitioner) in steps {
+            let ctx = PrivacyContext {
+                case_id,
+                identities,
+                practitioner,
+                allowlisted: &no,
+                confirmed_names: &no,
+                past_names: &no,
+                today: (2026, 10, 15),
+                masks: None,
+            };
+            let fresh = format!("{:?}", build_identity_index(&ctx).find(text, &tokens));
+            for _ in 0..2 {
+                let kept = format!("{:?}", identity_index(&ctx).find(text, &tokens));
+                assert_eq!(kept, fresh, "{case_id} {identities:?} {practitioner:?}");
+            }
+        }
+        // Other tests share the kept index, so only what forgetting leaves is checked here:
+        // the next request builds afresh and answers the same.
+        forget_identity_index();
+        let ctx = PrivacyContext {
+            case_id: "a",
+            identities: &first,
+            practitioner: &[],
+            allowlisted: &no,
+            confirmed_names: &no,
+            past_names: &no,
+            today: (2026, 10, 15),
+            masks: None,
+        };
+        assert_eq!(
+            format!("{:?}", identity_index(&ctx).find(text, &tokens)),
+            format!("{:?}", build_identity_index(&ctx).find(text, &tokens))
+        );
+    }
     use super::*;
 
     fn rep(start: usize, end: usize) -> Replacement {
