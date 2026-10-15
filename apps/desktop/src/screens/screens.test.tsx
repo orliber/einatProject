@@ -87,7 +87,7 @@ describe("main screens", () => {
     const view = render(<App />);
     const row = (await screen.findByRole("button", { name: /בתיק של נועם$/ })).closest("tr") as HTMLElement;
     expect(within(row).getByText("השליחה נכשלה")).toBeInTheDocument();
-    expect(within(row).getByText("לפתוח ולנסות שוב")).toBeInTheDocument();
+    expect(within(row).getByText("לנסות שוב")).toBeInTheDocument();
     expect(await a11yViolations(view.container)).toEqual([]);
   });
 

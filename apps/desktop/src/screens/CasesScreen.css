@@ -9,7 +9,7 @@
   min-height: 320px;
 }
 .explorer-tree {
-  flex: 0 0 248px;
+  flex: 0 0 220px;
   border-inline-end: 1px solid var(--line);
   background: var(--surface);
   padding: 12px 8px;
@@ -249,6 +249,10 @@ button.crumb:hover:not([aria-current="page"]) {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The date moves into the name line when its column folds (narrow window). */
+.when-inline {
+  display: none;
+}
 .row-icon {
   flex: none;
   width: 34px;
@@ -378,8 +382,8 @@ button.crumb:hover:not([aria-current="page"]) {
   margin-inline-start: auto;
 }
 
-/* ---------- a narrow window: the tree folds behind a button ---------- */
-@media (max-width: 1100px) {
+/* ---------- a narrow window (under a 1366px laptop at 125%): the tree folds behind a button ---------- */
+@media (max-width: 1060px) {
   .explorer {
     flex-direction: column;
   }
@@ -391,6 +395,10 @@ button.crumb:hover:not([aria-current="page"]) {
   }
   .explorer-tree.open {
     display: block;
+    max-width: 320px;
+  }
+  .when-inline {
+    display: inline;
   }
   .tree-toggle {
     display: inline-flex;

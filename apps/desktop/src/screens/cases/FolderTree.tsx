@@ -5,12 +5,19 @@ import { useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } 
 import type { Folder } from "../../ipc/client";
 import { FolderIcon } from "../library/LibraryDialogs";
 
-/** Which folders are open, kept while the vault is open (the page reloads on lock). */
-const opened = new Set<string>();
+/** The branches Einat left open, kept while the vault is open (the page reloads on lock). Written only from event handlers. */
+const remembered = new Set<string>();
 
 /** Closes every branch (tests start from a closed tree). */
 export function closeAllFolders() {
-  opened.clear();
+  remembered.clear();
+}
+
+/** The ids of the folders above `id`, nearest first. */
+export function ancestorsOf(folders: Folder[], id: string | null): string[] {
+  const out: string[] = [];
+  for (let p = folders.find((x) => x.id === id)?.parent_id; p; p = folders.find((x) => x.id === p)?.parent_id) out.push(p);
+  return out;
 }
 
 export type TreeRow = { folder: Folder; depth: number; children: boolean; open: boolean };
@@ -53,18 +60,24 @@ type Props = {
 };
 
 export function FolderTree(p: Props) {
-  const [, bump] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
-  // The current folder's ancestors are always open, so she sees where she is.
-  for (let id = p.folders.find((x) => x.id === p.current)?.parent_id; id; ) {
-    opened.add(id);
-    id = p.folders.find((x) => x.id === id)?.parent_id ?? null;
+  const [opened, setOpened] = useState(() => new Set([...remembered, ...ancestorsOf(p.folders, p.current)]));
+  // When she moves to another folder (a crumb, a row in the table), the branches above it open
+  // so she sees where she is; a branch she closes herself afterwards stays closed.
+  const [seen, setSeen] = useState(p.current);
+  if (seen !== p.current) {
+    setSeen(p.current);
+    const above = ancestorsOf(p.folders, p.current).filter((id) => !opened.has(id));
+    if (above.length) setOpened(new Set([...opened, ...above]));
   }
   const rows = visibleRows(p.folders, opened);
   const toggle = (id: string) => {
-    if (opened.has(id)) opened.delete(id);
-    else opened.add(id);
-    bump((n) => n + 1);
+    const next = new Set(opened);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    remembered.clear();
+    next.forEach((x) => remembered.add(x));
+    setOpened(next);
   };
 
   // Arrow keys walk the rows; in a right-to-left tree the left arrow opens and the right closes.
@@ -90,11 +103,13 @@ export function FolderTree(p: Props) {
 
   const cls = (id: string | null, on: boolean) => ["tree-row", on ? "on" : "", p.dropOn === (id ?? "top") ? "drop" : ""].filter(Boolean).join(" ");
   const topOn = !p.inTrash && p.current === null;
+  // One stop on the Tab order (the ARIA tree pattern): the selected row, or the top when none is.
+  const anyOn = !p.inTrash && rows.some((r) => r.folder.id === p.current);
 
   return (
     <nav className="tree" aria-label="תיקיות">
       <div ref={listRef} role="tree" aria-label="תיקיות" className="tree-list" onKeyDown={onKey}>
-        <div role="treeitem" aria-selected={topOn} aria-level={1} tabIndex={0} data-tree-row="" className={cls(null, topOn)}
+        <div role="treeitem" aria-selected={topOn} aria-level={1} tabIndex={anyOn ? -1 : 0} data-tree-row="" className={cls(null, topOn)}
           onClick={() => p.onPick(null)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); p.onPick(null); } }}
           {...p.dropProps(null)}>
           <span className="tree-arrow" aria-hidden="true" />
@@ -107,7 +122,7 @@ export function FolderTree(p: Props) {
           const n = p.countIn(r.folder.id);
           const row = (
             <div key={r.folder.id} role="treeitem" aria-selected={on} aria-level={r.depth + 1} aria-expanded={r.children ? r.open : undefined}
-              tabIndex={-1} data-tree-row={r.folder.id} className={cls(r.folder.id, on)} style={{ paddingInlineStart: 6 + (r.depth - 1) * 18 }}
+              tabIndex={on ? 0 : -1} data-tree-row={r.folder.id} className={cls(r.folder.id, on)} style={{ paddingInlineStart: 6 + (r.depth - 1) * 18 }}
               draggable onDragStart={p.onDragStart(r.folder.id)}
               onClick={() => p.onPick(r.folder.id)}
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); p.onPick(r.folder.id); } }}

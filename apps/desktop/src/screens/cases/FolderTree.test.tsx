@@ -55,6 +55,23 @@ describe("FolderTree", () => {
     expect(within(items).getByRole("treeitem", { name: /מחצית א/ })).toHaveAttribute("aria-selected", "true");
   });
 
+  it("an ancestor of the current folder can still be closed, and the Tab stop is the selected row", async () => {
+    const user = userEvent.setup();
+    const { view } = tree({ current: "a1" });
+    expect(screen.getByRole("treeitem", { name: /^תשפ״ו/ })).toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("treeitem", { name: /כל התיקים/ })).toHaveAttribute("tabindex", "-1");
+    await user.click(screen.getByRole("button", { name: "לסגור את גן חובה" }));
+    expect(screen.getByRole("treeitem", { name: /גן חובה/ })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("תשפ״ו")).toBeNull();
+    // Moving to another folder opens the branches above it again.
+    view.rerender(
+      <FolderTree folders={folders} current="a1x" inTrash={false} trashCount={0} countIn={() => 0} total={5}
+        onPick={vi.fn()} onPickTrash={vi.fn()} onNewFolder={vi.fn()} dropOn={null} dropProps={() => ({})}
+        onDragStart={() => () => undefined} rightClick={(_f, row) => row} />,
+    );
+    expect(screen.getByRole("treeitem", { name: /מחצית א/ })).toHaveAttribute("tabindex", "0");
+  });
+
   it("walks with the arrow keys, and Enter picks", async () => {
     const user = userEvent.setup();
     const { onPick } = tree();

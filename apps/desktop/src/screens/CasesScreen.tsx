@@ -94,11 +94,17 @@ export function CasesScreen() {
   const allCases = useMemo(() => cases.data ?? [], [cases.data]);
   // A folder that no longer exists (deleted elsewhere): back to the top.
   const current = folderId && allFolders.some((f) => f.id === folderId) ? folderId : null;
+  // In a narrow window the tree folds away after a pick; focus goes to the button that reopens it.
+  const closeTree = () => {
+    if (!treeOpen) return;
+    setTreeOpen(false);
+    setTimeout(() => document.querySelector<HTMLElement>(".tree-toggle")?.focus(), 0);
+  };
   const setFolderId = (id: string | null) => {
     rememberFolder(id);
     setFolderIdState(id);
     setInTrash(false);
-    setTreeOpen(false);
+    closeTree();
   };
   const setSort = (s: Sort) => {
     remembered.sort = s;
@@ -141,7 +147,8 @@ export function CasesScreen() {
   const shownFolders = q ? allFolders.filter((f) => f.name.toLowerCase().includes(q)) : allFolders.filter((f) => f.parent_id === current);
   // Inside a folder: its cases and the cases of every folder under it, like a search in an explorer.
   const inside = current ? descendants(allFolders, current) : null;
-  const shownCases = q ? allCases.filter(matches) : inside ? allCases.filter((c) => c.folder_id && inside.has(c.folder_id)) : allCases;
+  // A copy: the top level shows the query's own array, which must not be sorted in place.
+  const shownCases = [...(q ? allCases.filter(matches) : inside ? allCases.filter((c) => c.folder_id && inside.has(c.folder_id)) : allCases)];
   shownFolders.sort((a, b) => a.name.localeCompare(b.name, "he"));
   const statusOf = new Map(shownCases.map((c) => [c.id, caseStatus(c)]));
   const st = (c: CaseSummary) => statusOf.get(c.id) ?? caseStatus(c);
@@ -264,7 +271,7 @@ export function CasesScreen() {
           <div className="card explorer">
             <aside className={treeOpen ? "explorer-tree open" : "explorer-tree"}>
               <FolderTree folders={allFolders} current={current} inTrash={inTrash} trashCount={trashCount} total={allCases.length}
-                countIn={countIn} onPick={setFolderId} onPickTrash={() => { setInTrash(true); setQuery(""); setTreeOpen(false); }}
+                countIn={countIn} onPick={setFolderId} onPickTrash={() => { setInTrash(true); setQuery(""); closeTree(); }}
                 onNewFolder={() => setModal({ kind: "new-folder" })}
                 dropProps={dropProps} dropOn={dropOn} onDragStart={(id) => onDragStart({ folder: id })}
                 rightClick={(f, row) => <RightClick items={folderItems(f)}>{row}</RightClick>} />
@@ -293,7 +300,6 @@ export function CasesScreen() {
                   value={query} onChange={(e) => { setQuery(e.target.value); setInTrash(false); }} />
                 {!inTrash && (
                   <label className="sort">
-                    <span className="visually-hidden">מיון</span>
                     <select className="input" value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label="מיון">
                       {SORTS.map((s) => <option key={s.id} value={s.id}>מיון: {s.label}</option>)}
                     </select>
@@ -383,6 +389,7 @@ export function CasesScreen() {
                                       </div>
                                       <div className="small muted ellipsis">
                                         {[ageOf(c.meta.age, c.meta.child_gender), c.meta.code || "ללא קוד", where].filter(Boolean).join(" · ")}
+                                        <span className="when-inline"> · {updated(c.updated_at)}</span>
                                       </div>
                                     </div>
                                   </div>
@@ -410,7 +417,7 @@ export function CasesScreen() {
                   )}
                   {cases.data && !emptyHere && (
                     <div className="explorer-foot small muted">
-                      <span>{shownCases.length === 1 ? "תיק אחד" : `${shownCases.length} תיקים`}{current && shownFolders.length ? ", כולל תיקיות המשנה" : ""}</span>
+                      <span>{shownCases.length === 1 ? "תיק אחד" : `${shownCases.length} תיקים`}{!q && shownCases.some((c) => (c.folder_id ?? null) !== current) ? ", כולל תיקיות המשנה" : ""}</span>
                       <span>גוררים תיק לתיקייה כדי להעביר. לחיצה ימנית: עוד פעולות.</span>
                     </div>
                   )}

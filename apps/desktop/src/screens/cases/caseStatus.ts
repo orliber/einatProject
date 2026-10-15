@@ -29,7 +29,7 @@ export function caseStatus(c: CaseSummary): CaseStatus {
   const writing = `כתיבה: ${n} מתוך ${TOTAL_SECTIONS}`;
   if (c.failed_at) {
     return {
-      word: "השליחה נכשלה", detail: "לפתוח ולנסות שוב", attention: true,
+      word: "השליחה נכשלה", detail: "לנסות שוב", attention: true,
       steps: n > 0 ? ["done", "now", "empty"] : ["now", "empty", "empty"],
       full: `חומרים: יש · ${writing} · הוצאה: עוד לא · השליחה האחרונה נכשלה`,
       view: n > 0 ? "report" : "materials", button: "לפתוח",

@@ -51,9 +51,10 @@ describe("caseStatus: one word, one line, three steps", () => {
     expect(s.view).toBe("report");
   });
 
-  it("no word appears twice in a status", () => {
-    for (const s of [summary({}), summary({ approved: 2 }), summary({ approved: TOTAL_SECTIONS })].map(caseStatus)) {
-      const words = `${s.word} ${s.detail}`.split(/\s+/).filter((w) => w.length > 3);
+  it("no word appears twice in a row: the word, the detail and the button", () => {
+    const all = [summary({}), summary({ approved: 2 }), summary({ approved: TOTAL_SECTIONS }), summary({ approved: 3, consent: false }), summary({ approved: 3, failed_at: 1 })];
+    for (const s of all.map(caseStatus)) {
+      const words = `${s.word} ${s.detail} ${s.button}`.split(/\s+/).filter((w) => w.length > 3);
       expect(new Set(words).size).toBe(words.length);
     }
   });
