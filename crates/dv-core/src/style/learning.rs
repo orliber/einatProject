@@ -144,6 +144,20 @@ impl Core {
                 StyleOrigin::Reports,
                 shape.reports,
             )
+        } else if let Some(norm) = id.strip_prefix(FORMULA_ID) {
+            let f = local
+                .formulas
+                .iter()
+                .find(|f| f.norm == norm)
+                .ok_or_else(not_found)?;
+            learning.dismissed_phrases.push(id.to_owned());
+            (
+                f.section.clone(),
+                StyleKind::Template,
+                f.text.clone(),
+                StyleOrigin::Reports,
+                f.reports,
+            )
         } else if let Some(norm) = id.strip_prefix(PHRASE_ID) {
             let p = local
                 .phrases
@@ -205,7 +219,7 @@ impl Core {
 
     pub fn dismiss_style_suggestion(&mut self, id: &str) -> Result<(), CoreError> {
         let mut learning = self.learning()?;
-        if id.starts_with(SHAPE_ID) {
+        if id.starts_with(SHAPE_ID) || id.starts_with(FORMULA_ID) {
             learning.dismissed_phrases.push(id.to_owned());
         } else if let Some(norm) = id.strip_prefix(PHRASE_ID) {
             learning.dismissed_phrases.push(norm.to_owned());
@@ -225,6 +239,8 @@ pub(super) const PHRASE_ID: &str = "phrase:";
 /// ...and of the openings and closings of her sections with this (the whole id is kept when
 /// she answers, among the dismissed phrases).
 pub(super) const SHAPE_ID: &str = "shape:";
+/// ...and of her fixed wordings with this (kept whole when she answers, like a shape's).
+pub(super) const FORMULA_ID: &str = "formula:";
 
 pub(super) fn shape_key(s: &dv_style::Shape) -> String {
     let place = match s.place {
@@ -294,6 +310,23 @@ pub(super) fn suggestions(
                 count: sh.reports,
                 confidence: sh.share,
                 section: Some(sh.section.clone()),
+            }),
+    );
+    out.extend(
+        local
+            .formulas
+            .iter()
+            .map(|f| (format!("{FORMULA_ID}{}", f.norm), f))
+            .filter(|(id, _)| !learning.dismissed_phrases.contains(id))
+            .filter(|(_, f)| !in_profile.iter().any(|t| *t == normalize(&f.text)))
+            .map(|(id, f)| StyleSuggestion {
+                id,
+                kind: StyleSuggestionKind::Formula,
+                from: f.text.clone(),
+                to: String::new(),
+                count: f.reports,
+                confidence: f.share,
+                section: f.section.clone(),
             }),
     );
     out

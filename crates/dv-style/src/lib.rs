@@ -14,6 +14,8 @@
 //!   the paragraph of her reports closest to a draft.
 //! * [`shape`]: how she usually opens and closes each section.
 //! * [`terms`]: her usual name for terms that have several, so a report uses one.
+//! * [`skeleton`]: the order of the topics in each section, and their length, by age band.
+//! * [`formulas`]: sentences she writes the same way in several reports (a fixed wording).
 //!
 //! Nothing here reaches the network, and nothing goes into a request until Einat adds it to her
 //! profile, where the usual filter, overlap check and gate apply.
@@ -21,16 +23,20 @@
 #![forbid(unsafe_code)]
 
 pub mod edits;
+pub mod formulas;
 pub mod phrases;
 pub mod retrieve;
 pub mod shape;
+pub mod skeleton;
 pub mod stylometry;
 pub mod terms;
 pub mod text;
 
 pub use edits::{EditMark, EditModel, EditSuggestion, Pattern};
+pub use formulas::{mine_formulas, Formula};
 pub use phrases::{mine_phrases, PhraseCandidate, ReportParts};
 pub use shape::{mine_shapes, Place, Shape};
+pub use skeleton::{mine_skeletons, skeleton_for, AgeBand, Skeleton, SkeletonTopic};
 pub use stylometry::{report_weight, Measures, StyleModel};
 
 /// The key for what holds across the whole report (same as `dv_ai::style::GENERAL`).

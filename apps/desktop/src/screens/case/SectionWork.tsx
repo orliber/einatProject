@@ -357,7 +357,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
           {/* Inside the scrolling draft: on a laptop the open guide never pushes the
               conversation's foot off the screen (the review of stage 3). */}
           <SectionGuide caseId={caseId} sectionKey={section.key} guide={section.guide} isDefault={section.guide_is_default}
-            caseGuide={section.case_guide} onSaved={reload} />
+            learnedFrom={section.guide_learned_from} caseGuide={section.case_guide} onSaved={reload} />
 
           {job && (
             <div className="writing-card">

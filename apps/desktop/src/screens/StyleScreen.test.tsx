@@ -39,6 +39,8 @@ const overview = (over: Partial<StyleOverview> = {}): StyleOverview => ({
   },
   interpretations: [],
   scored_measures: 0,
+  skeletons: [],
+  omissions: [],
   ...over,
 });
 
@@ -199,6 +201,36 @@ describe("suggestions from her reports", () => {
     const [first] = screen.getAllByRole("button", { name: "להוסיף לפרופיל" });
     if (first) await user.click(first);
     await vi.waitFor(() => expect(calls).toContainEqual(["accept_style_suggestion", { id: "shape:opening:summary:x" }]));
+  });
+});
+
+describe("what was learned from her reports (round 34)", () => {
+  it("shows her fixed wording to add, the order of her sections and what she leaves out", async () => {
+    const calls: unknown[] = [];
+    mockIPC((cmd, args) => {
+      if (cmd === "style_overview") {
+        return overview({
+          sources: [source],
+          learned: { ...overview().learned, from_reports: 30 },
+          suggestions: [
+            { id: "formula:x", kind: "formula", from: "מנת המשכל הכללית נמצאה {תוצאה}.", to: "", count: 3, confidence: 100, section: "cognitive" },
+          ],
+          skeletons: [{ section: "parents_view", title: "תפקוד כיום בבית", band: "גיל שלוש עד שש", reports: 4, topics: ["משחק", "רגשי"] }],
+          omissions: ["את לא כותבת אחוזונים ליד התוצאות של תתי-המבחנים, ולכן הם לא נכתבים בדף התוצאות שנשלח."],
+        });
+      }
+      calls.push([cmd, args]);
+      return null;
+    });
+    const user = userEvent.setup();
+    wrap(<StyleScreen />);
+    expect(await screen.findByText(/משפט שאת כותבת באותו נוסח בכמה דוחות/)).toBeInTheDocument();
+    expect(screen.getByText("(ב-3 דוחות · בסעיף פרופיל קוגניטיבי)")).toBeInTheDocument();
+    expect(screen.getByText("תפקוד כיום בבית (גיל שלוש עד שש):")).toBeInTheDocument();
+    expect(screen.getByText(/משחק · רגשי/)).toBeInTheDocument();
+    expect(screen.getByText(/את לא כותבת אחוזונים/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "להוסיף לפרופיל" }));
+    await vi.waitFor(() => expect(calls).toContainEqual(["accept_style_suggestion", { id: "formula:x" }]));
   });
 });
 

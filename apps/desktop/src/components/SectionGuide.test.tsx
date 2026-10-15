@@ -110,4 +110,18 @@ describe("SectionGuide", () => {
     expect(screen.getByRole("button", { name: "עריכה" })).toBeVisible();
     expect(screen.getByRole("group")).toHaveAttribute("open");
   });
+
+  it("says when the guide is the order she writes the section in, learned from her reports", async () => {
+    mockIPC(() => null);
+    const user = userEvent.setup();
+    render(
+      <AppContext.Provider value={api()}>
+        <SectionGuide caseId="c1" sectionKey="parents_view" guide={"משחק (פסקה קצרה).\nרגשי (פסקה)."} isDefault learnedFrom={5} caseGuide="" onSaved={vi.fn()} />
+      </AppContext.Provider>,
+    );
+    await user.click(screen.getByText("איך לכתוב את הסעיף הזה"));
+    expect(screen.getByText("לפי הסדר שבו כתבת את הסעיף ב-5 מהדוחות שלך.")).toBeInTheDocument();
+    expect(screen.getByText("משחק (פסקה קצרה).")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "החזרה לנוסח המכון" })).not.toBeInTheDocument();
+  });
 });

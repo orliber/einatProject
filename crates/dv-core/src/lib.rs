@@ -82,8 +82,9 @@ pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
 pub use security::{SecurityItem, SecurityStatus};
 pub use style::{
     FitMonth, InterpretationResult, InterpretationView, OwnSectionHelp, SimilarParagraph,
-    StyleAnalysisResult, StyleImportPreview, StyleOverview, StylePartView, StyleProfileView,
-    StyleSectionLabel, StyleSourceView, StyleSuggestion, StyleSuggestionKind, StyleVersionView,
+    SkeletonView, StyleAnalysisResult, StyleImportPreview, StyleOverview, StylePartView,
+    StyleProfileView, StyleSectionLabel, StyleSourceView, StyleSuggestion, StyleSuggestionKind,
+    StyleVersionView,
 };
 pub use unsaved::UnsavedEdit;
 pub use usage::UsageSummary;

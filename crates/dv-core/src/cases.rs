@@ -176,8 +176,16 @@ impl Core {
     }
 
     /// The exact text [`Core::save_scores`] would store, for the live preview while typing.
-    pub fn preview_scores(sheet: &dv_domain::ScoreSheet) -> Result<String, CoreError> {
-        dv_domain::format_sheet(sheet).map_err(CoreError::Refused)
+    pub fn preview_scores(&mut self, sheet: &dv_domain::ScoreSheet) -> Result<String, CoreError> {
+        dv_domain::format_sheet_with(sheet, self.sheet_habits()?).map_err(CoreError::Refused)
+    }
+
+    /// What she leaves out beside scores in her reports (K12); nothing while locked.
+    fn sheet_habits(&mut self) -> Result<dv_domain::SheetHabits, CoreError> {
+        match self.vault_ref() {
+            Ok(v) => crate::style::sheet_habits(v),
+            Err(_) => Ok(dv_domain::SheetHabits::default()),
+        }
     }
 
     /// Save entered scores as a "test scores" material: the text (with ranges computed from the
@@ -191,7 +199,8 @@ impl Core {
         if sheet.entries.is_empty() {
             return Err(CoreError::Refused("לא הוזנו ציונים.".into()));
         }
-        let text = dv_domain::format_sheet(sheet).map_err(CoreError::Refused)?;
+        let text = dv_domain::format_sheet_with(sheet, self.sheet_habits()?)
+            .map_err(CoreError::Refused)?;
         let title = dv_domain::instruments()
             .into_iter()
             .find(|i| i.key == sheet.instrument)

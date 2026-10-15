@@ -13,7 +13,7 @@
 //! * In a drafting request, each item is filtered with the case's names first: one that would
 //!   stop the gate (a word holding the child's name) is left out of that request.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 use dv_ai::{RawStyleItem, StyleExcerpt, StyleItem, StyleKind, StyleOrigin, StyleProfile};
@@ -157,6 +157,8 @@ pub enum StyleSuggestionKind {
     Opening,
     /// In her past reports: a section usually closes with «from».
     Closing,
+    /// In her past reports: a sentence she writes the same way in several of them (K4).
+    Formula,
 }
 
 /// Something learned on her computer, waiting for her yes. Nothing of it is sent until then.
@@ -267,6 +269,23 @@ pub struct StyleOverview {
     pub interpretations: Vec<InterpretationView>,
     /// How many subtests have a score in her reports: what a reading would cover.
     pub scored_measures: u32,
+    /// The order she writes sections in, learned from her reports (K3, K13).
+    pub skeletons: Vec<SkeletonView>,
+    /// What she leaves out beside scores, so the scores material leaves it out too (K12).
+    pub omissions: Vec<String>,
+}
+
+/// The learned order of one section, for the screen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SkeletonView {
+    pub section: String,
+    pub title: String,
+    /// The age band in words; `None`: from all her reports.
+    pub band: Option<String>,
+    pub reports: u32,
+    /// The topics in their usual order.
+    pub topics: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -370,6 +389,15 @@ pub(crate) struct LocalStyle {
     /// only once she approved it.
     #[serde(default)]
     interpretations: Vec<dv_ai::Interpretation>,
+    /// The order of the topics in each section, by age band (K3, K13). Numbers and labels.
+    #[serde(default)]
+    skeletons: Vec<dv_style::Skeleton>,
+    /// Sentences she writes the same way in several reports (K4), offered to her.
+    #[serde(default)]
+    formulas: Vec<dv_style::Formula>,
+    /// What she leaves out beside scores (K12).
+    #[serde(default)]
+    habits: dv_domain::SheetHabits,
 }
 
 /// How many months of closeness figures are kept for the trend.
@@ -879,11 +907,21 @@ fn shared_run(text: &str, n: usize, index: &HashSet<String>) -> Option<String> {
         .find(|g| index.contains(g))
 }
 
+/// The runs of `n` words of her past reports that are about a child: a run in
+/// [`dv_style::formulas::MIN_REPORTS`] reports or more is her fixed wording (K4), which a
+/// profile item or a draft may repeat.
 fn source_index(sources: &[StoredSource], n: usize) -> HashSet<String> {
-    sources
-        .iter()
-        .flat_map(|s| s.parts.iter())
-        .flat_map(|p| ngrams(&p.text, n))
+    let mut reports: HashMap<String, usize> = HashMap::new();
+    for s in sources {
+        let grams: HashSet<String> = s.parts.iter().flat_map(|p| ngrams(&p.text, n)).collect();
+        for g in grams {
+            *reports.entry(g).or_default() += 1;
+        }
+    }
+    reports
+        .into_iter()
+        .filter(|(_, r)| *r < dv_style::formulas::MIN_REPORTS)
+        .map(|(g, _)| g)
         .collect()
 }
 
@@ -1050,6 +1088,15 @@ fn fit_reports(local: &mut LocalStyle, sources: &[StoredSource]) {
         .collect();
     local.phrases = dv_style::mine_phrases(&reports);
     local.shapes = dv_style::mine_shapes(&reports);
+    let bands: Vec<Option<dv_style::AgeBand>> = sources.iter().map(report_band).collect();
+    local.skeletons = dv_style::mine_skeletons(&reports, &bands);
+    local.formulas = dv_style::mine_formulas(&reports, &formula_slot);
+    local.habits = dv_domain::sheet_habits(
+        sources
+            .iter()
+            .flat_map(|s| s.parts.iter())
+            .map(|p| p.text.as_str()),
+    );
     local.terms = dv_style::terms::usual(
         sources
             .iter()
@@ -1057,6 +1104,78 @@ fn fit_reports(local: &mut LocalStyle, sources: &[StoredSource]) {
             .map(|p| p.text.as_str()),
         2,
     );
+}
+
+/// The age band of a past report, from the test it names most (K13): the Bayley is given
+/// under three, the WPPSI from three to six, the WISC from six. `None`: none of them.
+fn report_band(s: &StoredSource) -> Option<dv_style::AgeBand> {
+    use dv_style::AgeBand;
+    let text = s
+        .parts
+        .iter()
+        .map(|p| p.text.to_lowercase())
+        .collect::<Vec<_>>()
+        .join("\n");
+    [
+        ("bayley", AgeBand::Toddler),
+        ("wppsi", AgeBand::Preschool),
+        ("wisc", AgeBand::School),
+    ]
+    .into_iter()
+    .map(|(name, band)| (text.matches(name).count(), band))
+    .filter(|(n, _)| *n > 0)
+    .max_by_key(|(n, _)| *n)
+    .map(|(_, band)| band)
+}
+
+/// The empty place a tag of a past report becomes in her fixed wording (K4): a score, or a
+/// number. Any other tag is about a child, and the sentence is not learned.
+fn formula_slot(tag: &str) -> Option<&'static str> {
+    if dv_domain::is_score_tag(tag) {
+        Some("{תוצאה}")
+    } else if tag == "[מספר]" {
+        Some("{מספר}")
+    } else {
+        None
+    }
+}
+
+/// What she leaves out beside scores, in words (K12).
+fn omissions(h: dv_domain::SheetHabits) -> Vec<String> {
+    let mut out = Vec::new();
+    if h.no_subtest_percentiles {
+        out.push(
+            "את לא כותבת אחוזונים ליד התוצאות של תתי-המבחנים, ולכן הם לא נכתבים בדף התוצאות שנשלח."
+                .to_owned(),
+        );
+    }
+    if h.no_index_percentiles {
+        out.push(
+            "את לא כותבת אחוזונים ליד המדדים, ולכן הם לא נכתבים בדף התוצאות שנשלח.".to_owned(),
+        );
+    }
+    out
+}
+
+/// Her learned order of `section` for a case with `age`, unless the profile is switched off.
+pub(crate) fn style_skeleton(
+    v: &Vault,
+    section: &str,
+    age: Option<dv_domain::Age>,
+) -> Result<Option<dv_style::Skeleton>, CoreError> {
+    if v.setting(PROFILE_OFF_KEY)?.as_deref() == Some("1") {
+        return Ok(None);
+    }
+    let band = age.map(|a| dv_style::AgeBand::of_years(a.years));
+    Ok(dv_style::skeleton_for(&local_style(v)?.skeletons, section, band).cloned())
+}
+
+/// What she leaves out beside scores (K12), unless the profile is switched off.
+pub(crate) fn sheet_habits(v: &Vault) -> Result<dv_domain::SheetHabits, CoreError> {
+    if v.setting(PROFILE_OFF_KEY)?.as_deref() == Some("1") {
+        return Ok(dv_domain::SheetHabits::default());
+    }
+    Ok(local_style(v)?.habits)
 }
 
 /// The draft paragraph `draft_id` of a case, from any section.
@@ -1448,6 +1567,24 @@ impl Core {
             learned: local.learned(),
             interpretations: Self::interpretation_views(v)?,
             scored_measures,
+            skeletons: local
+                .skeletons
+                .iter()
+                .filter_map(|k| {
+                    let title = [None, Some(dv_domain::INSTITUTE_TEMPLATE)]
+                        .into_iter()
+                        .filter_map(|t| ReportStructure::for_template(t).ok())
+                        .find_map(|st| st.section(&k.section).map(|x| x.title.clone()))?;
+                    Some(SkeletonView {
+                        section: k.section.clone(),
+                        title,
+                        band: k.band.map(|b| b.label().to_owned()),
+                        reports: k.reports,
+                        topics: k.topics.iter().map(|t| t.label.clone()).collect(),
+                    })
+                })
+                .collect(),
+            omissions: omissions(local.habits),
         })
     }
 
@@ -1648,6 +1785,37 @@ mod unit {
         assert_eq!(got[1], (Some("appearance"), "הגיע בשמחה."));
         assert_eq!(got[2].0, Some("cognitive"));
         assert!(got.iter().any(|(k, _)| *k == Some("summary")));
+    }
+
+    #[test]
+    fn a_run_in_three_reports_is_her_wording_and_one_in_a_single_report_is_content() {
+        let source = |text: &str| StoredSource {
+            title: String::new(),
+            format: "txt".into(),
+            parts: vec![StoredPart {
+                section: None,
+                heading: String::new(),
+                text: text.to_owned(),
+            }],
+            analysis: None,
+        };
+        let wording = "המבחן הוא מבחן אינטליגנציה לילדים בגילאי הגן";
+        let sources: Vec<StoredSource> = (0..3)
+            .map(|i| {
+                if i == 0 {
+                    source(&format!("{wording}. [ילד] בנה מגדל גבוה מקוביות צבעוניות"))
+                } else {
+                    source(wording)
+                }
+            })
+            .collect();
+        let index = source_index(&sources, 5);
+        assert!(shared_run(wording, 5, &index).is_none(), "her wording");
+        assert!(shared_run("גם [ילד] בנה מגדל גבוה מקוביות", 5, &index).is_some());
+        assert!(
+            shared_run(wording, 5, &source_index(&sources[..2], 5)).is_some(),
+            "in two reports it may still be about a child"
+        );
     }
 
     #[test]

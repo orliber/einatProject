@@ -791,6 +791,11 @@ pub fn sheet_profiles(sheet: &ScoreSheet) -> Result<Vec<ScoreProfile>, String> {
 /// The text stored as a "test scores" material: every score with its range from the table,
 /// the scale sentence, and a note on large gaps between indexes (to check in the manual).
 pub fn format_sheet(sheet: &ScoreSheet) -> Result<String, String> {
+    format_sheet_with(sheet, SheetHabits::default())
+}
+
+/// [`format_sheet`], leaving out what she does not write beside scores (K12).
+pub fn format_sheet_with(sheet: &ScoreSheet, habits: SheetHabits) -> Result<String, String> {
     let (inst, entries) = checked(sheet)?;
     let mut out = format!("{} – {}\n", inst.name, inst.description_he);
     if !sheet.module.trim().is_empty() {
@@ -807,7 +812,12 @@ pub fn format_sheet(sheet: &ScoreSheet) -> Result<String, String> {
         let name = measure_label(measure);
         let range = range_of(measure, sheet, e.value);
         // "ציון" before the number: the privacy filter reads "29.5" alone as a date (29 May).
-        let value = match percentile(measure, e.value) {
+        let omit = if matches!(measure.scale, ScoreScale::Scaled | ScoreScale::VScale) {
+            habits.no_subtest_percentiles
+        } else {
+            habits.no_index_percentiles
+        };
+        let value = match percentile(measure, e.value).filter(|_| !omit) {
             Some(p) => {
                 any_percentile = true;
                 format!("ציון {}, אחוזון {p}", fmt_value(e.value))
@@ -1505,6 +1515,83 @@ pub fn interpretation_cases(instrument: &str, measure: &str) -> Vec<String> {
 /// The case of an interpretation that holds whatever the score.
 pub const GENERAL_CASE: &str = "כללי";
 
+/// What she leaves out beside scores in her reports (K12), so the scores material does not
+/// send what she does not write. Learned from the score tags of her past reports.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SheetHabits {
+    /// No percentile beside a subtest's score (scaled scores).
+    pub no_subtest_percentiles: bool,
+    /// No percentile beside an index's score (standard and T scores).
+    pub no_index_percentiles: bool,
+}
+
+/// Fewest reports with tagged scores of a kind before what she leaves out is learned.
+const HABIT_REPORTS: usize = 3;
+/// … and fewest tagged scores of the kind in all.
+const HABIT_SCORES: usize = 8;
+/// A percentile she writes beside less than this share of the scores is one she leaves out.
+const HABIT_SHARE: f64 = 0.1;
+
+/// Whether the sentence around the tag at `start..end` of `text` has a percentile in it.
+fn percentile_near(text: &str, start: usize, end: usize) -> bool {
+    let is_end = |c: char| matches!(c, '.' | '\n' | ';' | '!' | '?');
+    let from = text
+        .get(..start)
+        .and_then(|t| t.rfind(is_end))
+        .map_or(0, |i| i + 1);
+    let to = text
+        .get(end..)
+        .and_then(|t| t.find(is_end))
+        .map_or(text.len(), |i| end + i);
+    text.get(from..to).is_some_and(|s| s.contains("אחוזון"))
+}
+
+/// What she leaves out beside scores, from the text of her past reports (with score tags).
+#[must_use]
+#[allow(clippy::cast_precision_loss)]
+pub fn sheet_habits<'a>(reports: impl IntoIterator<Item = &'a str>) -> SheetHabits {
+    let all = instruments();
+    let scale = |inst: &str, measure: &str| {
+        all.iter()
+            .find(|i| i.key == inst)
+            .and_then(|i| i.measures.iter().find(|m| m.key == measure))
+            .map(|m| m.scale)
+    };
+    // (reports, scores, with a percentile) for subtests and for indexes.
+    let mut sub = (0usize, 0usize, 0usize);
+    let mut idx = (0usize, 0usize, 0usize);
+    for text in reports {
+        let (mut in_sub, mut in_idx) = (false, false);
+        for t in find_tagged_scores(text) {
+            let near = percentile_near(text, t.start, t.end);
+            let kind = match scale(&t.instrument, &t.measure) {
+                Some(ScoreScale::Scaled | ScoreScale::VScale) => {
+                    in_sub = true;
+                    &mut sub
+                }
+                Some(ScoreScale::Standard | ScoreScale::TAbility) => {
+                    in_idx = true;
+                    &mut idx
+                }
+                _ => continue,
+            };
+            kind.1 += 1;
+            kind.2 += usize::from(near);
+        }
+        sub.0 += usize::from(in_sub);
+        idx.0 += usize::from(in_idx);
+    }
+    let leaves_out = |(reports, scores, with): (usize, usize, usize)| {
+        reports >= HABIT_REPORTS
+            && scores >= HABIT_SCORES
+            && (with as f64) < HABIT_SHARE * scores as f64
+    };
+    SheetHabits {
+        no_subtest_percentiles: leaves_out(sub),
+        no_index_percentiles: leaves_out(idx),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1595,6 +1682,47 @@ mod tests {
         assert!(cases.contains(&"חולשה יחסית".to_owned()));
         assert!(!interpretation_cases("wppsi_iv", "fsiq").contains(&"חולשה יחסית".to_owned()));
         assert!(interpretation_cases("wppsi_iv", "nothing").is_empty());
+    }
+
+    #[test]
+    fn a_percentile_she_never_writes_beside_subtests_is_left_out_of_the_sheet() {
+        // Subtests without percentiles; the index with one.
+        let report = "WPPSI-IV. בקוביות [תוצאה 7 · ממוצע נמוך], ובמטריצות [תוצאה 13 · ממוצע גבוה]. \
+                      בזיכרון תמונות [תוצאה 10 · ממוצע]. מנת משכל כללית [תוצאה 98 · ממוצע], אחוזון [מספר].";
+        let h = sheet_habits([report; 3]);
+        assert!(h.no_subtest_percentiles);
+        assert!(!h.no_index_percentiles, "she writes it beside the index");
+        assert_eq!(
+            sheet_habits([report; 2]),
+            SheetHabits::default(),
+            "two reports are not a habit"
+        );
+        let sheet = ScoreSheet {
+            instrument: "wppsi_iv".into(),
+            module: String::new(),
+            cutoff: None,
+            entries: vec![
+                ScoreEntry {
+                    measure: "block_design".into(),
+                    value: 7.0,
+                    note: String::new(),
+                },
+                ScoreEntry {
+                    measure: "fsiq".into(),
+                    value: 98.0,
+                    note: String::new(),
+                },
+            ],
+            notes: String::new(),
+        };
+        let full = format_sheet(&sheet).unwrap_or_default();
+        let hers = format_sheet_with(&sheet, h).unwrap_or_default();
+        assert!(full.contains("ציון 7, אחוזון"), "{full}");
+        assert!(
+            hers.contains("ציון 7 –") && !hers.contains("ציון 7, אחוזון"),
+            "{hers}"
+        );
+        assert!(hers.contains("ציון 98, אחוזון"), "{hers}");
     }
 
     #[test]

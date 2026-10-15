@@ -490,6 +490,7 @@ export class FakeCore {
           mode: this.modes.get(s.key) ?? "ai",
           guide: this.guides.get(s.key) ?? INSTITUTE_GUIDES.get(s.key) ?? "",
           guide_is_default: !this.guides.has(s.key),
+          guide_learned_from: 0,
           case_guide: c.meta.guides?.[s.key] ?? "",
         };
       }),

@@ -370,13 +370,15 @@ function SuggestionText({ s }: { s: StyleSuggestion }) {
       return <>כך את פותחת את הסעיף בדרך כלל: <q>{s.from}…</q></>;
     case "closing":
       return <>כך את מסיימת את הסעיף בדרך כלל: <q>{s.from}…</q></>;
+    case "formula":
+      return <>משפט שאת כותבת באותו נוסח בכמה דוחות: <q>{s.from}</q></>;
   }
 }
 
 function suggestionDetail(s: StyleSuggestion, o: StyleOverview): string {
   const title = s.section ? o.sections.find((x) => x.key === s.section)?.title : undefined;
   const where = title ? ` · בסעיף ${title}` : "";
-  const fromReports = s.kind === "phrase" || s.kind === "opening" || s.kind === "closing";
+  const fromReports = s.kind !== "replace" && s.kind !== "avoid";
   return fromReports ? `ב-${s.count} דוחות${where}` : `${s.count} פעמים${where}`;
 }
 
@@ -454,6 +456,25 @@ function Learned({ o, onForget }: { o: StyleOverview; onForget: () => void }) {
         </p>
       )}
       {l.fit_by_month.length >= 2 && <FitTrend months={l.fit_by_month} />}
+      {o.skeletons.length > 0 && (
+        <div className="stack style-skeletons">
+          <h3 className="small">הסדר שבו את כותבת את הסעיפים</h3>
+          <ul className="style-learned">
+            {o.skeletons.map((k) => (
+              <li key={`${k.section}-${k.band ?? ""}`}>
+                <b>{k.title}{k.band ? ` (${k.band})` : ""}:</b> {k.topics.join(" · ")}{" "}
+                <span className="muted small">(מ-{k.reports} דוחות)</span>
+              </li>
+            ))}
+          </ul>
+          <p className="hint">כל עוד לא כתבת הנחיה משלך לסעיף, זו ההנחיה שלו בטיוטה.</p>
+        </div>
+      )}
+      {o.omissions.length > 0 && (
+        <ul className="style-learned" aria-label="מה את לא כותבת">
+          {o.omissions.map((t) => <li key={t}>{t}</li>)}
+        </ul>
+      )}
       {canForget && (
         <div className="row">
           <button type="button" className="btn btn-small btn-danger-quiet" onClick={onForget}>לשכוח את מה שנלמד מהתיקונים ומהדוחות שסיימתי</button>

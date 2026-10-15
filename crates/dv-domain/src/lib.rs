@@ -30,10 +30,10 @@ pub use report::{
 };
 pub use routing::{passage_ranges, passages, Feed, Routing, SectionPassages, Suggestion};
 pub use scores::{
-    check_scores, find_score_mentions, find_tagged_scores, format_sheet, instruments,
-    interpretation_cases, is_score_tag, parse_score_tag, score_tag, sheet_profiles, sheet_table,
-    Instrument, Relative, ScoreEntry, ScoreMention, ScoreProfile, ScoreRow, ScoreSheet,
-    TaggedScore, GENERAL_CASE,
+    check_scores, find_score_mentions, find_tagged_scores, format_sheet, format_sheet_with,
+    instruments, interpretation_cases, is_score_tag, parse_score_tag, score_tag, sheet_habits,
+    sheet_profiles, sheet_table, Instrument, Relative, ScoreEntry, ScoreMention, ScoreProfile,
+    ScoreRow, ScoreSheet, SheetHabits, TaggedScore, GENERAL_CASE,
 };
 
 #[derive(Debug, thiserror::Error)]

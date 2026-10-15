@@ -155,6 +155,8 @@ export class FakeStyle {
           learned: this.learned(),
           interpretations: this.interpretations,
           scored_measures: this.scored().length,
+          skeletons: [],
+          omissions: [],
         } satisfies StyleOverview;
       }
       case "import_style_source": {

@@ -175,6 +175,7 @@ impl Core {
                     mode: s.mode,
                     guide: guide.general,
                     guide_is_default: guide.is_default,
+                    guide_learned_from: guide.learned_from,
                     case_guide: guide.case,
                 });
             }

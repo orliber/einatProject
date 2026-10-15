@@ -1292,3 +1292,181 @@ fn demo_mode_shows_what_an_interpretation_looks_like() {
     let r = core.send_interpretations(&p.approval_id.unwrap()).unwrap();
     assert!(r.demo && r.kept > 0, "{r:?}");
 }
+
+/// A fabricated past report in the institute's headings: the home section in her order, and
+/// the test presented in her fixed wording.
+fn template_report(name: &str, fsiq: u32) -> String {
+    format!(
+        "סיכום אבחון פסיכולוגי\n\
+         תפקוד כיום בבית\n\
+         {name} ילד חייכן וסקרן, אוהב מוזיקה ונהנה מטיולים עם המשפחה.\n\
+         בבוקר מתלבש בעזרה, אוכל מגוון ונרדם בקלות.\n\
+         במשחק בוחר בלגו ובפאזלים, ומשחק בדמיון עם בובות.\n\
+         כשהוא כועס מגיב בבכי, ומתקשה להירגע לאחר תסכול.\n\
+         עם האחים משתף, ובגינה פונה לילדים אחרים ומחפש חברים.\n\
+         מדבר במשפטים קצרים, מבין הוראות פשוטות ומצביע על מה שרוצה.\n\
+         רגיש לרעש חזק ונמנע ממגע של מרקמים מסוימים.\n\
+         מתקשה להתרכז לאורך זמן, ופעלתנות רבה ניכרת בבית.\n\
+         התחום הקוגניטיבי\n\
+         מבחן WPPSI-IV הוא מבחן אינטליגנציה לילדים בגילאי הגן ובכיתות הראשונות. \
+         מנת המשכל הכללית נמצאה {fsiq}, בטווח שנמדד במבחן. \
+         {name} עבד בריכוז על הקוביות ושמח בכל הצלחה קטנה.\n"
+    )
+}
+
+fn upload_template_reports(core: &mut Core) {
+    for (n, (name, fsiq)) in [("נועם", 98), ("עידו", 104), ("איתמר", 91)]
+        .into_iter()
+        .enumerate()
+    {
+        let text = template_report(name, fsiq);
+        let preview = core
+            .import_style_source(&format!("דוח {n}.txt"), text.as_bytes())
+            .unwrap();
+        let all: Vec<u32> = preview.parts.iter().map(|p| p.index).collect();
+        core.save_style_source(&preview.token, &all, None).unwrap();
+    }
+}
+
+#[test]
+fn the_guide_of_a_section_is_the_order_she_writes_it_in_until_she_writes_her_own() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core) = vault(Some(fake.clone()));
+    upload_template_reports(&mut core);
+    assert!(fake.sent.lock().unwrap().is_empty(), "learned locally");
+    let o = core.style_overview().unwrap();
+    let home = o
+        .skeletons
+        .iter()
+        .find(|k| k.section == "parents_view" && k.band.is_none())
+        .unwrap_or_else(|| panic!("{:?}", o.skeletons));
+    assert_eq!(home.topics.len(), 8, "{:?}", home.topics);
+    assert_eq!(home.reports, 3);
+    let id = case(&mut core);
+    let guide = |core: &mut Core| {
+        let d = core.case_detail(&id).unwrap();
+        let s = d
+            .sections
+            .into_iter()
+            .find(|s| s.key == "parents_view")
+            .unwrap();
+        (s.guide, s.guide_learned_from, s.guide_is_default)
+    };
+    let (text, from, default) = guide(&mut core);
+    assert_eq!(from, 3);
+    assert!(default, "not hers yet");
+    assert!(text.starts_with("התכונות הטובות ומה אוהב ("), "{text}");
+    assert_eq!(text.lines().count(), 8);
+    no_secrets(&text, "a learned guide");
+    for name in ["נועם", "עידו", "איתמר"] {
+        assert!(!text.contains(name));
+    }
+    core.set_section_guide("parents_view", "קודם מה שההורים מספרים.")
+        .unwrap();
+    let (text, from, default) = guide(&mut core);
+    assert_eq!(
+        (text.as_str(), from, default),
+        ("קודם מה שההורים מספרים.", 0, false)
+    );
+    core.set_section_guide("parents_view", "").unwrap();
+    core.set_style_enabled(false).unwrap();
+    let (text, from, _) = guide(&mut core);
+    assert_eq!(from, 0, "with the profile off, the institute's text");
+    assert!(!text.starts_with("התכונות"), "{text}");
+}
+
+#[test]
+fn a_sentence_she_writes_the_same_way_in_three_reports_is_offered_as_her_wording() {
+    let (_dir, mut core) = vault(None);
+    upload_template_reports(&mut core);
+    let formulas: Vec<crate::StyleSuggestion> = core
+        .style_overview()
+        .unwrap()
+        .suggestions
+        .into_iter()
+        .filter(|s| s.kind == crate::StyleSuggestionKind::Formula)
+        .collect();
+    let texts: Vec<&str> = formulas.iter().map(|f| f.from.as_str()).collect();
+    assert!(
+        texts.contains(&"מבחן WPPSI-IV הוא מבחן אינטליגנציה לילדים בגילאי הגן ובכיתות הראשונות."),
+        "{texts:?}"
+    );
+    assert!(
+        texts.contains(&"מנת המשכל הכללית נמצאה {תוצאה}, בטווח שנמדד במבחן."),
+        "the score is an empty place: {texts:?}"
+    );
+    for f in &formulas {
+        assert!(!f.from.contains('[') && !f.from.chars().any(|c| c.is_ascii_digit()));
+        assert!(
+            !f.from.contains("קוביות"),
+            "a sentence about one child is not her wording"
+        );
+        assert_eq!(f.count, 3);
+    }
+    let first = formulas.first().unwrap().clone();
+    let active = core.accept_style_suggestion(&first.id).unwrap();
+    assert!(active.profile.items.iter().any(|i| i.text == first.from
+        && i.kind == dv_ai::StyleKind::Template
+        && i.origin == dv_ai::StyleOrigin::Reports));
+    assert!(!core
+        .style_overview()
+        .unwrap()
+        .suggestions
+        .iter()
+        .any(|s| s.id == first.id));
+    let second = formulas.get(1).unwrap();
+    core.dismiss_style_suggestion(&second.id).unwrap();
+    assert!(!core
+        .style_overview()
+        .unwrap()
+        .suggestions
+        .iter()
+        .any(|s| s.id == second.id));
+}
+
+#[test]
+fn a_percentile_she_never_writes_beside_subtests_is_left_out_of_the_scores_material() {
+    let (_dir, mut core) = vault(None);
+    let sheet = dv_domain::ScoreSheet {
+        instrument: "wppsi_iv".into(),
+        module: String::new(),
+        cutoff: None,
+        entries: vec![dv_domain::ScoreEntry {
+            measure: "block_design".into(),
+            value: 9.0,
+            note: String::new(),
+        }],
+        notes: String::new(),
+    };
+    assert!(core
+        .preview_scores(&sheet)
+        .unwrap()
+        .contains("ציון 9, אחוזון"));
+    for (name, text, _) in score_reports() {
+        let preview = core.import_style_source(&name, text.as_bytes()).unwrap();
+        let all: Vec<u32> = preview.parts.iter().map(|p| p.index).collect();
+        core.save_style_source(&preview.token, &all, None).unwrap();
+    }
+    let o = core.style_overview().unwrap();
+    // The twelve fabricated reports share no sentence about a child: none is her wording.
+    let formulas: Vec<&str> = o
+        .suggestions
+        .iter()
+        .filter(|s| s.kind == crate::StyleSuggestionKind::Formula)
+        .map(|s| s.from.as_str())
+        .collect();
+    assert!(formulas.is_empty(), "{formulas:?}");
+    assert!(
+        o.omissions.iter().any(|t| t.contains("תתי-המבחנים")),
+        "{:?}",
+        o.omissions
+    );
+    let preview = core.preview_scores(&sheet).unwrap();
+    assert!(
+        preview.contains("ציון 9 –") && !preview.contains("אחוזון"),
+        "{preview}"
+    );
+    let id = case(&mut core);
+    let saved = core.save_scores(&id, None, &sheet).unwrap();
+    assert_eq!(saved.content, preview, "what is saved is what she saw");
+}

@@ -1720,6 +1720,25 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
         )
         .unwrap_or_default(),
     ));
+    // The order of a section learned from her reports (K3) goes out as its guide: every
+    // topic, at every length.
+    for (section, topics) in dv_style::skeleton::TOPICS {
+        let skeleton = dv_style::Skeleton {
+            section: (*section).to_owned(),
+            band: None,
+            reports: 3,
+            topics: topics
+                .iter()
+                .zip([10, 40, 100, 200].into_iter().cycle())
+                .map(|((label, _), words)| dv_style::SkeletonTopic {
+                    label: (*label).to_owned(),
+                    share: 100,
+                    words,
+                })
+                .collect(),
+        };
+        body.push(Value::String(skeleton.guide()));
+    }
     let keys: Vec<String> = structure.sections().map(|s| s.key.clone()).collect();
     let excerpts: Vec<dv_ai::StyleExcerpt> = keys
         .iter()
