@@ -89,8 +89,9 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   const hint = `${useRotatingPlaceholder(CONSULT_HINTS, !messageEmpty)} · שמות יוסתרו אוטומטית`;
   const [review, setReview] = useKept<{ prepared: Prepared; text: string } | null>("consult:review", null);
   // A question typed (or waiting in the review) is kept in the vault if it locks meanwhile.
-  const typed = message.trim() ? message : (review?.text ?? null);
-  useHoldUnsaved(scope, `שאלה בשיחה עם ${ai}`, typed, "consult");
+  // By the box's emptiness, which flips at the first key: typing without a pause is held too.
+  const typed = !messageEmpty ? message : (review?.text ?? null);
+  const holdLive = useHoldUnsaved(scope, `שאלה בשיחה עם ${ai}`, typed, "consult");
   const [copied, setCopied] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<ConsultationSummary | null>(null);
   const [error, setError] = useKept<string | null>("consult:error", null);
@@ -310,7 +311,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
             <label htmlFor="consult-q" className="visually-hidden">שאלה ל-{ai}</label>
             <div className="chat-input">
               <LocalText id="consult-q" ref={input} rows={1} className="grow" placeholder={hint}
-                initial={message} resize={fitHeight} onEmptyChange={setMessageEmpty}
+                initial={message} resize={fitHeight} onEmptyChange={setMessageEmpty} onLive={holdLive}
                 onText={(text) => { reported.current = text; setMessage(text); }}
                 onKeyDown={(e) => {
                   // Enter sends, Shift+Enter is a new line (as in every chat).

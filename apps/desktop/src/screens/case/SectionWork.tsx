@@ -50,11 +50,12 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   const chatHint = `${useRotatingPlaceholder(DRAFT_HINTS, !messageEmpty)} · שמות יוסתרו אוטומטית`;
   const [busy, setBusy] = useState(false);
   /** A paragraph being edited: the text is in `editBox`; `text` is its debounced copy, for the lock. */
-  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const [editing, setEditing] = useKept<{ id: string; text: string } | null>(`${keep}:editing`, null);
   const editBox = useRef<LocalTextHandle>(null);
   /** A paragraph of her own being written (in `ownBox`), with its debounced copy, or `null`. */
-  const [own, setOwn] = useState<string | null>(null);
-  const [ownEmpty, setOwnEmpty] = useState(true);
+  // Both kept while the vault is open: leaving and coming back finds the editor with her text.
+  const [own, setOwn] = useKept<string | null>(`${keep}:own`, null);
+  const [ownEmpty, setOwnEmpty] = useState(() => !(own ?? "").trim());
   const ownBox = useRef<LocalTextHandle>(null);
   const startOwn = () => { setOwnEmpty(true); setOwn(""); };
   const [error, setError] = useState<string | null>(null);
@@ -104,7 +105,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
 
   // One request at a time per section: while it is prepared, reviewed or written.
   const job = api.jobs.find((j) => j.section === section.key);
-  useHoldUnsaved(caseId, `פסקה בסעיף "${section.title}"`, editing?.text ?? own);
+  const holdLive = useHoldUnsaved(caseId, `פסקה בסעיף "${section.title}"`, editing?.text ?? own);
   const [preparing, setPreparing] = useState(false);
   const working = preparing || busy || job !== undefined;
 
@@ -443,7 +444,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                 {isEditing ? (
                   <label className="edit-box">
                     <span className="visually-hidden">עריכת הפסקה</span>
-                    <LocalText key={p.id} ref={editBox} className="textarea serif" rows={5} initial={editing.text} autoFocus
+                    <LocalText key={p.id} ref={editBox} className="textarea serif" rows={5} initial={editing.text} autoFocus onLive={holdLive}
                       onText={(text) => setEditing((e) => (e?.id === p.id ? { id: p.id, text } : e))} />
                   </label>
                 ) : (
@@ -486,7 +487,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
             <div className="para pending">
               <label className="edit-box">
                 <span className="visually-hidden">פסקה חדשה</span>
-                <LocalText ref={ownBox} className="textarea serif" rows={4} initial={own} autoFocus placeholder="כתבי כאן. שמות מוסתרים לפני כל שליחה."
+                <LocalText ref={ownBox} className="textarea serif" rows={4} initial={own} autoFocus onLive={holdLive} placeholder="כתבי כאן. שמות מוסתרים לפני כל שליחה."
                   onText={(text) => setOwn((o) => (o === null ? null : text))} onEmptyChange={setOwnEmpty} />
               </label>
               <div className="row">

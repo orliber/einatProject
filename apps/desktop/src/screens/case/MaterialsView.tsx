@@ -369,7 +369,7 @@ function WriteDialog(props: { caseId: string; kind: InputKind; input?: CaseInput
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   // A long session note must survive Escape and the automatic lock.
-  useHoldUnsaved(props.caseId, title.trim() || kindLabel[kind], changed && content.trim() ? content : null, "materials");
+  const holdLive = useHoldUnsaved(props.caseId, title.trim() || kindLabel[kind], changed && !empty ? content : null, "materials");
 
   async function save() {
     // What is in the box now, not the debounced copy.
@@ -411,7 +411,7 @@ function WriteDialog(props: { caseId: string; kind: InputKind; input?: CaseInput
         <div className="field">
           <label htmlFor="w-text">הטקסט</label>
           <LocalText id="w-text" ref={box} className="textarea serif write-area" rows={14} initial={props.input?.content ?? ""} autoFocus
-            onText={setContent} onEditedChange={setChanged} onEmptyChange={setEmpty} />
+            onText={setContent} onLive={holdLive} onEditedChange={setChanged} onEmptyChange={setEmpty} />
         </div>
         <ErrorLine error={error} />
       </div>

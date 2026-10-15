@@ -10,7 +10,7 @@ import { SettingsScreen } from "./screens/SettingsScreen";
 import { StyleScreen } from "./screens/StyleScreen";
 import { ErrorLine, Toast, type ToastAction } from "./components/ui";
 import { IdleWarning } from "./components/IdleWarning";
-import { UnsavedNotice } from "./components/Unsaved";
+import { forgetHold, holdNow, UnsavedNotice } from "./components/Unsaved";
 import { applyTextSize, readTextSize, stepTextSize } from "./textSize";
 import { ShortcutsSheet, useShortcutsSheet } from "./components/ShortcutsSheet";
 import { isCombo, KEYS } from "./shortcuts";
@@ -134,6 +134,8 @@ export function App() {
   );
 
   const lockNow = useCallback(async () => {
+    // What she was typing a moment ago reaches the core first, which keeps it as it locks.
+    await holdNow();
     await ipc.lock().catch(() => undefined);
     setRoute({ name: "cases" });
     await refresh();
@@ -153,6 +155,7 @@ export function App() {
       clearKept();
       // And the failures kept for "לנסות שוב": they were for the vault just closed.
       forgetFailures();
+      forgetHold();
     }
     wasUnlocked.current = unlocked;
   }, [unlocked]);

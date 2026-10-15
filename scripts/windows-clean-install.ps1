@@ -28,12 +28,17 @@ foreach ($f in Get-ChildItem $kept.FullName -Filter *.txt) {
 }
 Write-Host "kept vault $($kept.Name): $((Get-ChildItem $vault -File).Count) files"
 
-# 2. Silent install, for this user only (no administrator).
+# 2. Silent install, for this user only (no administrator). The install itself leaves the vault
+#    exactly as it was; opening it later writes to it (its log, a migration), so the uninstall
+#    check in step 4 compares with the vault as the app left it.
+$hash = { Get-ChildItem $vault -File | Sort-Object Name | ForEach-Object { "$($_.Name) $((Get-FileHash $_.FullName).Hash)" } }
+$untouched = & $hash
 $setup = Start-Process -FilePath $Installer -ArgumentList "/S" -Wait -PassThru
 if ($setup.ExitCode -ne 0) { throw "the installer ended with $($setup.ExitCode)" }
 $exe = Get-ChildItem $installDir -Filter *.exe | Where-Object { $_.Name -ne "uninstall.exe" } | Select-Object -First 1
 if (-not $exe) { throw "nothing was installed in $installDir" }
 Write-Host "installed $($exe.FullName)"
+if (Compare-Object $untouched (& $hash)) { throw "the installer changed the vault" }
 
 # 3. It starts and stays up beside the old vault, opens it, takes 500 Hebrew characters typed
 #    in its real window (F1), and writes no crash.

@@ -28,6 +28,9 @@ export type LocalTextProps = Native & {
    *  removed (if anything is still unreported). For consumers that may lag: holding unsaved text,
    *  keeping a draft. Save and send read `value()` from the handle instead. */
   onText?: ((text: string) => void) | undefined;
+  /** The text on every change, at once. Only for what costs nothing per key (keeping the text
+   *  held for a lock, without calling the core); anything heavier listens to `onText`. */
+  onLive?: ((text: string) => void) | undefined;
   /** Only when the box turns empty (blank or spaces only) or stops being empty. It starts as
    *  `!initial.trim()`, which the screen already knows. */
   onEmptyChange?: ((empty: boolean) => void) | undefined;
@@ -37,7 +40,7 @@ export type LocalTextProps = Native & {
   resize?: ((box: HTMLTextAreaElement) => void) | undefined;
 };
 
-export function LocalText({ ref, initial = "", onText, onEmptyChange, onEditedChange, resize, onBlur, ...rest }: LocalTextProps) {
+export function LocalText({ ref, initial = "", onText, onLive, onEmptyChange, onEditedChange, resize, onBlur, ...rest }: LocalTextProps) {
   const [first] = useState(initial);
   const box = useRef<HTMLTextAreaElement>(null);
   const live = useRef(first);
@@ -45,9 +48,9 @@ export function LocalText({ ref, initial = "", onText, onEmptyChange, onEditedCh
   const wasEdited = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The latest callbacks, so a change in the screen's handlers never re-creates anything here.
-  const latest = useRef({ onText, onEmptyChange, onEditedChange, resize });
+  const latest = useRef({ onText, onLive, onEmptyChange, onEditedChange, resize });
   useLayoutEffect(() => {
-    latest.current = { onText, onEmptyChange, onEditedChange, resize };
+    latest.current = { onText, onLive, onEmptyChange, onEditedChange, resize };
   });
 
   /** Report the text now, if a report is still waiting. */
@@ -60,6 +63,7 @@ export function LocalText({ ref, initial = "", onText, onEmptyChange, onEditedCh
 
   const take = useCallback((next: string, now: boolean) => {
     live.current = next;
+    latest.current.onLive?.(next);
     const empty = next.trim() === "";
     if (empty !== wasEmpty.current) {
       wasEmpty.current = empty;

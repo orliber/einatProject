@@ -247,6 +247,43 @@ describe("writing the report", () => {
   });
 });
 
+describe("text being typed (F1a)", () => {
+  it("survives leaving the stage before it was reported, and is in the editor on return", async () => {
+    const { user } = await openApp();
+    const page = await openCase(user);
+    await user.click(within(page).getByText(/הופנה לאבחון פסיכולוגי-התפתחותי על ידי הוריו/));
+    const box = await screen.findByRole("textbox", { name: /עריכת פסקה בסעיף/ });
+    // No pause: the box has not reported it yet when she leaves.
+    fireEvent.change(box, { target: { value: "נוסח שלא נשמר עדיין" } });
+    await user.click(screen.getAllByRole("button", { name: /חומרים/ })[0] as HTMLElement);
+    await screen.findByRole("button", { name: /הדבקת טקסט/ });
+    await user.click(screen.getAllByRole("button", { name: /כתיבה$/ })[0] as HTMLElement);
+    const again = await screen.findByRole("textbox", { name: /עריכת פסקה בסעיף/ });
+    expect(again).toHaveValue("נוסח שלא נשמר עדיין");
+  });
+
+  it("is held in full before a lock by hand, even typed without a pause", async () => {
+    const core = new FakeCore();
+    await core.handle("unlock", { password: "x" });
+    const calls: { cmd: string; args: unknown }[] = [];
+    mockIPC((cmd, args) => {
+      calls.push({ cmd, args });
+      return core.handle(cmd, args);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const page = await openCase(user);
+    await user.click(within(page).getByText(/הופנה לאבחון פסיכולוגי-התפתחותי על ידי הוריו/));
+    const box = await screen.findByRole("textbox", { name: /עריכת פסקה בסעיף/ });
+    fireEvent.change(box, { target: { value: "נוסח שנכתב רגע לפני הנעילה" } });
+    fireEvent.keyDown(window, { key: "l", code: "KeyL", ctrlKey: true });
+    await waitFor(() => expect(calls.some((c) => c.cmd === "lock")).toBe(true));
+    const lock = calls.findIndex((c) => c.cmd === "lock");
+    const held = calls.slice(0, lock).filter((c) => c.cmd === "hold_unsaved").at(-1);
+    expect((held?.args as { edit: { text: string } | null }).edit?.text).toBe("נוסח שנכתב רגע לפני הנעילה");
+  });
+});
+
 describe("keyboard", () => {
   it("F1 opens the shortcuts sheet, and Escape closes it", async () => {
     await openApp();

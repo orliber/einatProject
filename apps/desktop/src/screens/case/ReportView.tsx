@@ -7,6 +7,7 @@ import { ErrorLine, WarnIcon } from "../../components/ui";
 import { Why } from "../../components/Why";
 import { ProgressLine } from "../../components/Progress";
 import { useHoldUnsaved } from "../../components/Unsaved";
+import { useKept } from "../../kept";
 import { LocalText, type LocalTextHandle } from "../../components/LocalText";
 import { useRotatingPlaceholder } from "../../components/Rotating";
 import { DRAFT_HINTS, PARAGRAPH_HINTS } from "../../i18n/suggestions";
@@ -165,7 +166,9 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
   /** A paragraph being edited in place, or a new one at `at`: "first", "end" or after a paragraph's id.
    *  The text being typed lives in the box (`editBox`); `text` is its debounced copy, for the
    *  vault lock, and `empty` follows the box only when it turns empty or back (F1a). */
-  const [editing, setEditing] = useState<{ id: string | null; text: string; at?: string | undefined; empty: boolean } | null>(null);
+  // Kept while the vault is open: leaving for another stage and coming back finds the editor
+  // open with what she typed (F1a, "ובעזיבה").
+  const [editing, setEditing] = useKept<{ id: string | null; text: string; at?: string | undefined; empty: boolean } | null>(`case:${caseId}:report:${s.key}:editing`, null);
   const editBox = useRef<LocalTextHandle>(null);
   const edit = (id: string | null, text: string, at?: string) => setEditing({ id, text, at, empty: !text.trim() });
   const [preparing, setPreparing] = useState(false);
@@ -178,7 +181,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
   const [whyPop, setWhyPop] = useState<string | null>(null);
   /** The paragraph whose delete button asks "למחוק?". */
   const [deleting, setDeleting] = useState<string | null>(null);
-  useHoldUnsaved(caseId, `פסקה בסעיף "${s.title}"`, editing?.text ?? null);
+  const holdLive = useHoldUnsaved(caseId, `פסקה בסעיף "${s.title}"`, editing?.text ?? null);
   // "In your own words" for Claude: one wish, kept while a card closes and another opens.
   const [wish, setWish] = useState("");
   const [wishEmpty, setWishEmpty] = useState(true);
@@ -372,7 +375,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
   const editor = editing && (
     <div className="a4-edit">
       <LocalText key={editing.id ?? `new-${editing.at ?? "end"}`} ref={editBox} className="a4-edit-text" resize={fitRows} autoFocus
-        aria-label={editing.id ? `עריכת פסקה בסעיף ${s.title}` : `פסקה חדשה בסעיף ${s.title}`} initial={editing.text}
+        aria-label={editing.id ? `עריכת פסקה בסעיף ${s.title}` : `פסקה חדשה בסעיף ${s.title}`} initial={editing.text} onLive={holdLive}
         placeholder="כותבים כאן, כמו בוורד. שמות מוסתרים לפני כל שליחה."
         onText={(text) => { const { id, at } = editing; setEditing((e) => (e && e.id === id && e.at === at ? { ...e, text } : e)); }}
         onEmptyChange={(empty) => { const { id, at } = editing; setEditing((e) => (e && e.id === id && e.at === at ? { ...e, empty } : e)); }}

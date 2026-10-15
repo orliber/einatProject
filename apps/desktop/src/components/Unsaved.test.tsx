@@ -2,7 +2,7 @@ import { act, fireEvent, render, renderHook, screen } from "@testing-library/rea
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { AppContext, type AppApi } from "../App";
 import { status } from "../test/fixtures";
-import { UnsavedNotice, useHoldUnsaved } from "./Unsaved";
+import { forgetHold, holdNow, UnsavedNotice, useHoldUnsaved } from "./Unsaved";
 
 describe("an edit open when the vault locks", () => {
   it("goes to the core while she types, and is withdrawn when the editor closes", async () => {
@@ -22,8 +22,35 @@ describe("an edit open when the vault locks", () => {
     await act(async () => { vi.advanceTimersByTime(1000); });
     expect(calls).toEqual([{ case_id: "c1", place: "פסקה", view: "report", text: "טיוטה" }]);
     rerender({ text: null });
+    await act(async () => { vi.advanceTimersByTime(200); });
     expect(calls.at(-1)).toBeNull();
     unmount();
+    vi.useRealTimers();
+  });
+
+  it("is held as it is in the box this moment when a lock comes, and kept when the screen goes", async () => {
+    vi.useFakeTimers();
+    const calls: unknown[] = [];
+    mockIPC((cmd, args) => {
+      if (cmd === "hold_unsaved") calls.push((args as { edit: unknown }).edit);
+      return null;
+    });
+    let live: ((t: string) => void) | null = null;
+    const { unmount } = renderHook(() => { live = useHoldUnsaved("c1", "פסקה", ""); });
+    // Every key, no pause: nothing goes to the core while she types…
+    for (const t of ["ט", "טי", "טיו", "טיוטה"]) {
+      act(() => live?.(t));
+      vi.advanceTimersByTime(50);
+    }
+    expect(calls).toEqual([]);
+    // …and a lock by hand sends exactly what is in the box.
+    await act(async () => { await holdNow(); });
+    expect(calls).toEqual([{ case_id: "c1", place: "פסקה", view: "report", text: "טיוטה" }]);
+    // Leaving the screen with the editor open keeps it held.
+    unmount();
+    await act(async () => { vi.advanceTimersByTime(500); });
+    expect(calls).toHaveLength(1);
+    forgetHold();
     vi.useRealTimers();
   });
 
