@@ -18,6 +18,7 @@
     "allow-readiness",
     "allow-confirm-readiness",
     "allow-security-status",
+    "allow-export-security-pdf",
     "allow-set-send-stopped",
     "allow-usage-summary",
     "allow-set-monthly-cap",

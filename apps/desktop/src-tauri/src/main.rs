@@ -352,6 +352,7 @@ fn main() {
             readiness,
             confirm_readiness,
             security_status,
+            export_security_pdf,
             set_send_stopped,
             usage_summary,
             set_monthly_cap,

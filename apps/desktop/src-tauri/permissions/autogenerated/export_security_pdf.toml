@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-export-security-pdf"
+description = "Enables the export_security_pdf command without any pre-configured scope."
+commands.allow = ["export_security_pdf"]
+
+[[permission]]
+identifier = "deny-export-security-pdf"
+description = "Denies the export_security_pdf command without any pre-configured scope."
+commands.deny = ["export_security_pdf"]

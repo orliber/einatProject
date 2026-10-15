@@ -153,6 +153,20 @@ function sentences(text: string, n: number): string {
   return (text.match(/[^.!?]+[.!?]?/g) ?? []).slice(0, n).join("").trim();
 }
 
+/** The demo's protection layers (the program's own come from the core, checked now). */
+const FAKE_LAYERS: [string, string, string][] = [
+  ["encryption", "הצפנת הכספת", "הכספת מוצפנת."],
+  ["computer_bound", "קשירה למחשב", "הכספת קשורה למחשב הזה."],
+  ["privacy_gate", "הסתרת פרטים לפני שליחה", "נבדק עכשיו: השער חסם שם גלוי של ילד בדוי."],
+  ["send_rules", "שליחה רק לפי הכללים", "נבדק עכשיו: מודל אחר, שדה מיותר ואזור אחר נחסמו."],
+  ["pinned", "חיבור מאומת לשירות ה-AI", "נבדק עכשיו: כל 9 התעודות המוכרות נמצאות בתוכנה."],
+  ["isolation", "קריאת מסמכים מבודדת", "פעיל במחשב הזה."],
+  ["lock", "נעילה והגנת מסך", "נעילה אחרי 10 דקות, והגנת המסך פעילה."],
+  ["memory", "זיכרון", "פעיל בהפעלה הזו."],
+  ["log", "יומן שלא ניתן לשנות", "נבדק עכשיו: היומן שלם."],
+  ["updates", "עדכונים חתומים", "מפתח החתימה נמצא בתוכנה."],
+];
+
 export class FakeCore {
   private unlocked = false;
   /** `?setup` in the address opens the first-run screens (for the demo page's pictures). */
@@ -776,8 +790,18 @@ export class FakeCore {
           items: [ok("encrypted"), ok("computer_bound"), ok("recovery_kit", "ok", "0"), ok("fips", "info"), ok("disk"), ok("cloud_folder"), ok("log_integrity"),
             ok("auto_lock", "ok", "10"), ok("screen"), ok("send", this.sendStopped ? "warn" : "ok"), ok("isolation"), ok("memory")],
           send_stopped: this.sendStopped, daily_limit: 400, max_request_kb: 2048,
+          layers: FAKE_LAYERS.map(([key, title, now]) => ({
+            key, title, now, what: `${title}: כך זה עובד בתוכנה.`, against: "גישה של מי שלא אמור לראות.",
+            state: key === "send_rules" && this.sendStopped ? "info" : "ok",
+          })),
+          yours: [
+            { key: "disk", title: "הצפנת הדיסק (BitLocker)", what: "מצפינה את כל המחשב.", against: "גניבה של המחשב.", state: "ok", now: "פעילה." },
+            { key: "recovery_kit", title: "ערכת השחזור המודפסת", what: "פותחת את הכספת במחשב אחר.", against: "אובדן של כל התיקים.", state: "ok", now: "נבדקה היום." },
+          ],
         };
       }
+      case "export_security_pdf":
+        return "C:\\Users\\demo\\Downloads\\שכבות ההגנה.pdf";
       case "readiness":
       case "confirm_readiness": {
         if (cmd === "confirm_readiness") this.ready[a.key as string] = a.done ? 1_790_000_000 : null;

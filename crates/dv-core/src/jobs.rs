@@ -417,7 +417,7 @@ pub struct Exported {
     bytes: Result<Zeroizing<Vec<u8>>, CoreError>,
 }
 
-fn export_error(e: dv_export::ExportError) -> CoreError {
+pub(crate) fn export_error(e: dv_export::ExportError) -> CoreError {
     match e {
         dv_export::ExportError::WeakPassword => CoreError::Refused(format!(
             "סיסמה לקובץ צריכה להיות באורך {} תווים לפחות.",

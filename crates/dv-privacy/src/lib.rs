@@ -14,6 +14,7 @@ mod misread;
 pub mod patterns;
 mod pipeline;
 pub mod restore;
+mod self_check;
 pub mod text;
 
 pub use fix::{fix_refused, FixedItem, FIXABLE_CODES, LEFT_OUT};
@@ -28,6 +29,7 @@ pub use pipeline::{
     AutoKind, Checks, FilterOutcome, Mark, NameHint, PrivacyContext, Segment, Suspect, SuspectKind,
     NAME_HINT_SURE,
 };
+pub use self_check::gate_self_check;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PrivacyError {

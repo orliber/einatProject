@@ -103,6 +103,18 @@ pub(crate) async fn export_pdf(
     save_export(dir, format!("{stem}.pdf"), bytes).await
 }
 
+/// L6: the protection layers on paper, for the parents and the institute (nothing about a
+/// child), into the same folder.
+#[tauri::command]
+pub(crate) async fn export_security_pdf(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Res<String> {
+    let dir = export_dir(&app)?;
+    let bytes = with_core(&state, |c| c.security_layers_pdf()).await?;
+    save_export(dir, "שכבות ההגנה.pdf".to_owned(), bytes).await
+}
+
 /// Whether a PDF is one this vault exported, unchanged: when it was made, or `None`.
 #[tauri::command]
 pub(crate) async fn check_original(

@@ -99,6 +99,44 @@ pub(crate) fn check_fields(body: &Value) -> Result<&serde_json::Map<String, Valu
     Ok(obj)
 }
 
+/// The rules check themselves at run time, for the security page (D-078): a model off the
+/// allow-list, a field that is not allowed and a request without the US region are each
+/// refused, and an allowed request passes. Nothing is sent.
+#[must_use]
+pub fn policy_self_check() -> bool {
+    let body = |model: &str, geo: &str, extra: bool| {
+        let mut b = serde_json::json!({
+            "model": model,
+            "inference_geo": geo,
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "בדיקה"}],
+        });
+        if extra {
+            if let Some(o) = b.as_object_mut() {
+                o.insert("metadata".to_owned(), serde_json::json!({ "user_id": "x" }));
+            }
+        }
+        b
+    };
+    let model = ALLOWED_MODELS.first().copied().unwrap_or_default();
+    check_policy(&body(model, "us", false)).is_ok()
+        && check_policy(&body("some-other-model", "us", false)).is_err()
+        && check_policy(&body(model, "us", true)).is_err()
+        && check_policy(&body(model, "eu", false)).is_err()
+}
+
+/// The pins of the AI service are all in place (D-077).
+#[must_use]
+pub fn pinning_in_place() -> bool {
+    pinning::pinned_roots(pinning::ANTHROPIC_ROOTS).roots.len() == pinning::ANTHROPIC_ROOTS.len()
+}
+
+/// How many roots the AI service may chain to (D-077).
+#[must_use]
+pub fn pinned_root_count() -> usize {
+    pinning::ANTHROPIC_ROOTS.len()
+}
+
 /// Check the outgoing body against the ZDR rules (STANDARDS.md §4, D-009).
 pub fn check_policy(body: &Value) -> Result<(), EgressError> {
     let obj = check_fields(body)?;
@@ -408,6 +446,12 @@ mod wire_tests;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_rules_and_the_pins_pass_their_own_check() {
+        assert!(super::policy_self_check());
+        assert!(super::pinning_in_place());
+    }
+
     use super::*;
     use serde_json::json;
 

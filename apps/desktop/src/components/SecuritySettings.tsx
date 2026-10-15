@@ -1,50 +1,45 @@
-// "Security status" (S4): which protections are on right now, as the program itself checked.
-// A missing protection is shown plainly; the emergency stop for sending sits at the bottom.
+// "The protection layers" (S4, L6): the ten layers of protection, each with what it does,
+// what it protects against and what the program found when it checked just now; then what
+// depends on her; then the emergency stop. The texts come from the core, which makes the PDF
+// from the same list, so the page and the paper say the same thing.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { ipc, type SecurityItem, type SecurityStatus } from "../ipc/client";
+import { ipc, type SecurityLayer, type SecurityStatus } from "../ipc/client";
 import { useApp } from "../App";
 import { ErrorLine } from "./ui";
 
-const LABELS: Record<string, (d: string | null) => string> = {
-  encrypted: () => "הכספת מוצפנת (AES-256), ומפתח נפרד לכל תיק",
-  computer_bound: () => "הסיסמה פותחת את הכספת רק במחשב הזה",
-  recovery_kit: (d) => (d === null ? "ערכת השחזור המודפסת עוד לא נבדקה" : d === "0" ? "ערכת השחזור המודפסת נבדקה היום" : `ערכת השחזור המודפסת נבדקה לפני ${d} ימים`),
-  fips: () => "מודול ההצפנה",
-  disk: () => "הצפנת הדיסק של המחשב (BitLocker / FileVault)",
-  cloud_folder: (d) => (d ? `הכספת נמצאת בתיקיית ענן (${d}). כדאי להעביר אותה` : "הכספת לא בתיקיית ענן"),
-  log_integrity: (d) => (d ? `יומן הפעילות: ${d}` : "יומן הפעילות שלם ולא שונה"),
-  auto_lock: (d) => `נעילה אוטומטית אחרי ${d} דקות, גם כשהחלון תקוע, וכשנועלים את המחשב או הוא נרדם`,
-  screen: () => "צילום מסך ושיתוף מסך מציגים חלון ריק",
-  send: () => "השליחה ל-AI",
-  isolation: () => "קריאת מסמכים בתהליך מבודד",
-  memory: () => "מה שהכספת מחזיקה בזיכרון נשאר בזיכרון ולא נכתב לדיסק",
-};
-
-const STATE_INFO = { chip: "chip chip-sand", text: "רגיל" };
 const STATE_TEXT: Record<string, { chip: string; text: string }> = {
   ok: { chip: "chip chip-ok", text: "פעיל" },
   warn: { chip: "chip chip-warn", text: "לבדוק" },
-  info: { chip: "chip chip-sand", text: "רגיל" },
+  info: { chip: "chip chip-sand", text: "לידיעה" },
 };
 
-function suffix(i: SecurityItem): string {
-  if (i.key === "send") return i.state === "ok" ? " פעילה, עם תקרה יומית וגודל מקסימלי" : " כבויה: עצירת חירום";
-  if (i.key === "fips") return i.state === "ok" ? " מאושר FIPS 140-3" : " סטנדרטי";
-  if (i.key === "recovery_kit" && i.state === "warn") return ". במחשב אחר רק היא פותחת את הכספת: כדאי לבדוק אותה ב\"סיסמה ואבטחה\"";
-  if (i.key === "computer_bound" && i.state === "warn") return " (זה יקרה בכניסה הבאה עם הסיסמה)";
-  if (i.key === "computer_bound" && i.state === "info") return " (במחשב הזה אין אפשרות כזו)";
-  if (i.key === "memory" && i.state === "warn") return " (Windows לא אישר את המקום לזה בהפעלה הזו)";
-  if (i.key === "memory" && i.state === "info") return " (במחשב הזה אין אפשרות כזו)";
-  if (i.key === "isolation") return i.state === "ok" ? "" : " (במחשב הזה אין בידוד כזה)";
-  return "";
+const INFO = { chip: "chip chip-sand", text: "לידיעה" };
+
+function Layer({ l, n }: { l: SecurityLayer; n?: number }) {
+  const st = STATE_TEXT[l.state] ?? INFO;
+  return (
+    <li className="layer">
+      <div className="layer-head">
+        <span className={st.chip}>{st.text}</span>
+        <strong>{n === undefined ? l.title : `${n}. ${l.title}`}</strong>
+      </div>
+      <p className="layer-now">{l.now}</p>
+      <details>
+        <summary>מה זה ומפני מה</summary>
+        <p>{l.what}</p>
+        <p>מגינה מפני: {l.against}</p>
+      </details>
+    </li>
+  );
 }
 
 export function SecuritySettings() {
-  const { fail } = useApp();
+  const { fail, notify } = useApp();
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["security"], queryFn: () => ipc.securityStatus() });
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   async function stop(stopped: boolean) {
     setError(null);
@@ -55,28 +50,49 @@ export function SecuritySettings() {
     }
   }
 
+  async function savePdf() {
+    setError(null);
+    setSaving(true);
+    try {
+      notify(`נשמר: ${await ipc.exportSecurityPdf()}`);
+    } catch (e) {
+      setError(fail(e as never));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const s = q.data;
   return (
     <section className="card setting" aria-labelledby="s-sec">
-      <h2 id="s-sec">מצב האבטחה</h2>
-      <ul className="sec-list">
-        {s?.items.map((i) => {
-          const st = STATE_TEXT[i.state] ?? STATE_INFO;
-          return (
-            <li key={i.key}>
-              <span className={st.chip}>{st.text}</span> {LABELS[i.key]?.(i.detail) ?? i.key}
-              {suffix(i)}
-            </li>
-          );
-        })}
-      </ul>
+      <h2 id="s-sec">שכבות ההגנה</h2>
+      <p className="hint">כל שכבה נבדקה עכשיו בידי התוכנה, לא רק לפי ההגדרות.</p>
+      <ol className="sec-list">
+        {s?.layers.map((l, i) => <Layer key={l.key} l={l} n={i + 1} />)}
+      </ol>
+      {s && s.yours.length > 0 && (
+        <>
+          <h3>מה שתלוי בך</h3>
+          <ul className="sec-list">
+            {s.yours.map((l) => <Layer key={l.key} l={l} />)}
+          </ul>
+        </>
+      )}
       {s && (
         <div className="row">
           <p className="hint">
-            עד {s.daily_limit} בקשות ביום, ולא יותר מ-{s.max_request_kb} KB לבקשה. הכל נשלח רק אחרי אישור המסך "לפני ששולחים".
+            עד {s.daily_limit} בקשות ביום, ולא יותר מ-{s.max_request_kb} KB לבקשה.
           </p>
           <button type="button" className={s.send_stopped ? "btn" : "btn btn-danger"} onClick={() => void stop(!s.send_stopped)}>
             {s.send_stopped ? "להפעיל שליחה מחדש" : "עצירת חירום: לכבות שליחה"}
+          </button>
+        </div>
+      )}
+      {s && (
+        <div className="row">
+          <p className="hint">אותו עמוד כקובץ PDF, להורים או למכון. אין בו שום פרט על ילד.</p>
+          <button type="button" className="btn" disabled={saving} onClick={() => void savePdf()}>
+            לשמור כ-PDF
           </button>
         </div>
       )}

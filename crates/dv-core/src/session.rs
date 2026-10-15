@@ -368,6 +368,9 @@ impl Core {
                 }
                 self.vault = Some(vault);
                 self.last_activity = Instant::now();
+                // The gate and the sending rules try themselves once per opening; a failure
+                // stops sending until the program is fixed (D-078, fail-closed).
+                crate::layers::stop_if_broken(crate::layers::SelfChecks::run());
                 if purge {
                     // Best effort: a case that fails to erase now is tried again next time, and
                     // never keeps the vault from opening.

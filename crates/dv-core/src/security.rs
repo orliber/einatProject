@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::layers::{self, SecurityLayer, SelfChecks};
 use crate::{AppStatus, Core};
 
 /// `ok` – on and verified · `warn` – off or unknown, she should look · `info` – a fact.
@@ -26,6 +27,10 @@ pub struct SecurityStatus {
     /// Requests the program may send per day, and the largest request, as the program enforces.
     pub daily_limit: u32,
     pub max_request_kb: u32,
+    /// The same, told as the ten layers of protection, checked now (L6).
+    pub layers: Vec<SecurityLayer>,
+    /// What depends on her: the disk, the cloud folder, the printed kit, the backup.
+    pub yours: Vec<SecurityLayer>,
 }
 
 fn item(key: &str, state: &str, detail: Option<String>) -> SecurityItem {
@@ -84,6 +89,8 @@ pub(crate) fn build(s: &AppStatus, send_stopped: bool) -> SecurityStatus {
         send_stopped,
         daily_limit: u32::try_from(dv_egress::DAILY_REQUESTS).unwrap_or(u32::MAX),
         max_request_kb: u32::try_from(dv_egress::MAX_BODY_BYTES / 1024).unwrap_or(u32::MAX),
+        layers: Vec::new(),
+        yours: Vec::new(),
     }
 }
 
@@ -92,7 +99,10 @@ const KIT_CHECK_DAYS: i64 = 365;
 
 impl Core {
     pub fn security_status(&mut self) -> SecurityStatus {
-        let mut s = build(&self.status(), dv_egress::is_stopped());
+        let checks = SelfChecks::run();
+        layers::stop_if_broken(checks);
+        let status = self.status();
+        let mut s = build(&status, dv_egress::is_stopped());
         // The password opens the vault only on this computer (D-076).
         s.items
             .insert(1, item("computer_bound", self.binding_state(), None));
@@ -115,6 +125,14 @@ impl Core {
                 item("recovery_kit", on(fresh), days.map(|d| d.to_string())),
             );
         }
+        s.layers = layers::build(&s.items, checks, s.send_stopped, status.review_always);
+        let backup = self
+            .vault
+            .is_some()
+            .then(|| self.backup_status().ok())
+            .flatten()
+            .map(|b| (b.due, b.has_cases));
+        s.yours = layers::yours(&s.items, backup);
         s
     }
 

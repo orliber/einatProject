@@ -25,6 +25,7 @@ pub mod name_model;
 mod own;
 use name_model::NameHints;
 mod jobs;
+mod layers;
 mod readiness;
 mod retention;
 mod seal;
@@ -75,6 +76,7 @@ pub use jobs::{
     BackupRun, BackupTask, DocumentRead, DrillJob, Drilled, ExportJob, Exported, ReadJob,
     RestoreJob, Restored, SlotJob, SlotMade, UnlockJob, Unlocked,
 };
+pub use layers::SecurityLayer;
 pub use library::TRASH_DAYS;
 pub use name_model::{HintJob, HintsRead};
 pub use own::SectionModeView;

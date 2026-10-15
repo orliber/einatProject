@@ -21,6 +21,7 @@ mod history;
 mod hostile;
 mod import_export;
 mod large_case;
+mod layers;
 mod library;
 mod masks;
 mod off_lock;
