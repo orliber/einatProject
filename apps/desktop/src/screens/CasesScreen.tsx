@@ -1,4 +1,4 @@
-// The case list, laid out like a file explorer (round 47, D-086): a folder tree on the right,
+// The case list, laid out like a file explorer (round 47, D-071): a folder tree on the right,
 // the path and the search above, and one table of subfolders and cases. Folders nest to any
 // depth (the core already keeps `parent_id`); this screen only shows them that way.
 import { useMemo, useState, type DragEvent } from "react";
@@ -306,7 +306,10 @@ export function CasesScreen() {
 
               {inTrash ? (
                 <TrashList cases={trash.data ?? []} pathOf={pathOf}
-                  onRestore={(c) => void run(() => ipc.restoreCase(c.id), "התיק שוחזר.")}
+                  onRestore={(c) => void run(() => ipc.restoreCase(c.id), "התיק שוחזר.").then(() => {
+                    // The last case restored: back to the list, where it now is.
+                    if ((trash.data?.length ?? 0) <= 1) setInTrash(false);
+                  })}
                   onPurge={(c) => setModal({ kind: "purge", c })} />
               ) : (
                 <>
