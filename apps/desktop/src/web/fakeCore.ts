@@ -1181,6 +1181,9 @@ export class FakeCore {
         const d = c.drafts.find((x) => x.id === a.draftId) ?? fail("not_found", "הפסקה לא נמצאה");
         return versionsOf(c.drafts, d).map((v) => ({ id: v.id, saved_at: v.at, by_ai: v.byAi, text: restore(v.text, c.people, this.practitioner) }));
       }
+      case "section_library":
+        // The fake keeps no past reports for the cases: nothing to offer.
+        return { lines: [], similar: [] };
       case "similar_paragraph": {
         const c = this.find(a.caseId);
         if (!c.drafts.some((x) => x.id === a.draftId)) fail("not_found", "הפסקה לא נמצאה");

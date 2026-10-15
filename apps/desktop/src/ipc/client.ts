@@ -34,6 +34,9 @@ import type { ReportSettings } from "./generated/ReportSettings";
 import type { TemplateView } from "./generated/TemplateView";
 import type { ParagraphView } from "./generated/ParagraphView";
 import type { SimilarParagraph } from "./generated/SimilarParagraph";
+import type { LibraryLine } from "./generated/LibraryLine";
+import type { SectionLibrary } from "./generated/SectionLibrary";
+import type { SimilarReport } from "./generated/SimilarReport";
 import type { FitMonth } from "./generated/FitMonth";
 import type { Role } from "./generated/Role";
 import type { ScoreSheet } from "./generated/ScoreSheet";
@@ -293,6 +296,9 @@ export const ipc = {
   /** The paragraph of her past reports closest to this one (ST2); worked out locally. */
   similarParagraph: (caseId: string, draftId: string) =>
     call("similar_paragraph", { caseId, draftId }),
+  /** Her diagnoses, recommendations and the reports most like the case (round 36); local. */
+  sectionLibrary: (caseId: string, sectionKey: string) =>
+    call("section_library", { caseId, sectionKey }),
   restoreParagraphVersion: (caseId: string, draftId: string, versionId: string) =>
     run("restore_paragraph_version", { caseId, draftId, versionId }),
   /** Her own paragraph. `at`: "end" (default), "first", or the id of the paragraph it follows. */
@@ -411,6 +417,9 @@ export type {
   InterpretationView,
   ParagraphView,
   SimilarParagraph,
+  LibraryLine,
+  SectionLibrary,
+  SimilarReport,
   StyleAnalysisResult,
   StyleImportPreview,
   StyleItem,

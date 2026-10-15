@@ -1470,3 +1470,82 @@ fn a_percentile_she_never_writes_beside_subtests_is_left_out_of_the_scores_mater
     let saved = core.save_scores(&id, None, &sheet).unwrap();
     assert_eq!(saved.content, preview, "what is saved is what she saw");
 }
+
+/// Fabricated past reports with diagnoses and recommendations: two like a preschool case
+/// tested with the WPPSI, one of a toddler.
+const LIST_REPORTS: [&str; 3] = [
+    "סיכום אבחון\nהתחום הקוגניטיבי\nנועם נבדק במבחן WPPSI-IV. מנת המשכל הכללית נמצאה 98, בטווח הממוצע.\n\
+     אבחנות\n- הפרעה על הספקטרום האוטיסטי, ברמת תמיכה ראשונה.\nהמלצות\n- מומלץ על ריפוי בעיסוק.\n- מומלץ על הדרכת הורים.\n- מומלץ שנועם ימשיך בגן של אורית.\n",
+    "סיכום אבחון\nהתחום הקוגניטיבי\nעידו נבדק במבחן WPPSI-IV. מנת המשכל הכללית נמצאה 101, בטווח הממוצע.\n\
+     אבחנות\n- הפרעה על הספקטרום האוטיסטי ברמת תמיכה ראשונה.\nהמלצות\n1. מומלץ על טיפול בריפוי בעיסוק.\n2. מומלץ על הדרכת הורים.\n",
+    "סיכום אבחון\nהתחום הקוגניטיבי\nאיתמר נבדק במבחן Bayley-4.\n\
+     אבחנות\n- עיכוב בהתפתחות השפה.\nהמלצות\n- מומלץ על הדרכת הורים.\n- מומלץ על טיפול בקלינאית תקשורת.\n",
+];
+
+#[test]
+fn her_recommendations_come_with_how_often_she_gave_them_in_reports_like_this_case() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core) = vault(Some(fake.clone()));
+    for (n, text) in LIST_REPORTS.iter().enumerate() {
+        let preview = core
+            .import_style_source(&format!("דוח {n}.txt"), text.as_bytes())
+            .unwrap();
+        let all: Vec<u32> = preview.parts.iter().map(|p| p.index).collect();
+        core.save_style_source(&preview.token, &all, None).unwrap();
+    }
+    let id = case(&mut core);
+    let sheet = dv_domain::ScoreSheet {
+        instrument: "wppsi_iv".into(),
+        module: String::new(),
+        cutoff: None,
+        entries: vec![dv_domain::ScoreEntry {
+            measure: "fsiq".into(),
+            value: 99.0,
+            note: String::new(),
+        }],
+        notes: String::new(),
+    };
+    core.save_scores(&id, None, &sheet).unwrap();
+    let lib = core.section_library(&id, "recommendations").unwrap();
+    let lines: Vec<(&str, u32, u32, u32)> = lib
+        .lines
+        .iter()
+        .map(|l| (l.text.as_str(), l.reports, l.in_similar, l.similar))
+        .collect();
+    assert_eq!(
+        lines,
+        vec![
+            ("מומלץ על הדרכת הורים.", 3, 2, 2),
+            ("מומלץ על טיפול בריפוי בעיסוק.", 2, 2, 2),
+        ],
+        "what she gave in the reports like this case first, then the most often"
+    );
+    let names = ["נועם", "עידו", "איתמר", "אורית"];
+    for l in &lib.lines {
+        assert!(!names.iter().any(|n| l.text.contains(n)), "{}", l.text);
+    }
+    assert_eq!(
+        lib.similar.len(),
+        2,
+        "the toddler's report is not like this case"
+    );
+    let first = &lib.similar[0];
+    assert!(
+        first.reasons.contains(&"WPPSI-IV".to_owned()),
+        "{:?}",
+        first.reasons
+    );
+    assert!(first.reasons.iter().any(|r| r == "גיל שלוש עד שש"));
+    for s in &lib.similar {
+        assert!(!names.iter().any(|n| s.text.contains(n)), "{}", s.text);
+    }
+    let dx = core.section_library(&id, "diagnoses").unwrap();
+    assert_eq!(dx.lines.len(), 1, "{:?}", dx.lines);
+    assert_eq!(dx.lines[0].reports, 2);
+    assert!(dx.lines[0].text.contains("הספקטרום האוטיסטי"));
+    // Choosing one adds it to the case as her own paragraph.
+    core.add_own_paragraph(&id, "recommendations", &lib.lines[0].text)
+        .unwrap();
+    assert!(fake.sent.lock().unwrap().is_empty(), "nothing was sent");
+    assert!(core.section_library(&id, "nothing").is_err());
+}

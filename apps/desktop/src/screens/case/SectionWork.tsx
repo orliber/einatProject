@@ -16,6 +16,7 @@ import { DRAFT_HINTS } from "../../i18n/suggestions";
 import { ParagraphVersions } from "../../components/ParagraphVersions";
 import { SectionGuide } from "../../components/SectionGuide";
 import { OwnSectionPanel } from "../../components/OwnSection";
+import { SectionLibraryPanel } from "../../components/SectionLibrary";
 import { MarkedText, StyleHintView, applyMark } from "./StyleHintView";
 import { isCombo, KEYS } from "../../shortcuts";
 import type { CaseApi } from "../CaseScreen";
@@ -358,6 +359,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               conversation's foot off the screen (the review of stage 3). */}
           <SectionGuide caseId={caseId} sectionKey={section.key} guide={section.guide} isDefault={section.guide_is_default}
             learnedFrom={section.guide_learned_from} caseGuide={section.case_guide} onSaved={reload} />
+          <SectionLibraryPanel caseId={caseId} sectionKey={section.key} onAdded={reload} />
 
           {job && (
             <div className="writing-card">

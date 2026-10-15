@@ -33,9 +33,11 @@ use crate::{today, Core, CoreError, Outgoing, Pending, PendingKind, Prepared, Re
 mod headings;
 mod interpret;
 mod learning;
+mod library;
 mod requests;
 
 pub use interpret::{InterpretationResult, InterpretationView};
+pub use library::{LibraryLine, SectionLibrary, SimilarReport};
 
 use headings::*;
 use learning::*;

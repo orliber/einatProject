@@ -37,6 +37,7 @@ import type { ReportSettings } from "./ReportSettings";
 import type { RetentionItem } from "./RetentionItem";
 import type { Role } from "./Role";
 import type { ScoreSheet } from "./ScoreSheet";
+import type { SectionLibrary } from "./SectionLibrary";
 import type { SectionMode } from "./SectionMode";
 import type { SectionModeView } from "./SectionModeView";
 import type { SectionResult } from "./SectionResult";
@@ -173,6 +174,7 @@ export type Commands = {
   save_style_source: { args: { token: string; included: Array<number>; title: string | null }; returns: StyleSourceView };
   score_instruments: { args: undefined; returns: Array<Instrument> };
   score_sheet: { args: { caseId: string; inputId: string }; returns: ScoreSheet | null };
+  section_library: { args: { caseId: string; sectionKey: string }; returns: SectionLibrary };
   section_modes: { args: undefined; returns: Array<SectionModeView> };
   security_status: { args: undefined; returns: SecurityStatus };
   send_consult: { args: { approvalId: string }; returns: ConsultResult };

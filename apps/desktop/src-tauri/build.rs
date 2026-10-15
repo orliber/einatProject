@@ -89,6 +89,7 @@ fn main() {
             "edit_paragraph",
             "paragraph_versions",
             "similar_paragraph",
+            "section_library",
             "own_section_help",
             "restore_paragraph_version",
             "add_own_paragraph",
