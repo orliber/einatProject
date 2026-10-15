@@ -7,6 +7,7 @@ import { useKept } from "../kept";
 import { useApp } from "../App";
 import { ipc } from "../ipc/client";
 import { LocalText, type LocalTextHandle } from "./LocalText";
+import { useHoldUnsaved } from "./Unsaved";
 import { rolesAsWords } from "./Similar";
 import { ErrorLine, Spinner } from "./ui";
 import "./Why.css";
@@ -37,6 +38,8 @@ export function OwnSectionPanel(props: {
   const [points, setPoints] = useKept(`case:${props.caseId}:section:${props.sectionKey}:points`, "");
   const [empty, setEmpty] = useState(() => !points.trim());
   const box = useRef<LocalTextHandle>(null);
+  // Her points are held for the automatic lock like a paragraph (the review of stage 3).
+  const holdLive = useHoldUnsaved(props.caseId, "הנקודות שלך לסעיף", points.trim() ? points : null);
   const h = help.data;
   const nothing = h && h.examples.length === 0 && h.openings.length === 0 && h.phrases.length === 0;
   return (
@@ -69,7 +72,7 @@ export function OwnSectionPanel(props: {
         });
       }}>
         <label htmlFor="own-points" className="small">הנקודות שלך</label>
-        <LocalText id="own-points" ref={box} rows={4} className="textarea" initial={points}
+        <LocalText id="own-points" ref={box} rows={3} className="textarea" initial={points} onLive={holdLive}
           placeholder="נקודה בכל שורה: מה ראית, מה עלה במפגש. שמות מוסתרים לפני השליחה."
           onText={setPoints} onEmptyChange={setEmpty} />
         <div className="row">

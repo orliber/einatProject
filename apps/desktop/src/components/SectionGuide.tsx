@@ -4,6 +4,8 @@
 import { useState } from "react";
 import { useApp } from "../App";
 import { ipc } from "../ipc/client";
+import { forgetKept, useKept } from "../kept";
+import { useHoldUnsaved } from "./Unsaved";
 import { ErrorLine } from "./ui";
 import "./SectionGuide.css";
 
@@ -27,20 +29,34 @@ function Lines({ text }: { text: string }) {
   );
 }
 
-/** One editor: a box, save and cancel. Its text lives here, not in the section's state. */
-function Editor(props: { label: string; initial: string; onSave: (text: string) => Promise<void>; onCancel: () => void }) {
-  const [text, setText] = useState(props.initial);
+/** One editor: a box, save and cancel. What she types is kept while she moves to another
+ *  stage and comes back, and held for the automatic lock like a paragraph (the review of
+ *  stage 3). Esc cancels, Ctrl/⌘+Enter saves. */
+function Editor(props: { caseId: string; keptKey: string; id: string; label: string; initial: string; onSave: (text: string) => Promise<void>; onCancel: () => void }) {
+  const [text, setText] = useKept(props.keptKey, props.initial);
   const [busy, setBusy] = useState(false);
-  const id = `guide-${props.label}`;
+  useHoldUnsaved(props.caseId, props.label, text === props.initial ? null : text);
+  const submit = () => {
+    setBusy(true);
+    void props.onSave(text).finally(() => setBusy(false));
+  };
   return (
     <form className="stack guide-editor" onSubmit={(e) => {
       e.preventDefault();
-      setBusy(true);
-      void props.onSave(text).finally(() => setBusy(false));
+      submit();
     }}>
-      <label className="small" htmlFor={id}>{props.label}</label>
-      <textarea id={id} className="input" rows={Math.min(8, Math.max(3, text.split("\n").length + 1))}
-        value={text} autoFocus onChange={(e) => setText(e.target.value)} />
+      <label className="small" htmlFor={props.id}>{props.label}</label>
+      <textarea id={props.id} className="input" rows={Math.min(8, Math.max(3, text.split("\n").length + 1))}
+        value={text} autoFocus onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            props.onCancel();
+          } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !busy) {
+            e.preventDefault();
+            submit();
+          }
+        }} />
       <div className="row">
         <button type="submit" className="btn btn-small btn-primary" disabled={busy}>שמירה</button>
         <button type="button" className="btn btn-small" onClick={props.onCancel}>ביטול</button>
@@ -51,12 +67,21 @@ function Editor(props: { label: string; initial: string; onSave: (text: string) 
 
 export function SectionGuide(props: Props) {
   const { fail } = useApp();
-  const [editing, setEditing] = useState<"general" | "case" | null>(null);
+  const base = `case:${props.caseId}:guide:${props.sectionKey}`;
+  const [editing, setEditingKept] = useKept<"general" | "case" | null>(`${base}:editing`, null);
+  // Opening an editor forgets what was typed in an earlier one (saved or cancelled): it opens
+  // on the text as it is now. What she types stays while she moves around the app.
+  const setEditing = (next: "general" | "case" | null) => {
+    if (next !== null) forgetKept(`${base}:${next}`);
+    setEditingKept(next);
+  };
+  const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const save = async (run: () => Promise<unknown>) => {
     setError(null);
     try {
       await run();
+      setResetting(false);
       setEditing(null);
       await props.onSaved();
     } catch (e) {
@@ -65,11 +90,11 @@ export function SectionGuide(props: Props) {
   };
   const empty = !props.guide.trim() && !props.caseGuide.trim();
   return (
-    <details className="section-guide">
+    <details className="section-guide" open={editing !== null || undefined}>
       <summary>איך לכתוב את הסעיף הזה</summary>
       <div className="stack guide-body">
         {editing === "general" ? (
-          <Editor label="ההנחיה לסעיף, לכל התיקים" initial={props.guide}
+          <Editor caseId={props.caseId} keptKey={`${base}:general`} id={`guide-general-${props.sectionKey}`} label="ההנחיה לסעיף, לכל התיקים" initial={props.guide}
             onSave={(t) => save(() => ipc.setSectionGuide(props.sectionKey, t))} onCancel={() => setEditing(null)} />
         ) : (
           <>
@@ -77,16 +102,23 @@ export function SectionGuide(props: Props) {
             <div className="row small wrap-row">
               <span className="muted">{props.isDefault ? "הנוסח של המכון." : "הנוסח שלך, לכל התיקים."}</span>
               <button type="button" className="btn btn-small" onClick={() => setEditing("general")}>עריכה</button>
-              {!props.isDefault && (
-                <button type="button" className="btn btn-small" onClick={() => void save(() => ipc.setSectionGuide(props.sectionKey, ""))}>
+              {!props.isDefault && !resetting && (
+                <button type="button" className="btn btn-small" onClick={() => setResetting(true)}>
                   החזרה לנוסח המכון
                 </button>
+              )}
+              {!props.isDefault && resetting && (
+                <span className="row">
+                  <span>הנוסח שלך יימחק מכל התיקים.</span>
+                  <button type="button" className="btn btn-small btn-primary" onClick={() => void save(() => ipc.setSectionGuide(props.sectionKey, ""))}>להחזיר</button>
+                  <button type="button" className="btn btn-small" onClick={() => setResetting(false)}>ביטול</button>
+                </span>
               )}
             </div>
           </>
         )}
         {editing === "case" ? (
-          <Editor label="תוספת לתיק הזה בלבד" initial={props.caseGuide}
+          <Editor caseId={props.caseId} keptKey={`${base}:case`} id={`guide-case-${props.sectionKey}`} label="תוספת לתיק הזה בלבד" initial={props.caseGuide}
             onSave={(t) => save(() => ipc.setCaseGuide(props.caseId, props.sectionKey, t))} onCancel={() => setEditing(null)} />
         ) : props.caseGuide.trim() ? (
           <div className="stack guide-case">

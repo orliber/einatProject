@@ -410,7 +410,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                     : "אין עדיין חומרים לסעיף. מוסיפים בחומרי התיק, או כותבים לבד."}
               </p>
               <div className="row">
-                {(derived || section.source_count > 0) && (
+                {!mine && (derived || section.source_count > 0) && (
                   <button type="button" className="btn btn-primary" disabled={working}
                     onClick={() => void ask(draftInstruction, `טיוטה לסעיף ${section.title}`)}>
                     {derived ? "כתיבת טיוטה מהסעיפים שאושרו" : `כתיבת טיוטה עם ${ai}`}
@@ -525,7 +525,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
           ) : visible.length > 0 && (
             <div className="row wrap-row">
               <button type="button" className="add-own" onClick={startOwn}>+ פסקה משלי</button>
-              {(derived || section.source_count > 0) && (
+              {!mine && (derived || section.source_count > 0) && (
                 <button type="button" className="add-own" disabled={working}
                   onClick={() => void ask(draftInstruction, `טיוטה חדשה לסעיף ${section.title}`)}>
                   ↻ טיוטה חדשה מ-{ai} (מחליפה את מה שלא אושר)

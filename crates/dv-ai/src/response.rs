@@ -43,9 +43,11 @@ pub struct SectionReply {
 struct RawParagraph {
     text: String,
     source_refs: Vec<String>,
-    /// Absent in an answer from before the guide, or from a model that left it out.
+    /// Absent in an answer from before the guide, or from a model that left it out. Read as
+    /// any JSON value: a negative or fractional number, or text, is no line (0) rather than
+    /// an answer that cannot be read at all (the review of stage 3).
     #[serde(default)]
-    guide: u32,
+    guide: Value,
 }
 
 #[derive(Deserialize)]
@@ -151,7 +153,11 @@ pub fn parse_section(
                 text: p.text,
                 source_refs: p.source_refs,
                 warnings,
-                guide: p.guide,
+                guide: p
+                    .guide
+                    .as_u64()
+                    .and_then(|g| u32::try_from(g).ok())
+                    .unwrap_or(0),
             }
         })
         .collect();
@@ -252,6 +258,26 @@ mod tests {
         assert!(out.paragraphs[1].warnings.iter().any(|w| w.contains("83")));
         assert!(!out.paragraphs[2].warnings.is_empty());
         assert!(out.paragraphs[3].warnings.iter().any(|w| w.contains("S9")));
+    }
+
+    /// The review of stage 3: a guide line the model numbered wrong is no line, and the
+    /// answer is read.
+    #[test]
+    fn a_wrong_guide_number_is_no_line_not_an_unreadable_answer() {
+        let reply = json!({
+            "reply": "ניסחתי",
+            "paragraphs": [
+                {"text": "א.", "source_refs": [], "guide": -2},
+                {"text": "ב.", "source_refs": [], "guide": 1.5},
+                {"text": "ג.", "source_refs": [], "guide": "3"},
+                {"text": "ד.", "source_refs": [], "guide": 2},
+                {"text": "ה.", "source_refs": [], "guide": 99_999_999_999u64}
+            ],
+            "questions": [], "missing": [], "contradictions": []
+        });
+        let out = parse_section(&api(&reply.to_string()), &[]).unwrap();
+        let guides: Vec<u32> = out.paragraphs.iter().map(|p| p.guide).collect();
+        assert_eq!(guides, [0, 0, 0, 2, 0]);
     }
 
     #[test]

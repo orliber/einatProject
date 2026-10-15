@@ -34,3 +34,8 @@
   padding-top: 8px;
   border-top: 1px solid var(--line);
 }
+/* On a laptop the open guide never takes the draft's room: it scrolls by itself. */
+.section-guide[open] .guide-body {
+  max-height: 30vh;
+  overflow-y: auto;
+}

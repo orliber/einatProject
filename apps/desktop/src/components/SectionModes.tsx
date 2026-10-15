@@ -14,7 +14,7 @@ export function SectionModesSettings() {
   return (
     <section className="card setting" aria-labelledby="s-modes">
       <h2 id="s-modes">סעיפים שאת כותבת בעצמך</h2>
-      <span className="hint">בסעיף שסימנת שום חומר מהתיק לא נשלח, ו"כתיבת כל הדוח" מדלגת עליו. אפשר לכתוב נקודות ולבקש לנסח מהן. חל על כל התיקים.</span>
+      <span className="hint">בסעיף שסימנת שום חומר מהתיק לא נשלח, ו"כתיבת כל הדוח" מדלגת עליו. אפשר לכתוב נקודות ולבקש לנסח מהן. חל על כל התיקים במבנה של המכון; תיק שנפתח לפני כן נשאר כמו שהיה.</span>
       {modes.isLoading && <Spinner />}
       <ul className="stack" style={{ listStyle: "none", margin: 0, padding: 0, gap: 4 }}>
         {(modes.data ?? []).map((m) => (

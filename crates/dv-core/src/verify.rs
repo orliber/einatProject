@@ -64,6 +64,14 @@ impl Core {
             .section(section_key)
             .ok_or_else(|| CoreError::NotFound(section_key.to_owned()))?
             .clone();
+        // Her own sections (round 30, D-068): nothing of the case is sent for them, the check
+        // against the sources included (the review of stage 3).
+        if section.mode == dv_domain::SectionMode::Own {
+            return Err(CoreError::Refused(
+                "את כותבת את הסעיף הזה בעצמך, ולכן הוא לא נבדק מול החומרים ושום חומר לא נשלח בשבילו."
+                    .to_owned(),
+            ));
+        }
         let model = self.model_for(Task::Draft)?;
         let data = self.privacy_data(case_id)?;
         let hints = self.case_hints(case_id, &[])?;

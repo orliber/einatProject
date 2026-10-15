@@ -197,7 +197,10 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
   // A new wording of an approved paragraph is shown beside it, not as a new draft.
   const reworded = new Map(proposed.filter((p) => p.replaces).map((p) => [p.replaces ?? "", p]));
   const pending = proposed.filter((p) => !p.replaces);
-  const canWrite = s.source_count > 0 || !s.sortable;
+  // Her own sections (round 30): nothing is drafted from the materials, so no AI control here;
+  // her points are worded on the section's own screen.
+  const mine = s.mode === "self";
+  const canWrite = !mine && (s.source_count > 0 || !s.sortable);
   const busy = preparing || job !== undefined;
   const sources = detail.routing
     .filter((r) => r.feeds.includes(s.key))
@@ -269,7 +272,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
         {p.warnings.map((w, i) => (
           <div key={i} className="note-warn small"><WarnIcon /><span>{w}</span></div>
         ))}
-        {p.status === "proposed" && p.style && (
+        {p.status === "proposed" && p.style && !mine && (
           <StyleHintView hint={p.style} busy={busy}
             onCloser={(how) => void write(`נסחי מחדש את הפסקה הבאה כך שתישמע כמו הכתיבה שלי: ${how}. באותו תוכן ובלי להוסיף עובדות: "${p.text}"`, p.id)}
             onApply={(m) => void act(() => ipc.editParagraph(caseId, p.id, applyMark(p.text, m)))} />
@@ -412,9 +415,14 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
         <span className="a4-tools">
 
         </span>
+        {/* The section's own screen: the guide, and for her sections the points to word. */}
+        <button type="button" className="link-small a4-open" onClick={() => go({ name: "case", id: caseId, view: s.key })}>
+          {mine ? "הסעיף שלך: נקודות לניסוח ←" : "איך לכתוב את הסעיף ←"}
+        </button>
       </div>
 
-      {s.sortable && (
+      {mine && <p className="small muted a4-mine">הסעיף הזה שלך: שום חומר לא נשלח בשבילו.</p>}
+      {s.sortable && !mine && (
         <div className="a4-sources">
           <span>{sources.length ? "נכתב מתוך:" : "אין חומרים לסעיף."}</span>
           {sources.map((i) => <span key={i.id} className="a4-source">{i.title || kindLabel[i.kind]}</span>)}
@@ -480,7 +488,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
             <span className="a4-flag">טיוטה של {ai} · עוד לא בדוח</span>
             <span className="row">
               <button type="button" className="btn btn-primary btn-small" onClick={() => void act(async () => { for (const p of pending) await ipc.approveParagraph(caseId, p.id); })}>✓ לאשר</button>
-              <span className="a4-pop-anchor">
+              {!mine && <span className="a4-pop-anchor">
                 <button type="button" className="btn btn-small" aria-expanded={open === "change"} disabled={busy} onClick={() => setOpen(open === "change" ? null : "change")}>✦ לשנות עם {ai}</button>
                 {open === "change" && (
                   <Popover label="מה לשנות בטיוטה" onClose={() => setOpen(null)}>
@@ -508,7 +516,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
                     </div>
                   </Popover>
                 )}
-              </span>
+              </span>}
               <button type="button" className="btn btn-small btn-ghost" onClick={() => void act(async () => { for (const p of pending) await ipc.rejectParagraph(caseId, p.id); })}>הסרה</button>
             </span>
           </div>
@@ -519,7 +527,12 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
       {ok.length === 0 && editing && editing.id === null && editor}
 
       {s.paragraphs.length === 0 && !job && !editing && (
-        canWrite ? (
+        mine ? (
+          <span className="a4-gap-row">
+            <button type="button" className="a4-gap a4-gap-own" onClick={() => edit(null, "", "end")}>+ פסקה משלי</button>
+            <button type="button" className="a4-gap" onClick={() => go({ name: "case", id: caseId, view: s.key })}>לנסח מהנקודות שלי ←</button>
+          </span>
+        ) : canWrite ? (
           <span className="a4-gap-row">
             <button type="button" className="a4-gap" disabled={busy} onClick={() => void write()}>✦ לכתוב עם {ai}</button>
             <button type="button" className="a4-gap a4-gap-own" onClick={() => edit(null, "", "end")}>+ פסקה משלי</button>

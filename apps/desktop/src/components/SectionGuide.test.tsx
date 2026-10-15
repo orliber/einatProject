@@ -3,7 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { AppContext, type AppApi } from "../App";
 import { status } from "../test/fixtures";
+import { clearKept } from "../kept";
 import { SectionGuide } from "./SectionGuide";
+
+afterEach(() => clearKept());
 
 function api(): AppApi {
   return { status: status(), go: vi.fn(), refresh: vi.fn(async () => undefined), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn(async () => undefined) };
@@ -60,6 +63,27 @@ describe("SectionGuide", () => {
     expect(screen.getByText("הנוסח שלך, לכל התיקים.")).toBeInTheDocument();
     expect(screen.getByText("בתיק הזה: המעבר")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "החזרה לנוסח המכון" }));
+    // She confirms first: her text is deleted from every case.
+    expect(calls.some(([cmd]) => cmd === "set_section_guide")).toBe(false);
+    await user.click(screen.getByRole("button", { name: "להחזיר" }));
     expect(calls).toContainEqual(["set_section_guide", { sectionKey: "background", text: "" }]);
+  });
+
+  it("opens the editor again on the saved text, not on what was typed before", async () => {
+    mockIPC(() => null);
+    const user = userEvent.setup();
+    const view = (guide: string) => (
+      <AppContext.Provider value={api()}>
+        <SectionGuide caseId="c1" sectionKey="background" guide={guide} isDefault={false} caseGuide="" onSaved={vi.fn()} />
+      </AppContext.Provider>
+    );
+    const { rerender } = render(view("ישן"));
+    await user.click(screen.getByText("איך לכתוב את הסעיף הזה"));
+    await user.click(screen.getByRole("button", { name: "עריכה" }));
+    await user.type(screen.getByLabelText("ההנחיה לסעיף, לכל התיקים"), " ועוד");
+    await user.click(screen.getByRole("button", { name: "ביטול" }));
+    rerender(view("חדש"));
+    await user.click(screen.getByRole("button", { name: "עריכה" }));
+    expect(screen.getByLabelText("ההנחיה לסעיף, לכל התיקים")).toHaveValue("חדש");
   });
 });

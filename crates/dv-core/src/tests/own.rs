@@ -137,3 +137,26 @@ fn the_full_draft_and_the_sorting_leave_her_sections_out_and_she_can_change_whic
         Err(CoreError::NotFound(_))
     ));
 }
+
+/// The review of stage 3: the check against the sources is refused in her section too, and
+/// her approved text of it is what the summary is written from (D-068 §6), filtered like
+/// any text: the summary needs the impression she wrote.
+#[test]
+fn her_section_is_not_checked_and_her_approved_text_feeds_the_summary() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    core.set_verify_stage(true).unwrap();
+    assert!(matches!(
+        core.prepare_verify(&case, "appearance"),
+        Err(CoreError::Refused(_))
+    ));
+    core.add_own_paragraph(&case, "appearance", "אלון הגיע בשמחה ונפרד מאמו בקלות.")
+        .unwrap();
+    let prepared = core.prepare_section(&case, "summary", "טיוטה").unwrap();
+    assert!(prepared.blocked.is_empty(), "{:?}", prepared.blocked);
+    core.send_section(&prepared.approval_id.expect("clears the gate"))
+        .unwrap();
+    let sent = fake.sent.lock().unwrap().last().unwrap().clone();
+    assert!(sent.contains("נפרד מאמו בקלות"), "{sent}");
+    assert!(!sent.contains("אלון"), "{sent}");
+}

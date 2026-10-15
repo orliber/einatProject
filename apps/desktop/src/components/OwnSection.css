@@ -16,3 +16,10 @@
   flex-direction: column;
   gap: 8px;
 }
+/* Her examples keep some room above the points box on a low screen. */
+.own-panel .chat-body {
+  min-height: 6rem;
+}
+.own-panel .chat-foot textarea {
+  max-height: 25vh;
+}

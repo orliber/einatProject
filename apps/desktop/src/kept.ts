@@ -49,6 +49,11 @@ export function useKept<T>(key: string, initial: T): [T, SetKept<T>] {
   return [value, set];
 }
 
+/** Forget one kept value: the next screen that reads it starts from its own default. */
+export function forgetKept(key: string) {
+  if (kept.delete(key)) emit();
+}
+
 /** On lock: nothing of a case stays in memory. */
 export function clearKept() {
   generation += 1;

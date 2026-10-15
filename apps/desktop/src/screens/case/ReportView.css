@@ -554,3 +554,13 @@
   color: var(--ink-muted);
   text-align: center;
 }
+/* The way into the section's own screen (its guide; her points in her sections). */
+.a4-open {
+  font-family: var(--font-ui);
+}
+@media print {
+  .a4-open,
+  .a4-mine {
+    display: none;
+  }
+}

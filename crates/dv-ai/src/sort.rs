@@ -176,7 +176,9 @@ struct RawRecord {
 
 #[derive(Deserialize)]
 struct RawMaterial {
-    material: u64,
+    /// Any JSON value: a number that is not a material's (negative, fractional, text) is an
+    /// unknown material, ignored like one, and the rest of the answer stands.
+    material: Value,
     summary: String,
     #[serde(default)]
     record: Option<RawRecord>,
@@ -239,8 +241,10 @@ pub fn parse_sort(
         ignored: 0,
     };
     for raw in raw.materials {
-        let slot = usize::try_from(raw.material)
-            .ok()
+        let slot = raw
+            .material
+            .as_u64()
+            .and_then(|m| usize::try_from(m).ok())
             .and_then(|m| m.checked_sub(1))
             .and_then(|i| reply.readings.get_mut(i));
         // An unknown material, or a second answer about one (the first stands).
@@ -411,6 +415,9 @@ mod tests {
                 {"material": 1, "summary": "תשובה שנייה על אותו חומר"},
                 {"material": 3, "summary": "חומר שלא נשלח"},
                 {"material": 0, "summary": "אפס"},
+                {"material": -1, "summary": "מספר שלילי"},
+                {"material": 1.5, "summary": "שבר"},
+                {"material": "1", "summary": "טקסט"},
                 {"material": 2, "summary": long, "record": {
                     "kind": "", "by": "", "setting": "x", "findings": "", "recommendations": ""
                 }}
@@ -425,8 +432,10 @@ mod tests {
         // Too long: dropped, not cut. An empty record is no record.
         let second = r.readings[1].as_ref().unwrap();
         assert!(second.summary.is_empty() && second.record.is_none());
-        // The second answer on material 1, material 3, material 0 and the long summary.
-        assert_eq!(r.ignored, 4);
+        // The second answer on material 1, material 3, material 0, a negative, a fractional
+        // and a text number (the review of stage 3: none of them fails the answer), and the
+        // long summary.
+        assert_eq!(r.ignored, 7);
         // An answer with no materials (an older request) still sorts.
         let old = json!({"sections": [{"section": "background", "passages": ["S1P1"]}]});
         let r = parse_sort(&api(&old), &[1], &["background".into()]).unwrap();

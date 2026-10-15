@@ -289,9 +289,14 @@ export function MaterialsView({ api }: { api: CaseApi }) {
 }
 
 /** The first sentence of a summary, for the row. */
+/** The summary's first sentence; with no sentence mark, its first line, cut at about 160
+ *  letters at a space (the review of stage 3). */
 function firstSentence(text: string): string {
   const m = /^.*?[.!?](?=\s|$)/s.exec(text.trim());
-  return (m ? m[0] : text).trim();
+  const first = (m ? m[0] : text.trim().split("\n")[0] ?? "").trim();
+  if (first.length <= 160) return first;
+  const cut = first.lastIndexOf(" ", 160);
+  return `${first.slice(0, cut > 80 ? cut : 160)}…`;
 }
 
 const SETTING: Record<Setting, string> = { institute: "במכון", community: "בקהילה", unknown: "לא צוין איפה" };
@@ -316,7 +321,7 @@ function ReadingView({ route, ai }: { route: MaterialRouting; ai: string }) {
       <p className="serif">{route.summary}</p>
       {route.record && <RecordLine record={route.record} />}
       {route.summary_notes.length > 0 && (
-        <ul className="small reading-notes">{route.summary_notes.map((n) => <li key={n}>{n}</li>)}</ul>
+        <ul className="small reading-notes">{route.summary_notes.map((n, i) => <li key={i}>{n}</li>)}</ul>
       )}
     </section>
   );
