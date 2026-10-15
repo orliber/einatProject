@@ -174,6 +174,34 @@ describe("writing the report", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "✓ לאשר" })).toBeNull());
   });
 
+  it("a send that failed is sent again from the section, and its draft arrives like the first time (F6)", async () => {
+    const core = new FakeCore();
+    await core.handle("unlock", { password: "x" });
+    const calls: string[] = [];
+    let sends = 0;
+    mockIPC((cmd, args) => {
+      calls.push(cmd);
+      if (cmd === "send_section" && ++sends === 1) {
+        throw { code: "egress", message: "אין חיבור לאינטרנט.", details: [], action: { kind: "retry", after_seconds: 0 } };
+      }
+      return core.handle(cmd, args);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const page = await openCase(user);
+    const write = within(page).getAllByRole("button", { name: "✦ לכתוב עם Claude" })[0];
+    if (!write) throw new Error("no empty section to write");
+    await user.click(write);
+    const review = await screen.findByRole("dialog", { name: "לפני שליחה ל-Claude" });
+    await user.click(within(review).getByRole("button", { name: /שליחה/ }));
+    const again = await screen.findByRole("button", { name: "לנסות שוב" });
+    await user.click(again);
+    // The same approved request goes again (nothing prepared again), and the draft shows.
+    await screen.findByRole("button", { name: "✓ לאשר" }, { timeout: 6000 });
+    expect(sends).toBe(2);
+    expect(calls.filter((c) => c === "prepare_section")).toHaveLength(1);
+  });
+
   it("previous reports can be summarized by topics through the same review screen", async () => {
     const { user, calls, core } = await openApp();
     const cases = (await core.handle("list_cases", {})) as { id: string }[];
@@ -216,6 +244,43 @@ describe("writing the report", () => {
     await user.click(screen.getByRole("button", { name: /הוצאת הדוח/ }));
     expect((await screen.findAllByText(/סיסמה/)).length).toBeGreaterThan(0);
     expect(await a11yViolations(view.container)).toEqual([]);
+  });
+});
+
+describe("text being typed (F1a)", () => {
+  it("survives leaving the stage before it was reported, and is in the editor on return", async () => {
+    const { user } = await openApp();
+    const page = await openCase(user);
+    await user.click(within(page).getByText(/הופנה לאבחון פסיכולוגי-התפתחותי על ידי הוריו/));
+    const box = await screen.findByRole("textbox", { name: /עריכת פסקה בסעיף/ });
+    // No pause: the box has not reported it yet when she leaves.
+    fireEvent.change(box, { target: { value: "נוסח שלא נשמר עדיין" } });
+    await user.click(screen.getAllByRole("button", { name: /חומרים/ })[0] as HTMLElement);
+    await screen.findByRole("button", { name: /הדבקת טקסט/ });
+    await user.click(screen.getAllByRole("button", { name: /כתיבה$/ })[0] as HTMLElement);
+    const again = await screen.findByRole("textbox", { name: /עריכת פסקה בסעיף/ });
+    expect(again).toHaveValue("נוסח שלא נשמר עדיין");
+  });
+
+  it("is held in full before a lock by hand, even typed without a pause", async () => {
+    const core = new FakeCore();
+    await core.handle("unlock", { password: "x" });
+    const calls: { cmd: string; args: unknown }[] = [];
+    mockIPC((cmd, args) => {
+      calls.push({ cmd, args });
+      return core.handle(cmd, args);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const page = await openCase(user);
+    await user.click(within(page).getByText(/הופנה לאבחון פסיכולוגי-התפתחותי על ידי הוריו/));
+    const box = await screen.findByRole("textbox", { name: /עריכת פסקה בסעיף/ });
+    fireEvent.change(box, { target: { value: "נוסח שנכתב רגע לפני הנעילה" } });
+    fireEvent.keyDown(window, { key: "l", code: "KeyL", ctrlKey: true });
+    await waitFor(() => expect(calls.some((c) => c.cmd === "lock")).toBe(true));
+    const lock = calls.findIndex((c) => c.cmd === "lock");
+    const held = calls.slice(0, lock).filter((c) => c.cmd === "hold_unsaved").at(-1);
+    expect((held?.args as { edit: { text: string } | null }).edit?.text).toBe("נוסח שנכתב רגע לפני הנעילה");
   });
 });
 

@@ -22,7 +22,9 @@ fn encode_bits(bytes: &[u8], chars: usize) -> String {
         }
         let idx = (acc >> (bits - 5)) & 31;
         bits -= 5;
-        out.push(char::from(ALPHABET[idx as usize]));
+        // Five bits always name one of the 32 letters; '?' would make the key fail to parse
+        // back, never print a key that opens nothing.
+        out.push(ALPHABET.get(idx as usize).map_or('?', |&c| char::from(c)));
     }
     out
 }
@@ -70,17 +72,22 @@ pub fn parse(typed: &str) -> Result<Key32, VaultError> {
     if symbols.len() != KEY_CHARS + CHECK_CHARS {
         return Err(VaultError::RecoveryKeyInvalid);
     }
+    let (key_symbols, check_symbols) = symbols
+        .split_at_checked(KEY_CHARS)
+        .ok_or(VaultError::RecoveryKeyInvalid)?;
     let mut out = [0u8; 32];
     let mut acc: u32 = 0;
     let mut bits = 0u32;
     let mut pos = 0usize;
-    for &s in &symbols[..KEY_CHARS] {
+    for &s in key_symbols {
         acc = (acc << 5) | s;
         bits += 5;
-        if bits >= 8 && pos < 32 {
-            out[pos] = u8::try_from((acc >> (bits - 8)) & 0xff).unwrap_or(0);
-            pos += 1;
-            bits -= 8;
+        if bits >= 8 {
+            if let Some(byte) = out.get_mut(pos) {
+                *byte = u8::try_from((acc >> (bits - 8)) & 0xff).unwrap_or(0);
+                pos += 1;
+                bits -= 8;
+            }
         }
         acc &= (1 << bits) - 1;
     }
@@ -89,7 +96,7 @@ pub fn parse(typed: &str) -> Result<Key32, VaultError> {
         .chars()
         .filter_map(decode_char)
         .collect();
-    if expected != symbols[KEY_CHARS..] {
+    if expected != check_symbols {
         return Err(VaultError::RecoveryKeyInvalid);
     }
     Ok(key)
@@ -104,10 +111,8 @@ pub fn derive_kek(recovery: &Key32) -> Result<Key32, VaultError> {
 /// key sealed to her Windows account on this computer. Neither alone opens the slot, so a
 /// broken-into Google account with a stolen backup reads nothing.
 pub fn derive_google_kek(drive_key: &Key32, computer_key: &Key32) -> Result<Key32, VaultError> {
-    let mut both = Zeroizing::new([0u8; 64]);
-    both[..32].copy_from_slice(drive_key.as_bytes());
-    both[32..].copy_from_slice(computer_key.as_bytes());
-    hkdf(both.as_slice(), "dv/slot/google/v1")
+    let both = Zeroizing::new([drive_key.as_bytes().as_slice(), computer_key.as_bytes()].concat());
+    hkdf(&both, "dv/slot/google/v1")
 }
 
 /// Who the Google slot belongs to: the account id, hashed with this vault's id so the header

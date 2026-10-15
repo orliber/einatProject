@@ -49,8 +49,9 @@ impl Core {
         learned: bool,
     ) -> Result<Prepared, CoreError> {
         if !self.verify_stage_on()? {
-            return Err(CoreError::Refused(
+            return Err(CoreError::Needs(
                 "הבדיקה מול המקורות כבויה. אפשר להפעיל אותה בהגדרות.".to_owned(),
+                ErrorAction::settings("ai"),
             ));
         }
         if DERIVED_SECTIONS.contains(&section_key) || Letter::of(section_key).is_some() {

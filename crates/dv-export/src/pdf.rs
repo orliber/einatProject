@@ -147,37 +147,34 @@ fn visual(line: &str) -> String {
     // last one before the next Hebrew letter.
     let mut ltr = vec![false; chars.len()];
     let mut i = 0;
-    while i < chars.len() {
-        if is_ltr(chars[i]) {
-            let mut end = i;
-            let mut j = i;
-            while j < chars.len() && !is_rtl(chars[j]) {
-                if is_ltr(chars[j]) {
-                    end = j;
-                }
-                j += 1;
-            }
-            for flag in &mut ltr[i..=end] {
+    while let Some(&c) = chars.get(i) {
+        if is_ltr(c) {
+            // The span runs to its last Latin letter or digit before the next Hebrew letter.
+            let len = chars
+                .iter()
+                .skip(i)
+                .take_while(|c| !is_rtl(**c))
+                .enumerate()
+                .filter(|(_, c)| is_ltr(**c))
+                .last()
+                .map_or(1, |(j, _)| j + 1);
+            for flag in ltr.iter_mut().skip(i).take(len) {
                 *flag = true;
             }
-            i = end + 1;
+            i += len;
         } else {
             i += 1;
         }
     }
+    // Drawn from the end: a left-to-right span keeps its order, everything else is reversed
+    // one character at a time (and mirrored).
+    let marked: Vec<(char, bool)> = chars.iter().copied().zip(ltr).collect();
     let mut out: Vec<char> = Vec::with_capacity(chars.len());
-    let mut k = chars.len();
-    while k > 0 {
-        k -= 1;
-        if ltr[k] {
-            let mut start = k;
-            while start > 0 && ltr[start - 1] {
-                start -= 1;
-            }
-            out.extend_from_slice(&chars[start..=k]);
-            k = start;
+    for run in marked.chunk_by(|a, b| a.1 == b.1).rev() {
+        if run.first().is_some_and(|(_, keep)| *keep) {
+            out.extend(run.iter().map(|(c, _)| *c));
         } else {
-            out.push(mirror(chars[k]));
+            out.extend(run.iter().rev().map(|(c, _)| mirror(*c)));
         }
     }
     out.into_iter().collect()
@@ -779,10 +776,12 @@ fn hash_2b(password: &[u8], salt: &[u8], udata: &[u8]) -> Result<[u8; 32], Expor
     loop {
         let unit = [password, &k, udata].concat();
         let k1 = unit.repeat(64);
-        let mut iv = [0u8; 16];
-        iv.copy_from_slice(&k[16..32]);
-        let e = cbc(&k[..16], iv, &k1)?;
-        let m = e[..16].iter().map(|b| u32::from(*b)).sum::<u32>() % 3;
+        let (Some(key), Some(iv)) = (k.get(..16), k.get(16..32)) else {
+            return Err(ExportError::Crypto);
+        };
+        let iv: [u8; 16] = iv.try_into().map_err(|_| ExportError::Crypto)?;
+        let e = cbc(key, iv, &k1)?;
+        let m = e.iter().take(16).map(|b| u32::from(*b)).sum::<u32>() % 3;
         let alg = match m {
             0 => &SHA256,
             1 => &SHA384,
@@ -795,9 +794,9 @@ fn hash_2b(password: &[u8], salt: &[u8], udata: &[u8]) -> Result<[u8; 32], Expor
             break;
         }
     }
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&k[..32]);
-    Ok(out)
+    k.get(..32)
+        .and_then(|head| <[u8; 32]>::try_from(head).ok())
+        .ok_or(ExportError::Crypto)
 }
 
 /// Passwords the PDF standard prepares unchanged (SASLprep is the identity on them):

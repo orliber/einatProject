@@ -2,7 +2,12 @@
 //! reordering of PDF lines, on generated text (Hebrew, Latin, digits, punctuation, line ends,
 //! and the invisible characters a hostile file could hide a name with).
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use dv_ingest::rtl::reverse_line;
 use dv_ingest::{extract, IngestError};

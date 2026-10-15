@@ -9,6 +9,9 @@
 //!   crashed v0.2.0, D-038). The minimum is raised at start, so the vault's pages fit.
 //! * No crash dumps with case data (S-5): a crash of this program is kept out of Windows Error
 //!   Reporting, its reports carry no heap, and no "stopped working" window waits on screen.
+//! * Is the computer locked (Win+L)? Asked of Windows every 15 seconds (THREAT_MODEL T2). It
+//!   used to start `tasklist.exe` each time, and a program started every 15 seconds is a likely
+//!   reason the text box she was typing in kept losing the keyboard, so it is a plain question now.
 #![allow(unsafe_code)]
 
 /// What [`harden_process`] managed to do, for the crash-free startup log in tests.
@@ -41,6 +44,14 @@ pub fn harden_process() -> Hardening {
     }
 }
 
+/// Is this Windows session locked (Win+L, the lock screen, switching user)? `None` when
+/// Windows cannot tell.
+#[cfg(windows)]
+#[must_use]
+pub fn session_locked() -> Option<bool> {
+    windows_impl::session_locked()
+}
+
 #[cfg(windows)]
 mod windows_impl {
     use windows::core::{HSTRING, PCWSTR};
@@ -53,6 +64,11 @@ mod windows_impl {
     use windows::Win32::System::Memory::{
         SetProcessWorkingSetSizeEx, QUOTA_LIMITS_HARDWS_MAX_DISABLE,
         QUOTA_LIMITS_HARDWS_MIN_DISABLE,
+    };
+    use windows::Win32::System::RemoteDesktop::{
+        WTSFreeMemory, WTSQuerySessionInformationW, WTSSessionInfoEx, WTSINFOEXW,
+        WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION, WTS_SESSIONSTATE_LOCK,
+        WTS_SESSIONSTATE_UNLOCK,
     };
     use windows::Win32::System::Threading::GetCurrentProcess;
 
@@ -78,6 +94,48 @@ mod windows_impl {
             lock_quota_mib: raise_lock_quota(),
             reports_excluded,
             reports_without_heap,
+        }
+    }
+
+    /// The session's lock state from `WTSQuerySessionInformationW` (level 1 of
+    /// `WTSSessionInfoEx`). Anything other than "locked" or "unlocked" is `None`.
+    pub fn session_locked() -> Option<bool> {
+        let mut buffer = windows::core::PWSTR::null();
+        let mut bytes = 0u32;
+        // SAFETY: both out-pointers point at locals that outlive the call; on success Windows
+        // allocates the buffer, which is freed below and not used after.
+        let asked = unsafe {
+            WTSQuerySessionInformationW(
+                Some(WTS_CURRENT_SERVER_HANDLE),
+                WTS_CURRENT_SESSION,
+                WTSSessionInfoEx,
+                &raw mut buffer,
+                &raw mut bytes,
+            )
+        };
+        if asked.is_err() || buffer.is_null() {
+            return None;
+        }
+        let fits = usize::try_from(bytes).is_ok_and(|b| b >= std::mem::size_of::<WTSINFOEXW>());
+        let flags = if fits {
+            // SAFETY: Windows filled the buffer with a WTSINFOEXW of at least its size (checked
+            // above); it is copied out once, before the buffer is freed.
+            let info = unsafe { buffer.0.cast::<WTSINFOEXW>().read_unaligned() };
+            if info.Level == 1 {
+                // SAFETY: the level is 1, so this union member is the one Windows filled.
+                Some(unsafe { info.Data.WTSInfoExLevel1.SessionFlags })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        // SAFETY: the buffer was allocated by WTSQuerySessionInformationW and is freed once.
+        unsafe { WTSFreeMemory(buffer.0.cast()) };
+        match u32::try_from(flags?).ok()? {
+            WTS_SESSIONSTATE_LOCK => Some(true),
+            WTS_SESSIONSTATE_UNLOCK => Some(false),
+            _ => None,
         }
     }
 
@@ -109,6 +167,12 @@ mod windows_impl {
     #[allow(clippy::unwrap_used)]
     mod tests {
         use windows::Win32::System::Memory::{VirtualLock, VirtualUnlock};
+
+        /// The test runs in an unlocked session, so Windows answers "not locked".
+        #[test]
+        fn this_session_is_not_locked() {
+            assert_eq!(super::session_locked(), Some(false));
+        }
 
         /// The vault's locked pages fit: with the default quota (about 200 KiB) locking
         /// 16 MiB fails; after hardening it succeeds.

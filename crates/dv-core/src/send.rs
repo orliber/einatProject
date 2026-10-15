@@ -336,7 +336,7 @@ impl Core {
             .ok_or_else(|| CoreError::NotFound("האישור פג. יש להכין את הבקשה מחדש.".to_owned()))?;
         let model = serde_json::from_slice::<Value>(pending.payload.body())
             .ok()
-            .and_then(|b| b["model"].as_str().map(str::to_owned))
+            .and_then(|b| b.get("model")?.as_str().map(str::to_owned))
             .unwrap_or_default();
         let provider = provider_of(&model);
         let api_key = key_of(self.vault_ref()?, provider)?;
@@ -353,10 +353,13 @@ impl Core {
                 .setting(&format!("{ZDR_PREFIX}{}", provider.id()))?
                 .is_some_and(|s| s.parse::<i64>().is_ok());
             if !confirmed {
-                return Err(CoreError::Refused(format!(
-                    "לא נשלח: אין אישור על הסכם אפס שמירת מידע (ZDR) עם {}. אפשר לאשר בהגדרות, או לבחור Claude או מודל מקומי.",
-                    provider.display_name()
-                )));
+                return Err(CoreError::Needs(
+                    format!(
+                        "לא נשלח: אין אישור על הסכם אפס שמירת מידע (ZDR) עם {}. אפשר לאשר בהגדרות, או לבחור Claude או מודל מקומי.",
+                        provider.display_name()
+                    ),
+                    ErrorAction::settings("ai"),
+                ));
             }
         }
         // Demo mode costs nothing; anything else stops at the monthly ceiling she set.
@@ -386,9 +389,12 @@ impl Core {
         };
         let month = usage::Month::parse(v.setting(&usage::this_month_key())?.as_deref());
         if month.reached(cap) {
-            return Err(CoreError::Refused(format!(
-                "הגעת לתקרת ההוצאה החודשית שקבעת (${cap}). אפשר להעלות אותה בהגדרות, תחת \"שימוש ועלות\"."
-            )));
+            return Err(CoreError::Needs(
+                format!(
+                    "הגעת לתקרת ההוצאה החודשית שקבעת (${cap}). אפשר להעלות אותה בהגדרות, תחת \"שימוש ועלות\"."
+                ),
+                ErrorAction::settings("ai"),
+            ));
         }
         Ok(())
     }
@@ -401,7 +407,7 @@ impl Core {
         }
         let model = serde_json::from_slice::<Value>(payload.body())
             .ok()
-            .and_then(|b| b["model"].as_str().map(str::to_owned))
+            .and_then(|b| b.get("model")?.as_str().map(str::to_owned))
             .unwrap_or_default();
         let key = usage::this_month_key();
         let Ok(v) = self.vault_mut() else { return };

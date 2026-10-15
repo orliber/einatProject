@@ -47,9 +47,12 @@ fn random<const N: usize>() -> Result<[u8; N], ExportError> {
     Ok(out)
 }
 
-fn iv16(bytes: &[u8]) -> [u8; 16] {
+/// The first 16 bytes of a SHA-512 digest.
+fn iv16(bytes: &[u8; 64]) -> [u8; 16] {
     let mut iv = [0u8; 16];
-    iv.copy_from_slice(&bytes[..16]);
+    for (to, from) in iv.iter_mut().zip(bytes) {
+        *to = *from;
+    }
     iv
 }
 
@@ -79,25 +82,32 @@ fn password_hash(password: &str, salt: &[u8; 16]) -> Zeroizing<[u8; 64]> {
 fn derive(h: &[u8; 64], block_key: &[u8; 8]) -> Zeroizing<[u8; 32]> {
     let full = Zeroizing::new(sha512(&[h, block_key]));
     let mut key = Zeroizing::new([0u8; 32]);
-    key.copy_from_slice(&full[..32]);
+    for (to, from) in key.iter_mut().zip(full.iter()) {
+        *to = *from;
+    }
     key
 }
 
+/// One base64 digit (RFC 4648) for the low six bits of `v`.
+fn b64_digit(v: u32) -> char {
+    let v = u8::try_from(v & 63).unwrap_or(0);
+    char::from(match v {
+        0..=25 => b'A' + v,
+        26..=51 => b'a' + (v - 26),
+        52..=61 => b'0' + (v - 52),
+        62 => b'+',
+        _ => b'/',
+    })
+}
+
 fn b64(data: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
-        let b = [
-            chunk[0],
-            *chunk.get(1).unwrap_or(&0),
-            *chunk.get(2).unwrap_or(&0),
-        ];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        let byte = |i: usize| u32::from(chunk.get(i).copied().unwrap_or(0));
+        let n = (byte(0) << 16) | (byte(1) << 8) | byte(2);
         for i in 0..4 {
             if i <= chunk.len() {
-                out.push(char::from(
-                    ALPHABET[usize::try_from((n >> (18 - 6 * i)) & 63).unwrap_or(0)],
-                ));
+                out.push(b64_digit(n >> (18 - 6 * i)));
             } else {
                 out.push('=');
             }

@@ -72,7 +72,7 @@ pub fn cp1252(b: u8) -> Option<char> {
         Some('Ÿ'),
     ];
     match b {
-        0x80..=0x9F => HIGH[usize::from(b - 0x80)],
+        0x80..=0x9F => HIGH.get(usize::from(b - 0x80)).copied().flatten(),
         _ => Some(char::from(b)),
     }
 }

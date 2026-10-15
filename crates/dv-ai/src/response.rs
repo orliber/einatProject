@@ -57,8 +57,9 @@ struct RawReply {
 pub(crate) fn text_of(response: &Value) -> Result<String, AiError> {
     match response["stop_reason"].as_str() {
         Some("refusal") => {
-            let category = response["stop_details"]["category"]
-                .as_str()
+            let category = response
+                .pointer("/stop_details/category")
+                .and_then(Value::as_str)
                 .unwrap_or("unspecified");
             return Err(AiError::Refused(category.to_owned()));
         }

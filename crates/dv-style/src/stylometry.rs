@@ -294,7 +294,7 @@ fn measure(text: &str) -> Option<([f64; N], Vec<f64>)> {
     // "עם זאת": contrast in two words.
     let im_zot = all
         .windows(2)
-        .filter(|p| p[0].norm.ends_with("עמ") && p[1].norm == "זאת")
+        .filter(|p| matches!(p, [a, b] if a.norm.ends_with("עמ") && b.norm == "זאת"))
         .count() as f64;
     let commas = text.matches(',').count() as f64;
     let parens = text.matches('(').count() as f64;
@@ -366,9 +366,16 @@ fn fit_weighted<'a>(
     for (s, _, r, w) in measured {
         if let Some(d) = delta(&r, &function) {
             let key = s.unwrap_or(GENERAL).to_owned();
-            part.global[DELTA].add(d, w);
-            if let Some(sec) = part.sections.get_mut(&key) {
-                sec[DELTA].add(d, w);
+            // `add` made room for every feature, Delta among them, before this pass.
+            if let Some(m) = part.global.get_mut(DELTA) {
+                m.add(d, w);
+            }
+            if let Some(m) = part
+                .sections
+                .get_mut(&key)
+                .and_then(|sec| sec.get_mut(DELTA))
+            {
+                m.add(d, w);
             }
         }
     }
@@ -383,9 +390,10 @@ fn add(part: &mut Part, section: Option<&str>, f: &[f64; N], rates: &[f64], w: f
         .entry(key)
         .or_insert_with(|| vec![Moments::default(); N]);
     sec.resize(N, Moments::default());
-    for (i, x) in f.iter().enumerate() {
-        part.global[i].add(*x, w);
-        sec[i].add(*x, w);
+    // `ensure` and `resize` made both N long, as `f` is.
+    for ((g, s), x) in part.global.iter_mut().zip(sec.iter_mut()).zip(f) {
+        g.add(*x, w);
+        s.add(*x, w);
     }
     for (m, r) in part.function.iter_mut().zip(rates) {
         m.add(*r, w);
@@ -469,7 +477,7 @@ impl StyleModel {
         let part = self.combined();
         let n = |p: &Part| p.global.first().map_or(0.0, |m| m.n);
         let usual = |i: usize, scale: f64| {
-            let m = part.global[i];
+            let m = part.global.get(i)?;
             (m.n >= MIN_PARAGRAPHS).then_some(m.mean * scale)
         };
         Measures {
@@ -505,7 +513,7 @@ impl StyleModel {
     }
 
     /// For each feature of a paragraph: (feature, z, her usual figure, this paragraph's).
-    fn zs(&self, section: &str, text: &str) -> Option<Vec<(usize, f64, f64, f64)>> {
+    fn zs(&self, section: &str, text: &str) -> Option<Vec<(&'static Feature, f64, f64, f64)>> {
         let part = self.combined();
         if part.global.first().map_or(0.0, |m| m.n) < MIN_PARAGRAPHS {
             return None;
@@ -517,9 +525,10 @@ impl StyleModel {
         f[DELTA] = delta(&rates, &part.function).unwrap_or(f64::NAN);
         let sec = part.sections.get(section);
         let mut out = Vec::new();
-        for (i, spec) in FEATURES.iter().enumerate() {
-            let g = part.global[i];
-            let (mean, var) = match sec.map(|s| s[i]).filter(|s| s.n > 0.0) {
+        // `combined` made the whole report's figures and every section's N long, as `f` is.
+        for (i, ((spec, g), x)) in FEATURES.iter().zip(&part.global).zip(f).enumerate() {
+            let section_figures = sec.and_then(|s| s.get(i)).filter(|s| s.n > 0.0);
+            let (mean, var) = match section_figures {
                 // Empirical Bayes: a section's figures, pulled toward the whole report's.
                 Some(s) => (
                     (s.n * s.mean + PRIOR * g.mean) / (s.n + PRIOR),
@@ -528,11 +537,10 @@ impl StyleModel {
                 None => (g.mean, g.var()),
             };
             let sd = var.sqrt().max(spec.floor);
-            let x = f[i];
             if !x.is_finite() || g.n < 2.0 {
                 continue;
             }
-            out.push((i, (x - mean) / sd, mean, x));
+            out.push((spec, (x - mean) / sd, mean, x));
         }
         Some(out)
     }
@@ -545,7 +553,12 @@ impl StyleModel {
 
     /// Features of a paragraph at least `z_min` of her usual spreads away, furthest first:
     /// (feature, z, her usual figure, this paragraph's).
-    fn unusual(&self, section: &str, text: &str, z_min: f64) -> Vec<(usize, f64, f64, f64)> {
+    fn unusual(
+        &self,
+        section: &str,
+        text: &str,
+        z_min: f64,
+    ) -> Vec<(&'static Feature, f64, f64, f64)> {
         let mut found: Vec<_> = self
             .zs(section, text)
             .unwrap_or_default()
@@ -560,8 +573,7 @@ impl StyleModel {
     fn described(&self, section: &str, text: &str, z_min: f64) -> Vec<String> {
         self.unusual(section, text, z_min)
             .into_iter()
-            .filter_map(|(i, z, mean, x)| {
-                let spec = &FEATURES[i];
+            .filter_map(|(spec, z, mean, x)| {
                 let t = if z > 0.0 { Some(spec.more) } else { spec.less }?;
                 Some(
                     t.replace("{v}", &format!("{x:.0}"))
@@ -595,8 +607,7 @@ impl StyleModel {
         let asks: Vec<String> = self
             .unusual(section, text, Z_HINT)
             .into_iter()
-            .filter_map(|(i, z, mean, _)| {
-                let spec = &FEATURES[i];
+            .filter_map(|(spec, z, mean, _)| {
                 let t = if z > 0.0 {
                     spec.ask_more
                 } else {
@@ -673,6 +684,14 @@ mod tests {
         xs[3..].iter().for_each(|x| b.add(*x, 1.0));
         let c = a.merge(b);
         assert!((c.mean - m.mean).abs() < 1e-9 && (c.m2 - m.m2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn im_zot_counts_as_a_contrast_only_as_two_words_in_a_row() {
+        let contrast = |text: &str| measure(text).unwrap().0[6];
+        let with = contrast("הילד שיחק בחצר עם זאת התעייף מהר מאוד.");
+        let apart = contrast("הילד שיחק עם החברים ואת זאת אהב מאוד.");
+        assert!(with > apart, "{with} {apart}");
     }
 
     #[test]

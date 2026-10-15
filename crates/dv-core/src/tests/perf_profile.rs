@@ -138,4 +138,73 @@ fn perf_profile() {
         took("prepare_section other case", t);
         let _ = p;
     }
+    long_work(&mut core, &case, dir.path());
+}
+
+/// The work that may hold the core for long (F2): each must leave the lock or stay short.
+fn long_work(core: &mut Core, case: &str, dir: &std::path::Path) {
+    let page = material(3);
+    let report = (0..12).map(|_| page.as_str()).collect::<Vec<_>>().join(" ");
+    let bytes = super::import_export::docx(&report, "מרכז בדוי", "יעל בדויה");
+    let t = Instant::now();
+    let job = core
+        .begin_import_document(case, "דוח קודם.docx", bytes.clone())
+        .unwrap();
+    let read = job.run();
+    took("import_document: read (free)", t);
+    let t = Instant::now();
+    core.finish_import_document(case, read).unwrap();
+    took("import_document: preview (locked, 12 pages)", t);
+    for n in 0..8 {
+        let read = core
+            .begin_import_style_source(&format!("דוח {n}.docx"), bytes.clone())
+            .unwrap()
+            .run();
+        let t = Instant::now();
+        let p = core.finish_import_style_source(read).unwrap();
+        let all: Vec<u32> = (0..u32::try_from(p.parts.len()).unwrap()).collect();
+        if n == 0 {
+            took("import_style_source: preview (locked)", t);
+        }
+        let t = Instant::now();
+        core.save_style_source(&p.token, &all, None).unwrap();
+        if n == 7 {
+            took("save_style_source (8th report)", t);
+        }
+    }
+    let backups = dir.join("backups");
+    std::fs::create_dir_all(&backups).unwrap();
+    // Each job: the time under the lock (begin + finish) and the time away from it (run).
+    let t = Instant::now();
+    let task = core.begin_backup(&backups.join("b.vaultbak")).unwrap();
+    took("backup: begin (locked)", t);
+    let t = Instant::now();
+    let run = task.run();
+    took("backup: write and read back (free)", t);
+    let t = Instant::now();
+    let done = core.finish_backup(run).unwrap();
+    took(
+        &format!("backup: finish (locked, {} KB)", done.bytes / 1024),
+        t,
+    );
+    let staged = std::fs::read(&done.path).unwrap();
+    core.stage_backup(staged, "b.vaultbak".into()).unwrap();
+    let t = Instant::now();
+    let job = core.begin_check_backup(PASSWORD).unwrap();
+    let t2 = Instant::now();
+    let drilled = job.run();
+    took("drill: run (free)", t2);
+    core.finish_check_backup(drilled).unwrap();
+    took("drill: all", t);
+    let t = Instant::now();
+    let job = core
+        .begin_change_password(PASSWORD, false, "סיסמה חדשה וארוכה מאוד")
+        .unwrap();
+    took("password: begin (locked)", t);
+    let t = Instant::now();
+    let made = job.run();
+    took("password: run (free)", t);
+    let t = Instant::now();
+    core.finish_change_password(made).unwrap();
+    took("password: finish (locked)", t);
 }

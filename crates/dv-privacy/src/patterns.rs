@@ -341,12 +341,17 @@ fn infer_year(m: u32, d: u32, today: Ymd) -> i32 {
     }
 }
 
+/// Labels that make nine digits near them an ID number.
+const ID_LABELS: [&str; 5] = ["ת.ז", "ת\"ז", "ת״ז", "זהות", "ID"];
+
+// Both read "no character" where `i` is not a boundary (never expected: it ends or starts a
+// match), and `digit_bounded`, their only reader, then takes the number as standing alone.
 fn char_before(text: &str, i: usize) -> Option<char> {
-    text[..i].chars().next_back()
+    text.get(..i)?.chars().next_back()
 }
 
 fn char_after(text: &str, i: usize) -> Option<char> {
-    text[i..].chars().next()
+    text.get(i..)?.chars().next()
 }
 
 /// Not glued to other digits (so "2021" inside "120215" is not a year).
@@ -358,9 +363,18 @@ fn digit_bounded(text: &str, start: usize, end: usize) -> bool {
 /// The word right before a number makes it an age or a score, not a date ("בגיל 2.5",
 /// "אפגר 9/10"). The second end of a range follows the first ("בני 4.5–6.5").
 fn preceded_by_age_or_score(text: &str, start: usize) -> bool {
-    let before = text[..start].trim_end_matches(['-', '־', '–', '—', ' ']);
+    // Text that cannot be read (never expected) is not shown to be an age: the date stays.
+    let Some(head) = text.get(..start) else {
+        return false;
+    };
+    let before = head.trim_end_matches(['-', '־', '–', '—', ' ']);
     let last = before.split_whitespace().last().unwrap_or("");
-    let dashed = text[before.len()..start].contains(['-', '־', '–', '—']);
+    // A dash among what was trimmed off.
+    let dashed = head
+        .chars()
+        .rev()
+        .take_while(|c| matches!(c, '-' | '־' | '–' | '—' | ' '))
+        .any(|c| c != ' ');
     if dashed
         && last.chars().next().is_some_and(|c| c.is_ascii_digit())
         && last.chars().all(|c| c.is_ascii_digit() || c == '.')
@@ -464,7 +478,11 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
             (None, Some(m)) => (Some(m), m == 5),
             (None, None) => (None, true),
         };
-        let start_tok = if day_before.is_some() { i - 1 } else { i };
+        let start_tok = if day_before.is_some() {
+            i.saturating_sub(1)
+        } else {
+            i
+        };
         let mut end_tok = if year_after.is_some() { i + 1 } else { i };
         // "ביוני", "ממאי": May–July with "in" or "from" glued on are months; were the word
         // the name יוני or יולי, hiding it is right too. Not "במרץ" ("energetically").
@@ -489,26 +507,32 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
                 (None, Some(y)) => relative_he((y, m, 15), today),
                 _ => PatternKind::Date.fixed_replacement().to_owned(),
             };
-            push(
-                hits,
-                tokens[start_tok].start,
-                tokens[end_tok].end,
-                PatternKind::Date,
-                replacement,
-            );
+            // The day and the year were read from these tokens; were one missing (never
+            // expected), everything up to the text's edge on that side is hidden with it.
+            let start = tokens
+                .get(start_tok)
+                .or(tokens.first())
+                .map_or(tok.start, |t| t.start.min(tok.start));
+            let end = tokens
+                .get(end_tok)
+                .or(tokens.last())
+                .map_or(tok.end, |t| t.end.max(tok.end));
+            push(hits, start, end, PatternKind::Date, replacement);
         } else if hebrew_cal {
             // "[אב]" is the father's tag, not the month: "[אם] ו[אב]" is not the 6th of Av,
             // nor "ו[אב_2]" (a second father) the 2nd.
             if inside_tag(text, tok.start, tok.end) {
                 continue;
             }
+            // A neighbour that cannot be read (never expected) is taken into the date.
             let numeral_before = i.checked_sub(1).and_then(|j| tokens.get(j)).filter(|t| {
-                let raw = &text[t.start..t.end];
-                c.hebrew_numeral.is_match(raw) && hebrew_day(raw)
+                text.get(t.start..t.end)
+                    .is_none_or(|raw| c.hebrew_numeral.is_match(raw) && hebrew_day(raw))
             });
-            let year_tok = tokens
-                .get(i + 1)
-                .filter(|t| c.hebrew_year.is_match(&text[t.start..t.end]));
+            let year_tok = tokens.get(i + 1).filter(|t| {
+                text.get(t.start..t.end)
+                    .is_none_or(|raw| c.hebrew_year.is_match(raw))
+            });
             if numeral_before.is_none() && year_tok.is_none() {
                 continue;
             }
@@ -526,11 +550,17 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
 }
 
 /// The word at `start..end` is part of a tag the filter wrote ("[אב]", "[אב_2]", "[בית_ספר_1]").
+/// Text that cannot be read (never expected) is not shown to be a tag.
 fn inside_tag(text: &str, start: usize, end: usize) -> bool {
-    let (Some(open), Some(close)) = (text[..start].rfind('['), text[end..].find(']')) else {
+    let (Some(head), Some(tail)) = (text.get(..start), text.get(end..)) else {
         return false;
     };
-    let inner = &text[open + 1..end + close];
+    let (Some(open), Some(close)) = (head.rfind('['), tail.find(']')) else {
+        return false;
+    };
+    let Some(inner) = text.get(open + 1..end + close) else {
+        return false;
+    };
     inner.chars().count() <= 40 && inner.chars().all(|c| c.is_alphanumeric() || c == '_')
 }
 
@@ -648,12 +678,15 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
         let (Some(m), Some(num)) = (caps.get(0), caps.get(1)) else {
             continue;
         };
-        // "80 מ\"ר" is square meters: the label follows a number there.
-        let after_number = text[..m.start()]
-            .trim_end()
-            .chars()
-            .next_back()
-            .is_some_and(|ch| ch.is_ascii_digit());
+        // "80 מ\"ר" is square meters: the label follows a number there (not shown when the
+        // text before cannot be read, never expected).
+        let after_number = text.get(..m.start()).is_some_and(|before| {
+            before
+                .trim_end()
+                .chars()
+                .next_back()
+                .is_some_and(|ch| ch.is_ascii_digit())
+        });
         if !after_number && digit_bounded(text, num.start(), num.end()) {
             push(
                 &mut hits,
@@ -715,14 +748,14 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
         let digits: String = m.as_str().chars().filter(char::is_ascii_digit).collect();
         // Grouped with spaces, nine digits are an ID only when they pass the check digit or
         // follow an ID label: "112 104 106" is a row of scores.
-        let labelled = {
-            let before = &text[..m.start()];
-            let from = before.char_indices().rev().nth(20).map_or(0, |(i, _)| i);
-            let near = &before[from..];
-            ["ת.ז", "ת\"ז", "ת״ז", "זהות", "ID"]
-                .iter()
-                .any(|l| near.contains(l))
-        };
+        // Text before that cannot be read (never expected) counts as a label.
+        let labelled = text
+            .get(..m.start())
+            .and_then(|before| {
+                let from = before.char_indices().rev().nth(20).map_or(0, |(i, _)| i);
+                before.get(from..)
+            })
+            .is_none_or(|near| ID_LABELS.iter().any(|l| near.contains(l)));
         let spaced = m.as_str().contains(' ');
         if digits.len() == 9
             && (!spaced || is_valid_israeli_id(&digits) || labelled)
@@ -742,16 +775,22 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
     // from 0 are a phone. Longer runs and rows of scores stay.
     for m in c.single_digits.find_iter(text) {
         let digits: String = m.as_str().chars().filter(char::is_ascii_digit).collect();
-        let before = text[..m.start()].trim_end_matches([' ', '-']);
-        let after = text[m.end()..].trim_start_matches([' ', '-']);
-        let alone = !before.ends_with(|ch: char| ch.is_ascii_digit())
-            && !after.starts_with(|ch: char| ch.is_ascii_digit());
-        let labelled = {
-            let from = before.char_indices().rev().nth(20).map_or(0, |(i, _)| i);
-            ["ת.ז", "ת\"ז", "ת״ז", "זהות", "ID"]
-                .iter()
-                .any(|l| before[from..].contains(l))
-        };
+        // Text around that cannot be read (never expected) is taken as no digit next to the
+        // run and as a label before it: the run is hidden.
+        let before = text
+            .get(..m.start())
+            .map(|b| b.trim_end_matches([' ', '-']));
+        let after = text
+            .get(m.end()..)
+            .map(|a| a.trim_start_matches([' ', '-']));
+        let alone = !before.is_some_and(|b| b.ends_with(|ch: char| ch.is_ascii_digit()))
+            && !after.is_some_and(|a| a.starts_with(|ch: char| ch.is_ascii_digit()));
+        let labelled = before
+            .and_then(|b| {
+                let from = b.char_indices().rev().nth(20).map_or(0, |(i, _)| i);
+                b.get(from..)
+            })
+            .is_none_or(|near| ID_LABELS.iter().any(|l| near.contains(l)));
         let kind = match digits.len() {
             9 if is_valid_israeli_id(&digits) || labelled => PatternKind::IdNumber,
             10 if digits.starts_with('0') && !digits.starts_with("00") => PatternKind::Phone,
@@ -829,13 +868,14 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
     }
     // A Hebrew year on its own: "תשפ\"ה", "בשנת הלימודים התשפ״ו" (not "תשע" = nine).
     for t in crate::text::tokenize(text) {
-        let raw = &text[t.start..t.end];
-        let bare = raw.trim_start_matches(['ב', 'ל', 'מ', 'ו', 'ה']);
-        if bare.starts_with("תש")
-            && bare.chars().filter(|c| matches!(c, '"' | '״')).count() == 1
-            && bare.chars().count() <= 6
-            && !hits.iter().any(|h| h.start < t.end && t.start < h.end)
-        {
+        // A word that cannot be read (never expected) is hidden as a year.
+        let year_like = text.get(t.start..t.end).is_none_or(|raw| {
+            let bare = raw.trim_start_matches(['ב', 'ל', 'מ', 'ו', 'ה']);
+            bare.starts_with("תש")
+                && bare.chars().filter(|c| matches!(c, '"' | '״')).count() == 1
+                && bare.chars().count() <= 6
+        });
+        if year_like && !hits.iter().any(|h| h.start < t.end && t.start < h.end) {
             push(
                 &mut hits,
                 t.start,
@@ -850,6 +890,7 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
 }
 
 #[cfg(test)]
+#[allow(clippy::string_slice)]
 mod tests {
     use super::*;
 
@@ -861,6 +902,19 @@ mod tests {
             .into_iter()
             .map(|h| (text[h.start..h.end].to_owned(), h.kind, h.replacement))
             .collect()
+    }
+
+    #[test]
+    fn offsets_inside_a_character_read_the_strict_way() {
+        // "א" is two bytes: byte 1 is inside it.
+        assert!(digit_bounded("א12", 1, 4));
+        assert!(!digit_bounded("12345", 1, 3));
+        // Not shown to be a tag, so "אב" there is still read as the month.
+        assert!(!inside_tag("[אב]", 2, 5));
+        assert!(inside_tag("[אב]", 1, 5));
+        // Not shown to be an age, so the date is still hidden.
+        assert!(!preceded_by_age_or_score("בגיל 3", 1));
+        assert!(preceded_by_age_or_score("בגיל 3", "בגיל ".len()));
     }
 
     #[test]

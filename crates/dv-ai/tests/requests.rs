@@ -5,6 +5,8 @@
 //!
 //! All text here is invented.
 
+#![allow(clippy::indexing_slicing)]
+
 use dv_ai::{
     build_consult_request, build_research_request, build_section_request, build_sort_request,
     build_style_analysis_request, build_style_synthesis_request, build_verify_request,

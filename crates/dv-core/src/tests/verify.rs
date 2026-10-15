@@ -31,7 +31,7 @@ fn the_check_against_the_sources_is_off_until_she_turns_it_on() {
     assert!(!core.verify_stage_on().unwrap());
     assert!(matches!(
         core.prepare_verify(&case, "kindergarten"),
-        Err(CoreError::Refused(_))
+        Err(CoreError::Needs(_, ErrorAction::Settings { .. }))
     ));
     core.set_verify_stage(true).unwrap();
     assert!(core.prepare_verify(&case, "kindergarten").is_ok());

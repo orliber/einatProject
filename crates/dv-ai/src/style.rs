@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use ts_rs::TS;
 
-use crate::request::{base_body, data_block, ModelConfig};
+use crate::request::{base_body, data_block, set, set_schema, ModelConfig};
 use crate::response::{text_of, AiError};
 
 /// A phrase is a short expression of hers, never a sentence of content.
@@ -152,14 +152,16 @@ fn schema(sections: &[String], kinds: &[StyleKind], with_support: bool) -> Value
     let mut keys: Vec<&str> = sections.iter().map(String::as_str).collect();
     keys.push(GENERAL);
     let kinds: Vec<&str> = kinds.iter().map(|k| k.key()).collect();
-    let mut props = json!({
-        "section": {"type": "string", "enum": keys},
-        "kind": {"type": "string", "enum": kinds},
-        "text": {"type": "string"}
-    });
+    let mut props = serde_json::Map::new();
+    props.insert(
+        "section".to_owned(),
+        json!({"type": "string", "enum": keys}),
+    );
+    props.insert("kind".to_owned(), json!({"type": "string", "enum": kinds}));
+    props.insert("text".to_owned(), json!({"type": "string"}));
     let mut required = vec!["section", "kind", "text"];
     if with_support {
-        props["support"] = json!({"type": "integer"});
+        props.insert("support".to_owned(), json!({"type": "integer"}));
         required.push("support");
     }
     json!({
@@ -212,11 +214,12 @@ pub fn build_style_analysis_request(
         ));
     }
     parts.push("תאר/י את סגנון הכתיבה של הקטעים.".to_owned());
-    body["messages"] = json!([{ "role": "user", "content": parts.join("\n\n") }]);
-    body["output_config"]["format"] = json!({
-        "type": "json_schema",
-        "schema": schema(sections, &ANALYSIS_KINDS, false),
-    });
+    set(
+        &mut body,
+        "messages",
+        json!([{ "role": "user", "content": parts.join("\n\n") }]),
+    );
+    set_schema(&mut body, schema(sections, &ANALYSIS_KINDS, false));
     body
 }
 
@@ -249,11 +252,12 @@ pub fn build_style_synthesis_request(
         ));
     }
     parts.push("בנה/י את פרופיל הסגנון.".to_owned());
-    body["messages"] = json!([{ "role": "user", "content": parts.join("\n\n") }]);
-    body["output_config"]["format"] = json!({
-        "type": "json_schema",
-        "schema": schema(sections, &SYNTHESIS_KINDS, true),
-    });
+    set(
+        &mut body,
+        "messages",
+        json!([{ "role": "user", "content": parts.join("\n\n") }]),
+    );
+    set_schema(&mut body, schema(sections, &SYNTHESIS_KINDS, true));
     body
 }
 

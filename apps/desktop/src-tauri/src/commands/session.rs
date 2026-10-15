@@ -38,9 +38,24 @@ pub(crate) async fn app_status(
 /// it blacked out Zoom and Teams. Setting this back to `true` restores D-037 as it was.
 pub(crate) const SCREEN_PROTECTION_ENABLED: bool = false;
 
+/// What the window was last told: `None` nothing yet (or the last try failed). Held while
+/// Windows is told, so two calls at once (the timer and her switch) can never leave the
+/// window in one state and this record in the other.
+static PROTECTED: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
+
 /// Screenshots and screen sharing see a blank window unless she turned that off (D-037).
+/// The status is read every 15 seconds; Windows is told only when the answer changes, so
+/// the window is not touched while she types.
 pub(crate) fn protect(window: &tauri::WebviewWindow, on: bool) {
-    let _ = window.set_content_protected(SCREEN_PROTECTION_ENABLED && on);
+    let on = SCREEN_PROTECTION_ENABLED && on;
+    let mut told = PROTECTED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if *told == Some(on) {
+        return;
+    }
+    // A failure is tried again next time.
+    *told = window.set_content_protected(on).ok().map(|()| on);
 }
 
 #[tauri::command]
@@ -72,7 +87,14 @@ pub(crate) async fn confirm_recovery_key(
 
 #[tauri::command]
 pub(crate) async fn unlock(state: tauri::State<'_, AppState>, password: String) -> Res<AppStatus> {
-    with_core(&state, move |c| c.unlock(&password)).await
+    let password = zeroize::Zeroizing::new(password);
+    off_lock(
+        &state,
+        move |c| c.begin_unlock(&password),
+        |job| job.run(),
+        |c, opened| c.finish_unlock(opened),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -80,7 +102,14 @@ pub(crate) async fn unlock_with_recovery(
     state: tauri::State<'_, AppState>,
     key: String,
 ) -> Res<AppStatus> {
-    with_core(&state, move |c| c.unlock_with_recovery(&key)).await
+    let key = zeroize::Zeroizing::new(key);
+    off_lock(
+        &state,
+        move |c| c.begin_unlock_with_recovery(&key),
+        |job| job.run(),
+        |c, opened| c.finish_unlock(opened),
+    )
+    .await
 }
 
 #[tauri::command]

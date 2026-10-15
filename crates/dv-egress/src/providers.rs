@@ -163,7 +163,7 @@ pub(crate) fn canonical(body: &Value, provider: Provider) -> Result<Canonical, E
         .and_then(Value::as_array)
         .ok_or_else(|| policy("no messages"))?
     {
-        let assistant = match m["role"].as_str() {
+        let assistant = match m.get("role").and_then(Value::as_str) {
             Some("user") => false,
             Some("assistant") => true,
             _ => return Err(policy("unknown role")),
@@ -237,10 +237,14 @@ pub(crate) fn to_openai(c: &Canonical) -> Value {
         "store": false,
     });
     if let Some(schema) = &c.schema {
-        body["response_format"] = json!({
-            "type": "json_schema",
-            "json_schema": { "name": "answer", "strict": true, "schema": schema },
-        });
+        set(
+            &mut body,
+            "response_format",
+            json!({
+                "type": "json_schema",
+                "json_schema": { "name": "answer", "strict": true, "schema": schema },
+            }),
+        );
     }
     body
 }
@@ -263,10 +267,14 @@ pub(crate) fn to_mistral(c: &Canonical) -> Value {
         "max_tokens": c.max_tokens,
     });
     if let Some(schema) = &c.schema {
-        body["response_format"] = json!({
-            "type": "json_schema",
-            "json_schema": { "name": "answer", "strict": true, "schema": schema },
-        });
+        set(
+            &mut body,
+            "response_format",
+            json!({
+                "type": "json_schema",
+                "json_schema": { "name": "answer", "strict": true, "schema": schema },
+            }),
+        );
     }
     body
 }
@@ -290,7 +298,7 @@ pub(crate) fn to_local(c: &Canonical) -> Value {
         "options": { "num_predict": c.max_tokens },
     });
     if let Some(schema) = &c.schema {
-        body["format"] = schema.clone();
+        set(&mut body, "format", schema.clone());
     }
     body
 }
@@ -314,21 +322,34 @@ pub(crate) fn to_gemini(c: &Canonical) -> Value {
         "thinkingConfig": { "thinkingBudget": budget },
     });
     if let Some(schema) = &c.schema {
-        config["responseMimeType"] = json!("application/json");
-        config["responseJsonSchema"] = schema.clone();
+        set(&mut config, "responseMimeType", json!("application/json"));
+        set(&mut config, "responseJsonSchema", schema.clone());
     }
     let mut body = json!({ "contents": contents, "generationConfig": config });
     if let Some(s) = &c.system {
-        body["systemInstruction"] = json!({ "parts": [ { "text": s } ] });
+        set(
+            &mut body,
+            "systemInstruction",
+            json!({ "parts": [ { "text": s } ] }),
+        );
     }
     body
 }
 
+/// Sets a field of a body this module built as a JSON object (a write through `value[key]`
+/// would panic on anything else).
+fn set(v: &mut Value, key: &str, value: Value) {
+    if let Some(o) = v.as_object_mut() {
+        o.insert(key.to_owned(), value);
+    }
+}
+
 /// Token counts in the Messages API `usage` shape (for the monthly cost ceiling).
-fn usage(input: &Value, output: &Value) -> Value {
+fn usage(input: Option<&Value>, output: Option<&Value>) -> Value {
+    let count = |v: Option<&Value>| v.and_then(Value::as_u64).unwrap_or(0);
     json!({
-        "input_tokens": input.as_u64().unwrap_or(0),
-        "output_tokens": output.as_u64().unwrap_or(0),
+        "input_tokens": count(input),
+        "output_tokens": count(output),
     })
 }
 
@@ -341,27 +362,32 @@ fn answer(model: &str, text: String, stop: &str, category: Option<String>) -> Va
         "content": [ { "type": "text", "text": text } ],
     });
     if let Some(c) = category {
-        v["stop_details"] = json!({ "category": c });
+        set(&mut v, "stop_details", json!({ "category": c }));
     }
     v
 }
 
 pub(crate) fn from_openai(model: &str, resp: &Value) -> Result<Value, EgressError> {
     let mut v = from_openai_inner(model, resp)?;
-    v["usage"] = usage(
-        &resp["usage"]["prompt_tokens"],
-        &resp["usage"]["completion_tokens"],
+    let tokens = usage(
+        resp.pointer("/usage/prompt_tokens"),
+        resp.pointer("/usage/completion_tokens"),
     );
+    set(&mut v, "usage", tokens);
     Ok(v)
 }
 
 fn from_openai_inner(model: &str, resp: &Value) -> Result<Value, EgressError> {
-    let choice = &resp["choices"][0];
-    if choice.is_null() {
-        return Err(EgressError::Protocol("no choices in the answer".to_owned()));
-    }
-    let message = &choice["message"];
-    if message["refusal"].as_str().is_some_and(|r| !r.is_empty()) {
+    let choice = resp
+        .pointer("/choices/0")
+        .filter(|c| !c.is_null())
+        .ok_or_else(|| EgressError::Protocol("no choices in the answer".to_owned()))?;
+    let message = choice.get("message").unwrap_or(&Value::Null);
+    if message
+        .get("refusal")
+        .and_then(Value::as_str)
+        .is_some_and(|r| !r.is_empty())
+    {
         return Ok(answer(
             model,
             String::new(),
@@ -369,8 +395,12 @@ fn from_openai_inner(model: &str, resp: &Value) -> Result<Value, EgressError> {
             Some("refusal".to_owned()),
         ));
     }
-    let text = message["content"].as_str().unwrap_or("").to_owned();
-    Ok(match choice["finish_reason"].as_str() {
+    let text = message
+        .get("content")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    Ok(match choice.get("finish_reason").and_then(Value::as_str) {
         Some("length" | "model_length") => answer(model, text, "max_tokens", None),
         Some("content_filter") => answer(
             model,
@@ -384,16 +414,18 @@ fn from_openai_inner(model: &str, resp: &Value) -> Result<Value, EgressError> {
 
 pub(crate) fn from_local(model: &str, resp: &Value) -> Result<Value, EgressError> {
     let mut v = from_local_inner(model, resp)?;
-    v["usage"] = usage(&resp["prompt_eval_count"], &resp["eval_count"]);
+    let tokens = usage(resp.get("prompt_eval_count"), resp.get("eval_count"));
+    set(&mut v, "usage", tokens);
     Ok(v)
 }
 
 fn from_local_inner(model: &str, resp: &Value) -> Result<Value, EgressError> {
-    let text = resp["message"]["content"]
-        .as_str()
+    let text = resp
+        .pointer("/message/content")
+        .and_then(Value::as_str)
         .ok_or_else(|| EgressError::Protocol("no message in the answer".to_owned()))?
         .to_owned();
-    Ok(match resp["done_reason"].as_str() {
+    Ok(match resp.get("done_reason").and_then(Value::as_str) {
         Some("length") => answer(model, text, "max_tokens", None),
         _ => answer(model, text, "end_turn", None),
     })
@@ -401,16 +433,21 @@ fn from_local_inner(model: &str, resp: &Value) -> Result<Value, EgressError> {
 
 pub(crate) fn from_gemini(model: &str, resp: &Value) -> Result<Value, EgressError> {
     let mut v = from_gemini_inner(model, resp)?;
-    let meta = &resp["usageMetadata"];
-    // Thinking tokens are billed as output.
-    let output = meta["candidatesTokenCount"].as_u64().unwrap_or(0)
-        + meta["thoughtsTokenCount"].as_u64().unwrap_or(0);
-    v["usage"] = usage(&meta["promptTokenCount"], &json!(output));
+    let meta = resp.get("usageMetadata").unwrap_or(&Value::Null);
+    let count = |k: &str| meta.get(k).and_then(Value::as_u64).unwrap_or(0);
+    // Thinking tokens are billed as output. The counts are the server's: a sum that does not
+    // fit is the most, never a crash.
+    let output = count("candidatesTokenCount").saturating_add(count("thoughtsTokenCount"));
+    let tokens = usage(meta.get("promptTokenCount"), Some(&json!(output)));
+    set(&mut v, "usage", tokens);
     Ok(v)
 }
 
 fn from_gemini_inner(model: &str, resp: &Value) -> Result<Value, EgressError> {
-    if let Some(reason) = resp["promptFeedback"]["blockReason"].as_str() {
+    if let Some(reason) = resp
+        .pointer("/promptFeedback/blockReason")
+        .and_then(Value::as_str)
+    {
         return Ok(answer(
             model,
             String::new(),
@@ -418,21 +455,20 @@ fn from_gemini_inner(model: &str, resp: &Value) -> Result<Value, EgressError> {
             Some(reason.to_lowercase()),
         ));
     }
-    let cand = &resp["candidates"][0];
-    if cand.is_null() {
-        return Err(EgressError::Protocol(
-            "no candidates in the answer".to_owned(),
-        ));
-    }
+    let cand = resp
+        .pointer("/candidates/0")
+        .filter(|c| !c.is_null())
+        .ok_or_else(|| EgressError::Protocol("no candidates in the answer".to_owned()))?;
     // Thought summaries (if any) are not part of the answer.
-    let text: String = cand["content"]["parts"]
-        .as_array()
+    let text: String = cand
+        .pointer("/content/parts")
+        .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter(|p| p["thought"] != true)
-        .filter_map(|p| p["text"].as_str())
+        .filter(|p| p.get("thought") != Some(&Value::Bool(true)))
+        .filter_map(|p| p.get("text").and_then(Value::as_str))
         .collect();
-    Ok(match cand["finishReason"].as_str() {
+    Ok(match cand.get("finishReason").and_then(Value::as_str) {
         Some("STOP") | None => answer(model, text, "end_turn", None),
         Some("MAX_TOKENS") => answer(model, text, "max_tokens", None),
         Some(other) => answer(model, String::new(), "refusal", Some(other.to_lowercase())),
@@ -509,10 +545,10 @@ impl ProviderTransport {
             .as_ref()
             .ok()
             .and_then(|v| {
-                v["error"]["message"]
-                    .as_str()
-                    .or_else(|| v["error"].as_str())
-                    .or_else(|| v["message"].as_str())
+                v.pointer("/error/message")
+                    .and_then(Value::as_str)
+                    .or_else(|| v.get("error").and_then(Value::as_str))
+                    .or_else(|| v.get("message").and_then(Value::as_str))
                     .map(str::to_owned)
             })
             .unwrap_or_default();
@@ -899,5 +935,62 @@ mod tests {
             transport_for("gpt-4o", "sk-test-not-real"),
             Err(EgressError::Policy(_))
         ));
+    }
+
+    /// Every value of a full answer, one at a time, replaced by a value of another shape: the
+    /// answer is the server's JSON, so it may be refused, never crash the app.
+    #[test]
+    fn answers_with_the_wrong_shapes_are_read_or_refused_never_a_crash() {
+        fn paths(v: &Value, at: String, out: &mut Vec<String>) {
+            out.push(at.clone());
+            match v {
+                Value::Object(m) => {
+                    for (k, c) in m {
+                        paths(c, format!("{at}/{k}"), out);
+                    }
+                }
+                Value::Array(a) => {
+                    for (i, c) in a.iter().enumerate() {
+                        paths(c, format!("{at}/{i}"), out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let odd = [
+            Value::Null,
+            json!(true),
+            json!(u64::MAX),
+            json!(-1),
+            json!(1.5e300),
+            json!("x"),
+            json!([]),
+            json!({}),
+        ];
+        let openai = json!({"choices": [{"message": {"content": "שלום", "refusal": null}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 3, "completion_tokens": 2}});
+        let local = json!({"message": {"content": "שלום"}, "done_reason": "stop", "prompt_eval_count": 3, "eval_count": 2});
+        let gemini = json!({"candidates": [{"content": {"parts": [{"text": "שלום"}, {"text": "x", "thought": true}]}, "finishReason": "STOP"}], "usageMetadata": {"promptTokenCount": 3, "candidatesTokenCount": u64::MAX, "thoughtsTokenCount": u64::MAX}, "promptFeedback": {}});
+        type Read = fn(&str, &Value) -> Result<Value, EgressError>;
+        let cases: [(&Value, Read); 3] = [
+            (&openai, from_openai),
+            (&local, from_local),
+            (&gemini, from_gemini),
+        ];
+        for (answer, read) in cases {
+            assert!(read("m", answer).is_ok(), "{answer}");
+            let mut all = Vec::new();
+            paths(answer, String::new(), &mut all);
+            for path in all {
+                for o in &odd {
+                    let mut changed = answer.clone();
+                    match changed.pointer_mut(&path) {
+                        Some(slot) => *slot = o.clone(),
+                        None => continue,
+                    }
+                    let r = std::panic::catch_unwind(|| read("m", &changed));
+                    assert!(r.is_ok(), "panic at {path:?} = {o}");
+                }
+            }
+        }
     }
 }

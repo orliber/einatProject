@@ -3,7 +3,12 @@
 //! reads worse, the cut-offs sit exactly where the tables say, and a score that cannot exist is
 //! refused rather than given the nearest range. Invented scores only.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use dv_domain::scores::{classify, percentile, Band, Measure, ScoreScale};
 use dv_domain::{format_sheet, instruments, sheet_profiles, sheet_table, ScoreEntry, ScoreSheet};

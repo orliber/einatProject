@@ -49,6 +49,7 @@ pub(crate) async fn install_update(
             code: "update".to_owned(),
             message: "כאן העדכון לא מותקן לבד. מתקינים את הגרסה החדשה מהקישור ששלח אור.".to_owned(),
             details: Vec::new(),
+            action: dv_core::ErrorAction::Dismiss,
         });
     }
     let dir = state.dir.clone();

@@ -89,12 +89,12 @@ pub(super) fn heading_matches(norm: &str, keyword: &str) -> bool {
         let mut forms = vec![w];
         let mut rest = w;
         for _ in 0..2 {
-            match rest.chars().next() {
-                Some(p @ ('ו' | 'ה' | 'ב' | 'ל' | 'ש' | 'מ')) => {
-                    rest = &rest[p.len_utf8()..];
+            match rest.strip_prefix(['ו', 'ה', 'ב', 'ל', 'ש', 'מ']) {
+                Some(shorter) => {
+                    rest = shorter;
                     forms.push(rest);
                 }
-                _ => break,
+                None => break,
             }
         }
         forms

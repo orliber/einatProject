@@ -4,7 +4,12 @@
 //! the seed is printed. The nightly job raises the number of rounds with `DV_FUZZ_ROUNDS`.
 //! (The real isolation is the worker process; this finds the bugs before they reach it.)
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use std::io::{Cursor, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};

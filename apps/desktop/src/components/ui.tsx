@@ -1,7 +1,10 @@
 // Small shared pieces: icons, dialog frame, marked text, toast.
 import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { AppContext } from "../App";
-import { failureFor } from "../errors";
+import { failureFor, rememberFailure, replayFor } from "../errors";
+import { asUiError } from "../ipc/client";
+import { SETTINGS_PANES, type SettingsPane } from "../screens/settingsPanes";
 import { BugReportDialog } from "./BugReport";
 import type { Segment } from "../ipc/generated/Segment";
 
@@ -239,50 +242,110 @@ export function Toast({ text, onDone, action }: { text: string; onDone: () => vo
   );
 }
 
-/** An error with the next step beside it: a missing consent opens the consent form, a bad
- *  key opens the settings, a technical failure can be copied for Or (F2, F4, F5). */
-/** Failures that are her own input, fixed where she types; no bug report for these. */
-const OWN_SLIPS = new Set(["wrong_secret", "recovery_invalid", "weak_password", "exists", "backoff", "locked", "not_found", "refused"]);
-
 /**
- * Every error on screen, with the next step (U5): the place that fixes it when there is one,
- * "לנסות שוב" when the caller can retry, and otherwise a bug report for Or. Never a dead end.
+ * Every error on screen, the same way, with its one next step (F6): the button the core chose
+ * for it. "לנסות שוב" runs the failed call again (or the caller's own retry), and the line goes
+ * once it worked; settings open on the pane that fixes it; a missing consent opens the case
+ * details; a fault only Or can read offers the report for him; her own slip closes with
+ * "הבנתי". A message that is not the remembered failure (written by the screen itself) gets
+ * the caller's retry when there is one, else "הבנתי". Never a dead end.
  */
-export function ErrorLine({ error, retry, report: always }: { error: string | null; retry?: (() => void) | undefined; report?: boolean }) {
+export function ErrorLine({ error: given, retry, report: always }: { error: string | null; retry?: (() => void) | undefined; report?: boolean }) {
   const app = useContext(AppContext);
+  const qc = useOptionalQueryClient();
   const [reporting, setReporting] = useState(false);
-  if (!error) return null;
-  const f = failureFor(error);
+  const [closed, setClosed] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // A try again that failed shows its own failure, with its own next step, in place of the
+  // first (never the old line as if nothing happened).
+  const [again_, setAgain] = useState<{ after: string; message: string } | null>(null);
+  const error = given !== null && again_?.after === given ? again_.message : given;
+  const f = error ? failureFor(error) : null;
+  const action = f?.action ?? null;
+  if (!error || given === null || closed === given) return null;
   const route = app?.route;
-  const actions: { label: string; run: () => void }[] = [];
-  if (f && app) {
-    if (f.code === "consent_missing" && route?.name === "case") {
-      const id = route.id;
-      actions.push({ label: "רישום ההסכמה", run: () => app.go({ name: "case", id, view: "details" }) });
+  const replay = replayFor(f);
+  const buttons: { label: string; run: () => void; wait?: number }[] = [];
+  const first = given;
+  const again = retry ?? (replay ? () => {
+    setBusy(true);
+    void replay()
+      .then(() => {
+        setClosed(first);
+        void qc?.invalidateQueries();
+        void app?.refresh();
+      })
+      .catch((e: unknown) => {
+        const u = asUiError(e);
+        let message = u.message;
+        if (app) message = app.fail(u);
+        else rememberFailure(u);
+        setAgain({ after: first, message });
+      })
+      .finally(() => setBusy(false));
+  } : undefined);
+  switch (action?.kind) {
+    case "retry":
+      if (again) buttons.push({ label: "לנסות שוב", run: again, wait: action.after_seconds });
+      break;
+    case "settings": {
+      const pane: SettingsPane = SETTINGS_PANES.find((p) => p.id === action.pane)?.id ?? "general";
+      if (app) buttons.push({ label: "פתיחת ההגדרות", run: () => app.go({ name: "settings", pane }) });
+      break;
     }
-    // The key, the zero-retention confirmation, the monthly ceiling: all fixed in settings.
-    if ((f.code === "egress" && f.message.includes("מפתח")) || f.message.includes("בהגדרות")) {
-      actions.push({ label: "פתיחת ההגדרות", run: () => app.go({ name: "settings", pane: "ai" }) });
-    }
+    case "consent":
+      if (app && route?.name === "case") {
+        const id = route.id;
+        buttons.push({ label: "רישום ההסכמה", run: () => app.go({ name: "case", id, view: "details" }) });
+      }
+      break;
+    case "unlock":
+      if (app) buttons.push({ label: "פתיחת הכספת", run: () => void app.refresh() });
+      break;
+    default:
+      if (!f && retry) buttons.push({ label: "לנסות שוב", run: retry });
   }
-  if (retry) actions.push({ label: "לנסות שוב", run: retry });
-  // A fault only Or can read, or a failure from the core with nothing else to offer: the report
-  // for him. Her own slips (a wrong password, a field left empty) are not faults.
-  const report = always === true || (f !== null && (f.details.length > 0 || (actions.length === 0 && !OWN_SLIPS.has(f.code))));
+  const report = always === true || action?.kind === "report" || (f !== null && f.details.length > 0);
+  if (buttons.length === 0 && !report) buttons.push({ label: "הבנתי", run: () => setClosed(first) });
   return (
     <div className="error-line">
       <p className="error" role="alert">{error}</p>
-      {(actions.length > 0 || report) && <div className="row error-actions">
-        {actions.map((a) => (
-          <button key={a.label} type="button" className="btn btn-small" onClick={a.run}>{a.label}</button>
-        ))}
+      <div className="row error-actions">
+        {buttons.map((a) => a.wait !== undefined
+          ? <WaitButton key={`${a.label}-${error}`} label={a.label} seconds={a.wait} busy={busy} run={a.run} />
+          : <button key={a.label} type="button" className="btn btn-small" onClick={a.run}>{a.label}</button>)}
         {report && (
           <button type="button" className="btn btn-small" onClick={() => setReporting(true)}>דוח תקלה לאור</button>
         )}
-      </div>}
+      </div>
       {reporting && (
         <BugReportDialog failure={f ? { code: f.code, details: f.details } : null} onClose={() => setReporting(false)} />
       )}
     </div>
   );
+}
+
+/** "לנסות שוב" that waits out the seconds the core asked for (too many tries, a busy AI). */
+function WaitButton({ label, seconds, busy, run }: { label: string; seconds: number; busy: boolean; run: () => void }) {
+  const [left, setLeft] = useState(seconds);
+  useEffect(() => {
+    if (seconds <= 0) return;
+    const t = window.setInterval(() => setLeft((w) => (w > 1 ? w - 1 : 0)), 1000);
+    return () => window.clearInterval(t);
+  }, [seconds]);
+  return (
+    <button type="button" className="btn btn-small" disabled={left > 0 || busy} onClick={run}>
+      {left > 0 ? `${label} (${left})` : label}
+    </button>
+  );
+}
+
+/** The query client when there is one (a screen under the app), so a retry that worked
+ *  refreshes what the screen shows; `null` in a bare test render. */
+function useOptionalQueryClient() {
+  try {
+    return useQueryClient();
+  } catch {
+    return null;
+  }
 }

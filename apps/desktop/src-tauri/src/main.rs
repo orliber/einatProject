@@ -27,7 +27,7 @@ use dv_core::{
 use dv_domain::{
     CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind, Role,
 };
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 struct AppState {
     core: Arc<Mutex<Core>>,
@@ -92,6 +92,7 @@ fn internal(what: &str) -> UiError {
         code: "internal".to_owned(),
         message: format!("שגיאה פנימית: {what}"),
         details: Vec::new(),
+        action: dv_core::ErrorAction::Report,
     }
 }
 
@@ -111,8 +112,62 @@ where
     .map_err(|_| internal("task"))?
 }
 
+/// Long work away from the core (F2): `begin` takes what it needs under the lock, `run` does
+/// the slow part on a worker thread while every other command goes on, and `finish` writes the
+/// result back under the lock.
+async fn off_lock<J, D, T>(
+    state: &AppState,
+    begin: impl FnOnce(&mut Core) -> Result<J, CoreError> + Send + 'static,
+    run: impl FnOnce(J) -> D + Send + 'static,
+    finish: impl FnOnce(&mut Core, D) -> Result<T, CoreError> + Send + 'static,
+) -> Res<T>
+where
+    J: Send + 'static,
+    D: Send + 'static,
+    T: Send + 'static,
+{
+    let job = with_core(state, begin).await?;
+    let done = tauri::async_runtime::spawn_blocking(move || run(job))
+        .await
+        .map_err(|_| internal("task"))?;
+    with_core(state, move |c| finish(c, done)).await
+}
+
+/// Let the name model read a case's new texts (and `extra`) while the core is free (F2),
+/// before a command that filters them. Only a head start: the command reads anything still
+/// missing itself, so filtering never depends on it. Nothing happens when the model is off.
+async fn warm_names(state: &AppState, case_id: &str, extra: Vec<String>) {
+    let core = Arc::clone(&state.core);
+    let case_id = case_id.to_owned();
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        let job = core
+            .lock()
+            .ok()?
+            .begin_name_hints(&case_id, &extra)
+            .ok()??;
+        let read = job.run();
+        core.lock().ok()?.finish_name_hints(read);
+        Some(())
+    })
+    .await;
+}
+
 /// Next to the vault folder, never inside it. Kept small.
 const CRASH_LOG: &str = "crash-log.txt";
+
+/// The one event the window listens to. It carries no case data: only that the vault
+/// locked, that the idle lock is close, or that a backup was just written.
+const CORE_EVENT: &str = "core";
+/// The idle warning starts this many seconds before the lock (the window shows the last 75).
+const IDLE_EVENT_SECONDS: u32 = 90;
+
+#[derive(Clone, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum CoreEvent {
+    Locked,
+    IdleSoon { seconds: u32 },
+    BackedUp,
+}
 const CRASH_LOG_MAX: u64 = 64 * 1024;
 
 /// A release build stops at the first panic (`panic = "abort"`), and on Windows it has no
@@ -196,12 +251,21 @@ fn main() {
                 protect(w, true);
             }
             let mut computer = os_lock::LockWatch::default();
+            // The window learns of a lock, of the last minute before it and of a backup from
+            // an event, so it never has to ask the core on a timer while she types (F3).
+            let events = app.handle().clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(15));
                 // Read the clock before waiting for the core: a long command holding it must not
                 // look like the computer slept.
                 let now = std::time::SystemTime::now();
-                let mut locked = timer.lock().is_ok_and(|mut c| c.tick(now));
+                let (mut locked, idle_in) = timer
+                    .lock()
+                    .map(|mut c| {
+                        let locked = c.tick(now);
+                        (locked, c.idle_lock_in())
+                    })
+                    .unwrap_or((false, None));
                 // The computer was locked (Win+L): the vault locks with it. Asked without
                 // holding the core, and only while the vault is open.
                 if !locked && timer.lock().is_ok_and(|c| c.is_unlocked()) {
@@ -213,9 +277,19 @@ fn main() {
                 // A backup that is due goes by itself to the drive of the last one, if it is
                 // connected (see `Core::auto_backup`). A failure waits and is shown nowhere: the
                 // backup reminder stays until a backup is made.
+                // Only the snapshot holds the core; writing to the drive and reading it back
+                // run with the core free (F2).
+                let mut backed_up = false;
                 if !locked {
-                    if let Ok(mut c) = timer.lock() {
-                        let _ = c.auto_backup();
+                    let task = timer
+                        .lock()
+                        .ok()
+                        .and_then(|mut c| c.begin_auto_backup().ok().flatten());
+                    if let Some(task) = task {
+                        let run = task.run();
+                        if let Ok(mut c) = timer.lock() {
+                            backed_up = c.finish_backup(run).is_ok();
+                        }
                     }
                 }
                 if locked {
@@ -223,6 +297,18 @@ fn main() {
                     if let Some(w) = &timer_window {
                         protect(w, true);
                     }
+                }
+                let event = if locked {
+                    Some(CoreEvent::Locked)
+                } else if backed_up {
+                    Some(CoreEvent::BackedUp)
+                } else {
+                    idle_in
+                        .filter(|s| *s <= IDLE_EVENT_SECONDS)
+                        .map(|seconds| CoreEvent::IdleSoon { seconds })
+                };
+                if let Some(e) = event {
+                    let _ = events.emit(CORE_EVENT, e);
                 }
             });
             app.manage(AppState {

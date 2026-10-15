@@ -3,44 +3,6 @@
 use super::*;
 
 impl Core {
-    /// The report as a locked PDF (EX-3, D-049): it opens with `password`, can be printed but
-    /// not changed, and its SHA-256 goes into the audit log so a copy can be checked later.
-    pub fn export_pdf(&mut self, case_id: &str, password: &str) -> Result<Vec<u8>, CoreError> {
-        let (report, check) = self.build_report(case_id)?;
-        if !check.blocking.is_empty() {
-            return Err(CoreError::Refused(check.blocking.join(" · ")));
-        }
-        let (regular, bold) = system_fonts(&report.font).ok_or_else(|| {
-            CoreError::Refused(
-                "לא נמצא במחשב גופן עברי ליצירת PDF (למשל David או Arial).".to_owned(),
-            )
-        })?;
-        let pdf = dv_export::render_pdf(
-            &report,
-            dv_export::PdfFonts {
-                regular: &regular,
-                bold: bold.as_deref(),
-            },
-            password,
-        )
-        .map_err(|e| match e {
-            dv_export::ExportError::WeakPassword => CoreError::Refused(format!(
-                "סיסמה לקובץ צריכה להיות באורך {} תווים לפחות.",
-                dv_export::MIN_PASSWORD_CHARS
-            )),
-            dv_export::ExportError::Pdf(m) => CoreError::Refused(m),
-            other => CoreError::Internal(other.to_string()),
-        })?;
-        let sha256 = dv_vault::crypto::sha256_hex(&pdf);
-        self.vault_mut()?.record(
-            AuditEvent::Export,
-            Some(case_id),
-            &serde_json::json!({ "protected": true, "pdf": true, "sha256": sha256, "sections": check.included_sections }),
-        )?;
-        self.learn_from_final(case_id);
-        Ok(pdf)
-    }
-
     /// Whether a PDF is exactly one this vault exported (its fingerprint is in the audit log):
     /// when, or `None` for a file that was changed or not made here.
     pub fn check_original(&mut self, bytes: &[u8]) -> Result<Option<i64>, CoreError> {
@@ -141,7 +103,12 @@ impl Core {
         };
         let identities = self.vault_ref()?.identities(case_id)?;
         let known: HashSet<String> = identities.iter().map(|i| i.tag.clone()).collect();
-        for p in &doc.parts[0].sections[0].paragraphs {
+        for p in doc
+            .parts
+            .iter()
+            .flat_map(|part| &part.sections)
+            .flat_map(|s| &s.paragraphs)
+        {
             if dv_privacy::restore::remaining_tags(p)
                 .iter()
                 .any(|t| known.contains(t))
@@ -290,14 +257,19 @@ impl Core {
                             blocking.push(format!("{}: נשארה תגית {tag}", s.title));
                         } else {
                             // Words the model put in square brackets ("[מחנכת]"): plain text.
-                            let plain = format!("({})", &tag[1..tag.len() - 1]);
+                            let inner = tag
+                                .strip_prefix('[')
+                                .and_then(|t| t.strip_suffix(']'))
+                                .unwrap_or(&tag);
+                            let plain = format!("({inner})");
                             *p = p.replace(&tag, &plain);
                         }
                     }
-                    for m in p.match_indices("[חסר") {
-                        let rest = &p[m.0..];
-                        let end = rest.find(']').map_or(rest.len(), |i| i + 1);
-                        to_complete.push(format!("{}: {}", s.title, &rest[..end]));
+                    for (at, _) in p.match_indices("[חסר") {
+                        // The marker up to its closing bracket, or to the end of the paragraph.
+                        let rest = p.get(at..).unwrap_or_default();
+                        let marker = rest.split_inclusive(']').next().unwrap_or(rest);
+                        to_complete.push(format!("{}: {marker}", s.title));
                     }
                 }
                 if s.key == "signature" {
@@ -445,36 +417,5 @@ impl Core {
 
     pub fn check_export(&mut self, case_id: &str) -> Result<ExportCheck, CoreError> {
         Ok(self.build_report(case_id)?.1)
-    }
-
-    /// The Word file's bytes. Refused while anything blocks; with a password it is encrypted
-    /// (ECMA-376 Agile, AES-256), the way Word protects files.
-    pub fn export_report(
-        &mut self,
-        case_id: &str,
-        password: Option<&str>,
-    ) -> Result<Vec<u8>, CoreError> {
-        let (report, check) = self.build_report(case_id)?;
-        if !check.blocking.is_empty() {
-            return Err(CoreError::Refused(check.blocking.join(" · ")));
-        }
-        let docx = self.render_docx(&report)?;
-        let out = match password {
-            Some(pw) => dv_export::encrypt(&docx, pw).map_err(|e| match e {
-                dv_export::ExportError::WeakPassword => CoreError::Refused(format!(
-                    "סיסמה לקובץ צריכה להיות באורך {} תווים לפחות.",
-                    dv_export::MIN_PASSWORD_CHARS
-                )),
-                other => CoreError::Internal(other.to_string()),
-            })?,
-            None => docx,
-        };
-        self.vault_mut()?.record(
-            AuditEvent::Export,
-            Some(case_id),
-            &serde_json::json!({ "protected": password.is_some(), "sections": check.included_sections }),
-        )?;
-        self.learn_from_final(case_id);
-        Ok(out)
     }
 }

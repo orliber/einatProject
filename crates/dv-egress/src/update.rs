@@ -165,27 +165,36 @@ pub fn download(fetch: &dyn Fetch, info: &UpdateInfo) -> Result<Vec<u8>, UpdateE
 fn parse_notice(bytes: &[u8]) -> Result<UpdateInfo, UpdateError> {
     let bad = |what: &str| UpdateError::BadNotice(what.to_owned());
     let v: Value = serde_json::from_slice(bytes).map_err(|_| bad("json"))?;
-    if v["product"] != PRODUCT {
+    if v.get("product").and_then(Value::as_str) != Some(PRODUCT) {
         return Err(bad("product"));
     }
-    let version = v["version"].as_str().ok_or_else(|| bad("version"))?;
+    let version = v
+        .get("version")
+        .and_then(Value::as_str)
+        .ok_or_else(|| bad("version"))?;
     parse_version(version).ok_or_else(|| bad("version"))?;
-    let installer = &v["installer"];
-    let url = installer["url"].as_str().ok_or_else(|| bad("url"))?;
+    let installer = v.get("installer").ok_or_else(|| bad("url"))?;
+    let url = installer
+        .get("url")
+        .and_then(Value::as_str)
+        .ok_or_else(|| bad("url"))?;
     if !url.starts_with(INSTALLER_PREFIX) || url.contains("..") {
         return Err(bad("url"));
     }
-    let sha256: [u8; 32] = installer["sha256"]
-        .as_str()
+    let sha256: [u8; 32] = installer
+        .get("sha256")
+        .and_then(Value::as_str)
         .and_then(from_hex)
         .and_then(|b| b.try_into().ok())
         .ok_or_else(|| bad("sha256"))?;
-    let size = installer["size"]
-        .as_u64()
+    let size = installer
+        .get("size")
+        .and_then(Value::as_u64)
         .filter(|s| (1..=MAX_INSTALLER).contains(s))
         .ok_or_else(|| bad("size"))?;
-    let notes = v["notes"]
-        .as_array()
+    let notes = v
+        .get("notes")
+        .and_then(Value::as_array)
         .map(|a| {
             a.iter()
                 .filter_map(Value::as_str)
@@ -196,8 +205,9 @@ fn parse_notice(bytes: &[u8]) -> Result<UpdateInfo, UpdateError> {
         .unwrap_or_default();
     Ok(UpdateInfo {
         version: version.to_owned(),
-        published: v["published"]
-            .as_str()
+        published: v
+            .get("published")
+            .and_then(Value::as_str)
             .unwrap_or("")
             .chars()
             .take(10)

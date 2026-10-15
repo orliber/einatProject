@@ -7,7 +7,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use serde::{Deserialize, Serialize};
 
-use crate::template::{attr, text, unpack, Parts};
+use crate::template::{attr, tag_attr, text, unpack, Parts};
 use crate::ExportError;
 
 /// What the page in the app takes from her template. Every field is optional: what the
@@ -178,12 +178,10 @@ fn styles(xml: &str, theme: &(Option<String>, Option<String>)) -> (Run, Run) {
 /// `w:<el> w:<name>="…"` in the last section properties of the document.
 fn section_number(doc: &str, el: &str, names: &[&str]) -> Option<u32> {
     let start = doc.rfind(&format!("<w:{el} "))?;
-    let tag = &doc[start..start + doc[start..].find('>')?];
-    names.iter().find_map(|name| {
-        let at = tag.find(&format!(" w:{name}=\""))? + name.len() + 5;
-        let end = at + tag[at..].find('"')?;
-        tag[at..end].parse().ok()
-    })
+    let (tag, _) = doc.get(start..)?.split_once('>')?;
+    names
+        .iter()
+        .find_map(|name| tag_attr(tag, name)?.parse().ok())
 }
 
 fn get<'a>(parts: &'a Parts, name: &str) -> Option<&'a [u8]> {
@@ -246,6 +244,25 @@ mod tests {
         for bad in ["", "x\";background:url(a)", "a}b", &"א".repeat(65)] {
             assert_eq!(font_name(bad), None, "{bad}");
         }
+    }
+
+    /// The last section's numbers, with Hebrew text before and between the tags; a value that
+    /// is not a number is not an answer.
+    #[test]
+    fn section_numbers_are_read_next_to_hebrew() {
+        let doc = "<w:p><w:t>מכתב להורים</w:t></w:p><w:sectPr><w:pgMar w:left=\"999\"/></w:sectPr>\
+                   <w:t>סוף</w:t><w:sectPr>שוליים<w:pgMar w:top=\"1800\" w:start=\"1300\"/></w:sectPr>";
+        assert_eq!(section_number(doc, "pgMar", &["top"]), Some(1800));
+        assert_eq!(section_number(doc, "pgMar", &["left", "start"]), Some(1300));
+        assert_eq!(section_number(doc, "pgMar", &["bottom"]), None);
+        assert_eq!(
+            section_number("<w:pgSz w:w=\"רחב\" w:h=\"16838\"/>", "pgSz", &["w"]),
+            None
+        );
+        assert_eq!(
+            section_number("<w:pgSz w:w=\"11906\" ילד", "pgSz", &["w"]),
+            None
+        );
     }
 
     #[test]

@@ -6,7 +6,12 @@
 //! written; the old Hebrew code page round-trips and anything else is refused, not guessed; and
 //! a PDF with no text layer is never imported as if it had one.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use std::io::{Cursor, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -583,6 +588,96 @@ fn image_size_bombs_in_a_pdf_are_refused_before_unpacking() {
         calmly("inflated", || read(&bytes, "a.pdf")),
         Err(IngestError::TooLarge)
     );
+}
+
+#[test]
+fn raw_pixels_in_every_colour_model_unpack_exactly_or_are_refused() {
+    // A page-sized image (smaller ones are not looked at) whose rows repeat `pattern`, and
+    // what the OCR engine is handed for it.
+    const SIDE: usize = 300;
+    let image = |dict: &str, pattern: &[u8], bytes: usize| {
+        let data: Vec<u8> = pattern.iter().copied().cycle().take(bytes).collect();
+        let dict = format!("/Width {SIDE} /Height {SIDE} {dict}");
+        match read(&image_pdf(&dict, &data), "a.pdf") {
+            Ok(Outcome::Scan(s)) => s.images.into_iter().next().map(|i| i.bytes),
+            other => panic!("{dict}: expected page images, got {other:?}"),
+        }
+    };
+    let pnm = |kind: &str, pattern: &[u8], bytes: usize| {
+        let mut out = format!("{kind}\n{SIDE} {SIDE}\n255\n").into_bytes();
+        out.extend(pattern.iter().copied().cycle().take(bytes));
+        Some(out)
+    };
+    let px = SIDE * SIDE;
+    // A palette of two colours; index 5 is past its end and is drawn black.
+    assert_eq!(
+        image(
+            "/BitsPerComponent 8 /ColorSpace [/Indexed /DeviceRGB 1 <FF000000FF00>]",
+            &[1, 5],
+            px
+        ),
+        pnm("P6", &[0, 255, 0, 0, 0, 0], px * 3)
+    );
+    assert_eq!(
+        image(
+            "/BitsPerComponent 8 /ColorSpace [/Indexed /DeviceGray 1 <1020>]",
+            &[1, 9],
+            px
+        ),
+        pnm("P5", &[0x20, 0], px)
+    );
+    assert_eq!(
+        image(
+            "/BitsPerComponent 8 /ColorSpace [/Indexed /DeviceCMYK 0 <0A141E05>]",
+            &[0],
+            px
+        ),
+        pnm("P6", &[240, 230, 220], px * 3)
+    );
+    assert_eq!(
+        image(
+            "/BitsPerComponent 8 /ColorSpace /DeviceCMYK",
+            &[10, 20, 30, 5],
+            px * 4
+        ),
+        pnm("P6", &[240, 230, 220], px * 3)
+    );
+    // 2-bit gray, four pixels a byte: 3, 1, 0, 0 scaled to 0–255.
+    assert_eq!(
+        image(
+            "/BitsPerComponent 2 /ColorSpace /DeviceGray",
+            &[0b1101_0000],
+            px / 4
+        ),
+        pnm("P5", &[255, 85, 0, 0], px)
+    );
+    // An indexed palette over an indexed palette: drawn black, never read past its end.
+    assert_eq!(
+        image(
+            "/BitsPerComponent 4 /ColorSpace [/Indexed [/Indexed /DeviceRGB 0 <000000>] 0 <00>]",
+            &[0x12],
+            px / 2
+        ),
+        pnm("P6", &[0], px * 3)
+    );
+    // Rows cut short, with or without PNG row filters: refused, nothing guessed.
+    let gray = format!("/Width {SIDE} /Height {SIDE} /BitsPerComponent 8 /ColorSpace /DeviceGray");
+    assert!(matches!(
+        calmly("cut short", || read(&image_pdf(&gray, &[1, 2, 3]), "a.pdf")),
+        Err(IngestError::Corrupt(_))
+    ));
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+    z.write_all(&vec![2u8; SIDE + 1 + SIDE / 2]).unwrap();
+    let filtered = z.finish().unwrap();
+    let dict =
+        format!("{gray} /Filter /FlateDecode /DecodeParms << /Predictor 15 /Columns {SIDE} >>");
+    assert!(matches!(
+        calmly("filtered and cut short", || read(
+            &image_pdf(&dict, &filtered),
+            "a.pdf"
+        )),
+        Err(IngestError::Corrupt(_))
+    ));
 }
 
 #[test]

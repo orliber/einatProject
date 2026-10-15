@@ -23,7 +23,7 @@ use dv_privacy::{
     clear, everyday_name, filter, AutoHidden, AutoKind, FilterOutcome, GateRequest, Mark,
     PrivacyContext,
 };
-use dv_vault::{AuditEvent, Vault};
+use dv_vault::{AuditEvent, TokenHasher, Vault};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
@@ -402,8 +402,8 @@ impl LocalStyle {
             hedges: m.hedges,
             contrasts: m.contrasts,
             first_person: m.first_person,
-            fit_recent: mean(&self.draft_fit[split..]),
-            fit_earlier: mean(&self.draft_fit[earlier_from..split]),
+            fit_recent: mean(self.draft_fit.get(split..).unwrap_or_default()),
+            fit_earlier: mean(self.draft_fit.get(earlier_from..split).unwrap_or_default()),
             fit_count: u32::try_from(n).unwrap_or(u32::MAX),
             fit_by_month: self
                 .fit_months
@@ -420,6 +420,120 @@ impl LocalStyle {
 }
 
 /// An upload waiting for her confirmation (memory only, cleared at lock).
+/// See [`Core::style_data`].
+pub(crate) struct StyleData {
+    identities: Vec<Identity>,
+    practitioner: Vec<String>,
+    allow: HashSet<String>,
+    hasher: TokenHasher,
+}
+
+impl StyleData {
+    pub(crate) fn with_ctx<R>(&self, f: impl FnOnce(&PrivacyContext<'_>, &TokenHasher) -> R) -> R {
+        let allowed = |t: &str| self.allow.contains(&self.hasher.token_hmac(t));
+        let none = |_: &str| false;
+        let ctx = PrivacyContext {
+            case_id: STYLE_CASE,
+            identities: &self.identities,
+            practitioner: &self.practitioner,
+            allowlisted: &allowed,
+            confirmed_names: &none,
+            past_names: &none,
+            today: today(),
+        };
+        f(&ctx, &self.hasher)
+    }
+
+    /// Changes when a name or a decision about one changed: work done with an older copy
+    /// is done again.
+    pub(crate) fn stamp(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for i in &self.identities {
+            (&i.id, &i.value, &i.aliases, &i.tag).hash(&mut h);
+        }
+        self.practitioner.hash(&mut h);
+        let mut allow: Vec<&String> = self.allow.iter().collect();
+        allow.sort();
+        allow.hash(&mut h);
+        h.finish()
+    }
+}
+
+/// A past report split into its parts and neutralized, before she chose what to keep.
+pub(crate) struct StyleWork {
+    stamp: u64,
+    title: String,
+    format: String,
+    parts: Vec<StoredPart>,
+    names: Vec<String>,
+    hidden: u32,
+    numbers: u32,
+    warnings: Vec<String>,
+}
+
+/// Split a past report into its parts and neutralize each (the slow part of adding one,
+/// run while the core is free).
+pub(crate) fn style_work(
+    data: &StyleData,
+    file_name: &str,
+    extracted: &dv_ingest::Extracted,
+) -> Result<StyleWork, CoreError> {
+    let structure =
+        ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
+    let raw_parts = split_parts(&extracted.body, &structure);
+    let stem = Path::new(file_name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("דוח")
+        .to_owned();
+    let (parts, title, hidden, numbers, names) = data.with_ctx(|ctx, hasher| {
+        let child = main_child(&extracted.body, ctx)?;
+        let child = child.as_deref();
+        let run = |t: &str| filter(t, ctx).map_err(|e| CoreError::Internal(e.to_string()));
+        let names = report_names(
+            &[run(&extracted.body)?, run(&extracted.margins)?],
+            child,
+            hasher,
+        );
+        let (mut hidden, mut numbers) = (0, 0);
+        let mut parts = Vec::new();
+        for p in raw_parts {
+            let (text, h, n) = neutralize(&p.text, ctx, child)?;
+            let (heading, hh, _) = neutralize(&p.heading, ctx, child)?;
+            hidden += h + hh;
+            numbers += n;
+            parts.push(StoredPart {
+                section: p.section,
+                heading,
+                text,
+            });
+        }
+        let (title, _, _) = neutralize(&stem, ctx, child)?;
+        Ok::<_, CoreError>((parts, title, hidden, numbers, names))
+    })?;
+    let mut warnings = extracted.warnings.clone();
+    if parts.iter().all(|p| p.section.is_none()) {
+        warnings.push(
+            "לא זיהיתי כותרות של סעיפים בדוח, ולכן שום קטע לא סומן מראש. אפשר לסמן ידנית את הקטעים שמראים את הסגנון."
+                .to_owned(),
+        );
+    }
+    if !extracted.margins.trim().is_empty() {
+        warnings.push("כותרות עליונות ותחתונות לא נלקחות בכלל.".to_owned());
+    }
+    Ok(StyleWork {
+        stamp: data.stamp(),
+        title: title.chars().take(TITLE_CHARS).collect(),
+        format: extracted.format.name().to_owned(),
+        parts,
+        names,
+        hidden,
+        numbers,
+        warnings,
+    })
+}
+
 pub(crate) struct StagedStyle {
     title: String,
     format: String,
@@ -448,7 +562,7 @@ pub(crate) fn past_name_hmacs(v: &Vault) -> Result<HashSet<String>, CoreError> {
 
 /// The words of the names the filter found in a past report, as keyed hashes. Everyday words
 /// ("גיל", "שמחה") are left out, as for names found in a case.
-fn report_names(outs: &[FilterOutcome], child: Option<&str>, v: &Vault) -> Vec<String> {
+fn report_names(outs: &[FilterOutcome], child: Option<&str>, v: &TokenHasher) -> Vec<String> {
     let mut words: Vec<String> = outs
         .iter()
         .flat_map(|o| o.auto_hidden.iter())
@@ -537,19 +651,20 @@ fn rebuild(out: &FilterOutcome, child: Option<&str>) -> (String, u32) {
             None | Some(Mark::Replaced) => text.push_str(&seg.text),
             Some(Mark::Tag) => {
                 let names = found(&seg.text);
-                let role = if names.is_empty() {
-                    None
-                } else if names
-                    .iter()
-                    .any(|a| child.is_some_and(|c| normalize(&a.token) == c))
-                {
-                    Some(Role::Child)
-                } else {
+                let role = match names.first() {
+                    None => None,
+                    Some(_)
+                        if names
+                            .iter()
+                            .any(|a| child.is_some_and(|c| normalize(&a.token) == c)) =>
+                    {
+                        Some(Role::Child)
+                    }
                     // "Another child" reads wrong in a report about one child.
-                    Some(match names[0].role {
+                    Some(first) => Some(match first.role {
                         Role::OtherChild | Role::Child => Role::Other,
                         r => r,
-                    })
+                    }),
                 };
                 match role {
                     Some(r) => text.push_str(&role_tag(r)),
@@ -584,29 +699,30 @@ fn mask_numbers(text: &str) -> (String, u32) {
     let mut out = String::with_capacity(text.len());
     let mut masked = 0;
     let mut depth = 0u32;
+    let at = |k: usize| chars.get(k).copied();
     let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
+    while let Some(c) = at(i) {
         match c {
             '[' => depth += 1,
             ']' => depth = depth.saturating_sub(1),
             _ => {}
         }
         if depth == 0 && c.is_ascii_digit() {
-            let latin_before = i > 0
-                && (chars[i - 1].is_ascii_alphabetic()
-                    || (chars[i - 1] == '-' && i > 1 && chars[i - 2].is_ascii_alphabetic()));
+            let before = |back: usize| i.checked_sub(back).and_then(at);
+            let latin_before = before(1).is_some_and(|p| {
+                p.is_ascii_alphabetic()
+                    || (p == '-' && before(2).is_some_and(|q| q.is_ascii_alphabetic()))
+            });
             let mut j = i;
-            while j < chars.len()
-                && (chars[j].is_ascii_digit()
-                    || (matches!(chars[j], '.' | ':' | '/' | '-' | ',')
-                        && j + 1 < chars.len()
-                        && chars[j + 1].is_ascii_digit()))
-            {
+            while at(j).is_some_and(|d| {
+                d.is_ascii_digit()
+                    || (matches!(d, '.' | ':' | '/' | '-' | ',')
+                        && at(j + 1).is_some_and(|e| e.is_ascii_digit()))
+            }) {
                 j += 1;
             }
             if latin_before {
-                out.extend(&chars[i..j]);
+                out.extend(chars.get(i..j).unwrap_or_default());
             } else {
                 out.push_str("[מספר]");
                 masked += 1;
@@ -781,11 +897,11 @@ fn focus(profile: &StyleProfile, section_key: &str, query: &str) -> StyleProfile
                 .collect();
             let texts: Vec<&str> = group
                 .iter()
-                .map(|n| profile.items[*n].text.as_str())
+                .filter_map(|n| profile.items.get(*n).map(|i| i.text.as_str()))
                 .collect();
             let kept: HashSet<usize> = dv_style::retrieve::best(&texts, query, budget)
                 .into_iter()
-                .map(|k| group[k])
+                .filter_map(|k| group.get(k).copied())
                 .collect();
             drop.extend(group.into_iter().filter(|n| !kept.contains(n)));
         }
@@ -919,12 +1035,10 @@ pub(crate) fn find_draft(
 // ------------------------------------------------------------ Core
 
 impl Core {
-    /// The privacy context for past reports: every case's names, each hidden by its role; the
-    /// practitioner; the words marked "not a name" for every case.
-    fn with_style_ctx<R>(
-        &mut self,
-        f: impl FnOnce(&PrivacyContext<'_>, &Vault) -> Result<R, CoreError>,
-    ) -> Result<R, CoreError> {
+    /// What filtering for her style needs, taken from the vault: every case's names (as the
+    /// style case), the practitioner, the "not a name" decisions, and the word hasher. Owned,
+    /// so the work can run while the core is free (F2).
+    pub(crate) fn style_data(&mut self) -> Result<StyleData, CoreError> {
         let v = self.vault_ref()?;
         let mut identities: Vec<Identity> = v
             .all_identities()?
@@ -946,21 +1060,19 @@ impl Core {
             source: dv_domain::IdentitySource::Manual,
             reason: String::new(),
         }));
-        let practitioner = v.practitioner()?.names;
-        let allow: HashSet<String> = v.not_a_name_hmacs("")?.into_iter().collect();
-        let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
-        let allowed = |t: &str| allow.contains(&v.token_hmac(t));
-        let none = |_: &str| false;
-        let ctx = PrivacyContext {
-            case_id: STYLE_CASE,
-            identities: &identities,
-            practitioner: &practitioner,
-            allowlisted: &allowed,
-            confirmed_names: &none,
-            past_names: &none,
-            today: today(),
-        };
-        f(&ctx, v)
+        Ok(StyleData {
+            practitioner: v.practitioner()?.names,
+            allow: v.not_a_name_hmacs("")?.into_iter().collect(),
+            hasher: v.token_hasher(),
+            identities,
+        })
+    }
+
+    fn with_style_ctx<R>(
+        &mut self,
+        f: impl FnOnce(&PrivacyContext<'_>, &TokenHasher) -> Result<R, CoreError>,
+    ) -> Result<R, CoreError> {
+        self.style_data()?.with_ctx(f)
     }
 
     fn stored_sources(&mut self) -> Result<Vec<(String, i64, StoredSource)>, CoreError> {
@@ -1006,13 +1118,13 @@ impl Core {
             }
         }
         Ok(
-            dv_style::retrieve::closest(&docs, &draft.section_key, &draft.text_tagged).map(|i| {
-                SimilarParagraph {
-                    text: docs[i].1.to_owned(),
-                    report: from[i].0.to_owned(),
-                    same_section: from[i].1 == Some(draft.section_key.as_str()),
-                }
-            }),
+            dv_style::retrieve::closest(&docs, &draft.section_key, &draft.text_tagged)
+                .and_then(|i| docs.get(i).zip(from.get(i)))
+                .map(|((_, text), (report, section))| SimilarParagraph {
+                    text: (*text).to_owned(),
+                    report: (*report).to_owned(),
+                    same_section: *section == Some(draft.section_key.as_str()),
+                }),
         )
     }
 
@@ -1030,62 +1142,33 @@ impl Core {
 
     // -------------------------------------------------------- past reports
 
-    /// Read a past report and show what would be kept. Nothing is stored until she confirms
-    /// with [`Core::save_style_source`].
-    pub fn import_style_source(
-        &mut self,
-        file_name: &str,
-        bytes: &[u8],
-    ) -> Result<StyleImportPreview, CoreError> {
+    /// Room for one more past report.
+    pub(crate) fn style_room(&mut self) -> Result<(), CoreError> {
         if self.vault_ref()?.style_sources()?.len() >= MAX_SOURCES {
             return Err(CoreError::Refused(format!(
                 "אפשר לשמור עד {MAX_SOURCES} דוחות. כדאי למחוק דוח ישן לפני שמוסיפים חדש."
             )));
         }
-        let extracted = self.read_document(file_name, bytes)?;
-        let structure =
-            ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
-        let raw_parts = split_parts(&extracted.body, &structure);
-        let stem = Path::new(file_name)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("דוח")
-            .to_owned();
-        let body = extracted.body.clone();
-        let margins = extracted.margins.clone();
-        let (parts, title, hidden, numbers, names) = self.with_style_ctx(|ctx, v| {
-            let child = main_child(&body, ctx)?;
-            let child = child.as_deref();
-            let run = |t: &str| filter(t, ctx).map_err(|e| CoreError::Internal(e.to_string()));
-            let names = report_names(&[run(&body)?, run(&margins)?], child, v);
-            let (mut hidden, mut numbers) = (0, 0);
-            let mut parts = Vec::new();
-            for p in raw_parts {
-                let (text, h, n) = neutralize(&p.text, ctx, child)?;
-                let (heading, hh, _) = neutralize(&p.heading, ctx, child)?;
-                hidden += h + hh;
-                numbers += n;
-                parts.push(StoredPart {
-                    section: p.section,
-                    heading,
-                    text,
-                });
-            }
-            let (title, _, _) = neutralize(&stem, ctx, child)?;
-            Ok((parts, title, hidden, numbers, names))
-        })?;
-        let mut warnings = extracted.warnings.clone();
-        if parts.iter().all(|p| p.section.is_none()) {
-            warnings.push(
-                "לא זיהיתי כותרות של סעיפים בדוח, ולכן שום קטע לא סומן מראש. אפשר לסמן ידנית את הקטעים שמראים את הסגנון."
-                    .to_owned(),
-            );
-        }
-        if !extracted.margins.trim().is_empty() {
-            warnings.push("כותרות עליונות ותחתונות לא נלקחות בכלל.".to_owned());
-        }
+        Ok(())
+    }
+
+    /// A past report already split and neutralized, waiting for her choice of parts
+    /// ([`Core::save_style_source`]). Done again here when a name changed meanwhile.
+    pub(crate) fn stage_style(
+        &mut self,
+        work: StyleWork,
+        file_name: &str,
+        extracted: &dv_ingest::Extracted,
+    ) -> Result<StyleImportPreview, CoreError> {
+        let data = self.style_data()?;
+        let work = if work.stamp == data.stamp() {
+            work
+        } else {
+            style_work(&data, file_name, extracted)?
+        };
         let token = dv_vault::crypto::random_id()?;
-        let views = parts
+        let views = work
+            .parts
             .iter()
             .enumerate()
             .map(|(i, p)| StylePartView {
@@ -1100,26 +1183,24 @@ impl Core {
                     .is_some_and(|k| DEFAULT_INCLUDED.contains(&k)),
             })
             .collect();
-        let format = extracted.format.name().to_owned();
-        let title: String = title.chars().take(TITLE_CHARS).collect();
         self.style_staged.clear();
         self.style_staged.insert(
             token.clone(),
             StagedStyle {
-                title: title.clone(),
-                format: format.clone(),
-                parts,
-                names,
+                title: work.title.clone(),
+                format: work.format.clone(),
+                parts: work.parts,
+                names: work.names,
             },
         );
         Ok(StyleImportPreview {
             token,
-            title,
-            format,
+            title: work.title,
+            format: work.format,
             parts: views,
-            hidden,
-            numbers,
-            warnings,
+            hidden: work.hidden,
+            numbers: work.numbers,
+            warnings: work.warnings,
         })
     }
 

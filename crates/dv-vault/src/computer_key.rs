@@ -136,15 +136,13 @@ const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012
 fn b64(bytes: &[u8]) -> Zeroizing<String> {
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let b = [
-            chunk[0],
-            chunk.get(1).copied().unwrap_or(0),
-            chunk.get(2).copied().unwrap_or(0),
-        ];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        let at = |k: usize| u32::from(chunk.get(k).copied().unwrap_or(0));
+        let n = (at(0) << 16) | (at(1) << 8) | at(2);
         for i in 0..4 {
             if i <= chunk.len() {
-                out.push(char::from(B64[((n >> (18 - 6 * i)) & 63) as usize]));
+                // Six bits always name one of the 64 letters.
+                let six = ((n >> (18 - 6 * i)) & 63) as usize;
+                out.push(B64.get(six).map_or('=', |&c| char::from(c)));
             } else {
                 out.push('=');
             }

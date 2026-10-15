@@ -5,7 +5,10 @@
 //! for the personal-data scan to read as an ID or a phone number. Each release adds one:
 //! `DV_WRITE_VAULT_FIXTURE=<version> cargo test -p dv-core upgrade::write -- --ignored`.
 //! Every kept vault is opened by the current code: unlocked with its password, the case and
-//! its materials, names, scores and paragraphs read back, and the log's chain intact.
+//! its materials, names, scores and paragraphs read back, and the log's chain intact. Then
+//! she works on it: a section drafted, approved and exported with the names back, a backup
+//! written and restored elsewhere, and the vault closed and opened again with the new work in
+//! it (F7).
 
 use std::path::{Path, PathBuf};
 
@@ -128,6 +131,85 @@ fn check(dir: &Path, version: &str) {
     );
 }
 
+/// A day's work on a vault this version just opened, saved and opened again.
+fn work(dir: &Path, version: &str) {
+    let mut core = Core::for_tests(dir, None);
+    core.unlock(PASSWORD).unwrap();
+    let case = core
+        .list_cases()
+        .unwrap()
+        .into_iter()
+        .find(|c| c.meta.code == CODE)
+        .unwrap_or_else(|| panic!("{version}: the case is gone"))
+        .id;
+    core.add_input(
+        &case,
+        InputKind::Intake,
+        "שיחה עם ההורים",
+        "ההורים סיפרו שגלעד אוהב לבנות מגדלים מקוביות.",
+    )
+    .unwrap_or_else(|e| panic!("{version}: new material: {e:?}"));
+    let prepared = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap_or_else(|e| panic!("{version}: prepare: {e:?}"));
+    let approval = prepared
+        .approval_id
+        .unwrap_or_else(|| panic!("{version}: nothing to send: {:?}", prepared.blocked));
+    core.send_section(&approval)
+        .unwrap_or_else(|e| panic!("{version}: send: {e:?}"));
+    let drafted = core
+        .case_detail(&case)
+        .unwrap()
+        .sections
+        .into_iter()
+        .find(|s| s.key == "kindergarten")
+        .and_then(|s| {
+            s.paragraphs
+                .into_iter()
+                .find(|p| p.status == DraftStatus::Proposed)
+        })
+        .unwrap_or_else(|| panic!("{version}: no new draft"));
+    core.approve_paragraph(&case, &drafted.id).unwrap();
+    let doc = super::import_export::read_docx_text(
+        &core
+            .export_report(&case, None)
+            .unwrap_or_else(|e| panic!("{version}: export: {e:?}")),
+    );
+    assert!(
+        doc.contains(OWN),
+        "{version}: her paragraph, with the names back"
+    );
+
+    let drive = tempfile::tempdir().unwrap();
+    let done = core
+        .write_backup(&drive.path().join("b"))
+        .unwrap_or_else(|e| panic!("{version}: backup: {e:?}"));
+    let fresh = tempfile::tempdir().unwrap();
+    let mut other = Core::for_tests(fresh.path(), None);
+    other
+        .stage_backup(std::fs::read(&done.path).unwrap(), "b.vaultbak".into())
+        .unwrap();
+    other
+        .restore_staged_backup(Some(PASSWORD), None)
+        .unwrap_or_else(|e| panic!("{version}: restore: {e:?}"));
+    let now = core.case_detail(&case).unwrap();
+    assert_eq!(
+        other.case_detail(&case).unwrap(),
+        now,
+        "{version}: restored"
+    );
+
+    core.lock();
+    let mut again = Core::for_tests(dir, None);
+    let status = again.unlock(PASSWORD).unwrap();
+    assert!(
+        status.integrity_warning.is_none(),
+        "{version}: log after work {:?}",
+        status.integrity_warning
+    );
+    assert_eq!(again.case_detail(&case).unwrap(), now, "{version}: saved");
+}
+
 fn vault_files(dir: &Path) -> Vec<PathBuf> {
     let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
         .unwrap()
@@ -161,6 +243,7 @@ fn every_kept_vault_opens_in_this_version() {
             std::fs::write(dir.path().join(original), bytes).unwrap();
         }
         check(dir.path(), &version);
+        work(dir.path(), &version);
     }
 }
 

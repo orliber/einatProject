@@ -172,20 +172,21 @@ fn logical(visual: &str) -> String {
     let chars: Vec<char> = visual.chars().collect();
     let mut out = String::new();
     let mut i = 0;
-    while i < chars.len() {
-        if is_hebrew(chars[i]) {
-            let mut j = i;
-            let mut end = i;
-            while j < chars.len() && (is_hebrew(chars[j]) || chars[j] == ' ') {
-                if is_hebrew(chars[j]) {
-                    end = j;
-                }
-                j += 1;
-            }
-            out.extend(chars[i..=end].iter().rev());
-            i = end + 1;
+    while let Some(&c) = chars.get(i) {
+        if is_hebrew(c) {
+            // The run ends at its last Hebrew letter: trailing spaces stay where they are.
+            let len = chars
+                .iter()
+                .skip(i)
+                .take_while(|c| is_hebrew(**c) || **c == ' ')
+                .enumerate()
+                .filter(|(_, c)| is_hebrew(**c))
+                .last()
+                .map_or(1, |(j, _)| j + 1);
+            out.extend(chars.iter().skip(i).take(len).rev());
+            i += len;
         } else {
-            out.push(chars[i]);
+            out.push(c);
             i += 1;
         }
     }
@@ -211,19 +212,23 @@ fn edge_key(line: &str) -> String {
 /// On a single page: the lines in the margin zone at the top and at the bottom that a gap
 /// (more than 1.8 times their font size) separates from the text next to them.
 fn set_apart(page: &[Line]) -> Vec<(usize, usize)> {
-    let lines: Vec<usize> = (0..page.len())
-        .filter(|i| !page[*i].text.trim().is_empty())
+    let lines: Vec<(usize, &Line)> = page
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| !l.text.trim().is_empty())
         .collect();
     let mut out = Vec::new();
     for order in [lines.clone(), lines.into_iter().rev().collect::<Vec<_>>()] {
         let mut edge = Vec::new();
-        for (k, &i) in order.iter().enumerate() {
-            if !page[i].in_margin_zone {
+        for (k, &(i, line)) in order.iter().enumerate() {
+            if !line.in_margin_zone {
                 break;
             }
             edge.push(i);
-            let Some(&next) = order.get(k + 1) else { break };
-            if (page[i].y - page[next].y).abs() > page[i].size * 1.8 {
+            let Some(&(_, next)) = order.get(k + 1) else {
+                break;
+            };
+            if (line.y - next.y).abs() > line.size * 1.8 {
                 out.extend(edge.iter().map(|i| (0, *i)));
                 break;
             }
@@ -394,14 +399,16 @@ fn pdf_string(bytes: &[u8]) -> String {
         [0xFE, 0xFF, rest @ ..] => {
             let units: Vec<u16> = rest
                 .chunks_exact(2)
-                .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                .filter_map(|c| <[u8; 2]>::try_from(c).ok())
+                .map(u16::from_be_bytes)
                 .collect();
             String::from_utf16_lossy(&units)
         }
         [0xFF, 0xFE, rest @ ..] => {
             let units: Vec<u16> = rest
                 .chunks_exact(2)
-                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .filter_map(|c| <[u8; 2]>::try_from(c).ok())
+                .map(u16::from_le_bytes)
                 .collect();
             String::from_utf16_lossy(&units)
         }

@@ -5,6 +5,8 @@
 //!
 //! All text here is invented.
 
+#![allow(clippy::indexing_slicing)]
+
 use dv_ai::{
     parse_consult, parse_derived_section, parse_section, parse_sort, parse_style_analysis,
     parse_style_synthesis, parse_verify, passage_id, AiError, StyleKind, Verdict,

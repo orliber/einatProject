@@ -3,7 +3,12 @@
 //! be that word. Invented sentences only. Prints the rates and fails below the floors, which
 //! may only rise. Stage C replaces the lexicon with the CBS names and adds the morphology.
 
-#![allow(clippy::unwrap_used, clippy::print_stdout, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::print_stdout,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use std::fs;
 use std::path::PathBuf;

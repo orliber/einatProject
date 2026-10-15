@@ -33,11 +33,13 @@ pub fn worker_main() -> i32 {
     {
         return 2;
     }
-    let Some(newline) = input.iter().position(|b| *b == b'\n') else {
+    // The first line is the file's name, the rest its bytes.
+    let mut parts = input.splitn(2, |b| *b == b'\n');
+    let (Some(name), Some(body)) = (parts.next(), parts.next()) else {
         return 2;
     };
-    let name = String::from_utf8_lossy(&input[..newline]).into_owned();
-    let result: WorkerResult = crate::read(&input[newline + 1..], &name);
+    let name = String::from_utf8_lossy(name).into_owned();
+    let result: WorkerResult = crate::read(body, &name);
     let Ok(json) = serde_json::to_vec(&result) else {
         return 3;
     };

@@ -1219,7 +1219,13 @@ fn nothing_goes_to_a_company_without_her_written_zero_retention_confirmation() {
         .unwrap()
         .approval_id
         .unwrap();
-    assert!(matches!(core.send_section(&id), Err(CoreError::Refused(m)) if m.contains("ZDR")));
+    let err = core.send_section(&id).unwrap_err();
+    assert!(matches!(&err, CoreError::Needs(m, _) if m.contains("ZDR")));
+    assert_eq!(
+        err.to_ui().action,
+        ErrorAction::settings("ai"),
+        "fixed in Settings"
+    );
     assert!(
         fake.sent.lock().unwrap().is_empty(),
         "nothing left the program"

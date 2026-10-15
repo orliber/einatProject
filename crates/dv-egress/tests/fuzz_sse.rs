@@ -3,7 +3,12 @@
 //! the app sees it. It may be refused, but must never panic and never run away.
 //! Deterministic (the seed is printed); `DV_FUZZ_ROUNDS` raises the rounds.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::{Duration, Instant};
@@ -105,8 +110,8 @@ fn stream(events: &[Value]) -> Vec<u8> {
         .into_bytes()
 }
 
-fn seed_stream() -> Vec<u8> {
-    stream(&[
+fn seed_events() -> Vec<Value> {
+    vec![
         json!({"type": "message_start", "message": {"id": "m", "type": "message", "role": "assistant", "content": [], "stop_reason": null, "usage": {"input_tokens": 10, "output_tokens": 1}}}),
         json!({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}}),
         json!({"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "חושב"}}),
@@ -119,7 +124,11 @@ fn seed_stream() -> Vec<u8> {
         json!({"type": "content_block_stop", "index": 1}),
         json!({"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 42}}),
         json!({"type": "message_stop"}),
-    ])
+    ]
+}
+
+fn seed_stream() -> Vec<u8> {
+    stream(&seed_events())
 }
 
 #[test]
@@ -170,6 +179,15 @@ fn hostile_indexes_and_shapes_are_refused_without_a_panic() {
         vec![json!({"type": "message_delta", "delta": null, "usage": []})],
         vec![json!({"type": "error", "error": {"type": "overloaded_error"}})],
         vec![json!([1, 2, 3])],
+        vec![
+            json!({"type": "content_block_start", "index": 0, "content_block": "text"}),
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "x"}}),
+        ],
+        vec![
+            json!({"type": "content_block_start", "index": 0, "content_block": [1]}),
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"}}),
+            json!({"type": "content_block_stop", "index": 0}),
+        ],
     ] {
         let bytes = stream(&events);
         let result = catch_unwind(AssertUnwindSafe(|| {
@@ -206,4 +224,67 @@ fn an_answer_that_does_not_end_is_refused() {
         result.map(|_| ())
     );
     assert!(started.elapsed() < Duration::from_secs(20));
+}
+
+/// One value somewhere in the event, a few levels down, replaced by a value of another shape.
+fn swap_shape(rng: &mut Rng, v: &mut Value, depth: usize) {
+    const ODD: [fn() -> Value; 10] = [
+        || Value::Null,
+        || json!(true),
+        || json!(7),
+        || json!(-1),
+        || json!(u64::MAX),
+        || json!(1.5e300),
+        || json!("x"),
+        || json!([]),
+        || json!({}),
+        || json!([{"type": "text"}]),
+    ];
+    if depth > 0 {
+        let child = match v {
+            Value::Object(m) if !m.is_empty() => {
+                let k = rng.below(m.len());
+                m.values_mut().nth(k)
+            }
+            Value::Array(a) if !a.is_empty() => {
+                let k = rng.below(a.len());
+                a.get_mut(k)
+            }
+            _ => None,
+        };
+        if let Some(c) = child {
+            swap_shape(rng, c, depth - 1);
+            return;
+        }
+    }
+    if let Some(make) = ODD.get(rng.below(ODD.len())) {
+        *v = make();
+    }
+}
+
+/// A well-formed stream whose events carry the wrong shapes (a block that is a string, a
+/// count that is an array): the server's JSON is read, never trusted to have our shape.
+#[test]
+fn events_with_the_wrong_shapes_never_panic() {
+    let seed0 = seed0();
+    for round in 0..rounds() * 4 {
+        let seed = seed0 ^ round.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        let mut rng = Rng(seed | 1);
+        let mut events = seed_events();
+        for _ in 0..=rng.below(3) {
+            let i = rng.below(events.len());
+            if let Some(e) = events.get_mut(i) {
+                let depth = rng.below(4);
+                swap_shape(&mut rng, e, depth);
+            }
+        }
+        let bytes = stream(&events);
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            dv_egress::sse::assemble(bytes.as_slice(), &|_| {})
+        }));
+        assert!(
+            result.is_ok(),
+            "panic: round {round}, seed {seed}, {events:?}"
+        );
+    }
 }

@@ -28,27 +28,37 @@ pub fn assemble(reader: impl BufRead, progress: &dyn Fn(u32)) -> Result<Value, E
      -> Result<(), EgressError> {
         let ev: Value =
             serde_json::from_str(data).map_err(|e| EgressError::Protocol(e.to_string()))?;
-        match ev["type"].as_str().unwrap_or("") {
+        match ev.get("type").and_then(Value::as_str).unwrap_or("") {
             "message_start" => {
-                *message = ev["message"].as_object().cloned();
+                *message = ev.get("message").and_then(Value::as_object).cloned();
             }
             "content_block_start" => {
                 let i = index(&ev)?;
+                // Every later event writes into the block, so it must be an object.
+                let block = ev
+                    .get("content_block")
+                    .filter(|b| b.is_object())
+                    .cloned()
+                    .ok_or_else(|| {
+                        EgressError::Protocol("a block that is not an object".to_owned())
+                    })?;
                 while blocks.len() <= i {
                     blocks.push(Value::Null);
                     partial_json.push(String::new());
                 }
-                blocks[i] = ev["content_block"].clone();
+                if let Some(slot) = blocks.get_mut(i) {
+                    *slot = block;
+                }
             }
             "content_block_delta" => {
                 let i = index(&ev)?;
                 let block = blocks
                     .get_mut(i)
                     .ok_or_else(|| EgressError::Protocol("delta before its block".to_owned()))?;
-                let delta = &ev["delta"];
-                match delta["type"].as_str().unwrap_or("") {
+                let delta = ev.get("delta").unwrap_or(&Value::Null);
+                match delta.get("type").and_then(Value::as_str).unwrap_or("") {
                     "text_delta" => {
-                        let piece = delta["text"].as_str().unwrap_or("");
+                        let piece = delta.get("text").and_then(Value::as_str).unwrap_or("");
                         for c in piece.chars() {
                             let space = c.is_whitespace();
                             if !space && !in_word {
@@ -59,17 +69,24 @@ pub fn assemble(reader: impl BufRead, progress: &dyn Fn(u32)) -> Result<Value, E
                         append(block, "text", piece);
                         progress(words);
                     }
-                    "thinking_delta" => {
-                        append(block, "thinking", delta["thinking"].as_str().unwrap_or(""))
-                    }
+                    "thinking_delta" => append(
+                        block,
+                        "thinking",
+                        delta.get("thinking").and_then(Value::as_str).unwrap_or(""),
+                    ),
                     "signature_delta" => append(
                         block,
                         "signature",
-                        delta["signature"].as_str().unwrap_or(""),
+                        delta.get("signature").and_then(Value::as_str).unwrap_or(""),
                     ),
                     "input_json_delta" => {
                         if let Some(p) = partial_json.get_mut(i) {
-                            p.push_str(delta["partial_json"].as_str().unwrap_or(""));
+                            p.push_str(
+                                delta
+                                    .get("partial_json")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or(""),
+                            );
                         }
                     }
                     _ => {}
@@ -77,19 +94,26 @@ pub fn assemble(reader: impl BufRead, progress: &dyn Fn(u32)) -> Result<Value, E
             }
             "content_block_stop" => {
                 let i = index(&ev)?;
-                if let (Some(block), Some(json)) = (blocks.get_mut(i), partial_json.get(i)) {
+                let block = blocks.get_mut(i).and_then(Value::as_object_mut);
+                if let (Some(block), Some(json)) = (block, partial_json.get(i)) {
                     if !json.is_empty() {
-                        block["input"] = serde_json::from_str(json)
+                        let input = serde_json::from_str(json)
                             .map_err(|e| EgressError::Protocol(e.to_string()))?;
+                        block.insert("input".to_owned(), input);
                     }
                 }
             }
             "message_delta" => {
                 if let Some(m) = message.as_mut() {
-                    for (k, v) in ev["delta"].as_object().into_iter().flatten() {
+                    for (k, v) in ev
+                        .get("delta")
+                        .and_then(Value::as_object)
+                        .into_iter()
+                        .flatten()
+                    {
                         m.insert(k.clone(), v.clone());
                     }
-                    if let Some(out) = ev["usage"]["output_tokens"].as_u64() {
+                    if let Some(out) = ev.pointer("/usage/output_tokens").and_then(Value::as_u64) {
                         if let Some(usage) = m.get_mut("usage").and_then(Value::as_object_mut) {
                             usage.insert("output_tokens".to_owned(), json!(out));
                         }
@@ -98,14 +122,20 @@ pub fn assemble(reader: impl BufRead, progress: &dyn Fn(u32)) -> Result<Value, E
             }
             "message_stop" => *done = true,
             "error" => {
-                let kind = ev["error"]["type"].as_str().unwrap_or("");
+                let kind = ev
+                    .pointer("/error/type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
                 return Err(match kind {
                     "overloaded_error" => EgressError::Unavailable(529),
                     "rate_limit_error" => EgressError::RateLimited,
                     "api_error" => EgressError::Unavailable(500),
                     _ => EgressError::Rejected(
                         400,
-                        ev["error"]["message"].as_str().unwrap_or("").to_owned(),
+                        ev.pointer("/error/message")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_owned(),
                     ),
                 });
             }
@@ -174,10 +204,14 @@ fn too_large() -> EgressError {
 
 /// Adds in place: a long answer arrives in thousands of small pieces.
 fn append(block: &mut Value, field: &str, piece: &str) {
-    if let Some(Value::String(now)) = block.get_mut(field) {
-        now.push_str(piece);
-    } else {
-        block[field] = Value::String(piece.to_owned());
+    let Some(block) = block.as_object_mut() else {
+        return;
+    };
+    match block.get_mut(field) {
+        Some(Value::String(now)) => now.push_str(piece),
+        _ => {
+            block.insert(field.to_owned(), Value::String(piece.to_owned()));
+        }
     }
 }
 
@@ -223,6 +257,33 @@ mod tests {
         assert_eq!(m["stop_reason"], "end_turn");
         assert_eq!(m["usage"]["output_tokens"], 42);
         assert_eq!(seen.get(), 3, "words in the text, not in the thinking");
+    }
+
+    #[test]
+    fn a_block_that_is_not_an_object_is_a_protocol_error_not_a_crash() {
+        for block in [
+            json!("text"),
+            json!(7),
+            json!([1]),
+            json!(null),
+            json!(true),
+        ] {
+            let s = stream(&[
+                json!({"type": "message_start", "message": {"content": [], "usage": {}}}),
+                json!({"type": "content_block_start", "index": 0, "content_block": block}),
+                json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "שלום"}}),
+                json!({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"}}),
+                json!({"type": "content_block_stop", "index": 0}),
+                json!({"type": "message_stop"}),
+            ]);
+            assert!(
+                matches!(
+                    assemble(s.as_bytes(), &|_| {}),
+                    Err(EgressError::Protocol(_))
+                ),
+                "{block}"
+            );
+        }
     }
 
     #[test]

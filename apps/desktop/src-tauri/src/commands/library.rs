@@ -89,6 +89,7 @@ pub(crate) async fn prepare_sort(
     state: tauri::State<'_, AppState>,
     case_id: String,
 ) -> Res<Prepared> {
+    warm_names(&state, &case_id, Vec::new()).await;
     with_core(&state, move |c| c.prepare_sort(&case_id)).await
 }
 
@@ -184,6 +185,7 @@ pub(crate) async fn edit_paragraph(
     draft_id: String,
     text: String,
 ) -> Res<()> {
+    warm_names(&state, &case_id, vec![text.clone()]).await;
     with_core(&state, move |c| {
         c.edit_paragraph(&case_id, &draft_id, &text)
     })
@@ -231,6 +233,7 @@ pub(crate) async fn add_own_paragraph(
     first: Option<bool>,
     after: Option<String>,
 ) -> Res<()> {
+    warm_names(&state, &case_id, vec![text.clone()]).await;
     with_core(&state, move |c| {
         // Where it goes (D-036): after a paragraph, first in the section, or at the end.
         let at = match (after.as_deref(), first.unwrap_or(false)) {

@@ -17,6 +17,10 @@ unused_must_use = "deny"
 all = { level = "deny", priority = -1 }
 unwrap_used = "deny"
 expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+# Cutting a string inside a Hebrew letter panics the same way (F4).
+string_slice = "deny"
 dbg_macro = "deny"
 print_stdout = "deny"
 
@@ -36,6 +40,7 @@ dv-ipc.workspace = true
 arboard = { version = "3.6.1", default-features = false }
 zeroize = "1.9"
 # The answer type of a request on its way (already used by every crate it talks to).
+serde.workspace = true
 serde_json.workspace = true
 # The system's own "Save as" / "Open" windows for the encrypted backup (D-024). Called from Rust
 # only: nothing is exposed to the webview. On Linux it uses GTK 3, already in the tree.
@@ -46,6 +51,6 @@ rfd = { version = "0.16", default-features = false, features = ["gtk3"] }
 fips = ["dv-core/fips"]
 
 # The one module that calls Windows directly (`src/win_platform.rs`, D-047): working-set quota
-# for locked memory and crash reporting. Already in the tree through Tauri's WebView2 bindings.
+# for locked memory, crash reporting and whether the session is locked. Already in the tree through Tauri's WebView2 bindings.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Diagnostics_Debug", "Win32_System_ErrorReporting", "Win32_System_Memory", "Win32_System_Threading"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Diagnostics_Debug", "Win32_System_ErrorReporting", "Win32_System_Memory", "Win32_System_RemoteDesktop", "Win32_System_Threading"] }

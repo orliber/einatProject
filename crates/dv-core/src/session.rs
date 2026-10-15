@@ -2,6 +2,10 @@
 
 use super::*;
 
+/// A password or kit check (Argon2id, seconds at most) that has not come back after this
+/// long is taken as lost, so the vault can never stay unopenable.
+const SECRET_WORK_STALE: Duration = Duration::from_secs(120);
+
 impl Core {
     /// `dir` is the vault folder (the shell passes the OS local-app-data folder).
     #[must_use]
@@ -20,6 +24,9 @@ impl Core {
             last_tick: None,
             failed_unlocks: 0,
             not_before: None,
+            secret_work: None,
+            secret_ticket: 0,
+            cancel: jobs::Cancel::default(),
             disk_encryption: disk.to_owned(),
             transport: None,
             ingest_exe: None,
@@ -34,9 +41,7 @@ impl Core {
             session: 0,
             models_dir: None,
             ner: None,
-            ner_loading: None,
             ner_exe: None,
-            ner_problem: None,
             hint_cache: HashMap::new(),
             section_nonces: HashMap::new(),
         }
@@ -123,7 +128,7 @@ impl Core {
 
     /// Seconds left before the idle lock, while the vault is open (shown as a warning in the
     /// last minute).
-    pub(crate) fn idle_lock_in(&self) -> Option<u32> {
+    pub fn idle_lock_in(&self) -> Option<u32> {
         self.vault.as_ref()?;
         let limit = Duration::from_secs(u64::from(self.lock_minutes()) * 60);
         let left = limit.saturating_sub(self.last_activity.elapsed()).as_secs();
@@ -243,6 +248,8 @@ impl Core {
 
     pub fn create_vault(&mut self, password: &str) -> Result<CreatedVault, CoreError> {
         self.refuse_cloud()?;
+        // Not while a restore writes the same folder (or an unlock reads it).
+        self.refuse_secret_work_running()?;
         let params = self.argon.unwrap_or_else(Argon2Params::calibrate);
         let created = Vault::create(&self.dir, password, params)?;
         let recovery_key = created.recovery_key.to_string();
@@ -259,6 +266,41 @@ impl Core {
                 t.saturating_duration_since(Instant::now()).as_secs() + 1,
             )),
             _ => Ok(()),
+        }
+    }
+
+    /// Take the one place for checking a password or kit off the lock, or refuse while
+    /// another check runs. A check that never came back (a lost job) frees it after a while.
+    /// Returns the ticket the job hands back to [`Self::release_secret_work`].
+    pub(crate) fn claim_secret_work(&mut self) -> Result<u64, CoreError> {
+        self.refuse_secret_work_running()?;
+        self.secret_ticket = self.secret_ticket.wrapping_add(1);
+        self.secret_work = Some((self.secret_ticket, Instant::now()));
+        Ok(self.secret_ticket)
+    }
+
+    pub(crate) fn refuse_secret_work_running(&self) -> Result<(), CoreError> {
+        match self.secret_work {
+            Some((_, since)) if since.elapsed() < SECRET_WORK_STALE => Err(CoreError::Needs(
+                "הסיסמה עדיין נבדקת. רגע אחד.".to_owned(),
+                ErrorAction::Dismiss,
+            )),
+            _ => Ok(()),
+        }
+    }
+
+    /// Frees the place, unless a newer check took it meanwhile (after a lock or the stale wait).
+    pub(crate) fn release_secret_work(&mut self, ticket: u64) {
+        if self.secret_work.is_some_and(|(t, _)| t == ticket) {
+            self.secret_work = None;
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn age_secret_work(&mut self) {
+        if let Some((t, _)) = self.secret_work {
+            let old = Instant::now().checked_sub(SECRET_WORK_STALE + Duration::from_secs(1));
+            self.secret_work = old.map(|since| (t, since));
         }
     }
 
@@ -323,20 +365,6 @@ impl Core {
         }
     }
 
-    pub fn unlock(&mut self, password: &str) -> Result<AppStatus, CoreError> {
-        self.refuse_cloud()?;
-        self.check_backoff()?;
-        let result = Vault::unlock_with_password(&self.dir, password);
-        self.after_unlock(result, true)
-    }
-
-    pub fn unlock_with_recovery(&mut self, recovery_key: &str) -> Result<AppStatus, CoreError> {
-        self.refuse_cloud()?;
-        self.check_backoff()?;
-        let result = Vault::unlock_with_recovery(&self.dir, recovery_key);
-        self.after_unlock(result, true)
-    }
-
     pub fn confirm_recovery_key(&mut self, typed: &str) -> Result<bool, CoreError> {
         Ok(self.vault_ref()?.check_recovery_key(typed))
     }
@@ -350,76 +378,24 @@ impl Core {
         self.keep_unsaved();
         self.pending.clear();
         self.session = self.session.wrapping_add(1);
+        self.cancel.set();
+        self.cancel = jobs::Cancel::default();
         self.staged_backup = None;
         self.style_staged.clear();
         self.removed_input = None;
         self.hint_cache.clear();
         self.section_nonces.clear();
         // The model's process held texts of this session in its memory: it ends with the lock.
-        self.ner = None;
-        self.ner_loading = None;
-        self.ner_problem = None;
+        self.end_name_model();
         if let Some(v) = self.vault.take() {
+            // A new password or kit begun while open lands as "locked meanwhile"; its check
+            // must not keep her from opening the vault again.
+            self.secret_work = None;
             let _ = v.lock_because(reason);
         }
     }
 
     // ------------------------------------------------------------ password and kit
-
-    /// `current` is the password, or the recovery kit when the password was forgotten.
-    pub(crate) fn proof<'a>(current: &'a str, with_recovery: bool) -> dv_vault::Secret<'a> {
-        if with_recovery {
-            dv_vault::Secret::Recovery(current)
-        } else {
-            dv_vault::Secret::Password(current)
-        }
-    }
-
-    /// A new password. Old backups keep opening with the old one, so a new backup is asked for.
-    pub fn change_password(
-        &mut self,
-        current: &str,
-        with_recovery: bool,
-        new_password: &str,
-    ) -> Result<(), CoreError> {
-        self.check_backoff()?;
-        let params = self.argon.unwrap_or_else(Argon2Params::calibrate);
-        let result = self.vault_mut()?.rekey_password(
-            Self::proof(current, with_recovery),
-            new_password,
-            params,
-        );
-        if let Err(e) = result {
-            self.count_failure(&e);
-            return Err(e.into());
-        }
-        self.failed_unlocks = 0;
-        self.mark_secret_changed()
-    }
-
-    /// A new printed kit; the old one stops opening the vault (not old backups).
-    pub fn new_recovery_kit(
-        &mut self,
-        current: &str,
-        with_recovery: bool,
-    ) -> Result<CreatedVault, CoreError> {
-        self.check_backoff()?;
-        let result = self
-            .vault_mut()?
-            .rotate_recovery_key(Self::proof(current, with_recovery));
-        let key = match result {
-            Ok(key) => key,
-            Err(e) => {
-                self.count_failure(&e);
-                return Err(e.into());
-            }
-        };
-        self.failed_unlocks = 0;
-        self.mark_secret_changed()?;
-        Ok(CreatedVault {
-            recovery_key: key.to_string(),
-        })
-    }
 
     // ------------------------------------------------------------ settings
 }

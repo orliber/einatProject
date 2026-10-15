@@ -9,6 +9,7 @@ import { ProgressLine } from "../../components/Progress";
 import { Why } from "../../components/Why";
 import { Similar } from "../../components/Similar";
 import { useHoldUnsaved } from "../../components/Unsaved";
+import { LocalText, type LocalTextHandle } from "../../components/LocalText";
 import { kindLabel } from "../../i18n/he";
 import { useRotatingPlaceholder } from "../../components/Rotating";
 import { DRAFT_HINTS } from "../../i18n/suggestions";
@@ -39,12 +40,24 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   // the request she typed, the one on its way, and what came back with the last answer.
   const keep = `case:${caseId}:section:${section.key}`;
   const [last, setLast] = useKept<SectionResult | null>(`${keep}:last`, null);
+  // The request being typed lives in its box (F1a); `message` is the kept, debounced copy.
   const [message, setMessage] = useKept(`${keep}:message`, "");
+  const [messageEmpty, setMessageEmpty] = useState(() => !message.trim());
+  const messageBox = useRef<LocalTextHandle>(null);
+  /** The last text the box reported, to tell its own reports from changes made elsewhere. */
+  const reported = useRef(message);
   const [asked, setAsked] = useKept<string | null>(`${keep}:asked`, null);
-  const chatHint = `${useRotatingPlaceholder(DRAFT_HINTS, message.length > 0)} · שמות יוסתרו אוטומטית`;
+  const chatHint = `${useRotatingPlaceholder(DRAFT_HINTS, !messageEmpty)} · שמות יוסתרו אוטומטית`;
   const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
-  const [own, setOwn] = useState<string | null>(null);
+  /** A paragraph being edited: the text is in `editBox`; `text` is its debounced copy, for the lock. */
+  const [editing, setEditing] = useKept<{ id: string; text: string } | null>(`${keep}:editing`, null);
+  const editBox = useRef<LocalTextHandle>(null);
+  /** A paragraph of her own being written (in `ownBox`), with its debounced copy, or `null`. */
+  // Both kept while the vault is open: leaving and coming back finds the editor with her text.
+  const [own, setOwn] = useKept<string | null>(`${keep}:own`, null);
+  const [ownEmpty, setOwnEmpty] = useState(() => !(own ?? "").trim());
+  const ownBox = useRef<LocalTextHandle>(null);
+  const startOwn = () => { setOwnEmpty(true); setOwn(""); };
   const [error, setError] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
   const [linked, setLinked] = useState(false);
@@ -81,41 +94,84 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
     chatEnd.current?.scrollIntoView({ block: "end" });
   }, [chat]);
 
+  // The kept request changed elsewhere (cleared when its answer came, maybe while another visit
+  // of this screen was open): the box takes it, unless she has typed in it since its last report.
+  useEffect(() => {
+    const box = messageBox.current;
+    if (!box || message === reported.current) return;
+    if (box.value() === reported.current) box.set(message);
+    else reported.current = message;
+  }, [message]);
+
   // One request at a time per section: while it is prepared, reviewed or written.
   const job = api.jobs.find((j) => j.section === section.key);
-  useHoldUnsaved(caseId, `פסקה בסעיף "${section.title}"`, editing?.text ?? own);
+  const holdLive = useHoldUnsaved(caseId, `פסקה בסעיף "${section.title}"`, editing?.text ?? own);
   const [preparing, setPreparing] = useState(false);
   const working = preparing || busy || job !== undefined;
+
+  /** The send of the last request, kept while it failed: "לנסות שוב" sends the same approved
+   *  request again and takes in its answer like the first time (the core kept the approval). */
+  const sending = useRef<(() => Promise<void>) | null>(null);
+  const [resend, setResend] = useState<(() => void) | null>(null);
+
+  function failed(e: unknown) {
+    const again = sending.current;
+    setResend(() => (again ? () => void sendAgain(again) : null));
+    setError(fail(e as never));
+  }
+
+  async function sendAgain(send: () => Promise<void>) {
+    setError(null);
+    setResend(null);
+    setBusy(true);
+    try {
+      await send();
+      sending.current = null;
+    } catch (e) {
+      failed(e);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   /** `replaces`: rewrite that one paragraph; otherwise the answer is the section's new draft. */
   async function ask(instruction: string, title?: string, replaces?: string) {
     if (!instruction.trim()) return;
     setError(null);
+    setResend(null);
+    sending.current = null;
     setPreparing(true);
     try {
       const prepare = () => ipc.prepareSection(caseId, section.key, instruction, replaces);
       const prepared = await prepare();
       setPreparing(false);
       setBusy(true);
+      const send = async (id: string) => {
+        setAsked(instruction);
+        await api.track(
+          { label: replaces ? `${ai} מנסח את הפסקה מחדש` : `${ai} כותב את "${section.title}"`, task: "draft", section: section.key, approval: id },
+          () => ipc.sendSection(id),
+          async (result) => {
+            setLast(result);
+            // Only the request that was sent is cleared, not one she typed meanwhile.
+            setMessage((m) => (m === instruction ? "" : m));
+            await Promise.all([reload(), loadChat()]);
+            if (result.demo) notify("מצב הדגמה: התשובה נבנתה במחשב, בלי שליחה.");
+          },
+        ).finally(() => setAsked(null));
+      };
       await api.review({
         title: title ?? `בקשה לסעיף ${section.title}`,
         prepared,
         reprepare: prepare,
         onSend: async (id) => {
-          setAsked(instruction);
-          const result = await api.track(
-            { label: replaces ? `${ai} מנסח את הפסקה מחדש` : `${ai} כותב את "${section.title}"`, task: "draft", section: section.key, approval: id },
-            () => ipc.sendSection(id),
-          ).finally(() => setAsked(null));
-          setLast(result);
-          // Only the request that was sent is cleared, not one she typed meanwhile.
-          setMessage((m) => (m === instruction ? "" : m));
-          await Promise.all([reload(), loadChat()]);
-          if (result.demo) notify("מצב הדגמה: התשובה נבנתה במחשב, בלי שליחה.");
+          sending.current = () => send(id);
+          await send(id);
+          sending.current = null;
         },
       });
     } catch (e) {
-      setError(fail(e as never));
+      failed(e);
     } finally {
       setPreparing(false);
       setBusy(false);
@@ -125,6 +181,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   /** The check of the proposed paragraphs against the sources: its own request and review. */
   async function verify() {
     setError(null);
+    setResend(null);
     setPreparing(true);
     try {
       const prepare = () => ipc.prepareVerify(caseId, section.key);
@@ -136,12 +193,14 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
         prepared,
         reprepare: prepare,
         onSend: async (id) => {
-          const result = await api.track(
+          await api.track(
             { label: `${ai} בודק את "${section.title}" מול המקורות`, task: "draft", approval: id },
             () => ipc.sendVerify(id),
+            (result) => {
+              setChecks(new Map(result.draft_ids.map((d, i) => [d, result.checks[i]] as [string, ParagraphCheck])));
+              if (result.demo) notify("מצב הדגמה: נבדקו רק מספרים שאין במקורות, בלי שליחה.");
+            },
           );
-          setChecks(new Map(result.draft_ids.map((d, i) => [d, result.checks[i]] as [string, ParagraphCheck])));
-          if (result.demo) notify("מצב הדגמה: נבדקו רק מספרים שאין במקורות, בלי שליחה.");
         },
       });
     } catch (e) {
@@ -162,9 +221,12 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
     }
   }
 
+  /** The request as it is in the box now (never the debounced copy). */
+  const typed = () => messageBox.current?.value() ?? message;
+
   function submit(e: FormEvent) {
     e.preventDefault();
-    if (!working) void ask(message);
+    if (!working) void ask(typed());
   }
 
   const derived = DERIVED.includes(section.key);
@@ -334,7 +396,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                     {derived ? "כתיבת טיוטה מהסעיפים שאושרו" : `כתיבת טיוטה עם ${ai}`}
                   </button>
                 )}
-                <button type="button" className="btn" onClick={() => setOwn("")}>כתיבה בעצמי</button>
+                <button type="button" className="btn" onClick={startOwn}>כתיבה בעצמי</button>
               </div>
             </div>
           )}
@@ -382,8 +444,8 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                 {isEditing ? (
                   <label className="edit-box">
                     <span className="visually-hidden">עריכת הפסקה</span>
-                    <textarea className="textarea serif" rows={5} value={editing.text} autoFocus
-                      onChange={(e) => setEditing({ id: p.id, text: e.target.value })} />
+                    <LocalText key={p.id} ref={editBox} className="textarea serif" rows={5} initial={editing.text} autoFocus onLive={holdLive}
+                      onText={(text) => setEditing((e) => (e?.id === p.id ? { id: p.id, text } : e))} />
                   </label>
                 ) : (
                   <p className="serif para-text"><MarkedText text={p.text} marks={p.style?.marks ?? []} /></p>
@@ -400,7 +462,10 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                   {isEditing ? (
                     <>
                       <button type="button" className="btn btn-primary btn-small"
-                        onClick={() => void act(async () => { await ipc.editParagraph(caseId, p.id, editing.text); await ipc.approveParagraph(caseId, p.id); setEditing(null); })}>שמירה ואישור</button>
+                        onClick={() => {
+                          const text = editBox.current?.value() ?? editing.text;
+                          void act(async () => { await ipc.editParagraph(caseId, p.id, text); await ipc.approveParagraph(caseId, p.id); setEditing(null); });
+                        }}>שמירה ואישור</button>
                       <button type="button" className="btn btn-small" onClick={() => setEditing(null)}>ביטול</button>
                       <button type="button" className="link-small" aria-expanded={similar === p.id} onClick={() => setSimilar(similar === p.id ? null : p.id)}>פסקה דומה מהדוחות שלי</button>
                     </>
@@ -422,18 +487,22 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
             <div className="para pending">
               <label className="edit-box">
                 <span className="visually-hidden">פסקה חדשה</span>
-                <textarea className="textarea serif" rows={4} value={own} autoFocus placeholder="כתבי כאן. שמות מוסתרים לפני כל שליחה."
-                  onChange={(e) => setOwn(e.target.value)} />
+                <LocalText ref={ownBox} className="textarea serif" rows={4} initial={own} autoFocus onLive={holdLive} placeholder="כתבי כאן. שמות מוסתרים לפני כל שליחה."
+                  onText={(text) => setOwn((o) => (o === null ? null : text))} onEmptyChange={setOwnEmpty} />
               </label>
               <div className="row">
-                <button type="button" className="btn btn-primary btn-small" disabled={!own.trim()}
-                  onClick={() => void act(async () => { await ipc.addOwnParagraph(caseId, section.key, own); setOwn(null); })}>הוספה לדוח</button>
+                <button type="button" className="btn btn-primary btn-small" disabled={ownEmpty}
+                  onClick={() => {
+                    const text = ownBox.current?.value() ?? own;
+                    if (!text.trim()) return;
+                    void act(async () => { await ipc.addOwnParagraph(caseId, section.key, text); setOwn(null); });
+                  }}>הוספה לדוח</button>
                 <button type="button" className="btn btn-small" onClick={() => setOwn(null)}>ביטול</button>
               </div>
             </div>
           ) : visible.length > 0 && (
             <div className="row wrap-row">
-              <button type="button" className="add-own" onClick={() => setOwn("")}>+ פסקה משלי</button>
+              <button type="button" className="add-own" onClick={startOwn}>+ פסקה משלי</button>
               {(derived || section.source_count > 0) && (
                 <button type="button" className="add-own" disabled={working}
                   onClick={() => void ask(draftInstruction, `טיוטה חדשה לסעיף ${section.title}`)}>
@@ -450,7 +519,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               {last.questions.map((c, i) => <p key={`q${i}`}><b>שאלה:</b> {c}</p>)}
             </div>
           )}
-          <ErrorLine error={error} />
+          <ErrorLine error={error} retry={resend ?? undefined} />
         </section>
 
         <section className="chat" aria-label="שיחה על הסעיף">
@@ -489,10 +558,11 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
             </div>
             <div className="chat-input">
               <label htmlFor="chat-msg" className="visually-hidden">הודעה ל-{ai}</label>
-              <textarea id="chat-msg" rows={2} className="textarea grow" placeholder={chatHint}
-                value={message} onChange={(e) => setMessage(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !working) void ask(message); }} />
-              <button type="submit" className="btn btn-primary send-btn" title="תמיד מוצג קודם מה יוצא מהמחשב" disabled={working || !message.trim()}>שליחה <SendIcon /></button>
+              <LocalText id="chat-msg" ref={messageBox} rows={2} className="textarea grow" placeholder={chatHint}
+                initial={message} onEmptyChange={setMessageEmpty}
+                onText={(text) => { reported.current = text; setMessage(text); }}
+                onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !working) void ask(typed()); }} />
+              <button type="submit" className="btn btn-primary send-btn" title="תמיד מוצג קודם מה יוצא מהמחשב" disabled={working || messageEmpty}>שליחה <SendIcon /></button>
             </div>
           </form>
         </section>

@@ -177,15 +177,19 @@ pub(crate) fn from_tsv(tsv: &str) -> (String, Option<f64>) {
     let (mut weighted, mut letters) = (0.0f64, 0usize);
     for row in tsv.lines() {
         let cols: Vec<&str> = row.split('\t').collect();
-        if cols.len() < 12 || cols[0] != "5" {
+        // level, page, block, paragraph, line, word, left, top, width, height, conf, text.
+        let [level, page, blk, par, line, _, _, _, _, _, conf, word, ..] = cols.as_slice() else {
+            continue;
+        };
+        if *level != "5" {
             continue;
         }
-        let n = |i: usize| cols[i].parse::<u32>().unwrap_or(0);
-        let word = cols[11].trim();
+        let n = |s: &str| s.parse::<u32>().unwrap_or(0);
+        let word = word.trim();
         if word.is_empty() {
             continue;
         }
-        let this = (n(1), n(2), n(3), n(4));
+        let this = (n(page), n(blk), n(par), n(line));
         if key != Some(this) {
             if key.is_some() {
                 text.push('\n');
@@ -199,7 +203,7 @@ pub(crate) fn from_tsv(tsv: &str) -> (String, Option<f64>) {
             text.push(' ');
         }
         text.push_str(word);
-        if let Ok(conf) = cols[10].parse::<f64>() {
+        if let Ok(conf) = conf.parse::<f64>() {
             if conf >= 0.0 {
                 let len = word.chars().count();
                 weighted += conf * len as f64;
@@ -274,5 +278,15 @@ mod tests {
         assert_eq!(text, "נועם משחק\nבחצר\n\nסוף");
         let c = conf.unwrap_or(0.0);
         assert!((c - 76.0).abs() < 0.01, "{c}");
+    }
+
+    #[test]
+    fn rows_cut_short_are_skipped() {
+        // A word row missing its text column, an empty line, a lone level: nothing invented.
+        let tsv = "5\t1\t1\t1\t1\t1\t0\t0\t1\t1\t90\n\n5\n5\t1\t1\t1\t1\t1\t0\t0\t1\t1\t90\tבדוי\textra\n";
+        let (text, conf) = from_tsv(tsv);
+        assert_eq!(text, "בדוי");
+        assert_eq!(conf, Some(90.0));
+        assert_eq!(from_tsv("5\t1\t1"), (String::new(), None));
     }
 }

@@ -672,16 +672,20 @@ fn mentions(sentence: &str, measure: &Measure) -> bool {
     {
         return false;
     }
+    let Some((&head, tail)) = name.split_first() else {
+        return false;
+    };
     let first_ok = |w: &str| {
-        w == name[0]
+        w == head
             || w.strip_prefix(['ו', 'ב', 'ה', 'ל', 'מ', 'ש', 'כ'])
                 .is_some_and(|rest| {
-                    rest == name[0] || rest.strip_prefix(['ב', 'ה', 'ל', 'מ']) == Some(name[0])
+                    rest == head || rest.strip_prefix(['ב', 'ה', 'ל', 'מ']) == Some(head)
                 })
     };
-    words
-        .windows(name.len())
-        .any(|win| first_ok(win[0]) && win[1..] == name[1..])
+    words.windows(name.len()).any(|win| {
+        win.split_first()
+            .is_some_and(|(first, rest)| first_ok(first) && rest == tail)
+    })
 }
 
 /// Numbers in a sentence that could be scores: not part of a test's name ("ADOS-2",
@@ -690,26 +694,29 @@ fn score_numbers(sentence: &str) -> Vec<String> {
     let chars: Vec<char> = sentence.chars().collect();
     let mut out = Vec::new();
     let mut i = 0;
-    while i < chars.len() {
-        if !chars[i].is_ascii_digit() {
+    while let Some(c) = chars.get(i) {
+        if !c.is_ascii_digit() {
             i += 1;
             continue;
         }
         let start = i;
-        while i < chars.len()
-            && (chars[i].is_ascii_digit()
-                || (chars[i] == '.' && chars.get(i + 1).is_some_and(char::is_ascii_digit)))
-        {
+        while chars.get(i).is_some_and(|c| {
+            c.is_ascii_digit() || (*c == '.' && chars.get(i + 1).is_some_and(char::is_ascii_digit))
+        }) {
             i += 1;
         }
-        let before = start.checked_sub(1).map(|j| chars[j]);
+        let at = |j: Option<usize>| j.and_then(|j| chars.get(j)).copied();
+        let before = at(start.checked_sub(1));
         let after = chars.get(i).copied();
-        let in_name = before == Some('-') && start >= 2 && chars[start - 2].is_ascii_alphabetic();
+        let in_name = before == Some('-')
+            && at(start.checked_sub(2)).is_some_and(|c| c.is_ascii_alphabetic());
         let glued =
             before.is_some_and(char::is_alphabetic) || after.is_some_and(char::is_alphabetic);
         let time = after == Some(':') || before == Some(':');
         if !(in_name || glued || time) {
-            out.push(chars[start..i].iter().collect());
+            if let Some(run) = chars.get(start..i) {
+                out.push(run.iter().collect());
+            }
         }
     }
     out

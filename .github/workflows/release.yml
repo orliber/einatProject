@@ -68,6 +68,18 @@ jobs:
         run: cargo test --release -p dv-vault --features fips
       - name: First run (create, close, open again; the real Argon2 cost)
         run: cargo test --release -p dv-core --test first_run -- --ignored
+      # F7: a release keeps a vault of its own, and every kept vault (0.2.0 on) opens in it,
+      # takes a day's work (draft, approve, export, backup, restore) and opens again.
+      - name: This version keeps a vault for the next ones
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          test -d "tests/fixtures/vaults/$version" || {
+            echo "tests/fixtures/vaults/$version is missing: DV_WRITE_VAULT_FIXTURE=$version cargo test -p dv-core upgrade::write -- --ignored"
+            exit 1
+          }
+      - name: Vaults of every earlier version open and take work
+        run: cargo test --release -p dv-core --lib upgrade
       - name: Build the one-click installer
         run: pnpm tauri build --bundles nsis --features fips
         working-directory: apps/desktop
@@ -81,6 +93,12 @@ jobs:
           $exe = Get-ChildItem target/release/bundle/nsis/*.exe | Select-Object -First 1
           Copy-Item $exe.FullName DiagnosticVault-Setup.exe
           (Get-FileHash DiagnosticVault-Setup.exe -Algorithm SHA256).Hash.ToLower() + "  DiagnosticVault-Setup.exe" | Out-File -Encoding ascii DiagnosticVault-Setup.exe.sha256
+      # F7, R8: installed silently on this account (which never had the app), started beside
+      # a kept vault, opened, 500 Hebrew characters typed in its real window with none lost
+      # (F1), uninstalled; her vault stays byte for byte.
+      - name: Clean install
+        shell: pwsh
+        run: scripts/windows-clean-install.ps1 -Installer DiagnosticVault-Setup.exe
       # SEC6: what went into this installer (CycloneDX), with its own checksum. A signed
       # provenance attestation is left out: on a private repository it needs a paid plan.
       - name: Software bill of materials

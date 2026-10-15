@@ -137,18 +137,29 @@ impl SortedTable {
         Self { data, lines }
     }
 
-    /// The value column(s) for `key`, if present.
+    /// The value column(s) for `key`, if present. A line that cannot be read (never
+    /// expected: the offsets were taken from this data) makes the word unknown, the reading
+    /// under which a word is most often taken for a name.
     #[must_use]
     pub fn get(&self, key: &str) -> Option<&'static str> {
         let data = self.data;
-        let i = self
-            .lines
-            .binary_search_by(|&(s, e)| data[s as usize..e as usize].cmp(key))
-            .ok()?;
-        let (_, e) = self.lines[i];
-        let rest = &self.data[e as usize..];
-        let line_end = rest.find('\n').unwrap_or(rest.len());
-        Some(rest[..line_end].trim_start_matches('\t'))
+        let mut unreadable = false;
+        let found = self.lines.binary_search_by(|&(s, e)| {
+            data.get(s as usize..e as usize).map_or_else(
+                || {
+                    unreadable = true;
+                    std::cmp::Ordering::Less
+                },
+                |k| k.cmp(key),
+            )
+        });
+        if unreadable {
+            return None;
+        }
+        let &(_, e) = self.lines.get(found.ok()?)?;
+        let rest = self.data.get(e as usize..)?;
+        let line = rest.split('\n').next().unwrap_or(rest);
+        Some(line.trim_start_matches('\t'))
     }
 }
 

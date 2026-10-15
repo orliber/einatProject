@@ -135,8 +135,14 @@ fn contains_words(text: &str, phrase: &str) -> bool {
         return false;
     }
     text.match_indices(phrase).any(|(at, m)| {
-        let before = text[..at].chars().next_back();
-        let after = text[at + m.len()..].chars().next();
+        let Some((head, tail)) = text.split_at_checked(at) else {
+            return false;
+        };
+        let Some(tail) = tail.strip_prefix(m) else {
+            return false;
+        };
+        let before = head.chars().next_back();
+        let after = tail.chars().next();
         !before.is_some_and(char::is_alphanumeric) && !after.is_some_and(char::is_alphanumeric)
     })
 }
@@ -187,18 +193,32 @@ pub fn changes(before: &str, after: &str) -> (Vec<(String, String)>, Option<f64>
     if a.is_empty() || a.len() > MAX_DIFF_WORDS || b.len() > MAX_DIFF_WORDS {
         return (Vec::new(), None);
     }
-    let (n, m) = (a.len(), b.len());
-    let mut lcs = vec![vec![0u16; m + 1]; n + 1];
-    for i in (0..n).rev() {
-        for j in (0..m).rev() {
-            lcs[i][j] = if a[i].norm == b[j].norm {
-                lcs[i + 1][j + 1] + 1
+    let n = a.len();
+    // `lcs[i][j]`: the longest common run of `a[i..]` and `b[j..]`. Built from the last row up,
+    // each row from its right end, so every cell needs only cells already built.
+    let mut next = vec![0u16; b.len() + 1];
+    let mut lcs = Vec::with_capacity(n + 1);
+    for wa in a.iter().rev() {
+        // Built from the right; `right` is the cell just built, `lcs[i][j + 1]`.
+        let mut row = vec![0u16];
+        let mut right = 0u16;
+        // (b[j], lcs[i + 1][j], lcs[i + 1][j + 1]), for j from the last word back.
+        for (wb, (down, diag)) in b.iter().zip(next.iter().zip(next.iter().skip(1))).rev() {
+            right = if wa.norm == wb.norm {
+                diag + 1
             } else {
-                lcs[i + 1][j].max(lcs[i][j + 1])
+                (*down).max(right)
             };
+            row.push(right);
         }
+        row.reverse();
+        lcs.push(std::mem::replace(&mut next, row));
     }
-    let kept = f64::from(lcs[0][0]) / n as f64;
+    lcs.push(next);
+    lcs.reverse();
+    // Every cell asked for below is inside the table; outside it there is nothing in common.
+    let at = |i: usize, j: usize| lcs.get(i).and_then(|r| r.get(j)).copied().unwrap_or(0);
+    let kept = f64::from(at(0, 0)) / n as f64;
     let mut out = Vec::new();
     let (mut i, mut j) = (0, 0);
     let (mut del, mut ins): (Vec<&Word>, Vec<&Word>) = (Vec::new(), Vec::new());
@@ -213,17 +233,31 @@ pub fn changes(before: &str, after: &str) -> (Vec<(String, String)>, Option<f64>
         del.clear();
         ins.clear();
     };
-    while i < n || j < m {
-        if i < n && j < m && a[i].norm == b[j].norm {
-            flush(&mut del, &mut ins);
-            i += 1;
-            j += 1;
-        } else if j < m && (i == n || lcs[i][j + 1] >= lcs[i + 1][j]) {
-            ins.push(&b[j]);
-            j += 1;
-        } else {
-            del.push(&a[i]);
-            i += 1;
+    loop {
+        match (a.get(i), b.get(j)) {
+            (None, None) => break,
+            (Some(x), Some(y)) if x.norm == y.norm => {
+                flush(&mut del, &mut ins);
+                i += 1;
+                j += 1;
+            }
+            (Some(x), Some(y)) => {
+                if at(i, j + 1) >= at(i + 1, j) {
+                    ins.push(y);
+                    j += 1;
+                } else {
+                    del.push(x);
+                    i += 1;
+                }
+            }
+            (None, Some(y)) => {
+                ins.push(y);
+                j += 1;
+            }
+            (Some(x), None) => {
+                del.push(x);
+                i += 1;
+            }
         }
     }
     flush(&mut del, &mut ins);
@@ -257,13 +291,14 @@ impl EditModel {
                 ..Pattern::default()
             };
             let id = probe.id();
-            let p = match self.pairs.iter_mut().position(|p| p.id() == id) {
-                Some(i) => &mut self.pairs[i],
-                None => {
-                    self.pairs.push(probe);
-                    let last = self.pairs.len() - 1;
-                    &mut self.pairs[last]
-                }
+            let p = if let Some(p) = self.pairs.iter_mut().find(|p| p.id() == id) {
+                p
+            } else {
+                self.pairs.push(probe);
+                let Some(p) = self.pairs.last_mut() else {
+                    continue;
+                };
+                p
             };
             p.count = p.count.saturating_add(1);
             *p.sections.entry(section.to_owned()).or_default() += 1;

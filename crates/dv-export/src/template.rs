@@ -163,6 +163,12 @@ pub(crate) fn attr(e: &BytesStart<'_>, name: &str) -> Option<String> {
     })
 }
 
+/// The value of ` w:<name>="…"` in the text of one tag, as written (not unescaped).
+pub(crate) fn tag_attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let (_, from) = tag.split_once(&format!(" w:{name}=\""))?;
+    from.split_once('"').map(|(value, _)| value)
+}
+
 fn rels(xml: &str) -> Result<Vec<Rel>, ExportError> {
     let mut reader = Reader::from_str(xml);
     let mut out = Vec::new();
@@ -458,15 +464,19 @@ fn drop_references(sect: &str, ids: &[&String]) -> String {
         .chain(rest.find("<w:footerReference"))
         .min()
     {
-        let Some(len) = rest[at..].find("/>").map(|e| e + 2) else {
+        // Both cuts are made before anything is written, so a cut that fails leaves the
+        // rest whole (below) and nothing twice.
+        let Some((before, from)) = rest.split_at_checked(at) else {
             break;
         };
-        out.push_str(&rest[..at]);
-        let tag = &rest[at..at + len];
+        let Some((tag, after)) = from.find("/>").and_then(|e| from.split_at_checked(e + 2)) else {
+            break;
+        };
+        out.push_str(before);
         if !ids.iter().any(|id| tag.contains(&format!("r:id=\"{id}\""))) {
             out.push_str(tag);
         }
-        rest = &rest[at + len..];
+        rest = after;
     }
     out.push_str(rest);
     out
@@ -476,10 +486,8 @@ fn drop_references(sect: &str, ids: &[&String]) -> String {
 fn text_width(sect: &str) -> usize {
     let num = |el: &str, name: &str| -> Option<usize> {
         let start = sect.find(&format!("<w:{el} "))?;
-        let tag = &sect[start..start + sect[start..].find('>')?];
-        let at = tag.find(&format!(" w:{name}=\""))? + name.len() + 5;
-        let end = at + tag[at..].find('"')?;
-        tag[at..end].parse().ok()
+        let (tag, _) = sect.get(start..)?.split_once('>')?;
+        tag_attr(tag, name)?.parse().ok()
     };
     let page = num("pgSz", "w").unwrap_or(11906);
     let left = num("pgMar", "left")
@@ -590,20 +598,27 @@ fn build(report: &Report, template: &[u8]) -> Result<Built, ExportError> {
     };
 
     // The body, and the section properties at its end.
-    let root_start = doc.find("<w:document").ok_or_else(|| bad("document"))?;
-    let root_end = root_start + doc[root_start..].find('>').ok_or_else(|| bad("document"))?;
-    let root_attrs = doc[root_start + "<w:document".len()..root_end]
-        .trim()
-        .trim_end_matches('/');
+    let root_attrs = doc
+        .split_once("<w:document")
+        .and_then(|(_, from)| from.split_once('>'))
+        .map(|(attrs, _)| attrs.trim().trim_end_matches('/'))
+        .ok_or_else(|| bad("document"))?;
     let body_open = doc.find("<w:body>").ok_or_else(|| bad("body"))? + "<w:body>".len();
     let body_close = doc.rfind("</w:body>").ok_or_else(|| bad("body"))?;
-    let inner = &doc[body_open..body_close];
+    // A body that closes before it opens is refused, not cut.
+    let inner = doc.get(body_open..body_close).ok_or_else(|| bad("body"))?;
     let kids = children(inner)?;
     let (content, sect_child) = match kids.split_last() {
         Some((last, rest)) if last.name == "w:sectPr" => (rest, Some(last)),
         _ => (kids.as_slice(), None),
     };
-    let mut sect = sect_child.map_or_else(String::new, |c| inner[c.start..c.end].to_owned());
+    let mut sect = match sect_child {
+        Some(c) => inner
+            .get(c.start..c.end)
+            .ok_or_else(|| bad("sectPr"))?
+            .to_owned(),
+        None => String::new(),
+    };
     if sect.is_empty() || sect.ends_with("/>") {
         sect = "<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1418\" w:right=\"1418\" w:bottom=\"1418\" w:left=\"1418\" w:header=\"709\" w:footer=\"709\" w:gutter=\"0\"/><w:bidi/></w:sectPr>".to_owned();
     }
@@ -652,9 +667,12 @@ fn build(report: &Report, template: &[u8]) -> Result<Built, ExportError> {
         if *is_header {
             headers += 1;
             if let Some((_, data)) = out.iter_mut().find(|(n, _)| *n == target) {
-                let xml = text(data)?.to_owned();
-                let at = xml.rfind("</w:hdr>").ok_or_else(|| bad("header"))?;
-                *data = format!("{}{line}{}", &xml[..at], &xml[at..]).into_bytes();
+                let xml = text(data)?;
+                let (head, tail) = xml
+                    .rfind("</w:hdr>")
+                    .and_then(|at| xml.split_at_checked(at))
+                    .ok_or_else(|| bad("header"))?;
+                *data = format!("{head}{line}{tail}").into_bytes();
             }
         } else {
             footers += 1;
@@ -706,10 +724,10 @@ fn build(report: &Report, template: &[u8]) -> Result<Built, ExportError> {
         width: text_width(&sect),
     };
     let mut matched = 0u32;
-    let styles_at = out.iter().position(|(n, _)| n == "word/styles.xml");
+    let styles_at = out.iter_mut().find(|(n, _)| n == "word/styles.xml");
     match styles_at {
-        Some(i) => {
-            let xml = text(&out[i].1)?.to_owned();
+        Some(styles) => {
+            let xml = text(&styles.1)?.to_owned();
             let (by_name, ids, normal) = her_styles(&xml)?;
             let mut extra = String::new();
             for (key, name, ppr, size, bold, color) in STYLES {
@@ -731,8 +749,10 @@ fn build(report: &Report, template: &[u8]) -> Result<Built, ExportError> {
                     layout.ids.insert(key, id);
                 }
             }
-            let at = xml.rfind("</w:styles>").ok_or_else(|| bad("styles"))?;
-            out[i].1 = format!("{}{extra}{}", &xml[..at], &xml[at..]).into_bytes();
+            let (head, tail) = xml
+                .rsplit_once("</w:styles>")
+                .ok_or_else(|| bad("styles"))?;
+            styles.1 = format!("{head}{extra}</w:styles>{tail}").into_bytes();
         }
         None => {
             layout = Layout {
@@ -765,7 +785,8 @@ fn build(report: &Report, template: &[u8]) -> Result<Built, ExportError> {
                 if i == m {
                     new_body.push_str(&report_xml);
                 } else {
-                    new_body.push_str(&inner[c.start..c.end]);
+                    // Her paragraph whole, or no document at all.
+                    new_body.push_str(inner.get(c.start..c.end).ok_or_else(|| bad("body"))?);
                 }
             }
         }
@@ -1022,5 +1043,59 @@ mod tests {
         assert!(check_template(&macro_ct).is_err());
         assert!(check_template(b"not a zip").is_err());
         assert!(check_template(&[0xD0, 0xCF, 0x11, 0xE0, 0, 0]).is_err());
+    }
+
+    /// Hebrew (two bytes a letter) around and inside the tags: the references to drop go, the
+    /// rest stays byte for byte, and a tag that never closes is kept whole.
+    #[test]
+    fn references_are_dropped_around_hebrew_text() {
+        let sect = "<w:sectPr>שלום<w:headerReference w:type=\"default\" r:id=\"rId7\"/>ילד בדוי<w:footerReference w:type=\"default\" r:id=\"rId9\"/>סוף</w:sectPr>";
+        let gone = String::from("rId7");
+        assert_eq!(
+            drop_references(sect, &[&gone]),
+            "<w:sectPr>שלוםילד בדוי<w:footerReference w:type=\"default\" r:id=\"rId9\"/>סוף</w:sectPr>"
+        );
+        let open = "<w:sectPr>אבג<w:headerReference r:id=\"rId7\" דוח";
+        assert_eq!(drop_references(open, &[&gone]), open);
+    }
+
+    /// The page width less the margins, with Hebrew before the tags; a value that is not a
+    /// number falls back to the default.
+    #[test]
+    fn the_text_width_is_read_next_to_hebrew() {
+        let sect = "<w:sectPr>עמוד<w:pgSz w:w=\"11906\" w:h=\"16838\"/>שוליים<w:pgMar w:right=\"1300\" w:left=\"1300\" w:gutter=\"0\"/></w:sectPr>";
+        assert_eq!(text_width(sect), 9306);
+        let odd =
+            "<w:sectPr><w:pgSz w:w=\"רחב\"/><w:pgMar w:right=\"1300\" w:left=\"1300\"/></w:sectPr>";
+        assert_eq!(text_width(odd), 11906 - 2600);
+        assert_eq!(text_width(&fixture_sect()), 9306);
+    }
+
+    fn fixture_sect() -> String {
+        let doc = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/fixtures/report_template/word/document.xml"),
+        )
+        .unwrap();
+        let start = doc.find("<w:sectPr").unwrap();
+        let end = doc.rfind("</w:sectPr>").unwrap() + "</w:sectPr>".len();
+        doc.get(start..end).unwrap().to_owned()
+    }
+
+    /// A body that closes before it opens is refused with her message, not a crash.
+    #[test]
+    fn a_body_that_closes_before_it_opens_is_refused() {
+        let tpl = fixture(|name, c| {
+            Some(if name == "word/document.xml" {
+                c.replace("</w:body>", "")
+                    .replace("<w:body>", "</w:body><w:body>")
+            } else {
+                c
+            })
+        });
+        assert!(matches!(
+            render_with_template(&sample(), &tpl),
+            Err(ExportError::Template(m)) if m.contains("פגום")
+        ));
     }
 }

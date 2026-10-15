@@ -1,7 +1,12 @@
 //! Windows Hello was taken out (D-054): a vault that had its slot keeps opening with the
 //! password, and the slot leaves the header. Fabricated data only.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use dv_vault::{Argon2Params, Vault};
 

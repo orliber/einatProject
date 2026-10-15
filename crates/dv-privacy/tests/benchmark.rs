@@ -5,7 +5,12 @@
 //! test prints recall and false alarms per group and fails under the thresholds, so a change
 //! that makes the filter weaker, or noisier, shows up as a number. All data is invented.
 
-#![allow(clippy::unwrap_used, clippy::print_stdout, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::print_stdout,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use dv_domain::{Identity, Role};
 use dv_privacy::text::normalize;

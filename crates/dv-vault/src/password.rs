@@ -145,8 +145,9 @@ pub fn check_policy(password: &str) -> Result<(), PolicyViolation> {
         return Err(PolicyViolation::Repetitive);
     }
     let sequential = chars
-        .windows(2)
-        .filter(|w| (w[1] as i64 - w[0] as i64).abs() == 1)
+        .iter()
+        .zip(chars.iter().skip(1))
+        .filter(|(a, b)| (i64::from(u32::from(**b)) - i64::from(u32::from(**a))).abs() == 1)
         .count();
     if sequential + 1 == chars.len() {
         return Err(PolicyViolation::Repetitive);

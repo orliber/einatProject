@@ -26,7 +26,7 @@ const HEADINGS: [string, string[]][] = [
 ];
 
 function fail(code: string, message: string): never {
-  const e: UiError = { code, message, details: [] };
+  const e: UiError = { code, message, details: [], action: { kind: "dismiss" } };
   throw e;
 }
 

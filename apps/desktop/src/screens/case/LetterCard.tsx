@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../../App";
 import { ipc, type ParagraphView, type Prepared } from "../../ipc/client";
 import { ReviewDialog } from "../../components/ReviewDialog";
 import { ExportDialog } from "../../components/ExportDialog";
 import { ErrorLine, Spinner } from "../../components/ui";
+import { LocalText, type LocalTextHandle } from "../../components/LocalText";
+import { useHoldUnsaved } from "../../components/Unsaved";
+import { useKept } from "../../kept";
 import type { CaseApi } from "../CaseScreen";
 
 type Audience = "parents" | "school";
@@ -19,7 +22,11 @@ export function LetterCard({ api }: { api: CaseApi }) {
   const [paragraphs, setParagraphs] = useState<ParagraphView[]>([]);
   const [review, setReview] = useState<Prepared | null>(null);
   const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  /** The paragraph being edited, with the text it started from; what is typed stays in `editBox`. */
+  // Kept while the vault is open, and held for a lock, like every paragraph editor (F1a).
+  const [editing, setEditing] = useKept<{ id: string; text: string } | null>(`case:${api.caseId}:letter:${audience}:editing`, null);
+  const holdLive = useHoldUnsaved(api.caseId, audience === "parents" ? "פסקה במכתב להורים" : "פסקה במכתב לצוות", editing?.text ?? null, "finish");
+  const editBox = useRef<LocalTextHandle>(null);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,10 +77,14 @@ export function LetterCard({ api }: { api: CaseApi }) {
       {paragraphs.map((p) =>
         editing?.id === p.id ? (
           <div key={p.id} className="stack" style={{ gap: 6 }}>
-            <textarea className="textarea serif" rows={4} autoFocus value={editing.text} onChange={(e) => setEditing({ id: p.id, text: e.target.value })} />
+            <LocalText key={p.id} ref={editBox} className="textarea serif" rows={4} autoFocus initial={editing.text} onLive={holdLive}
+              onText={(text) => setEditing((e) => (e?.id === p.id ? { id: p.id, text } : e))} />
             <div className="row">
               <button type="button" className="btn btn-primary btn-small"
-                onClick={() => void act(async () => { await ipc.editParagraph(api.caseId, editing.id, editing.text); setEditing(null); await load(); })}>שמירה</button>
+                onClick={() => {
+                  const text = editBox.current?.value() ?? editing.text;
+                  void act(async () => { await ipc.editParagraph(api.caseId, editing.id, text); setEditing(null); await load(); });
+                }}>שמירה</button>
               <button type="button" className="btn btn-small" onClick={() => setEditing(null)}>ביטול</button>
             </div>
           </div>

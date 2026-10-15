@@ -4,7 +4,12 @@
 //! is alone in its own process so the first database opens really are concurrent.
 //! Fabricated data only.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use std::sync::Barrier;
 

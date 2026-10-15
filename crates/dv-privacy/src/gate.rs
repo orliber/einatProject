@@ -18,7 +18,7 @@ use crate::pipeline::{
     arabic_identity_matches, declared_reads_as_word, identity_index, other_case_word, past_name,
     reads_as_word, PrivacyContext, Target,
 };
-use crate::text::{normalize, prefix_splits, tokenize};
+use crate::text::{normalize, prefix_splits, tokenize, Token};
 
 /// Generic replacements produced by the pipeline; always allowed in outgoing text.
 pub const GENERIC_TAGS: &[&str] = &[
@@ -53,22 +53,18 @@ pub fn replace_foreign_tags(
     with: impl Fn(&str) -> String,
 ) -> Option<String> {
     let re = TAG_RE.as_ref()?;
-    let mut out = String::with_capacity(text.len());
-    let mut last = 0;
     let mut changed = false;
-    for m in re.find_iter(text) {
-        if tag_allowed(m.as_str(), case_tags) {
-            continue;
+    // The regex copies the text between matches itself, so no offset is cut by hand.
+    let out = re.replace_all(text, |caps: &regex::Captures<'_>| {
+        let tag = caps.get(0).map_or("", |m| m.as_str());
+        if tag_allowed(tag, case_tags) {
+            tag.to_owned()
+        } else {
+            changed = true;
+            with(tag)
         }
-        out.push_str(&text[last..m.start()]);
-        out.push_str(&with(m.as_str()));
-        last = m.end();
-        changed = true;
-    }
-    changed.then(|| {
-        out.push_str(&text[last..]);
-        out
-    })
+    });
+    changed.then(|| out.into_owned())
 }
 
 /// The plain word of a tag: `[מוסד_1]` reads "מוסד", `[ילד_גן_2]` "ילד גן". Hebrew joins
@@ -194,11 +190,11 @@ pub(crate) fn name_findings(text: &str, ctx: &PrivacyContext<'_>) -> Vec<Finding
             continue;
         }
         // An ordinary word the psychologist confirmed ("שאלון" when a child is "אלון").
-        let whole = &tokens[m.first_token];
-        if m.prefix > 0
-            && LEXICON.common_words.contains(&whole.norm)
-            && (ctx.allowlisted)(&whole.norm)
-        {
+        // A token the match does not point at is no confirmed word: the finding stands.
+        let confirmed_word = |whole: &Token| {
+            LEXICON.common_words.contains(&whole.norm) && (ctx.allowlisted)(&whole.norm)
+        };
+        if m.prefix > 0 && tokens.get(m.first_token).is_some_and(confirmed_word) {
             continue;
         }
         out.push(Finding {
@@ -281,10 +277,12 @@ pub fn clear(req: &GateRequest<'_>) -> Result<ClearedPayload, Blocked> {
                 "unknown_name" => "נמצא שם שלא הוחלט לגביו",
                 _ => "נמצא שם מדוח ישן",
             };
+            // The finding is refused whatever its detail; one that cannot be cut out of the
+            // text (never expected) is refused without it.
             reasons.push(reason(
                 f.code,
                 message,
-                Some(text[f.start..f.end].to_owned()),
+                text.get(f.start..f.end).map(str::to_owned),
             ));
         }
         match patterns::find(text, req.ctx.today) {
@@ -306,9 +304,12 @@ pub fn clear(req: &GateRequest<'_>) -> Result<ClearedPayload, Blocked> {
         // An address field ("כתובת: מסדה 33, חיפה"), as the filter reads it: the filter hides
         // each part whole, or the tag of what it hid there first ("שכונת [יישוב_אחר]") stays
         // in it, so a part without any tag was never filtered.
+        // A part that cannot be read (never expected) was not shown to be filtered: refused.
         for (start, end) in crate::pipeline::address_field_spans(text) {
-            let part = &text[start..end];
-            if !TAG_RE.as_ref().is_some_and(|re| re.is_match(part)) {
+            let tagged = text
+                .get(start..end)
+                .is_some_and(|part| TAG_RE.as_ref().is_some_and(|re| re.is_match(part)));
+            if !tagged {
                 reasons.push(reason(
                     "pattern",
                     "נמצא פרט מזהה (מספר, תאריך, כתובת…)",

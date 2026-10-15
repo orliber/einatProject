@@ -80,7 +80,11 @@ pub fn scan_model_output(
         .collect();
     for t in tokenize(text) {
         let splits = prefix_splits(&t.norm);
-        let token = text[t.start..t.end].to_owned();
+        // As written; in its normalized form if it cannot be read so (never expected), still
+        // flagged.
+        let token = text
+            .get(t.start..t.end)
+            .map_or_else(|| t.norm.clone(), str::to_owned);
         if splits.iter().any(|(_, h)| declared.iter().any(|d| d == h)) {
             add(
                 &mut out,
@@ -104,7 +108,9 @@ pub fn scan_model_output(
         ) {
             add(
                 &mut out,
-                text[hit.start..hit.end].to_owned(),
+                // Still flagged, by its kind, if it cannot be cut out (never expected).
+                text.get(hit.start..hit.end)
+                    .map_or_else(|| hit.kind.label_he().to_owned(), str::to_owned),
                 SuspectKind::Indirect,
                 "Claude כתב פרט מזהה",
             );

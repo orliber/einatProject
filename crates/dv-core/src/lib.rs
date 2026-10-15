@@ -19,6 +19,7 @@ mod intake;
 mod library;
 pub mod name_model;
 use name_model::NameHints;
+mod jobs;
 mod readiness;
 mod retention;
 mod seal;
@@ -65,7 +66,12 @@ pub(crate) use dates::today;
 pub use dv_ai::{StyleItem, StyleKind, StyleOrigin, StyleProfile};
 pub use dv_vault::BACKUP_EXTENSION;
 pub use followup::FollowUpView;
+pub use jobs::{
+    BackupRun, BackupTask, DocumentRead, DrillJob, Drilled, ExportJob, Exported, ReadJob,
+    RestoreJob, Restored, SlotJob, SlotMade, UnlockJob, Unlocked,
+};
 pub use library::TRASH_DAYS;
+pub use name_model::{HintJob, HintsRead};
 pub use readiness::{Readiness, ReadinessItem};
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
 pub use security::{SecurityItem, SecurityStatus};
@@ -77,6 +83,7 @@ pub use style::{
 pub use unsaved::UnsavedEdit;
 pub use usage::UsageSummary;
 pub use verify::VerifyResult;
+pub use views::ErrorAction;
 pub use views::{
     ActivityEntry, ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail,
     ChatView, ConsultResult, ConsultTurnView, ConsultationSummary, ConsultationView, CreatedVault,
@@ -227,7 +234,8 @@ pub fn recent_crashes(log: &str) -> Vec<String> {
         .filter(|l| well_formed(l))
         .map(str::to_owned)
         .collect();
-    kept[kept.len().saturating_sub(CRASHES_SHOWN)..].to_vec()
+    let skip = kept.len().saturating_sub(CRASHES_SHOWN);
+    kept.into_iter().skip(skip).collect()
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -242,6 +250,9 @@ pub enum CoreError {
     ConsentMissing,
     #[error("refused: {0}")]
     Refused(String),
+    /// A refusal with its own next step (F6): the place that fixes it, or a retry.
+    #[error("refused: {0}")]
+    Needs(String, ErrorAction),
     #[error("wait {0}s")]
     Backoff(u64),
     #[error("egress: {0}")]
@@ -291,7 +302,7 @@ impl CoreError {
                 "consent_missing",
                 format!("לפני שליחה ל-{ai} צריך לרשום בתיק את הסכמת ההורים."),
             ),
-            CoreError::Refused(why) => ("refused", why.clone()),
+            CoreError::Refused(why) | CoreError::Needs(why, _) => ("refused", why.clone()),
             CoreError::Backoff(s) => (
                 "backoff",
                 format!("יותר מדי ניסיונות. אפשר לנסות שוב בעוד {s} שניות."),
@@ -308,7 +319,57 @@ impl CoreError {
             code: code.to_owned(),
             message,
             details,
+            action: self.action(),
         }
+    }
+
+    /// The one next step this error offers (F6).
+    #[must_use]
+    pub fn action(&self) -> ErrorAction {
+        match self {
+            CoreError::Locked => ErrorAction::Unlock,
+            CoreError::Vault(
+                VaultError::WrongSecret
+                | VaultError::RecoveryKeyInvalid
+                | VaultError::Policy(_)
+                | VaultError::AlreadyExists,
+            )
+            | CoreError::NotFound(_)
+            | CoreError::Refused(_) => ErrorAction::Dismiss,
+            CoreError::Vault(_) | CoreError::Internal(_) => ErrorAction::Report,
+            CoreError::ConsentMissing => ErrorAction::Consent,
+            CoreError::Needs(_, action) => action.clone(),
+            CoreError::Backoff(s) => ErrorAction::Retry {
+                after_seconds: u32::try_from(*s).unwrap_or(u32::MAX),
+            },
+            CoreError::Egress(e) => egress_action(e),
+            // The answer came and was not usable; its approval is spent, so sending "again"
+            // would do nothing. She asks again from the screen (a new request).
+            CoreError::Ai(_) => ErrorAction::Dismiss,
+            CoreError::Update(_) => ErrorAction::retry(),
+        }
+    }
+}
+
+/// Where a failed connection is fixed: her key and her choice of AI in Settings, the emergency
+/// stop on the security page, a retry only for what passes by itself, and a report for Or for
+/// what no retry can fix (a refused or broken request, an intercepted connection). Every
+/// variant is named, so a new one needs its own answer.
+fn egress_action(e: &EgressError) -> ErrorAction {
+    match e {
+        EgressError::NoApiKey | EgressError::Unauthorized | EgressError::LocalUnavailable => {
+            ErrorAction::settings("ai")
+        }
+        EgressError::Stopped => ErrorAction::settings("security"),
+        EgressError::RateLimited => ErrorAction::Retry { after_seconds: 60 },
+        EgressError::Offline | EgressError::Unavailable(_) => ErrorAction::retry(),
+        // A timeout or a conflict passes by itself; any other refusal comes back the same.
+        EgressError::Rejected(408 | 409, _) => ErrorAction::retry(),
+        EgressError::Rejected(..)
+        | EgressError::Policy(_)
+        | EgressError::Tls
+        | EgressError::Protocol(_) => ErrorAction::Report,
+        EgressError::TooLarge | EgressError::DailyLimit => ErrorAction::Dismiss,
     }
 }
 
@@ -521,6 +582,14 @@ pub struct Core {
     last_tick: Option<SystemTime>,
     failed_unlocks: u32,
     not_before: Option<Instant>,
+    /// Since when a password or kit is being checked off the lock (an unlock, a new password
+    /// or kit). One at a time: a second click never runs a second Argon2 in parallel, never
+    /// slips past the wait after wrong tries, and never writes the header at the same time.
+    secret_work: Option<(u64, Instant)>,
+    /// Numbers the checks, so only the check that took the place frees it.
+    secret_ticket: u64,
+    /// Set by the next lock, for the jobs begun before it (F2).
+    cancel: jobs::Cancel,
     disk_encryption: String,
     transport: Option<Arc<dyn Transport>>,
     /// The app's own binary, started as an isolated worker for each document.
@@ -545,15 +614,11 @@ pub struct Core {
     session: u64,
     /// Where the optional name model is downloaded (D-053); `None` keeps it off.
     models_dir: Option<PathBuf>,
-    /// The name model, started on first use while it is on (ended on lock).
-    ner: Option<name_model::NameFinder>,
-    /// The worker being checked and started in the background right after unlock, so the
-    /// first request does not wait for the model to load (dropped on lock, which ends it).
-    ner_loading: Option<std::thread::JoinHandle<Result<name_model::NameFinder, String>>>,
+    /// The name model, started on first use or right after unlock while it is on, and
+    /// shared with the job that reads a case's texts while the core is free (ended on lock).
+    ner: Option<Arc<name_model::NerCell>>,
     /// The app's binary, started as the name model's isolated worker (SEC2).
     ner_exe: Option<PathBuf>,
-    /// Why the name model is not in use right now (shown in Settings).
-    ner_problem: Option<String>,
     /// One data-block mark per section conversation (case, section), so its materials are the
     /// same bytes on every turn and the API's cache can serve them (dropped on lock).
     section_nonces: HashMap<(String, String), String>,
@@ -844,7 +909,7 @@ fn model_title(
 /// The report's font from the computer's own fonts (regular, and bold when there is one),
 /// else Arial, else a common font with Hebrew letters. Read only, never copied anywhere but
 /// into the PDF.
-fn system_fonts(name: &str) -> Option<(Vec<u8>, Option<Vec<u8>>)> {
+pub(crate) fn system_fonts(name: &str) -> Option<(Vec<u8>, Option<Vec<u8>>)> {
     let windows = std::env::var_os("WINDIR")
         .map(|w| std::path::PathBuf::from(w).join("Fonts"))
         .unwrap_or_else(|| std::path::PathBuf::from("C:\\Windows\\Fonts"));

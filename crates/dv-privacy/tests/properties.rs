@@ -7,7 +7,8 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    clippy::print_stdout
+    clippy::print_stdout,
+    clippy::indexing_slicing
 )]
 
 mod common;
@@ -18,7 +19,10 @@ use common::*;
 use dv_domain::{Identity, PRACTITIONER_TAG};
 use dv_privacy::restore::{remaining_tags, restore, scan_model_output};
 use dv_privacy::text::{normalize, prefix_splits, tokenize};
-use dv_privacy::{clear, filter, AutoKind, GateRequest, PrivacyContext};
+use dv_privacy::{
+    clear, filter, filter_split, filter_split_with_hints, filter_with_hints, AutoKind, GateRequest,
+    NameHint, PrivacyContext,
+};
 use proptest::prelude::*;
 
 /// Words the filter leaves exactly as they are, alone and next to a name.
@@ -413,5 +417,191 @@ fn a_tag_after_an_institution_word_and_a_quote_stays_whole() {
         let once = filter(text, &c).unwrap().tagged;
         assert!(once.contains("[ילד]"), "{once}");
         assert_eq!(filter(&once, &c).unwrap().tagged, once);
+    }
+}
+
+/// Words that send the filter into its context rules: person words, naming phrases, labels,
+/// titles, institution and job cues, dates, and the punctuation those rules stop at.
+const CONTEXT_WORDS: &[&str] = &[
+    "הגננת",
+    "סבתא",
+    "שלה",
+    "בשם",
+    "קוראים",
+    "לה",
+    "משפחת",
+    "ד\"ר",
+    "גב'",
+    "גן",
+    "בגן",
+    "בית",
+    "ספר",
+    "מכון",
+    "קופ\"ח",
+    "מכבי",
+    "ע\"ש",
+    "עובדת",
+    "כמורה",
+    "מספרת",
+    "שם הילד:",
+    "נולד",
+    "בחרקוב",
+    "עם",
+    "ועם",
+    "של",
+    "יום",
+    "ההולדת",
+    "באב",
+    "ה'",
+    "מרץ",
+    "March",
+    "Noam",
+    "-",
+    "–",
+    "־",
+    "(",
+    ")",
+    "\"",
+    "״",
+    "'",
+    "׳",
+    ":",
+    ",",
+    ".",
+    "\n",
+    "|",
+    "\t",
+    "[",
+    "]",
+    "[ילד]",
+    "3",
+    "12.3.2020",
+    "054",
+];
+
+/// Characters that sit on or between letters without showing as one: combining marks,
+/// niqqud and cantillation, direction marks, embeddings and isolates, joiners, the BOM, the
+/// soft hyphen, emoji (with a skin tone, a ZWJ family, a flag), presentation forms and
+/// look-alike letters.
+const ODD: &[&str] = &[
+    "\u{0301}",
+    "\u{0308}",
+    "\u{0327}",
+    "\u{036F}",
+    "\u{05B0}",
+    "\u{05B4}",
+    "\u{05B9}",
+    "\u{05BC}",
+    "\u{05BF}",
+    "\u{05C1}",
+    "\u{05C2}",
+    "\u{05C7}",
+    "\u{0591}",
+    "\u{05A0}",
+    "\u{200E}",
+    "\u{200F}",
+    "\u{202A}",
+    "\u{202B}",
+    "\u{202E}",
+    "\u{2066}",
+    "\u{2067}",
+    "\u{2069}",
+    "\u{200B}",
+    "\u{200C}",
+    "\u{200D}",
+    "\u{2060}",
+    "\u{FEFF}",
+    "\u{00AD}",
+    "\u{034F}",
+    "😀",
+    "👍🏽",
+    "👩‍👧",
+    "🇮🇱",
+    "\u{FB2A}",
+    "\u{FB4B}",
+    "\u{FB1D}",
+    "Ｎ",
+    "о",
+    "\u{0640}",
+    "ـ",
+    "ج",
+];
+
+/// One piece of text: a declared name (with a prefix, maybe with an odd character inside), a
+/// context word, an odd character, or any character at all; glued to the previous piece or
+/// after a space.
+fn messy_text(pieces: &[(u8, usize, usize, char, bool)]) -> String {
+    let mut out = String::new();
+    for &(kind, a, b, any, glued) in pieces {
+        if !glued && !out.is_empty() {
+            out.push(' ');
+        }
+        let (name, _) = CASE_NAMES[a % CASE_NAMES.len()];
+        match kind % 5 {
+            0 => {
+                out.push_str(PREFIXES[b % PREFIXES.len()]);
+                out.push_str(name);
+            }
+            1 => {
+                // An odd character after the name's `b`-th letter.
+                let cut = b % name.chars().count();
+                for (k, c) in name.chars().enumerate() {
+                    out.push(c);
+                    if k == cut {
+                        out.push_str(ODD[a % ODD.len()]);
+                    }
+                }
+            }
+            2 => out.push_str(CONTEXT_WORDS[b % CONTEXT_WORDS.len()]),
+            3 => out.push_str(ODD[b % ODD.len()]),
+            _ => out.push(any),
+        }
+    }
+    out
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
+
+    /// Declared names among combining marks, direction marks, emoji, niqqud, context words
+    /// and arbitrary characters never make a filtering entry point or the gate panic (a
+    /// release build aborts on a panic), and the filter never fails on them; split ranges
+    /// and name-model hints at any byte offset, char boundary or not, included.
+    #[test]
+    fn names_among_marks_emoji_and_niqqud_never_panic(
+        pieces in prop::collection::vec(
+            (any::<u8>(), 0usize..64, 0usize..64, any::<char>(), prop::bool::weighted(0.3)),
+            1..28,
+        ),
+        cuts in prop::collection::vec((0usize..512, 0usize..512), 0..4),
+        hint_at in prop::collection::vec((0usize..512, 0usize..512, 0.0f32..1.0), 0..4),
+    ) {
+        let text = messy_text(&pieces);
+        let ids = identities();
+        let c = ctx(&ids, CASE);
+        let at = |n: usize| n % (text.len() + 1);
+        let ranges: Vec<std::ops::Range<usize>> = cuts
+            .iter()
+            .map(|&(a, b)| at(a).min(at(b))..at(a).max(at(b)))
+            .collect();
+        let hints: Vec<NameHint> = hint_at
+            .iter()
+            .map(|&(a, b, score)| NameHint { start: at(a).min(at(b)), end: at(a).max(at(b)), score })
+            .collect();
+
+        let out = filter(&text, &c);
+        prop_assert!(out.is_ok(), "filter failed on {text:?}");
+        let out = out.unwrap();
+        assert_segments_consistent(&text, &out);
+        prop_assert!(filter_with_hints(&text, &c, &hints).is_ok(), "{text:?}");
+        prop_assert!(filter_split(&text, &c, &ranges).is_ok(), "{text:?}");
+        prop_assert!(filter_split_with_hints(&text, &c, &ranges, &hints).is_ok(), "{text:?}");
+        let again = filter(&out.tagged, &c);
+        prop_assert!(again.is_ok(), "filter failed on its own output {:?}", out.tagged);
+        let _ = gate_text(&text, &ids, CASE);
+        let _ = gate_text(&out.tagged, &ids, CASE);
+        let tags: Vec<String> = case_tags(&ids, CASE).into_iter().collect();
+        let _ = scan_model_output(&text, &tags, &ids);
+        let _ = restore(&out.tagged, &ids, Some("x"));
     }
 }

@@ -1,6 +1,7 @@
 //! Name hints from a local model (`dv-ner`, stage 5): they may add hides, never remove one.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::string_slice)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
 use dv_domain::{Identity, IdentitySource, Role};
 use dv_privacy::{filter, filter_with_hints, AutoKind, Mark, NameHint, PrivacyContext};

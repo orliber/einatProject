@@ -2,7 +2,7 @@
 //! Its classifier always answers B-PER, so every word must come back as its own span with
 //! the right byte range, also past the first window.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
 use std::fmt::Write as _;
 use std::path::PathBuf;

@@ -352,7 +352,11 @@ impl AnthropicTransport {
             _ => {
                 let message = serde_json::from_str::<Value>(&text)
                     .ok()
-                    .and_then(|v| v["error"]["message"].as_str().map(str::to_owned))
+                    .and_then(|v| {
+                        v.pointer("/error/message")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    })
                     .unwrap_or_default();
                 Err(EgressError::Rejected(status, message))
             }

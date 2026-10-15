@@ -10,6 +10,7 @@ pub(crate) async fn prepare_section(
     instruction: String,
     replaces: Option<String>,
 ) -> Res<Prepared> {
+    warm_names(&state, &case_id, Vec::new()).await;
     with_core(&state, move |c| {
         c.prepare_section_replacing(&case_id, &section_key, &instruction, replaces.as_deref())
     })
@@ -21,6 +22,7 @@ pub(crate) async fn prepare_full_draft(
     state: tauri::State<'_, AppState>,
     case_id: String,
 ) -> Res<Vec<(String, Prepared)>> {
+    warm_names(&state, &case_id, Vec::new()).await;
     with_core(&state, move |c| c.prepare_full_draft(&case_id)).await
 }
 
@@ -48,6 +50,7 @@ pub(crate) async fn copy_secret(state: tauri::State<'_, AppState>, text: String)
         code: "clipboard".to_owned(),
         message: "לא הצלחתי להעתיק. אפשר להקליד את הסיסמה.".to_owned(),
         details: Vec::new(),
+        action: dv_core::ErrorAction::retry(),
     })?;
     Ok(u32::try_from(secret_clipboard::CLEAR_AFTER.as_secs()).unwrap_or(60))
 }

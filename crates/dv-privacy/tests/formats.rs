@@ -3,11 +3,13 @@
 //! direction marks on names, gershayim in titles, OCR misreads and lexicon edge cases.
 //! Every value that could look real is generated at run time (see `common`).
 
+#![allow(clippy::string_slice)]
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    clippy::print_stdout
+    clippy::print_stdout,
+    clippy::indexing_slicing
 )]
 
 mod common;

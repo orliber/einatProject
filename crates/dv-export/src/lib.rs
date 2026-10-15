@@ -130,15 +130,14 @@ pub fn leftover_placeholders(report: &Report) -> Vec<String> {
     let mut found = Vec::new();
     for t in texts {
         let mut rest = t;
-        while let Some(start) = rest.find('[') {
-            let after = &rest[start + 1..];
-            match after.find(']') {
-                Some(end) if end <= 60 && !after[..end].contains('\n') => {
-                    let item = format!("[{}]", &after[..end]);
+        while let Some((_, after)) = rest.split_once('[') {
+            match after.split_once(']') {
+                Some((inside, tail)) if inside.len() <= 60 && !inside.contains('\n') => {
+                    let item = format!("[{inside}]");
                     if !found.contains(&item) {
                         found.push(item);
                     }
-                    rest = &after[end + 1..];
+                    rest = tail;
                 }
                 _ => break,
             }

@@ -114,7 +114,10 @@ pub fn scan_text(path: &str, text: &str) -> Vec<String> {
         for cap in re.captures_iter(text) {
             let id = &cap[1];
             if israeli_id::is_valid(id) && !FAKE_IDS.contains(&id) {
-                problems.push(format!("{path}: valid Israeli ID number {}…", &id[..3]));
+                problems.push(format!(
+                    "{path}: valid Israeli ID number {}…",
+                    id.get(..3).unwrap_or_default()
+                ));
             }
         }
     }

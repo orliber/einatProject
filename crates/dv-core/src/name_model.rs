@@ -10,7 +10,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 
 use dv_egress::name_model::{self, HuggingFaceFetch, ModelError, ModelFetch};
 use dv_ner::worker::NerWorker;
@@ -19,7 +19,7 @@ use dv_privacy::{FilterOutcome, NameHint, PrivacyContext, PrivacyError};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{Core, CoreError};
+use crate::{Core, CoreError, ErrorAction};
 
 /// Vault setting: "on" when she turned the model on.
 pub(crate) const NAME_MODEL_KEY: &str = "name_model";
@@ -43,6 +43,9 @@ pub struct NameModelView {
 pub(crate) enum NameFinder {
     InProcess(Arc<NerModel>),
     Isolated(NerWorker),
+    /// Tests: finds these exact words, and counts the texts it read.
+    #[cfg(test)]
+    Fixed(Vec<String>, Arc<std::sync::atomic::AtomicUsize>),
 }
 
 impl NameFinder {
@@ -72,6 +75,184 @@ impl NameFinder {
                         .collect()
                 })
                 .map_err(|_| ()),
+            #[cfg(test)]
+            Self::Fixed(words, read) => {
+                read.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(words
+                    .iter()
+                    .flat_map(|w| {
+                        text.match_indices(w.as_str()).map(|(start, m)| NameHint {
+                            start,
+                            end: start + m.len(),
+                            score: 0.99,
+                        })
+                    })
+                    .collect())
+            }
+        }
+    }
+}
+
+/// The model as the core holds it (F2): shared with a job that reads texts while the core is
+/// free, and loaded in the background after unlock. Whoever needs it waits for the loading
+/// to end. Lock order: the core, then this; a job takes only this.
+pub(crate) struct NerCell {
+    state: Mutex<NerState>,
+    loaded: Condvar,
+}
+
+enum NerState {
+    Loading,
+    Ready(NameFinder),
+    /// Why it is not in use (shown in Settings).
+    Failed(String),
+}
+
+impl std::fmt::Debug for NerCell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("NerCell")
+    }
+}
+
+impl NerCell {
+    fn with_state(state: NerState) -> Arc<Self> {
+        Arc::new(Self {
+            state: Mutex::new(state),
+            loaded: Condvar::new(),
+        })
+    }
+
+    /// Check the files and start the model on a thread of its own. When nobody holds the
+    /// cell any more by the time it is up (the vault locked), it is ended at once.
+    fn load_in_background(dir: PathBuf, exe: Option<PathBuf>) -> Arc<Self> {
+        let cell = Self::with_state(NerState::Loading);
+        let mine = Arc::clone(&cell);
+        let started = std::thread::Builder::new()
+            .name("name-model-load".to_owned())
+            .spawn(move || {
+                let loaded = load(&dir, exe.as_deref());
+                if Arc::strong_count(&mine) > 1 {
+                    mine.set(loaded.map_or_else(NerState::Failed, NerState::Ready));
+                }
+            });
+        if started.is_err() {
+            cell.set(NerState::Failed("לא הצלחתי להפעיל את המודל.".to_owned()));
+        }
+        cell
+    }
+
+    fn set(&self, state: NerState) {
+        let mut s = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        *s = state;
+        self.loaded.notify_all();
+    }
+
+    /// Run `f` on the model, after waiting for it to load. `Err` says why it is not in use.
+    fn with<T>(&self, f: impl FnOnce(&mut NameFinder) -> T) -> Result<T, String> {
+        let mut s = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        while matches!(*s, NerState::Loading) {
+            s = self.loaded.wait(s).unwrap_or_else(PoisonError::into_inner);
+        }
+        match &mut *s {
+            NerState::Ready(m) => Ok(f(m)),
+            NerState::Failed(why) => Err(why.clone()),
+            NerState::Loading => Err(String::new()),
+        }
+    }
+
+    /// The model read a text and failed: it is not used again until the next unlock, and its
+    /// process ends now.
+    fn fail(&self) {
+        self.set(NerState::Failed("המודל לא הצליח לקרוא מסמך.".to_owned()));
+    }
+
+    /// End the model's process now (the vault locked, or it was turned off), even while a
+    /// job still holds the cell. Waits for a loading in progress only when `wait`.
+    fn end(&self, wait: bool) {
+        let mut s = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        while wait && matches!(*s, NerState::Loading) {
+            s = self.loaded.wait(s).unwrap_or_else(PoisonError::into_inner);
+        }
+        if !matches!(*s, NerState::Loading) {
+            *s = NerState::Failed(String::new());
+        }
+    }
+
+    /// Why it is not in use; `None` while it loads or works (never waits).
+    fn problem(&self) -> Option<String> {
+        match self.state.try_lock().as_deref() {
+            Ok(NerState::Failed(why)) if !why.is_empty() => Some(why.clone()),
+            _ => None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn ready(finder: NameFinder) -> Arc<Self> {
+        Self::with_state(NerState::Ready(finder))
+    }
+
+    #[cfg(test)]
+    fn is_isolated(&self) -> bool {
+        matches!(
+            *self.state.lock().unwrap_or_else(PoisonError::into_inner),
+            NerState::Ready(NameFinder::Isolated(_))
+        )
+    }
+}
+
+/// Texts of a case the model has not read yet, read by a job while the core is free (F2).
+pub struct HintJob {
+    session: u64,
+    cancel: crate::jobs::Cancel,
+    case_id: String,
+    cell: Arc<NerCell>,
+    texts: Vec<String>,
+}
+
+/// What the model found in a [`HintJob`]'s texts, waiting for [`Core::finish_name_hints`].
+pub struct HintsRead {
+    session: u64,
+    case_id: String,
+    found: Vec<(String, Vec<NameHint>)>,
+}
+
+impl std::fmt::Debug for HintJob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HintJob")
+    }
+}
+
+impl std::fmt::Debug for HintsRead {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HintsRead")
+    }
+}
+
+impl HintJob {
+    /// Read each text with the model. Stops at the first failure: what is not found here is
+    /// read (or filtered on the rules alone) by the request itself, as before.
+    #[must_use]
+    pub fn run(self) -> HintsRead {
+        let mut found = Vec::new();
+        for text in self.texts {
+            // Locked meanwhile: the model ended with the lock, and the texts go now.
+            if self.cancel.is_set() {
+                found.clear();
+                break;
+            }
+            match self.cell.with(|m| m.people(&text)) {
+                Ok(Ok(hints)) => found.push((text, hints)),
+                Ok(Err(())) => {
+                    self.cell.fail();
+                    break;
+                }
+                Err(_) => break,
+            }
+        }
+        HintsRead {
+            session: self.session,
+            case_id: self.case_id,
+            found,
         }
     }
 }
@@ -231,7 +412,7 @@ impl Core {
             enabled: self.name_model_on() && downloaded,
             downloaded,
             size_mb,
-            problem: self.ner_problem.clone(),
+            problem: self.ner.as_ref().and_then(|c| c.problem()),
         })
     }
 
@@ -243,69 +424,71 @@ impl Core {
                 .as_deref()
                 .is_some_and(|d| name_model::present(&folder(d)));
             if !ready {
-                return Err(CoreError::Refused("קודם צריך להוריד את המודל.".to_owned()));
+                return Err(CoreError::Needs(
+                    "קודם צריך להוריד את המודל.".to_owned(),
+                    ErrorAction::settings("privacy"),
+                ));
             }
             self.vault_mut()?.set_setting(NAME_MODEL_KEY, "on")?;
-            self.ner_problem = None;
+            // A model that failed before gets another try.
+            if self.ner.as_ref().is_some_and(|c| c.problem().is_some()) {
+                self.ner = None;
+            }
             self.preload_name_model();
             return self.name_model_status();
         }
         self.vault_mut()?.set_setting(NAME_MODEL_KEY, "")?;
         self.vault_mut()?.clear_name_hints()?;
         self.hint_cache.clear();
-        self.ner = None;
         // A worker still loading holds the files open: let it finish, then end it.
-        if let Some(h) = self.ner_loading.take() {
-            drop(h.join());
+        if let Some(cell) = self.ner.take() {
+            cell.end(true);
         }
         if let Some(d) = dir.as_deref() {
             name_model::remove(&folder(d)).map_err(model_error)?;
         }
-        self.ner_problem = None;
         self.name_model_status()
     }
 
     /// The model, started once per unlock after its files pass their pinned hashes: in its
     /// own isolated process when the app gave one ([`Core::with_name_model_worker`], SEC2),
-    /// in this process otherwise (tests, development). `None` when it is off or cannot be
-    /// read (then `ner_problem` says why).
-    fn name_model(&mut self) -> Option<&mut NameFinder> {
+    /// in this process otherwise (tests, development). Started here and waited for when no
+    /// one started it yet. `None` when it is off or there is no models folder.
+    fn name_model(&mut self) -> Option<Arc<NerCell>> {
         if !self.name_model_on() {
             return None;
         }
-        if self.ner.is_none() && self.ner_problem.is_none() {
-            let loaded = match self.ner_loading.take() {
-                Some(h) => h
-                    .join()
-                    .unwrap_or_else(|_| Err("לא הצלחתי להפעיל את המודל.".to_owned())),
-                None => load(
-                    &folder(self.models_dir.as_deref()?),
-                    self.ner_exe.as_deref(),
+        if self.ner.is_none() {
+            let dir = folder(self.models_dir.as_deref()?);
+            let exe = self.ner_exe.clone();
+            self.ner = Some(match exe {
+                Some(exe) => NerCell::load_in_background(dir, Some(exe)),
+                None => NerCell::with_state(
+                    load(&dir, None).map_or_else(NerState::Failed, NerState::Ready),
                 ),
-            };
-            match loaded {
-                Ok(m) => self.ner = Some(m),
-                Err(why) => self.ner_problem = Some(why),
-            }
+            });
         }
-        self.ner.as_mut()
+        self.ner.clone()
     }
 
     /// Right after unlock, check the files and start the isolated worker in the background,
     /// so the first request finds the model loaded instead of waiting for it. Only for the
-    /// app's worker process; a lock drops the handle and the worker ends with it.
+    /// app's worker process; a lock ends it.
     pub(crate) fn preload_name_model(&mut self) {
-        if self.ner.is_some() || self.ner_loading.is_some() || self.ner_problem.is_some() {
+        if self.ner.is_some() {
             return;
         }
         let (Some(exe), Some(dir)) = (self.ner_exe.clone(), self.models_dir.as_deref()) else {
             return;
         };
-        let dir = folder(dir);
-        self.ner_loading = std::thread::Builder::new()
-            .name("name-model-load".to_owned())
-            .spawn(move || load(&dir, Some(&exe)))
-            .ok();
+        self.ner = Some(NerCell::load_in_background(folder(dir), Some(exe)));
+    }
+
+    /// End the model's process with the vault (on lock).
+    pub(crate) fn end_name_model(&mut self) {
+        if let Some(cell) = self.ner.take() {
+            cell.end(false);
+        }
     }
 
     /// The model's person spans in `text`, as hints for the filter. Empty when it is off.
@@ -315,47 +498,112 @@ impl Core {
         if text.trim().is_empty() || !self.name_model_on() {
             return Vec::new();
         }
-        if let Some(h) = self.hint_cache.get(text) {
-            return h.clone();
+        if let Some(h) = self.kept_hints(text) {
+            return h;
         }
-        let key = self
-            .vault_ref()
-            .ok()
-            .map(|v| v.name_hints_key(name_model::MODEL_REVISION, text));
-        let kept = key.as_deref().and_then(|k| {
-            self.vault_ref()
-                .ok()?
-                .name_hints(k)
-                .ok()
-                .flatten()
-                .and_then(|j| serde_json::from_str::<Vec<KeptHint>>(&j).ok())
-        });
-        if let Some(kept) = kept.filter(|k| valid(k, text)) {
-            let hints: Vec<NameHint> = kept.into_iter().map(NameHint::from).collect();
-            self.hint_cache.insert(text.to_owned(), hints.clone());
-            return hints;
-        }
-        let Some(model) = self.name_model() else {
+        let Some(cell) = self.name_model() else {
             return Vec::new();
         };
-        match model.people(text) {
-            Ok(hints) => {
-                self.hint_cache.insert(text.to_owned(), hints.clone());
-                if let (Some(k), false) = (key, case_id.is_empty()) {
-                    let kept: Vec<KeptHint> = hints.iter().map(KeptHint::from).collect();
-                    if let (Ok(json), Ok(v)) = (serde_json::to_string(&kept), self.vault_mut()) {
-                        // Only a saving: when it fails, the model reads the text again later.
-                        let _ = v.set_name_hints(&k, case_id, &json);
-                    }
-                }
+        match cell.with(|m| m.people(text)) {
+            Ok(Ok(hints)) => {
+                self.keep_hints(case_id, text, &hints);
                 hints
             }
-            Err(()) => {
+            Ok(Err(())) => {
                 // A worker that failed is not used again until the next unlock.
-                self.ner = None;
-                self.ner_problem = Some("המודל לא הצליח לקרוא מסמך.".to_owned());
+                cell.fail();
                 Vec::new()
             }
+            Err(_) => Vec::new(),
+        }
+    }
+
+    /// Kept spans for `text`, from memory or the vault, when they fit it.
+    fn kept_hints(&mut self, text: &str) -> Option<Vec<NameHint>> {
+        if let Some(h) = self.hint_cache.get(text) {
+            return Some(h.clone());
+        }
+        let v = self.vault_ref().ok()?;
+        let key = v.name_hints_key(name_model::MODEL_REVISION, text);
+        let kept = v
+            .name_hints(&key)
+            .ok()
+            .flatten()
+            .and_then(|j| serde_json::from_str::<Vec<KeptHint>>(&j).ok())
+            .filter(|k| valid(k, text))?;
+        let hints: Vec<NameHint> = kept.into_iter().map(NameHint::from).collect();
+        self.hint_cache.insert(text.to_owned(), hints.clone());
+        Some(hints)
+    }
+
+    /// Keep what the model found in `text`: in memory, and in the vault for a case's text.
+    fn keep_hints(&mut self, case_id: &str, text: &str, hints: &[NameHint]) {
+        self.hint_cache.insert(text.to_owned(), hints.to_vec());
+        if case_id.is_empty() {
+            return;
+        }
+        let kept: Vec<KeptHint> = hints.iter().map(KeptHint::from).collect();
+        if let (Ok(json), Ok(v)) = (serde_json::to_string(&kept), self.vault_mut()) {
+            let key = v.name_hints_key(name_model::MODEL_REVISION, text);
+            // Only a saving: when it fails, the model reads the text again later.
+            let _ = v.set_name_hints(&key, case_id, &json);
+        }
+    }
+
+    /// The texts of the case (its materials' titles and texts) and `extra` that the model has
+    /// not read yet, as a job to run while the core is free; `None` when there is nothing to
+    /// read or the model is off. Only a head start: a request reads anything still missing
+    /// itself, so filtering never depends on the job.
+    pub fn begin_name_hints(
+        &mut self,
+        case_id: &str,
+        extra: &[String],
+    ) -> Result<Option<HintJob>, CoreError> {
+        if !self.name_model_on() {
+            return Ok(None);
+        }
+        let mut texts: Vec<String> = extra.to_vec();
+        if !case_id.is_empty() {
+            for inp in self.vault_ref()?.inputs(case_id)? {
+                texts.push(inp.title);
+                texts.push(inp.content);
+            }
+        }
+        let mut missing: Vec<String> = Vec::new();
+        for t in texts {
+            if !t.trim().is_empty() && !missing.contains(&t) && self.kept_hints(&t).is_none() {
+                missing.push(t);
+            }
+        }
+        if missing.is_empty() {
+            return Ok(None);
+        }
+        // Started in the background when it is not yet: the job waits for it, not the core.
+        if self.ner.is_none() {
+            let Some(dir) = self.models_dir.as_deref().map(folder) else {
+                return Ok(None);
+            };
+            self.ner = Some(NerCell::load_in_background(dir, self.ner_exe.clone()));
+        }
+        let Some(cell) = self.ner.clone() else {
+            return Ok(None);
+        };
+        Ok(Some(HintJob {
+            session: self.session,
+            cancel: self.cancel.clone(),
+            case_id: case_id.to_owned(),
+            cell,
+            texts: missing,
+        }))
+    }
+
+    /// Keep what the job found. Dropped when the vault locked meanwhile.
+    pub fn finish_name_hints(&mut self, read: HintsRead) {
+        if self.session != read.session || self.vault.is_none() {
+            return;
+        }
+        for (text, hints) in read.found {
+            self.keep_hints(&read.case_id, &text, &hints);
         }
     }
 
@@ -435,7 +683,10 @@ mod tests {
         let s = c.name_model_status().unwrap();
         assert!(!s.enabled && !s.downloaded);
         assert_eq!(s.size_mb, 705);
-        assert!(matches!(c.set_name_model(true), Err(CoreError::Refused(_))));
+        assert!(matches!(
+            c.set_name_model(true),
+            Err(CoreError::Needs(_, ErrorAction::Settings { ref pane })) if pane == "privacy"
+        ));
         assert!(c.name_hints("", "רוני הגיע עם אמא").is_empty());
     }
 
@@ -544,7 +795,7 @@ mod tests {
         let more = "גם נוגה הגיעה למסיבה.";
         assert!(!c.name_hints(&case, more).is_empty());
         if worker.is_some() {
-            assert!(matches!(c.ner, Some(NameFinder::Isolated(_))));
+            assert!(c.ner.as_ref().is_some_and(|n| n.is_isolated()));
         }
     }
 
@@ -574,7 +825,7 @@ mod tests {
         // Kept spans are used without the model (its files here are empty, it cannot load).
         let h = c.name_hints("case-1", text);
         assert_eq!((h.len(), h[0].start, h[0].end), (1, 0, 8));
-        assert!(c.ner_problem.is_none(), "the model was never started");
+        assert!(c.ner.is_none(), "the model was never started");
         // Spans that do not fit the text are never used.
         let other = "אבג";
         let k2 = c
@@ -592,5 +843,73 @@ mod tests {
         );
         c.set_name_model(false).unwrap();
         assert_eq!(c.vault_ref().unwrap().name_hints(&key).unwrap(), None);
+    }
+
+    /// F2: the model reads a case's texts in a job while the core is free; the request then
+    /// finds them read and does not run the model under the core's lock.
+    #[test]
+    fn a_job_reads_the_case_with_the_model_while_the_core_is_free() {
+        let (d, mut c) = core();
+        let f = folder(&d.path().join("models"));
+        std::fs::create_dir_all(&f).unwrap();
+        c.vault_mut()
+            .unwrap()
+            .set_setting(NAME_MODEL_KEY, "on")
+            .unwrap();
+        let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        c.ner = Some(NerCell::ready(NameFinder::Fixed(
+            vec!["נוגה".into()],
+            Arc::clone(&reads),
+        )));
+        let meta = dv_domain::CaseMeta {
+            code: "TEST-0004".into(),
+            ..dv_domain::CaseMeta::default()
+        };
+        let case = c.create_case(meta, vec![]).unwrap();
+        let text = "נוגה הזמינה את הילד הביתה אחרי הגן.";
+        c.vault_mut()
+            .unwrap()
+            .add_input(&case, dv_domain::InputKind::Kindergarten, "שיחה", text)
+            .unwrap();
+        let read_before = reads.load(std::sync::atomic::Ordering::SeqCst);
+
+        let core = Arc::new(Mutex::new(c));
+        let job = core
+            .lock()
+            .unwrap()
+            .begin_name_hints(&case, &[])
+            .unwrap()
+            .expect("a text to read");
+        // The core is free while the job runs.
+        let worker = std::thread::spawn(move || job.run());
+        assert!(core.lock().unwrap().case_detail(&case).is_ok());
+        let read = worker.join().unwrap();
+        let mut c = core.lock().unwrap();
+        c.finish_name_hints(read);
+        let after_job = reads.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(after_job > read_before, "the job ran the model");
+
+        // Now the request finds the texts read: the model does not run under the lock.
+        let hints = c.case_hints(&case, &[]).unwrap();
+        assert!(
+            !hints.of(text).is_empty(),
+            "the name the model found is used"
+        );
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), after_job);
+        assert!(
+            c.begin_name_hints(&case, &[]).unwrap().is_none(),
+            "nothing left"
+        );
+
+        // A job begun before a lock lands nowhere after it.
+        let job = c
+            .begin_name_hints(&case, &["עוד טקסט על נוגה".to_owned()])
+            .unwrap()
+            .unwrap();
+        c.lock();
+        let read = job.run();
+        c.unlock("correct horse battery staple 1").unwrap();
+        c.finish_name_hints(read);
+        assert!(c.hint_cache.is_empty());
     }
 }

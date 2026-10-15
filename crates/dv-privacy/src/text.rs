@@ -255,25 +255,26 @@ pub struct Token {
 pub fn tokenize(text: &str) -> Vec<Token> {
     let chars: Vec<(usize, char)> = text.char_indices().collect();
     let mut tokens = Vec::new();
+    let char_at = |k: usize| chars.get(k).map(|&(_, c)| c);
     let mut i = 0;
-    while i < chars.len() {
-        let (start, c) = chars[i];
+    while let Some(&(start, c)) = chars.get(i) {
         if !is_word_char(c) {
             i += 1;
             continue;
         }
         let mut j = i + 1;
-        while j < chars.len() {
-            let c = chars[j].1;
-            let inner_quote =
-                is_inner_quote(c) && j + 1 < chars.len() && is_word_char(chars[j + 1].1);
+        while let Some(c) = char_at(j) {
+            let next_is_word = char_at(j + 1).is_some_and(is_word_char);
+            let inner_quote = is_inner_quote(c) && next_is_word;
             if is_word_char(c) || is_mark(c) || inner_quote {
                 j += 1;
             } else if is_inner_quote(c) && c != '"' && c != '\u{05F4}' && j > i {
                 // Trailing geresh as in ג'ורג' – keep it only after a Hebrew letter.
-                if is_hebrew_letter(chars[j - 1].1)
-                    && (j + 1 == chars.len() || !is_word_char(chars[j + 1].1))
-                {
+                let after_hebrew = j
+                    .checked_sub(1)
+                    .and_then(char_at)
+                    .is_some_and(is_hebrew_letter);
+                if after_hebrew && !next_is_word {
                     j += 1;
                 }
                 break;
@@ -282,7 +283,19 @@ pub fn tokenize(text: &str) -> Vec<Token> {
             }
         }
         let end = chars.get(j).map_or(text.len(), |(b, _)| *b);
-        let norm = normalize(&text[start..end]);
+        // `start` and `end` come from `char_indices`; were the cut ever refused, the same
+        // characters are read one by one, so no word is lost.
+        let norm = match text.get(start..end) {
+            Some(word) => normalize(word),
+            None => normalize(
+                &chars
+                    .iter()
+                    .skip(i)
+                    .take(j.saturating_sub(i))
+                    .map(|&(_, c)| c)
+                    .collect::<String>(),
+            ),
+        };
         if !norm.is_empty() {
             tokens.push(Token { start, end, norm });
         }
@@ -302,37 +315,42 @@ fn join_spaced_letters(text: &str, tokens: Vec<Token>) -> Vec<Token> {
         let mut chars = t.norm.chars();
         matches!((chars.next(), chars.next()), (Some(c), None) if c.is_alphabetic())
     };
+    // A gap that cannot be read (never expected) joins: the letters are read as one word.
     let close = |a: &Token, b: &Token| {
-        let gap = &text[a.end..b.start];
-        (1..=2).contains(&gap.len()) && gap.chars().all(|c| c == ' ' || c == '\u{00A0}')
+        text.get(a.end..b.start).is_none_or(|gap| {
+            (1..=2).contains(&gap.len()) && gap.chars().all(|c| c == ' ' || c == '\u{00A0}')
+        })
     };
     // The first letter may carry a prefix: "שנ ו ע ם" is ש + "נועם".
     let starter = |t: &Token| {
         let chars: Vec<char> = t.norm.chars().collect();
         single(t)
             || ((2..=MAX_PREFIX + 1).contains(&chars.len())
-                && chars.last().is_some_and(|c| c.is_alphabetic())
-                && is_valid_prefix(&chars[..chars.len() - 1].iter().collect::<String>()))
+                && chars.split_last().is_some_and(|(last, head)| {
+                    last.is_alphabetic() && is_valid_prefix(&head.iter().collect::<String>())
+                }))
     };
     let mut out: Vec<Token> = Vec::with_capacity(tokens.len());
-    let mut i = 0;
-    while i < tokens.len() {
-        let mut j = i + 1;
-        if starter(&tokens[i]) {
-            while j < tokens.len() && single(&tokens[j]) && close(&tokens[j - 1], &tokens[j]) {
-                j += 1;
+    let mut rest = tokens.into_iter().peekable();
+    while let Some(first) = rest.next() {
+        let joins = starter(&first);
+        let mut run = vec![first];
+        while let Some(next) =
+            rest.next_if(|t| joins && single(t) && run.last().is_some_and(|prev| close(prev, t)))
+        {
+            run.push(next);
+        }
+        match (run.first(), run.last()) {
+            (Some(a), Some(b)) if run.len() >= SPACED_MIN => {
+                let joined = Token {
+                    start: a.start,
+                    end: b.end,
+                    norm: run.iter().map(|t| t.norm.as_str()).collect(),
+                };
+                out.push(joined);
             }
+            _ => out.extend(run),
         }
-        if j - i >= SPACED_MIN {
-            out.push(Token {
-                start: tokens[i].start,
-                end: tokens[j - 1].end,
-                norm: tokens[i..j].iter().map(|t| t.norm.as_str()).collect(),
-            });
-        } else {
-            out.extend(tokens[i..j].iter().cloned());
-        }
-        i = j;
     }
     out
 }
@@ -344,16 +362,21 @@ pub fn prefix_splits(norm: &str) -> Vec<(usize, String)> {
     let chars: Vec<char> = norm.chars().collect();
     let mut out = vec![(0, norm.to_owned())];
     for n in 1..=MAX_PREFIX {
-        if chars.len() < n + 2 || !chars[..n].iter().all(|c| PREFIX_LETTERS.contains(c)) {
+        let Some((head, rest)) = chars.split_at_checked(n) else {
+            break;
+        };
+        if rest.len() < 2 || !head.iter().all(|c| PREFIX_LETTERS.contains(c)) {
             break;
         }
-        if is_valid_prefix(&chars[..n].iter().collect::<String>()) {
-            out.push((n, chars[n..].iter().collect()));
+        if is_valid_prefix(&head.iter().collect::<String>()) {
+            out.push((n, rest.iter().collect()));
             // A prefix before a quoted word: ל"נועם", ב״גן הדקל״, ו'מיכל'. The tokenizer keeps
             // the opening quote inside the word, and the quote counts as one more character
             // split off, so the remainder still starts where the name does.
-            if chars.len() >= n + 3 && matches!(chars[n], '"' | '\'') {
-                out.push((n + 1, chars[n + 1..].iter().collect()));
+            if let Some((&('"' | '\''), after)) = rest.split_first() {
+                if rest.len() >= 3 {
+                    out.push((n + 1, after.iter().collect()));
+                }
             }
         }
     }
@@ -381,8 +404,9 @@ pub fn spelling_variants(word: &str) -> Vec<String> {
     let chars: Vec<char> = word.chars().collect();
     let mut out = vec![word.to_owned()];
     if chars.len() >= 4 && chars.iter().all(|c| is_hebrew_letter(*c)) {
-        for i in 1..chars.len() - 1 {
-            if matches!(chars[i], 'ו' | 'י') {
+        let inner = chars.iter().enumerate().take(chars.len() - 1).skip(1);
+        for (i, c) in inner {
+            if matches!(c, 'ו' | 'י') {
                 let v: String = chars
                     .iter()
                     .enumerate()
@@ -407,19 +431,24 @@ pub fn edit_distance(a: &str, b: &str, cap: usize) -> usize {
         return cap + 1;
     }
     let mut prev: Vec<usize> = (0..=b.len()).collect();
+    // The distance from all of `a` so far to all of `b`: the last cell of the last row.
+    let mut last = b.len();
     for (i, ca) in a.iter().enumerate() {
-        let mut cur = vec![i + 1; b.len() + 1];
-        for (j, cb) in b.iter().enumerate() {
-            cur[j + 1] = (prev[j] + usize::from(ca != cb))
-                .min(prev[j + 1] + 1)
-                .min(cur[j] + 1);
+        let mut cur = Vec::with_capacity(b.len() + 1);
+        let mut left = i + 1;
+        cur.push(left);
+        // (diagonal, above) = (prev[j], prev[j + 1]) for each letter b[j].
+        for (cb, (diag, up)) in b.iter().zip(prev.iter().zip(prev.iter().skip(1))) {
+            left = (diag + usize::from(ca != cb)).min(up + 1).min(left + 1);
+            cur.push(left);
         }
         if cur.iter().min().copied().unwrap_or(0) > cap {
             return cap + 1;
         }
+        last = left;
         prev = cur;
     }
-    prev[b.len()]
+    last
 }
 
 /// Letters Hebrew spellings of names vary in (matres lectionis, gutturals): א ה ו י ע.
@@ -452,8 +481,15 @@ pub fn weak_near(a: &str, b: &str) -> bool {
     if long.len() != short.len() + 1 {
         return false;
     }
-    (0..long.len())
-        .any(|i| weak(&long[i]) && long[..i].iter().chain(&long[i + 1..]).eq(short.iter()))
+    long.iter().enumerate().any(|(i, c)| {
+        weak(c)
+            && long
+                .iter()
+                .enumerate()
+                .filter(|&(k, _)| k != i)
+                .map(|(_, c)| c)
+                .eq(short.iter())
+    })
 }
 
 #[cfg(test)]
