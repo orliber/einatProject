@@ -1,12 +1,15 @@
-// "הסגנון שלי" (D-043): Claude learns how Einat writes from her past reports. Three steps, one
-// main action at a time: add reports → analyze and build → review and approve. Every request
-// goes through the same review screen as everything else that leaves the computer.
-import { useMemo, useRef, useState } from "react";
+// "הסגנון שלי" (D-043, round 46 / D-089): the program learns how Einat writes from her past
+// reports. The page is three numbers, one queue that asks her about one thing at a time, what
+// the program already knows (five rows that open in place) and one line about her reports.
+// Every request goes through the same review screen as everything else that leaves the computer.
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
+import { ActionsMenu, type MenuItem } from "../components/Menu";
 import { estimateMs, ProgressLine, recordDuration } from "../components/Progress";
 import { ReviewDialog } from "../components/ReviewDialog";
 import { StyleImportDialog } from "../components/StyleImportDialog";
+import { Switch } from "../components/Switch";
 import { TopBar } from "../components/TopBar";
 import { ErrorLine, Skeleton, Spinner, UploadIcon, CloseIcon } from "../components/ui";
 import {
@@ -49,6 +52,25 @@ const KIND_HINT: Record<StyleKind, string> = {
   integration: "",
   criterion: "איך את מנסחת קריטריון, ואיזה סוג ממצא את קושרת אליו.",
 };
+/** The tag of one item in the queue: what kind of thing she is asked about, in one or two words. */
+const KIND_TAG: Record<StyleKind, string> = {
+  rule: "כלל כתיבה",
+  phrase: "ביטוי שחוזר אצלך",
+  avoid: "משהו שאת לא כותבת",
+  template: "תבנית משפט",
+  example: "דוגמה בדויה",
+  argument: "מבנה הטיעון",
+  integration: "חיבור בין כלים",
+  criterion: "ניסוח קריטריון",
+};
+const SUGGESTION_TAG: Record<StyleSuggestion["kind"], string> = {
+  replace: "מילה שאת מחליפה",
+  avoid: "משהו שאת מוחקת",
+  phrase: "ביטוי שחוזר אצלך",
+  opening: "איך את פותחת סעיף",
+  closing: "איך את מסיימת סעיף",
+  formula: "משפט שחוזר אצלך",
+};
 const KINDS: StyleKind[] = ["rule", "phrase", "avoid", "template", "argument", "integration", "criterion", "example"];
 const RECOMMENDED = 3;
 
@@ -61,9 +83,64 @@ function dateOf(unix: number): string {
   return new Date(unix * 1000).toLocaleDateString("he-IL", { day: "numeric", month: "long", year: "numeric" });
 }
 
+/** "היום", "לפני שבוע", "ב-3 במרץ 2026": when the last report was added, in words. */
+export function sinceLabel(unix: number, now = Date.now()): string {
+  const days = Math.floor((now / 1000 - unix) / 86_400);
+  if (days <= 0) return "היום";
+  if (days === 1) return "אתמול";
+  if (days < 7) return `לפני ${days} ימים`;
+  if (days < 14) return "לפני שבוע";
+  if (days < 31) return `לפני ${Math.floor(days / 7)} שבועות`;
+  return `ב-${dateOf(unix)}`;
+}
+
+// ------------------------------------------------------------------ what waits for her
+
+/** The draft items she already said something about, so leaving the page does not ask again. */
+const REVIEWED_KEY = "dv.style.reviewed";
+function loadReviewed(): string[] {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(REVIEWED_KEY) ?? "[]");
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+function storeReviewed(ids: string[]) {
+  try {
+    if (ids.length === 0) localStorage.removeItem(REVIEWED_KEY);
+    else localStorage.setItem(REVIEWED_KEY, JSON.stringify(ids));
+  } catch {
+    // Without storage she is only asked again about what she already saw; nothing is used unasked.
+  }
+}
+
+type Waiting =
+  | { kind: "item"; key: string; item: StyleItem }
+  | { kind: "draft"; key: string; items: number }
+  | { kind: "suggestion"; key: string; s: StyleSuggestion }
+  | { kind: "interpretation"; key: string; view: InterpretationView };
+
+const sameItem = (a: StyleItem, b: StyleItem) => a.kind === b.kind && a.section === b.section && a.text === b.text;
+
+/** Everything that waits for her yes, in one line: the draft's new items, then what was learned
+ * from her edits, then how she interprets scores. An item the profile in use already holds is
+ * not asked about again. */
+export function waitingFor(o: StyleOverview, reviewed: string[]): Waiting[] {
+  const out: Waiting[] = [];
+  if (o.draft) {
+    const known = (o.active?.profile.items ?? []).filter((i) => i.enabled);
+    const fresh = o.draft.profile.items.filter((i) => !reviewed.includes(i.id) && !known.some((k) => sameItem(k, i)));
+    if (fresh.length > 0) out.push(...fresh.map((item): Waiting => ({ kind: "item", key: `item:${item.id}`, item })));
+    else out.push({ kind: "draft", key: `draft:${o.draft.id}`, items: o.draft.profile.items.filter((i) => i.enabled).length });
+  }
+  out.push(...o.suggestions.map((s): Waiting => ({ kind: "suggestion", key: `sugg:${s.id}`, s })));
+  out.push(...o.interpretations.filter((i) => !i.item.approved).map((view): Waiting => ({ kind: "interpretation", key: `int:${view.item.id}`, view })));
+  return out;
+}
+
 export function StyleScreen() {
   const { status, fail, notify } = useApp();
-  const ai = useAi();
   const qc = useQueryClient();
   const overview = useQuery({ queryKey: ["style"], queryFn: ipc.styleOverview });
   const fileInput = useRef<HTMLInputElement>(null);
@@ -73,6 +150,8 @@ export function StyleScreen() {
   const [deleting, setDeleting] = useState<StyleSourceView | null>(null);
   const [resetting, setResetting] = useState(false);
   const [forgetting, setForgetting] = useState(false);
+  const [showVersions, setShowVersions] = useState(false);
+  const [reviewed, setReviewed] = useState<string[]>(loadReviewed);
   // The run: what is left to send, the review on screen, and the request on its way.
   const [queue, setQueue] = useState<Step[]>([]);
   const [review, setReview] = useState<{ step: Step; prepared: Prepared } | null>(null);
@@ -82,6 +161,16 @@ export function StyleScreen() {
   const reload = () => qc.invalidateQueries({ queryKey: ["style"] });
   const sectionTitle = (key: string | null) =>
     key ? (o?.sections.find((s) => s.key === key)?.title ?? key) : "לא זוהה סעיף";
+
+  // What she said about the draft's items lives as long as that draft; a new draft asks afresh.
+  const markReviewed = (id: string | null) => {
+    const ids = o?.draft?.profile.items.map((i) => i.id) ?? [];
+    setReviewed((r) => {
+      const next = id === null ? [] : [...r.filter((x) => ids.includes(x)), id];
+      storeReviewed(next);
+      return next;
+    });
+  };
 
   async function pick(file: File) {
     setError(null);
@@ -142,8 +231,9 @@ export function StyleScreen() {
           ? "לא נמצאה פרשנות חדשה בדוחות."
           : `${r.kept === 1 ? "פרשנות אחת מחכה" : `${r.kept} פרשנויות מחכות`} לאישור שלך.${r.dropped > 0 ? ` ${r.dropped} נפסלו (העתקה או פרט מזהה).` : ""}`);
       } else {
-        await ipc.sendStyleProfile(approval);
-        notify("טיוטת הפרופיל מוכנה. כדאי לעבור עליה ולאשר.");
+        const view = await ipc.sendStyleProfile(approval);
+        markReviewed(null);
+        notify(view.dropped > 0 ? `הטיוטה מוכנה. ${view.dropped} פריטים נפסלו (העתקה או פרט מזהה).` : "הטיוטה מוכנה. אפשר לאשר אחד-אחד.");
       }
       recordDuration("draft", status.speed, Date.now() - started);
       setSending(null);
@@ -174,51 +264,48 @@ export function StyleScreen() {
     );
   }
 
-  const analyzed = o.sources.filter((s) => s.analyzed).length;
   const waiting = o.sources.filter((s) => !s.analyzed || (s.analysis_demo && !o.demo_mode)).length;
-  const shown = o.draft ?? o.active;
-  const stage = o.sources.length === 0 ? 0 : o.draft ? 2 : o.active && waiting === 0 ? 3 : 1;
   const running = queue.length > 0 || sending !== null;
+  const asks = waitingFor(o, reviewed);
+  // A build is due when a report was not read yet, or nothing was built from the reports read.
+  const buildDue = o.sources.length > 0 && (waiting > 0 || (!o.draft && !o.active));
+  const analyzed = o.sources.filter((s) => s.analyzed).length;
+  const buildLabel = analyzed === 0
+    ? `ניתוח ${o.sources.length === 1 ? "הדוח" : `${o.sources.length} הדוחות`} ובניית הפרופיל`
+    : waiting > 0 ? `ניתוח ${waiting === 1 ? "הדוח החדש" : `${waiting} הדוחות החדשים`} ועדכון הפרופיל` : "בניית הפרופיל";
+  const canForget = o.learned.from_edits > 0 || o.learned.finished_reports > 0 || o.learned.fit_count > 0;
+
+  const more: MenuItem[] = [
+    ...(o.sources.some((s) => s.analyzed) ? [{ label: "ניתוח מחדש של כל הדוחות", run: () => startBuild(true), disabled: running }] : []),
+    ...(o.versions.length > 0 ? [{ label: showVersions ? "להסתיר את הגרסאות" : "גרסאות קודמות של הפרופיל", run: () => setShowVersions((v) => !v) }] : []),
+    ...(canForget ? [{ label: "לשכוח את מה שנלמד מהתיקונים ומהדוחות שסיימתי", run: () => setForgetting(true), danger: true }] : []),
+    ...(o.versions.length > 0 || o.draft ? [{ label: "מחיקת הפרופיל ומה שנלמד", run: () => setResetting(true), danger: true }] : []),
+  ];
 
   return (
     <div className="page">
       <TopBar active="style" />
       <main className="page-main style">
-        <header className="style-hero card">
-          <div className="stack grow">
-            <h1>הסגנון שלי</h1>
-            <p className="style-lead">
-              {ai} לומד לכתוב כמוך מדוחות ישנים שלך. נשמרים רק הקטעים שבחרת, בלי פרטים מזהים.
-              בכל ניסוח נשלח רק הפרופיל שאישרת.
-            </p>
-            <ol className="style-steps" aria-label="שלבים">
-              <li className={stage === 0 ? "now" : "done"}>1. דוחות ישנים</li>
-              <li className={stage === 1 ? "now" : stage > 1 ? "done" : ""}>2. ניתוח ובניית הפרופיל</li>
-              <li className={stage === 2 ? "now" : stage > 2 ? "done" : ""}>3. עיון ואישור</li>
-            </ol>
-          </div>
-          <div className="style-hero-action stack">
-            {stage === 0 && (
-              <button type="button" className="btn btn-primary btn-big" disabled={reading} onClick={() => fileInput.current?.click()}>
-                <UploadIcon /> הוספת דוח ישן
-              </button>
-            )}
-            {stage === 1 && (
-              <button type="button" className="btn btn-primary btn-big" disabled={running} onClick={() => startBuild(false)}>
-                {analyzed === 0 ? `ניתוח ${o.sources.length === 1 ? "הדוח" : `${o.sources.length} הדוחות`} ובניית הפרופיל` : waiting > 0 ? `ניתוח ${waiting} דוחות חדשים ועדכון הפרופיל` : "בניית הפרופיל"}
-              </button>
-            )}
-            {stage === 2 && <a className="btn btn-primary btn-big" href="#style-profile">עיון בטיוטה ואישור</a>}
-            {stage === 3 && <span className="chip chip-ok">הפרופיל בשימוש · גרסה {o.active?.version}</span>}
-            {o.sources.length > 0 && o.sources.length < RECOMMENDED && (
-              <span className="hint">מומלץ {RECOMMENDED} דוחות לפחות.</span>
-            )}
-            {o.demo_mode && <span className="hint">מצב הדגמה: ניתוח לדוגמה בלבד.</span>}
-          </div>
+        <header className="style-head">
+          <h1>הסגנון שלי</h1>
+          <p className="style-lead">התוכנה לומדת מהדוחות שלך איך את כותבת. שום דבר לא נכנס לשימוש לפני שאישרת אותו.</p>
+          {o.demo_mode && <p className="hint">מצב הדגמה: ניתוח לדוגמה בלבד.</p>}
         </header>
 
         <input ref={fileInput} type="file" hidden accept=".docx,.doc,.odt,.rtf,.pdf,.txt"
           onChange={(e) => { const f = e.target.files?.[0]; if (f) void pick(f); }} />
+
+        {o.sources.length === 0 ? (
+          <div className="style-start">
+            <button type="button" className="btn btn-primary btn-big" disabled={reading} onClick={() => fileInput.current?.click()}>
+              <UploadIcon /> הוספת דוח ישן
+            </button>
+            <p className="hint">דוח שכתבת בעבר, ב-Word, ODT או PDF. נשמר רק הטקסט אחרי הסתרה.</p>
+          </div>
+        ) : (
+          <StyleNumbers o={o} waiting={asks.length} />
+        )}
+
         {reading && <p className="muted"><Spinner /> קורא את הדוח ומסתיר פרטים מזהים…</p>}
         {sending && (
           <ProgressLine started={sending.started} estimate={estimateMs("draft", status.speed, status.demo_mode)} label={sending.label} approval={sending.approval} />
@@ -226,18 +313,18 @@ export function StyleScreen() {
         {queue.length > 1 && !sending && !review && <p className="muted small">נשארו {queue.length} שלבים.</p>}
         <ErrorLine error={error} />
 
-        <Sources o={o} onAdd={() => fileInput.current?.click()} adding={reading || running} onDelete={setDeleting}
-          onReanalyze={() => startBuild(true)} running={running} />
-
-        {o.suggestions.length > 0 && <Suggestions o={o} />}
-
-        <Learned o={o} onForget={() => setForgetting(true)} />
-
-        <Interpretations o={o} running={running} onRead={() => void next([{ kind: "interpret" }])} />
-
-        {shown && <ProfileEditor key={`${shown.id}`} view={shown} o={o} />}
-
-        {o.versions.length > 0 && <Versions o={o} onReset={() => setResetting(true)} />}
+        {o.sources.length > 0 && (
+          <>
+            <div className="style-pair">
+              <ApproveQueue o={o} asks={asks} onReviewed={markReviewed} running={running}
+                build={buildDue && asks.length === 0 ? { label: buildLabel, run: () => startBuild(false) } : null} />
+              <KnownList o={o} running={running} onReadScores={() => void next([{ kind: "interpret" }])} />
+            </div>
+            <Reports o={o} adding={reading || running} onAdd={() => fileInput.current?.click()} onDelete={setDeleting} more={more}
+              build={buildDue && asks.length > 0 ? { label: buildLabel, run: () => startBuild(false), disabled: running } : null} />
+            {showVersions && o.versions.length > 0 && <Versions o={o} />}
+          </>
+        )}
       </main>
 
       {importing && (
@@ -266,126 +353,420 @@ export function StyleScreen() {
         <ConfirmDialog danger title="מחיקת הפרופיל" action="מחיקת הפרופיל והלמידה"
           text="הפרופיל ומה שנלמד מהתיקונים יימחקו. הדוחות הישנים נשארים."
           onClose={() => setResetting(false)}
-          onConfirm={async () => { await ipc.resetStyle(); setResetting(false); await reload(); }} />
+          onConfirm={async () => { await ipc.resetStyle(); setResetting(false); markReviewed(null); await reload(); }} />
       )}
     </div>
   );
 }
 
-// ------------------------------------------------------------------ my reports
+// ------------------------------------------------------------------ the three numbers
 
-function Sources(props: {
-  o: StyleOverview;
-  adding: boolean;
-  running: boolean;
-  onAdd: () => void;
-  onDelete: (s: StyleSourceView) => void;
-  onReanalyze: () => void;
-}) {
-  const { o } = props;
-  if (o.sources.length === 0) {
-    return (
-      <section className="card style-card style-empty" aria-labelledby="style-sources">
-        <h2 id="style-sources">הדוחות שלי</h2>
-        <p className="muted">
-          עוד אין דוחות. אפשר להוסיף דוחות אבחון שכתבת בעבר (Word, ODT או PDF). מומלץ 3 עד 10 דוחות, מגילאים ומאבחנות שונים, כדי שהפרופיל ילמד את
-          הסגנון ולא תוכן מסוים.
-        </p>
-      </section>
-    );
-  }
+function StyleNumbers({ o, waiting }: { o: StyleOverview; waiting: number }) {
+  const known = (o.active?.profile.items.filter((i) => i.enabled).length ?? 0)
+    + o.interpretations.filter((i) => i.item.approved && i.item.enabled).length;
   return (
-    <section className="card style-card" aria-labelledby="style-sources">
-      <div className="row">
-        <h2 id="style-sources" className="grow">הדוחות שלי <span className="muted small">({o.sources.length})</span></h2>
-        {o.sources.some((s) => s.analyzed) && (
-          <button type="button" className="btn btn-small btn-ghost" disabled={props.running} onClick={props.onReanalyze}>ניתוח מחדש של כולם</button>
-        )}
-        <button type="button" className="btn btn-small" disabled={props.adding} onClick={props.onAdd}><UploadIcon /> הוספת דוח</button>
-      </div>
-      <ul className="style-sources">
-        {o.sources.map((s) => (
-          <li key={s.id} className="style-source">
-            <span className="fmt">{s.format.toUpperCase()}</span>
-            <div className="stack grow" style={{ gap: 4 }}>
-              <strong>{s.title}</strong>
-              <span className="muted small">
-                נוסף ב-{dateOf(s.added_at)} · {s.words.toLocaleString("he-IL")} מילים · {s.headings.join(" · ")}
-              </span>
-            </div>
-            {s.analyzed
-              ? s.analysis_demo
-                ? <span className="chip chip-sand" title="נותח במצב הדגמה">נותח כדוגמה</span>
-                : <span className="chip chip-ok">נותח · {s.analysis_items} פריטים</span>
-              : <span className="chip chip-warn">עוד לא נותח</span>}
-            <button type="button" className="btn btn-small btn-danger-quiet" onClick={() => props.onDelete(s)}>מחיקה</button>
-          </li>
-        ))}
-      </ul>
-      <p className="hint">נשמר רק הטקסט המנוטרל, לא הקובץ.</p>
-    </section>
+    <ul className="style-numbers" aria-label="במספרים">
+      <li className="style-number"><b>{o.sources.length}</b><span>{o.sources.length === 1 ? "דוח שלך נקרא" : "דוחות שלך נקראו"}</span></li>
+      <li className="style-number"><b>{known}</b><span>דברים שהתוכנה יודעת עלייך</span></li>
+      <li className={waiting > 0 ? "style-number warn" : "style-number"}><b>{waiting}</b><span>מחכים לאישור שלך</span></li>
+    </ul>
   );
 }
 
-// ------------------------------------------------------------------ suggestions from her edits
+// ------------------------------------------------------------------ one at a time
 
-function Suggestions({ o }: { o: StyleOverview }) {
-  const { fail, notify } = useApp();
-  const qc = useQueryClient();
-  const [error, setError] = useState<string | null>(null);
-  async function act(f: () => Promise<unknown>, done?: string) {
-    setError(null);
-    try {
-      await f();
-      if (done) notify(done);
-      await qc.invalidateQueries({ queryKey: ["style"] });
-    } catch (e) {
-      setError(fail(e as never));
-    }
-  }
-  return (
-    <section className="card style-card" aria-labelledby="style-sugg">
-      <h2 id="style-sugg">מה למדתי ממך</h2>
-      <p className="hint">נלמד במחשב מהתיקונים שלך. לא נשלח עד שתוסיפי לפרופיל.</p>
-      <ul className="style-suggestions">
-        {o.suggestions.map((s) => (
-          <li key={s.id} className="row">
-            <span className="grow">
-              <SuggestionText s={s} />{" "}
-              <span className="muted small">({suggestionDetail(s, o)})</span>
-            </span>
-            <button type="button" className="btn btn-small btn-primary" onClick={() => void act(() => ipc.acceptStyleSuggestion(s.id), "נוסף לפרופיל.")}>להוסיף לפרופיל</button>
-            <button type="button" className="btn btn-small btn-ghost" onClick={() => void act(() => ipc.dismissStyleSuggestion(s.id))}>לא צריך</button>
-          </li>
-        ))}
-      </ul>
-      <ErrorLine error={error} />
-    </section>
-  );
+function itemWhy(item: StyleItem, reports: number, o: StyleOverview): string {
+  const title = item.section ? o.sections.find((s) => s.key === item.section)?.title : undefined;
+  const where = item.section ? `בסעיף ${title ?? item.section}` : "בכל הדוח";
+  if (item.origin === "edits") return `נלמד מהתיקונים שלך, ${where}.`;
+  if (item.origin === "manual") return `כתבת את זה בעצמך, ${where}.`;
+  if (item.support === 1) return `מופיע באחד הדוחות שלך, ${where}.`;
+  if (item.support > 1) return `מופיע ב-${item.support} ${reports >= item.support ? `מתוך ${reports} ` : "מ"}הדוחות שלך, ${where}.`;
+  return `מהניתוח של הדוחות שלך, ${where}.`;
+}
+
+function suggestionWhy(s: StyleSuggestion, o: StyleOverview): string {
+  const title = s.section ? o.sections.find((x) => x.key === s.section)?.title : undefined;
+  const where = title ? `, בסעיף ${title}` : "";
+  if (s.kind === "replace" || s.kind === "avoid") return `שינית את זה ${s.count === 1 ? "פעם אחת" : `${s.count} פעמים`}${where}.`;
+  const of = o.sources.length >= s.count ? ` מתוך ${o.sources.length} ` : " מ";
+  return `מופיע ב-${s.count}${of}הדוחות שלך${where}.`;
 }
 
 function SuggestionText({ s }: { s: StyleSuggestion }) {
   switch (s.kind) {
     case "replace":
       return <>במקום <q>{s.from}</q> את כותבת <q>{s.to}</q></>;
-    case "avoid":
-      return <>את מוחקת <q>{s.from}</q></>;
-    case "phrase":
-      return <>ביטוי שחוזר בדוחות שלך: <q>{s.from}</q></>;
     case "opening":
-      return <>כך את פותחת את הסעיף בדרך כלל: <q>{s.from}…</q></>;
     case "closing":
-      return <>כך את מסיימת את הסעיף בדרך כלל: <q>{s.from}…</q></>;
-    case "formula":
-      return <>משפט שאת כותבת באותו נוסח בכמה דוחות: <q>{s.from}</q></>;
+      return <>{s.from}…</>;
+    default:
+      return <>{s.from}</>;
   }
 }
 
-function suggestionDetail(s: StyleSuggestion, o: StyleOverview): string {
-  const title = s.section ? o.sections.find((x) => x.key === s.section)?.title : undefined;
-  const where = title ? ` · בסעיף ${title}` : "";
-  const fromReports = s.kind !== "replace" && s.kind !== "avoid";
-  return fromReports ? `ב-${s.count} דוחות${where}` : `${s.count} פעמים${where}`;
+/** One thing at a time, in the report's font, with "to use it", "to edit" and "not needed".
+ * What she decides goes at once; the next thing comes up by itself. */
+function ApproveQueue({ o, asks, onReviewed, running, build }: {
+  o: StyleOverview;
+  asks: Waiting[];
+  onReviewed: (id: string) => void;
+  running: boolean;
+  build: { label: string; run: () => void } | null;
+}) {
+  const { fail, notify } = useApp();
+  const ai = useAi();
+  const qc = useQueryClient();
+  const [done, setDone] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [text, setText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [whole, setWhole] = useState(false);
+  const current = asks[0];
+
+  async function act(f: () => Promise<unknown>) {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await f();
+      setEditing(null);
+      // The count starts again once the queue is empty, so what comes later reads "1 of 1".
+      setDone((d) => (asks.length <= 1 ? 0 : d + 1));
+      await qc.invalidateQueries({ queryKey: ["style"] });
+    } catch (e) {
+      setError(fail(e as never));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Her word on one item of the draft. The last one makes the draft the profile in use. */
+  async function decide(item: StyleItem, change: Partial<StyleItem>) {
+    const draft = o.draft;
+    if (!draft) return;
+    const items = draft.profile.items.map((x) => (x.id === item.id ? { ...x, ...change } : x));
+    const left = asks.filter((a) => a.kind === "item" && a.item.id !== item.id).length;
+    const changed = Object.entries(change).some(([k, v]) => item[k as keyof StyleItem] !== v);
+    if (changed || left === 0) await ipc.saveStyleDraft({ items, reports: draft.profile.reports });
+    if (left > 0) {
+      onReviewed(item.id);
+      return;
+    }
+    await finish(items.some((i) => i.enabled));
+  }
+
+  async function finish(any: boolean) {
+    if (any) {
+      await ipc.approveStyleDraft();
+      notify(`הפרופיל אושר. מעכשיו ${ai} כותב בסגנון שלך.`);
+    } else {
+      await ipc.discardStyleDraft();
+      notify("לא נשאר פריט לשימוש, והטיוטה נמחקה.");
+    }
+  }
+
+  if (!current) {
+    return (
+      <section className="card style-queue style-queue-empty" aria-labelledby="style-queue-title">
+        {build ? (
+          <>
+            <h2 id="style-queue-title">ללמוד מהדוחות</h2>
+            <p className="style-queue-lead">
+              {o.sources.length < RECOMMENDED ? `מומלץ ${RECOMMENDED} דוחות לפחות. ` : ""}
+              אחרי הניתוח כל דבר שהתוכנה למדה יחכה כאן לאישור שלך.
+            </p>
+            <button type="button" className="btn btn-primary btn-big" disabled={running} onClick={build.run}>{build.label}</button>
+          </>
+        ) : (
+          <>
+            <h2 id="style-queue-title">הכול מאושר</h2>
+            <p className="style-queue-lead">
+              {o.active ? `הפרופיל בשימוש, גרסה ${o.active.version}.` : "אין כרגע מה לאשר."}
+              {" "}דבר חדש שהתוכנה תלמד מהתיקונים שלך יחכה כאן.
+            </p>
+          </>
+        )}
+      </section>
+    );
+  }
+
+  const total = done + asks.length;
+  const isEditing = editing === current.key;
+  const canEdit = current.kind === "item" || current.kind === "interpretation";
+  const startEdit = () => {
+    setEditing(current.key);
+    setText(current.kind === "item" ? current.item.text : current.kind === "interpretation" ? current.view.item.text : "");
+  };
+
+  let tag: string;
+  let body: ReactNode;
+  let why: string;
+  let use: () => Promise<unknown>;
+  let save: (t: string) => Promise<unknown> = async () => undefined;
+  let skip: () => Promise<unknown>;
+  switch (current.kind) {
+    case "item": {
+      const { item } = current;
+      tag = KIND_TAG[item.kind];
+      body = item.text;
+      why = itemWhy(item, o.draft?.profile.reports ?? 0, o);
+      use = () => decide(item, { enabled: true });
+      save = (t) => decide(item, { enabled: true, text: t });
+      skip = () => decide(item, { enabled: false });
+      break;
+    }
+    case "draft":
+      tag = "הפרופיל המעודכן";
+      body = `${current.items} פריטים, כולם כבר אושרו בגרסה הקודמת.`;
+      why = "אין בטיוטה הזאת דבר חדש. אישור מכניס אותה לשימוש כגרסה חדשה.";
+      use = () => finish(current.items > 0);
+      skip = () => ipc.discardStyleDraft();
+      break;
+    case "suggestion": {
+      const { s } = current;
+      tag = SUGGESTION_TAG[s.kind];
+      body = <SuggestionText s={s} />;
+      why = suggestionWhy(s, o);
+      use = () => ipc.acceptStyleSuggestion(s.id).then(() => notify("נוסף לפרופיל."));
+      skip = () => ipc.dismissStyleSuggestion(s.id);
+      break;
+    }
+    case "interpretation": {
+      const { item, instrument_name, measure_name } = current.view;
+      tag = "איך את מפרשת ציון";
+      body = item.text;
+      why = `${instrument_name} · ${measure_name}, ${item.case}${item.support > 1 ? `. כך כתבת ב-${item.support} דוחות.` : "."}`;
+      use = () => ipc.updateInterpretation(item.id, null, true, null);
+      save = (t) => ipc.updateInterpretation(item.id, t, true, null);
+      // "Not needed" keeps it, off, among what the program knows: she can turn it on there.
+      skip = () => ipc.updateInterpretation(item.id, null, true, false);
+      break;
+    }
+  }
+
+  return (
+    <section className="card style-queue" aria-labelledby="style-queue-title">
+      <div className="style-queue-head">
+        <h2 id="style-queue-title">לאשר אחד-אחד</h2>
+        <span className="muted">{done + 1} מתוך {total}</span>
+      </div>
+      <div className="style-progress" role="progressbar" aria-label="כמה כבר אישרת" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done}>
+        <span style={{ width: `${Math.round((done / total) * 100)}%` }} />
+      </div>
+      <span className="style-tag">{tag}</span>
+      {isEditing ? (
+        <textarea className="textarea style-quote-edit" aria-label="הנוסח" rows={3} maxLength={600} autoFocus value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setEditing(null);
+            } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && text.trim()) {
+              e.preventDefault();
+              void act(() => save(text.trim()));
+            }
+          }} />
+      ) : (
+        <blockquote className="style-quote">{body}</blockquote>
+      )}
+      <p className="style-why">{why}</p>
+      <ErrorLine error={error} />
+      <div className="style-queue-actions">
+        {isEditing ? (
+          <>
+            <button type="button" className="btn btn-primary" disabled={busy || !text.trim()} onClick={() => void act(() => save(text.trim()))}>שמירה ושימוש</button>
+            <button type="button" className="btn" disabled={busy} onClick={() => setEditing(null)}>ביטול</button>
+          </>
+        ) : (
+          <>
+            <button type="button" className="btn btn-primary" disabled={busy || running} onClick={() => void act(use)}>להשתמש בזה</button>
+            {canEdit && <button type="button" className="btn" disabled={busy || running} onClick={startEdit}>לערוך</button>}
+            <button type="button" className="btn btn-ghost" disabled={busy || running} onClick={() => void act(skip)}>לא צריך</button>
+          </>
+        )}
+      </div>
+      {o.draft && (current.kind === "item" || current.kind === "draft") && (
+        <>
+          <button type="button" className="btn btn-ghost btn-small style-whole" aria-expanded={whole} onClick={() => setWhole((w) => !w)}>
+            {whole ? "להסתיר את הטיוטה" : "לעבור על כל הטיוטה בבת אחת"}
+          </button>
+          {whole && <ProfileEditor key={o.draft.id} view={o.draft} o={o} />}
+        </>
+      )}
+    </section>
+  );
+}
+
+// ------------------------------------------------------------------ what the program knows
+
+type Known = "writing" | "order" | "phrases" | "scores" | "argument";
+const KNOWN: { key: Known; title: string; line: string; kinds: StyleKind[] }[] = [
+  { key: "writing", title: "איך את כותבת", line: "כללי כתיבה, מה את לא כותבת, ומה התוכנה מדדה", kinds: ["rule", "avoid", "example"] },
+  { key: "order", title: "סדר הנושאים בכל סעיף", line: "הסדר שבו את כותבת כל סעיף", kinds: [] },
+  { key: "phrases", title: "משפטים שחוזרים אצלך", line: "ביטויים ותבניות משפט קבועות", kinds: ["phrase", "template"] },
+  { key: "scores", title: "איך את מפרשת ציונים", line: "מה את כותבת על תוצאה של כל תת-מבחן", kinds: [] },
+  { key: "argument", title: "איך את בונה טיעון", line: "חיבור בין כלים, וניסוח קריטריון DSM", kinds: ["argument", "integration", "criterion"] },
+];
+
+function KnownList({ o, running, onReadScores }: { o: StyleOverview; running: boolean; onReadScores: () => void }) {
+  const { fail, notify } = useApp();
+  const qc = useQueryClient();
+  // One open at a time: each editor holds the whole profile, so two open ones would overwrite each other.
+  const [open, setOpen] = useState<Known | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const items = o.active?.profile.items.filter((i) => i.enabled) ?? [];
+  const count = (k: (typeof KNOWN)[number]) =>
+    k.key === "order" ? o.skeletons.length
+      : k.key === "scores" ? o.interpretations.filter((i) => i.item.approved && i.item.enabled).length
+        : items.filter((i) => k.kinds.includes(i.kind)).length;
+
+  async function toggleUse(on: boolean) {
+    setError(null);
+    try {
+      await ipc.setStyleEnabled(on);
+      notify(on ? "הפרופיל חזר לשימוש." : "הניסוח חזר לסגנון ברירת המחדל.");
+      await qc.invalidateQueries({ queryKey: ["style"] });
+    } catch (e) {
+      setError(fail(e as never));
+    }
+  }
+
+  return (
+    <section className="card style-known" aria-labelledby="style-known-title">
+      <h2 id="style-known-title">מה התוכנה יודעת עלייך</h2>
+      {o.active && (
+        <div className="style-known-use">
+          <Switch id="style-use" label="להשתמש במה שאישרת בכל ניסוח" checked={o.enabled} onChange={(on) => void toggleUse(on)} />
+        </div>
+      )}
+      <ErrorLine error={error} />
+      <ul className="style-known-rows">
+        {KNOWN.map((k) => {
+          const on = open === k.key;
+          return (
+            <li key={k.key}>
+              <button type="button" className="style-know" aria-expanded={on} aria-controls={`known-${k.key}`}
+                onClick={() => setOpen(on ? null : k.key)}>
+                <span className="style-know-text"><strong>{k.title}</strong><span className="muted">{k.line}</span></span>
+                <span className="style-know-count">{count(k)} <span aria-hidden="true">{on ? "↓" : "←"}</span></span>
+              </button>
+              {on && (
+                <div id={`known-${k.key}`} className="style-known-open" role="region" aria-label={k.title}>
+                  {k.key === "order" ? <Skeletons o={o} />
+                    : k.key === "scores" ? <Interpretations o={o} running={running} onRead={onReadScores} />
+                      : (
+                        <>
+                          {o.active
+                            ? o.draft
+                              ? <ReadOnlyItems items={o.active.profile.items.filter((i) => k.kinds.includes(i.kind))} o={o} />
+                              : <ProfileEditor key={o.active.id} view={o.active} o={o} kinds={k.kinds} />
+                            : <p className="muted small">עוד אין פרופיל מאושר. מה שתאשרי בצד יופיע כאן.</p>}
+                          {k.key === "writing" && <Learned o={o} />}
+                        </>
+                      )}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+/** While a draft waits, the profile in use is shown and not changed: one place to approve. */
+function ReadOnlyItems({ items, o }: { items: StyleItem[]; o: StyleOverview }) {
+  if (items.length === 0) return <p className="muted small">עוד אין כאן פריטים.</p>;
+  const title = (key: string | null) => (key ? (o.sections.find((s) => s.key === key)?.title ?? key) : "כל הדוח");
+  return (
+    <>
+      <p className="hint">אפשר לשנות כאן אחרי שתסיימי לאשר את הטיוטה.</p>
+      <ul className="style-items">
+        {items.map((i) => (
+          <li key={i.id} className={i.enabled ? "style-item" : "style-item style-item-off"}>
+            <span className="style-item-text grow">{i.text}</span>
+            <span className="chip">{title(i.section)}</span>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+function Skeletons({ o }: { o: StyleOverview }) {
+  if (o.skeletons.length === 0) return <p className="muted small">עוד לא נמצא סדר קבוע. הוא נלמד מ-3 דוחות לפחות שיש בהם אותו סעיף.</p>;
+  return (
+    <div className="stack style-skeletons">
+      <ul className="style-learned">
+        {o.skeletons.map((k) => (
+          <li key={`${k.section}-${k.band ?? ""}`}>
+            <b>{k.title}{k.band ? ` (${k.band})` : ""}:</b> {k.topics.join(" · ")}{" "}
+            <span className="muted small">(מ-{k.reports} דוחות)</span>
+          </li>
+        ))}
+      </ul>
+      <p className="hint">כל עוד לא כתבת הנחיה משלך לסעיף, זו ההנחיה שלו בטיוטה.</p>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ my reports
+
+function Reports(props: {
+  o: StyleOverview;
+  adding: boolean;
+  onAdd: () => void;
+  onDelete: (s: StyleSourceView) => void;
+  more: MenuItem[];
+  build: { label: string; run: () => void; disabled: boolean } | null;
+}) {
+  const { o } = props;
+  const [list, setList] = useState(false);
+  const last = Math.max(...o.sources.map((s) => s.added_at));
+  const notRead = o.sources.filter((s) => !s.analyzed).length;
+  return (
+    <section className="card style-reports" aria-labelledby="style-sources">
+      <div className="style-reports-row">
+        <h2 id="style-sources">הדוחות שלי</h2>
+        <span className="muted grow">
+          {o.sources.length === 1 ? "דוח אחד" : `${o.sources.length} דוחות`}, האחרון נוסף {sinceLabel(last)}.
+          {notRead > 0 && ` ${notRead === 1 ? "אחד עוד לא נותח" : `${notRead} עוד לא נותחו`}.`}
+          {" "}נשמר רק הטקסט אחרי הסתרה, לא הקובץ.
+        </span>
+        <div className="style-reports-actions">
+          {props.build && <button type="button" className="btn" disabled={props.build.disabled} onClick={props.build.run}>{props.build.label}</button>}
+          <button type="button" className="btn btn-ghost" aria-expanded={list} aria-controls="style-source-list" onClick={() => setList((v) => !v)}>
+            {list ? "להסתיר את הרשימה" : "לראות את הרשימה"}
+          </button>
+          <button type="button" className="btn" disabled={props.adding} onClick={props.onAdd}><UploadIcon /> הוספת דוח</button>
+          {props.more.length > 0 && <ActionsMenu label="עוד פעולות על הסגנון" items={props.more} />}
+        </div>
+      </div>
+      {list && (
+        <ul id="style-source-list" className="style-sources">
+          {o.sources.map((s) => (
+            <li key={s.id} className="style-source">
+              <span className="fmt">{s.format.toUpperCase()}</span>
+              <div className="stack grow" style={{ gap: 4 }}>
+                <strong>{s.title}</strong>
+                <span className="muted small">
+                  נוסף ב-{dateOf(s.added_at)} · {s.words.toLocaleString("he-IL")} מילים · {s.headings.join(" · ")}
+                </span>
+              </div>
+              {s.analyzed
+                ? s.analysis_demo
+                  ? <span className="chip chip-sand" title="נותח במצב הדגמה">נותח כדוגמה</span>
+                  : <span className="chip chip-ok">נותח · {s.analysis_items} פריטים</span>
+                : <span className="chip chip-warn">עוד לא נותח</span>}
+              <button type="button" className="btn btn-small btn-danger-quiet" onClick={() => props.onDelete(s)}>מחיקה</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
 }
 
 // ------------------------------------------------------------------ what was measured
@@ -433,7 +814,7 @@ function FitTrend({ months }: { months: FitMonth[] }) {
   );
 }
 
-function Learned({ o, onForget }: { o: StyleOverview; onForget: () => void }) {
+function Learned({ o }: { o: StyleOverview }) {
   const ai = useAi();
   const l = o.learned;
   const lines = learnedLines(l);
@@ -442,11 +823,10 @@ function Learned({ o, onForget }: { o: StyleOverview; onForget: () => void }) {
     l.from_edits > 0 && `${l.from_edits} מהתיקונים שלך`,
     l.finished_reports > 0 && (l.finished_reports === 1 ? "דוח אחד שסיימת בתוכנה" : `${l.finished_reports} דוחות שסיימת בתוכנה`),
   ].filter(Boolean) as string[];
-  const canForget = l.from_edits > 0 || l.finished_reports > 0 || l.fit_count > 0;
-  if (from.length === 0 && l.fit_count === 0) return null;
+  if (from.length === 0 && l.fit_count === 0 && o.omissions.length === 0) return null;
   return (
-    <section className="card style-card" aria-labelledby="style-learned">
-      <h2 id="style-learned">מה התוכנה מדדה בכתיבה שלך</h2>
+    <div className="stack style-measured">
+      <h3 className="small">מה התוכנה מדדה בכתיבה שלך</h3>
       <p className="hint">נמדד במחשב שלך, ונשמרים רק מספרים. {from.length > 0 && `נלמד מ${from.join(", ")}.`}</p>
       {lines.length > 0 ? (
         <ul className="style-learned">{lines.map((t) => <li key={t}>{t}</li>)}</ul>
@@ -462,31 +842,12 @@ function Learned({ o, onForget }: { o: StyleOverview; onForget: () => void }) {
         </p>
       )}
       {l.fit_by_month.length >= 2 && <FitTrend months={l.fit_by_month} />}
-      {o.skeletons.length > 0 && (
-        <div className="stack style-skeletons">
-          <h3 className="small">הסדר שבו את כותבת את הסעיפים</h3>
-          <ul className="style-learned">
-            {o.skeletons.map((k) => (
-              <li key={`${k.section}-${k.band ?? ""}`}>
-                <b>{k.title}{k.band ? ` (${k.band})` : ""}:</b> {k.topics.join(" · ")}{" "}
-                <span className="muted small">(מ-{k.reports} דוחות)</span>
-              </li>
-            ))}
-          </ul>
-          <p className="hint">כל עוד לא כתבת הנחיה משלך לסעיף, זו ההנחיה שלו בטיוטה.</p>
-        </div>
-      )}
       {o.omissions.length > 0 && (
         <ul className="style-learned" aria-label="מה את לא כותבת">
           {o.omissions.map((t) => <li key={t}>{t}</li>)}
         </ul>
       )}
-      {canForget && (
-        <div className="row">
-          <button type="button" className="btn btn-small btn-danger-quiet" onClick={onForget}>לשכוח את מה שנלמד מהתיקונים ומהדוחות שסיימתי</button>
-        </div>
-      )}
-    </section>
+    </div>
   );
 }
 
@@ -502,7 +863,9 @@ function Interpretations({ o, running, onRead }: { o: StyleOverview; running: bo
   // The item being changed: its buttons wait, so a double click does it once (the review of stage 4).
   const [busyId, setBusyId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<InterpretationView | null>(null);
-  if (o.scored_measures === 0 && o.interpretations.length === 0) return null;
+  if (o.scored_measures === 0 && o.interpretations.length === 0) {
+    return <p className="muted small">בדוחות שלך עוד לא נמצאה תוצאה ליד שם של תת-מבחן.</p>;
+  }
   const waiting = o.interpretations.filter((i) => !i.item.approved).length;
   const groups = new Map<string, InterpretationView[]>();
   for (const i of o.interpretations) {
@@ -527,8 +890,7 @@ function Interpretations({ o, running, onRead }: { o: StyleOverview; running: bo
   const save = (id: string) => void act(id, () => ipc.updateInterpretation(id, draft, true, null));
 
   return (
-    <section className="card style-card" aria-labelledby="style-interpret">
-      <h2 id="style-interpret">איך את מפרשת תוצאות</h2>
+    <div className="stack style-interpret">
       <p className="hint">
         מהמשפטים בדוחות הישנים שבהם כתבת על תוצאה של תת-מבחן. נשלחים רק המשפטים האלה, בלי פרטים מזהים, ונשמרת פרשנות כללית.
         שום פרשנות לא משמשת בדוח לפני שאישרת אותה.
@@ -607,13 +969,15 @@ function Interpretations({ o, running, onRead }: { o: StyleOverview; running: bo
             await qc.invalidateQueries({ queryKey: ["style"] });
           }} />
       )}
-    </section>
+    </div>
   );
 }
 
 // ------------------------------------------------------------------ the profile
 
-function ProfileEditor({ view, o }: { view: StyleProfileView; o: StyleOverview }) {
+/** The profile's items, to check, change, delete or add. `kinds`: only these are shown (a row of
+ * "what the program knows"); the rest of the profile is kept as it is when she saves. */
+function ProfileEditor({ view, o, kinds }: { view: StyleProfileView; o: StyleOverview; kinds?: StyleKind[] }) {
   const { fail, notify } = useApp();
   const ai = useAi();
   const qc = useQueryClient();
@@ -623,13 +987,14 @@ function ProfileEditor({ view, o }: { view: StyleProfileView; o: StyleOverview }
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const isDraft = view.status === "draft";
+  const shownKinds = kinds ?? KINDS;
 
   const groups = useMemo(() => {
     const keys: (string | null)[] = [null, ...o.sections.map((s) => s.key)];
     return keys
-      .map((key) => ({ key, title: key ? (o.sections.find((s) => s.key === key)?.title ?? key) : "כל הדוח", items: items.filter((i) => i.section === key) }))
+      .map((key) => ({ key, title: key ? (o.sections.find((s) => s.key === key)?.title ?? key) : "כל הדוח", items: items.filter((i) => i.section === key && shownKinds.includes(i.kind)) }))
       .filter((g) => g.key === null || g.items.length > 0);
-  }, [items, o.sections]);
+  }, [items, o.sections, shownKinds]);
 
   const change = (f: (all: StyleItem[]) => StyleItem[]) => {
     setItems(f);
@@ -655,31 +1020,25 @@ function ProfileEditor({ view, o }: { view: StyleProfileView; o: StyleOverview }
   const enabledCount = items.filter((i) => i.enabled).length;
 
   return (
-    <section id="style-profile" className={isDraft ? "card style-card style-profile style-draft" : "card style-card style-profile"} aria-labelledby="style-profile-title">
-      <div className="row style-profile-head">
-        <h2 id="style-profile-title" className="grow">{isDraft ? "טיוטת פרופיל הסגנון" : "פרופיל הסגנון"}</h2>
-        {isDraft ? <span className="chip chip-warn">טיוטה · עוד לא בשימוש</span> : <span className="chip chip-ok">בשימוש · גרסה {view.version}</span>}
-        {view.profile.reports > 0 && <span className="chip chip-sand">נבנה מ-{view.profile.reports} דוחות</span>}
-        {view.demo && <span className="chip chip-sand">נבנה במצב הדגמה</span>}
-      </div>
-      {!isDraft && (
-        <label className="row style-switch">
-          <input type="checkbox" checked={o.enabled}
-            onChange={(e) => void act(() => ipc.setStyleEnabled(e.target.checked), e.target.checked ? "הפרופיל חזר לשימוש." : "הניסוח חזר לסגנון ברירת המחדל.")} />
-          <span>להשתמש בפרופיל בכל ניסוח</span>
-        </label>
+    <section id="style-profile" className={isDraft ? "style-profile style-draft" : "style-profile"} aria-label={isDraft ? "טיוטת פרופיל הסגנון" : "פרופיל הסגנון"}>
+      {isDraft && (
+        <div className="row style-profile-head">
+          <span className="chip chip-warn">טיוטה · עוד לא בשימוש</span>
+          {view.profile.reports > 0 && <span className="chip chip-sand">נבנה מ-{view.profile.reports} דוחות</span>}
+          {view.demo && <span className="chip chip-sand">נבנה במצב הדגמה</span>}
+        </div>
       )}
       <p className="hint">
         {isDraft
-          ? "עברי על הפריטים. רק מה שמסומן ייכנס, ורק אחרי האישור."
+          ? "רק מה שמסומן ייכנס, ורק אחרי האישור."
           : "כל שינוי משפיע רק אחרי אישור."}
-        {view.dropped > 0 && ` ${view.dropped} פריטים נפסלו (העתקה או פרט מזהה).`}
+        {isDraft && view.dropped > 0 && ` ${view.dropped} פריטים נפסלו (העתקה או פרט מזהה).`}
       </p>
 
       {groups.map((g) => (
         <div key={g.key ?? "general"} className="style-group">
           <h3>{g.title}</h3>
-          {KINDS.map((kind) => {
+          {shownKinds.map((kind) => {
             const list = g.items.filter((i) => i.kind === kind);
             if (list.length === 0) return null;
             return (
@@ -708,7 +1067,7 @@ function ProfileEditor({ view, o }: { view: StyleProfileView; o: StyleOverview }
               </div>
             );
           })}
-          <AddItem onAdd={(kind, text) => change((all) => [...all, { id: "", section: g.key, kind, text, enabled: true, origin: "manual", support: 0 }])} />
+          <AddItem kinds={shownKinds} onAdd={(kind, text) => change((all) => [...all, { id: "", section: g.key, kind, text, enabled: true, origin: "manual", support: 0 }])} />
         </div>
       ))}
 
@@ -732,9 +1091,10 @@ function ProfileEditor({ view, o }: { view: StyleProfileView; o: StyleOverview }
   );
 }
 
-function AddItem({ onAdd }: { onAdd: (kind: StyleKind, text: string) => void }) {
+function AddItem({ kinds, onAdd }: { kinds: StyleKind[]; onAdd: (kind: StyleKind, text: string) => void }) {
+  const choices = kinds.filter((k) => k !== "example");
   const [open, setOpen] = useState(false);
-  const [kind, setKind] = useState<StyleKind>("rule");
+  const [kind, setKind] = useState<StyleKind>(choices[0] ?? "rule");
   const [text, setText] = useState("");
   if (!open) {
     return <button type="button" className="btn btn-ghost btn-small style-add" onClick={() => setOpen(true)}>+ הוספת פריט משלך</button>;
@@ -742,7 +1102,7 @@ function AddItem({ onAdd }: { onAdd: (kind: StyleKind, text: string) => void }) 
   return (
     <form className="row style-add-form" onSubmit={(e) => { e.preventDefault(); if (text.trim()) { onAdd(kind, text.trim()); setText(""); setOpen(false); } }}>
       <select className="select" aria-label="סוג" value={kind} onChange={(e) => setKind(e.target.value as StyleKind)}>
-        {KINDS.filter((k) => k !== "example").map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
+        {choices.map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
       </select>
       <input className="input grow" autoFocus placeholder="למשל: פסקת הסיכום פותחת בחוזקות של הילד" value={text} onChange={(e) => setText(e.target.value)} />
       <button type="submit" className="btn btn-small" disabled={!text.trim()}>הוספה</button>
@@ -753,7 +1113,7 @@ function AddItem({ onAdd }: { onAdd: (kind: StyleKind, text: string) => void }) 
 
 // ------------------------------------------------------------------ versions
 
-function Versions({ o, onReset }: { o: StyleOverview; onReset: () => void }) {
+function Versions({ o }: { o: StyleOverview }) {
   const { fail, notify } = useApp();
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
@@ -778,7 +1138,6 @@ function Versions({ o, onReset }: { o: StyleOverview; onReset: () => void }) {
         ))}
       </ul>
       <ErrorLine error={error} />
-      <button type="button" className="btn btn-small btn-danger-quiet style-reset" onClick={onReset}>מחיקת הפרופיל ומה שנלמד</button>
     </section>
   );
 }
