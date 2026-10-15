@@ -3,7 +3,7 @@
 use crate::*;
 
 #[tauri::command]
-pub(crate) fn ping() -> dv_ipc::PingResponse {
+pub(crate) fn ping() -> dv_core::PingResponse {
     dv_core::ping()
 }
 
