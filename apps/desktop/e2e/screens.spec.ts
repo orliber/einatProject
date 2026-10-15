@@ -46,6 +46,12 @@ async function expectLooksApproved(page: Page, name: string): Promise<void> {
   expect(await layout(page)).toMatchSnapshot(`${name}.txt`);
 }
 
+// The greeting follows the hour ("בוקר טוב", "לילה טוב"): every run sees the same night, the
+// one the pictures were approved in. Timers keep running.
+test.beforeEach(async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-10-14T23:00:00+03:00"));
+});
+
 test("the lock screen", async ({ page }) => {
   await page.goto("/preview.html");
   await expect(page.getByLabel("סיסמה")).toBeVisible();
