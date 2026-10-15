@@ -21,6 +21,8 @@ import { useKept } from "../kept";
 import "./CaseScreen.css";
 import { useAi } from "../ai";
 import { notSentMessage } from "../sending";
+import { useQuery } from "@tanstack/react-query";
+import { forgetRun, isRunning, runLine, runOf, runWholeReport, stopRun, useRun } from "./case/reportRun";
 
 export interface ReviewRequest {
   title: string;
@@ -302,6 +304,18 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inputCount]);
 
+  // Round 41: "write the whole report" runs in the background, in one line. A run the lock cut
+  // goes on when the case is opened again.
+  const verifyOn = useQuery({ queryKey: ["verify-stage"], queryFn: ipc.verifyStageOn, enabled: !status.review_always }).data === true;
+  const run = useRun(caseId);
+  const apiRef = useRef<CaseApi | null>(null);
+  const loaded = detail !== null;
+  useEffect(() => {
+    if (loaded && apiRef.current && runOf(caseId)?.phase === "paused") void runWholeReport(apiRef.current, { verify: verifyOn, ai });
+    // Once, when the case is there.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
+
   if (!detail) {
     return error ? (
       <main className="center-note"><ErrorLine error={error} retry={() => { setError(null); void reload(); }} /></main>
@@ -315,6 +329,11 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   }
 
   const api: CaseApi = { caseId, detail, reload, review: startReview, sort: () => startSort(), jobs, track, draft };
+  apiRef.current = api;
+  // With "show me every request" on (advanced), the window that shows each one; otherwise the
+  // background run.
+  const writeAll = () => (status.review_always ? setFullDraft(true) : void runWholeReport(api, { verify: verifyOn, ai }));
+  const running = isRunning(caseId);
   const unsorted = detail.routing.filter((r) => r.needs_sorting).length;
   const fed = detail.sections.filter((s) => s.source_count > 0);
   const pending = detail.sections.filter((s) => s.paragraphs.some((p) => p.status === "proposed"));
@@ -350,12 +369,13 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
             : unsorted > 0
               ? { title: unsorted === 1 ? "חומר אחד עוד לא מוין לסעיפים" : `${unsorted} חומרים עוד לא מוינו לסעיפים`, note: `${ai} ימיין אותם (אחרי הסתרה) לסעיפים.`, action: "מיון החומרים", run: () => void startSort() }
               : undrafted.length > 0
-                ? { title: `${undrafted.length} סעיפים עם חומר עוד לא נכתבו`, note: "כל סעיף נכתב רק מהחומרים שלו, ואת רואה מה יוצא.", action: `✦ לכתוב את ${undrafted.length} הסעיפים`, run: () => setFullDraft(true) }
+                ? { title: `${undrafted.length} סעיפים עם חומר עוד לא נכתבו`, note: "כל סעיף נכתב רק מהחומרים שלו, ואת רואה מה יוצא.", action: `✦ לכתוב את ${undrafted.length} הסעיפים`, run: writeAll }
                 : fed.length > 0 && fed.every((s) => s.approved)
                   ? { title: "כל הסעיפים שיש להם חומר אושרו", note: "הדוח יוצא כ-Word מוגן בסיסמה.", action: "להוצאת הדוח ←", run: () => go({ name: "case", id: caseId, view: "finish" }) }
                   : null;
   // A section shows its own job, and so does the report page; the rest run in the strip.
-  const elsewhere = jobs.filter((j) => !j.section || (j.section !== view && view !== "report"));
+  // While the whole report is written, its one line stands for its requests.
+  const elsewhere = running ? [] : jobs.filter((j) => !j.section || (j.section !== view && view !== "report"));
   const stages: { n: number; label: string; view: string; done: boolean }[] = [
     { n: 1, label: "חומרים", view: "materials", done: hasMaterials && unsorted === 0 },
     { n: 2, label: "כתיבה", view: "report", done: fed.length > 0 && fed.every((s) => s.approved) && pendingCount === 0 },
@@ -364,7 +384,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const more: MenuItem[] = [
     { label: "פרטים ושמות להסתרה", run: () => go({ name: "case", id: caseId, view: "details" }) },
     { label: current ? `מה יצא מהמחשב בסעיף "${current.title}"` : "מה יצא מהמחשב בתיק הזה", run: () => setSentFor(current?.key ?? "") },
-    { label: `כתיבת כל הדוח עם ${ai}`, run: () => setFullDraft(true) },
+    { label: `כתיבת כל הדוח עם ${ai}`, run: writeAll },
     ...(showShortcuts ? [{ label: "קיצורי מקלדת (F1)", run: showShortcuts }] : []),
     { label: "נעילה (Ctrl+L)", run: () => void lockNow() },
   ];
@@ -402,8 +422,19 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
             ipc.deleteCase(caseId).then(() => go({ name: "cases" }), (e: unknown) => { setThrowing(false); setError(fail(e as never)); });
           }} />
       )}
-      {(elsewhere.length > 0 || failures.length > 0) && (
+      {(elsewhere.length > 0 || failures.length > 0 || run) && (
         <section className="jobs-strip" aria-label={`${ai} עובד`}>
+          {run && (
+            <div className="run-line" role="status">
+              <span className="grow">{runLine(run)}</span>
+              {running && run.phase !== "check" && (
+                <button type="button" className="btn btn-small" disabled={run.stopping} onClick={() => stopRun(caseId)}>לעצור</button>
+              )}
+              {!running && (
+                <button type="button" className="icon-btn" aria-label="סגירה" onClick={() => forgetRun(caseId)}><CloseIcon /></button>
+              )}
+            </div>
+          )}
           {elsewhere.map((j) => <ProgressLine key={j.id} started={j.started} estimate={j.estimate} label={j.label} approval={j.approval} />)}
           {failures.map((f) => (
             <div key={f.id} className="job-failed" role="alert">
@@ -429,11 +460,11 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
       )}
 
       <div className="case-body">
-        {stage === 2 && <Contents detail={detail} jobs={jobs} view={view} onOpen={(key) => toReport(key)} onWriteAll={() => setFullDraft(true)} />}
+        {stage === 2 && <Contents detail={detail} jobs={jobs} view={view} onOpen={(key) => toReport(key)} onWriteAll={writeAll} />}
         <div className="work">
           {view === "materials" && <MaterialsView api={api} />}
           {view === "details" && <DetailsView api={api} />}
-          {view === "report" && <ReportView api={api} onWriteAll={() => setFullDraft(true)} focus={focus} />}
+          {view === "report" && <ReportView api={api} onWriteAll={writeAll} focus={focus} />}
           {view === "finish" && <FinishView api={api} onExport={() => setExporting(true)} onOpen={(key) => toReport(key)} />}
           {searching && (
             <CaseSearch detail={detail} onClose={() => setSearching(false)}

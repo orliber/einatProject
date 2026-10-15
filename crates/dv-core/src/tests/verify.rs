@@ -25,10 +25,13 @@ fn proposed_count(core: &mut Core, case: &str) -> usize {
 }
 
 #[test]
-fn the_check_against_the_sources_is_off_until_she_turns_it_on() {
+fn the_check_against_the_sources_is_on_until_she_turns_it_off() {
     let (_dir, mut core, case) = setup(Some(FakeTransport::default()));
     drafted(&mut core, &case);
-    assert!(!core.verify_stage_on().unwrap());
+    // On by default since it runs in the background (round 41, D-065 in the master plan).
+    assert!(core.verify_stage_on().unwrap());
+    assert!(core.prepare_verify(&case, "kindergarten").is_ok());
+    core.set_verify_stage(false).unwrap();
     assert!(matches!(
         core.prepare_verify(&case, "kindergarten"),
         Err(CoreError::Needs(_, ErrorAction::Settings { .. }))

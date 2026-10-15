@@ -317,6 +317,22 @@ describe("writing the report", () => {
     expect(within(reading).getByText(/נבדק ב-3\/2024/)).toBeInTheDocument();
   });
 
+  it("writes the whole report in one click, in the background, and checks it against the sources (round 41)", async () => {
+    const { user, calls } = await openApp(true, false);
+    await openCase(user);
+    await user.click(screen.getByRole("button", { name: /עוד פעולות/ }));
+    await user.click(await screen.findByRole("menuitem", { name: "כתיבת כל הדוח עם Claude" }));
+    // No window: one line says what the program is doing, with "stop".
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(await screen.findByText(/התוכנה עובדת/)).toBeInTheDocument();
+    expect(await screen.findByText(/הדוח נכתב ונבדק מול המקורות\. \d+ סעיפים מחכים לאישורך/, {}, { timeout: 20000 })).toBeInTheDocument();
+    expect(calls).toContain("send_section");
+    expect(calls).toContain("send_verify");
+    expect(calls.indexOf("send_verify")).toBeGreaterThan(calls.lastIndexOf("send_section"));
+    await user.click(within(screen.getByText(/הדוח נכתב ונבדק/).closest(".run-line") as HTMLElement).getByRole("button", { name: "סגירה" }));
+    expect(screen.queryByText(/הדוח נכתב ונבדק/)).toBeNull();
+  });
+
   it("with the review screen on, nothing is read by itself", async () => {
     const { user, calls } = await openApp();
     await openCase(user);

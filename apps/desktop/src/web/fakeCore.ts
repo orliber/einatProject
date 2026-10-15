@@ -189,7 +189,7 @@ export class FakeCore {
   private modes = new Map<string, SectionMode>();
   private lockMinutes = 15;
   private capUsd: number | null = null;
-  private verifyOn = false;
+  private verifyOn = true;
   private nameModel = { enabled: false, downloaded: false, size_mb: 705, problem: null as string | null };
   private ready: Record<string, number | null> = {};
   private sendStopped = false;

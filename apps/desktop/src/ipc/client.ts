@@ -263,7 +263,7 @@ export const ipc = {
   /** Words Claude has written so far for a request on its way (streamed answers). */
   sendProgress: (approvalId: string) => call("send_progress", { approvalId }),
   sendSection: (approvalId: string) => call("send_section", { approvalId }),
-  /** The check of a draft against its sources: off until switched on in settings. */
+  /** The check of a draft against its sources: on unless switched off in settings (round 41). */
   verifyStageOn: () => call("verify_stage_on"),
   setVerifyStage: (on: boolean) => run("set_verify_stage", { on }),
   /** The optional name model (D-053): off by default, downloaded only when turned on. */
