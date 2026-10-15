@@ -5,31 +5,14 @@ import type { CaseApi } from "../screens/CaseScreen";
 import { Dialog, ErrorLine, Spinner } from "./ui";
 import "./ExportDialog.css";
 
-const WORDS = [
-  "נהר", "ענן", "שקד", "אורן", "גשר", "מגדל", "חצב", "סלע", "נחל", "כרמל", "תמר", "אלון", "ברוש", "יונה", "שחף",
-  "ארבל", "גפן", "דולב", "הדס", "זית", "חרוב", "טל", "יסמין", "כלנית", "לוטם", "מרווה", "נרקיס", "סחלב", "עירית", "פיקוס",
-  "צבר", "קורנית", "רקפת", "שיזף", "תאנה", "אגם", "בריכה", "גבעה", "דיונה", "הר", "ואדי", "זריחה", "חוף", "טיפה", "ים",
-];
-
-/** A passphrase the parents can type from a phone call: four words and two digits. */
-export function makePassphrase(): string {
-  const r = new Uint32Array(5);
-  crypto.getRandomValues(r);
-  const w = (i: number) => WORDS[(r[i] ?? 0) % WORDS.length];
-  return `${w(0)}-${w(1)}-${(r[4] ?? 0) % 90 + 10}-${w(2)}-${w(3)}`;
-}
-
-/** The report, or with `letter` the short letter (EX-4): same password and folder. */
+/** The report, or with `letter` the short letter (EX-4), into the downloads folder. The files
+ *  open without a password, as she asked (D-081); the PDF is still print-only. */
 export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: () => void; letter?: "parents" | "school" }) {
   const { fail, go } = useApp();
   const [check, setCheck] = useState<ExportCheck | null>(null);
-  const [protect, setProtect] = useState(true);
   const [pdf, setPdf] = useState(false);
-  const [password, setPassword] = useState(makePassphrase);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
-  /** Seconds until the copied password is cleared from the clipboard. */
-  const [copied, setCopied] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -40,20 +23,11 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
     setBusy(true);
     setError(null);
     try {
-      const pw = protect ? password : null;
-      setSaved(await (letter ? ipc.exportLetter(api.caseId, letter, pw) : pdf ? ipc.exportPdf(api.caseId, password) : ipc.exportReport(api.caseId, pw)));
+      setSaved(await (letter ? ipc.exportLetter(api.caseId, letter, null) : pdf ? ipc.exportPdf(api.caseId, null) : ipc.exportReport(api.caseId, null)));
     } catch (e) {
       setError(fail(e as never));
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function copy() {
-    try {
-      setCopied(await ipc.copySecret(password));
-    } catch {
-      setCopied(null);
     }
   }
 
@@ -67,12 +41,6 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
         <div className="stack">
           <p>הקובץ נשמר:</p>
           <p className="saved-path" dir="ltr">{saved}</p>
-          {protect && (
-            <div className="note-sand stack" style={{ gap: 6 }}>
-              <b>הסיסמה לקובץ: <span className="mono">{password}</span></b>
-              <span>מוסרים אותה להורים בטלפון, לא באותו מייל. התוכנה לא שומרת אותה.</span>
-            </div>
-          )}
         </div>
       </Dialog>
     );
@@ -84,7 +52,7 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
         <>
           <span className="grow" />
           <button type="button" className="btn" onClick={onClose}>ביטול</button>
-          <button type="button" className="btn btn-primary" disabled={!check || blocked || busy || (protect && password.length < 10)} onClick={() => void run()}>
+          <button type="button" className="btn btn-primary" disabled={!check || blocked || busy} onClick={() => void run()}>
             {busy ? <><Spinner /> מפיקה…</> : letter ? "הפקת המכתב" : "הפקת הדוח"}
           </button>
         </>
@@ -124,27 +92,10 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
           {!letter && (
             <div className="row" role="radiogroup" aria-label="סוג הקובץ">
               <label className="row small"><input type="radio" checked={!pdf} onChange={() => setPdf(false)} /> Word (אפשר להמשיך לערוך)</label>
-              <label className="row small"><input type="radio" checked={pdf} onChange={() => { setPdf(true); setProtect(true); }} /> PDF נעול (להדפסה בלבד, בלי שינויים)</label>
+              <label className="row small"><input type="radio" checked={pdf} onChange={() => setPdf(true)} /> PDF נעול (להדפסה בלבד, בלי שינויים)</label>
             </div>
           )}
-          {pdf && <span className="small muted">ה-PDF נפתח רק בסיסמה ואי אפשר לשנות אותו. בהגדרות אפשר לבדוק אם עותק הוא המקורי.</span>}
-          <div className="card protect stack">
-            <label className="row"><input type="checkbox" checked={protect} disabled={pdf} onChange={(e) => setProtect(e.target.checked)} />
-              <b>הגנה בסיסמה</b> <span className="muted">(מומלץ כששולחים במייל)</span></label>
-            {protect && (
-              <>
-                <div className="row">
-                  <label htmlFor="exp-pw" className="visually-hidden">סיסמה לקובץ</label>
-                  <input id="exp-pw" className="input grow mono pw" value={password} onChange={(e) => setPassword(e.target.value)} />
-                  <button type="button" className="btn" onClick={() => void copy()}>{copied ? "הועתק" : "העתקה"}</button>
-                  {copied && <span className="small muted" role="status">יימחק מהלוח בעוד {copied} שניות.</span>}
-                  <button type="button" className="btn" onClick={() => { setPassword(makePassphrase()); setCopied(null); }}>סיסמה חדשה</button>
-                </div>
-                {password.length < 10 && <span className="small" role="status">לפחות 10 תווים (עכשיו {password.length}).</span>}
-                <span className="small muted">את הסיסמה מוסרים להורים בטלפון, לא באותו מייל.</span>
-              </>
-            )}
-          </div>
+          {pdf && <span className="small muted">את ה-PDF אי אפשר לשנות. בהגדרות אפשר לבדוק אם עותק הוא המקורי.</span>}
           {check && !letter && (
             <p className="small"><b>שם הקובץ:</b> {check.file_name} <span className="muted">(בלי שם הילד) · נשמר בתיקיית ההורדות</span></p>
           )}

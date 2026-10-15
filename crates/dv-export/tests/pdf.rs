@@ -78,7 +78,7 @@ fn pdf_of(report: &Report, font: &[u8]) -> Vec<u8> {
             regular: font,
             bold: None,
         },
-        PASSWORD,
+        Some(PASSWORD),
     )
     .unwrap()
 }
@@ -200,7 +200,7 @@ fn an_unusable_font_is_refused_clearly() {
         bold: None,
     };
     assert!(matches!(
-        render_pdf(&sample(), not_a_font, PASSWORD),
+        render_pdf(&sample(), not_a_font, Some(PASSWORD)),
         Err(ExportError::Pdf(m)) if m.contains("גופן")
     ));
     let latin_only = Path::new("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf");
@@ -211,7 +211,7 @@ fn an_unusable_font_is_refused_clearly() {
         regular: &bytes,
         bold: None,
     };
-    if let Err(ExportError::Pdf(m)) = render_pdf(&sample(), fonts, PASSWORD) {
+    if let Err(ExportError::Pdf(m)) = render_pdf(&sample(), fonts, Some(PASSWORD)) {
         assert!(m.contains("עבריות"), "{m}");
     }
 }

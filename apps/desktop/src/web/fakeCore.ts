@@ -1301,14 +1301,14 @@ export class FakeCore {
       case "letter":
         return [];
       case "export_pdf":
-        return "בהדמיה בדפדפן לא נוצר קובץ. בתוכנה המותקנת נשמר PDF נעול בסיסמה בתיקיית ההורדות.";
+        return "בהדמיה בדפדפן לא נוצר קובץ. בתוכנה המותקנת נשמר PDF נעול לשינויים בתיקיית ההורדות.";
       case "check_original":
         return null;
       case "prepare_letter":
         return fail("refused", "בהדמיה בדפדפן אין ניסוח מכתבים. בתוכנה המותקנת המכתב נכתב מתוך ההמלצות המאושרות.");
       case "export_letter":
       case "export_report":
-        return "בהדמיה בדפדפן לא נוצר קובץ. בתוכנה המותקנת הדוח נשמר בתיקיית ההורדות, מוצפן בסיסמה.";
+        return "בהדמיה בדפדפן לא נוצר קובץ. בתוכנה המותקנת הדוח נשמר בתיקיית ההורדות.";
       case "set_auto_backup":
         this.autoBackup = Boolean(a.on);
         this.logActivity("settings_changed", "security", "הגיבוי האוטומטי הודלק או כובה");

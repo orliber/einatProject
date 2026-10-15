@@ -2,7 +2,7 @@
 
 Starts Xvfb + tauri-driver, drives the WebView over WebDriver, and saves a screenshot per step.
 Linux only. Needs: xvfb, webkit2gtk-driver, tauri-driver (cargo install tauri-driver),
-libreoffice-writer (to make the PDF fixture), and `pip install selenium msoffcrypto-tool`.
+libreoffice-writer (to make the PDF fixture), and `pip install selenium`.
 Build first: `cd apps/desktop && pnpm tauri build --debug --no-bundle`. Run: `python3 tests/e2e/run.py`.
 Everything it writes (a fresh HOME, screenshots) goes to tests/e2e/out/, which git ignores.
 """
@@ -256,20 +256,16 @@ try:
     expect_text("הפקת דוח Word")
     time.sleep(1)
     shot("export")
-    export_password = find("//input[@id='exp-pw']").get_attribute("value")
     button("הפקת הדוח").click()
     expect_text("הדוח מוכן", 60)
     shot("export-done")
     found = [os.path.join(r, f) for r, _, fs in os.walk(HOME) for f in fs if f.endswith(".docx")]
     log.append("     export: saved = " + ", ".join(p.replace(HOME, "~") for p in found))
-    import io, zipfile, msoffcrypto
-    with open(found[0], "rb") as fh:
-        office = msoffcrypto.OfficeFile(fh)
-        office.load_key(password=export_password, verify_password=True)
-        plain = io.BytesIO()
-        office.decrypt(plain, verify_integrity=True)
+    import zipfile
+    # The file opens without a password (D-081): a plain Word package.
+    plain = found[0]
     xml = zipfile.ZipFile(plain).read("word/document.xml").decode()
-    log.append("     export: encrypted, opens with the password, integrity ok")
+    log.append("     export: opens without a password = True")
     log.append("     export: names restored = " + str("נועם" in xml) + ", tags left = " + str("[ילד]" in xml or "[אם]" in xml))
     log.append("     export: author in metadata = " + str("creator" in zipfile.ZipFile(plain).read("docProps/core.xml").decode()))
     button("סגירה").click()

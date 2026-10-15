@@ -189,6 +189,26 @@ describe("main screens", () => {
     expect(sign?.textContent).toMatch(/מומחית.*בהדרכת ד"ר נועה בדויה/);
   });
 
+  it("the report is exported without a password, as Word or as a print-only PDF", async () => {
+    const exported: [string, unknown][] = [];
+    const { user, core } = await openApp();
+    mockIPC((cmd, args) => {
+      if (cmd.startsWith("export_")) exported.push([cmd, args]);
+      return core.handle(cmd, args);
+    });
+    await openCase(user);
+    await user.click(screen.getByRole("button", { name: /הוצאת הדוח/ }));
+    expect(await screen.findByText("נשמר בתיקיית ההורדות, ונפתח בלי סיסמה.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "הפקת הקובץ" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "הפקת הקובץ" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByText(/סיסמה/)).toBeNull();
+    await user.click(within(dialog).getByRole("radio", { name: /PDF נעול/ }));
+    await user.click(within(dialog).getByRole("button", { name: "הפקת הדוח" }));
+    await waitFor(() => expect(exported).toEqual([["export_pdf", { caseId: expect.any(String), password: null }]]));
+    expect(await screen.findByRole("dialog", { name: "הדוח מוכן" })).not.toHaveTextContent(/סיסמה/);
+  });
+
   it("the page is Hebrew and right-to-left", async () => {
     await openApp();
     await screen.findByRole("button", { name: /בתיק של נועם$/ });

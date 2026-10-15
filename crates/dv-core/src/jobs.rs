@@ -420,7 +420,7 @@ enum ExportFormat {
         password: Option<Zeroizing<String>>,
     },
     Pdf {
-        password: Zeroizing<String>,
+        password: Option<Zeroizing<String>>,
     },
 }
 
@@ -522,11 +522,11 @@ impl ExportJob {
                                 regular: &regular,
                                 bold: bold.as_deref(),
                             },
-                            password,
+                            password.as_deref().map(String::as_str),
                         )
                         .map_err(export_error)
                     });
-                (true, true, bytes)
+                (true, password.is_some(), bytes)
             }
         }
     }
@@ -1063,17 +1063,20 @@ impl Core {
         )
     }
 
-    /// The report as a locked PDF (EX-3, D-049): it opens with `password`, can be printed but
-    /// not changed, and its SHA-256 goes into the audit log so a copy can be checked later.
+    /// The report as a locked PDF (EX-3, D-049): it can be printed but not changed, and its
+    /// SHA-256 goes into the audit log so a copy can be checked later. With `password` it
+    /// opens only with it; without one it opens for anyone (D-081).
     pub fn begin_export_pdf(
         &mut self,
         case_id: &str,
-        password: &str,
+        password: Option<&str>,
     ) -> Result<ExportJob, CoreError> {
         self.export_job(
             case_id,
             ExportFormat::Pdf {
-                password: Zeroizing::new(password.to_owned()),
+                password: password
+                    .filter(|p| !p.is_empty())
+                    .map(|p| Zeroizing::new(p.to_owned())),
             },
         )
     }
@@ -1113,7 +1116,11 @@ impl Core {
         self.finish_export(job.run()).map(|(b, _)| b)
     }
 
-    pub fn export_pdf(&mut self, case_id: &str, password: &str) -> Result<Vec<u8>, CoreError> {
+    pub fn export_pdf(
+        &mut self,
+        case_id: &str,
+        password: Option<&str>,
+    ) -> Result<Vec<u8>, CoreError> {
         let job = self.begin_export_pdf(case_id, password)?;
         self.finish_export(job.run()).map(|(b, _)| b)
     }

@@ -322,7 +322,7 @@ export const ipc = {
   checkExport: (caseId: string) => call("check_export", { caseId }),
   exportReport: (caseId: string, password: string | null) => call("export_report", { caseId, password }),
   /** EX-3: a locked PDF (opens with the password, prints, cannot be changed). */
-  exportPdf: (caseId: string, password: string) => call("export_pdf", { caseId, password }),
+  exportPdf: (caseId: string, password: string | null) => call("export_pdf", { caseId, password }),
   /** When this vault exported exactly this PDF, or `null` (changed, or not made here). */
   checkOriginal: async (file: File): Promise<number | null> => {
     const bytes = new Uint8Array(await file.arrayBuffer());

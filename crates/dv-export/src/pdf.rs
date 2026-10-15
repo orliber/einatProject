@@ -657,17 +657,18 @@ fn random<const N: usize>() -> Result<[u8; N], ExportError> {
     Ok(b)
 }
 
-/// The report as a PDF that opens with `password` and can be printed but not changed.
+/// The report as a PDF that can be printed but not changed. With `password` it opens only
+/// with it; without one (her choice, D-081) it opens for anyone and stays print-only.
 pub fn render_pdf(
     report: &Report,
     fonts: PdfFonts<'_>,
-    password: &str,
+    password: Option<&str>,
 ) -> Result<Vec<u8>, ExportError> {
-    if password.chars().count() < MIN_PASSWORD_CHARS {
+    if password.is_some_and(|p| p.chars().count() < MIN_PASSWORD_CHARS) {
         return Err(ExportError::WeakPassword);
     }
     let mut doc = build(report, fonts)?;
-    lock(&mut doc, password)?;
+    lock(&mut doc, password.unwrap_or_default())?;
     let mut out = Vec::new();
     doc.save_to(&mut out)
         .map_err(|e| ExportError::Package(e.to_string()))?;
@@ -1012,14 +1013,14 @@ mod tests {
             bold: None,
         };
         assert!(matches!(
-            render_pdf(&r, fonts, "קצר"),
+            render_pdf(&r, fonts, Some("קצר")),
             Err(ExportError::WeakPassword)
         ));
         assert!(matches!(
-            render_pdf(&r, fonts, "סיסמה-לקובץ-1"),
+            render_pdf(&r, fonts, Some("סיסמה-לקובץ-1")),
             Err(ExportError::Pdf(_))
         ));
-        let pdf = render_pdf(&r, fonts, "נהר-ענן-42-שקד-אורן").unwrap();
+        let pdf = render_pdf(&r, fonts, Some("נהר-ענן-42-שקד-אורן")).unwrap();
         assert!(pdf.starts_with(b"%PDF-2.0"));
         // Encrypted: no readable text, no name, no metadata.
         let raw = String::from_utf8_lossy(&pdf);
@@ -1035,7 +1036,16 @@ mod tests {
         // lopdf checks the password against U independently of the code above; that the
         // file opens in a reader (pdfinfo, pdftoppm with -upw) was checked by hand.
         // Each export is its own file: the fingerprint identifies this one.
-        assert_ne!(render_pdf(&r, fonts, "נהר-ענן-42-שקד-אורן").unwrap(), pdf);
+        assert_ne!(
+            render_pdf(&r, fonts, Some("נהר-ענן-42-שקד-אורן")).unwrap(),
+            pdf
+        );
+
+        // Without a password (D-081): it opens for anyone, and is still print-only.
+        let open = render_pdf(&r, fonts, None).unwrap();
+        assert!(String::from_utf8_lossy(&open).contains("/Encrypt"));
+        let doc = Document::load_mem(&open).unwrap();
+        assert!(!doc.get_pages().is_empty());
     }
     #[test]
     fn a_notice_opens_without_a_password_and_cannot_be_changed() {

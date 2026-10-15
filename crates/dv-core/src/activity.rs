@@ -125,7 +125,8 @@ fn describe(
         "blocked" => ("send", "השער עצר שליחה (נמצא מזהה)".to_owned(), true),
         "override" => ("send", "שליחה אושרה למרות אזהרה".to_owned(), true),
         "export" if flag("protected") => ("case", "דוח Word הופק, מוגן בסיסמה".to_owned(), false),
-        "export" => ("case", "דוח Word הופק, בלי סיסמה".to_owned(), true),
+        // Without a password is the usual export now (D-081), not a line to notice.
+        "export" => ("case", "דוח הופק, נפתח בלי סיסמה".to_owned(), false),
         "backup_written" => ("security", "גיבוי מוצפן נשמר".to_owned(), false),
         "backup_checked" if flag("ok") => (
             "security",

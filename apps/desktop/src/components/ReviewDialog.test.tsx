@@ -5,7 +5,6 @@ import { AppContext, type AppApi } from "../App";
 import { prepared, status } from "../test/fixtures";
 import { ReviewDialog } from "./ReviewDialog";
 import { Dialog } from "./ui";
-import { makePassphrase } from "./ExportDialog";
 
 function api(over: Partial<ReturnType<typeof status>> = {}): AppApi {
   return { status: status(over), go: vi.fn(), refresh: vi.fn(async () => undefined), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn(async () => undefined) };
@@ -131,14 +130,7 @@ describe("ReviewDialog", () => {
   });
 });
 
-describe("makePassphrase", () => {
-  it("is long enough for the export and differs each time", () => {
-    const a = makePassphrase();
-    expect(a.length).toBeGreaterThanOrEqual(10);
-    expect(a.split("-")).toHaveLength(5);
-    expect(new Set(Array.from({ length: 20 }, makePassphrase)).size).toBeGreaterThan(15);
-  });
-
+describe("a name the gate refused", () => {
   it("a blocked name can be decided on the spot, then the request is rebuilt (F1)", async () => {
     const calls: { cmd: string; args: unknown }[] = [];
     mockIPC((cmd, args) => {

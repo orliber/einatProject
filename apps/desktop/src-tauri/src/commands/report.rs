@@ -85,13 +85,15 @@ pub(crate) async fn export_pdf(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     case_id: String,
-    password: String,
+    password: Option<String>,
 ) -> Res<String> {
     let dir = export_dir(&app)?;
-    let password = zeroize::Zeroizing::new(password);
+    let password = password
+        .filter(|p| !p.is_empty())
+        .map(zeroize::Zeroizing::new);
     let (bytes, check) = off_lock(
         &state,
-        move |c| c.begin_export_pdf(&case_id, &password),
+        move |c| c.begin_export_pdf(&case_id, password.as_deref().map(String::as_str)),
         |job| job.run(),
         |c, exported| c.finish_export(exported),
     )

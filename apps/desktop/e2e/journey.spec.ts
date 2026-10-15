@@ -103,7 +103,7 @@ test("the export page lists what goes into the file and is accessible", async ({
   await expect(page.getByRole("article", { name: "הדוח, כמו בקובץ" })).toBeVisible();
   await stage(page, /הוצאת הדוח/).click();
   await expect(stage(page, /הוצאת הדוח/)).toHaveAttribute("aria-current", "step");
-  await expect(page.getByText(/סיסמה/).first()).toBeVisible();
+  await expect(page.getByText("נשמר בתיקיית ההורדות, ונפתח בלי סיסמה.")).toBeVisible();
   await expectAccessible(page);
 });
 
