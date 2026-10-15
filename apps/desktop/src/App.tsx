@@ -1,3 +1,8 @@
+// The base styles come first, before any component's stylesheet, whatever chunk the bundler
+// puts them in: a component rule overrides a base rule by coming later.
+import "./styles/tokens.css";
+import "./styles/base.css";
+import "./styles/motion.css";
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ipc, onCoreEvent, type AppStatus, type UiError } from "./ipc/client";
