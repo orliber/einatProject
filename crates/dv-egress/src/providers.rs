@@ -17,7 +17,7 @@ use dv_privacy::ClearedPayload;
 use serde_json::{json, Value};
 use zeroize::Zeroizing;
 
-use crate::{admit, build_client, check_fields, EgressError, RateLimit, Transport};
+use crate::{admit, build_client, check_fields, retry, EgressError, RateLimit, Transport};
 
 pub const OPENAI_HOST: &str = "api.openai.com";
 pub const GEMINI_HOST: &str = "generativelanguage.googleapis.com";
@@ -589,18 +589,7 @@ impl Transport for ProviderTransport {
         if !self.limit.lock().is_ok_and(|mut l| l.allow()) {
             return Err(EgressError::RateLimited);
         }
-        let mut delay = Duration::from_secs(2);
-        let mut attempt = 0;
-        loop {
-            match self.post_once(c.model, &bytes) {
-                Err(EgressError::Unavailable(_) | EgressError::RateLimited) if attempt < 2 => {
-                    std::thread::sleep(delay);
-                    delay *= 2;
-                    attempt += 1;
-                }
-                other => return other,
-            }
-        }
+        retry(|| self.post_once(c.model, &bytes))
     }
 }
 

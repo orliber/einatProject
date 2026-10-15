@@ -27,19 +27,6 @@ impl Core {
         }
         let suspects = prepared.suspects.len();
         let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
-        let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
-        let is_name = |t: &str| data.is_name.contains(&v.token_hmac(t));
-        let past = |t: &str| !data.past.is_empty() && data.past.contains(&v.token_hmac(t));
-        let ctx = PrivacyContext {
-            case_id: &data.case_id,
-            identities: &data.identities,
-            practitioner: &data.practitioner,
-            allowlisted: &allow,
-            confirmed_names: &is_name,
-            past_names: &past,
-            today: today(),
-            masks: None,
-        };
         let mut case_tags: HashSet<String> = data
             .identities
             .iter()
@@ -62,7 +49,10 @@ impl Core {
             fixed,
             cuts,
             mut codes,
-        } = answer_refusals(body, &ctx, &case_tags, suspects, &data.masks);
+        } = {
+            let lookups = data.lookups(v);
+            answer_refusals(body, &lookups.context(), &case_tags, suspects, &data.masks)
+        };
         if (!fixed.is_empty() || !cuts.is_empty()) && result.is_ok() {
             codes.sort();
             codes.dedup();
@@ -222,19 +212,8 @@ impl Core {
             if meta.consent.is_none() {
                 return Err(CoreError::ConsentMissing);
             }
-            let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
-            let is_name = |t: &str| data.is_name.contains(&v.token_hmac(t));
-            let past = |t: &str| !data.past.is_empty() && data.past.contains(&v.token_hmac(t));
-            let ctx = PrivacyContext {
-                case_id: &data.case_id,
-                identities: &data.identities,
-                practitioner: &data.practitioner,
-                allowlisted: &allow,
-                confirmed_names: &is_name,
-                past_names: &past,
-                today: today(),
-                masks: Some(&data.masks),
-            };
+            let lookups = data.lookups(v);
+            let ctx = lookups.masked_context();
             let run = |t: &str| {
                 hints
                     .filter(t, &ctx)

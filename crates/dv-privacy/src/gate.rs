@@ -3,15 +3,14 @@
 
 use std::collections::HashSet;
 use std::fmt;
-use std::sync::LazyLock;
 
 use aws_lc_rs::digest;
 use dv_domain::PRACTITIONER_TAG;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::lexicon::LEXICON;
+use crate::masks::TAG_RE;
 use crate::matcher::{quote_bytes, quote_opened, strip_quote_tail};
 use crate::patterns;
 use crate::pipeline::{
@@ -34,8 +33,6 @@ pub const GENERIC_TAGS: &[&str] = &[
     "[בית_חולים]",
     PRACTITIONER_TAG,
 ];
-
-static TAG_RE: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(r"\[[^\[\]\n]{1,40}\]").ok());
 
 /// A tag the gate lets through: one of the case's, a generic one, a "missing" note, or a
 /// score of a past report in the fixed form (round 32: a number and fixed table words only).

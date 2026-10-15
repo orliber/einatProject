@@ -7,8 +7,10 @@
 //! the vault, encrypted with the case; nothing of them goes out.
 
 use std::cell::RefCell;
+use std::sync::LazyLock;
 
 pub use dv_domain::MaskEntry;
+use regex::Regex;
 
 use crate::text::normalize;
 
@@ -61,6 +63,11 @@ pub fn is_mask_tag(tag: &str) -> bool {
         && n.bytes().all(|b| b.is_ascii_digit())
         && !n.starts_with('0')
 }
+
+/// Any square-bracketed run of up to 40 characters on one line: what may be a tag. The gate,
+/// the fix loop, the restore step and the bracket check of the filter all read tags with it.
+pub(crate) static TAG_RE: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r"\[[^\[\]\n]{1,40}\]").ok());
 
 /// A tag the filter writes by itself, numbered or not: it names a kind, never a person.
 #[must_use]
