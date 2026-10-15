@@ -113,7 +113,13 @@ function Press-Named($root, [string] $pattern, [string] $what, [int] $seconds = 
             if ($c.Name -notmatch $pattern -or -not $c.IsEnabled) { continue }
             $p = $null
             if ($e.TryGetCurrentPattern($invoke, [ref] $p)) {
-                $p.Invoke()
+                # A menu item closes its menu as it acts, and UI Automation may then report the
+                # element gone; the next step (its dialog's field) shows whether it acted.
+                try { $p.Invoke() }
+                catch [System.Management.Automation.MethodInvocationException] {
+                    if ($_.Exception.InnerException -isnot [System.Windows.Automation.ElementNotAvailableException]) { throw }
+                    Write-Host "(the item closed its menu as it was pressed)"
+                }
                 Write-Host "pressed: $($c.Name)"
                 return
             }
