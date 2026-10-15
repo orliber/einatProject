@@ -519,19 +519,20 @@ function FollowUpPanel({ api }: { api: CaseApi }) {
   const num = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
   return (
     <section className="followup" aria-label="השוואה לאבחון הקודם">
-      <button type="button" className="checklist-head" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <b className="grow">
-          אבחון מעקב{view.previous_gone ? " · האבחון הקודם נמחק" : ` · האבחון הקודם: ${view.previous_code}`}
-          {view.rows.length > 0 && ` · ${view.rows.length} מדדים להשוואה`}
-        </b>
+      <div className="checklist-head">
+        <button type="button" className="checklist-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+          <b className="grow">
+            אבחון מעקב{view.previous_gone ? " · האבחון הקודם נמחק" : ` · האבחון הקודם: ${view.previous_code}`}
+            {view.rows.length > 0 && ` · ${view.rows.length} מדדים להשוואה`}
+          </b>
+          <span aria-hidden="true">{open ? "▴" : "▾"}</span>
+        </button>
         {!view.previous_gone && (
-          <span role="link" tabIndex={0} className="link-small" onClick={(e) => { e.stopPropagation(); go({ name: "case", id: view.previous_id, view: "report" }); }}
-            onKeyDown={(e) => { if (e.key === "Enter") go({ name: "case", id: view.previous_id, view: "report" }); }}>
+          <button type="button" className="link-btn small" onClick={() => go({ name: "case", id: view.previous_id, view: "report" })}>
             לדוח הקודם
-          </span>
+          </button>
         )}
-        <span aria-hidden="true">{open ? "▴" : "▾"}</span>
-      </button>
+      </div>
       {open && (
         <div className="followup-body">
           {view.rows.length === 0 ? (

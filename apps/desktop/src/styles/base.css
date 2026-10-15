@@ -81,6 +81,8 @@ p {
 .btn {
   min-height: 44px;
   padding: 0 18px;
+  /* A double click acts twice at most; it never paints the page blue. */
+  user-select: none;
   font-size: var(--text-md);
   border-radius: var(--radius-md);
   border: 1px solid var(--line-strong);

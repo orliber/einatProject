@@ -168,9 +168,24 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
    *  vault lock, and `empty` follows the box only when it turns empty or back (F1a). */
   // Kept while the vault is open: leaving for another stage and coming back finds the editor
   // open with what she typed (F1a, "ובעזיבה").
-  const [editing, setEditing] = useKept<{ id: string | null; text: string; at?: string | undefined; empty: boolean } | null>(`case:${caseId}:report:${s.key}:editing`, null);
+  const [editing, setEditing] = useKept<{ id: string | null; text: string; original: string; at?: string | undefined; empty: boolean } | null>(`case:${caseId}:report:${s.key}:editing`, null);
   const editBox = useRef<LocalTextHandle>(null);
-  const edit = (id: string | null, text: string, at?: string) => setEditing({ id, text, at, empty: !text.trim() });
+  const edit = (id: string | null, text: string, at?: string) => setEditing({ id, text, original: text, at, empty: !text.trim() });
+  /** "ביטול" or Esc with a changed text: asked first, so one key never loses what she typed. */
+  const [leaving, setLeaving] = useState(false);
+  function close() {
+    setLeaving(false);
+    setEditing(null);
+  }
+  function cancel() {
+    if (!editing) return;
+    const typed = editBox.current?.value() ?? editing.text;
+    if (typed.trim() === editing.original.trim()) close();
+    else setLeaving(true);
+  }
+  /** Just after an action: the second click of a double click lands on what the first one
+   *  revealed (an insert slot where the bar was), so that slot is held for a moment. */
+  const [settling, setSettling] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [open, setOpen] = useState<"sources" | "change" | null>(null);
   /** The paragraph whose "✦ with Claude" card is open. */
@@ -206,11 +221,14 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
 
   async function act(fn: () => Promise<unknown>) {
     setError(null);
+    setSettling(true);
     try {
       await fn();
       await reload();
     } catch (e) {
       setError(fail(e as never));
+    } finally {
+      window.setTimeout(() => setSettling(false), 400);
     }
   }
 
@@ -243,13 +261,13 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
     const text = editBox.current?.value() ?? editing.text;
     const { id, at } = editing;
     // A new paragraph left empty is just not added.
-    if (!text.trim() && !id) return setEditing(null);
+    if (!text.trim() && !id) return close();
     await act(async () => {
       // All the text deleted and saved: the paragraph goes away.
       if (id && !text.trim()) await ipc.rejectParagraph(caseId, id);
       else if (id) await ipc.editParagraph(caseId, id, text);
       else await ipc.addOwnParagraph(caseId, s.key, text, at ?? "end");
-      setEditing(null);
+      close();
     });
   }
 
@@ -379,17 +397,25 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
         placeholder="כותבים כאן, כמו בוורד. שמות מוסתרים לפני כל שליחה."
         onText={(text) => { const { id, at } = editing; setEditing((e) => (e && e.id === id && e.at === at ? { ...e, text } : e)); }}
         onEmptyChange={(empty) => { const { id, at } = editing; setEditing((e) => (e && e.id === id && e.at === at ? { ...e, empty } : e)); }}
-        onKeyDown={(e) => { if (e.key === "Escape") setEditing(null); if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void save(); }} />
+        onKeyDown={(e) => { if (e.key === "Escape") { if (leaving) close(); else cancel(); } if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void save(); }} />
+      {leaving ? (
+        <div className="row" role="group" aria-label="לבטל את העריכה?">
+          <span className="small grow">לבטל את מה שכתבת כאן? הטקסט לא נשמר.</span>
+          <button type="button" className="btn btn-small danger-text" onClick={close}>כן, לבטל</button>
+          <button type="button" className="btn btn-primary btn-small" onClick={() => { setLeaving(false); editBox.current?.focus(); }}>להמשיך לערוך</button>
+        </div>
+      ) : (
       <div className="row">
         <button type="button" className="btn btn-primary btn-small" disabled={!editing.id && editing.empty} onClick={() => void save()}>
           {editing.id && editing.empty ? "שמירה (הפסקה תימחק)" : "שמירה"}
         </button>
-        <button type="button" className="btn btn-small" onClick={() => setEditing(null)}>ביטול</button>
+        <button type="button" className="btn btn-small" onClick={cancel}>ביטול</button>
         <span className="small muted grow">Ctrl+Enter לשמירה · Esc לביטול</span>
         {editing.id && (
-          <button type="button" className="link-btn small danger-text" onClick={() => { const id = editing.id ?? ""; void act(async () => { await ipc.rejectParagraph(caseId, id); setEditing(null); }); }}>מחיקת הפסקה</button>
+          <button type="button" className="link-btn small danger-text" onClick={() => { const id = editing.id ?? ""; void act(async () => { await ipc.rejectParagraph(caseId, id); close(); }); }}>מחיקת הפסקה</button>
         )}
       </div>
+      )}
     </div>
   );
 
@@ -399,7 +425,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
       <div key={`slot-${at}`}>{editor}</div>
     ) : (
       <div key={`slot-${at}`} className="a4-insert">
-        <button type="button" className="a4-insert-btn" disabled={editing !== null} aria-label="הוספת פסקה משלי כאן"
+        <button type="button" className="a4-insert-btn" disabled={editing !== null || settling} aria-label="הוספת פסקה משלי כאן"
           onClick={() => edit(null, "", at)}>+ פסקה משלי כאן</button>
       </div>
     );
@@ -417,7 +443,8 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
       {s.sortable && (
         <div className="a4-sources">
           <span>{sources.length ? "נכתב מתוך:" : "אין חומרים לסעיף."}</span>
-          {sources.map((i) => <span key={i.id} className="a4-source">{i.title || kindLabel[i.kind]}</span>)}
+          {sources.slice(0, 6).map((i) => <span key={i.id} className="a4-source">{i.title || kindLabel[i.kind]}</span>)}
+          {sources.length > 6 && <span className="a4-source">ועוד {sources.length - 6}</span>}
           <span className="a4-pop-anchor">
             <button type="button" className="a4-source-edit" aria-expanded={open === "sources"} onClick={() => setOpen(open === "sources" ? null : "sources")}>
               {sources.length ? "+ חומר / הסרה" : "+ קישור חומרים"}
