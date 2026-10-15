@@ -115,7 +115,8 @@ test("the report page opens a section's guide and her own section's points", asy
   await page.getByRole("navigation", { name: "ניווט ראשי" }).getByRole("button", { name: "הגדרות" }).click();
   await page.getByRole("navigation", { name: "חלקי ההגדרות" }).getByRole("button", { name: "הדוח" }).click();
   const hers = page.getByRole("checkbox", { name: /^רקע/ });
-  await hers.check();
+  // The box follows the saved setting, so it turns on only after the save: click and wait.
+  await hers.click();
   await expect(hers).toBeChecked();
   await page.getByRole("navigation", { name: "ניווט ראשי" }).getByRole("button", { name: "תיקים" }).click();
   await createCase(page, CHILD);
