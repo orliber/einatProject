@@ -368,21 +368,23 @@ describe("writing the report", () => {
     const { user, calls } = await openApp(true, false);
     await openCase(user);
     await user.click((screen.getAllByRole("button", { name: /חומרים/ })[0] as HTMLElement));
-    const overview = await screen.findByRole("region", { name: "סיכום החומרים" });
-    expect(within(overview).getByText(/עוד לא נקרא/)).toBeInTheDocument();
+    const list = await screen.findByRole("region", { name: "רשימת החומרים" });
+    expect(within(list).getByText(/עוד לא נקרא/)).toBeInTheDocument();
     expect(calls).not.toContain("prepare_sort");
-    await user.click(await screen.findByRole("button", { name: "הדבקת טקסט (דוחות ואבחונים קודמים)" }));
+    await user.click(await screen.findByRole("button", { name: "הוספה לאבחונים קודמים" }));
+    await user.click(await screen.findByRole("menuitem", { name: "הדבקת טקסט" }));
     await user.type(screen.getByLabelText("כותרת"), "דוח קלינאית");
     await user.type(screen.getByLabelText("הטקסט"), "נבדק ב-3/2024.{Enter}{Enter}נמצא עיכוב קל בשפה.{Enter}{Enter}מומלץ על טיפול בשפה.");
     await user.click(screen.getByRole("button", { name: "שמירה בתיק" }));
     // Sorted and summed up without a window, and the report recorded in the report's order.
-    expect(await within(overview).findByText(/3\/2024 · דוח של איש מקצוע/, {}, { timeout: 4000 })).toBeInTheDocument();
-    expect(within(overview).getByText("נמצא עיכוב קל בשפה.")).toBeInTheDocument();
-    expect(within(overview).queryByText(/עוד לא נקרא/)).not.toBeInTheDocument();
+    const prior = await screen.findByRole("region", { name: "אבחונים קודמים, בסדר הדוח" }, { timeout: 4000 });
+    expect(within(prior).getByText(/3\/2024 · דוח של איש מקצוע/)).toBeInTheDocument();
+    expect(within(prior).getByText("נמצא עיכוב קל בשפה.")).toBeInTheDocument();
+    expect(within(list).queryByText(/עוד לא נקרא/)).not.toBeInTheDocument();
     expect(calls).toContain("send_sort");
     expect(screen.queryByRole("dialog", { name: /לפני שליחה/ })).not.toBeInTheDocument();
     // The material's window shows the whole summary, as text.
-    await user.click(within(overview).getByRole("button", { name: "דוח קלינאית" }));
+    await user.click(within(prior).getByRole("button", { name: "דוח קלינאית" }));
     const reading = await screen.findByRole("region", { name: "מה כתוב בחומר" });
     expect(within(reading).getByText(/נבדק ב-3\/2024/)).toBeInTheDocument();
   });
@@ -407,7 +409,8 @@ describe("writing the report", () => {
     const { user, calls } = await openApp();
     await openCase(user);
     await user.click((screen.getAllByRole("button", { name: /חומרים/ })[0] as HTMLElement));
-    await user.click(await screen.findByRole("button", { name: "הדבקת טקסט (דוחות ואבחונים קודמים)" }));
+    await user.click(await screen.findByRole("button", { name: "הוספה לאבחונים קודמים" }));
+    await user.click(await screen.findByRole("menuitem", { name: "הדבקת טקסט" }));
     await user.type(screen.getByLabelText("כותרת"), "דוח קלינאית");
     await user.type(screen.getByLabelText("הטקסט"), "נמצא עיכוב קל בשפה.");
     await user.click(screen.getByRole("button", { name: "שמירה בתיק" }));
@@ -482,7 +485,7 @@ describe("text being typed (F1a)", () => {
     // No pause: the box has not reported it yet when she leaves.
     fireEvent.change(box, { target: { value: "נוסח שלא נשמר עדיין" } });
     await user.click(screen.getAllByRole("button", { name: /חומרים/ })[0] as HTMLElement);
-    await screen.findByRole("button", { name: /הדבקת טקסט/ });
+    await screen.findByRole("heading", { name: "מה יש בתיק" });
     await user.click(screen.getAllByRole("button", { name: /כתיבה$/ })[0] as HTMLElement);
     const again = await screen.findByRole("textbox", { name: /עריכת פסקה בסעיף/ });
     expect(again).toHaveValue("נוסח שלא נשמר עדיין");
