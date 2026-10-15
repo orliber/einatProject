@@ -76,7 +76,7 @@ describe("main screens", () => {
     expect(within(side).getByText(/כתוב 85, ובטבלה 95/)).toBeInTheDocument();
   });
 
-  it("a case whose last send failed shows 'נכשל' in the list", async () => {
+  it("a case whose last send failed says so in the list", async () => {
     const core = new FakeCore();
     await core.handle("unlock", { password: "x" });
     mockIPC(async (cmd, args) => {
@@ -86,8 +86,8 @@ describe("main screens", () => {
     });
     const view = render(<App />);
     const row = (await screen.findByRole("button", { name: /בתיק של נועם$/ })).closest("tr") as HTMLElement;
-    expect(within(row).getByText("נכשל")).toBeInTheDocument();
-    expect(within(row).getByText(/השליחה האחרונה נכשלה/)).toBeInTheDocument();
+    expect(within(row).getByText("השליחה נכשלה")).toBeInTheDocument();
+    expect(within(row).getByText("לנסות שוב")).toBeInTheDocument();
     expect(await a11yViolations(view.container)).toEqual([]);
   });
 

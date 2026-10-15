@@ -9,7 +9,7 @@ import { ErrorLine, CloseIcon, Skeleton } from "../components/ui";
 import { ActionsMenu, type MenuItem } from "../components/Menu";
 import { SampleGuide } from "./case/SampleGuide";
 import { CaseSearch } from "./case/CaseSearch";
-import { ageWords } from "../components/AgeField";
+import { ageOf } from "../components/AgeField";
 import { MaterialsView } from "./case/MaterialsView";
 import { SectionWork } from "./case/SectionWork";
 import { DetailsView } from "./case/DetailsView";
@@ -323,7 +323,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const hasMaterials = detail.inputs.length > 0;
   const pendingCount = pending.reduce((n, s) => n + s.paragraphs.filter((p) => p.status === "proposed").length, 0);
   const child = detail.identities.find((i) => i.role === "child")?.value ?? "";
-  const age = detail.meta.age ? `גיל ${detail.meta.age.years}:${detail.meta.age.months}` : "";
+  const age = ageOf(detail.meta.age, detail.meta.child_gender);
   const current = detail.sections.find((s) => s.key === view);
   // Three stages: materials, writing (the report page and each section), taking the report out.
   const stage = view === "materials" ? 1 : view === "finish" ? 3 : view === "details" ? 0 : 2;
@@ -375,7 +375,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         <button type="button" className="case-back" onClick={() => go({ name: "cases" })}>→ תיקים</button>
         <button type="button" className="case-id" title="פרטים ושמות להסתרה" onClick={() => go({ name: "case", id: caseId, view: "details" })}>
           <span className="case-child" title={child || detail.meta.code}>{child || detail.meta.code}</span>
-          {age && <span className="case-age" title={detail.meta.age ? ageWords(detail.meta.age) : undefined}>{age}</span>}
+          {age && <span className="case-age">{age}</span>}
           <span className={detail.meta.consent ? "chip chip-ok" : "chip chip-warn"}>{detail.meta.consent ? "✓ הסכמה" : "חסרה הסכמה"}</span>
           {detail.meta.follows && <span className="chip chip-sand">מעקב</span>}
         </button>

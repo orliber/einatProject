@@ -67,6 +67,8 @@ test("a case: report, materials and export", async ({ page }) => {
   await unlock(page);
   await page.getByRole("button", { name: /בתיק של נועם$/ }).click();
   await expect(page.getByRole("article", { name: "הדוח, כמו בקובץ" })).toBeVisible();
+  // The pointer stays where the case list's button was; off the page, no paragraph is hovered.
+  await page.mouse.move(0, 0);
   await expectLooksApproved(page, "case-report");
   await stage(page, /חומרים/).click();
   await expect(stage(page, /חומרים/)).toHaveAttribute("aria-current", "step");
