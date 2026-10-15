@@ -312,7 +312,7 @@ impl CoreError {
             ),
             CoreError::Vault(VaultError::OtherComputer) => (
                 "other_computer",
-                "הסיסמה פותחת את הכספת רק במחשב ובחשבון ה-Windows שבהם היא נקבעה. במחשב אחר, וגם באותו מחשב אחרי התקנה מחדש של Windows או איפוס החשבון, צריך את ערכת השחזור. אחרי הכניסה עם הערכה אפשר לבחור סיסמה בהגדרות, והיא תעבוד כאן.".to_owned(),
+                "הסיסמה פותחת את הכספת רק במחשב ובחשבון ה-Windows שבהם היא נקבעה. בעותק של תיקיית הכספת, וגם באותו מחשב אחרי התקנה מחדש של Windows או איפוס החשבון, נכנסים כאן עם ערכת השחזור, ואחר כך בוחרים סיסמה בהגדרות כדי שתעבוד גם כאן. אם המחשב הקודם אבד, אפשר גם לשחזר את הגיבוי עם הסיסמה.".to_owned(),
             ),
             CoreError::Vault(VaultError::RecoveryKeyInvalid) => (
                 "recovery_invalid",
@@ -634,6 +634,9 @@ pub struct Core {
     /// Wall-clock time of the shell's last timer tick (sleep detection).
     last_tick: Option<SystemTime>,
     failed_unlocks: u32,
+    /// When this run's wrong passwords or kits were typed: the ones just before she got in
+    /// are her own typos, and the opening does not report them (review of stage 5, U5).
+    failure_times: Vec<Instant>,
     not_before: Option<Instant>,
     /// Since when a password or kit is being checked off the lock (an unlock, a new password
     /// or kit). One at a time: a second click never runs a second Argon2 in parallel, never

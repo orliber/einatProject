@@ -68,11 +68,24 @@ describe("the protection layers", () => {
     expect(screen.getByText("השליחה כבויה עכשיו (עצירת חירום).")).toBeInTheDocument();
   });
 
+  it("sending cannot be turned back on while the gate failed its check, and the stop is there while loading", async () => {
+    const broken = view(true);
+    broken.layers[1] = layer("privacy_gate", "הסתרת פרטים לפני שליחה", "warn", "הבדיקה של השער נכשלה עכשיו.");
+    let answer: (v: unknown) => void = () => undefined;
+    mockIPC(() => new Promise((r) => { answer = r; }));
+    show();
+    expect(await screen.findByRole("button", { name: /עצירת חירום/ })).toBeEnabled();
+    expect(screen.getByText("בודקת…")).toBeInTheDocument();
+    answer(broken);
+    expect(await screen.findByRole("button", { name: /להפעיל שליחה מחדש/ })).toBeDisabled();
+    expect(screen.getByText(/אי אפשר להפעיל שליחה מחדש/)).toBeInTheDocument();
+  });
+
   it("saves the same page as a PDF and says where", async () => {
     mockIPC((cmd) => (cmd === "export_security_pdf" ? "C:\\Downloads\\שכבות ההגנה.pdf" : view(false)));
     const notify = vi.fn();
     show(api({ notify }));
     fireEvent.click(await screen.findByRole("button", { name: "לשמור כ-PDF" }));
-    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith("נשמר: C:\\Downloads\\שכבות ההגנה.pdf"));
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith("נשמר: \u2066C:\\Downloads\\שכבות ההגנה.pdf\u2069"));
   });
 });

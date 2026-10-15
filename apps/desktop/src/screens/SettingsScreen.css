@@ -199,3 +199,8 @@
   text-decoration: underline;
   cursor: pointer;
 }
+.layer-title {
+  margin: 0;
+  font-size: inherit;
+  font-weight: 700;
+}

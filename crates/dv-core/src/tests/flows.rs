@@ -1224,7 +1224,7 @@ fn only_the_material_deleted_last_can_be_put_back() {
 fn the_emergency_stop_works_while_locked_and_shows_on_the_security_screen() {
     let (_dir, mut core, _case) = setup(None);
     core.lock();
-    let stopped = core.set_send_stopped(true);
+    let stopped = core.set_send_stopped(true).unwrap();
     let send = |s: &SecurityStatus| {
         s.items
             .iter()
@@ -1234,7 +1234,7 @@ fn the_emergency_stop_works_while_locked_and_shows_on_the_security_screen() {
             .clone()
     };
     let on = (stopped.send_stopped, send(&stopped));
-    let resumed = core.set_send_stopped(false);
+    let resumed = core.set_send_stopped(false).unwrap();
     assert_eq!(on, (true, "warn".to_owned()));
     assert!(!resumed.send_stopped);
     assert_eq!(send(&resumed), "ok");

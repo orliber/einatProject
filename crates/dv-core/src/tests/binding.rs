@@ -99,8 +99,11 @@ fn a_new_vault_is_bound_to_this_computer_and_she_types_only_her_password() {
 
     // The kit opens it there, and a new password chosen there binds to that computer.
     there.unlock_with_recovery(&kit).unwrap();
-    assert_eq!(state(&mut there), "ok");
+    // Bound, but to the first computer: the page says the password does not open it here yet
+    // (review of stage 5, U2).
+    assert_eq!(state(&mut there), "warn");
     there.change_password(&kit, true, PASSWORD).unwrap();
+    assert_eq!(state(&mut there), "ok");
     there.lock();
     assert!(there.unlock(PASSWORD).unwrap().unlocked);
     // ...and the first computer's folder still opens with the password there.

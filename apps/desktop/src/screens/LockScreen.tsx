@@ -56,6 +56,12 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
       if (seconds > 0) {
         setNow(Date.now());
         setWaitUntil(Date.now() + seconds * 1000);
+      } else if (e.code === "other_computer" && mode === "password") {
+        // Not a forgotten password: here only the kit opens it. The form turns to the kit,
+        // and the message says why (review of stage 5, U3).
+        setMode("recovery");
+        setSecret("");
+        setError(e.message ?? "במחשב הזה נכנסים עם ערכת השחזור.");
       } else {
         setError(e.message ?? "הפתיחה נכשלה.");
         setBroken(e.code === "vault" || e.code === "internal");

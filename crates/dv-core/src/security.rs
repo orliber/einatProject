@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::layers::{self, SecurityLayer, SelfChecks};
-use crate::{AppStatus, Core};
+use crate::{AppStatus, Core, CoreError};
 
 /// `ok` – on and verified · `warn` – off or unknown, she should look · `info` – a fact.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -104,8 +104,14 @@ impl Core {
         let status = self.status();
         let mut s = build(&status, dv_egress::is_stopped());
         // The password opens the vault only on this computer (D-076).
-        s.items
-            .insert(1, item("computer_bound", self.binding_state(), None));
+        let bound = self.binding_state();
+        s.items.insert(
+            1,
+            match bound {
+                "elsewhere" => item("computer_bound", "warn", Some(bound.to_owned())),
+                _ => item("computer_bound", bound, None),
+            },
+        );
         // The vault's pages stay in RAM, never in the page file (D-047).
         let memory = match self.memory_lock {
             Some(true) => "ok",
@@ -137,9 +143,17 @@ impl Core {
     }
 
     /// The emergency stop. Works while locked too: stopping must never need a password.
-    pub fn set_send_stopped(&mut self, stopped: bool) -> SecurityStatus {
+    /// Turning sending back on tries the gate and the sending rules first, and is refused
+    /// while either fails, so it is never open for a moment (review of stage 5, U1).
+    pub fn set_send_stopped(&mut self, stopped: bool) -> Result<SecurityStatus, CoreError> {
+        if !stopped && layers::stop_if_broken(SelfChecks::run()) {
+            return Err(CoreError::Refused(
+                "אי אפשר להפעיל שליחה מחדש: השער או כללי השליחה לא עברו את הבדיקה עכשיו. כדאי לפנות לאור."
+                    .to_owned(),
+            ));
+        }
         dv_egress::set_stopped(stopped);
-        self.security_status()
+        Ok(self.security_status())
     }
 }
 

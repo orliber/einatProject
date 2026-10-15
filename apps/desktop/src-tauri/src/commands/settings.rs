@@ -29,7 +29,7 @@ pub(crate) async fn set_send_stopped(
     state: tauri::State<'_, AppState>,
     stopped: bool,
 ) -> Res<SecurityStatus> {
-    with_core(&state, move |c| Ok(c.set_send_stopped(stopped))).await
+    with_core(&state, move |c| c.set_send_stopped(stopped)).await
 }
 
 /// The paragraph being edited now (memory only), kept in the vault if it locks meanwhile.

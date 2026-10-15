@@ -136,11 +136,19 @@ impl Core {
         Vault::verify_password_here(&self.dir, password, key.as_ref())
     }
 
-    /// The security page's line: bound (ok), nothing here to bind to (info), or not bound
-    /// although it could be (warn; it binds at the next opening with the password).
+    /// The security page's line: bound to this computer (ok), nothing here to bind to
+    /// (info), not bound although it could be (warn; it binds at the next opening with the
+    /// password), or bound to another computer (`elsewhere`: she came in with the kit, and
+    /// her password does not open it here until she chooses one; review of stage 5, U2).
     pub(crate) fn binding_state(&self) -> &'static str {
         match self.vault.as_ref() {
-            Some(v) if v.password_bound() => "ok",
+            Some(v) if v.password_bound() => {
+                if self.password_key_here().is_some() {
+                    "ok"
+                } else {
+                    "elsewhere"
+                }
+            }
             _ if !self.computer_seal.available() => "info",
             _ => "warn",
         }

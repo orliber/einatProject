@@ -18,6 +18,9 @@ fn failures_on_disk(dir: &Path) -> u32 {
         .unwrap_or(0)
 }
 
+/// Wrong tries this long before the opening that worked are taken as her own typos.
+const OWN_TYPOS: Duration = Duration::from_secs(120);
+
 /// What the opening says, only when there is something to say.
 fn since_last_text(failed: u32) -> Option<String> {
     match failed {
@@ -49,6 +52,7 @@ impl Core {
             last_activity: Instant::now(),
             last_tick: None,
             failed_unlocks: 0,
+            failure_times: Vec::new(),
             not_before: None,
             secret_work: None,
             secret_ticket: 0,
@@ -344,8 +348,17 @@ impl Core {
     ) -> Result<AppStatus, CoreError> {
         match result {
             Ok(mut vault) => {
-                // Also the tries before the program was last closed.
-                let failed = self.failed_unlocks.max(failures_on_disk(&self.dir));
+                // Also the tries before the program was last closed (every try is counted
+                // on disk), but not her own typos just before this opening.
+                let own = self
+                    .failure_times
+                    .iter()
+                    .filter(|t| t.elapsed() < OWN_TYPOS)
+                    .count();
+                let failed = failures_on_disk(&self.dir)
+                    .max(self.failed_unlocks)
+                    .saturating_sub(u32::try_from(own).unwrap_or(u32::MAX));
+                self.failure_times.clear();
                 if failed > 0 {
                     let _ = vault.record(
                         AuditEvent::UnlockFailed,
@@ -395,6 +408,7 @@ impl Core {
             Err(e) => {
                 if matches!(e, VaultError::WrongSecret | VaultError::RecoveryKeyInvalid) {
                     self.failed_unlocks += 1;
+                    self.failure_times.push(Instant::now());
                     let wait = 2u64.saturating_pow(self.failed_unlocks.min(6)).min(60);
                     self.not_before = Some(Instant::now() + Duration::from_secs(wait));
                     let on_disk = failures_on_disk(&self.dir).saturating_add(1);

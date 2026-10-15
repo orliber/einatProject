@@ -8,6 +8,9 @@ import { RecoveryKitPaper } from "./RecoveryKit";
 import { GoogleSettings } from "./GoogleRecovery";
 import { Dialog, ErrorLine } from "./ui";
 
+/** In a dialog, after the password was refused because this computer is not the one it was set on. */
+const OTHER_COMPUTER_HINT = "במחשב הזה הסיסמה עוד לא פותחת את הכספת, ולכן מאמתים כאן עם ערכת השחזור. אחרי שבוחרים סיסמה חדשה, היא תעבוד גם במחשב הזה.";
+
 /** The current password, or the recovery kit for whoever forgot it. */
 function CurrentSecret(props: { value: string; onChange: (v: string) => void; withRecovery: boolean; onToggle: () => void }) {
   return (
@@ -44,10 +47,18 @@ function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
     try {
       await ipc.changePassword(current, withRecovery, pw);
       await qc.invalidateQueries({ queryKey: ["backup"] });
+      await qc.invalidateQueries({ queryKey: ["security"] });
       notify("הסיסמה הוחלפה. כדאי לגבות עכשיו: גיבויים קודמים נפתחים רק בסיסמה הקודמת.");
       onClose();
     } catch (err) {
-      setError((err as { message?: string }).message ?? "הסיסמה לא הוחלפה.");
+      const e = err as { code?: string; message?: string };
+      if (e.code === "other_computer") {
+        // She is in already: here the password does not open the vault yet, the kit does.
+        setWithRecovery(true);
+        setError(OTHER_COMPUTER_HINT);
+      } else {
+        setError(e.message ?? "הסיסמה לא הוחלפה.");
+      }
       setCurrent("");
       setPw("");
       setPw2("");
@@ -102,8 +113,15 @@ function NewKitDialog({ onClose }: { onClose: () => void }) {
       setCurrent("");
       setKit(created.recovery_key);
       await qc.invalidateQueries({ queryKey: ["backup"] });
+      await qc.invalidateQueries({ queryKey: ["security"] });
     } catch (err) {
-      setError((err as { message?: string }).message ?? "לא נוצרה ערכה.");
+      const e = err as { code?: string; message?: string };
+      if (e.code === "other_computer") {
+        setWithRecovery(true);
+        setError(OTHER_COMPUTER_HINT);
+      } else {
+        setError(e.message ?? "לא נוצרה ערכה.");
+      }
       setCurrent("");
     } finally {
       setBusy(false);
@@ -167,7 +185,14 @@ function CheckKitDialog({ onClose }: { onClose: () => void }) {
   async function check(e?: FormEvent) {
     e?.preventDefault();
     setError(null);
-    const ok = await ipc.confirmRecoveryKey(typed).catch(() => false);
+    let ok: boolean;
+    try {
+      ok = await ipc.confirmRecoveryKey(typed);
+    } catch (err) {
+      // A locked vault or another failure is said as itself, not as a wrong kit.
+      setTyped("");
+      return setError((err as { message?: string }).message ?? "הבדיקה לא הצליחה. אפשר לנסות שוב.");
+    }
     setTyped("");
     if (!ok) return setError("הערכה שהוקלדה לא פותחת את הכספת. כדאי לבדוק את הדף, ואם הוא אבד ליצור ערכה חדשה.");
     await qc.invalidateQueries({ queryKey: ["security"] });
@@ -182,7 +207,7 @@ function CheckKitDialog({ onClose }: { onClose: () => void }) {
         <button type="button" className="btn btn-primary" disabled={typed.trim().length < 20} onClick={() => void check()}>בדיקה</button>
       </>}>
       <form className="stack" onSubmit={(e) => void check(e)}>
-        <p>הסיסמה פותחת את הכספת רק במחשב הזה. במחשב אחר, למשל אם המחשב הזה התקלקל, הדף המודפס הוא הדרך פנימה. פעם בשנה כדאי לוודא שהוא עדיין נכון.</p>
+        <p>הסיסמה פותחת את הכספת רק במחשב הזה ובחשבון ה-Windows הזה. אם המחשב התקלקל או אבד, משחזרים את הגיבוי במחשב החדש עם הסיסמה או עם הדף הזה. בעותק של תיקיית הכספת, אחרי התקנה מחדש של Windows או אחרי איפוס החשבון, רק הדף המודפס פותח אותה. פעם בשנה כדאי לוודא שהוא עדיין נכון.</p>
         <div className="field">
           <label htmlFor="kit-check">ערכת השחזור, מהדף המודפס</label>
           <input id="kit-check" className="input mono" dir="ltr" autoComplete="off" autoFocus placeholder="XXXX-XXXX-…" value={typed} onChange={(e) => setTyped(e.target.value)} />

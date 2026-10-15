@@ -57,3 +57,16 @@ fn wrong_passwords_before_a_restart_are_told_at_the_next_opening_and_only_then()
     assert!(core.status().since_last.is_none());
     assert!(core.unlock(PASSWORD).unwrap().since_last.is_none());
 }
+
+#[test]
+fn her_own_typo_just_before_she_gets_in_is_not_reported_as_someone_else() {
+    // Review of stage 5, U5: one mistyped password, then the right one, in the same sitting.
+    let dir = tempfile::tempdir().unwrap();
+    let mut core = Core::for_tests(dir.path(), None);
+    core.create_vault(PASSWORD).unwrap();
+    core.lock();
+    assert!(core.unlock("סיסמה לא נכונה בכלל").is_err());
+    core.not_before = None;
+    let status = core.unlock(PASSWORD).unwrap();
+    assert!(status.since_last.is_none(), "{:?}", status.since_last);
+}
