@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>הסגנון שלי</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700&amp;family=Frank+Ruhl+Libre:wght@400;500;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f4f5f3}
+a{color:#1e5b56}a:hover{color:#164541}
+.btn{font:inherit;font-size:16px;font-weight:600;border-radius:12px;padding:0 20px;min-height:48px;border:1px solid #cfd5d2;background:#fff;color:#15201f;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.btn-primary{background:#1e5b56;border-color:#1e5b56;color:#fff}
+.btn-quiet{background:transparent;border-color:transparent;color:#4a5654}
+.tab{font:inherit;font-size:15px;color:#4a5654;background:none;border:0;padding:0 4px;min-height:56px;border-bottom:2px solid transparent;cursor:pointer}
+.tab-on{color:#15201f;font-weight:700;border-bottom-color:#1e5b56}
+.know{font:inherit;width:100%;background:#fff;border:0;border-top:1px solid #e3e6e3;display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:14px;align-items:center;text-align:right;padding:16px 20px;cursor:pointer;color:#15201f}
+.know:hover{background:#fafbfa}
+.ic{width:40px;height:40px;border-radius:10px;background:#e6efed;display:flex;align-items:center;justify-content:center}
+.stat{background:#fff;border:1px solid #e3e6e3;border-radius:16px;padding:18px 20px;display:flex;flex-direction:column;gap:2px}
+.big{font-size:32px;font-weight:700;line-height:1.1}
+</style>
+</helmet>
+<div style="font-family:Assistant,system-ui,sans-serif;color:#15201f;background:#f4f5f3;min-height:900px;width:100%;font-size:16px">
+  <header style="background:#fff;border-bottom:1px solid #e3e6e3;padding:0 32px;display:flex;align-items:center;gap:32px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+      כספת האבחון
+    </div>
+    <nav aria-label="ראשי" style="display:flex;gap:24px">
+      <a class="tab" href="Main.dc.html" style="display:inline-flex;align-items:center;text-decoration:none">תיקים</a>
+      <button class="tab tab-on" aria-current="page">הסגנון שלי</button>
+      <a class="tab" href="Consult.dc.html" style="display:inline-flex;align-items:center;text-decoration:none">התייעצות</a>
+      <a class="tab" href="Privacy.dc.html" style="display:inline-flex;align-items:center;text-decoration:none">הגדרות</a>
+    </nav>
+  </header>
+
+  <main style="max-width:1160px;margin:0 auto;padding:36px 32px 48px;display:flex;flex-direction:column;gap:24px">
+    <div>
+      <h1 style="margin:0;font-size:34px">הסגנון שלי</h1>
+      <p style="margin:8px 0 0;font-size:18px;color:#34403e;max-width:720px;line-height:1.6">התוכנה לומדת מהדוחות שלך איך את כותבת. שום דבר לא נכנס לשימוש לפני שאישרת אותו.</p>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px">
+      <div class="stat"><span class="big">6</span><span style="color:#4a5654">דוחות שלך נקראו</span></div>
+      <div class="stat"><span class="big">42</span><span style="color:#4a5654">דברים שהתוכנה יודעת עלייך</span></div>
+      <div class="stat" style="background:#fffbf4;border-color:#ebcb98"><span class="big" style="color:#8a4e0c">{{left}}</span><span style="color:#8a4e0c">מחכים לאישור שלך</span></div>
+    </div>
+
+    <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+      <section aria-labelledby="q-title" style="flex:1 1 460px;min-width:0;background:#fff;border:2px solid #1e5b56;border-radius:18px;padding:24px 26px;display:flex;flex-direction:column;gap:16px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <h2 id="q-title" style="margin:0;font-size:20px">לאשר אחד-אחד</h2>
+          <span style="margin-inline-start:auto;color:#4a5654;font-size:15px">{{pos}} מתוך 7</span>
+        </div>
+        <div style="height:6px;border-radius:3px;background:#e9ecea"><div style="height:6px;border-radius:3px;background:#1e5b56;width:{{bar}}"></div></div>
+        <div style="display:inline-flex;align-self:flex-start;font-size:14px;font-weight:700;color:#1e5b56;background:#e6efed;border-radius:999px;padding:4px 12px">{{item.kind}}</div>
+        <blockquote style="margin:0;font-family:'Frank Ruhl Libre',serif;font-size:21px;line-height:1.8;color:#1b1b1b;background:#fafbfa;border-radius:12px;padding:18px 20px">{{item.text}}</blockquote>
+        <p style="margin:0;color:#4a5654">{{item.why}}</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-primary" onClick="{{next}}" style="flex:1 1 160px">להשתמש בזה</button>
+          <button class="btn" style="flex:1 1 120px">לערוך</button>
+          <button class="btn btn-quiet" onClick="{{next}}">לא צריך</button>
+        </div>
+      </section>
+
+      <section aria-labelledby="k-title" style="flex:1 1 420px;min-width:0;background:#fff;border:1px solid #e3e6e3;border-radius:18px;overflow:hidden">
+        <h2 id="k-title" style="margin:0;font-size:20px;padding:20px 20px 14px">מה התוכנה יודעת עלייך</h2>
+        <button class="know"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="2" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"></path></svg></span><span><strong style="display:block">איך את כותבת</strong><span style="color:#4a5654;font-size:15px">משפטים בינוניים, גוף שלישי, טון חם ומקצועי</span></span><span style="color:#1e5b56">12 ←</span></button>
+        <button class="know"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="2" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"></path></svg></span><span><strong style="display:block">סדר הנושאים בכל סעיף</strong><span style="color:#4a5654;font-size:15px">למשל ברקע: הריון, לידה, ציוני דרך, שינה</span></span><span style="color:#1e5b56">9 ←</span></button>
+        <button class="know"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="2" aria-hidden="true"><path d="M7 7h4v4H7zM13 7h4v4h-4zM7 11c0 3-1 5-3 6M13 11c0 3-1 5-3 6"></path></svg></span><span><strong style="display:block">משפטים שחוזרים אצלך</strong><span style="color:#4a5654;font-size:15px">פתיחות וסגירות קבועות של סעיפים</span></span><span style="color:#1e5b56">8 ←</span></button>
+        <button class="know"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="2" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"></path></svg></span><span><strong style="display:block">איך את מפרשת ציונים</strong><span style="color:#4a5654;font-size:15px">מה את כותבת על כל טווח, ומה את לא כותבת</span></span><span style="color:#1e5b56">10 ←</span></button>
+        <button class="know"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="2" aria-hidden="true"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></span><span><strong style="display:block">איך את בונה טיעון</strong><span style="color:#4a5654;font-size:15px">קישור בין מבחנים, וניסוח קריטריון DSM</span></span><span style="color:#1e5b56">3 ←</span></button>
+      </section>
+    </div>
+
+    <section aria-labelledby="r-title" style="background:#fff;border:1px solid #e3e6e3;border-radius:18px;padding:18px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <h2 id="r-title" style="margin:0;font-size:18px">הדוחות שלי</h2>
+      <span style="color:#4a5654">6 דוחות, האחרון נוסף לפני שבוע. נשמר רק הטקסט אחרי הסתרה, לא הקובץ.</span>
+      <div style="margin-inline-start:auto;display:flex;gap:10px">
+        <button class="btn btn-quiet">לראות את הרשימה</button>
+        <button class="btn">+ הוספת דוח</button>
+      </div>
+    </section>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1366,"height":900}}'>
+class Component extends DCLogic {
+constructor(p){ super(p); this.state = { i: 0 }; }
+renderVals() {
+  const items = [
+    { kind: 'משפט פתיחה שחוזר אצלך', text: 'בהמשך לפניית ההורים, נערך אבחון פסיכולוגי-התפתחותי שכלל מפגשים עם הילד, שיחה עם ההורים ותצפית במסגרת.', why: 'מופיע ב-5 מתוך 6 הדוחות שלך, בפתיחת סיבת הפנייה.' },
+    { kind: 'איך את מפרשת ציון', text: 'ציון בטווח הממוצע הנמוך מתואר אצלך כ"חולשה יחסית", ולא כקושי.', why: 'כך כתבת ב-4 מתוך 4 הפעמים שהופיע ציון כזה.' },
+    { kind: 'סדר הנושאים', text: 'ברקע ההתפתחותי: הריון ולידה, ציוני דרך מוטוריים, שפה, שינה ואכילה, ורק אז מסגרות.', why: 'הסדר הזה חוזר ב-6 מתוך 6 דוחות.' },
+    { kind: 'משהו שאת לא כותבת', text: 'את לא מציינת אחוזונים בגוף הטקסט, רק בטבלה.', why: 'אף אחוזון בגוף הטקסט ב-6 הדוחות.' }
+  ];
+  const i = this.state.i % items.length;
+  return {
+    item: items[i],
+    pos: i + 1,
+    left: 7 - i,
+    bar: Math.round(((i + 1) / 7) * 100) + '%',
+    next: () => this.setState({ i: this.state.i + 1 })
+  };
+}
+}
+</script>
+</body>
+</html>

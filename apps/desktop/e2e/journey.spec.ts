@@ -132,6 +132,31 @@ test("the report page opens a section's guide and her own section's points", asy
   await expectAccessible(page);
 });
 
+// Round 46: from the tab to approving one thing is two clicks, and the page stays accessible
+// while it asks. The report is invented text, made in the page.
+test("the style page asks about one thing at a time", async ({ page }) => {
+  await unlock(page);
+  await page.getByRole("button", { name: "הסגנון שלי", exact: true }).first().click();
+  const report = "סיכום\nלסיכום, נראה כי הילד הבדוי סקרן ובעל יכולות טובות. מומלץ להמשיך במעקב.\n";
+  await page.locator("input[type=file]").evaluate((input: HTMLInputElement, text) => {
+    const files = new DataTransfer();
+    files.items.add(new File([text], "report.txt", { type: "text/plain" }));
+    input.files = files.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, report);
+  await page.getByRole("button", { name: "שמירת הקטעים שסומנו" }).click();
+  await page.getByRole("button", { name: /ובניית הפרופיל/ }).click();
+  const queue = page.getByRole("region", { name: "לאשר אחד-אחד" });
+  await expect(queue).toContainText(/1 מתוך \d/);
+  await expect(page.getByRole("list", { name: "במספרים" })).toBeVisible();
+  await expectAccessible(page);
+  await queue.getByRole("button", { name: "להשתמש בזה" }).click();
+  await expect(queue).toContainText(/2 מתוך \d/);
+  await page.getByRole("button", { name: /איך את כותבת/ }).click();
+  await expect(page.getByRole("region", { name: "איך את כותבת" })).toBeVisible();
+  await expectAccessible(page);
+});
+
 test("settings, consultation and writing style pages are accessible", async ({ page }) => {
   await unlock(page);
   for (const name of ["הגדרות", "התייעצות", "הסגנון שלי"]) {

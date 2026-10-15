@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -7,7 +7,7 @@ import { AppContext, type AppApi } from "../App";
 import { StyleImportDialog } from "../components/StyleImportDialog";
 import type { StyleOverview, StyleProfileView } from "../ipc/client";
 import { prepared, status } from "../test/fixtures";
-import { StyleScreen } from "./StyleScreen";
+import { sinceLabel, StyleScreen } from "./StyleScreen";
 
 function api(): AppApi {
   // Every step through the review screen: "show me every request" on (off by default; set here for the tests that read it).
@@ -62,35 +62,27 @@ const waiting = {
   item: { id: "i1", instrument: "wppsi_iv", measure: "animal_coding", case: "ממוצע נמוך", text: "קושי במהירות העבודה, לא בהבנה.", support: 3, approved: false, enabled: true, edited: false },
 };
 
-describe("StyleScreen", () => {
-  it("learns how she interprets scores, through the review screen, and waits for her approval", async () => {
-    const calls: [string, unknown][] = [];
-    mockIPC((cmd, args) => {
-      calls.push([cmd, args]);
-      if (cmd === "style_overview") return overview({ sources: [{ ...source, analyzed: true }], scored_measures: 4, interpretations: [waiting] });
-      if (cmd === "prepare_interpretations") return prepared({ approval_id: "i" });
-      if (cmd === "send_interpretations") return { kept: 1, dropped: 0, demo: true };
-      if (cmd === "update_interpretation") return { ...waiting, item: { ...waiting.item, approved: true } };
-      return null;
-    });
-    const user = userEvent.setup();
-    wrap(<StyleScreen />);
-    const group = await screen.findByRole("group", { name: "WPPSI-IV · קידוד חיות" });
-    expect(group).toHaveTextContent("מחכה לאישור");
-    expect(screen.getByText(/4 תת-מבחנים עם תוצאות/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "לקרוא שוב את הדוחות" }));
-    expect(await screen.findByText(/איך פירשת תוצאות ·/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /שליחה/ }));
-    await vi.waitFor(() => expect(calls.map(([c]) => c)).toContain("send_interpretations"));
-    await user.click(screen.getByRole("button", { name: "אישור" }));
-    await vi.waitFor(() => expect(calls).toContainEqual(["update_interpretation", { id: "i1", text: null, approved: true, enabled: null }]));
-  });
+const active: StyleProfileView = {
+  ...draft, id: "p0", status: "active",
+  profile: {
+    reports: 3,
+    items: [
+      { id: "a", section: null, kind: "rule", text: "גוף נסתר וזמן הווה", enabled: true, origin: "reports", support: 3 },
+      { id: "c", section: "summary", kind: "template", text: "לסיכום, {שם} מציג {תחום}", enabled: true, origin: "reports", support: 2 },
+    ],
+  },
+};
 
-  it("starts with one action: adding a past report", async () => {
+const queue = () => screen.getByRole("region", { name: "לאשר אחד-אחד" });
+const quote = () => queue().querySelector("blockquote")?.textContent ?? queue().querySelector("textarea")?.value;
+
+describe("StyleScreen (round 46)", () => {
+  it("starts with one action: adding a past report, and no numbers", async () => {
     mockIPC((cmd) => (cmd === "style_overview" ? overview() : null));
     wrap(<StyleScreen />);
     expect(await screen.findByRole("button", { name: /הוספת דוח ישן/ })).toBeInTheDocument();
-    expect(screen.getByText(/עוד אין דוחות/)).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "במספרים" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("heading")).toHaveLength(1);
   });
 
   it("analyzes each report, then builds the profile, each through the review screen", async () => {
@@ -115,7 +107,46 @@ describe("StyleScreen", () => {
     expect(order).toEqual(["prepare_style_analysis", "send_style_analysis", "prepare_style_profile", "send_style_profile"]);
   });
 
-  it("a draft is edited and approved: only what is checked goes in", async () => {
+  it("three numbers, and a draft is approved one item at a time: the last one puts the profile in use", async () => {
+    const calls: [string, unknown][] = [];
+    mockIPC((cmd, args) => {
+      if (cmd === "style_overview") return overview({ sources: [{ ...source, analyzed: true }], draft });
+      calls.push([cmd, args]);
+      if (cmd === "save_style_draft") return draft;
+      if (cmd === "approve_style_draft") return { ...draft, status: "active" };
+      return null;
+    });
+    const user = userEvent.setup();
+    wrap(<StyleScreen />);
+    const numbers = await screen.findByRole("list", { name: "במספרים" });
+    expect(numbers).toHaveTextContent("1דוח שלך נקרא");
+    expect(numbers).toHaveTextContent("0דברים שהתוכנה יודעת עלייך");
+    expect(numbers).toHaveTextContent("2מחכים לאישור שלך");
+    expect(queue()).toHaveTextContent("1 מתוך 2");
+    expect(queue()).toHaveTextContent("כלל כתיבה");
+    expect(quote()).toBe("גוף נסתר וזמן הווה");
+    expect(queue()).toHaveTextContent("מופיע ב-3 מתוך 3 הדוחות שלך, בכל הדוח.");
+    // Two clicks from the tab: the first item is already on the screen.
+    await user.click(within(queue()).getByRole("button", { name: "להשתמש בזה" }));
+    await vi.waitFor(() => expect(quote()).toBe("הציג תפקוד {רמה}"));
+    expect(calls).toEqual([]);
+    expect(queue()).toHaveTextContent("2 מתוך 2");
+    await user.click(within(queue()).getByRole("button", { name: "לא צריך" }));
+    await vi.waitFor(() => expect(calls.map(([c]) => c)).toEqual(["save_style_draft", "approve_style_draft"]));
+    const profile = (calls[0]?.[1] as { profile: StyleProfileView["profile"] }).profile;
+    expect(profile.items.find((i) => i.id === "b")?.enabled).toBe(false);
+    expect(profile.items.find((i) => i.id === "a")?.enabled).toBe(true);
+  });
+
+  it("asks only about what the profile in use does not hold yet", async () => {
+    mockIPC((cmd) => (cmd === "style_overview" ? overview({ sources: [{ ...source, analyzed: true }], draft, active }) : null));
+    wrap(<StyleScreen />);
+    await screen.findByRole("region", { name: "לאשר אחד-אחד" });
+    expect(queue()).toHaveTextContent("1 מתוך 1");
+    expect(quote()).toBe("הציג תפקוד {רמה}");
+  });
+
+  it("the whole draft can still be gone over at once", async () => {
     const saved: unknown[] = [];
     let approved = false;
     mockIPC((cmd, args) => {
@@ -126,7 +157,8 @@ describe("StyleScreen", () => {
     });
     const user = userEvent.setup();
     wrap(<StyleScreen />);
-    expect(await screen.findByText("טיוטה · עוד לא בשימוש")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "לעבור על כל הטיוטה בבת אחת" }));
+    expect(screen.getByText("טיוטה · עוד לא בשימוש")).toBeInTheDocument();
     expect(screen.getByText(/1 פריטים נפסלו/)).toBeInTheDocument();
     const [, template] = screen.getAllByRole("checkbox", { name: "להשתמש בפריט" });
     if (!template) throw new Error("the template's checkbox");
@@ -135,7 +167,117 @@ describe("StyleScreen", () => {
     await vi.waitFor(() => expect(approved).toBe(true));
     const profile = (saved[0] as { profile: StyleProfileView["profile"] }).profile;
     expect(profile.items.find((i) => i.id === "b")?.enabled).toBe(false);
+  });
+
+  it("an interpretation is edited in the queue and used, or kept off when not needed", async () => {
+    const calls: [string, unknown][] = [];
+    mockIPC((cmd, args) => {
+      if (cmd === "style_overview") return overview({ sources: [{ ...source, analyzed: true }], active, scored_measures: 4, interpretations: [waiting] });
+      calls.push([cmd, args]);
+      if (cmd === "update_interpretation") return { ...waiting, item: { ...waiting.item, approved: true } };
+      return null;
+    });
+    const user = userEvent.setup();
+    wrap(<StyleScreen />);
+    await screen.findByRole("region", { name: "לאשר אחד-אחד" });
+    expect(queue()).toHaveTextContent("איך את מפרשת ציון");
+    expect(queue()).toHaveTextContent("WPPSI-IV · קידוד חיות, ממוצע נמוך. כך כתבת ב-3 דוחות.");
+    await user.click(within(queue()).getByRole("button", { name: "לערוך" }));
+    const box = within(queue()).getByRole("textbox", { name: "הנוסח" });
+    await user.clear(box);
+    await user.type(box, "מהירות עבודה איטית");
+    await user.click(within(queue()).getByRole("button", { name: "שמירה ושימוש" }));
+    await vi.waitFor(() => expect(calls).toContainEqual(["update_interpretation", { id: "i1", text: "מהירות עבודה איטית", approved: true, enabled: null }]));
+    await user.click(await within(queue()).findByRole("button", { name: "לא צריך" }));
+    await vi.waitFor(() => expect(calls).toContainEqual(["update_interpretation", { id: "i1", text: null, approved: true, enabled: false }]));
+  });
+
+  it("learns how she interprets scores from the row that holds them, through the review screen", async () => {
+    const calls: string[] = [];
+    mockIPC((cmd) => {
+      calls.push(cmd);
+      if (cmd === "style_overview") return overview({ sources: [{ ...source, analyzed: true }], active, scored_measures: 4, interpretations: [waiting] });
+      if (cmd === "prepare_interpretations") return prepared({ approval_id: "i" });
+      if (cmd === "send_interpretations") return { kept: 1, dropped: 0, demo: true };
+      return null;
+    });
+    const user = userEvent.setup();
+    wrap(<StyleScreen />);
+    await user.click(await screen.findByRole("button", { name: /איך את מפרשת ציונים/ }));
+    const row = screen.getByRole("region", { name: "איך את מפרשת ציונים" });
+    expect(within(row).getByRole("group", { name: "WPPSI-IV · קידוד חיות" })).toHaveTextContent("מחכה לאישור");
+    expect(within(row).getByText(/4 תת-מבחנים עם תוצאות/)).toBeInTheDocument();
+    await user.click(within(row).getByRole("button", { name: "לקרוא שוב את הדוחות" }));
+    expect(await screen.findByText(/איך פירשת תוצאות ·/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /שליחה/ }));
+    await vi.waitFor(() => expect(calls).toContain("send_interpretations"));
+  });
+
+  it("what the program knows opens in place, one row at a time, and edits keep the rest of the profile", async () => {
+    const calls: [string, unknown][] = [];
+    mockIPC((cmd, args) => {
+      if (cmd === "style_overview") return overview({ sources: [{ ...source, analyzed: true }], active });
+      calls.push([cmd, args]);
+      if (cmd === "save_style_draft") return { ...active, status: "draft" };
+      if (cmd === "approve_style_draft") return active;
+      return null;
+    });
+    const user = userEvent.setup();
+    wrap(<StyleScreen />);
+    expect(await screen.findByRole("heading", { name: "הכול מאושר" })).toBeInTheDocument();
+    expect(screen.getByText(/הפרופיל בשימוש, גרסה 1/)).toBeInTheDocument();
+    const phrases = screen.getByRole("button", { name: /משפטים שחוזרים אצלך/ });
+    expect(phrases).toHaveTextContent("1");
+    await user.click(phrases);
+    const row = screen.getByRole("region", { name: "משפטים שחוזרים אצלך" });
+    expect(within(row).getByText("לסיכום, {שם} מציג {תחום}")).toBeInTheDocument();
+    expect(within(row).queryByText("גוף נסתר וזמן הווה")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /איך את כותבת/ }));
+    expect(screen.queryByRole("region", { name: "משפטים שחוזרים אצלך" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /משפטים שחוזרים אצלך/ }));
+    await user.click(within(screen.getByRole("region", { name: "משפטים שחוזרים אצלך" })).getByRole("checkbox", { name: "להשתמש בפריט" }));
+    await user.click(screen.getByRole("button", { name: "אישור הפרופיל" }));
+    await vi.waitFor(() => expect(calls.map(([c]) => c)).toEqual(["save_style_draft", "approve_style_draft"]));
+    const profile = (calls[0]?.[1] as { profile: StyleProfileView["profile"] }).profile;
     expect(profile.items.find((i) => i.id === "a")?.enabled).toBe(true);
+    expect(profile.items.find((i) => i.id === "c")?.enabled).toBe(false);
+  });
+
+  it("the profile is used in drafting from one switch that saves at once", async () => {
+    const calls: unknown[] = [];
+    mockIPC((cmd, args) => {
+      if (cmd === "style_overview") return overview({ sources: [{ ...source, analyzed: true }], active });
+      calls.push([cmd, args]);
+      return null;
+    });
+    const user = userEvent.setup();
+    wrap(<StyleScreen />);
+    await user.click(await screen.findByRole("switch", { name: "להשתמש במה שאישרת בכל ניסוח" }));
+    await vi.waitFor(() => expect(calls).toContainEqual(["set_style_enabled", { on: false }]));
+  });
+
+  it("her reports are one line, with the list behind a button", async () => {
+    mockIPC((cmd) => (cmd === "style_overview" ? overview({ sources: [{ ...source, added_at: Math.floor(Date.now() / 1000) - 8 * 86_400 }] }) : null));
+    const user = userEvent.setup();
+    wrap(<StyleScreen />);
+    const reports = await screen.findByRole("region", { name: "הדוחות שלי" });
+    expect(reports).toHaveTextContent("דוח אחד, האחרון נוסף לפני שבוע. אחד עוד לא נותח.");
+    expect(within(reports).queryByText("דוח א")).not.toBeInTheDocument();
+    await user.click(within(reports).getByRole("button", { name: "לראות את הרשימה" }));
+    expect(within(reports).getByText("דוח א")).toBeInTheDocument();
+  });
+});
+
+describe("sinceLabel", () => {
+  const now = Date.UTC(2026, 9, 15);
+  const ago = (days: number) => now / 1000 - days * 86_400;
+  it("says when in words", () => {
+    expect(sinceLabel(ago(0), now)).toBe("היום");
+    expect(sinceLabel(ago(1), now)).toBe("אתמול");
+    expect(sinceLabel(ago(3), now)).toBe("לפני 3 ימים");
+    expect(sinceLabel(ago(9), now)).toBe("לפני שבוע");
+    expect(sinceLabel(ago(22), now)).toBe("לפני 3 שבועות");
+    expect(sinceLabel(ago(60), now)).toMatch(/^ב-/);
   });
 });
 
@@ -156,14 +298,16 @@ describe("what the program measured", () => {
     });
     const user = userEvent.setup();
     wrap(<StyleScreen />);
-    expect(await screen.findByText("בממוצע 13 מילים במשפט")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /איך את כותבת/ }));
+    expect(screen.getByText("בממוצע 13 מילים במשפט")).toBeInTheDocument();
     expect(screen.getByText(/40 פסקאות מהדוחות הישנים, 3 מהתיקונים שלך, דוח אחד שסיימת בתוכנה/)).toBeInTheDocument();
     expect(screen.getByText("81 מתוך 100")).toBeInTheDocument();
     expect(screen.getByText(/לעומת 72/)).toBeInTheDocument();
     // ST12: by month, each bar named in words for a screen reader.
     expect(screen.getByLabelText("ספטמבר 2026: 70 (20 פסקאות)")).toBeInTheDocument();
     expect(screen.getByLabelText("אוקטובר 2026: 81 (40 פסקאות)")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /לשכוח את מה שנלמד/ }));
+    await user.click(screen.getByRole("button", { name: "עוד פעולות על הסגנון" }));
+    await user.click(await screen.findByRole("menuitem", { name: /לשכוח את מה שנלמד/ }));
     await user.click(screen.getByRole("button", { name: "לשכוח" }));
     await vi.waitFor(() => expect(calls).toContain("forget_style_learning"));
   });
@@ -177,7 +321,7 @@ describe("what the program measured", () => {
 });
 
 describe("suggestions from her reports", () => {
-  it("offers how she opens and closes a section, and adds it on her yes", async () => {
+  it("asks about how she opens and closes a section, one at a time, and adds it on her yes", async () => {
     const calls: unknown[] = [];
     mockIPC((cmd, args) => {
       if (cmd === "style_overview") {
@@ -194,18 +338,20 @@ describe("suggestions from her reports", () => {
     });
     const user = userEvent.setup();
     wrap(<StyleScreen />);
-    expect(await screen.findByText("לסיכום, נראה כי…")).toBeInTheDocument();
-    expect(screen.getByText(/כך את פותחת את הסעיף בדרך כלל/)).toBeInTheDocument();
-    expect(screen.getByText(/כך את מסיימת את הסעיף בדרך כלל/)).toBeInTheDocument();
-    expect(screen.getByText("(ב-4 דוחות · בסעיף סיכום)")).toBeInTheDocument();
-    const [first] = screen.getAllByRole("button", { name: "להוסיף לפרופיל" });
-    if (first) await user.click(first);
+    await screen.findByRole("region", { name: "לאשר אחד-אחד" });
+    expect(queue()).toHaveTextContent("איך את פותחת סעיף");
+    expect(quote()).toBe("לסיכום, נראה כי…");
+    expect(queue()).toHaveTextContent("מופיע ב-4 מהדוחות שלך, בסעיף סיכום.");
+    expect(within(queue()).queryByRole("button", { name: "לערוך" })).not.toBeInTheDocument();
+    await user.click(within(queue()).getByRole("button", { name: "להשתמש בזה" }));
     await vi.waitFor(() => expect(calls).toContainEqual(["accept_style_suggestion", { id: "shape:opening:summary:x" }]));
+    // The report not read yet waits beside her reports, not over the queue.
+    expect(screen.getByRole("region", { name: "הדוחות שלי" })).toHaveTextContent("ניתוח הדוח ובניית הפרופיל");
   });
 });
 
 describe("what was learned from her reports (round 34)", () => {
-  it("shows her fixed wording to add, the order of her sections and what she leaves out", async () => {
+  it("asks about her fixed wording, and shows the order of her sections and what she leaves out", async () => {
     const calls: unknown[] = [];
     mockIPC((cmd, args) => {
       if (cmd === "style_overview") {
@@ -224,12 +370,15 @@ describe("what was learned from her reports (round 34)", () => {
     });
     const user = userEvent.setup();
     wrap(<StyleScreen />);
-    expect(await screen.findByText(/משפט שאת כותבת באותו נוסח בכמה דוחות/)).toBeInTheDocument();
-    expect(screen.getByText("(ב-3 דוחות · בסעיף פרופיל קוגניטיבי)")).toBeInTheDocument();
+    await screen.findByRole("region", { name: "לאשר אחד-אחד" });
+    expect(queue()).toHaveTextContent("משפט שחוזר אצלך");
+    expect(queue()).toHaveTextContent("מופיע ב-3 מהדוחות שלך, בסעיף פרופיל קוגניטיבי.");
+    await user.click(screen.getByRole("button", { name: /סדר הנושאים בכל סעיף/ }));
     expect(screen.getByText("תפקוד כיום בבית (גיל שלוש עד שש):")).toBeInTheDocument();
     expect(screen.getByText(/משחק · רגשי/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /איך את כותבת/ }));
     expect(screen.getByText(/את לא כותבת אחוזונים/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "להוסיף לפרופיל" }));
+    await user.click(within(queue()).getByRole("button", { name: "להשתמש בזה" }));
     await vi.waitFor(() => expect(calls).toContainEqual(["accept_style_suggestion", { id: "formula:x" }]));
   });
 });
