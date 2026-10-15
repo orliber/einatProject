@@ -248,7 +248,7 @@ describe("writing the report", () => {
   it("a section is drafted only after the 'what leaves the computer' screen, then approved", async () => {
     const { user, calls } = await openApp();
     const page = await openCase(user);
-    const write = within(page).getAllByRole("button", { name: "✦ לכתוב עם Claude" })[0];
+    const write = within(page).getAllByRole("button", { name: "✦ לנסח" })[0];
     if (!write) throw new Error("no empty section to write");
     await user.click(write);
     const review = await screen.findByRole("dialog", { name: "לפני שליחה ל-Claude" });
@@ -280,7 +280,7 @@ describe("writing the report", () => {
     const user = userEvent.setup();
     render(<App />);
     const page = await openCase(user);
-    const write = within(page).getAllByRole("button", { name: "✦ לכתוב עם Claude" })[0];
+    const write = within(page).getAllByRole("button", { name: "✦ לנסח" })[0];
     if (!write) throw new Error("no empty section to write");
     await user.click(write);
     const review = await screen.findByRole("dialog", { name: "לפני שליחה ל-Claude" });
@@ -305,7 +305,7 @@ describe("writing the report", () => {
     const user = userEvent.setup();
     render(<App />);
     const page = await openCase(user);
-    const write = within(page).getAllByRole("button", { name: "✦ לכתוב עם Claude" })[0];
+    const write = within(page).getAllByRole("button", { name: "✦ לנסח" })[0];
     if (!write) throw new Error("no empty section to write");
     await user.click(write);
     await screen.findByRole("button", { name: "✓ לאשר" }, { timeout: 6000 });
@@ -328,7 +328,7 @@ describe("writing the report", () => {
     const user = userEvent.setup();
     render(<App />);
     const page = await openCase(user);
-    const write = within(page).getAllByRole("button", { name: "✦ לכתוב עם Claude" })[0];
+    const write = within(page).getAllByRole("button", { name: "✦ לנסח" })[0];
     if (!write) throw new Error("no empty section to write");
     await user.click(write);
     const line = await screen.findByText(/הבקשה לא נשלחה: שגיאה פנימית/);
@@ -356,7 +356,7 @@ describe("writing the report", () => {
     const user = userEvent.setup();
     render(<App />);
     const page = await openCase(user);
-    const write = within(page).getAllByRole("button", { name: "✦ לכתוב עם Claude" })[0];
+    const write = within(page).getAllByRole("button", { name: "✦ לנסח" })[0];
     if (!write) throw new Error("no empty section to write");
     await user.click(write);
     await user.click(await screen.findByRole("button", { name: "להעלות ל-$20 ולהמשיך" }));
@@ -418,8 +418,10 @@ describe("writing the report", () => {
     await user.click(screen.getByRole("button", { name: "→ תיקים" }));
     await openCase(user);
     await screen.findByText(/הדוח נכתב ונבדק מול המקורות/, {}, { timeout: 20000 });
-    // The page is the one she came back to: the new drafts wait for her there.
-    expect(await screen.findByRole("contentinfo", { name: "הצעד הבא" })).toHaveTextContent(/מחכות לאישור שלך|טיוטה אחת מחכה לאישור שלך/);
+    // The page is the one she came back to: the new drafts wait for her there (in the contents
+    // beside the page since round 48).
+    const contents = await screen.findByRole("complementary", { name: "תוכן הדוח" });
+    await waitFor(() => expect(contents).toHaveTextContent(/טיוטות מחכות לך|טיוטה אחת מחכה לך/));
   });
 
   it("with the review screen on, nothing is read by itself", async () => {
@@ -553,14 +555,18 @@ describe("keyboard", () => {
     const { user } = await openApp();
     await openCase(user);
     const headings = screen.getAllByRole("heading", { level: 3 });
+    // One section is in focus (round 48): its heading is the one the keyboard reaches.
+    const at = headings.findIndex((h) => h.tabIndex === 0);
+    expect(at).toBeGreaterThanOrEqual(0);
     act(() => {
       fireEvent.keyDown(window, { key: "ArrowDown", code: "ArrowDown", altKey: true });
     });
-    await waitFor(() => expect(document.activeElement).toBe(headings[0]));
+    await waitFor(() => expect(document.activeElement).toBe(headings[at + 1]));
+    expect(headings[at + 1]).toHaveAttribute("tabindex", "0");
     act(() => {
-      fireEvent.keyDown(window, { key: "ArrowDown", code: "ArrowDown", altKey: true });
+      fireEvent.keyDown(window, { key: "ArrowUp", code: "ArrowUp", altKey: true });
     });
-    await waitFor(() => expect(document.activeElement).toBe(headings[1]));
+    await waitFor(() => expect(document.activeElement).toBe(headings[at]));
   });
 
   it("Ctrl+K on a paragraph opens 'change with AI' for it", async () => {

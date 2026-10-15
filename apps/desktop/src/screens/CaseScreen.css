@@ -566,7 +566,7 @@
 .contents-item:hover {
   background: var(--surface-alt);
 }
-.contents-item[aria-current="page"] {
+.contents-item[aria-current] {
   /* Where I am: unmistakable, not just a hover color. */
   background: var(--primary-soft);
   color: var(--primary);
@@ -608,6 +608,54 @@
   border: 1.5px solid var(--primary);
   color: var(--primary);
   font-weight: 700;
+}
+/* Round 48: how far the report is, in one line over the bar, and what waits for her. */
+.contents-count {
+  font-size: var(--text-base);
+  color: var(--ink-soft);
+}
+.contents-count b {
+  font-size: var(--text-lg);
+  color: var(--ink);
+}
+.contents-waiting {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--warn-ink);
+}
+/* Her own section, not written yet: a dashed ring, "את כותבת". */
+.contents-item.st-mine .dot {
+  background: transparent;
+  border: 1.5px dashed var(--ink-muted);
+}
+.contents-item.st-empty .dot {
+  background: transparent;
+  border: 1.5px solid var(--line-strong);
+}
+.contents-tag.missing {
+  color: var(--ink-muted);
+}
+.contents-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.contents-unsorted {
+  align-self: flex-start;
+  text-align: start;
+}
+.contents-keys {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--ink-muted);
+}
+.contents-keys kbd {
+  font-family: var(--font-ui);
+  font-weight: 700;
+  color: var(--ink-soft);
 }
 /* The one next step, always in the same place. */
 .next-bar {

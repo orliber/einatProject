@@ -59,7 +59,112 @@
   margin: 26px 0 8px;
 }
 .a4-section {
+  position: relative;
   margin-bottom: 10px;
+  /* Round 48: room for the focus line, on every section, so the text never moves. */
+  margin-inline-start: -15px;
+  padding-inline-start: 12px;
+  border-inline-start: 3px solid transparent;
+}
+/* The section in focus: a green line at its side, no background. */
+.a4-section.is-focus {
+  border-inline-start-color: var(--primary);
+}
+.a4-section:not(.is-focus) .a4-para-tool,
+.a4-section:not(.is-focus) .a4-insert {
+  display: none;
+}
+.a4-section:not(.is-focus) .a4-editable {
+  cursor: pointer;
+}
+/* A draft out of focus: grey text, waiting its turn. */
+.a4-pending.is-dim {
+  background: transparent;
+  border-inline-start-color: transparent;
+  padding-block: 0;
+}
+.a4-wait {
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  color: var(--ink-muted);
+}
+/* ✓ (approved) or ○ (a draft waiting) in the margin, beside the heading. */
+.a4-side {
+  position: absolute;
+  inset-inline-end: -40px;
+  top: 18px;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+}
+/* The draft's one row of buttons, under its text. */
+.a4-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+  font-family: var(--font-ui);
+}
+.a4-change {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  color: var(--ink);
+}
+/* Before the draft: what matters to her here, then "✦ לנסח". */
+.a4-brief {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 10px;
+  font-family: var(--font-ui);
+}
+.a4-brief-label {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--ink);
+}
+.a4-brief-text {
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  font-size: var(--text-md);
+}
+.a4-brief-row {
+  align-items: center;
+  gap: 12px;
+}
+/* An empty section out of focus: one dashed line. */
+.a4-gap-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 2px 0 8px;
+  padding: 8px 12px;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: 6px;
+  color: var(--ink-muted);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+}
+@media print {
+  .a4-section {
+    border-inline-start-color: transparent;
+  }
+  .a4-side,
+  .a4-wait,
+  .a4-actions,
+  .a4-brief,
+  .a4-gap-line {
+    display: none;
+  }
 }
 .a4-heading {
   font-size: var(--text-lg);

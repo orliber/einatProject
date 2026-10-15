@@ -118,7 +118,7 @@ describe("materials", () => {
 describe("keyboard on the report page", () => {
   it("Ctrl+Enter on a proposed paragraph approves it", async () => {
     const { user, calls, page } = await openCase();
-    const write = within(page).getAllByRole("button", { name: "✦ לכתוב עם Claude" })[0];
+    const write = within(page).getAllByRole("button", { name: "✦ לנסח" })[0];
     if (!write) throw new Error("no empty section to write");
     await user.click(write);
     const review = await screen.findByRole("dialog", { name: "לפני שליחה ל-Claude" });
