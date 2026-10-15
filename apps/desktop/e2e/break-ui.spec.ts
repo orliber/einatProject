@@ -22,6 +22,8 @@ async function expectNoSidewaysSpill(page: Page, where: string): Promise<void> {
 
 const sizes = [
   { name: "a normal window", viewport: { width: 1280, height: 800 }, scale: 1 },
+  // A common laptop screen, short and wide: the explorer's tree and table have to share it.
+  { name: "a laptop screen", viewport: { width: 1366, height: 700 }, scale: 1 },
   { name: "the narrowest window", viewport: { width: 1024, height: 680 }, scale: 1 },
   // 150% text scaling: the same 1280px window shows 853 CSS pixels.
   { name: "150% text scaling", viewport: { width: 853, height: 560 }, scale: 1.5 },

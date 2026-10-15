@@ -21,6 +21,13 @@ export function ageWords(age: Age): string {
   return y || m || "פחות מחודש";
 }
 
+/** "בן 5 שנים ו-4 חודשים": the age in words, with "בן" or "בת" when the gender is known, "גיל" otherwise (D-084). */
+export function ageOf(age: Age | null | undefined, gender: "male" | "female" | null | undefined): string {
+  if (!age) return "";
+  const who = gender === "male" ? "בן " : gender === "female" ? "בת " : "גיל ";
+  return `${who}${ageWords(age)}`;
+}
+
 /** Years and months stay strings while typed; this is the age they make, if any. */
 export function parseAge(years: string, months: string): Age | null {
   if (years === "") return null;

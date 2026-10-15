@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>מסך התיקים</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700&amp;family=Frank+Ruhl+Libre:wght@500;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f4f5f3}
+a{color:#1e5b56}a:hover{color:#164541}
+.btn{font:inherit;font-size:15px;font-weight:600;border-radius:10px;padding:0 16px;min-height:44px;border:1px solid #cfd5d2;background:#fff;color:#15201f;cursor:pointer;display:inline-flex;align-items:center;gap:8px;text-decoration:none}
+.btn-primary{background:#1e5b56;border-color:#1e5b56;color:#fff}
+.tab{font:inherit;font-size:15px;color:#4a5654;background:none;border:0;padding:0 4px;min-height:56px;border-bottom:2px solid transparent;cursor:pointer;display:inline-flex;align-items:center;text-decoration:none}
+.tab-on{color:#15201f;font-weight:700;border-bottom-color:#1e5b56}
+.tr{display:flex;align-items:center;border-radius:8px;min-height:36px}
+.tr:hover{background:#f1f3f1}
+.tr-on{background:#e6efed}
+.tr-on .tname{color:#15201f;font-weight:600}
+.tw{font:inherit;background:none;border:0;width:24px;height:36px;color:#4a5654;cursor:pointer;flex:none;font-size:12px}
+.tname{font:inherit;font-size:15px;background:none;border:0;flex:1;text-align:right;display:flex;align-items:center;gap:8px;padding:0 6px 0 10px;min-height:36px;color:#34403e;cursor:pointer;min-width:0}
+.tname .n{margin-inline-start:auto;font-size:13px;color:#4a5654}
+.crumb{font:inherit;font-size:15px;background:none;border:0;color:#1e5b56;cursor:pointer;padding:4px 6px;border-radius:6px}
+.crumb:hover{background:#e6efed}
+.tool{font:inherit;font-size:14px;background:#fff;border:1px solid #cfd5d2;color:#34403e;border-radius:8px;min-height:36px;padding:0 10px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.tool-on{background:#15201f;border-color:#15201f;color:#fff}
+.hdr{display:grid;grid-template-columns:minmax(0,2.4fr) minmax(0,2.4fr) minmax(0,1.1fr) minmax(0,.8fr);gap:16px;padding:8px 20px;font-size:13px;color:#4a5654;font-weight:600;border-bottom:1px solid #e3e6e3;background:#fafbfa}
+.row{font:inherit;text-align:right;width:100%;background:#fff;border:0;border-bottom:1px solid #eef0ee;display:grid;grid-template-columns:minmax(0,2.4fr) minmax(0,2.4fr) minmax(0,1.1fr) minmax(0,.8fr);gap:16px;align-items:center;padding:10px 20px;cursor:pointer;color:#15201f;min-height:56px}
+.row:hover{background:#f6f8f7}
+.row-sel{background:#e6efed}
+.row-sel:hover{background:#e6efed}
+.fico{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex:none}
+.step{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#4a5654}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+</style>
+</helmet>
+<div style="font-family:Assistant,system-ui,sans-serif;color:#15201f;background:#f4f5f3;min-height:820px;width:100%;box-sizing:border-box;display:flex;flex-direction:column">
+  <header style="background:#fff;border-bottom:1px solid #e3e6e3;padding:0 32px;display:flex;align-items:center;gap:32px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+      כספת האבחון
+    </div>
+    <nav aria-label="ראשי" style="display:flex;gap:24px">
+      <button class="tab tab-on" aria-current="page">תיקים</button>
+      <a class="tab" href="Style.dc.html">הסגנון שלי</a>
+      <a class="tab" href="Consult.dc.html">התייעצות</a>
+      <a class="tab" href="Privacy.dc.html">הגדרות</a>
+    </nav>
+    <div style="margin-inline-start:auto;display:flex;align-items:center;gap:12px">
+      <span style="display:inline-flex;align-items:center;gap:8px;font-size:14px;color:#34403e"><span class="dot" style="background:#2f6b45"></span>מוצפן ונשמר במחשב הזה</span>
+      <button class="btn" aria-label="עזרה" style="padding:0;width:44px;justify-content:center">?</button>
+      <button class="btn">נעילה</button>
+    </div>
+  </header>
+
+  <div style="flex:1;display:flex;flex-wrap:wrap;min-height:0">
+    <aside aria-label="תיקיות" style="flex:0 0 260px;background:#fff;border-inline-end:1px solid #e3e6e3;padding:16px 10px;display:flex;flex-direction:column;gap:1px;box-sizing:border-box">
+      <button class="btn btn-primary" style="justify-content:center;margin:0 2px 14px">+ תיק חדש</button>
+      <sc-for list="{{tree}}" as="f" hint-placeholder-count="6">
+        <div class="tr {{f.cls}}" style="padding-inline-start:{{f.pad}}">
+          <button class="tw" onClick="{{f.toggle}}" aria-label="{{f.toggleLabel}}">{{f.arrow}}</button>
+          <button class="tname" onClick="{{f.pick}}" aria-current="{{f.cur}}">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+            {{f.name}}<span class="n">{{f.count}}</span>
+          </button>
+        </div>
+      </sc-for>
+      <div style="height:1px;background:#e3e6e3;margin:10px 6px"></div>
+      <div class="tr"><span class="tw"></span><button class="tname">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"></path></svg>
+        סל המחזור<span class="n">1</span></button></div>
+      <div style="margin-top:auto;padding:10px 12px;font-size:13px;color:#4a5654;line-height:1.5">תיקייה בתוך תיקייה, בלי הגבלה. גוררים תיק או תיקייה כדי להעביר. לחיצה ימנית: תיקייה חדשה בפנים, שינוי שם, מחיקה.</div>
+    </aside>
+
+    <main style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box">
+      <div style="display:flex;align-items:center;gap:8px;padding:12px 20px;background:#fff;border-bottom:1px solid #e3e6e3;flex-wrap:wrap">
+        <button class="tool" aria-label="למעלה" onClick="{{goUp}}" style="min-width:36px;justify-content:center">↑</button>
+        <nav aria-label="מיקום" style="display:flex;align-items:center;gap:2px;flex-wrap:wrap">
+          <sc-for list="{{crumbs}}" as="c" hint-placeholder-count="2">
+            <span style="color:#a0a8a6">{{c.sep}}</span><button class="crumb" onClick="{{c.pick}}" style="font-weight:{{c.weight}};color:{{c.color}}">{{c.name}}</button>
+          </sc-for>
+        </nav>
+        <div style="margin-inline-start:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:8px;border:1px solid #cfd5d2;border-radius:8px;padding:0 10px;min-height:36px;min-width:220px;background:#fff">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#4a5654" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+            <input placeholder="חיפוש בכל התיקים" aria-label="חיפוש תיקים" style="border:0;outline:0;font:inherit;font-size:14px;flex:1;background:transparent">
+          </label>
+          <button class="tool">מיון: עודכן ▾</button>
+          <button class="tool">+ תיקייה כאן</button>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:14px;padding:10px 20px;background:#e6efed;border-bottom:1px solid #cfe0dc;font-size:15px;flex-wrap:wrap">
+        <span style="font-weight:700;color:#1e5b56">להמשיך איפה שהפסקת:</span>
+        <span><strong>נועם</strong> · כתיבה, 2 מתוך 16 סעיפים · <strong>הבא:</strong> תפקוד לפי ההורים</span>
+        <a href="Report.dc.html" class="btn btn-primary" style="margin-inline-start:auto;min-height:38px">להמשיך לכתוב ←</a>
+      </div>
+
+      <div class="hdr"><span>שם</span><span>איפה זה עומד</span><span>עודכן</span><span>חומרים</span></div>
+      <sc-for list="{{subRows}}" as="s" hint-placeholder-count="2">
+        <button class="row" onClick="{{s.pick}}">
+          <span style="display:flex;align-items:center;gap:12px;min-width:0">
+            <span class="fico" style="background:#fbf1e2"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8a4e0c" stroke-width="1.8" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg></span>
+            <span><span style="display:block;font-weight:700;font-size:16px">{{s.name}}</span><span style="display:block;font-size:13px;color:#4a5654">תיקייה · {{s.count}}</span></span>
+          </span>
+          <span style="font-size:14px;color:#4a5654">{{s.inside}}</span>
+          <span style="font-size:14px;color:#4a5654">{{s.when}}</span>
+          <span></span>
+        </button>
+      </sc-for>
+      <sc-for list="{{rows}}" as="r" hint-placeholder-count="3">
+        <button class="row {{r.cls}}" onClick="{{r.pick}}" aria-selected="{{r.sel}}">
+          <span style="display:flex;align-items:center;gap:12px;min-width:0">
+            <span class="fico" style="background:{{r.bg}}">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="1.8" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"></path><path d="M14 3v4h4M9 12h6M9 16h6"></path></svg>
+            </span>
+            <span style="min-width:0"><span style="display:block;font-weight:700;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{r.name}}</span><span style="display:block;font-size:13px;color:#4a5654">{{r.age}} · {{r.path}}</span></span>
+          </span>
+          <span style="display:flex;flex-direction:column;gap:6px;min-width:0" title="{{r.tip}}">
+            <span style="display:flex;align-items:center;gap:8px"><span style="font-weight:600;color:{{r.stageColor}}">{{r.stage}}</span><span style="font-size:13px;color:#4a5654">{{r.detail}}</span></span>
+            <span style="display:flex;gap:4px;max-width:220px" aria-hidden="true">
+              <span style="flex:1;height:6px;border-radius:3px;background:{{r.d1}}"></span>
+              <span style="flex:1;height:6px;border-radius:3px;background:{{r.d2}}"></span>
+              <span style="flex:1;height:6px;border-radius:3px;background:{{r.d3}}"></span>
+            </span>
+          </span>
+          <span style="font-size:14px;color:#4a5654">{{r.when}}</span>
+          <span style="font-size:14px;color:#4a5654">{{r.files}}</span>
+        </button>
+      </sc-for>
+      <div style="padding:10px 20px;font-size:13px;color:#4a5654;display:flex;gap:16px;border-top:1px solid #e3e6e3;margin-top:auto">
+        <span>{{countText}}</span>
+        <span style="margin-inline-start:auto">השמות נשארים במחשב. Claude מקבל תפקידים ("הילד", "הגננת").</span>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1366,"height":820}}'>
+class Component extends DCLogic {
+constructor(p){ super(p); this.state = { folder: 'all', open: { all: true, private: true, inst: false }, sel: 'noam' }; }
+renderVals() {
+  const s = this.state;
+  const folders = [
+    { id:'all', parent:null, name:'כל התיקים' },
+    { id:'private', parent:'all', name:'אבחונים פרטיים' },
+    { id:'p2026', parent:'private', name:'2026' },
+    { id:'p2025', parent:'private', name:'2025' },
+    { id:'inst', parent:'all', name:'הפניות מהמכון' },
+    { id:'gan', parent:'inst', name:'גני ילדים' },
+    { id:'school', parent:'inst', name:'בתי ספר' },
+    { id:'follow', parent:'all', name:'מעקב, שנה אחרי' }
+  ];
+  const cases = [
+    { id:'noam', name:'נועם', age:'בן 5 שנים ו-4 חודשים', fid:'p2026', stage:'בכתיבה', stageColor:'#8a4e0c', detail:'2 מתוך 16 סעיפים אושרו', tip:'חומרים: הושלמו · כתיבה: 2 מתוך 16 · הוצאה: עוד לא', when:'היום, 10:00', files:'4', d1:'#2f6b45', d2:'#d38a2c', d3:'#e3e6e3' },
+    { id:'mika', name:'מיקה', age:'בת 4 שנים ו-2 חודשים', fid:'gan', stage:'אוספים חומרים', stageColor:'#8a4e0c', detail:'חסרים ציונים ודיווח מהגן', tip:'חומרים: 3 מתוך 5 · כתיבה: עוד לא · הוצאה: עוד לא', when:'אתמול', files:'3', d1:'#d38a2c', d2:'#e3e6e3', d3:'#e3e6e3' },
+    { id:'tamar', name:'תמר', age:'בת 3 שנים ו-9 חודשים', fid:'p2025', stage:'מוכן להוצאה', stageColor:'#1e5b56', detail:'כל הסעיפים אושרו', tip:'חומרים: הושלמו · כתיבה: 16 מתוך 16 · הוצאה: מחכה לך', when:'לפני שבוע', files:'7', d1:'#2f6b45', d2:'#2f6b45', d3:'#d38a2c' },
+    { id:'yoni', name:'יהונתן', age:'בן 7 שנים ו-1 חודשים', fid:'school', stage:'הופק ✓', stageColor:'#2f6b45', detail:'Word נשלח להורים לפני חודש', tip:'חומרים: הושלמו · כתיבה: הושלמה · הוצאה: הופק', when:'לפני חודש', files:'8', d1:'#2f6b45', d2:'#2f6b45', d3:'#2f6b45' }
+  ];
+  const byId = Object.fromEntries(folders.map(f => [f.id, f]));
+  const kids = id => folders.filter(f => f.parent === id);
+  const under = id => { const out = [id]; kids(id).forEach(k => out.push(...under(k.id))); return out; };
+  const countIn = id => { const ids = under(id); return cases.filter(c => ids.includes(c.fid)).length; };
+  const depth = id => { let d = 0, f = byId[id]; while (f && f.parent) { d++; f = byId[f.parent]; } return d; };
+  const pathOf = id => { const names = []; let f = byId[id]; while (f && f.parent) { names.unshift(f.name); f = byId[f.parent]; } return names.join(' › '); };
+
+  const tree = [];
+  const walk = (id) => {
+    const f = byId[id]; const ch = kids(id); const open = !!s.open[id]; const on = s.folder === id;
+    tree.push({
+      id, name: f.name, count: countIn(id), pad: (depth(id) * 18) + 'px',
+      cls: on ? 'tr-on' : '', cur: on ? 'true' : 'false',
+      arrow: ch.length ? (open ? '▾' : '◂') : '', toggleLabel: open ? 'לסגור' : 'לפתוח',
+      toggle: () => this.setState({ open: { ...s.open, [id]: !open } }),
+      pick: () => this.setState({ folder: id, open: { ...s.open, [id]: true } })
+    });
+    if (open) ch.forEach(k => walk(k.id));
+  };
+  walk('all');
+
+  const crumbIds = []; { let f = byId[s.folder]; while (f) { crumbIds.unshift(f.id); f = f.parent ? byId[f.parent] : null; } }
+  const crumbs = crumbIds.map((id, i) => ({
+    name: byId[id].name, sep: i === 0 ? '' : '›',
+    weight: i === crumbIds.length - 1 ? '700' : '400', color: i === crumbIds.length - 1 ? '#15201f' : '#1e5b56',
+    pick: () => this.setState({ folder: id })
+  }));
+
+  const subRows = kids(s.folder).map(k => ({
+    name: k.name, count: countIn(k.id) === 1 ? 'תיק אחד' : countIn(k.id) + ' תיקים',
+    inside: kids(k.id).length ? kids(k.id).map(x => x.name).join(', ') : '',
+    when: '', pick: () => this.setState({ folder: k.id, open: { ...s.open, [k.id]: true, [s.folder]: true } })
+  }));
+  const ids = under(s.folder);
+  const rows = cases.filter(c => ids.includes(c.fid)).map(c => ({
+    ...c, path: pathOf(c.fid), sel: c.id === s.sel ? 'true' : 'false', cls: c.id === s.sel ? 'row-sel' : '',
+    bg: c.id === s.sel ? '#cfe0dc' : '#e6efed', pick: () => this.setState({ sel: c.id })
+  }));
+  const parent = byId[s.folder] && byId[s.folder].parent;
+  return {
+    tree, crumbs, subRows, rows,
+    goUp: () => { if (parent) this.setState({ folder: parent }); },
+    countText: (rows.length === 1 ? 'תיק אחד' : rows.length + ' תיקים') + (subRows.length ? ', כולל תיקיות המשנה' : '')
+  };
+}
+}
+</script>
+</body>
+</html>
