@@ -16,12 +16,20 @@ use dv_vault::{Secret, Vault, VaultError};
 
 use crate::Core;
 
+/// Said once, at the opening that bound an older vault to this computer (review of stage 5,
+/// S1): from now on the kit is what opens it after Windows is reinstalled or elsewhere.
+pub(crate) const JUST_BOUND: &str = "מעכשיו הסיסמה פותחת את הכספת רק במחשב הזה ובחשבון ה-Windows הזה. במחשב אחר, אחרי התקנה מחדש של Windows או אחרי איפוס החשבון, נכנסים עם ערכת השחזור, ולכן כדאי לוודא שהיא אצלך: הגדרות ← סיסמה ואבטחה ← בדיקת ערכת השחזור.";
+
 /// The half of the password slot kept on this computer. Windows DPAPI in the program; a
 /// fake in tests (no Windows in tests).
 pub trait ComputerSeal: Send + Sync {
     fn available(&self) -> bool;
     fn load(&self, dir: &Path) -> Result<Key32, VaultError>;
     fn create(&self, dir: &Path) -> Result<Key32, VaultError>;
+    /// A new key held aside: the key in use stays until [`Self::promote_next`].
+    fn create_next(&self, dir: &Path) -> Result<Key32, VaultError>;
+    fn load_next(&self, dir: &Path) -> Result<Key32, VaultError>;
+    fn promote_next(&self, dir: &Path) -> Result<(), VaultError>;
 }
 
 /// The real one: sealed to her Windows account, as `vault.computer` in the vault folder.
@@ -38,6 +46,15 @@ impl ComputerSeal for WindowsSeal {
     fn create(&self, dir: &Path) -> Result<Key32, VaultError> {
         computer_key::create_for(dir, Purpose::Password)
     }
+    fn create_next(&self, dir: &Path) -> Result<Key32, VaultError> {
+        computer_key::create_next_for(dir, Purpose::Password)
+    }
+    fn load_next(&self, dir: &Path) -> Result<Key32, VaultError> {
+        computer_key::load_next_for(dir, Purpose::Password)
+    }
+    fn promote_next(&self, dir: &Path) -> Result<(), VaultError> {
+        computer_key::promote_next_for(dir, Purpose::Password)
+    }
 }
 
 /// This computer's key for the password slot. For a bound slot only the key that is here
@@ -52,6 +69,27 @@ pub(crate) fn key_here(seal: &dyn ComputerSeal, dir: &Path, bound: bool) -> Opti
         seal.load(dir).ok()
     } else {
         seal.load(dir).or_else(|_| seal.create(dir)).ok()
+    }
+}
+
+/// Whether the password slot on disk is bound. A header that cannot be read now (an
+/// antivirus holding it, a disk error) counts as bound, so the key here is only ever loaded
+/// and never replaced on a guess (review of stage 5, S4).
+pub(crate) fn bound_on_disk(dir: &Path) -> bool {
+    Vault::password_is_bound(dir).unwrap_or(true)
+}
+
+/// This computer's key for a new password slot while the slot on disk may be bound to
+/// another key: the key here when it opens, else a new one held aside, to be promoted with
+/// [`ComputerSeal::promote_next`] once the new slot is written (review of stage 5, S5). The
+/// key in use is never replaced before that, so a slot that was not written still opens.
+pub(crate) fn key_for_new_slot(seal: &dyn ComputerSeal, dir: &Path) -> (Option<Key32>, bool) {
+    if !seal.available() {
+        return (None, false);
+    }
+    match seal.load(dir) {
+        Ok(key) => (Some(key), false),
+        Err(_) => (seal.create_next(dir).ok(), true),
     }
 }
 
@@ -73,13 +111,23 @@ impl Core {
 
     /// This computer's key for the vault's password slot as it is on disk now.
     pub(crate) fn password_key_here(&self) -> Option<Key32> {
-        let bound = Vault::password_is_bound(&self.dir).unwrap_or(false);
-        key_here(self.computer_seal.as_ref(), &self.dir, bound)
+        key_here(
+            self.computer_seal.as_ref(),
+            &self.dir,
+            bound_on_disk(&self.dir),
+        )
     }
 
-    /// This computer's key for a new password slot: the one here, or a new one.
-    pub(crate) fn new_password_key(&self) -> Option<Key32> {
-        key_here(self.computer_seal.as_ref(), &self.dir, false)
+    /// This computer's key for a new password slot, and whether it is held aside until the
+    /// slot is written (then [`Self::promote_password_key`]).
+    pub(crate) fn new_password_key(&self) -> (Option<Key32>, bool) {
+        key_for_new_slot(self.computer_seal.as_ref(), &self.dir)
+    }
+
+    /// The key held aside for a slot that was just written becomes the one in use. If this
+    /// fails, the next opening with the password still finds it (see the unlock job).
+    pub(crate) fn promote_password_key(&self) {
+        let _ = self.computer_seal.promote_next(&self.dir);
     }
 
     /// Check the password on this computer without opening the vault again.

@@ -312,7 +312,7 @@ impl CoreError {
             ),
             CoreError::Vault(VaultError::OtherComputer) => (
                 "other_computer",
-                "הסיסמה פותחת את הכספת רק במחשב שבו היא נקבעה. כאן אפשר להיכנס עם ערכת השחזור, ואחר כך לבחור סיסמה בהגדרות כדי שתעבוד גם במחשב הזה.".to_owned(),
+                "הסיסמה פותחת את הכספת רק במחשב ובחשבון ה-Windows שבהם היא נקבעה. במחשב אחר, וגם באותו מחשב אחרי התקנה מחדש של Windows או איפוס החשבון, צריך את ערכת השחזור. אחרי הכניסה עם הערכה אפשר לבחור סיסמה בהגדרות, והיא תעבוד כאן.".to_owned(),
             ),
             CoreError::Vault(VaultError::RecoveryKeyInvalid) => (
                 "recovery_invalid",

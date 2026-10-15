@@ -8,9 +8,10 @@ use dv_vault::crypto::Key32;
 
 use super::*;
 
-/// One computer's sealed key, kept in memory; a computer that "lost" its key has none.
+/// One computer's sealed key, kept in memory; a computer that "lost" its key has none. The
+/// second is a key held aside until it is promoted.
 #[derive(Default)]
-struct FakeSeal(Mutex<Option<[u8; 32]>>);
+struct FakeSeal(Mutex<Option<[u8; 32]>>, Mutex<Option<[u8; 32]>>);
 
 impl ComputerSeal for FakeSeal {
     fn available(&self) -> bool {
@@ -27,6 +28,23 @@ impl ComputerSeal for FakeSeal {
         let key = Key32::random()?;
         *self.0.lock().unwrap() = Some(*key.as_bytes());
         Ok(key)
+    }
+    fn create_next(&self, _dir: &Path) -> Result<Key32, VaultError> {
+        let key = Key32::random()?;
+        *self.1.lock().unwrap() = Some(*key.as_bytes());
+        Ok(key)
+    }
+    fn load_next(&self, _dir: &Path) -> Result<Key32, VaultError> {
+        self.1
+            .lock()
+            .unwrap()
+            .map(Key32::from_bytes)
+            .ok_or(VaultError::NotFound)
+    }
+    fn promote_next(&self, _dir: &Path) -> Result<(), VaultError> {
+        let next = self.1.lock().unwrap().take().ok_or(VaultError::NotFound)?;
+        *self.0.lock().unwrap() = Some(next);
+        Ok(())
     }
 }
 
@@ -101,8 +119,17 @@ fn a_vault_from_before_is_bound_at_its_next_opening_with_no_screen() {
 
     let here = Arc::new(FakeSeal::default());
     let mut core = on(dir.path(), &here);
-    assert!(core.unlock(PASSWORD).unwrap().unlocked);
+    let opened = core.unlock(PASSWORD).unwrap();
+    assert!(opened.unlocked);
     assert_eq!(state(&mut core), "ok");
+    // Said once, with what opens it after a reinstall of Windows (review of stage 5, S1).
+    let said = opened.since_last.unwrap();
+    assert!(
+        said.contains("רק במחשב הזה") && said.contains("ערכת השחזור"),
+        "{said}"
+    );
+    core.lock();
+    assert!(core.unlock(PASSWORD).unwrap().since_last.is_none());
     let log = core.activity(None).unwrap();
     assert!(
         log.entries.iter().any(|e| e.text.contains("נקשרה למחשב")),
@@ -194,4 +221,70 @@ fn the_printed_kit_is_checked_in_settings_and_the_security_page_says_when() {
     // An internal date, not a line of its own in her log.
     let log = core.activity(None).unwrap();
     assert!(log.entries.iter().all(|e| e.text != "הגדרה עודכנה"));
+}
+
+/// A computer whose key held aside is never promoted (the program closed right after the new
+/// slot was written).
+struct NoPromote(Arc<FakeSeal>);
+
+impl ComputerSeal for NoPromote {
+    fn available(&self) -> bool {
+        true
+    }
+    fn load(&self, dir: &Path) -> Result<Key32, VaultError> {
+        self.0.load(dir)
+    }
+    fn create(&self, dir: &Path) -> Result<Key32, VaultError> {
+        self.0.create(dir)
+    }
+    fn create_next(&self, dir: &Path) -> Result<Key32, VaultError> {
+        self.0.create_next(dir)
+    }
+    fn load_next(&self, dir: &Path) -> Result<Key32, VaultError> {
+        self.0.load_next(dir)
+    }
+    fn promote_next(&self, _dir: &Path) -> Result<(), VaultError> {
+        Err(VaultError::NotFound)
+    }
+}
+
+#[test]
+fn a_new_key_waits_aside_until_its_slot_is_written_and_still_opens_after_a_crash() {
+    // Review of stage 5, S5: the key in use is never replaced before the new slot is written.
+    let dir = tempfile::tempdir().unwrap();
+    let first = Arc::new(FakeSeal::default());
+    let mut core = on(dir.path(), &first);
+    let kit = core.create_vault(PASSWORD).unwrap().recovery_key;
+    core.lock();
+    // On another computer the kit opens it; the new password's key is held aside there, and
+    // the program "closes" before it is promoted.
+    let copy = tempfile::tempdir().unwrap();
+    copy_folder(dir.path(), copy.path());
+    let second = Arc::new(FakeSeal::default());
+    let mut there = Core::for_tests(copy.path(), None)
+        .with_computer_seal(Arc::new(NoPromote(Arc::clone(&second))) as Arc<dyn ComputerSeal>);
+    there.unlock_with_recovery(&kit).unwrap();
+    there.change_password(&kit, true, PASSWORD).unwrap();
+    assert!(second.load(copy.path()).is_err(), "nothing replaced yet");
+    there.lock();
+    drop(there);
+    // The next opening finds the key held aside, opens, and keeps it as the one in use.
+    let mut again = on(copy.path(), &second);
+    assert!(again.unlock(PASSWORD).unwrap().unlocked);
+    assert!(second.load(copy.path()).is_ok() && second.load_next(copy.path()).is_err());
+    again.lock();
+    assert!(again.unlock(PASSWORD).unwrap().unlocked);
+}
+
+#[test]
+fn a_header_that_cannot_be_read_never_makes_a_new_key() {
+    // Review of stage 5, S4: unreadable counts as bound, so the key here is only loaded.
+    let dir = tempfile::tempdir().unwrap();
+    assert!(crate::binding::bound_on_disk(dir.path()));
+    let seal = FakeSeal::default();
+    assert!(
+        crate::binding::key_here(&seal, dir.path(), crate::binding::bound_on_disk(dir.path()))
+            .is_none()
+    );
+    assert!(seal.load(dir.path()).is_err(), "no key was made");
 }

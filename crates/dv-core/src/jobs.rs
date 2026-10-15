@@ -23,7 +23,7 @@ use dv_vault::crypto::Key32;
 use dv_vault::{Argon2Params, NewSlot, Secret, Vault, VaultError};
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::binding::key_here;
+use crate::binding::{bound_on_disk, key_for_new_slot, key_here};
 use crate::views::{BackupCheckView, BackupDone, CreatedVault};
 use crate::{AppStatus, ComputerSeal, Core, CoreError, ErrorAction};
 
@@ -88,23 +88,44 @@ pub struct UnlockJob {
 pub struct Unlocked {
     opened: Result<Vault, VaultError>,
     ticket: u64,
+    /// The password slot was bound to this computer by this opening (D-076): said once.
+    just_bound: bool,
 }
 
 impl UnlockJob {
     #[must_use]
     pub fn run(self) -> Unlocked {
+        let mut just_bound = false;
         let opened = match &self.proof {
             Proof::Password(p) => {
                 // Unsealing the key kept here takes a moment too, so it runs in the job.
-                let bound = Vault::password_is_bound(&self.dir).unwrap_or(false);
+                let bound = bound_on_disk(&self.dir);
                 let here = key_here(self.seal.as_ref(), &self.dir, bound);
-                Vault::unlock_with_password_here(&self.dir, p, here.as_ref())
+                let mut opened = Vault::unlock_with_password_here(&self.dir, p, here.as_ref());
+                // A new password whose key was held aside and not yet promoted (the program
+                // closed in between): that key opens it, and becomes the one in use.
+                if bound
+                    && matches!(
+                        opened,
+                        Err(VaultError::WrongSecret | VaultError::OtherComputer)
+                    )
+                {
+                    if let Ok(next) = self.seal.load_next(&self.dir) {
+                        if let Ok(v) = Vault::unlock_with_password_here(&self.dir, p, Some(&next)) {
+                            let _ = self.seal.promote_next(&self.dir);
+                            opened = Ok(v);
+                        }
+                    }
+                }
+                just_bound = !bound && opened.as_ref().is_ok_and(Vault::password_bound);
+                opened
             }
             Proof::Recovery(r) => Vault::unlock_with_recovery(&self.dir, r),
         };
         Unlocked {
             opened,
             ticket: self.ticket,
+            just_bound,
         }
     }
 }
@@ -127,6 +148,8 @@ pub struct SlotMade {
     session: u64,
     ticket: u64,
     made: Result<(NewSlot, Option<Zeroizing<String>>), VaultError>,
+    /// The new slot uses a key held aside, promoted only once the slot is written.
+    key_aside: bool,
 }
 
 impl SlotJob {
@@ -135,14 +158,19 @@ impl SlotJob {
         let seal = self.seal.as_ref();
         let here = key_here(seal, &self.dir, self.header.password_bound());
         let proof = self.proof.secret(here.as_ref());
+        let mut key_aside = false;
         let made = match &self.new_password {
             Some(new_password) => {
                 // Calibrating the key derivation to this computer takes a moment too.
                 let params = self.params.unwrap_or_else(Argon2Params::calibrate);
                 // The new password is bound here, also when the kit was the proof on a
-                // computer the old one was not bound to (D-076).
+                // computer the old one was not bound to (D-076). The new key is held aside
+                // until the slot is written, so the key in use is never lost to a slot
+                // that was not (review of stage 5, S5).
                 let fresh = if here.is_none() {
-                    key_here(seal, &self.dir, false)
+                    let (key, aside) = key_for_new_slot(seal, &self.dir);
+                    key_aside = aside && key.is_some();
+                    key
                 } else {
                     None
                 };
@@ -161,6 +189,7 @@ impl SlotJob {
             session: self.session,
             ticket: self.ticket,
             made,
+            key_aside,
         }
     }
 }
@@ -584,7 +613,18 @@ impl Core {
             drop(opened);
             return Ok(self.status());
         }
-        self.after_unlock(opened.opened, true)
+        let just_bound = opened.just_bound;
+        let status = self.after_unlock(opened.opened, true)?;
+        if !just_bound {
+            return Ok(status);
+        }
+        // An older vault bound at this opening: said once, with what to keep (review of
+        // stage 5, S1).
+        self.since_last = Some(match self.since_last.take() {
+            Some(before) => format!("{before} {}", crate::binding::JUST_BOUND),
+            None => crate::binding::JUST_BOUND.to_owned(),
+        });
+        Ok(self.status())
     }
 
     pub fn unlock(&mut self, password: &str) -> Result<AppStatus, CoreError> {
@@ -694,6 +734,9 @@ impl Core {
             ),
             other => other.into(),
         })?;
+        if made.key_aside {
+            self.promote_password_key();
+        }
         self.failed_unlocks = 0;
         self.mark_secret_changed()?;
         Ok(kit)

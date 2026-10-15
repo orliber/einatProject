@@ -103,9 +103,45 @@ pub fn create_for(dir: &Path, purpose: Purpose) -> Result<Key32, VaultError> {
     Ok(key)
 }
 
+/// A new computer key held aside (`vault.computer.next`), not yet replacing the one in use:
+/// the slot it is for is written first, and only then is it promoted (review of stage 5, S5).
+/// Until then the key in use stays, so a slot that was not written still opens.
+pub fn create_next_for(dir: &Path, purpose: Purpose) -> Result<Key32, VaultError> {
+    let key = Key32::random()?;
+    let sealed = protect(key.as_bytes(), purpose)?;
+    let tmp = dir.join(format!("{}.next.tmp", purpose.file()));
+    {
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(sealed.as_bytes())?;
+        f.sync_all()?;
+    }
+    fs::rename(&tmp, next_path(dir, purpose))?;
+    Ok(key)
+}
+
+/// The key held aside, unsealed (for an opening after the slot was written but before the
+/// key was promoted).
+pub fn load_next_for(dir: &Path, purpose: Purpose) -> Result<Key32, VaultError> {
+    load_from(&next_path(dir, purpose), purpose)
+}
+
+/// The key held aside becomes the one in use.
+pub fn promote_next_for(dir: &Path, purpose: Purpose) -> Result<(), VaultError> {
+    fs::rename(next_path(dir, purpose), path_for(dir, purpose))?;
+    Ok(())
+}
+
+fn next_path(dir: &Path, purpose: Purpose) -> PathBuf {
+    dir.join(format!("{}.next", purpose.file()))
+}
+
 /// The computer key, unsealed. Fails on another computer or Windows account.
 pub fn load_for(dir: &Path, purpose: Purpose) -> Result<Key32, VaultError> {
-    let sealed = fs::read_to_string(path_for(dir, purpose)).map_err(|_| VaultError::NotFound)?;
+    load_from(&path_for(dir, purpose), purpose)
+}
+
+fn load_from(file: &Path, purpose: Purpose) -> Result<Key32, VaultError> {
+    let sealed = fs::read_to_string(file).map_err(|_| VaultError::NotFound)?;
     let plain = unprotect(sealed.trim(), purpose)?;
     let bytes: [u8; 32] = plain
         .as_slice()
@@ -117,6 +153,9 @@ pub fn load_for(dir: &Path, purpose: Purpose) -> Result<Key32, VaultError> {
 pub fn remove_for(dir: &Path, purpose: Purpose) {
     let _ = fs::remove_file(path_for(dir, purpose));
 }
+
+/// Longest wait for the sealing or unsealing child.
+const DPAPI_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
 fn powershell() -> String {
     std::env::var_os("SystemRoot").map_or_else(
@@ -156,9 +195,34 @@ fn dpapi(script: &str, input: &str, purpose: Purpose) -> Result<Zeroizing<String
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(input.as_bytes())?;
     }
-    let out = child.wait_with_output()?;
-    let text = Zeroizing::new(String::from_utf8_lossy(&out.stdout).trim().to_owned());
-    if !out.status.success() || text.is_empty() {
+    // A PowerShell that never comes back (an antivirus holding it, a locked-down shell) is
+    // stopped and the key is taken as not here: it runs on every opening, under the core's
+    // lock, so it must not freeze the program (review of stage 5, S6). Fail-closed.
+    let mut stdout = child.stdout.take();
+    let reader = std::thread::spawn(move || {
+        let mut buf = Zeroizing::new(Vec::new());
+        if let Some(out) = stdout.as_mut() {
+            let _ = std::io::Read::read_to_end(out, &mut buf);
+        }
+        buf
+    });
+    let started = std::time::Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break Some(status);
+        }
+        if started.elapsed() > DPAPI_TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    let out = reader
+        .join()
+        .map_err(|_| VaultError::Crypto("the key sealed to this computer could not be read"))?;
+    let text = Zeroizing::new(String::from_utf8_lossy(&out).trim().to_owned());
+    if !status.is_some_and(|s| s.success()) || text.is_empty() {
         return Err(VaultError::Crypto(
             "the key sealed to this computer could not be opened",
         ));
@@ -253,6 +317,14 @@ mod tests {
         // The other slot's key is its own file, and one seal never opens as the other.
         let password = create_for(dir.path(), Purpose::Password).unwrap();
         assert_ne!(password, key);
+        assert_eq!(load_for(dir.path(), Purpose::Password).unwrap(), password);
+        // A key held aside opens as itself, and only replaces the one in use when promoted.
+        let next = create_next_for(dir.path(), Purpose::Password).unwrap();
+        assert_eq!(load_for(dir.path(), Purpose::Password).unwrap(), password);
+        assert_eq!(load_next_for(dir.path(), Purpose::Password).unwrap(), next);
+        promote_next_for(dir.path(), Purpose::Password).unwrap();
+        assert_eq!(load_for(dir.path(), Purpose::Password).unwrap(), next);
+        assert!(load_next_for(dir.path(), Purpose::Password).is_err());
         let google_seal = fs::read(path(dir.path())).unwrap();
         fs::write(path_for(dir.path(), Purpose::Password), &google_seal).unwrap();
         assert!(load_for(dir.path(), Purpose::Password).is_err());

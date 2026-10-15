@@ -330,8 +330,10 @@ pub(crate) fn build_client() -> Result<reqwest::blocking::Client, EgressError> {
 pub(crate) fn send_error(e: &reqwest::Error) -> EgressError {
     let text = format!("{e:?}").to_lowercase();
     let tls = text.contains("certificate") || text.contains("tls") || text.contains("handshake");
-    // The refusal is told apart by its mark, or by the flag the verifier set for it.
-    if text.contains(pinning::PIN_MARK) || (tls && pinning::take_pin_refused()) {
+    // The refusal is told apart by its mark, or by the flag the verifier set for it. The flag
+    // is read (and cleared) every time, so an old refusal never names a later failure.
+    let refused = pinning::take_pin_refused();
+    if text.contains(pinning::PIN_MARK) || (tls && refused) {
         EgressError::Pinned
     } else if tls {
         EgressError::Tls

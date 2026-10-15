@@ -29,6 +29,13 @@ fn the_vault_opens_again_after_the_program_closes() {
         let created = core.create_vault(PASSWORD).unwrap();
         assert!(core.confirm_recovery_key(&created.recovery_key).unwrap());
         assert!(core.status().unlocked);
+        // On Windows the password slot is bound to this computer from the start (D-076); a
+        // DPAPI that failed quietly would leave it unbound (review of stage 5, S3).
+        assert_eq!(
+            dv_vault::Vault::password_is_bound(&vault).unwrap(),
+            cfg!(windows),
+            "bound to this computer exactly where DPAPI is"
+        );
         core.list_cases().unwrap();
         core.lock();
         created.recovery_key

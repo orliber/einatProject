@@ -293,7 +293,7 @@ impl Core {
             return Err(CoreError::Internal("opened without a key".to_owned()));
         };
         let params = self.argon.unwrap_or_else(Argon2Params::calibrate);
-        let here = self.new_password_key();
+        let (here, aside) = self.new_password_key();
         self.vault_mut()?.rekey_password_here(
             Secret::Google {
                 drive,
@@ -303,6 +303,9 @@ impl Core {
             params,
             here.as_ref(),
         )?;
+        if aside {
+            self.promote_password_key();
+        }
         self.mark_secret_changed()?;
         Ok(self.status())
     }

@@ -5,7 +5,7 @@
 //! traffic. For `api.anthropic.com` the trust is narrower still: its certificate must chain
 //! to one of a few roots, named here by the SHA-256 of their public key (SPKI). These are the
 //! roots of the authorities that have issued its certificates (Google Trust Services, Let's
-//! Encrypt, ZeroSSL through USERTrust), and DigiCert as a spare. A certificate from any
+//! Encrypt, ZeroSSL through USERTrust, SSL.com), and DigiCert as a spare. A certificate from any
 //! other authority, even one the Mozilla list trusts, is refused, and nothing is sent.
 //!
 //! The list changes only with a new version of the program, through the signed update
@@ -54,6 +54,23 @@ pub(crate) const ANTHROPIC_ROOTS: &[(&str, &str)] = &[
     (
         "USERTrust ECC Certification Authority",
         "2021917e98263945c859c43f1d73cb4139053c414fa03ca3bc7ee88614298f3b",
+    ),
+    // SSL.com, which Cloudflare also rotates its certificates to (review of stage 5, S2).
+    (
+        "SSL.com TLS RSA Root CA 2022",
+        "2bcf553a66f570900ddd32ba6dfe1ecc06c9182d662dc1b60e1f7b767c2bdd54",
+    ),
+    (
+        "SSL.com TLS ECC Root CA 2022",
+        "1bf00d5c8f13c094dd17e00504cf0888850f12fd067fa1f92c0fdbf60b86e321",
+    ),
+    (
+        "SSL.com Root Certification Authority RSA",
+        "d1c45377ebdcd618cd1651dc2e02c21d751e5aa9fcd1b3431ff6ecf6a31348fa",
+    ),
+    (
+        "SSL.com Root Certification Authority ECC",
+        "a320f4d534d7be97c1ae8dd0499735bc895c323add2d388bfccf662c23d7f99a",
     ),
     // The spare: a different authority, so one change of issuer does not stop her work.
     (
@@ -226,13 +243,41 @@ mod tests {
             ANTHROPIC_ROOTS.len(),
             "a pin with a typo, or a root gone from the Mozilla list"
         );
-        assert!(roots.roots.len() < webpki_roots::TLS_SERVER_ROOTS.len() / 10);
+        // A small slice of the Mozilla list, never most of it.
+        assert!(roots.roots.len() < webpki_roots::TLS_SERVER_ROOTS.len() / 8);
         for a in &roots.roots {
             let subject = String::from_utf8_lossy(a.subject.as_ref()).into_owned();
             let pin = spki_pin(a.subject_public_key_info.as_ref());
             let (name, _) = ANTHROPIC_ROOTS.iter().find(|(_, p)| *p == pin).unwrap();
             assert!(subject.contains(name), "{name} is not {subject}");
         }
+    }
+
+    /// The real chain of the AI service ends at a pinned root. A TLS handshake only: no
+    /// request is sent and nothing of hers exists here. Run on purpose before each release
+    /// (`cargo test -p dv-egress --lib -- --ignored live_chain`, in release.yml), so a
+    /// change of authority is found before she meets it (review of stage 5, S2).
+    #[test]
+    #[ignore = "network: a TLS handshake with api.anthropic.com; run before a release"]
+    fn live_chain_of_the_ai_service_ends_at_a_pinned_root() {
+        use std::io::Write as _;
+        let config = Arc::new(crate::tls_config());
+        let name = ServerName::try_from("api.anthropic.com").unwrap();
+        let mut conn = rustls::ClientConnection::new(config, name).unwrap();
+        let mut sock = std::net::TcpStream::connect(("api.anthropic.com", 443)).unwrap();
+        sock.set_read_timeout(Some(std::time::Duration::from_secs(20)))
+            .unwrap();
+        while conn.is_handshaking() {
+            if let Err(e) = conn.complete_io(&mut sock) {
+                panic!(
+                    "the handshake failed (pinned refusal: {}): {e}",
+                    take_pin_refused()
+                );
+            }
+        }
+        conn.send_close_notify();
+        let _ = conn.complete_io(&mut sock);
+        let _ = sock.flush();
     }
 
     #[test]
