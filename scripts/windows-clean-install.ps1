@@ -6,7 +6,11 @@
 param([Parameter(Mandatory = $true)] [string] $Installer)
 $ErrorActionPreference = "Stop"
 
-$product = "Diagnostic Vault"
+# The installer names its folder after the Windows product name (Hebrew, in
+# tauri.windows.conf.json), not the one in tauri.conf.json, so it is read from there.
+$winConf = Join-Path $PSScriptRoot "..\apps\desktop\src-tauri\tauri.windows.conf.json"
+$product = (Get-Content $winConf -Raw -Encoding utf8 | ConvertFrom-Json).productName
+if (-not $product) { throw "no productName in $winConf" }
 $data = Join-Path $env:LOCALAPPDATA "il.diagnosticvault.desktop"
 $vault = Join-Path $data "vault"
 $installDir = Join-Path $env:LOCALAPPDATA $product
