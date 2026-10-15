@@ -237,10 +237,7 @@ export function CasesScreen() {
 
         {inTrash ? (
           <TrashList cases={trash.data ?? []} pathOf={pathOf}
-            onRestore={(c) => void run(() => ipc.restoreCase(c.id), "התיק שוחזר.").then(() => {
-              // The last case restored: back to the list, where it now is.
-              if ((trash.data?.length ?? 0) <= 1) setInTrash(false);
-            })}
+            onRestore={(c) => void run(() => ipc.restoreCase(c.id), "התיק שוחזר.")}
             onPurge={(c) => setModal({ kind: "purge", c })} />
         ) : (
           <>
