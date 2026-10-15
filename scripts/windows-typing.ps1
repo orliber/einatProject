@@ -73,6 +73,23 @@ function Find-Named($root, [string] $pattern, [string] $what, [int] $seconds = 6
     throw "not found: $what ($pattern)"
 }
 
+# The first text field whose name matches. A label shows the same name ("סיסמה" above the
+# field) and cannot take the keyboard, so only an edit control that can is taken.
+function Find-Field($root, [string] $pattern, [string] $what, [int] $seconds = 60) {
+    $edit = [System.Windows.Automation.ControlType]::Edit
+    $deadline = (Get-Date).AddSeconds($seconds)
+    while ((Get-Date) -lt $deadline) {
+        $all = $root.FindAll($Tree, [System.Windows.Automation.Condition]::TrueCondition)
+        foreach ($e in $all) {
+            $c = $e.Current
+            if ($c.ControlType -eq $edit -and $c.IsKeyboardFocusable -and $c.IsEnabled -and $c.Name -match $pattern) { return $e }
+        }
+        Start-Sleep -Milliseconds 300
+    }
+    Show-Names $root
+    throw "not found: $what ($pattern)"
+}
+
 function Invoke-Named($root, [string] $pattern, [string] $what) {
     $e = Find-Named $root $pattern $what
     $e.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -97,7 +114,7 @@ $window = Get-Window
 
 # 1. Open the vault.
 # Not `$password`: PowerShell names ignore case, and that is the [string] parameter above.
-$passwordField = Find-Named $window '^סיסמה$' "the password field" 90
+$passwordField = Find-Field $window '^סיסמה$' "the password field" 90
 Type-Into $passwordField $Password 0
 [Keys]::Enter()
 
@@ -105,7 +122,7 @@ Type-Into $passwordField $Password 0
 Invoke-Named $window 'בתיק של' "a case on the cases screen"
 Invoke-Named $window 'חומרים$' "the materials stage"
 Invoke-Named $window '^הדבקת טקסט' "paste text for a material"
-$field = Find-Named $window '^הטקסט$' "the text field of the material"
+$field = Find-Field $window '^הטקסט$' "the text field of the material"
 
 # 3. 500 Hebrew characters, one key at a time, words and punctuation as she writes them.
 $words = @("הילד", "שיחק", "בחצר", "עם", "חברים,", "והתמיד", "במשימה", "גם", "כשהיה", "לו", "קשה.")
