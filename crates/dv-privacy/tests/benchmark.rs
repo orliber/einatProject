@@ -134,6 +134,20 @@ const ITEMS: &[Item] = &[
         &["אייבי"],
         &["נולדה"],
     ),
+    // A child introduced by age or school year, a name that is also a word (round 32).
+    it(
+        "undeclared",
+        "איתי, תלמיד כיתה ב', הופנה בשל קשיי קשב.",
+        &["איתי"],
+        &["תלמיד", "קשב"],
+    ),
+    it(
+        "undeclared",
+        "סיכום.\nשירה, בת שנתיים, הגיעה עם הוריה.",
+        &["שירה"],
+        &["הגיעה"],
+    ),
+    it("undeclared", "גיל, בן 8, קורא לאט.", &["גיל"], &["קורא"]),
     // Surnames.
     it(
         "surname",

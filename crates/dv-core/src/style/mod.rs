@@ -494,7 +494,10 @@ pub(crate) fn style_work(
 ) -> Result<StyleWork, CoreError> {
     let structure =
         ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
-    let raw_parts = split_parts(&extracted.body, &structure);
+    // Round 32: a score beside its subtest keeps its number, as a score tag with its range
+    // and its place among the report's subtests; every other number is masked below.
+    let (body, _) = tag_scores(&extracted.body);
+    let raw_parts = split_parts(&body, &structure);
     let stem = Path::new(file_name)
         .file_stem()
         .and_then(|s| s.to_str())
@@ -747,6 +750,26 @@ fn mask_numbers(text: &str) -> (String, u32) {
         i += 1;
     }
     (out, masked)
+}
+
+/// Every score a past report gives beside its test or subtest, as a score tag
+/// (`dv_domain::score_tag`). Returns the text and how many were tagged.
+pub(crate) fn tag_scores(text: &str) -> (String, u32) {
+    let found = dv_domain::find_score_mentions(text);
+    let mut out = String::with_capacity(text.len() + found.len() * 24);
+    let mut at = 0;
+    let mut n = 0;
+    for m in &found {
+        let (Some(before), true) = (text.get(at..m.start), m.start >= at) else {
+            continue;
+        };
+        out.push_str(before);
+        out.push_str(&dv_domain::score_tag(m));
+        at = m.end;
+        n += 1;
+    }
+    out.push_str(text.get(at..).unwrap_or_default());
+    (out, n)
 }
 
 /// The child a past report is about: the unknown name it mentions most (twice or more).

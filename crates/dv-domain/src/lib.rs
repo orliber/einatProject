@@ -30,8 +30,9 @@ pub use report::{
 };
 pub use routing::{passage_ranges, passages, Feed, Routing, SectionPassages, Suggestion};
 pub use scores::{
-    check_scores, format_sheet, instruments, sheet_profiles, sheet_table, Instrument, ScoreEntry,
-    ScoreProfile, ScoreRow, ScoreSheet,
+    check_scores, find_score_mentions, format_sheet, instruments, is_score_tag, score_tag,
+    sheet_profiles, sheet_table, Instrument, Relative, ScoreEntry, ScoreMention, ScoreProfile,
+    ScoreRow, ScoreSheet,
 };
 
 #[derive(Debug, thiserror::Error)]

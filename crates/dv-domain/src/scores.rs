@@ -16,6 +16,10 @@ pub enum ScoreScale {
     Standard,
     /// Subtest scaled score: mean 10, SD 3.
     Scaled,
+    /// Vineland v-scale score: mean 15, SD 3 (round 32).
+    VScale,
+    /// An ability T score, higher = better: mean 50, SD 10 (Mullen scales, round 32).
+    TAbility,
     /// Questionnaire T score, higher = more concern, instrument-specific cut-offs.
     TConcern,
     /// A raw total compared with a cut-off the psychologist enters (ADOS-2).
@@ -50,6 +54,9 @@ pub struct Measure {
     pub max: f64,
     /// The table used for this measure.
     pub bands: Vec<Band>,
+    /// Other names it goes by in reports ("קידוד" for WISC-V coding, round 32).
+    #[serde(default)]
+    pub aliases: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -146,10 +153,79 @@ fn comparison_bands() -> Vec<Band> {
     ]
 }
 
+/// Vineland-3 adaptive levels for the composite and the domains (mean 100, SD 15).
+fn vineland_bands() -> Vec<Band> {
+    vec![
+        band(130.0, 140.0, "גבוה", 0),
+        band(115.0, 129.0, "גבוה במידה מתונה", 0),
+        band(86.0, 114.0, "תקין", 0),
+        band(71.0, 85.0, "נמוך במידה מתונה", 1),
+        band(20.0, 70.0, "נמוך", 3),
+    ]
+}
+
+/// Vineland-3 adaptive levels for the subdomains (v-scale, mean 15, SD 3).
+fn vscale_bands() -> Vec<Band> {
+    vec![
+        band(21.0, 24.0, "גבוה", 0),
+        band(18.0, 20.0, "גבוה במידה מתונה", 0),
+        band(13.0, 17.0, "תקין", 0),
+        band(10.0, 12.0, "נמוך במידה מתונה", 1),
+        band(1.0, 9.0, "נמוך", 3),
+    ]
+}
+
+/// Mullen descriptive categories for the scales (T, mean 50, SD 10).
+fn mullen_t_bands() -> Vec<Band> {
+    vec![
+        band(70.0, 80.0, "גבוה מאוד", 0),
+        band(60.0, 69.0, "מעל הממוצע", 0),
+        band(40.0, 59.0, "ממוצע", 0),
+        band(30.0, 39.0, "מתחת לממוצע", 2),
+        band(20.0, 29.0, "נמוך מאוד", 3),
+    ]
+}
+
+/// Mullen descriptive categories for the Early Learning Composite (mean 100, SD 15).
+fn mullen_elc_bands() -> Vec<Band> {
+    vec![
+        band(130.0, 155.0, "גבוה מאוד", 0),
+        band(115.0, 129.0, "מעל הממוצע", 0),
+        band(85.0, 114.0, "ממוצע", 0),
+        band(70.0, 84.0, "מתחת לממוצע", 2),
+        band(49.0, 69.0, "נמוך מאוד", 3),
+    ]
+}
+
+/// BRIEF-P: T ≥ 65 is clinically elevated; 60–64 mildly elevated (pending her approval).
+fn brief_bands() -> Vec<Band> {
+    vec![
+        band(20.0, 59.0, "בטווח התקין", 0),
+        band(60.0, 64.0, "מוגבר במידה קלה", 1),
+        band(65.0, 120.0, "מוגבר באופן מובהק קלינית", 3),
+    ]
+}
+
+/// A measure with other names it goes by in reports.
+fn with_aliases(mut x: Measure, aliases: &[&str]) -> Measure {
+    x.aliases = aliases.iter().map(|a| (*a).to_owned()).collect();
+    x
+}
+
+/// A measure with its own range and table.
+fn with_table(mut x: Measure, min: f64, max: f64, bands: Vec<Band>) -> Measure {
+    x.min = min;
+    x.max = max;
+    x.bands = bands;
+    x
+}
+
 fn m(key: &str, name_he: &str, abbr: &str, group: &str, scale: ScoreScale) -> Measure {
     let (min, max, bands) = match scale {
         ScoreScale::Standard => (40.0, 160.0, standard_bands()),
         ScoreScale::Scaled => (1.0, 19.0, scaled_bands()),
+        ScoreScale::VScale => (1.0, 24.0, vscale_bands()),
+        ScoreScale::TAbility => (20.0, 80.0, mullen_t_bands()),
         ScoreScale::TConcern => (20.0, 100.0, asrs_bands()),
         ScoreScale::RawCutoff => (0.0, 30.0, Vec::new()),
         ScoreScale::Cars => (15.0, 60.0, cars_bands()),
@@ -164,6 +240,7 @@ fn m(key: &str, name_he: &str, abbr: &str, group: &str, scale: ScoreScale) -> Me
         min,
         max,
         bands,
+        aliases: Vec::new(),
     }
 }
 
@@ -172,7 +249,7 @@ const STANDARD_NOTE: &str = "ציוני המדדים הם ציוני תקן (מ�
 /// The instruments the psychologist uses (docs/REPORT_STRUCTURE.md).
 #[must_use]
 pub fn instruments() -> Vec<Instrument> {
-    use ScoreScale::{Cars, Comparison, RawCutoff, Scaled, Standard, TConcern};
+    use ScoreScale::{Cars, Comparison, RawCutoff, Scaled, Standard, TAbility, TConcern, VScale};
     let mut cbcl: Vec<Measure> = [
         ("emotionally_reactive", "תגובתיות רגשית"),
         ("anxious_depressed", "חרדה/דיכאון"),
@@ -228,6 +305,17 @@ pub fn instruments() -> Vec<Instrument> {
                 m("zoo_locations", "מיקומים בגן החיות", "ZL", "תת-מבחנים", Scaled),
                 m("bug_search", "חיפוש חרקים", "BS", "תת-מבחנים", Scaled),
                 m("cancellation", "מחיקה", "CA", "תת-מבחנים", Scaled),
+                with_aliases(
+                    m("animal_coding", "קידוד חיות", "AC", "תת-מבחנים", Scaled),
+                    &["קידוד"],
+                ),
+                m("receptive_vocabulary", "אוצר מילים רצפטיבי", "RV", "תת-מבחנים", Scaled),
+                m("picture_naming", "שיום תמונות", "PN", "תת-מבחנים", Scaled),
+                // Ancillary indexes: not in the gap between the primary indexes.
+                m("vai", "רכישת אוצר מילים", "VAI", "מדדים נוספים", Standard),
+                m("nvi", "מדד לא מילולי", "NVI", "מדדים נוספים", Standard),
+                m("gai", "מדד יכולת כללית", "GAI", "מדדים נוספים", Standard),
+                m("cpi", "מדד יעילות קוגניטיבית", "CPI", "מדדים נוספים", Standard),
             ],
         },
         Instrument {
@@ -257,9 +345,44 @@ pub fn instruments() -> Vec<Instrument> {
                 m("digit_span", "זכירת ספרות", "DS", "תת-מבחנים", Scaled),
                 m("picture_span", "זכירת תמונות", "PS", "תת-מבחנים", Scaled),
                 m("letter_number", "רצף אותיות ומספרים", "LN", "תת-מבחנים", Scaled),
-                m("coding", "צפנים", "CD", "תת-מבחנים", Scaled),
+                with_aliases(
+                    m("coding", "צפנים", "CD", "תת-מבחנים", Scaled),
+                    &["קידוד"],
+                ),
                 m("symbol_search", "חיפוש סמלים", "SS", "תת-מבחנים", Scaled),
                 m("cancellation", "מחיקה", "CA", "תת-מבחנים", Scaled),
+            ],
+        },
+        Instrument {
+            key: "wppsi_iii".into(),
+            name: "WPPSI-III".into(),
+            description_he: "מבחן וקסלר לגיל הרך, מהדורה שלישית (2:6–7:3)".into(),
+            scale_note_he: STANDARD_NOTE.into(),
+            min_age_months: 30,
+            max_age_months: 87,
+            measures: vec![
+                m("fsiq", "מנת משכל כללית", "FSIQ", "מדדים", Standard),
+                m("viq", "מנת משכל מילולית", "VIQ", "מדדים", Standard),
+                m("piq", "מנת משכל ביצועית", "PIQ", "מדדים", Standard),
+                m("psq", "מנת מהירות עיבוד", "PSQ", "מדדים", Standard),
+                m("glc", "שפה כללית", "GLC", "מדדים", Standard),
+                m("information", "מידע", "IN", "תת-מבחנים", Scaled),
+                m("vocabulary", "אוצר מילים", "VC", "תת-מבחנים", Scaled),
+                m("word_reasoning", "היסק מילולי", "WR", "תת-מבחנים", Scaled),
+                m("comprehension", "הבנה", "CO", "תת-מבחנים", Scaled),
+                m("similarities", "שיתופיות", "SI", "תת-מבחנים", Scaled),
+                m("block_design", "קוביות", "BD", "תת-מבחנים", Scaled),
+                m("matrix", "מטריצות", "MR", "תת-מבחנים", Scaled),
+                m("picture_concepts", "מושגים בתמונות", "PCn", "תת-מבחנים", Scaled),
+                m("picture_completion", "השלמת תמונות", "PCm", "תת-מבחנים", Scaled),
+                m("object_assembly", "הרכבת עצמים", "OA", "תת-מבחנים", Scaled),
+                with_aliases(
+                    m("coding", "צפנים", "CD", "תת-מבחנים", Scaled),
+                    &["קידוד"],
+                ),
+                m("symbol_search", "חיפוש סמלים", "SS", "תת-מבחנים", Scaled),
+                m("receptive_vocabulary", "אוצר מילים רצפטיבי", "RV", "תת-מבחנים", Scaled),
+                m("picture_naming", "שיום תמונות", "PN", "תת-מבחנים", Scaled),
             ],
         },
         Instrument {
@@ -270,9 +393,12 @@ pub fn instruments() -> Vec<Instrument> {
             min_age_months: 0,
             max_age_months: 42,
             measures: vec![
-                m("cognitive", "קוגניטיבי", "COG", "מדדים", Standard),
+                with_aliases(
+                    m("cognitive", "קוגניטיבי", "COG", "מדדים", Standard),
+                    &["קוגניטיבית"],
+                ),
                 m("language", "שפה", "LANG", "מדדים", Standard),
-                m("motor", "מוטורי", "MOT", "מדדים", Standard),
+                with_aliases(m("motor", "מוטורי", "MOT", "מדדים", Standard), &["מוטורית"]),
                 m("receptive", "שפה קולטת", "RC", "תת-מבחנים", Scaled),
                 m("expressive", "שפה מבטאת", "EC", "תת-מבחנים", Scaled),
                 m("fine_motor", "מוטוריקה עדינה", "FM", "תת-מבחנים", Scaled),
@@ -325,6 +451,87 @@ pub fn instruments() -> Vec<Instrument> {
             min_age_months: 18,
             max_age_months: 71,
             measures: cbcl,
+        },
+        Instrument {
+            key: "brief_p".into(),
+            name: "BRIEF-P".into(),
+            description_he: "סולם דירוג לתפקודים ניהוליים בגיל הרך (הורים / גננת)".into(),
+            scale_note_he: "ציוני T (ממוצע 50, סטיית תקן 10); ככל שהערך גבוה יותר, הקושי רב יותר. ציון T של 65 ומעלה מוגבר באופן מובהק קלינית.".into(),
+            min_age_months: 24,
+            max_age_months: 71,
+            measures: [
+                ("inhibit", "עכבה", "INH", "סולמות"),
+                ("shift", "גמישות", "SHF", "סולמות"),
+                ("emotional_control", "שליטה רגשית", "EC", "סולמות"),
+                ("working_memory", "זיכרון עבודה", "WM", "סולמות"),
+                ("plan_organize", "תכנון וארגון", "PO", "סולמות"),
+                ("isci", "שליטה עצמית מעכבת", "ISCI", "מדדים"),
+                ("fi", "מדד גמישות", "FI", "מדדים"),
+                ("emi", "מטה-קוגניציה מתהווה", "EMI", "מדדים"),
+                ("gec", "מדד ניהולי כללי", "GEC", "מדדים"),
+            ]
+            .iter()
+            .map(|(k, n, a, g)| with_table(m(k, n, a, g, TConcern), 20.0, 120.0, brief_bands()))
+            // A report may call it a score; that name never goes out in a table ("ציון" is
+            // also a name).
+            .map(|x| if x.key == "gec" { with_aliases(x, &["ציון ניהולי כללי"]) } else { x })
+            .collect(),
+        },
+        Instrument {
+            key: "vineland_3".into(),
+            name: "Vineland-3".into(),
+            description_he: "סולמות וינלנד להתנהגות מסתגלת (ראיון עם ההורים או דירוג של ההורים / הצוות)".into(),
+            scale_note_he: "המדד הכללי והתחומים הם ציוני תקן (ממוצע 100, סטיית תקן 15); תת-התחומים הם ציוני v (ממוצע 15, סטיית תקן 3).".into(),
+            min_age_months: 0,
+            max_age_months: 1079,
+            measures: [
+                ("abc", "מדד התנהגות מסתגלת", "ABC"),
+                ("communication", "תקשורת", "COM"),
+                ("daily_living", "מיומנויות יומיום", "DLS"),
+                ("socialization", "חברות", "SOC"),
+                ("motor", "מוטוריקה", "MOT"),
+            ]
+            .iter()
+            .map(|(k, n, a)| with_table(m(k, n, a, "תחומים", Standard), 20.0, 140.0, vineland_bands()))
+            .chain(
+                [
+                    ("receptive", "קליטה", "REC"),
+                    ("expressive", "הבעה", "EXP"),
+                    ("written", "קריאה וכתיבה", "WRN"),
+                    ("personal", "אישי", "PER"),
+                    ("domestic", "ביתי", "DOM"),
+                    ("community", "קהילתי", "CMM"),
+                    ("interpersonal", "יחסים בין-אישיים", "IPR"),
+                    ("play_leisure", "משחק ופנאי", "PLY"),
+                    ("coping", "התמודדות", "CPS"),
+                    ("fine_motor", "מוטוריקה עדינה", "FMS"),
+                    ("gross_motor", "מוטוריקה גסה", "GMS"),
+                ]
+                .iter()
+                .map(|(k, n, a)| m(k, n, a, "תת-תחומים", VScale)),
+            )
+            .collect(),
+        },
+        Instrument {
+            key: "mullen".into(),
+            name: "MSEL".into(),
+            description_he: "סולמות מולן ללמידה מוקדמת (לידה עד 68 חודשים)".into(),
+            scale_note_he: "המדד המשולב ללמידה מוקדמת הוא ציון תקן (ממוצע 100, סטיית תקן 15); הסולמות הם ציוני T (ממוצע 50, סטיית תקן 10).".into(),
+            min_age_months: 0,
+            max_age_months: 68,
+            measures: vec![
+                with_table(
+                    m("elc", "מדד משולב ללמידה מוקדמת", "ELC", "מדדים", Standard),
+                    49.0,
+                    155.0,
+                    mullen_elc_bands(),
+                ),
+                m("gross_motor", "מוטוריקה גסה", "GM", "סולמות", TAbility),
+                m("visual_reception", "קליטה חזותית", "VR", "סולמות", TAbility),
+                m("fine_motor", "מוטוריקה עדינה", "FM", "סולמות", TAbility),
+                m("receptive_language", "שפה קולטת", "RL", "סולמות", TAbility),
+                m("expressive_language", "שפה מבטאת", "EL", "סולמות", TAbility),
+            ],
         },
         Instrument {
             key: "ados_2".into(),
@@ -387,6 +594,8 @@ pub fn percentile(measure: &Measure, value: f64) -> Option<String> {
     let z = match measure.scale {
         ScoreScale::Standard => (value - 100.0) / 15.0,
         ScoreScale::Scaled => (value - 10.0) / 3.0,
+        ScoreScale::VScale => (value - 15.0) / 3.0,
+        ScoreScale::TAbility => (value - 50.0) / 10.0,
         _ => return None,
     };
     let p = normal_cdf(z) * 100.0;
@@ -684,28 +893,47 @@ fn mentions(sentence: &str, measure: &Measure) -> bool {
     if measure.abbr.chars().count() >= 2 && words.iter().any(|w| *w == measure.abbr) {
         return true;
     }
-    let name: Vec<&str> = measure.name_he.split_whitespace().collect();
-    let long = name.len() >= 2 || measure.name_he.chars().count() >= 5;
-    if !long
-        || name
-            .iter()
-            .any(|w| !w.chars().all(|c| ('\u{05d0}'..='\u{05ea}').contains(&c)))
-    {
-        return false;
-    }
-    let Some((&head, tail)) = name.split_first() else {
-        return false;
-    };
-    let first_ok = |w: &str| {
-        w == head
-            || w.strip_prefix(['ו', 'ב', 'ה', 'ל', 'מ', 'ש', 'כ'])
-                .is_some_and(|rest| {
-                    rest == head || rest.strip_prefix(['ב', 'ה', 'ל', 'מ']) == Some(head)
-                })
-    };
-    words.windows(name.len()).any(|win| {
-        win.split_first()
-            .is_some_and(|(first, rest)| first_ok(first) && rest == tail)
+    std::iter::once(measure.name_he.as_str())
+        .chain(measure.aliases.iter().map(String::as_str))
+        .any(|name| named(&words, name))
+}
+
+/// Whether `words` hold the Hebrew name `name` (see [`mentions`]).
+fn named(words: &[&str], name_he: &str) -> bool {
+    let long = name_he.split_whitespace().count() >= 2 || name_he.chars().count() >= 5;
+    long && named_at(words, name_he).next().is_some()
+}
+
+/// Where in `words` the Hebrew name `name` starts, with or without a short name's length
+/// rule. A first word may take a prefix ("ובמטריצות"), the next ones the article
+/// ("ההבנה המילולית").
+fn named_at<'a>(words: &'a [&'a str], name_he: &'a str) -> impl Iterator<Item = usize> + 'a {
+    let name: Vec<&str> = name_he.split_whitespace().collect();
+    let hebrew = !name.is_empty()
+        && name.iter().all(|w| {
+            w.chars()
+                .all(|c| ('\u{05d0}'..='\u{05ea}').contains(&c) || c == '-')
+        });
+    let n = name.len().max(1);
+    (0..words.len().saturating_sub(n - 1)).filter(move |&k| {
+        let (Some((&head, tail)), Some(win)) = (name.split_first(), words.get(k..k + n)) else {
+            return false;
+        };
+        let first_ok = |w: &str| {
+            w == head
+                || w.strip_prefix(['ו', 'ב', 'ה', 'ל', 'מ', 'ש', 'כ'])
+                    .is_some_and(|rest| {
+                        rest == head || rest.strip_prefix(['ב', 'ה', 'ל', 'מ']) == Some(head)
+                    })
+        };
+        hebrew
+            && win.split_first().is_some_and(|(first, rest)| {
+                first_ok(first)
+                    && rest
+                        .iter()
+                        .zip(tail)
+                        .all(|(w, t)| w == t || w.strip_prefix('ה') == Some(t))
+            })
     })
 }
 
@@ -802,9 +1030,484 @@ pub fn check_scores(text: &str, sheets: &[ScoreSheet]) -> Vec<String> {
     out
 }
 
+// ------------------------------------------------------------ scores in a past report (round 32)
+
+/// Where a score stands among the child's own subtest scores in the same report: three
+/// scaled-score points or more from their mean (the Wechsler convention, pending her approval).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum Relative {
+    Strength,
+    Weakness,
+}
+
+impl Relative {
+    #[must_use]
+    pub fn label_he(self) -> &'static str {
+        match self {
+            Relative::Strength => "חוזקה יחסית",
+            Relative::Weakness => "חולשה יחסית",
+        }
+    }
+}
+
+/// The distance from the child's subtest mean that counts as a relative strength or weakness.
+pub const RELATIVE_POINTS: f64 = 3.0;
+
+/// A score found in a text, beside the name of the test or subtest it belongs to.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScoreMention {
+    pub instrument: String,
+    pub measure: String,
+    pub value: f64,
+    /// Byte range of the number in the text.
+    pub start: usize,
+    pub end: usize,
+    pub band: Option<String>,
+    pub relative: Option<Relative>,
+}
+
+/// Scales whose scores are tagged: the others' range labels are long sentences, and a raw
+/// cut-off score means nothing without its module.
+fn taggable(scale: ScoreScale) -> bool {
+    matches!(
+        scale,
+        ScoreScale::Standard
+            | ScoreScale::Scaled
+            | ScoreScale::VScale
+            | ScoreScale::TAbility
+            | ScoreScale::TConcern
+    )
+}
+
+/// The instruments a text names, best first: the exact name ("WPPSI-IV") before its family
+/// ("WPPSI"). All of them when it names none.
+fn named_instruments(text: &str, all: &[Instrument]) -> Vec<Instrument> {
+    let flat: String = text
+        .to_ascii_uppercase()
+        .chars()
+        .map(|c| if c == ' ' || c == '–' { '-' } else { c })
+        .collect();
+    let mut scored: Vec<(u8, &Instrument)> = all
+        .iter()
+        .map(|i| {
+            let name = i.name.to_ascii_uppercase().replace(' ', "-");
+            let family = name.split(['-', '(']).next().unwrap_or_default().to_owned();
+            let score = if flat.contains(&name) {
+                2
+            } else if family.chars().count() >= 4 && flat.contains(&family) {
+                1
+            } else {
+                0
+            };
+            (score, i)
+        })
+        .filter(|(s, _)| *s > 0)
+        .collect();
+    if scored.is_empty() {
+        return all.to_vec();
+    }
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.into_iter().map(|(_, i)| i.clone()).collect()
+}
+
+/// Byte ranges of the sentences of a text, split as [`check_scores`] splits them.
+fn sentence_spans(text: &str) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let bytes: Vec<(usize, char)> = text.char_indices().collect();
+    for (k, &(i, c)) in bytes.iter().enumerate() {
+        let next = bytes.get(k + 1).map(|(_, c)| *c);
+        let ends = matches!(c, '\n' | '!' | '?' | ';') || (c == '.' && next == Some(' '));
+        if ends {
+            out.push((start, i));
+            start = i + c.len_utf8();
+        }
+    }
+    out.push((start, text.len()));
+    out
+}
+
+/// Words of a sentence with their byte ranges, as [`mentions`] reads them.
+fn word_spans(sentence: &str) -> Vec<(usize, usize, &str)> {
+    let mut out = Vec::new();
+    let mut start: Option<usize> = None;
+    let keep = |c: char| c.is_alphanumeric() || c == '-' || c == '"' || c == '\'';
+    for (i, c) in sentence
+        .char_indices()
+        .chain(std::iter::once((sentence.len(), ' ')))
+    {
+        match (keep(c) && i < sentence.len(), start) {
+            (true, None) => start = Some(i),
+            (false, Some(s)) => {
+                if let Some(w) = sentence.get(s..i) {
+                    out.push((s, i, w));
+                }
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Where in `words` a measure is named: the byte range of each mention.
+fn mention_spans(words: &[(usize, usize, &str)], measure: &Measure) -> Vec<(usize, usize)> {
+    let plain: Vec<&str> = words.iter().map(|(_, _, w)| *w).collect();
+    let mut out = Vec::new();
+    if measure.abbr.chars().count() >= 2 {
+        for (s, e, w) in words {
+            if *w == measure.abbr {
+                out.push((*s, *e));
+            }
+        }
+    }
+    for name in
+        std::iter::once(measure.name_he.as_str()).chain(measure.aliases.iter().map(String::as_str))
+    {
+        let n = name.split_whitespace().count();
+        let long = n >= 2 || name.chars().count() >= 5;
+        for k in named_at(&plain, name) {
+            // A short name ("מידע", "שפה") is a common word too: only right before a number.
+            let next_is_number = plain
+                .get(k + n)
+                .is_some_and(|w| w.chars().all(|c| c.is_ascii_digit()));
+            if !long && !next_is_number {
+                continue;
+            }
+            if let (Some(a), Some(b)) = (words.get(k), words.get(k + n - 1)) {
+                out.push((a.0, b.1));
+            }
+        }
+    }
+    out
+}
+
+/// Numbers in a sentence that could be scores, with their byte ranges (see [`score_numbers`]),
+/// leaving out a percentile ("אחוזון 79", "79%").
+fn score_number_spans(sentence: &str) -> Vec<(usize, usize, f64)> {
+    let words = word_spans(sentence);
+    let mut out = Vec::new();
+    for (k, (s, e, w)) in words.iter().enumerate() {
+        let digits = w.chars().all(|c| c.is_ascii_digit());
+        if !digits {
+            continue;
+        }
+        let rest = sentence.get(*e..).unwrap_or_default();
+        let before = sentence.get(..*s).unwrap_or_default();
+        // A decimal: "29.5".
+        let (end, text) = match rest.strip_prefix('.').and_then(|r| {
+            let d: String = r.chars().take_while(char::is_ascii_digit).collect();
+            (!d.is_empty()).then_some(d)
+        }) {
+            Some(d) => (*e + 1 + d.len(), format!("{w}.{d}")),
+            None => (*e, (*w).to_owned()),
+        };
+        let after = sentence.get(end..).unwrap_or_default();
+        let percent = after.starts_with('%')
+            || k.checked_sub(1)
+                .and_then(|j| words.get(j))
+                .is_some_and(|(_, _, p)| p.contains("אחוזון"));
+        let time = before.ends_with(':') || after.starts_with(':') || after.starts_with('/');
+        let date = before.ends_with('/') || before.ends_with('.');
+        if percent || time || date {
+            continue;
+        }
+        if let Ok(v) = text.parse::<f64>() {
+            out.push((*s, end, v));
+        }
+    }
+    out
+}
+
+/// Every score a past report gives beside the name of a test or subtest: the instrument it
+/// names (or the first that has the measure), the measure, the value within its scale, its
+/// range from the table, and where it stands among the same report's subtest scores. Local
+/// only; the text is never sent for this.
+#[must_use]
+pub fn find_score_mentions(text: &str) -> Vec<ScoreMention> {
+    let all = instruments();
+    let candidates = named_instruments(text, &all);
+    let mut found: Vec<(ScoreMention, ScoreScale)> = Vec::new();
+    for (from, to) in sentence_spans(text) {
+        let Some(sentence) = text.get(from..to) else {
+            continue;
+        };
+        let words = word_spans(sentence);
+        // Every mention in the sentence: (where it ends, instrument, measure).
+        let mut named_here: Vec<(usize, usize, &Instrument, &Measure)> = Vec::new();
+        for inst in &candidates {
+            for m in inst.measures.iter().filter(|m| taggable(m.scale)) {
+                for (s, e) in mention_spans(&words, m) {
+                    // The same name in two instruments: the first one named wins.
+                    if !named_here
+                        .iter()
+                        .any(|(a, b, _, x)| (*a, *b) == (s, e) && x.key == m.key)
+                    {
+                        named_here.push((s, e, inst, m));
+                    }
+                }
+            }
+        }
+        if named_here.is_empty() {
+            continue;
+        }
+        // A longer name inside which a shorter one was found wins ("אוצר מילים רצפטיבי").
+        let inner: Vec<bool> = named_here
+            .iter()
+            .map(|(s, e, _, _)| {
+                named_here
+                    .iter()
+                    .any(|(s2, e2, _, _)| s2 <= s && e2 >= e && (e2 - s2) > (e - s))
+            })
+            .collect();
+        let named_here: Vec<_> = named_here
+            .into_iter()
+            .zip(inner)
+            .filter(|(_, inside)| !inside)
+            .map(|(n, _)| n)
+            .collect();
+        for (ns, ne, v) in score_number_spans(sentence) {
+            // The nearest mention before the number; after a score word, the one after it.
+            let before = named_here
+                .iter()
+                .filter(|(_, e, _, _)| *e <= ns)
+                .max_by_key(|(_, e, _, _)| *e);
+            // After it only as "ציון 7 בקוביות": a number before any name ("בן 6, קוביות")
+            // is something else.
+            let said_score = words
+                .iter()
+                .rev()
+                .find(|(_, e, _)| *e <= ns)
+                .is_some_and(|(_, _, w)| w.ends_with("ציון") || *w == "ציונו" || *w == "ציונה");
+            let after = named_here
+                .iter()
+                .filter(|(s, _, _, _)| *s >= ne && said_score)
+                .min_by_key(|(s, _, _, _)| *s);
+            // "ציון 13 במושגים בתמונות": after a score word, a name right after the number is
+            // its own ("קיבל ציון 7 ובמטריצות 13" keeps 7 with the name before it).
+            // "ובמטריצות" opens the next item.
+            let next_word = words
+                .iter()
+                .find(|(s, _, _)| *s >= ne)
+                .filter(|(_, _, w)| !w.starts_with('ו'))
+                .map(|(s, _, _)| *s);
+            let right_after = after.filter(|(s, _, _, _)| Some(*s) == next_word);
+            let nearest = right_after.or(before).or(after);
+            let Some(&(ms, me, inst, m)) = nearest else {
+                continue;
+            };
+            // Every candidate at that same place, the first whose scale holds the value.
+            let fits = |m: &Measure| {
+                v >= m.min
+                    && v <= m.max
+                    && (!matches!(m.scale, ScoreScale::Scaled | ScoreScale::VScale)
+                        || (v - v.round()).abs() < 1e-9)
+            };
+            let pick = named_here
+                .iter()
+                .filter(|(s, e, _, _)| (*s, *e) == (ms, me))
+                .find(|(_, _, _, x)| fits(x))
+                .map(|(_, _, i, x)| (*i, *x))
+                .or_else(|| fits(m).then_some((inst, m)));
+            let Some((inst, m)) = pick else { continue };
+            found.push((
+                ScoreMention {
+                    instrument: inst.key.clone(),
+                    measure: m.key.clone(),
+                    value: v,
+                    start: from + ns,
+                    end: from + ne,
+                    band: classify(m, v).map(|b| b.label.clone()),
+                    relative: None,
+                },
+                m.scale,
+            ));
+        }
+    }
+    // Relative place among the report's subtests of one instrument, three or more of them.
+    let groups: Vec<String> = found.iter().map(|(f, _)| f.instrument.clone()).collect();
+    for inst in groups {
+        let mut seen: Vec<(&str, f64)> = Vec::new();
+        for (f, scale) in &found {
+            if f.instrument == inst
+                && matches!(scale, ScoreScale::Scaled | ScoreScale::VScale)
+                && !seen.iter().any(|(k, _)| *k == f.measure)
+            {
+                seen.push((&f.measure, f.value));
+            }
+        }
+        if seen.len() < 3 {
+            continue;
+        }
+        #[allow(clippy::cast_precision_loss)]
+        let mean = seen.iter().map(|(_, v)| v).sum::<f64>() / seen.len() as f64;
+        for (f, scale) in &mut found {
+            if f.instrument == inst && matches!(scale, ScoreScale::Scaled | ScoreScale::VScale) {
+                f.relative = if f.value - mean >= RELATIVE_POINTS {
+                    Some(Relative::Strength)
+                } else if mean - f.value >= RELATIVE_POINTS {
+                    Some(Relative::Weakness)
+                } else {
+                    None
+                };
+            }
+        }
+    }
+    found.into_iter().map(|(f, _)| f).collect()
+}
+
+/// The tag a score becomes in a neutralized past report: `[תוצאה 9 · ממוצע · חולשה יחסית]`.
+#[must_use]
+pub fn score_tag(m: &ScoreMention) -> String {
+    let mut parts = vec![format!("תוצאה {}", fmt_value(m.value))];
+    parts.extend(m.band.clone());
+    parts.extend(m.relative.map(|r| r.label_he().to_owned()));
+    let tag = format!("[{}]", parts.join(" · "));
+    // The gate reads a tag as at most 40 characters inside the brackets.
+    if tag.chars().count() <= 42 {
+        tag
+    } else {
+        format!("[תוצאה {}]", fmt_value(m.value))
+    }
+}
+
+/// Every range label of the fixed tables, once.
+static BAND_LABELS: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
+    let mut out: Vec<String> = instruments()
+        .into_iter()
+        .flat_map(|i| i.measures)
+        .flat_map(|m| m.bands)
+        .map(|b| b.label)
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+});
+
+/// A score tag as [`score_tag`] writes it, and nothing else: a score from 0 to 200, then only
+/// a range label of the fixed tables and a relative place. Free words never pass, so the
+/// tag cannot carry a name.
+#[must_use]
+pub fn is_score_tag(tag: &str) -> bool {
+    let Some(inner) = tag.strip_prefix('[').and_then(|t| t.strip_suffix(']')) else {
+        return false;
+    };
+    let mut parts = inner.split(" · ");
+    let Some(value) = parts.next().and_then(|p| p.strip_prefix("תוצאה ")) else {
+        return false;
+    };
+    let Ok(v) = value.parse::<f64>() else {
+        return false;
+    };
+    if !(0.0..=200.0).contains(&v) || fmt_value(v) != value {
+        return false;
+    }
+    let rest: Vec<&str> = parts.collect();
+    let labels = &*BAND_LABELS;
+    let rel = |p: &str| p == Relative::Strength.label_he() || p == Relative::Weakness.label_he();
+    match rest.as_slice() {
+        [] => true,
+        [a] => labels.iter().any(|l| l == a) || rel(a),
+        [a, b] => labels.iter().any(|l| l == a) && rel(b),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scores_in_a_past_report_are_found_beside_their_subtest_with_their_place() {
+        let text = "במבחן WPPSI-IV הושגה מנת משכל כללית של 98. בקוביות (7) ובמטריצות (13) \
+                    הופיע פער. זיכרון תמונות 10, חיפוש חרקים 11.\nקידוד חיות: 6, אחוזון 9. \
+                    בגיל 5:4 נבדק ב-12.3.2023. שיחק עם 3 בובות.";
+        let found = find_score_mentions(text);
+        let got: Vec<(&str, f64, Option<Relative>)> = found
+            .iter()
+            .map(|f| (f.measure.as_str(), f.value, f.relative))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("fsiq", 98.0, None),
+                ("block_design", 7.0, None),
+                ("matrix", 13.0, Some(Relative::Strength)),
+                ("picture_memory", 10.0, None),
+                ("bug_search", 11.0, None),
+                ("animal_coding", 6.0, Some(Relative::Weakness)),
+            ]
+        );
+        assert!(found.iter().all(|f| f.instrument == "wppsi_iv"));
+        let six = found.iter().find(|f| f.value == 6.0).unwrap();
+        assert_eq!(text.get(six.start..six.end), Some("6"));
+        assert_eq!(score_tag(six), "[תוצאה 6 · ממוצע נמוך · חולשה יחסית]");
+        assert!(is_score_tag(&score_tag(six)));
+    }
+
+    #[test]
+    fn a_score_out_of_its_scale_or_named_otherwise_is_not_a_score() {
+        // 25 is no scaled score; WISC-V coding goes by "קידוד" too.
+        let found = find_score_mentions("ב-WISC-V: קוביות 25. קידוד 8.");
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            (found[0].instrument.as_str(), found[0].measure.as_str()),
+            ("wisc_v", "coding")
+        );
+        assert!(find_score_mentions("הילד בן 6 ואוהב קוביות").is_empty());
+        let after = find_score_mentions("הושג ציון 7 בקוביות.");
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].measure, "block_design");
+        let both = find_score_mentions("בקוביות קיבל ציון 7 ובמטריצות 13.");
+        let keys: Vec<&str> = both.iter().map(|m| m.measure.as_str()).collect();
+        assert_eq!(keys, ["block_design", "matrix"]);
+        // A short name is a common word: only right before its number.
+        let short = find_score_mentions("WPPSI-IV: מידע 11. היה לו מידע רב על 12 חיות.");
+        assert_eq!(short.len(), 1);
+        assert_eq!(short[0].value, 11.0);
+    }
+
+    #[test]
+    fn only_a_score_tag_of_the_fixed_tables_passes() {
+        for ok in [
+            "[תוצאה 9]",
+            "[תוצאה 112 · ממוצע גבוה]",
+            "[תוצאה 13 · חוזקה יחסית]",
+            "[תוצאה 29.5]",
+        ] {
+            assert!(is_score_tag(ok), "{ok}");
+        }
+        for bad in [
+            "[תוצאה 9 · אלון]",
+            "[תוצאה 012]",
+            "[תוצאה 300]",
+            "[תוצאה 9 · ממוצע · ממוצע]",
+            "[תוצאה 9 · חולשה יחסית · ממוצע]",
+            "[תוצאה 052-1]",
+            "[תוצאה]",
+            "תוצאה 9",
+        ] {
+            assert!(!is_score_tag(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_new_tables_read_their_scores() {
+        let v = measure("vineland_3", "receptive");
+        assert_eq!(percentile(&v, 15.0).as_deref(), Some("50"));
+        assert_eq!(
+            classify(&v, 11.0).map(|b| b.label.as_str()),
+            Some("נמוך במידה מתונה")
+        );
+        let t = measure("mullen", "visual_reception");
+        assert_eq!(percentile(&t, 60.0).as_deref(), Some("84"));
+        let b = measure("brief_p", "gec");
+        assert_eq!(classify(&b, 66.0).map(|b| b.level), Some(3));
+        // The ancillary indexes are not part of the gap between the primary ones.
+        assert_eq!(measure("wppsi_iv", "gai").group, "מדדים נוספים");
+    }
 
     fn measure(inst: &str, key: &str) -> Measure {
         instruments()

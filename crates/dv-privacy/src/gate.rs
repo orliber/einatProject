@@ -37,9 +37,13 @@ pub const GENERIC_TAGS: &[&str] = &[
 
 static TAG_RE: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(r"\[[^\[\]\n]{1,40}\]").ok());
 
-/// A tag the gate lets through: one of the case's, a generic one, or a "missing" note.
+/// A tag the gate lets through: one of the case's, a generic one, a "missing" note, or a
+/// score of a past report in the fixed form (round 32: a number and fixed table words only).
 fn tag_allowed(tag: &str, case_tags: &HashSet<String>) -> bool {
-    case_tags.contains(tag) || crate::masks::is_generic_tag(tag) || tag.starts_with("[חסר")
+    case_tags.contains(tag)
+        || crate::masks::is_generic_tag(tag)
+        || tag.starts_with("[חסר")
+        || dv_domain::is_score_tag(tag)
 }
 
 /// The text with every tag the gate would refuse replaced by `with(tag)`, or `None` when it

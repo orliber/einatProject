@@ -1,6 +1,11 @@
 //! End-to-end flows of the writing-style profile (D-043). Fabricated data only.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::string_slice
+)]
 
 use std::sync::{Arc, Mutex};
 
@@ -207,6 +212,44 @@ fn a_past_report_is_neutralized_before_anything_is_kept() {
         core.save_style_source(&preview.token, &[0], None),
         Err(CoreError::NotFound(_))
     ));
+}
+
+#[test]
+fn a_score_beside_its_subtest_is_kept_as_a_score_tag_and_goes_out_as_one() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core) = vault(Some(fake.clone()));
+    let report = "פרופיל קוגניטיבי\nבמבחן WPPSI-IV יואב הציג בקוביות (7) ובמטריצות (13) תפקוד \
+                  שונה, בזיכרון תמונות 10 ובחיפוש חרקים 11. בקידוד חיות (6) ניכר קושי. \
+                  נבדק בגיל 5:4, בחדר 12.\n";
+    let preview = core
+        .import_style_source("ישן.txt", report.as_bytes())
+        .unwrap();
+    let cognitive = preview
+        .parts
+        .iter()
+        .find(|p| p.section.as_deref() == Some("cognitive"))
+        .unwrap();
+    let t = &cognitive.text;
+    assert!(t.contains("בקוביות ([תוצאה 7 · ממוצע נמוך])"), "{t}");
+    assert!(t.contains("[תוצאה 13 · ממוצע גבוה · חוזקה יחסית]"), "{t}");
+    assert!(t.contains("[תוצאה 6 · ממוצע נמוך · חולשה יחסית]"), "{t}");
+    // Every other number is masked; the child's name is hidden.
+    assert!(t.contains("בגיל [מספר], בחדר [מספר]"), "{t}");
+    assert!(!t.contains("יואב"), "{t}");
+    // Saved and sent for the analysis, the tags go through the gate as they are.
+    let source = core
+        .save_style_source(&preview.token, &[cognitive.index], None)
+        .unwrap();
+    let p = core.prepare_style_analysis(&source.id).unwrap();
+    assert!(p.blocked.is_empty(), "{:?}", p.blocked);
+    let id = p.approval_id.unwrap();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({"items": []})));
+    let _ = core.send_style_analysis(&id);
+    let sent = last_sent(&fake);
+    assert!(
+        sent.contains("[תוצאה 13 · ממוצע גבוה · חוזקה יחסית]"),
+        "{sent}"
+    );
 }
 
 #[test]
@@ -1029,4 +1072,120 @@ fn her_own_section_shows_how_she_wrote_it_before_without_sending_anything() {
     // A section she never wrote has nothing to show, and nothing left the computer.
     assert!(core.own_section_help("dsm").unwrap().examples.is_empty());
     assert!(fake.sent.lock().unwrap().is_empty());
+}
+
+/// The fabricated reports of `tests/fixtures/score_reports`, without their marks, and how many
+/// scores each one marks.
+fn score_reports() -> Vec<(String, String, usize)> {
+    let dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/score_reports");
+    let mut files: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "txt"))
+        .collect();
+    files.sort();
+    files
+        .into_iter()
+        .map(|p| {
+            let marked = std::fs::read_to_string(&p).unwrap();
+            let marks = marked.matches('⟦').count();
+            // A mark may name its measure ("⟦13:matrix⟧"): keep only the number.
+            let text = strip_measure_keys(&marked.replace(['⟦', '⟧'], ""));
+            (
+                p.file_name().unwrap().to_string_lossy().into_owned(),
+                text,
+                marks,
+            )
+        })
+        .collect()
+}
+
+fn strip_measure_keys(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(':') {
+        let (head, tail) = rest.split_at(at);
+        let key: String = tail
+            .chars()
+            .skip(1)
+            .take_while(|c| c.is_ascii_lowercase() || *c == '_')
+            .collect();
+        out.push_str(head);
+        if !key.is_empty() && head.ends_with(|c: char| c.is_ascii_digit()) {
+            rest = &tail[1 + key.len()..];
+        } else {
+            out.push(':');
+            rest = &tail[1..];
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+#[test]
+fn old_reports_keep_their_scores_as_tags_and_no_other_number() {
+    let (_dir, mut core) = vault(None);
+    let children = [
+        "יואב",
+        "נועה",
+        "איתי",
+        "תמר",
+        "עומר",
+        "מאיה",
+        "רון",
+        "שירה",
+        "אורי",
+        "דניאל",
+        "הילה",
+        "גיל",
+    ];
+    let (mut marked, mut tagged) = (0usize, 0usize);
+    let mut stayed = Vec::new();
+    for (name, text, marks) in score_reports() {
+        assert!(
+            !text.contains('⟦') && !text.contains("matrix"),
+            "{name}: {text}"
+        );
+        let preview = core.import_style_source(&name, text.as_bytes()).unwrap();
+        let kept: String = preview
+            .parts
+            .iter()
+            .map(|p| format!("{}\n{}\n", p.heading, p.text))
+            .collect();
+        marked += marks;
+        // Score tags out; what is left holds no number but a test's own name ("WPPSI-IV").
+        let mut rest = String::new();
+        let mut tail = kept.as_str();
+        while let Some(open) = tail.find('[') {
+            rest.push_str(&tail[..open]);
+            let close = tail[open..].find(']').map_or(tail.len(), |c| open + c + 1);
+            let tag = &tail[open..close];
+            if dv_domain::is_score_tag(tag) {
+                tagged += 1;
+            }
+            tail = &tail[close..];
+        }
+        rest.push_str(tail);
+        for word in rest.split_whitespace() {
+            assert!(
+                !word.chars().any(|c| c.is_ascii_digit())
+                    || word.chars().any(|c| c.is_ascii_alphabetic()),
+                "{name}: a number stayed: {word}\n{kept}"
+            );
+        }
+        let words: Vec<String> = kept.split_whitespace().map(normalize).collect();
+        for child in children {
+            if words
+                .iter()
+                .any(|w| w.trim_matches(|c: char| !c.is_alphabetic()) == child)
+            {
+                stayed.push(format!("{name}: {child}"));
+            }
+        }
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let share = tagged as f64 / marked as f64;
+    assert!(share >= 0.95, "{tagged} of {marked} scores kept as tags");
+    assert!(stayed.is_empty(), "names stayed: {stayed:?}");
 }
