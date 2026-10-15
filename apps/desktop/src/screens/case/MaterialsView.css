@@ -1,35 +1,141 @@
-/* The slots fill the screen; a material opens in a window. */
-.materials-list {
-  flex-grow: 1;
-  min-width: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-  align-content: start;
-  gap: 12px;
-  overflow: auto;
-}
-.materials-list .dropzone {
-  grid-column: 1 / -1;
-}
-.material {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 12px 14px;
+/* Round 49 (D-088): what is missing, one drop zone, one list. A material opens in a window. */
+.materials-body {
   display: flex;
   flex-direction: column;
+  gap: 16px;
+  overflow: auto;
+}
+.needs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+.need {
+  display: flex;
+  align-items: center;
   gap: 4px;
+  min-height: 52px;
+  padding-inline: 12px 4px;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.need.missing,
+.need.optional {
+  border-style: dashed;
+  background: transparent;
+  color: var(--ink-muted);
+}
+.need.drop {
+  border: 2px solid var(--primary);
+  background: var(--primary-soft);
+}
+.need-name {
+  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow-wrap: anywhere;
+}
+.need-add {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
   text-align: start;
+  padding: 8px 0;
+  cursor: pointer;
+}
+.need-add:hover {
+  color: var(--primary);
+}
+.need-mark {
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.need.have .need-mark {
+  color: var(--ok);
+}
+.need-more {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+}
+.dropzone.wide {
+  min-height: 88px;
+  font-size: var(--text-md);
+  cursor: default;
+}
+.materials-list {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.materials-list-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  justify-content: space-between;
+  padding: 10px 20px;
+  background: var(--surface-alt);
+}
+.materials-empty {
+  margin: 0;
+  padding: 16px 20px;
+}
+.material {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  padding: 14px 20px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
 }
 .material:hover {
-  border-color: var(--line-strong);
+  background: var(--bg);
 }
 .material.selected {
-  border: 2px solid var(--primary);
-  padding: 10px 13px;
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+.material-kind {
+  justify-self: start;
+  font-size: var(--text-xs);
+  border-radius: 999px;
+  padding: 2px 10px;
+  background: var(--surface-alt);
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.material-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 .material-title {
   font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.material-date {
+  white-space: nowrap;
+}
+.prior-order {
+  gap: 6px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
 }
 .dropzone {
   border: 2px dashed var(--field-line);
@@ -121,10 +227,6 @@
   border-radius: var(--radius-md);
   background: var(--bg);
 }
-.sorted-mark {
-  color: var(--ok);
-  font-weight: 600;
-}
 .sections-pick {
   display: grid;
   gap: 14px;
@@ -203,28 +305,6 @@
   border-radius: var(--radius-md);
   background: var(--surface-alt);
 }
-.check-mark {
-  width: 24px;
-  height: 24px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font-weight: 700;
-  font-size: var(--text-sm);
-}
-.have .check-mark {
-  background: var(--ok-soft);
-  color: var(--ok);
-}
-.missing .check-mark {
-  background: var(--warn-soft);
-  color: var(--warn-ink);
-}
-.optional .check-mark {
-  background: var(--line);
-  color: var(--ink-muted);
-}
 /* A follow-up assessment next to the one before. */
 .followup {
   margin: 12px 24px 0;
@@ -260,60 +340,6 @@
 .compare-table tr.notable td {
   background: var(--warn-paper);
 }
-/* Materials in their places ("מה יש בתיק"). */
-.slot {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  border: 1px solid var(--line);
-}
-.slot.missing {
-  /* Missing is the normal start of a case, not a fault: a calm card, the dot carries the signal. */
-  border: 1px dashed var(--line-strong);
-}
-.slot.optional {
-  border-style: dashed;
-}
-.slot-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-.slot-head > .grow {
-  flex-basis: 180px;
-}
-.slot-add {
-  width: 36px;
-  height: 36px;
-}
-.slot.drop {
-  border: 2px solid var(--primary);
-  background: var(--primary-soft);
-}
-.slot.missing .slot-actions,
-.slot.optional .slot-actions {
-  /* The actions go under the title so it never breaks into three lines. */
-  flex-basis: 100%;
-  padding-inline-start: 34px;
-}
-.slot-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-}
-.slot-upload {
-  width: 36px;
-  height: 36px;
-}
-.slot .material {
-  margin: 0;
-}
-
 /* A file dragged anywhere on the screen: the whole screen takes it. */
 .materials-drop {
   outline: 2px dashed var(--primary);
@@ -323,9 +349,7 @@
 
 
 /* Round 31: the reading of the materials. */
-.material-summary { display: block; color: var(--ink-muted); margin-top: 2px; }
-.materials-reading { margin: 0 0 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); gap: 6px; }
-.materials-reading p { margin: 0; }
+.material-summary { display: block; color: var(--ink-soft); }
 .prior-list { margin: 0; padding-inline-start: 20px; display: flex; flex-direction: column; gap: 6px; }
 .prior-record { gap: 2px; }
 .material-reading { margin: 8px 0; padding: 10px 12px; border-radius: var(--radius-md); background: var(--surface-alt); gap: 4px; }

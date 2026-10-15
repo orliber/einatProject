@@ -1,5 +1,5 @@
-// The materials screen over the in-memory demo core: writing a material into its slot, the
-// empty-text refusal, deleting with undo, and approving a draft from the keyboard.
+// The materials screen over the in-memory demo core (round 49): what is missing, one list,
+// the empty-text refusal, deleting with undo, and approving a draft from the keyboard.
 // Every name and detail is invented.
 import { configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -43,13 +43,26 @@ describe("materials", () => {
     expect(await a11yViolations(view.container)).toEqual([]);
   });
 
-  it("an empty text is refused; a pasted text lands in its slot", async () => {
+  it("the page says what the report can be written from, and what is still missing", async () => {
+    const { user } = await openCase();
+    await toMaterials(user);
+    expect(screen.getByText(/^יש חומר ל-\d+ מתוך \d+ סעיפים\. הכול נשמר מוצפן\.$/)).toBeInTheDocument();
+    const needs = screen.getByRole("list", { name: "מה עוד חסר" });
+    const cells = within(needs).getAllByRole("listitem");
+    expect(cells.map((c) => c.textContent?.replace(/\s+/g, " ").trim())).toEqual([
+      "✓יש: אינטייק עם ההורים", "✓יש: דיווח מהמסגרת", "✓יש: תצפית ומפגשים", "✓יש: ציוני מבחנים", "○אבחונים קודמים (לא חובה) (העלאת מסמך)",
+    ]);
+    // Going on to writing is at the top of the page now, and the bar at the bottom is gone.
+    expect(screen.getByRole("button", { name: "לכתיבת הדוח ←" })).toHaveClass("btn-primary");
+    expect(screen.queryByRole("contentinfo", { name: "הצעד הבא" })).toBeNull();
+  });
+
+  it("an empty text is refused; a pasted text joins the one list", async () => {
     const { user, calls } = await openCase();
     const list = await toMaterials(user);
-    // The demo case has no earlier reports yet: that slot offers to paste one.
-    const slot = within(list).getByText("דוחות ואבחונים קודמים").closest(".slot") as HTMLElement;
-    expect(within(slot).getByText(/לא חובה/)).toBeInTheDocument();
-    await user.click(within(slot).getByRole("button", { name: "הדבקת טקסט (דוחות ואבחונים קודמים)" }));
+    // The demo case has no earlier reports yet: that cell is open, and offers to paste one.
+    await user.click(screen.getByRole("button", { name: "הוספה לאבחונים קודמים" }));
+    await user.click(await screen.findByRole("menuitem", { name: "הדבקת טקסט" }));
     const dialog = await screen.findByRole("dialog", { name: "הוספת טקסט" });
     const text = within(dialog).getByLabelText("הטקסט");
     expect(text).toHaveFocus();
@@ -64,11 +77,15 @@ describe("materials", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(calls.find((c) => c.cmd === "add_input")?.args).toMatchObject({ kind: "prior_report", title: "דוח קלינאית בדוי", content: "נועם הגיע לטיפול בשפה בגיל ארבע." });
     expect(await screen.findByRole("status")).toHaveTextContent("נשמר בתיק.");
-    expect(await within(slot).findByRole("button", { name: /דוח קלינאית בדוי/ })).toBeInTheDocument();
-    expect(within(slot).queryByText(/לא חובה/)).toBeNull();
+    // Newest first, with its kind as a tag; the cell is marked as there.
+    const row = await within(list).findByRole("button", { name: /דוח קלינאית בדוי/ });
+    expect(within(list).getAllByRole("button")[0]).toBe(row);
+    expect(row).toHaveTextContent("דוח קודם");
+    const needs = screen.getByRole("list", { name: "מה עוד חסר" });
+    expect(within(needs).getByText("אבחונים קודמים").closest("li")).toHaveClass("have");
   });
 
-  it("a slot with many materials shows eight and the rest on request (R5)", async () => {
+  it("every material is in one list, whatever its kind", async () => {
     const { user } = await openCase(async (core) => {
       const cases = (await core.handle("list_cases", {})) as { id: string; meta: { code: string } }[];
       for (const c of cases) {
@@ -78,10 +95,8 @@ describe("materials", () => {
       }
     });
     const list = await toMaterials(user);
-    const slot = within(list).getByText("דוחות ואבחונים קודמים (12)").closest(".slot") as HTMLElement;
-    expect(within(slot).getAllByRole("button", { name: /^דוח בדוי/ })).toHaveLength(8);
-    await user.click(within(slot).getByRole("button", { name: "עוד 4 בדוחות ואבחונים קודמים" }));
-    expect(within(slot).getAllByRole("button", { name: /^דוח בדוי/ })).toHaveLength(12);
+    expect(within(list).getAllByRole("button", { name: /^דוח קודם\s*דוח בדוי/ })).toHaveLength(12);
+    expect(within(list).getByRole("button", { name: /מפגש שני/ })).toBeInTheDocument();
   });
 
   it("a deleted material can be brought back from the notice", async () => {
