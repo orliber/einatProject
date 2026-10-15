@@ -69,11 +69,34 @@ describe("consultation", () => {
     expect(await a11yViolations(view.container)).toEqual([]);
   });
 
+  it("a conversation about a case that is no longer in the list still says it was about a case", async () => {
+    const turns = [
+      { role: "user", text: "איך לנסח את סעיף המסגרת?", hidden: [], demo: false, at: 1_760_000_000 },
+      { role: "assistant", text: "תשובה בדויה.", hidden: [], demo: false, at: 1_760_000_001 },
+    ];
+    const summary = (label: string | null) => ({ id: "conv-gone", case_id: "case-in-trash", case_label: label, title: "איך לנסח את סעיף המסגרת?", updated_at: 1_760_000_001, turns: 2 });
+    for (const [label, expected] of [["נועם · תיק-1024", "על התיק של נועם · תיק-1024"], [null, "על תיק שכבר לא ברשימה"]] as const) {
+      const { user, view } = await openApp((cmd) =>
+        cmd === "consultations" ? [summary(label)]
+          : cmd === "consultation" ? { id: "conv-gone", case_id: "case-in-trash", turns }
+            : undefined,
+      );
+      await user.click(await screen.findByRole("button", { name: "התייעצות" }));
+      await user.click(await screen.findByRole("button", { name: /^איך לנסח את סעיף המסגרת\?/ }));
+      const chat = screen.getByRole("region", { name: "השיחה" });
+      expect(await within(chat).findByText(expected)).toBeInTheDocument();
+      expect(within(chat).queryByText(/שאלה כללית/)).toBeNull();
+      view.unmount();
+    }
+  });
+
   it("the question she typed is echoed as text too", async () => {
     const { user } = await openApp();
     await ask(user, `שאלה עם תגיות ${PAYLOAD}`);
     const chat = screen.getByRole("region", { name: "השיחה" });
-    expect(await within(chat).findByText(/שאלה עם תגיות/)).toHaveTextContent(PAYLOAD);
+    // The question is the bubble and, shortened, the conversation's name above it: both text.
+    const bubble = (await within(chat).findAllByText(/שאלה עם תגיות/)).find((el) => el.classList.contains("chat-bubble-me"));
+    expect(bubble).toHaveTextContent(PAYLOAD);
     expectNoMarkup();
   });
 

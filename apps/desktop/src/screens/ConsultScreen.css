@@ -70,6 +70,16 @@
   gap: 8px;
   min-height: 0;
 }
+.history-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.history-group-label {
+  font-weight: 700;
+  color: var(--ink-muted);
+  padding: 4px 10px 2px;
+}
 .consult-history ul {
   list-style: none;
   margin: 0;
@@ -222,6 +232,21 @@
 }
 .chat-bubble-ai p {
   margin: 0;
+}
+.consult-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--line);
+}
+.consult-head-title {
+  font-size: var(--text-lg);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .chat-demo {
   align-self: flex-start;

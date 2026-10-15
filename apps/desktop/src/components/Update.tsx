@@ -3,6 +3,7 @@ import { AppContext, useApp } from "../App";
 import type { UiError } from "../ipc/client";
 import { ipc, type UpdateView } from "../ipc/client";
 import { Dialog, ErrorLine, Spinner, SparkIcon } from "./ui";
+import { Switch } from "./Switch";
 import "./Update.css";
 
 /**
@@ -247,11 +248,9 @@ export function UpdateSettings() {
       </div>
       {result && <span className="small muted" role="status">{result}</span>}
       <ErrorLine error={error} />
-      <label className="row small">
-        <input type="checkbox" checked={auto} onChange={(e) => { setAuto(e.target.checked); write(AUTO_KEY, e.target.checked ? "on" : "off"); }} />
-        לבדוק פעם ביום אם יש גרסה חדשה
-      </label>
-      <span className="hint">בלי שום מידע מהכספת. מתקינים רק בלחיצה, ורק גרסה חתומה.</span>
+      <Switch id="update-auto" label="לבדוק פעם ביום אם יש גרסה חדשה" checked={auto}
+        hint="בלי שום מידע מהכספת. מתקינים רק בלחיצה, ורק גרסה חתומה."
+        onChange={(v) => { setAuto(v); write(AUTO_KEY, v ? "on" : "off"); }} />
       {open && update && <UpdateDialog update={update} onClose={() => setOpen(false)} />}
     </section>
   );

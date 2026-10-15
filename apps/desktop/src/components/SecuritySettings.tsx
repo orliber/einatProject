@@ -1,35 +1,37 @@
-// "The protection layers" (S4, L6): the ten layers of protection, each with what it does,
-// what it protects against and what the program found when it checked just now; then what
-// depends on her; then the emergency stop. The texts come from the core, which makes the PDF
-// from the same list, so the page and the paper say the same thing.
+// "The layers of protection" (S4, L6; stage 5, D-078, in the approved design of round 50,
+// D-087): a grid of small cards, one per layer, with what the program found just now; the
+// layers that depend on her are marked "את". Above them the emergency stop, below them what
+// each layer does and against what, and the same list as a PDF. The texts come from the core,
+// which makes the PDF from the same list, so the page and the paper say the same thing.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ipc, type SecurityLayer, type SecurityStatus } from "../ipc/client";
 import { useApp } from "../App";
 import { ErrorLine } from "./ui";
 
-const STATE_TEXT: Record<string, { chip: string; text: string }> = {
-  ok: { chip: "chip chip-ok", text: "פעיל" },
-  warn: { chip: "chip chip-warn", text: "לבדוק" },
-  info: { chip: "chip chip-sand", text: "לידיעה" },
+const COUNT = ["אפס", "אחת", "שתיים", "שלוש", "ארבע", "חמש", "שש", "שבע", "שמונה", "תשע", "עשר", "אחת-עשרה", "שתים-עשרה", "שלוש-עשרה", "ארבע-עשרה"];
+const count = (n: number) => COUNT[n] ?? String(n);
+
+/** Where she fixes a layer that is hers. */
+const ACTION: Record<string, { label: string; pane: "backup" }> = {
+  backup: { label: "לגבות", pane: "backup" },
 };
 
-const INFO = { chip: "chip chip-sand", text: "לידיעה" };
-
-function Layer({ l, n }: { l: SecurityLayer; n?: number }) {
-  const st = STATE_TEXT[l.state] ?? INFO;
+function Card({ l, you }: { l: SecurityLayer; you: boolean }) {
+  const { go } = useApp();
+  const warn = l.state === "warn";
+  const action = you ? ACTION[l.key] : undefined;
   return (
-    <li className="layer">
-      <div className="layer-head">
-        <span className={st.chip}>{st.text}</span>
-        <h4 className="layer-title">{n === undefined ? l.title : `${n}. ${l.title}`}</h4>
+    <li className={["layer", warn ? "warn" : l.state === "info" ? "info" : "ok", you ? "you" : ""].filter(Boolean).join(" ")}>
+      <span className="layer-mark" aria-hidden="true">{you ? "את" : warn ? "!" : l.state === "info" ? "i" : "✓"}</span>
+      <span className="visually-hidden">{warn ? "לבדוק: " : l.state === "ok" ? "תקין: " : "לידיעה: "}</span>
+      <div className="layer-text">
+        <strong>{l.title}</strong>
+        <span className="small muted">{l.now}</span>
       </div>
-      <p className="layer-now">{l.now}</p>
-      <details>
-        <summary>מה זה ומפני מה<span className="visually-hidden">: {l.title}</span></summary>
-        <p>{l.what}</p>
-        <p>מגינה מפני: {l.against}</p>
-      </details>
+      {action && (
+        <button type="button" className="link-btn small layer-when" onClick={() => go({ name: "settings", pane: action.pane })}>{action.label}</button>
+      )}
     </li>
   );
 }
@@ -55,7 +57,7 @@ export function SecuritySettings() {
     setSaving(true);
     try {
       // The path is isolated, so its slashes do not mix with the Hebrew around it.
-      notify(`נשמר: \u2066${await ipc.exportSecurityPdf()}\u2069`);
+      notify(`נשמר: ⁦${await ipc.exportSecurityPdf()}⁩`);
     } catch (e) {
       setError(fail(e as never));
     } finally {
@@ -64,16 +66,31 @@ export function SecuritySettings() {
   }
 
   const s = q.data;
+  const all = s ? [...s.layers, ...s.yours] : [];
+  const bad = all.filter((l) => l.state === "warn");
+  const title = !s ? "בודקת את שכבות ההגנה…"
+    : bad.length === 0 ? `${count(all.length)} שכבות הגנה, כולן תקינות`
+      : `${all.length - bad.length} מתוך ${all.length} תקינות: ${bad.map((l) => l.title).join(", ")}`;
   // The stop is always there, also while the list loads or failed to load (review of
   // stage 5, U7). Sending cannot be turned back on while the gate or the rules fail (U1).
   const stopped = s?.send_stopped ?? false;
   const broken = s?.layers.some((l) => (l.key === "privacy_gate" || l.key === "send_rules") && l.state === "warn") ?? false;
   return (
     <section className="card setting" aria-labelledby="s-sec">
-      <h2 id="s-sec">שכבות ההגנה</h2>
+      <div className="layers-head">
+        <div>
+          <h2 id="s-sec">{title}</h2>
+          {s && (
+            <span className="hint">
+              השכבות שכתוב בהן "נבדק עכשיו" נוסו בידי התוכנה ממש עכשיו; בשאר מוצג המצב הנוכחי. {s.yours.length === 1 ? "אחת תלויה בך." : `${count(s.yours.length)} תלויות בך.`}
+            </span>
+          )}
+        </div>
+        <button type="button" className="btn btn-small" onClick={() => { void qc.invalidateQueries({ queryKey: ["security"] }); }}>לבדוק שוב</button>
+      </div>
       <div className="row">
-        <p className="hint">
-          {s ? `עד ${s.daily_limit} בקשות ביום, ולא יותר מ-${s.max_request_kb} KB לבקשה.` : "עצירת חירום של כל שליחה ל-AI."}
+        <p className="hint grow">
+          {s ? `עצירת חירום מכבה כל שליחה ל-AI עד שמדליקים אותה מחדש כאן. עד ${s.daily_limit} בקשות ביום, ולא יותר מ-${s.max_request_kb} KB לבקשה.` : "עצירת חירום מכבה כל שליחה ל-AI."}
         </p>
         <button type="button" className={stopped ? "btn" : "btn btn-danger"} disabled={stopped && broken}
           title={stopped && broken ? "השער או כללי השליחה לא עברו את הבדיקה, ולכן אי אפשר להפעיל שליחה." : undefined}
@@ -82,23 +99,31 @@ export function SecuritySettings() {
         </button>
       </div>
       {stopped && broken && <p className="hint">אי אפשר להפעיל שליחה מחדש: השער או כללי השליחה לא עברו את הבדיקה עכשיו. כדאי לפנות לאור.</p>}
-      <p className="hint">שלוש השכבות שכתוב בהן "נבדק עכשיו" נוסו בידי התוכנה ממש עכשיו. בשאר מוצג המצב הנוכחי שלהן.</p>
       {q.isPending && <p className="hint" role="status">בודקת…</p>}
       {q.isError && <ErrorLine error={fail(q.error as never)} retry={() => void qc.invalidateQueries({ queryKey: ["security"] })} />}
-      <ol className="sec-list">
-        {s?.layers.map((l, i) => <Layer key={l.key} l={l} n={i + 1} />)}
-      </ol>
-      {s && s.yours.length > 0 && (
-        <>
-          <h3>מה שתלוי בך</h3>
-          <ul className="sec-list">
-            {s.yours.map((l) => <Layer key={l.key} l={l} />)}
-          </ul>
-        </>
+      {s && (
+        <ul className="layers">
+          {s.layers.map((l) => <Card key={l.key} l={l} you={false} />)}
+          {s.yours.map((l) => <Card key={l.key} l={l} you />)}
+        </ul>
+      )}
+      {s && (
+        <details className="layers-more">
+          <summary>מה כל שכבה עושה, ומפני מה</summary>
+          <dl className="layers-what">
+            {all.map((l) => (
+              <div key={l.key}>
+                <dt>{l.title}</dt>
+                <dd>{l.what} מגינה מפני: {l.against}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="hint">שכבה של התוכנה שנכשלת עוצרת את השליחה מיד, ושום בקשה לא יוצאת עד שאור בודק. שכבה שתלויה בך מופיעה כאן עם "!", עם המקום שבו מתקנים.</p>
+        </details>
       )}
       {s && (
         <div className="row">
-          <p className="hint">אותו עמוד כקובץ PDF, להורים או למכון. אין בו שום פרט על ילד.</p>
+          <p className="hint grow">אותו עמוד כקובץ PDF, להורים או למכון. אין בו שום פרט על ילד.</p>
           <button type="button" className="btn" disabled={saving} onClick={() => void savePdf()}>
             {saving ? "שומרת…" : "לשמור כ-PDF"}
           </button>

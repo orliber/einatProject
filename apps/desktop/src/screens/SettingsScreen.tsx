@@ -2,7 +2,6 @@ import { useEffect, useState, type ReactNode } from "react";
 import { BugReportSettings } from "../components/BugReport";
 import { useApp } from "../App";
 import { ActivitySettings } from "../components/ActivityLog";
-import { SentHistorySettings } from "../components/SentHistory";
 import { BackupSettings } from "../components/Backup";
 import { PasswordSettings } from "../components/PasswordSettings";
 import { TopBar } from "../components/TopBar";
@@ -12,6 +11,8 @@ import { VerifySettings } from "../components/VerifySettings";
 import { NameModelSettings } from "../components/NameModelSettings";
 import { ReadinessSettings } from "../components/ReadinessSettings";
 import { SecuritySettings } from "../components/SecuritySettings";
+import { PrivacyStatus } from "../components/PrivacyStatus";
+import { Segmented, Switch } from "../components/Switch";
 import { ErrorLine } from "../components/ui";
 import { ipc, type ReportSettings, type TemplateView } from "../ipc/client";
 import { PROVIDERS, providerOf } from "../ai";
@@ -47,7 +48,6 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
   const provider = providerOf(status.model);
   const ai = provider.name;
   const hasKey = status.keys.includes(provider.id);
-  const [minutes, setMinutes] = useState(status.lock_minutes);
   const [names, setNames] = useState(status.practitioner.join(", "));
   const [report, setReport] = useState<ReportSettings | null>(null);
   const [template, setTemplate] = useState<TemplateView | null>(null);
@@ -180,30 +180,29 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
 
           {pane === "privacy" && (
             <>
+              <PrivacyStatus />
               <section className="card setting" aria-labelledby="s-privacy">
-                <h2 id="s-privacy">נעילה ושליחה</h2>
-                <Row label="נעילה אוטומטית" htmlFor="lock" hint="אחרי כמה דקות בלי פעילות.">
-                  <div className="row">
-                    <input id="lock" className="input narrow" type="number" min={1} max={60} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} />
-                    <button type="button" className="btn" onClick={() => void run(() => ipc.setLockMinutes(minutes), "זמן הנעילה עודכן.")}>שמירה</button>
-                  </div>
-                </Row>
-                <label className="row">
-                  <input type="checkbox" checked={status.review_always}
-                    onChange={(e) => void run(() => ipc.setReviewAlways(e.target.checked), "ההגדרה עודכנה.")} />
-                  <span>להציג לי כל בקשה לפני שליחה</span>
-                </label>
-                <span className="hint">כשזה כבוי, מה שעבר את בדיקת הפרטיות נשלח מיד. שמות ופרטים מזהים מוסתרים בתגית בעותק שיוצא בלבד, בכל מקרה.</span>
+                <h2 id="s-privacy">לפני כל שליחה</h2>
+                <Switch id="review-always" label="להציג לי כל בקשה לפני שליחה" checked={status.review_always}
+                  hint={status.review_always
+                    ? "דולק: כל בקשה נעצרת במסך \"לפני ששולחים\" עד שתאשרי."
+                    : "כבוי: התוכנה מסתירה ושולחת לבד. שמות ופרטים מזהים מוסתרים בעותק שיוצא בכל מקרה, ומה שיצא נשמר ברשימה למעלה."}
+                  onChange={(on) => void run(() => ipc.setReviewAlways(on), on ? "כל בקשה תוצג לפני שליחה." : "בקשה שעברה את הסינון תישלח מיד.")} />
+                <NameModelSettings />
                 {SCREEN_PROTECTION_SETTING && (
-                  <label className="row">
-                    <input type="checkbox" checked={status.screen_protection}
-                      onChange={(e) => void run(() => ipc.setScreenProtection(e.target.checked), e.target.checked ? "ההגנה מצילום מסך הודלקה." : "ההגנה מצילום מסך כובתה עד הנעילה הבאה של הכספת.")} />
-                    <span>להסתיר את התוכנה מצילומי מסך ומשיתוף מסך</span>
-                  </label>
+                  <Switch id="screen-protection" label="להסתיר את התוכנה מצילומי מסך ומשיתוף מסך" checked={status.screen_protection}
+                    onChange={(on) => void run(() => ipc.setScreenProtection(on), on ? "ההגנה מצילום מסך הודלקה." : "ההגנה מצילום מסך כובתה עד הנעילה הבאה של הכספת.")} />
                 )}
               </section>
-              <SentHistorySettings />
-              <NameModelSettings />
+              <section className="card setting" aria-labelledby="s-lock">
+                <h2 id="s-lock">נעילה</h2>
+                <Row label="נעילה אוטומטית אחרי" hint="דקות בלי פעילות. Ctrl+L נועל מיד.">
+                  <Segmented label="נעילה אוטומטית אחרי" value={status.lock_minutes}
+                    options={Array.from(new Set([5, 10, 15, 30, status.lock_minutes])).sort((a, b) => a - b).map((m) => ({ value: m, label: String(m) }))}
+                    onChange={(m) => void run(() => ipc.setLockMinutes(m), `הכספת תינעל אחרי ${m} דקות בלי פעילות.`)} />
+                </Row>
+                <span className="hint">כל הגדרה נשמרת מיד. מה שלא כתוב כאן, התוכנה בוחרת את האפשרות המחמירה.</span>
+              </section>
             </>
           )}
 
@@ -282,8 +281,8 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
 
           {pane === "security" && (
             <>
-              <PasswordSettings />
               <SecuritySettings />
+              <PasswordSettings />
             </>
           )}
 

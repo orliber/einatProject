@@ -44,15 +44,15 @@ function show(a: AppApi = api()) {
 }
 
 describe("the protection layers", () => {
-  it("shows each layer numbered, what was found now, and what it protects against", async () => {
+  it("counts the layers, names the one to look at, marks hers, and says what each does", async () => {
     mockIPC(() => view(false));
     show();
-    expect(await screen.findByText("1. הצפנת הכספת")).toBeInTheDocument();
+    // Three of the program's and one of hers: 3 of 4 fine, the disk named (round 50's grid).
+    expect(await screen.findByRole("heading", { name: /3 מתוך 4 תקינות: הצפנת הדיסק/ })).toBeInTheDocument();
     expect(screen.getByText("נבדק עכשיו: השער חסם שם גלוי של ילד בדוי.")).toBeInTheDocument();
-    expect(screen.getAllByText("מגינה מפני: מי שמנסה לקרוא.")).toHaveLength(4);
-    // What depends on her, with the missing protection shown plainly.
-    expect(screen.getByText("מה שתלוי בך")).toBeInTheDocument();
-    expect(screen.getByText("לבדוק")).toBeInTheDocument();
+    expect(screen.getByText(/אחת תלויה בך/)).toBeInTheDocument();
+    expect(screen.getByText("את")).toBeInTheDocument();
+    expect(screen.getAllByText(/מגינה מפני: מי שמנסה לקרוא\./)).toHaveLength(4);
   });
 
   it("the emergency stop goes to the core, and the layer says sending is off", async () => {
