@@ -5,6 +5,7 @@
 //! spellings, patterns (Safe Harbor floor + Israeli formats), unknown names from lexicons,
 //! indirect identifiers, and the fail-closed gate over the complete request.
 
+pub mod fix;
 pub mod gate;
 mod lexicon;
 pub mod masks;
@@ -15,6 +16,7 @@ mod pipeline;
 pub mod restore;
 pub mod text;
 
+pub use fix::{fix_refused, FixedItem, FIXABLE_CODES};
 pub use gate::{
     clear, replace_foreign_tags, tag_word, BlockReason, Blocked, ClearedPayload, GateRequest,
     GENERIC_TAGS,

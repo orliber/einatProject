@@ -40,6 +40,12 @@ impl PatternKind {
         }
     }
 
+    /// The kind's base in a case's mask book ([`crate::MASK_BASES`]).
+    #[must_use]
+    pub fn mask_base(self) -> &'static str {
+        crate::masks::mask_base(self.fixed_replacement()).unwrap_or("מספר")
+    }
+
     fn fixed_replacement(self) -> &'static str {
         match self {
             PatternKind::IdNumber => "[ת.ז.]",

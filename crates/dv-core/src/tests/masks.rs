@@ -116,3 +116,90 @@ fn a_consultation_without_a_case_gives_the_numbers_back_too() {
         "{got:?}"
     );
 }
+
+/// A refusal the fix loop answers no longer stops her. Text the filter never saw (here put in
+/// the request by hand, as a template, a bug or a future feature could) holds the child's name
+/// and a phone: the gate refuses it, the loop hides both in the outgoing copy, the same gate
+/// clears that copy, and the words are kept in the case's book for the answer.
+#[test]
+fn a_refusal_the_loop_can_answer_is_hidden_and_cleared_by_the_same_gate() {
+    let (_dir, mut core, case) = setup(None);
+    let phone = ["05", "3", "1112223"].concat();
+    let body = json!({
+        "model": "claude-test",
+        "system": "עוזרת לכתיבת דוח.",
+        "messages": [{"role": "user", "content": format!("אלון מתקשה. טלפון {phone}.")}],
+    });
+    let data = core.privacy_data(&case).unwrap();
+    let mut prepared = Prepared {
+        approval_id: None,
+        parts: Vec::new(),
+        suspects: Vec::new(),
+        auto_hidden: Vec::new(),
+        hidden: Vec::new(),
+        checks: Checks::default(),
+        blocked: Vec::new(),
+        demo_mode: false,
+    };
+    let kind = PendingKind::Sort {
+        case_id: case.clone(),
+        materials: Vec::new(),
+        sections: Vec::new(),
+    };
+    assert!(!core.gate(&data, &body, kind, &mut prepared, false).unwrap());
+    assert!(prepared.blocked.is_empty(), "{:?}", prepared.blocked);
+    let id = prepared.approval_id.clone().expect("cleared after the fix");
+    let sent = String::from_utf8_lossy(core.pending[&id].payload.body()).into_owned();
+    assert!(!sent.contains("אלון") && !sent.contains(&phone), "{sent}");
+    let fixed = prepared.parts.last().unwrap();
+    assert_eq!(fixed.label, "הוסתר בבדיקה האחרונה לפני השליחה");
+    let book = core.vault_ref().unwrap().masks(&case).unwrap();
+    assert!(
+        book.iter()
+            .any(|e| e.original == "אלון" && sent.contains(&e.tag)),
+        "{book:?}"
+    );
+    assert!(
+        book.iter()
+            .any(|e| e.original == phone && sent.contains(&e.tag)),
+        "{book:?}"
+    );
+    let audit = core.vault_ref().unwrap().audit_entries(1000).unwrap();
+    let blocked: Vec<_> = audit.iter().filter(|e| e.event == "blocked").collect();
+    assert_eq!(blocked.len(), 1, "{audit:?}");
+    assert!(
+        format!("{:?}", blocked[0]).contains("fixed"),
+        "{:?}",
+        blocked[0]
+    );
+}
+
+/// What the loop cannot answer still stops the request, with its reason: a name in a key.
+#[test]
+fn a_refusal_the_loop_cannot_answer_still_stops_the_request() {
+    let (_dir, mut core, case) = setup(None);
+    let body = json!({"model": "claude-test", "messages": [{"role": "user", "content": "שלום"}], "אלון": 1});
+    let data = core.privacy_data(&case).unwrap();
+    let mut prepared = Prepared {
+        approval_id: None,
+        parts: Vec::new(),
+        suspects: Vec::new(),
+        auto_hidden: Vec::new(),
+        hidden: Vec::new(),
+        checks: Checks::default(),
+        blocked: Vec::new(),
+        demo_mode: false,
+    };
+    let kind = PendingKind::Sort {
+        case_id: case.clone(),
+        materials: Vec::new(),
+        sections: Vec::new(),
+    };
+    core.gate(&data, &body, kind, &mut prepared, false).unwrap();
+    assert!(prepared.approval_id.is_none());
+    assert!(
+        prepared.blocked.iter().any(|r| r.code == "identity"),
+        "{:?}",
+        prepared.blocked
+    );
+}

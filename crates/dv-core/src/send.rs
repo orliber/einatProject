@@ -1,17 +1,22 @@
 //! Building a request (through the privacy gate), sending it, and storing the answer.
 
 use super::*;
+use dv_privacy::{Mark, Segment};
 
 impl Core {
     /// Clear the request, or keep the names the filter found first. `Ok(true)`: new names
     /// were kept with the case and the caller builds the request again, so every text of it
     /// carries their tags (a name found in two texts gets one tag, and Claude's answer can
     /// be restored). `may_learn` is false on that second build: anything new then blocks.
+    ///
+    /// A refusal the fix loop can answer (a name, a pattern, a foreign tag the filter never
+    /// saw) is answered here, up to three times: the refused words are hidden in the outgoing
+    /// copy and the copy goes back to the same gate (round 25). Anything else stays refused.
     pub(crate) fn gate(
         &mut self,
         data: &PrivacyData,
         body: &Value,
-        kind: PendingKind,
+        mut kind: PendingKind,
         prepared: &mut Prepared,
         may_learn: bool,
     ) -> Result<bool, CoreError> {
@@ -52,21 +57,65 @@ impl Core {
                     .map(|a| a.tag.clone()),
             );
         }
-        let req = GateRequest {
-            body,
-            ctx: &ctx,
-            case_tags: &case_tags,
-            unresolved_suspects: suspects,
-            canaries: &[],
-            max_bytes: MAX_REQUEST_BYTES,
-        };
-        match clear(&req) {
+        fn request<'a>(
+            body: &'a Value,
+            ctx: &'a PrivacyContext<'a>,
+            case_tags: &'a HashSet<String>,
+            suspects: usize,
+        ) -> GateRequest<'a> {
+            GateRequest {
+                body,
+                ctx,
+                case_tags,
+                unresolved_suspects: suspects,
+                canaries: &[],
+                max_bytes: MAX_REQUEST_BYTES,
+            }
+        }
+        let mut body = body.clone();
+        let mut result = clear(&request(&body, &ctx, &case_tags, suspects));
+        let mut fixed: Vec<dv_privacy::FixedItem> = Vec::new();
+        let mut refused_codes: Vec<String> = Vec::new();
+        for _ in 0..3 {
+            let Err(blocked) = &result else { break };
+            if !blocked
+                .reasons
+                .iter()
+                .all(|r| dv_privacy::FIXABLE_CODES.contains(&r.code.as_str()))
+            {
+                break;
+            }
+            let Some((next, items)) =
+                dv_privacy::fix_refused(&request(&body, &ctx, &case_tags, suspects), &data.masks)
+            else {
+                break;
+            };
+            refused_codes.extend(blocked.reasons.iter().map(|r| r.code.clone()));
+            fixed.extend(items);
+            body = next;
+            result = clear(&request(&body, &ctx, &case_tags, suspects));
+        }
+        if !fixed.is_empty() && result.is_ok() {
+            refused_codes.dedup();
+            let case_opt = (!data.case_id.is_empty()).then_some(data.case_id.as_str());
+            self.vault_mut()?.record(
+                AuditEvent::Blocked,
+                case_opt,
+                &serde_json::json!({ "codes": refused_codes, "fixed": true }),
+            )?;
+            note_fixed(prepared, &fixed);
+        }
+        match result {
             Ok(payload) => {
                 // The numbered tags this request gave keep their words with the case, so the
                 // answer, and every later request of the case, reads them the same way.
                 if !data.case_id.is_empty() {
                     self.vault_mut()?
                         .add_masks(&data.case_id, &data.masks.added())?;
+                }
+                // Without a case the book lives in the request; it holds the fixes too.
+                if let PendingKind::Consult { masks, .. } = &mut kind {
+                    *masks = data.masks.entries();
                 }
                 let id = payload.sha256().to_owned();
                 prepared.approval_id = Some(id.clone());
@@ -722,4 +771,40 @@ pub(crate) fn collect_sources(
         source_rows.push((sid, inp.id, content.tagged));
     }
     Ok((tagged_sources, source_rows))
+}
+
+/// What the fix loop hid shows with the request (the review in advanced mode, and the history
+/// of what left the computer): the words, what went out instead, and their kinds.
+fn note_fixed(prepared: &mut Prepared, fixed: &[dv_privacy::FixedItem]) {
+    let mut original = Vec::new();
+    let mut outgoing = Vec::new();
+    for (i, f) in fixed.iter().enumerate() {
+        if i > 0 {
+            let sep = Segment {
+                text: ", ".to_owned(),
+                mark: None,
+                label: None,
+            };
+            original.push(sep.clone());
+            outgoing.push(sep);
+        }
+        original.push(Segment {
+            text: f.original.clone(),
+            mark: Some(Mark::Replaced),
+            label: Some(f.label.clone()),
+        });
+        outgoing.push(Segment {
+            text: f.tag.clone(),
+            mark: Some(Mark::Tag),
+            label: Some(f.label.clone()),
+        });
+        if !prepared.hidden.contains(&f.label) {
+            prepared.hidden.push(f.label.clone());
+        }
+    }
+    prepared.parts.push(ReviewPart {
+        label: "הוסתר בבדיקה האחרונה לפני השליחה".to_owned(),
+        original,
+        outgoing,
+    });
 }

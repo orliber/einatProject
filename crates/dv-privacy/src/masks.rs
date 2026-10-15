@@ -25,6 +25,8 @@ pub const MASK_BASES: &[&str] = &[
     "כתובת",
     "מקום",
     "בית_חולים",
+    // A name the gate refused in text the filter never saw (round 25's fix loop).
+    "שם",
 ];
 
 /// The kind of a fixed generic tag the filter writes, or `None` for any other text.
