@@ -154,8 +154,9 @@ pub fn remove_for(dir: &Path, purpose: Purpose) {
     let _ = fs::remove_file(path_for(dir, purpose));
 }
 
-/// Longest wait for the sealing or unsealing child.
-const DPAPI_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+/// Longest wait for the sealing or unsealing child. A first PowerShell after the computer
+/// starts, beside a busy antivirus, took over 20 s on a CI runner; past this it is `Busy`.
+const DPAPI_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 
 fn powershell() -> String {
     std::env::var_os("SystemRoot").map_or_else(
@@ -209,12 +210,13 @@ fn dpapi(script: &str, input: &str, purpose: Purpose) -> Result<Zeroizing<String
     let started = std::time::Instant::now();
     let status = loop {
         if let Some(status) = child.try_wait()? {
-            break Some(status);
+            break status;
         }
         if started.elapsed() > DPAPI_TIMEOUT {
             let _ = child.kill();
             let _ = child.wait();
-            break None;
+            let _ = reader.join();
+            return Err(VaultError::Busy);
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     };
@@ -222,7 +224,7 @@ fn dpapi(script: &str, input: &str, purpose: Purpose) -> Result<Zeroizing<String
         .join()
         .map_err(|_| VaultError::Crypto("the key sealed to this computer could not be read"))?;
     let text = Zeroizing::new(String::from_utf8_lossy(&out).trim().to_owned());
-    if !status.is_some_and(|s| s.success()) || text.is_empty() {
+    if !status.success() || text.is_empty() {
         return Err(VaultError::Crypto(
             "the key sealed to this computer could not be opened",
         ));

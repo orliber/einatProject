@@ -314,6 +314,10 @@ impl CoreError {
                 "other_computer",
                 "הסיסמה פותחת את הכספת רק במחשב ובחשבון ה-Windows שבהם היא נקבעה. בעותק של תיקיית הכספת, וגם באותו מחשב אחרי התקנה מחדש של Windows או איפוס החשבון, נכנסים כאן עם ערכת השחזור, ואחר כך בוחרים סיסמה בהגדרות כדי שתעבוד גם כאן. אם המחשב הקודם אבד, אפשר גם לשחזר את הגיבוי עם הסיסמה.".to_owned(),
             ),
+            CoreError::Vault(VaultError::Busy) => (
+                "busy",
+                "Windows לא ענה בזמן לבדיקה שהסיסמה שייכת למחשב הזה. זה קורה לפעמים מיד אחרי הדלקת המחשב. אפשר לנסות שוב בעוד רגע.".to_owned(),
+            ),
             CoreError::Vault(VaultError::RecoveryKeyInvalid) => (
                 "recovery_invalid",
                 "ערכת השחזור לא תקינה. כדאי לבדוק שגיאות הקלדה.".to_owned(),
@@ -363,6 +367,7 @@ impl CoreError {
             CoreError::Vault(
                 VaultError::WrongSecret
                 | VaultError::OtherComputer
+                | VaultError::Busy
                 | VaultError::RecoveryKeyInvalid
                 | VaultError::Policy(_)
                 | VaultError::AlreadyExists,

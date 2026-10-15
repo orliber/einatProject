@@ -23,7 +23,7 @@ use dv_vault::crypto::Key32;
 use dv_vault::{Argon2Params, NewSlot, Secret, Vault, VaultError};
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::binding::{bound_on_disk, key_for_new_slot, key_here};
+use crate::binding::{bound_on_disk, key_for_new_slot, key_for_opening, key_here};
 use crate::views::{BackupCheckView, BackupDone, CreatedVault};
 use crate::{AppStatus, ComputerSeal, Core, CoreError, ErrorAction};
 
@@ -100,8 +100,8 @@ impl UnlockJob {
             Proof::Password(p) => {
                 // Unsealing the key kept here takes a moment too, so it runs in the job.
                 let bound = bound_on_disk(&self.dir);
-                let here = key_here(self.seal.as_ref(), &self.dir, bound);
-                let mut opened = Vault::unlock_with_password_here(&self.dir, p, here.as_ref());
+                let mut opened = key_for_opening(self.seal.as_ref(), &self.dir, bound)
+                    .and_then(|here| Vault::unlock_with_password_here(&self.dir, p, here.as_ref()));
                 // A new password whose key was held aside and not yet promoted (the program
                 // closed in between): that key opens it, and becomes the one in use.
                 if bound

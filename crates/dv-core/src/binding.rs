@@ -72,6 +72,31 @@ pub(crate) fn key_here(seal: &dyn ComputerSeal, dir: &Path, bound: bool) -> Opti
     }
 }
 
+/// The same for an opening with the password, where a Windows that did not answer in time
+/// is told apart from a key that is not here: it is asked once more, and then the opening
+/// says to try again, never "another computer" (a cold start could otherwise send her to
+/// the kit). For a slot not bound yet, a slow answer only leaves the binding for next time.
+pub(crate) fn key_for_opening(
+    seal: &dyn ComputerSeal,
+    dir: &Path,
+    bound: bool,
+) -> Result<Option<Key32>, VaultError> {
+    if !seal.available() {
+        return Ok(None);
+    }
+    let loaded = match seal.load(dir) {
+        Err(VaultError::Busy) => seal.load(dir),
+        other => other,
+    };
+    match loaded {
+        Ok(key) => Ok(Some(key)),
+        Err(VaultError::Busy) if bound => Err(VaultError::Busy),
+        Err(VaultError::Busy) => Ok(None),
+        Err(_) if bound => Ok(None),
+        Err(_) => Ok(seal.create(dir).ok()),
+    }
+}
+
 /// Whether the password slot on disk is bound. A header that cannot be read now (an
 /// antivirus holding it, a disk error) counts as bound, so the key here is only ever loaded
 /// and never replaced on a guess (review of stage 5, S4).

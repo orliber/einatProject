@@ -35,6 +35,10 @@ pub enum VaultError {
     /// The password slot is bound to another computer (D-076): here only the kit opens it.
     #[error("the password opens this vault only on the computer it is bound to")]
     OtherComputer,
+    /// Windows did not answer in time when the key kept for this computer was unsealed (a
+    /// cold start, an antivirus scan). Not "another computer": she tries again.
+    #[error("the computer did not answer in time")]
+    Busy,
     #[error("the recovery key is not valid (check for typos)")]
     RecoveryKeyInvalid,
     #[error("password does not meet the policy: {0:?}")]
