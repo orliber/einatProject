@@ -300,7 +300,7 @@ pub(crate) fn yours(items: &[SecurityItem], backup: Option<(bool, bool)>) -> Vec
                 None => "עוד לא נבדקה. בודקים אותה ב\"סיסמה ואבטחה\".".to_owned(),
                 Some("0") => "נבדקה היום.".to_owned(),
                 Some(d) if kit.state == "ok" => format!("נבדקה לפני {d} ימים."),
-                Some(d) => format!("נבדקה לפני {d} ימים. כדאי לבדוק אותה שוב."),
+                Some(d) => format!("נבדקה לפני {d} ימים. כדאי לבדוק אותה שוב ב\"סיסמה ואבטחה\"."),
             },
         ));
     }
