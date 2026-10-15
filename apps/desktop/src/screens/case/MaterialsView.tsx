@@ -174,7 +174,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
       <ErrorLine error={error} />
       {autoSaved && (
         <div className="note-sand row" role="status">
-          <span className="grow">"{autoSaved.title}" נשמר בתיק. לא היה בו מה להסתיר.</span>
+          <span className="grow">"{autoSaved.title}" נשמר בתיק.</span>
           <button type="button" className="btn btn-small" onClick={() => { setSelected(autoSaved.id); setAutoSaved(null); }}>לבדיקה</button>
           <button type="button" className="btn btn-small" onClick={() => void undoAutoSave()}>ביטול</button>
         </div>
