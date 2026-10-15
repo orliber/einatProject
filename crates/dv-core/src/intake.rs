@@ -146,8 +146,17 @@ impl Core {
         if !case_id.is_empty() {
             // A case that is not there has no names to hide with: refused, not filtered bare.
             self.vault_ref()?.case_meta(case_id)?;
-            // Learning is not needed here; a failure leaves the tag, and the gate blocks.
-            let _ = self.settle_stale_tags(case_id, &HashMap::new());
+            // Learning is not needed here; a failure leaves the tag, and the gate blocks. Each
+            // pass reads every stored text of the case: it is skipped while nothing was
+            // written since the last one (the deep review, 4–6 passes per saved material).
+            let counts = self.vault_ref()?.change_counts();
+            let fresh = self
+                .settled
+                .as_ref()
+                .is_some_and(|(id, at)| id == case_id && *at == counts);
+            if !fresh && self.settle_stale_tags(case_id, &HashMap::new()).is_ok() {
+                self.settled = Some((case_id.to_owned(), self.vault_ref()?.change_counts()));
+            }
         }
         let v = self.vault_ref()?;
         Ok(PrivacyData {

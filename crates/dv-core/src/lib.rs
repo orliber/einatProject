@@ -680,6 +680,10 @@ pub struct Core {
     section_nonces: HashMap<(String, String), String>,
     /// The name model's hints by text, so a material is read once (dropped on lock).
     hint_cache: HashMap<String, Vec<dv_privacy::NameHint>>,
+    /// The case whose stored texts were last settled against its tags, and the vault's write
+    /// counts right after: while they have not moved, no text or name changed, and settling
+    /// again would find nothing (dropped on lock).
+    settled: Option<(String, (u64, u64))>,
     /// The half of the password slot kept on this computer (D-076).
     computer_seal: Arc<dyn ComputerSeal>,
     /// The program's memory is kept out of the page file: `None` where the computer offers

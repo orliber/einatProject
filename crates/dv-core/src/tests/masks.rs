@@ -234,3 +234,37 @@ fn a_request_too_large_is_shortened_not_refused() {
     assert!(sent[0].contains("הוא נשאר במחשב."));
     assert!(sent[0].contains("הפסיכולוגית מבקשת: תנסח פסקה"));
 }
+
+/// Stored texts are settled against the case's tags before each filtering, and the pass is
+/// skipped only while nothing was written since the last one (the deep review): a tag that
+/// is not the case's, written after a settle, is still settled by the next request.
+#[test]
+fn a_foreign_tag_written_after_a_settle_is_still_settled() {
+    let (_dir, mut core, case) = setup(None);
+    let stored = |core: &mut Core| -> Vec<String> {
+        core.vault_ref()
+            .unwrap()
+            .drafts(&case, "kindergarten")
+            .unwrap()
+            .into_iter()
+            .map(|d| d.text_tagged)
+            .collect()
+    };
+    let add = |core: &mut Core, text: &str| {
+        core.vault_mut()
+            .unwrap()
+            .add_draft(&case, "kindergarten", text, Author::User, &[])
+            .unwrap();
+    };
+    add(&mut core, "[ילד] למד ב[מוסד_9].");
+    core.privacy_data(&case).unwrap();
+    assert_eq!(stored(&mut core), ["[ילד] למד במוסד."]);
+    // Nothing written: the next request does not read the texts again, and nothing changes.
+    let counts = core.vault_ref().unwrap().change_counts();
+    core.privacy_data(&case).unwrap();
+    assert_eq!(core.vault_ref().unwrap().change_counts(), counts);
+    // A new text with a foreign tag: settled by the next request.
+    add(&mut core, "שיחק ב[מוסד_8].");
+    core.privacy_data(&case).unwrap();
+    assert_eq!(stored(&mut core), ["[ילד] למד במוסד.", "שיחק במוסד."]);
+}
