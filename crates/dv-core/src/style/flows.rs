@@ -1189,3 +1189,106 @@ fn old_reports_keep_their_scores_as_tags_and_no_other_number() {
     assert!(share >= 0.95, "{tagged} of {marked} scores kept as tags");
     assert!(stayed.is_empty(), "names stayed: {stayed:?}");
 }
+
+/// Two of the fabricated old reports, every part kept.
+fn upload_scored(core: &mut Core) {
+    for (name, text, _) in score_reports()
+        .into_iter()
+        .filter(|(n, _, _)| n == "01.txt" || n == "11.txt")
+    {
+        let preview = core.import_style_source(&name, text.as_bytes()).unwrap();
+        let all: Vec<u32> = preview.parts.iter().map(|p| p.index).collect();
+        core.save_style_source(&preview.token, &all, None).unwrap();
+    }
+}
+
+#[test]
+fn the_interpretation_of_scores_is_learned_from_all_reports_and_waits_for_her() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core) = vault(Some(fake.clone()));
+    assert!(matches!(
+        core.prepare_interpretations(),
+        Err(CoreError::Refused(_))
+    ));
+    upload_scored(&mut core);
+    let o = core.style_overview().unwrap();
+    assert!(o.scored_measures >= 10, "{}", o.scored_measures);
+    assert!(o.interpretations.is_empty());
+
+    let p = core.prepare_interpretations().unwrap();
+    assert!(p.blocked.is_empty(), "{:?}", p.blocked);
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({"items": [
+        {"measure": "wppsi_iv/bug_search", "case": "ממוצע נמוך",
+         "text": "תוצאה נמוכה מתפרשת אצלה כקושי במהירות העבודה, ולא בהבנה.", "support": 2},
+        {"measure": "wppsi_iv/block_design", "case": "כללי",
+         "text": "היא בודקת את התוצאה לצד העבודה השיטתית שנצפתה.", "support": 1},
+        // Five words of a report: content, not an interpretation.
+        {"measure": "wppsi_iv/matrix", "case": "כללי",
+         "text": "לדבריה הופנה לאבחון בשל קשיי קשב בגן.", "support": 1},
+        {"measure": "wppsi_iv/matrix", "case": "כללי", "text": "הילה מתקשה.", "support": 1}
+    ]})));
+    let r = core.send_interpretations(&p.approval_id.unwrap()).unwrap();
+    let sent = last_sent(&fake);
+    // Grouped by subtest, with the score tags; the children's names stay home.
+    assert!(
+        sent.contains("wppsi_iv/bug_search") && sent.contains("[תוצאה 6 · ממוצע נמוך"),
+        "{sent}"
+    );
+    for child in ["יואב", "הילה"] {
+        assert!(!sent.contains(child), "{child}: {sent}");
+    }
+    assert_eq!((r.kept, r.dropped), (2, 2), "{r:?}");
+
+    let o = core.style_overview().unwrap();
+    assert_eq!(o.interpretations.len(), 2);
+    let first = &o.interpretations[0];
+    assert!(!first.item.approved && first.item.enabled);
+    assert_eq!(first.instrument_name, "WPPSI-IV");
+
+    // She approves one and writes another her way; a name in her words is refused.
+    let id = first.item.id.clone();
+    let v = core
+        .update_interpretation(&id, None, Some(true), None)
+        .unwrap();
+    assert!(v.item.approved && !v.item.edited);
+    let other = o.interpretations[1].item.id.clone();
+    assert!(matches!(
+        core.update_interpretation(&other, Some("כמו אצל יואב.".into()), None, None),
+        Err(CoreError::Refused(_))
+    ));
+    let v = core
+        .update_interpretation(
+            &other,
+            Some("תוצאה בקוביות נקראת לצד אופן העבודה.".into()),
+            None,
+            None,
+        )
+        .unwrap();
+    assert!(v.item.edited && !v.item.approved);
+
+    // A new reading replaces only what she did not approve or write.
+    let p = core.prepare_interpretations().unwrap();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({"items": [
+        {"measure": "wppsi_iv/matrix", "case": "כללי",
+         "text": "היא מקשרת אותה לחשיבה החזותית.", "support": 2}
+    ]})));
+    core.send_interpretations(&p.approval_id.unwrap()).unwrap();
+    let o = core.style_overview().unwrap();
+    assert_eq!(o.interpretations.len(), 3);
+    core.delete_interpretation(&other).unwrap();
+    assert_eq!(core.style_overview().unwrap().interpretations.len(), 2);
+    assert!(matches!(
+        core.delete_interpretation(&other),
+        Err(CoreError::NotFound(_))
+    ));
+}
+
+#[test]
+fn demo_mode_shows_what_an_interpretation_looks_like() {
+    let (_dir, mut core) = vault(None);
+    upload_scored(&mut core);
+    let p = core.prepare_interpretations().unwrap();
+    assert!(p.demo_mode);
+    let r = core.send_interpretations(&p.approval_id.unwrap()).unwrap();
+    assert!(r.demo && r.kept > 0, "{r:?}");
+}

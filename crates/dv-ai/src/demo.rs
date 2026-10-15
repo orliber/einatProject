@@ -359,6 +359,25 @@ fn verify_locally(text: &str) -> Value {
 
 /// Answer a request body the way the real API would, from local material only.
 #[must_use]
+/// Demo answer for the interpretation of scores (round 33): one general line per group,
+/// worded as a demo, so the screen shows what an approval looks like.
+fn interpret_locally(keys: &[Value]) -> Value {
+    let items: Vec<Value> = keys
+        .iter()
+        .filter_map(Value::as_str)
+        .take(6)
+        .map(|k| {
+            json!({
+                "measure": k,
+                "case": dv_domain::GENERAL_CASE,
+                "text": "מצב הדגמה: כאן תופיע הפרשנות שלך לתת-המבחן, כפי שעולה מהדוחות שלך, במילים כלליות.",
+                "support": 1
+            })
+        })
+        .collect();
+    json!({ "items": items })
+}
+
 pub fn respond(body: &Value) -> Value {
     let last_user = body["messages"]
         .as_array()
@@ -389,6 +408,11 @@ pub fn respond(body: &Value) -> Value {
     {
         let synthesis = kinds.iter().any(|k| k == "example");
         return api_text(&style_locally(last_user, synthesis).to_string());
+    }
+    if let Some(keys) =
+        in_schema("/properties/items/items/properties/measure/enum").and_then(Value::as_array)
+    {
+        return api_text(&interpret_locally(keys).to_string());
     }
     if in_schema("/properties/results/items/properties/verdict/enum").is_some_and(Value::is_array) {
         return api_text(&verify_locally(last_user).to_string());

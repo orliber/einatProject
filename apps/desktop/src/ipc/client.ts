@@ -61,6 +61,8 @@ import type { StyleItem } from "./generated/StyleItem";
 import type { StyleKind } from "./generated/StyleKind";
 import type { StyleLearned } from "./generated/StyleLearned";
 import type { StyleOverview } from "./generated/StyleOverview";
+import type { Interpretation } from "./generated/Interpretation";
+import type { InterpretationView } from "./generated/InterpretationView";
 import type { StyleProfile } from "./generated/StyleProfile";
 import type { StyleProfileView } from "./generated/StyleProfileView";
 import type { StyleSourceView } from "./generated/StyleSourceView";
@@ -378,6 +380,11 @@ export const ipc = {
   sendStyleAnalysis: (approvalId: string) => call("send_style_analysis", { approvalId }),
   prepareStyleProfile: () => call("prepare_style_profile"),
   sendStyleProfile: (approvalId: string) => call("send_style_profile", { approvalId }),
+  prepareInterpretations: () => call("prepare_interpretations"),
+  sendInterpretations: (approvalId: string) => call("send_interpretations", { approvalId }),
+  updateInterpretation: (id: string, text: string | null, approved: boolean | null, enabled: boolean | null) =>
+    call("update_interpretation", { id, text, approved, enabled }),
+  deleteInterpretation: (id: string) => run("delete_interpretation", { id }),
   saveStyleDraft: (profile: StyleProfile) => call("save_style_draft", { profile }),
   approveStyleDraft: () => call("approve_style_draft"),
   discardStyleDraft: () => run("discard_style_draft"),
@@ -400,6 +407,8 @@ export const ipc = {
 
 export type {
   FitMonth,
+  Interpretation,
+  InterpretationView,
   ParagraphView,
   SimilarParagraph,
   StyleAnalysisResult,

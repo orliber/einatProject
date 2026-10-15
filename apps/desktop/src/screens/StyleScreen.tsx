@@ -12,6 +12,7 @@ import { ErrorLine, Skeleton, Spinner, UploadIcon, CloseIcon } from "../componen
 import {
   ipc,
   type FitMonth,
+  type InterpretationView,
   type Prepared,
   type StyleImportPreview,
   type StyleItem,
@@ -45,7 +46,10 @@ const KIND_HINT: Record<StyleKind, string> = {
 const KINDS: StyleKind[] = ["rule", "phrase", "avoid", "template", "example"];
 const RECOMMENDED = 3;
 
-type Step = { kind: "analysis"; source: StyleSourceView } | { kind: "profile" };
+type Step = { kind: "analysis"; source: StyleSourceView } | { kind: "profile" } | { kind: "interpret" };
+
+const STEP_TITLE = (step: Step) =>
+  step.kind === "analysis" ? `ניתוח סגנון · ${step.source.title}` : step.kind === "interpret" ? "איך פירשת תוצאות" : "בניית פרופיל הסגנון";
 
 function dateOf(unix: number): string {
   return new Date(unix * 1000).toLocaleDateString("he-IL", { day: "numeric", month: "long", year: "numeric" });
@@ -89,7 +93,8 @@ export function StyleScreen() {
   // ---------------------------------------------------------------- the run
 
   async function prepare(step: Step) {
-    return step.kind === "analysis" ? ipc.prepareStyleAnalysis(step.source.id) : ipc.prepareStyleProfile();
+    if (step.kind === "analysis") return ipc.prepareStyleAnalysis(step.source.id);
+    return step.kind === "interpret" ? ipc.prepareInterpretations() : ipc.prepareStyleProfile();
   }
 
   async function next(steps: Step[]) {
@@ -116,13 +121,20 @@ export function StyleScreen() {
   }
 
   async function send(step: Step, approval: string, steps: Step[]) {
-    const label = step.kind === "analysis" ? `מנתח את הסגנון ב"${step.source.title}"` : "בונה את פרופיל הסגנון מכל הניתוחים";
+    const label = step.kind === "analysis"
+      ? `מנתח את הסגנון ב"${step.source.title}"`
+      : step.kind === "interpret" ? "לומד מהדוחות איך פירשת תוצאות" : "בונה את פרופיל הסגנון מכל הניתוחים";
     const started = Date.now();
     setSending({ label, approval, started });
     try {
       if (step.kind === "analysis") {
         const r = await ipc.sendStyleAnalysis(approval);
         if (r.dropped > 0) notify(`${r.kept} פריטים נשמרו, ${r.dropped} נפסלו (העתקה או פרט מזהה).`);
+      } else if (step.kind === "interpret") {
+        const r = await ipc.sendInterpretations(approval);
+        notify(r.kept === 0
+          ? "לא נמצאה פרשנות חדשה בדוחות."
+          : `${r.kept === 1 ? "פרשנות אחת מחכה" : `${r.kept} פרשנויות מחכות`} לאישור שלך.${r.dropped > 0 ? ` ${r.dropped} נפסלו (העתקה או פרט מזהה).` : ""}`);
       } else {
         await ipc.sendStyleProfile(approval);
         notify("טיוטת הפרופיל מוכנה. כדאי לעבור עליה ולאשר.");
@@ -215,6 +227,8 @@ export function StyleScreen() {
 
         <Learned o={o} onForget={() => setForgetting(true)} />
 
+        <Interpretations o={o} running={running} onRead={() => void next([{ kind: "interpret" }])} />
+
         {shown && <ProfileEditor key={`${shown.id}`} view={shown} o={o} />}
 
         {o.versions.length > 0 && <Versions o={o} onReset={() => setResetting(true)} />}
@@ -225,7 +239,7 @@ export function StyleScreen() {
           onSaved={(s) => { setImporting(null); notify(`"${s.title}" נשמר ב"הדוחות שלי".`); void reload(); }} />
       )}
       {review && (
-        <ReviewDialog title={review.step.kind === "analysis" ? `ניתוח סגנון · ${review.step.source.title}` : "בניית פרופיל הסגנון"}
+        <ReviewDialog title={STEP_TITLE(review.step)}
           caseId={null} prepared={review.prepared} reprepare={() => prepare(review.step)}
           onClose={() => { setReview(null); setQueue([]); }}
           onSend={async (id) => { const step = review.step; setReview(null); await send(step, id, queue); }} />
@@ -445,6 +459,90 @@ function Learned({ o, onForget }: { o: StyleOverview; onForget: () => void }) {
           <button type="button" className="btn btn-small btn-danger-quiet" onClick={onForget}>לשכוח את מה שנלמד מהתיקונים ומהדוחות שסיימתי</button>
         </div>
       )}
+    </section>
+  );
+}
+
+// ------------------------------------------------------------------ interpretation (round 33)
+
+/** How she interprets each subtest's score, learned from her reports; nothing is used before she approves it. */
+function Interpretations({ o, running, onRead }: { o: StyleOverview; running: boolean; onRead: () => void }) {
+  const { fail } = useApp();
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  if (o.scored_measures === 0 && o.interpretations.length === 0) return null;
+  const waiting = o.interpretations.filter((i) => !i.item.approved).length;
+  const groups = new Map<string, InterpretationView[]>();
+  for (const i of o.interpretations) {
+    const key = `${i.instrument_name} · ${i.measure_name}`;
+    groups.set(key, [...(groups.get(key) ?? []), i]);
+  }
+
+  async function act(f: () => Promise<unknown>) {
+    setError(null);
+    try {
+      await f();
+      setEditing(null);
+      await qc.invalidateQueries({ queryKey: ["style"] });
+    } catch (e) {
+      setError(fail(e as never));
+    }
+  }
+
+  return (
+    <section className="card style-card" aria-labelledby="style-interpret">
+      <h2 id="style-interpret">איך את מפרשת תוצאות</h2>
+      <p className="hint">
+        מהמשפטים בדוחות הישנים שבהם כתבת על תוצאה של תת-מבחן. נשלחים רק המשפטים האלה, בלי פרטים מזהים, ונשמרת פרשנות כללית.
+        שום פרשנות לא משמשת בדוח לפני שאישרת אותה.
+      </p>
+      <div className="row">
+        <button type="button" className="btn btn-small" disabled={running || o.scored_measures === 0} onClick={onRead}>
+          {o.interpretations.length === 0 ? "ללמוד מהדוחות איך פירשתי תוצאות" : "לקרוא שוב את הדוחות"}
+        </button>
+        {o.scored_measures > 0 && <span className="hint">{o.scored_measures === 1 ? "תת-מבחן אחד" : `${o.scored_measures} תת-מבחנים`} עם תוצאות בדוחות.</span>}
+        {waiting > 0 && <span className="chip">{waiting === 1 ? "אחת מחכה" : `${waiting} מחכות`} לאישור</span>}
+      </div>
+      <ErrorLine error={error} />
+      {[...groups.entries()].map(([title, items]) => (
+        <div key={title} className="style-group" role="group" aria-label={title}>
+          <h3>{title}</h3>
+          <ul className="style-items">
+            {items.map(({ item }) => (
+              <li key={item.id} className={item.enabled ? "" : "off"}>
+                <span className="chip">{item.case}</span>{" "}
+                {editing === item.id ? (
+                  <span className="stack">
+                    <textarea aria-label="הפרשנות" value={draft} rows={3} onChange={(e) => setDraft(e.target.value)} />
+                    <span className="row">
+                      <button type="button" className="btn btn-small btn-primary" onClick={() => void act(() => ipc.updateInterpretation(item.id, draft, true, null))}>שמירה ואישור</button>
+                      <button type="button" className="btn btn-small" onClick={() => setEditing(null)}>ביטול</button>
+                    </span>
+                  </span>
+                ) : (
+                  <>
+                    <span>{item.text}</span>
+                    {!item.approved && <span className="chip chip-warn">מחכה לאישור</span>}
+                    {item.support > 1 && <span className="hint"> · ב-{item.support} דוחות</span>}
+                    <span className="row">
+                      {!item.approved && <button type="button" className="btn btn-small btn-primary" onClick={() => void act(() => ipc.updateInterpretation(item.id, null, true, null))}>אישור</button>}
+                      <button type="button" className="btn btn-small" onClick={() => { setEditing(item.id); setDraft(item.text); }}>עריכה</button>
+                      {item.approved && (
+                        <button type="button" className="btn btn-small" onClick={() => void act(() => ipc.updateInterpretation(item.id, null, null, !item.enabled))}>
+                          {item.enabled ? "כיבוי" : "הדלקה"}
+                        </button>
+                      )}
+                      <button type="button" className="btn btn-small btn-danger-quiet" onClick={() => void act(() => ipc.deleteInterpretation(item.id))}>מחיקה</button>
+                    </span>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
     </section>
   );
 }

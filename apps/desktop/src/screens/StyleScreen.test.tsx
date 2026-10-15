@@ -37,6 +37,8 @@ const overview = (over: Partial<StyleOverview> = {}): StyleOverview => ({
     words_per_sentence: null, sentences_per_paragraph: null, commas_per_sentence: null,
     hedges: null, contrasts: null, first_person: null, fit_recent: null, fit_earlier: null, fit_count: 0, fit_by_month: [],
   },
+  interpretations: [],
+  scored_measures: 0,
   ...over,
 });
 
@@ -53,7 +55,35 @@ const draft: StyleProfileView = {
   },
 };
 
+const waiting = {
+  instrument_name: "WPPSI-IV", measure_name: "קידוד חיות",
+  item: { id: "i1", instrument: "wppsi_iv", measure: "animal_coding", case: "ממוצע נמוך", text: "קושי במהירות העבודה, לא בהבנה.", support: 3, approved: false, enabled: true, edited: false },
+};
+
 describe("StyleScreen", () => {
+  it("learns how she interprets scores, through the review screen, and waits for her approval", async () => {
+    const calls: [string, unknown][] = [];
+    mockIPC((cmd, args) => {
+      calls.push([cmd, args]);
+      if (cmd === "style_overview") return overview({ sources: [{ ...source, analyzed: true }], scored_measures: 4, interpretations: [waiting] });
+      if (cmd === "prepare_interpretations") return prepared({ approval_id: "i" });
+      if (cmd === "send_interpretations") return { kept: 1, dropped: 0, demo: true };
+      if (cmd === "update_interpretation") return { ...waiting, item: { ...waiting.item, approved: true } };
+      return null;
+    });
+    const user = userEvent.setup();
+    wrap(<StyleScreen />);
+    const group = await screen.findByRole("group", { name: "WPPSI-IV · קידוד חיות" });
+    expect(group).toHaveTextContent("מחכה לאישור");
+    expect(screen.getByText(/4 תת-מבחנים עם תוצאות/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "לקרוא שוב את הדוחות" }));
+    expect(await screen.findByText(/איך פירשת תוצאות ·/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /שליחה/ }));
+    await vi.waitFor(() => expect(calls.map(([c]) => c)).toContain("send_interpretations"));
+    await user.click(screen.getByRole("button", { name: "אישור" }));
+    await vi.waitFor(() => expect(calls).toContainEqual(["update_interpretation", { id: "i1", text: null, approved: true, enabled: null }]));
+  });
+
   it("starts with one action: adding a past report", async () => {
     mockIPC((cmd) => (cmd === "style_overview" ? overview() : null));
     wrap(<StyleScreen />);

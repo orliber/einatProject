@@ -81,9 +81,9 @@ pub use readiness::{Readiness, ReadinessItem};
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
 pub use security::{SecurityItem, SecurityStatus};
 pub use style::{
-    FitMonth, OwnSectionHelp, SimilarParagraph, StyleAnalysisResult, StyleImportPreview,
-    StyleOverview, StylePartView, StyleProfileView, StyleSectionLabel, StyleSourceView,
-    StyleSuggestion, StyleSuggestionKind, StyleVersionView,
+    FitMonth, InterpretationResult, InterpretationView, OwnSectionHelp, SimilarParagraph,
+    StyleAnalysisResult, StyleImportPreview, StyleOverview, StylePartView, StyleProfileView,
+    StyleSectionLabel, StyleSourceView, StyleSuggestion, StyleSuggestionKind, StyleVersionView,
 };
 pub use unsaved::UnsavedEdit;
 pub use usage::UsageSummary;
@@ -515,6 +515,10 @@ enum PendingKind {
     StyleAnalysis { source_id: String },
     /// Step 2: the analyses of `reports` past reports.
     StyleSynthesis { reports: u32 },
+    /// The interpretation of scores in her past reports (round 33): the groups that were sent.
+    Interpretation {
+        groups: Vec<dv_ai::InterpretationGroup>,
+    },
     /// The check of a section's proposed paragraphs against its sources: the drafts in the
     /// order of `P1`…, and the `S#` ids that were sent.
     Verify {
@@ -534,6 +538,7 @@ pub enum SendKind {
     Sort,
     StyleAnalysis,
     StyleSynthesis,
+    Interpretation,
     Verify,
 }
 
@@ -545,6 +550,7 @@ impl PendingKind {
             PendingKind::Sort { .. } => SendKind::Sort,
             PendingKind::StyleAnalysis { .. } => SendKind::StyleAnalysis,
             PendingKind::StyleSynthesis { .. } => SendKind::StyleSynthesis,
+            PendingKind::Interpretation { .. } => SendKind::Interpretation,
             PendingKind::Verify { .. } => SendKind::Verify,
         }
     }

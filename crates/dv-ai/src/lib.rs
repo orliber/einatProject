@@ -4,6 +4,7 @@
 //! the gate then scans the finished request body as a whole.
 
 pub mod demo;
+mod interpret;
 pub mod prompts;
 mod request;
 mod response;
@@ -12,6 +13,10 @@ mod sort;
 pub mod style;
 mod verify;
 
+pub use interpret::{
+    build_interpretation_request, parse_interpretations, render_interpretations, Interpretation,
+    InterpretationGroup, RawInterpretation, INTERPRETATION_FIXED_TEXTS, MAX_INTERPRETATION_CHARS,
+};
 pub use request::{
     build_consult_request, build_research_request, build_section_request, content_text,
     guide_lines, nonce_from, ConsultInput, ModelConfig, Provider, ResearchInput, SectionInput,

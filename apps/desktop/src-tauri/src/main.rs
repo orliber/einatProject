@@ -18,11 +18,11 @@ use commands::*;
 use dv_core::{
     ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView,
     ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
-    ExportCheck, ImportPreview, NameMatch, ParagraphVersionView, ParagraphView, Prepared,
-    Readiness, ReportSettings, RetentionItem, SectionResult, SecurityStatus, SentItem, SentText,
-    SortResult, StagedBackup, StyleAnalysisResult, StyleImportPreview, StyleOverview,
-    StyleProfileView, StyleSourceView, SuspectDecision, TemplateView, UiError, UnsavedEdit,
-    UsageSummary, VerifyResult,
+    ExportCheck, ImportPreview, InterpretationResult, InterpretationView, NameMatch,
+    ParagraphVersionView, ParagraphView, Prepared, Readiness, ReportSettings, RetentionItem,
+    SectionResult, SecurityStatus, SentItem, SentText, SortResult, StagedBackup,
+    StyleAnalysisResult, StyleImportPreview, StyleOverview, StyleProfileView, StyleSourceView,
+    SuspectDecision, TemplateView, UiError, UnsavedEdit, UsageSummary, VerifyResult,
 };
 use dv_domain::{
     CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind, Role,
@@ -432,6 +432,10 @@ fn main() {
             send_style_analysis,
             prepare_style_profile,
             send_style_profile,
+            prepare_interpretations,
+            send_interpretations,
+            update_interpretation,
+            delete_interpretation,
             save_style_draft,
             approve_style_draft,
             discard_style_draft,

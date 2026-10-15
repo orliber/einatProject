@@ -1391,29 +1391,119 @@ static BAND_LABELS: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(
 /// tag cannot carry a name.
 #[must_use]
 pub fn is_score_tag(tag: &str) -> bool {
-    let Some(inner) = tag.strip_prefix('[').and_then(|t| t.strip_suffix(']')) else {
-        return false;
-    };
+    parse_score_tag(tag).is_some()
+}
+
+/// What a score tag holds: the value, the range label and the relative place. `None` for
+/// anything that is not a score tag (see [`is_score_tag`]).
+#[must_use]
+pub fn parse_score_tag(tag: &str) -> Option<(f64, Option<String>, Option<Relative>)> {
+    let inner = tag.strip_prefix('[')?.strip_suffix(']')?;
     let mut parts = inner.split(" · ");
-    let Some(value) = parts.next().and_then(|p| p.strip_prefix("תוצאה ")) else {
-        return false;
-    };
-    let Ok(v) = value.parse::<f64>() else {
-        return false;
-    };
+    let value = parts.next()?.strip_prefix("תוצאה ")?;
+    let v = value.parse::<f64>().ok()?;
     if !(0.0..=200.0).contains(&v) || fmt_value(v) != value {
-        return false;
+        return None;
     }
     let rest: Vec<&str> = parts.collect();
     let labels = &*BAND_LABELS;
-    let rel = |p: &str| p == Relative::Strength.label_he() || p == Relative::Weakness.label_he();
+    let band = |p: &str| labels.iter().any(|l| l == p).then(|| p.to_owned());
+    let rel = |p: &str| {
+        [Relative::Strength, Relative::Weakness]
+            .into_iter()
+            .find(|r| r.label_he() == p)
+    };
     match rest.as_slice() {
-        [] => true,
-        [a] => labels.iter().any(|l| l == a) || rel(a),
-        [a, b] => labels.iter().any(|l| l == a) && rel(b),
-        _ => false,
+        [] => Some((v, None, None)),
+        [a] => match (band(a), rel(a)) {
+            (Some(b), _) => Some((v, Some(b), None)),
+            (None, Some(r)) => Some((v, None, Some(r))),
+            (None, None) => None,
+        },
+        [a, b] => Some((v, Some(band(a)?), Some(rel(b)?))),
+        _ => None,
     }
 }
+
+/// A score tag in a neutralized report, read back with the test or subtest named beside it
+/// (round 33): what the interpretation of her past reports is grouped by.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TaggedScore {
+    pub instrument: String,
+    pub measure: String,
+    /// Byte range of the whole tag.
+    pub start: usize,
+    pub end: usize,
+    pub band: Option<String>,
+    pub relative: Option<Relative>,
+}
+
+/// Every score tag in `text` whose test or subtest is named beside it, the way
+/// [`find_score_mentions`] read the number before it became a tag.
+#[must_use]
+pub fn find_tagged_scores(text: &str) -> Vec<TaggedScore> {
+    let mut tags = Vec::new();
+    let mut at = 0;
+    while let Some(open) = text.get(at..).and_then(|t| t.find('[')).map(|o| at + o) {
+        let Some(close) = text
+            .get(open..)
+            .and_then(|t| t.find(']'))
+            .map(|c| open + c + 1)
+        else {
+            break;
+        };
+        if let Some(parsed) = text.get(open..close).and_then(parse_score_tag) {
+            tags.push((open, close, parsed));
+        }
+        at = close;
+    }
+    if tags.is_empty() {
+        return Vec::new();
+    }
+    let mut out: Vec<TaggedScore> = Vec::new();
+    for m in find_score_mentions(text) {
+        let Some((s, e, (_, band, relative))) =
+            tags.iter().find(|(s, e, _)| *s <= m.start && m.end <= *e)
+        else {
+            continue;
+        };
+        if out.iter().any(|t| t.start == *s) {
+            continue;
+        }
+        out.push(TaggedScore {
+            instrument: m.instrument,
+            measure: m.measure,
+            start: *s,
+            end: *e,
+            band: band.clone(),
+            relative: *relative,
+        });
+    }
+    out
+}
+
+/// What an interpretation of a measure can be about: each range label of its table, a
+/// relative strength or weakness (for subtests), or the measure in general.
+#[must_use]
+pub fn interpretation_cases(instrument: &str, measure: &str) -> Vec<String> {
+    let Some(m) = instruments()
+        .into_iter()
+        .find(|i| i.key == instrument)
+        .and_then(|i| i.measures.into_iter().find(|m| m.key == measure))
+    else {
+        return Vec::new();
+    };
+    let mut out = vec![GENERAL_CASE.to_owned()];
+    out.extend(m.bands.iter().map(|b| b.label.clone()));
+    if matches!(m.scale, ScoreScale::Scaled | ScoreScale::VScale) {
+        out.push(Relative::Strength.label_he().to_owned());
+        out.push(Relative::Weakness.label_he().to_owned());
+    }
+    out
+}
+
+/// The case of an interpretation that holds whatever the score.
+pub const GENERAL_CASE: &str = "כללי";
 
 #[cfg(test)]
 mod tests {
@@ -1467,6 +1557,44 @@ mod tests {
         let short = find_score_mentions("WPPSI-IV: מידע 11. היה לו מידע רב על 12 חיות.");
         assert_eq!(short.len(), 1);
         assert_eq!(short[0].value, 11.0);
+    }
+
+    #[test]
+    fn a_score_tag_is_read_back_with_its_subtest() {
+        let text = "WPPSI-IV. בקוביות ([תוצאה 7 · ממוצע נמוך]) עבד לאט, ובמטריצות \
+                    [תוצאה 13 · ממוצע גבוה · חוזקה יחסית]. [תוצאה 9] בלי שם. בגיל [מספר].";
+        let got: Vec<(String, Option<String>, Option<Relative>)> = find_tagged_scores(text)
+            .into_iter()
+            .map(|t| (t.measure, t.band, t.relative))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (
+                    "block_design".to_owned(),
+                    Some("ממוצע נמוך".to_owned()),
+                    None
+                ),
+                (
+                    "matrix".to_owned(),
+                    Some("ממוצע גבוה".to_owned()),
+                    Some(Relative::Strength)
+                ),
+            ]
+        );
+        let t = &find_tagged_scores(text)[0];
+        assert_eq!(text.get(t.start..t.end), Some("[תוצאה 7 · ממוצע נמוך]"));
+        assert_eq!(
+            parse_score_tag("[תוצאה 6 · חולשה יחסית]"),
+            Some((6.0, None, Some(Relative::Weakness)))
+        );
+        let cases = interpretation_cases("wppsi_iv", "block_design");
+        assert!(
+            cases.contains(&GENERAL_CASE.to_owned()) && cases.contains(&"ממוצע נמוך".to_owned())
+        );
+        assert!(cases.contains(&"חולשה יחסית".to_owned()));
+        assert!(!interpretation_cases("wppsi_iv", "fsiq").contains(&"חולשה יחסית".to_owned()));
+        assert!(interpretation_cases("wppsi_iv", "nothing").is_empty());
     }
 
     #[test]

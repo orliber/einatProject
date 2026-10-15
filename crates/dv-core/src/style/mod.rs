@@ -31,8 +31,11 @@ use crate::dates::unix_now;
 use crate::{today, Core, CoreError, Outgoing, Pending, PendingKind, Prepared, Review, Task};
 
 mod headings;
+mod interpret;
 mod learning;
 mod requests;
+
+pub use interpret::{InterpretationResult, InterpretationView};
 
 use headings::*;
 use learning::*;
@@ -260,6 +263,10 @@ pub struct StyleOverview {
     pub sections: Vec<StyleSectionLabel>,
     pub demo_mode: bool,
     pub learned: StyleLearned,
+    /// How she interprets scores (round 33), approved or waiting for her.
+    pub interpretations: Vec<InterpretationView>,
+    /// How many subtests have a score in her reports: what a reading would cover.
+    pub scored_measures: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -359,6 +366,10 @@ pub(crate) struct LocalStyle {
     /// How she usually opens and closes each section, from her past reports (ST11).
     #[serde(default)]
     shapes: Vec<dv_style::Shape>,
+    /// How she interprets the score of each subtest, from her past reports (round 33). Used
+    /// only once she approved it.
+    #[serde(default)]
+    interpretations: Vec<dv_ai::Interpretation>,
 }
 
 /// How many months of closeness figures are kept for the trend.
@@ -1384,8 +1395,11 @@ impl Core {
         let structure =
             ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
         let demo_mode = self.demo_mode()?;
-        let sources = self
-            .stored_sources()?
+        let stored = self.stored_sources()?;
+        let scored_measures = interpret::scored_measures(
+            &stored.iter().map(|(_, _, s)| s.clone()).collect::<Vec<_>>(),
+        );
+        let sources = stored
             .into_iter()
             .map(|(id, at, s)| Self::source_view(id, at, &s))
             .collect();
@@ -1432,6 +1446,8 @@ impl Core {
                 .collect(),
             demo_mode,
             learned: local.learned(),
+            interpretations: Self::interpretation_views(v)?,
+            scored_measures,
         })
     }
 

@@ -67,6 +67,11 @@ impl PendingKind {
                 None,
                 serde_json::json!({ "style": "profile", "demo": demo }),
             ),
+            PendingKind::Interpretation { .. } => (
+                None,
+                None,
+                serde_json::json!({ "style": "interpretation", "demo": demo }),
+            ),
         }
     }
 }

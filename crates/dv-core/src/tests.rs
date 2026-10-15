@@ -1676,9 +1676,50 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
     );
     // The style profile (D-043): both requests' rules, frames and schemas, and the words the
     // profile is framed with in every drafting request.
-    for rules in dv_ai::style::FIXED_TEXTS {
+    for rules in dv_ai::style::FIXED_TEXTS
+        .into_iter()
+        .chain(dv_ai::INTERPRETATION_FIXED_TEXTS)
+    {
         body.push(Value::String(rules.to_owned()));
     }
+    // The interpretation of scores (round 33): every subtest's label and cases, as the builder
+    // writes them, and the words an approved interpretation is framed with.
+    let groups: Vec<dv_ai::InterpretationGroup> = dv_domain::instruments()
+        .into_iter()
+        .flat_map(|i| {
+            i.measures
+                .into_iter()
+                .map(move |m| dv_ai::InterpretationGroup {
+                    cases: dv_domain::interpretation_cases(&i.key, &m.key),
+                    label: format!("{} · {}", i.name, m.name_he),
+                    instrument: i.key.clone(),
+                    measure: m.key,
+                    sentences: vec![(1, String::new())],
+                })
+        })
+        .collect();
+    body.push(dv_ai::build_interpretation_request(
+        &dv_ai::ModelConfig::default(),
+        &groups,
+        &nonce,
+    ));
+    body.push(Value::String(
+        dv_ai::render_interpretations(
+            &[dv_ai::Interpretation {
+                id: "i".into(),
+                instrument: "x".into(),
+                measure: "y".into(),
+                case: "-".into(),
+                text: "-".into(),
+                support: 1,
+                approved: true,
+                enabled: true,
+                edited: false,
+            }],
+            &|_, _| Some("-".to_owned()),
+        )
+        .unwrap_or_default(),
+    ));
     let keys: Vec<String> = structure.sections().map(|s| s.key.clone()).collect();
     let excerpts: Vec<dv_ai::StyleExcerpt> = keys
         .iter()

@@ -23,6 +23,8 @@ import type { IdentityInput } from "./IdentityInput";
 import type { ImportPreview } from "./ImportPreview";
 import type { InputKind } from "./InputKind";
 import type { Instrument } from "./Instrument";
+import type { InterpretationResult } from "./InterpretationResult";
+import type { InterpretationView } from "./InterpretationView";
 import type { NameMatch } from "./NameMatch";
 import type { NameModelView } from "./NameModelView";
 import type { OwnSectionHelp } from "./OwnSectionHelp";
@@ -97,6 +99,7 @@ export type Commands = {
   delete_consultation: { args: { id: string }; returns: null };
   delete_folder: { args: { id: string }; returns: null };
   delete_input: { args: { caseId: string; inputId: string }; returns: null };
+  delete_interpretation: { args: { id: string }; returns: null };
   delete_style_source: { args: { id: string }; returns: null };
   discard_style_draft: { args: undefined; returns: null };
   discard_style_upload: { args: undefined; returns: null };
@@ -139,6 +142,7 @@ export type Commands = {
   prepare_consult: { args: { caseId: string | null; conversationId: string | null; message: string }; returns: Prepared };
   prepare_from_points: { args: { caseId: string; sectionKey: string; points: string }; returns: Prepared };
   prepare_full_draft: { args: { caseId: string }; returns: Array<[string, Prepared]> };
+  prepare_interpretations: { args: undefined; returns: Prepared };
   prepare_letter: { args: { caseId: string; audience: string; note: string }; returns: Prepared };
   prepare_section: { args: { caseId: string; sectionKey: string; instruction: string; replaces: string | null }; returns: Prepared };
   prepare_sort: { args: { caseId: string }; returns: Prepared };
@@ -172,6 +176,7 @@ export type Commands = {
   section_modes: { args: undefined; returns: Array<SectionModeView> };
   security_status: { args: undefined; returns: SecurityStatus };
   send_consult: { args: { approvalId: string }; returns: ConsultResult };
+  send_interpretations: { args: { approvalId: string }; returns: InterpretationResult };
   send_progress: { args: { approvalId: string }; returns: number };
   send_section: { args: { approvalId: string }; returns: SectionResult };
   send_sort: { args: { approvalId: string }; returns: SortResult };
@@ -209,6 +214,7 @@ export type Commands = {
   unlock_with_recovery: { args: { key: string }; returns: AppStatus };
   update_case: { args: { caseId: string; meta: CaseMeta }; returns: null };
   update_input: { args: { caseId: string; inputId: string; title: string; content: string }; returns: null };
+  update_interpretation: { args: { id: string; text: string | null; approved: boolean | null; enabled: boolean | null }; returns: InterpretationView };
   usage_summary: { args: undefined; returns: UsageSummary };
   verify_stage_on: { args: undefined; returns: boolean };
   write_backup: { args: undefined; returns: BackupDone | null };
