@@ -54,6 +54,53 @@ describe("an edit open when the vault locks", () => {
     vi.useRealTimers();
   });
 
+  it("closing a second case's editor falls back to the first one, still open", async () => {
+    vi.useFakeTimers();
+    const calls: unknown[] = [];
+    mockIPC((cmd, args) => {
+      if (cmd === "hold_unsaved") calls.push((args as { edit: unknown }).edit);
+      return null;
+    });
+    // Case A's editor: typed, then she went to another case with it open.
+    const a = renderHook(() => useHoldUnsaved("case-a", "פסקה משלי", "טקסט של תיק א בדוי"));
+    await act(async () => { vi.advanceTimersByTime(200); });
+    a.unmount();
+    // Case B's editor: one letter, then Esc.
+    const b = renderHook(({ text }: { text: string | null }) => useHoldUnsaved("case-b", "פסקה משלי", text), {
+      initialProps: { text: "ב" as string | null },
+    });
+    await act(async () => { vi.advanceTimersByTime(200); });
+    b.rerender({ text: null });
+    await act(async () => { await holdNow(); });
+    expect(calls.at(-1)).toEqual({ case_id: "case-a", place: "פסקה משלי", view: "report", text: "טקסט של תיק א בדוי" });
+    b.unmount();
+    forgetHold();
+    vi.useRealTimers();
+  });
+
+  it("the same editor shown again is one text: cancelling it lets go of it", async () => {
+    vi.useFakeTimers();
+    const calls: unknown[] = [];
+    mockIPC((cmd, args) => {
+      if (cmd === "hold_unsaved") calls.push((args as { edit: unknown }).edit);
+      return null;
+    });
+    const first = renderHook(() => useHoldUnsaved("c1", "פסקה", "טיוטה"));
+    await act(async () => { vi.advanceTimersByTime(200); });
+    first.unmount();
+    // Back on the stage: the kept editor opens again, then she cancels it.
+    const again = renderHook(({ text }: { text: string | null }) => useHoldUnsaved("c1", "פסקה", text), {
+      initialProps: { text: "טיוטה" as string | null },
+    });
+    await act(async () => { vi.advanceTimersByTime(200); });
+    again.rerender({ text: null });
+    await act(async () => { await holdNow(); });
+    expect(calls.at(-1)).toBeNull();
+    again.unmount();
+    forgetHold();
+    vi.useRealTimers();
+  });
+
   it("is offered back once after entering", async () => {
     mockIPC((cmd) => (cmd === "take_unsaved" ? { case_id: "c1", place: "פסקה בסעיף \"רקע\"", text: "הטקסט שלא נשמר" } : null));
     const go = vi.fn();

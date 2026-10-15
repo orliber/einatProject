@@ -6,10 +6,11 @@ import { useApp, type Route } from "../App";
 import { ipc, type UnsavedEdit } from "../ipc/client";
 import { Dialog } from "./ui";
 
-/** What the core should hold now, and what it last got. Kept here, not in a screen: a screen
- *  she leaves keeps its text held (she went to another stage, not away from the text), and a
- *  lock sends the latest text first (`holdNow`). */
-let wanted: (UnsavedEdit & { owner: string }) | null = null;
+/** The open editors' texts, by owner, the latest written last. Kept here, not in a screen: a
+ *  screen she leaves keeps its text held (she went to another stage, not away from the text),
+ *  and a lock sends the latest text first (`holdNow`). The core holds one text: the latest
+ *  editor still open, so closing one falls back to the one before it. */
+const holds = new Map<string, UnsavedEdit>();
 let sent = "null";
 let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -17,10 +18,19 @@ let timer: ReturnType<typeof setTimeout> | null = null;
  *  so this waits only a moment: no call to the core on each key. */
 const HOLD_WAIT_MS = 100;
 
+/** The same editor shown again (she came back to the stage) is one text, not two: what the
+ *  screen it was on held gives way to it. */
+function put(owner: string, e: UnsavedEdit) {
+  holds.delete(owner);
+  for (const [k, h] of holds) {
+    if (h.case_id === e.case_id && h.view === e.view && h.place === e.place) holds.delete(k);
+  }
+  holds.set(owner, e);
+}
+
 function edit(): UnsavedEdit | null {
-  if (!wanted || !wanted.text.trim()) return null;
-  const { case_id, place, view, text } = wanted;
-  return { case_id, place, view, text };
+  const latest = [...holds.values()].reverse().find((e) => e.text.trim());
+  return latest ? { ...latest } : null;
 }
 
 function send(): Promise<void> {
@@ -48,7 +58,7 @@ export function holdNow(): Promise<void> {
 export function forgetHold() {
   if (timer !== null) clearTimeout(timer);
   timer = null;
-  wanted = null;
+  holds.clear();
   sent = "null";
 }
 
@@ -68,18 +78,18 @@ export function useHoldUnsaved(caseId: string | null, place: string, text: strin
   });
   useEffect(() => {
     if (!open || caseId === null) {
-      if (wanted?.owner === owner) {
-        wanted = null;
+      if (holds.delete(owner)) {
         fromBox.current = false;
         schedule();
       }
       return;
     }
-    if (fromBox.current && wanted?.owner === owner) {
+    const held = holds.get(owner);
+    if (fromBox.current && held) {
       // The box's text is fresher; only where it is written may have changed.
-      wanted = { ...wanted, case_id: caseId, place, view };
+      holds.set(owner, { ...held, case_id: caseId, place, view });
     } else {
-      wanted = { owner, case_id: caseId, place, view, text: text ?? "" };
+      put(owner, { case_id: caseId, place, view, text: text ?? "" });
     }
     schedule();
   }, [owner, open, caseId, place, view, text]);
@@ -87,7 +97,7 @@ export function useHoldUnsaved(caseId: string | null, place: string, text: strin
     const m = meta.current;
     if (!m.open || m.caseId === null) return;
     fromBox.current = true;
-    wanted = { owner, case_id: m.caseId, place: m.place, view: m.view, text: live };
+    put(owner, { case_id: m.caseId, place: m.place, view: m.view, text: live });
     schedule();
   }, [owner]);
 }
