@@ -6,6 +6,7 @@
 
 mod activity;
 mod backup;
+mod binding;
 mod cases;
 mod consult;
 mod consultations;
@@ -14,6 +15,7 @@ mod drafts;
 mod export;
 mod failures;
 mod followup;
+pub use binding::{ComputerSeal, WindowsSeal};
 pub mod google;
 mod guides;
 mod history;
@@ -148,6 +150,8 @@ const MODEL_KEY: &str = "model";
 const ZDR_PREFIX: &str = "zdr/";
 const LOCK_KEY: &str = "lock_minutes";
 const FIRST_USE_KEY: &str = "first_use_day";
+/// When the printed recovery kit was last checked (D-076).
+const KIT_CHECKED_KEY: &str = "recovery_kit_checked_at";
 /// "Show me every request before it is sent" (round 26). On until she turns it off: the
 /// review screen stays the default until Einat confirms turning it off (D-062). The key of the
 /// earlier "only when suspicious" choice is not read.
@@ -304,6 +308,10 @@ impl CoreError {
                 "wrong_secret",
                 "הסיסמה או ערכת השחזור לא נכונות.".to_owned(),
             ),
+            CoreError::Vault(VaultError::OtherComputer) => (
+                "other_computer",
+                "הסיסמה פותחת את הכספת רק במחשב שבו היא נקבעה. כאן אפשר להיכנס עם ערכת השחזור, ואחר כך לבחור סיסמה בהגדרות כדי שתעבוד גם במחשב הזה.".to_owned(),
+            ),
             CoreError::Vault(VaultError::RecoveryKeyInvalid) => (
                 "recovery_invalid",
                 "ערכת השחזור לא תקינה. כדאי לבדוק שגיאות הקלדה.".to_owned(),
@@ -352,6 +360,7 @@ impl CoreError {
             CoreError::Locked => ErrorAction::Unlock,
             CoreError::Vault(
                 VaultError::WrongSecret
+                | VaultError::OtherComputer
                 | VaultError::RecoveryKeyInvalid
                 | VaultError::Policy(_)
                 | VaultError::AlreadyExists,
@@ -661,6 +670,8 @@ pub struct Core {
     section_nonces: HashMap<(String, String), String>,
     /// The name model's hints by text, so a material is read once (dropped on lock).
     hint_cache: HashMap<String, Vec<dv_privacy::NameHint>>,
+    /// The half of the password slot kept on this computer (D-076).
+    computer_seal: Arc<dyn ComputerSeal>,
 }
 
 impl std::fmt::Debug for Core {

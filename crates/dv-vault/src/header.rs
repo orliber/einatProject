@@ -26,6 +26,11 @@ pub enum KeySlot {
         salt: String,
         params: Argon2Params,
         wrapped_mk: String,
+        /// Bound to this computer (D-076): the key-encryption key is the stretched password
+        /// together with a key sealed to her Windows account. Left out of the file when false,
+        /// so a header from before reads and signs exactly as it did.
+        #[serde(default, skip_serializing_if = "is_false")]
+        bound: bool,
     },
     Recovery {
         wrapped_mk: String,
@@ -46,6 +51,11 @@ pub enum KeySlot {
         account: String,
         wrapped_mk: String,
     },
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,6 +99,14 @@ pub fn unwrap_mk(
 }
 
 impl VaultHeader {
+    /// The password slot is bound to a computer (D-076).
+    #[must_use]
+    pub fn password_bound(&self) -> bool {
+        self.slots
+            .iter()
+            .any(|s| matches!(s, KeySlot::Password { bound: true, .. }))
+    }
+
     fn mac_input(&self) -> Result<Vec<u8>, VaultError> {
         let unsigned = Self {
             mac: None,

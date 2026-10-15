@@ -157,8 +157,44 @@ function NewKitDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** Type the printed kit to see that it still opens the vault (once a year, D-076). */
+function CheckKitDialog({ onClose }: { onClose: () => void }) {
+  const { notify } = useApp();
+  const qc = useQueryClient();
+  const [typed, setTyped] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  async function check(e?: FormEvent) {
+    e?.preventDefault();
+    setError(null);
+    const ok = await ipc.confirmRecoveryKey(typed).catch(() => false);
+    setTyped("");
+    if (!ok) return setError("הערכה שהוקלדה לא פותחת את הכספת. כדאי לבדוק את הדף, ואם הוא אבד ליצור ערכה חדשה.");
+    await qc.invalidateQueries({ queryKey: ["security"] });
+    notify("ערכת השחזור פותחת את הכספת. כדאי לשמור את הדף במקום שלו.");
+    onClose();
+  }
+
+  return (
+    <Dialog narrow title="בדיקת ערכת השחזור" onClose={onClose}
+      footer={<>
+        <button type="button" className="btn" onClick={onClose}>ביטול</button>
+        <button type="button" className="btn btn-primary" disabled={typed.trim().length < 20} onClick={() => void check()}>בדיקה</button>
+      </>}>
+      <form className="stack" onSubmit={(e) => void check(e)}>
+        <p>הסיסמה פותחת את הכספת רק במחשב הזה. במחשב אחר, למשל אם המחשב הזה התקלקל, הדף המודפס הוא הדרך פנימה. פעם בשנה כדאי לוודא שהוא עדיין נכון.</p>
+        <div className="field">
+          <label htmlFor="kit-check">ערכת השחזור, מהדף המודפס</label>
+          <input id="kit-check" className="input mono" dir="ltr" autoComplete="off" autoFocus placeholder="XXXX-XXXX-…" value={typed} onChange={(e) => setTyped(e.target.value)} />
+        </div>
+        <ErrorLine error={error} />
+      </form>
+    </Dialog>
+  );
+}
+
 export function PasswordSettings() {
-  const [open, setOpen] = useState<"password" | "kit" | null>(null);
+  const [open, setOpen] = useState<"password" | "kit" | "check" | null>(null);
   return (
     <>
     <section className="card setting" aria-labelledby="s-password">
@@ -167,9 +203,11 @@ export function PasswordSettings() {
       <div className="row">
         <button type="button" className="btn" onClick={() => setOpen("password")}>החלפת סיסמה…</button>
         <button type="button" className="btn" onClick={() => setOpen("kit")}>ערכת שחזור חדשה…</button>
+        <button type="button" className="btn" onClick={() => setOpen("check")}>בדיקת ערכת השחזור…</button>
       </div>
       {open === "password" && <ChangePasswordDialog onClose={() => setOpen(null)} />}
       {open === "kit" && <NewKitDialog onClose={() => setOpen(null)} />}
+      {open === "check" && <CheckKitDialog onClose={() => setOpen(null)} />}
     </section>
     <GoogleSettings />
     </>

@@ -32,6 +32,9 @@ pub use store::{
 pub enum VaultError {
     #[error("wrong password or recovery key")]
     WrongSecret,
+    /// The password slot is bound to another computer (D-076): here only the kit opens it.
+    #[error("the password opens this vault only on the computer it is bound to")]
+    OtherComputer,
     #[error("the recovery key is not valid (check for typos)")]
     RecoveryKeyInvalid,
     #[error("password does not meet the policy: {0:?}")]

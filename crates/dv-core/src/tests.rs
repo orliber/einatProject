@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 
 use super::*;
 
+mod binding;
 mod flows;
 mod guides;
 mod history;

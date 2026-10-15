@@ -44,6 +44,7 @@ impl Core {
             ner_exe: None,
             hint_cache: HashMap::new(),
             section_nonces: HashMap::new(),
+            computer_seal: Arc::new(WindowsSeal),
         }
     }
 
@@ -235,7 +236,14 @@ impl Core {
         // Not while a restore writes the same folder (or an unlock reads it).
         self.refuse_secret_work_running()?;
         let params = self.argon.unwrap_or_else(Argon2Params::calibrate);
-        let created = Vault::create(&self.dir, password, params)?;
+        // Bound to this computer from the start where a key can be sealed here (D-076).
+        let key = if Vault::exists(&self.dir) {
+            None
+        } else {
+            std::fs::create_dir_all(&self.dir).map_err(VaultError::from)?;
+            binding::key_here(self.computer_seal.as_ref(), &self.dir, false)
+        };
+        let created = Vault::create_here(&self.dir, password, params, key.as_ref())?;
         let recovery_key = created.recovery_key.to_string();
         let mut vault = created.vault;
         vault.set_state(FIRST_USE_KEY, &day_number().to_string())?;
@@ -349,8 +357,24 @@ impl Core {
         }
     }
 
+    /// True when `typed` opens the vault: at creation, after a new kit, and when she checks
+    /// the printed page in settings (D-076: on another computer the kit is the way in, so
+    /// the security page asks for a check once a year). The day of the check is kept.
     pub fn confirm_recovery_key(&mut self, typed: &str) -> Result<bool, CoreError> {
-        Ok(self.vault_ref()?.check_recovery_key(typed))
+        let ok = self.vault_ref()?.check_recovery_key(typed);
+        if ok {
+            self.vault_mut()?
+                .set_setting(KIT_CHECKED_KEY, &crate::dates::unix_now().to_string())?;
+        }
+        Ok(ok)
+    }
+
+    /// When the printed kit was last typed and opened the vault.
+    pub(crate) fn kit_checked_at(&self) -> Option<i64> {
+        self.vault
+            .as_ref()
+            .and_then(|v| v.setting(KIT_CHECKED_KEY).ok().flatten())
+            .and_then(|s| s.parse().ok())
     }
 
     /// Wipe keys, pending approvals and consultation history from memory.

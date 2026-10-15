@@ -46,4 +46,24 @@ describe("security status", () => {
     expect(await screen.findByRole("button", { name: /להפעיל שליחה מחדש/ })).toBeInTheDocument();
     expect(calls.find(([c]) => c === "set_send_stopped")?.[1]).toMatchObject({ stopped: true });
   });
+
+  it("says the password opens the vault only here, and asks for a kit check once a year", async () => {
+    mockIPC(() => ({
+      ...view(false),
+      items: [
+        { key: "computer_bound", state: "ok", detail: null },
+        { key: "recovery_kit", state: "warn", detail: "400" },
+      ],
+    }));
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AppContext.Provider value={api()}>
+          <SecuritySettings />
+        </AppContext.Provider>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText(/הסיסמה פותחת את הכספת רק במחשב הזה/)).toBeInTheDocument();
+    expect(screen.getByText(/נבדקה לפני 400 ימים\. במחשב אחר רק היא פותחת את הכספת/)).toBeInTheDocument();
+  });
 });

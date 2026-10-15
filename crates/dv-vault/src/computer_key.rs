@@ -1,9 +1,11 @@
-//! The half of the Google slot that stays on this computer (D-041).
+//! Keys that stay on this computer: the half of the Google slot (D-041), and the half of the
+//! password slot once it is bound to this computer (D-076).
 //!
-//! A random key, sealed with Windows DPAPI to her Windows account (`CurrentUser`), kept as
-//! `google.computer` in the vault folder. It is not part of a backup, and the sealed file is
-//! useless on another computer or under another Windows user. With the key in her Google
-//! Drive it opens the Google slot; neither opens anything alone.
+//! Each is a random key, sealed with Windows DPAPI to her Windows account (`CurrentUser`),
+//! kept in the vault folder (`google.computer`, `vault.computer`), each with its own seal. It
+//! is not part of a backup, and the sealed file is useless on another computer or under
+//! another Windows user. With the key in her Google Drive, or with her password, it opens its
+//! slot; neither opens anything alone.
 //!
 //! No new dependency and no `unsafe`: DPAPI is reached through Windows PowerShell (by its
 //! full path, like the disk-encryption check), with the secret on stdin, never on the
@@ -20,9 +22,32 @@ use crate::crypto::Key32;
 use crate::VaultError;
 
 pub const COMPUTER_KEY_FILE: &str = "google.computer";
+pub const PASSWORD_KEY_FILE: &str = "vault.computer";
 
-/// Bound into the seal, so a blob made by another program for another purpose never fits.
-const ENTROPY: &str = "dv/google-computer-key/v1";
+/// Which slot a computer key is half of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Purpose {
+    Google,
+    Password,
+}
+
+impl Purpose {
+    fn file(self) -> &'static str {
+        match self {
+            Purpose::Google => COMPUTER_KEY_FILE,
+            Purpose::Password => PASSWORD_KEY_FILE,
+        }
+    }
+
+    /// Bound into the seal, so a blob made by another program, or for the other slot, never
+    /// fits.
+    fn entropy(self) -> &'static str {
+        match self {
+            Purpose::Google => "dv/google-computer-key/v1",
+            Purpose::Password => "dv/password-computer-key/v1",
+        }
+    }
+}
 
 /// True where this computer can seal a key to the Windows account.
 #[must_use]
@@ -32,32 +57,56 @@ pub fn available() -> bool {
 
 #[must_use]
 pub fn path(dir: &Path) -> PathBuf {
-    dir.join(COMPUTER_KEY_FILE)
+    path_for(dir, Purpose::Google)
 }
 
 #[must_use]
 pub fn exists(dir: &Path) -> bool {
-    path(dir).exists()
+    exists_for(dir, Purpose::Google)
+}
+
+/// A new computer key for the Google slot, sealed and written (replacing an older one).
+pub fn create(dir: &Path) -> Result<Key32, VaultError> {
+    create_for(dir, Purpose::Google)
+}
+
+/// The Google slot's computer key, unsealed. Fails on another computer or Windows account.
+pub fn load(dir: &Path) -> Result<Key32, VaultError> {
+    load_for(dir, Purpose::Google)
+}
+
+pub fn remove(dir: &Path) {
+    remove_for(dir, Purpose::Google);
+}
+
+#[must_use]
+pub fn path_for(dir: &Path, purpose: Purpose) -> PathBuf {
+    dir.join(purpose.file())
+}
+
+#[must_use]
+pub fn exists_for(dir: &Path, purpose: Purpose) -> bool {
+    path_for(dir, purpose).exists()
 }
 
 /// A new computer key, sealed and written (replacing an older one).
-pub fn create(dir: &Path) -> Result<Key32, VaultError> {
+pub fn create_for(dir: &Path, purpose: Purpose) -> Result<Key32, VaultError> {
     let key = Key32::random()?;
-    let sealed = protect(key.as_bytes())?;
-    let tmp = dir.join(format!("{COMPUTER_KEY_FILE}.tmp"));
+    let sealed = protect(key.as_bytes(), purpose)?;
+    let tmp = dir.join(format!("{}.tmp", purpose.file()));
     {
         let mut f = fs::File::create(&tmp)?;
         f.write_all(sealed.as_bytes())?;
         f.sync_all()?;
     }
-    fs::rename(&tmp, path(dir))?;
+    fs::rename(&tmp, path_for(dir, purpose))?;
     Ok(key)
 }
 
 /// The computer key, unsealed. Fails on another computer or Windows account.
-pub fn load(dir: &Path) -> Result<Key32, VaultError> {
-    let sealed = fs::read_to_string(path(dir)).map_err(|_| VaultError::NotFound)?;
-    let plain = unprotect(sealed.trim())?;
+pub fn load_for(dir: &Path, purpose: Purpose) -> Result<Key32, VaultError> {
+    let sealed = fs::read_to_string(path_for(dir, purpose)).map_err(|_| VaultError::NotFound)?;
+    let plain = unprotect(sealed.trim(), purpose)?;
     let bytes: [u8; 32] = plain
         .as_slice()
         .try_into()
@@ -65,8 +114,8 @@ pub fn load(dir: &Path) -> Result<Key32, VaultError> {
     Ok(Key32::from_bytes(bytes))
 }
 
-pub fn remove(dir: &Path) {
-    let _ = fs::remove_file(path(dir));
+pub fn remove_for(dir: &Path, purpose: Purpose) {
+    let _ = fs::remove_file(path_for(dir, purpose));
 }
 
 fn powershell() -> String {
@@ -82,14 +131,15 @@ fn powershell() -> String {
 }
 
 /// Run a fixed DPAPI script with `input` (base64) on stdin; its stdout is base64.
-fn dpapi(script: &str, input: &str) -> Result<Zeroizing<String>, VaultError> {
+fn dpapi(script: &str, input: &str, purpose: Purpose) -> Result<Zeroizing<String>, VaultError> {
     if !available() {
         return Err(VaultError::Refused(
             "sealing to the Windows account is only available on Windows".to_owned(),
         ));
     }
+    let entropy = purpose.entropy();
     let full = format!(
-        "Add-Type -AssemblyName System.Security; $e=[Text.Encoding]::UTF8.GetBytes('{ENTROPY}'); $b=[Convert]::FromBase64String([Console]::In.ReadToEnd().Trim()); {script}"
+        "Add-Type -AssemblyName System.Security; $e=[Text.Encoding]::UTF8.GetBytes('{entropy}'); $b=[Convert]::FromBase64String([Console]::In.ReadToEnd().Trim()); {script}"
     );
     let mut cmd = Command::new(powershell());
     cmd.args(["-NoProfile", "-NonInteractive", "-Command", &full])
@@ -116,17 +166,19 @@ fn dpapi(script: &str, input: &str) -> Result<Zeroizing<String>, VaultError> {
     Ok(text)
 }
 
-fn protect(plain: &[u8; 32]) -> Result<Zeroizing<String>, VaultError> {
+fn protect(plain: &[u8; 32], purpose: Purpose) -> Result<Zeroizing<String>, VaultError> {
     dpapi(
         "[Console]::Out.Write([Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Protect($b,$e,'CurrentUser')))",
         &b64(plain),
+        purpose,
     )
 }
 
-fn unprotect(sealed: &str) -> Result<Zeroizing<Vec<u8>>, VaultError> {
+fn unprotect(sealed: &str, purpose: Purpose) -> Result<Zeroizing<Vec<u8>>, VaultError> {
     let out = dpapi(
         "[Console]::Out.Write([Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Unprotect($b,$e,'CurrentUser')))",
         sealed,
+        purpose,
     )?;
     unb64(&out).map(Zeroizing::new)
 }
@@ -198,6 +250,12 @@ mod tests {
         let on_disk = fs::read(path(dir.path())).unwrap();
         assert!(!on_disk.windows(32).any(|w| w == key.as_bytes().as_slice()));
         assert_eq!(load(dir.path()).unwrap(), key);
+        // The other slot's key is its own file, and one seal never opens as the other.
+        let password = create_for(dir.path(), Purpose::Password).unwrap();
+        assert_ne!(password, key);
+        let google_seal = fs::read(path(dir.path())).unwrap();
+        fs::write(path_for(dir.path(), Purpose::Password), &google_seal).unwrap();
+        assert!(load_for(dir.path(), Purpose::Password).is_err());
         // A changed seal does not open.
         fs::write(path(dir.path()), "AAAA").unwrap();
         assert!(load(dir.path()).is_err());

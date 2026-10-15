@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use dv_domain::{CaseSummary, Folder};
 use dv_privacy::text::normalize;
-use dv_vault::{Vault, VaultError};
+use dv_vault::VaultError;
 
 use crate::views::NameMatch;
 use crate::{Core, CoreError};
@@ -70,7 +70,7 @@ impl Core {
                 "אפשר למחוק לצמיתות רק תיק שנמצא בסל המחזור.".to_owned(),
             ));
         }
-        if let Err(e) = Vault::verify_password(&self.dir, password) {
+        if let Err(e) = self.verify_password_here(password) {
             self.count_failure(&e);
             return Err(e.into());
         }

@@ -8,6 +8,8 @@ import { ErrorLine } from "./ui";
 
 const LABELS: Record<string, (d: string | null) => string> = {
   encrypted: () => "הכספת מוצפנת (AES-256), ומפתח נפרד לכל תיק",
+  computer_bound: () => "הסיסמה פותחת את הכספת רק במחשב הזה",
+  recovery_kit: (d) => (d === null ? "ערכת השחזור המודפסת עוד לא נבדקה" : d === "0" ? "ערכת השחזור המודפסת נבדקה היום" : `ערכת השחזור המודפסת נבדקה לפני ${d} ימים`),
   fips: () => "מודול ההצפנה",
   disk: () => "הצפנת הדיסק של המחשב (BitLocker / FileVault)",
   cloud_folder: (d) => (d ? `הכספת נמצאת בתיקיית ענן (${d}). כדאי להעביר אותה` : "הכספת לא בתיקיית ענן"),
@@ -28,6 +30,9 @@ const STATE_TEXT: Record<string, { chip: string; text: string }> = {
 function suffix(i: SecurityItem): string {
   if (i.key === "send") return i.state === "ok" ? " פעילה, עם תקרה יומית וגודל מקסימלי" : " כבויה: עצירת חירום";
   if (i.key === "fips") return i.state === "ok" ? " מאושר FIPS 140-3" : " סטנדרטי";
+  if (i.key === "recovery_kit" && i.state === "warn") return ". במחשב אחר רק היא פותחת את הכספת: כדאי לבדוק אותה ב\"סיסמה ואבטחה\"";
+  if (i.key === "computer_bound" && i.state === "warn") return " (זה יקרה בכניסה הבאה עם הסיסמה)";
+  if (i.key === "computer_bound" && i.state === "info") return " (במחשב הזה אין אפשרות כזו)";
   if (i.key === "isolation") return i.state === "ok" ? "" : " (במחשב הזה אין בידוד כזה)";
   return "";
 }

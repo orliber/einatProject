@@ -87,9 +87,28 @@ pub(crate) fn build(s: &AppStatus, send_stopped: bool) -> SecurityStatus {
     }
 }
 
+/// The printed kit is checked again after this many days.
+const KIT_CHECK_DAYS: i64 = 365;
+
 impl Core {
     pub fn security_status(&mut self) -> SecurityStatus {
-        build(&self.status(), dv_egress::is_stopped())
+        let mut s = build(&self.status(), dv_egress::is_stopped());
+        // The password opens the vault only on this computer (D-076).
+        s.items
+            .insert(1, item("computer_bound", self.binding_state(), None));
+        // On another computer the printed kit is the way in: checked within a year, or a
+        // reminder (the days since the last check, when there was one).
+        if self.vault.is_some() {
+            let days = self
+                .kit_checked_at()
+                .map(|t| (crate::dates::unix_now() - t).max(0) / dv_domain::dates::DAY_SECS);
+            let fresh = days.is_some_and(|d| d < KIT_CHECK_DAYS);
+            s.items.insert(
+                2,
+                item("recovery_kit", on(fresh), days.map(|d| d.to_string())),
+            );
+        }
+        s
     }
 
     /// The emergency stop. Works while locked too: stopping must never need a password.

@@ -771,7 +771,7 @@ export class FakeCore {
         if (cmd === "set_send_stopped") this.sendStopped = Boolean(a.stopped);
         const ok = (key: string, state = "ok", detail: string | null = null) => ({ key, state, detail });
         return {
-          items: [ok("encrypted"), ok("fips", "info"), ok("disk"), ok("cloud_folder"), ok("log_integrity"),
+          items: [ok("encrypted"), ok("computer_bound"), ok("recovery_kit", "ok", "0"), ok("fips", "info"), ok("disk"), ok("cloud_folder"), ok("log_integrity"),
             ok("auto_lock", "ok", "10"), ok("screen"), ok("send", this.sendStopped ? "warn" : "ok"), ok("isolation")],
           send_stopped: this.sendStopped, daily_limit: 400, max_request_kb: 2048,
         };

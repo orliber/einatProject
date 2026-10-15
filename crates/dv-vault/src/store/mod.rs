@@ -175,7 +175,14 @@ pub struct StoredConsultation {
 /// What opens a vault (or a backup of it).
 #[derive(Clone, Copy)]
 pub enum Secret<'a> {
+    /// The password, where its slot is not bound to a computer (or to open a backup).
     Password(&'a str),
+    /// The password on this computer, with the key sealed here to her Windows account
+    /// (D-076). Opens a bound slot, and an unbound one as [`Secret::Password`] does.
+    PasswordHere {
+        password: &'a str,
+        computer: &'a Key32,
+    },
     Recovery(&'a str),
     /// The key kept in her Google Drive (fetched after she signed in) and the key sealed to
     /// her Windows account on this computer (D-041). Both are needed.
@@ -189,35 +196,101 @@ impl std::fmt::Debug for Secret<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Secret::Password(_) => "Secret::Password(..)",
+            Secret::PasswordHere { .. } => "Secret::PasswordHere(..)",
             Secret::Recovery(_) => "Secret::Recovery(..)",
             Secret::Google { .. } => "Secret::Google(..)",
         })
     }
 }
 
+/// The password slot: its salt, its cost, its wrapped key, and whether it is bound.
+fn password_slot(
+    header: &VaultHeader,
+) -> Result<([u8; 32], Argon2Params, String, bool), VaultError> {
+    let (salt, params, wrapped, bound) = header
+        .slots
+        .iter()
+        .find_map(|s| match s {
+            KeySlot::Password {
+                salt,
+                params,
+                wrapped_mk,
+                bound,
+            } => Some((salt.clone(), *params, wrapped_mk.clone(), *bound)),
+            KeySlot::Recovery { .. } | KeySlot::WindowsHello { .. } | KeySlot::Google { .. } => {
+                None
+            }
+        })
+        .ok_or(VaultError::Corrupt("no password slot".to_owned()))?;
+    let salt: [u8; 32] = crate::crypto::unhex(&salt)?
+        .try_into()
+        .map_err(|_| VaultError::Corrupt("salt length".to_owned()))?;
+    Ok((salt, params, wrapped, bound))
+}
+
+/// The master key from the password slot, and the stretched password (to bind the slot
+/// without stretching again). A bound slot without this computer's key is refused before
+/// any slow work.
+fn password_master_key(
+    header: &VaultHeader,
+    password: &str,
+    computer: Option<&Key32>,
+) -> Result<(Key32, Zeroizing<[u8; 32]>), VaultError> {
+    let (salt, params, wrapped, bound) = password_slot(header)?;
+    let computer = match (bound, computer) {
+        (true, None) => return Err(VaultError::OtherComputer),
+        (true, Some(c)) => Some(c),
+        (false, _) => None,
+    };
+    let stretched = password::stretch(password, &salt, params)?;
+    let mk = match computer {
+        Some(c) => unwrap_mk(
+            &password::bound_kek_of(&stretched, c)?,
+            "password-bound",
+            &header.vault_id,
+            &wrapped,
+        )?,
+        None => unwrap_mk(
+            &password::kek_of(&stretched)?,
+            "password",
+            &header.vault_id,
+            &wrapped,
+        )?,
+    };
+    Ok((mk, stretched))
+}
+
+/// Where the unbound password slot is kept for the backups, sealed inside the vault (D-076).
+const BACKUP_SLOT_SECRET: &str = "password_slot_for_backups";
+
+/// A password slot bound to this computer, from the stretched password.
+pub(crate) fn bound_slot(
+    stretched: &[u8; 32],
+    salt: &[u8; 32],
+    params: Argon2Params,
+    computer: &Key32,
+    vault_id: &str,
+    mk: &Key32,
+) -> Result<KeySlot, VaultError> {
+    Ok(KeySlot::Password {
+        salt: hex(salt),
+        params,
+        wrapped_mk: wrap_mk(
+            &password::bound_kek_of(stretched, computer)?,
+            "password-bound",
+            vault_id,
+            mk,
+        )?,
+        bound: true,
+    })
+}
+
 /// The master key, unwrapped from the header's password, recovery or Google slot.
 pub(crate) fn master_key(header: &VaultHeader, secret: Secret<'_>) -> Result<Key32, VaultError> {
     match secret {
-        Secret::Password(password) => {
-            let (salt, params, wrapped) = header
-                .slots
-                .iter()
-                .find_map(|s| match s {
-                    KeySlot::Password {
-                        salt,
-                        params,
-                        wrapped_mk,
-                    } => Some((salt.clone(), *params, wrapped_mk.clone())),
-                    KeySlot::Recovery { .. }
-                    | KeySlot::WindowsHello { .. }
-                    | KeySlot::Google { .. } => None,
-                })
-                .ok_or(VaultError::Corrupt("no password slot".to_owned()))?;
-            let salt: [u8; 32] = crate::crypto::unhex(&salt)?
-                .try_into()
-                .map_err(|_| VaultError::Corrupt("salt length".to_owned()))?;
-            let kek = password::derive_kek(password, &salt, params)?;
-            unwrap_mk(&kek, "password", &header.vault_id, &wrapped)
+        Secret::Password(password) => password_master_key(header, password, None).map(|(mk, _)| mk),
+        Secret::PasswordHere { password, computer } => {
+            password_master_key(header, password, Some(computer)).map(|(mk, _)| mk)
         }
         Secret::Recovery(typed) => {
             let wrapped = header
@@ -316,6 +389,17 @@ impl Vault {
 
     /// Create a new vault. Returns it unlocked, with the recovery key to print.
     pub fn create(dir: &Path, password: &str, params: Argon2Params) -> Result<Created, VaultError> {
+        Self::create_here(dir, password, params, None)
+    }
+
+    /// Create a new vault, its password slot bound to this computer when `computer` is the
+    /// key sealed here to her Windows account (D-076).
+    pub fn create_here(
+        dir: &Path,
+        password: &str,
+        params: Argon2Params,
+        computer: Option<&Key32>,
+    ) -> Result<Created, VaultError> {
         password::check_policy(password).map_err(VaultError::Policy)?;
         if Self::exists(dir) {
             return Err(VaultError::AlreadyExists);
@@ -324,7 +408,17 @@ impl Vault {
         let vault_id = random_id()?;
         let mk = Key32::random()?;
         let salt = random_array::<32>()?;
-        let kek = password::derive_kek(password, &salt, params)?;
+        let stretched = password::stretch(password, &salt, params)?;
+        let unbound = KeySlot::Password {
+            salt: hex(&salt),
+            params,
+            wrapped_mk: wrap_mk(&password::kek_of(&stretched)?, "password", &vault_id, &mk)?,
+            bound: false,
+        };
+        let live = match computer {
+            Some(c) => bound_slot(&stretched, &salt, params, c, &vault_id, &mk)?,
+            None => unbound.clone(),
+        };
         let recovery_key = Key32::random()?;
         let recovery_kek = recovery::derive_kek(&recovery_key)?;
         let mut header = VaultHeader {
@@ -332,11 +426,7 @@ impl Vault {
             vault_id: vault_id.clone(),
             created_at: now(),
             slots: vec![
-                KeySlot::Password {
-                    salt: hex(&salt),
-                    params,
-                    wrapped_mk: wrap_mk(&kek, "password", &vault_id, &mk)?,
-                },
+                live,
                 KeySlot::Recovery {
                     wrapped_mk: wrap_mk(&recovery_kek, "recovery", &vault_id, &mk)?,
                 },
@@ -348,6 +438,9 @@ impl Vault {
         header.sign(&keys.header)?;
         header.write(dir)?;
         let mut vault = Self::open_with(dir, header, &mk)?;
+        if computer.is_some() {
+            vault.keep_backup_slot(&unbound)?;
+        }
         vault.record(AuditEvent::VaultCreated, None, &serde_json::json!({}))?;
         Ok(Created {
             vault,
@@ -357,24 +450,190 @@ impl Vault {
 
     /// Check the password without opening the vault again (before an irreversible action).
     pub fn verify_password(dir: &Path, password: &str) -> Result<(), VaultError> {
-        Self::password_mk(dir, password).map(|_| ())
+        Self::verify_password_here(dir, password, None)
     }
 
-    fn password_mk(dir: &Path, password: &str) -> Result<(VaultHeader, Key32), VaultError> {
+    /// Check the password on this computer (`computer`: the key sealed here, D-076).
+    pub fn verify_password_here(
+        dir: &Path,
+        password: &str,
+        computer: Option<&Key32>,
+    ) -> Result<(), VaultError> {
         let header = VaultHeader::read(dir)?;
-        let mk = master_key(&header, Secret::Password(password))?;
-        Ok((header, mk))
+        password_master_key(&header, password, computer).map(|_| ())
+    }
+
+    /// True when the password slot is bound to a computer (read while the vault is locked, to
+    /// know whether this computer's key is needed). Unauthenticated until the vault opens.
+    pub fn password_is_bound(dir: &Path) -> Result<bool, VaultError> {
+        let header = VaultHeader::read(dir)?;
+        password_slot(&header).map(|(_, _, _, bound)| bound)
     }
 
     pub fn unlock_with_password(dir: &Path, password: &str) -> Result<Self, VaultError> {
-        let (header, mk) = Self::password_mk(dir, password)?;
+        Self::unlock_with_password_here(dir, password, None)
+    }
+
+    /// Open with the password on this computer. With `computer` (the key sealed here to her
+    /// Windows account) a slot not yet bound is bound now, from the same stretched password,
+    /// so the change costs no second derivation (D-076). A failed binding leaves the vault
+    /// open with the slot as it was, and is tried again at the next opening.
+    pub fn unlock_with_password_here(
+        dir: &Path,
+        password: &str,
+        computer: Option<&Key32>,
+    ) -> Result<Self, VaultError> {
+        let header = VaultHeader::read(dir)?;
+        let (mk, stretched) = password_master_key(&header, password, computer)?;
         let mut vault = Self::open_with(dir, header, &mk)?;
         vault.record(
             AuditEvent::Unlock,
             None,
             &serde_json::json!({"method": "password"}),
         )?;
+        if let Some(c) = computer {
+            if vault.password_bound() {
+                // The slot the backups carry is made again when it is missing or stale (a
+                // new password whose header write failed): never a vault without backups.
+                if vault.backup_header().is_err() {
+                    let _ = vault.keep_unbound(&stretched, &mk);
+                }
+            } else {
+                if let Err(e) = vault.bind_with(&stretched, c, &mk) {
+                    let _ = vault.record(
+                        AuditEvent::IntegrityWarning,
+                        None,
+                        &serde_json::json!({ "reason": format!("binding to this computer: {e}") }),
+                    );
+                }
+            }
+        }
         Ok(vault)
+    }
+
+    /// The password slot is bound to a computer.
+    #[must_use]
+    pub fn password_bound(&self) -> bool {
+        password_slot(&self.header).is_ok_and(|(_, _, _, bound)| bound)
+    }
+
+    /// Bind the password slot to this computer, with the password (after a restore, where the
+    /// slot came unbound from the backup). Stretches the password once more; does nothing
+    /// when the slot is bound already.
+    pub fn bind_password(&mut self, password: &str, computer: &Key32) -> Result<(), VaultError> {
+        if self.password_bound() {
+            return Ok(());
+        }
+        let (mk, stretched) = password_master_key(&self.header, password, None)?;
+        self.bind_with(&stretched, computer, &mk)
+    }
+
+    /// Swap the unbound password slot for one bound to this computer. The unbound one is kept
+    /// first, sealed inside the vault, for the backups (they open with the password alone on
+    /// any computer, as they always did).
+    fn bind_with(
+        &mut self,
+        stretched: &[u8; 32],
+        computer: &Key32,
+        mk: &Key32,
+    ) -> Result<(), VaultError> {
+        let unbound = self
+            .header
+            .slots
+            .iter()
+            .find(|s| matches!(s, KeySlot::Password { bound: false, .. }))
+            .cloned()
+            .ok_or(VaultError::Corrupt("no unbound password slot".to_owned()))?;
+        let (salt, params, _, _) = password_slot(&self.header)?;
+        let bound = bound_slot(
+            stretched,
+            &salt,
+            params,
+            computer,
+            &self.header.vault_id,
+            mk,
+        )?;
+        self.keep_backup_slot(&unbound)?;
+        for slot in &mut self.header.slots {
+            if matches!(slot, KeySlot::Password { .. }) {
+                *slot = bound.clone();
+            }
+        }
+        self.header.sign(&self.keys.header)?;
+        self.header.write(&self.dir)?;
+        self.record(AuditEvent::PasswordBound, None, &serde_json::json!({}))
+    }
+
+    /// Make the unbound password slot again from the stretched password, and keep it.
+    fn keep_unbound(&mut self, stretched: &[u8; 32], mk: &Key32) -> Result<(), VaultError> {
+        let (salt, params, _, _) = password_slot(&self.header)?;
+        let unbound = KeySlot::Password {
+            salt: hex(&salt),
+            params,
+            wrapped_mk: wrap_mk(
+                &password::kek_of(stretched)?,
+                "password",
+                &self.header.vault_id,
+                mk,
+            )?,
+            bound: false,
+        };
+        self.keep_backup_slot(&unbound)
+    }
+
+    /// Keep the unbound password slot sealed inside the vault, for the backups. Not logged on
+    /// its own: the password's own event (created, bound, changed) is.
+    pub(crate) fn keep_backup_slot(&mut self, unbound: &KeySlot) -> Result<(), VaultError> {
+        let key = BACKUP_SLOT_SECRET;
+        let sealed = seal_str(
+            &self.keys.settings,
+            &aad("secrets", "value", key, ""),
+            &to_json(unbound)?,
+        )?;
+        self.main.execute(
+            "INSERT INTO secrets (key, value_enc) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value_enc = excluded.value_enc",
+            params![key, sealed],
+        )?;
+        Ok(())
+    }
+
+    /// The password slot is no longer bound: the backups carry the live one.
+    pub(crate) fn drop_backup_slot(&mut self) -> Result<(), VaultError> {
+        self.main
+            .execute("DELETE FROM secrets WHERE key = ?1", [BACKUP_SLOT_SECRET])?;
+        Ok(())
+    }
+
+    /// The header a backup carries: this one, with the unbound password slot in place of the
+    /// bound one, signed again. Refused when the kept slot is missing or not the one the live
+    /// slot was made with (fail closed: a backup that the password could not open is never
+    /// written).
+    pub(crate) fn backup_header(&self) -> Result<Vec<u8>, VaultError> {
+        if !self.password_bound() {
+            return Ok(fs::read(self.dir.join(HEADER_FILE))?);
+        }
+        let kept: KeySlot = from_json(&self.secret(BACKUP_SLOT_SECRET)?.ok_or(
+            VaultError::Integrity("the password slot for backups is missing"),
+        )?)?;
+        let (salt, params, _, _) = password_slot(&self.header)?;
+        let fits = matches!(
+            &kept,
+            KeySlot::Password { salt: s, params: p, bound: false, .. }
+                if crate::crypto::unhex(s).ok().as_deref() == Some(salt.as_slice()) && *p == params
+        );
+        if !fits {
+            return Err(VaultError::Integrity(
+                "the password slot for backups does not match the password",
+            ));
+        }
+        let mut header = self.header.clone();
+        for slot in &mut header.slots {
+            if matches!(slot, KeySlot::Password { .. }) {
+                *slot = kept.clone();
+            }
+        }
+        header.sign(&self.keys.header)?;
+        serde_json::to_vec_pretty(&header).map_err(|e| VaultError::Corrupt(e.to_string()))
     }
 
     pub fn unlock_with_recovery(dir: &Path, typed: &str) -> Result<Self, VaultError> {
@@ -576,7 +835,18 @@ impl Vault {
         new_password: &str,
         params: Argon2Params,
     ) -> Result<(), VaultError> {
-        let slot = NewSlot::password(&self.header, current, new_password, params)?;
+        self.rekey_password_here(current, new_password, params, None)
+    }
+
+    /// A new password, bound to this computer when `computer` is the key sealed here (D-076).
+    pub fn rekey_password_here(
+        &mut self,
+        current: Secret<'_>,
+        new_password: &str,
+        params: Argon2Params,
+        computer: Option<&Key32>,
+    ) -> Result<(), VaultError> {
+        let slot = NewSlot::password_here(&self.header, current, new_password, params, computer)?;
         self.apply_slot(slot)
     }
 
