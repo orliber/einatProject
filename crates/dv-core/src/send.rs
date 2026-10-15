@@ -635,6 +635,13 @@ impl Core {
         out: Outgoing,
         response: Result<(Value, bool), CoreError>,
     ) -> Result<SectionResult, CoreError> {
+        // A line the last check left out (D-082) is named under the draft.
+        let left_out = out
+            .pending
+            .payload
+            .body()
+            .windows(dv_privacy::LEFT_OUT.len())
+            .any(|w| w == dv_privacy::LEFT_OUT.as_bytes());
         let crate::stage::Received {
             kind,
             response,
@@ -769,6 +776,9 @@ impl Core {
                 .iter()
                 .map(|l| format!("חסרה פסקה לפי ההנחיה: {}", show(l)))
                 .chain(reply.missing.iter().map(|q| show(q)))
+                .chain(left_out.then(|| {
+                    "קטע מהחומרים לא נשלח, כי הבדיקה לא הייתה בטוחה שאין בו שם. אם הוא חשוב לסעיף, אפשר להוסיף אותו בעצמך.".to_owned()
+                }))
                 .collect(),
             contradictions: reply.contradictions.iter().map(|q| show(q)).collect(),
             demo,
@@ -976,6 +986,22 @@ pub(crate) fn answer_refusals(
             body = next;
         }
         result = clear(&request(&body, ctx, case_tags, suspects));
+    }
+    // The last step (D-082, Einat chose it): when hiding the words was not enough, every line
+    // the gate still refuses on its own is left out whole, and the copy goes to the same gate
+    // once more. Only for refusals a fix answers; a canary or an error stays refused.
+    if let Err(blocked) = &result {
+        let codes: Vec<&str> = blocked.reasons.iter().map(|r| r.code.as_str()).collect();
+        if !codes.is_empty() && codes.iter().all(|c| dv_privacy::FIXABLE_CODES.contains(c)) {
+            if let Some((next, items)) =
+                dv_privacy::drop_refused_lines(&request(&body, ctx, case_tags, suspects))
+            {
+                answered.extend(codes.iter().map(|c| (*c).to_owned()));
+                fixed.extend(items);
+                body = next;
+                result = clear(&request(&body, ctx, case_tags, suspects));
+            }
+        }
     }
     Answered {
         result,

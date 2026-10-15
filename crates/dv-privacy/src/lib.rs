@@ -17,7 +17,7 @@ pub mod restore;
 mod self_check;
 pub mod text;
 
-pub use fix::{fix_refused, FixedItem, FIXABLE_CODES, LEFT_OUT};
+pub use fix::{drop_refused_lines, fix_refused, FixedItem, FIXABLE_CODES, LEFT_OUT};
 pub use gate::{
     clear, replace_foreign_tags, tag_word, BlockReason, Blocked, ClearedPayload, GateRequest,
     GENERIC_TAGS,

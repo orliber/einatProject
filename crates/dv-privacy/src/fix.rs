@@ -13,6 +13,11 @@
 //! - A tag that is not the case's → the whole line is left out too: what is in the brackets
 //!   (up to 40 characters, "[דנה_שטרנברג]") was never filtered.
 //! - A pattern (number, date, phone, address field…) → the numbered tag of its kind.
+//!
+//! When hiding was not enough, the last step (D-082) leaves out whole every line the gate
+//! still refuses on its own for one of those reasons: the line goes out as [`LEFT_OUT`], and
+//! the copy goes to the same gate once more. A line with a canary or an error is never left
+//! out, so such a request stays refused. Only words go out less.
 
 use std::sync::LazyLock;
 
@@ -192,4 +197,72 @@ fn fix_text(
     }
     out.push_str(text.get(at..)?);
     Some(out)
+}
+
+/// The last step of the fix loop (D-082): every line of the request's string values that
+/// the gate refuses on its own, only for reasons a fix answers, is replaced by [`LEFT_OUT`].
+/// Keys are never touched. `None`: no line could be left out (the refusal stands).
+#[must_use]
+pub fn drop_refused_lines(req: &GateRequest<'_>) -> Option<(Value, Vec<FixedItem>)> {
+    let mut items = Vec::new();
+    let mut body = req.body.clone();
+    drop_value(&mut body, req, &mut items);
+    (!items.is_empty()).then_some((body, items))
+}
+
+fn drop_value(v: &mut Value, req: &GateRequest<'_>, items: &mut Vec<FixedItem>) {
+    match v {
+        Value::String(s) => {
+            if let Some(kept) = drop_lines(s, req, items) {
+                *s = kept;
+            }
+        }
+        Value::Array(list) => list.iter_mut().for_each(|x| drop_value(x, req, items)),
+        Value::Object(map) => map.values_mut().for_each(|x| drop_value(x, req, items)),
+        _ => {}
+    }
+}
+
+fn drop_lines(text: &str, req: &GateRequest<'_>, items: &mut Vec<FixedItem>) -> Option<String> {
+    let mut out = String::with_capacity(text.len());
+    let mut dropped = false;
+    for line in text.split_inclusive('\n') {
+        let (body, end) = line.strip_suffix('\n').map_or((line, ""), |b| (b, "\n"));
+        if !body.trim().is_empty() && refused_alone(body, req) {
+            items.push(FixedItem {
+                original: body.trim().to_owned(),
+                tag: LEFT_OUT.to_owned(),
+                label: "קטע שלא נשלח".to_owned(),
+            });
+            out.push_str(LEFT_OUT);
+            dropped = true;
+        } else {
+            out.push_str(body);
+        }
+        out.push_str(end);
+    }
+    dropped.then_some(out)
+}
+
+/// The line by itself before the same gate: refused, and only for reasons a fix answers.
+fn refused_alone(line: &str, req: &GateRequest<'_>) -> bool {
+    let value = Value::String(line.to_owned());
+    let alone = GateRequest {
+        body: &value,
+        ctx: req.ctx,
+        case_tags: req.case_tags,
+        unresolved_suspects: 0,
+        canaries: req.canaries,
+        max_bytes: usize::MAX,
+    };
+    match crate::gate::clear(&alone) {
+        Ok(_) => false,
+        Err(blocked) => {
+            !blocked.reasons.is_empty()
+                && blocked
+                    .reasons
+                    .iter()
+                    .all(|r| FIXABLE_CODES.contains(&r.code.as_str()))
+        }
+    }
 }
