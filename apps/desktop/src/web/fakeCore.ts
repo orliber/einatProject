@@ -635,7 +635,7 @@ export class FakeCore {
     this.keepSent(p.caseId, "sorting", p.materials.map((m) => this.filterFor(c0, m.content).tagged).join("\n\n"));
     const c = this.find(p.caseId);
     const keys = SORTABLE.map((s) => s.key);
-    const result: SortResult = { sorted: 0, unchanged: 0, links: 0, ignored: 0, demo: true };
+    const result: SortResult = { sorted: 0, unchanged: 0, links: 0, ignored: 0, demo: true, left_out: false };
     for (const m of p.materials) {
       const i = c.inputs.find((x) => x.id === m.id);
       if (!i || i.content !== m.content) {
@@ -900,11 +900,11 @@ export class FakeCore {
         if (!Object.keys(guides).length) delete c.meta.guides;
         return null;
       }
-      case "set_letter_recommendations": {
+      case "set_letter_left_out": {
         const c = this.find(a.caseId);
         const ids = a.ids as string[] | null;
-        c.meta = { ...c.meta, letter_recommendations: ids ?? [] };
-        if (ids === null) delete c.meta.letter_recommendations;
+        c.meta = { ...c.meta, letter_left_out: ids ?? [] };
+        if (ids === null) delete c.meta.letter_left_out;
         return null;
       }
       case "set_dsm_severity": {
@@ -1277,7 +1277,7 @@ export class FakeCore {
         conv.turns.push({ role: "user", text: p.shown, hidden: p.hidden, demo: true, at }, { role: "assistant", text: answer, hidden: [], demo: true, at });
         if (p.caseId) this.keepSent(p.caseId, "consult", p.question);
         conv.updated = at;
-        return { answer, demo: true, conversation_id: conv.id };
+        return { answer, demo: true, left_out: false, conversation_id: conv.id };
       }
       case "consultations":
         return [...this.convs].sort((x, y) => y.updated - x.updated).map((c) => {

@@ -83,7 +83,9 @@ export function sortSummary(r: SortResult): string {
   if (r.sorted === 0) return `${lead}לא נמצאו קטעים לשייך. החומרים נשארים בסעיפי ברירת המחדל.`;
   const what = r.sorted === 1 ? "חומר אחד מוין" : `${r.sorted} חומרים מוינו`;
   const rest = r.unchanged > 0 ? ` ${r.unchanged} נשארו לפי ברירת המחדל.` : "";
-  return `${lead}${what} לסעיפים. אפשר לשנות בכרטיס החומר.${rest}`;
+  // A line the check left out (D-082) may be why a material stayed where it was.
+  const left = r.left_out ? " קטע מהחומרים לא נשלח, כי הבדיקה לא הייתה בטוחה שאין בו שם." : "";
+  return `${lead}${what} לסעיפים. אפשר לשנות בכרטיס החומר.${rest}${left}`;
 }
 
 type SectionState = "approved" | "pending" | "empty";

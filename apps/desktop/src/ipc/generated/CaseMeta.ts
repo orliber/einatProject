@@ -28,7 +28,8 @@ guides?: { [key in string]: string },
  */
 dsm_severity?: DsmSeverity, 
 /**
- * The approved recommendations she marked for the letters (round 44), by paragraph id.
- * Absent: every approved recommendation.
+ * The approved recommendations she left out of the letters (round 44), by paragraph id.
+ * Every other approved one goes in, also one approved or rewritten later (D-083: all are
+ * marked until she unmarks one). Absent: all of them.
  */
-letter_recommendations?: Array<string>, };
+letter_left_out?: Array<string>, };

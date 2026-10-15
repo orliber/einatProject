@@ -3665,6 +3665,7 @@ fn assemble(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     /// The kept index answers exactly as a fresh build, through a change of names, of aliases,
     /// of the practitioner and of the case, and after it is forgotten.
@@ -3734,7 +3735,6 @@ mod tests {
             format!("{:?}", build_identity_index(&ctx).find(text, &tokens))
         );
     }
-    use super::*;
 
     fn rep(start: usize, end: usize) -> Replacement {
         Replacement {

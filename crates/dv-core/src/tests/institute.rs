@@ -57,12 +57,34 @@ fn her_dsm_severity_goes_out_as_she_set_it_and_another_level_gets_a_note() {
         .unwrap();
     assert_eq!(
         dsm.paragraphs[0].warnings,
-        vec!["בפסקה כתובה דרגה 3, ואת קבעת דרגה 2 ודרגה 1. כדאי לבדוק.".to_owned()]
+        // The sentence is about social communication, so it is held to that domain's level.
+        vec!["בפסקה כתובה דרגה 3, ואת קבעת דרגה 2. כדאי לבדוק.".to_owned()]
     );
 
-    // Cleared: the next request carries no level.
+    // Cleared: the next request says no level was set, and a level written is a note
+    // (review of stage 6, R3).
     core.set_dsm_severity(&case, None, None).unwrap();
     assert!(core.case_detail(&case).unwrap().meta.dsm_severity.is_none());
+    let p = core.prepare_section(&case, "dsm", "תנסח את הסעיף").unwrap();
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    let sent = fake.sent.lock().unwrap().clone();
+    let last = sent.last().unwrap();
+    assert!(
+        last.contains("לא לכתוב דרגה") && !last.contains("דרגה 2"),
+        "{last}"
+    );
+    let dsm = core
+        .case_detail(&case)
+        .unwrap()
+        .sections
+        .into_iter()
+        .find(|s| s.key == "dsm")
+        .unwrap();
+    assert!(dsm
+        .paragraphs
+        .iter()
+        .flat_map(|p| &p.warnings)
+        .any(|w| w.contains("ועוד לא קבעת רמת חומרה")));
 }
 
 #[test]
@@ -94,7 +116,7 @@ fn the_supervisors_lines_are_printed_under_her_signature() {
 }
 
 #[test]
-fn the_letter_is_written_from_the_recommendations_she_marked() {
+fn the_letter_is_written_from_the_recommendations_she_did_not_unmark() {
     let fake = FakeTransport::default();
     let (_dir, mut core, case) = setup(Some(fake.clone()));
     core.add_own_paragraph(&case, "recommendations", "המלצה על ריפוי בעיסוק פעם בשבוע.")
@@ -113,11 +135,11 @@ fn the_letter_is_written_from_the_recommendations_she_marked() {
         .map(|p| p.id)
         .collect();
     assert_eq!(ids.len(), 2);
-    // Only an approved recommendation of the case can be marked.
+    // Only an approved recommendation of the case can be left out.
     assert!(core
-        .set_letter_recommendations(&case, Some(vec!["not-a-paragraph".into()]))
+        .set_letter_left_out(&case, Some(vec!["not-a-paragraph".into()]))
         .is_err());
-    core.set_letter_recommendations(&case, Some(vec![ids[1].clone()]))
+    core.set_letter_left_out(&case, Some(vec![ids[0].clone()]))
         .unwrap();
 
     let p = core.prepare_letter(&case, "school", "").unwrap();
@@ -131,8 +153,26 @@ fn the_letter_is_written_from_the_recommendations_she_marked() {
     assert!(sent[0].contains("הדרכת הורים"), "{}", sent[0]);
     assert!(!sent[0].contains("ריפוי בעיסוק"), "{}", sent[0]);
 
+    // A recommendation approved after she unmarked one is in, until she unmarks it too
+    // (review of stage 6, R2).
+    core.add_own_paragraph(&case, "recommendations", "המלצה על טיפול רגשי.")
+        .unwrap();
+    let p = core.prepare_letter(&case, "school", "").unwrap();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({
+        "reply": "הנה",
+        "paragraphs": [{ "text": "מומלץ.", "source_refs": [] }],
+        "questions": [], "missing": [], "contradictions": [],
+    })));
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    let sent = fake.sent.lock().unwrap().clone();
+    let last = sent.last().unwrap();
+    assert!(
+        last.contains("טיפול רגשי") && !last.contains("ריפוי בעיסוק"),
+        "{last}"
+    );
+
     // Back to all of them.
-    core.set_letter_recommendations(&case, None).unwrap();
+    core.set_letter_left_out(&case, None).unwrap();
     let p = core.prepare_letter(&case, "school", "").unwrap();
     *fake.answer.lock().unwrap() = Some(api_json(&json!({
         "reply": "הנה",

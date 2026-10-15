@@ -216,7 +216,7 @@ describe("main screens", () => {
     await core.handle("add_own_paragraph", { caseId: noam.id, sectionKey: "recommendations", text: "המלצה על ריפוי בעיסוק." });
     await core.handle("add_own_paragraph", { caseId: noam.id, sectionKey: "recommendations", text: "המלצה על הדרכת הורים." });
     mockIPC((cmd, args) => {
-      if (cmd === "set_letter_recommendations") letters.push(args);
+      if (cmd === "set_letter_left_out") letters.push(args);
       return core.handle(cmd, args);
     });
     await openCase(user);

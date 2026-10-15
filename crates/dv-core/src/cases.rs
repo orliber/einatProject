@@ -42,7 +42,7 @@ impl Core {
         // A case's own guide lines are written in it, one section at a time.
         meta.guides = None;
         meta.dsm_severity = None;
-        meta.letter_recommendations = None;
+        meta.letter_left_out = None;
         let v = self.vault_mut()?;
         let id = v.create_case(&meta)?;
         v.set_identities(&id, &identities)?;
@@ -81,7 +81,7 @@ impl Core {
             template: None,
             guides: None,
             dsm_severity: None,
-            letter_recommendations: None,
+            letter_left_out: None,
         };
         let id = self.create_case(
             meta,
@@ -113,16 +113,17 @@ impl Core {
         meta.template = kept.template;
         meta.guides = kept.guides;
         meta.dsm_severity = kept.dsm_severity;
-        meta.letter_recommendations = kept.letter_recommendations;
+        meta.letter_left_out = kept.letter_left_out;
         self.vault_mut()?.update_case_meta(case_id, &meta)?;
         self.forget_pending(case_id);
         Ok(())
     }
 
-    /// The approved recommendations the letters are written from (round 44): the paragraph
-    /// ids she marked, or `None` for all of them. An id that is not an approved
-    /// recommendation of the case is refused.
-    pub fn set_letter_recommendations(
+    /// The approved recommendations left out of the letters (round 44): the paragraph ids
+    /// she unmarked, or `None` for none. Kept as what she left out, so a recommendation
+    /// approved or rewritten later is in until she unmarks it (review of stage 6, R2). An id
+    /// that is not an approved recommendation of the case is refused.
+    pub fn set_letter_left_out(
         &mut self,
         case_id: &str,
         ids: Option<Vec<String>>,
@@ -140,7 +141,7 @@ impl Core {
             }
         }
         let mut meta = v.case_meta(case_id)?;
-        meta.letter_recommendations = ids;
+        meta.letter_left_out = ids;
         self.vault_mut()?.update_case_meta(case_id, &meta)?;
         self.forget_pending(case_id);
         Ok(())

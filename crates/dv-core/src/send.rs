@@ -264,9 +264,11 @@ impl Core {
                     Some(l) => l.written_from().contains(&key),
                     None => key != section_key && !DERIVED_SECTIONS.contains(&key),
                 };
-                // The recommendations she marked for the letters (round 44), when she marked.
-                let marked = |key: &str, id: &str| match (&letter, &meta.letter_recommendations) {
-                    (Some(_), Some(ids)) if key == "recommendations" => ids.iter().any(|i| i == id),
+                // The recommendations she left out of the letters (round 44); the rest go in.
+                let marked = |key: &str, id: &str| match (&letter, &meta.letter_left_out) {
+                    (Some(_), Some(ids)) if key == "recommendations" => {
+                        !ids.iter().any(|i| i == id)
+                    }
                     _ => true,
                 };
                 for s in structure.sections().filter(|s| wanted(&s.key)) {
@@ -383,11 +385,10 @@ impl Core {
                     Vec::new()
                 };
             // The DSM-5 severity she set (round 43) goes with the DSM section as fixed words,
-            // after the guide, so the model writes her levels and no other.
-            let severity = meta
-                .dsm_severity
-                .filter(|_| section.key == "dsm" && !points && letter.is_none())
-                .and_then(|s| s.request_text());
+            // after the guide, so the model writes her levels and no other; while she has
+            // set none, that it writes none (review of stage 6, R3).
+            let severity = (section.key == "dsm" && !points && letter.is_none())
+                .then(|| dv_domain::severity_request(meta.dsm_severity.as_ref()));
             let guide_tagged = match severity {
                 Some(text) => {
                     let out = run(&text)?;
@@ -641,12 +642,7 @@ impl Core {
         response: Result<(Value, bool), CoreError>,
     ) -> Result<SectionResult, CoreError> {
         // A line the last check left out (D-082) is named under the draft.
-        let left_out = out
-            .pending
-            .payload
-            .body()
-            .windows(dv_privacy::LEFT_OUT.len())
-            .any(|w| w == dv_privacy::LEFT_OUT.as_bytes());
+        let left_out = had_left_out(&out);
         let crate::stage::Received {
             kind,
             response,
@@ -781,9 +777,7 @@ impl Core {
                 .iter()
                 .map(|l| format!("חסרה פסקה לפי ההנחיה: {}", show(l)))
                 .chain(reply.missing.iter().map(|q| show(q)))
-                .chain(left_out.then(|| {
-                    "קטע מהחומרים לא נשלח, כי הבדיקה לא הייתה בטוחה שאין בו שם. אם הוא חשוב לסעיף, אפשר להוסיף אותו בעצמך.".to_owned()
-                }))
+                .chain(left_out.then(|| LEFT_OUT_NOTE.to_owned()))
                 .collect(),
             contradictions: reply.contradictions.iter().map(|q| show(q)).collect(),
             demo,
@@ -1092,4 +1086,18 @@ impl Core {
         self.pending
             .retain(|_, p| p.kind.case() != Some(case_id) && p.payload.case_id() != case_id);
     }
+}
+
+/// Said where a request went out with a line the last check left out (D-082): under a
+/// draft, after a sorting, a check against the sources or a consultation (review of stage 6,
+/// R4), so a paragraph marked unsupported or a material left where it was has its reason.
+pub(crate) const LEFT_OUT_NOTE: &str = "קטע מהחומרים לא נשלח, כי הבדיקה לא הייתה בטוחה שאין בו שם. אם הוא חשוב לסעיף, אפשר להוסיף אותו בעצמך.";
+
+/// Whether the request went out with a line left out (D-082).
+pub(crate) fn had_left_out(out: &Outgoing) -> bool {
+    out.pending
+        .payload
+        .body()
+        .windows(dv_privacy::LEFT_OUT.len())
+        .any(|w| w == dv_privacy::LEFT_OUT.as_bytes())
 }

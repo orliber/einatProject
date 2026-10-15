@@ -2533,9 +2533,6 @@ impl Vault {
         self.touch(case_id)
     }
 
-    /// Rewrites the case's stored tagged text (paragraphs, their earlier wordings, the
-    /// conversations) where `change` returns a new text. Status, author and versions stay:
-    /// this settles placeholders, it is not her edit. Returns how many texts changed.
     /// How many rows were written in the case data and in the identities since the vault was
     /// opened: a pair that has not moved means no text and no name changed in between.
     #[must_use]
@@ -2543,6 +2540,9 @@ impl Vault {
         (self.main.total_changes(), self.identity.total_changes())
     }
 
+    /// Rewrites the case's stored tagged text (paragraphs, their earlier wordings, the
+    /// conversations) where `change` returns a new text. Status, author and versions stay:
+    /// this settles placeholders, it is not her edit. Returns how many texts changed.
     pub fn rewrite_case_texts(
         &mut self,
         case_id: &str,

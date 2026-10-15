@@ -197,7 +197,7 @@ export const ipc = {
   setCaseGuide: (caseId: string, sectionKey: string, text: string) => run("set_case_guide", { caseId, sectionKey, text }),
   /** The DSM-5 severity she set (round 43): a level 1–3 for each domain, `null` for none. */
   /** The approved recommendations the letters are written from (round 44); `null`: all. */
-  setLetterRecommendations: (caseId: string, ids: string[] | null) => run("set_letter_recommendations", { caseId, ids }),
+  setLetterLeftOut: (caseId: string, ids: string[] | null) => run("set_letter_left_out", { caseId, ids }),
   setDsmSeverity: (caseId: string, social: number | null, restricted: number | null) => run("set_dsm_severity", { caseId, social, restricted }),
   /** Into the recycle bin (D-023); restorable for 30 days. */
   deleteCase: (caseId: string) => run("delete_case", { caseId }),

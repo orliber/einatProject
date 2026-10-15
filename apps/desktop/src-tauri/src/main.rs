@@ -379,7 +379,7 @@ fn main() {
             update_case,
             set_case_guide,
             set_dsm_severity,
-            set_letter_recommendations,
+            set_letter_left_out,
             delete_case,
             set_identities,
             case_detail,

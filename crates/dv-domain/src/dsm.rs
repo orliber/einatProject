@@ -73,7 +73,31 @@ impl DsmSeverity {
     }
 }
 
-/// The levels a text names ("דרגה 2", "רמה 3", "Level 1").
+/// The fixed line for the DSM section when she has set no level: the model writes none
+/// (review of stage 6, R3; the level is her decision).
+pub const UNSET_REQUEST: &str =
+    "רמת החומרה (DSM-5) עוד לא נקבעה בידי המאבחנת. לא לכתוב דרגה או רמת חומרה.";
+
+/// The fixed words for the DSM section's request: her levels, or that there are none yet.
+#[must_use]
+pub fn severity_request(severity: Option<&DsmSeverity>) -> String {
+    severity
+        .and_then(DsmSeverity::request_text)
+        .unwrap_or_else(|| UNSET_REQUEST.to_owned())
+}
+
+/// A level written as a number or in words ("2", "שנייה", "שתיים").
+fn level_of(word: &str) -> Option<u8> {
+    let n = match word {
+        "1" | "אחת" | "ראשונה" | "אחד" => 1,
+        "2" | "שתיים" | "שנייה" | "שניה" | "שני" => 2,
+        "3" | "שלוש" | "שלישית" | "שלישי" => 3,
+        _ => return None,
+    };
+    Some(n)
+}
+
+/// The levels a text names ("דרגה 2", "רמה 3", "דרגה שנייה", "Level 1").
 fn levels_in(text: &str) -> Vec<u8> {
     let words: Vec<&str> = text
         .split(|c: char| c.is_whitespace() || matches!(c, ',' | '.' | ':' | ';' | '(' | ')'))
@@ -85,33 +109,64 @@ fn levels_in(text: &str) -> Vec<u8> {
         let word = word.trim_start_matches(['ב', 'ו', 'ה', 'ש', 'ל']);
         let named =
             matches!(word, "דרגה" | "רמה" | "דרגת" | "רמת") || word.eq_ignore_ascii_case("level");
-        if let (true, Ok(n)) = (named, next.parse::<u8>()) {
-            if level_words(n).is_some() {
-                out.push(n);
-            }
+        if let (true, Some(n)) = (named, level_of(next)) {
+            out.push(n);
         }
     }
     out
 }
 
-/// A note when the DSM paragraph names a level she did not set. Nothing when she set none.
+/// Which domain a sentence is about, when it names only one of them.
+fn domain_of(sentence: &str) -> Option<bool> {
+    let social = ["חברתי", "תקשורת"].iter().any(|w| sentence.contains(w));
+    let restricted = ["מוגבל", "חוזר", "תחומי עניין", "סטריאוטיפ"]
+        .iter()
+        .any(|w| sentence.contains(w));
+    match (social, restricted) {
+        (true, false) => Some(true),
+        (false, true) => Some(false),
+        _ => None,
+    }
+}
+
+/// A note when the DSM paragraph names a level she did not set: another level, a level of the
+/// other domain in a sentence about one domain, or any level while she has set none yet
+/// (review of stage 6, R3).
 #[must_use]
 pub fn check_dsm_severity(text: &str, severity: Option<&DsmSeverity>) -> Vec<String> {
-    let Some(s) = severity.filter(|s| s.is_set()) else {
-        return Vec::new();
-    };
-    let set: Vec<u8> = [s.social, s.restricted].into_iter().flatten().collect();
     let mut out = Vec::new();
-    for n in levels_in(text) {
-        if !set.contains(&n) {
-            let yours = set
-                .iter()
-                .map(|l| format!("דרגה {l}"))
-                .collect::<Vec<_>>()
-                .join(" ו");
+    let Some(s) = severity.filter(|s| s.is_set()) else {
+        for n in levels_in(text) {
             out.push(format!(
-                "בפסקה כתובה דרגה {n}, ואת קבעת {yours}. כדאי לבדוק."
+                "בפסקה כתובה דרגה {n}, ועוד לא קבעת רמת חומרה. כדאי לבדוק."
             ));
+        }
+        out.dedup();
+        return out;
+    };
+    let yours = |set: &[u8]| {
+        set.iter()
+            .map(|l| format!("דרגה {l}"))
+            .collect::<Vec<_>>()
+            .join(" ו")
+    };
+    for sentence in text.split(['.', ';', '\n']) {
+        let set: Vec<u8> = match domain_of(sentence) {
+            Some(true) => s.social.into_iter().collect(),
+            Some(false) => s.restricted.into_iter().collect(),
+            None => [s.social, s.restricted].into_iter().flatten().collect(),
+        };
+        for n in levels_in(sentence) {
+            if set.is_empty() {
+                out.push(format!(
+                    "בפסקה כתובה דרגה {n} בתחום שלא קבעת לו רמת חומרה. כדאי לבדוק."
+                ));
+            } else if !set.contains(&n) {
+                out.push(format!(
+                    "בפסקה כתובה דרגה {n}, ואת קבעת {}. כדאי לבדוק.",
+                    yours(&set)
+                ));
+            }
         }
     }
     out.dedup();
@@ -144,8 +199,32 @@ mod tests {
             notes,
             vec!["בפסקה כתובה דרגה 3, ואת קבעת דרגה 2 ודרגה 1. כדאי לבדוק.".to_owned()]
         );
-        // Not set: no note, whatever the paragraph says.
-        assert!(check_dsm_severity("דרגה 3", None).is_empty());
+        // Not set: any level written is a note (review of stage 6, R3).
+        assert_eq!(
+            check_dsm_severity("דרגה 3", None),
+            vec!["בפסקה כתובה דרגה 3, ועוד לא קבעת רמת חומרה. כדאי לבדוק.".to_owned()]
+        );
+        assert!(check_dsm_severity("עומד בקריטריונים לאבחנה.", None).is_empty());
+        // In words, and a level of the other domain.
+        assert_eq!(
+            check_dsm_severity("בתחום התקשורת החברתית: דרגה שלישית.", Some(&s)),
+            vec!["בפסקה כתובה דרגה 3, ואת קבעת דרגה 2. כדאי לבדוק.".to_owned()]
+        );
+        assert_eq!(
+            check_dsm_severity(
+                "בתחום התקשורת החברתית: דרגה 1. בדפוסים המוגבלים והחוזרים: דרגה 2.",
+                Some(&s)
+            )
+            .len(),
+            2,
+            "swapped levels"
+        );
+        assert!(check_dsm_severity(
+            "בתחום התקשורת החברתית: דרגה שנייה. בדפוסים המוגבלים והחוזרים: דרגה 1.",
+            Some(&s)
+        )
+        .is_empty());
+        assert_eq!(severity_request(None), UNSET_REQUEST);
         // A number that is not a level is not one.
         assert!(check_dsm_severity("בגיל 5 נצפו 3 התנהגויות.", Some(&s)).is_empty());
     }

@@ -67,11 +67,12 @@ pub struct CaseMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub dsm_severity: Option<crate::dsm::DsmSeverity>,
-    /// The approved recommendations she marked for the letters (round 44), by paragraph id.
-    /// Absent: every approved recommendation.
+    /// The approved recommendations she left out of the letters (round 44), by paragraph id.
+    /// Every other approved one goes in, also one approved or rewritten later (D-083: all are
+    /// marked until she unmarks one). Absent: all of them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub letter_recommendations: Option<Vec<String>>,
+    pub letter_left_out: Option<Vec<String>>,
 }
 
 /// One row of the case list. Names appear only locally.

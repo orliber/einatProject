@@ -1093,7 +1093,7 @@ impl Core {
         let sections = exported.check.included_sections;
         let meta = if exported.pdf {
             serde_json::json!({
-                "protected": true,
+                "protected": exported.protected,
                 "pdf": true,
                 "sha256": dv_vault::crypto::sha256_hex(&bytes),
                 "sections": sections,

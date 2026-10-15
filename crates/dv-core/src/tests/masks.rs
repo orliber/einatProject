@@ -124,7 +124,8 @@ fn a_consultation_without_a_case_gives_the_numbers_back_too() {
 /// book for the answer (the review of stage 2: nothing of a refused name's line is kept).
 #[test]
 fn a_refusal_the_loop_can_answer_is_hidden_and_cleared_by_the_same_gate() {
-    let (_dir, mut core, case) = setup(None);
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
     let phone = ["05", "3", "1112223"].concat();
     let body = json!({
         "model": "claude-test",
@@ -173,6 +174,10 @@ fn a_refusal_the_loop_can_answer_is_hidden_and_cleared_by_the_same_gate() {
         "{:?}",
         blocked[0]
     );
+    // The answer says a line was left out, so a material left where it was has its reason
+    // (review of stage 6, R4).
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({ "materials": [], "sections": [] })));
+    assert!(core.send_sort(&id).unwrap().left_out);
 }
 
 /// What the loop cannot answer still stops the request, with its reason: a name in a key.

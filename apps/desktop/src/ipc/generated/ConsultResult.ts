@@ -2,6 +2,10 @@
 
 export type ConsultResult = { answer: string, demo: boolean, 
 /**
+ * A line of the question was left out by the last check (D-082).
+ */
+left_out: boolean, 
+/**
  * The saved conversation this answer belongs to.
  */
 conversation_id: string, };

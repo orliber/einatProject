@@ -62,11 +62,13 @@ export function LetterCard({ api }: { api: CaseApi }) {
 
   const approved = paragraphs.filter((p) => p.status === "approved").length;
   const recommendations = api.detail.sections.find((s) => s.key === "recommendations")?.paragraphs.filter((p) => p.status === "approved") ?? [];
-  const picked = api.detail.meta.letter_recommendations;
-  const isPicked = (id: string) => !picked || picked.includes(id);
+  // What she left out is kept, so a recommendation approved or rewritten later is in until
+  // she unmarks it (D-083; review of stage 6, R2).
+  const leftOut = api.detail.meta.letter_left_out ?? [];
+  const isPicked = (id: string) => !leftOut.includes(id);
   const pick = (id: string, on: boolean) => void act(async () => {
-    const next = recommendations.map((r) => r.id).filter((r) => (r === id ? on : isPicked(r)));
-    await ipc.setLetterRecommendations(api.caseId, next.length === recommendations.length ? null : next);
+    const next = recommendations.map((r) => r.id).filter((r) => (r === id ? !on : !isPicked(r)));
+    await ipc.setLetterLeftOut(api.caseId, next.length ? next : null);
     await api.reload();
   });
 

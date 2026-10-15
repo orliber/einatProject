@@ -19,4 +19,8 @@ links: number,
 /**
  * Ids or sections in the answer that were not in the request (dropped).
  */
-ignored: number, demo: boolean, };
+ignored: number, demo: boolean, 
+/**
+ * A line of the materials was left out by the last check (D-082).
+ */
+left_out: boolean, };

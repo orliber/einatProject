@@ -146,6 +146,7 @@ impl Core {
         out: Outgoing,
         response: Result<(Value, bool), CoreError>,
     ) -> Result<ConsultResult, CoreError> {
+        let left_out = crate::send::had_left_out(&out);
         let crate::stage::Received {
             kind,
             response,
@@ -186,6 +187,7 @@ impl Core {
         Ok(ConsultResult {
             answer: shown,
             demo,
+            left_out,
             conversation_id,
         })
     }

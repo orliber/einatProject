@@ -165,6 +165,7 @@ impl Core {
         out: Outgoing,
         response: Result<(Value, bool), CoreError>,
     ) -> Result<VerifyResult, CoreError> {
+        let left_out = crate::send::had_left_out(&out);
         let crate::stage::Received {
             kind,
             response,
@@ -190,6 +191,13 @@ impl Core {
         for c in &mut checks {
             for n in &mut c.notes {
                 n.note = restore(&n.note, &identities, practitioner.as_deref(), &masks);
+            }
+            // A source line left out (D-082) may be why a paragraph is not supported.
+            if left_out && c.verdict != dv_ai::Verdict::Supported {
+                c.notes.push(dv_ai::VerifyNote {
+                    note: crate::send::LEFT_OUT_NOTE.to_owned(),
+                    source_refs: Vec::new(),
+                });
             }
         }
         Ok(VerifyResult {

@@ -114,6 +114,8 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   const [copied, setCopied] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<ConsultationSummary | null>(null);
   const [error, setError] = useKept<string | null>("consult:error", null);
+  // A line of the question the check left out (D-082): said under the answer.
+  const [leftOut, setLeftOut] = useState(false);
   const end = useRef<HTMLDivElement>(null);
   const input = useRef<LocalTextHandle>(null);
   const caseList = cases.data ?? [];
@@ -176,6 +178,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
     setSending(approvalId);
     try {
       const r = await ipc.sendConsult(approvalId);
+      setLeftOut(r.left_out);
       setConversation(r.conversation_id);
       setTurns((all) => [
         ...all.map((t) => (t.pending ? { ...t, pending: false, hidden } : t)),
@@ -372,6 +375,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
             </div>
             <span className="chat-hint muted small">Enter לשליחה · Shift+Enter לשורה חדשה</span>
           </form>
+          {leftOut && <p className="hint" role="status">קטע מהשאלה לא נשלח, כי הבדיקה לא הייתה בטוחה שאין בו שם. אם הוא חשוב, אפשר לנסח אותו בלי פרטים מזהים.</p>}
           <ErrorLine error={error} />
         </section>
       </div>
