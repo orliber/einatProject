@@ -66,3 +66,20 @@ fn an_export_is_found_by_its_fingerprint_without_reading_the_whole_log() {
         .unwrap()
         .is_none());
 }
+
+#[test]
+fn state_the_program_keeps_for_itself_is_written_without_a_log_entry() {
+    let (_dir, mut vault) = new_vault();
+    let before = vault.audit_entries(100).unwrap().len();
+    vault.set_state("usage/2026-10", "{}").unwrap();
+    assert_eq!(
+        vault.setting("usage/2026-10").unwrap().as_deref(),
+        Some("{}")
+    );
+    assert_eq!(vault.audit_entries(100).unwrap().len(), before);
+    // A setting she chose is logged, as before.
+    vault.set_setting("backup_auto", "1").unwrap();
+    let after = vault.audit_entries(100).unwrap();
+    assert_eq!(after.len(), before + 1);
+    assert_eq!(after[0].event, "settings_changed");
+}

@@ -17,7 +17,7 @@ impl Core {
 
     fn set_failed_sends(&mut self, failed: &HashMap<String, i64>) -> Result<(), CoreError> {
         let json = serde_json::to_string(failed).map_err(|e| CoreError::Internal(e.to_string()))?;
-        Ok(self.vault_mut()?.set_setting(FAILED_KEY, &json)?)
+        Ok(self.vault_mut()?.set_state(FAILED_KEY, &json)?)
     }
 
     /// Note how a send for a case ended. Never fails the send itself: the answer (or the

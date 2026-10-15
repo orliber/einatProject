@@ -689,16 +689,25 @@ impl Vault {
             .optional()?)
     }
 
+    /// A setting Einat chose: written, and logged as a change of settings.
     pub fn set_setting(&mut self, key: &str, value: &str) -> Result<(), VaultError> {
-        self.main.execute(
-            "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![key, value],
-        )?;
+        self.set_state(key, value)?;
         self.record(
             AuditEvent::SettingsChanged,
             None,
             &serde_json::json!({ "key": key }),
         )
+    }
+
+    /// State the program keeps for itself (this month's token counts, when the last backup was
+    /// written, an edit kept at lock): the same table, with no log entry and no header write,
+    /// since the event it follows is logged on its own and the log would only repeat it.
+    pub fn set_state(&mut self, key: &str, value: &str) -> Result<(), VaultError> {
+        self.main.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
     }
 
     /// The key under which the name model's spans for `text` are kept: a keyed hash, so the

@@ -121,7 +121,7 @@ impl Core {
 
     pub(crate) fn mark_secret_changed(&mut self) -> Result<(), CoreError> {
         self.vault_mut()?
-            .set_setting(SECRET_CHANGED_KEY, &unix_now().to_string())?;
+            .set_state(SECRET_CHANGED_KEY, &unix_now().to_string())?;
         Ok(())
     }
 
@@ -182,11 +182,11 @@ impl Core {
         current: bool,
     ) -> Result<(), CoreError> {
         let v = self.vault_mut()?;
-        v.set_setting(LAST_CHECK_KEY, &unix_now().to_string())?;
-        v.set_setting(LAST_BACKUP_KEY, &created_at.to_string())?;
-        v.set_setting(LAST_DIR_KEY, &folder.to_string_lossy())?;
+        v.set_state(LAST_CHECK_KEY, &unix_now().to_string())?;
+        v.set_state(LAST_BACKUP_KEY, &created_at.to_string())?;
+        v.set_state(LAST_DIR_KEY, &folder.to_string_lossy())?;
         if current {
-            v.set_setting(SECRET_CHANGED_KEY, "")?;
+            v.set_state(SECRET_CHANGED_KEY, "")?;
         }
         Ok(())
     }
@@ -194,7 +194,7 @@ impl Core {
     /// A restore drill passed.
     pub(crate) fn drill_recorded(&mut self) -> Result<(), CoreError> {
         self.vault_mut()?
-            .set_setting(LAST_CHECK_KEY, &unix_now().to_string())?;
+            .set_state(LAST_CHECK_KEY, &unix_now().to_string())?;
         Ok(())
     }
 

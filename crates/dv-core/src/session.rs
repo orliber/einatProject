@@ -254,7 +254,7 @@ impl Core {
         let created = Vault::create(&self.dir, password, params)?;
         let recovery_key = created.recovery_key.to_string();
         let mut vault = created.vault;
-        vault.set_setting(FIRST_USE_KEY, &day_number().to_string())?;
+        vault.set_state(FIRST_USE_KEY, &day_number().to_string())?;
         self.vault = Some(vault);
         self.last_activity = Instant::now();
         Ok(CreatedVault { recovery_key })
