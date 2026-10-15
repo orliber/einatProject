@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>התייעצות</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f4f5f3}
+a{color:#1e5b56}a:hover{color:#164541}
+.btn{font:inherit;font-size:15px;font-weight:600;border-radius:10px;padding:0 16px;min-height:44px;border:1px solid #cfd5d2;background:#fff;color:#15201f;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.btn-sm{min-height:36px;font-size:14px;padding:0 12px}
+.tab{font:inherit;font-size:15px;color:#4a5654;background:none;border:0;padding:0 4px;min-height:56px;border-bottom:2px solid transparent;cursor:pointer;display:inline-flex;align-items:center;text-decoration:none}
+.tab-on{color:#15201f;font-weight:700;border-bottom-color:#1e5b56}
+.conv{font:inherit;background:none;border:0;width:100%;text-align:right;padding:10px 12px;border-radius:10px;cursor:pointer;color:#15201f;display:flex;flex-direction:column;gap:2px}
+.conv-on{background:#e6efed}
+.ans h3{font-size:17px;margin:18px 0 6px}
+.ans p{margin:0 0 10px;line-height:1.75}
+.ans ol,.ans ul{margin:0 0 10px;padding-inline-start:22px;line-height:1.75}
+.ans li{margin-bottom:6px}
+</style>
+</helmet>
+<div style="font-family:Assistant,system-ui,sans-serif;color:#15201f;background:#f4f5f3;min-height:900px;width:100%;font-size:16px;display:flex;flex-direction:column">
+  <header style="background:#fff;border-bottom:1px solid #e3e6e3;padding:0 32px;display:flex;align-items:center;gap:32px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+      כספת האבחון
+    </div>
+    <nav aria-label="ראשי" style="display:flex;gap:24px">
+      <a class="tab" href="Main.dc.html">תיקים</a>
+      <a class="tab" href="Style.dc.html">הסגנון שלי</a>
+      <button class="tab tab-on" aria-current="page">התייעצות</button>
+      <a class="tab" href="Privacy.dc.html">הגדרות</a>
+    </nav>
+  </header>
+
+  <div style="flex:1;display:flex;flex-wrap:wrap;max-width:1240px;width:100%;margin:0 auto;padding:24px 32px;box-sizing:border-box;gap:24px">
+    <aside aria-label="שיחות" style="flex:0 0 260px;display:flex;flex-direction:column;gap:6px">
+      <button class="btn" style="justify-content:center;margin-bottom:10px">+ שיחה חדשה</button>
+      <div style="font-size:13px;font-weight:700;color:#4a5654;padding:6px 12px">היום</div>
+      <button class="conv conv-on" aria-current="true"><strong>ממצאים גבוליים בלי להקטין</strong><span style="font-size:13px;color:#4a5654">שאלה כללית · 10:12</span></button>
+      <button class="conv"><strong>התאמות לגננת במעברים</strong><span style="font-size:13px;color:#4a5654">על התיק של נועם · 09:40</span></button>
+      <div style="font-size:13px;font-weight:700;color:#4a5654;padding:6px 12px">אתמול</div>
+      <button class="conv"><strong>ABAS-3 מול דיווח מורה</strong><span style="font-size:13px;color:#4a5654">שאלה כללית</span></button>
+    </aside>
+
+    <section aria-label="השיחה" style="flex:999 1 560px;min-width:0;background:#fff;border:1px solid #e3e6e3;border-radius:18px;display:flex;flex-direction:column">
+      <div style="padding:16px 24px;border-bottom:1px solid #e3e6e3;display:flex;align-items:center;gap:10px">
+        <strong style="font-size:17px">ממצאים גבוליים בלי להקטין</strong>
+        <span style="font-size:13px;color:#4a5654;background:#f1f3f1;border-radius:999px;padding:2px 10px">שאלה כללית · בלי פרט מתיק</span>
+      </div>
+      <div style="flex:1;padding:24px;display:flex;flex-direction:column;gap:20px;overflow:auto">
+        <div style="align-self:flex-start;max-width:70%;background:#e6efed;border-radius:16px 16px 4px 16px;padding:12px 16px;line-height:1.6">איך להציג להורים ממצאים גבוליים, בלי להגזים ובלי להקטין?</div>
+
+        <article class="ans" aria-label="תשובת Claude" style="max-width:720px;color:#15201f">
+          <p>אפשר לבנות את זה בשלושה צעדים, כך שההורים יבינו את <strong>המשמעות</strong> ולא רק את המספר.</p>
+          <h3>1. להתחיל ממה שהילד כן עושה</h3>
+          <p>פסקה קצרה על החוזקות שנצפו, עם דוגמה מהמפגש. זה מעגן את ההמשך.</p>
+          <h3>2. לתאר את הממצא בשפה של תפקוד</h3>
+          <ul>
+            <li>במקום "ציון בטווח הגבולי", לכתוב <strong>מה זה אומר ביום-יום</strong>: "לוקח לו יותר זמן לעבד הוראות ארוכות".</li>
+            <li>להבחין בין <strong>חולשה יחסית</strong> לבין קושי שדורש התערבות.</li>
+          </ul>
+          <h3>3. לחבר להמלצה אחת ברורה</h3>
+          <p>כל ממצא גבולי מקבל צעד מעשי אחד, כדי שההורים ייצאו עם כיוון ולא עם דאגה.</p>
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <button class="btn btn-sm">העתקה</button>
+            <button class="btn btn-sm">להכניס לסעיף…</button>
+          </div>
+        </article>
+
+        <figure style="margin:0;border:1px dashed #e3b2a8;background:#fbe7e3;border-radius:12px;padding:12px 16px;max-width:720px">
+          <figcaption style="font-size:13px;font-weight:700;color:#6e1609;margin-bottom:6px">היום אותה תשובה נראית כך (להשוואה בלבד)</figcaption>
+          <div style="font-family:ui-monospace,Menlo,monospace;font-size:13px;color:#34403e;line-height:1.6;white-space:pre-line">**1. להתחיל ממה שהילד כן עושה**
+- במקום "ציון בטווח הגבולי", לכתוב **מה זה אומר ביום-יום**</div>
+        </figure>
+      </div>
+      <div style="padding:14px 24px 18px;border-top:1px solid #e3e6e3">
+        <label style="display:flex;align-items:center;gap:10px;border:1px solid #cfd5d2;border-radius:14px;padding:8px 8px 8px 16px;padding-inline-start:16px">
+          <input aria-label="שאלה" placeholder="לשאול עוד משהו… שמות יוסתרו לבד" style="flex:1;border:0;outline:0;font:inherit;background:transparent;min-height:36px">
+          <button class="btn" aria-label="שליחה" style="width:44px;padding:0;justify-content:center;background:#1e5b56;border-color:#1e5b56;color:#fff">←</button>
+        </label>
+      </div>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1366,"height":900}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
