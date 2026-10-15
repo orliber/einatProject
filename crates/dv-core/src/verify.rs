@@ -3,12 +3,13 @@
 //! A separate request after drafting: the proposed paragraphs and the sources they were
 //! written from go out together, filtered and cleared like any other request, with an
 //! approval of its own. The answer only adds a verdict per paragraph; nothing is rewritten,
-//! approved or removed. It is off until she turns it on, because it costs one more request.
+//! approved or removed. It is on unless she turns it off (round 41): it runs by itself in the
+//! background after "write the whole report", and its cost shows in the usage page.
 
 use super::*;
 use crate::send::collect_sources;
 
-/// "1" when the check is on.
+/// "0" when she turned the check off.
 const VERIFY_KEY: &str = "verify_stage";
 
 /// The answer of the check, for the paragraphs that were sent (in the order of `draft_ids`;
@@ -22,9 +23,9 @@ pub struct VerifyResult {
 }
 
 impl Core {
-    /// Is the check against the sources on? (Off by default.)
+    /// Is the check against the sources on? (On by default.)
     pub fn verify_stage_on(&mut self) -> Result<bool, CoreError> {
-        Ok(self.vault_ref()?.setting(VERIFY_KEY)?.as_deref() == Some("1"))
+        Ok(self.vault_ref()?.setting(VERIFY_KEY)?.as_deref() != Some("0"))
     }
 
     pub fn set_verify_stage(&mut self, on: bool) -> Result<(), CoreError> {
@@ -164,6 +165,7 @@ impl Core {
         out: Outgoing,
         response: Result<(Value, bool), CoreError>,
     ) -> Result<VerifyResult, CoreError> {
+        let left_out = crate::send::had_left_out(&out);
         let crate::stage::Received {
             kind,
             response,
@@ -189,6 +191,13 @@ impl Core {
         for c in &mut checks {
             for n in &mut c.notes {
                 n.note = restore(&n.note, &identities, practitioner.as_deref(), &masks);
+            }
+            // A source line left out (D-082) may be why a paragraph is not supported.
+            if left_out && c.verdict != dv_ai::Verdict::Supported {
+                c.notes.push(dv_ai::VerifyNote {
+                    note: crate::send::LEFT_OUT_NOTE.to_owned(),
+                    source_refs: Vec::new(),
+                });
             }
         }
         Ok(VerifyResult {

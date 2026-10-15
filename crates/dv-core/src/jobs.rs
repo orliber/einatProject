@@ -23,7 +23,7 @@ use dv_vault::crypto::Key32;
 use dv_vault::{Argon2Params, NewSlot, Secret, Vault, VaultError};
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::binding::{bound_on_disk, key_for_new_slot, key_here};
+use crate::binding::{bound_on_disk, key_for_new_slot, key_for_opening, key_here};
 use crate::views::{BackupCheckView, BackupDone, CreatedVault};
 use crate::{AppStatus, ComputerSeal, Core, CoreError, ErrorAction};
 
@@ -100,8 +100,8 @@ impl UnlockJob {
             Proof::Password(p) => {
                 // Unsealing the key kept here takes a moment too, so it runs in the job.
                 let bound = bound_on_disk(&self.dir);
-                let here = key_here(self.seal.as_ref(), &self.dir, bound);
-                let mut opened = Vault::unlock_with_password_here(&self.dir, p, here.as_ref());
+                let mut opened = key_for_opening(self.seal.as_ref(), &self.dir, bound)
+                    .and_then(|here| Vault::unlock_with_password_here(&self.dir, p, here.as_ref()));
                 // A new password whose key was held aside and not yet promoted (the program
                 // closed in between): that key opens it, and becomes the one in use.
                 if bound
@@ -420,7 +420,7 @@ enum ExportFormat {
         password: Option<Zeroizing<String>>,
     },
     Pdf {
-        password: Zeroizing<String>,
+        password: Option<Zeroizing<String>>,
     },
 }
 
@@ -522,11 +522,11 @@ impl ExportJob {
                                 regular: &regular,
                                 bold: bold.as_deref(),
                             },
-                            password,
+                            password.as_deref().map(String::as_str),
                         )
                         .map_err(export_error)
                     });
-                (true, true, bytes)
+                (true, password.is_some(), bytes)
             }
         }
     }
@@ -1063,17 +1063,20 @@ impl Core {
         )
     }
 
-    /// The report as a locked PDF (EX-3, D-049): it opens with `password`, can be printed but
-    /// not changed, and its SHA-256 goes into the audit log so a copy can be checked later.
+    /// The report as a locked PDF (EX-3, D-049): it can be printed but not changed, and its
+    /// SHA-256 goes into the audit log so a copy can be checked later. With `password` it
+    /// opens only with it; without one it opens for anyone (D-081).
     pub fn begin_export_pdf(
         &mut self,
         case_id: &str,
-        password: &str,
+        password: Option<&str>,
     ) -> Result<ExportJob, CoreError> {
         self.export_job(
             case_id,
             ExportFormat::Pdf {
-                password: Zeroizing::new(password.to_owned()),
+                password: password
+                    .filter(|p| !p.is_empty())
+                    .map(|p| Zeroizing::new(p.to_owned())),
             },
         )
     }
@@ -1090,7 +1093,7 @@ impl Core {
         let sections = exported.check.included_sections;
         let meta = if exported.pdf {
             serde_json::json!({
-                "protected": true,
+                "protected": exported.protected,
                 "pdf": true,
                 "sha256": dv_vault::crypto::sha256_hex(&bytes),
                 "sections": sections,
@@ -1113,7 +1116,11 @@ impl Core {
         self.finish_export(job.run()).map(|(b, _)| b)
     }
 
-    pub fn export_pdf(&mut self, case_id: &str, password: &str) -> Result<Vec<u8>, CoreError> {
+    pub fn export_pdf(
+        &mut self,
+        case_id: &str,
+        password: Option<&str>,
+    ) -> Result<Vec<u8>, CoreError> {
         let job = self.begin_export_pdf(case_id, password)?;
         self.finish_export(job.run()).map(|(b, _)| b)
     }

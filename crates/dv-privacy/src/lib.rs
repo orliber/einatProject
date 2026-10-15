@@ -17,7 +17,7 @@ pub mod restore;
 mod self_check;
 pub mod text;
 
-pub use fix::{fix_refused, FixedItem, FIXABLE_CODES, LEFT_OUT};
+pub use fix::{drop_refused_lines, fix_refused, FixedItem, FIXABLE_CODES, LEFT_OUT};
 pub use gate::{
     clear, replace_foreign_tags, tag_word, BlockReason, Blocked, ClearedPayload, GateRequest,
     GENERIC_TAGS,
@@ -25,9 +25,9 @@ pub use gate::{
 pub use masks::{is_generic_tag, is_mask_tag, MaskBook, MaskEntry, MASK_BASES};
 pub use misread::{ocr_misreads, Misread};
 pub use pipeline::{
-    everyday_name, filter, filter_split, filter_split_with_hints, filter_with_hints, AutoHidden,
-    AutoKind, Checks, FilterOutcome, Mark, NameHint, PrivacyContext, Segment, Suspect, SuspectKind,
-    NAME_HINT_SURE,
+    everyday_name, filter, filter_split, filter_split_with_hints, filter_with_hints,
+    forget_identity_index, AutoHidden, AutoKind, Checks, FilterOutcome, Mark, NameHint,
+    PrivacyContext, Segment, Suspect, SuspectKind, NAME_HINT_SURE,
 };
 pub use self_check::gate_self_check;
 

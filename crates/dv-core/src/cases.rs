@@ -41,6 +41,8 @@ impl Core {
         meta.template = Some(dv_domain::INSTITUTE_TEMPLATE.to_owned());
         // A case's own guide lines are written in it, one section at a time.
         meta.guides = None;
+        meta.dsm_severity = None;
+        meta.letter_left_out = None;
         let v = self.vault_mut()?;
         let id = v.create_case(&meta)?;
         v.set_identities(&id, &identities)?;
@@ -78,6 +80,8 @@ impl Core {
             follows: None,
             template: None,
             guides: None,
+            dsm_severity: None,
+            letter_left_out: None,
         };
         let id = self.create_case(
             meta,
@@ -108,6 +112,56 @@ impl Core {
         meta.follows = kept.follows;
         meta.template = kept.template;
         meta.guides = kept.guides;
+        meta.dsm_severity = kept.dsm_severity;
+        meta.letter_left_out = kept.letter_left_out;
+        self.vault_mut()?.update_case_meta(case_id, &meta)?;
+        self.forget_pending(case_id);
+        Ok(())
+    }
+
+    /// The approved recommendations left out of the letters (round 44): the paragraph ids
+    /// she unmarked, or `None` for none. Kept as what she left out, so a recommendation
+    /// approved or rewritten later is in until she unmarks it (review of stage 6, R2). An id
+    /// that is not an approved recommendation of the case is refused.
+    pub fn set_letter_left_out(
+        &mut self,
+        case_id: &str,
+        ids: Option<Vec<String>>,
+    ) -> Result<(), CoreError> {
+        let v = self.vault_ref()?;
+        if let Some(ids) = &ids {
+            let approved: Vec<String> = v
+                .drafts(case_id, "recommendations")?
+                .into_iter()
+                .filter(|d| d.status == DraftStatus::Approved)
+                .map(|d| d.id)
+                .collect();
+            if ids.iter().any(|id| !approved.contains(id)) {
+                return Err(CoreError::NotFound("ההמלצה".to_owned()));
+            }
+        }
+        let mut meta = v.case_meta(case_id)?;
+        meta.letter_left_out = ids;
+        self.vault_mut()?.update_case_meta(case_id, &meta)?;
+        self.forget_pending(case_id);
+        Ok(())
+    }
+
+    /// The DSM-5 severity she set for the case (round 43), one level (1–3) for each domain.
+    /// `None` for both: not set. A level outside 1–3 is refused.
+    pub fn set_dsm_severity(
+        &mut self,
+        case_id: &str,
+        social: Option<u8>,
+        restricted: Option<u8>,
+    ) -> Result<(), CoreError> {
+        let severity = dv_domain::DsmSeverity::new(social, restricted);
+        if severity.social != social || severity.restricted != restricted {
+            return Err(CoreError::Refused("רמת חומרה היא 1, 2 או 3.".to_owned()));
+        }
+        let v = self.vault_ref()?;
+        let mut meta = v.case_meta(case_id)?;
+        meta.dsm_severity = severity.is_set().then_some(severity);
         self.vault_mut()?.update_case_meta(case_id, &meta)?;
         self.forget_pending(case_id);
         Ok(())

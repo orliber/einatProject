@@ -13,8 +13,10 @@ const COUNT = ["אפס", "אחת", "שתיים", "שלוש", "ארבע", "חמש
 const count = (n: number) => COUNT[n] ?? String(n);
 
 /** Where she fixes a layer that is hers. */
-const ACTION: Record<string, { label: string; pane: "backup" }> = {
+const ACTION: Record<string, { label: string; pane: "backup" } | { label: string; below: string }> = {
   backup: { label: "לגבות", pane: "backup" },
+  // The kit is checked in the password card, just below on this page.
+  recovery_kit: { label: "לבדיקת הערכה", below: "s-password" },
 };
 
 function Card({ l, you }: { l: SecurityLayer; you: boolean }) {
@@ -30,7 +32,10 @@ function Card({ l, you }: { l: SecurityLayer; you: boolean }) {
         <span className="small muted">{l.now}</span>
       </div>
       {action && (
-        <button type="button" className="link-btn small layer-when" onClick={() => go({ name: "settings", pane: action.pane })}>{action.label}</button>
+        <button type="button" className="link-btn small layer-when" onClick={() => {
+          if ("pane" in action) go({ name: "settings", pane: action.pane });
+          else document.getElementById(action.below)?.scrollIntoView({ block: "start" });
+        }}>{action.label}</button>
       )}
     </li>
   );
@@ -68,7 +73,7 @@ export function SecuritySettings() {
   const s = q.data;
   const all = s ? [...s.layers, ...s.yours] : [];
   const bad = all.filter((l) => l.state === "warn");
-  const title = !s ? "בודקת את שכבות ההגנה…"
+  const title = !s ? "שכבות ההגנה"
     : bad.length === 0 ? `${count(all.length)} שכבות הגנה, כולן תקינות`
       : `${all.length - bad.length} מתוך ${all.length} תקינות: ${bad.map((l) => l.title).join(", ")}`;
   // The stop is always there, also while the list loads or failed to load (review of
@@ -86,7 +91,9 @@ export function SecuritySettings() {
             </span>
           )}
         </div>
-        <button type="button" className="btn btn-small" onClick={() => { void qc.invalidateQueries({ queryKey: ["security"] }); }}>לבדוק שוב</button>
+        <button type="button" className="btn btn-small" disabled={q.isFetching} onClick={() => { void qc.invalidateQueries({ queryKey: ["security"] }); }}>
+          {q.isFetching && !q.isPending ? "בודקת…" : "לבדוק שוב"}
+        </button>
       </div>
       <div className="row">
         <p className="hint grow">
@@ -118,7 +125,7 @@ export function SecuritySettings() {
               </div>
             ))}
           </dl>
-          <p className="hint">שכבה של התוכנה שנכשלת עוצרת את השליחה מיד, ושום בקשה לא יוצאת עד שאור בודק. שכבה שתלויה בך מופיעה כאן עם "!", עם המקום שבו מתקנים.</p>
+          <p className="hint">שכבה של התוכנה שנכשלת עוצרת את השליחה מיד, ושום בקשה לא יוצאת עד שאור בודק. שכבה שתלויה בך מסומנת "את", וכשצריך לתקן אותה כתוב בה מה עושים ואיפה.</p>
         </details>
       )}
       {s && (

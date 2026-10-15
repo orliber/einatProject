@@ -1321,7 +1321,7 @@ fn locked_pdf_is_recognised_as_the_original() {
     let (_dir, mut core, case) = setup(None);
     core.add_own_paragraph(&case, "referral", "ההורים של אלון פנו בשל קושי במעברים.")
         .unwrap();
-    let pdf = match core.export_pdf(&case, "נהר-ענן-42-שקד-אורן") {
+    let pdf = match core.export_pdf(&case, None) {
         Ok(pdf) => pdf,
         // No Hebrew font on this computer (a bare build machine): nothing to check.
         Err(CoreError::Refused(m)) if m.contains("גופן") => return,
@@ -1335,7 +1335,7 @@ fn locked_pdf_is_recognised_as_the_original() {
     changed[last] ^= 1;
     assert!(core.check_original(&changed).unwrap().is_none());
     assert!(matches!(
-        core.export_pdf(&case, "abc-אבג-12345"),
+        core.export_pdf(&case, Some("abc-אבג-12345")),
         Err(CoreError::Refused(_))
     ));
 }

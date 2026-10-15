@@ -1,4 +1,5 @@
-// The switch for the check of a draft against its sources (off by default: one more request).
+// The switch for the check of a draft against its sources (on by default since round 41: it
+// runs by itself after "write the whole report"; one more request per section).
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
 import { ipc } from "../ipc/client";
@@ -23,7 +24,7 @@ export function VerifySettings() {
     <section className="card setting" aria-labelledby="s-verify">
       <h2 id="s-verify">בדיקה מול המקורות</h2>
       <Switch id="verify-stage" label="לאפשר בדיקה של טיוטה מול החומרים" checked={on.data ?? false} disabled={on.data === undefined}
-        hint="ה-AI מסמן לכל פסקה אם היא נתמכת בחומרים. בקשה נוספת, באותו סינון, ובלי לשנות שום פסקה."
+        hint={'ה-AI מסמן לכל פסקה אם היא נתמכת בחומרים. רץ לבד אחרי "כתיבת כל הדוח": בקשה נוספת לכל סעיף, באותו סינון, ובלי לשנות שום פסקה.'}
         onChange={(v) => void change(v)} />
     </section>
   );

@@ -55,6 +55,31 @@ describe("too many wrong tries", () => {
   });
 });
 
+describe("a slow Windows at the opening", () => {
+  it("says it is waiting for Windows after a few seconds, then says to try again", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let answer: (v: unknown) => void = () => undefined;
+    mockIPC((cmd) => {
+      if (cmd === "unlock") return new Promise((_, no) => { answer = no; });
+      if (cmd === "ping") return { ipc_version: 1, core_version: "0.1.0", build_commit: "test", fips_active: false, platform: "linux" };
+      if (cmd === "google_status") return { on: false };
+      return null;
+    });
+    render(<LockScreen />);
+    fireEvent.change(screen.getByLabelText("סיסמה"), { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: "פתיחה" }));
+    await act(async () => {});
+    expect(screen.queryByText(/ממתינה ל-Windows/)).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(5100); });
+    expect(screen.getByText(/ממתינה ל-Windows/)).toBeInTheDocument();
+    await act(async () => { answer({ code: "busy", message: "Windows לא ענה בזמן. אפשר לנסות שוב בעוד רגע.", details: [] }); });
+    expect(screen.getByText(/אפשר לנסות שוב בעוד רגע/)).toBeInTheDocument();
+    expect(screen.queryByText(/ממתינה ל-Windows/)).toBeNull();
+    expect(screen.getByLabelText("סיסמה")).toHaveAttribute("type", "password");
+    vi.useRealTimers();
+  });
+});
+
 describe("a version that cannot open the vault (R7)", () => {
   it("says the vault is safe and opens the page of versions; a wrong password does not", async () => {
     const calls: string[] = [];

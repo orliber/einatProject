@@ -124,7 +124,8 @@ fn a_consultation_without_a_case_gives_the_numbers_back_too() {
 /// book for the answer (the review of stage 2: nothing of a refused name's line is kept).
 #[test]
 fn a_refusal_the_loop_can_answer_is_hidden_and_cleared_by_the_same_gate() {
-    let (_dir, mut core, case) = setup(None);
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
     let phone = ["05", "3", "1112223"].concat();
     let body = json!({
         "model": "claude-test",
@@ -173,6 +174,10 @@ fn a_refusal_the_loop_can_answer_is_hidden_and_cleared_by_the_same_gate() {
         "{:?}",
         blocked[0]
     );
+    // The answer says a line was left out, so a material left where it was has its reason
+    // (review of stage 6, R4).
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({ "materials": [], "sections": [] })));
+    assert!(core.send_sort(&id).unwrap().left_out);
 }
 
 /// What the loop cannot answer still stops the request, with its reason: a name in a key.
@@ -233,4 +238,38 @@ fn a_request_too_large_is_shortened_not_refused() {
     assert!(sent[0].len() <= MAX_REQUEST_BYTES, "{}", sent[0].len());
     assert!(sent[0].contains("הוא נשאר במחשב."));
     assert!(sent[0].contains("הפסיכולוגית מבקשת: תנסח פסקה"));
+}
+
+/// Stored texts are settled against the case's tags before each filtering, and the pass is
+/// skipped only while nothing was written since the last one (the deep review): a tag that
+/// is not the case's, written after a settle, is still settled by the next request.
+#[test]
+fn a_foreign_tag_written_after_a_settle_is_still_settled() {
+    let (_dir, mut core, case) = setup(None);
+    let stored = |core: &mut Core| -> Vec<String> {
+        core.vault_ref()
+            .unwrap()
+            .drafts(&case, "kindergarten")
+            .unwrap()
+            .into_iter()
+            .map(|d| d.text_tagged)
+            .collect()
+    };
+    let add = |core: &mut Core, text: &str| {
+        core.vault_mut()
+            .unwrap()
+            .add_draft(&case, "kindergarten", text, Author::User, &[])
+            .unwrap();
+    };
+    add(&mut core, "[ילד] למד ב[מוסד_9].");
+    core.privacy_data(&case).unwrap();
+    assert_eq!(stored(&mut core), ["[ילד] למד במוסד."]);
+    // Nothing written: the next request does not read the texts again, and nothing changes.
+    let counts = core.vault_ref().unwrap().change_counts();
+    core.privacy_data(&case).unwrap();
+    assert_eq!(core.vault_ref().unwrap().change_counts(), counts);
+    // A new text with a foreign tag: settled by the next request.
+    add(&mut core, "שיחק ב[מוסד_8].");
+    core.privacy_data(&case).unwrap();
+    assert_eq!(stored(&mut core), ["[ילד] למד במוסד.", "שיחק במוסד."]);
 }

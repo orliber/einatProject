@@ -73,6 +73,7 @@ impl Core {
             ner: None,
             ner_exe: None,
             hint_cache: HashMap::new(),
+            settled: None,
             section_nonces: HashMap::new(),
             computer_seal: Arc::new(WindowsSeal),
             memory_lock: None,
@@ -290,6 +291,7 @@ impl Core {
         let recovery_key = created.recovery_key.to_string();
         let mut vault = created.vault;
         vault.set_state(FIRST_USE_KEY, &day_number().to_string())?;
+        self.settled = None;
         self.vault = Some(vault);
         self.last_activity = Instant::now();
         Ok(CreatedVault { recovery_key })
@@ -379,6 +381,7 @@ impl Core {
                 if vault.has_hello_slot() {
                     let _ = vault.remove_hello_slot();
                 }
+                self.settled = None;
                 self.vault = Some(vault);
                 self.last_activity = Instant::now();
                 // The gate and the sending rules try themselves once per opening; a failure
@@ -454,11 +457,14 @@ impl Core {
         self.style_staged.clear();
         self.removed_input = None;
         self.hint_cache.clear();
+        self.settled = None;
         self.section_nonces.clear();
         self.opened_cases.clear();
         self.since_last = None;
         // The model's process held texts of this session in its memory: it ends with the lock.
         self.end_name_model();
+        // The filter's index of every case's names, kept between requests, goes too.
+        dv_privacy::forget_identity_index();
         if let Some(v) = self.vault.take() {
             // A new password or kit begun while open lands as "locked meanwhile"; its check
             // must not keep her from opening the vault again.

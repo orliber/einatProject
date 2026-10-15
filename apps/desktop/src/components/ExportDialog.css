@@ -38,15 +38,6 @@
   border-color: var(--block-line);
   color: var(--block-ink);
 }
-.protect {
-  padding: 16px 18px;
-  gap: 12px;
-}
-.pw {
-  font-size: var(--text-lg);
-  font-weight: 600;
-  background: var(--surface-alt);
-}
 .align-start {
   align-self: flex-start;
 }

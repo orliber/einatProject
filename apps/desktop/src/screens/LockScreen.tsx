@@ -40,6 +40,18 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
   }, [waitUntil]);
   const waitSeconds = waitUntil === null ? 0 : Math.max(1, Math.ceil((waitUntil - now) / 1000));
 
+  // An opening still going after a few seconds is most likely waiting for Windows to unseal
+  // the half of the password kept on this computer (a cold start): it says so.
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!busy) return;
+    const t = window.setTimeout(() => setSlow(true), 5000);
+    return () => {
+      window.clearTimeout(t);
+      setSlow(false);
+    };
+  }, [busy]);
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!secret.trim()) return;
@@ -105,6 +117,7 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
             <ErrorLine error={error} />
           )}
           {broken && <VersionTrouble version={version} />}
+          {busy && slow && mode === "password" && <p className="hint" role="status">ממתינה ל-Windows… זה קורה לפעמים מיד אחרי הדלקת המחשב.</p>}
           <button type="submit" className="btn btn-primary" disabled={busy || waitUntil !== null}>{busy ? "פותחת…" : he.lock.open}</button>
           <button type="button" className="link-btn" onClick={() => { setMode(mode === "password" ? (googleOn ? "google" : "recovery") : "password"); setSecret(""); setError(null); }}>
             {mode === "password" ? (googleOn ? "שכחתי את הסיסמה · כניסה עם גוגל" : "שכחתי את הסיסמה · פתיחה עם ערכת השחזור") : "חזרה לפתיחה עם סיסמה"}

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-dsm-severity"
+description = "Enables the set_dsm_severity command without any pre-configured scope."
+commands.allow = ["set_dsm_severity"]
+
+[[permission]]
+identifier = "deny-set-dsm-severity"
+description = "Denies the set_dsm_severity command without any pre-configured scope."
+commands.deny = ["set_dsm_severity"]

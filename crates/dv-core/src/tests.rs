@@ -20,6 +20,7 @@ mod guides;
 mod history;
 mod hostile;
 mod import_export;
+mod institute;
 mod large_case;
 mod layers;
 mod library;

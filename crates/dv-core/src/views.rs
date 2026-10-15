@@ -291,6 +291,8 @@ pub struct SortResult {
     /// Ids or sections in the answer that were not in the request (dropped).
     pub ignored: u32,
     pub demo: bool,
+    /// A line of the materials was left out by the last check (D-082).
+    pub left_out: bool,
 }
 
 /// One piece of outgoing text as the review screen shows it.
@@ -335,6 +337,8 @@ pub struct SectionResult {
 pub struct ConsultResult {
     pub answer: String,
     pub demo: bool,
+    /// A line of the question was left out by the last check (D-082).
+    pub left_out: bool,
     /// The saved conversation this answer belongs to.
     pub conversation_id: String,
 }
@@ -451,6 +455,10 @@ pub struct ReportSettings {
     pub font: String,
     pub confidentiality: String,
     pub signature: Vec<String>,
+    /// The supervisor's lines (round 43), printed under her signature, as the institute's
+    /// report has them for an intern. Empty: none.
+    #[serde(default)]
+    pub supervisor: Vec<String>,
 }
 
 /// Her Word template (EX-1), as checked when she chose it.

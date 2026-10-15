@@ -222,3 +222,74 @@ proptest::proptest! {
         }
     }
 }
+
+/// The last step (D-082): a line the gate refuses on its own is left out whole, the other
+/// lines go as they were, and the copy passes the unchanged gate. A line with a canary is
+/// never left out, so that request stays refused.
+#[test]
+fn a_line_the_gate_still_refuses_is_left_out_whole_and_a_canary_still_blocks() {
+    use dv_privacy::{drop_refused_lines, LEFT_OUT};
+    let ids = identities();
+    let c = ctx(&ids, CASE);
+    let tags = case_tags(&ids, CASE);
+    let body = raw("[ילד] הגיע בשמחה.\nנועם מתקשה במעברים.\nבסוף הבוקר נרגע.");
+    let req = |body: &Value, canaries: &[String]| {
+        clear(&GateRequest {
+            body,
+            ctx: &c,
+            case_tags: &tags,
+            unresolved_suspects: 0,
+            canaries,
+            max_bytes: 1_000_000,
+        })
+        .is_ok()
+    };
+    assert!(!req(&body, &[]));
+    let (out, items) = drop_refused_lines(&GateRequest {
+        body: &body,
+        ctx: &c,
+        case_tags: &tags,
+        unresolved_suspects: 0,
+        canaries: &[],
+        max_bytes: 1_000_000,
+    })
+    .unwrap();
+    let text = out["messages"][0]["content"].as_str().unwrap();
+    assert_eq!(
+        text,
+        format!("[ילד] הגיע בשמחה.\n{LEFT_OUT}\nבסוף הבוקר נרגע.")
+    );
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].original, "נועם מתקשה במעברים.");
+    assert!(!contains_norm(&out.to_string(), "נועם"));
+    assert!(req(&out, &[]));
+    // The rest of the request is as it was: its fields and the system prompt.
+    assert_eq!(out["system"], body["system"]);
+    assert_eq!(out["model"], body["model"]);
+
+    // A trap string on the same line: never left out, the request stays refused.
+    let trap = vec!["CANARY-TRAP-LINE".to_owned()];
+    let body = raw("[ילד] הגיע.\nנועם CANARY-TRAP-LINE במעברים.");
+    let dropped = drop_refused_lines(&GateRequest {
+        body: &body,
+        ctx: &c,
+        case_tags: &tags,
+        unresolved_suspects: 0,
+        canaries: &trap,
+        max_bytes: 1_000_000,
+    });
+    assert!(dropped.is_none());
+    assert!(!req(&body, &trap));
+
+    // Nothing refused: nothing left out.
+    let clean = raw("[ילד] הגיע בשמחה.");
+    assert!(drop_refused_lines(&GateRequest {
+        body: &clean,
+        ctx: &c,
+        case_tags: &tags,
+        unresolved_suspects: 0,
+        canaries: &[],
+        max_bytes: 1_000_000,
+    })
+    .is_none());
+}

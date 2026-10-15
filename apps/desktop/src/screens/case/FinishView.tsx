@@ -181,8 +181,8 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
           )}
           <ErrorLine error={error} />
           <section className="card finish-file">
-            <b>קובץ Word מוגן בסיסמה</b>
-            <span className="muted small">את הסיסמה שולחים להורים בנפרד מהקובץ.</span>
+            <b>קובץ Word או PDF</b>
+            <span className="muted small">נשמר בתיקיית ההורדות, ונפתח בלי סיסמה.</span>
             <button type="button" className="btn btn-primary btn-big" disabled={!ready} onClick={onExport}>הפקת הקובץ</button>
             {!ready && check && (
               <span className="small muted">

@@ -124,8 +124,20 @@ fn describe(
         }
         "blocked" => ("send", "השער עצר שליחה (נמצא מזהה)".to_owned(), true),
         "override" => ("send", "שליחה אושרה למרות אזהרה".to_owned(), true),
+        // A PDF is always print-only; it opens without a password unless she set one (D-081).
+        "export" if flag("pdf") && flag("protected") => (
+            "case",
+            "PDF להדפסה בלבד הופק, מוגן בסיסמה".to_owned(),
+            false,
+        ),
+        "export" if flag("pdf") => (
+            "case",
+            "PDF להדפסה בלבד הופק, נפתח בלי סיסמה".to_owned(),
+            false,
+        ),
         "export" if flag("protected") => ("case", "דוח Word הופק, מוגן בסיסמה".to_owned(), false),
-        "export" => ("case", "דוח Word הופק, בלי סיסמה".to_owned(), true),
+        // Without a password is the usual export now (D-081), not a line to notice.
+        "export" => ("case", "דוח הופק, נפתח בלי סיסמה".to_owned(), false),
         "backup_written" => ("security", "גיבוי מוצפן נשמר".to_owned(), false),
         "backup_checked" if flag("ok") => (
             "security",
@@ -309,6 +321,27 @@ mod tests {
             text.contains("נשלח ל-Claude") && text.contains("הדגמה"),
             "{text}"
         );
+        // An export says what was made and whether it opens without a password (D-081).
+        for (meta, said) in [
+            (
+                serde_json::json!({ "pdf": true, "protected": false }),
+                "PDF להדפסה בלבד הופק, נפתח בלי סיסמה",
+            ),
+            (
+                serde_json::json!({ "pdf": true, "protected": true }),
+                "PDF להדפסה בלבד הופק, מוגן בסיסמה",
+            ),
+            (
+                serde_json::json!({ "protected": true }),
+                "דוח Word הופק, מוגן בסיסמה",
+            ),
+            (
+                serde_json::json!({ "protected": false }),
+                "דוח הופק, נפתח בלי סיסמה",
+            ),
+        ] {
+            assert_eq!(describe("export", &meta, None).unwrap().1, said);
+        }
         let consult = serde_json::json!({ "consult": true, "ai": "Gemini" });
         let (_, text, _) = describe("send", &consult, None).unwrap();
         assert!(text.contains("נשלחה ל-Gemini"), "{text}");

@@ -13,6 +13,7 @@ import type { StagedBackup } from "./generated/StagedBackup";
 import type { CaseDetail } from "./generated/CaseDetail";
 import type { CaseInput } from "./generated/CaseInput";
 import type { CaseMeta } from "./generated/CaseMeta";
+import type { DsmSeverity } from "./generated/DsmSeverity";
 import type { SectionMode } from "./generated/SectionMode";
 import type { CaseSummary } from "./generated/CaseSummary";
 import type { Folder } from "./generated/Folder";
@@ -194,6 +195,10 @@ export const ipc = {
   createSampleCase: () => call("create_sample_case"),
   updateCase: (caseId: string, meta: CaseMeta) => run("update_case", { caseId, meta }),
   setCaseGuide: (caseId: string, sectionKey: string, text: string) => run("set_case_guide", { caseId, sectionKey, text }),
+  /** The approved recommendations she left out of the letters (round 44); `null`: none. */
+  setLetterLeftOut: (caseId: string, ids: string[] | null) => run("set_letter_left_out", { caseId, ids }),
+  /** The DSM-5 severity she set (round 43): a level 1–3 for each domain, `null` for none. */
+  setDsmSeverity: (caseId: string, social: number | null, restricted: number | null) => run("set_dsm_severity", { caseId, social, restricted }),
   /** Into the recycle bin (D-023); restorable for 30 days. */
   deleteCase: (caseId: string) => run("delete_case", { caseId }),
   listTrash: () => call("list_trash"),
@@ -263,7 +268,7 @@ export const ipc = {
   /** Words Claude has written so far for a request on its way (streamed answers). */
   sendProgress: (approvalId: string) => call("send_progress", { approvalId }),
   sendSection: (approvalId: string) => call("send_section", { approvalId }),
-  /** The check of a draft against its sources: off until switched on in settings. */
+  /** The check of a draft against its sources: on unless switched off in settings (round 41). */
   verifyStageOn: () => call("verify_stage_on"),
   setVerifyStage: (on: boolean) => run("set_verify_stage", { on }),
   /** The optional name model (D-053): off by default, downloaded only when turned on. */
@@ -318,8 +323,8 @@ export const ipc = {
 
   checkExport: (caseId: string) => call("check_export", { caseId }),
   exportReport: (caseId: string, password: string | null) => call("export_report", { caseId, password }),
-  /** EX-3: a locked PDF (opens with the password, prints, cannot be changed). */
-  exportPdf: (caseId: string, password: string) => call("export_pdf", { caseId, password }),
+  /** EX-3: a print-only PDF (cannot be changed; opens without a password, D-081). */
+  exportPdf: (caseId: string, password: string | null) => call("export_pdf", { caseId, password }),
   /** When this vault exported exactly this PDF, or `null` (changed, or not made here). */
   checkOriginal: async (file: File): Promise<number | null> => {
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -460,6 +465,7 @@ export type {
   CaseDetail,
   CaseInput,
   CaseMeta,
+  DsmSeverity,
   CaseSummary,
   ChatView,
   ExportCheck,

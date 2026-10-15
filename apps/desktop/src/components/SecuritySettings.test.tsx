@@ -81,6 +81,15 @@ describe("the protection layers", () => {
     expect(screen.getByText(/אי אפשר להפעיל שליחה מחדש/)).toBeInTheDocument();
   });
 
+  it("a layer of hers that needs her says where she fixes it", async () => {
+    const v = view(false);
+    v.yours.push(layer("recovery_kit", "ערכת השחזור המודפסת", "warn", "נבדקה לפני 400 ימים. כדאי לבדוק אותה שוב ב\"סיסמה ואבטחה\"."));
+    mockIPC(() => v);
+    show();
+    expect(await screen.findByRole("button", { name: "לבדיקת הערכה" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /3 מתוך 5 תקינות: הצפנת הדיסק \(BitLocker\), ערכת השחזור/ })).toBeInTheDocument();
+  });
+
   it("saves the same page as a PDF and says where", async () => {
     mockIPC((cmd) => (cmd === "export_security_pdf" ? "C:\\Downloads\\שכבות ההגנה.pdf" : view(false)));
     const notify = vi.fn();

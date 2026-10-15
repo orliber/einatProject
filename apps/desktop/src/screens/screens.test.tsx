@@ -148,6 +148,17 @@ describe("main screens", () => {
     expect(req.replaces).toBe("p-new");
   });
 
+  it("'full page' hides the contents beside the report, and brings it back (round 42)", async () => {
+    const { user } = await openApp();
+    await openCase(user);
+    expect(screen.getByRole("complementary", { name: "תוכן הדוח" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "דף מלא" }));
+    expect(screen.queryByRole("complementary", { name: "תוכן הדוח" })).toBeNull();
+    expect(screen.getByRole("button", { name: "דף מלא" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "דף מלא" }));
+    expect(screen.getByRole("complementary", { name: "תוכן הדוח" })).toBeInTheDocument();
+  });
+
   it("the report page passes the accessibility check", async () => {
     const { user, view } = await openApp();
     await openCase(user);
@@ -162,6 +173,67 @@ describe("main screens", () => {
     await user.click(screen.getByRole("button", { name: "התייעצות" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "התייעצות" })).toHaveAttribute("aria-current", "page"));
     expect(await a11yViolations(view.container)).toEqual([]);
+  });
+
+  it("the supervisor's lines are kept in settings and printed under her signature", async () => {
+    const { user, core } = await openApp();
+    await user.click(await screen.findByRole("button", { name: "הגדרות" }));
+    await user.click(await screen.findByRole("button", { name: "הדוח" }));
+    const box = await screen.findByLabelText("חתימת המדריכה");
+    await user.type(box, "בהדרכת ד\"ר נועה בדויה");
+    await user.click(within(box.closest("section") ?? document.body).getByRole("button", { name: "שמירה" }));
+    await waitFor(async () => expect(((await core.handle("report_settings", {})) as { supervisor: string[] }).supervisor).toEqual(["בהדרכת ד\"ר נועה בדויה"]));
+    await user.click(screen.getByRole("button", { name: "תיקים" }));
+    const page = await openCase(user);
+    const sign = page.querySelector(".a4-sign");
+    expect(sign?.textContent).toMatch(/מומחית.*בהדרכת ד"ר נועה בדויה/);
+  });
+
+  it("the report is exported without a password, as Word or as a print-only PDF", async () => {
+    const exported: [string, unknown][] = [];
+    const { user, core } = await openApp();
+    mockIPC((cmd, args) => {
+      if (cmd.startsWith("export_")) exported.push([cmd, args]);
+      return core.handle(cmd, args);
+    });
+    await openCase(user);
+    await user.click(screen.getByRole("button", { name: /הוצאת הדוח/ }));
+    expect(await screen.findByText("נשמר בתיקיית ההורדות, ונפתח בלי סיסמה.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "הפקת הקובץ" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "הפקת הקובץ" }));
+    const dialog = await screen.findByRole("dialog");
+    // No password is asked for, and she is told the file opens without one (D-081).
+    expect(within(dialog).queryByLabelText(/סיסמה/)).toBeNull();
+    expect(within(dialog).getByText("הקובץ נפתח בלי סיסמה: כל מי שיקבל אותו יוכל לקרוא אותו.")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("radio", { name: /PDF להדפסה בלבד/ }));
+    await user.click(within(dialog).getByRole("button", { name: "הפקת הדוח" }));
+    await waitFor(() => expect(exported).toEqual([["export_pdf", { caseId: expect.any(String), password: null }]]));
+    expect(await screen.findByRole("dialog", { name: "הדוח מוכן" })).not.toHaveTextContent(/סיסמה/);
+  });
+
+  it("the letter is written from the recommendations she marks", async () => {
+    const letters: unknown[] = [];
+    const { user, core } = await openApp();
+    const noam = ((await core.handle("list_cases", {})) as CaseSummary[]).find((c) => c.child_name === "נועם") ?? ({} as never);
+    await core.handle("add_own_paragraph", { caseId: noam.id, sectionKey: "recommendations", text: "המלצה על ריפוי בעיסוק." });
+    await core.handle("add_own_paragraph", { caseId: noam.id, sectionKey: "recommendations", text: "המלצה על הדרכת הורים." });
+    mockIPC((cmd, args) => {
+      if (cmd === "set_letter_left_out") letters.push(args);
+      return core.handle(cmd, args);
+    });
+    await openCase(user);
+    await user.click(screen.getByRole("button", { name: /הוצאת הדוח/ }));
+    const picks = await screen.findByRole("group", { name: "ההמלצות שנכנסות למכתב" });
+    const ot = within(picks).getByRole("checkbox", { name: "המלצה על ריפוי בעיסוק." });
+    expect(ot).toBeChecked();
+    await user.click(ot);
+    await waitFor(() => expect(letters).toHaveLength(1));
+    expect(letters[0]).toMatchObject({ ids: [expect.any(String)] });
+    await waitFor(() => expect(within(picks).getByRole("checkbox", { name: "המלצה על ריפוי בעיסוק." })).not.toBeChecked());
+    expect(within(picks).getByRole("checkbox", { name: "המלצה על הדרכת הורים." })).toBeChecked();
+    // Marked again: all of them, as before.
+    await user.click(within(picks).getByRole("checkbox", { name: "המלצה על ריפוי בעיסוק." }));
+    await waitFor(() => expect(letters[1]).toEqual({ caseId: noam.id, ids: null }));
   });
 
   it("the page is Hebrew and right-to-left", async () => {
@@ -317,6 +389,37 @@ describe("writing the report", () => {
     await user.click(within(prior).getByRole("button", { name: "דוח קלינאית" }));
     const reading = await screen.findByRole("region", { name: "מה כתוב בחומר" });
     expect(within(reading).getByText(/נבדק ב-3\/2024/)).toBeInTheDocument();
+  });
+
+  it("writes the whole report in one click, in the background, and checks it against the sources (round 41)", async () => {
+    const { user, calls } = await openApp(true, false);
+    await openCase(user);
+    await user.click(screen.getByRole("button", { name: /עוד פעולות/ }));
+    await user.click(await screen.findByRole("menuitem", { name: "כתיבת כל הדוח עם Claude" }));
+    // No window: one line says what the program is doing, with "stop".
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(await screen.findByText(/התוכנה עובדת/)).toBeInTheDocument();
+    expect(await screen.findByText(/הדוח נכתב ונבדק מול המקורות\. \d+ סעיפים מחכים לאישורך/, {}, { timeout: 20000 })).toBeInTheDocument();
+    expect(calls).toContain("send_section");
+    expect(calls).toContain("send_verify");
+    expect(calls.indexOf("send_verify")).toBeGreaterThan(calls.lastIndexOf("send_section"));
+    await user.click(within(screen.getByText(/הדוח נכתב ונבדק/).closest(".run-line") as HTMLElement).getByRole("button", { name: "סגירה" }));
+    expect(screen.queryByText(/הדוח נכתב ונבדק/)).toBeNull();
+  });
+
+  it("the run goes on after she leaves the case, and the case she comes back to shows its drafts (review of stage 6)", async () => {
+    const { user } = await openApp(true, false);
+    await openCase(user);
+    await user.click(screen.getByRole("button", { name: /עוד פעולות/ }));
+    await user.click(await screen.findByRole("menuitem", { name: "כתיבת כל הדוח עם Claude" }));
+    expect(await screen.findByText(/התוכנה עובדת/)).toBeInTheDocument();
+    // While it writes, nothing on the page sends a second request.
+    for (const b of screen.queryAllByRole("button", { name: /^✦ לכתוב את|^מיון החומרים$/ })) expect(b).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "→ תיקים" }));
+    await openCase(user);
+    await screen.findByText(/הדוח נכתב ונבדק מול המקורות/, {}, { timeout: 20000 });
+    // The page is the one she came back to: the new drafts wait for her there.
+    expect(await screen.findByRole("contentinfo", { name: "הצעד הבא" })).toHaveTextContent(/מחכות לאישור שלך|טיוטה אחת מחכה לאישור שלך/);
   });
 
   it("with the review screen on, nothing is read by itself", async () => {

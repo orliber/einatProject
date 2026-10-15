@@ -478,6 +478,7 @@ impl Core {
         out: Outgoing,
         response: Result<(Value, bool), CoreError>,
     ) -> Result<SortResult, CoreError> {
+        let left_out = crate::send::had_left_out(&out);
         let crate::stage::Received {
             kind,
             response,
@@ -504,6 +505,7 @@ impl Core {
             links: 0,
             ignored: reply.ignored,
             demo,
+            left_out,
         };
         for (((input_id, count, print, sent), placed), reading) in
             materials.iter().zip(reply.materials).zip(reply.readings)

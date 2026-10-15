@@ -546,13 +546,39 @@
   }
 }
 
-.report-hint {
-  margin: 0 auto 10px;
-  max-width: 794px;
-  font-family: var(--font-body);
-  font-size: var(--text-sm);
-  color: var(--ink-muted);
-  text-align: center;
+/* Round 42: the page reads as a document. What the program says about a paragraph (how close
+   it is to her style, a note on it) and what a section is written from show when the mouse or
+   the keyboard is on it; warnings stay. The space stays too, so nothing moves on hover. */
+.a4-para .style-hint,
+.a4-para .style-note,
+.a4-section .a4-sources {
+  opacity: 0;
+  transition: opacity var(--dur-hover, 0.14s) ease-out;
+}
+.a4-para:hover .style-hint,
+.a4-para:focus-within .style-hint,
+.a4-para.is-active .style-hint,
+.a4-para:hover .style-note,
+.a4-para:focus-within .style-note,
+.a4-section:hover .a4-sources,
+.a4-section:focus-within .a4-sources {
+  opacity: 1;
+}
+/* A new draft comes in softly. */
+@media (prefers-reduced-motion: no-preference) {
+  .a4-para.is-proposed {
+    animation: a4-para-in 0.28s ease-out both;
+  }
+}
+@keyframes a4-para-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 /* The way into the section's own screen (its guide; her points in her sections). */
 .a4-open {

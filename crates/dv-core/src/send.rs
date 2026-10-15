@@ -264,11 +264,18 @@ impl Core {
                     Some(l) => l.written_from().contains(&key),
                     None => key != section_key && !DERIVED_SECTIONS.contains(&key),
                 };
+                // The recommendations she left out of the letters (round 44); the rest go in.
+                let marked = |key: &str, id: &str| match (&letter, &meta.letter_left_out) {
+                    (Some(_), Some(ids)) if key == "recommendations" => {
+                        !ids.iter().any(|i| i == id)
+                    }
+                    _ => true,
+                };
                 for s in structure.sections().filter(|s| wanted(&s.key)) {
                     let text: Vec<String> = v
                         .drafts(case_id, &s.key)?
                         .into_iter()
-                        .filter(|d| d.status == DraftStatus::Approved)
+                        .filter(|d| d.status == DraftStatus::Approved && marked(&s.key, &d.id))
                         .map(|d| d.text_tagged)
                         .collect();
                     if !text.is_empty() {
@@ -377,6 +384,23 @@ impl Core {
                 } else {
                     Vec::new()
                 };
+            // The DSM-5 severity she set (round 43) goes with the DSM section as fixed words,
+            // after the guide, so the model writes her levels and no other; while she has
+            // set none, that it writes none (review of stage 6, R3).
+            let severity = (section.key == "dsm" && !points && letter.is_none())
+                .then(|| dv_domain::severity_request(meta.dsm_severity.as_ref()));
+            let guide_tagged = match severity {
+                Some(text) => {
+                    let out = run(&text)?;
+                    review.add("רמת החומרה שקבעת".to_owned(), &out);
+                    if guide_tagged.is_empty() {
+                        out.tagged
+                    } else {
+                        format!("{guide_tagged}\n{}", out.tagged)
+                    }
+                }
+                None => guide_tagged,
+            };
             let input = SectionInput {
                 section_key: section.key.clone(),
                 section_title: fixed_title(&section)?,
@@ -617,6 +641,8 @@ impl Core {
         out: Outgoing,
         response: Result<(Value, bool), CoreError>,
     ) -> Result<SectionResult, CoreError> {
+        // A line the last check left out (D-082) is named under the draft.
+        let left_out = had_left_out(&out);
         let crate::stage::Received {
             kind,
             response,
@@ -751,6 +777,7 @@ impl Core {
                 .iter()
                 .map(|l| format!("חסרה פסקה לפי ההנחיה: {}", show(l)))
                 .chain(reply.missing.iter().map(|q| show(q)))
+                .chain(left_out.then(|| LEFT_OUT_NOTE.to_owned()))
                 .collect(),
             contradictions: reply.contradictions.iter().map(|q| show(q)).collect(),
             demo,
@@ -959,6 +986,22 @@ pub(crate) fn answer_refusals(
         }
         result = clear(&request(&body, ctx, case_tags, suspects));
     }
+    // The last step (D-082, Einat chose it): when hiding the words was not enough, every line
+    // the gate still refuses on its own is left out whole, and the copy goes to the same gate
+    // once more. Only for refusals a fix answers; a canary or an error stays refused.
+    if let Err(blocked) = &result {
+        let codes: Vec<&str> = blocked.reasons.iter().map(|r| r.code.as_str()).collect();
+        if !codes.is_empty() && codes.iter().all(|c| dv_privacy::FIXABLE_CODES.contains(c)) {
+            if let Some((next, items)) =
+                dv_privacy::drop_refused_lines(&request(&body, ctx, case_tags, suspects))
+            {
+                answered.extend(codes.iter().map(|c| (*c).to_owned()));
+                fixed.extend(items);
+                body = next;
+                result = clear(&request(&body, ctx, case_tags, suspects));
+            }
+        }
+    }
     Answered {
         result,
         fixed,
@@ -1043,4 +1086,18 @@ impl Core {
         self.pending
             .retain(|_, p| p.kind.case() != Some(case_id) && p.payload.case_id() != case_id);
     }
+}
+
+/// Said where a request went out with a line the last check left out (D-082): under a
+/// draft, after a sorting, a check against the sources or a consultation (review of stage 6,
+/// R4), so a paragraph marked unsupported or a material left where it was has its reason.
+pub(crate) const LEFT_OUT_NOTE: &str = "קטע מהחומרים לא נשלח, כי הבדיקה לא הייתה בטוחה שאין בו שם. אם הוא חשוב לסעיף, אפשר להוסיף אותו בעצמך.";
+
+/// Whether the request went out with a line left out (D-082).
+pub(crate) fn had_left_out(out: &Outgoing) -> bool {
+    out.pending
+        .payload
+        .body()
+        .windows(dv_privacy::LEFT_OUT.len())
+        .any(|w| w == dv_privacy::LEFT_OUT.as_bytes())
 }

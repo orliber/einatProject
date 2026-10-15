@@ -1,4 +1,4 @@
-// The check of a draft against its sources over the demo core: off by default, its own
+// The check of a draft against its sources over the demo core: on by default (round 41), its own
 // review (an approval of its own), and a verdict per proposed paragraph that changes nothing.
 import { FakeCore } from "./fakeCore";
 
@@ -19,9 +19,10 @@ async function drafted() {
 }
 
 describe("the check against the sources", () => {
-  it("is off until switched on", async () => {
+  it("is on until switched off", async () => {
     const { core, caseId, key } = await drafted();
-    expect(await core.handle("verify_stage_on", {})).toBe(false);
+    expect(await core.handle("verify_stage_on", {})).toBe(true);
+    await core.handle("set_verify_stage", { on: false });
     await expect(core.handle("prepare_verify", { caseId, sectionKey: key })).rejects.toBeDefined();
   });
 

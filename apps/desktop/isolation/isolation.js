@@ -138,6 +138,8 @@ const ALLOWED = new Set([
   "set_api_key",
   "set_auto_backup",
   "set_case_guide",
+  "set_dsm_severity",
+  "set_letter_left_out",
   "set_identities",
   "set_input_sections",
   "set_lock_minutes",

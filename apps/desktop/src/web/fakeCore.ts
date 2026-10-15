@@ -189,7 +189,7 @@ export class FakeCore {
   private modes = new Map<string, SectionMode>();
   private lockMinutes = 15;
   private capUsd: number | null = null;
-  private verifyOn = false;
+  private verifyOn = true;
   private nameModel = { enabled: false, downloaded: false, size_mb: 705, problem: null as string | null };
   private ready: Record<string, number | null> = {};
   private sendStopped = false;
@@ -210,6 +210,7 @@ export class FakeCore {
     font: "David",
     confidentiality: "חסוי – מידע רפואי-פסיכולוגי. לשימוש הגורם המטפל בלבד.",
     signature: ["ד\"ר רותם בדויה", "פסיכולוגית התפתחותית מומחית"],
+    supervisor: [],
   };
   private cases: Case[] = [];
   private sampleId: string | null = null;
@@ -255,7 +256,7 @@ export class FakeCore {
       [t - 3 * 86_400 + 600, "send", "send", "החומרים נשלחו ל-Claude למיון לסעיפים (הדגמה: לא יצא מהמחשב)", false, noam],
       [t - 3 * 86_400 + 900, "send", "send", "הסעיף \"רקע התפתחותי\" נשלח ל-Claude (הדגמה: לא יצא מהמחשב)", false, noam],
       [t - 2 * 86_400, "lock", "access", "נעילה (המחשב נכנס לשינה)", false, null],
-      [t - 86_400, "export", "case", "דוח Word הופק, מוגן בסיסמה", false, noam],
+      [t - 86_400, "export", "case", "דוח הופק, נפתח בלי סיסמה", false, noam],
       [t - 86_400 + 60, "lock", "access", "נעילה", false, null],
     ];
     this.activityLog = rows.map(([ts, event, kind, text, warn, c], i) => ({ seq: i + 1, ts, event, kind, text, warn, case: c }));
@@ -634,7 +635,7 @@ export class FakeCore {
     this.keepSent(p.caseId, "sorting", p.materials.map((m) => this.filterFor(c0, m.content).tagged).join("\n\n"));
     const c = this.find(p.caseId);
     const keys = SORTABLE.map((s) => s.key);
-    const result: SortResult = { sorted: 0, unchanged: 0, links: 0, ignored: 0, demo: true };
+    const result: SortResult = { sorted: 0, unchanged: 0, links: 0, ignored: 0, demo: true, left_out: false };
     for (const m of p.materials) {
       const i = c.inputs.find((x) => x.id === m.id);
       if (!i || i.content !== m.content) {
@@ -897,6 +898,23 @@ export class FakeCore {
         if (text) guides[key] = text;
         c.meta = { ...c.meta, guides };
         if (!Object.keys(guides).length) delete c.meta.guides;
+        return null;
+      }
+      case "set_letter_left_out": {
+        const c = this.find(a.caseId);
+        const ids = a.ids as string[] | null;
+        c.meta = { ...c.meta, letter_left_out: ids ?? [] };
+        if (ids === null) delete c.meta.letter_left_out;
+        return null;
+      }
+      case "set_dsm_severity": {
+        const c = this.find(a.caseId);
+        const level = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+        const social = level(a.social);
+        const restricted = level(a.restricted);
+        if ([social, restricted].some((n) => n !== null && ![1, 2, 3].includes(n))) fail("refused", "רמת חומרה היא 1, 2 או 3.");
+        c.meta = { ...c.meta, dsm_severity: { social, restricted } };
+        if (social === null && restricted === null) delete c.meta.dsm_severity;
         return null;
       }
       case "set_practitioner":
@@ -1259,7 +1277,7 @@ export class FakeCore {
         conv.turns.push({ role: "user", text: p.shown, hidden: p.hidden, demo: true, at }, { role: "assistant", text: answer, hidden: [], demo: true, at });
         if (p.caseId) this.keepSent(p.caseId, "consult", p.question);
         conv.updated = at;
-        return { answer, demo: true, conversation_id: conv.id };
+        return { answer, demo: true, left_out: false, conversation_id: conv.id };
       }
       case "consultations":
         return [...this.convs].sort((x, y) => y.updated - x.updated).map((c) => {
@@ -1290,14 +1308,14 @@ export class FakeCore {
       case "letter":
         return [];
       case "export_pdf":
-        return "בהדמיה בדפדפן לא נוצר קובץ. בתוכנה המותקנת נשמר PDF נעול בסיסמה בתיקיית ההורדות.";
+        return "בהדמיה בדפדפן לא נוצר קובץ. בתוכנה המותקנת נשמר PDF להדפסה בלבד בתיקיית ההורדות.";
       case "check_original":
         return null;
       case "prepare_letter":
         return fail("refused", "בהדמיה בדפדפן אין ניסוח מכתבים. בתוכנה המותקנת המכתב נכתב מתוך ההמלצות המאושרות.");
       case "export_letter":
       case "export_report":
-        return "בהדמיה בדפדפן לא נוצר קובץ. בתוכנה המותקנת הדוח נשמר בתיקיית ההורדות, מוצפן בסיסמה.";
+        return "בהדמיה בדפדפן לא נוצר קובץ. בתוכנה המותקנת הדוח נשמר בתיקיית ההורדות.";
       case "set_auto_backup":
         this.autoBackup = Boolean(a.on);
         this.logActivity("settings_changed", "security", "הגיבוי האוטומטי הודלק או כובה");

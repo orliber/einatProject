@@ -43,6 +43,30 @@ pub(crate) async fn set_case_guide(
     .await
 }
 
+/// The DSM-5 severity she set (round 43): a level 1–3 for each domain, or none.
+#[tauri::command]
+pub(crate) async fn set_dsm_severity(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    social: Option<u8>,
+    restricted: Option<u8>,
+) -> Res<()> {
+    with_core(&state, move |c| {
+        c.set_dsm_severity(&case_id, social, restricted)
+    })
+    .await
+}
+
+/// The approved recommendations the letters are written from (round 44); `None`: all.
+#[tauri::command]
+pub(crate) async fn set_letter_left_out(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    ids: Option<Vec<String>>,
+) -> Res<()> {
+    with_core(&state, move |c| c.set_letter_left_out(&case_id, ids)).await
+}
+
 #[tauri::command]
 pub(crate) async fn delete_case(state: tauri::State<'_, AppState>, case_id: String) -> Res<()> {
     with_core(&state, move |c| c.delete_case(&case_id)).await

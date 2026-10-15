@@ -357,6 +357,12 @@
   background: var(--surface);
   border: 1px solid var(--line);
 }
+.run-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--text-base);
+}
 .job-failed {
   display: flex;
   align-items: center;
