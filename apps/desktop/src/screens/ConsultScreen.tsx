@@ -118,6 +118,13 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   const input = useRef<LocalTextHandle>(null);
   const caseList = cases.data ?? [];
   const selectedCase = caseList.find((c) => c.id === scope);
+  // What the conversation is about, by its scope, never by whether the case list has it: a case
+  // in the trash, or a list still loading, must not turn it into "no case data" (review of #109).
+  const savedLabel = saved.data?.find((c) => c.id === conversation)?.case_label;
+  const scopeLabel = scope === null
+    ? "שאלה כללית · בלי פרט מתיק"
+    : selectedCase ? `על התיק של ${selectedCase.child_name ?? selectedCase.meta.code}`
+      : savedLabel ? `על התיק של ${savedLabel}` : "על תיק שכבר לא ברשימה";
 
   // Follow the conversation down, like any chat.
   useEffect(() => {
@@ -280,9 +287,9 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
                       <li key={c.id} className={c.id === conversation ? "on" : undefined}>
                         <button type="button" className="history-item" disabled={inFlight} onClick={() => void open(c)} aria-current={c.id === conversation ? "true" : undefined}>
                           <span className="history-title">{c.title || "שיחה"}</span>
-                          <span className="history-meta">{c.case_label ? `על התיק של ${c.case_label}` : "שאלה כללית"}{g.id === "today" ? ` · ${when(c.updated_at)}` : g.id === "earlier" ? ` · ${when(c.updated_at)}` : ""}</span>
+                          <span className="history-meta">{c.case_label ? `על התיק של ${c.case_label}` : "שאלה כללית"}{g.id !== "yesterday" ? ` · ${when(c.updated_at)}` : ""}</span>
                         </button>
-                        <button type="button" className="icon-btn history-delete" disabled={inFlight} aria-label={`מחיקת השיחה ${c.title}`} onClick={() => setDeleting(c)}><CloseIcon /></button>
+                        <button type="button" className="icon-btn history-delete" disabled={inFlight} aria-label={`מחיקת השיחה ${c.title || "שיחה"}`} onClick={() => setDeleting(c)}><CloseIcon /></button>
                       </li>
                     ))}
                   </ul>
@@ -296,7 +303,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
           {turns.length > 0 && (
             <div className="consult-head">
               <strong className="consult-head-title">{titleOf(turns) || title}</strong>
-              <span className="chip chip-sand">{selectedCase ? `על התיק של ${selectedCase.child_name ?? selectedCase.meta.code}` : "שאלה כללית · בלי פרט מתיק"}</span>
+              <span className="chip chip-sand">{scopeLabel}</span>
             </div>
           )}
           <div className="consult-body" aria-live="polite">

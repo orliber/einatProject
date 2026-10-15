@@ -1,6 +1,7 @@
 // A model's answer, laid out from its text (round 45, D-086). The text is parsed into React
-// nodes: headings, bold, numbered and bulleted lists, paragraphs. Nothing else is recognised,
-// and nothing is ever turned into HTML: a "<" stays a "<". (CLAUDE.md: model output is text only.)
+// nodes: headings, bold, numbered and bulleted lists, paragraphs. Other marks she asked not to
+// see (single "*" or "_" emphasis, backticks, rule lines, table pipes) are dropped and their text
+// kept. Nothing is ever turned into HTML: a "<" stays a "<". (CLAUDE.md: model output is text only.)
 import "./RichText.css";
 
 /** A run of text, plain or bold. */
@@ -13,19 +14,40 @@ export type Block =
 /** Past this many lines the rest of the answer is one plain paragraph (a runaway answer stays readable). */
 const MAX_LINES = 200;
 
+/** "*a*", "_a_" and "`a`" → "a". Only a closed pair around a word is a mark: "5*3", a lone "*"
+ *  and "file_name_x" stay as written. */
+export function unmark(text: string): string {
+  return text
+    .replace(/`([^`\n]+)`/g, "$1")
+    .replace(/(^|[\s(["'״׳])\*(?!\s)([^*\n]+?)(?<!\s)\*(?=$|[\s).,:;!?"'״׳])/g, "$1$2")
+    .replace(/(^|[\s(["'״׳])_(?!\s)([^_\n]+?)(?<!\s)_(?=$|[\s).,:;!?"'״׳])/g, "$1$2");
+}
+
 /** "a **b** c" → a, b (bold), c. An unclosed "**" is ordinary text. */
 export function inlines(text: string): Inline[] {
   const out: Inline[] = [];
   const re = /\*\*([^*\n]+?)\*\*/g;
   let last = 0;
   for (let m = re.exec(text); m; m = re.exec(text)) {
-    if (m.index > last) out.push({ text: text.slice(last, m.index), bold: false });
-    out.push({ text: m[1] ?? "", bold: true });
+    if (m.index > last) out.push({ text: unmark(text.slice(last, m.index)), bold: false });
+    out.push({ text: unmark(m[1] ?? ""), bold: true });
     last = m.index + m[0].length;
   }
-  if (last < text.length) out.push({ text: text.slice(last), bold: false });
+  if (last < text.length) out.push({ text: unmark(text.slice(last)), bold: false });
   return out;
 }
+
+/** "---", "***", "* * *", "___": a rule line, which reads as a break between paragraphs. */
+const RULE = /^\s*([-*_])(\s*\1){2,}\s*$/;
+/** "| a | b |": a table row. Its cells are read in order, joined by " · ". */
+const TABLE_ROW = /^\s*\|(.*)\|\s*$/;
+function tableCells(line: string): string[] | null {
+  const m = TABLE_ROW.exec(line);
+  if (!m) return null;
+  return (m[1] ?? "").split("|").map((c) => c.trim());
+}
+/** "|---|:--:|": the line under a table's head, which carries nothing. */
+const isTableRule = (cells: string[]) => cells.every((c) => /^:?-{2,}:?$/.test(c));
 
 export function parseRich(text: string): Block[] {
   const all = text.replace(/\r\n?/g, "\n").split("\n");
@@ -39,7 +61,13 @@ export function parseRich(text: string): Block[] {
   };
   for (const raw of lines) {
     const line = raw.trimEnd();
-    if (!line.trim()) { flush(); continue; }
+    if (!line.trim() || RULE.test(line)) { flush(); continue; }
+    const cells = tableCells(line);
+    if (cells) {
+      flush();
+      if (!isTableRule(cells)) blocks.push({ kind: "paragraph", inline: inlines(cells.filter(Boolean).join(" · ")) });
+      continue;
+    }
     const heading = /^(#{1,3})\s+(.+)$/.exec(line.trim());
     // A line that is nothing but "**…**" is how the model writes a heading too.
     const boldLine = /^\*\*([^*]+)\*\*:?$/.exec(line.trim());
@@ -50,7 +78,7 @@ export function parseRich(text: string): Block[] {
       blocks.push({ kind: "heading", level: Math.min(3, heading[1]?.length ?? 1) as 1 | 2 | 3, inline: inlines(heading[2] ?? "") });
     } else if (boldLine) {
       flush();
-      blocks.push({ kind: "heading", level: 3, inline: [{ text: boldLine[1] ?? "", bold: false }] });
+      blocks.push({ kind: "heading", level: 3, inline: [{ text: unmark(boldLine[1] ?? ""), bold: false }] });
     } else if (ordered || bullet) {
       flush();
       const isOrdered = Boolean(ordered);
@@ -72,7 +100,12 @@ export function plainText(text: string): string {
   return text
     .replace(/\r\n?/g, "\n")
     .split("\n")
-    .map((l) => l.replace(/^(#{1,3})\s+/, "").replace(/\*\*([^*\n]+?)\*\*/g, "$1"))
+    .flatMap((l) => {
+      if (RULE.test(l)) return [""];
+      const cells = tableCells(l);
+      if (cells) return isTableRule(cells) ? [] : [cells.filter(Boolean).join(" · ")];
+      return [unmark(l.replace(/^(#{1,3})\s+/, "").replace(/\*\*([^*\n]+?)\*\*/g, "$1"))];
+    })
     .join("\n");
 }
 

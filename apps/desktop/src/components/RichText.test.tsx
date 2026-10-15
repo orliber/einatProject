@@ -1,7 +1,7 @@
 // The model's answer is laid out from its text, and never from HTML (round 45, D-086).
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { inlines, parseRich, plainText, RichText } from "./RichText";
+import { inlines, parseRich, plainText, RichText, unmark } from "./RichText";
 
 describe("RichText", () => {
   it("a heading, bold inside a sentence, and a mixed list", () => {
@@ -49,5 +49,20 @@ describe("RichText", () => {
 
   it("the clipboard text has no marks", () => {
     expect(plainText("## כותרת\nמילה **מודגשת** כאן")).toBe("כותרת\nמילה מודגשת כאן");
+    expect(plainText("*נטוי* ו-`קוד`\n---\n| מבחן | ציון |\n|---|---|\n| WPPSI | 98 |")).toBe("נטוי ו-קוד\n\nמבחן · ציון\nWPPSI · 98");
+  });
+
+  it("the other marks are dropped and their words kept; a lone star or a file name stays", () => {
+    expect(unmark("זה *חשוב* וגם _זה_ ו-`ABAS-3`")).toBe("זה חשוב וגם זה ו-ABAS-3");
+    expect(unmark("5 * 3 = 15, report_final_v2.docx, ו-* לבד")).toBe("5 * 3 = 15, report_final_v2.docx, ו-* לבד");
+    const blocks = parseRich("פסקה ראשונה\n* * *\nפסקה שנייה\n***\n---\n| א | ב |\n| :-- | --: |\n| 1 | 2 |");
+    expect(blocks).toEqual([
+      { kind: "paragraph", inline: [{ text: "פסקה ראשונה", bold: false }] },
+      { kind: "paragraph", inline: [{ text: "פסקה שנייה", bold: false }] },
+      { kind: "paragraph", inline: [{ text: "א · ב", bold: false }] },
+      { kind: "paragraph", inline: [{ text: "1 · 2", bold: false }] },
+    ]);
+    // A bullet still works, and its own emphasis is dropped.
+    expect(parseRich("* פריט *ראשון*")).toEqual([{ kind: "list", ordered: false, start: 1, items: [[{ text: "פריט ראשון", bold: false }]] }]);
   });
 });
