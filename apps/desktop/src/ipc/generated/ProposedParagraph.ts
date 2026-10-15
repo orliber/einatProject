@@ -8,4 +8,8 @@ source_refs: Array<string>,
 /**
  * Problems found locally (unknown source, a number not found in the sources…).
  */
-warnings: Array<string>, };
+warnings: Array<string>, 
+/**
+ * The line of the section's guide it answers, from 1; 0: none (round 29).
+ */
+guide: number, };

@@ -203,6 +203,14 @@ pub(crate) async fn paragraph_versions(
 
 /// The paragraph of her past reports closest to a draft paragraph (ST2). Local only.
 #[tauri::command]
+pub(crate) async fn own_section_help(
+    state: tauri::State<'_, AppState>,
+    section_key: String,
+) -> Res<dv_core::OwnSectionHelp> {
+    with_core(&state, move |c| c.own_section_help(&section_key)).await
+}
+
+#[tauri::command]
 pub(crate) async fn similar_paragraph(
     state: tauri::State<'_, AppState>,
     case_id: String,

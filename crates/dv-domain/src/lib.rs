@@ -7,6 +7,7 @@ pub mod compare;
 pub mod consistency;
 pub mod dates;
 pub mod identity;
+pub mod prior;
 pub mod records;
 pub mod report;
 pub mod routing;
@@ -17,11 +18,16 @@ pub use consistency::{check_age, check_gender, check_grade, check_recommendation
 pub use identity::{
     assign_tag, FoundName, Identity, IdentityInput, IdentitySource, Role, PRACTITIONER_TAG,
 };
+pub use prior::{
+    date_text, document_date, record_order, DocDate, MaterialSummary, PriorRecord, Setting,
+};
 pub use records::{
     Age, Author, CaseInput, CaseMeta, CaseSummary, ChatMessage, ChatRole, Consent, DraftParagraph,
     DraftStatus, Folder, GrammaticalGender, InputKind, MaskEntry, Transmission,
 };
-pub use report::{ReportPart, ReportSection, ReportStructure};
+pub use report::{
+    ReportPart, ReportSection, ReportStructure, SectionMode, DEFAULT_TEMPLATE, INSTITUTE_TEMPLATE,
+};
 pub use routing::{passage_ranges, passages, Feed, Routing, SectionPassages, Suggestion};
 pub use scores::{
     check_scores, format_sheet, instruments, sheet_profiles, sheet_table, Instrument, ScoreEntry,

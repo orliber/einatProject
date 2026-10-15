@@ -26,11 +26,13 @@ import type { ReviewPart } from "../ipc/generated/ReviewPart";
 import type { Role } from "../ipc/generated/Role";
 import type { ScoreSheet } from "../ipc/generated/ScoreSheet";
 import type { SectionResult } from "../ipc/generated/SectionResult";
+import type { SectionMode } from "../ipc/generated/SectionMode";
 import type { AutoHidden } from "../ipc/generated/AutoHidden";
 import type { IdentitySource } from "../ipc/generated/IdentitySource";
 import type { SuspectDecision } from "../ipc/generated/SuspectDecision";
 import type { UiError } from "../ipc/generated/UiError";
 import { kindLabel } from "../i18n/he";
+import institute from "../../../../templates/institute-v1.json";
 import structure from "../../../../templates/report_structure.json";
 import { readDocx } from "./docx";
 import { filter, restore, type Person } from "./filter";
@@ -94,11 +96,20 @@ interface Case {
 
 type Pending =
   | { type: "verify"; caseId: string; section: string; draftIds: string[] }
-  | { type: "section"; caseId: string; section: string; refs: { sid: string; label: string; tagged: string }[]; instruction: string; replaces: string | null }
+  | { type: "section"; caseId: string; section: string; refs: { sid: string; label: string; tagged: string }[]; instruction: string; replaces: string | null; points?: string }
   | { type: "consult"; question: string; shown: string; hidden: string[]; caseId: string | null; conversationId: string | null }
   | { type: "sort"; caseId: string; materials: { id: string; count: number; content: string }[] };
 
 const SECTIONS = structure.parts.flatMap((p) => p.sections.map((s) => ({ ...s, part: p.title, inputs: s.inputs as InputKind[] })));
+/** The institute's guide of each section (round 29), by key: the fake's report keeps the old
+ *  template's sections, whose keys the institute's has too. */
+const INSTITUTE_GUIDES = new Map<string, string>(
+  institute.parts.flatMap((p) => p.sections.map((s) => [s.key, "guide" in s ? s.guide : ""] as const)),
+);
+/** Who writes each section of the institute's report, as its template says (round 30). */
+const INSTITUTE_MODES = institute.parts.flatMap((p) => p.sections
+  .filter((s) => s.inputs.length > 0 && !["dsm", "summary", "diagnoses", "recommendations"].includes(s.key))
+  .map((s) => ({ key: s.key, title: s.title, template_mode: ("mode" in s && s.mode === "self" ? "self" : "ai") as SectionMode })));
 /** Sections written from materials (the rest are written from other sections). */
 const SORTABLE = SECTIONS.filter((s) => s.inputs.length > 0 && !["dsm", "summary", "diagnoses", "recommendations"].includes(s.key));
 const DERIVED = ["dsm", "summary", "diagnoses", "recommendations"];
@@ -127,6 +138,17 @@ function fail(code: string, message: string, action: UiError["action"] = actionF
   throw e;
 }
 
+/** The institute first, then the community, newest first; undated last (round 31). */
+function priorOrder(inputs: CaseInput[], routing: MaterialRouting[]): string[] {
+  const rank = { institute: 0, community: 1, unknown: 2 } as const;
+  const rows = inputs.flatMap((i) => {
+    const rec = routing.find((r) => r.input_id === i.id)?.record;
+    return rec ? [{ id: i.id, rank: rank[rec.setting], date: R.documentDate(i.content) }] : [];
+  });
+  const at = (d: [number, number] | null) => (d ? d[0] * 12 + d[1] : -1);
+  return rows.sort((a, b) => a.rank - b.rank || at(b.date) - at(a.date)).map((r) => r.id);
+}
+
 function sentences(text: string, n: number): string {
   return (text.match(/[^.!?]+[.!?]?/g) ?? []).slice(0, n).join("").trim();
 }
@@ -147,6 +169,10 @@ export class FakeCore {
   /** "מה יצא מהמחשב": what each request with a case's text carried (tagged), newest last. */
   private sentLog: { id: string; caseId: string; place: string; at: number; text: string }[] = [];
   private practitioner = ["ד\"ר רותם בדויה"];
+  /** Her own general guides (round 29), by section key. */
+  private guides = new Map<string, string>();
+  /** Who writes a section, as she set it in settings (round 30). */
+  private modes = new Map<string, SectionMode>();
   private lockMinutes = 15;
   private capUsd: number | null = null;
   private verifyOn = false;
@@ -430,9 +456,14 @@ export class FakeCore {
       const feeds = SORTABLE.map((s) => s.key).filter((k) => R.feed(r, k, table, count) !== null);
       const sorted = R.isSorted(r, count);
       const used = sorted ? new Set(r.suggestion?.sections.filter((x) => feeds.includes(x.section)).flatMap((x) => x.passages)).size : count;
+      const read = R.readingOf(r, count);
+      const date = R.documentDate(i.content);
       return {
         input_id: i.id, feeds, suggested: sorted ? R.base(r, table, count) : [], table, sorted, needs_sorting: R.needsSorting(r, count),
         by_ai: false, added: r.added, removed: r.removed, passages: count, used_passages: used,
+        summary: read ? restore(read.text, c.people, this.practitioner) : "",
+        record: read?.record ? { ...read.record, date: date ? `${date[1]}/${date[0]}` : "" } : null,
+        summary_notes: [],
       };
     });
   }
@@ -442,6 +473,9 @@ export class FakeCore {
     const routing = this.routing(c);
     return {
       id: c.id, meta: c.meta, identities, inputs: c.inputs, routing, sample: c.id === this.sampleId,
+      // Round 31: what no material feeds yet, and the previous assessments in the report's order.
+      missing: SORTABLE.filter((s) => !routing.some((r) => r.feeds.includes(s.key))).map((s) => s.title),
+      prior_order: priorOrder(c.inputs, routing),
       retention_default: `${new Date(c.created * 1000).getFullYear() + Math.max(7, 25 - (c.meta.age?.years ?? 25))}-${new Date(c.created * 1000).toISOString().slice(5, 10)}`,
       sections: SECTIONS.map((s) => {
         const drafts = c.drafts.filter((d) => d.section === s.key && d.status !== "rejected" && d.status !== "superseded");
@@ -451,14 +485,21 @@ export class FakeCore {
           sortable: SORTABLE.some((x) => x.key === s.key),
           paragraphs: drafts.map((d) => ({ id: d.id, text: restore(d.text, c.people, this.practitioner), status: d.status, by_ai: d.byAi, sources: d.sources, warnings: [], replaces: d.replaces ?? null, has_versions: versionsOf(c.drafts, d).length > 0, style_note: null, style: fakeStyleHint(d) })),
           approved: drafts.some((d) => d.status === "approved"),
+          // The fake's cases are in the old template, where every section is drafted unless she
+          // changed it in settings (round 30).
+          mode: this.modes.get(s.key) ?? "ai",
+          guide: this.guides.get(s.key) ?? INSTITUTE_GUIDES.get(s.key) ?? "",
+          guide_is_default: !this.guides.has(s.key),
+          case_guide: c.meta.guides?.[s.key] ?? "",
         };
       }),
     };
   }
 
-  private prepareSection(c: Case, key: string, instruction: string, replaces: string | null = null): Prepared {
+  private prepareSection(c: Case, key: string, instruction: string, replaces: string | null = null, points = false): Prepared {
     if (!c.meta.consent) fail("consent_missing", `לפני שליחה ל-${this.ai} צריך לרשום בתיק את הסכמת ההורים.`);
     const section = SECTIONS.find((s) => s.key === key) ?? fail("not_found", "הסעיף לא נמצא");
+    if (this.modes.get(key) === "self" && !points) fail("refused", "את כותבת את הסעיף הזה בעצמך, ולכן שום חומר לא נשלח בשבילו. אפשר לכתוב פסקה, או לנסח מהנקודות שלך.");
     const parts: ReviewPart[] = [];
     const autoHidden: AutoHidden[] = [];
     const hidden = new Set<string>();
@@ -474,7 +515,7 @@ export class FakeCore {
       checks.name_suspects += f.checks.name_suspects;
       return f.tagged;
     };
-    const sources: { label: string; title?: string; text: string }[] = DERIVED.includes(key)
+    const sources: { label: string; title?: string; text: string }[] = points ? [] : DERIVED.includes(key)
       ? c.drafts.filter((d) => d.status === "approved" && !DERIVED.includes(d.section)).map((d) => ({ label: `סעיף מאושר · ${SECTIONS.find((s) => s.key === d.section)?.title ?? ""}`, text: restore(d.text, c.people, this.practitioner) }))
       : c.inputs.flatMap((i) => {
           const f = this.feedOf(c, i, section.key);
@@ -482,7 +523,7 @@ export class FakeCore {
           if (f === "whole") return [{ label: kindLabel[i.kind], title: i.title, text: i.content }];
           return [{ label: `${kindLabel[i.kind]} · קטעים שנבחרו לסעיף`, title: i.title, text: R.excerpt(R.passages(i.content), f) }];
         });
-    if (DERIVED.includes(key) && sources.length === 0) {
+    if (!points && DERIVED.includes(key) && sources.length === 0) {
       fail("refused", "הסעיף הזה נכתב מתוך הסעיפים שכבר אישרת, ועוד לא אישרת אף סעיף. מאשרים קודם את הטיוטות בסעיפים האחרים, ואז חוזרים לכאן.");
     }
     sources.forEach((s, n) => {
@@ -490,9 +531,11 @@ export class FakeCore {
       const label = s.title !== undefined ? this.titledLabel(c, parts, `${sid} · ${s.label}`, s.title) : `${sid} · ${s.label}`;
       refs.push({ sid, label, tagged: take(label, s.text) });
     });
-    if (instruction.trim()) take("הבקשה שלך", instruction);
+    const guide = [this.guides.get(key) ?? INSTITUTE_GUIDES.get(key) ?? "", c.meta.guides?.[key] ?? ""].map((t) => t.trim()).filter(Boolean).join("\n");
+    if (instruction.trim() && guide) take("איך לכתוב את הסעיף", guide);
+    const tagged = instruction.trim() ? take(points ? "הנקודות שלך" : "הבקשה שלך", instruction) : "";
     const approval = newId("approval");
-    this.pending.set(approval, { type: "section", caseId: c.id, section: key, refs, instruction, replaces });
+    this.pending.set(approval, { type: "section", caseId: c.id, section: key, refs, instruction, replaces, ...(points ? { points: tagged } : {}) });
     return this.withKept(c, { approval_id: approval, parts, suspects: [], auto_hidden: autoHidden, hidden: Array.from(hidden), checks, blocked: [], demo_mode: true });
   }
 
@@ -581,8 +624,17 @@ export class FakeCore {
         result.unchanged += 1;
         continue;
       }
-      const r = this.routingOf(c, m.id);
-      const placed = R.sortLocally(R.passages(i.content), keys);
+      const parts = R.passages(i.content);
+      // Round 31: the same reading sums each material up, with a record for a report.
+      const report = i.kind === "prior_report" || i.kind === "professional";
+      const advice = parts.find((x) => x.includes("מומלץ") || x.includes("המלצ"));
+      const reading: R.Reading = {
+        passageCount: m.count,
+        text: sentences(parts.join(" "), 2),
+        ...(report ? { record: { kind: kindLabel[i.kind], by: "", setting: "unknown" as const, findings: sentences(parts[1] ?? parts[0] ?? "", 1), recommendations: advice ? sentences(advice, 1) : "" } } : {}),
+      };
+      const r = { ...this.routingOf(c, m.id), reading };
+      const placed = R.sortLocally(parts, keys);
       if (!placed.length) {
         c.routing.set(m.id, { ...r, unplaced: m.count });
         result.unchanged += 1;
@@ -597,7 +649,9 @@ export class FakeCore {
 
   private sendSection(p: Extract<Pending, { type: "section" }>): SectionResult {
     const c = this.find(p.caseId);
-    const paragraphs = p.refs.slice(0, 3).map((r) => ({ text: sentences(r.tagged, 2), source_refs: [r.sid], warnings: [] as string[] })).filter((x) => x.text);
+    const paragraphs = p.points !== undefined
+      ? [{ text: p.points.split("\n").map((l) => l.trim()).filter(Boolean).join(" "), source_refs: [] as string[], warnings: [] as string[], guide: 0 }].filter((x) => x.text)
+      : p.refs.slice(0, 3).map((r) => ({ text: sentences(r.tagged, 2), source_refs: [r.sid], warnings: [] as string[], guide: 0 })).filter((x) => x.text);
     const approvedTarget = p.replaces ? c.drafts.find((d) => d.id === p.replaces && d.status === "approved") : undefined;
     const target = p.replaces ? c.drafts.find((d) => d.id === p.replaces && d.status === "proposed") : undefined;
     if (approvedTarget && paragraphs.length) {
@@ -783,6 +837,41 @@ export class FakeCore {
       case "set_lock_minutes":
         this.lockMinutes = Number(a.minutes);
         return null;
+      case "section_modes":
+        return INSTITUTE_MODES.map((m) => ({ ...m, mode: this.modes.get(m.key) ?? m.template_mode }));
+      case "set_section_mode": {
+        if (!INSTITUTE_MODES.some((m) => m.key === a.sectionKey)) fail("not_found", "הסעיף לא נמצא");
+        this.modes.set(String(a.sectionKey), a.mode as SectionMode);
+        return null;
+      }
+      case "own_section_help":
+        return { examples: [], openings: [], closings: [], phrases: [] };
+      case "prepare_from_points": {
+        const c = this.find(a.caseId);
+        if (this.modes.get(String(a.sectionKey)) !== "self") fail("refused", "ניסוח מהנקודות שלך הוא לסעיפים שאת כותבת בעצמך.");
+        if (!String(a.points).trim()) fail("refused", "כותבים קודם את הנקודות, ואז מנסחים מהן.");
+        return this.prepareSection(c, String(a.sectionKey), String(a.points), null, true);
+      }
+      case "set_section_guide": {
+        if (!SECTIONS.some((s) => s.key === a.sectionKey)) fail("not_found", "הסעיף לא נמצא");
+        const text = String(a.text).replace(/\r\n?/g, "\n").trim();
+        if (text.length > 4000) fail("refused", "ההנחיה ארוכה מדי: עד 4000 תווים.");
+        if (text) this.guides.set(String(a.sectionKey), text);
+        else this.guides.delete(String(a.sectionKey));
+        return null;
+      }
+      case "set_case_guide": {
+        const c = this.find(a.caseId);
+        if (!SECTIONS.some((s) => s.key === a.sectionKey)) fail("not_found", "הסעיף לא נמצא");
+        const text = String(a.text).replace(/\r\n?/g, "\n").trim();
+        if (text.length > 4000) fail("refused", "ההנחיה ארוכה מדי: עד 4000 תווים.");
+        const key = String(a.sectionKey);
+        const guides: Record<string, string> = Object.fromEntries(Object.entries(c.meta.guides ?? {}).filter(([k]) => k !== key));
+        if (text) guides[key] = text;
+        c.meta = { ...c.meta, guides };
+        if (!Object.keys(guides).length) delete c.meta.guides;
+        return null;
+      }
       case "set_practitioner":
         this.practitioner = a.names as string[];
         return null;
@@ -903,7 +992,11 @@ export class FakeCore {
       }
       case "update_case": {
         const c = this.find(a.caseId);
-        c.meta = a.meta as CaseMeta;
+        // The case's guide lines have their own command (round 29).
+        const kept = c.meta.guides;
+        c.meta = { ...(a.meta as CaseMeta) };
+        if (kept) c.meta.guides = kept;
+        else delete c.meta.guides;
         c.updated = now();
         return null;
       }

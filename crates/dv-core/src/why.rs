@@ -8,11 +8,11 @@
 
 use std::collections::HashSet;
 
-use dv_domain::{passages, DraftStatus, Feed, ReportStructure};
+use dv_domain::{passages, DraftStatus, Feed};
 use dv_privacy::restore::restore;
 
 use crate::views::SourceExcerpt;
-use crate::{sorting, Core, CoreError, DERIVED_SECTIONS};
+use crate::{sorting, structure_for, Core, CoreError, DERIVED_SECTIONS};
 
 /// Passages shown per material, and in all.
 const PER_SOURCE: usize = 3;
@@ -55,8 +55,7 @@ impl Core {
         case_id: &str,
         draft_id: &str,
     ) -> Result<Vec<SourceExcerpt>, CoreError> {
-        let structure =
-            ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
+        let structure = structure_for(self.vault_ref()?, case_id)?;
         let v = self.vault_ref()?;
         let identities = v.identities(case_id)?;
         let masks = v.masks(case_id)?;

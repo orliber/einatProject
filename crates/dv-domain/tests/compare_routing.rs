@@ -342,6 +342,7 @@ fn routing(count: u32) -> impl Strategy<Value = Routing> {
             added,
             removed,
             unplaced: None,
+            summary: None,
         })
 }
 

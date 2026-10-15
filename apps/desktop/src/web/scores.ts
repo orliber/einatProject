@@ -37,6 +37,7 @@ export function formatSheet(sheet: ScoreSheet): string {
   if (sheet.module.trim()) out += `מודול: ${sheet.module.trim()}\n`;
   let group = "";
   const indexes: [string, number][] = [];
+  const groups = new Map<string, [string, number][]>();
   let anyPercentile = false;
   for (const e of sheet.entries) {
     const m = inst.measures.find((x) => x.key === e.measure);
@@ -63,6 +64,7 @@ export function formatSheet(sheet: ScoreSheet): string {
     const note = e.note.trim() ? `. ${e.note.trim()}` : "";
     out += range ? `- ${name}: ${value} – ${range}${note}\n` : `- ${name}: ${value}${note}\n`;
     if (m.scale === "standard" && m.group === "מדדים" && m.key !== "fsiq" && m.key !== "gac") indexes.push([m.name_he, e.value]);
+    if (!["fsiq", "gac", "total"].includes(m.key)) groups.set(m.group, [...(groups.get(m.group) ?? []), [name, e.value]]);
   }
   if (indexes.length > 1) {
     const hi = indexes.reduce((a, b) => (b[1] > a[1] ? b : a));
@@ -70,6 +72,12 @@ export function formatSheet(sheet: ScoreSheet): string {
     if (hi[1] - lo[1] >= 15) {
       out += `פער של ${fmt(hi[1] - lo[1])} נקודות בין ${hi[0]} (${fmt(hi[1])}) לבין ${lo[0]} (${fmt(lo[1])}), סטיית תקן אחת או יותר. מובהקות הפער נבדקת לפי טבלאות המבחן.\n`;
     }
+  }
+  // As in dv_domain::format_sheet: the order from the highest to the lowest, worked out here.
+  for (const [g, rows] of groups) {
+    if (rows.length < 2) continue;
+    const order = [...rows].sort((a, b) => b[1] - a[1]).map(([n, v]) => `${n} – ציון ${fmt(v)}`);
+    out += `${g} מהגבוה לנמוך: ${order.join("; ")}\n`;
   }
   out += `${inst.scale_note_he}\n`;
   if (anyPercentile) out += "האחוזונים חושבו לפי העקומה הנורמלית.\n";

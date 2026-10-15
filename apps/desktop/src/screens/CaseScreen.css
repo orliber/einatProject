@@ -480,6 +480,8 @@
   align-self: flex-start;
   margin: 12px 24px 0;
   font-size: var(--text-base);
+  /* Full colour: on the section's background the faded link fails the contrast check. */
+  opacity: 1;
 }
 /* The report's table of contents. */
 .contents {

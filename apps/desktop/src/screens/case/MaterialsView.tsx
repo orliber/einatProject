@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { useApp } from "../../App";
 import { kindLabel, kindOrder } from "../../i18n/he";
-import { ipc, type CaseInput, type FollowUpView, type ImportPreview, type InputKind, type MaterialRouting, type ScoreSheet } from "../../ipc/client";
+import { ipc, type CaseInput, type FollowUpView, type ImportPreview, type InputKind, type MaterialRouting, type PriorRecordView, type ScoreSheet, type Setting } from "../../ipc/client";
 import type { FilterOutcome } from "../../ipc/generated/FilterOutcome";
 import { ImportDialog } from "../../components/ImportDialog";
 import { AddMenu } from "../../components/Menu";
@@ -174,12 +174,13 @@ export function MaterialsView({ api }: { api: CaseApi }) {
       <ErrorLine error={error} />
       {autoSaved && (
         <div className="note-sand row" role="status">
-          <span className="grow">"{autoSaved.title}" נשמר בתיק. לא היה בו מה להסתיר.</span>
+          <span className="grow">"{autoSaved.title}" נשמר בתיק.</span>
           <button type="button" className="btn btn-small" onClick={() => { setSelected(autoSaved.id); setAutoSaved(null); }}>לבדיקה</button>
           <button type="button" className="btn btn-small" onClick={() => void undoAutoSave()}>ביטול</button>
         </div>
       )}
       {detail.meta.follows && <FollowUpPanel api={api} />}
+      {detail.inputs.length > 0 && <MaterialsReading api={api} titleOf={(id) => detail.inputs.find((x) => x.id === id)?.title ?? ""} open={(id) => setSelected(id)} />}
       <div className="view-body">
         <section className="materials-list" aria-label="רשימת החומרים">
           {groups.map((g) => (
@@ -210,13 +211,13 @@ export function MaterialsView({ api }: { api: CaseApi }) {
                   </span>
                 )}
               </div>
-              {g.kinds.includes("prior_report") && g.items.length > 0 && <PriorReportsAsk api={api} />}
               {(opened.has(g.label) ? g.items : g.items.slice(0, SLOT_SHOWN)).map((i) => (
                 <button key={i.id} type="button" className={i.id === selected ? "material selected" : "material"} onClick={() => setSelected(i.id)}>
                   <span className="material-title">{i.title || kindLabel[i.kind]}</span>
                   <span className="small muted">
                     {feedText(routeOf(i.id), titleOf)}{routeOf(i.id)?.sorted && <span className="sorted-mark"> · מוין</span>} · {new Date(i.created_at * 1000).toLocaleDateString("he-IL", { day: "numeric", month: "numeric" })}
                   </span>
+                  {routeOf(i.id)?.summary && <span className="material-summary small">{firstSentence(routeOf(i.id)?.summary ?? "")}</span>}
                 </button>
               ))}
               {g.items.length > SLOT_SHOWN && !opened.has(g.label) && (
@@ -254,6 +255,7 @@ export function MaterialsView({ api }: { api: CaseApi }) {
                   <button type="button" className="btn btn-small" onClick={() => setChoosing(input)}>שינוי הסעיפים</button>
                 </div>
               )}
+              {route?.summary && <ReadingView route={route} ai={ai} />}
               <div className="material-text serif">
                 {preview ? <Segments segments={preview.original_segments} side="original" /> : input.content}
               </div>
@@ -283,6 +285,80 @@ export function MaterialsView({ api }: { api: CaseApi }) {
           onSaved={async () => { setWriting(null); await reload(); notify("נשמר בתיק."); }} />
       )}
     </div>
+  );
+}
+
+/** The first sentence of a summary, for the row. */
+/** The summary's first sentence; with no sentence mark, its first line, cut at about 160
+ *  letters at a space (the review of stage 3). */
+function firstSentence(text: string): string {
+  const m = /^.*?[.!?](?=\s|$)/s.exec(text.trim());
+  const first = (m ? m[0] : text.trim().split("\n")[0] ?? "").trim();
+  if (first.length <= 160) return first;
+  const cut = first.lastIndexOf(" ", 160);
+  return `${first.slice(0, cut > 80 ? cut : 160)}…`;
+}
+
+const SETTING: Record<Setting, string> = { institute: "במכון", community: "בקהילה", unknown: "לא צוין איפה" };
+
+/** One previous assessment, as the reading recorded it. Plain text only. */
+function RecordLine({ record }: { record: PriorRecordView }) {
+  const head = [record.date, record.kind, record.by && `על ידי ${record.by}`, SETTING[record.setting]].filter(Boolean).join(" · ");
+  return (
+    <div className="stack prior-record">
+      <b className="small">{head}</b>
+      {record.findings && <span className="small"><b>ממצאים: </b>{record.findings}</span>}
+      {record.recommendations && <span className="small"><b>המלצות: </b>{record.recommendations}</span>}
+    </div>
+  );
+}
+
+/** What the reading said about one material (round 31). */
+function ReadingView({ route, ai }: { route: MaterialRouting; ai: string }) {
+  return (
+    <section className="material-reading stack" aria-label="מה כתוב בחומר">
+      <b className="small">מה כתוב בו, בקיצור ({ai} קרא, אחרי הסתרה)</b>
+      <p className="serif">{route.summary}</p>
+      {route.record && <RecordLine record={route.record} />}
+      {route.summary_notes.length > 0 && (
+        <ul className="small reading-notes">{route.summary_notes.map((n, i) => <li key={i}>{n}</li>)}</ul>
+      )}
+    </section>
+  );
+}
+
+/** "סיכום החומרים": what no material feeds yet, and the previous assessments in the order
+ *  the report lists them (fixed in code, round 31). */
+function MaterialsReading({ api, titleOf, open }: { api: CaseApi; titleOf: (id: string) => string; open: (id: string) => void }) {
+  const { detail } = api;
+  const records = detail.prior_order.flatMap((id) => {
+    const record = detail.routing.find((r) => r.input_id === id)?.record;
+    return record ? [{ id, record }] : [];
+  });
+  const unread = detail.routing.filter((r) => r.needs_sorting).length;
+  return (
+    <section className="materials-reading stack" aria-label="סיכום החומרים">
+      <b>סיכום החומרים</b>
+      {detail.missing.length > 0 ? (
+        <p className="small">אין עדיין חומר ל: {detail.missing.join(" · ")}</p>
+      ) : (
+        <p className="small muted">לכל סעיף שנכתב מהחומרים יש חומר.</p>
+      )}
+      {unread > 0 && <p className="small muted">{unread === 1 ? "חומר אחד עוד לא נקרא." : `${unread} חומרים עוד לא נקראו.`} הסיכום שלהם יופיע אחרי המיון.</p>}
+      {records.length > 0 && (
+        <div className="stack">
+          <span className="small muted">אבחונים וטיפולים קודמים, בסדר שבו הם נכתבים בדוח:</span>
+          <ol className="prior-list">
+            {records.map(({ id, record }) => (
+              <li key={id}>
+                <button type="button" className="link-btn" onClick={() => open(id)}>{titleOf(id) || record.kind}</button>
+                <RecordLine record={record} />
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -435,63 +511,6 @@ const NEEDS: Need[] = [
 
 /** Anything else (notes, pasted text). */
 const OTHER: Need = { label: "הערות וטקסט חופשי", kinds: ["free_text"], feeds: "לפי המיון", required: false, add: "free_text", addLabel: "הדבקת טקסט" };
-
-const PRIOR_TOPICS = ["אבחנות", "ממצאים עיקריים", "המלצות", "טיפולים שניתנו", "חוזקות", "קשיים", "מבחנים וציונים"];
-
-/** A free instruction about the previous reports ("summarize each by these topics"). It goes
- *  through the same preparation, review and gate as every section request; the answer is the
- *  draft of the "previous assessments" section, kept in the vault like any other draft. */
-function PriorReportsAsk({ api }: { api: CaseApi }) {
-  const [open, setOpen] = useState(false);
-  const [topics, setTopics] = useState<string[]>([]);
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const { fail } = useApp();
-  const [error, setError] = useState<string | null>(null);
-  const chosen = [...topics, ...(text.trim() ? [text.trim()] : [])];
-  const toggle = (t: string) => setTopics((c) => (c.includes(t) ? c.filter((x) => x !== t) : [...c, t]));
-  async function go() {
-    setError(null);
-    setBusy(true);
-    try {
-      await api.draft(
-        "prior_assessments",
-        `סכמי כל אחד מהדוחות והאבחונים הקודמים בנפרד, תחת כותרת עם שם המסמך, לפי הנושאים האלה: ${chosen.join(", ")}. ` +
-          "כללי: רק מה שכתוב במקורות, בלי להוסיף ממצאים, ועם מקור לכל פסקה.",
-      );
-    } catch (e) {
-      setError(fail(e as never));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className="prior-ask">
-      <button type="button" className="btn btn-small" aria-expanded={open} onClick={() => setOpen(!open)}>
-        ✦ סיכום כל דוח לפי נושאים
-      </button>
-      {open && (
-        <div className="stack">
-          <div className="row" role="group" aria-label="נושאים מוצעים">
-            {PRIOR_TOPICS.map((t) => (
-              <button key={t} type="button" className={topics.includes(t) ? "chip on" : "chip"} aria-pressed={topics.includes(t)} onClick={() => toggle(t)}>{t}</button>
-            ))}
-          </div>
-          <textarea rows={2} value={text} onChange={(e) => setText(e.target.value)}
-            aria-label="הוראה חופשית על הדוחות הקודמים"
-            placeholder="או לכתוב בחופשיות: למשל, סכמי כל דוח לפי תפקוד שפתי, קשב ורגש" />
-          <p className="small muted">התשובה נשמרת כטיוטה ב"אבחונים וטיפולים".</p>
-          <div className="row">
-            <button type="button" className="btn btn-primary btn-small" disabled={busy || chosen.length === 0} onClick={() => void go()}>
-              {busy ? "מכינה…" : "בדיקה לפני שליחה"}
-            </button>
-          </div>
-          <ErrorLine error={error} />
-        </div>
-      )}
-    </div>
-  );
-}
 
 /** D-029: the scores of this follow-up next to the assessment before, by fixed rules. */
 function FollowUpPanel({ api }: { api: CaseApi }) {

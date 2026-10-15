@@ -17,6 +17,7 @@ import { ipc, type ReportSettings, type TemplateView } from "../ipc/client";
 import { PROVIDERS, providerOf } from "../ai";
 
 import { TEXT_SIZES, applyTextSize, readTextSize } from "../textSize";
+import { SectionModesSettings } from "../components/SectionModes";
 import { SETTINGS_PANES, type SettingsPane } from "./settingsPanes";
 import "./SettingsScreen.css";
 
@@ -232,6 +233,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                 <button type="button" className="btn btn-primary align-start"
                   onClick={() => void run(() => ipc.setReportSettings({ ...report, signature: report.signature.filter((l) => l.trim()) }), "הגדרות הדוח נשמרו.")}>שמירה</button>
               </section>
+              <SectionModesSettings />
               <section className="card setting" aria-labelledby="s-template">
                 <h2 id="s-template">התבנית שלי (Word)</h2>
                 <span className="hint">

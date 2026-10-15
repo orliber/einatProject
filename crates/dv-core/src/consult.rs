@@ -92,8 +92,7 @@ impl Core {
             review.add("השאלה שלך".to_owned(), &msg);
             let mut case_context = None;
             if let Some(c) = case_id {
-                let structure = ReportStructure::load_default()
-                    .map_err(|e| CoreError::Internal(e.to_string()))?;
+                let structure = structure_for(v, c)?;
                 let mut lines = Vec::new();
                 for s in structure.sections() {
                     for d in v

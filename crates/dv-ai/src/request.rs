@@ -174,6 +174,31 @@ pub struct SectionInput {
     pub history: Vec<TaggedTurn>,
     pub instruction_tagged: String,
     pub style_profile: Option<String>,
+    /// How she wants the section written (round 29), filtered like her request: the general
+    /// guide, then this case's own lines. Empty: no guide.
+    pub guide_tagged: String,
+    /// A section she writes herself, worded from her points only (round 30): her request is
+    /// the points, and nothing else of the case goes with it.
+    pub points_only: bool,
+    /// The sources come in the order the section is written in (round 31: previous
+    /// assessments, the institute first, then the community, newest first), fixed in code.
+    pub sources_in_order: bool,
+}
+
+/// What the request says when the order of the sources is fixed in code (round 31).
+pub const ORDER_LINE: &str = "המקורות מסודרים לפי הסדר שבו הם נכתבים בסעיף, והסדר נקבע במחשב. כתוב/י עליהם באותו סדר שבו הם מופיעים, פסקה לכל מקור.";
+
+/// The opening of a request worded from her points (round 30): the builder's own words.
+pub const POINTS_LINE: &str = "את הסעיף הזה הפסיכולוגית כותבת בעצמה. נסח/י אותו רק מתוך הנקודות שבבקשה שלה, בלי להוסיף שום עובדה, התרשמות או פרשנות שאינן בהן. אין מקורות S, ולכן source_refs ריק בכל פסקה.";
+
+/// The lines of a section's guide, as they are numbered in the request.
+#[must_use]
+pub fn guide_lines(guide: &str) -> Vec<&str> {
+    guide
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect()
 }
 
 /// The per-request marker for data blocks, from 16 random bytes. Letters only: digits in
@@ -229,9 +254,10 @@ const SECTION_SCHEMA: &str = r#"{
         "type": "object",
         "properties": {
           "text": {"type": "string"},
-          "source_refs": {"type": "array", "items": {"type": "string"}}
+          "source_refs": {"type": "array", "items": {"type": "string"}},
+          "guide": {"type": "integer"}
         },
-        "required": ["text", "source_refs"],
+        "required": ["text", "source_refs", "guide"],
         "additionalProperties": false
       }
     },
@@ -299,7 +325,23 @@ pub fn build_section_request(
             GrammaticalGender::Female => "לשון: נקבה (\"מתקשה\", \"מגיבה\")".to_owned(),
         });
     }
-    if input.sources.is_empty() && !input.approved_context.is_empty() {
+    let guide = guide_lines(&input.guide_tagged);
+    if !guide.is_empty() {
+        // Numbered, so each paragraph can say which line it answers (`guide`) and a line no
+        // paragraph answers is found locally.
+        let numbered: Vec<String> = guide
+            .iter()
+            .enumerate()
+            .map(|(i, l)| format!("{}. {l}", i + 1))
+            .collect();
+        parts.push(format!(
+            "ההנחיה של הפסיכולוגית לסעיף:\n{}",
+            numbered.join("\n")
+        ));
+    }
+    if input.points_only {
+        parts.push(POINTS_LINE.to_owned());
+    } else if input.sources.is_empty() && !input.approved_context.is_empty() {
         // Summary, diagnoses, recommendations: written from the approved sections, which have
         // no S# ids, so there is nothing to cite.
         parts.push(
@@ -308,6 +350,9 @@ pub fn build_section_request(
         );
     } else {
         parts.push("מקורות (הפנה/י אליהם לפי המזהה, למשל S1):".to_owned());
+        if input.sources_in_order && input.sources.len() > 1 {
+            parts.push(ORDER_LINE.to_owned());
+        }
     }
     for (i, s) in input.sources.iter().enumerate() {
         let sid = format!("S{}", i + 1);
@@ -471,6 +516,9 @@ mod tests {
             history: vec![],
             instruction_tagged: "נסח/י פסקה".into(),
             style_profile: None,
+            guide_tagged: String::new(),
+            points_only: false,
+            sources_in_order: false,
         }
     }
 
@@ -521,6 +569,34 @@ mod tests {
         let last = content_text(&b["messages"][2]["content"]);
         assert!(last.contains("לקצר") && last.contains("current_draft"));
         assert_eq!(b["messages"][1]["role"], "assistant");
+    }
+
+    /// Round 29: the guide goes in the cached part, numbered from 1, blank lines dropped; each
+    /// paragraph of the answer must give the line it answers.
+    #[test]
+    fn the_guide_is_numbered_in_the_cached_part_and_each_paragraph_names_its_line() {
+        let mut input = section();
+        input.guide_tagged = "פתיחה על המבחן.\n\n  התחומים מהגבוה לנמוך.  \n".into();
+        let (body, _) = build_section_request(&ModelConfig::default(), &input, "n1");
+        let cached = body["messages"][0]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(
+            cached.contains(
+                "ההנחיה של הפסיכולוגית לסעיף:\n1. פתיחה על המבחן.\n2. התחומים מהגבוה לנמוך."
+            ),
+            "{cached}"
+        );
+        let items = &body["output_config"]["format"]["schema"]["properties"]["paragraphs"]["items"];
+        assert_eq!(items["properties"]["guide"]["type"], "integer");
+        assert!(items["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("guide")));
+        // No guide: no heading at all.
+        let (plain, _) = build_section_request(&ModelConfig::default(), &section(), "n1");
+        assert!(!content_text(&plain["messages"][0]["content"]).contains("ההנחיה"));
     }
 
     #[test]
