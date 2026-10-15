@@ -1,6 +1,8 @@
 //! The automatic fix loop's step (round 25): for every code a fix answers, the refused words
-//! are not in the fixed request, the fixed request passes the unchanged gate, and the words
-//! come back from the case's book. What a fix cannot answer stays refused.
+//! are not in the fixed request, and the fixed request passes the unchanged gate. A pattern
+//! comes back from the case's book; a line with a name or a foreign tag is left out whole,
+//! so nothing next to the name goes out and nothing of it is kept. What a fix cannot answer
+//! stays refused.
 
 #![allow(
     clippy::unwrap_used,
@@ -14,7 +16,7 @@ mod common;
 
 use common::*;
 use dv_privacy::restore::restore;
-use dv_privacy::{clear, fix_refused, GateRequest, MaskBook};
+use dv_privacy::{clear, fix_refused, GateRequest, MaskBook, LEFT_OUT};
 use serde_json::{json, Value};
 
 /// Text put in the request as is, the way a template, a key or a bug could: the filter never
@@ -109,12 +111,50 @@ fn every_fixable_refusal_is_hidden_and_the_fixed_request_passes_the_gate() {
             "{text}: {secret} still in {out}"
         );
         gate_body(&body, &ids, CASE).unwrap_or_else(|b| panic!("{text} -> {out}: {b:?}"));
-        // The words come back from the book (a foreign tag comes back as its word).
-        if code != "foreign_tag" {
+        if code == "pattern" {
+            // A pattern comes back from the book.
             let back = restore(&out, &ids, None, &book.entries());
             assert!(contains_norm(&back, &secret), "{text}: {back}");
+        } else {
+            // A name or a foreign tag: its line is left out, and the book keeps none of it.
+            assert!(out.contains(LEFT_OUT), "{text}: {out}");
+            assert!(
+                book.entries()
+                    .iter()
+                    .all(|e| !contains_norm(&e.original, &secret)),
+                "{text}"
+            );
         }
     }
+}
+
+/// The review of stage 2: a name hidden alone let the surname next to it out. Each of these
+/// was refused before the fix loop, and must not go out in part now.
+#[test]
+fn a_surname_next_to_a_refused_name_never_goes_out() {
+    let ids = identities();
+    for (text, kept) in [
+        ("שיחקה עם אביגיל שטרנברג בחצר.", "שטרנברג"),
+        ("נועם ואחיו גלעדי הגיעו.", "גלעדי"),
+        ("[דנה_שטרנברג] הגיעה.", "שטרנברג"),
+        (
+            "בבוקר הגיע.\nשיחקה עם אביגיל שטרנברג.\nבסוף נרגעה.",
+            "שטרנברג",
+        ),
+    ] {
+        let (body, book, _) = fixed(&raw(text));
+        let out = body["messages"][0]["content"].as_str().unwrap().to_owned();
+        assert!(!out.contains(kept), "{text} -> {out}");
+        assert!(out.contains(LEFT_OUT), "{text} -> {out}");
+        assert!(book.entries().is_empty(), "{text}: {:?}", book.entries());
+        gate_body(&body, &ids, CASE).unwrap_or_else(|b| panic!("{text} -> {out}: {b:?}"));
+    }
+    // The other lines go as they were.
+    let (body, _, _) = fixed(&raw("בבוקר הגיע.\nשיחקה עם אביגיל שטרנברג.\nבסוף נרגעה."));
+    assert_eq!(
+        body["messages"][0]["content"],
+        format!("בבוקר הגיע.\n{LEFT_OUT}\nבסוף נרגעה.")
+    );
 }
 
 #[test]
@@ -139,7 +179,8 @@ fn what_a_fix_cannot_answer_stays_refused() {
         canaries: &canaries,
         max_bytes: 1_000_000,
     };
-    let (next, _) = fix_refused(&req(&body), &book).unwrap();
+    // The line with the trap is never left out, so the name stays too and nothing is fixed.
+    let next = fix_refused(&req(&body), &book).map_or(body.clone(), |(n, _)| n);
     let still = clear(&req(&next)).unwrap_err();
     assert!(still.reasons.iter().any(|r| r.code == "canary"));
 }
@@ -155,6 +196,8 @@ proptest::proptest! {
             "נועם", "ונועם", "לרותם", "עידו", "אביטל", "ינאי", "אסנת", "אביגיל", "מתקשה",
             "בגן", "[מוסד_3]", "[ילד]", "14/9/2025", "רחוב", "הדקלים", "12", "שלום", "כתובת:",
             "\n", "ת.ז.", "000000018", "ושוב", "[טלפון_2]", "[שם_1]",
+            // Surnames and second names next to a name (the review of stage 2).
+            "שטרנברג", "גלעדי", "ואחיו", "[דנה_שטרנברג]", "בן-דוד",
         ]), 1..14)
     ) {
         let text = words.join(" ");
@@ -164,6 +207,17 @@ proptest::proptest! {
             let sent = String::from_utf8_lossy(p.body()).into_owned();
             for name in ["נועם", "רותם", "עידו", "אביטל", "ינאי", "אסנת", "אביגיל", "000000018"] {
                 proptest::prop_assert!(!contains_norm(&sent, name), "{} in {}", name, sent);
+            }
+            // A surname on a line with a name the gate refuses (or a bracket it does not
+            // know) never goes out: the whole line is left out, not only the name.
+            let refused = ["נועם", "רותם", "עידו", "אביטל", "ינאי", "אסנת", "אביגיל", "[דנה", "[מוסד"];
+            for surname in ["שטרנברג", "גלעדי", "בן-דוד"] {
+                let near = text.lines().any(|l| l.contains(surname) && refused.iter().any(|n| l.contains(n)));
+                let alone = text.lines().any(|l| l.contains(surname) && !refused.iter().any(|n| l.contains(n)));
+                proptest::prop_assert!(
+                    !(near && !alone && sent.contains(surname)),
+                    "{} next to a name in {}", surname, sent
+                );
             }
         }
     }

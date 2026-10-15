@@ -119,8 +119,9 @@ fn a_consultation_without_a_case_gives_the_numbers_back_too() {
 
 /// A refusal the fix loop answers no longer stops her. Text the filter never saw (here put in
 /// the request by hand, as a template, a bug or a future feature could) holds the child's name
-/// and a phone: the gate refuses it, the loop hides both in the outgoing copy, the same gate
-/// clears that copy, and the words are kept in the case's book for the answer.
+/// and a phone: the gate refuses it, the loop leaves the name's line out and hides the phone in
+/// the outgoing copy, the same gate clears that copy, and only the phone is kept in the case's
+/// book for the answer (the review of stage 2: nothing of a refused name's line is kept).
 #[test]
 fn a_refusal_the_loop_can_answer_is_hidden_and_cleared_by_the_same_gate() {
     let (_dir, mut core, case) = setup(None);
@@ -128,7 +129,7 @@ fn a_refusal_the_loop_can_answer_is_hidden_and_cleared_by_the_same_gate() {
     let body = json!({
         "model": "claude-test",
         "system": "עוזרת לכתיבת דוח.",
-        "messages": [{"role": "user", "content": format!("אלון מתקשה. טלפון {phone}.")}],
+        "messages": [{"role": "user", "content": format!("אלון מתקשה.\nטלפון {phone}.")}],
     });
     let data = core.privacy_data(&case).unwrap();
     let mut prepared = Prepared {
@@ -151,12 +152,12 @@ fn a_refusal_the_loop_can_answer_is_hidden_and_cleared_by_the_same_gate() {
     let id = prepared.approval_id.clone().expect("cleared after the fix");
     let sent = String::from_utf8_lossy(core.pending[&id].payload.body()).into_owned();
     assert!(!sent.contains("אלון") && !sent.contains(&phone), "{sent}");
+    assert!(sent.contains(dv_privacy::LEFT_OUT), "{sent}");
     let fixed = prepared.parts.last().unwrap();
     assert_eq!(fixed.label, "הוסתר בבדיקה האחרונה לפני השליחה");
     let book = core.vault_ref().unwrap().masks(&case).unwrap();
     assert!(
-        book.iter()
-            .any(|e| e.original == "אלון" && sent.contains(&e.tag)),
+        book.iter().all(|e| !e.original.contains("אלון")),
         "{book:?}"
     );
     assert!(

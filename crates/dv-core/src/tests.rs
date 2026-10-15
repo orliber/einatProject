@@ -477,6 +477,53 @@ fn no_consent_no_sending() {
         .is_some());
 }
 
+/// The review of stage 2: a request prepared before her consent was removed, or before a
+/// person was added to the case, never goes out (also not as a retry): it was filtered with
+/// what the case knew then.
+#[test]
+fn a_request_prepared_before_the_case_changed_does_not_go_out() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let p = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    let mut meta = core.case_detail(&case).unwrap().meta;
+    meta.consent = None;
+    core.update_case(&case, meta).unwrap();
+    assert!(core.send_section(&p.approval_id.unwrap()).is_err());
+
+    let mut meta = core.case_detail(&case).unwrap().meta;
+    meta.consent = Some(consent());
+    core.update_case(&case, meta).unwrap();
+    let p = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    let mut people: Vec<IdentityInput> = core
+        .case_detail(&case)
+        .unwrap()
+        .identities
+        .into_iter()
+        .map(|i| IdentityInput {
+            id: Some(i.id),
+            role: i.role,
+            value: i.value,
+            aliases: i.aliases,
+        })
+        .collect();
+    people.push(IdentityInput {
+        id: None,
+        role: Role::Other,
+        value: "בתיה".into(),
+        aliases: vec![],
+    });
+    core.set_identities(&case, people).unwrap();
+    assert!(matches!(
+        core.send_section(&p.approval_id.unwrap()),
+        Err(CoreError::NotFound(_))
+    ));
+    assert!(fake.sent.lock().unwrap().is_empty());
+}
+
 /// Everything the review screen shows as going out, joined.
 fn outgoing(p: &Prepared) -> String {
     p.parts

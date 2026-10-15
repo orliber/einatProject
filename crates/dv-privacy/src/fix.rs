@@ -5,16 +5,21 @@
 //! internal error, a refused object key) stays refused. A request too large is not this
 //! module's: the core shortens it (`dv_ai::shrink_to_fit`) and asks the gate again.
 //!
-//! - A name (declared, from the lexicon, from her past reports) → `[שם_N]` of the case's book.
+//! - A name (declared, from the lexicon, from her past reports, of another case) → the whole
+//!   line is left out, as [`LEFT_OUT`]. A gate refusal means the filter never saw this text,
+//!   so the words next to the name (a surname, a second name) are not known to be safe:
+//!   hiding only the word the gate matched could let them out. Nothing of the line is kept
+//!   in the case's book, so another case's name can never be restored into this one.
+//! - A tag that is not the case's → the whole line is left out too: what is in the brackets
+//!   (up to 40 characters, "[דנה_שטרנברג]") was never filtered.
 //! - A pattern (number, date, phone, address field…) → the numbered tag of its kind.
-//! - A tag that is not the case's → its plain word (`[מוסד_1]` → "מוסד"), checked again.
 
 use std::sync::LazyLock;
 
 use regex::Regex;
 use serde_json::Value;
 
-use crate::gate::{name_findings, tag_word, GateRequest};
+use crate::gate::{name_findings, GateRequest};
 use crate::masks::{is_generic_tag, MaskBook};
 use crate::patterns;
 
@@ -64,8 +69,60 @@ fn fix_value(v: &mut Value, req: &GateRequest<'_>, book: &MaskBook, items: &mut 
     }
 }
 
+/// What a line left out goes out as: plain words, no tag, so the gate checks it like any
+/// text and the model writes without it.
+pub const LEFT_OUT: &str = "(קטע שהושמט בבדיקה)";
+
 /// A span to replace: start, end, what goes out, and its kind for the list.
 type Span = (usize, usize, String, String);
+
+/// A tag the case does not know: neither its own, nor a kind, nor a marker to complete.
+fn foreign(tag: &str, req: &GateRequest<'_>) -> bool {
+    !(req.case_tags.contains(tag) || is_generic_tag(tag) || tag.starts_with("[חסר"))
+}
+
+/// Every line with a name or a foreign tag in it, left out whole; `None` when there is none.
+fn drop_name_lines(
+    text: &str,
+    req: &GateRequest<'_>,
+    items: &mut Vec<FixedItem>,
+) -> Option<String> {
+    let mut marks: Vec<usize> = name_findings(text, req.ctx)
+        .iter()
+        .map(|f| f.start)
+        .collect();
+    if let Some(re) = TAG_RE.as_ref() {
+        marks.extend(
+            re.find_iter(text)
+                .filter(|m| foreign(m.as_str(), req))
+                .map(|m| m.start()),
+        );
+    }
+    if marks.is_empty() {
+        return None;
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    for line in text.split_inclusive('\n') {
+        let end = at + line.len();
+        let (body, newline) = line.strip_suffix('\n').map_or((line, ""), |b| (b, "\n"));
+        // A line with a trap string is never left out: the request stays refused.
+        let trapped = req.canaries.iter().any(|c| body.contains(c.as_str()));
+        if !trapped && marks.iter().any(|m| (at..end).contains(m)) {
+            items.push(FixedItem {
+                original: body.trim().to_owned(),
+                tag: LEFT_OUT.to_owned(),
+                label: "קטע שלא נשלח".to_owned(),
+            });
+            out.push_str(LEFT_OUT);
+        } else {
+            out.push_str(body);
+        }
+        out.push_str(newline);
+        at = end;
+    }
+    Some(out)
+}
 
 fn fix_text(
     text: &str,
@@ -73,13 +130,12 @@ fn fix_text(
     book: &MaskBook,
     items: &mut Vec<FixedItem>,
 ) -> Option<String> {
+    // Names and foreign tags first: their lines go whole. Patterns on what is left.
+    let dropped = drop_name_lines(text, req, items);
+    let changed = dropped.is_some();
+    let text = dropped.as_deref().unwrap_or(text);
     let mut spans: Vec<Span> = Vec::new();
     let words = |s: usize, e: usize| text.get(s..e).map(str::to_owned);
-    for f in name_findings(text, req.ctx) {
-        if let Some(w) = words(f.start, f.end) {
-            spans.push((f.start, f.end, book.tag_for("שם", &w), "שם".to_owned()));
-        }
-    }
     // A text the scan cannot read is left as it is: the gate refuses it again ("internal").
     for h in patterns::find(text, req.ctx.today).unwrap_or_default() {
         if let Some(w) = words(h.start, h.end) {
@@ -104,18 +160,8 @@ fn fix_text(
             ));
         }
     }
-    if let Some(re) = TAG_RE.as_ref() {
-        for m in re.find_iter(text) {
-            let tag = m.as_str();
-            let allowed =
-                req.case_tags.contains(tag) || is_generic_tag(tag) || tag.starts_with("[חסר");
-            if !allowed {
-                spans.push((m.start(), m.end(), tag_word(tag), "תגית".to_owned()));
-            }
-        }
-    }
     if spans.is_empty() {
-        return None;
+        return changed.then(|| text.to_owned());
     }
     // Widest first at each start; a span inside one already taken is dropped (it is hidden).
     spans.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));

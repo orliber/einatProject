@@ -70,17 +70,24 @@ pub fn shrink_to_fit(body: &Value, max_bytes: usize) -> Option<(Value, Vec<Cut>)
 }
 
 /// Where to cut `text` to keep at most `keep` bytes: the last line break before it, else the
-/// last space, else a character boundary.
+/// last space, else a character boundary. Never inside a tag (`[ילד]`, `[מספר_12]`): a cut
+/// there moves to before its bracket, so no half tag goes out or comes back wrong.
 fn cut_point(text: &str, keep: usize) -> usize {
     let mut at = keep.min(text.len());
     while !text.is_char_boundary(at) {
         at -= 1;
     }
     let head = text.get(..at).unwrap_or_default();
-    head.rfind('\n')
+    let at = head
+        .rfind('\n')
         .filter(|&i| i >= at / 2)
         .or_else(|| head.rfind(' ').filter(|&i| i >= at / 2))
-        .unwrap_or(at)
+        .unwrap_or(at);
+    let head = text.get(..at).unwrap_or_default();
+    match (head.rfind('['), head.rfind(']')) {
+        (Some(open), close) if close.is_none_or(|c| c < open) => open,
+        _ => at,
+    }
 }
 
 struct Block {
@@ -231,6 +238,40 @@ mod tests {
         let (short, cuts) = shrink_to_fit(&body, max).expect("shortened");
         assert!(size(&short) <= max);
         assert_eq!(cuts.len(), 2, "{cuts:?}");
+    }
+
+    /// The review of stage 2: a cut with no line and no space near it lands inside a tag or a
+    /// word. It moves to before the tag's bracket, so every tag that goes out is whole.
+    #[test]
+    fn a_cut_with_no_space_never_splits_a_tag() {
+        let dense = "[ילד][מספר_12][תאריך_3]".repeat(20);
+        for keep in 1..dense.len() {
+            let at = cut_point(&dense, keep);
+            let head = dense.get(..at).expect("a character boundary");
+            assert!(
+                head.matches('[').count() == head.matches(']').count(),
+                "{keep}: {head}"
+            );
+            assert!(at <= keep);
+        }
+        let mut inp = input(&[1]);
+        if let Some(s) = inp.sources.first_mut() {
+            s.content_tagged = "[ילד]גדל[מספר_12]שנים".repeat(400);
+        }
+        let (body, _) = build_section_request(&ModelConfig::default(), &inp, "nn");
+        let max = size(&body) / 2;
+        let (short, _) = shrink_to_fit(&body, max).expect("shortened");
+        let text = all_text(&short);
+        let cut = text.find("\n(המשך החומר").expect("the note");
+        let before = text.get(..cut).unwrap_or_default();
+        let tail = before
+            .get(before.rfind("<data nonce=nn").unwrap_or(0)..)
+            .unwrap_or_default();
+        assert_eq!(
+            tail.matches('[').count(),
+            tail.matches(']').count(),
+            "{tail}"
+        );
     }
 
     #[test]

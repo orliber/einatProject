@@ -16,7 +16,7 @@ mod pipeline;
 pub mod restore;
 pub mod text;
 
-pub use fix::{fix_refused, FixedItem, FIXABLE_CODES};
+pub use fix::{fix_refused, FixedItem, FIXABLE_CODES, LEFT_OUT};
 pub use gate::{
     clear, replace_foreign_tags, tag_word, BlockReason, Blocked, ClearedPayload, GateRequest,
     GENERIC_TAGS,

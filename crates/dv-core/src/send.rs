@@ -369,6 +369,13 @@ impl Core {
             .ok()
             .and_then(|b| b.get("model")?.as_str().map(str::to_owned))
             .unwrap_or_default();
+        // Consent is checked again at the send itself, also for a request kept for a retry or
+        // past the monthly ceiling: consent removed since it was prepared stops it.
+        if let Some(case_id) = pending.kind.case().map(str::to_owned) {
+            if self.vault_ref()?.case_meta(&case_id)?.consent.is_none() {
+                return Err(CoreError::ConsentMissing);
+            }
+        }
         let provider = provider_of(&model);
         let api_key = key_of(self.vault_ref()?, provider)?;
         // ChatGPT, Gemini and Mistral keep what they receive unless she has a written zero-retention
@@ -895,4 +902,14 @@ pub(crate) fn note_fixed(prepared: &mut Prepared, fixed: &[dv_privacy::FixedItem
         original,
         outgoing,
     });
+}
+
+impl Core {
+    /// The case's requests waiting to go (prepared, kept for a retry or past the ceiling) are
+    /// dropped when its people or details change: each was filtered with what the case knew
+    /// then, so a name added since would go out untagged (the review of stage 2).
+    pub(crate) fn forget_pending(&mut self, case_id: &str) {
+        self.pending
+            .retain(|_, p| p.kind.case() != Some(case_id) && p.payload.case_id() != case_id);
+    }
 }

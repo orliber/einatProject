@@ -97,7 +97,9 @@ impl Core {
         check_meta(&meta)?;
         // Which assessment a follow-up belongs to is set when it is opened, never edited.
         meta.follows = self.vault_ref()?.case_meta(case_id)?.follows;
-        Ok(self.vault_mut()?.update_case_meta(case_id, &meta)?)
+        self.vault_mut()?.update_case_meta(case_id, &meta)?;
+        self.forget_pending(case_id);
+        Ok(())
     }
 
     pub fn set_identities(
@@ -105,7 +107,9 @@ impl Core {
         case_id: &str,
         identities: Vec<IdentityInput>,
     ) -> Result<Vec<dv_domain::Identity>, CoreError> {
-        Ok(self.vault_mut()?.set_identities(case_id, &identities)?)
+        let saved = self.vault_mut()?.set_identities(case_id, &identities)?;
+        self.forget_pending(case_id);
+        Ok(saved)
     }
 
     pub fn add_input(

@@ -18,6 +18,11 @@ impl PendingKind {
         self.send_kind()
     }
 
+    /// The case this request is about, if any.
+    pub(crate) fn case(&self) -> Option<&str> {
+        self.trace(false, "").0
+    }
+
     /// The case and the log's words for this request; and, for a request about a case's
     /// text, where the exact bytes sent are kept ("what left the computer" in the case).
     fn trace(&self, demo: bool, ai: &str) -> (Option<&str>, Option<&str>, Value) {
@@ -93,27 +98,20 @@ impl Core {
         let (response, demo) = match response {
             Ok(r) => r,
             Err(e) => {
+                // An error the service gave, or a connection lost on the way, may come after
+                // the bytes reached it: the request is recorded as sent, since this history
+                // stands in for the window before sending (the review of stage 2).
+                if may_have_left(&e) {
+                    self.record_sent(&out, false)?;
+                }
                 self.restore_pending(out);
                 return Err(e);
             }
         };
         self.note_usage(&out.pending.payload, &response, demo);
+        self.record_sent(&out, demo)?;
         let Outgoing { pending, model, .. } = out;
-        let Pending { payload, kind } = pending;
-        let ai = provider_of(&model).display_name();
-        let (case_id, kept_as, details) = kind.trace(demo, ai);
-        let v = self.vault_mut()?;
-        if let (Some(case_id), Some(kept_as)) = (case_id, kept_as) {
-            let payload_text = String::from_utf8_lossy(payload.body()).into_owned();
-            v.add_transmission(
-                case_id,
-                kept_as,
-                payload.sha256(),
-                if demo { "demo" } else { &model },
-                &payload_text,
-            )?;
-        }
-        v.record(AuditEvent::Send, case_id, &details)?;
+        let Pending { kind, .. } = pending;
         Ok(Received {
             kind,
             response,
@@ -121,4 +119,44 @@ impl Core {
             model,
         })
     }
+}
+
+impl Core {
+    /// The request as it left: the exact bytes with the case, and the log.
+    fn record_sent(&mut self, out: &Outgoing, demo: bool) -> Result<(), CoreError> {
+        let ai = provider_of(&out.model).display_name();
+        let (case_id, kept_as, details) = out.pending.kind.trace(demo, ai);
+        let v = self.vault_mut()?;
+        if let (Some(case_id), Some(kept_as)) = (case_id, kept_as) {
+            let payload = &out.pending.payload;
+            let payload_text = String::from_utf8_lossy(payload.body()).into_owned();
+            v.add_transmission(
+                case_id,
+                kept_as,
+                payload.sha256(),
+                if demo { "demo" } else { &out.model },
+                &payload_text,
+            )?;
+        }
+        v.record(AuditEvent::Send, case_id, &details)?;
+        Ok(())
+    }
+}
+
+/// A failure that can come after the request reached the service: an answer it gave (a key
+/// refused, too many requests, busy, refused, an answer that could not be read) or a
+/// connection lost on the way. A refusal on this computer (the rules, no key, the emergency
+/// stop, the size, the daily limit, the secure connection, a local model) sent nothing.
+fn may_have_left(e: &CoreError) -> bool {
+    matches!(
+        e,
+        CoreError::Egress(
+            EgressError::Unauthorized
+                | EgressError::RateLimited
+                | EgressError::Unavailable(_)
+                | EgressError::Rejected(..)
+                | EgressError::Protocol(_)
+                | EgressError::Offline
+        )
+    )
 }

@@ -144,3 +144,30 @@ fn newest_first_across_cases_each_with_its_own_names() {
         Err(CoreError::NotFound(_))
     ));
 }
+
+/// The review of stage 2: a send whose answer failed after it reached the service (busy, a
+/// connection lost on the way) is in the history too; a refusal on this computer is not.
+#[test]
+fn a_send_without_an_answer_is_in_the_history_when_it_may_have_left() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake));
+    let id = core
+        .prepare_section(&case, "kindergarten", "תנסח פסקה")
+        .unwrap()
+        .approval_id
+        .unwrap();
+    let out = core.begin_send(&id, SendKind::Section).unwrap();
+    assert!(core
+        .finish_section(out, Err(CoreError::Egress(EgressError::Unavailable(503))))
+        .is_err());
+    assert_eq!(core.sent_history(Some(&case), None, "").unwrap().len(), 1);
+    // Sending is switched off here: nothing left, nothing recorded.
+    let out = core.begin_send(&id, SendKind::Section).unwrap();
+    assert!(core
+        .finish_section(out, Err(CoreError::Egress(EgressError::Stopped)))
+        .is_err());
+    assert_eq!(core.sent_history(Some(&case), None, "").unwrap().len(), 1);
+    // The retry goes, and is recorded again: the same bytes left twice.
+    core.send_section(&id).unwrap();
+    assert_eq!(core.sent_history(Some(&case), None, "").unwrap().len(), 2);
+}
