@@ -113,12 +113,13 @@ function Press-Named($root, [string] $pattern, [string] $what, [int] $seconds = 
             $c = $e.Current
             if ($c.Name -notmatch $pattern -or -not $c.IsEnabled) { continue }
             $p = $null
-            if (-not $Keyboard -and $e.TryGetCurrentPattern($invoke, [ref] $p)) {
+            $keys = $c.IsKeyboardFocusable -and ($Keyboard -or -not $e.TryGetCurrentPattern($invoke, [ref] $p))
+            if (-not $keys -and $e.TryGetCurrentPattern($invoke, [ref] $p)) {
                 $p.Invoke()
                 Write-Host "pressed: $($c.Name)"
                 return
             }
-            if ($c.IsKeyboardFocusable) {
+            if ($keys) {
                 Focus-Field $e $what
                 [Keys]::Enter()
                 Write-Host "pressed with Enter: $($c.Name)"
