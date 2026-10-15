@@ -6,6 +6,7 @@
 pub mod compare;
 pub mod consistency;
 pub mod dates;
+pub mod dsm;
 pub mod identity;
 pub mod prior;
 pub mod records;
@@ -15,6 +16,7 @@ pub mod scores;
 
 pub use compare::{compare, comparison_text, ComparisonRow};
 pub use consistency::{check_age, check_gender, check_grade, check_recommendations};
+pub use dsm::{check_dsm_severity, level_words, DsmSeverity};
 pub use identity::{
     assign_tag, FoundName, Identity, IdentityInput, IdentitySource, Role, PRACTITIONER_TAG,
 };

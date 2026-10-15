@@ -63,6 +63,10 @@ pub struct CaseMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub guides: Option<std::collections::BTreeMap<String, String>>,
+    /// The DSM-5 severity she set (round 43), for the DSM section. Her decision, never drafted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub dsm_severity: Option<crate::dsm::DsmSeverity>,
 }
 
 /// One row of the case list. Names appear only locally.

@@ -15,6 +15,7 @@ import { useRotatingPlaceholder } from "../../components/Rotating";
 import { DRAFT_HINTS } from "../../i18n/suggestions";
 import { ParagraphVersions } from "../../components/ParagraphVersions";
 import { SectionGuide } from "../../components/SectionGuide";
+import { DsmSeverityPanel } from "../../components/DsmSeverity";
 import { OwnSectionPanel } from "../../components/OwnSection";
 import { SectionLibraryPanel } from "../../components/SectionLibrary";
 import { MarkedText, StyleHintView, applyMark } from "./StyleHintView";
@@ -360,6 +361,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               conversation's foot off the screen (the review of stage 3). */}
           <SectionGuide caseId={caseId} sectionKey={section.key} guide={section.guide} isDefault={section.guide_is_default}
             learnedFrom={section.guide_learned_from} caseGuide={section.case_guide} onSaved={reload} />
+          {section.key === "dsm" && <DsmSeverityPanel caseId={caseId} severity={api.detail.meta.dsm_severity} onSaved={reload} />}
           <SectionLibraryPanel caseId={caseId} sectionKey={section.key} onAdded={reload} />
 
           {job && (

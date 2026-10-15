@@ -451,6 +451,10 @@ pub struct ReportSettings {
     pub font: String,
     pub confidentiality: String,
     pub signature: Vec<String>,
+    /// The supervisor's lines (round 43), printed under her signature, as the institute's
+    /// report has them for an intern. Empty: none.
+    #[serde(default)]
+    pub supervisor: Vec<String>,
 }
 
 /// Her Word template (EX-1), as checked when she chose it.

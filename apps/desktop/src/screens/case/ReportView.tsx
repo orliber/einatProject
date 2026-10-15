@@ -60,7 +60,8 @@ export function ReportView({ api, focus }: { api: CaseApi; onWriteAll: () => voi
   const content = detail.sections.filter((s) => s.key !== "signature");
   const signature = detail.sections.find((s) => s.key === "signature");
   const signatureLines = signature?.paragraphs.filter((p) => p.status === "approved").flatMap((p) => p.text.split("\n")) ?? [];
-  const sign = signatureLines.length ? signatureLines : settings?.signature ?? [];
+  const supervisor = settings?.supervisor ?? [];
+  const sign = [...(signatureLines.length ? signatureLines : settings?.signature ?? []), ...(supervisor.length ? ["", ...supervisor] : [])];
 
   return (
     <div className="view">
@@ -83,7 +84,7 @@ export function ReportView({ api, focus }: { api: CaseApi; onWriteAll: () => voi
           ))}
           {sign.length > 0 && (
             <footer className="a4-sign">
-              {sign.map((l, i) => <p key={i}>{l}</p>)}
+              {sign.map((l, i) => (l ? <p key={i}>{l}</p> : <br key={i} />))}
             </footer>
           )}
         </article>

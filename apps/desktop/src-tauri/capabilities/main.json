@@ -33,6 +33,7 @@
     "allow-section-modes",
     "allow-set-section-mode",
     "allow-set-case-guide",
+    "allow-set-dsm-severity",
     "allow-set-review-always",
     "allow-set-screen-protection",
     "allow-report-settings",

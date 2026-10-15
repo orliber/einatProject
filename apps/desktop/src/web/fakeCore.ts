@@ -210,6 +210,7 @@ export class FakeCore {
     font: "David",
     confidentiality: "חסוי – מידע רפואי-פסיכולוגי. לשימוש הגורם המטפל בלבד.",
     signature: ["ד\"ר רותם בדויה", "פסיכולוגית התפתחותית מומחית"],
+    supervisor: [],
   };
   private cases: Case[] = [];
   private sampleId: string | null = null;
@@ -897,6 +898,16 @@ export class FakeCore {
         if (text) guides[key] = text;
         c.meta = { ...c.meta, guides };
         if (!Object.keys(guides).length) delete c.meta.guides;
+        return null;
+      }
+      case "set_dsm_severity": {
+        const c = this.find(a.caseId);
+        const level = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+        const social = level(a.social);
+        const restricted = level(a.restricted);
+        if ([social, restricted].some((n) => n !== null && ![1, 2, 3].includes(n))) fail("refused", "רמת חומרה היא 1, 2 או 3.");
+        c.meta = { ...c.meta, dsm_severity: { social, restricted } };
+        if (social === null && restricted === null) delete c.meta.dsm_severity;
         return null;
       }
       case "set_practitioner":

@@ -191,6 +191,7 @@ export type Commands = {
   set_api_key: { args: { provider: string; key: string; retentionAck: boolean }; returns: null };
   set_auto_backup: { args: { on: boolean }; returns: BackupStatus };
   set_case_guide: { args: { caseId: string; sectionKey: string; text: string }; returns: null };
+  set_dsm_severity: { args: { caseId: string; social: number | null; restricted: number | null }; returns: null };
   set_identities: { args: { caseId: string; identities: Array<IdentityInput> }; returns: Array<Identity> };
   set_input_sections: { args: { caseId: string; inputId: string; sections: Array<string> }; returns: null };
   set_lock_minutes: { args: { minutes: number }; returns: null };

@@ -229,8 +229,14 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                   <textarea id="r-sig" className="textarea" rows={3} value={report.signature.join("\n")}
                     onChange={(e) => setReport({ ...report, signature: e.target.value.split("\n") })} />
                 </div>
+                <div className="field">
+                  <label htmlFor="r-sup">חתימת המדריכה</label>
+                  <span className="hint">אם יש: מודפסת מתחת לחתימה שלך, שורה לכל פרט.</span>
+                  <textarea id="r-sup" className="textarea" rows={2} value={report.supervisor.join("\n")}
+                    onChange={(e) => setReport({ ...report, supervisor: e.target.value.split("\n") })} />
+                </div>
                 <button type="button" className="btn btn-primary align-start"
-                  onClick={() => void run(() => ipc.setReportSettings({ ...report, signature: report.signature.filter((l) => l.trim()) }), "הגדרות הדוח נשמרו.")}>שמירה</button>
+                  onClick={() => void run(() => ipc.setReportSettings({ ...report, signature: report.signature.filter((l) => l.trim()), supervisor: report.supervisor.filter((l) => l.trim()) }), "הגדרות הדוח נשמרו.")}>שמירה</button>
               </section>
               <SectionModesSettings />
               <section className="card setting" aria-labelledby="s-template">

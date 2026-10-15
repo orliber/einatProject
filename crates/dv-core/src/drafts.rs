@@ -135,6 +135,15 @@ impl Core {
                             } else {
                                 Vec::new()
                             })
+                            // A level in the DSM section that is not the one she set (round 43).
+                            .chain(if s.key == "dsm" {
+                                dv_domain::check_dsm_severity(
+                                    &d.text_tagged,
+                                    meta.dsm_severity.as_ref(),
+                                )
+                            } else {
+                                Vec::new()
+                            })
                             .chain(dv_style::terms::notes(
                                 &d.text_tagged,
                                 &her_terms,

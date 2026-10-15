@@ -39,6 +39,7 @@ fn main() {
             "create_sample_case",
             "update_case",
             "set_case_guide",
+            "set_dsm_severity",
             "delete_case",
             "set_identities",
             "case_detail",

@@ -159,6 +159,7 @@ impl Core {
                 .cloned()
                 .into_iter()
                 .collect(),
+            supervisor: Vec::new(),
         })
     }
 
@@ -381,7 +382,7 @@ impl Core {
             info,
             parts,
             tables,
-            signature,
+            signature: with_supervisor(signature, &settings.supervisor),
             confidentiality: settings.confidentiality,
             font: settings.font,
         };
@@ -421,4 +422,16 @@ impl Core {
     pub fn check_export(&mut self, case_id: &str) -> Result<ExportCheck, CoreError> {
         Ok(self.build_report(case_id)?.1)
     }
+}
+
+/// Her signature, and under it the supervisor's lines after an empty line (round 43).
+fn with_supervisor(mut signature: Vec<String>, supervisor: &[String]) -> Vec<String> {
+    let lines: Vec<&String> = supervisor.iter().filter(|l| !l.trim().is_empty()).collect();
+    if !lines.is_empty() {
+        if !signature.is_empty() {
+            signature.push(String::new());
+        }
+        signature.extend(lines.into_iter().cloned());
+    }
+    signature
 }

@@ -377,6 +377,24 @@ impl Core {
                 } else {
                     Vec::new()
                 };
+            // The DSM-5 severity she set (round 43) goes with the DSM section as fixed words,
+            // after the guide, so the model writes her levels and no other.
+            let severity = meta
+                .dsm_severity
+                .filter(|_| section.key == "dsm" && !points && letter.is_none())
+                .and_then(|s| s.request_text());
+            let guide_tagged = match severity {
+                Some(text) => {
+                    let out = run(&text)?;
+                    review.add("רמת החומרה שקבעת".to_owned(), &out);
+                    if guide_tagged.is_empty() {
+                        out.tagged
+                    } else {
+                        format!("{guide_tagged}\n{}", out.tagged)
+                    }
+                }
+                None => guide_tagged,
+            };
             let input = SectionInput {
                 section_key: section.key.clone(),
                 section_title: fixed_title(&section)?,

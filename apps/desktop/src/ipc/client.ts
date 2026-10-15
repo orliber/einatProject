@@ -13,6 +13,7 @@ import type { StagedBackup } from "./generated/StagedBackup";
 import type { CaseDetail } from "./generated/CaseDetail";
 import type { CaseInput } from "./generated/CaseInput";
 import type { CaseMeta } from "./generated/CaseMeta";
+import type { DsmSeverity } from "./generated/DsmSeverity";
 import type { SectionMode } from "./generated/SectionMode";
 import type { CaseSummary } from "./generated/CaseSummary";
 import type { Folder } from "./generated/Folder";
@@ -194,6 +195,8 @@ export const ipc = {
   createSampleCase: () => call("create_sample_case"),
   updateCase: (caseId: string, meta: CaseMeta) => run("update_case", { caseId, meta }),
   setCaseGuide: (caseId: string, sectionKey: string, text: string) => run("set_case_guide", { caseId, sectionKey, text }),
+  /** The DSM-5 severity she set (round 43): a level 1–3 for each domain, `null` for none. */
+  setDsmSeverity: (caseId: string, social: number | null, restricted: number | null) => run("set_dsm_severity", { caseId, social, restricted }),
   /** Into the recycle bin (D-023); restorable for 30 days. */
   deleteCase: (caseId: string) => run("delete_case", { caseId }),
   listTrash: () => call("list_trash"),
@@ -460,6 +463,7 @@ export type {
   CaseDetail,
   CaseInput,
   CaseMeta,
+  DsmSeverity,
   CaseSummary,
   ChatView,
   ExportCheck,
