@@ -90,3 +90,25 @@ fn the_scores_of_old_reports_are_found_and_nothing_else() {
     );
     assert!(wrong.is_empty(), "taken for a score: {wrong:?}");
 }
+
+/// The review of stage 4: a date beside a subtest is not a score ("ב 28.1.2019" is not 28.1).
+#[test]
+fn a_date_beside_a_subtest_is_not_a_score() {
+    for text in [
+        "בקליטה חזותית ב 28.1.2019 הושג ציון 45.",
+        "שאלון CBCL (מילוי 27.6.2018) הראה ציון T של 62.",
+        "בקליטה חזותית, בבדיקה מ-3/5/2019, ציון 45.",
+    ] {
+        let found: Vec<f64> = find_score_mentions(text).iter().map(|m| m.value).collect();
+        assert!(
+            found.iter().all(|v| (*v - v.round()).abs() < 1e-9
+                && ![28.0, 27.0, 2019.0, 2018.0, 3.0, 5.0].contains(v)),
+            "{text}: {found:?}"
+        );
+    }
+    let found: Vec<f64> = find_score_mentions("בקליטה חזותית ב 28.1.2019 הושג ציון 45.")
+        .iter()
+        .map(|m| m.value)
+        .collect();
+    assert_eq!(found, [45.0]);
+}

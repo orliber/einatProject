@@ -47,6 +47,34 @@ describe("SectionLibraryPanel", () => {
     expect(screen.getByRole("button", { name: "נוסף" })).toBeDisabled();
   });
 
+  it("adds a line once on a double click, and offers it again when adding fails", async () => {
+    let adds = 0;
+    let failNext = false;
+    mockIPC(async (cmd) => {
+      if (cmd === "section_library") {
+        return { lines: [{ text: "מומלץ על הדרכת הורים.", reports: 5, in_similar: 0, similar: 0 }], similar: [] };
+      }
+      if (cmd === "add_own_paragraph") {
+        adds += 1;
+        await new Promise((r) => setTimeout(r, 30));
+        if (failNext) throw new Error("x");
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    wrap(<SectionLibraryPanel caseId="c1" sectionKey="recommendations" onAdded={vi.fn()} />);
+    await user.click(await screen.findByText("מהדוחות הקודמים שלך"));
+    failNext = true;
+    await user.dblClick(screen.getByRole("button", { name: "להוסיף" }));
+    expect(adds).toBe(1);
+    expect(await screen.findByText("שגיאה")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "להוסיף" })).toBeEnabled();
+    failNext = false;
+    await user.click(screen.getByRole("button", { name: "להוסיף" }));
+    expect(await screen.findByRole("button", { name: "נוסף" })).toBeDisabled();
+    expect(adds).toBe(2);
+  });
+
   it("shows nothing when her reports offer nothing", async () => {
     mockIPC((cmd) => (cmd === "section_library" ? { lines: [], similar: [] } : null));
     const { container } = wrap(<SectionLibraryPanel caseId="c1" sectionKey="cognitive" onAdded={vi.fn()} />);

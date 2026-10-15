@@ -192,7 +192,16 @@ pub fn parse_interpretations(
             dropped += 1;
             continue;
         }
-        let reports = g.sentences.iter().map(|(r, _)| *r).max().unwrap_or(1);
+        // The reports the group's sentences come from, counted once each: sentences all from
+        // R5 are one report, not five (the review of stage 4).
+        let reports = u32::try_from(
+            g.sentences
+                .iter()
+                .map(|(r, _)| *r)
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+        )
+        .unwrap_or(u32::MAX);
         let support = item
             .support
             .and_then(|s| u32::try_from(s).ok())
@@ -288,6 +297,27 @@ mod tests {
         assert_eq!(kept.len(), 2, "{kept:?}");
         assert_eq!(dropped, 5);
         assert_eq!(kept[0].support, 2, "never more than the reports sent");
+    }
+
+    /// The review of stage 4: sentences that all come from R5 are one report, not five.
+    #[test]
+    fn support_counts_the_reports_not_the_highest_number() {
+        let mut g = groups();
+        g[0].sentences = vec![
+            (5, "בקידוד חיות ([תוצאה 6 · ממוצע נמוך]) עבד לאט.".into()),
+            (
+                5,
+                "בקידוד חיות [תוצאה 7 · ממוצע נמוך], בהלימה למהירות.".into(),
+            ),
+        ];
+        let (kept, _) = parse_interpretations(
+            &answer(json!([
+                {"measure": "wppsi_iv/animal_coding", "case": "ממוצע נמוך", "text": "ציון נמוך מתפרש כקושי במהירות העבודה.", "support": 5}
+            ])),
+            &g,
+        )
+        .unwrap();
+        assert_eq!(kept[0].support, 1);
     }
 
     #[test]

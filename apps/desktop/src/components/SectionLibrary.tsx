@@ -2,7 +2,7 @@
 // never sent. Her diagnoses and recommendations to choose from (K9, K10), each with how often
 // she gave it in reports like this case, and the reports most like this case (K14). Plain text.
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useApp } from "../App";
 import { ipc, type LibraryLine } from "../ipc/client";
 import { rolesAsWords } from "./Similar";
@@ -23,6 +23,7 @@ export function SectionLibraryPanel(props: { caseId: string; sectionKey: string;
   const { fail, notify } = useApp();
   const [error, setError] = useState<string | null>(null);
   const [added, setAdded] = useState<string[]>([]);
+  const pending = useRef(new Set<string>());
   const lib = useQuery({
     queryKey: ["section-library", props.caseId, props.sectionKey],
     queryFn: () => ipc.sectionLibrary(props.caseId, props.sectionKey),
@@ -30,15 +31,22 @@ export function SectionLibraryPanel(props: { caseId: string; sectionKey: string;
   const data = lib.data;
   if (!data || (data.lines.length === 0 && data.similar.length === 0)) return null;
 
+  // Marked added before the call and taken back if it fails: a double click adds it once
+  // (the review of stage 4).
   async function add(text: string) {
+    if (added.includes(text) || pending.current.has(text)) return;
+    pending.current.add(text);
     setError(null);
+    setAdded((a) => [...a, text]);
     try {
       await ipc.addOwnParagraph(props.caseId, props.sectionKey, text);
-      setAdded((a) => [...a, text]);
       notify("נוסף לסעיף.");
       await props.onAdded();
     } catch (e) {
+      setAdded((a) => a.filter((t) => t !== text));
       setError(fail(e as never));
+    } finally {
+      pending.current.delete(text);
     }
   }
 
@@ -65,7 +73,7 @@ export function SectionLibraryPanel(props: { caseId: string; sectionKey: string;
           <div className="stack">
             <b className="small">מה כתבת בסעיף הזה בדוחות הכי דומים</b>
             {data.similar.map((s) => (
-              <blockquote key={s.report} className="library-similar">
+              <blockquote key={`${s.report}:${s.text}`} className="library-similar">
                 <span className="small muted">{s.report}{s.reasons.length > 0 && ` · ${s.reasons.join(" · ")}`}</span>
                 <p className="serif">{rolesAsWords(s.text)}</p>
               </blockquote>

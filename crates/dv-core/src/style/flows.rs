@@ -628,14 +628,14 @@ fn a_paragraph_whose_sentences_are_unlike_hers_gets_a_gentle_note() {
         analysis: None,
     };
     let mut empty = super::LocalStyle::default();
-    super::fit_reports(&mut empty, &[]);
+    super::fit_reports(&mut empty, &[], &[]);
     let long = format!("{}. {}.", sentence(30), sentence(28));
     assert!(
         super::style_note(&empty.model, "observation", &long).is_none(),
         "nothing to measure, no notes"
     );
     let mut local = super::LocalStyle::default();
-    super::fit_reports(&mut local, &[source]);
+    super::fit_reports(&mut local, &[source], &[0]);
     let m = &local.model;
     let note = super::style_note(m, "observation", &long).unwrap();
     assert!(note.starts_with("משפטים ארוכים מהרגיל אצלך"), "{note}");
@@ -936,6 +936,7 @@ fn the_closeness_figure_comes_with_its_reasons_and_what_to_ask() {
             }],
             analysis: None,
         }],
+        &[0],
     );
     let m = &local.model;
     let long = format!("{}. {}.", sentence(30), sentence(28));

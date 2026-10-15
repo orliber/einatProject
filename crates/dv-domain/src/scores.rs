@@ -1220,7 +1220,14 @@ fn score_number_spans(sentence: &str) -> Vec<(usize, usize, f64)> {
                 .and_then(|j| words.get(j))
                 .is_some_and(|(_, _, p)| p.contains("אחוזון"));
         let time = before.ends_with(':') || after.starts_with(':') || after.starts_with('/');
-        let date = before.ends_with('/') || before.ends_with('.');
+        // "28.1.2019", "27.6.2018": a date, not a score of 28.1 (the review of stage 4).
+        let next_digit = |sep: char| {
+            after
+                .strip_prefix(sep)
+                .is_some_and(|r| r.starts_with(|c: char| c.is_ascii_digit()))
+        };
+        let date =
+            before.ends_with('/') || before.ends_with('.') || next_digit('.') || next_digit('/');
         if percent || time || date {
             continue;
         }
@@ -1309,12 +1316,8 @@ pub fn find_score_mentions(text: &str) -> Vec<ScoreMention> {
                 continue;
             };
             // Every candidate at that same place, the first whose scale holds the value.
-            let fits = |m: &Measure| {
-                v >= m.min
-                    && v <= m.max
-                    && (!matches!(m.scale, ScoreScale::Scaled | ScoreScale::VScale)
-                        || (v - v.round()).abs() < 1e-9)
-            };
+            // Every scale that becomes a tag is in whole numbers: "28.1" is never one of them.
+            let fits = |m: &Measure| v >= m.min && v <= m.max && (v - v.round()).abs() < 1e-9;
             let pick = named_here
                 .iter()
                 .filter(|(s, e, _, _)| (*s, *e) == (ms, me))
@@ -1537,7 +1540,7 @@ pub fn sheet_cases(sheet: &ScoreSheet) -> Vec<ScoreCases> {
     };
     let scaled: Vec<f64> = entries
         .iter()
-        .filter(|(m, _)| m.scale == ScoreScale::Scaled)
+        .filter(|(m, _)| matches!(m.scale, ScoreScale::Scaled | ScoreScale::VScale))
         .map(|(_, e)| e.value)
         .collect();
     #[allow(clippy::cast_precision_loss)]
@@ -1548,7 +1551,8 @@ pub fn sheet_cases(sheet: &ScoreSheet) -> Vec<ScoreCases> {
             let band = classify(m, e.value).map(|b| b.label.clone());
             let mut cases = vec![GENERAL_CASE.to_owned()];
             cases.extend(band.clone());
-            if let (ScoreScale::Scaled, Some(mean)) = (m.scale, mean) {
+            // A sheet is one instrument, so its subtests share one scale (as in a report).
+            if let (ScoreScale::Scaled | ScoreScale::VScale, Some(mean)) = (m.scale, mean) {
                 if e.value - mean >= RELATIVE_POINTS {
                     cases.push(Relative::Strength.label_he().to_owned());
                 } else if mean - e.value >= RELATIVE_POINTS {
@@ -1811,6 +1815,31 @@ mod tests {
             cases.first().map(|c| c.label.as_str()),
             Some("WPPSI-IV · קוביות")
         );
+    }
+
+    #[test]
+    fn a_vineland_subdomain_has_a_relative_place_too() {
+        let entry = |measure: &str, value: f64| ScoreEntry {
+            measure: measure.into(),
+            value,
+            note: String::new(),
+        };
+        let sheet = ScoreSheet {
+            instrument: "vineland_3".into(),
+            module: String::new(),
+            cutoff: None,
+            entries: vec![
+                entry("receptive", 10.0),
+                entry("personal", 15.0),
+                entry("coping", 19.0),
+            ],
+            notes: String::new(),
+        };
+        let cases = sheet_cases(&sheet);
+        let of = |m: &str| cases.iter().find(|c| c.measure == m).unwrap().cases.clone();
+        assert!(of("receptive").contains(&"חולשה יחסית".to_owned()));
+        assert!(of("coping").contains(&"חוזקה יחסית".to_owned()));
+        assert!(!of("personal").iter().any(|c| c.ends_with("יחסית")));
     }
 
     #[test]

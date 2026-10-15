@@ -499,6 +499,9 @@ function Interpretations({ o, running, onRead }: { o: StyleOverview; running: bo
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // The item being changed: its buttons wait, so a double click does it once (the review of stage 4).
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<InterpretationView | null>(null);
   if (o.scored_measures === 0 && o.interpretations.length === 0) return null;
   const waiting = o.interpretations.filter((i) => !i.item.approved).length;
   const groups = new Map<string, InterpretationView[]>();
@@ -507,16 +510,21 @@ function Interpretations({ o, running, onRead }: { o: StyleOverview; running: bo
     groups.set(key, [...(groups.get(key) ?? []), i]);
   }
 
-  async function act(f: () => Promise<unknown>) {
+  async function act(id: string, f: () => Promise<unknown>) {
+    if (busyId !== null) return;
     setError(null);
+    setBusyId(id);
     try {
       await f();
       setEditing(null);
       await qc.invalidateQueries({ queryKey: ["style"] });
     } catch (e) {
       setError(fail(e as never));
+    } finally {
+      setBusyId(null);
     }
   }
+  const save = (id: string) => void act(id, () => ipc.updateInterpretation(id, draft, true, null));
 
   return (
     <section className="card style-card" aria-labelledby="style-interpret">
@@ -526,7 +534,7 @@ function Interpretations({ o, running, onRead }: { o: StyleOverview; running: bo
         שום פרשנות לא משמשת בדוח לפני שאישרת אותה.
       </p>
       <div className="row">
-        <button type="button" className="btn btn-small" disabled={running || o.scored_measures === 0} onClick={onRead}>
+        <button type="button" className="btn btn-small" disabled={running || o.scored_measures === 0} onClick={() => { setError(null); onRead(); }}>
           {o.interpretations.length === 0 ? "ללמוד מהדוחות איך פירשתי תוצאות" : "לקרוא שוב את הדוחות"}
         </button>
         {o.scored_measures > 0 && <span className="hint">{o.scored_measures === 1 ? "תת-מבחן אחד" : `${o.scored_measures} תת-מבחנים`} עם תוצאות בדוחות.</span>}
@@ -537,39 +545,68 @@ function Interpretations({ o, running, onRead }: { o: StyleOverview; running: bo
         <div key={title} className="style-group" role="group" aria-label={title}>
           <h3>{title}</h3>
           <ul className="style-items">
-            {items.map(({ item }) => (
-              <li key={item.id} className={item.enabled ? "" : "off"}>
-                <span className="chip">{item.case}</span>{" "}
-                {editing === item.id ? (
-                  <span className="stack">
-                    <textarea aria-label="הפרשנות" value={draft} rows={3} onChange={(e) => setDraft(e.target.value)} />
-                    <span className="row">
-                      <button type="button" className="btn btn-small btn-primary" onClick={() => void act(() => ipc.updateInterpretation(item.id, draft, true, null))}>שמירה ואישור</button>
-                      <button type="button" className="btn btn-small" onClick={() => setEditing(null)}>ביטול</button>
+            {items.map((view) => {
+              const { item } = view;
+              const busy = busyId === item.id;
+              return (
+                <li key={item.id} className={item.enabled ? "style-item" : "style-item style-item-off"}>
+                  <span className="chip">{item.case}</span>{" "}
+                  {editing === item.id ? (
+                    <span className="stack grow">
+                      {/* One line: the core keeps a single paragraph of up to 600 characters. */}
+                      <textarea className="textarea" aria-label="הפרשנות" value={draft} rows={2} maxLength={600} autoFocus
+                        onChange={(e) => setDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") {
+                            e.preventDefault();
+                            setEditing(null);
+                          } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                            e.preventDefault();
+                            save(item.id);
+                          }
+                        }} />
+                      <span className="row">
+                        <button type="button" className="btn btn-small btn-primary" disabled={busy || !draft.trim()} onClick={() => save(item.id)}>שמירה ואישור</button>
+                        <button type="button" className="btn btn-small" onClick={() => setEditing(null)}>ביטול</button>
+                      </span>
                     </span>
-                  </span>
-                ) : (
-                  <>
-                    <span>{item.text}</span>
-                    {!item.approved && <span className="chip chip-warn">מחכה לאישור</span>}
-                    {item.support > 1 && <span className="hint"> · ב-{item.support} דוחות</span>}
-                    <span className="row">
-                      {!item.approved && <button type="button" className="btn btn-small btn-primary" onClick={() => void act(() => ipc.updateInterpretation(item.id, null, true, null))}>אישור</button>}
-                      <button type="button" className="btn btn-small" onClick={() => { setEditing(item.id); setDraft(item.text); }}>עריכה</button>
-                      {item.approved && (
-                        <button type="button" className="btn btn-small" onClick={() => void act(() => ipc.updateInterpretation(item.id, null, null, !item.enabled))}>
-                          {item.enabled ? "כיבוי" : "הדלקה"}
-                        </button>
-                      )}
-                      <button type="button" className="btn btn-small btn-danger-quiet" onClick={() => void act(() => ipc.deleteInterpretation(item.id))}>מחיקה</button>
+                  ) : (
+                    <span className="stack grow">
+                      <span className="style-item-text">{item.text}</span>
+                      <span className="row">
+                        {!item.approved && <span className="chip chip-warn">מחכה לאישור</span>}
+                        {item.support > 1 && <span className="hint">ב-{item.support} דוחות</span>}
+                        {!item.approved && <button type="button" className="btn btn-small btn-primary" disabled={busy} onClick={() => void act(item.id, () => ipc.updateInterpretation(item.id, null, true, null))}>אישור</button>}
+                        {/* One editor at a time: what she typed in the open one is never dropped silently. */}
+                        <button type="button" className="btn btn-small" disabled={busy || editing !== null}
+                          title={editing !== null ? "קודם לשמור או לבטל את העריכה הפתוחה" : undefined}
+                          onClick={() => { setEditing(item.id); setDraft(item.text); }}>עריכה</button>
+                        {item.approved && (
+                          <button type="button" className="btn btn-small" disabled={busy} onClick={() => void act(item.id, () => ipc.updateInterpretation(item.id, null, null, !item.enabled))}>
+                            {item.enabled ? "כיבוי" : "הדלקה"}
+                          </button>
+                        )}
+                        <button type="button" className="btn btn-small btn-danger-quiet" disabled={busy} onClick={() => setDeleting(view)}>מחיקה</button>
+                      </span>
                     </span>
-                  </>
-                )}
-              </li>
-            ))}
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       ))}
+      {deleting && (
+        <ConfirmDialog danger title="מחיקת פרשנות" action="מחיקה"
+          text={`"${deleting.item.text}" יימחק, וכבר לא ישמש בטיוטות.`}
+          onClose={() => setDeleting(null)}
+          onConfirm={async () => {
+            await ipc.deleteInterpretation(deleting.item.id);
+            setDeleting(null);
+            setError(null);
+            await qc.invalidateQueries({ queryKey: ["style"] });
+          }} />
+      )}
     </section>
   );
 }

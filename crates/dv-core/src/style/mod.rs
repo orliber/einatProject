@@ -522,6 +522,8 @@ pub(crate) struct StyleWork {
     format: String,
     parts: Vec<StoredPart>,
     names: Vec<String>,
+    /// A keyed hash of the report's main child: reports of the same child count once.
+    child: Option<String>,
     hidden: u32,
     numbers: u32,
     warnings: Vec<String>,
@@ -545,9 +547,10 @@ pub(crate) fn style_work(
         .and_then(|s| s.to_str())
         .unwrap_or("דוח")
         .to_owned();
-    let (parts, title, hidden, numbers, names) = data.with_ctx(|ctx, hasher| {
+    let (parts, title, hidden, numbers, names, child_hash) = data.with_ctx(|ctx, hasher| {
         let child = main_child(&extracted.body, ctx)?;
         let child = child.as_deref();
+        let child_hash = child.map(|c| hasher.token_hmac(&normalize(c)));
         let run = |t: &str| filter(t, ctx).map_err(|e| CoreError::Internal(e.to_string()));
         let names = report_names(
             &[run(&extracted.body)?, run(&extracted.margins)?],
@@ -568,7 +571,7 @@ pub(crate) fn style_work(
             });
         }
         let (title, _, _) = neutralize(&stem, ctx, child)?;
-        Ok::<_, CoreError>((parts, title, hidden, numbers, names))
+        Ok::<_, CoreError>((parts, title, hidden, numbers, names, child_hash))
     })?;
     let mut warnings = extracted.warnings.clone();
     if parts.iter().all(|p| p.section.is_none()) {
@@ -586,6 +589,7 @@ pub(crate) fn style_work(
         format: extracted.format.name().to_owned(),
         parts,
         names,
+        child: child_hash,
         hidden,
         numbers,
         warnings,
@@ -598,6 +602,7 @@ pub(crate) struct StagedStyle {
     parts: Vec<StoredPart>,
     /// Keyed hashes of the names found in the report (its child, people, the margins).
     names: Vec<String>,
+    child: Option<String>,
 }
 
 /// Keyed hashes of the names in her past reports, by report: hidden in every case and
@@ -605,6 +610,36 @@ pub(crate) struct StagedStyle {
 const PAST_NAMES_KEY: &str = "style_past_names";
 
 type PastNames = BTreeMap<String, Vec<String>>;
+
+/// The keyed hash of each past report's main child, by report (the review of stage 4): what
+/// is "in 3 reports or more" counts children, so three reports of one child sharing a copied
+/// history paragraph do not make it her fixed wording. A report without one counts alone.
+const CHILDREN_KEY: &str = "style_children";
+
+fn past_children(v: &Vault) -> Result<BTreeMap<String, String>, CoreError> {
+    match v.secret(CHILDREN_KEY)? {
+        Some(s) => parse(&s),
+        None => Ok(BTreeMap::new()),
+    }
+}
+
+/// For each report (by id, in order), the child it is about, as a small number: reports of
+/// the same child get the same one.
+pub(crate) fn child_groups(v: &Vault, ids: &[String]) -> Result<Vec<usize>, CoreError> {
+    let children = past_children(v)?;
+    let mut seen: HashMap<&str, usize> = HashMap::new();
+    Ok(ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| match children.get(id) {
+            Some(h) => {
+                let next = ids.len() + seen.len();
+                *seen.entry(h.as_str()).or_insert(next)
+            }
+            None => i,
+        })
+        .collect())
+}
 
 fn past_names(v: &Vault) -> Result<PastNames, CoreError> {
     match v.secret(PAST_NAMES_KEY)? {
@@ -913,17 +948,19 @@ fn shared_run(text: &str, n: usize, index: &HashSet<String>) -> Option<String> {
 /// The runs of `n` words of her past reports that are about a child: a run in
 /// [`dv_style::formulas::MIN_REPORTS`] reports or more is her fixed wording (K4), which a
 /// profile item or a draft may repeat.
-fn source_index(sources: &[StoredSource], n: usize) -> HashSet<String> {
-    let mut reports: HashMap<String, usize> = HashMap::new();
-    for s in sources {
+/// `children` holds the child of each report ([`child_groups`]): a run counts once per child.
+fn source_index(sources: &[StoredSource], children: &[usize], n: usize) -> HashSet<String> {
+    let mut reports: HashMap<String, HashSet<usize>> = HashMap::new();
+    for (i, s) in sources.iter().enumerate() {
+        let child = children.get(i).copied().unwrap_or(i);
         let grams: HashSet<String> = s.parts.iter().flat_map(|p| ngrams(&p.text, n)).collect();
         for g in grams {
-            *reports.entry(g).or_default() += 1;
+            reports.entry(g).or_default().insert(child);
         }
     }
     reports
         .into_iter()
-        .filter(|(_, r)| *r < dv_style::formulas::MIN_REPORTS)
+        .filter(|(_, r)| r.len() < dv_style::formulas::MIN_REPORTS)
         .map(|(g, _)| g)
         .collect()
 }
@@ -1008,15 +1045,16 @@ fn focus(profile: &StyleProfile, section_key: &str, query: &str) -> StyleProfile
 
 /// A warning for a drafted paragraph that repeats a past report word for word.
 pub(crate) fn overlap_warning(v: &Vault, texts: &[&str]) -> Result<Vec<Option<String>>, CoreError> {
-    let sources: Vec<StoredSource> = v
-        .style_sources()?
+    let rows = v.style_sources()?;
+    let sources: Vec<StoredSource> = rows
         .iter()
         .map(|s| parse(&s.json))
         .collect::<Result<_, _>>()?;
     if sources.is_empty() {
         return Ok(vec![None; texts.len()]);
     }
-    let index = source_index(&sources, DRAFT_NGRAM);
+    let ids: Vec<String> = rows.into_iter().map(|r| r.id).collect();
+    let index = source_index(&sources, &child_groups(v, &ids)?, DRAFT_NGRAM);
     Ok(texts
         .iter()
         .map(|t| {
@@ -1069,7 +1107,7 @@ pub(crate) fn style_note(
 }
 
 /// Re-learn from her past reports: the model's report half and the recurring phrases.
-fn fit_reports(local: &mut LocalStyle, sources: &[StoredSource]) {
+fn fit_reports(local: &mut LocalStyle, sources: &[StoredSource], children: &[usize]) {
     // The newest report counts in full; each earlier one a little less (ST5).
     let n = sources.len();
     local
@@ -1093,7 +1131,7 @@ fn fit_reports(local: &mut LocalStyle, sources: &[StoredSource]) {
     local.shapes = dv_style::mine_shapes(&reports);
     let bands: Vec<Option<dv_style::AgeBand>> = sources.iter().map(report_band).collect();
     local.skeletons = dv_style::mine_skeletons(&reports, &bands);
-    local.formulas = dv_style::mine_formulas(&reports, &formula_slot);
+    local.formulas = dv_style::mine_formulas(&reports, children, &formula_slot);
     local.habits = dv_domain::sheet_habits(
         sources
             .iter()
@@ -1412,6 +1450,7 @@ impl Core {
                 format: work.format.clone(),
                 parts: work.parts,
                 names: work.names,
+                child: work.child,
             },
         );
         Ok(StyleImportPreview {
@@ -1462,20 +1501,27 @@ impl Core {
         names.insert(id.clone(), staged.names);
         self.vault_mut()?
             .set_secret(PAST_NAMES_KEY, &json(&names)?)?;
+        if let Some(child) = staged.child {
+            let mut children = past_children(self.vault_ref()?)?;
+            children.insert(id.clone(), child);
+            self.vault_mut()?
+                .set_secret(CHILDREN_KEY, &json(&children)?)?;
+        }
         self.remeasure_style()?;
         Ok(Self::source_view(id, unix_now(), &stored))
     }
 
     /// Learn again from her past reports after they changed (D-052).
     fn remeasure_style(&mut self) -> Result<(), CoreError> {
-        let sources: Vec<StoredSource> = self
-            .vault_ref()?
-            .style_sources()?
+        let rows = self.vault_ref()?.style_sources()?;
+        let sources: Vec<StoredSource> = rows
             .iter()
             .map(|s| parse(&s.json))
             .collect::<Result<_, _>>()?;
+        let ids: Vec<String> = rows.into_iter().map(|r| r.id).collect();
+        let children = child_groups(self.vault_ref()?, &ids)?;
         let mut local = local_style(self.vault_ref()?)?;
-        fit_reports(&mut local, &sources);
+        fit_reports(&mut local, &sources, &children);
         let v = self.vault_mut()?;
         v.set_secret(LOCAL_STYLE_KEY, &json(&local)?)?;
         v.set_secret(OLD_FINGERPRINT_KEY, "null")?;
@@ -1507,6 +1553,11 @@ impl Core {
         if names.remove(id).is_some() {
             self.vault_mut()?
                 .set_secret(PAST_NAMES_KEY, &json(&names)?)?;
+        }
+        let mut children = past_children(self.vault_ref()?)?;
+        if children.remove(id).is_some() {
+            self.vault_mut()?
+                .set_secret(CHILDREN_KEY, &json(&children)?)?;
         }
         self.remeasure_style()
     }
@@ -1719,6 +1770,7 @@ impl Core {
         self.vault_mut()?.reset_style()?;
         self.vault_mut()?
             .set_secret(PAST_NAMES_KEY, &json(&PastNames::new())?)?;
+        self.vault_mut()?.set_secret(CHILDREN_KEY, "{}")?;
         self.vault_mut()?
             .set_secret(LOCAL_STYLE_KEY, &json(&LocalStyle::default())?)?;
         self.vault_mut()?.set_secret(OLD_FINGERPRINT_KEY, "null")?;
@@ -1812,12 +1864,18 @@ mod unit {
                 }
             })
             .collect();
-        let index = source_index(&sources, 5);
+        let index = source_index(&sources, &[0, 1, 2], 5);
         assert!(shared_run(wording, 5, &index).is_none(), "her wording");
         assert!(shared_run("גם [ילד] בנה מגדל גבוה מקוביות", 5, &index).is_some());
         assert!(
-            shared_run(wording, 5, &source_index(&sources[..2], 5)).is_some(),
+            shared_run(wording, 5, &source_index(&sources[..2], &[0, 1], 5)).is_some(),
             "in two reports it may still be about a child"
+        );
+        // The review of stage 4: three reports of one child are one child, so what they share
+        // may be about that child, and a draft repeating it is still warned.
+        assert!(
+            shared_run(wording, 5, &source_index(&sources, &[7, 7, 7], 5)).is_some(),
+            "three reports of the same child"
         );
     }
 

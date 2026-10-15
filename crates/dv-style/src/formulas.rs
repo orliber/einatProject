@@ -81,11 +81,14 @@ type Seen = BTreeMap<(Option<String>, String), (String, HashSet<usize>)>;
 #[allow(clippy::cast_precision_loss)]
 pub fn mine_formulas(
     reports: &[ReportParts<'_>],
+    children: &[usize],
     slot: &dyn Fn(&str) -> Option<&'static str>,
 ) -> Vec<Formula> {
     let mut seen: Seen = BTreeMap::new();
     let mut with_section: BTreeMap<Option<String>, HashSet<usize>> = BTreeMap::new();
-    for (d, parts) in reports.iter().enumerate() {
+    for (i, parts) in reports.iter().enumerate() {
+        // Reports of the same child count once (the review of stage 4).
+        let d = children.get(i).copied().unwrap_or(i);
         for (section, text) in parts {
             let section = section.map(str::to_owned);
             with_section.entry(section.clone()).or_default().insert(d);
@@ -175,7 +178,7 @@ mod tests {
             .iter()
             .map(|t| vec![(Some("cognitive"), t.as_str())])
             .collect();
-        let f = mine_formulas(&reports, &slot);
+        let f = mine_formulas(&reports, &[0, 1, 2], &slot);
         let texts: Vec<&str> = f.iter().map(|f| f.text.as_str()).collect();
         assert_eq!(
             texts,
@@ -189,7 +192,9 @@ mod tests {
             f.iter().all(|f| !f.text.contains('[')),
             "no tag, and the child's sentences are left"
         );
-        assert!(mine_formulas(&reports[..2], &slot).is_empty());
+        assert!(mine_formulas(&reports[..2], &[0, 1], &slot).is_empty());
+        // The review of stage 4: three reports of one child are one child, not her wording.
+        assert!(mine_formulas(&reports, &[4, 4, 4], &slot).is_empty());
     }
 
     #[test]

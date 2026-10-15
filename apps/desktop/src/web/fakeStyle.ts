@@ -88,7 +88,7 @@ export class FakeStyle {
     const scored = out.replace(new RegExp(`(${SUBTESTS.map(([, n]) => n).join("|")})( \\(| )(\\d{1,3})(\\)?)`, "g"),
       (_m, name: string, open: string, v: string, close: string) => `${name}${open}[תוצאה ${v}]${close ?? ""}`);
     let numbers = 0;
-    const masked = scored.replace(/(?<![A-Za-z-]|תוצאה )\d+([.:/]\d+)*/g, () => { numbers += 1; return "[מספר]"; });
+    const masked = scored.replace(/(?<![A-Za-z-]|תוצאה \d*)\d+([.:/]\d+)*/g, () => { numbers += 1; return "[מספר]"; });
     return { text: masked, hidden, numbers };
   }
 
@@ -274,8 +274,10 @@ export class FakeStyle {
           item: { id: newId("interp"), instrument: "wppsi_iv", measure: key, case: "כללי", support: 1, approved: false, enabled: true, edited: false,
             text: "מצב הדגמה: כאן תופיע הפרשנות שלך לתת-המבחן, כפי שעולה מהדוחות שלך, במילים כלליות." },
         }));
-        this.interpretations.push(...added);
-        return { kept: added.length, dropped: 0, demo: true };
+        // As the core does: a text she already keeps is not added twice.
+        const fresh = added.filter((v) => !this.interpretations.some((i) => i.item.measure === v.item.measure && i.item.text === v.item.text));
+        this.interpretations.push(...fresh);
+        return { kept: fresh.length, dropped: added.length - fresh.length, demo: true };
       }
       case "update_interpretation": {
         const v = this.interpretations.find((i) => i.item.id === a.id) ?? fail("not_found", "לא נמצא: הפרשנות");
