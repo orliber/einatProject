@@ -9,7 +9,7 @@ import { RetentionNotice } from "../components/RetentionNotice";
 import { TopBar } from "../components/TopBar";
 import { NewCaseDialog } from "../components/NewCaseDialog";
 import { ageOf } from "../components/AgeField";
-import { ActionsMenu, RightClick, type MenuItem } from "../components/Menu";
+import { ActionsMenu, RightClick, RightClickArea, type MenuItem } from "../components/Menu";
 import { ErrorLine, Skeleton } from "../components/ui";
 import { greeting } from "../i18n/he";
 import { ipc, type CaseSummary, type Folder, type UiError } from "../ipc/client";
@@ -214,6 +214,14 @@ export function CasesScreen() {
     { label: "אבחון מעקב לילד/ה הזה/ו", run: () => void followUp(c) },
     { label: "העברה לסל המחזור", run: () => setModal({ kind: "delete-case", c }), danger: true },
   ];
+  /** The right-click actions of the row under the pointer: one menu for the whole table. */
+  const rowMenu = (target: Element): MenuItem[] | null => {
+    const row = target.closest<HTMLElement>("tr[data-folder], tr[data-case]");
+    const f = row?.dataset.folder && byId.get(row.dataset.folder);
+    if (f) return folderItems(f);
+    const c = row?.dataset.case && allCases.find((x) => x.id === row.dataset.case);
+    return c ? caseItems(c) : null;
+  };
   const caseName = (c: CaseSummary) => c.child_name ?? c.meta.code;
   /** D-029: a new case for the follow-up, with the same names; it opens on its details. */
   async function followUp(c: CaseSummary) {
@@ -349,13 +357,13 @@ export function CasesScreen() {
                           <th className="col-go"><span className="visually-hidden">פעולות</span></th>
                         </tr>
                       </thead>
-                      <tbody>
-                        {shownFolders.map((f) => {
-                          const n = countIn(f.id);
-                          const sub = allFolders.filter((x) => x.parent_id === f.id).map((x) => x.name);
-                          return (
-                            <RightClick key={f.id} items={folderItems(f)}>
-                              <tr className={dropOn === f.id ? "folder-row drop" : "folder-row"} onClick={() => setFolderId(f.id)} draggable
+                      <RightClickArea itemsAt={rowMenu}>
+                        <tbody>
+                          {shownFolders.map((f) => {
+                            const n = countIn(f.id);
+                            const sub = allFolders.filter((x) => x.parent_id === f.id).map((x) => x.name);
+                            return (
+                              <tr key={f.id} data-folder={f.id} className={dropOn === f.id ? "folder-row drop" : "folder-row"} onClick={() => setFolderId(f.id)} draggable
                                 onDragStart={onDragStart({ folder: f.id })} {...dropProps(f.id)}>
                                 <td>
                                   <div className="name-cell">
@@ -380,16 +388,14 @@ export function CasesScreen() {
                                   </div>
                                 </td>
                               </tr>
-                            </RightClick>
-                          );
-                        })}
-                        {shownCases.map((c) => {
-                          const s = st(c);
-                          const open = () => go({ name: "case", id: c.id, view: s.view });
-                          const where = c.folder_id && c.folder_id !== current ? pathOf(c.folder_id) : "";
-                          return (
-                            <RightClick key={c.id} items={caseItems(c)}>
-                              <tr onClick={open} className="case-row" draggable onDragStart={onDragStart({ case: c.id })}>
+                            );
+                          })}
+                          {shownCases.map((c) => {
+                            const s = st(c);
+                            const open = () => go({ name: "case", id: c.id, view: s.view });
+                            const where = c.folder_id && c.folder_id !== current ? pathOf(c.folder_id) : "";
+                            return (
+                              <tr key={c.id} data-case={c.id} onClick={open} className="case-row" draggable onDragStart={onDragStart({ case: c.id })}>
                                 <td>
                                   <div className="name-cell">
                                     <span className="row-icon">
@@ -421,10 +427,10 @@ export function CasesScreen() {
                                   </div>
                                 </td>
                               </tr>
-                            </RightClick>
-                          );
-                        })}
-                      </tbody>
+                            );
+                          })}
+                        </tbody>
+                      </RightClickArea>
                     </table>
                   )}
                   {emptyHere && (
