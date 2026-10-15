@@ -428,7 +428,9 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
       if (pending.length > 0 && !mine && !busy) setChanging(true);
     } else if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
       e.preventDefault();
-      if (job) return;
+      // One press approves one draft: a held key (auto-repeat) or a press while the last
+      // approval is still saving does nothing, so holding Enter never approves the report.
+      if (e.repeat || job || busy || settling) return;
       if (pending.length > 0) void approveAll();
       else if (s.paragraphs.length === 0 && canWrite) briefBox.current?.focus();
       else onNext();

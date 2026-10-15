@@ -136,6 +136,41 @@ describe("the report page, one section in focus", () => {
     expect(calls.filter((c) => c.cmd === "approve_paragraph").length).toBeGreaterThanOrEqual(2);
   });
 
+  it("a held Enter approves one draft, not the whole report", async () => {
+    const { calls, user, page } = await openReport();
+    const first = focused(page);
+    if (!first) throw new Error("no section in focus");
+    await user.click(within(first).getByRole("button", { name: "✦ לנסח" }));
+    await within(first).findByRole("group", { name: /^הטיוטה של/ });
+    const line = page.querySelector<HTMLElement>(".a4-gap-line");
+    const second = line?.closest<HTMLElement>(".a4-section");
+    if (!line || !second) throw new Error("no empty section left");
+    await user.click(within(line).getByRole("button", { name: "✦ לנסח" }));
+    await within(second).findByRole("group", { name: /^הטיוטה של/ });
+    const head = within(second).getByRole("heading", { level: 3 });
+    head.focus();
+    // The key held down: the first press, then the keyboard's repeats.
+    fireEvent.keyDown(head, { key: "Enter", code: "Enter" });
+    for (let i = 0; i < 5; i++) fireEvent.keyDown(document.activeElement ?? head, { key: "Enter", code: "Enter", repeat: true });
+    // The focus moves on to the first draft; the key is still held.
+    const firstHead = within(first).getByRole("heading", { level: 3 });
+    await waitFor(() => expect(document.activeElement).toBe(firstHead));
+    for (let i = 0; i < 5; i++) fireEvent.keyDown(firstHead, { key: "Enter", code: "Enter", repeat: true });
+    await new Promise((r) => setTimeout(r, 500));
+    expect(calls.filter((c) => c.cmd === "approve_paragraph").length).toBeGreaterThan(0);
+    // The first draft is still waiting for its own press.
+    expect(within(first).getByRole("button", { name: "✓ לאשר" })).toBeInTheDocument();
+  });
+
+  it("in full page, with the contents hidden, the next step comes back under the page", async () => {
+    const { user } = await openReport();
+    expect(screen.queryByRole("contentinfo", { name: "הצעד הבא" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "דף מלא" }));
+    expect(screen.queryByRole("complementary", { name: "תוכן הדוח" })).toBeNull();
+    expect(screen.getByRole("contentinfo", { name: "הצעד הבא" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "דף מלא" }));
+  });
+
   it("the contents say how far the report is, and the two keys", async () => {
     await openReport();
     const contents = screen.getByRole("complementary", { name: "תוכן הדוח" });

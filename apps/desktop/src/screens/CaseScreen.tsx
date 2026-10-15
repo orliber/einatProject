@@ -395,8 +395,9 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
       : !detail.meta.consent
         ? { title: `לפני שליחה ל-${ai} צריך לרשום את הסכמת ההורים.`, note: "", action: "רישום ההסכמה", run: () => go({ name: "case", id: caseId, view: "details" }) }
         // Round 49: on the materials page, "לכתיבת הדוח ←" sits at the top of the page; round 48:
-        // on the report page what is next is in the contents beside it.
-        : stage === 1 || view === "report"
+        // on the report page what is next is in the contents beside it (in "דף מלא", with the
+        // contents hidden, the bar comes back).
+        : stage === 1 || (view === "report" && !fullPage)
           ? null
           : pendingCount > 0
             ? { title: pendingCount === 1 ? "טיוטה אחת מחכה לאישור שלך" : `${pendingCount} פסקאות מחכות לאישור שלך`, note: "", action: `לטיוטה ב"${pending[0]?.title ?? ""}" ←`, run: () => toReport(pending[0]?.key) }
