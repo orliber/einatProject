@@ -334,7 +334,7 @@ select.select {
 }
 .dialog {
   width: min(1040px, 100%);
-  max-height: calc(100vh - 48px);
+  max-height: calc(100vh / var(--zoom, 1) - 48px);
   background: var(--bg);
   border-radius: var(--radius-xl);
   display: flex;
@@ -372,6 +372,24 @@ select.select {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+/* A low window (a laptop under its taskbar): the dialog keeps its buttons on screen. */
+@media (max-height: 700px) {
+  .overlay {
+    padding: 12px;
+  }
+  .dialog {
+    max-height: calc(100vh / var(--zoom, 1) - 24px);
+  }
+  .dialog-head {
+    padding: 14px 22px 12px;
+  }
+  .dialog-body {
+    padding: 14px 22px;
+  }
+  .dialog-foot {
+    padding: 10px 22px;
+  }
 }
 
 /* ---------- idle lock warning ---------- */

@@ -8,6 +8,14 @@
   gap: 24px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  container-type: inline-size;
+}
+@media (max-width: 1200px) {
+  .topbar {
+    padding: 0 16px;
+    gap: 12px;
+  }
 }
 .topbar-brand {
   display: inline-flex;
@@ -83,6 +91,13 @@
   flex-direction: column;
   gap: 24px;
 }
+/* A low window: the first case is on screen without scrolling. */
+@media (max-height: 720px) {
+  .page-main {
+    padding: 20px 40px;
+    gap: 12px;
+  }
+}
 .page-head {
   display: flex;
   align-items: flex-end;
@@ -91,4 +106,15 @@
 }
 .page-head h1 {
   font-size: var(--text-3xl);
+}
+
+/* A laptop screen, or a larger text size (measured after the zoom): the bar keeps to one
+   line. Last, so it wins over the rules above. */
+@container (max-width: 1150px) {
+  .topbar-link {
+    padding: 0 10px;
+  }
+  .topbar-safe {
+    display: none;
+  }
 }
