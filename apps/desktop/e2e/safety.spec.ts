@@ -2,7 +2,7 @@
 // nothing is fetched from outside the page, and the keyboard reaches what the mouse does.
 // All people and texts are invented.
 import { expect, test, type Page } from "@playwright/test";
-import { createCase, expectAccessible, stage, unlock } from "./helpers";
+import { createCase, expectAccessible, reviewEveryRequest, stage, unlock } from "./helpers";
 
 const PAYLOAD = `<img src=x onerror="window.__xss=1"><script>window.__xss=2</script><b id="injected">מודגש</b>`;
 
@@ -33,6 +33,7 @@ test("markup in a material is shown as text, not run as HTML", async ({ page }) 
 
 test("a consultation question with markup is echoed as text", async ({ page }) => {
   await unlock(page);
+  await reviewEveryRequest(page);
   await page.getByRole("button", { name: "התייעצות", exact: true }).click();
   await page.locator("#consult-q").fill(`מה כדאי לבדוק? ${PAYLOAD}`);
   await page.getByRole("button", { name: "שליחה", exact: true }).click();

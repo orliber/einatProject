@@ -136,7 +136,7 @@ const ALLOWED = new Set([
   "set_practitioner",
   "set_report_settings",
   "set_report_template",
-  "set_review_only_suspect",
+  "set_review_always",
   "set_screen_protection",
   "set_speed",
   "set_style_enabled",

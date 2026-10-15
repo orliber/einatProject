@@ -127,7 +127,10 @@ const MODEL_KEY: &str = "model";
 const ZDR_PREFIX: &str = "zdr/";
 const LOCK_KEY: &str = "lock_minutes";
 const FIRST_USE_KEY: &str = "first_use_day";
-const REVIEW_KEY: &str = "review_only_suspect";
+/// "Show me every request before it is sent" (round 26). On until she turns it off: the
+/// review screen stays the default until Einat confirms turning it off (D-062). The key of the
+/// earlier "only when suspicious" choice is not read.
+const REVIEW_KEY: &str = "review_always";
 const SCREEN_KEY: &str = "screen_protection";
 /// How long Claude may think (see `Core::model_for`).
 const SPEED_KEY: &str = "answer_speed";
@@ -140,8 +143,6 @@ enum Task {
     Draft,
     Consult,
 }
-/// Days of use before "show the review only when suspicious" can be chosen (D-020).
-const REVIEW_ALWAYS_DAYS: u64 = 14;
 
 fn day_number() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| {

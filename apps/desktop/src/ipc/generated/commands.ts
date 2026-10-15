@@ -181,7 +181,7 @@ export type Commands = {
   set_practitioner: { args: { names: Array<string> }; returns: null };
   set_report_settings: { args: { settings: ReportSettings }; returns: null };
   set_report_template: { args: Uint8Array; returns: TemplateView };
-  set_review_only_suspect: { args: { on: boolean }; returns: null };
+  set_review_always: { args: { on: boolean }; returns: null };
   set_screen_protection: { args: { on: boolean }; returns: null };
   set_send_stopped: { args: { stopped: boolean }; returns: SecurityStatus };
   set_speed: { args: { speed: string }; returns: null };

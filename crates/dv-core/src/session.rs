@@ -154,22 +154,12 @@ impl Core {
 
     pub fn status(&mut self) -> AppStatus {
         let cloud = dv_vault::env::cloud_synced_component(&self.dir);
-        let (practitioner, review_only_suspect, review_choice_available) = match &self.vault {
-            Some(v) => {
-                let first = v
-                    .setting(FIRST_USE_KEY)
-                    .ok()
-                    .flatten()
-                    .and_then(|d| d.parse::<u64>().ok())
-                    .unwrap_or_else(day_number);
-                let available = day_number().saturating_sub(first) >= REVIEW_ALWAYS_DAYS;
-                (
-                    v.practitioner().map(|p| p.names).unwrap_or_default(),
-                    available && v.setting(REVIEW_KEY).ok().flatten().as_deref() == Some("1"),
-                    available,
-                )
-            }
-            None => (Vec::new(), false, false),
+        let (practitioner, review_always) = match &self.vault {
+            Some(v) => (
+                v.practitioner().map(|p| p.names).unwrap_or_default(),
+                v.setting(REVIEW_KEY).ok().flatten().as_deref() != Some("0"),
+            ),
+            None => (Vec::new(), true),
         };
         let speed = self
             .vault
@@ -208,8 +198,7 @@ impl Core {
             lock_minutes: self.lock_minutes(),
             idle_lock_in: self.idle_lock_in(),
             practitioner,
-            review_only_suspect,
-            review_choice_available,
+            review_always,
             screen_protection: self
                 .vault
                 .as_ref()
@@ -225,13 +214,8 @@ impl Core {
         Ok(())
     }
 
-    /// After the first weeks, the review screen may be shown only when something is suspicious.
-    pub fn set_review_only_suspect(&mut self, on: bool) -> Result<(), CoreError> {
-        if on && !self.status().review_choice_available {
-            return Err(CoreError::Refused(format!(
-                "בשבועיים הראשונים ({REVIEW_ALWAYS_DAYS} ימים) מסך הבדיקה מוצג תמיד."
-            )));
-        }
+    /// Show every request before it is sent (advanced mode), or send what the gate cleared.
+    pub fn set_review_always(&mut self, on: bool) -> Result<(), CoreError> {
         self.vault_mut()?
             .set_setting(REVIEW_KEY, if on { "1" } else { "0" })?;
         Ok(())

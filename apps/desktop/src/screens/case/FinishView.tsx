@@ -33,7 +33,6 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
   // Kept while the vault is open: leaving and coming back finds the editor with her text.
   const [editing, setEditing] = useKept<{ id: string; text: string } | null>(`case:${caseId}:finish:editing`, null);
   const editBox = useRef<LocalTextHandle>(null);
-  const [withMarks, setWithMarks] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const holdLive = useHoldUnsaved(caseId, "פסקה בשלב הסיום", editing?.text ?? null);
 
@@ -74,8 +73,10 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
   const child = detail.identities.find((i) => i.role === "child")?.value ?? "";
   const blocked = (check?.blocking.length ?? 0) > 0;
   const nothing = check !== null && check.included_sections === 0;
-  const needsConfirm = toComplete.length > 0 && !withMarks;
-  const ready = check !== null && !blocked && !nothing && !needsConfirm;
+  // Round 26: what is left to complete is listed, and never stops the file. The core also marks
+  // a tag it could not put words back into; those sections are listed by name.
+  const ready = check !== null && !blocked && !nothing;
+  const markedElsewhere = (check?.to_complete ?? []).filter((t) => !toComplete.some(({ section }) => t.startsWith(`${section.title}:`)));
 
   async function save() {
     if (!editing) return;
@@ -160,11 +161,14 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
                         </button>
                       ),
                     )}
-                    <label className="row small">
-                      <input type="checkbox" checked={withMarks} onChange={(e) => setWithMarks(e.target.checked)} />
-                      להוציא בכל זאת: הסימונים יישארו בקובץ, ואשלים אותם בוורד
-                    </label>
+                    <span className="small muted">הקובץ יוצא גם כך: הסימונים נשארים בו, ואפשר להשלים אותם בוורד.</span>
                   </div>
+                </li>
+              )}
+              {markedElsewhere.length > 0 && (
+                <li className="warn">
+                  <span className="finish-mark" aria-hidden="true">!</span>
+                  <span className="grow">יסומנו בקובץ להשלמה: {markedElsewhere.join(" · ")}</span>
                 </li>
               )}
               {!blocked && check.included_sections > 0 && (
@@ -182,7 +186,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
             <button type="button" className="btn btn-primary btn-big" disabled={!ready} onClick={onExport}>הפקת הקובץ</button>
             {!ready && check && (
               <span className="small muted">
-                {nothing ? "צריך לפחות סעיף מאושר אחד." : blocked ? "קודם מתקנים את מה שמסומן למעלה." : "משלימים את הסימונים, או מסמנים \"להוציא בכל זאת\"."}
+                {nothing ? "צריך לפחות סעיף מאושר אחד." : "קודם מתקנים את מה שמסומן למעלה."}
               </span>
             )}
           </section>

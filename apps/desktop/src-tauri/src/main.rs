@@ -345,7 +345,7 @@ fn main() {
             set_speed,
             set_lock_minutes,
             set_practitioner,
-            set_review_only_suspect,
+            set_review_always,
             set_screen_protection,
             report_settings,
             set_report_settings,

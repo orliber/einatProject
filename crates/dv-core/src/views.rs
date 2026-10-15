@@ -35,6 +35,9 @@ pub enum ErrorAction {
     Report,
     /// Something of hers to change, as the message says: the button closes the message.
     Dismiss,
+    /// The monthly ceiling she set is reached: raise it to `to_usd` and send the same request
+    /// (its approval is kept), with no other step (round 26).
+    RaiseCap { to_usd: u32 },
 }
 
 impl ErrorAction {
@@ -78,10 +81,9 @@ pub struct AppStatus {
     pub idle_lock_in: Option<u32>,
     /// Names always hidden as the practitioner (shown in settings).
     pub practitioner: Vec<String>,
-    /// Show the review screen only when something is suspicious (D-020).
-    pub review_only_suspect: bool,
-    /// The choice above opens after the first 14 days of use (D-020).
-    pub review_choice_available: bool,
+    /// Show every request on the review screen before it is sent (on by default until Einat
+    /// confirms otherwise; D-062). Off: a request the gate cleared goes at once.
+    pub review_always: bool,
     /// Screenshots and screen sharing show a blank window (D-037). Always on while the vault
     /// is locked; she may turn it off for the open vault in settings.
     pub screen_protection: bool,

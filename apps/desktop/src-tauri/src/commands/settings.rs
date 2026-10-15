@@ -102,11 +102,8 @@ pub(crate) async fn set_practitioner(
 }
 
 #[tauri::command]
-pub(crate) async fn set_review_only_suspect(
-    state: tauri::State<'_, AppState>,
-    on: bool,
-) -> Res<()> {
-    with_core(&state, move |c| c.set_review_only_suspect(on)).await
+pub(crate) async fn set_review_always(state: tauri::State<'_, AppState>, on: bool) -> Res<()> {
+    with_core(&state, move |c| c.set_review_always(on)).await
 }
 
 #[tauri::command]

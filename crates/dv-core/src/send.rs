@@ -57,69 +57,20 @@ impl Core {
                     .map(|a| a.tag.clone()),
             );
         }
-        fn request<'a>(
-            body: &'a Value,
-            ctx: &'a PrivacyContext<'a>,
-            case_tags: &'a HashSet<String>,
-            suspects: usize,
-        ) -> GateRequest<'a> {
-            GateRequest {
-                body,
-                ctx,
-                case_tags,
-                unresolved_suspects: suspects,
-                canaries: &[],
-                max_bytes: MAX_REQUEST_BYTES,
-            }
-        }
-        let mut body = body.clone();
-        let mut result = clear(&request(&body, &ctx, &case_tags, suspects));
-        let mut fixed: Vec<dv_privacy::FixedItem> = Vec::new();
-        let mut cuts: Vec<dv_ai::Cut> = Vec::new();
-        let mut refused_codes: Vec<String> = Vec::new();
-        for _ in 0..3 {
-            let Err(blocked) = &result else { break };
-            let codes: Vec<&str> = blocked.reasons.iter().map(|r| r.code.as_str()).collect();
-            if !codes
-                .iter()
-                .all(|c| *c == "too_large" || dv_privacy::FIXABLE_CODES.contains(c))
-            {
-                break;
-            }
-            refused_codes.extend(codes.iter().map(|c| (*c).to_owned()));
-            if codes.iter().any(|c| dv_privacy::FIXABLE_CODES.contains(c)) {
-                let Some((next, items)) = dv_privacy::fix_refused(
-                    &request(&body, &ctx, &case_tags, suspects),
-                    &data.masks,
-                ) else {
-                    break;
-                };
-                fixed.extend(items);
-                body = next;
-            }
-            // Too large: the longest materials are cut at a line, the rest stays home.
-            if codes.contains(&"too_large") {
-                let Some((next, shortened)) = dv_ai::shrink_to_fit(&body, MAX_REQUEST_BYTES) else {
-                    break;
-                };
-                for c in shortened {
-                    match cuts.iter_mut().find(|x| x.label == c.label) {
-                        Some(x) => x.kept = c.kept,
-                        None => cuts.push(c),
-                    }
-                }
-                body = next;
-            }
-            result = clear(&request(&body, &ctx, &case_tags, suspects));
-        }
+        let Answered {
+            result,
+            fixed,
+            cuts,
+            mut codes,
+        } = answer_refusals(body, &ctx, &case_tags, suspects, &data.masks);
         if (!fixed.is_empty() || !cuts.is_empty()) && result.is_ok() {
-            refused_codes.sort();
-            refused_codes.dedup();
+            codes.sort();
+            codes.dedup();
             let case_opt = (!data.case_id.is_empty()).then_some(data.case_id.as_str());
             self.vault_mut()?.record(
                 AuditEvent::Blocked,
                 case_opt,
-                &serde_json::json!({ "codes": refused_codes, "fixed": true }),
+                &serde_json::json!({ "codes": codes, "fixed": true }),
             )?;
             if !fixed.is_empty() {
                 note_fixed(prepared, &fixed);
@@ -469,11 +420,12 @@ impl Core {
         };
         let month = usage::Month::parse(v.setting(&usage::this_month_key())?.as_deref());
         if month.reached(cap) {
+            let to_usd = raised_cap(cap);
             return Err(CoreError::Needs(
                 format!(
-                    "הגעת לתקרת ההוצאה החודשית שקבעת (${cap}). אפשר להעלות אותה בהגדרות, תחת \"שימוש ועלות\"."
+                    "הגעת לתקרת ההוצאה החודשית שקבעת (${cap}). אפשר להעלות אותה ל-${to_usd} ולהמשיך, והבקשה נשלחת כמו שהוכנה."
                 ),
-                ErrorAction::settings("ai"),
+                ErrorAction::RaiseCap { to_usd },
             ));
         }
         Ok(())
@@ -796,9 +748,97 @@ pub(crate) fn collect_sources(
     Ok((tagged_sources, source_rows))
 }
 
+/// What the fix loop made of a request: the gate's last verdict, what was hidden or cut on
+/// the way, and the codes it answered.
+pub(crate) struct Answered {
+    pub(crate) result: Result<ClearedPayload, dv_privacy::Blocked>,
+    pub(crate) fixed: Vec<dv_privacy::FixedItem>,
+    pub(crate) cuts: Vec<dv_ai::Cut>,
+    pub(crate) codes: Vec<String>,
+}
+
+/// The gate on `body`, and when it refuses only what can be answered in the outgoing copy
+/// (a name, a pattern, a foreign tag, the size), that answer and the same gate again, up to
+/// three times (round 25). The gate is not changed; a fix only takes words out.
+pub(crate) fn answer_refusals(
+    body: &Value,
+    ctx: &PrivacyContext<'_>,
+    case_tags: &HashSet<String>,
+    suspects: usize,
+    book: &dv_privacy::MaskBook,
+) -> Answered {
+    fn request<'a>(
+        body: &'a Value,
+        ctx: &'a PrivacyContext<'a>,
+        case_tags: &'a HashSet<String>,
+        suspects: usize,
+    ) -> GateRequest<'a> {
+        GateRequest {
+            body,
+            ctx,
+            case_tags,
+            unresolved_suspects: suspects,
+            canaries: &[],
+            max_bytes: MAX_REQUEST_BYTES,
+        }
+    }
+    let mut body = body.clone();
+    let mut result = clear(&request(&body, ctx, case_tags, suspects));
+    let mut fixed: Vec<dv_privacy::FixedItem> = Vec::new();
+    let mut cuts: Vec<dv_ai::Cut> = Vec::new();
+    let mut answered: Vec<String> = Vec::new();
+    for _ in 0..3 {
+        let Err(blocked) = &result else { break };
+        let codes: Vec<&str> = blocked.reasons.iter().map(|r| r.code.as_str()).collect();
+        if !codes
+            .iter()
+            .all(|c| *c == "too_large" || dv_privacy::FIXABLE_CODES.contains(c))
+        {
+            break;
+        }
+        answered.extend(codes.iter().map(|c| (*c).to_owned()));
+        if codes.iter().any(|c| dv_privacy::FIXABLE_CODES.contains(c)) {
+            let Some((next, items)) =
+                dv_privacy::fix_refused(&request(&body, ctx, case_tags, suspects), book)
+            else {
+                break;
+            };
+            fixed.extend(items);
+            body = next;
+        }
+        // Too large: the longest materials are cut at a line, the rest stays home.
+        if codes.contains(&"too_large") {
+            let Some((next, shortened)) = dv_ai::shrink_to_fit(&body, MAX_REQUEST_BYTES) else {
+                break;
+            };
+            for c in shortened {
+                match cuts.iter_mut().find(|x| x.label == c.label) {
+                    Some(x) => x.kept = c.kept,
+                    None => cuts.push(c),
+                }
+            }
+            body = next;
+        }
+        result = clear(&request(&body, ctx, case_tags, suspects));
+    }
+    Answered {
+        result,
+        fixed,
+        cuts,
+        codes: answered,
+    }
+}
+
+/// The ceiling offered when the month reaches it: half again, at least $10 more, in whole
+/// fives, so one click is enough for the rest of a busy month and never a blank cheque.
+pub(crate) fn raised_cap(cap: u32) -> u32 {
+    let more = (cap / 2).max(10);
+    cap.saturating_add(more).div_ceil(5).saturating_mul(5)
+}
+
 /// What was cut for size shows with the request, like what was hidden: which material, and
 /// how much of it went.
-fn note_cut(prepared: &mut Prepared, cuts: &[dv_ai::Cut]) {
+pub(crate) fn note_cut(prepared: &mut Prepared, cuts: &[dv_ai::Cut]) {
     let lines: Vec<String> = cuts
         .iter()
         .map(|c| {
@@ -823,7 +863,7 @@ fn note_cut(prepared: &mut Prepared, cuts: &[dv_ai::Cut]) {
 
 /// What the fix loop hid shows with the request (the review in advanced mode, and the history
 /// of what left the computer): the words, what went out instead, and their kinds.
-fn note_fixed(prepared: &mut Prepared, fixed: &[dv_privacy::FixedItem]) {
+pub(crate) fn note_fixed(prepared: &mut Prepared, fixed: &[dv_privacy::FixedItem]) {
     let mut original = Vec::new();
     let mut outgoing = Vec::new();
     for (i, f) in fixed.iter().enumerate() {

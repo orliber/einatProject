@@ -65,10 +65,10 @@ export function MaterialsView({ api }: { api: CaseApi }) {
     setReading(file.name);
     try {
       const preview = await ipc.importDocument(caseId, file);
-      // Nothing hidden, nothing left out, no warnings: there is nothing to review, so it is
-      // saved at once (encrypted, nothing leaves the computer) with "ביטול" beside it.
-      const clean = preview.body.trim() !== "" && preview.auto_hidden.length === 0
-        && preview.left_out.length === 0 && preview.warnings.length === 0;
+      // Everything read: saved at once (encrypted, nothing leaves the computer) with "ביטול"
+      // beside it. What the filter will hide is not a question (round 26); only a file that
+      // was not read in full opens the window, to say what was left out.
+      const clean = preview.body.trim() !== "" && preview.left_out.length === 0 && preview.warnings.length === 0;
       if (clean) {
         const saved = await ipc.addInput(caseId, kind ?? preview.suggested_kind, preview.title.trim(), preview.body);
         setAutoSaved({ id: saved.id, title: preview.title.trim() || file.name });
@@ -237,7 +237,6 @@ export function MaterialsView({ api }: { api: CaseApi }) {
               <div className="material-head">
                 <h2 className="grow">{input.title || kindLabel[input.kind]}</h2>
                 <span className="small muted">{kindLabel[input.kind]}</span>
-                {preview && preview.hidden.length > 0 && <span className="chip chip-warn">{countHidden(preview)} פרטים יוסתרו</span>}
                 <button type="button" className="btn btn-small" onClick={() => void edit(input)}>עריכה</button>
                 <button type="button" className="btn btn-small" onClick={() => void remove(input)}>מחיקה</button>
               </div>
@@ -285,10 +284,6 @@ export function MaterialsView({ api }: { api: CaseApi }) {
       )}
     </div>
   );
-}
-
-function countHidden(p: FilterOutcome): number {
-  return p.original_segments.filter((s) => s.mark === "replaced" || s.mark === "relative").length;
 }
 
 function feedText(route: MaterialRouting | undefined, titleOf: (key: string) => string): string {

@@ -3,4 +3,4 @@
 /**
  * What the button under an error does (F6).
  */
-export type ErrorAction = { "kind": "retry", after_seconds: number, } | { "kind": "settings", pane: string, } | { "kind": "consent" } | { "kind": "unlock" } | { "kind": "report" } | { "kind": "dismiss" };
+export type ErrorAction = { "kind": "retry", after_seconds: number, } | { "kind": "settings", pane: string, } | { "kind": "consent" } | { "kind": "unlock" } | { "kind": "report" } | { "kind": "dismiss" } | { "kind": "raise_cap", to_usd: number, };

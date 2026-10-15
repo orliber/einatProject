@@ -332,13 +332,28 @@ fn usage_is_counted_and_the_monthly_ceiling_stops_sending() {
     core.set_monthly_cap(Some(10)).unwrap();
     let second = section(&mut core);
     let err = core.send_section(&second).unwrap_err();
-    assert_eq!(err.to_ui().code, "refused");
+    let ui = err.to_ui();
+    assert_eq!(ui.code, "refused");
+    // The message offers the raised ceiling, and the button raises it to exactly that.
+    assert_eq!(ui.action, ErrorAction::RaiseCap { to_usd: 20 });
+    assert!(ui.message.contains("$20"), "{}", ui.message);
     assert_eq!(fake.sent.lock().unwrap().len(), 1);
-    // Raising the ceiling lets the same approval go out.
-    core.set_monthly_cap(None).unwrap();
-    assert_eq!(core.usage_summary().unwrap().cap_usd, None);
+    // Raising the ceiling lets the same approval go out, without preparing it again.
+    core.set_monthly_cap(Some(20)).unwrap();
     core.send_section(&second).unwrap();
     assert_eq!(fake.sent.lock().unwrap().len(), 2);
+    core.set_monthly_cap(None).unwrap();
+    assert_eq!(core.usage_summary().unwrap().cap_usd, None);
+}
+
+#[test]
+fn the_raised_ceiling_is_half_again_at_least_ten_in_fives() {
+    assert_eq!(send::raised_cap(10), 20);
+    assert_eq!(send::raised_cap(7), 20);
+    assert_eq!(send::raised_cap(30), 45);
+    assert_eq!(send::raised_cap(100), 150);
+    // No overflow at the top: it stays at the largest whole five.
+    assert_eq!(send::raised_cap(u32::MAX), u32::MAX);
 }
 
 #[test]
@@ -1237,16 +1252,16 @@ fn the_vault_locks_with_the_computer() {
 }
 
 #[test]
-fn review_screen_is_always_shown_in_the_first_weeks() {
+fn every_request_is_shown_first_by_default_and_she_may_turn_it_off() {
     let (_dir, mut core, _case) = setup(None);
     let s = core.status();
-    assert!(!s.review_only_suspect && !s.review_choice_available);
-    assert!(matches!(
-        core.set_review_only_suspect(true),
-        Err(CoreError::Refused(_))
-    ));
-    assert!(core.set_review_only_suspect(false).is_ok());
+    assert!(s.review_always);
     assert_eq!(s.practitioner, vec!["ד\"ר רותם אלמוג".to_owned()]);
+    // No waiting period: off from the first day, and on again.
+    core.set_review_always(false).unwrap();
+    assert!(!core.status().review_always);
+    core.set_review_always(true).unwrap();
+    assert!(core.status().review_always);
 }
 
 #[test]

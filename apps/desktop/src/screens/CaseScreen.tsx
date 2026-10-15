@@ -19,6 +19,7 @@ import { isCombo, KEYS } from "../shortcuts";
 import { useKept } from "../kept";
 import "./CaseScreen.css";
 import { useAi } from "../ai";
+import { notSentMessage } from "../sending";
 
 export interface ReviewRequest {
   title: string;
@@ -68,6 +69,8 @@ const retries = new Map<number, () => void>();
 
 /** The screen's `track`, for a retry from the strip after she left the case and came back. */
 let currentTrack: CaseApi["track"] | null = null;
+/** The screen's `review`, for "לנסות שוב" on a request that did not go (built again). */
+let currentReview: CaseApi["review"] | null = null;
 
 /** One line for the result of a sorting, in plain words. */
 export function sortSummary(r: SortResult): string {
@@ -162,7 +165,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [caseId, go]);
 
-  const [failures, setFailures] = useKept<{ id: number; label: string; section?: string; approval?: string; message: string }[]>(`case:${caseId}:failures`, []);
+  const [failures, setFailures] = useKept<{ id: number; label: string; section?: string; approval?: string; again?: string; message: string }[]>(`case:${caseId}:failures`, []);
   const track = useCallback(
     async <T,>(job: { label: string; task: Task; section?: string; approval?: string }, run: () => Promise<T>, then?: (out: T) => Promise<void> | void): Promise<T> => {
       const j: Job = { ...job, id: ++jobSeq, started: Date.now(), estimate: estimateMs(job.task, status.speed, status.demo_mode) };
@@ -184,8 +187,14 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         // Never lost silently, wherever she is by then. A send the core kept the approval
         // for can go again from the strip, and its answer is taken in by the same `then` (F6).
         const err = e as UiError;
-        if (err.action?.kind === "retry") retries.set(j.id, () => void currentTrack?.(job, run, then).catch(() => undefined));
-        setFailures((f) => [...f, { id: j.id, label: job.label, ...(job.section ? { section: job.section } : {}), ...(job.approval ? { approval: job.approval } : {}), message: fail(e as never) }]);
+        const action = err.action;
+        if (action?.kind === "retry") retries.set(j.id, () => void currentTrack?.(job, run, then).catch(() => undefined));
+        // The monthly ceiling: one click raises it and sends the same request (round 26).
+        if (action?.kind === "raise_cap") {
+          retries.set(j.id, () => void ipc.setMonthlyCap(action.to_usd).then(() => currentTrack?.(job, run, then)).catch(() => undefined));
+        }
+        const again = action?.kind === "raise_cap" ? { again: `להעלות ל-$${action.to_usd} ולהמשיך` } : {};
+        setFailures((f) => [...f, { id: j.id, label: job.label, ...(job.section ? { section: job.section } : {}), ...(job.approval ? { approval: job.approval } : {}), ...again, message: fail(e as never) }]);
         throw e;
       } finally {
         setJobs((js) => js.filter((x) => x.id !== j.id));
@@ -200,9 +209,19 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const startReview = useCallback(
     (r: ReviewRequest) =>
       new Promise<boolean>((resolve, reject) => {
-        const clean = r.prepared.approval_id && r.prepared.auto_hidden.length === 0 && r.prepared.blocked.length === 0;
-        if (status.review_only_suspect && clean && r.prepared.approval_id) {
-          r.onSend(r.prepared.approval_id).then(() => resolve(true), reject);
+        // Round 26: what the gate cleared goes at once; the review only when she asked for it.
+        if (!status.review_always) {
+          if (r.prepared.approval_id) {
+            r.onSend(r.prepared.approval_id).then(() => resolve(true), reject);
+            return;
+          }
+          // Refused after the fix loop: a line in the strip, with "לנסות שוב" (built again).
+          const id = ++jobSeq;
+          retries.set(id, () => void r.reprepare().then((prepared) => currentReview?.({ ...r, prepared })).catch((e: unknown) => {
+            setFailures((f) => [...f, { id: ++jobSeq, label: r.title, message: fail(e as never) }]);
+          }));
+          setFailures((f) => [...f, { id, label: r.title, message: notSentMessage(r.prepared) }]);
+          resolve(false);
           return;
         }
         // One review at a time: one that is replaced counts as "went back", so whoever
@@ -212,8 +231,11 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
           return { r, done: resolve, failed: reject };
         });
       }),
-    [status.review_only_suspect],
+    [status.review_always, setFailures, fail],
   );
+  useEffect(() => {
+    currentReview = startReview;
+  }, [startReview]);
 
   const draft = useCallback(
     async (key: string, instruction?: string, replaces?: string) => {
@@ -369,7 +391,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
                   retries.delete(f.id);
                   setFailures((all) => all.filter((x) => x.id !== f.id));
                   again?.();
-                }}>לנסות שוב</button>
+                }}>{f.again ?? "לנסות שוב"}</button>
               )}
               <button type="button" className="icon-btn" aria-label="סגירה" onClick={() => {
                 retries.delete(f.id);

@@ -1,7 +1,7 @@
 // The main journey in the browser preview: home → new case → materials → the "what leaves the
 // computer" review → the report page. All people and texts are invented.
 import { expect, test } from "@playwright/test";
-import { createCase, expectAccessible, stage, unlock } from "./helpers";
+import { createCase, expectAccessible, reviewEveryRequest, stage, unlock } from "./helpers";
 
 const CHILD = "יונתן בדוי";
 const INTAKE =
@@ -23,6 +23,7 @@ test("the cases screen lists the invented cases and is accessible", async ({ pag
 
 test("home → new case → materials → review before sending → report page", async ({ page }) => {
   await unlock(page);
+  await reviewEveryRequest(page);
 
   // New case.
   await createCase(page, CHILD);

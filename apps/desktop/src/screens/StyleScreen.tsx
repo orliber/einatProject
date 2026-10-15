@@ -26,6 +26,7 @@ import {
 import { ConfirmDialog } from "./library/LibraryDialogs";
 import "./StyleScreen.css";
 import { useAi } from "../ai";
+import { notSentMessage } from "../sending";
 
 const KIND_LABEL: Record<StyleKind, string> = {
   rule: "כללי כתיבה",
@@ -101,9 +102,13 @@ export function StyleScreen() {
     setError(null);
     try {
       const prepared = await prepare(step);
-      const clean = prepared.approval_id && !prepared.auto_hidden.length && !prepared.blocked.length;
-      if (status.review_only_suspect && clean && prepared.approval_id) await send(step, prepared.approval_id, steps);
-      else setReview({ step, prepared });
+      // Round 26: what the gate cleared goes at once; the review only when she asked for it.
+      if (status.review_always) setReview({ step, prepared });
+      else if (prepared.approval_id) await send(step, prepared.approval_id, steps);
+      else {
+        setError(notSentMessage(prepared));
+        setQueue([]);
+      }
     } catch (e) {
       setError(fail(e as never));
       setQueue([]);

@@ -156,7 +156,7 @@ export class FakeCore {
     return providerOf(this.model).name;
   }
   private speed = "balanced";
-  private reviewOnlySuspect = false;
+  private reviewAlways = true;
   private screenProtection = true;
   private template: TemplateView | null = null;
   private report: ReportSettings = {
@@ -395,7 +395,7 @@ export class FakeCore {
     return {
       vault_exists: this.vaultExists, unlocked: this.unlocked, disk_encryption: "on", cloud_synced_folder: null, fips_active: true,
       demo_mode: true, model: this.model, provider: providerOf(this.model).id, ai_name: this.ai, keys: [], speed: this.speed, integrity_warning: null, lock_minutes: this.lockMinutes, idle_lock_in: this.unlocked ? this.lockMinutes * 60 : null,
-      practitioner: this.practitioner, review_only_suspect: this.reviewOnlySuspect, review_choice_available: true, screen_protection: !this.unlocked || this.screenProtection,
+      practitioner: this.practitioner, review_always: this.reviewAlways, screen_protection: !this.unlocked || this.screenProtection,
     };
   }
 
@@ -752,8 +752,8 @@ export class FakeCore {
       case "set_screen_protection":
         this.screenProtection = Boolean(a.on);
         return null;
-      case "set_review_only_suspect":
-        this.reviewOnlySuspect = Boolean(a.on);
+      case "set_review_always":
+        this.reviewAlways = Boolean(a.on);
         return null;
       case "report_settings":
         return this.report;
