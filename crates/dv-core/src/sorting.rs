@@ -20,8 +20,8 @@ use serde_json::Value;
 use crate::name_model::NameHints;
 use crate::views::{MaterialRouting, Prepared, PriorRecordView, SortResult};
 use crate::{
-    restore, scan_model_output, structure_for, today, Core, CoreError, Outgoing, PendingKind,
-    Review, DERIVED_SECTIONS,
+    restore, scan_model_output, structure_for, Core, CoreError, Outgoing, PendingKind, Review,
+    DERIVED_SECTIONS,
 };
 
 /// The section of previous assessments, written in an order fixed in code (round 31).
@@ -356,19 +356,8 @@ impl Core {
             if v.case_meta(case_id)?.consent.is_none() {
                 return Err(CoreError::ConsentMissing);
             }
-            let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
-            let is_name = |t: &str| data.is_name.contains(&v.token_hmac(t));
-            let past = |t: &str| !data.past.is_empty() && data.past.contains(&v.token_hmac(t));
-            let ctx = PrivacyContext {
-                case_id: &data.case_id,
-                identities: &data.identities,
-                practitioner: &data.practitioner,
-                allowlisted: &allow,
-                confirmed_names: &is_name,
-                past_names: &past,
-                today: today(),
-                masks: Some(&data.masks),
-            };
+            let lookups = data.lookups(v);
+            let ctx = lookups.masked_context();
             let internal = |e: dv_privacy::PrivacyError| CoreError::Internal(e.to_string());
             let mut review = Review::default();
             let mut materials = Vec::new();

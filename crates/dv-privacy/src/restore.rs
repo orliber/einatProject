@@ -1,17 +1,12 @@
 //! Local-only: put real names back for display and export, and check model output.
 
-use std::sync::LazyLock;
-
 use dv_domain::{Identity, PRACTITIONER_TAG};
-use regex::Regex;
 
 use crate::lexicon::LEXICON;
-use crate::masks::{is_generic_tag, MaskEntry};
+use crate::masks::{is_generic_tag, MaskEntry, TAG_RE};
 use crate::patterns::{self, PatternKind};
 use crate::pipeline::{Suspect, SuspectKind};
 use crate::text::{normalize, prefix_splits, tokenize};
-
-static TAG_RE: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(r"\[[^\[\]\n]{1,40}\]").ok());
 
 /// Replace the case's tags with the declared names, and each numbered tag of its mask book
 /// with the words it hid. Prefixes stay attached ("ל[ילד]" → "לנועם").

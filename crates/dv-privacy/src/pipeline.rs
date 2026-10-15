@@ -1824,9 +1824,7 @@ fn number_masks(
 /// score of a past report in its fixed form (round 32), or another case's, which the gate
 /// then refuses. Same length, so every offset still holds.
 fn plain_brackets(text: &str, ctx: &PrivacyContext<'_>) -> String {
-    static BRACKETED: std::sync::LazyLock<Option<regex::Regex>> =
-        std::sync::LazyLock::new(|| regex::Regex::new(r"\[[^\[\]\n]{1,40}\]").ok());
-    let Some(re) = BRACKETED.as_ref() else {
+    let Some(re) = crate::masks::TAG_RE.as_ref() else {
         return text.to_owned();
     };
     let known = |t: &str| {

@@ -19,13 +19,10 @@
 //! the copy goes to the same gate once more. A line with a canary or an error is never left
 //! out, so such a request stays refused. Only words go out less.
 
-use std::sync::LazyLock;
-
-use regex::Regex;
 use serde_json::Value;
 
 use crate::gate::{name_findings, GateRequest};
-use crate::masks::{is_generic_tag, MaskBook};
+use crate::masks::{is_generic_tag, MaskBook, TAG_RE};
 use crate::patterns;
 
 /// The codes a fix can answer. Any other code in a refusal leaves it refused.
@@ -36,8 +33,6 @@ pub const FIXABLE_CODES: &[&str] = &[
     "pattern",
     "foreign_tag",
 ];
-
-static TAG_RE: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(r"\[[^\[\]\n]{1,40}\]").ok());
 
 /// One thing the fix hid: the words, what went out instead, and what kind they were.
 #[derive(Debug, Clone, PartialEq, Eq)]

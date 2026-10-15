@@ -723,6 +723,66 @@ struct PrivacyData {
     masks: dv_privacy::MaskBook,
 }
 
+/// A [`PrivacyData`]'s word lookups against the open vault's keyed hash, kept alive while a
+/// [`PrivacyContext`] borrows them. See [`PrivacyData::lookups`].
+struct CaseLookups<'a, A, N, P> {
+    data: &'a PrivacyData,
+    allow: A,
+    is_name: N,
+    past: P,
+}
+
+impl PrivacyData {
+    /// The lookups every case context uses: "not a name", "a name in a word", and her past
+    /// reports' names, each by keyed hash of the normalized token.
+    fn lookups<'a>(
+        &'a self,
+        v: &'a Vault,
+    ) -> CaseLookups<
+        'a,
+        impl Fn(&str) -> bool + 'a,
+        impl Fn(&str) -> bool + 'a,
+        impl Fn(&str) -> bool + 'a,
+    > {
+        CaseLookups {
+            data: self,
+            allow: |t: &str| self.allow.contains(&v.token_hmac(t)),
+            is_name: |t: &str| self.is_name.contains(&v.token_hmac(t)),
+            past: |t: &str| !self.past.is_empty() && self.past.contains(&v.token_hmac(t)),
+        }
+    }
+}
+
+impl<A, N, P> CaseLookups<'_, A, N, P>
+where
+    A: Fn(&str) -> bool,
+    N: Fn(&str) -> bool,
+    P: Fn(&str) -> bool,
+{
+    /// The case's context with the fixed tag of each kind (`[תאריך]`), no mask book.
+    fn context(&self) -> PrivacyContext<'_> {
+        self.with_masks(None)
+    }
+
+    /// The case's context with its mask book: numbered tags that come back in the answer.
+    fn masked_context(&self) -> PrivacyContext<'_> {
+        self.with_masks(Some(&self.data.masks))
+    }
+
+    fn with_masks<'s>(&'s self, masks: Option<&'s dv_privacy::MaskBook>) -> PrivacyContext<'s> {
+        PrivacyContext {
+            case_id: &self.data.case_id,
+            identities: &self.data.identities,
+            practitioner: &self.data.practitioner,
+            allowlisted: &self.allow,
+            confirmed_names: &self.is_name,
+            past_names: &self.past,
+            today: today(),
+            masks,
+        }
+    }
+}
+
 /// Everything the review screen shows, accumulated over the outgoing texts.
 #[derive(Default)]
 struct Review {

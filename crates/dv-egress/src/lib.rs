@@ -327,6 +327,25 @@ pub(crate) fn build_client() -> Result<reqwest::blocking::Client, EgressError> {
         .map_err(|e| EgressError::Protocol(e.to_string()))
 }
 
+/// Send once, and again after 2 s and then 4 s while the server is busy (5xx) or asks to slow
+/// down (429): three tries at most. Any other answer, or error, is returned as is.
+pub(crate) fn retry(
+    mut once: impl FnMut() -> Result<Value, EgressError>,
+) -> Result<Value, EgressError> {
+    let mut delay = Duration::from_secs(2);
+    let mut attempt = 0;
+    loop {
+        match once() {
+            Err(EgressError::Unavailable(_) | EgressError::RateLimited) if attempt < 2 => {
+                std::thread::sleep(delay);
+                delay *= 2;
+                attempt += 1;
+            }
+            other => return other,
+        }
+    }
+}
+
 pub(crate) fn send_error(e: &reqwest::Error) -> EgressError {
     let text = format!("{e:?}").to_lowercase();
     let tls = text.contains("certificate") || text.contains("tls") || text.contains("handshake");
@@ -428,18 +447,7 @@ impl Transport for AnthropicTransport {
         if !self.limit.lock().is_ok_and(|mut l| l.allow()) {
             return Err(EgressError::RateLimited);
         }
-        let mut delay = Duration::from_secs(2);
-        let mut attempt = 0;
-        loop {
-            match self.post_once(payload.body(), progress) {
-                Err(EgressError::Unavailable(_) | EgressError::RateLimited) if attempt < 2 => {
-                    std::thread::sleep(delay);
-                    delay *= 2;
-                    attempt += 1;
-                }
-                other => return other,
-            }
-        }
+        retry(|| self.post_once(payload.body(), progress))
     }
 }
 

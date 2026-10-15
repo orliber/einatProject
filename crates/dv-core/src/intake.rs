@@ -239,19 +239,8 @@ impl Core {
     ) -> Result<FilterOutcome, CoreError> {
         let data = self.privacy_data(case_id)?;
         let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
-        let allow = |t: &str| data.allow.contains(&v.token_hmac(t));
-        let is_name = |t: &str| data.is_name.contains(&v.token_hmac(t));
-        let past = |t: &str| !data.past.is_empty() && data.past.contains(&v.token_hmac(t));
-        let ctx = PrivacyContext {
-            case_id: &data.case_id,
-            identities: &data.identities,
-            practitioner: &data.practitioner,
-            allowlisted: &allow,
-            confirmed_names: &is_name,
-            past_names: &past,
-            today: today(),
-            masks: None,
-        };
+        let lookups = data.lookups(v);
+        let ctx = lookups.context();
         filter_with_hints(text, &ctx, hints).map_err(|e| CoreError::Internal(e.to_string()))
     }
 
