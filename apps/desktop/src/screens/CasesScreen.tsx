@@ -1,3 +1,6 @@
+// The case list, laid out like a file explorer (round 47, D-086): a folder tree on the right,
+// the path and the search above, and one table of subfolders and cases. Folders nest to any
+// depth (the core already keeps `parent_id`); this screen only shows them that way.
 import { useMemo, useState, type DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
@@ -5,33 +8,31 @@ import { BackupReminder } from "../components/Backup";
 import { RetentionNotice } from "../components/RetentionNotice";
 import { TopBar } from "../components/TopBar";
 import { NewCaseDialog } from "../components/NewCaseDialog";
-import { ageWords } from "../components/AgeField";
+import { ageOf } from "../components/AgeField";
 import { ActionsMenu, RightClick, type MenuItem } from "../components/Menu";
 import { ErrorLine, Skeleton } from "../components/ui";
 import { greeting } from "../i18n/he";
 import { ipc, type CaseSummary, type Folder, type UiError } from "../ipc/client";
 import { ConfirmDialog, FolderIcon, FolderNameDialog, MoveDialog, PurgeDialog, descendants } from "./library/LibraryDialogs";
+import { FolderTree } from "./cases/FolderTree";
+import { caseStatus, TOTAL_SECTIONS, type CaseStatus } from "./cases/caseStatus";
 import "./CasesScreen.css";
 import { useAi } from "../ai";
 
-const TOTAL_SECTIONS = 16;
 const TRASH_DAYS = 30;
 
 /** The folder Einat was in, kept while the vault is open (the page reloads on lock). */
-const remembered: { folder: string | null } = { folder: null };
+const remembered: { folder: string | null; sort: Sort } = { folder: null, sort: "updated" };
 function rememberFolder(id: string | null) {
   remembered.folder = id;
 }
 
-/** What to do next in a case, in one chip and one line (canvas "תיקים"). */
-function nextStep(c: CaseSummary): { chip: string; cls: string; text: string; start: boolean } {
-  const n = c.approved_sections.length;
-  if (c.failed_at) return { chip: "נכשל", cls: "chip chip-fail", text: "השליחה האחרונה נכשלה. לפתוח ולנסות שוב", start: false };
-  if (!c.meta.consent) return { chip: "הסכמה", cls: "chip chip-warn", text: "לרשום את הסכמת ההורים", start: false };
-  if (n >= TOTAL_SECTIONS) return { chip: "✓ מוכן", cls: "chip chip-ok", text: "להפיק דוח Word", start: false };
-  if (n > 0) return { chip: "בכתיבה", cls: "chip", text: `לאשר עוד ${TOTAL_SECTIONS - n} סעיפים`, start: false };
-  return { chip: "חומרים", cls: "chip chip-empty", text: "להוסיף חומרים ולהכין טיוטה", start: true };
-}
+type Sort = "updated" | "name" | "status";
+const SORTS: { id: Sort; label: string }[] = [
+  { id: "updated", label: "עודכן" },
+  { id: "name", label: "שם" },
+  { id: "status", label: "איפה זה עומד" },
+];
 
 function updated(ts: number): string {
   const d = new Date(ts * 1000);
@@ -39,6 +40,9 @@ function updated(ts: number): string {
   if (d.toDateString() === today.toDateString()) {
     return `היום, ${d.toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}`;
   }
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return "אתמול";
   return d.toLocaleDateString("he-IL", { day: "numeric", month: "numeric" });
 }
 
@@ -54,6 +58,21 @@ type Modal =
 /** A drag carries one case or one folder. */
 type Drag = { case: string } | { folder: string };
 
+/** One word, one line and three steps (canvas "תיקים": "שהסטטוס יהיה ברור ונקי"). */
+function StatusCell({ s }: { s: CaseStatus }) {
+  return (
+    <div className="status-cell" title={s.full}>
+      <div className="status-line">
+        <span className={s.attention ? "status-word attention" : "status-word"}>{s.word}</span>
+        <span className="small muted">{s.detail}</span>
+      </div>
+      <div className="pips" aria-hidden="true">
+        {s.steps.map((st, i) => <span key={i} className={`pip pip-${st}`} />)}
+      </div>
+    </div>
+  );
+}
+
 export function CasesScreen() {
   const { go, fail, status, notify } = useApp();
   const ai = useAi();
@@ -64,6 +83,8 @@ export function CasesScreen() {
   const [folderId, setFolderIdState] = useState<string | null>(remembered.folder);
   const [inTrash, setInTrash] = useState(false);
   const [query, setQuery] = useState("");
+  const [sort, setSortState] = useState<Sort>(remembered.sort);
+  const [treeOpen, setTreeOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [modal, setModal] = useState<Modal | null>(null);
   const [dropOn, setDropOn] = useState<string | null>(null);
@@ -77,6 +98,11 @@ export function CasesScreen() {
     rememberFolder(id);
     setFolderIdState(id);
     setInTrash(false);
+    setTreeOpen(false);
+  };
+  const setSort = (s: Sort) => {
+    remembered.sort = s;
+    setSortState(s);
   };
 
   const refreshAll = () => Promise.all(["cases", "folders", "trash"].map((k) => qc.invalidateQueries({ queryKey: [k] })));
@@ -108,12 +134,22 @@ export function CasesScreen() {
     const ids = descendants(allFolders, id);
     return allCases.filter((c) => c.folder_id && ids.has(c.folder_id)).length;
   };
+  const parentOf = current ? (byId.get(current)?.parent_id ?? null) : null;
 
   const q = query.trim().toLowerCase();
   const matches = (c: CaseSummary) => !q || (c.child_name ?? "").toLowerCase().includes(q) || c.meta.code.toLowerCase().includes(q);
   const shownFolders = q ? allFolders.filter((f) => f.name.toLowerCase().includes(q)) : allFolders.filter((f) => f.parent_id === current);
-  const shownCases = q ? allCases.filter(matches) : allCases.filter((c) => (c.folder_id ?? null) === current);
+  // Inside a folder: its cases and the cases of every folder under it, like a search in an explorer.
+  const inside = current ? descendants(allFolders, current) : null;
+  const shownCases = q ? allCases.filter(matches) : inside ? allCases.filter((c) => c.folder_id && inside.has(c.folder_id)) : allCases;
   shownFolders.sort((a, b) => a.name.localeCompare(b.name, "he"));
+  const statusOf = new Map(shownCases.map((c) => [c.id, caseStatus(c)]));
+  const st = (c: CaseSummary) => statusOf.get(c.id) ?? caseStatus(c);
+  const rank = (s: CaseStatus) => (s.attention ? 0 : s.steps[2] === "now" ? 1 : s.steps[1] === "now" ? 2 : 3);
+  shownCases.sort((a, b) =>
+    sort === "name" ? (a.child_name ?? a.meta.code).localeCompare(b.child_name ?? b.meta.code, "he")
+      : sort === "status" ? rank(st(a)) - rank(st(b)) || b.updated_at - a.updated_at
+        : b.updated_at - a.updated_at);
 
   // "ד\"ר רותם בדויה" → "רותם": a title is not how anyone is greeted.
   const name = status.practitioner[0]?.split(" ").find((w) => w && !/^(ד["״']?ר|דר'|פרופ'|גב'|מר)$/.test(w));
@@ -122,6 +158,7 @@ export function CasesScreen() {
   const resume = [...allCases]
     .filter((c) => c.approved_sections.length < TOTAL_SECTIONS)
     .sort((a, b) => b.updated_at - a.updated_at)[0];
+  const resumeStatus = resume ? caseStatus(resume) : null;
   const trashCount = trash.data?.length ?? 0;
 
   // ---------------------------------------------------------------- drag and drop
@@ -151,6 +188,7 @@ export function CasesScreen() {
   // ---------------------------------------------------------------- actions
   const folderItems = (f: Folder): MenuItem[] => [
     { label: "פתיחה", run: () => setFolderId(f.id) },
+    { label: "תיקייה חדשה בפנים", run: () => { setFolderId(f.id); setModal({ kind: "new-folder" }); } },
     { label: "שינוי שם", run: () => setModal({ kind: "rename", folder: f }) },
     { label: "העברה לתיקייה אחרת…", run: () => setModal({ kind: "move-folder", folder: f }) },
     { label: "מחיקת התיקייה", run: () => setModal({ kind: "delete-folder", folder: f }), danger: true },
@@ -174,36 +212,33 @@ export function CasesScreen() {
     }
   }
 
+  const noCasesYet = allCases.length === 0 && allFolders.length === 0 && !!cases.data;
+  const emptyHere = !!cases.data && !noCasesYet && shownCases.length === 0 && shownFolders.length === 0;
+
   return (
     <div className="page">
       <TopBar active="cases" />
-      <main className="page-main">
+      <main className="page-main cases-main">
         <div className="page-head">
           <div className="stack" style={{ gap: 4 }}>
             <h1>{greeting()}{name ? `, ${name}` : ""}</h1>
             <p className="muted">{cases.data ? (allCases.length ? `${inProgress} תיקים בעבודה.` : "עוד אין תיקים") : " "}</p>
           </div>
           <div className="row head-actions">
-            <button type="button" className="btn btn-big" onClick={() => setModal({ kind: "new-folder" })}><FolderIcon size={17} /> תיקייה חדשה</button>
             <button type="button" className="btn btn-primary btn-big" onClick={() => setCreating(true)}>+ תיק חדש</button>
           </div>
         </div>
-        {resume && !q && (
+        {resume && resumeStatus && !q && !inTrash && (
           <section className="resume" aria-label="להמשיך איפה שהפסקת">
-            <div className="grow stack" style={{ gap: 4 }}>
-              <span className="resume-eyebrow">להמשיך איפה שהפסקת</span>
-              <span className="resume-name">{resume.child_name ?? resume.meta.code}{resume.meta.age ? ` · גיל ${resume.meta.age.years}:${resume.meta.age.months}` : ""}</span>
-              <span className="muted">{nextStep(resume).text} · עודכן {updated(resume.updated_at)}</span>
-              <div className="row resume-progress">
-                <div className="bar" aria-hidden="true">
-                  <div className="bar-fill" style={{ width: `${Math.round((resume.approved_sections.length / TOTAL_SECTIONS) * 100)}%` }} />
-                </div>
-                <span className="small muted">{resume.approved_sections.length} מתוך {TOTAL_SECTIONS} סעיפים מאושרים</span>
-              </div>
-            </div>
-            <button type="button" className="btn btn-primary btn-big"
-              onClick={() => go({ name: "case", id: resume.id, view: resume.approved_sections.length > 0 ? "report" : "materials" })}>
-              {resume.approved_sections.length > 0 ? "להמשיך לכתוב ←" : "להמשיך ←"}
+            <span className="resume-eyebrow">להמשיך איפה שהפסקת:</span>
+            <span className="resume-text">
+              <strong className="serif resume-name">{resume.child_name ?? resume.meta.code}</strong>
+              {" · "}{resumeStatus.word}{resumeStatus.steps[1] === "now" ? `, ${resumeStatus.detail}` : ""}
+              {resume.meta.current_section ? <> · <strong>הבא:</strong> {resume.meta.current_section}</> : null}
+            </span>
+            <button type="button" className="btn btn-primary"
+              onClick={() => go({ name: "case", id: resume.id, view: resumeStatus.view })}>
+              {resumeStatus.view === "report" ? "להמשיך לכתוב ←" : "להמשיך ←"}
             </button>
           </section>
         )}
@@ -215,132 +250,171 @@ export function CasesScreen() {
         <ErrorLine error={error ?? (cases.error ? fail(cases.error as unknown as UiError) : null)}
           retry={!error && cases.error ? () => void qc.invalidateQueries({ queryKey: ["cases"] }) : undefined} />
 
-        <div className="library-bar">
-          <nav className="crumbs" aria-label="מיקום">
-            <button type="button" className={dropOn === "top" ? "crumb drop" : "crumb"} aria-current={!inTrash && !current ? "page" : undefined}
-              onClick={() => setFolderId(null)} {...dropProps(null)}>כל התיקים</button>
-            {!inTrash && path.map((f) => (
-              <span key={f.id} className="crumb-wrap">
-                <span className="crumb-sep" aria-hidden="true">›</span>
-                <button type="button" className={dropOn === f.id ? "crumb drop" : "crumb"} aria-current={f.id === current ? "page" : undefined}
-                  onClick={() => setFolderId(f.id)} {...dropProps(f.id)}>{f.name}</button>
-              </span>
-            ))}
-            {inTrash && <span className="crumb-wrap"><span className="crumb-sep" aria-hidden="true">›</span><span className="crumb" aria-current="page">סל המחזור</span></span>}
-          </nav>
-          <input className="input search" type="search" placeholder="חיפוש לפי שם או קוד, בכל התיקיות" aria-label="חיפוש תיקים"
-            value={query} onChange={(e) => { setQuery(e.target.value); setInTrash(false); }} />
-          <button type="button" className={inTrash ? "btn trash-btn on" : "btn trash-btn"} onClick={() => { setInTrash(!inTrash); setQuery(""); }}>
-            סל המחזור{trashCount > 0 ? ` (${trashCount})` : ""}
-          </button>
-        </div>
-
-        {inTrash ? (
-          <TrashList cases={trash.data ?? []} pathOf={pathOf}
-            onRestore={(c) => void run(() => ipc.restoreCase(c.id), "התיק שוחזר.")}
-            onPurge={(c) => setModal({ kind: "purge", c })} />
+        {noCasesYet ? (
+          <div className="card empty">
+            <h2>התיק הראשון</h2>
+            <p className="muted">פותחים תיק, מוסיפים חומרים, ו-{ai} מציע טיוטה לכל סעיף.</p>
+            <div className="row wrap-row">
+              <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>פתיחת תיק</button>
+              <button type="button" className="btn" disabled={sample.isPending} onClick={() => sample.mutate()}>לנסות קודם על תיק לדוגמה</button>
+            </div>
+            <p className="small muted">תיק בדוי קצר, כדי לראות איך זה עובד. אפשר למחוק אותו בכל רגע.</p>
+          </div>
         ) : (
-          <>
-            {!cases.data && !cases.error && (
-              <div className="stack" style={{ gap: 12 }}>
-                <Skeleton card lines={4} label="טוען את התיקים" />
-              </div>
-            )}
-            {allCases.length === 0 && allFolders.length === 0 && cases.data && (
-              <div className="card empty">
-                <h2>התיק הראשון</h2>
-                <p className="muted">פותחים תיק, מוסיפים חומרים, ו-{ai} מציע טיוטה לכל סעיף.</p>
-                <div className="row wrap-row">
-                  <button type="button" className="btn btn-primary" onClick={() => setCreating(true)}>פתיחת תיק</button>
-                  <button type="button" className="btn" disabled={sample.isPending} onClick={() => sample.mutate()}>לנסות קודם על תיק לדוגמה</button>
-                </div>
-                <p className="small muted">תיק בדוי קצר, כדי לראות איך זה עובד. אפשר למחוק אותו בכל רגע.</p>
-              </div>
-            )}
+          <div className="card explorer">
+            <aside className={treeOpen ? "explorer-tree open" : "explorer-tree"}>
+              <FolderTree folders={allFolders} current={current} inTrash={inTrash} trashCount={trashCount} total={allCases.length}
+                countIn={countIn} onPick={setFolderId} onPickTrash={() => { setInTrash(true); setQuery(""); setTreeOpen(false); }}
+                onNewFolder={() => setModal({ kind: "new-folder" })}
+                dropProps={dropProps} dropOn={dropOn} onDragStart={(id) => onDragStart({ folder: id })}
+                rightClick={(f, row) => <RightClick items={folderItems(f)}>{row}</RightClick>} />
+            </aside>
 
-            {shownFolders.length > 0 && (
-              <ul className="folders" aria-label="תיקיות">
-                {shownFolders.map((f) => (
-                  <li key={f.id}>
-                    <RightClick items={folderItems(f)}>
-                      <div className={dropOn === f.id ? "folder drop" : "folder"} draggable onDragStart={onDragStart({ folder: f.id })} {...dropProps(f.id)}>
-                        <button type="button" className="folder-open" onClick={() => setFolderId(f.id)}>
-                          <span className="folder-icon"><FolderIcon size={26} /></span>
-                          <span className="folder-text">
-                            <span className="folder-name">{f.name}</span>
-                            <span className="small muted">{q && f.parent_id ? `${pathOf(f.parent_id)} · ` : ""}{countIn(f.id) === 1 ? "תיק אחד" : `${countIn(f.id)} תיקים`}</span>
-                          </span>
-                        </button>
-                        <ActionsMenu items={folderItems(f)} label={`פעולות על התיקייה ${f.name}`} />
-                      </div>
-                    </RightClick>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {shownCases.length > 0 && (
-              <div className="card table-card">
-                <table className="cases">
-                  <thead>
-                    <tr>
-                      <th>ילד/ה</th>
-                      <th>הצעד הבא</th>
-                      <th className="col-progress">הדוח</th>
-                      <th className="col-go"><span className="visually-hidden">פעולות</span></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {shownCases.map((c) => {
-                      const s = nextStep(c);
-                      const pct = Math.round((c.approved_sections.length / TOTAL_SECTIONS) * 100);
-                      const open = () => go({ name: "case", id: c.id, view: c.approved_sections.length > 0 ? "report" : "materials" });
-                      return (
-                        <RightClick key={c.id} items={caseItems(c)}>
-                          <tr onClick={open} className="case-row" draggable onDragStart={onDragStart({ case: c.id })}>
-                            <td>
-                              <div className="case-name serif">
-                                {c.child_name ?? "ללא שם"}
-                                {c.meta.follows && <span className="chip chip-sand follow-chip">מעקב</span>}
-                              </div>
-                              <div className="small muted">
-                                {c.meta.age ? `${ageWords(c.meta.age)} · ` : ""}{c.meta.code || "ללא קוד"} · עודכן {updated(c.updated_at)}
-                                {q && c.folder_id ? ` · ${pathOf(c.folder_id)}` : ""}
-                              </div>
-                            </td>
-                            <td>
-                              <span className="next-cell"><span className={s.cls}>{s.chip}</span><span>{s.text}</span></span>
-                            </td>
-                            <td>
-                              <div className="progress-row">
-                                <div className="bar" role="progressbar" aria-label="סעיפים שאושרו" aria-valuemin={0} aria-valuemax={TOTAL_SECTIONS} aria-valuenow={c.approved_sections.length}>
-                                  <div className={pct >= 100 ? "bar-fill bar-done" : "bar-fill"} style={{ width: `${pct}%` }} />
-                                </div>
-                                <span className="small muted num">{c.approved_sections.length} מתוך {TOTAL_SECTIONS}</span>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="row-actions">
-                                <button type="button" className={s.start ? "btn" : "btn btn-primary"}
-                                  onClick={(e) => { e.stopPropagation(); open(); }}>
-                                  {s.start ? "פתיחה" : "להמשיך"}<span className="visually-hidden"> בתיק של {caseName(c)}</span>
-                                </button>
-                                <ActionsMenu items={caseItems(c)} label={`פעולות על התיק של ${caseName(c)}`} />
-                              </div>
-                            </td>
-                          </tr>
-                        </RightClick>
-                      );
-                    })}
-                  </tbody>
-                </table>
+            <div className="explorer-main">
+              <div className="library-bar">
+                <button type="button" className="btn tree-toggle" aria-expanded={treeOpen} onClick={() => setTreeOpen(!treeOpen)}>
+                  <FolderIcon size={16} /> תיקיות
+                </button>
+                <button type="button" className="btn btn-icon up" aria-label="לתיקייה שמעל" disabled={inTrash ? false : current === null}
+                  onClick={() => (inTrash ? setFolderId(remembered.folder) : setFolderId(parentOf))}>↑</button>
+                <nav className="crumbs" aria-label="מיקום">
+                  <button type="button" className={dropOn === "top" ? "crumb drop" : "crumb"} aria-current={!inTrash && !current ? "page" : undefined}
+                    onClick={() => setFolderId(null)} {...dropProps(null)}>תיקים</button>
+                  {!inTrash && path.map((f) => (
+                    <span key={f.id} className="crumb-wrap">
+                      <span className="crumb-sep" aria-hidden="true">›</span>
+                      <button type="button" className={dropOn === f.id ? "crumb drop" : "crumb"} aria-current={f.id === current ? "page" : undefined}
+                        onClick={() => setFolderId(f.id)} {...dropProps(f.id)}>{f.name}</button>
+                    </span>
+                  ))}
+                  {inTrash && <span className="crumb-wrap"><span className="crumb-sep" aria-hidden="true">›</span><span className="crumb" aria-current="page">סל המחזור</span></span>}
+                </nav>
+                <input className="input search" type="search" placeholder="חיפוש בכל התיקים" aria-label="חיפוש תיקים"
+                  value={query} onChange={(e) => { setQuery(e.target.value); setInTrash(false); }} />
+                {!inTrash && (
+                  <label className="sort">
+                    <span className="visually-hidden">מיון</span>
+                    <select className="input" value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label="מיון">
+                      {SORTS.map((s) => <option key={s.id} value={s.id}>מיון: {s.label}</option>)}
+                    </select>
+                  </label>
+                )}
+                {!inTrash && (
+                  <button type="button" className="btn" onClick={() => setModal({ kind: "new-folder" })}><FolderIcon size={16} /> תיקייה כאן</button>
+                )}
               </div>
-            )}
 
-            {cases.data && (allCases.length > 0 || allFolders.length > 0) && shownCases.length === 0 && shownFolders.length === 0 && (
-              <p className="muted empty-folder">{q ? "לא נמצא תיק או תיקייה בשם הזה." : "התיקייה ריקה. גוררים לכאן תיקים, או פותחים תיק חדש."}</p>
-            )}
-          </>
+              {inTrash ? (
+                <TrashList cases={trash.data ?? []} pathOf={pathOf}
+                  onRestore={(c) => void run(() => ipc.restoreCase(c.id), "התיק שוחזר.")}
+                  onPurge={(c) => setModal({ kind: "purge", c })} />
+              ) : (
+                <>
+                  {!cases.data && !cases.error && (
+                    <div className="stack" style={{ gap: 12, padding: 16 }}>
+                      <Skeleton card lines={4} label="טוען את התיקים" />
+                    </div>
+                  )}
+                  {(shownFolders.length > 0 || shownCases.length > 0) && (
+                    <table className="cases">
+                      <thead>
+                        <tr>
+                          <th>שם</th>
+                          <th>איפה זה עומד</th>
+                          <th className="col-when">עודכן</th>
+                          <th className="col-go"><span className="visually-hidden">פעולות</span></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {shownFolders.map((f) => {
+                          const n = countIn(f.id);
+                          const sub = allFolders.filter((x) => x.parent_id === f.id).map((x) => x.name);
+                          return (
+                            <RightClick key={f.id} items={folderItems(f)}>
+                              <tr className={dropOn === f.id ? "folder-row drop" : "folder-row"} onClick={() => setFolderId(f.id)} draggable
+                                onDragStart={onDragStart({ folder: f.id })} {...dropProps(f.id)}>
+                                <td>
+                                  <div className="name-cell">
+                                    <span className="row-icon folder-icon"><FolderIcon size={18} /></span>
+                                    <div>
+                                      <div className="case-name">{f.name}</div>
+                                      <div className="small muted">
+                                        תיקייה · {n === 0 ? "ריקה" : n === 1 ? "תיק אחד" : `${n} תיקים`}
+                                        {q && f.parent_id ? ` · ${pathOf(f.parent_id)}` : ""}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td><span className="small muted">{sub.length ? `בפנים: ${sub.join(", ")}` : ""}</span></td>
+                                <td className="col-when" />
+                                <td>
+                                  <div className="row-actions">
+                                    <button type="button" className="btn" onClick={(e) => { e.stopPropagation(); setFolderId(f.id); }}>
+                                      פתיחה<span className="visually-hidden"> של התיקייה {f.name}</span>
+                                    </button>
+                                    <ActionsMenu items={folderItems(f)} label={`פעולות על התיקייה ${f.name}`} />
+                                  </div>
+                                </td>
+                              </tr>
+                            </RightClick>
+                          );
+                        })}
+                        {shownCases.map((c) => {
+                          const s = st(c);
+                          const open = () => go({ name: "case", id: c.id, view: s.view });
+                          const where = c.folder_id && c.folder_id !== current ? pathOf(c.folder_id) : "";
+                          return (
+                            <RightClick key={c.id} items={caseItems(c)}>
+                              <tr onClick={open} className="case-row" draggable onDragStart={onDragStart({ case: c.id })}>
+                                <td>
+                                  <div className="name-cell">
+                                    <span className="row-icon">
+                                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true">
+                                        <path d="M6 3h8l4 4v14H6z" /><path d="M14 3v4h4M9 12h6M9 16h6" />
+                                      </svg>
+                                    </span>
+                                    <div className="min0">
+                                      <div className="case-name serif">
+                                        {c.child_name ?? "ללא שם"}
+                                        {c.meta.follows && <span className="chip chip-sand follow-chip">מעקב</span>}
+                                      </div>
+                                      <div className="small muted ellipsis">
+                                        {[ageOf(c.meta.age, c.meta.child_gender), c.meta.code || "ללא קוד", where].filter(Boolean).join(" · ")}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td><StatusCell s={s} /></td>
+                                <td className="small muted col-when">{updated(c.updated_at)}</td>
+                                <td>
+                                  <div className="row-actions">
+                                    <button type="button" className={s.view === "report" ? "btn btn-primary" : "btn"}
+                                      onClick={(e) => { e.stopPropagation(); open(); }}>
+                                      {s.button}<span className="visually-hidden"> בתיק של {caseName(c)}</span>
+                                    </button>
+                                    <ActionsMenu items={caseItems(c)} label={`פעולות על התיק של ${caseName(c)}`} />
+                                  </div>
+                                </td>
+                              </tr>
+                            </RightClick>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                  {emptyHere && (
+                    <p className="muted empty-folder">{q ? "לא נמצא תיק או תיקייה בשם הזה." : "התיקייה ריקה. גוררים לכאן תיקים, או פותחים תיק חדש."}</p>
+                  )}
+                  {cases.data && !emptyHere && (
+                    <div className="explorer-foot small muted">
+                      <span>{shownCases.length === 1 ? "תיק אחד" : `${shownCases.length} תיקים`}{current && shownFolders.length ? ", כולל תיקיות המשנה" : ""}</span>
+                      <span>גוררים תיק לתיקייה כדי להעביר. לחיצה ימנית: עוד פעולות.</span>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
         )}
         <p className="small muted">השמות נשארים במחשב. {ai} מקבל תפקידים ("הילד", "הגננת") במקום שמות.</p>
       </main>
@@ -396,10 +470,10 @@ function TrashList(props: { cases: CaseSummary[]; pathOf: (id: string | null) =>
     return <p className="muted empty-folder">סל המחזור ריק. תיק שנמחק נשמר כאן {TRASH_DAYS} יום.</p>;
   }
   return (
-    <div className="card table-card">
+    <>
       <p className="small muted trash-note">נמחקים לצמיתות אחרי {TRASH_DAYS} יום. מחיקה מוקדמת דורשת סיסמה.</p>
       <table className="cases">
-        <thead><tr><th>ילד/ה</th><th>נמחק</th><th className="col-go"><span className="visually-hidden">פעולות</span></th></tr></thead>
+        <thead><tr><th>שם</th><th>נמחק</th><th className="col-go"><span className="visually-hidden">פעולות</span></th></tr></thead>
         <tbody>
           {props.cases.map((c) => (
             <tr key={c.id}>
@@ -418,6 +492,6 @@ function TrashList(props: { cases: CaseSummary[]; pathOf: (id: string | null) =>
           ))}
         </tbody>
       </table>
-    </div>
+    </>
   );
 }
