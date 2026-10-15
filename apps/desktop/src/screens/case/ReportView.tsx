@@ -3,7 +3,7 @@ import { useApp } from "../../App";
 import { ipc, type CaseDetail, type ReportSettings, type TemplateView } from "../../ipc/client";
 import { kindLabel } from "../../i18n/he";
 import { ageWords } from "../../components/AgeField";
-import { ErrorLine, WarnIcon } from "../../components/ui";
+import { ErrorLine, SparkIcon, WarnIcon } from "../../components/ui";
 import { Why } from "../../components/Why";
 import { ProgressLine } from "../../components/Progress";
 import { useHoldUnsaved } from "../../components/Unsaved";
@@ -133,6 +133,32 @@ const PARA_CHANGES: [string, string][] = [
   ["לפשט להורים", "נסחי את הפסקה הבאה בשפה פשוטה וברורה להורים, באותו תוכן."],
 ];
 
+/** "או במילים שלך" inside an open card. Its changing hint is a timer, so it lives here, in
+ *  the card, and not in the section: fifteen closed cards run no timers. Enter sends. */
+function WishBox({ boxRef, hints, wish, typing, onText, onEmptyChange, onSend }: {
+  boxRef: RefObject<LocalTextHandle | null>;
+  hints: readonly string[];
+  wish: string;
+  typing: boolean;
+  onText: (text: string) => void;
+  onEmptyChange: (empty: boolean) => void;
+  onSend: () => void;
+}) {
+  const hint = useRotatingPlaceholder(hints, typing);
+  return (
+    <label className="stack small muted" style={{ gap: 4 }}>
+      או במילים שלך
+      <LocalText ref={boxRef} className="textarea" rows={2} initial={wish} placeholder={hint}
+        onText={onText} onEmptyChange={onEmptyChange}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" || e.shiftKey) return;
+          e.preventDefault();
+          onSend();
+        }} />
+    </label>
+  );
+}
+
 /** A small card next to what opened it; Escape or a click outside closes it. */
 function Popover({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -202,8 +228,6 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
   const [wishEmpty, setWishEmpty] = useState(true);
   const paraWish = useRef<LocalTextHandle>(null);
   const draftWish = useRef<LocalTextHandle>(null);
-  const paraHint = useRotatingPlaceholder(PARAGRAPH_HINTS, !wishEmpty);
-  const draftHint = useRotatingPlaceholder(DRAFT_HINTS, !wishEmpty);
   const [sourcesChanged, setSourcesChanged] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const job = api.jobs.find((j) => j.section === s.key);
@@ -304,7 +328,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
               </Popover>
             )}
             {canWrite && <button type="button" className="a4-ai" aria-expanded={paraPop === p.id} aria-label="לשנות את הפסקה עם AI" title="לשנות את הפסקה עם AI"
-              onClick={() => setParaPop(paraPop === p.id ? null : p.id)}><SparkIcon /></button>}
+              onClick={() => setParaPop(paraPop === p.id ? null : p.id)}><SparkIcon size={16} /></button>}
             {p.has_versions && (
               <button type="button" className="a4-hist" aria-expanded={history === p.id} aria-label="גרסאות קודמות של הפסקה" title="גרסאות קודמות (Ctrl+Shift+H)"
                 onClick={() => { setParaPop(null); setHistory(history === p.id ? null : p.id); }}><HistoryIcon /></button>
@@ -332,18 +356,8 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
                       onClick={() => void write(`${text} הפסקה: "${p.text}"`, p.id)}>{label}</button>
                   ))}
                 </div>
-                <label className="stack small muted" style={{ gap: 4 }}>
-                  או במילים שלך
-                  <LocalText ref={paraWish} className="textarea" rows={2} initial={wish} placeholder={paraHint}
-                    onText={setWish} onEmptyChange={setWishEmpty}
-                    onKeyDown={(e) => {
-                      if (e.key !== "Enter" || e.shiftKey) return;
-                      const w = takeWish(paraWish);
-                      if (w === null) return;
-                      e.preventDefault();
-                      void write(`${w} הפסקה: "${p.text}"`, p.id);
-                    }} />
-                </label>
+                <WishBox boxRef={paraWish} hints={PARAGRAPH_HINTS} wish={wish} typing={!wishEmpty} onText={setWish} onEmptyChange={setWishEmpty}
+                  onSend={() => { const w = takeWish(paraWish); if (w !== null) void write(`${w} הפסקה: "${p.text}"`, p.id); }} />
                 <div className="a4-pop-foot">
                   <span className="small muted grow">{p.status === "approved" ? "יופיע ליד הקיים, ויחליף אותו רק באישורך." : "יחליף את הפסקה בטיוטה."}</span>
                   <button type="button" className="btn btn-primary btn-small" disabled={wishEmpty}
@@ -517,18 +531,8 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
                         <button key={label} type="button" className="pill-btn" onClick={() => void write(text)}>{label}</button>
                       ))}
                     </div>
-                    <label className="stack small muted" style={{ gap: 4 }}>
-                      או במילים שלך
-                      <LocalText ref={draftWish} className="textarea" rows={2} initial={wish} placeholder={draftHint}
-                        onText={setWish} onEmptyChange={setWishEmpty}
-                        onKeyDown={(e) => {
-                          if (e.key !== "Enter" || e.shiftKey) return;
-                          const w = takeWish(draftWish);
-                          if (w === null) return;
-                          e.preventDefault();
-                          void write(w);
-                        }} />
-                    </label>
+                    <WishBox boxRef={draftWish} hints={DRAFT_HINTS} wish={wish} typing={!wishEmpty} onText={setWish} onEmptyChange={setWishEmpty}
+                      onSend={() => { const w = takeWish(draftWish); if (w !== null) void write(w); }} />
                     <div className="a4-pop-foot">
                       <span className="small muted grow">הטיוטה החדשה תחליף את זו. מה שאישרת נשאר.</span>
                       <button type="button" className="btn btn-primary btn-small" disabled={wishEmpty} onClick={() => { const w = takeWish(draftWish); if (w !== null) void write(w); }}>שליחה</button>
@@ -570,14 +574,6 @@ function fitRows(box: HTMLTextAreaElement) {
 }
 
 /** The AI mark: the same sparkle whichever model writes (D-036). */
-function SparkIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />
-      <path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z" />
-    </svg>
-  );
-}
 
 function HistoryIcon() {
   return (
