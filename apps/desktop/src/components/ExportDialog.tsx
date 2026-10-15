@@ -92,10 +92,12 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
           {!letter && (
             <div className="row" role="radiogroup" aria-label="סוג הקובץ">
               <label className="row small"><input type="radio" checked={!pdf} onChange={() => setPdf(false)} /> Word (אפשר להמשיך לערוך)</label>
-              <label className="row small"><input type="radio" checked={pdf} onChange={() => setPdf(true)} /> PDF נעול (להדפסה בלבד, בלי שינויים)</label>
+              <label className="row small"><input type="radio" checked={pdf} onChange={() => setPdf(true)} /> PDF להדפסה בלבד (אי אפשר לשנות)</label>
             </div>
           )}
-          {pdf && <span className="small muted">את ה-PDF אי אפשר לשנות. בהגדרות אפשר לבדוק אם עותק הוא המקורי.</span>}
+          {pdf && !letter && <span className="small muted">את ה-PDF אי אפשר לשנות. בהגדרות אפשר לבדוק אם עותק הוא המקורי.</span>}
+          {/* D-081: the file goes out without a password, and she is told so. */}
+          <span className="small muted">הקובץ נפתח בלי סיסמה: כל מי שיקבל אותו יוכל לקרוא אותו.</span>
           {check && !letter && (
             <p className="small"><b>שם הקובץ:</b> {check.file_name} <span className="muted">(בלי שם הילד) · נשמר בתיקיית ההורדות</span></p>
           )}

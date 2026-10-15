@@ -20,15 +20,24 @@ const DOMAINS = [
 export function DsmSeverityPanel(props: { caseId: string; severity?: DsmSeverity | undefined; onSaved: () => Promise<void> | void }) {
   const { fail } = useApp();
   const [error, setError] = useState<string | null>(null);
-  const now = { social: props.severity?.social ?? null, restricted: props.severity?.restricted ?? null };
+  // What she chose, until the case reloads: a second change goes out with the first one's
+  // value for the other domain, and nothing changes while one is being saved.
+  const [mine, setMine] = useState<{ social: number | null; restricted: number | null } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const now = mine ?? { social: props.severity?.social ?? null, restricted: props.severity?.restricted ?? null };
   const change = async (domain: "social" | "restricted", value: string) => {
     setError(null);
     const next = { ...now, [domain]: value ? Number(value) : null };
+    setMine(next);
+    setSaving(true);
     try {
       await ipc.setDsmSeverity(props.caseId, next.social, next.restricted);
       await props.onSaved();
     } catch (e) {
       setError(fail(e as never));
+    } finally {
+      setMine(null);
+      setSaving(false);
     }
   };
   return (
@@ -38,7 +47,7 @@ export function DsmSeverityPanel(props: { caseId: string; severity?: DsmSeverity
         {DOMAINS.map(([key, label]) => (
           <div key={key} className="field">
             <label htmlFor={`dsm-${key}`} className="small">{label}</label>
-            <select id={`dsm-${key}`} className="input" value={now[key] ?? ""} onChange={(e) => void change(key, e.target.value)}>
+            <select id={`dsm-${key}`} className="input" value={now[key] ?? ""} disabled={saving} onChange={(e) => void change(key, e.target.value)}>
               <option value="">לא נקבעה</option>
               {LEVELS.map(([n, words]) => <option key={n} value={n}>{words}</option>)}
             </select>

@@ -195,9 +195,9 @@ export const ipc = {
   createSampleCase: () => call("create_sample_case"),
   updateCase: (caseId: string, meta: CaseMeta) => run("update_case", { caseId, meta }),
   setCaseGuide: (caseId: string, sectionKey: string, text: string) => run("set_case_guide", { caseId, sectionKey, text }),
-  /** The DSM-5 severity she set (round 43): a level 1–3 for each domain, `null` for none. */
-  /** The approved recommendations the letters are written from (round 44); `null`: all. */
+  /** The approved recommendations she left out of the letters (round 44); `null`: none. */
   setLetterLeftOut: (caseId: string, ids: string[] | null) => run("set_letter_left_out", { caseId, ids }),
+  /** The DSM-5 severity she set (round 43): a level 1–3 for each domain, `null` for none. */
   setDsmSeverity: (caseId: string, social: number | null, restricted: number | null) => run("set_dsm_severity", { caseId, social, restricted }),
   /** Into the recycle bin (D-023); restorable for 30 days. */
   deleteCase: (caseId: string) => run("delete_case", { caseId }),
@@ -323,7 +323,7 @@ export const ipc = {
 
   checkExport: (caseId: string) => call("check_export", { caseId }),
   exportReport: (caseId: string, password: string | null) => call("export_report", { caseId, password }),
-  /** EX-3: a locked PDF (opens with the password, prints, cannot be changed). */
+  /** EX-3: a print-only PDF (cannot be changed; opens without a password, D-081). */
   exportPdf: (caseId: string, password: string | null) => call("export_pdf", { caseId, password }),
   /** When this vault exported exactly this PDF, or `null` (changed, or not made here). */
   checkOriginal: async (file: File): Promise<number | null> => {

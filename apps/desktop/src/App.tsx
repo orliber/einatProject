@@ -16,6 +16,7 @@ import { applyTextSize, readTextSize, stepTextSize } from "./textSize";
 import { ShortcutsSheet, useShortcutsSheet } from "./components/ShortcutsSheet";
 import { isCombo, KEYS } from "./shortcuts";
 import { forgetFailures, rememberFailure } from "./errors";
+import { resetRuns } from "./screens/case/reportRun";
 import { clearKept } from "./kept";
 import type { SettingsPane } from "./screens/settingsPanes";
 
@@ -172,6 +173,9 @@ export function App() {
       // And the failures kept for "לנסות שוב": they were for the vault just closed.
       forgetFailures();
       forgetHold();
+      // And "write the whole report": its line was for the vault just closed (the next step
+      // offers what is still unwritten once it is open again).
+      resetRuns();
     }
     wasUnlocked.current = unlocked;
   }, [unlocked]);

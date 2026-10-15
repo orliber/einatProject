@@ -82,7 +82,8 @@ export function LetterCard({ api }: { api: CaseApi }) {
         <label className="row small"><input type="radio" checked={audience === "parents"} onChange={() => setAudience("parents")} /> להורים</label>
         <label className="row small"><input type="radio" checked={audience === "school"} onChange={() => setAudience("school")} /> לצוות החינוכי</label>
       </div>
-      {recommendations.length > 1 && (
+      {/* One recommendation she unmarked shows too, so it can be marked again. */}
+      {(recommendations.length > 1 || recommendations.some((r) => !isPicked(r.id))) && (
         <fieldset className="stack letter-picks">
           <legend className="small">ההמלצות שנכנסות למכתב</legend>
           {recommendations.map((r) => (
@@ -91,6 +92,7 @@ export function LetterCard({ api }: { api: CaseApi }) {
               <span>{r.text}</span>
             </label>
           ))}
+          {recommendations.every((r) => !isPicked(r.id)) && <span className="small muted">לא סימנת אף המלצה, אז המכתב ייכתב בלי המלצות.</span>}
         </fieldset>
       )}
       <input className="input" placeholder="מה עוד חשוב שיהיה במכתב? (לא חובה)" value={note} onChange={(e) => setNote(e.target.value)} />

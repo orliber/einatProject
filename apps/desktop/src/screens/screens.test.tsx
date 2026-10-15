@@ -154,8 +154,8 @@ describe("main screens", () => {
     expect(screen.getByRole("complementary", { name: "תוכן הדוח" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "דף מלא" }));
     expect(screen.queryByRole("complementary", { name: "תוכן הדוח" })).toBeNull();
-    expect(screen.getByRole("button", { name: "עם תוכן הדוח" })).toHaveAttribute("aria-pressed", "true");
-    await user.click(screen.getByRole("button", { name: "עם תוכן הדוח" }));
+    expect(screen.getByRole("button", { name: "דף מלא" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "דף מלא" }));
     expect(screen.getByRole("complementary", { name: "תוכן הדוח" })).toBeInTheDocument();
   });
 
@@ -202,8 +202,10 @@ describe("main screens", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "הפקת הקובץ" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "הפקת הקובץ" }));
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).queryByText(/סיסמה/)).toBeNull();
-    await user.click(within(dialog).getByRole("radio", { name: /PDF נעול/ }));
+    // No password is asked for, and she is told the file opens without one (D-081).
+    expect(within(dialog).queryByLabelText(/סיסמה/)).toBeNull();
+    expect(within(dialog).getByText("הקובץ נפתח בלי סיסמה: כל מי שיקבל אותו יוכל לקרוא אותו.")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("radio", { name: /PDF להדפסה בלבד/ }));
     await user.click(within(dialog).getByRole("button", { name: "הפקת הדוח" }));
     await waitFor(() => expect(exported).toEqual([["export_pdf", { caseId: expect.any(String), password: null }]]));
     expect(await screen.findByRole("dialog", { name: "הדוח מוכן" })).not.toHaveTextContent(/סיסמה/);
@@ -403,6 +405,21 @@ describe("writing the report", () => {
     expect(calls.indexOf("send_verify")).toBeGreaterThan(calls.lastIndexOf("send_section"));
     await user.click(within(screen.getByText(/הדוח נכתב ונבדק/).closest(".run-line") as HTMLElement).getByRole("button", { name: "סגירה" }));
     expect(screen.queryByText(/הדוח נכתב ונבדק/)).toBeNull();
+  });
+
+  it("the run goes on after she leaves the case, and the case she comes back to shows its drafts (review of stage 6)", async () => {
+    const { user } = await openApp(true, false);
+    await openCase(user);
+    await user.click(screen.getByRole("button", { name: /עוד פעולות/ }));
+    await user.click(await screen.findByRole("menuitem", { name: "כתיבת כל הדוח עם Claude" }));
+    expect(await screen.findByText(/התוכנה עובדת/)).toBeInTheDocument();
+    // While it writes, nothing on the page sends a second request.
+    for (const b of screen.queryAllByRole("button", { name: /^✦ לכתוב את|^מיון החומרים$/ })) expect(b).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "→ תיקים" }));
+    await openCase(user);
+    await screen.findByText(/הדוח נכתב ונבדק מול המקורות/, {}, { timeout: 20000 });
+    // The page is the one she came back to: the new drafts wait for her there.
+    expect(await screen.findByRole("contentinfo", { name: "הצעד הבא" })).toHaveTextContent(/מחכות לאישור שלך|טיוטה אחת מחכה לאישור שלך/);
   });
 
   it("with the review screen on, nothing is read by itself", async () => {

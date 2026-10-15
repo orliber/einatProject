@@ -22,7 +22,7 @@ import "./CaseScreen.css";
 import { useAi } from "../ai";
 import { notSentMessage } from "../sending";
 import { useQuery } from "@tanstack/react-query";
-import { forgetRun, isRunning, runLine, runOf, runWholeReport, stopRun, useRun } from "./case/reportRun";
+import { forgetRun, isRunning, runLine, runWholeReport, showingCase, stopRun, useRun } from "./case/reportRun";
 
 export interface ReviewRequest {
   title: string;
@@ -76,6 +76,10 @@ const retries = new Map<number, () => void>();
 let currentTrack: CaseApi["track"] | null = null;
 /** The screen's `review`, for "לנסות שוב" on a request that did not go (built again). */
 let currentReview: CaseApi["review"] | null = null;
+/** Where she is now, in which case: an answer that lands after she left says so where she is. */
+let showing: { caseId: string; view: string } | null = null;
+/** How long the line of a finished run stays (it then gives its place back to the page). */
+const RUN_LINE_MS = 8000;
 
 /** One line for the result of a sorting, in plain words. */
 export function sortSummary(r: SortResult): string {
@@ -153,7 +157,11 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const viewRef = useRef(view);
   useEffect(() => {
     viewRef.current = view;
-  }, [view]);
+    showing = { caseId, view };
+    return () => {
+      showing = null;
+    };
+  }, [caseId, view]);
   // Alt+↓ / Alt+↑: the next or previous section, on the report page or section by section (UX-5).
   const focusRef = useRef(focus);
   useEffect(() => {
@@ -192,7 +200,8 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         answered = true;
         if (!status.demo_mode) recordDuration(job.task, status.speed, Date.now() - j.started);
         const title = detailRef.current?.sections.find((s) => s.key === job.section)?.title;
-        if (job.section && viewRef.current !== job.section && viewRef.current !== "report" && title) notify(`הטיוטה ל"${title}" מוכנה לאישור.`);
+        const here = showing?.caseId === caseId ? showing.view : null;
+        if (job.section && here !== job.section && here !== "report" && title) notify(`הטיוטה ל"${title}" מוכנה לאישור.`);
         // The same request sent again and answered: its earlier failure is over.
         if (job.approval) setFailures((f) => f.filter((x) => x.approval !== job.approval));
         await then?.(out);
@@ -216,7 +225,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         setJobs((js) => js.filter((x) => x.id !== j.id));
       }
     },
-    [status.speed, status.demo_mode, notify, fail, setJobs, setFailures],
+    [caseId, status.speed, status.demo_mode, notify, fail, setJobs, setFailures],
   );
   useEffect(() => {
     currentTrack = track;
@@ -276,6 +285,8 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   /** `quiet`: the reading that runs by itself after a material was added (round 31): when
    *  there is nothing to read, or it cannot be built now, it says nothing; the button stays. */
   const startSort = async (quiet = false) => {
+    // While the whole report is written, its run does the sorting: never a second request.
+    if (isRunning(caseId)) return;
     if (!quiet) setError(null);
     try {
       const prepared = await ipc.prepareSort(caseId);
@@ -315,19 +326,31 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inputCount]);
 
-  // Round 41: "write the whole report" runs in the background, in one line. A run the lock cut
-  // goes on when the case is opened again.
+  // Round 41: "write the whole report" runs in the background, in one line.
   const verifyOn = useQuery({ queryKey: ["verify-stage"], queryFn: ipc.verifyStageOn, enabled: !status.review_always }).data === true;
   const run = useRun(caseId);
-  const apiRef = useRef<CaseApi | null>(null);
-  const loaded = detail !== null;
+  const api: CaseApi | null = detail ? { caseId, detail, reload, review: startReview, sort: () => startSort(), jobs, track, draft } : null;
+  // The run sees this screen, wherever it was started from (she may have left and come back).
   useEffect(() => {
-    if (loaded && apiRef.current && runOf(caseId)?.phase === "paused") void runWholeReport(apiRef.current, { verify: verifyOn, ai });
-    // Once, when the case is there.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded]);
+    if (!api) return;
+    showingCase(caseId, api);
+    return () => showingCase(caseId, null);
+  });
+  // The page follows the run: each section written, each check and each phase reloads it, on
+  // the screen showing the case now (not the one the run was started from).
+  const runStep = run ? `${run.phase}:${run.done}:${run.checked}` : "";
+  useEffect(() => {
+    if (runStep) void reload();
+  }, [runStep, reload]);
+  // A finished run's line steps aside after a moment; one with something to fix stays.
+  const runOver = run !== undefined && !isRunning(caseId) && run.failed === 0 && run.error === null;
+  useEffect(() => {
+    if (!runOver) return;
+    const t = setTimeout(() => forgetRun(caseId), RUN_LINE_MS);
+    return () => clearTimeout(t);
+  }, [runOver, caseId]);
 
-  if (!detail) {
+  if (!detail || !api) {
     return error ? (
       <main className="center-note"><ErrorLine error={error} retry={() => { setError(null); void reload(); }} /></main>
     ) : (
@@ -339,8 +362,6 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     );
   }
 
-  const api: CaseApi = { caseId, detail, reload, review: startReview, sort: () => startSort(), jobs, track, draft };
-  apiRef.current = api;
   // With "show me every request" on (advanced), the window that shows each one; otherwise the
   // background run.
   const writeAll = () => (status.review_always ? setFullDraft(true) : void runWholeReport(api, { verify: verifyOn, ai }));
@@ -366,7 +387,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     if (unsorted > 0 && detail.meta.consent) await startSort();
     toReport();
   };
-  const next: { title: string; note: string; action: string; run: () => void } | null =
+  const next: { title: string; note: string; action: string; run: () => void; sends?: boolean } | null =
     stage === 0 || stage === 3
       ? null
       : !detail.meta.consent
@@ -377,9 +398,9 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
           : pendingCount > 0
             ? { title: pendingCount === 1 ? "טיוטה אחת מחכה לאישור שלך" : `${pendingCount} פסקאות מחכות לאישור שלך`, note: "", action: `לטיוטה ב"${pending[0]?.title ?? ""}" ←`, run: () => toReport(pending[0]?.key) }
             : unsorted > 0
-              ? { title: unsorted === 1 ? "חומר אחד עוד לא מוין לסעיפים" : `${unsorted} חומרים עוד לא מוינו לסעיפים`, note: "", action: "מיון החומרים", run: () => void startSort() }
+              ? { title: unsorted === 1 ? "חומר אחד עוד לא מוין לסעיפים" : `${unsorted} חומרים עוד לא מוינו לסעיפים`, note: "", action: "מיון החומרים", run: () => void startSort(), sends: true }
               : undrafted.length > 0
-                ? { title: `${undrafted.length} סעיפים עם חומר עוד לא נכתבו`, note: "", action: `✦ לכתוב את ${undrafted.length} הסעיפים`, run: writeAll }
+                ? { title: `${undrafted.length} סעיפים עם חומר עוד לא נכתבו`, note: "", action: `✦ לכתוב את ${undrafted.length} הסעיפים`, run: writeAll, sends: true }
                 : fed.length > 0 && fed.every((s) => s.approved)
                   ? { title: "כל הסעיפים שיש להם חומר אושרו", note: "", action: "להוצאת הדוח ←", run: () => go({ name: "case", id: caseId, view: "finish" }) }
                   : null;
@@ -420,8 +441,8 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         </nav>
         {status.demo_mode && <span className="chip chip-sand" title="לא הוגדר מפתח API בהגדרות">מצב הדגמה</span>}
         {stage === 2 && (
-          <button type="button" className="btn" aria-pressed={fullPage} title="להסתיר את תוכן הדוח שבצד" onClick={() => setFullPage(!fullPage)}>
-            {fullPage ? "עם תוכן הדוח" : "דף מלא"}
+          <button type="button" className="btn" aria-pressed={fullPage} title={fullPage ? "להחזיר את תוכן הדוח שבצד" : "להסתיר את תוכן הדוח שבצד"} onClick={() => setFullPage(!fullPage)}>
+            דף מלא
           </button>
         )}
         <button type="button" className="btn" onClick={() => setSearching(true)}>חיפוש</button>
@@ -442,8 +463,14 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
           {run && (
             <div className="run-line" role="status">
               <span className="grow">{runLine(run)}</span>
-              {running && run.phase !== "check" && (
+              {running && (
                 <button type="button" className="btn btn-small" disabled={run.stopping} onClick={() => stopRun(caseId)}>לעצור</button>
+              )}
+              {!running && run.error && (
+                <button type="button" className="btn btn-small" onClick={() => {
+                  forgetRun(caseId);
+                  writeAll();
+                }}>לנסות שוב</button>
               )}
               {!running && (
                 <button type="button" className="icon-btn" aria-label="סגירה" onClick={() => forgetRun(caseId)}><CloseIcon /></button>
@@ -475,7 +502,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
       )}
 
       <div className="case-body">
-        {stage === 2 && !fullPage && <Contents detail={detail} jobs={jobs} view={view} onOpen={(key) => toReport(key)} onWriteAll={writeAll} />}
+        {stage === 2 && !fullPage && <Contents detail={detail} jobs={jobs} view={view} onOpen={(key) => toReport(key)} onWriteAll={running ? undefined : writeAll} />}
         <div className="work">
           {view === "materials" && <MaterialsView api={api} onWrite={() => void toWriting()} />}
           {view === "details" && <DetailsView api={api} />}
@@ -504,7 +531,8 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
             <b className="next-title">{next.title}</b>
             {next.note && <span className="small muted">{next.note}</span>}
           </div>
-          <button type="button" className="btn btn-primary btn-big" onClick={next.run}>{next.action}</button>
+          {/* While the whole report is written, nothing here sends a second request. */}
+          <button type="button" className="btn btn-primary btn-big" disabled={running && next.sends === true} onClick={next.run}>{next.action}</button>
         </footer>
       )}
 
@@ -530,7 +558,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
 }
 
 /** The report's table of contents: every section with its state, one click to it on the page. */
-function Contents(props: { detail: CaseDetail; jobs: Job[]; view: string; onOpen: (key: string) => void; onWriteAll: () => void }) {
+function Contents(props: { detail: CaseDetail; jobs: Job[]; view: string; onOpen: (key: string) => void; onWriteAll: (() => void) | undefined }) {
   const { detail, jobs, view } = props;
   const content = detail.sections.filter((s) => s.key !== "signature");
   const approved = content.filter((s) => s.approved && !s.paragraphs.some((p) => p.status === "proposed")).length;
@@ -567,7 +595,7 @@ function Contents(props: { detail: CaseDetail; jobs: Job[]; view: string; onOpen
           </div>
         ))}
       </nav>
-      {writable > 0 && (
+      {writable > 0 && props.onWriteAll && (
         <button type="button" className="btn contents-write" onClick={props.onWriteAll}>✦ לכתוב את {writable} הריקים</button>
       )}
     </aside>

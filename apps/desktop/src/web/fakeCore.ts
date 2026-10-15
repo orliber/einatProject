@@ -256,7 +256,7 @@ export class FakeCore {
       [t - 3 * 86_400 + 600, "send", "send", "החומרים נשלחו ל-Claude למיון לסעיפים (הדגמה: לא יצא מהמחשב)", false, noam],
       [t - 3 * 86_400 + 900, "send", "send", "הסעיף \"רקע התפתחותי\" נשלח ל-Claude (הדגמה: לא יצא מהמחשב)", false, noam],
       [t - 2 * 86_400, "lock", "access", "נעילה (המחשב נכנס לשינה)", false, null],
-      [t - 86_400, "export", "case", "דוח Word הופק, מוגן בסיסמה", false, noam],
+      [t - 86_400, "export", "case", "דוח הופק, נפתח בלי סיסמה", false, noam],
       [t - 86_400 + 60, "lock", "access", "נעילה", false, null],
     ];
     this.activityLog = rows.map(([ts, event, kind, text, warn, c], i) => ({ seq: i + 1, ts, event, kind, text, warn, case: c }));
@@ -1308,7 +1308,7 @@ export class FakeCore {
       case "letter":
         return [];
       case "export_pdf":
-        return "בהדמיה בדפדפן לא נוצר קובץ. בתוכנה המותקנת נשמר PDF נעול לשינויים בתיקיית ההורדות.";
+        return "בהדמיה בדפדפן לא נוצר קובץ. בתוכנה המותקנת נשמר PDF להדפסה בלבד בתיקיית ההורדות.";
       case "check_original":
         return null;
       case "prepare_letter":
