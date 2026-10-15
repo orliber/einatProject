@@ -25,6 +25,10 @@ pub(crate) const JUST_BOUND: &str = "מעכשיו הסיסמה פותחת את �
 pub trait ComputerSeal: Send + Sync {
     fn available(&self) -> bool;
     fn load(&self, dir: &Path) -> Result<Key32, VaultError>;
+    /// The same while the vault is open (under the core's lock): a shorter wait.
+    fn load_in_session(&self, dir: &Path) -> Result<Key32, VaultError> {
+        self.load(dir)
+    }
     fn create(&self, dir: &Path) -> Result<Key32, VaultError>;
     /// A new key held aside: the key in use stays until [`Self::promote_next`].
     fn create_next(&self, dir: &Path) -> Result<Key32, VaultError>;
@@ -42,6 +46,9 @@ impl ComputerSeal for WindowsSeal {
     }
     fn load(&self, dir: &Path) -> Result<Key32, VaultError> {
         computer_key::load_for(dir, Purpose::Password)
+    }
+    fn load_in_session(&self, dir: &Path) -> Result<Key32, VaultError> {
+        computer_key::load_in_session_for(dir, Purpose::Password)
     }
     fn create(&self, dir: &Path) -> Result<Key32, VaultError> {
         computer_key::create_for(dir, Purpose::Password)
@@ -134,13 +141,22 @@ impl Core {
         self
     }
 
-    /// This computer's key for the vault's password slot as it is on disk now.
-    pub(crate) fn password_key_here(&self) -> Option<Key32> {
-        key_here(
-            self.computer_seal.as_ref(),
-            &self.dir,
-            bound_on_disk(&self.dir),
-        )
+    /// This computer's key for the vault's password slot as it is on disk now. A Windows
+    /// that did not answer in time is `Busy`, never "not here": a check of her password then
+    /// says to try again instead of "wrong password" (review of stage 5).
+    pub(crate) fn password_key_here(&self) -> Result<Option<Key32>, VaultError> {
+        let seal = self.computer_seal.as_ref();
+        if !seal.available() {
+            return Ok(None);
+        }
+        let bound = bound_on_disk(&self.dir);
+        match seal.load_in_session(&self.dir) {
+            Ok(key) => Ok(Some(key)),
+            Err(VaultError::Busy) if bound => Err(VaultError::Busy),
+            Err(VaultError::Busy) => Ok(None),
+            Err(_) if bound => Ok(None),
+            Err(_) => Ok(seal.create(&self.dir).ok()),
+        }
     }
 
     /// This computer's key for a new password slot, and whether it is held aside until the
@@ -157,7 +173,7 @@ impl Core {
 
     /// Check the password on this computer without opening the vault again.
     pub(crate) fn verify_password_here(&self, password: &str) -> Result<(), VaultError> {
-        let key = self.password_key_here();
+        let key = self.password_key_here()?;
         Vault::verify_password_here(&self.dir, password, key.as_ref())
     }
 
@@ -165,15 +181,14 @@ impl Core {
     /// (info), not bound although it could be (warn; it binds at the next opening with the
     /// password), or bound to another computer (`elsewhere`: she came in with the kit, and
     /// her password does not open it here until she chooses one; review of stage 5, U2).
+    /// `busy`: Windows did not answer in time, so it is not known now.
     pub(crate) fn binding_state(&self) -> &'static str {
         match self.vault.as_ref() {
-            Some(v) if v.password_bound() => {
-                if self.password_key_here().is_some() {
-                    "ok"
-                } else {
-                    "elsewhere"
-                }
-            }
+            Some(v) if v.password_bound() => match self.password_key_here() {
+                Ok(Some(_)) => "ok",
+                Ok(None) => "elsewhere",
+                Err(_) => "busy",
+            },
             _ if !self.computer_seal.available() => "info",
             _ => "warn",
         }

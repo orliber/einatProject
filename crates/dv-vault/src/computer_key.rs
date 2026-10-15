@@ -15,6 +15,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use zeroize::Zeroizing;
 
@@ -122,7 +123,7 @@ pub fn create_next_for(dir: &Path, purpose: Purpose) -> Result<Key32, VaultError
 /// The key held aside, unsealed (for an opening after the slot was written but before the
 /// key was promoted).
 pub fn load_next_for(dir: &Path, purpose: Purpose) -> Result<Key32, VaultError> {
-    load_from(&next_path(dir, purpose), purpose)
+    load_from(&next_path(dir, purpose), purpose, OPENING_WAIT)
 }
 
 /// The key held aside becomes the one in use.
@@ -137,12 +138,18 @@ fn next_path(dir: &Path, purpose: Purpose) -> PathBuf {
 
 /// The computer key, unsealed. Fails on another computer or Windows account.
 pub fn load_for(dir: &Path, purpose: Purpose) -> Result<Key32, VaultError> {
-    load_from(&path_for(dir, purpose), purpose)
+    load_from(&path_for(dir, purpose), purpose, OPENING_WAIT)
 }
 
-fn load_from(file: &Path, purpose: Purpose) -> Result<Key32, VaultError> {
+/// The same while the vault is open, where the check runs under the core's lock: a shorter
+/// wait, so a slow Windows never holds the program for long (review of stage 5).
+pub fn load_in_session_for(dir: &Path, purpose: Purpose) -> Result<Key32, VaultError> {
+    load_from(&path_for(dir, purpose), purpose, IN_SESSION_WAIT)
+}
+
+fn load_from(file: &Path, purpose: Purpose, wait: Duration) -> Result<Key32, VaultError> {
     let sealed = fs::read_to_string(file).map_err(|_| VaultError::NotFound)?;
-    let plain = unprotect(sealed.trim(), purpose)?;
+    let plain = unprotect(sealed.trim(), purpose, wait)?;
     let bytes: [u8; 32] = plain
         .as_slice()
         .try_into()
@@ -154,9 +161,12 @@ pub fn remove_for(dir: &Path, purpose: Purpose) {
     let _ = fs::remove_file(path_for(dir, purpose));
 }
 
-/// Longest wait for the sealing or unsealing child. A first PowerShell after the computer
-/// starts, beside a busy antivirus, took over 20 s on a CI runner; past this it is `Busy`.
-const DPAPI_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+/// Longest wait for the sealing or unsealing child at an opening, which runs outside the
+/// core's lock. A first PowerShell after the computer starts, beside a busy antivirus, took
+/// over 20 s on a CI runner; past this it is `Busy` (she tries again).
+const OPENING_WAIT: Duration = Duration::from_secs(45);
+/// The same for a check while the vault is open, under the core's lock.
+const IN_SESSION_WAIT: Duration = Duration::from_secs(20);
 
 fn powershell() -> String {
     std::env::var_os("SystemRoot").map_or_else(
@@ -171,7 +181,12 @@ fn powershell() -> String {
 }
 
 /// Run a fixed DPAPI script with `input` (base64) on stdin; its stdout is base64.
-fn dpapi(script: &str, input: &str, purpose: Purpose) -> Result<Zeroizing<String>, VaultError> {
+fn dpapi(
+    script: &str,
+    input: &str,
+    purpose: Purpose,
+    wait: Duration,
+) -> Result<Zeroizing<String>, VaultError> {
     if !available() {
         return Err(VaultError::Refused(
             "sealing to the Windows account is only available on Windows".to_owned(),
@@ -212,7 +227,7 @@ fn dpapi(script: &str, input: &str, purpose: Purpose) -> Result<Zeroizing<String
         if let Some(status) = child.try_wait()? {
             break status;
         }
-        if started.elapsed() > DPAPI_TIMEOUT {
+        if started.elapsed() > wait {
             let _ = child.kill();
             let _ = child.wait();
             let _ = reader.join();
@@ -237,14 +252,20 @@ fn protect(plain: &[u8; 32], purpose: Purpose) -> Result<Zeroizing<String>, Vaul
         "[Console]::Out.Write([Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Protect($b,$e,'CurrentUser')))",
         &b64(plain),
         purpose,
+        OPENING_WAIT,
     )
 }
 
-fn unprotect(sealed: &str, purpose: Purpose) -> Result<Zeroizing<Vec<u8>>, VaultError> {
+fn unprotect(
+    sealed: &str,
+    purpose: Purpose,
+    wait: Duration,
+) -> Result<Zeroizing<Vec<u8>>, VaultError> {
     let out = dpapi(
         "[Console]::Out.Write([Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Unprotect($b,$e,'CurrentUser')))",
         sealed,
         purpose,
+        wait,
     )?;
     unb64(&out).map(Zeroizing::new)
 }

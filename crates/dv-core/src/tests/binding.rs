@@ -347,3 +347,32 @@ fn a_slow_windows_says_try_again_and_never_another_computer() {
     assert!(core.check_backoff().is_ok(), "not a guess: no waiting time");
     assert!(core.unlock(PASSWORD).unwrap().unlocked);
 }
+
+#[test]
+fn a_slow_windows_while_open_is_not_a_wrong_password_nor_another_computer() {
+    // Review of stage 5: the checks of her password while the vault is open and the
+    // security page tell a late Windows apart too.
+    let dir = tempfile::tempdir().unwrap();
+    let here = Arc::new(FakeSeal::default());
+    on(dir.path(), &here).create_vault(PASSWORD).unwrap();
+    let slow = Arc::new(Slow(Arc::clone(&here), Mutex::new(0)));
+    let mut core = Core::for_tests(dir.path(), None)
+        .with_computer_seal(Arc::clone(&slow) as Arc<dyn ComputerSeal>);
+    core.unlock(PASSWORD).unwrap();
+    *slow.1.lock().unwrap() = 1;
+    let item = core
+        .security_status()
+        .items
+        .into_iter()
+        .find(|i| i.key == "computer_bound")
+        .unwrap();
+    assert_eq!(
+        (item.state.as_str(), item.detail.as_deref()),
+        ("info", Some("busy"))
+    );
+    *slow.1.lock().unwrap() = 1;
+    let e = core.google_turn_on_check(PASSWORD).unwrap_err();
+    assert!(matches!(e, CoreError::Vault(VaultError::Busy)));
+    assert!(core.check_backoff().is_ok(), "not a guess: no waiting time");
+    assert!(core.google_turn_on_check(PASSWORD).is_ok());
+}

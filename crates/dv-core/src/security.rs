@@ -109,6 +109,7 @@ impl Core {
             1,
             match bound {
                 "elsewhere" => item("computer_bound", "warn", Some(bound.to_owned())),
+                "busy" => item("computer_bound", "info", Some(bound.to_owned())),
                 _ => item("computer_bound", bound, None),
             },
         );

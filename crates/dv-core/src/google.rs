@@ -207,7 +207,7 @@ impl Core {
         self.check_backoff()?;
         let dir = self.dir.clone();
         let computer = keys.load_or_create(&dir)?;
-        let here = self.password_key_here();
+        let here = self.password_key_here()?;
         let proof = crate::binding::password_secret(password, here.as_ref());
         let vault = self.vault_mut()?;
         let tag = google_account_tag(vault.vault_id(), google_account_id);
@@ -228,7 +228,7 @@ impl Core {
     ) -> Result<(), CoreError> {
         self.check_backoff()?;
         let dir = self.dir.clone();
-        let here = self.password_key_here();
+        let here = self.password_key_here()?;
         let proof = crate::binding::password_secret(password, here.as_ref());
         let result = self.vault_mut()?.remove_google_slot(proof);
         if let Err(e) = result {

@@ -107,6 +107,7 @@ pub(crate) fn build(
     let fips = state_of(items, "fips") == "ok";
     let bound = state_of(items, "computer_bound");
     let elsewhere = detail_of(items, "computer_bound") == Some("elsewhere");
+    let busy = detail_of(items, "computer_bound") == Some("busy");
     let minutes = detail_of(items, "auto_lock").unwrap_or("10");
     let screen = state_of(items, "screen") == "ok";
     let isolation = state_of(items, "isolation");
@@ -158,6 +159,7 @@ pub(crate) fn build(
             bound,
             match bound {
                 _ if elsewhere => "הסיסמה עוד לא פותחת את הכספת במחשב הזה. בוחרים סיסמה ב\"החלפת סיסמה…\" עם ערכת השחזור.",
+                _ if busy => "Windows לא ענה בזמן לבדיקה הזו. בודקים שוב בעוד רגע.",
                 "ok" => "הכספת קשורה למחשב הזה.",
                 "info" => "במחשב הזה אין אפשרות כזו.",
                 _ => "הכספת תיקשר למחשב בכניסה הבאה עם הסיסמה.",
