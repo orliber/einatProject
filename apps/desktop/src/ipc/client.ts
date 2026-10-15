@@ -43,6 +43,7 @@ import type { ScoreSheet } from "./generated/ScoreSheet";
 import type { UsageSummary } from "./generated/UsageSummary";
 import type { Readiness } from "./generated/Readiness";
 import type { SecurityItem } from "./generated/SecurityItem";
+import type { SecurityLayer } from "./generated/SecurityLayer";
 import type { SecurityStatus } from "./generated/SecurityStatus";
 import type { UnsavedEdit } from "./generated/UnsavedEdit";
 import type { SectionResult } from "./generated/SectionResult";
@@ -161,6 +162,8 @@ export const ipc = {
   takeUnsaved: () => call("take_unsaved"),
   readiness: () => call("readiness"),
   securityStatus: () => call("security_status"),
+  /** The protection layers as a PDF (L6), into the same folder as the reports. */
+  exportSecurityPdf: () => call("export_security_pdf"),
   setSendStopped: (stopped: boolean) => call("set_send_stopped", { stopped }),
   confirmReadiness: (key: string, done: boolean) => call("confirm_readiness", { key, done }),
   usageSummary: () => call("usage_summary"),
@@ -434,6 +437,7 @@ export type {
   UsageSummary,
   Readiness,
   SecurityItem,
+  SecurityLayer,
   SecurityStatus,
   UnsavedEdit,
   ActivityPage,

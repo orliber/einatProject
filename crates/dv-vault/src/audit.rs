@@ -50,6 +50,8 @@ pub enum AuditEvent {
     /// Windows Hello was turned on or off as a way in (D-047).
     WindowsHelloOn,
     WindowsHelloOff,
+    /// The password slot was bound to this computer (D-076).
+    PasswordBound,
 }
 
 impl AuditEvent {
@@ -87,6 +89,7 @@ impl AuditEvent {
             AuditEvent::StyleProfileApproved => "style_profile_approved",
             AuditEvent::WindowsHelloOn => "windows_hello_on",
             AuditEvent::WindowsHelloOff => "windows_hello_off",
+            AuditEvent::PasswordBound => "password_bound",
         }
     }
 }

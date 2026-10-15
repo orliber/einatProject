@@ -189,7 +189,7 @@ impl Core {
         self.check_backoff()?;
         let vault = self.vault_ref()?;
         let id = vault.vault_id().to_owned();
-        if let Err(e) = Vault::verify_password(&self.dir, password) {
+        if let Err(e) = self.verify_password_here(password) {
             self.count_failure(&e);
             return Err(e.into());
         }
@@ -207,9 +207,11 @@ impl Core {
         self.check_backoff()?;
         let dir = self.dir.clone();
         let computer = keys.load_or_create(&dir)?;
+        let here = self.password_key_here();
+        let proof = crate::binding::password_secret(password, here.as_ref());
         let vault = self.vault_mut()?;
         let tag = google_account_tag(vault.vault_id(), google_account_id);
-        let result = vault.set_google_slot(Secret::Password(password), drive, &computer, &tag);
+        let result = vault.set_google_slot(proof, drive, &computer, &tag);
         if let Err(e) = result {
             self.count_failure(&e);
             return Err(e.into());
@@ -226,9 +228,9 @@ impl Core {
     ) -> Result<(), CoreError> {
         self.check_backoff()?;
         let dir = self.dir.clone();
-        let result = self
-            .vault_mut()?
-            .remove_google_slot(Secret::Password(password));
+        let here = self.password_key_here();
+        let proof = crate::binding::password_secret(password, here.as_ref());
+        let result = self.vault_mut()?.remove_google_slot(proof);
         if let Err(e) = result {
             self.count_failure(&e);
             return Err(e.into());
@@ -291,14 +293,19 @@ impl Core {
             return Err(CoreError::Internal("opened without a key".to_owned()));
         };
         let params = self.argon.unwrap_or_else(Argon2Params::calibrate);
-        self.vault_mut()?.rekey_password(
+        let (here, aside) = self.new_password_key();
+        self.vault_mut()?.rekey_password_here(
             Secret::Google {
                 drive,
                 computer: &computer,
             },
             new_password,
             params,
+            here.as_ref(),
         )?;
+        if aside {
+            self.promote_password_key();
+        }
         self.mark_secret_changed()?;
         Ok(self.status())
     }

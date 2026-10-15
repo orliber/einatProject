@@ -383,7 +383,8 @@ impl Vault {
             .main
             .query_row("SELECT count(*) FROM cases", [], |r| r.get(0))?;
 
-        let header_bytes = fs::read(self.dir.join(HEADER_FILE))?;
+        // Opens with the password on any computer, and with the kit (D-076).
+        let header_bytes = self.backup_header()?;
         let created_at = now();
         let sealed = seal(
             &self.keys.backup,

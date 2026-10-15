@@ -6,6 +6,35 @@ use super::*;
 /// long is taken as lost, so the vault can never stay unopenable.
 const SECRET_WORK_STALE: Duration = Duration::from_secs(120);
 
+/// Wrong passwords or kits typed since the last opening, kept across a restart of the program
+/// (a number only; the vault is locked, so it cannot hold it). Read and removed at the next
+/// opening, which then says so (L4).
+const FAILURES_FILE: &str = "unlock.failures";
+
+fn failures_on_disk(dir: &Path) -> u32 {
+    std::fs::read_to_string(dir.join(FAILURES_FILE))
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+/// Wrong tries this long before the opening that worked are taken as her own typos.
+const OWN_TYPOS: Duration = Duration::from_secs(120);
+
+/// What the opening says, only when there is something to say.
+fn since_last_text(failed: u32) -> Option<String> {
+    match failed {
+        0 => None,
+        1 => Some(
+            "מאז הכניסה הקודמת היה ניסיון כניסה אחד שנכשל. אם זו לא את, כדאי להחליף סיסמה."
+                .to_owned(),
+        ),
+        n => Some(format!(
+            "מאז הכניסה הקודמת היו {n} ניסיונות כניסה שנכשלו. אם זו לא את, כדאי להחליף סיסמה."
+        )),
+    }
+}
+
 impl Core {
     /// `dir` is the vault folder (the shell passes the OS local-app-data folder).
     #[must_use]
@@ -23,6 +52,7 @@ impl Core {
             last_activity: Instant::now(),
             last_tick: None,
             failed_unlocks: 0,
+            failure_times: Vec::new(),
             not_before: None,
             secret_work: None,
             secret_ticket: 0,
@@ -44,7 +74,20 @@ impl Core {
             ner_exe: None,
             hint_cache: HashMap::new(),
             section_nonces: HashMap::new(),
+            computer_seal: Arc::new(WindowsSeal),
+            memory_lock: None,
+            opened_cases: HashSet::new(),
+            since_last: None,
         }
+    }
+
+    /// What the shell managed at start (D-047, L7): `offered` where the computer can lock the
+    /// program's memory in RAM, `locked` when the room for it was granted. Shown as it is on
+    /// the security page.
+    #[must_use]
+    pub fn with_memory_lock(mut self, offered: bool, locked: bool) -> Self {
+        self.memory_lock = offered.then_some(locked);
+        self
     }
 
     /// Read documents in a separate worker process (the app passes its own binary).
@@ -203,6 +246,7 @@ impl Core {
                 .vault
                 .as_ref()
                 .is_none_or(|v| v.setting(SCREEN_KEY).ok().flatten().as_deref() != Some("0")),
+            since_last: self.since_last.clone(),
         }
     }
 
@@ -235,7 +279,14 @@ impl Core {
         // Not while a restore writes the same folder (or an unlock reads it).
         self.refuse_secret_work_running()?;
         let params = self.argon.unwrap_or_else(Argon2Params::calibrate);
-        let created = Vault::create(&self.dir, password, params)?;
+        // Bound to this computer from the start where a key can be sealed here (D-076).
+        let key = if Vault::exists(&self.dir) {
+            None
+        } else {
+            std::fs::create_dir_all(&self.dir).map_err(VaultError::from)?;
+            binding::key_here(self.computer_seal.as_ref(), &self.dir, false)
+        };
+        let created = Vault::create_here(&self.dir, password, params, key.as_ref())?;
         let recovery_key = created.recovery_key.to_string();
         let mut vault = created.vault;
         vault.set_state(FIRST_USE_KEY, &day_number().to_string())?;
@@ -297,13 +348,26 @@ impl Core {
     ) -> Result<AppStatus, CoreError> {
         match result {
             Ok(mut vault) => {
-                if self.failed_unlocks > 0 {
+                // Also the tries before the program was last closed (every try is counted
+                // on disk), but not her own typos just before this opening.
+                let own = self
+                    .failure_times
+                    .iter()
+                    .filter(|t| t.elapsed() < OWN_TYPOS)
+                    .count();
+                let failed = failures_on_disk(&self.dir)
+                    .max(self.failed_unlocks)
+                    .saturating_sub(u32::try_from(own).unwrap_or(u32::MAX));
+                self.failure_times.clear();
+                if failed > 0 {
                     let _ = vault.record(
                         AuditEvent::UnlockFailed,
                         None,
-                        &serde_json::json!({ "count": self.failed_unlocks }),
+                        &serde_json::json!({ "count": failed }),
                     );
                 }
+                let _ = std::fs::remove_file(self.dir.join(FAILURES_FILE));
+                self.since_last = since_last_text(failed);
                 self.failed_unlocks = 0;
                 self.not_before = None;
                 self.rollback_warning = self
@@ -317,6 +381,9 @@ impl Core {
                 }
                 self.vault = Some(vault);
                 self.last_activity = Instant::now();
+                // The gate and the sending rules try themselves once per opening; a failure
+                // stops sending until the program is fixed (D-078, fail-closed).
+                crate::layers::stop_if_broken(crate::layers::SelfChecks::run());
                 if purge {
                     // Best effort: a case that fails to erase now is tried again next time, and
                     // never keeps the vault from opening.
@@ -341,16 +408,35 @@ impl Core {
             Err(e) => {
                 if matches!(e, VaultError::WrongSecret | VaultError::RecoveryKeyInvalid) {
                     self.failed_unlocks += 1;
+                    self.failure_times.push(Instant::now());
                     let wait = 2u64.saturating_pow(self.failed_unlocks.min(6)).min(60);
                     self.not_before = Some(Instant::now() + Duration::from_secs(wait));
+                    let on_disk = failures_on_disk(&self.dir).saturating_add(1);
+                    let _ = std::fs::write(self.dir.join(FAILURES_FILE), on_disk.to_string());
                 }
                 Err(e.into())
             }
         }
     }
 
+    /// True when `typed` opens the vault: at creation, after a new kit, and when she checks
+    /// the printed page in settings (D-076: on another computer the kit is the way in, so
+    /// the security page asks for a check once a year). The day of the check is kept.
     pub fn confirm_recovery_key(&mut self, typed: &str) -> Result<bool, CoreError> {
-        Ok(self.vault_ref()?.check_recovery_key(typed))
+        let ok = self.vault_ref()?.check_recovery_key(typed);
+        if ok {
+            self.vault_mut()?
+                .set_setting(KIT_CHECKED_KEY, &crate::dates::unix_now().to_string())?;
+        }
+        Ok(ok)
+    }
+
+    /// When the printed kit was last typed and opened the vault.
+    pub(crate) fn kit_checked_at(&self) -> Option<i64> {
+        self.vault
+            .as_ref()
+            .and_then(|v| v.setting(KIT_CHECKED_KEY).ok().flatten())
+            .and_then(|s| s.parse().ok())
     }
 
     /// Wipe keys, pending approvals and consultation history from memory.
@@ -369,6 +455,8 @@ impl Core {
         self.removed_input = None;
         self.hint_cache.clear();
         self.section_nonces.clear();
+        self.opened_cases.clear();
+        self.since_last = None;
         // The model's process held texts of this session in its memory: it ends with the lock.
         self.end_name_model();
         if let Some(v) = self.vault.take() {

@@ -46,4 +46,9 @@ review_always: boolean,
  * Screenshots and screen sharing show a blank window (D-037). Always on while the vault
  * is locked; she may turn it off for the open vault in settings.
  */
-screen_protection: boolean, };
+screen_protection: boolean, 
+/**
+ * Said once after opening, when there is something to say: wrong passwords typed since
+ * the last opening (L4).
+ */
+since_last: string | null, };

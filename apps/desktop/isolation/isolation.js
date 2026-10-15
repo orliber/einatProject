@@ -31,6 +31,7 @@ const ALLOWED = new Set([
   "confirm_readiness",
   "prepare_verify",
   "security_status",
+  "export_security_pdf",
   "send_verify",
   "set_send_stopped",
   "confirm_recovery_key",

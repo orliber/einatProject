@@ -9,7 +9,7 @@
 
 use zeroize::Zeroizing;
 
-use super::{master_key, random_array, Secret, Vault};
+use super::{bound_slot, master_key, random_array, Secret, Vault};
 use crate::audit::AuditEvent;
 use crate::crypto::{hex, Key32};
 use crate::header::{wrap_mk, KeySlot, VaultHeader};
@@ -30,6 +30,8 @@ pub struct NewSlot {
     /// The wrapped key of the slot it replaces, as it was when the proof was checked.
     replaces: String,
     slot: KeySlot,
+    /// For a password slot bound to this computer: the unbound one, kept for the backups.
+    backup: Option<KeySlot>,
 }
 
 impl std::fmt::Debug for NewSlot {
@@ -63,20 +65,47 @@ impl NewSlot {
         new_password: &str,
         params: Argon2Params,
     ) -> Result<Self, VaultError> {
+        Self::password_here(header, current, new_password, params, None)
+    }
+
+    /// A new password slot, bound to this computer when `computer` is the key sealed here to
+    /// her Windows account (D-076).
+    pub fn password_here(
+        header: &VaultHeader,
+        current: Secret<'_>,
+        new_password: &str,
+        params: Argon2Params,
+        computer: Option<&Key32>,
+    ) -> Result<Self, VaultError> {
         password::check_policy(new_password).map_err(VaultError::Policy)?;
         let replaces = existing(header, SlotKind::Password)?;
         let mk = master_key(header, current)?;
         let salt = random_array::<32>()?;
-        let kek = password::derive_kek(new_password, &salt, params)?;
+        let stretched = password::stretch(new_password, &salt, params)?;
+        let unbound = KeySlot::Password {
+            salt: hex(&salt),
+            params,
+            wrapped_mk: wrap_mk(
+                &password::kek_of(&stretched)?,
+                "password",
+                &header.vault_id,
+                &mk,
+            )?,
+            bound: false,
+        };
+        let (slot, backup) = match computer {
+            Some(c) => (
+                bound_slot(&stretched, &salt, params, c, &header.vault_id, &mk)?,
+                Some(unbound),
+            ),
+            None => (unbound, None),
+        };
         Ok(Self {
             vault_id: header.vault_id.clone(),
             kind: SlotKind::Password,
             replaces,
-            slot: KeySlot::Password {
-                salt: hex(&salt),
-                params,
-                wrapped_mk: wrap_mk(&kek, "password", &header.vault_id, &mk)?,
-            },
+            slot,
+            backup,
         })
     }
 
@@ -97,6 +126,7 @@ impl NewSlot {
             slot: KeySlot::Recovery {
                 wrapped_mk: wrap_mk(&kek, "recovery", &header.vault_id, &mk)?,
             },
+            backup: None,
         };
         Ok((slot, recovery::format(&recovery_key)))
     }
@@ -119,6 +149,14 @@ impl Vault {
             return Err(VaultError::Integrity(
                 "the key slot changed while the new one was being made",
             ));
+        }
+        if new.kind == SlotKind::Password {
+            // The slot the backups carry follows the new password (first, so a backup is
+            // never written with a password slot that is gone).
+            match &new.backup {
+                Some(unbound) => self.keep_backup_slot(unbound)?,
+                None => self.drop_backup_slot()?,
+            }
         }
         for slot in &mut self.header.slots {
             let same = matches!(

@@ -80,15 +80,37 @@ pub fn normalize(password: &str) -> Zeroizing<String> {
     Zeroizing::new(password.trim().nfkc().collect())
 }
 
+/// The password stretched with Argon2id (the slow part, done once per check).
+pub fn stretch(
+    password: &str,
+    salt: &[u8; 32],
+    params: Argon2Params,
+) -> Result<Zeroizing<[u8; 32]>, VaultError> {
+    let normalized = normalize(password);
+    derive_raw(normalized.as_bytes(), salt, params)
+}
+
+/// The password slot's key-encryption key, from the stretched password.
+pub fn kek_of(stretched: &[u8; 32]) -> Result<Key32, VaultError> {
+    hkdf(stretched, "dv/slot/password/v1")
+}
+
+/// The key-encryption key of a password slot bound to this computer (D-076): the stretched
+/// password together with the key sealed to her Windows account. Neither opens it alone, so a
+/// copied vault folder cannot be guessed at on another computer.
+pub fn bound_kek_of(stretched: &[u8; 32], computer: &Key32) -> Result<Key32, VaultError> {
+    let both = Zeroizing::new([stretched.as_slice(), computer.as_bytes().as_slice()].concat());
+    hkdf(&both, "dv/slot/password-bound/v1")
+}
+
 /// Derive the password slot's key-encryption key.
 pub fn derive_kek(
     password: &str,
     salt: &[u8; 32],
     params: Argon2Params,
 ) -> Result<Key32, VaultError> {
-    let normalized = normalize(password);
-    let stretched = derive_raw(normalized.as_bytes(), salt, params)?;
-    hkdf(stretched.as_ref(), "dv/slot/password/v1")
+    let stretched = stretch(password, salt, params)?;
+    kek_of(&stretched)
 }
 
 /// Very common passwords and keyboard walks (Latin and Hebrew layouts).

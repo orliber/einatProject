@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 pub use agile::{encrypt, MIN_PASSWORD_CHARS};
 pub use docx::render;
 pub use look::{template_look, TemplateLook};
-pub use pdf::{render_pdf, PdfFonts};
+pub use pdf::{render_notice_pdf, render_pdf, PdfFonts};
 pub use template::{
     check_template, render_with_template, TemplateSummary, MARKER, MAX_TEMPLATE_BYTES,
 };
@@ -76,6 +76,15 @@ pub struct ScoreChart {
 pub struct ChartBar {
     pub label: String,
     pub value: f64,
+}
+
+/// A page that holds nothing about a child, for the parents or the institute (the protection
+/// layers, L6): a title, sections, and a line at the top of every page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Notice {
+    pub title: String,
+    pub sections: Vec<ReportSection>,
+    pub footer: String,
 }
 
 /// Everything that goes into the file.

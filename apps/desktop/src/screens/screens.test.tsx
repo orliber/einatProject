@@ -13,8 +13,9 @@ import type { CaseDetail } from "../ipc/generated/CaseDetail";
 configure({ asyncUtilTimeout: 5000 });
 vi.setConfig({ testTimeout: 30_000 });
 
-async function openApp(unlock = true, review = true) {
+async function openApp(unlock = true, review = true, prep?: (core: FakeCore) => void) {
   const core = new FakeCore();
+  prep?.(core);
   if (unlock) await core.handle("unlock", { password: "x" });
   // These tests walk every screen a request passes through, the review screen included, so
   // they run with "show me every request before sending" on (off by default; set here for the tests that read it).
@@ -35,6 +36,20 @@ async function openCase(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("main screens", () => {
+  it("says once what happened since the last opening, and stays closed when she closes it", async () => {
+    const { user, view } = await openApp(true, true, (core) => {
+      core.sinceLast = "מאז הכניסה הקודמת היו 2 ניסיונות כניסה שנכשלו. אם זו לא את, כדאי להחליף סיסמה.";
+    });
+    expect(await screen.findByText(/היו 2 ניסיונות כניסה שנכשלו/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "הבנתי" }));
+    expect(screen.queryByText(/היו 2 ניסיונות כניסה שנכשלו/)).not.toBeInTheDocument();
+    // The cases screen again (as after a visit to a case): still closed.
+    view.unmount();
+    render(<App />);
+    expect(await screen.findByRole("button", { name: /בתיק של נועם$/ })).toBeInTheDocument();
+    expect(screen.queryByText(/היו 2 ניסיונות כניסה שנכשלו/)).not.toBeInTheDocument();
+  });
+
   it("the lock screen passes the accessibility check", async () => {
     const { view } = await openApp(false);
     expect(await screen.findByLabelText("סיסמה")).toBeInTheDocument();

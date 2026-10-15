@@ -73,6 +73,9 @@ function StatusCell({ s }: { s: CaseStatus }) {
   );
 }
 
+/** The "since last time" line she closed this session, so it stays closed (L4). */
+let sinceDismissed: string | null = null;
+
 export function CasesScreen() {
   const { go, fail, status, notify } = useApp();
   const ai = useAi();
@@ -82,6 +85,11 @@ export function CasesScreen() {
   const trash = useQuery({ queryKey: ["trash"], queryFn: ipc.listTrash });
   const [folderId, setFolderIdState] = useState<string | null>(remembered.folder);
   const [inTrash, setInTrash] = useState(false);
+  const [sinceSeen, setSinceSeenState] = useState(sinceDismissed !== null && sinceDismissed === status.since_last);
+  const setSinceSeen = (seen: boolean) => {
+    sinceDismissed = seen ? status.since_last : null;
+    setSinceSeenState(seen);
+  };
   const [query, setQuery] = useState("");
   const [sort, setSortState] = useState<Sort>(remembered.sort);
   const [treeOpen, setTreeOpen] = useState(false);
@@ -259,6 +267,13 @@ export function CasesScreen() {
         )}
         {status.integrity_warning && (
           <ErrorLine error={`בדיקת השלמות של הכספת מצאה חריגה: ${status.integrity_warning}`} report />
+        )}
+        {status.since_last && !sinceSeen && (
+          // What happened while she was away (L4): said once, only when there is something.
+          <div className="backup-reminder" role="status">
+            <span className="grow">{status.since_last}</span>
+            <button type="button" className="btn btn-small" onClick={() => setSinceSeen(true)}>הבנתי</button>
+          </div>
         )}
         <BackupReminder />
         <RetentionNotice />

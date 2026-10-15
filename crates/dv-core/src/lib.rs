@@ -6,6 +6,7 @@
 
 mod activity;
 mod backup;
+mod binding;
 mod cases;
 mod consult;
 mod consultations;
@@ -14,6 +15,7 @@ mod drafts;
 mod export;
 mod failures;
 mod followup;
+pub use binding::{ComputerSeal, WindowsSeal};
 pub mod google;
 mod guides;
 mod history;
@@ -23,6 +25,7 @@ pub mod name_model;
 mod own;
 use name_model::NameHints;
 mod jobs;
+mod layers;
 mod readiness;
 mod retention;
 mod seal;
@@ -73,6 +76,7 @@ pub use jobs::{
     BackupRun, BackupTask, DocumentRead, DrillJob, Drilled, ExportJob, Exported, ReadJob,
     RestoreJob, Restored, SlotJob, SlotMade, UnlockJob, Unlocked,
 };
+pub use layers::SecurityLayer;
 pub use library::TRASH_DAYS;
 pub use name_model::{HintJob, HintsRead};
 pub use own::SectionModeView;
@@ -148,6 +152,8 @@ const MODEL_KEY: &str = "model";
 const ZDR_PREFIX: &str = "zdr/";
 const LOCK_KEY: &str = "lock_minutes";
 const FIRST_USE_KEY: &str = "first_use_day";
+/// When the printed recovery kit was last checked (D-076).
+const KIT_CHECKED_KEY: &str = "recovery_kit_checked_at";
 /// "Show me every request before it is sent" (round 26). On until she turns it off: the
 /// review screen stays the default until Einat confirms turning it off (D-062). The key of the
 /// earlier "only when suspicious" choice is not read.
@@ -304,6 +310,10 @@ impl CoreError {
                 "wrong_secret",
                 "הסיסמה או ערכת השחזור לא נכונות.".to_owned(),
             ),
+            CoreError::Vault(VaultError::OtherComputer) => (
+                "other_computer",
+                "הסיסמה פותחת את הכספת רק במחשב ובחשבון ה-Windows שבהם היא נקבעה. בעותק של תיקיית הכספת, וגם באותו מחשב אחרי התקנה מחדש של Windows או איפוס החשבון, נכנסים כאן עם ערכת השחזור, ואחר כך בוחרים סיסמה בהגדרות כדי שתעבוד גם כאן. אם המחשב הקודם אבד, אפשר גם לשחזר את הגיבוי עם הסיסמה.".to_owned(),
+            ),
             CoreError::Vault(VaultError::RecoveryKeyInvalid) => (
                 "recovery_invalid",
                 "ערכת השחזור לא תקינה. כדאי לבדוק שגיאות הקלדה.".to_owned(),
@@ -352,6 +362,7 @@ impl CoreError {
             CoreError::Locked => ErrorAction::Unlock,
             CoreError::Vault(
                 VaultError::WrongSecret
+                | VaultError::OtherComputer
                 | VaultError::RecoveryKeyInvalid
                 | VaultError::Policy(_)
                 | VaultError::AlreadyExists,
@@ -383,6 +394,8 @@ fn egress_action(e: &EgressError) -> ErrorAction {
             ErrorAction::settings("ai")
         }
         EgressError::Stopped => ErrorAction::settings("security"),
+        // The service's certificate is from an authority this version is not pinned to.
+        EgressError::Pinned => ErrorAction::settings("about"),
         EgressError::RateLimited => ErrorAction::Retry { after_seconds: 60 },
         EgressError::Offline | EgressError::Unavailable(_) => ErrorAction::retry(),
         // A timeout or a conflict passes by itself; any other refusal comes back the same.
@@ -416,6 +429,9 @@ fn egress_he(e: &EgressError, ai: &str) -> String {
             "החיבור המאובטח נכשל. ייתכן שתוכנה במחשב (למשל אנטי-וירוס) מיירטת תעבורה מוצפנת."
                 .to_owned()
         }
+        EgressError::Pinned => format!(
+            "החיבור ל-{ai} נעצר ושום דבר לא נשלח: התעודה שלו היא מגורם שהגרסה הזו של התוכנה לא סומכת עליו. צריך לעדכן את התוכנה (בהגדרות, באודות)."
+        ),
         EgressError::Stopped => "השליחה כבויה (עצירת חירום). אפשר להפעיל אותה מחדש במסך מצב האבטחה."
             .to_owned(),
         EgressError::TooLarge => "הבקשה גדולה מדי. כדאי לשלוח פחות חומרים בבת אחת.".to_owned(),
@@ -618,6 +634,9 @@ pub struct Core {
     /// Wall-clock time of the shell's last timer tick (sleep detection).
     last_tick: Option<SystemTime>,
     failed_unlocks: u32,
+    /// When this run's wrong passwords or kits were typed: the ones just before she got in
+    /// are her own typos, and the opening does not report them (review of stage 5, U5).
+    failure_times: Vec<Instant>,
     not_before: Option<Instant>,
     /// Since when a password or kit is being checked off the lock (an unlock, a new password
     /// or kit). One at a time: a second click never runs a second Argon2 in parallel, never
@@ -661,6 +680,15 @@ pub struct Core {
     section_nonces: HashMap<(String, String), String>,
     /// The name model's hints by text, so a material is read once (dropped on lock).
     hint_cache: HashMap<String, Vec<dv_privacy::NameHint>>,
+    /// The half of the password slot kept on this computer (D-076).
+    computer_seal: Arc<dyn ComputerSeal>,
+    /// The program's memory is kept out of the page file: `None` where the computer offers
+    /// no such thing, else whether the room for it was granted at start (D-047, L7).
+    memory_lock: Option<bool>,
+    /// The cases opened this session, so each opening is logged once (L3; dropped on lock).
+    opened_cases: HashSet<String>,
+    /// What this opening has to say about the time since the last one (L4; dropped on lock).
+    since_last: Option<String>,
 }
 
 impl std::fmt::Debug for Core {

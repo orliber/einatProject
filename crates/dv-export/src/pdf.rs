@@ -21,7 +21,7 @@ use aws_lc_rs::digest::{digest, SHA256, SHA384, SHA512};
 use aws_lc_rs::iv::FixedLength;
 use lopdf::{dictionary, Document, Object, Stream, StringFormat};
 
-use crate::{ExportError, Report, ScoreChart, MIN_PASSWORD_CHARS};
+use crate::{ExportError, Notice, Report, ScoreChart, MIN_PASSWORD_CHARS};
 
 const PAGE_W: f32 = 595.28;
 const PAGE_H: f32 = 841.89;
@@ -674,6 +674,31 @@ pub fn render_pdf(
     Ok(out)
 }
 
+/// A notice that holds nothing about a child (the protection layers page, L6): it opens
+/// without a password, and is print-only like the report, so the copy the parents or the
+/// institute keep is the one she made. It takes a [`Notice`], never a [`Report`], so a
+/// child's report cannot reach this path.
+pub fn render_notice_pdf(notice: &Notice, fonts: PdfFonts<'_>) -> Result<Vec<u8>, ExportError> {
+    let report = Report {
+        title: notice.title.clone(),
+        info: Vec::new(),
+        parts: vec![crate::ReportPart {
+            title: String::new(),
+            sections: notice.sections.clone(),
+        }],
+        tables: Vec::new(),
+        signature: Vec::new(),
+        confidentiality: notice.footer.clone(),
+        font: String::new(),
+    };
+    let mut doc = build(&report, fonts)?;
+    lock(&mut doc, "")?;
+    let mut out = Vec::new();
+    doc.save_to(&mut out)
+        .map_err(|e| ExportError::Package(e.to_string()))?;
+    Ok(out)
+}
+
 /// The document, not yet encrypted.
 fn build(report: &Report, fonts: PdfFonts<'_>) -> Result<Document, ExportError> {
     let regular = Font::load(fonts.regular)?;
@@ -1011,5 +1036,32 @@ mod tests {
         // file opens in a reader (pdfinfo, pdftoppm with -upw) was checked by hand.
         // Each export is its own file: the fingerprint identifies this one.
         assert_ne!(render_pdf(&r, fonts, "נהר-ענן-42-שקד-אורן").unwrap(), pdf);
+    }
+    #[test]
+    fn a_notice_opens_without_a_password_and_cannot_be_changed() {
+        let Some(font) = system_font() else {
+            eprintln!("no Hebrew font on this computer; skipped");
+            return;
+        };
+        let n = Notice {
+            title: "שכבות ההגנה".into(),
+            sections: vec![crate::ReportSection {
+                title: "הצפנה".into(),
+                paragraphs: vec!["כל התיקים שמורים מוצפנים (AES-256).".into()],
+            }],
+            footer: "נוצר בכספת האבחון".into(),
+        };
+        let fonts = PdfFonts {
+            regular: &font,
+            bold: None,
+        };
+        let pdf = render_notice_pdf(&n, fonts).unwrap();
+        assert!(pdf.starts_with(b"%PDF-2.0"));
+        // Print-only, like the report; a reader opens it with the empty password by itself
+        // (lopdf does so when it loads it).
+        let raw = String::from_utf8_lossy(&pdf);
+        assert!(raw.contains("/Encrypt") && !raw.contains("Producer") && !raw.contains("Author"));
+        let doc = Document::load_mem(&pdf).unwrap();
+        assert_eq!(doc.get_pages().len(), 1);
     }
 }

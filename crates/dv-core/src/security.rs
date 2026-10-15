@@ -5,7 +5,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{AppStatus, Core};
+use crate::layers::{self, SecurityLayer, SelfChecks};
+use crate::{AppStatus, Core, CoreError};
 
 /// `ok` – on and verified · `warn` – off or unknown, she should look · `info` – a fact.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -26,6 +27,10 @@ pub struct SecurityStatus {
     /// Requests the program may send per day, and the largest request, as the program enforces.
     pub daily_limit: u32,
     pub max_request_kb: u32,
+    /// The same, told as the ten layers of protection, checked now (L6).
+    pub layers: Vec<SecurityLayer>,
+    /// What depends on her: the disk, the cloud folder, the printed kit, the backup.
+    pub yours: Vec<SecurityLayer>,
 }
 
 fn item(key: &str, state: &str, detail: Option<String>) -> SecurityItem {
@@ -84,18 +89,71 @@ pub(crate) fn build(s: &AppStatus, send_stopped: bool) -> SecurityStatus {
         send_stopped,
         daily_limit: u32::try_from(dv_egress::DAILY_REQUESTS).unwrap_or(u32::MAX),
         max_request_kb: u32::try_from(dv_egress::MAX_BODY_BYTES / 1024).unwrap_or(u32::MAX),
+        layers: Vec::new(),
+        yours: Vec::new(),
     }
 }
 
+/// The printed kit is checked again after this many days.
+const KIT_CHECK_DAYS: i64 = 365;
+
 impl Core {
     pub fn security_status(&mut self) -> SecurityStatus {
-        build(&self.status(), dv_egress::is_stopped())
+        let checks = SelfChecks::run();
+        layers::stop_if_broken(checks);
+        let status = self.status();
+        let mut s = build(&status, dv_egress::is_stopped());
+        // The password opens the vault only on this computer (D-076).
+        let bound = self.binding_state();
+        s.items.insert(
+            1,
+            match bound {
+                "elsewhere" => item("computer_bound", "warn", Some(bound.to_owned())),
+                _ => item("computer_bound", bound, None),
+            },
+        );
+        // The vault's pages stay in RAM, never in the page file (D-047).
+        let memory = match self.memory_lock {
+            Some(true) => "ok",
+            Some(false) => "warn",
+            None => "info",
+        };
+        s.items.push(item("memory", memory, None));
+        // On another computer the printed kit is the way in: checked within a year, or a
+        // reminder (the days since the last check, when there was one).
+        if self.vault.is_some() {
+            let days = self
+                .kit_checked_at()
+                .map(|t| (crate::dates::unix_now() - t).max(0) / dv_domain::dates::DAY_SECS);
+            let fresh = days.is_some_and(|d| d < KIT_CHECK_DAYS);
+            s.items.insert(
+                2,
+                item("recovery_kit", on(fresh), days.map(|d| d.to_string())),
+            );
+        }
+        s.layers = layers::build(&s.items, checks, s.send_stopped, status.review_always);
+        let backup = self
+            .vault
+            .is_some()
+            .then(|| self.backup_status().ok())
+            .flatten()
+            .map(|b| (b.due, b.has_cases));
+        s.yours = layers::yours(&s.items, backup);
+        s
     }
 
     /// The emergency stop. Works while locked too: stopping must never need a password.
-    pub fn set_send_stopped(&mut self, stopped: bool) -> SecurityStatus {
+    /// Turning sending back on tries the gate and the sending rules first, and is refused
+    /// while either fails, so it is never open for a moment (review of stage 5, U1).
+    pub fn set_send_stopped(&mut self, stopped: bool) -> Result<SecurityStatus, CoreError> {
+        if !stopped && layers::stop_if_broken(SelfChecks::run()) {
+            return Err(CoreError::Refused(
+                "אי אפשר להפעיל שליחה מחדש: השער או כללי השליחה לא עברו את הבדיקה עכשיו. כדאי לפנות לאור."
+                    .to_owned(),
+            ));
+        }
         dv_egress::set_stopped(stopped);
-        self.security_status()
+        Ok(self.security_status())
     }
 }
 
@@ -122,6 +180,7 @@ mod tests {
             practitioner: Vec::new(),
             review_always: true,
             screen_protection: true,
+            since_last: None,
         }
     }
 

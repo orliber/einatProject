@@ -14,6 +14,15 @@ const CLOSING_SECTIONS: &[&str] = &[
 impl Core {
     pub fn case_detail(&mut self, case_id: &str) -> Result<CaseDetail, CoreError> {
         let structure = structure_for(self.vault_ref()?, case_id)?;
+        // Each case she opens is in the log once a session (L3; regulation 10's access record).
+        if !self.opened_cases.contains(case_id) {
+            self.vault_mut()?.record(
+                AuditEvent::CaseOpened,
+                Some(case_id),
+                &serde_json::json!({}),
+            )?;
+            self.opened_cases.insert(case_id.to_owned());
+        }
         // What she usually changes in the AI's wording (ST9); only with the profile on.
         let habits = if style::style_model(self.vault_ref()?)?.is_some() {
             self.style_habits().unwrap_or_default()

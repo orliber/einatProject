@@ -222,7 +222,7 @@ fn remember_crashes(path: PathBuf) {
 fn main() {
     // Before anything holds case data: room to lock the vault's memory in RAM, and no crash
     // dump with the heap in it (D-047). The document worker below gets the same.
-    let _ = win_platform::harden_process();
+    let hardening = win_platform::harden_process();
     // A document worker: the same binary, started by the core for one file.
     if std::env::args().nth(1).as_deref() == Some(dv_ingest::worker::WORKER_ARG) {
         std::process::exit(dv_ingest::worker::worker_main());
@@ -235,7 +235,7 @@ fn main() {
     }
 
     let result = tauri::Builder::default()
-        .setup(|app| {
+        .setup(move |app| {
             let data = app.path().app_local_data_dir()?;
             remember_crashes(data.join(CRASH_LOG));
             // The window's own crash reports (WebView2 keeps them under its data folder) could
@@ -247,7 +247,9 @@ fn main() {
             // The installer of the last update has done its work.
             dv_core::update::clean(&dir);
             let models = data.join("models");
-            let mut core = Core::new(&dir).with_models_dir(models.clone());
+            let mut core = Core::new(&dir)
+                .with_models_dir(models.clone())
+                .with_memory_lock(cfg!(windows), hardening.lock_quota_mib.is_some());
             if let Ok(exe) = std::env::current_exe() {
                 core = core
                     .with_ingest_worker(exe.clone())
@@ -350,6 +352,7 @@ fn main() {
             readiness,
             confirm_readiness,
             security_status,
+            export_security_pdf,
             set_send_stopped,
             usage_summary,
             set_monthly_cap,

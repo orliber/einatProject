@@ -25,6 +25,7 @@ const INTERNAL_SETTINGS: &[&str] = &[
     "backup_last_check_at",
     "secret_changed_at",
     "first_use_day",
+    crate::KIT_CHECKED_KEY,
     // An open edit kept at lock and given back at the next entry.
     "unsaved_edit",
     REVIEWED_KEY,
@@ -77,6 +78,11 @@ fn describe(
         "lock" => ("access", "נעילה".to_owned(), false),
         "password_changed" => ("security", "הסיסמה הוחלפה".to_owned(), false),
         "recovery_key_rotated" => ("security", "נוצרה ערכת שחזור חדשה".to_owned(), false),
+        "password_bound" => (
+            "security",
+            "הסיסמה נקשרה למחשב הזה (במחשב אחר היא לא פותחת את הכספת)".to_owned(),
+            false,
+        ),
         "google_recovery_on" => (
             "security",
             "הופעלה כניסה עם גוגל למקרה ששוכחים את הסיסמה".to_owned(),
@@ -88,7 +94,7 @@ fn describe(
             true,
         ),
         "case_created" => ("case", "תיק נפתח".to_owned(), false),
-        "case_opened" => ("case", "תיק נפתח לצפייה".to_owned(), false),
+        "case_opened" => ("case", "פתחת את התיק".to_owned(), false),
         "case_trashed" => ("case", "תיק הועבר לסל המחזור".to_owned(), false),
         "case_restored" => ("case", "תיק הוחזר מסל המחזור".to_owned(), false),
         "case_deleted" => ("case", "תיק נמחק לצמיתות".to_owned(), true),
@@ -269,6 +275,7 @@ mod tests {
             "lock",
             "password_changed",
             "recovery_key_rotated",
+            "password_bound",
             "google_recovery_on",
             "google_recovery_off",
             "case_created",

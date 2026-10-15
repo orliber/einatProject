@@ -110,6 +110,7 @@ export type Commands = {
   export_letter: { args: { caseId: string; audience: string; password: string | null }; returns: string };
   export_pdf: { args: { caseId: string; password: string }; returns: string };
   export_report: { args: { caseId: string; password: string | null }; returns: string };
+  export_security_pdf: { args: undefined; returns: string };
   find_name_matches: { args: { caseId: string | null; names: Array<string> }; returns: Array<NameMatch> };
   folders: { args: undefined; returns: Array<Folder> };
   follow_up: { args: { caseId: string }; returns: FollowUpView | null };

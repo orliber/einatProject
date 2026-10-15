@@ -215,6 +215,22 @@
   cursor: pointer;
   font-weight: 600;
 }
+.layers-what {
+  margin: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.layers-what dt {
+  font-weight: 700;
+}
+.layers-what dd {
+  margin: 0;
+}
+.layer.info .layer-mark {
+  background: var(--sand);
+  color: var(--ink-muted);
+}
 @media (max-width: 760px) {
   .layers {
     grid-template-columns: 1fr;
