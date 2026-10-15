@@ -92,3 +92,54 @@ fn the_supervisors_lines_are_printed_under_her_signature() {
     let s: ReportSettings = serde_json::from_str(old).unwrap();
     assert!(s.supervisor.is_empty());
 }
+
+#[test]
+fn the_letter_is_written_from_the_recommendations_she_marked() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    core.add_own_paragraph(&case, "recommendations", "המלצה על ריפוי בעיסוק פעם בשבוע.")
+        .unwrap();
+    core.add_own_paragraph(&case, "recommendations", "המלצה על הדרכת הורים.")
+        .unwrap();
+    let ids: Vec<String> = core
+        .case_detail(&case)
+        .unwrap()
+        .sections
+        .into_iter()
+        .find(|s| s.key == "recommendations")
+        .unwrap()
+        .paragraphs
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+    assert_eq!(ids.len(), 2);
+    // Only an approved recommendation of the case can be marked.
+    assert!(core
+        .set_letter_recommendations(&case, Some(vec!["not-a-paragraph".into()]))
+        .is_err());
+    core.set_letter_recommendations(&case, Some(vec![ids[1].clone()]))
+        .unwrap();
+
+    let p = core.prepare_letter(&case, "school", "").unwrap();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({
+        "reply": "הנה",
+        "paragraphs": [{ "text": "מומלצת הדרכת הורים.", "source_refs": [] }],
+        "questions": [], "missing": [], "contradictions": [],
+    })));
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    let sent = fake.sent.lock().unwrap().clone();
+    assert!(sent[0].contains("הדרכת הורים"), "{}", sent[0]);
+    assert!(!sent[0].contains("ריפוי בעיסוק"), "{}", sent[0]);
+
+    // Back to all of them.
+    core.set_letter_recommendations(&case, None).unwrap();
+    let p = core.prepare_letter(&case, "school", "").unwrap();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({
+        "reply": "הנה",
+        "paragraphs": [{ "text": "מומלץ.", "source_refs": [] }],
+        "questions": [], "missing": [], "contradictions": [],
+    })));
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    let sent = fake.sent.lock().unwrap().clone();
+    assert!(sent.last().unwrap().contains("ריפוי בעיסוק"));
+}

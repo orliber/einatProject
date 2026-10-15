@@ -57,6 +57,16 @@ pub(crate) async fn set_dsm_severity(
     .await
 }
 
+/// The approved recommendations the letters are written from (round 44); `None`: all.
+#[tauri::command]
+pub(crate) async fn set_letter_recommendations(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    ids: Option<Vec<String>>,
+) -> Res<()> {
+    with_core(&state, move |c| c.set_letter_recommendations(&case_id, ids)).await
+}
+
 #[tauri::command]
 pub(crate) async fn delete_case(state: tauri::State<'_, AppState>, case_id: String) -> Res<()> {
     with_core(&state, move |c| c.delete_case(&case_id)).await

@@ -15,6 +15,8 @@ type Audience = "parents" | "school";
 /**
  * EX-4: a short letter to the parents or the school, drafted from the approved report through
  * the same review screen and gate. The school letter is written from the recommendations only.
+ * Round 44: she marks which approved recommendations go into the letters (all, until she
+ * unmarks one); the mark is kept with the case.
  */
 export function LetterCard({ api }: { api: CaseApi }) {
   const { fail, status } = useApp();
@@ -59,6 +61,14 @@ export function LetterCard({ api }: { api: CaseApi }) {
   }
 
   const approved = paragraphs.filter((p) => p.status === "approved").length;
+  const recommendations = api.detail.sections.find((s) => s.key === "recommendations")?.paragraphs.filter((p) => p.status === "approved") ?? [];
+  const picked = api.detail.meta.letter_recommendations;
+  const isPicked = (id: string) => !picked || picked.includes(id);
+  const pick = (id: string, on: boolean) => void act(async () => {
+    const next = recommendations.map((r) => r.id).filter((r) => (r === id ? on : isPicked(r)));
+    await ipc.setLetterRecommendations(api.caseId, next.length === recommendations.length ? null : next);
+    await api.reload();
+  });
 
   return (
     <section className="card finish-file letter-card">
@@ -70,6 +80,17 @@ export function LetterCard({ api }: { api: CaseApi }) {
         <label className="row small"><input type="radio" checked={audience === "parents"} onChange={() => setAudience("parents")} /> להורים</label>
         <label className="row small"><input type="radio" checked={audience === "school"} onChange={() => setAudience("school")} /> לצוות החינוכי</label>
       </div>
+      {recommendations.length > 1 && (
+        <fieldset className="stack letter-picks">
+          <legend className="small">ההמלצות שנכנסות למכתב</legend>
+          {recommendations.map((r) => (
+            <label key={r.id} className="row small letter-pick">
+              <input type="checkbox" checked={isPicked(r.id)} disabled={busy} onChange={(e) => pick(r.id, e.target.checked)} />
+              <span>{r.text}</span>
+            </label>
+          ))}
+        </fieldset>
+      )}
       <input className="input" placeholder="מה עוד חשוב שיהיה במכתב? (לא חובה)" value={note} onChange={(e) => setNote(e.target.value)} />
       <button type="button" className="btn" disabled={busy}
         onClick={() => void act(async () => {

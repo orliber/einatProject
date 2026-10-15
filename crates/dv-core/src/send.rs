@@ -264,11 +264,16 @@ impl Core {
                     Some(l) => l.written_from().contains(&key),
                     None => key != section_key && !DERIVED_SECTIONS.contains(&key),
                 };
+                // The recommendations she marked for the letters (round 44), when she marked.
+                let marked = |key: &str, id: &str| match (&letter, &meta.letter_recommendations) {
+                    (Some(_), Some(ids)) if key == "recommendations" => ids.iter().any(|i| i == id),
+                    _ => true,
+                };
                 for s in structure.sections().filter(|s| wanted(&s.key)) {
                     let text: Vec<String> = v
                         .drafts(case_id, &s.key)?
                         .into_iter()
-                        .filter(|d| d.status == DraftStatus::Approved)
+                        .filter(|d| d.status == DraftStatus::Approved && marked(&s.key, &d.id))
                         .map(|d| d.text_tagged)
                         .collect();
                     if !text.is_empty() {

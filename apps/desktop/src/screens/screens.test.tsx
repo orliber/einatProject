@@ -209,6 +209,31 @@ describe("main screens", () => {
     expect(await screen.findByRole("dialog", { name: "הדוח מוכן" })).not.toHaveTextContent(/סיסמה/);
   });
 
+  it("the letter is written from the recommendations she marks", async () => {
+    const letters: unknown[] = [];
+    const { user, core } = await openApp();
+    const noam = ((await core.handle("list_cases", {})) as CaseSummary[]).find((c) => c.child_name === "נועם") ?? ({} as never);
+    await core.handle("add_own_paragraph", { caseId: noam.id, sectionKey: "recommendations", text: "המלצה על ריפוי בעיסוק." });
+    await core.handle("add_own_paragraph", { caseId: noam.id, sectionKey: "recommendations", text: "המלצה על הדרכת הורים." });
+    mockIPC((cmd, args) => {
+      if (cmd === "set_letter_recommendations") letters.push(args);
+      return core.handle(cmd, args);
+    });
+    await openCase(user);
+    await user.click(screen.getByRole("button", { name: /הוצאת הדוח/ }));
+    const picks = await screen.findByRole("group", { name: "ההמלצות שנכנסות למכתב" });
+    const ot = within(picks).getByRole("checkbox", { name: "המלצה על ריפוי בעיסוק." });
+    expect(ot).toBeChecked();
+    await user.click(ot);
+    await waitFor(() => expect(letters).toHaveLength(1));
+    expect(letters[0]).toMatchObject({ ids: [expect.any(String)] });
+    await waitFor(() => expect(within(picks).getByRole("checkbox", { name: "המלצה על ריפוי בעיסוק." })).not.toBeChecked());
+    expect(within(picks).getByRole("checkbox", { name: "המלצה על הדרכת הורים." })).toBeChecked();
+    // Marked again: all of them, as before.
+    await user.click(within(picks).getByRole("checkbox", { name: "המלצה על ריפוי בעיסוק." }));
+    await waitFor(() => expect(letters[1]).toEqual({ caseId: noam.id, ids: null }));
+  });
+
   it("the page is Hebrew and right-to-left", async () => {
     await openApp();
     await screen.findByRole("button", { name: /בתיק של נועם$/ });

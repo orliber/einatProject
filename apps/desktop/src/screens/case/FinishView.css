@@ -110,3 +110,19 @@
   font-size: var(--text-xs);
   color: var(--ink-muted);
 }
+
+/* Round 44: the recommendations she marks for the letters. */
+.letter-picks {
+  margin: 0;
+  padding: 8px 12px;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+.letter-pick {
+  align-items: flex-start;
+  gap: 8px;
+}
+.letter-pick span {
+  white-space: pre-wrap;
+}

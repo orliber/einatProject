@@ -26,4 +26,9 @@ guides?: { [key in string]: string },
 /**
  * The DSM-5 severity she set (round 43), for the DSM section. Her decision, never drafted.
  */
-dsm_severity?: DsmSeverity, };
+dsm_severity?: DsmSeverity, 
+/**
+ * The approved recommendations she marked for the letters (round 44), by paragraph id.
+ * Absent: every approved recommendation.
+ */
+letter_recommendations?: Array<string>, };

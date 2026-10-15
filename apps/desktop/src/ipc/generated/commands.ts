@@ -194,6 +194,7 @@ export type Commands = {
   set_dsm_severity: { args: { caseId: string; social: number | null; restricted: number | null }; returns: null };
   set_identities: { args: { caseId: string; identities: Array<IdentityInput> }; returns: Array<Identity> };
   set_input_sections: { args: { caseId: string; inputId: string; sections: Array<string> }; returns: null };
+  set_letter_recommendations: { args: { caseId: string; ids: Array<string> | null }; returns: null };
   set_lock_minutes: { args: { minutes: number }; returns: null };
   set_model: { args: { model: string }; returns: null };
   set_monthly_cap: { args: { capUsd: number | null }; returns: null };

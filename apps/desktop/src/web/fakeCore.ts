@@ -900,6 +900,13 @@ export class FakeCore {
         if (!Object.keys(guides).length) delete c.meta.guides;
         return null;
       }
+      case "set_letter_recommendations": {
+        const c = this.find(a.caseId);
+        const ids = a.ids as string[] | null;
+        c.meta = { ...c.meta, letter_recommendations: ids ?? [] };
+        if (ids === null) delete c.meta.letter_recommendations;
+        return null;
+      }
       case "set_dsm_severity": {
         const c = this.find(a.caseId);
         const level = (v: unknown) => (v === null || v === undefined ? null : Number(v));

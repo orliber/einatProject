@@ -42,6 +42,7 @@ impl Core {
         // A case's own guide lines are written in it, one section at a time.
         meta.guides = None;
         meta.dsm_severity = None;
+        meta.letter_recommendations = None;
         let v = self.vault_mut()?;
         let id = v.create_case(&meta)?;
         v.set_identities(&id, &identities)?;
@@ -80,6 +81,7 @@ impl Core {
             template: None,
             guides: None,
             dsm_severity: None,
+            letter_recommendations: None,
         };
         let id = self.create_case(
             meta,
@@ -111,6 +113,34 @@ impl Core {
         meta.template = kept.template;
         meta.guides = kept.guides;
         meta.dsm_severity = kept.dsm_severity;
+        meta.letter_recommendations = kept.letter_recommendations;
+        self.vault_mut()?.update_case_meta(case_id, &meta)?;
+        self.forget_pending(case_id);
+        Ok(())
+    }
+
+    /// The approved recommendations the letters are written from (round 44): the paragraph
+    /// ids she marked, or `None` for all of them. An id that is not an approved
+    /// recommendation of the case is refused.
+    pub fn set_letter_recommendations(
+        &mut self,
+        case_id: &str,
+        ids: Option<Vec<String>>,
+    ) -> Result<(), CoreError> {
+        let v = self.vault_ref()?;
+        if let Some(ids) = &ids {
+            let approved: Vec<String> = v
+                .drafts(case_id, "recommendations")?
+                .into_iter()
+                .filter(|d| d.status == DraftStatus::Approved)
+                .map(|d| d.id)
+                .collect();
+            if ids.iter().any(|id| !approved.contains(id)) {
+                return Err(CoreError::NotFound("ההמלצה".to_owned()));
+            }
+        }
+        let mut meta = v.case_meta(case_id)?;
+        meta.letter_recommendations = ids;
         self.vault_mut()?.update_case_meta(case_id, &meta)?;
         self.forget_pending(case_id);
         Ok(())
