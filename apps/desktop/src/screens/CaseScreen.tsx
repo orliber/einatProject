@@ -66,6 +66,8 @@ export interface CaseApi {
 }
 
 let jobSeq = 0;
+/** "דף מלא", kept while the program runs. */
+let fullPageOn = false;
 /** "לנסות שוב" for a failure in the strip, by its id: memory only, so it survives leaving the
  *  case and coming back (as the strip does), but not a reload. */
 const retries = new Map<number, () => void>();
@@ -113,6 +115,13 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const [focus, setFocus] = useState<{ key: string; at: number } | null>(null);
   const [searching, setSearching] = useState(false);
   const [throwing, setThrowing] = useState(false);
+  // Round 42: "full page" hides the contents beside the report, for every case until she
+  // turns it off (memory only).
+  const [fullPage, setFullPageState] = useState(fullPageOn);
+  const setFullPage = (on: boolean) => {
+    fullPageOn = on;
+    setFullPageState(on);
+  };
 
   // Sections written side by side reload at about the same time: an answer that arrives
   // after a newer one is older, and never puts back a section that is already there.
@@ -359,19 +368,19 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     stage === 0 || stage === 3
       ? null
       : !detail.meta.consent
-        ? { title: `לפני שליחה ל-${ai} צריך לרשום את הסכמת ההורים.`, note: "אפשר להמשיך לאסוף חומרים בינתיים.", action: "רישום ההסכמה", run: () => go({ name: "case", id: caseId, view: "details" }) }
+        ? { title: `לפני שליחה ל-${ai} צריך לרשום את הסכמת ההורים.`, note: "", action: "רישום ההסכמה", run: () => go({ name: "case", id: caseId, view: "details" }) }
         : stage === 1
           ? hasMaterials
-            ? { title: fed.length ? `יש חומר ל-${fed.length} סעיפים` : `${detail.inputs.length} חומרים בתיק`, note: unsorted > 0 ? `${ai} ימיין את החומרים (אחרי הסתרה) לסעיפים.` : "הבא: טיוטה לכל סעיף, ואת מאשרת.", action: "לכתיבת הדוח ←", run: () => void toWriting() }
+            ? { title: fed.length ? `יש חומר ל-${fed.length} סעיפים` : `${detail.inputs.length} חומרים בתיק`, note: "", action: "לכתיבת הדוח ←", run: () => void toWriting() }
             : null
           : pendingCount > 0
-            ? { title: pendingCount === 1 ? "טיוטה אחת מחכה לאישור שלך" : `${pendingCount} פסקאות מחכות לאישור שלך`, note: "רק מה שאישרת נכנס לקובץ.", action: `לטיוטה ב"${pending[0]?.title ?? ""}" ←`, run: () => toReport(pending[0]?.key) }
+            ? { title: pendingCount === 1 ? "טיוטה אחת מחכה לאישור שלך" : `${pendingCount} פסקאות מחכות לאישור שלך`, note: "", action: `לטיוטה ב"${pending[0]?.title ?? ""}" ←`, run: () => toReport(pending[0]?.key) }
             : unsorted > 0
-              ? { title: unsorted === 1 ? "חומר אחד עוד לא מוין לסעיפים" : `${unsorted} חומרים עוד לא מוינו לסעיפים`, note: `${ai} ימיין אותם (אחרי הסתרה) לסעיפים.`, action: "מיון החומרים", run: () => void startSort() }
+              ? { title: unsorted === 1 ? "חומר אחד עוד לא מוין לסעיפים" : `${unsorted} חומרים עוד לא מוינו לסעיפים`, note: "", action: "מיון החומרים", run: () => void startSort() }
               : undrafted.length > 0
-                ? { title: `${undrafted.length} סעיפים עם חומר עוד לא נכתבו`, note: "כל סעיף נכתב רק מהחומרים שלו, ואת רואה מה יוצא.", action: `✦ לכתוב את ${undrafted.length} הסעיפים`, run: writeAll }
+                ? { title: `${undrafted.length} סעיפים עם חומר עוד לא נכתבו`, note: "", action: `✦ לכתוב את ${undrafted.length} הסעיפים`, run: writeAll }
                 : fed.length > 0 && fed.every((s) => s.approved)
-                  ? { title: "כל הסעיפים שיש להם חומר אושרו", note: "הדוח יוצא כ-Word מוגן בסיסמה.", action: "להוצאת הדוח ←", run: () => go({ name: "case", id: caseId, view: "finish" }) }
+                  ? { title: "כל הסעיפים שיש להם חומר אושרו", note: "", action: "להוצאת הדוח ←", run: () => go({ name: "case", id: caseId, view: "finish" }) }
                   : null;
   // A section shows its own job, and so does the report page; the rest run in the strip.
   // While the whole report is written, its one line stands for its requests.
@@ -409,6 +418,11 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
           ))}
         </nav>
         {status.demo_mode && <span className="chip chip-sand" title="לא הוגדר מפתח API בהגדרות">מצב הדגמה</span>}
+        {stage === 2 && (
+          <button type="button" className="btn" aria-pressed={fullPage} title="להסתיר את תוכן הדוח שבצד" onClick={() => setFullPage(!fullPage)}>
+            {fullPage ? "עם תוכן הדוח" : "דף מלא"}
+          </button>
+        )}
         <button type="button" className="btn" onClick={() => setSearching(true)}>חיפוש</button>
         <button type="button" className="btn" onClick={() => go({ name: "consult", caseId })}>התייעצות</button>
         <ActionsMenu items={more} label="עוד פעולות: פרטים ושמות, כתיבת כל הדוח, נעילה" />
@@ -460,7 +474,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
       )}
 
       <div className="case-body">
-        {stage === 2 && <Contents detail={detail} jobs={jobs} view={view} onOpen={(key) => toReport(key)} onWriteAll={writeAll} />}
+        {stage === 2 && !fullPage && <Contents detail={detail} jobs={jobs} view={view} onOpen={(key) => toReport(key)} onWriteAll={writeAll} />}
         <div className="work">
           {view === "materials" && <MaterialsView api={api} />}
           {view === "details" && <DetailsView api={api} />}
@@ -487,7 +501,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         <footer className="next-bar" aria-label="הצעד הבא">
           <div className="grow stack" style={{ gap: 2 }}>
             <b className="next-title">{next.title}</b>
-            <span className="small muted">{next.note}</span>
+            {next.note && <span className="small muted">{next.note}</span>}
           </div>
           <button type="button" className="btn btn-primary btn-big" onClick={next.run}>{next.action}</button>
         </footer>

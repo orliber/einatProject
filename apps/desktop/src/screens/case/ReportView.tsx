@@ -65,8 +65,6 @@ export function ReportView({ api, focus }: { api: CaseApi; onWriteAll: () => voi
   return (
     <div className="view">
       <div className="report-desk">
-        {/* The page is the whole screen (D-036); one quiet line says how to work on it. */}
-        <p className="report-hint">לחיצה על פסקה: עריכה · ✦: שינוי עם AI · F1: קיצורים{look.fromTemplate && " · בגופן התבנית שלך"}</p>
         <article className="a4" style={look.style} aria-label="הדוח, כמו בקובץ">
           <header className="a4-header">{settings?.confidentiality}</header>
           <h1 className="a4-title">{settings?.title ?? "דוח אבחון פסיכולוגי"}</h1>
@@ -304,7 +302,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
     editing?.id === p.id ? (
       <div key={p.id}>{editor}</div>
     ) : (
-      <div key={p.id} className={paraPop === p.id || deleting === p.id || history === p.id ? "a4-para is-active" : "a4-para"}>
+      <div key={p.id} className={`a4-para${p.status === "proposed" ? " is-proposed" : ""}${paraPop === p.id || deleting === p.id || history === p.id ? " is-active" : ""}`}>
         <p className={p.by_ai ? "a4-p a4-editable" : "a4-p a4-editable a4-own"} tabIndex={0} title={note ?? "לחיצה לעריכה"}
           aria-label={`${p.status === "proposed" ? "טיוטה שממתינה לאישור" : "פסקה"}${p.by_ai ? " (AI)" : ""}: ${p.text}`}
           aria-describedby={`keys-${s.key}`}

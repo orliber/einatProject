@@ -148,6 +148,17 @@ describe("main screens", () => {
     expect(req.replaces).toBe("p-new");
   });
 
+  it("'full page' hides the contents beside the report, and brings it back (round 42)", async () => {
+    const { user } = await openApp();
+    await openCase(user);
+    expect(screen.getByRole("complementary", { name: "תוכן הדוח" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "דף מלא" }));
+    expect(screen.queryByRole("complementary", { name: "תוכן הדוח" })).toBeNull();
+    expect(screen.getByRole("button", { name: "עם תוכן הדוח" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "עם תוכן הדוח" }));
+    expect(screen.getByRole("complementary", { name: "תוכן הדוח" })).toBeInTheDocument();
+  });
+
   it("the report page passes the accessibility check", async () => {
     const { user, view } = await openApp();
     await openCase(user);
