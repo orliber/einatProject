@@ -18,6 +18,7 @@ use zeroize::Zeroizing;
 
 pub mod google;
 pub mod name_model;
+mod pinning;
 pub mod providers;
 pub mod sse;
 pub mod update;
@@ -71,6 +72,10 @@ pub enum EgressError {
     LocalUnavailable,
     #[error("the secure connection failed; something on this computer may be intercepting encrypted traffic")]
     Tls,
+    /// The service's certificate is valid but from an authority this version is not pinned
+    /// to (D-077): a new version of the program is needed.
+    #[error("the service's certificate is not from an authority this version trusts; an update is needed")]
+    Pinned,
     #[error("unexpected answer from the service: {0}")]
     Protocol(String),
     #[error("sending is switched off (emergency stop)")]
@@ -244,30 +249,28 @@ impl RateLimit {
     }
 }
 
+/// TLS 1.3 only, the Mozilla roots built into the program (never the computer's own store),
+/// and for the AI service only the few roots it is pinned to (D-077). Anything that cannot be
+/// set up trusts nothing at all, so no connection opens (fail closed).
 pub(crate) fn tls_config() -> rustls::ClientConfig {
-    let roots = rustls::RootCertStore {
-        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
-    };
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
-    let builder = rustls::ClientConfig::builder_with_provider(provider);
-    match builder.with_protocol_versions(&[&rustls::version::TLS13]) {
-        Ok(b) => b.with_root_certificates(roots).with_no_client_auth(),
-        // Unreachable with the aws-lc provider; fall back to the provider's safe defaults.
-        Err(_) => rustls::ClientConfig::builder_with_provider(Arc::new(
-            rustls::crypto::aws_lc_rs::default_provider(),
-        ))
-        .with_safe_default_protocol_versions()
-        .map(|b| {
-            b.with_root_certificates(rustls::RootCertStore {
-                roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
-            })
-            .with_no_client_auth()
-        })
-        .unwrap_or_else(|_| {
-            rustls::ClientConfig::builder()
-                .with_root_certificates(rustls::RootCertStore::empty())
-                .with_no_client_auth()
-        }),
+    let builder = rustls::ClientConfig::builder_with_provider(Arc::clone(&provider));
+    let Ok(builder) = builder.with_protocol_versions(&[&rustls::version::TLS13]) else {
+        // Unreachable with the aws-lc provider.
+        return rustls::ClientConfig::builder()
+            .with_root_certificates(rustls::RootCertStore::empty())
+            .with_no_client_auth();
+    };
+    match pinning::PinnedVerifier::new(&provider) {
+        // A verifier of the program's own: the Mozilla roots with the pins on top. Nothing is
+        // loosened (the name `dangerous` is rustls's for any custom verifier).
+        Some(v) => builder
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(v))
+            .with_no_client_auth(),
+        None => builder
+            .with_root_certificates(rustls::RootCertStore::empty())
+            .with_no_client_auth(),
     }
 }
 
@@ -288,7 +291,11 @@ pub(crate) fn build_client() -> Result<reqwest::blocking::Client, EgressError> {
 
 pub(crate) fn send_error(e: &reqwest::Error) -> EgressError {
     let text = format!("{e:?}").to_lowercase();
-    if text.contains("certificate") || text.contains("tls") || text.contains("handshake") {
+    let tls = text.contains("certificate") || text.contains("tls") || text.contains("handshake");
+    // The refusal is told apart by its mark, or by the flag the verifier set for it.
+    if text.contains(pinning::PIN_MARK) || (tls && pinning::take_pin_refused()) {
+        EgressError::Pinned
+    } else if tls {
         EgressError::Tls
     } else {
         EgressError::Offline

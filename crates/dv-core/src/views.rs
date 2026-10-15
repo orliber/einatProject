@@ -102,6 +102,9 @@ pub struct AppStatus {
     /// Screenshots and screen sharing show a blank window (D-037). Always on while the vault
     /// is locked; she may turn it off for the open vault in settings.
     pub screen_protection: bool,
+    /// Said once after opening, when there is something to say: wrong passwords typed since
+    /// the last opening (L4).
+    pub since_last: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

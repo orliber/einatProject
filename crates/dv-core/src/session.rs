@@ -6,6 +6,32 @@ use super::*;
 /// long is taken as lost, so the vault can never stay unopenable.
 const SECRET_WORK_STALE: Duration = Duration::from_secs(120);
 
+/// Wrong passwords or kits typed since the last opening, kept across a restart of the program
+/// (a number only; the vault is locked, so it cannot hold it). Read and removed at the next
+/// opening, which then says so (L4).
+const FAILURES_FILE: &str = "unlock.failures";
+
+fn failures_on_disk(dir: &Path) -> u32 {
+    std::fs::read_to_string(dir.join(FAILURES_FILE))
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+/// What the opening says, only when there is something to say.
+fn since_last_text(failed: u32) -> Option<String> {
+    match failed {
+        0 => None,
+        1 => Some(
+            "מאז הכניסה הקודמת היה ניסיון כניסה אחד שנכשל. אם זו לא את, כדאי להחליף סיסמה."
+                .to_owned(),
+        ),
+        n => Some(format!(
+            "מאז הכניסה הקודמת היו {n} ניסיונות כניסה שנכשלו. אם זו לא את, כדאי להחליף סיסמה."
+        )),
+    }
+}
+
 impl Core {
     /// `dir` is the vault folder (the shell passes the OS local-app-data folder).
     #[must_use]
@@ -45,7 +71,19 @@ impl Core {
             hint_cache: HashMap::new(),
             section_nonces: HashMap::new(),
             computer_seal: Arc::new(WindowsSeal),
+            memory_lock: None,
+            opened_cases: HashSet::new(),
+            since_last: None,
         }
+    }
+
+    /// What the shell managed at start (D-047, L7): `offered` where the computer can lock the
+    /// program's memory in RAM, `locked` when the room for it was granted. Shown as it is on
+    /// the security page.
+    #[must_use]
+    pub fn with_memory_lock(mut self, offered: bool, locked: bool) -> Self {
+        self.memory_lock = offered.then_some(locked);
+        self
     }
 
     /// Read documents in a separate worker process (the app passes its own binary).
@@ -204,6 +242,7 @@ impl Core {
                 .vault
                 .as_ref()
                 .is_none_or(|v| v.setting(SCREEN_KEY).ok().flatten().as_deref() != Some("0")),
+            since_last: self.since_last.clone(),
         }
     }
 
@@ -305,13 +344,17 @@ impl Core {
     ) -> Result<AppStatus, CoreError> {
         match result {
             Ok(mut vault) => {
-                if self.failed_unlocks > 0 {
+                // Also the tries before the program was last closed.
+                let failed = self.failed_unlocks.max(failures_on_disk(&self.dir));
+                if failed > 0 {
                     let _ = vault.record(
                         AuditEvent::UnlockFailed,
                         None,
-                        &serde_json::json!({ "count": self.failed_unlocks }),
+                        &serde_json::json!({ "count": failed }),
                     );
                 }
+                let _ = std::fs::remove_file(self.dir.join(FAILURES_FILE));
+                self.since_last = since_last_text(failed);
                 self.failed_unlocks = 0;
                 self.not_before = None;
                 self.rollback_warning = self
@@ -351,6 +394,8 @@ impl Core {
                     self.failed_unlocks += 1;
                     let wait = 2u64.saturating_pow(self.failed_unlocks.min(6)).min(60);
                     self.not_before = Some(Instant::now() + Duration::from_secs(wait));
+                    let on_disk = failures_on_disk(&self.dir).saturating_add(1);
+                    let _ = std::fs::write(self.dir.join(FAILURES_FILE), on_disk.to_string());
                 }
                 Err(e.into())
             }
@@ -393,6 +438,8 @@ impl Core {
         self.removed_input = None;
         self.hint_cache.clear();
         self.section_nonces.clear();
+        self.opened_cases.clear();
+        self.since_last = None;
         // The model's process held texts of this session in its memory: it ends with the lock.
         self.end_name_model();
         if let Some(v) = self.vault.take() {

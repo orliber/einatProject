@@ -188,6 +188,8 @@ export class FakeCore {
   private speed = "balanced";
   private reviewAlways = false;
   private screenProtection = true;
+  /** What the opening says about the time since the last one (L4), for tests. */
+  sinceLast: string | null = null;
   private template: TemplateView | null = null;
   private report: ReportSettings = {
     title: "דוח אבחון פסיכולוגי-התפתחותי",
@@ -425,7 +427,7 @@ export class FakeCore {
     return {
       vault_exists: this.vaultExists, unlocked: this.unlocked, disk_encryption: "on", cloud_synced_folder: null, fips_active: true,
       demo_mode: true, model: this.model, provider: providerOf(this.model).id, ai_name: this.ai, keys: [], speed: this.speed, integrity_warning: null, lock_minutes: this.lockMinutes, idle_lock_in: this.unlocked ? this.lockMinutes * 60 : null,
-      practitioner: this.practitioner, review_always: this.reviewAlways, screen_protection: !this.unlocked || this.screenProtection,
+      practitioner: this.practitioner, review_always: this.reviewAlways, screen_protection: !this.unlocked || this.screenProtection, since_last: this.unlocked ? this.sinceLast : null,
     };
   }
 
@@ -772,7 +774,7 @@ export class FakeCore {
         const ok = (key: string, state = "ok", detail: string | null = null) => ({ key, state, detail });
         return {
           items: [ok("encrypted"), ok("computer_bound"), ok("recovery_kit", "ok", "0"), ok("fips", "info"), ok("disk"), ok("cloud_folder"), ok("log_integrity"),
-            ok("auto_lock", "ok", "10"), ok("screen"), ok("send", this.sendStopped ? "warn" : "ok"), ok("isolation")],
+            ok("auto_lock", "ok", "10"), ok("screen"), ok("send", this.sendStopped ? "warn" : "ok"), ok("isolation"), ok("memory")],
           send_stopped: this.sendStopped, daily_limit: 400, max_request_kb: 2048,
         };
       }

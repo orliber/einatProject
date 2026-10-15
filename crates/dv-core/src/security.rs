@@ -96,6 +96,13 @@ impl Core {
         // The password opens the vault only on this computer (D-076).
         s.items
             .insert(1, item("computer_bound", self.binding_state(), None));
+        // The vault's pages stay in RAM, never in the page file (D-047).
+        let memory = match self.memory_lock {
+            Some(true) => "ok",
+            Some(false) => "warn",
+            None => "info",
+        };
+        s.items.push(item("memory", memory, None));
         // On another computer the printed kit is the way in: checked within a year, or a
         // reminder (the days since the last check, when there was one).
         if self.vault.is_some() {
@@ -141,6 +148,7 @@ mod tests {
             practitioner: Vec::new(),
             review_always: true,
             screen_protection: true,
+            since_last: None,
         }
     }
 

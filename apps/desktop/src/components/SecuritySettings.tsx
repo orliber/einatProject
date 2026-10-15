@@ -18,6 +18,7 @@ const LABELS: Record<string, (d: string | null) => string> = {
   screen: () => "צילום מסך ושיתוף מסך מציגים חלון ריק",
   send: () => "השליחה ל-AI",
   isolation: () => "קריאת מסמכים בתהליך מבודד",
+  memory: () => "מה שהכספת מחזיקה בזיכרון נשאר בזיכרון ולא נכתב לדיסק",
 };
 
 const STATE_INFO = { chip: "chip chip-sand", text: "רגיל" };
@@ -33,6 +34,8 @@ function suffix(i: SecurityItem): string {
   if (i.key === "recovery_kit" && i.state === "warn") return ". במחשב אחר רק היא פותחת את הכספת: כדאי לבדוק אותה ב\"סיסמה ואבטחה\"";
   if (i.key === "computer_bound" && i.state === "warn") return " (זה יקרה בכניסה הבאה עם הסיסמה)";
   if (i.key === "computer_bound" && i.state === "info") return " (במחשב הזה אין אפשרות כזו)";
+  if (i.key === "memory" && i.state === "warn") return " (Windows לא אישר את המקום לזה בהפעלה הזו)";
+  if (i.key === "memory" && i.state === "info") return " (במחשב הזה אין אפשרות כזו)";
   if (i.key === "isolation") return i.state === "ok" ? "" : " (במחשב הזה אין בידוד כזה)";
   return "";
 }

@@ -392,6 +392,8 @@ fn egress_action(e: &EgressError) -> ErrorAction {
             ErrorAction::settings("ai")
         }
         EgressError::Stopped => ErrorAction::settings("security"),
+        // The service's certificate is from an authority this version is not pinned to.
+        EgressError::Pinned => ErrorAction::settings("about"),
         EgressError::RateLimited => ErrorAction::Retry { after_seconds: 60 },
         EgressError::Offline | EgressError::Unavailable(_) => ErrorAction::retry(),
         // A timeout or a conflict passes by itself; any other refusal comes back the same.
@@ -425,6 +427,9 @@ fn egress_he(e: &EgressError, ai: &str) -> String {
             "החיבור המאובטח נכשל. ייתכן שתוכנה במחשב (למשל אנטי-וירוס) מיירטת תעבורה מוצפנת."
                 .to_owned()
         }
+        EgressError::Pinned => format!(
+            "החיבור ל-{ai} נעצר ושום דבר לא נשלח: התעודה שלו היא מגורם שהגרסה הזו של התוכנה לא סומכת עליו. צריך לעדכן את התוכנה (בהגדרות, באודות)."
+        ),
         EgressError::Stopped => "השליחה כבויה (עצירת חירום). אפשר להפעיל אותה מחדש במסך מצב האבטחה."
             .to_owned(),
         EgressError::TooLarge => "הבקשה גדולה מדי. כדאי לשלוח פחות חומרים בבת אחת.".to_owned(),
@@ -672,6 +677,13 @@ pub struct Core {
     hint_cache: HashMap<String, Vec<dv_privacy::NameHint>>,
     /// The half of the password slot kept on this computer (D-076).
     computer_seal: Arc<dyn ComputerSeal>,
+    /// The program's memory is kept out of the page file: `None` where the computer offers
+    /// no such thing, else whether the room for it was granted at start (D-047, L7).
+    memory_lock: Option<bool>,
+    /// The cases opened this session, so each opening is logged once (L3; dropped on lock).
+    opened_cases: HashSet<String>,
+    /// What this opening has to say about the time since the last one (L4; dropped on lock).
+    since_last: Option<String>,
 }
 
 impl std::fmt::Debug for Core {

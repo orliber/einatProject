@@ -94,7 +94,7 @@ fn describe(
             true,
         ),
         "case_created" => ("case", "תיק נפתח".to_owned(), false),
-        "case_opened" => ("case", "תיק נפתח לצפייה".to_owned(), false),
+        "case_opened" => ("case", "פתחת את התיק".to_owned(), false),
         "case_trashed" => ("case", "תיק הועבר לסל המחזור".to_owned(), false),
         "case_restored" => ("case", "תיק הוחזר מסל המחזור".to_owned(), false),
         "case_deleted" => ("case", "תיק נמחק לצמיתות".to_owned(), true),

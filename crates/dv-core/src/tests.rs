@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 
 use super::*;
 
+mod access;
 mod binding;
 mod flows;
 mod guides;
@@ -177,6 +178,15 @@ fn every_error_has_a_next_step_that_fits_it() {
             ErrorAction::Report,
         ),
         (CoreError::Egress(EgressError::Tls), ErrorAction::Report),
+        // A certificate from an authority this version is not pinned to: an update (D-077).
+        (
+            CoreError::Egress(EgressError::Pinned),
+            ErrorAction::settings("about"),
+        ),
+        (
+            CoreError::Vault(VaultError::OtherComputer),
+            ErrorAction::Dismiss,
+        ),
         (
             CoreError::Egress(EgressError::Protocol("x".into())),
             ErrorAction::Report,
