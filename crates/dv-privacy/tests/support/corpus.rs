@@ -278,6 +278,7 @@ pub fn measure(docs: &[Doc], hints: &dyn Fn(&str) -> Vec<NameHint>) -> Report {
                 confirmed_names: &confirmed,
                 past_names: &|_: &str| false,
                 today: (2026, 10, 3),
+                masks: None,
             };
             (
                 filter_with_hints(&doc.text, &ctx, &hints(&doc.text)).unwrap(),

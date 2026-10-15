@@ -15,6 +15,18 @@ export async function unlock(page: Page): Promise<void> {
   expect(errors).toEqual([]);
 }
 
+/** Settings → privacy → "show me every request before sending" (off by default),
+ *  for the journeys that read the review screen; then back to the cases. */
+export async function reviewEveryRequest(page: Page): Promise<void> {
+  await page.getByRole("navigation", { name: "ניווט ראשי" }).getByRole("button", { name: "הגדרות" }).click();
+  await page.getByRole("navigation", { name: "חלקי ההגדרות" }).getByRole("button", { name: "פרטיות" }).click();
+  const box = page.getByRole("checkbox", { name: /להציג לי כל בקשה לפני שליחה/ });
+  await box.check();
+  await expect(box).toBeChecked();
+  await page.getByRole("navigation", { name: "ניווט ראשי" }).getByRole("button", { name: "תיקים" }).click();
+  await expect(page.getByRole("button", { name: "+ תיק חדש" })).toBeVisible();
+}
+
 /**
  * axe-core (WCAG 2.1 A and AA, the same rules as the component tests) on the live page.
  * Unlike jsdom, a real browser lays out and paints, so colour contrast is checked too.

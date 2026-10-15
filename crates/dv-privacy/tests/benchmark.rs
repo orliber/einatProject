@@ -616,6 +616,7 @@ fn the_filter_meets_the_benchmark() {
         confirmed_names: &confirmed,
         past_names: &|_: &str| false,
         today: (2026, 9, 30),
+        masks: None,
     };
 
     let mut stats: std::collections::BTreeMap<&str, (u32, u32)> = Default::default();

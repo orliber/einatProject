@@ -1,7 +1,7 @@
 // The main journey in the browser preview: home → new case → materials → the "what leaves the
 // computer" review → the report page. All people and texts are invented.
 import { expect, test } from "@playwright/test";
-import { createCase, expectAccessible, stage, unlock } from "./helpers";
+import { createCase, expectAccessible, reviewEveryRequest, stage, unlock } from "./helpers";
 
 const CHILD = "יונתן בדוי";
 const INTAKE =
@@ -23,6 +23,7 @@ test("the cases screen lists the invented cases and is accessible", async ({ pag
 
 test("home → new case → materials → review before sending → report page", async ({ page }) => {
   await unlock(page);
+  await reviewEveryRequest(page);
 
   // New case.
   await createCase(page, CHILD);
@@ -81,6 +82,18 @@ test("home → new case → materials → review before sending → report page"
   await expect(approve).toBeVisible({ timeout: 20_000 });
   // The draft on the page is written back with the names, locally.
   await approve.click();
+  await expectAccessible(page);
+
+  // What left the computer: the request is in the case's history, with the child's name
+  // hidden in the text that left (round 27).
+  await page.getByRole("button", { name: /^עוד פעולות/ }).click();
+  await page.getByRole("menuitem", { name: "מה יצא מהמחשב בתיק הזה" }).click();
+  const sent = page.getByRole("dialog", { name: /^מה יצא מהמחשב/ });
+  await expect(sent).toBeVisible();
+  await sent.getByRole("button", { name: "הטקסט שיצא" }).first().click();
+  const asked = sent.getByRole("region", { name: "בקשה" });
+  await expect(asked).toBeVisible();
+  await expect(asked).not.toContainText("יונתן");
   await expectAccessible(page);
 });
 

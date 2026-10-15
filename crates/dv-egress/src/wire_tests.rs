@@ -31,6 +31,7 @@ fn cleared(body: &Value) -> Result<ClearedPayload, Blocked> {
         confirmed_names: &|_: &str| false,
         past_names: &|_: &str| false,
         today: (2026, 10, 11),
+        masks: None,
     };
     let tags = HashSet::new();
     clear(&GateRequest {

@@ -11,17 +11,37 @@ impl Core {
         prepared: &mut Prepared,
     ) -> Result<(), CoreError> {
         let suspects = prepared.suspects.len();
-        let result = self.with_style_ctx(|ctx, _| {
+        // The same fix loop as a case request (round 26, Z8): what the gate refuses is hidden
+        // in the outgoing copy, with a book of this request only (her past reports have no
+        // case to keep it in), and the copy goes back to the same gate.
+        let book = dv_privacy::MaskBook::default();
+        let answered = self.with_style_ctx(|ctx, _| {
             let tags = style_tags();
-            Ok(clear(&GateRequest {
-                body,
-                ctx,
-                case_tags: &tags,
-                unresolved_suspects: suspects,
-                canaries: &[],
-                max_bytes: MAX_REQUEST_BYTES,
-            }))
+            Ok(crate::send::answer_refusals(
+                body, ctx, &tags, suspects, &book,
+            ))
         })?;
+        let crate::send::Answered {
+            result,
+            fixed,
+            cuts,
+            mut codes,
+        } = answered;
+        if (!fixed.is_empty() || !cuts.is_empty()) && result.is_ok() {
+            codes.sort();
+            codes.dedup();
+            self.vault_mut()?.record(
+                AuditEvent::Blocked,
+                None,
+                &serde_json::json!({ "codes": codes, "style": true, "fixed": true }),
+            )?;
+            if !fixed.is_empty() {
+                crate::send::note_fixed(prepared, &fixed);
+            }
+            if !cuts.is_empty() {
+                crate::send::note_cut(prepared, &cuts);
+            }
+        }
         match result {
             Ok(payload) => {
                 let id = payload.sha256().to_owned();

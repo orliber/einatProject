@@ -54,6 +54,7 @@ fn hidden_share(names: &[String], templates: &[&str]) -> (u32, u32, Vec<String>)
         confirmed_names: &|_: &str| false,
         past_names: &|_: &str| false,
         today: (2026, 10, 9),
+        masks: None,
     };
     let (mut hit, mut total, mut missed) = (0, 0, Vec::new());
     for name in names {
@@ -115,6 +116,7 @@ fn tells_keeps_the_next_word_and_a_salon_name_is_still_left_out() {
         confirmed_names: &|_: &str| false,
         past_names: &|_: &str| false,
         today: (2026, 10, 9),
+        masks: None,
     };
     for text in [
         "הגננת מספרת שבמפגש הבוקר היא מתקשה.",

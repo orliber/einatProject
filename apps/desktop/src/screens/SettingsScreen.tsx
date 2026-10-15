@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { BugReportSettings } from "../components/BugReport";
 import { useApp } from "../App";
 import { ActivitySettings } from "../components/ActivityLog";
+import { SentHistorySettings } from "../components/SentHistory";
 import { BackupSettings } from "../components/Backup";
 import { PasswordSettings } from "../components/PasswordSettings";
 import { TopBar } from "../components/TopBar";
@@ -187,11 +188,11 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                   </div>
                 </Row>
                 <label className="row">
-                  <input type="checkbox" checked={status.review_only_suspect} disabled={!status.review_choice_available}
-                    onChange={(e) => void run(() => ipc.setReviewOnlySuspect(e.target.checked), "ההגדרה עודכנה.")} />
-                  <span>להציג את "מה יוצא מהמחשב" רק כשמשהו הוסתר אוטומטית</span>
+                  <input type="checkbox" checked={status.review_always}
+                    onChange={(e) => void run(() => ipc.setReviewAlways(e.target.checked), "ההגדרה עודכנה.")} />
+                  <span>להציג לי כל בקשה לפני שליחה</span>
                 </label>
-                {!status.review_choice_available && <span className="hint">בשבועיים הראשונים המסך מוצג לפני כל שליחה.</span>}
+                <span className="hint">כשזה כבוי, מה שעבר את בדיקת הפרטיות נשלח מיד. שמות ופרטים מזהים מוסתרים בתגית בעותק שיוצא בלבד, בכל מקרה.</span>
                 {SCREEN_PROTECTION_SETTING && (
                   <label className="row">
                     <input type="checkbox" checked={status.screen_protection}
@@ -200,6 +201,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                   </label>
                 )}
               </section>
+              <SentHistorySettings />
               <NameModelSettings />
             </>
           )}

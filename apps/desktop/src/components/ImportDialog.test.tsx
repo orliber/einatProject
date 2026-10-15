@@ -1,5 +1,4 @@
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { AppContext, type AppApi } from "../App";
 import type { ImportPreview } from "../ipc/client";
@@ -36,39 +35,18 @@ const preview = (): ImportPreview => ({
   warnings: [],
 });
 
-const identity = (value: string, tag: string) => ({
-  id: tag, case_id: "c1", role: "teacher", tag, value, aliases: [], source: "auto", reason: "אחרי 'הגננת'",
-});
-
 describe("ImportDialog", () => {
-  it("lists what was hidden without asking, and 'להחזיר' takes one item off", async () => {
-    const calls: string[] = [];
-    mockIPC((cmd) => {
-      calls.push(cmd);
-      if (cmd === "preview_filter") {
-        return {
-          tagged: "", original_segments: [{ text: "הגננת רינת סיפרה שהוא משחק עם חן.", mark: null, label: null }],
-          tagged_segments: [], auto_hidden: [], hidden: [], checks: { declared_names: 0, patterns: 0, name_suspects: 0, indirect_suspects: 0 },
-        };
-      }
-      if (cmd === "case_detail") return { identities: [identity("רינת", "[גננת_2]")] };
-      return null;
-    });
-    const user = userEvent.setup();
+  it("shows the text with what is hidden marked, and no card: the names are on the case's privacy page", () => {
+    mockIPC(() => null);
     render(
       <AppContext.Provider value={api()}>
         <ImportDialog caseId="c1" preview={preview()} onClose={vi.fn()} onSaved={vi.fn(async () => undefined)} />
       </AppContext.Provider>,
     );
-    expect(screen.queryByText(/תתבקשי להחליט/)).toBeNull();
-    const card = screen.getByRole("region", { name: "מה הוסתר אוטומטית" });
-    expect(card).toHaveTextContent("הסתרתי אוטומטית 2 פרטים");
-    expect(card).toHaveTextContent("לא בטוח");
-
-    await user.click(screen.getByRole("button", { name: "להחזיר את חן" }));
-    expect(calls).toContain("restore_auto_hidden");
-    expect(await screen.findByText("הסתרתי אוטומטית פרט אחד")).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "מה הוסתר אוטומטית" })).toHaveTextContent("רינת");
+    expect(screen.queryByRole("region", { name: "מה הוסתר אוטומטית" })).toBeNull();
+    expect(screen.queryByText(/הסתרתי אוטומטית/)).toBeNull();
+    const text = screen.getByRole("region", { name: "הטקסט שיישמר בתיק" });
+    expect(text).toHaveTextContent("הגננת רינת סיפרה שהוא משחק עם חן.");
     expect(screen.getByRole("button", { name: "שמירה בתיק" })).toBeEnabled();
   });
 });

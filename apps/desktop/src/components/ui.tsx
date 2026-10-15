@@ -3,7 +3,7 @@ import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppContext } from "../App";
 import { failureFor, rememberFailure, replayFor } from "../errors";
-import { asUiError } from "../ipc/client";
+import { asUiError, ipc } from "../ipc/client";
 import { SETTINGS_PANES, type SettingsPane } from "../screens/settingsPanes";
 import { BugReportDialog } from "./BugReport";
 import type { Segment } from "../ipc/generated/Segment";
@@ -302,6 +302,13 @@ export function ErrorLine({ error: given, retry, report: always }: { error: stri
     case "unlock":
       if (app) buttons.push({ label: "פתיחת הכספת", run: () => void app.refresh() });
       break;
+    case "raise_cap": {
+      // One click: the ceiling goes up to what the message says, and the same request goes.
+      const to = action.to_usd;
+      if (again) buttons.push({ label: `להעלות ל-$${to} ולהמשיך`, run: () => void ipc.setMonthlyCap(to).then(again, (e: unknown) => setAgain({ after: first, message: asUiError(e).message })) });
+      else if (app) buttons.push({ label: "פתיחת ההגדרות", run: () => app.go({ name: "settings", pane: "ai" }) });
+      break;
+    }
     default:
       if (!f && retry) buttons.push({ label: "לנסות שוב", run: retry });
   }

@@ -10,7 +10,8 @@ import { prepared, status } from "../test/fixtures";
 import { StyleScreen } from "./StyleScreen";
 
 function api(): AppApi {
-  return { status: status(), go: vi.fn(), refresh: vi.fn(async () => undefined), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn(async () => undefined) };
+  // Every step through the review screen: "show me every request" on (off by default; set here for the tests that read it).
+  return { status: status({ review_always: true }), go: vi.fn(), refresh: vi.fn(async () => undefined), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn(async () => undefined) };
 }
 
 function wrap(node: ReactNode) {

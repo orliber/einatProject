@@ -86,6 +86,7 @@ impl Core {
                 confirmed_names: &is_name,
                 past_names: &past,
                 today: today(),
+                masks: Some(&data.masks),
             };
             let mut review = Review::default();
             let (sources, _rows) = collect_sources(
@@ -176,10 +177,11 @@ impl Core {
         let mut checks = dv_ai::parse_verify(&response, &paragraph_ids, &source_ids)?;
         // Notes may carry tags; she reads the names. A note is shown, never stored or sent.
         let identities = v.identities(&case_id)?;
+        let masks = v.masks(&case_id)?;
         let practitioner = v.practitioner()?.names.first().cloned();
         for c in &mut checks {
             for n in &mut c.notes {
-                n.note = restore(&n.note, &identities, practitioner.as_deref());
+                n.note = restore(&n.note, &identities, practitioner.as_deref(), &masks);
             }
         }
         Ok(VerifyResult {

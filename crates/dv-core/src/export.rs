@@ -43,6 +43,7 @@ impl Core {
         let letter = Letter::from_audience(audience)?;
         let v = self.vault_ref()?;
         let identities = v.identities(case_id)?;
+        let masks = v.masks(case_id)?;
         let practitioner = v.practitioner()?.names.first().cloned();
         let with_versions = v.drafts_with_versions(case_id)?;
         Ok(v.drafts(case_id, letter.key())?
@@ -54,7 +55,7 @@ impl Core {
                 style_note: None,
                 style: None,
                 id: d.id,
-                text: restore(&d.text_tagged, &identities, practitioner.as_deref()),
+                text: restore(&d.text_tagged, &identities, practitioner.as_deref(), &masks),
                 status: d.status,
                 by_ai: d.author == Author::Ai,
                 sources: Vec::new(),
@@ -226,8 +227,9 @@ impl Core {
         let v = self.vault_ref()?;
         let meta = v.case_meta(case_id)?;
         let identities = v.identities(case_id)?;
+        let masks = v.masks(case_id)?;
         let practitioner = v.practitioner()?.names.first().cloned();
-        let show = |t: &str| restore(t, &identities, practitioner.as_deref());
+        let show = |t: &str| restore(t, &identities, practitioner.as_deref(), &masks);
 
         let mut blocking = Vec::new();
         let mut to_complete = Vec::new();
@@ -252,9 +254,13 @@ impl Core {
                     .collect();
                 for p in &mut paragraphs {
                     for tag in dv_privacy::restore::remaining_tags(p) {
-                        if known_tags.contains(&tag) {
-                            // A real tag the names could not be put back into: never in a file.
-                            blocking.push(format!("{}: נשארה תגית {tag}", s.title));
+                        if known_tags.contains(&tag) || dv_privacy::is_mask_tag(&tag) {
+                            // A real tag the words could not be put back into (a person removed
+                            // from the case, a draft from before the mask book): never a tag in
+                            // a file, and no stop either. It becomes a marker to complete, and
+                            // the finish screen lists it with the others (round 26).
+                            let marker = format!("[חסר: {}]", dv_privacy::tag_word(&tag));
+                            *p = p.replace(&tag, &marker);
                         } else {
                             // Words the model put in square brackets ("[מחנכת]"): plain text.
                             let inner = tag
@@ -387,7 +393,7 @@ impl Core {
                 continue; // Pointed out in `to_complete`; hers to fill in.
             }
             let msg = format!("נשאר בדוח סימון בסוגריים מרובעים: {leftover}");
-            if !blocking.iter().any(|b| b.contains(&leftover)) {
+            if !blocking.iter().any(|b: &String| b.contains(&leftover)) {
                 blocking.push(msg);
             }
         }

@@ -165,7 +165,7 @@ export const ipc = {
   setModel: (model: string) => run("set_model", { model }),
   setLockMinutes: (minutes: number) => run("set_lock_minutes", { minutes }),
   setPractitioner: (names: string[]) => run("set_practitioner", { names }),
-  setReviewOnlySuspect: (on: boolean) => run("set_review_only_suspect", { on }),
+  setReviewAlways: (on: boolean) => run("set_review_always", { on }),
   setScreenProtection: (on: boolean) => run("set_screen_protection", { on }),
   reportSettings: () => call("report_settings"),
   setReportSettings: (settings: ReportSettings) => run("set_report_settings", { settings }),
@@ -316,6 +316,9 @@ export const ipc = {
   // Activity log (metadata only; cases named on this computer) and retention reminders.
   activity: (before: number | null) => call("activity", { before }),
   markActivityReviewed: () => run("mark_activity_reviewed"),
+  /** "מה יצא מהמחשב": the requests kept with a case (or every case), newest first. */
+  sentHistory: (caseId: string | null, place: string | null, query: string) => call("sent_history", { caseId, place, query }),
+  sentText: (caseId: string, id: string) => call("sent_text", { caseId, id }),
   retentionDue: () => call("retention_due"),
   keepCaseLonger: (caseId: string, years: number) => run("keep_case_longer", { caseId, years }),
 

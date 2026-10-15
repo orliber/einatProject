@@ -59,6 +59,7 @@ pub fn ctx<'a>(ids: &'a [Identity], case: &'a str) -> PrivacyContext<'a> {
         confirmed_names: &|_: &str| false,
         past_names: &|_: &str| false,
         today: TODAY,
+        masks: None,
     }
 }
 

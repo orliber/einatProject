@@ -218,7 +218,7 @@ fn an_edit_after_the_review_never_rides_on_the_earlier_approval() {
 }
 
 #[test]
-fn every_failed_attempt_stores_nothing_and_the_retry_is_stored_once() {
+fn every_failed_attempt_drafts_nothing_and_the_retry_is_drafted_once() {
     let t = Scripted::failing(2);
     let (_dir, mut core, case) = scripted_setup(&t);
     let id = approval(&mut core, &case);
@@ -230,15 +230,18 @@ fn every_failed_attempt_stores_nothing_and_the_retry_is_stored_once() {
             "{err:?}"
         );
         assert_eq!(t.attempts().len(), attempt);
-        // Nothing went out, so nothing is recorded as sent and no draft appears.
-        assert!(core
-            .vault_ref()
-            .unwrap()
-            .transmissions(&case)
-            .unwrap()
-            .is_empty());
+        // A connection lost on the way may come after the bytes reached the service: the
+        // attempt is in the history of what left (the review of stage 2), and no draft appears.
+        assert_eq!(
+            core.vault_ref()
+                .unwrap()
+                .transmissions(&case)
+                .unwrap()
+                .len(),
+            attempt
+        );
         assert!(core.chat(&case, "kindergarten").unwrap().is_empty());
-        assert_eq!(sends_logged(&mut core), 0);
+        assert_eq!(sends_logged(&mut core), attempt);
         let detail = core.case_detail(&case).unwrap();
         let section = detail.sections.iter().find(|s| s.key == "kindergarten");
         assert!(section.is_none_or(|s| s.paragraphs.is_empty()));
@@ -256,10 +259,10 @@ fn every_failed_attempt_stores_nothing_and_the_retry_is_stored_once() {
             .transmissions(&case)
             .unwrap()
             .len(),
-        1
+        3
     );
     assert_eq!(core.chat(&case, "kindergarten").unwrap().len(), 2);
-    assert_eq!(sends_logged(&mut core), 1);
+    assert_eq!(sends_logged(&mut core), 3);
     let drafted = core
         .case_detail(&case)
         .unwrap()
@@ -426,6 +429,14 @@ fn every_command_refuses_while_the_vault_is_locked() {
             Box::new(|k| k.create_folder(None, "תיקייה").map(drop)),
         ),
         ("consultations", Box::new(|k| k.consultations().map(drop))),
+        (
+            "sent_history",
+            Box::new(|k| k.sent_history(None, None, "").map(drop)),
+        ),
+        (
+            "sent_text",
+            Box::new(move |k| k.sent_text(c, "x").map(drop)),
+        ),
         ("activity", Box::new(|k| k.activity(None).map(drop))),
         ("readiness", Box::new(|k| k.readiness().map(drop))),
         (

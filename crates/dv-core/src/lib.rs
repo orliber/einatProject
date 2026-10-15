@@ -15,6 +15,7 @@ mod export;
 mod failures;
 mod followup;
 pub mod google;
+mod history;
 mod intake;
 mod library;
 pub mod name_model;
@@ -66,6 +67,7 @@ pub(crate) use dates::today;
 pub use dv_ai::{StyleItem, StyleKind, StyleOrigin, StyleProfile};
 pub use dv_vault::BACKUP_EXTENSION;
 pub use followup::FollowUpView;
+pub use history::{HiddenWord, SentItem, SentPart, SentText};
 pub use jobs::{
     BackupRun, BackupTask, DocumentRead, DrillJob, Drilled, ExportJob, Exported, ReadJob,
     RestoreJob, Restored, SlotJob, SlotMade, UnlockJob, Unlocked,
@@ -127,7 +129,10 @@ const MODEL_KEY: &str = "model";
 const ZDR_PREFIX: &str = "zdr/";
 const LOCK_KEY: &str = "lock_minutes";
 const FIRST_USE_KEY: &str = "first_use_day";
-const REVIEW_KEY: &str = "review_only_suspect";
+/// "Show me every request before it is sent" (round 26). On until she turns it off: the
+/// review screen stays the default until Einat confirms turning it off (D-062). The key of the
+/// earlier "only when suspicious" choice is not read.
+const REVIEW_KEY: &str = "review_always";
 const SCREEN_KEY: &str = "screen_protection";
 /// How long Claude may think (see `Core::model_for`).
 const SPEED_KEY: &str = "answer_speed";
@@ -140,8 +145,6 @@ enum Task {
     Draft,
     Consult,
 }
-/// Days of use before "show the review only when suspicious" can be chosen (D-020).
-const REVIEW_ALWAYS_DAYS: u64 = 14;
 
 fn day_number() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| {
@@ -472,6 +475,8 @@ enum PendingKind {
         /// The question as typed (kept only in the vault, for display).
         message_shown: String,
         hidden: Vec<String>,
+        /// The request's mask book, to give the answer back as she wrote the question.
+        masks: Vec<dv_domain::MaskEntry>,
     },
     /// Sorting materials into sections (D-022): per material its id, how many passages were
     /// sent, and a fingerprint of its text then.
@@ -644,6 +649,9 @@ struct PrivacyData {
     is_name: HashSet<String>,
     /// Keyed hashes of the names in her past reports (`style`).
     past: HashSet<String>,
+    /// The case's mask book while this request is built (round 25): what it keeps, and the
+    /// numbered tags this request adds, kept with the case once the gate clears it.
+    masks: dv_privacy::MaskBook,
 }
 
 /// Everything the review screen shows, accumulated over the outgoing texts.

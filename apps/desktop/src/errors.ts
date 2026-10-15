@@ -13,9 +13,9 @@ export function rememberFailure(e: UiError): void {
   last = e;
 }
 
-/** Keep the failed call itself, for "לנסות שוב". Only for failures that offer a retry. */
+/** Keep the failed call itself, for "לנסות שוב" (or "ולהמשיך" after raising the ceiling). */
 export function rememberReplay(e: UiError, run: () => Promise<unknown>): void {
-  if (e.action.kind === "retry") lastReplay = { error: e, run };
+  if (e.action.kind === "retry" || e.action.kind === "raise_cap") lastReplay = { error: e, run };
 }
 
 /** Nothing kept survives a lock: the vault that call was for is closed. */

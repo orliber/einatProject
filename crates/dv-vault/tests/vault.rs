@@ -1319,3 +1319,42 @@ fn header_writes_at_the_same_time_never_mix_and_leave_no_temp_file() {
         .collect();
     assert!(left.is_empty(), "{left:?}");
 }
+
+#[test]
+fn the_mask_book_is_sealed_keeps_each_tag_and_goes_with_the_case() {
+    let (dir, mut vault, _) = new_vault();
+    let case = noam(&mut vault);
+    let entry = |tag: &str, original: &str| dv_domain::MaskEntry {
+        tag: tag.into(),
+        kind: "כתובת".into(),
+        original: original.into(),
+    };
+    vault
+        .add_masks(
+            &case,
+            &[
+                entry("[כתובת_1]", "רחוב הדקלים 12"),
+                entry("[כתובת_2]", "שדרות הנרקיסים 7"),
+            ],
+        )
+        .unwrap();
+    // A tag once given keeps its words.
+    vault
+        .add_masks(&case, &[entry("[כתובת_1]", "משהו אחר")])
+        .unwrap();
+    let book = vault.masks(&case).unwrap();
+    assert_eq!(
+        book,
+        [
+            entry("[כתובת_1]", "רחוב הדקלים 12"),
+            entry("[כתובת_2]", "שדרות הנרקיסים 7")
+        ]
+    );
+    drop(vault);
+    let bytes = all_bytes(dir.path());
+    assert!(!contains(&bytes, "הדקלים") && !contains(&bytes, "הנרקיסים"));
+    let mut vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
+    assert_eq!(vault.masks(&case).unwrap().len(), 2);
+    vault.delete_case(&case).unwrap();
+    assert!(matches!(vault.masks(&case), Err(VaultError::NotFound)));
+}

@@ -5,17 +5,23 @@ use std::sync::LazyLock;
 use dv_domain::{Identity, PRACTITIONER_TAG};
 use regex::Regex;
 
-use crate::gate::GENERIC_TAGS;
 use crate::lexicon::LEXICON;
+use crate::masks::{is_generic_tag, MaskEntry};
 use crate::patterns::{self, PatternKind};
 use crate::pipeline::{Suspect, SuspectKind};
 use crate::text::{normalize, prefix_splits, tokenize};
 
 static TAG_RE: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(r"\[[^\[\]\n]{1,40}\]").ok());
 
-/// Replace the case's tags with the declared names. Prefixes stay attached ("ל[ילד]" → "לנועם").
+/// Replace the case's tags with the declared names, and each numbered tag of its mask book
+/// with the words it hid. Prefixes stay attached ("ל[ילד]" → "לנועם").
 #[must_use]
-pub fn restore(tagged: &str, identities: &[Identity], practitioner: Option<&str>) -> String {
+pub fn restore(
+    tagged: &str,
+    identities: &[Identity],
+    practitioner: Option<&str>,
+    masks: &[MaskEntry],
+) -> String {
     let Some(re) = TAG_RE.as_ref() else {
         return tagged.to_owned();
     };
@@ -26,10 +32,13 @@ pub fn restore(tagged: &str, identities: &[Identity], practitioner: Option<&str>
                 return p.to_owned();
             }
         }
-        identities
+        if let Some(i) = identities.iter().find(|i| i.tag == tag) {
+            return i.value.clone();
+        }
+        masks
             .iter()
-            .find(|i| i.tag == tag)
-            .map_or_else(|| tag.to_owned(), |i| i.value.clone())
+            .find(|m| m.tag == tag)
+            .map_or_else(|| tag.to_owned(), |m| m.original.clone())
     })
     .into_owned()
 }
@@ -117,7 +126,7 @@ pub fn scan_model_output(
         }
     }
     for tag in remaining_tags(text) {
-        let generic = tag.ends_with("_אחר]") || GENERIC_TAGS.contains(&tag.as_str());
+        let generic = tag.ends_with("_אחר]") || is_generic_tag(&tag);
         if !case_tags.contains(&tag) && !generic {
             add(
                 &mut out,

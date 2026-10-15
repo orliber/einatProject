@@ -16,6 +16,9 @@ vi.setConfig({ testTimeout: 30_000 });
 async function openApp(unlock = true) {
   const core = new FakeCore();
   if (unlock) await core.handle("unlock", { password: "x" });
+  // These tests walk every screen a request passes through, the review screen included, so
+  // they run with "show me every request before sending" on (off by default; set here for the tests that read it).
+  if (unlock) await core.handle("set_review_always", { on: true });
   const calls: string[] = [];
   mockIPC((cmd, args) => {
     calls.push(cmd);
@@ -177,6 +180,7 @@ describe("writing the report", () => {
   it("a send that failed is sent again from the section, and its draft arrives like the first time (F6)", async () => {
     const core = new FakeCore();
     await core.handle("unlock", { password: "x" });
+    await core.handle("set_review_always", { on: true });
     const calls: string[] = [];
     let sends = 0;
     mockIPC((cmd, args) => {
@@ -200,6 +204,79 @@ describe("writing the report", () => {
     await screen.findByRole("button", { name: "✓ לאשר" }, { timeout: 6000 });
     expect(sends).toBe(2);
     expect(calls.filter((c) => c === "prepare_section")).toHaveLength(1);
+  });
+
+  it("with every request shown first turned off, a cleared request goes at once: no window (round 26)", async () => {
+    const core = new FakeCore();
+    await core.handle("unlock", { password: "x" });
+    await core.handle("set_review_always", { on: false });
+    const calls: string[] = [];
+    mockIPC((cmd, args) => {
+      calls.push(cmd);
+      return core.handle(cmd, args);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const page = await openCase(user);
+    const write = within(page).getAllByRole("button", { name: "✦ לכתוב עם Claude" })[0];
+    if (!write) throw new Error("no empty section to write");
+    await user.click(write);
+    await screen.findByRole("button", { name: "✓ לאשר" }, { timeout: 6000 });
+    expect(screen.queryByRole("dialog", { name: /לפני שליחה/ })).toBeNull();
+    expect(calls.indexOf("send_section")).toBeGreaterThan(calls.indexOf("prepare_section"));
+  });
+
+  it("with it off, a request the gate still refuses is a line with 'לנסות שוב', never a window (round 26)", async () => {
+    const core = new FakeCore();
+    await core.handle("unlock", { password: "x" });
+    await core.handle("set_review_always", { on: false });
+    let prepares = 0;
+    mockIPC(async (cmd, args) => {
+      const out = await core.handle(cmd, args);
+      if (cmd === "prepare_section" && ++prepares === 1) {
+        return { ...(out as object), approval_id: null, blocked: [{ code: "internal", message: "שגיאה פנימית", detail: "נועם" }] };
+      }
+      return out;
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const page = await openCase(user);
+    const write = within(page).getAllByRole("button", { name: "✦ לכתוב עם Claude" })[0];
+    if (!write) throw new Error("no empty section to write");
+    await user.click(write);
+    const line = await screen.findByText(/הבקשה לא נשלחה: שגיאה פנימית/);
+    expect(screen.queryByRole("dialog", { name: /לפני שליחה/ })).toBeNull();
+    // The gate's detail (which may quote a name) is not on the screen.
+    expect(line.closest(".job-failed")).not.toHaveTextContent("נועם");
+    await user.click(screen.getByRole("button", { name: "לנסות שוב" }));
+    await screen.findByRole("button", { name: "✓ לאשר" }, { timeout: 6000 });
+    expect(prepares).toBe(2);
+  });
+
+  it("at the monthly ceiling, one click raises it and the same request goes (round 26)", async () => {
+    const core = new FakeCore();
+    await core.handle("unlock", { password: "x" });
+    await core.handle("set_review_always", { on: false });
+    const calls: { cmd: string; args: unknown }[] = [];
+    let sends = 0;
+    mockIPC((cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd === "send_section" && ++sends === 1) {
+        throw { code: "refused", message: "הגעת לתקרת ההוצאה החודשית שקבעת ($10). אפשר להעלות אותה ל-$20 ולהמשיך.", details: [], action: { kind: "raise_cap", to_usd: 20 } };
+      }
+      return core.handle(cmd, args);
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    const page = await openCase(user);
+    const write = within(page).getAllByRole("button", { name: "✦ לכתוב עם Claude" })[0];
+    if (!write) throw new Error("no empty section to write");
+    await user.click(write);
+    await user.click(await screen.findByRole("button", { name: "להעלות ל-$20 ולהמשיך" }));
+    await screen.findByRole("button", { name: "✓ לאשר" }, { timeout: 6000 });
+    expect(calls.find((c) => c.cmd === "set_monthly_cap")?.args).toEqual({ capUsd: 20 });
+    expect(sends).toBe(2);
+    expect(calls.filter((c) => c.cmd === "prepare_section")).toHaveLength(1);
   });
 
   it("previous reports can be summarized by topics through the same review screen", async () => {

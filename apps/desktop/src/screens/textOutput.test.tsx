@@ -19,6 +19,9 @@ type Override = (cmd: string, args: Record<string, unknown>, core: FakeCore) => 
 async function openApp(over: Override = () => undefined, prepare?: (core: FakeCore, caseId: string) => Promise<void>) {
   const core = new FakeCore();
   await core.handle("unlock", { password: "x" });
+  // These tests read every screen a request passes through, the review screen included, so
+  // they run with "show me every request before sending" on (off by default; set here for the tests that read it).
+  await core.handle("set_review_always", { on: true });
   const cases = (await core.handle("list_cases", {})) as { id: string; child_name: string | null }[];
   const caseId = cases.find((c) => c.child_name === "נועם")?.id ?? "";
   if (prepare) await prepare(core, caseId);

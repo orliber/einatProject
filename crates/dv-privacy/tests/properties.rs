@@ -96,7 +96,7 @@ proptest! {
         }
         prop_assert!(out.auto_hidden.is_empty(), "{:?}", out.auto_hidden);
         assert_segments_consistent(&text, &out);
-        prop_assert_eq!(restore(&out.tagged, &ids, None), text);
+        prop_assert_eq!(restore(&out.tagged, &ids, None, &[]), text);
         prop_assert!(gate_text(&out.tagged, &ids, CASE).is_ok(), "dead end on {}", out.tagged);
     }
 
@@ -148,7 +148,7 @@ proptest! {
     ) {
         let ids = identities();
         let text: String = pieces.concat();
-        let restored = restore(&text, &ids, practitioner);
+        let restored = restore(&text, &ids, practitioner, &[]);
         // What restoring adds is made only of the values of known tags it found.
         let mut expected = text.clone();
         for i in ids.iter().filter(|i| i.case_id == CASE && text.contains(&i.tag)) {
@@ -185,7 +185,7 @@ proptest! {
         assert_segments_consistent(&text, &out);
         let _ = gate_text(&text, &ids, CASE);
         let _ = gate_text(&out.tagged, &ids, CASE);
-        let _ = restore(&text, &ids, Some("x"));
+        let _ = restore(&text, &ids, Some("x"), &[]);
         let _ = remaining_tags(&text);
         let mut last_end = 0;
         for t in tokenize(&text) {
@@ -240,7 +240,7 @@ fn very_long_input_is_filtered_completely() {
         assert!(!out.tagged.contains(name), "{name} kept");
     }
     assert!(out.tagged.starts_with("[ילד] ") && out.tagged.ends_with("עם [גננת]"));
-    assert_eq!(restore(&out.tagged, &ids, None), text);
+    assert_eq!(restore(&out.tagged, &ids, None, &[]), text);
     // One long word, and a long run of one letter.
     let word = "א".repeat(20_000);
     assert_eq!(filter(&word, &c).unwrap().tagged, word);
@@ -296,7 +296,7 @@ fn another_cases_name_never_gets_this_cases_tag() {
         .expect("listed on the card");
     assert_eq!(other.kind, AutoKind::OtherCase);
     // Restoring this case's tags never writes the other child's name.
-    let restored = restore(&out.tagged, &ids, None);
+    let restored = restore(&out.tagged, &ids, None, &[]);
     assert!(restored.starts_with("נועם ו"), "{restored}");
     assert!(!restored.contains("ינאי"));
 }
@@ -305,7 +305,7 @@ fn another_cases_name_never_gets_this_cases_tag() {
 fn restore_keeps_unknown_tags_and_reports_them() {
     let ids = identities();
     let tagged = "[ילד] ו[גננת_7] ו[מאבחנת] [חסר: תאריך] [ת.ז.]";
-    let restored = restore(tagged, &ids, None);
+    let restored = restore(tagged, &ids, None, &[]);
     assert_eq!(restored, "נועם ו[גננת_7] ו[מאבחנת] [חסר: תאריך] [ת.ז.]");
     // An export must notice every tag left, but never a "[חסר …]" note.
     assert_eq!(
@@ -316,12 +316,12 @@ fn restore_keeps_unknown_tags_and_reports_them() {
             "[ת.ז.]".to_owned()
         ]
     );
-    let with_p = restore(tagged, &ids, Some("ד\"ר נטע לב"));
+    let with_p = restore(tagged, &ids, Some("ד\"ר נטע לב"), &[]);
     assert!(with_p.contains("וד\"ר נטע לב"), "{with_p}");
     // Another case's identities with the same tag are never used: the first matching
     // identity wins, and the caller passes only this case's (dv-export does).
     let only_other: Vec<Identity> = ids.iter().filter(|i| i.case_id == OTHER).cloned().collect();
-    assert!(restore("[ילד]", &only_other, None).contains("ינאי"));
+    assert!(restore("[ילד]", &only_other, None, &[]).contains("ינאי"));
 }
 
 #[test]
@@ -346,7 +346,7 @@ fn the_practitioner_is_hidden_and_restored_with_her_own_tag() {
         max_bytes: 10_000,
     };
     assert!(clear(&req).is_ok());
-    assert_eq!(restore(&out.tagged, &ids, Some("נטע לבנון")), text);
+    assert_eq!(restore(&out.tagged, &ids, Some("נטע לבנון"), &[]), text);
 }
 
 #[test]
@@ -602,6 +602,6 @@ proptest! {
         let _ = gate_text(&out.tagged, &ids, CASE);
         let tags: Vec<String> = case_tags(&ids, CASE).into_iter().collect();
         let _ = scan_model_output(&text, &tags, &ids);
-        let _ = restore(&out.tagged, &ids, Some("x"));
+        let _ = restore(&out.tagged, &ids, Some("x"), &[]);
     }
 }

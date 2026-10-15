@@ -38,13 +38,10 @@ idle_lock_in: number | null,
  */
 practitioner: Array<string>, 
 /**
- * Show the review screen only when something is suspicious (D-020).
+ * Show every request on the review screen before it is sent (off by default, as Einat
+ * approved; D-062). Off: a request the gate cleared goes at once.
  */
-review_only_suspect: boolean, 
-/**
- * The choice above opens after the first 14 days of use (D-020).
- */
-review_choice_available: boolean, 
+review_always: boolean, 
 /**
  * Screenshots and screen sharing show a blank window (D-037). Always on while the vault
  * is locked; she may turn it off for the open vault in settings.

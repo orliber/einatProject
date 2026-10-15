@@ -286,6 +286,16 @@ pub struct DraftParagraph {
     pub replaces: Option<String>,
 }
 
+/// One numbered tag of a case's mask book and the words it hid (a number, a date, an address,
+/// a place): the answer is given back with them (round 25). Kept sealed with the case.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MaskEntry {
+    pub tag: String,
+    /// The kind, as the tag names it ("תאריך").
+    pub kind: String,
+    pub original: String,
+}
+
 /// Exactly what left the computer for one request (tagged text), for accountability.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
