@@ -152,9 +152,11 @@ $passwordField = Find-Field $window '^סיסמה$' "the password field" 90
 Type-Into $passwordField $Password 0
 [Keys]::Enter()
 
-# 2. The case, then its materials, then "הדבקת טקסט" for one of them.
+# 2. The case, then its materials, then "הדבקת טקסט" for one of them (since round 49 it is in
+#    the menu of each kind of material, here the earlier assessments).
 Invoke-Named $window 'בתיק של' "a case on the cases screen"
 Invoke-Named $window 'חומרים$' "the materials stage"
+Invoke-Named $window '^הוספה לאבחונים קודמים' "the add menu of the earlier assessments"
 Invoke-Named $window '^הדבקת טקסט' "paste text for a material"
 $field = Find-Field $window '^הטקסט$' "the text field of the material"
 
