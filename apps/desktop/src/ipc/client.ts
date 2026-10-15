@@ -13,6 +13,7 @@ import type { StagedBackup } from "./generated/StagedBackup";
 import type { CaseDetail } from "./generated/CaseDetail";
 import type { CaseInput } from "./generated/CaseInput";
 import type { CaseMeta } from "./generated/CaseMeta";
+import type { SectionMode } from "./generated/SectionMode";
 import type { CaseSummary } from "./generated/CaseSummary";
 import type { Folder } from "./generated/Folder";
 import type { GoogleStatus } from "./generated/GoogleStatus";
@@ -241,6 +242,14 @@ export const ipc = {
   prepareSection: (caseId: string, sectionKey: string, instruction: string, replaces?: string) =>
     call("prepare_section", { caseId, sectionKey, instruction, replaces: replaces ?? null }),
   prepareFullDraft: (caseId: string) => call("prepare_full_draft", { caseId }),
+  /** A section she writes herself, worded from her points only (round 30). */
+  prepareFromPoints: (caseId: string, sectionKey: string, points: string) =>
+    call("prepare_from_points", { caseId, sectionKey, points }),
+  /** Beside her own section: how she wrote it in her reports. Local, nothing is sent. */
+  ownSectionHelp: (sectionKey: string) => call("own_section_help", { sectionKey }),
+  /** Who writes each section of the institute's report (round 30). */
+  sectionModes: () => call("section_modes"),
+  setSectionMode: (sectionKey: string, mode: SectionMode) => run("set_section_mode", { sectionKey, mode }),
   /** Words Claude has written so far for a request on its way (streamed answers). */
   sendProgress: (approvalId: string) => call("send_progress", { approvalId }),
   sendSection: (approvalId: string) => call("send_section", { approvalId }),

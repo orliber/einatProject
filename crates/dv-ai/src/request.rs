@@ -177,7 +177,13 @@ pub struct SectionInput {
     /// How she wants the section written (round 29), filtered like her request: the general
     /// guide, then this case's own lines. Empty: no guide.
     pub guide_tagged: String,
+    /// A section she writes herself, worded from her points only (round 30): her request is
+    /// the points, and nothing else of the case goes with it.
+    pub points_only: bool,
 }
+
+/// The opening of a request worded from her points (round 30): the builder's own words.
+pub const POINTS_LINE: &str = "את הסעיף הזה הפסיכולוגית כותבת בעצמה. נסח/י אותו רק מתוך הנקודות שבבקשה שלה, בלי להוסיף שום עובדה, התרשמות או פרשנות שאינן בהן. אין מקורות S, ולכן source_refs ריק בכל פסקה.";
 
 /// The lines of a section's guide, as they are numbered in the request.
 #[must_use]
@@ -327,7 +333,9 @@ pub fn build_section_request(
             numbered.join("\n")
         ));
     }
-    if input.sources.is_empty() && !input.approved_context.is_empty() {
+    if input.points_only {
+        parts.push(POINTS_LINE.to_owned());
+    } else if input.sources.is_empty() && !input.approved_context.is_empty() {
         // Summary, diagnoses, recommendations: written from the approved sections, which have
         // no S# ids, so there is nothing to cite.
         parts.push(
@@ -500,6 +508,7 @@ mod tests {
             instruction_tagged: "נסח/י פסקה".into(),
             style_profile: None,
             guide_tagged: String::new(),
+            points_only: false,
         }
     }
 

@@ -367,6 +367,29 @@ pub fn respond(body: &Value) -> Value {
         ));
     }
 
+    if body
+        .pointer("/messages/0/content")
+        .map(crate::request::content_text)
+        .is_some_and(|t| t.contains(crate::POINTS_LINE))
+    {
+        // Her own section, from her points (round 30): her points, joined into one paragraph.
+        let points: Vec<&str> = last_user
+            .rsplit_once("הפסיכולוגית מבקשת:")
+            .map_or("", |(_, p)| p)
+            .lines()
+            .map(|l| l.trim().trim_start_matches(['-', '•', '*']).trim())
+            .filter(|l| !l.is_empty())
+            .collect();
+        let text = points.join(" ");
+        let answer = json!({
+            "reply": format!("מצב הדגמה: חיברתי את הנקודות שלך לפסקה אחת. במצב אמיתי {ai} מנסח אותן בסגנון שלך, בלי להוסיף עליהן."),
+            "paragraphs": if text.is_empty() { Vec::new() } else { vec![json!({ "text": text, "source_refs": [], "guide": 0 })] },
+            "questions": [],
+            "missing": [],
+            "contradictions": []
+        });
+        return api_text(&answer.to_string());
+    }
     let sources = sources_in(last_user);
     let approved = approved_in(last_user);
     if sources.is_empty() && !approved.is_empty() {
@@ -507,6 +530,7 @@ mod tests {
             instruction_tagged: "נסחי".into(),
             style_profile: None,
             guide_tagged: String::new(),
+            points_only: false,
         };
         let (body, refs) = build_section_request(&ModelConfig::default(), &input, "n");
         let sources: Vec<(String, String)> = refs
@@ -543,6 +567,7 @@ mod tests {
             instruction_tagged: "כתבי טיוטה לסעיף מתוך הסעיפים שאושרו.".into(),
             style_profile: None,
             guide_tagged: String::new(),
+            points_only: false,
         };
         let (body, _) = build_section_request(&ModelConfig::default(), &input, "n");
         let approved: Vec<String> = input

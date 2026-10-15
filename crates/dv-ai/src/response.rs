@@ -161,6 +161,20 @@ pub fn parse_derived_section(
     response: &Value,
     approved: &[String],
 ) -> Result<SectionReply, AiError> {
+    parse_without_sources(response, approved, "בסעיפים שאושרו")
+}
+
+/// Parse an answer worded from her points only (round 30): no `S#` sources either, and every
+/// number must be one she wrote in the points.
+pub fn parse_points_section(response: &Value, points: &str) -> Result<SectionReply, AiError> {
+    parse_without_sources(response, &[points.to_owned()], "בנקודות שלך")
+}
+
+fn parse_without_sources(
+    response: &Value,
+    sent: &[String],
+    where_: &str,
+) -> Result<SectionReply, AiError> {
     let mut reply = parse_section(response, &[])?;
     for p in &mut reply.paragraphs {
         p.warnings = p
@@ -169,9 +183,9 @@ pub fn parse_derived_section(
             .map(|r| format!("מקור לא קיים: {r}"))
             .collect();
         for n in numbers(&p.text) {
-            if !approved.iter().any(|t| numbers(t).contains(&n)) {
+            if !sent.iter().any(|t| numbers(t).contains(&n)) {
                 p.warnings
-                    .push(format!("המספר {n} לא מופיע בסעיפים שאושרו – לבדוק"));
+                    .push(format!("המספר {n} לא מופיע {where_} – לבדוק"));
             }
         }
     }

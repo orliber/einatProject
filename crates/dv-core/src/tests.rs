@@ -22,6 +22,7 @@ mod large_case;
 mod library;
 mod masks;
 mod off_lock;
+mod own;
 mod perf_profile;
 mod sample_flows;
 mod sort_flows;
@@ -1597,6 +1598,7 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
             instruction_tagged: String::new(),
             style_profile: None,
             guide_tagged: String::new(),
+            points_only: false,
         };
         let nonce = dv_ai::nonce_from(&[7; 16]);
         // Like the real gate: every string in the body, not the JSON numbers ("max_tokens").
@@ -1610,6 +1612,7 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
             section_key: "summary".into(),
             sources: vec![],
             guide_tagged: "[ילד]\n[ילד]".into(),
+            points_only: false,
             ..input
         };
         // What the institute's sections are about goes out in its sorting request (D-066).
@@ -1617,6 +1620,12 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
             body.push(Value::String(s.about.clone()));
         }
         body.push(dv_ai::build_section_request(&dv_ai::ModelConfig::default(), &derived, &nonce).0);
+        // A section she writes herself, worded from her points (round 30): its own opening.
+        let points = dv_ai::SectionInput {
+            points_only: true,
+            ..derived
+        };
+        body.push(dv_ai::build_section_request(&dv_ai::ModelConfig::default(), &points, &nonce).0);
     }
     // The sorting request (D-022): every section key and description of the template, the
     // passage frames and the schema.

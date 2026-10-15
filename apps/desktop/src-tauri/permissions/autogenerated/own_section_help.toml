@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-own-section-help"
+description = "Enables the own_section_help command without any pre-configured scope."
+commands.allow = ["own_section_help"]
+
+[[permission]]
+identifier = "deny-own-section-help"
+description = "Denies the own_section_help command without any pre-configured scope."
+commands.deny = ["own_section_help"]

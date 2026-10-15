@@ -3,6 +3,20 @@
 use crate::*;
 
 #[tauri::command]
+pub(crate) async fn prepare_from_points(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    section_key: String,
+    points: String,
+) -> Res<Prepared> {
+    warm_names(&state, &case_id, Vec::new()).await;
+    with_core(&state, move |c| {
+        c.prepare_from_points(&case_id, &section_key, &points)
+    })
+    .await
+}
+
+#[tauri::command]
 pub(crate) async fn prepare_section(
     state: tauri::State<'_, AppState>,
     case_id: String,

@@ -27,6 +27,8 @@ pub(crate) fn sortable(structure: &ReportStructure) -> Vec<&ReportSection> {
     structure
         .sections()
         .filter(|s| !DERIVED_SECTIONS.contains(&s.key.as_str()) && !s.inputs.is_empty())
+        // Her own sections take no material (round 30).
+        .filter(|s| s.mode == dv_domain::SectionMode::Ai)
         .collect()
 }
 

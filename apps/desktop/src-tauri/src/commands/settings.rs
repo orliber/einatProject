@@ -94,6 +94,22 @@ pub(crate) async fn set_lock_minutes(state: tauri::State<'_, AppState>, minutes:
 }
 
 #[tauri::command]
+pub(crate) async fn section_modes(
+    state: tauri::State<'_, AppState>,
+) -> Res<Vec<dv_core::SectionModeView>> {
+    with_core(&state, |c| c.section_modes()).await
+}
+
+#[tauri::command]
+pub(crate) async fn set_section_mode(
+    state: tauri::State<'_, AppState>,
+    section_key: String,
+    mode: dv_domain::SectionMode,
+) -> Res<()> {
+    with_core(&state, move |c| c.set_section_mode(&section_key, mode)).await
+}
+
+#[tauri::command]
 pub(crate) async fn set_section_guide(
     state: tauri::State<'_, AppState>,
     section_key: String,
