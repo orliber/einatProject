@@ -100,9 +100,30 @@ function Invoke-Named($root, [string] $pattern, [string] $what, [int] $seconds =
     throw "nothing to press: $what ($pattern)"
 }
 
+# Where the keys go now, for the log when they went elsewhere.
+function Focused-Name {
+    $f = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if ($null -eq $f) { return "(nothing)" }
+    return "$($f.Current.ControlType.ProgrammaticName) '$($f.Current.Name)'"
+}
+
+# Focus the field, and keep at it until it holds the focus: a dialog that opens moves the
+# focus to its first field by itself, a moment after it shows.
+function Focus-Field($element, [string] $what) {
+    Start-Sleep -Milliseconds 1000
+    for ($i = 0; $i -lt 20; $i++) {
+        $element.SetFocus()
+        Start-Sleep -Milliseconds 250
+        if ($element.Current.HasKeyboardFocus) {
+            Start-Sleep -Milliseconds 250
+            if ($element.Current.HasKeyboardFocus) { return }
+        }
+    }
+    throw "the focus does not stay in $what; it is in $(Focused-Name)"
+}
+
 function Type-Into($element, [string] $text, [int] $pauseMs) {
-    $element.SetFocus()
-    Start-Sleep -Milliseconds 300
+    Focus-Field $element "the field"
     foreach ($c in $text.ToCharArray()) {
         [Keys]::Char($c)
         if ($pauseMs -gt 0) { Start-Sleep -Milliseconds $pauseMs }
@@ -160,6 +181,7 @@ if ($got -ne $text) {
     $n = [Math]::Min($got.Length, $text.Length)
     $at = 0
     while ($at -lt $n -and $got[$at] -eq $text[$at]) { $at++ }
+    Write-Host "the focus is in: $(Focused-Name)"
     throw "typing lost or changed keys: $($got.Length) of $($text.Length) characters, first difference at $at"
 }
 Write-Host ("typing: ok ({0} Hebrew characters in {1:N1} s, none lost)" -f $text.Length, $typed)
