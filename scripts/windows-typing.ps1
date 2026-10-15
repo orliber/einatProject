@@ -101,9 +101,10 @@ function Invoke-Named($root, [string] $pattern, [string] $what, [int] $seconds =
 }
 
 # A menu and its items: a menu button opens on a key or a pointer press, not on the click
-# Invoke sends, and offers no Invoke at all. So an element that can be invoked is invoked,
-# and one that cannot takes the focus and Enter, as she would open it from the keyboard.
-function Press-Named($root, [string] $pattern, [string] $what, [int] $seconds = 60) {
+# Invoke sends, and offers no Invoke at all; an item invoked while its menu settles may be
+# gone before it acts. So with -Keyboard (and for anything that cannot be invoked) the
+# element takes the focus and Enter, as she would choose it from the keyboard.
+function Press-Named($root, [string] $pattern, [string] $what, [int] $seconds = 60, [switch] $Keyboard) {
     $invoke = [System.Windows.Automation.InvokePattern]::Pattern
     $deadline = (Get-Date).AddSeconds($seconds)
     while ((Get-Date) -lt $deadline) {
@@ -112,14 +113,8 @@ function Press-Named($root, [string] $pattern, [string] $what, [int] $seconds = 
             $c = $e.Current
             if ($c.Name -notmatch $pattern -or -not $c.IsEnabled) { continue }
             $p = $null
-            if ($e.TryGetCurrentPattern($invoke, [ref] $p)) {
-                # A menu item closes its menu as it acts, and UI Automation may then report the
-                # element gone; the next step (its dialog's field) shows whether it acted.
-                try { $p.Invoke() }
-                catch [System.Management.Automation.MethodInvocationException] {
-                    if ($_.Exception.InnerException -isnot [System.Windows.Automation.ElementNotAvailableException]) { throw }
-                    Write-Host "(the item closed its menu as it was pressed)"
-                }
+            if (-not $Keyboard -and $e.TryGetCurrentPattern($invoke, [ref] $p)) {
+                $p.Invoke()
                 Write-Host "pressed: $($c.Name)"
                 return
             }
@@ -192,8 +187,8 @@ Type-Into $passwordField $Password 0
 #    the menu of each kind of material, here the earlier assessments).
 Invoke-Named $window 'בתיק של' "a case on the cases screen"
 Invoke-Named $window 'חומרים$' "the materials stage"
-Press-Named $window '^הוספה לאבחונים קודמים' "the add menu of the earlier assessments"
-Press-Named $window '^הדבקת טקסט' "paste text for a material"
+Press-Named $window '^הוספה לאבחונים קודמים' "the add menu of the earlier assessments" -Keyboard
+Press-Named $window '^הדבקת טקסט' "paste text for a material" -Keyboard
 $field = Find-Field $window '^הטקסט$' "the text field of the material"
 
 # 3. 500 Hebrew characters, one key at a time, words and punctuation as she writes them.
