@@ -51,7 +51,6 @@ use dv_domain::{
     IdentitySource, InputKind, ReportStructure, Role,
 };
 use dv_egress::{EgressError, Transport};
-use dv_ipc::{PingResponse, IPC_VERSION};
 use dv_privacy::restore::{restore, scan_model_output};
 use dv_privacy::text::normalize;
 use dv_privacy::{
@@ -89,7 +88,6 @@ pub use style::{
 pub use unsaved::UnsavedEdit;
 pub use usage::UsageSummary;
 pub use verify::VerifyResult;
-pub use views::ErrorAction;
 pub use views::{
     ActivityEntry, ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail,
     ChatView, ConsultResult, ConsultTurnView, ConsultationSummary, ConsultationView, CreatedVault,
@@ -98,6 +96,7 @@ pub use views::{
     SortResult, SourceExcerpt, StagedBackup, StyleHint, StyleMark, SuspectDecision, TemplateView,
     UiError,
 };
+pub use views::{ErrorAction, PingResponse, IPC_VERSION};
 
 const API_KEY: &str = "anthropic_api_key";
 

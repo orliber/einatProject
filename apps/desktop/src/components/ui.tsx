@@ -259,6 +259,13 @@ export function ErrorLine({ error: given, retry, report: always }: { error: stri
   // A try again that failed shows its own failure, with its own next step, in place of the
   // first (never the old line as if nothing happened).
   const [again_, setAgain] = useState<{ after: string; message: string } | null>(null);
+  // "הבנתי" closes this message, not the next one like it: a second file refused for the
+  // same reason shows the line again, since the screen clears the error before each try.
+  const [last, setLast] = useState(given);
+  if (given !== last) {
+    setLast(given);
+    if (given === null && closed !== null) setClosed(null);
+  }
   const error = given !== null && again_?.after === given ? again_.message : given;
   const f = error ? failureFor(error) : null;
   const action = f?.action ?? null;

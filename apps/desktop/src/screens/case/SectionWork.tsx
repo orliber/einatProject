@@ -22,6 +22,7 @@ import { isCombo, KEYS } from "../../shortcuts";
 import type { CaseApi } from "../CaseScreen";
 import "./SectionWork.css";
 import { useAi } from "../../ai";
+import { DRAFT_FROM_APPROVED, DRAFT_FROM_SOURCES } from "./instructions";
 
 type Section = CaseDetail["sections"][number];
 
@@ -274,7 +275,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   const after = api.detail.sections.findIndex((s) => s.key === section.key);
   const nextSection =
     order.find((s) => api.detail.sections.indexOf(s) > after && !s.approved) ?? order.find((s) => !s.approved);
-  const draftInstruction = derived ? "כתבי טיוטה לסעיף מתוך הסעיפים שאושרו." : "כתבי טיוטה לסעיף מתוך המקורות, עם מקור לכל פסקה.";
+  const draftInstruction = derived ? DRAFT_FROM_APPROVED : DRAFT_FROM_SOURCES;
 
   return (
     <div className="view">

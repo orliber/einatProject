@@ -50,7 +50,7 @@ impl Core {
             return;
         };
         if let Ok(json) = serde_json::to_string(&edit) {
-            let _ = v.set_setting(UNSAVED_KEY, &json);
+            let _ = v.set_state(UNSAVED_KEY, &json);
         }
     }
 
@@ -60,7 +60,7 @@ impl Core {
         let Some(stored) = v.setting(UNSAVED_KEY)?.filter(|s| !s.is_empty()) else {
             return Ok(None);
         };
-        v.set_setting(UNSAVED_KEY, "")?;
+        v.set_state(UNSAVED_KEY, "")?;
         Ok(serde_json::from_str(&stored).ok())
     }
 }

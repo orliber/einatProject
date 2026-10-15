@@ -79,7 +79,9 @@ impl Core {
         let read = |key: &str| -> Option<i64> { v.setting(key).ok().flatten()?.parse().ok() };
         let last_at = read(LAST_BACKUP_KEY);
         let last_check_at = read(LAST_CHECK_KEY);
-        let days_since = last_at.map(|t| (unix_now() - t).max(0) / dv_domain::dates::DAY_SECS);
+        // A corrupt value in the setting must not stop the program (overflow aborts).
+        let days_since =
+            last_at.map(|t| unix_now().saturating_sub(t).max(0) / dv_domain::dates::DAY_SECS);
         // Cleared by the next backup (see `write_backup`).
         let secret_changed = read(SECRET_CHANGED_KEY).is_some();
         Ok(BackupStatus {
@@ -88,7 +90,7 @@ impl Core {
             due: secret_changed || days_since.is_none_or(|d| d >= BACKUP_DAYS),
             secret_changed,
             last_check_at,
-            has_cases: !v.list_cases()?.is_empty() || !v.list_trash()?.is_empty(),
+            has_cases: v.has_cases()?,
             auto: v.setting(AUTO_KEY)?.as_deref() != Some("0"),
         })
     }
@@ -119,7 +121,7 @@ impl Core {
 
     pub(crate) fn mark_secret_changed(&mut self) -> Result<(), CoreError> {
         self.vault_mut()?
-            .set_setting(SECRET_CHANGED_KEY, &unix_now().to_string())?;
+            .set_state(SECRET_CHANGED_KEY, &unix_now().to_string())?;
         Ok(())
     }
 
@@ -180,11 +182,11 @@ impl Core {
         current: bool,
     ) -> Result<(), CoreError> {
         let v = self.vault_mut()?;
-        v.set_setting(LAST_CHECK_KEY, &unix_now().to_string())?;
-        v.set_setting(LAST_BACKUP_KEY, &created_at.to_string())?;
-        v.set_setting(LAST_DIR_KEY, &folder.to_string_lossy())?;
+        v.set_state(LAST_CHECK_KEY, &unix_now().to_string())?;
+        v.set_state(LAST_BACKUP_KEY, &created_at.to_string())?;
+        v.set_state(LAST_DIR_KEY, &folder.to_string_lossy())?;
         if current {
-            v.set_setting(SECRET_CHANGED_KEY, "")?;
+            v.set_state(SECRET_CHANGED_KEY, "")?;
         }
         Ok(())
     }
@@ -192,7 +194,7 @@ impl Core {
     /// A restore drill passed.
     pub(crate) fn drill_recorded(&mut self) -> Result<(), CoreError> {
         self.vault_mut()?
-            .set_setting(LAST_CHECK_KEY, &unix_now().to_string())?;
+            .set_state(LAST_CHECK_KEY, &unix_now().to_string())?;
         Ok(())
     }
 

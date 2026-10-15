@@ -70,6 +70,18 @@ describe("ErrorLine", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it("the same message shows again after it was closed, once the screen cleared and set it anew", async () => {
+    const user = userEvent.setup();
+    const message = "הקובץ הזה לא נקרא.";
+    const view = render(<ErrorLine error={message} />);
+    await user.click(screen.getByRole("button", { name: "הבנתי" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    // A second file refused for the same reason: the screen clears, then reports again.
+    view.rerender(<ErrorLine error={null} />);
+    view.rerender(<ErrorLine error={message} />);
+    expect(screen.getByRole("alert")).toHaveTextContent(message);
+  });
+
   it("a missing consent on a case offers the consent form of that case", async () => {
     const go = vi.fn();
     const message = "לפני שליחה צריך לרשום את הסכמת ההורים.";

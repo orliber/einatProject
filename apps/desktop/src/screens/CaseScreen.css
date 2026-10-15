@@ -378,6 +378,8 @@
   padding: 0 24px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
+  /* Measured after the text size (zoom), so a narrow bar is told apart from a wide one. */
+  container-type: inline-size;
 }
 .case-back {
   white-space: nowrap;
@@ -420,10 +422,17 @@
 }
 .stages {
   flex-grow: 1;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
   display: flex;
   justify-content: center;
   gap: 6px;
+}
+@media (max-width: 1200px) {
+  .case-bar {
+    gap: 10px;
+    padding: 0 16px;
+  }
 }
 .stage {
   display: flex;
@@ -606,4 +615,20 @@
 }
 .next-bar .next-title {
   font-size: var(--text-md);
+}
+
+/* A laptop screen, or a larger text size (measured after the zoom): the case bar keeps to one
+   line. Last, so it wins over the rules above. */
+@container (max-width: 1150px) {
+  .case-age {
+    display: none;
+  }
+  .case-child {
+    /* Never squeezed to one letter: the stages and the age give way first. */
+    min-width: 6ch;
+    max-width: 18ch;
+  }
+  .stage {
+    padding: 0 10px;
+  }
 }

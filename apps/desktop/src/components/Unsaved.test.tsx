@@ -22,7 +22,7 @@ describe("an edit open when the vault locks", () => {
     await act(async () => { vi.advanceTimersByTime(1000); });
     expect(calls).toEqual([{ case_id: "c1", place: "פסקה", view: "report", text: "טיוטה" }]);
     rerender({ text: null });
-    await act(async () => { vi.advanceTimersByTime(200); });
+    await act(async () => { vi.advanceTimersByTime(500); });
     expect(calls.at(-1)).toBeNull();
     unmount();
     vi.useRealTimers();
@@ -63,13 +63,13 @@ describe("an edit open when the vault locks", () => {
     });
     // Case A's editor: typed, then she went to another case with it open.
     const a = renderHook(() => useHoldUnsaved("case-a", "פסקה משלי", "טקסט של תיק א בדוי"));
-    await act(async () => { vi.advanceTimersByTime(200); });
+    await act(async () => { vi.advanceTimersByTime(500); });
     a.unmount();
     // Case B's editor: one letter, then Esc.
     const b = renderHook(({ text }: { text: string | null }) => useHoldUnsaved("case-b", "פסקה משלי", text), {
       initialProps: { text: "ב" as string | null },
     });
-    await act(async () => { vi.advanceTimersByTime(200); });
+    await act(async () => { vi.advanceTimersByTime(500); });
     b.rerender({ text: null });
     await act(async () => { await holdNow(); });
     expect(calls.at(-1)).toEqual({ case_id: "case-a", place: "פסקה משלי", view: "report", text: "טקסט של תיק א בדוי" });
@@ -86,13 +86,13 @@ describe("an edit open when the vault locks", () => {
       return null;
     });
     const first = renderHook(() => useHoldUnsaved("c1", "פסקה", "טיוטה"));
-    await act(async () => { vi.advanceTimersByTime(200); });
+    await act(async () => { vi.advanceTimersByTime(500); });
     first.unmount();
     // Back on the stage: the kept editor opens again, then she cancels it.
     const again = renderHook(({ text }: { text: string | null }) => useHoldUnsaved("c1", "פסקה", text), {
       initialProps: { text: "טיוטה" as string | null },
     });
-    await act(async () => { vi.advanceTimersByTime(200); });
+    await act(async () => { vi.advanceTimersByTime(500); });
     again.rerender({ text: null });
     await act(async () => { await holdNow(); });
     expect(calls.at(-1)).toBeNull();

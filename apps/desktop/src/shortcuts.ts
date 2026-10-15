@@ -24,6 +24,9 @@ export function isTyping(target: EventTarget | null): boolean {
   return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
 }
 
+/** The key the sheet names for Ctrl: on a Mac the same shortcuts are on ⌘. */
+export const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
+
 export const KEYS = {
   lock: { ctrl: true, code: "KeyL" },
   help: { code: "F1" },
@@ -41,9 +44,9 @@ export const SHEET: { group: string; items: [string, string][] }[] = [
   {
     group: "בכל מקום",
     items: [
-      ["Ctrl+L", "נעילה מיידית של הכספת"],
-      ["F1 או Ctrl+/", "הדף הזה: קיצורי המקלדת"],
-      ["Ctrl + / Ctrl − / Ctrl 0", "הגדלה, הקטנה וגודל רגיל של הטקסט"],
+      [`${MOD}+L`, "נעילה מיידית של הכספת"],
+      [`F1 או ${MOD}+/`, "הדף הזה: קיצורי המקלדת"],
+      [`${MOD} + / ${MOD} − / ${MOD} 0`, "הגדלה, הקטנה וגודל רגיל של הטקסט"],
       ["Tab / Shift+Tab", "מעבר בין כפתורים ושדות"],
       ["Esc", "סגירת חלון או ביטול עריכה"],
     ],
@@ -53,10 +56,10 @@ export const SHEET: { group: string; items: [string, string][] }[] = [
     items: [
       ["Alt+↓ / Alt+↑", "לסעיף הבא / לסעיף הקודם"],
       ["Enter", "עריכת הפסקה שמסומנת"],
-      ["Ctrl+Enter", "בפסקה שממתינה: אישור. בעריכה: שמירה. בשיחה: שליחה"],
-      ["Ctrl+Shift+Enter", "אישור כל הטיוטה של הסעיף"],
-      ["Ctrl+K", "לשנות את הפסקה שמסומנת עם AI"],
-      ["Ctrl+Shift+H", "גרסאות קודמות של הפסקה שמסומנת"],
+      [`${MOD}+Enter`, "בפסקה שממתינה: אישור. בעריכה: שמירה. בשיחה: שליחה"],
+      [`${MOD}+Shift+Enter`, "אישור כל הטיוטה של הסעיף"],
+      [`${MOD}+K`, "לשנות את הפסקה שמסומנת עם AI"],
+      [`${MOD}+Shift+H`, "גרסאות קודמות של הפסקה שמסומנת"],
     ],
   },
 ];

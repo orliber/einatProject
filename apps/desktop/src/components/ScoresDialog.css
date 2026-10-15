@@ -145,6 +145,9 @@
 .scores-preview {
   position: sticky;
   top: 0;
+  /* Stays under the dialog's head and foot; a long preview scrolls inside. */
+  max-height: calc(100vh / var(--zoom, 1) - 220px);
+  overflow: auto;
   background: var(--warn-paper);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);

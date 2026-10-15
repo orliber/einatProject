@@ -314,6 +314,35 @@ describe("writing the report", () => {
     expect(calls).not.toContain("prepare_sort");
   });
 
+  it("Esc with a changed text asks first; the text is kept until she says to drop it", async () => {
+    const { user } = await openApp();
+    const page = await openCase(user);
+    const original = within(page).getByText(/הופנה לאבחון פסיכולוגי-התפתחותי על ידי הוריו/);
+    await user.click(original);
+    const box = await screen.findByRole("textbox", { name: /עריכת פסקה בסעיף/ });
+    await user.type(box, " ועוד מילה.");
+    await user.keyboard("{Escape}");
+    const ask = await screen.findByRole("group", { name: "לבטל את העריכה?" });
+    expect((screen.getByRole("textbox", { name: /עריכת פסקה בסעיף/ }) as HTMLTextAreaElement).value).toContain("ועוד מילה.");
+    await user.click(within(ask).getByRole("button", { name: "להמשיך לערוך" }));
+    expect(screen.queryByRole("group", { name: "לבטל את העריכה?" })).toBeNull();
+    expect((screen.getByRole("textbox", { name: /עריכת פסקה בסעיף/ }) as HTMLTextAreaElement).value).toContain("ועוד מילה.");
+    // Esc twice: asked, then dropped.
+    await user.keyboard("{Escape}{Escape}");
+    expect(screen.queryByRole("textbox", { name: /עריכת פסקה בסעיף/ })).toBeNull();
+    expect(within(page).getByText(/הופנה לאבחון פסיכולוגי-התפתחותי על ידי הוריו/)).toBeInTheDocument();
+    expect(within(page).queryByText(/ועוד מילה/)).toBeNull();
+  });
+
+  it("Esc with nothing changed closes the editor at once", async () => {
+    const { user } = await openApp();
+    const page = await openCase(user);
+    await user.click(within(page).getByText(/הופנה לאבחון פסיכולוגי-התפתחותי על ידי הוריו/));
+    await screen.findByRole("textbox", { name: /עריכת פסקה בסעיף/ });
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("textbox", { name: /עריכת פסקה בסעיף/ })).toBeNull();
+  });
+
   it("an edited paragraph keeps its earlier wording, and it can be brought back", async () => {
     const { user } = await openApp();
     const page = await openCase(user);

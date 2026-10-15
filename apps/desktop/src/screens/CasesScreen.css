@@ -264,3 +264,12 @@ button.crumb:hover:not([aria-current="page"]) {
 .resume-progress .bar {
   width: 300px;
 }
+/* A low window (a laptop under its taskbar): the first case stays on screen. */
+@media (max-height: 720px) {
+  .resume {
+    padding: 12px 20px;
+  }
+  .resume-name {
+    font-size: var(--text-2xl);
+  }
+}

@@ -40,7 +40,6 @@ dv-egress = { path = "crates/dv-egress" }
 dv-domain = { path = "crates/dv-domain" }
 dv-ingest = { path = "crates/dv-ingest" }
 dv-export = { path = "crates/dv-export" }
-dv-ipc = { path = "crates/dv-ipc" }
 dv-core = { path = "crates/dv-core" }
 dv-sandbox = { path = "crates/dv-sandbox" }
 dv-ner = { path = "crates/dv-ner" }

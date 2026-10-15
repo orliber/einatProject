@@ -550,7 +550,7 @@ impl Core {
         let mut month = usage::Month::parse(v.setting(&key).ok().flatten().as_deref());
         month.add(&model, usage::Tokens::from_answer(answer));
         if let Ok(json) = serde_json::to_string(&month) {
-            let _ = v.set_setting(&key, &json);
+            let _ = v.set_state(&key, &json);
         }
     }
 

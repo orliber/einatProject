@@ -1,13 +1,14 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+// The base styles come first, before any component's stylesheet, whatever chunk the bundler
+// puts them in: a component rule overrides a base rule by coming later.
+import "./styles/tokens.css";
+import "./styles/base.css";
+import "./styles/motion.css";
+import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ipc, onCoreEvent, type AppStatus, type UiError } from "./ipc/client";
 import { LockScreen } from "./screens/LockScreen";
-import { SetupScreen } from "./screens/SetupScreen";
 import { CasesScreen } from "./screens/CasesScreen";
 import { CaseScreen } from "./screens/CaseScreen";
-import { ConsultScreen } from "./screens/ConsultScreen";
-import { SettingsScreen } from "./screens/SettingsScreen";
-import { StyleScreen } from "./screens/StyleScreen";
 import { ErrorLine, Toast, type ToastAction } from "./components/ui";
 import { IdleWarning } from "./components/IdleWarning";
 import { forgetHold, holdNow, UnsavedNotice } from "./components/Unsaved";
@@ -17,6 +18,21 @@ import { isCombo, KEYS } from "./shortcuts";
 import { forgetFailures, rememberFailure } from "./errors";
 import { clearKept } from "./kept";
 import type { SettingsPane } from "./screens/settingsPanes";
+
+// The pages she opens rarely load on their own, so the first paint and the case pages carry
+// only what they need; they are fetched in the background right after the vault opens.
+const SetupScreen = lazy(() => import("./screens/SetupScreen").then((m) => ({ default: m.SetupScreen })));
+const ConsultScreen = lazy(() => import("./screens/ConsultScreen").then((m) => ({ default: m.ConsultScreen })));
+const SettingsScreen = lazy(() => import("./screens/SettingsScreen").then((m) => ({ default: m.SettingsScreen })));
+const StyleScreen = lazy(() => import("./screens/StyleScreen").then((m) => ({ default: m.StyleScreen })));
+function warmRarePages() {
+  const load = () => { void import("./screens/SettingsScreen"); void import("./screens/ConsultScreen"); void import("./screens/StyleScreen"); };
+  // WebKit (the Mac) has no requestIdleCallback.
+  if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(load);
+  else window.setTimeout(load, 1500);
+}
+/** While a page's code is fetched: an empty page in its place, never a flash of another page. */
+const PageLoading = () => <main className="center-note" aria-busy="true" />;
 
 export type Route =
   | { name: "cases" }
@@ -160,6 +176,9 @@ export function App() {
     wasUnlocked.current = unlocked;
   }, [unlocked]);
   useEffect(() => {
+    if (unlocked) warmRarePages();
+  }, [unlocked]);
+  useEffect(() => {
     if (!unlocked) return;
     const onKey = (e: KeyboardEvent) => {
       // By the physical key: with the Hebrew layout on, Ctrl+L is "ך" (UX-5).
@@ -218,10 +237,12 @@ export function App() {
   if (!status) return <main className="center-note" aria-busy="true" />;
   if (!status.vault_exists || inSetup) {
     return (
-      <SetupScreen status={status}
-        onCreated={() => { setInSetup(true); void refresh(); }}
-        onDone={async () => { setInSetup(false); await refresh(); }}
-        onRestored={(s) => { setInSetup(false); setStatus(s); setRoute({ name: "cases" }); }} />
+      <Suspense fallback={<PageLoading />}>
+        <SetupScreen status={status}
+          onCreated={() => { setInSetup(true); void refresh(); }}
+          onDone={async () => { setInSetup(false); await refresh(); }}
+          onRestored={(s) => { setInSetup(false); setStatus(s); setRoute({ name: "cases" }); }} />
+      </Suspense>
     );
   }
   if (!status.unlocked) {
@@ -261,9 +282,11 @@ function Shell(props: {
     <AppContext.Provider value={api}>
       {route.name === "cases" && <CasesScreen />}
       {route.name === "case" && <CaseScreen key={route.id} caseId={route.id} view={route.view} />}
-      {route.name === "consult" && <ConsultScreen caseId={route.caseId} />}
-      {route.name === "style" && <StyleScreen />}
-      {route.name === "settings" && <SettingsScreen key={route.pane ?? ""} pane={route.pane} />}
+      <Suspense fallback={<PageLoading />}>
+        {route.name === "consult" && <ConsultScreen caseId={route.caseId} />}
+        {route.name === "style" && <StyleScreen />}
+        {route.name === "settings" && <SettingsScreen key={route.pane ?? ""} pane={route.pane} />}
+      </Suspense>
       {toast && <Toast text={toast.text} action={toast.action} onDone={() => setToast(null)} />}
       <UnsavedNotice />
       {sheet.open && <ShortcutsSheet onClose={sheet.close} />}
