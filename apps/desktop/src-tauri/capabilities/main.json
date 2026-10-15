@@ -28,6 +28,8 @@
     "allow-set-speed",
     "allow-set-lock-minutes",
     "allow-set-practitioner",
+    "allow-set-section-guide",
+    "allow-set-case-guide",
     "allow-set-review-always",
     "allow-set-screen-protection",
     "allow-report-settings",

@@ -14,6 +14,7 @@ import { kindLabel } from "../../i18n/he";
 import { useRotatingPlaceholder } from "../../components/Rotating";
 import { DRAFT_HINTS } from "../../i18n/suggestions";
 import { ParagraphVersions } from "../../components/ParagraphVersions";
+import { SectionGuide } from "../../components/SectionGuide";
 import { MarkedText, StyleHintView, applyMark } from "./StyleHintView";
 import { isCombo, KEYS } from "../../shortcuts";
 import type { CaseApi } from "../CaseScreen";
@@ -23,6 +24,8 @@ import { useAi } from "../../ai";
 type Section = CaseDetail["sections"][number];
 
 const DERIVED = ["summary", "diagnoses", "recommendations", "dsm"];
+/** A line of the guide no paragraph of the first draft answers (round 29): it says so itself. */
+const GUIDE_MISSING = "חסרה פסקה לפי ההנחיה";
 
 const QUICK: [string, string][] = [
   ["להרחיב", "הרחיבי את הטיוטה של הסעיף, בלי להוסיף עובדות שאינן במקורות."],
@@ -290,6 +293,9 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
         </div>
       </div>
 
+      <SectionGuide caseId={caseId} sectionKey={section.key} guide={section.guide} isDefault={section.guide_is_default}
+        caseGuide={section.case_guide} onSaved={reload} />
+
       {linking && (
         <section className="link-panel" aria-label="החומרים שהסעיף נכתב מהם">
           <p className="small muted">
@@ -515,7 +521,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
           {last && (last.questions.length > 0 || last.missing.length > 0 || last.contradictions.length > 0) && (
             <div className="notes-from-claude">
               {last.contradictions.map((c, i) => <p key={`c${i}`}><b>סתירה בין החומרים:</b> {c}</p>)}
-              {last.missing.map((c, i) => <p key={`m${i}`}><b>חסר מידע:</b> {c}</p>)}
+              {last.missing.map((c, i) => <p key={`m${i}`}>{c.startsWith(GUIDE_MISSING) ? c : <><b>חסר מידע:</b> {c}</>}</p>)}
               {last.questions.map((c, i) => <p key={`q${i}`}><b>שאלה:</b> {c}</p>)}
             </div>
           )}

@@ -39,6 +39,8 @@ impl Core {
         // Every new case is in the institute's report (D-066); a template is never chosen
         // from outside.
         meta.template = Some(dv_domain::INSTITUTE_TEMPLATE.to_owned());
+        // A case's own guide lines are written in it, one section at a time.
+        meta.guides = None;
         let v = self.vault_mut()?;
         let id = v.create_case(&meta)?;
         v.set_identities(&id, &identities)?;
@@ -75,6 +77,7 @@ impl Core {
             }),
             follows: None,
             template: None,
+            guides: None,
         };
         let id = self.create_case(
             meta,
@@ -100,10 +103,11 @@ impl Core {
     pub fn update_case(&mut self, case_id: &str, mut meta: CaseMeta) -> Result<(), CoreError> {
         check_meta(&meta)?;
         // Which assessment a follow-up belongs to, and the case's template, are set when it is
-        // opened, never edited.
+        // opened, never edited. Its guide lines have their own command (`set_case_guide`).
         let kept = self.vault_ref()?.case_meta(case_id)?;
         meta.follows = kept.follows;
         meta.template = kept.template;
+        meta.guides = kept.guides;
         self.vault_mut()?.update_case_meta(case_id, &meta)?;
         self.forget_pending(case_id);
         Ok(())

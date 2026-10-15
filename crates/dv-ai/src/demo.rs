@@ -506,6 +506,7 @@ mod tests {
             history: vec![],
             instruction_tagged: "נסחי".into(),
             style_profile: None,
+            guide_tagged: String::new(),
         };
         let (body, refs) = build_section_request(&ModelConfig::default(), &input, "n");
         let sources: Vec<(String, String)> = refs
@@ -541,6 +542,7 @@ mod tests {
             history: vec![],
             instruction_tagged: "כתבי טיוטה לסעיף מתוך הסעיפים שאושרו.".into(),
             style_profile: None,
+            guide_tagged: String::new(),
         };
         let (body, _) = build_section_request(&ModelConfig::default(), &input, "n");
         let approved: Vec<String> = input

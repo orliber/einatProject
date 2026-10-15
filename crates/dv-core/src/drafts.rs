@@ -141,6 +141,7 @@ impl Core {
                     u32::try_from(routing.iter().filter(|r| r.feeds.contains(&s.key)).count())
                         .unwrap_or(0);
                 let approved = paragraphs.iter().any(|p| p.status == DraftStatus::Approved);
+                let guide = guides::guide_for(v, &meta, s)?;
                 sections.push(SectionView {
                     key: s.key.clone(),
                     title: s.title.clone(),
@@ -149,6 +150,10 @@ impl Core {
                     sortable: sortable.contains(&s.key.as_str()),
                     paragraphs,
                     approved,
+                    mode: s.mode,
+                    guide: guide.general,
+                    guide_is_default: guide.is_default,
+                    case_guide: guide.case,
                 });
             }
         }

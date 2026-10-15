@@ -94,6 +94,15 @@ pub(crate) async fn set_lock_minutes(state: tauri::State<'_, AppState>, minutes:
 }
 
 #[tauri::command]
+pub(crate) async fn set_section_guide(
+    state: tauri::State<'_, AppState>,
+    section_key: String,
+    text: String,
+) -> Res<()> {
+    with_core(&state, move |c| c.set_section_guide(&section_key, &text)).await
+}
+
+#[tauri::command]
 pub(crate) async fn set_practitioner(
     state: tauri::State<'_, AppState>,
     names: Vec<String>,

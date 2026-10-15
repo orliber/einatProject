@@ -174,6 +174,19 @@ pub struct SectionInput {
     pub history: Vec<TaggedTurn>,
     pub instruction_tagged: String,
     pub style_profile: Option<String>,
+    /// How she wants the section written (round 29), filtered like her request: the general
+    /// guide, then this case's own lines. Empty: no guide.
+    pub guide_tagged: String,
+}
+
+/// The lines of a section's guide, as they are numbered in the request.
+#[must_use]
+pub fn guide_lines(guide: &str) -> Vec<&str> {
+    guide
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect()
 }
 
 /// The per-request marker for data blocks, from 16 random bytes. Letters only: digits in
@@ -229,9 +242,10 @@ const SECTION_SCHEMA: &str = r#"{
         "type": "object",
         "properties": {
           "text": {"type": "string"},
-          "source_refs": {"type": "array", "items": {"type": "string"}}
+          "source_refs": {"type": "array", "items": {"type": "string"}},
+          "guide": {"type": "integer"}
         },
-        "required": ["text", "source_refs"],
+        "required": ["text", "source_refs", "guide"],
         "additionalProperties": false
       }
     },
@@ -298,6 +312,20 @@ pub fn build_section_request(
             GrammaticalGender::Male => "לשון: זכר (\"מתקשה\", \"מגיב\")".to_owned(),
             GrammaticalGender::Female => "לשון: נקבה (\"מתקשה\", \"מגיבה\")".to_owned(),
         });
+    }
+    let guide = guide_lines(&input.guide_tagged);
+    if !guide.is_empty() {
+        // Numbered, so each paragraph can say which line it answers (`guide`) and a line no
+        // paragraph answers is found locally.
+        let numbered: Vec<String> = guide
+            .iter()
+            .enumerate()
+            .map(|(i, l)| format!("{}. {l}", i + 1))
+            .collect();
+        parts.push(format!(
+            "ההנחיה של הפסיכולוגית לסעיף:\n{}",
+            numbered.join("\n")
+        ));
     }
     if input.sources.is_empty() && !input.approved_context.is_empty() {
         // Summary, diagnoses, recommendations: written from the approved sections, which have
@@ -471,6 +499,7 @@ mod tests {
             history: vec![],
             instruction_tagged: "נסח/י פסקה".into(),
             style_profile: None,
+            guide_tagged: String::new(),
         }
     }
 
@@ -521,6 +550,34 @@ mod tests {
         let last = content_text(&b["messages"][2]["content"]);
         assert!(last.contains("לקצר") && last.contains("current_draft"));
         assert_eq!(b["messages"][1]["role"], "assistant");
+    }
+
+    /// Round 29: the guide goes in the cached part, numbered from 1, blank lines dropped; each
+    /// paragraph of the answer must give the line it answers.
+    #[test]
+    fn the_guide_is_numbered_in_the_cached_part_and_each_paragraph_names_its_line() {
+        let mut input = section();
+        input.guide_tagged = "פתיחה על המבחן.\n\n  התחומים מהגבוה לנמוך.  \n".into();
+        let (body, _) = build_section_request(&ModelConfig::default(), &input, "n1");
+        let cached = body["messages"][0]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert!(
+            cached.contains(
+                "ההנחיה של הפסיכולוגית לסעיף:\n1. פתיחה על המבחן.\n2. התחומים מהגבוה לנמוך."
+            ),
+            "{cached}"
+        );
+        let items = &body["output_config"]["format"]["schema"]["properties"]["paragraphs"]["items"];
+        assert_eq!(items["properties"]["guide"]["type"], "integer");
+        assert!(items["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("guide")));
+        // No guide: no heading at all.
+        let (plain, _) = build_section_request(&ModelConfig::default(), &section(), "n1");
+        assert!(!content_text(&plain["messages"][0]["content"]).contains("ההנחיה"));
     }
 
     #[test]

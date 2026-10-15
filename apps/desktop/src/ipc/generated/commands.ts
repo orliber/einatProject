@@ -176,6 +176,7 @@ export type Commands = {
   sent_text: { args: { caseId: string; id: string }; returns: SentText };
   set_api_key: { args: { provider: string; key: string; retentionAck: boolean }; returns: null };
   set_auto_backup: { args: { on: boolean }; returns: BackupStatus };
+  set_case_guide: { args: { caseId: string; sectionKey: string; text: string }; returns: null };
   set_identities: { args: { caseId: string; identities: Array<IdentityInput> }; returns: Array<Identity> };
   set_input_sections: { args: { caseId: string; inputId: string; sections: Array<string> }; returns: null };
   set_lock_minutes: { args: { minutes: number }; returns: null };
@@ -187,6 +188,7 @@ export type Commands = {
   set_report_template: { args: Uint8Array; returns: TemplateView };
   set_review_always: { args: { on: boolean }; returns: null };
   set_screen_protection: { args: { on: boolean }; returns: null };
+  set_section_guide: { args: { sectionKey: string; text: string }; returns: null };
   set_send_stopped: { args: { stopped: boolean }; returns: SecurityStatus };
   set_speed: { args: { speed: string }; returns: null };
   set_style_enabled: { args: { on: boolean }; returns: null };

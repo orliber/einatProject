@@ -173,6 +173,14 @@ pub struct SectionView {
     pub sortable: bool,
     pub paragraphs: Vec<ParagraphView>,
     pub approved: bool,
+    /// Who writes the first draft (D-066).
+    pub mode: dv_domain::SectionMode,
+    /// How to write it (round 29): hers from settings, or the template's.
+    pub guide: String,
+    /// `guide` is the template's text, not edited.
+    pub guide_is_default: bool,
+    /// The lines added for this case only.
+    pub case_guide: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

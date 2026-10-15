@@ -15,6 +15,7 @@ mod export;
 mod failures;
 mod followup;
 pub mod google;
+mod guides;
 mod history;
 mod intake;
 mod library;
@@ -473,6 +474,9 @@ enum PendingKind {
         /// The one proposed paragraph the answer rewrites ("ניסוח מחדש"); `None`: the answer
         /// is the section's new draft and replaces the paragraphs not approved yet.
         replaces: Option<String>,
+        /// A first draft: the guide's lines as they went out, numbered from 1, to find the
+        /// ones no paragraph answers (round 29). Empty: not checked.
+        guide: Vec<String>,
     },
     Consult {
         case_id: Option<String>,

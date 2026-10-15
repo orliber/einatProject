@@ -58,6 +58,11 @@ pub struct CaseMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub template: Option<String>,
+    /// Her addition to a section's guide for this case only (round 29), by section key. Kept
+    /// with the case, so it goes when the case goes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub guides: Option<std::collections::BTreeMap<String, String>>,
 }
 
 /// One row of the case list. Names appear only locally.

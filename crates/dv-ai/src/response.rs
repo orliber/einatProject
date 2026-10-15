@@ -25,6 +25,8 @@ pub struct ProposedParagraph {
     pub source_refs: Vec<String>,
     /// Problems found locally (unknown source, a number not found in the sources…).
     pub warnings: Vec<String>,
+    /// The line of the section's guide it answers, from 1; 0: none (round 29).
+    pub guide: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -41,6 +43,9 @@ pub struct SectionReply {
 struct RawParagraph {
     text: String,
     source_refs: Vec<String>,
+    /// Absent in an answer from before the guide, or from a model that left it out.
+    #[serde(default)]
+    guide: u32,
 }
 
 #[derive(Deserialize)]
@@ -136,6 +141,7 @@ pub fn parse_section(
                 text: p.text,
                 source_refs: p.source_refs,
                 warnings,
+                guide: p.guide,
             }
         })
         .collect();

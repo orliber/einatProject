@@ -1,0 +1,36 @@
+.section-guide {
+  margin: 0 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+}
+.section-guide > summary {
+  cursor: pointer;
+  padding: 8px 14px;
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+}
+.guide-body {
+  padding: 0 14px 12px;
+  gap: 8px;
+}
+.guide-lines {
+  margin: 0;
+  padding-inline-start: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.guide-text,
+.guide-lines {
+  font-size: var(--text-base);
+  white-space: pre-wrap;
+}
+.guide-text {
+  margin: 0;
+}
+.guide-case {
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}

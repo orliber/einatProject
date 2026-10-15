@@ -299,6 +299,29 @@ impl Core {
             if let Some(text) = &style_profile {
                 review.add_context("פרופיל הסגנון שלך".to_owned(), &run(text)?);
             }
+            // How she wants the section written (round 29), filtered like her request: the
+            // case's own lines may name someone.
+            let guide_text = if letter.is_some() {
+                String::new()
+            } else {
+                guides::guide_for(v, &meta, &section)?.text()
+            };
+            let guide_tagged = if guide_text.is_empty() {
+                String::new()
+            } else {
+                let out = run(&guide_text)?;
+                review.add("איך לכתוב את הסעיף".to_owned(), &out);
+                out.tagged
+            };
+            // A first draft of the whole section is checked against the guide's lines, when it
+            // has two or more; a rewrite of one paragraph or a turn on a draft is not.
+            let lines = dv_ai::guide_lines(&guide_tagged);
+            let guide_lines: Vec<String> =
+                if current.is_empty() && replaces.is_none() && lines.len() >= 2 {
+                    lines.into_iter().map(str::to_owned).collect()
+                } else {
+                    Vec::new()
+                };
             let input = SectionInput {
                 section_key: section.key.clone(),
                 section_title: fixed_title(&section)?,
@@ -310,6 +333,7 @@ impl Core {
                 history,
                 instruction_tagged: instr.tagged.clone(),
                 style_profile,
+                guide_tagged,
             };
             let approved = input
                 .approved_context
@@ -322,6 +346,7 @@ impl Core {
                 instr.hidden.clone(),
                 source_rows,
                 approved,
+                guide_lines,
             );
             (input, review, sources)
         };
@@ -340,7 +365,7 @@ impl Core {
         };
         let (body, _refs) = dv_ai::build_section_request(&model, &input, &nonce);
         let mut prepared = review.into_case_prepared(demo_mode, &data);
-        let (key, instruction_tagged, instr_hidden, rows, approved) = sources;
+        let (key, instruction_tagged, instr_hidden, rows, approved, guide) = sources;
         let kind = PendingKind::Section {
             case_id: case_id.to_owned(),
             section_key: key,
@@ -349,6 +374,7 @@ impl Core {
             sources: rows,
             approved,
             replaces: replaces.map(str::to_owned),
+            guide,
         };
         if self.gate(&data, &body, kind, &mut prepared, !learned)? {
             return self.prepare_section_once(case_id, section_key, instruction, replaces, true);
@@ -535,6 +561,7 @@ impl Core {
             sources,
             approved,
             replaces,
+            guide,
         } = kind
         else {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
@@ -620,6 +647,18 @@ impl Core {
             }
         }
 
+        // The guide's lines no paragraph answers (round 29), worked out here from the numbers
+        // the paragraphs give. Not in a demo answer, which follows no guide.
+        let unanswered: Vec<&String> = if demo || reply.paragraphs.is_empty() {
+            Vec::new()
+        } else {
+            guide
+                .iter()
+                .zip(1u32..)
+                .filter(|(_, n)| !reply.paragraphs.iter().any(|p| p.guide == *n))
+                .map(|(l, _)| l)
+                .collect()
+        };
         let practitioner = v.practitioner()?.names.first().cloned();
         let show = |t: &str| restore(t, &identities, practitioner.as_deref(), &masks);
         Ok(SectionResult {
@@ -633,7 +672,11 @@ impl Core {
                 })
                 .collect(),
             questions: reply.questions.iter().map(|q| show(q)).collect(),
-            missing: reply.missing.iter().map(|q| show(q)).collect(),
+            missing: unanswered
+                .iter()
+                .map(|l| format!("חסרה פסקה לפי ההנחיה: {}", show(l)))
+                .chain(reply.missing.iter().map(|q| show(q)))
+                .collect(),
             contradictions: reply.contradictions.iter().map(|q| show(q)).collect(),
             demo,
         })

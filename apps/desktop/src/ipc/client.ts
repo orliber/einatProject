@@ -165,6 +165,7 @@ export const ipc = {
   setModel: (model: string) => run("set_model", { model }),
   setLockMinutes: (minutes: number) => run("set_lock_minutes", { minutes }),
   setPractitioner: (names: string[]) => run("set_practitioner", { names }),
+  setSectionGuide: (sectionKey: string, text: string) => run("set_section_guide", { sectionKey, text }),
   setReviewAlways: (on: boolean) => run("set_review_always", { on }),
   setScreenProtection: (on: boolean) => run("set_screen_protection", { on }),
   reportSettings: () => call("report_settings"),
@@ -181,6 +182,7 @@ export const ipc = {
   createCase: (meta: CaseMeta, identities: IdentityInput[]) => call("create_case", { meta, identities }),
   createSampleCase: () => call("create_sample_case"),
   updateCase: (caseId: string, meta: CaseMeta) => run("update_case", { caseId, meta }),
+  setCaseGuide: (caseId: string, sectionKey: string, text: string) => run("set_case_guide", { caseId, sectionKey, text }),
   /** Into the recycle bin (D-023); restorable for 30 days. */
   deleteCase: (caseId: string) => run("delete_case", { caseId }),
   listTrash: () => call("list_trash"),

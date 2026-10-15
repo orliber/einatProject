@@ -16,4 +16,9 @@ follows?: string,
  * The report template the case was opened with (`ReportStructure::for_template`).
  * Absent: a case from before templates were kept, in the old one.
  */
-template?: string, };
+template?: string, 
+/**
+ * Her addition to a section's guide for this case only (round 29), by section key. Kept
+ * with the case, so it goes when the case goes.
+ */
+guides?: { [key in string]: string }, };
