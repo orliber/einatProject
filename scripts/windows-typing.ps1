@@ -100,6 +100,36 @@ function Invoke-Named($root, [string] $pattern, [string] $what, [int] $seconds =
     throw "nothing to press: $what ($pattern)"
 }
 
+# A menu and its items: a menu button opens on a key or a pointer press, not on the click
+# Invoke sends, and offers no Invoke at all. So an element that can be invoked is invoked,
+# and one that cannot takes the focus and Enter, as she would open it from the keyboard.
+function Press-Named($root, [string] $pattern, [string] $what, [int] $seconds = 60) {
+    $invoke = [System.Windows.Automation.InvokePattern]::Pattern
+    $deadline = (Get-Date).AddSeconds($seconds)
+    while ((Get-Date) -lt $deadline) {
+        $all = $root.FindAll($Tree, [System.Windows.Automation.Condition]::TrueCondition)
+        foreach ($e in $all) {
+            $c = $e.Current
+            if ($c.Name -notmatch $pattern -or -not $c.IsEnabled) { continue }
+            $p = $null
+            if ($e.TryGetCurrentPattern($invoke, [ref] $p)) {
+                $p.Invoke()
+                Write-Host "pressed: $($c.Name)"
+                return
+            }
+            if ($c.IsKeyboardFocusable) {
+                Focus-Field $e $what
+                [Keys]::Enter()
+                Write-Host "pressed with Enter: $($c.Name)"
+                return
+            }
+        }
+        Start-Sleep -Milliseconds 300
+    }
+    Show-Names $root
+    throw "nothing to press: $what ($pattern)"
+}
+
 # Where the keys go now, for the log when they went elsewhere.
 function Focused-Name {
     $f = [System.Windows.Automation.AutomationElement]::FocusedElement
@@ -156,8 +186,8 @@ Type-Into $passwordField $Password 0
 #    the menu of each kind of material, here the earlier assessments).
 Invoke-Named $window 'בתיק של' "a case on the cases screen"
 Invoke-Named $window 'חומרים$' "the materials stage"
-Invoke-Named $window '^הוספה לאבחונים קודמים' "the add menu of the earlier assessments"
-Invoke-Named $window '^הדבקת טקסט' "paste text for a material"
+Press-Named $window '^הוספה לאבחונים קודמים' "the add menu of the earlier assessments"
+Press-Named $window '^הדבקת טקסט' "paste text for a material"
 $field = Find-Field $window '^הטקסט$' "the text field of the material"
 
 # 3. 500 Hebrew characters, one key at a time, words and punctuation as she writes them.
