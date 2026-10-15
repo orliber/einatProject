@@ -203,3 +203,33 @@ fn a_refusal_the_loop_cannot_answer_still_stops_the_request() {
         prepared.blocked
     );
 }
+
+/// Too large for one send (round 25): one long material on a single line is one passage, so the
+/// passage choice cannot cut it and the request is over the limit; it is shortened and goes,
+/// with a part on the request saying what was cut.
+#[test]
+fn a_request_too_large_is_shortened_not_refused() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let line = "אלון משחק בחצר עם ילדים אחרים ומחכה לתורו בסבלנות ";
+    let long = line.repeat(MAX_REQUEST_BYTES / line.len() + 2000);
+    core.add_input(&case, InputKind::Kindergarten, "יומן הגן", &long)
+        .unwrap();
+    let p = core
+        .prepare_section(&case, "kindergarten", "תנסח פסקה")
+        .unwrap();
+    assert!(p.blocked.is_empty(), "{:?}", p.blocked);
+    let note = p
+        .parts
+        .iter()
+        .find(|x| x.label == "קוצר, כי הבקשה הייתה ארוכה מדי")
+        .expect("the cut is shown with the request");
+    let said: String = note.outgoing.iter().map(|s| s.text.as_str()).collect();
+    assert!(said.contains("ההמשך נשאר במחשב"), "{said}");
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    let sent = fake.sent.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1);
+    assert!(sent[0].len() <= MAX_REQUEST_BYTES, "{}", sent[0].len());
+    assert!(sent[0].contains("הוא נשאר במחשב."));
+    assert!(sent[0].contains("הפסיכולוגית מבקשת: תנסח פסקה"));
+}

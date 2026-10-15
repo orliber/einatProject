@@ -75,27 +75,45 @@ impl Core {
         let mut body = body.clone();
         let mut result = clear(&request(&body, &ctx, &case_tags, suspects));
         let mut fixed: Vec<dv_privacy::FixedItem> = Vec::new();
+        let mut cuts: Vec<dv_ai::Cut> = Vec::new();
         let mut refused_codes: Vec<String> = Vec::new();
         for _ in 0..3 {
             let Err(blocked) = &result else { break };
-            if !blocked
-                .reasons
+            let codes: Vec<&str> = blocked.reasons.iter().map(|r| r.code.as_str()).collect();
+            if !codes
                 .iter()
-                .all(|r| dv_privacy::FIXABLE_CODES.contains(&r.code.as_str()))
+                .all(|c| *c == "too_large" || dv_privacy::FIXABLE_CODES.contains(c))
             {
                 break;
             }
-            let Some((next, items)) =
-                dv_privacy::fix_refused(&request(&body, &ctx, &case_tags, suspects), &data.masks)
-            else {
-                break;
-            };
-            refused_codes.extend(blocked.reasons.iter().map(|r| r.code.clone()));
-            fixed.extend(items);
-            body = next;
+            refused_codes.extend(codes.iter().map(|c| (*c).to_owned()));
+            if codes.iter().any(|c| dv_privacy::FIXABLE_CODES.contains(c)) {
+                let Some((next, items)) = dv_privacy::fix_refused(
+                    &request(&body, &ctx, &case_tags, suspects),
+                    &data.masks,
+                ) else {
+                    break;
+                };
+                fixed.extend(items);
+                body = next;
+            }
+            // Too large: the longest materials are cut at a line, the rest stays home.
+            if codes.contains(&"too_large") {
+                let Some((next, shortened)) = dv_ai::shrink_to_fit(&body, MAX_REQUEST_BYTES) else {
+                    break;
+                };
+                for c in shortened {
+                    match cuts.iter_mut().find(|x| x.label == c.label) {
+                        Some(x) => x.kept = c.kept,
+                        None => cuts.push(c),
+                    }
+                }
+                body = next;
+            }
             result = clear(&request(&body, &ctx, &case_tags, suspects));
         }
-        if !fixed.is_empty() && result.is_ok() {
+        if (!fixed.is_empty() || !cuts.is_empty()) && result.is_ok() {
+            refused_codes.sort();
             refused_codes.dedup();
             let case_opt = (!data.case_id.is_empty()).then_some(data.case_id.as_str());
             self.vault_mut()?.record(
@@ -103,7 +121,12 @@ impl Core {
                 case_opt,
                 &serde_json::json!({ "codes": refused_codes, "fixed": true }),
             )?;
-            note_fixed(prepared, &fixed);
+            if !fixed.is_empty() {
+                note_fixed(prepared, &fixed);
+            }
+            if !cuts.is_empty() {
+                note_cut(prepared, &cuts);
+            }
         }
         match result {
             Ok(payload) => {
@@ -771,6 +794,31 @@ pub(crate) fn collect_sources(
         source_rows.push((sid, inp.id, content.tagged));
     }
     Ok((tagged_sources, source_rows))
+}
+
+/// What was cut for size shows with the request, like what was hidden: which material, and
+/// how much of it went.
+fn note_cut(prepared: &mut Prepared, cuts: &[dv_ai::Cut]) {
+    let lines: Vec<String> = cuts
+        .iter()
+        .map(|c| {
+            let percent = c.kept.saturating_mul(100) / c.total.max(1);
+            format!("{}: נשלחו כ-{percent}% מהטקסט, ההמשך נשאר במחשב", c.label)
+        })
+        .collect();
+    let text = lines.join("\n");
+    let plain = || {
+        vec![Segment {
+            text: text.clone(),
+            mark: None,
+            label: None,
+        }]
+    };
+    prepared.parts.push(ReviewPart {
+        label: "קוצר, כי הבקשה הייתה ארוכה מדי".to_owned(),
+        original: plain(),
+        outgoing: plain(),
+    });
 }
 
 /// What the fix loop hid shows with the request (the review in advanced mode, and the history

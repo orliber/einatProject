@@ -2,7 +2,8 @@
 //! in the outgoing copy, and the copy goes back to the gate, which is not changed and has no
 //! way around it. Only spans are replaced, each with a tag that names a kind or this case's
 //! book, so a fix can only take words out. What cannot be fixed this way (a canary, an
-//! internal error, a request too large, a refused object key) stays refused.
+//! internal error, a refused object key) stays refused. A request too large is not this
+//! module's: the core shortens it (`dv_ai::shrink_to_fit`) and asks the gate again.
 //!
 //! - A name (declared, from the lexicon, from her past reports) → `[שם_N]` of the case's book.
 //! - A pattern (number, date, phone, address field…) → the numbered tag of its kind.
