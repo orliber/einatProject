@@ -1218,7 +1218,8 @@ export class FakeCore {
         if (p?.type !== "consult") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
         this.pending.delete(String(a.approvalId));
         await new Promise((r) => setTimeout(r, 1400));
-        const answer = `מצב הדגמה: כאן תופיע תשובה מקצועית של ${this.ai}, שמבחינה בין ידע מבוסס לדעה ומציינת אי-ודאות. ההחלטה המקצועית נשארת שלך.`;
+        // Shaped like a real answer (headings, bold, a list), so the layout of answers is seen in the demo.
+        const answer = `מצב הדגמה: כאן תופיע תשובה מקצועית של ${this.ai}, שמבחינה בין **ידע מבוסס** לדעה ומציינת אי-ודאות.\n\n## מה כדאי לבדוק\n1. מה הילד כן עושה, עם דוגמה מהמפגש.\n2. מה הממצא אומר **ביום-יום**, לא רק המספר.\n- חולשה יחסית, או קושי שדורש התערבות?\n\nההחלטה המקצועית נשארת שלך.`;
         const at = now();
         let conv = p.conversationId ? this.convs.find((x) => x.id === p.conversationId) : undefined;
         if (!conv) {

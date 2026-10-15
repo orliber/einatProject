@@ -9,6 +9,7 @@ import { ErrorLine, Spinner, CloseIcon } from "../components/ui";
 import { useWords, wordsSoFar } from "../components/Progress";
 import { useHoldUnsaved } from "../components/Unsaved";
 import { LocalText, type LocalTextHandle } from "../components/LocalText";
+import { plainText, RichText } from "../components/RichText";
 import { ConfirmDialog } from "./library/LibraryDialogs";
 import { ipc, type ConsultationSummary, type Prepared } from "../ipc/client";
 import { useRotating, useRotatingPlaceholder } from "../components/Rotating";
@@ -35,14 +36,31 @@ function clock(at: number): string {
   return new Date(at * 1000).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" });
 }
 
-/** "היום", "אתמול", or the date, for the list of conversations. */
-function when(at: number): string {
+/** Days between `at` and today, by the calendar (0 = today). */
+function daysAgo(at: number): number {
   const d = new Date(at * 1000);
-  const today = new Date();
-  const days = Math.round((new Date(today.toDateString()).getTime() - new Date(d.toDateString()).getTime()) / 86_400_000);
+  return Math.round((new Date(new Date().toDateString()).getTime() - new Date(d.toDateString()).getTime()) / 86_400_000);
+}
+
+/** The time today, "אתמול", or the date, for the list of conversations. */
+function when(at: number): string {
+  const days = daysAgo(at);
   if (days <= 0) return clock(at);
   if (days === 1) return "אתמול";
-  return d.toLocaleDateString("he-IL");
+  return new Date(at * 1000).toLocaleDateString("he-IL");
+}
+
+/** The list of conversations in three groups, like a mail client (round 45). */
+const GROUPS: { id: string; label: string; of: (days: number) => boolean }[] = [
+  { id: "today", label: "היום", of: (d) => d <= 0 },
+  { id: "yesterday", label: "אתמול", of: (d) => d === 1 },
+  { id: "earlier", label: "קודם", of: (d) => d > 1 },
+];
+
+/** The first question, shortened, as the conversation's name. */
+function titleOf(turns: Turn[]): string {
+  const first = turns.find((t) => t.role === "user")?.text.trim().replace(/\s+/g, " ") ?? "";
+  return first.length > 40 ? `${first.slice(0, 40).trimEnd()}…` : first;
 }
 
 /** "Claude is writing…" with the seconds waited, so a long answer never looks stuck. */
@@ -202,9 +220,9 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
 
   async function copy(i: number, text: string) {
     // Answers about a case may hold names: only the protected clipboard (out of clipboard
-    // history, cleared after a minute). No fallback to the ordinary one.
+    // history, cleared after a minute). No fallback to the ordinary one. The marks stay out.
     try {
-      await ipc.copySecret(text);
+      await ipc.copySecret(plainText(text));
     } catch (err) {
       setError(fail(err as never));
       return;
@@ -251,21 +269,36 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
           <nav className="consult-history" aria-label="שיחות קודמות">
             <span className="label">שיחות קודמות</span>
             {saved.data?.length === 0 && <span className="muted small">השיחות נשמרות כאן, מוצפנות בכספת.</span>}
-            <ul>
-              {(saved.data ?? []).map((c) => (
-                <li key={c.id} className={c.id === conversation ? "on" : undefined}>
-                  <button type="button" className="history-item" disabled={inFlight} onClick={() => void open(c)} aria-current={c.id === conversation ? "true" : undefined}>
-                    <span className="history-title">{c.title || "שיחה"}</span>
-                    <span className="history-meta">{c.case_label ?? "כללי"} · {when(c.updated_at)}</span>
-                  </button>
-                  <button type="button" className="icon-btn history-delete" disabled={inFlight} aria-label={`מחיקת השיחה ${c.title}`} onClick={() => setDeleting(c)}><CloseIcon /></button>
-                </li>
-              ))}
-            </ul>
+            {GROUPS.map((g) => {
+              const list = (saved.data ?? []).filter((c) => g.of(daysAgo(c.updated_at)));
+              if (!list.length) return null;
+              return (
+                <div key={g.id} className="history-group">
+                  <span className="history-group-label small">{g.label}</span>
+                  <ul aria-label={g.label}>
+                    {list.map((c) => (
+                      <li key={c.id} className={c.id === conversation ? "on" : undefined}>
+                        <button type="button" className="history-item" disabled={inFlight} onClick={() => void open(c)} aria-current={c.id === conversation ? "true" : undefined}>
+                          <span className="history-title">{c.title || "שיחה"}</span>
+                          <span className="history-meta">{c.case_label ? `על התיק של ${c.case_label}` : "שאלה כללית"}{g.id === "today" ? ` · ${when(c.updated_at)}` : g.id === "earlier" ? ` · ${when(c.updated_at)}` : ""}</span>
+                        </button>
+                        <button type="button" className="icon-btn history-delete" disabled={inFlight} aria-label={`מחיקת השיחה ${c.title}`} onClick={() => setDeleting(c)}><CloseIcon /></button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
           </nav>
         </aside>
 
         <section className="card consult-chat" aria-label="השיחה">
+          {turns.length > 0 && (
+            <div className="consult-head">
+              <strong className="consult-head-title">{titleOf(turns) || title}</strong>
+              <span className="chip chip-sand">{selectedCase ? `על התיק של ${selectedCase.child_name ?? selectedCase.meta.code}` : "שאלה כללית · בלי פרט מתיק"}</span>
+            </div>
+          )}
           <div className="consult-body" aria-live="polite">
             {turns.length === 0 && (
               <div className="consult-empty">
@@ -294,7 +327,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
                   <div className="chat-col">
                     <div className="chat-bubble chat-bubble-ai serif">
                       {t.demo && <span className="chip chip-sand chat-demo">הדגמה</span>}
-                      {t.text.split(/\n{2,}/).map((p, j) => <p key={j}>{p}</p>)}
+                      <RichText text={t.text} />
                     </div>
                     <span className="chat-meta">
                       {ai} · {clock(t.at)}

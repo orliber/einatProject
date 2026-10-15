@@ -73,7 +73,9 @@ describe("consultation", () => {
     const { user } = await openApp();
     await ask(user, `שאלה עם תגיות ${PAYLOAD}`);
     const chat = screen.getByRole("region", { name: "השיחה" });
-    expect(await within(chat).findByText(/שאלה עם תגיות/)).toHaveTextContent(PAYLOAD);
+    // The question is the bubble and, shortened, the conversation's name above it: both text.
+    const bubble = (await within(chat).findAllByText(/שאלה עם תגיות/)).find((el) => el.classList.contains("chat-bubble-me"));
+    expect(bubble).toHaveTextContent(PAYLOAD);
     expectNoMarkup();
   });
 

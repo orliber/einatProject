@@ -1,0 +1,36 @@
+/* A model's answer, laid out from its text (round 45). No backgrounds: the bubble has one. */
+.rich {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  line-height: 1.75;
+}
+.rich h3,
+.rich h4 {
+  margin: 8px 0 0;
+  font-family: var(--font-ui);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.rich h4 {
+  font-size: var(--text-base);
+}
+.rich h3:first-child,
+.rich h4:first-child {
+  margin-top: 0;
+}
+.rich p {
+  margin: 0;
+}
+.rich ol,
+.rich ul {
+  margin: 0;
+  padding-inline-start: 22px;
+}
+.rich li {
+  margin-bottom: 6px;
+}
+.rich li:last-child {
+  margin-bottom: 0;
+}
