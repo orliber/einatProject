@@ -20,8 +20,10 @@ using System.Runtime.InteropServices;
 public static class Keys {
     [StructLayout(LayoutKind.Sequential)]
     struct KEYBDINPUT { public ushort wVk; public ushort wScan; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
+    // As large as the union's largest member (MOUSEINPUT, 32 bytes on x64): SendInput refuses
+    // any other INPUT size with error 87.
     [StructLayout(LayoutKind.Explicit)]
-    struct INPUTUNION { [FieldOffset(0)] public KEYBDINPUT ki; [FieldOffset(0)] public long pad0; [FieldOffset(8)] public long pad1; [FieldOffset(16)] public long pad2; }
+    struct INPUTUNION { [FieldOffset(0)] public KEYBDINPUT ki; [FieldOffset(0)] public long pad0; [FieldOffset(8)] public long pad1; [FieldOffset(16)] public long pad2; [FieldOffset(24)] public long pad3; }
     [StructLayout(LayoutKind.Sequential)]
     struct INPUT { public uint type; public INPUTUNION u; }
     [DllImport("user32.dll", SetLastError = true)]
