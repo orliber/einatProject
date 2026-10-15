@@ -339,7 +339,18 @@ impl Core {
                 .chain([instr.tagged.as_str()])
                 .collect::<Vec<_>>()
                 .join("\n");
-            let style_profile = style::style_for_request(v, &ctx, section_key, &query)?;
+            let mut style_profile = style::style_for_request(v, &ctx, section_key, &query)?;
+            // How she interprets the scores of this case (round 37), in a section written from
+            // the scores: the approved interpretations that fit each score.
+            if section.inputs.contains(&InputKind::TestScores) && !points {
+                let sheets = score_sheets(v, case_id, &v.inputs(case_id)?)?;
+                if let Some(text) = style::interpretations_for_request(v, &sheets)? {
+                    style_profile = Some(match style_profile {
+                        Some(p) => format!("{p}\n{text}"),
+                        None => text,
+                    });
+                }
+            }
             if let Some(text) = &style_profile {
                 review.add_context("פרופיל הסגנון שלך".to_owned(), &run(text)?);
             }
@@ -655,8 +666,10 @@ impl Core {
         // D-043: a paragraph that repeats a past report word for word.
         let texts: Vec<&str> = reply.paragraphs.iter().map(|p| p.text.as_str()).collect();
         let overlaps = style::overlap_warning(v, &texts)?;
+        let interpretations = style::InterpretationCheck::new(v, &sheets)?;
         for (p, w) in reply.paragraphs.iter_mut().zip(overlaps) {
             p.warnings.extend(w);
+            p.warnings.extend(interpretations.notes(&p.text));
         }
         v.add_message(
             &case_id,

@@ -12,6 +12,7 @@ import { ErrorLine, Skeleton, Spinner, UploadIcon, CloseIcon } from "../componen
 import {
   ipc,
   type FitMonth,
+  type InterpretationView,
   type Prepared,
   type StyleImportPreview,
   type StyleItem,
@@ -34,6 +35,9 @@ const KIND_LABEL: Record<StyleKind, string> = {
   avoid: "מה את לא כותבת",
   template: "תבניות משפט",
   example: "דוגמאות בדויות",
+  argument: "מבנה הטיעון",
+  integration: "חיבור בין כלים וסעיפים",
+  criterion: "ניסוח קריטריונים (DSM-5)",
 };
 const KIND_HINT: Record<StyleKind, string> = {
   rule: "",
@@ -41,11 +45,17 @@ const KIND_HINT: Record<StyleKind, string> = {
   avoid: "",
   template: "במקום התוכן באים סוגריים מסולסלים, למשל {תחום}.",
   example: "פסקאות על ילד בדוי. הן מראות ל-AI את הסגנון, ואין בהן שום דבר מהדוחות.",
+  argument: "השלבים של פסקה, לפי הסדר.",
+  integration: "",
+  criterion: "איך את מנסחת קריטריון, ואיזה סוג ממצא את קושרת אליו.",
 };
-const KINDS: StyleKind[] = ["rule", "phrase", "avoid", "template", "example"];
+const KINDS: StyleKind[] = ["rule", "phrase", "avoid", "template", "argument", "integration", "criterion", "example"];
 const RECOMMENDED = 3;
 
-type Step = { kind: "analysis"; source: StyleSourceView } | { kind: "profile" };
+type Step = { kind: "analysis"; source: StyleSourceView } | { kind: "profile" } | { kind: "interpret" };
+
+const STEP_TITLE = (step: Step) =>
+  step.kind === "analysis" ? `ניתוח סגנון · ${step.source.title}` : step.kind === "interpret" ? "איך פירשת תוצאות" : "בניית פרופיל הסגנון";
 
 function dateOf(unix: number): string {
   return new Date(unix * 1000).toLocaleDateString("he-IL", { day: "numeric", month: "long", year: "numeric" });
@@ -89,7 +99,8 @@ export function StyleScreen() {
   // ---------------------------------------------------------------- the run
 
   async function prepare(step: Step) {
-    return step.kind === "analysis" ? ipc.prepareStyleAnalysis(step.source.id) : ipc.prepareStyleProfile();
+    if (step.kind === "analysis") return ipc.prepareStyleAnalysis(step.source.id);
+    return step.kind === "interpret" ? ipc.prepareInterpretations() : ipc.prepareStyleProfile();
   }
 
   async function next(steps: Step[]) {
@@ -116,13 +127,20 @@ export function StyleScreen() {
   }
 
   async function send(step: Step, approval: string, steps: Step[]) {
-    const label = step.kind === "analysis" ? `מנתח את הסגנון ב"${step.source.title}"` : "בונה את פרופיל הסגנון מכל הניתוחים";
+    const label = step.kind === "analysis"
+      ? `מנתח את הסגנון ב"${step.source.title}"`
+      : step.kind === "interpret" ? "לומד מהדוחות איך פירשת תוצאות" : "בונה את פרופיל הסגנון מכל הניתוחים";
     const started = Date.now();
     setSending({ label, approval, started });
     try {
       if (step.kind === "analysis") {
         const r = await ipc.sendStyleAnalysis(approval);
         if (r.dropped > 0) notify(`${r.kept} פריטים נשמרו, ${r.dropped} נפסלו (העתקה או פרט מזהה).`);
+      } else if (step.kind === "interpret") {
+        const r = await ipc.sendInterpretations(approval);
+        notify(r.kept === 0
+          ? "לא נמצאה פרשנות חדשה בדוחות."
+          : `${r.kept === 1 ? "פרשנות אחת מחכה" : `${r.kept} פרשנויות מחכות`} לאישור שלך.${r.dropped > 0 ? ` ${r.dropped} נפסלו (העתקה או פרט מזהה).` : ""}`);
       } else {
         await ipc.sendStyleProfile(approval);
         notify("טיוטת הפרופיל מוכנה. כדאי לעבור עליה ולאשר.");
@@ -215,6 +233,8 @@ export function StyleScreen() {
 
         <Learned o={o} onForget={() => setForgetting(true)} />
 
+        <Interpretations o={o} running={running} onRead={() => void next([{ kind: "interpret" }])} />
+
         {shown && <ProfileEditor key={`${shown.id}`} view={shown} o={o} />}
 
         {o.versions.length > 0 && <Versions o={o} onReset={() => setResetting(true)} />}
@@ -225,7 +245,7 @@ export function StyleScreen() {
           onSaved={(s) => { setImporting(null); notify(`"${s.title}" נשמר ב"הדוחות שלי".`); void reload(); }} />
       )}
       {review && (
-        <ReviewDialog title={review.step.kind === "analysis" ? `ניתוח סגנון · ${review.step.source.title}` : "בניית פרופיל הסגנון"}
+        <ReviewDialog title={STEP_TITLE(review.step)}
           caseId={null} prepared={review.prepared} reprepare={() => prepare(review.step)}
           onClose={() => { setReview(null); setQueue([]); }}
           onSend={async (id) => { const step = review.step; setReview(null); await send(step, id, queue); }} />
@@ -356,13 +376,15 @@ function SuggestionText({ s }: { s: StyleSuggestion }) {
       return <>כך את פותחת את הסעיף בדרך כלל: <q>{s.from}…</q></>;
     case "closing":
       return <>כך את מסיימת את הסעיף בדרך כלל: <q>{s.from}…</q></>;
+    case "formula":
+      return <>משפט שאת כותבת באותו נוסח בכמה דוחות: <q>{s.from}</q></>;
   }
 }
 
 function suggestionDetail(s: StyleSuggestion, o: StyleOverview): string {
   const title = s.section ? o.sections.find((x) => x.key === s.section)?.title : undefined;
   const where = title ? ` · בסעיף ${title}` : "";
-  const fromReports = s.kind === "phrase" || s.kind === "opening" || s.kind === "closing";
+  const fromReports = s.kind !== "replace" && s.kind !== "avoid";
   return fromReports ? `ב-${s.count} דוחות${where}` : `${s.count} פעמים${where}`;
 }
 
@@ -440,10 +462,150 @@ function Learned({ o, onForget }: { o: StyleOverview; onForget: () => void }) {
         </p>
       )}
       {l.fit_by_month.length >= 2 && <FitTrend months={l.fit_by_month} />}
+      {o.skeletons.length > 0 && (
+        <div className="stack style-skeletons">
+          <h3 className="small">הסדר שבו את כותבת את הסעיפים</h3>
+          <ul className="style-learned">
+            {o.skeletons.map((k) => (
+              <li key={`${k.section}-${k.band ?? ""}`}>
+                <b>{k.title}{k.band ? ` (${k.band})` : ""}:</b> {k.topics.join(" · ")}{" "}
+                <span className="muted small">(מ-{k.reports} דוחות)</span>
+              </li>
+            ))}
+          </ul>
+          <p className="hint">כל עוד לא כתבת הנחיה משלך לסעיף, זו ההנחיה שלו בטיוטה.</p>
+        </div>
+      )}
+      {o.omissions.length > 0 && (
+        <ul className="style-learned" aria-label="מה את לא כותבת">
+          {o.omissions.map((t) => <li key={t}>{t}</li>)}
+        </ul>
+      )}
       {canForget && (
         <div className="row">
           <button type="button" className="btn btn-small btn-danger-quiet" onClick={onForget}>לשכוח את מה שנלמד מהתיקונים ומהדוחות שסיימתי</button>
         </div>
+      )}
+    </section>
+  );
+}
+
+// ------------------------------------------------------------------ interpretation (round 33)
+
+/** How she interprets each subtest's score, learned from her reports; nothing is used before she approves it. */
+function Interpretations({ o, running, onRead }: { o: StyleOverview; running: boolean; onRead: () => void }) {
+  const { fail } = useApp();
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  // The item being changed: its buttons wait, so a double click does it once (the review of stage 4).
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<InterpretationView | null>(null);
+  if (o.scored_measures === 0 && o.interpretations.length === 0) return null;
+  const waiting = o.interpretations.filter((i) => !i.item.approved).length;
+  const groups = new Map<string, InterpretationView[]>();
+  for (const i of o.interpretations) {
+    const key = `${i.instrument_name} · ${i.measure_name}`;
+    groups.set(key, [...(groups.get(key) ?? []), i]);
+  }
+
+  async function act(id: string, f: () => Promise<unknown>) {
+    if (busyId !== null) return;
+    setError(null);
+    setBusyId(id);
+    try {
+      await f();
+      setEditing(null);
+      await qc.invalidateQueries({ queryKey: ["style"] });
+    } catch (e) {
+      setError(fail(e as never));
+    } finally {
+      setBusyId(null);
+    }
+  }
+  const save = (id: string) => void act(id, () => ipc.updateInterpretation(id, draft, true, null));
+
+  return (
+    <section className="card style-card" aria-labelledby="style-interpret">
+      <h2 id="style-interpret">איך את מפרשת תוצאות</h2>
+      <p className="hint">
+        מהמשפטים בדוחות הישנים שבהם כתבת על תוצאה של תת-מבחן. נשלחים רק המשפטים האלה, בלי פרטים מזהים, ונשמרת פרשנות כללית.
+        שום פרשנות לא משמשת בדוח לפני שאישרת אותה.
+      </p>
+      <div className="row">
+        <button type="button" className="btn btn-small" disabled={running || o.scored_measures === 0} onClick={() => { setError(null); onRead(); }}>
+          {o.interpretations.length === 0 ? "ללמוד מהדוחות איך פירשתי תוצאות" : "לקרוא שוב את הדוחות"}
+        </button>
+        {o.scored_measures > 0 && <span className="hint">{o.scored_measures === 1 ? "תת-מבחן אחד" : `${o.scored_measures} תת-מבחנים`} עם תוצאות בדוחות.</span>}
+        {waiting > 0 && <span className="chip">{waiting === 1 ? "אחת מחכה" : `${waiting} מחכות`} לאישור</span>}
+      </div>
+      <ErrorLine error={error} />
+      {[...groups.entries()].map(([title, items]) => (
+        <div key={title} className="style-group" role="group" aria-label={title}>
+          <h3>{title}</h3>
+          <ul className="style-items">
+            {items.map((view) => {
+              const { item } = view;
+              const busy = busyId === item.id;
+              return (
+                <li key={item.id} className={item.enabled ? "style-item" : "style-item style-item-off"}>
+                  <span className="chip">{item.case}</span>{" "}
+                  {editing === item.id ? (
+                    <span className="stack grow">
+                      {/* One line: the core keeps a single paragraph of up to 600 characters. */}
+                      <textarea className="textarea" aria-label="הפרשנות" value={draft} rows={2} maxLength={600} autoFocus
+                        onChange={(e) => setDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") {
+                            e.preventDefault();
+                            setEditing(null);
+                          } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                            e.preventDefault();
+                            save(item.id);
+                          }
+                        }} />
+                      <span className="row">
+                        <button type="button" className="btn btn-small btn-primary" disabled={busy || !draft.trim()} onClick={() => save(item.id)}>שמירה ואישור</button>
+                        <button type="button" className="btn btn-small" onClick={() => setEditing(null)}>ביטול</button>
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="stack grow">
+                      <span className="style-item-text">{item.text}</span>
+                      <span className="row">
+                        {!item.approved && <span className="chip chip-warn">מחכה לאישור</span>}
+                        {item.support > 1 && <span className="hint">ב-{item.support} דוחות</span>}
+                        {!item.approved && <button type="button" className="btn btn-small btn-primary" disabled={busy} onClick={() => void act(item.id, () => ipc.updateInterpretation(item.id, null, true, null))}>אישור</button>}
+                        {/* One editor at a time: what she typed in the open one is never dropped silently. */}
+                        <button type="button" className="btn btn-small" disabled={busy || editing !== null}
+                          title={editing !== null ? "קודם לשמור או לבטל את העריכה הפתוחה" : undefined}
+                          onClick={() => { setEditing(item.id); setDraft(item.text); }}>עריכה</button>
+                        {item.approved && (
+                          <button type="button" className="btn btn-small" disabled={busy} onClick={() => void act(item.id, () => ipc.updateInterpretation(item.id, null, null, !item.enabled))}>
+                            {item.enabled ? "כיבוי" : "הדלקה"}
+                          </button>
+                        )}
+                        <button type="button" className="btn btn-small btn-danger-quiet" disabled={busy} onClick={() => setDeleting(view)}>מחיקה</button>
+                      </span>
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+      {deleting && (
+        <ConfirmDialog danger title="מחיקת פרשנות" action="מחיקה"
+          text={`"${deleting.item.text}" יימחק, וכבר לא ישמש בטיוטות.`}
+          onClose={() => setDeleting(null)}
+          onConfirm={async () => {
+            await ipc.deleteInterpretation(deleting.item.id);
+            setDeleting(null);
+            setError(null);
+            await qc.invalidateQueries({ queryKey: ["style"] });
+          }} />
       )}
     </section>
   );

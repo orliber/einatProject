@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-delete-interpretation"
+description = "Enables the delete_interpretation command without any pre-configured scope."
+commands.allow = ["delete_interpretation"]
+
+[[permission]]
+identifier = "deny-delete-interpretation"
+description = "Denies the delete_interpretation command without any pre-configured scope."
+commands.deny = ["delete_interpretation"]

@@ -34,6 +34,9 @@ import type { ReportSettings } from "./generated/ReportSettings";
 import type { TemplateView } from "./generated/TemplateView";
 import type { ParagraphView } from "./generated/ParagraphView";
 import type { SimilarParagraph } from "./generated/SimilarParagraph";
+import type { LibraryLine } from "./generated/LibraryLine";
+import type { SectionLibrary } from "./generated/SectionLibrary";
+import type { SimilarReport } from "./generated/SimilarReport";
 import type { FitMonth } from "./generated/FitMonth";
 import type { Role } from "./generated/Role";
 import type { ScoreSheet } from "./generated/ScoreSheet";
@@ -61,6 +64,8 @@ import type { StyleItem } from "./generated/StyleItem";
 import type { StyleKind } from "./generated/StyleKind";
 import type { StyleLearned } from "./generated/StyleLearned";
 import type { StyleOverview } from "./generated/StyleOverview";
+import type { Interpretation } from "./generated/Interpretation";
+import type { InterpretationView } from "./generated/InterpretationView";
 import type { StyleProfile } from "./generated/StyleProfile";
 import type { StyleProfileView } from "./generated/StyleProfileView";
 import type { StyleSourceView } from "./generated/StyleSourceView";
@@ -291,6 +296,9 @@ export const ipc = {
   /** The paragraph of her past reports closest to this one (ST2); worked out locally. */
   similarParagraph: (caseId: string, draftId: string) =>
     call("similar_paragraph", { caseId, draftId }),
+  /** Her diagnoses, recommendations and the reports most like the case (round 36); local. */
+  sectionLibrary: (caseId: string, sectionKey: string) =>
+    call("section_library", { caseId, sectionKey }),
   restoreParagraphVersion: (caseId: string, draftId: string, versionId: string) =>
     run("restore_paragraph_version", { caseId, draftId, versionId }),
   /** Her own paragraph. `at`: "end" (default), "first", or the id of the paragraph it follows. */
@@ -378,6 +386,11 @@ export const ipc = {
   sendStyleAnalysis: (approvalId: string) => call("send_style_analysis", { approvalId }),
   prepareStyleProfile: () => call("prepare_style_profile"),
   sendStyleProfile: (approvalId: string) => call("send_style_profile", { approvalId }),
+  prepareInterpretations: () => call("prepare_interpretations"),
+  sendInterpretations: (approvalId: string) => call("send_interpretations", { approvalId }),
+  updateInterpretation: (id: string, text: string | null, approved: boolean | null, enabled: boolean | null) =>
+    call("update_interpretation", { id, text, approved, enabled }),
+  deleteInterpretation: (id: string) => run("delete_interpretation", { id }),
   saveStyleDraft: (profile: StyleProfile) => call("save_style_draft", { profile }),
   approveStyleDraft: () => call("approve_style_draft"),
   discardStyleDraft: () => run("discard_style_draft"),
@@ -400,8 +413,13 @@ export const ipc = {
 
 export type {
   FitMonth,
+  Interpretation,
+  InterpretationView,
   ParagraphView,
   SimilarParagraph,
+  LibraryLine,
+  SectionLibrary,
+  SimilarReport,
   StyleAnalysisResult,
   StyleImportPreview,
   StyleItem,

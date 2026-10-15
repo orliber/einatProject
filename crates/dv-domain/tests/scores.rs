@@ -53,7 +53,10 @@ fn grid(m: &Measure) -> Vec<f64> {
 /// True when a higher score means more concern (questionnaires, CARS-2, ADOS-2 comparison);
 /// false when a higher score means better functioning (Wechsler, Bayley, ABAS).
 fn higher_is_concern(scale: ScoreScale) -> bool {
-    !matches!(scale, ScoreScale::Standard | ScoreScale::Scaled)
+    !matches!(
+        scale,
+        ScoreScale::Standard | ScoreScale::Scaled | ScoreScale::VScale | ScoreScale::TAbility
+    )
 }
 
 fn sheet(instrument: &str, entries: &[(&str, f64)]) -> ScoreSheet {
@@ -309,10 +312,13 @@ fn the_average_range_matches_its_percentiles() {
 }
 
 #[test]
-fn only_standard_and_scaled_scores_have_percentiles() {
+fn only_ability_scores_on_the_normal_curve_have_percentiles() {
     for (inst, m) in tabled() {
         let has = percentile(&m, m.min).is_some();
-        let should = matches!(m.scale, ScoreScale::Standard | ScoreScale::Scaled);
+        let should = matches!(
+            m.scale,
+            ScoreScale::Standard | ScoreScale::Scaled | ScoreScale::VScale | ScoreScale::TAbility
+        );
         assert_eq!(has, should, "{inst}/{}", m.key);
     }
 }

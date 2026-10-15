@@ -101,8 +101,11 @@ pub(crate) fn score_instruments() -> Vec<dv_domain::Instrument> {
 }
 
 #[tauri::command]
-pub(crate) fn preview_scores(sheet: dv_domain::ScoreSheet) -> Res<String> {
-    dv_core::Core::preview_scores(&sheet).map_err(|e| e.to_ui())
+pub(crate) async fn preview_scores(
+    state: tauri::State<'_, AppState>,
+    sheet: dv_domain::ScoreSheet,
+) -> Res<String> {
+    with_core(&state, move |c| c.preview_scores(&sheet)).await
 }
 
 #[tauri::command]

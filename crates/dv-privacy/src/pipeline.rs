@@ -1263,6 +1263,40 @@ fn name_run_suspects(
         }
     }
 
+    // 4b. A child introduced by age or school year at the start of a sentence: "שירה, בת
+    // שנתיים", "איתי, תלמיד כיתה ב'". A name that is also an everyday word ("with me", "a
+    // song") is read as a name here: nothing else opens a sentence this way (round 32).
+    let introduces = [
+        "בן",
+        "בת",
+        "תלמיד",
+        "תלמידת",
+        "ילד",
+        "ילדה",
+        "פעוט",
+        "פעוטה",
+    ];
+    for (i, tok) in tokens.iter().enumerate() {
+        let opens_sentence = match i.checked_sub(1) {
+            None => true,
+            Some(p) => gap(p, i)?.is_some_and(|g| g.contains(['\n', '.', ':'])),
+        };
+        let known = lex.first_names.contains(&tok.norm)
+            || lex.word_names.contains(&tok.norm)
+            || lex.surnames.contains(&tok.norm);
+        // No stop words here: "גיל, תלמיד כיתה ג'" can only be a name.
+        if !opens_sentence || !known || !hebrew(tok) || digits(tok) {
+            continue;
+        }
+        let comma = gap(i, i + 1)?.is_some_and(|g| g.trim() == ",");
+        let introduced = tokens
+            .get(i + 1)
+            .is_some_and(|n| introduces.iter().any(|w| norm_eq(w, &n.norm)));
+        if comma && introduced && !is_person_word(&tok.norm) && !is_title(&tok.norm) {
+            push(tok.start, tok.end, "שם בפתח משפט, לפני גיל או כיתה", out)?;
+        }
+    }
+
     // 5. A name right after a word for a person, with no punctuation: "הגננת אסתי",
     // "סבא מוטי", "דודה שלו ולדה", "הסייעת החדשה רבקה", "המורה לאנגלית שירלי". What follows
     // must look like a name: a known name, or a word that is not an everyday word.
@@ -1739,8 +1773,9 @@ fn number_masks(
 
 /// Square brackets around words that are not a tag ("[מחנכת]" written by the model, "[...]"
 /// in a document) become round ones, so the words inside are filtered like any other text and
-/// never pass for a tag. A real tag stays: this case's (already filtered), a generic one, or
-/// another case's, which the gate then refuses. Same length, so every offset still holds.
+/// never pass for a tag. A real tag stays: this case's (already filtered), a generic one, a
+/// score of a past report in its fixed form (round 32), or another case's, which the gate
+/// then refuses. Same length, so every offset still holds.
 fn plain_brackets(text: &str, ctx: &PrivacyContext<'_>) -> String {
     static BRACKETED: std::sync::LazyLock<Option<regex::Regex>> =
         std::sync::LazyLock::new(|| regex::Regex::new(r"\[[^\[\]\n]{1,40}\]").ok());
@@ -1750,6 +1785,7 @@ fn plain_brackets(text: &str, ctx: &PrivacyContext<'_>) -> String {
     let known = |t: &str| {
         crate::masks::is_generic_tag(t)
             || t.starts_with("[חסר")
+            || dv_domain::is_score_tag(t)
             || ctx.identities.iter().any(|i| i.tag == t)
     };
     let mut out = text.to_owned();

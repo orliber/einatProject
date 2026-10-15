@@ -24,6 +24,11 @@ guide: string,
  */
 guide_is_default: boolean, 
 /**
+ * `guide` is the order she writes the section in, learned from this many of her past
+ * reports (K3). 0: it is the template's text or hers.
+ */
+guide_learned_from: number, 
+/**
  * The lines added for this case only.
  */
 case_guide: string, };

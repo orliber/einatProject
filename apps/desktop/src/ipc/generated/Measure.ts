@@ -10,4 +10,8 @@ abbr: string, group: string, scale: ScoreScale, min: number, max: number,
 /**
  * The table used for this measure.
  */
-bands: Array<Band>, };
+bands: Array<Band>, 
+/**
+ * Other names it goes by in reports ("קידוד" for WISC-V coding, round 32).
+ */
+aliases: Array<string>, };

@@ -158,3 +158,44 @@ pub(crate) async fn dismiss_style_suggestion(
 ) -> Res<()> {
     with_core(&state, move |c| c.dismiss_style_suggestion(&id)).await
 }
+
+#[tauri::command]
+pub(crate) async fn prepare_interpretations(state: tauri::State<'_, AppState>) -> Res<Prepared> {
+    with_core(&state, |c| c.prepare_interpretations()).await
+}
+
+#[tauri::command]
+pub(crate) async fn send_interpretations(
+    state: tauri::State<'_, AppState>,
+    approval_id: String,
+) -> Res<InterpretationResult> {
+    let id = approval_id.clone();
+    let out = with_core(&state, move |c| {
+        c.begin_send(&id, dv_core::SendKind::Interpretation)
+    })
+    .await?;
+    let (out, response) = transmit(&state, approval_id, out).await?;
+    with_core(&state, move |c| c.finish_interpretations(out, response)).await
+}
+
+#[tauri::command]
+pub(crate) async fn update_interpretation(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    text: Option<String>,
+    approved: Option<bool>,
+    enabled: Option<bool>,
+) -> Res<InterpretationView> {
+    with_core(&state, move |c| {
+        c.update_interpretation(&id, text, approved, enabled)
+    })
+    .await
+}
+
+#[tauri::command]
+pub(crate) async fn delete_interpretation(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Res<()> {
+    with_core(&state, move |c| c.delete_interpretation(&id)).await
+}

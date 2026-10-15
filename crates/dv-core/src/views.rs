@@ -194,6 +194,9 @@ pub struct SectionView {
     pub guide: String,
     /// `guide` is the template's text, not edited.
     pub guide_is_default: bool,
+    /// `guide` is the order she writes the section in, learned from this many of her past
+    /// reports (K3). 0: it is the template's text or hers.
+    pub guide_learned_from: u32,
     /// The lines added for this case only.
     pub case_guide: String,
 }

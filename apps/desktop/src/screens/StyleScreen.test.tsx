@@ -37,6 +37,10 @@ const overview = (over: Partial<StyleOverview> = {}): StyleOverview => ({
     words_per_sentence: null, sentences_per_paragraph: null, commas_per_sentence: null,
     hedges: null, contrasts: null, first_person: null, fit_recent: null, fit_earlier: null, fit_count: 0, fit_by_month: [],
   },
+  interpretations: [],
+  scored_measures: 0,
+  skeletons: [],
+  omissions: [],
   ...over,
 });
 
@@ -53,7 +57,35 @@ const draft: StyleProfileView = {
   },
 };
 
+const waiting = {
+  instrument_name: "WPPSI-IV", measure_name: "קידוד חיות",
+  item: { id: "i1", instrument: "wppsi_iv", measure: "animal_coding", case: "ממוצע נמוך", text: "קושי במהירות העבודה, לא בהבנה.", support: 3, approved: false, enabled: true, edited: false },
+};
+
 describe("StyleScreen", () => {
+  it("learns how she interprets scores, through the review screen, and waits for her approval", async () => {
+    const calls: [string, unknown][] = [];
+    mockIPC((cmd, args) => {
+      calls.push([cmd, args]);
+      if (cmd === "style_overview") return overview({ sources: [{ ...source, analyzed: true }], scored_measures: 4, interpretations: [waiting] });
+      if (cmd === "prepare_interpretations") return prepared({ approval_id: "i" });
+      if (cmd === "send_interpretations") return { kept: 1, dropped: 0, demo: true };
+      if (cmd === "update_interpretation") return { ...waiting, item: { ...waiting.item, approved: true } };
+      return null;
+    });
+    const user = userEvent.setup();
+    wrap(<StyleScreen />);
+    const group = await screen.findByRole("group", { name: "WPPSI-IV · קידוד חיות" });
+    expect(group).toHaveTextContent("מחכה לאישור");
+    expect(screen.getByText(/4 תת-מבחנים עם תוצאות/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "לקרוא שוב את הדוחות" }));
+    expect(await screen.findByText(/איך פירשת תוצאות ·/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /שליחה/ }));
+    await vi.waitFor(() => expect(calls.map(([c]) => c)).toContain("send_interpretations"));
+    await user.click(screen.getByRole("button", { name: "אישור" }));
+    await vi.waitFor(() => expect(calls).toContainEqual(["update_interpretation", { id: "i1", text: null, approved: true, enabled: null }]));
+  });
+
   it("starts with one action: adding a past report", async () => {
     mockIPC((cmd) => (cmd === "style_overview" ? overview() : null));
     wrap(<StyleScreen />);
@@ -169,6 +201,36 @@ describe("suggestions from her reports", () => {
     const [first] = screen.getAllByRole("button", { name: "להוסיף לפרופיל" });
     if (first) await user.click(first);
     await vi.waitFor(() => expect(calls).toContainEqual(["accept_style_suggestion", { id: "shape:opening:summary:x" }]));
+  });
+});
+
+describe("what was learned from her reports (round 34)", () => {
+  it("shows her fixed wording to add, the order of her sections and what she leaves out", async () => {
+    const calls: unknown[] = [];
+    mockIPC((cmd, args) => {
+      if (cmd === "style_overview") {
+        return overview({
+          sources: [source],
+          learned: { ...overview().learned, from_reports: 30 },
+          suggestions: [
+            { id: "formula:x", kind: "formula", from: "מנת המשכל הכללית נמצאה {תוצאה}.", to: "", count: 3, confidence: 100, section: "cognitive" },
+          ],
+          skeletons: [{ section: "parents_view", title: "תפקוד כיום בבית", band: "גיל שלוש עד שש", reports: 4, topics: ["משחק", "רגשי"] }],
+          omissions: ["את לא כותבת אחוזונים ליד התוצאות של תתי-המבחנים, ולכן הם לא נכתבים בדף התוצאות שנשלח."],
+        });
+      }
+      calls.push([cmd, args]);
+      return null;
+    });
+    const user = userEvent.setup();
+    wrap(<StyleScreen />);
+    expect(await screen.findByText(/משפט שאת כותבת באותו נוסח בכמה דוחות/)).toBeInTheDocument();
+    expect(screen.getByText("(ב-3 דוחות · בסעיף פרופיל קוגניטיבי)")).toBeInTheDocument();
+    expect(screen.getByText("תפקוד כיום בבית (גיל שלוש עד שש):")).toBeInTheDocument();
+    expect(screen.getByText(/משחק · רגשי/)).toBeInTheDocument();
+    expect(screen.getByText(/את לא כותבת אחוזונים/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "להוסיף לפרופיל" }));
+    await vi.waitFor(() => expect(calls).toContainEqual(["accept_style_suggestion", { id: "formula:x" }]));
   });
 });
 

@@ -52,6 +52,7 @@ impl Core {
             .collect();
         let sheets = score_sheets(v, case_id, &inputs)?;
         let style_model = style::style_model(v)?;
+        let interpretations = style::InterpretationCheck::new(v, &sheets)?;
         let retention_default = v
             .list_cases()?
             .into_iter()
@@ -130,6 +131,7 @@ impl Core {
                                 &her_terms,
                                 &report_terms,
                             ))
+                            .chain(interpretations.notes(&d.text_tagged))
                             .collect(),
                         style_note: style_model
                             .as_ref()
@@ -175,6 +177,7 @@ impl Core {
                     mode: s.mode,
                     guide: guide.general,
                     guide_is_default: guide.is_default,
+                    guide_learned_from: guide.learned_from,
                     case_guide: guide.case,
                 });
             }

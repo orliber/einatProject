@@ -3,4 +3,4 @@
 /**
  * How a measure's numbers are read.
  */
-export type ScoreScale = "standard" | "scaled" | "t_concern" | "raw_cutoff" | "cars" | "comparison";
+export type ScoreScale = "standard" | "scaled" | "v_scale" | "t_ability" | "t_concern" | "raw_cutoff" | "cars" | "comparison";

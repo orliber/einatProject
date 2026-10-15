@@ -21,7 +21,7 @@ function normalCdf(z: number): number {
 }
 
 function percentile(m: Measure, v: number): string | null {
-  const z = m.scale === "standard" ? (v - 100) / 15 : m.scale === "scaled" ? (v - 10) / 3 : null;
+  const z = m.scale === "standard" ? (v - 100) / 15 : m.scale === "scaled" ? (v - 10) / 3 : m.scale === "v_scale" ? (v - 15) / 3 : m.scale === "t_ability" ? (v - 50) / 10 : null;
   if (z === null) return null;
   const p = normalCdf(z) * 100;
   if (p < 0.1) return "<0.1";
@@ -107,7 +107,7 @@ export function compareSheets(before: ScoreSheet[], after: ScoreSheet[]): Compar
       }
       if (!prev || rows.some((r) => r.abbr === now.m.abbr)) continue;
       const change = e.value - prev.v;
-      const at = now.m.scale === "standard" || now.m.scale === "t_concern" ? 10 : now.m.scale === "scaled" ? 3 : Infinity;
+      const at = ["standard", "t_concern", "t_ability"].includes(now.m.scale) ? 10 : now.m.scale === "scaled" || now.m.scale === "v_scale" ? 3 : Infinity;
       rows.push({
         measure: now.m.name_he, abbr: now.m.abbr, before_instrument: prev.inst.name, after_instrument: now.inst.name,
         before: prev.v, after: e.value, change, before_band: band(prev.m, prev.v), after_band: band(now.m, e.value), notable: Math.abs(change) >= at,

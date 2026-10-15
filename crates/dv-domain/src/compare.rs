@@ -29,8 +29,8 @@ pub struct ComparisonRow {
 pub fn notable(scale: ScoreScale, change: f64) -> bool {
     let at_least = match scale {
         ScoreScale::Standard => 10.0,
-        ScoreScale::Scaled => 3.0,
-        ScoreScale::TConcern => 10.0,
+        ScoreScale::Scaled | ScoreScale::VScale => 3.0,
+        ScoreScale::TConcern | ScoreScale::TAbility => 10.0,
         _ => return false,
     };
     change.abs() >= at_least

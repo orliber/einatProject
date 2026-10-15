@@ -1,6 +1,11 @@
 //! End-to-end flows of the writing-style profile (D-043). Fabricated data only.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::string_slice
+)]
 
 use std::sync::{Arc, Mutex};
 
@@ -207,6 +212,44 @@ fn a_past_report_is_neutralized_before_anything_is_kept() {
         core.save_style_source(&preview.token, &[0], None),
         Err(CoreError::NotFound(_))
     ));
+}
+
+#[test]
+fn a_score_beside_its_subtest_is_kept_as_a_score_tag_and_goes_out_as_one() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core) = vault(Some(fake.clone()));
+    let report = "פרופיל קוגניטיבי\nבמבחן WPPSI-IV יואב הציג בקוביות (7) ובמטריצות (13) תפקוד \
+                  שונה, בזיכרון תמונות 10 ובחיפוש חרקים 11. בקידוד חיות (6) ניכר קושי. \
+                  נבדק בגיל 5:4, בחדר 12.\n";
+    let preview = core
+        .import_style_source("ישן.txt", report.as_bytes())
+        .unwrap();
+    let cognitive = preview
+        .parts
+        .iter()
+        .find(|p| p.section.as_deref() == Some("cognitive"))
+        .unwrap();
+    let t = &cognitive.text;
+    assert!(t.contains("בקוביות ([תוצאה 7 · ממוצע נמוך])"), "{t}");
+    assert!(t.contains("[תוצאה 13 · ממוצע גבוה · חוזקה יחסית]"), "{t}");
+    assert!(t.contains("[תוצאה 6 · ממוצע נמוך · חולשה יחסית]"), "{t}");
+    // Every other number is masked; the child's name is hidden.
+    assert!(t.contains("בגיל [מספר], בחדר [מספר]"), "{t}");
+    assert!(!t.contains("יואב"), "{t}");
+    // Saved and sent for the analysis, the tags go through the gate as they are.
+    let source = core
+        .save_style_source(&preview.token, &[cognitive.index], None)
+        .unwrap();
+    let p = core.prepare_style_analysis(&source.id).unwrap();
+    assert!(p.blocked.is_empty(), "{:?}", p.blocked);
+    let id = p.approval_id.unwrap();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({"items": []})));
+    let _ = core.send_style_analysis(&id);
+    let sent = last_sent(&fake);
+    assert!(
+        sent.contains("[תוצאה 13 · ממוצע גבוה · חוזקה יחסית]"),
+        "{sent}"
+    );
 }
 
 #[test]
@@ -585,14 +628,14 @@ fn a_paragraph_whose_sentences_are_unlike_hers_gets_a_gentle_note() {
         analysis: None,
     };
     let mut empty = super::LocalStyle::default();
-    super::fit_reports(&mut empty, &[]);
+    super::fit_reports(&mut empty, &[], &[]);
     let long = format!("{}. {}.", sentence(30), sentence(28));
     assert!(
         super::style_note(&empty.model, "observation", &long).is_none(),
         "nothing to measure, no notes"
     );
     let mut local = super::LocalStyle::default();
-    super::fit_reports(&mut local, &[source]);
+    super::fit_reports(&mut local, &[source], &[0]);
     let m = &local.model;
     let note = super::style_note(m, "observation", &long).unwrap();
     assert!(note.starts_with("משפטים ארוכים מהרגיל אצלך"), "{note}");
@@ -893,6 +936,7 @@ fn the_closeness_figure_comes_with_its_reasons_and_what_to_ask() {
             }],
             analysis: None,
         }],
+        &[0],
     );
     let m = &local.model;
     let long = format!("{}. {}.", sentence(30), sentence(28));
@@ -1029,4 +1073,561 @@ fn her_own_section_shows_how_she_wrote_it_before_without_sending_anything() {
     // A section she never wrote has nothing to show, and nothing left the computer.
     assert!(core.own_section_help("dsm").unwrap().examples.is_empty());
     assert!(fake.sent.lock().unwrap().is_empty());
+}
+
+/// The fabricated reports of `tests/fixtures/score_reports`, without their marks, and how many
+/// scores each one marks.
+fn score_reports() -> Vec<(String, String, usize)> {
+    let dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/score_reports");
+    let mut files: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "txt"))
+        .collect();
+    files.sort();
+    files
+        .into_iter()
+        .map(|p| {
+            let marked = std::fs::read_to_string(&p).unwrap();
+            let marks = marked.matches('⟦').count();
+            // A mark may name its measure ("⟦13:matrix⟧"): keep only the number.
+            let text = strip_measure_keys(&marked.replace(['⟦', '⟧'], ""));
+            (
+                p.file_name().unwrap().to_string_lossy().into_owned(),
+                text,
+                marks,
+            )
+        })
+        .collect()
+}
+
+fn strip_measure_keys(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(':') {
+        let (head, tail) = rest.split_at(at);
+        let key: String = tail
+            .chars()
+            .skip(1)
+            .take_while(|c| c.is_ascii_lowercase() || *c == '_')
+            .collect();
+        out.push_str(head);
+        if !key.is_empty() && head.ends_with(|c: char| c.is_ascii_digit()) {
+            rest = &tail[1 + key.len()..];
+        } else {
+            out.push(':');
+            rest = &tail[1..];
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+#[test]
+fn old_reports_keep_their_scores_as_tags_and_no_other_number() {
+    let (_dir, mut core) = vault(None);
+    let children = [
+        "יואב",
+        "נועה",
+        "איתי",
+        "תמר",
+        "עומר",
+        "מאיה",
+        "רון",
+        "שירה",
+        "אורי",
+        "דניאל",
+        "הילה",
+        "גיל",
+    ];
+    let (mut marked, mut tagged) = (0usize, 0usize);
+    let mut stayed = Vec::new();
+    for (name, text, marks) in score_reports() {
+        assert!(
+            !text.contains('⟦') && !text.contains("matrix"),
+            "{name}: {text}"
+        );
+        let preview = core.import_style_source(&name, text.as_bytes()).unwrap();
+        let kept: String = preview
+            .parts
+            .iter()
+            .map(|p| format!("{}\n{}\n", p.heading, p.text))
+            .collect();
+        marked += marks;
+        // Score tags out; what is left holds no number but a test's own name ("WPPSI-IV").
+        let mut rest = String::new();
+        let mut tail = kept.as_str();
+        while let Some(open) = tail.find('[') {
+            rest.push_str(&tail[..open]);
+            let close = tail[open..].find(']').map_or(tail.len(), |c| open + c + 1);
+            let tag = &tail[open..close];
+            if dv_domain::is_score_tag(tag) {
+                tagged += 1;
+            }
+            tail = &tail[close..];
+        }
+        rest.push_str(tail);
+        for word in rest.split_whitespace() {
+            assert!(
+                !word.chars().any(|c| c.is_ascii_digit())
+                    || word.chars().any(|c| c.is_ascii_alphabetic()),
+                "{name}: a number stayed: {word}\n{kept}"
+            );
+        }
+        let words: Vec<String> = kept.split_whitespace().map(normalize).collect();
+        for child in children {
+            if words
+                .iter()
+                .any(|w| w.trim_matches(|c: char| !c.is_alphabetic()) == child)
+            {
+                stayed.push(format!("{name}: {child}"));
+            }
+        }
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let share = tagged as f64 / marked as f64;
+    assert!(share >= 0.95, "{tagged} of {marked} scores kept as tags");
+    assert!(stayed.is_empty(), "names stayed: {stayed:?}");
+}
+
+/// Two of the fabricated old reports, every part kept.
+fn upload_scored(core: &mut Core) {
+    for (name, text, _) in score_reports()
+        .into_iter()
+        .filter(|(n, _, _)| n == "01.txt" || n == "11.txt")
+    {
+        let preview = core.import_style_source(&name, text.as_bytes()).unwrap();
+        let all: Vec<u32> = preview.parts.iter().map(|p| p.index).collect();
+        core.save_style_source(&preview.token, &all, None).unwrap();
+    }
+}
+
+#[test]
+fn the_interpretation_of_scores_is_learned_from_all_reports_and_waits_for_her() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core) = vault(Some(fake.clone()));
+    assert!(matches!(
+        core.prepare_interpretations(),
+        Err(CoreError::Refused(_))
+    ));
+    upload_scored(&mut core);
+    let o = core.style_overview().unwrap();
+    assert!(o.scored_measures >= 10, "{}", o.scored_measures);
+    assert!(o.interpretations.is_empty());
+
+    let p = core.prepare_interpretations().unwrap();
+    assert!(p.blocked.is_empty(), "{:?}", p.blocked);
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({"items": [
+        {"measure": "wppsi_iv/bug_search", "case": "ממוצע נמוך",
+         "text": "תוצאה נמוכה מתפרשת אצלה כקושי במהירות העבודה, ולא בהבנה.", "support": 2},
+        {"measure": "wppsi_iv/block_design", "case": "כללי",
+         "text": "היא בודקת את התוצאה לצד העבודה השיטתית שנצפתה.", "support": 1},
+        // Five words of a report: content, not an interpretation.
+        {"measure": "wppsi_iv/matrix", "case": "כללי",
+         "text": "לדבריה הופנה לאבחון בשל קשיי קשב בגן.", "support": 1},
+        {"measure": "wppsi_iv/matrix", "case": "כללי", "text": "הילה מתקשה.", "support": 1}
+    ]})));
+    let r = core.send_interpretations(&p.approval_id.unwrap()).unwrap();
+    let sent = last_sent(&fake);
+    // Grouped by subtest, with the score tags; the children's names stay home.
+    assert!(
+        sent.contains("wppsi_iv/bug_search") && sent.contains("[תוצאה 6 · ממוצע נמוך"),
+        "{sent}"
+    );
+    for child in ["יואב", "הילה"] {
+        assert!(!sent.contains(child), "{child}: {sent}");
+    }
+    assert_eq!((r.kept, r.dropped), (2, 2), "{r:?}");
+
+    let o = core.style_overview().unwrap();
+    assert_eq!(o.interpretations.len(), 2);
+    let first = &o.interpretations[0];
+    assert!(!first.item.approved && first.item.enabled);
+    assert_eq!(first.instrument_name, "WPPSI-IV");
+
+    // She approves one and writes another her way; a name in her words is refused.
+    let id = first.item.id.clone();
+    let v = core
+        .update_interpretation(&id, None, Some(true), None)
+        .unwrap();
+    assert!(v.item.approved && !v.item.edited);
+    let other = o.interpretations[1].item.id.clone();
+    assert!(matches!(
+        core.update_interpretation(&other, Some("כמו אצל יואב.".into()), None, None),
+        Err(CoreError::Refused(_))
+    ));
+    let v = core
+        .update_interpretation(
+            &other,
+            Some("תוצאה בקוביות נקראת לצד אופן העבודה.".into()),
+            None,
+            None,
+        )
+        .unwrap();
+    assert!(v.item.edited && !v.item.approved);
+
+    // A new reading replaces only what she did not approve or write.
+    let p = core.prepare_interpretations().unwrap();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({"items": [
+        {"measure": "wppsi_iv/matrix", "case": "כללי",
+         "text": "היא מקשרת אותה לחשיבה החזותית.", "support": 2}
+    ]})));
+    core.send_interpretations(&p.approval_id.unwrap()).unwrap();
+    let o = core.style_overview().unwrap();
+    assert_eq!(o.interpretations.len(), 3);
+    core.delete_interpretation(&other).unwrap();
+    assert_eq!(core.style_overview().unwrap().interpretations.len(), 2);
+    assert!(matches!(
+        core.delete_interpretation(&other),
+        Err(CoreError::NotFound(_))
+    ));
+}
+
+#[test]
+fn demo_mode_shows_what_an_interpretation_looks_like() {
+    let (_dir, mut core) = vault(None);
+    upload_scored(&mut core);
+    let p = core.prepare_interpretations().unwrap();
+    assert!(p.demo_mode);
+    let r = core.send_interpretations(&p.approval_id.unwrap()).unwrap();
+    assert!(r.demo && r.kept > 0, "{r:?}");
+}
+
+/// A fabricated past report in the institute's headings: the home section in her order, and
+/// the test presented in her fixed wording.
+fn template_report(name: &str, fsiq: u32) -> String {
+    format!(
+        "סיכום אבחון פסיכולוגי\n\
+         תפקוד כיום בבית\n\
+         {name} ילד חייכן וסקרן, אוהב מוזיקה ונהנה מטיולים עם המשפחה.\n\
+         בבוקר מתלבש בעזרה, אוכל מגוון ונרדם בקלות.\n\
+         במשחק בוחר בלגו ובפאזלים, ומשחק בדמיון עם בובות.\n\
+         כשהוא כועס מגיב בבכי, ומתקשה להירגע לאחר תסכול.\n\
+         עם האחים משתף, ובגינה פונה לילדים אחרים ומחפש חברים.\n\
+         מדבר במשפטים קצרים, מבין הוראות פשוטות ומצביע על מה שרוצה.\n\
+         רגיש לרעש חזק ונמנע ממגע של מרקמים מסוימים.\n\
+         מתקשה להתרכז לאורך זמן, ופעלתנות רבה ניכרת בבית.\n\
+         התחום הקוגניטיבי\n\
+         מבחן WPPSI-IV הוא מבחן אינטליגנציה לילדים בגילאי הגן ובכיתות הראשונות. \
+         מנת המשכל הכללית נמצאה {fsiq}, בטווח שנמדד במבחן. \
+         {name} עבד בריכוז על הקוביות ושמח בכל הצלחה קטנה.\n"
+    )
+}
+
+fn upload_template_reports(core: &mut Core) {
+    for (n, (name, fsiq)) in [("נועם", 98), ("עידו", 104), ("איתמר", 91)]
+        .into_iter()
+        .enumerate()
+    {
+        let text = template_report(name, fsiq);
+        let preview = core
+            .import_style_source(&format!("דוח {n}.txt"), text.as_bytes())
+            .unwrap();
+        let all: Vec<u32> = preview.parts.iter().map(|p| p.index).collect();
+        core.save_style_source(&preview.token, &all, None).unwrap();
+    }
+}
+
+#[test]
+fn the_guide_of_a_section_is_the_order_she_writes_it_in_until_she_writes_her_own() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core) = vault(Some(fake.clone()));
+    upload_template_reports(&mut core);
+    assert!(fake.sent.lock().unwrap().is_empty(), "learned locally");
+    let o = core.style_overview().unwrap();
+    let home = o
+        .skeletons
+        .iter()
+        .find(|k| k.section == "parents_view" && k.band.is_none())
+        .unwrap_or_else(|| panic!("{:?}", o.skeletons));
+    assert_eq!(home.topics.len(), 8, "{:?}", home.topics);
+    assert_eq!(home.reports, 3);
+    let id = case(&mut core);
+    let guide = |core: &mut Core| {
+        let d = core.case_detail(&id).unwrap();
+        let s = d
+            .sections
+            .into_iter()
+            .find(|s| s.key == "parents_view")
+            .unwrap();
+        (s.guide, s.guide_learned_from, s.guide_is_default)
+    };
+    let (text, from, default) = guide(&mut core);
+    assert_eq!(from, 3);
+    assert!(default, "not hers yet");
+    assert!(text.starts_with("התכונות הטובות ומה אוהב ("), "{text}");
+    assert_eq!(text.lines().count(), 8);
+    no_secrets(&text, "a learned guide");
+    for name in ["נועם", "עידו", "איתמר"] {
+        assert!(!text.contains(name));
+    }
+    core.set_section_guide("parents_view", "קודם מה שההורים מספרים.")
+        .unwrap();
+    let (text, from, default) = guide(&mut core);
+    assert_eq!(
+        (text.as_str(), from, default),
+        ("קודם מה שההורים מספרים.", 0, false)
+    );
+    core.set_section_guide("parents_view", "").unwrap();
+    core.set_style_enabled(false).unwrap();
+    let (text, from, _) = guide(&mut core);
+    assert_eq!(from, 0, "with the profile off, the institute's text");
+    assert!(!text.starts_with("התכונות"), "{text}");
+}
+
+#[test]
+fn a_sentence_she_writes_the_same_way_in_three_reports_is_offered_as_her_wording() {
+    let (_dir, mut core) = vault(None);
+    upload_template_reports(&mut core);
+    let formulas: Vec<crate::StyleSuggestion> = core
+        .style_overview()
+        .unwrap()
+        .suggestions
+        .into_iter()
+        .filter(|s| s.kind == crate::StyleSuggestionKind::Formula)
+        .collect();
+    let texts: Vec<&str> = formulas.iter().map(|f| f.from.as_str()).collect();
+    assert!(
+        texts.contains(&"מבחן WPPSI-IV הוא מבחן אינטליגנציה לילדים בגילאי הגן ובכיתות הראשונות."),
+        "{texts:?}"
+    );
+    assert!(
+        texts.contains(&"מנת המשכל הכללית נמצאה {תוצאה}, בטווח שנמדד במבחן."),
+        "the score is an empty place: {texts:?}"
+    );
+    for f in &formulas {
+        assert!(!f.from.contains('[') && !f.from.chars().any(|c| c.is_ascii_digit()));
+        assert!(
+            !f.from.contains("קוביות"),
+            "a sentence about one child is not her wording"
+        );
+        assert_eq!(f.count, 3);
+    }
+    let first = formulas.first().unwrap().clone();
+    let active = core.accept_style_suggestion(&first.id).unwrap();
+    assert!(active.profile.items.iter().any(|i| i.text == first.from
+        && i.kind == dv_ai::StyleKind::Template
+        && i.origin == dv_ai::StyleOrigin::Reports));
+    assert!(!core
+        .style_overview()
+        .unwrap()
+        .suggestions
+        .iter()
+        .any(|s| s.id == first.id));
+    let second = formulas.get(1).unwrap();
+    core.dismiss_style_suggestion(&second.id).unwrap();
+    assert!(!core
+        .style_overview()
+        .unwrap()
+        .suggestions
+        .iter()
+        .any(|s| s.id == second.id));
+}
+
+#[test]
+fn a_percentile_she_never_writes_beside_subtests_is_left_out_of_the_scores_material() {
+    let (_dir, mut core) = vault(None);
+    let sheet = dv_domain::ScoreSheet {
+        instrument: "wppsi_iv".into(),
+        module: String::new(),
+        cutoff: None,
+        entries: vec![dv_domain::ScoreEntry {
+            measure: "block_design".into(),
+            value: 9.0,
+            note: String::new(),
+        }],
+        notes: String::new(),
+    };
+    assert!(core
+        .preview_scores(&sheet)
+        .unwrap()
+        .contains("ציון 9, אחוזון"));
+    for (name, text, _) in score_reports() {
+        let preview = core.import_style_source(&name, text.as_bytes()).unwrap();
+        let all: Vec<u32> = preview.parts.iter().map(|p| p.index).collect();
+        core.save_style_source(&preview.token, &all, None).unwrap();
+    }
+    let o = core.style_overview().unwrap();
+    // The twelve fabricated reports share no sentence about a child: none is her wording.
+    let formulas: Vec<&str> = o
+        .suggestions
+        .iter()
+        .filter(|s| s.kind == crate::StyleSuggestionKind::Formula)
+        .map(|s| s.from.as_str())
+        .collect();
+    assert!(formulas.is_empty(), "{formulas:?}");
+    assert!(
+        o.omissions.iter().any(|t| t.contains("תתי-המבחנים")),
+        "{:?}",
+        o.omissions
+    );
+    let preview = core.preview_scores(&sheet).unwrap();
+    assert!(
+        preview.contains("ציון 9 –") && !preview.contains("אחוזון"),
+        "{preview}"
+    );
+    let id = case(&mut core);
+    let saved = core.save_scores(&id, None, &sheet).unwrap();
+    assert_eq!(saved.content, preview, "what is saved is what she saw");
+}
+
+/// Fabricated past reports with diagnoses and recommendations: two like a preschool case
+/// tested with the WPPSI, one of a toddler.
+const LIST_REPORTS: [&str; 3] = [
+    "סיכום אבחון\nהתחום הקוגניטיבי\nנועם נבדק במבחן WPPSI-IV. מנת המשכל הכללית נמצאה 98, בטווח הממוצע.\n\
+     אבחנות\n- הפרעה על הספקטרום האוטיסטי, ברמת תמיכה ראשונה.\nהמלצות\n- מומלץ על ריפוי בעיסוק.\n- מומלץ על הדרכת הורים.\n- מומלץ שנועם ימשיך בגן של אורית.\n",
+    "סיכום אבחון\nהתחום הקוגניטיבי\nעידו נבדק במבחן WPPSI-IV. מנת המשכל הכללית נמצאה 101, בטווח הממוצע.\n\
+     אבחנות\n- הפרעה על הספקטרום האוטיסטי ברמת תמיכה ראשונה.\nהמלצות\n1. מומלץ על טיפול בריפוי בעיסוק.\n2. מומלץ על הדרכת הורים.\n",
+    "סיכום אבחון\nהתחום הקוגניטיבי\nאיתמר נבדק במבחן Bayley-4.\n\
+     אבחנות\n- עיכוב בהתפתחות השפה.\nהמלצות\n- מומלץ על הדרכת הורים.\n- מומלץ על טיפול בקלינאית תקשורת.\n",
+];
+
+#[test]
+fn her_recommendations_come_with_how_often_she_gave_them_in_reports_like_this_case() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core) = vault(Some(fake.clone()));
+    for (n, text) in LIST_REPORTS.iter().enumerate() {
+        let preview = core
+            .import_style_source(&format!("דוח {n}.txt"), text.as_bytes())
+            .unwrap();
+        let all: Vec<u32> = preview.parts.iter().map(|p| p.index).collect();
+        core.save_style_source(&preview.token, &all, None).unwrap();
+    }
+    let id = case(&mut core);
+    let sheet = dv_domain::ScoreSheet {
+        instrument: "wppsi_iv".into(),
+        module: String::new(),
+        cutoff: None,
+        entries: vec![dv_domain::ScoreEntry {
+            measure: "fsiq".into(),
+            value: 99.0,
+            note: String::new(),
+        }],
+        notes: String::new(),
+    };
+    core.save_scores(&id, None, &sheet).unwrap();
+    let lib = core.section_library(&id, "recommendations").unwrap();
+    let lines: Vec<(&str, u32, u32, u32)> = lib
+        .lines
+        .iter()
+        .map(|l| (l.text.as_str(), l.reports, l.in_similar, l.similar))
+        .collect();
+    assert_eq!(
+        lines,
+        vec![
+            ("מומלץ על הדרכת הורים.", 3, 2, 2),
+            ("מומלץ על טיפול בריפוי בעיסוק.", 2, 2, 2),
+        ],
+        "what she gave in the reports like this case first, then the most often"
+    );
+    let names = ["נועם", "עידו", "איתמר", "אורית"];
+    for l in &lib.lines {
+        assert!(!names.iter().any(|n| l.text.contains(n)), "{}", l.text);
+    }
+    assert_eq!(
+        lib.similar.len(),
+        2,
+        "the toddler's report is not like this case"
+    );
+    let first = &lib.similar[0];
+    assert!(
+        first.reasons.contains(&"WPPSI-IV".to_owned()),
+        "{:?}",
+        first.reasons
+    );
+    assert!(first.reasons.iter().any(|r| r == "גיל שלוש עד שש"));
+    for s in &lib.similar {
+        assert!(!names.iter().any(|n| s.text.contains(n)), "{}", s.text);
+    }
+    let dx = core.section_library(&id, "diagnoses").unwrap();
+    assert_eq!(dx.lines.len(), 1, "{:?}", dx.lines);
+    assert_eq!(dx.lines[0].reports, 2);
+    assert!(dx.lines[0].text.contains("הספקטרום האוטיסטי"));
+    // Choosing one adds it to the case as her own paragraph.
+    core.add_own_paragraph(&id, "recommendations", &lib.lines[0].text)
+        .unwrap();
+    assert!(fake.sent.lock().unwrap().is_empty(), "nothing was sent");
+    assert!(core.section_library(&id, "nothing").is_err());
+}
+
+#[test]
+fn her_approved_interpretations_that_fit_the_scores_go_out_and_a_misfit_is_noted() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core) = vault(Some(fake.clone()));
+    upload_scored(&mut core);
+    let p = core.prepare_interpretations().unwrap();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({"items": [
+        {"measure": "wppsi_iv/bug_search", "case": "ממוצע נמוך",
+         "text": "תוצאה נמוכה מתפרשת אצלה כקושי במהירות העבודה, ולא בהבנה.", "support": 2},
+        {"measure": "wppsi_iv/block_design", "case": "כללי",
+         "text": "היא בודקת את התוצאה לצד העבודה השיטתית שנצפתה.", "support": 1},
+        {"measure": "wppsi_iv/matrix", "case": "חוזקה יחסית",
+         "text": "חוזקה בחשיבה החזותית נקשרת אצלה ליכולת ללמוד מהתבוננות.", "support": 1}
+    ]})));
+    core.send_interpretations(&p.approval_id.unwrap()).unwrap();
+    *fake.answer.lock().unwrap() = None;
+    for i in core.style_overview().unwrap().interpretations {
+        core.update_interpretation(&i.item.id, None, Some(true), None)
+            .unwrap();
+    }
+    let id = case(&mut core);
+    let entry = |measure: &str, value: f64| dv_domain::ScoreEntry {
+        measure: measure.into(),
+        value,
+        note: String::new(),
+    };
+    let sheet = dv_domain::ScoreSheet {
+        instrument: "wppsi_iv".into(),
+        module: String::new(),
+        cutoff: None,
+        entries: vec![
+            entry("block_design", 9.0),
+            entry("matrix", 10.0),
+            entry("bug_search", 12.0),
+            entry("information", 10.0),
+        ],
+        notes: String::new(),
+    };
+    core.save_scores(&id, None, &sheet).unwrap();
+    let p = core.prepare_section(&id, "cognitive", "נסחי").unwrap();
+    assert!(p.blocked.is_empty(), "{:?}", p.blocked);
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    let body = last_sent(&fake);
+    assert!(body.contains("איך הפסיכולוגית מפרשת תוצאות"), "{body}");
+    assert!(
+        body.contains("העבודה השיטתית שנצפתה"),
+        "the general one fits every score"
+    );
+    assert!(
+        !body.contains("במהירות העבודה") && !body.contains("ללמוד מהתבוננות"),
+        "a low-range or strength reading does not fit these scores"
+    );
+    // A paragraph that uses one written for a low range, beside an average score, is noted.
+    core.add_own_paragraph(
+        &id,
+        "cognitive",
+        "בחיפוש חרקים נראה כי תוצאה נמוכה מתפרשת אצלה כקושי במהירות העבודה.",
+    )
+    .unwrap();
+    let d = core.case_detail(&id).unwrap();
+    let warnings: Vec<String> = d
+        .sections
+        .iter()
+        .filter(|s| s.key == "cognitive")
+        .flat_map(|s| s.paragraphs.iter().flat_map(|p| p.warnings.clone()))
+        .collect();
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("שכתבת ל«ממוצע נמוך» בWPPSI-IV · חיפוש חרקים")),
+        "{warnings:?}"
+    );
+    core.set_style_enabled(false).unwrap();
+    let p = core.prepare_section(&id, "cognitive", "נסחי").unwrap();
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    assert!(
+        !last_sent(&fake).contains("איך הפסיכולוגית מפרשת תוצאות"),
+        "switched off"
+    );
 }
