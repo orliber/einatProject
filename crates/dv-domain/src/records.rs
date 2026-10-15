@@ -53,6 +53,11 @@ pub struct CaseMeta {
     #[serde(default)]
     #[ts(optional)]
     pub follows: Option<String>,
+    /// The report template the case was opened with (`ReportStructure::for_template`).
+    /// Absent: a case from before templates were kept, in the old one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub template: Option<String>,
 }
 
 /// One row of the case list. Names appear only locally.

@@ -32,10 +32,13 @@ impl Core {
 
     pub fn create_case(
         &mut self,
-        meta: CaseMeta,
+        mut meta: CaseMeta,
         identities: Vec<IdentityInput>,
     ) -> Result<String, CoreError> {
         check_meta(&meta)?;
+        // Every new case is in the institute's report (D-066); a template is never chosen
+        // from outside.
+        meta.template = Some(dv_domain::INSTITUTE_TEMPLATE.to_owned());
         let v = self.vault_mut()?;
         let id = v.create_case(&meta)?;
         v.set_identities(&id, &identities)?;
@@ -71,6 +74,7 @@ impl Core {
                 given_by: "תיק בדוי".into(),
             }),
             follows: None,
+            template: None,
         };
         let id = self.create_case(
             meta,
@@ -95,8 +99,11 @@ impl Core {
 
     pub fn update_case(&mut self, case_id: &str, mut meta: CaseMeta) -> Result<(), CoreError> {
         check_meta(&meta)?;
-        // Which assessment a follow-up belongs to is set when it is opened, never edited.
-        meta.follows = self.vault_ref()?.case_meta(case_id)?.follows;
+        // Which assessment a follow-up belongs to, and the case's template, are set when it is
+        // opened, never edited.
+        let kept = self.vault_ref()?.case_meta(case_id)?;
+        meta.follows = kept.follows;
+        meta.template = kept.template;
         self.vault_mut()?.update_case_meta(case_id, &meta)?;
         self.forget_pending(case_id);
         Ok(())

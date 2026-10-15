@@ -59,8 +59,7 @@ impl Core {
                 "הבדיקה מול המקורות מיועדת לסעיפים שנכתבים מחומרי התיק.".to_owned(),
             ));
         }
-        let structure =
-            ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
+        let structure = structure_for(self.vault_ref()?, case_id)?;
         let section = structure
             .section(section_key)
             .ok_or_else(|| CoreError::NotFound(section_key.to_owned()))?

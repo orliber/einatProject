@@ -222,8 +222,7 @@ impl Core {
         // leaves it, and the check below still blocks.
         let _ = self.settle_stale_tags(case_id, &HashMap::new());
         let settings = self.report_settings()?;
-        let structure =
-            ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
+        let structure = structure_for(self.vault_ref()?, case_id)?;
         let v = self.vault_ref()?;
         let meta = v.case_meta(case_id)?;
         let identities = v.identities(case_id)?;

@@ -21,7 +21,9 @@ pub use records::{
     Age, Author, CaseInput, CaseMeta, CaseSummary, ChatMessage, ChatRole, Consent, DraftParagraph,
     DraftStatus, Folder, GrammaticalGender, InputKind, MaskEntry, Transmission,
 };
-pub use report::{ReportPart, ReportSection, ReportStructure};
+pub use report::{
+    ReportPart, ReportSection, ReportStructure, SectionMode, DEFAULT_TEMPLATE, INSTITUTE_TEMPLATE,
+};
 pub use routing::{passage_ranges, passages, Feed, Routing, SectionPassages, Suggestion};
 pub use scores::{
     check_scores, format_sheet, instruments, sheet_profiles, sheet_table, Instrument, ScoreEntry,

@@ -11,4 +11,9 @@ retention_until: string | null, consent: Consent | null,
 /**
  * A follow-up assessment: the case of the assessment before (D-029).
  */
-follows?: string, };
+follows?: string, 
+/**
+ * The report template the case was opened with (`ReportStructure::for_template`).
+ * Absent: a case from before templates were kept, in the old one.
+ */
+template?: string, };

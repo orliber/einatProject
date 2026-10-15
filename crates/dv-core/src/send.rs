@@ -164,8 +164,7 @@ impl Core {
         replaces: Option<&str>,
         learned: bool,
     ) -> Result<Prepared, CoreError> {
-        let structure =
-            ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
+        let structure = structure_for(self.vault_ref()?, case_id)?;
         let letter = Letter::of(section_key);
         let section = match letter {
             Some(l) => dv_domain::ReportSection {
@@ -173,6 +172,8 @@ impl Core {
                 title: l.title().to_owned(),
                 inputs: Vec::new(),
                 about: String::new(),
+                mode: dv_domain::SectionMode::Ai,
+                guide: String::new(),
             },
             None => structure
                 .section(section_key)
@@ -645,8 +646,7 @@ impl Core {
         &mut self,
         case_id: &str,
     ) -> Result<Vec<(String, Prepared)>, CoreError> {
-        let structure =
-            ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
+        let structure = structure_for(self.vault_ref()?, case_id)?;
         let fed: HashSet<String> = {
             let v = self.vault_ref()?;
             let inputs = v.inputs(case_id)?;

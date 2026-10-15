@@ -191,7 +191,8 @@ impl Core {
     /// A page of the log, newest first. `before` is the `seq` of the last entry already shown.
     pub fn activity(&mut self, before: Option<i64>) -> Result<ActivityPage, CoreError> {
         let v = self.vault_ref()?;
-        let structure = ReportStructure::load_default().ok();
+        // The institute's template holds every section of the old one too (D-066).
+        let structure = ReportStructure::for_template(Some(dv_domain::INSTITUTE_TEMPLATE)).ok();
         let mut names: HashMap<String, (String, bool)> = HashMap::new();
         for (case, trashed) in v
             .list_cases()?

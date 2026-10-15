@@ -120,6 +120,13 @@ pub(crate) fn key_of(
     }
 }
 
+/// The report template of a case (D-066): the institute's for a new case, the one it was
+/// opened with for an older one.
+pub(crate) fn structure_for(v: &Vault, case_id: &str) -> Result<ReportStructure, CoreError> {
+    ReportStructure::for_template(v.case_meta(case_id)?.template.as_deref())
+        .map_err(|e| CoreError::Internal(e.to_string()))
+}
+
 /// The company of a model; anything unknown reads as Claude (the default).
 fn provider_of(model: &str) -> Provider {
     Provider::of_model(model).unwrap_or(Provider::Anthropic)

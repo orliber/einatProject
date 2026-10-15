@@ -18,7 +18,9 @@ use serde_json::Value;
 
 use crate::name_model::NameHints;
 use crate::views::{MaterialRouting, Prepared, SortResult};
-use crate::{today, Core, CoreError, Outgoing, PendingKind, Review, DERIVED_SECTIONS};
+use crate::{
+    structure_for, today, Core, CoreError, Outgoing, PendingKind, Review, DERIVED_SECTIONS,
+};
 
 /// Sections that are written from materials (not from other sections, not the signature).
 pub(crate) fn sortable(structure: &ReportStructure) -> Vec<&ReportSection> {
@@ -93,6 +95,10 @@ const SECTION_WORDS: &[(&str, &str)] = &[
     (
         "communication",
         "תקשורת שפה דיבור קשר עין הדדיות שיח משפטים אוצר מילים מחוות",
+    ),
+    (
+        "behavior_attention",
+        "קשב ריכוז שאלון התנהגות היפראקטיביות אימפולסיביות התפרצויות עכבה ארגון תכנון ויסות",
     ),
     (
         "emotional",
@@ -237,8 +243,7 @@ impl Core {
         input_id: &str,
         sections: &[String],
     ) -> Result<(), CoreError> {
-        let structure =
-            ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
+        let structure = structure_for(self.vault_ref()?, case_id)?;
         let known: Vec<&str> = sortable(&structure)
             .iter()
             .map(|s| s.key.as_str())
@@ -284,8 +289,7 @@ impl Core {
     }
 
     fn prepare_sort_once(&mut self, case_id: &str, learned: bool) -> Result<Prepared, CoreError> {
-        let structure =
-            ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
+        let structure = structure_for(self.vault_ref()?, case_id)?;
         let sections: Vec<SortSection> = sortable(&structure)
             .into_iter()
             .map(|s| SortSection {
