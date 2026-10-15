@@ -157,7 +157,7 @@ impl Core {
         let (practitioner, review_always) = match &self.vault {
             Some(v) => (
                 v.practitioner().map(|p| p.names).unwrap_or_default(),
-                v.setting(REVIEW_KEY).ok().flatten().as_deref() != Some("0"),
+                v.setting(REVIEW_KEY).ok().flatten().as_deref() == Some("1"),
             ),
             None => (Vec::new(), true),
         };

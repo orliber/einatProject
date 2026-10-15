@@ -17,7 +17,7 @@ async function openApp(unlock = true) {
   const core = new FakeCore();
   if (unlock) await core.handle("unlock", { password: "x" });
   // These tests walk every screen a request passes through, the review screen included, so
-  // they run with "show me every request before sending" on (on by default; set here so the test says what it reads).
+  // they run with "show me every request before sending" on (off by default; set here for the tests that read it).
   if (unlock) await core.handle("set_review_always", { on: true });
   const calls: string[] = [];
   mockIPC((cmd, args) => {

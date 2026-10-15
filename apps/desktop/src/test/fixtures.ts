@@ -18,7 +18,7 @@ export const status = (over: Partial<AppStatus> = {}): AppStatus => ({
   lock_minutes: 10,
   idle_lock_in: 600,
   practitioner: ["רותם בדויה"],
-  review_always: true,
+  review_always: false,
   ...over,
 });
 

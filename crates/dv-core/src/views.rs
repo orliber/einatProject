@@ -81,8 +81,8 @@ pub struct AppStatus {
     pub idle_lock_in: Option<u32>,
     /// Names always hidden as the practitioner (shown in settings).
     pub practitioner: Vec<String>,
-    /// Show every request on the review screen before it is sent (on by default until Einat
-    /// confirms otherwise; D-062). Off: a request the gate cleared goes at once.
+    /// Show every request on the review screen before it is sent (off by default, as Einat
+    /// approved; D-062). Off: a request the gate cleared goes at once.
     pub review_always: bool,
     /// Screenshots and screen sharing show a blank window (D-037). Always on while the vault
     /// is locked; she may turn it off for the open vault in settings.

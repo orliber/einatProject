@@ -15,7 +15,7 @@ export async function unlock(page: Page): Promise<void> {
   expect(errors).toEqual([]);
 }
 
-/** Settings → privacy → "show me every request before sending" (on by default; set here so the test says what it reads),
+/** Settings → privacy → "show me every request before sending" (off by default),
  *  for the journeys that read the review screen; then back to the cases. */
 export async function reviewEveryRequest(page: Page): Promise<void> {
   await page.getByRole("navigation", { name: "ניווט ראשי" }).getByRole("button", { name: "הגדרות" }).click();

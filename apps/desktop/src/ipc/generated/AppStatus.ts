@@ -38,8 +38,8 @@ idle_lock_in: number | null,
  */
 practitioner: Array<string>, 
 /**
- * Show every request on the review screen before it is sent (on by default until Einat
- * confirms otherwise; D-062). Off: a request the gate cleared goes at once.
+ * Show every request on the review screen before it is sent (off by default, as Einat
+ * approved; D-062). Off: a request the gate cleared goes at once.
  */
 review_always: boolean, 
 /**

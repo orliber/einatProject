@@ -160,7 +160,7 @@ export class FakeCore {
     return providerOf(this.model).name;
   }
   private speed = "balanced";
-  private reviewAlways = true;
+  private reviewAlways = false;
   private screenProtection = true;
   private template: TemplateView | null = null;
   private report: ReportSettings = {

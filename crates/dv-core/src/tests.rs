@@ -1300,16 +1300,18 @@ fn the_vault_locks_with_the_computer() {
 }
 
 #[test]
-fn every_request_is_shown_first_by_default_and_she_may_turn_it_off() {
+fn a_request_goes_without_a_window_by_default_and_she_may_ask_to_see_each_one() {
     let (_dir, mut core, _case) = setup(None);
     let s = core.status();
-    assert!(s.review_always);
+    assert!(
+        !s.review_always,
+        "off by default (D-062, approved by Einat)"
+    );
     assert_eq!(s.practitioner, vec!["ד\"ר רותם אלמוג".to_owned()]);
-    // No waiting period: off from the first day, and on again.
-    core.set_review_always(false).unwrap();
-    assert!(!core.status().review_always);
     core.set_review_always(true).unwrap();
     assert!(core.status().review_always);
+    core.set_review_always(false).unwrap();
+    assert!(!core.status().review_always);
 }
 
 #[test]
