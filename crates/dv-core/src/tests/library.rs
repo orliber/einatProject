@@ -1364,6 +1364,7 @@ fn a_kept_word_the_gate_refuses_can_be_restored_from_the_card() {
         allow: HashSet::new(),
         is_name: HashSet::new(),
         past: HashSet::new(),
+        masks: dv_privacy::MaskBook::default(),
     };
     let reason = |detail: &str| dv_privacy::BlockReason {
         code: "identity".into(),

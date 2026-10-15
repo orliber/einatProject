@@ -8,6 +8,8 @@ import { PeopleEditor, toIdentityInputs, type PersonRow } from "../../components
 import { Dialog, ErrorLine } from "../../components/ui";
 import type { CaseApi } from "../CaseScreen";
 import { useAi } from "../../ai";
+import { CasePrivacyCard } from "../../components/CasePrivacy";
+import type { Identity } from "../../ipc/generated/Identity";
 
 /** The case's details, consent and the names hidden before every send. */
 export function DetailsView({ api }: { api: CaseApi }) {
@@ -32,6 +34,18 @@ export function DetailsView({ api }: { api: CaseApi }) {
     return r.some((x) => x.role === "child") ? r : [{ id: null, role: "child", value: "", aliases: "" }, ...r];
   });
   const [error, setError] = useState<string | null>(null);
+
+  /** After a change on the privacy card: what the vault now holds, keeping what she is typing.
+   *  A name brought back leaves the list; a confirmed one is hers; a new role shows. */
+  async function namesChanged(fresh: Identity[]) {
+    setRows((now) => now.flatMap((r) => {
+      if (r.id === null) return [r];
+      const i = fresh.find((x) => x.id === r.id);
+      if (!i) return [];
+      return [i.source === "manual" ? { id: r.id, role: i.role, value: r.value, aliases: r.aliases } : { ...r, role: i.role }];
+    }));
+    await reload();
+  }
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [typed, setTyped] = useState("");
 
@@ -128,6 +142,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
               </div>
             )}
           </div>
+          <CasePrivacyCard caseId={caseId} identities={detail.identities} onChanged={namesChanged} />
           <div className="card details-card stack danger-zone">
             <b>מחיקת התיק</b>
             <p className="small muted">נשמר בסל המחזור 30 יום, ואז נמחק לצמיתות.</p>

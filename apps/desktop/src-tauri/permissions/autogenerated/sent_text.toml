@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sent-text"
+description = "Enables the sent_text command without any pre-configured scope."
+commands.allow = ["sent_text"]
+
+[[permission]]
+identifier = "deny-sent-text"
+description = "Denies the sent_text command without any pre-configured scope."
+commands.deny = ["sent_text"]

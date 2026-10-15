@@ -95,13 +95,12 @@ export function ReviewDialog(props: {
       footer={
         <>
           <span className="small muted grow">
-            {status.review_choice_available ? (
-              <label className="row">
-                <input type="checkbox" checked={status.review_only_suspect}
-                  onChange={(e) => void ipc.setReviewOnlySuspect(e.target.checked).then(refresh)} />
-                להציג את המסך הזה רק כשמשהו הוסתר אוטומטית
-              </label>
-            ) : "בשבועיים הראשונים המסך מוצג לפני כל שליחה."}
+            {/* Shown only because she asked to see every request (advanced); off, requests go at once. */}
+            <label className="row">
+              <input type="checkbox" checked={status.review_always}
+                onChange={(e) => void ipc.setReviewAlways(e.target.checked).then(refresh)} />
+              להציג את המסך הזה לפני כל שליחה
+            </label>
           </span>
           {prepared.demo_mode && <span className="chip chip-sand">מצב הדגמה: שום דבר לא יוצא מהמחשב</span>}
           <button type="button" className="btn" onClick={props.onClose}>חזרה לעריכה</button>

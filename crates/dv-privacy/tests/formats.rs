@@ -717,7 +717,7 @@ fn a_closing_quote_or_possessive_glued_to_a_name_does_not_hide_it() {
         assert!(gate_text(&out.tagged, &ids, CASE).is_ok(), "{}", out.tagged);
         // Restoring gives back the text, quotes in place ("Noam" comes back as the declared
         // Hebrew name, as any alias does).
-        let restored = dv_privacy::restore::restore(&out.tagged, &ids, None);
+        let restored = dv_privacy::restore::restore(&out.tagged, &ids, None, &[]);
         assert_eq!(restored, text.replace("Noam", "נועם"));
     }
     // A lexicon name in quotes is hidden and refused raw too.

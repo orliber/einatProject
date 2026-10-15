@@ -29,6 +29,7 @@ fn ctx<'a>(ids: &'a [Identity], allow: &'a dyn Fn(&str) -> bool) -> PrivacyConte
         confirmed_names: &|_: &str| false,
         past_names: &|_: &str| false,
         today: (2026, 10, 11),
+        masks: None,
     }
 }
 

@@ -14,6 +14,9 @@ vi.setConfig({ testTimeout: 30_000 });
 async function openCase(prepare?: (core: FakeCore) => Promise<void>) {
   const core = new FakeCore();
   await core.handle("unlock", { password: "x" });
+  // These tests walk every screen a request passes through, the review screen included, so
+  // they run with "show me every request before sending" on (off by default; set here for the tests that read it).
+  await core.handle("set_review_always", { on: true });
   await prepare?.(core);
   const calls: { cmd: string; args: Record<string, unknown> }[] = [];
   mockIPC((cmd, args) => {

@@ -10,6 +10,30 @@ pub(crate) async fn activity(
     with_core(&state, move |c| c.activity(before)).await
 }
 
+/// "מה יצא מהמחשב": the requests kept with a case (one, or all), newest first.
+#[tauri::command]
+pub(crate) async fn sent_history(
+    state: tauri::State<'_, AppState>,
+    case_id: Option<String>,
+    place: Option<String>,
+    query: String,
+) -> Res<Vec<SentItem>> {
+    with_core(&state, move |c| {
+        c.sent_history(case_id.as_deref(), place.as_deref(), &query)
+    })
+    .await
+}
+
+/// One request in full, as it left.
+#[tauri::command]
+pub(crate) async fn sent_text(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    id: String,
+) -> Res<SentText> {
+    with_core(&state, move |c| c.sent_text(&case_id, &id)).await
+}
+
 #[tauri::command]
 pub(crate) async fn mark_activity_reviewed(state: tauri::State<'_, AppState>) -> Res<()> {
     with_core(&state, |c| c.mark_activity_reviewed()).await

@@ -39,6 +39,8 @@ import { compareSheets, comparisonText, formatSheet, instruments } from "./score
 import * as R from "./routing";
 import { PROVIDERS, providerOf } from "../providers";
 import type { SortResult } from "../ipc/generated/SortResult";
+import type { SentItem } from "../ipc/generated/SentItem";
+import type { SentText } from "../ipc/generated/SentText";
 
 type Args = Record<string, unknown>;
 
@@ -142,6 +144,8 @@ export class FakeCore {
   private reviewedAt: number | null = null;
   private convs: { id: string; caseId: string | null; updated: number; turns: { role: string; text: string; hidden: string[]; demo: boolean; at: number }[] }[] = [];
   private activityLog: ActivityEntry[] = [];
+  /** "מה יצא מהמחשב": what each request with a case's text carried (tagged), newest last. */
+  private sentLog: { id: string; caseId: string; place: string; at: number; text: string }[] = [];
   private practitioner = ["ד\"ר רותם בדויה"];
   private lockMinutes = 15;
   private capUsd: number | null = null;
@@ -156,7 +160,7 @@ export class FakeCore {
     return providerOf(this.model).name;
   }
   private speed = "balanced";
-  private reviewOnlySuspect = false;
+  private reviewAlways = false;
   private screenProtection = true;
   private template: TemplateView | null = null;
   private report: ReportSettings = {
@@ -395,7 +399,7 @@ export class FakeCore {
     return {
       vault_exists: this.vaultExists, unlocked: this.unlocked, disk_encryption: "on", cloud_synced_folder: null, fips_active: true,
       demo_mode: true, model: this.model, provider: providerOf(this.model).id, ai_name: this.ai, keys: [], speed: this.speed, integrity_warning: null, lock_minutes: this.lockMinutes, idle_lock_in: this.unlocked ? this.lockMinutes * 60 : null,
-      practitioner: this.practitioner, review_only_suspect: this.reviewOnlySuspect, review_choice_available: true, screen_protection: !this.unlocked || this.screenProtection,
+      practitioner: this.practitioner, review_always: this.reviewAlways, screen_protection: !this.unlocked || this.screenProtection,
     };
   }
 
@@ -534,7 +538,40 @@ export class FakeCore {
     return this.withKept(c, { approval_id: approval, parts, suspects: [], auto_hidden: autoHidden, hidden: Array.from(hidden), checks, blocked: [], demo_mode: true });
   }
 
+  private keepSent(caseId: string, place: string, text: string) {
+    this.sentLog.push({ id: newId("sent"), caseId, place, at: now(), text });
+  }
+
+  private sentItem(s: { id: string; caseId: string; place: string; at: number; text: string }): SentItem {
+    const c = this.find(s.caseId);
+    const hidden = c.people.filter((x) => s.text.includes(x.tag)).map((x) => ({ tag: x.tag, word: x.value }));
+    return { id: s.id, case_id: s.caseId, case_code: c.meta.code, place: s.place, at: s.at, ai: "", demo: true, sha256: "0".repeat(64), bytes: new TextEncoder().encode(s.text).length, hidden, hidden_match: false };
+  }
+
+  private sentHistory(caseId: string | null, place: string | null, query: string): SentItem[] {
+    const q = query.trim();
+    return [...this.sentLog].reverse().flatMap((s) => {
+      if ((caseId && s.caseId !== caseId) || (place && s.place !== place)) return [];
+      const item = this.sentItem(s);
+      if (!q || s.text.includes(q)) return [item];
+      return item.hidden.some((h) => h.word.includes(q)) ? [{ ...item, hidden_match: true }] : [];
+    });
+  }
+
+  private sentText(caseId: string, id: string): SentText {
+    const s = this.sentLog.find((x) => x.id === id && x.caseId === caseId) ?? fail("not_found", "הבקשה הזו לא נמצאה");
+    const rules = "מצב הדגמה: כאן ההוראות הקבועות שנשלחות עם כל בקשה.";
+    return {
+      item: this.sentItem(s),
+      parts: [{ label: "הוראות קבועות", text: rules }, { label: "בקשה", text: s.text }],
+      exact: JSON.stringify({ system: [{ type: "text", text: rules }], messages: [{ role: "user", content: s.text }] }),
+      hash_ok: true,
+    };
+  }
+
   private sendSort(p: Extract<Pending, { type: "sort" }>): SortResult {
+    const c0 = this.find(p.caseId);
+    this.keepSent(p.caseId, "sorting", p.materials.map((m) => this.filterFor(c0, m.content).tagged).join("\n\n"));
     const c = this.find(p.caseId);
     const keys = SORTABLE.map((s) => s.key);
     const result: SortResult = { sorted: 0, unchanged: 0, links: 0, ignored: 0, demo: true };
@@ -752,8 +789,8 @@ export class FakeCore {
       case "set_screen_protection":
         this.screenProtection = Boolean(a.on);
         return null;
-      case "set_review_only_suspect":
-        this.reviewOnlySuspect = Boolean(a.on);
+      case "set_review_always":
+        this.reviewAlways = Boolean(a.on);
         return null;
       case "report_settings":
         return this.report;
@@ -993,6 +1030,9 @@ export class FakeCore {
         if (p?.type !== "section") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
         this.pending.delete(String(a.approvalId));
         await new Promise((r) => setTimeout(r, 2500));
+        const c = this.find(p.caseId);
+        const asked = p.instruction.trim() ? [`הבקשה שלך\n${this.filterFor(c, p.instruction).tagged}`] : [];
+        this.keepSent(p.caseId, p.section, [...p.refs.map((r) => `${r.label}\n${r.tagged}`), ...asked].join("\n\n"));
         return this.sendSection(p);
       }
       case "prepare_sort":
@@ -1093,6 +1133,7 @@ export class FakeCore {
           this.convs.unshift(conv);
         }
         conv.turns.push({ role: "user", text: p.shown, hidden: p.hidden, demo: true, at }, { role: "assistant", text: answer, hidden: [], demo: true, at });
+        if (p.caseId) this.keepSent(p.caseId, "consult", p.question);
         conv.updated = at;
         return { answer, demo: true, conversation_id: conv.id };
       }
@@ -1219,6 +1260,10 @@ export class FakeCore {
         const page = [...this.activityLog].reverse().filter((e) => e.seq < before).slice(0, 50);
         return { entries: page, more: false, last_seq: page.at(-1)?.seq ?? null, intact: true, reviewed_at: this.reviewedAt };
       }
+      case "sent_history":
+        return this.sentHistory(a.caseId ? String(a.caseId) : null, a.place ? String(a.place) : null, String(a.query ?? ""));
+      case "sent_text":
+        return this.sentText(String(a.caseId), String(a.id));
       case "mark_activity_reviewed":
         this.logActivity("audit_reviewed", "security", "היומן נבדק");
         this.reviewedAt = now();

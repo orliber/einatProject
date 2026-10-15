@@ -15,6 +15,7 @@ import { useRotating, useRotatingPlaceholder } from "../components/Rotating";
 import { CONSULT_HINTS, CONSULT_IDEAS } from "../i18n/suggestions";
 import "./ConsultScreen.css";
 import { useAi } from "../ai";
+import { notSentMessage } from "../sending";
 
 interface Turn {
   role: "user" | "assistant";
@@ -179,11 +180,16 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
     else setMessage("");
     try {
       const prepared = await ipc.prepareConsult(scope, conversation, text);
-      const clean = prepared.approval_id && !prepared.auto_hidden.length && !prepared.blocked.length;
-      if (status.review_only_suspect && clean && prepared.approval_id) {
+      // Round 26: what the gate cleared goes at once; the review only when she asked for it.
+      if (status.review_always) {
+        setReview({ prepared, text });
+      } else if (prepared.approval_id) {
         await send(prepared.approval_id, prepared.hidden);
       } else {
-        setReview({ prepared, text });
+        dropPending();
+        setMessage(text);
+        if (input.current) input.current.set(text);
+        setError(notSentMessage(prepared));
       }
     } catch (err) {
       dropPending();

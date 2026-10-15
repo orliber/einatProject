@@ -194,6 +194,7 @@ fn measure_flow(docs: &[Doc]) -> Flow {
                 confirmed_names: &confirmed,
                 past_names: &|_: &str| false,
                 today: (2026, 10, 3),
+                masks: None,
             };
             let o = filter(&doc.text, &ctx).unwrap();
             flow.note_card(&doc.case, &o.auto_hidden);
@@ -251,6 +252,7 @@ fn measure_flow(docs: &[Doc]) -> Flow {
             confirmed_names: &confirmed,
             past_names: &|_: &str| false,
             today: (2026, 10, 3),
+            masks: None,
         };
         let tags: BTreeSet<String> = mine.iter().map(|i| i.tag.clone()).collect();
         let tags: std::collections::HashSet<String> = tags.into_iter().collect();

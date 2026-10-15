@@ -120,8 +120,7 @@ mod tests {
             lock_minutes: 10,
             idle_lock_in: None,
             practitioner: Vec::new(),
-            review_only_suspect: false,
-            review_choice_available: false,
+            review_always: true,
             screen_protection: true,
         }
     }

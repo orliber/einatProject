@@ -20,8 +20,7 @@ use dv_ai::{RawStyleItem, StyleExcerpt, StyleItem, StyleKind, StyleOrigin, Style
 use dv_domain::{Author, DraftParagraph, DraftStatus, Identity, ReportStructure, Role};
 use dv_privacy::text::normalize;
 use dv_privacy::{
-    clear, everyday_name, filter, AutoHidden, AutoKind, FilterOutcome, GateRequest, Mark,
-    PrivacyContext,
+    everyday_name, filter, AutoHidden, AutoKind, FilterOutcome, Mark, PrivacyContext,
 };
 use dv_vault::{AuditEvent, TokenHasher, Vault};
 use serde::{Deserialize, Serialize};
@@ -29,10 +28,7 @@ use serde_json::Value;
 use ts_rs::TS;
 
 use crate::dates::unix_now;
-use crate::{
-    today, Core, CoreError, Outgoing, Pending, PendingKind, Prepared, Review, Task,
-    MAX_REQUEST_BYTES,
-};
+use crate::{today, Core, CoreError, Outgoing, Pending, PendingKind, Prepared, Review, Task};
 
 mod headings;
 mod learning;
@@ -440,6 +436,7 @@ impl StyleData {
             confirmed_names: &none,
             past_names: &none,
             today: today(),
+            masks: None,
         };
         f(&ctx, &self.hasher)
     }

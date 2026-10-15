@@ -197,6 +197,17 @@ pub const MAIN_MIGRATIONS: &[&str] = &[
         hints TEXT NOT NULL
      );
      CREATE INDEX name_hints_case ON name_hints(case_id);",
+    // v10: the case's mask book (round 25): what each numbered tag of a number, a date, an
+    // address or a place hid, so the answer comes back as she wrote it. The words are sealed
+    // with the case key; the tag and its kind name nothing.
+    "CREATE TABLE masks (
+        case_id TEXT NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+        tag TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        original_enc BLOB NOT NULL,
+        PRIMARY KEY (case_id, tag)
+     );",
 ];
 
 pub const IDENTITY_MIGRATIONS: &[&str] = &[
@@ -286,6 +297,7 @@ mod tests {
                 "f2a949fd4a472698",
                 "c450369d36db7b57",
                 "319cc0d373ae4523",
+                "942e02ced273dca6",
             ],
         ),
         ("identity", &["98e79c9e2d976424", "59aa5787b56ebc78"]),

@@ -36,6 +36,8 @@ import type { Role } from "./Role";
 import type { ScoreSheet } from "./ScoreSheet";
 import type { SectionResult } from "./SectionResult";
 import type { SecurityStatus } from "./SecurityStatus";
+import type { SentItem } from "./SentItem";
+import type { SentText } from "./SentText";
 import type { SimilarParagraph } from "./SimilarParagraph";
 import type { SortResult } from "./SortResult";
 import type { SourceExcerpt } from "./SourceExcerpt";
@@ -170,6 +172,8 @@ export type Commands = {
   send_style_analysis: { args: { approvalId: string }; returns: StyleAnalysisResult };
   send_style_profile: { args: { approvalId: string }; returns: StyleProfileView };
   send_verify: { args: { approvalId: string }; returns: VerifyResult };
+  sent_history: { args: { caseId: string | null; place: string | null; query: string }; returns: Array<SentItem> };
+  sent_text: { args: { caseId: string; id: string }; returns: SentText };
   set_api_key: { args: { provider: string; key: string; retentionAck: boolean }; returns: null };
   set_auto_backup: { args: { on: boolean }; returns: BackupStatus };
   set_identities: { args: { caseId: string; identities: Array<IdentityInput> }; returns: Array<Identity> };
@@ -181,7 +185,7 @@ export type Commands = {
   set_practitioner: { args: { names: Array<string> }; returns: null };
   set_report_settings: { args: { settings: ReportSettings }; returns: null };
   set_report_template: { args: Uint8Array; returns: TemplateView };
-  set_review_only_suspect: { args: { on: boolean }; returns: null };
+  set_review_always: { args: { on: boolean }; returns: null };
   set_screen_protection: { args: { on: boolean }; returns: null };
   set_send_stopped: { args: { stopped: boolean }; returns: SecurityStatus };
   set_speed: { args: { speed: string }; returns: null };

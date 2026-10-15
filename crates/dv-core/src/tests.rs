@@ -14,10 +14,12 @@ use serde_json::{json, Value};
 use super::*;
 
 mod flows;
+mod history;
 mod hostile;
 mod import_export;
 mod large_case;
 mod library;
+mod masks;
 mod off_lock;
 mod perf_profile;
 mod sample_flows;
@@ -331,13 +333,28 @@ fn usage_is_counted_and_the_monthly_ceiling_stops_sending() {
     core.set_monthly_cap(Some(10)).unwrap();
     let second = section(&mut core);
     let err = core.send_section(&second).unwrap_err();
-    assert_eq!(err.to_ui().code, "refused");
+    let ui = err.to_ui();
+    assert_eq!(ui.code, "refused");
+    // The message offers the raised ceiling, and the button raises it to exactly that.
+    assert_eq!(ui.action, ErrorAction::RaiseCap { to_usd: 20 });
+    assert!(ui.message.contains("$20"), "{}", ui.message);
     assert_eq!(fake.sent.lock().unwrap().len(), 1);
-    // Raising the ceiling lets the same approval go out.
-    core.set_monthly_cap(None).unwrap();
-    assert_eq!(core.usage_summary().unwrap().cap_usd, None);
+    // Raising the ceiling lets the same approval go out, without preparing it again.
+    core.set_monthly_cap(Some(20)).unwrap();
     core.send_section(&second).unwrap();
     assert_eq!(fake.sent.lock().unwrap().len(), 2);
+    core.set_monthly_cap(None).unwrap();
+    assert_eq!(core.usage_summary().unwrap().cap_usd, None);
+}
+
+#[test]
+fn the_raised_ceiling_is_half_again_at_least_ten_in_fives() {
+    assert_eq!(send::raised_cap(10), 20);
+    assert_eq!(send::raised_cap(7), 20);
+    assert_eq!(send::raised_cap(30), 45);
+    assert_eq!(send::raised_cap(100), 150);
+    // No overflow at the top: it stays at the largest whole five.
+    assert_eq!(send::raised_cap(u32::MAX), u32::MAX);
 }
 
 #[test]
@@ -458,6 +475,53 @@ fn no_consent_no_sending() {
         .unwrap()
         .approval_id
         .is_some());
+}
+
+/// The review of stage 2: a request prepared before her consent was removed, or before a
+/// person was added to the case, never goes out (also not as a retry): it was filtered with
+/// what the case knew then.
+#[test]
+fn a_request_prepared_before_the_case_changed_does_not_go_out() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let p = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    let mut meta = core.case_detail(&case).unwrap().meta;
+    meta.consent = None;
+    core.update_case(&case, meta).unwrap();
+    assert!(core.send_section(&p.approval_id.unwrap()).is_err());
+
+    let mut meta = core.case_detail(&case).unwrap().meta;
+    meta.consent = Some(consent());
+    core.update_case(&case, meta).unwrap();
+    let p = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    let mut people: Vec<IdentityInput> = core
+        .case_detail(&case)
+        .unwrap()
+        .identities
+        .into_iter()
+        .map(|i| IdentityInput {
+            id: Some(i.id),
+            role: i.role,
+            value: i.value,
+            aliases: i.aliases,
+        })
+        .collect();
+    people.push(IdentityInput {
+        id: None,
+        role: Role::Other,
+        value: "בתיה".into(),
+        aliases: vec![],
+    });
+    core.set_identities(&case, people).unwrap();
+    assert!(matches!(
+        core.send_section(&p.approval_id.unwrap()),
+        Err(CoreError::NotFound(_))
+    ));
+    assert!(fake.sent.lock().unwrap().is_empty());
 }
 
 /// Everything the review screen shows as going out, joined.
@@ -1236,16 +1300,18 @@ fn the_vault_locks_with_the_computer() {
 }
 
 #[test]
-fn review_screen_is_always_shown_in_the_first_weeks() {
+fn a_request_goes_without_a_window_by_default_and_she_may_ask_to_see_each_one() {
     let (_dir, mut core, _case) = setup(None);
     let s = core.status();
-    assert!(!s.review_only_suspect && !s.review_choice_available);
-    assert!(matches!(
-        core.set_review_only_suspect(true),
-        Err(CoreError::Refused(_))
-    ));
-    assert!(core.set_review_only_suspect(false).is_ok());
+    assert!(
+        !s.review_always,
+        "off by default (D-062, approved by Einat)"
+    );
     assert_eq!(s.practitioner, vec!["ד\"ר רותם אלמוג".to_owned()]);
+    core.set_review_always(true).unwrap();
+    assert!(core.status().review_always);
+    core.set_review_always(false).unwrap();
+    assert!(!core.status().review_always);
 }
 
 #[test]
@@ -1645,6 +1711,7 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
             confirmed_names: &|_| false,
             past_names: &|_| false,
             today: (2026, 9, 28),
+            masks: None,
         };
         let req = GateRequest {
             body: &body,
@@ -1711,6 +1778,7 @@ fn score_tables_and_section_titles_are_never_rewritten_silently() {
                 confirmed_names: &|_| false,
                 past_names: &|_| false,
                 today: (2026, 9, 28),
+                masks: None,
             };
             dv_privacy::filter(text, &ctx).unwrap()
         };

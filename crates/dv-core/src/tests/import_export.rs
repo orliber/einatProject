@@ -246,3 +246,34 @@ fn missing_information_marker_is_pointed_out_and_bracketed_words_are_plain() {
         "{text}"
     );
 }
+
+/// A tag the words cannot be put back into (here an old fixed tag from before the mask book)
+/// does not stop the export (round 26): it becomes a marker, listed with what is left to
+/// complete, and never reaches the file as a tag.
+#[test]
+fn a_tag_left_in_the_report_becomes_a_marker_to_complete_not_a_stop() {
+    let (_dir, mut core, case) = setup(None);
+    let v = core.vault_mut().unwrap();
+    let d = v
+        .add_draft(
+            &case,
+            "referral",
+            "ההורים השאירו [טלפון] לחזרה.",
+            dv_domain::Author::User,
+            &[],
+        )
+        .unwrap();
+    v.set_draft_status(&case, &d.id, DraftStatus::Approved)
+        .unwrap();
+    let check = core.check_export(&case).unwrap();
+    assert!(check.blocking.is_empty(), "{:?}", check.blocking);
+    assert!(
+        check.to_complete.iter().any(|t| t.contains("[חסר: טלפון]")),
+        "{:?}",
+        check.to_complete
+    );
+    let out = core.export_report(&case, None).unwrap();
+    let text = read_docx_text(&out);
+    assert!(!text.contains("[טלפון]"), "{text}");
+    assert!(text.contains("[חסר: טלפון]"), "{text}");
+}

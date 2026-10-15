@@ -7,6 +7,7 @@ import { ErrorLine, Spinner } from "../../components/ui";
 import { LocalText, type LocalTextHandle } from "../../components/LocalText";
 import { useHoldUnsaved } from "../../components/Unsaved";
 import { useKept } from "../../kept";
+import { notSentMessage } from "../../sending";
 import type { CaseApi } from "../CaseScreen";
 
 type Audience = "parents" | "school";
@@ -16,7 +17,7 @@ type Audience = "parents" | "school";
  * the same review screen and gate. The school letter is written from the recommendations only.
  */
 export function LetterCard({ api }: { api: CaseApi }) {
-  const { fail } = useApp();
+  const { fail, status } = useApp();
   const [audience, setAudience] = useState<Audience>("parents");
   const [note, setNote] = useState("");
   const [paragraphs, setParagraphs] = useState<ParagraphView[]>([]);
@@ -71,7 +72,15 @@ export function LetterCard({ api }: { api: CaseApi }) {
       </div>
       <input className="input" placeholder="מה עוד חשוב שיהיה במכתב? (לא חובה)" value={note} onChange={(e) => setNote(e.target.value)} />
       <button type="button" className="btn" disabled={busy}
-        onClick={() => void act(async () => setReview(await ipc.prepareLetter(api.caseId, audience, note)))}>
+        onClick={() => void act(async () => {
+          const prepared = await ipc.prepareLetter(api.caseId, audience, note);
+          // Round 26: what the gate cleared goes at once; the review only when she asked for it.
+          if (status.review_always) setReview(prepared);
+          else if (prepared.approval_id) {
+            await ipc.sendSection(prepared.approval_id);
+            await load();
+          } else setError(notSentMessage(prepared));
+        })}>
         {busy ? <><Spinner /> מכינה…</> : paragraphs.length ? "ניסוח מחדש" : "ניסוח המכתב"}
       </button>
       {paragraphs.map((p) =>
