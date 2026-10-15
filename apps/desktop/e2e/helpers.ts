@@ -3,10 +3,10 @@ import axe from "axe-core";
 import { expect, type Locator, type Page } from "@playwright/test";
 
 /** Open the preview and unlock it (the demo core accepts any password). */
-export async function unlock(page: Page): Promise<void> {
+export async function unlock(page: Page, path = "/preview.html"): Promise<void> {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto("/preview.html");
+  await page.goto(path);
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
   await expect(page.locator("html")).toHaveAttribute("lang", "he");
   await page.getByLabel("סיסמה").fill("סיסמה בדויה לבדיקה");

@@ -10,9 +10,7 @@ impl Core {
         let needle = format!("\"sha256\":\"{sha256}\"");
         Ok(self
             .vault_ref()?
-            .audit_entries(u32::MAX)?
-            .into_iter()
-            .find(|e| e.event == "export" && e.meta.contains(&needle))
+            .audit_find("export", &needle)?
             .map(|e| e.ts))
     }
 

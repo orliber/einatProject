@@ -1318,7 +1318,6 @@ dependencies = [
  "dv-egress",
  "dv-export",
  "dv-ingest",
- "dv-ipc",
  "dv-ner",
  "dv-privacy",
  "dv-style",
@@ -1340,7 +1339,6 @@ dependencies = [
  "dv-core",
  "dv-domain",
  "dv-ingest",
- "dv-ipc",
  "dv-ner",
  "dv-privacy",
  "rfd",
@@ -1409,15 +1407,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "zip 8.6.0",
-]
-
-[[package]]
-name = "dv-ipc"
-version = "0.6.0"
-dependencies = [
- "serde",
- "serde_json",
- "ts-rs",
 ]
 
 [[package]]

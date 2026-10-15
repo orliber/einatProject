@@ -173,10 +173,19 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 0 16px;
+}
+.checklist-toggle {
+  flex-grow: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
   border: 0;
   background: transparent;
   text-align: start;
+  font: inherit;
+  color: inherit;
 }
 .checklist-items {
   list-style: none;

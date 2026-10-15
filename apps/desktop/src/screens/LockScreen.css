@@ -18,6 +18,15 @@
   gap: 24px;
   box-shadow: var(--shadow-dialog);
 }
+@media (max-height: 660px) {
+  .lock-backdrop {
+    padding: 12px;
+  }
+  .lock-card {
+    padding: 24px 32px 20px;
+    gap: 14px;
+  }
+}
 .lock-icon {
   width: 60px;
   height: 60px;

@@ -19,7 +19,6 @@ dv-domain.workspace = true
 dv-egress.workspace = true
 dv-export.workspace = true
 dv-ingest.workspace = true
-dv-ipc.workspace = true
 dv-ner.workspace = true
 dv-privacy.workspace = true
 dv-style.workspace = true

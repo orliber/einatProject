@@ -15,8 +15,9 @@ let sent = "null";
 let timer: ReturnType<typeof setTimeout> | null = null;
 
 /** The editors hand over their text at most every 800 ms (LocalText) or on every key (`live`),
- *  so this waits only a moment: no call to the core on each key. */
-const HOLD_WAIT_MS = 100;
+ *  so this waits a moment after the last key: no call to the core (and its lock) on each key.
+ *  A lock by hand sends at once (`holdNow`); a lock with the computer may miss this moment. */
+const HOLD_WAIT_MS = 400;
 
 /** The same editor shown again (she came back to the stage) is one text, not two: what the
  *  screen it was on held gives way to it. */
