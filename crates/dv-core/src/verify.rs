@@ -59,12 +59,19 @@ impl Core {
                 "הבדיקה מול המקורות מיועדת לסעיפים שנכתבים מחומרי התיק.".to_owned(),
             ));
         }
-        let structure =
-            ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
+        let structure = structure_for(self.vault_ref()?, case_id)?;
         let section = structure
             .section(section_key)
             .ok_or_else(|| CoreError::NotFound(section_key.to_owned()))?
             .clone();
+        // Her own sections (round 30, D-068): nothing of the case is sent for them, the check
+        // against the sources included (the review of stage 3).
+        if section.mode == dv_domain::SectionMode::Own {
+            return Err(CoreError::Refused(
+                "את כותבת את הסעיף הזה בעצמך, ולכן הוא לא נבדק מול החומרים ושום חומר לא נשלח בשבילו."
+                    .to_owned(),
+            ));
+        }
         let model = self.model_for(Task::Draft)?;
         let data = self.privacy_data(case_id)?;
         let hints = self.case_hints(case_id, &[])?;

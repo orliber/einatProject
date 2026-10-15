@@ -1,6 +1,7 @@
 //! What is learned from her edits, approvals and final reports, and the suggestions made of it (D-052).
 
 use super::*;
+use crate::structure_for;
 
 impl Core {
     /// Learn from her edit of the AI's paragraph in `section`: the changes she made, and her
@@ -65,8 +66,7 @@ impl Core {
     }
 
     pub(super) fn try_learn_from_final(&mut self, case_id: &str) -> Result<(), CoreError> {
-        let structure =
-            ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
+        let structure = structure_for(self.vault_ref()?, case_id)?;
         let v = self.vault_ref()?;
         let mut parts: Vec<(String, String)> = Vec::new();
         for section in structure.sections().filter(|s| s.key != "signature") {

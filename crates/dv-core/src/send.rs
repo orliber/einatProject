@@ -153,7 +153,24 @@ impl Core {
                 return Err(CoreError::NotFound("הפסקה".to_owned()));
             }
         }
-        self.prepare_section_once(case_id, section_key, instruction, replaces, false)
+        self.prepare_section_once(case_id, section_key, instruction, replaces, false, false)
+    }
+
+    /// "לנסח מהנקודות שלי" (round 30): a section she writes herself, worded from the points
+    /// she typed, with the section's guide and her style. No material, score or other section
+    /// goes with it.
+    pub fn prepare_from_points(
+        &mut self,
+        case_id: &str,
+        section_key: &str,
+        points: &str,
+    ) -> Result<Prepared, CoreError> {
+        if points.trim().is_empty() {
+            return Err(CoreError::Refused(
+                "כותבים קודם את הנקודות, ואז מנסחים מהן.".to_owned(),
+            ));
+        }
+        self.prepare_section_once(case_id, section_key, points, None, false, true)
     }
 
     pub(crate) fn prepare_section_once(
@@ -163,9 +180,9 @@ impl Core {
         instruction: &str,
         replaces: Option<&str>,
         learned: bool,
+        points: bool,
     ) -> Result<Prepared, CoreError> {
-        let structure =
-            ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
+        let structure = structure_for(self.vault_ref()?, case_id)?;
         let letter = Letter::of(section_key);
         let section = match letter {
             Some(l) => dv_domain::ReportSection {
@@ -173,12 +190,27 @@ impl Core {
                 title: l.title().to_owned(),
                 inputs: Vec::new(),
                 about: String::new(),
+                mode: dv_domain::SectionMode::Ai,
+                guide: String::new(),
             },
             None => structure
                 .section(section_key)
                 .ok_or_else(|| CoreError::NotFound(section_key.to_owned()))?
                 .clone(),
         };
+        // Her own sections (round 30): nothing is sent for them but her points, on request.
+        let own = section.mode == dv_domain::SectionMode::Own;
+        if own && !points {
+            return Err(CoreError::Refused(
+                "את כותבת את הסעיף הזה בעצמך, ולכן שום חומר לא נשלח בשבילו. אפשר לכתוב פסקה, או לנסח מהנקודות שלך."
+                    .to_owned(),
+            ));
+        }
+        if points && !own {
+            return Err(CoreError::Refused(
+                "ניסוח מהנקודות שלך הוא לסעיפים שאת כותבת בעצמך.".to_owned(),
+            ));
+        }
         let model = self.model_config()?;
         let data = self.privacy_data(case_id)?;
         let hints = self.case_hints(case_id, &[])?;
@@ -211,7 +243,7 @@ impl Core {
             let fixed_title = |sec: &dv_domain::ReportSection| model_title(sec, &ctx);
             let mut review = Review::default();
             let derived = DERIVED_SECTIONS.contains(&section_key) || letter.is_some();
-            let (tagged_sources, source_rows) = if derived {
+            let (tagged_sources, source_rows) = if derived || points {
                 (Vec::new(), Vec::new())
             } else {
                 collect_sources(
@@ -225,7 +257,7 @@ impl Core {
                 )?
             };
             let mut approved_context = Vec::new();
-            if derived {
+            if derived && !points {
                 // A letter gets only the sections it is written from (EX-4): the school letter
                 // only the recommendations, never the background or the diagnoses.
                 let wanted = |key: &str| match letter {
@@ -252,7 +284,7 @@ impl Core {
                     "המכתב נכתב מתוך ההמלצות שאישרת בדוח, ועוד אין המלצות מאושרות. מאשרים קודם את סעיף ההמלצות.".to_owned(),
                 ));
             }
-            if derived && approved_context.is_empty() {
+            if derived && !points && approved_context.is_empty() {
                 return Err(CoreError::Refused(
                     "הסעיף הזה נכתב מתוך הסעיפים שכבר אישרת, ועוד לא אישרת אף סעיף. מאשרים קודם את הטיוטות בסעיפים האחרים, ואז חוזרים לכאן."
                         .to_owned(),
@@ -263,6 +295,7 @@ impl Core {
             for d in v
                 .drafts(case_id, section_key)?
                 .into_iter()
+                .filter(|_| !points)
                 .filter(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved))
             {
                 let out = run(&d.text_tagged)?;
@@ -272,7 +305,11 @@ impl Core {
             // The conversation so far is not shown again, but what the filter hides in it is
             // kept like everything else, so its tags belong to the case.
             let mut history: Vec<TaggedTurn> = Vec::new();
-            for m in v.messages(case_id, section_key)? {
+            for m in v
+                .messages(case_id, section_key)?
+                .into_iter()
+                .filter(|_| !points)
+            {
                 let o = run(&m.text_tagged)?;
                 review.note_hidden(&o);
                 history.push(TaggedTurn {
@@ -285,7 +322,15 @@ impl Core {
                 });
             }
             let instr = run(instruction)?;
-            review.add("הבקשה שלך".to_owned(), &instr);
+            review.add(
+                if points {
+                    "הנקודות שלך"
+                } else {
+                    "הבקשה שלך"
+                }
+                .to_owned(),
+                &instr,
+            );
             // Her approved style profile (D-043), as it goes out with this case's names hidden.
             // The items that fit this section's material best go out (D-052).
             let query: String = tagged_sources
@@ -298,6 +343,29 @@ impl Core {
             if let Some(text) = &style_profile {
                 review.add_context("פרופיל הסגנון שלך".to_owned(), &run(text)?);
             }
+            // How she wants the section written (round 29), filtered like her request: the
+            // case's own lines may name someone.
+            let guide_text = if letter.is_some() {
+                String::new()
+            } else {
+                guides::guide_for(v, &meta, &section)?.text()
+            };
+            let guide_tagged = if guide_text.is_empty() {
+                String::new()
+            } else {
+                let out = run(&guide_text)?;
+                review.add("איך לכתוב את הסעיף".to_owned(), &out);
+                out.tagged
+            };
+            // A first draft of the whole section is checked against the guide's lines, when it
+            // has two or more; a rewrite of one paragraph or a turn on a draft is not.
+            let lines = dv_ai::guide_lines(&guide_tagged);
+            let guide_lines: Vec<String> =
+                if current.is_empty() && replaces.is_none() && lines.len() >= 2 {
+                    lines.into_iter().map(str::to_owned).collect()
+                } else {
+                    Vec::new()
+                };
             let input = SectionInput {
                 section_key: section.key.clone(),
                 section_title: fixed_title(&section)?,
@@ -309,18 +377,27 @@ impl Core {
                 history,
                 instruction_tagged: instr.tagged.clone(),
                 style_profile,
+                guide_tagged,
+                points_only: points,
+                sources_in_order: section_key == sorting::PRIOR_SECTION && !points,
             };
-            let approved = input
-                .approved_context
-                .iter()
-                .map(|(_, t)| t.clone())
-                .collect::<Vec<_>>();
+            // From her points, the numbers in the answer are checked against the points.
+            let approved = if points {
+                vec![instr.tagged.clone()]
+            } else {
+                input
+                    .approved_context
+                    .iter()
+                    .map(|(_, t)| t.clone())
+                    .collect::<Vec<_>>()
+            };
             let sources = (
                 section.key.clone(),
                 instr.tagged,
                 instr.hidden.clone(),
                 source_rows,
                 approved,
+                guide_lines,
             );
             (input, review, sources)
         };
@@ -339,7 +416,7 @@ impl Core {
         };
         let (body, _refs) = dv_ai::build_section_request(&model, &input, &nonce);
         let mut prepared = review.into_case_prepared(demo_mode, &data);
-        let (key, instruction_tagged, instr_hidden, rows, approved) = sources;
+        let (key, instruction_tagged, instr_hidden, rows, approved, guide) = sources;
         let kind = PendingKind::Section {
             case_id: case_id.to_owned(),
             section_key: key,
@@ -348,9 +425,18 @@ impl Core {
             sources: rows,
             approved,
             replaces: replaces.map(str::to_owned),
+            guide,
+            from_points: points,
         };
         if self.gate(&data, &body, kind, &mut prepared, !learned)? {
-            return self.prepare_section_once(case_id, section_key, instruction, replaces, true);
+            return self.prepare_section_once(
+                case_id,
+                section_key,
+                instruction,
+                replaces,
+                true,
+                points,
+            );
         }
         Ok(prepared)
     }
@@ -453,7 +539,7 @@ impl Core {
         let mut month = usage::Month::parse(v.setting(&key).ok().flatten().as_deref());
         month.add(&model, usage::Tokens::from_answer(answer));
         if let Ok(json) = serde_json::to_string(&month) {
-            let _ = v.set_setting(&key, &json);
+            let _ = v.set_state(&key, &json);
         }
     }
 
@@ -534,6 +620,8 @@ impl Core {
             sources,
             approved,
             replaces,
+            guide,
+            from_points,
         } = kind
         else {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
@@ -543,7 +631,9 @@ impl Core {
             .iter()
             .map(|(sid, _, text)| (sid.clone(), text.clone()))
             .collect();
-        let mut reply = if DERIVED_SECTIONS.contains(&section_key.as_str()) {
+        let mut reply = if from_points {
+            dv_ai::parse_points_section(&response, &approved.concat())?
+        } else if DERIVED_SECTIONS.contains(&section_key.as_str()) {
             dv_ai::parse_derived_section(&response, &approved)?
         } else {
             dv_ai::parse_section(&response, &refs)?
@@ -619,6 +709,18 @@ impl Core {
             }
         }
 
+        // The guide's lines no paragraph answers (round 29), worked out here from the numbers
+        // the paragraphs give. Not in a demo answer, which follows no guide.
+        let unanswered: Vec<&String> = if demo || reply.paragraphs.is_empty() {
+            Vec::new()
+        } else {
+            guide
+                .iter()
+                .zip(1u32..)
+                .filter(|(_, n)| !reply.paragraphs.iter().any(|p| p.guide == *n))
+                .map(|(l, _)| l)
+                .collect()
+        };
         let practitioner = v.practitioner()?.names.first().cloned();
         let show = |t: &str| restore(t, &identities, practitioner.as_deref(), &masks);
         Ok(SectionResult {
@@ -632,7 +734,11 @@ impl Core {
                 })
                 .collect(),
             questions: reply.questions.iter().map(|q| show(q)).collect(),
-            missing: reply.missing.iter().map(|q| show(q)).collect(),
+            missing: unanswered
+                .iter()
+                .map(|l| format!("חסרה פסקה לפי ההנחיה: {}", show(l)))
+                .chain(reply.missing.iter().map(|q| show(q)))
+                .collect(),
             contradictions: reply.contradictions.iter().map(|q| show(q)).collect(),
             demo,
         })
@@ -645,8 +751,7 @@ impl Core {
         &mut self,
         case_id: &str,
     ) -> Result<Vec<(String, Prepared)>, CoreError> {
-        let structure =
-            ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
+        let structure = structure_for(self.vault_ref()?, case_id)?;
         let fed: HashSet<String> = {
             let v = self.vault_ref()?;
             let inputs = v.inputs(case_id)?;
@@ -659,6 +764,7 @@ impl Core {
         for s in structure
             .sections()
             .filter(|s| !DERIVED_SECTIONS.contains(&s.key.as_str()))
+            .filter(|s| s.mode == dv_domain::SectionMode::Ai)
         {
             let written = self
                 .vault_ref()?
@@ -699,7 +805,19 @@ pub(crate) fn collect_sources(
     };
     let mut tagged_sources = Vec::new();
     let mut source_rows = Vec::new();
-    for inp in v.inputs(case_id)? {
+    let mut inputs = v.inputs(case_id)?;
+    if section_key == sorting::PRIOR_SECTION {
+        // Round 31: the institute first, then the community, newest first, fixed here.
+        let keys = inputs
+            .iter()
+            .map(|i| sorting::prior_key(v, case_id, i))
+            .collect::<Result<Vec<_>, _>>()?;
+        inputs = dv_domain::record_order(&keys)
+            .into_iter()
+            .filter_map(|k| inputs.get(k).cloned())
+            .collect();
+    }
+    for inp in inputs {
         // D-022: the table, the sorting, and Einat's choice decide what goes here.
         let table = sorting::table_for(structure, inp.kind);
         let count = passage_ranges(&inp.content).len();

@@ -170,6 +170,20 @@ enum CoreEvent {
 }
 const CRASH_LOG_MAX: u64 = 64 * 1024;
 
+/// The window opens at the size in `tauri.conf.json`. On a laptop with Windows set to 125–150 %
+/// scaling, the work area (the screen without the taskbar) is smaller than that, and the window
+/// opened with its right strip and its bottom bar outside the screen: such a window fills the
+/// work area instead. One that already fits is left where the system put it.
+fn fit_window(window: &tauri::WebviewWindow) {
+    let (Ok(Some(monitor)), Ok(size)) = (window.current_monitor(), window.outer_size()) else {
+        return;
+    };
+    let area = monitor.work_area().size;
+    if size.width > area.width || size.height > area.height {
+        let _ = window.maximize();
+    }
+}
+
 /// A release build stops at the first panic (`panic = "abort"`), and on Windows it has no
 /// console, so the program just vanished. Write where it stopped: the time, version, thread
 /// and source line, and the message only when it is fixed text in the code. A message built
@@ -249,6 +263,7 @@ fn main() {
             // The window opens protected (tauri.conf.json); this lifts it while D-039 holds.
             if let Some(w) = &timer_window {
                 protect(w, true);
+                fit_window(w);
             }
             let mut computer = os_lock::LockWatch::default();
             // The window learns of a lock, of the last minute before it and of a backup from
@@ -345,6 +360,9 @@ fn main() {
             set_speed,
             set_lock_minutes,
             set_practitioner,
+            set_section_guide,
+            section_modes,
+            set_section_mode,
             set_review_always,
             set_screen_protection,
             report_settings,
@@ -356,6 +374,7 @@ fn main() {
             create_case,
             create_sample_case,
             update_case,
+            set_case_guide,
             delete_case,
             set_identities,
             case_detail,
@@ -376,6 +395,7 @@ fn main() {
             confirm_auto_hidden,
             change_role,
             prepare_section,
+            prepare_from_points,
             prepare_full_draft,
             send_section,
             verify_stage_on,
@@ -410,6 +430,7 @@ fn main() {
             edit_paragraph,
             paragraph_versions,
             similar_paragraph,
+            own_section_help,
             restore_paragraph_version,
             add_own_paragraph,
             prepare_consult,

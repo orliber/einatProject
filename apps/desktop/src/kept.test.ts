@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { clearKept, getKept, useKept } from "./kept";
+import { clearKept, forgetKept, getKept, useKept } from "./kept";
 
 afterEach(() => clearKept());
 
@@ -29,5 +29,14 @@ describe("kept screen state", () => {
     expect(screen.result.current[0]).toBe("");
     set("תשובה מאוחרת");
     expect(getKept("t:last", "")).toBe("");
+  });
+
+  it("forgets one value, and the next screen starts from its own default", () => {
+    const first = renderHook(() => useKept("t:draft", "ישן"));
+    act(() => first.result.current[1]("טיוטה"));
+    first.unmount();
+    forgetKept("t:draft");
+    const again = renderHook(() => useKept("t:draft", "חדש"));
+    expect(again.result.current[0]).toBe("חדש");
   });
 });

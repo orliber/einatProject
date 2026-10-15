@@ -15,10 +15,12 @@ mod export;
 mod failures;
 mod followup;
 pub mod google;
+mod guides;
 mod history;
 mod intake;
 mod library;
 pub mod name_model;
+mod own;
 use name_model::NameHints;
 mod jobs;
 mod readiness;
@@ -49,7 +51,6 @@ use dv_domain::{
     IdentitySource, InputKind, ReportStructure, Role,
 };
 use dv_egress::{EgressError, Transport};
-use dv_ipc::{PingResponse, IPC_VERSION};
 use dv_privacy::restore::{restore, scan_model_output};
 use dv_privacy::text::normalize;
 use dv_privacy::{
@@ -74,18 +75,18 @@ pub use jobs::{
 };
 pub use library::TRASH_DAYS;
 pub use name_model::{HintJob, HintsRead};
+pub use own::SectionModeView;
 pub use readiness::{Readiness, ReadinessItem};
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
 pub use security::{SecurityItem, SecurityStatus};
 pub use style::{
-    FitMonth, SimilarParagraph, StyleAnalysisResult, StyleImportPreview, StyleOverview,
-    StylePartView, StyleProfileView, StyleSectionLabel, StyleSourceView, StyleSuggestion,
-    StyleSuggestionKind, StyleVersionView,
+    FitMonth, OwnSectionHelp, SimilarParagraph, StyleAnalysisResult, StyleImportPreview,
+    StyleOverview, StylePartView, StyleProfileView, StyleSectionLabel, StyleSourceView,
+    StyleSuggestion, StyleSuggestionKind, StyleVersionView,
 };
 pub use unsaved::UnsavedEdit;
 pub use usage::UsageSummary;
 pub use verify::VerifyResult;
-pub use views::ErrorAction;
 pub use views::{
     ActivityEntry, ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail,
     ChatView, ConsultResult, ConsultTurnView, ConsultationSummary, ConsultationView, CreatedVault,
@@ -94,6 +95,7 @@ pub use views::{
     SortResult, SourceExcerpt, StagedBackup, StyleHint, StyleMark, SuspectDecision, TemplateView,
     UiError,
 };
+pub use views::{ErrorAction, PingResponse, IPC_VERSION};
 
 const API_KEY: &str = "anthropic_api_key";
 
@@ -118,6 +120,22 @@ pub(crate) fn key_of(
         Some(name) => v.secret(name),
         None => Ok(Some(zeroize::Zeroizing::new(String::new()))),
     }
+}
+
+/// The report template of a case (D-066): the institute's for a new case, the one it was
+/// opened with for an older one.
+pub(crate) fn structure_for(v: &Vault, case_id: &str) -> Result<ReportStructure, CoreError> {
+    let mut structure = ReportStructure::for_template(v.case_meta(case_id)?.template.as_deref())
+        .map_err(|e| CoreError::Internal(e.to_string()))?;
+    // Who writes each section, as she set it in settings (round 30).
+    for part in &mut structure.parts {
+        for s in &mut part.sections {
+            if let Some(mode) = own::mode_setting(v, &s.key)? {
+                s.mode = mode;
+            }
+        }
+    }
+    Ok(structure)
 }
 
 /// The company of a model; anything unknown reads as Claude (the default).
@@ -466,6 +484,11 @@ enum PendingKind {
         /// The one proposed paragraph the answer rewrites ("ניסוח מחדש"); `None`: the answer
         /// is the section's new draft and replaces the paragraphs not approved yet.
         replaces: Option<String>,
+        /// A first draft: the guide's lines as they went out, numbered from 1, to find the
+        /// ones no paragraph answers (round 29). Empty: not checked.
+        guide: Vec<String>,
+        /// Worded from her points only (round 30): no `S#` sources; `approved` holds the points.
+        from_points: bool,
     },
     Consult {
         case_id: Option<String>,
@@ -482,7 +505,9 @@ enum PendingKind {
     /// sent, and a fingerprint of its text then.
     Sort {
         case_id: String,
-        materials: Vec<(String, usize, u64)>,
+        /// Per material: id, passage count, fingerprint of the text, and the text as sent
+        /// (tagged), which the numbers of its summary are checked against (round 31).
+        materials: Vec<(String, usize, u64, String)>,
         sections: Vec<String>,
     },
     /// Step 1 of the writing-style profile: one past report (D-043).

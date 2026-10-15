@@ -633,6 +633,27 @@ pub fn format_sheet(sheet: &ScoreSheet) -> Result<String, String> {
             ));
         }
     }
+    // The order the report gives them in (the institute's: from the highest to the lowest),
+    // worked out here, never by the model. A total is not one of the domains it orders.
+    let mut groups: Vec<(&str, Vec<(String, f64)>)> = Vec::new();
+    for (measure, e) in &entries {
+        if matches!(measure.key.as_str(), "fsiq" | "gac" | "total") {
+            continue;
+        }
+        let row = (measure_label(measure), e.value);
+        match groups.iter_mut().find(|(g, _)| *g == measure.group) {
+            Some((_, rows)) => rows.push(row),
+            None => groups.push((&measure.group, vec![row])),
+        }
+    }
+    for (group, mut rows) in groups.into_iter().filter(|(_, r)| r.len() >= 2) {
+        rows.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let order: Vec<String> = rows
+            .iter()
+            .map(|(name, v)| format!("{name} – ציון {}", fmt_value(*v)))
+            .collect();
+        out.push_str(&format!("{group} מהגבוה לנמוך: {}\n", order.join("; ")));
+    }
     out.push_str(&inst.scale_note_he);
     out.push('\n');
     if any_percentile {
@@ -925,6 +946,14 @@ mod tests {
         );
         assert!(text.contains("פער של 24 נקודות"), "{text}");
         assert!(text.contains("לא על ידי מודל השפה"));
+        assert!(
+            text.contains(
+                "מדדים מהגבוה לנמוך: הבנה מילולית (VCI) – ציון 112; מהירות עיבוד (PSI) – ציון 88"
+            ),
+            "{text}"
+        );
+        // A group of one score (the one subtest) has no order to give.
+        assert_eq!(text.matches("מהגבוה לנמוך").count(), 1, "{text}");
 
         let ados = ScoreSheet {
             instrument: "ados_2".into(),
@@ -942,6 +971,40 @@ mod tests {
             text.contains("מודול: 1") && text.contains("ציון 14 – בנקודת החתך או מעליה (11)"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn the_domains_are_given_from_the_highest_to_the_lowest_in_code() {
+        let entry = |measure: &str, value: f64| ScoreEntry {
+            measure: measure.into(),
+            value,
+            note: String::new(),
+        };
+        let sheet = ScoreSheet {
+            instrument: "wppsi_iv".into(),
+            module: String::new(),
+            cutoff: None,
+            entries: vec![
+                entry("fsiq", 99.0),
+                entry("psi", 88.0),
+                entry("vci", 112.0),
+                entry("vsi", 100.0),
+                entry("matrix", 13.0),
+            ],
+            notes: String::new(),
+        };
+        let text = format_sheet(&sheet).unwrap_or_else(|e| panic!("{e}"));
+        let line = text
+            .lines()
+            .find(|l| l.contains("מהגבוה לנמוך"))
+            .unwrap_or_else(|| panic!("{text}"));
+        let at = |abbr: &str| line.find(abbr).unwrap_or_else(|| panic!("{line}"));
+        assert!(at("VCI") < at("VSI") && at("VSI") < at("PSI"), "{line}");
+        assert!(line.contains("(VCI) – ציון 112"), "{line}");
+        // The full scale is not one of the domains.
+        assert!(!line.contains("FSIQ"), "{line}");
+        // One subtest alone is not ordered.
+        assert_eq!(text.matches("מהגבוה לנמוך").count(), 1, "{text}");
     }
 
     #[test]

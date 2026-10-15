@@ -107,6 +107,31 @@ test("the export page lists what goes into the file and is accessible", async ({
   await expectAccessible(page);
 });
 
+// The review of stage 3: the section's guide, and her own section's points, are reached from
+// the report page (the report is the only way into a case since D-063).
+test("the report page opens a section's guide and her own section's points", async ({ page }) => {
+  await unlock(page);
+  // The preview's cases are in the old template: she marks the background as hers first.
+  await page.getByRole("navigation", { name: "ניווט ראשי" }).getByRole("button", { name: "הגדרות" }).click();
+  await page.getByRole("navigation", { name: "חלקי ההגדרות" }).getByRole("button", { name: "הדוח" }).click();
+  const hers = page.getByRole("checkbox", { name: /^רקע/ });
+  // The box follows the saved setting, so it turns on only after the save: click and wait.
+  await hers.click();
+  await expect(hers).toBeChecked();
+  await page.getByRole("navigation", { name: "ניווט ראשי" }).getByRole("button", { name: "תיקים" }).click();
+  await createCase(page, CHILD);
+  await stage(page, /כתיבה/).click();
+  await expect(page.getByRole("article", { name: "הדוח, כמו בקובץ" })).toBeVisible();
+  await page.getByRole("button", { name: "איך לכתוב את הסעיף ←" }).first().click();
+  // The link opens the guide on arrival.
+  await expect(page.getByText(/הנוסח של המכון|הנוסח שלך, לכל התיקים/)).toBeVisible();
+  await page.getByRole("button", { name: "→ חזרה לדוח" }).click();
+  await page.getByRole("button", { name: "הסעיף שלך: נקודות לניסוח ←" }).first().click();
+  await expect(page.getByRole("region", { name: "הסעיף שלך" })).toBeVisible();
+  await expect(page.getByLabel("הנקודות שלך")).toBeVisible();
+  await expectAccessible(page);
+});
+
 test("settings, consultation and writing style pages are accessible", async ({ page }) => {
   await unlock(page);
   for (const name of ["הגדרות", "התייעצות", "הסגנון שלי"]) {

@@ -209,6 +209,22 @@ pub struct StyleLearned {
     pub fit_by_month: Vec<FitMonth>,
 }
 
+/// Beside a section she writes herself (round 30): from her past reports and her profile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[ts(export)]
+pub struct OwnSectionHelp {
+    /// The section's first paragraph in her reports, newest first.
+    pub examples: Vec<SimilarParagraph>,
+    /// How she opened and closed the section, one line per report, without repeats.
+    pub openings: Vec<String>,
+    pub closings: Vec<String>,
+    /// Her approved phrases and templates for the section.
+    pub phrases: Vec<String>,
+}
+
+const OWN_HELP_EXAMPLES: usize = 3;
+const OWN_HELP_LINES: usize = 5;
+
 /// A paragraph of her past reports, beside a draft paragraph (ST2).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -1123,6 +1139,58 @@ impl Core {
                     same_section: *section == Some(draft.section_key.as_str()),
                 }),
         )
+    }
+
+    /// Help beside a section she writes herself (round 30), all from her past reports and her
+    /// approved profile, on this computer: how she wrote this section before, how she usually
+    /// opens and closes it, and her phrases for it. Nothing is sent.
+    pub fn own_section_help(&mut self, section_key: &str) -> Result<OwnSectionHelp, CoreError> {
+        let mut sources = self.stored_sources()?;
+        // Newest report first.
+        sources.sort_by_key(|(_, at, _)| std::cmp::Reverse(*at));
+        let mut help = OwnSectionHelp::default();
+        let push = |list: &mut Vec<String>, line: &str| {
+            let line = format!("{}.", line.trim_end_matches(['.', ',', ':']));
+            if list.len() < OWN_HELP_LINES && !list.contains(&line) {
+                list.push(line);
+            }
+        };
+        for (_, _, src) in &sources {
+            let paras: Vec<&str> = src
+                .parts
+                .iter()
+                .filter(|p| p.section.as_deref() == Some(section_key))
+                .flat_map(|p| dv_style::text::paragraphs(&p.text))
+                .collect();
+            let (Some(first), Some(last)) = (paras.first(), paras.last()) else {
+                continue;
+            };
+            if help.examples.len() < OWN_HELP_EXAMPLES {
+                help.examples.push(SimilarParagraph {
+                    text: (*first).to_owned(),
+                    report: src.title.clone(),
+                    same_section: true,
+                });
+            }
+            if let Some(s) = dv_style::text::sentences(first).first() {
+                push(&mut help.openings, s);
+            }
+            if let Some(s) = dv_style::text::sentences(last).last() {
+                push(&mut help.closings, s);
+            }
+        }
+        if let Some(p) = self.active_profile()? {
+            help.phrases = p
+                .profile
+                .items
+                .into_iter()
+                .filter(|i| i.enabled && i.section.as_deref() == Some(section_key))
+                .filter(|i| matches!(i.kind, StyleKind::Phrase | StyleKind::Template))
+                .map(|i| i.text)
+                .take(OWN_HELP_LINES)
+                .collect();
+        }
+        Ok(help)
     }
 
     /// What was learned from her edits, for marking her usual changes in a draft.

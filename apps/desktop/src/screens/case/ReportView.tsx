@@ -3,11 +3,12 @@ import { useApp } from "../../App";
 import { ipc, type CaseDetail, type ReportSettings, type TemplateView } from "../../ipc/client";
 import { kindLabel } from "../../i18n/he";
 import { ageWords } from "../../components/AgeField";
-import { ErrorLine, WarnIcon } from "../../components/ui";
+import { ErrorLine, SparkIcon, WarnIcon } from "../../components/ui";
 import { Why } from "../../components/Why";
 import { ProgressLine } from "../../components/Progress";
 import { useHoldUnsaved } from "../../components/Unsaved";
-import { useKept } from "../../kept";
+import { setKept, useKept } from "../../kept";
+import { guideOpenKey } from "../../components/SectionGuide";
 import { LocalText, type LocalTextHandle } from "../../components/LocalText";
 import { useRotatingPlaceholder } from "../../components/Rotating";
 import { DRAFT_HINTS, PARAGRAPH_HINTS } from "../../i18n/suggestions";
@@ -133,6 +134,32 @@ const PARA_CHANGES: [string, string][] = [
   ["לפשט להורים", "נסחי את הפסקה הבאה בשפה פשוטה וברורה להורים, באותו תוכן."],
 ];
 
+/** "או במילים שלך" inside an open card. Its changing hint is a timer, so it lives here, in
+ *  the card, and not in the section: fifteen closed cards run no timers. Enter sends. */
+function WishBox({ boxRef, hints, wish, typing, onText, onEmptyChange, onSend }: {
+  boxRef: RefObject<LocalTextHandle | null>;
+  hints: readonly string[];
+  wish: string;
+  typing: boolean;
+  onText: (text: string) => void;
+  onEmptyChange: (empty: boolean) => void;
+  onSend: () => void;
+}) {
+  const hint = useRotatingPlaceholder(hints, typing);
+  return (
+    <label className="stack small muted" style={{ gap: 4 }}>
+      או במילים שלך
+      <LocalText ref={boxRef} className="textarea" rows={2} initial={wish} placeholder={hint}
+        onText={onText} onEmptyChange={onEmptyChange}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" || e.shiftKey) return;
+          e.preventDefault();
+          onSend();
+        }} />
+    </label>
+  );
+}
+
 /** A small card next to what opened it; Escape or a click outside closes it. */
 function Popover({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -168,9 +195,24 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
    *  vault lock, and `empty` follows the box only when it turns empty or back (F1a). */
   // Kept while the vault is open: leaving for another stage and coming back finds the editor
   // open with what she typed (F1a, "ובעזיבה").
-  const [editing, setEditing] = useKept<{ id: string | null; text: string; at?: string | undefined; empty: boolean } | null>(`case:${caseId}:report:${s.key}:editing`, null);
+  const [editing, setEditing] = useKept<{ id: string | null; text: string; original: string; at?: string | undefined; empty: boolean } | null>(`case:${caseId}:report:${s.key}:editing`, null);
   const editBox = useRef<LocalTextHandle>(null);
-  const edit = (id: string | null, text: string, at?: string) => setEditing({ id, text, at, empty: !text.trim() });
+  const edit = (id: string | null, text: string, at?: string) => setEditing({ id, text, original: text, at, empty: !text.trim() });
+  /** "ביטול" or Esc with a changed text: asked first, so one key never loses what she typed. */
+  const [leaving, setLeaving] = useState(false);
+  function close() {
+    setLeaving(false);
+    setEditing(null);
+  }
+  function cancel() {
+    if (!editing) return;
+    const typed = editBox.current?.value() ?? editing.text;
+    if (typed.trim() === editing.original.trim()) close();
+    else setLeaving(true);
+  }
+  /** Just after an action: the second click of a double click lands on what the first one
+   *  revealed (an insert slot where the bar was), so that slot is held for a moment. */
+  const [settling, setSettling] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [open, setOpen] = useState<"sources" | "change" | null>(null);
   /** The paragraph whose "✦ with Claude" card is open. */
@@ -187,8 +229,6 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
   const [wishEmpty, setWishEmpty] = useState(true);
   const paraWish = useRef<LocalTextHandle>(null);
   const draftWish = useRef<LocalTextHandle>(null);
-  const paraHint = useRotatingPlaceholder(PARAGRAPH_HINTS, !wishEmpty);
-  const draftHint = useRotatingPlaceholder(DRAFT_HINTS, !wishEmpty);
   const [sourcesChanged, setSourcesChanged] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const job = api.jobs.find((j) => j.section === s.key);
@@ -197,7 +237,10 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
   // A new wording of an approved paragraph is shown beside it, not as a new draft.
   const reworded = new Map(proposed.filter((p) => p.replaces).map((p) => [p.replaces ?? "", p]));
   const pending = proposed.filter((p) => !p.replaces);
-  const canWrite = s.source_count > 0 || !s.sortable;
+  // Her own sections (round 30): nothing is drafted from the materials, so no AI control here;
+  // her points are worded on the section's own screen.
+  const mine = s.mode === "self";
+  const canWrite = !mine && (s.source_count > 0 || !s.sortable);
   const busy = preparing || job !== undefined;
   const sources = detail.routing
     .filter((r) => r.feeds.includes(s.key))
@@ -206,11 +249,14 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
 
   async function act(fn: () => Promise<unknown>) {
     setError(null);
+    setSettling(true);
     try {
       await fn();
       await reload();
     } catch (e) {
       setError(fail(e as never));
+    } finally {
+      window.setTimeout(() => setSettling(false), 400);
     }
   }
 
@@ -243,13 +289,13 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
     const text = editBox.current?.value() ?? editing.text;
     const { id, at } = editing;
     // A new paragraph left empty is just not added.
-    if (!text.trim() && !id) return setEditing(null);
+    if (!text.trim() && !id) return close();
     await act(async () => {
       // All the text deleted and saved: the paragraph goes away.
       if (id && !text.trim()) await ipc.rejectParagraph(caseId, id);
       else if (id) await ipc.editParagraph(caseId, id, text);
       else await ipc.addOwnParagraph(caseId, s.key, text, at ?? "end");
-      setEditing(null);
+      close();
     });
   }
 
@@ -269,7 +315,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
         {p.warnings.map((w, i) => (
           <div key={i} className="note-warn small"><WarnIcon /><span>{w}</span></div>
         ))}
-        {p.status === "proposed" && p.style && (
+        {p.status === "proposed" && p.style && !mine && (
           <StyleHintView hint={p.style} busy={busy}
             onCloser={(how) => void write(`נסחי מחדש את הפסקה הבאה כך שתישמע כמו הכתיבה שלי: ${how}. באותו תוכן ובלי להוסיף עובדות: "${p.text}"`, p.id)}
             onApply={(m) => void act(() => ipc.editParagraph(caseId, p.id, applyMark(p.text, m)))} />
@@ -286,7 +332,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
               </Popover>
             )}
             {canWrite && <button type="button" className="a4-ai" aria-expanded={paraPop === p.id} aria-label="לשנות את הפסקה עם AI" title="לשנות את הפסקה עם AI"
-              onClick={() => setParaPop(paraPop === p.id ? null : p.id)}><SparkIcon /></button>}
+              onClick={() => setParaPop(paraPop === p.id ? null : p.id)}><SparkIcon size={16} /></button>}
             {p.has_versions && (
               <button type="button" className="a4-hist" aria-expanded={history === p.id} aria-label="גרסאות קודמות של הפסקה" title="גרסאות קודמות (Ctrl+Shift+H)"
                 onClick={() => { setParaPop(null); setHistory(history === p.id ? null : p.id); }}><HistoryIcon /></button>
@@ -314,18 +360,8 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
                       onClick={() => void write(`${text} הפסקה: "${p.text}"`, p.id)}>{label}</button>
                   ))}
                 </div>
-                <label className="stack small muted" style={{ gap: 4 }}>
-                  או במילים שלך
-                  <LocalText ref={paraWish} className="textarea" rows={2} initial={wish} placeholder={paraHint}
-                    onText={setWish} onEmptyChange={setWishEmpty}
-                    onKeyDown={(e) => {
-                      if (e.key !== "Enter" || e.shiftKey) return;
-                      const w = takeWish(paraWish);
-                      if (w === null) return;
-                      e.preventDefault();
-                      void write(`${w} הפסקה: "${p.text}"`, p.id);
-                    }} />
-                </label>
+                <WishBox boxRef={paraWish} hints={PARAGRAPH_HINTS} wish={wish} typing={!wishEmpty} onText={setWish} onEmptyChange={setWishEmpty}
+                  onSend={() => { const w = takeWish(paraWish); if (w !== null) void write(`${w} הפסקה: "${p.text}"`, p.id); }} />
                 <div className="a4-pop-foot">
                   <span className="small muted grow">{p.status === "approved" ? "יופיע ליד הקיים, ויחליף אותו רק באישורך." : "יחליף את הפסקה בטיוטה."}</span>
                   <button type="button" className="btn btn-primary btn-small" disabled={wishEmpty}
@@ -379,17 +415,25 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
         placeholder="כותבים כאן, כמו בוורד. שמות מוסתרים לפני כל שליחה."
         onText={(text) => { const { id, at } = editing; setEditing((e) => (e && e.id === id && e.at === at ? { ...e, text } : e)); }}
         onEmptyChange={(empty) => { const { id, at } = editing; setEditing((e) => (e && e.id === id && e.at === at ? { ...e, empty } : e)); }}
-        onKeyDown={(e) => { if (e.key === "Escape") setEditing(null); if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void save(); }} />
+        onKeyDown={(e) => { if (e.key === "Escape") { if (leaving) close(); else cancel(); } if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void save(); }} />
+      {leaving ? (
+        <div className="row" role="group" aria-label="לבטל את העריכה?">
+          <span className="small grow">לבטל את מה שכתבת כאן? הטקסט לא נשמר.</span>
+          <button type="button" className="btn btn-small danger-text" onClick={close}>כן, לבטל</button>
+          <button type="button" className="btn btn-primary btn-small" onClick={() => { setLeaving(false); editBox.current?.focus(); }}>להמשיך לערוך</button>
+        </div>
+      ) : (
       <div className="row">
         <button type="button" className="btn btn-primary btn-small" disabled={!editing.id && editing.empty} onClick={() => void save()}>
           {editing.id && editing.empty ? "שמירה (הפסקה תימחק)" : "שמירה"}
         </button>
-        <button type="button" className="btn btn-small" onClick={() => setEditing(null)}>ביטול</button>
+        <button type="button" className="btn btn-small" onClick={cancel}>ביטול</button>
         <span className="small muted grow">Ctrl+Enter לשמירה · Esc לביטול</span>
         {editing.id && (
-          <button type="button" className="link-btn small danger-text" onClick={() => { const id = editing.id ?? ""; void act(async () => { await ipc.rejectParagraph(caseId, id); setEditing(null); }); }}>מחיקת הפסקה</button>
+          <button type="button" className="link-btn small danger-text" onClick={() => { const id = editing.id ?? ""; void act(async () => { await ipc.rejectParagraph(caseId, id); close(); }); }}>מחיקת הפסקה</button>
         )}
       </div>
+      )}
     </div>
   );
 
@@ -399,7 +443,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
       <div key={`slot-${at}`}>{editor}</div>
     ) : (
       <div key={`slot-${at}`} className="a4-insert">
-        <button type="button" className="a4-insert-btn" disabled={editing !== null} aria-label="הוספת פסקה משלי כאן"
+        <button type="button" className="a4-insert-btn" disabled={editing !== null || settling} aria-label="הוספת פסקה משלי כאן"
           onClick={() => edit(null, "", at)}>+ פסקה משלי כאן</button>
       </div>
     );
@@ -412,12 +456,22 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
         <span className="a4-tools">
 
         </span>
+        {/* The section's own screen: the guide, and for her sections the points to word. */}
+        <button type="button" className="link-small a4-open" onClick={() => {
+          // Her points are at the top of her section; elsewhere the guide opens on arrival.
+          if (!mine) setKept(guideOpenKey(caseId, s.key), false)(true);
+          go({ name: "case", id: caseId, view: s.key });
+        }}>
+          {mine ? "הסעיף שלך: נקודות לניסוח ←" : "איך לכתוב את הסעיף ←"}
+        </button>
       </div>
 
-      {s.sortable && (
+      {mine && <p className="small muted a4-mine">הסעיף הזה שלך: שום חומר לא נשלח בשבילו.</p>}
+      {s.sortable && !mine && (
         <div className="a4-sources">
           <span>{sources.length ? "נכתב מתוך:" : "אין חומרים לסעיף."}</span>
-          {sources.map((i) => <span key={i.id} className="a4-source">{i.title || kindLabel[i.kind]}</span>)}
+          {sources.slice(0, 6).map((i) => <span key={i.id} className="a4-source">{i.title || kindLabel[i.kind]}</span>)}
+          {sources.length > 6 && <span className="a4-source">ועוד {sources.length - 6}</span>}
           <span className="a4-pop-anchor">
             <button type="button" className="a4-source-edit" aria-expanded={open === "sources"} onClick={() => setOpen(open === "sources" ? null : "sources")}>
               {sources.length ? "+ חומר / הסרה" : "+ קישור חומרים"}
@@ -480,7 +534,7 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
             <span className="a4-flag">טיוטה של {ai} · עוד לא בדוח</span>
             <span className="row">
               <button type="button" className="btn btn-primary btn-small" onClick={() => void act(async () => { for (const p of pending) await ipc.approveParagraph(caseId, p.id); })}>✓ לאשר</button>
-              <span className="a4-pop-anchor">
+              {!mine && <span className="a4-pop-anchor">
                 <button type="button" className="btn btn-small" aria-expanded={open === "change"} disabled={busy} onClick={() => setOpen(open === "change" ? null : "change")}>✦ לשנות עם {ai}</button>
                 {open === "change" && (
                   <Popover label="מה לשנות בטיוטה" onClose={() => setOpen(null)}>
@@ -490,25 +544,15 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
                         <button key={label} type="button" className="pill-btn" onClick={() => void write(text)}>{label}</button>
                       ))}
                     </div>
-                    <label className="stack small muted" style={{ gap: 4 }}>
-                      או במילים שלך
-                      <LocalText ref={draftWish} className="textarea" rows={2} initial={wish} placeholder={draftHint}
-                        onText={setWish} onEmptyChange={setWishEmpty}
-                        onKeyDown={(e) => {
-                          if (e.key !== "Enter" || e.shiftKey) return;
-                          const w = takeWish(draftWish);
-                          if (w === null) return;
-                          e.preventDefault();
-                          void write(w);
-                        }} />
-                    </label>
+                    <WishBox boxRef={draftWish} hints={DRAFT_HINTS} wish={wish} typing={!wishEmpty} onText={setWish} onEmptyChange={setWishEmpty}
+                      onSend={() => { const w = takeWish(draftWish); if (w !== null) void write(w); }} />
                     <div className="a4-pop-foot">
                       <span className="small muted grow">הטיוטה החדשה תחליף את זו. מה שאישרת נשאר.</span>
                       <button type="button" className="btn btn-primary btn-small" disabled={wishEmpty} onClick={() => { const w = takeWish(draftWish); if (w !== null) void write(w); }}>שליחה</button>
                     </div>
                   </Popover>
                 )}
-              </span>
+              </span>}
               <button type="button" className="btn btn-small btn-ghost" onClick={() => void act(async () => { for (const p of pending) await ipc.rejectParagraph(caseId, p.id); })}>הסרה</button>
             </span>
           </div>
@@ -519,7 +563,12 @@ function A4Section({ api, section: s }: { api: CaseApi; section: Section }) {
       {ok.length === 0 && editing && editing.id === null && editor}
 
       {s.paragraphs.length === 0 && !job && !editing && (
-        canWrite ? (
+        mine ? (
+          <span className="a4-gap-row">
+            <button type="button" className="a4-gap a4-gap-own" onClick={() => edit(null, "", "end")}>+ פסקה משלי</button>
+            <button type="button" className="a4-gap" onClick={() => go({ name: "case", id: caseId, view: s.key })}>לנסח מהנקודות שלי ←</button>
+          </span>
+        ) : canWrite ? (
           <span className="a4-gap-row">
             <button type="button" className="a4-gap" disabled={busy} onClick={() => void write()}>✦ לכתוב עם {ai}</button>
             <button type="button" className="a4-gap a4-gap-own" onClick={() => edit(null, "", "end")}>+ פסקה משלי</button>
@@ -543,14 +592,6 @@ function fitRows(box: HTMLTextAreaElement) {
 }
 
 /** The AI mark: the same sparkle whichever model writes (D-036). */
-function SparkIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />
-      <path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z" />
-    </svg>
-  );
-}
 
 function HistoryIcon() {
   return (

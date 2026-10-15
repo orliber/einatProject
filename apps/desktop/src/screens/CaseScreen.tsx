@@ -260,10 +260,13 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     [caseId, startReview, track, reload, ai],
   );
 
-  const startSort = async () => {
-    setError(null);
+  /** `quiet`: the reading that runs by itself after a material was added (round 31): when
+   *  there is nothing to read, or it cannot be built now, it says nothing; the button stays. */
+  const startSort = async (quiet = false) => {
+    if (!quiet) setError(null);
     try {
       const prepared = await ipc.prepareSort(caseId);
+      if (quiet && !prepared.approval_id) return;
       await startReview({
         title: "מיון החומרים לסעיפים",
         prepared,
@@ -276,9 +279,28 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         },
       });
     } catch (e) {
-      setError(fail(e as never));
+      if (!quiet) setError(fail(e as never));
     }
   };
+
+  // Round 31: a material added while she works is read (sorted and summed up) by itself, when
+  // requests go without the review screen. Not on opening a case: only after an addition.
+  const reading = useRef<{ count: number; busy: boolean }>({ count: -1, busy: false });
+  const inputCount = detail?.inputs.length ?? -1;
+  const unreadNow = detail?.routing.filter((r) => r.needs_sorting).length ?? 0;
+  const consented = Boolean(detail?.meta.consent);
+  useEffect(() => {
+    const before = reading.current.count;
+    reading.current.count = inputCount;
+    if (before < 0 || inputCount <= before) return;
+    if (status.review_always || !consented || unreadNow === 0 || reading.current.busy) return;
+    reading.current.busy = true;
+    void startSort(true).finally(() => {
+      reading.current.busy = false;
+    });
+    // startSort is rebuilt on every render; the count decides when this runs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputCount]);
 
   if (!detail) {
     return error ? (
@@ -292,7 +314,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     );
   }
 
-  const api: CaseApi = { caseId, detail, reload, review: startReview, sort: startSort, jobs, track, draft };
+  const api: CaseApi = { caseId, detail, reload, review: startReview, sort: () => startSort(), jobs, track, draft };
   const unsorted = detail.routing.filter((r) => r.needs_sorting).length;
   const fed = detail.sections.filter((s) => s.source_count > 0);
   const pending = detail.sections.filter((s) => s.paragraphs.some((p) => p.status === "proposed"));

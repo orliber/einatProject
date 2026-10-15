@@ -3,7 +3,8 @@
 // for showing each request first. Everything is plain text; nothing here sends anything.
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import structure from "../../../../templates/report_structure.json";
+// The institute template holds every section key of the old one too (D-066).
+import structure from "../../../../templates/institute-v1.json";
 import { useApp } from "../App";
 import { ipc } from "../ipc/client";
 import type { SentItem } from "../ipc/generated/SentItem";

@@ -153,7 +153,16 @@ fn einat_decides_last_and_an_edit_forgets_the_old_passages() {
         .unwrap();
     let after = r(&mut core);
     assert!(!after.sorted);
-    assert_eq!(after.feeds, ["referral", "parents_view", "cognitive"]);
+    // An intake feeds the behavior and attention section of the institute's report too.
+    assert_eq!(
+        after.feeds,
+        [
+            "referral",
+            "parents_view",
+            "cognitive",
+            "behavior_attention"
+        ]
+    );
 }
 
 #[test]

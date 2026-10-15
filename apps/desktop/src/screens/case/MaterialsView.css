@@ -173,10 +173,19 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 0 16px;
+}
+.checklist-toggle {
+  flex-grow: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
   border: 0;
   background: transparent;
   text-align: start;
+  font: inherit;
+  color: inherit;
 }
 .checklist-items {
   list-style: none;
@@ -312,8 +321,13 @@
   background: var(--primary-soft);
 }
 
-.prior-ask { padding: 6px 12px 10px; }
-.prior-ask .stack { margin-top: 8px; }
-.prior-ask textarea { width: 100%; }
-.prior-ask .chip { cursor: pointer; border: 1px solid var(--primary); background: transparent; }
-.prior-ask .chip.on { background: var(--primary); color: #fff; }
+
+/* Round 31: the reading of the materials. */
+.material-summary { display: block; color: var(--ink-muted); margin-top: 2px; }
+.materials-reading { margin: 0 0 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); gap: 6px; }
+.materials-reading p { margin: 0; }
+.prior-list { margin: 0; padding-inline-start: 20px; display: flex; flex-direction: column; gap: 6px; }
+.prior-record { gap: 2px; }
+.material-reading { margin: 8px 0; padding: 10px 12px; border-radius: var(--radius-md); background: var(--surface-alt); gap: 4px; }
+.material-reading p { margin: 0; }
+.reading-notes { margin: 0; padding-inline-start: 18px; background: var(--warn-soft); border-radius: var(--radius-md); }

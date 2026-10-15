@@ -13,6 +13,7 @@ import type { StagedBackup } from "./generated/StagedBackup";
 import type { CaseDetail } from "./generated/CaseDetail";
 import type { CaseInput } from "./generated/CaseInput";
 import type { CaseMeta } from "./generated/CaseMeta";
+import type { SectionMode } from "./generated/SectionMode";
 import type { CaseSummary } from "./generated/CaseSummary";
 import type { Folder } from "./generated/Folder";
 import type { GoogleStatus } from "./generated/GoogleStatus";
@@ -48,6 +49,8 @@ import type { VerifyResult } from "./generated/VerifyResult";
 import type { SortResult } from "./generated/SortResult";
 import type { SourceExcerpt } from "./generated/SourceExcerpt";
 import type { MaterialRouting } from "./generated/MaterialRouting";
+import type { PriorRecordView } from "./generated/PriorRecordView";
+import type { Setting } from "./generated/Setting";
 import type { SuspectDecision } from "./generated/SuspectDecision";
 import type { FollowUpView } from "./generated/FollowUpView";
 import type { UiError } from "./generated/UiError";
@@ -165,6 +168,7 @@ export const ipc = {
   setModel: (model: string) => run("set_model", { model }),
   setLockMinutes: (minutes: number) => run("set_lock_minutes", { minutes }),
   setPractitioner: (names: string[]) => run("set_practitioner", { names }),
+  setSectionGuide: (sectionKey: string, text: string) => run("set_section_guide", { sectionKey, text }),
   setReviewAlways: (on: boolean) => run("set_review_always", { on }),
   setScreenProtection: (on: boolean) => run("set_screen_protection", { on }),
   reportSettings: () => call("report_settings"),
@@ -181,6 +185,7 @@ export const ipc = {
   createCase: (meta: CaseMeta, identities: IdentityInput[]) => call("create_case", { meta, identities }),
   createSampleCase: () => call("create_sample_case"),
   updateCase: (caseId: string, meta: CaseMeta) => run("update_case", { caseId, meta }),
+  setCaseGuide: (caseId: string, sectionKey: string, text: string) => run("set_case_guide", { caseId, sectionKey, text }),
   /** Into the recycle bin (D-023); restorable for 30 days. */
   deleteCase: (caseId: string) => run("delete_case", { caseId }),
   listTrash: () => call("list_trash"),
@@ -239,6 +244,14 @@ export const ipc = {
   prepareSection: (caseId: string, sectionKey: string, instruction: string, replaces?: string) =>
     call("prepare_section", { caseId, sectionKey, instruction, replaces: replaces ?? null }),
   prepareFullDraft: (caseId: string) => call("prepare_full_draft", { caseId }),
+  /** A section she writes herself, worded from her points only (round 30). */
+  prepareFromPoints: (caseId: string, sectionKey: string, points: string) =>
+    call("prepare_from_points", { caseId, sectionKey, points }),
+  /** Beside her own section: how she wrote it in her reports. Local, nothing is sent. */
+  ownSectionHelp: (sectionKey: string) => call("own_section_help", { sectionKey }),
+  /** Who writes each section of the institute's report (round 30). */
+  sectionModes: () => call("section_modes"),
+  setSectionMode: (sectionKey: string, mode: SectionMode) => run("set_section_mode", { sectionKey, mode }),
   /** Words Claude has written so far for a request on its way (streamed answers). */
   sendProgress: (approvalId: string) => call("send_progress", { approvalId }),
   sendSection: (approvalId: string) => call("send_section", { approvalId }),
@@ -418,6 +431,8 @@ export type {
   GoogleStatus,
   NameMatch,
   MaterialRouting,
+  PriorRecordView,
+  Setting,
   SortResult,
   SourceExcerpt,
   CaseDetail,

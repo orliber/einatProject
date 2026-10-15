@@ -1,4 +1,4 @@
-/* The case list as a file explorer (round 47, D-071): tree on the right, path and table. */
+/* The case list as a file explorer (round 47, D-085): tree on the right, path and table. */
 .cases-main {
   gap: 16px;
 }
@@ -408,5 +408,14 @@ button.crumb:hover:not([aria-current="page"]) {
   }
   .search {
     width: 180px;
+  }
+}
+/* A low window (a laptop under its taskbar): the first case stays on screen. */
+@media (max-height: 720px) {
+  .resume {
+    padding: 12px 20px;
+  }
+  .resume-name {
+    font-size: var(--text-2xl);
   }
 }

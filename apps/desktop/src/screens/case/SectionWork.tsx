@@ -14,15 +14,20 @@ import { kindLabel } from "../../i18n/he";
 import { useRotatingPlaceholder } from "../../components/Rotating";
 import { DRAFT_HINTS } from "../../i18n/suggestions";
 import { ParagraphVersions } from "../../components/ParagraphVersions";
+import { SectionGuide } from "../../components/SectionGuide";
+import { OwnSectionPanel } from "../../components/OwnSection";
 import { MarkedText, StyleHintView, applyMark } from "./StyleHintView";
 import { isCombo, KEYS } from "../../shortcuts";
 import type { CaseApi } from "../CaseScreen";
 import "./SectionWork.css";
 import { useAi } from "../../ai";
+import { DRAFT_FROM_APPROVED, DRAFT_FROM_SOURCES } from "./instructions";
 
 type Section = CaseDetail["sections"][number];
 
 const DERIVED = ["summary", "diagnoses", "recommendations", "dsm"];
+/** A line of the guide no paragraph of the first draft answers (round 29): it says so itself. */
+const GUIDE_MISSING = "חסרה פסקה לפי ההנחיה";
 
 const QUICK: [string, string][] = [
   ["להרחיב", "הרחיבי את הטיוטה של הסעיף, בלי להוסיף עובדות שאינן במקורות."],
@@ -134,15 +139,20 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
     }
   }
 
-  /** `replaces`: rewrite that one paragraph; otherwise the answer is the section's new draft. */
-  async function ask(instruction: string, title?: string, replaces?: string) {
-    if (!instruction.trim()) return;
+  /** `replaces`: rewrite that one paragraph; otherwise the answer is the section's new draft.
+   *  `points`: her own section, worded from her points only (round 30). Resolves `true` once
+   *  the answer came. */
+  async function ask(instruction: string, title?: string, replaces?: string, points = false): Promise<boolean> {
+    if (!instruction.trim()) return false;
     setError(null);
     setResend(null);
     sending.current = null;
     setPreparing(true);
+    let went = false;
     try {
-      const prepare = () => ipc.prepareSection(caseId, section.key, instruction, replaces);
+      const prepare = () => points
+        ? ipc.prepareFromPoints(caseId, section.key, instruction)
+        : ipc.prepareSection(caseId, section.key, instruction, replaces);
       const prepared = await prepare();
       setPreparing(false);
       setBusy(true);
@@ -152,6 +162,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
           { label: replaces ? `${ai} מנסח את הפסקה מחדש` : `${ai} כותב את "${section.title}"`, task: "draft", section: section.key, approval: id },
           () => ipc.sendSection(id),
           async (result) => {
+            went = true;
             setLast(result);
             // Only the request that was sent is cleared, not one she typed meanwhile.
             setMessage((m) => (m === instruction ? "" : m));
@@ -176,6 +187,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
       setPreparing(false);
       setBusy(false);
     }
+    return went;
   }
 
   /** The check of the proposed paragraphs against the sources: its own request and review. */
@@ -230,6 +242,8 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   }
 
   const derived = DERIVED.includes(section.key);
+  /** Hers to write (round 30): nothing of the case is sent for it but her points. */
+  const mine = section.mode === "self";
   const visible = section.paragraphs;
   const approved = visible.filter((p) => p.status === "approved").length;
   const pending = visible.filter((p) => p.status === "proposed").length;
@@ -260,7 +274,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   const after = api.detail.sections.findIndex((s) => s.key === section.key);
   const nextSection =
     order.find((s) => api.detail.sections.indexOf(s) > after && !s.approved) ?? order.find((s) => !s.approved);
-  const draftInstruction = derived ? "כתבי טיוטה לסעיף מתוך הסעיפים שאושרו." : "כתבי טיוטה לסעיף מתוך המקורות, עם מקור לכל פסקה.";
+  const draftInstruction = derived ? DRAFT_FROM_APPROVED : DRAFT_FROM_SOURCES;
 
   return (
     <div className="view">
@@ -271,7 +285,9 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
             <span className="small muted">{section.part}</span>
           </div>
           <div className="row small wrap-row">
-            {derived ? (
+            {mine ? (
+              <span className="muted">הסעיף הזה שלך: {ai} לא כותב אותו מהחומרים, ושום חומר לא נשלח בשבילו.</span>
+            ) : derived ? (
               <span className="muted">הסעיף נכתב מתוך הסעיפים שכבר אישרת.</span>
             ) : (
               <>
@@ -339,6 +355,10 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
             <span className="draft-label">טיוטת הסעיף</span>
             <span>{approved > 0 && `${approved} פסקאות אושרו`}{approved > 0 && pending > 0 && " · "}{pending > 0 && `${pending} ממתינות לאישורך`}</span>
           </div>
+          {/* Inside the scrolling draft: on a laptop the open guide never pushes the
+              conversation's foot off the screen (the review of stage 3). */}
+          <SectionGuide caseId={caseId} sectionKey={section.key} guide={section.guide} isDefault={section.guide_is_default}
+            caseGuide={section.case_guide} onSaved={reload} />
 
           {job && (
             <div className="writing-card">
@@ -383,14 +403,16 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
             <div className="draft-empty">
               <p className="serif">עוד אין טיוטה לסעיף הזה.</p>
               <p className="hint">
-                {derived
+                {mine
+                  ? "את כותבת את הסעיף הזה: פסקה משלך, או נקודות שמנוסחות לפסקה (בצד)."
+                  : derived
                   ? `${ai} יכין טיוטה מהסעיפים שאישרת.`
                   : section.source_count > 0
                     ? `${ai} יכין טיוטה מהחומרים של הסעיף. לפני השליחה תראי מה יוצא.`
                     : "אין עדיין חומרים לסעיף. מוסיפים בחומרי התיק, או כותבים לבד."}
               </p>
               <div className="row">
-                {(derived || section.source_count > 0) && (
+                {!mine && (derived || section.source_count > 0) && (
                   <button type="button" className="btn btn-primary" disabled={working}
                     onClick={() => void ask(draftInstruction, `טיוטה לסעיף ${section.title}`)}>
                     {derived ? "כתיבת טיוטה מהסעיפים שאושרו" : `כתיבת טיוטה עם ${ai}`}
@@ -453,7 +475,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                 {warnings.map((w, i) => (
                   <div key={i} className="note-warn"><WarnIcon /><span>{w}</span></div>
                 ))}
-                {!isEditing && p.style && (
+                {!isEditing && p.style && !mine && (
                   <StyleHintView hint={p.style} busy={working}
                     onCloser={(how) => void ask(`נסחי מחדש את הפסקה הבאה כך שתישמע כמו הכתיבה שלי: ${how}. באותו תוכן ובלי להוסיף עובדות: "${p.text}"`, "קירוב פסקה לסגנון שלך", p.id)}
                     onApply={(m) => void act(() => ipc.editParagraph(caseId, p.id, applyMark(p.text, m)))} />
@@ -472,8 +494,10 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                   ) : (
                     <>
                       <button type="button" className="btn btn-primary btn-small" onClick={() => void act(() => ipc.approveParagraph(caseId, p.id))}>אישור</button>
-                      <button type="button" className="btn btn-small" disabled={working}
-                        onClick={() => void ask(`נסחי מחדש את הפסקה הבאה, באותו תוכן ובלי להוסיף עובדות: "${p.text}"`, "ניסוח מחדש של פסקה אחת", p.id)}>ניסוח מחדש</button>
+                      {!mine && (
+                        <button type="button" className="btn btn-small" disabled={working}
+                          onClick={() => void ask(`נסחי מחדש את הפסקה הבאה, באותו תוכן ובלי להוסיף עובדות: "${p.text}"`, "ניסוח מחדש של פסקה אחת", p.id)}>ניסוח מחדש</button>
+                      )}
                       <button type="button" className="btn btn-small" onClick={() => setEditing({ id: p.id, text: p.text })}>עריכה</button>
                       <button type="button" className="btn btn-small btn-ghost" onClick={() => void act(() => ipc.rejectParagraph(caseId, p.id))}>הסרה</button>
                     </>
@@ -503,7 +527,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
           ) : visible.length > 0 && (
             <div className="row wrap-row">
               <button type="button" className="add-own" onClick={startOwn}>+ פסקה משלי</button>
-              {(derived || section.source_count > 0) && (
+              {!mine && (derived || section.source_count > 0) && (
                 <button type="button" className="add-own" disabled={working}
                   onClick={() => void ask(draftInstruction, `טיוטה חדשה לסעיף ${section.title}`)}>
                   ↻ טיוטה חדשה מ-{ai} (מחליפה את מה שלא אושר)
@@ -515,13 +539,17 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
           {last && (last.questions.length > 0 || last.missing.length > 0 || last.contradictions.length > 0) && (
             <div className="notes-from-claude">
               {last.contradictions.map((c, i) => <p key={`c${i}`}><b>סתירה בין החומרים:</b> {c}</p>)}
-              {last.missing.map((c, i) => <p key={`m${i}`}><b>חסר מידע:</b> {c}</p>)}
+              {last.missing.map((c, i) => <p key={`m${i}`}>{c.startsWith(GUIDE_MISSING) ? c : <><b>חסר מידע:</b> {c}</>}</p>)}
               {last.questions.map((c, i) => <p key={`q${i}`}><b>שאלה:</b> {c}</p>)}
             </div>
           )}
           <ErrorLine error={error} retry={resend ?? undefined} />
         </section>
 
+        {mine ? (
+          <OwnSectionPanel caseId={caseId} sectionKey={section.key} ai={ai} working={working}
+            onWord={(points) => ask(points, `ניסוח "${section.title}" מהנקודות שלך`, undefined, true)} />
+        ) : (
         <section className="chat" aria-label="שיחה על הסעיף">
           <div className="chat-head">שיחה על הסעיף</div>
           <div className="chat-body" aria-live="polite">
@@ -566,6 +594,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
             </div>
           </form>
         </section>
+        )}
       </div>
     </div>
   );

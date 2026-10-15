@@ -82,6 +82,9 @@ fn section(content: &str) -> SectionInput {
         }],
         instruction_tagged: "נסח/י פסקה".to_owned(),
         style_profile: None,
+        guide_tagged: "פסקה על המבחן.\nהתחומים מהגבוה לנמוך.".to_owned(),
+        points_only: false,
+        sources_in_order: false,
     }
 }
 

@@ -13,12 +13,12 @@ import type { CaseDetail } from "../ipc/generated/CaseDetail";
 configure({ asyncUtilTimeout: 5000 });
 vi.setConfig({ testTimeout: 30_000 });
 
-async function openApp(unlock = true) {
+async function openApp(unlock = true, review = true) {
   const core = new FakeCore();
   if (unlock) await core.handle("unlock", { password: "x" });
   // These tests walk every screen a request passes through, the review screen included, so
   // they run with "show me every request before sending" on (off by default; set here for the tests that read it).
-  if (unlock) await core.handle("set_review_always", { on: true });
+  if (unlock) await core.handle("set_review_always", { on: review });
   const calls: string[] = [];
   mockIPC((cmd, args) => {
     calls.push(cmd);
@@ -279,20 +279,68 @@ describe("writing the report", () => {
     expect(calls.filter((c) => c.cmd === "prepare_section")).toHaveLength(1);
   });
 
-  it("previous reports can be summarized by topics through the same review screen", async () => {
-    const { user, calls, core } = await openApp();
-    const cases = (await core.handle("list_cases", {})) as { id: string }[];
-    const id = cases[0]?.id ?? "";
-    await core.handle("add_input", { caseId: id, kind: "prior_report", title: "דוח קלינאית", content: "דוח בדוי על שפה וקשב." });
-    await user.click(await screen.findByRole("button", { name: /בתיק של נועם$/ }));
-    await screen.findByRole("article", { name: "הדוח, כמו בקובץ" });
+  it("a material added is read by itself: its summary, its record, and what is still missing", async () => {
+    const { user, calls } = await openApp(true, false);
+    await openCase(user);
     await user.click((screen.getAllByRole("button", { name: /חומרים/ })[0] as HTMLElement));
-    await user.click(await screen.findByRole("button", { name: /סיכום כל דוח לפי נושאים/ }));
-    await user.click(screen.getByRole("button", { name: "המלצות" }));
-    await user.click(screen.getByRole("button", { name: "בדיקה לפני שליחה" }));
-    await screen.findByRole("dialog", { name: /לפני שליחה/ });
-    expect(calls).toContain("prepare_section");
-    expect(calls).not.toContain("send_section");
+    const overview = await screen.findByRole("region", { name: "סיכום החומרים" });
+    expect(within(overview).getByText(/עוד לא נקרא/)).toBeInTheDocument();
+    expect(calls).not.toContain("prepare_sort");
+    await user.click(await screen.findByRole("button", { name: "הדבקת טקסט (דוחות ואבחונים קודמים)" }));
+    await user.type(screen.getByLabelText("כותרת"), "דוח קלינאית");
+    await user.type(screen.getByLabelText("הטקסט"), "נבדק ב-3/2024.{Enter}{Enter}נמצא עיכוב קל בשפה.{Enter}{Enter}מומלץ על טיפול בשפה.");
+    await user.click(screen.getByRole("button", { name: "שמירה בתיק" }));
+    // Sorted and summed up without a window, and the report recorded in the report's order.
+    expect(await within(overview).findByText(/3\/2024 · דוח של איש מקצוע/, {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(within(overview).getByText("נמצא עיכוב קל בשפה.")).toBeInTheDocument();
+    expect(within(overview).queryByText(/עוד לא נקרא/)).not.toBeInTheDocument();
+    expect(calls).toContain("send_sort");
+    expect(screen.queryByRole("dialog", { name: /לפני שליחה/ })).not.toBeInTheDocument();
+    // The material's window shows the whole summary, as text.
+    await user.click(within(overview).getByRole("button", { name: "דוח קלינאית" }));
+    const reading = await screen.findByRole("region", { name: "מה כתוב בחומר" });
+    expect(within(reading).getByText(/נבדק ב-3\/2024/)).toBeInTheDocument();
+  });
+
+  it("with the review screen on, nothing is read by itself", async () => {
+    const { user, calls } = await openApp();
+    await openCase(user);
+    await user.click((screen.getAllByRole("button", { name: /חומרים/ })[0] as HTMLElement));
+    await user.click(await screen.findByRole("button", { name: "הדבקת טקסט (דוחות ואבחונים קודמים)" }));
+    await user.type(screen.getByLabelText("כותרת"), "דוח קלינאית");
+    await user.type(screen.getByLabelText("הטקסט"), "נמצא עיכוב קל בשפה.");
+    await user.click(screen.getByRole("button", { name: "שמירה בתיק" }));
+    await screen.findByText("נשמר בתיק.");
+    expect(calls).not.toContain("prepare_sort");
+  });
+
+  it("Esc with a changed text asks first; the text is kept until she says to drop it", async () => {
+    const { user } = await openApp();
+    const page = await openCase(user);
+    const original = within(page).getByText(/הופנה לאבחון פסיכולוגי-התפתחותי על ידי הוריו/);
+    await user.click(original);
+    const box = await screen.findByRole("textbox", { name: /עריכת פסקה בסעיף/ });
+    await user.type(box, " ועוד מילה.");
+    await user.keyboard("{Escape}");
+    const ask = await screen.findByRole("group", { name: "לבטל את העריכה?" });
+    expect((screen.getByRole("textbox", { name: /עריכת פסקה בסעיף/ }) as HTMLTextAreaElement).value).toContain("ועוד מילה.");
+    await user.click(within(ask).getByRole("button", { name: "להמשיך לערוך" }));
+    expect(screen.queryByRole("group", { name: "לבטל את העריכה?" })).toBeNull();
+    expect((screen.getByRole("textbox", { name: /עריכת פסקה בסעיף/ }) as HTMLTextAreaElement).value).toContain("ועוד מילה.");
+    // Esc twice: asked, then dropped.
+    await user.keyboard("{Escape}{Escape}");
+    expect(screen.queryByRole("textbox", { name: /עריכת פסקה בסעיף/ })).toBeNull();
+    expect(within(page).getByText(/הופנה לאבחון פסיכולוגי-התפתחותי על ידי הוריו/)).toBeInTheDocument();
+    expect(within(page).queryByText(/ועוד מילה/)).toBeNull();
+  });
+
+  it("Esc with nothing changed closes the editor at once", async () => {
+    const { user } = await openApp();
+    const page = await openCase(user);
+    await user.click(within(page).getByText(/הופנה לאבחון פסיכולוגי-התפתחותי על ידי הוריו/));
+    await screen.findByRole("textbox", { name: /עריכת פסקה בסעיף/ });
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("textbox", { name: /עריכת פסקה בסעיף/ })).toBeNull();
   });
 
   it("an edited paragraph keeps its earlier wording, and it can be brought back", async () => {

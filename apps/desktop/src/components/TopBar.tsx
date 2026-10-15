@@ -1,5 +1,6 @@
 import { useApp, type Route } from "../App";
 import { he } from "../i18n/he";
+import { MOD } from "../shortcuts";
 import { LockIcon } from "./ui";
 import { UpdateChip } from "./Update";
 import "./TopBar.css";
@@ -27,7 +28,7 @@ export function TopBar({ active }: { active: Route["name"] }) {
       {showShortcuts && (
         <button type="button" className="btn btn-small icon-btn" aria-label="קיצורי מקלדת (F1)" title="קיצורי מקלדת (F1)" onClick={showShortcuts}>?</button>
       )}
-      <button type="button" className="btn btn-small" title="נעילה (Ctrl+L)" onClick={() => void lockNow()}>
+      <button type="button" className="btn btn-small" title={`נעילה (${MOD}+L)`} onClick={() => void lockNow()}>
         <LockIcon size={15} /> נעילה
       </button>
     </header>

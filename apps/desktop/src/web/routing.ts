@@ -35,11 +35,23 @@ export interface Suggestion {
   sections: { section: string; passages: number[] }[];
 }
 
+/** What the reading said about a material (round 31), for the text it was read from. */
+export interface Reading {
+  passageCount: number;
+  text: string;
+  record?: { kind: string; by: string; setting: "institute" | "community" | "unknown"; findings: string; recommendations: string };
+}
+
 export interface Routing {
   suggestion?: Suggestion;
   added: string[];
   removed: string[];
   unplaced?: number;
+  reading?: Reading;
+}
+
+export function readingOf(r: Routing, count: number): Reading | undefined {
+  return r.reading && r.reading.passageCount === count ? r.reading : undefined;
 }
 
 export type Feed = "whole" | number[];
@@ -58,7 +70,22 @@ export function isSorted(r: Routing, count: number): boolean {
 }
 
 export function needsSorting(r: Routing, count: number): boolean {
-  return count > 0 && !isSorted(r, count) && r.unplaced !== count;
+  return count > 0 && ((!isSorted(r, count) && r.unplaced !== count) || !readingOf(r, count));
+}
+
+/** The latest "month/year" written in a document, leaving out lines about a birth. */
+export function documentDate(text: string): [number, number] | null {
+  let best: [number, number] | null = null;
+  for (const line of text.split("\n")) {
+    if (line.includes("לידה") || line.includes("נולד")) continue;
+    for (const m of line.matchAll(/(?<!\d)(?:(\d{1,2})[./-])?(\d{1,2})[./-](\d{4}|\d{2})(?!\d)/g)) {
+      const year = (m[3] ?? "").length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+      const month = Number(m[2]);
+      if ((m[1] === undefined && (m[3] ?? "").length !== 4) || month < 1 || month > 12 || year < 1990 || year > 2099) continue;
+      if (!best || year > best[0] || (year === best[0] && month > best[1])) best = [year, month];
+    }
+  }
+  return best;
 }
 
 export function feed(r: Routing, section: string, table: string[], count: number): Feed | null {

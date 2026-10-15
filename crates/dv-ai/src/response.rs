@@ -25,6 +25,8 @@ pub struct ProposedParagraph {
     pub source_refs: Vec<String>,
     /// Problems found locally (unknown source, a number not found in the sources…).
     pub warnings: Vec<String>,
+    /// The line of the section's guide it answers, from 1; 0: none (round 29).
+    pub guide: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -41,6 +43,11 @@ pub struct SectionReply {
 struct RawParagraph {
     text: String,
     source_refs: Vec<String>,
+    /// Absent in an answer from before the guide, or from a model that left it out. Read as
+    /// any JSON value: a negative or fractional number, or text, is no line (0) rather than
+    /// an answer that cannot be read at all (the review of stage 3).
+    #[serde(default)]
+    guide: Value,
 }
 
 #[derive(Deserialize)]
@@ -95,6 +102,16 @@ pub(crate) fn numbers(text: &str) -> Vec<String> {
     out
 }
 
+/// The numbers written in `text` that appear in none of `sources`: what a summary may have
+/// added (round 31). Shown as a note, never fixed silently.
+#[must_use]
+pub fn numbers_not_in(text: &str, sources: &[&str]) -> Vec<String> {
+    numbers(text)
+        .into_iter()
+        .filter(|n| !sources.iter().any(|s| numbers(s).contains(n)))
+        .collect()
+}
+
 /// Parse a section answer and verify it against the sources that were sent.
 ///
 /// `sources` maps `S#` to the tagged text of that source.
@@ -136,6 +153,11 @@ pub fn parse_section(
                 text: p.text,
                 source_refs: p.source_refs,
                 warnings,
+                guide: p
+                    .guide
+                    .as_u64()
+                    .and_then(|g| u32::try_from(g).ok())
+                    .unwrap_or(0),
             }
         })
         .collect();
@@ -155,6 +177,20 @@ pub fn parse_derived_section(
     response: &Value,
     approved: &[String],
 ) -> Result<SectionReply, AiError> {
+    parse_without_sources(response, approved, "בסעיפים שאושרו")
+}
+
+/// Parse an answer worded from her points only (round 30): no `S#` sources either, and every
+/// number must be one she wrote in the points.
+pub fn parse_points_section(response: &Value, points: &str) -> Result<SectionReply, AiError> {
+    parse_without_sources(response, &[points.to_owned()], "בנקודות שלך")
+}
+
+fn parse_without_sources(
+    response: &Value,
+    sent: &[String],
+    where_: &str,
+) -> Result<SectionReply, AiError> {
     let mut reply = parse_section(response, &[])?;
     for p in &mut reply.paragraphs {
         p.warnings = p
@@ -163,9 +199,9 @@ pub fn parse_derived_section(
             .map(|r| format!("מקור לא קיים: {r}"))
             .collect();
         for n in numbers(&p.text) {
-            if !approved.iter().any(|t| numbers(t).contains(&n)) {
+            if !sent.iter().any(|t| numbers(t).contains(&n)) {
                 p.warnings
-                    .push(format!("המספר {n} לא מופיע בסעיפים שאושרו – לבדוק"));
+                    .push(format!("המספר {n} לא מופיע {where_} – לבדוק"));
             }
         }
     }
@@ -222,6 +258,26 @@ mod tests {
         assert!(out.paragraphs[1].warnings.iter().any(|w| w.contains("83")));
         assert!(!out.paragraphs[2].warnings.is_empty());
         assert!(out.paragraphs[3].warnings.iter().any(|w| w.contains("S9")));
+    }
+
+    /// The review of stage 3: a guide line the model numbered wrong is no line, and the
+    /// answer is read.
+    #[test]
+    fn a_wrong_guide_number_is_no_line_not_an_unreadable_answer() {
+        let reply = json!({
+            "reply": "ניסחתי",
+            "paragraphs": [
+                {"text": "א.", "source_refs": [], "guide": -2},
+                {"text": "ב.", "source_refs": [], "guide": 1.5},
+                {"text": "ג.", "source_refs": [], "guide": "3"},
+                {"text": "ד.", "source_refs": [], "guide": 2},
+                {"text": "ה.", "source_refs": [], "guide": 99_999_999_999u64}
+            ],
+            "questions": [], "missing": [], "contradictions": []
+        });
+        let out = parse_section(&api(&reply.to_string()), &[]).unwrap();
+        let guides: Vec<u32> = out.paragraphs.iter().map(|p| p.guide).collect();
+        assert_eq!(guides, [0, 0, 0, 2, 0]);
     }
 
     #[test]

@@ -13,8 +13,7 @@ const CLOSING_SECTIONS: &[&str] = &[
 
 impl Core {
     pub fn case_detail(&mut self, case_id: &str) -> Result<CaseDetail, CoreError> {
-        let structure =
-            ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
+        let structure = structure_for(self.vault_ref()?, case_id)?;
         // What she usually changes in the AI's wording (ST9); only with the profile on.
         let habits = if style::style_model(self.vault_ref()?)?.is_some() {
             self.style_habits().unwrap_or_default()
@@ -29,6 +28,28 @@ impl Core {
         let inputs = v.inputs(case_id)?;
         let practitioner = v.practitioner()?.names.first().cloned();
         let routing = Core::material_routing(v, &structure, case_id, &inputs)?;
+        // Round 31: what no material feeds yet, and the order of the previous assessments.
+        let missing: Vec<String> = sorting::sortable(&structure)
+            .iter()
+            .filter(|s| !routing.iter().any(|r| r.feeds.contains(&s.key)))
+            .map(|s| s.title.clone())
+            .collect();
+        let with_record: Vec<&dv_domain::CaseInput> = inputs
+            .iter()
+            .filter(|i| {
+                routing
+                    .iter()
+                    .any(|r| r.input_id == i.id && r.record.is_some())
+            })
+            .collect();
+        let keys = with_record
+            .iter()
+            .map(|i| sorting::prior_key(v, case_id, i))
+            .collect::<Result<Vec<_>, _>>()?;
+        let prior_order: Vec<String> = dv_domain::record_order(&keys)
+            .into_iter()
+            .filter_map(|k| with_record.get(k).map(|i| i.id.clone()))
+            .collect();
         let sheets = score_sheets(v, case_id, &inputs)?;
         let style_model = style::style_model(v)?;
         let retention_default = v
@@ -142,6 +163,7 @@ impl Core {
                     u32::try_from(routing.iter().filter(|r| r.feeds.contains(&s.key)).count())
                         .unwrap_or(0);
                 let approved = paragraphs.iter().any(|p| p.status == DraftStatus::Approved);
+                let guide = guides::guide_for(v, &meta, s)?;
                 sections.push(SectionView {
                     key: s.key.clone(),
                     title: s.title.clone(),
@@ -150,6 +172,10 @@ impl Core {
                     sortable: sortable.contains(&s.key.as_str()),
                     paragraphs,
                     approved,
+                    mode: s.mode,
+                    guide: guide.general,
+                    guide_is_default: guide.is_default,
+                    case_guide: guide.case,
                 });
             }
         }
@@ -162,6 +188,8 @@ impl Core {
             sections,
             retention_default,
             sample,
+            missing,
+            prior_order,
         })
     }
 

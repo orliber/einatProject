@@ -17,4 +17,14 @@ retention_default: string,
 /**
  * The made-up case to try the program on (U3).
  */
-sample: boolean, };
+sample: boolean, 
+/**
+ * Sections written from materials that no material feeds yet (round 31), by title, in
+ * report order. Computed here, never by the AI.
+ */
+missing: Array<string>, 
+/**
+ * The materials with a record of a previous assessment, in the order "אבחונים וטיפולים
+ * קודמים" is written in (the institute first, then the community, newest first).
+ */
+prior_order: Array<string>, };

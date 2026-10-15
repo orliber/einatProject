@@ -14,6 +14,8 @@ export function readTextSize(): number {
 
 export function applyTextSize(percent: number): void {
   document.documentElement.style.setProperty("zoom", percent === 100 ? "" : `${percent}%`);
+  // Viewport units are scaled with the window: a dialog sized by `100vh` divides by this.
+  document.documentElement.style.setProperty("--zoom", percent === 100 ? "" : String(percent / 100));
   try {
     localStorage.setItem(KEY, String(percent));
   } catch {

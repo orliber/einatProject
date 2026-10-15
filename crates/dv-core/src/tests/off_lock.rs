@@ -129,7 +129,8 @@ fn a_new_password_is_made_while_the_core_works_and_lands_only_in_its_session() {
     c.finish_change_password(made).unwrap();
     c.lock();
     assert!(c.unlock(PASSWORD).is_err());
-    std::thread::sleep(std::time::Duration::from_millis(2100));
+    // The wait after a wrong password is tested elsewhere; here it would only slow the run.
+    c.not_before = None;
     c.unlock(new_password).unwrap();
 
     // A weak password is refused before any slow work.
@@ -193,7 +194,7 @@ fn a_backup_is_written_and_read_back_while_the_core_works() {
         .unwrap()
         .run();
     assert!(c.finish_check_backup(drilled).is_err());
-    std::thread::sleep(std::time::Duration::from_millis(2100));
+    c.not_before = None;
     assert!(
         c.check_staged_backup(PASSWORD).is_ok(),
         "the file was put back"

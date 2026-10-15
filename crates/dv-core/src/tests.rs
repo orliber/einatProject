@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 use super::*;
 
 mod flows;
+mod guides;
 mod history;
 mod hostile;
 mod import_export;
@@ -21,10 +22,13 @@ mod large_case;
 mod library;
 mod masks;
 mod off_lock;
+mod own;
 mod perf_profile;
+mod reading;
 mod sample_flows;
 mod sort_flows;
 mod surfaces;
+mod templates;
 mod upgrade;
 mod verify;
 
@@ -1594,17 +1598,39 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
             }],
             instruction_tagged: String::new(),
             style_profile: None,
+            guide_tagged: String::new(),
+            points_only: false,
+            sources_in_order: false,
         };
         let nonce = dv_ai::nonce_from(&[7; 16]);
         // Like the real gate: every string in the body, not the JSON numbers ("max_tokens").
         body.push(dv_ai::build_section_request(&dv_ai::ModelConfig::default(), &input, &nonce).0);
         // A summary: written from the approved sections only, with its own opening line.
+        // With a guide (round 29): its heading and numbering are the builder's words. The
+        // lines are hers (the institute's until she edits them) and go through the filter like
+        // her request, so they are checked with the case text below.
+        let institute = ReportStructure::for_template(Some(dv_domain::INSTITUTE_TEMPLATE)).unwrap();
         let derived = dv_ai::SectionInput {
             section_key: "summary".into(),
             sources: vec![],
+            guide_tagged: "[ילד]\n[ילד]".into(),
+            points_only: false,
+            sources_in_order: false,
             ..input
         };
+        // What the institute's sections are about goes out in its sorting request (D-066).
+        for s in institute.sections() {
+            body.push(Value::String(s.about.clone()));
+        }
         body.push(dv_ai::build_section_request(&dv_ai::ModelConfig::default(), &derived, &nonce).0);
+        // A section she writes herself, worded from her points (round 30): its own opening.
+        let points = dv_ai::SectionInput {
+            points_only: true,
+            ..derived
+        };
+        body.push(dv_ai::build_section_request(&dv_ai::ModelConfig::default(), &points, &nonce).0);
+        // Previous assessments, in the order fixed in code (round 31).
+        body.push(Value::String(dv_ai::ORDER_LINE.to_owned()));
     }
     // The sorting request (D-022): every section key and description of the template, the
     // passage frames and the schema.
@@ -1744,6 +1770,17 @@ fn score_tables_and_section_titles_are_never_rewritten_silently() {
         .parts
         .into_iter()
         .flat_map(|p| std::iter::once(p.title).chain(p.sections.into_iter().map(|s| s.title)))
+        .chain(
+            // The institute's titles and guide lines (D-066, round 29) are case text too.
+            ReportStructure::for_template(Some(dv_domain::INSTITUTE_TEMPLATE))
+                .unwrap()
+                .parts
+                .into_iter()
+                .flat_map(|p| {
+                    std::iter::once(p.title)
+                        .chain(p.sections.into_iter().flat_map(|s| [s.title, s.guide]))
+                }),
+        )
         .collect();
     for inst in dv_domain::instruments() {
         let entries = inst

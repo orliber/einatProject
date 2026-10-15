@@ -119,6 +119,10 @@ fn case(core: &mut Core) -> String {
         "אלון הגיע למפגש בשמחה ושיתף פעולה.",
     )
     .unwrap();
+    // These flows draft the impression from the observation, as before it became hers to
+    // write in the institute's report (round 30).
+    core.set_section_mode("appearance", dv_domain::SectionMode::Ai)
+        .unwrap();
     id
 }
 
@@ -997,4 +1001,32 @@ fn her_usual_openings_are_offered_once_and_not_after_she_answers() {
     );
     learning.dismissed_phrases.push(found[0].id.clone());
     assert!(super::suggestions(&learning, &local, None).is_empty());
+}
+
+/// Round 30: beside a section she writes herself, how she wrote it in her reports, from this
+/// computer only, with every name neutralized.
+#[test]
+fn her_own_section_shows_how_she_wrote_it_before_without_sending_anything() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core) = vault(Some(fake.clone()));
+    let _ = case(&mut core);
+    upload(&mut core);
+    let help = core.own_section_help("appearance").unwrap();
+    assert_eq!(help.examples.len(), 1, "{help:?}");
+    assert!(help.examples[0].text.contains("נפרד"), "{help:?}");
+    assert_eq!(help.openings.len(), 1);
+    assert!(help.openings[0].ends_with('.'));
+    assert_eq!(help.closings.len(), 1);
+    for line in help
+        .examples
+        .iter()
+        .map(|e| &e.text)
+        .chain(&help.openings)
+        .chain(&help.closings)
+    {
+        no_secrets(line, "the help beside her own section");
+    }
+    // A section she never wrote has nothing to show, and nothing left the computer.
+    assert!(core.own_section_help("dsm").unwrap().examples.is_empty());
+    assert!(fake.sent.lock().unwrap().is_empty());
 }

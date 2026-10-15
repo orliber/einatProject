@@ -6,6 +6,21 @@ use dv_privacy::{AutoHidden, BlockReason, Checks, Segment, Suspect};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+/// Version of the IPC contract. Bump on any breaking change to a command.
+pub const IPC_VERSION: u32 = 1;
+
+/// Reply to the `ping` command: proves the UI is talking to the Rust core.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PingResponse {
+    pub ipc_version: u32,
+    pub core_version: String,
+    pub build_commit: String,
+    /// True once the vault runs on the FIPS 140-3 validated module.
+    pub fips_active: bool,
+    pub platform: String,
+}
+
 /// The error the UI shows: a stable `code`, a Hebrew `message`, and the one next step it
 /// offers (F6). Every error has a next step; none is a dead end.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -173,6 +188,14 @@ pub struct SectionView {
     pub sortable: bool,
     pub paragraphs: Vec<ParagraphView>,
     pub approved: bool,
+    /// Who writes the first draft (D-066).
+    pub mode: dv_domain::SectionMode,
+    /// How to write it (round 29): hers from settings, or the template's.
+    pub guide: String,
+    /// `guide` is the template's text, not edited.
+    pub guide_is_default: bool,
+    /// The lines added for this case only.
+    pub case_guide: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -198,6 +221,12 @@ pub struct CaseDetail {
     pub retention_default: String,
     /// The made-up case to try the program on (U3).
     pub sample: bool,
+    /// Sections written from materials that no material feeds yet (round 31), by title, in
+    /// report order. Computed here, never by the AI.
+    pub missing: Vec<String>,
+    /// The materials with a record of a previous assessment, in the order "אבחונים וטיפולים
+    /// קודמים" is written in (the institute first, then the community, newest first).
+    pub prior_order: Vec<String>,
 }
 
 /// Where one material goes in the report (D-022).
@@ -222,6 +251,25 @@ pub struct MaterialRouting {
     pub passages: u32,
     /// Passages that reach at least one section.
     pub used_passages: u32,
+    /// What the reading said about it (round 31), restored: plain text. Empty: not read yet.
+    pub summary: String,
+    /// A report by another professional: what, by whom, where, findings, recommendations.
+    pub record: Option<PriorRecordView>,
+    /// Numbers in the summary or the record that are not in the material ("לבדוק").
+    pub summary_notes: Vec<String>,
+}
+
+/// A previous assessment or treatment as the materials screen shows it (round 31).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PriorRecordView {
+    pub kind: String,
+    pub by: String,
+    pub setting: dv_domain::Setting,
+    pub findings: String,
+    pub recommendations: String,
+    /// Month and year as written in the document ("3/2024"), read here; empty when none.
+    pub date: String,
 }
 
 /// What a sorting changed.
@@ -535,4 +583,64 @@ pub struct RetentionItem {
     pub until: String,
     /// The proposed default, not a date Einat chose.
     pub by_default: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+
+    fn sample() -> PingResponse {
+        PingResponse {
+            ipc_version: IPC_VERSION,
+            core_version: "0.0.0".to_owned(),
+            build_commit: "dev".to_owned(),
+            fips_active: false,
+            platform: "linux".to_owned(),
+        }
+    }
+
+    #[test]
+    fn ping_crosses_the_boundary_unchanged() {
+        let json = serde_json::to_string(&sample()).unwrap();
+        assert_eq!(
+            serde_json::from_str::<PingResponse>(&json).unwrap(),
+            sample()
+        );
+    }
+
+    #[test]
+    fn the_json_fields_are_exactly_the_ones_the_typescript_type_declares() {
+        let value = serde_json::to_value(sample()).unwrap();
+        let mut keys: Vec<&str> = value
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        // The type as ts-rs generates it (in memory: the export test rewrites the file on disk
+        // while the tests run, and CI already checks the checked-in copy is current).
+        let ts = <PingResponse as TS>::inline(&ts_rs::Config::default());
+        // Field names as declared in the type: `name: type`, outside the doc comments.
+        let code: String = ts
+            .split("/**")
+            .map(|part| part.split_once("*/").map_or(part, |(_, rest)| rest))
+            .collect();
+        let body = code.split_once('{').unwrap().1.rsplit_once('}').unwrap().0;
+        let mut declared: Vec<&str> = body
+            .split(',')
+            .filter_map(|f| f.split_once(':').map(|(name, _)| name.trim()))
+            .collect();
+        declared.sort_unstable();
+        assert_eq!(keys, declared);
+    }
+
+    #[test]
+    fn a_reply_missing_a_field_is_refused_rather_than_filled_in() {
+        let mut value = serde_json::to_value(sample()).unwrap();
+        value.as_object_mut().unwrap().remove("fips_active");
+        assert!(serde_json::from_value::<PingResponse>(value).is_err());
+    }
 }

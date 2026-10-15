@@ -1,4 +1,4 @@
-// The folder tree of the case list, like the left pane of a file explorer (round 47, D-071).
+// The folder tree of the case list, like the left pane of a file explorer (round 47, D-085).
 // Folders nest to any depth; a folder with children opens and closes with its arrow, the
 // arrow keys walk the visible rows, and a case or folder can be dropped on any row.
 import { useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";

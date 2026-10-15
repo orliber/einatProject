@@ -19,9 +19,11 @@ document.title = "הדמיית כספת האבחון";
 // The app is laid out for a desktop window. In a narrow panel, scale the whole window down
 // instead of letting it scroll sideways.
 const DESIGN_WIDTH = 1180;
+// `preview.html?nofit` shows the window as the app would at that size (the laptop e2e test).
+const NO_FIT = new URLSearchParams(location.search).has("nofit");
 function fit() {
   const root = document.getElementById("root");
-  if (!root) return;
+  if (!root || NO_FIT) return;
   const z = Math.min(1, window.innerWidth / DESIGN_WIDTH);
   root.style.setProperty("zoom", String(z));
   // Under CSS zoom, pixel lengths are scaled and percentages are not.

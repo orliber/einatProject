@@ -31,6 +31,19 @@ pub(crate) async fn update_case(
 }
 
 #[tauri::command]
+pub(crate) async fn set_case_guide(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    section_key: String,
+    text: String,
+) -> Res<()> {
+    with_core(&state, move |c| {
+        c.set_case_guide(&case_id, &section_key, &text)
+    })
+    .await
+}
+
+#[tauri::command]
 pub(crate) async fn delete_case(state: tauri::State<'_, AppState>, case_id: String) -> Res<()> {
     with_core(&state, move |c| c.delete_case(&case_id)).await
 }

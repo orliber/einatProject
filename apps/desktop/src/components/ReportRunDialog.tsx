@@ -9,8 +9,7 @@ import { useAi } from "../ai";
 
 /** How many sections are written at the same time. */
 const PARALLEL = 3;
-/** The request each section is sent with (the same as the core's full draft). */
-const DRAFT_INSTRUCTION = "כתוב/י טיוטה לסעיף מתוך המקורות, עם מקור לכל פסקה.";
+import { DRAFT_FROM_SOURCES as DRAFT_INSTRUCTION } from "../screens/case/instructions";
 
 type RowState = "ready" | "question" | "waiting" | "writing" | "done" | "failed";
 

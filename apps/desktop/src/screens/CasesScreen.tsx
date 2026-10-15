@@ -1,4 +1,4 @@
-// The case list, laid out like a file explorer (round 47, D-071): a folder tree on the right,
+// The case list, laid out like a file explorer (round 47, D-085): a folder tree on the right,
 // the path and the search above, and one table of subfolders and cases. Folders nest to any
 // depth (the core already keeps `parent_id`); this screen only shows them that way.
 import { useMemo, useState, type DragEvent } from "react";

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Dialog } from "./ui";
 import { isCombo, KEYS, SHEET } from "../shortcuts";
 
@@ -41,5 +41,9 @@ export function useShortcutsSheet(enabled: boolean) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [enabled]);
-  return { open, show: () => setOpen(true), close: () => setOpen(false) };
+  // The same functions on every render: the app's context value (and every screen in it) is
+  // not redrawn for them.
+  const show = useCallback(() => setOpen(true), []);
+  const close = useCallback(() => setOpen(false), []);
+  return { open, show, close };
 }

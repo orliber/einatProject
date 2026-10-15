@@ -49,7 +49,6 @@
 | `dv-ingest` | ה-worker: pdfium, DOCX (`zip` + `quick-xml`), OCR, חילוץ מטא-דאטה | `pdfium-render` | רשת, מפתחות |
 | `dv-export` | DOCX מתבנית, הצפנת ECMA-376 Agile, `restore` | `zip`, `quick-xml`, `cfb` | רשת |
 | `dv-style` | למידת סגנון מקומית: מודל סטטיסטי לפי סעיף, למידה מתיקונים, ביטויים חוזרים (D-052) | `dv-privacy`, `serde` | רשת |
-| `dv-ipc` | הגדרות פקודות, סכמות, יצירת טיפוסי TS (`specta`) | `serde`, `specta` | |
 | `apps/desktop/src-tauri` | מעטפת דקה: חלון, CSP, capabilities, העברת פקודות ל-crates | `tauri` | plugins של fs/shell/http |
 
 **אינווריאנטים שנאכפים ב-CI (`xtask check-invariants`):**
@@ -154,7 +153,7 @@ audit(seq PK, ts, event, case_ref /* HMAC של case_id */, meta_json_enc, prev_m
 ## מבנה הריפו
 ```
 Cargo.toml                 (workspace)
-crates/  dv-vault/ dv-privacy/ dv-ai/ dv-egress/ dv-domain/ dv-ingest/ dv-export/ dv-ipc/
+crates/  dv-vault/ dv-privacy/ dv-ai/ dv-egress/ dv-domain/ dv-ingest/ dv-export/
 apps/desktop/  src/ (React+TS+Vite)   src-tauri/
 xtask/                     בדיקות אינווריאנטים, סריקת pre-commit (Rust, בלי Python)
 knowledge/                 *.yaml (status: pending|approved)
