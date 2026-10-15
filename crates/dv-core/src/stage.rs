@@ -45,9 +45,11 @@ impl PendingKind {
                 Some("sorting"),
                 serde_json::json!({ "sorting": true, "demo": demo, "ai": ai }),
             ),
+            // A question from inside a case is kept with it too (round 27): the case's text
+            // may be in it. A question without a case has no case to keep it with.
             PendingKind::Consult { case_id, .. } => (
                 case_id.as_deref(),
-                None,
+                case_id.as_ref().map(|_| "consult"),
                 serde_json::json!({ "consult": true, "demo": demo, "ai": ai }),
             ),
             PendingKind::StyleAnalysis { .. } => (

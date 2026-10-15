@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { BugReportSettings } from "../components/BugReport";
 import { useApp } from "../App";
 import { ActivitySettings } from "../components/ActivityLog";
+import { SentHistorySettings } from "../components/SentHistory";
 import { BackupSettings } from "../components/Backup";
 import { PasswordSettings } from "../components/PasswordSettings";
 import { TopBar } from "../components/TopBar";
@@ -200,6 +201,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                   </label>
                 )}
               </section>
+              <SentHistorySettings />
               <NameModelSettings />
             </>
           )}

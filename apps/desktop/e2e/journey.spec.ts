@@ -83,6 +83,18 @@ test("home → new case → materials → review before sending → report page"
   // The draft on the page is written back with the names, locally.
   await approve.click();
   await expectAccessible(page);
+
+  // What left the computer: the request is in the case's history, with the child's name
+  // hidden in the text that left (round 27).
+  await page.getByRole("button", { name: /^עוד פעולות/ }).click();
+  await page.getByRole("menuitem", { name: "מה יצא מהמחשב בתיק הזה" }).click();
+  const sent = page.getByRole("dialog", { name: /^מה יצא מהמחשב/ });
+  await expect(sent).toBeVisible();
+  await sent.getByRole("button", { name: "הטקסט שיצא" }).first().click();
+  const asked = sent.getByRole("region", { name: "בקשה" });
+  await expect(asked).toBeVisible();
+  await expect(asked).not.toContainText("יונתן");
+  await expectAccessible(page);
 });
 
 test("the export page lists what goes into the file and is accessible", async ({ page }) => {

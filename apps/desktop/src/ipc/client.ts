@@ -316,6 +316,9 @@ export const ipc = {
   // Activity log (metadata only; cases named on this computer) and retention reminders.
   activity: (before: number | null) => call("activity", { before }),
   markActivityReviewed: () => run("mark_activity_reviewed"),
+  /** "מה יצא מהמחשב": the requests kept with a case (or every case), newest first. */
+  sentHistory: (caseId: string | null, place: string | null, query: string) => call("sent_history", { caseId, place, query }),
+  sentText: (caseId: string, id: string) => call("sent_text", { caseId, id }),
   retentionDue: () => call("retention_due"),
   keepCaseLonger: (caseId: string, years: number) => run("keep_case_longer", { caseId, years }),
 

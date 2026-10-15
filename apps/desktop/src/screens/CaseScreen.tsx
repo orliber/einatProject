@@ -13,6 +13,7 @@ import { ageWords } from "../components/AgeField";
 import { MaterialsView } from "./case/MaterialsView";
 import { SectionWork } from "./case/SectionWork";
 import { DetailsView } from "./case/DetailsView";
+import { SentHistoryDialog } from "../components/SentHistory";
 import { ReportView } from "./case/ReportView";
 import { FinishView } from "./case/FinishView";
 import { isCombo, KEYS } from "../shortcuts";
@@ -104,6 +105,8 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   const [jobs, setJobs] = useKept<Job[]>(`case:${caseId}:jobs`, []);
   const [exporting, setExporting] = useState(false);
   const [fullDraft, setFullDraft] = useState(false);
+  /** "מה יצא מהמחשב": open for one section (its key), or the whole case (""). */
+  const [sentFor, setSentFor] = useState<string | null>(null);
   /** A section to bring into view on the report page. */
   const [focus, setFocus] = useState<{ key: string; at: number } | null>(null);
   const [searching, setSearching] = useState(false);
@@ -338,6 +341,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   ];
   const more: MenuItem[] = [
     { label: "פרטים ושמות להסתרה", run: () => go({ name: "case", id: caseId, view: "details" }) },
+    { label: current ? `מה יצא מהמחשב בסעיף "${current.title}"` : "מה יצא מהמחשב בתיק הזה", run: () => setSentFor(current?.key ?? "") },
     { label: `כתיבת כל הדוח עם ${ai}`, run: () => setFullDraft(true) },
     ...(showShortcuts ? [{ label: "קיצורי מקלדת (F1)", run: showShortcuts }] : []),
     { label: "נעילה (Ctrl+L)", run: () => void lockNow() },
@@ -438,6 +442,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
 
       {exporting && <ExportDialog api={api} onClose={() => setExporting(false)} />}
       {fullDraft && <ReportRunDialog api={api} onClose={() => setFullDraft(false)} />}
+      {sentFor !== null && <SentHistoryDialog caseId={caseId} {...(sentFor ? { place: sentFor } : {})} onClose={() => setSentFor(null)} />}
       {/* Last, so it opens above the dialog that asked for it. */}
       {review && (
         <ReviewDialog title={review.r.title} caseId={caseId} prepared={review.r.prepared} reprepare={review.r.reprepare}

@@ -426,6 +426,14 @@ fn every_command_refuses_while_the_vault_is_locked() {
             Box::new(|k| k.create_folder(None, "תיקייה").map(drop)),
         ),
         ("consultations", Box::new(|k| k.consultations().map(drop))),
+        (
+            "sent_history",
+            Box::new(|k| k.sent_history(None, None, "").map(drop)),
+        ),
+        (
+            "sent_text",
+            Box::new(move |k| k.sent_text(c, "x").map(drop)),
+        ),
         ("activity", Box::new(|k| k.activity(None).map(drop))),
         ("readiness", Box::new(|k| k.readiness().map(drop))),
         (

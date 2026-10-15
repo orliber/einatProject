@@ -127,6 +127,8 @@
     "allow-export-report",
     "allow-print-page",
     "allow-activity",
+    "allow-sent-history",
+    "allow-sent-text",
     "allow-mark-activity-reviewed",
     "allow-retention-due",
     "allow-keep-case-longer",

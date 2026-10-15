@@ -125,6 +125,8 @@ const ALLOWED = new Set([
   "send_sort",
   "send_style_analysis",
   "send_style_profile",
+  "sent_history",
+  "sent_text",
   "set_api_key",
   "set_auto_backup",
   "set_identities",

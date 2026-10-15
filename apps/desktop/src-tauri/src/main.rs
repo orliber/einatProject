@@ -19,10 +19,10 @@ use dv_core::{
     ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView,
     ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
     ExportCheck, ImportPreview, NameMatch, ParagraphVersionView, ParagraphView, Prepared,
-    Readiness, ReportSettings, RetentionItem, SectionResult, SecurityStatus, SortResult,
-    StagedBackup, StyleAnalysisResult, StyleImportPreview, StyleOverview, StyleProfileView,
-    StyleSourceView, SuspectDecision, TemplateView, UiError, UnsavedEdit, UsageSummary,
-    VerifyResult,
+    Readiness, ReportSettings, RetentionItem, SectionResult, SecurityStatus, SentItem, SentText,
+    SortResult, StagedBackup, StyleAnalysisResult, StyleImportPreview, StyleOverview,
+    StyleProfileView, StyleSourceView, SuspectDecision, TemplateView, UiError, UnsavedEdit,
+    UsageSummary, VerifyResult,
 };
 use dv_domain::{
     CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind, Role,
@@ -444,6 +444,8 @@ fn main() {
             export_letter,
             print_page,
             activity,
+            sent_history,
+            sent_text,
             mark_activity_reviewed,
             retention_due,
             keep_case_longer,

@@ -2,8 +2,6 @@ import { useState } from "react";
 import { useApp } from "../App";
 import { kindLabel, kindOrder } from "../i18n/he";
 import { ipc, type ImportPreview, type InputKind } from "../ipc/client";
-import type { AutoHidden } from "../ipc/generated/AutoHidden";
-import { AutoHiddenCard } from "./AutoHiddenCard";
 import { Dialog, ErrorLine, Segments } from "./ui";
 import "./ImportDialog.css";
 
@@ -24,26 +22,8 @@ export function ImportDialog(props: {
   const [title, setTitle] = useState(p.title);
   const [body, setBody] = useState(p.body);
   const [editing, setEditing] = useState(false);
-  const [found, setFound] = useState<AutoHidden[]>(p.auto_hidden);
-  const [segments, setSegments] = useState(p.preview);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  /** After "להחזיר" or a role change on the card: the text and the card as they are now. */
-  async function refilter() {
-    const [fresh, detail] = await Promise.all([ipc.previewFilter(props.caseId, p.body), ipc.caseDetail(props.caseId)]);
-    const kept = (a: AutoHidden) => detail.identities.find((i) => i.source !== "manual" && i.value === a.token);
-    const next = found.flatMap((a) => {
-      if (a.kind === "name" || a.kind === "other_case") {
-        const i = kept(a);
-        return i ? [{ ...a, tag: i.tag, role: i.role }] : [];
-      }
-      return fresh.auto_hidden.filter((x) => x.token === a.token);
-    });
-    for (const a of fresh.auto_hidden) if (!next.some((x) => x.token === a.token)) next.push(a);
-    setFound(next);
-    setSegments(fresh.original_segments);
-  }
 
   async function save() {
     if (!body.trim()) return setError("אין טקסט לשמור.");
@@ -86,8 +66,6 @@ export function ImportDialog(props: {
             <input id="imp-title" className="input" value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
 
-          <AutoHiddenCard items={found} caseId={props.caseId} onChanged={refilter} disabled={busy} />
-
           {(p.left_out.length > 0 || p.warnings.length > 0) && (
             <div className="note-sand stack" style={{ gap: 4 }}>
               <b>לא נקלט מהקובץ</b>
@@ -109,7 +87,7 @@ export function ImportDialog(props: {
             </label>
           ) : (
             <div className="import-body serif">
-              {body === p.body ? <Segments segments={segments} side="original" /> : body}
+              {body === p.body ? <Segments segments={p.preview} side="original" /> : body}
             </div>
           )}
         </section>

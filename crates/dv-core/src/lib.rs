@@ -15,6 +15,7 @@ mod export;
 mod failures;
 mod followup;
 pub mod google;
+mod history;
 mod intake;
 mod library;
 pub mod name_model;
@@ -66,6 +67,7 @@ pub(crate) use dates::today;
 pub use dv_ai::{StyleItem, StyleKind, StyleOrigin, StyleProfile};
 pub use dv_vault::BACKUP_EXTENSION;
 pub use followup::FollowUpView;
+pub use history::{HiddenWord, SentItem, SentPart, SentText};
 pub use jobs::{
     BackupRun, BackupTask, DocumentRead, DrillJob, Drilled, ExportJob, Exported, ReadJob,
     RestoreJob, Restored, SlotJob, SlotMade, UnlockJob, Unlocked,

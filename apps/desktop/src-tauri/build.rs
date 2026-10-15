@@ -125,6 +125,8 @@ fn main() {
             "export_report",
             "print_page",
             "activity",
+            "sent_history",
+            "sent_text",
             "mark_activity_reviewed",
             "retention_due",
             "keep_case_longer",
