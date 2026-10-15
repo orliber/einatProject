@@ -8,21 +8,20 @@ import { AddMenu } from "../../components/Menu";
 import { ScoresDialog } from "../../components/ScoresDialog";
 import { useHoldUnsaved } from "../../components/Unsaved";
 import { LocalText, type LocalTextHandle } from "../../components/LocalText";
-import { Dialog, ErrorLine, Segments, Spinner, UploadIcon, PlusIcon, EditIcon } from "../../components/ui";
+import { Dialog, ErrorLine, Segments, Spinner, UploadIcon, PlusIcon } from "../../components/ui";
 import type { CaseApi } from "../CaseScreen";
 import "./MaterialsView.css";
 import { useAi } from "../../ai";
 
 const ACCEPT = ".docx,.doc,.odt,.rtf,.pdf,.txt,.jpg,.jpeg,.png,.tif,.tiff,.heic,application/vnd.oasis.opendocument.text,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/rtf,text/plain,image/jpeg,image/png,image/tiff";
 
-/** Materials shown in a slot before "עוד" (R5). */
-const SLOT_SHOWN = 8;
-
-export function MaterialsView({ api }: { api: CaseApi }) {
+/** The materials of a case (round 49, D-088): what is still missing, one place to drop a file,
+ *  and one list of everything, newest first. `onWrite` goes on to writing (sorting first). */
+export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => void }) {
   const { fail, notify } = useApp();
   const ai = useAi();
   const { detail, caseId, reload } = api;
-  // A material opens in a window when clicked; the screen itself is only the slots.
+  // A material opens in a window when clicked; the screen itself is only the list.
   const [selected, setSelected] = useState<string | null>(null);
   const [previewed, setPreviewed] = useState<{ id: string; outcome: FilterOutcome } | null>(null);
   const [importing, setImporting] = useState<{ preview: ImportPreview; kind?: InputKind | undefined } | null>(null);
@@ -35,8 +34,6 @@ export function MaterialsView({ api }: { api: CaseApi }) {
   const [choosing, setChoosing] = useState<CaseInput | null>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // R5: a slot with many materials shows the newest first, the rest on request.
-  const [opened, setOpened] = useState<Set<string>>(() => new Set());
   /** A clean import saved without the review window, with a way back (F7). */
   const [autoSaved, setAutoSaved] = useState<{ id: string; title: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -153,23 +150,34 @@ export function MaterialsView({ api }: { api: CaseApi }) {
   }
 
   const sorted = [...detail.inputs].sort((a, b) => b.created_at - a.created_at);
-  // Materials in their places: what an assessment rests on, and what is still missing.
-  const groups = [...NEEDS, OTHER].map((n) => ({ ...n, items: sorted.filter((i) => n.kinds.includes(i.kind)) }))
-    .filter((g) => g !== undefined && (g.kinds !== OTHER.kinds || g.items.length > 0));
+  // Round 49 (D-088): what the report can be written from, in one sentence.
+  const sortable = detail.sections.filter((s) => s.sortable);
+  const covered = sortable.filter((s) => s.source_count > 0).length;
+  const unread = detail.routing.filter((r) => r.needs_sorting).length;
+  const anySorted = detail.routing.some((r) => r.sorted);
+  const has = (n: Need) => detail.inputs.some((i) => n.kinds.includes(i.kind));
+  const addItems = (n: Need) => [
+    { label: n.add === "upload" ? "העלאת קובץ מהמחשב (וורד, PDF)" : n.addLabel, run: () => (n.add === "upload" ? chooseFile(n.kinds[0]) : write(n)) },
+    n.add === "upload" ? { label: "הדבקת טקסט", run: () => write(n) } : { label: "העלאת קובץ מהמחשב (וורד, PDF)", run: () => chooseFile(n.kinds[0]) },
+  ];
+  const dropProps = (key: string, kind?: InputKind) => ({
+    onDragOver: (e: DragEvent) => { e.preventDefault(); e.stopPropagation(); setDropOn(key); },
+    onDragLeave: () => setDropOn((d) => (d === key ? null : d)),
+    onDrop: (e: DragEvent) => onDrop(e, kind),
+  });
 
   return (
     <div className={dragging ? "view materials-drop" : "view"} onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop}>
       <div className="view-head">
         <div className="stack" style={{ gap: 4 }}>
           <h1>מה יש בתיק</h1>
-          <p className="muted small">גוררים לכאן Word, ‏PDF או ODT. הכל נשמר מוצפן.</p>
+          <p className="muted small">
+            {sorted.length === 0 ? "עוד אין חומרים. הכול נשמר מוצפן." : `יש חומר ל-${covered} מתוך ${sortable.length} סעיפים. הכול נשמר מוצפן.`}
+          </p>
         </div>
-        <div className="row">
-          <button type="button" className="btn btn-primary btn-big" disabled={reading !== null} onClick={() => chooseFile()}>
-            {reading ? <><Spinner /> קוראת את {reading}…</> : <><UploadIcon /> העלאת מסמך</>}
-          </button>
-          <input ref={fileRef} type="file" accept={ACCEPT} hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; const k = uploadFor; setUploadFor(undefined); if (f) void readFile(f, k); }} />
-        </div>
+        {sorted.length > 0 && onWrite && (
+          <button type="button" className={detail.meta.consent ? "btn btn-primary btn-big" : "btn btn-big"} onClick={onWrite}>לכתיבת הדוח ←</button>
+        )}
       </div>
       <ErrorLine error={error} />
       {autoSaved && (
@@ -180,55 +188,63 @@ export function MaterialsView({ api }: { api: CaseApi }) {
         </div>
       )}
       {detail.meta.follows && <FollowUpPanel api={api} />}
-      {detail.inputs.length > 0 && <MaterialsReading api={api} titleOf={(id) => detail.inputs.find((x) => x.id === id)?.title ?? ""} open={(id) => setSelected(id)} />}
-      <div className="view-body">
-        <section className="materials-list" aria-label="רשימת החומרים">
-          {groups.map((g) => (
-            <div key={g.label} className={`slot ${g.items.length ? "have" : g.required ? "missing" : "optional"}${dropOn === g.label ? " drop" : ""}`}
-              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDropOn(g.label); }}
-              onDragLeave={() => setDropOn((d) => (d === g.label ? null : d))}
-              onDrop={(e) => onDrop(e, g.kinds[0])}>
-              <div className="slot-head">
-                <span className="check-mark" aria-hidden="true">{g.items.length ? "✓" : g.required ? "!" : "+"}</span>
-                <span className="grow stack" style={{ gap: 0 }}>
-                  <b>{g.label}{g.items.length > 1 && ` (${g.items.length})`}</b>
-                  <span className="small muted">{dropOn === g.label ? "לשחרר כאן" : g.items.length ? "" : g.required ? `חסר · נחוץ ל: ${g.feeds}` : `לא חובה · ${g.feeds}`}</span>
-                </span>
-                {g.items.length ? (
-                  <AddMenu className="icon-btn slot-add" label={`הוספה ל${g.label}`} items={[
-                    { label: g.add === "upload" ? "העלאת קובץ מהמחשב (וורד, PDF)" : g.addLabel, run: () => (g.add === "upload" ? chooseFile(g.kinds[0]) : write(g)) },
-                    g.add === "upload" ? { label: "הדבקת טקסט", run: () => write(g) } : { label: "העלאת קובץ מהמחשב (וורד, PDF)", run: () => chooseFile(g.kinds[0]) },
-                  ]}><PlusIcon /></AddMenu>
+      <div className="view-body materials-body">
+        <ul className="needs" aria-label="מה עוד חסר">
+          {NEEDS.map((n) => {
+            const on = has(n);
+            return (
+              <li key={n.label} className={`need ${on ? "have" : n.required ? "missing" : "optional"}${dropOn === n.label ? " drop" : ""}`} {...dropProps(n.label, n.kinds[0])}>
+                {on ? (
+                  <span className="need-name"><span className="need-mark" aria-hidden="true">✓</span><span className="visually-hidden">יש: </span>{n.label}</span>
                 ) : (
-                  <span className="slot-actions">
-                    <button type="button" className="btn btn-small" aria-label={`${g.addLabel} (${g.label})`}
-                      onClick={() => (g.add === "upload" ? chooseFile(g.kinds[0]) : write(g))}>{g.addLabel}</button>
-                    <button type="button" className="icon-btn slot-upload" aria-label={g.add === "upload" ? `הדבקת טקסט (${g.label})` : `העלאת קובץ (${g.label})`}
-                      title={g.add === "upload" ? "הדבקת טקסט" : "העלאת קובץ Word, ‏PDF או ODT"}
-                      onClick={() => (g.add === "upload" ? write(g) : chooseFile(g.kinds[0]))}>
-                      {g.add === "upload" ? <EditIcon /> : <UploadIcon />}
-                    </button>
-                  </span>
+                  <button type="button" className="need-name need-add" title={n.addLabel}
+                    onClick={() => (n.add === "upload" ? chooseFile(n.kinds[0]) : write(n))}>
+                    <span className="need-mark" aria-hidden="true">○</span>
+                    <span>{n.label}{!n.required && <span className="small"> (לא חובה)</span>}<span className="visually-hidden"> ({n.addLabel})</span></span>
+                  </button>
                 )}
-              </div>
-              {(opened.has(g.label) ? g.items : g.items.slice(0, SLOT_SHOWN)).map((i) => (
-                <button key={i.id} type="button" className={i.id === selected ? "material selected" : "material"} onClick={() => setSelected(i.id)}>
-                  <span className="material-title">{i.title || kindLabel[i.kind]}</span>
-                  <span className="small muted">
-                    {feedText(routeOf(i.id), titleOf)}{routeOf(i.id)?.sorted && <span className="sorted-mark"> · מוין</span>} · {new Date(i.created_at * 1000).toLocaleDateString("he-IL", { day: "numeric", month: "numeric" })}
-                  </span>
-                  {routeOf(i.id)?.summary && <span className="material-summary small">{firstSentence(routeOf(i.id)?.summary ?? "")}</span>}
-                </button>
-              ))}
-              {g.items.length > SLOT_SHOWN && !opened.has(g.label) && (
-                <button type="button" className="link-btn slot-more" onClick={() => setOpened((o) => new Set(o).add(g.label))}>
-                  עוד {g.items.length - SLOT_SHOWN} ב{g.label}
-                </button>
-              )}
-            </div>
-          ))}
-        </section>
+                <AddMenu className="icon-btn need-more" label={`הוספה ל${n.label}`} items={addItems(n)}><PlusIcon /></AddMenu>
+              </li>
+            );
+          })}
+        </ul>
 
+        <div className={`dropzone wide${dropOn === "any" ? " over" : ""}`} {...dropProps("any")}>
+          <UploadIcon />
+          {reading ? (
+            <span role="status"><Spinner /> קוראת את {reading}…</span>
+          ) : (
+            <span>גוררים לכאן Word, ‏PDF או ODT, או <button type="button" className="link-btn" onClick={() => chooseFile()}>בוחרים קובץ</button></span>
+          )}
+          <input ref={fileRef} type="file" accept={ACCEPT} hidden aria-label="העלאת מסמך" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; const k = uploadFor; setUploadFor(undefined); if (f) void readFile(f, k); }} />
+        </div>
+
+        <section className="materials-list" aria-label="רשימת החומרים">
+          <div className="materials-list-head small">
+            <b>{sorted.length === 1 ? "חומר אחד" : `${sorted.length} חומרים`}</b>
+            <span className="muted">
+              {unread > 0
+                ? `${unread === 1 ? "חומר אחד עוד לא נקרא" : `${unread} חומרים עוד לא נקראו`}. הסיכום יופיע אחרי המיון.`
+                : anySorted ? "מוינו לסעיפים לבד, אחרי הסתרה" : ""}
+            </span>
+          </div>
+          {sorted.length === 0 && <p className="materials-empty muted">מתחילים מאינטייק עם ההורים, או גוררים מסמך.</p>}
+          {sorted.map((i) => {
+            const r = routeOf(i.id);
+            return (
+              <button key={i.id} type="button" className={i.id === selected ? "material selected" : "material"} onClick={() => setSelected(i.id)}>
+                <span className="material-kind">{KIND_TAG[i.kind]}</span>
+                <span className="material-main">
+                  <span className="material-title">{i.title || kindLabel[i.kind]}</span>
+                  {r?.summary && <span className="material-summary">{firstSentence(r.summary)}</span>}
+                  <span className="small muted">{feedText(r, titleOf)}</span>
+                </span>
+                <span className="small muted material-date">{new Date(i.created_at * 1000).toLocaleDateString("he-IL", { day: "numeric", month: "numeric" })}</span>
+              </button>
+            );
+          })}
+        </section>
+        {sorted.length > 0 && <PriorOrder api={api} titleOf={(id) => detail.inputs.find((x) => x.id === id)?.title ?? ""} open={(id) => setSelected(id)} />}
       </div>
 
       {input && (
@@ -327,37 +343,25 @@ function ReadingView({ route, ai }: { route: MaterialRouting; ai: string }) {
   );
 }
 
-/** "סיכום החומרים": what no material feeds yet, and the previous assessments in the order
- *  the report lists them (fixed in code, round 31). */
-function MaterialsReading({ api, titleOf, open }: { api: CaseApi; titleOf: (id: string) => string; open: (id: string) => void }) {
+/** The previous assessments in the order the report lists them (fixed in code, round 31). */
+function PriorOrder({ api, titleOf, open }: { api: CaseApi; titleOf: (id: string) => string; open: (id: string) => void }) {
   const { detail } = api;
   const records = detail.prior_order.flatMap((id) => {
     const record = detail.routing.find((r) => r.input_id === id)?.record;
     return record ? [{ id, record }] : [];
   });
-  const unread = detail.routing.filter((r) => r.needs_sorting).length;
+  if (!records.length) return null;
   return (
-    <section className="materials-reading stack" aria-label="סיכום החומרים">
-      <b>סיכום החומרים</b>
-      {detail.missing.length > 0 ? (
-        <p className="small">אין עדיין חומר ל: {detail.missing.join(" · ")}</p>
-      ) : (
-        <p className="small muted">לכל סעיף שנכתב מהחומרים יש חומר.</p>
-      )}
-      {unread > 0 && <p className="small muted">{unread === 1 ? "חומר אחד עוד לא נקרא." : `${unread} חומרים עוד לא נקראו.`} הסיכום שלהם יופיע אחרי המיון.</p>}
-      {records.length > 0 && (
-        <div className="stack">
-          <span className="small muted">אבחונים וטיפולים קודמים, בסדר שבו הם נכתבים בדוח:</span>
-          <ol className="prior-list">
-            {records.map(({ id, record }) => (
-              <li key={id}>
-                <button type="button" className="link-btn" onClick={() => open(id)}>{titleOf(id) || record.kind}</button>
-                <RecordLine record={record} />
-              </li>
-            ))}
-          </ol>
-        </div>
-      )}
+    <section className="prior-order stack" aria-label="אבחונים קודמים, בסדר הדוח">
+      <b className="small">אבחונים וטיפולים קודמים, בסדר שבו הם נכתבים בדוח</b>
+      <ol className="prior-list">
+        {records.map(({ id, record }) => (
+          <li key={id}>
+            <button type="button" className="link-btn" onClick={() => open(id)}>{titleOf(id) || record.kind}</button>
+            <RecordLine record={record} />
+          </li>
+        ))}
+      </ol>
     </section>
   );
 }
@@ -503,14 +507,17 @@ type Need = {
 /** What an assessment usually rests on (docs/REPORT_STRUCTURE.md), deterministic. */
 const NEEDS: Need[] = [
   { label: "אינטייק עם ההורים", kinds: ["intake"], feeds: "רקע, התפתחות ותיאור ההורים", required: true, add: "intake", addLabel: "רישום אינטייק" },
-  { label: "דיווח מהמסגרת החינוכית", kinds: ["kindergarten"], feeds: "סעיף המסגרת החינוכית", required: true, add: "kindergarten", addLabel: "רישום שיחה עם הגננת" },
+  { label: "דיווח מהמסגרת", kinds: ["kindergarten"], feeds: "סעיף המסגרת החינוכית", required: true, add: "kindergarten", addLabel: "רישום שיחה עם הגננת" },
+  { label: "תצפית ומפגשים", kinds: ["session_note", "observation"], feeds: "הופעה והתרשמות, משחק ומישור רגשי", required: true, add: "session_note", addLabel: "רישום מפגש" },
   { label: "ציוני מבחנים", kinds: ["test_scores"], feeds: "כלי האבחון והפרופיל הקוגניטיבי", required: true, add: "test_scores", addLabel: "הזנת ציונים" },
-  { label: "המפגשים והתצפית שלך", kinds: ["session_note", "observation"], feeds: "הופעה והתרשמות, משחק ומישור רגשי", required: true, add: "session_note", addLabel: "רישום מפגש" },
-  { label: "דוחות ואבחונים קודמים", kinds: ["prior_report", "professional"], feeds: "אבחונים וטיפולים (אם יש)", required: false, add: "upload", addLabel: "העלאת מסמך" },
+  { label: "אבחונים קודמים", kinds: ["prior_report", "professional"], feeds: "אבחונים וטיפולים (אם יש)", required: false, add: "upload", addLabel: "העלאת מסמך" },
 ];
 
-/** Anything else (notes, pasted text). */
-const OTHER: Need = { label: "הערות וטקסט חופשי", kinds: ["free_text"], feeds: "לפי המיון", required: false, add: "free_text", addLabel: "הדבקת טקסט" };
+/** The short tag of each kind in the list. */
+const KIND_TAG: Record<InputKind, string> = {
+  intake: "אינטייק", kindergarten: "מסגרת", session_note: "מפגש", observation: "תצפית", test_scores: "ציונים",
+  prior_report: "דוח קודם", professional: "איש מקצוע", free_text: "הערה",
+};
 
 /** D-029: the scores of this follow-up next to the assessment before, by fixed rules. */
 function FollowUpPanel({ api }: { api: CaseApi }) {

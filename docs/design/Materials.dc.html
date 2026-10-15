@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>החומרים בתיק</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f4f5f3}
+a{color:#1e5b56}a:hover{color:#164541}
+.btn{font:inherit;font-size:15px;font-weight:600;border-radius:10px;padding:0 16px;min-height:44px;border:1px solid #cfd5d2;background:#fff;color:#15201f;cursor:pointer;display:inline-flex;align-items:center;gap:8px;text-decoration:none}
+.btn-primary{background:#1e5b56;border-color:#1e5b56;color:#fff}
+.stage{font:inherit;font-size:15px;border:0;background:none;color:#4a5654;display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 6px;cursor:pointer;text-decoration:none}
+.num{width:24px;height:24px;border-radius:50%;border:1px solid #cfd5d2;display:inline-flex;align-items:center;justify-content:center;font-size:13px}
+.need{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:12px;background:#fff;border:1px solid #e3e6e3;font-size:15px}
+.mat{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:start;padding:16px 20px;border-top:1px solid #e3e6e3}
+.tag{font-size:12px;border-radius:999px;padding:2px 10px;background:#f1f3f1;color:#34403e;white-space:nowrap}
+</style>
+</helmet>
+<div style="font-family:Assistant,system-ui,sans-serif;color:#15201f;background:#f4f5f3;min-height:820px;width:100%">
+  <header style="background:#fff;border-bottom:1px solid #e3e6e3;padding:0 24px;display:flex;align-items:center;gap:20px;min-height:64px;flex-wrap:wrap">
+    <a href="Main.dc.html" style="font-weight:600;text-decoration:none">→ תיקים</a>
+    <div style="display:flex;align-items:baseline;gap:8px"><strong style="font-size:19px">נועם</strong><span style="color:#4a5654;font-size:14px">בן 5 שנים ו-4 חודשים</span></div>
+    <nav aria-label="שלבי התיק" style="display:flex;gap:4px;margin-inline:auto;align-items:center">
+      <button class="stage" aria-current="step" style="color:#15201f;font-weight:700"><span class="num" style="background:#1e5b56;border-color:#1e5b56;color:#fff">1</span>חומרים</button>
+      <span style="width:28px;height:1px;background:#cfd5d2"></span>
+      <a href="Report.dc.html" class="stage"><span class="num">2</span>כתיבה</a>
+      <span style="width:28px;height:1px;background:#cfd5d2"></span>
+      <button class="stage"><span class="num">3</span>הוצאת הדוח</button>
+    </nav>
+    <div style="display:flex;gap:8px">
+      <button class="btn">התייעצות</button>
+      <button class="btn" aria-label="עוד" style="width:44px;padding:0;justify-content:center">⋯</button>
+    </div>
+  </header>
+
+  <main style="max-width:1120px;margin:0 auto;padding:32px;display:flex;flex-direction:column;gap:24px">
+    <div style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap">
+      <div>
+        <h1 style="margin:0;font-size:30px">מה יש בתיק</h1>
+        <p style="margin:6px 0 0;color:#4a5654">יש חומר ל-10 מתוך 16 סעיפים. הכול נשמר מוצפן.</p>
+      </div>
+      <a href="Report.dc.html" class="btn btn-primary" style="margin-inline-start:auto">לכתיבת הדוח ←</a>
+    </div>
+
+    <section aria-label="מה עוד חסר" style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px">
+      <div class="need"><span style="color:#2f6b45;font-weight:700">✓</span>אינטייק עם ההורים</div>
+      <div class="need"><span style="color:#2f6b45;font-weight:700">✓</span>דיווח מהמסגרת</div>
+      <div class="need"><span style="color:#2f6b45;font-weight:700">✓</span>תצפית ומפגשים</div>
+      <div class="need"><span style="color:#2f6b45;font-weight:700">✓</span>ציוני מבחנים</div>
+      <div class="need" style="border-style:dashed;background:transparent;color:#4a5654"><span>○</span>אבחונים קודמים <span style="font-size:12px">(לא חובה)</span></div>
+    </section>
+
+    <label style="display:flex;align-items:center;justify-content:center;gap:12px;border:2px dashed #cfe0dc;background:#fafbfa;border-radius:14px;min-height:88px;font-size:16px;color:#34403e;cursor:pointer">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 16V4M6 10l6-6 6 6M4 20h16"></path></svg>
+      גוררים לכאן Word, PDF או ODT, או <span style="color:#1e5b56;font-weight:700;text-decoration:underline">בוחרים קובץ</span>
+      <input type="file" style="display:none" aria-label="העלאת מסמך">
+    </label>
+
+    <section aria-label="החומרים" style="background:#fff;border:1px solid #e3e6e3;border-radius:16px;overflow:hidden">
+      <div style="display:flex;padding:12px 20px;font-size:13px;color:#4a5654;font-weight:600;background:#fafbfa"><span>4 חומרים</span><span style="margin-inline-start:auto">מוינו לסעיפים לבד, אחרי הסתרה</span></div>
+      <div class="mat">
+        <span class="tag">אינטייק</span>
+        <div>
+          <div style="font-weight:700">אינטייק עם ההורים</div>
+          <div style="font-size:14px;color:#34403e;margin-top:2px">ההורים מתארים קושי במעברים ובהמתנה לתור. התפתחות מוטורית ושפתית בזמן. שינה רגועה.</div>
+          <div style="font-size:13px;color:#4a5654;margin-top:6px">מזין: סיבת הפנייה, רקע, תפקוד לפי ההורים</div>
+        </div>
+        <span style="font-size:13px;color:#4a5654">15.10</span>
+      </div>
+      <div class="mat">
+        <span class="tag">מסגרת</span>
+        <div>
+          <div style="font-weight:700">שיחה עם הגננת</div>
+          <div style="font-size:14px;color:#34403e;margin-top:2px">משחק לצד ילדים ופחות איתם. מגיב טוב להכנה מראש לפני מעבר.</div>
+          <div style="font-size:13px;color:#4a5654;margin-top:6px">מזין: מסגרת חינוכית</div>
+        </div>
+        <span style="font-size:13px;color:#4a5654">15.10</span>
+      </div>
+      <div class="mat">
+        <span class="tag">תצפית</span>
+        <div>
+          <div style="font-weight:700">מפגש שני</div>
+          <div style="font-size:14px;color:#34403e;margin-top:2px">שיתוף פעולה טוב במטלות מובנות, קשב יורד במטלות מילוליות ארוכות.</div>
+          <div style="font-size:13px;color:#4a5654;margin-top:6px">מזין: הופעה והתרשמות, איכויות התקשורת</div>
+        </div>
+        <span style="font-size:13px;color:#4a5654">15.10</span>
+      </div>
+      <div class="mat">
+        <span class="tag">ציונים</span>
+        <div>
+          <div style="font-weight:700">WPPSI-IV</div>
+          <div style="font-size:14px;color:#34403e;margin-top:2px">10 מבחני משנה הוזנו. מנת משכל כללית בטווח הממוצע.</div>
+          <div style="font-size:13px;color:#4a5654;margin-top:6px">מזין: כלי האבחון, פרופיל קוגניטיבי</div>
+        </div>
+        <span style="font-size:13px;color:#4a5654">15.10</span>
+      </div>
+    </section>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1366,"height":820}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

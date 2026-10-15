@@ -342,9 +342,8 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
       : !detail.meta.consent
         ? { title: `לפני שליחה ל-${ai} צריך לרשום את הסכמת ההורים.`, note: "אפשר להמשיך לאסוף חומרים בינתיים.", action: "רישום ההסכמה", run: () => go({ name: "case", id: caseId, view: "details" }) }
         : stage === 1
-          ? hasMaterials
-            ? { title: fed.length ? `יש חומר ל-${fed.length} סעיפים` : `${detail.inputs.length} חומרים בתיק`, note: unsorted > 0 ? `${ai} ימיין את החומרים (אחרי הסתרה) לסעיפים.` : "הבא: טיוטה לכל סעיף, ואת מאשרת.", action: "לכתיבת הדוח ←", run: () => void toWriting() }
-            : null
+          // Round 49: on the materials page, "לכתיבת הדוח ←" sits at the top of the page.
+          ? null
           : pendingCount > 0
             ? { title: pendingCount === 1 ? "טיוטה אחת מחכה לאישור שלך" : `${pendingCount} פסקאות מחכות לאישור שלך`, note: "רק מה שאישרת נכנס לקובץ.", action: `לטיוטה ב"${pending[0]?.title ?? ""}" ←`, run: () => toReport(pending[0]?.key) }
             : unsorted > 0
@@ -431,7 +430,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
       <div className="case-body">
         {stage === 2 && <Contents detail={detail} jobs={jobs} view={view} onOpen={(key) => toReport(key)} onWriteAll={() => setFullDraft(true)} />}
         <div className="work">
-          {view === "materials" && <MaterialsView api={api} />}
+          {view === "materials" && <MaterialsView api={api} onWrite={() => void toWriting()} />}
           {view === "details" && <DetailsView api={api} />}
           {view === "report" && <ReportView api={api} onWriteAll={() => setFullDraft(true)} focus={focus} />}
           {view === "finish" && <FinishView api={api} onExport={() => setExporting(true)} onOpen={(key) => toReport(key)} />}

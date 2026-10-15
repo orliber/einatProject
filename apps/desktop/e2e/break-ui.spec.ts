@@ -62,6 +62,15 @@ for (const size of sizes) {
       await stage(page, /חומרים/).click();
       await expect(page.getByRole("heading", { name: "מה יש בתיק" })).toBeVisible();
       await expectNoSidewaysSpill(page, "materials");
+      // A material with a long file-like name stays in its row (round 49).
+      await page.getByRole("button", { name: "אינטייק עם ההורים (רישום אינטייק)" }).click();
+      const write = page.getByRole("dialog", { name: "הוספת טקסט" });
+      await write.getByLabel("כותרת").fill("סיכום_אינטייק_עם_ההורים_Weissberg-Abramovich_גרסה_סופית_מתוקנת_2026-10-15.docx");
+      await write.getByLabel("הטקסט").fill("טקסט בדוי.");
+      await write.getByRole("button", { name: "שמירה בתיק" }).click();
+      await expect(write).toBeHidden();
+      await expect(page.getByRole("region", { name: "רשימת החומרים" }).getByRole("button", { name: /Weissberg-Abramovich_גרסה/ })).toBeVisible();
+      await expectNoSidewaysSpill(page, "materials with a long name");
     });
   });
 }
