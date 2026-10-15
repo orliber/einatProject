@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-send-interpretations"
+description = "Enables the send_interpretations command without any pre-configured scope."
+commands.allow = ["send_interpretations"]
+
+[[permission]]
+identifier = "deny-send-interpretations"
+description = "Denies the send_interpretations command without any pre-configured scope."
+commands.deny = ["send_interpretations"]

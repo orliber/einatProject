@@ -1,5 +1,6 @@
 // "איך לכתוב את הסעיף הזה" (round 29): the section's guide at the top of the section. The
-// institute's text until she edits it (for every case), and lines of her own for this case.
+// institute's text until she edits it (for every case), or the order she writes the section in
+// when it was learned from her past reports (K3), and lines of her own for this case.
 // It goes out with each draft request of the section, filtered like her request. Plain text.
 import { useState } from "react";
 import { useApp } from "../App";
@@ -14,6 +15,8 @@ type Props = {
   sectionKey: string;
   guide: string;
   isDefault: boolean;
+  /** The guide is the order she writes the section in, learned from this many reports. */
+  learnedFrom?: number;
   caseGuide: string;
   /** After a save: the case is read again. */
   onSaved: () => Promise<void> | void;
@@ -115,7 +118,11 @@ export function SectionGuide(props: Props) {
           <>
             {props.guide.trim() ? <Lines text={props.guide} /> : <p className="muted small">אין עדיין הנחיה לסעיף הזה.</p>}
             <div className="row small wrap-row">
-              <span className="muted">{props.isDefault ? "הנוסח של המכון." : "הנוסח שלך, לכל התיקים."}</span>
+              <span className="muted">{!props.isDefault
+                ? "הנוסח שלך, לכל התיקים."
+                : props.learnedFrom
+                  ? `לפי הסדר שבו כתבת את הסעיף ב-${props.learnedFrom} מהדוחות שלך.`
+                  : "הנוסח של המכון."}</span>
               <button type="button" className="btn btn-small" onClick={() => setEditing("general")}>עריכה</button>
               {!props.isDefault && !resetting && (
                 <button type="button" className="btn btn-small" onClick={() => setResetting(true)}>

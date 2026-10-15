@@ -210,6 +210,16 @@ pub(crate) async fn own_section_help(
     with_core(&state, move |c| c.own_section_help(&section_key)).await
 }
 
+/// Her diagnoses, recommendations and the reports most like the case (round 36; local only).
+#[tauri::command]
+pub(crate) async fn section_library(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    section_key: String,
+) -> Res<dv_core::SectionLibrary> {
+    with_core(&state, move |c| c.section_library(&case_id, &section_key)).await
+}
+
 #[tauri::command]
 pub(crate) async fn similar_paragraph(
     state: tauri::State<'_, AppState>,

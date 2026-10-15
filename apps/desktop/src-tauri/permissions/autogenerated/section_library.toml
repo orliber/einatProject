@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-section-library"
+description = "Enables the section_library command without any pre-configured scope."
+commands.allow = ["section_library"]
+
+[[permission]]
+identifier = "deny-section-library"
+description = "Denies the section_library command without any pre-configured scope."
+commands.deny = ["section_library"]

@@ -127,8 +127,13 @@ impl Core {
         &mut self,
         items: Vec<RawStyleItem>,
     ) -> Result<(Vec<RawStyleItem>, u32), CoreError> {
-        let sources: Vec<StoredSource> = self.stored_sources()?.into_iter().map(|s| s.2).collect();
-        let index = source_index(&sources, PROFILE_NGRAM);
+        let (ids, sources): (Vec<String>, Vec<StoredSource>) = self
+            .stored_sources()?
+            .into_iter()
+            .map(|s| (s.0, s.2))
+            .unzip();
+        let children = super::child_groups(self.vault_ref()?, &ids)?;
+        let index = source_index(&sources, &children, PROFILE_NGRAM);
         self.with_style_ctx(|ctx, _| {
             let before = items.len();
             let kept: Vec<RawStyleItem> = items

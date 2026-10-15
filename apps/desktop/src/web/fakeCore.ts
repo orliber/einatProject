@@ -490,6 +490,7 @@ export class FakeCore {
           mode: this.modes.get(s.key) ?? "ai",
           guide: this.guides.get(s.key) ?? INSTITUTE_GUIDES.get(s.key) ?? "",
           guide_is_default: !this.guides.has(s.key),
+          guide_learned_from: 0,
           case_guide: c.meta.guides?.[s.key] ?? "",
         };
       }),
@@ -1180,6 +1181,9 @@ export class FakeCore {
         const d = c.drafts.find((x) => x.id === a.draftId) ?? fail("not_found", "הפסקה לא נמצאה");
         return versionsOf(c.drafts, d).map((v) => ({ id: v.id, saved_at: v.at, by_ai: v.byAi, text: restore(v.text, c.people, this.practitioner) }));
       }
+      case "section_library":
+        // The fake keeps no past reports for the cases: nothing to offer.
+        return { lines: [], similar: [] };
       case "similar_paragraph": {
         const c = this.find(a.caseId);
         if (!c.drafts.some((x) => x.id === a.draftId)) fail("not_found", "הפסקה לא נמצאה");

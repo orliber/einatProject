@@ -1,5 +1,6 @@
 // Browser preview only: the writing-style screen (D-043) over the preview's small filter. The real
 // neutralizing, checks and gate run in Rust; this shows the flow with fabricated reports.
+import type { InterpretationView } from "../ipc/generated/InterpretationView";
 import type { Prepared } from "../ipc/generated/Prepared";
 import type { StyleImportPreview } from "../ipc/generated/StyleImportPreview";
 import type { StyleItem } from "../ipc/generated/StyleItem";
@@ -18,6 +19,8 @@ import { filter, type Person } from "./filter";
 type Args = Record<string, unknown>;
 
 const SECTIONS = structure.parts.flatMap((p) => p.sections).filter((s) => s.key !== "signature");
+/** The preview's short list of subtests whose scores it keeps (the real list is the fixed tables). */
+const SUBTESTS: [string, string][] = [["block_design", "קוביות"], ["matrix", "מטריצות"], ["animal_coding", "קידוד חיות"], ["picture_memory", "זיכרון תמונות"], ["bug_search", "חיפוש חרקים"]];
 const INCLUDED = ["appearance", "cognitive", "adaptive", "communication", "dsm", "emotional", "summary", "recommendations"];
 const HEADINGS: [string, string[]][] = [
   ["dsm", ["DSM"]], ["summary", ["סיכום"]], ["recommendations", ["המלצות"]], ["referral", ["סיבת הפניה"]],
@@ -64,10 +67,11 @@ export class FakeStyle {
   private versions: Version[] = [];
   private enabled = true;
   private staged: { token: string; title: string; format: string; parts: Source["parts"] } | null = null;
-  private pending = new Map<string, { type: "analysis"; id: string } | { type: "profile" }>();
+  private pending = new Map<string, { type: "analysis"; id: string } | { type: "profile" } | { type: "interpret" }>();
+  private interpretations: InterpretationView[] = [];
 
   static handles(cmd: string): boolean {
-    return cmd.includes("style");
+    return cmd.includes("style") || cmd.includes("interpretation");
   }
 
   private neutral(text: string, people: Person[], practitioner: string[]): { text: string; hidden: number; numbers: number } {
@@ -80,8 +84,11 @@ export class FakeStyle {
       if (s.mark === "relative") return "[תאריך]";
       return s.text.replace(/^\[([^\]]+?)_\d+\]$/, "[$1_1]");
     }).join("");
+    // A score beside a subtest of the preview's short list stays as a score tag (round 32).
+    const scored = out.replace(new RegExp(`(${SUBTESTS.map(([, n]) => n).join("|")})( \\(| )(\\d{1,3})(\\)?)`, "g"),
+      (_m, name: string, open: string, v: string, close: string) => `${name}${open}[תוצאה ${v}]${close ?? ""}`);
     let numbers = 0;
-    const masked = out.replace(/(?<![A-Za-z-])\d+([.:/]\d+)*/g, () => { numbers += 1; return "[מספר]"; });
+    const masked = scored.replace(/(?<![A-Za-z-]|תוצאה \d*)\d+([.:/]\d+)*/g, () => { numbers += 1; return "[מספר]"; });
     return { text: masked, hidden, numbers };
   }
 
@@ -120,6 +127,12 @@ export class FakeStyle {
     };
   }
 
+  /** The preview's subtests that have a score tag in a saved report. */
+  private scored(): [string, string][] {
+    const text = this.sources.flatMap((s) => s.parts.map((p) => p.text)).join("\n");
+    return SUBTESTS.filter(([, name]) => text.includes(`${name} [תוצאה`) || text.includes(`${name} ([תוצאה`));
+  }
+
   private prepared(label: string, text: string, approval: string): Prepared {
     const seg = [{ text, mark: null, label: null }];
     return { approval_id: approval, parts: [{ label, original: seg, outgoing: seg }], suspects: [], auto_hidden: [], hidden: [], checks: { declared_names: 0, patterns: 0, name_suspects: 0, indirect_suspects: 0 }, blocked: [], demo_mode: true };
@@ -140,6 +153,10 @@ export class FakeStyle {
           sections: SECTIONS.map((s) => ({ key: s.key, title: s.title })),
           demo_mode: true,
           learned: this.learned(),
+          interpretations: this.interpretations,
+          scored_measures: this.scored().length,
+          skeletons: [],
+          omissions: [],
         } satisfies StyleOverview;
       }
       case "import_style_source": {
@@ -237,6 +254,48 @@ export class FakeStyle {
           text: "הילד ניגש למשימות בסקרנות ובשיתוף פעולה. בתחום המילולי הציג תפקוד ממוצע ({מספר}), עם זאת ניכר קושי בזיכרון העבודה. כך לדוגמא, כשהמשימה חולקה לשלבים הצליח להשלים אותה." });
         const keep = this.versions.find((v) => v.status === "active")?.profile.items.filter((i) => i.origin !== "reports") ?? [];
         return this.add("draft", { items: [...items, ...keep], reports: analyzed.length });
+      }
+      case "prepare_interpretations": {
+        const scored = this.scored();
+        if (!scored.length) return fail("refused", "בדוחות הישנים אין עדיין תוצאה ליד שם של מבחן או תת-מבחן.");
+        const approval = newId("approval");
+        this.pending.set(approval, { type: "interpret" });
+        const lines = this.sources.flatMap((s) => s.parts.flatMap((p) => p.text.split(/(?<=\.)\s+|\n/))).filter((l) => l.includes("[תוצאה"));
+        return this.prepared("פרשנות התוצאות", lines.join("\n"), approval);
+      }
+      case "send_interpretations": {
+        const p = this.pending.get(String(a.approvalId));
+        if (p?.type !== "interpret") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
+        this.pending.delete(String(a.approvalId));
+        await new Promise((r) => setTimeout(r, 1200));
+        this.interpretations = this.interpretations.filter((i) => i.item.approved || i.item.edited);
+        const added = this.scored().map(([key, name]): InterpretationView => ({
+          instrument_name: "WPPSI-IV", measure_name: name,
+          item: { id: newId("interp"), instrument: "wppsi_iv", measure: key, case: "כללי", support: 1, approved: false, enabled: true, edited: false,
+            text: "מצב הדגמה: כאן תופיע הפרשנות שלך לתת-המבחן, כפי שעולה מהדוחות שלך, במילים כלליות." },
+        }));
+        // As the core does: a text she already keeps is not added twice.
+        const fresh = added.filter((v) => !this.interpretations.some((i) => i.item.measure === v.item.measure && i.item.text === v.item.text));
+        this.interpretations.push(...fresh);
+        return { kept: fresh.length, dropped: added.length - fresh.length, demo: true };
+      }
+      case "update_interpretation": {
+        const v = this.interpretations.find((i) => i.item.id === a.id) ?? fail("not_found", "לא נמצא: הפרשנות");
+        if (typeof a.text === "string") {
+          const t = a.text.trim().replace(/\s+/g, " ");
+          if (!t || t.length > 600) fail("refused", "הפרשנות צריכה להיות באורך של עד 600 תווים.");
+          if (/[[\]]/.test(t)) fail("refused", "בטקסט יש משהו שנראה כמו שם או פרט מזהה. הפרשנות נשמרת במילים כלליות בלבד.");
+          if (t !== v.item.text) v.item = { ...v.item, text: t, edited: true };
+        }
+        if (typeof a.approved === "boolean") v.item = { ...v.item, approved: a.approved };
+        if (typeof a.enabled === "boolean") v.item = { ...v.item, enabled: a.enabled };
+        return v;
+      }
+      case "delete_interpretation": {
+        const before = this.interpretations.length;
+        this.interpretations = this.interpretations.filter((i) => i.item.id !== a.id);
+        if (this.interpretations.length === before) fail("not_found", "לא נמצא: הפרשנות");
+        return null;
       }
       case "save_style_draft": {
         const profile = a.profile as StyleProfile;

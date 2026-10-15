@@ -2,7 +2,8 @@
 //! text from the template until she edits it in settings; a case can add lines of its own.
 //! The whole guide goes out with every drafting request of the section, filtered like her
 //! request, and each paragraph says which line it answers, so a line nobody wrote is shown as
-//! a missing paragraph.
+//! a missing paragraph. Until she writes her own, the general guide is the order she writes
+//! the section in, when it was learned from her past reports (K3).
 
 use super::*;
 
@@ -18,6 +19,9 @@ pub(crate) struct SectionGuide {
     pub general: String,
     /// `general` is the template's text, not edited.
     pub is_default: bool,
+    /// `general` is the order she writes the section in, learned from this many of her
+    /// reports (K3), in place of the template's text. 0: not learned.
+    pub learned_from: u32,
     /// This case's own lines.
     pub case: String,
 }
@@ -42,9 +46,20 @@ pub(crate) fn guide_for(
     let stored = v
         .setting(&format!("{GUIDE_PREFIX}{}", section.key))?
         .filter(|t| !t.trim().is_empty());
+    // Until she writes her own, the order she writes the section in, when it was learned
+    // from her reports (K3, by the child's age band, K13); else the institute's text.
+    let learned = if stored.is_none() {
+        crate::style::style_skeleton(v, &section.key, meta.age)?
+    } else {
+        None
+    };
+    let learned_from = learned.as_ref().map_or(0, |k| k.reports);
     Ok(SectionGuide {
         is_default: stored.is_none(),
-        general: stored.unwrap_or_else(|| section.guide.clone()),
+        learned_from,
+        general: stored
+            .or_else(|| learned.map(|k| k.guide()))
+            .unwrap_or_else(|| section.guide.clone()),
         case: meta
             .guides
             .as_ref()
