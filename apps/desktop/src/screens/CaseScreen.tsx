@@ -343,7 +343,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     if (runStep) void reload();
   }, [runStep, reload]);
   // A finished run's line steps aside after a moment; one with something to fix stays.
-  const runOver = run !== undefined && !isRunning(caseId) && run.failed === 0 && run.error === null;
+  const runOver = run !== undefined && !isRunning(caseId) && run.failed === 0 && run.uncheckedFailed === 0 && run.error === null;
   useEffect(() => {
     if (!runOver) return;
     const t = setTimeout(() => forgetRun(caseId), RUN_LINE_MS);
