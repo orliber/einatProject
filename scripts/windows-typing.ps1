@@ -39,6 +39,7 @@ public static class Keys {
     }
     public static void Char(char c) { Send(0, c, UNICODE); Send(0, c, UNICODE | KEYUP); }
     public static void Enter() { Send(0x0D, 0, 0); Send(0x0D, 0, KEYUP); }
+    public static void Down() { Send(0x28, 0, 0); Send(0x28, 0, KEYUP); }
 }
 "@
 
@@ -143,6 +144,29 @@ function Press-Named($root, [string] $pattern, [string] $what, [int] $seconds = 
     throw "nothing to press: $what ($pattern)"
 }
 
+# An item of the menu that is open, chosen from the keyboard alone: a menu opened with Enter
+# puts the focus on its first item, and the arrow moves it down one item at a time (it stops
+# at the last one). The items are not looked up and focused from outside: the menu replaces
+# them while it opens, and a focus sent to one that is gone lands outside the menu and closes it.
+function Choose-InMenu([string] $pattern, [string] $what, [int] $seconds = 20) {
+    $deadline = (Get-Date).AddSeconds($seconds)
+    Start-Sleep -Milliseconds 800
+    while ((Get-Date) -lt $deadline) {
+        $f = [System.Windows.Automation.AutomationElement]::FocusedElement
+        $name = ""
+        try { if ($null -ne $f) { $name = $f.Current.Name } } catch { }
+        if ($name -match $pattern) {
+            [Keys]::Enter()
+            Write-Host "chosen with Enter: $name"
+            return
+        }
+        [Keys]::Down()
+        Start-Sleep -Milliseconds 500
+    }
+    Show-Names $window
+    throw "not reached from the keyboard: $what ($pattern); the focus is in $(Focused-Name)"
+}
+
 # Where the keys go now, for the log when they went elsewhere.
 function Focused-Name {
     $f = [System.Windows.Automation.AutomationElement]::FocusedElement
@@ -200,7 +224,7 @@ Type-Into $passwordField $Password 0
 Invoke-Named $window 'בתיק של' "a case on the cases screen"
 Invoke-Named $window 'חומרים$' "the materials stage"
 Press-Named $window '^הוספה לאבחונים קודמים' "the add menu of the earlier assessments" -Keyboard
-Press-Named $window '^הדבקת טקסט' "paste text for a material" -Keyboard
+Choose-InMenu '^הדבקת טקסט' "paste text for a material"
 $field = Find-Field $window '^הטקסט$' "the text field of the material"
 
 # 3. 500 Hebrew characters, one key at a time, words and punctuation as she writes them.
