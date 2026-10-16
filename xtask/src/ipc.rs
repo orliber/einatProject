@@ -269,8 +269,10 @@ pub fn write(root: &Path) -> Result<String, String> {
 
 /// For `check-invariants`: the checked-in file matches the shell's commands.
 pub fn stale(root: &Path) -> Vec<String> {
+    // A Windows checkout has CRLF line endings (core.autocrlf); `render` writes LF.
+    let checked_in = fs::read_to_string(root.join(OUT)).map(|now| now.replace("\r\n", "\n"));
     match render(root) {
-        Ok(text) if fs::read_to_string(root.join(OUT)).is_ok_and(|now| now == text) => Vec::new(),
+        Ok(text) if checked_in.is_ok_and(|now| now == text) => Vec::new(),
         Ok(_) => vec![format!("{OUT} is stale: run `cargo xtask gen-ipc`")],
         Err(e) => vec![format!("gen-ipc: {e}")],
     }
