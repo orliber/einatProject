@@ -39,6 +39,7 @@ public static class Keys {
     }
     public static void Char(char c) { Send(0, c, UNICODE); Send(0, c, UNICODE | KEYUP); }
     public static void Enter() { Send(0x0D, 0, 0); Send(0x0D, 0, KEYUP); }
+    public static void Down() { Send(0x28, 0, 0); Send(0x28, 0, KEYUP); }
 }
 "@
 
@@ -100,6 +101,72 @@ function Invoke-Named($root, [string] $pattern, [string] $what, [int] $seconds =
     throw "nothing to press: $what ($pattern)"
 }
 
+# A menu and its items: a menu button opens on a key or a pointer press, not on the click
+# Invoke sends, and offers no Invoke at all; an item invoked while its menu settles may be
+# gone before it acts. So with -Keyboard (and for anything that cannot be invoked) the
+# element takes the focus and Enter, as she would choose it from the keyboard.
+function Press-Named($root, [string] $pattern, [string] $what, [int] $seconds = 60, [switch] $Keyboard) {
+    $invoke = [System.Windows.Automation.InvokePattern]::Pattern
+    $deadline = (Get-Date).AddSeconds($seconds)
+    while ((Get-Date) -lt $deadline) {
+        $all = $root.FindAll($Tree, [System.Windows.Automation.Condition]::TrueCondition)
+        foreach ($e in $all) {
+            # A menu that is still opening replaces its items: one found a moment ago may be
+            # gone by the time it is pressed. Then it is looked for again.
+            try {
+                $c = $e.Current
+                if ($c.Name -notmatch $pattern -or -not $c.IsEnabled) { continue }
+                $p = $null
+                $keys = $c.IsKeyboardFocusable -and ($Keyboard -or -not $e.TryGetCurrentPattern($invoke, [ref] $p))
+                if (-not $keys -and $e.TryGetCurrentPattern($invoke, [ref] $p)) {
+                    $p.Invoke()
+                    Write-Host "pressed: $($c.Name)"
+                    return
+                }
+                if ($keys) {
+                    Focus-Field $e $what
+                    [Keys]::Enter()
+                    Write-Host "pressed with Enter: $($c.Name)"
+                    return
+                }
+            }
+            catch {
+                $x = $_.Exception
+                while ($x -and $x -isnot [System.Windows.Automation.ElementNotAvailableException]) { $x = $x.InnerException }
+                if (-not $x) { throw }
+                Write-Host "(gone before it was pressed, looking again: $what)"
+                break
+            }
+        }
+        Start-Sleep -Milliseconds 300
+    }
+    Show-Names $root
+    throw "nothing to press: $what ($pattern)"
+}
+
+# An item of the menu that is open, chosen from the keyboard alone: a menu opened with Enter
+# puts the focus on its first item, and the arrow moves it down one item at a time (it stops
+# at the last one). The items are not looked up and focused from outside: the menu replaces
+# them while it opens, and a focus sent to one that is gone lands outside the menu and closes it.
+function Choose-InMenu([string] $pattern, [string] $what, [int] $seconds = 20) {
+    $deadline = (Get-Date).AddSeconds($seconds)
+    Start-Sleep -Milliseconds 800
+    while ((Get-Date) -lt $deadline) {
+        $f = [System.Windows.Automation.AutomationElement]::FocusedElement
+        $name = ""
+        try { if ($null -ne $f) { $name = $f.Current.Name } } catch { }
+        if ($name -match $pattern) {
+            [Keys]::Enter()
+            Write-Host "chosen with Enter: $name"
+            return
+        }
+        [Keys]::Down()
+        Start-Sleep -Milliseconds 500
+    }
+    Show-Names $window
+    throw "not reached from the keyboard: $what ($pattern); the focus is in $(Focused-Name)"
+}
+
 # Where the keys go now, for the log when they went elsewhere.
 function Focused-Name {
     $f = [System.Windows.Automation.AutomationElement]::FocusedElement
@@ -152,10 +219,12 @@ $passwordField = Find-Field $window '^סיסמה$' "the password field" 90
 Type-Into $passwordField $Password 0
 [Keys]::Enter()
 
-# 2. The case, then its materials, then "הדבקת טקסט" for one of them.
+# 2. The case, then its materials, then "הדבקת טקסט" for one of them (since round 49 it is in
+#    the menu of each kind of material, here the earlier assessments).
 Invoke-Named $window 'בתיק של' "a case on the cases screen"
 Invoke-Named $window 'חומרים$' "the materials stage"
-Invoke-Named $window '^הדבקת טקסט' "paste text for a material"
+Press-Named $window '^הוספה לאבחונים קודמים' "the add menu of the earlier assessments" -Keyboard
+Choose-InMenu '^הדבקת טקסט' "paste text for a material"
 $field = Find-Field $window '^הטקסט$' "the text field of the material"
 
 # 3. 500 Hebrew characters, one key at a time, words and punctuation as she writes them.
