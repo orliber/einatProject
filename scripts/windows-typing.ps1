@@ -110,20 +110,31 @@ function Press-Named($root, [string] $pattern, [string] $what, [int] $seconds = 
     while ((Get-Date) -lt $deadline) {
         $all = $root.FindAll($Tree, [System.Windows.Automation.Condition]::TrueCondition)
         foreach ($e in $all) {
-            $c = $e.Current
-            if ($c.Name -notmatch $pattern -or -not $c.IsEnabled) { continue }
-            $p = $null
-            $keys = $c.IsKeyboardFocusable -and ($Keyboard -or -not $e.TryGetCurrentPattern($invoke, [ref] $p))
-            if (-not $keys -and $e.TryGetCurrentPattern($invoke, [ref] $p)) {
-                $p.Invoke()
-                Write-Host "pressed: $($c.Name)"
-                return
+            # A menu that is still opening replaces its items: one found a moment ago may be
+            # gone by the time it is pressed. Then it is looked for again.
+            try {
+                $c = $e.Current
+                if ($c.Name -notmatch $pattern -or -not $c.IsEnabled) { continue }
+                $p = $null
+                $keys = $c.IsKeyboardFocusable -and ($Keyboard -or -not $e.TryGetCurrentPattern($invoke, [ref] $p))
+                if (-not $keys -and $e.TryGetCurrentPattern($invoke, [ref] $p)) {
+                    $p.Invoke()
+                    Write-Host "pressed: $($c.Name)"
+                    return
+                }
+                if ($keys) {
+                    Focus-Field $e $what
+                    [Keys]::Enter()
+                    Write-Host "pressed with Enter: $($c.Name)"
+                    return
+                }
             }
-            if ($keys) {
-                Focus-Field $e $what
-                [Keys]::Enter()
-                Write-Host "pressed with Enter: $($c.Name)"
-                return
+            catch {
+                $x = $_.Exception
+                while ($x -and $x -isnot [System.Windows.Automation.ElementNotAvailableException]) { $x = $x.InnerException }
+                if (-not $x) { throw }
+                Write-Host "(gone before it was pressed, looking again: $what)"
+                break
             }
         }
         Start-Sleep -Milliseconds 300
