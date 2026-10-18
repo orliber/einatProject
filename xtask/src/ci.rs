@@ -55,6 +55,13 @@ const RUST: &[Step] = &[
         args: &["deny", "check"],
         env: &[],
     },
+    Step {
+        title: "the version can be released",
+        dir: "",
+        program: "bash",
+        args: &["scripts/release-ready.sh"],
+        env: &[],
+    },
 ];
 
 const UI: &[Step] = &[

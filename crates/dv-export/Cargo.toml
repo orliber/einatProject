@@ -21,7 +21,7 @@ quick-xml = "0.42"
 serde.workspace = true
 thiserror.workspace = true
 ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
-zip = { version = "8.6", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 zeroize = "1.9"
 
 [dev-dependencies]

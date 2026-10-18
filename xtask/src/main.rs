@@ -5,8 +5,8 @@
 //! * `cargo xtask scan --staged | --all` – blocks personal data, archives and
 //!   binaries from entering the repository (pre-commit hook and CI).
 //! * `cargo xtask update-keygen [--next]` / `update-notice …` / `update-key-backup …` /
-//!   `update-key-restore …` – signed updates, on the developer's
-//!   computer only (D-033, `scripts/release.sh`).
+//!   `update-key-restore …` – signed updates (D-033): the key pair on the developer's
+//!   computer, the notice signed there or in the release workflow (D-091).
 //! * `cargo xtask gen-ipc` – the TypeScript of every command, from the shell (`ipc.rs`).
 //! * `cargo xtask ci [--e2e] [--rust|--ui]` – the CI checks, on this computer, in one command.
 //! * `cargo xtask check-parsers` / `sbom <out.json>` / `self-audit [--full]` – the supply
