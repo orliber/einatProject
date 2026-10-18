@@ -301,8 +301,19 @@ jobs:
       # approve, export, backup, restore) and opens again.
       - name: Vaults of every earlier version open and take work
         run: cargo test --release -p dv-core --lib upgrade
+      # On Windows the FIPS module is a DLL: it goes into the installer beside the program,
+      # or the installed app cannot start (bundle-fips.ps1).
+      - name: The program and its FIPS module
+        shell: pwsh
+        run: |
+          pnpm build
+          if ($LASTEXITCODE -ne 0) { throw "UI build failed" }
+          cargo build --release -p dv-desktop --features fips
+          if ($LASTEXITCODE -ne 0) { throw "build failed" }
+          src-tauri/windows/bundle-fips.ps1
+        working-directory: apps/desktop
       - name: Build the one-click installer
-        run: pnpm tauri build --bundles nsis --features fips
+        run: pnpm tauri build --bundles nsis --features fips --config src-tauri/tauri.fips.conf.json
         working-directory: apps/desktop
       - name: Fixed name and checksum
         shell: pwsh
