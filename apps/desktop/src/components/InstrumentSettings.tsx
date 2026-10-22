@@ -4,7 +4,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useApp } from "../App";
-import { ipc, type InstrumentApproval, type InstrumentStatus } from "../ipc/client";
+import { ipc, type Instrument, type InstrumentApproval, type InstrumentStatus } from "../ipc/client";
+import type { Measure } from "../ipc/generated/Measure";
+import { ageSpan, tableOrder } from "./ScoresView";
 import { Segmented } from "./Switch";
 import { ErrorLine } from "./ui";
 
@@ -22,6 +24,46 @@ const CHOICES: { value: Exclude<InstrumentStatus, "awaiting">; label: string }[]
 
 function casesWords(n: number): string {
   return n === 1 ? "בתיק פתוח אחד" : `ב-${n} תיקים פתוחים`;
+}
+
+/** The measures that share one table, in the instrument's order: the table is shown once. */
+function byTable(instrument: Instrument): { first: Measure; measures: Measure[] }[] {
+  const out: { key: string; first: Measure; measures: Measure[] }[] = [];
+  for (const m of tableOrder(instrument)) {
+    const key = JSON.stringify([m.min, m.max, m.bands]);
+    const same = out.find((g) => g.key === key);
+    if (same) same.measures.push(m);
+    else out.push({ key, first: m, measures: [m] });
+  }
+  return out;
+}
+
+/** What she approves: the edition (in the name), the ages, every measure and its table. */
+function InstrumentTable({ instrument }: { instrument: Instrument }) {
+  return (
+    <details className="instrument-table">
+      <summary>הטבלה שבתוכנה</summary>
+      <p className="hint">
+        <span dir="ltr">{instrument.name}</span> · גילאים {ageSpan(instrument.min_age_months, instrument.max_age_months)}
+        {instrument.scale_note_he && ` · ${instrument.scale_note_he}`}
+      </p>
+      {byTable(instrument).map((g) => (
+        <div key={g.first.key} className="instrument-group">
+          <p className="instrument-measures">
+            {g.measures.map((m) => `${m.name_he} (${m.abbr})`).join(" · ")}
+            {` · ציון ${g.first.min}–${g.first.max}`}
+          </p>
+          <ul className="instrument-bands">
+            {g.first.bands.map((b) => (
+              <li key={`${b.min}-${b.max}`}>
+                <span dir="ltr">{b.min === b.max ? b.min : `${b.min}–${b.max}`}</span>: {b.label}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </details>
+  );
 }
 
 export function InstrumentSettings() {
@@ -59,7 +101,8 @@ export function InstrumentSettings() {
       <ErrorLine error={list.error ? fail(list.error as never) : error} />
       <ul className="instrument-list">
         {items.map((a) => (
-          <li key={a.instrument.key} className="set-row">
+          <li key={a.instrument.key} className="instrument-row">
+           <div className="set-row">
             <div className="set-row-text">
               <span className="set-row-label" dir="ltr">{a.instrument.name}</span>
               <span className="hint">
@@ -78,6 +121,8 @@ export function InstrumentSettings() {
                 }}
               />
             </div>
+           </div>
+           <InstrumentTable instrument={a.instrument} />
           </li>
         ))}
       </ul>

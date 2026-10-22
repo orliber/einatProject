@@ -854,7 +854,8 @@ export class FakeCore {
         const manual = ["zdr", "consent_form", "legal"].map((key) => ({
           key, done: this.ready[key] != null, checked_by_program: false, confirmed_at: this.ready[key] ?? null,
         }));
-        const tables = this.instrumentApprovals().every((x) => x.status !== "awaiting" || x.open_cases === 0);
+        // As the core (D-098): every instrument answered, not only those in open cases.
+        const tables = this.instrumentApprovals().every((x) => x.status !== "awaiting");
         const items = [...manual,
           { key: "score_tables", done: tables, checked_by_program: true, confirmed_at: null },
           { key: "api_key", done: false, checked_by_program: true, confirmed_at: null },

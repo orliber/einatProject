@@ -105,7 +105,7 @@ fn every_instrument_awaits_her_approval_until_she_answers() {
 }
 
 #[test]
-fn readiness_line_waits_for_every_instrument_in_an_open_case() {
+fn readiness_line_waits_for_her_answer_on_every_instrument() {
     let (_dir, mut core, case) = setup(None);
     // Program-checked now; she cannot tick it herself.
     let item = core
@@ -117,36 +117,35 @@ fn readiness_line_waits_for_every_instrument_in_an_open_case() {
         .unwrap();
     assert!(item.checked_by_program);
     assert!(core.confirm_readiness("score_tables", true).is_err());
-    // No score table in any open case: nothing waits.
-    assert!(tables_line(&mut core));
+    // Fail closed: a new vault, with nothing answered and no table anywhere, is not done.
+    assert!(!tables_line(&mut core));
 
     core.save_scores(&case, None, &sheet("wppsi_iv", &[("fsiq", 104.0)], ""))
         .unwrap();
-    let brief = core
-        .save_scores(&case, None, &sheet("brief_p", &[("inhibit", 62.0)], ""))
-        .unwrap();
-    assert!(!tables_line(&mut core), "both await her approval");
-    core.set_instrument_status("wppsi_iv", InstrumentStatus::Approved)
-        .unwrap();
-    assert!(!tables_line(&mut core), "BRIEF-P still awaits");
-    // An instrument she does not give never leaves the computer: it does not hold the line.
-    core.set_instrument_status("brief_p", InstrumentStatus::NotUsed)
+    let keys: Vec<String> = dv_domain::instruments()
+        .into_iter()
+        .map(|i| i.key)
+        .collect();
+    let (last, rest) = keys.split_last().unwrap();
+    for key in rest {
+        // "Not given" is an answer too: those tables never leave the computer.
+        let answer = if key == "wppsi_iv" {
+            InstrumentStatus::Approved
+        } else {
+            InstrumentStatus::NotUsed
+        };
+        core.set_instrument_status(key, answer).unwrap();
+    }
+    assert!(!tables_line(&mut core), "{last} still awaits her answer");
+    core.set_instrument_status(last, InstrumentStatus::Approved)
         .unwrap();
     assert!(tables_line(&mut core));
-    // Another instrument awaiting approval, but in no open case, does not matter.
-    assert_eq!(status(&mut core, "wisc_v"), InstrumentStatus::Awaiting);
 
-    // A case in the bin is not open.
-    core.set_instrument_status("brief_p", InstrumentStatus::Approved)
-        .unwrap();
-    assert!(tables_line(&mut core));
+    // It does not change as cases come and go.
     let other = core.create_sample_case().unwrap();
-    core.save_scores(&other, None, &sheet("wisc_v", &[("fsiq", 99.0)], ""))
-        .unwrap();
-    assert!(!tables_line(&mut core));
+    assert!(tables_line(&mut core));
     core.delete_case(&other).unwrap();
     assert!(tables_line(&mut core));
-    let _ = brief;
 }
 
 #[test]
@@ -250,4 +249,59 @@ fn an_instrument_she_does_not_give_is_in_no_request_and_not_offered() {
         .find(|r| r.input_id == brief.id)
         .unwrap();
     assert!(route.left_out.is_none() && !route.feeds.is_empty());
+}
+
+#[test]
+fn a_saved_comparison_follows_her_answer() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, before) = setup(Some(fake.clone()));
+    core.save_scores(&before, None, &sheet("wppsi_iv", &[("fsiq", 96.0)], ""))
+        .unwrap();
+    core.save_scores(&before, None, &sheet("brief_p", &[("inhibit", 71.0)], ""))
+        .unwrap();
+    let after = core.create_follow_up(&before).unwrap();
+    let mut meta = core.case_detail(&after).unwrap().meta;
+    meta.consent = Some(consent());
+    core.update_case(&after, meta).unwrap();
+    core.save_scores(&after, None, &sheet("wppsi_iv", &[("fsiq", 104.0)], ""))
+        .unwrap();
+    core.save_scores(&after, None, &sheet("brief_p", &[("inhibit", 58.0)], ""))
+        .unwrap();
+    let saved = core.add_comparison_material(&after).unwrap();
+    assert!(saved.content.contains("(INH)"), "{}", saved.content);
+
+    // "Not given": the saved comparison is written again without its lines, so no request
+    // carries the old numbers.
+    core.set_instrument_status("brief_p", InstrumentStatus::NotUsed)
+        .unwrap();
+    let comparison = |core: &mut Core| {
+        core.case_detail(&after)
+            .unwrap()
+            .inputs
+            .into_iter()
+            .find(|i| i.title == "השוואה לאבחון הקודם")
+    };
+    let rewritten = comparison(&mut core).expect("WPPSI-IV is still compared");
+    assert!(
+        rewritten.content.contains("96 ← 104"),
+        "{}",
+        rewritten.content
+    );
+    assert!(
+        !rewritten.content.contains("(INH)"),
+        "{}",
+        rewritten.content
+    );
+    let prepared = core.prepare_section(&after, "cognitive", "").unwrap();
+    core.send_section(&prepared.approval_id.unwrap()).unwrap();
+    let sent = fake.sent.lock().unwrap().join("\n");
+    assert!(sent.contains("96 ← 104"), "{sent}");
+    for word in ["(INH)", "71 ← 58"] {
+        assert!(!sent.contains(word), "{word} went out");
+    }
+
+    // Nothing left to compare: the material is gone, not left with old numbers.
+    core.set_instrument_status("wppsi_iv", InstrumentStatus::NotUsed)
+        .unwrap();
+    assert!(comparison(&mut core).is_none());
 }

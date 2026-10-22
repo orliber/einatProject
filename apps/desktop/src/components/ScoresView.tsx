@@ -63,7 +63,7 @@ function toEntries(sheet: ScoreSheet | null | undefined): Record<string, Entry> 
 }
 
 /** "מ-6 שנים עד 16 שנים ו-11 חודשים". */
-function ageSpan(minMonths: number, maxMonths: number): string {
+export function ageSpan(minMonths: number, maxMonths: number): string {
   const w = (n: number) => ageWords({ years: Math.floor(n / 12), months: n % 12 });
   return `מ-${w(minMonths)} עד ${w(maxMonths)}`;
 }

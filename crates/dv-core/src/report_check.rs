@@ -83,6 +83,23 @@ impl Core {
         })
     }
 
+    /// The approved drafts the check reads, so the name model can read them first, off the
+    /// core's lock (F2).
+    pub fn report_check_texts(&mut self, case_id: &str) -> Result<Vec<String>, CoreError> {
+        let structure = structure_for(self.vault_ref()?, case_id)?;
+        let v = self.vault_ref()?;
+        let mut out = Vec::new();
+        for s in structure.sections().filter(|s| s.key != "signature") {
+            out.extend(
+                v.drafts(case_id, &s.key)?
+                    .into_iter()
+                    .filter(|d| d.status == DraftStatus::Approved)
+                    .map(|d| d.text_tagged),
+            );
+        }
+        Ok(out)
+    }
+
     /// Build the one request that reads the approved report as a whole.
     pub fn prepare_report_check(&mut self, case_id: &str) -> Result<Prepared, CoreError> {
         self.prepare_report_check_once(case_id, false)
@@ -102,7 +119,11 @@ impl Core {
         let structure = structure_for(self.vault_ref()?, case_id)?;
         let model = self.model_for(Task::Draft)?;
         let data = self.privacy_data(case_id)?;
-        let hints = self.case_hints(case_id, &[])?;
+        // The approved drafts are not materials: the name model reads them as well, each one
+        // as it is filtered below.
+        let approved = self.report_check_texts(case_id)?;
+        let extra: Vec<&str> = approved.iter().map(String::as_str).collect();
+        let hints = self.case_hints(case_id, &extra)?;
         let demo_mode = self.demo_mode()?;
 
         let (input, review, keys) = {
@@ -128,21 +149,24 @@ impl Core {
                 {
                     waiting.push(s.title.clone());
                 }
-                let text: Vec<String> = drafts
+                // Each draft filtered by itself, with the name model's reading of that draft.
+                let mut text = Vec::new();
+                for d in drafts
                     .into_iter()
                     .filter(|d| d.status == DraftStatus::Approved)
-                    .map(|d| d.text_tagged)
-                    .collect();
+                {
+                    let out = hints
+                        .filter(&d.text_tagged, &ctx)
+                        .map_err(|e| CoreError::Internal(e.to_string()))?;
+                    review.add(format!("סעיף מאושר · {}", s.title), &out);
+                    text.push(out.tagged);
+                }
                 if text.is_empty() {
                     continue;
                 }
-                let out = hints
-                    .filter(&text.join("\n"), &ctx)
-                    .map_err(|e| CoreError::Internal(e.to_string()))?;
-                review.add(format!("סעיף מאושר · {}", s.title), &out);
                 sections.push(dv_ai::ReportCheckSection {
                     title: model_title(s, &ctx)?,
-                    text_tagged: out.tagged,
+                    text_tagged: text.join("\n"),
                     closing: CLOSING_SECTIONS.contains(&s.key.as_str()),
                 });
                 keys.push(s.key.clone());
@@ -162,11 +186,12 @@ impl Core {
         };
 
         let nonce = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
-        let (body, _ids) = dv_ai::build_report_check_request(&model, &input, &nonce);
+        let (body, ids) = dv_ai::build_report_check_request(&model, &input, &nonce);
         let mut prepared = review.into_case_prepared(demo_mode, &data);
         let kind = PendingKind::ReportCheck {
             case_id: case_id.to_owned(),
             section_keys: keys,
+            ids,
         };
         if self.gate(&data, &body, kind, &mut prepared, !learned)? {
             return self.prepare_report_check_once(case_id, true);
@@ -197,11 +222,11 @@ impl Core {
         let PendingKind::ReportCheck {
             case_id,
             section_keys,
+            ids,
         } = kind
         else {
             return Err(CoreError::NotFound("בקשה מסוג אחר".to_owned()));
         };
-        let ids: Vec<String> = (1..=section_keys.len()).map(|i| format!("R{i}")).collect();
         let raw = dv_ai::parse_report_check(&response, &ids)?;
         let v = self.vault_ref()?;
         let identities = v.identities(&case_id)?;

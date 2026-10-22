@@ -45,7 +45,7 @@ impl Core {
         let v = self.vault_ref()?;
         // A key for the AI she chose (the local model needs none; D-040).
         let api_key = crate::key_of(v, provider)?.is_some();
-        // Her answer in Settings → המבחנים, for each instrument in an open case (D-098).
+        // Her answer in Settings → המבחנים, for every instrument (D-098).
         let tables = crate::instruments::tables_approved(v)?;
         let mut items = Vec::new();
         for key in CONFIRMED {

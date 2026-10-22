@@ -56,7 +56,12 @@ pub(crate) async fn prepare_report_check(
     state: tauri::State<'_, AppState>,
     case_id: String,
 ) -> Res<Prepared> {
-    warm_names(&state, &case_id, Vec::new()).await;
+    // The approved drafts too: the check reads them, and they are not materials.
+    let id = case_id.clone();
+    let drafts = with_core(&state, move |c| c.report_check_texts(&id))
+        .await
+        .unwrap_or_default();
+    warm_names(&state, &case_id, drafts).await;
     with_core(&state, move |c| c.prepare_report_check(&case_id)).await
 }
 

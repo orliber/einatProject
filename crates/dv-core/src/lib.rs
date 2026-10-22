@@ -562,6 +562,8 @@ enum PendingKind {
     ReportCheck {
         case_id: String,
         section_keys: Vec<String>,
+        /// The request's ids ("R1"…), one per key: the notes are read by the ids sent.
+        ids: Vec<String>,
     },
 }
 

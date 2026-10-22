@@ -61,7 +61,7 @@ describe("her approval of the score tables (D-098)", () => {
         </AppContext.Provider>
       </QueryClientProvider>,
     );
-    expect(await screen.findByText(/טבלאות המבחנים שבתיקים הפתוחים אושרו/)).toBeInTheDocument();
+    expect(await screen.findByText(/ענית על הטבלאות של כל אחד מהמבחנים/)).toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "לתיקון" }));
     expect(go).toHaveBeenCalledWith({ name: "settings", pane: "tests" });
@@ -82,6 +82,9 @@ describe("her approval of the score tables (D-098)", () => {
     });
     render(wrap(<InstrumentSettings />));
     expect(await screen.findByText(/מבחן אחד בתיק פתוח מחכה/)).toBeInTheDocument();
+    // What she approves is on the screen: each instrument's ages, measures and table.
+    expect(screen.getAllByText("הטבלה שבתוכנה")).toHaveLength(instruments.length);
+    expect(screen.getByText(/\(INH\)/)).toBeInTheDocument();
     const group = screen.getByRole("radiogroup", { name: /BRIEF-P: מחכה לאישור/ });
     fireEvent.click(within(group).getByRole("radio", { name: "לא מעבירה את זה" }));
     await vi.waitFor(() => expect(calls.find(([c]) => c === "set_instrument_status")?.[1]).toEqual({ key: "brief_p", status: "not_used" }));

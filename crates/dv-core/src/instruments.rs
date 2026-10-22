@@ -136,39 +136,54 @@ pub(crate) fn request_inputs(v: &Vault, case_id: &str) -> Result<Vec<CaseInput>,
     Ok(out)
 }
 
-/// For each instrument, the open cases with a score table of it; `None` when a table in an
-/// open case cannot be read.
-fn in_open_cases(v: &Vault) -> Result<Option<HashMap<String, HashSet<String>>>, CoreError> {
-    let mut out: HashMap<String, HashSet<String>> = HashMap::new();
+/// The score tables in open cases: for each instrument, the cases with a table of it, and
+/// whether some table could not be read. An unreadable one does not hide the others; the
+/// materials list says which it is ("טבלת הציונים הזו לא נקראה").
+struct OpenTables {
+    by_instrument: HashMap<String, HashSet<String>>,
+    unreadable: bool,
+}
+
+fn in_open_cases(v: &Vault) -> Result<OpenTables, CoreError> {
+    let mut out = OpenTables {
+        by_instrument: HashMap::new(),
+        unreadable: false,
+    };
     for case in v
         .list_cases()?
         .into_iter()
         .filter(|c| c.deleted_at.is_none())
     {
-        for input in v.inputs(&case.id)? {
+        for input in v
+            .inputs(&case.id)?
+            .into_iter()
+            .filter(|i| i.kind == InputKind::TestScores)
+        {
             match sheet_of(v, &case.id, &input)? {
                 Ok(Some(sheet)) => {
-                    out.entry(sheet.instrument)
+                    out.by_instrument
+                        .entry(sheet.instrument)
                         .or_default()
                         .insert(case.id.clone());
                 }
                 Ok(None) => {}
-                Err(()) => return Ok(None),
+                Err(()) => out.unreadable = true,
             }
         }
     }
-    Ok(Some(out))
+    Ok(out)
 }
 
-/// "טבלאות המבחנים אושרו": every instrument with a score table in an open case is approved,
-/// or marked not given (its tables never leave the computer). One awaiting approval, or a
-/// table that cannot be read, keeps it off.
+/// "טבלאות המבחנים אושרו": she has answered for every instrument of the fixed tables ("מאושר"
+/// or "לא מעבירה את זה"), and every score table in an open case can be read. Fail closed: a
+/// new vault, with nothing answered, shows it as not done, and it does not change as cases come
+/// and go.
 pub(crate) fn tables_approved(v: &Vault) -> Result<bool, CoreError> {
-    let Some(used) = in_open_cases(v)? else {
+    if in_open_cases(v)?.unreadable {
         return Ok(false);
-    };
-    for key in used.keys() {
-        if status_of(v, key)? == InstrumentStatus::Awaiting {
+    }
+    for i in dv_domain::instruments() {
+        if status_of(v, &i.key)? == InstrumentStatus::Awaiting {
             return Ok(false);
         }
     }
@@ -190,7 +205,7 @@ impl Core {
     /// Every instrument with her answer, for Settings → המבחנים.
     pub fn instrument_approvals(&mut self) -> Result<Vec<InstrumentApproval>, CoreError> {
         let v = self.vault_ref()?;
-        let used = in_open_cases(v)?.unwrap_or_default();
+        let used = in_open_cases(v)?.by_instrument;
         dv_domain::instruments()
             .into_iter()
             .map(|instrument| {
@@ -232,8 +247,17 @@ impl Core {
                 "אפשר לבחור \"מאושר\" או \"לא מעבירה את זה\".".to_owned(),
             ));
         };
-        self.vault_mut()?
-            .set_setting(&format!("{PREFIX}{key}"), value)?;
+        let setting = format!("{PREFIX}{key}");
+        let v = self.vault_mut()?;
+        v.set_state(&setting, value)?;
+        // Logged with her answer, so the activity log can say which test and what she chose.
+        v.record(
+            dv_vault::AuditEvent::SettingsChanged,
+            None,
+            &serde_json::json!({ "key": setting, "value": value }),
+        )?;
+        // The comparison with an earlier assessment is text: written again without its scores.
+        self.refresh_comparisons()?;
         // A request prepared before the answer may hold its scores: prepared again.
         self.pending.clear();
         self.instrument_approvals()

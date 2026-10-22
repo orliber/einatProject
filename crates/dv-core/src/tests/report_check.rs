@@ -208,3 +208,62 @@ fn the_check_works_in_demo_mode_without_a_key_or_a_transport() {
         "demo"
     );
 }
+
+/// The approved paragraphs go through the same filter and gate as any request, each one by
+/// itself: a first name and an ID number in one of them are hidden before anything is sent,
+/// and the name is shown on the card so she can see it was hidden.
+#[test]
+fn an_approved_paragraph_with_a_name_or_an_id_goes_out_hidden() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    approved_report(&mut core, &case);
+    core.set_report_check(true).unwrap();
+    // Assembled at run time: no valid ID number sits in the source.
+    let id = (0..10)
+        .map(|d| format!("31415926{d}"))
+        .find(|s| dv_privacy::patterns::is_valid_israeli_id(s))
+        .unwrap();
+    // Written straight into the vault, past the tagging her own text goes through: the check
+    // must not rely on what was stored.
+    let v = core.vault_mut().unwrap();
+    let d = v
+        .add_draft(
+            &case,
+            "summary",
+            &format!("ולשירן אין קשר לגן. מספר זהות {id}."),
+            Author::Ai,
+            &[],
+        )
+        .unwrap();
+    v.set_draft_status(&case, &d.id, DraftStatus::Approved)
+        .unwrap();
+
+    let prepared = core.prepare_report_check(&case).unwrap();
+    assert!(
+        prepared.auto_hidden.iter().any(|a| a.token == "שירן"),
+        "{:?}",
+        prepared.auto_hidden
+    );
+    assert!(
+        prepared.hidden.iter().any(|h| h == "מספר זהות"),
+        "{:?}",
+        prepared.hidden
+    );
+    let shown: String = prepared
+        .parts
+        .iter()
+        .flat_map(|p| p.outgoing.iter().map(|s| s.text.as_str()))
+        .collect();
+    assert!(
+        !shown.contains("שירן") && !shown.contains(id.as_str()),
+        "{shown}"
+    );
+
+    core.send_report_check(&prepared.approval_id.expect("cleared once hidden"))
+        .unwrap();
+    let sent = fake.sent.lock().unwrap().join("\n");
+    assert!(sent.contains("[מספר_זהות_1]"), "{sent}");
+    for word in ["שירן", id.as_str()] {
+        assert!(!sent.contains(word), "{word} went out");
+    }
+}

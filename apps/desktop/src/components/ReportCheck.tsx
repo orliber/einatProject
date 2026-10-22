@@ -85,6 +85,8 @@ export function ReportCheckItem({ api, onOpen }: { api: CaseApi; onOpen: (key: s
 
   async function run() {
     setError(null);
+    // The notes of an earlier check are not left under a new one that failed.
+    setResult(null);
     setBusy(true);
     try {
       const prepare = () => ipc.prepareReportCheck(caseId);

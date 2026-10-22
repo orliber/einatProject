@@ -97,6 +97,42 @@ impl Core {
         }))
     }
 
+    /// After her answer on an instrument changed (D-098): every comparison material is written
+    /// again from the tables that may still go out, or removed when nothing is left to compare.
+    /// The comparison is text with no sheet behind it, so it could not be left out by itself.
+    pub(crate) fn refresh_comparisons(&mut self) -> Result<(), CoreError> {
+        let cases: Vec<String> = self
+            .vault_ref()?
+            .list_cases()?
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        for case_id in cases {
+            let Some(existing) = self
+                .vault_ref()?
+                .inputs(&case_id)?
+                .into_iter()
+                .find(|i| i.title == COMPARISON_TITLE)
+            else {
+                continue;
+            };
+            let rows = self
+                .follow_up(&case_id)?
+                .map(|f| f.rows)
+                .unwrap_or_default();
+            if rows.is_empty() {
+                // Removed for good: putting it back would bring the old numbers back.
+                self.vault_mut()?.take_input(&case_id, &existing.id)?;
+            } else {
+                let text = comparison_text(&rows);
+                if text != existing.content {
+                    self.update_input(&case_id, &existing.id, COMPARISON_TITLE, &text)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Put the comparison into the case's materials (replacing an earlier one), so the
     /// sections are written from the same numbers she sees.
     pub fn add_comparison_material(
