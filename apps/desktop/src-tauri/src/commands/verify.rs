@@ -1,4 +1,5 @@
-//! Checking a draft against its sources (off until she turns it on in settings).
+//! Checking a draft against its sources (on unless she turns it off), and the whole approved
+//! report (off until she turns it on).
 
 use crate::*;
 
@@ -35,4 +36,41 @@ pub(crate) async fn send_verify(
     .await?;
     let (out, response) = transmit(&state, approval_id, out).await?;
     with_core(&state, move |c| c.finish_verify(out, response)).await
+}
+
+/// The check of the whole approved report (D-097): off until she turns it on, its cost shown.
+#[tauri::command]
+pub(crate) async fn report_check_setting(
+    state: tauri::State<'_, AppState>,
+) -> Res<ReportCheckSetting> {
+    with_core(&state, |c| c.report_check_setting()).await
+}
+
+#[tauri::command]
+pub(crate) async fn set_report_check(state: tauri::State<'_, AppState>, on: bool) -> Res<()> {
+    with_core(&state, move |c| c.set_report_check(on)).await
+}
+
+#[tauri::command]
+pub(crate) async fn prepare_report_check(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+) -> Res<Prepared> {
+    warm_names(&state, &case_id, Vec::new()).await;
+    with_core(&state, move |c| c.prepare_report_check(&case_id)).await
+}
+
+/// Same path as `send_verify`: out of the core's lock, then the notes.
+#[tauri::command]
+pub(crate) async fn send_report_check(
+    state: tauri::State<'_, AppState>,
+    approval_id: String,
+) -> Res<ReportCheckResult> {
+    let id = approval_id.clone();
+    let out = with_core(&state, move |c| {
+        c.begin_send(&id, dv_core::SendKind::ReportCheck)
+    })
+    .await?;
+    let (out, response) = transmit(&state, approval_id, out).await?;
+    with_core(&state, move |c| c.finish_report_check(out, response)).await
 }

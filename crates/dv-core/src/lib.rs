@@ -27,6 +27,7 @@ use name_model::NameHints;
 mod jobs;
 mod layers;
 mod readiness;
+mod report_check;
 mod retention;
 mod seal;
 mod security;
@@ -81,6 +82,7 @@ pub use library::TRASH_DAYS;
 pub use name_model::{HintJob, HintsRead};
 pub use own::SectionModeView;
 pub use readiness::{Readiness, ReadinessItem};
+pub use report_check::{ReportCheckNote, ReportCheckResult, ReportCheckSetting};
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
 pub use security::{SecurityItem, SecurityStatus};
 pub use style::{
@@ -548,6 +550,12 @@ enum PendingKind {
         draft_ids: Vec<String>,
         source_ids: Vec<String>,
     },
+    /// The check of the whole approved report (D-097): the keys of the sections sent, in the
+    /// order of `R1`…
+    ReportCheck {
+        case_id: String,
+        section_keys: Vec<String>,
+    },
 }
 
 /// What an approval is expected to be for. `Core::begin_send` checks it before anything
@@ -561,6 +569,7 @@ pub enum SendKind {
     StyleSynthesis,
     Interpretation,
     Verify,
+    ReportCheck,
 }
 
 impl PendingKind {
@@ -573,6 +582,7 @@ impl PendingKind {
             PendingKind::StyleSynthesis { .. } => SendKind::StyleSynthesis,
             PendingKind::Interpretation { .. } => SendKind::Interpretation,
             PendingKind::Verify { .. } => SendKind::Verify,
+            PendingKind::ReportCheck { .. } => SendKind::ReportCheck,
         }
     }
 }

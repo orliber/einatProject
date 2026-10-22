@@ -96,6 +96,7 @@ interface Case {
 
 type Pending =
   | { type: "verify"; caseId: string; section: string; draftIds: string[] }
+  | { type: "report_check"; caseId: string; sections: string[]; texts: string[] }
   | { type: "section"; caseId: string; section: string; refs: { sid: string; label: string; tagged: string }[]; instruction: string; replaces: string | null; points?: string }
   | { type: "consult"; question: string; shown: string; hidden: string[]; caseId: string | null; conversationId: string | null }
   | { type: "sort"; caseId: string; materials: { id: string; count: number; content: string }[] };
@@ -190,6 +191,8 @@ export class FakeCore {
   private lockMinutes = 15;
   private capUsd: number | null = null;
   private verifyOn = true;
+  /** The check of the whole report (D-097): off until she turns it on. */
+  private reportCheckOn = false;
   private nameModel = { enabled: false, downloaded: false, size_mb: 705, problem: null as string | null };
   private ready: Record<string, number | null> = {};
   private sendStopped = false;
@@ -575,6 +578,30 @@ export class FakeCore {
     return { ...base, approval_id: approval, parts };
   }
 
+  /** The check of the whole report (D-097): the approved sections only, once nothing waits. */
+  private prepareReportCheck(c: Case): Prepared {
+    if (!this.reportCheckOn) fail("refused", "בדיקת הדוח כולו כבויה. אפשר להפעיל אותה בהגדרות.");
+    if (!c.meta.consent) fail("consent_missing", `לפני שליחה ל-${this.ai} צריך לרשום בתיק את הסכמת ההורים.`);
+    const content = SECTIONS.filter((s) => s.key !== "signature");
+    const waiting = content.filter((s) => c.drafts.some((d) => d.section === s.key && d.status === "proposed" && !d.replaces));
+    if (waiting.length) fail("refused", `הדוח נבדק כולו אחרי שכל הטיוטות אושרו. עוד מחכות לאישור: ${waiting.map((s) => s.title).join(", ")}.`);
+    const parts: ReviewPart[] = [];
+    const sections: string[] = [];
+    const texts: string[] = [];
+    for (const s of content) {
+      const text = c.drafts.filter((d) => d.section === s.key && d.status === "approved").map((d) => d.text).join("\n");
+      if (!text) continue;
+      const f = this.filterFor(c, text);
+      parts.push({ label: `סעיף מאושר · ${s.title}`, original: f.original_segments, outgoing: f.tagged_segments });
+      sections.push(s.key);
+      texts.push(f.tagged);
+    }
+    if (sections.length < 2) fail("refused", "בדיקת הדוח כולו משווה בין סעיפים, וצריך לפחות שני סעיפים מאושרים.");
+    const approval = newId("approval");
+    this.pending.set(approval, { type: "report_check", caseId: c.id, sections, texts });
+    return this.withKept(c, { approval_id: approval, parts, suspects: [], auto_hidden: [], hidden: [], checks: { declared_names: 0, patterns: 0, name_suspects: 0, indirect_suspects: 0 }, blocked: [], demo_mode: true });
+  }
+
   /** Sorting into sections (D-022): every material not sorted yet, one review. */
   private prepareSort(c: Case): Prepared {
     if (!c.meta.consent) fail("consent_missing", `לפני שליחה ל-${this.ai} צריך לרשום בתיק את הסכמת ההורים.`);
@@ -843,6 +870,32 @@ export class FakeCore {
           checks: p.draftIds.map((_, i) => ({ paragraph: `P${i + 1}`, verdict: "partial", notes: [] })),
           demo: true,
         };
+      }
+      case "report_check_setting":
+        return { on: this.reportCheckOn, cents_per_check: 15 };
+      case "set_report_check":
+        this.reportCheckOn = Boolean(a.on);
+        return null;
+      case "prepare_report_check":
+        return this.prepareReportCheck(this.find(a.caseId));
+      case "send_report_check": {
+        const p = this.pending.get(String(a.approvalId));
+        if (p?.type !== "report_check") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
+        this.pending.delete(String(a.approvalId));
+        this.keepSent(p.caseId, "report_check", p.texts.join("\n\n"));
+        await new Promise((r) => setTimeout(r, 900));
+        // Like the demo check: a sentence said word for word in two sections is a repetition.
+        const sentences = (t: string) => t.split(/(?<=[.!?])/).map((x) => x.trim()).filter((x) => x.length >= 20);
+        const notes = [];
+        for (let i = 0; i < p.texts.length; i++) {
+          for (let j = i + 1; j < p.texts.length; j++) {
+            const theirs = sentences(p.texts[j] ?? "");
+            if (sentences(p.texts[i] ?? "").some((x) => theirs.includes(x))) {
+              notes.push({ kind: "repetition", sections: [p.sections[i], p.sections[j]], note: "מצב הדגמה: אותו משפט מופיע בשני הסעיפים." });
+            }
+          }
+        }
+        return { notes, checked: p.sections, demo: true };
       }
       case "usage_summary":
         return { month: "2026-10", requests: 0, input_tokens: 0, output_tokens: 0, estimated_cents: 0, cap_usd: this.capUsd, unpriced_models: [] };

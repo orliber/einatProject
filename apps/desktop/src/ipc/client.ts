@@ -51,6 +51,9 @@ import type { SectionResult } from "./generated/SectionResult";
 import type { ParagraphCheck } from "./generated/ParagraphCheck";
 import type { Verdict } from "./generated/Verdict";
 import type { VerifyResult } from "./generated/VerifyResult";
+import type { ReportCheckNote } from "./generated/ReportCheckNote";
+import type { ReportCheckResult } from "./generated/ReportCheckResult";
+import type { ReportNoteKind } from "./generated/ReportNoteKind";
 import type { SortResult } from "./generated/SortResult";
 import type { SourceExcerpt } from "./generated/SourceExcerpt";
 import type { MaterialRouting } from "./generated/MaterialRouting";
@@ -281,6 +284,11 @@ export const ipc = {
   setNameModel: (on: boolean) => call("set_name_model", { on }),
   prepareVerify: (caseId: string, sectionKey: string) => call("prepare_verify", { caseId, sectionKey }),
   sendVerify: (approvalId: string) => call("send_verify", { approvalId }),
+  /** The check of the whole approved report (D-097): off until she turns it on, its cost shown. */
+  reportCheckSetting: () => call("report_check_setting"),
+  setReportCheck: (on: boolean) => run("set_report_check", { on }),
+  prepareReportCheck: (caseId: string) => call("prepare_report_check", { caseId }),
+  sendReportCheck: (approvalId: string) => call("send_report_check", { approvalId }),
   /** D-022: sort every material not sorted yet into sections (one review screen). */
   prepareSort: (caseId: string) => call("prepare_sort", { caseId }),
   sendSort: (approvalId: string) => call("send_sort", { approvalId }),
@@ -489,4 +497,7 @@ export type {
   ParagraphCheck,
   Verdict,
   VerifyResult,
+  ReportCheckNote,
+  ReportCheckResult,
+  ReportNoteKind,
 };

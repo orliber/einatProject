@@ -8,6 +8,7 @@ import { TopBar } from "../components/TopBar";
 import { UpdateSettings } from "../components/Update";
 import { UsageSettings } from "../components/UsageSettings";
 import { VerifySettings } from "../components/VerifySettings";
+import { ReportCheckSettings } from "../components/ReportCheck";
 import { NameModelSettings } from "../components/NameModelSettings";
 import { ReadinessSettings } from "../components/ReadinessSettings";
 import { SecuritySettings } from "../components/SecuritySettings";
@@ -175,6 +176,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
               </section>
               <UsageSettings />
               <VerifySettings />
+              <ReportCheckSettings />
             </>
           )}
 

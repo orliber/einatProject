@@ -29,6 +29,7 @@ mod off_lock;
 mod own;
 mod perf_profile;
 mod reading;
+mod report_check;
 mod sample_flows;
 mod sort_flows;
 mod surfaces;

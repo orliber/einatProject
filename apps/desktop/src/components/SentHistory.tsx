@@ -18,6 +18,7 @@ const SECTION_TITLES = new Map(structure.parts.flatMap((p) => p.sections.map((s)
 export function placeLabel(place: string): string {
   if (place === "sorting") return "מיון החומרים לסעיפים";
   if (place === "consult") return "שאלה מתוך התיק";
+  if (place === "report_check") return "בדיקת הדוח כולו";
   if (place === "letter_parents") return "מכתב להורים";
   if (place === "letter_school") return "מכתב לבית הספר";
   return SECTION_TITLES.get(place) ?? place;

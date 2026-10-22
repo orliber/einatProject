@@ -33,6 +33,8 @@ import type { ParagraphView } from "./ParagraphView";
 import type { PingResponse } from "./PingResponse";
 import type { Prepared } from "./Prepared";
 import type { Readiness } from "./Readiness";
+import type { ReportCheckResult } from "./ReportCheckResult";
+import type { ReportCheckSetting } from "./ReportCheckSetting";
 import type { ReportSettings } from "./ReportSettings";
 import type { RetentionItem } from "./RetentionItem";
 import type { Role } from "./Role";
@@ -146,6 +148,7 @@ export type Commands = {
   prepare_full_draft: { args: { caseId: string }; returns: Array<[string, Prepared]> };
   prepare_interpretations: { args: undefined; returns: Prepared };
   prepare_letter: { args: { caseId: string; audience: string; note: string }; returns: Prepared };
+  prepare_report_check: { args: { caseId: string }; returns: Prepared };
   prepare_section: { args: { caseId: string; sectionKey: string; instruction: string; replaces: string | null }; returns: Prepared };
   prepare_sort: { args: { caseId: string }; returns: Prepared };
   prepare_style_analysis: { args: { sourceId: string }; returns: Prepared };
@@ -160,6 +163,7 @@ export type Commands = {
   recent_crashes: { args: undefined; returns: Array<string> };
   reject_paragraph: { args: { caseId: string; draftId: string }; returns: null };
   rename_folder: { args: { id: string; name: string }; returns: null };
+  report_check_setting: { args: undefined; returns: ReportCheckSetting };
   report_settings: { args: undefined; returns: ReportSettings };
   report_template: { args: undefined; returns: TemplateView | null };
   reset_style: { args: undefined; returns: null };
@@ -181,6 +185,7 @@ export type Commands = {
   send_consult: { args: { approvalId: string }; returns: ConsultResult };
   send_interpretations: { args: { approvalId: string }; returns: InterpretationResult };
   send_progress: { args: { approvalId: string }; returns: number };
+  send_report_check: { args: { approvalId: string }; returns: ReportCheckResult };
   send_section: { args: { approvalId: string }; returns: SectionResult };
   send_sort: { args: { approvalId: string }; returns: SortResult };
   send_style_analysis: { args: { approvalId: string }; returns: StyleAnalysisResult };
@@ -200,6 +205,7 @@ export type Commands = {
   set_monthly_cap: { args: { capUsd: number | null }; returns: null };
   set_name_model: { args: { on: boolean }; returns: NameModelView };
   set_practitioner: { args: { names: Array<string> }; returns: null };
+  set_report_check: { args: { on: boolean }; returns: null };
   set_report_settings: { args: { settings: ReportSettings }; returns: null };
   set_report_template: { args: Uint8Array; returns: TemplateView };
   set_review_always: { args: { on: boolean }; returns: null };
