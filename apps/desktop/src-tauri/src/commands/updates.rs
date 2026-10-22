@@ -21,7 +21,7 @@ pub(crate) fn open_releases_page() -> Res<()> {
 /// (D-038). Nothing is installed here. `true` when a verified installer is waiting.
 #[tauri::command]
 pub(crate) async fn prepare_update(state: tauri::State<'_, AppState>) -> Res<bool> {
-    if !cfg!(windows) {
+    if !cfg!(any(windows, target_os = "macos")) {
         return Ok(false);
     }
     let dir = state.dir.clone();
@@ -39,12 +39,14 @@ pub(crate) async fn prepare_update(state: tauri::State<'_, AppState>) -> Res<boo
 /// Lock the vault and run the verified installer, then close. The installer (passive, update
 /// mode) replaces the program and opens it again; the vault folder is not touched. A version
 /// fetched in the background is used when it is still intact; otherwise it is fetched now.
+/// On a Mac (D-101) the new app from the verified disk image takes the old one's place and is
+/// opened; where the app folder cannot be written, the image opens in Finder instead.
 #[tauri::command]
 pub(crate) async fn install_update(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Res<()> {
-    if !cfg!(windows) {
+    if !cfg!(any(windows, target_os = "macos")) {
         return Err(UiError {
             code: "update".to_owned(),
             message: "כאן העדכון לא מותקן לבד. מתקינים את הגרסה החדשה מהקישור ששלח אור.".to_owned(),
@@ -73,10 +75,53 @@ pub(crate) async fn install_update(
         Ok(())
     })
     .await?;
+    if cfg!(target_os = "macos") {
+        return install_on_mac(&app, file).await;
+    }
     std::process::Command::new(&file.path)
         .args(["/P", "/UPDATE", "/R"])
         .spawn()
         .map_err(|_| internal("the installer did not start"))?;
     app.exit(0);
     Ok(())
+}
+
+/// The Mac half of [`install_update`], with the vault already locked.
+async fn install_on_mac(app: &tauri::AppHandle, file: dv_core::update::Downloaded) -> Res<()> {
+    let bundle = std::env::current_exe()
+        .ok()
+        .and_then(|exe| dv_core::update::bundle_of(&exe));
+    let placed = tauri::async_runtime::spawn_blocking(move || match bundle {
+        Some(bundle) => dv_core::update::install_macos(&file, &bundle)
+            .map(|()| bundle)
+            .map_err(|_| file),
+        None => Err(file),
+    })
+    .await
+    .map_err(|_| internal("task"))?;
+    match placed {
+        Ok(bundle) => {
+            std::process::Command::new("/usr/bin/open")
+                .arg("-n")
+                .arg(&bundle)
+                .spawn()
+                .map_err(|_| internal("the new version did not start"))?;
+            app.exit(0);
+            Ok(())
+        }
+        Err(file) => {
+            // Checked again: only the verified image is ever opened.
+            if dv_core::update::still_intact(&file) {
+                let _ = std::process::Command::new("/usr/bin/open")
+                    .arg(&file.path)
+                    .spawn();
+            }
+            Err(UiError {
+                code: "update".to_owned(),
+                message: "הגרסה החדשה לא הותקנה לבד. נפתח חלון עם התוכנה החדשה: גוררים אותה לתיקיית Applications ומאשרים החלפה, ואז פותחים אותה שוב.".to_owned(),
+                details: Vec::new(),
+                action: dv_core::ErrorAction::Dismiss,
+            })
+        }
+    }
 }

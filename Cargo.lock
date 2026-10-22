@@ -1342,6 +1342,7 @@ dependencies = [
  "dv-ner",
  "dv-privacy",
  "rfd",
+ "rustix",
  "serde",
  "serde_json",
  "tauri",
@@ -1443,6 +1444,7 @@ dependencies = [
 name = "dv-sandbox"
 version = "0.7.0"
 dependencies = [
+ "tempfile",
  "windows-sys 0.61.2",
 ]
 

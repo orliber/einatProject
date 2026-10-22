@@ -59,6 +59,26 @@ fn time_limit_kills_the_worker() {
     assert_eq!(r, Err(IngestError::Timeout));
 }
 
+/// The program as it is shipped (`DV_TEST_APP_EXE`, set by the installer jobs), started as a
+/// worker the way the app starts it: contained, it still reads a document. On a Mac this is
+/// the check that the sandbox profile lets the real app binary start (D-101).
+#[test]
+#[ignore = "needs the built app: DV_TEST_APP_EXE"]
+fn the_shipped_program_reads_a_document_contained() {
+    let exe = std::env::var("DV_TEST_APP_EXE").expect("DV_TEST_APP_EXE");
+    let out = worker::run(
+        Path::new(&exe),
+        "notes.txt",
+        "תצפית בגן: הילד משחק לבד.".as_bytes(),
+        worker::DEFAULT_TIMEOUT,
+    )
+    .unwrap();
+    let Outcome::Text(out) = out else {
+        panic!("text expected")
+    };
+    assert_eq!(out.body, "תצפית בגן: הילד משחק לבד.");
+}
+
 #[test]
 fn worker_arg_is_stable() {
     // The desktop binary checks this exact argument before starting anything else.

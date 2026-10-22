@@ -6,6 +6,8 @@
 
 mod commands;
 mod file_dialog;
+#[cfg(target_os = "macos")]
+mod mac_platform;
 mod os_lock;
 mod secret_clipboard;
 mod win_platform;
@@ -250,7 +252,10 @@ fn main() {
             let models = data.join("models");
             let mut core = Core::new(&dir)
                 .with_models_dir(models.clone())
-                .with_memory_lock(cfg!(windows), hardening.lock_quota_mib.is_some());
+                .with_memory_lock(
+                    cfg!(any(windows, target_os = "macos")),
+                    hardening.lock_quota_mib.is_some(),
+                );
             if let Ok(exe) = std::env::current_exe() {
                 core = core
                     .with_ingest_worker(exe.clone())

@@ -11,8 +11,10 @@
 //! * an environment of `SystemRoot` and `WINDIR` only, the system folder as working folder, no
 //!   window, and nothing inherited but its own stdin and stdout.
 //!
-//! Elsewhere (development on Linux, the Mac build) the process is started the same way minus
-//! the containment; [`CONTAINED`] says which.
+//! On a Mac the same process runs inside the system's sandbox (`sandbox-exec`, D-101): no
+//! network, no writing, no other process, and reading only the system's libraries, the worker's
+//! folder and [`Policy::read_dirs`] (`macos.rs`). Elsewhere (development on Linux) the process
+//! is started the same way minus the containment; [`CONTAINED`] says which.
 //!
 //! The Windows part is the one audited exception to `forbid(unsafe_code)` in the workspace: all
 //! of it is in `windows.rs`, every `unsafe` block says why it is sound, and nothing else here
@@ -27,8 +29,14 @@ use std::time::Duration;
 #[allow(unsafe_code)]
 mod windows;
 
-/// Whether this platform contains the worker (AppContainer and job object).
-pub const CONTAINED: bool = cfg!(windows);
+// Built on every Unix so its profile is checked on the Linux CI too; started only on a Mac.
+#[cfg(unix)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod macos;
+
+/// Whether this platform contains the worker (Windows: AppContainer and job object; macOS:
+/// the system sandbox).
+pub const CONTAINED: bool = cfg!(any(windows, target_os = "macos"));
 
 /// What the contained process may have.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,7 +84,13 @@ pub fn spawn(exe: &Path, args: &[&str], policy: &Policy) -> io::Result<Child> {
             inner: windows::spawn(exe, args, policy)?,
         })
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        Ok(Child {
+            inner: macos::spawn(exe, args, policy)?,
+        })
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let inner = std::process::Command::new(exe)
             .args(args)

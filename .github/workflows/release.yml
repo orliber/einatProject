@@ -2,10 +2,11 @@ name: Release
 
 # A release in minutes, from GitHub, with nothing new to fail (D-091).
 #
-# Nothing is built here. Every merge to main already built the Windows installer exactly as it
-# is published, and ran every release check on it (ci.yml → windows-release). This workflow
-# takes that installer for the commit being released, checks it is the same commit and version,
-# signs the update notice (D-033) and publishes:
+# Nothing is built here. Every merge to main already built the Windows installer and the Mac
+# disk image exactly as they are published, and ran every release check on them (ci.yml →
+# windows-release, macos-release; D-101). This workflow takes both for the commit being
+# released, checks they are the same commit and version, signs the update notice (D-033) and
+# publishes:
 #   1. a release in this repository, under the fixed names (D-026)
 #   2. installer + notice + signature in the public installers repository; within a day every
 #      installed copy offers "יש גרסה חדשה"
@@ -105,6 +106,30 @@ jobs:
           done
           head -c 2 DiagnosticVault-Setup.exe | grep -q MZ || fail "not a Windows program"
 
+      # The Mac disk image of the same CI run, checked the same way (D-101).
+      - name: The Mac disk image CI built and checked for this commit
+        env:
+          V: ${{ steps.what.outputs.version }}
+          SHA: ${{ steps.what.outputs.sha }}
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          runs="$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$SHA" --limit 20 \
+            --json databaseId,event -q '.[] | select(.event != "pull_request") | .databaseId')"
+          got=""
+          for id in $runs; do
+            if gh run download "$id" -R "$GITHUB_REPOSITORY" -n release-macos -D release-mac 2>/dev/null; then
+              got="$id"; break
+            fi
+          done
+          [[ -n "$got" ]] || fail "no checked Mac disk image for $SHA yet (ci.yml → macos-release). Wait for CI on main to be green, then run this again."
+          echo "Mac disk image from CI run $got"
+          cd release-mac
+          grep -qx "commit=$SHA" build.txt || fail "the disk image was built from another commit: $(cat build.txt)"
+          grep -qx "version=$V" build.txt || fail "the disk image is of another version: $(cat build.txt)"
+          sha256sum -c DiagnosticVault.dmg.sha256
+          tail -c 512 DiagnosticVault.dmg | head -c 4 | grep -q koly || fail "not a Mac disk image"
+          mv DiagnosticVault.dmg DiagnosticVault.dmg.sha256 ../release-out/
+
       # Built before the key is anywhere in the environment: no build script ever sees it.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: The signing tool
@@ -122,7 +147,7 @@ jobs:
           fail() { echo "::error::$*"; exit 1; }
           notes="release-notes/$V.txt"
           if [[ "$REHEARSAL" == "true" ]]; then
-            target/debug/xtask update-notice --test-key "$V" release-out/DiagnosticVault-Setup.exe "$notes" release-out
+            target/debug/xtask update-notice --test-key "$V" release-out/DiagnosticVault-Setup.exe "$notes" release-out release-out/DiagnosticVault.dmg
             exit 0
           fi
           [[ -n "$SIGNING_KEY" ]] || fail "the secret DV_UPDATE_SIGNING_KEY is missing (docs/RELEASE_HE.md → פעם אחת). Or: scripts/release.sh $V on Or's Mac signs there."
@@ -130,7 +155,7 @@ jobs:
           key="$RUNNER_TEMP/update-signing.pk8"
           trap 'rm -f "$key"' EXIT
           printf '%s' "$SIGNING_KEY" | base64 -d > "$key" || fail "DV_UPDATE_SIGNING_KEY is not base64"
-          DV_UPDATE_KEY="$key" target/debug/xtask update-notice "$V" release-out/DiagnosticVault-Setup.exe "$notes" release-out
+          DV_UPDATE_KEY="$key" target/debug/xtask update-notice "$V" release-out/DiagnosticVault-Setup.exe "$notes" release-out release-out/DiagnosticVault.dmg
 
       - name: Publish in this repository (fixed names, D-026)
         if: env.REHEARSAL != 'true'
@@ -141,6 +166,7 @@ jobs:
           fail() { echo "::error::$*"; exit 1; }
           tag="v$V"
           files=(release-out/DiagnosticVault-Setup.exe release-out/DiagnosticVault-Setup.exe.sha256
+                 release-out/DiagnosticVault.dmg release-out/DiagnosticVault.dmg.sha256
                  release-out/DiagnosticVault-sbom.cdx.json release-out/DiagnosticVault-sbom.cdx.json.sha256)
           if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$tag" "${files[@]}" -R "$GITHUB_REPOSITORY" --clobber
@@ -166,7 +192,8 @@ jobs:
           [[ -n "$RELEASES_TOKEN" ]] || fail "the secret RELEASES_REPO_TOKEN is missing (docs/RELEASE_HE.md → פעם אחת)"
           GH_TOKEN="$RELEASES_TOKEN" gh release create "v$V" -R "$RELEASES_REPO" --latest \
             --title "כספת האבחון $V" --notes-file "release-notes/$V.txt" \
-            release-out/DiagnosticVault-Setup.exe release-out/latest.json release-out/latest.json.sig
+            release-out/DiagnosticVault-Setup.exe release-out/DiagnosticVault.dmg \
+            release-out/latest.json release-out/latest.json.sig
           echo "פורסם: $GITHUB_SERVER_URL/$RELEASES_REPO/releases/tag/v$V" >> "$GITHUB_STEP_SUMMARY"
 
       # A rehearsal leaves what it would have published, to look at.

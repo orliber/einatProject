@@ -141,6 +141,54 @@ jobs:
       - run: cargo clippy -p dv-desktop --features fips -- -D warnings
       - run: cargo test --release -p dv-desktop --features fips
 
+  macos:
+    name: macOS – the vault, documents, updates and the shell, as released
+    # D-101: on a Mac the computer key lives in the Keychain, documents are read in the system
+    # sandbox and the process keeps no core file. Each is tested here, on a real Mac, on every
+    # PR, because none of it can run on the Linux job.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # A keychain of its own, unlocked, as her login keychain is while she is signed in.
+      - name: A keychain for the tests
+        run: |
+          security create-keychain -p dv-ci dv-ci.keychain
+          security set-keychain-settings dv-ci.keychain
+          security unlock-keychain -p dv-ci dv-ci.keychain
+          security list-keychains -d user -s dv-ci.keychain
+          security default-keychain -d user -s dv-ci.keychain
+      - run: cargo test --release -p dv-vault -p dv-egress -p dv-ingest -p dv-sandbox
+      - name: First run (create, close, open again; the real Argon2 cost)
+        run: cargo test --release -p dv-core --test first_run -- --ignored
+      - name: Binding, Google and updates in the core
+        run: cargo test --release -p dv-core --lib -- binding google update security
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: apps/desktop/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: apps/desktop
+      # The shell embeds the built UI at compile time.
+      - run: pnpm build
+        working-directory: apps/desktop
+      - name: OCR resource folder (no installer here)
+        run: mkdir -p apps/desktop/src-tauri/ocr/tessdata
+      - run: cargo clippy -p dv-desktop -- -D warnings
+      - run: cargo test --release -p dv-desktop
+      # The program itself (with every framework it links) as the document worker, inside the
+      # sandbox: the profile must let it start.
+      - name: The program reads a document contained
+        run: |
+          cargo build --release -p dv-desktop
+          DV_TEST_APP_EXE="$PWD/target/release/dv-desktop" cargo test --release -p dv-ingest --test worker -- --ignored the_shipped_program
+
   frontend:
     name: UI – typecheck, lint, tests, build, audit
     runs-on: ubuntu-24.04
@@ -187,13 +235,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows has its own job below: the installer exactly as released.
-          # Ad-hoc signed (tauri.conf.json): Gatekeeper offers "Open Anyway" instead of "damaged".
-          - os: macos-latest
-            bundles: app,dmg
-            artifact: diagnostic-vault-macos
-            paths: |
-              target/release/bundle/dmg/*.dmg
+          # Windows and macOS have their own jobs below: the installers exactly as released.
           - os: ubuntu-22.04
             bundles: deb
             artifact: diagnostic-vault-linux
@@ -349,6 +391,76 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-windows
+          path: release-out/
+          if-no-files-found: error
+          retention-days: 30
+
+  macos-release:
+    name: macOS disk image – exactly what a release publishes
+    # D-101: the Mac version is released beside the Windows one, built the same way: on the
+    # FIPS module, with the Google sign-in pair, after every other check of this commit.
+    # Ad-hoc signed (tauri.conf.json): Gatekeeper offers "Open Anyway" the first time.
+    needs: [rust, supply-chain, fips, macos, frontend]
+    if: github.event_name != 'pull_request'
+    runs-on: macos-latest
+    env:
+      # Forgot password → Google (D-041). Unset: the option is simply not offered.
+      DV_GOOGLE_CLIENT_ID: ${{ secrets.DV_GOOGLE_CLIENT_ID }}
+      DV_GOOGLE_CLIENT_SECRET: ${{ secrets.DV_GOOGLE_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: apps/desktop/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: apps/desktop
+      # All encryption on the FIPS 140-3 validated module (D-006): Go.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+      # No OCR engine is shipped for the Mac yet: a scan is refused there, as a scan without
+      # the engine is anywhere.
+      - name: OCR resource folder
+        run: mkdir -p apps/desktop/src-tauri/ocr/tessdata
+      - name: Privacy suite (0 leaks)
+        run: cargo test -p dv-privacy
+      - name: Vaults of every earlier version open and take work
+        run: cargo test --release -p dv-core --lib upgrade
+      - name: Build the disk image
+        run: pnpm tauri build --bundles app,dmg --features fips
+        working-directory: apps/desktop
+      - name: Fixed name, checksum and build record
+        run: |
+          mkdir -p release-out
+          dmg="$(ls target/release/bundle/dmg/*.dmg | head -1)"
+          cp "$dmg" release-out/DiagnosticVault.dmg
+          (cd release-out && shasum -a 256 DiagnosticVault.dmg > DiagnosticVault.dmg.sha256)
+          v="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          printf 'version=%s\ncommit=%s\n' "$v" "$GITHUB_SHA" > release-out/build.txt
+          cat release-out/build.txt
+      # What she runs: the image mounts, holds one app, signed (ad hoc) and whole, and that
+      # app reads a document as a worker inside the sandbox.
+      - name: The app in the image starts its document reader contained
+        run: |
+          mnt="$RUNNER_TEMP/dv-dmg"
+          mkdir -p "$mnt"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" release-out/DiagnosticVault.dmg
+          app="$(ls -d "$mnt"/*.app)"
+          codesign --verify --deep --strict "$app"
+          exe="$(ls "$app/Contents/MacOS/"* | head -1)"
+          DV_TEST_APP_EXE="$exe" cargo test --release -p dv-ingest --test worker -- --ignored the_shipped_program
+          hdiutil detach "$mnt"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-macos
           path: release-out/
           if-no-files-found: error
           retention-days: 30

@@ -210,7 +210,7 @@ function CheckKitDialog({ onClose }: { onClose: () => void }) {
         <button type="button" className="btn btn-primary" disabled={typed.trim().length < 20} onClick={() => void check()}>בדיקה</button>
       </>}>
       <form className="stack" onSubmit={(e) => void check(e)}>
-        <p>הסיסמה פותחת את הכספת רק במחשב הזה ובחשבון ה-Windows הזה. אם המחשב התקלקל או אבד, משחזרים את הגיבוי במחשב החדש עם הסיסמה או עם הדף הזה. בעותק של תיקיית הכספת, אחרי התקנה מחדש של Windows או אחרי איפוס החשבון, רק הדף המודפס פותח אותה. פעם בשנה כדאי לוודא שהוא עדיין נכון.</p>
+        <p>הסיסמה פותחת את הכספת רק במחשב הזה ובחשבון המשתמש הזה. אם המחשב התקלקל או אבד, משחזרים את הגיבוי במחשב החדש עם הסיסמה או עם הדף הזה. בעותק של תיקיית הכספת, אחרי התקנה מחדש של מערכת ההפעלה או אחרי איפוס החשבון, רק הדף המודפס פותח אותה. פעם בשנה כדאי לוודא שהוא עדיין נכון.</p>
         <div className="field">
           <label htmlFor="kit-check">ערכת השחזור, מהדף המודפס</label>
           <input id="kit-check" className="input mono" dir="ltr" autoComplete="off" autoFocus placeholder="XXXX-XXXX-…" value={typed} onChange={(e) => setTyped(e.target.value)} />

@@ -32,7 +32,8 @@ pub struct UpdateView {
     pub published: String,
     pub notes: Vec<String>,
     pub size_mb: u32,
-    /// The installer runs by itself only on Windows; elsewhere she is told where to get it.
+    /// The new version installs by itself on Windows and macOS (D-101); elsewhere she is told
+    /// where to get it.
     pub can_install: bool,
 }
 
@@ -51,7 +52,18 @@ fn view(info: &UpdateInfo) -> UpdateView {
         published: info.published.clone(),
         notes: info.notes.clone(),
         size_mb: u32::try_from(info.size.div_ceil(1024 * 1024)).unwrap_or(u32::MAX),
-        can_install: cfg!(windows),
+        can_install: cfg!(any(windows, target_os = "macos")),
+    }
+}
+
+/// The file a version is written as: the setup program on Windows, the disk image on a Mac.
+/// Only digits and dots reach the name (the version was parsed as x.y.z).
+fn installer_name(version: &str) -> String {
+    let v = version.trim_start_matches('v');
+    if cfg!(target_os = "macos") {
+        format!("DiagnosticVault-{v}.dmg")
+    } else {
+        format!("DiagnosticVault-Setup-{v}.exe")
     }
 }
 
@@ -133,12 +145,7 @@ fn write_installer(
     let bytes = update::download(fetch, info)?;
     let folder = dir.join(FOLDER);
     fs::create_dir_all(&folder).map_err(|e| CoreError::Internal(e.to_string()))?;
-    // Only digits and dots reach the file name (the version was parsed as x.y.z).
-    let name = format!(
-        "DiagnosticVault-Setup-{}.exe",
-        info.version.trim_start_matches('v')
-    );
-    let path = folder.join(name);
+    let path = folder.join(installer_name(&info.version));
     fs::write(&path, &bytes).map_err(|e| CoreError::Internal(e.to_string()))?;
     Ok(Downloaded {
         version: info.version.clone(),
@@ -150,6 +157,95 @@ fn write_installer(
 /// Just before the installer runs: the file on disk is still the one that was verified.
 pub fn still_intact(file: &Downloaded) -> bool {
     fs::read(&file.path).is_ok_and(|b| update::sha256(&b) == file.sha256)
+}
+
+/// The app bundle the running program is in (`…/כספת.app/Contents/MacOS/<program>`).
+#[must_use]
+pub fn bundle_of(exe: &Path) -> Option<PathBuf> {
+    let bundle = exe.parent()?.parent()?.parent()?;
+    let ok = exe.parent()?.file_name()? == "MacOS"
+        && exe.parent()?.parent()?.file_name()? == "Contents"
+        && bundle.extension()? == "app";
+    ok.then(|| bundle.to_path_buf())
+}
+
+/// On a Mac (D-101): the new version from the verified disk image takes the place of the app
+/// bundle `bundle`. The image is mounted read-only and hidden, its one `.app` is copied beside
+/// the old bundle (`ditto`, which keeps the signature), and only then are the two swapped, so
+/// a copy that failed leaves the old version in place. The vault folder is elsewhere and is
+/// never touched. Every program is called by its full path, with arguments, no shell.
+pub fn install_macos(file: &Downloaded, bundle: &Path) -> Result<(), CoreError> {
+    let fail = |what: &str| CoreError::Internal(format!("mac update: {what}"));
+    if !still_intact(file) {
+        return Err(fail("the disk image changed after it was checked"));
+    }
+    let run = |program: &str, args: &[&std::ffi::OsStr]| -> Result<(), CoreError> {
+        let status = std::process::Command::new(program)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map_err(|_| fail(program))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(fail(program))
+        }
+    };
+    let name = bundle.file_name().ok_or_else(|| fail("bundle name"))?;
+    let parent = bundle.parent().ok_or_else(|| fail("bundle folder"))?;
+    let mount = file.path.with_extension("mount");
+    let _ = fs::remove_dir_all(&mount);
+    fs::create_dir_all(&mount).map_err(|_| fail("mount point"))?;
+    run(
+        "/usr/bin/hdiutil",
+        &[
+            "attach".as_ref(),
+            "-nobrowse".as_ref(),
+            "-readonly".as_ref(),
+            "-noautoopen".as_ref(),
+            "-mountpoint".as_ref(),
+            mount.as_os_str(),
+            file.path.as_os_str(),
+        ],
+    )?;
+    let staged = parent.join(format!("{}.new", name.to_string_lossy()));
+    let copied = (|| {
+        let apps: Vec<PathBuf> = fs::read_dir(&mount)
+            .map_err(|_| fail("disk image"))?
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "app") && !p.is_symlink())
+            .collect();
+        let [app] = apps.as_slice() else {
+            return Err(fail("the disk image does not hold one app"));
+        };
+        let _ = fs::remove_dir_all(&staged);
+        run("/usr/bin/ditto", &[app.as_os_str(), staged.as_os_str()])
+    })();
+    let _ = run(
+        "/usr/bin/hdiutil",
+        &["detach".as_ref(), mount.as_os_str(), "-force".as_ref()],
+    );
+    let _ = fs::remove_dir(&mount);
+    if let Err(e) = copied {
+        let _ = fs::remove_dir_all(&staged);
+        return Err(e);
+    }
+    let old = parent.join(format!("{}.old", name.to_string_lossy()));
+    let _ = fs::remove_dir_all(&old);
+    fs::rename(bundle, &old).map_err(|_| {
+        let _ = fs::remove_dir_all(&staged);
+        fail("the old version could not be moved")
+    })?;
+    if fs::rename(&staged, bundle).is_err() {
+        let _ = fs::rename(&old, bundle);
+        let _ = fs::remove_dir_all(&staged);
+        return Err(fail("the new version could not be put in place"));
+    }
+    let _ = fs::remove_dir_all(&old);
+    Ok(())
 }
 
 /// Installers from earlier updates are not kept.
@@ -211,7 +307,8 @@ mod tests {
         let notice = serde_json::to_vec(&serde_json::json!({
             "product": PRODUCT, "version": "0.3.0", "published": "2026-10-01",
             "notes": ["עדכון לדוגמה"],
-            "installer": {"url": url, "sha256": to_hex(&update::sha256(installer)), "size": installer.len()}
+            "installer": {"url": url, "sha256": to_hex(&update::sha256(installer)), "size": installer.len()},
+            "macos": {"url": url, "sha256": to_hex(&update::sha256(installer)), "size": installer.len()}
         }))
         .unwrap();
         let sig = to_hex(k.sign(&signed_bytes(&notice)).as_ref());
@@ -237,7 +334,7 @@ mod tests {
         let file = download_with(&t, &[key], "0.2.9", dir.path()).unwrap();
         assert!(file
             .path
-            .ends_with("updates/DiagnosticVault-Setup-0.3.0.exe"));
+            .ends_with(format!("updates/{}", installer_name("0.3.0"))));
         assert!(still_intact(&file));
         fs::write(&file.path, b"MZ swapped").unwrap();
         assert!(
@@ -281,6 +378,34 @@ mod tests {
             .unwrap()
             .is_none());
         assert!(!dir.path().join(FOLDER).exists());
+    }
+
+    #[test]
+    fn the_app_bundle_is_found_only_where_a_mac_puts_it() {
+        assert_eq!(
+            bundle_of(Path::new("/Applications/V.app/Contents/MacOS/dv-desktop")),
+            Some(PathBuf::from("/Applications/V.app"))
+        );
+        for not in [
+            "/usr/local/bin/dv-desktop",
+            "/Applications/V/Contents/MacOS/dv-desktop",
+            "/Applications/V.app/Contents/Resources/dv-desktop",
+            "dv-desktop",
+        ] {
+            assert_eq!(bundle_of(Path::new(not)), None, "{not}");
+        }
+    }
+
+    #[test]
+    fn a_disk_image_changed_on_disk_is_never_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (t, key) = server(b"disk image", b"disk image");
+        let file = download_with(&t, &[key], "0.2.9", dir.path()).unwrap();
+        fs::write(&file.path, b"swapped").unwrap();
+        let bundle = dir.path().join("V.app");
+        fs::create_dir_all(&bundle).unwrap();
+        assert!(install_macos(&file, &bundle).is_err());
+        assert!(bundle.is_dir(), "the version in place stays");
     }
 
     #[test]

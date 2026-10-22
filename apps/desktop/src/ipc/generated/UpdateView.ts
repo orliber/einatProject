@@ -5,6 +5,7 @@
  */
 export type UpdateView = { version: string, current: string, published: string, notes: Array<string>, size_mb: number, 
 /**
- * The installer runs by itself only on Windows; elsewhere she is told where to get it.
+ * The new version installs by itself on Windows and macOS (D-101); elsewhere she is told
+ * where to get it.
  */
 can_install: boolean, };

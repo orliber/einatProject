@@ -27,7 +27,7 @@ const ITEMS: Record<string, { label: string; hint: string; jump?: SettingsPane }
   },
   api_key: { label: "מוגדר מפתח API", hint: "", jump: "ai" },
   backup: { label: "יש גיבוי מהשבועיים האחרונים", hint: "", jump: "backup" },
-  disk: { label: "הצפנת הדיסק (BitLocker) דלוקה", hint: "", jump: "security" },
+  disk: { label: "הצפנת הדיסק דלוקה", hint: "", jump: "security" },
 };
 
 

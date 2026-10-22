@@ -125,7 +125,7 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
           )}
           {broken && <VersionTrouble version={version} />}
           {busy && <WaitLine key={mode} task="unlock" speed={mode} delay={1000} label="פותחת את הכספת המוצפנת" />}
-          {busy && slow && mode === "password" && <p className="hint" role="status">ממתינה ל-Windows… זה קורה לפעמים מיד אחרי הדלקת המחשב.</p>}
+          {busy && slow && mode === "password" && <p className="hint" role="status">ממתינה למחשב… זה קורה לפעמים מיד אחרי הדלקת המחשב.</p>}
           <button type="submit" className="btn btn-primary" disabled={busy || waitUntil !== null}>{busy ? "פותחת…" : he.lock.open}</button>
           <button type="button" className="link-btn" onClick={() => show(mode === "password" ? (google.on ? "google" : "forgot") : "password")}>
             {mode === "password" ? "שכחתי את הסיסמה" : "חזרה לפתיחה עם סיסמה"}

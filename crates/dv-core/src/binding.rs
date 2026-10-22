@@ -1,12 +1,12 @@
 //! The password slot bound to this computer (D-076): an invisible second factor.
 //!
-//! The password slot's key is the stretched password together with a random key sealed to her
-//! Windows account on this computer (DPAPI). A copied vault folder cannot be guessed at on
+//! The password slot's key is the stretched password together with a random key kept for her
+//! account on this computer (DPAPI on Windows, the login Keychain on a Mac, D-101). A copied vault folder cannot be guessed at on
 //! another computer, not even with a graphics card; on this computer she types the password
 //! as before. The printed kit opens the vault anywhere, and a backup opens with the password
 //! alone (it is on a drive she keeps; a documented deviation).
 //!
-//! Where nothing can seal a key to the account (not Windows), the slot stays as it was.
+//! Where nothing can keep a key for the account (Linux), the slot stays as it was.
 
 use std::path::Path;
 
@@ -18,7 +18,7 @@ use crate::Core;
 
 /// Said once, at the opening that bound an older vault to this computer (review of stage 5,
 /// S1): from now on the kit is what opens it after Windows is reinstalled or elsewhere.
-pub(crate) const JUST_BOUND: &str = "מעכשיו הסיסמה פותחת את הכספת רק במחשב הזה ובחשבון ה-Windows הזה. במחשב אחר, אחרי התקנה מחדש של Windows או אחרי איפוס החשבון, נכנסים עם ערכת השחזור, ולכן כדאי לוודא שהיא אצלך: הגדרות ← סיסמה ואבטחה ← בדיקת ערכת השחזור.";
+pub(crate) const JUST_BOUND: &str = "מעכשיו הסיסמה פותחת את הכספת רק במחשב הזה ובחשבון המשתמש הזה. במחשב אחר, אחרי התקנה מחדש של מערכת ההפעלה או אחרי איפוס החשבון, נכנסים עם ערכת השחזור, ולכן כדאי לוודא שהיא אצלך: הגדרות ← סיסמה ואבטחה ← בדיקת ערכת השחזור.";
 
 /// The half of the password slot kept on this computer. Windows DPAPI in the program; a
 /// fake in tests (no Windows in tests).
