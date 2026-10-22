@@ -45,3 +45,6 @@ release-out/
 
 # The OCR engine is fetched and built in CI (windows/fetch-ocr.ps1), never committed
 apps/desktop/src-tauri/ocr/
+# The FIPS module DLL and its installer config, made at build time (windows/bundle-fips.ps1)
+apps/desktop/src-tauri/fips/
+apps/desktop/src-tauri/tauri.fips.conf.json

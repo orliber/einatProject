@@ -20,20 +20,29 @@ $dest = Join-Path $PSScriptRoot '..\ocr'
 $data = Join-Path $dest 'tessdata'
 New-Item -ItemType Directory -Force -Path $data | Out-Null
 
-# 1. The engine.
-$vcpkg = $env:VCPKG_INSTALLATION_ROOT
-if (-not $vcpkg -or -not (Test-Path (Join-Path $vcpkg 'vcpkg.exe'))) { throw 'vcpkg not found on this runner' }
-Write-Host "vcpkg commit: $(git -C $vcpkg rev-parse HEAD)"
-& (Join-Path $vcpkg 'vcpkg.exe') install 'tesseract:x64-windows-static' --clean-after-build --disable-metrics
-if ($LASTEXITCODE -ne 0) { throw 'tesseract build failed' }
-$exe = Get-ChildItem -Recurse -Filter 'tesseract.exe' (Join-Path $vcpkg 'installed\x64-windows-static\tools') | Select-Object -First 1
-if (-not $exe) { throw 'tesseract.exe not found after the build' }
-Copy-Item $exe.FullName (Join-Path $dest 'tesseract.exe') -Force
-& (Join-Path $dest 'tesseract.exe') --version
+# 1. The engine. A build kept in the CI cache from an earlier run on main (same script) is
+#    used as it is: the build takes about 15 minutes and gives the same program.
+$cached = Join-Path $dest 'tesseract.exe'
+if (Test-Path $cached) {
+  Write-Host "engine from the cache: $((Get-FileHash $cached -Algorithm SHA256).Hash.ToLower())"
+  & $cached --version
+  if ($LASTEXITCODE -ne 0) { throw 'the cached tesseract.exe does not run' }
+} else {
+  $vcpkg = $env:VCPKG_INSTALLATION_ROOT
+  if (-not $vcpkg -or -not (Test-Path (Join-Path $vcpkg 'vcpkg.exe'))) { throw 'vcpkg not found on this runner' }
+  Write-Host "vcpkg commit: $(git -C $vcpkg rev-parse HEAD)"
+  & (Join-Path $vcpkg 'vcpkg.exe') install 'tesseract:x64-windows-static' --clean-after-build --disable-metrics
+  if ($LASTEXITCODE -ne 0) { throw 'tesseract build failed' }
+  $exe = Get-ChildItem -Recurse -Filter 'tesseract.exe' (Join-Path $vcpkg 'installed\x64-windows-static\tools') | Select-Object -First 1
+  if (-not $exe) { throw 'tesseract.exe not found after the build' }
+  Copy-Item $exe.FullName (Join-Path $dest 'tesseract.exe') -Force
+  & (Join-Path $dest 'tesseract.exe') --version
+}
 
 # 2. The language data (tessdata_best: the most accurate Hebrew).
 foreach ($lang in $Languages.Keys) {
   $file = Join-Path $data "$lang.traineddata"
+  if ((Test-Path $file) -and (Get-FileHash $file -Algorithm SHA256).Hash.ToLower() -eq $Languages[$lang]) { continue }
   $url = "https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/$TessdataTag/$lang.traineddata"
   Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $file
   $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
