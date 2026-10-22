@@ -167,7 +167,7 @@ jobs:
           security list-keychains -d user -s dv-ci.keychain
           security default-keychain -d user -s dv-ci.keychain
       # dv-ner: the name model's runtime (ONNX) as a worker inside the sandbox.
-      - run: cargo test --release -p dv-vault -p dv-egress -p dv-ingest -p dv-sandbox -p dv-ner
+      - run: cargo test --release --no-fail-fast -p dv-vault -p dv-egress -p dv-ingest -p dv-sandbox -p dv-ner
       - name: First run (create, close, open again; the real Argon2 cost)
         run: cargo test --release -p dv-core --test first_run -- --ignored
       - name: Binding, Google and updates in the core
@@ -195,6 +195,15 @@ jobs:
         run: |
           cargo build --release -p dv-desktop
           DV_TEST_APP_EXE="$PWD/target/release/dv-desktop" cargo test --release -p dv-ingest --test worker -- --ignored the_shipped_program
+      # When a contained worker fails, what the sandbox refused and how the worker ended (test
+      # data only: fabricated documents).
+      - name: Sandbox refusals and worker crashes
+        if: failure()
+        run: |
+          log show --last 30m --style compact --predicate 'sender == "Sandbox" OR eventMessage CONTAINS "deny("' | tail -150 || true
+          for f in $(ls -t ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -E '^(dv-|bash)' | head -3); do
+            echo "=== $f"; head -c 8000 ~/Library/Logs/DiagnosticReports/"$f"; echo
+          done
 
   frontend:
     name: UI – typecheck, lint, tests, build, audit
