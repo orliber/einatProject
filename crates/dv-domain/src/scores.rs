@@ -788,6 +788,59 @@ pub fn sheet_profiles(sheet: &ScoreSheet) -> Result<Vec<ScoreProfile>, String> {
     Ok(out)
 }
 
+/// Where a score falls in the parents' chart (round 55, D-095).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParentGroup {
+    /// "חזק": a typical band that starts above the scale's mean ("ממוצע גבוה", "מעל הממוצע").
+    Strong,
+    /// "בטווח הגיל": the typical band around the mean.
+    InRange,
+    /// "קשה יותר": a band marked mild or worse ("ממוצע נמוך" and below).
+    Harder,
+}
+
+/// One measure in the parents' chart.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParentBand {
+    /// The measure's Hebrew name, without its abbreviation.
+    pub label: String,
+    pub group: ParentGroup,
+    pub value: f64,
+}
+
+/// The parents' chart of a sheet, from the same fixed tables as the report (never the model).
+/// Only ability scales (index, subtest, v-scale and ability T scores), where higher is better:
+/// questionnaires and autism measures say nothing a "strong" column could hold, and are left
+/// to her words in the text.
+pub fn sheet_bands(sheet: &ScoreSheet) -> Result<Vec<ParentBand>, String> {
+    let (_, entries) = checked(sheet)?;
+    Ok(entries
+        .iter()
+        .filter_map(|(measure, e)| {
+            let mean = match measure.scale {
+                ScoreScale::Standard => 100.0,
+                ScoreScale::Scaled => 10.0,
+                ScoreScale::VScale => 15.0,
+                ScoreScale::TAbility => 50.0,
+                _ => return None,
+            };
+            let band = classify(measure, e.value)?;
+            let group = if band.level >= 1 {
+                ParentGroup::Harder
+            } else if band.min > mean {
+                ParentGroup::Strong
+            } else {
+                ParentGroup::InRange
+            };
+            Some(ParentBand {
+                label: measure.name_he.clone(),
+                group,
+                value: e.value,
+            })
+        })
+        .collect())
+}
+
 /// The text stored as a "test scores" material: every score with its range from the table,
 /// the scale sentence, and a note on large gaps between indexes (to check in the manual).
 pub fn format_sheet(sheet: &ScoreSheet) -> Result<String, String> {
@@ -1653,6 +1706,60 @@ pub fn sheet_habits<'a>(reports: impl IntoIterator<Item = &'a str>) -> SheetHabi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parents_groups_come_from_the_fixed_tables() {
+        let entry = |measure: &str, value: f64| ScoreEntry {
+            measure: measure.into(),
+            value,
+            note: String::new(),
+        };
+        let sheet = ScoreSheet {
+            instrument: "wppsi_iv".into(),
+            module: String::new(),
+            cutoff: None,
+            entries: vec![
+                entry("fsiq", 110.0),
+                entry("fsiq", 109.0),
+                entry("fsiq", 89.0),
+                entry("block_design", 13.0),
+                entry("block_design", 8.0),
+                entry("block_design", 7.0),
+            ],
+            notes: String::new(),
+        };
+        let groups: Vec<ParentGroup> = sheet_bands(&sheet)
+            .unwrap()
+            .iter()
+            .map(|b| b.group)
+            .collect();
+        use ParentGroup::{Harder, InRange, Strong};
+        assert_eq!(groups, [Strong, InRange, Harder, Strong, InRange, Harder]);
+        // Every ability table: the band that holds the mean is "in range", no strong band
+        // holds it, and every band marked mild or worse is "harder".
+        for inst in instruments() {
+            for m in inst.measures {
+                let mean = match m.scale {
+                    ScoreScale::Standard => 100.0,
+                    ScoreScale::Scaled => 10.0,
+                    ScoreScale::VScale => 15.0,
+                    ScoreScale::TAbility => 50.0,
+                    _ => continue,
+                };
+                let at_mean = classify(&m, mean).unwrap();
+                assert!(at_mean.level == 0 && at_mean.min <= mean, "{}", m.key);
+            }
+        }
+        // Questionnaires are left out.
+        let asrs = ScoreSheet {
+            instrument: "cars_2".into(),
+            module: String::new(),
+            cutoff: None,
+            entries: vec![entry("total", 32.0)],
+            notes: String::new(),
+        };
+        assert!(sheet_bands(&asrs).unwrap().is_empty());
+    }
 
     #[test]
     fn scores_in_a_past_report_are_found_beside_their_subtest_with_their_place() {
