@@ -35,9 +35,10 @@ pub use report::{
 pub use routing::{passage_ranges, passages, Feed, Routing, SectionPassages, Suggestion};
 pub use scores::{
     check_scores, find_score_mentions, find_tagged_scores, format_sheet, format_sheet_with,
-    instruments, interpretation_cases, is_score_tag, parse_score_tag, score_tag, sheet_cases,
-    sheet_habits, sheet_profiles, sheet_table, Instrument, Relative, ScoreCases, ScoreEntry,
-    ScoreMention, ScoreProfile, ScoreRow, ScoreSheet, SheetHabits, TaggedScore, GENERAL_CASE,
+    instruments, interpretation_cases, is_score_tag, parse_score_tag, score_tag, sheet_bands,
+    sheet_cases, sheet_habits, sheet_profiles, sheet_table, Instrument, ParentBand, ParentGroup,
+    Relative, ScoreCases, ScoreEntry, ScoreMention, ScoreProfile, ScoreRow, ScoreSheet,
+    SheetHabits, TaggedScore, GENERAL_CASE,
 };
 
 #[derive(Debug, thiserror::Error)]

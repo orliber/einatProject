@@ -186,3 +186,33 @@ pub(crate) async fn report_template(
 ) -> Res<Option<TemplateView>> {
     with_core(&state, |c| c.report_template()).await
 }
+
+/// Her logo (round 55): a PNG or JPEG, the file's bytes as the raw body.
+#[tauri::command]
+pub(crate) async fn set_report_logo(
+    state: tauri::State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Res<LogoView> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(internal("body"));
+    };
+    // Refused before it is copied: the core refuses it too, but only after a copy.
+    if bytes.len() > dv_core::MAX_LOGO_BYTES {
+        return Err(CoreError::Refused(
+            "התמונה גדולה מ-1MB. שומרים אותה בגודל קטן יותר ובוחרים שוב.".to_owned(),
+        )
+        .to_ui());
+    }
+    let bytes = bytes.clone();
+    with_core(&state, move |c| c.set_report_logo(&bytes)).await
+}
+
+#[tauri::command]
+pub(crate) async fn clear_report_logo(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| c.clear_report_logo()).await
+}
+
+#[tauri::command]
+pub(crate) async fn report_logo(state: tauri::State<'_, AppState>) -> Res<Option<LogoView>> {
+    with_core(&state, |c| c.report_logo()).await
+}

@@ -844,6 +844,7 @@ pub fn check_template(template: &[u8]) -> Result<TemplateSummary, ExportError> {
         signature: Vec::new(),
         confidentiality: String::new(),
         font: String::new(),
+        ..Report::default()
     };
     Ok(build(&sample, template)?.summary)
 }
