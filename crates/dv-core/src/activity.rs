@@ -98,10 +98,32 @@ fn describe(
             "הופעל עותק מוצפן של הגיבוי בגוגל דרייב".to_owned(),
             true,
         ),
+        "drive_backup_off" if flag("restore") => (
+            "security",
+            "אחרי שחזור מגיבוי, העותק המוצפן בגוגל דרייב כבוי עד שתדליקי אותו שוב".to_owned(),
+            true,
+        ),
         "drive_backup_off" => (
             "security",
             "כובה העותק המוצפן של הגיבוי בגוגל דרייב".to_owned(),
             true,
+        ),
+        "drive_backup_failed" => (
+            "security",
+            "עותק מוצפן של הגיבוי לא עלה לגוגל דרייב".to_owned(),
+            false,
+        ),
+        "drive_backup_cleanup" => (
+            "security",
+            match text("result") {
+                "cleaned" => "העותקים בגוגל דרייב נמחקו, וההרשאה שניתנה לתוכנה בוטלה",
+                "withdrawn" => {
+                    "ההרשאה בגוגל כבר הייתה מבוטלת, ולכן את העותקים בגוגל דרייב התוכנה לא יכולה למחוק"
+                }
+                _ => "מחיקת העותקים בגוגל דרייב וביטול ההרשאה עוד לא הושלמו, וינוסו שוב",
+            }
+            .to_owned(),
+            text("result") == "withdrawn",
         ),
         "drive_backup_uploaded" => (
             "security",
@@ -325,6 +347,8 @@ mod tests {
             "drive_backup_on",
             "drive_backup_off",
             "drive_backup_uploaded",
+            "drive_backup_failed",
+            "drive_backup_cleanup",
             "case_created",
             "case_opened",
             "case_trashed",

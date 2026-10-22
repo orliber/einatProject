@@ -813,9 +813,14 @@ impl Core {
     ) {
         let file = run.file.take();
         let session = run.session;
+        // A password or kit changed while it was written: this backup opens only with the old
+        // one, which may be why it was changed. It stays on her drive, and never goes up.
+        let current = self
+            .vault_ref()
+            .is_ok_and(|v| v.header_copy().slots == run.header.slots);
         let done = self.finish_backup_only(run);
         let upload = match (&done, file) {
-            (Ok(d), Some(file)) => self.begin_drive_upload(session, d.created_at, file),
+            (Ok(d), Some(file)) if current => self.begin_drive_upload(session, d.created_at, file),
             _ => None,
         };
         (done, upload)
@@ -990,7 +995,10 @@ impl Core {
         }
         // No recycle-bin purge now: a restore is often how a mistaken deletion is undone.
         // after_unlock counts a wrong secret.
-        self.after_unlock(restored.vault, false)
+        let status = self.after_unlock(restored.vault, false)?;
+        // The copy in her Drive is never turned on by a restore (D-099).
+        self.drive_backup_forget_after_restore()?;
+        Ok(status)
     }
 
     pub fn restore_staged_backup(

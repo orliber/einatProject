@@ -10,7 +10,8 @@
 //!   digits and letters only, no case, no name), the type is `application/octet-stream`, and
 //!   the folder is `appDataFolder`. No other metadata, no description, no properties.
 //! * Only [`crate::google::GOOGLE_HOSTS`], through [`crate::google::Http`]; the upload address
-//!   Google hands back must be on `www.googleapis.com` at the upload path, or nothing is sent.
+//!   Google hands back must be on `www.googleapis.com` at the upload path, and the address the
+//!   body goes to is rebuilt here from its `upload_id` alone, or nothing is sent.
 //! * Only three Drive calls: start an upload into `appDataFolder` and send its body, list the
 //!   files of `appDataFolder`, delete a file there. Only files named as this module names them
 //!   for this vault are ever deleted; the sign-in key files are never touched.
@@ -18,14 +19,18 @@
 use std::time::Duration;
 
 use serde_json::Value;
+use zeroize::Zeroizing;
 
 use crate::google::{
     delete_file, json, GoogleError, Http, Method, Reply, Request, Session, FILES_URL,
 };
 
-/// Start a resumable upload; the body follows to the address in the answer's `Location`.
+/// Start a resumable upload; the body follows to this address with the `upload_id` Google
+/// answers with. The answer names the new file and its size, to check what arrived.
 const UPLOAD_START: &str =
-    "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id";
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,size";
+/// Google's upload ids are short; this leaves room and refuses anything longer.
+const MAX_UPLOAD_ID: usize = 512;
 const UPLOAD_HOST: &str = "www.googleapis.com";
 const UPLOAD_PATH: &str = "/upload/drive/v3/files";
 /// Copies kept in her Drive; older ones are deleted after each upload.
@@ -84,33 +89,55 @@ fn upload_timeout(bytes: usize) -> Duration {
     Duration::from_secs(secs.min(4 * 60 * 60))
 }
 
-/// The upload address Google answered with, held to its own host and path.
+/// The address the body goes to: Google's answer held to its own host and path, with no
+/// fragment and no key twice, and then rebuilt from [`UPLOAD_START`] and its `upload_id` alone
+/// (letters, digits, `-` and `_`), so nothing else Google's answer carries is followed.
 fn upload_address(location: Option<&str>) -> Result<String, GoogleError> {
     let refuse = || GoogleError::Protocol("unexpected upload address".to_owned());
     let url = reqwest::Url::parse(location.ok_or_else(refuse)?).map_err(|_| refuse())?;
-    let ok = crate::google::host_allowed(&url)
+    let place = crate::google::host_allowed(&url)
         && url.host_str() == Some(UPLOAD_HOST)
         && url.port().is_none()
         && url.username().is_empty()
         && url.password().is_none()
-        && url.path() == UPLOAD_PATH
-        && url
-            .query_pairs()
-            .any(|(k, v)| k == "upload_id" && !v.is_empty());
-    if ok {
-        Ok(url.to_string())
-    } else {
-        Err(refuse())
+        && url.fragment().is_none()
+        && url.path() == UPLOAD_PATH;
+    if !place {
+        return Err(refuse());
     }
+    let mut keys = std::collections::HashSet::new();
+    let mut id = None;
+    for (k, v) in url.query_pairs() {
+        if !keys.insert(k.clone().into_owned()) {
+            return Err(refuse());
+        }
+        if k == "upload_id" {
+            id = Some(v.into_owned());
+        }
+    }
+    let id = id
+        .filter(|v| {
+            !v.is_empty()
+                && v.len() <= MAX_UPLOAD_ID
+                && v.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        })
+        .ok_or_else(refuse)?;
+    Ok(format!("{UPLOAD_START}&upload_id={id}"))
 }
 
 /// Upload one sealed backup file into the hidden folder. Returns the new file's id.
+///
+/// `still_wanted` is asked right before the body goes out: when it says no (the vault was
+/// locked, or the copy turned off, meanwhile), nothing is sent and the answer is
+/// [`GoogleError::Cancelled`]. The upload started at Google then lapses on its own.
 pub fn upload_copy(
     http: &dyn Http,
     s: &Session,
     vault_id: &str,
     created_at: i64,
     sealed: Vec<u8>,
+    still_wanted: &dyn Fn() -> bool,
 ) -> Result<String, GoogleError> {
     if sealed.is_empty() || sealed.len() > MAX_COPY_BYTES {
         return Err(GoogleError::Protocol("backup size".to_owned()));
@@ -125,23 +152,37 @@ pub fn upload_copy(
         url: UPLOAD_START.to_owned(),
         bearer: Some(s.token.clone()),
         content_type: Some("application/json; charset=UTF-8".to_owned()),
-        body: meta.to_string().into_bytes(),
+        body: Zeroizing::new(meta.to_string().into_bytes()),
         timeout: None,
     })?;
     if !(200..300).contains(&started.status) {
         return Err(GoogleError::Protocol(format!("status {}", started.status)));
     }
     let address = upload_address(started.location.as_deref())?;
-    let timeout = upload_timeout(sealed.len());
+    if !still_wanted() {
+        return Err(GoogleError::Cancelled);
+    }
+    let size = sealed.len();
     let Reply { status, body, .. } = http.send(Request {
         method: Method::Put,
         url: address,
         bearer: Some(s.token.clone()),
         content_type: Some("application/octet-stream".to_owned()),
-        body: sealed,
-        timeout: Some(timeout),
+        body: Zeroizing::new(sealed),
+        timeout: Some(upload_timeout(size)),
     })?;
     let v = json(status, &body)?;
+    // Drive gives the size as a decimal string; it must be what was sent.
+    let arrived = match v.get("size") {
+        Some(Value::String(n)) => n.parse::<u64>().ok(),
+        Some(n) => n.as_u64(),
+        None => None,
+    };
+    if arrived != u64::try_from(size).ok() {
+        return Err(GoogleError::Protocol(
+            "the copy arrived with another size".to_owned(),
+        ));
+    }
     v.get("id")
         .and_then(Value::as_str)
         .filter(|id| safe_file_id(id))
@@ -162,7 +203,7 @@ pub fn list_copies(
         &[
             ("spaces", "appDataFolder"),
             ("q", "trashed = false"),
-            ("fields", "files(id,name)"),
+            ("fields", "files(id,name),nextPageToken"),
             ("pageSize", "1000"),
         ],
     )
@@ -172,28 +213,33 @@ pub fn list_copies(
         url: url.to_string(),
         bearer: Some(s.token.clone()),
         content_type: None,
-        body: Vec::new(),
+        body: Zeroizing::new(Vec::new()),
         timeout: None,
     })?;
     let v = json(status, &body)?;
-    let mut copies: Vec<DriveCopy> = v
+    // Fail closed: an answer without its list, or with a second page, is not "no copies"
+    // (turning off would then say the copies were deleted while some stay).
+    let files = v
         .get("files")
         .and_then(Value::as_array)
-        .map(|files| {
-            files
-                .iter()
-                .filter_map(|f| {
-                    let id = f.get("id").and_then(Value::as_str)?;
-                    let name = f.get("name").and_then(Value::as_str)?;
-                    let created_at = copy_time(name, vault_id)?;
-                    safe_file_id(id).then(|| DriveCopy {
-                        id: id.to_owned(),
-                        created_at,
-                    })
-                })
-                .collect()
+        .ok_or_else(|| GoogleError::Protocol("no file list".to_owned()))?;
+    if v.get("nextPageToken").is_some_and(|t| !t.is_null()) {
+        return Err(GoogleError::Protocol(
+            "more than one page of files".to_owned(),
+        ));
+    }
+    let mut copies: Vec<DriveCopy> = files
+        .iter()
+        .filter_map(|f| {
+            let id = f.get("id").and_then(Value::as_str)?;
+            let name = f.get("name").and_then(Value::as_str)?;
+            let created_at = copy_time(name, vault_id)?;
+            safe_file_id(id).then(|| DriveCopy {
+                id: id.to_owned(),
+                created_at,
+            })
         })
-        .unwrap_or_default();
+        .collect();
     copies.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(b.id.cmp(&a.id)));
     Ok(copies)
 }
@@ -206,13 +252,14 @@ pub fn delete_copy(http: &dyn Http, s: &Session, file_id: &str) -> Result<(), Go
     delete_file(http, s, file_id)
 }
 
-/// Keep the newest [`KEEP`] copies of this vault (always `just_uploaded`), delete the rest.
-/// Returns how many were deleted.
+/// Keep the newest `keep` copies of this vault (always `just_uploaded`; [`KEEP`] as a rule,
+/// one after her password or kit changed), delete the rest. Returns how many were deleted.
 pub fn keep_latest(
     http: &dyn Http,
     s: &Session,
     vault_id: &str,
     just_uploaded: &str,
+    keep: usize,
 ) -> Result<usize, GoogleError> {
     let copies = list_copies(http, s, vault_id)?;
     let mut kept = usize::from(copies.iter().any(|c| c.id == just_uploaded));
@@ -221,7 +268,7 @@ pub fn keep_latest(
         if c.id == just_uploaded {
             continue;
         }
-        if kept < KEEP {
+        if kept < keep {
             kept += 1;
             continue;
         }
@@ -262,6 +309,12 @@ mod tests {
         next: Mutex<u32>,
         /// Hand back this upload address instead of the real-looking one.
         location: Option<String>,
+        /// Answer the upload's start with this status instead of 200.
+        start_status: Option<u16>,
+        /// Answer the file list with this instead of the files.
+        listing: Option<Value>,
+        /// Say the copy arrived with this size instead of its own.
+        size: Option<Value>,
     }
 
     impl Http for FakeDrive {
@@ -272,36 +325,48 @@ mod tests {
                 req.method,
                 req.url.clone(),
                 req.content_type.clone(),
-                req.body.clone(),
+                req.body.to_vec(),
             ));
             let path = url.path().to_owned();
             match (req.method, path.as_str()) {
                 (Method::Post, UPLOAD_PATH) => {
                     let meta: Value = serde_json::from_slice(&req.body).unwrap();
                     *self.pending.lock().unwrap() = Some(meta["name"].as_str().unwrap().to_owned());
-                    Ok(Reply {
-                        status: 200,
-                        body: Vec::new(),
-                        location: Some(self.location.clone().unwrap_or_else(|| {
-                            "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id&upload_id=ABC".to_owned()
-                        })),
-                    })
+                    Ok(Reply::pointing_to(
+                        self.start_status.unwrap_or(200),
+                        self.location.as_deref().unwrap_or(
+                            "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id%2Csize&upload_id=AB-c_1",
+                        ),
+                    ))
                 }
                 (Method::Put, UPLOAD_PATH) => {
                     let name = self.pending.lock().unwrap().take().unwrap();
                     let mut n = self.next.lock().unwrap();
                     *n += 1;
                     let id = format!("f{n}");
+                    let size = self
+                        .size
+                        .clone()
+                        .unwrap_or_else(|| Value::from(req.body.len().to_string()));
                     self.files
                         .lock()
                         .unwrap()
-                        .push((id.clone(), name, req.body));
+                        .push((id.clone(), name, req.body.to_vec()));
                     Ok(Reply::new(
                         200,
-                        serde_json::json!({ "id": id }).to_string().into_bytes(),
+                        serde_json::json!({ "id": id, "size": size })
+                            .to_string()
+                            .into_bytes(),
                     ))
                 }
                 (Method::Get, "/drive/v3/files") => {
+                    // The list asks for the hidden folder, and for nothing about the names.
+                    let q: Vec<(String, String)> = url.query_pairs().into_owned().collect();
+                    assert!(q.contains(&("spaces".to_owned(), "appDataFolder".to_owned())));
+                    assert!(q.contains(&("q".to_owned(), "trashed = false".to_owned())));
+                    if let Some(answer) = &self.listing {
+                        return Ok(Reply::new(200, answer.to_string().into_bytes()));
+                    }
                     let files: Vec<Value> = self
                         .files
                         .lock()
@@ -334,7 +399,15 @@ mod tests {
     fn the_copy_is_exactly_the_sealed_file_in_the_hidden_folder_with_an_opaque_name() {
         let drive = FakeDrive::default();
         let sealed: Vec<u8> = (0..5000u32).map(|i| (i * 7 % 251) as u8).collect();
-        let id = upload_copy(&drive, &session(), "V1x", 1_790_683_200, sealed.clone()).unwrap();
+        let id = upload_copy(
+            &drive,
+            &session(),
+            "V1x",
+            1_790_683_200,
+            sealed.clone(),
+            &|| true,
+        )
+        .unwrap();
         assert_eq!(id, "f1");
         let seen = drive.seen.lock().unwrap();
         assert_eq!(seen.len(), 2);
@@ -352,6 +425,11 @@ mod tests {
         );
         // The body: the sealed bytes, nothing added.
         assert_eq!(seen[1].0, Method::Put);
+        assert_eq!(
+            seen[1].1,
+            format!("{UPLOAD_START}&upload_id=AB-c_1"),
+            "rebuilt from the upload id alone"
+        );
         assert_eq!(seen[1].3, sealed);
         assert_eq!(seen[1].2.as_deref(), Some("application/octet-stream"));
         assert_eq!(drive.files.lock().unwrap()[0].2, sealed);
@@ -377,8 +455,8 @@ mod tests {
         ]);
         let mut last = String::new();
         for t in 1..=5 {
-            last = upload_copy(&drive, &s, "V1", 100 + t, vec![1, 2, 3]).unwrap();
-            keep_latest(&drive, &s, "V1", &last).unwrap();
+            last = upload_copy(&drive, &s, "V1", 100 + t, vec![1, 2, 3], &|| true).unwrap();
+            keep_latest(&drive, &s, "V1", &last, KEEP).unwrap();
         }
         let copies = list_copies(&drive, &s, "V1").unwrap();
         assert_eq!(
@@ -411,13 +489,19 @@ mod tests {
             "https://www.googleapis.com/upload/drive/v3/files",
             "https://www.googleapis.com:8443/upload/drive/v3/files?upload_id=A",
             "https://u:p@www.googleapis.com/upload/drive/v3/files?upload_id=A",
+            "https://www.googleapis.com/upload/drive/v3/files?upload_id=A#x",
+            "https://www.googleapis.com/upload/drive/v3/files?upload_id=A&upload_id=B",
+            "https://www.googleapis.com/upload/drive/v3/files?upload_id=A&x=1&x=2",
+            "https://www.googleapis.com/upload/drive/v3/files?upload_id=A%26uploadType%3Dmedia",
+            "https://www.googleapis.com/upload/drive/v3/files?upload_id=a.b",
+            "https://www.googleapis.com/upload/drive/v3/files?upload_id=",
             "not a url",
         ] {
             let drive = FakeDrive {
                 location: Some(bad.to_owned()),
                 ..FakeDrive::default()
             };
-            let got = upload_copy(&drive, &session(), "V1", 1, vec![9; 10]);
+            let got = upload_copy(&drive, &session(), "V1", 1, vec![9; 10], &|| true);
             assert!(matches!(got, Err(GoogleError::Protocol(_))), "{bad}");
             let seen = drive.seen.lock().unwrap();
             assert_eq!(seen.len(), 1, "{bad}: the body went out");
@@ -446,10 +530,121 @@ mod tests {
     #[test]
     fn an_empty_or_huge_file_is_not_sent() {
         let drive = FakeDrive::default();
-        assert!(upload_copy(&drive, &session(), "V1", 1, Vec::new()).is_err());
+        assert!(upload_copy(&drive, &session(), "V1", 1, Vec::new(), &|| true).is_err());
         assert!(drive.seen.lock().unwrap().is_empty());
         assert!(upload_timeout(MAX_COPY_BYTES) <= Duration::from_secs(4 * 60 * 60));
         assert_eq!(upload_timeout(0), Duration::from_secs(120));
+    }
+
+    #[test]
+    fn an_upload_id_longer_than_any_google_gives_is_refused() {
+        let long = format!(
+            "https://www.googleapis.com/upload/drive/v3/files?upload_id={}",
+            "A".repeat(MAX_UPLOAD_ID + 1)
+        );
+        assert!(upload_address(Some(&long)).is_err());
+        let ok = format!(
+            "https://www.googleapis.com/upload/drive/v3/files?upload_id={}",
+            "A".repeat(MAX_UPLOAD_ID)
+        );
+        assert!(upload_address(Some(&ok)).is_ok());
+    }
+
+    /// A redirect is never followed: an answer that is not a success sends nothing more.
+    #[test]
+    fn a_redirect_at_the_start_sends_no_body() {
+        for status in [301, 302, 307, 308, 403] {
+            let drive = FakeDrive {
+                start_status: Some(status),
+                ..FakeDrive::default()
+            };
+            assert!(upload_copy(&drive, &session(), "V1", 1, vec![9; 10], &|| true).is_err());
+            assert_eq!(drive.seen.lock().unwrap().len(), 1, "{status}");
+        }
+    }
+
+    /// Locked or turned off between the start and the body: the body never goes out.
+    #[test]
+    fn when_no_longer_wanted_the_body_is_not_sent() {
+        let drive = FakeDrive::default();
+        let got = upload_copy(&drive, &session(), "V1", 1, vec![9; 10], &|| false);
+        assert_eq!(got.unwrap_err(), GoogleError::Cancelled);
+        let seen = drive.seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].0, Method::Post);
+    }
+
+    #[test]
+    fn a_copy_that_arrived_with_another_size_does_not_count() {
+        for size in [
+            serde_json::json!("9"),
+            serde_json::json!(null),
+            serde_json::json!("x"),
+        ] {
+            let drive = FakeDrive {
+                size: Some(size.clone()),
+                ..FakeDrive::default()
+            };
+            assert!(
+                upload_copy(&drive, &session(), "V1", 1, vec![9; 10], &|| true).is_err(),
+                "{size}"
+            );
+        }
+        let drive = FakeDrive {
+            size: Some(serde_json::json!(10)),
+            ..FakeDrive::default()
+        };
+        assert!(upload_copy(&drive, &session(), "V1", 1, vec![9; 10], &|| true).is_ok());
+    }
+
+    /// Fail closed: an answer without its list, or with a second page, is not "no copies".
+    #[test]
+    fn a_list_without_its_files_or_with_more_pages_is_an_error() {
+        for answer in [
+            serde_json::json!({}),
+            serde_json::json!({ "files": "x" }),
+            serde_json::json!({ "files": [], "nextPageToken": "p2" }),
+        ] {
+            let drive = FakeDrive {
+                listing: Some(answer.clone()),
+                ..FakeDrive::default()
+            };
+            assert!(list_copies(&drive, &session(), "V1").is_err(), "{answer}");
+            assert!(
+                delete_all_copies(&drive, &session(), "V1").is_err(),
+                "{answer}"
+            );
+        }
+        let drive = FakeDrive {
+            listing: Some(serde_json::json!({ "files": [], "nextPageToken": null })),
+            ..FakeDrive::default()
+        };
+        assert_eq!(list_copies(&drive, &session(), "V1").unwrap(), []);
+    }
+
+    /// Neither a request's printout nor an error's text carries a token.
+    #[test]
+    fn no_token_in_printouts_or_errors() {
+        let req = Request {
+            method: Method::Put,
+            url: UPLOAD_START.to_owned(),
+            bearer: Some(Zeroizing::new("ya29.secret".to_owned())),
+            content_type: None,
+            body: Zeroizing::new(b"1//refresh".to_vec()),
+            timeout: None,
+        };
+        let printed = format!("{req:?} {:?}", session());
+        assert!(
+            !printed.contains("ya29") && !printed.contains("1//"),
+            "{printed}"
+        );
+        let drive = FakeDrive {
+            location: Some("https://evil.example/?token=ya29.token".to_owned()),
+            ..FakeDrive::default()
+        };
+        let e = upload_copy(&drive, &session(), "V1", 1, vec![9; 10], &|| true).unwrap_err();
+        let text = format!("{e} {e:?}");
+        assert!(!text.contains("ya29"), "{text}");
     }
 
     #[test]

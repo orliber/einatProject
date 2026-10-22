@@ -120,8 +120,12 @@ impl Core {
     }
 
     pub(crate) fn mark_secret_changed(&mut self) -> Result<(), CoreError> {
-        self.vault_mut()?
-            .set_state(SECRET_CHANGED_KEY, &unix_now().to_string())?;
+        let now = unix_now().to_string();
+        let v = self.vault_mut()?;
+        v.set_state(SECRET_CHANGED_KEY, &now)?;
+        // Copies in her Drive sealed before this open with the old password or kit: the next
+        // copy that goes up is then the only one kept (D-099).
+        v.set_state(crate::drive_backup::REKEYED_KEY, &now)?;
         Ok(())
     }
 

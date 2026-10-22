@@ -318,6 +318,14 @@ fn main() {
                         }
                     }
                 }
+                // A cleanup still owed at Google after turning the Drive copy off (D-099):
+                // tried again after an unlock and then every 15 minutes, with the core free.
+                if !locked {
+                    let owed = timer.lock().ok().and_then(|mut c| c.take_drive_cleanup());
+                    if let Some(cleanup) = owed {
+                        commands::cleanup_in_background(Arc::clone(&timer), cleanup);
+                    }
+                }
                 if locked {
                     timer_clipboard.clear_now();
                     if let Some(w) = &timer_window {

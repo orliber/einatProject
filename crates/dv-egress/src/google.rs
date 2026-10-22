@@ -63,6 +63,9 @@ pub enum GoogleError {
     /// The lasting permission (a refresh token) was withdrawn or ran out: sign in again.
     #[error("the permission given to this app was withdrawn")]
     Revoked,
+    /// She left the app's hidden Drive folder unticked on Google's page (granular consent).
+    #[error("access to the app's hidden Drive folder was not granted")]
+    ScopeNotGranted,
 }
 
 /// The app's registration with Google (a "Desktop app" OAuth client). Google treats the
@@ -125,12 +128,37 @@ fn b64url_decode(text: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// `application/x-www-form-urlencoded`, built with the URL library reqwest already has.
-fn form(pairs: &[(&str, &str)]) -> String {
-    reqwest::Url::parse_with_params("http://form.invalid/", pairs)
-        .ok()
-        .and_then(|u| u.query().map(str::to_owned))
-        .unwrap_or_default()
+/// `application/x-www-form-urlencoded` (as the WHATWG URL standard encodes a form), written
+/// straight into memory that is wiped when dropped: the forms carry codes and tokens. The room
+/// is reserved first, so no copy is left behind by a growing buffer.
+fn form(pairs: &[(&str, &str)]) -> Zeroizing<Vec<u8>> {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let room = pairs.iter().map(|(k, v)| 3 * (k.len() + v.len()) + 2).sum();
+    let mut out = Zeroizing::new(Vec::with_capacity(room));
+    for (i, (k, v)) in pairs.iter().enumerate() {
+        if i > 0 {
+            out.push(b'&');
+        }
+        for (j, part) in [k, v].into_iter().enumerate() {
+            if j > 0 {
+                out.push(b'=');
+            }
+            for &b in part.as_bytes() {
+                match b {
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'*' | b'-' | b'.' | b'_' => {
+                        out.push(b);
+                    }
+                    b' ' => out.push(b'+'),
+                    _ => {
+                        // Four bits always name one of the sixteen digits.
+                        let hex = |n: u8| HEX.get(usize::from(n)).copied().unwrap_or(b'0');
+                        out.extend_from_slice(&[b'%', hex(b >> 4), hex(b & 15)]);
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 // ------------------------------------------------------------------ sign-in in the browser
@@ -371,7 +399,9 @@ pub struct Request {
     pub url: String,
     pub bearer: Option<Zeroizing<String>>,
     pub content_type: Option<String>,
-    pub body: Vec<u8>,
+    /// Wiped when dropped: a form may carry a code or a token. What reqwest copies into its own
+    /// buffers to send is outside this program's reach (residual, as for every TLS library).
+    pub body: Zeroizing<Vec<u8>>,
     /// Longer than the usual minute for an upload; `None` keeps the minute.
     pub timeout: Option<Duration>,
 }
@@ -380,7 +410,8 @@ pub struct Request {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reply {
     pub status: u16,
-    pub body: Vec<u8>,
+    /// Wiped when dropped: an answer may carry a token.
+    pub body: Zeroizing<Vec<u8>>,
     pub location: Option<String>,
 }
 
@@ -389,8 +420,17 @@ impl Reply {
     pub fn new(status: u16, body: Vec<u8>) -> Self {
         Self {
             status,
-            body,
+            body: Zeroizing::new(body),
             location: None,
+        }
+    }
+
+    /// An answer that points elsewhere (the start of an upload), with no body.
+    #[must_use]
+    pub fn pointing_to(status: u16, location: &str) -> Self {
+        Self {
+            location: Some(location.to_owned()),
+            ..Self::new(status, Vec::new())
         }
     }
 }
@@ -412,6 +452,17 @@ pub trait Http: Send + Sync {
 pub(crate) fn host_allowed(url: &reqwest::Url) -> bool {
     url.scheme() == "https" && url.host_str().is_some_and(|h| GOOGLE_HOSTS.contains(&h))
 }
+
+/// Where a PUT may go: Drive's upload path on `www.googleapis.com`, nowhere else (D-099).
+pub(crate) fn put_allowed(url: &reqwest::Url) -> bool {
+    host_allowed(url)
+        && url.host_str() == Some("www.googleapis.com")
+        && url.port().is_none()
+        && url.path() == "/upload/drive/v3/files"
+}
+
+/// The largest answer read: a key file, a token, a file list.
+const MAX_ANSWER: usize = 256 * 1024;
 
 /// The real connection: TLS 1.3, Mozilla's roots, HTTPS only, no proxy, no redirects.
 pub struct GoogleHttp {
@@ -447,6 +498,12 @@ impl Http for GoogleHttp {
         if !host_allowed(&url) {
             return Err(GoogleError::Protocol("host is not on the list".to_owned()));
         }
+        // A PUT is only ever the body of a backup copy, to Drive's upload path (D-099).
+        if req.method == Method::Put && !put_allowed(&url) {
+            return Err(GoogleError::Protocol(
+                "a PUT off the upload path".to_owned(),
+            ));
+        }
         let mut builder = match req.method {
             Method::Get => self.client.get(url),
             Method::Post => self.client.post(url),
@@ -462,7 +519,10 @@ impl Http for GoogleHttp {
         if let Some(ct) = &req.content_type {
             builder = builder.header("content-type", ct.as_str());
         }
-        let resp = builder.body(req.body).send().map_err(|e| {
+        let mut req = req;
+        // Moved, not copied: a backup copy can be large.
+        let body = std::mem::take(&mut *req.body);
+        let resp = builder.body(body).send().map_err(|e| {
             let text = format!("{e:?}").to_lowercase();
             if text.contains("certificate") || text.contains("tls") || text.contains("handshake") {
                 GoogleError::Tls
@@ -477,9 +537,10 @@ impl Http for GoogleHttp {
             .get(reqwest::header::LOCATION)
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned);
-        // Small answers only: a key file, a token, a file list.
-        let mut body = Vec::new();
-        resp.take(256 * 1024)
+        // Small answers only: a key file, a token, a file list. The room is reserved first, so
+        // a growing buffer leaves no unwiped copy of a token behind.
+        let mut body = Zeroizing::new(Vec::with_capacity(MAX_ANSWER));
+        resp.take(MAX_ANSWER as u64)
             .read_to_end(&mut body)
             .map_err(|_| GoogleError::Offline)?;
         Ok(Reply {
@@ -579,28 +640,44 @@ pub fn finish(
         url: TOKEN_URL.to_owned(),
         bearer: None,
         content_type: Some("application/x-www-form-urlencoded".to_owned()),
-        body: body.into_bytes(),
+        body,
         timeout: None,
     })?;
-    let v = json(status, &bytes)?;
-    let token = v
-        .get("access_token")
-        .and_then(Value::as_str)
+    let mut v = json(status, &bytes)?;
+    // Each token is moved out of the parsed answer into memory that is wiped when dropped.
+    let token = take_secret(&mut v, "access_token")
         .ok_or_else(|| GoogleError::Protocol("no access token".to_owned()))?;
-    let id_token = v
-        .get("id_token")
-        .and_then(Value::as_str)
+    let id_token = take_secret(&mut v, "id_token")
         .ok_or_else(|| GoogleError::Protocol("no id token".to_owned()))?;
-    let refresh = v
-        .get("refresh_token")
-        .and_then(Value::as_str)
-        .filter(|t| !t.is_empty())
-        .map(|t| Zeroizing::new(t.to_owned()));
+    let refresh = take_secret(&mut v, "refresh_token");
+    // Google's consent page lets her untick the hidden folder; without it nothing here works.
+    if !granted(&v) {
+        return Err(GoogleError::ScopeNotGranted);
+    }
     Ok(Session {
-        token: Zeroizing::new(token.to_owned()),
-        account_id: account_from_id_token(id_token, &cfg.client_id)?,
+        account_id: account_from_id_token(&id_token, &cfg.client_id)?,
+        token,
         refresh,
     })
+}
+
+/// The scope that every Google action of this app needs.
+const APPDATA_SCOPE: &str = "https://www.googleapis.com/auth/drive.appdata";
+
+/// The answer says the app's hidden Drive folder was granted (RFC 6749 §5.1 `scope`).
+fn granted(answer: &Value) -> bool {
+    answer
+        .get("scope")
+        .and_then(Value::as_str)
+        .is_some_and(|s| s.split(' ').any(|x| x == APPDATA_SCOPE))
+}
+
+/// Move a text field out of a parsed answer into memory that is wiped when dropped.
+fn take_secret(answer: &mut Value, key: &str) -> Option<Zeroizing<String>> {
+    match answer.get_mut(key).map(Value::take) {
+        Some(Value::String(s)) => Some(Zeroizing::new(s)).filter(|s| !s.is_empty()),
+        _ => None,
+    }
 }
 
 /// A short-lived token from the lasting permission, without the browser (D-099). The account
@@ -611,12 +688,12 @@ pub fn session_from_refresh(
     cfg: &ClientConfig,
     refresh_token: &str,
 ) -> Result<Session, GoogleError> {
-    let body = Zeroizing::new(form(&[
+    let body = form(&[
         ("client_id", &cfg.client_id),
         ("client_secret", &cfg.client_secret),
         ("refresh_token", refresh_token),
         ("grant_type", "refresh_token"),
-    ]));
+    ]);
     let Reply {
         status,
         body: bytes,
@@ -626,7 +703,7 @@ pub fn session_from_refresh(
         url: TOKEN_URL.to_owned(),
         bearer: None,
         content_type: Some("application/x-www-form-urlencoded".to_owned()),
-        body: body.as_bytes().to_vec(),
+        body,
         timeout: None,
     })?;
     // RFC 6749 §5.2: a withdrawn or expired grant answers 400 `invalid_grant`.
@@ -639,14 +716,11 @@ pub fn session_from_refresh(
             return Err(GoogleError::Revoked);
         }
     }
-    let v = json(status, &bytes)?;
-    let token = v
-        .get("access_token")
-        .and_then(Value::as_str)
-        .filter(|t| !t.is_empty())
+    let mut v = json(status, &bytes)?;
+    let token = take_secret(&mut v, "access_token")
         .ok_or_else(|| GoogleError::Protocol("no access token".to_owned()))?;
     Ok(Session {
-        token: Zeroizing::new(token.to_owned()),
+        token,
         account_id: String::new(),
         refresh: None,
     })
@@ -685,7 +759,7 @@ pub fn find_keys(http: &dyn Http, s: &Session, vault_id: &str) -> Result<Vec<Str
         url: url.to_string(),
         bearer: Some(s.token.clone()),
         content_type: None,
-        body: Vec::new(),
+        body: Zeroizing::new(Vec::new()),
         timeout: None,
     })?;
     let v = json(status, &bytes)?;
@@ -723,7 +797,7 @@ pub fn read_key(
         url: format!("{FILES_URL}/{file_id}?alt=media"),
         bearer: Some(s.token.clone()),
         content_type: None,
-        body: Vec::new(),
+        body: Zeroizing::new(Vec::new()),
         timeout: None,
     })?;
     if !(200..300).contains(&status) {
@@ -759,7 +833,7 @@ pub fn put_key(
         url: format!("{UPLOAD_URL}&fields=id"),
         bearer: Some(s.token.clone()),
         content_type: Some(format!("multipart/related; boundary={boundary}")),
-        body: body.as_bytes().to_vec(),
+        body: Zeroizing::new(body.as_bytes().to_vec()),
         timeout: None,
     })?;
     let v = json(status, &bytes)?;
@@ -781,7 +855,7 @@ pub(crate) fn delete_file(http: &dyn Http, s: &Session, file_id: &str) -> Result
         url: format!("{FILES_URL}/{file_id}"),
         bearer: Some(s.token.clone()),
         content_type: None,
-        body: Vec::new(),
+        body: Zeroizing::new(Vec::new()),
         timeout: None,
     })?;
     if (200..300).contains(&status) || status == 404 {
@@ -793,20 +867,33 @@ pub(crate) fn delete_file(http: &dyn Http, s: &Session, file_id: &str) -> Result
 
 /// End the session at Google: the token stops working at once. Best effort.
 pub fn revoke(http: &dyn Http, s: Session) {
-    revoke_token(http, &s.token);
+    let _ = revoke_token(http, &s.token);
 }
 
-/// Withdraw a token at Google, a lasting permission included (D-099). Best effort.
-pub fn revoke_token(http: &dyn Http, token: &str) {
-    let body = form(&[("token", token)]);
-    let _ = http.send(Request {
+/// Withdraw a token at Google, a lasting permission included (D-099). `Ok` once Google says
+/// it no longer works: withdrawn now, or already withdrawn or run out before (RFC 7009 §2.2
+/// answers 200; Google answers 400 `invalid_token` for a token it no longer knows).
+pub fn revoke_token(http: &dyn Http, token: &str) -> Result<(), GoogleError> {
+    let Reply { status, body, .. } = http.send(Request {
         method: Method::Post,
         url: REVOKE_URL.to_owned(),
         bearer: None,
         content_type: Some("application/x-www-form-urlencoded".to_owned()),
-        body: body.into_bytes(),
+        body: form(&[("token", token)]),
         timeout: None,
-    });
+    })?;
+    if (200..300).contains(&status) {
+        return Ok(());
+    }
+    let gone = status == 400
+        && serde_json::from_slice::<Value>(&body)
+            .ok()
+            .is_some_and(|v| v.get("error").and_then(Value::as_str) == Some("invalid_token"));
+    if gone {
+        Ok(())
+    } else {
+        Err(GoogleError::Protocol(format!("status {status}")))
+    }
 }
 
 #[cfg(test)]
@@ -853,7 +940,7 @@ mod tests {
                 req.method,
                 req.url.clone(),
                 req.bearer.as_ref().map(|t| t.to_string()),
-                req.body.clone(),
+                req.body.to_vec(),
             ));
             let (status, body) = self.answers.lock().unwrap().pop().unwrap();
             Ok(Reply::new(status, body))
@@ -954,6 +1041,7 @@ mod tests {
         let answer = serde_json::json!({
             "access_token": "ya29.token",
             "id_token": id_token("https://accounts.google.com", &cfg().client_id, "1234567890"),
+            "scope": SCOPES,
         });
         let fake = Fake::new(vec![(200, answer.to_string().into_bytes())]);
         let session = finish(&fake, &cfg(), &s, "the-code").unwrap();
@@ -1192,7 +1280,7 @@ mod tests {
                 url: url.clone(),
                 bearer: Some(Zeroizing::new("ya29.token".to_owned())),
                 content_type: None,
-                body: b"secret".to_vec(),
+                body: Zeroizing::new(b"secret".to_vec()),
                 timeout: None,
             });
             assert!(
@@ -1212,6 +1300,7 @@ mod tests {
         let answer = serde_json::json!({
             "access_token": "ya29.token",
             "id_token": id_token("accounts.google.com", &cfg().client_id, "42"),
+            "scope": SCOPES,
         });
         let fake = Fake::new(vec![(200, answer.to_string().into_bytes())]);
         finish(&fake, &cfg(), &s, "the-code").unwrap();
@@ -1258,6 +1347,93 @@ mod tests {
         }
         let fake = Fake::new(vec![(200, b"<html>".to_vec())]);
         assert!(finish(&fake, &cfg(), &s, "c").is_err());
+    }
+
+    /// Google's consent page lets her untick the hidden folder: then nothing is kept, and she
+    /// is told why, instead of every later upload or key failing.
+    #[test]
+    fn a_sign_in_without_the_hidden_folder_is_refused() {
+        let s = begin_lasting(&cfg()).unwrap();
+        let good_id = id_token("https://accounts.google.com", &cfg().client_id, "42");
+        for scope in [
+            serde_json::json!("openid"),
+            serde_json::json!("openid https://www.googleapis.com/auth/drive.appdata.readonly"),
+            serde_json::json!(""),
+            serde_json::Value::Null,
+        ] {
+            let answer = serde_json::json!({
+                "access_token": "t", "refresh_token": "r", "id_token": good_id, "scope": scope,
+            });
+            let fake = Fake::new(vec![(200, answer.to_string().into_bytes())]);
+            assert_eq!(
+                finish(&fake, &cfg(), &s, "c").unwrap_err(),
+                GoogleError::ScopeNotGranted,
+                "{scope}"
+            );
+        }
+    }
+
+    /// A token sent to be withdrawn is gone once Google says so, also when it was already
+    /// gone; anything else is not done (the caller tries again).
+    #[test]
+    fn a_withdrawal_counts_only_once_google_confirms_it() {
+        for (status, body, ok) in [
+            (200, &b""[..], true),
+            (400, &br#"{"error":"invalid_token"}"#[..], true),
+            (400, &br#"{"error":"invalid_request"}"#[..], false),
+            (503, &b""[..], false),
+        ] {
+            let fake = Fake::new(vec![(status, body.to_vec())]);
+            assert_eq!(revoke_token(&fake, "1//t").is_ok(), ok, "{status}");
+            let seen = fake.seen.lock().unwrap();
+            assert_eq!(seen[0].1, REVOKE_URL);
+            assert_eq!(seen[0].2, None, "the token goes in the body only");
+            assert_eq!(seen[0].3, b"token=1%2F%2Ft");
+        }
+    }
+
+    /// The form encoding matches the URL standard's, which Google reads.
+    #[test]
+    fn forms_are_encoded_as_the_url_standard_does() {
+        let pairs = [("a b", "1//x+y=z&w"), ("קוד", "~*-._!'()"), ("e", "")];
+        let ours = String::from_utf8(form(&pairs).to_vec()).unwrap();
+        let theirs = reqwest::Url::parse_with_params("http://form.invalid/", &pairs)
+            .unwrap()
+            .query()
+            .unwrap()
+            .to_owned();
+        assert_eq!(ours, theirs);
+    }
+
+    /// The only PUT is a backup copy's body, to Drive's upload path (D-099): checked where
+    /// every request goes out, before anything is sent.
+    #[test]
+    fn a_put_goes_only_to_the_upload_path() {
+        let http = GoogleHttp::new().unwrap();
+        for url in [
+            "https://www.googleapis.com/drive/v3/files/abc",
+            "https://oauth2.googleapis.com/upload/drive/v3/files",
+            "https://www.googleapis.com/upload/drive/v3/files/x",
+            "https://www.googleapis.com:444/upload/drive/v3/files",
+        ] {
+            let got = http.send(Request {
+                method: Method::Put,
+                url: url.to_owned(),
+                bearer: None,
+                content_type: None,
+                body: Zeroizing::new(Vec::new()),
+                timeout: None,
+            });
+            assert_eq!(
+                got.unwrap_err(),
+                GoogleError::Protocol("a PUT off the upload path".to_owned()),
+                "{url}"
+            );
+        }
+        assert!(put_allowed(
+            &reqwest::Url::parse("https://www.googleapis.com/upload/drive/v3/files?upload_id=A")
+                .unwrap()
+        ));
     }
 
     #[test]
@@ -1347,6 +1523,7 @@ mod tests {
             "access_token": "ya29.token",
             "refresh_token": "1//lasting",
             "id_token": id_token("https://accounts.google.com", &cfg().client_id, "42"),
+            "scope": "https://www.googleapis.com/auth/drive.appdata openid",
         });
         let fake = Fake::new(vec![(200, answer.to_string().into_bytes())]);
         let mut session = finish(&fake, &cfg(), &s, "code").unwrap();
@@ -1394,7 +1571,13 @@ mod tests {
             theirs in "[A-Za-z0-9_-]{0,24}",
             code in "[A-Za-z0-9/._~-]{1,40}",
         ) {
-            let enc = |s: &str| form(&[("v", s)]).strip_prefix("v=").unwrap_or_default().to_owned();
+            let enc = |s: &str| {
+                String::from_utf8(form(&[("v", s)]).to_vec())
+                    .unwrap()
+                    .strip_prefix("v=")
+                    .unwrap_or_default()
+                    .to_owned()
+            };
             let line = format!("GET /?state={}&code={} HTTP/1.1", enc(&theirs), enc(&code));
             let got = parse_answer(&line, &ours);
             if theirs == ours {
@@ -1410,7 +1593,7 @@ mod tests {
             let session = Session {
                 token: Zeroizing::new("ya29.token".to_owned()),
                 account_id: "1".to_owned(),
-            refresh: None,
+                refresh: None,
             };
             let fake = Fake::new(vec![(200, b"k".to_vec()), (204, Vec::new())]);
             let _ = read_key(&fake, &session, &id);

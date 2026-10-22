@@ -24,4 +24,9 @@ last_at: number | null,
 /**
  * The last copy did not go up, and why.
  */
-problem: DriveProblem | null, };
+problem: DriveProblem | null, 
+/**
+ * Turned off, but deleting the copies and withdrawing the permission at Google is not
+ * confirmed yet (tried again while the vault is open).
+ */
+cleanup_pending: boolean, };

@@ -5,7 +5,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
-import { ipc, type DriveBackupStatus, type DriveProblem } from "../ipc/client";
+import { ipc, type DriveBackupStatus, type DriveCleanupResult, type DriveProblem } from "../ipc/client";
 import { heDateTime } from "./Backup";
 import { Switch } from "./Switch";
 import { ErrorLine } from "./ui";
@@ -20,6 +20,19 @@ const PROBLEM: Record<DriveProblem, string> = {
   reconnect: "ההרשאה בגוגל בוטלה, ולכן העותקים לא עולים. אפשר לחבר שוב.",
 };
 
+/** Still owed at Google after turning off: said, never passed off as done. */
+export const CLEANUP_PENDING =
+  "העותק בגוגל דרייב כבוי, ושום עותק לא עולה יותר. את העותקים שכבר שם עוד לא הצלחתי למחוק, וגם לא לבטל את ההרשאה בגוגל. אנסה שוב מעצמי בזמן שהכספת פתוחה.";
+
+/** The permission was gone at Google already, so the copies there are out of the program's reach. */
+export const CLEANUP_WITHDRAWN =
+  "העותק בגוגל דרייב כובה. ההרשאה בגוגל כבר הייתה מבוטלת, ולכן את העותקים שנשארו שם התוכנה לא יכולה למחוק. הם מוצפנים. אפשר למחוק אותם בגוגל דרייב: הגדרות ← ניהול אפליקציות ← כספת האבחון ← מחיקת נתוני אפליקציה מוסתרים. שימי לב: זה מוחק גם את המפתח של הכניסה עם גוגל כששוכחים סיסמה, ואז צריך להדליק אותה שוב.";
+
+const TURNED_OFF: Record<Exclude<DriveCleanupResult, "pending" | "withdrawn">, string> = {
+  cleaned: "העותק בגוגל דרייב כובה. העותקים שהיו שם נמחקו, וההרשאה שניתנה לתוכנה בוטלה.",
+  off: "העותק בגוגל דרייב כבוי.",
+};
+
 function message(err: unknown, fallback: string): string {
   return (err as { message?: string }).message ?? fallback;
 }
@@ -29,12 +42,16 @@ export function DriveBackupSettings() {
   const qc = useQueryClient();
   const { data: status } = useQuery({ queryKey: ["drive-backup"], queryFn: ipc.driveBackupStatus, retry: false });
   const [signingIn, setSigningIn] = useState(false);
+  const [turningOff, setTurningOff] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // What turning off left owed at Google, kept on screen (not a passing notice).
+  const [left, setLeft] = useState<string | null>(null);
   if (!status?.available) return null;
   const s: DriveBackupStatus = status;
 
   async function turnOn() {
     setError(null);
+    setLeft(null);
     setSigningIn(true);
     try {
       qc.setQueryData(["drive-backup"], await ipc.driveBackupTurnOn());
@@ -48,14 +65,18 @@ export function DriveBackupSettings() {
 
   async function turnOff() {
     setError(null);
+    setLeft(null);
+    setTurningOff(true);
     try {
-      const deleted = await ipc.driveBackupTurnOff();
+      const result = await ipc.driveBackupTurnOff();
       await qc.invalidateQueries({ queryKey: ["drive-backup"] });
-      notify(deleted
-        ? "העותק בגוגל דרייב כובה, והעותקים שהיו שם נמחקו."
-        : "העותק בגוגל דרייב כובה. את העותקים שכבר שם לא הצלחתי למחוק עכשיו (אין חיבור). הם מוצפנים, ואפשר למחוק אותם מהגדרות גוגל דרייב ← ניהול אפליקציות.");
+      if (result === "pending") setLeft(CLEANUP_PENDING);
+      else if (result === "withdrawn") setLeft(CLEANUP_WITHDRAWN);
+      else notify(TURNED_OFF[result]);
     } catch (err) {
       setError(message(err, "הכיבוי לא הושלם."));
+    } finally {
+      setTurningOff(false);
     }
   }
 
@@ -74,12 +95,13 @@ export function DriveBackupSettings() {
     <section className="card setting" aria-labelledby="s-drive">
       <h2 id="s-drive">עותק מוצפן בגוגל דרייב</h2>
       <Switch id="drive-backup" label="אחרי כל גיבוי, לשמור עותק מוצפן גם בגוגל דרייב" checked={s.on}
-        disabled={signingIn || !canTurnOn} hint={hint}
+        disabled={signingIn || turningOff || !canTurnOn} hint={hint}
         onChange={(on) => void (on ? turnOn() : turnOff())} />
       <ul className="small">
         <li>עולה רק קובץ הגיבוי המוצפן, לתיקייה נסתרת של התוכנה בדרייב שלך. שום שם, תיק או טקסט לא עולה בגלוי.</li>
         <li>בלי הסיסמה שלך או ערכת השחזור המודפסת, הקובץ הזה לא שימושי לאף אחד, גם לא לגוגל.</li>
         <li>נשמרים שלושת העותקים האחרונים, והישנים נמחקים. כיבוי מוחק את כולם מגוגל.</li>
+        <li>כדי להעלות בלי לשאול בכל פעם, התוכנה שומרת בתוך הכספת הרשאה לתיקייה הנסתרת בלבד, עד שתכבי. כיבוי מבטל את ההרשאה בגוגל.</li>
       </ul>
       {signingIn && (
         <button type="button" className="btn align-start" onClick={() => void ipc.googleCancel()}>ביטול</button>
@@ -91,6 +113,13 @@ export function DriveBackupSettings() {
             <> <button type="button" className="link-btn" onClick={() => void turnOn()}>חיבור מחדש</button></>
           )}
         </p>
+      )}
+      {left ? (
+        <p className="hint" role="status">{left}</p>
+      ) : (
+        !s.on && s.cleanup_pending && !turningOff && (
+          <p className="hint" role="status">{CLEANUP_PENDING}</p>
+        )
       )}
       <ErrorLine error={error} />
     </section>

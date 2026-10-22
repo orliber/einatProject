@@ -20,6 +20,7 @@ import type { Folder } from "./generated/Folder";
 import type { GoogleStatus } from "./generated/GoogleStatus";
 import type { DriveBackupStatus } from "./generated/DriveBackupStatus";
 import type { DriveProblem } from "./generated/DriveProblem";
+import type { DriveCleanupResult } from "./generated/DriveCleanupResult";
 import type { NameMatch } from "./generated/NameMatch";
 import type { ChatView } from "./generated/ChatView";
 import type { ConsultationSummary } from "./generated/ConsultationSummary";
@@ -416,7 +417,7 @@ export const ipc = {
   driveBackupStatus: () => call("drive_backup_status"),
   /** Opens Google in her browser; resolves when she is back and the copy is on. */
   driveBackupTurnOn: () => call("drive_backup_turn_on"),
-  /** `false`: off, but the copies in Drive could not be deleted now (no internet). */
+  /** How far deleting the copies and withdrawing the permission at Google got. */
   driveBackupTurnOff: () => call("drive_backup_turn_off"),
 
   // Writing style (D-043): past reports kept neutralized, the profile, learning from edits.
@@ -499,6 +500,7 @@ export type {
   Folder,
   GoogleStatus,
   DriveBackupStatus,
+  DriveCleanupResult,
   DriveProblem,
   NameMatch,
   MaterialRouting,

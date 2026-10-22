@@ -70,11 +70,14 @@ pub(crate) async fn google_turn_on(state: tauri::State<'_, AppState>, password: 
     let password = zeroize::Zeroizing::new(password);
     let check = password.clone();
     let vault_id = with_core(&state, move |c| c.google_turn_on_check(&check)).await?;
+    // While the encrypted backup copy is on, the session is not revoked at the end: at Google
+    // that would withdraw the copy's lasting permission too (D-099).
+    let keep_grant = with_core(&state, |c| Ok(c.drive_backup_on())).await?;
     let (drive, account, new_id, older, http_session) = with_google(move |http, session| {
         match dv_core::google::put_new_key(http, &session, &vault_id) {
             Ok((key, id, older)) => Ok((key, session.account_id.clone(), id, older, Some(session))),
             Err(e) => {
-                dv_core::google::tidy_up(http, session, &[]);
+                dv_core::google::tidy_up(http, session, &[], keep_grant);
                 Err(e)
             }
         }
@@ -97,23 +100,29 @@ pub(crate) async fn google_turn_on(state: tauri::State<'_, AppState>, password: 
     };
     let _ = tauri::async_runtime::spawn_blocking(move || {
         if let (Ok(http), Some(session)) = (dv_core::google::GoogleHttp::new(), http_session) {
-            dv_core::google::tidy_up(&http, session, &stale);
+            dv_core::google::tidy_up(&http, session, &stale, keep_grant);
         }
     })
     .await;
     finished
 }
 
+/// Disconnect Google. The encrypted backup copy rests on this connection, so it turns off too
+/// (D-099): its copies are deleted and its permission withdrawn at Google, with the core free.
 #[tauri::command]
 pub(crate) async fn google_turn_off(
     state: tauri::State<'_, AppState>,
     password: String,
 ) -> Res<()> {
     let password = zeroize::Zeroizing::new(password);
-    with_core(&state, move |c| {
+    let cleanup = with_core(&state, move |c| {
         c.google_turn_off(&dv_core::google::WindowsAccount, &password)
     })
-    .await
+    .await?;
+    if let Some(cleanup) = cleanup {
+        super::cleanup_in_background(Arc::clone(&state.core), cleanup);
+    }
+    Ok(())
 }
 
 /// Forgot the password: sign in with the connected Google account on this computer, open
@@ -129,7 +138,9 @@ pub(crate) async fn google_recover(
         c.google_recover_check(&dv_core::google::WindowsAccount, &check)
     })
     .await?;
-    let keys = with_google(move |http, session| {
+    // The session ends after the vault is open: only then is it known whether the encrypted
+    // backup copy is on, whose lasting permission a revoke would withdraw too (D-099).
+    let (keys, session) = with_google(move |http, session| {
         let result = if dv_core::google::same_account(&vault_id, &tag, &session) {
             dv_core::google::read_keys(http, &session, &vault_id)
         } else {
@@ -137,12 +148,29 @@ pub(crate) async fn google_recover(
                 "זה לא חשבון הגוגל שחובר לכספת. אפשר לנסות שוב ולבחור את החשבון שחובר.".to_owned(),
             ))
         };
-        dv_core::google::tidy_up(http, session, &[]);
-        result
+        match result {
+            Ok(keys) => Ok((keys, session)),
+            Err(e) => {
+                dv_core::google::tidy_up(http, session, &[], false);
+                Err(e)
+            }
+        }
     })
     .await?;
-    with_core(&state, move |c| {
+    let opened = with_core(&state, move |c| {
         c.google_recover_finish(&dv_core::google::WindowsAccount, &keys, &new_password)
     })
-    .await
+    .await;
+    // Unknown (still locked): revoked, the stricter choice.
+    let keep_grant = opened.is_ok()
+        && with_core(&state, |c| Ok(c.drive_backup_on()))
+            .await
+            .unwrap_or(false);
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        if let Ok(http) = dv_core::google::GoogleHttp::new() {
+            dv_core::google::tidy_up(&http, session, &[], keep_grant);
+        }
+    })
+    .await;
+    opened
 }

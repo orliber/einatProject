@@ -93,6 +93,10 @@ fn from_google(e: &GoogleError) -> CoreError {
         GoogleError::Tls => "החיבור המאובטח לגוגל נכשל. ייתכן שמשהו במחשב מיירט תעבורה מוצפנת.",
         GoogleError::Protocol(_) => "גוגל ענתה תשובה לא צפויה. אפשר לנסות שוב מאוחר יותר.",
         GoogleError::Revoked => "ההרשאה שניתנה לתוכנה בגוגל בוטלה. אפשר לחבר שוב.",
+        GoogleError::ScopeNotGranted => {
+            "בחלון של גוגל לא סומנה הגישה לתיקייה הנסתרת של התוכנה בדרייב, ובלעדיה זה לא עובד. \
+             אפשר לנסות שוב ולסמן אותה."
+        }
     })
 }
 
@@ -182,11 +186,17 @@ pub fn read_keys(
 }
 
 /// Best effort: delete key files that no slot uses any more, then end the session.
-pub fn tidy_up(http: &dyn Http, session: Session, stale: &[String]) {
+///
+/// While the encrypted backup copy is on (D-099, `keep_grant`), the session is not revoked:
+/// at Google that withdraws the app's whole grant, the copy's lasting permission with it. The
+/// short token is dropped instead, and runs out within the hour.
+pub fn tidy_up(http: &dyn Http, session: Session, stale: &[String], keep_grant: bool) {
     for id in stale {
         let _ = google::delete_key(http, &session, id);
     }
-    google::revoke(http, session);
+    if !keep_grant {
+        google::revoke(http, session);
+    }
 }
 
 impl Core {
@@ -242,11 +252,14 @@ impl Core {
 
     /// Turn it off. Needs no Google: without the half on this computer the key in her Drive
     /// opens nothing, not even old backups (they never carry that half).
+    ///
+    /// Disconnecting Google also turns the encrypted backup copy off (D-099 rests on this
+    /// connection): its cleanup at Google is returned, to run with the core free.
     pub fn google_turn_off(
         &mut self,
         keys: &dyn ComputerKeys,
         password: &str,
-    ) -> Result<(), CoreError> {
+    ) -> Result<Option<crate::drive_backup::DriveCleanup>, CoreError> {
         self.check_backoff()?;
         let dir = self.dir.clone();
         let here = self.password_key_here()?;
@@ -257,7 +270,7 @@ impl Core {
             return Err(e.into());
         }
         keys.remove(&dir);
-        Ok(())
+        self.drive_backup_turn_off()
     }
 
     /// "Forgot password", step 1 (under the lock, while locked): the new password is

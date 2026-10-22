@@ -5,6 +5,7 @@ import type { ActivityEntry } from "../ipc/generated/ActivityEntry";
 import type { AppStatus } from "../ipc/generated/AppStatus";
 import type { BackupStatus } from "../ipc/generated/BackupStatus";
 import type { DriveBackupStatus } from "../ipc/generated/DriveBackupStatus";
+import type { DriveCleanupResult } from "../ipc/generated/DriveCleanupResult";
 import type { StagedBackup } from "../ipc/generated/StagedBackup";
 import type { CaseDetail } from "../ipc/generated/CaseDetail";
 import type { CaseInput } from "../ipc/generated/CaseInput";
@@ -1498,21 +1499,25 @@ export class FakeCore {
         if (!String(a.password ?? "")) fail("wrong_secret", "הסיסמה לא נכונה.");
         this.googleOn = false;
         this.logActivity("google_recovery_off", "security", "בוטלה הכניסה עם גוגל למקרה ששוכחים את הסיסמה", true);
+        // The copy in Drive rests on this connection, and turns off with it (D-099).
+        this.handle("drive_backup_turn_off", {});
         return null;
       case "google_cancel":
         return null;
       case "drive_backup_status":
-        return { available: true, connected: this.googleOn, on: this.driveOn, last_at: this.driveOn ? this.driveLastAt : null, problem: null } satisfies DriveBackupStatus;
+        return { available: true, connected: this.googleOn, on: this.driveOn, last_at: this.driveOn ? this.driveLastAt : null, problem: null, cleanup_pending: false } satisfies DriveBackupStatus;
       case "drive_backup_turn_on":
         if (!this.googleOn) fail("refused", "קודם מחברים את חשבון הגוגל: הגדרות ← סיסמה ואבטחה ← כניסה עם גוגל כששוכחים סיסמה.");
         this.driveOn = true;
         this.logActivity("drive_backup_on", "security", "הופעל עותק מוצפן של הגיבוי בגוגל דרייב", true);
         return this.handle("drive_backup_status", {});
-      case "drive_backup_turn_off":
-        if (this.driveOn) this.logActivity("drive_backup_off", "security", "כובה העותק המוצפן של הגיבוי בגוגל דרייב", true);
+      case "drive_backup_turn_off": {
+        const was = this.driveOn;
+        if (was) this.logActivity("drive_backup_off", "security", "כובה העותק המוצפן של הגיבוי בגוגל דרייב", true);
         this.driveOn = false;
         this.driveLastAt = null;
-        return true;
+        return (was ? "cleaned" : "off") satisfies DriveCleanupResult;
+      }
       case "google_recover":
         if (!this.googleOn) fail("refused", "הכניסה עם גוגל לא מופעלת במחשב הזה.");
         this.unlocked = true;
