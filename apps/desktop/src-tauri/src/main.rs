@@ -305,9 +305,25 @@ fn main() {
                         .and_then(|mut c| c.begin_auto_backup().ok().flatten());
                     if let Some(task) = task {
                         let run = task.run();
+                        let mut upload = None;
                         if let Ok(mut c) = timer.lock() {
-                            backed_up = c.finish_backup(run).is_ok();
+                            let (done, up) = c.finish_backup_for_drive(run);
+                            backed_up = done.is_ok();
+                            upload = up;
                         }
+                        // The encrypted copy in her Drive, when on (D-099), on its own thread:
+                        // this timer also locks the vault and must not wait for a slow line.
+                        if let Some(up) = upload {
+                            commands::upload_in_background(Arc::clone(&timer), up);
+                        }
+                    }
+                }
+                // A cleanup still owed at Google after turning the Drive copy off (D-099):
+                // tried again after an unlock and then every 15 minutes, with the core free.
+                if !locked {
+                    let owed = timer.lock().ok().and_then(|mut c| c.take_drive_cleanup());
+                    if let Some(cleanup) = owed {
+                        commands::cleanup_in_background(Arc::clone(&timer), cleanup);
                     }
                 }
                 if locked {
@@ -504,6 +520,9 @@ fn main() {
             restore_backup,
             forget_backup,
             set_auto_backup,
+            drive_backup_status,
+            drive_backup_turn_on,
+            drive_backup_turn_off,
             check_update,
             prepare_update,
             install_update,

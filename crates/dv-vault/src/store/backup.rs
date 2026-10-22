@@ -373,6 +373,12 @@ impl WrittenBackup {
     /// with its own key (`PRAGMA integrity_check`), and as many cases as the vault had. A
     /// backup counts only once it is known to open.
     pub fn verify(self) -> Result<BackupWritten, VaultError> {
+        self.verify_keeping_file().map(|(done, _)| done)
+    }
+
+    /// As [`WrittenBackup::verify`], and also hand back the bytes that were read back from the
+    /// disk and opened: the encrypted copy that goes to her Drive is exactly this (D-099).
+    pub fn verify_keeping_file(self) -> Result<(BackupWritten, Vec<u8>), VaultError> {
         let job = &self.job;
         let bytes = fs::read(&self.path)?;
         let (created_at, cases) = check_file(&bytes, &job.vault_id, &job.keys, &job.dir)?;
@@ -386,13 +392,14 @@ impl WrittenBackup {
                 "the backup holds fewer cases than the vault",
             ));
         }
-        Ok(BackupWritten {
+        let done = BackupWritten {
             info: BackupInfo {
                 bytes: job.bytes(),
                 created_at,
             },
             cases: u32::try_from(cases).unwrap_or(u32::MAX),
-        })
+        };
+        Ok((done, bytes))
     }
 }
 
@@ -515,6 +522,17 @@ impl Vault {
         target: &Path,
         secret: Secret<'_>,
     ) -> Result<(Vault, BackupCheck), VaultError> {
+        Self::restore_backup_then(backup, target, secret, |_| Ok(()))
+    }
+
+    /// As [`Vault::restore_backup`], with `prepare` run on the opened vault before anything
+    /// else: when it fails, the restore fails and leaves nothing behind.
+    pub fn restore_backup_then(
+        backup: &[u8],
+        target: &Path,
+        secret: Secret<'_>,
+        prepare: impl FnOnce(&mut Vault) -> Result<(), VaultError>,
+    ) -> Result<(Vault, BackupCheck), VaultError> {
         if target.join(HEADER_FILE).exists() {
             return Err(VaultError::AlreadyExists);
         }
@@ -536,7 +554,9 @@ impl Vault {
                 fs::write(target.join(name), bytes)?;
             }
             fs::write(target.join(HEADER_FILE), parsed.header_bytes)?;
-            Vault::open_with(target, parsed.header, &mk)
+            let mut vault = Vault::open_with(target, parsed.header, &mk)?;
+            prepare(&mut vault)?;
+            Ok(vault)
         })();
         let mut vault = match opened {
             Ok(vault) => vault,

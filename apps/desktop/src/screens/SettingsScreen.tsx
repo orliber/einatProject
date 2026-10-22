@@ -3,6 +3,7 @@ import { BugReportSettings } from "../components/BugReport";
 import { useApp } from "../App";
 import { ActivitySettings } from "../components/ActivityLog";
 import { BackupSettings } from "../components/Backup";
+import { DriveBackupSettings } from "../components/DriveBackupSettings";
 import { PasswordSettings } from "../components/PasswordSettings";
 import { TopBar } from "../components/TopBar";
 import { UpdateSettings } from "../components/Update";
@@ -319,7 +320,12 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
 
           {pane === "tests" && <InstrumentSettings />}
 
-          {pane === "backup" && <BackupSettings />}
+          {pane === "backup" && (
+            <>
+              <BackupSettings />
+              <DriveBackupSettings />
+            </>
+          )}
 
           {pane === "security" && (
             <>
