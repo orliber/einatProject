@@ -6,6 +6,7 @@ import { CoreStatus } from "../components/CoreStatus";
 import { ErrorLine, LockIcon } from "../components/ui";
 import { GoogleRecoverForm } from "../components/GoogleRecovery";
 import { LockScreenUpdate } from "../components/Update";
+import { timed, WaitLine } from "../components/Progress";
 import "./LockScreen.css";
 
 export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnlocked?: (s: AppStatus) => void }) {
@@ -59,7 +60,7 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
     setError(null);
     setBroken(false);
     try {
-      const s = mode === "password" ? await ipc.unlock(secret) : await ipc.unlockWithRecovery(secret);
+      const s = await timed("unlock", mode === "password" ? ipc.unlock(secret) : ipc.unlockWithRecovery(secret), mode);
       setSecret("");
       onUnlocked?.(s);
     } catch (err) {
@@ -117,6 +118,7 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
             <ErrorLine error={error} />
           )}
           {broken && <VersionTrouble version={version} />}
+          {busy && <WaitLine key={mode} task="unlock" speed={mode} delay={1000} label="פותחת את הכספת המוצפנת" />}
           {busy && slow && mode === "password" && <p className="hint" role="status">ממתינה ל-Windows… זה קורה לפעמים מיד אחרי הדלקת המחשב.</p>}
           <button type="submit" className="btn btn-primary" disabled={busy || waitUntil !== null}>{busy ? "פותחת…" : he.lock.open}</button>
           <button type="button" className="link-btn" onClick={() => { setMode(mode === "password" ? (googleOn ? "google" : "recovery") : "password"); setSecret(""); setError(null); }}>

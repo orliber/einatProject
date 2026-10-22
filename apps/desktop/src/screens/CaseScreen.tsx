@@ -4,7 +4,7 @@ import { ipc, type CaseDetail, type Prepared, type SortResult, type UiError } fr
 import { ReviewDialog } from "../components/ReviewDialog";
 import { ExportDialog } from "../components/ExportDialog";
 import { ReportRunDialog } from "../components/ReportRunDialog";
-import { ProgressLine, estimateMs, recordDuration, type Task } from "../components/Progress";
+import { ProgressLine, estimateMs, recordDuration, timed, WaitLine, type Task } from "../components/Progress";
 import { ErrorLine, CloseIcon, Skeleton } from "../components/ui";
 import { ActionsMenu, type MenuItem } from "../components/Menu";
 import { SampleGuide } from "./case/SampleGuide";
@@ -269,7 +269,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
       const derivedKey = ["summary", "diagnoses", "recommendations", "dsm"].includes(key);
       const text = instruction ?? (derivedKey ? "כתבי טיוטה לסעיף מתוך הסעיפים שאושרו." : "כתבי טיוטה לסעיף מתוך המקורות, עם מקור לכל פסקה.");
       const prepare = () => ipc.prepareSection(caseId, key, text, replaces);
-      const prepared = await prepare();
+      const prepared = await timed("prepare", prepare(), "section");
       return startReview({
         title: `טיוטה לסעיף ${title}`,
         prepared,
@@ -284,12 +284,14 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
 
   /** `quiet`: the reading that runs by itself after a material was added (round 31): when
    *  there is nothing to read, or it cannot be built now, it says nothing; the button stays. */
+  const [preparingSort, setPreparingSort] = useState(false);
   const startSort = async (quiet = false) => {
     // While the whole report is written, its run does the sorting: never a second request.
     if (isRunning(caseId)) return;
     if (!quiet) setError(null);
+    setPreparingSort(true);
     try {
-      const prepared = await ipc.prepareSort(caseId);
+      const prepared = await timed("prepare", ipc.prepareSort(caseId), "sort").finally(() => setPreparingSort(false));
       if (quiet && !prepared.approval_id) return;
       await startReview({
         title: "מיון החומרים לסעיפים",
@@ -462,7 +464,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
             ipc.deleteCase(caseId).then(() => go({ name: "cases" }), (e: unknown) => { setThrowing(false); setError(fail(e as never)); });
           }} />
       )}
-      {(elsewhere.length > 0 || failures.length > 0 || run) && (
+      {(elsewhere.length > 0 || failures.length > 0 || run || preparingSort) && (
         <section className="jobs-strip" aria-label={`${ai} עובד`}>
           {run && (
             <div className="run-line" role="status">
@@ -481,6 +483,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
               )}
             </div>
           )}
+          {preparingSort && <WaitLine task="prepare" speed="sort" label="מכינה את בקשת המיון: מסתירה שמות ובודקת מה יוצא" />}
           {elsewhere.map((j) => <ProgressLine key={j.id} started={j.started} estimate={j.estimate} label={j.label} approval={j.approval} />)}
           {failures.map((f) => (
             <div key={f.id} className="job-failed" role="alert">

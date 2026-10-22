@@ -3,6 +3,7 @@ import { useApp } from "../App";
 import { ipc, type ExportCheck } from "../ipc/client";
 import type { CaseApi } from "../screens/CaseScreen";
 import { Dialog, ErrorLine, Spinner } from "./ui";
+import { timed, WaitLine } from "./Progress";
 import "./ExportDialog.css";
 
 /** The report, or with `letter` the short letter (EX-4), into the downloads folder. The files
@@ -16,14 +17,16 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    ipc.checkExport(api.caseId).then(setCheck).catch((e) => setError(fail(e as never)));
+    timed("check", ipc.checkExport(api.caseId)).then(setCheck).catch((e) => setError(fail(e as never)));
   }, [api.caseId, fail]);
+
+  const exportKind = letter ? "letter" : pdf ? "pdf" : "word";
 
   async function run() {
     setBusy(true);
     setError(null);
     try {
-      setSaved(await (letter ? ipc.exportLetter(api.caseId, letter, null) : pdf ? ipc.exportPdf(api.caseId, null) : ipc.exportReport(api.caseId, null)));
+      setSaved(await timed("export", letter ? ipc.exportLetter(api.caseId, letter, null) : pdf ? ipc.exportPdf(api.caseId, null) : ipc.exportReport(api.caseId, null), exportKind));
     } catch (e) {
       setError(fail(e as never));
     } finally {
@@ -59,7 +62,8 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
       }>
       <div className="export">
         <div className="stack grow">
-          {!check && <p className="muted"><Spinner /> בודקת את הדוח…</p>}
+          {!check && <WaitLine task="check" label="בודקת את הדוח" />}
+          {busy && <WaitLine key={exportKind} task="export" speed={exportKind} label={letter ? "מפיקה את המכתב" : pdf ? "מפיקה את ה-PDF" : "מפיקה את קובץ ה-Word"} />}
           {check && !letter && (
             <ul className="checklist">
               <li className={check.included_sections > 0 ? "ok" : "bad"}>

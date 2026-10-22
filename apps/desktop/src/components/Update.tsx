@@ -4,6 +4,7 @@ import type { UiError } from "../ipc/client";
 import { ipc, type UpdateView } from "../ipc/client";
 import { Dialog, ErrorLine, Spinner, SparkIcon } from "./ui";
 import { Switch } from "./Switch";
+import { WaitLine } from "./Progress";
 import "./Update.css";
 
 /**
@@ -164,6 +165,7 @@ export function UpdateDialog({ update, onClose }: { update: UpdateView; onClose:
         )
       }>
       <div className="stack update-body">
+        {busy && !isReady && <WaitLine task="update" delay={0} guess={(10 + update.size_mb * 2) * 1000} label="מורידה את הגרסה ובודקת את החתימה שלה" />}
         {update.notes.length > 0 && (
           <>
             <b>מה חדש</b>

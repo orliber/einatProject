@@ -4,6 +4,8 @@ import { ipc, type ParagraphView, type Prepared } from "../../ipc/client";
 import { ReviewDialog } from "../../components/ReviewDialog";
 import { ExportDialog } from "../../components/ExportDialog";
 import { ErrorLine, Spinner } from "../../components/ui";
+import { recordDuration, timed, WaitLine } from "../../components/Progress";
+import { useAi } from "../../ai";
 import { LocalText, type LocalTextHandle } from "../../components/LocalText";
 import { useHoldUnsaved } from "../../components/Unsaved";
 import { useKept } from "../../kept";
@@ -20,11 +22,14 @@ type Audience = "parents" | "school";
  */
 export function LetterCard({ api }: { api: CaseApi }) {
   const { fail, status } = useApp();
+  const ai = useAi();
   const [audience, setAudience] = useState<Audience>("parents");
   const [note, setNote] = useState("");
   const [paragraphs, setParagraphs] = useState<ParagraphView[]>([]);
   const [review, setReview] = useState<Prepared | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Where a new wording is: being prepared here, or being written by the AI (for the wait line). */
+  const [stage, setStage] = useState<"prepare" | "write" | null>(null);
   /** The paragraph being edited, with the text it started from; what is typed stays in `editBox`. */
   // Kept while the vault is open, and held for a lock, like every paragraph editor (F1a).
   const [editing, setEditing] = useKept<{ id: string; text: string } | null>(`case:${api.caseId}:letter:${audience}:editing`, null);
@@ -48,6 +53,15 @@ export function LetterCard({ api }: { api: CaseApi }) {
     };
   }, [api.caseId, audience, fail]);
 
+  /** Sends the letter's request and waits for its paragraphs, keeping how long it took. */
+  async function write(approvalId: string) {
+    setStage("write");
+    const started = Date.now();
+    await ipc.sendSection(approvalId);
+    if (!status.demo_mode) recordDuration("draft", status.speed, Date.now() - started);
+    await load();
+  }
+
   async function act(fn: () => Promise<unknown>) {
     setError(null);
     setBusy(true);
@@ -57,6 +71,7 @@ export function LetterCard({ api }: { api: CaseApi }) {
       setError(fail(e as never));
     } finally {
       setBusy(false);
+      setStage(null);
     }
   }
 
@@ -98,16 +113,18 @@ export function LetterCard({ api }: { api: CaseApi }) {
       <input className="input" placeholder="מה עוד חשוב שיהיה במכתב? (לא חובה)" value={note} onChange={(e) => setNote(e.target.value)} />
       <button type="button" className="btn" disabled={busy}
         onClick={() => void act(async () => {
-          const prepared = await ipc.prepareLetter(api.caseId, audience, note);
+          setStage("prepare");
+          const prepared = await timed("prepare", ipc.prepareLetter(api.caseId, audience, note), "letter");
           // Round 26: what the gate cleared goes at once; the review only when she asked for it.
           if (status.review_always) setReview(prepared);
           else if (prepared.approval_id) {
-            await ipc.sendSection(prepared.approval_id);
-            await load();
+            await write(prepared.approval_id);
           } else setError(notSentMessage(prepared));
         })}>
-        {busy ? <><Spinner /> מכינה…</> : paragraphs.length ? "ניסוח מחדש" : "ניסוח המכתב"}
+        {busy ? <><Spinner /> {stage === "write" ? "כותב…" : "מכינה…"}</> : paragraphs.length ? "ניסוח מחדש" : "ניסוח המכתב"}
       </button>
+      {stage === "prepare" && <WaitLine task="prepare" speed="letter" label="מכינה את הבקשה: מסתירה שמות ובודקת מה יוצא" />}
+      {stage === "write" && <WaitLine task="draft" speed={status.speed} demo={status.demo_mode} delay={0} label={`${ai} כותב את המכתב`} />}
       {paragraphs.map((p) =>
         editing?.id === p.id ? (
           <div key={p.id} className="stack" style={{ gap: 6 }}>
@@ -145,7 +162,7 @@ export function LetterCard({ api }: { api: CaseApi }) {
           onClose={() => setReview(null)}
           onSend={async (id) => {
             setReview(null);
-            await act(async () => { await ipc.sendSection(id); await load(); });
+            await act(() => write(id));
           }} />
       )}
       {exporting && <ExportDialog api={api} letter={audience} onClose={() => setExporting(false)} />}

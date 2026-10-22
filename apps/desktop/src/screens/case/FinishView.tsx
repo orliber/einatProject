@@ -4,7 +4,8 @@ import { ipc, type ExportCheck, type ReportSettings } from "../../ipc/client";
 import type { ParagraphCheck } from "../../ipc/generated/ParagraphCheck";
 import { getKept, useKept } from "../../kept";
 import { ageWords } from "../../components/AgeField";
-import { ErrorLine, Spinner } from "../../components/ui";
+import { ErrorLine } from "../../components/ui";
+import { timed, WaitLine } from "../../components/Progress";
 import { useHoldUnsaved } from "../../components/Unsaved";
 import { LocalText, type LocalTextHandle } from "../../components/LocalText";
 import type { CaseApi } from "../CaseScreen";
@@ -38,7 +39,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
 
   useEffect(() => {
     let alive = true;
-    ipc.checkExport(caseId).then((c) => alive && setCheck(c)).catch((e: unknown) => alive && setError(fail(e as never)));
+    timed("check", ipc.checkExport(caseId)).then((c) => alive && setCheck(c)).catch((e: unknown) => alive && setError(fail(e as never)));
     return () => {
       alive = false;
     };
@@ -99,7 +100,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
             <h1>{ready ? "הדוח מוכן להוצאה" : nothing ? "עוד אין מה להוציא" : "כמעט מוכן"}</h1>
             <span className="muted">משמאל: הדוח כמו שייצא. כאן: מה עוד לעשות.</span>
           </div>
-          {!check && !error && <p className="muted"><Spinner /> בודקת…</p>}
+          {!check && !error && <WaitLine task="check" label="בודקת שהדוח מוכן להוצאה" />}
           {check && (
             <ul className="finish-checks">
               <li className={check.included_sections > 0 ? "ok" : "warn"}>
