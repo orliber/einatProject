@@ -125,7 +125,12 @@ pub fn create_next_for(dir: &Path, purpose: Purpose) -> Result<Key32, VaultError
         f.write_all(sealed.as_bytes())?;
         f.sync_all()?;
     }
+    // A key held aside earlier and never promoted (the program closed in between) is replaced.
+    let stale = fs::read_to_string(next_path(dir, purpose)).ok();
     fs::rename(&tmp, next_path(dir, purpose))?;
+    if let Some(stale) = stale {
+        forget(stale.trim(), purpose);
+    }
     Ok(key)
 }
 
@@ -343,14 +348,16 @@ fn keychain_store(plain: &[u8; 32], purpose: Purpose) -> Result<Zeroizing<String
     // `security -i` prints its prompt and nothing else; success is the read-back below.
     let _ = run(SECURITY, &["-i"], command.as_bytes(), OPENING_WAIT);
     let sealed = Zeroizing::new(format!("{KEYCHAIN_PREFIX}{}", id.as_str()));
-    let back = keychain_load(&sealed, purpose, OPENING_WAIT)?;
-    if back.as_slice() != plain.as_slice() {
-        keychain_delete(&sealed, purpose);
-        return Err(VaultError::Crypto(
-            "the key could not be kept in this computer's Keychain",
-        ));
+    match keychain_load(&sealed, purpose, OPENING_WAIT) {
+        Ok(back) if back.as_slice() == plain.as_slice() => Ok(sealed),
+        // An item `add` may have made is not left behind, whatever went wrong.
+        other => {
+            keychain_delete(&sealed, purpose);
+            Err(other.err().unwrap_or(VaultError::Crypto(
+                "the key could not be kept in this computer's Keychain",
+            )))
+        }
     }
-    Ok(sealed)
 }
 
 fn keychain_load(
@@ -540,6 +547,7 @@ mod tests {
         assert_eq!(load_for(dir.path(), Purpose::Password).unwrap(), next);
         assert!(load_next_for(dir.path(), Purpose::Password).is_err());
         let google_seal = fs::read(path(dir.path())).unwrap();
+        let password_seal = fs::read_to_string(path_for(dir.path(), Purpose::Password)).unwrap();
         fs::write(path_for(dir.path(), Purpose::Password), &google_seal).unwrap();
         assert!(load_for(dir.path(), Purpose::Password).is_err());
         // A changed seal does not open.
@@ -550,6 +558,7 @@ mod tests {
             String::from_utf8_lossy(&google_seal).trim(),
             Purpose::Google,
         );
+        forget(password_seal.trim(), Purpose::Password);
         remove_for(dir.path(), Purpose::Password);
         assert!(!exists_for(dir.path(), Purpose::Password));
     }

@@ -158,6 +158,13 @@ mod contained_on_a_mac {
             ..Policy::default()
         };
         assert_eq!(bash(&script, &granted), "fabricated case note");
+        // Nor through the data volume's mount under /System.
+        let real = std::fs::canonicalize(&file).unwrap();
+        let script = format!(
+            "read -r line < '/System/Volumes/Data{}' 2>/dev/null && printf '%s' \"$line\" || echo denied",
+            real.display()
+        );
+        assert_eq!(bash(&script, &Policy::default()), "denied\n");
     }
 
     #[test]

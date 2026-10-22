@@ -110,15 +110,21 @@ async fn install_on_mac(app: &tauri::AppHandle, file: dv_core::update::Downloade
             Ok(())
         }
         Err(file) => {
-            // Checked again: only the verified image is ever opened.
-            if dv_core::update::still_intact(&file) {
-                let _ = std::process::Command::new("/usr/bin/open")
+            // Checked again: only the verified image is ever opened. The program then closes
+            // (the vault is already locked), because Finder will not replace an app that is
+            // open: she drags the new one to Applications and opens it.
+            if dv_core::update::still_intact(&file)
+                && std::process::Command::new("/usr/bin/open")
                     .arg(&file.path)
-                    .spawn();
+                    .spawn()
+                    .is_ok()
+            {
+                app.exit(0);
+                return Ok(());
             }
             Err(UiError {
                 code: "update".to_owned(),
-                message: "הגרסה החדשה לא הותקנה לבד. נפתח חלון עם התוכנה החדשה: גוררים אותה לתיקיית Applications ומאשרים החלפה, ואז פותחים אותה שוב.".to_owned(),
+                message: "הגרסה החדשה לא הותקנה. אפשר לנסות שוב מההגדרות, או להוריד אותה מהקישור ששלח אור.".to_owned(),
                 details: Vec::new(),
                 action: dv_core::ErrorAction::Dismiss,
             })

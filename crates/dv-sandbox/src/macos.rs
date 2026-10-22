@@ -63,6 +63,9 @@ pub fn profile(exe: &Path, policy: &Policy) -> io::Result<String> {
         "(allow file-read* (literal \"/dev/null\") (literal \"/dev/random\") (literal \"/dev/urandom\") (literal \"/private/etc/localtime\"))\n",
     );
     p.push_str("(allow file-write-data (literal \"/dev/null\"))\n");
+    // The data volume is also mounted under /System (her home, the vault): never readable,
+    // whatever path reaches it. In this language the last matching rule wins.
+    p.push_str("(deny file-read* file-map-executable (subpath \"/System/Volumes/Data\"))\n");
     p.push_str("(allow sysctl-read)\n");
     p.push_str("(allow signal (target self))\n");
     Ok(p)
