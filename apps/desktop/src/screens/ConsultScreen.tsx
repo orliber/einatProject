@@ -5,8 +5,8 @@ import { useApp } from "../App";
 import { TopBar } from "../components/TopBar";
 import { ReviewDialog } from "../components/ReviewDialog";
 import { CasePicker } from "../components/CasePicker";
-import { ErrorLine, Spinner, CloseIcon } from "../components/ui";
-import { useWords, wordsSoFar } from "../components/Progress";
+import { ErrorLine, CloseIcon } from "../components/ui";
+import { clock as elapsedClock, estimateMs, learned, leftText, recordDuration, timed, useWords, WaitLine, wordsSoFar } from "../components/Progress";
 import { useHoldUnsaved } from "../components/Unsaved";
 import { LocalText, type LocalTextHandle } from "../components/LocalText";
 import { plainText, RichText } from "../components/RichText";
@@ -66,20 +66,25 @@ function titleOf(turns: Turn[]): string {
 /** "Claude is writing…" with the seconds waited, so a long answer never looks stuck. */
 function Typing({ since, approval }: { since: number; approval: string | null }) {
   const ai = useAi();
+  const { status } = useApp();
   const words = useWords(approval ?? undefined);
+  // About how long an answer takes here, at this answer speed (measured on this computer).
+  const [estimate] = useState(() => estimateMs("consult", status.speed, status.demo_mode));
+  const [known] = useState(() => status.demo_mode || learned("consult", status.speed));
   const [t, setT] = useState(() => Date.now());
   useEffect(() => {
     const i = window.setInterval(() => setT(Date.now()), 1000);
     return () => window.clearInterval(i);
   }, []);
-  const seconds = Math.max(0, Math.round((t - since) / 1000));
+  const elapsed = Math.max(0, t - since);
   return (
     <div className="chat-row chat-row-ai" role="status">
       <span className="chat-avatar" aria-hidden="true">{ai.charAt(0)}</span>
       <div className="chat-bubble chat-bubble-ai chat-typing">
         <span className="dots" aria-hidden="true"><i /><i /><i /></span>
-        <span className="muted small">{ai} כותב{seconds >= 3 ? ` · ${seconds} שניות` : "…"}{words >= 5 ? ` · ${wordsSoFar(words)}` : ""}</span>
-        {seconds >= 25 && <span className="muted small">תשובה מעמיקה לוקחת עד דקה.</span>}
+        <span className="muted small">
+          {ai} כותב{elapsed >= 2000 ? ` · ${elapsedClock(elapsed)} · ${leftText(elapsed, estimate, known)}` : "…"}{words >= 5 ? ` · ${wordsSoFar(words)}` : ""}
+        </span>
       </div>
     </div>
   );
@@ -174,10 +179,12 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   const dropPending = () => setTurns((all) => all.filter((t) => !t.pending));
 
   async function send(approvalId: string, hidden: string[]) {
-    setWaitingSince(Date.now());
+    const started = Date.now();
+    setWaitingSince(started);
     setSending(approvalId);
     try {
       const r = await ipc.sendConsult(approvalId);
+      if (!status.demo_mode) recordDuration("consult", status.speed, Date.now() - started);
       setLeftOut(r.left_out);
       setConversation(r.conversation_id);
       setTurns((all) => [
@@ -207,7 +214,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
     if (input.current) input.current.set("");
     else setMessage("");
     try {
-      const prepared = await ipc.prepareConsult(scope, conversation, text);
+      const prepared = await timed("prepare", ipc.prepareConsult(scope, conversation, text), "consult");
       // Round 26: what the gate cleared goes at once; the review only when she asked for it.
       if (status.review_always) {
         setReview({ prepared, text });
@@ -351,7 +358,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
             {busy && !waitingSince && !review && (
               <div className="chat-row chat-row-ai">
                 <span className="chat-avatar" aria-hidden="true">{ai.charAt(0)}</span>
-                <div className="chat-bubble chat-bubble-ai chat-typing"><Spinner /> <span className="muted small">בודקת מה יוצא מהמחשב…</span></div>
+                <div className="chat-bubble chat-bubble-ai chat-typing grow"><WaitLine task="prepare" speed="consult" delay={0} label="מסתירה שמות ובודקת מה יוצא מהמחשב" /></div>
               </div>
             )}
             <div ref={end} />

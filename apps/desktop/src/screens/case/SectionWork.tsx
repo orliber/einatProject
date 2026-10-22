@@ -5,7 +5,7 @@ import { ipc, type CaseDetail, type ChatView, type ParagraphCheck, type SectionR
 import { useQuery } from "@tanstack/react-query";
 import { VerdictNote } from "../../components/VerdictNote";
 import { ErrorLine, SendIcon, Spinner, WarnIcon } from "../../components/ui";
-import { ProgressLine } from "../../components/Progress";
+import { ProgressLine, timed, WaitLine } from "../../components/Progress";
 import { Why } from "../../components/Why";
 import { Similar } from "../../components/Similar";
 import { useHoldUnsaved } from "../../components/Unsaved";
@@ -155,7 +155,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
       const prepare = () => points
         ? ipc.prepareFromPoints(caseId, section.key, instruction)
         : ipc.prepareSection(caseId, section.key, instruction, replaces);
-      const prepared = await prepare();
+      const prepared = await timed("prepare", prepare(), "section");
       setPreparing(false);
       setBusy(true);
       const send = async (id: string) => {
@@ -199,7 +199,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
     setPreparing(true);
     try {
       const prepare = () => ipc.prepareVerify(caseId, section.key);
-      const prepared = await prepare();
+      const prepared = await timed("prepare", prepare(), "section");
       setPreparing(false);
       setBusy(true);
       await api.review({
@@ -372,7 +372,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               </span>
             </div>
           )}
-          {preparing && <p className="muted small"><Spinner /> מסתירה שמות ובודקת מה יוצא…</p>}
+          {preparing && <WaitLine task="prepare" speed="section" label="מכינה את הבקשה: מסתירה שמות ובודקת מה יוצא" />}
 
           {pending > 0 && !job && (
             <div className="draft-banner">

@@ -4,6 +4,7 @@ import { ipc, type AppStatus } from "../ipc/client";
 import { ErrorLine, LockIcon } from "../components/ui";
 import { RestoreFromBackup } from "../components/Backup";
 import { RecoveryKitPaper } from "../components/RecoveryKit";
+import { timed, WaitLine } from "../components/Progress";
 import "./SetupScreen.css";
 
 type Step = "password" | "recovery" | "me" | "restore";
@@ -29,7 +30,7 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
     if (pw !== pw2) return setError("שתי הסיסמאות לא זהות.");
     setBusy(true);
     try {
-      const created = await ipc.createVault(pw);
+      const created = await timed("create", ipc.createVault(pw));
       setKey(created.recovery_key);
       setPw("");
       setPw2("");
@@ -110,6 +111,7 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
               <li className={pw2.length > 0 && pw === pw2 ? "met" : undefined}>{pw2.length > 0 && pw === pw2 ? "✓" : "○"} שתי הסיסמאות זהות</li>
             </ul>
             <ErrorLine error={error} />
+            {busy && <WaitLine task="create" label="יוצרת את הכספת ומצפינה אותה" />}
             <button type="submit" className="btn btn-primary btn-big" disabled={busy}>{busy ? "יוצרת כספת מוצפנת…" : "יצירת הכספת"}</button>
             <p className="hint">
               {status.fips_active ? "ההצפנה נעשית ברכיב הצפנה מאושר ומבוקר (FIPS 140-3)." : "הכל נשמר מוצפן במחשב הזה."} אף אחד לא שומר את הסיסמה.

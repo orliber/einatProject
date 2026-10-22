@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
 import { ipc, type AppStatus, type BackupCheckView, type StagedBackup } from "../ipc/client";
 import { Dialog, ErrorLine, CloseIcon } from "./ui";
+import { timed, WaitLine } from "./Progress";
 import "./Backup.css";
 
 /** Automatic backups kept on the drive (dv-core `AUTO_KEEP`). */
@@ -132,7 +133,7 @@ export function CheckBackupDialog({ staged, onClose }: { staged: StagedBackup; o
     setBusy(true);
     setError(null);
     try {
-      setResult(await ipc.checkBackup(pw));
+      setResult(await timed("backup-check", ipc.checkBackup(pw)));
       await qc.invalidateQueries({ queryKey: ["backup"] });
     } catch (err) {
       setError((err as { message?: string }).message ?? "הבדיקה נכשלה.");
@@ -169,6 +170,7 @@ export function CheckBackupDialog({ staged, onClose }: { staged: StagedBackup; o
               <input id="check-pw" className="input" type="password" autoComplete="current-password" autoFocus value={pw} onChange={(e) => setPw(e.target.value)} />
             </div>
           )}
+          {busy && <WaitLine task="backup-check" label="פותחת את הגיבוי בעותק זמני ובודקת שהוא שלם" />}
           <ErrorLine error={error} />
         </form>
       )}
@@ -250,7 +252,7 @@ export function RestoreFromBackup({ onRestored, onBack }: { onRestored: (s: AppS
     setBusy(true);
     setError(null);
     try {
-      const status = mode === "password" ? await ipc.restoreBackup(secret, null) : await ipc.restoreBackup(null, secret);
+      const status = await timed("restore", mode === "password" ? ipc.restoreBackup(secret, null) : ipc.restoreBackup(null, secret));
       setSecret("");
       onRestored(status);
     } catch (err) {
@@ -286,6 +288,7 @@ export function RestoreFromBackup({ onRestored, onBack }: { onRestored: (s: AppS
             {mode === "password" ? "הסיסמה נשכחה? פתיחה עם ערכת השחזור" : "פתיחה עם הסיסמה"}
           </button>
           <ErrorLine error={error} />
+          {busy && <WaitLine task="restore" label="פותחת את הגיבוי, בודקת שהוא שלם ומשחזרת" />}
           <button type="submit" className="btn btn-primary btn-big" disabled={busy || !secret.trim()}>{busy ? "משחזרת…" : "שחזור ופתיחה"}</button>
         </form>
       )}

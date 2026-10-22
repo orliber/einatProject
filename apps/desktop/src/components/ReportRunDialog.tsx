@@ -3,7 +3,7 @@ import { useApp } from "../App";
 import { ipc, type Prepared } from "../ipc/client";
 import type { CaseApi } from "../screens/CaseScreen";
 import { Dialog, ErrorLine, Segments, Spinner } from "./ui";
-import { aboutLeft, estimateMs, ProgressLine } from "./Progress";
+import { aboutLeft, estimateMs, ProgressLine, timed, WaitLine } from "./Progress";
 import "./ReportRunDialog.css";
 import { useAi } from "../ai";
 
@@ -30,6 +30,7 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
   /** "לעצור": the sections still in the queue are not sent; those being written finish. */
   const stopping = useRef(false);
   const [stopped, setStopped] = useState(false);
+  const [preparingSort, setPreparingSort] = useState(false);
   const unsorted = api.detail.routing.filter((r) => r.needs_sorting).length;
   const draftMs = estimateMs("draft", status.speed, status.demo_mode);
 
@@ -43,7 +44,7 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
   async function load() {
     setError(null);
     try {
-      apply(await ipc.prepareFullDraft(api.caseId));
+      apply(await timed("prepare", ipc.prepareFullDraft(api.caseId), "report"));
     } catch (e) {
       setError(fail(e as never));
     }
@@ -53,7 +54,7 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
     // Opening starts the work: sorting first when needed (its review shows what leaves),
     // then the drafts are prepared (after sorting, `load` runs again).
     if (unsorted > 0) void sortFirst();
-    else ipc.prepareFullDraft(api.caseId).then(apply).catch((e: unknown) => setError(fail(e as never)));
+    else timed("prepare", ipc.prepareFullDraft(api.caseId), "report").then(apply).catch((e: unknown) => setError(fail(e as never)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -71,8 +72,9 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
 
   async function sortFirst() {
     setError(null);
+    setPreparingSort(true);
     try {
-      const prepared = await ipc.prepareSort(api.caseId);
+      const prepared = await timed("prepare", ipc.prepareSort(api.caseId), "sort").finally(() => setPreparingSort(false));
       const sent = await api.review({
         title: "שלב 1: מיון החומרים לסעיפים",
         prepared,
@@ -211,10 +213,11 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
         {unsorted > 0 && (
           <div className="run-sort">
             <span className="grow">קודם ממיינים, כדי שכל סעיף יקבל רק את שלו.</span>
-            <button type="button" className="btn btn-primary" onClick={() => void sortFirst()}>מיון החומרים</button>
+            <button type="button" className="btn btn-primary" disabled={preparingSort} onClick={() => void sortFirst()}>מיון החומרים</button>
           </div>
         )}
-        {unsorted === 0 && !items && !error && <p className="muted"><Spinner /> מכינה את הבקשות ובודקת מה יוצא…</p>}
+        {preparingSort && <WaitLine task="prepare" speed="sort" label="מכינה את בקשת המיון ומסתירה שמות" />}
+        {unsorted === 0 && !items && !error && <WaitLine task="prepare" speed="report" label="מכינה את הבקשות, מסתירה שמות ובודקת מה יוצא" />}
         {items && items.length === 0 && <p className="muted">אין סעיפים שמחכים לטיוטה. מוסיפים חומרים ב"חומרי התיק".</p>}
 
         {running && rows.length > 0 && (

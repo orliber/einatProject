@@ -13,6 +13,20 @@
 .progress-label {
   font-weight: 700;
 }
+.progress-line.small {
+  gap: 6px;
+  min-width: min(260px, 100%);
+  margin-block: 6px;
+}
+.progress-line.small .progress-label {
+  font-weight: 400;
+}
+.progress-line.small .progress-time {
+  font-size: var(--text-sm);
+}
+.progress-line.small .progress-track {
+  height: 6px;
+}
 .progress-time {
   font-size: var(--text-base);
   color: var(--ink-muted);
