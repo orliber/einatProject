@@ -106,24 +106,29 @@ pub fn config() -> Result<ClientConfig, CoreError> {
 }
 
 /// Sign in in her browser and come back with a session. Runs outside the core's lock.
-/// `open` opens the address in her default browser.
+/// `open` opens the address in her default browser. `keep_grant` as for [`tidy_up`]: a sign-in
+/// refused for lacking the hidden folder withdraws its token only when nothing rests on the
+/// app's grant ([`Core::drive_keeps_grant`]).
 pub fn sign_in(
     open: &dyn Fn(&str) -> Result<(), CoreError>,
+    keep_grant: bool,
 ) -> Result<(GoogleHttp, Session), CoreError> {
-    sign_in_with(open, false)
+    sign_in_with(open, false, keep_grant)
 }
 
 /// As [`sign_in`], asking Google for a lasting permission too: for the encrypted backup
 /// copy, which goes up after each backup without the browser (D-099).
 pub fn sign_in_lasting(
     open: &dyn Fn(&str) -> Result<(), CoreError>,
+    keep_grant: bool,
 ) -> Result<(GoogleHttp, Session), CoreError> {
-    sign_in_with(open, true)
+    sign_in_with(open, true, keep_grant)
 }
 
 fn sign_in_with(
     open: &dyn Fn(&str) -> Result<(), CoreError>,
     lasting: bool,
+    keep_grant: bool,
 ) -> Result<(GoogleHttp, Session), CoreError> {
     let cfg = config()?;
     if BUSY.swap(true, Ordering::SeqCst) {
@@ -143,7 +148,8 @@ fn sign_in_with(
         open(&pending.url)?;
         let code = google::wait(&mut pending, &CANCEL, google::SIGN_IN_TIMEOUT)
             .map_err(|e| from_google(&e))?;
-        let session = google::finish(&http, &cfg, &pending, &code).map_err(|e| from_google(&e))?;
+        let session = google::finish_with(&http, &cfg, &pending, &code, keep_grant)
+            .map_err(|e| from_google(&e))?;
         Ok((http, session))
     })();
     BUSY.store(false, Ordering::SeqCst);
@@ -187,9 +193,10 @@ pub fn read_keys(
 
 /// Best effort: delete key files that no slot uses any more, then end the session.
 ///
-/// While the encrypted backup copy is on (D-099, `keep_grant`), the session is not revoked:
-/// at Google that withdraws the app's whole grant, the copy's lasting permission with it. The
-/// short token is dropped instead, and runs out within the hour.
+/// While the encrypted backup copy is on or its cleanup is owed (D-099, `keep_grant`, from
+/// [`Core::drive_keeps_grant`]), the session is not revoked: at Google that withdraws the
+/// app's whole grant, the copy's lasting permission with it, and an owed cleanup could then no
+/// longer delete the copies. The short token is dropped instead, and runs out within the hour.
 pub fn tidy_up(http: &dyn Http, session: Session, stale: &[String], keep_grant: bool) {
     for id in stale {
         let _ = google::delete_key(http, &session, id);

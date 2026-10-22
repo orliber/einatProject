@@ -1505,7 +1505,7 @@ export class FakeCore {
       case "google_cancel":
         return null;
       case "drive_backup_status":
-        return { available: true, connected: this.googleOn, on: this.driveOn, last_at: this.driveOn ? this.driveLastAt : null, problem: null, cleanup_pending: false } satisfies DriveBackupStatus;
+        return { available: true, connected: this.googleOn, on: this.driveOn, last_at: this.driveOn ? this.driveLastAt : null, problem: null, cleanup_pending: false, copies_left: false } satisfies DriveBackupStatus;
       case "drive_backup_turn_on":
         if (!this.googleOn) fail("refused", "קודם מחברים את חשבון הגוגל: הגדרות ← סיסמה ואבטחה ← כניסה עם גוגל כששוכחים סיסמה.");
         this.driveOn = true;

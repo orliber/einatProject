@@ -113,6 +113,16 @@ fn describe(
             "עותק מוצפן של הגיבוי לא עלה לגוגל דרייב".to_owned(),
             false,
         ),
+        "drive_backup_cleanup" if flag("restore") => (
+            "security",
+            if text("result") == "pending" {
+                "ביטול ההרשאה בגוגל שהגיעה עם הגיבוי ששוחזר עוד לא הושלם, וינוסה שוב"
+            } else {
+                "ההרשאה בגוגל שהגיעה עם הגיבוי ששוחזר בוטלה"
+            }
+            .to_owned(),
+            false,
+        ),
         "drive_backup_cleanup" => (
             "security",
             match text("result") {

@@ -32,7 +32,8 @@ pub(crate) fn open_in_browser(url: &str) -> Result<(), CoreError> {
 }
 
 /// Sign in outside the core's lock, then run `then` with the session (still outside it).
-pub(crate) async fn with_google<T, F>(then: F) -> Res<T>
+/// `keep_grant` as for [`dv_core::google::tidy_up`].
+pub(crate) async fn with_google<T, F>(keep_grant: bool, then: F) -> Res<T>
 where
     T: Send + 'static,
     F: FnOnce(&dv_core::google::GoogleHttp, dv_core::google::Session) -> Result<T, CoreError>
@@ -40,7 +41,8 @@ where
         + 'static,
 {
     tauri::async_runtime::spawn_blocking(move || {
-        let (http, session) = dv_core::google::sign_in(&open_in_browser).map_err(|e| e.to_ui())?;
+        let (http, session) =
+            dv_core::google::sign_in(&open_in_browser, keep_grant).map_err(|e| e.to_ui())?;
         then(&http, session).map_err(|e| e.to_ui())
     })
     .await
@@ -70,18 +72,19 @@ pub(crate) async fn google_turn_on(state: tauri::State<'_, AppState>, password: 
     let password = zeroize::Zeroizing::new(password);
     let check = password.clone();
     let vault_id = with_core(&state, move |c| c.google_turn_on_check(&check)).await?;
-    // While the encrypted backup copy is on, the session is not revoked at the end: at Google
-    // that would withdraw the copy's lasting permission too (D-099).
-    let keep_grant = with_core(&state, |c| Ok(c.drive_backup_on())).await?;
-    let (drive, account, new_id, older, http_session) = with_google(move |http, session| {
-        match dv_core::google::put_new_key(http, &session, &vault_id) {
+    // While the encrypted backup copy is on or its cleanup is owed, the session is not revoked
+    // at the end: at Google that would withdraw the copy's lasting permission too (D-099).
+    let keep_grant = with_core(&state, |c| Ok(c.drive_keeps_grant())).await?;
+    let (drive, account, new_id, older, http_session) = with_google(
+        keep_grant,
+        move |http, session| match dv_core::google::put_new_key(http, &session, &vault_id) {
             Ok((key, id, older)) => Ok((key, session.account_id.clone(), id, older, Some(session))),
             Err(e) => {
                 dv_core::google::tidy_up(http, session, &[], keep_grant);
                 Err(e)
             }
-        }
-    })
+        },
+    )
     .await?;
     let finished = with_core(&state, move |c| {
         c.google_turn_on_finish(
@@ -139,8 +142,9 @@ pub(crate) async fn google_recover(
     })
     .await?;
     // The session ends after the vault is open: only then is it known whether the encrypted
-    // backup copy is on, whose lasting permission a revoke would withdraw too (D-099).
-    let (keys, session) = with_google(move |http, session| {
+    // backup copy is on or its cleanup owed, which a revoke would strand (D-099). Until then
+    // (locked) the grant is left alone, and the short token runs out within the hour.
+    let (keys, session) = with_google(true, move |http, session| {
         let result = if dv_core::google::same_account(&vault_id, &tag, &session) {
             dv_core::google::read_keys(http, &session, &vault_id)
         } else {
@@ -151,7 +155,7 @@ pub(crate) async fn google_recover(
         match result {
             Ok(keys) => Ok((keys, session)),
             Err(e) => {
-                dv_core::google::tidy_up(http, session, &[], false);
+                dv_core::google::tidy_up(http, session, &[], true);
                 Err(e)
             }
         }
@@ -161,11 +165,10 @@ pub(crate) async fn google_recover(
         c.google_recover_finish(&dv_core::google::WindowsAccount, &keys, &new_password)
     })
     .await;
-    // Unknown (still locked): revoked, the stricter choice.
-    let keep_grant = opened.is_ok()
-        && with_core(&state, |c| Ok(c.drive_backup_on()))
-            .await
-            .unwrap_or(false);
+    // Still locked (not opened): not known, left alone.
+    let keep_grant = with_core(&state, |c| Ok(c.drive_keeps_grant()))
+        .await
+        .unwrap_or(true);
     let _ = tauri::async_runtime::spawn_blocking(move || {
         if let Ok(http) = dv_core::google::GoogleHttp::new() {
             dv_core::google::tidy_up(&http, session, &[], keep_grant);

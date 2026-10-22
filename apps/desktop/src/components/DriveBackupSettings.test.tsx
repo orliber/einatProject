@@ -4,7 +4,7 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import { AppContext, type AppApi } from "../App";
 import { status } from "../test/fixtures";
 import type { DriveBackupStatus, DriveCleanupResult } from "../ipc/client";
-import { CLEANUP_PENDING, CLEANUP_WITHDRAWN, CONNECT_FIRST, DriveBackupSettings } from "./DriveBackupSettings";
+import { CLEANUP_PENDING, CLEANUP_WITHDRAWN, CONNECT_FIRST, COPIES_LEFT, DriveBackupSettings } from "./DriveBackupSettings";
 
 const api = (over: Partial<AppApi> = {}): AppApi => ({
   status: status(),
@@ -17,7 +17,7 @@ const api = (over: Partial<AppApi> = {}): AppApi => ({
 });
 
 const drive = (over: Partial<DriveBackupStatus> = {}): DriveBackupStatus => ({
-  available: true, connected: true, on: false, last_at: null, problem: null, cleanup_pending: false, ...over,
+  available: true, connected: true, on: false, last_at: null, problem: null, cleanup_pending: false, copies_left: false, ...over,
 });
 
 function show(a: AppApi = api()) {
@@ -126,6 +126,27 @@ describe("the encrypted copy in Google Drive", () => {
     mockIPC(() => drive({ cleanup_pending: true }));
     show();
     expect(await screen.findByText(CLEANUP_PENDING)).toBeInTheDocument();
+  });
+
+  it("lets the owed cleanup's line go once the program finished it by itself", async () => {
+    let pending = true;
+    mockIPC(() => drive({ cleanup_pending: pending }));
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <AppContext.Provider value={api()}><DriveBackupSettings /></AppContext.Provider>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText(CLEANUP_PENDING)).toBeInTheDocument();
+    pending = false;
+    await qc.refetchQueries({ queryKey: ["drive-backup"] });
+    await waitFor(() => expect(screen.queryByText(CLEANUP_PENDING)).toBeNull());
+  });
+
+  it("after a restore, says copies from before may be in Drive and how to delete them", async () => {
+    mockIPC(() => drive({ copies_left: true }));
+    show();
+    expect(await screen.findByText(COPIES_LEFT)).toBeInTheDocument();
   });
 
   it("is hidden where this version cannot talk to Google", async () => {

@@ -319,19 +319,24 @@ pub struct Restored {
 impl RestoreJob {
     #[must_use]
     pub fn run(self) -> Restored {
-        // A failed restore removes what it wrote.
-        let vault = Vault::restore_backup(&self.bytes, &self.dir, self.proof.secret(None)).map(
-            |(mut v, _)| {
-                // The backup's password slot opens anywhere; here it is bound to this
-                // computer at once (D-076). Best effort: otherwise at the next opening.
-                if let Proof::Password(p) = &self.proof {
-                    if let Some(here) = key_here(self.seal.as_ref(), &self.dir, false) {
-                        let _ = v.bind_password(p, &here);
-                    }
+        // A failed restore removes what it wrote. The copy in her Drive is never turned on by
+        // a restore (D-099): when that cannot be made sure of, the restore fails.
+        let vault = Vault::restore_backup_then(
+            &self.bytes,
+            &self.dir,
+            self.proof.secret(None),
+            crate::drive_backup::forget_on_restore,
+        )
+        .map(|(mut v, _)| {
+            // The backup's password slot opens anywhere; here it is bound to this
+            // computer at once (D-076). Best effort: otherwise at the next opening.
+            if let Proof::Password(p) = &self.proof {
+                if let Some(here) = key_here(self.seal.as_ref(), &self.dir, false) {
+                    let _ = v.bind_password(p, &here);
                 }
-                v
-            },
-        );
+            }
+            v
+        });
         Restored {
             bytes: self.bytes,
             vault,
@@ -995,10 +1000,7 @@ impl Core {
         }
         // No recycle-bin purge now: a restore is often how a mistaken deletion is undone.
         // after_unlock counts a wrong secret.
-        let status = self.after_unlock(restored.vault, false)?;
-        // The copy in her Drive is never turned on by a restore (D-099).
-        self.drive_backup_forget_after_restore()?;
-        Ok(status)
+        self.after_unlock(restored.vault, false)
     }
 
     pub fn restore_staged_backup(

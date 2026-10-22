@@ -22,7 +22,11 @@ const PROBLEM: Record<DriveProblem, string> = {
 
 /** Still owed at Google after turning off: said, never passed off as done. */
 export const CLEANUP_PENDING =
-  "העותק בגוגל דרייב כבוי, ושום עותק לא עולה יותר. את העותקים שכבר שם עוד לא הצלחתי למחוק, וגם לא לבטל את ההרשאה בגוגל. אנסה שוב מעצמי בזמן שהכספת פתוחה.";
+  "העותק בגוגל דרייב כבוי, ושום עותק לא עולה יותר. את העותקים שכבר שם התוכנה עוד לא הצליחה למחוק, וגם לא לבטל את ההרשאה בגוגל. היא תנסה שוב מעצמה בזמן שהכספת פתוחה.";
+
+/** After a restore of a backup taken while the copy was on: its copies were left in Drive. */
+export const COPIES_LEFT =
+  "לפני השחזור העותק בגוגל דרייב היה דלוק, ולכן ייתכן שנשארו שם עותקים מוצפנים מלפני השחזור. כדי למחוק אותם, מדליקים את העותק ואז מכבים אותו.";
 
 /** The permission was gone at Google already, so the copies there are out of the program's reach. */
 export const CLEANUP_WITHDRAWN =
@@ -40,11 +44,16 @@ function message(err: unknown, fallback: string): string {
 export function DriveBackupSettings() {
   const { notify } = useApp();
   const qc = useQueryClient();
-  const { data: status } = useQuery({ queryKey: ["drive-backup"], queryFn: ipc.driveBackupStatus, retry: false });
+  // While a cleanup is owed, the program tries it again by itself: read again now and then, so
+  // the line goes once it is done.
+  const { data: status } = useQuery({
+    queryKey: ["drive-backup"], queryFn: ipc.driveBackupStatus, retry: false,
+    refetchInterval: (q) => (q.state.data?.cleanup_pending ? 60_000 : false),
+  });
   const [signingIn, setSigningIn] = useState(false);
   const [turningOff, setTurningOff] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // What turning off left owed at Google, kept on screen (not a passing notice).
+  // The permission was gone at Google already: kept on screen (not a passing notice).
   const [left, setLeft] = useState<string | null>(null);
   if (!status?.available) return null;
   const s: DriveBackupStatus = status;
@@ -70,9 +79,9 @@ export function DriveBackupSettings() {
     try {
       const result = await ipc.driveBackupTurnOff();
       await qc.invalidateQueries({ queryKey: ["drive-backup"] });
-      if (result === "pending") setLeft(CLEANUP_PENDING);
-      else if (result === "withdrawn") setLeft(CLEANUP_WITHDRAWN);
-      else notify(TURNED_OFF[result]);
+      // Still owed: the status says so, for as long as it is owed.
+      if (result === "withdrawn") setLeft(CLEANUP_WITHDRAWN);
+      else if (result !== "pending") notify(TURNED_OFF[result]);
     } catch (err) {
       setError(message(err, "הכיבוי לא הושלם."));
     } finally {
@@ -116,10 +125,10 @@ export function DriveBackupSettings() {
       )}
       {left ? (
         <p className="hint" role="status">{left}</p>
-      ) : (
-        !s.on && s.cleanup_pending && !turningOff && (
-          <p className="hint" role="status">{CLEANUP_PENDING}</p>
-        )
+      ) : !s.on && !turningOff && s.cleanup_pending ? (
+        <p className="hint" role="status">{CLEANUP_PENDING}</p>
+      ) : !s.on && !turningOff && s.copies_left && (
+        <p className="hint" role="status">{COPIES_LEFT}</p>
       )}
       <ErrorLine error={error} />
     </section>

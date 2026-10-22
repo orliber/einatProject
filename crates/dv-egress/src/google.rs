@@ -519,9 +519,16 @@ impl Http for GoogleHttp {
         if let Some(ct) = &req.content_type {
             builder = builder.header("content-type", ct.as_str());
         }
-        let mut req = req;
-        // Moved, not copied: a backup copy can be large.
-        let body = std::mem::take(&mut *req.body);
+        // reqwest takes its own buffer and frees it without wiping. A form (it may carry a
+        // token and the client secret) is copied for it, so the original here is wiped when
+        // dropped; reqwest's copy is a residual (D-099). The upload's body, a sealed backup
+        // that opens only with her password or kit, is moved instead: it can be large.
+        let body = if req.method == Method::Put {
+            let mut req = req;
+            std::mem::take(&mut *req.body)
+        } else {
+            req.body.to_vec()
+        };
         let resp = builder.body(body).send().map_err(|e| {
             let text = format!("{e:?}").to_lowercase();
             if text.contains("certificate") || text.contains("tls") || text.contains("handshake") {
@@ -616,12 +623,26 @@ fn account_from_id_token(id_token: &str, client_id: &str) -> Result<String, Goog
         .ok_or_else(|| GoogleError::Protocol("id token has no account".to_owned()))
 }
 
-/// Trade the browser's one-time code for a token (PKCE).
+/// Trade the browser's one-time code for a token (PKCE). A token without the hidden folder is
+/// refused and left to run out (see [`finish_with`]).
 pub fn finish(
     http: &dyn Http,
     cfg: &ClientConfig,
     sign_in: &SignIn,
     code: &str,
+) -> Result<Session, GoogleError> {
+    finish_with(http, cfg, sign_in, code, true)
+}
+
+/// As [`finish`]. A token without the hidden folder is withdrawn at Google before it is
+/// refused, so no grant is left, unless `keep_grant`: the app's grant at Google is one per
+/// account, and the encrypted backup copy may rest on it (D-099).
+pub fn finish_with(
+    http: &dyn Http,
+    cfg: &ClientConfig,
+    sign_in: &SignIn,
+    code: &str,
+    keep_grant: bool,
 ) -> Result<Session, GoogleError> {
     let body = form(&[
         ("code", code),
@@ -652,6 +673,9 @@ pub fn finish(
     let refresh = take_secret(&mut v, "refresh_token");
     // Google's consent page lets her untick the hidden folder; without it nothing here works.
     if !granted(&v) {
+        if !keep_grant {
+            let _ = revoke_token(http, &token);
+        }
         return Err(GoogleError::ScopeNotGranted);
     }
     Ok(Session {
@@ -1370,7 +1394,25 @@ mod tests {
                 GoogleError::ScopeNotGranted,
                 "{scope}"
             );
+            // Left to run out: the grant may hold the backup copy's permission.
+            assert_eq!(fake.seen.lock().unwrap().len(), 1, "{scope}");
         }
+        // Withdrawn when nothing rests on the grant.
+        let answer = serde_json::json!({
+            "access_token": "t", "id_token": good_id, "scope": "openid",
+        });
+        let fake = Fake::new(vec![
+            (200, answer.to_string().into_bytes()),
+            (200, Vec::new()),
+        ]);
+        assert_eq!(
+            finish_with(&fake, &cfg(), &s, "c", false).unwrap_err(),
+            GoogleError::ScopeNotGranted
+        );
+        let seen = fake.seen.lock().unwrap();
+        assert_eq!(seen.len(), 2);
+        assert_eq!(seen[1].1, REVOKE_URL);
+        assert_eq!(seen[1].3, b"token=t");
     }
 
     /// A token sent to be withdrawn is gone once Google says so, also when it was already

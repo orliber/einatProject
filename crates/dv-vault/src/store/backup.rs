@@ -522,6 +522,17 @@ impl Vault {
         target: &Path,
         secret: Secret<'_>,
     ) -> Result<(Vault, BackupCheck), VaultError> {
+        Self::restore_backup_then(backup, target, secret, |_| Ok(()))
+    }
+
+    /// As [`Vault::restore_backup`], with `prepare` run on the opened vault before anything
+    /// else: when it fails, the restore fails and leaves nothing behind.
+    pub fn restore_backup_then(
+        backup: &[u8],
+        target: &Path,
+        secret: Secret<'_>,
+        prepare: impl FnOnce(&mut Vault) -> Result<(), VaultError>,
+    ) -> Result<(Vault, BackupCheck), VaultError> {
         if target.join(HEADER_FILE).exists() {
             return Err(VaultError::AlreadyExists);
         }
@@ -543,7 +554,9 @@ impl Vault {
                 fs::write(target.join(name), bytes)?;
             }
             fs::write(target.join(HEADER_FILE), parsed.header_bytes)?;
-            Vault::open_with(target, parsed.header, &mk)
+            let mut vault = Vault::open_with(target, parsed.header, &mk)?;
+            prepare(&mut vault)?;
+            Ok(vault)
         })();
         let mut vault = match opened {
             Ok(vault) => vault,

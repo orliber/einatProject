@@ -81,6 +81,7 @@ impl Core {
             since_last: None,
             drive_generation: Arc::default(),
             drive_cleanup_at: None,
+            drive_cleanups: Arc::default(),
         }
     }
 

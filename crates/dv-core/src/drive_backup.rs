@@ -16,10 +16,15 @@
 //! * Turning it off forgets the permission at once and keeps it, sealed, only as a cleanup
 //!   that is owed: delete the copies in her Drive and withdraw the permission at Google. Until
 //!   Google confirms both, the cleanup is tried again while the vault is open.
-//! * A restored backup never turns it on: the permission it carries is forgotten, and she
-//!   turns the copy on again herself.
+//! * While it is on, or a cleanup is owed, nothing else withdraws the app's grant at Google:
+//!   the grant is one per account, so a withdrawal by a sign-in's tidy-up would strand the
+//!   cleanup (the copies could no longer be deleted). The cleanup withdraws it itself.
+//! * A restored backup never turns it on: the permission it carries is forgotten at once and
+//!   withdrawn at Google (tried again like a cleanup), while its copies stay: they may be her
+//!   only copies away from this computer. The settings say that turning the copy on and off
+//!   deletes them.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -39,6 +44,16 @@ const TOKEN_SECRET: &str = "drive_backup_token";
 /// A permission she turned off whose cleanup at Google (delete the copies, withdraw it) is
 /// not confirmed yet. Sealed like the permission; tried again until Google confirms.
 const CLEANUP_SECRET: &str = "drive_backup_cleanup";
+/// A permission a restored backup carried: withdrawn at Google, its copies left alone. Sealed
+/// like the permission; tried again until Google confirms.
+const REVOKE_SECRET: &str = "drive_backup_revoke";
+/// How the last cleanup went (and the last withdrawal after a restore): a retry that ends the
+/// same way writes nothing more to the activity log.
+const CLEANUP_RESULT_KEY: &str = "drive_backup_cleanup_result";
+const REVOKE_RESULT_KEY: &str = "drive_backup_revoke_result";
+/// "1" after a restore of a backup taken while the copy was on: copies from before the restore
+/// may be in her Drive, until a cleanup deletes them.
+const COPIES_LEFT_KEY: &str = "drive_backup_copies_left";
 /// The backup time of the newest copy that went up.
 const LAST_KEY: &str = "drive_backup_last_at";
 /// Why the last upload did not go up, or empty.
@@ -62,12 +77,12 @@ static QUEUE: Mutex<(Option<DriveUpload>, bool)> = Mutex::new((None, false));
 #[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum DriveProblem {
-    /// No internet (or the secure connection failed). The next backup tries again.
+    /// No internet. The next backup tries again.
     Offline,
     /// The permission at Google was withdrawn: connect again.
     Reconnect,
-    /// Google answered something else, or the connection could not be set up. The next
-    /// backup tries again.
+    /// Google answered something else, the secure connection failed, or the connection could
+    /// not be set up. The next backup tries again.
     Failed,
 }
 
@@ -92,7 +107,7 @@ impl DriveProblem {
     fn of(e: &GoogleError) -> Self {
         match e {
             GoogleError::Revoked => DriveProblem::Reconnect,
-            GoogleError::Offline | GoogleError::Tls => DriveProblem::Offline,
+            GoogleError::Offline => DriveProblem::Offline,
             _ => DriveProblem::Failed,
         }
     }
@@ -116,6 +131,17 @@ pub enum DriveCleanupResult {
 }
 
 impl DriveCleanupResult {
+    fn parse(s: &str) -> Option<Self> {
+        [
+            DriveCleanupResult::Off,
+            DriveCleanupResult::Cleaned,
+            DriveCleanupResult::Pending,
+            DriveCleanupResult::Withdrawn,
+        ]
+        .into_iter()
+        .find(|r| r.as_str() == s)
+    }
+
     fn as_str(self) -> &'static str {
         match self {
             DriveCleanupResult::Off => "off",
@@ -144,6 +170,9 @@ pub struct DriveBackupStatus {
     /// Turned off, but deleting the copies and withdrawing the permission at Google is not
     /// confirmed yet (tried again while the vault is open).
     pub cleanup_pending: bool,
+    /// A restored backup was taken while the copy was on: copies from before the restore may
+    /// be in her Drive (turning the copy on and off deletes them).
+    pub copies_left: bool,
 }
 
 fn refused(text: &str) -> CoreError {
@@ -161,13 +190,19 @@ fn not_connected() -> CoreError {
 /// ([`google::begin_lasting`]): the account is the one connected to the vault, and Google gave
 /// a lasting permission. The short token is not revoked here: at Google that would withdraw
 /// the lasting permission with it. It is dropped, and expires within the hour.
+///
+/// `keep_grant`: a cleanup is owed ([`Core::drive_keeps_grant`]). Then nothing is withdrawn
+/// here either: it would withdraw the owed cleanup's permission (the same grant), which could
+/// then no longer delete the copies. The cleanup withdraws the whole grant itself.
 pub fn lasting_permission(
     http: &dyn Http,
     mut session: Session,
     vault_id: &str,
     tag: &str,
+    keep_grant: bool,
 ) -> Result<Zeroizing<String>, CoreError> {
     if !same_account(vault_id, tag, &session) {
+        // Another account: another grant, nothing of this vault's.
         google::revoke(http, session);
         return Err(refused(
             "זה לא חשבון הגוגל שחובר לכספת. אפשר לנסות שוב ולבחור את החשבון שחובר.",
@@ -176,7 +211,9 @@ pub fn lasting_permission(
     match session.take_refresh_token() {
         Some(token) => Ok(token),
         None => {
-            google::revoke(http, session);
+            if !keep_grant {
+                google::revoke(http, session);
+            }
             Err(refused(
                 "גוגל לא נתנה לתוכנה הרשאה קבועה. אפשר לנסות שוב ולאשר בחלון של גוגל.",
             ))
@@ -185,9 +222,13 @@ pub fn lasting_permission(
 }
 
 /// A lasting permission that was given but is not kept (the vault locked during the sign-in,
-/// or the account changed): withdrawn at Google, so no unused permission stays there.
-pub fn withdraw_unkept(http: &dyn Http, token: &str) {
-    let _ = google::revoke_token(http, token);
+/// or Google was disconnected): withdrawn at Google, so no unused permission stays there.
+/// Not while a cleanup is owed (`keep_grant`, see [`lasting_permission`]): the cleanup
+/// withdraws this permission with its own, after deleting the copies.
+pub fn withdraw_unkept(http: &dyn Http, token: &str, keep_grant: bool) {
+    if !keep_grant {
+        let _ = google::revoke_token(http, token);
+    }
 }
 
 /// Queue an upload for the one worker; a newer one replaces one still waiting. `true` when
@@ -336,13 +377,32 @@ impl DriveUpload {
     }
 }
 
-/// After turning off, with the core free: delete the copies and withdraw the permission.
+/// After turning off, with the core free: delete the copies and withdraw the permission. After
+/// a restore (`copies: false`): withdraw the restored permission only.
 pub struct DriveCleanup {
     session: u64,
     token: Zeroizing<String>,
     vault_id: String,
+    copies: bool,
     generation: Arc<AtomicU64>,
     at: u64,
+    _running: Running,
+}
+
+/// Counts a cleanup on its way, until it is dropped: the timer hands out no other meanwhile.
+struct Running(Arc<AtomicUsize>);
+
+impl Running {
+    fn new(count: &Arc<AtomicUsize>) -> Self {
+        count.fetch_add(1, Ordering::AcqRel);
+        Running(Arc::clone(count))
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 impl std::fmt::Debug for DriveCleanup {
@@ -362,6 +422,7 @@ enum Cleaned {
 pub struct DriveCleaned {
     session: u64,
     token: Zeroizing<String>,
+    copies: bool,
     outcome: Cleaned,
 }
 
@@ -380,6 +441,11 @@ impl DriveCleanup {
         let moved = || self.generation.load(Ordering::Acquire) != self.at;
         let outcome = if moved() {
             Cleaned::Superseded
+        } else if !self.copies {
+            match google::revoke_token(http, &self.token) {
+                Ok(()) => Cleaned::Done(DriveCleanupResult::Cleaned),
+                Err(_) => Cleaned::Done(DriveCleanupResult::Pending),
+            }
         } else {
             match google::session_from_refresh(http, cfg, &self.token) {
                 Err(GoogleError::Revoked) => Cleaned::Done(DriveCleanupResult::Withdrawn),
@@ -397,28 +463,57 @@ impl DriveCleanup {
         DriveCleaned {
             session: self.session,
             token: self.token,
+            copies: self.copies,
             outcome,
         }
     }
 }
 
+/// Right after a restore, inside the restore itself (a failure here undoes the restore): a
+/// backup taken while the copy was on carries its permission, and a restore must never turn it
+/// on without her. The permission is forgotten and kept, sealed, only to be withdrawn at Google
+/// (by [`Core::take_drive_cleanup`]); the copies stay, and the settings say how to delete them.
+/// A cleanup the backup still owed stays owed.
+pub(crate) fn forget_on_restore(v: &mut Vault) -> Result<(), dv_vault::VaultError> {
+    let read = v.secret(TOKEN_SECRET);
+    // Also when it could not be read: the permission must not stay.
+    let had = !matches!(read, Ok(None));
+    let token = read.ok().flatten().filter(|t| !t.is_empty());
+    if had {
+        v.delete_secret(TOKEN_SECRET)?;
+        if let Some(token) = &token {
+            v.set_secret(REVOKE_SECRET, token)?;
+            v.set_state(REVOKE_RESULT_KEY, "")?;
+        }
+        v.set_state(COPIES_LEFT_KEY, "1")?;
+        v.record(
+            AuditEvent::DriveBackupOff,
+            None,
+            &serde_json::json!({ "restore": true }),
+        )?;
+    }
+    v.set_state(PROBLEM_KEY, "")?;
+    v.set_state(LAST_KEY, "")?;
+    v.set_state(REKEYED_KEY, "")?;
+    Ok(())
+}
+
 impl Core {
     fn drive_token(&self) -> Option<Zeroizing<String>> {
+        self.drive_secret(TOKEN_SECRET)
+    }
+
+    fn drive_secret(&self, name: &str) -> Option<Zeroizing<String>> {
         self.vault
             .as_ref()?
-            .secret(TOKEN_SECRET)
+            .secret(name)
             .ok()
             .flatten()
             .filter(|t| !t.is_empty())
     }
 
     fn drive_cleanup_token(&self) -> Option<Zeroizing<String>> {
-        self.vault
-            .as_ref()?
-            .secret(CLEANUP_SECRET)
-            .ok()
-            .flatten()
-            .filter(|t| !t.is_empty())
+        self.drive_secret(CLEANUP_SECRET)
     }
 
     /// Moves the generation: an upload or cleanup begun before it stops (see their `run`).
@@ -426,10 +521,35 @@ impl Core {
         self.drive_generation.fetch_add(1, Ordering::AcqRel) + 1
     }
 
+    fn drive_cleanup(
+        &self,
+        token: Zeroizing<String>,
+        copies: bool,
+        at: u64,
+    ) -> Option<DriveCleanup> {
+        Some(DriveCleanup {
+            session: self.session,
+            token,
+            vault_id: self.vault.as_ref()?.vault_id().to_owned(),
+            copies,
+            generation: Arc::clone(&self.drive_generation),
+            at,
+            _running: Running::new(&self.drive_cleanups),
+        })
+    }
+
     /// The copy is on (the vault holds the lasting permission).
     #[must_use]
     pub fn drive_backup_on(&self) -> bool {
         self.drive_token().is_some()
+    }
+
+    /// Whether the end of a Google sign-in must leave the app's grant at Google alone: the
+    /// copy is on, or a cleanup is owed (withdrawing the grant would strand it), or the vault
+    /// is locked and that is not known. A short token kept this way runs out within the hour.
+    #[must_use]
+    pub fn drive_keeps_grant(&self) -> bool {
+        self.vault.is_none() || self.drive_backup_on() || self.drive_cleanup_token().is_some()
     }
 
     pub fn drive_backup_status(
@@ -448,6 +568,7 @@ impl Core {
         } else {
             None
         };
+        let copies_left = v.setting(COPIES_LEFT_KEY)?.as_deref() == Some("1");
         Ok(DriveBackupStatus {
             available: google.available,
             connected: google.on,
@@ -455,17 +576,19 @@ impl Core {
             last_at,
             problem,
             cleanup_pending,
+            copies_left,
         })
     }
 
     /// Turning it on, step 1 (under the lock): her Google account is connected on this
-    /// computer, and the copy is not on already. Returns the vault id and the tag of the
-    /// connected account. A cleanup still running from an earlier turning off does not
-    /// withdraw the permission she is about to give (the same grant at Google).
+    /// computer, and the copy is not on already. Returns the vault id, the tag of the
+    /// connected account, and whether the sign-in must leave the grant alone
+    /// ([`Self::drive_keeps_grant`]). A cleanup still running from an earlier turning off does
+    /// not withdraw the permission she is about to give (the same grant at Google).
     pub fn drive_backup_turn_on_check(
         &mut self,
         keys: &dyn ComputerKeys,
-    ) -> Result<(String, String), CoreError> {
+    ) -> Result<(String, String, bool), CoreError> {
         let vault_id = self.vault_ref()?.vault_id().to_owned();
         if self.drive_backup_on() {
             return Err(refused("העותק בגוגל דרייב כבר דלוק."));
@@ -476,7 +599,7 @@ impl Core {
         let (_, tag) = Vault::google_slot(&self.dir)?;
         let tag = tag.ok_or_else(not_connected)?;
         self.drive_moved();
-        Ok((vault_id, tag))
+        Ok((vault_id, tag, self.drive_keeps_grant()))
     }
 
     /// Turning it on, step 3 (under the lock): Google is still connected here with the same
@@ -503,13 +626,17 @@ impl Core {
         }
         self.drive_moved();
         let owed = self.drive_cleanup_token().is_some();
+        let restored = self.drive_secret(REVOKE_SECRET).is_some();
         let v = self.vault_mut()?;
         v.set_secret(TOKEN_SECRET, token)?;
-        // A cleanup still owed would withdraw this new permission with the old one (the same
-        // grant at Google). Its copies are this vault's, and the next uploads keep only the
-        // newest.
+        // A cleanup still owed, or a restored permission still to withdraw, would withdraw
+        // this new permission with the old one (the same grant at Google). Their copies are
+        // this vault's, and the next uploads keep only the newest.
         if owed {
             v.delete_secret(CLEANUP_SECRET)?;
+        }
+        if restored {
+            v.delete_secret(REVOKE_SECRET)?;
         }
         v.set_state(PROBLEM_KEY, "")?;
         v.record(AuditEvent::DriveBackupOn, None, &serde_json::json!({}))?;
@@ -519,13 +646,13 @@ impl Core {
     /// Turn it off (under the lock): the permission is forgotten at once, and no further copy
     /// goes up (an upload on its way stops before its body). The permission stays sealed only
     /// as the cleanup owed at Google, returned to run with the core free. Also when it was
-    /// already off but a cleanup is still owed, so a second click tries it again.
+    /// already off but a cleanup is still owed (disconnecting Google asks again).
     pub fn drive_backup_turn_off(&mut self) -> Result<Option<DriveCleanup>, CoreError> {
-        let session = self.session;
         let v = self.vault_mut()?;
         let read = v.secret(TOKEN_SECRET);
         // Also when it could not be read: the permission must not stay.
-        if !matches!(read, Ok(None)) {
+        let was_on = !matches!(read, Ok(None));
+        if was_on {
             v.delete_secret(TOKEN_SECRET)?;
         }
         let token = read.ok().flatten().filter(|t| !t.is_empty());
@@ -533,81 +660,106 @@ impl Core {
         v.set_state(LAST_KEY, "")?;
         if let Some(token) = &token {
             v.set_secret(CLEANUP_SECRET, token)?;
+            v.set_state(CLEANUP_RESULT_KEY, "")?;
             v.record(AuditEvent::DriveBackupOff, None, &serde_json::json!({}))?;
         }
-        let at = self.drive_moved();
+        // Uploads on their way stop; a cleanup on its way while it was off already goes on.
+        let at = if was_on {
+            self.drive_moved()
+        } else {
+            self.drive_generation.load(Ordering::Acquire)
+        };
         let Some(owed) = self.drive_cleanup_token() else {
             return Ok(None);
         };
         self.drive_cleanup_at = Some(Instant::now());
-        Ok(Some(DriveCleanup {
-            session,
-            token: owed,
-            vault_id: self.vault_ref()?.vault_id().to_owned(),
-            generation: Arc::clone(&self.drive_generation),
-            at,
-        }))
+        Ok(self.drive_cleanup(owed, true, at))
     }
 
-    /// The cleanup still owed at Google, to try again with the core free: after an unlock,
-    /// and then at most every 15 minutes while the vault is open. The shell's timer asks.
+    /// What is owed at Google to try again with the core free: the cleanup after turning off,
+    /// or else the withdrawal after a restore. After an unlock, then at most every 15 minutes
+    /// while the vault is open, and never while another is on its way. The shell's timer asks.
     pub fn take_drive_cleanup(&mut self) -> Option<DriveCleanup> {
         if self
             .drive_cleanup_at
             .is_some_and(|t| t.elapsed() < CLEANUP_RETRY)
+            || self.drive_cleanups.load(Ordering::Acquire) > 0
         {
             return None;
         }
-        let token = self.drive_cleanup_token()?;
-        let vault_id = self.vault.as_ref()?.vault_id().to_owned();
+        let (token, copies) = match self.drive_cleanup_token() {
+            Some(t) => (t, true),
+            None => (self.drive_secret(REVOKE_SECRET)?, false),
+        };
         self.drive_cleanup_at = Some(Instant::now());
-        Some(DriveCleanup {
-            session: self.session,
-            token,
-            vault_id,
-            generation: Arc::clone(&self.drive_generation),
-            at: self.drive_generation.load(Ordering::Acquire),
-        })
+        let at = self.drive_generation.load(Ordering::Acquire);
+        self.drive_cleanup(token, copies, at)
+    }
+
+    /// What is owed now, as she is told: a cleanup still owed, or else how the last one went.
+    fn drive_cleanup_now(&mut self) -> Result<DriveCleanupResult, CoreError> {
+        if self.drive_cleanup_token().is_some() {
+            return Ok(DriveCleanupResult::Pending);
+        }
+        Ok(self
+            .vault_ref()?
+            .setting(CLEANUP_RESULT_KEY)?
+            .as_deref()
+            .and_then(DriveCleanupResult::parse)
+            .filter(|r| *r != DriveCleanupResult::Pending)
+            .unwrap_or(DriveCleanupResult::Off))
     }
 
     /// Record how a cleanup went (under the lock). Done only when Google confirmed it, or
-    /// when the permission is gone there already; otherwise it stays owed.
+    /// when the permission is gone there already; otherwise it stays owed. A retry that ends
+    /// as the last one did writes nothing more to the activity log.
     pub fn finish_drive_cleanup(
         &mut self,
         done: DriveCleaned,
     ) -> Result<DriveCleanupResult, CoreError> {
         self.same_session(done.session)?;
+        let (secret, result_key) = if done.copies {
+            (CLEANUP_SECRET, CLEANUP_RESULT_KEY)
+        } else {
+            (REVOKE_SECRET, REVOKE_RESULT_KEY)
+        };
         let ours = self
-            .drive_cleanup_token()
+            .drive_secret(secret)
             .is_some_and(|t| t.as_str() == done.token.as_str());
         let result = match done.outcome {
             Cleaned::Superseded => {
                 // On again with a new permission: nothing is owed any more. Off again: still
                 // owed, tried later.
                 if ours && self.drive_backup_on() {
-                    self.vault_mut()?.delete_secret(CLEANUP_SECRET)?;
+                    self.vault_mut()?.delete_secret(secret)?;
                 }
-                return Ok(if self.drive_cleanup_token().is_some() {
-                    DriveCleanupResult::Pending
-                } else {
-                    DriveCleanupResult::Off
-                });
+                return self.drive_cleanup_now();
             }
+            // Finished by another run meanwhile (or turned on again): nothing more to record.
+            Cleaned::Done(_) if !ours => return self.drive_cleanup_now(),
             Cleaned::Done(r) => r,
         };
         let v = self.vault_mut()?;
-        if ours && result != DriveCleanupResult::Pending {
-            v.delete_secret(CLEANUP_SECRET)?;
+        if result != DriveCleanupResult::Pending {
+            v.delete_secret(secret)?;
+            if done.copies && result == DriveCleanupResult::Cleaned {
+                v.set_state(COPIES_LEFT_KEY, "")?;
+            }
         }
-        v.record(
-            AuditEvent::DriveBackupCleanup,
-            None,
-            &serde_json::json!({ "result": result.as_str() }),
-        )?;
+        let last = v.setting(result_key)?;
+        if last.as_deref() != Some(result.as_str()) {
+            v.set_state(result_key, result.as_str())?;
+            v.record(
+                AuditEvent::DriveBackupCleanup,
+                None,
+                &serde_json::json!({ "result": result.as_str(), "restore": !done.copies }),
+            )?;
+        }
         Ok(result)
     }
 
-    /// What to upload after a backup was recorded, when the copy is on.
+    /// What to upload after a backup was recorded, when the copy is on and Google is still
+    /// connected (a copy is never sent on a permission whose turning off did not finish).
     pub(crate) fn begin_drive_upload(
         &mut self,
         session: u64,
@@ -615,6 +767,7 @@ impl Core {
         file: Vec<u8>,
     ) -> Option<DriveUpload> {
         let token = self.drive_token()?;
+        Vault::google_slot(&self.dir).ok()?.1?;
         let v = self.vault.as_ref()?;
         let vault_id = v.vault_id().to_owned();
         let rekeyed = v
@@ -676,27 +829,6 @@ impl Core {
                 )?;
             }
         }
-        Ok(())
-    }
-
-    /// Right after a restore: a backup taken while the copy was on carries its permission,
-    /// and a restore must never turn it on without her. Forgotten here; she turns it on again
-    /// herself. A cleanup the backup still owed stays owed.
-    pub(crate) fn drive_backup_forget_after_restore(&mut self) -> Result<(), CoreError> {
-        let had = self.drive_token().is_some();
-        let v = self.vault_mut()?;
-        if had {
-            v.delete_secret(TOKEN_SECRET)?;
-            v.record(
-                AuditEvent::DriveBackupOff,
-                None,
-                &serde_json::json!({ "restore": true }),
-            )?;
-        }
-        v.set_state(PROBLEM_KEY, "")?;
-        v.set_state(LAST_KEY, "")?;
-        v.set_state(REKEYED_KEY, "")?;
-        self.drive_moved();
         Ok(())
     }
 }

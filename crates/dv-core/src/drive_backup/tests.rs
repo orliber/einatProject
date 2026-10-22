@@ -418,8 +418,18 @@ fn a_cleanup_that_did_not_finish_is_tried_again_until_google_confirms() {
     assert!(!status.on && status.cleanup_pending);
     let (_, upload) = backup(&mut core, &out.path().join("b2"));
     assert!(upload.is_none(), "no copy goes up once off");
-    // The second click tries again, and says how it went.
+    // Asked again (disconnecting Google does), it tries again and says how it went; the
+    // activity log has the one row, not one per try.
     assert_eq!(turn_off(&mut core, &offline), DriveCleanupResult::Pending);
+    let rows = |core: &mut Core| {
+        core.activity(None)
+            .unwrap()
+            .entries
+            .iter()
+            .filter(|e| e.event == "drive_backup_cleanup")
+            .count()
+    };
+    assert_eq!(rows(&mut core), 1);
 
     // A copy deleted but the withdrawal failed: still owed.
     let no_revoke = FakeGoogle {
@@ -442,9 +452,99 @@ fn a_cleanup_that_did_not_finish_is_tried_again_until_google_confirms() {
     );
     assert!(google.files.lock().unwrap().is_empty());
     assert!(!core.drive_backup_status(&computer).unwrap().cleanup_pending);
+    assert_eq!(rows(&mut core), 2);
     core.lock();
     core.unlock(PASSWORD).unwrap();
     assert!(core.take_drive_cleanup().is_none());
+}
+
+/// The timer hands out no cleanup while one is on its way; a run that ends after another
+/// finished the same cleanup says how that one went, and records nothing again.
+#[test]
+fn cleanups_do_not_overlap() {
+    let (_dir, mut core, _) = turned_on();
+    let offline = FakeGoogle {
+        fail: Some(GoogleError::Offline),
+        ..FakeGoogle::default()
+    };
+    assert_eq!(turn_off(&mut core, &offline), DriveCleanupResult::Pending);
+    core.drive_cleanup_at = None;
+    let first = core.take_drive_cleanup().unwrap();
+    core.drive_cleanup_at = None;
+    assert!(core.take_drive_cleanup().is_none(), "one on its way");
+    let second = core.drive_backup_turn_off().unwrap().unwrap();
+    let google = FakeGoogle::default();
+    assert_eq!(
+        core.finish_drive_cleanup(first.run(&google, &cfg()))
+            .unwrap(),
+        DriveCleanupResult::Cleaned
+    );
+    // The second one finds the permission withdrawn already, and is told it was cleaned.
+    let withdrawn = FakeGoogle {
+        withdrawn: true,
+        ..FakeGoogle::default()
+    };
+    assert_eq!(
+        core.finish_drive_cleanup(second.run(&withdrawn, &cfg()))
+            .unwrap(),
+        DriveCleanupResult::Cleaned
+    );
+    let log = core.activity(None).unwrap().entries;
+    assert!(!log
+        .iter()
+        .any(|e| e.event == "drive_backup_cleanup" && e.warn));
+    core.drive_cleanup_at = None;
+    assert!(core.take_drive_cleanup().is_none(), "nothing owed");
+}
+
+/// Turned off without internet, then a Google sign-in (connecting again, or a forgotten
+/// password): its end must not withdraw the grant, or the owed cleanup could no longer delete
+/// the copies. The cleanup then deletes them and withdraws the grant itself.
+#[test]
+fn a_sign_in_after_turning_off_offline_leaves_the_cleanup_its_grant() {
+    let (_dir, mut core, _) = turned_on();
+    let google = FakeGoogle::default();
+    let out = tempfile::tempdir().unwrap();
+    let (_, upload) = backup(&mut core, &out.path().join("b"));
+    core.finish_drive_upload(upload.unwrap().run(&google, &cfg()))
+        .unwrap();
+    let offline = FakeGoogle {
+        fail: Some(GoogleError::Offline),
+        ..FakeGoogle::default()
+    };
+    assert_eq!(turn_off(&mut core, &offline), DriveCleanupResult::Pending);
+
+    // The sign-in's tidy-up, as the shell runs it.
+    let keep_grant = core.drive_keeps_grant();
+    assert!(keep_grant);
+    let session = google::session_from_refresh(&FakeGoogle::default(), &cfg(), "short").unwrap();
+    crate::google::tidy_up(&google, session, &[], keep_grant);
+    // A lasting permission that came without its refresh token, or was not kept: not
+    // withdrawn either.
+    let vault_id = core.vault_ref().unwrap().vault_id().to_owned();
+    let no_refresh = google::session_from_refresh(&FakeGoogle::default(), &cfg(), "short").unwrap();
+    assert!(lasting_permission(
+        &google,
+        no_refresh,
+        &vault_id,
+        &google_account_tag(&vault_id, ""),
+        keep_grant
+    )
+    .is_err());
+    withdraw_unkept(&google, "1//unkept", keep_grant);
+    assert!(google.calls(Method::Post, "/revoke").is_empty());
+
+    core.drive_cleanup_at = None;
+    let owed = core.take_drive_cleanup().unwrap();
+    assert_eq!(
+        core.finish_drive_cleanup(owed.run(&google, &cfg()))
+            .unwrap(),
+        DriveCleanupResult::Cleaned
+    );
+    assert!(google.files.lock().unwrap().is_empty(), "copies stranded");
+    assert_eq!(google.calls(Method::Post, "/revoke").len(), 1);
+    // Nothing rests on the grant any more: the next sign-in's end withdraws its token.
+    assert!(!core.drive_keeps_grant());
 }
 
 /// The permission was withdrawn at Google before the cleanup: the copies can no longer be
@@ -562,10 +662,107 @@ fn a_restored_backup_never_turns_the_copy_on() {
     let status = other.drive_backup_status(&FakeComputer::default()).unwrap();
     assert!(!status.on, "turned on by a restore");
     assert_eq!((status.last_at, status.problem), (None, None));
+    // Her copies from before may be in her Drive: said, not deleted (they may be her only
+    // ones away from the lost computer).
+    assert!(status.copies_left && !status.cleanup_pending);
     let (_, upload) = backup(&mut other, &out.path().join("after"));
     assert!(upload.is_none(), "a copy went up after a restore");
     let log = other.activity(None).unwrap().entries;
     assert!(log.iter().any(|e| e.event == "drive_backup_off" && e.warn));
+
+    // The permission the backup carried is withdrawn at Google, tried until confirmed; the
+    // copies are left alone.
+    let google = FakeGoogle::default();
+    google
+        .files
+        .lock()
+        .unwrap()
+        .push(("old".to_owned(), "x".to_owned(), b"c".to_vec()));
+    let failing = FakeGoogle {
+        revoke_fails: true,
+        ..FakeGoogle::default()
+    };
+    let owed = other.take_drive_cleanup().expect("the withdrawal");
+    assert_eq!(
+        other
+            .finish_drive_cleanup(owed.run(&failing, &cfg()))
+            .unwrap(),
+        DriveCleanupResult::Pending
+    );
+    other.drive_cleanup_at = None;
+    let owed = other.take_drive_cleanup().expect("tried again");
+    assert_eq!(
+        other
+            .finish_drive_cleanup(owed.run(&google, &cfg()))
+            .unwrap(),
+        DriveCleanupResult::Cleaned
+    );
+    let revoked = google.calls(Method::Post, "/revoke");
+    assert_eq!(revoked.len(), 1);
+    assert!(String::from_utf8(revoked[0].2.clone())
+        .unwrap()
+        .contains("token=1%2F%2Flasting"));
+    assert_eq!(google.seen.lock().unwrap().len(), 1, "only the withdrawal");
+    assert_eq!(google.files.lock().unwrap().len(), 1, "the copies stay");
+    other.drive_cleanup_at = None;
+    assert!(other.take_drive_cleanup().is_none());
+    assert!(
+        other
+            .drive_backup_status(&FakeComputer::default())
+            .unwrap()
+            .copies_left
+    );
+}
+
+/// When the restored vault cannot be made sure to have the copy off, the restore fails and
+/// leaves nothing behind (she can try again).
+#[test]
+fn a_restore_that_cannot_forget_the_permission_leaves_nothing() {
+    let (_dir, mut core, _) = turned_on();
+    let out = tempfile::tempdir().unwrap();
+    let (done, _) = backup(&mut core, &out.path().join("b"));
+    let bytes = std::fs::read(&done.path).unwrap();
+    let fresh = tempfile::tempdir().unwrap();
+    let failed = Vault::restore_backup_then(
+        &bytes,
+        fresh.path(),
+        dv_vault::Secret::Password(PASSWORD),
+        |_| Err(dv_vault::VaultError::NotFound),
+    );
+    assert!(failed.is_err());
+    assert_eq!(std::fs::read_dir(fresh.path()).unwrap().count(), 0);
+}
+
+/// After a restore, turning the copy on and off deletes the copies from before it.
+#[test]
+fn turning_on_and_off_after_a_restore_deletes_the_copies_left() {
+    let (_dir, mut core, _) = turned_on();
+    let out = tempfile::tempdir().unwrap();
+    let (done, _) = backup(&mut core, &out.path().join("b"));
+    let bytes = std::fs::read(&done.path).unwrap();
+    let fresh = tempfile::tempdir().unwrap();
+    let mut other = Core::for_tests(fresh.path(), None);
+    other.stage_backup(bytes, "b.vaultbak".into()).unwrap();
+    other.restore_staged_backup(Some(PASSWORD), None).unwrap();
+    let vault_id = other.vault_ref().unwrap().vault_id().to_owned();
+    let google = FakeGoogle::default();
+    google.files.lock().unwrap().push((
+        "old".to_owned(),
+        drive::copy_name(&vault_id, done.created_at),
+        b"c".to_vec(),
+    ));
+    let computer = FakeComputer::default();
+    let tag = connect_google(&mut other, &computer);
+    other
+        .drive_backup_turn_on_finish(&computer, &tag, "1//again")
+        .unwrap();
+    // The restored permission is not withdrawn after this: it is the same grant.
+    other.drive_cleanup_at = None;
+    assert!(other.take_drive_cleanup().is_none());
+    assert_eq!(turn_off(&mut other, &google), DriveCleanupResult::Cleaned);
+    assert!(google.files.lock().unwrap().is_empty());
+    let status = other.drive_backup_status(&computer).unwrap();
+    assert!(!status.copies_left && !status.cleanup_pending);
 }
 
 /// A password changed while a backup was written: that backup opens with the old password and

@@ -63,21 +63,22 @@ pub(crate) async fn drive_backup_status(
 /// Turn it on: her Google account must be connected here; she signs in with the same account
 /// in her browser and allows a lasting permission for the app's hidden folder. A permission
 /// that is given but cannot be kept (the vault locked meanwhile, Google disconnected) is
-/// withdrawn at Google at once.
+/// withdrawn at Google at once, unless a cleanup is owed: that cleanup withdraws it.
 #[tauri::command]
 pub(crate) async fn drive_backup_turn_on(
     state: tauri::State<'_, AppState>,
 ) -> Res<DriveBackupStatus> {
-    let (vault_id, tag) = with_core(&state, |c| {
+    let (vault_id, tag, keep_grant) = with_core(&state, |c| {
         c.drive_backup_turn_on_check(&dv_core::google::WindowsAccount)
     })
     .await?;
     let kept_tag = tag.clone();
     let (http, token) = tauri::async_runtime::spawn_blocking(move || {
-        let (http, session) =
-            dv_core::google::sign_in_lasting(&open_in_browser).map_err(|e| e.to_ui())?;
-        let token = dv_core::drive_backup::lasting_permission(&http, session, &vault_id, &tag)
+        let (http, session) = dv_core::google::sign_in_lasting(&open_in_browser, keep_grant)
             .map_err(|e| e.to_ui())?;
+        let token =
+            dv_core::drive_backup::lasting_permission(&http, session, &vault_id, &tag, keep_grant)
+                .map_err(|e| e.to_ui())?;
         Ok::<_, UiError>((http, token))
     })
     .await
@@ -89,7 +90,7 @@ pub(crate) async fn drive_backup_turn_on(
     .await;
     if let Err(e) = finished {
         let _ = tauri::async_runtime::spawn_blocking(move || {
-            dv_core::drive_backup::withdraw_unkept(&http, &token);
+            dv_core::drive_backup::withdraw_unkept(&http, &token, keep_grant);
         })
         .await;
         return Err(e);

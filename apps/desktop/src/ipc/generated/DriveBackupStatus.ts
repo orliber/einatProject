@@ -29,4 +29,9 @@ problem: DriveProblem | null,
  * Turned off, but deleting the copies and withdrawing the permission at Google is not
  * confirmed yet (tried again while the vault is open).
  */
-cleanup_pending: boolean, };
+cleanup_pending: boolean, 
+/**
+ * A restored backup was taken while the copy was on: copies from before the restore may
+ * be in her Drive (turning the copy on and off deletes them).
+ */
+copies_left: boolean, };
