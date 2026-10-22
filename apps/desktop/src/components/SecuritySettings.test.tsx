@@ -75,7 +75,7 @@ describe("the protection layers", () => {
     mockIPC(() => new Promise((r) => { answer = r; }));
     show();
     expect(await screen.findByRole("button", { name: /עצירת חירום/ })).toBeEnabled();
-    expect(screen.getByText("בודקת…")).toBeInTheDocument();
+    expect(screen.getByText("בודקת עכשיו את שכבות ההגנה")).toBeInTheDocument();
     answer(broken);
     expect(await screen.findByRole("button", { name: /להפעיל שליחה מחדש/ })).toBeDisabled();
     expect(screen.getByText(/אי אפשר להפעיל שליחה מחדש/)).toBeInTheDocument();

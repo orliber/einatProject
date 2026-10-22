@@ -8,6 +8,7 @@ import { useState } from "react";
 import { ipc, type SecurityLayer, type SecurityStatus } from "../ipc/client";
 import { useApp } from "../App";
 import { ErrorLine } from "./ui";
+import { timed, WaitLine } from "./Progress";
 
 const COUNT = ["אפס", "אחת", "שתיים", "שלוש", "ארבע", "חמש", "שש", "שבע", "שמונה", "תשע", "עשר", "אחת-עשרה", "שתים-עשרה", "שלוש-עשרה", "ארבע-עשרה"];
 const count = (n: number) => COUNT[n] ?? String(n);
@@ -44,7 +45,7 @@ function Card({ l, you }: { l: SecurityLayer; you: boolean }) {
 export function SecuritySettings() {
   const { fail, notify } = useApp();
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["security"], queryFn: () => ipc.securityStatus() });
+  const q = useQuery({ queryKey: ["security"], queryFn: () => timed("check", ipc.securityStatus(), "security") });
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -106,7 +107,7 @@ export function SecuritySettings() {
         </button>
       </div>
       {stopped && broken && <p className="hint">אי אפשר להפעיל שליחה מחדש: השער או כללי השליחה לא עברו את הבדיקה עכשיו. כדאי לפנות לאור.</p>}
-      {q.isPending && <p className="hint" role="status">בודקת…</p>}
+      {q.isFetching && <WaitLine task="check" speed="security" delay={300} label="בודקת עכשיו את שכבות ההגנה" />}
       {q.isError && <ErrorLine error={fail(q.error as never)} retry={() => void qc.invalidateQueries({ queryKey: ["security"] })} />}
       {s && (
         <ul className="layers">

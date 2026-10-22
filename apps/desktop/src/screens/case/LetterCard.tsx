@@ -58,7 +58,7 @@ export function LetterCard({ api }: { api: CaseApi }) {
     setStage("write");
     const started = Date.now();
     await ipc.sendSection(approvalId);
-    if (!status.demo_mode) recordDuration("draft", status.speed, Date.now() - started);
+    if (!status.demo_mode) recordDuration("draft", `letter:${status.speed}`, Date.now() - started);
     await load();
   }
 
@@ -124,7 +124,7 @@ export function LetterCard({ api }: { api: CaseApi }) {
         {busy ? <><Spinner /> {stage === "write" ? "כותב…" : "מכינה…"}</> : paragraphs.length ? "ניסוח מחדש" : "ניסוח המכתב"}
       </button>
       {stage === "prepare" && <WaitLine task="prepare" speed="letter" label="מכינה את הבקשה: מסתירה שמות ובודקת מה יוצא" />}
-      {stage === "write" && <WaitLine task="draft" speed={status.speed} demo={status.demo_mode} delay={0} label={`${ai} כותב את המכתב`} />}
+      {stage === "write" && <WaitLine task="draft" speed={`letter:${status.speed}`} demo={status.demo_mode} delay={0} label={`${ai} כותב את המכתב`} />}
       {paragraphs.map((p) =>
         editing?.id === p.id ? (
           <div key={p.id} className="stack" style={{ gap: 6 }}>

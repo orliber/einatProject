@@ -7,7 +7,7 @@ import "./Progress.css";
 /** Requests to Claude ("draft", "sort", "consult"), and the waits that stay on this computer. */
 export type Task = "draft" | "sort" | "consult" | LocalTask;
 /** Waits here, measured per computer: preparing a request, reading a file, a backup… */
-export type LocalTask = "prepare" | "read" | "check" | "export" | "backup" | "backup-check" | "restore" | "unlock" | "create" | "update";
+export type LocalTask = "prepare" | "read" | "check" | "export" | "backup-check" | "restore" | "unlock" | "create" | "rekey" | "update";
 
 /** Seconds a wait usually takes before anything was measured: by answer speed for Claude,
  *  under "any" for the waits on this computer. A first guess, said as one ("בדרך כלל"). */
@@ -19,11 +19,11 @@ const DEFAULTS: Record<Task, Partial<Record<string, number>>> = {
   read: { small: 4, medium: 10, large: 30, any: 8 },
   check: { any: 3 },
   export: { any: 6 },
-  backup: { any: 10 },
   "backup-check": { any: 6 },
   restore: { any: 12 },
   unlock: { any: 3 },
   create: { any: 5 },
+  rekey: { password: 5, kit: 5, any: 5 },
   update: { any: 45 },
 };
 const KEY = "dv.timing.v1";
@@ -59,7 +59,9 @@ export function estimateMs(task: Task, speed = "any", demo = false): number {
   const seen = [...(load()[`${task}:${speed}`] ?? [])].sort((a, b) => a - b);
   if (seen.length >= 2) return seen[Math.floor(seen.length / 2)] ?? 0;
   const d = DEFAULTS[task];
-  return (d[speed] ?? d.balanced ?? d.any ?? 30) * 1000;
+  // A letter at some answer speed: under its own key, from the drafts' guess at that speed.
+  const base = speed.startsWith("letter:") ? speed.slice(7) : speed;
+  return (d[base] ?? d.balanced ?? d.any ?? 30) * 1000;
 }
 
 /** A file's size, in the few groups its reading time is kept by. */

@@ -4,7 +4,7 @@ import type { UiError } from "../ipc/client";
 import { ipc, type UpdateView } from "../ipc/client";
 import { Dialog, ErrorLine, Spinner, SparkIcon } from "./ui";
 import { Switch } from "./Switch";
-import { WaitLine } from "./Progress";
+import { timed, WaitLine } from "./Progress";
 import "./Update.css";
 
 /**
@@ -165,6 +165,8 @@ export function UpdateDialog({ update, onClose }: { update: UpdateView; onClose:
         )
       }>
       <div className="stack update-body">
+        {/* Never measured: a finished install closes the program (it reopens on the new version),
+            so the guess comes from the installer's size. */}
         {busy && !isReady && <WaitLine task="update" delay={0} guess={(10 + update.size_mb * 2) * 1000} label="מורידה את הגרסה ובודקת את החתימה שלה" />}
         {update.notes.length > 0 && (
           <>
@@ -225,7 +227,7 @@ export function UpdateSettings() {
     setError(null);
     setResult(null);
     try {
-      const v = await checkNow();
+      const v = await timed("check", checkNow(), "update");
       if (v) setOpen(true);
       else setResult("זו הגרסה החדשה ביותר.");
     } catch (e) {
@@ -248,6 +250,7 @@ export function UpdateSettings() {
           </button>
         )}
       </div>
+      {busy && <WaitLine task="check" speed="update" label="בודקת ב-GitHub אם יש גרסה חדשה" />}
       {result && <span className="small muted" role="status">{result}</span>}
       <ErrorLine error={error} />
       <Switch id="update-auto" label="לבדוק פעם ביום אם יש גרסה חדשה" checked={auto}
