@@ -99,6 +99,7 @@ impl Core {
             signature: report.signature,
             confidentiality: settings.confidentiality,
             font: settings.font,
+            logo: self.logo()?,
             ..dv_export::Report::default()
         };
         let identities = self.vault_ref()?.identities(case_id)?;
@@ -161,6 +162,7 @@ impl Core {
                 .into_iter()
                 .collect(),
             supervisor: Vec::new(),
+            parents_opening: crate::views::default_parents_opening(),
         })
     }
 
@@ -178,6 +180,110 @@ impl Core {
         self.vault_mut()?
             .set_setting(TEMPLATE_KEY, &dv_vault::crypto::hex(bytes))?;
         Ok(view)
+    }
+
+    /// Her logo (round 55, D-095): a PNG or JPEG of at most 1 MB, read by its bytes and kept
+    /// without its metadata. Refused with a sentence she can act on.
+    pub fn set_report_logo(&mut self, bytes: &[u8]) -> Result<LogoView, CoreError> {
+        let logo = dv_export::check_logo(bytes).map_err(crate::jobs::export_error)?;
+        self.vault_mut()?
+            .set_setting(LOGO_KEY, &dv_vault::crypto::hex(&logo.bytes))?;
+        Ok(logo_view(&logo))
+    }
+
+    /// No logo on the reports.
+    pub fn clear_report_logo(&mut self) -> Result<(), CoreError> {
+        self.vault_mut()?.set_setting(LOGO_KEY, "")?;
+        Ok(())
+    }
+
+    pub fn report_logo(&mut self) -> Result<Option<LogoView>, CoreError> {
+        Ok(self.logo()?.as_ref().map(logo_view))
+    }
+
+    /// The logo as kept, checked again (it is small): a file that no longer reads is refused
+    /// here, not drawn half.
+    pub(crate) fn logo(&mut self) -> Result<Option<dv_export::Logo>, CoreError> {
+        match self.vault_ref()?.setting(LOGO_KEY)? {
+            Some(h) if !h.is_empty() => {
+                let bytes =
+                    dv_vault::crypto::unhex(&h).map_err(|e| CoreError::Internal(e.to_string()))?;
+                dv_export::check_logo(&bytes)
+                    .map(Some)
+                    .map_err(crate::jobs::export_error)
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// The parents' version (round 55, D-095): the approved report without the score tables,
+    /// with a chart of three groups computed from the fixed tables, her opening sentence, and
+    /// (unless she shows numbers) no score in the text. Built here; nothing is sent.
+    pub(crate) fn build_parents_report(
+        &mut self,
+        case_id: &str,
+        options: ParentsOptions,
+    ) -> Result<(dv_export::Report, ExportCheck), CoreError> {
+        let (full, mut check) = self.build_report(case_id)?;
+        let settings = self.report_settings()?;
+        let v = self.vault_ref()?;
+        let mut rows = Vec::new();
+        let mut scores = Vec::new();
+        for input in v
+            .inputs(case_id)?
+            .into_iter()
+            .filter(|i| i.kind == InputKind::TestScores)
+        {
+            let Some(data) = v.input_data(case_id, &input.id)? else {
+                continue;
+            };
+            let sheet: dv_domain::ScoreSheet =
+                serde_json::from_str(&data).map_err(|e| CoreError::Internal(e.to_string()))?;
+            scores.extend(sheet.entries.iter().map(|e| e.value));
+            for b in dv_domain::sheet_bands(&sheet).map_err(CoreError::Refused)? {
+                rows.push(dv_export::BandRow {
+                    label: b.label,
+                    group: match b.group {
+                        dv_domain::ParentGroup::Strong => 0,
+                        dv_domain::ParentGroup::InRange => 1,
+                        dv_domain::ParentGroup::Harder => 2,
+                    },
+                    value: Some(score_text(b.value)),
+                });
+            }
+        }
+        // Scores the text gives beside a test's name, also ones not entered in a table.
+        for p in full
+            .parts
+            .iter()
+            .flat_map(|p| &p.sections)
+            .flat_map(|s| &s.paragraphs)
+        {
+            scores.extend(dv_domain::find_score_mentions(p).iter().map(|m| m.value));
+        }
+        let bands = if rows.is_empty() {
+            Vec::new()
+        } else {
+            vec![dv_export::BandChart {
+                title: "במבט אחד".to_owned(),
+                groups: ["חזק", "בטווח הגיל", "קשה יותר"]
+                    .map(str::to_owned)
+                    .to_vec(),
+                rows,
+                note: "הטבלה מחושבת מהציונים לפי טבלאות קבועות. \"בטווח הגיל\": כמו רוב הילדים בגיל הזה.".to_owned(),
+            }]
+        };
+        let report = dv_export::for_parents(
+            &full,
+            dv_export::ParentsVersion {
+                opening: settings.parents_opening,
+                bands,
+                show_numbers: options.show_numbers,
+                scores,
+            },
+        );
+        check.file_name = parents_file_name(&check.file_name);
+        Ok((report, check))
     }
 
     /// Back to the plain report.
@@ -391,6 +497,7 @@ impl Core {
             signature: with_supervisor(signature, &settings.supervisor),
             confidentiality: settings.confidentiality,
             font: settings.font,
+            logo: self.logo()?,
             ..dv_export::Report::default()
         };
         for leftover in dv_export::leftover_placeholders(&report) {
@@ -428,6 +535,36 @@ impl Core {
 
     pub fn check_export(&mut self, case_id: &str) -> Result<ExportCheck, CoreError> {
         Ok(self.build_report(case_id)?.1)
+    }
+}
+
+fn logo_view(logo: &dv_export::Logo) -> LogoView {
+    LogoView {
+        format: match logo.format {
+            dv_export::LogoFormat::Png => "PNG",
+            dv_export::LogoFormat::Jpeg => "JPEG",
+        }
+        .to_owned(),
+        width: logo.width,
+        height: logo.height,
+        size_kb: u32::try_from(logo.bytes.len().div_ceil(1024)).unwrap_or(u32::MAX),
+    }
+}
+
+/// A score as the report writes it: "102", "29.5".
+fn score_text(v: f64) -> String {
+    if (v - v.round()).abs() < 1e-9 {
+        format!("{v:.0}")
+    } else {
+        format!("{v:.1}")
+    }
+}
+
+/// "דוח אבחון X.docx" → "דוח אבחון X - להורים.docx" (still without the child's name).
+pub(crate) fn parents_file_name(name: &str) -> String {
+    match name.rsplit_once('.') {
+        Some((stem, ext)) => format!("{stem} - להורים.{ext}"),
+        None => format!("{name} - להורים"),
     }
 }
 

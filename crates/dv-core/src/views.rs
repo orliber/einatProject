@@ -462,6 +462,35 @@ pub struct ReportSettings {
     /// report has them for an intern. Empty: none.
     #[serde(default)]
     pub supervisor: Vec<String>,
+    /// The opening sentence of the parents' version (round 55, D-095), written once.
+    #[serde(default = "default_parents_opening")]
+    pub parents_opening: String,
+}
+
+/// The parents' opening sentence until she writes her own.
+#[must_use]
+pub fn default_parents_opening() -> String {
+    "להורים שלום, זהו סיכום האבחון בשפה פשוטה. הדוח המלא נשמר אצלי, ואפשר לקבל אותו בכל עת."
+        .to_owned()
+}
+
+/// Her logo (round 55, D-095), as checked when she chose it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LogoView {
+    /// "PNG" or "JPEG".
+    pub format: String,
+    pub width: u32,
+    pub height: u32,
+    pub size_kb: u32,
+}
+
+/// What she chose for the parents' version in the export dialog (round 55, D-095).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ParentsOptions {
+    /// Scores in the chart and in the text. Off unless she turns it on, every time.
+    pub show_numbers: bool,
 }
 
 /// Her Word template (EX-1), as checked when she chose it.

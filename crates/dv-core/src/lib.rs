@@ -99,10 +99,10 @@ pub use verify::VerifyResult;
 pub use views::{
     ActivityEntry, ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail,
     ChatView, ConsultResult, ConsultTurnView, ConsultationSummary, ConsultationView, CreatedVault,
-    ExportCheck, ImportPreview, MaterialRouting, NameMatch, NameSuggestion, ParagraphVersionView,
-    ParagraphView, Prepared, ReportSettings, RetentionItem, ReviewPart, SectionResult, SectionView,
-    SortResult, SourceExcerpt, StagedBackup, StyleHint, StyleMark, SuspectDecision, TemplateView,
-    UiError,
+    ExportCheck, ImportPreview, LogoView, MaterialRouting, NameMatch, NameSuggestion,
+    ParagraphVersionView, ParagraphView, ParentsOptions, Prepared, ReportSettings, RetentionItem,
+    ReviewPart, SectionResult, SectionView, SortResult, SourceExcerpt, StagedBackup, StyleHint,
+    StyleMark, SuspectDecision, TemplateView, UiError,
 };
 pub use views::{ErrorAction, PingResponse, IPC_VERSION};
 
@@ -183,6 +183,8 @@ fn day_number() -> u64 {
 const REPORT_KEY: &str = "report_settings";
 /// Her Word template (EX-1), hex-encoded inside the encrypted vault.
 const TEMPLATE_KEY: &str = "report_template";
+/// Her logo (round 55), checked and rebuilt, hex-encoded inside the encrypted vault.
+const LOGO_KEY: &str = "report_logo";
 /// A gap this long between two 15-second ticks means the computer slept.
 const SLEEP_GAP: Duration = Duration::from_secs(60);
 const MAX_REQUEST_BYTES: usize = 900_000;
