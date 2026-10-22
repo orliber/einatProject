@@ -148,7 +148,9 @@ fn size_ok(width: u32, height: u32) -> Result<(), ExportError> {
 }
 
 /// One PNG chunk: its type, its data, and the whole chunk as it is in the file.
-fn png_chunks(bytes: &[u8]) -> Result<Vec<([u8; 4], &[u8], &[u8])>, ExportError> {
+type Chunk<'a> = ([u8; 4], &'a [u8], &'a [u8]);
+
+fn png_chunks(bytes: &[u8]) -> Result<Vec<Chunk<'_>>, ExportError> {
     let mut out = Vec::new();
     let mut at = PNG_SIGNATURE.len();
     loop {
@@ -281,6 +283,23 @@ fn clean_jpeg(bytes: &[u8]) -> Result<Logo, ExportError> {
         height,
         bytes: out,
     })
+}
+
+/// Whether a checked JPEG is grey (one component) rather than colour (three).
+pub(crate) fn jpeg_gray(logo: &Logo) -> bool {
+    let b = &logo.bytes;
+    let mut at = 2;
+    while let (Some(0xFF), Some(&marker)) = (b.get(at), b.get(at + 1)) {
+        if matches!(marker, 0xC0..=0xC2) {
+            return b.get(at + 9) == Some(&1);
+        }
+        if marker == 0xDA || marker == 0xD9 {
+            break;
+        }
+        let Some(len) = be16(b, at + 2) else { break };
+        at += 2 + usize::from(len);
+    }
+    false
 }
 
 /// A PNG's pixels, 8 bits a sample: grey or RGB, and the transparency when it has any.
@@ -556,5 +575,38 @@ pub(crate) mod tests {
         bad[n - 20] ^= 0x55; // inside the pixel data: the chunk's CRC no longer matches
         assert!(matches!(check_logo(&bad), Err(ExportError::Image(_))));
         assert!(check_logo(&bad[..30]).is_err(), "cut short");
+    }
+
+    #[test]
+    fn anything_but_png_or_jpeg_is_refused_in_hebrew() {
+        let refused = |bytes: &[u8]| match check_logo(bytes) {
+            Err(ExportError::Image(m)) => m,
+            other => panic!("not refused: {other:?}"),
+        };
+        assert!(refused(b"").contains("ריק"));
+        let svg =
+            refused(b"\xEF\xBB\xBF  <svg xmlns=\"http://www.w3.org/2000/svg\"><script/></svg>");
+        assert!(svg.contains("SVG"), "{svg}");
+        assert!(refused(b"<?xml version=\"1.0\"?><svg/>").contains("SVG"));
+        assert!(refused(b"GIF89a\x01\x00\x01\x00").contains("PNG או JPEG"));
+        assert!(refused(b"BM\x00\x00\x00\x00").contains("PNG או JPEG"));
+        // A logo named .png is still read by its bytes.
+        assert!(refused(b"%PDF-1.7 not a picture").contains("PNG או JPEG"));
+        let mut big = png(4, 4, 2, 0);
+        big.resize(MAX_LOGO_BYTES + 1, 0);
+        assert!(refused(&big).contains("1MB"));
+        // Over the size in pixels.
+        assert!(refused(&png(9000, 1, 2, 0)).contains("8000"));
+        // A JPEG that is cut before its picture.
+        assert!(check_logo(&[0xFF, 0xD8, 0xFF, 0xD9]).is_err());
+    }
+
+    #[test]
+    fn checking_twice_gives_the_same_logo() {
+        for bytes in [png(6, 3, 6, 4), jpeg(30, 10)] {
+            let once = check_logo(&bytes).unwrap();
+            assert_eq!(check_logo(&once.bytes).unwrap(), once);
+        }
+        assert!(!jpeg_gray(&check_logo(&jpeg(30, 10)).unwrap()));
     }
 }
