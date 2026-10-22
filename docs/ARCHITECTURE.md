@@ -11,8 +11,8 @@
 │  └──────────────────────────┘                    ▼                       │
 │                             ┌───────────────────────────────────────┐    │
 │                             │ תהליך ראשי – Rust (בינארי חתום אחד)   │    │
-│                             │  vault · privacy · domain · ai ·      │    │
-│                             │  export · ipc                         │    │
+│                             │  core · vault · privacy · domain ·    │    │
+│                             │  ai · export · style                  │    │
 │                             │        │ ClearedPayload בלבד          │    │
 │                             │        ▼                              │    │
 │                             │  egress  ← ה-crate היחיד עם רשת        │────┼──► api.anthropic.com
@@ -21,7 +21,7 @@
 │  ┌─────────────────────────────▼──┐     ┌─────▼─────────────────────┐    │
 │  │ ingest worker (אותו בינארי,     │     │ OS: TPM / Secure Enclave, │    │
 │  │ תהליך נפרד): בלי מפתחות, בלי DB, │     │ Keychain / Cred. Manager  │    │
-│  │ PDF (pdfium) · DOCX · OCR       │     └───────────────────────────┘    │
+│  │ PDF · DOCX · OCR                │     └───────────────────────────┘    │
 │  └────────────────────────────────┘                                     │
 │   vault/                                                                │
 │   ├ vault.header   פרמטרי KDF, מפתחות עטופים, עוגן יומן (מאומת ב-MAC)  │
@@ -37,19 +37,27 @@
 | ראשי (Rust + webview) | כן, רק כשהכספת פתוחה | רק דרך `egress` | לא | |
 | ingest worker | **לא** | **לא** | כן | מופעל לכל מסמך, עם מגבלות זמן וזיכרון, ונהרג בסוף |
 | tesseract helper | לא | לא | כן (תמונה) | בינארי חתום שנקרא מה-worker בלבד |
+| מודל השמות (`dv-ner::worker`) | **לא** | **לא** | לא (רק הטקסט שנשלח אליו) | רק אם עינת הדליקה אותו (D-053). אותו בינארי, תהליך נפרד ומבודד כמו ה-worker (SEC2, D-044): בלי רשת, רק תיקיית המודל, תקרת זיכרון. נטען פעם אחת בכל פתיחה |
+
+ב-Windows שני התהליכים הנפרדים רצים ב-AppContainer בלי הרשאות ובתוך job object (`dv-sandbox`, D-044). בפיתוח בלינוקס וב-Mac הם רצים באותה צורה בלי הבידוד.
 
 ## Crates (Rust workspace)
 | Crate | תפקיד | תלויות רגישות | אסור |
 |---|---|---|---|
-| `dv-vault` | KDF, מפתחות, SQLCipher, AEAD, נעילה, יומן, env_checks, קשירה לחומרה | `aws-lc-rs` (fips), `argon2`, `rusqlite` (sqlcipher), `zeroize`, `secrecy`, `keyring` | רשת |
-| `dv-privacy` | שכבות 1–7, `variants_he`, NER (`ort` + `tokenizers`), **gate** ⇒ `ClearedPayload` | `ort`, `tokenizers`, `aho-corasick`, `regex` | רשת |
+| `dv-core` | השירותים של האפליקציה: `Core` מחזיק את הכספת הפתוחה ומעביר כל בקשה באותו מסלול (סינון ← בנייה ← סקירה ← שער ← אישור ← שליחה ← בדיקה ← שמירה). פקודות Tauri הן עטיפה דקה שלו | כל ה-crates האחרים, `zeroize` | קוד רשת משלו |
+| `dv-vault` | KDF, מפתחות, SQLCipher, AEAD, נעילה, יומן, env_checks, קשירה לחומרה, גיבוי | `aws-lc-rs` (fips במתקין של השחרור), `argon2`, `rusqlite` (sqlcipher), `zeroize`, `unicode-normalization` | רשת |
+| `dv-privacy` | שכבות 1–7, `variants_he`, **gate** ⇒ `ClearedPayload`. רמזי שמות מ-`dv-ner` רק מוסיפים הסתרה, אף פעם לא מורידים | `regex`, `aws-lc-rs` | רשת |
+| `dv-ner` | זיהוי שמות מקומי (DictaBERT-NER) ב-Rust טהור על המעבד, בתהליך נפרד (D-053). כבוי כברירת מחדל; הקבצים יורדים רק דרך `dv-egress` | `candle-core`, `candle-nn`, `candle-transformers`, `tokenizers` | רשת |
+| `dv-sandbox` | הפעלה של תהליך לא מהימן בבידוד (AppContainer + job object ב-Windows, D-044) | — | רשת |
 | `dv-ai` | context builder, פרומפטים, סכמות, פעולות מהירות, פענוח פלט | `serde` | רשת. **בונה בקשות בלבד** |
-| `dv-egress` | שליחה ל-AI שנבחר (Anthropic כברירת מחדל, או OpenAI / Google לפי D-040): רשימה לבנה של endpoints ודגמים, streaming, retry, מגבלות | `reqwest` (rustls, בלי שורשי מערכת), `webpki-roots` | כל דבר חוץ מ-`ClearedPayload` |
+| `dv-egress` | שליחה ל-AI שנבחר (Anthropic כברירת מחדל, או OpenAI / Google לפי D-040): רשימה לבנה של endpoints ודגמים, streaming, retry, מגבלות. וגם, בלי שום מידע מהכספת: עדכוני תוכנה מ-GitHub (D-033), הורדת מודל השמות מ-`huggingface.co` ו-`*.hf.co` (D-053), וכניסה עם גוגל (`oauth2.googleapis.com`, `www.googleapis.com`, D-041) | `reqwest` (rustls, בלי שורשי מערכת), `rustls`, `webpki-roots`, `aws-lc-rs` | כל דבר חוץ מ-`ClearedPayload` לשליחה ל-AI |
 | `dv-domain` | תיקים, סעיפים, ציונים, `interpretation`, DSM | — | רשת |
-| `dv-ingest` | ה-worker: pdfium, DOCX (`zip` + `quick-xml`), OCR, חילוץ מטא-דאטה | `pdfium-render` | רשת, מפתחות |
-| `dv-export` | DOCX מתבנית, הצפנת ECMA-376 Agile, `restore` | `zip`, `quick-xml`, `cfb` | רשת |
+| `dv-ingest` | ה-worker: PDF (`pdf-extract`), DOCX (`zip` + `quick-xml`), DOC ישן (`cfb`), OCR מקומי, חילוץ מטא-דאטה | `pdf-extract`, `zip`, `quick-xml`, `cfb`, `flate2` | רשת, מפתחות |
+| `dv-export` | DOCX מתבנית, PDF, הצפנת ECMA-376 Agile, `restore` | `zip`, `quick-xml`, `cfb`, `lopdf`, `ttf-parser`, `aws-lc-rs` | רשת |
 | `dv-style` | למידת סגנון מקומית: מודל סטטיסטי לפי סעיף, למידה מתיקונים, ביטויים חוזרים (D-052) | `dv-privacy`, `serde` | רשת |
-| `apps/desktop/src-tauri` | מעטפת דקה: חלון, CSP, capabilities, העברת פקודות ל-crates | `tauri` | plugins של fs/shell/http |
+| `apps/desktop/src-tauri` | מעטפת דקה: חלון, CSP, capabilities, העברת פקודות ל-`dv-core`. ה-IPC נוצר מהקוד (`cargo xtask gen-ipc`, `ts-rs`) | `tauri`, `arboard` (לוח העתקה), `rfd` (חלון בחירת קבצים) | plugins של fs/shell/http |
+
+> **יושר לקוד (סבב 62):** הטבלה תוקנה ב-22.10.2026 לפי ה-`Cargo.toml` של כל crate. מה שהופיע כאן קודם ולא קיים: `pdfium`, `keyring`, `secrecy`, `ort`, `aho-corasick`, ו-crate בשם `dv-ipc` (נמחק; ה-IPC נוצר מהקוד). זיהוי השמות עבר מ-`dv-privacy` ל-`dv-ner`, בתהליך נפרד.
 
 **אינווריאנטים שנאכפים ב-CI (`xtask check-invariants`):**
 1. `reqwest`, `hyper`, `ureq` ודומיהם מופיעים בעץ התלויות **רק** של `dv-egress`.
@@ -133,7 +141,7 @@ audit(seq PK, ts, event, case_ref /* HMAC של case_id */, meta_json_enc, prev_m
 - **שכחתי סיסמה, גוגל (D-041, `google.rs`):** רק `oauth2.googleapis.com` ו-`www.googleapis.com`, הרשאת `drive.appdata` + `openid`, PKCE ומאזין חד-פעמי על 127.0.0.1. הטוקן בזיכרון לפעולה אחת ומבוטל בסופה. נשלח רק מפתח אקראי ושם קובץ מהמזהה האקראי של הכספת.
 - **Endpoints מותרים:** `POST /v1/messages` ו-`POST /v1/messages/count_tokens`. כל השאר לא ממומש.
 - **דגמים מותרים:** רשימה לבנה בקוד של דגמים שזמינים תחת ZDR. דגמים מסוג Covered Models (Fable, Mythos) חסומים. הדגם נבחר בהגדרות מתוך הרשימה.
-- **שדות אסורים:** `metadata`, Files, Batch, code_execution. **חריג יחיד:** `web_search_20250305` (הגרסה הבסיסית, זכאית ל-ZDR), ורק בקריאות של מצב מחקר (D-014), בלי תוכן מהתיק ועם `allowed_domains`.
+- **שדות אסורים:** `metadata`, Files, Batch, code_execution. **חריג יחיד:** `web_search_20250305` (הגרסה הבסיסית, זכאית ל-ZDR), ורק בקריאות של מצב מחקר (D-014), בלי תוכן מהתיק ועם `allowed_domains`. **פער פתוח (סבב 62):** כלל הברזל ב-`CLAUDE.md` אומר "בלי כלי שרת", והקוד (`dv-egress/src/lib.rs`, `ALLOWED_TOOL`) מתיר את החריג הזה. לא שיניתי את כלל הברזל, כי זו הקלה ולא יישור; ההכרעה אצל אור: להוסיף ל-`CLAUDE.md` את החריג כפי שהוא ב-D-014, או להסיר אותו מהקוד.
 - `inference_geo: "us"` קבוע.
 - הסכמות (structured outputs / `strict`) קבועות בקוד. בדיקה אוטומטית שאין בהן תוכן מתיק.
 - מגבלת גודל payload, מגבלת קצב, תקרת עלות חודשית ו-circuit breaker.
