@@ -41,6 +41,28 @@ public static class Keys {
     public static void Enter() { Send(0x0D, 0, 0); Send(0x0D, 0, KEYUP); }
     public static void Down() { Send(0x28, 0, 0); Send(0x28, 0, KEYUP); }
 }
+public static class Wins {
+    delegate bool EnumProc(IntPtr h, IntPtr l);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, System.Text.StringBuilder s, int n);
+    // Every top-level window of the process, visible or not: "handle visible class title".
+    public static string[] Of(uint process) {
+        var found = new System.Collections.Generic.List<string>();
+        EnumWindows((h, l) => {
+            uint pid; GetWindowThreadProcessId(h, out pid);
+            if (pid == process) {
+                var t = new System.Text.StringBuilder(256); GetWindowText(h, t, 256);
+                var c = new System.Text.StringBuilder(256); GetClassName(h, c, 256);
+                found.Add(h.ToInt64() + " visible=" + IsWindowVisible(h) + " class=" + c + " title=" + t);
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found.ToArray();
+    }
+}
 "@
 
 $A = [System.Windows.Automation.AutomationElement]
@@ -52,6 +74,15 @@ function Get-Window {
         if ($p.MainWindowHandle -ne [IntPtr]::Zero) { return $A::FromHandle($p.MainWindowHandle) }
         Start-Sleep -Milliseconds 500
     }
+    # What there is instead, so the log says why: the process's own windows (a hidden main
+    # window, a dialog), its child processes (the WebView2 ones) and the crash log.
+    Write-Host "--- windows of process $ProcessId ---"
+    [Wins]::Of([uint32]$ProcessId) | ForEach-Object { Write-Host $_ }
+    Write-Host "--- its child processes ---"
+    Get-CimInstance Win32_Process -Filter "ParentProcessId = $ProcessId" |
+        ForEach-Object { Write-Host "$($_.ProcessId) $($_.Name)" }
+    $crashes = Join-Path $env:LOCALAPPDATA "il.diagnosticvault.desktop\crash-log.txt"
+    if (Test-Path $crashes) { Write-Host "--- crash log ---"; Get-Content $crashes | Write-Host }
     throw "the app shows no window"
 }
 

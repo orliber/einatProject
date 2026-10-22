@@ -82,7 +82,7 @@ pub(crate) fn unpack(bytes: &[u8]) -> Result<Parts, ExportError> {
         if f.is_dir() {
             continue;
         }
-        let name = f.name().to_owned();
+        let name = f.name().map_err(bad)?.into_owned();
         if name.starts_with('/') || name.contains("..") || name.contains('\\') {
             return Err(bad("part name"));
         }

@@ -28,6 +28,13 @@ ignore = [
   # 0.11 too).
   { id = "RUSTSEC-2024-0436", reason = "paste: build-time macro under candle/tokenizers, used by dv-ner for the optional name model (D-053) (review-by 2027-01-11)" },
   { id = "RUSTSEC-2026-0192", reason = "lopdf font parser; runs only in the isolated ingest worker (D-018) (review-by 2027-01-11)" },
+  # zip: all three advisories are about ZipArchive::extract() writing files to disk. Our own
+  # crates are on zip 9 (fixed). zip 7.2 stays only under candle-core 0.9 (the optional name
+  # model, D-053), which never calls extract(): it reads .npz/.pth entries by name in memory,
+  # and dv-ner loads only safetensors files with a fixed SHA-256. Drop when candle moves on.
+  { id = "RUSTSEC-2026-0367", reason = "zip 7.2 under candle-core only; extract() never called; our crates on zip 9 (review-by 2027-01-18)" },
+  { id = "RUSTSEC-2026-0368", reason = "zip 7.2 under candle-core only; extract() never called; our crates on zip 9 (review-by 2027-01-18)" },
+  { id = "RUSTSEC-2026-0369", reason = "zip 7.2 under candle-core only; extract() never called; our crates on zip 9 (review-by 2027-01-18)" },
 ]
 
 [licenses]
