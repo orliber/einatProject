@@ -71,6 +71,18 @@ for (const size of sizes) {
       await expect(write).toBeHidden();
       await expect(page.getByRole("region", { name: "רשימת החומרים" }).getByRole("button", { name: /Weissberg-Abramovich_גרסה/ })).toBeVisible();
       await expectNoSidewaysSpill(page, "materials with a long name");
+      // The score table, its profile and the stored text share the window (round 54).
+      await page.getByRole("button", { name: /ציוני מבחנים \(הזנת ציונים\)/ }).click();
+      const scores = page.getByRole("region", { name: "הזנת ציונים" });
+      await scores.getByLabel("מנת משכל כללית", { exact: true }).fill("78");
+      await scores.getByLabel("שיתופיות", { exact: true }).fill("25");
+      await expect(scores.getByRole("img", { name: /פרופיל המדדים/ })).toBeVisible();
+      await expectNoSidewaysSpill(page, "scores");
+      const inside = await page.evaluate(() => {
+        const body = document.querySelector<HTMLElement>(".scores-view .scores-body");
+        return body ? body.scrollWidth <= body.clientWidth + 1 : false;
+      });
+      expect(inside, "the score table scrolls sideways inside its view").toBe(true);
     });
   });
 }
