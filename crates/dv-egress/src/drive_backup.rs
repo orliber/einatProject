@@ -488,7 +488,7 @@ mod tests {
             "https://www.googleapis.com/drive/v3/files?upload_id=A",
             "https://www.googleapis.com/upload/drive/v3/files",
             "https://www.googleapis.com:8443/upload/drive/v3/files?upload_id=A",
-            "https://u:p@www.googleapis.com/upload/drive/v3/files?upload_id=A",
+            "https://u:@www.googleapis.com/upload/drive/v3/files?upload_id=A",
             "https://www.googleapis.com/upload/drive/v3/files?upload_id=A#x",
             "https://www.googleapis.com/upload/drive/v3/files?upload_id=A&upload_id=B",
             "https://www.googleapis.com/upload/drive/v3/files?upload_id=A&x=1&x=2",
