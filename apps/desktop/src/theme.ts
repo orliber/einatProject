@@ -1,4 +1,4 @@
-// Light or dark (D-101): by the computer unless chosen in Settings. The colours themselves
+// Light or dark (D-102): by the computer unless chosen in Settings. The colours themselves
 // are in styles/tokens.css; this only sets `data-theme` on <html>. Kept on this computer
 // only, like the text size; it holds nothing about any case.
 const KEY = "dv.theme";

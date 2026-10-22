@@ -1,5 +1,6 @@
 // Light or dark: by the computer by default, kept on this computer, never breaking when storage is off.
 import { THEMES, applyTheme, readTheme } from "./theme";
+import tokens from "./styles/tokens.css?raw";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -48,5 +49,22 @@ describe("theme", () => {
     expect(readTheme()).toBe("system");
     expect(() => applyTheme("dark")).not.toThrow();
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+  });
+});
+
+describe("the dark colours", () => {
+  // Dark comes two ways (by the computer, or chosen in Settings), each in its own block of
+  // tokens.css: the two must never drift apart.
+  it("are the same whether the computer or Settings chose dark", () => {
+    const block = (selector: string) => {
+      const start = tokens.indexOf(`${selector} {`);
+      expect(start, selector).toBeGreaterThan(-1);
+      const body = tokens.slice(tokens.indexOf("{", start) + 1, tokens.indexOf("}", start));
+      return body.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("/*"));
+    };
+    const bySystem = block(':root:not([data-theme="light"])');
+    const chosen = block(':root[data-theme="dark"]');
+    expect(bySystem.length).toBeGreaterThan(10);
+    expect(chosen).toEqual(bySystem);
   });
 });

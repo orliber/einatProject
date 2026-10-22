@@ -1,5 +1,5 @@
 /* Design tokens: the approved screens (docs/SCREENS.md, D-020 "elegant case file").
-   Light and dark (D-101): the colours below are the light ones. The report page (`.a4`, and
+   Light and dark (D-102): the colours below are the light ones. The report page (`.a4`, and
    the small page in the export dialog) declares them again for itself, so it stays white
    paper with dark text in dark mode: it is a document. */
 :root,
@@ -96,7 +96,7 @@
   --font-mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
 }
 
-/* Dark (D-101): by the computer unless Settings say light or dark (`data-theme` on <html>).
+/* Dark (D-102): by the computer unless Settings say light or dark (`data-theme` on <html>).
    On screen only: a printed page (the recovery kit) is always light. The two blocks hold the
    same values. */
 @media screen and (prefers-color-scheme: dark) {

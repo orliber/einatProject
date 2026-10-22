@@ -98,7 +98,7 @@ for (const [name, file] of [["הגדרות", "settings"], ["התייעצות", "
   });
 }
 
-// Dark mode (D-101): the same screens, laid out the same, readable (axe, contrast included);
+// Dark mode (D-102): the same screens, laid out the same, readable (axe, contrast included);
 // the report page stays white paper with dark text.
 const DARK_BG = "rgb(17, 23, 22)";
 const bodyBg = (page: Page) => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
