@@ -691,6 +691,7 @@ pub fn render_notice_pdf(notice: &Notice, fonts: PdfFonts<'_>) -> Result<Vec<u8>
         signature: Vec::new(),
         confidentiality: notice.footer.clone(),
         font: String::new(),
+        ..Report::default()
     };
     let mut doc = build(&report, fonts)?;
     lock(&mut doc, "")?;

@@ -8,7 +8,9 @@
 
 mod agile;
 mod docx;
+mod image;
 mod look;
+mod parents;
 mod pdf;
 mod template;
 
@@ -16,7 +18,9 @@ use serde::{Deserialize, Serialize};
 
 pub use agile::{encrypt, MIN_PASSWORD_CHARS};
 pub use docx::render;
+pub use image::{check_logo, Logo, LogoFormat, MAX_LOGO_BYTES};
 pub use look::{template_look, TemplateLook};
+pub use parents::{for_parents, without_scores, BandChart, BandRow, ParentsVersion};
 pub use pdf::{render_notice_pdf, render_pdf, PdfFonts};
 pub use template::{
     check_template, render_with_template, TemplateSummary, MARKER, MAX_TEMPLATE_BYTES,
@@ -88,10 +92,17 @@ pub struct Notice {
 }
 
 /// Everything that goes into the file.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Report {
     pub title: String,
     pub info: Vec<InfoLine>,
+    /// Paragraphs right after the lines at the top (the parents' version opens with her
+    /// sentence).
+    #[serde(default)]
+    pub intro: Vec<String>,
+    /// Charts in words, after the opening (the parents' version, in place of the tables).
+    #[serde(default)]
+    pub bands: Vec<BandChart>,
     pub parts: Vec<ReportPart>,
     /// Score tables, printed as an appendix after the sections.
     pub tables: Vec<ScoreTable>,
@@ -101,6 +112,10 @@ pub struct Report {
     pub confidentiality: String,
     /// Body font (Hebrew and Latin).
     pub font: String,
+    /// Her logo, at the top of the first page: in the PDF, and in the Word file when it is not
+    /// written into her template (which has its own).
+    #[serde(default)]
+    pub logo: Option<Logo>,
 }
 
 impl Report {
@@ -163,6 +178,9 @@ pub enum ExportError {
     /// Her template cannot be used; the message says what to do, in Hebrew.
     #[error("{0}")]
     Template(String),
+    /// Her logo cannot be used; the message says what to do, in Hebrew.
+    #[error("{0}")]
+    Image(String),
 }
 
 /// Defense in depth before writing a file: bracketed placeholders that must not reach the
@@ -171,7 +189,12 @@ pub enum ExportError {
 pub fn leftover_placeholders(report: &Report) -> Vec<String> {
     let mut texts: Vec<&str> = vec![&report.title];
     texts.extend(report.info.iter().map(|l| l.value.as_str()));
+    texts.extend(report.intro.iter().map(String::as_str));
     texts.extend(report.signature.iter().map(String::as_str));
+    for c in &report.bands {
+        texts.push(&c.title);
+        texts.extend(c.rows.iter().map(|r| r.label.as_str()));
+    }
     for part in &report.parts {
         for s in &part.sections {
             texts.extend(s.paragraphs.iter().map(String::as_str));
@@ -248,6 +271,7 @@ mod tests {
             signature: vec!["ד\"ר בדויה, פסיכולוגית התפתחותית".into()],
             confidentiality: "חסוי – מידע רפואי".into(),
             font: "David".into(),
+            ..Report::default()
         }
     }
 

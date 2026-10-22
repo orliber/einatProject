@@ -99,6 +99,7 @@ impl Core {
             signature: report.signature,
             confidentiality: settings.confidentiality,
             font: settings.font,
+            ..dv_export::Report::default()
         };
         let identities = self.vault_ref()?.identities(case_id)?;
         let known: HashSet<String> = identities.iter().map(|i| i.tag.clone()).collect();
@@ -390,6 +391,7 @@ impl Core {
             signature: with_supervisor(signature, &settings.supervisor),
             confidentiality: settings.confidentiality,
             font: settings.font,
+            ..dv_export::Report::default()
         };
         for leftover in dv_export::leftover_placeholders(&report) {
             if leftover.starts_with("[חסר") {
