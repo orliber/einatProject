@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>הסגנון שלי: המסלול</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700&amp;family=Frank+Ruhl+Libre:wght@400;500;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#f4f5f3}
+a{color:#1e5b56}a:hover{color:#164541}
+.btn{font:inherit;font-size:16px;font-weight:600;border-radius:12px;padding:0 20px;min-height:48px;border:1px solid #cfd5d2;background:#fff;color:#15201f;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.btn-primary{background:#1e5b56;border-color:#1e5b56;color:#fff}
+.btn-quiet{background:transparent;border-color:transparent;color:#4a5654}
+.btn-small{min-height:36px;font-size:15px;padding:0 14px;border-radius:10px}
+.tab{font:inherit;font-size:15px;color:#4a5654;background:none;border:0;padding:0 4px;min-height:56px;border-bottom:2px solid transparent;cursor:pointer}
+.tab-on{color:#15201f;font-weight:700;border-bottom-color:#1e5b56}
+.stage{font:inherit;text-align:right;background:#fff;border:1px solid #e3e6e3;border-radius:16px;padding:16px 18px;display:flex;flex-direction:column;gap:8px;min-height:140px;cursor:pointer;color:#15201f;flex:1 1 220px;min-width:0;position:relative}
+.stage:hover{background:#fafbfa}
+.stage-on{border:2px solid #1e5b56;padding:15px 17px}
+.stage-warn{border-color:#ebcb98;background:#fffbf4}
+.num{width:30px;height:30px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;background:#e6efed;color:#1e5b56}
+.num-done{background:#2f6b45;color:#fff}
+.num-warn{background:#8a4e0c;color:#fff}
+.know{font:inherit;width:100%;background:#fff;border:0;border-top:1px solid #e3e6e3;display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:14px;align-items:center;text-align:right;padding:16px 20px;cursor:pointer;color:#15201f}
+.know:hover{background:#fafbfa}
+.know-on{background:#fafbfa}
+.ic{width:40px;height:40px;border-radius:10px;background:#e6efed;display:flex;align-items:center;justify-content:center}
+.chip{display:inline-flex;align-items:center;border-radius:999px;padding:3px 10px;font-size:14px;background:#f1f3f1;color:#34403e;white-space:nowrap}
+.chip-ok{background:#e5f1e8;color:#2f6b45}
+.chip-warn{background:#fbf1e2;color:#8a4e0c}
+.chip-primary{background:#e6efed;color:#1e5b56;font-weight:700}
+.link{display:flex;gap:12px;align-items:flex-start;padding:10px 14px;border-radius:10px;background:#fff;border:1px solid #e3e6e3}
+.link-label{font-size:13px;font-weight:700;color:#1e5b56;min-width:64px;padding-top:3px}
+.arrow{width:2px;height:14px;background:#cfd5d2;margin-inline-start:30px}
+</style>
+</helmet>
+<div style="font-family:Assistant,system-ui,sans-serif;color:#15201f;background:#f4f5f3;min-height:1640px;width:100%;font-size:16px">
+  <header style="background:#fff;border-bottom:1px solid #e3e6e3;padding:0 32px;display:flex;align-items:center;gap:32px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+      כספת האבחון
+    </div>
+    <nav aria-label="ראשי" style="display:flex;gap:24px">
+      <button class="tab">תיקים</button>
+      <button class="tab tab-on" aria-current="page">הסגנון שלי</button>
+      <button class="tab">התייעצות</button>
+      <button class="tab">הגדרות</button>
+    </nav>
+  </header>
+
+  <main style="max-width:1160px;margin:0 auto;padding:32px 32px 48px;display:flex;flex-direction:column;gap:22px">
+    <div>
+      <h1 style="margin:0;font-size:34px">הסגנון שלי</h1>
+      <p style="margin:8px 0 0;font-size:18px;color:#34403e;max-width:760px;line-height:1.6">התוכנה לומדת מהדוחות שלך איך את כותבת, ומה את מסיקה מכל ממצא. ארבעה שלבים, משמאל לימין: הדוח נכנס, נקרא, את מאשרת, וזה משמש בכל טיוטה. שום דבר לא נכנס לשימוש לפני שאישרת אותו.</p>
+    </div>
+
+    <ol aria-label="המסלול" style="list-style:none;margin:0;padding:0;display:flex;gap:12px;flex-wrap:wrap;align-items:stretch">
+      <li style="display:flex;flex:1 1 220px;min-width:0">
+        <button class="stage" aria-current="false">
+          <span style="display:flex;align-items:center;gap:10px"><span class="num num-done" aria-hidden="true">1</span><strong style="font-size:17px">הדוחות שלי</strong></span>
+          <span style="font-size:26px;font-weight:700;line-height:1.1">6 דוחות</span>
+          <span style="color:#4a5654;font-size:15px">האחרון נוסף לפני שבוע. נשמר רק הטקסט אחרי הסתרה.</span>
+          <span style="margin-top:auto;color:#1e5b56;font-weight:600;font-size:15px">+ הוספת דוח</span>
+        </button>
+      </li>
+      <li style="display:flex;flex:1 1 220px;min-width:0">
+        <button class="stage stage-on" aria-current="step">
+          <span style="display:flex;align-items:center;gap:10px"><span class="num" aria-hidden="true">2</span><strong style="font-size:17px">ניתוח</strong></span>
+          <span style="font-size:26px;font-weight:700;line-height:1.1">5 מתוך 6 נותחו</span>
+          <span style="color:#4a5654;font-size:15px">מכל דוח נלמדים סגנון, פרשנות של תוצאות וכללי הסקה.</span>
+          <span style="margin-top:auto;color:#1e5b56;font-weight:600;font-size:15px">ניתוח הדוח החדש ועדכון הפרופיל ←</span>
+        </button>
+      </li>
+      <li style="display:flex;flex:1 1 220px;min-width:0">
+        <button class="stage stage-warn">
+          <span style="display:flex;align-items:center;gap:10px"><span class="num num-warn" aria-hidden="true">3</span><strong style="font-size:17px">אישור</strong></span>
+          <span style="font-size:26px;font-weight:700;line-height:1.1;color:#8a4e0c">7 מחכים לך</span>
+          <span style="color:#4a5654;font-size:15px">אחד-אחד: להשתמש, לערוך, או לא צריך.</span>
+          <span style="margin-top:auto;color:#8a4e0c;font-weight:600;font-size:15px">לאשר עכשיו ↓</span>
+        </button>
+      </li>
+      <li style="display:flex;flex:1 1 220px;min-width:0">
+        <button class="stage">
+          <span style="display:flex;align-items:center;gap:10px"><span class="num num-done" aria-hidden="true">4</span><strong style="font-size:17px">בשימוש</strong></span>
+          <span style="font-size:26px;font-weight:700;line-height:1.1">42 דברים</span>
+          <span style="color:#4a5654;font-size:15px">גרסה 3 של הפרופיל. נכנסים לכל טיוטה, רק מה שמתאים לסעיף ולתיק.</span>
+          <span style="margin-top:auto;color:#1e5b56;font-weight:600;font-size:15px">מה התוכנה יודעת עלייך ↓</span>
+        </button>
+      </li>
+    </ol>
+
+    <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+      <section aria-labelledby="q-title" style="flex:1 1 460px;min-width:0;background:#fff;border:2px solid #1e5b56;border-radius:18px;padding:24px 26px;display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <h2 id="q-title" style="margin:0;font-size:20px">לאשר אחד-אחד</h2>
+          <span style="margin-inline-start:auto;color:#4a5654;font-size:15px">3 מתוך 7</span>
+        </div>
+        <div style="height:6px;border-radius:3px;background:#e9ecea"><div style="height:6px;border-radius:3px;background:#1e5b56;width:29%"></div></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <span class="chip chip-primary">איך את מסיקה</span>
+          <span class="chip">בסעיף התחום ההתנהגותי והקשבי</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:0">
+          <div class="link"><span class="link-label">בתצפית</span><span style="font-family:'Frank Ruhl Libre',serif;font-size:19px;line-height:1.7;color:#1b1b1b">הילד עוזב משימה באמצע, מסתובב בחדר, וחוזר אליה רק אחרי תיווך של המבוגר</span></div>
+          <div class="arrow" aria-hidden="true"></div>
+          <div class="link"><span class="link-label">מסקנה</span><span style="font-family:'Frank Ruhl Libre',serif;font-size:19px;line-height:1.7;color:#1b1b1b">קושי בהתמדה ובוויסות עצמי. את קובעת זאת כשהדפוס חוזר גם בדיווח הגן; אחרת מסתייגת (נראה כי)</span></div>
+          <div class="arrow" aria-hidden="true"></div>
+          <div class="link"><span class="link-label">ניסוח</span><span style="font-family:'Frank Ruhl Libre',serif;font-size:19px;line-height:1.7;color:#1b1b1b">ניכר קושי ב{תחום}, הבא לידי ביטוי ב{דוגמה מהתצפית}, ומגיב היטב לתיווך</span></div>
+          <div class="arrow" aria-hidden="true"></div>
+          <div class="link"><span class="link-label">המלצה</span><span style="font-family:'Frank Ruhl Libre',serif;font-size:19px;line-height:1.7;color:#1b1b1b">תיווך של מבוגר בתחילת משימה וחלוקה לשלבים קצרים</span></div>
+        </div>
+        <p style="margin:0;color:#4a5654">נלמד מ-4 מתוך 6 הדוחות שלך. בטיוטה: כשבחומרים יש ממצא כזה, הניסוח מסיק ומנסח לפי הכלל; בלי ממצא כזה, הכלל לא משמש.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-primary" style="flex:1 1 160px">להשתמש בזה</button>
+          <button class="btn" style="flex:1 1 120px">לערוך</button>
+          <button class="btn btn-quiet">לא צריך</button>
+        </div>
+      </section>
+
+      <section aria-labelledby="k-title" style="flex:1 1 420px;min-width:0;background:#fff;border:1px solid #e3e6e3;border-radius:18px;overflow:hidden">
+        <h2 id="k-title" style="margin:0;font-size:20px;padding:20px 20px 6px">מה התוכנה יודעת עלייך</h2>
+        <p style="margin:0;padding:0 20px 14px;color:#4a5654;font-size:15px">כל שורה נפתחת במקום. מה שכאן נכנס לכל טיוטה, לפי הסעיף.</p>
+        <button class="know"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="2" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"></path></svg></span><span><strong style="display:block">איך את כותבת</strong><span style="color:#4a5654;font-size:15px">כללי כתיבה, מה את לא כותבת, ומה התוכנה מדדה</span></span><span style="color:#1e5b56;font-weight:600">12 ←</span></button>
+        <button class="know"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="2" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"></path></svg></span><span><strong style="display:block">סדר הנושאים בכל סעיף</strong><span style="color:#4a5654;font-size:15px">הסדר שבו את כותבת כל סעיף</span></span><span style="color:#1e5b56;font-weight:600">9 ←</span></button>
+        <button class="know"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="2" aria-hidden="true"><path d="M7 7h4v4H7zM13 7h4v4h-4zM7 11c0 3-1 5-3 6M13 11c0 3-1 5-3 6"></path></svg></span><span><strong style="display:block">משפטים שחוזרים אצלך</strong><span style="color:#4a5654;font-size:15px">ביטויים ותבניות משפט קבועות</span></span><span style="color:#1e5b56;font-weight:600">8 ←</span></button>
+        <button class="know"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="2" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"></path></svg></span><span><strong style="display:block">איך את מפרשת ציונים</strong><span style="color:#4a5654;font-size:15px">מה את כותבת על תוצאה של כל תת-מבחן</span></span><span style="color:#1e5b56;font-weight:600">10 ←</span></button>
+        <button class="know know-on" aria-expanded="true"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="2" aria-hidden="true"><path d="M4 6h6l3 6-3 6H4M14 6h6l-3 6 3 6h-6"></path></svg></span><span><strong style="display:block">איך את מסיקה</strong><span style="color:#4a5654;font-size:15px">מהממצא למסקנה: התנהגות, דיווח או דפוס תוצאות, ומה נובע מהם</span></span><span style="color:#1e5b56;font-weight:600">7 ↓</span></button>
+        <div style="background:#fafbfa;padding:4px 20px 18px;display:flex;flex-direction:column;gap:10px">
+          <p style="margin:0;color:#4a5654;font-size:15px">דפוסי תוצאות שהתוכנה מזהה בקוד (פער בין מדדים, המדד הנמוך ביותר, פיזור, מסתגל מול קוגניטיבי) מופיעים כאן עם הקריאה שלך לכל אחד.</p>
+          <div style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:10px;background:#fff;border:1px solid #e3e6e3">
+            <span class="chip">בתוצאות</span>
+            <span style="line-height:1.6"><b>המדד הנמוך ביותר: מהירות עיבוד</b> ← קצב עבודה איטי ולא קושי בהבנה; נבדק מול התצפית ← «{מדד} נמוך משאר המדדים, בהלימה ל…» ← תרגול קצב בסביבה שקטה <span class="chip chip-ok">ב-3 דוחות</span></span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:10px;background:#fff;border:1px solid #e3e6e3">
+            <span class="chip">לפי ההורים</span>
+            <span style="line-height:1.6"><b>קושי בפרידה בבוקר ובמעברים</b> ← חרדת פרידה, שמוצגת כהשערה עד לתצפית ← «לדברי ההורים ניכר קושי ב…, שעשוי להעיד על…» ← הדרכת הורים <span class="chip chip-ok">ב-2 דוחות</span></span>
+          </div>
+          <button class="btn btn-quiet btn-small" style="align-self:flex-start">+ הוספת כלל משלך</button>
+        </div>
+        <button class="know"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1e5b56" stroke-width="2" aria-hidden="true"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></span><span><strong style="display:block">איך את בונה טיעון</strong><span style="color:#4a5654;font-size:15px">חיבור בין כלים, וניסוח קריטריון DSM</span></span><span style="color:#1e5b56;font-weight:600">3 ←</span></button>
+      </section>
+    </div>
+
+    <section aria-labelledby="r-title" style="background:#fff;border:1px solid #e3e6e3;border-radius:18px;padding:18px 20px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+        <h2 id="r-title" style="margin:0;font-size:20px">הדוחות שלי</h2>
+        <span style="color:#4a5654;flex:1 1 220px">6 דוחות, האחרון נוסף לפני שבוע. אחד עוד לא נותח. נשמר רק הטקסט אחרי הסתרה, לא הקובץ.</span>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-inline-start:auto">
+          <button class="btn btn-quiet">להסתיר את הרשימה</button>
+          <button class="btn">+ הוספת דוח</button>
+          <button class="btn btn-quiet" aria-label="עוד פעולות על הסגנון">⋯</button>
+        </div>
+      </div>
+      <ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px">
+        <li style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid #e3e6e3;border-radius:12px;background:#fafbfa;flex-wrap:wrap">
+          <span class="chip">DOCX</span>
+          <span style="display:flex;flex-direction:column;gap:4px;flex:1 1 260px;min-width:0"><strong>אבחון התפתחותי, גן, 2023</strong><span style="color:#4a5654;font-size:14px">נוסף ב-3 באוקטובר 2026 · 2,140 מילים · התרשמות · פרופיל קוגניטיבי · סיכום · המלצות</span></span>
+          <span style="display:flex;gap:6px;flex-wrap:wrap"><span class="chip chip-ok">נותח · 14 פריטים</span><span class="chip chip-ok">3 כללי הסקה</span><span class="chip">2 דפוסי תוצאות</span></span>
+          <button class="btn btn-quiet btn-small">מחיקה</button>
+        </li>
+        <li style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid #e3e6e3;border-radius:12px;background:#fafbfa;flex-wrap:wrap">
+          <span class="chip">PDF</span>
+          <span style="display:flex;flex-direction:column;gap:4px;flex:1 1 260px;min-width:0"><strong>סיכום אבחון פסיכולוגי, גיל שש</strong><span style="color:#4a5654;font-size:14px">נוסף ב-15 באוקטובר 2026 · 1,860 מילים · הופעה והתרשמות · פרופיל קוגניטיבי · DSM-5 · סיכום</span></span>
+          <span style="display:flex;gap:6px;flex-wrap:wrap"><span class="chip chip-warn">עוד לא נותח</span></span>
+          <button class="btn btn-quiet btn-small">מחיקה</button>
+        </li>
+      </ul>
+    </section>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1640}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

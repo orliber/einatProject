@@ -9,4 +9,9 @@ export type StyleItem = { id: string, section: string | null, kind: StyleKind, t
 /**
  * In how many of her reports it was seen (0: not from reports).
  */
-support: number, };
+support: number, 
+/**
+ * An inference about a pattern of scores: the pattern's key
+ * ([`dv_domain::pattern_keys`]). It goes out only with a case that has the pattern.
+ */
+pattern?: string, };

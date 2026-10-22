@@ -8,4 +8,8 @@ headings: Array<string>, analyzed: boolean,
 /**
  * Analyzed in demo mode (no API key): worth analyzing again for real.
  */
-analysis_demo: boolean, analysis_items: number, };
+analysis_demo: boolean, analysis_items: number, 
+/**
+ * Of them, chains from a finding to a conclusion (D-100).
+ */
+analysis_inferences: number, };

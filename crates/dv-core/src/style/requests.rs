@@ -98,8 +98,17 @@ impl Core {
             }
             Ok((excerpts, review))
         })?;
+        // The patterns of the report's scores, from its tags (D-100): worked out here, so the
+        // model only describes how she reads each one.
+        let text: String = source
+            .parts
+            .iter()
+            .map(|p| p.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let patterns = dv_domain::report_patterns(&dv_domain::find_tagged_scores(&text));
         let nonce = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
-        let body = dv_ai::build_style_analysis_request(&model, &keys, &excerpts, &nonce);
+        let body = dv_ai::build_style_analysis_request(&model, &keys, &excerpts, &patterns, &nonce);
         let mut prepared = review.into_prepared(demo_mode);
         self.gate_style(
             &body,
@@ -273,6 +282,7 @@ impl Core {
                 enabled: true,
                 origin: StyleOrigin::Reports,
                 support: i.support,
+                pattern: i.pattern,
             });
         }
         if let Some(active) = self.active_profile()? {

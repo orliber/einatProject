@@ -7,7 +7,7 @@ import { AppContext, type AppApi } from "../App";
 import { StyleImportDialog } from "../components/StyleImportDialog";
 import type { StyleOverview, StyleProfileView } from "../ipc/client";
 import { prepared, status } from "../test/fixtures";
-import { sinceLabel, StyleScreen } from "./StyleScreen";
+import { chainLinks, sinceLabel, StyleScreen } from "./StyleScreen";
 
 function api(): AppApi {
   // Every step through the review screen: "show me every request" on (off by default; set here for the tests that read it).
@@ -44,7 +44,7 @@ const overview = (over: Partial<StyleOverview> = {}): StyleOverview => ({
   ...over,
 });
 
-const source = { id: "s1", title: "דוח א", format: "docx", added_at: 1_790_000_000, words: 900, headings: ["סיכום"], analyzed: false, analysis_demo: false, analysis_items: 0 };
+const source = { id: "s1", title: "דוח א", format: "docx", added_at: 1_790_000_000, words: 900, headings: ["סיכום"], analyzed: false, analysis_demo: false, analysis_items: 0, analysis_inferences: 0 };
 
 const draft: StyleProfileView = {
   id: "p1", version: 1, status: "draft", created_at: 1_790_000_000, dropped: 1, demo: false,
@@ -118,10 +118,12 @@ describe("StyleScreen (round 46)", () => {
     });
     const user = userEvent.setup();
     wrap(<StyleScreen />);
-    const numbers = await screen.findByRole("list", { name: "במספרים" });
-    expect(numbers).toHaveTextContent("1דוח שלך נקרא");
-    expect(numbers).toHaveTextContent("0דברים שהתוכנה יודעת עלייך");
-    expect(numbers).toHaveTextContent("2מחכים לאישור שלך");
+    const journey = await screen.findByRole("list", { name: "המסלול" });
+    expect(journey).toHaveTextContent("הדוחות שלידוח אחד");
+    expect(journey).toHaveTextContent("ניתוחנותח");
+    expect(journey).toHaveTextContent("אישור2 מחכים לך");
+    expect(within(journey).getByRole("button", { current: "step" })).toHaveTextContent("אישור");
+    expect(journey).toHaveTextContent("בשימוש0 דברים");
     expect(queue()).toHaveTextContent("1 מתוך 2");
     expect(queue()).toHaveTextContent("כלל כתיבה");
     expect(quote()).toBe("גוף נסתר וזמן הווה");
@@ -136,6 +138,24 @@ describe("StyleScreen (round 46)", () => {
     const profile = (calls[0]?.[1] as { profile: StyleProfileView["profile"] }).profile;
     expect(profile.items.find((i) => i.id === "b")?.enabled).toBe(false);
     expect(profile.items.find((i) => i.id === "a")?.enabled).toBe(true);
+  });
+
+  it("the rest of the draft goes into use with one click, without touching what she said no to", async () => {
+    const calls: string[] = [];
+    mockIPC((cmd) => {
+      if (cmd === "style_overview") return overview({ sources: [{ ...source, analyzed: true }], draft });
+      calls.push(cmd);
+      if (cmd === "approve_style_draft") return { ...draft, status: "active" };
+      return null;
+    });
+    // What she said about an earlier draft's items is remembered per draft; this test starts afresh.
+    localStorage.removeItem("dv.style.reviewed");
+    const user = userEvent.setup();
+    wrap(<StyleScreen />);
+    await screen.findByRole("region", { name: "לאשר אחד-אחד" });
+    expect(queue()).toHaveTextContent("1 מתוך 2");
+    await user.click(within(queue()).getByRole("button", { name: "להשתמש בכל 2 שנשארו" }));
+    await vi.waitFor(() => expect(calls.filter((c) => c !== "check_update")).toEqual(["approve_style_draft"]));
   });
 
   it("asks only about what the profile in use does not hold yet", async () => {
@@ -345,8 +365,9 @@ describe("suggestions from her reports", () => {
     expect(within(queue()).queryByRole("button", { name: "לערוך" })).not.toBeInTheDocument();
     await user.click(within(queue()).getByRole("button", { name: "להשתמש בזה" }));
     await vi.waitFor(() => expect(calls).toContainEqual(["accept_style_suggestion", { id: "shape:opening:summary:x" }]));
-    // The report not read yet waits beside her reports, not over the queue.
-    expect(screen.getByRole("region", { name: "הדוחות שלי" })).toHaveTextContent("ניתוח הדוח ובניית הפרופיל");
+    // The report not read yet waits in the journey's analysis stage, not over the queue (D-100).
+    expect(screen.getByRole("list", { name: "המסלול" })).toHaveTextContent("ניתוח הדוח ובניית הפרופיל");
+    expect(queue()).not.toHaveTextContent("ניתוח הדוח ובניית הפרופיל");
   });
 });
 
@@ -410,5 +431,17 @@ describe("StyleImportDialog", () => {
     await user.click(screen.getByRole("button", { name: "שמירת הקטעים שסומנו" }));
     await vi.waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(saved[0]).toMatchObject({ token: "t1", included: [1], title: null });
+  });
+});
+
+describe("chainLinks (D-100)", () => {
+  it("keeps a score pattern's colon inside the head's parentheses", () => {
+    const text = "בתוצאות (המדד הנמוך ביותר: מהירות עיבוד): נמוך משאר המדדים ← מסקנה: קצב עבודה איטי ← ניסוח: {מדד} נמוך";
+    expect(chainLinks(text)).toEqual([
+      { label: "בתוצאות (המדד הנמוך ביותר: מהירות עיבוד)", body: "נמוך משאר המדדים" },
+      { label: "מסקנה", body: "קצב עבודה איטי" },
+      { label: "ניסוח", body: "{מדד} נמוך" },
+    ]);
+    expect(chainLinks("בלי תווית")).toEqual([{ label: "", body: "בלי תווית" }]);
   });
 });

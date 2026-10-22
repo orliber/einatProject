@@ -1760,10 +1760,19 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
             text: String::new(),
         })
         .collect();
+    // Every pattern of scores there can be (D-100): their names go out as fixed text too.
+    let patterns: Vec<dv_domain::ScorePattern> = dv_domain::pattern_keys()
+        .into_iter()
+        .map(|key| dv_domain::ScorePattern {
+            label: dv_domain::pattern_label(&key).unwrap_or_default(),
+            key,
+        })
+        .collect();
     body.push(dv_ai::build_style_analysis_request(
         &dv_ai::ModelConfig::default(),
         &keys,
         &excerpts,
+        &patterns,
         &nonce,
     ));
     body.push(dv_ai::build_style_synthesis_request(
@@ -1795,12 +1804,13 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
                     enabled: true,
                     origin: dv_ai::StyleOrigin::Reports,
                     support: 1,
+                    pattern: None,
                 })
             })
             .collect(),
     };
     body.push(Value::String(
-        dv_ai::render_for_section(&profile, "cognitive", &|_| true).unwrap(),
+        dv_ai::render_for_section(&profile, "cognitive", &|_| true, &[]).unwrap(),
     ));
     let body = Value::Array(body);
     let tags: HashSet<String> = HashSet::from(["[ילד]".to_owned()]);
