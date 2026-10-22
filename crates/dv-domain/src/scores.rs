@@ -1447,7 +1447,7 @@ pub struct TaggedScore {
     /// Byte range of the whole tag.
     pub start: usize,
     pub end: usize,
-    /// The score itself, for the patterns of the report's profile (D-091).
+    /// The score itself, for the patterns of the report's profile (D-100).
     pub value: f64,
     pub band: Option<String>,
     pub relative: Option<Relative>,

@@ -1,4 +1,4 @@
-//! Patterns in a child's scores, worked out in code (D-091): not one score, but the shape of
+//! Patterns in a child's scores, worked out in code (D-100): not one score, but the shape of
 //! the profile. A gap of a standard deviation or more between the indexes of one test, which
 //! index is the lowest or the highest, a wide spread that makes the total hard to read, a
 //! scatter between the subtests, and the adaptive total against the cognitive one.
@@ -8,7 +8,7 @@
 //! new case (where that reading is used). The keys are fixed here; the model never decides
 //! what a pattern is, only describes how she writes about it.
 //!
-//! Thresholds (`knowledge/instruments.md`, waiting for her approval): 15 standard points (one
+//! Thresholds (`knowledge/result_patterns.md`, waiting for her approval): 15 standard points (one
 //! SD) for a gap, 23 (one and a half SDs, the usual guideline for a total that is hard to
 //! interpret) for a wide spread, 6 scaled points (two SDs) for a subtest scatter, and 15
 //! points between the adaptive and the cognitive totals.
@@ -149,7 +149,10 @@ fn patterns_of(scores: &[Score<'_>]) -> Vec<ScorePattern> {
             out.push(p);
         }
     };
-    for list in by_instrument.values() {
+    for (inst, list) in &by_instrument {
+        // "A total that is hard to interpret" is a rule about the cognitive composites; an
+        // adaptive scale's domains spread without that meaning.
+        let cognitive = COGNITIVE_TOTALS.iter().any(|(i, _)| i == inst);
         let indexes: Vec<(&Measure, f64)> =
             list.iter().filter(|(m, _)| is_index(m)).copied().collect();
         if let (Some(hi), Some(lo)) = (
@@ -164,7 +167,7 @@ fn patterns_of(scores: &[Score<'_>]) -> Vec<ScorePattern> {
                 let key = format!("highest_index:{}", hi.0.key);
                 push(pattern(&key, &label_of(&key)));
             }
-            if spread >= WIDE_SPREAD {
+            if cognitive && spread >= WIDE_SPREAD {
                 push(pattern("index_spread_wide", &label_of("index_spread_wide")));
             }
             if indexes.len() >= 3 && spread <= FLAT_SPREAD {
@@ -339,6 +342,24 @@ mod tests {
             sheet("abas_3", &[("gac", 88.0)]),
         ]);
         assert!(between.is_empty(), "12 points: neither a gap nor in line");
+    }
+
+    #[test]
+    fn a_wide_spread_is_a_cognitive_pattern_only() {
+        let adaptive = sheet_patterns(&[sheet(
+            "abas_3",
+            &[("conceptual", 70.0), ("social", 100.0), ("practical", 85.0)],
+        )]);
+        assert!(keys(&adaptive).contains(&"index_gap"), "{adaptive:?}");
+        assert!(
+            !keys(&adaptive).contains(&"index_spread_wide"),
+            "an adaptive scale has no total that is hard to interpret: {adaptive:?}"
+        );
+        let cognitive = sheet_patterns(&[sheet("wppsi_iv", &[("vci", 115.0), ("psi", 85.0)])]);
+        assert!(
+            keys(&cognitive).contains(&"index_spread_wide"),
+            "{cognitive:?}"
+        );
     }
 
     #[test]

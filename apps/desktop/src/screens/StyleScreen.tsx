@@ -80,8 +80,20 @@ const KINDS: StyleKind[] = ["rule", "phrase", "avoid", "template", "inference", 
 export const CHAIN_SEP = " ← ";
 export function chainLinks(text: string): { label: string; body: string }[] {
   return text.split(CHAIN_SEP).map((part) => {
-    const at = part.indexOf(": ");
-    return at > 0 && at <= 60 ? { label: part.slice(0, at), body: part.slice(at + 2) } : { label: "", body: part };
+    // The label ends at the first ": " outside parentheses: a score pattern's head is
+    // `בתוצאות (המדד הנמוך ביותר: מהירות עיבוד): …`, and the colon inside stays with it.
+    let depth = 0;
+    let at = -1;
+    for (let i = 0; i < part.length && i <= 80; i += 1) {
+      const c = part[i];
+      if (c === "(") depth += 1;
+      else if (c === ")") depth = Math.max(0, depth - 1);
+      else if (c === ":" && depth === 0 && part[i + 1] === " ") {
+        at = i;
+        break;
+      }
+    }
+    return at > 0 ? { label: part.slice(0, at), body: part.slice(at + 2) } : { label: "", body: part };
   });
 }
 
@@ -597,6 +609,13 @@ function ApproveQueue({ o, asks, onReviewed, running, buildDue }: {
 
   const total = done + asks.length;
   const isEditing = editing === current.key;
+  // One click for the draft's remaining items, so a long queue is never a chore (D-100): what
+  // she already said no to stays off, the rest goes into use as the draft holds it.
+  const rest = asks.filter((a) => a.kind === "item").length;
+  const useRest = async () => {
+    const items = o.draft?.profile.items ?? [];
+    await finish(items.some((i) => i.enabled));
+  };
   const canEdit = current.kind === "item" || current.kind === "interpretation";
   const startEdit = () => {
     setEditing(current.key);
@@ -693,9 +712,16 @@ function ApproveQueue({ o, asks, onReviewed, running, buildDue }: {
       </div>
       {o.draft && (current.kind === "item" || current.kind === "draft") && (
         <>
-          <button type="button" className="btn btn-ghost btn-small style-whole" aria-expanded={whole} onClick={() => setWhole((w) => !w)}>
-            {whole ? "להסתיר את הטיוטה" : "לעבור על כל הטיוטה בבת אחת"}
-          </button>
+          <div className="style-queue-rest">
+            {rest > 1 && !isEditing && (
+              <button type="button" className="btn btn-ghost btn-small" disabled={busy || running} onClick={() => void act(useRest)}>
+                להשתמש בכל {rest} שנשארו
+              </button>
+            )}
+            <button type="button" className="btn btn-ghost btn-small style-whole" aria-expanded={whole} onClick={() => setWhole((w) => !w)}>
+              {whole ? "להסתיר את הטיוטה" : "לעבור על כל הטיוטה בבת אחת"}
+            </button>
+          </div>
           {whole && <ProfileEditor key={o.draft.id} view={o.draft} o={o} />}
         </>
       )}

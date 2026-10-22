@@ -157,6 +157,11 @@
 .style-queue-actions .btn:not(.btn-primary):not(.btn-ghost) {
   flex: 1 1 120px;
 }
+.style-queue-rest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
 .style-whole {
   align-self: flex-start;
 }

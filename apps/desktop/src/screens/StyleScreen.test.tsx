@@ -7,7 +7,7 @@ import { AppContext, type AppApi } from "../App";
 import { StyleImportDialog } from "../components/StyleImportDialog";
 import type { StyleOverview, StyleProfileView } from "../ipc/client";
 import { prepared, status } from "../test/fixtures";
-import { sinceLabel, StyleScreen } from "./StyleScreen";
+import { chainLinks, sinceLabel, StyleScreen } from "./StyleScreen";
 
 function api(): AppApi {
   // Every step through the review screen: "show me every request" on (off by default; set here for the tests that read it).
@@ -138,6 +138,24 @@ describe("StyleScreen (round 46)", () => {
     const profile = (calls[0]?.[1] as { profile: StyleProfileView["profile"] }).profile;
     expect(profile.items.find((i) => i.id === "b")?.enabled).toBe(false);
     expect(profile.items.find((i) => i.id === "a")?.enabled).toBe(true);
+  });
+
+  it("the rest of the draft goes into use with one click, without touching what she said no to", async () => {
+    const calls: string[] = [];
+    mockIPC((cmd) => {
+      if (cmd === "style_overview") return overview({ sources: [{ ...source, analyzed: true }], draft });
+      calls.push(cmd);
+      if (cmd === "approve_style_draft") return { ...draft, status: "active" };
+      return null;
+    });
+    // What she said about an earlier draft's items is remembered per draft; this test starts afresh.
+    localStorage.removeItem("dv.style.reviewed");
+    const user = userEvent.setup();
+    wrap(<StyleScreen />);
+    await screen.findByRole("region", { name: "לאשר אחד-אחד" });
+    expect(queue()).toHaveTextContent("1 מתוך 2");
+    await user.click(within(queue()).getByRole("button", { name: "להשתמש בכל 2 שנשארו" }));
+    await vi.waitFor(() => expect(calls.filter((c) => c !== "check_update")).toEqual(["approve_style_draft"]));
   });
 
   it("asks only about what the profile in use does not hold yet", async () => {
@@ -413,5 +431,17 @@ describe("StyleImportDialog", () => {
     await user.click(screen.getByRole("button", { name: "שמירת הקטעים שסומנו" }));
     await vi.waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(saved[0]).toMatchObject({ token: "t1", included: [1], title: null });
+  });
+});
+
+describe("chainLinks (D-100)", () => {
+  it("keeps a score pattern's colon inside the head's parentheses", () => {
+    const text = "בתוצאות (המדד הנמוך ביותר: מהירות עיבוד): נמוך משאר המדדים ← מסקנה: קצב עבודה איטי ← ניסוח: {מדד} נמוך";
+    expect(chainLinks(text)).toEqual([
+      { label: "בתוצאות (המדד הנמוך ביותר: מהירות עיבוד)", body: "נמוך משאר המדדים" },
+      { label: "מסקנה", body: "קצב עבודה איטי" },
+      { label: "ניסוח", body: "{מדד} נמוך" },
+    ]);
+    expect(chainLinks("בלי תווית")).toEqual([{ label: "", body: "בלי תווית" }]);
   });
 });
