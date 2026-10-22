@@ -26,11 +26,13 @@ import type { InstrumentApproval } from "./InstrumentApproval";
 import type { InstrumentStatus } from "./InstrumentStatus";
 import type { InterpretationResult } from "./InterpretationResult";
 import type { InterpretationView } from "./InterpretationView";
+import type { LogoView } from "./LogoView";
 import type { NameMatch } from "./NameMatch";
 import type { NameModelView } from "./NameModelView";
 import type { OwnSectionHelp } from "./OwnSectionHelp";
 import type { ParagraphVersionView } from "./ParagraphVersionView";
 import type { ParagraphView } from "./ParagraphView";
+import type { ParentsOptions } from "./ParentsOptions";
 import type { PingResponse } from "./PingResponse";
 import type { Prepared } from "./Prepared";
 import type { Readiness } from "./Readiness";
@@ -86,6 +88,7 @@ export type Commands = {
   check_original: { args: Uint8Array; returns: number | null };
   check_update: { args: undefined; returns: UpdateView | null };
   choose_backup: { args: undefined; returns: StagedBackup | null };
+  clear_report_logo: { args: undefined; returns: null };
   clear_report_template: { args: undefined; returns: null };
   confirm_auto_hidden: { args: { caseId: string; token: string; tag: string }; returns: null };
   confirm_readiness: { args: { key: string; done: boolean }; returns: Readiness };
@@ -111,8 +114,8 @@ export type Commands = {
   download_name_model: { args: undefined; returns: NameModelView };
   edit_paragraph: { args: { caseId: string; draftId: string; text: string; openedWith: string | null }; returns: boolean };
   export_letter: { args: { caseId: string; audience: string; password: string | null }; returns: string };
-  export_pdf: { args: { caseId: string; password: string | null }; returns: string };
-  export_report: { args: { caseId: string; password: string | null }; returns: string };
+  export_pdf: { args: { caseId: string; password: string | null; parents: ParentsOptions | null }; returns: string };
+  export_report: { args: { caseId: string; password: string | null; parents: ParentsOptions | null }; returns: string };
   export_security_pdf: { args: undefined; returns: string };
   find_name_matches: { args: { caseId: string | null; names: Array<string> }; returns: Array<NameMatch> };
   folders: { args: undefined; returns: Array<Folder> };
@@ -166,6 +169,7 @@ export type Commands = {
   reject_paragraph: { args: { caseId: string; draftId: string }; returns: null };
   rename_folder: { args: { id: string; name: string }; returns: null };
   report_check_setting: { args: undefined; returns: ReportCheckSetting };
+  report_logo: { args: undefined; returns: LogoView | null };
   report_settings: { args: undefined; returns: ReportSettings };
   report_template: { args: undefined; returns: TemplateView | null };
   reset_style: { args: undefined; returns: null };
@@ -209,6 +213,7 @@ export type Commands = {
   set_name_model: { args: { on: boolean }; returns: NameModelView };
   set_practitioner: { args: { names: Array<string> }; returns: null };
   set_report_check: { args: { on: boolean }; returns: null };
+  set_report_logo: { args: Uint8Array; returns: LogoView };
   set_report_settings: { args: { settings: ReportSettings }; returns: null };
   set_report_template: { args: Uint8Array; returns: TemplateView };
   set_review_always: { args: { on: boolean }; returns: null };

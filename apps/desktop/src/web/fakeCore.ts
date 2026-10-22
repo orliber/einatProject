@@ -21,6 +21,7 @@ import type { Folder } from "../ipc/generated/Folder";
 import type { NameMatch } from "../ipc/generated/NameMatch";
 import type { Prepared } from "../ipc/generated/Prepared";
 import type { ReportSettings } from "../ipc/generated/ReportSettings";
+import type { LogoView } from "../ipc/generated/LogoView";
 import type { TemplateView } from "../ipc/generated/TemplateView";
 import type { ReviewPart } from "../ipc/generated/ReviewPart";
 import type { Role } from "../ipc/generated/Role";
@@ -210,12 +211,14 @@ export class FakeCore {
   /** What the opening says about the time since the last one (L4), for tests. */
   sinceLast: string | null = null;
   private template: TemplateView | null = null;
+  private logo: LogoView | null = null;
   private report: ReportSettings = {
     title: "דוח אבחון פסיכולוגי-התפתחותי",
     font: "David",
     confidentiality: "חסוי – מידע רפואי-פסיכולוגי. לשימוש הגורם המטפל בלבד.",
     signature: ["ד\"ר רותם בדויה", "פסיכולוגית התפתחותית מומחית"],
     supervisor: [],
+    parents_opening: "להורים שלום, זהו סיכום האבחון בשפה פשוטה. הדוח המלא נשמר אצלי, ואפשר לקבל אותו בכל עת.",
   };
   private cases: Case[] = [];
   private sampleId: string | null = null;
@@ -1015,6 +1018,22 @@ export class FakeCore {
         return this.template;
       case "clear_report_template":
         this.template = null;
+        return null;
+      case "report_logo":
+        return this.logo;
+      case "set_report_logo": {
+        // As the core: by the bytes, never the name; PNG or JPEG only, at most 1 MB.
+        const b = args instanceof Uint8Array ? args : new Uint8Array();
+        const png = b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
+        const jpeg = b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
+        if (b.length === 0) return fail("refused", "הקובץ ריק.");
+        if (b.length > 1024 * 1024) return fail("refused", "התמונה גדולה מ-1MB. שומרים אותה בגודל קטן יותר ובוחרים שוב.");
+        if (!png && !jpeg) return fail("refused", "רק תמונת PNG או JPEG. הקובץ הזה אינו אחד מהם.");
+        this.logo = { format: png ? "PNG" : "JPEG", width: 240, height: 80, size_kb: Math.ceil(b.length / 1024) };
+        return this.logo;
+      }
+      case "clear_report_logo":
+        this.logo = null;
         return null;
       case "list_cases":
         return this.cases.filter((c) => c.deletedAt === null).map((c) => this.summary(c));

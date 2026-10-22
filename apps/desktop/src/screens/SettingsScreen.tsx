@@ -16,7 +16,7 @@ import { SecuritySettings } from "../components/SecuritySettings";
 import { PrivacyStatus } from "../components/PrivacyStatus";
 import { Segmented, Switch } from "../components/Switch";
 import { ErrorLine } from "../components/ui";
-import { ipc, type ReportSettings, type TemplateView } from "../ipc/client";
+import { ipc, type LogoView, type ReportSettings, type TemplateView } from "../ipc/client";
 import { PROVIDERS, providerOf } from "../ai";
 
 import { TEXT_SIZES, applyTextSize, readTextSize } from "../textSize";
@@ -53,6 +53,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
   const [names, setNames] = useState(status.practitioner.join(", "));
   const [report, setReport] = useState<ReportSettings | null>(null);
   const [template, setTemplate] = useState<TemplateView | null>(null);
+  const [logo, setLogo] = useState<LogoView | null>(null);
   const [original, setOriginal] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [textSize, setTextSize] = useState(readTextSize);
@@ -60,6 +61,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
   useEffect(() => {
     ipc.reportSettings().then(setReport).catch((e) => setError(fail(e as never)));
     ipc.reportTemplate().then(setTemplate).catch(() => setTemplate(null));
+    ipc.reportLogo().then(setLogo).catch(() => setLogo(null));
   }, [fail]);
 
   async function run(fn: () => Promise<void>, done: string) {
@@ -238,6 +240,12 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                   <textarea id="r-sup" className="textarea" rows={2} value={report.supervisor.join("\n")}
                     onChange={(e) => setReport({ ...report, supervisor: e.target.value.split("\n") })} />
                 </div>
+                <div className="field">
+                  <label htmlFor="r-parents">משפט הפתיחה בגרסה להורים</label>
+                  <span className="hint">נכתב פעם אחת, ופותח כל גרסה להורים.</span>
+                  <textarea id="r-parents" className="textarea" rows={2} value={report.parents_opening}
+                    onChange={(e) => setReport({ ...report, parents_opening: e.target.value })} />
+                </div>
                 <button type="button" className="btn btn-primary align-start"
                   onClick={() => void run(() => ipc.setReportSettings({ ...report, signature: report.signature.filter((l) => l.trim()), supervisor: report.supervisor.filter((l) => l.trim()) }), "הגדרות הדוח נשמרו.")}>שמירה</button>
               </section>
@@ -262,6 +270,29 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                   {template && (
                     <button type="button" className="btn btn-small"
                       onClick={() => void run(async () => { await ipc.clearReportTemplate(); setTemplate(null); }, "חזרה לעיצוב הרגיל של הדוח.")}>בלי תבנית</button>
+                  )}
+                </div>
+              </section>
+              <section className="card setting" aria-labelledby="s-logo">
+                <h2 id="s-logo">לוגו</h2>
+                <span className="hint">
+                  {logo
+                    ? `${logo.format}, ${logo.width}×${logo.height}, ${logo.size_kb}KB. מודפס בראש העמוד הראשון של הדוח${template ? " (ב-PDF; ב-Word נשאר הלוגו של התבנית)" : ""}.`
+                    : "תמונת PNG או JPEG, עד 1MB. נשמרת מוצפנת בכספת, ומודפסת בראש העמוד הראשון של הדוח."}
+                </span>
+                <div className="row">
+                  <label className="btn btn-small">
+                    {logo ? "החלפת הלוגו" : "בחירת לוגו"}
+                    <input type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" hidden
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = "";
+                        if (f) void run(async () => setLogo(await ipc.setReportLogo(f)), "הלוגו נשמר. הוא יודפס בדוח הבא.");
+                      }} />
+                  </label>
+                  {logo && (
+                    <button type="button" className="btn btn-small"
+                      onClick={() => void run(async () => { await ipc.clearReportLogo(); setLogo(null); }, "הלוגו הוסר מהדוחות.")}>בלי לוגו</button>
                   )}
                 </div>
               </section>
