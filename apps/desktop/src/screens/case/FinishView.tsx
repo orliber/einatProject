@@ -9,6 +9,7 @@ import { ErrorLine } from "../../components/ui";
 import { timed, WaitLine } from "../../components/Progress";
 import { useHoldUnsaved } from "../../components/Unsaved";
 import { LocalText, type LocalTextHandle } from "../../components/LocalText";
+import { ReportCheckItem } from "../../components/ReportCheck";
 import type { CaseApi } from "../CaseScreen";
 import { LetterCard } from "./LetterCard";
 import "./FinishView.css";
@@ -133,6 +134,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
                   </div>
                 </li>
               )}
+              <ReportCheckItem api={api} onOpen={onOpen} />
               {check.blocking.map((b) => (
                 <li key={b} className="warn">
                   <span className="finish-mark" aria-hidden="true">!</span>

@@ -8,8 +8,10 @@ import { TopBar } from "../components/TopBar";
 import { UpdateSettings } from "../components/Update";
 import { UsageSettings } from "../components/UsageSettings";
 import { VerifySettings } from "../components/VerifySettings";
+import { ReportCheckSettings } from "../components/ReportCheck";
 import { NameModelSettings } from "../components/NameModelSettings";
 import { ReadinessSettings } from "../components/ReadinessSettings";
+import { InstrumentSettings } from "../components/InstrumentSettings";
 import { SecuritySettings } from "../components/SecuritySettings";
 import { PrivacyStatus } from "../components/PrivacyStatus";
 import { Segmented, Switch } from "../components/Switch";
@@ -175,6 +177,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
               </section>
               <UsageSettings />
               <VerifySettings />
+              <ReportCheckSettings />
             </>
           )}
 
@@ -282,6 +285,8 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
               </section>
             </>
           )}
+
+          {pane === "tests" && <InstrumentSettings />}
 
           {pane === "backup" && <BackupSettings />}
 

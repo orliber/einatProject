@@ -833,7 +833,8 @@ pub(crate) fn collect_sources(
     };
     let mut tagged_sources = Vec::new();
     let mut source_rows = Vec::new();
-    let mut inputs = v.inputs(case_id)?;
+    // A score table of an instrument she does not give stays in the computer (D-098).
+    let mut inputs = crate::instruments::request_inputs(v, case_id)?;
     if section_key == sorting::PRIOR_SECTION {
         // Round 31: the institute first, then the community, newest first, fixed here.
         let keys = inputs

@@ -21,11 +21,17 @@ const wisc = () => {
 };
 
 let saved: ScoreSheet[] = [];
+/** Her answers in Settings → המבחנים (D-098); the rest await approval. All approved by default. */
+const allApproved = () => Object.fromEntries(instruments.map((i) => [i.key, "approved" as const]));
+let answers: Record<string, "approved" | "not_used"> = allApproved();
 
 function mount(props: Partial<Parameters<typeof ScoresView>[0]> = {}) {
   saved = [];
   mockIPC((cmd, args) => {
-    if (cmd === "score_instruments") return instruments;
+    if (cmd === "score_instruments")
+      return instruments
+        .map((instrument) => ({ instrument, status: answers[instrument.key] ?? "awaiting", open_cases: 0 }))
+        .filter((a) => a.status !== "not_used");
     if (cmd === "preview_scores") return "טקסט הציונים";
     if (cmd === "save_scores") {
       saved.push((args as { sheet: ScoreSheet }).sheet);
@@ -45,7 +51,30 @@ function mount(props: Partial<Parameters<typeof ScoresView>[0]> = {}) {
 
 const field = (name: string) => screen.getByLabelText(name, { selector: "input" });
 
-afterEach(() => forgetScoreDrafts());
+afterEach(() => {
+  forgetScoreDrafts();
+  answers = allApproved();
+});
+
+describe("her approval of the tables (D-098)", () => {
+  it("marks an instrument awaiting approval, and leaves out one she does not give", async () => {
+    answers = { wppsi_iv: "approved", wisc_v: "not_used" }; // the rest await approval
+    mount();
+    // The age fits WISC-V, which she does not give: the table opens at another instrument.
+    const picker = await screen.findByRole("radiogroup", { name: "הכלי" });
+    expect(within(picker).queryByRole("radio", { name: /WISC-V/ })).toBeNull();
+    expect(within(picker).getByRole("radio", { name: /WPPSI-IV/ }).textContent).not.toContain("טיוטה");
+    expect(within(picker).getByRole("radio", { name: /BRIEF-P/ }).textContent).toContain("טיוטה");
+    expect(within(picker).getAllByRole("radio").filter((r) => r.getAttribute("aria-checked") === "true")).toHaveLength(1);
+  });
+
+  it("says why a saved table of an instrument she does not give cannot be edited", async () => {
+    answers = { wisc_v: "not_used" };
+    const sheet: ScoreSheet = { instrument: "wisc_v", module: "", cutoff: null, entries: [{ measure: "fsiq", value: 99, note: "" }], notes: "" };
+    mount({ sheet, input: { id: "in-9" } as never });
+    expect(await screen.findByText(/לא מעבירה את הכלי הזה/)).toBeTruthy();
+  });
+});
 
 describe("the score helpers", () => {
   it("reads a band from the table, and a column from a spreadsheet", () => {

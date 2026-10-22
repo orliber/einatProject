@@ -96,6 +96,7 @@ interface Case {
 
 type Pending =
   | { type: "verify"; caseId: string; section: string; draftIds: string[] }
+  | { type: "report_check"; caseId: string; sections: string[]; texts: string[] }
   | { type: "section"; caseId: string; section: string; refs: { sid: string; label: string; tagged: string }[]; instruction: string; replaces: string | null; points?: string }
   | { type: "consult"; question: string; shown: string; hidden: string[]; caseId: string | null; conversationId: string | null }
   | { type: "sort"; caseId: string; materials: { id: string; count: number; content: string }[] };
@@ -190,8 +191,12 @@ export class FakeCore {
   private lockMinutes = 15;
   private capUsd: number | null = null;
   private verifyOn = true;
+  /** The check of the whole report (D-097): off until she turns it on. */
+  private reportCheckOn = false;
   private nameModel = { enabled: false, downloaded: false, size_mb: 705, problem: null as string | null };
   private ready: Record<string, number | null> = {};
+  /** Her answer for each instrument's tables (D-098); none is "awaiting". */
+  private instrumentAnswers: Record<string, "approved" | "not_used"> = {};
   private sendStopped = false;
   /** The material deleted last, for "ביטול" (forgotten on lock, as in the core). */
   private removedInput: { caseId: string; input: CaseInput; at: number } | null = null;
@@ -386,6 +391,15 @@ export class FakeCore {
     return input;
   }
 
+  /** Every instrument with her answer and the open cases that hold a table of it. */
+  private instrumentApprovals() {
+    return instruments.map((instrument) => ({
+      instrument,
+      status: this.instrumentAnswers[instrument.key] ?? ("awaiting" as const),
+      open_cases: this.cases.filter((c) => c.deletedAt === null && [...c.sheets.values()].some((sh) => sh.instrument === instrument.key)).length,
+    }));
+  }
+
   private find(id: unknown): Case {
     return this.cases.find((c) => c.id === id) ?? fail("not_found", "התיק לא נמצא");
   }
@@ -481,7 +495,14 @@ export class FakeCore {
         summary: read ? restore(read.text, c.people, this.practitioner) : "",
         record: read?.record ? { ...read.record, date: date ? `${date[1]}/${date[0]}` : "" } : null,
         summary_notes: [],
+        left_out: null,
       };
+    }).map((route) => {
+      // A score table of an instrument she does not give feeds nothing (D-098).
+      const sheet = c.sheets.get(route.input_id);
+      if (!sheet || this.instrumentAnswers[sheet.instrument] !== "not_used") return route;
+      const name = instruments.find((x) => x.key === sheet.instrument)?.name ?? sheet.instrument;
+      return { ...route, feeds: [], needs_sorting: false, left_out: `סימנת בהגדרות שאת לא מעבירה את ${name}. הציונים נשארים בתיק כמו שנשמרו, אבל לא נשלחים ולא נכנסים לדוח.` };
     });
   }
 
@@ -573,6 +594,30 @@ export class FakeCore {
     const approval = newId("approval");
     this.pending.set(approval, { type: "verify", caseId: c.id, section: key, draftIds: drafts.map((d) => d.id) });
     return { ...base, approval_id: approval, parts };
+  }
+
+  /** The check of the whole report (D-097): the approved sections only, once nothing waits. */
+  private prepareReportCheck(c: Case): Prepared {
+    if (!this.reportCheckOn) fail("refused", "בדיקת הדוח כולו כבויה. אפשר להפעיל אותה בהגדרות.");
+    if (!c.meta.consent) fail("consent_missing", `לפני שליחה ל-${this.ai} צריך לרשום בתיק את הסכמת ההורים.`);
+    const content = SECTIONS.filter((s) => s.key !== "signature");
+    const waiting = content.filter((s) => c.drafts.some((d) => d.section === s.key && d.status === "proposed" && !d.replaces));
+    if (waiting.length) fail("refused", `הדוח נבדק כולו אחרי שכל הטיוטות אושרו. עוד מחכות לאישור: ${waiting.map((s) => s.title).join(", ")}.`);
+    const parts: ReviewPart[] = [];
+    const sections: string[] = [];
+    const texts: string[] = [];
+    for (const s of content) {
+      const text = c.drafts.filter((d) => d.section === s.key && d.status === "approved").map((d) => d.text).join("\n");
+      if (!text) continue;
+      const f = this.filterFor(c, text);
+      parts.push({ label: `סעיף מאושר · ${s.title}`, original: f.original_segments, outgoing: f.tagged_segments });
+      sections.push(s.key);
+      texts.push(f.tagged);
+    }
+    if (sections.length < 2) fail("refused", "בדיקת הדוח כולו משווה בין סעיפים, וצריך לפחות שני סעיפים מאושרים.");
+    const approval = newId("approval");
+    this.pending.set(approval, { type: "report_check", caseId: c.id, sections, texts });
+    return this.withKept(c, { approval_id: approval, parts, suspects: [], auto_hidden: [], hidden: [], checks: { declared_names: 0, patterns: 0, name_suspects: 0, indirect_suspects: 0 }, blocked: [], demo_mode: true });
   }
 
   /** Sorting into sections (D-022): every material not sorted yet, one review. */
@@ -750,7 +795,7 @@ export class FakeCore {
   // ------------------------------------------------------------------ the IPC surface
   async handle(cmd: string, args: unknown, options?: { headers?: Record<string, string> }): Promise<unknown> {
     const a = (args ?? {}) as Args;
-    if (!["plugin:event|listen", "plugin:event|unlisten", "ping", "recent_crashes", "app_status", "unlock", "unlock_with_recovery", "create_vault", "confirm_recovery_key", "google_status", "google_recover", "google_cancel", "score_instruments", "preview_scores", "choose_backup", "restore_backup", "forget_backup"].includes(cmd) && !this.unlocked) {
+    if (!["plugin:event|listen", "plugin:event|unlisten", "ping", "recent_crashes", "app_status", "unlock", "unlock_with_recovery", "create_vault", "confirm_recovery_key", "google_status", "google_recover", "google_cancel", "choose_backup", "restore_backup", "forget_backup"].includes(cmd) && !this.unlocked) {
       fail("locked", "הכספת נעולה. יש לפתוח אותה מחדש.");
     }
     if (FakeStyle.handles(cmd)) return this.style.handle(cmd, a, args, options?.headers ?? {}, this.allPeople(), this.practitioner);
@@ -806,10 +851,13 @@ export class FakeCore {
       case "readiness":
       case "confirm_readiness": {
         if (cmd === "confirm_readiness") this.ready[a.key as string] = a.done ? 1_790_000_000 : null;
-        const manual = ["zdr", "consent_form", "score_tables", "legal"].map((key) => ({
+        const manual = ["zdr", "consent_form", "legal"].map((key) => ({
           key, done: this.ready[key] != null, checked_by_program: false, confirmed_at: this.ready[key] ?? null,
         }));
+        // As the core (D-098): every instrument answered, not only those in open cases.
+        const tables = this.instrumentApprovals().every((x) => x.status !== "awaiting");
         const items = [...manual,
+          { key: "score_tables", done: tables, checked_by_program: true, confirmed_at: null },
           { key: "api_key", done: false, checked_by_program: true, confirmed_at: null },
           { key: "backup", done: false, checked_by_program: true, confirmed_at: null },
           { key: "disk", done: true, checked_by_program: true, confirmed_at: null }];
@@ -843,6 +891,32 @@ export class FakeCore {
           checks: p.draftIds.map((_, i) => ({ paragraph: `P${i + 1}`, verdict: "partial", notes: [] })),
           demo: true,
         };
+      }
+      case "report_check_setting":
+        return { on: this.reportCheckOn, cents_per_check: 15 };
+      case "set_report_check":
+        this.reportCheckOn = Boolean(a.on);
+        return null;
+      case "prepare_report_check":
+        return this.prepareReportCheck(this.find(a.caseId));
+      case "send_report_check": {
+        const p = this.pending.get(String(a.approvalId));
+        if (p?.type !== "report_check") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
+        this.pending.delete(String(a.approvalId));
+        this.keepSent(p.caseId, "report_check", p.texts.join("\n\n"));
+        await new Promise((r) => setTimeout(r, 900));
+        // Like the demo check: a sentence said word for word in two sections is a repetition.
+        const sentences = (t: string) => t.split(/(?<=[.!?])/).map((x) => x.trim()).filter((x) => x.length >= 20);
+        const notes = [];
+        for (let i = 0; i < p.texts.length; i++) {
+          for (let j = i + 1; j < p.texts.length; j++) {
+            const theirs = sentences(p.texts[j] ?? "");
+            if (sentences(p.texts[i] ?? "").some((x) => theirs.includes(x))) {
+              notes.push({ kind: "repetition", sections: [p.sections[i], p.sections[j]], note: "מצב הדגמה: אותו משפט מופיע בשני הסעיפים." });
+            }
+          }
+        }
+        return { notes, checked: p.sections, demo: true };
       }
       case "usage_summary":
         return { month: "2026-10", requests: 0, input_tokens: 0, output_tokens: 0, estimated_cents: 0, cap_usd: this.capUsd, unpriced_models: [] };
@@ -1083,8 +1157,18 @@ export class FakeCore {
         return null;
       }
       case "score_instruments":
-        return instruments;
+        return this.instrumentApprovals().filter((x) => x.status !== "not_used");
+      case "instrument_approvals":
+        return this.instrumentApprovals();
+      case "set_instrument_status": {
+        const key = String(a.key);
+        if (!instruments.some((i) => i.key === key)) return fail("not_found", "המבחן לא נמצא");
+        if (a.status !== "approved" && a.status !== "not_used") return fail("refused", "אפשר לבחור \"מאושר\" או \"לא מעבירה את זה\".");
+        this.instrumentAnswers[key] = a.status;
+        return this.instrumentApprovals();
+      }
       case "preview_scores":
+        if (this.instrumentAnswers[(a.sheet as ScoreSheet).instrument] === "not_used") return fail("refused", "סימנת בהגדרות שאת לא מעבירה את המבחן הזה.");
         try {
           return formatSheet(a.sheet as ScoreSheet);
         } catch (e) {
@@ -1093,6 +1177,7 @@ export class FakeCore {
       case "save_scores": {
         const c = this.find(a.caseId);
         const sheet = a.sheet as ScoreSheet;
+        if (this.instrumentAnswers[sheet.instrument] === "not_used") return fail("refused", "סימנת בהגדרות שאת לא מעבירה את המבחן הזה.");
         let text = "";
         try {
           text = formatSheet(sheet);

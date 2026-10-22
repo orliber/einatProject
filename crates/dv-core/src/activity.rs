@@ -171,6 +171,23 @@ fn describe(
             "עודכן אישור ברשימה \"מוכנה לעבודה אמיתית\"".to_owned(),
             false,
         ),
+        "settings_changed" if text("key").starts_with("instrument/") => {
+            let key = text("key").trim_start_matches("instrument/");
+            let name = dv_domain::instruments()
+                .into_iter()
+                .find(|i| i.key == key)
+                .map_or_else(|| "מבחן".to_owned(), |i| i.name);
+            let answer = match text("value") {
+                "approved" => " – מאושר",
+                "not_used" => " – לא מעבירה את זה",
+                _ => "",
+            };
+            (
+                "security",
+                format!("טבלאות {name}{answer} (בהגדרות ← המבחנים)"),
+                false,
+            )
+        }
         "settings_changed" if !text("secret").is_empty() => {
             ("security", "מפתח ה-API נשמר".to_owned(), false)
         }

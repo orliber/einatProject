@@ -63,7 +63,7 @@ function toEntries(sheet: ScoreSheet | null | undefined): Record<string, Entry> 
 }
 
 /** "מ-6 שנים עד 16 שנים ו-11 חודשים". */
-function ageSpan(minMonths: number, maxMonths: number): string {
+export function ageSpan(minMonths: number, maxMonths: number): string {
   const w = (n: number) => ageWords({ years: Math.floor(n / 12), months: n % 12 });
   return `מ-${w(minMonths)} עד ${w(maxMonths)}`;
 }
@@ -126,6 +126,8 @@ export function ScoresView(props: {
   const [instruments, setInstruments] = useState<Instrument[] | null>(null);
   /** A new table opens on the instrument for the child's age (null: kept or edited table). */
   const opensFor = useRef(draft || props.sheet ? null : props.age);
+  /** Instruments whose tables still await her approval in Settings → המבחנים (D-098). */
+  const [awaiting, setAwaiting] = useState<Set<string>>(() => new Set());
   const [key, setKey] = useState(draft?.key ?? props.sheet?.instrument ?? "wppsi_iv");
   const [entries, setEntries] = useState<Record<string, Entry>>(() => draft?.entries ?? toEntries(props.sheet));
   const [module, setModule] = useState(draft?.module ?? props.sheet?.module ?? "");
@@ -151,14 +153,20 @@ export function ScoresView(props: {
       .scoreInstruments()
       .then((list) => {
         if (!alive) return;
-        setInstruments(list);
-        const fit = firstFit(list, opensFor.current);
+        const given = list.map((a) => a.instrument);
+        setInstruments(given);
+        setAwaiting(new Set(list.filter((a) => a.status === "awaiting").map((a) => a.instrument.key)));
+        // A new table opens at an instrument she gives, the first whose ages hold the child's.
+        const fit = firstFit(given, opensFor.current);
         if (fit) setKey(fit);
+        else if (!props.input && !draft) setKey((k) => (given.some((i) => i.key === k) ? k : given[0]?.key ?? k));
       })
       .catch((e: unknown) => alive && setError(fail(e as never)));
     return () => {
       alive = false;
     };
+    // Loaded once, when the view opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fail]);
 
   const instrument = instruments?.find((i) => i.key === key) ?? null;
@@ -338,9 +346,21 @@ export function ScoresView(props: {
                       onKeyDown={pick}
                       onClick={() => setKey(i.key)}>
                       {i.name}
+                      {awaiting.has(i.key) && <span className="inst-draft" title="הטבלאות מחכות לאישור שלך בהגדרות"> · טיוטה</span>}
                     </button>
                   ))}
                 </div>
+                {!instrument && props.input && (
+                  <p className="small warn-text" role="note">
+                    סימנת בהגדרות שאת לא מעבירה את הכלי הזה. הציונים נשארים בתיק כמו שנשמרו, אבל לא נשלחים ולא נכנסים לדוח.
+                    כדי לערוך אותם, סמני אותו שוב כמאושר בהגדרות ← המבחנים.
+                  </p>
+                )}
+                {instrument && awaiting.has(instrument.key) && (
+                  <p className="small warn-text" role="note">
+                    הטבלאות של {instrument.name} עוד מחכות לאישור שלך (הגדרות ← המבחנים). עד אז, רק בתיקים בדויים.
+                  </p>
+                )}
                 {instrument && (
                   <p className="small muted">
                     {instrument.description_he}

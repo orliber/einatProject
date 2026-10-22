@@ -245,6 +245,8 @@ impl Core {
         let model = self.model_for(Task::Draft)?;
         let demo_mode = self.demo_mode()?;
         let sources: Vec<StoredSource> = self.stored_sources()?.into_iter().map(|s| s.2).collect();
+        // Not an instrument she does not give (D-098).
+        let not_used = crate::instruments::not_used(self.vault_ref()?)?;
         let (groups, review) = self.with_style_ctx(|ctx, _| {
             let mut texts = Vec::new();
             for s in &sources {
@@ -258,6 +260,9 @@ impl Core {
             let mut groups = Vec::new();
             let mut budget = MAX_INTERPRETATION_CHARS_SENT;
             for (instrument, measure, sentences) in group_sentences(&texts) {
+                if not_used.contains(&instrument) {
+                    continue;
+                }
                 let Some((iname, mname)) = measure_names(&instrument, &measure) else {
                     continue;
                 };

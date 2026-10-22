@@ -6,6 +6,7 @@
 pub mod demo;
 mod interpret;
 pub mod prompts;
+mod report_check;
 mod request;
 mod response;
 mod shrink;
@@ -16,6 +17,10 @@ mod verify;
 pub use interpret::{
     build_interpretation_request, parse_interpretations, render_interpretations, Interpretation,
     InterpretationGroup, RawInterpretation, INTERPRETATION_FIXED_TEXTS, MAX_INTERPRETATION_CHARS,
+};
+pub use report_check::{
+    build_report_check_request, parse_report_check, ReportCheckInput, ReportCheckSection,
+    ReportNote, ReportNoteKind, MAX_REPORT_NOTES,
 };
 pub use request::{
     build_consult_request, build_research_request, build_section_request, content_text,

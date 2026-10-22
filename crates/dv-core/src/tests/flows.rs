@@ -786,8 +786,8 @@ fn readiness_follows_what_the_program_checks_and_keeps_what_she_confirmed() {
         [
             "zdr",
             "consent_form",
-            "score_tables",
             "legal",
+            "score_tables",
             "api_key",
             "backup",
             "disk"
@@ -820,13 +820,21 @@ fn readiness_follows_what_the_program_checks_and_keeps_what_she_confirmed() {
     for key in ["consent_form", "legal"] {
         core.confirm_readiness(key, true).unwrap();
     }
-    for bad in ["disk", "api_key", "", "zdr ", "ZDR", "ready/zdr"] {
+    for bad in [
+        "disk",
+        "api_key",
+        "score_tables",
+        "",
+        "zdr ",
+        "ZDR",
+        "ready/zdr",
+    ] {
         assert!(core.confirm_readiness(bad, true).is_err(), "{bad:?}");
     }
     core.lock();
     core.unlock("חתול כחול ישן על הספה").unwrap();
     assert!(done(&mut core, "consent_form") && done(&mut core, "legal"));
-    assert!(!done(&mut core, "zdr") && !done(&mut core, "score_tables"));
+    assert!(!done(&mut core, "zdr"));
     assert!(!core.readiness().unwrap().all_done);
 }
 

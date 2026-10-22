@@ -220,13 +220,20 @@ impl Core {
         let masks = v.masks(case_id)?;
         let practitioner = v.practitioner()?.names.first().cloned();
         let show = |t: &str| restore(t, &identities, practitioner.as_deref(), &masks);
+        let not_used = crate::instruments::not_used(v)?;
         inputs
             .iter()
             .map(|inp| {
                 let routing = routing_of(v, case_id, &inp.id)?;
                 let table = table_for(structure, inp.kind);
                 let count = passage_ranges(&inp.content).len();
-                let feeds = routing.feeds(&order, &table, count);
+                // A score table of an instrument she does not give feeds nothing (D-098).
+                let left_out = crate::instruments::left_out(v, case_id, inp, &not_used)?;
+                let feeds = if left_out.is_some() {
+                    Vec::new()
+                } else {
+                    routing.feeds(&order, &table, count)
+                };
                 let sorted = routing.is_sorted(count);
                 let suggested = if sorted {
                     routing.base(&table, count)
@@ -276,9 +283,10 @@ impl Core {
                     suggested,
                     table,
                     sorted,
-                    needs_sorting: count > 0 && routing.needs_sorting(count),
+                    needs_sorting: left_out.is_none() && count > 0 && routing.needs_sorting(count),
                     added: routing.added,
                     removed: routing.removed,
+                    left_out,
                 })
             })
             .collect()
@@ -364,7 +372,8 @@ impl Core {
             let mut rows = Vec::new();
             // Materials that cannot be cut into passages right now (see below), by title.
             let mut uncut: Vec<String> = Vec::new();
-            for inp in v.inputs(case_id)? {
+            // A score table of an instrument she does not give is not sorted (D-098).
+            for inp in crate::instruments::request_inputs(v, case_id)? {
                 let ranges = passage_ranges(&inp.content);
                 if ranges.is_empty()
                     || !routing_of(v, case_id, &inp.id)?.needs_sorting(ranges.len())

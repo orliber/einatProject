@@ -21,6 +21,7 @@ mod history;
 mod hostile;
 mod import_export;
 mod institute;
+mod instruments;
 mod large_case;
 mod layers;
 mod library;
@@ -29,6 +30,7 @@ mod off_lock;
 mod own;
 mod perf_profile;
 mod reading;
+mod report_check;
 mod sample_flows;
 mod sort_flows;
 mod surfaces;
@@ -1435,7 +1437,7 @@ fn entered_scores_feed_the_section_with_ranges_from_the_table() {
 fn every_instrument_sheet_passes_the_filter_without_questions() {
     use dv_domain::{ScoreEntry, ScoreSheet};
     let (_dir, mut core, case) = setup(None);
-    for inst in Core::score_instruments() {
+    for inst in dv_domain::instruments() {
         let entries = inst
             .measures
             .iter()

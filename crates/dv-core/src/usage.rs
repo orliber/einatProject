@@ -74,6 +74,18 @@ impl Tokens {
     }
 }
 
+/// Estimated cents for one request of this size, rounded up; `None` without a price.
+pub(crate) fn estimate_cents(model: &str, input: u32, output: u32) -> Option<u32> {
+    let t = Tokens {
+        requests: 1,
+        input,
+        output,
+        ..Tokens::default()
+    };
+    t.cost_ten_thousandths(model)
+        .map(|c| u32::try_from(c.div_ceil(100)).unwrap_or(u32::MAX))
+}
+
 /// List prices, dollars per million tokens: (input, output, cache read).
 fn price(model: &str) -> Option<(f64, f64, f64)> {
     Some(match model {

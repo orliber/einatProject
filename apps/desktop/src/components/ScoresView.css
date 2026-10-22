@@ -257,3 +257,9 @@
 .preview-empty {
   margin-top: 14px;
 }
+.inst-draft {
+  unicode-bidi: isolate;
+  direction: rtl;
+  font-weight: 400;
+  opacity: 0.8;
+}

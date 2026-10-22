@@ -3,7 +3,7 @@
 use super::*;
 
 /// Sections that sum up the body rather than add to it (G2).
-const CLOSING_SECTIONS: &[&str] = &[
+pub(crate) const CLOSING_SECTIONS: &[&str] = &[
     "summary",
     "diagnoses",
     "recommendations",

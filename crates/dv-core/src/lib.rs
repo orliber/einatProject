@@ -19,6 +19,7 @@ pub use binding::{ComputerSeal, WindowsSeal};
 pub mod google;
 mod guides;
 mod history;
+mod instruments;
 mod intake;
 mod library;
 pub mod name_model;
@@ -27,6 +28,7 @@ use name_model::NameHints;
 mod jobs;
 mod layers;
 mod readiness;
+mod report_check;
 mod retention;
 mod seal;
 mod security;
@@ -72,6 +74,7 @@ pub use dv_ai::{StyleItem, StyleKind, StyleOrigin, StyleProfile};
 pub use dv_vault::BACKUP_EXTENSION;
 pub use followup::FollowUpView;
 pub use history::{HiddenWord, SentItem, SentPart, SentText};
+pub use instruments::{InstrumentApproval, InstrumentStatus};
 pub use jobs::{
     BackupRun, BackupTask, DocumentRead, DrillJob, Drilled, ExportJob, Exported, ReadJob,
     RestoreJob, Restored, SlotJob, SlotMade, UnlockJob, Unlocked,
@@ -81,6 +84,7 @@ pub use library::TRASH_DAYS;
 pub use name_model::{HintJob, HintsRead};
 pub use own::SectionModeView;
 pub use readiness::{Readiness, ReadinessItem};
+pub use report_check::{ReportCheckNote, ReportCheckResult, ReportCheckSetting};
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
 pub use security::{SecurityItem, SecurityStatus};
 pub use style::{
@@ -445,17 +449,22 @@ fn egress_he(e: &EgressError, ai: &str) -> String {
     }
 }
 
-/// The score sheets entered in the case's score table (the scores the text is checked against).
+/// The score sheets entered in the case's score table (the scores the text is checked against),
+/// but for instruments she does not give.
 fn score_sheets(
     v: &Vault,
     case_id: &str,
     inputs: &[dv_domain::CaseInput],
 ) -> Result<Vec<dv_domain::ScoreSheet>, CoreError> {
+    // An instrument she does not give is in no request and no check (D-098).
+    let skip = instruments::not_used(v)?;
     let mut out = Vec::new();
     for i in inputs.iter().filter(|i| i.kind == InputKind::TestScores) {
         if let Some(data) = v.input_data(case_id, &i.id)? {
-            if let Ok(sheet) = serde_json::from_str(&data) {
-                out.push(sheet);
+            if let Ok(sheet) = serde_json::from_str::<dv_domain::ScoreSheet>(&data) {
+                if !skip.contains(&sheet.instrument) {
+                    out.push(sheet);
+                }
             }
         }
     }
@@ -548,6 +557,14 @@ enum PendingKind {
         draft_ids: Vec<String>,
         source_ids: Vec<String>,
     },
+    /// The check of the whole approved report (D-097): the keys of the sections sent, in the
+    /// order of `R1`…
+    ReportCheck {
+        case_id: String,
+        section_keys: Vec<String>,
+        /// The request's ids ("R1"…), one per key: the notes are read by the ids sent.
+        ids: Vec<String>,
+    },
 }
 
 /// What an approval is expected to be for. `Core::begin_send` checks it before anything
@@ -561,6 +578,7 @@ pub enum SendKind {
     StyleSynthesis,
     Interpretation,
     Verify,
+    ReportCheck,
 }
 
 impl PendingKind {
@@ -573,6 +591,7 @@ impl PendingKind {
             PendingKind::StyleSynthesis { .. } => SendKind::StyleSynthesis,
             PendingKind::Interpretation { .. } => SendKind::Interpretation,
             PendingKind::Verify { .. } => SendKind::Verify,
+            PendingKind::ReportCheck { .. } => SendKind::ReportCheck,
         }
     }
 }

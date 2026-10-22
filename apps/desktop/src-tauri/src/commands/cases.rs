@@ -119,9 +119,12 @@ pub(crate) async fn update_input(
     .await
 }
 
+/// The instruments the score table offers (all but the ones she does not give), with her answer.
 #[tauri::command]
-pub(crate) fn score_instruments() -> Vec<dv_domain::Instrument> {
-    dv_core::Core::score_instruments()
+pub(crate) async fn score_instruments(
+    state: tauri::State<'_, AppState>,
+) -> Res<Vec<dv_core::InstrumentApproval>> {
+    with_core(&state, |c| c.score_instruments()).await
 }
 
 #[tauri::command]
