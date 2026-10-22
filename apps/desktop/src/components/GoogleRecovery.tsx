@@ -28,9 +28,11 @@ function WaitingForBrowser() {
 const TWO_STEP =
   "חשוב: בחשבון הגוגל צריך להיות מופעל אימות דו-שלבי (בהגדרות החשבון ← אבטחה ← אימות דו-שלבי). כך מי שמגלה את סיסמת הגוגל לא נכנס לחשבון.";
 
-function TurnOnDialog({ onClose }: { onClose: () => void }) {
-  const { notify } = useApp();
-  const qc = useQueryClient();
+/**
+ * Turning it on: her vault password, then Google in her browser. Needs the vault open (the
+ * settings, or first-run setup right after the kit). What follows success is the caller's.
+ */
+export function TurnOnDialog({ onClose, onTurnedOn }: { onClose: () => void; onTurnedOn: () => Promise<void> | void }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,8 +44,7 @@ function TurnOnDialog({ onClose }: { onClose: () => void }) {
     setError(null);
     try {
       await ipc.googleTurnOn(password);
-      await qc.invalidateQueries({ queryKey: ["google"] });
-      notify("הכניסה עם גוגל הופעלה. אם הסיסמה תישכח, נכנסים מהמחשב הזה עם חשבון הגוגל.");
+      await onTurnedOn();
       onClose();
     } catch (err) {
       setError(message(err, "החיבור לגוגל לא הושלם."));
@@ -126,6 +127,8 @@ function TurnOffDialog({ onClose }: { onClose: () => void }) {
 
 /** Settings: turn it on or off. Hidden where it cannot work (not Windows, or not set up). */
 export function GoogleSettings() {
+  const { notify } = useApp();
+  const qc = useQueryClient();
   const { data: status } = useGoogleStatus();
   const [open, setOpen] = useState<"on" | "off" | null>(null);
   if (!status?.available) return null;
@@ -149,7 +152,10 @@ export function GoogleSettings() {
           <button type="button" className="btn" onClick={() => setOpen("on")}>הפעלה…</button>
         )}
       </div>
-      {open === "on" && <TurnOnDialog onClose={() => setOpen(null)} />}
+      {open === "on" && <TurnOnDialog onClose={() => setOpen(null)} onTurnedOn={async () => {
+        await qc.invalidateQueries({ queryKey: ["google"] });
+        notify("הכניסה עם גוגל הופעלה. אם הסיסמה תישכח, נכנסים מהמחשב הזה עם חשבון הגוגל.");
+      }} />}
       {open === "off" && <TurnOffDialog onClose={() => setOpen(null)} />}
     </section>
   );

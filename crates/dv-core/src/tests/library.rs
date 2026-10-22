@@ -313,19 +313,19 @@ fn an_open_edit_survives_the_lock_inside_the_vault() {
         text: text.into(),
     };
     // Nothing kept: nothing offered.
-    assert_eq!(core.take_unsaved().unwrap(), None);
+    assert!(core.take_unsaved().unwrap().is_empty());
     // An edit saved (closed) before the lock is not kept.
-    core.hold_unsaved(Some(edit("טיוטה")));
-    core.hold_unsaved(None);
+    core.hold_unsaved(vec![edit("טיוטה")]);
+    core.hold_unsaved(Vec::new());
     core.lock();
     core.unlock(PASSWORD).unwrap();
-    assert_eq!(core.take_unsaved().unwrap(), None);
+    assert!(core.take_unsaved().unwrap().is_empty());
 
     let text = "הילד הגיע לאבחון בליווי אמו, ושיתף פעולה לאורך כל המפגשים.";
-    core.hold_unsaved(Some(edit(text)));
+    core.hold_unsaved(vec![edit(text)]);
     assert!(core.lock_with_computer());
     // Locked: a closing editor changes nothing.
-    core.hold_unsaved(None);
+    core.hold_unsaved(Vec::new());
     // Not on disk outside the vault.
     for entry in walkdir(dir.path()) {
         let bytes = std::fs::read(&entry).unwrap();
@@ -335,14 +335,14 @@ fn an_open_edit_survives_the_lock_inside_the_vault() {
         );
     }
     core.unlock(PASSWORD).unwrap();
-    assert_eq!(core.take_unsaved().unwrap(), Some(edit(text)));
+    assert_eq!(core.take_unsaved().unwrap(), vec![edit(text)]);
     // Offered once.
-    assert_eq!(core.take_unsaved().unwrap(), None);
+    assert!(core.take_unsaved().unwrap().is_empty());
     // Whitespace is not an edit worth keeping.
-    core.hold_unsaved(Some(edit("  \n")));
+    core.hold_unsaved(vec![edit("  \n")]);
     core.lock();
     core.unlock(PASSWORD).unwrap();
-    assert_eq!(core.take_unsaved().unwrap(), None);
+    assert!(core.take_unsaved().unwrap().is_empty());
     // An edit kept by an earlier version (no view) still comes back.
     let old: crate::UnsavedEdit =
         serde_json::from_str(r#"{"case_id":"c","place":"פסקה","text":"טקסט"}"#).unwrap();
@@ -1111,6 +1111,45 @@ fn her_own_paragraph_goes_where_she_put_it() {
     let second = ids(&mut core)[1].clone();
     core.edit_paragraph(&case, &second, "  \n ").unwrap();
     assert_eq!(texts(&mut core), vec!["אחת.", "שלוש.", "ארבע."]);
+}
+
+/// An editor left open on an older wording does not silently write over a newer one: her text
+/// is saved, the newer wording stays among the earlier versions, and the page is told.
+#[test]
+fn a_stale_editor_keeps_the_newer_wording_as_a_version_and_says_so() {
+    let (_dir, mut core, case) = setup(None);
+    core.add_own_paragraph(&case, "kindergarten", "נוסח ראשון.")
+        .unwrap();
+    let id = |core: &mut Core| {
+        core.case_detail(&case)
+            .unwrap()
+            .sections
+            .into_iter()
+            .find(|s| s.key == "kindergarten")
+            .unwrap()
+            .paragraphs
+            .remove(0)
+            .id
+    };
+    let p = id(&mut core);
+    // Two editors open on "נוסח ראשון.": the first saves, then the second one, still showing it.
+    assert!(!core
+        .edit_paragraph_opened(&case, &p, "נוסח שני.", Some("נוסח ראשון."))
+        .unwrap());
+    assert!(core
+        .edit_paragraph_opened(&case, &p, "נוסח שלישי.", Some("נוסח ראשון."))
+        .unwrap());
+    let versions: Vec<String> = core
+        .paragraph_versions(&case, &p)
+        .unwrap()
+        .into_iter()
+        .map(|v| v.text)
+        .collect();
+    assert!(versions.contains(&"נוסח שני.".to_string()), "{versions:?}");
+    // An editor that saw the current wording is not warned.
+    assert!(!core
+        .edit_paragraph_opened(&case, &p, "נוסח רביעי.", Some("נוסח שלישי."))
+        .unwrap());
 }
 
 /// AI-6: a score written in the report is checked against the score table she entered, in

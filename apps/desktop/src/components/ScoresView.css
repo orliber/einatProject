@@ -1,9 +1,41 @@
-/* Score table: entry on the right, the stored text on the left (RTL). */
+/* Score table (round 54, D-094): a view of the materials stage. The table on the right (RTL),
+   the profile and the stored text beside it; below the width both need, they stack. */
+.scores-view {
+  min-width: 0;
+}
+.scores-body {
+  overflow: auto;
+}
 .scores {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  display: flex;
+  flex-wrap: wrap;
   gap: 24px;
-  align-items: start;
+  align-items: flex-start;
+  /* As tall as the table (not the window), so the profile can stay beside it while it scrolls. */
+  align-self: flex-start;
+  width: 100%;
+  min-width: 0;
+}
+.scores-main {
+  flex: 1 1 520px;
+  min-width: 0;
+}
+.scores-side {
+  flex: 1 1 300px;
+  max-width: 420px;
+  min-width: 0;
+  position: sticky;
+  top: 0;
+  /* Beside the table while she types far down it. */
+  gap: 12px;
+}
+.scores-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 24px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
 }
 .inst-picker {
   display: flex;
@@ -109,6 +141,20 @@
   border-color: var(--block);
   background: var(--block-soft);
 }
+/* Under a score that cannot be: a short red line, no window. */
+.score-err {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--block);
+  white-space: nowrap;
+}
+.scores-missing {
+  margin: 0;
+  min-height: 1.5em;
+  color: var(--ink-soft);
+}
 .note-input {
   width: 100%;
   min-height: 36px;
@@ -137,17 +183,60 @@
   background: var(--block-soft);
   color: var(--block);
 }
-.band-bad {
-  background: transparent;
-  color: var(--block);
-  padding-inline: 0;
+.scores-chart {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  margin: 0;
+}
+.scores-chart h3 {
+  font-size: var(--text-base);
+  margin-bottom: 6px;
+}
+.score-chart {
+  display: block;
+  overflow: visible;
+}
+.chart-band-0 {
+  fill: var(--primary-soft);
+}
+.chart-band-1 {
+  fill: var(--sand);
+}
+.chart-band-2 {
+  fill: var(--warn-soft);
+}
+.chart-band-3 {
+  fill: var(--block-soft);
+}
+.chart-edge {
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+.chart-mean {
+  stroke: var(--ink-muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.chart-bar {
+  fill: var(--primary);
+}
+.chart-label {
+  font-size: 12px;
+  fill: var(--ink-soft);
+}
+.chart-value {
+  font-size: 12px;
+  font-weight: 700;
+  fill: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.chart-tick {
+  font-size: 10px;
+  fill: var(--ink-muted);
 }
 .scores-preview {
-  position: sticky;
-  top: 0;
-  /* Stays under the dialog's head and foot; a long preview scrolls inside. */
-  max-height: calc(100vh / var(--zoom, 1) - 220px);
-  overflow: auto;
   background: var(--warn-paper);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -167,12 +256,4 @@
 }
 .preview-empty {
   margin-top: 14px;
-}
-@media (max-width: 1000px) {
-  .scores {
-    grid-template-columns: 1fr;
-  }
-  .scores-preview {
-    position: static;
-  }
 }

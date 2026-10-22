@@ -664,7 +664,7 @@ pub struct Core {
     /// The last automatic backup attempt this session (a failed one waits before the next).
     auto_backup_tried: Option<Instant>,
     /// The text being typed right now (memory only; kept in the vault on lock).
-    unsaved: Option<UnsavedEdit>,
+    unsaved: Vec<UnsavedEdit>,
     /// The material deleted last, still sealed, for "ביטול" (memory only; dropped on lock).
     removed_input: Option<dv_vault::RemovedInput>,
     /// Where the rollback seal is kept (outside the vault folder); `None` turns it off.

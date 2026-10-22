@@ -750,7 +750,7 @@ export class FakeCore {
   // ------------------------------------------------------------------ the IPC surface
   async handle(cmd: string, args: unknown, options?: { headers?: Record<string, string> }): Promise<unknown> {
     const a = (args ?? {}) as Args;
-    if (!["plugin:event|listen", "plugin:event|unlisten", "ping", "recent_crashes", "app_status", "unlock", "unlock_with_recovery", "create_vault", "confirm_recovery_key", "score_instruments", "preview_scores", "choose_backup", "restore_backup", "forget_backup"].includes(cmd) && !this.unlocked) {
+    if (!["plugin:event|listen", "plugin:event|unlisten", "ping", "recent_crashes", "app_status", "unlock", "unlock_with_recovery", "create_vault", "confirm_recovery_key", "google_status", "google_recover", "google_cancel", "score_instruments", "preview_scores", "choose_backup", "restore_backup", "forget_backup"].includes(cmd) && !this.unlocked) {
       fail("locked", "הכספת נעולה. יש לפתוח אותה מחדש.");
     }
     if (FakeStyle.handles(cmd)) return this.style.handle(cmd, a, args, options?.headers ?? {}, this.allPeople(), this.practitioner);
@@ -782,7 +782,7 @@ export class FakeCore {
       case "hold_unsaved":
         return null;
       case "take_unsaved":
-        return null;
+        return [];
       case "security_status":
       case "set_send_stopped": {
         if (cmd === "set_send_stopped") this.sendStopped = Boolean(a.stopped);
@@ -1213,12 +1213,14 @@ export class FakeCore {
           c.drafts = c.drafts.filter((x) => x.id !== d.id);
           return null;
         }
+        const seen = a.openedWith == null ? null : String(a.openedWith).trim();
+        const changedMeanwhile = seen !== null && restore(d.text, c.people, this.practitioner).trim() !== seen;
         const tagged = this.filterFor(c, String(a.text)).tagged;
         keepVersion(d, tagged);
         d.text = tagged;
         d.byAi = false;
         d.status = "approved";
-        return null;
+        return changedMeanwhile;
       }
       case "paragraph_versions": {
         const c = this.find(a.caseId);

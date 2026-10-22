@@ -10,6 +10,8 @@ const MATERIALS: usize = 50;
 const PARAGRAPHS: usize = 200;
 /// Opening the case (`case_detail`), debug build.
 const OPEN_BUDGET: Duration = Duration::from_secs(2);
+/// Preparing one section's request over 50 materials, debug build.
+const PREPARE_BUDGET: Duration = Duration::from_secs(3);
 /// What `case_detail` sends to the screen, as JSON.
 const DETAIL_BUDGET_BYTES: usize = 1024 * 1024;
 
@@ -64,6 +66,17 @@ fn a_large_case_opens_within_budget_and_its_detail_stays_small() {
             bytes / 1024
         ),
     );
+    // Preparing a section's request (the filter over its materials) runs under the core's
+    // lock: measured here so a slow-down shows.
+    let started = Instant::now();
+    core.prepare_section(&case, "kindergarten", "תנסח פסקה")
+        .unwrap();
+    let prepare = started.elapsed();
+    let _ = std::io::Write::write_fmt(
+        &mut std::io::stderr(),
+        format_args!("R5: prepare_section {prepare:?}\n"),
+    );
+    assert!(prepare < PREPARE_BUDGET, "preparing took {prepare:?}");
     assert_eq!(cases.len(), 1);
     assert_eq!(detail.inputs.len(), MATERIALS + 2);
     assert!(open < OPEN_BUDGET, "opening took {open:?}");

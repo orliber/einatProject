@@ -76,14 +76,23 @@ impl Core {
         let with_versions = v.drafts_with_versions(case_id)?;
         // One name for one thing (ST10): hers from her past reports, else the report's own.
         let her_terms = style::style_terms(v)?;
+        // Each section's paragraphs are read (and decrypted) once, for the checks across the
+        // report and for the view (deep review 3.6).
+        let mut shown: std::collections::HashMap<String, Vec<dv_domain::DraftParagraph>> =
+            std::collections::HashMap::new();
         let mut report: Vec<(String, String, String)> = Vec::new();
         for s in structure.sections() {
+            let drafts: Vec<_> = v
+                .drafts(case_id, &s.key)?
+                .into_iter()
+                .filter(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved))
+                .collect();
             report.extend(
-                v.drafts(case_id, &s.key)?
-                    .into_iter()
-                    .filter(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved))
-                    .map(|d| (s.key.clone(), d.id, d.text_tagged)),
+                drafts
+                    .iter()
+                    .map(|d| (s.key.clone(), d.id.clone(), d.text_tagged.clone())),
             );
+            shown.insert(s.key.clone(), drafts);
         }
         let report_texts: Vec<String> = report.iter().map(|(_, _, t)| t.clone()).collect();
         // What the body of the report says (G2): the sections a recommendation rests on.
@@ -96,10 +105,10 @@ impl Core {
         let mut sections = Vec::new();
         for part in &structure.parts {
             for s in &part.sections {
-                let paragraphs: Vec<ParagraphView> = v
-                    .drafts(case_id, &s.key)?
+                let paragraphs: Vec<ParagraphView> = shown
+                    .remove(&s.key)
+                    .unwrap_or_default()
                     .into_iter()
-                    .filter(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved))
                     .map(|d| ParagraphView {
                         has_versions: with_versions.contains(&d.id),
                         id: d.id,
@@ -281,6 +290,39 @@ impl Core {
         self.vault_mut()?.edit_draft(case_id, draft_id, &tagged)?;
         self.learn_from_draft_edit(before, &tagged);
         Ok(())
+    }
+
+    /// Her edit, saved from an editor that was opened on `opened_with` (the text as she saw it).
+    /// If the paragraph changed meanwhile (an editor left open while another one saved, or a
+    /// new wording came in), her text is still saved and the newer wording is kept among the
+    /// earlier versions, as every edit keeps the one before it (D-046). Returns `true` then, so
+    /// the page can tell her that two wordings exist and where the other one is.
+    pub fn edit_paragraph_opened(
+        &mut self,
+        case_id: &str,
+        draft_id: &str,
+        text: &str,
+        opened_with: Option<&str>,
+    ) -> Result<bool, CoreError> {
+        let changed_meanwhile = match opened_with {
+            None => false,
+            Some(seen) => {
+                let v = self.vault_ref()?;
+                match style::find_draft(v, case_id, draft_id)? {
+                    None => false,
+                    Some(d) => {
+                        let identities = v.identities(case_id)?;
+                        let masks = v.masks(case_id)?;
+                        let practitioner = v.practitioner()?.names.first().cloned();
+                        let now =
+                            restore(&d.text_tagged, &identities, practitioner.as_deref(), &masks);
+                        now.trim() != seen.trim()
+                    }
+                }
+            }
+        };
+        self.edit_paragraph(case_id, draft_id, text)?;
+        Ok(changed_meanwhile && !text.trim().is_empty())
     }
 
     /// A paragraph's earlier wordings, newest first, names restored (D-046).

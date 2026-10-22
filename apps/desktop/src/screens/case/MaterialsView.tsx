@@ -5,7 +5,7 @@ import { ipc, type CaseInput, type FollowUpView, type ImportPreview, type InputK
 import type { FilterOutcome } from "../../ipc/generated/FilterOutcome";
 import { ImportDialog } from "../../components/ImportDialog";
 import { AddMenu } from "../../components/Menu";
-import { ScoresDialog } from "../../components/ScoresDialog";
+import { ScoresView, scoresDraft } from "../../components/ScoresView";
 import { useHoldUnsaved } from "../../components/Unsaved";
 import { LocalText, type LocalTextHandle } from "../../components/LocalText";
 import { Dialog, ErrorLine, Segments, UploadIcon, PlusIcon } from "../../components/ui";
@@ -31,7 +31,12 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
   const [dropOn, setDropOn] = useState<string | null>(null);
   const [reading, setReading] = useState<{ name: string; size: string } | null>(null);
   const [writing, setWriting] = useState<{ kind: InputKind; input?: CaseInput } | null>(null);
-  const [scoring, setScoring] = useState<{ input?: CaseInput; sheet?: ScoreSheet } | null>(null);
+  // Round 54 (D-094): the score table is a view of this stage, not a window. Scores left
+  // unsaved on the way to another stage open again on the way back.
+  const [scoring, setScoring] = useState<{ input?: CaseInput | undefined; sheet?: ScoreSheet } | null>(() => {
+    const d = scoresDraft(caseId);
+    return d ? { input: detail.inputs.find((i) => i.id === d.inputId) } : null;
+  });
   const [choosing, setChoosing] = useState<CaseInput | null>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -167,6 +172,14 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
     onDrop: (e: DragEvent) => onDrop(e, kind),
   });
 
+  if (scoring) {
+    return (
+      <ScoresView caseId={caseId} age={detail.meta.age} input={scoring.input} sheet={scoring.sheet}
+        onClose={() => setScoring(null)}
+        onSaved={async () => { setScoring(null); await reload(); notify("הציונים נשמרו בתיק."); }} />
+    );
+  }
+
   return (
     <div className={dragging ? "view materials-drop" : "view"} onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop}>
       <div className="view-head">
@@ -286,11 +299,6 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
       {importing && (
         <ImportDialog caseId={caseId} preview={importing.preview} kind={importing.kind} onClose={() => setImporting(null)}
           onSaved={async () => { setImporting(null); await reload(); notify("המסמך נשמר בתיק."); }} />
-      )}
-      {scoring && (
-        <ScoresDialog caseId={caseId} age={detail.meta.age} input={scoring.input} sheet={scoring.sheet}
-          onClose={() => setScoring(null)}
-          onSaved={async () => { setScoring(null); await reload(); notify("הציונים נשמרו בתיק."); }} />
       )}
       {choosing && routeOf(choosing.id) && (
         <SectionsDialog api={api} input={choosing} route={routeOf(choosing.id) as MaterialRouting} titleOf={titleOf}

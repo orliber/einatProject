@@ -184,10 +184,11 @@ pub(crate) async fn edit_paragraph(
     case_id: String,
     draft_id: String,
     text: String,
-) -> Res<()> {
+    opened_with: Option<String>,
+) -> Res<bool> {
     warm_names(&state, &case_id, vec![text.clone()]).await;
     with_core(&state, move |c| {
-        c.edit_paragraph(&case_id, &draft_id, &text)
+        c.edit_paragraph_opened(&case_id, &draft_id, &text, opened_with.as_deref())
     })
     .await
 }

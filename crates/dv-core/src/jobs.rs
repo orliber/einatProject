@@ -430,7 +430,7 @@ pub struct ExportJob {
     session: u64,
     cancel: Cancel,
     case_id: String,
-    report: dv_export::Report,
+    report: WipedReport,
     check: crate::ExportCheck,
     format: ExportFormat,
 }
@@ -467,10 +467,29 @@ impl Exported {
     }
 }
 
+/// The report's texts, wiped when the job ends: after `run`, or if the job is dropped before it
+/// ran (a lock in between).
+struct WipedReport(dv_export::Report);
+
+impl std::ops::Deref for WipedReport {
+    type Target = dv_export::Report;
+    fn deref(&self) -> &dv_export::Report {
+        &self.0
+    }
+}
+
+impl Drop for WipedReport {
+    fn drop(&mut self) {
+        self.0.wipe();
+    }
+}
+
 impl ExportJob {
     #[must_use]
-    pub fn run(self) -> Exported {
+    pub fn run(mut self) -> Exported {
         let (pdf, protected, bytes) = self.render();
+        // The report's texts (names, paragraphs, scores) are not needed once the file is made.
+        self.report.0.wipe();
         // Locked while it was rendered: the file is wiped now, and nothing is saved.
         let bytes = if self.cancel.is_set() {
             Err(locked_meanwhile())
@@ -1040,7 +1059,7 @@ impl Core {
             session: self.session,
             cancel: self.cancel.clone(),
             case_id: case_id.to_owned(),
-            report,
+            report: WipedReport(report),
             check,
             format,
         })

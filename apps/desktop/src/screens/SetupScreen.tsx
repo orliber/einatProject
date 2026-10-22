@@ -1,15 +1,17 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { he } from "../i18n/he";
 import { ipc, type AppStatus } from "../ipc/client";
 import { ErrorLine, LockIcon } from "../components/ui";
 import { RestoreFromBackup } from "../components/Backup";
 import { RecoveryKitPaper } from "../components/RecoveryKit";
+import { TurnOnDialog } from "../components/GoogleRecovery";
 import { timed, WaitLine } from "../components/Progress";
 import "./SetupScreen.css";
 
-type Step = "password" | "recovery" | "me" | "restore";
+type Step = "password" | "recovery" | "google" | "me" | "restore";
 
-/** First run: a password, the printed recovery kit, and the practitioner's own names. */
+/** First run: a password, the printed recovery kit, Google for a forgotten password (optional,
+ *  where this version has it), and the practitioner's own names. */
 export function SetupScreen({ status, onCreated, onDone, onRestored }: { status: AppStatus; onCreated?: () => void; onDone: () => Promise<void>; onRestored?: (s: AppStatus) => void }) {
   const [step, setStep] = useState<Step>("password");
   const [pw, setPw] = useState("");
@@ -22,6 +24,20 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
   const [names, setNames] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Sign in with Google when the password is forgotten (D-041): offered once, right after the
+  // kit, while the vault is open; skipped where this version cannot do it (D-096).
+  const [googleAvailable, setGoogleAvailable] = useState(false);
+  // The steps are shown once it is known whether Google is one of them: no 3 turning into 4.
+  const [googleKnown, setGoogleKnown] = useState(false);
+  const [googleOpen, setGoogleOpen] = useState(false);
+  const [googleOn, setGoogleOn] = useState(false);
+  useEffect(() => {
+    ipc.googleStatus()
+      .then((g) => setGoogleAvailable(g?.available === true && !g.on))
+      .catch(() => setGoogleAvailable(false))
+      .finally(() => setGoogleKnown(true));
+  }, []);
+  const order: Step[] = googleAvailable ? ["password", "recovery", "google", "me"] : ["password", "recovery", "me"];
 
   async function create(e: FormEvent) {
     e.preventDefault();
@@ -51,7 +67,7 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
     // Nothing secret stays in the screen's memory once it served (SEC10).
     setKey("");
     setTyped("");
-    setStep("me");
+    setStep(googleAvailable ? "google" : "me");
   }
 
   async function finish(e: FormEvent) {
@@ -69,7 +85,6 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
   }
 
   const stepState = (s: Step) => {
-    const order: Step[] = ["password", "recovery", "me"];
     const i = order.indexOf(s);
     const cur = order.indexOf(step);
     return i < cur ? "done" : i === cur ? "current" : "next";
@@ -80,11 +95,11 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
       <header className="setup-head">
         <LockIcon size={24} color="var(--primary)" />
         <span className="brand-name">{he.appName}</span>
-        {step !== "restore" && <ol className="steps" aria-label="שלבי ההגדרה">
-          {(["password", "recovery", "me"] as Step[]).map((s, i) => (
+        {step !== "restore" && googleKnown && <ol className="steps" aria-label="שלבי ההגדרה">
+          {order.map((s, i) => (
             <li key={s} className={`step step-${stepState(s)}`} aria-current={stepState(s) === "current" ? "step" : undefined}>
               <span className="step-dot">{stepState(s) === "done" ? "✓" : i + 1}</span>
-              {s === "password" ? "סיסמה" : s === "recovery" ? "ערכת שחזור" : "הפרטים שלך"}
+              {s === "password" ? "סיסמה" : s === "recovery" ? "ערכת שחזור" : s === "google" ? "כניסה עם גוגל" : "הפרטים שלך"}
             </li>
           ))}
         </ol>}
@@ -162,8 +177,24 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
           </div>
         )}
 
+        {step === "google" && (
+          <div className="setup-col stack">
+            <h1>להפעיל כניסה עם גוגל כששוכחים סיסמה</h1>
+            <p className="lede">לא חובה. אם הסיסמה תישכח, נכנסים מהמחשב הזה עם חשבון הגוגל ובוחרים סיסמה חדשה. ערכת השחזור עדיין עובדת.</p>
+            <div className="row">
+              <button type="button" className="btn btn-primary btn-big" autoFocus onClick={() => setGoogleOpen(true)}>הפעלה…</button>
+              <button type="button" className="btn btn-big" onClick={() => setStep("me")}>אחר כך</button>
+            </div>
+            <p className="hint">אפשר גם בכל זמן אחר, בהגדרות ← סיסמה ואבטחה.</p>
+            {googleOpen && (
+              <TurnOnDialog onClose={() => setGoogleOpen(false)} onTurnedOn={() => { setGoogleOn(true); setStep("me"); }} />
+            )}
+          </div>
+        )}
+
         {step === "me" && (
           <form className="setup-col stack" onSubmit={finish}>
+            {googleOn && <p className="setup-done" role="status">✓ הכניסה עם גוגל הופעלה.</p>}
             <h1>הפרטים שלך</h1>
             <p className="lede">השם שלך ושם הקליניקה יוחלפו תמיד ב"המאבחנת" לפני שליחה.</p>
             <div className="field">

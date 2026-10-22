@@ -2,6 +2,11 @@
 import type { InputKind } from "../ipc/generated/InputKind";
 import type { Role } from "../ipc/generated/Role";
 
+/** A paragraph saved from an editor opened on an older wording (round 51). */
+export const STALE_EDIT = "הפסקה השתנתה בזמן שהעורך היה פתוח. הנוסח שלך נשמר, והנוסח האחר נמצא ב\"גרסאות קודמות\".";
+/** The same, where the screen has no "גרסאות קודמות" button (letters, the finish screen). */
+export const STALE_EDIT_KEPT = "הפסקה השתנתה בזמן שהעורך היה פתוח. הנוסח שלך נשמר, והנוסח האחר נשמר כגרסה קודמת של הפסקה.";
+
 export const he = {
   appName: "כספת האבחון",
   encrypted: "מוצפן, שמור במחשב הזה",
@@ -12,8 +17,7 @@ export const he = {
     keepWorking: "להמשיך לעבוד",
     password: "סיסמה",
     open: "פתיחה",
-    footer:
-      "כל המידע מוצפן ושמור רק במחשב הזה. לנו אין עותק ואין סיסמה, ולכן אי אפשר לשחזר אותה בלי ערכת השחזור המודפסת.",
+    footer: "מוצפן ונשמר במחשב הזה",
   },
   core: {
     connected: "התוכנה פועלת כראוי",
