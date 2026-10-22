@@ -16,6 +16,7 @@ use dv_privacy::ClearedPayload;
 use serde_json::Value;
 use zeroize::Zeroizing;
 
+pub mod drive_backup;
 pub mod google;
 pub mod name_model;
 mod pinning;

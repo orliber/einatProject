@@ -32,7 +32,7 @@ pub const GOOGLE_HOSTS: &[&str] = &["oauth2.googleapis.com", "www.googleapis.com
 pub const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const REVOKE_URL: &str = "https://oauth2.googleapis.com/revoke";
-const FILES_URL: &str = "https://www.googleapis.com/drive/v3/files";
+pub(crate) const FILES_URL: &str = "https://www.googleapis.com/drive/v3/files";
 const UPLOAD_URL: &str = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
 /// Her account id (`openid`) and the app's own hidden Drive folder. Nothing else.
 const SCOPES: &str = "openid https://www.googleapis.com/auth/drive.appdata";
@@ -58,6 +58,9 @@ pub enum GoogleError {
     Tls,
     #[error("unexpected answer from Google: {0}")]
     Protocol(String),
+    /// The lasting permission (a refresh token) was withdrawn or ran out: sign in again.
+    #[error("the permission given to this app was withdrawn")]
+    Revoked,
 }
 
 /// The app's registration with Google (a "Desktop app" OAuth client). Google treats the
@@ -81,7 +84,7 @@ pub fn configured() -> Option<ClientConfig> {
 
 // ------------------------------------------------------------------ small encoders
 
-fn random_bytes<const N: usize>() -> Result<[u8; N], GoogleError> {
+pub(crate) fn random_bytes<const N: usize>() -> Result<[u8; N], GoogleError> {
     let mut out = [0u8; N];
     aws_lc_rs::rand::fill(&mut out).map_err(|_| GoogleError::Protocol("random".to_owned()))?;
     Ok(out)
@@ -90,7 +93,7 @@ fn random_bytes<const N: usize>() -> Result<[u8; N], GoogleError> {
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 /// Base64url without padding (RFC 4648 §5), as PKCE and JWTs use it.
-fn b64url(bytes: &[u8]) -> String {
+pub(crate) fn b64url(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len() * 4 / 3 + 2);
     for chunk in bytes.chunks(3) {
         let at = |k: usize| u32::from(chunk.get(k).copied().unwrap_or(0));
@@ -148,6 +151,17 @@ impl std::fmt::Debug for SignIn {
 
 /// Start a sign-in: listen on a free port of 127.0.0.1 and build the Google address.
 pub fn begin(cfg: &ClientConfig) -> Result<SignIn, GoogleError> {
+    begin_with(cfg, false)
+}
+
+/// Start a sign-in that also asks for lasting permission (a refresh token), for the
+/// encrypted backup copy that goes up after each backup without opening the browser (D-099).
+/// The scope is the same: the app's hidden Drive folder and her account id, nothing else.
+pub fn begin_lasting(cfg: &ClientConfig) -> Result<SignIn, GoogleError> {
+    begin_with(cfg, true)
+}
+
+fn begin_with(cfg: &ClientConfig, lasting: bool) -> Result<SignIn, GoogleError> {
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .map_err(|e| GoogleError::Protocol(format!("listener: {e}")))?;
     let port = listener
@@ -159,22 +173,26 @@ pub fn begin(cfg: &ClientConfig) -> Result<SignIn, GoogleError> {
     let challenge =
         b64url(aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, verifier.as_bytes()).as_ref());
     let state = b64url(&random_bytes::<16>()?);
-    let url = reqwest::Url::parse_with_params(
-        AUTH_URL,
-        &[
-            ("client_id", cfg.client_id.as_str()),
-            ("redirect_uri", redirect.as_str()),
-            ("response_type", "code"),
-            ("scope", SCOPES),
-            ("code_challenge", challenge.as_str()),
-            ("code_challenge_method", "S256"),
-            ("state", state.as_str()),
-            // Always ask which account, so she sees which one she is about to use.
-            ("prompt", "select_account"),
-        ],
-    )
-    .map_err(|e| GoogleError::Protocol(e.to_string()))?
-    .to_string();
+    let mut params = vec![
+        ("client_id", cfg.client_id.as_str()),
+        ("redirect_uri", redirect.as_str()),
+        ("response_type", "code"),
+        ("scope", SCOPES),
+        ("code_challenge", challenge.as_str()),
+        ("code_challenge_method", "S256"),
+        ("state", state.as_str()),
+        // Always ask which account, so she sees which one she is about to use.
+        ("prompt", "select_account"),
+    ];
+    if lasting {
+        params.push(("access_type", "offline"));
+        // Google gives a refresh token again only when it asks for consent again.
+        params.retain(|(k, _)| *k != "prompt");
+        params.push(("prompt", "select_account consent"));
+    }
+    let url = reqwest::Url::parse_with_params(AUTH_URL, &params)
+        .map_err(|e| GoogleError::Protocol(e.to_string()))?
+        .to_string();
     Ok(SignIn {
         listener: Some(listener),
         verifier,
@@ -341,6 +359,8 @@ fn listen(
 pub enum Method {
     Get,
     Post,
+    /// Only the body of an encrypted backup copy, to the upload address Google gave (D-099).
+    Put,
     Delete,
 }
 
@@ -350,6 +370,27 @@ pub struct Request {
     pub bearer: Option<Zeroizing<String>>,
     pub content_type: Option<String>,
     pub body: Vec<u8>,
+    /// Longer than the usual minute for an upload; `None` keeps the minute.
+    pub timeout: Option<Duration>,
+}
+
+/// One answer: its status, its body (capped), and where it points (an upload's address).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reply {
+    pub status: u16,
+    pub body: Vec<u8>,
+    pub location: Option<String>,
+}
+
+impl Reply {
+    #[must_use]
+    pub fn new(status: u16, body: Vec<u8>) -> Self {
+        Self {
+            status,
+            body,
+            location: None,
+        }
+    }
 }
 
 impl std::fmt::Debug for Request {
@@ -363,10 +404,10 @@ impl std::fmt::Debug for Request {
 
 /// One HTTP exchange. The real one is [`GoogleHttp`]; tests use a fake (no real API in tests).
 pub trait Http: Send + Sync {
-    fn send(&self, req: Request) -> Result<(u16, Vec<u8>), GoogleError>;
+    fn send(&self, req: Request) -> Result<Reply, GoogleError>;
 }
 
-fn host_allowed(url: &reqwest::Url) -> bool {
+pub(crate) fn host_allowed(url: &reqwest::Url) -> bool {
     url.scheme() == "https" && url.host_str().is_some_and(|h| GOOGLE_HOSTS.contains(&h))
 }
 
@@ -398,7 +439,7 @@ impl GoogleHttp {
 }
 
 impl Http for GoogleHttp {
-    fn send(&self, req: Request) -> Result<(u16, Vec<u8>), GoogleError> {
+    fn send(&self, req: Request) -> Result<Reply, GoogleError> {
         let url =
             reqwest::Url::parse(&req.url).map_err(|e| GoogleError::Protocol(e.to_string()))?;
         if !host_allowed(&url) {
@@ -407,8 +448,12 @@ impl Http for GoogleHttp {
         let mut builder = match req.method {
             Method::Get => self.client.get(url),
             Method::Post => self.client.post(url),
+            Method::Put => self.client.put(url),
             Method::Delete => self.client.delete(url),
         };
+        if let Some(t) = req.timeout {
+            builder = builder.timeout(t);
+        }
         if let Some(token) = &req.bearer {
             builder = builder.header("authorization", format!("Bearer {}", token.as_str()));
         }
@@ -424,12 +469,22 @@ impl Http for GoogleHttp {
             }
         })?;
         let status = resp.status().as_u16();
+        // Only read here; the caller checks it (an upload address must stay on the list).
+        let location = resp
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
         // Small answers only: a key file, a token, a file list.
         let mut body = Vec::new();
         resp.take(256 * 1024)
             .read_to_end(&mut body)
             .map_err(|_| GoogleError::Offline)?;
-        Ok((status, body))
+        Ok(Reply {
+            status,
+            body,
+            location,
+        })
     }
 }
 
@@ -437,8 +492,26 @@ impl Http for GoogleHttp {
 
 /// A signed-in account: the token (memory only) and the account's stable id.
 pub struct Session {
-    token: Zeroizing<String>,
+    pub(crate) token: Zeroizing<String>,
     pub account_id: String,
+    /// Only after [`begin_lasting`]: the lasting permission, for the caller to keep sealed.
+    refresh: Option<Zeroizing<String>>,
+}
+
+impl Session {
+    #[cfg(test)]
+    pub(crate) fn for_tests(token: &str) -> Self {
+        Self {
+            token: Zeroizing::new(token.to_owned()),
+            account_id: "1".to_owned(),
+            refresh: None,
+        }
+    }
+
+    /// The lasting permission Google gave, if it gave one. Taken once.
+    pub fn take_refresh_token(&mut self) -> Option<Zeroizing<String>> {
+        self.refresh.take()
+    }
 }
 
 impl std::fmt::Debug for Session {
@@ -447,7 +520,7 @@ impl std::fmt::Debug for Session {
     }
 }
 
-fn json(status: u16, body: &[u8]) -> Result<Value, GoogleError> {
+pub(crate) fn json(status: u16, body: &[u8]) -> Result<Value, GoogleError> {
     if !(200..300).contains(&status) {
         return Err(GoogleError::Protocol(format!("status {status}")));
     }
@@ -495,12 +568,17 @@ pub fn finish(
         ("grant_type", "authorization_code"),
         ("code_verifier", &sign_in.verifier),
     ]);
-    let (status, bytes) = http.send(Request {
+    let Reply {
+        status,
+        body: bytes,
+        ..
+    } = http.send(Request {
         method: Method::Post,
         url: TOKEN_URL.to_owned(),
         bearer: None,
         content_type: Some("application/x-www-form-urlencoded".to_owned()),
         body: body.into_bytes(),
+        timeout: None,
     })?;
     let v = json(status, &bytes)?;
     let token = v
@@ -511,9 +589,64 @@ pub fn finish(
         .get("id_token")
         .and_then(Value::as_str)
         .ok_or_else(|| GoogleError::Protocol("no id token".to_owned()))?;
+    let refresh = v
+        .get("refresh_token")
+        .and_then(Value::as_str)
+        .filter(|t| !t.is_empty())
+        .map(|t| Zeroizing::new(t.to_owned()));
     Ok(Session {
         token: Zeroizing::new(token.to_owned()),
         account_id: account_from_id_token(id_token, &cfg.client_id)?,
+        refresh,
+    })
+}
+
+/// A short-lived token from the lasting permission, without the browser (D-099). The account
+/// id is not asked for again (empty): the permission was checked against the vault's account
+/// when it was given. A withdrawn permission is [`GoogleError::Revoked`].
+pub fn session_from_refresh(
+    http: &dyn Http,
+    cfg: &ClientConfig,
+    refresh_token: &str,
+) -> Result<Session, GoogleError> {
+    let body = Zeroizing::new(form(&[
+        ("client_id", &cfg.client_id),
+        ("client_secret", &cfg.client_secret),
+        ("refresh_token", refresh_token),
+        ("grant_type", "refresh_token"),
+    ]));
+    let Reply {
+        status,
+        body: bytes,
+        ..
+    } = http.send(Request {
+        method: Method::Post,
+        url: TOKEN_URL.to_owned(),
+        bearer: None,
+        content_type: Some("application/x-www-form-urlencoded".to_owned()),
+        body: body.as_bytes().to_vec(),
+        timeout: None,
+    })?;
+    // RFC 6749 §5.2: a withdrawn or expired grant answers 400 `invalid_grant`.
+    if status == 400 || status == 401 {
+        let withdrawn = serde_json::from_slice::<Value>(&bytes)
+            .ok()
+            .and_then(|v| v.get("error").and_then(Value::as_str).map(str::to_owned))
+            .is_some_and(|e| e == "invalid_grant" || e == "unauthorized_client");
+        if withdrawn {
+            return Err(GoogleError::Revoked);
+        }
+    }
+    let v = json(status, &bytes)?;
+    let token = v
+        .get("access_token")
+        .and_then(Value::as_str)
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| GoogleError::Protocol("no access token".to_owned()))?;
+    Ok(Session {
+        token: Zeroizing::new(token.to_owned()),
+        account_id: String::new(),
+        refresh: None,
     })
 }
 
@@ -541,12 +674,17 @@ pub fn find_keys(http: &dyn Http, s: &Session, vault_id: &str) -> Result<Vec<Str
         ],
     )
     .map_err(|e| GoogleError::Protocol(e.to_string()))?;
-    let (status, bytes) = http.send(Request {
+    let Reply {
+        status,
+        body: bytes,
+        ..
+    } = http.send(Request {
         method: Method::Get,
         url: url.to_string(),
         bearer: Some(s.token.clone()),
         content_type: None,
         body: Vec::new(),
+        timeout: None,
     })?;
     let v = json(status, &bytes)?;
     Ok(v.get("files")
@@ -574,12 +712,17 @@ pub fn read_key(
     s: &Session,
     file_id: &str,
 ) -> Result<Zeroizing<String>, GoogleError> {
-    let (status, bytes) = http.send(Request {
+    let Reply {
+        status,
+        body: bytes,
+        ..
+    } = http.send(Request {
         method: Method::Get,
         url: format!("{FILES_URL}/{file_id}?alt=media"),
         bearer: Some(s.token.clone()),
         content_type: None,
         body: Vec::new(),
+        timeout: None,
     })?;
     if !(200..300).contains(&status) {
         return Err(GoogleError::Protocol(format!("status {status}")));
@@ -605,12 +748,17 @@ pub fn put_key(
     let body = Zeroizing::new(format!(
         "--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{meta}\r\n--{boundary}\r\nContent-Type: text/plain\r\n\r\n{key_text}\r\n--{boundary}--\r\n"
     ));
-    let (status, bytes) = http.send(Request {
+    let Reply {
+        status,
+        body: bytes,
+        ..
+    } = http.send(Request {
         method: Method::Post,
         url: format!("{UPLOAD_URL}&fields=id"),
         bearer: Some(s.token.clone()),
         content_type: Some(format!("multipart/related; boundary={boundary}")),
         body: body.as_bytes().to_vec(),
+        timeout: None,
     })?;
     let v = json(status, &bytes)?;
     v.get("id")
@@ -621,12 +769,18 @@ pub fn put_key(
 
 /// Delete one key file (permanently, not to the Drive bin).
 pub fn delete_key(http: &dyn Http, s: &Session, file_id: &str) -> Result<(), GoogleError> {
-    let (status, _) = http.send(Request {
+    delete_file(http, s, file_id)
+}
+
+/// Delete one file of the app's hidden folder (permanently, not to the Drive bin).
+pub(crate) fn delete_file(http: &dyn Http, s: &Session, file_id: &str) -> Result<(), GoogleError> {
+    let Reply { status, .. } = http.send(Request {
         method: Method::Delete,
         url: format!("{FILES_URL}/{file_id}"),
         bearer: Some(s.token.clone()),
         content_type: None,
         body: Vec::new(),
+        timeout: None,
     })?;
     if (200..300).contains(&status) || status == 404 {
         Ok(())
@@ -637,13 +791,19 @@ pub fn delete_key(http: &dyn Http, s: &Session, file_id: &str) -> Result<(), Goo
 
 /// End the session at Google: the token stops working at once. Best effort.
 pub fn revoke(http: &dyn Http, s: Session) {
-    let body = form(&[("token", &s.token)]);
+    revoke_token(http, &s.token);
+}
+
+/// Withdraw a token at Google, a lasting permission included (D-099). Best effort.
+pub fn revoke_token(http: &dyn Http, token: &str) {
+    let body = form(&[("token", token)]);
     let _ = http.send(Request {
         method: Method::Post,
         url: REVOKE_URL.to_owned(),
         bearer: None,
         content_type: Some("application/x-www-form-urlencoded".to_owned()),
         body: body.into_bytes(),
+        timeout: None,
     });
 }
 
@@ -684,7 +844,7 @@ mod tests {
     }
 
     impl Http for Fake {
-        fn send(&self, req: Request) -> Result<(u16, Vec<u8>), GoogleError> {
+        fn send(&self, req: Request) -> Result<Reply, GoogleError> {
             let url = reqwest::Url::parse(&req.url).unwrap();
             assert!(host_allowed(&url), "{}", req.url);
             self.seen.lock().unwrap().push((
@@ -693,7 +853,8 @@ mod tests {
                 req.bearer.as_ref().map(|t| t.to_string()),
                 req.body.clone(),
             ));
-            Ok(self.answers.lock().unwrap().pop().unwrap())
+            let (status, body) = self.answers.lock().unwrap().pop().unwrap();
+            Ok(Reply::new(status, body))
         }
     }
 
@@ -821,6 +982,7 @@ mod tests {
         let session = Session {
             token: Zeroizing::new("ya29.token".to_owned()),
             account_id: "1".to_owned(),
+            refresh: None,
         };
         let fake = Fake::new(vec![
             (200, br#"{"id":"file-1"}"#.to_vec()),
@@ -859,6 +1021,7 @@ mod tests {
         let session = Session {
             token: Zeroizing::new("ya29.token".to_owned()),
             account_id: "1".to_owned(),
+            refresh: None,
         };
         let fake = Fake::new(vec![(
             200,
@@ -1028,6 +1191,7 @@ mod tests {
                 bearer: Some(Zeroizing::new("ya29.token".to_owned())),
                 content_type: None,
                 body: b"secret".to_vec(),
+                timeout: None,
             });
             assert!(
                 matches!(got, Err(GoogleError::Protocol(_))),
@@ -1099,6 +1263,7 @@ mod tests {
         let session = Session {
             token: Zeroizing::new("ya29.token".to_owned()),
             account_id: "1".to_owned(),
+            refresh: None,
         };
         let files: Vec<serde_json::Value> = [
             "a/../b", "ok-1", "x?y", "ok_2", "", "ok3", "ok4", "ok5", "ok6",
@@ -1135,6 +1300,7 @@ mod tests {
         let session = Session {
             token: Zeroizing::new("ya29.token".to_owned()),
             account_id: "1".to_owned(),
+            refresh: None,
         };
         let fake = Fake::new(vec![(200, br#"{"id":"f"}"#.to_vec())]);
         put_key(&fake, &session, "V1", "00ff").unwrap();
@@ -1154,6 +1320,65 @@ mod tests {
             meta,
             serde_json::json!({"name": "diagnostic-vault-V1.key", "parents": ["appDataFolder"]})
         );
+    }
+
+    // ---------------------------------------------------------- lasting permission (D-099)
+
+    #[test]
+    fn a_lasting_sign_in_asks_for_offline_access_and_the_same_scope() {
+        let s = begin_lasting(&cfg()).unwrap();
+        let url = reqwest::Url::parse(&s.url).unwrap();
+        let q: std::collections::HashMap<String, String> = url.query_pairs().into_owned().collect();
+        assert_eq!(q["scope"], SCOPES);
+        assert_eq!(q["access_type"], "offline");
+        assert_eq!(q["prompt"], "select_account consent");
+        assert_eq!(url.query_pairs().filter(|(k, _)| k == "prompt").count(), 1);
+        // The usual sign-in never asks for it.
+        let plain = begin(&cfg()).unwrap();
+        assert!(!plain.url.contains("access_type"));
+    }
+
+    #[test]
+    fn the_refresh_token_is_taken_once_and_trades_for_a_short_token() {
+        let s = begin_lasting(&cfg()).unwrap();
+        let answer = serde_json::json!({
+            "access_token": "ya29.token",
+            "refresh_token": "1//lasting",
+            "id_token": id_token("https://accounts.google.com", &cfg().client_id, "42"),
+        });
+        let fake = Fake::new(vec![(200, answer.to_string().into_bytes())]);
+        let mut session = finish(&fake, &cfg(), &s, "code").unwrap();
+        assert_eq!(session.take_refresh_token().unwrap().as_str(), "1//lasting");
+        assert!(session.take_refresh_token().is_none());
+
+        let fake = Fake::new(vec![(
+            200,
+            br#"{"access_token":"ya29.short","expires_in":3599}"#.to_vec(),
+        )]);
+        let short = session_from_refresh(&fake, &cfg(), "1//lasting").unwrap();
+        assert_eq!(short.token.as_str(), "ya29.short");
+        let seen = fake.seen.lock().unwrap();
+        assert_eq!(seen[0].1, TOKEN_URL);
+        assert_eq!(seen[0].2, None, "the lasting token goes in the body only");
+        let body = String::from_utf8(seen[0].3.clone()).unwrap();
+        assert!(body.contains("grant_type=refresh_token"));
+        assert!(body.contains("refresh_token=1%2F%2Flasting"));
+    }
+
+    #[test]
+    fn a_withdrawn_permission_is_told_apart() {
+        let fake = Fake::new(vec![(400, br#"{"error":"invalid_grant"}"#.to_vec())]);
+        assert_eq!(
+            session_from_refresh(&fake, &cfg(), "t").unwrap_err(),
+            GoogleError::Revoked
+        );
+        let fake = Fake::new(vec![(500, Vec::new())]);
+        assert!(matches!(
+            session_from_refresh(&fake, &cfg(), "t"),
+            Err(GoogleError::Protocol(_))
+        ));
+        let fake = Fake::new(vec![(200, br#"{"access_token":""}"#.to_vec())]);
+        assert!(session_from_refresh(&fake, &cfg(), "t").is_err());
     }
 
     proptest::proptest! {
@@ -1183,6 +1408,7 @@ mod tests {
             let session = Session {
                 token: Zeroizing::new("ya29.token".to_owned()),
                 account_id: "1".to_owned(),
+            refresh: None,
             };
             let fake = Fake::new(vec![(200, b"k".to_vec()), (204, Vec::new())]);
             let _ = read_key(&fake, &session, &id);
