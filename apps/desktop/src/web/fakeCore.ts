@@ -1409,6 +1409,7 @@ export class FakeCore {
         return {
           blocking: [], to_complete: missing, empty_sections: d.sections.filter((s) => !s.approved).map((s) => s.title),
           included_sections: d.sections.filter((s) => s.approved).length, score_tables: c.sheets.size, file_name: `דוח אבחון – ${c.meta.code}.docx`,
+          parents_left_out: 0, parents_chart_rows: c.sheets.size > 0 ? 3 : 0,
         } satisfies ExportCheck;
       }
       case "letter":

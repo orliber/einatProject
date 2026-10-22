@@ -176,3 +176,72 @@ fn settings_kept_before_round_55_read_with_the_default_opening() {
     let s: ReportSettings = serde_json::from_str(old).unwrap();
     assert_eq!(s.parents_opening, crate::views::default_parents_opening());
 }
+
+/// One chart for each test, under its name (two tests can share a measure's name); a test she
+/// does not give is not charted (D-098) but its numbers still leave the text; the dialog knows
+/// how many sentences go and whether there is a chart at all.
+#[test]
+fn each_test_gets_its_own_chart_and_the_dialog_knows_what_goes() {
+    let (_dir, mut core, case) = setup(None);
+    core.add_own_paragraph(
+        &case,
+        "kindergarten",
+        "בהבנה המילולית קיבל ציון 112. אלון נהנה מהמשחק. ציוניו בקוביות היו 7 ו-9.",
+    )
+    .unwrap();
+    let sheet = |instrument: &str, entries: &[(&str, f64)]| dv_domain::ScoreSheet {
+        instrument: instrument.into(),
+        module: String::new(),
+        cutoff: None,
+        entries: entries
+            .iter()
+            .map(|(m, v)| dv_domain::ScoreEntry {
+                measure: (*m).into(),
+                value: *v,
+                note: String::new(),
+            })
+            .collect(),
+        notes: String::new(),
+    };
+    let check = core.check_export(&case).unwrap();
+    assert_eq!(check.parents_chart_rows, 0, "no table, no chart");
+    assert_eq!(check.parents_left_out, 2);
+
+    core.save_scores(&case, None, &sheet("wppsi_iv", &[("vci", 112.0)]))
+        .unwrap();
+    core.save_scores(
+        &case,
+        None,
+        &sheet("wisc_v", &[("vci", 95.0), ("wmi", 88.0)]),
+    )
+    .unwrap();
+    // A questionnaire only: still no row of its own.
+    core.save_scores(&case, None, &sheet("brief_p", &[("inhibit", 71.0)]))
+        .unwrap();
+    let check = core.check_export(&case).unwrap();
+    assert_eq!(check.parents_chart_rows, 3);
+    assert!(
+        !check.file_name.contains("להורים"),
+        "the full report's name"
+    );
+
+    let (bytes, _) = export(&mut core, &case, Some(ParentsOptions::default()));
+    let doc = words(&bytes);
+    assert!(doc.contains("במבט אחד · WPPSI-IV") && doc.contains("במבט אחד · WISC-V"));
+    assert_eq!(
+        doc.matches("הבנה מילולית").count(),
+        2,
+        "one row in each chart"
+    );
+
+    core.set_instrument_status("wisc_v", crate::InstrumentStatus::NotUsed)
+        .unwrap();
+    assert_eq!(core.check_export(&case).unwrap().parents_chart_rows, 1);
+    let (bytes, _) = export(&mut core, &case, Some(ParentsOptions::default()));
+    let doc = words(&bytes);
+    assert!(doc.contains("במבט אחד · WPPSI-IV") && !doc.contains("WISC-V"));
+    for n in ["112", "95", "88", "71"] {
+        assert!(!doc.contains(n), "{n} in the parents' version");
+    }
+    assert!(doc.contains("אלון נהנה מהמשחק"));
+}

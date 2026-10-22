@@ -92,7 +92,7 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
           {forParents && (
             <div className="parents-version stack">
               <span className="small">אותם סעיפים מאושרים, בלי טבלאות הציונים. במקומן טבלה פשוטה: חזק / בטווח הגיל / קשה יותר, מחושבת מהציונים. נבנית במחשב הזה, שום דבר לא נשלח.</span>
-              <Switch id="parents-numbers" label="להציג מספרים" checked={numbers} onChange={setNumbers}
+              <Switch id="parents-numbers" label="להציג ציונים בגרסה להורים" checked={numbers} onChange={setNumbers}
                 hint={numbers ? "הציונים יופיעו בטבלה ובטקסט." : "בלי ציונים: משפט עם ציון יוצא מהגרסה להורים."} />
               {opening !== null && (
                 <p className="small">
@@ -110,10 +110,18 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
                 <span aria-hidden="true">{check.included_sections > 0 ? "✓" : "!"}</span>
                 <span>{check.included_sections} סעיפים עם פסקאות מאושרות</span>
               </li>
-              {check.score_tables > 0 && forParents && (
+              {check.parents_chart_rows > 0 && forParents && (
                 <li className="ok">
                   <span aria-hidden="true">✓</span>
                   <span>במקום טבלאות הציונים: טבלה פשוטה של חזק / בטווח הגיל / קשה יותר</span>
+                </li>
+              )}
+              {check.parents_left_out > 0 && forParents && !numbers && (
+                <li className="warn">
+                  <span aria-hidden="true">!</span>
+                  <span>
+                    {check.parents_left_out === 1 ? "משפט אחד הושמט" : `${check.parents_left_out} משפטים הושמטו`} כי היה בהם מספר שנראה כמו ציון. כדי להשאיר אותם: לנסח בלי המספר, או להציג ציונים.
+                  </span>
                 </li>
               )}
               {check.score_tables > 0 && !forParents && (

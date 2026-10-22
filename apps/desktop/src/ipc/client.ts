@@ -80,6 +80,9 @@ import type { StyleProfileView } from "./generated/StyleProfileView";
 import type { StyleSourceView } from "./generated/StyleSourceView";
 import type { StyleSuggestion } from "./generated/StyleSuggestion";
 
+/** The largest logo the core takes (`dv_export::MAX_LOGO_BYTES`). */
+export const LOGO_MAX_BYTES = 1024 * 1024;
+
 /** Every failure reaches the UI as a UiError with a Hebrew message and its next step (F6). */
 export function asUiError(e: unknown): UiError {
   if (e && typeof e === "object" && "message" in e && "code" in e) {
@@ -201,6 +204,10 @@ export const ipc = {
   reportTemplate: () => call("report_template"),
   /** Her logo (round 55): a PNG or JPEG of at most 1 MB, the file's bytes as the raw body. */
   setReportLogo: async (file: File): Promise<LogoView> => {
+    // Refused before the file is read, the way the core refuses it (1 MB, `MAX_LOGO_BYTES`).
+    if (file.size > LOGO_MAX_BYTES) {
+      throw { code: "refused", message: "התמונה גדולה מ-1MB. שומרים אותה בגודל קטן יותר ובוחרים שוב.", details: [], action: { kind: "dismiss" } } satisfies UiError;
+    }
     const bytes = new Uint8Array(await file.arrayBuffer());
     return await call("set_report_logo", bytes);
   },

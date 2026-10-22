@@ -20,7 +20,9 @@ pub use agile::{encrypt, MIN_PASSWORD_CHARS};
 pub use docx::render;
 pub use image::{check_logo, Logo, LogoFormat, MAX_LOGO_BYTES};
 pub use look::{template_look, TemplateLook};
-pub use parents::{for_parents, without_scores, BandChart, BandRow, ParentsVersion};
+pub use parents::{
+    for_parents, without_scores, without_scores_counted, BandChart, BandRow, ParentsVersion,
+};
 pub use pdf::{render_notice_pdf, render_pdf, PdfFonts};
 pub use template::{
     check_template, render_with_template, TemplateSummary, MARKER, MAX_TEMPLATE_BYTES,
@@ -157,10 +159,26 @@ impl Report {
                 }
             }
         }
+        for x in &mut self.intro {
+            x.zeroize();
+        }
+        for c in &mut self.bands {
+            c.title.zeroize();
+            c.note.zeroize();
+            for r in &mut c.rows {
+                r.label.zeroize();
+                if let Some(v) = &mut r.value {
+                    v.zeroize();
+                }
+            }
+        }
         for x in &mut self.signature {
             x.zeroize();
         }
         self.confidentiality.zeroize();
+        if let Some(l) = &mut self.logo {
+            l.bytes.zeroize();
+        }
     }
 }
 
@@ -273,6 +291,25 @@ mod tests {
             font: "David".into(),
             ..Report::default()
         }
+    }
+
+    /// After a lock nothing of the report is left in memory, the parents' parts included.
+    #[test]
+    fn wipe_leaves_nothing_of_the_parents_version() {
+        let mut r = crate::docx::tests::parents(true);
+        r.logo = Some(crate::check_logo(&crate::image::tests::png(3, 3, 2, 0)).unwrap());
+        assert!(!r.intro.is_empty() && !r.bands.is_empty());
+        r.wipe();
+        let words = |t: &str| t.chars().any(|c| c != '\0');
+        assert!(!r.intro.iter().any(|t| words(t)));
+        for c in &r.bands {
+            assert!(!words(&c.title) && !words(&c.note));
+            for row in &c.rows {
+                assert!(!words(&row.label));
+                assert!(!row.value.as_deref().is_some_and(words));
+            }
+        }
+        assert!(r.logo.as_ref().is_some_and(|l| l.bytes.is_empty()));
     }
 
     #[test]

@@ -591,13 +591,8 @@ fn normal_cdf(z: f64) -> f64 {
 /// Wechsler manuals print it ("79", "0.4", ">99.9"). `None` for other scales.
 #[must_use]
 pub fn percentile(measure: &Measure, value: f64) -> Option<String> {
-    let z = match measure.scale {
-        ScoreScale::Standard => (value - 100.0) / 15.0,
-        ScoreScale::Scaled => (value - 10.0) / 3.0,
-        ScoreScale::VScale => (value - 15.0) / 3.0,
-        ScoreScale::TAbility => (value - 50.0) / 10.0,
-        _ => return None,
-    };
+    let (mean, sd) = ability_norm(measure.scale)?;
+    let z = (value - mean) / sd;
     let p = normal_cdf(z) * 100.0;
     Some(if p < 0.1 {
         "<0.1".to_owned()
@@ -608,6 +603,18 @@ pub fn percentile(measure: &Measure, value: f64) -> Option<String> {
     } else {
         format!("{:.0}", p.round())
     })
+}
+
+/// The mean and standard deviation of an ability scale, where higher is better; `None` for
+/// questionnaires and the other scales.
+fn ability_norm(scale: ScoreScale) -> Option<(f64, f64)> {
+    match scale {
+        ScoreScale::Standard => Some((100.0, 15.0)),
+        ScoreScale::Scaled => Some((10.0, 3.0)),
+        ScoreScale::VScale => Some((15.0, 3.0)),
+        ScoreScale::TAbility => Some((50.0, 10.0)),
+        _ => None,
+    }
 }
 
 /// One entered score.
@@ -817,13 +824,7 @@ pub fn sheet_bands(sheet: &ScoreSheet) -> Result<Vec<ParentBand>, String> {
     Ok(entries
         .iter()
         .filter_map(|(measure, e)| {
-            let mean = match measure.scale {
-                ScoreScale::Standard => 100.0,
-                ScoreScale::Scaled => 10.0,
-                ScoreScale::VScale => 15.0,
-                ScoreScale::TAbility => 50.0,
-                _ => return None,
-            };
+            let (mean, _) = ability_norm(measure.scale)?;
             let band = classify(measure, e.value)?;
             let group = if band.level >= 1 {
                 ParentGroup::Harder

@@ -71,6 +71,7 @@ pub use backup::{
 };
 pub(crate) use dates::today;
 pub use dv_ai::{StyleItem, StyleKind, StyleOrigin, StyleProfile};
+pub use dv_export::MAX_LOGO_BYTES;
 pub use dv_vault::BACKUP_EXTENSION;
 pub use followup::FollowUpView;
 pub use history::{HiddenWord, SentItem, SentPart, SentText};

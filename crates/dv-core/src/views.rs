@@ -449,6 +449,13 @@ pub struct ExportCheck {
     pub score_tables: u32,
     /// The file name, without the child's name (file names travel in e-mails).
     pub file_name: String,
+    /// Sentences the parents' version without numbers leaves out, because they hold a score
+    /// (round 55, D-095): the dialog says how many.
+    #[serde(default)]
+    pub parents_left_out: u32,
+    /// Rows of the parents' charts (0: no chart, only questionnaires or no tables).
+    #[serde(default)]
+    pub parents_chart_rows: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

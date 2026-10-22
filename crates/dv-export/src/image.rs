@@ -17,7 +17,8 @@ use crate::ExportError;
 pub const MAX_LOGO_BYTES: usize = 1024 * 1024;
 /// The largest side, and the most pixels, of a picture taken (a logo is far smaller).
 const MAX_SIDE: u32 = 8000;
-const MAX_PIXELS: u64 = 16_000_000;
+/// 4 million pixels: a logo is far smaller, and the decoded picture stays a few dozen MB.
+const MAX_PIXELS: u64 = 4_000_000;
 
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 
@@ -141,7 +142,7 @@ fn size_ok(width: u32, height: u32) -> Result<(), ExportError> {
     }
     if width > MAX_SIDE || height > MAX_SIDE || u64::from(width) * u64::from(height) > MAX_PIXELS {
         return Err(refuse(
-            "התמונה גדולה מדי (יותר מ-8000 פיקסלים בצד). שומרים אותה קטנה יותר ובוחרים שוב.",
+            "התמונה גדולה מדי (יותר מ-8000 פיקסלים בצד, או יותר מ-4 מיליון פיקסלים). שומרים אותה קטנה יותר ובוחרים שוב.",
         ));
     }
     Ok(())
@@ -183,6 +184,12 @@ fn clean_png(bytes: &[u8]) -> Result<Logo, ExportError> {
     let width = be32(ihdr, 0).ok_or_else(unreadable)?;
     let height = be32(ihdr, 4).ok_or_else(unreadable)?;
     size_ok(width, height)?;
+    // One header, one palette, one transparency: a second one is not a file a reader agrees on.
+    for once in [b"IHDR", b"PLTE", b"tRNS"] {
+        if chunks.iter().filter(|(k, _, _)| k == once).count() > 1 {
+            return Err(unreadable());
+        }
+    }
     let mut out = PNG_SIGNATURE.to_vec();
     for (kind, _, whole) in &chunks {
         match kind {
@@ -202,8 +209,9 @@ fn clean_png(bytes: &[u8]) -> Result<Logo, ExportError> {
 }
 
 /// A JPEG's markers that carry the picture (the frame, tables, scans); the application
-/// segments, comments and anything after the end are left out. APP14 (Adobe) stays: it only
-/// says how the colours are coded.
+/// segments, comments and anything after the end are left out. APP14 stays only as Adobe's
+/// 12 bytes that say how the colours are coded. Every kept segment is exactly as long as what
+/// it holds, so no other bytes can ride inside one.
 fn clean_jpeg(bytes: &[u8]) -> Result<Logo, ExportError> {
     let mut out = vec![0xFF, 0xD8];
     let mut at = 2;
@@ -231,6 +239,10 @@ fn clean_jpeg(bytes: &[u8]) -> Result<Logo, ExportError> {
             // Frames: baseline, extended, progressive (Huffman). Lossless and arithmetic
             // coding are rare, and not every reader draws them.
             0xC0..=0xC2 => {
+                if size.is_some() {
+                    // A second frame.
+                    return Err(unreadable());
+                }
                 let h = u32::from(be16(segment, 5).ok_or_else(unreadable)?);
                 let w = u32::from(be16(segment, 7).ok_or_else(unreadable)?);
                 let components = *segment.get(9).ok_or_else(unreadable)?;
@@ -239,15 +251,33 @@ fn clean_jpeg(bytes: &[u8]) -> Result<Logo, ExportError> {
                         "תמונת JPEG בצבעי הדפסה (CMYK) או ברזולוציית צבע מיוחדת לא נתמכת. שומרים אותה מחדש כ-JPEG רגיל או כ-PNG.",
                     ));
                 }
+                if len != 8 + 3 * usize::from(components) {
+                    return Err(unreadable());
+                }
                 size_ok(w, h)?;
                 size = Some((w, h));
                 out.extend_from_slice(segment);
             }
             0xC3 | 0xC5..=0xC7 | 0xC9..=0xCB | 0xCD..=0xCF => return Err(unreadable()),
-            // Tables, restart interval, Adobe colour transform.
-            0xC4 | 0xDB | 0xDD | 0xEE => out.extend_from_slice(segment),
+            0xC4 => {
+                huffman_tables(segment.get(4..).unwrap_or_default())?;
+                out.extend_from_slice(segment);
+            }
+            0xDB => {
+                quant_tables(segment.get(4..).unwrap_or_default())?;
+                out.extend_from_slice(segment);
+            }
+            // Restart interval: two bytes.
+            0xDD if len == 4 => out.extend_from_slice(segment),
+            0xDD => return Err(unreadable()),
+            // Adobe's colour transform (12 bytes after the length); any other APP14 is left out.
+            0xEE if len == 14 && segment.get(4..9) == Some(b"Adobe") => {
+                out.extend_from_slice(segment);
+            }
+            0xEE => {}
             0xDA => {
-                if size.is_none() {
+                let parts = usize::from(*segment.get(4).ok_or_else(unreadable)?);
+                if size.is_none() || !(1..=4).contains(&parts) || len != 6 + 2 * parts {
                     return Err(unreadable());
                 }
                 out.extend_from_slice(segment);
@@ -283,6 +313,44 @@ fn clean_jpeg(bytes: &[u8]) -> Result<Logo, ExportError> {
         height,
         bytes: out,
     })
+}
+
+/// DQT: tables of 64 values, 1 or 2 bytes each, filling the segment exactly.
+fn quant_tables(mut data: &[u8]) -> Result<(), ExportError> {
+    if data.is_empty() {
+        return Err(unreadable());
+    }
+    while let Some((&pq_tq, rest)) = data.split_first() {
+        let size = match pq_tq >> 4 {
+            0 => 64,
+            1 => 128,
+            _ => return Err(unreadable()),
+        };
+        if pq_tq & 0x0F > 3 {
+            return Err(unreadable());
+        }
+        data = rest.get(size..).ok_or_else(unreadable)?;
+    }
+    Ok(())
+}
+
+/// DHT: tables of 16 counts and their values, filling the segment exactly.
+fn huffman_tables(mut data: &[u8]) -> Result<(), ExportError> {
+    if data.is_empty() {
+        return Err(unreadable());
+    }
+    while let Some((&tc_th, rest)) = data.split_first() {
+        if tc_th >> 4 > 1 || tc_th & 0x0F > 3 {
+            return Err(unreadable());
+        }
+        let counts = rest.get(..16).ok_or_else(unreadable)?;
+        let values: usize = counts.iter().map(|c| usize::from(*c)).sum();
+        if values > 256 {
+            return Err(unreadable());
+        }
+        data = rest.get(16 + values..).ok_or_else(unreadable)?;
+    }
+    Ok(())
 }
 
 /// Whether a checked JPEG is grey (one component) rather than colour (three).
@@ -365,8 +433,17 @@ pub(crate) fn png_pixels(logo: &Logo) -> Result<Pixels, ExportError> {
         .ok_or_else(unreadable)?;
     let [depth, ctype, method, filtering, interlace] =
         <[u8; 5]>::try_from(ihdr.get(8..13).ok_or_else(unreadable)?).map_err(|_| unreadable())?;
-    if method != 0 || filtering != 0 || interlace != 0 {
-        // Interlaced, or an unknown method.
+    if interlace != 0 {
+        return Err(refuse(
+            "תמונת PNG משולבת (interlaced) לא נתמכת. שומרים אותה מחדש בלי שילוב (למשל בתוכנת הצייר) ובוחרים שוב.",
+        ));
+    }
+    if depth == 16 {
+        return Err(refuse(
+            "תמונת PNG ב-16 ביט לצבע לא נתמכת. שומרים אותה מחדש ב-8 ביט (למשל בתוכנת הצייר) ובוחרים שוב.",
+        ));
+    }
+    if method != 0 || filtering != 0 {
         return Err(unreadable());
     }
     let channels: usize = match (ctype, depth) {
@@ -408,6 +485,8 @@ pub(crate) fn png_pixels(logo: &Logo) -> Result<Pixels, ExportError> {
         return Err(unreadable());
     }
     let data = unfilter(&raw, row, bpp)?;
+    // The filtered copy is not needed any more: only one full copy at a time.
+    drop(raw);
 
     let max = (1u16 << depth) - 1;
     // One sample of a palette or grey row, 1 to 8 bits wide.
@@ -599,6 +678,130 @@ pub(crate) mod tests {
         assert!(refused(&png(9000, 1, 2, 0)).contains("8000"));
         // A JPEG that is cut before its picture.
         assert!(check_logo(&[0xFF, 0xD8, 0xFF, 0xD9]).is_err());
+    }
+
+    /// `jpeg()` with `segment` (marker and payload, the length is added) before the frame.
+    fn jpeg_with(marker: u8, payload: &[u8]) -> Vec<u8> {
+        let base = jpeg(30, 10);
+        let at = base.windows(2).position(|w| w == [0xFF, 0xDB]).unwrap();
+        let mut out = base[..at].to_vec();
+        out.extend_from_slice(&[0xFF, marker]);
+        out.extend_from_slice(&u16::try_from(payload.len() + 2).unwrap().to_be_bytes());
+        out.extend_from_slice(payload);
+        out.extend_from_slice(&base[at..]);
+        out
+    }
+
+    #[test]
+    fn jpeg_segments_carry_only_what_they_declare() {
+        // Adobe's APP14 is kept; any other APP14 (or a longer one) is left out, not refused.
+        let adobe = b"Adobe\x00\x64\x00\x00\x00\x00\x01";
+        let logo = check_logo(&jpeg_with(0xEE, adobe)).unwrap();
+        assert!(logo.bytes.windows(5).any(|w| w == b"Adobe"));
+        let mut long = adobe.to_vec();
+        long.extend_from_slice(b"hidden-payload");
+        let logo = check_logo(&jpeg_with(0xEE, &long)).unwrap();
+        assert!(!logo.bytes.windows(6).any(|w| w == b"hidden"));
+        assert!(!logo.bytes.windows(5).any(|w| w == b"Adobe"));
+        // Restart interval: two bytes exactly.
+        assert!(check_logo(&jpeg_with(0xDD, &[0, 4])).is_ok());
+        assert!(check_logo(&jpeg_with(0xDD, &[0, 4, b'x'])).is_err());
+        // A quantization table with bytes after it, or of an unknown precision.
+        let mut dqt = vec![0x01];
+        dqt.extend(std::iter::repeat_n(1u8, 64));
+        assert!(check_logo(&jpeg_with(0xDB, &dqt)).is_ok());
+        dqt.extend_from_slice(b"extra");
+        assert!(check_logo(&jpeg_with(0xDB, &dqt)).is_err());
+        let mut dqt = vec![0x21];
+        dqt.extend(std::iter::repeat_n(1u8, 64));
+        assert!(check_logo(&jpeg_with(0xDB, &dqt)).is_err());
+        // A Huffman table: 16 counts and exactly that many values.
+        let mut dht = vec![0x00];
+        let mut counts = [0u8; 16];
+        counts[0] = 2;
+        dht.extend_from_slice(&counts);
+        dht.extend_from_slice(&[0, 1]);
+        assert!(check_logo(&jpeg_with(0xC4, &dht)).is_ok());
+        dht.push(9);
+        assert!(check_logo(&jpeg_with(0xC4, &dht)).is_err());
+        // A second frame.
+        let base = jpeg(30, 10);
+        let sof = base.windows(2).position(|w| w == [0xFF, 0xC0]).unwrap();
+        let mut two = base[..sof + 19].to_vec();
+        two.extend_from_slice(&base[sof..]);
+        assert!(check_logo(&two).is_err());
+    }
+
+    #[test]
+    fn png_with_two_headers_or_palettes_is_refused_and_the_reasons_are_named() {
+        let base = png(3, 3, 2, 0);
+        let ihdr_end = PNG_SIGNATURE.len() + 25;
+        let mut two = base[..ihdr_end].to_vec();
+        two.extend_from_slice(&base[PNG_SIGNATURE.len()..ihdr_end]);
+        two.extend_from_slice(&base[ihdr_end..]);
+        assert!(check_logo(&two).is_err());
+
+        let with_ihdr = |depth: u8, interlace: u8| {
+            let mut ihdr = 3u32.to_be_bytes().to_vec();
+            ihdr.extend_from_slice(&3u32.to_be_bytes());
+            ihdr.extend_from_slice(&[depth, 2, 0, 0, interlace]);
+            let mut out = PNG_SIGNATURE.to_vec();
+            out.extend(chunk(b"IHDR", &ihdr));
+            out.extend_from_slice(&base[ihdr_end..]);
+            out
+        };
+        let said = |b: &[u8]| match check_logo(b) {
+            Err(ExportError::Image(m)) => m,
+            other => panic!("not refused: {other:?}"),
+        };
+        assert!(said(&with_ihdr(16, 0)).contains("16 ביט"));
+        assert!(said(&with_ihdr(8, 1)).contains("interlaced"));
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(512))]
+
+        /// Whatever the bytes, the check answers and never panics.
+        #[test]
+        fn any_bytes_are_answered(bytes in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..2048)) {
+            let _ = check_logo(&bytes);
+            let mut png_like = PNG_SIGNATURE.to_vec();
+            png_like.extend_from_slice(&bytes);
+            let _ = check_logo(&png_like);
+            let mut jpeg_like = vec![0xFF, 0xD8, 0xFF];
+            jpeg_like.extend_from_slice(&bytes);
+            let _ = check_logo(&jpeg_like);
+        }
+
+        /// Real files cut anywhere, with a byte changed anywhere, or with a chunk or segment
+        /// length changed: refused or read, never a panic; what is read is read again the same.
+        #[test]
+        fn damaged_logos_are_answered(
+            cut in 0usize..400,
+            at in 0usize..400,
+            value in proptest::prelude::any::<u8>(),
+            depth in proptest::prelude::any::<u8>(),
+            ctype in proptest::prelude::any::<u8>(),
+        ) {
+            for base in [png(7, 5, 6, 4), png(4, 4, 2, 1), jpeg(30, 10)] {
+                let _ = check_logo(&base[..cut.min(base.len())]);
+                let mut flipped = base.clone();
+                let i = at % flipped.len();
+                flipped[i] = value;
+                if let Ok(logo) = check_logo(&flipped) {
+                    proptest::prop_assert_eq!(check_logo(&logo.bytes).unwrap(), logo);
+                }
+            }
+            // The PNG header's depth and colour type, with a correct checksum.
+            let base = png(5, 3, 2, 0);
+            let mut ihdr = 5u32.to_be_bytes().to_vec();
+            ihdr.extend_from_slice(&3u32.to_be_bytes());
+            ihdr.extend_from_slice(&[depth, ctype, 0, 0, 0]);
+            let mut out = PNG_SIGNATURE.to_vec();
+            out.extend(chunk(b"IHDR", &ihdr));
+            out.extend_from_slice(&base[PNG_SIGNATURE.len() + 25..]);
+            let _ = check_logo(&out);
+        }
     }
 
     #[test]

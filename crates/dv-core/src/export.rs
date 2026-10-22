@@ -217,17 +217,36 @@ impl Core {
     }
 
     /// The parents' version (round 55, D-095): the approved report without the score tables,
-    /// with a chart of three groups computed from the fixed tables, her opening sentence, and
-    /// (unless she shows numbers) no score in the text. Built here; nothing is sent.
+    /// with a chart of three groups for each test, computed from the fixed tables, her opening
+    /// sentence, and (unless she shows numbers) no score in the text. Built here; nothing is
+    /// sent.
     pub(crate) fn build_parents_report(
         &mut self,
         case_id: &str,
         options: ParentsOptions,
     ) -> Result<(dv_export::Report, ExportCheck), CoreError> {
-        let (full, mut check) = self.build_report(case_id)?;
+        let (report, mut check) = self.parents_report(case_id, options)?;
+        check.file_name = parents_file_name(&check.file_name);
+        Ok((report, check))
+    }
+
+    /// [`Core::build_parents_report`] with the full report's file name, and in the check how
+    /// many sentences are left out and how many rows the charts have.
+    fn parents_report(
+        &mut self,
+        case_id: &str,
+        options: ParentsOptions,
+    ) -> Result<(dv_export::Report, ExportCheck), CoreError> {
+        let (mut full, mut check) = self.build_report(case_id)?;
         let settings = self.report_settings()?;
         let v = self.vault_ref()?;
-        let mut rows = Vec::new();
+        // Not a test she does not give (D-098), as in the full report.
+        let not_used = crate::instruments::not_used(v)?;
+        let names: std::collections::HashMap<String, String> = dv_domain::instruments()
+            .into_iter()
+            .map(|i| (i.key, i.name))
+            .collect();
+        let mut bands = Vec::new();
         let mut scores = Vec::new();
         for input in v
             .inputs(case_id)?
@@ -239,9 +258,15 @@ impl Core {
             };
             let sheet: dv_domain::ScoreSheet =
                 serde_json::from_str(&data).map_err(|e| CoreError::Internal(e.to_string()))?;
+            // Its numbers still may not stay in the text, whether it is charted or not.
             scores.extend(sheet.entries.iter().map(|e| e.value));
-            for b in dv_domain::sheet_bands(&sheet).map_err(CoreError::Refused)? {
-                rows.push(dv_export::BandRow {
+            if not_used.contains(&sheet.instrument) {
+                continue;
+            }
+            let rows: Vec<dv_export::BandRow> = dv_domain::sheet_bands(&sheet)
+                .map_err(CoreError::Refused)?
+                .into_iter()
+                .map(|b| dv_export::BandRow {
                     label: b.label,
                     group: match b.group {
                         dv_domain::ParentGroup::Strong => 0,
@@ -249,8 +274,29 @@ impl Core {
                         dv_domain::ParentGroup::Harder => 2,
                     },
                     value: Some(score_text(b.value)),
-                });
+                })
+                .collect();
+            if rows.is_empty() {
+                continue;
             }
+            // One chart for each test, under its name: two tests can share a measure's name.
+            let name = names
+                .get(&sheet.instrument)
+                .cloned()
+                .unwrap_or_else(|| sheet.instrument.clone());
+            bands.push(dv_export::BandChart {
+                title: format!("במבט אחד · {name}"),
+                groups: ["חזק", "בטווח הגיל", "קשה יותר"]
+                    .map(str::to_owned)
+                    .to_vec(),
+                rows,
+                note: String::new(),
+            });
+        }
+        if let Some(last) = bands.last_mut() {
+            last.note =
+                "הטבלה מחושבת מהציונים לפי טבלאות קבועות. \"בטווח הגיל\": כמו רוב הילדים בגיל הזה."
+                    .to_owned();
         }
         // Scores the text gives beside a test's name, also ones not entered in a table.
         for p in full
@@ -261,19 +307,7 @@ impl Core {
         {
             scores.extend(dv_domain::find_score_mentions(p).iter().map(|m| m.value));
         }
-        let bands = if rows.is_empty() {
-            Vec::new()
-        } else {
-            vec![dv_export::BandChart {
-                title: "במבט אחד".to_owned(),
-                groups: ["חזק", "בטווח הגיל", "קשה יותר"]
-                    .map(str::to_owned)
-                    .to_vec(),
-                rows,
-                note: "הטבלה מחושבת מהציונים לפי טבלאות קבועות. \"בטווח הגיל\": כמו רוב הילדים בגיל הזה.".to_owned(),
-            }]
-        };
-        let report = dv_export::for_parents(
+        let (report, left_out) = dv_export::for_parents(
             &full,
             dv_export::ParentsVersion {
                 opening: settings.parents_opening,
@@ -282,7 +316,11 @@ impl Core {
                 scores,
             },
         );
-        check.file_name = parents_file_name(&check.file_name);
+        full.wipe();
+        check.parents_left_out = u32::try_from(left_out).unwrap_or(u32::MAX);
+        check.parents_chart_rows =
+            u32::try_from(report.bands.iter().map(|c| c.rows.len()).sum::<usize>())
+                .unwrap_or(u32::MAX);
         Ok((report, check))
     }
 
@@ -529,12 +567,18 @@ impl Core {
                 included_sections: included,
                 score_tables,
                 file_name,
+                parents_left_out: 0,
+                parents_chart_rows: 0,
             },
         ))
     }
 
+    /// What the export dialog shows before anything is made, for the full report and for the
+    /// parents' version without numbers (the version's default).
     pub fn check_export(&mut self, case_id: &str) -> Result<ExportCheck, CoreError> {
-        Ok(self.build_report(case_id)?.1)
+        let (mut report, check) = self.parents_report(case_id, ParentsOptions::default())?;
+        report.wipe();
+        Ok(check)
     }
 }
 

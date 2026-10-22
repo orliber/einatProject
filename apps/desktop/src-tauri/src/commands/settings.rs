@@ -196,6 +196,13 @@ pub(crate) async fn set_report_logo(
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err(internal("body"));
     };
+    // Refused before it is copied: the core refuses it too, but only after a copy.
+    if bytes.len() > dv_core::MAX_LOGO_BYTES {
+        return Err(CoreError::Refused(
+            "התמונה גדולה מ-1MB. שומרים אותה בגודל קטן יותר ובוחרים שוב.".to_owned(),
+        )
+        .to_ui());
+    }
     let bytes = bytes.clone();
     with_core(&state, move |c| c.set_report_logo(&bytes)).await
 }

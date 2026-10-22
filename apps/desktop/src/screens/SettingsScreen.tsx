@@ -277,7 +277,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                 <h2 id="s-logo">לוגו</h2>
                 <span className="hint">
                   {logo
-                    ? `${logo.format}, ${logo.width}×${logo.height}, ${logo.size_kb}KB. מודפס בראש העמוד הראשון של הדוח${template ? " (ב-PDF; ב-Word נשאר הלוגו של התבנית)" : ""}.`
+                    ? `${logo.format}, ${logo.width}×${logo.height}, ${logo.size_kb >= 1000 ? `${(logo.size_kb / 1024).toFixed(1)}MB` : `${logo.size_kb}KB`}. מודפס בראש העמוד הראשון של הדוח${template ? " (ב-PDF; ב-Word נשאר הלוגו של התבנית)" : ""}.`
                     : "תמונת PNG או JPEG, עד 1MB. נשמרת מוצפנת בכספת, ומודפסת בראש העמוד הראשון של הדוח."}
                 </span>
                 <div className="row">

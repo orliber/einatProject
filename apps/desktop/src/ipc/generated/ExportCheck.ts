@@ -24,4 +24,13 @@ score_tables: number,
 /**
  * The file name, without the child's name (file names travel in e-mails).
  */
-file_name: string, };
+file_name: string, 
+/**
+ * Sentences the parents' version without numbers leaves out, because they hold a score
+ * (round 55, D-095): the dialog says how many.
+ */
+parents_left_out: number, 
+/**
+ * Rows of the parents' charts (0: no chart, only questionnaires or no tables).
+ */
+parents_chart_rows: number, };

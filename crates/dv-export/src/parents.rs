@@ -47,9 +47,16 @@ pub struct ParentsVersion {
 }
 
 /// The parents' version of a report: no score tables, the chart in words, her opening
-/// sentence, and (unless she chose otherwise) no scores in the text.
+/// sentence, and (unless she chose otherwise) no scores in the text. With it, how many
+/// sentences were left out because they held a score (the export dialog says so).
 #[must_use]
-pub fn for_parents(full: &Report, v: ParentsVersion) -> Report {
+pub fn for_parents(full: &Report, v: ParentsVersion) -> (Report, usize) {
+    let mut left_out = 0;
+    let mut strip = |t: &str| {
+        let (kept, n) = without_scores_counted(t, &v.scores);
+        left_out += n;
+        kept
+    };
     let parts = full
         .parts
         .iter()
@@ -63,13 +70,7 @@ pub fn for_parents(full: &Report, v: ParentsVersion) -> Report {
                     paragraphs: s
                         .paragraphs
                         .iter()
-                        .map(|p| {
-                            if v.show_numbers {
-                                p.clone()
-                            } else {
-                                without_scores(p, &v.scores)
-                            }
-                        })
+                        .map(|p| if v.show_numbers { p.clone() } else { strip(p) })
                         .filter(|p| !p.trim().is_empty())
                         .collect(),
                 })
@@ -93,9 +94,9 @@ pub fn for_parents(full: &Report, v: ParentsVersion) -> Report {
     let opening = if v.show_numbers {
         v.opening.trim().to_owned()
     } else {
-        without_scores(v.opening.trim(), &v.scores)
+        strip(v.opening.trim())
     };
-    Report {
+    let report = Report {
         title: format!("{} – גרסה להורים", full.title.trim()),
         info: full.info.clone(),
         intro: if opening.is_empty() {
@@ -110,21 +111,31 @@ pub fn for_parents(full: &Report, v: ParentsVersion) -> Report {
         confidentiality: full.confidentiality.clone(),
         font: full.font.clone(),
         logo: full.logo.clone(),
-    }
+    };
+    (report, left_out)
 }
 
-/// Words after which a number is a score.
+/// Hebrew words after which a number is a score (also with a prefix: "בציון", "והאחוזון").
 const SCORE_WORDS: &[&str] = &[
     "ציון",
     "ציונו",
     "ציונה",
     "ציוני",
+    "ציוניו",
+    "ציוניה",
     "ציונים",
     "אחוזון",
     "אחוזונים",
-    "IQ",
     "משכל",
+    "תקן",
+    "טווח",
 ];
+
+/// Score abbreviations, as whole words only ("T 63", "SS 7", "IQ 85"; also "T-63", "T=63").
+const SCORE_MARKS: &[&str] = &["IQ", "T", "SS", "ss", "SD", "Z"];
+
+/// How many words before a number are looked at for a score word ("ציון תקן של 85").
+const LOOK_BACK: usize = 4;
 
 /// A number in the text: where it is (bytes) and its value.
 struct Number {
@@ -162,8 +173,10 @@ fn numbers(text: &str) -> Vec<Number> {
             .rev()
             .take(2)
             .collect();
-        let edition =
-            before.first() == Some(&'-') && before.get(1).is_some_and(char::is_ascii_alphabetic);
+        // "ADOS-2" is an edition; "T-63" and "SS-7" are scores.
+        let edition = before.first() == Some(&'-')
+            && before.get(1).is_some_and(char::is_ascii_alphabetic)
+            && !SCORE_MARKS.contains(&latin_word_before(text, start.saturating_sub(1)));
         let compound = run.contains([':', '/']) || run.matches('.').count() > 1;
         if !edition && !compound {
             // "85,90" lists two numbers.
@@ -184,6 +197,18 @@ fn numbers(text: &str) -> Vec<Number> {
     out
 }
 
+/// The Latin word that ends at byte `end` ("T" in "T-63").
+fn latin_word_before(text: &str, end: usize) -> &str {
+    let head = text.get(..end).unwrap_or_default();
+    let from = head
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| c.is_ascii_alphabetic())
+        .last()
+        .map_or(head.len(), |(i, _)| i);
+    head.get(from..).unwrap_or_default()
+}
+
 /// Whether the number at `n` is a score: one of `scores`, or beside a score word or "%".
 fn is_score(text: &str, n: &Number, scores: &[f64]) -> bool {
     if scores.iter().any(|s| (s - n.value).abs() < 1e-9) {
@@ -193,8 +218,15 @@ fn is_score(text: &str, n: &Number, scores: &[f64]) -> bool {
     if after.starts_with('%') {
         return true;
     }
-    let before: Vec<&str> = text
-        .get(..n.start)
+    // Only this sentence: a score word in the sentence before says nothing about this number.
+    let head = text.get(..n.start).unwrap_or_default();
+    let from = [". ", "! ", "? ", "; ", "\n"]
+        .iter()
+        .filter_map(|p| head.rfind(p).map(|i| i + p.len()))
+        .max()
+        .unwrap_or(0);
+    let before: Vec<&str> = head
+        .get(from..)
         .unwrap_or_default()
         .split(|c: char| !(c.is_alphanumeric() || c == '"' || c == '\''))
         .filter(|w| !w.is_empty())
@@ -202,8 +234,8 @@ fn is_score(text: &str, n: &Number, scores: &[f64]) -> bool {
     before
         .iter()
         .rev()
-        .take(2)
-        .any(|w| SCORE_WORDS.iter().any(|s| w.ends_with(s)))
+        .take(LOOK_BACK)
+        .any(|w| SCORE_WORDS.iter().any(|s| w.ends_with(s)) || SCORE_MARKS.contains(w))
 }
 
 /// Byte ranges of the sentences of a paragraph: up to and including ".", "!", "?" or ";"
@@ -245,6 +277,12 @@ fn parenthesis(text: &str, at: usize) -> Option<(usize, usize)> {
 /// still holds one. A text that would still hold one after that is dropped whole (fail-closed).
 #[must_use]
 pub fn without_scores(text: &str, scores: &[f64]) -> String {
+    without_scores_counted(text, scores).0
+}
+
+/// [`without_scores`], and how many sentences were left out.
+#[must_use]
+pub fn without_scores_counted(text: &str, scores: &[f64]) -> (String, usize) {
     // 1. Parentheses with a score in them ("(ציון תקן 102, אחוזון 55)").
     let mut cut: Vec<(usize, usize)> = numbers(text)
         .iter()
@@ -267,22 +305,30 @@ pub fn without_scores(text: &str, scores: &[f64]) -> String {
     // 2. Sentences that still hold a score.
     let found = numbers(&kept);
     let mut out = String::with_capacity(kept.len());
+    let mut left_out = 0;
     for (s, e) in sentences(&kept) {
         let has = found
             .iter()
             .any(|n| n.start >= s && n.end <= e && is_score(&kept, n, scores));
         if !has {
             out.push_str(kept.get(s..e).unwrap_or_default());
-        } else if kept.get(s..e).is_some_and(|t| t.ends_with('\n')) {
-            out.push('\n');
+        } else {
+            left_out += 1;
+            if kept.get(s..e).is_some_and(|t| t.ends_with('\n')) {
+                out.push('\n');
+            }
         }
     }
     let tidy = tidy(&out);
     // 3. Fail-closed: nothing that reads as a score is left.
     if numbers(&tidy).iter().any(|n| is_score(&tidy, n, scores)) {
-        return String::new();
+        let rest = sentences(&tidy)
+            .iter()
+            .filter(|(s, e)| tidy.get(*s..*e).is_some_and(|t| !t.trim().is_empty()))
+            .count();
+        return (String::new(), left_out + rest);
     }
-    tidy
+    (tidy, left_out)
 }
 
 /// Spaces left by what was removed: doubled, at the ends of lines, before punctuation.
@@ -329,10 +375,55 @@ mod tests {
     }
 
     #[test]
+    fn score_phrasings_from_reports_are_caught_without_the_table() {
+        for t in [
+            "התקבל ציון תקן של 85 במבחן.",
+            "הציון נמצא בטווח 90–109 במבחן.",
+            "ציוניו היו 7 ו-9 בשני המבחנים.",
+            "ציוניה בשני המבחנים היו 7 ו-9.",
+            "התקבל ציון T-63 בשאלון.",
+            "התקבל T=63 בשאלון.",
+            "בקוביות SS 7, נמוך מהצפוי.",
+            "בקוביות התקבל SS-7.",
+            "מנת משכל IQ 85 בבדיקה הקודמת.",
+        ] {
+            let (out, n) = without_scores_counted(t, &[]);
+            assert_eq!(out, "", "{t}");
+            assert_eq!(n, 1, "{t}");
+        }
+        // An edition is still not a score, and the rest of the text stays.
+        let t = "הועבר ADOS-2 ו-WISC-5. התקבל ציון T-63 בשאלון.";
+        assert_eq!(
+            without_scores_counted(t, &[]),
+            ("הועבר ADOS-2 ו-WISC-5.".to_owned(), 1)
+        );
+    }
+
+    #[test]
+    fn the_count_says_how_many_sentences_went() {
+        let t = "הוא בן שלוש. ציון 7 בקוביות. ציון 9 במטריצות. הוא אוהב לצייר.";
+        assert_eq!(
+            without_scores_counted(t, &[]),
+            ("הוא בן שלוש. הוא אוהב לצייר.".to_owned(), 2)
+        );
+        // A score in parentheses goes with them, and no sentence is counted.
+        let t = "התפקוד בטווח הממוצע (ציון 102).";
+        assert_eq!(
+            without_scores_counted(t, &[]),
+            ("התפקוד בטווח הממוצע.".to_owned(), 0)
+        );
+    }
+
+    #[test]
     fn a_number_beside_a_score_word_is_a_score_even_if_not_in_the_table() {
         let t = "מהירות העיבוד באחוזון 9. שאר התחומים תקינים.";
         assert_eq!(without_scores(t, &[]), "שאר התחומים תקינים.");
         assert_eq!(without_scores("שיפור של 30% בקשב.", &[]), "");
+        // A score word in the sentence before does not reach into the next one.
+        assert_eq!(
+            without_scores("הוא בטווח הממוצע. יש לו 2 אחים.", &[]),
+            "הוא בטווח הממוצע. יש לו 2 אחים."
+        );
         // A number that is no score at all stays.
         assert_eq!(
             without_scores("הוא בן שלוש ויש לו 2 אחים.", &[]),

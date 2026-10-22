@@ -784,6 +784,7 @@ pub(crate) mod tests {
                 scores: vec![112.0, 84.0, 102.0],
             },
         )
+        .0
     }
 
     #[test]

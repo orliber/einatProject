@@ -53,7 +53,7 @@
 | `dv-egress` | שליחה ל-AI שנבחר (Anthropic כברירת מחדל, או OpenAI / Google לפי D-040): רשימה לבנה של endpoints ודגמים, streaming, retry, מגבלות. וגם, בלי שום מידע מהכספת: עדכוני תוכנה מ-GitHub (D-033), הורדת מודל השמות מ-`huggingface.co` ו-`*.hf.co` (D-053), וכניסה עם גוגל (`oauth2.googleapis.com`, `www.googleapis.com`, D-041) | `reqwest` (rustls, בלי שורשי מערכת), `rustls`, `webpki-roots`, `aws-lc-rs` | כל דבר חוץ מ-`ClearedPayload` לשליחה ל-AI |
 | `dv-domain` | תיקים, סעיפים, ציונים, `interpretation`, DSM | — | רשת |
 | `dv-ingest` | ה-worker: PDF (`pdf-extract`), DOCX (`zip` + `quick-xml`), DOC ישן (`cfb`), OCR מקומי, חילוץ מטא-דאטה | `pdf-extract`, `zip`, `quick-xml`, `cfb`, `flate2` | רשת, מפתחות |
-| `dv-export` | DOCX מתבנית, PDF, הצפנת ECMA-376 Agile, `restore` | `zip`, `quick-xml`, `cfb`, `lopdf`, `ttf-parser`, `aws-lc-rs` | רשת |
+| `dv-export` | DOCX מתבנית, PDF, הצפנת ECMA-376 Agile, `restore` | `zip`, `quick-xml`, `cfb`, `lopdf`, `ttf-parser`, `aws-lc-rs`, `flate2` (פענוח PNG של הלוגו, D-095) | רשת |
 | `dv-style` | למידת סגנון מקומית: מודל סטטיסטי לפי סעיף, למידה מתיקונים, ביטויים חוזרים (D-052) | `dv-privacy`, `serde` | רשת |
 | `apps/desktop/src-tauri` | מעטפת דקה: חלון, CSP, capabilities, העברת פקודות ל-`dv-core`. ה-IPC נוצר מהקוד (`cargo xtask gen-ipc`, `ts-rs`) | `tauri`, `arboard` (לוח העתקה), `rfd` (חלון בחירת קבצים) | plugins של fs/shell/http |
 

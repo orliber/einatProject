@@ -31,7 +31,7 @@ function caseApi(): CaseApi {
 
 const check: ExportCheck = {
   blocking: [], to_complete: [], empty_sections: [], included_sections: 3, score_tables: 1,
-  file_name: "דוח אבחון TEST-0002.docx",
+  file_name: "דוח אבחון TEST-0002.docx", parents_left_out: 2, parents_chart_rows: 4,
 };
 
 const settings: ReportSettings = {
@@ -64,8 +64,10 @@ describe("ExportDialog", () => {
     const { calls, user } = setup();
     await user.click(await screen.findByRole("radio", { name: "גרסה להורים" }));
     expect(await screen.findByText("להורים שלום, זה הסיכום בשפה פשוטה.")).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "להציג מספרים" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("switch", { name: "להציג ציונים בגרסה להורים" })).toHaveAttribute("aria-checked", "false");
     expect(screen.getByText(/חזק \/ בטווח הגיל \/ קשה יותר/, { selector: "li span" })).toBeInTheDocument();
+    // What the version leaves out is said, not done in silence.
+    expect(screen.getByText(/2 משפטים הושמטו כי היה בהם מספר שנראה כמו ציון/)).toBeInTheDocument();
     expect(screen.getByText(/דוח אבחון TEST-0002 - להורים\.docx/)).toBeInTheDocument();
     expect(screen.queryByText(/טבלת הציונים תצורף כנספח/)).toBeNull();
     await user.click(screen.getByRole("button", { name: "הפקת הגרסה להורים" }));
@@ -76,7 +78,8 @@ describe("ExportDialog", () => {
   it("numbers go only when she turns them on, also in the PDF", async () => {
     const { calls, user } = setup();
     await user.click(await screen.findByRole("radio", { name: "גרסה להורים" }));
-    await user.click(screen.getByRole("switch", { name: "להציג מספרים" }));
+    await user.click(screen.getByRole("switch", { name: "להציג ציונים בגרסה להורים" }));
+    expect(screen.queryByText(/משפטים הושמטו/)).toBeNull();
     await user.click(screen.getByRole("radio", { name: /PDF/ }));
     await user.click(screen.getByRole("button", { name: "הפקת הגרסה להורים" }));
     await screen.findByText("הגרסה להורים מוכנה");
