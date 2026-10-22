@@ -103,9 +103,9 @@ describe("SectionGuide", () => {
     await user.click(screen.getByRole("button", { name: "עריכה" }));
     await user.type(screen.getByLabelText("ההנחיה לסעיף, לכל התיקים"), " נוספת");
     const holds = () => calls.filter(([cmd]) => cmd === "hold_unsaved").map(([, a]) => a);
-    await waitFor(() => expect(holds().at(-1)).toMatchObject({ edit: { text: "שורה נוספת", view: "background" } }));
+    await waitFor(() => expect(holds().at(-1)).toMatchObject({ edits: [{ text: "שורה נוספת", view: "background" }] }));
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(holds().at(-1)).toEqual({ edit: null }));
+    await waitFor(() => expect(holds().at(-1)).toEqual({ edits: [] }));
     // The guide is still open after the editor closed.
     expect(screen.getByRole("button", { name: "עריכה" })).toBeVisible();
     expect(screen.getByRole("group")).toHaveAttribute("open");

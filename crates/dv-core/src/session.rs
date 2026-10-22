@@ -64,7 +64,7 @@ impl Core {
             staged_backup: None,
             style_staged: HashMap::new(),
             auto_backup_tried: None,
-            unsaved: None,
+            unsaved: Vec::new(),
             removed_input: None,
             seal_dir: seal::default_dir(),
             rollback_warning: None,
@@ -456,7 +456,10 @@ impl Core {
         self.staged_backup = None;
         self.style_staged.clear();
         self.removed_input = None;
-        self.hint_cache.clear();
+        // The cache is keyed by the case's texts themselves: overwritten, not only let go.
+        for (mut text, _) in self.hint_cache.drain() {
+            zeroize::Zeroize::zeroize(&mut text);
+        }
         self.settled = None;
         self.section_nonces.clear();
         self.opened_cases.clear();

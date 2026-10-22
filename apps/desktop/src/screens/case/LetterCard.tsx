@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../../App";
+import { STALE_EDIT } from "../../i18n/he";
 import { ipc, type ParagraphView, type Prepared } from "../../ipc/client";
 import { ReviewDialog } from "../../components/ReviewDialog";
 import { ExportDialog } from "../../components/ExportDialog";
@@ -19,7 +20,7 @@ type Audience = "parents" | "school";
  * unmarks one); the mark is kept with the case.
  */
 export function LetterCard({ api }: { api: CaseApi }) {
-  const { fail, status } = useApp();
+  const { fail, status, notify } = useApp();
   const [audience, setAudience] = useState<Audience>("parents");
   const [note, setNote] = useState("");
   const [paragraphs, setParagraphs] = useState<ParagraphView[]>([]);
@@ -27,7 +28,7 @@ export function LetterCard({ api }: { api: CaseApi }) {
   const [busy, setBusy] = useState(false);
   /** The paragraph being edited, with the text it started from; what is typed stays in `editBox`. */
   // Kept while the vault is open, and held for a lock, like every paragraph editor (F1a).
-  const [editing, setEditing] = useKept<{ id: string; text: string } | null>(`case:${api.caseId}:letter:${audience}:editing`, null);
+  const [editing, setEditing] = useKept<{ id: string; text: string; original?: string } | null>(`case:${api.caseId}:letter:${audience}:editing`, null);
   const holdLive = useHoldUnsaved(api.caseId, audience === "parents" ? "פסקה במכתב להורים" : "פסקה במכתב לצוות", editing?.text ?? null, "finish");
   const editBox = useRef<LocalTextHandle>(null);
   const [exporting, setExporting] = useState(false);
@@ -112,12 +113,12 @@ export function LetterCard({ api }: { api: CaseApi }) {
         editing?.id === p.id ? (
           <div key={p.id} className="stack" style={{ gap: 6 }}>
             <LocalText key={p.id} ref={editBox} className="textarea serif" rows={4} autoFocus initial={editing.text} onLive={holdLive}
-              onText={(text) => setEditing((e) => (e?.id === p.id ? { id: p.id, text } : e))} />
+              onText={(text) => setEditing((e) => (e?.id === p.id ? { ...e, text } : e))} />
             <div className="row">
               <button type="button" className="btn btn-primary btn-small"
                 onClick={() => {
                   const text = editBox.current?.value() ?? editing.text;
-                  void act(async () => { await ipc.editParagraph(api.caseId, editing.id, text); setEditing(null); await load(); });
+                  void act(async () => { if (await ipc.editParagraph(api.caseId, editing.id, text, editing.original ?? null)) notify(STALE_EDIT); setEditing(null); await load(); });
                 }}>שמירה</button>
               <button type="button" className="btn btn-small" onClick={() => setEditing(null)}>ביטול</button>
             </div>
@@ -130,7 +131,7 @@ export function LetterCard({ api }: { api: CaseApi }) {
                 <button type="button" className="link-small" onClick={() => void act(async () => { await ipc.approveParagraph(api.caseId, p.id); await load(); })}>אישור</button>
               )}
               {p.status === "approved" && <span className="small muted">✓ מאושר</span>}
-              <button type="button" className="link-small" onClick={() => setEditing({ id: p.id, text: p.text })}>עריכה</button>
+              <button type="button" className="link-small" onClick={() => setEditing({ id: p.id, text: p.text, original: p.text })}>עריכה</button>
             </div>
           </div>
         ),

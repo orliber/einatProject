@@ -283,6 +283,39 @@ impl Core {
         Ok(())
     }
 
+    /// Her edit, saved from an editor that was opened on `opened_with` (the text as she saw it).
+    /// If the paragraph changed meanwhile (an editor left open while another one saved, or a
+    /// new wording came in), her text is still saved and the newer wording is kept among the
+    /// earlier versions, as every edit keeps the one before it (D-046). Returns `true` then, so
+    /// the page can tell her that two wordings exist and where the other one is.
+    pub fn edit_paragraph_opened(
+        &mut self,
+        case_id: &str,
+        draft_id: &str,
+        text: &str,
+        opened_with: Option<&str>,
+    ) -> Result<bool, CoreError> {
+        let changed_meanwhile = match opened_with {
+            None => false,
+            Some(seen) => {
+                let v = self.vault_ref()?;
+                match style::find_draft(v, case_id, draft_id)? {
+                    None => false,
+                    Some(d) => {
+                        let identities = v.identities(case_id)?;
+                        let masks = v.masks(case_id)?;
+                        let practitioner = v.practitioner()?.names.first().cloned();
+                        let now =
+                            restore(&d.text_tagged, &identities, practitioner.as_deref(), &masks);
+                        now.trim() != seen.trim()
+                    }
+                }
+            }
+        };
+        self.edit_paragraph(case_id, draft_id, text)?;
+        Ok(changed_meanwhile && !text.trim().is_empty())
+    }
+
     /// A paragraph's earlier wordings, newest first, names restored (D-046).
     pub fn paragraph_versions(
         &mut self,

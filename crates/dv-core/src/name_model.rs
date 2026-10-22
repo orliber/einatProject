@@ -233,10 +233,15 @@ impl HintJob {
     /// read (or filtered on the rules alone) by the request itself, as before.
     #[must_use]
     pub fn run(self) -> HintsRead {
-        let mut found = Vec::new();
-        for text in self.texts {
+        let mut found: Vec<(String, Vec<NameHint>)> = Vec::new();
+        let mut texts = self.texts.into_iter();
+        for mut text in texts.by_ref() {
             // Locked meanwhile: the model ended with the lock, and the texts go now.
             if self.cancel.is_set() {
+                zeroize::Zeroize::zeroize(&mut text);
+                for (t, _) in &mut found {
+                    zeroize::Zeroize::zeroize(t);
+                }
                 found.clear();
                 break;
             }
@@ -244,10 +249,18 @@ impl HintJob {
                 Ok(Ok(hints)) => found.push((text, hints)),
                 Ok(Err(())) => {
                     self.cell.fail();
+                    zeroize::Zeroize::zeroize(&mut text);
                     break;
                 }
-                Err(_) => break,
+                Err(_) => {
+                    zeroize::Zeroize::zeroize(&mut text);
+                    break;
+                }
             }
+        }
+        // Texts not read (the model failed or the vault locked) are wiped too.
+        for mut text in texts {
+            zeroize::Zeroize::zeroize(&mut text);
         }
         HintsRead {
             session: self.session,
@@ -599,11 +612,18 @@ impl Core {
 
     /// Keep what the job found. Dropped when the vault locked meanwhile.
     pub fn finish_name_hints(&mut self, read: HintsRead) {
-        if self.session != read.session || self.vault.is_none() {
-            return;
-        }
-        for (text, hints) in read.found {
-            self.keep_hints(&read.case_id, &text, &hints);
+        let HintsRead {
+            session,
+            case_id,
+            found,
+        } = read;
+        let current = self.session == session && self.vault.is_some();
+        for (mut text, hints) in found {
+            if current {
+                self.keep_hints(&case_id, &text, &hints);
+            }
+            // Landed after a lock, or kept: the copy carried back from the job is wiped.
+            zeroize::Zeroize::zeroize(&mut text);
         }
     }
 

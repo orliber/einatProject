@@ -469,8 +469,10 @@ impl Exported {
 
 impl ExportJob {
     #[must_use]
-    pub fn run(self) -> Exported {
+    pub fn run(mut self) -> Exported {
         let (pdf, protected, bytes) = self.render();
+        // The report's texts (names, paragraphs, scores) are not needed once the file is made.
+        self.report.wipe();
         // Locked while it was rendered: the file is wiped now, and nothing is saved.
         let bytes = if self.cancel.is_set() {
             Err(locked_meanwhile())

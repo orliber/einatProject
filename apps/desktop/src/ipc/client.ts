@@ -159,7 +159,7 @@ export const ipc = {
   lock: () => run("lock"),
   /** Typing or scrolling in the window counts as activity for the idle lock. */
   touch: () => run("touch"),
-  holdUnsaved: (edit: UnsavedEdit | null) => run("hold_unsaved", { edit }),
+  holdUnsaved: (edits: UnsavedEdit[]) => run("hold_unsaved", { edits }),
   takeUnsaved: () => call("take_unsaved"),
   readiness: () => call("readiness"),
   securityStatus: () => call("security_status"),
@@ -296,8 +296,10 @@ export const ipc = {
   /** Approve every paragraph waiting in the section; returns how many. */
   approveSection: (caseId: string, sectionKey: string) => call("approve_section", { caseId, sectionKey }),
   rejectParagraph: (caseId: string, draftId: string) => run("reject_paragraph", { caseId, draftId }),
-  editParagraph: (caseId: string, draftId: string, text: string) =>
-    run("edit_paragraph", { caseId, draftId, text }),
+  /** `openedWith`: the text the editor showed when it opened. `true` back = the paragraph
+   *  changed meanwhile; her text is saved and the other wording is kept among the versions. */
+  editParagraph: (caseId: string, draftId: string, text: string, openedWith: string | null = null) =>
+    call("edit_paragraph", { caseId, draftId, text, openedWith }),
   /** Earlier wordings of a paragraph, newest first; bring one back (D-046). */
   paragraphVersions: (caseId: string, draftId: string) =>
     call("paragraph_versions", { caseId, draftId }),

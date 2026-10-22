@@ -782,7 +782,7 @@ export class FakeCore {
       case "hold_unsaved":
         return null;
       case "take_unsaved":
-        return null;
+        return [];
       case "security_status":
       case "set_send_stopped": {
         if (cmd === "set_send_stopped") this.sendStopped = Boolean(a.stopped);
@@ -1213,12 +1213,14 @@ export class FakeCore {
           c.drafts = c.drafts.filter((x) => x.id !== d.id);
           return null;
         }
+        const seen = a.openedWith == null ? null : String(a.openedWith).trim();
+        const changedMeanwhile = seen !== null && restore(d.text, c.people, this.practitioner).trim() !== seen;
         const tagged = this.filterFor(c, String(a.text)).tagged;
         keepVersion(d, tagged);
         d.text = tagged;
         d.byAi = false;
         d.status = "approved";
-        return null;
+        return changedMeanwhile;
       }
       case "paragraph_versions": {
         const c = this.find(a.caseId);

@@ -106,7 +106,7 @@ export type Commands = {
   discard_style_upload: { args: undefined; returns: null };
   dismiss_style_suggestion: { args: { id: string }; returns: null };
   download_name_model: { args: undefined; returns: NameModelView };
-  edit_paragraph: { args: { caseId: string; draftId: string; text: string }; returns: null };
+  edit_paragraph: { args: { caseId: string; draftId: string; text: string; openedWith: string | null }; returns: boolean };
   export_letter: { args: { caseId: string; audience: string; password: string | null }; returns: string };
   export_pdf: { args: { caseId: string; password: string | null }; returns: string };
   export_report: { args: { caseId: string; password: string | null }; returns: string };
@@ -121,7 +121,7 @@ export type Commands = {
   google_status: { args: undefined; returns: GoogleStatus };
   google_turn_off: { args: { password: string }; returns: null };
   google_turn_on: { args: { password: string }; returns: null };
-  hold_unsaved: { args: { edit: UnsavedEdit | null }; returns: null };
+  hold_unsaved: { args: { edits: Array<UnsavedEdit> }; returns: null };
   import_document: { args: Uint8Array; returns: ImportPreview };
   import_style_source: { args: Uint8Array; returns: StyleImportPreview };
   install_update: { args: undefined; returns: null };
@@ -213,7 +213,7 @@ export type Commands = {
   settle_foreign_tags: { args: { caseId: string }; returns: number };
   similar_paragraph: { args: { caseId: string; draftId: string }; returns: SimilarParagraph | null };
   style_overview: { args: undefined; returns: StyleOverview };
-  take_unsaved: { args: undefined; returns: UnsavedEdit | null };
+  take_unsaved: { args: undefined; returns: Array<UnsavedEdit> };
   touch: { args: undefined; returns: null };
   unlock: { args: { password: string }; returns: AppStatus };
   unlock_with_recovery: { args: { key: string }; returns: AppStatus };

@@ -103,6 +103,44 @@ pub struct Report {
     pub font: String,
 }
 
+impl Report {
+    /// Overwrites every text of the report in memory: the child's details, the paragraphs, the
+    /// scores. For a report dropped after a lock, or once the file is made.
+    pub fn wipe(&mut self) {
+        use zeroize::Zeroize;
+        self.title.zeroize();
+        for l in &mut self.info {
+            l.label.zeroize();
+            l.value.zeroize();
+        }
+        for p in &mut self.parts {
+            p.title.zeroize();
+            for s in &mut p.sections {
+                s.title.zeroize();
+                for x in &mut s.paragraphs {
+                    x.zeroize();
+                }
+            }
+        }
+        for t in &mut self.tables {
+            t.title.zeroize();
+            t.note.zeroize();
+            for c in &mut t.columns {
+                c.zeroize();
+            }
+            for r in &mut t.rows {
+                for c in r {
+                    c.zeroize();
+                }
+            }
+        }
+        for x in &mut self.signature {
+            x.zeroize();
+        }
+        self.confidentiality.zeroize();
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ExportError {
     #[error("password too short")]

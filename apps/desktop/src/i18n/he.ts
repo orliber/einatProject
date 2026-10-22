@@ -2,6 +2,9 @@
 import type { InputKind } from "../ipc/generated/InputKind";
 import type { Role } from "../ipc/generated/Role";
 
+/** A paragraph saved from an editor opened on an older wording (round 51). */
+export const STALE_EDIT = "הפסקה השתנתה בזמן שהעורך היה פתוח. הנוסח שלך נשמר, והנוסח האחר נמצא ב\"גרסאות קודמות\".";
+
 export const he = {
   appName: "כספת האבחון",
   encrypted: "מוצפן, שמור במחשב הזה",

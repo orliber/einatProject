@@ -528,7 +528,7 @@ describe("text being typed (F1a)", () => {
     await waitFor(() => expect(calls.some((c) => c.cmd === "lock")).toBe(true));
     const lock = calls.findIndex((c) => c.cmd === "lock");
     const held = calls.slice(0, lock).filter((c) => c.cmd === "hold_unsaved").at(-1);
-    expect((held?.args as { edit: { text: string } | null }).edit?.text).toBe("נוסח שנכתב רגע לפני הנעילה");
+    expect((held?.args as { edits: { text: string }[] }).edits.at(-1)?.text).toBe("נוסח שנכתב רגע לפני הנעילה");
   });
 });
 

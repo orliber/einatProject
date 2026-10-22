@@ -32,22 +32,22 @@ pub(crate) async fn set_send_stopped(
     with_core(&state, move |c| c.set_send_stopped(stopped)).await
 }
 
-/// The paragraph being edited now (memory only), kept in the vault if it locks meanwhile.
+/// The texts being edited now (memory only), kept in the vault if it locks meanwhile.
 #[tauri::command]
 pub(crate) async fn hold_unsaved(
     state: tauri::State<'_, AppState>,
-    edit: Option<UnsavedEdit>,
+    edits: Vec<UnsavedEdit>,
 ) -> Res<()> {
     with_core(&state, move |c| {
-        c.hold_unsaved(edit);
+        c.hold_unsaved(edits);
         Ok(())
     })
     .await
 }
 
-/// After entering: the edit kept at the last lock, offered once.
+/// After entering: the edits kept at the last lock, offered once.
 #[tauri::command]
-pub(crate) async fn take_unsaved(state: tauri::State<'_, AppState>) -> Res<Option<UnsavedEdit>> {
+pub(crate) async fn take_unsaved(state: tauri::State<'_, AppState>) -> Res<Vec<UnsavedEdit>> {
     with_core(&state, |c| c.take_unsaved()).await
 }
 

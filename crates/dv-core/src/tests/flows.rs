@@ -833,7 +833,52 @@ fn readiness_follows_what_the_program_checks_and_keeps_what_she_confirmed() {
 // ------------------------------------------------------------ unsaved typing
 
 #[test]
-fn only_the_latest_open_edit_is_kept_and_a_long_one_is_cut_not_lost() {
+fn every_open_editor_is_kept_at_the_lock_not_only_the_last_one() {
+    let (_dir, mut core, case) = setup(None);
+    let edit = |case_id: &str, place: &str, text: &str| crate::UnsavedEdit {
+        case_id: case_id.into(),
+        place: place.into(),
+        view: "report".into(),
+        text: text.into(),
+    };
+    // Two editors in two cases: a lock by hand keeps both, the latest last.
+    let both = vec![
+        edit(&case, "פסקה בסעיף רקע", "טקסט בתיק הראשון"),
+        edit("other-case", "רישום מפגש", "טקסט בתיק השני"),
+    ];
+    core.hold_unsaved(both.clone());
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(core.take_unsaved().unwrap(), both);
+    assert!(core.take_unsaved().unwrap().is_empty());
+
+    // More editors than the cap: the latest are kept.
+    let many: Vec<_> = (0..12)
+        .map(|i| edit(&case, &format!("פסקה {i}"), &format!("טקסט {i}")))
+        .collect();
+    core.hold_unsaved(many.clone());
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(
+        core.take_unsaved().unwrap(),
+        many[12 - crate::unsaved::MAX_EDITS..].to_vec()
+    );
+
+    // A vault locked by an earlier version kept one edit, not a list: it still comes back.
+    core.vault_mut()
+        .unwrap()
+        .set_state(
+            crate::unsaved::UNSAVED_KEY,
+            r#"{"case_id":"c","place":"פסקה","text":"טקסט ישן"}"#,
+        )
+        .unwrap();
+    let old = core.take_unsaved().unwrap();
+    assert_eq!(old.len(), 1);
+    assert_eq!(old[0].text, "טקסט ישן");
+}
+
+#[test]
+fn the_latest_text_of_an_editor_is_kept_and_a_long_one_is_cut_not_lost() {
     let (_dir, mut core, case) = setup(None);
     let edit = |text: String| crate::UnsavedEdit {
         case_id: case.clone(),
@@ -841,8 +886,8 @@ fn only_the_latest_open_edit_is_kept_and_a_long_one_is_cut_not_lost() {
         view: "consult".into(),
         text,
     };
-    core.hold_unsaved(Some(edit("גרסה ראשונה".into())));
-    core.hold_unsaved(Some(edit("גרסה שנייה".into())));
+    core.hold_unsaved(vec![edit("גרסה ראשונה".into())]);
+    core.hold_unsaved(vec![edit("גרסה שנייה".into())]);
     // The computer slept: the tick locks, and what was typed is kept for the next entry.
     let now = SystemTime::now();
     assert!(!core.tick(now));
@@ -850,22 +895,22 @@ fn only_the_latest_open_edit_is_kept_and_a_long_one_is_cut_not_lost() {
     core.unlock(PASSWORD).unwrap();
     assert_eq!(
         core.take_unsaved().unwrap(),
-        Some(edit("גרסה שנייה".into()))
+        vec![edit("גרסה שנייה".into())]
     );
 
     let long: String = "א".repeat(60_000);
-    core.hold_unsaved(Some(edit(long)));
+    core.hold_unsaved(vec![edit(long)]);
     core.lock();
     core.unlock(PASSWORD).unwrap();
-    let back = core.take_unsaved().unwrap().unwrap();
+    let back = core.take_unsaved().unwrap().pop().unwrap();
     assert_eq!(back.text.chars().count(), 50_000);
     assert!(back.text.chars().all(|c| c == 'א'));
 
     // A locked session takes nothing new, so nothing is offered after the next entry.
     core.lock();
-    core.hold_unsaved(Some(edit("הוקלד אחרי הנעילה".into())));
+    core.hold_unsaved(vec![edit("הוקלד אחרי הנעילה".into())]);
     core.unlock(PASSWORD).unwrap();
-    assert_eq!(core.take_unsaved().unwrap(), None);
+    assert!(core.take_unsaved().unwrap().is_empty());
 }
 
 // ------------------------------------------------------------ rollback seal

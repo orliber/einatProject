@@ -8,10 +8,10 @@ import { Dialog } from "./ui";
 
 /** The open editors' texts, by owner, the latest written last. Kept here, not in a screen: a
  *  screen she leaves keeps its text held (she went to another stage, not away from the text),
- *  and a lock sends the latest text first (`holdNow`). The core holds one text: the latest
- *  editor still open, so closing one falls back to the one before it. */
+ *  and a lock sends them at once (`holdNow`). The core holds every open editor's text (up to
+ *  eight, the latest last), so two cases open at the lock both keep what was typed. */
 const holds = new Map<string, UnsavedEdit>();
-let sent = "null";
+let sent = "[]";
 let timer: ReturnType<typeof setTimeout> | null = null;
 
 /** The editors hand over their text at most every 800 ms (LocalText) or on every key (`live`),
@@ -29,15 +29,14 @@ function put(owner: string, e: UnsavedEdit) {
   holds.set(owner, e);
 }
 
-function edit(): UnsavedEdit | null {
-  const latest = [...holds.values()].reverse().find((e) => e.text.trim());
-  return latest ? { ...latest } : null;
+function edits(): UnsavedEdit[] {
+  return [...holds.values()].filter((e) => e.text.trim()).map((e) => ({ ...e }));
 }
 
 function send(): Promise<void> {
   if (timer !== null) clearTimeout(timer);
   timer = null;
-  const next = edit();
+  const next = edits();
   const key = JSON.stringify(next);
   if (key === sent) return Promise.resolve();
   sent = key;
@@ -60,7 +59,7 @@ export function forgetHold() {
   if (timer !== null) clearTimeout(timer);
   timer = null;
   holds.clear();
-  sent = "null";
+  sent = "[]";
 }
 
 /** Report the open editor's text (or `null` when none is open) to the core. `view` is where
@@ -109,16 +108,20 @@ function placeOf(edit: UnsavedEdit): Route {
   return { name: "case", id: edit.case_id, view: edit.view || "report" };
 }
 
-/** After entering: the text that was being edited when the vault locked. */
+/** After entering: the texts that were being edited when the vault locked, one after another. */
 export function UnsavedNotice() {
   const { go } = useApp();
-  const [edit, setEdit] = useState<UnsavedEdit | null>(null);
+  const [kept, setKept] = useState<UnsavedEdit[]>([]);
   const [copied, setCopied] = useState(false);
   useEffect(() => {
-    ipc.takeUnsaved().then(setEdit, () => undefined);
+    ipc.takeUnsaved().then((list) => setKept(list ?? []), () => undefined);
   }, []);
+  const edit = kept[0];
   if (!edit) return null;
-  const close = () => setEdit(null);
+  const next = () => {
+    setCopied(false);
+    setKept((k) => k.slice(1));
+  };
   async function copy() {
     if (!edit) return;
     try {
@@ -128,13 +131,14 @@ export function UnsavedNotice() {
       setCopied(false);
     }
   }
+  const more = kept.length - 1;
   return (
-    <Dialog title="טקסט שלא נשמר לפני הנעילה" subtitle={edit.place} onClose={close}
+    <Dialog title="טקסט שלא נשמר לפני הנעילה" subtitle={edit.place} onClose={() => setKept([])}
       footer={
         <div className="row">
           <button type="button" className="btn btn-primary" onClick={() => void copy()}>{copied ? "הועתק" : "העתקת הטקסט"}</button>
-          <button type="button" className="btn" onClick={() => { close(); go(placeOf(edit)); }}>מעבר לתיק</button>
-          <button type="button" className="btn" onClick={close}>סגירה</button>
+          <button type="button" className="btn" onClick={() => { setKept([]); go(placeOf(edit)); }}>מעבר לתיק</button>
+          <button type="button" className="btn" onClick={next}>{more > 0 ? `הבא (עוד ${more})` : "סגירה"}</button>
         </div>
       }>
       <p className="muted small">
