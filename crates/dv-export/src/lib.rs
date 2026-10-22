@@ -133,6 +133,14 @@ impl Report {
                     c.zeroize();
                 }
             }
+            for ch in &mut t.charts {
+                ch.title.zeroize();
+                ch.note.zeroize();
+                for b in &mut ch.bars {
+                    b.label.zeroize();
+                    b.value = 0.0;
+                }
+            }
         }
         for x in &mut self.signature {
             x.zeroize();

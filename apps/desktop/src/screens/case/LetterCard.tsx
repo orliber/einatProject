@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../../App";
-import { STALE_EDIT } from "../../i18n/he";
+import { STALE_EDIT_KEPT } from "../../i18n/he";
 import { ipc, type ParagraphView, type Prepared } from "../../ipc/client";
 import { ReviewDialog } from "../../components/ReviewDialog";
 import { ExportDialog } from "../../components/ExportDialog";
@@ -118,7 +118,7 @@ export function LetterCard({ api }: { api: CaseApi }) {
               <button type="button" className="btn btn-primary btn-small"
                 onClick={() => {
                   const text = editBox.current?.value() ?? editing.text;
-                  void act(async () => { if (await ipc.editParagraph(api.caseId, editing.id, text, editing.original ?? null)) notify(STALE_EDIT); setEditing(null); await load(); });
+                  void act(async () => { if (await ipc.editParagraph(api.caseId, editing.id, text, editing.original ?? null)) notify(STALE_EDIT_KEPT); setEditing(null); await load(); });
                 }}>שמירה</button>
               <button type="button" className="btn btn-small" onClick={() => setEditing(null)}>ביטול</button>
             </div>

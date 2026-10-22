@@ -236,6 +236,11 @@ pub struct BackupWritten {
 /// connection to each, its read transaction begun (the vault is in WAL mode, so each keeps
 /// seeing the vault as it was while the vault goes on writing). Exporting it, the slow part on
 /// a large vault, happens in the job. Dropped unexported (a lock), its scratch folder goes.
+///
+/// The three read transactions agree with each other only because they are begun together
+/// under the core's lock (`Vault::begin_backup` takes `&mut self`) and the vault owns the only
+/// connections that write. While a snapshot waits for its job it holds three keyed connections
+/// and its open reads keep the WAL from being checkpointed past them.
 struct Snapshot {
     scratch: std::path::PathBuf,
     conns: Vec<(&'static str, Connection)>,

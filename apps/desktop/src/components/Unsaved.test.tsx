@@ -118,6 +118,25 @@ describe("an edit open when the vault locks", () => {
     expect(screen.queryByDisplayValue("טקסט בדוי ב")).toBeNull();
   });
 
+  it("Escape or going to the first case still offers the next kept text", async () => {
+    mockIPC((cmd) => (cmd === "take_unsaved"
+      ? [
+          { case_id: "c1", place: "פסקה בתיק א", view: "report", text: "טקסט בדוי א" },
+          { case_id: "c2", place: "פסקה בתיק ב", view: "report", text: "טקסט בדוי ב" },
+          { case_id: "c3", place: "פסקה בתיק ג", view: "report", text: "טקסט בדוי ג" },
+        ]
+      : null));
+    const go = vi.fn();
+    const api: AppApi = { status: status(), go, refresh: vi.fn(), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn() };
+    render(<AppContext.Provider value={api}><UnsavedNotice /></AppContext.Provider>);
+    expect(await screen.findByDisplayValue("טקסט בדוי א")).toBeInTheDocument();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    expect(await screen.findByDisplayValue("טקסט בדוי ב")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "מעבר לתיק" }));
+    expect(go).toHaveBeenCalledWith({ name: "case", id: "c2", view: "report" });
+    expect(screen.getByDisplayValue("טקסט בדוי ג")).toBeInTheDocument();
+  });
+
   it("is offered back once after entering", async () => {
     mockIPC((cmd) => (cmd === "take_unsaved" ? [{ case_id: "c1", place: "פסקה בסעיף \"רקע\"", text: "הטקסט שלא נשמר" }] : null));
     const go = vi.fn();

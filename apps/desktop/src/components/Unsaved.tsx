@@ -114,7 +114,8 @@ export function UnsavedNotice() {
   const [kept, setKept] = useState<UnsavedEdit[]>([]);
   const [copied, setCopied] = useState(false);
   useEffect(() => {
-    ipc.takeUnsaved().then((list) => setKept(list ?? []), () => undefined);
+    // Added, not replaced: under StrictMode the effect runs twice, and the second take is empty.
+    ipc.takeUnsaved().then((list) => setKept((k) => [...k, ...(list ?? [])]), () => undefined);
   }, []);
   const edit = kept[0];
   if (!edit) return null;
@@ -133,11 +134,11 @@ export function UnsavedNotice() {
   }
   const more = kept.length - 1;
   return (
-    <Dialog title="טקסט שלא נשמר לפני הנעילה" subtitle={edit.place} onClose={() => setKept([])}
+    <Dialog title="טקסט שלא נשמר לפני הנעילה" subtitle={edit.place} onClose={next}
       footer={
         <div className="row">
           <button type="button" className="btn btn-primary" onClick={() => void copy()}>{copied ? "הועתק" : "העתקת הטקסט"}</button>
-          <button type="button" className="btn" onClick={() => { setKept([]); go(placeOf(edit)); }}>מעבר לתיק</button>
+          <button type="button" className="btn" onClick={() => { next(); go(placeOf(edit)); }}>מעבר לתיק</button>
           <button type="button" className="btn" onClick={next}>{more > 0 ? `הבא (עוד ${more})` : "סגירה"}</button>
         </div>
       }>

@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useApp } from "../../App";
-import { STALE_EDIT } from "../../i18n/he";
+import { STALE_EDIT_KEPT } from "../../i18n/he";
 import { ipc, type ExportCheck, type ReportSettings } from "../../ipc/client";
 import type { ParagraphCheck } from "../../ipc/generated/ParagraphCheck";
 import { getKept, useKept } from "../../kept";
@@ -84,7 +84,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
     const text = editBox.current?.value() ?? editing.text;
     setError(null);
     try {
-      if (await ipc.editParagraph(caseId, editing.id, text, editing.original ?? null)) notify(STALE_EDIT);
+      if (await ipc.editParagraph(caseId, editing.id, text, editing.original ?? null)) notify(STALE_EDIT_KEPT);
       setEditing(null);
       await reload();
     } catch (e) {

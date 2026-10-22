@@ -4,6 +4,8 @@ import type { Role } from "../ipc/generated/Role";
 
 /** A paragraph saved from an editor opened on an older wording (round 51). */
 export const STALE_EDIT = "הפסקה השתנתה בזמן שהעורך היה פתוח. הנוסח שלך נשמר, והנוסח האחר נמצא ב\"גרסאות קודמות\".";
+/** The same, where the screen has no "גרסאות קודמות" button (letters, the finish screen). */
+export const STALE_EDIT_KEPT = "הפסקה השתנתה בזמן שהעורך היה פתוח. הנוסח שלך נשמר, והנוסח האחר נשמר כגרסה קודמת של הפסקה.";
 
 export const he = {
   appName: "כספת האבחון",
