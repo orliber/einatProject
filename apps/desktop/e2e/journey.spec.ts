@@ -173,7 +173,7 @@ test("the style page asks about one thing at a time", async ({ page }) => {
   await page.getByRole("button", { name: /ובניית הפרופיל/ }).click();
   const queue = page.getByRole("region", { name: "לאשר אחד-אחד" });
   await expect(queue).toContainText(/1 מתוך \d/);
-  await expect(page.getByRole("list", { name: "במספרים" })).toBeVisible();
+  await expect(page.getByRole("list", { name: "המסלול" })).toBeVisible();
   await expectAccessible(page);
   await queue.getByRole("button", { name: "להשתמש בזה" }).click();
   await expect(queue).toContainText(/2 מתוך \d/);

@@ -283,7 +283,37 @@ fn style_locally(request: &str, synthesis: bool) -> Value {
             "kind": "argument",
             "text": "מצב הדגמה: קודם היכולת, אחר כך הקושי אחרי «עם זאת», ואז דוגמה מהתצפית."
         }));
-        return json!({ "items": items });
+        // One chain from a finding to a conclusion (D-091), and one about a pattern of
+        // scores when the request names any.
+        let mut inferences = vec![json!({
+            "section": "general",
+            "finding_kind": "behavior",
+            "pattern": "",
+            "finding": "מצב הדגמה: הילד עוזב משימה באמצע וחוזר אליה רק אחרי תיווך",
+            "conclusion": "קושי בהתמדה, שנקבע כשהוא חוזר גם בדיווח הגן",
+            "wording": "ניכר קושי ב{תחום}, הבא לידי ביטוי ב{דוגמה}",
+            "recommendation": "תיווך של מבוגר בתחילת משימה"
+        })];
+        if let Some(key) = request
+            .lines()
+            .find_map(|l| {
+                l.strip_prefix("- ")
+                    .and_then(|r| r.split_once(": "))
+                    .map(|(k, _)| k)
+            })
+            .filter(|k| dv_domain::pattern_label(k).is_some())
+        {
+            inferences.push(json!({
+                "section": "cognitive",
+                "finding_kind": "scores",
+                "pattern": key,
+                "finding": "מצב הדגמה: הדפוס הזה בתוצאות",
+                "conclusion": "כאן תופיע המסקנה שלך מהדפוס, כפי שעולה מהדוחות",
+                "wording": "הפער בין {מדד} ל{מדד} מעיד על {מסקנה}",
+                "recommendation": ""
+            }));
+        }
+        return json!({ "items": items, "inferences": inferences });
     }
     // Merge the analyses: an item seen in several reports counts once, with its support.
     let mut merged: Vec<(String, String, String, u32)> = Vec::new();
@@ -304,10 +334,27 @@ fn style_locally(request: &str, synthesis: bool) -> Value {
             None => merged.push((section.to_owned(), kind.to_owned(), text.to_owned(), 1)),
         }
     }
-    let mut items: Vec<Value> = merged
-        .into_iter()
-        .map(|(s, k, t, n)| json!({ "section": s, "kind": k, "text": t, "support": n }))
-        .collect();
+    let mut inferences: Vec<Value> = Vec::new();
+    let mut items: Vec<Value> = Vec::new();
+    for (s, k, t, n) in merged {
+        if k == "inference" {
+            inferences.push(json!({
+                "section": s,
+                "finding_kind": "behavior",
+                "pattern": "",
+                "finding": "מצב הדגמה: ממצא שחוזר בדוחות",
+                "conclusion": t
+                    .split(crate::style::INFERENCE_SEP)
+                    .find_map(|l| l.strip_prefix("מסקנה: "))
+                    .unwrap_or("מצב הדגמה: המסקנה שלך"),
+                "wording": "ניכר {מסקנה}",
+                "recommendation": "",
+                "support": n
+            }));
+        } else {
+            items.push(json!({ "section": s, "kind": k, "text": t, "support": n }));
+        }
+    }
     for section in sections {
         items.push(json!({
             "section": section,
@@ -316,7 +363,7 @@ fn style_locally(request: &str, synthesis: bool) -> Value {
             "support": 1
         }));
     }
-    json!({ "items": items })
+    json!({ "items": items, "inferences": inferences })
 }
 
 /// `(section, text)` of every excerpt in a style-analysis request.
@@ -580,6 +627,7 @@ mod tests {
                 excerpt("cognitive", "[ילד] הציג תפקוד ממוצע. עם זאת, ניכר קושי."),
                 excerpt("summary", "כך לדוגמא, [ילד] מגיב לתיווך."),
             ],
+            &[],
             "n",
         );
         let (one, dropped) = parse_style_analysis(&respond(&body), &keys).unwrap();

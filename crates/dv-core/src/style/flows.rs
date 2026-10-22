@@ -334,6 +334,7 @@ fn the_profile_is_built_approved_and_used_in_drafting() {
         enabled: true,
         origin: dv_ai::StyleOrigin::Manual,
         support: 0,
+        pattern: None,
     });
     core.save_style_draft(edited).unwrap();
     let v2 = core.approve_style_draft().unwrap();
@@ -398,6 +399,7 @@ fn an_item_holding_a_later_childs_name_is_left_out_of_that_case_only() {
                 enabled: true,
                 origin: dv_ai::StyleOrigin::Manual,
                 support: 0,
+                pattern: None,
             },
             dv_ai::StyleItem {
                 id: String::new(),
@@ -407,6 +409,7 @@ fn an_item_holding_a_later_childs_name_is_left_out_of_that_case_only() {
                 enabled: true,
                 origin: dv_ai::StyleOrigin::Manual,
                 support: 0,
+                pattern: None,
             },
         ],
     };
@@ -445,6 +448,7 @@ fn her_own_items_with_a_name_or_a_tag_are_refused() {
                 enabled: true,
                 origin: dv_ai::StyleOrigin::Manual,
                 support: 0,
+                pattern: None,
             }],
         };
         assert!(
