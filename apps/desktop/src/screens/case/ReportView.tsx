@@ -403,8 +403,9 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
     await act(async () => {
       // All the text deleted and saved: the paragraph goes away.
       if (id && !text.trim()) await ipc.rejectParagraph(caseId, id);
-      else if (id && (await ipc.editParagraph(caseId, id, text, editing.original))) notify(STALE_EDIT);
-      else await ipc.addOwnParagraph(caseId, s.key, text, at ?? "end");
+      else if (id) {
+        if (await ipc.editParagraph(caseId, id, text, editing.original)) notify(STALE_EDIT);
+      } else await ipc.addOwnParagraph(caseId, s.key, text, at ?? "end");
       close();
     });
   }
