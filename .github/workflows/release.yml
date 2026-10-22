@@ -58,15 +58,40 @@ jobs:
         id: what
         run: |
           fail() { echo "::error::$*"; exit 1; }
-          v="$(scripts/release-ready.sh)"
           sha="$GITHUB_SHA"
+          if [[ "$REHEARSAL" != "true" ]]; then
+            git merge-base --is-ancestor "$sha" origin/main \
+              || fail "only a commit on main is released (this is $GITHUB_REF_NAME). A rehearsal can run anywhere."
+          fi
+          # "Run workflow" on main releases the newest commit of main whose CI is green, so its
+          # installer is built and checked. A merge whose CI is still running goes in the next
+          # release instead of holding this one. A tag releases exactly its own commit.
+          if [[ "$GITHUB_REF_TYPE" != "tag" && "$REHEARSAL" != "true" ]]; then
+            sha=""
+            for c in $(git rev-list --first-parent -n 30 "$GITHUB_SHA"); do
+              # A failed lookup stops the release: read as "not green", it would quietly pick an
+              # older commit and publish it under the same version.
+              green="$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$c" --limit 20 --json event,conclusion \
+                -q '.[] | select(.event != "pull_request" and .conclusion == "success") | .event')" \
+                || fail "could not read the CI runs of $c; nothing was published. Run this again."
+              if [[ -n "$green" ]]; then sha="$c"; break; fi
+            done
+            [[ -n "$sha" ]] || fail "no commit among the last 30 on main has green CI yet. CI on main builds the installer after every merge (about 40 minutes): wait for it, then run this again."
+            if [[ "$sha" != "$GITHUB_SHA" ]]; then
+              echo "::notice::main is at $GITHUB_SHA, whose CI is not green yet; releasing $sha, the newest commit with a checked installer"
+              git checkout -q "$sha"
+            fi
+          fi
+          v="$(scripts/release-ready.sh)"
           if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$v" ]]; then
             fail "the tag is $GITHUB_REF_NAME but the version in the code is $v"
           fi
           if [[ "$REHEARSAL" != "true" ]]; then
-            git merge-base --is-ancestor "$sha" origin/main \
-              || fail "only a commit on main is released (this is $GITHUB_REF_NAME). A rehearsal can run anywhere."
             if gh release view "v$v" -R "$RELEASES_REPO" >/dev/null 2>&1; then
+              # Right after a version PR is merged, its CI is still running and the newest green
+              # commit is the version already out: wait for main, don't bump again.
+              [[ "$sha" == "$GITHUB_SHA" ]] \
+                || fail "version $v is already published, and main's newest commit ($GITHUB_SHA) is still in CI. Wait for CI on main to be green, then run this again."
               fail "version $v is already published in $RELEASES_REPO: a new version needs a new number (scripts/release.sh bump)"
             fi
           fi

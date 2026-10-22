@@ -207,7 +207,7 @@ describe("main screens", () => {
     expect(within(dialog).getByText("הקובץ נפתח בלי סיסמה: כל מי שיקבל אותו יוכל לקרוא אותו.")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("radio", { name: /PDF להדפסה בלבד/ }));
     await user.click(within(dialog).getByRole("button", { name: "הפקת הדוח" }));
-    await waitFor(() => expect(exported).toEqual([["export_pdf", { caseId: expect.any(String), password: null }]]));
+    await waitFor(() => expect(exported).toEqual([["export_pdf", { caseId: expect.any(String), password: null, parents: null }]]));
     expect(await screen.findByRole("dialog", { name: "הדוח מוכן" })).not.toHaveTextContent(/סיסמה/);
   });
 

@@ -35,6 +35,8 @@ import type { PingResponse } from "./generated/PingResponse";
 import type { Prepared } from "./generated/Prepared";
 import type { ReportSettings } from "./generated/ReportSettings";
 import type { TemplateView } from "./generated/TemplateView";
+import type { LogoView } from "./generated/LogoView";
+import type { ParentsOptions } from "./generated/ParentsOptions";
 import type { ParagraphView } from "./generated/ParagraphView";
 import type { SimilarParagraph } from "./generated/SimilarParagraph";
 import type { LibraryLine } from "./generated/LibraryLine";
@@ -77,6 +79,9 @@ import type { StyleProfile } from "./generated/StyleProfile";
 import type { StyleProfileView } from "./generated/StyleProfileView";
 import type { StyleSourceView } from "./generated/StyleSourceView";
 import type { StyleSuggestion } from "./generated/StyleSuggestion";
+
+/** The largest logo the core takes (`dv_export::MAX_LOGO_BYTES`). */
+export const LOGO_MAX_BYTES = 1024 * 1024;
 
 /** Every failure reaches the UI as a UiError with a Hebrew message and its next step (F6). */
 export function asUiError(e: unknown): UiError {
@@ -197,6 +202,17 @@ export const ipc = {
   },
   clearReportTemplate: () => run("clear_report_template"),
   reportTemplate: () => call("report_template"),
+  /** Her logo (round 55): a PNG or JPEG of at most 1 MB, the file's bytes as the raw body. */
+  setReportLogo: async (file: File): Promise<LogoView> => {
+    // Refused before the file is read, the way the core refuses it (1 MB, `MAX_LOGO_BYTES`).
+    if (file.size > LOGO_MAX_BYTES) {
+      throw { code: "refused", message: "התמונה גדולה מ-1MB. שומרים אותה בגודל קטן יותר ובוחרים שוב.", details: [], action: { kind: "dismiss" } } satisfies UiError;
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    return await call("set_report_logo", bytes);
+  },
+  clearReportLogo: () => run("clear_report_logo"),
+  reportLogo: () => call("report_logo"),
 
   listCases: () => call("list_cases"),
   createCase: (meta: CaseMeta, identities: IdentityInput[]) => call("create_case", { meta, identities }),
@@ -337,9 +353,12 @@ export const ipc = {
   sendConsult: (approvalId: string) => call("send_consult", { approvalId }),
 
   checkExport: (caseId: string) => call("check_export", { caseId }),
-  exportReport: (caseId: string, password: string | null) => call("export_report", { caseId, password }),
+  /** With `parents`, the parents' version (round 55, D-095): built here, nothing is sent. */
+  exportReport: (caseId: string, password: string | null, parents: ParentsOptions | null = null) =>
+    call("export_report", { caseId, password, parents }),
   /** EX-3: a print-only PDF (cannot be changed; opens without a password, D-081). */
-  exportPdf: (caseId: string, password: string | null) => call("export_pdf", { caseId, password }),
+  exportPdf: (caseId: string, password: string | null, parents: ParentsOptions | null = null) =>
+    call("export_pdf", { caseId, password, parents }),
   /** When this vault exported exactly this PDF, or `null` (changed, or not made here). */
   checkOriginal: async (file: File): Promise<number | null> => {
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -496,6 +515,8 @@ export type {
   Prepared,
   ReportSettings,
   TemplateView,
+  LogoView,
+  ParentsOptions,
   FollowUpView,
   ScoreSheet,
   SectionResult,

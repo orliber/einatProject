@@ -433,6 +433,8 @@ pub struct ExportJob {
     report: WipedReport,
     check: crate::ExportCheck,
     format: ExportFormat,
+    /// The parents' version (round 55), for the audit log.
+    parents: bool,
 }
 
 /// The file's bytes (or why not), waiting for [`Core::finish_export`].
@@ -442,6 +444,7 @@ pub struct Exported {
     check: crate::ExportCheck,
     pdf: bool,
     protected: bool,
+    parents: bool,
     /// The report as a file, wiped if it is dropped unsaved (it landed after a lock).
     bytes: Result<Zeroizing<Vec<u8>>, CoreError>,
 }
@@ -452,9 +455,9 @@ pub(crate) fn export_error(e: dv_export::ExportError) -> CoreError {
             "סיסמה לקובץ צריכה להיות באורך {} תווים לפחות.",
             dv_export::MIN_PASSWORD_CHARS
         )),
-        dv_export::ExportError::Template(m) | dv_export::ExportError::Pdf(m) => {
-            CoreError::Refused(m)
-        }
+        dv_export::ExportError::Template(m)
+        | dv_export::ExportError::Pdf(m)
+        | dv_export::ExportError::Image(m) => CoreError::Refused(m),
         other => CoreError::Internal(other.to_string()),
     }
 }
@@ -502,6 +505,7 @@ impl ExportJob {
             check: self.check,
             pdf,
             protected,
+            parents: self.parents,
             bytes,
         }
     }
@@ -1050,8 +1054,16 @@ impl Core {
     // ------------------------------------------------------------ export
 
     /// The report from approved paragraphs, with real names, and what stops the export.
-    fn export_job(&mut self, case_id: &str, format: ExportFormat) -> Result<ExportJob, CoreError> {
-        let (report, check) = self.build_report(case_id)?;
+    fn export_job(
+        &mut self,
+        case_id: &str,
+        format: ExportFormat,
+        parents: Option<crate::ParentsOptions>,
+    ) -> Result<ExportJob, CoreError> {
+        let (report, check) = match parents {
+            Some(options) => self.build_parents_report(case_id, options)?,
+            None => self.build_report(case_id)?,
+        };
         if !check.blocking.is_empty() {
             return Err(CoreError::Refused(check.blocking.join(" · ")));
         }
@@ -1062,6 +1074,7 @@ impl Core {
             report: WipedReport(report),
             check,
             format,
+            parents: parents.is_some(),
         })
     }
 
@@ -1072,6 +1085,16 @@ impl Core {
         case_id: &str,
         password: Option<&str>,
     ) -> Result<ExportJob, CoreError> {
+        self.begin_export_report_as(case_id, password, None)
+    }
+
+    /// The Word file, full or (with `parents`) the parents' version (round 55, D-095).
+    pub fn begin_export_report_as(
+        &mut self,
+        case_id: &str,
+        password: Option<&str>,
+        parents: Option<crate::ParentsOptions>,
+    ) -> Result<ExportJob, CoreError> {
         let template = self.template_bytes()?;
         self.export_job(
             case_id,
@@ -1079,6 +1102,7 @@ impl Core {
                 template,
                 password: password.map(|p| Zeroizing::new(p.to_owned())),
             },
+            parents,
         )
     }
 
@@ -1090,6 +1114,16 @@ impl Core {
         case_id: &str,
         password: Option<&str>,
     ) -> Result<ExportJob, CoreError> {
+        self.begin_export_pdf_as(case_id, password, None)
+    }
+
+    /// The locked PDF, full or (with `parents`) the parents' version (round 55, D-095).
+    pub fn begin_export_pdf_as(
+        &mut self,
+        case_id: &str,
+        password: Option<&str>,
+        parents: Option<crate::ParentsOptions>,
+    ) -> Result<ExportJob, CoreError> {
         self.export_job(
             case_id,
             ExportFormat::Pdf {
@@ -1097,6 +1131,7 @@ impl Core {
                     .filter(|p| !p.is_empty())
                     .map(|p| Zeroizing::new(p.to_owned())),
             },
+            parents,
         )
     }
 
@@ -1116,9 +1151,14 @@ impl Core {
                 "pdf": true,
                 "sha256": dv_vault::crypto::sha256_hex(&bytes),
                 "sections": sections,
+                "parents": exported.parents,
             })
         } else {
-            serde_json::json!({ "protected": exported.protected, "sections": sections })
+            serde_json::json!({
+                "protected": exported.protected,
+                "sections": sections,
+                "parents": exported.parents,
+            })
         };
         self.vault_mut()?
             .record(dv_vault::AuditEvent::Export, Some(&exported.case_id), &meta)?;

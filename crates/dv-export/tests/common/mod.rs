@@ -47,6 +47,7 @@ pub fn report_with(f: impl Fn(&str) -> String) -> Report {
         signature: vec![f("signature")],
         confidentiality: f("confidentiality"),
         font: f("font"),
+        ..Report::default()
     }
 }
 

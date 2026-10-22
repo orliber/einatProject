@@ -62,6 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         signature: vec!["בברכה,".into(), "פסיכולוגית התפתחותית מומחית (בדוי)".into(), "מס' רישיון: לדוגמה בלבד".into()],
         confidentiality: "חסוי – מידע רפואי. מיועד להורים ולגורמים שההורים אישרו בלבד.".into(),
         font: "David".into(),
+        ..Report::default()
     };
     let docx = render(&report)?;
     std::fs::write(dir.join("sample-report.docx"), &docx)?;

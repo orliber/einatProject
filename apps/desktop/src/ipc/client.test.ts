@@ -46,7 +46,7 @@ describe("ipc", () => {
     await ipc.restoreAutoHidden("c1", "חן", "[אדם_1]");
     expect(mocked).toHaveBeenLastCalledWith("restore_auto_hidden", { caseId: "c1", token: "חן", tag: "[אדם_1]" });
     await ipc.exportReport("c1", null);
-    expect(mocked).toHaveBeenLastCalledWith("export_report", { caseId: "c1", password: null });
+    expect(mocked).toHaveBeenLastCalledWith("export_report", { caseId: "c1", password: null, parents: null });
     await ipc.setApiKey("anthropic", "k");
     expect(mocked).toHaveBeenLastCalledWith("set_api_key", { provider: "anthropic", key: "k", retentionAck: false });
   });

@@ -45,13 +45,15 @@ pub(crate) fn export_dir(app: &tauri::AppHandle) -> Result<PathBuf, UiError> {
     })
 }
 
-/// Write the report into the Downloads folder and return where it was saved.
+/// Write the report into the Downloads folder and return where it was saved. With `parents`,
+/// the parents' version (round 55, D-095).
 #[tauri::command]
 pub(crate) async fn export_report(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     case_id: String,
     password: Option<String>,
+    parents: Option<ParentsOptions>,
 ) -> Res<String> {
     let dir = export_dir(&app)?;
     let password = password
@@ -60,7 +62,9 @@ pub(crate) async fn export_report(
     // Rendering, encrypting and writing the file run with the core free (F2).
     let (bytes, check) = off_lock(
         &state,
-        move |c| c.begin_export_report(&case_id, password.as_deref().map(String::as_str)),
+        move |c| {
+            c.begin_export_report_as(&case_id, password.as_deref().map(String::as_str), parents)
+        },
         |job| job.run(),
         |c, exported| c.finish_export(exported),
     )
@@ -86,6 +90,7 @@ pub(crate) async fn export_pdf(
     state: tauri::State<'_, AppState>,
     case_id: String,
     password: Option<String>,
+    parents: Option<ParentsOptions>,
 ) -> Res<String> {
     let dir = export_dir(&app)?;
     let password = password
@@ -93,7 +98,7 @@ pub(crate) async fn export_pdf(
         .map(zeroize::Zeroizing::new);
     let (bytes, check) = off_lock(
         &state,
-        move |c| c.begin_export_pdf(&case_id, password.as_deref().map(String::as_str)),
+        move |c| c.begin_export_pdf_as(&case_id, password.as_deref().map(String::as_str), parents),
         |job| job.run(),
         |c, exported| c.finish_export(exported),
     )
