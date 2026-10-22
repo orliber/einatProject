@@ -1,9 +1,11 @@
-//! The worker contained on a Mac (D-101): the system's own sandbox (`sandbox-exec`, the
-//! Seatbelt profile language every Apple app runs under), with a profile that denies
-//! everything by default and then allows only what a reader needs to start and run:
+//! The worker contained on a Mac (D-101): the system's own sandbox (Seatbelt, the kernel
+//! sandbox every Apple app runs in, here through `sandbox-exec` and its profile language),
+//! with a profile that denies everything by default and then allows only what a reader needs
+//! to start and run:
 //!
 //! * no network at all (nothing allows it), no writing anywhere but `/dev/null`, no other
-//!   process (no fork, and exec only of the worker itself), no talking to system services;
+//!   process (no fork, and exec only of the worker itself), no talking to system services,
+//!   and only the system values in [`SYSCTL_NAMES`] (none about other processes);
 //! * reading only the system's own libraries, the worker program's folder and the folders in
 //!   [`Policy::read_dirs`]. Her home folder, the vault and every other file stay unreadable;
 //!   only names and sizes can be looked up (dyld needs that to find its libraries).
@@ -11,7 +13,9 @@
 //! The process is started through `/usr/bin/sandbox-exec` by its full path, with the profile
 //! on the command line (it holds paths only, never anything from a document). No `unsafe`,
 //! no new dependency. A memory ceiling, as the Windows job object sets, has no working
-//! equivalent on macOS (`RLIMIT_AS` is not enforced); the time limit still ends the worker.
+//! equivalent on macOS (`RLIMIT_AS` is not enforced); the app's time limit still ends the
+//! worker, and the worker ends itself with the app and within a CPU limit (the app's
+//! `mac_platform::contain_worker`). Residual risk in THREAT_MODEL.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -32,6 +36,36 @@ const SYSTEM_READ: &[&str] = &[
     "/private/var/db/timezone",
     "/System/Volumes/Preboot/Cryptexes",
 ];
+
+/// The system values a reader may look up: processors, memory and page sizes, and the
+/// system's version (the C library, the memory allocator and the ONNX runtime read these).
+const SYSCTL_NAMES: &[&str] = &[
+    "hw.ncpu",
+    "hw.activecpu",
+    "hw.logicalcpu",
+    "hw.logicalcpu_max",
+    "hw.physicalcpu",
+    "hw.physicalcpu_max",
+    "hw.memsize",
+    "hw.pagesize",
+    "hw.cachelinesize",
+    "hw.l1dcachesize",
+    "hw.l2cachesize",
+    "hw.cputype",
+    "hw.cpusubtype",
+    "hw.cpufamily",
+    "hw.nperflevels",
+    "kern.osversion",
+    "kern.osrelease",
+    "kern.ostype",
+    "kern.osproductversion",
+    "kern.osvariant_status",
+    "kern.secure_kernel",
+    "sysctl.proc_translated",
+    "vm.pagesize",
+];
+/// The same by prefix: processor features and per-core-type sizes.
+const SYSCTL_PREFIXES: &[&str] = &["hw.optional.", "hw.perflevel", "machdep.cpu."];
 
 /// The profile for `exe`, which may also read `policy.read_dirs`.
 pub fn profile(exe: &Path, policy: &Policy) -> io::Result<String> {
@@ -66,7 +100,16 @@ pub fn profile(exe: &Path, policy: &Policy) -> io::Result<String> {
     // The data volume is also mounted under /System (her home, the vault): never readable,
     // whatever path reaches it. In this language the last matching rule wins.
     p.push_str("(deny file-read* file-map-executable (subpath \"/System/Volumes/Data\"))\n");
-    p.push_str("(allow sysctl-read)\n");
+    // Only what a program reads about the machine to size itself, never about other
+    // processes (their command lines could carry a name into the extracted text).
+    p.push_str("(allow sysctl-read");
+    for name in SYSCTL_NAMES {
+        p.push_str(&format!(" (sysctl-name \"{name}\")"));
+    }
+    for prefix in SYSCTL_PREFIXES {
+        p.push_str(&format!(" (sysctl-name-prefix \"{prefix}\")"));
+    }
+    p.push_str(")\n");
     p.push_str("(allow signal (target self))\n");
     Ok(p)
 }
@@ -125,6 +168,8 @@ mod tests {
         assert!(!p.contains("network"), "{p}");
         assert!(!p.contains("process-fork"), "{p}");
         assert!(!p.contains("mach-lookup"), "{p}");
+        assert!(!p.contains("(allow sysctl-read)"), "{p}");
+        assert!(!p.contains("kern.proc"), "{p}");
         let real = std::fs::canonicalize(dir.path()).unwrap();
         assert!(
             p.contains(&format!("(subpath \"{}\")", real.display())),

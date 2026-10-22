@@ -191,5 +191,12 @@ mod contained_on_a_mac {
             &Policy::default(),
         );
         assert_eq!(out, "denied\n");
+        // Nor replace itself with another program (`exec` is a builtin; with `execfail` a
+        // refused exec returns instead of ending the shell).
+        let out = bash(
+            "shopt -s execfail; exec /bin/echo started 2>/dev/null; echo denied",
+            &Policy::default(),
+        );
+        assert_eq!(out, "denied\n");
     }
 }

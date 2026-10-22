@@ -1,8 +1,9 @@
 name: CI
 
 # Pull requests run the fast checks once (not again for the branch push), and the macOS tests
-# (D-101: the Mac's protections run nowhere else). The installer builds (macOS counts 10x,
-# Windows 2x in Actions minutes) run on main and by hand only.
+# on every PR (D-101: the Mac's protections run nowhere else; macOS counts 10x in Actions
+# minutes, a cost taken on purpose). The installer builds (both platforms) run on main and by
+# hand only.
 on:
   push:
     branches: [main]
@@ -15,7 +16,8 @@ on:
         default: false
 
 # Least privilege: read the code, nothing else. The only secrets are the Google sign-in pair
-# the Windows installer carries (D-041), and only in the installer job, never on a PR.
+# the installers carry (D-041), and only in the steps that build the Windows installer and the
+# Mac disk image, never on a PR.
 # Every action is pinned to a commit (STANDARDS 5.8); Dependabot keeps the pins current.
 permissions:
   contents: read
@@ -164,7 +166,8 @@ jobs:
           security unlock-keychain -p dv-ci dv-ci.keychain
           security list-keychains -d user -s dv-ci.keychain
           security default-keychain -d user -s dv-ci.keychain
-      - run: cargo test --release -p dv-vault -p dv-egress -p dv-ingest -p dv-sandbox
+      # dv-ner: the name model's runtime (ONNX) as a worker inside the sandbox.
+      - run: cargo test --release -p dv-vault -p dv-egress -p dv-ingest -p dv-sandbox -p dv-ner
       - name: First run (create, close, open again; the real Argon2 cost)
         run: cargo test --release -p dv-core --test first_run -- --ignored
       - name: Binding, Google and updates in the core
@@ -292,10 +295,6 @@ jobs:
     # here: minutes, and nothing new to fail. Also "Run workflow" on any branch.
     if: github.event_name != 'pull_request'
     runs-on: windows-latest
-    env:
-      # Forgot password → Google (D-041). Unset: the option is simply not offered.
-      DV_GOOGLE_CLIENT_ID: ${{ secrets.DV_GOOGLE_CLIENT_ID }}
-      DV_GOOGLE_CLIENT_SECRET: ${{ secrets.DV_GOOGLE_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -351,6 +350,10 @@ jobs:
       # or the installed app cannot start (bundle-fips.ps1).
       - name: The program and its FIPS module
         shell: pwsh
+        # Forgot password → Google (D-041), built in. Unset: the option is simply not offered.
+        env:
+          DV_GOOGLE_CLIENT_ID: ${{ secrets.DV_GOOGLE_CLIENT_ID }}
+          DV_GOOGLE_CLIENT_SECRET: ${{ secrets.DV_GOOGLE_CLIENT_SECRET }}
         run: |
           pnpm build
           if ($LASTEXITCODE -ne 0) { throw "UI build failed" }
@@ -361,6 +364,10 @@ jobs:
       - name: Build the one-click installer
         run: pnpm tauri build --bundles nsis --features fips --config src-tauri/tauri.fips.conf.json
         working-directory: apps/desktop
+        # Forgot password → Google (D-041), built in. Unset: the option is simply not offered.
+        env:
+          DV_GOOGLE_CLIENT_ID: ${{ secrets.DV_GOOGLE_CLIENT_ID }}
+          DV_GOOGLE_CLIENT_SECRET: ${{ secrets.DV_GOOGLE_CLIENT_SECRET }}
       - name: Fixed name and checksum
         shell: pwsh
         run: |
@@ -407,10 +414,6 @@ jobs:
     needs: [rust, supply-chain, fips, macos, frontend]
     if: github.event_name != 'pull_request'
     runs-on: macos-latest
-    env:
-      # Forgot password → Google (D-041). Unset: the option is simply not offered.
-      DV_GOOGLE_CLIENT_ID: ${{ secrets.DV_GOOGLE_CLIENT_ID }}
-      DV_GOOGLE_CLIENT_SECRET: ${{ secrets.DV_GOOGLE_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -441,6 +444,10 @@ jobs:
       - name: Build the disk image
         run: pnpm tauri build --bundles app,dmg --features fips
         working-directory: apps/desktop
+        # Forgot password → Google (D-041), built in. Unset: the option is simply not offered.
+        env:
+          DV_GOOGLE_CLIENT_ID: ${{ secrets.DV_GOOGLE_CLIENT_ID }}
+          DV_GOOGLE_CLIENT_SECRET: ${{ secrets.DV_GOOGLE_CLIENT_SECRET }}
       - name: Fixed name, checksum and build record
         run: |
           mkdir -p release-out

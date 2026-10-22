@@ -279,12 +279,10 @@ pub(crate) fn yours(items: &[SecurityItem], backup: Option<(bool, bool)>) -> Vec
         disk,
         if disk == "ok" {
             "פעילה."
+        } else if cfg!(target_os = "macos") {
+            "לא נמצאה. כדאי להפעיל אותה בהגדרות המערכת של ה-Mac."
         } else {
-            if cfg!(target_os = "macos") {
-                "לא נמצאה. כדאי להפעיל אותה בהגדרות המערכת של ה-Mac."
-            } else {
-                "לא נמצאה. כדאי להפעיל אותה ב-Windows."
-            }
+            "לא נמצאה. כדאי להפעיל אותה ב-Windows."
         },
     ));
     let cloud = detail_of(items, "cloud_folder");
