@@ -41,7 +41,7 @@
     position: absolute;
     inset: 0 0 auto 0;
     box-shadow: none;
-    border: 1px solid #000;
+    border: 1px solid var(--paper-ink);
   }
   body.printing-kit .kit .no-print {
     display: none !important;

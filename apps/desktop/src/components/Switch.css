@@ -46,7 +46,7 @@
   height: 22px;
   border-radius: 50%;
   background: var(--surface);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+  box-shadow: var(--shadow-knob);
   transition: inset-inline-start 160ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 .switch.on .switch-knob {

@@ -1,5 +1,11 @@
-/* Design tokens: the approved screens (docs/SCREENS.md, D-020 "elegant case file"). */
-:root {
+/* Design tokens: the approved screens (docs/SCREENS.md, D-020 "elegant case file").
+   Light and dark (D-101): the colours below are the light ones. The report page (`.a4`, and
+   the small page in the export dialog) declares them again for itself, so it stays white
+   paper with dark text in dark mode: it is a document. */
+:root,
+.a4,
+.mini-page {
+  color-scheme: light;
   --bg: #f4f5f3;
   --surface: #ffffff;
   --surface-alt: #fafbfa;
@@ -52,6 +58,11 @@
   --paper-faint: #737373;
   --paper-heading: #1f3a5f;
   --paper-sand: #e9e5dc;
+}
+
+:root {
+  --overlay: rgba(23, 40, 42, 0.55);
+  --shadow-knob: 0 1px 2px rgba(0, 0, 0, 0.2);
   --radius-sm: 8px;
   --radius-md: 10px;
   --radius-lg: 14px;
@@ -83,6 +94,100 @@
   --font-display: "Frank Ruhl Libre", "David", serif; /* the report text and the child's name only */
   --font-ui: "Assistant", "Segoe UI", system-ui, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+
+/* Dark (D-101): by the computer unless Settings say light or dark (`data-theme` on <html>).
+   On screen only: a printed page (the recovery kit) is always light. The two blocks hold the
+   same values. */
+@media screen and (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #111716;
+    --surface: #1a2221;
+    --surface-alt: #161d1c;
+    --sand: #212a29;
+    --ink: #e6ecea;
+    --ink-muted: #a9b5b2;
+    --ink-soft: #cdd6d4;
+    --primary: #7fc4ba;
+    --primary-hover: #9ad3ca;
+    --primary-soft: #1d3633;
+    --ok: #86c99d;
+    --ok-soft: #1b3324;
+    --warn: #e8b46a;
+    --warn-ink: #e8b46a;
+    --warn-soft: #34281a;
+    --warn-line: #6b4f27;
+    --warn-paper: #231d15;
+    --block: #f19a8b;
+    --block-soft: #3a1f1b;
+    --ink-faint: #85918f;
+    --on-primary: #0d1817;
+    --sand-strong: #2a3433;
+    --primary-line: #2f5450;
+    --block-line: #6e3a32;
+    --block-ink: #f6b8ad;
+    --block-strong: #ec8b7a;
+    --warn-dot: #e0a955;
+    --mark: #5a4520;
+    --line: #2c3634;
+    --line-strong: #3d4947;
+    --field-line: #56635f;
+    /* The case column is dark in both. Around the report page: */
+    --paper-sand: #262d2b;
+    --overlay: rgba(0, 0, 0, 0.6);
+    --shadow-knob: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --shadow-paper: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.5);
+    --shadow-2: 0 12px 32px rgba(0, 0, 0, 0.5);
+    --shadow-page: 0 1px 3px rgba(0, 0, 0, 0.5), 0 8px 28px rgba(0, 0, 0, 0.4);
+    --shadow-dialog: 0 24px 60px rgba(0, 0, 0, 0.6);
+  }
+}
+@media screen {
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #111716;
+    --surface: #1a2221;
+    --surface-alt: #161d1c;
+    --sand: #212a29;
+    --ink: #e6ecea;
+    --ink-muted: #a9b5b2;
+    --ink-soft: #cdd6d4;
+    --primary: #7fc4ba;
+    --primary-hover: #9ad3ca;
+    --primary-soft: #1d3633;
+    --ok: #86c99d;
+    --ok-soft: #1b3324;
+    --warn: #e8b46a;
+    --warn-ink: #e8b46a;
+    --warn-soft: #34281a;
+    --warn-line: #6b4f27;
+    --warn-paper: #231d15;
+    --block: #f19a8b;
+    --block-soft: #3a1f1b;
+    --ink-faint: #85918f;
+    --on-primary: #0d1817;
+    --sand-strong: #2a3433;
+    --primary-line: #2f5450;
+    --block-line: #6e3a32;
+    --block-ink: #f6b8ad;
+    --block-strong: #ec8b7a;
+    --warn-dot: #e0a955;
+    --mark: #5a4520;
+    --line: #2c3634;
+    --line-strong: #3d4947;
+    --field-line: #56635f;
+    /* The case column is dark in both. Around the report page: */
+    --paper-sand: #262d2b;
+    --overlay: rgba(0, 0, 0, 0.6);
+    --shadow-knob: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --shadow-paper: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.5);
+    --shadow-2: 0 12px 32px rgba(0, 0, 0, 0.5);
+    --shadow-page: 0 1px 3px rgba(0, 0, 0, 0.5), 0 8px 28px rgba(0, 0, 0, 0.4);
+    --shadow-dialog: 0 24px 60px rgba(0, 0, 0, 0.6);
+  }
 }
 
 /* Motion (styling only): strong ease-out curves, short durations. */

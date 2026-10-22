@@ -21,6 +21,7 @@ import { ipc, type LogoView, type ReportSettings, type TemplateView } from "../i
 import { PROVIDERS, providerOf } from "../ai";
 
 import { TEXT_SIZES, applyTextSize, readTextSize } from "../textSize";
+import { THEMES, applyTheme, readTheme } from "../theme";
 import { SectionModesSettings } from "../components/SectionModes";
 import { SETTINGS_PANES, type SettingsPane } from "./settingsPanes";
 import "./SettingsScreen.css";
@@ -58,6 +59,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
   const [original, setOriginal] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [textSize, setTextSize] = useState(readTextSize);
+  const [theme, setTheme] = useState(readTheme);
 
   useEffect(() => {
     ipc.reportSettings().then(setReport).catch((e) => setError(fail(e as never)));
@@ -102,6 +104,10 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                     onChange={(e) => { const n = Number(e.target.value); applyTextSize(n); setTextSize(n); }}>
                     {TEXT_SIZES.map((n) => <option key={n} value={n}>{n === 100 ? "רגיל" : `${n}%`}</option>)}
                   </select>
+                </Row>
+                <Row label="מראה" hint="דף הדוח נשאר לבן">
+                  <Segmented label="מראה" value={theme} options={THEMES}
+                    onChange={(t) => { applyTheme(t); setTheme(t); }} />
                 </Row>
                 <div className="field">
                   <label htmlFor="names">השמות שלך</label>

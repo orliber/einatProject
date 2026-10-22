@@ -5,7 +5,7 @@
 // To accept a deliberate change: `pnpm e2e screens --update-snapshots`, and review the diff.
 // All names are invented.
 import { expect, test, type Page } from "@playwright/test";
-import { stage, unlock } from "./helpers";
+import { expectAccessible, stage, unlock } from "./helpers";
 
 /** Visible landmarks and controls, in document order, with boxes rounded to 16px. */
 async function layout(page: Page): Promise<string> {
@@ -97,3 +97,59 @@ for (const [name, file] of [["הגדרות", "settings"], ["התייעצות", "
     await expectLooksApproved(page, file);
   });
 }
+
+// Dark mode (D-101): the same screens, laid out the same, readable (axe, contrast included);
+// the report page stays white paper with dark text.
+const DARK_BG = "rgb(17, 23, 22)";
+const bodyBg = (page: Page) => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+
+test.describe("in dark mode, by the computer", () => {
+  test.use({ colorScheme: "dark" });
+
+  test("the cases screen", async ({ page }) => {
+    await unlock(page);
+    expect(await bodyBg(page)).toBe(DARK_BG);
+    await expectLooksApproved(page, "cases");
+    await expectAccessible(page);
+  });
+
+  test("the settings page", async ({ page }) => {
+    await unlock(page);
+    await page.getByRole("button", { name: "הגדרות", exact: true }).first().click();
+    await expect(page.getByRole("radio", { name: "לפי המחשב" })).toHaveAttribute("aria-checked", "true");
+    expect(await bodyBg(page)).toBe(DARK_BG);
+    await expectLooksApproved(page, "settings");
+    await expectAccessible(page);
+  });
+
+  test("a case: the report page stays white", async ({ page }) => {
+    await unlock(page);
+    await page.getByRole("button", { name: /בתיק של נועם$/ }).click();
+    const paper = page.getByRole("article", { name: "הדוח, כמו בקובץ" });
+    await expect(paper).toBeVisible();
+    await page.mouse.move(0, 0);
+    expect(await bodyBg(page)).toBe(DARK_BG);
+    expect(await paper.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(255, 255, 255)");
+    expect(await paper.evaluate((el) => getComputedStyle(el).color)).toBe("rgb(27, 27, 27)");
+    await expectLooksApproved(page, "case-report");
+    await expectAccessible(page);
+  });
+});
+
+test("light, dark or by the computer: chosen in Settings and kept", async ({ page }) => {
+  await unlock(page);
+  await page.getByRole("button", { name: "הגדרות", exact: true }).first().click();
+  const look = page.getByRole("radiogroup", { name: "מראה" });
+  await look.getByRole("radio", { name: "כהה" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  expect(await bodyBg(page)).toBe(DARK_BG);
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expectAccessible(page);
+  await unlock(page);
+  await page.getByRole("button", { name: "הגדרות", exact: true }).first().click();
+  await expect(look.getByRole("radio", { name: "כהה" })).toHaveAttribute("aria-checked", "true");
+  await look.getByRole("radio", { name: "לפי המחשב" }).click();
+  await expect(page.locator("html")).not.toHaveAttribute("data-theme", /.*/);
+  expect(await bodyBg(page)).toBe("rgb(244, 245, 243)");
+});
