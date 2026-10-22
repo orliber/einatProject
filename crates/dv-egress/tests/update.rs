@@ -15,8 +15,8 @@ use std::collections::HashMap;
 use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::{Ed25519KeyPair, KeyPair};
 use dv_egress::update::{
-    check, download, parse_key, parse_version, pinned_key, sha256, signed_bytes, to_hex, Fetch,
-    UpdateError, UpdateInfo, PRODUCT, UPDATE_HOSTS,
+    check, download, parse_key, parse_notice_for, parse_version, pinned_key, sha256, signed_bytes,
+    to_hex, Fetch, UpdateError, UpdateInfo, PLATFORM_ENTRY, PRODUCT, UPDATE_HOSTS,
 };
 use proptest::prelude::*;
 use serde_json::{json, Value};
@@ -66,7 +66,9 @@ fn notice_value(version: &str) -> Value {
         "version": version,
         "published": "2026-10-01T10:00:00Z",
         "notes": ["תיקון קטן"],
-        "installer": {"url": INSTALLER_URL, "sha256": to_hex(&sha256(INSTALLER)), "size": INSTALLER.len()}
+        "installer": {"url": INSTALLER_URL, "sha256": to_hex(&sha256(INSTALLER)), "size": INSTALLER.len()},
+        // The Mac entry (D-101): the same invented bytes, so every test runs on both systems.
+        "macos": {"url": INSTALLER_URL, "sha256": to_hex(&sha256(INSTALLER)), "size": INSTALLER.len()}
     })
 }
 
@@ -161,7 +163,7 @@ fn a_signed_notice_with_a_broken_field_is_refused() {
         (
             "url",
             Box::new(|n| {
-                n["installer"]["url"] = json!(
+                n[PLATFORM_ENTRY]["url"] = json!(
                     "http://github.com/orliber/einat-vault-releases/releases/download/v9/x.exe"
                 )
             }),
@@ -169,30 +171,30 @@ fn a_signed_notice_with_a_broken_field_is_refused() {
         (
             "url",
             Box::new(|n| {
-                n["installer"]["url"] = json!("https://github.com/orliber/einat-vault-releases/releases/download/../../../evil/x.exe")
+                n[PLATFORM_ENTRY]["url"] = json!("https://github.com/orliber/einat-vault-releases/releases/download/../../../evil/x.exe")
             }),
         ),
         (
             "url",
             Box::new(|n| {
-                n["installer"]["url"] =
+                n[PLATFORM_ENTRY]["url"] =
                     json!("https://github.com/orliber/other-repo/releases/download/v9/x.exe")
             }),
         ),
         (
             "sha256",
-            Box::new(|n| n["installer"]["sha256"] = json!("ab".repeat(31))),
+            Box::new(|n| n[PLATFORM_ENTRY]["sha256"] = json!("ab".repeat(31))),
         ),
         (
             "sha256",
-            Box::new(|n| n["installer"]["sha256"] = json!("zz".repeat(32))),
+            Box::new(|n| n[PLATFORM_ENTRY]["sha256"] = json!("zz".repeat(32))),
         ),
-        ("size", Box::new(|n| n["installer"]["size"] = json!(0))),
+        ("size", Box::new(|n| n[PLATFORM_ENTRY]["size"] = json!(0))),
         (
             "size",
-            Box::new(|n| n["installer"]["size"] = json!(401_u64 * 1024 * 1024)),
+            Box::new(|n| n[PLATFORM_ENTRY]["size"] = json!(401_u64 * 1024 * 1024)),
         ),
-        ("size", Box::new(|n| n["installer"]["size"] = json!(-1))),
+        ("size", Box::new(|n| n[PLATFORM_ENTRY]["size"] = json!(-1))),
     ];
     for (what, change) in broken {
         let mut n = notice_value("9.0.0");
@@ -211,6 +213,34 @@ fn a_signed_notice_with_a_broken_field_is_refused() {
     assert_eq!(
         check(&t, "0.1.0", &[public(&k)]),
         Err(UpdateError::BadNotice("json".to_owned()))
+    );
+}
+
+/// Each system reads only its own entry, and a broken one is refused even when the other
+/// system's entry is sound (and the other way round).
+#[test]
+fn a_broken_entry_for_this_system_is_refused_whatever_the_other_says() {
+    for (sound, broken) in [("installer", "macos"), ("macos", "installer")] {
+        let mut n = notice_value("9.0.0");
+        n[broken]["sha256"] = json!("ab".repeat(31));
+        let bytes = serde_json::to_vec(&n).unwrap();
+        assert!(
+            parse_notice_for(&bytes, sound).unwrap().is_some(),
+            "{sound}"
+        );
+        assert_eq!(
+            parse_notice_for(&bytes, broken),
+            Err(UpdateError::BadNotice("sha256".to_owned())),
+            "{broken}"
+        );
+    }
+    // A notice with no entry for this system offers nothing (an older notice on a Mac).
+    let mut n = notice_value("9.0.0");
+    n.as_object_mut().unwrap().remove(PLATFORM_ENTRY);
+    let k = keypair();
+    assert_eq!(
+        check(&signed(&k, &n, INSTALLER), "0.1.0", &[public(&k)]),
+        Ok(None)
     );
 }
 

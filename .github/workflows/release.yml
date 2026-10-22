@@ -58,7 +58,14 @@ jobs:
         id: what
         run: |
           fail() { echo "::error::$*"; exit 1; }
+          # The newest green CI run of a commit (not a pull request's): both the Windows installer
+          # and the Mac disk image are taken from this one run, so they passed the same checks.
+          green_run() {
+            gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$1" --limit 20 --json databaseId,event,conclusion \
+              -q '[.[] | select(.event != "pull_request" and .conclusion == "success")] | .[0].databaseId // empty'
+          }
           sha="$GITHUB_SHA"
+          run=""
           if [[ "$REHEARSAL" != "true" ]]; then
             git merge-base --is-ancestor "$sha" origin/main \
               || fail "only a commit on main is released (this is $GITHUB_REF_NAME). A rehearsal can run anywhere."
@@ -71,16 +78,20 @@ jobs:
             for c in $(git rev-list --first-parent -n 30 "$GITHUB_SHA"); do
               # A failed lookup stops the release: read as "not green", it would quietly pick an
               # older commit and publish it under the same version.
-              green="$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$c" --limit 20 --json event,conclusion \
-                -q '.[] | select(.event != "pull_request" and .conclusion == "success") | .event')" \
+              green="$(green_run "$c")" \
                 || fail "could not read the CI runs of $c; nothing was published. Run this again."
-              if [[ -n "$green" ]]; then sha="$c"; break; fi
+              if [[ -n "$green" ]]; then sha="$c"; run="$green"; break; fi
             done
             [[ -n "$sha" ]] || fail "no commit among the last 30 on main has green CI yet. CI on main builds the installer after every merge (about 40 minutes): wait for it, then run this again."
             if [[ "$sha" != "$GITHUB_SHA" ]]; then
               echo "::notice::main is at $GITHUB_SHA, whose CI is not green yet; releasing $sha, the newest commit with a checked installer"
               git checkout -q "$sha"
             fi
+          fi
+          # A tag or a rehearsal takes exactly its own commit, and still only from a green run.
+          if [[ -z "$run" ]]; then
+            run="$(green_run "$sha")" || fail "could not read the CI runs of $sha; nothing was published. Run this again."
+            [[ -n "$run" ]] || fail "CI for $sha is not green (or not finished) yet. CI builds the installers after every merge to main (about 40 minutes), and a rehearsal on a branch needs CI → Run workflow on that branch first. Wait for it to be green, then run this again."
           fi
           v="$(scripts/release-ready.sh)"
           if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$v" ]]; then
@@ -97,31 +108,24 @@ jobs:
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
           echo "### $([[ $REHEARSAL == true ]] && echo 'חזרה על' || echo 'שחרור') גרסה $v" >> "$GITHUB_STEP_SUMMARY"
-          echo "commit \`$sha\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "commit \`$sha\`, from [CI run $run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$run)" >> "$GITHUB_STEP_SUMMARY"
 
-      # The installer of the CI run for exactly this commit. It is uploaded only after every
-      # check of that run passed (the windows-release job runs last), so it is never one that
-      # failed anything.
+      # The installer of the one green CI run chosen above. It is uploaded only after every check
+      # of that run passed (the windows-release job runs last), so it is never one that failed
+      # anything.
       - name: The installer CI built and checked for this commit
         env:
           V: ${{ steps.what.outputs.version }}
           SHA: ${{ steps.what.outputs.sha }}
+          RUN: ${{ steps.what.outputs.run }}
         run: |
           fail() { echo "::error::$*"; exit 1; }
-          runs="$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$SHA" --limit 20 \
-            --json databaseId,event,status -q '.[] | select(.event != "pull_request") | "\(.databaseId) \(.status)"')"
-          got=""
-          while read -r id status; do
-            [[ -n "$id" ]] || continue
-            if gh run download "$id" -R "$GITHUB_REPOSITORY" -n release-windows -D release-out 2>/dev/null; then
-              got="$id"; break
-            fi
-            [[ "$status" == "completed" ]] || echo "::notice::CI run $id for this commit is still $status"
-          done <<< "$runs"
-          [[ -n "$got" ]] || fail "no checked installer for $SHA yet. CI on main builds it after every merge (about 40 minutes); if it failed, it is red at $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/workflows/ci.yml. Wait for it to be green, then run this again."
-          echo "installer from CI run $got"
-          echo "installer from [CI run $got]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$got)" >> "$GITHUB_STEP_SUMMARY"
+          [[ -n "$RUN" ]] || fail "no green CI run was chosen"
+          gh run download "$RUN" -R "$GITHUB_REPOSITORY" -n release-windows -D release-out \
+            || fail "CI run $RUN for $SHA is green but has no Windows installer (release-windows); nothing was published. See $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN"
+          echo "installer from CI run $RUN"
           cd release-out
           grep -qx "commit=$SHA" build.txt || fail "the installer was built from another commit: $(cat build.txt)"
           grep -qx "version=$V" build.txt || fail "the installer is of another version: $(cat build.txt)"
@@ -131,23 +135,22 @@ jobs:
           done
           head -c 2 DiagnosticVault-Setup.exe | grep -q MZ || fail "not a Windows program"
 
-      # The Mac disk image of the same CI run, checked the same way (D-101).
+      # The Mac disk image of the same green CI run, checked the same way (D-101). Both or
+      # nothing: a release never goes out with one platform's file missing.
       - name: The Mac disk image CI built and checked for this commit
         env:
           V: ${{ steps.what.outputs.version }}
           SHA: ${{ steps.what.outputs.sha }}
+          RUN: ${{ steps.what.outputs.run }}
         run: |
           fail() { echo "::error::$*"; exit 1; }
-          runs="$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$SHA" --limit 20 \
-            --json databaseId,event -q '.[] | select(.event != "pull_request") | .databaseId')"
-          got=""
-          for id in $runs; do
-            if gh run download "$id" -R "$GITHUB_REPOSITORY" -n release-macos -D release-mac 2>/dev/null; then
-              got="$id"; break
+          if ! gh run download "$RUN" -R "$GITHUB_REPOSITORY" -n release-macos -D release-mac; then
+            if ! git cat-file -e "$SHA:crates/dv-sandbox/src/macos.rs" 2>/dev/null; then
+              fail "commit $SHA was built before the Mac version existed, so its CI made no Mac disk image. Merge to main once more (or wait for CI of the newest commit on main to be green), then run this again."
             fi
-          done
-          [[ -n "$got" ]] || fail "no checked Mac disk image for $SHA yet (ci.yml → macos-release). Wait for CI on main to be green, then run this again."
-          echo "Mac disk image from CI run $got"
+            fail "CI run $RUN for $SHA is green but has no Mac disk image (release-macos); nothing was published. See $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN"
+          fi
+          echo "Mac disk image from CI run $RUN"
           cd release-mac
           grep -qx "commit=$SHA" build.txt || fail "the disk image was built from another commit: $(cat build.txt)"
           grep -qx "version=$V" build.txt || fail "the disk image is of another version: $(cat build.txt)"
