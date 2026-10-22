@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { LockScreen } from "./LockScreen";
+import { a11yViolations } from "../test/a11y";
 
 describe("LockScreen", () => {
   it("renders the Hebrew lock screen with an accessible password field", () => {
@@ -102,5 +103,61 @@ describe("a version that cannot open the vault (R7)", () => {
     fireEvent.click(screen.getByRole("button", { name: "פתיחה" }));
     await act(async () => {});
     expect(screen.queryByText(/הכספת נשארת במחשב/)).toBeNull();
+  });
+});
+
+describe("forgot the password (D-096)", () => {
+  const ping = { ipc_version: 1, core_version: "0.1.0", build_commit: "test", fips_active: false, platform: "linux" };
+  function core(google: { available: boolean; on: boolean }) {
+    mockIPC((cmd) => {
+      if (cmd === "ping") return ping;
+      if (cmd === "google_status") return { ...google, needs_setup_here: false };
+      return null;
+    });
+  }
+
+  it("is one field, one green button, one short line, and the link is always there", async () => {
+    core({ available: true, on: false });
+    const { container } = render(<LockScreen />);
+    expect(screen.getByText("מוצפן ונשמר במחשב הזה")).toBeInTheDocument();
+    expect(container.querySelectorAll("input")).toHaveLength(1);
+    expect(container.querySelectorAll(".btn-primary")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "שכחתי את הסיסמה" })).toBeInTheDocument();
+    expect(await screen.findByText(/התוכנה פועלת כראוי/)).toBeInTheDocument();
+  });
+
+  it("with Google on, goes to the Google sign-in", async () => {
+    core({ available: true, on: true });
+    render(<LockScreen />);
+    await act(async () => {}); // the Google status arrives
+    fireEvent.click(screen.getByRole("button", { name: "שכחתי את הסיסמה" }));
+    expect(screen.getByLabelText("סיסמה חדשה")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "כניסה עם גוגל" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "יש לי את ערכת השחזור המודפסת" }));
+    expect(screen.getByLabelText("ערכת השחזור")).toBeInTheDocument();
+  });
+
+  it("with Google off, says to use the kit now and where to turn Google on for next time", async () => {
+    core({ available: true, on: false });
+    const { container } = render(<LockScreen />);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "שכחתי את הסיסמה" }));
+    expect(screen.queryByLabelText("סיסמה חדשה")).toBeNull();
+    expect(screen.getByText(/פותחים עם ערכת השחזור המודפסת/)).toBeInTheDocument();
+    expect(screen.getByText(/בהגדרות ← סיסמה ואבטחה/)).toBeInTheDocument();
+    expect(await a11yViolations(container)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "פתיחה עם ערכת השחזור" }));
+    expect(screen.getByLabelText("ערכת השחזור")).toHaveAttribute("type", "text");
+    fireEvent.click(screen.getByRole("button", { name: "חזרה לפתיחה עם סיסמה" }));
+    expect(screen.getByLabelText("סיסמה")).toHaveAttribute("type", "password");
+  });
+
+  it("where this version has no Google sign-in, does not offer it", async () => {
+    core({ available: false, on: false });
+    render(<LockScreen />);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "שכחתי את הסיסמה" }));
+    expect(screen.getByText(/פותחים עם ערכת השחזור המודפסת/)).toBeInTheDocument();
+    expect(screen.queryByText(/גוגל/)).toBeNull();
   });
 });

@@ -127,3 +127,8 @@
 .restore-link {
   align-self: center;
 }
+.setup-done {
+  margin: 0;
+  color: var(--ok);
+  font-weight: 600;
+}
