@@ -76,14 +76,23 @@ impl Core {
         let with_versions = v.drafts_with_versions(case_id)?;
         // One name for one thing (ST10): hers from her past reports, else the report's own.
         let her_terms = style::style_terms(v)?;
+        // Each section's paragraphs are read (and decrypted) once, for the checks across the
+        // report and for the view (deep review 3.6).
+        let mut shown: std::collections::HashMap<String, Vec<dv_domain::DraftParagraph>> =
+            std::collections::HashMap::new();
         let mut report: Vec<(String, String, String)> = Vec::new();
         for s in structure.sections() {
+            let drafts: Vec<_> = v
+                .drafts(case_id, &s.key)?
+                .into_iter()
+                .filter(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved))
+                .collect();
             report.extend(
-                v.drafts(case_id, &s.key)?
-                    .into_iter()
-                    .filter(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved))
-                    .map(|d| (s.key.clone(), d.id, d.text_tagged)),
+                drafts
+                    .iter()
+                    .map(|d| (s.key.clone(), d.id.clone(), d.text_tagged.clone())),
             );
+            shown.insert(s.key.clone(), drafts);
         }
         let report_texts: Vec<String> = report.iter().map(|(_, _, t)| t.clone()).collect();
         // What the body of the report says (G2): the sections a recommendation rests on.
@@ -96,10 +105,10 @@ impl Core {
         let mut sections = Vec::new();
         for part in &structure.parts {
             for s in &part.sections {
-                let paragraphs: Vec<ParagraphView> = v
-                    .drafts(case_id, &s.key)?
+                let paragraphs: Vec<ParagraphView> = shown
+                    .remove(&s.key)
+                    .unwrap_or_default()
                     .into_iter()
-                    .filter(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved))
                     .map(|d| ParagraphView {
                         has_versions: with_versions.contains(&d.id),
                         id: d.id,
