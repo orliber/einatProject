@@ -8,7 +8,8 @@ import { AddMenu } from "../../components/Menu";
 import { ScoresView, scoresDraft } from "../../components/ScoresView";
 import { useHoldUnsaved } from "../../components/Unsaved";
 import { LocalText, type LocalTextHandle } from "../../components/LocalText";
-import { Dialog, ErrorLine, Segments, Spinner, UploadIcon, PlusIcon } from "../../components/ui";
+import { Dialog, ErrorLine, Segments, UploadIcon, PlusIcon } from "../../components/ui";
+import { sizeBucket, timed, WaitLine } from "../../components/Progress";
 import type { CaseApi } from "../CaseScreen";
 import "./MaterialsView.css";
 import { useAi } from "../../ai";
@@ -28,7 +29,7 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
   // The slot a file is being chosen for (the "+" of that slot), so it lands in its place.
   const [uploadFor, setUploadFor] = useState<InputKind | undefined>(undefined);
   const [dropOn, setDropOn] = useState<string | null>(null);
-  const [reading, setReading] = useState<string | null>(null);
+  const [reading, setReading] = useState<{ name: string; size: string } | null>(null);
   const [writing, setWriting] = useState<{ kind: InputKind; input?: CaseInput } | null>(null);
   // Round 54 (D-094): the score table is a view of this stage, not a window. Scores left
   // unsaved on the way to another stage open again on the way back.
@@ -64,9 +65,9 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
 
   async function readFile(file: File, kind?: InputKind) {
     setError(null);
-    setReading(file.name);
+    setReading({ name: file.name, size: sizeBucket(file.size) });
     try {
-      const preview = await ipc.importDocument(caseId, file);
+      const preview = await timed("read", ipc.importDocument(caseId, file), sizeBucket(file.size));
       // Everything read: saved at once (encrypted, nothing leaves the computer) with "ביטול"
       // beside it. What the filter will hide is not a question (round 26); only a file that
       // was not read in full opens the window, to say what was left out.
@@ -225,7 +226,7 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
         <div className={`dropzone wide${dropOn === "any" ? " over" : ""}`} {...dropProps("any")}>
           <UploadIcon />
           {reading ? (
-            <span role="status"><Spinner /> קוראת את {reading}…</span>
+            <div className="grow"><WaitLine task="read" speed={reading.size} delay={0} label={`קוראת את ${reading.name} ומסתירה פרטים מזהים`} /></div>
           ) : (
             <span>גוררים לכאן Word, ‏PDF או ODT, או <button type="button" className="link-btn" onClick={() => chooseFile()}>בוחרים קובץ</button></span>
           )}

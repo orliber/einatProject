@@ -5,7 +5,7 @@ import { kindLabel, STALE_EDIT } from "../../i18n/he";
 import { ageWords } from "../../components/AgeField";
 import { ErrorLine, SparkIcon, WarnIcon } from "../../components/ui";
 import { Why } from "../../components/Why";
-import { ProgressLine } from "../../components/Progress";
+import { ProgressLine, WaitLine } from "../../components/Progress";
 import { useHoldUnsaved } from "../../components/Unsaved";
 import { setKept, useKept } from "../../kept";
 import { guideOpenKey } from "../../components/SectionGuide";
@@ -681,7 +681,7 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
           <ProgressLine started={job.started} estimate={job.estimate} label={job.label} approval={job.approval} />
         </div>
       )}
-      {preparing && !job && <p className="small muted">מכינה את הבקשה…</p>}
+      {preparing && !job && <WaitLine task="prepare" speed="section" label="מכינה את הבקשה: מסתירה שמות ובודקת מה יוצא" />}
 
       {pending.length > 0 && !job && (
         <div className={focused ? "a4-pending" : "a4-pending is-dim"}>
