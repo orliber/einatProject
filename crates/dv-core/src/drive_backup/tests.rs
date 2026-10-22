@@ -153,11 +153,35 @@ fn vault() -> (tempfile::TempDir, Core) {
 
 /// Google connected here (D-041) with account "acct-1". Returns the connected account's tag.
 fn connect_google(core: &mut Core, computer: &FakeComputer) -> String {
+    connect_account(core, computer, "acct-1")
+}
+
+fn connect_account(core: &mut Core, computer: &FakeComputer, account: &str) -> String {
     let drive = Key32::random().unwrap();
-    core.google_turn_on_finish(computer, PASSWORD, &drive, "acct-1")
+    core.google_turn_on_finish(computer, PASSWORD, &drive, account)
         .unwrap();
     let vault_id = core.vault_ref().unwrap().vault_id().to_owned();
-    google_account_tag(&vault_id, "acct-1")
+    google_account_tag(&vault_id, account)
+}
+
+/// What the turn-on check returns (it also needs this version registered with Google, which
+/// tests are not).
+fn checked(core: &mut Core, tag: &str) -> DriveTurnOn {
+    let vault_id = core.vault_ref().unwrap().vault_id().to_owned();
+    let mut owed = Vec::new();
+    if core.drive_cleanup_token().is_some() {
+        owed.push(core.drive_account(CLEANUP_ACCOUNT_KEY));
+    }
+    if core.drive_secret(REVOKE_SECRET).is_some() {
+        owed.push(core.drive_account(REVOKE_ACCOUNT_KEY));
+    }
+    core.drive_moved();
+    DriveTurnOn {
+        vault_id,
+        tag: tag.to_owned(),
+        keep_grant: core.drive_keeps_grant(),
+        owed,
+    }
 }
 
 /// Google connected and the copy on, with the lasting permission "1//lasting".
@@ -520,18 +544,13 @@ fn a_sign_in_after_turning_off_offline_leaves_the_cleanup_its_grant() {
     let session = google::session_from_refresh(&FakeGoogle::default(), &cfg(), "short").unwrap();
     crate::google::tidy_up(&google, session, &[], keep_grant);
     // A lasting permission that came without its refresh token, or was not kept: not
-    // withdrawn either.
+    // withdrawn either. (The fake session's account is "".)
     let vault_id = core.vault_ref().unwrap().vault_id().to_owned();
+    let mut turn_on = checked(&mut core, &google_account_tag(&vault_id, ""));
+    turn_on.owed = vec![google_account_tag(&vault_id, "")];
     let no_refresh = google::session_from_refresh(&FakeGoogle::default(), &cfg(), "short").unwrap();
-    assert!(lasting_permission(
-        &google,
-        no_refresh,
-        &vault_id,
-        &google_account_tag(&vault_id, ""),
-        keep_grant
-    )
-    .is_err());
-    withdraw_unkept(&google, "1//unkept", keep_grant);
+    assert!(lasting_permission(&google, no_refresh, &turn_on).is_err());
+    withdraw_unkept(&google, "1//unkept", &turn_on);
     assert!(google.calls(Method::Post, "/revoke").is_empty());
 
     core.drive_cleanup_at = None;
@@ -581,11 +600,10 @@ fn turning_on_again_drops_the_cleanup_that_would_withdraw_it() {
     // A retry was handed out and is on its way when she turns it on again.
     core.drive_cleanup_at = None;
     let running = core.take_drive_cleanup().unwrap();
-    // What the turn-on check does (it also needs this version registered with Google, which
-    // tests are not): the generation moves before her browser opens.
-    core.drive_moved();
     let vault_id = core.vault_ref().unwrap().vault_id().to_owned();
     let tag = google_account_tag(&vault_id, "acct-1");
+    // The generation moves before her browser opens.
+    let _ = checked(&mut core, &tag);
     core.drive_backup_turn_on_finish(&computer, &tag, "1//new")
         .unwrap();
     let google = FakeGoogle::default();
@@ -731,6 +749,78 @@ fn a_restore_that_cannot_forget_the_permission_leaves_nothing() {
     );
     assert!(failed.is_err());
     assert_eq!(std::fs::read_dir(fresh.path()).unwrap().count(), 0);
+}
+
+/// After a restore, another Google account connected and turned on: the first account's grant
+/// is still withdrawn, its copies are still said to be left, and a sign-in with the first
+/// account does not withdraw its grant before the debt is paid.
+#[test]
+fn another_account_never_drops_the_first_accounts_debt() {
+    let (_dir, mut core, _) = turned_on();
+    let out = tempfile::tempdir().unwrap();
+    let (done, _) = backup(&mut core, &out.path().join("b"));
+    let bytes = std::fs::read(&done.path).unwrap();
+    let fresh = tempfile::tempdir().unwrap();
+    let mut other = Core::for_tests(fresh.path(), None);
+    other.stage_backup(bytes, "b.vaultbak".into()).unwrap();
+    other.restore_staged_backup(Some(PASSWORD), None).unwrap();
+    let vault_id = other.vault_ref().unwrap().vault_id().to_owned();
+    let first = google_account_tag(&vault_id, "acct-1");
+
+    let computer = FakeComputer::default();
+    let second = connect_account(&mut other, &computer, "acct-2");
+    let turn_on = checked(&mut other, &second);
+    // Signing in with the first account by mistake: its grant is left for the debt.
+    let google = FakeGoogle::default();
+    let mut session = google::session_from_refresh(&FakeGoogle::default(), &cfg(), "x").unwrap();
+    session.account_id = "acct-1".to_owned();
+    assert!(lasting_permission(&google, session, &turn_on).is_err());
+    assert!(google.calls(Method::Post, "/revoke").is_empty());
+    assert!(turn_on.owes(&first) && !turn_on.owes(&second));
+
+    other
+        .drive_backup_turn_on_finish(&computer, &second, "1//second")
+        .unwrap();
+    // The first account's permission is still withdrawn, and only it.
+    other.drive_cleanup_at = None;
+    let owed = other.take_drive_cleanup().expect("still owed");
+    assert_eq!(
+        other
+            .finish_drive_cleanup(owed.run(&google, &cfg()))
+            .unwrap(),
+        DriveCleanupResult::Cleaned
+    );
+    let revoked = google.calls(Method::Post, "/revoke");
+    assert_eq!(revoked.len(), 1);
+    assert!(String::from_utf8(revoked[0].2.clone())
+        .unwrap()
+        .contains("token=1%2F%2Flasting"));
+    // Turning the second account's copy off deletes its copies, not the first one's: the line
+    // stays.
+    assert_eq!(turn_off(&mut other, &google), DriveCleanupResult::Cleaned);
+    assert!(other.drive_backup_status(&computer).unwrap().copies_left);
+}
+
+/// A cleanup owed on one account keeps its place: the copy is not turned on with another
+/// account until it is done.
+#[test]
+fn turning_on_with_another_account_waits_for_the_cleanup() {
+    let (_dir, mut core, computer) = turned_on();
+    let offline = FakeGoogle {
+        fail: Some(GoogleError::Offline),
+        ..FakeGoogle::default()
+    };
+    assert_eq!(turn_off(&mut core, &offline), DriveCleanupResult::Pending);
+    let second = connect_account(&mut core, &computer, "acct-2");
+    let err = core
+        .drive_backup_turn_on_finish(&computer, &second, "1//second")
+        .unwrap_err();
+    assert!(
+        matches!(&err, CoreError::Refused(t) if t.contains("מחשבון הגוגל הקודם")),
+        "{err:?}"
+    );
+    assert!(!core.drive_backup_on());
+    assert!(core.drive_backup_status(&computer).unwrap().cleanup_pending);
 }
 
 /// After a restore, turning the copy on and off deletes the copies from before it.

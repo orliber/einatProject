@@ -16,7 +16,7 @@ export const CONNECT_FIRST =
 
 const PROBLEM: Record<DriveProblem, string> = {
   offline: "העותק האחרון לא עלה, כי לא היה חיבור לאינטרנט. הוא יעלה עם הגיבוי הבא.",
-  failed: "העותק האחרון לא עלה. ננסה שוב עם הגיבוי הבא.",
+  failed: "העותק האחרון לא עלה. התוכנה תנסה שוב עם הגיבוי הבא.",
   reconnect: "ההרשאה בגוגל בוטלה, ולכן העותקים לא עולים. אפשר לחבר שוב.",
 };
 
@@ -26,7 +26,7 @@ export const CLEANUP_PENDING =
 
 /** After a restore of a backup taken while the copy was on: its copies were left in Drive. */
 export const COPIES_LEFT =
-  "לפני השחזור העותק בגוגל דרייב היה דלוק, ולכן ייתכן שנשארו שם עותקים מוצפנים מלפני השחזור. כדי למחוק אותם, מדליקים את העותק ואז מכבים אותו.";
+  "לפני השחזור העותק בגוגל דרייב היה דלוק, ולכן ייתכן שנשארו שם עותקים מוצפנים מלפני השחזור. כדי למחוק אותם, מחברים את אותו חשבון גוגל שהיה מחובר אז, מדליקים את העותק ואז מכבים אותו.";
 
 /** The permission was gone at Google already, so the copies there are out of the program's reach. */
 export const CLEANUP_WITHDRAWN =

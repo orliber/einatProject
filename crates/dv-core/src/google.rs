@@ -73,6 +73,12 @@ impl ComputerKeys for WindowsAccount {
 static BUSY: AtomicBool = AtomicBool::new(false);
 static CANCEL: AtomicBool = AtomicBool::new(false);
 
+/// A sign-in is waiting for her browser: a cleanup owed at Google waits for it to end (D-099),
+/// or it could withdraw the grant the sign-in is giving.
+pub(crate) fn signing_in() -> bool {
+    BUSY.load(Ordering::SeqCst)
+}
+
 /// Stop a sign-in that is waiting for the browser.
 pub fn cancel() {
     CANCEL.store(true, Ordering::SeqCst);
@@ -277,7 +283,10 @@ impl Core {
             return Err(e.into());
         }
         keys.remove(&dir);
-        self.drive_backup_turn_off()
+        // Google is disconnected whatever happens next. If the copy could not be turned off
+        // here, nothing goes up any more (an upload needs the connection too), and its switch
+        // still shows it on, to turn off there.
+        Ok(self.drive_backup_turn_off().unwrap_or(None))
     }
 
     /// "Forgot password", step 1 (under the lock, while locked): the new password is
