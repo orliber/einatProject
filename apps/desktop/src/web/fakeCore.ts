@@ -4,6 +4,7 @@
 import type { ActivityEntry } from "../ipc/generated/ActivityEntry";
 import type { AppStatus } from "../ipc/generated/AppStatus";
 import type { BackupStatus } from "../ipc/generated/BackupStatus";
+import type { DriveBackupStatus } from "../ipc/generated/DriveBackupStatus";
 import type { StagedBackup } from "../ipc/generated/StagedBackup";
 import type { CaseDetail } from "../ipc/generated/CaseDetail";
 import type { CaseInput } from "../ipc/generated/CaseInput";
@@ -178,6 +179,9 @@ export class FakeCore {
   private lastCheckAt: number | null = null;
   private secretChanged = false;
   private googleOn = false;
+  /** The encrypted copy in Drive (D-099): off by default, needs Google connected. */
+  private driveOn = false;
+  private driveLastAt: number | null = null;
   private autoBackup = true;
   private reviewedAt: number | null = null;
   private convs: { id: string; caseId: string | null; updated: number; turns: { role: string; text: string; hidden: string[]; demo: boolean; at: number }[] }[] = [];
@@ -1439,6 +1443,10 @@ export class FakeCore {
         this.lastBackupAt = now();
         this.secretChanged = false;
         this.logActivity("backup_written", "security", "גיבוי מוצפן נשמר");
+        if (this.driveOn) {
+          this.driveLastAt = now();
+          this.logActivity("drive_backup_uploaded", "security", "עותק מוצפן של הגיבוי עלה לגוגל דרייב");
+        }
         const day = new Date().toISOString().slice(0, 10);
         return { path: `E:\\גיבויים\\גיבוי כספת האבחון ${day}.vaultbak (בהדמיה לא נשמר קובץ)`, bytes: 1_843_200, created_at: this.lastBackupAt };
       }
@@ -1493,6 +1501,18 @@ export class FakeCore {
         return null;
       case "google_cancel":
         return null;
+      case "drive_backup_status":
+        return { available: true, connected: this.googleOn, on: this.driveOn, last_at: this.driveOn ? this.driveLastAt : null, problem: null } satisfies DriveBackupStatus;
+      case "drive_backup_turn_on":
+        if (!this.googleOn) fail("refused", "קודם מחברים את חשבון הגוגל: הגדרות ← סיסמה ואבטחה ← כניסה עם גוגל כששוכחים סיסמה.");
+        this.driveOn = true;
+        this.logActivity("drive_backup_on", "security", "הופעל עותק מוצפן של הגיבוי בגוגל דרייב", true);
+        return this.handle("drive_backup_status", {});
+      case "drive_backup_turn_off":
+        if (this.driveOn) this.logActivity("drive_backup_off", "security", "כובה העותק המוצפן של הגיבוי בגוגל דרייב", true);
+        this.driveOn = false;
+        this.driveLastAt = null;
+        return true;
       case "google_recover":
         if (!this.googleOn) fail("refused", "הכניסה עם גוגל לא מופעלת במחשב הזה.");
         this.unlocked = true;

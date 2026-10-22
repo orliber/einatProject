@@ -18,6 +18,8 @@ import type { SectionMode } from "./generated/SectionMode";
 import type { CaseSummary } from "./generated/CaseSummary";
 import type { Folder } from "./generated/Folder";
 import type { GoogleStatus } from "./generated/GoogleStatus";
+import type { DriveBackupStatus } from "./generated/DriveBackupStatus";
+import type { DriveProblem } from "./generated/DriveProblem";
 import type { NameMatch } from "./generated/NameMatch";
 import type { ChatView } from "./generated/ChatView";
 import type { ConsultationSummary } from "./generated/ConsultationSummary";
@@ -410,6 +412,12 @@ export const ipc = {
     call("restore_backup", { password, recoveryKey }),
   forgetBackup: () => run("forget_backup"),
   setAutoBackup: (on: boolean) => call("set_auto_backup", { on }),
+  /** The encrypted copy of each backup in her Google Drive (D-099). Off by default. */
+  driveBackupStatus: () => call("drive_backup_status"),
+  /** Opens Google in her browser; resolves when she is back and the copy is on. */
+  driveBackupTurnOn: () => call("drive_backup_turn_on"),
+  /** `false`: off, but the copies in Drive could not be deleted now (no internet). */
+  driveBackupTurnOff: () => call("drive_backup_turn_off"),
 
   // Writing style (D-043): past reports kept neutralized, the profile, learning from edits.
   styleOverview: () => call("style_overview"),
@@ -490,6 +498,8 @@ export type {
   StagedBackup,
   Folder,
   GoogleStatus,
+  DriveBackupStatus,
+  DriveProblem,
   NameMatch,
   MaterialRouting,
   PriorRecordView,
