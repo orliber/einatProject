@@ -1206,6 +1206,39 @@ fn a_backup_job_is_written_and_checked_away_from_the_vault() {
     assert!(second.verify().is_ok());
 }
 
+/// The snapshot is taken in a moment and exported in the job (F2): a job dropped before it is
+/// written (the vault locked) leaves no scratch folder, and one written later holds the vault
+/// as it was when it began.
+#[test]
+fn a_backup_snapshot_is_exported_away_from_the_vault() {
+    let (dir, mut vault, _) = new_vault();
+    noam(&mut vault);
+    let scratch = |d: &std::path::Path| {
+        fs::read_dir(d)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with(".backup-"))
+            .count()
+    };
+    let dropped = vault.begin_backup().unwrap();
+    assert_eq!(scratch(dir.path()), 1);
+    drop(dropped);
+    assert_eq!(scratch(dir.path()), 0, "nothing left behind");
+
+    let job = vault.begin_backup().unwrap();
+    // Two more cases after the snapshot began, before it is exported.
+    noam(&mut vault);
+    noam(&mut vault);
+    let out = tempfile::tempdir().unwrap();
+    let done = job
+        .write(&out.path().join("b.vaultbak"))
+        .unwrap()
+        .verify()
+        .unwrap();
+    assert_eq!(done.cases, 1);
+    assert_eq!(scratch(dir.path()), 0);
+}
+
 #[test]
 fn a_restore_drill_runs_without_the_vault_and_is_logged_after() {
     let (dir, mut vault, _) = new_vault();

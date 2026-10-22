@@ -71,8 +71,9 @@ fn corrupt(what: &str) -> VaultError {
     VaultError::Corrupt(format!("backup: {what}"))
 }
 
-/// Copy a database into `path`, encrypted with the same key (never a clear-text step).
-fn export(conn: &Connection, path: &Path, key: &Key32) -> Result<(), VaultError> {
+/// Attach `path` as the encrypted export target `dv_backup`, with the same key as the database
+/// (never a clear-text step).
+fn attach(conn: &Connection, path: &Path, key: &Key32) -> Result<(), VaultError> {
     let target = path
         .to_str()
         .ok_or_else(|| corrupt("path"))?
@@ -83,9 +84,6 @@ fn export(conn: &Connection, path: &Path, key: &Key32) -> Result<(), VaultError>
         key_hex.as_str()
     ));
     conn.execute_batch(&attach)?;
-    let exported = conn.query_row("SELECT sqlcipher_export('dv_backup')", [], |_| Ok(()));
-    conn.execute_batch("DETACH DATABASE dv_backup;")?;
-    exported?;
     Ok(())
 }
 
@@ -207,7 +205,10 @@ impl CheckKeys {
 /// the slow part; [`Vault::finish_backup`] records it. It holds only the sealed file and
 /// copies of the keys that check it, wiped when it is dropped.
 pub struct BackupJob {
+    /// The sealed file; empty until the snapshot is exported ([`BackupJob::seal`]).
     file: Vec<u8>,
+    /// The snapshot, taken under the lock and exported away from it.
+    pending: Option<Snapshot>,
     created_at: i64,
     vault_id: String,
     /// The vault folder: the check's scratch folder goes next to the vault.
@@ -231,6 +232,87 @@ pub struct BackupWritten {
     pub cases: u32,
 }
 
+/// A consistent snapshot of the three databases, taken in a moment under the core's lock: one
+/// connection to each, its read transaction begun (the vault is in WAL mode, so each keeps
+/// seeing the vault as it was while the vault goes on writing). Exporting it, the slow part on
+/// a large vault, happens in the job. Dropped unexported (a lock), its scratch folder goes.
+struct Snapshot {
+    scratch: std::path::PathBuf,
+    conns: Vec<(&'static str, Connection)>,
+    header_bytes: Vec<u8>,
+    backup: Key32,
+}
+
+impl Drop for Snapshot {
+    fn drop(&mut self) {
+        self.conns.clear();
+        let _ = fs::remove_dir_all(&self.scratch);
+    }
+}
+
+impl Snapshot {
+    /// Open one connection per database, attach its encrypted export target, and begin the
+    /// read transactions together: from here each sees the vault as it is now.
+    fn take(vault: &Vault) -> Result<(Self, i64), VaultError> {
+        let scratch = vault.dir.join(format!(".backup-{}", random_id()?));
+        fs::create_dir(&scratch)?;
+        let mut snap = Self {
+            scratch,
+            conns: Vec::new(),
+            header_bytes: vault.backup_header()?,
+            backup: vault.keys.backup.clone(),
+        };
+        for (name, key) in [
+            (MAIN_DB, &vault.keys.db_main),
+            (IDENTITY_DB, &vault.keys.db_identity),
+            (AUDIT_DB, &vault.keys.db_audit),
+        ] {
+            let conn = open_encrypted(&vault.dir.join(name), key)?;
+            attach(&conn, &snap.scratch.join(name), key)?;
+            conn.execute_batch("BEGIN DEFERRED;")?;
+            // The first read fixes what this transaction sees.
+            conn.query_row("SELECT count(*) FROM main.sqlite_master", [], |r| {
+                r.get::<_, i64>(0)
+            })?;
+            snap.conns.push((name, conn));
+        }
+        let live_cases: i64 = snap
+            .conns
+            .first()
+            .ok_or_else(|| corrupt("no main database"))?
+            .1
+            .query_row("SELECT count(*) FROM main.cases", [], |r| r.get(0))?;
+        Ok((snap, live_cases))
+    }
+
+    /// Export each database from its transaction (encrypted, never a clear-text step) and seal
+    /// them into the backup file.
+    fn export(mut self, created_at: i64, vault_id: &str) -> Result<Vec<u8>, VaultError> {
+        let mut container = Zeroizing::new(Vec::new());
+        for (name, conn) in std::mem::take(&mut self.conns) {
+            let exported = conn.query_row("SELECT sqlcipher_export('dv_backup')", [], |_| Ok(()));
+            conn.execute_batch("COMMIT;")?;
+            conn.execute_batch("DETACH DATABASE dv_backup;")?;
+            exported?;
+            drop(conn);
+            push_entry(&mut container, name, &fs::read(self.scratch.join(name))?);
+        }
+        let sealed = seal(&self.backup, &aad(vault_id, created_at), &container)?;
+        let header_bytes = &self.header_bytes;
+        let mut file = Vec::with_capacity(MAGIC.len() + 4 + header_bytes.len() + 8 + sealed.len());
+        file.extend_from_slice(MAGIC);
+        file.extend_from_slice(
+            &u32::try_from(header_bytes.len())
+                .map_err(|_| corrupt("header size"))?
+                .to_le_bytes(),
+        );
+        file.extend_from_slice(header_bytes);
+        file.extend_from_slice(&created_at.to_le_bytes());
+        file.extend_from_slice(&sealed);
+        Ok(file)
+    }
+}
+
 impl std::fmt::Debug for BackupJob {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BackupJob")
@@ -240,13 +322,28 @@ impl std::fmt::Debug for BackupJob {
 }
 
 impl BackupJob {
+    /// The size of the sealed file (0 before [`BackupJob::seal`]).
     #[must_use]
     pub fn bytes(&self) -> u64 {
         u64::try_from(self.file.len()).unwrap_or(u64::MAX)
     }
 
-    /// Write the file to `dest`, replaced atomically.
+    /// Export the snapshot and seal it: the slow part on a large vault, done away from the
+    /// core's lock. Does nothing once sealed.
+    pub fn seal(mut self) -> Result<Self, VaultError> {
+        if let Some(snap) = self.pending.take() {
+            self.file = snap.export(self.created_at, &self.vault_id)?;
+        }
+        Ok(self)
+    }
+
+    /// Seal the file if it is not yet, and write it to `dest`, replaced atomically.
     pub fn write(self, dest: &Path) -> Result<WrittenBackup, VaultError> {
+        let this = self.seal()?;
+        this.write_sealed(dest)
+    }
+
+    fn write_sealed(self, dest: &Path) -> Result<WrittenBackup, VaultError> {
         let part = dest.with_extension(format!("{BACKUP_EXTENSION}.part"));
         let written = (|| -> Result<(), VaultError> {
             let mut f = fs::File::create(&part)?;
@@ -358,52 +455,16 @@ pub fn drill_backup(
 }
 
 impl Vault {
-    /// Take a consistent snapshot of the three databases and seal it: the part of a backup
-    /// that needs the vault. Writing it out and reading it back is the job's.
+    /// Take a consistent snapshot of the three databases: the part of a backup that needs the
+    /// vault, a moment (F2). Exporting and sealing it, writing it out and reading it back are
+    /// the job's ([`BackupJob::write`]), while the vault goes on working.
     pub fn begin_backup(&mut self) -> Result<BackupJob, VaultError> {
-        // A scratch folder next to the vault, for the encrypted snapshots only.
-        let scratch = self.dir.join(format!(".backup-{}", random_id()?));
-        fs::create_dir(&scratch)?;
-        let snapshots = (|| -> Result<Zeroizing<Vec<u8>>, VaultError> {
-            let mut container = Zeroizing::new(Vec::new());
-            for (name, conn, key) in [
-                (MAIN_DB, &self.main, &self.keys.db_main),
-                (IDENTITY_DB, &self.identity, &self.keys.db_identity),
-                (AUDIT_DB, &self.audit, &self.keys.db_audit),
-            ] {
-                let path = scratch.join(name);
-                export(conn, &path, key)?;
-                push_entry(&mut container, name, &fs::read(&path)?);
-            }
-            Ok(container)
-        })();
-        let _ = fs::remove_dir_all(&scratch);
-        let container = snapshots?;
-        let live_cases: i64 = self
-            .main
-            .query_row("SELECT count(*) FROM cases", [], |r| r.get(0))?;
-
         // Opens with the password on any computer, and with the kit (D-076).
-        let header_bytes = self.backup_header()?;
-        let created_at = now();
-        let sealed = seal(
-            &self.keys.backup,
-            &aad(&self.header.vault_id, created_at),
-            &container,
-        )?;
-        let mut file = Vec::with_capacity(MAGIC.len() + 4 + header_bytes.len() + 8 + sealed.len());
-        file.extend_from_slice(MAGIC);
-        file.extend_from_slice(
-            &u32::try_from(header_bytes.len())
-                .map_err(|_| corrupt("header size"))?
-                .to_le_bytes(),
-        );
-        file.extend_from_slice(&header_bytes);
-        file.extend_from_slice(&created_at.to_le_bytes());
-        file.extend_from_slice(&sealed);
+        let (snapshot, live_cases) = Snapshot::take(self)?;
         Ok(BackupJob {
-            file,
-            created_at,
+            file: Vec::new(),
+            pending: Some(snapshot),
+            created_at: now(),
             vault_id: self.header.vault_id.clone(),
             dir: self.dir.clone(),
             keys: CheckKeys::of(&self.keys),
@@ -428,7 +489,7 @@ impl Vault {
     /// Write an encrypted backup of the whole vault to `dest` (replaced atomically), without
     /// reading it back.
     pub fn write_backup(&mut self, dest: &Path) -> Result<BackupInfo, VaultError> {
-        let job = self.begin_backup()?;
+        let job = self.begin_backup()?.seal()?;
         let info = BackupInfo {
             bytes: job.bytes(),
             created_at: job.created_at,
