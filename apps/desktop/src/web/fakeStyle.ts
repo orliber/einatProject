@@ -98,6 +98,7 @@ export class FakeStyle {
       words: s.parts.reduce((n, p) => n + p.text.split(/\s+/).filter(Boolean).length, 0),
       headings: s.parts.map((p) => p.heading), analyzed: s.analysis !== null, analysis_demo: s.analysis !== null,
       analysis_items: s.analysis?.length ?? 0,
+      analysis_inferences: s.analysis?.filter((i) => i.kind === "inference").length ?? 0,
     };
   }
 
@@ -228,6 +229,7 @@ export class FakeStyle {
           ...(/עם זאת/.test(text) ? [{ kind: "rule" as const, section: null, text: "מבנה של חוזקה ואחריה הקושי, עם \"עם זאת\"" }] : []),
           ...(/כך לדוגמ/.test(text) ? [{ kind: "phrase" as const, section: null, text: "כך לדוגמא" }] : []),
           { kind: "template", section: "cognitive", text: "הציג תפקוד {רמה} ({תוצאה}), עם זאת ניכר קושי ב{תחום}" },
+          { kind: "inference", section: null, text: "בתצפית: הילד עוזב משימה באמצע וחוזר אליה רק אחרי תיווך ← מסקנה: קושי בהתמדה ובוויסות, שנקבע כשהוא חוזר גם בדיווח הגן ← ניסוח: ניכר קושי ב{תחום}, הבא לידי ביטוי ב{דוגמה} ← המלצה: תיווך של מבוגר בתחילת משימה" },
         ];
         return { source_id: s.id, kept: s.analysis.length, dropped: 0, demo: true };
       }

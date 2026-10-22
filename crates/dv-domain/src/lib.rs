@@ -8,6 +8,7 @@ pub mod consistency;
 pub mod dates;
 pub mod dsm;
 pub mod identity;
+pub mod patterns;
 pub mod prior;
 pub mod records;
 pub mod report;
@@ -20,6 +21,7 @@ pub use dsm::{check_dsm_severity, level_words, severity_request, DsmSeverity};
 pub use identity::{
     assign_tag, FoundName, Identity, IdentityInput, IdentitySource, Role, PRACTITIONER_TAG,
 };
+pub use patterns::{pattern_keys, pattern_label, report_patterns, sheet_patterns, ScorePattern};
 pub use prior::{
     date_text, document_date, record_order, DocDate, MaterialSummary, PriorRecord, Setting,
 };
