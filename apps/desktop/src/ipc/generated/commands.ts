@@ -13,6 +13,8 @@ import type { ConsultResult } from "./ConsultResult";
 import type { ConsultationSummary } from "./ConsultationSummary";
 import type { ConsultationView } from "./ConsultationView";
 import type { CreatedVault } from "./CreatedVault";
+import type { DriveBackupStatus } from "./DriveBackupStatus";
+import type { DriveCleanupResult } from "./DriveCleanupResult";
 import type { ExportCheck } from "./ExportCheck";
 import type { FilterOutcome } from "./FilterOutcome";
 import type { Folder } from "./Folder";
@@ -112,6 +114,9 @@ export type Commands = {
   discard_style_upload: { args: undefined; returns: null };
   dismiss_style_suggestion: { args: { id: string }; returns: null };
   download_name_model: { args: undefined; returns: NameModelView };
+  drive_backup_status: { args: undefined; returns: DriveBackupStatus };
+  drive_backup_turn_off: { args: undefined; returns: DriveCleanupResult };
+  drive_backup_turn_on: { args: undefined; returns: DriveBackupStatus };
   edit_paragraph: { args: { caseId: string; draftId: string; text: string; openedWith: string | null }; returns: boolean };
   export_letter: { args: { caseId: string; audience: string; password: string | null }; returns: string };
   export_pdf: { args: { caseId: string; password: string | null; parents: ParentsOptions | null }; returns: string };

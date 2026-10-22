@@ -16,6 +16,7 @@ mod export;
 mod failures;
 mod followup;
 pub use binding::{ComputerSeal, WindowsSeal};
+pub mod drive_backup;
 pub mod google;
 mod guides;
 mod history;
@@ -720,6 +721,13 @@ pub struct Core {
     opened_cases: HashSet<String>,
     /// What this opening has to say about the time since the last one (L4; dropped on lock).
     since_last: Option<String>,
+    /// Moves when the Drive copy turns on or off (D-099): an upload or a cleanup begun before
+    /// it stops before sending anything more.
+    drive_generation: Arc<std::sync::atomic::AtomicU64>,
+    /// When the cleanup owed at Google was last handed out (reset on lock).
+    drive_cleanup_at: Option<Instant>,
+    /// Cleanups of the Drive copy on their way (D-099): the timer adds none while one runs.
+    drive_cleanups: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl std::fmt::Debug for Core {

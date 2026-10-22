@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-drive-backup-turn-off"
+description = "Enables the drive_backup_turn_off command without any pre-configured scope."
+commands.allow = ["drive_backup_turn_off"]
+
+[[permission]]
+identifier = "deny-drive-backup-turn-off"
+description = "Denies the drive_backup_turn_off command without any pre-configured scope."
+commands.deny = ["drive_backup_turn_off"]
