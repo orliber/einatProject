@@ -323,7 +323,13 @@ impl CoreError {
             ),
             CoreError::Vault(VaultError::Busy) => (
                 "busy",
-                "המחשב לא ענה בזמן לבדיקה שהסיסמה שייכת למחשב הזה. זה קורה לפעמים מיד אחרי הדלקת המחשב. אפשר לנסות שוב בעוד רגע.".to_owned(),
+                if cfg!(target_os = "macos") {
+                    // A locked Keychain asks for her Mac's password; a cancel lands here too.
+                    "ה-Mac לא אישר בזמן את הבדיקה שהסיסמה שייכת למחשב הזה. אם הופיעה בקשה לסיסמה של ה-Mac (מחזיק המפתחות), צריך לאשר אותה. אפשר לנסות שוב בעוד רגע."
+                } else {
+                    "המחשב לא ענה בזמן לבדיקה שהסיסמה שייכת למחשב הזה. זה קורה לפעמים מיד אחרי הדלקת המחשב. אפשר לנסות שוב בעוד רגע."
+                }
+                .to_owned(),
             ),
             CoreError::Vault(VaultError::RecoveryKeyInvalid) => (
                 "recovery_invalid",

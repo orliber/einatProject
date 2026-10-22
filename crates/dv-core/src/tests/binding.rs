@@ -376,3 +376,63 @@ fn a_slow_windows_while_open_is_not_a_wrong_password_nor_another_computer() {
     assert!(core.check_backoff().is_ok(), "not a guess: no waiting time");
     assert!(core.google_turn_on_check(PASSWORD).is_ok());
 }
+
+/// A computer that could keep a key but does not now (a locked Keychain, a dialog she
+/// cancelled): every key it is asked for is `Busy`.
+struct Locked;
+
+impl ComputerSeal for Locked {
+    fn available(&self) -> bool {
+        true
+    }
+    fn load(&self, _dir: &Path) -> Result<Key32, VaultError> {
+        Err(VaultError::Busy)
+    }
+    fn create(&self, _dir: &Path) -> Result<Key32, VaultError> {
+        Err(VaultError::Busy)
+    }
+    fn create_next(&self, _dir: &Path) -> Result<Key32, VaultError> {
+        Err(VaultError::Busy)
+    }
+    fn load_next(&self, _dir: &Path) -> Result<Key32, VaultError> {
+        Err(VaultError::Busy)
+    }
+    fn promote_next(&self, _dir: &Path) -> Result<(), VaultError> {
+        Err(VaultError::Busy)
+    }
+}
+
+#[test]
+fn a_key_that_cannot_be_made_here_writes_no_unbound_password() {
+    // Review of #136: on a computer that can bind, a new password or a new vault is never
+    // written unbound; she is told to try again and nothing changes.
+    let dir = tempfile::tempdir().unwrap();
+    let mut core = Core::for_tests(dir.path(), None)
+        .with_computer_seal(Arc::new(Locked) as Arc<dyn ComputerSeal>);
+    let e = core.create_vault(PASSWORD).unwrap_err();
+    assert!(matches!(e, CoreError::Vault(VaultError::Busy)), "{e:?}");
+    assert!(!Vault::exists(dir.path()), "no vault was made");
+
+    let here = Arc::new(FakeSeal::default());
+    let kit = on(dir.path(), &here)
+        .create_vault(PASSWORD)
+        .unwrap()
+        .recovery_key;
+    let copy = tempfile::tempdir().unwrap();
+    copy_folder(dir.path(), copy.path());
+    let mut there = Core::for_tests(copy.path(), None)
+        .with_computer_seal(Arc::new(Locked) as Arc<dyn ComputerSeal>);
+    there.unlock_with_recovery(&kit).unwrap();
+    let e = there
+        .change_password(&kit, true, "another fabricated password 7")
+        .unwrap_err();
+    assert!(matches!(e, CoreError::Vault(VaultError::Busy)), "{e:?}");
+    assert!(
+        Vault::password_is_bound(copy.path()).unwrap(),
+        "the slot was not rewritten"
+    );
+    assert!(
+        there.check_backoff().is_ok(),
+        "not a guess: no waiting time"
+    );
+}

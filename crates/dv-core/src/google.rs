@@ -279,6 +279,8 @@ impl Core {
             ));
         }
         let computer = keys.load(&self.dir)?;
+        // The new password's key here first: if it cannot be made, nothing is opened.
+        let (here, aside) = self.new_password_key()?;
         let mut opened = Err(VaultError::WrongSecret);
         let mut used = None;
         for drive in drive_keys {
@@ -293,7 +295,6 @@ impl Core {
             return Err(CoreError::Internal("opened without a key".to_owned()));
         };
         let params = self.argon.unwrap_or_else(Argon2Params::calibrate);
-        let (here, aside) = self.new_password_key();
         self.vault_mut()?.rekey_password_here(
             Secret::Google {
                 drive,

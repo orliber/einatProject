@@ -20,8 +20,8 @@ use crate::Core;
 /// S1): from now on the kit is what opens it after Windows is reinstalled or elsewhere.
 pub(crate) const JUST_BOUND: &str = "מעכשיו הסיסמה פותחת את הכספת רק במחשב הזה ובחשבון המשתמש הזה. במחשב אחר, אחרי התקנה מחדש של מערכת ההפעלה או אחרי איפוס החשבון, נכנסים עם ערכת השחזור, ולכן כדאי לוודא שהיא אצלך: הגדרות ← סיסמה ואבטחה ← בדיקת ערכת השחזור.";
 
-/// The half of the password slot kept on this computer. Windows DPAPI in the program; a
-/// fake in tests (no Windows in tests).
+/// The half of the password slot kept on this computer. Windows DPAPI or the Mac Keychain in
+/// the program; a fake in tests.
 pub trait ComputerSeal: Send + Sync {
     fn available(&self) -> bool;
     fn load(&self, dir: &Path) -> Result<Key32, VaultError>;
@@ -36,7 +36,8 @@ pub trait ComputerSeal: Send + Sync {
     fn promote_next(&self, dir: &Path) -> Result<(), VaultError>;
 }
 
-/// The real one: sealed to her Windows account, as `vault.computer` in the vault folder.
+/// The real one: sealed to her account on this computer (Windows DPAPI, the Mac Keychain), as
+/// `vault.computer` in the vault folder.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct WindowsSeal;
 
@@ -115,14 +116,40 @@ pub(crate) fn bound_on_disk(dir: &Path) -> bool {
 /// another key: the key here when it opens, else a new one held aside, to be promoted with
 /// [`ComputerSeal::promote_next`] once the new slot is written (review of stage 5, S5). The
 /// key in use is never replaced before that, so a slot that was not written still opens.
-pub(crate) fn key_for_new_slot(seal: &dyn ComputerSeal, dir: &Path) -> (Option<Key32>, bool) {
+///
+/// Where a key can be kept here but this one could not be made (a locked Keychain, a dialog
+/// she cancelled, a slow answer), it is `Busy` and no slot is written: a new password is never
+/// left unbound on a computer that can bind it (review of #136).
+pub(crate) fn key_for_new_slot(
+    seal: &dyn ComputerSeal,
+    dir: &Path,
+) -> Result<(Option<Key32>, bool), VaultError> {
     if !seal.available() {
-        return (None, false);
+        return Ok((None, false));
     }
     match seal.load(dir) {
-        Ok(key) => (Some(key), false),
-        Err(_) => (seal.create_next(dir).ok(), true),
+        Ok(key) => Ok((Some(key), false)),
+        Err(_) => seal
+            .create_next(dir)
+            .map(|key| (Some(key), true))
+            .map_err(|_| VaultError::Busy),
     }
+}
+
+/// The key for a new vault's password slot: made here where it can be, else `Busy` (the
+/// vault is not created unbound on a computer that can bind it). Nothing where nothing can
+/// keep a key (Linux).
+pub(crate) fn key_for_new_vault(
+    seal: &dyn ComputerSeal,
+    dir: &Path,
+) -> Result<Option<Key32>, VaultError> {
+    if !seal.available() {
+        return Ok(None);
+    }
+    seal.load(dir)
+        .or_else(|_| seal.create(dir))
+        .map(Some)
+        .map_err(|_| VaultError::Busy)
 }
 
 /// The password as a secret: with this computer's key when there is one.
@@ -161,7 +188,7 @@ impl Core {
 
     /// This computer's key for a new password slot, and whether it is held aside until the
     /// slot is written (then [`Self::promote_password_key`]).
-    pub(crate) fn new_password_key(&self) -> (Option<Key32>, bool) {
+    pub(crate) fn new_password_key(&self) -> Result<(Option<Key32>, bool), VaultError> {
         key_for_new_slot(self.computer_seal.as_ref(), &self.dir)
     }
 

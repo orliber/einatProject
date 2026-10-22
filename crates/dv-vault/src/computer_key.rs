@@ -190,17 +190,32 @@ const OPENING_WAIT: Duration = Duration::from_secs(45);
 const IN_SESSION_WAIT: Duration = Duration::from_secs(20);
 
 /// Run `program` with `args`, `input` on stdin; its stdout, trimmed, if it succeeded.
-///
-/// A child that never comes back (an antivirus holding it, a locked-down shell, a Keychain
-/// waiting on a dialog) is stopped and the key is taken as not here: it runs on every
-/// opening, under the core's lock, so it must not freeze the program (review of stage 5,
-/// S6). Fail-closed.
 fn run(
     program: &str,
     args: &[&str],
     input: &[u8],
     wait: Duration,
 ) -> Result<Zeroizing<String>, VaultError> {
+    let (code, text) = run_with_code(program, args, input, wait)?;
+    if code != Some(0) || text.is_empty() {
+        return Err(VaultError::Crypto(
+            "the key sealed to this computer could not be opened",
+        ));
+    }
+    Ok(text)
+}
+
+/// The same, with the exit code (`None` when it was ended by a signal) whatever it was.
+///
+/// A child that never comes back (an antivirus holding it, a locked-down shell, a Keychain
+/// waiting on a dialog) is stopped and it is `Busy`: it runs on every opening, under the
+/// core's lock, so it must not freeze the program (review of stage 5, S6). Fail-closed.
+fn run_with_code(
+    program: &str,
+    args: &[&str],
+    input: &[u8],
+    wait: Duration,
+) -> Result<(Option<i32>, Zeroizing<String>), VaultError> {
     let mut cmd = Command::new(program);
     cmd.args(args)
         .stdin(Stdio::piped())
@@ -218,7 +233,8 @@ fn run(
     }
     let mut stdout = child.stdout.take();
     let reader = std::thread::spawn(move || {
-        let mut buf = Zeroizing::new(Vec::new());
+        // Room for any answer up front, so the key is never left behind in a buffer that grew.
+        let mut buf = Zeroizing::new(Vec::with_capacity(16 * 1024));
         if let Some(out) = stdout.as_mut() {
             let _ = std::io::Read::read_to_end(out, &mut buf);
         }
@@ -241,12 +257,7 @@ fn run(
         .join()
         .map_err(|_| VaultError::Crypto("the key sealed to this computer could not be read"))?;
     let text = Zeroizing::new(String::from_utf8_lossy(&out).trim().to_owned());
-    if !status.success() || text.is_empty() {
-        return Err(VaultError::Crypto(
-            "the key sealed to this computer could not be opened",
-        ));
-    }
-    Ok(text)
+    Ok((status.code(), text))
 }
 
 fn not_here() -> VaultError {
@@ -341,13 +352,22 @@ fn keychain_store(plain: &[u8; 32], purpose: Purpose) -> Result<Zeroizing<String
     aws_lc_rs::rand::fill(&mut idb).map_err(|_| VaultError::Crypto("random"))?;
     let id = hex(&idb);
     let account = keychain_account(purpose, &id);
-    let command = Zeroizing::new(format!(
-        "add-generic-password -U -s {KEYCHAIN_SERVICE} -a {account} -l {KEYCHAIN_SERVICE} -w {}\n",
-        hex(plain).as_str()
-    ));
-    // `security -i` prints its prompt and nothing else; success is the read-back below.
-    let _ = run(SECURITY, &["-i"], command.as_bytes(), OPENING_WAIT);
+    // Built in a buffer of its final size, so no copy of the key is left where it grew.
+    let head = format!(
+        "add-generic-password -U -s {KEYCHAIN_SERVICE} -a {account} -l {KEYCHAIN_SERVICE} -w "
+    );
+    let mut command = Zeroizing::new(String::with_capacity(head.len() + 2 * plain.len() + 1));
+    command.push_str(&head);
+    command.push_str(&hex(plain));
+    command.push('\n');
+    // `security -i` prints its prompt and nothing else; success is the read-back below. A
+    // Keychain that did not answer in time is not asked again (the core's lock is held).
+    let added = run_with_code(SECURITY, &["-i"], command.as_bytes(), OPENING_WAIT);
     let sealed = Zeroizing::new(format!("{KEYCHAIN_PREFIX}{}", id.as_str()));
+    if let Err(e) = added {
+        keychain_delete(&sealed, purpose);
+        return Err(e);
+    }
     match keychain_load(&sealed, purpose, OPENING_WAIT) {
         Ok(back) if back.as_slice() == plain.as_slice() => Ok(sealed),
         // An item `add` may have made is not left behind, whatever went wrong.
@@ -369,7 +389,7 @@ fn keychain_load(
         "the key kept for this computer is not readable",
     ))?;
     let account = keychain_account(purpose, id);
-    let out = run(
+    let (code, out) = run_with_code(
         SECURITY,
         &[
             "find-generic-password",
@@ -382,7 +402,33 @@ fn keychain_load(
         &[],
         wait,
     )?;
-    unhex(&out)
+    match keychain_outcome(code) {
+        Found::Yes if !out.is_empty() => unhex(&out),
+        Found::Yes | Found::No => Err(VaultError::Crypto(
+            "the key kept for this computer is not in this account's Keychain",
+        )),
+        Found::Unknown => Err(VaultError::Busy),
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Found {
+    Yes,
+    No,
+    /// Not known now: she cancelled the Keychain's dialog (exit 128), the Keychain is locked
+    /// and may not ask (36), it refused her password (51), or anything else. "Try again",
+    /// never "another computer, use the recovery kit" (review of #136).
+    Unknown,
+}
+
+/// What `security find-generic-password` says by its exit code (the low byte of the
+/// Security framework's status): only 44, `errSecItemNotFound`, means the item is not here.
+fn keychain_outcome(code: Option<i32>) -> Found {
+    match code {
+        Some(0) => Found::Yes,
+        Some(44) => Found::No,
+        _ => Found::Unknown,
+    }
 }
 
 fn keychain_delete(sealed: &str, purpose: Purpose) {
@@ -502,6 +548,15 @@ mod tests {
         }
         assert_eq!(b64(b"foobar").as_str(), "Zm9vYmFy");
         assert_eq!(b64(b"fo").as_str(), "Zm8=");
+    }
+
+    #[test]
+    fn only_a_missing_item_means_not_here() {
+        assert_eq!(keychain_outcome(Some(0)), Found::Yes);
+        assert_eq!(keychain_outcome(Some(44)), Found::No);
+        for code in [Some(128), Some(36), Some(51), Some(1), None] {
+            assert_eq!(keychain_outcome(code), Found::Unknown, "{code:?}");
+        }
     }
 
     #[test]

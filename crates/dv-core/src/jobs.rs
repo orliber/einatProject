@@ -168,20 +168,24 @@ impl SlotJob {
                 // until the slot is written, so the key in use is never lost to a slot
                 // that was not (review of stage 5, S5).
                 let fresh = if here.is_none() {
-                    let (key, aside) = key_for_new_slot(seal, &self.dir);
-                    key_aside = aside && key.is_some();
-                    key
+                    key_for_new_slot(seal, &self.dir).map(|(key, aside)| {
+                        key_aside = aside;
+                        key
+                    })
                 } else {
-                    None
+                    Ok(None)
                 };
-                NewSlot::password_here(
-                    &self.header,
-                    proof,
-                    new_password,
-                    params,
-                    here.as_ref().or(fresh.as_ref()),
-                )
-                .map(|s| (s, None))
+                fresh
+                    .and_then(|fresh| {
+                        NewSlot::password_here(
+                            &self.header,
+                            proof,
+                            new_password,
+                            params,
+                            here.as_ref().or(fresh.as_ref()),
+                        )
+                    })
+                    .map(|s| (s, None))
             }
             None => NewSlot::recovery(&self.header, proof).map(|(s, k)| (s, Some(k))),
         };
