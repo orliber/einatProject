@@ -93,11 +93,11 @@ export function forgetScoreDrafts() {
   drafts.clear();
 }
 
-/** The instrument a new table opens on: the first whose ages hold the child's age. */
-function firstFit(age: Age | null): string {
-  if (!age) return "wppsi_iv";
+/** The instrument a new table opens on: the first whose ages (from the core's tables) hold the child's age. */
+function firstFit(list: Instrument[], age: Age | null): string | null {
+  if (!age) return null;
   const months = age.years * 12 + age.months;
-  return months > 91 && months <= 203 ? "wisc_v" : "wppsi_iv";
+  return list.find((i) => months >= i.min_age_months && months <= i.max_age_months)?.key ?? null;
 }
 
 /**
@@ -124,7 +124,9 @@ export function ScoresView(props: {
     return d && d.inputId === inputId ? d : null;
   });
   const [instruments, setInstruments] = useState<Instrument[] | null>(null);
-  const [key, setKey] = useState(draft?.key ?? props.sheet?.instrument ?? firstFit(props.age));
+  /** A new table opens on the instrument for the child's age (null: kept or edited table). */
+  const opensFor = useRef(draft || props.sheet ? null : props.age);
+  const [key, setKey] = useState(draft?.key ?? props.sheet?.instrument ?? "wppsi_iv");
   const [entries, setEntries] = useState<Record<string, Entry>>(() => draft?.entries ?? toEntries(props.sheet));
   const [module, setModule] = useState(draft?.module ?? props.sheet?.module ?? "");
   const [cutoff, setCutoff] = useState(draft?.cutoff ?? (props.sheet?.cutoff != null ? String(props.sheet.cutoff) : ""));
@@ -133,7 +135,8 @@ export function ScoresView(props: {
   const [saving, setSaving] = useState(false);
   /** Saved: nothing here is unsaved any more, even before the view closes. */
   const [done, setDone] = useState(false);
-  const [initialEntries] = useState(() => draft?.initialEntries ?? JSON.stringify(entries));
+  // Everything she can type: the scores, their notes, the module, the cut-off and the notes.
+  const [initialEntries] = useState(() => draft?.initialEntries ?? JSON.stringify([entries, module, cutoff, notes]));
   const [error, setError] = useState<string | null>(null);
   const [pasted, setPasted] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -146,7 +149,12 @@ export function ScoresView(props: {
     let alive = true;
     ipc
       .scoreInstruments()
-      .then((list) => alive && setInstruments(list))
+      .then((list) => {
+        if (!alive) return;
+        setInstruments(list);
+        const fit = firstFit(list, opensFor.current);
+        if (fit) setKey(fit);
+      })
       .catch((e: unknown) => alive && setError(fail(e as never)));
     return () => {
       alive = false;
@@ -189,7 +197,7 @@ export function ScoresView(props: {
     };
   }, [sheet]);
 
-  const dirty = !saving && !done && JSON.stringify(entries) !== initialEntries;
+  const dirty = !saving && !done && JSON.stringify([entries, module, cutoff, notes]) !== initialEntries;
   // Unsaved scores wait in memory while she is on another stage (see `drafts`).
   useEffect(() => {
     if (dirty) drafts.set(props.caseId, { inputId, key, entries, module, cutoff, notes, initialEntries });

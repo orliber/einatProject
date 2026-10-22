@@ -26,12 +26,15 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
   // Sign in with Google when the password is forgotten (D-041): offered once, right after the
   // kit, while the vault is open; skipped where this version cannot do it (D-096).
   const [googleAvailable, setGoogleAvailable] = useState(false);
+  // The steps are shown once it is known whether Google is one of them: no 3 turning into 4.
+  const [googleKnown, setGoogleKnown] = useState(false);
   const [googleOpen, setGoogleOpen] = useState(false);
   const [googleOn, setGoogleOn] = useState(false);
   useEffect(() => {
     ipc.googleStatus()
       .then((g) => setGoogleAvailable(g?.available === true && !g.on))
-      .catch(() => setGoogleAvailable(false));
+      .catch(() => setGoogleAvailable(false))
+      .finally(() => setGoogleKnown(true));
   }, []);
   const order: Step[] = googleAvailable ? ["password", "recovery", "google", "me"] : ["password", "recovery", "me"];
 
@@ -91,7 +94,7 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
       <header className="setup-head">
         <LockIcon size={24} color="var(--primary)" />
         <span className="brand-name">{he.appName}</span>
-        {step !== "restore" && <ol className="steps" aria-label="שלבי ההגדרה">
+        {step !== "restore" && googleKnown && <ol className="steps" aria-label="שלבי ההגדרה">
           {order.map((s, i) => (
             <li key={s} className={`step step-${stepState(s)}`} aria-current={stepState(s) === "current" ? "step" : undefined}>
               <span className="step-dot">{stepState(s) === "done" ? "✓" : i + 1}</span>
