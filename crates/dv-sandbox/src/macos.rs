@@ -63,6 +63,10 @@ const SYSCTL_NAMES: &[&str] = &[
     "kern.secure_kernel",
     "sysctl.proc_translated",
     "vm.pagesize",
+    // dyld reads these two to find the system's libraries (the OS cryptex) and stops the
+    // program before `main` without them (macOS 26).
+    "kern.bootargs",
+    "security.mac.lockdown_mode_state",
 ];
 /// The same by prefix: processor features and per-core-type sizes.
 const SYSCTL_PREFIXES: &[&str] = &["hw.optional.", "hw.perflevel", "machdep.cpu."];
@@ -93,6 +97,8 @@ pub fn profile(exe: &Path, policy: &Policy) -> io::Result<String> {
     }
     p.push_str(&format!("(allow file-read*{subpaths})\n"));
     p.push_str(&format!("(allow file-map-executable{subpaths})\n"));
+    // dyld opens the root folder itself (not what is in it) to find the shared cache.
+    p.push_str("(allow file-read-data (literal \"/\"))\n");
     p.push_str(
         "(allow file-read* (literal \"/dev/null\") (literal \"/dev/random\") (literal \"/dev/urandom\") (literal \"/private/etc/localtime\"))\n",
     );
