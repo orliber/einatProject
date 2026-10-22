@@ -91,19 +91,30 @@ async fn install_on_mac(app: &tauri::AppHandle, file: dv_core::update::Downloade
     let bundle = std::env::current_exe()
         .ok()
         .and_then(|exe| dv_core::update::bundle_of(&exe));
-    let placed = tauri::async_runtime::spawn_blocking(move || match bundle {
-        Some(bundle) => dv_core::update::install_macos(&file, &bundle)
+    let work = app.path().app_local_data_dir().ok();
+    let placed = tauri::async_runtime::spawn_blocking(move || match (bundle, work) {
+        (Some(bundle), Some(work)) => dv_core::update::install_macos(&file, &bundle, &work)
             .map(|()| bundle)
             .map_err(|_| file),
-        None => Err(file),
+        _ => Err(file),
     })
     .await
     .map_err(|_| internal("task"))?;
     match placed {
         Ok(bundle) => {
-            std::process::Command::new("/usr/bin/open")
-                .arg("-n")
+            // The new version starts only once this one has exited, so the two never hold the
+            // vault at once. The paths are arguments to the script, never part of it.
+            std::process::Command::new("/bin/sh")
+                .args([
+                    "-c",
+                    "while kill -0 \"$1\" 2>/dev/null; do /bin/sleep 0.2; done; exec /usr/bin/open -n \"$2\"",
+                    "dv-relaunch",
+                    &std::process::id().to_string(),
+                ])
                 .arg(&bundle)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
                 .spawn()
                 .map_err(|_| internal("the new version did not start"))?;
             app.exit(0);

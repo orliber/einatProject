@@ -170,65 +170,115 @@ pub fn bundle_of(exe: &Path) -> Option<PathBuf> {
 }
 
 /// On a Mac (D-101): the new version from the verified disk image takes the place of the app
-/// bundle `bundle`. The image is mounted read-only and hidden, its one `.app` is copied beside
-/// the old bundle (`ditto`, which keeps the signature), and only then are the two swapped, so
-/// a copy that failed leaves the old version in place. The vault folder is elsewhere and is
-/// never touched. Every program is called by its full path, with arguments, no shell.
-pub fn install_macos(file: &Downloaded, bundle: &Path) -> Result<(), CoreError> {
-    let fail = |what: &str| CoreError::Internal(format!("mac update: {what}"));
-    if !still_intact(file) {
-        return Err(fail("the disk image changed after it was checked"));
-    }
-    let run = |program: &str, args: &[&std::ffi::OsStr]| -> Result<(), CoreError> {
-        let status = std::process::Command::new(program)
+/// bundle `bundle`, working in a private folder made under `work` (the app's own data
+/// folder, outside the vault folder; never the system's temporary folder). Every program is
+/// called by its full path, with arguments, no shell. The vault folder is never touched.
+pub fn install_macos(file: &Downloaded, bundle: &Path, work: &Path) -> Result<(), CoreError> {
+    install_macos_with(file, bundle, &SystemTools, work)
+}
+
+/// The programs the Mac install runs; a fake in tests.
+pub(crate) trait MacTools {
+    /// Run `program` with `args`; whether it succeeded.
+    fn run(&self, program: &str, args: &[&std::ffi::OsStr]) -> bool;
+}
+
+struct SystemTools;
+
+impl MacTools for SystemTools {
+    fn run(&self, program: &str, args: &[&std::ffi::OsStr]) -> bool {
+        std::process::Command::new(program)
             .args(args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
-            .map_err(|_| fail(program))?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(fail(program))
-        }
-    };
+            .is_ok_and(|s| s.success())
+    }
+}
+
+/// The install, in order:
+/// 1. the image is read once, its SHA-256 checked against the signed one, and those same
+///    bytes written into a new folder only she can open (`0700`, under `work`):
+///    what is mounted is exactly what was checked, not a file another program could swap;
+/// 2. that copy is mounted read-only and hidden, in the same private folder;
+/// 3. its one `.app` is copied beside the old bundle (`ditto`, which keeps the signature),
+///    and the copy's signature is checked whole (`codesign --verify --deep --strict`);
+/// 4. only then are the two swapped, so any failure before leaves the old version in place.
+pub(crate) fn install_macos_with(
+    file: &Downloaded,
+    bundle: &Path,
+    tools: &dyn MacTools,
+    work: &Path,
+) -> Result<(), CoreError> {
+    let fail = |what: &str| CoreError::Internal(format!("mac update: {what}"));
     let name = bundle.file_name().ok_or_else(|| fail("bundle name"))?;
     let parent = bundle.parent().ok_or_else(|| fail("bundle folder"))?;
-    let mount = file.path.with_extension("mount");
-    let _ = fs::remove_dir_all(&mount);
-    fs::create_dir_all(&mount).map_err(|_| fail("mount point"))?;
-    run(
-        "/usr/bin/hdiutil",
-        &[
-            "attach".as_ref(),
-            "-nobrowse".as_ref(),
-            "-readonly".as_ref(),
-            "-noautoopen".as_ref(),
-            "-mountpoint".as_ref(),
-            mount.as_os_str(),
-            file.path.as_os_str(),
-        ],
-    )?;
+    let bytes = fs::read(&file.path).map_err(|_| fail("the disk image could not be read"))?;
+    if update::sha256(&bytes) != file.sha256 {
+        return Err(fail("the disk image changed after it was checked"));
+    }
+    let private = private_folder(work).map_err(|_| fail("a private folder"))?;
+    let image = private.join("update.dmg");
+    let mount = private.join("mount");
     let staged = parent.join(format!("{}.new", name.to_string_lossy()));
     let copied = (|| {
-        let apps: Vec<PathBuf> = fs::read_dir(&mount)
-            .map_err(|_| fail("disk image"))?
-            .filter_map(Result::ok)
-            .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|x| x == "app") && !p.is_symlink())
-            .collect();
-        let [app] = apps.as_slice() else {
-            return Err(fail("the disk image does not hold one app"));
-        };
-        let _ = fs::remove_dir_all(&staged);
-        run("/usr/bin/ditto", &[app.as_os_str(), staged.as_os_str()])
+        fs::write(&image, &bytes).map_err(|_| fail("the private copy"))?;
+        drop(bytes);
+        fs::create_dir(&mount).map_err(|_| fail("mount point"))?;
+        let attached = tools.run(
+            "/usr/bin/hdiutil",
+            &[
+                "attach".as_ref(),
+                "-nobrowse".as_ref(),
+                "-readonly".as_ref(),
+                "-noautoopen".as_ref(),
+                "-mountpoint".as_ref(),
+                mount.as_os_str(),
+                image.as_os_str(),
+            ],
+        );
+        if !attached {
+            return Err(fail("/usr/bin/hdiutil"));
+        }
+        let found = (|| {
+            let apps: Vec<PathBuf> = fs::read_dir(&mount)
+                .map_err(|_| fail("disk image"))?
+                .filter_map(Result::ok)
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|x| x == "app") && !p.is_symlink())
+                .collect();
+            let [app] = apps.as_slice() else {
+                return Err(fail("the disk image does not hold one app"));
+            };
+            let _ = fs::remove_dir_all(&staged);
+            if tools.run("/usr/bin/ditto", &[app.as_os_str(), staged.as_os_str()]) {
+                Ok(())
+            } else {
+                Err(fail("/usr/bin/ditto"))
+            }
+        })();
+        let _ = tools.run(
+            "/usr/bin/hdiutil",
+            &["detach".as_ref(), mount.as_os_str(), "-force".as_ref()],
+        );
+        found?;
+        let whole = tools.run(
+            "/usr/bin/codesign",
+            &[
+                "--verify".as_ref(),
+                "--deep".as_ref(),
+                "--strict".as_ref(),
+                staged.as_os_str(),
+            ],
+        );
+        if whole {
+            Ok(())
+        } else {
+            Err(fail("the new version's signature does not hold"))
+        }
     })();
-    let _ = run(
-        "/usr/bin/hdiutil",
-        &["detach".as_ref(), mount.as_os_str(), "-force".as_ref()],
-    );
-    let _ = fs::remove_dir(&mount);
+    let _ = fs::remove_dir_all(&private);
     if let Err(e) = copied {
         let _ = fs::remove_dir_all(&staged);
         return Err(e);
@@ -246,6 +296,20 @@ pub fn install_macos(file: &Downloaded, bundle: &Path) -> Result<(), CoreError> 
     }
     let _ = fs::remove_dir_all(&old);
     Ok(())
+}
+
+/// A new folder under `work` that only this account can open. Never one that already exists:
+/// a folder put there in advance makes the install fail, not use it.
+fn private_folder(work: &Path) -> std::io::Result<PathBuf> {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let dir = work.join(format!("dv-update-{}-{nanos}", std::process::id()));
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(&dir)?;
+    Ok(dir)
 }
 
 /// Installers from earlier updates are not kept.
@@ -396,6 +460,96 @@ mod tests {
         }
     }
 
+    /// The Mac's programs, played on folders: `attach` puts `apps` in the mount point,
+    /// `ditto` copies, `codesign` answers `signed`. Records what ran.
+    struct FakeMac {
+        apps: Vec<&'static str>,
+        signed: bool,
+        ran: std::cell::RefCell<Vec<String>>,
+    }
+
+    impl MacTools for FakeMac {
+        fn run(&self, program: &str, args: &[&std::ffi::OsStr]) -> bool {
+            self.ran.borrow_mut().push(program.to_owned());
+            let arg = |i: usize| PathBuf::from(args[i]);
+            match (program, args.first().and_then(|a| a.to_str())) {
+                ("/usr/bin/hdiutil", Some("attach")) => {
+                    let image = arg(6);
+                    assert_eq!(fs::read(&image).unwrap(), b"disk image");
+                    let mount = arg(5);
+                    assert!(mount.starts_with(image.parent().unwrap()));
+                    for app in &self.apps {
+                        fs::create_dir_all(mount.join(app).join("Contents")).unwrap();
+                        fs::write(mount.join(app).join("Contents/new"), b"new").unwrap();
+                    }
+                    true
+                }
+                ("/usr/bin/hdiutil", Some("detach")) => true,
+                ("/usr/bin/ditto", _) => {
+                    let (from, to) = (arg(0), arg(1));
+                    fs::create_dir_all(to.join("Contents")).unwrap();
+                    fs::copy(from.join("Contents/new"), to.join("Contents/new")).is_ok()
+                }
+                ("/usr/bin/codesign", _) => self.signed,
+                _ => false,
+            }
+        }
+    }
+
+    fn mac_case(
+        apps: Vec<&'static str>,
+        signed: bool,
+    ) -> (tempfile::TempDir, Downloaded, PathBuf, FakeMac) {
+        let dir = tempfile::tempdir().unwrap();
+        let (t, key) = server(b"disk image", b"disk image");
+        let file = download_with(&t, &[key], "0.2.9", dir.path()).unwrap();
+        let bundle = dir.path().join("Applications").join("V.app");
+        fs::create_dir_all(bundle.join("Contents")).unwrap();
+        fs::write(bundle.join("Contents/old"), b"old").unwrap();
+        fs::create_dir_all(dir.path().join("tmp")).unwrap();
+        let tools = FakeMac {
+            apps,
+            signed,
+            ran: std::cell::RefCell::new(Vec::new()),
+        };
+        (dir, file, bundle, tools)
+    }
+
+    #[test]
+    fn on_a_mac_the_new_version_takes_the_old_ones_place_and_nothing_is_left() {
+        let (dir, file, bundle, tools) = mac_case(vec!["V.app"], true);
+        install_macos_with(&file, &bundle, &tools, &dir.path().join("tmp")).unwrap();
+        assert!(bundle.join("Contents/new").is_file() && !bundle.join("Contents/old").exists());
+        let apps = dir.path().join("Applications");
+        assert_eq!(
+            fs::read_dir(&apps).unwrap().count(),
+            1,
+            "no .new or .old left"
+        );
+        assert_eq!(
+            fs::read_dir(dir.path().join("tmp")).unwrap().count(),
+            0,
+            "private copy gone"
+        );
+        assert!(tools.ran.borrow().iter().any(|p| p == "/usr/bin/codesign"));
+    }
+
+    #[test]
+    fn on_a_mac_a_broken_signature_or_a_strange_image_leaves_the_old_version() {
+        for (apps, signed) in [
+            (vec!["V.app"], false),
+            (vec!["V.app", "W.app"], true),
+            (vec![], true),
+        ] {
+            let (dir, file, bundle, tools) = mac_case(apps.clone(), signed);
+            assert!(install_macos_with(&file, &bundle, &tools, &dir.path().join("tmp")).is_err());
+            assert!(bundle.join("Contents/old").is_file(), "{apps:?} {signed}");
+            let apps_dir = dir.path().join("Applications");
+            assert_eq!(fs::read_dir(&apps_dir).unwrap().count(), 1, "no .new left");
+            assert_eq!(fs::read_dir(dir.path().join("tmp")).unwrap().count(), 0);
+        }
+    }
+
     #[test]
     fn a_disk_image_changed_on_disk_is_never_installed() {
         let dir = tempfile::tempdir().unwrap();
@@ -404,8 +558,14 @@ mod tests {
         fs::write(&file.path, b"swapped").unwrap();
         let bundle = dir.path().join("V.app");
         fs::create_dir_all(&bundle).unwrap();
-        assert!(install_macos(&file, &bundle).is_err());
+        let tools = FakeMac {
+            apps: vec!["V.app"],
+            signed: true,
+            ran: std::cell::RefCell::new(Vec::new()),
+        };
+        assert!(install_macos_with(&file, &bundle, &tools, dir.path()).is_err());
         assert!(bundle.is_dir(), "the version in place stays");
+        assert!(tools.ran.borrow().is_empty(), "nothing was mounted");
     }
 
     #[test]
