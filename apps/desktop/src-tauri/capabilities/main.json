@@ -17,6 +17,8 @@
     "allow-touch",
     "allow-readiness",
     "allow-confirm-readiness",
+    "allow-instrument-approvals",
+    "allow-set-instrument-status",
     "allow-security-status",
     "allow-export-security-pdf",
     "allow-set-send-stopped",

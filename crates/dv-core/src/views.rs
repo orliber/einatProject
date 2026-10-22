@@ -263,6 +263,9 @@ pub struct MaterialRouting {
     pub record: Option<PriorRecordView>,
     /// Numbers in the summary or the record that are not in the material ("לבדוק").
     pub summary_notes: Vec<String>,
+    /// Why it goes into no request and feeds no section: a score table of an instrument she
+    /// marked "לא מעבירה את זה" (D-098). `None` for every other material.
+    pub left_out: Option<String>,
 }
 
 /// A previous assessment or treatment as the materials screen shows it (round 31).

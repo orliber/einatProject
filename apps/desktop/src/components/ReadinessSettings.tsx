@@ -17,8 +17,9 @@ const ITEMS: Record<string, { label: string; hint: string; jump?: SettingsPane }
     hint: "",
   },
   score_tables: {
-    label: "עברתי על טבלאות הציונים ואישרתי אותן",
-    hint: "",
+    label: "טבלאות המבחנים שבתיקים הפתוחים אושרו",
+    hint: "לכל מבחן: מאושר, או לא מעבירה את זה.",
+    jump: "tests",
   },
   legal: {
     label: "התייעצתי עם יועץ משפטי או יועץ פרטיות",

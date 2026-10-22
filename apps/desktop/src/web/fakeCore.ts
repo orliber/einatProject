@@ -195,6 +195,8 @@ export class FakeCore {
   private reportCheckOn = false;
   private nameModel = { enabled: false, downloaded: false, size_mb: 705, problem: null as string | null };
   private ready: Record<string, number | null> = {};
+  /** Her answer for each instrument's tables (D-098); none is "awaiting". */
+  private instrumentAnswers: Record<string, "approved" | "not_used"> = {};
   private sendStopped = false;
   /** The material deleted last, for "ביטול" (forgotten on lock, as in the core). */
   private removedInput: { caseId: string; input: CaseInput; at: number } | null = null;
@@ -389,6 +391,15 @@ export class FakeCore {
     return input;
   }
 
+  /** Every instrument with her answer and the open cases that hold a table of it. */
+  private instrumentApprovals() {
+    return instruments.map((instrument) => ({
+      instrument,
+      status: this.instrumentAnswers[instrument.key] ?? ("awaiting" as const),
+      open_cases: this.cases.filter((c) => c.deletedAt === null && [...c.sheets.values()].some((sh) => sh.instrument === instrument.key)).length,
+    }));
+  }
+
   private find(id: unknown): Case {
     return this.cases.find((c) => c.id === id) ?? fail("not_found", "התיק לא נמצא");
   }
@@ -484,7 +495,14 @@ export class FakeCore {
         summary: read ? restore(read.text, c.people, this.practitioner) : "",
         record: read?.record ? { ...read.record, date: date ? `${date[1]}/${date[0]}` : "" } : null,
         summary_notes: [],
+        left_out: null,
       };
+    }).map((route) => {
+      // A score table of an instrument she does not give feeds nothing (D-098).
+      const sheet = c.sheets.get(route.input_id);
+      if (!sheet || this.instrumentAnswers[sheet.instrument] !== "not_used") return route;
+      const name = instruments.find((x) => x.key === sheet.instrument)?.name ?? sheet.instrument;
+      return { ...route, feeds: [], needs_sorting: false, left_out: `סימנת בהגדרות שאת לא מעבירה את ${name}. הציונים נשארים בתיק כמו שנשמרו, אבל לא נשלחים ולא נכנסים לדוח.` };
     });
   }
 
@@ -777,7 +795,7 @@ export class FakeCore {
   // ------------------------------------------------------------------ the IPC surface
   async handle(cmd: string, args: unknown, options?: { headers?: Record<string, string> }): Promise<unknown> {
     const a = (args ?? {}) as Args;
-    if (!["plugin:event|listen", "plugin:event|unlisten", "ping", "recent_crashes", "app_status", "unlock", "unlock_with_recovery", "create_vault", "confirm_recovery_key", "google_status", "google_recover", "google_cancel", "score_instruments", "preview_scores", "choose_backup", "restore_backup", "forget_backup"].includes(cmd) && !this.unlocked) {
+    if (!["plugin:event|listen", "plugin:event|unlisten", "ping", "recent_crashes", "app_status", "unlock", "unlock_with_recovery", "create_vault", "confirm_recovery_key", "google_status", "google_recover", "google_cancel", "choose_backup", "restore_backup", "forget_backup"].includes(cmd) && !this.unlocked) {
       fail("locked", "הכספת נעולה. יש לפתוח אותה מחדש.");
     }
     if (FakeStyle.handles(cmd)) return this.style.handle(cmd, a, args, options?.headers ?? {}, this.allPeople(), this.practitioner);
@@ -833,10 +851,12 @@ export class FakeCore {
       case "readiness":
       case "confirm_readiness": {
         if (cmd === "confirm_readiness") this.ready[a.key as string] = a.done ? 1_790_000_000 : null;
-        const manual = ["zdr", "consent_form", "score_tables", "legal"].map((key) => ({
+        const manual = ["zdr", "consent_form", "legal"].map((key) => ({
           key, done: this.ready[key] != null, checked_by_program: false, confirmed_at: this.ready[key] ?? null,
         }));
+        const tables = this.instrumentApprovals().every((x) => x.status !== "awaiting" || x.open_cases === 0);
         const items = [...manual,
+          { key: "score_tables", done: tables, checked_by_program: true, confirmed_at: null },
           { key: "api_key", done: false, checked_by_program: true, confirmed_at: null },
           { key: "backup", done: false, checked_by_program: true, confirmed_at: null },
           { key: "disk", done: true, checked_by_program: true, confirmed_at: null }];
@@ -1136,8 +1156,18 @@ export class FakeCore {
         return null;
       }
       case "score_instruments":
-        return instruments;
+        return this.instrumentApprovals().filter((x) => x.status !== "not_used");
+      case "instrument_approvals":
+        return this.instrumentApprovals();
+      case "set_instrument_status": {
+        const key = String(a.key);
+        if (!instruments.some((i) => i.key === key)) return fail("not_found", "המבחן לא נמצא");
+        if (a.status !== "approved" && a.status !== "not_used") return fail("refused", "אפשר לבחור \"מאושר\" או \"לא מעבירה את זה\".");
+        this.instrumentAnswers[key] = a.status;
+        return this.instrumentApprovals();
+      }
       case "preview_scores":
+        if (this.instrumentAnswers[(a.sheet as ScoreSheet).instrument] === "not_used") return fail("refused", "סימנת בהגדרות שאת לא מעבירה את המבחן הזה.");
         try {
           return formatSheet(a.sheet as ScoreSheet);
         } catch (e) {
@@ -1146,6 +1176,7 @@ export class FakeCore {
       case "save_scores": {
         const c = this.find(a.caseId);
         const sheet = a.sheet as ScoreSheet;
+        if (this.instrumentAnswers[sheet.instrument] === "not_used") return fail("refused", "סימנת בהגדרות שאת לא מעבירה את המבחן הזה.");
         let text = "";
         try {
           text = formatSheet(sheet);

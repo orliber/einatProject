@@ -27,20 +27,11 @@ pub struct FollowUpView {
 }
 
 impl Core {
+    /// The case's score tables, but for instruments she does not give: the comparison becomes
+    /// a material, and so goes into requests (D-098).
     fn sheets(&mut self, case_id: &str) -> Result<Vec<ScoreSheet>, CoreError> {
         let v = self.vault_ref()?;
-        let mut out = Vec::new();
-        for i in v.inputs(case_id)? {
-            if i.kind != InputKind::TestScores {
-                continue;
-            }
-            if let Some(data) = v.input_data(case_id, &i.id)? {
-                if let Ok(sheet) = serde_json::from_str::<ScoreSheet>(&data) {
-                    out.push(sheet);
-                }
-            }
-        }
-        Ok(out)
+        crate::score_sheets(v, case_id, &v.inputs(case_id)?)
     }
 
     /// Open a follow-up assessment of `previous_id`: same names and folder, a new consent.

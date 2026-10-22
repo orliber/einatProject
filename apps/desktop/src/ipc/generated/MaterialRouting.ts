@@ -44,4 +44,9 @@ record: PriorRecordView | null,
 /**
  * Numbers in the summary or the record that are not in the material ("לבדוק").
  */
-summary_notes: Array<string>, };
+summary_notes: Array<string>, 
+/**
+ * Why it goes into no request and feeds no section: a score table of an instrument she
+ * marked "לא מעבירה את זה" (D-098). `None` for every other material.
+ */
+left_out: string | null, };

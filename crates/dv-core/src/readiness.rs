@@ -1,8 +1,9 @@
 //! "Ready for real cases": one list of what must be true before a real child's material goes
 //! into the program (ROADMAP stage 8, D-004). It informs and links; it never blocks work.
 //!
-//! Some items the program checks itself (a backup, disk encryption, an API key). The others
-//! only she can confirm (a written ZDR agreement, the consent form, the score tables); each
+//! Some items the program checks itself (a backup, disk encryption, an API key, and since
+//! round 59 the score tables: every instrument in an open case approved, D-098). The others
+//! only she can confirm (a written ZDR agreement, the consent form, legal advice); each
 //! confirmation is kept with its date, and shows in the activity log.
 
 use serde::{Deserialize, Serialize};
@@ -14,7 +15,7 @@ use crate::{Core, CoreError};
 const PREFIX: &str = "ready/";
 
 /// Items she confirms herself, in the order shown.
-pub(crate) const CONFIRMED: &[&str] = &["zdr", "consent_form", "score_tables", "legal"];
+pub(crate) const CONFIRMED: &[&str] = &["zdr", "consent_form", "legal"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -44,6 +45,8 @@ impl Core {
         let v = self.vault_ref()?;
         // A key for the AI she chose (the local model needs none; D-040).
         let api_key = crate::key_of(v, provider)?.is_some();
+        // Her answer in Settings → המבחנים, for each instrument in an open case (D-098).
+        let tables = crate::instruments::tables_approved(v)?;
         let mut items = Vec::new();
         for key in CONFIRMED {
             let confirmed_at = v
@@ -62,6 +65,7 @@ impl Core {
             checked_by_program: true,
             confirmed_at: None,
         };
+        items.push(auto("score_tables", tables));
         items.push(auto("api_key", api_key));
         items.push(auto(
             "backup",

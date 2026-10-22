@@ -17,6 +17,24 @@ pub(crate) async fn confirm_readiness(
     with_core(&state, move |c| c.confirm_readiness(&key, done)).await
 }
 
+/// Settings → המבחנים: every instrument with her answer (D-098).
+#[tauri::command]
+pub(crate) async fn instrument_approvals(
+    state: tauri::State<'_, AppState>,
+) -> Res<Vec<dv_core::InstrumentApproval>> {
+    with_core(&state, |c| c.instrument_approvals()).await
+}
+
+/// Her answer for one instrument: approved, or not given.
+#[tauri::command]
+pub(crate) async fn set_instrument_status(
+    state: tauri::State<'_, AppState>,
+    key: String,
+    status: dv_core::InstrumentStatus,
+) -> Res<Vec<dv_core::InstrumentApproval>> {
+    with_core(&state, move |c| c.set_instrument_status(&key, status)).await
+}
+
 /// The security status list (S4): what is on, what is not.
 #[tauri::command]
 pub(crate) async fn security_status(state: tauri::State<'_, AppState>) -> Res<SecurityStatus> {

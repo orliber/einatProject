@@ -271,7 +271,10 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
                 <button type="button" className="btn btn-small" onClick={() => void edit(input)}>עריכה</button>
                 <button type="button" className="btn btn-small" onClick={() => void remove(input)}>מחיקה</button>
               </div>
-              {route && (
+              {route?.left_out && (
+                <p className="material-feeds small warn-text" role="note">{route.left_out}</p>
+              )}
+              {route && !route.left_out && (
                 <div className="material-feeds">
                   <span className="small grow">
                     <b>מזין בדוח: </b>
@@ -376,6 +379,8 @@ function PriorOrder({ api, titleOf, open }: { api: CaseApi; titleOf: (id: string
 }
 
 function feedText(route: MaterialRouting | undefined, titleOf: (key: string) => string): string {
+  // A score table of an instrument she does not give (D-098) goes nowhere.
+  if (route?.left_out) return "לא נשלח ולא נכנס לדוח";
   const titles = (route?.feeds ?? []).map(titleOf);
   if (!titles.length) return "לא מזין סעיף";
   return `מזין: ${titles.slice(0, 2).join(", ")}${titles.length > 2 ? ` ועוד ${titles.length - 2}` : ""}`;

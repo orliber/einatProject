@@ -352,6 +352,8 @@ fn main() {
             touch,
             readiness,
             confirm_readiness,
+            instrument_approvals,
+            set_instrument_status,
             security_status,
             export_security_pdf,
             set_send_stopped,

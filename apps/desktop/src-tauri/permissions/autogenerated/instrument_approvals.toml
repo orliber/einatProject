@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-instrument-approvals"
+description = "Enables the instrument_approvals command without any pre-configured scope."
+commands.allow = ["instrument_approvals"]
+
+[[permission]]
+identifier = "deny-instrument-approvals"
+description = "Denies the instrument_approvals command without any pre-configured scope."
+commands.deny = ["instrument_approvals"]

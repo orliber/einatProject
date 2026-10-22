@@ -29,6 +29,8 @@ const ALLOWED = new Set([
   "choose_backup",
   "clear_report_template",
   "confirm_readiness",
+  "instrument_approvals",
+  "set_instrument_status",
   "prepare_verify",
   "security_status",
   "export_security_pdf",

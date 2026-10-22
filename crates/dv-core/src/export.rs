@@ -332,6 +332,8 @@ impl Core {
         });
 
         // Score tables entered in the table (not imported text), in the order they were added.
+        // Not a table of an instrument she does not give: its ranges are not hers (D-098).
+        let not_used = crate::instruments::not_used(v)?;
         let mut tables = Vec::new();
         for input in v
             .inputs(case_id)?
@@ -343,6 +345,9 @@ impl Core {
             };
             let sheet: dv_domain::ScoreSheet =
                 serde_json::from_str(&data).map_err(|e| CoreError::Internal(e.to_string()))?;
+            if not_used.contains(&sheet.instrument) {
+                continue;
+            }
             let (title, rows, note) = dv_domain::sheet_table(&sheet).map_err(CoreError::Refused)?;
             let charts = dv_domain::sheet_profiles(&sheet)
                 .map_err(CoreError::Refused)?

@@ -22,7 +22,8 @@ import type { Identity } from "./Identity";
 import type { IdentityInput } from "./IdentityInput";
 import type { ImportPreview } from "./ImportPreview";
 import type { InputKind } from "./InputKind";
-import type { Instrument } from "./Instrument";
+import type { InstrumentApproval } from "./InstrumentApproval";
+import type { InstrumentStatus } from "./InstrumentStatus";
 import type { InterpretationResult } from "./InterpretationResult";
 import type { InterpretationView } from "./InterpretationView";
 import type { NameMatch } from "./NameMatch";
@@ -127,6 +128,7 @@ export type Commands = {
   import_document: { args: Uint8Array; returns: ImportPreview };
   import_style_source: { args: Uint8Array; returns: StyleImportPreview };
   install_update: { args: undefined; returns: null };
+  instrument_approvals: { args: undefined; returns: Array<InstrumentApproval> };
   keep_case_longer: { args: { caseId: string; years: number }; returns: null };
   letter: { args: { caseId: string; audience: string }; returns: Array<ParagraphView> };
   list_cases: { args: undefined; returns: Array<CaseSummary> };
@@ -177,7 +179,7 @@ export type Commands = {
   save_scores: { args: { caseId: string; inputId: string | null; sheet: ScoreSheet }; returns: CaseInput };
   save_style_draft: { args: { profile: StyleProfile }; returns: StyleProfileView };
   save_style_source: { args: { token: string; included: Array<number>; title: string | null }; returns: StyleSourceView };
-  score_instruments: { args: undefined; returns: Array<Instrument> };
+  score_instruments: { args: undefined; returns: Array<InstrumentApproval> };
   score_sheet: { args: { caseId: string; inputId: string }; returns: ScoreSheet | null };
   section_library: { args: { caseId: string; sectionKey: string }; returns: SectionLibrary };
   section_modes: { args: undefined; returns: Array<SectionModeView> };
@@ -199,6 +201,7 @@ export type Commands = {
   set_dsm_severity: { args: { caseId: string; social: number | null; restricted: number | null }; returns: null };
   set_identities: { args: { caseId: string; identities: Array<IdentityInput> }; returns: Array<Identity> };
   set_input_sections: { args: { caseId: string; inputId: string; sections: Array<string> }; returns: null };
+  set_instrument_status: { args: { key: string; status: InstrumentStatus }; returns: Array<InstrumentApproval> };
   set_letter_left_out: { args: { caseId: string; ids: Array<string> | null }; returns: null };
   set_lock_minutes: { args: { minutes: number }; returns: null };
   set_model: { args: { model: string }; returns: null };

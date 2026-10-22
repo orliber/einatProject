@@ -19,6 +19,7 @@ pub use binding::{ComputerSeal, WindowsSeal};
 pub mod google;
 mod guides;
 mod history;
+mod instruments;
 mod intake;
 mod library;
 pub mod name_model;
@@ -73,6 +74,7 @@ pub use dv_ai::{StyleItem, StyleKind, StyleOrigin, StyleProfile};
 pub use dv_vault::BACKUP_EXTENSION;
 pub use followup::FollowUpView;
 pub use history::{HiddenWord, SentItem, SentPart, SentText};
+pub use instruments::{InstrumentApproval, InstrumentStatus};
 pub use jobs::{
     BackupRun, BackupTask, DocumentRead, DrillJob, Drilled, ExportJob, Exported, ReadJob,
     RestoreJob, Restored, SlotJob, SlotMade, UnlockJob, Unlocked,
@@ -447,17 +449,22 @@ fn egress_he(e: &EgressError, ai: &str) -> String {
     }
 }
 
-/// The score sheets entered in the case's score table (the scores the text is checked against).
+/// The score sheets entered in the case's score table (the scores the text is checked against),
+/// but for instruments she does not give.
 fn score_sheets(
     v: &Vault,
     case_id: &str,
     inputs: &[dv_domain::CaseInput],
 ) -> Result<Vec<dv_domain::ScoreSheet>, CoreError> {
+    // An instrument she does not give is in no request and no check (D-098).
+    let skip = instruments::not_used(v)?;
     let mut out = Vec::new();
     for i in inputs.iter().filter(|i| i.kind == InputKind::TestScores) {
         if let Some(data) = v.input_data(case_id, &i.id)? {
-            if let Ok(sheet) = serde_json::from_str(&data) {
-                out.push(sheet);
+            if let Ok(sheet) = serde_json::from_str::<dv_domain::ScoreSheet>(&data) {
+                if !skip.contains(&sheet.instrument) {
+                    out.push(sheet);
+                }
             }
         }
     }

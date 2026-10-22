@@ -28,6 +28,8 @@ import type { IdentityInput } from "./generated/IdentityInput";
 import type { ImportPreview } from "./generated/ImportPreview";
 import type { InputKind } from "./generated/InputKind";
 import type { Instrument } from "./generated/Instrument";
+import type { InstrumentApproval } from "./generated/InstrumentApproval";
+import type { InstrumentStatus } from "./generated/InstrumentStatus";
 import type { ParagraphVersionView } from "./generated/ParagraphVersionView";
 import type { PingResponse } from "./generated/PingResponse";
 import type { Prepared } from "./generated/Prepared";
@@ -170,6 +172,9 @@ export const ipc = {
   exportSecurityPdf: () => call("export_security_pdf"),
   setSendStopped: (stopped: boolean) => call("set_send_stopped", { stopped }),
   confirmReadiness: (key: string, done: boolean) => call("confirm_readiness", { key, done }),
+  /** Settings → המבחנים: every instrument with her answer (D-098). */
+  instrumentApprovals: () => call("instrument_approvals"),
+  setInstrumentStatus: (key: string, status: InstrumentStatus) => call("set_instrument_status", { key, status }),
   usageSummary: () => call("usage_summary"),
   /** Dollars; `null` removes the ceiling. */
   setMonthlyCap: (capUsd: number | null) => run("set_monthly_cap", { capUsd }),
@@ -484,6 +489,8 @@ export type {
   ImportPreview,
   InputKind,
   Instrument,
+  InstrumentApproval,
+  InstrumentStatus,
   ParagraphVersionView,
   PingResponse,
   Prepared,

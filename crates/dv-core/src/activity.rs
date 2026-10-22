@@ -171,6 +171,11 @@ fn describe(
             "עודכן אישור ברשימה \"מוכנה לעבודה אמיתית\"".to_owned(),
             false,
         ),
+        "settings_changed" if text("key").starts_with("instrument/") => (
+            "security",
+            "עודכנה התשובה שלך על טבלאות של מבחן (בהגדרות ← המבחנים)".to_owned(),
+            false,
+        ),
         "settings_changed" if !text("secret").is_empty() => {
             ("security", "מפתח ה-API נשמר".to_owned(), false)
         }
