@@ -9,7 +9,11 @@ describe("wait estimates", () => {
     expect(estimateMs("export", "word")).toBe(6000);
     expect(leftText(1000, 6000, false)).toBe("בדרך כלל כ-5 שניות");
     recordDuration("export", "word", 20_000);
+    // The clock stands still around this wait: 0 ms is not kept, so a slow runner that
+    // measures 1 ms cannot add a third value and move the median.
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_790_000_000_000);
     await timed("export", Promise.resolve("ok"), "word");
+    now.mockRestore();
     recordDuration("export", "word", 22_000);
     expect(learned("export", "word")).toBe(true);
     expect(estimateMs("export", "word")).toBe(22_000);
