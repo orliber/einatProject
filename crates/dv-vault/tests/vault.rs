@@ -1164,6 +1164,27 @@ fn style_sources_and_profiles_are_sealed_versioned_and_erasable() {
 }
 
 #[test]
+fn the_kept_file_is_the_backup_as_read_back_from_the_disk() {
+    let (_dir, mut vault, _) = new_vault();
+    noam(&mut vault);
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("kept.vaultbak");
+    let (done, kept) = vault
+        .begin_backup()
+        .unwrap()
+        .write(&dest)
+        .unwrap()
+        .verify_keeping_file()
+        .unwrap();
+    assert_eq!(kept, fs::read(&dest).unwrap());
+    assert_eq!(u64::try_from(kept.len()).unwrap(), done.info.bytes);
+    assert_eq!(
+        dv_vault::peek_backup(&kept).unwrap().created_at,
+        done.info.created_at
+    );
+}
+
+#[test]
 fn a_backup_job_is_written_and_checked_away_from_the_vault() {
     let (_dir, mut vault, _) = new_vault();
     noam(&mut vault);

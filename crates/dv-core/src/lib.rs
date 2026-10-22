@@ -16,6 +16,7 @@ mod export;
 mod failures;
 mod followup;
 pub use binding::{ComputerSeal, WindowsSeal};
+pub mod drive_backup;
 pub mod google;
 mod guides;
 mod history;

@@ -14,7 +14,9 @@
 //! * Only the hosts on [`GOOGLE_HOSTS`], HTTPS with TLS 1.3 and Mozilla's roots, no proxy, no
 //!   redirects. The sign-in page itself opens in her browser, never inside the program.
 //! * The access token lives in memory for one action and is revoked right after it. Nothing
-//!   from Google is stored.
+//!   from Google is stored, except one thing she turns on herself: the lasting permission of
+//!   the encrypted backup copy (D-099, [`begin_lasting`]), kept sealed inside the vault by the
+//!   caller. Its short tokens are not revoked (at Google that withdraws the permission too).
 //! * OAuth for installed apps: a one-time listener on 127.0.0.1 for the answer, PKCE (S256)
 //!   and a random `state`, so another program cannot slip its own answer in.
 
@@ -42,7 +44,7 @@ const MAX_KEYS: usize = 5;
 /// How long the program waits for her to finish signing in.
 pub const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(300);
 
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum GoogleError {
     #[error("sign-in with Google is not set up in this version")]
     NotConfigured,

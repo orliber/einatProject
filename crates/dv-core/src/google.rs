@@ -106,6 +106,21 @@ pub fn config() -> Result<ClientConfig, CoreError> {
 pub fn sign_in(
     open: &dyn Fn(&str) -> Result<(), CoreError>,
 ) -> Result<(GoogleHttp, Session), CoreError> {
+    sign_in_with(open, false)
+}
+
+/// As [`sign_in`], asking Google for a lasting permission too: for the encrypted backup
+/// copy, which goes up after each backup without the browser (D-099).
+pub fn sign_in_lasting(
+    open: &dyn Fn(&str) -> Result<(), CoreError>,
+) -> Result<(GoogleHttp, Session), CoreError> {
+    sign_in_with(open, true)
+}
+
+fn sign_in_with(
+    open: &dyn Fn(&str) -> Result<(), CoreError>,
+    lasting: bool,
+) -> Result<(GoogleHttp, Session), CoreError> {
     let cfg = config()?;
     if BUSY.swap(true, Ordering::SeqCst) {
         return Err(refused(
@@ -115,7 +130,12 @@ pub fn sign_in(
     CANCEL.store(false, Ordering::SeqCst);
     let result = (|| {
         let http = GoogleHttp::new().map_err(|e| from_google(&e))?;
-        let mut pending = google::begin(&cfg).map_err(|e| from_google(&e))?;
+        let mut pending = if lasting {
+            google::begin_lasting(&cfg)
+        } else {
+            google::begin(&cfg)
+        }
+        .map_err(|e| from_google(&e))?;
         open(&pending.url)?;
         let code = google::wait(&mut pending, &CANCEL, google::SIGN_IN_TIMEOUT)
             .map_err(|e| from_google(&e))?;
