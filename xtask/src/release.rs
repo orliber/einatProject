@@ -1,11 +1,13 @@
-//! Signed updates, on Or's Mac only (D-033).
+//! Signed updates (D-033, D-091).
 //!
 //! * `cargo xtask update-keygen` – once: a new Ed25519 key pair. The private key goes to
 //!   `~/.diagnostic-vault/update-signing.pk8` (owner-only), never into the repository; the
 //!   public key is written to `crates/dv-egress/update_key.pub`, to commit.
-//! * `cargo xtask update-notice <version> <installer.exe> <notes.txt> <out-dir>` – the signed
-//!   notice (`latest.json` + `latest.json.sig`) for a release, checked with the same code the
-//!   program runs before it is written.
+//! * `cargo xtask update-notice [--test-key] <version> <installer.exe> <notes.txt> <out-dir>` –
+//!   the signed notice (`latest.json` + `latest.json.sig`) for a release, checked with the same
+//!   code the program runs before it is written. The key is read from `DV_UPDATE_KEY` (on
+//!   Or's Mac, or in the release workflow from a repository secret, D-091); `--test-key` signs
+//!   with a key made for the run, for a rehearsal.
 //! * `cargo xtask update-keygen --next` – once: a second key pair, pinned beside the first, so
 //!   the day the first is lost or retired a release signed with the second is still accepted
 //!   (SEC5). Sign with it by pointing `DV_UPDATE_KEY` at its file.
@@ -201,19 +203,39 @@ pub fn sign_and_verify(
 }
 
 pub fn notice(root: &Path, args: &[String]) -> Result<String, String> {
+    // A rehearsal (`--test-key`): the whole notice is built, signed and checked with the
+    // program's own code, but with a key made for this run only. Installed copies refuse it,
+    // so nothing signed this way can update anyone.
+    let (test_key, args) = match args {
+        [flag, rest @ ..] if flag == "--test-key" => (true, rest),
+        _ => (false, args),
+    };
     let [version, installer, notes, out] = args else {
         return Err(
-            "usage: cargo xtask update-notice <version> <installer.exe> <notes.txt> <out-dir>"
+            "usage: cargo xtask update-notice [--test-key] <version> <installer.exe> <notes.txt> <out-dir>"
                 .to_owned(),
         );
     };
     update::parse_version(version).ok_or("the version must look like 1.2.3")?;
-    let pinned = fs::read_to_string(root.join(PUBLIC_FILE))
+    let mut pinned = fs::read_to_string(root.join(PUBLIC_FILE))
         .ok()
         .map(|t| update::parse_keys(&t))
         .filter(|k| !k.is_empty())
         .ok_or("no public key yet: run `cargo xtask update-keygen` first")?;
-    let key = fs::read(default_key_path()?).map_err(|e| format!("private key: {e}"))?;
+    let key = if test_key {
+        let doc =
+            Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).map_err(|_| "keygen failed")?;
+        let pair = Ed25519KeyPair::from_pkcs8(doc.as_ref()).map_err(|_| "keygen failed")?;
+        let public: [u8; 32] = pair
+            .public_key()
+            .as_ref()
+            .try_into()
+            .map_err(|_| "keygen failed")?;
+        pinned = vec![public];
+        doc.as_ref().to_vec()
+    } else {
+        fs::read(default_key_path()?).map_err(|e| format!("private key: {e}"))?
+    };
     let exe = fs::read(installer).map_err(|e| format!("{installer}: {e}"))?;
     if !exe.starts_with(b"MZ") {
         return Err(format!("{installer} is not a Windows program"));
@@ -238,7 +260,12 @@ pub fn notice(root: &Path, args: &[String]) -> Result<String, String> {
     fs::write(out.join("latest.json"), &body).map_err(|e| e.to_string())?;
     fs::write(out.join("latest.json.sig"), sig).map_err(|e| e.to_string())?;
     Ok(format!(
-        "signed and checked: {}",
+        "signed and checked{}: {}",
+        if test_key {
+            " with a key for this run only (a rehearsal: installed copies refuse it)"
+        } else {
+            ""
+        },
         out.join("latest.json").display()
     ))
 }
@@ -374,6 +401,41 @@ mod tests {
         assert!(sign_and_verify(doc.as_ref(), &[pinned], &body, exe).is_ok());
         assert!(sign_and_verify(doc.as_ref(), &[[7; 32], pinned], &body, exe).is_ok());
         assert!(sign_and_verify(doc.as_ref(), &[[7; 32]], &body, exe).is_err());
+    }
+
+    #[test]
+    fn a_rehearsal_signs_and_checks_with_a_key_of_its_own() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let dir = std::env::temp_dir().join(format!("dv-notice-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("setup.exe");
+        let notes = dir.join("notes.txt");
+        fs::write(&exe, b"MZ invented installer").unwrap();
+        fs::write(&notes, "שורה ראשונה\n\nשורה שנייה\n").unwrap();
+        let s = |p: &Path| p.to_string_lossy().into_owned();
+        let args = [
+            "--test-key".to_owned(),
+            "0.9.1".to_owned(),
+            s(&exe),
+            s(&notes),
+            s(&dir.join("out")),
+        ];
+        let said = notice(&root, &args).unwrap();
+        assert!(said.contains("rehearsal"), "{said}");
+        let body: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.join("out/latest.json")).unwrap()).unwrap();
+        assert_eq!(body["version"], "0.9.1");
+        assert_eq!(body["notes"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            fs::read_to_string(dir.join("out/latest.json.sig"))
+                .unwrap()
+                .len(),
+            128
+        );
+        // Without `--test-key` and without a key file, nothing is signed.
+        std::env::set_var("DV_UPDATE_KEY", dir.join("no-such-key"));
+        assert!(notice(&root, &args[1..]).is_err());
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

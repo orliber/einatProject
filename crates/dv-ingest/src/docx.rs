@@ -52,7 +52,12 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
     if zip.len() > MAX_ENTRIES {
         return Err(corrupt("too many entries"));
     }
-    let names: Vec<String> = zip.file_names().map(str::to_owned).collect();
+    // A name that does not decode makes the whole file unreadable (fail-closed).
+    let names: Vec<String> = zip
+        .file_names()
+        .map(|n| n.map(std::borrow::Cow::into_owned))
+        .collect::<Result<_, _>>()
+        .map_err(corrupt)?;
     let mut budget = MAX_TOTAL_BYTES;
     let mut warnings = Vec::new();
 

@@ -248,7 +248,7 @@ fn report_text_stays_in_the_body_and_the_package_has_no_dates() {
             f.last_modified(),
             Some(zip::DateTime::default()),
             "{} carries a time",
-            f.name()
+            f.name().expect("entry name")
         );
     }
 }
