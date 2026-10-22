@@ -116,6 +116,8 @@ pub struct StyleSourceView {
     /// Analyzed in demo mode (no API key): worth analyzing again for real.
     pub analysis_demo: bool,
     pub analysis_items: u32,
+    /// Of them, chains from a finding to a conclusion (D-100).
+    pub analysis_inferences: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -315,6 +317,9 @@ struct SavedItem {
     kind: StyleKind,
     text: String,
     support: u32,
+    /// An inference about a pattern of scores: its key (D-100).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pattern: Option<String>,
 }
 
 impl From<&RawStyleItem> for SavedItem {
@@ -324,6 +329,7 @@ impl From<&RawStyleItem> for SavedItem {
             kind: i.kind,
             text: i.text.clone(),
             support: i.support,
+            pattern: i.pattern.clone(),
         }
     }
 }
@@ -335,6 +341,7 @@ impl From<&SavedItem> for RawStyleItem {
             kind: i.kind,
             text: i.text.clone(),
             support: i.support,
+            pattern: i.pattern.clone(),
         }
     }
 }
@@ -969,11 +976,15 @@ fn source_index(sources: &[StoredSource], children: &[usize], n: usize) -> HashS
 
 /// The approved profile as it goes into a drafting request for `section_key`, with every item
 /// that the case's filter would change left out. `None`: no profile, or it is switched off.
+///
+/// `patterns`: the patterns of this case's scores (D-100), in a section written from them;
+/// empty elsewhere, so no inference about a pattern goes out there.
 pub(crate) fn style_for_request(
     v: &Vault,
     ctx: &PrivacyContext<'_>,
     section_key: &str,
     query: &str,
+    patterns: &[dv_domain::ScorePattern],
 ) -> Result<Option<String>, CoreError> {
     if v.setting(PROFILE_OFF_KEY)?.as_deref() == Some("1") {
         return Ok(None);
@@ -987,8 +998,8 @@ pub(crate) fn style_for_request(
     };
     let stored: StoredProfile = parse(&active.json)?;
     let keep = |t: &str| clean(t, ctx);
-    let focused = focus(&stored.profile, section_key, query);
-    let Some(text) = dv_ai::render_for_section(&focused, section_key, &keep) else {
+    let focused = focus(&stored.profile, section_key, query, patterns);
+    let Some(text) = dv_ai::render_for_section(&focused, section_key, &keep, patterns) else {
         return Ok(None);
     };
     // Learned only from her edits: her rules come on top of the default style.
@@ -1001,23 +1012,43 @@ pub(crate) fn style_for_request(
 
 /// How many items of a kind go into one request, for the section and for the whole report
 /// each. Rules and things to avoid always go: they are short and they are her word.
-const REQUEST_BUDGET: [(StyleKind, usize); 3] = [
+const REQUEST_BUDGET: [(StyleKind, usize); 4] = [
     (StyleKind::Example, 2),
     (StyleKind::Template, 6),
     (StyleKind::Phrase, 12),
+    (StyleKind::Inference, 6),
 ];
 
-/// The profile with only the examples, templates and phrases that fit this request best
-/// (BM25 against the case's filtered text for the section, on her computer; D-052).
-fn focus(profile: &StyleProfile, section_key: &str, query: &str) -> StyleProfile {
+/// The profile with only the examples, templates, phrases and inferences that fit this
+/// request best (BM25 against the case's filtered text for the section, on her computer;
+/// D-052). An inference about a pattern of scores is not ranked: it goes when the case has
+/// the pattern (D-100), and stays out otherwise.
+fn focus(
+    profile: &StyleProfile,
+    section_key: &str,
+    query: &str,
+    patterns: &[dv_domain::ScorePattern],
+) -> StyleProfile {
     let mut drop: HashSet<usize> = HashSet::new();
+    for (n, i) in profile.items.iter().enumerate() {
+        if let Some(p) = &i.pattern {
+            if !patterns.iter().any(|x| x.key == *p) {
+                drop.insert(n);
+            }
+        }
+    }
     for scope in [Some(section_key), None] {
         for (kind, budget) in REQUEST_BUDGET {
             let group: Vec<usize> = profile
                 .items
                 .iter()
                 .enumerate()
-                .filter(|(_, i)| i.enabled && i.kind == kind && i.section.as_deref() == scope)
+                .filter(|(_, i)| {
+                    i.enabled
+                        && i.kind == kind
+                        && i.section.as_deref() == scope
+                        && i.pattern.is_none()
+                })
                 .map(|(n, _)| n)
                 .collect();
             let texts: Vec<&str> = group
@@ -1543,6 +1574,14 @@ impl Core {
             analyzed: s.analysis.is_some(),
             analysis_demo: s.analysis.as_ref().is_some_and(|a| a.demo),
             analysis_items: s.analysis.as_ref().map_or(0, |a| count(a.items.len())),
+            analysis_inferences: s.analysis.as_ref().map_or(0, |a| {
+                count(
+                    a.items
+                        .iter()
+                        .filter(|i| i.kind == StyleKind::Inference)
+                        .count(),
+                )
+            }),
         }
     }
 
@@ -1896,6 +1935,7 @@ mod unit {
             enabled: true,
             origin: StyleOrigin::Reports,
             support: 1,
+            pattern: None,
         };
         let topics = [
             "ציור",
@@ -1914,7 +1954,12 @@ mod unit {
             .collect();
         items.push(item(99, StyleKind::Rule, "משפטים קצרים.".into()));
         let profile = StyleProfile { items, reports: 3 };
-        let focused = focus(&profile, "observation", "הגננת מספרת על קושי בשינה ובאכילה");
+        let focused = focus(
+            &profile,
+            "observation",
+            "הגננת מספרת על קושי בשינה ובאכילה",
+            &[],
+        );
         let texts: Vec<&str> = focused.items.iter().map(|i| i.text.as_str()).collect();
         assert_eq!(
             focused.items.len(),

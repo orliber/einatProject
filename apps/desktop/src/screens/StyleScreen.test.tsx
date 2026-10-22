@@ -44,7 +44,7 @@ const overview = (over: Partial<StyleOverview> = {}): StyleOverview => ({
   ...over,
 });
 
-const source = { id: "s1", title: "דוח א", format: "docx", added_at: 1_790_000_000, words: 900, headings: ["סיכום"], analyzed: false, analysis_demo: false, analysis_items: 0 };
+const source = { id: "s1", title: "דוח א", format: "docx", added_at: 1_790_000_000, words: 900, headings: ["סיכום"], analyzed: false, analysis_demo: false, analysis_items: 0, analysis_inferences: 0 };
 
 const draft: StyleProfileView = {
   id: "p1", version: 1, status: "draft", created_at: 1_790_000_000, dropped: 1, demo: false,
@@ -118,10 +118,12 @@ describe("StyleScreen (round 46)", () => {
     });
     const user = userEvent.setup();
     wrap(<StyleScreen />);
-    const numbers = await screen.findByRole("list", { name: "במספרים" });
-    expect(numbers).toHaveTextContent("1דוח שלך נקרא");
-    expect(numbers).toHaveTextContent("0דברים שהתוכנה יודעת עלייך");
-    expect(numbers).toHaveTextContent("2מחכים לאישור שלך");
+    const journey = await screen.findByRole("list", { name: "המסלול" });
+    expect(journey).toHaveTextContent("הדוחות שלידוח אחד");
+    expect(journey).toHaveTextContent("ניתוחנותח");
+    expect(journey).toHaveTextContent("אישור2 מחכים לך");
+    expect(within(journey).getByRole("button", { current: "step" })).toHaveTextContent("אישור");
+    expect(journey).toHaveTextContent("בשימוש0 דברים");
     expect(queue()).toHaveTextContent("1 מתוך 2");
     expect(queue()).toHaveTextContent("כלל כתיבה");
     expect(quote()).toBe("גוף נסתר וזמן הווה");
@@ -345,8 +347,9 @@ describe("suggestions from her reports", () => {
     expect(within(queue()).queryByRole("button", { name: "לערוך" })).not.toBeInTheDocument();
     await user.click(within(queue()).getByRole("button", { name: "להשתמש בזה" }));
     await vi.waitFor(() => expect(calls).toContainEqual(["accept_style_suggestion", { id: "shape:opening:summary:x" }]));
-    // The report not read yet waits beside her reports, not over the queue.
-    expect(screen.getByRole("region", { name: "הדוחות שלי" })).toHaveTextContent("ניתוח הדוח ובניית הפרופיל");
+    // The report not read yet waits in the journey's analysis stage, not over the queue (D-100).
+    expect(screen.getByRole("list", { name: "המסלול" })).toHaveTextContent("ניתוח הדוח ובניית הפרופיל");
+    expect(queue()).not.toHaveTextContent("ניתוח הדוח ובניית הפרופיל");
   });
 });
 

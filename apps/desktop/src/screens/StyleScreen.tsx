@@ -41,6 +41,7 @@ const KIND_LABEL: Record<StyleKind, string> = {
   argument: "מבנה הטיעון",
   integration: "חיבור בין כלים וסעיפים",
   criterion: "ניסוח קריטריונים (DSM-5)",
+  inference: "איך את מסיקה: מהממצא למסקנה",
 };
 const KIND_HINT: Record<StyleKind, string> = {
   rule: "",
@@ -51,6 +52,7 @@ const KIND_HINT: Record<StyleKind, string> = {
   argument: "השלבים של פסקה, לפי הסדר.",
   integration: "",
   criterion: "איך את מנסחת קריטריון, ואיזה סוג ממצא את קושרת אליו.",
+  inference: "סוג הממצא ← מה את מסיקה ← איך את מנסחת ← ההמלצה שנובעת. בטיוטה הכלל משמש רק כשיש בחומרים ממצא כזה.",
 };
 /** The tag of one item in the queue: what kind of thing she is asked about, in one or two words. */
 const KIND_TAG: Record<StyleKind, string> = {
@@ -62,6 +64,7 @@ const KIND_TAG: Record<StyleKind, string> = {
   argument: "מבנה הטיעון",
   integration: "חיבור בין כלים",
   criterion: "ניסוח קריטריון",
+  inference: "איך את מסיקה",
 };
 const SUGGESTION_TAG: Record<StyleSuggestion["kind"], string> = {
   replace: "מילה שאת מחליפה",
@@ -71,7 +74,37 @@ const SUGGESTION_TAG: Record<StyleSuggestion["kind"], string> = {
   closing: "איך את מסיימת סעיף",
   formula: "משפט שחוזר אצלך",
 };
-const KINDS: StyleKind[] = ["rule", "phrase", "avoid", "template", "argument", "integration", "criterion", "example"];
+const KINDS: StyleKind[] = ["rule", "phrase", "avoid", "template", "inference", "argument", "integration", "criterion", "example"];
+
+/** The links of an inference's chain (D-100): `בתצפית: … ← מסקנה: … ← ניסוח: … ← המלצה: …`. */
+export const CHAIN_SEP = " ← ";
+export function chainLinks(text: string): { label: string; body: string }[] {
+  return text.split(CHAIN_SEP).map((part) => {
+    const at = part.indexOf(": ");
+    return at > 0 && at <= 60 ? { label: part.slice(0, at), body: part.slice(at + 2) } : { label: "", body: part };
+  });
+}
+
+/** An inference as a chain, one link under the other, so the "why" reads as a thought. */
+function InferenceChain({ text, quiet }: { text: string; quiet?: boolean }) {
+  const links = chainLinks(text);
+  if (links.length < 2) return <>{text}</>;
+  return (
+    <span className={quiet ? "style-chain style-chain-quiet" : "style-chain"}>
+      {links.map((l, i) => (
+        <span key={i} className="style-chain-link">
+          {l.label && <span className="style-chain-label">{l.label}</span>}
+          <span className="style-chain-body">{l.body}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** An item's text as it reads best: a chain for an inference, plain text for the rest. */
+function ItemText({ item }: { item: StyleItem }) {
+  return item.kind === "inference" ? <InferenceChain text={item.text} quiet /> : <>{item.text}</>;
+}
 const RECOMMENDED = 3;
 
 type Step = { kind: "analysis"; source: StyleSourceView } | { kind: "profile" } | { kind: "interpret" };
@@ -288,7 +321,7 @@ export function StyleScreen() {
       <main className="page-main style">
         <header className="style-head">
           <h1>הסגנון שלי</h1>
-          <p className="style-lead">התוכנה לומדת מהדוחות שלך איך את כותבת. שום דבר לא נכנס לשימוש לפני שאישרת אותו.</p>
+          <p className="style-lead">התוכנה לומדת מהדוחות שלך איך את כותבת, ומה את מסיקה מכל ממצא. ארבעה שלבים: הדוח נכנס, נקרא, את מאשרת, וזה משמש בכל טיוטה. שום דבר לא נכנס לשימוש לפני שאישרת אותו.</p>
           {o.demo_mode && <p className="hint">מצב הדגמה: ניתוח לדוגמה בלבד.</p>}
         </header>
 
@@ -303,7 +336,8 @@ export function StyleScreen() {
             <p className="hint">דוח שכתבת בעבר, ב-Word, ODT או PDF. נשמר רק הטקסט אחרי הסתרה.</p>
           </div>
         ) : (
-          <StyleNumbers o={o} waiting={asks.length} />
+          <Journey o={o} waiting={asks.length} analyzed={analyzed} notRead={waiting} onAdd={() => fileInput.current?.click()}
+            build={buildDue ? { label: buildLabel, run: () => startBuild(false), disabled: running } : null} />
         )}
 
         {reading && <p className="muted"><Spinner /> קורא את הדוח ומסתיר פרטים מזהים…</p>}
@@ -316,12 +350,10 @@ export function StyleScreen() {
         {o.sources.length > 0 && (
           <>
             <div className="style-pair">
-              <ApproveQueue o={o} asks={asks} onReviewed={markReviewed} running={running}
-                build={buildDue && asks.length === 0 ? { label: buildLabel, run: () => startBuild(false) } : null} />
+              <ApproveQueue o={o} asks={asks} onReviewed={markReviewed} running={running} buildDue={buildDue} />
               <KnownList o={o} running={running} onReadScores={() => void next([{ kind: "interpret" }])} />
             </div>
-            <Reports o={o} adding={reading || running} onAdd={() => fileInput.current?.click()} onDelete={setDeleting} more={more}
-              build={buildDue && asks.length > 0 ? { label: buildLabel, run: () => startBuild(false), disabled: running } : null} />
+            <Reports o={o} adding={reading || running} onAdd={() => fileInput.current?.click()} onDelete={setDeleting} more={more} />
             {showVersions && o.versions.length > 0 && <Versions o={o} />}
           </>
         )}
@@ -359,17 +391,88 @@ export function StyleScreen() {
   );
 }
 
-// ------------------------------------------------------------------ the three numbers
+// ------------------------------------------------------------------ the journey (D-100)
 
-function StyleNumbers({ o, waiting }: { o: StyleOverview; waiting: number }) {
-  const known = (o.active?.profile.items.filter((i) => i.enabled).length ?? 0)
+/** The number of things the program knows and uses: the profile's items in use and the approved interpretations. */
+function knownCount(o: StyleOverview): number {
+  return (o.active?.profile.items.filter((i) => i.enabled).length ?? 0)
     + o.interpretations.filter((i) => i.item.approved && i.item.enabled).length;
+}
+
+type Stage = {
+  key: "reports" | "analysis" | "approval" | "use";
+  title: string;
+  figure: string;
+  line: string;
+  action: string;
+  state: "done" | "current" | "warn" | "next";
+  run: () => void;
+  disabled: boolean;
+};
+
+const scrollTo = (id: string) => () => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+/** The whole process in one strip: my reports, analysis, approval, in use. Each stage says where
+ * it stands and what to do next; the current one is marked. */
+function Journey({ o, waiting, analyzed, notRead, onAdd, build }: {
+  o: StyleOverview;
+  waiting: number;
+  analyzed: number;
+  notRead: number;
+  onAdd: () => void;
+  build: { label: string; run: () => void; disabled: boolean } | null;
+}) {
+  const n = o.sources.length;
+  const last = Math.max(...o.sources.map((s) => s.added_at));
+  const known = knownCount(o);
+  const inUse = o.active !== null && o.enabled;
+  const stages: Stage[] = [
+    {
+      key: "reports", title: "הדוחות שלי", figure: n === 1 ? "דוח אחד" : `${n} דוחות`,
+      line: `האחרון נוסף ${sinceLabel(last)}. נשמר רק הטקסט אחרי הסתרה.`,
+      action: "+ הוספת דוח", state: "done", run: onAdd, disabled: false,
+    },
+    {
+      key: "analysis", title: "ניתוח", figure: analyzed === n ? (n === 1 ? "נותח" : "כולם נותחו") : `${analyzed} מתוך ${n} נותחו`,
+      line: "מכל דוח נלמדים הסגנון, הפרשנות של תוצאות וכללי ההסקה שלך.",
+      action: build ? `${build.label} ←` : "הכול מעודכן",
+      state: build ? "current" : "done", run: build ? build.run : scrollTo("style-sources"), disabled: build?.disabled ?? false,
+    },
+    {
+      key: "approval", title: "אישור", figure: waiting === 0 ? "הכול מאושר" : waiting === 1 ? "אחד מחכה לך" : `${waiting} מחכים לך`,
+      line: "אחד-אחד: להשתמש, לערוך, או לא צריך.",
+      action: waiting > 0 ? "לאשר עכשיו ↓" : "אין מה לאשר",
+      state: waiting > 0 ? "warn" : notRead > 0 && !build ? "next" : "done", run: scrollTo("style-queue-title"), disabled: false,
+    },
+    {
+      key: "use", title: "בשימוש", figure: known === 1 ? "דבר אחד" : `${known} דברים`,
+      line: o.active
+        ? inUse
+          ? `גרסה ${o.active.version} של הפרופיל. נכנסים לכל טיוטה, רק מה שמתאים לסעיף ולתיק.`
+          : "הפרופיל כבוי: הניסוח בסגנון ברירת המחדל."
+        : "אחרי האישור הראשון הפרופיל ייכנס לכל טיוטה.",
+      action: "מה התוכנה יודעת עלייך ↓", state: o.active ? (inUse ? "done" : "next") : "next", run: scrollTo("style-known-title"), disabled: false,
+    },
+  ];
+  // Without a report analyzed there is no analysis to stand on; the first open stage is the current one.
+  const current = stages.find((s) => s.state === "current") ?? stages.find((s) => s.state === "warn") ?? stages.find((s) => s.state === "next");
   return (
-    <ul className="style-numbers" aria-label="במספרים">
-      <li className="style-number"><b>{o.sources.length}</b><span>{o.sources.length === 1 ? "דוח שלך נקרא" : "דוחות שלך נקראו"}</span></li>
-      <li className="style-number"><b>{known}</b><span>דברים שהתוכנה יודעת עלייך</span></li>
-      <li className={waiting > 0 ? "style-number warn" : "style-number"}><b>{waiting}</b><span>מחכים לאישור שלך</span></li>
-    </ul>
+    <ol className="style-journey" aria-label="המסלול">
+      {stages.map((s, i) => (
+        <li key={s.key}>
+          <button type="button" className={`style-stage style-stage-${s.state}`} aria-current={s === current ? "step" : undefined}
+            disabled={s.disabled} onClick={s.run}>
+            <span className="style-stage-head">
+              <span className={`style-stage-num style-stage-num-${s.state}`} aria-hidden="true">{s.state === "done" ? "✓" : i + 1}</span>
+              <strong>{s.title}</strong>
+            </span>
+            <span className="style-stage-figure">{s.figure}</span>
+            <span className="style-stage-line">{s.line}</span>
+            <span className="style-stage-action">{s.action}</span>
+          </button>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -407,12 +510,13 @@ function SuggestionText({ s }: { s: StyleSuggestion }) {
 
 /** One thing at a time, in the report's font, with "to use it", "to edit" and "not needed".
  * What she decides goes at once; the next thing comes up by itself. */
-function ApproveQueue({ o, asks, onReviewed, running, build }: {
+function ApproveQueue({ o, asks, onReviewed, running, buildDue }: {
   o: StyleOverview;
   asks: Waiting[];
   onReviewed: (id: string) => void;
   running: boolean;
-  build: { label: string; run: () => void } | null;
+  /** A report waits to be read: the analysis starts from the journey's "ניתוח" stage (D-100). */
+  buildDue: boolean;
 }) {
   const { fail, notify } = useApp();
   const ai = useAi();
@@ -470,14 +574,13 @@ function ApproveQueue({ o, asks, onReviewed, running, build }: {
   if (!current) {
     return (
       <section className="card style-queue style-queue-empty" aria-labelledby="style-queue-title">
-        {build ? (
+        {buildDue ? (
           <>
             <h2 id="style-queue-title">ללמוד מהדוחות</h2>
             <p className="style-queue-lead">
               {o.sources.length < RECOMMENDED ? `מומלץ ${RECOMMENDED} דוחות לפחות. ` : ""}
-              אחרי הניתוח כל דבר שהתוכנה למדה יחכה כאן לאישור שלך.
+              הניתוח מתחיל בשלב «ניתוח» למעלה. אחריו כל דבר שהתוכנה למדה יחכה כאן לאישור שלך.
             </p>
-            <button type="button" className="btn btn-primary btn-big" disabled={running} onClick={build.run}>{build.label}</button>
           </>
         ) : (
           <>
@@ -510,8 +613,9 @@ function ApproveQueue({ o, asks, onReviewed, running, build }: {
     case "item": {
       const { item } = current;
       tag = KIND_TAG[item.kind];
-      body = item.text;
-      why = itemWhy(item, o.draft?.profile.reports ?? 0, o);
+      body = item.kind === "inference" ? <InferenceChain text={item.text} /> : item.text;
+      why = itemWhy(item, o.draft?.profile.reports ?? 0, o)
+        + (item.kind === "inference" ? " בטיוטה: כשבחומרים יש ממצא כזה, הניסוח מסיק ומנסח לפי הכלל; בלי ממצא כזה הכלל לא משמש." : "");
       use = () => decide(item, { enabled: true });
       save = (t) => decide(item, { enabled: true, text: t });
       skip = () => decide(item, { enabled: false });
@@ -601,14 +705,19 @@ function ApproveQueue({ o, asks, onReviewed, running, build }: {
 
 // ------------------------------------------------------------------ what the program knows
 
-type Known = "writing" | "order" | "phrases" | "scores" | "argument";
+type Known = "writing" | "order" | "phrases" | "scores" | "inference" | "argument";
 const KNOWN: { key: Known; title: string; line: string; kinds: StyleKind[] }[] = [
   { key: "writing", title: "איך את כותבת", line: "כללי כתיבה, מה את לא כותבת, ומה התוכנה מדדה", kinds: ["rule", "avoid", "example"] },
   { key: "order", title: "סדר הנושאים בכל סעיף", line: "הסדר שבו את כותבת כל סעיף", kinds: [] },
   { key: "phrases", title: "משפטים שחוזרים אצלך", line: "ביטויים ותבניות משפט קבועות", kinds: ["phrase", "template"] },
   { key: "scores", title: "איך את מפרשת ציונים", line: "מה את כותבת על תוצאה של כל תת-מבחן", kinds: [] },
+  { key: "inference", title: "איך את מסיקה", line: "מהממצא למסקנה: תצפית, דיווח או דפוס תוצאות, ומה נובע מהם", kinds: ["inference"] },
   { key: "argument", title: "איך את בונה טיעון", line: "חיבור בין כלים, וניסוח קריטריון DSM", kinds: ["argument", "integration", "criterion"] },
 ];
+
+const INFERENCE_HINT = "נלמד מהדוחות שלך: מאיזה ממצא (התנהגות בבדיקה, דיווח ההורים או הגן, הרקע, אבחון קודם) את מגיעה לאיזו מסקנה, איך את מנסחת אותה ואיזו המלצה נובעת ממנה. "
+  + "דפוסי תוצאות (פער בין מדדים, המדד הנמוך ביותר, פיזור, מסתגל מול קוגניטיבי) מזוהים בקוד, ולכל דפוס נשמרת הקריאה שלך. "
+  + "בטיוטה נשלחים רק הכללים שהממצא שלהם מופיע בחומרים של הסעיף, או שהדפוס שלהם נמצא בתוצאות של הילד.";
 
 function KnownList({ o, running, onReadScores }: { o: StyleOverview; running: boolean; onReadScores: () => void }) {
   const { fail, notify } = useApp();
@@ -658,6 +767,7 @@ function KnownList({ o, running, onReadScores }: { o: StyleOverview; running: bo
                     : k.key === "scores" ? <Interpretations o={o} running={running} onRead={onReadScores} />
                       : (
                         <>
+                          {k.key === "inference" && <p className="hint">{INFERENCE_HINT}</p>}
                           {o.active
                             ? o.draft
                               ? <ReadOnlyItems items={o.active.profile.items.filter((i) => k.kinds.includes(i.kind))} o={o} />
@@ -686,7 +796,7 @@ function ReadOnlyItems({ items, o }: { items: StyleItem[]; o: StyleOverview }) {
       <ul className="style-items">
         {items.map((i) => (
           <li key={i.id} className={i.enabled ? "style-item" : "style-item style-item-off"}>
-            <span className="style-item-text grow">{i.text}</span>
+            <span className="style-item-text grow"><ItemText item={i} /></span>
             <span className="chip">{title(i.section)}</span>
           </li>
         ))}
@@ -720,7 +830,6 @@ function Reports(props: {
   onAdd: () => void;
   onDelete: (s: StyleSourceView) => void;
   more: MenuItem[];
-  build: { label: string; run: () => void; disabled: boolean } | null;
 }) {
   const { o } = props;
   const [list, setList] = useState(false);
@@ -736,7 +845,6 @@ function Reports(props: {
           {" "}נשמר רק הטקסט אחרי הסתרה, לא הקובץ.
         </span>
         <div className="style-reports-actions">
-          {props.build && <button type="button" className="btn" disabled={props.build.disabled} onClick={props.build.run}>{props.build.label}</button>}
           <button type="button" className="btn btn-ghost" aria-expanded={list} aria-controls="style-source-list" onClick={() => setList((v) => !v)}>
             {list ? "להסתיר את הרשימה" : "לראות את הרשימה"}
           </button>
@@ -758,7 +866,12 @@ function Reports(props: {
               {s.analyzed
                 ? s.analysis_demo
                   ? <span className="chip chip-sand" title="נותח במצב הדגמה">נותח כדוגמה</span>
-                  : <span className="chip chip-ok">נותח · {s.analysis_items} פריטים</span>
+                  : (
+                    <span className="style-source-learned">
+                      <span className="chip chip-ok">נותח · {s.analysis_items - s.analysis_inferences} פריטי סגנון</span>
+                      {s.analysis_inferences > 0 && <span className="chip chip-ok">{s.analysis_inferences === 1 ? "כלל הסקה אחד" : `${s.analysis_inferences} כללי הסקה`}</span>}
+                    </span>
+                  )
                 : <span className="chip chip-warn">עוד לא נותח</span>}
               <button type="button" className="btn btn-small btn-danger-quiet" onClick={() => props.onDelete(s)}>מחיקה</button>
             </li>
@@ -1050,11 +1163,11 @@ function ProfileEditor({ view, o, kinds }: { view: StyleProfileView; o: StyleOve
                       <input type="checkbox" aria-label="להשתמש בפריט" checked={item.enabled}
                         onChange={() => change((all) => all.map((x) => (x.id === item.id ? { ...x, enabled: !x.enabled } : x)))} />
                       {editing === item.id ? (
-                        <textarea className="textarea grow" rows={kind === "example" ? 4 : 2} autoFocus defaultValue={item.text}
+                        <textarea className="textarea grow" rows={kind === "example" || kind === "inference" ? 4 : 2} autoFocus defaultValue={item.text}
                           onBlur={(e) => { const text = e.target.value.trim(); setEditing(null); if (text && text !== item.text) change((all) => all.map((x) => (x.id === item.id ? { ...x, text } : x))); }} />
                       ) : (
                         <button type="button" className={kind === "example" ? "style-item-text style-example grow" : "style-item-text grow"} title="עריכה" onClick={() => setEditing(item.id)}>
-                          {item.text}
+                          <ItemText item={item} />
                         </button>
                       )}
                       {item.origin === "edits" && <span className="chip chip-sand">מהתיקונים שלך</span>}
@@ -1104,7 +1217,8 @@ function AddItem({ kinds, onAdd }: { kinds: StyleKind[]; onAdd: (kind: StyleKind
       <select className="select" aria-label="סוג" value={kind} onChange={(e) => setKind(e.target.value as StyleKind)}>
         {choices.map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
       </select>
-      <input className="input grow" autoFocus placeholder="למשל: פסקת הסיכום פותחת בחוזקות של הילד" value={text} onChange={(e) => setText(e.target.value)} />
+      <input className="input grow" autoFocus value={text} onChange={(e) => setText(e.target.value)}
+        placeholder={kind === "inference" ? "בתצפית: הילד עוזב משימה באמצע ← מסקנה: קושי בהתמדה ← ניסוח: ניכר קושי ב{תחום} ← המלצה: תיווך בתחילת משימה" : "למשל: פסקת הסיכום פותחת בחוזקות של הילד"} />
       <button type="submit" className="btn btn-small" disabled={!text.trim()}>הוספה</button>
       <button type="button" className="btn btn-small btn-ghost" onClick={() => setOpen(false)}>ביטול</button>
     </form>

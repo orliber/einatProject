@@ -1447,6 +1447,8 @@ pub struct TaggedScore {
     /// Byte range of the whole tag.
     pub start: usize,
     pub end: usize,
+    /// The score itself, for the patterns of the report's profile (D-091).
+    pub value: f64,
     pub band: Option<String>,
     pub relative: Option<Relative>,
 }
@@ -1475,7 +1477,7 @@ pub fn find_tagged_scores(text: &str) -> Vec<TaggedScore> {
     }
     let mut out: Vec<TaggedScore> = Vec::new();
     for m in find_score_mentions(text) {
-        let Some((s, e, (_, band, relative))) =
+        let Some((s, e, (value, band, relative))) =
             tags.iter().find(|(s, e, _)| *s <= m.start && m.end <= *e)
         else {
             continue;
@@ -1488,6 +1490,7 @@ pub fn find_tagged_scores(text: &str) -> Vec<TaggedScore> {
             measure: m.measure,
             start: *s,
             end: *e,
+            value: *value,
             band: band.clone(),
             relative: *relative,
         });

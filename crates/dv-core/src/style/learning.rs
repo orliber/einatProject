@@ -204,6 +204,7 @@ impl Core {
             enabled: true,
             origin,
             support,
+            pattern: None,
         });
         self.check_items(&mut stored.profile)?;
         let v = self.vault_mut()?;
