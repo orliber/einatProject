@@ -20,6 +20,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use zeroize::Zeroizing;
@@ -195,9 +196,25 @@ pub fn remove_for(dir: &Path, purpose: Purpose) {
 /// Longest wait for the sealing or unsealing child at an opening, which runs outside the
 /// core's lock. A first PowerShell after the computer starts, beside a busy antivirus, took
 /// over 20 s on a CI runner; past this it is `Busy` (she tries again).
-const OPENING_WAIT: Duration = Duration::from_secs(45);
+pub const OPENING_WAIT: Duration = Duration::from_secs(45);
 /// The same for a check while the vault is open, under the core's lock.
 const IN_SESSION_WAIT: Duration = Duration::from_secs(20);
+
+/// The longest any sealing or unsealing child took since the program started, in
+/// milliseconds; one that was stopped counts as its whole wait. Only a duration, for the bug
+/// report: it shows whether a slow computer ever comes near `OPENING_WAIT`.
+static SLOWEST_CHILD_MS: AtomicU32 = AtomicU32::new(0);
+
+/// See `SLOWEST_CHILD_MS`; 0 until a child has run.
+#[must_use]
+pub fn slowest_child_ms() -> u32 {
+    SLOWEST_CHILD_MS.load(Ordering::Relaxed)
+}
+
+fn note_child_time(took: Duration) {
+    let ms = u32::try_from(took.as_millis()).unwrap_or(u32::MAX);
+    SLOWEST_CHILD_MS.fetch_max(ms, Ordering::Relaxed);
+}
 
 /// Run `program` with `args`, `input` on stdin; its stdout, trimmed, if it succeeded.
 fn run(
@@ -265,6 +282,7 @@ fn run_with_code(
             break status;
         }
         if started.elapsed() > wait {
+            note_child_time(started.elapsed());
             let _ = child.kill();
             let _ = child.wait();
             let _ = reader.join();
@@ -272,6 +290,7 @@ fn run_with_code(
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     };
+    note_child_time(started.elapsed());
     let out = reader.join().map_err(|_| VaultError::Busy)?;
     let text = Zeroizing::new(String::from_utf8_lossy(&out).trim().to_owned());
     Ok((status.code(), text))
@@ -605,6 +624,17 @@ mod tests {
             keychain_answer(Some(0), "0aff").unwrap().as_slice(),
             &[10, 255]
         );
+    }
+
+    #[test]
+    fn the_slowest_child_is_kept() {
+        note_child_time(Duration::from_millis(7));
+        let after = slowest_child_ms();
+        assert!(after >= 7);
+        note_child_time(Duration::from_millis(1));
+        assert!(slowest_child_ms() >= after);
+        note_child_time(Duration::from_secs(u64::MAX));
+        assert_eq!(slowest_child_ms(), u32::MAX);
     }
 
     #[test]

@@ -231,6 +231,9 @@ pub fn ping() -> PingResponse {
         build_commit: option_env!("DV_BUILD_COMMIT").unwrap_or("dev").to_owned(),
         fips_active: dv_vault::crypto::fips_active(),
         platform: std::env::consts::OS.to_owned(),
+        slowest_key_check_ms: dv_vault::computer_key::slowest_child_ms(),
+        key_check_wait_ms: u32::try_from(dv_vault::computer_key::OPENING_WAIT.as_millis())
+            .unwrap_or(u32::MAX),
     }
 }
 

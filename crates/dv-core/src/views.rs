@@ -19,6 +19,11 @@ pub struct PingResponse {
     /// True once the vault runs on the FIPS 140-3 validated module.
     pub fips_active: bool,
     pub platform: String,
+    /// The longest the key kept on this computer took to seal or open since the program
+    /// started (0: not yet), and how long an opening waits for it, both in milliseconds. For
+    /// the bug report only.
+    pub slowest_key_check_ms: u32,
+    pub key_check_wait_ms: u32,
 }
 
 /// The error the UI shows: a stable `code`, a Hebrew `message`, and the one next step it
@@ -651,6 +656,8 @@ mod tests {
             build_commit: "dev".to_owned(),
             fips_active: false,
             platform: "linux".to_owned(),
+            slowest_key_check_ms: 0,
+            key_check_wait_ms: 45_000,
         }
     }
 

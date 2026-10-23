@@ -7,4 +7,10 @@ export type PingResponse = { ipc_version: number, core_version: string, build_co
 /**
  * True once the vault runs on the FIPS 140-3 validated module.
  */
-fips_active: boolean, platform: string, };
+fips_active: boolean, platform: string, 
+/**
+ * The longest the key kept on this computer took to seal or open since the program
+ * started (0: not yet), and how long an opening waits for it, both in milliseconds. For
+ * the bug report only.
+ */
+slowest_key_check_ms: number, key_check_wait_ms: number, };
