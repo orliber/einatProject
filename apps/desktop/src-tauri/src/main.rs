@@ -6,6 +6,8 @@
 
 mod commands;
 mod file_dialog;
+#[cfg(target_os = "macos")]
+mod mac_platform;
 mod os_lock;
 mod secret_clipboard;
 mod win_platform;
@@ -220,20 +222,37 @@ fn remember_crashes(path: PathBuf) {
     }));
 }
 
+/// The most CPU one document's reader may use on a Mac (the app gives up on it far sooner,
+/// by the clock: this bounds a reader the app could no longer stop).
+#[cfg(target_os = "macos")]
+const INGEST_CPU_SECONDS: u64 = 300;
+
 fn main() {
     // Before anything holds case data: room to lock the vault's memory in RAM, and no crash
     // dump with the heap in it (D-047). The document worker below gets the same.
     let hardening = win_platform::harden_process();
     // A document worker: the same binary, started by the core for one file.
     if std::env::args().nth(1).as_deref() == Some(dv_ingest::worker::WORKER_ARG) {
+        // On a Mac: ended with the app, and one document's CPU at most (D-101).
+        #[cfg(target_os = "macos")]
+        if let Some(code) = mac_platform::contain_worker(Some(INGEST_CPU_SECONDS)) {
+            std::process::exit(code);
+        }
         std::process::exit(dv_ingest::worker::worker_main());
     }
     // The name model worker (SEC2): the same binary, started by the core once per unlock with
-    // the model folder, contained like the document worker.
+    // the model folder, contained like the document worker. It lives for the session, so it
+    // has no CPU limit; it ends with the app, or when the app closes its stdin.
     if std::env::args().nth(1).as_deref() == Some(dv_ner::worker::WORKER_ARG) {
+        #[cfg(target_os = "macos")]
+        if let Some(code) = mac_platform::contain_worker(None) {
+            std::process::exit(code);
+        }
         let dir = std::env::args().nth(2).unwrap_or_default();
         std::process::exit(dv_ner::worker::worker_main(std::path::Path::new(&dir)));
     }
+    #[cfg(target_os = "macos")]
+    let hardening = mac_platform::with_wire_limit(hardening);
 
     let result = tauri::Builder::default()
         .setup(move |app| {
@@ -250,7 +269,10 @@ fn main() {
             let models = data.join("models");
             let mut core = Core::new(&dir)
                 .with_models_dir(models.clone())
-                .with_memory_lock(cfg!(windows), hardening.lock_quota_mib.is_some());
+                .with_memory_lock(
+                    cfg!(any(windows, target_os = "macos")),
+                    hardening.lock_quota_mib.is_some(),
+                );
             if let Ok(exe) = std::env::current_exe() {
                 core = core
                     .with_ingest_worker(exe.clone())

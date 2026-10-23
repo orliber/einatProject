@@ -156,7 +156,20 @@ impl SlotJob {
     #[must_use]
     pub fn run(self) -> SlotMade {
         let seal = self.seal.as_ref();
-        let here = key_here(seal, &self.dir, self.header.password_bound());
+        // Loaded as for an opening: a Keychain or Windows that is only slow, locked or
+        // cancelled is asked once more and then says to try again, before any new key is
+        // made; never "another computer" (review of #136).
+        let here = match key_for_opening(seal, &self.dir, self.header.password_bound()) {
+            Ok(here) => here,
+            Err(e) => {
+                return SlotMade {
+                    session: self.session,
+                    ticket: self.ticket,
+                    made: Err(e),
+                    key_aside: false,
+                };
+            }
+        };
         let proof = self.proof.secret(here.as_ref());
         let mut key_aside = false;
         let made = match &self.new_password {
@@ -168,20 +181,24 @@ impl SlotJob {
                 // until the slot is written, so the key in use is never lost to a slot
                 // that was not (review of stage 5, S5).
                 let fresh = if here.is_none() {
-                    let (key, aside) = key_for_new_slot(seal, &self.dir);
-                    key_aside = aside && key.is_some();
-                    key
+                    key_for_new_slot(seal, &self.dir).map(|(key, aside)| {
+                        key_aside = aside;
+                        key
+                    })
                 } else {
-                    None
+                    Ok(None)
                 };
-                NewSlot::password_here(
-                    &self.header,
-                    proof,
-                    new_password,
-                    params,
-                    here.as_ref().or(fresh.as_ref()),
-                )
-                .map(|s| (s, None))
+                fresh
+                    .and_then(|fresh| {
+                        NewSlot::password_here(
+                            &self.header,
+                            proof,
+                            new_password,
+                            params,
+                            here.as_ref().or(fresh.as_ref()),
+                        )
+                    })
+                    .map(|s| (s, None))
             }
             None => NewSlot::recovery(&self.header, proof).map(|(s, k)| (s, Some(k))),
         };

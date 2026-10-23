@@ -78,10 +78,14 @@ pub(crate) fn build(s: &AppStatus, send_stopped: bool) -> SecurityStatus {
         item("screen", on(s.screen_protection), None),
         item("send", on(!send_stopped), None),
     ];
-    // The document readers run in a restricted process only on Windows (D-047).
+    // The document readers run in a restricted process on Windows (D-047) and macOS (D-101).
     items.push(item(
         "isolation",
-        if cfg!(windows) { "ok" } else { "warn" },
+        if dv_ingest::worker::CONTAINED {
+            "ok"
+        } else {
+            "warn"
+        },
         None,
     ));
     SecurityStatus {

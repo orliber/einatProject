@@ -139,23 +139,34 @@ git fetch -q origin main
 sha="$(git rev-parse origin/main)"
 say "1/4 המתקין ש-CI בנה ובדק ל-$sha"
 rm -rf "$OUT" && mkdir -p "$OUT"
-got=""
-for id in $(gh run list -R "$SOURCE_REPO" --workflow ci.yml --commit "$sha" --limit 20 --json databaseId,event \
-    -q '.[] | select(.event != "pull_request") | .databaseId'); do
-  if gh run download "$id" -R "$SOURCE_REPO" -n release-windows -D "$OUT" 2>/dev/null; then got="$id"; break; fi
-done
-[[ -n "$got" ]] || die "אין עדיין מתקין בדוק ל-$sha: CI על main בונה אותו אחרי כל מיזוג. לחכות שיהיה ירוק."
+# One green CI run (not a pull request's): both platforms' files come from it.
+got="$(gh run list -R "$SOURCE_REPO" --workflow ci.yml --commit "$sha" --limit 20 --json databaseId,event,conclusion \
+    -q '[.[] | select(.event != "pull_request" and .conclusion == "success")] | .[0].databaseId // empty')" \
+  || die "לא הצלחתי לקרוא את ריצות ה-CI של $sha. לנסות שוב."
+[[ -n "$got" ]] || die "אין עדיין ריצת CI ירוקה ל-$sha: CI על main בונה את המתקינים אחרי כל מיזוג. לחכות שיהיה ירוק."
+gh run download "$got" -R "$SOURCE_REPO" -n release-windows -D "$OUT" \
+  || die "אין מתקין Windows בריצה $got (ci.yml → windows-release)."
 grep -qx "commit=$sha" "$OUT/build.txt" && grep -qx "version=$VERSION" "$OUT/build.txt" \
   || die "המתקין לא של $sha בגרסה $VERSION: $(cat "$OUT/build.txt")"
 # Written on Windows (CRLF): without the CR, shasum looks for the right name.
 (cd "$OUT" && for f in *.sha256; do tr -d '\r' < "$f" | shasum -a 256 -c -; done)
+# The Mac disk image of the same run (D-101).
+gh run download "$got" -R "$SOURCE_REPO" -n release-macos -D "$OUT/mac" \
+  || die "אין דמות דיסק של Mac בריצה $got (ci.yml → macos-release)."
+grep -qx "commit=$sha" "$OUT/mac/build.txt" && grep -qx "version=$VERSION" "$OUT/mac/build.txt" \
+  || die "דמות הדיסק לא של $sha בגרסה $VERSION: $(cat "$OUT/mac/build.txt")"
+(cd "$OUT/mac" && shasum -a 256 -c DiagnosticVault.dmg.sha256)
+grep -Eqx '[0-9a-f]{40}' "$OUT/mac/DiagnosticVault.cdhash" \
+  || die "אין בריצה $got את ה-CDHash של האפליקציה (DiagnosticVault.cdhash)."
+mv "$OUT/mac/DiagnosticVault.dmg" "$OUT/mac/DiagnosticVault.dmg.sha256" "$OUT/mac/DiagnosticVault.cdhash" "$OUT/" && rm -r "$OUT/mac"
 
 say "2/4 חתימה ובדיקה עצמית"
 git show "origin/main:release-notes/$VERSION.txt" > "$OUT/notes.txt"
-cargo xtask update-notice "$VERSION" "$OUT/DiagnosticVault-Setup.exe" "$OUT/notes.txt" "$OUT"
+cargo xtask update-notice "$VERSION" "$OUT/DiagnosticVault-Setup.exe" "$OUT/notes.txt" "$OUT" "$OUT/DiagnosticVault.dmg" "$OUT/DiagnosticVault.cdhash"
 
 say "3/4 פרסום ב-$SOURCE_REPO"
 files=("$OUT/DiagnosticVault-Setup.exe" "$OUT/DiagnosticVault-Setup.exe.sha256"
+       "$OUT/DiagnosticVault.dmg" "$OUT/DiagnosticVault.dmg.sha256"
        "$OUT/DiagnosticVault-sbom.cdx.json" "$OUT/DiagnosticVault-sbom.cdx.json.sha256")
 if gh release view "v$VERSION" -R "$SOURCE_REPO" >/dev/null 2>&1; then
   gh release upload "v$VERSION" "${files[@]}" -R "$SOURCE_REPO" --clobber
@@ -173,6 +184,6 @@ fi
 say "4/4 פרסום ב-$RELEASES_REPO"
 gh release create "v$VERSION" --repo "$RELEASES_REPO" --latest \
   --title "כספת האבחון $VERSION" --notes-file "$OUT/notes.txt" \
-  "$OUT/DiagnosticVault-Setup.exe" "$OUT/latest.json" "$OUT/latest.json.sig"
+  "$OUT/DiagnosticVault-Setup.exe" "$OUT/DiagnosticVault.dmg" "$OUT/latest.json" "$OUT/latest.json.sig"
 
 say "הגרסה $VERSION פורסמה. אצל עינת היא תופיע כ'יש גרסה חדשה' בבדיקה היומית הבאה (או מיד, מ'הגדרות ← בדיקת עדכונים')."

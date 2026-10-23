@@ -17,9 +17,11 @@
 /// What [`harden_process`] managed to do, for the crash-free startup log in tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Hardening {
-    /// The minimum working set now granted, in MiB (`None`: the call failed everywhere).
+    /// The minimum working set now granted, in MiB (`None`: the call failed everywhere). On a
+    /// Mac, how much may be locked, when that is enough and no core file can be written.
     pub lock_quota_mib: Option<usize>,
-    /// The program is excluded from Windows Error Reporting for this user.
+    /// The program is excluded from Windows Error Reporting for this user. On a Mac, where
+    /// there is no such opt-out, it means no core file can be written.
     pub reports_excluded: bool,
     /// Error reports, if any are still made, carry no heap.
     pub reports_without_heap: bool,
@@ -38,7 +40,11 @@ pub fn harden_process() -> Hardening {
     {
         windows_impl::harden()
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        crate::mac_platform::harden()
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         Hardening::default()
     }

@@ -288,7 +288,7 @@ impl Core {
             None
         } else {
             std::fs::create_dir_all(&self.dir).map_err(VaultError::from)?;
-            binding::key_here(self.computer_seal.as_ref(), &self.dir, false)
+            binding::key_for_new_vault(self.computer_seal.as_ref(), &self.dir)?
         };
         let created = Vault::create_here(&self.dir, password, params, key.as_ref())?;
         let recovery_key = created.recovery_key.to_string();

@@ -70,12 +70,12 @@ describe("a slow Windows at the opening", () => {
     fireEvent.change(screen.getByLabelText("סיסמה"), { target: { value: "x" } });
     fireEvent.click(screen.getByRole("button", { name: "פתיחה" }));
     await act(async () => {});
-    expect(screen.queryByText(/ממתינה ל-Windows/)).toBeNull();
+    expect(screen.queryByText(/ממתינה למחשב/)).toBeNull();
     await act(async () => { vi.advanceTimersByTime(5100); });
-    expect(screen.getByText(/ממתינה ל-Windows/)).toBeInTheDocument();
-    await act(async () => { answer({ code: "busy", message: "Windows לא ענה בזמן. אפשר לנסות שוב בעוד רגע.", details: [] }); });
+    expect(screen.getByText(/ממתינה למחשב/)).toBeInTheDocument();
+    await act(async () => { answer({ code: "busy", message: "המחשב לא ענה בזמן. אפשר לנסות שוב בעוד רגע.", details: [] }); });
     expect(screen.getByText(/אפשר לנסות שוב בעוד רגע/)).toBeInTheDocument();
-    expect(screen.queryByText(/ממתינה ל-Windows/)).toBeNull();
+    expect(screen.queryByText(/ממתינה למחשב/)).toBeNull();
     expect(screen.getByLabelText("סיסמה")).toHaveAttribute("type", "password");
     vi.useRealTimers();
   });

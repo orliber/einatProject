@@ -122,7 +122,10 @@ fn the_worker_answers_like_the_model_and_keeps_running_between_texts() {
 #[test]
 fn a_worker_without_model_files_does_not_start() {
     use dv_ner::worker::{NerWorker, WorkerError};
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("dv-ner-none");
+    // A folder that is there but empty: the worker starts (contained, it may read only this
+    // folder) and says the model did not load.
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("dv-ner-empty");
+    std::fs::create_dir_all(&dir).unwrap();
     assert!(matches!(
         NerWorker::start(worker_exe(), &dir),
         Err(WorkerError::Load(_))

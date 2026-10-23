@@ -38,3 +38,7 @@ windows-sys = { version = "0.61", features = [
   "Win32_System_Pipes",
   "Win32_System_Threading",
 ] }
+
+[dev-dependencies]
+# Folders for the sandbox tests (already used by the other crates' tests).
+tempfile = "3"
