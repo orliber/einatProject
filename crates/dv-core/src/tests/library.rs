@@ -108,6 +108,60 @@ fn folders_hold_cases_and_refuse_loops() {
 }
 
 #[test]
+fn a_moved_case_is_in_one_folder_and_a_name_is_not_taken_twice_side_by_side() {
+    let (_dir, mut core, case) = setup(None);
+    let a = core.create_folder(None, "גן הדקל").unwrap();
+    let b = core.create_folder(None, "גן האלון").unwrap();
+    core.move_case(&case, Some(&a.id)).unwrap();
+    core.move_case(&case, Some(&b.id)).unwrap();
+    // Moved, not copied: one case, in the last folder only.
+    let cases = core.list_cases().unwrap();
+    assert_eq!(cases.len(), 1);
+    assert_eq!(cases[0].folder_id.as_deref(), Some(b.id.as_str()));
+    // Into the bin and back: it returns to where it was, still once.
+    core.delete_case(&case).unwrap();
+    assert!(core.list_cases().unwrap().is_empty());
+    core.restore_case(&case).unwrap();
+    let cases = core.list_cases().unwrap();
+    assert_eq!(cases.len(), 1);
+    assert_eq!(cases[0].folder_id.as_deref(), Some(b.id.as_str()));
+
+    // The same name side by side is refused, whatever the spaces or letter case.
+    for name in ["גן הדקל", "  גן הדקל "] {
+        assert!(matches!(
+            core.create_folder(None, name),
+            Err(CoreError::Refused(_))
+        ));
+    }
+    assert!(matches!(
+        core.rename_folder(&b.id, "גן הדקל"),
+        Err(CoreError::Refused(_))
+    ));
+    // Its own name again is fine, and so is the same name one level down.
+    core.rename_folder(&a.id, "גן הדקל").unwrap();
+    let inner = core.create_folder(Some(&b.id), "גן הדקל").unwrap();
+    // Moving it up next to its namesake is refused, and nothing moves.
+    assert!(matches!(
+        core.move_folder(&inner.id, None),
+        Err(CoreError::Refused(_))
+    ));
+    assert_eq!(
+        core.folders()
+            .unwrap()
+            .into_iter()
+            .find(|f| f.id == inner.id)
+            .unwrap()
+            .parent_id
+            .as_deref(),
+        Some(b.id.as_str())
+    );
+    assert!(matches!(
+        core.rename_folder("no-such-folder", "x"),
+        Err(CoreError::Vault(VaultError::NotFound))
+    ));
+}
+
+#[test]
 fn a_name_seen_in_another_case_is_pointed_out() {
     let (_dir, mut core, case) = setup(None);
     // The test case has the child "אלון" and the teacher "שירה".

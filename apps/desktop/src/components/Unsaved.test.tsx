@@ -130,6 +130,9 @@ describe("an edit open when the vault locks", () => {
     const api: AppApi = { status: status(), go, refresh: vi.fn(), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn() };
     render(<AppContext.Provider value={api}><UnsavedNotice /></AppContext.Provider>);
     expect(await screen.findByDisplayValue("טקסט בדוי א")).toBeInTheDocument();
+    // The dialog listens for Escape from an effect; under load the text can be on screen before
+    // it runs. Focus moves in from the effect just before, so once it is inside, Escape is heard.
+    await vi.waitFor(() => expect(screen.getByRole("dialog")).toContainElement(document.activeElement as HTMLElement));
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
     expect(await screen.findByDisplayValue("טקסט בדוי ב")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "מעבר לתיק" }));

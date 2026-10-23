@@ -346,6 +346,14 @@ export class FakeCore {
     return f;
   }
 
+  /** As the core: two folders side by side never share a name. */
+  private noSiblingNamed(parent: string | null, name: string, except: string | null) {
+    const key = name.trim().toLowerCase();
+    if (this.folderList.some((f) => f.parent_id === parent && f.id !== except && f.name.trim().toLowerCase() === key)) {
+      fail("refused", `כבר יש כאן תיקייה בשם "${name}".`);
+    }
+  }
+
   private folderOf(id: unknown): Folder {
     return this.folderList.find((f) => f.id === id) ?? fail("not_found", "התיקייה לא נמצאה");
   }
@@ -1063,13 +1071,19 @@ export class FakeCore {
         const name = String(a.name ?? "").trim();
         if (!name) fail("refused", "צריך לתת שם לתיקייה.");
         if (a.parentId) this.folderOf(a.parentId);
+        this.noSiblingNamed((a.parentId as string | null) ?? null, name, null);
         return this.addFolder((a.parentId as string | null) ?? null, name);
       }
-      case "rename_folder":
-        this.folderOf(a.id).name = String(a.name ?? "").trim() || fail("refused", "צריך לתת שם לתיקייה.");
+      case "rename_folder": {
+        const f = this.folderOf(a.id);
+        const name = String(a.name ?? "").trim() || fail("refused", "צריך לתת שם לתיקייה.");
+        this.noSiblingNamed(f.parent_id, name, f.id);
+        f.name = name;
         return null;
+      }
       case "move_folder": {
         const f = this.folderOf(a.id);
+        this.noSiblingNamed((a.parentId as string | null) ?? null, f.name, f.id);
         for (let p = (a.parentId as string | null) ?? null; p; p = this.folderOf(p).parent_id) {
           if (p === f.id) fail("refused", "אי אפשר להעביר תיקייה לתוך עצמה או לתוך תיקייה שבתוכה.");
         }

@@ -83,7 +83,7 @@ export function MoveDialog(props: { what: string; folders: Folder[]; current: st
       <div className="move-tree" role="radiogroup" aria-label="תיקיית היעד">
         <label className="check-row move-row">
           <input type="radio" name="move-target" checked={target === null} onChange={() => setTarget(null)} />
-          <span className="grow"><b>כל התיקים</b> (הרמה העליונה)</span>
+          <span className="grow"><b>תיקים</b> (הרמה העליונה)</span>
         </label>
         {tree(null, 1)}
       </div>

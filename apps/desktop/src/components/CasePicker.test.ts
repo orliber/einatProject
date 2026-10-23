@@ -13,7 +13,7 @@ describe("groupByFolder", () => {
     const folders = [folder("b", "פרטיים"), folder("c", "2026", "b"), folder("a", "מכון")];
     const cases = [kase("1", "נועם", null), kase("2", "מאיה", "c"), kase("3", "אורי", "a"), kase("4", "גיא", "missing")];
     expect(groupByFolder(cases, folders).map((g) => [g.label, g.cases.map((c) => c.child_name)])).toEqual([
-      ["כל התיקים", ["גיא", "נועם"]],
+      ["תיקים", ["גיא", "נועם"]],
       ["מכון", ["אורי"]],
       ["פרטיים › 2026", ["מאיה"]],
     ]);
