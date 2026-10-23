@@ -67,6 +67,10 @@ const SYSCTL_NAMES: &[&str] = &[
     // program before `main` without them (macOS 26).
     "kern.bootargs",
     "security.mac.lockdown_mode_state",
+    // The C library's page size and platform version: Rust's start-up stops on a zero page
+    // size.
+    "hw.pagesize_compat",
+    "kern.iossupportversion",
 ];
 /// The same by prefix: processor features and per-core-type sizes.
 const SYSCTL_PREFIXES: &[&str] = &["hw.optional.", "hw.perflevel", "machdep.cpu."];

@@ -186,11 +186,22 @@ mod contained_on_a_mac {
     /// The worker cannot start another program (a parser bug cannot hand off to a shell).
     #[test]
     fn no_second_process() {
-        let out = bash(
-            "/bin/echo started 2>/dev/null || echo denied",
+        // A refused fork ends the shell itself: nothing is printed and it fails.
+        let mut child = spawn(
+            Path::new("/bin/bash"),
+            &["-c", "/bin/echo started"],
             &Policy::default(),
-        );
-        assert_eq!(out, "denied\n");
+        )
+        .unwrap();
+        let mut out = String::new();
+        child
+            .take_stdout()
+            .unwrap()
+            .read_to_string(&mut out)
+            .unwrap();
+        let status = child.wait_timeout(Duration::from_secs(10)).unwrap();
+        assert!(status.is_some_and(|s| !s.success()), "{status:?}");
+        assert_eq!(out, "");
         // Nor replace itself with another program (`exec` is a builtin; with `execfail` a
         // refused exec returns instead of ending the shell).
         let out = bash(
