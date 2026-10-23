@@ -327,7 +327,7 @@ select.select {
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(23, 40, 42, 0.55);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;

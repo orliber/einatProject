@@ -24,5 +24,7 @@ export default defineConfig(({ mode }) => ({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
+    // CSS is left out of tests, except a stylesheet read as text (`?raw`) by a test of it.
+    css: { include: [/\?raw$/] },
   },
 }));

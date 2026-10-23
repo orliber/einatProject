@@ -91,7 +91,7 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
   return (
     <main className="lock-backdrop">
       <section className="lock-card" aria-labelledby="lock-title">
-        <div className="lock-icon"><LockIcon size={28} color="#fff" /></div>
+        <div className="lock-icon"><LockIcon size={28} /></div>
         <div className="lock-heading">
           <h1 id="lock-title">{he.appName}</h1>
           {PREVIEW ? (
