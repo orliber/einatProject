@@ -32,6 +32,7 @@
   height: 60px;
   border-radius: 16px;
   background: var(--primary);
+  color: var(--on-primary);
   display: grid;
   place-items: center;
 }

@@ -2,5 +2,5 @@
 .section-library > summary { cursor: pointer; font-weight: 600; }
 .library-body { padding: 8px 0; gap: 10px; }
 .library-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.library-similar { margin: 0; padding: 8px 12px; border-inline-start: 3px solid var(--line, #ddd); white-space: pre-wrap; }
+.library-similar { margin: 0; padding: 8px 12px; border-inline-start: 3px solid var(--line); white-space: pre-wrap; }
 .library-similar p { margin: 4px 0 0; }
