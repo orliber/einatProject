@@ -76,6 +76,19 @@ const SYSCTL_NAMES: &[&str] = &[
 /// The same by prefix: processor features and per-core-type sizes.
 const SYSCTL_PREFIXES: &[&str] = &["hw.optional.", "hw.perflevel", "machdep.cpu."];
 
+/// `X.app/Contents/Frameworks` when `exe` (already canonical) is `X.app/Contents/MacOS/<name>`
+/// and that folder exists; nothing for any other program.
+fn app_frameworks(exe: &Path) -> Option<PathBuf> {
+    let macos = exe.parent()?;
+    let contents = macos.parent()?;
+    let app = contents.parent()?;
+    let is_app = macos.file_name()? == "MacOS"
+        && contents.file_name()? == "Contents"
+        && app.extension()? == "app";
+    let frameworks = contents.join("Frameworks");
+    (is_app && frameworks.is_dir()).then_some(frameworks)
+}
+
 /// The profile for `exe`, which may also read `policy.read_dirs`.
 pub fn profile(exe: &Path, policy: &Policy) -> io::Result<String> {
     let exe = std::fs::canonicalize(exe)?;
@@ -101,13 +114,9 @@ pub fn profile(exe: &Path, policy: &Policy) -> io::Result<String> {
         code.push_str(&format!(" (subpath {})", quote(own)?));
     }
     // Inside the app, the libraries it ships (the FIPS module is a dylib on a Mac) are in
-    // Contents/Frameworks beside Contents/MacOS, signed with the app.
-    if let Some(frameworks) = exe
-        .parent()
-        .and_then(Path::parent)
-        .map(|contents| contents.join("Frameworks"))
-        .filter(|f| f.is_dir())
-    {
+    // Contents/Frameworks beside Contents/MacOS, signed with the app. Only for a program that
+    // really is X.app/Contents/MacOS/<program>.
+    if let Some(frameworks) = app_frameworks(&exe) {
         code.push_str(&format!(
             " (subpath {})",
             quote(&std::fs::canonicalize(frameworks)?)?
@@ -249,14 +258,20 @@ mod tests {
     /// worker may load; a folder beside a program that is not in an app is not added.
     #[test]
     fn the_apps_own_frameworks_are_readable_code() {
-        let app = tempfile::tempdir().unwrap();
-        let contents = app.path().join("Contents");
-        std::fs::create_dir_all(contents.join("MacOS")).unwrap();
-        std::fs::create_dir_all(contents.join("Frameworks")).unwrap();
-        let exe = contents.join("MacOS").join("app");
-        std::fs::copy("/bin/cat", &exe).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let program_in = |bundle: &str| {
+            let contents = dir.path().join(bundle).join("Contents");
+            std::fs::create_dir_all(contents.join("MacOS")).unwrap();
+            std::fs::create_dir_all(contents.join("Frameworks")).unwrap();
+            let exe = contents.join("MacOS").join("app");
+            std::fs::copy("/bin/cat", &exe).unwrap();
+            exe
+        };
+        let exe = program_in("Diagnostic Vault.app");
         let p = profile(&exe, &Policy::default()).unwrap();
-        let frameworks = std::fs::canonicalize(contents.join("Frameworks")).unwrap();
+        let frameworks =
+            std::fs::canonicalize(exe.parent().unwrap().parent().unwrap().join("Frameworks"))
+                .unwrap();
         let rule = format!("(subpath \"{}\")", frameworks.display());
         let mapped = p
             .lines()
@@ -264,6 +279,9 @@ mod tests {
             .unwrap();
         assert!(mapped.contains(&rule), "{p}");
 
+        // The same layout outside an app, and a program that is not in one: nothing added.
+        let p = profile(&program_in("not-an-app"), &Policy::default()).unwrap();
+        assert!(!p.contains("Frameworks"), "{p}");
         let p = profile(Path::new("/bin/cat"), &Policy::default()).unwrap();
         assert!(!p.contains("Frameworks"), "{p}");
     }
