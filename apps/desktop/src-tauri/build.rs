@@ -180,4 +180,12 @@ fn main() {
         eprintln!("tauri-build failed: {error:#}");
         std::process::exit(1);
     }
+    // On a Mac the FIPS module is a dylib named @rpath/…; the app ships it in
+    // Contents/Frameworks (macos/bundle-fips.sh), so the program looks for it there. Without
+    // this, dyld stops the installed app before its first line (D-091, D-101).
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos")
+        && std::env::var_os("CARGO_FEATURE_FIPS").is_some()
+    {
+        println!("cargo:rustc-link-arg-bins=-Wl,-rpath,@executable_path/../Frameworks");
+    }
 }

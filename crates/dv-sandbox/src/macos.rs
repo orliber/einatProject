@@ -100,6 +100,19 @@ pub fn profile(exe: &Path, policy: &Policy) -> io::Result<String> {
     if let Some(own) = read.first() {
         code.push_str(&format!(" (subpath {})", quote(own)?));
     }
+    // Inside the app, the libraries it ships (the FIPS module is a dylib on a Mac) are in
+    // Contents/Frameworks beside Contents/MacOS, signed with the app.
+    if let Some(frameworks) = exe
+        .parent()
+        .and_then(Path::parent)
+        .map(|contents| contents.join("Frameworks"))
+        .filter(|f| f.is_dir())
+    {
+        code.push_str(&format!(
+            " (subpath {})",
+            quote(&std::fs::canonicalize(frameworks)?)?
+        ));
+    }
     let mut subpaths = code.clone();
     for d in read.iter().skip(1) {
         subpaths.push_str(&format!(" (subpath {})", quote(d)?));
@@ -230,6 +243,29 @@ mod tests {
             next(CLOSE_INHERITED),
             format!("closed\nclosed\n{FD_LIMIT}\n")
         );
+    }
+
+    /// An app's own Frameworks folder (Contents/Frameworks beside Contents/MacOS) is code the
+    /// worker may load; a folder beside a program that is not in an app is not added.
+    #[test]
+    fn the_apps_own_frameworks_are_readable_code() {
+        let app = tempfile::tempdir().unwrap();
+        let contents = app.path().join("Contents");
+        std::fs::create_dir_all(contents.join("MacOS")).unwrap();
+        std::fs::create_dir_all(contents.join("Frameworks")).unwrap();
+        let exe = contents.join("MacOS").join("app");
+        std::fs::copy("/bin/cat", &exe).unwrap();
+        let p = profile(&exe, &Policy::default()).unwrap();
+        let frameworks = std::fs::canonicalize(contents.join("Frameworks")).unwrap();
+        let rule = format!("(subpath \"{}\")", frameworks.display());
+        let mapped = p
+            .lines()
+            .find(|l| l.starts_with("(allow file-map-executable"))
+            .unwrap();
+        assert!(mapped.contains(&rule), "{p}");
+
+        let p = profile(Path::new("/bin/cat"), &Policy::default()).unwrap();
+        assert!(!p.contains("Frameworks"), "{p}");
     }
 
     #[test]

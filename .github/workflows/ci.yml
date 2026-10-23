@@ -464,8 +464,16 @@ jobs:
         run: cargo test -p dv-privacy
       - name: Vaults of every earlier version open and take work
         run: cargo test --release -p dv-core --lib upgrade
+      # On a Mac the FIPS module is a dylib beside the program, not inside it: it goes in the
+      # app's Contents/Frameworks, where the program looks (build.rs). Without it dyld stops
+      # the app before its first line, as the missing DLL did on Windows (D-091).
+      - name: The program and its FIPS module
+        run: |
+          pnpm --dir apps/desktop build
+          cargo build --release -p dv-desktop --features fips
+          apps/desktop/src-tauri/macos/bundle-fips.sh
       - name: Build the disk image
-        run: pnpm tauri build --bundles app,dmg --features fips
+        run: pnpm tauri build --bundles app,dmg --features fips --config src-tauri/tauri.fips.conf.json
         working-directory: apps/desktop
         # Forgot password → Google (D-041), built in. Unset: the option is simply not offered.
         env:
@@ -499,6 +507,11 @@ jobs:
           printf '%s\n' "$cdhash" > release-out/DiagnosticVault.cdhash
           cat release-out/DiagnosticVault.cdhash
           exe="$(ls "$app/Contents/MacOS/"* | head -1)"
+          # The libraries it loads and where it looks for its own: the FIPS module must be
+          # @rpath/… and found in Contents/Frameworks.
+          otool -L "$exe"
+          otool -l "$exe" | grep -A2 LC_RPATH
+          ls -l "$app/Contents/Frameworks"
           DV_TEST_APP_EXE="$exe" cargo test --release -p dv-ingest --test worker -- --ignored the_shipped_program
           hdiutil detach "$mnt"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
