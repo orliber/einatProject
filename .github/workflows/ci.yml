@@ -103,7 +103,11 @@ jobs:
           persist-credentials: false
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # Before this job, every vault test died here with STATUS_STACK_OVERFLOW (D-038).
-      - run: cargo test --release -p dv-vault -p dv-egress -p dv-ingest -p dv-sandbox
+      - run: cargo test --release -p dv-vault -p dv-egress -p dv-ingest -p dv-sandbox -- --skip computer_key::
+      # The key sealed to this computer (DPAPI) on its own: beside the Argon2 tests a busy
+      # runner held its PowerShell past the opening's wait (main, 23.10), which is not a fault.
+      - name: The key kept on this computer, on its own
+        run: cargo test --release -p dv-vault --lib computer_key::
       - name: First run (create, close, open again; the real Argon2 cost)
         run: cargo test --release -p dv-core --test first_run -- --ignored
 
@@ -137,7 +141,9 @@ jobs:
       # The shell embeds the built UI at compile time.
       - run: pnpm build
         working-directory: apps/desktop
-      - run: cargo test --release -p dv-vault --features fips
+      - run: cargo test --release -p dv-vault --features fips -- --skip computer_key::
+      - name: The key kept on this computer, on its own
+        run: cargo test --release -p dv-vault --features fips --lib computer_key::
       # Tauri checks that bundled resources exist even when nothing is bundled. This job builds
       # no installer, so an empty folder stands in for the OCR engine (D-048); the installer
       # jobs (desktop, release) fetch the real one.
@@ -167,7 +173,10 @@ jobs:
           security list-keychains -d user -s dv-ci.keychain
           security default-keychain -d user -s dv-ci.keychain
       # dv-ner: the name model's runtime (ONNX) as a worker inside the sandbox.
-      - run: cargo test --release --no-fail-fast -p dv-vault -p dv-egress -p dv-ingest -p dv-sandbox -p dv-ner
+      - run: cargo test --release --no-fail-fast -p dv-vault -p dv-egress -p dv-ingest -p dv-sandbox -p dv-ner -- --skip computer_key::
+      # The key in the Keychain on its own, away from the Argon2 tests (as on Windows).
+      - name: The key kept on this computer, on its own
+        run: cargo test --release -p dv-vault --lib computer_key::
       - name: First run (create, close, open again; the real Argon2 cost)
         run: cargo test --release -p dv-core --test first_run -- --ignored
       - name: Binding, Google and updates in the core

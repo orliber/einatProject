@@ -824,7 +824,7 @@ export class FakeCore {
       case "recent_crashes":
         return [];
       case "ping":
-        return { ipc_version: 1, core_version: "0.1.0", build_commit: "browser-preview", fips_active: false, platform: "browser" };
+        return { ipc_version: 1, core_version: "0.1.0", build_commit: "browser-preview", fips_active: false, platform: "browser", slowest_key_check_ms: 0, key_check_wait_ms: 45000 };
       case "app_status":
         return this.status();
       case "unlock":
