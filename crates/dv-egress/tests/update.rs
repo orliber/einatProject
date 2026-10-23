@@ -60,6 +60,9 @@ fn public(k: &Ed25519KeyPair) -> [u8; 32] {
     k.public_key().as_ref().try_into().unwrap()
 }
 
+/// A made-up CDHash for the Mac entry.
+const CDHASH: &str = "0123456789abcdef0123456789abcdef01234567";
+
 fn notice_value(version: &str) -> Value {
     json!({
         "product": PRODUCT,
@@ -68,7 +71,7 @@ fn notice_value(version: &str) -> Value {
         "notes": ["תיקון קטן"],
         "installer": {"url": INSTALLER_URL, "sha256": to_hex(&sha256(INSTALLER)), "size": INSTALLER.len()},
         // The Mac entry (D-101): the same invented bytes, so every test runs on both systems.
-        "macos": {"url": INSTALLER_URL, "sha256": to_hex(&sha256(INSTALLER)), "size": INSTALLER.len()}
+        "macos": {"url": INSTALLER_URL, "sha256": to_hex(&sha256(INSTALLER)), "size": INSTALLER.len(), "cdhash": CDHASH}
     })
 }
 
@@ -234,6 +237,34 @@ fn a_broken_entry_for_this_system_is_refused_whatever_the_other_says() {
             "{broken}"
         );
     }
+    // The Mac entry names the app's CDHash, read back exactly; without a sound one it is
+    // refused (the install would have nothing to check the app against). Windows has none.
+    let bytes = serde_json::to_vec(&notice_value("9.0.0")).unwrap();
+    let mac = parse_notice_for(&bytes, "macos").unwrap().unwrap();
+    assert_eq!(mac.cdhash.map(|c| to_hex(&c)).as_deref(), Some(CDHASH));
+    assert_eq!(
+        parse_notice_for(&bytes, "installer")
+            .unwrap()
+            .unwrap()
+            .cdhash,
+        None
+    );
+    for bad in [
+        Value::Null,
+        json!("ab".repeat(19)),
+        json!("ab".repeat(32)),
+        json!("zz".repeat(20)),
+    ] {
+        let mut n = notice_value("9.0.0");
+        n["macos"]["cdhash"] = bad;
+        let bytes = serde_json::to_vec(&n).unwrap();
+        assert_eq!(
+            parse_notice_for(&bytes, "macos"),
+            Err(UpdateError::BadNotice("cdhash".to_owned())),
+            "{n}"
+        );
+        assert!(parse_notice_for(&bytes, "installer").unwrap().is_some());
+    }
     // A notice with no entry for this system offers nothing (an older notice on a Mac).
     let mut n = notice_value("9.0.0");
     n.as_object_mut().unwrap().remove(PLATFORM_ENTRY);
@@ -289,6 +320,7 @@ fn an_installer_off_the_release_address_is_refused_before_it_is_fetched() {
         installer_url: "https://objects.githubusercontent.com/evil/Setup.exe".to_owned(),
         sha256: sha256(INSTALLER),
         size: INSTALLER.len() as u64,
+        cdhash: None,
     };
     assert!(matches!(
         download(&t, &info),

@@ -1341,6 +1341,7 @@ dependencies = [
  "dv-ingest",
  "dv-ner",
  "dv-privacy",
+ "dv-sandbox",
  "rfd",
  "rustix",
  "serde",

@@ -75,7 +75,14 @@ pub struct UpdateInfo {
     pub installer_url: String,
     pub sha256: [u8; 32],
     pub size: u64,
+    /// The Mac entry only (D-101): the CDHash of the app in the disk image, as `codesign`
+    /// reports it, so the install checks that the app is exactly the one built and signed
+    /// for this release, not only that it is signed by someone. `None` for Windows.
+    pub cdhash: Option<[u8; CDHASH_LEN]>,
 }
+
+/// A CDHash: the code directory's hash, cut to 20 bytes as `codesign` uses it.
+pub const CDHASH_LEN: usize = 20;
 
 /// Whatever fetches bytes: GitHub in the program, a table in the tests.
 pub trait Fetch {
@@ -206,6 +213,20 @@ pub fn parse_notice_for(bytes: &[u8], entry: &str) -> Result<Option<UpdateInfo>,
         .and_then(Value::as_u64)
         .filter(|s| (1..=MAX_INSTALLER).contains(s))
         .ok_or_else(|| bad("size"))?;
+    // A Mac entry without the app's CDHash is refused: the install would have nothing to
+    // check the app's own signature against.
+    let cdhash = if entry == "macos" {
+        Some(
+            installer
+                .get("cdhash")
+                .and_then(Value::as_str)
+                .and_then(from_hex)
+                .and_then(|b| b.try_into().ok())
+                .ok_or_else(|| bad("cdhash"))?,
+        )
+    } else {
+        None
+    };
     let notes = v
         .get("notes")
         .and_then(Value::as_array)
@@ -230,6 +251,7 @@ pub fn parse_notice_for(bytes: &[u8], entry: &str) -> Result<Option<UpdateInfo>,
         installer_url: url.to_owned(),
         sha256,
         size,
+        cdhash,
     }))
 }
 
@@ -377,7 +399,8 @@ mod tests {
             "notes": ["שיפורים בסינון"],
             "installer": {"url": URL, "sha256": to_hex(hash.as_ref()), "size": INSTALLER.len()},
             // The same file stands in for the Mac disk image, so every test runs on both.
-            "macos": {"url": URL, "sha256": to_hex(hash.as_ref()), "size": INSTALLER.len()}
+            "macos": {"url": URL, "sha256": to_hex(hash.as_ref()), "size": INSTALLER.len(),
+                      "cdhash": "0123456789abcdef0123456789abcdef01234567"}
         }))
         .unwrap_or_default()
     }

@@ -59,3 +59,5 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Diag
 # already in Cargo.lock (tempfile).
 [target.'cfg(target_os = "macos")'.dependencies]
 rustix = { version = "1", features = ["process"] }
+# The most descriptors a worker may hold, as its start sets it (one value for both sides).
+dv-sandbox.workspace = true

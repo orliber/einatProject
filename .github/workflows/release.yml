@@ -156,7 +156,8 @@ jobs:
           grep -qx "version=$V" build.txt || fail "the disk image is of another version: $(cat build.txt)"
           sha256sum -c DiagnosticVault.dmg.sha256
           tail -c 512 DiagnosticVault.dmg | head -c 4 | grep -q koly || fail "not a Mac disk image"
-          mv DiagnosticVault.dmg DiagnosticVault.dmg.sha256 ../release-out/
+          grep -Eqx '[0-9a-f]{40}' DiagnosticVault.cdhash || fail "no CDHash of the app in the image (DiagnosticVault.cdhash)"
+          mv DiagnosticVault.dmg DiagnosticVault.dmg.sha256 DiagnosticVault.cdhash ../release-out/
 
       # Built before the key is anywhere in the environment: no build script ever sees it.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -175,7 +176,7 @@ jobs:
           fail() { echo "::error::$*"; exit 1; }
           notes="release-notes/$V.txt"
           if [[ "$REHEARSAL" == "true" ]]; then
-            target/debug/xtask update-notice --test-key "$V" release-out/DiagnosticVault-Setup.exe "$notes" release-out release-out/DiagnosticVault.dmg
+            target/debug/xtask update-notice --test-key "$V" release-out/DiagnosticVault-Setup.exe "$notes" release-out release-out/DiagnosticVault.dmg release-out/DiagnosticVault.cdhash
             exit 0
           fi
           [[ -n "$SIGNING_KEY" ]] || fail "the secret DV_UPDATE_SIGNING_KEY is missing (docs/RELEASE_HE.md → פעם אחת). Or: scripts/release.sh $V on Or's Mac signs there."
@@ -183,7 +184,7 @@ jobs:
           key="$RUNNER_TEMP/update-signing.pk8"
           trap 'rm -f "$key"' EXIT
           printf '%s' "$SIGNING_KEY" | base64 -d > "$key" || fail "DV_UPDATE_SIGNING_KEY is not base64"
-          DV_UPDATE_KEY="$key" target/debug/xtask update-notice "$V" release-out/DiagnosticVault-Setup.exe "$notes" release-out release-out/DiagnosticVault.dmg
+          DV_UPDATE_KEY="$key" target/debug/xtask update-notice "$V" release-out/DiagnosticVault-Setup.exe "$notes" release-out release-out/DiagnosticVault.dmg release-out/DiagnosticVault.cdhash
 
       - name: Publish in this repository (fixed names, D-026)
         if: env.REHEARSAL != 'true'

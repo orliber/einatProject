@@ -195,6 +195,20 @@ jobs:
         run: |
           cargo build --release -p dv-desktop
           DV_TEST_APP_EXE="$PWD/target/release/dv-desktop" cargo test --release -p dv-ingest --test worker -- --ignored the_shipped_program
+      # The check an installed copy makes of a new version (D-101, `dv-core/src/update.rs`),
+      # in the same words: the app whose CDHash the signed notice names passes, and no other.
+      - name: An update accepts only the app the signed notice names
+        run: |
+          app="$RUNNER_TEMP/dv-cdhash-check"
+          cp target/release/dv-desktop "$app"
+          codesign -s - -f "$app"
+          cdhash="$(codesign -dvvv "$app" 2>&1 | sed -n 's/^CDHash=//p')"
+          [[ "$cdhash" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::no CDHash: $cdhash"; exit 1; }
+          codesign --verify --deep --strict -R "=cdhash H\"$cdhash\"" "$app"
+          other="$(printf '%040d' 0)"
+          if codesign --verify --deep --strict -R "=cdhash H\"$other\"" "$app" 2>/dev/null; then
+            echo "::error::an app with another CDHash passed"; exit 1
+          fi
       # When a contained worker fails, what the sandbox refused and how the worker ended (test
       # data only: fabricated documents).
       - name: Sandbox refusals and worker crashes
@@ -467,14 +481,23 @@ jobs:
           printf 'version=%s\ncommit=%s\n' "$v" "$GITHUB_SHA" > release-out/build.txt
           cat release-out/build.txt
       # What she runs: the image mounts, holds one app, signed (ad hoc) and whole, and that
-      # app reads a document as a worker inside the sandbox.
+      # app reads a document as a worker inside the sandbox. The app's CDHash is recorded
+      # beside the image: the signed notice carries it, and an installed copy accepts only
+      # that exact app (D-101, review of #136).
       - name: The app in the image starts its document reader contained
         run: |
           mnt="$RUNNER_TEMP/dv-dmg"
           mkdir -p "$mnt"
           hdiutil attach -nobrowse -readonly -mountpoint "$mnt" release-out/DiagnosticVault.dmg
           app="$(ls -d "$mnt"/*.app)"
+          [ "$(ls -d "$mnt"/*.app | wc -l)" -eq 1 ] || { echo "::error::not one app in the image"; exit 1; }
           codesign --verify --deep --strict "$app"
+          cdhash="$(codesign -dvvv "$app" 2>&1 | sed -n 's/^CDHash=//p')"
+          [[ "$cdhash" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::no CDHash for the app: $cdhash"; exit 1; }
+          # The same check an installed copy makes, so a requirement it would refuse fails here.
+          codesign --verify --deep --strict -R "=cdhash H\"$cdhash\"" "$app"
+          printf '%s\n' "$cdhash" > release-out/DiagnosticVault.cdhash
+          cat release-out/DiagnosticVault.cdhash
           exe="$(ls "$app/Contents/MacOS/"* | head -1)"
           DV_TEST_APP_EXE="$exe" cargo test --release -p dv-ingest --test worker -- --ignored the_shipped_program
           hdiutil detach "$mnt"

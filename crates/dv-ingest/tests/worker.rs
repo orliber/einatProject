@@ -86,9 +86,19 @@ fn the_shipped_program_reads_a_document_contained() {
 #[ignore = "needs the built app: DV_TEST_APP_EXE"]
 fn the_shipped_program_refuses_a_descriptor_it_should_not_have() {
     let exe = std::env::var("DV_TEST_APP_EXE").expect("DV_TEST_APP_EXE");
+    // Started as the app starts it (dv-sandbox): whatever this test process inherited is
+    // closed and the descriptor limit set, then `script` runs.
     let run = |script: &str| {
         std::process::Command::new("/bin/bash")
-            .args(["-c", script, &exe])
+            .args([
+                "-c",
+                dv_sandbox::CLOSE_INHERITED,
+                "dv-sandbox",
+                "/bin/bash",
+                "-c",
+                script,
+                &exe,
+            ])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -96,22 +106,27 @@ fn the_shipped_program_refuses_a_descriptor_it_should_not_have() {
             .unwrap()
             .code()
     };
-    // Whatever this test process inherited is closed first (cargo's own descriptors), as the
-    // app's start does (dv-sandbox).
-    let close = "i=3; while [ \"$i\" -lt 1024 ]; do eval \"exec $i>&-\"; i=$((i+1)); done; ";
-    // bash keeps descriptor 5 open across exec, as an app that forgot close-on-exec would.
+    // bash keeps a descriptor open across exec, as an app that forgot close-on-exec would:
+    // a low one and the highest the worker can hold.
+    let last = dv_sandbox::FD_LIMIT - 1;
+    for fd in [5, last] {
+        assert_eq!(
+            run(&format!(
+                "exec {fd}</dev/null; exec \"$0\" --dv-ingest-worker"
+            )),
+            Some(7),
+            "{fd}"
+        );
+    }
+    // A lower limit than the start sets is no reason to refuse.
     assert_eq!(
-        run(&format!(
-            "{close}exec 5</dev/null; exec \"$0\" --dv-ingest-worker"
-        )),
-        Some(7)
+        run("ulimit -n 512; exec \"$0\" --dv-ingest-worker"),
+        Some(2),
+        "a lower limit is fine"
     );
     // Without it the same start runs: an empty request gets the worker's own answer (2), not
     // the refusal.
-    assert_eq!(
-        run(&format!("{close}exec \"$0\" --dv-ingest-worker")),
-        Some(2)
-    );
+    assert_eq!(run("exec \"$0\" --dv-ingest-worker"), Some(2));
 }
 
 /// On a Mac the shipped worker ends once the app that started it is gone (the app crashed or
@@ -146,6 +161,10 @@ fn the_shipped_program_ends_when_the_app_is_gone() {
     // The "app" (bash) starts the worker, sees it running, and quits without ending it.
     let mut app = std::process::Command::new("/bin/bash")
         .args([
+            "-c",
+            dv_sandbox::CLOSE_INHERITED,
+            "dv-sandbox",
+            "/bin/bash",
             "-c",
             "\"$0\" --dv-ingest-worker < \"$1\" >/dev/null 2>&1 & echo $!",
             &exe,

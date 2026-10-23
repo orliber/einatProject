@@ -68,8 +68,6 @@ pub fn with_wire_limit(mut hardening: Hardening) -> Hardening {
     hardening
 }
 
-/// The most file descriptors looked at for one the worker should not have.
-const FD_SCAN: u32 = 1024;
 /// How often the worker checks that the app is still there.
 const PARENT_CHECK: Duration = Duration::from_millis(500);
 
@@ -78,11 +76,21 @@ const PARENT_CHECK: Duration = Duration::from_millis(500);
 /// object's kill-on-close) and after `cpu_seconds` of CPU, a limit it cannot raise. `Some`
 /// (the exit code) when it must not run: a descriptor of the app's beyond 0, 1 and 2 reached
 /// it, which the sandbox would not stop it reading.
+///
+/// Every number below its descriptor limit is looked at. Its start (dv-sandbox) closes all
+/// that are open and sets that limit to [`dv_sandbox::FD_LIMIT`]; a higher limit (a start
+/// some other way) is refused, since a descriptor could then be beyond the look.
 #[must_use]
 pub fn contain_worker(cpu_seconds: Option<u64>) -> Option<i32> {
-    let open = |fd: u32| std::fs::metadata(format!("/dev/fd/{fd}")).is_ok();
+    let open = |fd: u64| std::fs::metadata(format!("/dev/fd/{fd}")).is_ok();
+    let Some(limit) = getrlimit(Resource::Nofile)
+        .current
+        .filter(|&l| l <= dv_sandbox::FD_LIMIT)
+    else {
+        return Some(7);
+    };
     // Its own stdin must show as open, or the look would prove nothing (fail-closed).
-    if !open(0) || (3..FD_SCAN).any(open) {
+    if !open(0) || (3..limit).any(open) {
         return Some(7);
     }
     if let Some(seconds) = cpu_seconds {

@@ -462,3 +462,38 @@ fn a_key_that_cannot_be_made_here_writes_no_unbound_password() {
         "not a guess: no waiting time"
     );
 }
+
+#[test]
+fn a_slow_keychain_at_a_new_password_or_kit_says_try_again_and_makes_no_key() {
+    // Review of #136: a bound slot whose key here is late twice is `Busy` for a new password
+    // and for a new kit, never "another computer", and no key is made or held aside.
+    let dir = tempfile::tempdir().unwrap();
+    let here = Arc::new(FakeSeal::default());
+    on(dir.path(), &here).create_vault(PASSWORD).unwrap();
+    let slow = Arc::new(Slow(Arc::clone(&here), Mutex::new(0)));
+    let mut core = Core::for_tests(dir.path(), None)
+        .with_computer_seal(Arc::clone(&slow) as Arc<dyn ComputerSeal>);
+    core.unlock(PASSWORD).unwrap();
+    let in_use = *here.load(dir.path()).unwrap().as_bytes();
+
+    *slow.1.lock().unwrap() = 2;
+    let e = core
+        .change_password(PASSWORD, false, "another fabricated password 7")
+        .unwrap_err();
+    assert!(matches!(e, CoreError::Vault(VaultError::Busy)), "{e:?}");
+    *slow.1.lock().unwrap() = 2;
+    let e = core.new_recovery_kit(PASSWORD, false).unwrap_err();
+    assert!(matches!(e, CoreError::Vault(VaultError::Busy)), "{e:?}");
+
+    assert!(here.load_next(dir.path()).is_err(), "no key held aside");
+    assert_eq!(*here.load(dir.path()).unwrap().as_bytes(), in_use);
+    assert!(core.check_backoff().is_ok(), "not a guess: no waiting time");
+    core.change_password(PASSWORD, false, "another fabricated password 7")
+        .unwrap();
+    core.lock();
+    assert!(
+        core.unlock("another fabricated password 7")
+            .unwrap()
+            .unlocked
+    );
+}

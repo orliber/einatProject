@@ -4,8 +4,9 @@
 //!   `~/.diagnostic-vault/update-signing.pk8` (owner-only), never into the repository; the
 //!   public key is written to `crates/dv-egress/update_key.pub`, to commit.
 //! * `cargo xtask update-notice [--test-key] <version> <installer.exe> <notes.txt> <out-dir>
-//!   [<mac.dmg>]` – the signed notice (`latest.json` + `latest.json.sig`) for a release, with
-//!   the Mac disk image when there is one (D-101), checked with the same
+//!   [<mac.dmg> <app.cdhash>]` – the signed notice (`latest.json` + `latest.json.sig`) for a
+//!   release, with the Mac disk image and its app's CDHash (as CI recorded it with
+//!   `codesign`) when there is one (D-101), checked with the same
 //!   code the program runs before it is written. The key is read from `DV_UPDATE_KEY` (on
 //!   Or's Mac, or in the release workflow from a repository secret, D-091); `--test-key` signs
 //!   with a key made for the run, for a rehearsal.
@@ -144,13 +145,16 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
 /// The name the Mac disk image is published under (D-101), beside the Windows installer.
 pub const MAC_IMAGE: &str = "DiagnosticVault.dmg";
 
+/// The Mac release: the disk image, and the CDHash of the one app in it.
+pub type MacImage<'a> = (&'a [u8], [u8; update::CDHASH_LEN]);
+
 /// The notice for one release, as bytes: the Windows installer (`installer`, read by every
-/// version) and, when there is one, the Mac disk image (`macos`, read by Mac copies from
-/// D-101 on; earlier versions ignore it).
+/// version) and, when there is one, the Mac disk image with its app's CDHash (`macos`, read
+/// by Mac copies from D-101 on; earlier versions ignore it).
 pub fn notice_json(
     version: &str,
     installer: &[u8],
-    mac: Option<&[u8]>,
+    mac: Option<MacImage<'_>>,
     notes: &[String],
     published: &str,
 ) -> Vec<u8> {
@@ -169,10 +173,26 @@ pub fn notice_json(
         "notes": notes,
         "installer": file("DiagnosticVault-Setup.exe", installer),
     });
-    if let (Some(mac), Some(o)) = (mac, body.as_object_mut()) {
-        o.insert("macos".to_owned(), file(MAC_IMAGE, mac));
+    if let (Some((image, cdhash)), Some(o)) = (mac, body.as_object_mut()) {
+        let mut entry = file(MAC_IMAGE, image);
+        entry["cdhash"] = serde_json::json!(update::to_hex(&cdhash));
+        o.insert("macos".to_owned(), entry);
     }
     serde_json::to_vec_pretty(&body).unwrap_or_default()
+}
+
+/// A CDHash as `codesign -dvvv` prints it (`CDHash=` then 40 hex digits), alone in a file.
+#[must_use]
+pub fn parse_cdhash(text: &str) -> Option<[u8; update::CDHASH_LEN]> {
+    let t = text.trim();
+    if t.len() != 2 * update::CDHASH_LEN || !t.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let mut out = [0u8; update::CDHASH_LEN];
+    for (o, pair) in out.iter_mut().zip(t.as_bytes().chunks(2)) {
+        *o = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
+    }
+    Some(out)
 }
 
 /// A disk image as `hdiutil` writes it: the UDIF trailer (`koly`) in its last 512 bytes.
@@ -194,7 +214,7 @@ pub fn sign_and_verify(
     pinned: &[[u8; 32]],
     notice: &[u8],
     installer: &[u8],
-    mac: Option<&[u8]>,
+    mac: Option<MacImage<'_>>,
 ) -> Result<String, String> {
     let pair =
         Ed25519KeyPair::from_pkcs8(pair_pkcs8).map_err(|_| "the private key file is not valid")?;
@@ -220,7 +240,7 @@ pub fn sign_and_verify(
         ),
         (win.installer_url.clone(), installer.to_vec()),
     ]);
-    if let (Some(info), Some(bytes)) = (&mac_info, mac) {
+    if let (Some(info), Some((bytes, _))) = (&mac_info, mac) {
         files.insert(info.installer_url.clone(), bytes.to_vec());
     }
     let server = Local(files);
@@ -240,8 +260,10 @@ pub fn sign_and_verify(
     }
     match (mac, mac_info) {
         (None, None) => {}
-        (Some(bytes), Some(info))
-            if info.sha256 == update::sha256(bytes) && info.size == bytes.len() as u64 => {}
+        (Some((bytes, cdhash)), Some(info))
+            if info.sha256 == update::sha256(bytes)
+                && info.size == bytes.len() as u64
+                && info.cdhash == Some(cdhash) => {}
         _ => {
             return Err("self-check failed: the Mac entry does not match the disk image".to_owned())
         }
@@ -259,10 +281,12 @@ pub fn notice(root: &Path, args: &[String]) -> Result<String, String> {
     };
     let (version, installer, notes, out, mac) = match args {
         [version, installer, notes, out] => (version, installer, notes, out, None),
-        [version, installer, notes, out, mac] => (version, installer, notes, out, Some(mac)),
+        [version, installer, notes, out, dmg, cdhash] => {
+            (version, installer, notes, out, Some((dmg, cdhash)))
+        }
         _ => {
             return Err(
-                "usage: cargo xtask update-notice [--test-key] <version> <installer.exe> <notes.txt> <out-dir> [<mac.dmg>]"
+                "usage: cargo xtask update-notice [--test-key] <version> <installer.exe> <notes.txt> <out-dir> [<mac.dmg> <app.cdhash>]"
                     .to_owned(),
             )
         }
@@ -292,12 +316,17 @@ pub fn notice(root: &Path, args: &[String]) -> Result<String, String> {
         return Err(format!("{installer} is not a Windows program"));
     }
     let dmg = match mac {
-        Some(path) => {
+        Some((path, cdhash_file)) => {
             let bytes = fs::read(path).map_err(|e| format!("{path}: {e}"))?;
             if !is_disk_image(&bytes) {
                 return Err(format!("{path} is not a Mac disk image"));
             }
-            Some(bytes)
+            let cdhash = fs::read_to_string(cdhash_file)
+                .ok()
+                .as_deref()
+                .and_then(parse_cdhash)
+                .ok_or_else(|| format!("{cdhash_file} does not hold one CDHash"))?;
+            Some((bytes, cdhash))
         }
         None => None,
     };
@@ -314,8 +343,11 @@ pub fn notice(root: &Path, args: &[String]) -> Result<String, String> {
         .ok()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
         .unwrap_or_default();
-    let body = notice_json(version, &exe, dmg.as_deref(), &lines, &today);
-    let sig = sign_and_verify(&key, &pinned, &body, &exe, dmg.as_deref())?;
+    let mac = dmg
+        .as_ref()
+        .map(|(bytes, cdhash)| (bytes.as_slice(), *cdhash));
+    let body = notice_json(version, &exe, mac, &lines, &today);
+    let sig = sign_and_verify(&key, &pinned, &body, &exe, mac)?;
     let out = PathBuf::from(out);
     fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     fs::write(out.join("latest.json"), &body).map_err(|e| e.to_string())?;
@@ -466,22 +498,36 @@ mod tests {
         let mut dmg = vec![0u8; 1024];
         dmg[512..516].copy_from_slice(b"koly");
         assert!(is_disk_image(&dmg) && !is_disk_image(exe));
-        let both = notice_json(
-            "v0.2.0",
-            exe,
-            Some(&dmg),
-            &["שיפור".to_owned()],
-            "2026-10-01",
+        let cdhash = parse_cdhash("0123456789abcdef0123456789ABCDEF01234567\n").unwrap();
+        let mac = Some((dmg.as_slice(), cdhash));
+        let both = notice_json("v0.2.0", exe, mac, &["שיפור".to_owned()], "2026-10-01");
+        assert!(sign_and_verify(doc.as_ref(), &[pinned], &both, exe, mac).is_ok());
+        let other: &[u8] = b"other";
+        assert!(
+            sign_and_verify(doc.as_ref(), &[pinned], &both, exe, Some((other, cdhash))).is_err()
         );
-        assert!(sign_and_verify(doc.as_ref(), &[pinned], &both, exe, Some(&dmg)).is_ok());
-        assert!(sign_and_verify(doc.as_ref(), &[pinned], &both, exe, Some(b"other")).is_err());
+        let mut wrong = cdhash;
+        wrong[0] ^= 1;
+        assert!(sign_and_verify(doc.as_ref(), &[pinned], &both, exe, Some((&dmg, wrong))).is_err());
         assert!(sign_and_verify(doc.as_ref(), &[pinned], &both, exe, None).is_err());
-        assert!(sign_and_verify(doc.as_ref(), &[pinned], &body, exe, Some(&dmg)).is_err());
+        assert!(sign_and_verify(doc.as_ref(), &[pinned], &body, exe, mac).is_err());
         let v: serde_json::Value = serde_json::from_slice(&both).unwrap();
         assert!(v["macos"]["url"]
             .as_str()
             .unwrap()
             .ends_with("/v0.2.0/DiagnosticVault.dmg"));
+        assert_eq!(
+            v["macos"]["cdhash"],
+            "0123456789abcdef0123456789abcdef01234567"
+        );
+        for bad in [
+            "",
+            "0123",
+            "0123456789abcdef0123456789abcdef0123456z",
+            "+123456789abcdef0123456789abcdef01234567",
+        ] {
+            assert!(parse_cdhash(bad).is_none(), "{bad}");
+        }
     }
 
     #[test]

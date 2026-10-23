@@ -34,6 +34,11 @@ mod windows;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod macos;
 
+/// How a Mac worker's start closes what the app left open, and the most descriptors a worker
+/// may then hold (its own check and the tests use the same).
+#[cfg(unix)]
+pub use macos::{CLOSE_INHERITED, FD_LIMIT};
+
 /// Whether this platform contains the worker (Windows: AppContainer and job object; macOS:
 /// the system sandbox).
 pub const CONTAINED: bool = cfg!(any(windows, target_os = "macos"));

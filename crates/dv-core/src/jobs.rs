@@ -156,7 +156,20 @@ impl SlotJob {
     #[must_use]
     pub fn run(self) -> SlotMade {
         let seal = self.seal.as_ref();
-        let here = key_here(seal, &self.dir, self.header.password_bound());
+        // Loaded as for an opening: a Keychain or Windows that is only slow, locked or
+        // cancelled is asked once more and then says to try again, before any new key is
+        // made; never "another computer" (review of #136).
+        let here = match key_for_opening(seal, &self.dir, self.header.password_bound()) {
+            Ok(here) => here,
+            Err(e) => {
+                return SlotMade {
+                    session: self.session,
+                    ticket: self.ticket,
+                    made: Err(e),
+                    key_aside: false,
+                };
+            }
+        };
         let proof = self.proof.secret(here.as_ref());
         let mut key_aside = false;
         let made = match &self.new_password {

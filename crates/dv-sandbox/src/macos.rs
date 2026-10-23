@@ -93,15 +93,21 @@ pub fn profile(exe: &Path, policy: &Policy) -> io::Result<String> {
         quote(&exe)?
     ));
     p.push_str("(allow file-read-metadata)\n");
-    let mut subpaths = String::new();
+    let mut code = String::new();
     for s in SYSTEM_READ {
-        subpaths.push_str(&format!(" (subpath \"{s}\")"));
+        code.push_str(&format!(" (subpath \"{s}\")"));
     }
-    for d in &read {
+    if let Some(own) = read.first() {
+        code.push_str(&format!(" (subpath {})", quote(own)?));
+    }
+    let mut subpaths = code.clone();
+    for d in read.iter().skip(1) {
         subpaths.push_str(&format!(" (subpath {})", quote(d)?));
     }
     p.push_str(&format!("(allow file-read*{subpaths})\n"));
-    p.push_str(&format!("(allow file-map-executable{subpaths})\n"));
+    // Code is mapped only from the system and the program's own folder, never from the
+    // folders a run reads (documents, the name model).
+    p.push_str(&format!("(allow file-map-executable{code})\n"));
     // dyld opens the root folder itself (not what is in it) to find the shared cache.
     p.push_str("(allow file-read-data (literal \"/\"))\n");
     p.push_str(
@@ -141,11 +147,16 @@ fn quote(path: &Path) -> io::Result<String> {
     Ok(format!("\"{s}\""))
 }
 
-/// Closes every descriptor from 3 up before the next program starts: the sandbox does not
-/// stop a program reading a descriptor it inherits, and a library in the app may have left
-/// one open across exec. Then `exec`s its arguments (a shell builtin loop, no other program).
-const CLOSE_INHERITED: &str =
-    "i=3; while [ \"$i\" -lt 1024 ]; do eval \"exec $i>&-\"; i=$((i+1)); done; exec \"$@\"";
+/// Closes every descriptor that is open from 3 up, whatever its number, before the next
+/// program starts: the sandbox does not stop a program reading a descriptor it inherits, and
+/// a library in the app may have left one open across exec. A listing it cannot read stops
+/// the start (fail-closed). Then the most descriptors the next program may hold is set to
+/// [`FD_LIMIT`], so the worker's own check of every number below it covers all it can have,
+/// and its arguments are `exec`ed (shell builtins only, no other program).
+pub const CLOSE_INHERITED: &str = "for f in /dev/fd/*; do n=${f##*/}; case $n in ''|*[!0-9]*) exit 70;; esac; [ \"$n\" -gt 2 ] && eval \"exec $n>&-\"; done; ulimit -n 1024 || exit 71; exec \"$@\"";
+
+/// The most descriptors a worker may hold (`ulimit -n` in [`CLOSE_INHERITED`]).
+pub const FD_LIMIT: u64 = 1024;
 
 /// Start `exe` inside the profile: `/bin/bash` closes what the app left open, `/usr/bin/env
 /// -i` drops the shell's own variables, and `sandbox-exec` applies the profile and becomes the
@@ -197,15 +208,16 @@ mod tests {
         );
     }
 
-    /// The start closes a descriptor the app left open (here: 5, kept across exec by bash);
-    /// without it the next program could read it.
+    /// The start closes the descriptors the app left open (here: 5 and 3000, kept across exec
+    /// by bash), whatever their number; without it the next program could read them. It then
+    /// holds no more than [`FD_LIMIT`].
     #[test]
     fn nothing_the_app_left_open_reaches_the_next_program() {
         let next = |script: &str| {
             let out = std::process::Command::new("/bin/bash")
                 .args([
                     "-c",
-                    "exec 5</dev/null; exec /bin/bash -c \"$0\" dv-sandbox /bin/bash -c ': <&5 2>/dev/null && echo open || echo closed'",
+                    "ulimit -n 4096 && exec 5</dev/null 3000</dev/null && exec /bin/bash -c \"$0\" dv-sandbox /bin/bash -c 'for n in 5 3000; do { : <&$n; } 2>/dev/null && echo open || echo closed; done; ulimit -n'",
                     script,
                 ])
                 .env_clear()
@@ -213,8 +225,11 @@ mod tests {
                 .unwrap();
             String::from_utf8_lossy(&out.stdout).into_owned()
         };
-        assert_eq!(next("exec \"$@\""), "open\n");
-        assert_eq!(next(CLOSE_INHERITED), "closed\n");
+        assert_eq!(next("exec \"$@\""), "open\nopen\n4096\n");
+        assert_eq!(
+            next(CLOSE_INHERITED),
+            format!("closed\nclosed\n{FD_LIMIT}\n")
+        );
     }
 
     #[test]

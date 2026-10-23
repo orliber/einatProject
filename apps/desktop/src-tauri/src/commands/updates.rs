@@ -40,7 +40,8 @@ pub(crate) async fn prepare_update(state: tauri::State<'_, AppState>) -> Res<boo
 /// mode) replaces the program and opens it again; the vault folder is not touched. A version
 /// fetched in the background is used when it is still intact; otherwise it is fetched now.
 /// On a Mac (D-101) the new app from the verified disk image takes the old one's place and is
-/// opened; where the app folder cannot be written, the image opens in Finder instead.
+/// opened. Only where every check held and the app's folder cannot be written does a new
+/// private copy of the verified image open in Finder; a failed check opens nothing.
 #[tauri::command]
 pub(crate) async fn install_update(
     app: tauri::AppHandle,
@@ -92,16 +93,24 @@ async fn install_on_mac(app: &tauri::AppHandle, file: dv_core::update::Downloade
         .ok()
         .and_then(|exe| dv_core::update::bundle_of(&exe));
     let work = app.path().app_local_data_dir().ok();
-    let placed = tauri::async_runtime::spawn_blocking(move || match (bundle, work) {
-        (Some(bundle), Some(work)) => dv_core::update::install_macos(&file, &bundle, &work)
-            .map(|()| bundle)
-            .map_err(|_| file),
-        _ => Err(file),
+    let placed = tauri::async_runtime::spawn_blocking(move || {
+        use dv_core::update::{clean_private, install_macos, private_image, MacInstallError};
+        let (Some(bundle), Some(work)) = (bundle, work) else {
+            return Placed::Not;
+        };
+        clean_private(&work);
+        match install_macos(&file, &bundle, &work) {
+            Ok(()) => Placed::Installed(bundle),
+            Err(MacInstallError::NotWritable) => {
+                private_image(&file, &work).map_or(Placed::Not, Placed::ByHand)
+            }
+            Err(MacInstallError::Refused(_)) => Placed::Not,
+        }
     })
     .await
     .map_err(|_| internal("task"))?;
     match placed {
-        Ok(bundle) => {
+        Placed::Installed(bundle) => {
             // The new version starts only once this one has exited, so the two never hold the
             // vault at once. The paths are arguments to the script, never part of it.
             std::process::Command::new("/bin/sh")
@@ -120,25 +129,39 @@ async fn install_on_mac(app: &tauri::AppHandle, file: dv_core::update::Downloade
             app.exit(0);
             Ok(())
         }
-        Err(file) => {
-            // Checked again: only the verified image is ever opened. The program then closes
-            // (the vault is already locked), because Finder will not replace an app that is
-            // open: she drags the new one to Applications and opens it.
-            if dv_core::update::still_intact(&file)
-                && std::process::Command::new("/usr/bin/open")
-                    .arg(&file.path)
-                    .spawn()
-                    .is_ok()
+        Placed::ByHand(image) => {
+            // The checked app, in a new private copy of the verified image. The program then
+            // closes (the vault is already locked), because Finder will not replace an app
+            // that is open: she drags the new one to Applications and opens it.
+            if std::process::Command::new("/usr/bin/open")
+                .arg(&image)
+                .spawn()
+                .is_ok()
             {
                 app.exit(0);
                 return Ok(());
             }
-            Err(UiError {
-                code: "update".to_owned(),
-                message: "הגרסה החדשה לא הותקנה. אפשר לנסות שוב מההגדרות, או להוריד אותה מהקישור ששלח אור.".to_owned(),
-                details: Vec::new(),
-                action: dv_core::ErrorAction::Dismiss,
-            })
+            Err(not_installed())
         }
+        Placed::Not => Err(not_installed()),
+    }
+}
+
+/// What the Mac install came to.
+enum Placed {
+    /// In place: start it once this version has exited.
+    Installed(std::path::PathBuf),
+    /// Checked, but the app's folder cannot be written: this private image opens in Finder.
+    ByHand(std::path::PathBuf),
+    /// Not installed: the version in place stays and nothing is opened.
+    Not,
+}
+
+fn not_installed() -> UiError {
+    UiError {
+        code: "update".to_owned(),
+        message: "הגרסה החדשה לא הותקנה, והגרסה הנוכחית נשארת כמו שהיא. אפשר לנסות שוב מההגדרות. אם זה חוזר, כדאי לספר לאור.".to_owned(),
+        details: Vec::new(),
+        action: dv_core::ErrorAction::Dismiss,
     }
 }

@@ -99,14 +99,8 @@ pub fn exists_for(dir: &Path, purpose: Purpose) -> bool {
 pub fn create_for(dir: &Path, purpose: Purpose) -> Result<Key32, VaultError> {
     let key = Key32::random()?;
     let sealed = protect(key.as_bytes(), purpose)?;
-    let tmp = dir.join(format!("{}.tmp", purpose.file()));
-    {
-        let mut f = fs::File::create(&tmp)?;
-        f.write_all(sealed.as_bytes())?;
-        f.sync_all()?;
-    }
     let old = fs::read_to_string(path_for(dir, purpose)).ok();
-    fs::rename(&tmp, path_for(dir, purpose))?;
+    put(dir, &sealed, &path_for(dir, purpose), purpose)?;
     if let Some(old) = old {
         forget(old.trim(), purpose);
     }
@@ -119,19 +113,35 @@ pub fn create_for(dir: &Path, purpose: Purpose) -> Result<Key32, VaultError> {
 pub fn create_next_for(dir: &Path, purpose: Purpose) -> Result<Key32, VaultError> {
     let key = Key32::random()?;
     let sealed = protect(key.as_bytes(), purpose)?;
-    let tmp = dir.join(format!("{}.next.tmp", purpose.file()));
-    {
-        let mut f = fs::File::create(&tmp)?;
-        f.write_all(sealed.as_bytes())?;
-        f.sync_all()?;
-    }
     // A key held aside earlier and never promoted (the program closed in between) is replaced.
     let stale = fs::read_to_string(next_path(dir, purpose)).ok();
-    fs::rename(&tmp, next_path(dir, purpose))?;
+    put(dir, &sealed, &next_path(dir, purpose), purpose)?;
     if let Some(stale) = stale {
         forget(stale.trim(), purpose);
     }
     Ok(key)
+}
+
+/// Write a sealed key to `to` through a temporary file. If that fails, the Keychain item it
+/// names is removed too (on a Mac), so no key is left that no file points to.
+fn put(dir: &Path, sealed: &str, to: &Path, purpose: Purpose) -> Result<(), VaultError> {
+    let tmp = dir.join(format!(
+        "{}.tmp",
+        to.file_name()
+            .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+    ));
+    let written = (|| {
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(sealed.as_bytes())?;
+        f.sync_all()?;
+        fs::rename(&tmp, to)
+    })();
+    if let Err(e) = written {
+        let _ = fs::remove_file(&tmp);
+        forget(sealed, purpose);
+        return Err(e.into());
+    }
+    Ok(())
 }
 
 /// The key held aside, unsealed (for an opening after the slot was written but before the
@@ -210,6 +220,10 @@ fn run(
 /// A child that never comes back (an antivirus holding it, a locked-down shell, a Keychain
 /// waiting on a dialog) is stopped and it is `Busy`: it runs on every opening, under the
 /// core's lock, so it must not freeze the program (review of stage 5, S6). Fail-closed.
+///
+/// A child that could not be started, given its input or waited on (a passing lack of
+/// memory or processes) is `Busy` too: none of these says the key is not on this computer,
+/// so none may send her to the recovery kit (review of #136).
 fn run_with_code(
     program: &str,
     args: &[&str],
@@ -227,9 +241,13 @@ fn run_with_code(
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    let mut child = cmd.spawn()?;
+    let mut child = cmd.spawn().map_err(|_| VaultError::Busy)?;
     if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(input)?;
+        if stdin.write_all(input).is_err() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(VaultError::Busy);
+        }
     }
     let mut stdout = child.stdout.take();
     let reader = std::thread::spawn(move || {
@@ -242,7 +260,8 @@ fn run_with_code(
     });
     let started = std::time::Instant::now();
     let status = loop {
-        if let Some(status) = child.try_wait()? {
+        // A failed look is looked at again, until the wait is over (then `Busy`).
+        if let Some(status) = child.try_wait().ok().flatten() {
             break status;
         }
         if started.elapsed() > wait {
@@ -253,9 +272,7 @@ fn run_with_code(
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     };
-    let out = reader
-        .join()
-        .map_err(|_| VaultError::Crypto("the key sealed to this computer could not be read"))?;
+    let out = reader.join().map_err(|_| VaultError::Busy)?;
     let text = Zeroizing::new(String::from_utf8_lossy(&out).trim().to_owned());
     Ok((status.code(), text))
 }
@@ -402,12 +419,18 @@ fn keychain_load(
         &[],
         wait,
     )?;
+    keychain_answer(code, &out)
+}
+
+/// The key in `security`'s answer. Only a missing item is "not here"; an answer with nothing
+/// in it is not known now, like any exit but 0 and 44.
+fn keychain_answer(code: Option<i32>, out: &str) -> Result<Zeroizing<Vec<u8>>, VaultError> {
     match keychain_outcome(code) {
-        Found::Yes if !out.is_empty() => unhex(&out),
-        Found::Yes | Found::No => Err(VaultError::Crypto(
+        Found::Yes if !out.is_empty() => unhex(out),
+        Found::No => Err(VaultError::Crypto(
             "the key kept for this computer is not in this account's Keychain",
         )),
-        Found::Unknown => Err(VaultError::Busy),
+        Found::Yes | Found::Unknown => Err(VaultError::Busy),
     }
 }
 
@@ -557,6 +580,31 @@ mod tests {
         for code in [Some(128), Some(36), Some(51), Some(1), None] {
             assert_eq!(keychain_outcome(code), Found::Unknown, "{code:?}");
         }
+    }
+
+    #[test]
+    fn a_keychain_that_cannot_be_asked_or_says_nothing_is_try_again() {
+        // Review of #136: only a missing item sends her to the kit.
+        assert!(matches!(
+            run_with_code("/nonexistent/dv-no-such-program", &[], b"", IN_SESSION_WAIT),
+            Err(VaultError::Busy)
+        ));
+        assert!(matches!(
+            keychain_answer(Some(0), ""),
+            Err(VaultError::Busy)
+        ));
+        assert!(matches!(
+            keychain_answer(Some(128), "00"),
+            Err(VaultError::Busy)
+        ));
+        assert!(matches!(
+            keychain_answer(Some(44), ""),
+            Err(VaultError::Crypto(_))
+        ));
+        assert_eq!(
+            keychain_answer(Some(0), "0aff").unwrap().as_slice(),
+            &[10, 255]
+        );
     }
 
     #[test]

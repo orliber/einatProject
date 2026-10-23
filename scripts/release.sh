@@ -156,11 +156,13 @@ gh run download "$got" -R "$SOURCE_REPO" -n release-macos -D "$OUT/mac" \
 grep -qx "commit=$sha" "$OUT/mac/build.txt" && grep -qx "version=$VERSION" "$OUT/mac/build.txt" \
   || die "דמות הדיסק לא של $sha בגרסה $VERSION: $(cat "$OUT/mac/build.txt")"
 (cd "$OUT/mac" && shasum -a 256 -c DiagnosticVault.dmg.sha256)
-mv "$OUT/mac/DiagnosticVault.dmg" "$OUT/mac/DiagnosticVault.dmg.sha256" "$OUT/" && rm -r "$OUT/mac"
+grep -Eqx '[0-9a-f]{40}' "$OUT/mac/DiagnosticVault.cdhash" \
+  || die "אין בריצה $got את ה-CDHash של האפליקציה (DiagnosticVault.cdhash)."
+mv "$OUT/mac/DiagnosticVault.dmg" "$OUT/mac/DiagnosticVault.dmg.sha256" "$OUT/mac/DiagnosticVault.cdhash" "$OUT/" && rm -r "$OUT/mac"
 
 say "2/4 חתימה ובדיקה עצמית"
 git show "origin/main:release-notes/$VERSION.txt" > "$OUT/notes.txt"
-cargo xtask update-notice "$VERSION" "$OUT/DiagnosticVault-Setup.exe" "$OUT/notes.txt" "$OUT" "$OUT/DiagnosticVault.dmg"
+cargo xtask update-notice "$VERSION" "$OUT/DiagnosticVault-Setup.exe" "$OUT/notes.txt" "$OUT" "$OUT/DiagnosticVault.dmg" "$OUT/DiagnosticVault.cdhash"
 
 say "3/4 פרסום ב-$SOURCE_REPO"
 files=("$OUT/DiagnosticVault-Setup.exe" "$OUT/DiagnosticVault-Setup.exe.sha256"
