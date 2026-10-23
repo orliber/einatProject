@@ -96,14 +96,22 @@ fn the_shipped_program_refuses_a_descriptor_it_should_not_have() {
             .unwrap()
             .code()
     };
+    // Whatever this test process inherited is closed first (cargo's own descriptors), as the
+    // app's start does (dv-sandbox).
+    let close = "i=3; while [ \"$i\" -lt 1024 ]; do eval \"exec $i>&-\"; i=$((i+1)); done; ";
     // bash keeps descriptor 5 open across exec, as an app that forgot close-on-exec would.
     assert_eq!(
-        run("exec 5</dev/null; exec \"$0\" --dv-ingest-worker"),
+        run(&format!(
+            "{close}exec 5</dev/null; exec \"$0\" --dv-ingest-worker"
+        )),
         Some(7)
     );
     // Without it the same start runs: an empty request gets the worker's own answer (2), not
     // the refusal.
-    assert_eq!(run("exec \"$0\" --dv-ingest-worker"), Some(2));
+    assert_eq!(
+        run(&format!("{close}exec \"$0\" --dv-ingest-worker")),
+        Some(2)
+    );
 }
 
 /// On a Mac the shipped worker ends once the app that started it is gone (the app crashed or
