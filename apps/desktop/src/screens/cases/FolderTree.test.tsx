@@ -59,7 +59,7 @@ describe("FolderTree", () => {
     const user = userEvent.setup();
     const { view } = tree({ current: "a1" });
     expect(screen.getByRole("treeitem", { name: /^תשפ״ו/ })).toHaveAttribute("tabindex", "0");
-    expect(screen.getByRole("treeitem", { name: /כל התיקים/ })).toHaveAttribute("tabindex", "-1");
+    expect(screen.getByRole("treeitem", { name: /^תיקים/ })).toHaveAttribute("tabindex", "-1");
     await user.click(screen.getByRole("button", { name: "לסגור את גן חובה" }));
     expect(screen.getByRole("treeitem", { name: /גן חובה/ })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("תשפ״ו")).toBeNull();
@@ -75,7 +75,7 @@ describe("FolderTree", () => {
   it("walks with the arrow keys, and Enter picks", async () => {
     const user = userEvent.setup();
     const { onPick } = tree();
-    const top = screen.getByRole("treeitem", { name: /כל התיקים/ });
+    const top = screen.getByRole("treeitem", { name: /^תיקים/ });
     top.focus();
     await user.keyboard("{ArrowDown}");
     expect(document.activeElement).toHaveTextContent("בית ספר");
@@ -91,7 +91,7 @@ describe("FolderTree", () => {
   it("takes a drop on a folder row and on the top level", () => {
     const { dropped } = tree();
     fireEvent.drop(screen.getByRole("treeitem", { name: /בית ספר/ }));
-    fireEvent.drop(screen.getByRole("treeitem", { name: /כל התיקים/ }));
+    fireEvent.drop(screen.getByRole("treeitem", { name: /^תיקים/ }));
     expect(dropped).toEqual(["b", null]);
   });
 });

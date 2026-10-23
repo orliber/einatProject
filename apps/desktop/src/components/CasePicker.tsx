@@ -16,7 +16,7 @@ export function groupByFolder(cases: CaseSummary[], folders: Folder[]): CaseGrou
   const known = new Set(folders.map((f) => f.id));
   const groups: CaseGroup[] = [];
   const top = cases.filter((c) => !c.folder_id || !known.has(c.folder_id));
-  if (top.length) groups.push({ label: "כל התיקים", cases: sorted(top) });
+  if (top.length) groups.push({ label: "תיקים", cases: sorted(top) });
   const walk = (parent: string | null, path: string[]) => {
     for (const f of folders.filter((x) => x.parent_id === parent).sort(byName)) {
       const here = [...path, f.name];

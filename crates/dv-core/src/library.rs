@@ -102,15 +102,20 @@ impl Core {
         name: &str,
     ) -> Result<Folder, CoreError> {
         let name = folder_name(name)?;
+        self.no_sibling_named(parent_id, &name, None)?;
         Ok(self.vault_mut()?.create_folder(parent_id, &name)?)
     }
 
     pub fn rename_folder(&mut self, id: &str, name: &str) -> Result<(), CoreError> {
         let name = folder_name(name)?;
+        let parent = self.folder(id)?.parent_id;
+        self.no_sibling_named(parent.as_deref(), &name, Some(id))?;
         Ok(self.vault_mut()?.rename_folder(id, &name)?)
     }
 
     pub fn move_folder(&mut self, id: &str, parent_id: Option<&str>) -> Result<(), CoreError> {
+        let name = self.folder(id)?.name;
+        self.no_sibling_named(parent_id, &name, Some(id))?;
         match self.vault_mut()?.move_folder(id, parent_id) {
             Err(VaultError::Refused(_)) => Err(CoreError::Refused(
                 "אי אפשר להעביר תיקייה לתוך עצמה או לתוך תיקייה שבתוכה.".to_owned(),
@@ -126,6 +131,35 @@ impl Core {
 
     pub fn move_case(&mut self, case_id: &str, folder_id: Option<&str>) -> Result<(), CoreError> {
         Ok(self.vault_mut()?.move_case(case_id, folder_id)?)
+    }
+
+    fn folder(&mut self, id: &str) -> Result<Folder, CoreError> {
+        self.vault_ref()?
+            .folders()?
+            .into_iter()
+            .find(|f| f.id == id)
+            .ok_or(CoreError::Vault(VaultError::NotFound))
+    }
+
+    /// Two folders with the same name side by side cannot be told apart in the tree, so a name
+    /// is refused where another folder (other than `except`) already has it, as in an explorer.
+    fn no_sibling_named(
+        &mut self,
+        parent_id: Option<&str>,
+        name: &str,
+        except: Option<&str>,
+    ) -> Result<(), CoreError> {
+        let taken = self.vault_ref()?.folders()?.into_iter().any(|f| {
+            f.parent_id.as_deref() == parent_id
+                && Some(f.id.as_str()) != except
+                && f.name.trim().to_lowercase() == name.trim().to_lowercase()
+        });
+        if taken {
+            return Err(CoreError::Refused(format!(
+                "כבר יש כאן תיקייה בשם \"{name}\"."
+            )));
+        }
+        Ok(())
     }
 
     /// Names typed for a new (or edited) case that already appear in another case: a sibling,

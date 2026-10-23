@@ -57,6 +57,35 @@ type Modal =
 
 /** A drag carries one case or one folder. */
 type Drag = { case: string } | { folder: string };
+const DRAG_TYPE = "application/x-dv-item";
+/** The item being dragged now (one drag at a time); a drag over a place it cannot go shows "no drop" there. */
+const drag: { now: Drag | null } = { now: null };
+function setDragging(d: Drag | null) {
+  drag.now = d;
+}
+
+/** What a drop carries, or `null` for anything that is not one of ours (a file, text from elsewhere). */
+export function readDrag(raw: string): Drag | null {
+  try {
+    const d: unknown = JSON.parse(raw);
+    if (d && typeof d === "object") {
+      if (typeof (d as { case?: unknown }).case === "string") return { case: (d as { case: string }).case };
+      if (typeof (d as { folder?: unknown }).folder === "string") return { folder: (d as { folder: string }).folder };
+    }
+  } catch {
+    // Not JSON: not ours.
+  }
+  return null;
+}
+
+/**
+ * The cases a folder view lists: in a folder, only the cases directly in it, as in a file
+ * explorer (a case lives in one place); the cases of its subfolders are inside those folders.
+ * A search looks everywhere.
+ */
+export function casesShown(all: CaseSummary[], current: string | null, matches: ((c: CaseSummary) => boolean) | null): CaseSummary[] {
+  return all.filter((c) => (matches ? matches(c) : (c.folder_id ?? null) === current));
+}
 
 /** One word, one line and three steps (canvas "תיקים": "שהסטטוס יהיה ברור ונקי"). */
 function StatusCell({ s }: { s: CaseStatus }) {
@@ -112,6 +141,8 @@ export function CasesScreen() {
     rememberFolder(id);
     setFolderIdState(id);
     setInTrash(false);
+    // Going to a folder ends a search; otherwise the list would still show the search results.
+    setQuery("");
     closeTree();
   };
   const setSort = (s: Sort) => {
@@ -130,10 +161,15 @@ export function CasesScreen() {
     onSuccess: () => refreshAll(),
     onError: (e: unknown) => setError(fail(e as UiError)),
   });
-  const run = (f: () => Promise<unknown>, done?: string) =>
-    act.mutateAsync(f).then(() => {
-      if (done) notify(done);
-    });
+  /** Runs an action and refreshes the list; resolves `false` when it failed (the error is already shown). */
+  const run = (f: () => Promise<unknown>, done?: string): Promise<boolean> =>
+    act.mutateAsync(f).then(
+      () => {
+        if (done) notify(done);
+        return true;
+      },
+      () => false,
+    );
 
   const byId = new Map(allFolders.map((f) => [f.id, f]));
   const path: Folder[] = [];
@@ -151,12 +187,10 @@ export function CasesScreen() {
   const parentOf = current ? (byId.get(current)?.parent_id ?? null) : null;
 
   const q = query.trim().toLowerCase();
-  const matches = (c: CaseSummary) => !q || (c.child_name ?? "").toLowerCase().includes(q) || c.meta.code.toLowerCase().includes(q);
+  const matches = (c: CaseSummary) => (c.child_name ?? "").toLowerCase().includes(q) || c.meta.code.toLowerCase().includes(q);
   const shownFolders = q ? allFolders.filter((f) => f.name.toLowerCase().includes(q)) : allFolders.filter((f) => f.parent_id === current);
-  // Inside a folder: its cases and the cases of every folder under it, like a search in an explorer.
-  const inside = current ? descendants(allFolders, current) : null;
-  // A copy: the top level shows the query's own array, which must not be sorted in place.
-  const shownCases = [...(q ? allCases.filter(matches) : inside ? allCases.filter((c) => c.folder_id && inside.has(c.folder_id)) : allCases)];
+  // A new array (filter), so sorting it below never touches the query's own data.
+  const shownCases = casesShown(allCases, current, q ? matches : null);
   shownFolders.sort((a, b) => a.name.localeCompare(b.name, "he"));
   const statusOf = new Map(shownCases.map((c) => [c.id, caseStatus(c)]));
   const st = (c: CaseSummary) => statusOf.get(c.id) ?? caseStatus(c);
@@ -176,28 +210,86 @@ export function CasesScreen() {
   const resumeStatus = resume ? caseStatus(resume) : null;
   const trashCount = trash.data?.length ?? 0;
 
+  // ---------------------------------------------------------------- moving
+  const caseName = (c: CaseSummary) => c.child_name ?? c.meta.code;
+  const placeName = (id: string | null) => (id ? `"${byId.get(id)?.name ?? ""}"` : "הרמה העליונה");
+  /** Moves a case (never copies: a case has one folder), with "ביטול" on the notice. Throws when refused. */
+  const moveCase = async (c: CaseSummary, to: string | null) => {
+    const from = c.folder_id ?? null;
+    if (from === to) return;
+    await ipc.moveCase(c.id, to);
+    await refreshAll();
+    notify(`התיק של ${caseName(c)} הועבר ל${placeName(to)}.`, { label: "ביטול", run: () => void run(() => ipc.moveCase(c.id, from), "ההעברה בוטלה.") });
+  };
+  /** Whether `f` may go into `to`: not into itself, nor into a folder inside it. */
+  const folderFits = (f: Folder, to: string | null) => !(to && descendants(allFolders, f.id).has(to));
+  const moveFolder = async (f: Folder, to: string | null) => {
+    const from = f.parent_id ?? null;
+    if (from === to || !folderFits(f, to)) return;
+    await ipc.moveFolder(f.id, to);
+    await refreshAll();
+    notify(`התיקייה "${f.name}" הועברה ל${placeName(to)}.`, { label: "ביטול", run: () => void run(() => ipc.moveFolder(f.id, from), "ההעברה בוטלה.") });
+  };
+  const dropFailed = (e: unknown) => setError(fail(e as UiError));
+
   // ---------------------------------------------------------------- drag and drop
   const onDragStart = (d: Drag) => (e: DragEvent) => {
-    e.dataTransfer.setData("application/x-dv-item", JSON.stringify(d));
+    setDragging(d);
+    e.dataTransfer.setData(DRAG_TYPE, JSON.stringify(d));
     e.dataTransfer.effectAllowed = "move";
   };
-  const dropProps = (target: string | null) => ({
+  const endDrag = () => {
+    setDragging(null);
+    setDropOn(null);
+  };
+  /** Where a drop on `target` would move the item: `false` when it would change nothing or is not allowed. */
+  const fits = (d: Drag, target: string | null) => {
+    if ("case" in d) {
+      const c = allCases.find((x) => x.id === d.case);
+      return !!c && (c.folder_id ?? null) !== target;
+    }
+    const f = byId.get(d.folder);
+    return !!f && (f.parent_id ?? null) !== target && folderFits(f, target);
+  };
+  const dropZone = (key: string, accepts: (d: Drag) => boolean, drop: (d: Drag) => void) => ({
     onDragOver: (e: DragEvent) => {
-      if (e.dataTransfer.types.includes("application/x-dv-item")) {
-        e.preventDefault();
-        setDropOn(target ?? "top");
-      }
+      if (!e.dataTransfer.types.includes(DRAG_TYPE)) return;
+      const d = drag.now;
+      if (d && !accepts(d)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      if (dropOn !== key) setDropOn(key);
     },
-    onDragLeave: () => setDropOn(null),
+    // Moving over a child of the row (its icon, its name) is not leaving it.
+    onDragLeave: (e: DragEvent) => {
+      if (!(e.currentTarget as Node).contains(e.relatedTarget as Node | null)) setDropOn((on) => (on === key ? null : on));
+    },
     onDrop: (e: DragEvent) => {
       e.preventDefault();
-      setDropOn(null);
-      const raw = e.dataTransfer.getData("application/x-dv-item");
-      if (!raw) return;
-      const d = JSON.parse(raw) as Drag;
-      if ("case" in d) void run(() => ipc.moveCase(d.case, target), "התיק הועבר.");
-      else if (d.folder !== target && !(target && descendants(allFolders, d.folder).has(target))) void run(() => ipc.moveFolder(d.folder, target), "התיקייה הועברה.");
+      const d = drag.now ?? readDrag(e.dataTransfer.getData(DRAG_TYPE));
+      endDrag();
+      if (d && accepts(d)) drop(d);
     },
+  });
+  const dropProps = (target: string | null) =>
+    dropZone(target ?? "top", (d) => fits(d, target), (d) => {
+      if ("case" in d) {
+        const c = allCases.find((x) => x.id === d.case);
+        if (c) moveCase(c, target).catch(dropFailed);
+      } else {
+        const f = byId.get(d.folder);
+        if (f) moveFolder(f, target).catch(dropFailed);
+      }
+    });
+  // A case or a folder dropped on the recycle bin: the same question as from its menu.
+  const trashDropProps = dropZone("trash", () => true, (d) => {
+    if ("case" in d) {
+      const c = allCases.find((x) => x.id === d.case);
+      if (c) setModal({ kind: "delete-case", c });
+    } else {
+      const f = byId.get(d.folder);
+      if (f) setModal({ kind: "delete-folder", folder: f });
+    }
   });
 
   // ---------------------------------------------------------------- actions
@@ -222,7 +314,6 @@ export function CasesScreen() {
     const c = row?.dataset.case && allCases.find((x) => x.id === row.dataset.case);
     return c ? caseItems(c) : null;
   };
-  const caseName = (c: CaseSummary) => c.child_name ?? c.meta.code;
   /** D-029: a new case for the follow-up, with the same names; it opens on its details. */
   async function followUp(c: CaseSummary) {
     try {
@@ -291,12 +382,12 @@ export function CasesScreen() {
             <p className="small muted">תיק בדוי קצר, כדי לראות איך זה עובד. אפשר למחוק אותו בכל רגע.</p>
           </div>
         ) : (
-          <div className="card explorer">
+          <div className="card explorer" onDragEnd={endDrag}>
             <aside className={treeOpen ? "explorer-tree open" : "explorer-tree"}>
               <FolderTree folders={allFolders} current={current} inTrash={inTrash} trashCount={trashCount} total={allCases.length}
                 countIn={countIn} onPick={setFolderId} onPickTrash={() => { setInTrash(true); setQuery(""); closeTree(); }}
                 onNewFolder={() => setModal({ kind: "new-folder" })}
-                dropProps={dropProps} dropOn={dropOn} onDragStart={(id) => onDragStart({ folder: id })}
+                dropProps={dropProps} trashDropProps={trashDropProps} dropOn={dropOn} onDragStart={(id) => onDragStart({ folder: id })}
                 rightClick={(f, row) => <RightClick items={folderItems(f)}>{row}</RightClick>} />
             </aside>
 
@@ -335,10 +426,13 @@ export function CasesScreen() {
 
               {inTrash ? (
                 <TrashList cases={trash.data ?? []} pathOf={pathOf}
-                  onRestore={(c) => void run(() => ipc.restoreCase(c.id), "התיק שוחזר.").then(() => {
-                    // The last case restored: back to the list, where it now is.
-                    if ((trash.data?.length ?? 0) <= 1) setInTrash(false);
-                  })}
+                  onRestore={(c) => {
+                    const to = c.folder_id && byId.has(c.folder_id) ? placeName(c.folder_id) : "הרמה העליונה";
+                    void run(() => ipc.restoreCase(c.id), `התיק שוחזר אל ${to}.`).then((ok) => {
+                      // The last case restored: back to the list, where it now is.
+                      if (ok && (trash.data?.length ?? 0) <= 1) setInTrash(false);
+                    });
+                  }}
                   onPurge={(c) => setModal({ kind: "purge", c })} />
               ) : (
                 <>
@@ -438,8 +532,8 @@ export function CasesScreen() {
                   )}
                   {cases.data && !emptyHere && (
                     <div className="explorer-foot small muted">
-                      <span>{shownCases.length === 1 ? "תיק אחד" : `${shownCases.length} תיקים`}{!q && shownCases.some((c) => (c.folder_id ?? null) !== current) ? ", כולל תיקיות המשנה" : ""}</span>
-                      <span>גוררים תיק לתיקייה כדי להעביר. לחיצה ימנית: עוד פעולות.</span>
+                      <span>{shownCases.length === 1 ? "תיק אחד" : `${shownCases.length} תיקים`}{q ? " בכל התיקיות" : ""}</span>
+                      <span>גוררים תיק לתיקייה כדי להעביר, או לסל המחזור. לחיצה ימנית: עוד פעולות.</span>
                     </div>
                   )}
                 </>
@@ -456,7 +550,7 @@ export function CasesScreen() {
       )}
       {modal?.kind === "new-folder" && (
         <FolderNameDialog title={current ? `תיקייה חדשה בתוך "${byId.get(current)?.name ?? ""}"` : "תיקייה חדשה"} onClose={() => setModal(null)}
-          onSave={async (n) => { await ipc.createFolder(current, n); await refreshAll(); setModal(null); }} />
+          onSave={async (n) => { await ipc.createFolder(current, n); await refreshAll(); setModal(null); setInTrash(false); }} />
       )}
       {modal?.kind === "rename" && (
         <FolderNameDialog title="שינוי שם התיקייה" initial={modal.folder.name} onClose={() => setModal(null)}
@@ -465,12 +559,12 @@ export function CasesScreen() {
       {modal?.kind === "move-folder" && (
         <MoveDialog what={`התיקייה "${modal.folder.name}"`} folders={allFolders} current={modal.folder.parent_id} exclude={descendants(allFolders, modal.folder.id)}
           onClose={() => setModal(null)}
-          onMove={async (t) => { await ipc.moveFolder(modal.folder.id, t); await refreshAll(); setModal(null); notify("התיקייה הועברה."); }} />
+          onMove={async (t) => { await moveFolder(modal.folder, t); setModal(null); }} />
       )}
       {modal?.kind === "move-case" && (
         <MoveDialog what={`התיק של ${caseName(modal.c)}`} folders={allFolders} current={modal.c.folder_id}
           onClose={() => setModal(null)}
-          onMove={async (t) => { await ipc.moveCase(modal.c.id, t); await refreshAll(); setModal(null); notify("התיק הועבר."); }} />
+          onMove={async (t) => { await moveCase(modal.c, t); setModal(null); }} />
       )}
       {modal?.kind === "delete-folder" && (
         <ConfirmDialog title={`מחיקת התיקייה "${modal.folder.name}"`} action="מחיקת התיקייה"
@@ -478,13 +572,25 @@ export function CasesScreen() {
             ? "רק התיקייה נמחקת. מה שבתוכה עובר לתיקייה שמעליה."
             : "התיקייה ריקה ותימחק."}
           onClose={() => setModal(null)}
-          onConfirm={async () => { await ipc.deleteFolder(modal.folder.id); await refreshAll(); setModal(null); }} />
+          onConfirm={async () => {
+            await ipc.deleteFolder(modal.folder.id);
+            // She was inside it: she stays where its contents went, one level up.
+            if (current === modal.folder.id) setFolderId(modal.folder.parent_id);
+            await refreshAll();
+            setModal(null);
+          }} />
       )}
       {modal?.kind === "delete-case" && (
         <ConfirmDialog title={`העברת התיק של ${caseName(modal.c)} לסל המחזור`} action="העברה לסל המחזור" danger
           text={`התיק נשמר בסל ${TRASH_DAYS} יום, מוצפן, ואפשר לשחזר אותו. אחר כך נמחק לצמיתות.`}
           onClose={() => setModal(null)}
-          onConfirm={async () => { await ipc.deleteCase(modal.c.id); await refreshAll(); setModal(null); notify("התיק הועבר לסל המחזור."); }} />
+          onConfirm={async () => {
+            const id = modal.c.id;
+            await ipc.deleteCase(id);
+            await refreshAll();
+            setModal(null);
+            notify("התיק הועבר לסל המחזור.", { label: "ביטול", run: () => void run(() => ipc.restoreCase(id), "התיק שוחזר.") });
+          }} />
       )}
       {modal?.kind === "purge" && (
         <PurgeDialog name={`התיק של ${caseName(modal.c)}`} onClose={() => setModal(null)}
@@ -510,7 +616,7 @@ function TrashList(props: { cases: CaseSummary[]; pathOf: (id: string | null) =>
             <tr key={c.id}>
               <td>
                 <div className="case-name serif">{c.child_name ?? "ללא שם"}</div>
-                <div className="small muted">{c.meta.code}{c.folder_id ? ` · היה ב: ${props.pathOf(c.folder_id)}` : ""}</div>
+                <div className="small muted">{[c.meta.code, c.folder_id && props.pathOf(c.folder_id) ? `היה ב: ${props.pathOf(c.folder_id)}` : ""].filter(Boolean).join(" · ")}</div>
               </td>
               <td className="small">{c.deleted_at ? updated(c.deleted_at) : ""} · יימחק בעוד {daysLeft(c)} ימים</td>
               <td>
