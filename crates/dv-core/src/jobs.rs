@@ -209,6 +209,8 @@ pub struct BackupTask {
     dest: PathBuf,
     folder: PathBuf,
     auto: bool,
+    /// The encrypted copy in her Drive is on (D-099): keep the file as it was read back.
+    drive: bool,
 }
 
 /// A backup written and read back (or why not), waiting for [`Core::finish_backup`].
@@ -219,15 +221,21 @@ pub struct BackupRun {
     folder: PathBuf,
     auto: bool,
     done: Result<dv_vault::BackupWritten, CoreError>,
+    /// The verified file, only when the Drive copy is on.
+    pub(crate) file: Option<Vec<u8>>,
 }
 
 impl BackupTask {
     #[must_use]
     pub fn run(self) -> BackupRun {
-        let done = if self.cancel.is_set() {
+        let written = if self.cancel.is_set() {
             Err(locked_meanwhile())
         } else {
             Self::write(self.job, &self.dest)
+        };
+        let (done, file) = match written {
+            Ok((done, file)) => (Ok(done), self.drive.then_some(file)),
+            Err(e) => (Err(e), None),
         };
         BackupRun {
             session: self.session,
@@ -236,10 +244,14 @@ impl BackupTask {
             folder: self.folder,
             auto: self.auto,
             done,
+            file,
         }
     }
 
-    fn write(job: dv_vault::BackupJob, dest: &Path) -> Result<dv_vault::BackupWritten, CoreError> {
+    fn write(
+        job: dv_vault::BackupJob,
+        dest: &Path,
+    ) -> Result<(dv_vault::BackupWritten, Vec<u8>), CoreError> {
         job.write(dest)
             .map_err(|_| {
                 CoreError::Needs(
@@ -250,7 +262,7 @@ impl BackupTask {
                 )
             })
             .and_then(|w| {
-                w.verify().map_err(|_| {
+                w.verify_keeping_file().map_err(|_| {
                     CoreError::Needs(
                         "הגיבוי נכתב, אבל בבדיקה הוא לא נפתח כמו שצריך. כדאי לנסות שוב, ואם זה \
                          חוזר, לנסות דיסק אחר."
@@ -311,19 +323,24 @@ pub struct Restored {
 impl RestoreJob {
     #[must_use]
     pub fn run(self) -> Restored {
-        // A failed restore removes what it wrote.
-        let vault = Vault::restore_backup(&self.bytes, &self.dir, self.proof.secret(None)).map(
-            |(mut v, _)| {
-                // The backup's password slot opens anywhere; here it is bound to this
-                // computer at once (D-076). Best effort: otherwise at the next opening.
-                if let Proof::Password(p) = &self.proof {
-                    if let Some(here) = key_here(self.seal.as_ref(), &self.dir, false) {
-                        let _ = v.bind_password(p, &here);
-                    }
+        // A failed restore removes what it wrote. The copy in her Drive is never turned on by
+        // a restore (D-099): when that cannot be made sure of, the restore fails.
+        let vault = Vault::restore_backup_then(
+            &self.bytes,
+            &self.dir,
+            self.proof.secret(None),
+            crate::drive_backup::forget_on_restore,
+        )
+        .map(|(mut v, _)| {
+            // The backup's password slot opens anywhere; here it is bound to this
+            // computer at once (D-076). Best effort: otherwise at the next opening.
+            if let Proof::Password(p) = &self.proof {
+                if let Some(here) = key_here(self.seal.as_ref(), &self.dir, false) {
+                    let _ = v.bind_password(p, &here);
                 }
-                v
-            },
-        );
+            }
+            v
+        });
         Restored {
             bytes: self.bytes,
             vault,
@@ -595,7 +612,7 @@ fn locked_meanwhile() -> CoreError {
 }
 
 impl Core {
-    fn same_session(&self, session: u64) -> Result<(), CoreError> {
+    pub(crate) fn same_session(&self, session: u64) -> Result<(), CoreError> {
         if self.vault.is_none() {
             return Err(CoreError::Locked);
         }
@@ -784,11 +801,41 @@ impl Core {
             dest,
             folder,
             auto: false,
+            drive: self.drive_backup_on(),
         })
     }
 
     /// Record a backup that was written and read back: it counts from now on.
     pub fn finish_backup(&mut self, run: BackupRun) -> Result<BackupDone, CoreError> {
+        self.finish_backup_for_drive(run).0
+    }
+
+    /// As [`Core::finish_backup`], and when the encrypted copy in her Drive is on, what to
+    /// upload with the core free ([`crate::drive_backup::DriveUpload::run`]). The local backup
+    /// is recorded first and stands whatever happens to the upload (D-099).
+    pub fn finish_backup_for_drive(
+        &mut self,
+        mut run: BackupRun,
+    ) -> (
+        Result<BackupDone, CoreError>,
+        Option<crate::drive_backup::DriveUpload>,
+    ) {
+        let file = run.file.take();
+        let session = run.session;
+        // A password or kit changed while it was written: this backup opens only with the old
+        // one, which may be why it was changed. It stays on her drive, and never goes up.
+        let current = self
+            .vault_ref()
+            .is_ok_and(|v| v.header_copy().slots == run.header.slots);
+        let done = self.finish_backup_only(run);
+        let upload = match (&done, file) {
+            (Ok(d), Some(file)) if current => self.begin_drive_upload(session, d.created_at, file),
+            _ => None,
+        };
+        (done, upload)
+    }
+
+    fn finish_backup_only(&mut self, run: BackupRun) -> Result<BackupDone, CoreError> {
         let auto = run.auto;
         let result = self.record_backup(run);
         // A failed automatic backup waits before the next try (`auto_backup_tried`).

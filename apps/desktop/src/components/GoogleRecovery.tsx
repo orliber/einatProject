@@ -81,9 +81,15 @@ export function TurnOnDialog({ onClose, onTurnedOn }: { onClose: () => void; onT
   );
 }
 
+/** Said when disconnecting Google while the encrypted copy in Drive is on (D-099). */
+export const DRIVE_COPY_TURNS_OFF =
+  "גם העותק המוצפן בגוגל דרייב יכובה: העותקים שם יימחקו, וההרשאה שניתנה לתוכנה בגוגל תבוטל.";
+
 function TurnOffDialog({ onClose }: { onClose: () => void }) {
   const { notify } = useApp();
   const qc = useQueryClient();
+  const { data: drive } = useQuery({ queryKey: ["drive-backup"], queryFn: ipc.driveBackupStatus, retry: false });
+  const copyOn = drive?.on === true;
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,8 +101,13 @@ function TurnOffDialog({ onClose }: { onClose: () => void }) {
     setError(null);
     try {
       await ipc.googleTurnOff(password);
-      await qc.invalidateQueries({ queryKey: ["google"] });
-      notify("הכניסה עם גוגל בוטלה. המפתח שנשאר בגוגל כבר לא פותח כלום.");
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["google"] }),
+        qc.invalidateQueries({ queryKey: ["drive-backup"] }),
+      ]);
+      notify(copyOn
+        ? "הכניסה עם גוגל בוטלה, והעותק בגוגל דרייב כובה. המפתח שנשאר בגוגל כבר לא פותח כלום."
+        : "הכניסה עם גוגל בוטלה. המפתח שנשאר בגוגל כבר לא פותח כלום.");
       onClose();
     } catch (err) {
       setError(message(err, "הביטול לא הושלם."));
@@ -113,6 +124,7 @@ function TurnOffDialog({ onClose }: { onClose: () => void }) {
       </>}>
       <form className="stack" onSubmit={(e) => void turnOff(e)}>
         <p>אחרי הביטול, אם הסיסמה תישכח, נכנסים רק עם ערכת השחזור המודפסת.</p>
+        {copyOn && <p>{DRIVE_COPY_TURNS_OFF}</p>}
         <div className="field">
           <label htmlFor="g-off-pw">הסיסמה הנוכחית של הכספת</label>
           <input id="g-off-pw" className="input" type="password" autoComplete="current-password" autoFocus

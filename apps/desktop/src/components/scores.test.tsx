@@ -128,7 +128,8 @@ describe("ScoresView", () => {
 
   it("fills the scores in order from a pasted column, and says what did not fit", async () => {
     mount();
-    await screen.findByRole("radio", { name: "WISC-V" });
+    // The view's own first focus lands on the instrument; paste only after it, or it lands later.
+    await waitFor(() => expect(screen.getByRole("radio", { name: "WISC-V" })).toHaveFocus());
     const order = tableOrder(wisc());
     const at = order.findIndex((m) => m.key === "similarities");
     fireEvent.paste(field("שיתופיות"), { clipboardData: { getData: () => "12\n9\n\n11\n" } });

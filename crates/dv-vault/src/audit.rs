@@ -52,6 +52,14 @@ pub enum AuditEvent {
     WindowsHelloOff,
     /// The password slot was bound to this computer (D-076).
     PasswordBound,
+    /// The encrypted copy of each backup in her Google Drive turned on or off, one copy that
+    /// went up or did not (the kind of problem only), and how the cleanup at Google went after
+    /// turning off (D-099). Sizes and kinds only.
+    DriveBackupOn,
+    DriveBackupOff,
+    DriveBackupUploaded,
+    DriveBackupFailed,
+    DriveBackupCleanup,
 }
 
 impl AuditEvent {
@@ -90,6 +98,11 @@ impl AuditEvent {
             AuditEvent::WindowsHelloOn => "windows_hello_on",
             AuditEvent::WindowsHelloOff => "windows_hello_off",
             AuditEvent::PasswordBound => "password_bound",
+            AuditEvent::DriveBackupOn => "drive_backup_on",
+            AuditEvent::DriveBackupOff => "drive_backup_off",
+            AuditEvent::DriveBackupUploaded => "drive_backup_uploaded",
+            AuditEvent::DriveBackupFailed => "drive_backup_failed",
+            AuditEvent::DriveBackupCleanup => "drive_backup_cleanup",
         }
     }
 }

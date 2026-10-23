@@ -22,13 +22,19 @@ pub(crate) async fn write_backup(
     let Some(dest) = file_dialog::save(&app, start, dv_core::backup_file_name(now)).await else {
         return Ok(None);
     };
-    off_lock(
+    let (done, upload) = off_lock(
         &state,
         move |c| c.begin_backup(&dest),
         |task| task.run(),
-        |c, run| c.finish_backup(run).map(Some),
+        |c, run| Ok(c.finish_backup_for_drive(run)),
     )
-    .await
+    .await?;
+    // The encrypted copy in her Drive, when on (D-099): after the backup is recorded, with
+    // the core free, and never holding up or undoing the backup.
+    if let Some(upload) = upload {
+        super::upload_in_background(Arc::clone(&state.core), upload);
+    }
+    done.map(Some).map_err(|e| e.to_ui())
 }
 
 /// Ask for a backup file (the system's "Open") and say what it is. `None` when cancelled.
