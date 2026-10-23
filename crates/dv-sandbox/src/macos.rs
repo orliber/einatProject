@@ -11,7 +11,8 @@
 //!   only names and sizes can be looked up (dyld needs that to find its libraries).
 //!
 //! The process is started through `/usr/bin/sandbox-exec` by its full path, with the profile
-//! on the command line (it holds paths only, never anything from a document). No `unsafe`,
+//! on the command line (it holds paths only, never anything from a document), after every
+//! descriptor the app may have left open is closed ([`spawn`]). No `unsafe`,
 //! no new dependency. A memory ceiling, as the Windows job object sets, has no working
 //! equivalent on macOS (`RLIMIT_AS` is not enforced); the app's time limit still ends the
 //! worker, and the worker ends itself with the app and within a CPU limit (the app's
@@ -140,12 +141,22 @@ fn quote(path: &Path) -> io::Result<String> {
     Ok(format!("\"{s}\""))
 }
 
-/// Start `exe` inside the profile.
+/// Closes every descriptor from 3 up before the next program starts: the sandbox does not
+/// stop a program reading a descriptor it inherits, and a library in the app may have left
+/// one open across exec. Then `exec`s its arguments (a shell builtin loop, no other program).
+const CLOSE_INHERITED: &str =
+    "i=3; while [ \"$i\" -lt 1024 ]; do eval \"exec $i>&-\"; i=$((i+1)); done; exec \"$@\"";
+
+/// Start `exe` inside the profile: `/bin/bash` closes what the app left open, `/usr/bin/env
+/// -i` drops the shell's own variables, and `sandbox-exec` applies the profile and becomes the
+/// worker. Each `exec`s the next, so the process the app holds is the worker itself.
 pub fn spawn(exe: &Path, args: &[&str], policy: &Policy) -> io::Result<std::process::Child> {
     let profile = profile(exe, policy)?;
     let exe = std::fs::canonicalize(exe)?;
-    std::process::Command::new(SANDBOX_EXEC)
-        .arg("-p")
+    std::process::Command::new("/bin/bash")
+        .args(["-c", CLOSE_INHERITED, "dv-sandbox", "/usr/bin/env", "-i"])
+        .args(policy.single_thread.then_some("OMP_THREAD_LIMIT=1"))
+        .args([SANDBOX_EXEC, "-p"])
         .arg(profile)
         .arg(exe)
         .args(args)
@@ -153,7 +164,6 @@ pub fn spawn(exe: &Path, args: &[&str], policy: &Policy) -> io::Result<std::proc
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .env_clear()
-        .envs(policy.single_thread.then_some(("OMP_THREAD_LIMIT", "1")))
         .current_dir("/")
         .spawn()
 }
@@ -185,6 +195,26 @@ mod tests {
             p.contains(&format!("(subpath \"{}\")", real.display())),
             "{p}"
         );
+    }
+
+    /// The start closes a descriptor the app left open (here: 5, kept across exec by bash);
+    /// without it the next program could read it.
+    #[test]
+    fn nothing_the_app_left_open_reaches_the_next_program() {
+        let next = |script: &str| {
+            let out = std::process::Command::new("/bin/bash")
+                .args([
+                    "-c",
+                    "exec 5</dev/null; exec /bin/bash -c \"$0\" dv-sandbox /bin/bash -c ': <&5 2>/dev/null && echo open || echo closed'",
+                    script,
+                ])
+                .env_clear()
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        };
+        assert_eq!(next("exec \"$@\""), "open\n");
+        assert_eq!(next(CLOSE_INHERITED), "closed\n");
     }
 
     #[test]
