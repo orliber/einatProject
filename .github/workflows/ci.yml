@@ -200,7 +200,7 @@ jobs:
       - name: Sandbox refusals and worker crashes
         if: failure()
         run: |
-          log show --last 30m --style compact --predicate 'sender == "Sandbox" OR eventMessage CONTAINS "deny("' | tail -150 || true
+          log show --last 60m --style compact --predicate 'eventMessage CONTAINS "Sandbox: dv-" OR eventMessage CONTAINS "Sandbox: bash" OR eventMessage CONTAINS "Sandbox: cat" OR eventMessage CONTAINS "Sandbox: env"' | sort -u -k5 | tail -150 || true
           for f in $(ls -t ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -E '^(dv-|bash)' | head -3); do
             echo "=== $f"; head -c 8000 ~/Library/Logs/DiagnosticReports/"$f"; echo
           done

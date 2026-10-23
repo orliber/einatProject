@@ -48,6 +48,30 @@ impl ComputerSeal for FakeSeal {
     }
 }
 
+/// A computer with nothing to keep a key in.
+struct Nowhere;
+
+impl ComputerSeal for Nowhere {
+    fn available(&self) -> bool {
+        false
+    }
+    fn load(&self, _dir: &Path) -> Result<Key32, VaultError> {
+        Err(VaultError::NotFound)
+    }
+    fn create(&self, _dir: &Path) -> Result<Key32, VaultError> {
+        Err(VaultError::NotFound)
+    }
+    fn create_next(&self, _dir: &Path) -> Result<Key32, VaultError> {
+        Err(VaultError::NotFound)
+    }
+    fn load_next(&self, _dir: &Path) -> Result<Key32, VaultError> {
+        Err(VaultError::NotFound)
+    }
+    fn promote_next(&self, _dir: &Path) -> Result<(), VaultError> {
+        Err(VaultError::NotFound)
+    }
+}
+
 fn on(dir: &Path, seal: &Arc<FakeSeal>) -> Core {
     Core::for_tests(dir, None).with_computer_seal(Arc::clone(seal) as Arc<dyn ComputerSeal>)
 }
@@ -113,8 +137,10 @@ fn a_new_vault_is_bound_to_this_computer_and_she_types_only_her_password() {
 #[test]
 fn a_vault_from_before_is_bound_at_its_next_opening_with_no_screen() {
     let dir = tempfile::tempdir().unwrap();
-    // Made on a computer with nothing to seal to (the program before this round).
-    let mut before = Core::for_tests(dir.path(), None);
+    // Made on a computer with nothing to seal to (the program before this round): stated, not
+    // left to the computer the test runs on (a Mac's Keychain would bind it at once).
+    let mut before = Core::for_tests(dir.path(), None)
+        .with_computer_seal(Arc::new(Nowhere) as Arc<dyn ComputerSeal>);
     before.create_vault(PASSWORD).unwrap();
     assert_ne!(state(&mut before), "ok");
     before.lock();
