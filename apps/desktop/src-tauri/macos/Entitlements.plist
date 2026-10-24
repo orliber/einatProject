@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The Mac app's only entitlement (D-101, 0.8.1). The app is signed ad hoc with the hardened
+  runtime, and an ad-hoc signature has no Team ID. Under the hardened runtime macOS loads only
+  libraries of the same Team ID, so it refused the FIPS module in Contents/Frameworks and 0.8.0
+  stopped before its first line. This turns off that one check and keeps the rest of the
+  hardened runtime (no DYLD_* variables, no debugger, no unsigned executable memory). The
+  module is sealed in the app's signature, and an update accepts only the exact app the signed
+  notice names (CDHash), so a library swapped in the bundle breaks the signature.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>
