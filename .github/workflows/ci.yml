@@ -509,6 +509,16 @@ jobs:
           app="$(ls -d "$mnt"/*.app)"
           [ "$(ls -d "$mnt"/*.app | wc -l)" -eq 1 ] || { echo "::error::not one app in the image"; exit 1; }
           codesign --verify --deep --strict "$app"
+          # Hardened runtime with an ad-hoc signature (no Team ID): macOS refuses every library
+          # in Contents/Frameworks unless library validation is off, and the app stops before
+          # its first line (0.8.0). The runner (SIP off) loaded it anyway, so starting the app
+          # here did not catch that; the signature is checked instead.
+          sig="$(codesign -dvvv "$app" 2>&1)"
+          ent="$(codesign -d --entitlements - --xml "$app" 2>/dev/null)"
+          grep -Eq '^CodeDirectory .*flags=0x[0-9a-f]+\([^)]*runtime' <<<"$sig" \
+            || { echo "::error::the app is not signed with the hardened runtime"; exit 1; }
+          grep -q 'com.apple.security.cs.disable-library-validation' <<<"$ent" \
+            || { echo "::error::hardened runtime without disable-library-validation: macOS will refuse the FIPS module"; exit 1; }
           cdhash="$(codesign -dvvv "$app" 2>&1 | sed -n 's/^CDHash=//p')"
           [[ "$cdhash" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::no CDHash for the app: $cdhash"; exit 1; }
           # The same check an installed copy makes, so a requirement it would refuse fails here.
