@@ -16,43 +16,41 @@ impl Core {
         &mut self,
         data: &PrivacyData,
         body: &Value,
-        mut kind: PendingKind,
+        kind: PendingKind,
         prepared: &mut Prepared,
         may_learn: bool,
     ) -> Result<bool, CoreError> {
-        let found = found_names(data, &prepared.auto_hidden);
-        if may_learn && !data.case_id.is_empty() && !found.is_empty() {
-            self.vault_mut()?.add_found_names(&data.case_id, &found)?;
-            return Ok(true);
+        let cleared = {
+            let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
+            clear_request(data, &data.lookups(v), body, prepared, may_learn)
+        };
+        match cleared {
+            Cleared::Learn(found) => {
+                self.vault_mut()?.add_found_names(&data.case_id, &found)?;
+                Ok(true)
+            }
+            Cleared::Answered(answered) => {
+                self.land(data, answered, kind, prepared)?;
+                Ok(false)
+            }
         }
-        let suspects = prepared.suspects.len();
-        let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
-        let mut case_tags: HashSet<String> = data
-            .identities
-            .iter()
-            .filter(|i| i.case_id == data.case_id)
-            .map(|i| i.tag.clone())
-            .collect();
-        // A consultation without a case has nowhere to keep names: the tags the filter gave
-        // them are this request's own.
-        if data.case_id.is_empty() {
-            case_tags.extend(
-                prepared
-                    .auto_hidden
-                    .iter()
-                    .filter(|a| matches!(a.kind, AutoKind::Name | AutoKind::OtherCase))
-                    .map(|a| a.tag.clone()),
-            );
-        }
+    }
+
+    /// The gate's verdict kept with the case: the fixes in the log and on the card, the
+    /// numbered tags with the case, and only a cleared payload as an approval to send.
+    pub(crate) fn land(
+        &mut self,
+        data: &PrivacyData,
+        answered: Answered,
+        mut kind: PendingKind,
+        prepared: &mut Prepared,
+    ) -> Result<(), CoreError> {
         let Answered {
             result,
             fixed,
             cuts,
             mut codes,
-        } = {
-            let lookups = data.lookups(v);
-            answer_refusals(body, &lookups.context(), &case_tags, suspects, &data.masks)
-        };
+        } = answered;
         if (!fixed.is_empty() || !cuts.is_empty()) && result.is_ok() {
             codes.sort();
             codes.dedup();
@@ -109,359 +107,7 @@ impl Core {
                 prepared.blocked = reasons;
             }
         }
-        Ok(false)
-    }
-
-    /// Build the request for one section and everything the review screen needs.
-    pub fn prepare_section(
-        &mut self,
-        case_id: &str,
-        section_key: &str,
-        instruction: &str,
-    ) -> Result<Prepared, CoreError> {
-        self.prepare_section_replacing(case_id, section_key, instruction, None)
-    }
-
-    /// A section request whose answer rewrites one proposed paragraph (`replaces`), or, with
-    /// `None`, becomes the section's draft in place of the paragraphs not approved yet: one
-    /// draft at a time, never a pile of versions.
-    pub fn prepare_section_replacing(
-        &mut self,
-        case_id: &str,
-        section_key: &str,
-        instruction: &str,
-        replaces: Option<&str>,
-    ) -> Result<Prepared, CoreError> {
-        // Only a paragraph of this section in this case can be rewritten (SEC9).
-        if let Some(id) = replaces {
-            let ours = self
-                .vault_ref()?
-                .drafts(case_id, section_key)?
-                .iter()
-                .any(|d| d.id == id);
-            if !ours {
-                return Err(CoreError::NotFound("הפסקה".to_owned()));
-            }
-        }
-        self.prepare_section_once(case_id, section_key, instruction, replaces, false, false)
-    }
-
-    /// "לנסח מהנקודות שלי" (round 30): a section she writes herself, worded from the points
-    /// she typed, with the section's guide and her style. No material, score or other section
-    /// goes with it.
-    pub fn prepare_from_points(
-        &mut self,
-        case_id: &str,
-        section_key: &str,
-        points: &str,
-    ) -> Result<Prepared, CoreError> {
-        if points.trim().is_empty() {
-            return Err(CoreError::Refused(
-                "כותבים קודם את הנקודות, ואז מנסחים מהן.".to_owned(),
-            ));
-        }
-        self.prepare_section_once(case_id, section_key, points, None, false, true)
-    }
-
-    pub(crate) fn prepare_section_once(
-        &mut self,
-        case_id: &str,
-        section_key: &str,
-        instruction: &str,
-        replaces: Option<&str>,
-        learned: bool,
-        points: bool,
-    ) -> Result<Prepared, CoreError> {
-        let structure = structure_for(self.vault_ref()?, case_id)?;
-        let letter = Letter::of(section_key);
-        let section = match letter {
-            Some(l) => dv_domain::ReportSection {
-                key: section_key.to_owned(),
-                title: l.title().to_owned(),
-                inputs: Vec::new(),
-                about: String::new(),
-                mode: dv_domain::SectionMode::Ai,
-                guide: String::new(),
-            },
-            None => structure
-                .section(section_key)
-                .ok_or_else(|| CoreError::NotFound(section_key.to_owned()))?
-                .clone(),
-        };
-        // Her own sections (round 30): nothing is sent for them but her points, on request.
-        let own = section.mode == dv_domain::SectionMode::Own;
-        if own && !points {
-            return Err(CoreError::Refused(
-                "את כותבת את הסעיף הזה בעצמך, ולכן שום חומר לא נשלח בשבילו. אפשר לכתוב פסקה, או לנסח מהנקודות שלך."
-                    .to_owned(),
-            ));
-        }
-        if points && !own {
-            return Err(CoreError::Refused(
-                "ניסוח מהנקודות שלך הוא לסעיפים שאת כותבת בעצמך.".to_owned(),
-            ));
-        }
-        let model = self.model_config()?;
-        let data = self.privacy_data(case_id)?;
-        let hints = self.case_hints(case_id, &[])?;
-        let demo_mode = self.demo_mode()?;
-
-        let (input, review, sources) = {
-            let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
-            let meta = v.case_meta(case_id)?;
-            if meta.consent.is_none() {
-                return Err(CoreError::ConsentMissing);
-            }
-            let lookups = data.lookups(v);
-            let ctx = lookups.masked_context();
-            let run = |t: &str| {
-                hints
-                    .filter(t, &ctx)
-                    .map_err(|e| CoreError::Internal(e.to_string()))
-            };
-            let fixed_title = |sec: &dv_domain::ReportSection| model_title(sec, &ctx);
-            let mut review = Review::default();
-            let derived = DERIVED_SECTIONS.contains(&section_key) || letter.is_some();
-            let (tagged_sources, source_rows) = if derived || points {
-                (Vec::new(), Vec::new())
-            } else {
-                collect_sources(
-                    v,
-                    &structure,
-                    &ctx,
-                    &hints,
-                    case_id,
-                    section_key,
-                    &mut review,
-                )?
-            };
-            let mut approved_context = Vec::new();
-            if derived && !points {
-                // A letter gets only the sections it is written from (EX-4): the school letter
-                // only the recommendations, never the background or the diagnoses.
-                let wanted = |key: &str| match letter {
-                    Some(l) => l.written_from().contains(&key),
-                    None => key != section_key && !DERIVED_SECTIONS.contains(&key),
-                };
-                // The recommendations she left out of the letters (round 44); the rest go in.
-                let marked = |key: &str, id: &str| match (&letter, &meta.letter_left_out) {
-                    (Some(_), Some(ids)) if key == "recommendations" => {
-                        !ids.iter().any(|i| i == id)
-                    }
-                    _ => true,
-                };
-                for s in structure.sections().filter(|s| wanted(&s.key)) {
-                    let text: Vec<String> = v
-                        .drafts(case_id, &s.key)?
-                        .into_iter()
-                        .filter(|d| d.status == DraftStatus::Approved && marked(&s.key, &d.id))
-                        .map(|d| d.text_tagged)
-                        .collect();
-                    if !text.is_empty() {
-                        let out = run(&text.join("\n"))?;
-                        review.add(format!("סעיף מאושר · {}", s.title), &out);
-                        approved_context.push((fixed_title(s)?, out.tagged));
-                    }
-                }
-            }
-            // Nothing approved yet: there is nothing to write it from, so nothing is sent.
-            if letter.is_some() && approved_context.is_empty() {
-                return Err(CoreError::Refused(
-                    "המכתב נכתב מתוך ההמלצות שאישרת בדוח, ועוד אין המלצות מאושרות. מאשרים קודם את סעיף ההמלצות.".to_owned(),
-                ));
-            }
-            if derived && !points && approved_context.is_empty() {
-                return Err(CoreError::Refused(
-                    "הסעיף הזה נכתב מתוך הסעיפים שכבר אישרת, ועוד לא אישרת אף סעיף. מאשרים קודם את הטיוטות בסעיפים האחרים, ואז חוזרים לכאן."
-                        .to_owned(),
-                ));
-            }
-            // The current draft may contain manual edits, so it goes through review too.
-            let mut current = Vec::new();
-            for d in v
-                .drafts(case_id, section_key)?
-                .into_iter()
-                .filter(|_| !points)
-                .filter(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved))
-            {
-                let out = run(&d.text_tagged)?;
-                review.add("הטיוטה הנוכחית".to_owned(), &out);
-                current.push(out.tagged);
-            }
-            // The conversation so far is not shown again, but what the filter hides in it is
-            // kept like everything else, so its tags belong to the case.
-            let mut history: Vec<TaggedTurn> = Vec::new();
-            for m in v
-                .messages(case_id, section_key)?
-                .into_iter()
-                .filter(|_| !points)
-            {
-                let o = run(&m.text_tagged)?;
-                review.note_hidden(&o);
-                history.push(TaggedTurn {
-                    role: if m.role == ChatRole::User {
-                        "user".to_owned()
-                    } else {
-                        "assistant".to_owned()
-                    },
-                    text_tagged: o.tagged,
-                });
-            }
-            let instr = run(instruction)?;
-            review.add(
-                if points {
-                    "הנקודות שלך"
-                } else {
-                    "הבקשה שלך"
-                }
-                .to_owned(),
-                &instr,
-            );
-            // Her approved style profile (D-043), as it goes out with this case's names hidden.
-            // The items that fit this section's material best go out (D-052).
-            let query: String = tagged_sources
-                .iter()
-                .map(|s| s.content_tagged.as_str())
-                .chain([instr.tagged.as_str()])
-                .collect::<Vec<_>>()
-                .join("\n");
-            // In a section written from the scores: the patterns of this case's scores (D-100),
-            // worked out here, for her inferences about them.
-            let from_scores = section.inputs.contains(&InputKind::TestScores) && !points;
-            let sheets = if from_scores {
-                score_sheets(v, case_id, &v.inputs(case_id)?)?
-            } else {
-                Vec::new()
-            };
-            let patterns = dv_domain::sheet_patterns(&sheets);
-            let mut style_profile =
-                style::style_for_request(v, &ctx, section_key, &query, &patterns)?;
-            // How she interprets the scores of this case (round 37), in a section written from
-            // the scores: the approved interpretations that fit each score.
-            if from_scores {
-                if let Some(text) = style::interpretations_for_request(v, &sheets)? {
-                    style_profile = Some(match style_profile {
-                        Some(p) => format!("{p}\n{text}"),
-                        None => text,
-                    });
-                }
-            }
-            if let Some(text) = &style_profile {
-                review.add_context("פרופיל הסגנון שלך".to_owned(), &run(text)?);
-            }
-            // How she wants the section written (round 29), filtered like her request: the
-            // case's own lines may name someone.
-            let guide_text = if letter.is_some() {
-                String::new()
-            } else {
-                guides::guide_for(v, &meta, &section)?.text()
-            };
-            let guide_tagged = if guide_text.is_empty() {
-                String::new()
-            } else {
-                let out = run(&guide_text)?;
-                review.add("איך לכתוב את הסעיף".to_owned(), &out);
-                out.tagged
-            };
-            // A first draft of the whole section is checked against the guide's lines, when it
-            // has two or more; a rewrite of one paragraph or a turn on a draft is not.
-            let lines = dv_ai::guide_lines(&guide_tagged);
-            let guide_lines: Vec<String> =
-                if current.is_empty() && replaces.is_none() && lines.len() >= 2 {
-                    lines.into_iter().map(str::to_owned).collect()
-                } else {
-                    Vec::new()
-                };
-            // The DSM-5 severity she set (round 43) goes with the DSM section as fixed words,
-            // after the guide, so the model writes her levels and no other; while she has
-            // set none, that it writes none (review of stage 6, R3).
-            let severity = (section.key == "dsm" && !points && letter.is_none())
-                .then(|| dv_domain::severity_request(meta.dsm_severity.as_ref()));
-            let guide_tagged = match severity {
-                Some(text) => {
-                    let out = run(&text)?;
-                    review.add("רמת החומרה שקבעת".to_owned(), &out);
-                    if guide_tagged.is_empty() {
-                        out.tagged
-                    } else {
-                        format!("{guide_tagged}\n{}", out.tagged)
-                    }
-                }
-                None => guide_tagged,
-            };
-            let input = SectionInput {
-                section_key: section.key.clone(),
-                section_title: fixed_title(&section)?,
-                age: meta.age.map(dv_domain::Age::display),
-                gender: meta.child_gender,
-                sources: tagged_sources,
-                approved_context,
-                current_draft: current,
-                history,
-                instruction_tagged: instr.tagged.clone(),
-                style_profile,
-                guide_tagged,
-                points_only: points,
-                sources_in_order: section_key == sorting::PRIOR_SECTION && !points,
-            };
-            // From her points, the numbers in the answer are checked against the points.
-            let approved = if points {
-                vec![instr.tagged.clone()]
-            } else {
-                input
-                    .approved_context
-                    .iter()
-                    .map(|(_, t)| t.clone())
-                    .collect::<Vec<_>>()
-            };
-            let sources = (
-                section.key.clone(),
-                instr.tagged,
-                instr.hidden.clone(),
-                source_rows,
-                approved,
-                guide_lines,
-            );
-            (input, review, sources)
-        };
-
-        let nonce = match self
-            .section_nonces
-            .get(&(case_id.to_owned(), input.section_key.clone()))
-        {
-            Some(n) => n.clone(),
-            None => {
-                let n = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
-                self.section_nonces
-                    .insert((case_id.to_owned(), input.section_key.clone()), n.clone());
-                n
-            }
-        };
-        let (body, _refs) = dv_ai::build_section_request(&model, &input, &nonce);
-        let mut prepared = review.into_case_prepared(demo_mode, &data);
-        let (key, instruction_tagged, instr_hidden, rows, approved, guide) = sources;
-        let kind = PendingKind::Section {
-            case_id: case_id.to_owned(),
-            section_key: key,
-            instruction_tagged,
-            hidden: instr_hidden,
-            sources: rows,
-            approved,
-            replaces: replaces.map(str::to_owned),
-            guide,
-            from_points: points,
-        };
-        if self.gate(&data, &body, kind, &mut prepared, !learned)? {
-            return self.prepare_section_once(
-                case_id,
-                section_key,
-                instruction,
-                replaces,
-                true,
-                points,
-            );
-        }
-        Ok(prepared)
+        Ok(())
     }
 
     /// Take an approved request out of the core so it can be sent without holding the
@@ -771,45 +417,6 @@ impl Core {
             demo,
         })
     }
-
-    /// Prepare every section that has material and nothing written yet (the "write the empty
-    /// sections" button). A section with a draft or approved paragraphs is left as it is:
-    /// writing it again would put a second draft beside what she already approved.
-    pub fn prepare_full_draft(
-        &mut self,
-        case_id: &str,
-    ) -> Result<Vec<(String, Prepared)>, CoreError> {
-        let structure = structure_for(self.vault_ref()?, case_id)?;
-        let fed: HashSet<String> = {
-            let v = self.vault_ref()?;
-            let inputs = v.inputs(case_id)?;
-            Core::material_routing(v, &structure, case_id, &inputs)?
-                .into_iter()
-                .flat_map(|r| r.feeds)
-                .collect()
-        };
-        let mut out = Vec::new();
-        for s in structure
-            .sections()
-            .filter(|s| !DERIVED_SECTIONS.contains(&s.key.as_str()))
-            .filter(|s| s.mode == dv_domain::SectionMode::Ai)
-        {
-            let written = self
-                .vault_ref()?
-                .drafts(case_id, &s.key)?
-                .iter()
-                .any(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved));
-            if fed.contains(&s.key) && !written {
-                let p = self.prepare_section(
-                    case_id,
-                    &s.key,
-                    "כתוב/י טיוטה לסעיף מתוך המקורות, עם מקור לכל פסקה.",
-                )?;
-                out.push((s.key.clone(), p));
-            }
-        }
-        Ok(out)
-    }
 }
 
 /// The sources a section is written from, filtered: for each material the passages routed to
@@ -817,22 +424,32 @@ impl Core {
 /// tagged text. Each is also added to the review screen.
 pub(crate) type SectionSources = (Vec<TaggedInput>, Vec<(String, String, String)>);
 
-pub(crate) fn collect_sources(
+/// A material that goes to a section, as the vault holds it: read under the core's lock and
+/// filtered away from it (D-109). Its text is wiped when it is dropped.
+pub(crate) struct SourceRead {
+    id: String,
+    kind: InputKind,
+    title: String,
+    content: String,
+    /// The passages routed to the section, or the whole material.
+    feed: dv_domain::Feed,
+}
+
+impl Drop for SourceRead {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.title);
+        zeroize::Zeroize::zeroize(&mut self.content);
+    }
+}
+
+/// The materials a section is written from, in the order they go out (D-022): the table, the
+/// sorting, and Einat's choice decide what goes here.
+pub(crate) fn read_sources(
     v: &Vault,
     structure: &ReportStructure,
-    ctx: &PrivacyContext<'_>,
-    hints: &NameHints,
     case_id: &str,
     section_key: &str,
-    review: &mut Review,
-) -> Result<SectionSources, CoreError> {
-    let run = |t: &str| {
-        hints
-            .filter(t, ctx)
-            .map_err(|e| CoreError::Internal(e.to_string()))
-    };
-    let mut tagged_sources = Vec::new();
-    let mut source_rows = Vec::new();
+) -> Result<Vec<SourceRead>, CoreError> {
     // A score table of an instrument she does not give stays in the computer (D-098).
     let mut inputs = crate::instruments::request_inputs(v, case_id)?;
     if section_key == sorting::PRIOR_SECTION {
@@ -846,6 +463,7 @@ pub(crate) fn collect_sources(
             .filter_map(|k| inputs.get(k).cloned())
             .collect();
     }
+    let mut out = Vec::new();
     for inp in inputs {
         // D-022: the table, the sorting, and Einat's choice decide what goes here.
         let table = sorting::table_for(structure, inp.kind);
@@ -854,20 +472,49 @@ pub(crate) fn collect_sources(
         else {
             continue;
         };
+        out.push(SourceRead {
+            id: inp.id,
+            kind: inp.kind,
+            title: inp.title,
+            content: inp.content,
+            feed,
+        });
+    }
+    Ok(out)
+}
+
+/// The materials read by [`read_sources`], filtered: for each its title and the passages
+/// routed to the section. Returns the tagged inputs and, per `S#`, the material's id and
+/// tagged text. Each is also added to the review screen. `stop` is asked before each one: a
+/// job the vault's lock cancelled ends there.
+pub(crate) fn filter_sources(
+    read: &[SourceRead],
+    section_key: &str,
+    section_title: &str,
+    ctx: &PrivacyContext<'_>,
+    hints: &NameHints,
+    review: &mut Review,
+    stop: &dyn Fn() -> Result<(), CoreError>,
+) -> Result<SectionSources, CoreError> {
+    let run = |t: &str| {
+        hints
+            .filter(t, ctx)
+            .map_err(|e| CoreError::Internal(e.to_string()))
+    };
+    let mut tagged_sources = Vec::new();
+    let mut source_rows = Vec::new();
+    for inp in read {
+        stop()?;
         let sid = format!("S{}", tagged_sources.len() + 1);
         let title = run(&inp.title)?;
         // G4: a long material sent whole goes with the passages that bear on the section.
-        let section_title = structure
-            .sections()
-            .find(|s| s.key == section_key)
-            .map_or("", |s| s.title.as_str());
-        let cut = match feed {
+        let cut = match inp.feed {
             dv_domain::Feed::Whole if inp.kind != InputKind::TestScores => {
                 sorting::trimmed(&inp.content, section_key, section_title)
             }
             _ => None,
         };
-        let (feed, kind) = match (feed, cut) {
+        let (feed, kind) = match (&inp.feed, cut) {
             (dv_domain::Feed::Whole, Some((chosen, total))) => (
                 dv_domain::Feed::Passages(chosen.clone()),
                 format!(
@@ -879,9 +526,10 @@ pub(crate) fn collect_sources(
             (dv_domain::Feed::Whole, None) => {
                 (dv_domain::Feed::Whole, inp.kind.label_he().to_owned())
             }
-            (f @ dv_domain::Feed::Passages(_), _) => {
-                (f, format!("{} · קטעים שנבחרו לסעיף", inp.kind.label_he()))
-            }
+            (f @ dv_domain::Feed::Passages(_), _) => (
+                f.clone(),
+                format!("{} · קטעים שנבחרו לסעיף", inp.kind.label_he()),
+            ),
         };
         let content = sorting::section_text(&inp.content, &feed, ctx, hints)?;
         // A title with nothing to hide is shown as the source's label, not as a part.
@@ -897,9 +545,62 @@ pub(crate) fn collect_sources(
             title_tagged: title.tagged,
             content_tagged: content.tagged.clone(),
         });
-        source_rows.push((sid, inp.id, content.tagged));
+        source_rows.push((sid, inp.id.clone(), content.tagged));
     }
     Ok((tagged_sources, source_rows))
+}
+
+/// The gate's side of a request, which needs no vault: the names the filter found first
+/// (`Learn`: kept with the case, and the request is built again), else the fix loop's verdict.
+pub(crate) enum Cleared {
+    Learn(Vec<FoundName>),
+    Answered(Answered),
+}
+
+/// The checks of [`Core::gate`] that read nothing but the request and the case's privacy data,
+/// so they can run away from the core's lock (D-109). Nothing is kept here: [`Core::land`]
+/// keeps the verdict under the lock.
+pub(crate) fn clear_request<A, N, P>(
+    data: &PrivacyData,
+    lookups: &CaseLookups<'_, A, N, P>,
+    body: &Value,
+    prepared: &Prepared,
+    may_learn: bool,
+) -> Cleared
+where
+    A: Fn(&str) -> bool,
+    N: Fn(&str) -> bool,
+    P: Fn(&str) -> bool,
+{
+    let found = found_names(data, &prepared.auto_hidden);
+    if may_learn && !data.case_id.is_empty() && !found.is_empty() {
+        return Cleared::Learn(found);
+    }
+    let suspects = prepared.suspects.len();
+    let mut case_tags: HashSet<String> = data
+        .identities
+        .iter()
+        .filter(|i| i.case_id == data.case_id)
+        .map(|i| i.tag.clone())
+        .collect();
+    // A consultation without a case has nowhere to keep names: the tags the filter gave
+    // them are this request's own.
+    if data.case_id.is_empty() {
+        case_tags.extend(
+            prepared
+                .auto_hidden
+                .iter()
+                .filter(|a| matches!(a.kind, AutoKind::Name | AutoKind::OtherCase))
+                .map(|a| a.tag.clone()),
+        );
+    }
+    Cleared::Answered(answer_refusals(
+        body,
+        &lookups.context(),
+        &case_tags,
+        suspects,
+        &data.masks,
+    ))
 }
 
 /// What the fix loop made of a request: the gate's last verdict, what was hidden or cut on
@@ -1074,6 +775,8 @@ impl Core {
     pub(crate) fn forget_pending(&mut self, case_id: &str) {
         self.pending
             .retain(|_, p| p.kind.case() != Some(case_id) && p.payload.case_id() != case_id);
+        // A request still being filtered lands as begun again (D-109).
+        self.pending_epoch = self.pending_epoch.wrapping_add(1);
     }
 }
 

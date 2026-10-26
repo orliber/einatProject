@@ -10,8 +10,8 @@ pub(crate) async fn prepare_from_points(
     points: String,
 ) -> Res<Prepared> {
     warm_names(&state, &case_id, Vec::new()).await;
-    with_core(&state, move |c| {
-        c.prepare_from_points(&case_id, &section_key, &points)
+    prepare_off_lock(&state, move |c| {
+        c.begin_prepare_from_points(&case_id, &section_key, &points)
     })
     .await
 }
@@ -25,8 +25,8 @@ pub(crate) async fn prepare_section(
     replaces: Option<String>,
 ) -> Res<Prepared> {
     warm_names(&state, &case_id, Vec::new()).await;
-    with_core(&state, move |c| {
-        c.prepare_section_replacing(&case_id, &section_key, &instruction, replaces.as_deref())
+    prepare_off_lock(&state, move |c| {
+        c.begin_prepare_section(&case_id, &section_key, &instruction, replaces.as_deref())
     })
     .await
 }
@@ -37,7 +37,22 @@ pub(crate) async fn prepare_full_draft(
     case_id: String,
 ) -> Res<Vec<(String, Prepared)>> {
     warm_names(&state, &case_id, Vec::new()).await;
-    with_core(&state, move |c| c.prepare_full_draft(&case_id)).await
+    // Every section read in one moment under the lock, filtered side by side away from it
+    // (D-109), and each landed under the lock; one whose ground changed is begun again.
+    let mut jobs = with_core(&state, move |c| c.begin_full_draft(&case_id)).await?;
+    let order: Vec<String> = jobs.iter().map(|(k, _)| k.clone()).collect();
+    let mut out = Vec::new();
+    while !jobs.is_empty() {
+        let runs = tauri::async_runtime::spawn_blocking(move || dv_core::run_requests(jobs))
+            .await
+            .map_err(|_| internal("task"))?
+            .map_err(|e| e.to_ui())?;
+        let (ready, again) = with_core(&state, move |c| c.finish_requests(runs)).await?;
+        out.extend(ready);
+        jobs = again;
+    }
+    out.sort_by_key(|(k, _)| order.iter().position(|o| o == k));
+    Ok(out)
 }
 
 /// Take the approved payload, send it without holding the core, then store the answer.

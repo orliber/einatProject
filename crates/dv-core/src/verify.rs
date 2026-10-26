@@ -7,7 +7,6 @@
 //! background after "write the whole report", and its cost shows in the usage page.
 
 use super::*;
-use crate::send::collect_sources;
 
 /// "0" when she turned the check off.
 const VERIFY_KEY: &str = "verify_stage";
@@ -32,114 +31,6 @@ impl Core {
         self.vault_mut()?
             .set_setting(VERIFY_KEY, if on { "1" } else { "0" })?;
         Ok(())
-    }
-
-    /// Build the request that checks the section's proposed paragraphs against its sources.
-    pub fn prepare_verify(
-        &mut self,
-        case_id: &str,
-        section_key: &str,
-    ) -> Result<Prepared, CoreError> {
-        self.prepare_verify_once(case_id, section_key, false)
-    }
-
-    fn prepare_verify_once(
-        &mut self,
-        case_id: &str,
-        section_key: &str,
-        learned: bool,
-    ) -> Result<Prepared, CoreError> {
-        if !self.verify_stage_on()? {
-            return Err(CoreError::Needs(
-                "הבדיקה מול המקורות כבויה. אפשר להפעיל אותה בהגדרות.".to_owned(),
-                ErrorAction::settings("ai"),
-            ));
-        }
-        if DERIVED_SECTIONS.contains(&section_key) || Letter::of(section_key).is_some() {
-            return Err(CoreError::Refused(
-                "הבדיקה מול המקורות מיועדת לסעיפים שנכתבים מחומרי התיק.".to_owned(),
-            ));
-        }
-        let structure = structure_for(self.vault_ref()?, case_id)?;
-        let section = structure
-            .section(section_key)
-            .ok_or_else(|| CoreError::NotFound(section_key.to_owned()))?
-            .clone();
-        // Her own sections (round 30, D-068): nothing of the case is sent for them, the check
-        // against the sources included (the review of stage 3).
-        if section.mode == dv_domain::SectionMode::Own {
-            return Err(CoreError::Refused(
-                "את כותבת את הסעיף הזה בעצמך, ולכן הוא לא נבדק מול החומרים ושום חומר לא נשלח בשבילו."
-                    .to_owned(),
-            ));
-        }
-        let model = self.model_for(Task::Draft)?;
-        let data = self.privacy_data(case_id)?;
-        let hints = self.case_hints(case_id, &[])?;
-        let demo_mode = self.demo_mode()?;
-
-        let (input, review, draft_ids) = {
-            let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
-            if v.case_meta(case_id)?.consent.is_none() {
-                return Err(CoreError::ConsentMissing);
-            }
-            let lookups = data.lookups(v);
-            let ctx = lookups.masked_context();
-            let mut review = Review::default();
-            let (sources, _rows) = collect_sources(
-                v,
-                &structure,
-                &ctx,
-                &hints,
-                case_id,
-                section_key,
-                &mut review,
-            )?;
-            if sources.is_empty() {
-                return Err(CoreError::Refused(
-                    "אין לסעיף הזה חומרים לבדוק מולם.".to_owned(),
-                ));
-            }
-            let mut paragraphs = Vec::new();
-            let mut draft_ids = Vec::new();
-            for d in v
-                .drafts(case_id, section_key)?
-                .into_iter()
-                .filter(|d| d.status == DraftStatus::Proposed)
-            {
-                let out =
-                    filter(&d.text_tagged, &ctx).map_err(|e| CoreError::Internal(e.to_string()))?;
-                review.add("פסקה לבדיקה".to_owned(), &out);
-                paragraphs.push(out.tagged);
-                draft_ids.push(d.id);
-            }
-            if paragraphs.is_empty() {
-                return Err(CoreError::Refused(
-                    "אין טיוטות מוצעות לבדיקה בסעיף הזה.".to_owned(),
-                ));
-            }
-            let input = dv_ai::VerifyInput {
-                section_title: model_title(&section, &ctx)?,
-                sources,
-                paragraphs,
-            };
-            (input, review, draft_ids)
-        };
-
-        let nonce = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
-        let (body, _paragraph_ids, source_ids) =
-            dv_ai::build_verify_request(&model, &input, &nonce);
-        let mut prepared = review.into_case_prepared(demo_mode, &data);
-        let kind = PendingKind::Verify {
-            case_id: case_id.to_owned(),
-            section_key: section_key.to_owned(),
-            draft_ids,
-            source_ids,
-        };
-        if self.gate(&data, &body, kind, &mut prepared, !learned)? {
-            return self.prepare_verify_once(case_id, section_key, true);
-        }
-        Ok(prepared)
     }
 
     /// Send exactly what was approved and read the verdicts.

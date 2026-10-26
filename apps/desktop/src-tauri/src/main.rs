@@ -136,6 +136,26 @@ where
     with_core(state, move |c| finish(c, done)).await
 }
 
+/// A request prepared away from the core (D-109): read under the lock, filtered and cleared
+/// on a worker while every other command goes on (typing is saved, the timer ticks), and
+/// landed under the lock, where alone it becomes an approval. Begun again when what the filter
+/// decides by changed in between. A worker that panicked lands nothing.
+async fn prepare_off_lock(
+    state: &AppState,
+    begin: impl FnOnce(&mut Core) -> Result<dv_core::RequestJob, CoreError> + Send + 'static,
+) -> Res<dv_core::Prepared> {
+    let mut job = with_core(state, begin).await?;
+    loop {
+        let ran = tauri::async_runtime::spawn_blocking(move || job.run())
+            .await
+            .map_err(|_| internal("task"))?;
+        match with_core(state, move |c| c.finish_request(ran)).await? {
+            dv_core::Landed::Ready(p) => return Ok(p),
+            dv_core::Landed::Again(next) => job = *next,
+        }
+    }
+}
+
 /// Let the name model read a case's new texts (and `extra`) while the core is free (F2),
 /// before a command that filters them. Only a head start: the command reads anything still
 /// missing itself, so filtering never depends on it. Nothing happens when the model is off.

@@ -974,18 +974,8 @@ fn source_index(sources: &[StoredSource], children: &[usize], n: usize) -> HashS
 
 // ------------------------------------------------------------ use in drafting
 
-/// The approved profile as it goes into a drafting request for `section_key`, with every item
-/// that the case's filter would change left out. `None`: no profile, or it is switched off.
-///
-/// `patterns`: the patterns of this case's scores (D-100), in a section written from them;
-/// empty elsewhere, so no inference about a pattern goes out there.
-pub(crate) fn style_for_request(
-    v: &Vault,
-    ctx: &PrivacyContext<'_>,
-    section_key: &str,
-    query: &str,
-    patterns: &[dv_domain::ScorePattern],
-) -> Result<Option<String>, CoreError> {
+/// The approved profile for a drafting request. `None`: no profile, or it is switched off.
+pub(crate) fn style_source(v: &Vault) -> Result<Option<StyleSource>, CoreError> {
     if v.setting(PROFILE_OFF_KEY)?.as_deref() == Some("1") {
         return Ok(None);
     }
@@ -996,18 +986,37 @@ pub(crate) fn style_for_request(
     else {
         return Ok(None);
     };
-    let stored: StoredProfile = parse(&active.json)?;
-    let keep = |t: &str| clean(t, ctx);
-    let focused = focus(&stored.profile, section_key, query, patterns);
-    let Some(text) = dv_ai::render_for_section(&focused, section_key, &keep, patterns) else {
-        return Ok(None);
-    };
-    // Learned only from her edits: her rules come on top of the default style.
-    Ok(Some(if stored.profile.reports == 0 {
-        format!("{}\n{text}", dv_ai::prompts::DEFAULT_STYLE)
-    } else {
-        text
-    }))
+    Ok(Some(StyleSource(parse(&active.json)?)))
+}
+
+/// Her active profile as the vault keeps it, read under the core's lock and rendered for a
+/// request away from it (D-109).
+pub(crate) struct StyleSource(StoredProfile);
+
+impl StyleSource {
+    /// The profile as it goes into a drafting request for `section_key`, with every item that
+    /// the case's filter would change left out.
+    ///
+    /// `patterns`: the patterns of this case's scores (D-100), in a section written from them;
+    /// empty elsewhere, so no inference about a pattern goes out there.
+    pub(crate) fn render(
+        &self,
+        ctx: &PrivacyContext<'_>,
+        section_key: &str,
+        query: &str,
+        patterns: &[dv_domain::ScorePattern],
+    ) -> Option<String> {
+        let stored = &self.0;
+        let keep = |t: &str| clean(t, ctx);
+        let focused = focus(&stored.profile, section_key, query, patterns);
+        let text = dv_ai::render_for_section(&focused, section_key, &keep, patterns)?;
+        // Learned only from her edits: her rules come on top of the default style.
+        Some(if stored.profile.reports == 0 {
+            format!("{}\n{text}", dv_ai::prompts::DEFAULT_STYLE)
+        } else {
+            text
+        })
+    }
 }
 
 /// How many items of a kind go into one request, for the section and for the whole report

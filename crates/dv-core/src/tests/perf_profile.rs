@@ -138,7 +138,77 @@ fn perf_profile() {
         took("prepare_section other case", t);
         let _ = p;
     }
+    full_draft(&mut core, &case);
     long_work(&mut core, &case, dir.path());
+}
+
+/// "לכתוב את הריקים" on a case whose materials feed many sections (D-109): how long the
+/// sections' requests take, and how long the core is held while they are prepared.
+fn full_draft(core: &mut Core, first: &str) {
+    let meta = CaseMeta {
+        code: "TEST-0900".into(),
+        age: Some(Age {
+            years: 6,
+            months: 2,
+        }),
+        child_gender: Some(GrammaticalGender::Female),
+        consent: Some(consent()),
+        ..CaseMeta::default()
+    };
+    let case = core
+        .create_case(
+            meta,
+            vec![IdentityInput {
+                id: None,
+                role: Role::Child,
+                value: "נוגה".into(),
+                aliases: vec![],
+            }],
+        )
+        .unwrap();
+    let kinds = [
+        InputKind::Intake,
+        InputKind::PriorReport,
+        InputKind::Professional,
+        InputKind::Kindergarten,
+        InputKind::Observation,
+        InputKind::SessionNote,
+    ];
+    for (i, kind) in kinds.into_iter().cycle().take(MATERIALS * 2).enumerate() {
+        core.add_input(&case, kind, &format!("חומר {i}"), &material(i))
+            .unwrap();
+    }
+    let t = Instant::now();
+    let all = core.prepare_full_draft(&case).unwrap();
+    took(&format!("prepare_full_draft ({} sections)", all.len()), t);
+    // The same, step by step as the app runs it (D-109): what holds the core, and what not.
+    let t = Instant::now();
+    let jobs = core.begin_full_draft(&case).unwrap();
+    took("full draft: begin (locked)", t);
+    let t = Instant::now();
+    let runs = run_requests(jobs).unwrap();
+    took("full draft: filter side by side (free)", t);
+    let t = Instant::now();
+    let (ready, again) = core.finish_requests(runs).unwrap();
+    took(
+        &format!(
+            "full draft: finish (locked, {} ready, {} again)",
+            ready.len(),
+            again.len()
+        ),
+        t,
+    );
+    let t = Instant::now();
+    let job = core
+        .begin_prepare_section(first, "kindergarten", "תנסח", None)
+        .unwrap();
+    took("prepare_section: begin (locked)", t);
+    let t = Instant::now();
+    let ran = job.run();
+    took("prepare_section: filter (free)", t);
+    let t = Instant::now();
+    core.finish_request(ran).unwrap();
+    took("prepare_section: finish (locked)", t);
 }
 
 /// The work that may hold the core for long (F2): each must leave the lock or stay short.

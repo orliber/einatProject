@@ -69,6 +69,7 @@ impl Core {
             seal_dir: seal::default_dir(),
             rollback_warning: None,
             session: 0,
+            pending_epoch: 0,
             models_dir: None,
             ner: None,
             ner_exe: None,
@@ -452,7 +453,7 @@ impl Core {
 
     pub(crate) fn lock_because(&mut self, reason: Option<&str>) {
         self.keep_unsaved();
-        self.pending.clear();
+        self.drop_pending();
         self.session = self.session.wrapping_add(1);
         self.cancel.set();
         self.cancel = jobs::Cancel::default();
