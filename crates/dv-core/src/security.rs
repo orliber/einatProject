@@ -124,12 +124,19 @@ impl Core {
         // A forgotten password is opened with her Google account, not a printed kit (D-103):
         // a reminder until it is on. Where this version has no Google, it is only said.
         if self.vault.is_some() {
-            let state = if dv_egress::google::configured().is_none() {
-                "info"
+            // The same answer as the lock screen's: the slot, and the half kept here. A restored
+            // backup on a new computer has the slot but not the half: it needs turning on again.
+            let google = self.google_status(&crate::google::WindowsAccount);
+            let (state, detail) = if google.on {
+                ("ok", None)
+            } else if google.needs_setup_here {
+                ("warn", Some("setup_here".to_owned()))
+            } else if google.available {
+                ("warn", None)
             } else {
-                on(dv_vault::Vault::google_slot(&self.dir).is_ok_and(|(_, tag)| tag.is_some()))
+                ("info", None)
             };
-            s.items.insert(2, item("forgot_password", state, None));
+            s.items.insert(2, item("forgot_password", state, detail));
         }
         s.layers = layers::build(&s.items, checks, s.send_stopped, status.review_always);
         let backup = self

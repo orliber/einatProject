@@ -238,7 +238,18 @@ fn a_retired_kit_stops_opening_and_the_security_page_asks_for_google_instead() {
     let forgot = items.iter().find(|i| i.key == "forgot_password").unwrap();
     assert!(["warn", "info"].contains(&forgot.state.as_str()));
     assert!(core.confirm_recovery_key(&kit).unwrap());
-    // Retiring: the kit she had no longer opens the vault, and nothing new is handed out.
+    // Not while Google is off here: the kit would be the only way back from a forgotten
+    // password, and nothing is tried (no proof checked, the kit still opens).
+    let refused = core
+        .begin_retire_recovery_kit(PASSWORD, false, &crate::google::WindowsAccount)
+        .unwrap_err();
+    assert!(
+        matches!(refused, CoreError::Needs(ref m, _) if m.contains("גוגל")),
+        "{refused:?}"
+    );
+    assert!(core.confirm_recovery_key(&kit).unwrap());
+    // Retiring (the step after those checks): the kit she had no longer opens the vault,
+    // and nothing new is handed out.
     let job = core.begin_new_recovery_kit(PASSWORD, false).unwrap();
     core.finish_retire_recovery_kit(job.run()).unwrap();
     assert!(!core.confirm_recovery_key(&kit).unwrap());

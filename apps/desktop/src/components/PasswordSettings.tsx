@@ -6,7 +6,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
 import { ipc } from "../ipc/client";
 import { RecoveryKitPaper } from "./RecoveryKit";
-import { GoogleSettings } from "./GoogleRecovery";
+import { GoogleSettings, useGoogleStatus } from "./GoogleRecovery";
+import { useBackupStatus } from "./Backup";
 import { Dialog, ErrorLine } from "./ui";
 import { timed, WaitLine } from "./Progress";
 
@@ -270,7 +271,8 @@ function RetireKitDialog({ onClose }: { onClose: () => void }) {
         <button type="button" className="btn btn-primary" disabled={busy || !current} onClick={() => void retire()}>{busy ? "מבטלת…" : "ביטול הערכה"}</button>
       </>}>
       <form className="stack" onSubmit={(e) => void retire(e)}>
-        <p>דף שנשכח במגירה לא יפתח יותר את הכספת. גיבויים קודמים עדיין נפתחים בו, עד שיתחלפו בגיבויים חדשים.</p>
+        <p>דף שנשכח במגירה לא יפתח יותר את הכספת עצמה.</p>
+        <p><strong>אבל כל קובץ גיבוי שנשמר לפני הביטול עדיין נפתח בדף הישן,</strong> עד שהקובץ נמחק. כדאי לגבות מיד אחרי הביטול, ולמחוק מהדיסק הנייד את קובצי הגיבוי הישנים.</p>
         <p className="muted small">בלי ערכה, סיסמה שנשכחה נפתחת רק עם כניסה עם גוגל.</p>
         <CurrentSecret value={current} onChange={setCurrent} withRecovery={withRecovery}
           onToggle={() => { setWithRecovery(!withRecovery); setCurrent(""); setError(null); }} />
@@ -281,8 +283,21 @@ function RetireKitDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+/**
+ * Why the kit cannot be retired yet, or null (D-103, the same two conditions the core checks):
+ * Google sign-in on here, and a backup newer than the last change of the password or kit.
+ */
+export function retireBlocked(googleOn: boolean | undefined, backup: { last_at: number | null; secret_changed: boolean } | undefined): string | null {
+  if (!googleOn) return "קודם מפעילים כניסה עם גוגל (למעלה): בלי ערכה ובלי גוגל, סיסמה שנשכחה = אין דרך להיכנס.";
+  if (!backup || backup.last_at === null || backup.secret_changed) return "קודם גיבוי עדכני לדיסק נייד (הגדרות ← גיבוי): הוא מה שפותח את הכספת במחשב אחר.";
+  return null;
+}
+
 export function PasswordSettings() {
   const [open, setOpen] = useState<"password" | "kit" | "check" | "retire" | null>(null);
+  const google = useGoogleStatus();
+  const backup = useBackupStatus();
+  const blocked = retireBlocked(google.data?.on, backup.data);
   return (
     <>
     <section className="card setting" aria-labelledby="s-password">
@@ -301,8 +316,9 @@ export function PasswordSettings() {
       <div className="row">
         <button type="button" className="btn" onClick={() => setOpen("kit")}>יצירת ערכה…</button>
         <button type="button" className="btn" onClick={() => setOpen("check")}>בדיקת ערכה…</button>
-        <button type="button" className="btn" onClick={() => setOpen("retire")}>ביטול הערכה הקיימת…</button>
+        <button type="button" className="btn" disabled={blocked !== null} aria-describedby={blocked ? "retire-blocked" : undefined} onClick={() => setOpen("retire")}>ביטול הערכה הקיימת…</button>
       </div>
+      {blocked && <p id="retire-blocked" className="hint">{blocked}</p>}
       {open === "kit" && <NewKitDialog onClose={() => setOpen(null)} />}
       {open === "check" && <CheckKitDialog onClose={() => setOpen(null)} />}
       {open === "retire" && <RetireKitDialog onClose={() => setOpen(null)} />}

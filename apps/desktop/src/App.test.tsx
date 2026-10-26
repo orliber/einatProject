@@ -6,7 +6,7 @@ import { App, sameStatus } from "./App";
 import { status } from "./test/fixtures";
 
 describe("App", () => {
-  it("first run: password, then her details, with no printed kit (D-103)", async () => {
+  it("first run: password, then the backup step, with no printed kit (D-103)", async () => {
     let created = false;
     let confirmed = 0;
     mockIPC((cmd) => {
@@ -24,8 +24,10 @@ describe("App", () => {
     await user.type(await screen.findByLabelText("סיסמה"), "כלב ירוק רץ מהר");
     await user.type(screen.getByLabelText("שוב, לאימות"), "כלב ירוק רץ מהר");
     await user.click(screen.getByRole("button", { name: "יצירת הכספת" }));
-    expect(await screen.findByRole("heading", { name: "הפרטים שלך" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "גיבוי לדיסק נייד" })).toBeInTheDocument();
     expect(screen.queryByText(/ערכת שחזור|ערכת השחזור/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "אחר כך" }));
+    expect(await screen.findByRole("heading", { name: "הפרטים שלך" })).toBeInTheDocument();
     expect(confirmed).toBe(0);
   });
 
@@ -46,12 +48,12 @@ describe("App", () => {
     await user.type(await screen.findByLabelText("סיסמה"), "כלב ירוק רץ מהר");
     await user.type(screen.getByLabelText("שוב, לאימות"), "כלב ירוק רץ מהר");
     await user.click(screen.getByRole("button", { name: "יצירת הכספת" }));
-    expect(await screen.findByRole("heading", { name: "הפרטים שלך" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "גיבוי לדיסק נייד" })).toBeInTheDocument();
     // The periodic status check now reports an existing, unlocked vault.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(16000);
     });
-    expect(screen.getByRole("heading", { name: "הפרטים שלך" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "גיבוי לדיסק נייד" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "התיק הראשון" })).not.toBeInTheDocument();
     vi.useRealTimers();
   });

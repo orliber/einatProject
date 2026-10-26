@@ -426,14 +426,9 @@ impl Core {
     }
 
     /// True when `typed` opens the vault: after a new kit, and when she checks the printed page
-    /// under "מתקדם" in settings (D-103). The day of the check is kept.
+    /// under "מתקדם" in settings (D-103).
     pub fn confirm_recovery_key(&mut self, typed: &str) -> Result<bool, CoreError> {
-        let ok = self.vault_ref()?.check_recovery_key(typed);
-        if ok {
-            self.vault_mut()?
-                .set_setting(KIT_CHECKED_KEY, &crate::dates::unix_now().to_string())?;
-        }
-        Ok(ok)
+        Ok(self.vault_ref()?.check_recovery_key(typed))
     }
 
     /// Wipe keys, pending approvals and consultation history from memory.

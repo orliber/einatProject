@@ -7,10 +7,10 @@ import { TurnOnDialog } from "../components/GoogleRecovery";
 import { timed, WaitLine } from "../components/Progress";
 import "./SetupScreen.css";
 
-type Step = "password" | "google" | "me" | "restore";
+type Step = "password" | "google" | "backup" | "me" | "restore";
 
-/** First run: a password, Google for a forgotten password (where this version has it), and the
- *  practitioner's own names. No printed kit (D-103): the vault still gets a kit slot, but its key
+/** First run: a password, Google for a forgotten password (where this version has it), a first
+ *  backup to a removable drive, and the practitioner's own names. No printed kit (D-103): the vault still gets a kit slot, but its key
  *  is never shown; a kit can be made later under "מתקדם" in the settings. */
 export function SetupScreen({ status, onCreated, onDone, onRestored }: { status: AppStatus; onCreated?: () => void; onDone: () => Promise<void>; onRestored?: (s: AppStatus) => void }) {
   const [step, setStep] = useState<Step>("password");
@@ -32,7 +32,26 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
       .catch(() => setGoogleAvailable(false))
       .finally(() => setGoogleKnown(true));
   }, []);
-  const order: Step[] = googleAvailable ? ["password", "google", "me"] : ["password", "me"];
+    // Without the printed kit, Google and the backup are the ways back in (D-103): both offered,
+  // both skippable, each with its cost said in one line.
+  const order: Step[] = googleAvailable ? ["password", "google", "backup", "me"] : ["password", "backup", "me"];
+  const [backupDone, setBackupDone] = useState(false);
+  async function firstBackup() {
+    setError(null);
+    setBusy(true);
+    try {
+      // The system's "Save as" window; cancelled = stay on this step.
+      const done = await ipc.writeBackup();
+      if (done) {
+        setBackupDone(true);
+        setStep("me");
+      }
+    } catch (err) {
+      setError((err as { message: string }).message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function create(e: FormEvent) {
     e.preventDefault();
@@ -45,7 +64,7 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
       await timed("create", ipc.createVault(pw));
       setPw("");
       setPw2("");
-      setStep(googleAvailable ? "google" : "me");
+      setStep(googleAvailable ? "google" : "backup");
       onCreated?.();
     } catch (err) {
       setError((err as { message: string }).message);
@@ -83,7 +102,7 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
           {order.map((s, i) => (
             <li key={s} className={`step step-${stepState(s)}`} aria-current={stepState(s) === "current" ? "step" : undefined}>
               <span className="step-dot">{stepState(s) === "done" ? "✓" : i + 1}</span>
-              {s === "password" ? "סיסמה" : s === "google" ? "כניסה עם גוגל" : "הפרטים שלך"}
+              {s === "password" ? "סיסמה" : s === "google" ? "כניסה עם גוגל" : s === "backup" ? "גיבוי" : "הפרטים שלך"}
             </li>
           ))}
         </ol>}
@@ -133,18 +152,32 @@ export function SetupScreen({ status, onCreated, onDone, onRestored }: { status:
             <p className="lede">מומלץ מאוד. אם הסיסמה תישכח, נכנסים מהמחשב הזה עם חשבון הגוגל ובוחרים סיסמה חדשה. בלי זה, אין דרך להיכנס אם הסיסמה נשכחה.</p>
             <div className="row">
               <button type="button" className="btn btn-primary btn-big" autoFocus onClick={() => setGoogleOpen(true)}>הפעלה…</button>
-              <button type="button" className="btn btn-big" onClick={() => setStep("me")}>אחר כך</button>
+              <button type="button" className="btn btn-big" onClick={() => setStep("backup")}>אחר כך</button>
             </div>
             <p className="hint">אפשר גם בכל זמן אחר, בהגדרות ← סיסמה ואבטחה.</p>
             {googleOpen && (
-              <TurnOnDialog onClose={() => setGoogleOpen(false)} onTurnedOn={() => { setGoogleOn(true); setStep("me"); }} />
+              <TurnOnDialog onClose={() => setGoogleOpen(false)} onTurnedOn={() => { setGoogleOn(true); setStep("backup"); }} />
             )}
+          </div>
+        )}
+
+        {step === "backup" && (
+          <div className="setup-col stack">
+            {googleOn && <p className="setup-done" role="status">✓ הכניסה עם גוגל הופעלה.</p>}
+            <h1>גיבוי לדיסק נייד</h1>
+            <p className="lede">אם המחשב יתקלקל או יאבד, הגיבוי הוא מה שפותח את התיקים במחשב אחר, עם הסיסמה. מחברים דיסק נייד ובוחרים בו מקום. מכאן הגיבוי נעשה לבד בכל פעם שהדיסק מחובר.</p>
+            <div className="row">
+              <button type="button" className="btn btn-primary btn-big" autoFocus disabled={busy} onClick={() => void firstBackup()}>{busy ? "שומרת גיבוי מוצפן…" : "בחירת מקום וגיבוי ראשון…"}</button>
+              <button type="button" className="btn btn-big" disabled={busy} onClick={() => { setError(null); setStep("me"); }}>אחר כך</button>
+            </div>
+            <ErrorLine error={error} />
+            <p className="hint">בלי גיבוי, מחשב שהתקלקל = אין דרך לפתוח את התיקים. אפשר גם בכל זמן אחר, בהגדרות ← גיבוי.</p>
           </div>
         )}
 
         {step === "me" && (
           <form className="setup-col stack" onSubmit={finish}>
-            {googleOn && <p className="setup-done" role="status">✓ הכניסה עם גוגל הופעלה.</p>}
+            {backupDone && <p className="setup-done" role="status">✓ הגיבוי הראשון נשמר.</p>}
             <h1>הפרטים שלך</h1>
             <p className="lede">השם שלך ושם הקליניקה יוחלפו תמיד ב"המאבחנת" לפני שליחה.</p>
             <div className="field">

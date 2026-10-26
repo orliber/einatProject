@@ -47,7 +47,9 @@ pub(crate) async fn retire_recovery_kit(
     let current = zeroize::Zeroizing::new(current);
     off_lock(
         &state,
-        move |c| c.begin_new_recovery_kit(&current, with_recovery),
+        move |c| {
+            c.begin_retire_recovery_kit(&current, with_recovery, &dv_core::google::WindowsAccount)
+        },
         |job| job.run(),
         |c, made| c.finish_retire_recovery_kit(made),
     )

@@ -256,7 +256,8 @@ export function RestoreFromBackup({ onRestored, onBack }: { onRestored: (s: AppS
       setSecret("");
       onRestored(status);
     } catch (err) {
-      setError((err as { message?: string }).message ?? "השחזור נכשל.");
+      const e = err as { code?: string; message?: string };
+      setError(mode === "recovery" && e.code === "wrong_secret" ? "ערכת השחזור לא נכונה. כדאי לבדוק שגיאות הקלדה." : e.message ?? "השחזור נכשל.");
       setSecret("");
       setBusy(false);
     }

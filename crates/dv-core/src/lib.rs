@@ -158,7 +158,8 @@ const MODEL_KEY: &str = "model";
 const ZDR_PREFIX: &str = "zdr/";
 const LOCK_KEY: &str = "lock_minutes";
 const FIRST_USE_KEY: &str = "first_use_day";
-/// When the printed recovery kit was last checked (D-076).
+/// When the printed recovery kit was last checked (D-076). No longer written (D-103); still
+/// hidden from her log, where older vaults have it.
 const KIT_CHECKED_KEY: &str = "recovery_kit_checked_at";
 /// "Show me every request before it is sent" (round 26). On until she turns it off: the
 /// review screen stays the default until Einat confirms turning it off (D-062). The key of the
