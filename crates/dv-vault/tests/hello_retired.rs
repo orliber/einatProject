@@ -44,6 +44,12 @@ fn a_vault_with_an_old_hello_slot_opens_with_the_password_and_loses_the_slot() {
 
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(!text.contains("windows_hello"));
+    // Edited from outside here, so it stays flagged: a changed header is never sealed again
+    // (D-104, review of #153). A header an older version really signed stays sealed
+    // (`store::version_tests::a_retired_hello_slot_leaves_a_signed_header_signed`).
     let vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
-    assert!(vault.integrity().header_ok, "the header is sealed again");
+    assert!(
+        !vault.integrity().header_ok,
+        "an outside edit was sealed again"
+    );
 }

@@ -168,8 +168,7 @@ impl Vault {
                 *slot = new.slot.clone();
             }
         }
-        self.header.sign(&self.keys.header)?;
-        self.header.write(&self.dir)?;
+        self.save_header()?;
         let event = match new.kind {
             SlotKind::Password => AuditEvent::PasswordChanged,
             SlotKind::Recovery => AuditEvent::RecoveryKeyRotated,

@@ -302,3 +302,82 @@ fn a_backup_carries_the_version_and_restores_here() {
     assert_eq!(restored.app_version(), Some(APP_VERSION));
     assert_eq!(sealed(&restored).as_deref(), Some(APP_VERSION));
 }
+
+/// Review of #153: a header changed while the vault was locked is never signed again by the
+/// program. Not by the log entries of the opening, not by catching up an anchor one entry
+/// behind, not by recording the version: it fails its check at every opening.
+#[test]
+fn a_changed_header_is_never_signed_again() {
+    for lagging in [false, true] {
+        let (dir, vault, _) = new_vault();
+        if lagging {
+            // An entry the header's anchor does not name yet (an append cut short).
+            crate::audit::append(
+                &vault.audit,
+                &vault.keys.audit_mac,
+                0,
+                crate::AuditEvent::Lock,
+                None,
+                &serde_json::json!({}),
+            )
+            .unwrap();
+        }
+        drop(vault);
+        let path = dir.path().join(HEADER_FILE);
+        let mut header: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        header["created_at"] = serde_json::json!(header["created_at"].as_i64().unwrap() + 1);
+        fs::write(&path, serde_json::to_vec_pretty(&header).unwrap()).unwrap();
+
+        for opening in 1..=3 {
+            let vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
+            assert!(
+                !vault.integrity().header_ok,
+                "lagging {lagging}, opening {opening}: the changed header passed"
+            );
+            assert!(
+                vault.integrity().audit_ok,
+                "lagging {lagging}, opening {opening}: {:?}",
+                vault.integrity()
+            );
+        }
+        // Nor in a backup of it: restored, it still fails.
+        let mut vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
+        let out = dir.path().join("b.vaultbak");
+        vault.write_backup(&out).unwrap();
+        drop(vault);
+        let target = tempfile::tempdir().unwrap();
+        let (restored, check) = Vault::restore_backup(
+            &fs::read(&out).unwrap(),
+            target.path(),
+            Secret::Password(PASSWORD),
+        )
+        .unwrap();
+        assert!(!restored.integrity().header_ok && !check.integrity_ok);
+    }
+}
+
+/// The Windows Hello slot an older version signed (D-054) leaves the header, and the header
+/// stays signed: only a header changed by someone else is left unsigned.
+#[test]
+fn a_retired_hello_slot_leaves_a_signed_header_signed() {
+    let (dir, mut vault, _) = new_vault();
+    vault
+        .header
+        .slots
+        .push(crate::header::KeySlot::WindowsHello {
+            credential: "il.diagnosticvault.test".into(),
+            challenge: "00".into(),
+            wrapped_mk: "00".into(),
+        });
+    vault.header.sign(&vault.keys.header).unwrap();
+    vault.header.write(&vault.dir).unwrap();
+    drop(vault);
+    let mut vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
+    assert!(vault.integrity().header_ok && vault.has_hello_slot());
+    vault.remove_hello_slot().unwrap();
+    drop(vault);
+    let vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
+    assert!(vault.integrity().header_ok, "{:?}", vault.integrity());
+    assert!(!vault.has_hello_slot());
+}

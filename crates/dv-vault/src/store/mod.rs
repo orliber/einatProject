@@ -594,8 +594,7 @@ impl Vault {
                 *slot = bound.clone();
             }
         }
-        self.header.sign(&self.keys.header)?;
-        self.header.write(&self.dir)?;
+        self.save_header()?;
         self.record(AuditEvent::PasswordBound, None, &serde_json::json!({}))
     }
 
@@ -667,7 +666,11 @@ impl Vault {
                 *slot = kept.clone();
             }
         }
-        header.sign(&self.keys.header)?;
+        // A header that failed its check is not signed for the backup either: restored, it
+        // still fails.
+        if self.integrity.header_ok {
+            header.sign(&self.keys.header)?;
+        }
         serde_json::to_vec_pretty(&header).map_err(|e| VaultError::Corrupt(e.to_string()))
     }
 
@@ -716,8 +719,7 @@ impl Vault {
         self.header
             .slots
             .retain(|s| !matches!(s, KeySlot::WindowsHello { .. }));
-        self.header.sign(&self.keys.header)?;
-        self.header.write(&self.dir)?;
+        self.save_header()?;
         hello::delete_key_pair(&credential);
         self.record(AuditEvent::WindowsHelloOff, None, &serde_json::json!({}))
     }
@@ -764,8 +766,7 @@ impl Vault {
             .slots
             .retain(|s| !matches!(s, KeySlot::Google { .. }));
         self.header.slots.push(slot);
-        self.header.sign(&self.keys.header)?;
-        self.header.write(&self.dir)?;
+        self.save_header()?;
         self.record(AuditEvent::GoogleRecoveryOn, None, &serde_json::json!({}))
     }
 
@@ -779,8 +780,7 @@ impl Vault {
         self.header
             .slots
             .retain(|s| !matches!(s, KeySlot::Google { .. }));
-        self.header.sign(&self.keys.header)?;
-        self.header.write(&self.dir)?;
+        self.save_header()?;
         self.record(AuditEvent::GoogleRecoveryOff, None, &serde_json::json!({}))
     }
 
@@ -808,8 +808,12 @@ impl Vault {
                 ChainStatus::Intact { .. } => (true, None),
                 ChainStatus::AnchorLagging { head } => {
                     header.audit_anchor = Some(head);
-                    header.sign(&keys.header)?;
-                    header.write(dir)?;
+                    // Never signed again when it failed its check (the warning below writes
+                    // it, with the signature it came with).
+                    if header_ok {
+                        header.sign(&keys.header)?;
+                        header.write(dir)?;
+                    }
                     (true, None)
                 }
                 ChainStatus::Broken { reason } => (false, Some(reason)),
@@ -1006,7 +1010,17 @@ impl Vault {
             meta,
         )?;
         self.header.audit_anchor = Some(anchor);
-        self.header.sign(&self.keys.header)?;
+        self.save_header()
+    }
+
+    /// Write the header. Signed again only when it is the header this vault signed: one that
+    /// failed its check at opening is written with the signature it came with, so it fails
+    /// again at every opening and the warning stays. Nothing here ever makes a changed header
+    /// pass (D-104, review of #153).
+    pub(crate) fn save_header(&mut self) -> Result<(), VaultError> {
+        if self.integrity.header_ok {
+            self.header.sign(&self.keys.header)?;
+        }
         self.header.write(&self.dir)
     }
 
