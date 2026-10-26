@@ -10,6 +10,7 @@ import type { CaseApi } from "../CaseScreen";
 import { useAi } from "../../ai";
 import { CasePrivacyCard } from "../../components/CasePrivacy";
 import type { Identity } from "../../ipc/generated/Identity";
+import { consentToSave, olderFormNote } from "../../consentForm";
 
 /** The case's details, consent and the names hidden before every send. */
 export function DetailsView({ api }: { api: CaseApi }) {
@@ -59,7 +60,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
         code: code.trim(),
         child_gender: gender,
         age: parseAge(years, months),
-        consent: consent ? { given_on: consentDate, form_version: m.consent?.form_version ?? "v1", given_by: consentBy.trim() || "ההורים" } : null,
+        consent: consentToSave(m.consent, consent, consentDate, consentBy),
         retention_until: ownRetention ? retention : null,
       });
       await ipc.setIdentities(caseId, toIdentityInputs(rows));
@@ -127,6 +128,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
                 </div>
               </div>
             )}
+            {consent && olderFormNote(m.consent) && <p className="hint">{olderFormNote(m.consent)}</p>}
           </div>
           <div className="card details-card stack">
             <b>תקופת השמירה</b>
