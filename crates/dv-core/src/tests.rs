@@ -215,12 +215,118 @@ fn every_error_has_a_next_step_that_fits_it() {
             CoreError::Needs("x".into(), ErrorAction::retry()),
             ErrorAction::retry(),
         ),
+        // D-121: what the service said, each to the place that fixes it.
+        (
+            CoreError::Egress(EgressError::Overloaded),
+            ErrorAction::retry(),
+        ),
+        (
+            CoreError::Egress(EgressError::Billing("x".into())),
+            ErrorAction::settings("ai"),
+        ),
+        (
+            CoreError::Egress(EgressError::Forbidden("x".into())),
+            ErrorAction::settings("ai"),
+        ),
+        (
+            CoreError::Egress(EgressError::ModelGone("x".into())),
+            ErrorAction::settings("about"),
+        ),
+        (
+            CoreError::Egress(EgressError::InvalidRequest("x".into())),
+            ErrorAction::Report,
+        ),
+        // D-122: the breaker's own wait.
+        (
+            CoreError::Egress(EgressError::CircuitOpen(42)),
+            ErrorAction::Retry { after_seconds: 42 },
+        ),
     ];
     for (e, want) in cases {
         let ui = e.to_ui();
         assert_eq!(ui.action, want, "{e:?}");
         assert!(!ui.message.is_empty());
     }
+}
+
+/// D-121: every failure of the AI is told in Hebrew, naming the AI she chose; the service's
+/// own English words (and the parser's) are only in the details she can copy.
+#[test]
+fn ai_failures_are_told_in_hebrew_with_the_service_words_only_in_the_details() {
+    let server = "Your credit balance is too low to access the Anthropic API";
+    let cases: Vec<(CoreError, &str)> = vec![
+        (CoreError::Egress(EgressError::Overloaded), "עמוס"),
+        (
+            CoreError::Egress(EgressError::Unavailable(503)),
+            "תקלה זמנית",
+        ),
+        (CoreError::Egress(EgressError::CircuitOpen(42)), "42 שניות"),
+        (
+            CoreError::Egress(EgressError::Billing(server.into())),
+            "קרדיט",
+        ),
+        (
+            CoreError::Egress(EgressError::Forbidden(server.into())),
+            "הרשאה",
+        ),
+        (
+            CoreError::Egress(EgressError::ModelGone(server.into())),
+            "כבר לא זמין",
+        ),
+        (
+            CoreError::Egress(EgressError::InvalidRequest(server.into())),
+            "דחה את הבקשה",
+        ),
+        (
+            CoreError::Egress(EgressError::Rejected(418, server.into())),
+            "דחה את הבקשה",
+        ),
+        (
+            CoreError::Egress(EgressError::Protocol(server.into())),
+            "לא צפויה",
+        ),
+        (
+            CoreError::Egress(EgressError::Policy(server.into())),
+            "שום דבר לא נשלח",
+        ),
+        (
+            CoreError::Ai(dv_ai::AiError::Format(
+                "expected value at line 1 column 1".into(),
+            )),
+            "לא צפויה",
+        ),
+        (
+            CoreError::Ai(dv_ai::AiError::Refused("refusal".into())),
+            "סירב",
+        ),
+        (CoreError::Ai(dv_ai::AiError::Truncated), "נקטעה"),
+    ];
+    for (e, words) in cases {
+        let ui = e.to_ui_for("ChatGPT");
+        assert!(ui.message.contains(words), "{e:?}: {}", ui.message);
+        // No English but the AI's name (and "API", in capitals).
+        assert!(
+            !ui.message
+                .replace("ChatGPT", "")
+                .chars()
+                .any(|c| c.is_ascii_lowercase()),
+            "{e:?}: {}",
+            ui.message
+        );
+        assert!(
+            !ui.message.contains("Claude") && !ui.message.contains("שגיאה בחיבור"),
+            "{e:?}: {}",
+            ui.message
+        );
+        assert!(!ui.details.is_empty(), "{e:?}: the details keep the cause");
+    }
+    let ui = CoreError::Egress(EgressError::Billing(server.into())).to_ui();
+    assert!(
+        ui.details.iter().any(|d| d.contains(server)),
+        "{:?}",
+        ui.details
+    );
+    assert!(ui.message.contains("Claude"));
 }
 
 #[test]
@@ -995,8 +1101,67 @@ fn unlock_backoff_after_wrong_password() {
     core.lock();
     assert!(core.unlock("סיסמה שגויה לגמרי כאן").is_err());
     assert!(matches!(core.unlock(PASSWORD), Err(CoreError::Backoff(_))));
+    // A restart of the program does not shorten the wait (D-122).
     let mut fresh = Core::for_tests(dir.path(), None);
+    assert!(matches!(fresh.unlock(PASSWORD), Err(CoreError::Backoff(_))));
+    fresh.not_before = None;
     assert!(fresh.unlock(PASSWORD).unwrap().unlocked);
+}
+
+/// D-122: five wrong passwords, then the program closed and opened again: the wait is still
+/// there, as long as it was (32 s), and never more than a minute.
+#[test]
+fn the_wait_after_wrong_passwords_survives_a_restart() {
+    let (dir, mut core, _case) = setup(None);
+    core.lock();
+    for _ in 0..5 {
+        core.not_before = None;
+        assert!(core.unlock("סיסמה שגויה לגמרי כאן").is_err());
+    }
+    drop(core);
+    let mut again = Core::for_tests(dir.path(), None);
+    let Err(CoreError::Backoff(s)) = again.unlock(PASSWORD) else {
+        panic!("a restart cleared the wait");
+    };
+    assert!((30..=33).contains(&s), "{s}s");
+    // The sixth try in the new run waits as the sixth: the count went with the file.
+    again.not_before = None;
+    assert!(again.unlock("סיסמה שגויה לגמרי כאן").is_err());
+    let Err(CoreError::Backoff(s)) = again.unlock(PASSWORD) else {
+        panic!("no wait after the sixth try");
+    };
+    assert!((59..=61).contains(&s), "{s}s");
+}
+
+/// A wait far in the future (a clock moved back, a file from elsewhere) is held to a minute,
+/// and a file the program did not write is the longest wait, not none (fail-closed, D-122).
+#[test]
+fn a_kept_wait_is_bounded_and_a_strange_file_waits_the_longest() {
+    let (dir, mut core, _case) = setup(None);
+    core.lock();
+    drop(core);
+    let file = dir.path().join("unlock.failures");
+    let far = crate::dates::unix_now() + 10 * 365 * 24 * 3600;
+    for (text, wait) in [
+        (format!("3 {far}"), true),
+        ("שלום".to_owned(), true),
+        ("3 4 5".to_owned(), true),
+        (String::new(), true),
+        // The program before D-122 wrote the count alone: no wait to keep.
+        ("3".to_owned(), false),
+        (format!("3 {}", crate::dates::unix_now() - 5), false),
+    ] {
+        std::fs::write(&file, &text).unwrap();
+        let mut run = Core::for_tests(dir.path(), None);
+        match run.unlock(PASSWORD) {
+            Err(CoreError::Backoff(s)) => assert!(wait && s <= 61, "{text:?}: {s}s"),
+            Ok(status) => {
+                assert!(!wait && status.unlocked, "{text:?}");
+                run.lock();
+            }
+            Err(e) => panic!("{text:?}: {e:?}"),
+        }
+    }
 }
 
 #[test]

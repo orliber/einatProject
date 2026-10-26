@@ -65,8 +65,28 @@ pub enum EgressError {
     RateLimited,
     #[error("the AI service is busy or unavailable ({0})")]
     Unavailable(u16),
+    /// Anthropic's `overloaded_error` (529): the service is up but has no room right now.
+    #[error("the AI service is overloaded")]
+    Overloaded,
+    /// No credit left on the account, or a billing problem (`billing_error`, 402, or a
+    /// "credit balance is too low" refusal). The server's words are kept for the details only.
+    #[error("the account has no credit left or a billing problem: {0}")]
+    Billing(String),
+    /// The model was not found (`not_found_error`, 404): retired, or never offered to this key.
+    #[error("the model was not found by the service: {0}")]
+    ModelGone(String),
+    /// The key is valid but not allowed this request (`permission_error`, 403).
+    #[error("the key is not allowed this request: {0}")]
+    Forbidden(String),
+    /// The service refused the request as built (`invalid_request_error`, 400).
+    #[error("the service refused the request as invalid: {0}")]
+    InvalidRequest(String),
     #[error("the request was refused by the service ({0}): {1}")]
     Rejected(u16, String),
+    /// Several busy answers in a row: no request goes out until the cool-down passes (D-122).
+    /// Nothing was sent; the number is the seconds left.
+    #[error("the AI service failed several times in a row; paused for {0}s")]
+    CircuitOpen(u64),
     #[error("no connection to the AI service (the rest of the program keeps working)")]
     Offline,
     #[error("the local model does not answer (is Ollama running, with the model installed?)")]
@@ -269,7 +289,7 @@ pub(crate) struct RateLimit {
 }
 
 impl RateLimit {
-    pub(crate) fn per_minute(max: usize) -> Self {
+    pub(crate) const fn per_minute(max: usize) -> Self {
         Self {
             window: Duration::from_secs(60),
             max,
@@ -328,8 +348,9 @@ pub(crate) fn build_client() -> Result<reqwest::blocking::Client, EgressError> {
         .map_err(|e| EgressError::Protocol(e.to_string()))
 }
 
-/// Send once, and again after 2 s and then 4 s while the server is busy (5xx) or asks to slow
-/// down (429): three tries at most. Any other answer, or error, is returned as is.
+/// Send once, and again after 2 s and then 4 s while the server is busy (5xx, overloaded) or
+/// asks to slow down (429): three tries at most. Any other answer, or error (an open breaker
+/// among them), is returned as is.
 pub(crate) fn retry(
     mut once: impl FnMut() -> Result<Value, EgressError>,
 ) -> Result<Value, EgressError> {
@@ -337,7 +358,9 @@ pub(crate) fn retry(
     let mut attempt = 0;
     loop {
         match once() {
-            Err(EgressError::Unavailable(_) | EgressError::RateLimited) if attempt < 2 => {
+            Err(
+                EgressError::Unavailable(_) | EgressError::Overloaded | EgressError::RateLimited,
+            ) if attempt < 2 => {
                 std::thread::sleep(delay);
                 delay *= 2;
                 attempt += 1;
@@ -362,12 +385,156 @@ pub(crate) fn send_error(e: &reqwest::Error) -> EgressError {
     }
 }
 
+/// What an error answer of the Anthropic API means: its `error.type` first, its status when
+/// the type is missing or new. The server's own words go only into the variant, which the
+/// program shows under "details" and never sends anywhere (D-121).
+pub(crate) fn anthropic_error(status: u16, body: &str) -> EgressError {
+    let v = serde_json::from_str::<Value>(body).ok();
+    let field = |p: &str| {
+        v.as_ref()
+            .and_then(|v| v.pointer(p))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned()
+    };
+    anthropic_kind(&field("/error/type"), status, field("/error/message"))
+}
+
+/// The same for a type and message already read (a streamed `error` event has no status of
+/// its own; it passes 400, the status of a refused request).
+pub(crate) fn anthropic_kind(kind: &str, status: u16, message: String) -> EgressError {
+    // No credit left comes back as an invalid request whose only mark is its wording.
+    if kind == "billing_error"
+        || status == 402
+        || message.to_ascii_lowercase().contains("credit balance")
+    {
+        return EgressError::Billing(message);
+    }
+    match kind {
+        "authentication_error" => EgressError::Unauthorized,
+        "permission_error" => EgressError::Forbidden(message),
+        "not_found_error" => EgressError::ModelGone(message),
+        "rate_limit_error" => EgressError::RateLimited,
+        "overloaded_error" => EgressError::Overloaded,
+        "api_error" | "timeout_error" => EgressError::Unavailable(status.max(500)),
+        "invalid_request_error" => EgressError::InvalidRequest(message),
+        _ => match status {
+            401 => EgressError::Unauthorized,
+            403 => EgressError::Forbidden(message),
+            404 => EgressError::ModelGone(message),
+            429 => EgressError::RateLimited,
+            529 => EgressError::Overloaded,
+            500..=599 => EgressError::Unavailable(status),
+            400 => EgressError::InvalidRequest(message),
+            _ => EgressError::Rejected(status, message),
+        },
+    }
+}
+
+/// Consecutive busy answers (5xx, overloaded) that open the breaker.
+const BREAKER_FAILURES: u32 = 5;
+/// How long an open breaker refuses before one trial request may go.
+const BREAKER_COOL_DOWN: Duration = Duration::from_secs(60);
+/// A trial request that never reported back (longer than the client's own timeout) is taken
+/// as lost, so the breaker cannot stay shut for the rest of the run.
+const BREAKER_TRIAL_LOST: Duration = Duration::from_secs(660);
+
+/// A small circuit breaker for the AI service (THREAT_MODEL E-5, D-122): after
+/// [`BREAKER_FAILURES`] busy answers in a row it refuses every request for
+/// [`BREAKER_COOL_DOWN`] without opening a connection; then one trial request may go
+/// (half-open). An answer from a working service closes it; another busy answer opens it again.
+/// Memory only: a restart starts closed.
+#[derive(Debug, Default)]
+pub(crate) struct Breaker {
+    failures: u32,
+    /// Open until this moment.
+    open_until: Option<Instant>,
+    /// Half-open: the trial request out now, and since when.
+    trial: Option<Instant>,
+}
+
+/// What one attempt says about the service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Health {
+    /// It answered (with an answer or a refusal of this request): it works.
+    Up,
+    /// A 5xx or overloaded answer.
+    Busy,
+    /// Nothing about the service: no connection, a refusal before sending, a rate limit.
+    Unknown,
+}
+
+impl Health {
+    pub(crate) fn of(r: &Result<Value, EgressError>) -> Self {
+        match r {
+            Ok(_)
+            | Err(
+                EgressError::Unauthorized
+                | EgressError::Billing(_)
+                | EgressError::ModelGone(_)
+                | EgressError::Forbidden(_)
+                | EgressError::InvalidRequest(_)
+                | EgressError::Rejected(..),
+            ) => Health::Up,
+            Err(EgressError::Unavailable(_) | EgressError::Overloaded) => Health::Busy,
+            Err(_) => Health::Unknown,
+        }
+    }
+}
+
+impl Breaker {
+    /// May an attempt go now? While open, the seconds left; while half-open, only one trial.
+    pub(crate) fn admit(&mut self, now: Instant) -> Result<(), EgressError> {
+        if let Some(until) = self.open_until {
+            if now < until {
+                let left = until.saturating_duration_since(now);
+                return Err(EgressError::CircuitOpen(left.as_secs() + 1));
+            }
+            // Half-open: one trial at a time.
+            if self
+                .trial
+                .is_some_and(|since| now.saturating_duration_since(since) < BREAKER_TRIAL_LOST)
+            {
+                return Err(EgressError::CircuitOpen(BREAKER_COOL_DOWN.as_secs()));
+            }
+            self.trial = Some(now);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn record(&mut self, health: Health, now: Instant) {
+        match health {
+            Health::Up => *self = Self::default(),
+            Health::Busy => {
+                self.failures = self.failures.saturating_add(1);
+                self.trial = None;
+                // A failed trial opens it again at once; otherwise the count decides.
+                if self.open_until.is_some() || self.failures >= BREAKER_FAILURES {
+                    self.open_until = Some(now + BREAKER_COOL_DOWN);
+                }
+            }
+            // The trial told nothing: the next request may try.
+            Health::Unknown => self.trial = None,
+        }
+    }
+}
+
+/// The breaker for the Anthropic service, and the per-minute limit shared by every request to
+/// a remote service: each send builds a new transport, so both must outlive it.
+static ANTHROPIC_BREAKER: Mutex<Breaker> = Mutex::new(Breaker {
+    failures: 0,
+    open_until: None,
+    trial: None,
+});
+pub(crate) static MINUTE_LIMIT: Mutex<RateLimit> = Mutex::new(RateLimit::per_minute(20));
+
 /// The real transport to the Anthropic Messages API.
 pub struct AnthropicTransport {
     client: reqwest::blocking::Client,
     api_key: Zeroizing<String>,
     url: String,
-    limit: Mutex<RateLimit>,
+    limit: &'static Mutex<RateLimit>,
+    breaker: &'static Mutex<Breaker>,
 }
 
 impl std::fmt::Debug for AnthropicTransport {
@@ -387,7 +554,8 @@ impl AnthropicTransport {
             client: build_client()?,
             api_key: Zeroizing::new(api_key.trim().to_owned()),
             url: MESSAGES_URL.to_owned(),
-            limit: Mutex::new(RateLimit::per_minute(20)),
+            limit: &MINUTE_LIMIT,
+            breaker: &ANTHROPIC_BREAKER,
         })
     }
 
@@ -413,21 +581,23 @@ impl AnthropicTransport {
         let text = read_answer(resp)?;
         match status {
             200 => serde_json::from_str(&text).map_err(|e| EgressError::Protocol(e.to_string())),
-            401 | 403 => Err(EgressError::Unauthorized),
-            429 => Err(EgressError::RateLimited),
-            500..=599 => Err(EgressError::Unavailable(status)),
-            _ => {
-                let message = serde_json::from_str::<Value>(&text)
-                    .ok()
-                    .and_then(|v| {
-                        v.pointer("/error/message")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned)
-                    })
-                    .unwrap_or_default();
-                Err(EgressError::Rejected(status, message))
-            }
+            _ => Err(anthropic_error(status, &text)),
         }
+    }
+
+    /// One attempt through the breaker: refused at once while it is open, and its outcome
+    /// told to it.
+    fn attempt(&self, body: &[u8], progress: &dyn Fn(u32)) -> Result<Value, EgressError> {
+        // A poisoned lock refuses, like everything here that cannot be checked.
+        self.breaker
+            .lock()
+            .map_err(|_| EgressError::CircuitOpen(BREAKER_COOL_DOWN.as_secs()))?
+            .admit(Instant::now())?;
+        let r = self.post_once(body, progress);
+        if let Ok(mut b) = self.breaker.lock() {
+            b.record(Health::of(&r), Instant::now());
+        }
+        r
     }
 }
 
@@ -448,7 +618,7 @@ impl Transport for AnthropicTransport {
         if !self.limit.lock().is_ok_and(|mut l| l.allow()) {
             return Err(EgressError::RateLimited);
         }
-        retry(|| self.post_once(payload.body(), progress))
+        retry(|| self.attempt(payload.body(), progress))
     }
 }
 
@@ -566,5 +736,128 @@ mod tests {
         let mut l = RateLimit::per_minute(3);
         assert!(l.allow() && l.allow() && l.allow());
         assert!(!l.allow());
+    }
+
+    #[test]
+    fn every_transport_shares_one_minute_limit_and_one_breaker() {
+        // Each send builds a new transport: a limit or breaker of its own would start empty.
+        let a = AnthropicTransport::new("sk-ant-test-not-real").unwrap();
+        let b = AnthropicTransport::new("sk-ant-test-not-real").unwrap();
+        assert!(std::ptr::eq(a.limit, b.limit) && std::ptr::eq(a.limit, &MINUTE_LIMIT));
+        assert!(std::ptr::eq(a.breaker, b.breaker));
+    }
+
+    /// D-121: Anthropic's error answers, by type and by status, as real ones look.
+    #[test]
+    fn anthropic_error_answers_become_their_own_variants() {
+        let body = |kind: &str, message: &str| {
+            json!({"type": "error", "error": {"type": kind, "message": message}}).to_string()
+        };
+        let cases = [
+            (529, body("overloaded_error", "Overloaded"), EgressError::Overloaded),
+            (500, body("api_error", "Internal server error"), EgressError::Unavailable(500)),
+            (504, body("timeout_error", "Request timeout"), EgressError::Unavailable(504)),
+            (401, body("authentication_error", "invalid x-api-key"), EgressError::Unauthorized),
+            (429, body("rate_limit_error", "Number of request tokens has exceeded"), EgressError::RateLimited),
+            (
+                400,
+                body("invalid_request_error", "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."),
+                EgressError::Billing("Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.".into()),
+            ),
+            (402, body("billing_error", "payment required"), EgressError::Billing("payment required".into())),
+            (404, body("not_found_error", "model: claude-old-1"), EgressError::ModelGone("model: claude-old-1".into())),
+            (403, body("permission_error", "not allowed"), EgressError::Forbidden("not allowed".into())),
+            (
+                400,
+                body("invalid_request_error", "messages: at least one message is required"),
+                EgressError::InvalidRequest("messages: at least one message is required".into()),
+            ),
+            // No body the program can read (a proxy's page): the status decides.
+            (529, "<html>busy</html>".to_owned(), EgressError::Overloaded),
+            (503, String::new(), EgressError::Unavailable(503)),
+            (404, String::new(), EgressError::ModelGone(String::new())),
+            (403, String::new(), EgressError::Forbidden(String::new())),
+            (402, String::new(), EgressError::Billing(String::new())),
+            (418, body("teapot_error", "short and stout"), EgressError::Rejected(418, "short and stout".into())),
+        ];
+        for (status, text, want) in cases {
+            assert_eq!(anthropic_error(status, &text), want, "{status} {text}");
+        }
+    }
+
+    #[test]
+    fn the_breaker_opens_after_busy_answers_in_a_row_and_lets_one_trial_through() {
+        let t0 = Instant::now();
+        let mut b = Breaker::default();
+        for _ in 0..BREAKER_FAILURES - 1 {
+            assert!(b.admit(t0).is_ok());
+            b.record(Health::Busy, t0);
+        }
+        // An answer from a working service in between starts the count again.
+        b.record(Health::Up, t0);
+        for _ in 0..BREAKER_FAILURES - 1 {
+            b.record(Health::Busy, t0);
+        }
+        assert!(b.admit(t0).is_ok(), "one short of the count");
+        // Nothing about the service (no connection) neither counts nor clears.
+        b.record(Health::Unknown, t0);
+        b.record(Health::Busy, t0);
+        assert_eq!(b.admit(t0), Err(EgressError::CircuitOpen(61)));
+        let later = t0 + Duration::from_secs(30);
+        assert_eq!(b.admit(later), Err(EgressError::CircuitOpen(31)));
+
+        // Half-open: one trial, the rest wait for it.
+        let after = t0 + BREAKER_COOL_DOWN;
+        assert!(b.admit(after).is_ok());
+        assert!(matches!(b.admit(after), Err(EgressError::CircuitOpen(_))));
+        // A busy trial opens it again for a whole cool-down.
+        b.record(Health::Busy, after);
+        assert!(matches!(
+            b.admit(after + Duration::from_secs(59)),
+            Err(EgressError::CircuitOpen(_))
+        ));
+        // A trial that told nothing lets the next one try; one that worked closes it.
+        let again = after + BREAKER_COOL_DOWN;
+        assert!(b.admit(again).is_ok());
+        b.record(Health::Unknown, again);
+        assert!(b.admit(again).is_ok());
+        b.record(Health::Up, again);
+        assert!(b.admit(again).is_ok() && b.admit(again).is_ok());
+    }
+
+    #[test]
+    fn a_lost_trial_does_not_keep_the_breaker_shut() {
+        let t0 = Instant::now();
+        let mut b = Breaker::default();
+        for _ in 0..BREAKER_FAILURES {
+            b.record(Health::Busy, t0);
+        }
+        let after = t0 + BREAKER_COOL_DOWN;
+        assert!(b.admit(after).is_ok());
+        assert!(b.admit(after + BREAKER_TRIAL_LOST).is_ok());
+    }
+
+    #[test]
+    fn what_each_outcome_says_about_the_service() {
+        assert_eq!(Health::of(&Ok(json!({}))), Health::Up);
+        assert_eq!(
+            Health::of(&Err(EgressError::InvalidRequest("x".into()))),
+            Health::Up
+        );
+        assert_eq!(
+            Health::of(&Err(EgressError::Billing("x".into()))),
+            Health::Up
+        );
+        assert_eq!(Health::of(&Err(EgressError::Overloaded)), Health::Busy);
+        assert_eq!(
+            Health::of(&Err(EgressError::Unavailable(502))),
+            Health::Busy
+        );
+        assert_eq!(Health::of(&Err(EgressError::Offline)), Health::Unknown);
+        assert_eq!(Health::of(&Err(EgressError::RateLimited)), Health::Unknown);
+        assert_eq!(
+            Health::of(&Err(EgressError::CircuitOpen(3))),
+            Health::Unknown
+        );
     }
 }

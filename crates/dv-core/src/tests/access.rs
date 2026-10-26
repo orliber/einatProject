@@ -38,12 +38,14 @@ fn wrong_passwords_before_a_restart_are_told_at_the_next_opening_and_only_then()
     let (dir, mut core, _case) = setup(None);
     core.lock();
     drop(core);
-    // Two tries in two runs of the program (each run starts without the waiting time).
+    // Two tries in two runs of the program (the wait, kept across them, skipped here).
     for _ in 0..2 {
         let mut run = Core::for_tests(dir.path(), None);
+        run.not_before = None;
         assert!(run.unlock("סיסמה לא נכונה בכלל").is_err());
     }
     let mut core = Core::for_tests(dir.path(), None);
+    core.not_before = None;
     let status = core.unlock(PASSWORD).unwrap();
     let said = status.since_last.unwrap();
     assert!(said.contains("2 ניסיונות כניסה שנכשלו"), "{said}");
