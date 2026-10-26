@@ -50,6 +50,8 @@ import type { Role } from "./generated/Role";
 import type { ScoreSheet } from "./generated/ScoreSheet";
 import type { UsageSummary } from "./generated/UsageSummary";
 import type { Readiness } from "./generated/Readiness";
+import type { SafetyNet } from "./generated/SafetyNet";
+import type { NetPart } from "./generated/NetPart";
 import type { SecurityItem } from "./generated/SecurityItem";
 import type { SecurityLayer } from "./generated/SecurityLayer";
 import type { SecurityStatus } from "./generated/SecurityStatus";
@@ -180,6 +182,8 @@ export const ipc = {
   exportSecurityPdf: () => call("export_security_pdf"),
   setSendStopped: (stopped: boolean) => call("set_send_stopped", { stopped }),
   confirmReadiness: (key: string, done: boolean) => call("confirm_readiness", { key, done }),
+  /** "The safety net" (D-107): Google sign-in if the password is forgotten, and a recent backup. */
+  safetyNet: () => call("safety_net"),
   /** Settings → המבחנים: every instrument with her answer (D-098). */
   instrumentApprovals: () => call("instrument_approvals"),
   setInstrumentStatus: (key: string, status: InstrumentStatus) => call("set_instrument_status", { key, status }),
@@ -484,6 +488,8 @@ export type {
   UpdateView,
   UsageSummary,
   Readiness,
+  SafetyNet,
+  NetPart,
   SecurityItem,
   SecurityLayer,
   SecurityStatus,

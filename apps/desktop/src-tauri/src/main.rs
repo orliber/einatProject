@@ -390,6 +390,7 @@ fn main() {
             touch,
             readiness,
             confirm_readiness,
+            safety_net,
             instrument_approvals,
             set_instrument_status,
             security_status,

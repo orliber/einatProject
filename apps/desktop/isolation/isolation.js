@@ -30,6 +30,7 @@ const ALLOWED = new Set([
   "clear_report_template",
   "clear_report_logo",
   "confirm_readiness",
+  "safety_net",
   "instrument_approvals",
   "set_instrument_status",
   "prepare_verify",

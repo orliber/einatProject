@@ -28,7 +28,7 @@ export function useBackupStatus() {
 }
 
 /** "Back up now": the "Save as" window, then the result in a toast. */
-function useWriteBackup() {
+export function useWriteBackup() {
   const { notify, fail } = useApp();
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
@@ -40,7 +40,8 @@ function useWriteBackup() {
       const done = await ipc.writeBackup();
       if (done) {
         notify(`הגיבוי נשמר מוצפן: ${done.path}`);
-        await qc.invalidateQueries({ queryKey: ["backup"] });
+        // The safety net follows the backup status; "ready for real cases" counts it too.
+        await Promise.all([qc.invalidateQueries({ queryKey: ["backup"] }), qc.invalidateQueries({ queryKey: ["readiness"] })]);
       }
     } catch (e) {
       setError(fail(e as never));

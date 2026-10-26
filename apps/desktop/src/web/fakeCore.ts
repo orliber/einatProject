@@ -4,6 +4,9 @@
 import type { ActivityEntry } from "../ipc/generated/ActivityEntry";
 import type { AppStatus } from "../ipc/generated/AppStatus";
 import type { BackupStatus } from "../ipc/generated/BackupStatus";
+import type { GoogleStatus } from "../ipc/generated/GoogleStatus";
+import type { NetPart } from "../ipc/generated/NetPart";
+import type { SafetyNet } from "../ipc/generated/SafetyNet";
 import type { DriveBackupStatus } from "../ipc/generated/DriveBackupStatus";
 import type { DriveCleanupResult } from "../ipc/generated/DriveCleanupResult";
 import type { StagedBackup } from "../ipc/generated/StagedBackup";
@@ -875,7 +878,7 @@ export class FakeCore {
         const items = [...manual,
           { key: "score_tables", done: tables, checked_by_program: true, confirmed_at: null },
           { key: "api_key", done: false, checked_by_program: true, confirmed_at: null },
-          { key: "backup", done: false, checked_by_program: true, confirmed_at: null },
+          { key: "backup", done: !((await this.handle("backup_status", {})) as BackupStatus).due, checked_by_program: true, confirmed_at: null },
           { key: "disk", done: true, checked_by_program: true, confirmed_at: null }];
         return { items, all_done: false };
       }
@@ -1518,6 +1521,26 @@ export class FakeCore {
         return null;
       case "google_cancel":
         return null;
+      // As the core (D-107): made from the two statuses, the same words.
+      case "safety_net": {
+        const g = (await this.handle("google_status", {})) as GoogleStatus;
+        const b = (await this.handle("backup_status", {})) as BackupStatus;
+        const ago = (d: number) => (d <= 0 ? "היום" : d === 1 ? "אתמול" : d === 2 ? "לפני יומיים" : `לפני ${d} ימים`);
+        const google: NetPart = !g.available
+          ? { state: "unavailable", text: "כניסה עם גוגל לא זמינה במחשב הזה", hint: null }
+          : g.on ? { state: "ok", text: "כניסה עם גוגל", hint: null }
+            : g.needs_setup_here
+              ? { state: "missing", text: "כניסה עם גוגל לא מחוברת במחשב הזה", hint: "היא הופעלה במחשב אחר. מחברים אותה שוב כאן, וכך אפשר להיכנס גם אם הסיסמה תישכח." }
+              : { state: "missing", text: "כניסה עם גוגל כבויה", hint: "מפעילים אותה פעם אחת, וכך אפשר להיכנס ולבחור סיסמה חדשה גם אם הסיסמה תישכח." };
+        const backup: NetPart = b.days_since === null
+          ? { state: "missing", text: "אין עדיין גיבוי", hint: "גיבוי מוצפן על דיסק נפרד שומר את התיקים אם המחשב יתקלקל או ילך לאיבוד." }
+          : b.secret_changed
+            ? { state: "missing", text: "הסיסמה הוחלפה אחרי הגיבוי האחרון", hint: "הגיבוי הקודם נפתח רק בסיסמה הישנה. כדאי לגבות עכשיו." }
+            : b.due
+              ? { state: "missing", text: `הגיבוי האחרון ${ago(b.days_since)}`, hint: "גיבוי נחשב עדכני 7 ימים. כדאי לגבות עכשיו." }
+              : { state: "ok", text: `גיבוי מ${ago(b.days_since)}`, hint: null };
+        return { google, backup, ok: google.state !== "missing" && backup.state === "ok" } satisfies SafetyNet;
+      }
       case "drive_backup_status":
         return { available: true, connected: this.googleOn, on: this.driveOn, last_at: this.driveOn ? this.driveLastAt : null, problem: null, cleanup_pending: false, copies_left: false } satisfies DriveBackupStatus;
       case "drive_backup_turn_on":

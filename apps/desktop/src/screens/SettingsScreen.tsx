@@ -12,6 +12,7 @@ import { VerifySettings } from "../components/VerifySettings";
 import { ReportCheckSettings } from "../components/ReportCheck";
 import { NameModelSettings } from "../components/NameModelSettings";
 import { ReadinessSettings } from "../components/ReadinessSettings";
+import { SafetyNet } from "../components/SafetyNet";
 import { InstrumentSettings } from "../components/InstrumentSettings";
 import { SecuritySettings } from "../components/SecuritySettings";
 import { PrivacyStatus } from "../components/PrivacyStatus";
@@ -96,6 +97,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
 
           {pane === "general" && (
             <>
+              <SafetyNet />
               <ReadinessSettings />
               <section className="card setting" aria-labelledby="s-general">
                 <h2 id="s-general">תצוגה ופרטים</h2>
@@ -335,6 +337,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
 
           {pane === "security" && (
             <>
+              <SafetyNet />
               <SecuritySettings />
               <PasswordSettings />
             </>

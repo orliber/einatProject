@@ -16,6 +16,7 @@ fn main() {
             "take_unsaved",
             "readiness",
             "confirm_readiness",
+            "safety_net",
             "instrument_approvals",
             "set_instrument_status",
             "security_status",

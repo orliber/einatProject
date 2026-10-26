@@ -43,6 +43,7 @@ import type { ReportCheckSetting } from "./ReportCheckSetting";
 import type { ReportSettings } from "./ReportSettings";
 import type { RetentionItem } from "./RetentionItem";
 import type { Role } from "./Role";
+import type { SafetyNet } from "./SafetyNet";
 import type { ScoreSheet } from "./ScoreSheet";
 import type { SectionLibrary } from "./SectionLibrary";
 import type { SectionMode } from "./SectionMode";
@@ -185,6 +186,7 @@ export type Commands = {
   restore_paragraph_version: { args: { caseId: string; draftId: string; versionId: string }; returns: null };
   restore_style_version: { args: { id: string }; returns: StyleProfileView };
   retention_due: { args: undefined; returns: Array<RetentionItem> };
+  safety_net: { args: undefined; returns: SafetyNet };
   save_scores: { args: { caseId: string; inputId: string | null; sheet: ScoreSheet }; returns: CaseInput };
   save_style_draft: { args: { profile: StyleProfile }; returns: StyleProfileView };
   save_style_source: { args: { token: string; included: Array<number>; title: string | null }; returns: StyleSourceView };

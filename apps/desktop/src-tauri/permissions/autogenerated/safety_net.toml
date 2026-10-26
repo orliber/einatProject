@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-safety-net"
+description = "Enables the safety_net command without any pre-configured scope."
+commands.allow = ["safety_net"]
+
+[[permission]]
+identifier = "deny-safety-net"
+description = "Denies the safety_net command without any pre-configured scope."
+commands.deny = ["safety_net"]
