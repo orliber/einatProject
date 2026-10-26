@@ -929,6 +929,93 @@ fn restoring_never_overwrites_a_vault() {
     ));
 }
 
+/// D-124: a restore cut short by a power cut leaves a header next to databases that never
+/// reached the disk (missing, empty or zeroed). That is not a vault: it is not opened into new,
+/// empty databases, and restoring again into the same folder works.
+#[test]
+fn a_header_without_its_databases_is_not_a_vault_and_can_be_restored_over() {
+    let (dir, mut vault, _) = new_vault();
+    noam(&mut vault);
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("backup.vaultbak");
+    vault.write_backup(&dest).unwrap();
+    let bytes = fs::read(&dest).unwrap();
+    let header = fs::read(dir.path().join("vault.header")).unwrap();
+
+    let target = tempfile::tempdir().unwrap();
+    let t = target.path();
+    fs::write(t.join("vault.header"), &header).unwrap();
+    assert!(!Vault::exists(t), "a header alone");
+    fs::write(t.join("main.db"), b"").unwrap();
+    fs::write(t.join("identity.db"), [0u8; 8192]).unwrap();
+    fs::write(t.join("audit.db-wal"), b"").unwrap();
+    fs::write(t.join("main.db-shm"), [0u8; 64]).unwrap();
+    fs::create_dir(t.join(".restore-cut-short")).unwrap();
+    fs::write(t.join(".restore-cut-short").join("main.db"), b"half").unwrap();
+    assert!(
+        !Vault::exists(t),
+        "a header next to empty and zeroed databases"
+    );
+    assert!(matches!(
+        Vault::unlock_with_password(t, PASSWORD),
+        Err(VaultError::NotFound)
+    ));
+    assert_eq!(
+        fs::read(t.join("main.db")).unwrap().len(),
+        0,
+        "not opened into a new one"
+    );
+
+    let (restored, check) = Vault::restore_backup(&bytes, t, Secret::Password(PASSWORD)).unwrap();
+    assert_eq!(check.cases, 1);
+    assert!(check.integrity_ok);
+    drop(restored);
+    assert!(Vault::exists(t));
+    let leftovers: Vec<_> = fs::read_dir(t)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with('.'))
+        .collect();
+    assert!(leftovers.is_empty(), "no staging folder is left");
+    let reopened = Vault::unlock_with_password(t, PASSWORD).unwrap();
+    assert!(reopened.integrity().header_ok && reopened.integrity().audit_ok);
+    assert_eq!(reopened.list_cases().unwrap().len(), 1);
+}
+
+/// D-124: cut short after the databases were moved in and before the header: no header, so no
+/// vault, and the restore runs again over them.
+#[test]
+fn databases_without_a_header_are_restored_over() {
+    let (_dir, mut vault, _) = new_vault();
+    noam(&mut vault);
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("backup.vaultbak");
+    vault.write_backup(&dest).unwrap();
+    let bytes = fs::read(&dest).unwrap();
+
+    let target = tempfile::tempdir().unwrap();
+    let t = target.path();
+    drop(Vault::restore_backup(&bytes, t, Secret::Password(PASSWORD)).unwrap());
+    fs::remove_file(t.join("vault.header")).unwrap();
+    assert!(!Vault::exists(t));
+    let (restored, check) = Vault::restore_backup(&bytes, t, Secret::Password(PASSWORD)).unwrap();
+    assert_eq!(check.cases, 1);
+    assert!(restored.integrity().header_ok && restored.integrity().audit_ok);
+}
+
+/// A database that cannot be read counts as holding data: a vault is never taken for an empty
+/// folder because a file was locked or unreadable (fail-closed).
+#[cfg(unix)]
+#[test]
+fn an_unreadable_database_still_counts_as_a_vault() {
+    let target = tempfile::tempdir().unwrap();
+    let t = target.path();
+    fs::write(t.join("vault.header"), b"{}").unwrap();
+    fs::create_dir(t.join("main.db")).unwrap();
+    // A folder in place of the file: opening it works, reading it fails.
+    assert!(Vault::exists(t));
+}
+
 #[test]
 fn the_restore_drill_checks_a_backup_without_touching_the_vault() {
     let (dir, mut vault, _) = new_vault();

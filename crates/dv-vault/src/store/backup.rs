@@ -21,7 +21,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use zeroize::Zeroizing;
 
-use super::{master_key, now, Keys, Secret, Vault, AUDIT_DB, IDENTITY_DB, MAIN_DB};
+use super::{master_key, now, Keys, Secret, Vault, AUDIT_DB, DB_FILES, IDENTITY_DB, MAIN_DB};
 use crate::audit::AuditEvent;
 use crate::crypto::{hex, open, random_id, seal, Key32};
 use crate::db::open_encrypted;
@@ -29,7 +29,6 @@ use crate::header::{VaultHeader, HEADER_FILE};
 use crate::VaultError;
 
 const MAGIC: &[u8; 8] = b"DVBAK\0\0\x01";
-const FILES: [&str; 3] = [MAIN_DB, IDENTITY_DB, AUDIT_DB];
 pub const BACKUP_EXTENSION: &str = "vaultbak";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,7 +154,7 @@ fn entries(container: &[u8]) -> Result<Vec<(String, &[u8])>, VaultError> {
     }
     let mut names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
     names.sort_unstable();
-    let mut expected = FILES.to_vec();
+    let mut expected = DB_FILES.to_vec();
     expected.sort_unstable();
     if names != expected {
         return Err(corrupt("unexpected contents"));
@@ -172,7 +171,8 @@ pub(super) fn remove_stale_scratch(dir: &Path) {
         let name = name.to_string_lossy();
         if (name.starts_with(".backup-")
             || name.starts_with(".drill-")
-            || name.starts_with(".verify-"))
+            || name.starts_with(".verify-")
+            || name.starts_with(".restore-"))
             && entry.file_type().is_ok_and(|t| t.is_dir())
         {
             let _ = fs::remove_dir_all(entry.path());
@@ -449,6 +449,64 @@ fn check_file(
     Ok((parsed.created_at, opened?))
 }
 
+/// Flush a folder's entries (files created, renamed or removed in it) to the disk. On Windows
+/// a folder cannot be opened as a file; NTFS journals a rename in order with the other
+/// changes to its metadata, so a rename that survives a power cut comes with those before it.
+fn sync_dir(dir: &Path) -> Result<(), VaultError> {
+    #[cfg(unix)]
+    fs::File::open(dir)?.sync_all()?;
+    #[cfg(not(unix))]
+    let _ = dir;
+    Ok(())
+}
+
+/// Put a restored vault's files into `target` so that a power cut at any moment leaves either
+/// no vault there (and the restore can be run again) or the whole vault (D-124): every file is
+/// written in a staging folder inside `target` and flushed to the disk, then moved into place,
+/// the databases first and the header last. `target` holds no vault ([`Vault::exists`]), so
+/// what an earlier restore cut short left there holds no data and is removed first.
+fn place_restored(
+    target: &Path,
+    files: &[(String, &[u8])],
+    header: &[u8],
+) -> Result<(), VaultError> {
+    let staging = target.join(format!(".restore-{}", random_id()?));
+    fs::create_dir(&staging)?;
+    let placed = (|| -> Result<(), VaultError> {
+        let all = files
+            .iter()
+            .map(|(name, bytes)| (name.as_str(), *bytes))
+            .chain([(HEADER_FILE, header)]);
+        for (name, bytes) in all {
+            let mut f = fs::File::create(staging.join(name))?;
+            f.write_all(bytes)?;
+            f.sync_all()?;
+        }
+        sync_dir(&staging)?;
+        // A header left alone must go before the databases come in: next to them it would make
+        // a "vault" that does not open (or opens another vault's keys over these files).
+        for leftover in DB_FILES
+            .iter()
+            .flat_map(|name| ["-wal", "-shm"].map(|suffix| format!("{name}{suffix}")))
+            .chain([HEADER_FILE.to_owned()])
+        {
+            match fs::remove_file(target.join(&leftover)) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+                _ => {}
+            }
+        }
+        sync_dir(target)?;
+        for (name, _) in files {
+            fs::rename(staging.join(name), target.join(name))?;
+        }
+        sync_dir(target)?;
+        fs::rename(staging.join(HEADER_FILE), target.join(HEADER_FILE))?;
+        sync_dir(target)
+    })();
+    let _ = fs::remove_dir_all(&staging);
+    placed
+}
+
 /// Restore drill on a backup file, without the open vault: open it in a scratch folder next
 /// to the vault in `dir`, count what it holds, and remove it. Proves both the file and the
 /// secret work. The slow part (the key derivation) runs here; [`Vault::record_drill`] logs it.
@@ -533,7 +591,7 @@ impl Vault {
         secret: Secret<'_>,
         prepare: impl FnOnce(&mut Vault) -> Result<(), VaultError>,
     ) -> Result<(Vault, BackupCheck), VaultError> {
-        if target.join(HEADER_FILE).exists() {
+        if Vault::exists(target) {
             return Err(VaultError::AlreadyExists);
         }
         let parsed = parse(backup)?;
@@ -549,11 +607,9 @@ impl Vault {
         let files = entries(&container)?;
 
         fs::create_dir_all(target)?;
+        remove_stale_scratch(target);
         let opened = (|| -> Result<Vault, VaultError> {
-            for (name, bytes) in &files {
-                fs::write(target.join(name), bytes)?;
-            }
-            fs::write(target.join(HEADER_FILE), parsed.header_bytes)?;
+            place_restored(target, &files, parsed.header_bytes)?;
             let mut vault = Vault::open_with(target, parsed.header, &mk)?;
             prepare(&mut vault)?;
             Ok(vault)
@@ -561,8 +617,9 @@ impl Vault {
         let mut vault = match opened {
             Ok(vault) => vault,
             Err(e) => {
-                // Leave nothing half-restored behind: only the files this call wrote.
-                for name in FILES.iter().chain([&HEADER_FILE]) {
+                // Leave nothing half-restored behind: only the files this call wrote. The
+                // header first, so that a stop halfway never leaves it next to a database.
+                for name in [&HEADER_FILE].into_iter().chain(DB_FILES.iter()) {
                     for suffix in ["", "-wal", "-shm"] {
                         let _ = fs::remove_file(target.join(format!("{name}{suffix}")));
                     }

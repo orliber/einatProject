@@ -81,6 +81,22 @@ pub struct DraftVersion {
 const MAIN_DB: &str = "main.db";
 const IDENTITY_DB: &str = "identity.db";
 const AUDIT_DB: &str = "audit.db";
+const DB_FILES: [&str; 3] = [MAIN_DB, IDENTITY_DB, AUDIT_DB];
+
+/// True when the file at `path` holds anything: its first page is there and not all zeros.
+/// A file that cannot be read counts as holding data (fail-closed: it is never replaced).
+fn holds_data(path: &Path) -> bool {
+    use std::io::Read;
+    let file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) => return e.kind() != std::io::ErrorKind::NotFound,
+    };
+    let mut page = Vec::with_capacity(4096);
+    match file.take(4096).read_to_end(&mut page) {
+        Ok(_) => page.iter().any(|&b| b != 0),
+        Err(_) => true,
+    }
+}
 
 fn token_hmac(key: &Key32, token: &str) -> String {
     hex(&hmac_sha256(
@@ -382,9 +398,24 @@ fn enum_from<T: DeserializeOwned>(text: &str) -> Result<T, VaultError> {
 }
 
 impl Vault {
+    /// A vault is its header and a database that holds data. A header alone, next to missing,
+    /// empty or zeroed databases (a setup or a restore cut short by a power cut), is not a
+    /// vault: nothing could open it, and a new setup or a restore may replace it (D-124).
     #[must_use]
     pub fn exists(dir: &Path) -> bool {
         dir.join(HEADER_FILE).exists()
+            && DB_FILES.iter().any(|name| {
+                holds_data(&dir.join(name)) || holds_data(&dir.join(format!("{name}-wal")))
+            })
+    }
+
+    /// The header of the vault in `dir`, to open it. A header with no databases is refused,
+    /// rather than opened into new, empty ones (D-124).
+    fn existing_header(dir: &Path) -> Result<VaultHeader, VaultError> {
+        if !Self::exists(dir) {
+            return Err(VaultError::NotFound);
+        }
+        VaultHeader::read(dir)
     }
 
     /// Create a new vault. Returns it unlocked, with the recovery key to print.
@@ -483,7 +514,7 @@ impl Vault {
         password: &str,
         computer: Option<&Key32>,
     ) -> Result<Self, VaultError> {
-        let header = VaultHeader::read(dir)?;
+        let header = Self::existing_header(dir)?;
         let (mk, stretched) = password_master_key(&header, password, computer)?;
         let mut vault = Self::open_with(dir, header, &mk)?;
         vault.record(
@@ -637,7 +668,7 @@ impl Vault {
     }
 
     pub fn unlock_with_recovery(dir: &Path, typed: &str) -> Result<Self, VaultError> {
-        let header = VaultHeader::read(dir)?;
+        let header = Self::existing_header(dir)?;
         let mk = master_key(&header, Secret::Recovery(typed))?;
         let mut vault = Self::open_with(dir, header, &mk)?;
         vault.record(
@@ -655,7 +686,7 @@ impl Vault {
         drive: &Key32,
         computer: &Key32,
     ) -> Result<Self, VaultError> {
-        let header = VaultHeader::read(dir)?;
+        let header = Self::existing_header(dir)?;
         let mk = master_key(&header, Secret::Google { drive, computer })?;
         let mut vault = Self::open_with(dir, header, &mk)?;
         vault.record(

@@ -373,7 +373,8 @@ export const ipc = {
   letter: (caseId: string, audience: "parents" | "school") => call("letter", { caseId, audience }),
   exportLetter: (caseId: string, audience: "parents" | "school", password: string | null) =>
     call("export_letter", { caseId, audience, password }),
-  /** The file password to the clipboard: out of history and cloud sync, cleared after N seconds (returned). */
+  /** A secret to the clipboard: out of history and cloud sync (and on a Mac out of Universal
+   *  Clipboard), cleared after N seconds (returned: 60, or 20 on a Mac). */
   copySecret: (text: string) => call("copy_secret", { text }),
 
   /** The system's print window (the macOS webview ignores `window.print()`). */

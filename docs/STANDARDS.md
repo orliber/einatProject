@@ -158,7 +158,7 @@
 | הצפנת דיסק | US-2, IL-8 | בדיקה ב-`env_checks`: FileVault / BitLocker / Device Encryption. **תזכורת בלבד** (D-013, סטייה מתועדת) | 2 |
 | תיקייה מסונכרנת לענן | IL-2 | סירוב לפעול (Dropbox, OneDrive, iCloud, Google Drive) | 2 |
 | צילום מסך ושיתוף מסך | GDPR 32 | `contentProtected`: כבוי בינתיים לבקשת עינת (D-039). הקוד נשאר וחוזר בשני קבועים. | 1 |
-| לוח העתקה | ASVS | ניקוי אחרי 60 שניות, ובלי היסטוריית לוח (ExcludeClipboardContentFromMonitorProcessing ב-Windows) | 5 |
+| לוח העתקה | ASVS | רק דרך הלוח המוגן (`secret_clipboard.rs`), ונמחק בנעילה. **Windows:** בלי היסטוריית הלוח (Win+V), בלי "סנכרון בין מכשירים" ובלי תוכנות ניטור (`ExcludeClipboardContentFromMonitorProcessing`), ניקוי אחרי 60 שניות. **Mac:** סימון "מוסתר" (`org.nspasteboard.ConcealedType`) לתוכנות היסטוריה שמכבדות אותו, ו"במק הזה בלבד" (`CurrentHostOnly`) כדי שלא יעבור לאייפון ב-Universal Clipboard, וניקוי אחרי 20 שניות (D-125). **Linux:** רק רמז הסיסמה של KDE. מה שנשאר: R15 ב-`THREAT_MODEL.md` | 5 |
 | קובצי Word שיוצאו | IL-1 | נפתחים בלי סיסמה, לבקשתה (D-081, חריגה מהמחמיר עם נימוק). בלי שם הילד בשם הקובץ, PDF להדפסה בלבד עם טביעת אצבע, אזהרה על שמירה אוטומטית ל-OneDrive. הליבה עדיין יודעת להצפין (ECMA-376 Agile) אם יוחלט להחזיר. | 5, 8 |
 
 ### 5.10 בינה מלאכותית (OWASP LLM Top 10, 2025)
