@@ -10,12 +10,19 @@ export const CONSENT_FORM_VERSION = "v3";
 const SAMPLE = "תיק לדוגמה";
 
 /** The consent to save: the one recorded before keeps its version (never relabelled);
- *  a consent recorded now is on the current form. `null` when she has no consent. */
-export function consentToSave(before: Consent | null, given: boolean, givenOn: string, givenBy: string): Consent | null {
+ *  a consent recorded now, or one the parents signed again on today's form (`resigned`, her
+ *  explicit action), is on the current form. `null` when she has no consent. */
+export function consentToSave(
+  before: Consent | null,
+  given: boolean,
+  givenOn: string,
+  givenBy: string,
+  resigned = false,
+): Consent | null {
   if (!given) return null;
   return {
     given_on: givenOn,
-    form_version: before?.form_version ?? CONSENT_FORM_VERSION,
+    form_version: resigned ? CONSENT_FORM_VERSION : (before?.form_version ?? CONSENT_FORM_VERSION),
     given_by: givenBy.trim() || "ההורים",
   };
 }

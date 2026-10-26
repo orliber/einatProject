@@ -10,7 +10,7 @@ import type { CaseApi } from "../CaseScreen";
 import { useAi } from "../../ai";
 import { CasePrivacyCard } from "../../components/CasePrivacy";
 import type { Identity } from "../../ipc/generated/Identity";
-import { consentToSave, olderFormNote } from "../../consentForm";
+import { CONSENT_FORM_VERSION, consentToSave, olderFormNote } from "../../consentForm";
 
 /** The case's details, consent and the names hidden before every send. */
 export function DetailsView({ api }: { api: CaseApi }) {
@@ -25,6 +25,9 @@ export function DetailsView({ api }: { api: CaseApi }) {
   const [consent, setConsent] = useState(m.consent !== null);
   const [consentDate, setConsentDate] = useState(m.consent?.given_on ?? todayIso());
   const [consentBy, setConsentBy] = useState(m.consent?.given_by ?? "שני ההורים");
+  // The parents signed today's form again: recorded only when she says so (D-115).
+  const [resigned, setResigned] = useState(false);
+  const olderForm = olderFormNote(m.consent);
   const [ownRetention, setOwnRetention] = useState(m.retention_until !== null);
   const [retention, setRetention] = useState(m.retention_until ?? detail.retention_default);
   const [rows, setRows] = useState<PersonRow[]>(() => {
@@ -60,7 +63,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
         code: code.trim(),
         child_gender: gender,
         age: parseAge(years, months),
-        consent: consentToSave(m.consent, consent, consentDate, consentBy),
+        consent: consentToSave(m.consent, consent, consentDate, consentBy, resigned),
         retention_until: ownRetention ? retention : null,
       });
       await ipc.setIdentities(caseId, toIdentityInputs(rows));
@@ -120,7 +123,8 @@ export function DetailsView({ api }: { api: CaseApi }) {
               <div className="row wrap">
                 <div className="field">
                   <label htmlFor="d-cd">תאריך</label>
-                  <DateField id="d-cd" value={consentDate} onChange={setConsentDate} notAfterToday />
+                  {/* Signed again: a fresh field, showing the date it now holds (the field keeps what was typed). */}
+                  <DateField key={resigned ? "resigned" : "recorded"} id="d-cd" value={consentDate} onChange={setConsentDate} notAfterToday />
                 </div>
                 <div className="field grow">
                   <label htmlFor="d-cb">מי חתם (תפקיד, לא שם)</label>
@@ -128,7 +132,21 @@ export function DetailsView({ api }: { api: CaseApi }) {
                 </div>
               </div>
             )}
-            {consent && olderFormNote(m.consent) && <p className="hint">{olderFormNote(m.consent)}</p>}
+            {consent && olderForm && (
+              <div className="stack" style={{ gap: 4 }}>
+                <p className="hint">
+                  {resigned
+                    ? `בשמירה ההסכמה תירשם לפי הנוסח הנוכחי (${CONSENT_FORM_VERSION}), עם תאריך החתימה החדש.`
+                    : olderForm}
+                </p>
+                {!resigned && (
+                  <button type="button" className="link-small align-start"
+                    onClick={() => { setResigned(true); setConsentDate(todayIso()); }}>
+                    ההורים חתמו מחדש על הנוסח הנוכחי
+                  </button>
+                )}
+              </div>
+            )}
           </div>
           <div className="card details-card stack">
             <b>תקופת השמירה</b>

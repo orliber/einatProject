@@ -160,9 +160,9 @@ const LOCK_KEY: &str = "lock_minutes";
 const FIRST_USE_KEY: &str = "first_use_day";
 /// When the printed recovery kit was last checked (D-076).
 const KIT_CHECKED_KEY: &str = "recovery_kit_checked_at";
-/// "Show me every request before it is sent" (round 26). On until she turns it off: the
-/// review screen stays the default until Einat confirms turning it off (D-062). The key of the
-/// earlier "only when suspicious" choice is not read.
+/// "Show me every request before it is sent" (round 26). Off unless she turns it on: Einat
+/// confirmed off as the default on 15.10.2026 (D-062). The key of the earlier "only when
+/// suspicious" choice is not read.
 const REVIEW_KEY: &str = "review_always";
 const SCREEN_KEY: &str = "screen_protection";
 /// How long Claude may think (see `Core::model_for`).

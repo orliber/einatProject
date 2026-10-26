@@ -20,6 +20,11 @@ describe("consent form version", () => {
     });
   });
 
+  it("puts a re-signed consent on the current form, only when she says the parents signed again", () => {
+    expect(consentToSave(old, true, "2026-10-26", "שני ההורים", true)?.form_version).toBe(CONSENT_FORM_VERSION);
+    expect(consentToSave(old, true, "2026-10-26", "שני ההורים", false)?.form_version).toBe("v1");
+  });
+
   it("saves no consent when she has none, and names the parents when no signer is typed", () => {
     expect(consentToSave(old, false, "2026-09-01", "האם")).toBeNull();
     expect(consentToSave(null, true, "2026-10-26", "  ")?.given_by).toBe("ההורים");

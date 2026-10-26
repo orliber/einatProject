@@ -36,9 +36,9 @@
 **למה:** בלי חתימה Windows מציג "Windows protected your PC" ו-SmartScreen, אין שם מאומת על המתקין, ומבדק החדירה יסמן את זה (`PENTEST_SCOPE.md` §8, `STANDARDS.md` §5.8). העדכון בתוך התוכנה כבר מוגן בחתימה משלו (D-033), אבל ההתקנה הראשונה לא.
 
 **איזו תעודה (המחמירה שזמינה):**
-- **Azure Artifact Signing** (לשעבר Trusted Signing) של Microsoft זמין היום ליחידים רק בארה"ב ובקנדה, ולארגונים בארה"ב, קנדה, האיחוד האירופי ובריטניה. לעוסק בישראל הוא לא זמין, אלא אם יש חברה רשומה באחת המדינות האלה.
+- **Azure Artifact Signing** (לשעבר Trusted Signing) של Microsoft זמין, לפי התיעוד שלהם באוקטובר 2026, ליחידים רק בארה"ב ובקנדה, ולארגונים בארה"ב, קנדה, האיחוד האירופי ובריטניה. לעוסק בישראל הוא לא זמין, אלא אם יש חברה רשומה באחת המדינות האלה. **לבדוק** לפני שקונים: הרשימה מתרחבת.
 - **נבחר: תעודת OV** (Organization Validation) על שם עינת או הקליניקה, מרשות מוכרת עם **חתימה בענן**, כך שהמפתח נשאר ב-HSM של הרשות ולא יוצא אף פעם (זו גם דרישת התעשייה מאז 2023). דוגמאות: SSL.com eSigner, DigiCert KeyLocker, Sectigo, Certum. משווים מחיר ותמיכה בחתימה מ-GitHub Actions.
-- תעודת EV מחייבת חברה רשומה, ומאז 2024 כבר לא נותנת ל-SmartScreen אמון מיידי יותר מ-OV. אם יש חברה, EV מחמירה יותר באימות הזהות, ואפשר לבחור בה.
+- תעודת EV מחייבת חברה רשומה, ולפי מה שידוע לנו מאז 2024 כבר לא נותנת ל-SmartScreen אמון מיידי יותר מ-OV (**לבדוק** מול הרשות שמוכרת). אם יש חברה, EV מחמירה יותר באימות הזהות, ואפשר לבחור בה.
 
 **הצעדים:**
 1. קונים תעודה, ועוברים אימות זהות (תעודה מזהה, ואם על שם עסק: מסמכי העסק). השם שמופיע בתעודה הוא מה שעינת תראה בחלון ההתקנה.
@@ -55,7 +55,7 @@
 1. הרשמה ל-Apple Developer Program (99$ לשנה). כיחיד מספיק Apple ID עם אימות דו-שלבי; כארגון צריך מספר D-U-N-S. השם שמופיע ב-Gatekeeper הוא שם החשבון.
 2. ב-Certificates: יוצרים **Developer ID Application** (רק Account Holder יכול), ומייצאים `.p12` עם סיסמה.
 3. ב-App Store Connect ← Users and Access ← Integrations: מפתח API ל-notarization (Issuer ID, Key ID, קובץ `.p8`).
-4. ב-GitHub, ב-Environment `release` (כמו ב-2): `APPLE_CERTIFICATE` (ה-`.p12` ב-base64), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_API_ISSUER`, `APPLE_API_KEY`, ותוכן ה-`.p8`. אלה השמות ש-Tauri קורא.
+4. ב-GitHub, ב-Environment `release` (כמו ב-2), כסודות: `APPLE_CERTIFICATE` (ה-`.p12` ב-base64), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_API_ISSUER`, `APPLE_API_KEY` (ה-Key ID), ותוכן ה-`.p8` בסוד נפרד. Tauri קורא את המפתח עצמו מ-`APPLE_API_KEY_PATH`, שהוא **נתיב לקובץ**: ה-workflow כותב את תוכן הסוד לקובץ זמני ב-`$RUNNER_TEMP` (הרשאות 600), מעביר את הנתיב, ומוחק אותו בסוף.
 5. **שינוי בקוד, ב-thread נפרד של Claude:** `signingIdentity` במקום `"-"`, חתימה של מודול ה-FIPS באותה זהות, **הסרת `com.apple.security.cs.disable-library-validation`** מ-`macos/Entitlements.plist` (D-101, חלופה א), notarization ו-staple לדמות, וחישוב ה-CDHash **אחרי** החתימה (ההודעה החתומה מקבלת רק אותו). בהמשך, לפי D-101: Secure Enclave ו-App Sandbox.
 
 **איך יודעים שעבד:** `spctl -a -vv` מחזיר `accepted, source=Developer ID`; `xcrun stapler validate` עובר על הדמות; האפליקציה נפתחת ב-Mac אחר בלי "Open Anyway"; עדכון מ-0.8.x עובר.
