@@ -47,6 +47,7 @@ pub fn report_with(f: impl Fn(&str) -> String) -> Report {
         signature: vec![f("signature")],
         confidentiality: f("confidentiality"),
         font: f("font"),
+        ..Report::default()
     }
 }
 
@@ -68,7 +69,9 @@ pub fn sample() -> Report {
 
 pub fn part_names(zip_bytes: &[u8]) -> Vec<String> {
     let zip = zip::ZipArchive::new(Cursor::new(zip_bytes)).unwrap();
-    zip.file_names().map(str::to_owned).collect()
+    zip.file_names()
+        .map(|n| n.expect("entry name").into_owned())
+        .collect()
 }
 
 pub fn part(zip_bytes: &[u8], name: &str) -> Option<String> {

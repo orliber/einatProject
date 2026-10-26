@@ -17,6 +17,24 @@ pub(crate) async fn confirm_readiness(
     with_core(&state, move |c| c.confirm_readiness(&key, done)).await
 }
 
+/// Settings → המבחנים: every instrument with her answer (D-098).
+#[tauri::command]
+pub(crate) async fn instrument_approvals(
+    state: tauri::State<'_, AppState>,
+) -> Res<Vec<dv_core::InstrumentApproval>> {
+    with_core(&state, |c| c.instrument_approvals()).await
+}
+
+/// Her answer for one instrument: approved, or not given.
+#[tauri::command]
+pub(crate) async fn set_instrument_status(
+    state: tauri::State<'_, AppState>,
+    key: String,
+    status: dv_core::InstrumentStatus,
+) -> Res<Vec<dv_core::InstrumentApproval>> {
+    with_core(&state, move |c| c.set_instrument_status(&key, status)).await
+}
+
 /// The security status list (S4): what is on, what is not.
 #[tauri::command]
 pub(crate) async fn security_status(state: tauri::State<'_, AppState>) -> Res<SecurityStatus> {
@@ -32,22 +50,22 @@ pub(crate) async fn set_send_stopped(
     with_core(&state, move |c| c.set_send_stopped(stopped)).await
 }
 
-/// The paragraph being edited now (memory only), kept in the vault if it locks meanwhile.
+/// The texts being edited now (memory only), kept in the vault if it locks meanwhile.
 #[tauri::command]
 pub(crate) async fn hold_unsaved(
     state: tauri::State<'_, AppState>,
-    edit: Option<UnsavedEdit>,
+    edits: Vec<UnsavedEdit>,
 ) -> Res<()> {
     with_core(&state, move |c| {
-        c.hold_unsaved(edit);
+        c.hold_unsaved(edits);
         Ok(())
     })
     .await
 }
 
-/// After entering: the edit kept at the last lock, offered once.
+/// After entering: the edits kept at the last lock, offered once.
 #[tauri::command]
-pub(crate) async fn take_unsaved(state: tauri::State<'_, AppState>) -> Res<Option<UnsavedEdit>> {
+pub(crate) async fn take_unsaved(state: tauri::State<'_, AppState>) -> Res<Vec<UnsavedEdit>> {
     with_core(&state, |c| c.take_unsaved()).await
 }
 
@@ -167,4 +185,34 @@ pub(crate) async fn report_template(
     state: tauri::State<'_, AppState>,
 ) -> Res<Option<TemplateView>> {
     with_core(&state, |c| c.report_template()).await
+}
+
+/// Her logo (round 55): a PNG or JPEG, the file's bytes as the raw body.
+#[tauri::command]
+pub(crate) async fn set_report_logo(
+    state: tauri::State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Res<LogoView> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(internal("body"));
+    };
+    // Refused before it is copied: the core refuses it too, but only after a copy.
+    if bytes.len() > dv_core::MAX_LOGO_BYTES {
+        return Err(CoreError::Refused(
+            "התמונה גדולה מ-1MB. שומרים אותה בגודל קטן יותר ובוחרים שוב.".to_owned(),
+        )
+        .to_ui());
+    }
+    let bytes = bytes.clone();
+    with_core(&state, move |c| c.set_report_logo(&bytes)).await
+}
+
+#[tauri::command]
+pub(crate) async fn clear_report_logo(state: tauri::State<'_, AppState>) -> Res<()> {
+    with_core(&state, |c| c.clear_report_logo()).await
+}
+
+#[tauri::command]
+pub(crate) async fn report_logo(state: tauri::State<'_, AppState>) -> Res<Option<LogoView>> {
+    with_core(&state, |c| c.report_logo()).await
 }

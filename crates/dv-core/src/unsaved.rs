@@ -15,6 +15,8 @@ use crate::{Core, CoreError};
 pub(crate) const UNSAVED_KEY: &str = "unsaved_edit";
 /// Far longer than a paragraph; a longer text is cut, not refused.
 const MAX_CHARS: usize = 50_000;
+/// Editors open at once (several cases, a paragraph and a note). More than this keeps the latest.
+pub(crate) const MAX_EDITS: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -30,37 +32,56 @@ pub struct UnsavedEdit {
 }
 
 impl Core {
-    /// The edit open right now, or `None` once it is saved or closed. While the vault is locked
-    /// this does nothing (the page may report a closed editor as it is being replaced).
-    pub fn hold_unsaved(&mut self, edit: Option<UnsavedEdit>) {
+    /// The editors open right now, the latest last; empty once all are saved or closed. While
+    /// the vault is locked this does nothing (the page may report a closed editor as it is
+    /// being replaced).
+    pub fn hold_unsaved(&mut self, edits: Vec<UnsavedEdit>) {
         if self.vault.is_none() {
             return;
         }
-        self.unsaved = edit.filter(|e| !e.text.trim().is_empty()).map(|mut e| {
-            if e.text.chars().count() > MAX_CHARS {
-                e.text = e.text.chars().take(MAX_CHARS).collect();
-            }
-            e
-        });
+        let mut kept: Vec<UnsavedEdit> = edits
+            .into_iter()
+            .filter(|e| !e.text.trim().is_empty())
+            .map(|mut e| {
+                if e.text.chars().count() > MAX_CHARS {
+                    e.text = e.text.chars().take(MAX_CHARS).collect();
+                }
+                e
+            })
+            .collect();
+        if kept.len() > MAX_EDITS {
+            kept.drain(..kept.len() - MAX_EDITS);
+        }
+        self.unsaved = kept;
     }
 
-    /// Before the vault closes: keep the open edit inside it.
+    /// Before the vault closes: keep every open edit inside it.
     pub(crate) fn keep_unsaved(&mut self) {
-        let (Some(edit), Some(v)) = (self.unsaved.take(), self.vault.as_mut()) else {
+        let edits = std::mem::take(&mut self.unsaved);
+        let Some(v) = self.vault.as_mut() else {
             return;
         };
-        if let Ok(json) = serde_json::to_string(&edit) {
+        if edits.is_empty() {
+            return;
+        }
+        if let Ok(json) = serde_json::to_string(&edits) {
             let _ = v.set_state(UNSAVED_KEY, &json);
         }
     }
 
-    /// After entering: the edit kept at the last lock, offered once.
-    pub fn take_unsaved(&mut self) -> Result<Option<UnsavedEdit>, CoreError> {
+    /// After entering: the edits kept at the last lock, offered once. A vault kept by an
+    /// earlier version holds one edit, not a list.
+    pub fn take_unsaved(&mut self) -> Result<Vec<UnsavedEdit>, CoreError> {
         let v = self.vault_mut()?;
         let Some(stored) = v.setting(UNSAVED_KEY)?.filter(|s| !s.is_empty()) else {
-            return Ok(None);
+            return Ok(Vec::new());
         };
         v.set_state(UNSAVED_KEY, "")?;
-        Ok(serde_json::from_str(&stored).ok())
+        if let Ok(list) = serde_json::from_str::<Vec<UnsavedEdit>>(&stored) {
+            return Ok(list);
+        }
+        Ok(serde_json::from_str::<UnsavedEdit>(&stored)
+            .into_iter()
+            .collect())
     }
 }

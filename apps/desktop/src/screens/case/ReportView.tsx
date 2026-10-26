@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { useApp } from "../../App";
 import { ipc, type CaseDetail, type ReportSettings, type TemplateView } from "../../ipc/client";
-import { kindLabel } from "../../i18n/he";
+import { kindLabel, STALE_EDIT } from "../../i18n/he";
 import { ageWords } from "../../components/AgeField";
 import { ErrorLine, SparkIcon, WarnIcon } from "../../components/ui";
 import { Why } from "../../components/Why";
-import { ProgressLine } from "../../components/Progress";
+import { ProgressLine, WaitLine } from "../../components/Progress";
 import { useHoldUnsaved } from "../../components/Unsaved";
 import { setKept, useKept } from "../../kept";
 import { guideOpenKey } from "../../components/SectionGuide";
@@ -270,7 +270,7 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
   /** After a draft is approved: the next draft waiting comes into focus. */
   onNext: () => void;
 }) {
-  const { go, fail } = useApp();
+  const { go, fail, notify } = useApp();
   const ai = useAi();
   const { caseId, reload, detail } = api;
   /** A paragraph being edited in place, or a new one at `at`: "first", "end" or after a paragraph's id.
@@ -403,8 +403,9 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
     await act(async () => {
       // All the text deleted and saved: the paragraph goes away.
       if (id && !text.trim()) await ipc.rejectParagraph(caseId, id);
-      else if (id) await ipc.editParagraph(caseId, id, text);
-      else await ipc.addOwnParagraph(caseId, s.key, text, at ?? "end");
+      else if (id) {
+        if (await ipc.editParagraph(caseId, id, text, editing.original)) notify(STALE_EDIT);
+      } else await ipc.addOwnParagraph(caseId, s.key, text, at ?? "end");
       close();
     });
   }
@@ -460,7 +461,7 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
         {focused && p.status === "proposed" && p.style && !mine && (
           <StyleHintView hint={p.style} busy={busy}
             onCloser={(how) => void write(`נסחי מחדש את הפסקה הבאה כך שתישמע כמו הכתיבה שלי: ${how}. באותו תוכן ובלי להוסיף עובדות: "${p.text}"`, p.id)}
-            onApply={(m) => void act(() => ipc.editParagraph(caseId, p.id, applyMark(p.text, m)))} />
+            onApply={(m) => void act(async () => { await ipc.editParagraph(caseId, p.id, applyMark(p.text, m)); })} />
         )}
         {focused && p.style_note && <span className="small muted style-note">{p.style_note}</span>}
         {focused && !busy && (
@@ -680,7 +681,7 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
           <ProgressLine started={job.started} estimate={job.estimate} label={job.label} approval={job.approval} />
         </div>
       )}
-      {preparing && !job && <p className="small muted">מכינה את הבקשה…</p>}
+      {preparing && !job && <WaitLine task="prepare" speed="section" label="מכינה את הבקשה: מסתירה שמות ובודקת מה יוצא" />}
 
       {pending.length > 0 && !job && (
         <div className={focused ? "a4-pending" : "a4-pending is-dim"}>

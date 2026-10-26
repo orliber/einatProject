@@ -5,12 +5,12 @@ import { ipc, type CaseDetail, type ChatView, type ParagraphCheck, type SectionR
 import { useQuery } from "@tanstack/react-query";
 import { VerdictNote } from "../../components/VerdictNote";
 import { ErrorLine, SendIcon, Spinner, WarnIcon } from "../../components/ui";
-import { ProgressLine } from "../../components/Progress";
+import { ProgressLine, timed, WaitLine } from "../../components/Progress";
 import { Why } from "../../components/Why";
 import { Similar } from "../../components/Similar";
 import { useHoldUnsaved } from "../../components/Unsaved";
 import { LocalText, type LocalTextHandle } from "../../components/LocalText";
-import { kindLabel } from "../../i18n/he";
+import { kindLabel, STALE_EDIT } from "../../i18n/he";
 import { useRotatingPlaceholder } from "../../components/Rotating";
 import { DRAFT_HINTS } from "../../i18n/suggestions";
 import { ParagraphVersions } from "../../components/ParagraphVersions";
@@ -57,7 +57,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
   const chatHint = `${useRotatingPlaceholder(DRAFT_HINTS, !messageEmpty)} · שמות יוסתרו אוטומטית`;
   const [busy, setBusy] = useState(false);
   /** A paragraph being edited: the text is in `editBox`; `text` is its debounced copy, for the lock. */
-  const [editing, setEditing] = useKept<{ id: string; text: string } | null>(`${keep}:editing`, null);
+  const [editing, setEditing] = useKept<{ id: string; text: string; original?: string } | null>(`${keep}:editing`, null);
   const editBox = useRef<LocalTextHandle>(null);
   /** A paragraph of her own being written (in `ownBox`), with its debounced copy, or `null`. */
   // Both kept while the vault is open: leaving and coming back finds the editor with her text.
@@ -155,7 +155,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
       const prepare = () => points
         ? ipc.prepareFromPoints(caseId, section.key, instruction)
         : ipc.prepareSection(caseId, section.key, instruction, replaces);
-      const prepared = await prepare();
+      const prepared = await timed("prepare", prepare(), "section");
       setPreparing(false);
       setBusy(true);
       const send = async (id: string) => {
@@ -199,7 +199,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
     setPreparing(true);
     try {
       const prepare = () => ipc.prepareVerify(caseId, section.key);
-      const prepared = await prepare();
+      const prepared = await timed("prepare", prepare(), "section");
       setPreparing(false);
       setBusy(true);
       await api.review({
@@ -372,7 +372,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
               </span>
             </div>
           )}
-          {preparing && <p className="muted small"><Spinner /> מסתירה שמות ובודקת מה יוצא…</p>}
+          {preparing && <WaitLine task="prepare" speed="section" label="מכינה את הבקשה: מסתירה שמות ובודקת מה יוצא" />}
 
           {pending > 0 && !job && (
             <div className="draft-banner">
@@ -439,7 +439,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                     <span className="approved-mark">✓ אושר על ידך</span>
                     {p.sources.length > 0 && <span className="muted">מקור: {p.sources.join(" · ")}</span>}
                     {p.by_ai && <button type="button" className="link-small" aria-expanded={why === p.id} onClick={() => setWhy(why === p.id ? null : p.id)}>למה כתבת את זה?</button>}
-                    <button type="button" className="link-small" onClick={() => setEditing({ id: p.id, text: p.text })}>עריכה</button>
+                    <button type="button" className="link-small" onClick={() => setEditing({ id: p.id, text: p.text, original: p.text })}>עריכה</button>
                     {p.has_versions && (
                       <button type="button" className="link-small" aria-expanded={history === p.id} onClick={() => setHistory(history === p.id ? null : p.id)}>גרסאות קודמות</button>
                     )}
@@ -471,7 +471,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                   <label className="edit-box">
                     <span className="visually-hidden">עריכת הפסקה</span>
                     <LocalText key={p.id} ref={editBox} className="textarea serif" rows={5} initial={editing.text} autoFocus onLive={holdLive}
-                      onText={(text) => setEditing((e) => (e?.id === p.id ? { id: p.id, text } : e))} />
+                      onText={(text) => setEditing((e) => (e?.id === p.id ? { ...e, text } : e))} />
                   </label>
                 ) : (
                   <p className="serif para-text"><MarkedText text={p.text} marks={p.style?.marks ?? []} /></p>
@@ -482,7 +482,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                 {!isEditing && p.style && !mine && (
                   <StyleHintView hint={p.style} busy={working}
                     onCloser={(how) => void ask(`נסחי מחדש את הפסקה הבאה כך שתישמע כמו הכתיבה שלי: ${how}. באותו תוכן ובלי להוסיף עובדות: "${p.text}"`, "קירוב פסקה לסגנון שלך", p.id)}
-                    onApply={(m) => void act(() => ipc.editParagraph(caseId, p.id, applyMark(p.text, m)))} />
+                    onApply={(m) => void act(async () => { await ipc.editParagraph(caseId, p.id, applyMark(p.text, m)); })} />
                 )}
                 <div className="row wrap-row">
                   {isEditing ? (
@@ -490,7 +490,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                       <button type="button" className="btn btn-primary btn-small"
                         onClick={() => {
                           const text = editBox.current?.value() ?? editing.text;
-                          void act(async () => { await ipc.editParagraph(caseId, p.id, text); await ipc.approveParagraph(caseId, p.id); setEditing(null); });
+                          void act(async () => { if (await ipc.editParagraph(caseId, p.id, text, editing.original ?? null)) notify(STALE_EDIT); await ipc.approveParagraph(caseId, p.id); setEditing(null); });
                         }}>שמירה ואישור</button>
                       <button type="button" className="btn btn-small" onClick={() => setEditing(null)}>ביטול</button>
                       <button type="button" className="link-small" aria-expanded={similar === p.id} onClick={() => setSimilar(similar === p.id ? null : p.id)}>פסקה דומה מהדוחות שלי</button>
@@ -502,7 +502,7 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
                         <button type="button" className="btn btn-small" disabled={working}
                           onClick={() => void ask(`נסחי מחדש את הפסקה הבאה, באותו תוכן ובלי להוסיף עובדות: "${p.text}"`, "ניסוח מחדש של פסקה אחת", p.id)}>ניסוח מחדש</button>
                       )}
-                      <button type="button" className="btn btn-small" onClick={() => setEditing({ id: p.id, text: p.text })}>עריכה</button>
+                      <button type="button" className="btn btn-small" onClick={() => setEditing({ id: p.id, text: p.text, original: p.text })}>עריכה</button>
                       <button type="button" className="btn btn-small btn-ghost" onClick={() => void act(() => ipc.rejectParagraph(caseId, p.id))}>הסרה</button>
                     </>
                   )}

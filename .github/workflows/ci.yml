@@ -1,7 +1,9 @@
 name: CI
 
-# Pull requests run the fast checks once (not again for the branch push). The installer
-# builds (macOS counts 10x, Windows 2x in Actions minutes) run on main and by hand only.
+# Pull requests run the fast checks once (not again for the branch push), and the macOS tests
+# on every PR (D-101: the Mac's protections run nowhere else; macOS counts 10x in Actions
+# minutes, a cost taken on purpose). The installer builds (both platforms) run on main and by
+# hand only.
 on:
   push:
     branches: [main]
@@ -9,18 +11,23 @@ on:
   workflow_dispatch:
     inputs:
       fips:
-        description: "Build the installers on the FIPS 140-3 module (D-006). Verify here before it becomes the default."
+        description: "Build the Linux package on the FIPS 140-3 module (D-006). Windows and macOS are always built on it, as released."
         type: boolean
         default: false
 
-# Least privilege: read the code, nothing else. No secrets are used anywhere.
+# Least privilege: read the code, nothing else. The only secrets are the Google sign-in pair
+# the installers carry (D-041), and only in the steps that build the Windows installer and the
+# Mac disk image, never on a PR.
 # Every action is pinned to a commit (STANDARDS 5.8); Dependabot keeps the pins current.
 permissions:
   contents: read
 
+# A new push to a PR cancels its older run. On main a run is never cancelled (D-091): with
+# several merges an hour, cancelling meant no main run ever reached the release installer.
+# The run in progress finishes; only the newest waiting one runs after it.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -55,6 +62,10 @@ jobs:
         run: git diff --exit-code -- apps/desktop/src/ipc/generated
       - run: cargo xtask check-invariants
       - run: cargo xtask scan --all
+      # D-091: the version on main can always be released. Its "מה חדש" lines and the vault
+      # it keeps for the next versions (F7) come in the same PR that sets the number.
+      - name: The version on main can be released
+        run: scripts/release-ready.sh
 
   supply-chain:
     name: Supply chain – cargo-deny (advisories, licenses, bans, sources)
@@ -92,7 +103,11 @@ jobs:
           persist-credentials: false
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # Before this job, every vault test died here with STATUS_STACK_OVERFLOW (D-038).
-      - run: cargo test --release -p dv-vault -p dv-egress -p dv-ingest -p dv-sandbox
+      - run: cargo test --release -p dv-vault -p dv-egress -p dv-ingest -p dv-sandbox -- --skip 'computer_key::'
+      # The key sealed to this computer (DPAPI) on its own: beside the Argon2 tests a busy
+      # runner held its PowerShell past the opening's wait (main, 23.10), which is not a fault.
+      - name: The key kept on this computer, on its own
+        run: cargo test --release -p dv-vault --lib 'computer_key::'
       - name: First run (create, close, open again; the real Argon2 cost)
         run: cargo test --release -p dv-core --test first_run -- --ignored
 
@@ -126,7 +141,9 @@ jobs:
       # The shell embeds the built UI at compile time.
       - run: pnpm build
         working-directory: apps/desktop
-      - run: cargo test --release -p dv-vault --features fips
+      - run: cargo test --release -p dv-vault --features fips -- --skip 'computer_key::'
+      - name: The key kept on this computer, on its own
+        run: cargo test --release -p dv-vault --features fips --lib 'computer_key::'
       # Tauri checks that bundled resources exist even when nothing is bundled. This job builds
       # no installer, so an empty folder stands in for the OCR engine (D-048); the installer
       # jobs (desktop, release) fetch the real one.
@@ -135,6 +152,81 @@ jobs:
         run: New-Item -ItemType Directory -Force apps/desktop/src-tauri/ocr/tessdata | Out-Null
       - run: cargo clippy -p dv-desktop --features fips -- -D warnings
       - run: cargo test --release -p dv-desktop --features fips
+
+  macos:
+    name: macOS – the vault, documents, updates and the shell, as released
+    # D-101: on a Mac the computer key lives in the Keychain, documents are read in the system
+    # sandbox and the process keeps no core file. Each is tested here, on a real Mac, on every
+    # PR, because none of it can run on the Linux job.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # A keychain of its own, unlocked, as her login keychain is while she is signed in.
+      - name: A keychain for the tests
+        run: |
+          security create-keychain -p dv-ci dv-ci.keychain
+          security set-keychain-settings dv-ci.keychain
+          security unlock-keychain -p dv-ci dv-ci.keychain
+          security list-keychains -d user -s dv-ci.keychain
+          security default-keychain -d user -s dv-ci.keychain
+      # dv-ner: the name model's runtime (ONNX) as a worker inside the sandbox.
+      - run: cargo test --release --no-fail-fast -p dv-vault -p dv-egress -p dv-ingest -p dv-sandbox -p dv-ner -- --skip 'computer_key::'
+      # The key in the Keychain on its own, away from the Argon2 tests (as on Windows).
+      - name: The key kept on this computer, on its own
+        run: cargo test --release -p dv-vault --lib 'computer_key::'
+      - name: First run (create, close, open again; the real Argon2 cost)
+        run: cargo test --release -p dv-core --test first_run -- --ignored
+      - name: Binding, Google and updates in the core
+        run: cargo test --release -p dv-core --lib -- binding google update security
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: apps/desktop/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: apps/desktop
+      # The shell embeds the built UI at compile time.
+      - run: pnpm build
+        working-directory: apps/desktop
+      - name: OCR resource folder (no installer here)
+        run: mkdir -p apps/desktop/src-tauri/ocr/tessdata
+      - run: cargo clippy -p dv-desktop -- -D warnings
+      - run: cargo test --release -p dv-desktop
+      # The program itself (with every framework it links) as the document worker, inside the
+      # sandbox: the profile must let it start.
+      - name: The program reads a document contained
+        run: |
+          cargo build --release -p dv-desktop
+          DV_TEST_APP_EXE="$PWD/target/release/dv-desktop" cargo test --release -p dv-ingest --test worker -- --ignored the_shipped_program
+      # The check an installed copy makes of a new version (D-101, `dv-core/src/update.rs`),
+      # in the same words: the app whose CDHash the signed notice names passes, and no other.
+      - name: An update accepts only the app the signed notice names
+        run: |
+          app="$RUNNER_TEMP/dv-cdhash-check"
+          cp target/release/dv-desktop "$app"
+          codesign -s - -f "$app"
+          cdhash="$(codesign -dvvv "$app" 2>&1 | sed -n 's/^CDHash=//p')"
+          [[ "$cdhash" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::no CDHash: $cdhash"; exit 1; }
+          codesign --verify --deep --strict -R "=cdhash H\"$cdhash\"" "$app"
+          other="$(printf '%040d' 0)"
+          if codesign --verify --deep --strict -R "=cdhash H\"$other\"" "$app" 2>/dev/null; then
+            echo "::error::an app with another CDHash passed"; exit 1
+          fi
+      # When a contained worker fails, what the sandbox refused and how the worker ended (test
+      # data only: fabricated documents).
+      - name: Sandbox refusals and worker crashes
+        if: failure()
+        run: |
+          log show --last 60m --style compact --predicate 'eventMessage CONTAINS "Sandbox: dv-" OR eventMessage CONTAINS "Sandbox: bash" OR eventMessage CONTAINS "Sandbox: cat" OR eventMessage CONTAINS "Sandbox: env"' | sort -u -k5 | tail -150 || true
+          for f in $(ls -t ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -E '^(dv-|bash)' | head -3); do
+            echo "=== $f"; head -c 8000 ~/Library/Logs/DiagnosticReports/"$f"; echo
+          done
 
   frontend:
     name: UI – typecheck, lint, tests, build, audit
@@ -182,18 +274,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # One file to send: a per-user setup (no admin prompt) with WebView2 bundled.
-          - os: windows-latest
-            bundles: nsis
-            artifact: diagnostic-vault-windows
-            paths: |
-              target/release/bundle/nsis/*.exe
-          # Ad-hoc signed (tauri.conf.json): Gatekeeper offers "Open Anyway" instead of "damaged".
-          - os: macos-latest
-            bundles: app,dmg
-            artifact: diagnostic-vault-macos
-            paths: |
-              target/release/bundle/dmg/*.dmg
+          # Windows and macOS have their own jobs below: the installers exactly as released.
           - os: ubuntu-22.04
             bundles: deb
             artifact: diagnostic-vault-linux
@@ -220,36 +301,241 @@ jobs:
           cache-dependency-path: apps/desktop/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: apps/desktop
-      # FIPS build (aws-lc-fips-sys): Go everywhere; NASM and Ninja on Windows.
+      # FIPS build (aws-lc-fips-sys): Go.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: inputs.fips
         with:
           go-version: stable
-      - name: FIPS build tools (Windows)
-        if: inputs.fips && runner.os == 'Windows'
-        run: |
-          choco install nasm ninja -y --no-progress
-          echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-      # The installer carries the OCR engine (D-048); built from source, pinned.
-      - name: OCR engine (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: apps/desktop/src-tauri/windows/fetch-ocr.ps1
       - name: Clippy on the desktop shell
         run: cargo clippy -p dv-desktop -- -D warnings
       - name: Build installer (unsigned; signing is phase 8)
         run: pnpm tauri build --bundles ${{ matrix.bundles }} ${{ inputs.fips && '--features fips' || '' }}
         working-directory: apps/desktop
-      # F7, R8: the same check the release runs, on every installer built here.
-      - name: Clean install (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $exe = Get-ChildItem target/release/bundle/nsis/*.exe | Select-Object -First 1
-          scripts/windows-clean-install.ps1 -Installer $exe.FullName
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.paths }}
           if-no-files-found: error
           retention-days: 14
+
+  windows-release:
+    name: Windows installer – exactly what a release publishes
+    # Last, after every other check of this commit: an installer that is uploaded passed them all.
+    needs: [rust, supply-chain, fips, windows, windows-shell, frontend]
+    # D-091: every merge to main builds the installer a release will publish, the same way and
+    # with every release check. A release then only signs and publishes what already passed
+    # here: minutes, and nothing new to fail. Also "Run workflow" on any branch.
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The OCR engine fetch-ocr.ps1 builds is kept with the Rust cache: built once, not for a
+      # quarter of an hour on every run.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-directories: apps/desktop/src-tauri/ocr
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: apps/desktop/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: apps/desktop
+      # All encryption on the FIPS 140-3 validated module (D-006, D-047): Go, NASM and Ninja.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+      - name: FIPS build tools
+        run: |
+          choco install nasm ninja -y --no-progress
+          echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      # The local OCR engine goes into the installer (D-048), and is tested where it runs:
+      # inside the sandbox, on Windows, on an invented scanned letter.
+      - name: OCR engine
+        shell: pwsh
+        run: apps/desktop/src-tauri/windows/fetch-ocr.ps1
+      - name: OCR in the sandbox
+        run: cargo test --release -p dv-ingest --test ocr
+        env:
+          DV_TEST_OCR_DIR: ${{ github.workspace }}\apps\desktop\src-tauri\ocr
+          DV_REQUIRE_OCR: "1"
+      # SEC8: invariants, the data scan, pinned parser versions, the update key and the SBOM.
+      - name: Self audit
+        run: cargo xtask self-audit
+      # Nothing is released that leaks: the adversarial suite and canary must show 0 leaks.
+      - name: Privacy suite (0 leaks)
+        run: cargo test -p dv-privacy
+      # A TLS handshake only, no request: the AI service's real chain still ends at a pinned
+      # root, so a change of authority stops the release and not her work (D-077).
+      - name: The AI service's certificate chain matches the pins
+        run: cargo test --release -p dv-egress --lib -- --ignored live_chain
+      # F7: every kept vault (0.2.0 on) opens in this version, takes a day's work (draft,
+      # approve, export, backup, restore) and opens again.
+      - name: Vaults of every earlier version open and take work
+        run: cargo test --release -p dv-core --lib upgrade
+      # On Windows the FIPS module is a DLL: it goes into the installer beside the program,
+      # or the installed app cannot start (bundle-fips.ps1).
+      - name: The program and its FIPS module
+        shell: pwsh
+        # Forgot password → Google (D-041), built in. Unset: the option is simply not offered.
+        env:
+          DV_GOOGLE_CLIENT_ID: ${{ secrets.DV_GOOGLE_CLIENT_ID }}
+          DV_GOOGLE_CLIENT_SECRET: ${{ secrets.DV_GOOGLE_CLIENT_SECRET }}
+        run: |
+          pnpm build
+          if ($LASTEXITCODE -ne 0) { throw "UI build failed" }
+          cargo build --release -p dv-desktop --features fips
+          if ($LASTEXITCODE -ne 0) { throw "build failed" }
+          src-tauri/windows/bundle-fips.ps1
+        working-directory: apps/desktop
+      - name: Build the one-click installer
+        run: pnpm tauri build --bundles nsis --features fips --config src-tauri/tauri.fips.conf.json
+        working-directory: apps/desktop
+        # Forgot password → Google (D-041), built in. Unset: the option is simply not offered.
+        env:
+          DV_GOOGLE_CLIENT_ID: ${{ secrets.DV_GOOGLE_CLIENT_ID }}
+          DV_GOOGLE_CLIENT_SECRET: ${{ secrets.DV_GOOGLE_CLIENT_SECRET }}
+      - name: Fixed name and checksum
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-out | Out-Null
+          $exe = Get-ChildItem target/release/bundle/nsis/*.exe | Select-Object -First 1
+          Copy-Item $exe.FullName release-out/DiagnosticVault-Setup.exe
+          Push-Location release-out
+          (Get-FileHash DiagnosticVault-Setup.exe -Algorithm SHA256).Hash.ToLower() + "  DiagnosticVault-Setup.exe" | Out-File -Encoding ascii DiagnosticVault-Setup.exe.sha256
+          Pop-Location
+      # F7, R8: installed silently on this account (which never had the app), started beside
+      # a kept vault, opened, 500 Hebrew characters typed in its real window with none lost
+      # (F1), uninstalled; her vault stays byte for byte.
+      - name: Clean install
+        shell: pwsh
+        run: scripts/windows-clean-install.ps1 -Installer release-out/DiagnosticVault-Setup.exe
+      # SEC6: what went into this installer (CycloneDX), with its own checksum. A signed
+      # provenance attestation is left out: on a private repository it needs a paid plan.
+      - name: Software bill of materials
+        shell: pwsh
+        run: |
+          cargo xtask sbom release-out/DiagnosticVault-sbom.cdx.json
+          Push-Location release-out
+          (Get-FileHash DiagnosticVault-sbom.cdx.json -Algorithm SHA256).Hash.ToLower() + "  DiagnosticVault-sbom.cdx.json" | Out-File -Encoding ascii DiagnosticVault-sbom.cdx.json.sha256
+          Pop-Location
+      # What the release workflow checks before it signs: the same commit and version.
+      - name: Build record
+        shell: bash
+        run: |
+          v="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          printf 'version=%s\ncommit=%s\n' "$v" "$GITHUB_SHA" > release-out/build.txt
+          cat release-out/build.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-windows
+          path: release-out/
+          if-no-files-found: error
+          retention-days: 30
+
+  macos-release:
+    name: macOS disk image – exactly what a release publishes
+    # D-101: the Mac version is released beside the Windows one, built the same way: on the
+    # FIPS module, with the Google sign-in pair, after every other check of this commit.
+    # Ad-hoc signed (tauri.conf.json): Gatekeeper offers "Open Anyway" the first time.
+    needs: [rust, supply-chain, fips, macos, frontend]
+    if: github.event_name != 'pull_request'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: apps/desktop/package.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: apps/desktop
+      # All encryption on the FIPS 140-3 validated module (D-006): Go.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+      # No OCR engine is shipped for the Mac yet: a scan is refused there, as a scan without
+      # the engine is anywhere.
+      - name: OCR resource folder
+        run: mkdir -p apps/desktop/src-tauri/ocr/tessdata
+      - name: Privacy suite (0 leaks)
+        run: cargo test -p dv-privacy
+      - name: Vaults of every earlier version open and take work
+        run: cargo test --release -p dv-core --lib upgrade
+      # On a Mac the FIPS module is a dylib beside the program, not inside it: it goes in the
+      # app's Contents/Frameworks, where the program looks (build.rs). Without it dyld stops
+      # the app before its first line, as the missing DLL did on Windows (D-091).
+      - name: The program and its FIPS module
+        run: |
+          pnpm --dir apps/desktop build
+          cargo build --release -p dv-desktop --features fips
+          apps/desktop/src-tauri/macos/bundle-fips.sh
+      - name: Build the disk image
+        run: pnpm tauri build --bundles app,dmg --features fips --config src-tauri/tauri.fips.conf.json
+        working-directory: apps/desktop
+        # Forgot password → Google (D-041), built in. Unset: the option is simply not offered.
+        env:
+          DV_GOOGLE_CLIENT_ID: ${{ secrets.DV_GOOGLE_CLIENT_ID }}
+          DV_GOOGLE_CLIENT_SECRET: ${{ secrets.DV_GOOGLE_CLIENT_SECRET }}
+      - name: Fixed name, checksum and build record
+        run: |
+          mkdir -p release-out
+          dmg="$(ls target/release/bundle/dmg/*.dmg | head -1)"
+          cp "$dmg" release-out/DiagnosticVault.dmg
+          (cd release-out && shasum -a 256 DiagnosticVault.dmg > DiagnosticVault.dmg.sha256)
+          v="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          printf 'version=%s\ncommit=%s\n' "$v" "$GITHUB_SHA" > release-out/build.txt
+          cat release-out/build.txt
+      # What she runs: the image mounts, holds one app, signed (ad hoc) and whole, and that
+      # app reads a document as a worker inside the sandbox. The app's CDHash is recorded
+      # beside the image: the signed notice carries it, and an installed copy accepts only
+      # that exact app (D-101, review of #136).
+      - name: The app in the image starts its document reader contained
+        run: |
+          mnt="$RUNNER_TEMP/dv-dmg"
+          mkdir -p "$mnt"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" release-out/DiagnosticVault.dmg
+          app="$(ls -d "$mnt"/*.app)"
+          [ "$(ls -d "$mnt"/*.app | wc -l)" -eq 1 ] || { echo "::error::not one app in the image"; exit 1; }
+          codesign --verify --deep --strict "$app"
+          # Hardened runtime with an ad-hoc signature (no Team ID): macOS refuses every library
+          # in Contents/Frameworks unless library validation is off, and the app stops before
+          # its first line (0.8.0). The runner (SIP off) loaded it anyway, so starting the app
+          # here did not catch that; the signature is checked instead.
+          sig="$(codesign -dvvv "$app" 2>&1)"
+          ent="$(codesign -d --entitlements - --xml "$app" 2>/dev/null)"
+          grep -Eq '^CodeDirectory .*flags=0x[0-9a-f]+\([^)]*runtime' <<<"$sig" \
+            || { echo "::error::the app is not signed with the hardened runtime"; exit 1; }
+          grep -q 'com.apple.security.cs.disable-library-validation' <<<"$ent" \
+            || { echo "::error::hardened runtime without disable-library-validation: macOS will refuse the FIPS module"; exit 1; }
+          cdhash="$(codesign -dvvv "$app" 2>&1 | sed -n 's/^CDHash=//p')"
+          [[ "$cdhash" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::no CDHash for the app: $cdhash"; exit 1; }
+          # The same check an installed copy makes, so a requirement it would refuse fails here.
+          codesign --verify --deep --strict -R "=cdhash H\"$cdhash\"" "$app"
+          printf '%s\n' "$cdhash" > release-out/DiagnosticVault.cdhash
+          cat release-out/DiagnosticVault.cdhash
+          exe="$(ls "$app/Contents/MacOS/"* | head -1)"
+          # The libraries it loads and where it looks for its own: the FIPS module must be
+          # @rpath/… and found in Contents/Frameworks.
+          otool -L "$exe"
+          otool -l "$exe" | grep -A2 LC_RPATH
+          ls -l "$app/Contents/Frameworks"
+          DV_TEST_APP_EXE="$exe" cargo test --release -p dv-ingest --test worker -- --ignored the_shipped_program
+          hdiutil detach "$mnt"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-macos
+          path: release-out/
+          if-no-files-found: error
+          retention-days: 30

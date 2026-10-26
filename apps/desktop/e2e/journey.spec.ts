@@ -173,7 +173,7 @@ test("the style page asks about one thing at a time", async ({ page }) => {
   await page.getByRole("button", { name: /ובניית הפרופיל/ }).click();
   const queue = page.getByRole("region", { name: "לאשר אחד-אחד" });
   await expect(queue).toContainText(/1 מתוך \d/);
-  await expect(page.getByRole("list", { name: "במספרים" })).toBeVisible();
+  await expect(page.getByRole("list", { name: "המסלול" })).toBeVisible();
   await expectAccessible(page);
   await queue.getByRole("button", { name: "להשתמש בזה" }).click();
   await expect(queue).toContainText(/2 מתוך \d/);
@@ -190,4 +190,45 @@ test("settings, consultation and writing style pages are accessible", async ({ p
     await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
     await expectAccessible(page);
   }
+});
+
+test("a whole WISC-V is entered from the keyboard, with the profile beside it (round 54)", async ({ page }) => {
+  await unlock(page);
+  await createCase(page, "דניאל בדוי", { consent: false });
+  await stage(page, /חומרים/).click();
+  // From the materials to the table and back to the materials, without the mouse.
+  await page.getByRole("button", { name: /ציוני מבחנים \(הזנת ציונים\)/ }).focus();
+  await page.keyboard.press("Enter");
+  const view = page.getByRole("region", { name: "הזנת ציונים" });
+  await expect(view.getByRole("radio", { name: "WPPSI-IV" })).toBeFocused();
+  await page.keyboard.press("ArrowLeft");
+  await expect(view.getByRole("radio", { name: "WISC-V" })).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Tab");
+  // Indexes first, as the table lists them; then the ten subtests, Enter passing the others.
+  const values: Record<string, string> = {
+    "מנת משכל כללית": "96", "הבנה מילולית": "104", "חזותי-מרחבי": "92", "חשיבה פלואידית": "97", "זיכרון עבודה": "88", "מהירות עיבוד": "85",
+    "שיתופיות": "11", "אוצר מילים": "10", "קוביות": "9", "פאזלים חזותיים": "8", "מטריצות": "10",
+    "משקלות": "9", "זכירת ספרות": "8", "זכירת תמונות": "8", "צפנים": "7", "חיפוש סמלים": "8",
+  };
+  const ids = await view.locator("input.score-input").evaluateAll((els) => els.map((el) => el.id));
+  expect(ids).toHaveLength(22);
+  for (const id of ids) {
+    const input = view.locator(`#${id}`);
+    await expect(input).toBeFocused();
+    const name = (await view.locator(`label[for="${id}"]`).innerText()).trim();
+    const value = values[name];
+    if (value) await page.keyboard.type(value);
+    await page.keyboard.press("Enter");
+  }
+  await expect(view.getByRole("img", { name: /פרופיל תת-המבחנים: שיתופיות 11/ })).toBeVisible();
+  await expect(view.getByRole("img", { name: /פרופיל המדדים: מנת משכל כללית 96/ })).toBeVisible();
+  await expect(view.getByText("16 ציונים הוזנו")).toBeVisible();
+  await expect(view.getByLabel(/הערות על ההעברה/)).toBeFocused();
+  await expectAccessible(page);
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(view.getByRole("button", { name: "שמירה בתיק" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "מה יש בתיק" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "רשימת החומרים" }).getByRole("button", { name: /WISC-V/ })).toBeVisible();
 });

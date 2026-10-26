@@ -1164,6 +1164,27 @@ fn style_sources_and_profiles_are_sealed_versioned_and_erasable() {
 }
 
 #[test]
+fn the_kept_file_is_the_backup_as_read_back_from_the_disk() {
+    let (_dir, mut vault, _) = new_vault();
+    noam(&mut vault);
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("kept.vaultbak");
+    let (done, kept) = vault
+        .begin_backup()
+        .unwrap()
+        .write(&dest)
+        .unwrap()
+        .verify_keeping_file()
+        .unwrap();
+    assert_eq!(kept, fs::read(&dest).unwrap());
+    assert_eq!(u64::try_from(kept.len()).unwrap(), done.info.bytes);
+    assert_eq!(
+        dv_vault::peek_backup(&kept).unwrap().created_at,
+        done.info.created_at
+    );
+}
+
+#[test]
 fn a_backup_job_is_written_and_checked_away_from_the_vault() {
     let (_dir, mut vault, _) = new_vault();
     noam(&mut vault);
@@ -1204,6 +1225,39 @@ fn a_backup_job_is_written_and_checked_away_from_the_vault() {
     let second = vault.begin_backup().unwrap().write(&dest).unwrap();
     assert!(first.verify().is_err());
     assert!(second.verify().is_ok());
+}
+
+/// The snapshot is taken in a moment and exported in the job (F2): a job dropped before it is
+/// written (the vault locked) leaves no scratch folder, and one written later holds the vault
+/// as it was when it began.
+#[test]
+fn a_backup_snapshot_is_exported_away_from_the_vault() {
+    let (dir, mut vault, _) = new_vault();
+    noam(&mut vault);
+    let scratch = |d: &std::path::Path| {
+        fs::read_dir(d)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with(".backup-"))
+            .count()
+    };
+    let dropped = vault.begin_backup().unwrap();
+    assert_eq!(scratch(dir.path()), 1);
+    drop(dropped);
+    assert_eq!(scratch(dir.path()), 0, "nothing left behind");
+
+    let job = vault.begin_backup().unwrap();
+    // Two more cases after the snapshot began, before it is exported.
+    noam(&mut vault);
+    noam(&mut vault);
+    let out = tempfile::tempdir().unwrap();
+    let done = job
+        .write(&out.path().join("b.vaultbak"))
+        .unwrap()
+        .verify()
+        .unwrap();
+    assert_eq!(done.cases, 1);
+    assert_eq!(scratch(dir.path()), 0);
 }
 
 #[test]

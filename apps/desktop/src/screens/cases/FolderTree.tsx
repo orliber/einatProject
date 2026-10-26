@@ -53,6 +53,8 @@ type Props = {
   onNewFolder: () => void;
   /** Drop handlers for a row (the top level is `null`). */
   dropProps: (target: string | null) => Record<string, unknown>;
+  /** Drop handlers of the recycle bin: a case or folder dropped there is offered for deletion. */
+  trashDropProps?: Record<string, unknown>;
   dropOn: string | null;
   onDragStart: (folderId: string) => (e: DragEvent) => void;
   /** Wraps a folder row with its right-click menu. */
@@ -114,7 +116,7 @@ export function FolderTree(p: Props) {
           {...p.dropProps(null)}>
           <span className="tree-arrow" aria-hidden="true" />
           <span className="tree-icon"><FolderIcon size={18} /></span>
-          <span className="tree-name">כל התיקים</span>
+          <span className="tree-name">תיקים</span>
           <span className="tree-count">{p.total || ""}</span>
         </div>
         {rows.map((r) => {
@@ -149,7 +151,8 @@ export function FolderTree(p: Props) {
         <span className="tree-name">תיקייה חדשה</span>
       </button>
       <div className="tree-sep" role="separator" />
-      <button type="button" className={p.inTrash ? "tree-row on" : "tree-row"} aria-current={p.inTrash ? "page" : undefined} onClick={p.onPickTrash}>
+      <button type="button" className={["tree-row", p.inTrash ? "on" : "", p.dropOn === "trash" ? "drop" : ""].filter(Boolean).join(" ")}
+        aria-current={p.inTrash ? "page" : undefined} onClick={p.onPickTrash} {...p.trashDropProps}>
         <span className="tree-arrow" aria-hidden="true" />
         <span className="tree-icon" aria-hidden="true">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">

@@ -5,4 +5,8 @@ export type ReportSettings = { title: string, font: string, confidentiality: str
  * The supervisor's lines (round 43), printed under her signature, as the institute's
  * report has them for an intern. Empty: none.
  */
-supervisor: Array<string>, };
+supervisor: Array<string>, 
+/**
+ * The opening sentence of the parents' version (round 55, D-095), written once.
+ */
+parents_opening: string, };

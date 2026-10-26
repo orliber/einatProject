@@ -19,6 +19,14 @@ const MANIFEST_URL: &str =
     "https://github.com/orliber/einat-vault-releases/releases/latest/download/latest.json";
 const SIGNATURE_URL: &str =
     "https://github.com/orliber/einat-vault-releases/releases/latest/download/latest.json.sig";
+/// The notice's entry for this platform: `installer` (the Windows setup program, the only
+/// entry before D-101) or `macos` (the Mac disk image). A notice with no entry for this
+/// platform offers nothing here.
+pub const PLATFORM_ENTRY: &str = if cfg!(target_os = "macos") {
+    "macos"
+} else {
+    "installer"
+};
 /// Every installer lives under this prefix.
 const INSTALLER_PREFIX: &str = "https://github.com/orliber/einat-vault-releases/releases/download/";
 /// GitHub answers a release download with a redirect to its file storage. Nothing else.
@@ -67,7 +75,14 @@ pub struct UpdateInfo {
     pub installer_url: String,
     pub sha256: [u8; 32],
     pub size: u64,
+    /// The Mac entry only (D-101): the CDHash of the app in the disk image, as `codesign`
+    /// reports it, so the install checks that the app is exactly the one built and signed
+    /// for this release, not only that it is signed by someone. `None` for Windows.
+    pub cdhash: Option<[u8; CDHASH_LEN]>,
 }
+
+/// A CDHash: the code directory's hash, cut to 20 bytes as `codesign` uses it.
+pub const CDHASH_LEN: usize = 20;
 
 /// Whatever fetches bytes: GitHub in the program, a table in the tests.
 pub trait Fetch {
@@ -142,7 +157,9 @@ pub fn check(
     if !by_a_pinned_key {
         return Err(UpdateError::BadSignature);
     }
-    let info = parse_notice(&notice)?;
+    let Some(info) = parse_notice_for(&notice, PLATFORM_ENTRY)? else {
+        return Ok(None);
+    };
     let newer = match (parse_version(&info.version), parse_version(current)) {
         (Some(new), Some(now)) => new > now,
         _ => return Err(UpdateError::BadNotice("version".to_owned())),
@@ -162,7 +179,9 @@ pub fn download(fetch: &dyn Fetch, info: &UpdateInfo) -> Result<Vec<u8>, UpdateE
     Ok(bytes)
 }
 
-fn parse_notice(bytes: &[u8]) -> Result<UpdateInfo, UpdateError> {
+/// The verified notice's version and the file for `entry`; `None` when it has no file for
+/// that platform (a release made only for Windows, as every one before D-101).
+pub fn parse_notice_for(bytes: &[u8], entry: &str) -> Result<Option<UpdateInfo>, UpdateError> {
     let bad = |what: &str| UpdateError::BadNotice(what.to_owned());
     let v: Value = serde_json::from_slice(bytes).map_err(|_| bad("json"))?;
     if v.get("product").and_then(Value::as_str) != Some(PRODUCT) {
@@ -173,7 +192,9 @@ fn parse_notice(bytes: &[u8]) -> Result<UpdateInfo, UpdateError> {
         .and_then(Value::as_str)
         .ok_or_else(|| bad("version"))?;
     parse_version(version).ok_or_else(|| bad("version"))?;
-    let installer = v.get("installer").ok_or_else(|| bad("url"))?;
+    let Some(installer) = v.get(entry) else {
+        return Ok(None);
+    };
     let url = installer
         .get("url")
         .and_then(Value::as_str)
@@ -192,6 +213,20 @@ fn parse_notice(bytes: &[u8]) -> Result<UpdateInfo, UpdateError> {
         .and_then(Value::as_u64)
         .filter(|s| (1..=MAX_INSTALLER).contains(s))
         .ok_or_else(|| bad("size"))?;
+    // A Mac entry without the app's CDHash is refused: the install would have nothing to
+    // check the app's own signature against.
+    let cdhash = if entry == "macos" {
+        Some(
+            installer
+                .get("cdhash")
+                .and_then(Value::as_str)
+                .and_then(from_hex)
+                .and_then(|b| b.try_into().ok())
+                .ok_or_else(|| bad("cdhash"))?,
+        )
+    } else {
+        None
+    };
     let notes = v
         .get("notes")
         .and_then(Value::as_array)
@@ -203,7 +238,7 @@ fn parse_notice(bytes: &[u8]) -> Result<UpdateInfo, UpdateError> {
                 .collect()
         })
         .unwrap_or_default();
-    Ok(UpdateInfo {
+    Ok(Some(UpdateInfo {
         version: version.to_owned(),
         published: v
             .get("published")
@@ -216,7 +251,8 @@ fn parse_notice(bytes: &[u8]) -> Result<UpdateInfo, UpdateError> {
         installer_url: url.to_owned(),
         sha256,
         size,
-    })
+        cdhash,
+    }))
 }
 
 /// `major.minor.patch`, digits only.
@@ -361,9 +397,36 @@ mod tests {
         serde_json::to_vec(&json!({
             "product": PRODUCT, "version": version, "published": "2026-10-01",
             "notes": ["שיפורים בסינון"],
-            "installer": {"url": URL, "sha256": to_hex(hash.as_ref()), "size": INSTALLER.len()}
+            "installer": {"url": URL, "sha256": to_hex(hash.as_ref()), "size": INSTALLER.len()},
+            // The same file stands in for the Mac disk image, so every test runs on both.
+            "macos": {"url": URL, "sha256": to_hex(hash.as_ref()), "size": INSTALLER.len(),
+                      "cdhash": "0123456789abcdef0123456789abcdef01234567"}
         }))
         .unwrap_or_default()
+    }
+
+    #[test]
+    fn each_platform_takes_its_own_file_and_a_notice_without_one_offers_nothing() {
+        let mut n: Value = serde_json::from_slice(&notice("0.2.0")).unwrap_or_default();
+        n["macos"]["url"] = json!(
+            "https://github.com/orliber/einat-vault-releases/releases/download/v0.2.0/DiagnosticVault.dmg"
+        );
+        n["macos"]["size"] = json!(7);
+        let bytes = serde_json::to_vec(&n).unwrap_or_default();
+        let win = parse_notice_for(&bytes, "installer").ok().flatten();
+        let mac = parse_notice_for(&bytes, "macos").ok().flatten();
+        assert_eq!(win.map(|i| i.installer_url), Some(URL.to_owned()));
+        assert_eq!(mac.as_ref().map(|i| i.size), Some(7));
+        assert!(mac.is_some_and(|i| i.installer_url.ends_with(".dmg")));
+
+        // A release made before there was a Mac image: nothing for the Mac, Windows as before.
+        let k = keypair();
+        let mut n: Value = serde_json::from_slice(&notice("0.2.0")).unwrap_or_default();
+        if let Some(o) = n.as_object_mut() {
+            o.remove(PLATFORM_ENTRY);
+        }
+        let t = server(&k, serde_json::to_vec(&n).unwrap_or_default(), INSTALLER);
+        assert_eq!(check(&t, "0.1.0", &[public(&k)]), Ok(None));
     }
 
     fn server(k: &Ed25519KeyPair, notice: Vec<u8>, installer: &[u8]) -> Table {
@@ -446,7 +509,7 @@ mod tests {
         ));
 
         let mut n: Value = serde_json::from_slice(&notice("0.2.0")).unwrap_or_default();
-        n["installer"]["url"] = json!("https://evil.example/Setup.exe");
+        n[PLATFORM_ENTRY]["url"] = json!("https://evil.example/Setup.exe");
         let t = server(&k, serde_json::to_vec(&n).unwrap_or_default(), INSTALLER);
         assert!(matches!(
             check(&t, "0.1.0", &[public(&k)]),

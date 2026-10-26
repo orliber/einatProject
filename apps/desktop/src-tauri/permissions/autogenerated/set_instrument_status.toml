@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-instrument-status"
+description = "Enables the set_instrument_status command without any pre-configured scope."
+commands.allow = ["set_instrument_status"]
+
+[[permission]]
+identifier = "deny-set-instrument-status"
+description = "Denies the set_instrument_status command without any pre-configured scope."
+commands.deny = ["set_instrument_status"]

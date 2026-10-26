@@ -5,7 +5,7 @@ use std::io::{Cursor, Write};
 
 use std::collections::HashMap;
 
-use crate::{ExportError, Report, ScoreChart};
+use crate::{BandChart, ExportError, Logo, Report, ScoreChart};
 
 pub(crate) const W_NS: &str = r#"xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#;
 
@@ -277,6 +277,8 @@ fn table(columns: &[String], rows: &[Vec<String>], l: &Layout) -> String {
 }
 
 const HEADER_FILL: &str = "E6EFED";
+/// The group a measure falls in, in the parents' chart.
+const MARK_FILL: &str = "C9D9EA";
 const BAR_FILL: &str = "1F3A5F";
 const BAND_FILL: &str = "EEF3F2";
 
@@ -373,33 +375,79 @@ fn chart(c: &ScoreChart, l: &Layout) -> String {
     t
 }
 
+/// The parents' chart (round 55): one row per measure, one column per group, the measure's
+/// group marked (with its score when she chose to show numbers). Table cells, like the score
+/// profiles: the same in Word, LibreOffice and on paper.
+fn bands_table(c: &BandChart, l: &Layout) -> String {
+    let n = c.groups.len().max(1);
+    let label_w = l.width * 40 / 100;
+    let group_w = (l.width - label_w) / n;
+    let mut grid = vec![label_w];
+    grid.extend(std::iter::repeat_n(group_w, n));
+    let style = l.id("TableText");
+    let mut t = table_start(label_w + group_w * n, true, &grid);
+    t.push_str("<w:tr><w:trPr><w:tblHeader/></w:trPr>");
+    t.push_str(&cell(label_w, 1, Some(HEADER_FILL), style, true, "תחום"));
+    for g in &c.groups {
+        t.push_str(&cell(group_w, 1, Some(HEADER_FILL), style, true, g));
+    }
+    t.push_str("</w:tr>");
+    for r in &c.rows {
+        t.push_str("<w:tr><w:trPr><w:cantSplit/></w:trPr>");
+        t.push_str(&cell(label_w, 1, None, style, false, &r.label));
+        for i in 0..n {
+            if i == r.group {
+                let mark = r.value.as_deref().unwrap_or("●");
+                t.push_str(&cell(group_w, 1, Some(MARK_FILL), style, true, mark));
+            } else {
+                t.push_str(&cell(group_w, 1, None, style, false, ""));
+            }
+        }
+        t.push_str("</w:tr>");
+    }
+    t.push_str("</w:tbl>");
+    t
+}
+
 /// The body's paragraphs and tables, without the section properties.
 pub(crate) fn body(report: &Report, l: &Layout) -> String {
     let mut body = String::new();
-    let mut p = |key: &'static str, text: &str, label: Option<&str>| {
+    let p = |body: &mut String, key: &'static str, text: &str, label: Option<&str>| {
         if !text.is_empty() || label.is_some() || key == "Signature" {
             body.push_str(&para(l.id(key), text, label));
         }
     };
-    p("Title", &report.title, None);
+    p(&mut body, "Title", &report.title, None);
     for line in &report.info {
-        p("Info", &line.value, Some(&line.label));
+        p(&mut body, "Info", &line.value, Some(&line.label));
+    }
+    for text in &report.intro {
+        for piece in text.split('\n').filter(|t| !t.trim().is_empty()) {
+            p(&mut body, "BodyText", piece.trim(), None);
+        }
+    }
+    for c in report.bands.iter().filter(|c| !c.rows.is_empty()) {
+        body.push_str(&para(l.id("Heading2"), &c.title, None));
+        body.push_str(&bands_table(c, l));
+        if !c.note.is_empty() {
+            body.push_str(&para(l.id("TableNote"), &c.note, None));
+        }
     }
     for part in &report.parts {
-        p("Heading1", &part.title, None);
+        p(&mut body, "Heading1", &part.title, None);
         for section in &part.sections {
-            p("Heading2", &section.title, None);
+            p(&mut body, "Heading2", &section.title, None);
             for text in &section.paragraphs {
                 for piece in text.split('\n').filter(|t| !t.trim().is_empty()) {
-                    p("BodyText", piece.trim(), None);
+                    p(&mut body, "BodyText", piece.trim(), None);
                 }
             }
         }
     }
     if !report.signature.is_empty() {
-        p("Signature", "", None);
+        p(&mut body, "Signature", "", None);
         for line in &report.signature {
-            p("Signature", line, None);
+            p(&mut body, "Signature", line, None);
         }
     }
     if !report.tables.is_empty() {
@@ -440,10 +488,36 @@ pub(crate) fn wrap_document(root_attrs: &str, body: &str) -> String {
     )
 }
 
+/// The drawing namespaces, for the logo.
+const DRAWING_NS: &str = r#"xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture""#;
+
+/// The largest logo at the top of the first page, in points.
+pub(crate) const LOGO_MAX_W: f32 = 170.0;
+pub(crate) const LOGO_MAX_H: f32 = 70.0;
+
+/// Her logo, centered above the title, as an inline picture (relationship `rIdLogo`).
+fn logo_para(logo: &Logo) -> String {
+    let (w, h) = logo.fit(LOGO_MAX_W, LOGO_MAX_H);
+    // English Metric Units: 12,700 to a point.
+    let (cx, cy) = ((w * 12_700.0).round() as u64, (h * 12_700.0).round() as u64);
+    format!(
+        "<w:p><w:pPr><w:jc w:val=\"center\"/><w:spacing w:after=\"200\"/><w:bidi/></w:pPr><w:r><w:drawing>\
+         <wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{cx}\" cy=\"{cy}\"/>\
+         <wp:docPr id=\"1\" name=\"Logo\"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>\
+         <a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic>\
+         <pic:nvPicPr><pic:cNvPr id=\"0\" name=\"logo.{ext}\"/><pic:cNvPicPr/></pic:nvPicPr>\
+         <pic:blipFill><a:blip r:embed=\"rIdLogo\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>\
+         <pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>\
+         </pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>",
+        ext = logo.extension()
+    )
+}
+
 fn document(report: &Report) -> String {
-    let mut b = body(report, &Layout::plain());
+    let mut b = report.logo.as_ref().map(logo_para).unwrap_or_default();
+    b.push_str(&body(report, &Layout::plain()));
     b.push_str(PLAIN_SECTION);
-    wrap_document(W_NS, &b)
+    wrap_document(&format!("{W_NS} {DRAWING_NS}"), &b)
 }
 
 /// The confidentiality line, centered and gray, with direct formatting: it has to look the
@@ -532,10 +606,32 @@ pub(crate) fn package(parts: &[(String, Vec<u8>)]) -> Result<Vec<u8>, ExportErro
 
 /// Build the DOCX package: her template when one is given (see `template`), else the plain one.
 pub fn render(report: &Report) -> Result<Vec<u8>, ExportError> {
-    let parts: Vec<(String, Vec<u8>)> = [
-        ("[Content_Types].xml", CONTENT_TYPES.to_owned()),
+    let (types, rels) = match &report.logo {
+        Some(logo) => (
+            CONTENT_TYPES.replacen(
+                "<Default Extension=\"xml\"",
+                &format!(
+                    "<Default Extension=\"{}\" ContentType=\"{}\"/><Default Extension=\"xml\"",
+                    logo.extension(),
+                    logo.content_type()
+                ),
+                1,
+            ),
+            DOC_RELS.replacen(
+                "</Relationships>",
+                &format!(
+                    "<Relationship Id=\"rIdLogo\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/logo.{}\"/></Relationships>",
+                    logo.extension()
+                ),
+                1,
+            ),
+        ),
+        None => (CONTENT_TYPES.to_owned(), DOC_RELS.to_owned()),
+    };
+    let mut parts: Vec<(String, Vec<u8>)> = [
+        ("[Content_Types].xml", types),
         ("_rels/.rels", ROOT_RELS.to_owned()),
-        ("word/_rels/document.xml.rels", DOC_RELS.to_owned()),
+        ("word/_rels/document.xml.rels", rels),
         ("word/document.xml", document(report)),
         ("word/styles.xml", styles(&report.font)),
         ("word/settings.xml", SETTINGS.to_owned()),
@@ -546,11 +642,17 @@ pub fn render(report: &Report) -> Result<Vec<u8>, ExportError> {
     .into_iter()
     .map(|(n, c)| (n.to_owned(), c.into_bytes()))
     .collect();
+    if let Some(logo) = &report.logo {
+        parts.push((
+            format!("word/media/logo.{}", logo.extension()),
+            logo.bytes.clone(),
+        ));
+    }
     package(&parts)
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::io::Read;
 
     use super::*;
@@ -649,5 +751,97 @@ mod tests {
         assert_eq!(doc.matches("w:fill=\"1F3A5F\"").count(), 15);
         assert_eq!(doc.matches("w:fill=\"EEF3F2\"").count(), 0);
         assert!(doc.contains("<w:gridSpan w:val=\"3\"/>"));
+    }
+
+    /// The parents' version of the sample: one chart, scores found in the case.
+    pub(crate) fn parents(show_numbers: bool) -> Report {
+        let mut full = sample();
+        full.parts[0].sections[1]
+            .paragraphs
+            .push("הוא נהנה מהמשחק ושיתף פעולה לאורך כל המפגש.".into());
+        crate::for_parents(
+            &full,
+            crate::ParentsVersion {
+                opening: "להורים היקרים, זה סיכום האבחון בשפה פשוטה.".into(),
+                bands: vec![crate::BandChart {
+                    title: "איפה הוא עומד".into(),
+                    groups: vec!["חזק".into(), "בטווח הגיל".into(), "קשה יותר".into()],
+                    rows: vec![
+                        crate::BandRow {
+                            label: "הבנה מילולית (VCI)".into(),
+                            group: 0,
+                            value: Some("112".into()),
+                        },
+                        crate::BandRow {
+                            label: "זיכרון עבודה (WMI)".into(),
+                            group: 2,
+                            value: Some("84".into()),
+                        },
+                    ],
+                    note: "הגרף מחושב מהציונים, בלי בינה מלאכותית.".into(),
+                }],
+                show_numbers,
+                scores: vec![112.0, 84.0, 102.0],
+            },
+        )
+        .0
+    }
+
+    #[test]
+    fn parents_version_has_the_chart_and_no_numbers_by_default() {
+        let r = parents(false);
+        assert!(r.tables.is_empty() && r.title.ends_with("גרסה להורים"));
+        let doc = part(&render(&r).unwrap(), "word/document.xml");
+        assert!(doc.contains("להורים היקרים"), "her opening sentence");
+        assert!(
+            doc.contains("איפה הוא עומד") && doc.contains("בטווח הגיל") && doc.contains("קשה יותר")
+        );
+        assert_eq!(
+            doc.matches("w:fill=\"C9D9EA\"").count(),
+            2,
+            "one mark a row"
+        );
+        assert!(doc.contains(">●<"));
+        assert!(!doc.contains("נספח: טבלאות ציונים"));
+        for n in ["112", "102", "84", ">79<"] {
+            assert!(!doc.contains(n), "{n} left in the parents' version");
+        }
+        // What has no score stays.
+        assert!(doc.contains("הוא נהנה מהמשחק") && doc.contains("סיבת הפניה"));
+
+        // With numbers: the scores are in the chart and in the text.
+        let doc = part(&render(&parents(true)).unwrap(), "word/document.xml");
+        assert!(doc.contains(">112<") && doc.contains(">84<") && doc.contains("102"));
+        assert!(
+            !doc.contains("נספח: טבלאות ציונים"),
+            "never the full tables"
+        );
+    }
+
+    #[test]
+    fn logo_is_embedded_once_at_the_top() {
+        let mut r = sample();
+        r.logo = Some(crate::check_logo(&crate::image::tests::png(40, 20, 6, 1)).unwrap());
+        let bytes = render(&r).unwrap();
+        let doc = part(&bytes, "word/document.xml");
+        assert!(doc.contains("r:embed=\"rIdLogo\"") && doc.contains("xmlns:wp="));
+        // 170 by 85 does not fit 70 high: 140 by 70 points.
+        assert!(doc.contains("cx=\"1778000\" cy=\"889000\""), "{doc}");
+        assert!(
+            doc.find("rIdLogo") < doc.find("דוח אבחון פסיכולוגי"),
+            "above the title"
+        );
+        assert!(part(&bytes, "word/_rels/document.xml.rels").contains("media/logo.png"));
+        assert!(part(&bytes, "[Content_Types].xml").contains("image/png"));
+        let mut zip = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
+        let mut img = Vec::new();
+        zip.by_name("word/media/logo.png")
+            .unwrap()
+            .read_to_end(&mut img)
+            .unwrap();
+        assert_eq!(Some(img), r.logo.map(|l| l.bytes));
+        // Without a logo, no picture part at all.
+        let plain = render(&sample()).unwrap();
+        assert!(!part(&plain, "[Content_Types].xml").contains("image/"));
     }
 }

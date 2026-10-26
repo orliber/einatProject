@@ -5,10 +5,11 @@ import { ipc, type CaseInput, type FollowUpView, type ImportPreview, type InputK
 import type { FilterOutcome } from "../../ipc/generated/FilterOutcome";
 import { ImportDialog } from "../../components/ImportDialog";
 import { AddMenu } from "../../components/Menu";
-import { ScoresDialog } from "../../components/ScoresDialog";
+import { ScoresView, scoresDraft } from "../../components/ScoresView";
 import { useHoldUnsaved } from "../../components/Unsaved";
 import { LocalText, type LocalTextHandle } from "../../components/LocalText";
-import { Dialog, ErrorLine, Segments, Spinner, UploadIcon, PlusIcon } from "../../components/ui";
+import { Dialog, ErrorLine, Segments, UploadIcon, PlusIcon } from "../../components/ui";
+import { sizeBucket, timed, WaitLine } from "../../components/Progress";
 import type { CaseApi } from "../CaseScreen";
 import "./MaterialsView.css";
 import { useAi } from "../../ai";
@@ -28,9 +29,14 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
   // The slot a file is being chosen for (the "+" of that slot), so it lands in its place.
   const [uploadFor, setUploadFor] = useState<InputKind | undefined>(undefined);
   const [dropOn, setDropOn] = useState<string | null>(null);
-  const [reading, setReading] = useState<string | null>(null);
+  const [reading, setReading] = useState<{ name: string; size: string } | null>(null);
   const [writing, setWriting] = useState<{ kind: InputKind; input?: CaseInput } | null>(null);
-  const [scoring, setScoring] = useState<{ input?: CaseInput; sheet?: ScoreSheet } | null>(null);
+  // Round 54 (D-094): the score table is a view of this stage, not a window. Scores left
+  // unsaved on the way to another stage open again on the way back.
+  const [scoring, setScoring] = useState<{ input?: CaseInput | undefined; sheet?: ScoreSheet } | null>(() => {
+    const d = scoresDraft(caseId);
+    return d ? { input: detail.inputs.find((i) => i.id === d.inputId) } : null;
+  });
   const [choosing, setChoosing] = useState<CaseInput | null>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,9 +65,9 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
 
   async function readFile(file: File, kind?: InputKind) {
     setError(null);
-    setReading(file.name);
+    setReading({ name: file.name, size: sizeBucket(file.size) });
     try {
-      const preview = await ipc.importDocument(caseId, file);
+      const preview = await timed("read", ipc.importDocument(caseId, file), sizeBucket(file.size));
       // Everything read: saved at once (encrypted, nothing leaves the computer) with "ביטול"
       // beside it. What the filter will hide is not a question (round 26); only a file that
       // was not read in full opens the window, to say what was left out.
@@ -166,6 +172,14 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
     onDrop: (e: DragEvent) => onDrop(e, kind),
   });
 
+  if (scoring) {
+    return (
+      <ScoresView caseId={caseId} age={detail.meta.age} input={scoring.input} sheet={scoring.sheet}
+        onClose={() => setScoring(null)}
+        onSaved={async () => { setScoring(null); await reload(); notify("הציונים נשמרו בתיק."); }} />
+    );
+  }
+
   return (
     <div className={dragging ? "view materials-drop" : "view"} onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop}>
       <div className="view-head">
@@ -212,7 +226,7 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
         <div className={`dropzone wide${dropOn === "any" ? " over" : ""}`} {...dropProps("any")}>
           <UploadIcon />
           {reading ? (
-            <span role="status"><Spinner /> קוראת את {reading}…</span>
+            <div className="grow"><WaitLine task="read" speed={reading.size} delay={0} label={`קוראת את ${reading.name} ומסתירה פרטים מזהים`} /></div>
           ) : (
             <span>גוררים לכאן Word, ‏PDF או ODT, או <button type="button" className="link-btn" onClick={() => chooseFile()}>בוחרים קובץ</button></span>
           )}
@@ -257,7 +271,10 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
                 <button type="button" className="btn btn-small" onClick={() => void edit(input)}>עריכה</button>
                 <button type="button" className="btn btn-small" onClick={() => void remove(input)}>מחיקה</button>
               </div>
-              {route && (
+              {route?.left_out && (
+                <p className="material-feeds small warn-text" role="note">{route.left_out}</p>
+              )}
+              {route && !route.left_out && (
                 <div className="material-feeds">
                   <span className="small grow">
                     <b>מזין בדוח: </b>
@@ -285,11 +302,6 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
       {importing && (
         <ImportDialog caseId={caseId} preview={importing.preview} kind={importing.kind} onClose={() => setImporting(null)}
           onSaved={async () => { setImporting(null); await reload(); notify("המסמך נשמר בתיק."); }} />
-      )}
-      {scoring && (
-        <ScoresDialog caseId={caseId} age={detail.meta.age} input={scoring.input} sheet={scoring.sheet}
-          onClose={() => setScoring(null)}
-          onSaved={async () => { setScoring(null); await reload(); notify("הציונים נשמרו בתיק."); }} />
       )}
       {choosing && routeOf(choosing.id) && (
         <SectionsDialog api={api} input={choosing} route={routeOf(choosing.id) as MaterialRouting} titleOf={titleOf}
@@ -367,6 +379,8 @@ function PriorOrder({ api, titleOf, open }: { api: CaseApi; titleOf: (id: string
 }
 
 function feedText(route: MaterialRouting | undefined, titleOf: (key: string) => string): string {
+  // A score table of an instrument she does not give (D-098) goes nowhere.
+  if (route?.left_out) return "לא נשלח ולא נכנס לדוח";
   const titles = (route?.feeds ?? []).map(titleOf);
   if (!titles.length) return "לא מזין סעיף";
   return `מזין: ${titles.slice(0, 2).join(", ")}${titles.length > 2 ? ` ועוד ${titles.length - 2}` : ""}`;

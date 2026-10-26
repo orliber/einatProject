@@ -325,11 +325,20 @@ impl Core {
                 .chain([instr.tagged.as_str()])
                 .collect::<Vec<_>>()
                 .join("\n");
-            let mut style_profile = style::style_for_request(v, &ctx, section_key, &query)?;
+            // In a section written from the scores: the patterns of this case's scores (D-100),
+            // worked out here, for her inferences about them.
+            let from_scores = section.inputs.contains(&InputKind::TestScores) && !points;
+            let sheets = if from_scores {
+                score_sheets(v, case_id, &v.inputs(case_id)?)?
+            } else {
+                Vec::new()
+            };
+            let patterns = dv_domain::sheet_patterns(&sheets);
+            let mut style_profile =
+                style::style_for_request(v, &ctx, section_key, &query, &patterns)?;
             // How she interprets the scores of this case (round 37), in a section written from
             // the scores: the approved interpretations that fit each score.
-            if section.inputs.contains(&InputKind::TestScores) && !points {
-                let sheets = score_sheets(v, case_id, &v.inputs(case_id)?)?;
+            if from_scores {
                 if let Some(text) = style::interpretations_for_request(v, &sheets)? {
                     style_profile = Some(match style_profile {
                         Some(p) => format!("{p}\n{text}"),
@@ -824,7 +833,8 @@ pub(crate) fn collect_sources(
     };
     let mut tagged_sources = Vec::new();
     let mut source_rows = Vec::new();
-    let mut inputs = v.inputs(case_id)?;
+    // A score table of an instrument she does not give stays in the computer (D-098).
+    let mut inputs = crate::instruments::request_inputs(v, case_id)?;
     if section_key == sorting::PRIOR_SECTION {
         // Round 31: the institute first, then the community, newest first, fixed here.
         let keys = inputs

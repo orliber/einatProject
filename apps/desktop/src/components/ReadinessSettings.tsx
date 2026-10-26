@@ -17,8 +17,9 @@ const ITEMS: Record<string, { label: string; hint: string; jump?: SettingsPane }
     hint: "",
   },
   score_tables: {
-    label: "עברתי על טבלאות הציונים ואישרתי אותן",
-    hint: "",
+    label: "ענית על הטבלאות של כל אחד מהמבחנים",
+    hint: "מאושר, או לא מעבירה את זה.",
+    jump: "tests",
   },
   legal: {
     label: "התייעצתי עם יועץ משפטי או יועץ פרטיות",
@@ -26,7 +27,7 @@ const ITEMS: Record<string, { label: string; hint: string; jump?: SettingsPane }
   },
   api_key: { label: "מוגדר מפתח API", hint: "", jump: "ai" },
   backup: { label: "יש גיבוי מהשבועיים האחרונים", hint: "", jump: "backup" },
-  disk: { label: "הצפנת הדיסק (BitLocker) דלוקה", hint: "", jump: "security" },
+  disk: { label: "הצפנת הדיסק דלוקה", hint: "", jump: "security" },
 };
 
 

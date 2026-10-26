@@ -4,6 +4,7 @@ import { ipc, type Prepared } from "../ipc/client";
 import type { SuspectDecision } from "../ipc/generated/SuspectDecision";
 import { AutoHiddenCard } from "./AutoHiddenCard";
 import { Dialog, ErrorLine, Segments, ShieldIcon, Spinner } from "./ui";
+import { WaitLine } from "./Progress";
 import "./ReviewDialog.css";
 import { useAi } from "../ai";
 
@@ -110,6 +111,7 @@ export function ReviewDialog(props: {
         </>
       }>
       <div className="stack review">
+        {busy === "decide" && <WaitLine task="prepare" label="מכינה את הבקשה מחדש ובודקת שוב מה יוצא" />}
         <AutoHiddenCard items={prepared.auto_hidden} caseId={props.caseId} onChanged={rebuild} disabled={busy !== null} />
 
         {blocked.map((b, i) => (

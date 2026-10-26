@@ -64,7 +64,7 @@ impl Core {
             staged_backup: None,
             style_staged: HashMap::new(),
             auto_backup_tried: None,
-            unsaved: None,
+            unsaved: Vec::new(),
             removed_input: None,
             seal_dir: seal::default_dir(),
             rollback_warning: None,
@@ -79,6 +79,9 @@ impl Core {
             memory_lock: None,
             opened_cases: HashSet::new(),
             since_last: None,
+            drive_generation: Arc::default(),
+            drive_cleanup_at: None,
+            drive_cleanups: Arc::default(),
         }
     }
 
@@ -285,7 +288,7 @@ impl Core {
             None
         } else {
             std::fs::create_dir_all(&self.dir).map_err(VaultError::from)?;
-            binding::key_here(self.computer_seal.as_ref(), &self.dir, false)
+            binding::key_for_new_vault(self.computer_seal.as_ref(), &self.dir)?
         };
         let created = Vault::create_here(&self.dir, password, params, key.as_ref())?;
         let recovery_key = created.recovery_key.to_string();
@@ -456,11 +459,16 @@ impl Core {
         self.staged_backup = None;
         self.style_staged.clear();
         self.removed_input = None;
-        self.hint_cache.clear();
+        // The cache is keyed by the case's texts themselves: overwritten, not only let go.
+        for (mut text, _) in self.hint_cache.drain() {
+            zeroize::Zeroize::zeroize(&mut text);
+        }
         self.settled = None;
         self.section_nonces.clear();
         self.opened_cases.clear();
         self.since_last = None;
+        // A cleanup owed at Google is tried again soon after the next unlock.
+        self.drive_cleanup_at = None;
         // The model's process held texts of this session in its memory: it ends with the lock.
         self.end_name_model();
         // The filter's index of every case's names, kept between requests, goes too.

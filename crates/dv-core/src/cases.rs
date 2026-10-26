@@ -223,14 +223,12 @@ impl Core {
         self.learn_input(case_id, title, content)
     }
 
-    /// The instruments with their fixed tables (knowledge/instruments.md).
-    #[must_use]
-    pub fn score_instruments() -> Vec<dv_domain::Instrument> {
-        dv_domain::instruments()
-    }
-
     /// The exact text [`Core::save_scores`] would store, for the live preview while typing.
+    /// Not for an instrument she does not give (D-098).
     pub fn preview_scores(&mut self, sheet: &dv_domain::ScoreSheet) -> Result<String, CoreError> {
+        if let Ok(v) = self.vault_ref() {
+            crate::instruments::check_given(v, &sheet.instrument)?;
+        }
         dv_domain::format_sheet_with(sheet, self.sheet_habits()?).map_err(CoreError::Refused)
     }
 
@@ -253,6 +251,8 @@ impl Core {
         if sheet.entries.is_empty() {
             return Err(CoreError::Refused("לא הוזנו ציונים.".into()));
         }
+        // An instrument she does not give is not entered (D-098).
+        crate::instruments::check_given(self.vault_ref()?, &sheet.instrument)?;
         let text = dv_domain::format_sheet_with(sheet, self.sheet_habits()?)
             .map_err(CoreError::Refused)?;
         let title = dv_domain::instruments()

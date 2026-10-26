@@ -16,9 +16,11 @@ mod export;
 mod failures;
 mod followup;
 pub use binding::{ComputerSeal, WindowsSeal};
+pub mod drive_backup;
 pub mod google;
 mod guides;
 mod history;
+mod instruments;
 mod intake;
 mod library;
 pub mod name_model;
@@ -27,6 +29,7 @@ use name_model::NameHints;
 mod jobs;
 mod layers;
 mod readiness;
+mod report_check;
 mod retention;
 mod seal;
 mod security;
@@ -69,9 +72,11 @@ pub use backup::{
 };
 pub(crate) use dates::today;
 pub use dv_ai::{StyleItem, StyleKind, StyleOrigin, StyleProfile};
+pub use dv_export::MAX_LOGO_BYTES;
 pub use dv_vault::BACKUP_EXTENSION;
 pub use followup::FollowUpView;
 pub use history::{HiddenWord, SentItem, SentPart, SentText};
+pub use instruments::{InstrumentApproval, InstrumentStatus};
 pub use jobs::{
     BackupRun, BackupTask, DocumentRead, DrillJob, Drilled, ExportJob, Exported, ReadJob,
     RestoreJob, Restored, SlotJob, SlotMade, UnlockJob, Unlocked,
@@ -81,6 +86,7 @@ pub use library::TRASH_DAYS;
 pub use name_model::{HintJob, HintsRead};
 pub use own::SectionModeView;
 pub use readiness::{Readiness, ReadinessItem};
+pub use report_check::{ReportCheckNote, ReportCheckResult, ReportCheckSetting};
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
 pub use security::{SecurityItem, SecurityStatus};
 pub use style::{
@@ -95,10 +101,10 @@ pub use verify::VerifyResult;
 pub use views::{
     ActivityEntry, ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail,
     ChatView, ConsultResult, ConsultTurnView, ConsultationSummary, ConsultationView, CreatedVault,
-    ExportCheck, ImportPreview, MaterialRouting, NameMatch, NameSuggestion, ParagraphVersionView,
-    ParagraphView, Prepared, ReportSettings, RetentionItem, ReviewPart, SectionResult, SectionView,
-    SortResult, SourceExcerpt, StagedBackup, StyleHint, StyleMark, SuspectDecision, TemplateView,
-    UiError,
+    ExportCheck, ImportPreview, LogoView, MaterialRouting, NameMatch, NameSuggestion,
+    ParagraphVersionView, ParagraphView, ParentsOptions, Prepared, ReportSettings, RetentionItem,
+    ReviewPart, SectionResult, SectionView, SortResult, SourceExcerpt, StagedBackup, StyleHint,
+    StyleMark, SuspectDecision, TemplateView, UiError,
 };
 pub use views::{ErrorAction, PingResponse, IPC_VERSION};
 
@@ -179,6 +185,8 @@ fn day_number() -> u64 {
 const REPORT_KEY: &str = "report_settings";
 /// Her Word template (EX-1), hex-encoded inside the encrypted vault.
 const TEMPLATE_KEY: &str = "report_template";
+/// Her logo (round 55), checked and rebuilt, hex-encoded inside the encrypted vault.
+const LOGO_KEY: &str = "report_logo";
 /// A gap this long between two 15-second ticks means the computer slept.
 const SLEEP_GAP: Duration = Duration::from_secs(60);
 const MAX_REQUEST_BYTES: usize = 900_000;
@@ -223,6 +231,9 @@ pub fn ping() -> PingResponse {
         build_commit: option_env!("DV_BUILD_COMMIT").unwrap_or("dev").to_owned(),
         fips_active: dv_vault::crypto::fips_active(),
         platform: std::env::consts::OS.to_owned(),
+        slowest_key_check_ms: dv_vault::computer_key::slowest_child_ms(),
+        key_check_wait_ms: u32::try_from(dv_vault::computer_key::OPENING_WAIT.as_millis())
+            .unwrap_or(u32::MAX),
     }
 }
 
@@ -312,11 +323,17 @@ impl CoreError {
             ),
             CoreError::Vault(VaultError::OtherComputer) => (
                 "other_computer",
-                "הסיסמה פותחת את הכספת רק במחשב ובחשבון ה-Windows שבהם היא נקבעה. בעותק של תיקיית הכספת, וגם באותו מחשב אחרי התקנה מחדש של Windows או איפוס החשבון, נכנסים כאן עם ערכת השחזור, ואחר כך בוחרים סיסמה בהגדרות כדי שתעבוד גם כאן. אם המחשב הקודם אבד, אפשר גם לשחזר את הגיבוי עם הסיסמה.".to_owned(),
+                "הסיסמה פותחת את הכספת רק במחשב ובחשבון המשתמש שבהם היא נקבעה. בעותק של תיקיית הכספת, וגם באותו מחשב אחרי התקנה מחדש של מערכת ההפעלה או איפוס החשבון, נכנסים כאן עם ערכת השחזור, ואחר כך בוחרים סיסמה בהגדרות כדי שתעבוד גם כאן. אם המחשב הקודם אבד, אפשר גם לשחזר את הגיבוי עם הסיסמה.".to_owned(),
             ),
             CoreError::Vault(VaultError::Busy) => (
                 "busy",
-                "Windows לא ענה בזמן לבדיקה שהסיסמה שייכת למחשב הזה. זה קורה לפעמים מיד אחרי הדלקת המחשב. אפשר לנסות שוב בעוד רגע.".to_owned(),
+                if cfg!(target_os = "macos") {
+                    // A locked Keychain asks for her Mac's password; a cancel lands here too.
+                    "ה-Mac לא אישר בזמן את הבדיקה שהסיסמה שייכת למחשב הזה. אם הופיעה בקשה לסיסמה של ה-Mac (מחזיק המפתחות), צריך לאשר אותה. אפשר לנסות שוב בעוד רגע."
+                } else {
+                    "המחשב לא ענה בזמן לבדיקה שהסיסמה שייכת למחשב הזה. זה קורה לפעמים מיד אחרי הדלקת המחשב. אפשר לנסות שוב בעוד רגע."
+                }
+                .to_owned(),
             ),
             CoreError::Vault(VaultError::RecoveryKeyInvalid) => (
                 "recovery_invalid",
@@ -445,17 +462,22 @@ fn egress_he(e: &EgressError, ai: &str) -> String {
     }
 }
 
-/// The score sheets entered in the case's score table (the scores the text is checked against).
+/// The score sheets entered in the case's score table (the scores the text is checked against),
+/// but for instruments she does not give.
 fn score_sheets(
     v: &Vault,
     case_id: &str,
     inputs: &[dv_domain::CaseInput],
 ) -> Result<Vec<dv_domain::ScoreSheet>, CoreError> {
+    // An instrument she does not give is in no request and no check (D-098).
+    let skip = instruments::not_used(v)?;
     let mut out = Vec::new();
     for i in inputs.iter().filter(|i| i.kind == InputKind::TestScores) {
         if let Some(data) = v.input_data(case_id, &i.id)? {
-            if let Ok(sheet) = serde_json::from_str(&data) {
-                out.push(sheet);
+            if let Ok(sheet) = serde_json::from_str::<dv_domain::ScoreSheet>(&data) {
+                if !skip.contains(&sheet.instrument) {
+                    out.push(sheet);
+                }
             }
         }
     }
@@ -548,6 +570,14 @@ enum PendingKind {
         draft_ids: Vec<String>,
         source_ids: Vec<String>,
     },
+    /// The check of the whole approved report (D-097): the keys of the sections sent, in the
+    /// order of `R1`…
+    ReportCheck {
+        case_id: String,
+        section_keys: Vec<String>,
+        /// The request's ids ("R1"…), one per key: the notes are read by the ids sent.
+        ids: Vec<String>,
+    },
 }
 
 /// What an approval is expected to be for. `Core::begin_send` checks it before anything
@@ -561,6 +591,7 @@ pub enum SendKind {
     StyleSynthesis,
     Interpretation,
     Verify,
+    ReportCheck,
 }
 
 impl PendingKind {
@@ -573,6 +604,7 @@ impl PendingKind {
             PendingKind::StyleSynthesis { .. } => SendKind::StyleSynthesis,
             PendingKind::Interpretation { .. } => SendKind::Interpretation,
             PendingKind::Verify { .. } => SendKind::Verify,
+            PendingKind::ReportCheck { .. } => SendKind::ReportCheck,
         }
     }
 }
@@ -664,7 +696,7 @@ pub struct Core {
     /// The last automatic backup attempt this session (a failed one waits before the next).
     auto_backup_tried: Option<Instant>,
     /// The text being typed right now (memory only; kept in the vault on lock).
-    unsaved: Option<UnsavedEdit>,
+    unsaved: Vec<UnsavedEdit>,
     /// The material deleted last, still sealed, for "ביטול" (memory only; dropped on lock).
     removed_input: Option<dv_vault::RemovedInput>,
     /// Where the rollback seal is kept (outside the vault folder); `None` turns it off.
@@ -698,6 +730,13 @@ pub struct Core {
     opened_cases: HashSet<String>,
     /// What this opening has to say about the time since the last one (L4; dropped on lock).
     since_last: Option<String>,
+    /// Moves when the Drive copy turns on or off (D-099): an upload or a cleanup begun before
+    /// it stops before sending anything more.
+    drive_generation: Arc<std::sync::atomic::AtomicU64>,
+    /// When the cleanup owed at Google was last handed out (reset on lock).
+    drive_cleanup_at: Option<Instant>,
+    /// Cleanups of the Drive copy on their way (D-099): the timer adds none while one runs.
+    drive_cleanups: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl std::fmt::Debug for Core {

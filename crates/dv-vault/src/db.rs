@@ -208,6 +208,10 @@ pub const MAIN_MIGRATIONS: &[&str] = &[
         original_enc BLOB NOT NULL,
         PRIMARY KEY (case_id, tag)
      );",
+    // v11: "what left the computer" is read per case; an index instead of a full scan as the
+    // history grows (deep review 3.5). How long the text itself is kept waits for the legal
+    // review (P-07), so nothing is deleted.
+    "CREATE INDEX transmissions_case ON transmissions(case_id, created_at);",
 ];
 
 pub const IDENTITY_MIGRATIONS: &[&str] = &[
@@ -298,6 +302,7 @@ mod tests {
                 "c450369d36db7b57",
                 "319cc0d373ae4523",
                 "942e02ced273dca6",
+                "860fa1cbe9c35c6b",
             ],
         ),
         ("identity", &["98e79c9e2d976424", "59aa5787b56ebc78"]),

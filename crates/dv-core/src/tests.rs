@@ -21,14 +21,17 @@ mod history;
 mod hostile;
 mod import_export;
 mod institute;
+mod instruments;
 mod large_case;
 mod layers;
 mod library;
 mod masks;
 mod off_lock;
 mod own;
+mod parents;
 mod perf_profile;
 mod reading;
+mod report_check;
 mod sample_flows;
 mod sort_flows;
 mod surfaces;
@@ -1435,7 +1438,7 @@ fn entered_scores_feed_the_section_with_ranges_from_the_table() {
 fn every_instrument_sheet_passes_the_filter_without_questions() {
     use dv_domain::{ScoreEntry, ScoreSheet};
     let (_dir, mut core, case) = setup(None);
-    for inst in Core::score_instruments() {
+    for inst in dv_domain::instruments() {
         let entries = inst
             .measures
             .iter()
@@ -1760,10 +1763,19 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
             text: String::new(),
         })
         .collect();
+    // Every pattern of scores there can be (D-100): their names go out as fixed text too.
+    let patterns: Vec<dv_domain::ScorePattern> = dv_domain::pattern_keys()
+        .into_iter()
+        .map(|key| dv_domain::ScorePattern {
+            label: dv_domain::pattern_label(&key).unwrap_or_default(),
+            key,
+        })
+        .collect();
     body.push(dv_ai::build_style_analysis_request(
         &dv_ai::ModelConfig::default(),
         &keys,
         &excerpts,
+        &patterns,
         &nonce,
     ));
     body.push(dv_ai::build_style_synthesis_request(
@@ -1795,12 +1807,13 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
                     enabled: true,
                     origin: dv_ai::StyleOrigin::Reports,
                     support: 1,
+                    pattern: None,
                 })
             })
             .collect(),
     };
     body.push(Value::String(
-        dv_ai::render_for_section(&profile, "cognitive", &|_| true).unwrap(),
+        dv_ai::render_for_section(&profile, "cognitive", &|_| true, &[]).unwrap(),
     ));
     let body = Value::Array(body);
     let tags: HashSet<String> = HashSet::from(["[ילד]".to_owned()]);

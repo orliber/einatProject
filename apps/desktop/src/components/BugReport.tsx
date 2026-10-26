@@ -8,6 +8,9 @@ export interface BugFacts {
   version: string;
   commit: string;
   platform: string;
+  /** The slowest the key kept on this computer took to seal or open, and how long an opening
+   * waits for it (ms); `null` when unknown, slowest 0 when it has not run yet. */
+  keyCheck: { slowestMs: number; waitMs: number } | null;
   /** Where she was: the screen and, in a case, the tab. Never the case itself. */
   screen: string;
   failure: Pick<UiError, "code" | "details"> | null;
@@ -36,6 +39,10 @@ export function bugReportText(f: BugFacts): string {
     `מסך: ${f.screen}`,
     `שעה: ${new Date().toISOString()}`,
   ];
+  if (f.keyCheck && f.keyCheck.slowestMs > 0) {
+    const seconds = (ms: number) => (ms / 1000).toFixed(1);
+    lines.push(`המפתח שבמחשב: הכי איטי ${seconds(f.keyCheck.slowestMs)} שניות (מחכים עד ${seconds(f.keyCheck.waitMs)})`);
+  }
   if (f.failure) {
     lines.push(`קוד שגיאה: ${f.failure.code}`);
     if (f.failure.details.length) lines.push("פרטים:", ...f.failure.details);
@@ -66,6 +73,7 @@ export function BugReportDialog({ failure, onClose }: { failure: BugFacts["failu
         version: p?.core_version ?? "לא ידוע",
         commit: p?.build_commit ?? "לא ידוע",
         platform: p?.platform ?? "לא ידוע",
+        keyCheck: p ? { slowestMs: p.slowest_key_check_ms, waitMs: p.key_check_wait_ms } : null,
         screen,
         failure,
         crashes,

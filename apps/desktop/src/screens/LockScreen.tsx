@@ -6,18 +6,23 @@ import { CoreStatus } from "../components/CoreStatus";
 import { ErrorLine, LockIcon } from "../components/ui";
 import { GoogleRecoverForm } from "../components/GoogleRecovery";
 import { LockScreenUpdate } from "../components/Update";
+import { timed, WaitLine } from "../components/Progress";
 import "./LockScreen.css";
 
 export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnlocked?: (s: AppStatus) => void }) {
-  const [mode, setMode] = useState<"password" | "recovery" | "google">("password");
-  // Forgot the password: Google first when it is on for this computer (D-041).
-  const [googleOn, setGoogleOn] = useState(false);
+  const [mode, setMode] = useState<"password" | "recovery" | "google" | "forgot">("password");
+  // Forgot the password: Google first when it is on for this computer (D-041). When it is off,
+  // a short note says to use the kit now, and where Google is turned on for next time (D-096).
+  const [google, setGoogle] = useState<{ on: boolean; available: boolean }>({ on: false, available: false });
   useEffect(() => {
-    ipc.googleStatus().then((g) => setGoogleOn(g.on)).catch(() => setGoogleOn(false));
+    ipc.googleStatus()
+      .then((g) => setGoogle({ on: g?.on === true, available: g?.available === true }))
+      .catch(() => setGoogle({ on: false, available: false }));
   }, []);
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const show = (m: typeof mode) => { setMode(m); setSecret(""); setError(null); };
   // The vault did not open for a reason that is not the password (R7): often a new version.
   const [broken, setBroken] = useState(false);
   const [version, setVersion] = useState<string | null>(null);
@@ -59,7 +64,7 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
     setError(null);
     setBroken(false);
     try {
-      const s = mode === "password" ? await ipc.unlock(secret) : await ipc.unlockWithRecovery(secret);
+      const s = await timed("unlock", mode === "password" ? ipc.unlock(secret) : ipc.unlockWithRecovery(secret), mode);
       setSecret("");
       onUnlocked?.(s);
     } catch (err) {
@@ -86,7 +91,7 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
   return (
     <main className="lock-backdrop">
       <section className="lock-card" aria-labelledby="lock-title">
-        <div className="lock-icon"><LockIcon size={28} color="#fff" /></div>
+        <div className="lock-icon"><LockIcon size={28} /></div>
         <div className="lock-heading">
           <h1 id="lock-title">{he.appName}</h1>
           {PREVIEW ? (
@@ -97,11 +102,13 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
         </div>
         {mode === "google" ? (
           <>
-            <GoogleRecoverForm onUnlocked={onUnlocked} onBack={() => setMode("password")} />
-            <button type="button" className="link-btn" onClick={() => { setMode("recovery"); setSecret(""); setError(null); }}>
+            <GoogleRecoverForm onUnlocked={onUnlocked} onBack={() => show("password")} />
+            <button type="button" className="link-btn" onClick={() => show("recovery")}>
               יש לי את ערכת השחזור המודפסת
             </button>
           </>
+        ) : mode === "forgot" ? (
+          <ForgotPassword googleAvailable={google.available} onKit={() => show("recovery")} onBack={() => show("password")} />
         ) : (
         <form className="lock-form" onSubmit={submit}>
           <div className="field">
@@ -117,15 +124,16 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
             <ErrorLine error={error} />
           )}
           {broken && <VersionTrouble version={version} />}
-          {busy && slow && mode === "password" && <p className="hint" role="status">ממתינה ל-Windows… זה קורה לפעמים מיד אחרי הדלקת המחשב.</p>}
+          {busy && <WaitLine key={mode} task="unlock" speed={mode} delay={1000} label="פותחת את הכספת המוצפנת" />}
+          {busy && slow && mode === "password" && <p className="hint" role="status">ממתינה למחשב… זה קורה לפעמים מיד אחרי הדלקת המחשב.</p>}
           <button type="submit" className="btn btn-primary" disabled={busy || waitUntil !== null}>{busy ? "פותחת…" : he.lock.open}</button>
-          <button type="button" className="link-btn" onClick={() => { setMode(mode === "password" ? (googleOn ? "google" : "recovery") : "password"); setSecret(""); setError(null); }}>
-            {mode === "password" ? (googleOn ? "שכחתי את הסיסמה · כניסה עם גוגל" : "שכחתי את הסיסמה · פתיחה עם ערכת השחזור") : "חזרה לפתיחה עם סיסמה"}
+          <button type="button" className="link-btn" onClick={() => show(mode === "password" ? (google.on ? "google" : "forgot") : "password")}>
+            {mode === "password" ? "שכחתי את הסיסמה" : "חזרה לפתיחה עם סיסמה"}
           </button>
         </form>
         )}
         <div className="lock-foot">
-          <p className="hint">{he.lock.footer}</p>
+          <p className="lock-safe"><LockIcon size={14} color="currentColor" />{he.lock.footer}</p>
           <CoreStatus />
           {!PREVIEW && <LockScreenUpdate />}
         </div>
@@ -136,18 +144,35 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
 }
 
 /**
+ * Forgot the password, Google sign-in not on: two lines. The printed kit opens it now; Google
+ * is turned on in the settings, once inside, for next time (D-096).
+ */
+function ForgotPassword({ googleAvailable, onKit, onBack }: { googleAvailable: boolean; onKit: () => void; onBack: () => void }) {
+  return (
+    <div className="lock-form">
+      <div className="lock-note" role="note">
+        <p><strong>עכשיו:</strong> פותחים עם ערכת השחזור המודפסת, ובוחרים סיסמה חדשה בפנים.</p>
+        {googleAvailable && (
+          <p><strong>לפעם הבאה:</strong> אחרי הכניסה מפעילים כניסה עם גוגל, בהגדרות ← סיסמה ואבטחה.</p>
+        )}
+      </div>
+      <button type="button" className="btn btn-primary" autoFocus onClick={onKit}>פתיחה עם ערכת השחזור</button>
+      <button type="button" className="link-btn" onClick={onBack}>חזרה לפתיחה עם סיסמה</button>
+    </div>
+  );
+}
+
+/**
  * R7: a version that cannot open the vault never leaves her stuck. The vault stays on the
  * computer untouched by a reinstall, and the version before can be installed over this one.
  */
 function VersionTrouble({ version }: { version: string | null }) {
   const [problem, setProblem] = useState<string | null>(null);
   return (
-    <div className="lock-trouble" role="note">
-      <p>
-        <strong>הכספת לא נפתחה בגרסה הזו{version ? ` (${version})` : ""}.</strong> הכספת נשארת במחשב ולא נמחקת.
-        אם זה התחיל אחרי עדכון, מתקינים את הגרסה הקודמת ומספרים לאור.
-      </p>
-      <button type="button" className="btn" onClick={() => {
+    <div className="lock-note" role="note">
+      <p><strong>הכספת לא נפתחה בגרסה הזו{version ? ` (${version})` : ""}.</strong></p>
+      <p>הכספת נשארת במחשב ולא נמחקת. אם זה התחיל אחרי עדכון, מתקינים את הגרסה הקודמת ומספרים לאור.</p>
+      <button type="button" className="btn btn-small" onClick={() => {
         setProblem(null);
         ipc.openReleasesPage().catch((e: { message?: string }) => setProblem(e.message ?? "הדף לא נפתח."));
       }}>לדף הגרסאות (נפתח בדפדפן)</button>

@@ -283,7 +283,37 @@ fn style_locally(request: &str, synthesis: bool) -> Value {
             "kind": "argument",
             "text": "מצב הדגמה: קודם היכולת, אחר כך הקושי אחרי «עם זאת», ואז דוגמה מהתצפית."
         }));
-        return json!({ "items": items });
+        // One chain from a finding to a conclusion (D-091), and one about a pattern of
+        // scores when the request names any.
+        let mut inferences = vec![json!({
+            "section": "general",
+            "finding_kind": "behavior",
+            "pattern": "",
+            "finding": "מצב הדגמה: הילד עוזב משימה באמצע וחוזר אליה רק אחרי תיווך",
+            "conclusion": "קושי בהתמדה, שנקבע כשהוא חוזר גם בדיווח הגן",
+            "wording": "ניכר קושי ב{תחום}, הבא לידי ביטוי ב{דוגמה}",
+            "recommendation": "תיווך של מבוגר בתחילת משימה"
+        })];
+        if let Some(key) = request
+            .lines()
+            .find_map(|l| {
+                l.strip_prefix("- ")
+                    .and_then(|r| r.split_once(": "))
+                    .map(|(k, _)| k)
+            })
+            .filter(|k| dv_domain::pattern_label(k).is_some())
+        {
+            inferences.push(json!({
+                "section": "cognitive",
+                "finding_kind": "scores",
+                "pattern": key,
+                "finding": "מצב הדגמה: הדפוס הזה בתוצאות",
+                "conclusion": "כאן תופיע המסקנה שלך מהדפוס, כפי שעולה מהדוחות",
+                "wording": "הפער בין {מדד} ל{מדד} מעיד על {מסקנה}",
+                "recommendation": ""
+            }));
+        }
+        return json!({ "items": items, "inferences": inferences });
     }
     // Merge the analyses: an item seen in several reports counts once, with its support.
     let mut merged: Vec<(String, String, String, u32)> = Vec::new();
@@ -304,10 +334,27 @@ fn style_locally(request: &str, synthesis: bool) -> Value {
             None => merged.push((section.to_owned(), kind.to_owned(), text.to_owned(), 1)),
         }
     }
-    let mut items: Vec<Value> = merged
-        .into_iter()
-        .map(|(s, k, t, n)| json!({ "section": s, "kind": k, "text": t, "support": n }))
-        .collect();
+    let mut inferences: Vec<Value> = Vec::new();
+    let mut items: Vec<Value> = Vec::new();
+    for (s, k, t, n) in merged {
+        if k == "inference" {
+            inferences.push(json!({
+                "section": s,
+                "finding_kind": "behavior",
+                "pattern": "",
+                "finding": "מצב הדגמה: ממצא שחוזר בדוחות",
+                "conclusion": t
+                    .split(crate::style::INFERENCE_SEP)
+                    .find_map(|l| l.strip_prefix("מסקנה: "))
+                    .unwrap_or("מצב הדגמה: המסקנה שלך"),
+                "wording": "ניכר {מסקנה}",
+                "recommendation": "",
+                "support": n
+            }));
+        } else {
+            items.push(json!({ "section": s, "kind": k, "text": t, "support": n }));
+        }
+    }
     for section in sections {
         items.push(json!({
             "section": section,
@@ -316,7 +363,7 @@ fn style_locally(request: &str, synthesis: bool) -> Value {
             "support": 1
         }));
     }
-    json!({ "items": items })
+    json!({ "items": items, "inferences": inferences })
 }
 
 /// `(section, text)` of every excerpt in a style-analysis request.
@@ -360,6 +407,50 @@ fn verify_locally(text: &str) -> Value {
         })
         .collect();
     json!({ "results": results })
+}
+
+/// The check of the whole report in demo mode and with no AI: only what code can know. A
+/// sentence said word for word in two sections is a repetition; a number in a closing section
+/// that no body section has is "only in the summary". A contradiction needs reading, so the
+/// demo never reports one.
+fn report_check_locally(text: &str) -> Value {
+    let body = blocks_with(text, "body_section");
+    let closing = blocks_with(text, "closing_section");
+    let all: Vec<&(String, String)> = body.iter().chain(closing.iter()).collect();
+    let sentences = |t: &str| -> Vec<String> {
+        t.split_inclusive(['.', '!', '?'])
+            .map(|s| s.trim().to_owned())
+            .filter(|s| s.chars().count() >= 20)
+            .collect()
+    };
+    let mut notes: Vec<Value> = Vec::new();
+    for (i, (a, a_text)) in all.iter().map(|x| (&x.0, &x.1)).enumerate() {
+        for (b, b_text) in all.iter().skip(i + 1).map(|x| (&x.0, &x.1)) {
+            let theirs = sentences(b_text);
+            if sentences(a_text).iter().any(|s| theirs.contains(s)) {
+                notes.push(json!({
+                    "kind": "repetition",
+                    "sections": [a, b],
+                    "note": "מצב הדגמה: אותו משפט מופיע בשני הסעיפים."
+                }));
+            }
+        }
+    }
+    for (id, t) in &closing {
+        for n in crate::response::numbers(t) {
+            if !body
+                .iter()
+                .any(|(_, b)| crate::response::numbers(b).contains(&n))
+            {
+                notes.push(json!({
+                    "kind": "summary_only",
+                    "sections": [id],
+                    "note": format!("מצב הדגמה: המספר {n} מופיע כאן ולא בגוף הדוח.")
+                }));
+            }
+        }
+    }
+    json!({ "notes": notes })
 }
 
 /// Answer a request body the way the real API would, from local material only.
@@ -421,6 +512,9 @@ pub fn respond(body: &Value) -> Value {
     }
     if in_schema("/properties/results/items/properties/verdict/enum").is_some_and(Value::is_array) {
         return api_text(&verify_locally(last_user).to_string());
+    }
+    if in_schema("/properties/notes/items/properties/kind/enum").is_some_and(Value::is_array) {
+        return api_text(&report_check_locally(last_user).to_string());
     }
     if let Some(keys) =
         in_schema("/properties/sections/items/properties/section/enum").and_then(Value::as_array)
@@ -580,6 +674,7 @@ mod tests {
                 excerpt("cognitive", "[ילד] הציג תפקוד ממוצע. עם זאת, ניכר קושי."),
                 excerpt("summary", "כך לדוגמא, [ילד] מגיב לתיווך."),
             ],
+            &[],
             "n",
         );
         let (one, dropped) = parse_style_analysis(&respond(&body), &keys).unwrap();
@@ -668,5 +763,38 @@ mod tests {
         assert_eq!(reply.paragraphs.len(), 2);
         assert!(reply.paragraphs.iter().all(|p| p.warnings.is_empty()));
         assert!(reply.paragraphs[0].text.contains("מעברים"));
+    }
+    #[test]
+    fn demo_report_check_finds_a_repeated_sentence_and_a_number_only_in_the_summary() {
+        use crate::report_check::{
+            build_report_check_request, parse_report_check, ReportCheckInput, ReportCheckSection,
+            ReportNoteKind,
+        };
+        let section = |t: &str, x: &str, closing| ReportCheckSection {
+            title: t.into(),
+            text_tagged: x.into(),
+            closing,
+        };
+        let input = ReportCheckInput {
+            sections: vec![
+                section("רקע", "[ילד] מתקשה במעברים בין פעילויות בגן.", false),
+                section(
+                    "מסגרת",
+                    "[ילד] מתקשה במעברים בין פעילויות בגן. משתתף בקבוצה.",
+                    false,
+                ),
+                section("סיכום", "נמצא ציון 7 באוצר מילים.", true),
+            ],
+        };
+        let (body, ids) = build_report_check_request(&ModelConfig::default(), &input, "n");
+        let notes = parse_report_check(&respond(&body), &ids).unwrap();
+        assert!(notes.iter().any(|n| n.kind == ReportNoteKind::Repetition
+            && n.sections == vec!["R1".to_owned(), "R2".to_owned()]));
+        assert!(notes
+            .iter()
+            .any(|n| n.kind == ReportNoteKind::SummaryOnly && n.sections == vec!["R3".to_owned()]));
+        assert!(notes
+            .iter()
+            .all(|n| n.kind != ReportNoteKind::Contradiction));
     }
 }

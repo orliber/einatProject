@@ -1,20 +1,26 @@
 //! Keys that stay on this computer: the half of the Google slot (D-041), and the half of the
 //! password slot once it is bound to this computer (D-076).
 //!
-//! Each is a random key, sealed with Windows DPAPI to her Windows account (`CurrentUser`),
-//! kept in the vault folder (`google.computer`, `vault.computer`), each with its own seal. It
-//! is not part of a backup, and the sealed file is useless on another computer or under
-//! another Windows user. With the key in her Google Drive, or with her password, it opens its
-//! slot; neither opens anything alone.
+//! Each is a random key kept only on this computer, for her account, with its own seal per
+//! slot. The file in the vault folder (`google.computer`, `vault.computer`) is not part of a
+//! backup, and is useless on another computer or under another account. With the key in her
+//! Google Drive, or with her password, it opens its slot; neither opens anything alone.
 //!
-//! No new dependency and no `unsafe`: DPAPI is reached through Windows PowerShell (by its
-//! full path, like the disk-encryption check), with the secret on stdin, never on the
-//! command line. Elsewhere than Windows the feature is not offered.
+//! * **Windows:** the key is sealed with DPAPI to her Windows account (`CurrentUser`), and
+//!   the sealed bytes are the file.
+//! * **macOS (D-101):** the key is an item in her login Keychain, which only her macOS
+//!   account opens; the file holds only the item's random name (`kc1:<id>`). An item made for
+//!   one slot is never found under the other's name.
+//!
+//! No new dependency and no `unsafe`: each is reached through the system's own program (by
+//! its full path: Windows PowerShell, `/usr/bin/security`), with the secret on stdin or
+//! stdout, never on the command line. Elsewhere (Linux) the feature is not offered.
 
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use zeroize::Zeroizing;
@@ -50,10 +56,10 @@ impl Purpose {
     }
 }
 
-/// True where this computer can seal a key to the Windows account.
+/// True where this computer can keep a key for her account alone (Windows, macOS).
 #[must_use]
 pub fn available() -> bool {
-    cfg!(windows)
+    cfg!(any(windows, target_os = "macos"))
 }
 
 #[must_use]
@@ -94,13 +100,11 @@ pub fn exists_for(dir: &Path, purpose: Purpose) -> bool {
 pub fn create_for(dir: &Path, purpose: Purpose) -> Result<Key32, VaultError> {
     let key = Key32::random()?;
     let sealed = protect(key.as_bytes(), purpose)?;
-    let tmp = dir.join(format!("{}.tmp", purpose.file()));
-    {
-        let mut f = fs::File::create(&tmp)?;
-        f.write_all(sealed.as_bytes())?;
-        f.sync_all()?;
+    let old = fs::read_to_string(path_for(dir, purpose)).ok();
+    put(dir, &sealed, &path_for(dir, purpose), purpose)?;
+    if let Some(old) = old {
+        forget(old.trim(), purpose);
     }
-    fs::rename(&tmp, path_for(dir, purpose))?;
     Ok(key)
 }
 
@@ -110,14 +114,35 @@ pub fn create_for(dir: &Path, purpose: Purpose) -> Result<Key32, VaultError> {
 pub fn create_next_for(dir: &Path, purpose: Purpose) -> Result<Key32, VaultError> {
     let key = Key32::random()?;
     let sealed = protect(key.as_bytes(), purpose)?;
-    let tmp = dir.join(format!("{}.next.tmp", purpose.file()));
-    {
+    // A key held aside earlier and never promoted (the program closed in between) is replaced.
+    let stale = fs::read_to_string(next_path(dir, purpose)).ok();
+    put(dir, &sealed, &next_path(dir, purpose), purpose)?;
+    if let Some(stale) = stale {
+        forget(stale.trim(), purpose);
+    }
+    Ok(key)
+}
+
+/// Write a sealed key to `to` through a temporary file. If that fails, the Keychain item it
+/// names is removed too (on a Mac), so no key is left that no file points to.
+fn put(dir: &Path, sealed: &str, to: &Path, purpose: Purpose) -> Result<(), VaultError> {
+    let tmp = dir.join(format!(
+        "{}.tmp",
+        to.file_name()
+            .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+    ));
+    let written = (|| {
         let mut f = fs::File::create(&tmp)?;
         f.write_all(sealed.as_bytes())?;
         f.sync_all()?;
+        fs::rename(&tmp, to)
+    })();
+    if let Err(e) = written {
+        let _ = fs::remove_file(&tmp);
+        forget(sealed, purpose);
+        return Err(e.into());
     }
-    fs::rename(&tmp, next_path(dir, purpose))?;
-    Ok(key)
+    Ok(())
 }
 
 /// The key held aside, unsealed (for an opening after the slot was written but before the
@@ -128,7 +153,11 @@ pub fn load_next_for(dir: &Path, purpose: Purpose) -> Result<Key32, VaultError> 
 
 /// The key held aside becomes the one in use.
 pub fn promote_next_for(dir: &Path, purpose: Purpose) -> Result<(), VaultError> {
+    let old = fs::read_to_string(path_for(dir, purpose)).ok();
     fs::rename(next_path(dir, purpose), path_for(dir, purpose))?;
+    if let Some(old) = old {
+        forget(old.trim(), purpose);
+    }
     Ok(())
 }
 
@@ -158,15 +187,122 @@ fn load_from(file: &Path, purpose: Purpose, wait: Duration) -> Result<Key32, Vau
 }
 
 pub fn remove_for(dir: &Path, purpose: Purpose) {
+    if let Ok(old) = fs::read_to_string(path_for(dir, purpose)) {
+        forget(old.trim(), purpose);
+    }
     let _ = fs::remove_file(path_for(dir, purpose));
 }
 
 /// Longest wait for the sealing or unsealing child at an opening, which runs outside the
 /// core's lock. A first PowerShell after the computer starts, beside a busy antivirus, took
 /// over 20 s on a CI runner; past this it is `Busy` (she tries again).
-const OPENING_WAIT: Duration = Duration::from_secs(45);
+pub const OPENING_WAIT: Duration = Duration::from_secs(45);
 /// The same for a check while the vault is open, under the core's lock.
 const IN_SESSION_WAIT: Duration = Duration::from_secs(20);
+
+/// The longest any sealing or unsealing child took since the program started, in
+/// milliseconds; one that was stopped counts as its whole wait. Only a duration, for the bug
+/// report: it shows whether a slow computer ever comes near `OPENING_WAIT`.
+static SLOWEST_CHILD_MS: AtomicU32 = AtomicU32::new(0);
+
+/// See `SLOWEST_CHILD_MS`; 0 until a child has run.
+#[must_use]
+pub fn slowest_child_ms() -> u32 {
+    SLOWEST_CHILD_MS.load(Ordering::Relaxed)
+}
+
+fn note_child_time(took: Duration) {
+    let ms = u32::try_from(took.as_millis()).unwrap_or(u32::MAX);
+    SLOWEST_CHILD_MS.fetch_max(ms, Ordering::Relaxed);
+}
+
+/// Run `program` with `args`, `input` on stdin; its stdout, trimmed, if it succeeded.
+fn run(
+    program: &str,
+    args: &[&str],
+    input: &[u8],
+    wait: Duration,
+) -> Result<Zeroizing<String>, VaultError> {
+    let (code, text) = run_with_code(program, args, input, wait)?;
+    if code != Some(0) || text.is_empty() {
+        return Err(VaultError::Crypto(
+            "the key sealed to this computer could not be opened",
+        ));
+    }
+    Ok(text)
+}
+
+/// The same, with the exit code (`None` when it was ended by a signal) whatever it was.
+///
+/// A child that never comes back (an antivirus holding it, a locked-down shell, a Keychain
+/// waiting on a dialog) is stopped and it is `Busy`: it runs on every opening, under the
+/// core's lock, so it must not freeze the program (review of stage 5, S6). Fail-closed.
+///
+/// A child that could not be started, given its input or waited on (a passing lack of
+/// memory or processes) is `Busy` too: none of these says the key is not on this computer,
+/// so none may send her to the recovery kit (review of #136).
+fn run_with_code(
+    program: &str,
+    args: &[&str],
+    input: &[u8],
+    wait: Duration,
+) -> Result<(Option<i32>, Zeroizing<String>), VaultError> {
+    let mut cmd = Command::new(program);
+    cmd.args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = cmd.spawn().map_err(|_| VaultError::Busy)?;
+    if let Some(mut stdin) = child.stdin.take() {
+        if stdin.write_all(input).is_err() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(VaultError::Busy);
+        }
+    }
+    let mut stdout = child.stdout.take();
+    let reader = std::thread::spawn(move || {
+        // Room for any answer up front, so the key is never left behind in a buffer that grew.
+        let mut buf = Zeroizing::new(Vec::with_capacity(16 * 1024));
+        if let Some(out) = stdout.as_mut() {
+            let _ = std::io::Read::read_to_end(out, &mut buf);
+        }
+        buf
+    });
+    let started = std::time::Instant::now();
+    let status = loop {
+        // A failed look is looked at again, until the wait is over (then `Busy`).
+        if let Some(status) = child.try_wait().ok().flatten() {
+            break status;
+        }
+        if started.elapsed() > wait {
+            note_child_time(started.elapsed());
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = reader.join();
+            return Err(VaultError::Busy);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    note_child_time(started.elapsed());
+    let out = reader.join().map_err(|_| VaultError::Busy)?;
+    let text = Zeroizing::new(String::from_utf8_lossy(&out).trim().to_owned());
+    Ok((status.code(), text))
+}
+
+fn not_here() -> VaultError {
+    VaultError::Refused(
+        "keeping a key for this computer's account is not available here".to_owned(),
+    )
+}
+
+// ------------------------------------------------------------------ Windows: DPAPI
 
 fn powershell() -> String {
     std::env::var_os("SystemRoot").map_or_else(
@@ -187,73 +323,189 @@ fn dpapi(
     purpose: Purpose,
     wait: Duration,
 ) -> Result<Zeroizing<String>, VaultError> {
-    if !available() {
-        return Err(VaultError::Refused(
-            "sealing to the Windows account is only available on Windows".to_owned(),
-        ));
-    }
     let entropy = purpose.entropy();
     let full = format!(
         "Add-Type -AssemblyName System.Security; $e=[Text.Encoding]::UTF8.GetBytes('{entropy}'); $b=[Convert]::FromBase64String([Console]::In.ReadToEnd().Trim()); {script}"
     );
-    let mut cmd = Command::new(powershell());
-    cmd.args(["-NoProfile", "-NonInteractive", "-Command", &full])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    let mut child = cmd.spawn()?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(input.as_bytes())?;
-    }
-    // A PowerShell that never comes back (an antivirus holding it, a locked-down shell) is
-    // stopped and the key is taken as not here: it runs on every opening, under the core's
-    // lock, so it must not freeze the program (review of stage 5, S6). Fail-closed.
-    let mut stdout = child.stdout.take();
-    let reader = std::thread::spawn(move || {
-        let mut buf = Zeroizing::new(Vec::new());
-        if let Some(out) = stdout.as_mut() {
-            let _ = std::io::Read::read_to_end(out, &mut buf);
-        }
-        buf
-    });
-    let started = std::time::Instant::now();
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if started.elapsed() > wait {
-            let _ = child.kill();
-            let _ = child.wait();
-            let _ = reader.join();
-            return Err(VaultError::Busy);
-        }
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    };
-    let out = reader
-        .join()
-        .map_err(|_| VaultError::Crypto("the key sealed to this computer could not be read"))?;
-    let text = Zeroizing::new(String::from_utf8_lossy(&out).trim().to_owned());
-    if !status.success() || text.is_empty() {
-        return Err(VaultError::Crypto(
-            "the key sealed to this computer could not be opened",
-        ));
-    }
-    Ok(text)
+    run(
+        &powershell(),
+        &["-NoProfile", "-NonInteractive", "-Command", &full],
+        input.as_bytes(),
+        wait,
+    )
 }
 
+// ------------------------------------------------------------------ macOS: the Keychain
+
+const SECURITY: &str = "/usr/bin/security";
+/// The Keychain items' service; each item's account is the slot's purpose and a random id.
+const KEYCHAIN_SERVICE: &str = "dv-diagnostic-vault";
+/// What the file holds on a Mac: this, then the item's id.
+const KEYCHAIN_PREFIX: &str = "kc1:";
+
+fn keychain_account(purpose: Purpose, id: &str) -> String {
+    format!("{}/{id}", purpose.entropy())
+}
+
+/// The id written in the file, if it is one this program made (hex only, so it is never an
+/// option or a second command to `security`).
+fn keychain_id(sealed: &str) -> Option<&str> {
+    let id = sealed.strip_prefix(KEYCHAIN_PREFIX)?;
+    (id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit())).then_some(id)
+}
+
+fn hex(bytes: &[u8]) -> Zeroizing<String> {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut out = Zeroizing::new(String::with_capacity(bytes.len() * 2));
+    for &b in bytes {
+        for nibble in [b >> 4, b & 15] {
+            out.push(char::from(
+                DIGITS.get(usize::from(nibble)).copied().unwrap_or(b'0'),
+            ));
+        }
+    }
+    out
+}
+
+fn unhex(text: &str) -> Result<Zeroizing<Vec<u8>>, VaultError> {
+    let bad = || VaultError::Crypto("the key kept for this computer is not readable");
+    if text.len() % 2 != 0 {
+        return Err(bad());
+    }
+    let mut out = Zeroizing::new(Vec::with_capacity(text.len() / 2));
+    for pair in text.as_bytes().chunks(2) {
+        let s = std::str::from_utf8(pair).map_err(|_| bad())?;
+        out.push(u8::from_str_radix(s, 16).map_err(|_| bad())?);
+    }
+    Ok(out)
+}
+
+/// A new Keychain item holding `plain`. The secret goes to `security` on stdin (its
+/// interactive mode reads the command there), never on a command line another process can
+/// see; the item is then read back, so a key is only used once it is really kept.
+fn keychain_store(plain: &[u8; 32], purpose: Purpose) -> Result<Zeroizing<String>, VaultError> {
+    let mut idb = [0u8; 16];
+    aws_lc_rs::rand::fill(&mut idb).map_err(|_| VaultError::Crypto("random"))?;
+    let id = hex(&idb);
+    let account = keychain_account(purpose, &id);
+    // Built in a buffer of its final size, so no copy of the key is left where it grew.
+    let head = format!(
+        "add-generic-password -U -s {KEYCHAIN_SERVICE} -a {account} -l {KEYCHAIN_SERVICE} -w "
+    );
+    let mut command = Zeroizing::new(String::with_capacity(head.len() + 2 * plain.len() + 1));
+    command.push_str(&head);
+    command.push_str(&hex(plain));
+    command.push('\n');
+    // `security -i` prints its prompt and nothing else; success is the read-back below. A
+    // Keychain that did not answer in time is not asked again (the core's lock is held).
+    let added = run_with_code(SECURITY, &["-i"], command.as_bytes(), OPENING_WAIT);
+    let sealed = Zeroizing::new(format!("{KEYCHAIN_PREFIX}{}", id.as_str()));
+    if let Err(e) = added {
+        keychain_delete(&sealed, purpose);
+        return Err(e);
+    }
+    match keychain_load(&sealed, purpose, OPENING_WAIT) {
+        Ok(back) if back.as_slice() == plain.as_slice() => Ok(sealed),
+        // An item `add` may have made is not left behind, whatever went wrong.
+        other => {
+            keychain_delete(&sealed, purpose);
+            Err(other.err().unwrap_or(VaultError::Crypto(
+                "the key could not be kept in this computer's Keychain",
+            )))
+        }
+    }
+}
+
+fn keychain_load(
+    sealed: &str,
+    purpose: Purpose,
+    wait: Duration,
+) -> Result<Zeroizing<Vec<u8>>, VaultError> {
+    let id = keychain_id(sealed).ok_or(VaultError::Crypto(
+        "the key kept for this computer is not readable",
+    ))?;
+    let account = keychain_account(purpose, id);
+    let (code, out) = run_with_code(
+        SECURITY,
+        &[
+            "find-generic-password",
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-a",
+            &account,
+            "-w",
+        ],
+        &[],
+        wait,
+    )?;
+    keychain_answer(code, &out)
+}
+
+/// The key in `security`'s answer. Only a missing item is "not here"; an answer with nothing
+/// in it is not known now, like any exit but 0 and 44.
+fn keychain_answer(code: Option<i32>, out: &str) -> Result<Zeroizing<Vec<u8>>, VaultError> {
+    match keychain_outcome(code) {
+        Found::Yes if !out.is_empty() => unhex(out),
+        Found::No => Err(VaultError::Crypto(
+            "the key kept for this computer is not in this account's Keychain",
+        )),
+        Found::Yes | Found::Unknown => Err(VaultError::Busy),
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Found {
+    Yes,
+    No,
+    /// Not known now: she cancelled the Keychain's dialog (exit 128), the Keychain is locked
+    /// and may not ask (36), it refused her password (51), or anything else. "Try again",
+    /// never "another computer, use the recovery kit" (review of #136).
+    Unknown,
+}
+
+/// What `security find-generic-password` says by its exit code (the low byte of the
+/// Security framework's status): only 44, `errSecItemNotFound`, means the item is not here.
+fn keychain_outcome(code: Option<i32>) -> Found {
+    match code {
+        Some(0) => Found::Yes,
+        Some(44) => Found::No,
+        _ => Found::Unknown,
+    }
+}
+
+fn keychain_delete(sealed: &str, purpose: Purpose) {
+    if let Some(id) = keychain_id(sealed) {
+        let account = keychain_account(purpose, id);
+        let _ = run(
+            SECURITY,
+            &[
+                "delete-generic-password",
+                "-s",
+                KEYCHAIN_SERVICE,
+                "-a",
+                &account,
+            ],
+            &[],
+            IN_SESSION_WAIT,
+        );
+    }
+}
+
+// ------------------------------------------------------------------ either
+
 fn protect(plain: &[u8; 32], purpose: Purpose) -> Result<Zeroizing<String>, VaultError> {
-    dpapi(
-        "[Console]::Out.Write([Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Protect($b,$e,'CurrentUser')))",
-        &b64(plain),
-        purpose,
-        OPENING_WAIT,
-    )
+    if cfg!(windows) {
+        dpapi(
+            "[Console]::Out.Write([Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Protect($b,$e,'CurrentUser')))",
+            &b64(plain),
+            purpose,
+            OPENING_WAIT,
+        )
+    } else if cfg!(target_os = "macos") {
+        keychain_store(plain, purpose)
+    } else {
+        Err(not_here())
+    }
 }
 
 fn unprotect(
@@ -261,13 +513,27 @@ fn unprotect(
     purpose: Purpose,
     wait: Duration,
 ) -> Result<Zeroizing<Vec<u8>>, VaultError> {
-    let out = dpapi(
-        "[Console]::Out.Write([Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Unprotect($b,$e,'CurrentUser')))",
-        sealed,
-        purpose,
-        wait,
-    )?;
-    unb64(&out).map(Zeroizing::new)
+    if cfg!(windows) {
+        let out = dpapi(
+            "[Console]::Out.Write([Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Unprotect($b,$e,'CurrentUser')))",
+            sealed,
+            purpose,
+            wait,
+        )?;
+        unb64(&out).map(Zeroizing::new)
+    } else if cfg!(target_os = "macos") {
+        keychain_load(sealed, purpose, wait)
+    } else {
+        Err(not_here())
+    }
+}
+
+/// A key that is no longer in use: on a Mac its Keychain item goes too (a DPAPI seal is only
+/// the file). Best effort.
+fn forget(sealed: &str, purpose: Purpose) {
+    if cfg!(target_os = "macos") {
+        keychain_delete(sealed, purpose);
+    }
 }
 
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -327,7 +593,72 @@ mod tests {
     }
 
     #[test]
-    fn sealed_to_this_windows_account_and_back() {
+    fn only_a_missing_item_means_not_here() {
+        assert_eq!(keychain_outcome(Some(0)), Found::Yes);
+        assert_eq!(keychain_outcome(Some(44)), Found::No);
+        for code in [Some(128), Some(36), Some(51), Some(1), None] {
+            assert_eq!(keychain_outcome(code), Found::Unknown, "{code:?}");
+        }
+    }
+
+    #[test]
+    fn a_keychain_that_cannot_be_asked_or_says_nothing_is_try_again() {
+        // Review of #136: only a missing item sends her to the kit.
+        assert!(matches!(
+            run_with_code("/nonexistent/dv-no-such-program", &[], b"", IN_SESSION_WAIT),
+            Err(VaultError::Busy)
+        ));
+        assert!(matches!(
+            keychain_answer(Some(0), ""),
+            Err(VaultError::Busy)
+        ));
+        assert!(matches!(
+            keychain_answer(Some(128), "00"),
+            Err(VaultError::Busy)
+        ));
+        assert!(matches!(
+            keychain_answer(Some(44), ""),
+            Err(VaultError::Crypto(_))
+        ));
+        assert_eq!(
+            keychain_answer(Some(0), "0aff").unwrap().as_slice(),
+            &[10, 255]
+        );
+    }
+
+    #[test]
+    fn the_slowest_child_is_kept() {
+        note_child_time(Duration::from_millis(7));
+        let after = slowest_child_ms();
+        assert!(after >= 7);
+        note_child_time(Duration::from_millis(1));
+        assert!(slowest_child_ms() >= after);
+        note_child_time(Duration::from_secs(u64::MAX));
+        assert_eq!(slowest_child_ms(), u32::MAX);
+    }
+
+    #[test]
+    fn keychain_ids_are_only_ours() {
+        assert_eq!(
+            keychain_id("kc1:0123456789abcdef0123456789abcdef"),
+            Some("0123456789abcdef0123456789abcdef")
+        );
+        for bad in [
+            "kc1:",
+            "kc1:-w x",
+            "kc1:0123456789abcdef0123456789abcdeg",
+            "kc1:0123456789abcdef0123456789abcdef\nadd",
+            "AAAA",
+        ] {
+            assert_eq!(keychain_id(bad), None, "{bad:?}");
+        }
+        let bytes: Vec<u8> = (0..=255u8).collect();
+        assert_eq!(unhex(&hex(&bytes)).unwrap().as_slice(), bytes.as_slice());
+        assert!(unhex("abc").is_err() && unhex("zz").is_err());
+    }
+
+    #[test]
+    fn sealed_to_this_account_and_back() {
         let dir = tempfile::tempdir().unwrap();
         if !available() {
             assert!(create(dir.path()).is_err());
@@ -349,10 +680,41 @@ mod tests {
         assert_eq!(load_for(dir.path(), Purpose::Password).unwrap(), next);
         assert!(load_next_for(dir.path(), Purpose::Password).is_err());
         let google_seal = fs::read(path(dir.path())).unwrap();
+        let password_seal = fs::read_to_string(path_for(dir.path(), Purpose::Password)).unwrap();
         fs::write(path_for(dir.path(), Purpose::Password), &google_seal).unwrap();
         assert!(load_for(dir.path(), Purpose::Password).is_err());
         // A changed seal does not open.
         fs::write(path(dir.path()), "AAAA").unwrap();
         assert!(load(dir.path()).is_err());
+        // Nothing is left behind (on a Mac, in the Keychain): each key goes with its file.
+        forget(
+            String::from_utf8_lossy(&google_seal).trim(),
+            Purpose::Google,
+        );
+        forget(password_seal.trim(), Purpose::Password);
+        remove_for(dir.path(), Purpose::Password);
+        assert!(!exists_for(dir.path(), Purpose::Password));
+    }
+
+    /// On a Mac the file holds only the item's name: the key itself is in the Keychain, and
+    /// once the item is gone the file opens nothing.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn on_a_mac_the_key_lives_in_the_keychain() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = create(dir.path()).unwrap();
+        let on_disk = fs::read_to_string(path(dir.path())).unwrap();
+        assert!(on_disk.starts_with(KEYCHAIN_PREFIX), "{on_disk}");
+        assert!(!on_disk.contains(hex(key.as_bytes()).as_str()));
+        // A replaced key takes its item with it; the new one opens.
+        let again = create(dir.path()).unwrap();
+        assert!(keychain_load(on_disk.trim(), Purpose::Google, OPENING_WAIT).is_err());
+        assert_eq!(load(dir.path()).unwrap(), again);
+        // A copy of the folder where the item is not (another Mac, another account).
+        let copy = fs::read_to_string(path(dir.path())).unwrap();
+        remove(dir.path());
+        fs::write(path(dir.path()), copy).unwrap();
+        assert!(load(dir.path()).is_err());
+        remove(dir.path());
     }
 }

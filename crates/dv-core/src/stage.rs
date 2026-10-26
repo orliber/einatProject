@@ -45,6 +45,11 @@ impl PendingKind {
                 Some(section_key),
                 serde_json::json!({ "section": section_key, "stage": "verify", "demo": demo, "ai": ai }),
             ),
+            PendingKind::ReportCheck { case_id, .. } => (
+                Some(case_id),
+                Some("report_check"),
+                serde_json::json!({ "stage": "report_check", "demo": demo, "ai": ai }),
+            ),
             PendingKind::Sort { case_id, .. } => (
                 Some(case_id),
                 Some("sorting"),

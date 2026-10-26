@@ -122,3 +122,23 @@
 .empty-list[open] > summary {
   margin-bottom: 4px;
 }
+.parents-version {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  gap: 8px;
+}
+.mini-bands {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+}
+.mini-bands i {
+  height: 6px;
+  background: var(--paper-sand);
+  border-radius: 1px;
+}
+.mini-bands i.on {
+  background: var(--paper-faint);
+}

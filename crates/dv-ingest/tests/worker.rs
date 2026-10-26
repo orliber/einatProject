@@ -59,6 +59,139 @@ fn time_limit_kills_the_worker() {
     assert_eq!(r, Err(IngestError::Timeout));
 }
 
+/// The program as it is shipped (`DV_TEST_APP_EXE`, set by the installer jobs), started as a
+/// worker the way the app starts it: contained, it still reads a document. On a Mac this is
+/// the check that the sandbox profile lets the real app binary start (D-101).
+#[test]
+#[ignore = "needs the built app: DV_TEST_APP_EXE"]
+fn the_shipped_program_reads_a_document_contained() {
+    let exe = std::env::var("DV_TEST_APP_EXE").expect("DV_TEST_APP_EXE");
+    let out = worker::run(
+        Path::new(&exe),
+        "notes.txt",
+        "תצפית בגן: הילד משחק לבד.".as_bytes(),
+        worker::DEFAULT_TIMEOUT,
+    )
+    .unwrap();
+    let Outcome::Text(out) = out else {
+        panic!("text expected")
+    };
+    assert_eq!(out.body, "תצפית בגן: הילד משחק לבד.");
+}
+
+/// On a Mac the shipped worker refuses to run with a descriptor of the app's besides stdin,
+/// stdout and stderr: the sandbox would not stop it reading one (D-101).
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "needs the built app: DV_TEST_APP_EXE"]
+fn the_shipped_program_refuses_a_descriptor_it_should_not_have() {
+    let exe = std::env::var("DV_TEST_APP_EXE").expect("DV_TEST_APP_EXE");
+    // Started as the app starts it (dv-sandbox): whatever this test process inherited is
+    // closed and the descriptor limit set, then `script` runs.
+    let run = |script: &str| {
+        std::process::Command::new("/bin/bash")
+            .args([
+                "-c",
+                dv_sandbox::CLOSE_INHERITED,
+                "dv-sandbox",
+                "/bin/bash",
+                "-c",
+                script,
+                &exe,
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap()
+            .code()
+    };
+    // bash keeps a descriptor open across exec, as an app that forgot close-on-exec would:
+    // a low one and the highest the worker can hold.
+    let last = dv_sandbox::FD_LIMIT - 1;
+    for fd in [5, last] {
+        assert_eq!(
+            run(&format!(
+                "exec {fd}</dev/null; exec \"$0\" --dv-ingest-worker"
+            )),
+            Some(7),
+            "{fd}"
+        );
+    }
+    // A lower limit than the start sets is no reason to refuse.
+    assert_eq!(
+        run("ulimit -n 512; exec \"$0\" --dv-ingest-worker"),
+        Some(2),
+        "a lower limit is fine"
+    );
+    // Without it the same start runs: an empty request gets the worker's own answer (2), not
+    // the refusal.
+    assert_eq!(run("exec \"$0\" --dv-ingest-worker"), Some(2));
+}
+
+/// On a Mac the shipped worker ends once the app that started it is gone (the app crashed or
+/// was forced to quit), even while it waits on a stdin that never closes (D-101).
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "needs the built app: DV_TEST_APP_EXE"]
+fn the_shipped_program_ends_when_the_app_is_gone() {
+    use std::io::Read;
+    let exe = std::env::var("DV_TEST_APP_EXE").expect("DV_TEST_APP_EXE");
+    let dir = std::env::temp_dir().join(format!("dv-orphan-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let fifo = dir.join("stdin");
+    let _ = std::fs::remove_file(&fifo);
+    assert!(std::process::Command::new("/usr/bin/mkfifo")
+        .arg(&fifo)
+        .status()
+        .unwrap()
+        .success());
+    // The test holds the writing end, so the worker's stdin never closes.
+    let writer = {
+        let fifo = fifo.clone();
+        std::thread::spawn(move || std::fs::OpenOptions::new().write(true).open(fifo).unwrap())
+    };
+    let state = |pid: &str| {
+        let out = std::process::Command::new("/bin/ps")
+            .args(["-o", "stat=", "-p", pid])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    };
+    // The "app" (bash) starts the worker, sees it running, and quits without ending it.
+    let mut app = std::process::Command::new("/bin/bash")
+        .args([
+            "-c",
+            dv_sandbox::CLOSE_INHERITED,
+            "dv-sandbox",
+            "/bin/bash",
+            "-c",
+            "\"$0\" --dv-ingest-worker < \"$1\" >/dev/null 2>&1 & echo $!",
+            &exe,
+            fifo.to_str().unwrap(),
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut pid = String::new();
+    app.stdout.take().unwrap().read_to_string(&mut pid).unwrap();
+    let pid = pid.trim().to_owned();
+    let held = writer.join().unwrap();
+    let st = state(&pid);
+    assert!(!st.is_empty() && !st.starts_with('Z'), "running: {st:?}");
+    app.wait().unwrap();
+    let gone = (0..50).any(|_| {
+        std::thread::sleep(Duration::from_millis(100));
+        let st = state(&pid);
+        st.is_empty() || st.starts_with('Z')
+    });
+    drop(held);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(gone, "the worker outlived the app: {}", state(&pid));
+}
+
 #[test]
 fn worker_arg_is_stable() {
     // The desktop binary checks this exact argument before starting anything else.

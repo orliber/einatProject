@@ -93,6 +93,53 @@ fn describe(
             "בוטלה הכניסה עם גוגל למקרה ששוכחים את הסיסמה".to_owned(),
             true,
         ),
+        "drive_backup_on" => (
+            "security",
+            "הופעל עותק מוצפן של הגיבוי בגוגל דרייב".to_owned(),
+            true,
+        ),
+        "drive_backup_off" if flag("restore") => (
+            "security",
+            "אחרי שחזור מגיבוי, העותק המוצפן בגוגל דרייב כבוי עד שתדליקי אותו שוב".to_owned(),
+            true,
+        ),
+        "drive_backup_off" => (
+            "security",
+            "כובה העותק המוצפן של הגיבוי בגוגל דרייב".to_owned(),
+            true,
+        ),
+        "drive_backup_failed" => (
+            "security",
+            "עותק מוצפן של הגיבוי לא עלה לגוגל דרייב".to_owned(),
+            false,
+        ),
+        "drive_backup_cleanup" if flag("restore") => (
+            "security",
+            if text("result") == "pending" {
+                "ביטול ההרשאה בגוגל שהגיעה עם הגיבוי ששוחזר עוד לא הושלם, וינוסה שוב"
+            } else {
+                "ההרשאה בגוגל שהגיעה עם הגיבוי ששוחזר בוטלה"
+            }
+            .to_owned(),
+            false,
+        ),
+        "drive_backup_cleanup" => (
+            "security",
+            match text("result") {
+                "cleaned" => "העותקים בגוגל דרייב נמחקו, וההרשאה שניתנה לתוכנה בוטלה",
+                "withdrawn" => {
+                    "ההרשאה בגוגל כבר הייתה מבוטלת, ולכן את העותקים בגוגל דרייב התוכנה לא יכולה למחוק"
+                }
+                _ => "מחיקת העותקים בגוגל דרייב וביטול ההרשאה עוד לא הושלמו, וינוסו שוב",
+            }
+            .to_owned(),
+            text("result") == "withdrawn",
+        ),
+        "drive_backup_uploaded" => (
+            "security",
+            "עותק מוצפן של הגיבוי עלה לגוגל דרייב".to_owned(),
+            false,
+        ),
         "case_created" => ("case", "תיק נפתח".to_owned(), false),
         "case_opened" => ("case", "פתחת את התיק".to_owned(), false),
         "case_trashed" => ("case", "תיק הועבר לסל המחזור".to_owned(), false),
@@ -171,6 +218,23 @@ fn describe(
             "עודכן אישור ברשימה \"מוכנה לעבודה אמיתית\"".to_owned(),
             false,
         ),
+        "settings_changed" if text("key").starts_with("instrument/") => {
+            let key = text("key").trim_start_matches("instrument/");
+            let name = dv_domain::instruments()
+                .into_iter()
+                .find(|i| i.key == key)
+                .map_or_else(|| "מבחן".to_owned(), |i| i.name);
+            let answer = match text("value") {
+                "approved" => " – מאושר",
+                "not_used" => " – לא מעבירה את זה",
+                _ => "",
+            };
+            (
+                "security",
+                format!("טבלאות {name}{answer} (בהגדרות ← המבחנים)"),
+                false,
+            )
+        }
         "settings_changed" if !text("secret").is_empty() => {
             ("security", "מפתח ה-API נשמר".to_owned(), false)
         }
@@ -290,6 +354,11 @@ mod tests {
             "password_bound",
             "google_recovery_on",
             "google_recovery_off",
+            "drive_backup_on",
+            "drive_backup_off",
+            "drive_backup_uploaded",
+            "drive_backup_failed",
+            "drive_backup_cleanup",
             "case_created",
             "case_opened",
             "case_trashed",

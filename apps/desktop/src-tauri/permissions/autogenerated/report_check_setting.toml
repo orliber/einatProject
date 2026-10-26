@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-report-check-setting"
+description = "Enables the report_check_setting command without any pre-configured scope."
+commands.allow = ["report_check_setting"]
+
+[[permission]]
+identifier = "deny-report-check-setting"
+description = "Denies the report_check_setting command without any pre-configured scope."
+commands.deny = ["report_check_setting"]

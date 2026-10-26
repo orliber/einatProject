@@ -80,6 +80,7 @@ describe("SentHistoryDialog", () => {
   it("names what each request was for in her words", () => {
     expect(placeLabel("sorting")).toBe("מיון החומרים לסעיפים");
     expect(placeLabel("consult")).toBe("שאלה מתוך התיק");
+    expect(placeLabel("report_check")).toBe("בדיקת הדוח כולו");
     expect(placeLabel("letter_parents")).toBe("מכתב להורים");
     expect(placeLabel("kindergarten")).not.toBe("kindergarten");
   });

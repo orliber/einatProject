@@ -21,7 +21,9 @@ use aws_lc_rs::digest::{digest, SHA256, SHA384, SHA512};
 use aws_lc_rs::iv::FixedLength;
 use lopdf::{dictionary, Document, Object, Stream, StringFormat};
 
-use crate::{ExportError, Notice, Report, ScoreChart, MIN_PASSWORD_CHARS};
+use crate::{
+    BandChart, ExportError, Logo, LogoFormat, Notice, Report, ScoreChart, MIN_PASSWORD_CHARS,
+};
 
 const PAGE_W: f32 = 595.28;
 const PAGE_H: f32 = 841.89;
@@ -39,6 +41,7 @@ const LIGHT_GRAY: Rgb = (0.48, 0.48, 0.48);
 const HEADER_FILL: Rgb = (0.902, 0.937, 0.929);
 const BAND_FILL: Rgb = (0.933, 0.953, 0.949);
 const LINE: Rgb = (0.722, 0.769, 0.757);
+const MARK_FILL: Rgb = (0.788, 0.851, 0.918);
 
 /// The fonts the report is set in: the bytes of TrueType files. Without a bold file,
 /// headings are drawn with a thin outline instead.
@@ -493,6 +496,97 @@ impl<'a> Pages<'a> {
         }
     }
 
+    /// The parents' chart (round 55): one row per measure, one column per group, as in the
+    /// Word file. The measure's group is shaded and marked, with its score when shown.
+    fn bands(&mut self, c: &BandChart) {
+        let size = 10.5;
+        let lead = size * 1.35;
+        let total = RIGHT - LEFT;
+        let n = c.groups.len().max(1);
+        let label_w = total * 0.40;
+        let group_w = (total - label_w) / n as f32;
+        // The right edge of group `i`'s column.
+        let col_right = |i: usize| RIGHT - label_w - i as f32 * group_w;
+        let header: Vec<String> = c.groups.clone();
+        let head_h = lead + 6.0;
+        self.ensure(head_h * 2.0);
+        let top = self.y;
+        self.rect(LEFT, top - head_h, total, head_h, HEADER_FILL);
+        self.frame(RIGHT - label_w, top - head_h, label_w, head_h);
+        self.text_at(
+            "תחום",
+            RIGHT - 4.0,
+            top - head_h + 6.0,
+            size,
+            true,
+            INK,
+            Align::Right,
+        );
+        for (i, g) in header.iter().enumerate() {
+            self.frame(col_right(i) - group_w, top - head_h, group_w, head_h);
+            self.text_at(
+                g,
+                col_right(i) - group_w / 2.0,
+                top - head_h + 6.0,
+                size,
+                true,
+                INK,
+                Align::Center,
+            );
+        }
+        self.y = top - head_h;
+        for r in &c.rows {
+            let lines = wrap(self.font(false), &r.label, size, label_w - 8.0);
+            let h = lines.len().max(1) as f32 * lead + 6.0;
+            self.ensure(h);
+            let top = self.y;
+            self.frame(RIGHT - label_w, top - h, label_w, h);
+            let mut y = top - 3.0;
+            for l in &lines {
+                y -= lead;
+                self.text_at(
+                    l,
+                    RIGHT - 4.0,
+                    y + size * 0.3,
+                    size,
+                    false,
+                    INK,
+                    Align::Right,
+                );
+            }
+            for i in 0..n {
+                let x = col_right(i) - group_w;
+                if i == r.group {
+                    self.rect(x, top - h, group_w, h, MARK_FILL);
+                    let mid = x + group_w / 2.0;
+                    match &r.value {
+                        Some(v) => self.text_at(
+                            v,
+                            mid,
+                            top - h / 2.0 - size * 0.35,
+                            size,
+                            true,
+                            INK,
+                            Align::Center,
+                        ),
+                        None => self.rect(mid - 3.5, top - h / 2.0 - 3.5, 7.0, 7.0, NAVY),
+                    }
+                }
+                self.frame(x, top - h, group_w, h);
+            }
+            self.y = top - h;
+        }
+    }
+
+    /// Her logo, centered at the top of the page (the image `/Logo`).
+    fn logo(&mut self, logo: &Logo) {
+        let (w, h) = logo.fit(crate::docx::LOGO_MAX_W, crate::docx::LOGO_MAX_H);
+        let x = (PAGE_W - w) / 2.0;
+        let y = self.y - h;
+        let _ = writeln!(self.cur, "q {w:.2} 0 0 {h:.2} {x:.2} {y:.2} cm /Logo Do Q");
+        self.y = y - 12.0;
+    }
+
     fn finish(mut self) -> Vec<String> {
         if !self.cur.is_empty() || self.done.is_empty() {
             self.done.push(self.cur);
@@ -502,6 +596,9 @@ impl<'a> Pages<'a> {
 }
 
 fn lay_out(report: &Report, p: &mut Pages<'_>) {
+    if let Some(logo) = &report.logo {
+        p.logo(logo);
+    }
     p.paragraph(
         &report.title,
         18.0,
@@ -523,6 +620,18 @@ fn lay_out(report: &Report, p: &mut Pages<'_>) {
             2.0,
             0.0,
         );
+    }
+    for text in &report.intro {
+        for piece in text.split('\n').filter(|t| !t.trim().is_empty()) {
+            p.paragraph(piece.trim(), 12.0, false, INK, Align::Right, 8.0, 4.0, 0.0);
+        }
+    }
+    for c in report.bands.iter().filter(|c| !c.rows.is_empty()) {
+        p.paragraph(&c.title, 13.0, true, INK, Align::Right, 10.0, 4.0, 50.0);
+        p.bands(c);
+        if !c.note.is_empty() {
+            p.paragraph(&c.note, 9.0, false, GRAY, Align::Right, 3.0, 6.0, 0.0);
+        }
     }
     for part in &report.parts {
         if !part.title.is_empty() {
@@ -691,6 +800,7 @@ pub fn render_notice_pdf(notice: &Notice, fonts: PdfFonts<'_>) -> Result<Vec<u8>
         signature: Vec::new(),
         confidentiality: notice.footer.clone(),
         font: String::new(),
+        ..Report::default()
     };
     let mut doc = build(&report, fonts)?;
     lock(&mut doc, "")?;
@@ -698,6 +808,50 @@ pub fn render_notice_pdf(notice: &Notice, fonts: PdfFonts<'_>) -> Result<Vec<u8>
     doc.save_to(&mut out)
         .map_err(|e| ExportError::Package(e.to_string()))?;
     Ok(out)
+}
+
+/// Her logo as an image: a JPEG as it is (DCT), a PNG as its pixels, with its transparency
+/// as a soft mask. Compressed with the rest of the file.
+fn logo_image(doc: &mut Document, logo: &Logo) -> Result<lopdf::ObjectId, ExportError> {
+    let (w, h) = (i64::from(logo.width), i64::from(logo.height));
+    match logo.format {
+        LogoFormat::Jpeg => {
+            let space = if crate::image::jpeg_gray(logo) {
+                "DeviceGray"
+            } else {
+                "DeviceRGB"
+            };
+            Ok(doc.add_object(
+                Stream::new(
+                    dictionary! {
+                        "Type" => "XObject", "Subtype" => "Image", "Width" => w, "Height" => h,
+                        "ColorSpace" => space, "BitsPerComponent" => 8, "Filter" => "DCTDecode",
+                    },
+                    logo.bytes.clone(),
+                )
+                .with_compression(false),
+            ))
+        }
+        LogoFormat::Png => {
+            let px = crate::image::png_pixels(logo)?;
+            let space = if px.gray { "DeviceGray" } else { "DeviceRGB" };
+            let mut dict = dictionary! {
+                "Type" => "XObject", "Subtype" => "Image", "Width" => w, "Height" => h,
+                "ColorSpace" => space, "BitsPerComponent" => 8,
+            };
+            if let Some(alpha) = px.alpha {
+                let mask = doc.add_object(Stream::new(
+                    dictionary! {
+                        "Type" => "XObject", "Subtype" => "Image", "Width" => w, "Height" => h,
+                        "ColorSpace" => "DeviceGray", "BitsPerComponent" => 8,
+                    },
+                    alpha,
+                ));
+                dict.set("SMask", mask);
+            }
+            Ok(doc.add_object(Stream::new(dict, px.color)))
+        }
+    }
 }
 
 /// The document, not yet encrypted.
@@ -741,7 +895,12 @@ fn build(report: &Report, fonts: PdfFonts<'_>) -> Result<Document, ExportError> 
     if let Some(b) = &bold {
         fonts_dict.set("F2", embed(&mut doc, b, "DVReport-Bold"));
     }
-    let resources = doc.add_object(dictionary! { "Font" => fonts_dict });
+    let mut res = dictionary! { "Font" => fonts_dict };
+    if let Some(logo) = &report.logo {
+        let image = logo_image(&mut doc, logo)?;
+        res.set("XObject", dictionary! { "Logo" => image });
+    }
+    let resources = doc.add_object(res);
     let mut kids = Vec::with_capacity(count);
     for c in contents {
         let content = doc.add_object(Stream::new(dictionary! {}, c.into_bytes()));
@@ -1073,5 +1232,49 @@ mod tests {
         assert!(raw.contains("/Encrypt") && !raw.contains("Producer") && !raw.contains("Author"));
         let doc = Document::load_mem(&pdf).unwrap();
         assert_eq!(doc.get_pages().len(), 1);
+    }
+
+    #[test]
+    fn parents_pdf_carries_the_logo_and_the_chart() {
+        let Some(font) = system_font() else {
+            eprintln!("no Hebrew font on this computer; skipped");
+            return;
+        };
+        let fonts = PdfFonts {
+            regular: &font,
+            bold: None,
+        };
+        for logo in [
+            crate::image::tests::png(40, 20, 6, 2),
+            crate::image::tests::png(10, 10, 2, 0),
+            crate::image::tests::jpeg(30, 10),
+        ] {
+            let mut r = crate::docx::tests::parents(false);
+            r.logo = Some(crate::check_logo(&logo).unwrap());
+            let doc = build(&r, fonts).unwrap();
+            let page = doc.page_iter().next().unwrap();
+            let content = String::from_utf8(doc.get_page_content(page).unwrap()).unwrap();
+            assert!(content.contains("/Logo Do"), "the logo on the first page");
+            let images = doc
+                .objects
+                .values()
+                .filter_map(|o| o.as_stream().ok())
+                .filter(|s| s.dict.get(b"Subtype").and_then(Object::as_name).ok() == Some(b"Image"))
+                .count();
+            assert!(images >= 1);
+            let pdf = render_pdf(&r, fonts, None).unwrap();
+            if let Ok(dir) = std::env::var("DV_PDF_SAMPLE") {
+                let dir = std::path::Path::new(&dir);
+                std::fs::write(
+                    dir.join(format!(
+                        "parents-{}.pdf",
+                        r.logo.as_ref().map_or("", |l| l.extension())
+                    )),
+                    &pdf,
+                )
+                .unwrap();
+                std::fs::write(dir.join("parents.docx"), crate::render(&r).unwrap()).unwrap();
+            }
+        }
     }
 }

@@ -4,6 +4,8 @@
 import type { ActivityEntry } from "../ipc/generated/ActivityEntry";
 import type { AppStatus } from "../ipc/generated/AppStatus";
 import type { BackupStatus } from "../ipc/generated/BackupStatus";
+import type { DriveBackupStatus } from "../ipc/generated/DriveBackupStatus";
+import type { DriveCleanupResult } from "../ipc/generated/DriveCleanupResult";
 import type { StagedBackup } from "../ipc/generated/StagedBackup";
 import type { CaseDetail } from "../ipc/generated/CaseDetail";
 import type { CaseInput } from "../ipc/generated/CaseInput";
@@ -21,6 +23,7 @@ import type { Folder } from "../ipc/generated/Folder";
 import type { NameMatch } from "../ipc/generated/NameMatch";
 import type { Prepared } from "../ipc/generated/Prepared";
 import type { ReportSettings } from "../ipc/generated/ReportSettings";
+import type { LogoView } from "../ipc/generated/LogoView";
 import type { TemplateView } from "../ipc/generated/TemplateView";
 import type { ReviewPart } from "../ipc/generated/ReviewPart";
 import type { Role } from "../ipc/generated/Role";
@@ -96,6 +99,7 @@ interface Case {
 
 type Pending =
   | { type: "verify"; caseId: string; section: string; draftIds: string[] }
+  | { type: "report_check"; caseId: string; sections: string[]; texts: string[] }
   | { type: "section"; caseId: string; section: string; refs: { sid: string; label: string; tagged: string }[]; instruction: string; replaces: string | null; points?: string }
   | { type: "consult"; question: string; shown: string; hidden: string[]; caseId: string | null; conversationId: string | null }
   | { type: "sort"; caseId: string; materials: { id: string; count: number; content: string }[] };
@@ -176,6 +180,9 @@ export class FakeCore {
   private lastCheckAt: number | null = null;
   private secretChanged = false;
   private googleOn = false;
+  /** The encrypted copy in Drive (D-099): off by default, needs Google connected. */
+  private driveOn = false;
+  private driveLastAt: number | null = null;
   private autoBackup = true;
   private reviewedAt: number | null = null;
   private convs: { id: string; caseId: string | null; updated: number; turns: { role: string; text: string; hidden: string[]; demo: boolean; at: number }[] }[] = [];
@@ -190,8 +197,12 @@ export class FakeCore {
   private lockMinutes = 15;
   private capUsd: number | null = null;
   private verifyOn = true;
+  /** The check of the whole report (D-097): off until she turns it on. */
+  private reportCheckOn = false;
   private nameModel = { enabled: false, downloaded: false, size_mb: 705, problem: null as string | null };
   private ready: Record<string, number | null> = {};
+  /** Her answer for each instrument's tables (D-098); none is "awaiting". */
+  private instrumentAnswers: Record<string, "approved" | "not_used"> = {};
   private sendStopped = false;
   /** The material deleted last, for "ביטול" (forgotten on lock, as in the core). */
   private removedInput: { caseId: string; input: CaseInput; at: number } | null = null;
@@ -205,12 +216,14 @@ export class FakeCore {
   /** What the opening says about the time since the last one (L4), for tests. */
   sinceLast: string | null = null;
   private template: TemplateView | null = null;
+  private logo: LogoView | null = null;
   private report: ReportSettings = {
     title: "דוח אבחון פסיכולוגי-התפתחותי",
     font: "David",
     confidentiality: "חסוי – מידע רפואי-פסיכולוגי. לשימוש הגורם המטפל בלבד.",
     signature: ["ד\"ר רותם בדויה", "פסיכולוגית התפתחותית מומחית"],
     supervisor: [],
+    parents_opening: "להורים שלום, זהו סיכום האבחון בשפה פשוטה. הדוח המלא נשמר אצלי, ואפשר לקבל אותו בכל עת.",
   };
   private cases: Case[] = [];
   private sampleId: string | null = null;
@@ -333,6 +346,14 @@ export class FakeCore {
     return f;
   }
 
+  /** As the core: two folders side by side never share a name. */
+  private noSiblingNamed(parent: string | null, name: string, except: string | null) {
+    const key = name.trim().toLowerCase();
+    if (this.folderList.some((f) => f.parent_id === parent && f.id !== except && f.name.trim().toLowerCase() === key)) {
+      fail("refused", `כבר יש כאן תיקייה בשם "${name}".`);
+    }
+  }
+
   private folderOf(id: unknown): Folder {
     return this.folderList.find((f) => f.id === id) ?? fail("not_found", "התיקייה לא נמצאה");
   }
@@ -384,6 +405,15 @@ export class FakeCore {
     c.inputs.push(input);
     c.updated = now();
     return input;
+  }
+
+  /** Every instrument with her answer and the open cases that hold a table of it. */
+  private instrumentApprovals() {
+    return instruments.map((instrument) => ({
+      instrument,
+      status: this.instrumentAnswers[instrument.key] ?? ("awaiting" as const),
+      open_cases: this.cases.filter((c) => c.deletedAt === null && [...c.sheets.values()].some((sh) => sh.instrument === instrument.key)).length,
+    }));
   }
 
   private find(id: unknown): Case {
@@ -481,7 +511,14 @@ export class FakeCore {
         summary: read ? restore(read.text, c.people, this.practitioner) : "",
         record: read?.record ? { ...read.record, date: date ? `${date[1]}/${date[0]}` : "" } : null,
         summary_notes: [],
+        left_out: null,
       };
+    }).map((route) => {
+      // A score table of an instrument she does not give feeds nothing (D-098).
+      const sheet = c.sheets.get(route.input_id);
+      if (!sheet || this.instrumentAnswers[sheet.instrument] !== "not_used") return route;
+      const name = instruments.find((x) => x.key === sheet.instrument)?.name ?? sheet.instrument;
+      return { ...route, feeds: [], needs_sorting: false, left_out: `סימנת בהגדרות שאת לא מעבירה את ${name}. הציונים נשארים בתיק כמו שנשמרו, אבל לא נשלחים ולא נכנסים לדוח.` };
     });
   }
 
@@ -573,6 +610,30 @@ export class FakeCore {
     const approval = newId("approval");
     this.pending.set(approval, { type: "verify", caseId: c.id, section: key, draftIds: drafts.map((d) => d.id) });
     return { ...base, approval_id: approval, parts };
+  }
+
+  /** The check of the whole report (D-097): the approved sections only, once nothing waits. */
+  private prepareReportCheck(c: Case): Prepared {
+    if (!this.reportCheckOn) fail("refused", "בדיקת הדוח כולו כבויה. אפשר להפעיל אותה בהגדרות.");
+    if (!c.meta.consent) fail("consent_missing", `לפני שליחה ל-${this.ai} צריך לרשום בתיק את הסכמת ההורים.`);
+    const content = SECTIONS.filter((s) => s.key !== "signature");
+    const waiting = content.filter((s) => c.drafts.some((d) => d.section === s.key && d.status === "proposed" && !d.replaces));
+    if (waiting.length) fail("refused", `הדוח נבדק כולו אחרי שכל הטיוטות אושרו. עוד מחכות לאישור: ${waiting.map((s) => s.title).join(", ")}.`);
+    const parts: ReviewPart[] = [];
+    const sections: string[] = [];
+    const texts: string[] = [];
+    for (const s of content) {
+      const text = c.drafts.filter((d) => d.section === s.key && d.status === "approved").map((d) => d.text).join("\n");
+      if (!text) continue;
+      const f = this.filterFor(c, text);
+      parts.push({ label: `סעיף מאושר · ${s.title}`, original: f.original_segments, outgoing: f.tagged_segments });
+      sections.push(s.key);
+      texts.push(f.tagged);
+    }
+    if (sections.length < 2) fail("refused", "בדיקת הדוח כולו משווה בין סעיפים, וצריך לפחות שני סעיפים מאושרים.");
+    const approval = newId("approval");
+    this.pending.set(approval, { type: "report_check", caseId: c.id, sections, texts });
+    return this.withKept(c, { approval_id: approval, parts, suspects: [], auto_hidden: [], hidden: [], checks: { declared_names: 0, patterns: 0, name_suspects: 0, indirect_suspects: 0 }, blocked: [], demo_mode: true });
   }
 
   /** Sorting into sections (D-022): every material not sorted yet, one review. */
@@ -750,7 +811,7 @@ export class FakeCore {
   // ------------------------------------------------------------------ the IPC surface
   async handle(cmd: string, args: unknown, options?: { headers?: Record<string, string> }): Promise<unknown> {
     const a = (args ?? {}) as Args;
-    if (!["plugin:event|listen", "plugin:event|unlisten", "ping", "recent_crashes", "app_status", "unlock", "unlock_with_recovery", "create_vault", "confirm_recovery_key", "score_instruments", "preview_scores", "choose_backup", "restore_backup", "forget_backup"].includes(cmd) && !this.unlocked) {
+    if (!["plugin:event|listen", "plugin:event|unlisten", "ping", "recent_crashes", "app_status", "unlock", "unlock_with_recovery", "create_vault", "confirm_recovery_key", "google_status", "google_recover", "google_cancel", "choose_backup", "restore_backup", "forget_backup"].includes(cmd) && !this.unlocked) {
       fail("locked", "הכספת נעולה. יש לפתוח אותה מחדש.");
     }
     if (FakeStyle.handles(cmd)) return this.style.handle(cmd, a, args, options?.headers ?? {}, this.allPeople(), this.practitioner);
@@ -763,7 +824,7 @@ export class FakeCore {
       case "recent_crashes":
         return [];
       case "ping":
-        return { ipc_version: 1, core_version: "0.1.0", build_commit: "browser-preview", fips_active: false, platform: "browser" };
+        return { ipc_version: 1, core_version: "0.1.0", build_commit: "browser-preview", fips_active: false, platform: "browser", slowest_key_check_ms: 0, key_check_wait_ms: 45000 };
       case "app_status":
         return this.status();
       case "unlock":
@@ -782,7 +843,7 @@ export class FakeCore {
       case "hold_unsaved":
         return null;
       case "take_unsaved":
-        return null;
+        return [];
       case "security_status":
       case "set_send_stopped": {
         if (cmd === "set_send_stopped") this.sendStopped = Boolean(a.stopped);
@@ -806,10 +867,13 @@ export class FakeCore {
       case "readiness":
       case "confirm_readiness": {
         if (cmd === "confirm_readiness") this.ready[a.key as string] = a.done ? 1_790_000_000 : null;
-        const manual = ["zdr", "consent_form", "score_tables", "legal"].map((key) => ({
+        const manual = ["zdr", "consent_form", "legal"].map((key) => ({
           key, done: this.ready[key] != null, checked_by_program: false, confirmed_at: this.ready[key] ?? null,
         }));
+        // As the core (D-098): every instrument answered, not only those in open cases.
+        const tables = this.instrumentApprovals().every((x) => x.status !== "awaiting");
         const items = [...manual,
+          { key: "score_tables", done: tables, checked_by_program: true, confirmed_at: null },
           { key: "api_key", done: false, checked_by_program: true, confirmed_at: null },
           { key: "backup", done: false, checked_by_program: true, confirmed_at: null },
           { key: "disk", done: true, checked_by_program: true, confirmed_at: null }];
@@ -843,6 +907,32 @@ export class FakeCore {
           checks: p.draftIds.map((_, i) => ({ paragraph: `P${i + 1}`, verdict: "partial", notes: [] })),
           demo: true,
         };
+      }
+      case "report_check_setting":
+        return { on: this.reportCheckOn, cents_per_check: 15 };
+      case "set_report_check":
+        this.reportCheckOn = Boolean(a.on);
+        return null;
+      case "prepare_report_check":
+        return this.prepareReportCheck(this.find(a.caseId));
+      case "send_report_check": {
+        const p = this.pending.get(String(a.approvalId));
+        if (p?.type !== "report_check") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
+        this.pending.delete(String(a.approvalId));
+        this.keepSent(p.caseId, "report_check", p.texts.join("\n\n"));
+        await new Promise((r) => setTimeout(r, 900));
+        // Like the demo check: a sentence said word for word in two sections is a repetition.
+        const sentences = (t: string) => t.split(/(?<=[.!?])/).map((x) => x.trim()).filter((x) => x.length >= 20);
+        const notes = [];
+        for (let i = 0; i < p.texts.length; i++) {
+          for (let j = i + 1; j < p.texts.length; j++) {
+            const theirs = sentences(p.texts[j] ?? "");
+            if (sentences(p.texts[i] ?? "").some((x) => theirs.includes(x))) {
+              notes.push({ kind: "repetition", sections: [p.sections[i], p.sections[j]], note: "מצב הדגמה: אותו משפט מופיע בשני הסעיפים." });
+            }
+          }
+        }
+        return { notes, checked: p.sections, demo: true };
       }
       case "usage_summary":
         return { month: "2026-10", requests: 0, input_tokens: 0, output_tokens: 0, estimated_cents: 0, cap_usd: this.capUsd, unpriced_models: [] };
@@ -942,6 +1032,22 @@ export class FakeCore {
       case "clear_report_template":
         this.template = null;
         return null;
+      case "report_logo":
+        return this.logo;
+      case "set_report_logo": {
+        // As the core: by the bytes, never the name; PNG or JPEG only, at most 1 MB.
+        const b = args instanceof Uint8Array ? args : new Uint8Array();
+        const png = b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
+        const jpeg = b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
+        if (b.length === 0) return fail("refused", "הקובץ ריק.");
+        if (b.length > 1024 * 1024) return fail("refused", "התמונה גדולה מ-1MB. שומרים אותה בגודל קטן יותר ובוחרים שוב.");
+        if (!png && !jpeg) return fail("refused", "רק תמונת PNG או JPEG. הקובץ הזה אינו אחד מהם.");
+        this.logo = { format: png ? "PNG" : "JPEG", width: 240, height: 80, size_kb: Math.ceil(b.length / 1024) };
+        return this.logo;
+      }
+      case "clear_report_logo":
+        this.logo = null;
+        return null;
       case "list_cases":
         return this.cases.filter((c) => c.deletedAt === null).map((c) => this.summary(c));
       case "list_trash":
@@ -965,13 +1071,19 @@ export class FakeCore {
         const name = String(a.name ?? "").trim();
         if (!name) fail("refused", "צריך לתת שם לתיקייה.");
         if (a.parentId) this.folderOf(a.parentId);
+        this.noSiblingNamed((a.parentId as string | null) ?? null, name, null);
         return this.addFolder((a.parentId as string | null) ?? null, name);
       }
-      case "rename_folder":
-        this.folderOf(a.id).name = String(a.name ?? "").trim() || fail("refused", "צריך לתת שם לתיקייה.");
+      case "rename_folder": {
+        const f = this.folderOf(a.id);
+        const name = String(a.name ?? "").trim() || fail("refused", "צריך לתת שם לתיקייה.");
+        this.noSiblingNamed(f.parent_id, name, f.id);
+        f.name = name;
         return null;
+      }
       case "move_folder": {
         const f = this.folderOf(a.id);
+        this.noSiblingNamed((a.parentId as string | null) ?? null, f.name, f.id);
         for (let p = (a.parentId as string | null) ?? null; p; p = this.folderOf(p).parent_id) {
           if (p === f.id) fail("refused", "אי אפשר להעביר תיקייה לתוך עצמה או לתוך תיקייה שבתוכה.");
         }
@@ -1083,8 +1195,18 @@ export class FakeCore {
         return null;
       }
       case "score_instruments":
-        return instruments;
+        return this.instrumentApprovals().filter((x) => x.status !== "not_used");
+      case "instrument_approvals":
+        return this.instrumentApprovals();
+      case "set_instrument_status": {
+        const key = String(a.key);
+        if (!instruments.some((i) => i.key === key)) return fail("not_found", "המבחן לא נמצא");
+        if (a.status !== "approved" && a.status !== "not_used") return fail("refused", "אפשר לבחור \"מאושר\" או \"לא מעבירה את זה\".");
+        this.instrumentAnswers[key] = a.status;
+        return this.instrumentApprovals();
+      }
       case "preview_scores":
+        if (this.instrumentAnswers[(a.sheet as ScoreSheet).instrument] === "not_used") return fail("refused", "סימנת בהגדרות שאת לא מעבירה את המבחן הזה.");
         try {
           return formatSheet(a.sheet as ScoreSheet);
         } catch (e) {
@@ -1093,6 +1215,7 @@ export class FakeCore {
       case "save_scores": {
         const c = this.find(a.caseId);
         const sheet = a.sheet as ScoreSheet;
+        if (this.instrumentAnswers[sheet.instrument] === "not_used") return fail("refused", "סימנת בהגדרות שאת לא מעבירה את המבחן הזה.");
         let text = "";
         try {
           text = formatSheet(sheet);
@@ -1213,12 +1336,14 @@ export class FakeCore {
           c.drafts = c.drafts.filter((x) => x.id !== d.id);
           return null;
         }
+        const seen = a.openedWith == null ? null : String(a.openedWith).trim();
+        const changedMeanwhile = seen !== null && restore(d.text, c.people, this.practitioner).trim() !== seen;
         const tagged = this.filterFor(c, String(a.text)).tagged;
         keepVersion(d, tagged);
         d.text = tagged;
         d.byAi = false;
         d.status = "approved";
-        return null;
+        return changedMeanwhile;
       }
       case "paragraph_versions": {
         const c = this.find(a.caseId);
@@ -1303,6 +1428,7 @@ export class FakeCore {
         return {
           blocking: [], to_complete: missing, empty_sections: d.sections.filter((s) => !s.approved).map((s) => s.title),
           included_sections: d.sections.filter((s) => s.approved).length, score_tables: c.sheets.size, file_name: `דוח אבחון – ${c.meta.code}.docx`,
+          parents_left_out: 0, parents_chart_rows: c.sheets.size > 0 ? 3 : 0,
         } satisfies ExportCheck;
       }
       case "letter":
@@ -1332,6 +1458,10 @@ export class FakeCore {
         this.lastBackupAt = now();
         this.secretChanged = false;
         this.logActivity("backup_written", "security", "גיבוי מוצפן נשמר");
+        if (this.driveOn) {
+          this.driveLastAt = now();
+          this.logActivity("drive_backup_uploaded", "security", "עותק מוצפן של הגיבוי עלה לגוגל דרייב");
+        }
         const day = new Date().toISOString().slice(0, 10);
         return { path: `E:\\גיבויים\\גיבוי כספת האבחון ${day}.vaultbak (בהדמיה לא נשמר קובץ)`, bytes: 1_843_200, created_at: this.lastBackupAt };
       }
@@ -1383,9 +1513,25 @@ export class FakeCore {
         if (!String(a.password ?? "")) fail("wrong_secret", "הסיסמה לא נכונה.");
         this.googleOn = false;
         this.logActivity("google_recovery_off", "security", "בוטלה הכניסה עם גוגל למקרה ששוכחים את הסיסמה", true);
+        // The copy in Drive rests on this connection, and turns off with it (D-099).
+        this.handle("drive_backup_turn_off", {});
         return null;
       case "google_cancel":
         return null;
+      case "drive_backup_status":
+        return { available: true, connected: this.googleOn, on: this.driveOn, last_at: this.driveOn ? this.driveLastAt : null, problem: null, cleanup_pending: false, copies_left: false } satisfies DriveBackupStatus;
+      case "drive_backup_turn_on":
+        if (!this.googleOn) fail("refused", "קודם מחברים את חשבון הגוגל: הגדרות ← סיסמה ואבטחה ← כניסה עם גוגל כששוכחים סיסמה.");
+        this.driveOn = true;
+        this.logActivity("drive_backup_on", "security", "הופעל עותק מוצפן של הגיבוי בגוגל דרייב", true);
+        return this.handle("drive_backup_status", {});
+      case "drive_backup_turn_off": {
+        const was = this.driveOn;
+        if (was) this.logActivity("drive_backup_off", "security", "כובה העותק המוצפן של הגיבוי בגוגל דרייב", true);
+        this.driveOn = false;
+        this.driveLastAt = null;
+        return (was ? "cleaned" : "off") satisfies DriveCleanupResult;
+      }
       case "google_recover":
         if (!this.googleOn) fail("refused", "הכניסה עם גוגל לא מופעלת במחשב הזה.");
         this.unlocked = true;

@@ -156,7 +156,20 @@ impl SlotJob {
     #[must_use]
     pub fn run(self) -> SlotMade {
         let seal = self.seal.as_ref();
-        let here = key_here(seal, &self.dir, self.header.password_bound());
+        // Loaded as for an opening: a Keychain or Windows that is only slow, locked or
+        // cancelled is asked once more and then says to try again, before any new key is
+        // made; never "another computer" (review of #136).
+        let here = match key_for_opening(seal, &self.dir, self.header.password_bound()) {
+            Ok(here) => here,
+            Err(e) => {
+                return SlotMade {
+                    session: self.session,
+                    ticket: self.ticket,
+                    made: Err(e),
+                    key_aside: false,
+                };
+            }
+        };
         let proof = self.proof.secret(here.as_ref());
         let mut key_aside = false;
         let made = match &self.new_password {
@@ -168,20 +181,24 @@ impl SlotJob {
                 // until the slot is written, so the key in use is never lost to a slot
                 // that was not (review of stage 5, S5).
                 let fresh = if here.is_none() {
-                    let (key, aside) = key_for_new_slot(seal, &self.dir);
-                    key_aside = aside && key.is_some();
-                    key
+                    key_for_new_slot(seal, &self.dir).map(|(key, aside)| {
+                        key_aside = aside;
+                        key
+                    })
                 } else {
-                    None
+                    Ok(None)
                 };
-                NewSlot::password_here(
-                    &self.header,
-                    proof,
-                    new_password,
-                    params,
-                    here.as_ref().or(fresh.as_ref()),
-                )
-                .map(|s| (s, None))
+                fresh
+                    .and_then(|fresh| {
+                        NewSlot::password_here(
+                            &self.header,
+                            proof,
+                            new_password,
+                            params,
+                            here.as_ref().or(fresh.as_ref()),
+                        )
+                    })
+                    .map(|s| (s, None))
             }
             None => NewSlot::recovery(&self.header, proof).map(|(s, k)| (s, Some(k))),
         };
@@ -205,6 +222,8 @@ pub struct BackupTask {
     dest: PathBuf,
     folder: PathBuf,
     auto: bool,
+    /// The encrypted copy in her Drive is on (D-099): keep the file as it was read back.
+    drive: bool,
 }
 
 /// A backup written and read back (or why not), waiting for [`Core::finish_backup`].
@@ -215,15 +234,21 @@ pub struct BackupRun {
     folder: PathBuf,
     auto: bool,
     done: Result<dv_vault::BackupWritten, CoreError>,
+    /// The verified file, only when the Drive copy is on.
+    pub(crate) file: Option<Vec<u8>>,
 }
 
 impl BackupTask {
     #[must_use]
     pub fn run(self) -> BackupRun {
-        let done = if self.cancel.is_set() {
+        let written = if self.cancel.is_set() {
             Err(locked_meanwhile())
         } else {
             Self::write(self.job, &self.dest)
+        };
+        let (done, file) = match written {
+            Ok((done, file)) => (Ok(done), self.drive.then_some(file)),
+            Err(e) => (Err(e), None),
         };
         BackupRun {
             session: self.session,
@@ -232,10 +257,14 @@ impl BackupTask {
             folder: self.folder,
             auto: self.auto,
             done,
+            file,
         }
     }
 
-    fn write(job: dv_vault::BackupJob, dest: &Path) -> Result<dv_vault::BackupWritten, CoreError> {
+    fn write(
+        job: dv_vault::BackupJob,
+        dest: &Path,
+    ) -> Result<(dv_vault::BackupWritten, Vec<u8>), CoreError> {
         job.write(dest)
             .map_err(|_| {
                 CoreError::Needs(
@@ -246,7 +275,7 @@ impl BackupTask {
                 )
             })
             .and_then(|w| {
-                w.verify().map_err(|_| {
+                w.verify_keeping_file().map_err(|_| {
                     CoreError::Needs(
                         "הגיבוי נכתב, אבל בבדיקה הוא לא נפתח כמו שצריך. כדאי לנסות שוב, ואם זה \
                          חוזר, לנסות דיסק אחר."
@@ -307,19 +336,24 @@ pub struct Restored {
 impl RestoreJob {
     #[must_use]
     pub fn run(self) -> Restored {
-        // A failed restore removes what it wrote.
-        let vault = Vault::restore_backup(&self.bytes, &self.dir, self.proof.secret(None)).map(
-            |(mut v, _)| {
-                // The backup's password slot opens anywhere; here it is bound to this
-                // computer at once (D-076). Best effort: otherwise at the next opening.
-                if let Proof::Password(p) = &self.proof {
-                    if let Some(here) = key_here(self.seal.as_ref(), &self.dir, false) {
-                        let _ = v.bind_password(p, &here);
-                    }
+        // A failed restore removes what it wrote. The copy in her Drive is never turned on by
+        // a restore (D-099): when that cannot be made sure of, the restore fails.
+        let vault = Vault::restore_backup_then(
+            &self.bytes,
+            &self.dir,
+            self.proof.secret(None),
+            crate::drive_backup::forget_on_restore,
+        )
+        .map(|(mut v, _)| {
+            // The backup's password slot opens anywhere; here it is bound to this
+            // computer at once (D-076). Best effort: otherwise at the next opening.
+            if let Proof::Password(p) = &self.proof {
+                if let Some(here) = key_here(self.seal.as_ref(), &self.dir, false) {
+                    let _ = v.bind_password(p, &here);
                 }
-                v
-            },
-        );
+            }
+            v
+        });
         Restored {
             bytes: self.bytes,
             vault,
@@ -430,9 +464,11 @@ pub struct ExportJob {
     session: u64,
     cancel: Cancel,
     case_id: String,
-    report: dv_export::Report,
+    report: WipedReport,
     check: crate::ExportCheck,
     format: ExportFormat,
+    /// The parents' version (round 55), for the audit log.
+    parents: bool,
 }
 
 /// The file's bytes (or why not), waiting for [`Core::finish_export`].
@@ -442,6 +478,7 @@ pub struct Exported {
     check: crate::ExportCheck,
     pdf: bool,
     protected: bool,
+    parents: bool,
     /// The report as a file, wiped if it is dropped unsaved (it landed after a lock).
     bytes: Result<Zeroizing<Vec<u8>>, CoreError>,
 }
@@ -452,9 +489,9 @@ pub(crate) fn export_error(e: dv_export::ExportError) -> CoreError {
             "סיסמה לקובץ צריכה להיות באורך {} תווים לפחות.",
             dv_export::MIN_PASSWORD_CHARS
         )),
-        dv_export::ExportError::Template(m) | dv_export::ExportError::Pdf(m) => {
-            CoreError::Refused(m)
-        }
+        dv_export::ExportError::Template(m)
+        | dv_export::ExportError::Pdf(m)
+        | dv_export::ExportError::Image(m) => CoreError::Refused(m),
         other => CoreError::Internal(other.to_string()),
     }
 }
@@ -467,10 +504,29 @@ impl Exported {
     }
 }
 
+/// The report's texts, wiped when the job ends: after `run`, or if the job is dropped before it
+/// ran (a lock in between).
+struct WipedReport(dv_export::Report);
+
+impl std::ops::Deref for WipedReport {
+    type Target = dv_export::Report;
+    fn deref(&self) -> &dv_export::Report {
+        &self.0
+    }
+}
+
+impl Drop for WipedReport {
+    fn drop(&mut self) {
+        self.0.wipe();
+    }
+}
+
 impl ExportJob {
     #[must_use]
-    pub fn run(self) -> Exported {
+    pub fn run(mut self) -> Exported {
         let (pdf, protected, bytes) = self.render();
+        // The report's texts (names, paragraphs, scores) are not needed once the file is made.
+        self.report.0.wipe();
         // Locked while it was rendered: the file is wiped now, and nothing is saved.
         let bytes = if self.cancel.is_set() {
             Err(locked_meanwhile())
@@ -483,6 +539,7 @@ impl ExportJob {
             check: self.check,
             pdf,
             protected,
+            parents: self.parents,
             bytes,
         }
     }
@@ -568,7 +625,7 @@ fn locked_meanwhile() -> CoreError {
 }
 
 impl Core {
-    fn same_session(&self, session: u64) -> Result<(), CoreError> {
+    pub(crate) fn same_session(&self, session: u64) -> Result<(), CoreError> {
         if self.vault.is_none() {
             return Err(CoreError::Locked);
         }
@@ -757,11 +814,41 @@ impl Core {
             dest,
             folder,
             auto: false,
+            drive: self.drive_backup_on(),
         })
     }
 
     /// Record a backup that was written and read back: it counts from now on.
     pub fn finish_backup(&mut self, run: BackupRun) -> Result<BackupDone, CoreError> {
+        self.finish_backup_for_drive(run).0
+    }
+
+    /// As [`Core::finish_backup`], and when the encrypted copy in her Drive is on, what to
+    /// upload with the core free ([`crate::drive_backup::DriveUpload::run`]). The local backup
+    /// is recorded first and stands whatever happens to the upload (D-099).
+    pub fn finish_backup_for_drive(
+        &mut self,
+        mut run: BackupRun,
+    ) -> (
+        Result<BackupDone, CoreError>,
+        Option<crate::drive_backup::DriveUpload>,
+    ) {
+        let file = run.file.take();
+        let session = run.session;
+        // A password or kit changed while it was written: this backup opens only with the old
+        // one, which may be why it was changed. It stays on her drive, and never goes up.
+        let current = self
+            .vault_ref()
+            .is_ok_and(|v| v.header_copy().slots == run.header.slots);
+        let done = self.finish_backup_only(run);
+        let upload = match (&done, file) {
+            (Ok(d), Some(file)) if current => self.begin_drive_upload(session, d.created_at, file),
+            _ => None,
+        };
+        (done, upload)
+    }
+
+    fn finish_backup_only(&mut self, run: BackupRun) -> Result<BackupDone, CoreError> {
         let auto = run.auto;
         let result = self.record_backup(run);
         // A failed automatic backup waits before the next try (`auto_backup_tried`).
@@ -1031,8 +1118,16 @@ impl Core {
     // ------------------------------------------------------------ export
 
     /// The report from approved paragraphs, with real names, and what stops the export.
-    fn export_job(&mut self, case_id: &str, format: ExportFormat) -> Result<ExportJob, CoreError> {
-        let (report, check) = self.build_report(case_id)?;
+    fn export_job(
+        &mut self,
+        case_id: &str,
+        format: ExportFormat,
+        parents: Option<crate::ParentsOptions>,
+    ) -> Result<ExportJob, CoreError> {
+        let (report, check) = match parents {
+            Some(options) => self.build_parents_report(case_id, options)?,
+            None => self.build_report(case_id)?,
+        };
         if !check.blocking.is_empty() {
             return Err(CoreError::Refused(check.blocking.join(" · ")));
         }
@@ -1040,9 +1135,10 @@ impl Core {
             session: self.session,
             cancel: self.cancel.clone(),
             case_id: case_id.to_owned(),
-            report,
+            report: WipedReport(report),
             check,
             format,
+            parents: parents.is_some(),
         })
     }
 
@@ -1053,6 +1149,16 @@ impl Core {
         case_id: &str,
         password: Option<&str>,
     ) -> Result<ExportJob, CoreError> {
+        self.begin_export_report_as(case_id, password, None)
+    }
+
+    /// The Word file, full or (with `parents`) the parents' version (round 55, D-095).
+    pub fn begin_export_report_as(
+        &mut self,
+        case_id: &str,
+        password: Option<&str>,
+        parents: Option<crate::ParentsOptions>,
+    ) -> Result<ExportJob, CoreError> {
         let template = self.template_bytes()?;
         self.export_job(
             case_id,
@@ -1060,6 +1166,7 @@ impl Core {
                 template,
                 password: password.map(|p| Zeroizing::new(p.to_owned())),
             },
+            parents,
         )
     }
 
@@ -1071,6 +1178,16 @@ impl Core {
         case_id: &str,
         password: Option<&str>,
     ) -> Result<ExportJob, CoreError> {
+        self.begin_export_pdf_as(case_id, password, None)
+    }
+
+    /// The locked PDF, full or (with `parents`) the parents' version (round 55, D-095).
+    pub fn begin_export_pdf_as(
+        &mut self,
+        case_id: &str,
+        password: Option<&str>,
+        parents: Option<crate::ParentsOptions>,
+    ) -> Result<ExportJob, CoreError> {
         self.export_job(
             case_id,
             ExportFormat::Pdf {
@@ -1078,6 +1195,7 @@ impl Core {
                     .filter(|p| !p.is_empty())
                     .map(|p| Zeroizing::new(p.to_owned())),
             },
+            parents,
         )
     }
 
@@ -1097,9 +1215,14 @@ impl Core {
                 "pdf": true,
                 "sha256": dv_vault::crypto::sha256_hex(&bytes),
                 "sections": sections,
+                "parents": exported.parents,
             })
         } else {
-            serde_json::json!({ "protected": exported.protected, "sections": sections })
+            serde_json::json!({
+                "protected": exported.protected,
+                "sections": sections,
+                "parents": exported.parents,
+            })
         };
         self.vault_mut()?
             .record(dv_vault::AuditEvent::Export, Some(&exported.case_id), &meta)?;

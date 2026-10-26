@@ -9,7 +9,7 @@ describe("an edit open when the vault locks", () => {
     vi.useFakeTimers();
     const calls: unknown[] = [];
     mockIPC((cmd, args) => {
-      if (cmd === "hold_unsaved") calls.push((args as { edit: unknown }).edit);
+      if (cmd === "hold_unsaved") calls.push((args as { edits: unknown }).edits);
       return null;
     });
     const { rerender, unmount } = renderHook(({ text }: { text: string | null }) => useHoldUnsaved("c1", "פסקה", text), {
@@ -20,10 +20,10 @@ describe("an edit open when the vault locks", () => {
     rerender({ text: "ט" });
     rerender({ text: "טיוטה" });
     await act(async () => { vi.advanceTimersByTime(1000); });
-    expect(calls).toEqual([{ case_id: "c1", place: "פסקה", view: "report", text: "טיוטה" }]);
+    expect(calls).toEqual([[{ case_id: "c1", place: "פסקה", view: "report", text: "טיוטה" }]]);
     rerender({ text: null });
     await act(async () => { vi.advanceTimersByTime(500); });
-    expect(calls.at(-1)).toBeNull();
+    expect(calls.at(-1)).toEqual([]);
     unmount();
     vi.useRealTimers();
   });
@@ -32,7 +32,7 @@ describe("an edit open when the vault locks", () => {
     vi.useFakeTimers();
     const calls: unknown[] = [];
     mockIPC((cmd, args) => {
-      if (cmd === "hold_unsaved") calls.push((args as { edit: unknown }).edit);
+      if (cmd === "hold_unsaved") calls.push((args as { edits: unknown }).edits);
       return null;
     });
     let live: ((t: string) => void) | null = null;
@@ -45,7 +45,7 @@ describe("an edit open when the vault locks", () => {
     expect(calls).toEqual([]);
     // …and a lock by hand sends exactly what is in the box.
     await act(async () => { await holdNow(); });
-    expect(calls).toEqual([{ case_id: "c1", place: "פסקה", view: "report", text: "טיוטה" }]);
+    expect(calls).toEqual([[{ case_id: "c1", place: "פסקה", view: "report", text: "טיוטה" }]]);
     // Leaving the screen with the editor open keeps it held.
     unmount();
     await act(async () => { vi.advanceTimersByTime(500); });
@@ -54,11 +54,11 @@ describe("an edit open when the vault locks", () => {
     vi.useRealTimers();
   });
 
-  it("closing a second case's editor falls back to the first one, still open", async () => {
+  it("two cases' editors are both held, and closing one keeps the other", async () => {
     vi.useFakeTimers();
     const calls: unknown[] = [];
     mockIPC((cmd, args) => {
-      if (cmd === "hold_unsaved") calls.push((args as { edit: unknown }).edit);
+      if (cmd === "hold_unsaved") calls.push((args as { edits: unknown }).edits);
       return null;
     });
     // Case A's editor: typed, then she went to another case with it open.
@@ -72,7 +72,7 @@ describe("an edit open when the vault locks", () => {
     await act(async () => { vi.advanceTimersByTime(500); });
     b.rerender({ text: null });
     await act(async () => { await holdNow(); });
-    expect(calls.at(-1)).toEqual({ case_id: "case-a", place: "פסקה משלי", view: "report", text: "טקסט של תיק א בדוי" });
+    expect(calls.at(-1)).toEqual([{ case_id: "case-a", place: "פסקה משלי", view: "report", text: "טקסט של תיק א בדוי" }]);
     b.unmount();
     forgetHold();
     vi.useRealTimers();
@@ -82,7 +82,7 @@ describe("an edit open when the vault locks", () => {
     vi.useFakeTimers();
     const calls: unknown[] = [];
     mockIPC((cmd, args) => {
-      if (cmd === "hold_unsaved") calls.push((args as { edit: unknown }).edit);
+      if (cmd === "hold_unsaved") calls.push((args as { edits: unknown }).edits);
       return null;
     });
     const first = renderHook(() => useHoldUnsaved("c1", "פסקה", "טיוטה"));
@@ -95,14 +95,53 @@ describe("an edit open when the vault locks", () => {
     await act(async () => { vi.advanceTimersByTime(500); });
     again.rerender({ text: null });
     await act(async () => { await holdNow(); });
-    expect(calls.at(-1)).toBeNull();
+    expect(calls.at(-1)).toEqual([]);
     again.unmount();
     forgetHold();
     vi.useRealTimers();
   });
 
+  it("two texts kept at the lock are offered one after the other", async () => {
+    mockIPC((cmd) => (cmd === "take_unsaved"
+      ? [
+          { case_id: "c1", place: "פסקה בתיק א", view: "report", text: "טקסט בדוי א" },
+          { case_id: "c2", place: "רישום מפגש בתיק ב", view: "materials", text: "טקסט בדוי ב" },
+        ]
+      : null));
+    const api: AppApi = { status: status(), go: vi.fn(), refresh: vi.fn(), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn() };
+    render(<AppContext.Provider value={api}><UnsavedNotice /></AppContext.Provider>);
+    expect(await screen.findByDisplayValue("טקסט בדוי א")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "הבא (עוד 1)" }));
+    expect(screen.getByDisplayValue("טקסט בדוי ב")).toBeInTheDocument();
+    const closers = screen.getAllByRole("button", { name: "סגירה" });
+    fireEvent.click(closers[closers.length - 1] as HTMLElement);
+    expect(screen.queryByDisplayValue("טקסט בדוי ב")).toBeNull();
+  });
+
+  it("Escape or going to the first case still offers the next kept text", async () => {
+    mockIPC((cmd) => (cmd === "take_unsaved"
+      ? [
+          { case_id: "c1", place: "פסקה בתיק א", view: "report", text: "טקסט בדוי א" },
+          { case_id: "c2", place: "פסקה בתיק ב", view: "report", text: "טקסט בדוי ב" },
+          { case_id: "c3", place: "פסקה בתיק ג", view: "report", text: "טקסט בדוי ג" },
+        ]
+      : null));
+    const go = vi.fn();
+    const api: AppApi = { status: status(), go, refresh: vi.fn(), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn() };
+    render(<AppContext.Provider value={api}><UnsavedNotice /></AppContext.Provider>);
+    expect(await screen.findByDisplayValue("טקסט בדוי א")).toBeInTheDocument();
+    // The dialog listens for Escape from an effect; under load the text can be on screen before
+    // it runs. Focus moves in from the effect just before, so once it is inside, Escape is heard.
+    await vi.waitFor(() => expect(screen.getByRole("dialog")).toContainElement(document.activeElement as HTMLElement));
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    expect(await screen.findByDisplayValue("טקסט בדוי ב")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "מעבר לתיק" }));
+    expect(go).toHaveBeenCalledWith({ name: "case", id: "c2", view: "report" });
+    expect(screen.getByDisplayValue("טקסט בדוי ג")).toBeInTheDocument();
+  });
+
   it("is offered back once after entering", async () => {
-    mockIPC((cmd) => (cmd === "take_unsaved" ? { case_id: "c1", place: "פסקה בסעיף \"רקע\"", text: "הטקסט שלא נשמר" } : null));
+    mockIPC((cmd) => (cmd === "take_unsaved" ? [{ case_id: "c1", place: "פסקה בסעיף \"רקע\"", text: "הטקסט שלא נשמר" }] : null));
     const go = vi.fn();
     const api: AppApi = { status: status(), go, refresh: vi.fn(), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn() };
     render(<AppContext.Provider value={api}><UnsavedNotice /></AppContext.Provider>);
@@ -117,7 +156,7 @@ describe("an edit open when the vault locks", () => {
       ["materials", { name: "case", id: "c1", view: "materials" }],
       ["consult", { name: "consult", caseId: "c1" }],
     ] as const) {
-      mockIPC((cmd) => (cmd === "take_unsaved" ? { case_id: "c1", place: "רישום מפגש", view, text: `טקסט ${view}` } : null));
+      mockIPC((cmd) => (cmd === "take_unsaved" ? [{ case_id: "c1", place: "רישום מפגש", view, text: `טקסט ${view}` }] : null));
       const go = vi.fn();
       const api: AppApi = { status: status(), go, refresh: vi.fn(), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn() };
       const { unmount } = render(<AppContext.Provider value={api}><UnsavedNotice /></AppContext.Provider>);

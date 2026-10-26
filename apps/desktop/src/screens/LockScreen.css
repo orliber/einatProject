@@ -32,6 +32,7 @@
   height: 60px;
   border-radius: 16px;
   background: var(--primary);
+  color: var(--on-primary);
   display: grid;
   place-items: center;
 }
@@ -72,7 +73,9 @@
 }
 .lock-foot {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
   gap: 10px;
   border-top: 1px solid var(--line);
   padding-top: 16px;
@@ -117,16 +120,32 @@
   font-weight: 600;
 }
 
-/* R7: the vault did not open in this version. */
-.lock-trouble {
-  margin-top: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: 10px;
-  background: var(--sand);
+/* Forgot the password (Google off), and R7: the vault did not open in this version. */
+.lock-note {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
   text-align: start;
 }
-.lock-trouble p {
-  margin: 0 0 8px;
-  line-height: 1.5;
+.lock-note p {
+  margin: 0;
+  line-height: 1.6;
+}
+.lock-note .btn {
+  align-self: flex-start;
+}
+.lock-safe {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--ink-muted);
+}
+.lock-foot .core-status {
+  align-self: center;
 }

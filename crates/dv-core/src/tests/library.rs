@@ -108,6 +108,60 @@ fn folders_hold_cases_and_refuse_loops() {
 }
 
 #[test]
+fn a_moved_case_is_in_one_folder_and_a_name_is_not_taken_twice_side_by_side() {
+    let (_dir, mut core, case) = setup(None);
+    let a = core.create_folder(None, "גן הדקל").unwrap();
+    let b = core.create_folder(None, "גן האלון").unwrap();
+    core.move_case(&case, Some(&a.id)).unwrap();
+    core.move_case(&case, Some(&b.id)).unwrap();
+    // Moved, not copied: one case, in the last folder only.
+    let cases = core.list_cases().unwrap();
+    assert_eq!(cases.len(), 1);
+    assert_eq!(cases[0].folder_id.as_deref(), Some(b.id.as_str()));
+    // Into the bin and back: it returns to where it was, still once.
+    core.delete_case(&case).unwrap();
+    assert!(core.list_cases().unwrap().is_empty());
+    core.restore_case(&case).unwrap();
+    let cases = core.list_cases().unwrap();
+    assert_eq!(cases.len(), 1);
+    assert_eq!(cases[0].folder_id.as_deref(), Some(b.id.as_str()));
+
+    // The same name side by side is refused, whatever the spaces or letter case.
+    for name in ["גן הדקל", "  גן הדקל "] {
+        assert!(matches!(
+            core.create_folder(None, name),
+            Err(CoreError::Refused(_))
+        ));
+    }
+    assert!(matches!(
+        core.rename_folder(&b.id, "גן הדקל"),
+        Err(CoreError::Refused(_))
+    ));
+    // Its own name again is fine, and so is the same name one level down.
+    core.rename_folder(&a.id, "גן הדקל").unwrap();
+    let inner = core.create_folder(Some(&b.id), "גן הדקל").unwrap();
+    // Moving it up next to its namesake is refused, and nothing moves.
+    assert!(matches!(
+        core.move_folder(&inner.id, None),
+        Err(CoreError::Refused(_))
+    ));
+    assert_eq!(
+        core.folders()
+            .unwrap()
+            .into_iter()
+            .find(|f| f.id == inner.id)
+            .unwrap()
+            .parent_id
+            .as_deref(),
+        Some(b.id.as_str())
+    );
+    assert!(matches!(
+        core.rename_folder("no-such-folder", "x"),
+        Err(CoreError::Vault(VaultError::NotFound))
+    ));
+}
+
+#[test]
 fn a_name_seen_in_another_case_is_pointed_out() {
     let (_dir, mut core, case) = setup(None);
     // The test case has the child "אלון" and the teacher "שירה".
@@ -313,19 +367,19 @@ fn an_open_edit_survives_the_lock_inside_the_vault() {
         text: text.into(),
     };
     // Nothing kept: nothing offered.
-    assert_eq!(core.take_unsaved().unwrap(), None);
+    assert!(core.take_unsaved().unwrap().is_empty());
     // An edit saved (closed) before the lock is not kept.
-    core.hold_unsaved(Some(edit("טיוטה")));
-    core.hold_unsaved(None);
+    core.hold_unsaved(vec![edit("טיוטה")]);
+    core.hold_unsaved(Vec::new());
     core.lock();
     core.unlock(PASSWORD).unwrap();
-    assert_eq!(core.take_unsaved().unwrap(), None);
+    assert!(core.take_unsaved().unwrap().is_empty());
 
     let text = "הילד הגיע לאבחון בליווי אמו, ושיתף פעולה לאורך כל המפגשים.";
-    core.hold_unsaved(Some(edit(text)));
+    core.hold_unsaved(vec![edit(text)]);
     assert!(core.lock_with_computer());
     // Locked: a closing editor changes nothing.
-    core.hold_unsaved(None);
+    core.hold_unsaved(Vec::new());
     // Not on disk outside the vault.
     for entry in walkdir(dir.path()) {
         let bytes = std::fs::read(&entry).unwrap();
@@ -335,14 +389,14 @@ fn an_open_edit_survives_the_lock_inside_the_vault() {
         );
     }
     core.unlock(PASSWORD).unwrap();
-    assert_eq!(core.take_unsaved().unwrap(), Some(edit(text)));
+    assert_eq!(core.take_unsaved().unwrap(), vec![edit(text)]);
     // Offered once.
-    assert_eq!(core.take_unsaved().unwrap(), None);
+    assert!(core.take_unsaved().unwrap().is_empty());
     // Whitespace is not an edit worth keeping.
-    core.hold_unsaved(Some(edit("  \n")));
+    core.hold_unsaved(vec![edit("  \n")]);
     core.lock();
     core.unlock(PASSWORD).unwrap();
-    assert_eq!(core.take_unsaved().unwrap(), None);
+    assert!(core.take_unsaved().unwrap().is_empty());
     // An edit kept by an earlier version (no view) still comes back.
     let old: crate::UnsavedEdit =
         serde_json::from_str(r#"{"case_id":"c","place":"פסקה","text":"טקסט"}"#).unwrap();
@@ -1111,6 +1165,45 @@ fn her_own_paragraph_goes_where_she_put_it() {
     let second = ids(&mut core)[1].clone();
     core.edit_paragraph(&case, &second, "  \n ").unwrap();
     assert_eq!(texts(&mut core), vec!["אחת.", "שלוש.", "ארבע."]);
+}
+
+/// An editor left open on an older wording does not silently write over a newer one: her text
+/// is saved, the newer wording stays among the earlier versions, and the page is told.
+#[test]
+fn a_stale_editor_keeps_the_newer_wording_as_a_version_and_says_so() {
+    let (_dir, mut core, case) = setup(None);
+    core.add_own_paragraph(&case, "kindergarten", "נוסח ראשון.")
+        .unwrap();
+    let id = |core: &mut Core| {
+        core.case_detail(&case)
+            .unwrap()
+            .sections
+            .into_iter()
+            .find(|s| s.key == "kindergarten")
+            .unwrap()
+            .paragraphs
+            .remove(0)
+            .id
+    };
+    let p = id(&mut core);
+    // Two editors open on "נוסח ראשון.": the first saves, then the second one, still showing it.
+    assert!(!core
+        .edit_paragraph_opened(&case, &p, "נוסח שני.", Some("נוסח ראשון."))
+        .unwrap());
+    assert!(core
+        .edit_paragraph_opened(&case, &p, "נוסח שלישי.", Some("נוסח ראשון."))
+        .unwrap());
+    let versions: Vec<String> = core
+        .paragraph_versions(&case, &p)
+        .unwrap()
+        .into_iter()
+        .map(|v| v.text)
+        .collect();
+    assert!(versions.contains(&"נוסח שני.".to_string()), "{versions:?}");
+    // An editor that saw the current wording is not warned.
+    assert!(!core
+        .edit_paragraph_opened(&case, &p, "נוסח רביעי.", Some("נוסח שלישי."))
+        .unwrap());
 }
 
 /// AI-6: a score written in the report is checked against the score table she entered, in

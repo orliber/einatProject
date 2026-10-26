@@ -18,6 +18,9 @@ import type { SectionMode } from "./generated/SectionMode";
 import type { CaseSummary } from "./generated/CaseSummary";
 import type { Folder } from "./generated/Folder";
 import type { GoogleStatus } from "./generated/GoogleStatus";
+import type { DriveBackupStatus } from "./generated/DriveBackupStatus";
+import type { DriveProblem } from "./generated/DriveProblem";
+import type { DriveCleanupResult } from "./generated/DriveCleanupResult";
 import type { NameMatch } from "./generated/NameMatch";
 import type { ChatView } from "./generated/ChatView";
 import type { ConsultationSummary } from "./generated/ConsultationSummary";
@@ -28,11 +31,15 @@ import type { IdentityInput } from "./generated/IdentityInput";
 import type { ImportPreview } from "./generated/ImportPreview";
 import type { InputKind } from "./generated/InputKind";
 import type { Instrument } from "./generated/Instrument";
+import type { InstrumentApproval } from "./generated/InstrumentApproval";
+import type { InstrumentStatus } from "./generated/InstrumentStatus";
 import type { ParagraphVersionView } from "./generated/ParagraphVersionView";
 import type { PingResponse } from "./generated/PingResponse";
 import type { Prepared } from "./generated/Prepared";
 import type { ReportSettings } from "./generated/ReportSettings";
 import type { TemplateView } from "./generated/TemplateView";
+import type { LogoView } from "./generated/LogoView";
+import type { ParentsOptions } from "./generated/ParentsOptions";
 import type { ParagraphView } from "./generated/ParagraphView";
 import type { SimilarParagraph } from "./generated/SimilarParagraph";
 import type { LibraryLine } from "./generated/LibraryLine";
@@ -51,6 +58,9 @@ import type { SectionResult } from "./generated/SectionResult";
 import type { ParagraphCheck } from "./generated/ParagraphCheck";
 import type { Verdict } from "./generated/Verdict";
 import type { VerifyResult } from "./generated/VerifyResult";
+import type { ReportCheckNote } from "./generated/ReportCheckNote";
+import type { ReportCheckResult } from "./generated/ReportCheckResult";
+import type { ReportNoteKind } from "./generated/ReportNoteKind";
 import type { SortResult } from "./generated/SortResult";
 import type { SourceExcerpt } from "./generated/SourceExcerpt";
 import type { MaterialRouting } from "./generated/MaterialRouting";
@@ -72,6 +82,9 @@ import type { StyleProfile } from "./generated/StyleProfile";
 import type { StyleProfileView } from "./generated/StyleProfileView";
 import type { StyleSourceView } from "./generated/StyleSourceView";
 import type { StyleSuggestion } from "./generated/StyleSuggestion";
+
+/** The largest logo the core takes (`dv_export::MAX_LOGO_BYTES`). */
+export const LOGO_MAX_BYTES = 1024 * 1024;
 
 /** Every failure reaches the UI as a UiError with a Hebrew message and its next step (F6). */
 export function asUiError(e: unknown): UiError {
@@ -159,7 +172,7 @@ export const ipc = {
   lock: () => run("lock"),
   /** Typing or scrolling in the window counts as activity for the idle lock. */
   touch: () => run("touch"),
-  holdUnsaved: (edit: UnsavedEdit | null) => run("hold_unsaved", { edit }),
+  holdUnsaved: (edits: UnsavedEdit[]) => run("hold_unsaved", { edits }),
   takeUnsaved: () => call("take_unsaved"),
   readiness: () => call("readiness"),
   securityStatus: () => call("security_status"),
@@ -167,6 +180,9 @@ export const ipc = {
   exportSecurityPdf: () => call("export_security_pdf"),
   setSendStopped: (stopped: boolean) => call("set_send_stopped", { stopped }),
   confirmReadiness: (key: string, done: boolean) => call("confirm_readiness", { key, done }),
+  /** Settings → המבחנים: every instrument with her answer (D-098). */
+  instrumentApprovals: () => call("instrument_approvals"),
+  setInstrumentStatus: (key: string, status: InstrumentStatus) => call("set_instrument_status", { key, status }),
   usageSummary: () => call("usage_summary"),
   /** Dollars; `null` removes the ceiling. */
   setMonthlyCap: (capUsd: number | null) => run("set_monthly_cap", { capUsd }),
@@ -189,6 +205,17 @@ export const ipc = {
   },
   clearReportTemplate: () => run("clear_report_template"),
   reportTemplate: () => call("report_template"),
+  /** Her logo (round 55): a PNG or JPEG of at most 1 MB, the file's bytes as the raw body. */
+  setReportLogo: async (file: File): Promise<LogoView> => {
+    // Refused before the file is read, the way the core refuses it (1 MB, `MAX_LOGO_BYTES`).
+    if (file.size > LOGO_MAX_BYTES) {
+      throw { code: "refused", message: "התמונה גדולה מ-1MB. שומרים אותה בגודל קטן יותר ובוחרים שוב.", details: [], action: { kind: "dismiss" } } satisfies UiError;
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    return await call("set_report_logo", bytes);
+  },
+  clearReportLogo: () => run("clear_report_logo"),
+  reportLogo: () => call("report_logo"),
 
   listCases: () => call("list_cases"),
   createCase: (meta: CaseMeta, identities: IdentityInput[]) => call("create_case", { meta, identities }),
@@ -281,6 +308,11 @@ export const ipc = {
   setNameModel: (on: boolean) => call("set_name_model", { on }),
   prepareVerify: (caseId: string, sectionKey: string) => call("prepare_verify", { caseId, sectionKey }),
   sendVerify: (approvalId: string) => call("send_verify", { approvalId }),
+  /** The check of the whole approved report (D-097): off until she turns it on, its cost shown. */
+  reportCheckSetting: () => call("report_check_setting"),
+  setReportCheck: (on: boolean) => run("set_report_check", { on }),
+  prepareReportCheck: (caseId: string) => call("prepare_report_check", { caseId }),
+  sendReportCheck: (approvalId: string) => call("send_report_check", { approvalId }),
   /** D-022: sort every material not sorted yet into sections (one review screen). */
   prepareSort: (caseId: string) => call("prepare_sort", { caseId }),
   sendSort: (approvalId: string) => call("send_sort", { approvalId }),
@@ -296,8 +328,10 @@ export const ipc = {
   /** Approve every paragraph waiting in the section; returns how many. */
   approveSection: (caseId: string, sectionKey: string) => call("approve_section", { caseId, sectionKey }),
   rejectParagraph: (caseId: string, draftId: string) => run("reject_paragraph", { caseId, draftId }),
-  editParagraph: (caseId: string, draftId: string, text: string) =>
-    run("edit_paragraph", { caseId, draftId, text }),
+  /** `openedWith`: the text the editor showed when it opened. `true` back = the paragraph
+   *  changed meanwhile; her text is saved and the other wording is kept among the versions. */
+  editParagraph: (caseId: string, draftId: string, text: string, openedWith: string | null = null) =>
+    call("edit_paragraph", { caseId, draftId, text, openedWith }),
   /** Earlier wordings of a paragraph, newest first; bring one back (D-046). */
   paragraphVersions: (caseId: string, draftId: string) =>
     call("paragraph_versions", { caseId, draftId }),
@@ -322,9 +356,12 @@ export const ipc = {
   sendConsult: (approvalId: string) => call("send_consult", { approvalId }),
 
   checkExport: (caseId: string) => call("check_export", { caseId }),
-  exportReport: (caseId: string, password: string | null) => call("export_report", { caseId, password }),
+  /** With `parents`, the parents' version (round 55, D-095): built here, nothing is sent. */
+  exportReport: (caseId: string, password: string | null, parents: ParentsOptions | null = null) =>
+    call("export_report", { caseId, password, parents }),
   /** EX-3: a print-only PDF (cannot be changed; opens without a password, D-081). */
-  exportPdf: (caseId: string, password: string | null) => call("export_pdf", { caseId, password }),
+  exportPdf: (caseId: string, password: string | null, parents: ParentsOptions | null = null) =>
+    call("export_pdf", { caseId, password, parents }),
   /** When this vault exported exactly this PDF, or `null` (changed, or not made here). */
   checkOriginal: async (file: File): Promise<number | null> => {
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -376,6 +413,12 @@ export const ipc = {
     call("restore_backup", { password, recoveryKey }),
   forgetBackup: () => run("forget_backup"),
   setAutoBackup: (on: boolean) => call("set_auto_backup", { on }),
+  /** The encrypted copy of each backup in her Google Drive (D-099). Off by default. */
+  driveBackupStatus: () => call("drive_backup_status"),
+  /** Opens Google in her browser; resolves when she is back and the copy is on. */
+  driveBackupTurnOn: () => call("drive_backup_turn_on"),
+  /** How far deleting the copies and withdrawing the permission at Google got. */
+  driveBackupTurnOff: () => call("drive_backup_turn_off"),
 
   // Writing style (D-043): past reports kept neutralized, the profile, learning from edits.
   styleOverview: () => call("style_overview"),
@@ -456,6 +499,9 @@ export type {
   StagedBackup,
   Folder,
   GoogleStatus,
+  DriveBackupStatus,
+  DriveCleanupResult,
+  DriveProblem,
   NameMatch,
   MaterialRouting,
   PriorRecordView,
@@ -474,11 +520,15 @@ export type {
   ImportPreview,
   InputKind,
   Instrument,
+  InstrumentApproval,
+  InstrumentStatus,
   ParagraphVersionView,
   PingResponse,
   Prepared,
   ReportSettings,
   TemplateView,
+  LogoView,
+  ParentsOptions,
   FollowUpView,
   ScoreSheet,
   SectionResult,
@@ -487,4 +537,7 @@ export type {
   ParagraphCheck,
   Verdict,
   VerifyResult,
+  ReportCheckNote,
+  ReportCheckResult,
+  ReportNoteKind,
 };

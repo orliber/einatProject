@@ -207,7 +207,7 @@ describe("main screens", () => {
     expect(within(dialog).getByText("הקובץ נפתח בלי סיסמה: כל מי שיקבל אותו יוכל לקרוא אותו.")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("radio", { name: /PDF להדפסה בלבד/ }));
     await user.click(within(dialog).getByRole("button", { name: "הפקת הדוח" }));
-    await waitFor(() => expect(exported).toEqual([["export_pdf", { caseId: expect.any(String), password: null }]]));
+    await waitFor(() => expect(exported).toEqual([["export_pdf", { caseId: expect.any(String), password: null, parents: null }]]));
     expect(await screen.findByRole("dialog", { name: "הדוח מוכן" })).not.toHaveTextContent(/סיסמה/);
   });
 
@@ -528,7 +528,7 @@ describe("text being typed (F1a)", () => {
     await waitFor(() => expect(calls.some((c) => c.cmd === "lock")).toBe(true));
     const lock = calls.findIndex((c) => c.cmd === "lock");
     const held = calls.slice(0, lock).filter((c) => c.cmd === "hold_unsaved").at(-1);
-    expect((held?.args as { edit: { text: string } | null }).edit?.text).toBe("נוסח שנכתב רגע לפני הנעילה");
+    expect((held?.args as { edits: { text: string }[] }).edits.at(-1)?.text).toBe("נוסח שנכתב רגע לפני הנעילה");
   });
 });
 

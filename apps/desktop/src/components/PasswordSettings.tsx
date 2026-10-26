@@ -7,6 +7,7 @@ import { ipc } from "../ipc/client";
 import { RecoveryKitPaper } from "./RecoveryKit";
 import { GoogleSettings } from "./GoogleRecovery";
 import { Dialog, ErrorLine } from "./ui";
+import { timed, WaitLine } from "./Progress";
 
 /** In a dialog, after the password was refused because this computer is not the one it was set on. */
 const OTHER_COMPUTER_HINT = "במחשב הזה הסיסמה עוד לא פותחת את הכספת, ולכן מאמתים כאן עם ערכת השחזור. אחרי שבוחרים סיסמה חדשה, היא תעבוד גם במחשב הזה.";
@@ -45,7 +46,7 @@ function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
     if (pw !== pw2) return setError("שתי הסיסמאות החדשות לא זהות.");
     setBusy(true);
     try {
-      await ipc.changePassword(current, withRecovery, pw);
+      await timed("rekey", ipc.changePassword(current, withRecovery, pw), "password");
       await qc.invalidateQueries({ queryKey: ["backup"] });
       await qc.invalidateQueries({ queryKey: ["security"] });
       notify("הסיסמה הוחלפה. כדאי לגבות עכשיו: גיבויים קודמים נפתחים רק בסיסמה הקודמת.");
@@ -88,6 +89,7 @@ function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
           <li className={pw2.length > 0 && pw === pw2 ? "met" : undefined}>{pw2.length > 0 && pw === pw2 ? "✓" : "○"} שתי הסיסמאות זהות</li>
         </ul>
         <button type="submit" hidden />
+        {busy && <WaitLine task="rekey" speed="password" label="מצפינה את הכספת מחדש בסיסמה החדשה" />}
         <ErrorLine error={error} />
       </form>
     </Dialog>
@@ -109,7 +111,7 @@ function NewKitDialog({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      const created = await ipc.newRecoveryKit(current, withRecovery);
+      const created = await timed("rekey", ipc.newRecoveryKit(current, withRecovery), "kit");
       setCurrent("");
       setKit(created.recovery_key);
       await qc.invalidateQueries({ queryKey: ["backup"] });
@@ -169,6 +171,7 @@ function NewKitDialog({ onClose }: { onClose: () => void }) {
         <p>למשל אם הדף אבד או שמישהו ראה אותו. הערכה הקודמת תפסיק לפתוח את הכספת, אבל גיבויים קודמים עדיין נפתחים בה: לא לזרוק אותה עד שיש גיבוי חדש.</p>
         <CurrentSecret value={current} onChange={setCurrent} withRecovery={withRecovery}
           onToggle={() => { setWithRecovery(!withRecovery); setCurrent(""); setError(null); }} />
+        {busy && <WaitLine task="rekey" speed="kit" label="יוצרת ערכת שחזור חדשה ומצפינה מחדש" />}
         <ErrorLine error={error} />
       </form>
     </Dialog>
@@ -207,7 +210,7 @@ function CheckKitDialog({ onClose }: { onClose: () => void }) {
         <button type="button" className="btn btn-primary" disabled={typed.trim().length < 20} onClick={() => void check()}>בדיקה</button>
       </>}>
       <form className="stack" onSubmit={(e) => void check(e)}>
-        <p>הסיסמה פותחת את הכספת רק במחשב הזה ובחשבון ה-Windows הזה. אם המחשב התקלקל או אבד, משחזרים את הגיבוי במחשב החדש עם הסיסמה או עם הדף הזה. בעותק של תיקיית הכספת, אחרי התקנה מחדש של Windows או אחרי איפוס החשבון, רק הדף המודפס פותח אותה. פעם בשנה כדאי לוודא שהוא עדיין נכון.</p>
+        <p>הסיסמה פותחת את הכספת רק במחשב הזה ובחשבון המשתמש הזה. אם המחשב התקלקל או אבד, משחזרים את הגיבוי במחשב החדש עם הסיסמה או עם הדף הזה. בעותק של תיקיית הכספת, אחרי התקנה מחדש של מערכת ההפעלה או אחרי איפוס החשבון, רק הדף המודפס פותח אותה. פעם בשנה כדאי לוודא שהוא עדיין נכון.</p>
         <div className="field">
           <label htmlFor="kit-check">ערכת השחזור, מהדף המודפס</label>
           <input id="kit-check" className="input mono" dir="ltr" autoComplete="off" autoFocus placeholder="XXXX-XXXX-…" value={typed} onChange={(e) => setTyped(e.target.value)} />

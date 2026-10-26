@@ -6,6 +6,8 @@
 
 mod commands;
 mod file_dialog;
+#[cfg(target_os = "macos")]
+mod mac_platform;
 mod os_lock;
 mod secret_clipboard;
 mod win_platform;
@@ -18,11 +20,12 @@ use commands::*;
 use dv_core::{
     ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView,
     ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
-    ExportCheck, ImportPreview, InterpretationResult, InterpretationView, NameMatch,
-    ParagraphVersionView, ParagraphView, Prepared, Readiness, ReportSettings, RetentionItem,
-    SectionResult, SecurityStatus, SentItem, SentText, SortResult, StagedBackup,
-    StyleAnalysisResult, StyleImportPreview, StyleOverview, StyleProfileView, StyleSourceView,
-    SuspectDecision, TemplateView, UiError, UnsavedEdit, UsageSummary, VerifyResult,
+    ExportCheck, ImportPreview, InterpretationResult, InterpretationView, LogoView, NameMatch,
+    ParagraphVersionView, ParagraphView, ParentsOptions, Prepared, Readiness, ReportCheckResult,
+    ReportCheckSetting, ReportSettings, RetentionItem, SectionResult, SecurityStatus, SentItem,
+    SentText, SortResult, StagedBackup, StyleAnalysisResult, StyleImportPreview, StyleOverview,
+    StyleProfileView, StyleSourceView, SuspectDecision, TemplateView, UiError, UnsavedEdit,
+    UsageSummary, VerifyResult,
 };
 use dv_domain::{
     CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind, Role,
@@ -219,20 +222,37 @@ fn remember_crashes(path: PathBuf) {
     }));
 }
 
+/// The most CPU one document's reader may use on a Mac (the app gives up on it far sooner,
+/// by the clock: this bounds a reader the app could no longer stop).
+#[cfg(target_os = "macos")]
+const INGEST_CPU_SECONDS: u64 = 300;
+
 fn main() {
     // Before anything holds case data: room to lock the vault's memory in RAM, and no crash
     // dump with the heap in it (D-047). The document worker below gets the same.
     let hardening = win_platform::harden_process();
     // A document worker: the same binary, started by the core for one file.
     if std::env::args().nth(1).as_deref() == Some(dv_ingest::worker::WORKER_ARG) {
+        // On a Mac: ended with the app, and one document's CPU at most (D-101).
+        #[cfg(target_os = "macos")]
+        if let Some(code) = mac_platform::contain_worker(Some(INGEST_CPU_SECONDS)) {
+            std::process::exit(code);
+        }
         std::process::exit(dv_ingest::worker::worker_main());
     }
     // The name model worker (SEC2): the same binary, started by the core once per unlock with
-    // the model folder, contained like the document worker.
+    // the model folder, contained like the document worker. It lives for the session, so it
+    // has no CPU limit; it ends with the app, or when the app closes its stdin.
     if std::env::args().nth(1).as_deref() == Some(dv_ner::worker::WORKER_ARG) {
+        #[cfg(target_os = "macos")]
+        if let Some(code) = mac_platform::contain_worker(None) {
+            std::process::exit(code);
+        }
         let dir = std::env::args().nth(2).unwrap_or_default();
         std::process::exit(dv_ner::worker::worker_main(std::path::Path::new(&dir)));
     }
+    #[cfg(target_os = "macos")]
+    let hardening = mac_platform::with_wire_limit(hardening);
 
     let result = tauri::Builder::default()
         .setup(move |app| {
@@ -249,7 +269,10 @@ fn main() {
             let models = data.join("models");
             let mut core = Core::new(&dir)
                 .with_models_dir(models.clone())
-                .with_memory_lock(cfg!(windows), hardening.lock_quota_mib.is_some());
+                .with_memory_lock(
+                    cfg!(any(windows, target_os = "macos")),
+                    hardening.lock_quota_mib.is_some(),
+                );
             if let Ok(exe) = std::env::current_exe() {
                 core = core
                     .with_ingest_worker(exe.clone())
@@ -304,9 +327,25 @@ fn main() {
                         .and_then(|mut c| c.begin_auto_backup().ok().flatten());
                     if let Some(task) = task {
                         let run = task.run();
+                        let mut upload = None;
                         if let Ok(mut c) = timer.lock() {
-                            backed_up = c.finish_backup(run).is_ok();
+                            let (done, up) = c.finish_backup_for_drive(run);
+                            backed_up = done.is_ok();
+                            upload = up;
                         }
+                        // The encrypted copy in her Drive, when on (D-099), on its own thread:
+                        // this timer also locks the vault and must not wait for a slow line.
+                        if let Some(up) = upload {
+                            commands::upload_in_background(Arc::clone(&timer), up);
+                        }
+                    }
+                }
+                // A cleanup still owed at Google after turning the Drive copy off (D-099):
+                // tried again after an unlock and then every 15 minutes, with the core free.
+                if !locked {
+                    let owed = timer.lock().ok().and_then(|mut c| c.take_drive_cleanup());
+                    if let Some(cleanup) = owed {
+                        commands::cleanup_in_background(Arc::clone(&timer), cleanup);
                     }
                 }
                 if locked {
@@ -351,6 +390,8 @@ fn main() {
             touch,
             readiness,
             confirm_readiness,
+            instrument_approvals,
+            set_instrument_status,
             security_status,
             export_security_pdf,
             set_send_stopped,
@@ -373,6 +414,9 @@ fn main() {
             set_report_template,
             clear_report_template,
             report_template,
+            set_report_logo,
+            clear_report_logo,
+            report_logo,
             list_cases,
             create_case,
             create_sample_case,
@@ -411,6 +455,10 @@ fn main() {
             set_name_model,
             prepare_verify,
             send_verify,
+            report_check_setting,
+            set_report_check,
+            prepare_report_check,
+            send_report_check,
             prepare_sort,
             send_sort,
             set_input_sections,
@@ -494,6 +542,9 @@ fn main() {
             restore_backup,
             forget_backup,
             set_auto_backup,
+            drive_backup_status,
+            drive_backup_turn_on,
+            drive_backup_turn_off,
             check_update,
             prepare_update,
             install_update,

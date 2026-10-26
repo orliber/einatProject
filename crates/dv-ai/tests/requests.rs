@@ -8,9 +8,10 @@
 #![allow(clippy::indexing_slicing)]
 
 use dv_ai::{
-    build_consult_request, build_research_request, build_section_request, build_sort_request,
-    build_style_analysis_request, build_style_synthesis_request, build_verify_request,
-    ConsultInput, ModelConfig, RawStyleItem, ResearchInput, SectionInput, SortInput, SortMaterial,
+    build_consult_request, build_report_check_request, build_research_request,
+    build_section_request, build_sort_request, build_style_analysis_request,
+    build_style_synthesis_request, build_verify_request, ConsultInput, ModelConfig, RawStyleItem,
+    ReportCheckInput, ReportCheckSection, ResearchInput, SectionInput, SortInput, SortMaterial,
     SortSection, StyleExcerpt, StyleKind, TaggedInput, TaggedTurn, VerifyInput,
 };
 use dv_domain::GrammaticalGender;
@@ -145,6 +146,28 @@ fn every_body(text: &str, nonce: &str) -> Vec<(&'static str, Value)> {
         ),
         ("sort", build_sort_request(&m, &sort(text), nonce)),
         (
+            "report_check",
+            build_report_check_request(
+                &m,
+                &ReportCheckInput {
+                    sections: vec![
+                        ReportCheckSection {
+                            title: "רקע".to_owned(),
+                            text_tagged: text.to_owned(),
+                            closing: false,
+                        },
+                        ReportCheckSection {
+                            title: "סיכום".to_owned(),
+                            text_tagged: text.to_owned(),
+                            closing: true,
+                        },
+                    ],
+                },
+                nonce,
+            )
+            .0,
+        ),
+        (
             "style_analysis",
             build_style_analysis_request(
                 &m,
@@ -153,6 +176,7 @@ fn every_body(text: &str, nonce: &str) -> Vec<(&'static str, Value)> {
                     section: "cognitive".to_owned(),
                     text: text.to_owned(),
                 }],
+                &[],
                 nonce,
             ),
         ),
@@ -166,6 +190,7 @@ fn every_body(text: &str, nonce: &str) -> Vec<(&'static str, Value)> {
                     kind: StyleKind::Rule,
                     text: text.to_owned(),
                     support: 1,
+                    pattern: None,
                 }]],
                 nonce,
             ),

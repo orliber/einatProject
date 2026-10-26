@@ -48,6 +48,30 @@ impl ComputerSeal for FakeSeal {
     }
 }
 
+/// A computer with nothing to keep a key in.
+struct Nowhere;
+
+impl ComputerSeal for Nowhere {
+    fn available(&self) -> bool {
+        false
+    }
+    fn load(&self, _dir: &Path) -> Result<Key32, VaultError> {
+        Err(VaultError::NotFound)
+    }
+    fn create(&self, _dir: &Path) -> Result<Key32, VaultError> {
+        Err(VaultError::NotFound)
+    }
+    fn create_next(&self, _dir: &Path) -> Result<Key32, VaultError> {
+        Err(VaultError::NotFound)
+    }
+    fn load_next(&self, _dir: &Path) -> Result<Key32, VaultError> {
+        Err(VaultError::NotFound)
+    }
+    fn promote_next(&self, _dir: &Path) -> Result<(), VaultError> {
+        Err(VaultError::NotFound)
+    }
+}
+
 fn on(dir: &Path, seal: &Arc<FakeSeal>) -> Core {
     Core::for_tests(dir, None).with_computer_seal(Arc::clone(seal) as Arc<dyn ComputerSeal>)
 }
@@ -113,8 +137,10 @@ fn a_new_vault_is_bound_to_this_computer_and_she_types_only_her_password() {
 #[test]
 fn a_vault_from_before_is_bound_at_its_next_opening_with_no_screen() {
     let dir = tempfile::tempdir().unwrap();
-    // Made on a computer with nothing to seal to (the program before this round).
-    let mut before = Core::for_tests(dir.path(), None);
+    // Made on a computer with nothing to seal to (the program before this round): stated, not
+    // left to the computer the test runs on (a Mac's Keychain would bind it at once).
+    let mut before = Core::for_tests(dir.path(), None)
+        .with_computer_seal(Arc::new(Nowhere) as Arc<dyn ComputerSeal>);
     before.create_vault(PASSWORD).unwrap();
     assert_ne!(state(&mut before), "ok");
     before.lock();
@@ -375,4 +401,99 @@ fn a_slow_windows_while_open_is_not_a_wrong_password_nor_another_computer() {
     assert!(matches!(e, CoreError::Vault(VaultError::Busy)));
     assert!(core.check_backoff().is_ok(), "not a guess: no waiting time");
     assert!(core.google_turn_on_check(PASSWORD).is_ok());
+}
+
+/// A computer that could keep a key but does not now (a locked Keychain, a dialog she
+/// cancelled): every key it is asked for is `Busy`.
+struct Locked;
+
+impl ComputerSeal for Locked {
+    fn available(&self) -> bool {
+        true
+    }
+    fn load(&self, _dir: &Path) -> Result<Key32, VaultError> {
+        Err(VaultError::Busy)
+    }
+    fn create(&self, _dir: &Path) -> Result<Key32, VaultError> {
+        Err(VaultError::Busy)
+    }
+    fn create_next(&self, _dir: &Path) -> Result<Key32, VaultError> {
+        Err(VaultError::Busy)
+    }
+    fn load_next(&self, _dir: &Path) -> Result<Key32, VaultError> {
+        Err(VaultError::Busy)
+    }
+    fn promote_next(&self, _dir: &Path) -> Result<(), VaultError> {
+        Err(VaultError::Busy)
+    }
+}
+
+#[test]
+fn a_key_that_cannot_be_made_here_writes_no_unbound_password() {
+    // Review of #136: on a computer that can bind, a new password or a new vault is never
+    // written unbound; she is told to try again and nothing changes.
+    let dir = tempfile::tempdir().unwrap();
+    let mut core = Core::for_tests(dir.path(), None)
+        .with_computer_seal(Arc::new(Locked) as Arc<dyn ComputerSeal>);
+    let e = core.create_vault(PASSWORD).unwrap_err();
+    assert!(matches!(e, CoreError::Vault(VaultError::Busy)), "{e:?}");
+    assert!(!Vault::exists(dir.path()), "no vault was made");
+
+    let here = Arc::new(FakeSeal::default());
+    let kit = on(dir.path(), &here)
+        .create_vault(PASSWORD)
+        .unwrap()
+        .recovery_key;
+    let copy = tempfile::tempdir().unwrap();
+    copy_folder(dir.path(), copy.path());
+    let mut there = Core::for_tests(copy.path(), None)
+        .with_computer_seal(Arc::new(Locked) as Arc<dyn ComputerSeal>);
+    there.unlock_with_recovery(&kit).unwrap();
+    let e = there
+        .change_password(&kit, true, "another fabricated password 7")
+        .unwrap_err();
+    assert!(matches!(e, CoreError::Vault(VaultError::Busy)), "{e:?}");
+    assert!(
+        Vault::password_is_bound(copy.path()).unwrap(),
+        "the slot was not rewritten"
+    );
+    assert!(
+        there.check_backoff().is_ok(),
+        "not a guess: no waiting time"
+    );
+}
+
+#[test]
+fn a_slow_keychain_at_a_new_password_or_kit_says_try_again_and_makes_no_key() {
+    // Review of #136: a bound slot whose key here is late twice is `Busy` for a new password
+    // and for a new kit, never "another computer", and no key is made or held aside.
+    let dir = tempfile::tempdir().unwrap();
+    let here = Arc::new(FakeSeal::default());
+    on(dir.path(), &here).create_vault(PASSWORD).unwrap();
+    let slow = Arc::new(Slow(Arc::clone(&here), Mutex::new(0)));
+    let mut core = Core::for_tests(dir.path(), None)
+        .with_computer_seal(Arc::clone(&slow) as Arc<dyn ComputerSeal>);
+    core.unlock(PASSWORD).unwrap();
+    let in_use = *here.load(dir.path()).unwrap().as_bytes();
+
+    *slow.1.lock().unwrap() = 2;
+    let e = core
+        .change_password(PASSWORD, false, "another fabricated password 7")
+        .unwrap_err();
+    assert!(matches!(e, CoreError::Vault(VaultError::Busy)), "{e:?}");
+    *slow.1.lock().unwrap() = 2;
+    let e = core.new_recovery_kit(PASSWORD, false).unwrap_err();
+    assert!(matches!(e, CoreError::Vault(VaultError::Busy)), "{e:?}");
+
+    assert!(here.load_next(dir.path()).is_err(), "no key held aside");
+    assert_eq!(*here.load(dir.path()).unwrap().as_bytes(), in_use);
+    assert!(core.check_backoff().is_ok(), "not a guess: no waiting time");
+    core.change_password(PASSWORD, false, "another fabricated password 7")
+        .unwrap();
+    core.lock();
+    assert!(
+        core.unlock("another fabricated password 7")
+            .unwrap()
+            .unlocked
+    );
 }

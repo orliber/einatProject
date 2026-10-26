@@ -16,6 +16,8 @@ fn main() {
             "take_unsaved",
             "readiness",
             "confirm_readiness",
+            "instrument_approvals",
+            "set_instrument_status",
             "security_status",
             "export_security_pdf",
             "set_send_stopped",
@@ -68,6 +70,10 @@ fn main() {
             "set_name_model",
             "prepare_verify",
             "send_verify",
+            "report_check_setting",
+            "set_report_check",
+            "prepare_report_check",
+            "send_report_check",
             "prepare_sort",
             "send_sort",
             "set_input_sections",
@@ -110,6 +116,9 @@ fn main() {
             "paragraph_sources",
             "prepare_letter",
             "report_template",
+            "set_report_logo",
+            "clear_report_logo",
+            "report_logo",
             "restore_auto_hidden",
             "confirm_auto_hidden",
             "set_report_template",
@@ -157,6 +166,9 @@ fn main() {
             "check_backup",
             "restore_backup",
             "forget_backup",
+            "drive_backup_status",
+            "drive_backup_turn_on",
+            "drive_backup_turn_off",
             "check_update",
             "prepare_update",
             "install_update",
@@ -167,5 +179,13 @@ fn main() {
         // The build stops with the reason; the program itself never panics (F4).
         eprintln!("tauri-build failed: {error:#}");
         std::process::exit(1);
+    }
+    // On a Mac the FIPS module is a dylib named @rpath/…; the app ships it in
+    // Contents/Frameworks (macos/bundle-fips.sh), so the program looks for it there. Without
+    // this, dyld stops the installed app before its first line (D-091, D-101).
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos")
+        && std::env::var_os("CARGO_FEATURE_FIPS").is_some()
+    {
+        println!("cargo:rustc-link-arg-bins=-Wl,-rpath,@executable_path/../Frameworks");
     }
 }

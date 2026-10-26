@@ -8,6 +8,7 @@ pub mod consistency;
 pub mod dates;
 pub mod dsm;
 pub mod identity;
+pub mod patterns;
 pub mod prior;
 pub mod records;
 pub mod report;
@@ -20,6 +21,7 @@ pub use dsm::{check_dsm_severity, level_words, severity_request, DsmSeverity};
 pub use identity::{
     assign_tag, FoundName, Identity, IdentityInput, IdentitySource, Role, PRACTITIONER_TAG,
 };
+pub use patterns::{pattern_keys, pattern_label, report_patterns, sheet_patterns, ScorePattern};
 pub use prior::{
     date_text, document_date, record_order, DocDate, MaterialSummary, PriorRecord, Setting,
 };
@@ -33,9 +35,10 @@ pub use report::{
 pub use routing::{passage_ranges, passages, Feed, Routing, SectionPassages, Suggestion};
 pub use scores::{
     check_scores, find_score_mentions, find_tagged_scores, format_sheet, format_sheet_with,
-    instruments, interpretation_cases, is_score_tag, parse_score_tag, score_tag, sheet_cases,
-    sheet_habits, sheet_profiles, sheet_table, Instrument, Relative, ScoreCases, ScoreEntry,
-    ScoreMention, ScoreProfile, ScoreRow, ScoreSheet, SheetHabits, TaggedScore, GENERAL_CASE,
+    instruments, interpretation_cases, is_score_tag, parse_score_tag, score_tag, sheet_bands,
+    sheet_cases, sheet_habits, sheet_profiles, sheet_table, Instrument, ParentBand, ParentGroup,
+    Relative, ScoreCases, ScoreEntry, ScoreMention, ScoreProfile, ScoreRow, ScoreSheet,
+    SheetHabits, TaggedScore, GENERAL_CASE,
 };
 
 #[derive(Debug, thiserror::Error)]

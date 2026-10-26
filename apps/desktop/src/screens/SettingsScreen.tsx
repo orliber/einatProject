@@ -3,21 +3,25 @@ import { BugReportSettings } from "../components/BugReport";
 import { useApp } from "../App";
 import { ActivitySettings } from "../components/ActivityLog";
 import { BackupSettings } from "../components/Backup";
+import { DriveBackupSettings } from "../components/DriveBackupSettings";
 import { PasswordSettings } from "../components/PasswordSettings";
 import { TopBar } from "../components/TopBar";
 import { UpdateSettings } from "../components/Update";
 import { UsageSettings } from "../components/UsageSettings";
 import { VerifySettings } from "../components/VerifySettings";
+import { ReportCheckSettings } from "../components/ReportCheck";
 import { NameModelSettings } from "../components/NameModelSettings";
 import { ReadinessSettings } from "../components/ReadinessSettings";
+import { InstrumentSettings } from "../components/InstrumentSettings";
 import { SecuritySettings } from "../components/SecuritySettings";
 import { PrivacyStatus } from "../components/PrivacyStatus";
 import { Segmented, Switch } from "../components/Switch";
 import { ErrorLine } from "../components/ui";
-import { ipc, type ReportSettings, type TemplateView } from "../ipc/client";
+import { ipc, type LogoView, type ReportSettings, type TemplateView } from "../ipc/client";
 import { PROVIDERS, providerOf } from "../ai";
 
 import { TEXT_SIZES, applyTextSize, readTextSize } from "../textSize";
+import { THEMES, applyTheme, readTheme } from "../theme";
 import { SectionModesSettings } from "../components/SectionModes";
 import { SETTINGS_PANES, type SettingsPane } from "./settingsPanes";
 import "./SettingsScreen.css";
@@ -51,13 +55,16 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
   const [names, setNames] = useState(status.practitioner.join(", "));
   const [report, setReport] = useState<ReportSettings | null>(null);
   const [template, setTemplate] = useState<TemplateView | null>(null);
+  const [logo, setLogo] = useState<LogoView | null>(null);
   const [original, setOriginal] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [textSize, setTextSize] = useState(readTextSize);
+  const [theme, setTheme] = useState(readTheme);
 
   useEffect(() => {
     ipc.reportSettings().then(setReport).catch((e) => setError(fail(e as never)));
     ipc.reportTemplate().then(setTemplate).catch(() => setTemplate(null));
+    ipc.reportLogo().then(setLogo).catch(() => setLogo(null));
   }, [fail]);
 
   async function run(fn: () => Promise<void>, done: string) {
@@ -97,6 +104,10 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                     onChange={(e) => { const n = Number(e.target.value); applyTextSize(n); setTextSize(n); }}>
                     {TEXT_SIZES.map((n) => <option key={n} value={n}>{n === 100 ? "רגיל" : `${n}%`}</option>)}
                   </select>
+                </Row>
+                <Row label="מראה" hint="דף הדוח נשאר לבן">
+                  <Segmented label="מראה" value={theme} options={THEMES}
+                    onChange={(t) => { applyTheme(t); setTheme(t); }} />
                 </Row>
                 <div className="field">
                   <label htmlFor="names">השמות שלך</label>
@@ -175,6 +186,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
               </section>
               <UsageSettings />
               <VerifySettings />
+              <ReportCheckSettings />
             </>
           )}
 
@@ -235,6 +247,12 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                   <textarea id="r-sup" className="textarea" rows={2} value={report.supervisor.join("\n")}
                     onChange={(e) => setReport({ ...report, supervisor: e.target.value.split("\n") })} />
                 </div>
+                <div className="field">
+                  <label htmlFor="r-parents">משפט הפתיחה בגרסה להורים</label>
+                  <span className="hint">נכתב פעם אחת, ופותח כל גרסה להורים.</span>
+                  <textarea id="r-parents" className="textarea" rows={2} value={report.parents_opening}
+                    onChange={(e) => setReport({ ...report, parents_opening: e.target.value })} />
+                </div>
                 <button type="button" className="btn btn-primary align-start"
                   onClick={() => void run(() => ipc.setReportSettings({ ...report, signature: report.signature.filter((l) => l.trim()), supervisor: report.supervisor.filter((l) => l.trim()) }), "הגדרות הדוח נשמרו.")}>שמירה</button>
               </section>
@@ -262,6 +280,29 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                   )}
                 </div>
               </section>
+              <section className="card setting" aria-labelledby="s-logo">
+                <h2 id="s-logo">לוגו</h2>
+                <span className="hint">
+                  {logo
+                    ? `${logo.format}, ${logo.width}×${logo.height}, ${logo.size_kb >= 1000 ? `${(logo.size_kb / 1024).toFixed(1)}MB` : `${logo.size_kb}KB`}. מודפס בראש העמוד הראשון של הדוח${template ? " (ב-PDF; ב-Word נשאר הלוגו של התבנית)" : ""}.`
+                    : "תמונת PNG או JPEG, עד 1MB. נשמרת מוצפנת בכספת, ומודפסת בראש העמוד הראשון של הדוח."}
+                </span>
+                <div className="row">
+                  <label className="btn btn-small">
+                    {logo ? "החלפת הלוגו" : "בחירת לוגו"}
+                    <input type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" hidden
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = "";
+                        if (f) void run(async () => setLogo(await ipc.setReportLogo(f)), "הלוגו נשמר. הוא יודפס בדוח הבא.");
+                      }} />
+                  </label>
+                  {logo && (
+                    <button type="button" className="btn btn-small"
+                      onClick={() => void run(async () => { await ipc.clearReportLogo(); setLogo(null); }, "הלוגו הוסר מהדוחות.")}>בלי לוגו</button>
+                  )}
+                </div>
+              </section>
               <section className="card setting" aria-labelledby="s-original">
                 <h2 id="s-original">בדיקת מקוריות של PDF</h2>
                 <Row label="האם הקובץ שונה מאז שהופק?" hint="לקובץ PDF שהופק כאן.">
@@ -283,7 +324,14 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
             </>
           )}
 
-          {pane === "backup" && <BackupSettings />}
+          {pane === "tests" && <InstrumentSettings />}
+
+          {pane === "backup" && (
+            <>
+              <BackupSettings />
+              <DriveBackupSettings />
+            </>
+          )}
 
           {pane === "security" && (
             <>

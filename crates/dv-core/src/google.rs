@@ -73,6 +73,12 @@ impl ComputerKeys for WindowsAccount {
 static BUSY: AtomicBool = AtomicBool::new(false);
 static CANCEL: AtomicBool = AtomicBool::new(false);
 
+/// A sign-in is waiting for her browser: a cleanup owed at Google waits for it to end (D-099),
+/// or it could withdraw the grant the sign-in is giving.
+pub(crate) fn signing_in() -> bool {
+    BUSY.load(Ordering::SeqCst)
+}
+
 /// Stop a sign-in that is waiting for the browser.
 pub fn cancel() {
     CANCEL.store(true, Ordering::SeqCst);
@@ -92,6 +98,11 @@ fn from_google(e: &GoogleError) -> CoreError {
         GoogleError::Offline => "אין חיבור לגוגל. צריך אינטרנט כדי להשתמש בכניסה עם גוגל.",
         GoogleError::Tls => "החיבור המאובטח לגוגל נכשל. ייתכן שמשהו במחשב מיירט תעבורה מוצפנת.",
         GoogleError::Protocol(_) => "גוגל ענתה תשובה לא צפויה. אפשר לנסות שוב מאוחר יותר.",
+        GoogleError::Revoked => "ההרשאה שניתנה לתוכנה בגוגל בוטלה. אפשר לחבר שוב.",
+        GoogleError::ScopeNotGranted => {
+            "בחלון של גוגל לא סומנה הגישה לתיקייה הנסתרת של התוכנה בדרייב, ובלעדיה זה לא עובד. \
+             אפשר לנסות שוב ולסמן אותה."
+        }
     })
 }
 
@@ -101,9 +112,29 @@ pub fn config() -> Result<ClientConfig, CoreError> {
 }
 
 /// Sign in in her browser and come back with a session. Runs outside the core's lock.
-/// `open` opens the address in her default browser.
+/// `open` opens the address in her default browser. `keep_grant` as for [`tidy_up`]: a sign-in
+/// refused for lacking the hidden folder withdraws its token only when nothing rests on the
+/// app's grant ([`Core::drive_keeps_grant`]).
 pub fn sign_in(
     open: &dyn Fn(&str) -> Result<(), CoreError>,
+    keep_grant: bool,
+) -> Result<(GoogleHttp, Session), CoreError> {
+    sign_in_with(open, false, keep_grant)
+}
+
+/// As [`sign_in`], asking Google for a lasting permission too: for the encrypted backup
+/// copy, which goes up after each backup without the browser (D-099).
+pub fn sign_in_lasting(
+    open: &dyn Fn(&str) -> Result<(), CoreError>,
+    keep_grant: bool,
+) -> Result<(GoogleHttp, Session), CoreError> {
+    sign_in_with(open, true, keep_grant)
+}
+
+fn sign_in_with(
+    open: &dyn Fn(&str) -> Result<(), CoreError>,
+    lasting: bool,
+    keep_grant: bool,
 ) -> Result<(GoogleHttp, Session), CoreError> {
     let cfg = config()?;
     if BUSY.swap(true, Ordering::SeqCst) {
@@ -114,11 +145,17 @@ pub fn sign_in(
     CANCEL.store(false, Ordering::SeqCst);
     let result = (|| {
         let http = GoogleHttp::new().map_err(|e| from_google(&e))?;
-        let mut pending = google::begin(&cfg).map_err(|e| from_google(&e))?;
+        let mut pending = if lasting {
+            google::begin_lasting(&cfg)
+        } else {
+            google::begin(&cfg)
+        }
+        .map_err(|e| from_google(&e))?;
         open(&pending.url)?;
         let code = google::wait(&mut pending, &CANCEL, google::SIGN_IN_TIMEOUT)
             .map_err(|e| from_google(&e))?;
-        let session = google::finish(&http, &cfg, &pending, &code).map_err(|e| from_google(&e))?;
+        let session = google::finish_with(&http, &cfg, &pending, &code, keep_grant)
+            .map_err(|e| from_google(&e))?;
         Ok((http, session))
     })();
     BUSY.store(false, Ordering::SeqCst);
@@ -161,11 +198,18 @@ pub fn read_keys(
 }
 
 /// Best effort: delete key files that no slot uses any more, then end the session.
-pub fn tidy_up(http: &dyn Http, session: Session, stale: &[String]) {
+///
+/// While the encrypted backup copy is on or its cleanup is owed (D-099, `keep_grant`, from
+/// [`Core::drive_keeps_grant`]), the session is not revoked: at Google that withdraws the
+/// app's whole grant, the copy's lasting permission with it, and an owed cleanup could then no
+/// longer delete the copies. The short token is dropped instead, and runs out within the hour.
+pub fn tidy_up(http: &dyn Http, session: Session, stale: &[String], keep_grant: bool) {
     for id in stale {
         let _ = google::delete_key(http, &session, id);
     }
-    google::revoke(http, session);
+    if !keep_grant {
+        google::revoke(http, session);
+    }
 }
 
 impl Core {
@@ -221,11 +265,14 @@ impl Core {
 
     /// Turn it off. Needs no Google: without the half on this computer the key in her Drive
     /// opens nothing, not even old backups (they never carry that half).
+    ///
+    /// Disconnecting Google also turns the encrypted backup copy off (D-099 rests on this
+    /// connection): its cleanup at Google is returned, to run with the core free.
     pub fn google_turn_off(
         &mut self,
         keys: &dyn ComputerKeys,
         password: &str,
-    ) -> Result<(), CoreError> {
+    ) -> Result<Option<crate::drive_backup::DriveCleanup>, CoreError> {
         self.check_backoff()?;
         let dir = self.dir.clone();
         let here = self.password_key_here()?;
@@ -236,7 +283,10 @@ impl Core {
             return Err(e.into());
         }
         keys.remove(&dir);
-        Ok(())
+        // Google is disconnected whatever happens next. If the copy could not be turned off
+        // here, nothing goes up any more (an upload needs the connection too), and its switch
+        // still shows it on, to turn off there.
+        Ok(self.drive_backup_turn_off().unwrap_or(None))
     }
 
     /// "Forgot password", step 1 (under the lock, while locked): the new password is
@@ -279,6 +329,8 @@ impl Core {
             ));
         }
         let computer = keys.load(&self.dir)?;
+        // The new password's key here first: if it cannot be made, nothing is opened.
+        let (here, aside) = self.new_password_key()?;
         let mut opened = Err(VaultError::WrongSecret);
         let mut used = None;
         for drive in drive_keys {
@@ -293,7 +345,6 @@ impl Core {
             return Err(CoreError::Internal("opened without a key".to_owned()));
         };
         let params = self.argon.unwrap_or_else(Argon2Params::calibrate);
-        let (here, aside) = self.new_password_key();
         self.vault_mut()?.rekey_password_here(
             Secret::Google {
                 drive,

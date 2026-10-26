@@ -177,6 +177,14 @@ fn readers() -> Vec<Reader> {
             ]}),
             Box::new(|r| dv_ai::parse_verify(r, &ids(&["P1", "P2"]), &ids(&["S1"])).is_ok()),
         ),
+        (
+            "report check",
+            json!({"notes": [
+                {"kind": "contradiction", "sections": ["R1", "R3"], "note": "הרקע והסיכום שונים"},
+                {"kind": "summary_only", "sections": ["R3"], "note": "ממצא שמופיע רק בסיכום"}
+            ]}),
+            Box::new(|r| dv_ai::parse_report_check(r, &ids(&["R1", "R2", "R3"])).is_ok()),
+        ),
     ]
 }
 

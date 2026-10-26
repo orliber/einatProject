@@ -1,12 +1,15 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useApp } from "../../App";
+import { STALE_EDIT_KEPT } from "../../i18n/he";
 import { ipc, type ExportCheck, type ReportSettings } from "../../ipc/client";
 import type { ParagraphCheck } from "../../ipc/generated/ParagraphCheck";
 import { getKept, useKept } from "../../kept";
 import { ageWords } from "../../components/AgeField";
-import { ErrorLine, Spinner } from "../../components/ui";
+import { ErrorLine } from "../../components/ui";
+import { timed, WaitLine } from "../../components/Progress";
 import { useHoldUnsaved } from "../../components/Unsaved";
 import { LocalText, type LocalTextHandle } from "../../components/LocalText";
+import { ReportCheckItem } from "../../components/ReportCheck";
 import type { CaseApi } from "../CaseScreen";
 import { LetterCard } from "./LetterCard";
 import "./FinishView.css";
@@ -25,20 +28,20 @@ function Marked({ text }: { text: string }) {
  * marker is completed right here; it never stops the file, it only asks her to confirm.
  */
 export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: () => void; onOpen: (key: string) => void }) {
-  const { fail } = useApp();
+  const { fail, notify } = useApp();
   const { detail, caseId, reload } = api;
   const [check, setCheck] = useState<ExportCheck | null>(null);
   const [settings, setSettings] = useState<ReportSettings | null>(null);
   /** A marked paragraph being completed: the text is in `editBox`; `text` is its debounced copy, for the lock. */
   // Kept while the vault is open: leaving and coming back finds the editor with her text.
-  const [editing, setEditing] = useKept<{ id: string; text: string } | null>(`case:${caseId}:finish:editing`, null);
+  const [editing, setEditing] = useKept<{ id: string; text: string; original?: string } | null>(`case:${caseId}:finish:editing`, null);
   const editBox = useRef<LocalTextHandle>(null);
   const [error, setError] = useState<string | null>(null);
   const holdLive = useHoldUnsaved(caseId, "פסקה בשלב הסיום", editing?.text ?? null);
 
   useEffect(() => {
     let alive = true;
-    ipc.checkExport(caseId).then((c) => alive && setCheck(c)).catch((e: unknown) => alive && setError(fail(e as never)));
+    timed("check", ipc.checkExport(caseId)).then((c) => alive && setCheck(c)).catch((e: unknown) => alive && setError(fail(e as never)));
     return () => {
       alive = false;
     };
@@ -83,7 +86,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
     const text = editBox.current?.value() ?? editing.text;
     setError(null);
     try {
-      await ipc.editParagraph(caseId, editing.id, text);
+      if (await ipc.editParagraph(caseId, editing.id, text, editing.original ?? null)) notify(STALE_EDIT_KEPT);
       setEditing(null);
       await reload();
     } catch (e) {
@@ -99,7 +102,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
             <h1>{ready ? "הדוח מוכן להוצאה" : nothing ? "עוד אין מה להוציא" : "כמעט מוכן"}</h1>
             <span className="muted">משמאל: הדוח כמו שייצא. כאן: מה עוד לעשות.</span>
           </div>
-          {!check && !error && <p className="muted"><Spinner /> בודקת…</p>}
+          {!check && !error && <WaitLine task="check" label="בודקת שהדוח מוכן להוצאה" />}
           {check && (
             <ul className="finish-checks">
               <li className={check.included_sections > 0 ? "ok" : "warn"}>
@@ -131,6 +134,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
                   </div>
                 </li>
               )}
+              <ReportCheckItem api={api} onOpen={onOpen} />
               {check.blocking.map((b) => (
                 <li key={b} className="warn">
                   <span className="finish-mark" aria-hidden="true">!</span>
@@ -148,14 +152,14 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
                         <div key={p.id} className="stack" style={{ gap: 6 }}>
                           <span className="small muted">{section.title}</span>
                           <LocalText key={p.id} ref={editBox} className="textarea serif" rows={4} autoFocus initial={editing.text} onLive={holdLive}
-                            onText={(text) => setEditing((e) => (e?.id === p.id ? { id: p.id, text } : e))} />
+                            onText={(text) => setEditing((e) => (e?.id === p.id ? { ...e, text } : e))} />
                           <div className="row">
                             <button type="button" className="btn btn-primary btn-small" onClick={() => void save()}>שמירה</button>
                             <button type="button" className="btn btn-small" onClick={() => setEditing(null)}>ביטול</button>
                           </div>
                         </div>
                       ) : (
-                        <button key={p.id} type="button" className="complete-item" onClick={() => setEditing({ id: p.id, text: p.text })}>
+                        <button key={p.id} type="button" className="complete-item" onClick={() => setEditing({ id: p.id, text: p.text, original: p.text })}>
                           <span className="small muted">{section.title} · להשלמה כאן</span>
                           <span className="serif"><Marked text={p.text} /></span>
                         </button>
