@@ -29,7 +29,14 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 900 } } }],
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 900 } } },
+    // On the Windows job only (D-117): Microsoft Edge as installed on Windows, the same engine
+    // and text input as the WebView2 the app runs in, for the Hebrew typing tests.
+    ...(process.env.DV_E2E_EDGE
+      ? [{ name: "edge", testMatch: "**/hebrew-typing.spec.ts", use: { ...devices["Desktop Edge"], channel: "msedge", viewport: { width: 1280, height: 900 } } }]
+      : []),
+  ],
   webServer: {
     command: `pnpm exec vite preview --mode preview-web --host 127.0.0.1 --port ${PORT} --strictPort`,
     url: `http://127.0.0.1:${PORT}/preview.html`,

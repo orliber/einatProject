@@ -5,6 +5,11 @@
 # window's status checks run. The text field must then hold exactly what was typed: no key
 # lost, doubled or out of order, and the window must have kept up.
 #
+# Then (L6, D-117) the way her keyboard really sends Hebrew: the window is switched to the
+# Hebrew layout and the keys themselves are pressed (virtual-key and scan codes, not Unicode),
+# so Windows' own layout, and the text input of WebView2 behind it, turn them into letters.
+# This is the path on which typing stopped before F1(a).
+#
 # Runs in Windows PowerShell 5.1 (UI Automation ships with it). Reads the window only through
 # UI Automation, the way a screen reader does; nothing in the app is switched on for the test.
 param(
@@ -38,8 +43,45 @@ public static class Keys {
         if (SendInput(1, i, Marshal.SizeOf(typeof(INPUT))) != 1) throw new Exception("SendInput failed: " + Marshal.GetLastWin32Error());
     }
     public static void Char(char c) { Send(0, c, UNICODE); Send(0, c, UNICODE | KEYUP); }
+    // A physical key, as a keyboard sends it: what letter it makes is the window's layout's choice.
+    [DllImport("user32.dll")]
+    static extern uint MapVirtualKey(uint code, uint mapType);
+    public static void Key(ushort vk) {
+        var scan = (ushort)MapVirtualKey(vk, 0);
+        Send(vk, scan, 0);
+        Send(vk, scan, KEYUP);
+    }
     public static void Enter() { Send(0x0D, 0, 0); Send(0x0D, 0, KEYUP); }
     public static void Down() { Send(0x28, 0, 0); Send(0x28, 0, KEYUP); }
+}
+// The keyboard layout of the window that has the keyboard focus (in WebView2 a window of its
+// browser process, not of the app's own), and a request to that window to switch it.
+public static class Layout {
+    [StructLayout(LayoutKind.Sequential)]
+    struct RECT { public int l, t, r, b; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct GUITHREADINFO { public int cbSize; public uint flags; public IntPtr active, focus, capture, menuOwner, moveSize, caret; public RECT caretRect; }
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr pid);
+    [DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint thread, ref GUITHREADINFO info);
+    [DllImport("user32.dll")] static extern IntPtr GetKeyboardLayout(uint thread);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr LoadKeyboardLayout(string id, uint flags);
+    [DllImport("user32.dll")] static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+    const uint WM_INPUTLANGCHANGEREQUEST = 0x0050, KLF_ACTIVATE = 0x1;
+    public static IntPtr Focused() {
+        var fg = GetForegroundWindow();
+        var info = new GUITHREADINFO();
+        info.cbSize = Marshal.SizeOf(typeof(GUITHREADINFO));
+        if (GetGUIThreadInfo(GetWindowThreadProcessId(fg, IntPtr.Zero), ref info) && info.focus != IntPtr.Zero) return info.focus;
+        return fg;
+    }
+    // The language of the layout the focused window types with (0x040D is Hebrew).
+    public static int Language() { return (int)(GetKeyboardLayout(GetWindowThreadProcessId(Focused(), IntPtr.Zero)).ToInt64() & 0xFFFF); }
+    public static IntPtr Load(string id) { return LoadKeyboardLayout(id, KLF_ACTIVATE); }
+    public static void Request(IntPtr layout) {
+        PostMessage(Focused(), WM_INPUTLANGCHANGEREQUEST, IntPtr.Zero, layout);
+        PostMessage(GetForegroundWindow(), WM_INPUTLANGCHANGEREQUEST, IntPtr.Zero, layout);
+    }
 }
 public static class Wins {
     delegate bool EnumProc(IntPtr h, IntPtr l);
@@ -285,3 +327,50 @@ if ($got -ne $text) {
     throw "typing lost or changed keys: $($got.Length) of $($text.Length) characters, first difference at $at"
 }
 Write-Host ("typing: ok ({0} Hebrew characters in {1:N1} s, none lost)" -f $text.Length, $typed)
+
+# 5. The Hebrew layout, key by key (D-117): the window is switched to Hebrew (KBDHEB, which
+#    every Windows has), and each letter is the key it sits on: ש is the A key, and so on.
+#    Nothing in the text says how to type it: only the layout turns the keys into Hebrew.
+$hebrew = [Layout]::Load("0000040D")
+if ($hebrew -eq [IntPtr]::Zero) { throw "the Hebrew keyboard layout could not be loaded" }
+$before = [Layout]::Language()
+# The field kept the focus from step 3 (the caret at the end of the text): it is not focused
+# again, which could move the caret.
+if (-not $field.Current.HasKeyboardFocus) { throw "the field lost the focus after typing; it is in $(Focused-Name)" }
+for ($i = 0; $i -lt 20 -and [Layout]::Language() -ne 0x040D; $i++) {
+    [Layout]::Request($hebrew)
+    Start-Sleep -Milliseconds 250
+}
+if ([Layout]::Language() -ne 0x040D) {
+    throw ("the window did not switch to the Hebrew layout (it types with 0x{0:X4}, was 0x{1:X4})" -f [Layout]::Language(), $before)
+}
+Write-Host ("layout: Hebrew (0x040D) in the focused window, was 0x{0:X4}" -f $before)
+# The Israeli standard layout (SI 1452): each letter and the virtual key of its place.
+$vk = @{
+    [char]'ק' = 0x45; [char]'ר' = 0x52; [char]'א' = 0x54; [char]'ט' = 0x59; [char]'ו' = 0x55; [char]'ן' = 0x49
+    [char]'ם' = 0x4F; [char]'פ' = 0x50; [char]'ש' = 0x41; [char]'ד' = 0x53; [char]'ג' = 0x44; [char]'כ' = 0x46
+    [char]'ע' = 0x47; [char]'י' = 0x48; [char]'ח' = 0x4A; [char]'ל' = 0x4B; [char]'ך' = 0x4C; [char]'ף' = 0xBA
+    [char]'ז' = 0x5A; [char]'ס' = 0x58; [char]'ב' = 0x43; [char]'ה' = 0x56; [char]'נ' = 0x42; [char]'מ' = 0x4E
+    [char]'צ' = 0x4D; [char]'ת' = 0xBC; [char]'ץ' = 0xBE; [char]' ' = 0x20
+}
+$phrase = " הילדה בנתה מגדל גבוה מקוביות וצחקה כשהוא נפל ואז בנתה אותו שוב עם חברה"
+$started = Get-Date
+foreach ($c in $phrase.ToCharArray()) {
+    [Keys]::Key([uint16]$vk[$c])
+    Start-Sleep -Milliseconds 15
+}
+$typed = ((Get-Date) - $started).TotalSeconds
+$want = $text + $phrase
+$got = ""
+for ($i = 0; $i -lt 20; $i++) {
+    $got = Value-Of $field
+    if ($got -eq $want) { break }
+    Start-Sleep -Milliseconds 250
+}
+if ($got -ne $want) {
+    $tail = if ($got.Length -gt $text.Length) { $got.Substring($text.Length) } else { "" }
+    Write-Host "the focus is in: $(Focused-Name)"
+    Write-Host "typed on the Hebrew layout, the field got: '$tail'"
+    throw "typing on the Hebrew layout lost or changed keys: $($got.Length) of $($want.Length) characters"
+}
+Write-Host ("typing on the Hebrew layout: ok ({0} keys in {1:N1} s, none lost)" -f $phrase.Length, $typed)
