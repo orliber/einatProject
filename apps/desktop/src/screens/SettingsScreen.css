@@ -328,6 +328,9 @@
 .ready-label {
   font-weight: 600;
 }
+.ready-item .link-btn {
+  font-size: var(--text-sm);
+}
 .ready-item .btn,
 .ready-item .link-btn {
   flex: none;

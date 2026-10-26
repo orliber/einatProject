@@ -3,6 +3,6 @@ import type { NetPart } from "./NetPart";
 
 export type SafetyNet = { google: NetPart, backup: NetPart, 
 /**
- * Nothing is missing.
+ * Both parts are there. False also when Google cannot work here.
  */
 ok: boolean, };

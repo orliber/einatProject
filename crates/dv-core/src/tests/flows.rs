@@ -796,13 +796,16 @@ fn the_safety_net_and_readiness_agree_on_what_a_recent_backup_is() {
     let net = core.safety_net(&NoGoogle).unwrap();
     assert_eq!(net.google.state, crate::NetState::Unavailable);
     assert_eq!(net.backup.text, "אין עדיין גיבוי");
+    assert_eq!(net.backup.state, crate::NetState::Missing);
     assert!(!net.ok && !backup_done(&mut core));
 
     let drive = tempfile::tempdir().unwrap();
     core.write_backup(&drive.path().join("b")).unwrap();
     let net = core.safety_net(&NoGoogle).unwrap();
     assert_eq!(net.backup.text, "גיבוי מהיום");
-    assert!(net.ok && backup_done(&mut core));
+    assert_eq!(net.backup.state, crate::NetState::Ok);
+    assert!(backup_done(&mut core));
+    assert!(!net.ok, "without Google sign-in the net is never whole");
 
     // Eight days ago: a reminder is due, so neither counts it (it was two weeks before D-107).
     let eight_days_ago = crate::dates::unix_now() - 8 * dv_domain::dates::DAY_SECS;
@@ -812,14 +815,16 @@ fn the_safety_net_and_readiness_agree_on_what_a_recent_backup_is() {
         .unwrap();
     let net = core.safety_net(&NoGoogle).unwrap();
     assert_eq!(net.backup.text, "הגיבוי האחרון לפני 8 ימים");
-    assert!(!net.ok && !backup_done(&mut core));
+    assert_eq!(net.backup.state, crate::NetState::Missing);
+    assert!(!backup_done(&mut core));
 
     core.write_backup(&drive.path().join("c")).unwrap();
     core.change_password(PASSWORD, false, "חתול כחול ישן על הספה")
         .unwrap();
     let net = core.safety_net(&NoGoogle).unwrap();
     assert_eq!(net.backup.text, "הסיסמה הוחלפה אחרי הגיבוי האחרון");
-    assert!(!net.ok && !backup_done(&mut core));
+    assert_eq!(net.backup.state, crate::NetState::Missing);
+    assert!(!backup_done(&mut core));
 }
 
 #[test]

@@ -108,6 +108,25 @@ describe("the safety net (D-107)", () => {
     expect(calls).toContain("write_backup");
   });
 
+  it("where Google cannot work, the row is amber and says so, with nothing to press", async () => {
+    mockIPC((cmd) => {
+      if (cmd === "google_status") return { ...google, available: false };
+      if (cmd === "backup_status") return { ...backup, days_since: 1, due: false };
+      return {
+        google: { state: "unavailable", text: "כניסה עם גוגל לא זמינה במחשב הזה", hint: "אם הסיסמה תישכח, אין כאן כניסה עם גוגל." },
+        backup: { state: "ok", text: "גיבוי מאתמול", hint: null },
+        ok: false,
+      };
+    });
+    render(wrap(<SafetyNet />));
+    const net = await screen.findByRole("region", { name: "רשת הביטחון" });
+    expect(net).toHaveClass("partial");
+    expect(net).not.toHaveClass("ok");
+    expect(net).toHaveTextContent("כניסה עם גוגל לא זמינה במחשב הזה! (לא זמין)");
+    expect(within(net).getByText(/אין כאן כניסה עם גוגל/)).toBeInTheDocument();
+    expect(within(net).queryByRole("button")).toBeNull();
+  });
+
   it("all there: one green line, no buttons", async () => {
     mockIPC((cmd) => {
       if (cmd === "google_status") return { ...google, on: true };

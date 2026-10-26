@@ -179,7 +179,8 @@ export class FakeCore {
   /** `?setup` in the address opens the first-run screens (for the demo page's pictures). */
   private vaultExists = typeof location === "undefined" || !location.search.includes("setup");
   // Nine days ago, so the preview shows the weekly reminder (D-024).
-  private lastBackupAt: number | null = Math.floor(Date.now() / 1000) - 9 * 86_400;
+  // Two days ago: recent by the core's week (D-107), so the demo opens without a backup reminder.
+  private lastBackupAt: number | null = Math.floor(Date.now() / 1000) - 2 * 86_400;
   private lastCheckAt: number | null = null;
   private secretChanged = false;
   private googleOn = false;
@@ -1526,7 +1527,7 @@ export class FakeCore {
         const g = (await this.handle("google_status", {})) as GoogleStatus;
         const b = (await this.handle("backup_status", {})) as BackupStatus;
         const google: NetPart = !g.available
-          ? { state: "unavailable", text: "כניסה עם גוגל לא זמינה במחשב הזה", hint: null }
+          ? { state: "unavailable", text: "כניסה עם גוגל לא זמינה במחשב הזה", hint: "אם הסיסמה תישכח, אין כאן כניסה עם גוגל. כדאי לשמור את הסיסמה במקום בטוח." }
           : g.on ? { state: "ok", text: "כניסה עם גוגל", hint: null }
             : g.needs_setup_here
               ? { state: "missing", text: "כניסה עם גוגל לא מחוברת במחשב הזה", hint: "היא הופעלה במחשב אחר. מחברים אותה שוב כאן, וכך אפשר להיכנס גם אם הסיסמה תישכח." }
@@ -1536,9 +1537,9 @@ export class FakeCore {
           : b.secret_changed
             ? { state: "missing", text: "הסיסמה הוחלפה אחרי הגיבוי האחרון", hint: "הגיבוי הקודם נפתח רק בסיסמה הישנה. כדאי לגבות עכשיו." }
             : b.due
-              ? { state: "missing", text: `הגיבוי האחרון ${daysAgo(b.days_since)}`, hint: "גיבוי נחשב עדכני 7 ימים. כדאי לגבות עכשיו." }
+              ? { state: "missing", text: `הגיבוי האחרון ${daysAgo(b.days_since)}`, hint: "גיבוי נחשב עדכני עד 7 ימים. כדאי לגבות עכשיו." }
               : { state: "ok", text: `גיבוי מ${daysAgo(b.days_since)}`, hint: null };
-        return { google, backup, ok: google.state !== "missing" && backup.state === "ok" } satisfies SafetyNet;
+        return { google, backup, ok: google.state === "ok" && backup.state === "ok" } satisfies SafetyNet;
       }
       case "drive_backup_status":
         return { available: true, connected: this.googleOn, on: this.driveOn, last_at: this.driveOn ? this.driveLastAt : null, problem: null, cleanup_pending: false, copies_left: false } satisfies DriveBackupStatus;

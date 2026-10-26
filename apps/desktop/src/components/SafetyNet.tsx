@@ -15,12 +15,8 @@ function Part({ p }: { p: NetPart }) {
   return (
     <span className={`net-part ${p.state}`}>
       {p.text}
-      {p.state !== "unavailable" && (
-        <>
-          <span className="net-mark" aria-hidden="true">{p.state === "ok" ? "✓" : "!"}</span>
-          <span className="visually-hidden">{p.state === "ok" ? " (תקין)" : " (חסר)"}</span>
-        </>
-      )}
+      <span className="net-mark" aria-hidden="true">{p.state === "ok" ? "✓" : "!"}</span>
+      <span className="visually-hidden">{p.state === "ok" ? " (תקין)" : p.state === "missing" ? " (חסר)" : " (לא זמין)"}</span>
     </span>
   );
 }
@@ -44,14 +40,21 @@ export function SafetyNet() {
   if (!n) return null;
   const googleMissing = n.google.state === "missing";
   const backupMissing = n.backup.state === "missing";
+  // Red: something a button fixes. Amber: not whole, but nothing to turn on here (D-107).
+  const look = n.ok ? "ok" : googleMissing || backupMissing ? "missing" : "partial";
   return (
-    <section className={`safety-net ${n.ok ? "ok" : "missing"}`} aria-labelledby="s-net">
+    <section className={`safety-net ${look}`} aria-labelledby="s-net">
       <div className="net-line">
         <h2 id="s-net" className="net-title">רשת הביטחון</h2>
         <p className="net-parts">
           אם תשכחי את הסיסמה: <Part p={n.google} /><span className="net-dot" aria-hidden="true"> · </span><Part p={n.backup} />
         </p>
       </div>
+      {n.google.state === "unavailable" && n.google.hint && (
+        <div className="net-fix">
+          <p className="net-hint">{n.google.hint}</p>
+        </div>
+      )}
       {googleMissing && (
         <div className="net-fix">
           <p className="net-hint">{n.google.hint}</p>

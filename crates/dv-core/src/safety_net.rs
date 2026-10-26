@@ -1,7 +1,8 @@
 //! "The safety net" (D-107): one row, on General and on the security page, that says whether
 //! she can still get in if the password is forgotten (sign-in with Google) and whether her
 //! cases survive a broken or lost computer (a recent backup). When one is missing the row
-//! turns red and says what to do.
+//! turns red and says what to do; where Google sign-in cannot work at all, it is amber and
+//! says so, and it is green only when both are really there.
 //!
 //! It is made from the two statuses that already exist (Google, backup), so it can never
 //! disagree with them. A backup counts while no backup reminder is due: newer than
@@ -23,7 +24,8 @@ pub enum NetState {
     Ok,
     /// Missing or out of date: the row turns red, with a way to fix it.
     Missing,
-    /// Cannot work on this computer (this version has no Google sign-in): said, not counted.
+    /// Cannot work on this computer (this version has no Google sign-in): no button can fix
+    /// it, but the net is not whole either, so the row is never green (amber, said honestly).
     Unavailable,
 }
 
@@ -42,7 +44,7 @@ pub struct NetPart {
 pub struct SafetyNet {
     pub google: NetPart,
     pub backup: NetPart,
-    /// Nothing is missing.
+    /// Both parts are there. False also when Google cannot work here.
     pub ok: bool,
 }
 
@@ -72,7 +74,7 @@ pub fn safety_net(google: &GoogleStatus, backup: &BackupStatus) -> SafetyNet {
         part(
             NetState::Unavailable,
             "כניסה עם גוגל לא זמינה במחשב הזה",
-            None,
+            Some("אם הסיסמה תישכח, אין כאן כניסה עם גוגל. כדאי לשמור את הסיסמה במקום בטוח."),
         )
     } else if google.on {
         part(NetState::Ok, "כניסה עם גוגל", None)
@@ -104,7 +106,7 @@ pub fn safety_net(google: &GoogleStatus, backup: &BackupStatus) -> SafetyNet {
             state: NetState::Missing,
             text: format!("הגיבוי האחרון {}", days_ago(d)),
             hint: Some(format!(
-                "גיבוי נחשב עדכני {} ימים. כדאי לגבות עכשיו.",
+                "גיבוי נחשב עדכני עד {} ימים. כדאי לגבות עכשיו.",
                 crate::BACKUP_DAYS
             )),
         },
@@ -114,7 +116,8 @@ pub fn safety_net(google: &GoogleStatus, backup: &BackupStatus) -> SafetyNet {
             hint: None,
         },
     };
-    let ok = google.state != NetState::Missing && backup.state == NetState::Ok;
+    // The strictest reading (D-107): green only when both are really there.
+    let ok = google.state == NetState::Ok && backup.state == NetState::Ok;
     SafetyNet { google, backup, ok }
 }
 
@@ -217,10 +220,12 @@ mod tests {
     }
 
     #[test]
-    fn where_google_cannot_work_only_the_backup_decides() {
+    fn where_google_cannot_work_the_row_is_never_green() {
         let net = safety_net(&google(false, false, false), &backup(Some(1), false));
         assert_eq!(net.google.state, NetState::Unavailable);
-        assert!(net.ok);
+        assert!(!net.ok, "no forgotten-password path here: not a whole net");
+        assert!(net.google.hint.is_some(), "said honestly");
+        assert_eq!(net.backup.state, NetState::Ok);
         let net = safety_net(&google(false, false, false), &backup(None, false));
         assert!(!net.ok);
     }

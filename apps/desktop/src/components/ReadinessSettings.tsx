@@ -101,7 +101,7 @@ export function ReadinessSettings() {
                   onClick={() => void confirm(i.key, true)}>אישרתי</button>
               )}
               {!i.checked_by_program && i.done && (
-                <button type="button" className="link-btn small" aria-label={`ביטול האישור: ${item.label}`}
+                <button type="button" className="link-btn" aria-label={`ביטול האישור: ${item.label}`}
                   onClick={() => void confirm(i.key, false)}>ביטול האישור</button>
               )}
               {i.checked_by_program && !i.done && item.jump && (

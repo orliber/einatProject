@@ -173,8 +173,7 @@ export function CheckBackupDialog({ staged, onClose }: { staged: StagedBackup; o
   );
 }
 
-/** Days before the line comes back, and how long "×" puts it away. */
-const REMIND_AFTER_DAYS = 14;
+/** How long "×" puts the line away. */
 const SNOOZE_DAYS = 7;
 const SNOOZE_KEY = "dv.backupSnoozedAt";
 
@@ -188,8 +187,9 @@ function snoozedUntil(): number {
 
 /**
  * A quiet line on the cases screen, only now and then: when there has never been a backup,
- * two weeks after the last one, or after a password / kit change (always, the old backup no
- * longer opens with the new secret). "×" puts it away for a week.
+ * a week after the last one, or after a password / kit change (always, the old backup no
+ * longer opens with the new secret): the core's `due`, the same rule as the safety net
+ * (D-107). "×" puts it away for a week.
  */
 export function BackupReminder() {
   const { go } = useApp();
@@ -197,8 +197,7 @@ export function BackupReminder() {
   const { write, busy, error } = useWriteBackup();
   const [hidden, setHidden] = useState(() => Date.now() < snoozedUntil());
   const s = status.data;
-  const due = s && (s.secret_changed || s.last_at === null || (s.days_since ?? 0) >= REMIND_AFTER_DAYS);
-  if (!s || !due || !s.has_cases || (hidden && !s.secret_changed)) return null;
+  if (!s || !s.due || !s.has_cases || (hidden && !s.secret_changed)) return null;
   const snooze = () => {
     try {
       localStorage.setItem(SNOOZE_KEY, String(Date.now()));
