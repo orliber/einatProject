@@ -1,6 +1,69 @@
 //! Backup (D-024).
 
+use std::sync::mpsc::{sync_channel, SyncSender};
+
 use crate::*;
+
+/// The automatic backup, on a worker of its own (D-119). The shell's timer only nudges it and
+/// never waits for it: a backup to a slow drive takes longer than the gap the timer reads as
+/// "the computer slept", and while the timer waited, the idle lock, the lock with the computer
+/// and the last-minute warning waited too. One worker means one backup at a time; while it
+/// writes, at most one nudge waits, and when it is done that nudge finds nothing due.
+pub(crate) struct AutoBackup {
+    nudge: SyncSender<()>,
+}
+
+impl AutoBackup {
+    /// Start the worker. `backed_up` is called after each backup that was recorded.
+    pub(crate) fn start(core: Arc<Mutex<Core>>, backed_up: impl Fn() + Send + 'static) -> Self {
+        Self::with_job(move || {
+            if auto_backup_once(&core) {
+                backed_up();
+            }
+        })
+    }
+
+    /// The worker around any job (the tests give it one that waits).
+    fn with_job(mut job: impl FnMut() + Send + 'static) -> Self {
+        let (nudge, nudged) = sync_channel::<()>(1);
+        std::thread::spawn(move || {
+            for () in nudged {
+                job();
+            }
+        });
+        Self { nudge }
+    }
+
+    /// See whether a backup is due. Returns at once, whatever the worker is doing.
+    pub(crate) fn nudge(&self) {
+        let _ = self.nudge.try_send(());
+    }
+}
+
+/// A backup that is due goes by itself to the drive of the last one, if it is connected (see
+/// `Core::auto_backup`). Only taking the snapshot and recording it hold the core; writing to
+/// the drive and reading it back run with the core free (F2). A failure waits and is shown
+/// nowhere: the backup reminder stays until a backup is made. True when one was recorded.
+fn auto_backup_once(core: &Arc<Mutex<Core>>) -> bool {
+    let task = core
+        .lock()
+        .ok()
+        .and_then(|mut c| c.begin_auto_backup().ok().flatten());
+    let Some(task) = task else {
+        return false;
+    };
+    let run = task.run();
+    let Ok(mut c) = core.lock() else {
+        return false;
+    };
+    let (done, upload) = c.finish_backup_for_drive(run);
+    drop(c);
+    // The encrypted copy in her Drive, when on (D-099), on its own thread too.
+    if let Some(up) = upload {
+        super::upload_in_background(Arc::clone(core), up);
+    }
+    done.is_ok()
+}
 
 #[tauri::command]
 pub(crate) async fn backup_status(state: tauri::State<'_, AppState>) -> Res<BackupStatus> {
@@ -125,4 +188,64 @@ pub(crate) async fn forget_backup(state: tauri::State<'_, AppState>) -> Res<()> 
         Ok(())
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc::channel;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_slow_backup_never_holds_up_the_timer_and_runs_one_at_a_time() {
+        let running = Arc::new(AtomicUsize::new(0));
+        let most = Arc::new(AtomicUsize::new(0));
+        let runs = Arc::new(AtomicUsize::new(0));
+        let (release, wait) = channel::<()>();
+        let wait = Mutex::new(wait);
+        let (started, first_started) = channel::<()>();
+        let backup = {
+            let (running, most, runs) =
+                (Arc::clone(&running), Arc::clone(&most), Arc::clone(&runs));
+            AutoBackup::with_job(move || {
+                let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+                most.fetch_max(now, Ordering::SeqCst);
+                let _ = started.send(());
+                // A drive that takes as long as the test says.
+                let _ = wait.lock().unwrap().recv();
+                running.fetch_sub(1, Ordering::SeqCst);
+                runs.fetch_add(1, Ordering::SeqCst);
+            })
+        };
+        backup.nudge();
+        first_started.recv_timeout(Duration::from_secs(5)).unwrap();
+        // The timer goes on nudging while the backup writes: every nudge returns at once.
+        let at = Instant::now();
+        for _ in 0..20 {
+            backup.nudge();
+        }
+        assert!(at.elapsed() < Duration::from_secs(1));
+        // Let the first backup and the one nudge kept for after it finish.
+        release.send(()).unwrap();
+        first_started.recv_timeout(Duration::from_secs(5)).unwrap();
+        release.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while runs.load(Ordering::SeqCst) < 2 && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        assert_eq!(runs.load(Ordering::SeqCst), 2, "one kept nudge, not twenty");
+        assert_eq!(most.load(Ordering::SeqCst), 1, "never two at once");
+    }
+
+    #[test]
+    fn with_nothing_due_the_worker_does_nothing() {
+        let dir = std::env::temp_dir().join(format!("dv-auto-backup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let core = Arc::new(Mutex::new(Core::for_tests(&dir, None)));
+        // No vault yet: nothing is due, nothing is written.
+        assert!(!auto_backup_once(&core));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

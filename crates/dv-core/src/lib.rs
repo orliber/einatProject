@@ -73,6 +73,20 @@ pub use backup::{
 pub(crate) use dates::today;
 pub use dv_ai::{StyleItem, StyleKind, StyleOrigin, StyleProfile};
 pub use dv_export::MAX_LOGO_BYTES;
+
+/// The largest file "check the original" reads: the same cap as any document she brings in
+/// (`dv_ingest::MAX_INPUT_BYTES`, 25 MiB), refused before it is read (D-120).
+pub const MAX_ORIGINAL_BYTES: usize = dv_ingest::MAX_INPUT_BYTES;
+
+/// Why a file is too large for "check the original": no report she exported is that big.
+#[must_use]
+pub fn original_too_large() -> CoreError {
+    CoreError::Refused(
+        "הקובץ גדול מ-25MB, ולכן הוא לא דוח שהופק כאן. בוחרים את קובץ ה-PDF או ה-Word שהופק."
+            .to_owned(),
+    )
+}
+pub use dv_vault::crypto::sha256_hex;
 pub use dv_vault::BACKUP_EXTENSION;
 pub use followup::FollowUpView;
 pub use history::{HiddenWord, SentItem, SentPart, SentText};
@@ -346,6 +360,12 @@ impl CoreError {
             CoreError::Vault(VaultError::AlreadyExists) => {
                 ("exists", "כבר קיימת כספת במחשב הזה.".to_owned())
             }
+            // Said by its kind, never by its text: an operating system's or a library's
+            // wording can name the file, and with it her user name or a case code (D-120).
+            CoreError::Vault(VaultError::Io(e)) => {
+                details.push(io_detail(e));
+                ("vault", io_he(e.kind()).to_owned())
+            }
             CoreError::Vault(e) => {
                 details.push(e.to_string());
                 ("vault", TECHNICAL_HE.to_owned())
@@ -371,7 +391,8 @@ impl CoreError {
         UiError {
             code: code.to_owned(),
             message,
-            details,
+            // The details go into the bug report she copies for Or: never a path (D-120).
+            details: details.iter().map(|d| without_paths(d)).collect(),
             action: self.action(),
         }
     }
@@ -428,6 +449,49 @@ fn egress_action(e: &EgressError) -> ErrorAction {
         | EgressError::Protocol(_) => ErrorAction::Report,
         EgressError::TooLarge | EgressError::DailyLimit => ErrorAction::Dismiss,
     }
+}
+
+/// A file that could not be read or written, by the shell: shown by its kind, never its path.
+#[must_use]
+pub fn file_error(e: std::io::Error) -> CoreError {
+    CoreError::Vault(VaultError::Io(e))
+}
+
+/// An io error for the bug report: its kind and the system's number, nothing it says.
+fn io_detail(e: &std::io::Error) -> String {
+    match e.raw_os_error() {
+        Some(n) => format!("file error: {:?} (os error {n})", e.kind()),
+        None => format!("file error: {:?}", e.kind()),
+    }
+}
+
+/// What she is told about a file that could not be read or written, by its kind.
+fn io_he(kind: std::io::ErrorKind) -> &'static str {
+    use std::io::ErrorKind as K;
+    match kind {
+        K::StorageFull | K::QuotaExceeded => {
+            "אין מספיק מקום בדיסק. מפנים מקום ומנסים שוב. שום דבר לא נשלח והחומרים שמורים."
+        }
+        K::PermissionDenied | K::ReadOnlyFilesystem => {
+            "אין הרשאה לכתוב בתיקייה או לקרוא את הקובץ. ייתכן שהקובץ פתוח בתוכנה אחרת, או שאנטי-וירוס חוסם. אפשר לנסות שוב."
+        }
+        K::NotFound => "הקובץ או התיקייה לא נמצאו. אם זה דיסק נייד, כדאי לבדוק שהוא מחובר.",
+        _ => TECHNICAL_HE,
+    }
+}
+
+/// A detail with any path cut off: from the first word that holds a path separator, the
+/// rest is dropped (a path may hold spaces, so what follows it is not kept either).
+fn without_paths(detail: &str) -> String {
+    let mut kept = Vec::new();
+    for word in detail.split(' ') {
+        if word.contains(['/', '\\']) {
+            kept.push("[נתיב הוסר]");
+            break;
+        }
+        kept.push(word);
+    }
+    kept.join(" ")
 }
 
 /// One calm sentence for failures only the developer can read; the raw text rides in

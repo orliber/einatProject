@@ -1401,12 +1401,50 @@ fn letters_are_written_from_the_approved_recommendations_only() {
     for para in &letter {
         core.approve_paragraph(&case, &para.id).unwrap();
     }
-    let doc = read_docx_text(&core.export_letter(&case, "school", None).unwrap());
+    let file = core.export_letter(&case, "school", None).unwrap();
+    let doc = read_docx_text(&file);
     assert!(
         doc.contains("מכתב לצוות החינוכי") && doc.contains("שם הילד"),
         "{doc}"
     );
     assert!(!doc.contains("סיבת הפניה"));
+    // The letter is recorded with its fingerprint, so "check the original" knows it (D-120),
+    // and a changed copy is not taken for it.
+    assert!(core.check_original(&file).unwrap().is_some());
+    let mut changed = file.clone();
+    let last = changed.len() - 1;
+    changed[last] ^= 1;
+    assert!(core.check_original(&changed).unwrap().is_none());
+}
+
+#[test]
+fn every_exported_file_is_recognised_and_only_the_fingerprint_comes_in() {
+    let (_dir, mut core, case) = setup(None);
+    core.add_own_paragraph(&case, "referral", "ההורים של אלון פנו בשל קושי במעברים.")
+        .unwrap();
+    // The Word report too, not only the PDF (D-120).
+    let word = core.export_report(&case, None).unwrap();
+    let sha = dv_vault::crypto::sha256_hex(&word);
+    assert!(core.check_original_hash(&sha).unwrap().is_some());
+    assert!(core.check_original(&word).unwrap().is_some());
+    // Anything but a fingerprint is refused, never searched for.
+    for bad in [
+        "",
+        "%",
+        &sha.to_uppercase(),
+        &format!("{sha}\""),
+        sha.get(..63).unwrap(),
+    ] {
+        assert!(
+            matches!(core.check_original_hash(bad), Err(CoreError::Internal(_))),
+            "{bad}"
+        );
+    }
+    // Over the cap: refused before it is hashed.
+    let big = vec![0_u8; crate::MAX_ORIGINAL_BYTES + 1];
+    let e = core.check_original(&big).unwrap_err().to_ui();
+    assert_eq!(e.code, "refused");
+    assert!(e.message.contains("25MB"), "{}", e.message);
 }
 
 #[test]

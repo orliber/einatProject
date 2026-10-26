@@ -294,6 +294,10 @@ fn main() {
             // The window learns of a lock, of the last minute before it and of a backup from
             // an event, so it never has to ask the core on a timer while she types (F3).
             let events = app.handle().clone();
+            let backup_events = app.handle().clone();
+            let auto_backup = AutoBackup::start(Arc::clone(&core), move || {
+                let _ = backup_events.emit(CORE_EVENT, CoreEvent::BackedUp);
+            });
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(15));
                 // Read the clock before waiting for the core: a long command holding it must not
@@ -314,31 +318,10 @@ fn main() {
                         locked = timer.lock().is_ok_and(|mut c| c.lock_with_computer());
                     }
                 }
-                // A backup that is due goes by itself to the drive of the last one, if it is
-                // connected (see `Core::auto_backup`). A failure waits and is shown nowhere: the
-                // backup reminder stays until a backup is made.
-                // Only the snapshot holds the core; writing to the drive and reading it back
-                // run with the core free (F2).
-                let mut backed_up = false;
+                // A backup that is due goes by itself to the drive of the last one, on its
+                // own worker: the timer never waits for a slow drive (D-119).
                 if !locked {
-                    let task = timer
-                        .lock()
-                        .ok()
-                        .and_then(|mut c| c.begin_auto_backup().ok().flatten());
-                    if let Some(task) = task {
-                        let run = task.run();
-                        let mut upload = None;
-                        if let Ok(mut c) = timer.lock() {
-                            let (done, up) = c.finish_backup_for_drive(run);
-                            backed_up = done.is_ok();
-                            upload = up;
-                        }
-                        // The encrypted copy in her Drive, when on (D-099), on its own thread:
-                        // this timer also locks the vault and must not wait for a slow line.
-                        if let Some(up) = upload {
-                            commands::upload_in_background(Arc::clone(&timer), up);
-                        }
-                    }
+                    auto_backup.nudge();
                 }
                 // A cleanup still owed at Google after turning the Drive copy off (D-099):
                 // tried again after an unlock and then every 15 minutes, with the core free.
@@ -356,8 +339,6 @@ fn main() {
                 }
                 let event = if locked {
                     Some(CoreEvent::Locked)
-                } else if backed_up {
-                    Some(CoreEvent::BackedUp)
                 } else {
                     idle_in
                         .filter(|s| *s <= IDLE_EVENT_SECONDS)

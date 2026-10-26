@@ -469,6 +469,8 @@ pub struct ExportJob {
     format: ExportFormat,
     /// The parents' version (round 55), for the audit log.
     parents: bool,
+    /// A letter (EX-4), by its key, for the audit log: not learned from as a final report.
+    letter: Option<&'static str>,
 }
 
 /// The file's bytes (or why not), waiting for [`Core::finish_export`].
@@ -479,6 +481,7 @@ pub struct Exported {
     pdf: bool,
     protected: bool,
     parents: bool,
+    letter: Option<&'static str>,
     /// The report as a file, wiped if it is dropped unsaved (it landed after a lock).
     bytes: Result<Zeroizing<Vec<u8>>, CoreError>,
 }
@@ -540,6 +543,7 @@ impl ExportJob {
             pdf,
             protected,
             parents: self.parents,
+            letter: self.letter,
             bytes,
         }
     }
@@ -1139,6 +1143,7 @@ impl Core {
             check,
             format,
             parents: parents.is_some(),
+            letter: None,
         })
     }
 
@@ -1199,7 +1204,35 @@ impl Core {
         )
     }
 
-    /// Record the export (the PDF with its fingerprint) and learn from the final report.
+    /// The short letter (EX-4) as a Word file, in her template when she has one: put together
+    /// under the lock, rendered (and encrypted) in the job, like the report (D-120).
+    pub fn begin_export_letter(
+        &mut self,
+        case_id: &str,
+        audience: &str,
+        password: Option<&str>,
+    ) -> Result<ExportJob, CoreError> {
+        let (letter, doc, check) = self.letter_doc(case_id, audience)?;
+        let template = self.template_bytes()?;
+        Ok(ExportJob {
+            session: self.session,
+            cancel: self.cancel.clone(),
+            case_id: case_id.to_owned(),
+            report: WipedReport(doc),
+            check,
+            format: ExportFormat::Word {
+                template,
+                password: password
+                    .filter(|p| !p.is_empty())
+                    .map(|p| Zeroizing::new(p.to_owned())),
+            },
+            parents: false,
+            letter: Some(letter.key()),
+        })
+    }
+
+    /// Record the export with the file's fingerprint (Word, PDF or letter alike, so "check
+    /// the original" knows every file she gave out, D-120) and learn from the final report.
     /// Returns the file's bytes and the check, whose file name has no child's name in it.
     pub fn finish_export(
         &mut self,
@@ -1208,25 +1241,33 @@ impl Core {
         self.same_session(exported.session)?;
         // Moved out, not copied: no second copy is left to wipe.
         let bytes = std::mem::take(&mut *exported.bytes?);
-        let sections = exported.check.included_sections;
-        let meta = if exported.pdf {
-            serde_json::json!({
+        let sha256 = dv_vault::crypto::sha256_hex(&bytes);
+        let meta = match exported.letter {
+            Some(letter) => serde_json::json!({
+                "protected": exported.protected,
+                "letter": letter,
+                "sha256": sha256,
+            }),
+            None if exported.pdf => serde_json::json!({
                 "protected": exported.protected,
                 "pdf": true,
-                "sha256": dv_vault::crypto::sha256_hex(&bytes),
-                "sections": sections,
+                "sha256": sha256,
+                "sections": exported.check.included_sections,
                 "parents": exported.parents,
-            })
-        } else {
-            serde_json::json!({
+            }),
+            None => serde_json::json!({
                 "protected": exported.protected,
-                "sections": sections,
+                "sha256": sha256,
+                "sections": exported.check.included_sections,
                 "parents": exported.parents,
-            })
+            }),
         };
         self.vault_mut()?
             .record(dv_vault::AuditEvent::Export, Some(&exported.case_id), &meta)?;
-        self.learn_from_final(&exported.case_id);
+        // A letter is not the report: its paragraphs teach nothing about her style.
+        if exported.letter.is_none() {
+            self.learn_from_final(&exported.case_id);
+        }
         Ok((bytes, exported.check))
     }
 

@@ -85,6 +85,8 @@ import type { StyleSuggestion } from "./generated/StyleSuggestion";
 
 /** The largest logo the core takes (`dv_export::MAX_LOGO_BYTES`). */
 export const LOGO_MAX_BYTES = 1024 * 1024;
+/** The largest file "check the original" reads (`dv_core::MAX_ORIGINAL_BYTES`, 25 MiB). */
+export const ORIGINAL_MAX_BYTES = 25 * 1024 * 1024;
 
 /** Every failure reaches the UI as a UiError with a Hebrew message and its next step (F6). */
 export function asUiError(e: unknown): UiError {
@@ -362,8 +364,12 @@ export const ipc = {
   /** EX-3: a print-only PDF (cannot be changed; opens without a password, D-081). */
   exportPdf: (caseId: string, password: string | null, parents: ParentsOptions | null = null) =>
     call("export_pdf", { caseId, password, parents }),
-  /** When this vault exported exactly this PDF, or `null` (changed, or not made here). */
+  /** When this vault exported exactly this file (PDF, Word or letter), or `null` (changed, or not made here). */
   checkOriginal: async (file: File): Promise<number | null> => {
+    // Refused before the file is read, the way the core refuses it (25 MB, D-120).
+    if (file.size > ORIGINAL_MAX_BYTES) {
+      throw { code: "refused", message: "הקובץ גדול מ-25MB, ולכן הוא לא דוח שהופק כאן. בוחרים את קובץ ה-PDF או ה-Word שהופק.", details: [], action: { kind: "dismiss" } } satisfies UiError;
+    }
     const bytes = new Uint8Array(await file.arrayBuffer());
     return await call("check_original", bytes);
   },

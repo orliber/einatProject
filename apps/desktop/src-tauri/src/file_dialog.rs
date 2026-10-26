@@ -1,4 +1,5 @@
-//! The system's own "Save as" and "Open" windows, for the encrypted backup (D-024).
+//! The system's own "Save as" and "Open" windows, for the encrypted backup (D-024), and the
+//! folder window for an export when no usual folder can take it (D-120).
 //!
 //! They run on the main thread (macOS requires it, GTK expects it) and are awaited from a
 //! command. The webview never gets a path or a file from here: only what the command returns.
@@ -81,6 +82,22 @@ pub async fn open(app: &AppHandle, dir: Option<PathBuf>) -> Option<PathBuf> {
             dialog = dialog.set_parent(w);
         }
         dialog.pick_file()
+    })
+    .await
+    .flatten()
+}
+
+/// The system's folder window, with `title` saying why it is asked. `None` when cancelled.
+pub async fn pick_folder(app: &AppHandle, title: &'static str) -> Option<PathBuf> {
+    if let Some(d) = scripted_dir() {
+        return Some(d);
+    }
+    on_main_thread(app, move |window| {
+        let mut dialog = rfd::FileDialog::new().set_title(title);
+        if let Some(w) = window.as_ref() {
+            dialog = dialog.set_parent(w);
+        }
+        dialog.pick_folder()
     })
     .await
     .flatten()
