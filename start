@@ -5,6 +5,12 @@
 #                    code changed since the last install, or if it isn't installed)
 #   ./start --build  close the app, rebuild, replace the copy in /Applications, open it
 #   ./start --dev    run in developer mode (hot reload), without touching the installed app
+#   --no-fips        (with the first two) a quicker build without the FIPS module
+#
+# The app is built as the Mac release builds it (ci.yml, macos-release; D-101): on the FIPS
+# 140-3 module, with its dylib put inside the app (bundle-fips.sh). A copy built any other way
+# can open where the release does not (0.8.1: dyld stopped the released app before its first
+# line), so --no-fips is for a quick look only. The FIPS build needs Go and CMake.
 #
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -19,7 +25,18 @@ MARK="target/.start-installed"
 bold() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 fail() { printf '\n\033[31m✗ %s\033[0m\n' "$1"; exit 1; }
 
-code_id() { { git rev-parse HEAD; git status --porcelain; git diff HEAD; } | shasum | cut -d' ' -f1; }
+FIPS=1
+
+# The code and how it was built: the commit, uncommitted changes, new files' contents, the mode.
+code_id() {
+  {
+    git rev-parse HEAD
+    git status --porcelain
+    git diff HEAD
+    git ls-files -o --exclude-standard -z | while IFS= read -r -d '' f; do shasum "$f"; done
+    echo "fips=${FIPS}"
+  } | shasum | cut -d' ' -f1
+}
 
 quit_app() {
   osascript -e "tell application id \"${APP_ID}\" to quit" >/dev/null 2>&1 || true
@@ -36,8 +53,19 @@ build_and_install() {
   id="$(code_id)"
   bold "Installing UI dependencies…"
   (cd apps/desktop && pnpm install --frozen-lockfile)
-  bold "Building ${APP_NAME}…"
-  (cd apps/desktop && pnpm tauri build --bundles app)
+  if [ "${FIPS}" = 1 ]; then
+    command -v go >/dev/null || fail "Go is not installed (the FIPS module needs it): brew install go, or ./start --no-fips"
+    command -v cmake >/dev/null || fail "CMake is not installed (the FIPS module needs it): brew install cmake, or ./start --no-fips"
+    bold "Building ${APP_NAME} on the FIPS module, as released…"
+    mkdir -p apps/desktop/src-tauri/ocr/tessdata
+    pnpm --dir apps/desktop build
+    cargo build --release -p dv-desktop --features fips
+    apps/desktop/src-tauri/macos/bundle-fips.sh
+    (cd apps/desktop && pnpm tauri build --bundles app --features fips --config src-tauri/tauri.fips.conf.json)
+  else
+    bold "Building ${APP_NAME} (without the FIPS module)…"
+    (cd apps/desktop && pnpm tauri build --bundles app)
+  fi
   [ -d "${BUILT}" ] || fail "The build finished but ${BUILT} is missing."
   quit_app
   bold "Installing into /Applications…"
@@ -50,7 +78,13 @@ up_to_date() {
   [ -d "${INSTALLED}" ] && [ -f "${MARK}" ] && [ "$(cat "${MARK}")" = "$(code_id)" ]
 }
 
-case "${1:-}" in
+args=()
+for a in "$@"; do
+  if [ "$a" = "--no-fips" ]; then FIPS=0; else args+=("$a"); fi
+done
+[ "${#args[@]}" -le 1 ] || fail "One option at a time (use --build or --dev, with --no-fips if you like)"
+
+case "${args[0]:-}" in
   --dev)
     bold "Starting developer mode…"
     cd apps/desktop && exec pnpm tauri dev
@@ -64,7 +98,7 @@ case "${1:-}" in
       build_and_install
     fi
     ;;
-  *) fail "Unknown option: $1 (use --build or --dev)" ;;
+  *) fail "Unknown option: ${args[0]} (use --build or --dev, with --no-fips if you like)" ;;
 esac
 
 open "${INSTALLED}"
