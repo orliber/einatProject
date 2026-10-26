@@ -640,10 +640,6 @@
   flex-direction: column;
   gap: 8px;
 }
-.contents-unsorted {
-  align-self: flex-start;
-  text-align: start;
-}
 .contents-keys {
   display: flex;
   flex-direction: column;
@@ -685,4 +681,22 @@
   .stage {
     padding: 0 10px;
   }
+}
+/* D-114: material not sorted yet, said above the writing: what it means and what to do. */
+.contents-alert {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--warn-line);
+  border-radius: 10px;
+  background: var(--warn-paper);
+  color: var(--ink);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+.contents-alert b {
+  font-size: var(--text-base);
+  color: var(--warn-ink);
 }

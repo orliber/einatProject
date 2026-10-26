@@ -511,7 +511,8 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
       <div className="case-body">
         {stage === 2 && !fullPage && (
           <Contents detail={detail} jobs={jobs} view={view} current={view === "report" ? focusKey : null} onOpen={(key) => toReport(key)} onWriteAll={running ? undefined : writeAll}
-            onSort={running ? undefined : () => void startSort()} onFinish={() => go({ name: "case", id: caseId, view: "finish" })} />
+            onSort={running ? undefined : () => void startSort()} onConsent={() => go({ name: "case", id: caseId, view: "details" })}
+            onFinish={() => go({ name: "case", id: caseId, view: "finish" })} />
         )}
         <div className="work">
           {view === "materials" && <MaterialsView api={api} onWrite={() => void toWriting()} />}
@@ -580,9 +581,11 @@ function Contents(props: {
   /** Absent while the whole report is written: nothing here sends a second request. */
   onWriteAll: (() => void) | undefined;
   onSort: (() => void) | undefined;
+  onConsent: () => void;
   onFinish: () => void;
 }) {
   const { detail, jobs, view } = props;
+  const ai = useAi();
   const content = detail.sections.filter((s) => s.key !== "signature");
   const approved = content.filter((s) => s.approved && !s.paragraphs.some((p) => p.status === "proposed")).length;
   const waiting = content.filter((s) => s.paragraphs.some((p) => p.status === "proposed")).length;
@@ -594,6 +597,8 @@ function Contents(props: {
   const fed = detail.sections.filter((s) => s.source_count > 0);
   const done = fed.length > 0 && fed.every((s) => s.approved) && waiting === 0;
   const parts = Array.from(new Set(detail.sections.map((s) => s.part)));
+  // Sections marked "חסר חומר" now; sorting may still give some of them material.
+  const missing = empty.filter((s) => s.sortable && s.source_count === 0 && s.mode !== "self").length;
   return (
     <aside className="contents" aria-label="תוכן הדוח">
       <div className="contents-head">
@@ -627,15 +632,29 @@ function Contents(props: {
         ))}
       </nav>
       <div className="contents-foot">
+        {/* D-114: material not sorted yet goes into no draft, so it is said above the writing,
+            in words, with what to do (not a small link under it). While the whole report is
+            written its run sorts first, so the alert steps aside. */}
+        {unsorted > 0 && props.onSort && (
+          <div className="contents-alert" role="status">
+            <b>{unsorted === 1 ? "חומר אחד עוד לא מוין לסעיפים" : `${unsorted} חומרים עוד לא מוינו לסעיפים`}</b>
+            {detail.meta.consent ? (
+              <span>
+                חומר שלא מוין לא נכנס לטיוטות.
+                {missing > 0 ? " אחרי המיון יתברר גם איפה באמת חסר חומר." : ""}
+              </span>
+            ) : (
+              <span>המיון שולח את החומרים, בלי שמות, ל-{ai}. קודם רושמים את הסכמת ההורים.</span>
+            )}
+            <button type="button" className="btn btn-small" onClick={detail.meta.consent ? props.onSort : props.onConsent}>
+              {detail.meta.consent ? "למיין את החומרים" : "רישום ההסכמה"}
+            </button>
+          </div>
+        )}
         {writable > 0 && props.onWriteAll && (
           <button type="button" className="btn contents-write" onClick={props.onWriteAll}>✦ לכתוב את {writable} הריקים</button>
         )}
         {done && <button type="button" className="btn btn-primary" onClick={props.onFinish}>להוצאת הדוח ←</button>}
-        {unsorted > 0 && detail.meta.consent && props.onSort && (
-          <button type="button" className="link-small contents-unsorted" onClick={props.onSort}>
-            {unsorted === 1 ? "חומר אחד עוד לא מוין" : `${unsorted} חומרים עוד לא מוינו`} · למיין
-          </button>
-        )}
         <p className="contents-keys">
           <span><kbd>Enter</kbd> לאשר ולעבור הלאה</span>
           <span><kbd>{MOD}+Enter</kbd> לשנות</span>

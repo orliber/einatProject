@@ -87,9 +87,41 @@ describe("the case explorer", () => {
   it("the top level shows a case that sits in a folder only inside that folder", async () => {
     const { user } = await openList();
     expect(shownNames()).toEqual(["נועם"]);
-    await user.click(screen.getByRole("button", { name: /פתיחה\s*של התיקייה אבחונים פרטיים/ }));
+    await user.click(screen.getByRole("button", { name: "פתיחת התיקייה אבחונים פרטיים" }));
     expect(await screen.findByRole("button", { name: /בתיק של מאיה$/ })).toBeInTheDocument();
     expect(shownNames()).toEqual(["מאיה"]);
+  });
+
+  it("is quiet: no path at the top, a folder opens from its name, one prominent button (D-113)", async () => {
+    const { user } = await openList();
+    // At the top the tab and the tree already say "תיקים": no path and no "up" beside them.
+    expect(screen.queryByRole("navigation", { name: "מיקום" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "לתיקייה שמעל" })).toBeNull();
+    // A folder row has no "פתיחה" button of its own.
+    const row = folderRow("אבחונים פרטיים");
+    expect(within(row).queryByRole("button", { name: /^פתיחה/ })).toBeNull();
+    // "עודכן": when a case inside last changed; nothing for an empty folder.
+    expect(row.querySelector("td.col-when")?.textContent).not.toBe("");
+    expect(folderRow("הפניות מהמכון").querySelector("td.col-when")?.textContent).toBe("");
+    // One prominent button in the list, on the case she is continuing.
+    const primaries = table().querySelectorAll(".btn-primary");
+    expect(primaries).toHaveLength(1);
+    expect(caseRow("נועם").contains(primaries[0] ?? null)).toBe(true);
+    // The folder's name is its stop on the keyboard: Tab to it, Enter opens it.
+    within(row).getByRole("button", { name: "פתיחת התיקייה אבחונים פרטיים" }).focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("button", { name: /בתיק של מאיה$/ })).toBeInTheDocument();
+    expect(within(screen.getByRole("navigation", { name: "מיקום" })).getByRole("button", { name: "אבחונים פרטיים" })).toHaveAttribute("aria-current", "page");
+    // Inside a folder no case is the one being continued: no prominent button there.
+    expect(table().querySelectorAll(".btn-primary")).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "לתיקייה שמעל" }));
+    await vi.waitFor(() => expect(screen.queryByRole("navigation", { name: "מיקום" })).toBeNull());
+  });
+
+  it("clicking anywhere on a folder row opens it", async () => {
+    const { user } = await openList();
+    await user.click(within(folderRow("אבחונים פרטיים")).getByText("תיק אחד"));
+    expect(await screen.findByRole("button", { name: /בתיק של מאיה$/ })).toBeInTheDocument();
   });
 
   it("a case dragged to a folder moves there (it is no longer at the top), and ביטול brings it back", async () => {
@@ -108,7 +140,7 @@ describe("the case explorer", () => {
   it("a moved case thrown in the recycle bin takes nothing else with it", async () => {
     const { user, core } = await openList();
     drag(caseRow("נועם"), folderRow("אבחונים פרטיים"));
-    await user.click(screen.getByRole("button", { name: /פתיחה\s*של התיקייה אבחונים פרטיים/ }));
+    await user.click(screen.getByRole("button", { name: "פתיחת התיקייה אבחונים פרטיים" }));
     await screen.findByRole("button", { name: /בתיק של נועם$/ });
     expect(shownNames().sort()).toEqual(["מאיה", "נועם"]);
 
@@ -139,7 +171,7 @@ describe("the case explorer", () => {
     expect(drag(folderRow("הפניות מהמכון"), folderRow("אבחונים פרטיים"))).toBe(true);
     expect(await screen.findByText(/התיקייה "הפניות מהמכון" הועברה ל"אבחונים פרטיים"/)).toBeInTheDocument();
     await vi.waitFor(() => expect(within(table()).queryByText("הפניות מהמכון")).toBeNull());
-    await user.click(screen.getByRole("button", { name: /פתיחה\s*של התיקייה אבחונים פרטיים/ }));
+    await user.click(screen.getByRole("button", { name: "פתיחת התיקייה אבחונים פרטיים" }));
     expect(await within(table()).findByText("הפניות מהמכון")).toBeInTheDocument();
   });
 
@@ -166,7 +198,7 @@ describe("the case explorer", () => {
   it("clicking a folder in the search results opens it and ends the search", async () => {
     const { user } = await openList();
     await user.type(screen.getByRole("searchbox", { name: "חיפוש תיקים" }), "אבחונים");
-    await user.click(await screen.findByRole("button", { name: /פתיחה\s*של התיקייה אבחונים פרטיים/ }));
+    await user.click(await screen.findByRole("button", { name: "פתיחת התיקייה אבחונים פרטיים" }));
     expect(screen.getByRole("searchbox", { name: "חיפוש תיקים" })).toHaveValue("");
     expect(await screen.findByRole("button", { name: /בתיק של מאיה$/ })).toBeInTheDocument();
     expect(within(table()).getByText("2026")).toBeInTheDocument();
@@ -174,8 +206,8 @@ describe("the case explorer", () => {
 
   it("deleting the folder she is in leaves her where its contents went", async () => {
     const { user } = await openList();
-    await user.click(screen.getByRole("button", { name: /פתיחה\s*של התיקייה אבחונים פרטיים/ }));
-    await user.click(await screen.findByRole("button", { name: /פתיחה\s*של התיקייה 2026/ }));
+    await user.click(screen.getByRole("button", { name: "פתיחת התיקייה אבחונים פרטיים" }));
+    await user.click(await screen.findByRole("button", { name: "פתיחת התיקייה 2026" }));
     expect(await screen.findByText(/התיקייה ריקה/)).toBeInTheDocument();
     fireEvent.contextMenu(treeRow(/^2026/));
     await user.click(await screen.findByRole("menuitem", { name: "מחיקת התיקייה" }));
