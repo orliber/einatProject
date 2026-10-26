@@ -435,6 +435,8 @@ pub(crate) fn anthropic_kind(kind: &str, status: u16, message: String) -> Egress
 const BREAKER_FAILURES: u32 = 5;
 /// How long an open breaker refuses before one trial request may go.
 const BREAKER_COOL_DOWN: Duration = Duration::from_secs(60);
+/// What a request is told while the trial request is out: it may be back in seconds.
+const BREAKER_TRIAL_WAIT: Duration = Duration::from_secs(5);
 /// A trial request that never reported back (longer than the client's own timeout) is taken
 /// as lost, so the breaker cannot stay shut for the rest of the run.
 const BREAKER_TRIAL_LOST: Duration = Duration::from_secs(660);
@@ -495,7 +497,7 @@ impl Breaker {
                 .trial
                 .is_some_and(|since| now.saturating_duration_since(since) < BREAKER_TRIAL_LOST)
             {
-                return Err(EgressError::CircuitOpen(BREAKER_COOL_DOWN.as_secs()));
+                return Err(EgressError::CircuitOpen(BREAKER_TRIAL_WAIT.as_secs()));
             }
             self.trial = Some(now);
         }
@@ -809,7 +811,7 @@ mod tests {
         // Half-open: one trial, the rest wait for it.
         let after = t0 + BREAKER_COOL_DOWN;
         assert!(b.admit(after).is_ok());
-        assert!(matches!(b.admit(after), Err(EgressError::CircuitOpen(_))));
+        assert_eq!(b.admit(after), Err(EgressError::CircuitOpen(5)));
         // A busy trial opens it again for a whole cool-down.
         b.record(Health::Busy, after);
         assert!(matches!(
