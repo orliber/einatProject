@@ -257,6 +257,36 @@ fn a_retired_kit_stops_opening_and_the_security_page_asks_for_google_instead() {
     assert!(log.entries.iter().any(|e| e.text == "ערכת השחזור הוחלפה"));
 }
 
+#[test]
+fn retiring_the_kit_needs_a_backup_newer_than_the_last_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let drive = tempfile::tempdir().unwrap();
+    let here = Arc::new(FakeSeal::default());
+    let mut core = on(dir.path(), &here);
+    core.create_vault(PASSWORD).unwrap();
+    let needs_backup = |r: Result<(), CoreError>| matches!(r, Err(CoreError::Needs(ref m, _)) if m.contains("גיבוי עדכני"));
+    // Google off: refused whatever the backup.
+    assert!(matches!(
+        core.retire_ready_given(false),
+        Err(CoreError::Needs(ref m, _)) if m.contains("גוגל")
+    ));
+    // Google on, no backup yet.
+    assert!(needs_backup(core.retire_ready_given(true)));
+    // Google on, a backup.
+    core.write_backup(&drive.path().join("b")).unwrap();
+    core.retire_ready_given(true).unwrap();
+    // The password changed after it: that backup opens only with the old one.
+    let job = core
+        .begin_change_password(PASSWORD, false, "סיסמה חדשה וארוכה מאוד לכספת")
+        .unwrap();
+    core.finish_change_password(job.run()).unwrap();
+    assert!(needs_backup(core.retire_ready_given(true)));
+    assert!(core.retire_ready_given(false).is_err());
+    // A new backup: allowed again.
+    core.write_backup(&drive.path().join("c")).unwrap();
+    core.retire_ready_given(true).unwrap();
+}
+
 /// A computer whose key held aside is never promoted (the program closed right after the new
 /// slot was written).
 struct NoPromote(Arc<FakeSeal>);

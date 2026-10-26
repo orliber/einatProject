@@ -771,7 +771,14 @@ impl Core {
         &mut self,
         keys: &dyn crate::google::ComputerKeys,
     ) -> Result<(), CoreError> {
-        if !self.google_status(keys).on {
+        let google_on = self.google_status(keys).on;
+        self.retire_ready_given(google_on)
+    }
+
+    /// The two conditions, with whether Google works here already known (tests cannot build
+    /// a version with a Google registration, so they give it here).
+    pub(crate) fn retire_ready_given(&mut self, google_on: bool) -> Result<(), CoreError> {
+        if !google_on {
             return Err(CoreError::Needs(
                 "קודם מפעילים כניסה עם גוגל במחשב הזה: בלי ערכה ובלי גוגל, סיסמה שנשכחה = אין דרך להיכנס."
                     .to_owned(),
