@@ -569,3 +569,210 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ---------- D3 / D-112: before the first report, the four stages as one drawn path ---------- */
+.style-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 28px 30px;
+  border-radius: var(--radius-xl);
+}
+.style-path {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: repeat(4, auto);
+  column-gap: 28px;
+}
+/* Each stage spans the path's four rows, so titles, lines and examples sit level across. */
+.style-path-step {
+  position: relative;
+  display: grid;
+  grid-row: span 4;
+  grid-template-rows: subgrid;
+  row-gap: 6px;
+  justify-items: start;
+  min-width: 0;
+}
+/* The order is in the numbers and the words; the line and its arrow only draw it. */
+.style-path-node {
+  position: relative;
+  z-index: 1;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 6px;
+  border: 2px solid var(--primary);
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  color: var(--primary);
+  font-size: var(--text-lg);
+  font-weight: 700;
+}
+.style-path-step[aria-current] .style-path-node {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+.style-path-link {
+  position: absolute;
+  top: 19px;
+  inset-inline-start: 50px;
+  inset-inline-end: -22px;
+  border-top: 2px dashed var(--ink-faint);
+}
+.style-path-link::after {
+  content: "";
+  position: absolute;
+  top: -6px;
+  inset-inline-end: -2px;
+  border-block: 5px solid transparent;
+  border-inline-start: 8px solid var(--ink-faint);
+}
+.style-path-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.style-path-title {
+  font-size: var(--text-lg);
+}
+.style-path-here {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+.style-path-line {
+  color: var(--ink-muted);
+  font-size: var(--text-base);
+  line-height: 1.5;
+}
+.style-path-example {
+  justify-self: stretch;
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-alt);
+  font-size: var(--text-base);
+  line-height: 1.6;
+}
+.style-path-quote {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  line-height: 1.7;
+  color: var(--ink);
+}
+.style-path-hidden {
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--sand-strong);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.style-path-learned,
+.style-path-draft {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.style-path-learned > span {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.style-path-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+.style-path-draft .style-path-tag {
+  align-self: flex-start;
+}
+.style-path-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* Pictures of the three answers, not buttons: the real ones come with the first report. */
+.style-path-choice {
+  padding: 3px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.style-path-choice-yes {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
+}
+.style-path-note {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--text-base);
+  line-height: 1.6;
+}
+@media (max-width: 960px) {
+  .style-path {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    row-gap: 22px;
+  }
+  .style-path-step {
+    grid-row: auto;
+    grid-template-rows: none;
+    grid-template-columns: 40px minmax(0, 1fr);
+    column-gap: 14px;
+    row-gap: 6px;
+    justify-items: start;
+  }
+  .style-path-step > * {
+    grid-column: 2;
+  }
+  .style-path-node {
+    grid-column: 1;
+    grid-row: 1 / span 3;
+    align-self: start;
+    margin: 0;
+  }
+  .style-path-link {
+    grid-column: 1;
+    top: 46px;
+    bottom: -18px;
+    inset-inline-start: 19px;
+    inset-inline-end: auto;
+    border-top: 0;
+    border-inline-start: 2px dashed var(--ink-faint);
+  }
+  .style-path-link::after {
+    top: auto;
+    bottom: -2px;
+    inset-inline-start: -6px;
+    inset-inline-end: auto;
+    border-block: 0;
+    border-inline: 5px solid transparent;
+    border-top: 8px solid var(--ink-faint);
+  }
+  .style-path-example {
+    justify-self: stretch;
+  }
+}

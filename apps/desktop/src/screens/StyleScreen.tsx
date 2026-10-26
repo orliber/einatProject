@@ -2,7 +2,7 @@
 // reports. The page is three numbers, one queue that asks her about one thing at a time, what
 // the program already knows (five rows that open in place) and one line about her reports.
 // Every request goes through the same review screen as everything else that leaves the computer.
-// The parts live in `./style/`; this file holds the page and the run (O5).
+// The parts live in `./style/`; this file holds the page and the run (O5 / D-111).
 import { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
@@ -11,7 +11,7 @@ import { estimateMs, ProgressLine, recordDuration } from "../components/Progress
 import { ReviewDialog } from "../components/ReviewDialog";
 import { StyleImportDialog } from "../components/StyleImportDialog";
 import { TopBar } from "../components/TopBar";
-import { ErrorLine, Skeleton, Spinner, UploadIcon } from "../components/ui";
+import { ErrorLine, Skeleton, Spinner } from "../components/ui";
 import { ipc, type Prepared, type StyleImportPreview, type StyleSourceView } from "../ipc/client";
 import { ConfirmDialog } from "./library/LibraryDialogs";
 import "./StyleScreen.css";
@@ -20,6 +20,7 @@ import { ApproveQueue } from "./style/ApproveQueue";
 import { Journey } from "./style/Journey";
 import { KnownList } from "./style/KnownList";
 import { Reports } from "./style/Reports";
+import { StyleStart } from "./style/StyleStart";
 import { Versions } from "./style/Versions";
 import { loadReviewed, storeReviewed, waitingFor } from "./style/waiting";
 
@@ -183,7 +184,12 @@ export function StyleScreen() {
       <main className="page-main style">
         <header className="style-head">
           <h1>הסגנון שלי</h1>
-          <p className="style-lead">התוכנה לומדת מהדוחות שלך איך את כותבת, ומה את מסיקה מכל ממצא. ארבעה שלבים: הדוח נכנס, נקרא, את מאשרת, וזה משמש בכל טיוטה. שום דבר לא נכנס לשימוש לפני שאישרת אותו.</p>
+          <p className="style-lead">
+            התוכנה לומדת מהדוחות שלך איך את כותבת, ומה את מסיקה מכל ממצא.
+            {/* Before the first report the four stages are drawn below (D-112); after it, the journey shows them. */}
+            {o.sources.length > 0 && " ארבעה שלבים: הדוח נכנס, נקרא, את מאשרת, וזה משמש בכל טיוטה."}
+            {" "}שום דבר לא נכנס לשימוש לפני שאישרת אותו.
+          </p>
           {o.demo_mode && <p className="hint">מצב הדגמה: ניתוח לדוגמה בלבד.</p>}
         </header>
 
@@ -191,12 +197,7 @@ export function StyleScreen() {
           onChange={(e) => { const f = e.target.files?.[0]; if (f) void pick(f); }} />
 
         {o.sources.length === 0 ? (
-          <div className="style-start">
-            <button type="button" className="btn btn-primary btn-big" disabled={reading} onClick={() => fileInput.current?.click()}>
-              <UploadIcon /> הוספת דוח ישן
-            </button>
-            <p className="hint">דוח שכתבת בעבר, ב-Word, ODT או PDF. נשמר רק הטקסט אחרי הסתרה.</p>
-          </div>
+          <StyleStart adding={reading} onAdd={() => fileInput.current?.click()} />
         ) : (
           <Journey o={o} waiting={asks.length} analyzed={analyzed} notRead={waiting} onAdd={() => fileInput.current?.click()}
             build={buildDue ? { label: buildLabel, run: () => startBuild(false), disabled: running } : null} />
