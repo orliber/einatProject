@@ -175,6 +175,8 @@ export class FakeCore {
   private unlocked = false;
   /** `?setup` in the address opens the first-run screens (for the demo page's pictures). */
   private vaultExists = typeof location === "undefined" || !location.search.includes("setup");
+  /** `?newer=0.9.2` in the address: the vault was opened by a newer version (D-104). */
+  private newerVersion = typeof location === "undefined" ? null : new URLSearchParams(location.search).get("newer");
   // Nine days ago, so the preview shows the weekly reminder (D-024).
   private lastBackupAt: number | null = Math.floor(Date.now() / 1000) - 9 * 86_400;
   private lastCheckAt: number | null = null;
@@ -473,6 +475,7 @@ export class FakeCore {
       vault_exists: this.vaultExists, unlocked: this.unlocked, disk_encryption: "on", cloud_synced_folder: null, fips_active: true,
       demo_mode: true, model: this.model, provider: providerOf(this.model).id, ai_name: this.ai, keys: [], speed: this.speed, integrity_warning: null, lock_minutes: this.lockMinutes, idle_lock_in: this.unlocked ? this.lockMinutes * 60 : null,
       practitioner: this.practitioner, review_always: this.reviewAlways, screen_protection: !this.unlocked || this.screenProtection, since_last: this.unlocked ? this.sinceLast : null,
+      ...(this.newerVersion !== null && !this.unlocked ? { newer_version: this.newerVersion } : {}),
     };
   }
 
@@ -811,7 +814,7 @@ export class FakeCore {
   // ------------------------------------------------------------------ the IPC surface
   async handle(cmd: string, args: unknown, options?: { headers?: Record<string, string> }): Promise<unknown> {
     const a = (args ?? {}) as Args;
-    if (!["plugin:event|listen", "plugin:event|unlisten", "ping", "recent_crashes", "app_status", "unlock", "unlock_with_recovery", "create_vault", "confirm_recovery_key", "google_status", "google_recover", "google_cancel", "choose_backup", "restore_backup", "forget_backup"].includes(cmd) && !this.unlocked) {
+    if (!["plugin:event|listen", "plugin:event|unlisten", "ping", "recent_crashes", "app_status", "unlock", "unlock_with_recovery", "create_vault", "confirm_recovery_key", "google_status", "google_recover", "google_cancel", "choose_backup", "restore_backup", "forget_backup", "check_update", "prepare_update", "install_update", "open_releases_page"].includes(cmd) && !this.unlocked) {
       fail("locked", "הכספת נעולה. יש לפתוח אותה מחדש.");
     }
     if (FakeStyle.handles(cmd)) return this.style.handle(cmd, a, args, options?.headers ?? {}, this.allPeople(), this.practitioner);
@@ -829,6 +832,7 @@ export class FakeCore {
         return this.status();
       case "unlock":
       case "unlock_with_recovery":
+        if (this.newerVersion !== null) fail("newer_version", `הכספת נפתחה בגרסה חדשה יותר (${this.newerVersion}). צריך להתקין את הגרסה החדשה. הכספת והתיקים לא נפגעו, ולא צריך את ערכת השחזור.`);
         this.unlocked = true;
         this.logActivity("unlock", "access", cmd === "unlock" ? "כניסה" : "כניסה עם ערכת השחזור", cmd !== "unlock");
         return this.status();
@@ -1486,7 +1490,8 @@ export class FakeCore {
         return 0;
       case "check_update":
         return {
-          version: "0.2.0", current: "0.1.0", published: "2026-10-01", size_mb: 14, can_install: true,
+          ...(this.newerVersion ? { version: this.newerVersion, current: "0.8.1" } : { version: "0.2.0", current: "0.1.0" }),
+          published: "2026-10-01", size_mb: 14, can_install: true,
           notes: ["כפתור ה-+ בחומרים מעלה גם קבצי Word ו-PDF", "זיהוי שמות חזק יותר לפני שליחה", "הדוח נכתב מול העיניים"],
         };
       case "prepare_update":

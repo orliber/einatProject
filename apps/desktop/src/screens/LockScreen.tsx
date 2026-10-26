@@ -5,7 +5,7 @@ import { ipc, type AppStatus } from "../ipc/client";
 import { CoreStatus } from "../components/CoreStatus";
 import { ErrorLine, LockIcon } from "../components/ui";
 import { GoogleRecoverForm } from "../components/GoogleRecovery";
-import { LockScreenUpdate } from "../components/Update";
+import { LockScreenUpdate, NewerVaultNotice } from "../components/Update";
 import { timed, WaitLine } from "../components/Progress";
 import "./LockScreen.css";
 
@@ -25,6 +25,9 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
   const show = (m: typeof mode) => { setMode(m); setSecret(""); setError(null); };
   // The vault did not open for a reason that is not the password (R7): often a new version.
   const [broken, setBroken] = useState(false);
+  // A newer version opened the vault (D-104): no password, no kit, the new version instead.
+  const [newerFound, setNewerFound] = useState<string | null>(null);
+  const newer = status?.newer_version ?? newerFound;
   const [version, setVersion] = useState<string | null>(null);
   useEffect(() => {
     ipc.ping().then((p) => setVersion(p.core_version)).catch(() => setVersion(null));
@@ -79,6 +82,8 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
         setMode("recovery");
         setSecret("");
         setError(e.message ?? "במחשב הזה נכנסים עם ערכת השחזור.");
+      } else if (e.code === "newer_version") {
+        setNewerFound("");
       } else {
         setError(e.message ?? "הפתיחה נכשלה.");
         setBroken(e.code === "vault" || e.code === "internal");
@@ -100,7 +105,9 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
             <p>{he.lock.lockedAfterIdle(status?.lock_minutes ?? 10)}</p>
           )}
         </div>
-        {mode === "google" ? (
+        {newer !== null ? (
+          <NewerVaultNotice version={newer} />
+        ) : mode === "google" ? (
           <>
             <GoogleRecoverForm onUnlocked={onUnlocked} onBack={() => show("password")} />
             <button type="button" className="link-btn" onClick={() => show("recovery")}>

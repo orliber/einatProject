@@ -122,8 +122,14 @@ fn check(dir: &Path, version: &str) {
         1,
         "{version}: scores"
     );
-    // Opened once by the new version, it opens again (migrations ran and were recorded).
+    // Opened once by the new version, it opens again (migrations ran and were recorded), and
+    // the vault now names this version as the newest that opened it (D-104).
     core.lock();
+    assert_eq!(
+        Vault::opened_by(dir).unwrap().as_deref(),
+        Some(dv_vault::version::APP_VERSION),
+        "{version}: version recorded"
+    );
     let mut again = Core::for_tests(dir, None);
     assert!(
         again.unlock(PASSWORD).unwrap().unlocked,

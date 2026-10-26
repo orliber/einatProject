@@ -346,6 +346,9 @@ impl CoreError {
             CoreError::Vault(VaultError::AlreadyExists) => {
                 ("exists", "כבר קיימת כספת במחשב הזה.".to_owned())
             }
+            CoreError::Vault(VaultError::NewerVersion(v)) => {
+                ("newer_version", update::newer_version_he(v))
+            }
             CoreError::Vault(e) => {
                 details.push(e.to_string());
                 ("vault", TECHNICAL_HE.to_owned())
@@ -387,7 +390,8 @@ impl CoreError {
                 | VaultError::Busy
                 | VaultError::RecoveryKeyInvalid
                 | VaultError::Policy(_)
-                | VaultError::AlreadyExists,
+                | VaultError::AlreadyExists
+                | VaultError::NewerVersion(_),
             )
             | CoreError::NotFound(_)
             | CoreError::Refused(_) => ErrorAction::Dismiss,

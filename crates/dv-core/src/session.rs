@@ -251,6 +251,21 @@ impl Core {
                 .as_ref()
                 .is_none_or(|v| v.setting(SCREEN_KEY).ok().flatten().as_deref() != Some("0")),
             since_last: self.since_last.clone(),
+            newer_version: self
+                .vault
+                .is_none()
+                .then(|| Vault::opened_by_newer(&self.dir))
+                .flatten(),
+        }
+    }
+
+    /// D-104: a vault a newer version of the program opened is not opened by this one. Said
+    /// before anything is asked of the computer (the key kept here) or written (the count of
+    /// wrong tries): it is not a wrong password, and never a reason for the kit.
+    pub(crate) fn refuse_newer_vault(&self) -> Result<(), CoreError> {
+        match Vault::opened_by_newer(&self.dir) {
+            Some(v) => Err(VaultError::NewerVersion(v).into()),
+            None => Ok(()),
         }
     }
 

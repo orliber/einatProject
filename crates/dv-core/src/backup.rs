@@ -208,8 +208,11 @@ impl Core {
         bytes: Vec<u8>,
         file_name: String,
     ) -> Result<StagedBackup, CoreError> {
-        let peek = peek_backup(&bytes)
-            .map_err(|_| CoreError::Refused("הקובץ הזה הוא לא גיבוי של כספת האבחון.".to_owned()))?;
+        let peek = peek_backup(&bytes).map_err(|e| match e {
+            // A newer version wrote it (D-104): said as such, with what to install.
+            VaultError::NewerVersion(_) => CoreError::Vault(e),
+            _ => CoreError::Refused("הקובץ הזה הוא לא גיבוי של כספת האבחון.".to_owned()),
+        })?;
         let same_vault = self.vault.as_ref().map(|v| v.vault_id() == peek.vault_id);
         self.staged_backup = Some(bytes);
         Ok(StagedBackup {

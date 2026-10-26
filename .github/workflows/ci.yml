@@ -533,6 +533,93 @@ jobs:
           ls -l "$app/Contents/Frameworks"
           DV_TEST_APP_EXE="$exe" cargo test --release -p dv-ingest --test worker -- --ignored the_shipped_program
           hdiutil detach "$mnt"
+      # L3 (D-106): the update she gets, version to version, before this image can be released.
+      # The version before is the one installed copies have now: its notice is checked with the
+      # program's own code and pinned keys, its disk image installed as she installed it, and
+      # its own source (the release tag) makes a vault with a password bound to this Mac's
+      # Keychain and then installs this image with that version's own update code. This image's
+      # app must then start, and this commit's code open the same vault with the same password.
+      # Reason: 0.8.0 stopped on the Mac at the first start after its install.
+      - name: "Update from the version before: which, and its disk image"
+        id: before
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          up="$RUNNER_TEMP/dv-update"
+          mkdir -p "$up"
+          base="https://github.com/orliber/einat-vault-releases/releases/latest/download"
+          curl -fsSL --retry 4 -o "$up/latest.json" "$base/latest.json" || fail "the published notice could not be fetched"
+          curl -fsSL --retry 4 -o "$up/latest.json.sig" "$base/latest.json.sig" || fail "the notice's signature could not be fetched"
+          DV_UPDATE_NOTICE="$up/latest.json" DV_UPDATE_NOTICE_SIG="$up/latest.json.sig" DV_UPDATE_OUT="$up/before.txt" \
+            cargo test --release -p dv-core --test mac_update -- --ignored --exact notice
+          cat "$up/before.txt"
+          get() { sed -n "s/^$1=//p" "$up/before.txt"; }
+          v="$(get version)"; url="$(get url)"; sha="$(get sha256)"; size="$(get size)"; cdhash="$(get cdhash)"
+          [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "version $v"
+          curl -fsSL --retry 4 -o "$up/before.dmg" "$url" || fail "the disk image of $v could not be fetched"
+          [ "$(stat -f %z "$up/before.dmg")" = "$size" ] || fail "the disk image of $v is not the size the notice signs"
+          echo "$sha  $up/before.dmg" | shasum -a 256 -c - || fail "the disk image of $v is not the one the notice signs"
+          now="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          [ "$v" = "$now" ] && echo "::notice::the version before is $v, the same number as this build: the update is checked as a reinstall over it"
+          { echo "version=$v"; echo "cdhash=$cdhash"; echo "tag=v$v"; echo "dir=$up"; } >> "$GITHUB_OUTPUT"
+      # The version before, from its own release tag: the code installed copies run now.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.before.outputs.tag }}
+          path: before
+          persist-credentials: false
+      - name: "Update from the version before: installed, and it starts"
+        env:
+          UP: ${{ steps.before.outputs.dir }}
+          CDHASH: ${{ steps.before.outputs.cdhash }}
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          # A keychain of its own, unlocked, as her login keychain is while she is signed in.
+          security create-keychain -p dv-ci dv-update.keychain
+          security set-keychain-settings dv-update.keychain
+          security unlock-keychain -p dv-ci dv-update.keychain
+          security list-keychains -d user -s dv-update.keychain
+          security default-keychain -d user -s dv-update.keychain
+          mnt="$UP/mnt"
+          mkdir -p "$mnt" "$UP/Applications"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$UP/before.dmg"
+          app="$(ls -d "$mnt"/*.app)"
+          codesign --verify --deep --strict -R "=cdhash H\"$CDHASH\"" "$app" || fail "the app in the image is not the one the notice signs"
+          ditto "$app" "$UP/Applications/$(basename "$app")"
+          hdiutil detach "$mnt"
+          bundle="$(ls -d "$UP/Applications"/*.app)"
+          echo "DV_UPDATE_BUNDLE=$bundle" >> "$GITHUB_ENV"
+          scripts/ci/app-starts.sh "$bundle"
+      - name: "Update from the version before: its vault, bound to the Keychain"
+        env:
+          UP: ${{ steps.before.outputs.dir }}
+        run: |
+          cp crates/dv-core/tests/mac_update.rs before/crates/dv-core/tests/mac_update.rs
+          DV_UPDATE_VAULT="$UP/vault" cargo test --release --manifest-path before/Cargo.toml -p dv-core --test mac_update -- --ignored --exact create
+      - name: "Update from the version before: it installs this image"
+        env:
+          UP: ${{ steps.before.outputs.dir }}
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          v="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          sha="$(cut -d' ' -f1 release-out/DiagnosticVault.dmg.sha256)"
+          cdhash="$(cat release-out/DiagnosticVault.cdhash)"
+          DV_UPDATE_DMG="$PWD/release-out/DiagnosticVault.dmg" DV_UPDATE_VERSION="$v" DV_UPDATE_SHA256="$sha" \
+            DV_UPDATE_CDHASH="$cdhash" DV_UPDATE_WORK="$UP/work" \
+            cargo test --release --manifest-path before/Cargo.toml -p dv-core --test mac_update -- --ignored --exact install
+          # In place is exactly this build's app: its version, and its signature.
+          plist="$DV_UPDATE_BUNDLE/Contents/Info.plist"
+          got="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
+          [ "$got" = "$v" ] || fail "after the update the app is $got, not $v"
+          codesign --verify --deep --strict -R "=cdhash H\"$cdhash\"" "$DV_UPDATE_BUNDLE" || fail "after the update the app is not this build's"
+          [ ! -e "$DV_UPDATE_BUNDLE.new" ] || fail "the update left its copy beside the app"
+      - name: "Update from the version before: the new app starts and opens her vault"
+        env:
+          UP: ${{ steps.before.outputs.dir }}
+        run: |
+          scripts/ci/app-starts.sh "$DV_UPDATE_BUNDLE"
+          v="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          DV_UPDATE_VAULT="$UP/vault" DV_UPDATE_VERSION="$v" \
+            cargo test --release -p dv-core --test mac_update -- --ignored --exact open
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-macos

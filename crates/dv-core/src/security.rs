@@ -186,6 +186,7 @@ mod tests {
             review_always: true,
             screen_protection: true,
             since_last: None,
+            newer_version: None,
         }
     }
 

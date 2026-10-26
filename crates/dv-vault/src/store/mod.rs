@@ -22,13 +22,15 @@ use crate::db::{migrate, open_encrypted, AUDIT_MIGRATIONS, IDENTITY_MIGRATIONS, 
 use crate::header::{unwrap_mk, wrap_mk, KeySlot, VaultHeader, FORMAT, HEADER_FILE};
 use crate::hello;
 use crate::password::{self, Argon2Params};
-use crate::{recovery, VaultError};
+use crate::{recovery, version, VaultError};
 
 mod backup;
 mod slots;
 mod style;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod version_tests;
 pub use backup::{
     drill_backup, peek_backup, BackupCheck, BackupInfo, BackupJob, BackupPeek, BackupWritten,
     WrittenBackup, BACKUP_EXTENSION,
@@ -263,6 +265,38 @@ fn password_master_key(
 /// Where the unbound password slot is kept for the backups, sealed inside the vault (D-076).
 const BACKUP_SLOT_SECRET: &str = "password_slot_for_backups";
 
+/// Where the newest version that opened the vault is kept, sealed inside it (D-104).
+const APP_VERSION_SECRET: &str = "app_version";
+
+/// The version sealed in the main database (D-104), read before the vault is built and before
+/// any migration. `None` for a vault no version recorded itself in yet (one from before the
+/// table of secrets has no table at all).
+fn sealed_app_version(main: &Connection, key: &Key32) -> Result<Option<String>, VaultError> {
+    let tables: i64 = main.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'secrets'",
+        [],
+        |r| r.get(0),
+    )?;
+    if tables == 0 {
+        return Ok(None);
+    }
+    let row: Option<Vec<u8>> = main
+        .query_row(
+            "SELECT value_enc FROM secrets WHERE key = ?1",
+            [APP_VERSION_SECRET],
+            |r| r.get(0),
+        )
+        .optional()?;
+    row.map(|sealed| {
+        open_string(
+            key,
+            &aad("secrets", "value", APP_VERSION_SECRET, ""),
+            &sealed,
+        )
+    })
+    .transpose()
+}
+
 /// A password slot bound to this computer, from the stretched password.
 pub(crate) fn bound_slot(
     stretched: &[u8; 32],
@@ -432,6 +466,7 @@ impl Vault {
                 },
             ],
             audit_anchor: None,
+            app_version: None,
             mac: None,
         };
         let keys = Keys::derive(&mk)?;
@@ -751,9 +786,17 @@ impl Vault {
 
     fn open_with(dir: &Path, mut header: VaultHeader, mk: &Key32) -> Result<Self, VaultError> {
         let keys = Keys::derive(mk)?;
-        backup::remove_stale_scratch(dir);
         let header_ok = header.verify(&keys.header).is_ok();
+        // D-104: a vault a newer version opened is refused before anything is written to it:
+        // by the header (also checked as it was read), and by the version sealed in the main
+        // database, which cannot be edited. A newer version that only migrated the databases
+        // and then failed to open did not record itself: the version before still opens the
+        // vault (migrations only add, R7).
+        version::refuse_newer(header.app_version.as_deref(), version::APP_VERSION)?;
         let main = open_encrypted(&dir.join(MAIN_DB), &keys.db_main)?;
+        let sealed_version = sealed_app_version(&main, &keys.settings)?;
+        version::refuse_newer(sealed_version.as_deref(), version::APP_VERSION)?;
+        backup::remove_stale_scratch(dir);
         migrate(&main, MAIN_MIGRATIONS)?;
         let identity = open_encrypted(&dir.join(IDENTITY_DB), &keys.db_identity)?;
         migrate(&identity, IDENTITY_MIGRATIONS)?;
@@ -793,7 +836,61 @@ impl Vault {
                 &serde_json::json!({ "reason": reason }),
             )?;
         }
+        vault.record_app_version(sealed_version.as_deref())?;
         Ok(vault)
+    }
+
+    /// The newest version of the program that opened this vault (D-104), as the header says
+    /// while it is locked. Unauthenticated until the vault opens: it only decides what the
+    /// lock screen says. `None` for a vault no version recorded itself in yet.
+    pub fn opened_by(dir: &Path) -> Result<Option<String>, VaultError> {
+        Ok(VaultHeader::read(dir)?.app_version)
+    }
+
+    /// While the vault is locked: `Some(version)` when a newer version of the program opened
+    /// it and this one will not (D-104); the version is empty when it cannot be shown. Read
+    /// from the header alone, so the lock screen says so before anything is typed.
+    #[must_use]
+    pub fn opened_by_newer(dir: &Path) -> Option<String> {
+        match VaultHeader::read(dir) {
+            Err(VaultError::NewerVersion(v)) => Some(v),
+            _ => None,
+        }
+    }
+
+    /// The version recorded in the open vault's header.
+    #[must_use]
+    pub fn app_version(&self) -> Option<&str> {
+        self.header.app_version.as_deref()
+    }
+
+    /// Record this version as the newest that opened the vault, when it is newer than the one
+    /// recorded (never lower, D-104): sealed in the main database, and in the header when the
+    /// header is the one this vault signed (a header changed by someone else is never signed
+    /// again here). A header from before D-104 moves to the format that records it.
+    fn record_app_version(&mut self, sealed: Option<&str>) -> Result<(), VaultError> {
+        let current = version::APP_VERSION;
+        if version::should_record(sealed, current) {
+            let value = seal_str(
+                &self.keys.settings,
+                &aad("secrets", "value", APP_VERSION_SECRET, ""),
+                current,
+            )?;
+            self.main.execute(
+                "INSERT INTO secrets (key, value_enc) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value_enc = excluded.value_enc",
+                params![APP_VERSION_SECRET, value],
+            )?;
+        }
+        if self.integrity.header_ok
+            && (version::should_record(self.header.app_version.as_deref(), current)
+                || self.header.format < FORMAT)
+        {
+            self.header.app_version = Some(current.to_owned());
+            self.header.format = FORMAT;
+            self.header.sign(&self.keys.header)?;
+            self.header.write(&self.dir)?;
+        }
+        Ok(())
     }
 
     #[must_use]

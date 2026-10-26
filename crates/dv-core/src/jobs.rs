@@ -95,6 +95,14 @@ pub struct Unlocked {
 impl UnlockJob {
     #[must_use]
     pub fn run(self) -> Unlocked {
+        // Checked again here: a newer version may have opened the vault since (D-104).
+        if let Some(v) = Vault::opened_by_newer(&self.dir) {
+            return Unlocked {
+                opened: Err(VaultError::NewerVersion(v)),
+                ticket: self.ticket,
+                just_bound: false,
+            };
+        }
         let mut just_bound = false;
         let opened = match &self.proof {
             Proof::Password(p) => {
@@ -639,6 +647,7 @@ impl Core {
 
     pub fn begin_unlock(&mut self, password: &str) -> Result<UnlockJob, CoreError> {
         self.refuse_cloud()?;
+        self.refuse_newer_vault()?;
         self.check_backoff()?;
         let ticket = self.claim_secret_work()?;
         Ok(UnlockJob {
@@ -651,6 +660,7 @@ impl Core {
 
     pub fn begin_unlock_with_recovery(&mut self, typed: &str) -> Result<UnlockJob, CoreError> {
         self.refuse_cloud()?;
+        self.refuse_newer_vault()?;
         self.check_backoff()?;
         let ticket = self.claim_secret_work()?;
         Ok(UnlockJob {

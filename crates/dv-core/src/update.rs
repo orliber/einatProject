@@ -161,6 +161,23 @@ fn write_installer(
     })
 }
 
+/// Just before an installer runs (D-104): it is a newer version than this one, never an older
+/// one nor this one again, whatever was decided when it was fetched. Going back a version is
+/// only ever done by hand, from the releases page (R7).
+pub fn refuse_downgrade(file: &Downloaded) -> Result<(), CoreError> {
+    refuse_downgrade_from(&file.version, CURRENT_VERSION)
+}
+
+fn refuse_downgrade_from(new: &str, current: &str) -> Result<(), CoreError> {
+    match (update::parse_version(new), update::parse_version(current)) {
+        (Some(n), Some(c)) if n > c => Ok(()),
+        _ => Err(CoreError::Refused(
+            "הגרסה שהורדה לא חדשה יותר מזו שמותקנת, ולכן לא הותקנה. התוכנה ממשיכה לעבוד כרגיל."
+                .to_owned(),
+        )),
+    }
+}
+
 /// Just before the installer runs: the file on disk is still the one that was verified.
 pub fn still_intact(file: &Downloaded) -> bool {
     fs::read(&file.path).is_ok_and(|b| update::sha256(&b) == file.sha256)
@@ -194,6 +211,7 @@ pub enum MacInstallError {
 /// folder, outside the vault folder; never the system's temporary folder). Every program is
 /// called by its full path, with arguments, no shell. The vault folder is never touched.
 pub fn install_macos(file: &Downloaded, bundle: &Path, work: &Path) -> Result<(), MacInstallError> {
+    refuse_downgrade(file).map_err(MacInstallError::Refused)?;
     install_macos_with(file, bundle, &SystemTools, work)
 }
 
@@ -404,6 +422,19 @@ impl From<UpdateError> for CoreError {
     }
 }
 
+/// A newer version opened the vault (D-104): what to do, and that nothing was lost. Never a
+/// wrong password, never the kit.
+pub(crate) fn newer_version_he(version: &str) -> String {
+    let which = if version.is_empty() {
+        String::new()
+    } else {
+        format!(" ({version})")
+    };
+    format!(
+        "הכספת נפתחה בגרסה חדשה יותר{which}. צריך להתקין את הגרסה החדשה. הכספת והתיקים לא נפגעו, ולא צריך את ערכת השחזור."
+    )
+}
+
 pub(crate) fn update_he(e: &UpdateError) -> String {
     match e {
         UpdateError::NotConfigured => "בגרסה הזו עדיין אין עדכונים אוטומטיים.".to_owned(),
@@ -423,6 +454,40 @@ pub(crate) fn update_he(e: &UpdateError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_installer_runs_only_for_a_newer_version() {
+        assert!(refuse_downgrade_from("0.9.0", "0.8.1").is_ok());
+        assert!(refuse_downgrade_from("0.10.0", "0.9.9").is_ok());
+        assert!(refuse_downgrade_from("1.0.0", "0.99.0").is_ok());
+        for (new, current) in [
+            ("0.8.1", "0.8.1"),
+            ("0.7.0", "0.8.1"),
+            ("0.9.9", "0.10.0"),
+            ("junk", "0.8.1"),
+            ("", "0.8.1"),
+            ("0.9.0", "junk"),
+        ] {
+            assert!(
+                matches!(
+                    refuse_downgrade_from(new, current),
+                    Err(CoreError::Refused(_))
+                ),
+                "{new} over {current}"
+            );
+        }
+        let older = Downloaded {
+            version: "0.0.1".to_owned(),
+            path: PathBuf::from("nowhere"),
+            sha256: [0; 32],
+            cdhash: None,
+        };
+        assert!(refuse_downgrade(&older).is_err());
+        assert!(matches!(
+            install_macos(&older, Path::new("nowhere.app"), Path::new("nowhere")),
+            Err(MacInstallError::Refused(CoreError::Refused(_)))
+        ));
+    }
 
     #[test]
     fn the_releases_page_is_the_releases_repository() {
