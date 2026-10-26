@@ -175,6 +175,14 @@ describe("the case explorer", () => {
     expect(await within(table()).findByText("הפניות מהמכון")).toBeInTheDocument();
   });
 
+  it("a folder dragged by its name moves like one dragged by its row (D-113)", async () => {
+    await openList();
+    const name = within(folderRow("הפניות מהמכון")).getByRole("button", { name: "פתיחת התיקייה הפניות מהמכון" });
+    expect(name).toHaveAttribute("draggable", "true");
+    expect(drag(name, folderRow("אבחונים פרטיים"))).toBe(true);
+    expect(await screen.findByText(/התיקייה "הפניות מהמכון" הועברה ל"אבחונים פרטיים"/)).toBeInTheDocument();
+  });
+
   it("something dropped from outside the app is ignored", async () => {
     const { calls } = await openList();
     const dataTransfer = transfer();

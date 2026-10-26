@@ -480,8 +480,10 @@ export function CasesScreen() {
                                     <span className="row-icon folder-icon"><FolderIcon size={18} /></span>
                                     <div className="min0">
                                       {/* D-113: the row opens the folder; this is its one stop on the
-                                          keyboard (Tab, then Enter), with no "פתיחה" button beside it. */}
-                                      <button type="button" className="case-name folder-name" aria-label={`פתיחת התיקייה ${f.name}`}
+                                          keyboard (Tab, then Enter), with no "פתיחה" button beside it.
+                                          Draggable itself: WebKit (the Mac app) may not start a drag
+                                          from inside a button; its dragstart bubbles to the row's. */}
+                                      <button type="button" className="case-name folder-name" aria-label={`פתיחת התיקייה ${f.name}`} draggable
                                         onClick={(e) => { e.stopPropagation(); setFolderId(f.id); }}>{f.name}</button>
                                       <div className="small muted">
                                         {n === 0 ? "ריקה" : n === 1 ? "תיק אחד" : `${n} תיקים`}
