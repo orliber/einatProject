@@ -49,10 +49,10 @@ export const START_STAGES: StartStage[] = [
     title: "בשימוש",
     line: "מעכשיו כל טיוטה נכתבת בסגנון שלך, רק עם מה שמתאים לסעיף ולתיק.",
     example: (
-      <span className="style-path-draft">
+      <div className="style-path-draft">
         <span className="style-path-tag">בטיוטה של תיק חדש</span>
         <blockquote className="style-path-quote">ניכר כי קיים קושי בהתמדה, ונדרש תיווך בתחילת משימה.</blockquote>
-      </span>
+      </div>
     ),
   },
 ];
@@ -71,7 +71,7 @@ export function StyleStart({ adding, onAdd }: { adding: boolean; onAdd: () => vo
               {i === 0 && <span className="style-path-here">מתחילים כאן</span>}
             </span>
             <span className="style-path-line">{s.line}</span>
-            <span className="style-path-example">{s.example}</span>
+            <div className="style-path-example">{s.example}</div>
           </li>
         ))}
       </ol>
