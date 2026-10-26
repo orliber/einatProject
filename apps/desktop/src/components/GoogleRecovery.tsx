@@ -65,7 +65,7 @@ export function TurnOnDialog({ onClose, onTurnedOn }: { onClose: () => void; onT
           <ul className="small">
             <li>זה עובד רק במחשב הזה: חלק מהמפתח נשמר בגוגל, וחלק נשמר במחשב, קשור למשתמש שלך בווינדוס. גוגל לבדה לא פותחת את הכספת, וגם לא מי שפורץ לחשבון הגוגל.</li>
             <li>לגוגל נשמר רק מפתח, בתיקייה נסתרת של התוכנה. שום תיק, שם או טקסט לא יוצא.</li>
-            <li>במחשב חדש עדיין צריך את הסיסמה או את ערכת השחזור המודפסת.</li>
+            <li>במחשב חדש משחזרים את הגיבוי עם הסיסמה.</li>
           </ul>
           <p className="hint">{TWO_STEP}</p>
           <div className="field">
@@ -123,7 +123,7 @@ function TurnOffDialog({ onClose }: { onClose: () => void }) {
         <button type="button" className="btn btn-danger" disabled={busy || !password} onClick={() => void turnOff()}>ביטול הכניסה עם גוגל</button>
       </>}>
       <form className="stack" onSubmit={(e) => void turnOff(e)}>
-        <p>אחרי הביטול, אם הסיסמה תישכח, נכנסים רק עם ערכת השחזור המודפסת.</p>
+        <p>אחרי הביטול, אם הסיסמה תישכח, אין דרך להיכנס (אלא אם יצרת ערכת שחזור תחת "מתקדם").</p>
         {copyOn && <p>{DRIVE_COPY_TURNS_OFF}</p>}
         <div className="field">
           <label htmlFor="g-off-pw">הסיסמה הנוכחית של הכספת</label>
@@ -152,7 +152,7 @@ export function GoogleSettings() {
       ) : status.needs_setup_here ? (
         <p className="muted small">הופעלה במחשב אחר. כדי שתעבוד כאן, מחברים שוב.</p>
       ) : (
-        <p className="muted small">במקום ערכת השחזור, נכנסים עם גוגל ובוחרים סיסמה חדשה. רק מהמחשב הזה.</p>
+        <p className="muted small">אם הסיסמה תישכח, נכנסים עם גוגל ובוחרים סיסמה חדשה. רק מהמחשב הזה.</p>
       )}
       <div className="row">
         {status.on ? (

@@ -98,9 +98,6 @@ pub(crate) fn build(s: &AppStatus, send_stopped: bool) -> SecurityStatus {
     }
 }
 
-/// The printed kit is checked again after this many days.
-const KIT_CHECK_DAYS: i64 = 365;
-
 impl Core {
     pub fn security_status(&mut self) -> SecurityStatus {
         let checks = SelfChecks::run();
@@ -124,17 +121,15 @@ impl Core {
             None => "info",
         };
         s.items.push(item("memory", memory, None));
-        // On another computer the printed kit is the way in: checked within a year, or a
-        // reminder (the days since the last check, when there was one).
+        // A forgotten password is opened with her Google account, not a printed kit (D-103):
+        // a reminder until it is on. Where this version has no Google, it is only said.
         if self.vault.is_some() {
-            let days = self
-                .kit_checked_at()
-                .map(|t| (crate::dates::unix_now() - t).max(0) / dv_domain::dates::DAY_SECS);
-            let fresh = days.is_some_and(|d| d < KIT_CHECK_DAYS);
-            s.items.insert(
-                2,
-                item("recovery_kit", on(fresh), days.map(|d| d.to_string())),
-            );
+            let state = if dv_egress::google::configured().is_none() {
+                "info"
+            } else {
+                on(dv_vault::Vault::google_slot(&self.dir).is_ok_and(|(_, tag)| tag.is_some()))
+            };
+            s.items.insert(2, item("forgot_password", state, None));
         }
         s.layers = layers::build(&s.items, checks, s.send_stopped, status.review_always);
         let backup = self

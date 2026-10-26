@@ -425,9 +425,8 @@ impl Core {
         }
     }
 
-    /// True when `typed` opens the vault: at creation, after a new kit, and when she checks
-    /// the printed page in settings (D-076: on another computer the kit is the way in, so
-    /// the security page asks for a check once a year). The day of the check is kept.
+    /// True when `typed` opens the vault: after a new kit, and when she checks the printed page
+    /// under "מתקדם" in settings (D-103). The day of the check is kept.
     pub fn confirm_recovery_key(&mut self, typed: &str) -> Result<bool, CoreError> {
         let ok = self.vault_ref()?.check_recovery_key(typed);
         if ok {
@@ -435,14 +434,6 @@ impl Core {
                 .set_setting(KIT_CHECKED_KEY, &crate::dates::unix_now().to_string())?;
         }
         Ok(ok)
-    }
-
-    /// When the printed kit was last typed and opened the vault.
-    pub(crate) fn kit_checked_at(&self) -> Option<i64> {
-        self.vault
-            .as_ref()
-            .and_then(|v| v.setting(KIT_CHECKED_KEY).ok().flatten())
-            .and_then(|s| s.parse().ok())
     }
 
     /// Wipe keys, pending approvals and consultation history from memory.

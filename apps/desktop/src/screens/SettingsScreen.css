@@ -322,3 +322,13 @@
   font-size: var(--text-sm);
   color: var(--ink-soft);
 }
+
+/* The printed kit, folded under "מתקדם" (D-103). */
+.setting.advanced > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+.setting.advanced[open] > summary {
+  margin-bottom: 8px;
+}

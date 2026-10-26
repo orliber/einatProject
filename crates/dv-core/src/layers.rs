@@ -154,11 +154,11 @@ pub(crate) fn build(
         layer(
             "computer_bound",
             "קשירה למחשב",
-            "הסיסמה פותחת את הכספת רק במחשב הזה ובחשבון המשתמש הזה. אם המחשב התקלקל או אבד, משחזרים את הגיבוי במחשב החדש עם הסיסמה או עם ערכת השחזור. בעותק של תיקיית הכספת, אחרי התקנה מחדש של מערכת ההפעלה או אחרי איפוס החשבון, פותחת אותה רק ערכת השחזור.",
+            "הסיסמה פותחת את הכספת רק במחשב הזה ובחשבון המשתמש הזה. אם המחשב התקלקל או אבד, או שמערכת ההפעלה הותקנה מחדש, משחזרים את הגיבוי עם הסיסמה.",
             "ניסיון לנחש את הסיסמה על עותק של הכספת במחשב אחר.",
             bound,
             match bound {
-                _ if elsewhere => "הסיסמה עוד לא פותחת את הכספת במחשב הזה. בוחרים סיסמה ב\"החלפת סיסמה…\" עם ערכת השחזור.",
+                _ if elsewhere => "הסיסמה עוד לא פותחת את הכספת במחשב הזה. בוחרים סיסמה ב\"החלפת סיסמה…\".",
                 _ if busy => "המחשב לא ענה בזמן לבדיקה הזו. בודקים שוב בעוד רגע.",
                 "ok" => "הכספת קשורה למחשב הזה.",
                 "info" => "במחשב הזה אין אפשרות כזו.",
@@ -297,18 +297,17 @@ pub(crate) fn yours(items: &[SecurityItem], backup: Option<(bool, bool)>) -> Vec
             Some(c) => format!("הכספת בתיקייה ש-{c} מסנכרן. כדאי להעביר אותה."),
         },
     ));
-    if let Some(kit) = find(items, "recovery_kit") {
+    if let Some(forgot) = find(items, "forgot_password") {
         out.push(layer(
-            "recovery_kit",
-            "ערכת השחזור המודפסת",
-            "פותחת את הכספת אם הסיסמה נשכחה או במחשב אחר.",
-            "אובדן של כל התיקים.",
-            &kit.state,
-            &match kit.detail.as_deref() {
-                None => "עוד לא נבדקה. בודקים אותה ב\"סיסמה ואבטחה\".".to_owned(),
-                Some("0") => "נבדקה היום.".to_owned(),
-                Some(d) if kit.state == "ok" => format!("נבדקה לפני {d} ימים."),
-                Some(d) => format!("נבדקה לפני {d} ימים. כדאי לבדוק אותה שוב ב\"סיסמה ואבטחה\"."),
+            "forgot_password",
+            "כניסה עם גוגל כששוכחים סיסמה",
+            "פותחת את הכספת במחשב הזה עם חשבון הגוגל שלך, ובוחרים סיסמה חדשה.",
+            "סיסמה שנשכחה, ואיתה כל התיקים.",
+            &forgot.state,
+            match forgot.state.as_str() {
+                "ok" => "מופעלת.",
+                "info" => "בגרסה הזו אין כניסה עם גוגל.",
+                _ => "לא מופעלת. בלעדיה אין דרך להיכנס אם הסיסמה נשכחה. מפעילים אותה ב\"סיסמה ואבטחה\".",
             },
         ));
     }
@@ -460,18 +459,18 @@ mod tests {
     }
 
     #[test]
-    fn what_depends_on_her_names_the_disk_the_kit_and_the_backup() {
+    fn what_depends_on_her_names_the_disk_google_and_the_backup() {
         let mut items = healthy();
         items.push(item("disk", "warn", None));
         items.push(item("cloud_folder", "ok", None));
-        items.push(item("recovery_kit", "warn", Some("400")));
+        items.push(item("forgot_password", "warn", None));
         let y = yours(&items, Some((true, true)));
         let keys: Vec<_> = y.iter().map(|x| x.key.as_str()).collect();
-        assert_eq!(keys, ["disk", "cloud_folder", "recovery_kit", "backup"]);
+        assert_eq!(keys, ["disk", "cloud_folder", "forgot_password", "backup"]);
         assert!(y
             .iter()
             .all(|x| x.key == "cloud_folder" || x.state == "warn"));
-        assert!(y[2].now.contains("400"));
+        assert!(y[2].now.contains("לא מופעלת"));
     }
 
     #[test]

@@ -157,6 +157,7 @@
     "allow-keep-case-longer",
     "allow-change-password",
     "allow-new-recovery-kit",
+    "allow-retire-recovery-kit",
     "allow-google-status",
     "allow-google-cancel",
     "allow-google-turn-on",

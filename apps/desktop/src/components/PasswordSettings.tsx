@@ -1,5 +1,6 @@
-// Settings: a new password, or a new printed recovery kit. Either one asks for a new backup,
-// because older backups keep opening only with what was in use on their day (D-024).
+// Settings: a new password; under "מתקדם", the printed recovery kit for whoever wants one (D-103).
+// Either one asks for a new backup, because older backups keep opening only with what was in
+// use on their day (D-024).
 import { useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
@@ -12,7 +13,14 @@ import { timed, WaitLine } from "./Progress";
 /** In a dialog, after the password was refused because this computer is not the one it was set on. */
 const OTHER_COMPUTER_HINT = "במחשב הזה הסיסמה עוד לא פותחת את הכספת, ולכן מאמתים כאן עם ערכת השחזור. אחרי שבוחרים סיסמה חדשה, היא תעבוד גם במחשב הזה.";
 
-/** The current password, or the recovery kit for whoever forgot it. */
+/** The kit's own words when the kit was the proof and it was refused. */
+function refusal(e: { code?: string; message?: string }, withRecovery: boolean, fallback: string): string {
+  if (withRecovery && e.code === "wrong_secret") return "ערכת השחזור לא נכונה. כדאי לבדוק שגיאות הקלדה.";
+  return e.message ?? fallback;
+}
+
+/** The current password; the recovery kit only once the password was refused here because this
+ *  computer is not the one it was set on (D-103: no kit offered otherwise). */
 function CurrentSecret(props: { value: string; onChange: (v: string) => void; withRecovery: boolean; onToggle: () => void }) {
   return (
     <>
@@ -22,9 +30,9 @@ function CurrentSecret(props: { value: string; onChange: (v: string) => void; wi
           dir={props.withRecovery ? "ltr" : undefined} autoComplete={props.withRecovery ? "off" : "current-password"} autoFocus
           placeholder={props.withRecovery ? "7K3M-Q9WD-…" : undefined} value={props.value} onChange={(e) => props.onChange(e.target.value)} />
       </div>
-      <button type="button" className="link-btn align-start" onClick={props.onToggle}>
-        {props.withRecovery ? "אימות עם הסיסמה" : "הסיסמה נשכחה? אימות עם ערכת השחזור"}
-      </button>
+      {props.withRecovery && (
+        <button type="button" className="link-btn align-start" onClick={props.onToggle}>אימות עם הסיסמה</button>
+      )}
     </>
   );
 }
@@ -58,7 +66,7 @@ function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
         setWithRecovery(true);
         setError(OTHER_COMPUTER_HINT);
       } else {
-        setError(e.message ?? "הסיסמה לא הוחלפה.");
+        setError(refusal(e, withRecovery, "הסיסמה לא הוחלפה."));
       }
       setCurrent("");
       setPw("");
@@ -122,7 +130,7 @@ function NewKitDialog({ onClose }: { onClose: () => void }) {
         setWithRecovery(true);
         setError(OTHER_COMPUTER_HINT);
       } else {
-        setError(e.message ?? "לא נוצרה ערכה.");
+        setError(refusal(e, withRecovery, "לא נוצרה ערכה."));
       }
       setCurrent("");
     } finally {
@@ -168,7 +176,7 @@ function NewKitDialog({ onClose }: { onClose: () => void }) {
         <button type="button" className="btn btn-primary" disabled={busy || !current} onClick={() => void issue()}>{busy ? "יוצרת…" : "יצירת ערכה חדשה"}</button>
       </>}>
       <form className="stack" onSubmit={(e) => void issue(e)}>
-        <p>למשל אם הדף אבד או שמישהו ראה אותו. הערכה הקודמת תפסיק לפתוח את הכספת, אבל גיבויים קודמים עדיין נפתחים בה: לא לזרוק אותה עד שיש גיבוי חדש.</p>
+        <p>דף מודפס שפותח את הכספת בלי הסיסמה. ערכה קודמת, אם הייתה, תפסיק לפתוח את הכספת, אבל גיבויים קודמים עדיין נפתחים בה.</p>
         <CurrentSecret value={current} onChange={setCurrent} withRecovery={withRecovery}
           onToggle={() => { setWithRecovery(!withRecovery); setCurrent(""); setError(null); }} />
         {busy && <WaitLine task="rekey" speed="kit" label="יוצרת ערכת שחזור חדשה ומצפינה מחדש" />}
@@ -210,7 +218,7 @@ function CheckKitDialog({ onClose }: { onClose: () => void }) {
         <button type="button" className="btn btn-primary" disabled={typed.trim().length < 20} onClick={() => void check()}>בדיקה</button>
       </>}>
       <form className="stack" onSubmit={(e) => void check(e)}>
-        <p>הסיסמה פותחת את הכספת רק במחשב הזה ובחשבון המשתמש הזה. אם המחשב התקלקל או אבד, משחזרים את הגיבוי במחשב החדש עם הסיסמה או עם הדף הזה. בעותק של תיקיית הכספת, אחרי התקנה מחדש של מערכת ההפעלה או אחרי איפוס החשבון, רק הדף המודפס פותח אותה. פעם בשנה כדאי לוודא שהוא עדיין נכון.</p>
+        <p>מקלידים את הדף המודפס כדי לוודא שהוא עדיין פותח את הכספת.</p>
         <div className="field">
           <label htmlFor="kit-check">ערכת השחזור, מהדף המודפס</label>
           <input id="kit-check" className="input mono" dir="ltr" autoComplete="off" autoFocus placeholder="XXXX-XXXX-…" value={typed} onChange={(e) => setTyped(e.target.value)} />
@@ -221,23 +229,84 @@ function CheckKitDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** The kit she has stops opening the vault; nothing new is shown (D-103). */
+function RetireKitDialog({ onClose }: { onClose: () => void }) {
+  const { notify } = useApp();
+  const qc = useQueryClient();
+  const [current, setCurrent] = useState("");
+  const [withRecovery, setWithRecovery] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function retire(e?: FormEvent) {
+    e?.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await timed("rekey", ipc.retireRecoveryKit(current, withRecovery), "kit");
+      setCurrent("");
+      await qc.invalidateQueries({ queryKey: ["backup"] });
+      await qc.invalidateQueries({ queryKey: ["security"] });
+      notify("ערכת השחזור כבר לא פותחת את הכספת. כדאי לגבות עכשיו.");
+      onClose();
+    } catch (err) {
+      const e = err as { code?: string; message?: string };
+      if (e.code === "other_computer") {
+        setWithRecovery(true);
+        setError(OTHER_COMPUTER_HINT);
+      } else {
+        setError(refusal(e, withRecovery, "הערכה לא בוטלה."));
+      }
+      setCurrent("");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog narrow title="ביטול ערכת השחזור" onClose={onClose}
+      footer={<>
+        <button type="button" className="btn" onClick={onClose}>חזרה</button>
+        <button type="button" className="btn btn-primary" disabled={busy || !current} onClick={() => void retire()}>{busy ? "מבטלת…" : "ביטול הערכה"}</button>
+      </>}>
+      <form className="stack" onSubmit={(e) => void retire(e)}>
+        <p>דף שנשכח במגירה לא יפתח יותר את הכספת. גיבויים קודמים עדיין נפתחים בו, עד שיתחלפו בגיבויים חדשים.</p>
+        <p className="muted small">בלי ערכה, סיסמה שנשכחה נפתחת רק עם כניסה עם גוגל.</p>
+        <CurrentSecret value={current} onChange={setCurrent} withRecovery={withRecovery}
+          onToggle={() => { setWithRecovery(!withRecovery); setCurrent(""); setError(null); }} />
+        {busy && <WaitLine task="rekey" speed="kit" label="מבטלת את ערכת השחזור" />}
+        <ErrorLine error={error} />
+      </form>
+    </Dialog>
+  );
+}
+
 export function PasswordSettings() {
-  const [open, setOpen] = useState<"password" | "kit" | "check" | null>(null);
+  const [open, setOpen] = useState<"password" | "kit" | "check" | "retire" | null>(null);
   return (
     <>
     <section className="card setting" aria-labelledby="s-password">
-      <h2 id="s-password">סיסמה וערכת שחזור</h2>
+      <h2 id="s-password">סיסמה</h2>
       <p className="muted small">אחרי החלפה כדאי לגבות מחדש.</p>
       <div className="row">
         <button type="button" className="btn" onClick={() => setOpen("password")}>החלפת סיסמה…</button>
-        <button type="button" className="btn" onClick={() => setOpen("kit")}>ערכת שחזור חדשה…</button>
-        <button type="button" className="btn" onClick={() => setOpen("check")}>בדיקת ערכת השחזור…</button>
       </div>
       {open === "password" && <ChangePasswordDialog onClose={() => setOpen(null)} />}
-      {open === "kit" && <NewKitDialog onClose={() => setOpen(null)} />}
-      {open === "check" && <CheckKitDialog onClose={() => setOpen(null)} />}
     </section>
     <GoogleSettings />
+    {/* The kit is no longer part of her way in (D-103): kept here, folded, as a last resort. */}
+    <details className="card setting advanced">
+      <summary>מתקדם: ערכת שחזור מודפסת (לא חובה)</summary>
+      <p className="muted small">דף מודפס שפותח את הכספת בלי הסיסמה. לא צריך אותו כשהכניסה עם גוגל מופעלת. שימושי רק אם גוגל לא זמינה.</p>
+      <div className="row">
+        <button type="button" className="btn" onClick={() => setOpen("kit")}>יצירת ערכה…</button>
+        <button type="button" className="btn" onClick={() => setOpen("check")}>בדיקת ערכה…</button>
+        <button type="button" className="btn" onClick={() => setOpen("retire")}>ביטול הערכה הקיימת…</button>
+      </div>
+      {open === "kit" && <NewKitDialog onClose={() => setOpen(null)} />}
+      {open === "check" && <CheckKitDialog onClose={() => setOpen(null)} />}
+      {open === "retire" && <RetireKitDialog onClose={() => setOpen(null)} />}
+    </details>
     </>
   );
 }

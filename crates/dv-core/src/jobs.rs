@@ -764,6 +764,16 @@ impl Core {
         })
     }
 
+    /// The kit she has stops opening the vault, and no new one is shown (D-103): the slot gets
+    /// a key nobody holds. Old backups still open with the old kit, as after a new kit.
+    pub fn finish_retire_recovery_kit(&mut self, made: SlotMade) -> Result<(), CoreError> {
+        let kit = self
+            .finish_slot(made)?
+            .ok_or_else(|| CoreError::Internal("no kit".to_owned()))?;
+        drop(kit);
+        Ok(())
+    }
+
     pub fn new_recovery_kit(
         &mut self,
         current: &str,

@@ -393,6 +393,9 @@ export const ipc = {
     run("change_password", { current, withRecovery, newPassword }),
   newRecoveryKit: (current: string, withRecovery: boolean) =>
     call("new_recovery_kit", { current, withRecovery }),
+  /** The kit she has stops opening the vault; no new one is shown (D-103). */
+  retireRecoveryKit: (current: string, withRecovery: boolean) =>
+    call("retire_recovery_kit", { current, withRecovery }),
 
   /** Forgot the password → sign in with Google (D-041). Readable while locked. */
   googleStatus: () => call("google_status"),

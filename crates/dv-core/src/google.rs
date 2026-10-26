@@ -304,9 +304,7 @@ impl Core {
         let (vault_id, tag) = Vault::google_slot(&self.dir)?;
         match tag {
             Some(tag) if keys.exists(&self.dir) => Ok((vault_id, tag)),
-            _ => Err(refused(
-                "הכניסה עם גוגל לא מופעלת במחשב הזה. אפשר להיכנס עם ערכת השחזור המודפסת.",
-            )),
+            _ => Err(refused("הכניסה עם גוגל לא מופעלת במחשב הזה.")),
         }
     }
 

@@ -835,7 +835,7 @@ export class FakeCore {
       case "create_vault":
         this.vaultExists = true;
         this.unlocked = true;
-        return { recovery_key: "DEMO-PREV-IEWX-KEYS-ONLY-4TST" };
+        return null;
       case "confirm_recovery_key":
         return true;
       case "touch":
@@ -849,7 +849,7 @@ export class FakeCore {
         if (cmd === "set_send_stopped") this.sendStopped = Boolean(a.stopped);
         const ok = (key: string, state = "ok", detail: string | null = null) => ({ key, state, detail });
         return {
-          items: [ok("encrypted"), ok("computer_bound"), ok("recovery_kit", "ok", "0"), ok("fips", "info"), ok("disk"), ok("cloud_folder"), ok("log_integrity"),
+          items: [ok("encrypted"), ok("computer_bound"), ok("forgot_password", "ok"), ok("fips", "info"), ok("disk"), ok("cloud_folder"), ok("log_integrity"),
             ok("auto_lock", "ok", "10"), ok("screen"), ok("send", this.sendStopped ? "warn" : "ok"), ok("isolation"), ok("memory")],
           send_stopped: this.sendStopped, daily_limit: 400, max_request_kb: 2048,
           layers: FAKE_LAYERS.map(([key, title, now]) => ({
@@ -858,7 +858,7 @@ export class FakeCore {
           })),
           yours: [
             { key: "disk", title: "הצפנת הדיסק (BitLocker)", what: "מצפינה את כל המחשב.", against: "גניבה של המחשב.", state: "ok", now: "פעילה." },
-            { key: "recovery_kit", title: "ערכת השחזור המודפסת", what: "פותחת את הכספת במחשב אחר.", against: "אובדן של כל התיקים.", state: "ok", now: "נבדקה היום." },
+            { key: "forgot_password", title: "כניסה עם גוגל כששוכחים סיסמה", what: "פותחת את הכספת במחשב הזה עם חשבון הגוגל שלך.", against: "סיסמה שנשכחה, ואיתה כל התיקים.", state: "ok", now: "מופעלת." },
           ],
         };
       }
@@ -1061,7 +1061,7 @@ export class FakeCore {
       case "purge_case": {
         const c = this.find(a.caseId);
         if (c.deletedAt === null) fail("refused", "אפשר למחוק לצמיתות רק תיק שנמצא בסל המחזור.");
-        if (!String(a.password ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
+        if (!String(a.password ?? "")) fail("wrong_secret", "הסיסמה לא נכונה.");
         this.cases = this.cases.filter((x) => x.id !== c.id);
         return null;
       }
@@ -1471,12 +1471,12 @@ export class FakeCore {
         return { file_name: `גיבוי כספת האבחון ${day}.vaultbak`, created_at: at, same_vault: this.unlocked ? true : null } satisfies StagedBackup;
       }
       case "check_backup":
-        if (!String(a.password ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
+        if (!String(a.password ?? "")) fail("wrong_secret", "הסיסמה לא נכונה.");
         this.lastCheckAt = now();
         this.logActivity("backup_checked", "security", `תרגול שחזור: הגיבוי נפתח ותקין (${this.cases.length === 1 ? "תיק אחד" : `${this.cases.length} תיקים`})`);
         return { created_at: this.lastBackupAt ?? now(), cases: this.cases.length, integrity_ok: true };
       case "restore_backup":
-        if (!String(a.password ?? a.recoveryKey ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
+        if (!String(a.password ?? a.recoveryKey ?? "")) fail("wrong_secret", "הסיסמה לא נכונה.");
         this.vaultExists = true;
         this.unlocked = true;
         return this.status();
@@ -1496,7 +1496,7 @@ export class FakeCore {
       case "install_update":
         return fail("update", "בתצוגה המקדימה לא מתקינים. בתוכנה עצמה העדכון יורד, נבדק מול החתימה ומותקן.");
       case "change_password":
-        if (!String(a.current ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
+        if (!String(a.current ?? "")) fail("wrong_secret", "הסיסמה לא נכונה.");
         if (String(a.newPassword ?? "").length < 12) fail("weak_password", "הסיסמה קצרה או נפוצה מדי. מומלץ משפט של כמה מילים (12 תווים לפחות).");
         this.secretChanged = true;
         this.logActivity("password_changed", "security", "הסיסמה הוחלפה");
@@ -1539,10 +1539,15 @@ export class FakeCore {
         this.logActivity("unlock", "access", "כניסה עם חשבון הגוגל (הסיסמה נשכחה) ובחירת סיסמה חדשה", true);
         return this.status();
       case "new_recovery_kit":
-        if (!String(a.current ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
+        if (!String(a.current ?? "")) fail("wrong_secret", "הסיסמה לא נכונה.");
         this.secretChanged = true;
-        this.logActivity("recovery_key_rotated", "security", "נוצרה ערכת שחזור חדשה");
+        this.logActivity("recovery_key_rotated", "security", "ערכת השחזור הוחלפה");
         return { recovery_key: "DEMO-NEWK-ITXX-ONLY-PREV-IEW7" };
+      case "retire_recovery_kit":
+        if (!String(a.current ?? "")) fail("wrong_secret", "הסיסמה לא נכונה.");
+        this.secretChanged = true;
+        this.logActivity("recovery_key_rotated", "security", "ערכת השחזור הוחלפה");
+        return null;
       case "activity": {
         const before = typeof a.before === "number" ? a.before : Infinity;
         const page = [...this.activityLog].reverse().filter((e) => e.seq < before).slice(0, 50);

@@ -77,7 +77,7 @@ fn describe(
         }
         "lock" => ("access", "נעילה".to_owned(), false),
         "password_changed" => ("security", "הסיסמה הוחלפה".to_owned(), false),
-        "recovery_key_rotated" => ("security", "נוצרה ערכת שחזור חדשה".to_owned(), false),
+        "recovery_key_rotated" => ("security", "ערכת השחזור הוחלפה".to_owned(), false),
         "password_bound" => (
             "security",
             "הסיסמה נקשרה למחשב הזה (במחשב אחר היא לא פותחת את הכספת)".to_owned(),
