@@ -37,7 +37,7 @@ import type { AutoHidden } from "../ipc/generated/AutoHidden";
 import type { IdentitySource } from "../ipc/generated/IdentitySource";
 import type { SuspectDecision } from "../ipc/generated/SuspectDecision";
 import type { UiError } from "../ipc/generated/UiError";
-import { kindLabel } from "../i18n/he";
+import { daysAgo, kindLabel } from "../i18n/he";
 import institute from "../../../../templates/institute-v1.json";
 import structure from "../../../../templates/report_structure.json";
 import { readDocx } from "./docx";
@@ -1525,7 +1525,6 @@ export class FakeCore {
       case "safety_net": {
         const g = (await this.handle("google_status", {})) as GoogleStatus;
         const b = (await this.handle("backup_status", {})) as BackupStatus;
-        const ago = (d: number) => (d <= 0 ? "היום" : d === 1 ? "אתמול" : d === 2 ? "לפני יומיים" : `לפני ${d} ימים`);
         const google: NetPart = !g.available
           ? { state: "unavailable", text: "כניסה עם גוגל לא זמינה במחשב הזה", hint: null }
           : g.on ? { state: "ok", text: "כניסה עם גוגל", hint: null }
@@ -1537,8 +1536,8 @@ export class FakeCore {
           : b.secret_changed
             ? { state: "missing", text: "הסיסמה הוחלפה אחרי הגיבוי האחרון", hint: "הגיבוי הקודם נפתח רק בסיסמה הישנה. כדאי לגבות עכשיו." }
             : b.due
-              ? { state: "missing", text: `הגיבוי האחרון ${ago(b.days_since)}`, hint: "גיבוי נחשב עדכני 7 ימים. כדאי לגבות עכשיו." }
-              : { state: "ok", text: `גיבוי מ${ago(b.days_since)}`, hint: null };
+              ? { state: "missing", text: `הגיבוי האחרון ${daysAgo(b.days_since)}`, hint: "גיבוי נחשב עדכני 7 ימים. כדאי לגבות עכשיו." }
+              : { state: "ok", text: `גיבוי מ${daysAgo(b.days_since)}`, hint: null };
         return { google, backup, ok: google.state !== "missing" && backup.state === "ok" } satisfies SafetyNet;
       }
       case "drive_backup_status":

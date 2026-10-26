@@ -6,6 +6,7 @@ import { useApp } from "../App";
 import { ipc, type AppStatus, type BackupCheckView, type StagedBackup } from "../ipc/client";
 import { Dialog, ErrorLine, CloseIcon } from "./ui";
 import { timed, WaitLine } from "./Progress";
+import { daysAgo } from "../i18n/he";
 import "./Backup.css";
 
 /** Automatic backups kept on the drive (dv-core `AUTO_KEEP`). */
@@ -14,13 +15,6 @@ const AUTO_KEEP = 3;
 export function heDateTime(unix: number): string {
   const d = new Date(unix * 1000);
   return `${d.toLocaleDateString("he-IL")}, ${d.toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}`;
-}
-
-export function daysAgo(days: number): string {
-  if (days <= 0) return "היום";
-  if (days === 1) return "אתמול";
-  if (days === 2) return "שלשום";
-  return `לפני ${days} ימים`;
 }
 
 export function useBackupStatus() {
