@@ -1143,8 +1143,47 @@ fn scratch_folders_left_by_a_crash_are_removed_at_unlock() {
     let stale = dir.path().join(".backup-0123");
     fs::create_dir(&stale).unwrap();
     fs::write(stale.join("main.db"), b"encrypted copy").unwrap();
+    // Left by a crash yesterday.
+    fs::File::open(&stale)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(86_400))
+        .unwrap();
     let _vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
     assert!(!stale.exists());
+}
+
+/// A backup job that is still pending when the vault is opened again (the computer slept
+/// mid-export, the vault locked, she unlocked) keeps its scratch folder and finishes: only a
+/// folder old enough to be a crash's is removed at an opening.
+#[test]
+fn a_backup_job_pending_across_a_lock_and_unlock_still_finishes() {
+    let (dir, mut vault, _) = new_vault();
+    noam(&mut vault);
+    let job = vault.begin_backup().unwrap();
+    let scratch: Vec<_> = fs::read_dir(dir.path())
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".backup-"))
+        .collect();
+    assert_eq!(scratch.len(), 1);
+    vault.lock().unwrap();
+    let reopened = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
+    assert!(
+        scratch[0].path().exists(),
+        "the pending job's folder is left alone"
+    );
+    let out = tempfile::tempdir().unwrap();
+    let done = job
+        .write(&out.path().join("b.vaultbak"))
+        .unwrap()
+        .verify()
+        .unwrap();
+    assert_eq!(done.cases, 1);
+    assert!(
+        !scratch[0].path().exists(),
+        "the job removed its own folder"
+    );
+    drop(reopened);
 }
 
 #[test]

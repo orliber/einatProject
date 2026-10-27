@@ -877,7 +877,7 @@ impl Vault {
         let main = open_encrypted(&dir.join(MAIN_DB), &keys.db_main)?;
         let sealed_version = sealed_app_version(&main, &keys.settings)?;
         version::refuse_newer(sealed_version.as_deref(), version::APP_VERSION)?;
-        backup::remove_stale_scratch(dir);
+        backup::remove_scratch_older_than(dir, backup::STALE_SCRATCH_AGE);
         migrate(&main, MAIN_MIGRATIONS)?;
         let identity = open_encrypted(&dir.join(IDENTITY_DB), &keys.db_identity)?;
         migrate(&identity, IDENTITY_MIGRATIONS)?;
