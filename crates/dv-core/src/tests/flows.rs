@@ -812,7 +812,13 @@ impl crate::google::ComputerKeys for NoGoogle {
     fn load(&self, _: &Path) -> Result<dv_vault::crypto::Key32, VaultError> {
         Err(VaultError::NotFound)
     }
-    fn load_or_create(&self, _: &Path) -> Result<dv_vault::crypto::Key32, VaultError> {
+    fn create_next(&self, _: &Path) -> Result<dv_vault::crypto::Key32, VaultError> {
+        Err(VaultError::NotFound)
+    }
+    fn load_next(&self, _: &Path) -> Result<dv_vault::crypto::Key32, VaultError> {
+        Err(VaultError::NotFound)
+    }
+    fn promote_next(&self, _: &Path) -> Result<(), VaultError> {
         Err(VaultError::NotFound)
     }
     fn remove(&self, _: &Path) {}
