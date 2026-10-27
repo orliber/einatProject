@@ -17,6 +17,7 @@
 use std::fs;
 use std::io::Write;
 use std::path::Path;
+use std::time::{Duration, SystemTime};
 
 use rusqlite::Connection;
 use zeroize::Zeroizing;
@@ -165,19 +166,43 @@ fn entries(container: &[u8]) -> Result<Vec<(String, &[u8])>, VaultError> {
     Ok(files)
 }
 
+/// A scratch folder older than this at an opening was left by a crash, not by a job still at
+/// work: a backup, check or drill takes minutes at most, on the slowest drive.
+pub(super) const STALE_SCRATCH_AGE: Duration = Duration::from_secs(60 * 60);
+
+/// Remove every scratch folder (at a restore: nothing of ours can be at work in the target).
 pub(super) fn remove_stale_scratch(dir: &Path) {
+    remove_scratch_older_than(dir, Duration::ZERO);
+}
+
+/// Remove the scratch folders a crash may have left behind, by age: the vault is opened again
+/// while a backup job that began before the lock may still be writing to its folder (the
+/// computer slept mid-export, the vault locked, she unlocked), and that one is left alone.
+/// A folder whose age cannot be read is left alone too.
+pub(super) fn remove_scratch_older_than(dir: &Path, age: Duration) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
+    let now = SystemTime::now();
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if (name.starts_with(".backup-")
+        if !(name.starts_with(".backup-")
             || name.starts_with(".drill-")
             || name.starts_with(".verify-")
             || name.starts_with(".restore-"))
-            && entry.file_type().is_ok_and(|t| t.is_dir())
+            || !entry.file_type().is_ok_and(|t| t.is_dir())
         {
+            continue;
+        }
+        let old_enough = age.is_zero()
+            || entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|m| now.duration_since(m).ok())
+                .is_some_and(|since| since >= age);
+        if old_enough {
             let _ = fs::remove_dir_all(entry.path());
         }
     }

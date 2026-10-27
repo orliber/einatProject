@@ -1136,6 +1136,51 @@ fn a_backup_just_written_is_read_back_and_opened_without_the_password() {
     ));
 }
 
+/// A vault bound to this computer whose kept (unbound) password slot does not match the live
+/// one (a password change cut short), opened with the recovery kit: no backup is written, the
+/// refusal says why (`BackupSlotStale`), and an opening with the password makes the slot again.
+#[test]
+fn a_bound_vault_opened_with_the_kit_says_why_it_cannot_back_up_until_a_password_unlock() {
+    let dir = tempfile::tempdir().unwrap();
+    let computer = dv_vault::crypto::Key32::random().unwrap();
+    let created =
+        Vault::create_here(dir.path(), PASSWORD, Argon2Params::TEST, Some(&computer)).unwrap();
+    let recovery = created.recovery_key.to_string();
+    let mut vault = created.vault;
+    noam(&mut vault);
+    assert!(vault.password_bound());
+    // The kept slot of another password (the shape `keep_backup_slot` writes).
+    let stale = serde_json::json!({
+        "kind": "password",
+        "salt": "11".repeat(32),
+        "params": {"m_kib": 64, "t": 1, "p": 1},
+        "wrapped_mk": "00"
+    });
+    vault
+        .set_secret("password_slot_for_backups", &stale.to_string())
+        .unwrap();
+    vault.lock().unwrap();
+
+    let mut by_kit = Vault::unlock_with_recovery(dir.path(), &recovery).unwrap();
+    assert!(matches!(
+        by_kit.begin_backup(),
+        Err(VaultError::BackupSlotStale)
+    ));
+    drop(by_kit);
+
+    let mut by_pw =
+        Vault::unlock_with_password_here(dir.path(), PASSWORD, Some(&computer)).unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let done = by_pw
+        .begin_backup()
+        .unwrap()
+        .write(&out.path().join("b.vaultbak"))
+        .unwrap()
+        .verify()
+        .unwrap();
+    assert_eq!(done.cases, 1);
+}
+
 #[test]
 fn scratch_folders_left_by_a_crash_are_removed_at_unlock() {
     let (dir, vault, _) = new_vault();
@@ -1143,8 +1188,47 @@ fn scratch_folders_left_by_a_crash_are_removed_at_unlock() {
     let stale = dir.path().join(".backup-0123");
     fs::create_dir(&stale).unwrap();
     fs::write(stale.join("main.db"), b"encrypted copy").unwrap();
+    // Left by a crash yesterday.
+    fs::File::open(&stale)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(86_400))
+        .unwrap();
     let _vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
     assert!(!stale.exists());
+}
+
+/// A backup job that is still pending when the vault is opened again (the computer slept
+/// mid-export, the vault locked, she unlocked) keeps its scratch folder and finishes: only a
+/// folder old enough to be a crash's is removed at an opening.
+#[test]
+fn a_backup_job_pending_across_a_lock_and_unlock_still_finishes() {
+    let (dir, mut vault, _) = new_vault();
+    noam(&mut vault);
+    let job = vault.begin_backup().unwrap();
+    let scratch: Vec<_> = fs::read_dir(dir.path())
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".backup-"))
+        .collect();
+    assert_eq!(scratch.len(), 1);
+    vault.lock().unwrap();
+    let reopened = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
+    assert!(
+        scratch[0].path().exists(),
+        "the pending job's folder is left alone"
+    );
+    let out = tempfile::tempdir().unwrap();
+    let done = job
+        .write(&out.path().join("b.vaultbak"))
+        .unwrap()
+        .verify()
+        .unwrap();
+    assert_eq!(done.cases, 1);
+    assert!(
+        !scratch[0].path().exists(),
+        "the job removed its own folder"
+    );
+    drop(reopened);
 }
 
 #[test]
@@ -1541,4 +1625,17 @@ fn the_mask_book_is_sealed_keeps_each_tag_and_goes_with_the_case() {
     assert_eq!(vault.masks(&case).unwrap().len(), 2);
     vault.delete_case(&case).unwrap();
     assert!(matches!(vault.masks(&case), Err(VaultError::NotFound)));
+}
+
+/// The password's key derivation wipes its working memory (the `zeroize` feature of argon2):
+/// without it, the blocks and the initial hash stay in freed memory after every opening, and
+/// a memory dump lets a guess be checked without the memory-hard work.
+#[test]
+fn the_key_derivation_is_built_to_wipe_its_memory() {
+    let manifest = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).unwrap();
+    let argon2 = manifest
+        .lines()
+        .find(|l| l.starts_with("argon2 ="))
+        .expect("the argon2 dependency");
+    assert!(argon2.contains("\"zeroize\""), "{argon2}");
 }

@@ -20,7 +20,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 aws-lc-rs = { version = "1.18", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
-argon2 = { version = "0.6", default-features = false, features = ["alloc", "parallel"] }
+argon2 = { version = "0.6", default-features = false, features = ["alloc", "parallel", "zeroize"] }
 rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
 zeroize = { version = "1.9", features = ["zeroize_derive"] }
 unicode-normalization = "0.1"

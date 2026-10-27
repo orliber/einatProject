@@ -116,7 +116,7 @@ impl Http for FakeGoogle {
 
 /// The half on "this computer", kept in memory instead of Windows DPAPI.
 #[derive(Default)]
-struct FakeComputer(RefCell<Option<[u8; 32]>>);
+struct FakeComputer(RefCell<Option<[u8; 32]>>, RefCell<Option<[u8; 32]>>);
 
 impl ComputerKeys for FakeComputer {
     fn available(&self) -> bool {
@@ -131,13 +131,25 @@ impl ComputerKeys for FakeComputer {
             .map(Key32::from_bytes)
             .ok_or(dv_vault::VaultError::NotFound)
     }
-    fn load_or_create(&self, dir: &Path) -> Result<Key32, dv_vault::VaultError> {
-        if let Ok(k) = self.load(dir) {
-            return Ok(k);
-        }
+    fn create_next(&self, _: &Path) -> Result<Key32, dv_vault::VaultError> {
         let k = Key32::random()?;
-        *self.0.borrow_mut() = Some(*k.as_bytes());
+        *self.1.borrow_mut() = Some(*k.as_bytes());
         Ok(k)
+    }
+    fn load_next(&self, _: &Path) -> Result<Key32, dv_vault::VaultError> {
+        self.1
+            .borrow()
+            .map(Key32::from_bytes)
+            .ok_or(dv_vault::VaultError::NotFound)
+    }
+    fn promote_next(&self, _: &Path) -> Result<(), dv_vault::VaultError> {
+        let next = self
+            .1
+            .borrow_mut()
+            .take()
+            .ok_or(dv_vault::VaultError::NotFound)?;
+        *self.0.borrow_mut() = Some(next);
+        Ok(())
     }
     fn remove(&self, _: &Path) {
         *self.0.borrow_mut() = None;

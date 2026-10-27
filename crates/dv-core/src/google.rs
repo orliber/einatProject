@@ -41,7 +41,12 @@ pub trait ComputerKeys {
     fn available(&self) -> bool;
     fn exists(&self, dir: &std::path::Path) -> bool;
     fn load(&self, dir: &std::path::Path) -> Result<Key32, VaultError>;
-    fn load_or_create(&self, dir: &std::path::Path) -> Result<Key32, VaultError>;
+    /// A new key held aside, not yet replacing the one in use (see `computer_key::create_next_for`).
+    fn create_next(&self, dir: &std::path::Path) -> Result<Key32, VaultError>;
+    /// The key held aside, for a slot written just before the program closed.
+    fn load_next(&self, dir: &std::path::Path) -> Result<Key32, VaultError>;
+    /// The key held aside becomes the one in use.
+    fn promote_next(&self, dir: &std::path::Path) -> Result<(), VaultError>;
     fn remove(&self, dir: &std::path::Path);
 }
 
@@ -59,10 +64,14 @@ impl ComputerKeys for WindowsAccount {
     fn load(&self, dir: &std::path::Path) -> Result<Key32, VaultError> {
         computer_key::load(dir)
     }
-    fn load_or_create(&self, dir: &std::path::Path) -> Result<Key32, VaultError> {
-        // Keep the key that is there when it still opens: a failed switch never strands
-        // the slot that already works.
-        computer_key::load(dir).or_else(|_| computer_key::create(dir))
+    fn create_next(&self, dir: &std::path::Path) -> Result<Key32, VaultError> {
+        computer_key::create_next_for(dir, computer_key::Purpose::Google)
+    }
+    fn load_next(&self, dir: &std::path::Path) -> Result<Key32, VaultError> {
+        computer_key::load_next_for(dir, computer_key::Purpose::Google)
+    }
+    fn promote_next(&self, dir: &std::path::Path) -> Result<(), VaultError> {
+        computer_key::promote_next_for(dir, computer_key::Purpose::Google)
     }
     fn remove(&self, dir: &std::path::Path) {
         computer_key::remove(dir);
@@ -227,17 +236,28 @@ impl Core {
         }
     }
 
-    /// Turning it on, step 1 (under the lock): check the password before her browser opens,
-    /// and return the vault id the Drive file is named after.
+    /// Turning it on, step 1: check the password before her browser opens, away from the
+    /// lock (F2: `begin`, the job's `run`, then `finish`, which returns the vault id the
+    /// Drive file is named after).
+    pub fn begin_google_turn_on_check(
+        &mut self,
+        password: &str,
+    ) -> Result<crate::PasswordCheckJob, CoreError> {
+        self.begin_password_check(password)
+    }
+
+    pub fn finish_google_turn_on_check(
+        &mut self,
+        checked: crate::PasswordChecked,
+    ) -> Result<String, CoreError> {
+        self.finish_password_check(checked)?;
+        Ok(self.vault_ref()?.vault_id().to_owned())
+    }
+
+    /// The three steps in a row (tests, callers that hold no lock).
     pub fn google_turn_on_check(&mut self, password: &str) -> Result<String, CoreError> {
-        self.check_backoff()?;
-        let vault = self.vault_ref()?;
-        let id = vault.vault_id().to_owned();
-        if let Err(e) = self.verify_password_here(password) {
-            self.count_failure(&e);
-            return Err(e.into());
-        }
-        Ok(id)
+        let job = self.begin_google_turn_on_check(password)?;
+        self.finish_google_turn_on_check(job.run())
     }
 
     /// Turning it on, step 3 (under the lock, after the key is in her Drive): write the slot.
@@ -250,15 +270,29 @@ impl Core {
     ) -> Result<(), CoreError> {
         self.check_backoff()?;
         let dir = self.dir.clone();
-        let computer = keys.load_or_create(&dir)?;
+        // The vault first (it may have locked itself during the sign-in), then the password's
+        // key here: nothing on this computer is touched before the slot can be written.
+        self.vault_ref()?;
         let here = self.password_key_here()?;
         let proof = crate::binding::password_secret(password, here.as_ref());
+        // The key that is there is kept when it still opens: the slot that already works is
+        // never stranded. A slow Windows (`Busy`) is not "no key": she tries again. Only when
+        // there is none here that opens is a new one made, and held aside until the slot is
+        // written (as the password's key, `vault.computer.next`).
+        let (computer, aside) = match keys.load(&dir) {
+            Ok(key) => (key, false),
+            Err(VaultError::Busy) => return Err(VaultError::Busy.into()),
+            Err(_) => (keys.create_next(&dir)?, true),
+        };
         let vault = self.vault_mut()?;
         let tag = google_account_tag(vault.vault_id(), google_account_id);
         let result = vault.set_google_slot(proof, drive, &computer, &tag);
         if let Err(e) = result {
             self.count_failure(&e);
             return Err(e.into());
+        }
+        if aside {
+            keys.promote_next(&dir)?;
         }
         Ok(())
     }
@@ -327,28 +361,50 @@ impl Core {
             ));
         }
         self.refuse_newer_vault()?;
-        let computer = keys.load(&self.dir)?;
+        // The key in use, and the one held aside when the program closed between the slot
+        // write and the promotion.
+        let mut computers: Vec<(Key32, bool)> = Vec::new();
+        let in_use = match keys.load(&self.dir) {
+            Ok(key) => {
+                computers.push((key, false));
+                Ok(())
+            }
+            Err(VaultError::Busy) => return Err(VaultError::Busy.into()),
+            Err(e) => Err(e),
+        };
+        if let Ok(next) = keys.load_next(&self.dir) {
+            computers.push((next, true));
+        }
+        if computers.is_empty() {
+            in_use?;
+        }
         // The new password's key here first: if it cannot be made, nothing is opened.
         let (here, aside) = self.new_password_key()?;
         let mut opened = Err(VaultError::WrongSecret);
         let mut used = None;
-        for drive in drive_keys {
-            opened = Vault::unlock_with_google(&self.dir, drive, &computer);
-            if opened.is_ok() {
-                used = Some(drive);
-                break;
+        'search: for drive in drive_keys {
+            for (i, (computer, _)) in computers.iter().enumerate() {
+                opened = Vault::unlock_with_google(&self.dir, drive, computer);
+                if opened.is_ok() {
+                    used = Some((drive, i));
+                    break 'search;
+                }
             }
         }
         self.after_unlock(opened, true)?;
-        let Some(drive) = used else {
+        let Some((drive, which)) = used else {
             return Err(CoreError::Internal("opened without a key".to_owned()));
         };
+        let Some((computer, aside_key)) = computers.get(which) else {
+            return Err(CoreError::Internal("opened without a key".to_owned()));
+        };
+        if *aside_key {
+            // It opened with the key held aside: that one is the slot's now.
+            let _ = keys.promote_next(&self.dir);
+        }
         let params = self.argon.unwrap_or_else(Argon2Params::calibrate);
         self.vault_mut()?.rekey_password_here(
-            Secret::Google {
-                drive,
-                computer: &computer,
-            },
+            Secret::Google { drive, computer },
             new_password,
             params,
             here.as_ref(),
@@ -377,34 +433,126 @@ mod tests {
     const PASSWORD: &str = "סוס ירוק רץ בשדה 2026";
     const NEW_PASSWORD: &str = "ציפור כתומה שרה בבוקר";
 
-    /// The half on "this computer", kept in memory instead of Windows DPAPI.
+    /// The half on "this computer", kept in memory instead of Windows DPAPI: the key in use,
+    /// the one held aside, and a Windows that does not answer once (`busy_once`).
     #[derive(Default)]
-    struct FakeComputer(RefCell<Option<[u8; 32]>>);
+    struct FakeComputer {
+        key: RefCell<Option<[u8; 32]>>,
+        next: RefCell<Option<[u8; 32]>>,
+        busy_once: RefCell<bool>,
+        created: RefCell<u32>,
+    }
 
     impl ComputerKeys for FakeComputer {
         fn available(&self) -> bool {
             true
         }
         fn exists(&self, _: &Path) -> bool {
-            self.0.borrow().is_some()
+            self.key.borrow().is_some()
         }
         fn load(&self, _: &Path) -> Result<Key32, VaultError> {
-            self.0
+            if self.busy_once.replace(false) {
+                return Err(VaultError::Busy);
+            }
+            self.key
                 .borrow()
                 .map(Key32::from_bytes)
                 .ok_or(VaultError::NotFound)
         }
-        fn load_or_create(&self, dir: &Path) -> Result<Key32, VaultError> {
-            if let Ok(k) = self.load(dir) {
-                return Ok(k);
-            }
+        fn create_next(&self, _: &Path) -> Result<Key32, VaultError> {
             let k = Key32::random()?;
-            *self.0.borrow_mut() = Some(*k.as_bytes());
+            *self.next.borrow_mut() = Some(*k.as_bytes());
+            *self.created.borrow_mut() += 1;
             Ok(k)
         }
-        fn remove(&self, _: &Path) {
-            *self.0.borrow_mut() = None;
+        fn load_next(&self, _: &Path) -> Result<Key32, VaultError> {
+            self.next
+                .borrow()
+                .map(Key32::from_bytes)
+                .ok_or(VaultError::NotFound)
         }
+        fn promote_next(&self, _: &Path) -> Result<(), VaultError> {
+            let next = self.next.borrow_mut().take().ok_or(VaultError::NotFound)?;
+            *self.key.borrow_mut() = Some(next);
+            Ok(())
+        }
+        fn remove(&self, _: &Path) {
+            *self.key.borrow_mut() = None;
+        }
+    }
+
+    /// A turn-on that fails (the vault locked itself during the browser sign-in, the password
+    /// is wrong, or Windows did not answer in time) never replaces the half on this computer:
+    /// the Google slot that already works still opens the vault.
+    #[test]
+    fn a_failed_turn_on_keeps_the_google_slot_that_works() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut core = Core::for_tests(dir.path(), None);
+        core.create_vault(PASSWORD).unwrap();
+        let computer = FakeComputer::default();
+        let drive = Key32::random().unwrap();
+        core.google_turn_on_finish(&computer, PASSWORD, &drive, "acct-1")
+            .unwrap();
+        assert_eq!(*computer.created.borrow(), 1);
+        assert!(
+            computer.next.borrow().is_none(),
+            "promoted after the slot was written"
+        );
+        let in_use = *computer.key.borrow();
+
+        // Windows slow once, with the vault still open: she is told to try again, and the
+        // key is not replaced.
+        *computer.busy_once.borrow_mut() = true;
+        let r = core.google_turn_on_finish(&computer, PASSWORD, &drive, "acct-1");
+        assert!(
+            matches!(r, Err(CoreError::Vault(VaultError::Busy))),
+            "{r:?}"
+        );
+        core.not_before = None;
+        // A wrong password: nothing replaced either.
+        assert!(core
+            .google_turn_on_finish(&computer, "לא הסיסמה שלה בכלל", &drive, "acct-1")
+            .is_err());
+        core.not_before = None;
+        // The vault locked itself during the sign-in, and Windows is slow again.
+        core.lock();
+        *computer.busy_once.borrow_mut() = true;
+        let r = core.google_turn_on_finish(&computer, PASSWORD, &drive, "acct-1");
+        assert!(matches!(r, Err(CoreError::Locked)), "{r:?}");
+        assert_eq!(*computer.created.borrow(), 1, "no new key was made");
+        assert_eq!(*computer.key.borrow(), in_use);
+        assert!(
+            *computer.busy_once.borrow(),
+            "the key was not even asked for"
+        );
+        *computer.busy_once.borrow_mut() = false;
+
+        // And "forgot password" still works here.
+        core.not_before = None;
+        core.google_recover_check(&computer, NEW_PASSWORD).unwrap();
+        core.google_recover_finish(&computer, &[drive], NEW_PASSWORD)
+            .unwrap();
+    }
+
+    /// The program closed between the slot write and the promotion of the key held aside:
+    /// the recovery opens with that key and promotes it.
+    #[test]
+    fn a_slot_written_under_the_key_held_aside_still_opens() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut core = Core::for_tests(dir.path(), None);
+        core.create_vault(PASSWORD).unwrap();
+        let computer = FakeComputer::default();
+        let drive = Key32::random().unwrap();
+        core.google_turn_on_finish(&computer, PASSWORD, &drive, "acct-1")
+            .unwrap();
+        // Undo the promotion, as a crash right before it would have left things.
+        let promoted = computer.key.borrow_mut().take();
+        *computer.next.borrow_mut() = promoted;
+        core.lock();
+        core.google_recover_finish(&computer, &[drive], NEW_PASSWORD)
+            .unwrap();
+        assert!(computer.next.borrow().is_none());
+        assert_eq!(*computer.key.borrow(), promoted);
     }
 
     #[test]
