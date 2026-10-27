@@ -112,7 +112,13 @@ impl Core {
                     .map(|d| ParagraphView {
                         has_versions: with_versions.contains(&d.id),
                         id: d.id,
-                        text: restore(&d.text_tagged, &identities, practitioner.as_deref(), &masks),
+                        text: shown_paragraph(
+                            &d.text_tagged,
+                            d.author,
+                            &identities,
+                            practitioner.as_deref(),
+                            &masks,
+                        ),
                         status: d.status,
                         by_ai: d.author == Author::Ai,
                         sources: d
@@ -274,7 +280,8 @@ impl Core {
             .set_draft_status(case_id, draft_id, DraftStatus::Rejected)?)
     }
 
-    /// Manual edit: the text (with real names) is stored tagged.
+    /// Manual edit: the text (with real names) is stored tagged, every other word of hers
+    /// kept (D-126).
     pub fn edit_paragraph(
         &mut self,
         case_id: &str,
@@ -285,7 +292,7 @@ impl Core {
         if text.trim().is_empty() {
             return self.reject_paragraph(case_id, draft_id);
         }
-        let tagged = self.learn(case_id, text)?.tagged;
+        let tagged = self.learn_to_keep(case_id, text)?;
         let before = style::find_draft(self.vault_ref()?, case_id, draft_id)?;
         self.vault_mut()?.edit_draft(case_id, draft_id, &tagged)?;
         self.learn_from_draft_edit(before, &tagged);
@@ -314,8 +321,13 @@ impl Core {
                         let identities = v.identities(case_id)?;
                         let masks = v.masks(case_id)?;
                         let practitioner = v.practitioner()?.names.first().cloned();
-                        let now =
-                            restore(&d.text_tagged, &identities, practitioner.as_deref(), &masks);
+                        let now = shown_paragraph(
+                            &d.text_tagged,
+                            d.author,
+                            &identities,
+                            practitioner.as_deref(),
+                            &masks,
+                        );
                         now.trim() != seen.trim()
                     }
                 }
@@ -341,7 +353,13 @@ impl Core {
                 id: d.id,
                 saved_at: d.saved_at,
                 by_ai: d.author == Author::Ai,
-                text: restore(&d.text_tagged, &identities, practitioner.as_deref(), &masks),
+                text: shown_paragraph(
+                    &d.text_tagged,
+                    d.author,
+                    &identities,
+                    practitioner.as_deref(),
+                    &masks,
+                ),
             })
             .collect())
     }
@@ -376,7 +394,7 @@ impl Core {
         text: &str,
         at: Option<Option<&str>>,
     ) -> Result<(), CoreError> {
-        let tagged = self.learn(case_id, text)?.tagged;
+        let tagged = self.learn_to_keep(case_id, text)?;
         let v = self.vault_mut()?;
         let d = v.add_draft(case_id, section_key, &tagged, Author::User, &[])?;
         v.set_draft_status(case_id, &d.id, DraftStatus::Approved)?;
@@ -387,4 +405,40 @@ impl Core {
     }
 
     // ------------------------------------------------------------ AI: prepare → approve → send
+}
+
+/// A stored paragraph (or an earlier wording of one) as she sees it and exports it: hers with
+/// her kept words as she wrote them (D-126), Claude's with every other tag put back.
+pub(crate) fn shown_paragraph(
+    text_tagged: &str,
+    author: Author,
+    identities: &[dv_domain::Identity],
+    practitioner: Option<&str>,
+    masks: &[dv_domain::MaskEntry],
+) -> String {
+    if author == Author::User {
+        dv_privacy::restore::restore_hers(text_tagged, identities, practitioner, masks)
+    } else {
+        restore(text_tagged, identities, practitioner, masks)
+    }
+}
+
+/// A stored paragraph as it goes into a request (D-126): hers back as she wrote it, so the
+/// filter reads her words in their own context and hides exactly what it hid when she wrote
+/// them; Claude's as stored. A kept-words tag anywhere else is never put back: the filter
+/// reads it as plain words and the gate refuses it.
+pub(crate) fn paragraph_to_send(
+    v: &Vault,
+    case_id: &str,
+    d: &dv_domain::DraftParagraph,
+) -> Result<String, CoreError> {
+    if d.author != Author::User {
+        return Ok(d.text_tagged.clone());
+    }
+    Ok(dv_privacy::restore::her_text_to_send(
+        &d.text_tagged,
+        &v.identities(case_id)?,
+        v.practitioner()?.names.first().map(String::as_str),
+        &v.masks(case_id)?,
+    ))
 }

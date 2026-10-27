@@ -9,8 +9,8 @@
 use std::collections::HashSet;
 
 use dv_domain::{passages, DraftStatus, Feed};
-use dv_privacy::restore::restore;
 
+use crate::drafts::shown_paragraph;
 use crate::views::SourceExcerpt;
 use crate::{sorting, structure_for, Core, CoreError, DERIVED_SECTIONS};
 
@@ -60,7 +60,15 @@ impl Core {
         let identities = v.identities(case_id)?;
         let masks = v.masks(case_id)?;
         let practitioner = v.practitioner()?.names.first().cloned();
-        let show = |t: &str| restore(t, &identities, practitioner.as_deref(), &masks);
+        let show = |d: &dv_domain::DraftParagraph| {
+            shown_paragraph(
+                &d.text_tagged,
+                d.author,
+                &identities,
+                practitioner.as_deref(),
+                &masks,
+            )
+        };
         let mut found = None;
         for s in structure.sections() {
             if let Some(d) = v
@@ -73,7 +81,7 @@ impl Core {
             }
         }
         let (section_key, draft) = found.ok_or_else(|| CoreError::NotFound("הפסקה".to_owned()))?;
-        let paragraph = words(&show(&draft.text_tagged));
+        let paragraph = words(&show(&draft));
 
         let mut out = Vec::new();
         if DERIVED_SECTIONS.contains(&section_key.as_str()) {
@@ -87,7 +95,7 @@ impl Core {
                     .into_iter()
                     .filter(|d| d.status == DraftStatus::Approved)
                 {
-                    candidates.push((format!("סעיף מאושר · {}", s.title), show(&d.text_tagged)));
+                    candidates.push((format!("סעיף מאושר · {}", s.title), show(&d)));
                 }
             }
             for (score, label, text) in ranked(&paragraph, candidates).into_iter().take(AT_MOST) {

@@ -1,21 +1,50 @@
 //! Local-only: put real names back for display and export, and check model output.
 
+use std::borrow::Cow;
+
 use dv_domain::{Identity, PRACTITIONER_TAG};
 
 use crate::lexicon::LEXICON;
-use crate::masks::{is_generic_tag, MaskEntry, TAG_RE};
+use crate::masks::{is_generic_tag, is_kept_words_tag, MaskEntry, KEPT_WORDS, TAG_RE};
 use crate::patterns::{self, PatternKind};
 use crate::pipeline::{Suspect, SuspectKind};
 use crate::text::{normalize, prefix_splits, tokenize};
 
 /// Replace the case's tags with the declared names, and each numbered tag of its mask book
 /// with the words it hid. Prefixes stay attached ("ל[ילד]" → "לנועם").
+///
+/// A kept-words tag (D-126) stays as it is: it is put back only in her own paragraph
+/// ([`restore_hers`]). Anywhere else (an answer, a note, a message) it came from no rule that
+/// hid it, so the words it stands for, shown there and then edited, would go out with no rule
+/// to hide them again.
 #[must_use]
 pub fn restore(
     tagged: &str,
     identities: &[Identity],
     practitioner: Option<&str>,
     masks: &[MaskEntry],
+) -> String {
+    put_back(tagged, identities, practitioner, masks, false)
+}
+
+/// [`restore`] for a paragraph she wrote or edited (`Author::User`): her kept words too, as
+/// she wrote them.
+#[must_use]
+pub fn restore_hers(
+    tagged: &str,
+    identities: &[Identity],
+    practitioner: Option<&str>,
+    masks: &[MaskEntry],
+) -> String {
+    put_back(tagged, identities, practitioner, masks, true)
+}
+
+fn put_back(
+    tagged: &str,
+    identities: &[Identity],
+    practitioner: Option<&str>,
+    masks: &[MaskEntry],
+    hers: bool,
 ) -> String {
     let Some(re) = TAG_RE.as_ref() else {
         return tagged.to_owned();
@@ -32,10 +61,54 @@ pub fn restore(
         }
         masks
             .iter()
+            .filter(|m| hers || m.kind != KEPT_WORDS)
             .find(|m| m.tag == tag)
             .map_or_else(|| tag.to_owned(), |m| m.original.clone())
     })
     .into_owned()
+}
+
+/// Every kept-words tag in text that came from outside (a model's answer) written as plain
+/// words, "[מילים_1]" as "(מילים_1)", so it can never stand for her words anywhere: not when
+/// it is shown, nor in a paragraph of hers once she edits it. Same length.
+#[must_use]
+pub fn plain_kept_words(text: &str) -> Cow<'_, str> {
+    // Without the tag pattern (never expected) every opening of one is made plain.
+    let Some(re) = TAG_RE.as_ref() else {
+        return Cow::Owned(text.replace(crate::masks::KEPT_WORDS_OPEN, "(מילים_"));
+    };
+    re.replace_all(text, |caps: &regex::Captures<'_>| {
+        let tag = &caps[0];
+        match tag
+            .strip_prefix('[')
+            .and_then(|t| t.strip_suffix(']'))
+            .filter(|_| is_kept_words_tag(tag))
+        {
+            Some(inner) => format!("({inner})"),
+            None => tag.to_owned(),
+        }
+    })
+}
+
+/// Her own stored paragraph (D-126) back as she wrote it, to be filtered again before it is
+/// sent: the filter then reads her words in their own context, as when she typed them, and
+/// hides exactly what it hid then. Only for a paragraph she wrote or edited, whose kept-words
+/// tags came from [`crate::filter_to_keep`]: in any other text (an answer, a material, a
+/// message) such a tag is never put back, since out of its place a kept word loses the rule
+/// that hid it. Text without a kept-words tag is returned as stored. `identities`,
+/// `practitioner` and `masks` are the case's, as for [`restore`].
+#[must_use]
+pub fn her_text_to_send(
+    stored: &str,
+    identities: &[Identity],
+    practitioner: Option<&str>,
+    masks: &[MaskEntry],
+) -> String {
+    if stored.contains(crate::masks::KEPT_WORDS_OPEN) {
+        restore_hers(stored, identities, practitioner, masks)
+    } else {
+        stored.to_owned()
+    }
 }
 
 /// Identity-like tags left in text (everything but `[חסר: …]` notes).
@@ -162,5 +235,23 @@ mod tests {
         assert!(tokens.iter().any(|t| t.contains("1234567")), "{tokens:?}");
         assert!(tokens.contains(&"[גננת_7]"), "{tokens:?}");
         assert!(!tokens.contains(&"[מספר]") && !tokens.contains(&"[ילד]"));
+    }
+
+    #[test]
+    fn her_kept_words_come_back_only_in_her_own_paragraph() {
+        let masks = vec![MaskEntry {
+            tag: "[מילים_1]".into(),
+            kind: KEPT_WORDS.into(),
+            original: "\"זרזירים\"".into(),
+        }];
+        let text = "שמח עם [מילים_1] בגן.";
+        assert_eq!(restore(text, &[], None, &masks), text);
+        assert_eq!(
+            restore_hers(text, &[], None, &masks),
+            "שמח עם \"זרזירים\" בגן."
+        );
+        assert_eq!(plain_kept_words(text), "שמח עם (מילים_1) בגן.");
+        // Any other tag stays a tag.
+        assert_eq!(plain_kept_words("[ילד] ו[מילים_0]"), "[ילד] ו[מילים_0]");
     }
 }

@@ -30,6 +30,30 @@ pub const MASK_BASES: &[&str] = &[
     "שם",
 ];
 
+/// The base of a kept-words tag (D-126): words of hers the outgoing filter leaves out or
+/// generalizes, stored in a paragraph of hers under a number. Not a mask base: such a tag is
+/// never sent and never trusted in text from anywhere else. Every filter reads it as plain
+/// words ("(מילים_1)"), the gate refuses it, and the answer scan points it out. Only her own
+/// paragraph is put back as she wrote it before it is filtered ([`her_text_to_send`]).
+///
+/// [`her_text_to_send`]: crate::restore::her_text_to_send
+pub const KEPT_WORDS: &str = "מילים";
+
+/// How every kept-words tag starts.
+pub(crate) const KEPT_WORDS_OPEN: &str = "[מילים_";
+
+/// `[מילים_N]`, the form of a kept-words tag (D-126).
+#[must_use]
+pub fn is_kept_words_tag(tag: &str) -> bool {
+    tag.strip_prefix(KEPT_WORDS_OPEN)
+        .and_then(|t| t.strip_suffix(']'))
+        .is_some_and(|n| {
+            (1..=4).contains(&n.len())
+                && n.bytes().all(|b| b.is_ascii_digit())
+                && !n.starts_with('0')
+        })
+}
+
 /// The kind of a fixed generic tag the filter writes, or `None` for any other text.
 #[must_use]
 pub fn mask_base(fixed_tag: &str) -> Option<&'static str> {
@@ -155,6 +179,62 @@ impl MaskBook {
             }
         }
         tag
+    }
+
+    /// The kept-words tag of exactly these words (D-126), as she wrote them: niqqud, spacing
+    /// and quotes included, so restoring gives back the very same text.
+    #[must_use]
+    pub fn kept_words_tag(&self, original: &str) -> String {
+        if let Some(e) = self
+            .entries
+            .borrow()
+            .iter()
+            .find(|e| e.kind == KEPT_WORDS && e.original == original)
+        {
+            return e.tag.clone();
+        }
+        let prefix = format!("[{KEPT_WORDS}_");
+        let next = self
+            .entries
+            .borrow()
+            .iter()
+            .filter_map(|e| {
+                e.tag
+                    .strip_prefix(&prefix)?
+                    .strip_suffix(']')?
+                    .parse::<u32>()
+                    .ok()
+            })
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        let tag = format!("{prefix}{next}]");
+        self.entries.borrow_mut().push(MaskEntry {
+            tag: tag.clone(),
+            kind: KEPT_WORDS.to_owned(),
+            original: original.to_owned(),
+        });
+        tag
+    }
+
+    /// The words a kept-words tag stands for, if the book has it.
+    #[must_use]
+    pub fn kept_words_original(&self, tag: &str) -> Option<String> {
+        self.entries
+            .borrow()
+            .iter()
+            .find(|e| e.kind == KEPT_WORDS && e.tag == tag)
+            .map(|e| e.original.clone())
+    }
+
+    /// The words a numbered tag of any kind stands for, if the book has it.
+    #[must_use]
+    pub fn original(&self, tag: &str) -> Option<String> {
+        self.entries
+            .borrow()
+            .iter()
+            .find(|e| e.tag == tag)
+            .map(|e| e.original.clone())
     }
 
     /// What this request added, to keep with the case.

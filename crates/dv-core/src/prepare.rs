@@ -1241,8 +1241,8 @@ impl Core {
                         .drafts(case_id, &s.key)?
                         .into_iter()
                         .filter(|d| d.status == DraftStatus::Approved && marked(&s.key, &d.id))
-                        .map(|d| d.text_tagged)
-                        .collect();
+                        .map(|d| crate::drafts::paragraph_to_send(v, case_id, &d))
+                        .collect::<Result<_, _>>()?;
                     if !text.is_empty() {
                         approved.push((s.clone(), text.join("\n")));
                     }
@@ -1267,8 +1267,8 @@ impl Core {
                 v.drafts(case_id, section_key)?
                     .into_iter()
                     .filter(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved))
-                    .map(|d| d.text_tagged)
-                    .collect()
+                    .map(|d| crate::drafts::paragraph_to_send(v, case_id, &d))
+                    .collect::<Result<_, _>>()?
             };
             let history: Vec<(ChatRole, String)> = if points {
                 Vec::new()
@@ -1550,7 +1550,7 @@ impl Core {
                         .into_iter()
                         .filter(|d| d.status == DraftStatus::Approved)
                     {
-                        approved.push((s.clone(), d.text_tagged));
+                        approved.push((s.clone(), crate::drafts::paragraph_to_send(v, c, &d)?));
                     }
                 }
             }
@@ -1718,8 +1718,8 @@ impl Core {
                 let text: Vec<String> = drafts
                     .into_iter()
                     .filter(|d| d.status == DraftStatus::Approved)
-                    .map(|d| d.text_tagged)
-                    .collect();
+                    .map(|d| crate::drafts::paragraph_to_send(v, &case_id, &d))
+                    .collect::<Result<_, _>>()?;
                 if !text.is_empty() {
                     sections.push((s.clone(), text));
                 }

@@ -68,7 +68,13 @@ impl Core {
                 style_note: None,
                 style: None,
                 id: d.id,
-                text: restore(&d.text_tagged, &identities, practitioner.as_deref(), &masks),
+                text: crate::drafts::shown_paragraph(
+                    &d.text_tagged,
+                    d.author,
+                    &identities,
+                    practitioner.as_deref(),
+                    &masks,
+                ),
                 status: d.status,
                 by_ai: d.author == Author::Ai,
                 sources: Vec::new(),
@@ -376,7 +382,15 @@ impl Core {
         let identities = v.identities(case_id)?;
         let masks = v.masks(case_id)?;
         let practitioner = v.practitioner()?.names.first().cloned();
-        let show = |t: &str| restore(t, &identities, practitioner.as_deref(), &masks);
+        let show = |d: &dv_domain::DraftParagraph| {
+            crate::drafts::shown_paragraph(
+                &d.text_tagged,
+                d.author,
+                &identities,
+                practitioner.as_deref(),
+                &masks,
+            )
+        };
 
         let mut blocking = Vec::new();
         let mut to_complete = Vec::new();
@@ -397,7 +411,7 @@ impl Core {
                     .drafts(case_id, &s.key)?
                     .into_iter()
                     .filter(|d| d.status == DraftStatus::Approved)
-                    .map(|d| show(&d.text_tagged))
+                    .map(|d| show(&d))
                     .collect();
                 for p in &mut paragraphs {
                     for tag in dv_privacy::restore::remaining_tags(p) {

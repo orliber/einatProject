@@ -332,6 +332,10 @@ fn zero_leaks_for_numbers_dates_and_contact_details() {
         "ת.ז. של הילד 000000018".to_owned(),
         "ת.ז. 000 000 018".to_owned(),
         "תעודת זהות 00000001-8".to_owned(),
+        // Right after a period that is not a decimal point (D-126: was let through whole).
+        "ת.ז.000000018".to_owned(),
+        "הגיע עם האם.000000018 נבדק".to_owned(),
+        join(&["נמסר.054", "7654321"]),
         join(&["טלפון האם 054-", "7654321"]),
         join(&["הטלפון 054", "7654321 או +972-54-", "765-4321"]),
         join(&["בבית: 03-", "1234567"]),
@@ -1296,4 +1300,428 @@ fn zero_leaks_for_names_with_look_alike_letters() {
         leaks.len(),
         leaks.join("\n")
     );
+}
+
+/// Groups of digits joined by a maqaf or a Unicode hyphen ("000־000־018") went out whole and
+/// passed the gate: the patterns took only "-" between groups. An ID glued by a hyphen to a
+/// date ("000000018-3.9.2026") went out whole too, and only the gate stopped it. Checked digit by digit, since
+/// the joiners keep the number from showing as one string. Found in review of D-126.
+#[test]
+fn numbers_joined_by_a_maqaf_or_a_unicode_hyphen_never_go_out() {
+    let join = |parts: &[&str]| parts.concat();
+    let digits = |s: &str| s.chars().filter(char::is_ascii_digit).collect::<String>();
+    for (text, secret) in [
+        ("000־000־018".to_owned(), "000000018"),
+        ("ת.ז. 000־000־018".to_owned(), "000000018"),
+        ("ת.ז. 0000־0001־8".to_owned(), "000000018"),
+        ("000\u{2011}000\u{2011}018".to_owned(), "000000018"),
+        ("000\u{2010}000\u{2010}018 נמסר".to_owned(), "000000018"),
+        ("0־0־0־0־0־0־0־1־8".to_owned(), "000000018"),
+        (join(&["טלפון 054", "־7654321"]), "7654321"),
+        (join(&["טלפון 054־765", "־4321"]), "7654321"),
+        // A date glued to the end took the run, and the ID before it went out whole.
+        ("ת.ז. 000000018-3.9.2026".to_owned(), "000000018"),
+        ("000000018־12.3.2020 נבדק".to_owned(), "000000018"),
+        ("נבדק 3.9.2026/000000018".to_owned(), "000000018"),
+        ("נבדק 3.9.2026.000000018".to_owned(), "000000018"),
+    ] {
+        let ids = identities();
+        let out = filter(&text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(
+            !digits(&out.tagged).contains(secret),
+            "{text} → {}",
+            out.tagged
+        );
+        let o = send(&text, CASE);
+        assert!(o.leaked.is_empty(), "{text} leaked {:?}", o.leaked);
+        // The gate refuses the number itself.
+        assert!(
+            !gate_with(&text, &ids, CASE).cleared,
+            "{text} cleared by the gate"
+        );
+    }
+}
+
+/// Every separator a document or a keyboard may put between the groups of an ID or a phone:
+/// the dashes, the minus, other scripts' hyphens, the spaces that do not break, and an
+/// apostrophe, a geresh or a comma. All of them went out whole and the gate cleared them
+/// (second review of D-126). The filter hides each, and the gate refuses each on its own.
+#[test]
+fn numbers_split_by_any_dash_or_space_never_go_out() {
+    let join = |parts: &[&str]| parts.concat();
+    let digits = |s: &str| s.chars().filter(char::is_ascii_digit).collect::<String>();
+    let ids = identities();
+    let dashes = [
+        '\u{2012}', '\u{2013}', '\u{2014}', '\u{2015}', '\u{2212}', '\u{FE58}', '\u{058A}',
+        '\u{2043}', '\u{2E3A}', '\u{30FC}', '\u{FE63}', '\u{2E17}',
+    ];
+    let spaces = [
+        '\u{00A0}', '\u{2009}', '\u{202F}', '\u{3000}', '\u{2007}', '\u{2002}', ' ',
+    ];
+    let marks = ['\'', '\u{05F3}', ',', ':', ';', '_'];
+    let mut cases = Vec::new();
+    for sep in dashes.iter().chain(&spaces).chain(&marks) {
+        let s = sep.to_string();
+        cases.push((join(&["ת.ז. 000", &s, "000", &s, "018 נמסר"]), "000000018"));
+        cases.push((join(&["ת.ז. 0000", &s, "0001", &s, "8 נמסר"]), "000000018"));
+        let single: Vec<String> = "000000018".chars().map(String::from).collect();
+        cases.push((join(&["מספר ", &single.join(&s), " נמסר"]), "000000018"));
+        cases.push((join(&["טלפון 054", &s, "765", &s, "4321"]), "7654321"));
+    }
+    for sep in dashes {
+        // Without a label too: joined by a dash, nine digits are an ID.
+        let s = sep.to_string();
+        cases.push((join(&["000", &s, "000", &s, "018 נמסר"]), "000000018"));
+    }
+    // After an ID label, nine digits in groups of any size, or with a mark inside one
+    // (third review of D-126).
+    for text in [
+        "ת.ז 00 00 00 01 8 נמסר",
+        "ת.ז 000 000 01 8 נמסר",
+        "ת\"ז: 0 00 000 018",
+        "ת.ז 0.0.0.0.0.0.0.1.8",
+        "ת.ז 0000\u{301}00018",
+    ] {
+        cases.push((text.to_owned(), "000000018"));
+    }
+    for (text, secret) in cases {
+        let out = filter(&text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(
+            !digits(&out.tagged).contains(secret),
+            "{text:?} → {}",
+            out.tagged
+        );
+        let o = send(&text, CASE);
+        assert!(o.leaked.is_empty(), "{text:?} leaked {:?}", o.leaked);
+        assert!(
+            !gate_with(&text, &ids, CASE).cleared,
+            "{text:?} cleared by the gate"
+        );
+    }
+    // A row of scores typed with plain spaces or commas is still a row of scores.
+    for text in [
+        "ציונים: 112 104 106",
+        "ציונים: 112,104,106",
+        "טווח 100–115",
+        "ציונים 100–112–125",
+    ] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert_eq!(out.tagged, text);
+    }
+}
+
+/// A kept-words tag (D-126) stands for her words only in her own stored paragraph, which
+/// dv-core restores whole before filtering. Planted anywhere else (an answer of the model, a
+/// material, her chat) it is read as plain words: out of its place a kept word would lose the
+/// rule that hid it ("עם [מילים_1]" would have sent the kindergarten's name with no
+/// institution word before it). The gate refuses the tag itself, and the answer scan points
+/// it out. Found in review of D-126.
+#[test]
+fn a_kept_words_tag_planted_anywhere_never_brings_her_words_out() {
+    let ids = identities();
+    let entry = |tag: &str, original: &str| dv_privacy::MaskEntry {
+        tag: tag.to_owned(),
+        kind: dv_privacy::KEPT_WORDS.to_owned(),
+        original: original.to_owned(),
+    };
+    let book = MaskBook::new(vec![
+        entry("[מילים_1]", " \"זרזירים\""),
+        entry("[מילים_9]", "כמנהלת חשבונות במאפיית שיבולים"),
+    ]);
+    let ctx = PrivacyContext {
+        masks: Some(&book),
+        ..ctx_for(&ids, &[], CASE)
+    };
+    let case_tags: Vec<String> = ids
+        .iter()
+        .filter(|i| i.case_id == CASE)
+        .map(|i| i.tag.clone())
+        .collect();
+    for text in [
+        "הילד שמח עם [מילים_1] מאוד",
+        "האם עובדת [מילים_9].",
+        "[מילים_1][מילים_9]",
+        "ב[מילים_9] ובגן[מילים_1]",
+        "לגן [מילים_1] הגיע",
+    ] {
+        let out = filter(text, &ctx).unwrap();
+        for word in ["זרזירים", "חשבונות", "שיבולים"] {
+            assert!(!out.tagged.contains(word), "{text} → {}", out.tagged);
+        }
+        assert!(!out.tagged.contains("[מילים_"), "{text} → {}", out.tagged);
+        let o = send(text, CASE);
+        assert!(o.leaked.is_empty(), "{text} leaked {:?}", o.leaked);
+        assert!(
+            !gate_with(text, &ids, CASE).cleared,
+            "{text} cleared by the gate"
+        );
+        let found = dv_privacy::restore::scan_model_output(text, &case_tags, &ids);
+        assert!(
+            found.iter().any(|s| s.token.starts_with("[מילים_")),
+            "{text}: {found:?}"
+        );
+    }
+}
+
+/// Every way a month is named, for the date tests below (D-128).
+const HE_MONTH_NAMES: &[&str] = &[
+    "ינואר",
+    "פברואר",
+    "מרץ",
+    "מרס",
+    "אפריל",
+    "מאי",
+    "יוני",
+    "יולי",
+    "אוגוסט",
+    "ספטמבר",
+    "אוקטובר",
+    "נובמבר",
+    "דצמבר",
+    "ינו'",
+    "פבר'",
+    "מארס",
+    "אפר'",
+    "אוג'",
+    "ספט'",
+    "אוק'",
+    "אוקט'",
+    "נוב'",
+    "דצמ'",
+];
+const EN_MONTH_NAMES: &[&str] = &[
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Sept",
+    "Oct",
+    "Nov",
+    "Dec",
+];
+
+/// A month's name as a word of `text`, alone or with a Hebrew prefix ("במרץ", "לינואר").
+fn month_name_in(text: &str) -> Option<String> {
+    dv_privacy::text::tokenize(text).into_iter().find_map(|t| {
+        let named = dv_privacy::text::prefix_splits(&t.norm)
+            .iter()
+            .any(|(_, w)| {
+                HE_MONTH_NAMES.iter().any(|m| normalize(m) == *w)
+                    || EN_MONTH_NAMES.iter().any(|m| normalize(m) == *w)
+            });
+        named.then_some(t.norm)
+    })
+}
+
+/// The filter's outcome for one date phrase inside `context`: one generalized date, no month
+/// name and no year left, and the gate clears it (no dead end).
+fn check_one_date(context: &str, phrase: &str, year: &str) -> Result<(), String> {
+    check_one_date_with(&identities(), context, phrase, year)?;
+    let o = send(&context.replace("{}", phrase), CASE);
+    if !o.leaked.is_empty() {
+        return Err(format!("{phrase:?} leaked {:?}", o.leaked));
+    }
+    Ok(())
+}
+
+/// [`check_one_date`] with the case's people `ids` (a sister named like a month).
+fn check_one_date_with(
+    ids: &[Identity],
+    context: &str,
+    phrase: &str,
+    year: &str,
+) -> Result<(), String> {
+    let text = context.replace("{}", phrase);
+    let out = filter(&text, &ctx_for(ids, &[], CASE)).unwrap();
+    if let Some(m) = month_name_in(&out.tagged) {
+        return Err(format!(
+            "{text:?} → {:?}: the month {m} was left",
+            out.tagged
+        ));
+    }
+    if out.tagged.contains(year) {
+        return Err(format!("{text:?} → {:?}: the year was left", out.tagged));
+    }
+    if !gate_with(&out.tagged, ids, CASE).cleared {
+        return Err(format!("{text:?} → {:?}: the gate refused it", out.tagged));
+    }
+    Ok(())
+}
+
+/// A date with a month name comes out as one generalized date, the way a numeric one does,
+/// with nothing of it beside it. "March 12.3.2020" went out as "March לפני כ-7 שנים" and the
+/// gate refused it: Einat could not send the paragraph and did not know why (D-128).
+#[test]
+fn dates_with_a_month_name_come_out_whole_and_generalized() {
+    for (phrase, year) in [
+        ("12 במרץ 2020", "2020"),
+        ("ב-12 במרץ 2020", "2020"),
+        ("במרץ 2020", "2020"),
+        ("March 12.3.2020", "2020"),
+        ("12.3.2020 March", "2020"),
+        ("12 March 2020", "2020"),
+        ("Mar. 2020", "2020"),
+        ("מרץ 20", "20"),
+        ("12 במרץ 20", "20"),
+        ("12 במרץ, 2020", "2020"),
+        ("12.3.2020 (מרץ)", "2020"),
+        ("March 3, 2025", "2025"),
+        ("March 3rd, 2025", "2025"),
+        ("on 12th March 2020", "2020"),
+        ("2020 March", "2020"),
+        ("בשנת 2020 במרץ", "2020"),
+        ("12/מרץ/2020", "2020"),
+        ("12-במרץ-2020", "2020"),
+        ("ינואר-2020", "2020"),
+        ("Jan '20", "20"),
+        ("מרץ ’20", "20"),
+        ("SEPT 2021", "2021"),
+        ("3 במרס 2025", "2025"),
+        ("31 בפברואר 2020", "2020"),
+        // Third review.
+        ("12th of March 2020", "2020"),
+        ("the 12th of March, 2020", "2020"),
+        ("March the 12th, 2020", "2020"),
+        ("י\"ב במרץ 2020", "2020"),
+        ("ט\"ו בספטמבר 2021", "2021"),
+        ("15 בתשרי 2020", "2020"),
+        ("אדר ב' 2024", "2024"),
+        ("בכסלו 2021", "2021"),
+        ("ספט' 20", "20"),
+        ("אוג' 2020", "2020"),
+        ("אוקט' 2020", "2020"),
+        ("פבר' 2020", "2020"),
+        ("12 בספט' 2020", "2020"),
+        ("מארס 2020", "2020"),
+        ("ב-12.3 במרץ 2020", "2020"),
+        ("2020-Mar-12", "2020"),
+        ("2020 אפריל 85", "2020"),
+        ("12 במרץ (2020)", "2020"),
+        ("(12 במרץ) 2020", "2020"),
+    ] {
+        if let Err(e) = check_one_date("נבדק {} בבוקר", phrase, year) {
+            panic!("{e}");
+        }
+    }
+    // A month alone, in a word that is also an everyday one, stays ("energetically"). One
+    // that is only a month ("בינואר") is hidden as before.
+    let ids = identities();
+    for text in ["נבדק במרץ בבוקר", "עבד במרץ רב", "ילד מלא מרץ ושמחה"]
+    {
+        assert_eq!(
+            filter(text, &ctx_for(&ids, &[], CASE)).unwrap().tagged,
+            text
+        );
+    }
+    // A range keeps both its ends, each generalized.
+    for text in ["בין מרץ 2020 למאי 2021", "12 במרץ – 15 באפריל 2020"] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(month_name_in(&out.tagged).is_none(), "{}", out.tagged);
+        assert_eq!(out.tagged.matches("לפני").count(), 2, "{}", out.tagged);
+    }
+    // The exact generalization: the year written out wins, a short year is not the next
+    // date's day, an age is not a year.
+    for (text, out) in [
+        ("ב-12.3 במרץ 2020", "ב-לפני כ-6 שנים"),
+        ("2020-Mar-12", "לפני כ-7 שנים"),
+        ("2020 אפריל 85", "לפני כ-6 שנים 85"),
+    ] {
+        assert_eq!(filter(text, &ctx_for(&ids, &[], CASE)).unwrap().tagged, out);
+    }
+    // "may" the verb.
+    for text in ["She may 3 times a week refuse", "It may rain"] {
+        assert_eq!(
+            filter(text, &ctx_for(&ids, &[], CASE)).unwrap().tagged,
+            text
+        );
+    }
+    // A sister named like a month: her name is hers, and the date next to it is still one
+    // generalized date that the gate clears (third review of D-128).
+    let mut with_may = identities();
+    with_may.push(id(CASE, Role::Sister, "[אחות_2]", "מאי", &[]));
+    with_may.push(id(CASE, Role::Brother, "[אח_1]", "יוני", &[]));
+    for phrase in [
+        "12.5.2020 (מאי)",
+        "2020 מאי",
+        "מאי 2020 הגיעה",
+        "ביוני 2015",
+        "3.9.2020 יוני",
+    ] {
+        let year = if phrase.contains("2015") {
+            "2015"
+        } else {
+            "2020"
+        };
+        if let Err(e) = check_one_date_with(&with_may, "נבדקה {} בבוקר", phrase, year) {
+            panic!("{e}");
+        }
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 300, ..ProptestConfig::default() })]
+
+    /// Month names × separators × orders × contexts (D-128): one generalized date, no month
+    /// name and no year beside it, cleared by the gate, nothing leaked.
+    #[test]
+    fn every_month_name_with_any_separator_and_order_is_one_generalized_date(
+        hebrew in any::<bool>(),
+        month in 0usize..64,
+        prefix in 0usize..4,
+        dot in any::<bool>(),
+        order in 0usize..6,
+        sep in 0usize..6,
+        day in 1u32..=28,
+        year in 2015u32..=2025,
+        short in any::<bool>(),
+        context in 0usize..4,
+    ) {
+        let seps = [" ", "-", "/", ".", ", ", " - "];
+        let s = seps[sep];
+        let m = if hebrew {
+            let name = HE_MONTH_NAMES[month % HE_MONTH_NAMES.len()];
+            format!("{}{name}", ["", "ב", "ל", "ב-"][prefix])
+        } else {
+            let name = EN_MONTH_NAMES[month % EN_MONTH_NAMES.len()];
+            let dot = if dot && name.len() <= 4 { "." } else { "" };
+            format!("{name}{dot}")
+        };
+        let y = if short { format!("{:02}", year % 100) } else { year.to_string() };
+        let d = day.to_string();
+        let phrase = match order {
+            0 => [d.as_str(), &m, &y].join(s),
+            1 => [m.as_str(), &y].join(s),
+            2 => [y.as_str(), &m].join(s),
+            3 => [m.as_str(), &d, &y].join(s),
+            4 => format!("{d}.{}.{y}{s}{m}", (month % 12) + 1),
+            _ => format!("{m}{s}{d}.{}.{y}", (month % 12) + 1),
+        };
+        let contexts = ["נבדק {} בבוקר", "{}", "בתאריך {}, הגיע עם אמו.", "(נבדק {})"];
+        // Every other case has a sister and a brother named like months.
+        let r = if day % 2 == 0 {
+            let mut ids = identities();
+            ids.push(id(CASE, Role::Sister, "[אחות_2]", "מאי", &[]));
+            ids.push(id(CASE, Role::Brother, "[אח_1]", "יוני", &[]));
+            check_one_date_with(&ids, contexts[context], &phrase, &y)
+        } else {
+            check_one_date(contexts[context], &phrase, &y)
+        };
+        prop_assert!(r.is_ok(), "{}", r.unwrap_err());
+    }
 }

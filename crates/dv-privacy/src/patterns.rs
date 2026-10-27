@@ -3,6 +3,7 @@
 //! Clinical text is full of numbers that must survive (ages "בגיל 2.5", scores "(96)",
 //! score lists "12 13 9"), so every rule is written to hide identifiers without eating them.
 
+use std::borrow::Cow;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -46,7 +47,7 @@ impl PatternKind {
         crate::masks::mask_base(self.fixed_replacement()).unwrap_or("מספר")
     }
 
-    fn fixed_replacement(self) -> &'static str {
+    pub(crate) fn fixed_replacement(self) -> &'static str {
         match self {
             PatternKind::IdNumber => "[ת.ז.]",
             PatternKind::Phone => "[טלפון]",
@@ -88,6 +89,17 @@ const HE_MONTHS: &[(&str, u32, bool)] = &[
     ("אוקטובר", 10, false),
     ("נובמבר", 11, false),
     ("דצמבר", 12, false),
+    // Short forms, with the geresh, and the other spelling of March.
+    ("ינו'", 1, false),
+    ("פבר'", 2, false),
+    ("מארס", 3, false),
+    ("אפר'", 4, false),
+    ("אוג'", 8, false),
+    ("ספט'", 9, false),
+    ("אוק'", 10, false),
+    ("אוקט'", 10, false),
+    ("נוב'", 11, false),
+    ("דצמ'", 12, false),
 ];
 const EN_MONTHS: &[(&str, u32)] = &[
     ("january", 1),
@@ -200,6 +212,61 @@ const HEBREW_CAL_MONTHS: &[&str] = &[
     "אלול",
 ];
 
+/// What may stand between the groups of an ID, a phone, a card or an account number typed in
+/// parts, for every rule that reads one (one class, so no rule is left with fewer): any space
+/// (also a non-breaking, thin or ideographic one), a hyphen, the maqaf, every dash and minus,
+/// the other scripts' hyphens, an apostrophe, a geresh, a comma, a colon, a semicolon and an
+/// underscore. Any of them went out whole between the groups of an ID (the second and third
+/// reviews of D-126). A plain number with a
+/// dash ("100–115", a score range) is read by `digit_run`, which keeps to hyphens.
+const GROUP_SEP: &str = r"\s\-\x{05BE}\x{2010}-\x{2015}\x{2212}\x{FE58}\x{FE63}\x{FF0D}\x{058A}\x{1806}\x{2043}\x{2E17}\x{2E3A}\x{2E3B}\x{30FC}'\x{05F3}\x{2019},:;_";
+
+/// One character of [`GROUP_SEP`].
+fn group_sep(c: char) -> bool {
+    c.is_whitespace()
+        || matches!(
+            c,
+            '-' | '\u{05BE}' | '\u{2010}'
+                ..='\u{2015}'
+                    | '\u{2212}'
+                    | '\u{FE58}'
+                    | '\u{FE63}'
+                    | '\u{FF0D}'
+                    | '\u{058A}'
+                    | '\u{1806}'
+                    | '\u{2043}'
+                    | '\u{2E17}'
+                    | '\u{2E3A}'
+                    | '\u{2E3B}'
+                    | '\u{30FC}'
+                    | '\''
+                    | '\u{05F3}'
+                    | '\u{2019}'
+                    | ','
+                    | ':'
+                    | ';'
+                    | '_'
+        )
+}
+
+/// A hyphen of any script, as opposed to a dash or a space: groups joined by one are one
+/// number. Between groups joined by anything else ("100–115–120", a row of scores) nine
+/// digits are an ID only with the check digit or a label.
+fn hyphen(c: char) -> bool {
+    matches!(
+        c,
+        '-' | '\u{05BE}'
+            | '\u{2010}'
+            | '\u{2011}'
+            | '\u{FE63}'
+            | '\u{FF0D}'
+            | '\u{058A}'
+            | '\u{1806}'
+            | '\u{2043}'
+            | '\u{2E17}'
+    )
+}
+
 struct Compiled {
     email: Regex,
     url: Regex,
@@ -208,6 +275,7 @@ struct Compiled {
     spaced_phone: Regex,
     spaced_id: Regex,
     single_digits: Regex,
+    labelled_digits: Regex,
     num_date: Regex,
     year: Regex,
     address: Regex,
@@ -229,21 +297,32 @@ static COMPILED: LazyLock<Result<Compiled, regex::Error>> = LazyLock::new(|| {
         )?,
         ip: Regex::new(r"\d{1,3}(?:\.\d{1,3}){3}")?,
         // Digits joined by at most one - / . between them (IDs, phones, file numbers). No spaces,
-        // so score lists such as "12 13 9" are never merged.
-        digit_run: Regex::new(r"\+?\d(?:[\-./]?\d)+")?,
+        // so score lists such as "12 13 9" are never merged. A hyphen is also the maqaf and the
+        // Unicode hyphens ("000־000־018" went out whole): a hyphen, never a dash, so a score
+        // range ("100–115") is read as before.
+        digit_run: Regex::new(r"\+?\d(?:[\-./\x{05BE}\x{2010}\x{2011}]?\d)+")?,
         // A phone typed in groups. Between them a space (also a non-breaking one), a hyphen or
         // any dash ("054‑1234567" with a non-breaking hyphen, "054–1234567"); the area code
         // may be in parentheses ("(054) 123-4567", "(03)1234567"), and then it is part of it.
-        spaced_phone: Regex::new(
-            r"(?:(?:\+972[\s\-‐-―−]?|0)(?:5\d|[2-4]|[89]|7\d)[\s\-‐-―−]|(?:\+972\s?)?\(\s?0?(?:5\d|[2-4]|[89]|7\d)\s?\)[\s\-‐-―−]?)\d{3}[\s\-‐-―−]?\d{4}",
-        )?,
+        spaced_phone: Regex::new(&format!(
+            r"(?:(?:\+972[{s}]?|0)(?:5\d|[2-4]|[89]|7\d)[{s}]|(?:\+972\s?)?\(\s?0?(?:5\d|[2-4]|[89]|7\d)\s?\)[{s}]?)\d{{3}}[{s}]?\d{{4}}",
+            s = GROUP_SEP
+        ))?,
         // ID numbers typed in groups ("000 000 018", "0000-0001-8").
-        spaced_id: Regex::new(r"\d{3,4}[\s\-]\d{3,4}[\s\-]\d{1,3}")?,
-        // Nine or ten digits one at a time, each followed by one space or hyphen.
-        single_digits: Regex::new(r"\d(?:[ \-]\d){8,9}")?,
+        spaced_id: Regex::new(&format!(
+            r"\d{{3,4}}[{s}]\d{{3,4}}[{s}]\d{{1,3}}",
+            s = GROUP_SEP
+        ))?,
+        // Nine or ten digits one at a time, each followed by one separator.
+        single_digits: Regex::new(&format!(r"\d(?:[{GROUP_SEP}]\d){{8,9}}"))?,
+        // Nine digits in groups of any size, each at most one separator (or a period) from the
+        // next: after an ID label, an ID however it was typed ("ת.ז 00 00 00 01 8").
+        labelled_digits: Regex::new(&format!(r"\d(?:[{GROUP_SEP}.]?\d){{8}}"))?,
         // Bank accounts (IBAN) and card numbers typed in groups of four.
-        iban: Regex::new(r"(?i)\bIL\d{2}(?:[ \-]?\d{1,4}){3,6}")?,
-        card: Regex::new(r"\d{4}(?:[ \-]\d{4}){2,3}")?,
+        iban: Regex::new(&format!(
+            r"(?i)\bIL\d{{2}}(?:[{GROUP_SEP}]?\d{{1,4}}){{3,6}}"
+        ))?,
+        card: Regex::new(&format!(r"\d{{4}}(?:[{GROUP_SEP}]\d{{4}}){{2,3}}"))?,
         num_date: Regex::new(r"(\d{1,2})[./](\d{1,2})(?:[./](\d{4}|\d{2}))?")?,
         year: Regex::new(r"(19[5-9]\d|20[0-4]\d)")?,
         address: Regex::new(
@@ -360,9 +439,34 @@ fn char_after(text: &str, i: usize) -> Option<char> {
     text.get(i..)?.chars().next()
 }
 
+/// The text with each tag `blank` picks (one with no word of its own: a person's tag or a
+/// generic one) written over with `x`, byte for byte, so every offset still holds and the
+/// number inside a tag ("[מספר_זהות_1] מרץ") is never read as part of a date or a number
+/// next to it. A letter, not a mark, so a prefix glued to a tag stays one word with it
+/// ("ו[ילד] באב" is not "ו' באב"). A tag left as it is ("[חסר: …]") is read like any text.
+pub(crate) fn blank_tags<'t>(text: &'t str, blank: impl Fn(&str) -> bool) -> Cow<'t, str> {
+    let Some(re) = crate::masks::TAG_RE.as_ref() else {
+        return Cow::Borrowed(text);
+    };
+    let mut out: Option<String> = None;
+    for m in re.find_iter(text).filter(|m| blank(m.as_str())) {
+        out.get_or_insert_with(|| text.to_owned())
+            .replace_range(m.range(), &"x".repeat(m.len()));
+    }
+    out.map_or(Cow::Borrowed(text), Cow::Owned)
+}
+
 /// Not glued to other digits (so "2021" inside "120215" is not a year).
 fn digit_bounded(text: &str, start: usize, end: usize) -> bool {
-    !char_before(text, start).is_some_and(|c| c.is_ascii_digit() || c == '.')
+    // A period counts only as a decimal point, after a digit ("3.14159"): after a word or
+    // a label ("ת.ז.000000018", "שוב.000000018") the number stands on its own, and was
+    // let through whole.
+    let decimal = || {
+        text.get(..start)
+            .and_then(|b| b.strip_suffix('.'))
+            .is_some_and(|b| b.ends_with(|c: char| c.is_ascii_digit()))
+    };
+    !char_before(text, start).is_some_and(|c| c.is_ascii_digit() || (c == '.' && decimal()))
         && !char_after(text, end).is_some_and(|c| c.is_ascii_digit())
 }
 
@@ -428,6 +532,11 @@ fn push(
 /// A day of a Hebrew month in letters, 1–30, largest letter first ("ה", "טו", "כ\"ט"):
 /// "שם" and "של" are words.
 fn hebrew_day(raw: &str) -> bool {
+    hebrew_day_value(raw).is_some()
+}
+
+/// The day a Hebrew numeral stands for ("י\"ב" → 12), as [`hebrew_day`] reads it.
+fn hebrew_day_value(raw: &str) -> Option<u32> {
     let mut total = 0;
     let mut last = u32::MAX;
     for ch in raw
@@ -439,29 +548,113 @@ fn hebrew_day(raw: &str) -> bool {
             'י' => 10,
             'כ' | 'ך' => 20,
             'ל' => 30,
-            _ => return false,
+            _ => return None,
         };
         if value > last {
-            return false;
+            return None;
         }
         last = value;
         total += value;
     }
-    (1..=30).contains(&total)
+    Some(total).filter(|t| (1..=30).contains(t))
+}
+
+/// The month a word names: a Gregorian month in Hebrew, with a prefix or without ("במרץ",
+/// "לינואר"), or in English, in full or short ("March", "Mar"). Also the ambiguous ones
+/// ("מרץ", "מאי"): next to a date, they are read as its month.
+pub(crate) fn month_word(norm: &str) -> Option<u32> {
+    prefix_splits(norm)
+        .iter()
+        .find_map(|(_, w)| {
+            HE_MONTHS
+                .iter()
+                .find(|(m, _, _)| norm_eq(m, w))
+                .map(|(_, n, _)| *n)
+        })
+        .or_else(|| EN_MONTHS.iter().find(|(m, _)| *m == norm).map(|(_, n)| *n))
+        .or_else(|| hebrew_calendar_month(norm).then_some(0))
+}
+
+/// A month of the Hebrew calendar ("בתשרי", "כסלו"), bare or after "ב" only: never with the
+/// article ("שם האב" is the father). "אב" alone is the father far more often than the month,
+/// so next to a date it is not taken into it ("3.9.2026, אב ואם נכחו").
+fn hebrew_calendar_month(norm: &str) -> bool {
+    prefix_splits(norm).iter().any(|(p, w)| {
+        (*p == 0 || (*p == 1 && norm.starts_with('ב')))
+            && !norm_eq("אב", w)
+            && HEBREW_CAL_MONTHS.iter().any(|m| norm_eq(m, w))
+    })
+}
+
+/// A day of the month as a word: "12", or in English with its ending ("12th", "3rd").
+fn day_word(norm: &str) -> Option<u32> {
+    let digits = ["st", "nd", "rd", "th"]
+        .iter()
+        .find_map(|end| norm.strip_suffix(end))
+        .unwrap_or(norm);
+    digits.parse::<u32>().ok().filter(|d| (1..=31).contains(d))
 }
 
 fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>) {
     let tokens = tokenize(text);
-    let num = |i: usize| tokens.get(i).and_then(|t| t.norm.parse::<u32>().ok());
+    let raw = |i: usize| tokens.get(i).and_then(|t| text.get(t.start..t.end));
+    let norm = |i: usize| tokens.get(i).map_or("", |t| t.norm.as_str());
+    let num = |i: usize| norm(i).parse::<u32>().ok();
+    let is_month = |i: usize| month_word(norm(i)).is_some();
+    // A day as a word: "12", "12th", or a Hebrew numeral with its geresh or gershayim
+    // ("י\"ב", "ה'"); a bare pair of letters is a word ("גב").
+    let day = |i: usize| {
+        day_word(norm(i)).or_else(|| {
+            raw(i)
+                .filter(|r| r.contains(['\'', '"', '׳', '״']) && c.hebrew_numeral.is_match(r))
+                .and_then(hebrew_day_value)
+        })
+    };
+    let full_year = |i: usize| {
+        num(i)
+            .filter(|y| (1900..=2100).contains(y))
+            .and_then(|y| i32::try_from(y).ok())
+    };
+    // "Jan '20", "מרץ ’20": a year with its century cut off.
+    let cut_year = |i: usize| {
+        tokens.get(i).is_some_and(|t| {
+            text.get(..t.start)
+                .is_some_and(|b| b.ends_with(['\'', '\u{2019}', '\u{05F3}']))
+        })
+    };
+    // "מרץ 20", "12 במרץ 20": two digits after a month are the year, unless a month or
+    // another number comes right after them ("12 במרץ – 15 באפריל 2020" is the 15th of
+    // April, "ינואר 10 15" the 10th of January 2015).
+    let short_year = |i: usize| {
+        tokens
+            .get(i)
+            .filter(|t| t.norm.len() == 2 && t.norm.bytes().all(|b| b.is_ascii_digit()))
+            .filter(|_| !is_month(i + 1) && num(i + 1).is_none())
+            .and_then(|t| expand_year(&t.norm, today))
+    };
     for (i, tok) in tokens.iter().enumerate() {
         let splits = prefix_splits(&tok.norm);
-        let day_before = i
+        // The word before the month that may be its day: past a prefix written apart with a
+        // hyphen ("15 ב-ינואר") and past "of" ("12th of March").
+        let prev = i.checked_sub(1).map(|j| {
+            let apart = tokens.get(j).is_some_and(|p| {
+                crate::text::is_valid_prefix(&p.norm)
+                    && text
+                        .get(p.end..tok.start)
+                        .is_some_and(|g| matches!(g, "-" | "\u{05BE}"))
+            });
+            if apart || norm(j) == "of" {
+                j.saturating_sub(1)
+            } else {
+                j
+            }
+        });
+        let day_before = prev.filter(|&j| j < i).and_then(day);
+        // "2020-Mar-12", "2020 אפריל": the year before the month.
+        let year_before = i
             .checked_sub(1)
-            .and_then(num)
-            .filter(|d| (1..=31).contains(d));
-        let year_after = num(i + 1)
-            .filter(|y| (1900..=2100).contains(y))
-            .and_then(|y| i32::try_from(y).ok());
+            .filter(|_| day_before.is_none())
+            .and_then(full_year);
 
         let gregorian = splits.iter().find_map(|(p, w)| {
             HE_MONTHS
@@ -478,34 +671,67 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
             (*p == 0 || (*p == 1 && tok.norm.starts_with('ב')))
                 && HEBREW_CAL_MONTHS.iter().any(|m| norm_eq(m, w))
         });
-
         let (month, ambiguous) = match (gregorian, english) {
             (Some((_, m, amb)), _) => (Some(m), amb),
             (None, Some(m)) => (Some(m), m == 5),
             (None, None) => (None, true),
         };
-        let start_tok = if day_before.is_some() {
-            i.saturating_sub(1)
-        } else {
-            i
-        };
-        let mut end_tok = if year_after.is_some() { i + 1 } else { i };
         // "ביוני", "ממאי": May–July with "in" or "from" glued on are months; were the word
         // the name יוני or יולי, hiding it is right too. Not "במרץ" ("energetically").
         let glued_month = gregorian.is_some_and(|(p, m, _)| {
             p == 1 && (5..=7).contains(&m) && tok.norm.starts_with(['ב', 'מ'])
         });
         if let Some(m) = month {
-            if ambiguous && day_before.is_none() && year_after.is_none() && !glued_month {
+            let mut start_tok = match (day_before, prev) {
+                (Some(_), Some(j)) => j,
+                _ => i,
+            };
+            let mut end_tok = i;
+            let (mut day_of, mut year_of) = (day_before, None);
+            if let Some(y) = full_year(i + 1).or_else(|| {
+                (cut_year(i + 1)
+                    || (year_before.is_none()
+                        && (gregorian.is_some() || (english.is_some() && day_before.is_some()))))
+                .then(|| short_year(i + 1))
+                .flatten()
+            }) {
+                year_of = Some(y);
+                end_tok = i + 1;
+            } else if day_before.is_none() && !cut_year(i + 1) {
+                // "March 3", "March the 12th, 2020", "March 3, 25"; in Hebrew only with the
+                // year after it ("ינואר 1 2015"), since "מרץ 20" is March 2020.
+                let n = if english.is_some() && norm(i + 1) == "the" {
+                    i + 2
+                } else {
+                    i + 1
+                };
+                if let Some(d) = day(n) {
+                    let year = full_year(n + 1).or_else(|| short_year(n + 1));
+                    if english.is_some() || year.is_some() || year_before.is_some() {
+                        day_of = Some(d);
+                        year_of = year;
+                        end_tok = if year.is_some() { n + 1 } else { n };
+                    }
+                }
+            }
+            if year_of.is_none() {
+                if let Some(y) = year_before {
+                    year_of = Some(y);
+                    start_tok = i.saturating_sub(1);
+                }
+            }
+            if ambiguous && day_of.is_none() && year_of.is_none() && !glued_month {
                 continue;
             }
-            if english.is_some()
-                && day_before.is_none()
-                && num(i + 1).is_some_and(|d| (1..=31).contains(&d))
-            {
-                end_tok = i + 1; // "March 3"
+            // "may" is a verb too ("She may 3 times refuse"): as a month, with a year, or
+            // written "May" with a day.
+            let may_verb = english == Some(5)
+                && year_of.is_none()
+                && !raw(i).is_some_and(|r| r.starts_with('M'));
+            if may_verb {
+                continue;
             }
-            let replacement = match (day_before, year_after) {
+            let replacement = match (day_of, year_of) {
                 (Some(d), Some(y)) if valid_ymd(y, m, d) => relative_he((y, m, d), today),
                 (Some(d), None) if valid_ymd(today.0, m, d) => {
                     relative_he((infer_year(m, d, today), m, d), today)
@@ -535,14 +761,31 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
                 text.get(t.start..t.end)
                     .is_none_or(|raw| c.hebrew_numeral.is_match(raw) && hebrew_day(raw))
             });
-            let year_tok = tokens.get(i + 1).filter(|t| {
-                text.get(t.start..t.end)
-                    .is_none_or(|raw| c.hebrew_year.is_match(raw))
+            // A day in digits ("15 בתשרי 2020"), only with the year after it.
+            let digits_before = i
+                .checked_sub(1)
+                .filter(|&j| num(j).is_some_and(|d| (1..=30).contains(&d)))
+                .and_then(|j| tokens.get(j));
+            // "אדר ב' 2024": the second Adar.
+            let after = if norm_eq("אדר", tok.norm.trim_start_matches('ב'))
+                && raw(i + 1).is_some_and(|r| matches!(r, "א'" | "ב'" | "א׳" | "ב׳"))
+            {
+                i + 2
+            } else {
+                i + 1
+            };
+            // A Hebrew year ("תשפ\"ה") or a Gregorian one ("בכסלו 2021").
+            let year_tok = tokens.get(after).filter(|t| {
+                full_year(after).is_some()
+                    || text
+                        .get(t.start..t.end)
+                        .is_none_or(|raw| c.hebrew_year.is_match(raw))
             });
-            if numeral_before.is_none() && year_tok.is_none() {
+            let before = numeral_before.or(digits_before.filter(|_| year_tok.is_some()));
+            if before.is_none() && year_tok.is_none() {
                 continue;
             }
-            let start = numeral_before.map_or(tok.start, |t| t.start);
+            let start = before.map_or(tok.start, |t| t.start);
             let end = year_tok.map_or(tok.end, |t| t.end);
             push(
                 hits,
@@ -762,7 +1005,11 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
                 before.get(from..)
             })
             .is_none_or(|near| ID_LABELS.iter().any(|l| near.contains(l)));
-        let spaced = m.as_str().contains(' ');
+        // A row of scores is typed with spaces, commas or dashes ("100–115–120").
+        let spaced = m
+            .as_str()
+            .chars()
+            .any(|ch| !ch.is_ascii_digit() && !hyphen(ch));
         if digits.len() == 9
             && (!spaced || is_valid_israeli_id(&digits) || labelled)
             && digit_bounded(text, m.start(), m.end())
@@ -783,12 +1030,8 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
         let digits: String = m.as_str().chars().filter(char::is_ascii_digit).collect();
         // Text around that cannot be read (never expected) is taken as no digit next to the
         // run and as a label before it: the run is hidden.
-        let before = text
-            .get(..m.start())
-            .map(|b| b.trim_end_matches([' ', '-']));
-        let after = text
-            .get(m.end()..)
-            .map(|a| a.trim_start_matches([' ', '-']));
+        let before = text.get(..m.start()).map(|b| b.trim_end_matches(group_sep));
+        let after = text.get(m.end()..).map(|a| a.trim_start_matches(group_sep));
         let alone = !before.is_some_and(|b| b.ends_with(|ch: char| ch.is_ascii_digit()))
             && !after.is_some_and(|a| a.starts_with(|ch: char| ch.is_ascii_digit()));
         let labelled = before
@@ -804,6 +1047,27 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
         };
         if alone {
             push(&mut hits, m.start(), m.end(), kind, fixed(kind));
+        }
+    }
+    // Nine digits right after an ID label are the ID, in groups of any size: "ת.ז 00 00 00 01
+    // 8" and "ת.ז 000 000 01 8" went out whole (third review of D-126).
+    for m in c.labelled_digits.find_iter(text) {
+        // Text before that cannot be read (never expected) counts as a label.
+        let labelled = text
+            .get(..m.start())
+            .and_then(|before| {
+                let from = before.char_indices().rev().nth(20).map_or(0, |(i, _)| i);
+                before.get(from..)
+            })
+            .is_none_or(|near| ID_LABELS.iter().any(|l| near.contains(l)));
+        if labelled && digit_bounded(text, m.start(), m.end()) {
+            push(
+                &mut hits,
+                m.start(),
+                m.end(),
+                PatternKind::IdNumber,
+                fixed(PatternKind::IdNumber),
+            );
         }
     }
     // Numeric dates first, so "14.9.2025" becomes a date and not a generic number.
@@ -835,12 +1099,11 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
             );
         }
     }
-    for m in c.digit_run.find_iter(text) {
-        let digits: String = m.as_str().chars().filter(char::is_ascii_digit).collect();
-        if digits.len() < 5 || !digit_bounded(text, m.start(), m.end()) {
-            continue;
-        }
-        let kind = if is_valid_israeli_id(&digits) || digits.len() == 9 {
+    // Before plain runs of digits, so "January-1-2015" is one date, not "January-[מספר]"
+    // (D-128). Whatever a date takes is hidden whole, so an ID it reads as a day goes too.
+    month_dates(text, today, c, &mut hits);
+    let run_kind = |digits: &str| {
+        if is_valid_israeli_id(digits) || digits.len() == 9 {
             PatternKind::IdNumber
         } else if (digits.starts_with('0') && (9..=10).contains(&digits.len()))
             || digits.starts_with("972")
@@ -848,10 +1111,37 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
             PatternKind::Phone
         } else {
             PatternKind::Number
-        };
+        }
+    };
+    for m in c.digit_run.find_iter(text) {
+        let digits: String = m.as_str().chars().filter(char::is_ascii_digit).collect();
+        if digits.len() < 5 || !digit_bounded(text, m.start(), m.end()) {
+            continue;
+        }
+        let kind = run_kind(&digits);
         push(&mut hits, m.start(), m.end(), kind, fixed(kind));
+        // A date already took the end of the run ("000000018-3.9.2026") or its start
+        // ("3.9.2026/000000018"): an ID or a phone in a part of it between joiners is still
+        // hidden (it went out whole).
+        let mut at = m.start();
+        for part in m
+            .as_str()
+            .split(['-', '.', '/', '\u{05BE}', '\u{2010}', '\u{2011}'])
+        {
+            let (start, end) = (at, at + part.len());
+            // The joiner after this part, in bytes.
+            at = end
+                + text
+                    .get(end..)
+                    .and_then(|r| r.chars().next())
+                    .map_or(0, char::len_utf8);
+            let digits: String = part.chars().filter(char::is_ascii_digit).collect();
+            if digits.len() >= 9 && part.bytes().all(|b| b.is_ascii_digit()) {
+                let kind = run_kind(&digits);
+                push(&mut hits, start, end, kind, fixed(kind));
+            }
+        }
     }
-    month_dates(text, today, c, &mut hits);
     for m in c.year.find_iter(text) {
         if !digit_bounded(text, m.start(), m.end()) {
             continue;
@@ -891,8 +1181,181 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
             );
         }
     }
+    join_month_names(text, &mut hits);
     hits.sort_by_key(|h| h.start);
     Ok(hits)
+}
+
+/// What may stand between a month name and the date it belongs to: up to four spaces,
+/// commas, hyphens or dashes, slashes, periods and parentheses ("Jan. - 1.1.2015").
+fn date_gap(gap: &str) -> bool {
+    gap.chars().count() <= 4
+        && gap.chars().all(|c| {
+            c.is_whitespace()
+                || matches!(
+                    c,
+                    ',' | '-' | '\u{05BE}' | '\u{2010}'..='\u{2015}' | '/' | '.' | '(' | ')'
+                )
+        })
+}
+
+/// A date phrase with a month name comes out as one generalized date (D-128), with nothing
+/// of it left beside it: "March 12.3.2020" went out as "March לפני כ-7 שנים" (the numeric
+/// date took the day, and the month was left), and the gate refused it; "2020 March" as two
+/// generalizations; "12.3.2020 (מרץ)" with the month in parentheses. A month name right
+/// next to a date or a year is taken into it, and a date or a year next to one that carries
+/// a month name joins it. Two dates that both carry a month ("מרץ 2020 – מאי 2021", a range)
+/// stay two. A month name alone, with nothing next to it ("במרץ"), is read as before.
+fn join_month_names(text: &str, hits: &mut Vec<PatternHit>) {
+    let tokens = tokenize(text);
+    let month_at =
+        |t: &crate::text::Token| month_word(&t.norm).is_some() && !inside_tag(text, t.start, t.end);
+    // The words next to a date, as spans: each word, and a prefix written apart with a
+    // hyphen together with the month after it ("2015 ב-מרץ"), as one.
+    let mut words: Vec<(usize, usize, bool)> = Vec::with_capacity(tokens.len());
+    let mut idx = 0;
+    while let Some(t) = tokens.get(idx) {
+        let next = tokens.get(idx + 1);
+        let glued = next.filter(|n| {
+            crate::text::is_valid_prefix(&t.norm)
+                && month_at(n)
+                && text
+                    .get(t.end..n.start)
+                    .is_some_and(|g| matches!(g, "-" | "\u{05BE}"))
+        });
+        if let Some(n) = glued {
+            words.push((t.start, n.end, true));
+            idx += 2;
+        } else {
+            words.push((t.start, t.end, month_at(t)));
+            idx += 1;
+        }
+    }
+    let dated = |k: PatternKind| matches!(k, PatternKind::Date | PatternKind::Year);
+    let has_month = |h: &PatternHit| {
+        words
+            .iter()
+            .any(|&(s, e, m)| m && h.start <= s && e <= h.end)
+    };
+    let fixed = |r: &str| {
+        r == PatternKind::Date.fixed_replacement() || r == PatternKind::Year.fixed_replacement()
+    };
+    // A year written out in the hit ("2020"): its generalization knows the year.
+    let has_year = |h: &PatternHit| {
+        h.kind == PatternKind::Year
+            || tokens.iter().any(|t| {
+                h.start <= t.start
+                    && t.end <= h.end
+                    && t.norm.len() == 4
+                    && t.norm
+                        .parse::<u32>()
+                        .is_ok_and(|y| (1900..=2100).contains(&y))
+            })
+    };
+    // Each pass takes one word or joins two hits; a text has fewer passes than words.
+    for _ in 0..=words.len() {
+        let mut changed = false;
+        'hits: for k in 0..hits.len() {
+            let Some(h) = hits.get(k).filter(|h| dated(h.kind)).cloned() else {
+                continue;
+            };
+            let before = words.iter().rev().find(|w| w.1 <= h.start);
+            let after = words.iter().find(|w| w.0 >= h.end);
+            let near = [
+                before.filter(|w| text.get(w.1..h.start).is_some_and(date_gap)),
+                after.filter(|w| text.get(h.end..w.0).is_some_and(date_gap)),
+            ];
+            for &(ws, we, is_month) in near.into_iter().flatten() {
+                let other = hits.iter().position(|o| o.start < we && ws < o.end);
+                match other {
+                    // A month name that nothing took yet.
+                    None if is_month => {
+                        let Some(this) = hits.get_mut(k) else {
+                            break 'hits;
+                        };
+                        this.kind = PatternKind::Date;
+                        if ws < this.start {
+                            this.start = ws;
+                        } else {
+                            this.end = we;
+                            // "12.3.2020 (מרץ)": the closing parenthesis with it.
+                            let opened = text.get(h.end..ws).is_some_and(|g| g.contains('('));
+                            if opened && text.get(we..).is_some_and(|r| r.starts_with(')')) {
+                                this.end += 1;
+                            }
+                        }
+                        changed = true;
+                    }
+                    Some(j) if j != k => {
+                        let Some(o) = hits.get(j).filter(|o| dated(o.kind)).cloned() else {
+                            continue;
+                        };
+                        // Two dates, each with its own month or its own year, stay two.
+                        if has_month(&h) == has_month(&o) || (has_year(&h) && has_year(&o)) {
+                            continue;
+                        }
+                        // The more exact generalization stays: one that knows the year
+                        // ("ב-12.3 במרץ 2020" is 2020, not this year), a relative time over a
+                        // fixed tag, a date over a year.
+                        let rank = |x: &PatternHit| {
+                            (
+                                has_year(x),
+                                !fixed(&x.replacement),
+                                x.kind == PatternKind::Date,
+                            )
+                        };
+                        let replacement = if rank(&o) > rank(&h) {
+                            o.replacement.clone()
+                        } else {
+                            h.replacement.clone()
+                        };
+                        let joined = PatternHit {
+                            start: h.start.min(o.start),
+                            end: h.end.max(o.end),
+                            kind: PatternKind::Date,
+                            replacement,
+                        };
+                        hits.retain(|x| *x != h && *x != o);
+                        hits.push(joined);
+                        changed = true;
+                    }
+                    _ => {}
+                }
+                if changed {
+                    break 'hits;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    // A parenthesis the date opened or closed goes with it: "12 במרץ (2020)" left ")" behind,
+    // "(12 במרץ) 2020" left "(".
+    for k in 0..hits.len() {
+        let Some(h) = hits.get(k).filter(|h| h.kind == PatternKind::Date) else {
+            continue;
+        };
+        let Some(inside) = text.get(h.start..h.end) else {
+            continue;
+        };
+        let (opens, closes) = (inside.matches('(').count(), inside.matches(')').count());
+        let (start, end) =
+            if opens > closes && text.get(h.end..).is_some_and(|r| r.starts_with(')')) {
+                (h.start, h.end.saturating_add(1))
+            } else if closes > opens && text.get(..h.start).is_some_and(|b| b.ends_with('(')) {
+                (h.start.saturating_sub(1), h.end)
+            } else {
+                continue;
+            };
+        let free = hits
+            .iter()
+            .enumerate()
+            .all(|(j, o)| j == k || o.end <= start || end <= o.start);
+        if let Some(h) = hits.get_mut(k).filter(|_| free) {
+            (h.start, h.end) = (start, end);
+        }
+    }
 }
 
 #[cfg(test)]
