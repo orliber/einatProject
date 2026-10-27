@@ -56,6 +56,12 @@ pub enum VaultError {
     Refused(String),
     #[error("integrity check failed: {0}")]
     Integrity(&'static str),
+    /// The password slot a backup carries (the unbound one, kept inside a vault bound to
+    /// this computer, D-076) is missing or was made for another password: a password change
+    /// cut short, and the vault opened since with the kit or with Google. An opening with
+    /// the password, or a new password, makes it again; until then no backup is written.
+    #[error("the password slot for backups is missing or stale")]
+    BackupSlotStale,
     #[error("stored data failed authentication")]
     Authentication,
     #[error("cryptographic failure: {0}")]

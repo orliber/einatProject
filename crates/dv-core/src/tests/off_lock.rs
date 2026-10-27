@@ -380,3 +380,55 @@ fn work_still_running_when_the_vault_locks_drops_what_it_holds() {
         .run();
     assert!(!read.texts().is_empty());
 }
+
+/// A purge from the recycle bin checks the password away from the lock: the core answers
+/// meanwhile; a wrong password counts toward the wait; a check begun before a lock erases
+/// nothing after it; a case restored from the bin while the password was checked stays.
+#[test]
+fn a_purge_checks_the_password_while_the_core_answers() {
+    let (_dir, mut core, case) = setup(None);
+    core.delete_case(&case).unwrap();
+    let core = shared(core);
+
+    let job = core
+        .lock()
+        .unwrap()
+        .begin_purge_case(&case, PASSWORD)
+        .unwrap();
+    let checked = while_running(&core, job, PasswordCheckJob::run, |c| {
+        assert!(c.status().unlocked);
+        // One check at a time, as at an opening.
+        assert!(c.begin_purge_case(&case, PASSWORD).is_err());
+        // Restored meanwhile: the purge finds it at work and leaves it.
+        c.restore_case(&case).unwrap();
+    });
+    let mut c = core.lock().unwrap();
+    assert!(matches!(
+        c.finish_purge_case(&case, checked),
+        Err(CoreError::Refused(_))
+    ));
+    assert!(c.case_detail(&case).is_ok());
+
+    // A wrong password: refused, and counted.
+    c.delete_case(&case).unwrap();
+    let job = c.begin_purge_case(&case, "לא הסיסמה הנכונה בכלל").unwrap();
+    assert!(matches!(
+        c.finish_purge_case(&case, job.run()),
+        Err(CoreError::Vault(VaultError::WrongSecret))
+    ));
+    assert_eq!(c.failed_unlocks, 1);
+    c.not_before = None;
+
+    // Locked between the check and its landing: nothing is erased.
+    let job = c.begin_purge_case(&case, PASSWORD).unwrap();
+    let checked = job.run();
+    c.lock();
+    c.unlock(PASSWORD).unwrap();
+    assert!(c.finish_purge_case(&case, checked).is_err());
+    assert!(c.list_trash().unwrap().iter().any(|t| t.id == case));
+
+    // The right password, in one session: erased.
+    c.purge_case(&case, PASSWORD).unwrap();
+    assert!(c.list_trash().unwrap().iter().all(|t| t.id != case));
+    assert!(c.case_detail(&case).is_err());
+}

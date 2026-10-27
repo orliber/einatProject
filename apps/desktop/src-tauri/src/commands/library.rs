@@ -19,7 +19,15 @@ pub(crate) async fn purge_case(
     case_id: String,
     password: String,
 ) -> Res<()> {
-    with_core(&state, move |c| c.purge_case(&case_id, &password)).await
+    let password = zeroize::Zeroizing::new(password);
+    let id = case_id.clone();
+    off_lock(
+        &state,
+        move |c| c.begin_purge_case(&id, &password),
+        dv_core::PasswordCheckJob::run,
+        move |c, checked| c.finish_purge_case(&case_id, checked),
+    )
+    .await
 }
 
 #[tauri::command]

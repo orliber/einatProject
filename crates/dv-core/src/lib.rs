@@ -96,8 +96,8 @@ pub use history::{
 };
 pub use instruments::{InstrumentApproval, InstrumentStatus};
 pub use jobs::{
-    BackupRun, BackupTask, DocumentRead, DrillJob, Drilled, ExportJob, Exported, ReadJob,
-    RestoreJob, Restored, SlotJob, SlotMade, UnlockJob, Unlocked,
+    BackupRun, BackupTask, DocumentRead, DrillJob, Drilled, ExportJob, Exported, PasswordCheckJob,
+    PasswordChecked, ReadJob, RestoreJob, Restored, SlotJob, SlotMade, UnlockJob, Unlocked,
 };
 pub use layers::SecurityLayer;
 pub use library::TRASH_DAYS;
@@ -370,6 +370,10 @@ impl CoreError {
             CoreError::Vault(VaultError::NewerVersion(v)) => {
                 ("newer_version", update::newer_version_he(v))
             }
+            CoreError::Vault(VaultError::BackupSlotStale) => (
+                "backup_slot_stale",
+                BACKUP_SLOT_STALE_HE.to_owned(),
+            ),
             // Said by its kind, never by its text: an operating system's or a library's
             // wording can name the file, and with it her user name or a case code (D-120).
             CoreError::Vault(VaultError::Io(e)) => {
@@ -429,6 +433,8 @@ impl CoreError {
             )
             | CoreError::NotFound(_)
             | CoreError::Refused(_) => ErrorAction::Dismiss,
+            // A new password, in Settings, makes the slot the backups carry again.
+            CoreError::Vault(VaultError::BackupSlotStale) => ErrorAction::settings("security"),
             CoreError::Vault(_) | CoreError::Internal(_) => ErrorAction::Report,
             CoreError::ConsentMissing => ErrorAction::Consent,
             CoreError::Needs(_, action) => action.clone(),
@@ -520,6 +526,11 @@ fn without_paths(detail: &str) -> String {
     }
     kept.join(" ")
 }
+
+/// The vault is bound to this computer and was opened with the recovery kit or with Google
+/// after a password change that was cut short: the slot the backups carry is stale, and no
+/// backup is written until the password opens the vault once, or a new one is set.
+pub const BACKUP_SLOT_STALE_HE: &str = "הגיבוי לא נכתב: הכספת נפתחה עם ערכת השחזור או עם גוגל, וחסר בה החלק של הסיסמה שהגיבוי צריך. פותחים פעם אחת עם הסיסמה, או קובעים סיסמה חדשה, והגיבוי יעבוד.";
 
 /// One calm sentence for failures only the developer can read; the raw text rides in
 /// `UiError::details` behind a "copy details" button (F5).

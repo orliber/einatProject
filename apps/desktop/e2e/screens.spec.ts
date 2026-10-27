@@ -43,7 +43,9 @@ async function layout(page: Page): Promise<string> {
 }
 
 async function expectLooksApproved(page: Page, name: string): Promise<void> {
-  expect(await layout(page)).toMatchSnapshot(`${name}.txt`);
+  // Soft: a test that walks several screens reports every changed picture in one run, so a
+  // deliberate change is reviewed (and accepted) once, not one screen per CI round.
+  expect.soft(await layout(page)).toMatchSnapshot(`${name}.txt`);
 }
 
 // The greeting follows the hour ("בוקר טוב", "לילה טוב"): every run sees the same night, the

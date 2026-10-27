@@ -727,9 +727,11 @@ impl Vault {
         if !self.password_bound() {
             return Ok(fs::read(self.dir.join(HEADER_FILE))?);
         }
-        let kept: KeySlot = from_json(&self.secret(BACKUP_SLOT_SECRET)?.ok_or(
-            VaultError::Integrity("the password slot for backups is missing"),
-        )?)?;
+        let kept: KeySlot = from_json(
+            &self
+                .secret(BACKUP_SLOT_SECRET)?
+                .ok_or(VaultError::BackupSlotStale)?,
+        )?;
         let (salt, params, _, _) = password_slot(&self.header)?;
         let fits = matches!(
             &kept,
@@ -737,9 +739,7 @@ impl Vault {
                 if crate::crypto::unhex(s).ok().as_deref() == Some(salt.as_slice()) && *p == params
         );
         if !fits {
-            return Err(VaultError::Integrity(
-                "the password slot for backups does not match the password",
-            ));
+            return Err(VaultError::BackupSlotStale);
         }
         let mut header = self.header.clone();
         for slot in &mut header.slots {
@@ -877,7 +877,7 @@ impl Vault {
         let main = open_encrypted(&dir.join(MAIN_DB), &keys.db_main)?;
         let sealed_version = sealed_app_version(&main, &keys.settings)?;
         version::refuse_newer(sealed_version.as_deref(), version::APP_VERSION)?;
-        backup::remove_stale_scratch(dir);
+        backup::remove_scratch_older_than(dir, backup::STALE_SCRATCH_AGE);
         migrate(&main, MAIN_MIGRATIONS)?;
         let identity = open_encrypted(&dir.join(IDENTITY_DB), &keys.db_identity)?;
         migrate(&identity, IDENTITY_MIGRATIONS)?;

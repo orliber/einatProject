@@ -71,7 +71,14 @@ pub(crate) fn google_cancel() {
 pub(crate) async fn google_turn_on(state: tauri::State<'_, AppState>, password: String) -> Res<()> {
     let password = zeroize::Zeroizing::new(password);
     let check = password.clone();
-    let vault_id = with_core(&state, move |c| c.google_turn_on_check(&check)).await?;
+    // The password is checked away from the lock (F2) before her browser opens.
+    let vault_id = off_lock(
+        &state,
+        move |c| c.begin_google_turn_on_check(&check),
+        dv_core::PasswordCheckJob::run,
+        |c, checked| c.finish_google_turn_on_check(checked),
+    )
+    .await?;
     // While the encrypted backup copy is on or its cleanup is owed, the session is not revoked
     // at the end: at Google that would withdraw the copy's lasting permission too (D-099).
     let keep_grant = with_core(&state, |c| Ok(c.drive_keeps_grant())).await?;

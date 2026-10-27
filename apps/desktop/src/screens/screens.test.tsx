@@ -295,6 +295,49 @@ describe("writing the report", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "✓ לאשר" })).toBeNull());
   });
 
+  it("a second request while the review is open sends the second request, never the first (regression)", async () => {
+    const { user, core } = await openApp();
+    const page = await openCase(user);
+    const prepared: string[] = [];
+    const sent: unknown[] = [];
+    mockIPC(async (cmd, args) => {
+      const out = await core.handle(cmd, args);
+      if (cmd === "prepare_section") prepared.push((out as { approval_id: string }).approval_id);
+      if (cmd === "send_section") sent.push((args as { approvalId: string }).approvalId);
+      return out;
+    });
+    const writes = within(page).getAllByRole("button", { name: "✦ לנסח" });
+    const [first, second] = writes;
+    if (!first || !second) throw new Error("two empty sections are needed");
+    await user.click(first);
+    const review = await screen.findByRole("dialog", { name: "לפני שליחה ל-Claude" });
+    await user.click(second);
+    await waitFor(() => expect(prepared).toHaveLength(2));
+    // The review now shows the second request: sending it sends that one.
+    await user.click(within(await screen.findByRole("dialog", { name: "לפני שליחה ל-Claude" })).getByRole("button", { name: /שליחה/ }));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toBe(prepared[1]);
+    expect(review).not.toBeInTheDocument();
+  });
+
+  it("'back to editing' in the sorting review keeps her on the materials page (regression)", async () => {
+    const { user, calls } = await openApp();
+    await openCase(user);
+    await user.click(within(screen.getByRole("navigation", { name: "שלבי התיק" })).getByRole("button", { name: /חומרים/ }));
+    await screen.findByRole("heading", { name: "מה יש בתיק" });
+    await user.click(screen.getByRole("button", { name: "לכתיבת הדוח ←" }));
+    const review = await screen.findByRole("dialog", { name: "לפני שליחה ל-Claude" });
+    expect(review).toHaveTextContent("מיון החומרים לסעיפים");
+    await user.click(within(review).getByRole("button", { name: "חזרה לעריכה" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "לפני שליחה ל-Claude" })).toBeNull());
+    expect(screen.getByRole("heading", { name: "מה יש בתיק" })).toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: "הדוח, כמו בקובץ" })).toBeNull();
+    expect(calls).not.toContain("send_sort");
+    // Nothing is blocked: the same button asks again.
+    await user.click(screen.getByRole("button", { name: "לכתיבת הדוח ←" }));
+    expect(await screen.findByRole("dialog", { name: "לפני שליחה ל-Claude" })).toBeInTheDocument();
+  });
+
   it("a send that failed is sent again from the section, and its draft arrives like the first time (F6)", async () => {
     const core = new FakeCore();
     await core.handle("unlock", { password: "x" });
@@ -598,6 +641,29 @@ describe("keyboard", () => {
       fireEvent.keyDown(window, { key: "ArrowUp", code: "ArrowUp", altKey: true });
     });
     await waitFor(() => expect(document.activeElement).toBe(headings[at]));
+  });
+
+  it("Alt+↓ does nothing under a dialog or while typing in a field (regression)", async () => {
+    const { user } = await openApp();
+    await openCase(user);
+    const headings = screen.getAllByRole("heading", { level: 3 });
+    const at = headings.findIndex((h) => h.tabIndex === 0);
+    fireEvent.keyDown(window, { key: "F1", code: "F1" });
+    const sheet = await screen.findByRole("dialog", { name: "קיצורי מקלדת" });
+    act(() => {
+      fireEvent.keyDown(window, { key: "ArrowDown", code: "ArrowDown", altKey: true });
+    });
+    expect(sheet).toBeInTheDocument();
+    expect(headings[at + 1]).toHaveAttribute("tabindex", "-1");
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await user.click(within(screen.getByRole("article", { name: "הדוח, כמו בקובץ" })).getByText(/הופנה לאבחון פסיכולוגי-התפתחותי על ידי הוריו/));
+    const box = await screen.findByRole("textbox", { name: /עריכת פסקה בסעיף/ });
+    act(() => {
+      fireEvent.keyDown(box, { key: "ArrowDown", code: "ArrowDown", altKey: true });
+    });
+    expect(box).toBeInTheDocument();
+    expect(headings[at + 1]).toHaveAttribute("tabindex", "-1");
   });
 
   it("Ctrl+K on a paragraph opens 'change with AI' for it", async () => {

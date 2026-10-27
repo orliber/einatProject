@@ -160,6 +160,37 @@ pub struct SlotMade {
     key_aside: bool,
 }
 
+/// A check of her password for an irreversible step inside the session (a purge, Google on):
+/// the key derivation (Argon2id, about a second) and this computer's key run in the job.
+pub struct PasswordCheckJob {
+    session: u64,
+    ticket: u64,
+    dir: PathBuf,
+    password: Zeroizing<String>,
+    seal: Arc<dyn ComputerSeal>,
+}
+
+/// The check's outcome, waiting for the `finish_*` of the step it is for.
+pub struct PasswordChecked {
+    session: u64,
+    ticket: u64,
+    result: Result<(), VaultError>,
+}
+
+impl PasswordCheckJob {
+    #[must_use]
+    pub fn run(self) -> PasswordChecked {
+        // The key here as for an opening: a Windows that is only slow says to try again.
+        let result = key_for_opening(self.seal.as_ref(), &self.dir, bound_on_disk(&self.dir))
+            .and_then(|here| Vault::verify_password_here(&self.dir, &self.password, here.as_ref()));
+        PasswordChecked {
+            session: self.session,
+            ticket: self.ticket,
+            result,
+        }
+    }
+}
+
 impl SlotJob {
     #[must_use]
     pub fn run(self) -> SlotMade {
@@ -616,6 +647,8 @@ opaque_debug!(
     Unlocked,
     SlotJob,
     SlotMade,
+    PasswordCheckJob,
+    PasswordChecked,
     BackupTask,
     BackupRun,
     DrillJob,
@@ -865,6 +898,42 @@ impl Core {
         Ok(kit)
     }
 
+    // ------------------------------------------------------------ password check
+
+    /// A check of her password away from the lock, for a step that is then done under it
+    /// (`finish_password_check` first). One at a time, like an opening.
+    pub(crate) fn begin_password_check(
+        &mut self,
+        password: &str,
+    ) -> Result<PasswordCheckJob, CoreError> {
+        self.check_backoff()?;
+        self.vault_ref()?;
+        let ticket = self.claim_secret_work()?;
+        Ok(PasswordCheckJob {
+            session: self.session,
+            ticket,
+            dir: self.dir.clone(),
+            password: Zeroizing::new(password.to_owned()),
+            seal: Arc::clone(&self.computer_seal),
+        })
+    }
+
+    /// The outcome: a wrong password counts toward the wait, as at unlock; a check begun
+    /// before a lock stands for nothing after it.
+    pub(crate) fn finish_password_check(
+        &mut self,
+        checked: PasswordChecked,
+    ) -> Result<(), CoreError> {
+        self.release_secret_work(checked.ticket);
+        self.same_session(checked.session)?;
+        if let Err(e) = checked.result {
+            self.count_failure(&e);
+            return Err(e.into());
+        }
+        self.failed_unlocks = 0;
+        Ok(())
+    }
+
     // ------------------------------------------------------------ backup
 
     /// Check where the backup goes and take the snapshot. Writing it out is the task's.
@@ -933,7 +1002,8 @@ impl Core {
         let current = self.vault_ref()?.header_copy().slots == run.header.slots;
         self.backup_recorded(&run.folder, done.info.created_at, current)?;
         if run.auto {
-            crate::backup::prune_auto_backups(&run.folder);
+            let vault_id = self.vault_ref()?.vault_id().to_owned();
+            crate::backup::prune_auto_backups(&run.folder, &vault_id);
         }
         Ok(BackupDone {
             path: run.dest.display().to_string(),
@@ -959,8 +1029,10 @@ impl Core {
             return Ok(None);
         };
         self.auto_backup_tried = Some(std::time::Instant::now());
+        let vault_id = self.vault_ref()?.vault_id().to_owned();
         let mut task = self.begin_backup(&dir.join(crate::backup::auto_backup_file_name(
             crate::dates::unix_now(),
+            &vault_id,
         )))?;
         task.auto = true;
         Ok(Some(task))

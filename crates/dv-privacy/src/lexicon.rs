@@ -217,6 +217,7 @@ pub const NAME_CONTEXT_PREV: &[&str] = &[
     "בתו",
     "ד\"ר",
     "דר",
+    "דר'",
     "גב'",
     "מר",
     "הפסיכולוגית",
@@ -358,6 +359,7 @@ pub const GENERIC_PLACE_WORDS: &[&str] = &[
 pub const TITLES: &[&str] = &[
     "ד\"ר",
     "דר",
+    "דר'",
     "דוקטור",
     "פרופ'",
     "פרופסור",

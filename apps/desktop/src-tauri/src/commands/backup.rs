@@ -113,24 +113,27 @@ pub(crate) async fn choose_backup(
     let Some(path) = file_dialog::open(&app, start).await else {
         return Ok(None);
     };
-    with_core(&state, move |c| {
-        let size = std::fs::metadata(&path)
-            .map_err(|e| CoreError::Refused(format!("אי אפשר לקרוא את הקובץ: {e}")))?
-            .len();
-        if size > dv_core::MAX_BACKUP_BYTES {
-            return Err(CoreError::Refused(
-                "הקובץ גדול מדי בשביל גיבוי של הכספת.".to_owned(),
-            ));
-        }
-        let bytes = std::fs::read(&path)
-            .map_err(|e| CoreError::Refused(format!("אי אפשר לקרוא את הקובץ: {e}")))?;
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        c.stage_backup(bytes, name).map(Some)
-    })
-    .await
+    // Read with the core free (a slow drive holds up nothing else); a file error is said by
+    // its kind, never with what the system wrote (the path, D-120).
+    let read =
+        tauri::async_runtime::spawn_blocking(move || -> Result<(Vec<u8>, String), CoreError> {
+            let size = std::fs::metadata(&path).map_err(dv_core::file_error)?.len();
+            if size > dv_core::MAX_BACKUP_BYTES {
+                return Err(CoreError::Refused(
+                    "הקובץ גדול מדי בשביל גיבוי של הכספת.".to_owned(),
+                ));
+            }
+            let bytes = std::fs::read(&path).map_err(dv_core::file_error)?;
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            Ok((bytes, name))
+        })
+        .await
+        .map_err(|_| internal("task"))?;
+    let (bytes, name) = read.map_err(|e| e.to_ui())?;
+    with_core(&state, move |c| c.stage_backup(bytes, name).map(Some)).await
 }
 
 /// Restore drill on the chosen file, with the password.

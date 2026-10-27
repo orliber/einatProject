@@ -368,16 +368,24 @@ fn a_backup_is_made_by_itself_when_the_drive_is_there() {
     // Not due: nothing.
     assert!(core.auto_backup().unwrap().is_none());
 
-    // Older auto backups in the folder, and one of hers with a similar name.
+    // Older auto backups of this vault in the folder, named the old way (a date only, before
+    // D-131), one that is no backup at all under such a name, and one of hers with a similar
+    // name.
     for day in ["2026-01-01", "2026-02-01", "2026-03-01"] {
-        std::fs::write(
-            drive
+        core.write_backup(
+            &drive
                 .path()
                 .join(format!("גיבוי אוטומטי כספת האבחון {day}.vaultbak")),
-            b"old",
         )
         .unwrap();
     }
+    std::fs::write(
+        drive
+            .path()
+            .join("גיבוי אוטומטי כספת האבחון 2025-12-01.vaultbak"),
+        b"not a backup",
+    )
+    .unwrap();
     std::fs::write(drive.path().join("גיבוי אוטומטי כספת האבחון.txt"), b"hers").unwrap();
 
     // A new password makes it due; the drive is connected: a backup is made by itself.
@@ -390,9 +398,11 @@ fn a_backup_is_made_by_itself_when_the_drive_is_there() {
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     names.sort();
-    // The oldest automatic one went; hers stayed.
-    assert_eq!(names.len(), 2 + crate::AUTO_KEEP, "{names:?}");
+    // The oldest automatic one of this vault went (an old name counts by its header); hers
+    // stayed, and so did the file that is not a backup of ours.
+    assert_eq!(names.len(), 3 + crate::AUTO_KEEP, "{names:?}");
     assert!(!names.iter().any(|n| n.contains("2026-01-01")));
+    assert!(names.iter().any(|n| n.contains("2025-12-01")));
     assert!(names.contains(&"שלי.vaultbak".to_owned()));
     assert!(names.contains(&"גיבוי אוטומטי כספת האבחון.txt".to_owned()));
 
@@ -409,6 +419,78 @@ fn a_backup_is_made_by_itself_when_the_drive_is_there() {
     // A locked vault: nothing.
     core.lock();
     assert!(core.auto_backup().unwrap().is_none());
+}
+
+/// Two vaults (the clinic's and the home computer's) that back up to one drive: each keeps its
+/// own three automatic backups, and neither overwrites or removes the other's (D-131).
+#[test]
+fn two_vaults_on_one_drive_keep_their_own_automatic_backups() {
+    let drive = tempfile::tempdir().unwrap();
+    let today = crate::dates::unix_now();
+    let mut done_paths = Vec::new();
+    for name in ["a", "b"] {
+        let (_dir, mut core, _case) = setup(None);
+        let vault_id = core.vault_ref().unwrap().vault_id().to_owned();
+        core.write_backup(&drive.path().join(format!("שלי-{name}.vaultbak")))
+            .unwrap();
+        // Three older ones of this vault; vault a's third is named the old way (a date only).
+        let days = if name == "a" {
+            ["2026-01-01", "2026-02-01"].as_slice()
+        } else {
+            ["2026-01-01", "2026-02-01", "2026-03-01"].as_slice()
+        };
+        for day in days {
+            let at = dv_domain::dates::days_from_civil(dv_domain::dates::parse_iso(day).unwrap())
+                * dv_domain::dates::DAY_SECS;
+            core.write_backup(
+                &drive
+                    .path()
+                    .join(crate::auto_backup_file_name(at, &vault_id)),
+            )
+            .unwrap();
+        }
+        if name == "a" {
+            core.write_backup(
+                &drive
+                    .path()
+                    .join("גיבוי אוטומטי כספת האבחון 2026-03-01.vaultbak"),
+            )
+            .unwrap();
+        }
+        core.mark_secret_changed().unwrap();
+        let done = core.auto_backup().unwrap().unwrap();
+        assert_eq!(
+            std::path::Path::new(&done.path),
+            drive
+                .path()
+                .join(crate::auto_backup_file_name(today, &vault_id))
+        );
+        done_paths.push(done.path);
+    }
+    assert_ne!(
+        done_paths[0], done_paths[1],
+        "each vault has its own file for the day"
+    );
+    let mut names: Vec<String> = std::fs::read_dir(drive.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    // Each vault: its own manual one, and three automatic ones (the oldest of its four
+    // removed). Vault a's 2026-03-01 file, named the old way, stayed through vault b's
+    // pruning (its header names vault a).
+    assert_eq!(names.len(), 2 * (1 + crate::AUTO_KEEP), "{names:?}");
+    assert_eq!(
+        names.iter().filter(|n| n.contains("2026-01-01")).count(),
+        0,
+        "{names:?}"
+    );
+    assert_eq!(
+        names.iter().filter(|n| n.contains("2026-02-01")).count(),
+        2,
+        "{names:?}"
+    );
+    assert!(names.contains(&"גיבוי אוטומטי כספת האבחון 2026-03-01.vaultbak".to_owned()));
 }
 
 #[test]

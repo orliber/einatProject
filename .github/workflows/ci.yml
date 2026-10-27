@@ -424,6 +424,16 @@ jobs:
       - name: Clean install
         shell: pwsh
         run: scripts/windows-clean-install.ps1 -Installer release-out/DiagnosticVault-Setup.exe
+      # D-033, D-038: the update as the program runs it. The newest published version (the
+      # public releases repository, no secret) is installed and started, then this installer
+      # runs over it with `/P /UPDATE /R` as `install_update` starts it: the running app is
+      # closed, the program replaced, the registry says this version, the app is opened again
+      # and stays up, and the vault beside it is untouched. Best effort for the version change:
+      # when the published installer cannot be fetched, the same installer is installed twice
+      # (update mode, the close and the relaunch are still exercised) and the step says so.
+      - name: Update over an installed version
+        shell: pwsh
+        run: scripts/windows-update-install.ps1 -Installer release-out/DiagnosticVault-Setup.exe
       # SEC6: what went into this installer (CycloneDX), with its own checksum. A signed
       # provenance attestation is left out: on a private repository it needs a paid plan.
       - name: Software bill of materials

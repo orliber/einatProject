@@ -30,9 +30,19 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
   const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // The check runs when the dialog opens, and again from "לנסות שוב" when it failed: the
+  // dialog never waits for an answer that is not coming.
+  const [checkRun, setCheckRun] = useState(0);
+  const [checkError, setCheckError] = useState<string | null>(null);
   useEffect(() => {
-    timed("check", ipc.checkExport(api.caseId)).then(setCheck).catch((e) => setError(fail(e as never)));
-  }, [api.caseId, fail]);
+    let alive = true;
+    timed("check", ipc.checkExport(api.caseId))
+      .then((c) => alive && setCheck(c))
+      .catch((e) => alive && setCheckError(fail(e as never)));
+    return () => {
+      alive = false;
+    };
+  }, [api.caseId, fail, checkRun]);
 
   const exportKind = letter ? "letter" : pdf ? "pdf" : "word";
 
@@ -102,7 +112,8 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
               )}
             </div>
           )}
-          {!check && <WaitLine task="check" label="בודקת את הדוח" />}
+          {!check && !checkError && <WaitLine task="check" label="בודקת את הדוח" />}
+          {!check && <ErrorLine error={checkError} retry={() => { setCheckError(null); setCheckRun((n) => n + 1); }} />}
           {busy && <WaitLine key={exportKind} task="export" speed={exportKind} label={letter ? "מפיקה את המכתב" : pdf ? "מפיקה את ה-PDF" : "מפיקה את קובץ ה-Word"} />}
           {check && !letter && (
             <ul className="checklist">

@@ -78,7 +78,7 @@ type Span = (usize, usize, String, String);
 
 /// A tag the case does not know: neither its own, nor a kind, nor a marker to complete.
 fn foreign(tag: &str, req: &GateRequest<'_>) -> bool {
-    !(req.case_tags.contains(tag) || is_generic_tag(tag) || tag.starts_with("[חסר"))
+    !(req.case_tags.contains(tag) || is_generic_tag(tag) || crate::masks::is_missing_note(tag))
 }
 
 /// Every line with a name or a foreign tag in it, left out whole; `None` when there is none.

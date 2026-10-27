@@ -212,6 +212,11 @@ fn every_error_has_a_next_step_that_fits_it() {
             CoreError::Vault(VaultError::WrongSecret),
             ErrorAction::Dismiss,
         ),
+        // The slot the backups carry is stale: a new password, in Settings, makes it again.
+        (
+            CoreError::Vault(VaultError::BackupSlotStale),
+            ErrorAction::settings("security"),
+        ),
         (CoreError::Refused("x".into()), ErrorAction::Dismiss),
         (
             CoreError::Needs("x".into(), ErrorAction::retry()),

@@ -153,6 +153,15 @@ fn write_installer(
     fs::create_dir_all(&folder).map_err(|e| CoreError::Internal(e.to_string()))?;
     let path = folder.join(installer_name(&info.version));
     fs::write(&path, &bytes).map_err(|e| CoreError::Internal(e.to_string()))?;
+    // Installers of other versions (an earlier notice's, a start that could not clean) are
+    // not kept beside it: the folder holds one file, the one the notice names.
+    if let Ok(entries) = fs::read_dir(&folder) {
+        for other in entries.filter_map(Result::ok).map(|e| e.path()) {
+            if other != path {
+                let _ = fs::remove_file(&other);
+            }
+        }
+    }
     Ok(Downloaded {
         version: info.version.clone(),
         path,
@@ -180,7 +189,28 @@ fn refuse_downgrade_from(new: &str, current: &str) -> Result<(), CoreError> {
 
 /// Just before the installer runs: the file on disk is still the one that was verified.
 pub fn still_intact(file: &Downloaded) -> bool {
-    fs::read(&file.path).is_ok_and(|b| update::sha256(&b) == file.sha256)
+    open_intact(file).is_some()
+}
+
+/// The installer, open for reading and checked through that same handle: the bytes hashed
+/// are the bytes of the file this handle holds. On Windows the handle is opened so that no
+/// one else may open the file for writing while it is held (`FILE_SHARE_READ` only), so
+/// what the installer runs is what was checked, as long as the caller keeps the handle until
+/// the installer has started. `None` when the file is gone or is not the verified one.
+pub fn open_intact(file: &Downloaded) -> Option<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_SHARE_READ: later opens may read (CreateProcess maps the image for reading
+        // and running), none may write or delete.
+        options.share_mode(0x0000_0001);
+    }
+    let mut handle = options.open(&file.path).ok()?;
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut handle, &mut bytes).ok()?;
+    (update::sha256(&bytes) == file.sha256).then_some(handle)
 }
 
 /// The app bundle the running program is in (`…/כספת.app/Contents/MacOS/<program>`).
@@ -513,11 +543,15 @@ mod tests {
     const CDHASH: &str = "0123456789abcdef0123456789abcdef01234567";
 
     fn server(installer: &[u8], served: &[u8]) -> (Table, [u8; 32]) {
+        server_of("0.3.0", installer, served)
+    }
+
+    fn server_of(version: &str, installer: &[u8], served: &[u8]) -> (Table, [u8; 32]) {
         let doc = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
         let k = Ed25519KeyPair::from_pkcs8(doc.as_ref()).unwrap();
-        let url = format!("{BASE}/download/v0.3.0/DiagnosticVault-Setup.exe");
+        let url = format!("{BASE}/download/v{version}/DiagnosticVault-Setup.exe");
         let notice = serde_json::to_vec(&serde_json::json!({
-            "product": PRODUCT, "version": "0.3.0", "published": "2026-10-01",
+            "product": PRODUCT, "version": version, "published": "2026-10-01",
             "notes": ["עדכון לדוגמה"],
             "installer": {"url": url, "sha256": to_hex(&update::sha256(installer)), "size": installer.len()},
             "macos": {"url": url, "sha256": to_hex(&update::sha256(installer)), "size": installer.len(), "cdhash": CDHASH}
@@ -590,6 +624,61 @@ mod tests {
             .unwrap()
             .is_none());
         assert!(!dir.path().join(FOLDER).exists());
+    }
+
+    #[test]
+    fn a_newer_notice_replaces_the_installer_fetched_before_and_keeps_one_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let (t3, key3) = server(b"MZ three", b"MZ three");
+        let first = prepare_with(&t3, &[key3], "0.2.9", dir.path(), None)
+            .unwrap()
+            .unwrap();
+        // A file left by a start that could not clean (the installer was still running).
+        fs::write(
+            dir.path()
+                .join(FOLDER)
+                .join("DiagnosticVault-Setup-0.1.0.exe"),
+            b"old",
+        )
+        .unwrap();
+        let (t4, key4) = server_of("0.4.0", b"MZ four", b"MZ four");
+        let next = prepare_with(&t4, &[key4], "0.2.9", dir.path(), Some(first))
+            .unwrap()
+            .unwrap();
+        assert_eq!(next.version, "0.4.0");
+        assert!(still_intact(&next));
+        let left: Vec<PathBuf> = fs::read_dir(dir.path().join(FOLDER))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        assert_eq!(
+            left,
+            vec![next.path.clone()],
+            "only the newest installer stays"
+        );
+    }
+
+    #[test]
+    fn the_installer_is_checked_through_the_handle_that_is_held() {
+        let dir = tempfile::tempdir().unwrap();
+        let (t, key) = server(b"MZ installer", b"MZ installer");
+        let file = download_with(&t, &[key], "0.2.9", dir.path()).unwrap();
+        let held = open_intact(&file).expect("the verified file opens");
+        assert_eq!(
+            fs::metadata(&file.path).unwrap().len(),
+            held.metadata().unwrap().len()
+        );
+        drop(held);
+        fs::write(&file.path, b"MZ swapped").unwrap();
+        assert!(
+            open_intact(&file).is_none(),
+            "a changed file gives no handle"
+        );
+        fs::remove_file(&file.path).unwrap();
+        assert!(
+            open_intact(&file).is_none(),
+            "a missing file gives no handle"
+        );
     }
 
     #[test]

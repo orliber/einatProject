@@ -144,7 +144,12 @@ impl<T: Clone> PhraseIndex<T> {
 /// quote only when a quote `opened` before the word: "טל'" (phone) and "גב'" stay as written.
 pub(crate) fn strip_quote_tail(norm: &str, opened: bool) -> (&str, usize) {
     let long_enough = |b: &&str| b.chars().count() >= 2;
-    if let Some(bare) = norm.strip_suffix("'s").filter(long_enough) {
+    // The English possessive, and the same one typed in Hebrew ("נועם'ס", D-132).
+    if let Some(bare) = norm
+        .strip_suffix("'s")
+        .or_else(|| norm.strip_suffix("'ס"))
+        .filter(long_enough)
+    {
         return (bare, 2);
     }
     if let Some(bare) = norm.strip_suffix('"').filter(long_enough) {

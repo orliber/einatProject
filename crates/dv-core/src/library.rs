@@ -8,7 +8,7 @@ use dv_privacy::text::normalize;
 use dv_vault::VaultError;
 
 use crate::views::NameMatch;
-use crate::{Core, CoreError};
+use crate::{Core, CoreError, PasswordCheckJob, PasswordChecked};
 
 /// A deleted case waits this long in the recycle bin before it is erased for good.
 pub const TRASH_DAYS: i64 = 30;
@@ -60,9 +60,37 @@ impl Core {
     }
 
     /// Erase a case from the recycle bin now. Irreversible, so the password is asked again,
-    /// with the same waiting time after wrong attempts as at unlock.
+    /// with the same waiting time after wrong attempts as at unlock; the check runs away
+    /// from the lock (F2): `begin`, the job's `run`, then `finish`.
+    pub fn begin_purge_case(
+        &mut self,
+        case_id: &str,
+        password: &str,
+    ) -> Result<PasswordCheckJob, CoreError> {
+        self.refuse_unless_in_trash(case_id)?;
+        self.begin_password_check(password)
+    }
+
+    pub fn finish_purge_case(
+        &mut self,
+        case_id: &str,
+        checked: PasswordChecked,
+    ) -> Result<(), CoreError> {
+        self.finish_password_check(checked)?;
+        // Restored from the bin while the password was checked: left alone.
+        self.refuse_unless_in_trash(case_id)?;
+        self.vault_mut()?.delete_case(case_id)?;
+        self.forget_final_style(case_id);
+        self.forget_failure(case_id)
+    }
+
+    /// The three steps in a row (tests, callers that hold no lock).
     pub fn purge_case(&mut self, case_id: &str, password: &str) -> Result<(), CoreError> {
-        self.check_backoff()?;
+        let job = self.begin_purge_case(case_id, password)?;
+        self.finish_purge_case(case_id, job.run())
+    }
+
+    fn refuse_unless_in_trash(&mut self, case_id: &str) -> Result<(), CoreError> {
         if !self
             .vault_ref()?
             .list_trash()?
@@ -73,14 +101,7 @@ impl Core {
                 "אפשר למחוק לצמיתות רק תיק שנמצא בסל המחזור.".to_owned(),
             ));
         }
-        if let Err(e) = self.verify_password_here(password) {
-            self.count_failure(&e);
-            return Err(e.into());
-        }
-        self.failed_unlocks = 0;
-        self.vault_mut()?.delete_case(case_id)?;
-        self.forget_final_style(case_id);
-        self.forget_failure(case_id)
+        Ok(())
     }
 
     /// Erase what has waited in the recycle bin longer than [`TRASH_DAYS`]. Runs at unlock.

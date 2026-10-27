@@ -94,7 +94,54 @@ export function SparkIcon({ size = 14 }: { size?: number }) {
   return <Glyph size={size}><path d="M12 3c.5 4.5 2.5 6.5 7 7-4.5.5-6.5 2.5-7 7-.5-4.5-2.5-6.5-7-7 4.5-.5 6.5-2.5 7-7Z" fill="currentColor" /></Glyph>;
 }
 
-/** A modal frame. Escape closes it; focus moves into it when it opens. */
+/** The open dialogs, in mount order. Only the one on top answers Escape and Tab. */
+const openDialogs: HTMLElement[] = [];
+
+/** The dialog on top: the last mounted one that has no other open dialog inside it
+ *  (a nested dialog's effect runs before its parent's, so mount order alone is not enough). */
+function topDialog(): HTMLElement | undefined {
+  for (let i = openDialogs.length - 1; i >= 0; i--) {
+    const d = openDialogs[i];
+    if (d && !openDialogs.some((o) => o !== d && d.contains(o))) return d;
+  }
+  return undefined;
+}
+
+/** Whether any modal dialog is open: window-level shortcuts stay quiet then. */
+export function dialogOpen(): boolean {
+  return openDialogs.length > 0;
+}
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), ' +
+  'textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), [contenteditable="true"]';
+
+/** Keeps Tab and Shift+Tab cycling inside the frame. */
+function trapTab(frame: HTMLElement, e: KeyboardEvent) {
+  const items = Array.from(frame.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+    (el) => el.getAttribute("aria-hidden") !== "true",
+  );
+  if (items.length === 0) {
+    e.preventDefault();
+    frame.focus();
+    return;
+  }
+  const first = items[0] as HTMLElement;
+  const last = items[items.length - 1] as HTMLElement;
+  const active = document.activeElement;
+  const inside = active instanceof HTMLElement && frame.contains(active) && active !== frame;
+  if (e.shiftKey) {
+    if (!inside || active === first) {
+      e.preventDefault();
+      last.focus();
+    }
+  } else if (!inside || active === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
+/** A modal frame. Escape closes it; focus moves into it when it opens and back to the opener on close. */
 export function Dialog(props: {
   title: string;
   subtitle?: ReactNode;
@@ -122,17 +169,34 @@ export function Dialog(props: {
     // A field marked autoFocus inside has already taken focus (React applies it before effects):
     // keep it there, so she can type at once. Otherwise the frame takes focus.
     const frame = ref.current;
-    if (frame && !frame.contains(document.activeElement)) frame.focus();
+    const opener = document.activeElement;
+    if (frame && !frame.contains(opener)) frame.focus();
+    return () => {
+      // Focus goes back to whatever opened the dialog, if it is still on the page.
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
   }, []);
   useEffect(() => {
-    if (!closable) return;
+    const frame = ref.current;
+    if (!frame) return;
+    openDialogs.push(frame);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      // Only the dialog on top answers keys: Escape closes one dialog at a time, Tab stays inside.
+      if (topDialog() !== frame) return;
+      if (e.key === "Tab") {
+        trapTab(frame, e);
+        return;
+      }
+      if (e.key !== "Escape" || !closable) return;
       if (confirmingRef.current) setConfirming(false);
       else closeRef.current?.();
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      const i = openDialogs.lastIndexOf(frame);
+      if (i >= 0) openDialogs.splice(i, 1);
+    };
   }, [closable]);
   return (
     <div className="overlay">

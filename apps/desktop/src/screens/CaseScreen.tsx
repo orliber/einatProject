@@ -5,7 +5,8 @@ import { ReviewDialog } from "../components/ReviewDialog";
 import { ExportDialog } from "../components/ExportDialog";
 import { ReportRunDialog } from "../components/ReportRunDialog";
 import { ProgressLine, estimateMs, recordDuration, timed, WaitLine, type Task } from "../components/Progress";
-import { ErrorLine, CloseIcon, Skeleton } from "../components/ui";
+import { ErrorLine, CloseIcon, Skeleton, dialogOpen } from "../components/ui";
+import { UpdateChip } from "../components/Update";
 import { ActionsMenu, type MenuItem } from "../components/Menu";
 import { SampleGuide } from "./case/SampleGuide";
 import { CaseSearch } from "./case/CaseSearch";
@@ -16,7 +17,7 @@ import { DetailsView } from "./case/DetailsView";
 import { SentHistoryDialog } from "../components/SentHistory";
 import { ReportView, firstFocus } from "./case/ReportView";
 import { FinishView } from "./case/FinishView";
-import { isCombo, KEYS, MOD } from "../shortcuts";
+import { isCombo, isTyping, KEYS, MOD } from "../shortcuts";
 import { useKept } from "../kept";
 import "./CaseScreen.css";
 import { useAi } from "../ai";
@@ -109,7 +110,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     detailRef.current = detail;
   }, [detail]);
   const [error, setError] = useState<string | null>(null);
-  const [review, setReview] = useState<{ r: ReviewRequest; done: (sent: boolean) => void; failed: (e: unknown) => void } | null>(null);
+  const [review, setReview] = useState<{ seq: number; r: ReviewRequest; done: (sent: boolean) => void; failed: (e: unknown) => void } | null>(null);
   // Kept while she is in another case or screen: the requests still running there, so they
   // show (and one section is not asked twice) when she comes back.
   const [jobs, setJobs] = useKept<Job[]>(`case:${caseId}:jobs`, []);
@@ -171,6 +172,8 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     const onKey = (e: KeyboardEvent) => {
       const down = isCombo(e, KEYS.nextSection);
       if (!down && !isCombo(e, KEYS.prevSection)) return;
+      // Not under a dialog, and not while she types in a field.
+      if (dialogOpen() || isTyping(e.target)) return;
       const d = detailRef.current;
       const v = viewRef.current;
       const keys = (d?.sections ?? []).filter((s) => s.key !== "signature").map((s) => s.key);
@@ -253,7 +256,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         // waited for it is never left waiting (and never stuck "busy").
         setReview((prev) => {
           if (prev) queueMicrotask(() => prev.done(false));
-          return { r, done: resolve, failed: reject };
+          return { seq: ++jobSeq, r, done: resolve, failed: reject };
         });
       }),
     [status.review_always, setFailures, fail],
@@ -285,15 +288,16 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   /** `quiet`: the reading that runs by itself after a material was added (round 31): when
    *  there is nothing to read, or it cannot be built now, it says nothing; the button stays. */
   const [preparingSort, setPreparingSort] = useState(false);
-  const startSort = async (quiet = false) => {
+  /** Resolves true when the sorting was sent (or the run does it), false when she went back. */
+  const startSort = async (quiet = false): Promise<boolean> => {
     // While the whole report is written, its run does the sorting: never a second request.
-    if (isRunning(caseId)) return;
+    if (isRunning(caseId)) return true;
     if (!quiet) setError(null);
     setPreparingSort(true);
     try {
       const prepared = await timed("prepare", ipc.prepareSort(caseId), "sort").finally(() => setPreparingSort(false));
-      if (quiet && !prepared.approval_id) return;
-      await startReview({
+      if (quiet && !prepared.approval_id) return false;
+      return await startReview({
         title: "מיון החומרים לסעיפים",
         prepared,
         reprepare: () => ipc.prepareSort(caseId),
@@ -306,6 +310,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
       });
     } catch (e) {
       if (!quiet) setError(fail(e as never));
+      return false;
     }
   };
 
@@ -331,7 +336,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   // Round 41: "write the whole report" runs in the background, in one line.
   const verifyOn = useQuery({ queryKey: ["verify-stage"], queryFn: ipc.verifyStageOn, enabled: !status.review_always }).data === true;
   const run = useRun(caseId);
-  const api: CaseApi | null = detail ? { caseId, detail, reload, review: startReview, sort: () => startSort(), jobs, track, draft } : null;
+  const api: CaseApi | null = detail ? { caseId, detail, reload, review: startReview, sort: () => startSort().then(() => undefined), jobs, track, draft } : null;
   // The run sees this screen, wherever it was started from (she may have left and come back).
   useEffect(() => {
     if (!api) return;
@@ -386,7 +391,8 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   };
   const toWriting = async () => {
     // Sorting happens on the way to writing, so each section gets only its passages.
-    if (unsorted > 0 && detail.meta.consent) await startSort();
+    // "חזרה לעריכה" in the review means: stay here, nothing was sent.
+    if (unsorted > 0 && detail.meta.consent && !(await startSort())) return;
     toReport();
   };
   // The section in focus on the report page: the one she chose, else the first draft waiting.
@@ -446,6 +452,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
           ))}
         </nav>
         {status.demo_mode && <span className="chip chip-sand" title="לא הוגדר מפתח API בהגדרות">מצב הדגמה</span>}
+        <UpdateChip />
         {stage === 2 && (
           <button type="button" className="btn" aria-pressed={fullPage} title={fullPage ? "להחזיר את תוכן הדוח שבצד" : "להסתיר את תוכן הדוח שבצד"} onClick={() => setFullPage(!fullPage)}>
             דף מלא
@@ -553,7 +560,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
       {sentFor !== null && <SentHistoryDialog caseId={caseId} {...(sentFor ? { place: sentFor } : {})} onClose={() => setSentFor(null)} />}
       {/* Last, so it opens above the dialog that asked for it. */}
       {review && (
-        <ReviewDialog title={review.r.title} caseId={caseId} prepared={review.r.prepared} reprepare={review.r.reprepare}
+        <ReviewDialog key={review.seq} title={review.r.title} caseId={caseId} prepared={review.r.prepared} reprepare={review.r.reprepare}
           onClose={() => {
             review.done(false);
             setReview(null);
