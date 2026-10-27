@@ -433,6 +433,7 @@ jobs:
       # (update mode, the close and the relaunch are still exercised) and the step says so.
       - name: Update over an installed version
         shell: pwsh
+        timeout-minutes: 30
         run: scripts/windows-update-install.ps1 -Installer release-out/DiagnosticVault-Setup.exe
       # SEC6: what went into this installer (CycloneDX), with its own checksum. A signed
       # provenance attestation is left out: on a private repository it needs a paid plan.

@@ -68,7 +68,13 @@ $untouched = & $hash
 
 # 3. The update, as the program starts it: the installer closes the running app
 #    (RestartManager, forced in passive mode), replaces the program and opens it again.
-$update = Start-Process -FilePath $Installer -ArgumentList "/P", "/UPDATE", "/R" -Wait -PassThru
+#    Not `-Wait`: that waits for the installer's descendants too, and the relaunched app is
+#    one, so it never returns. WaitForExit waits for the installer alone, with a limit.
+$update = Start-Process -FilePath $Installer -ArgumentList "/P", "/UPDATE", "/R" -PassThru
+if (-not $update.WaitForExit(900000)) {
+    Stop-Process -Id $update.Id -Force -ErrorAction SilentlyContinue
+    throw "the update installer did not finish within 15 minutes"
+}
 if ($update.ExitCode -ne 0) { throw "the update installer ended with $($update.ExitCode)" }
 for ($i = 0; $i -lt 30 -and -not $old.HasExited; $i++) { Start-Sleep -Seconds 1 }
 if (-not $old.HasExited) { throw "the earlier version was still running after the update" }
