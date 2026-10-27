@@ -1176,6 +1176,10 @@ fn named_instruments(text: &str, all: &[Instrument]) -> Vec<Instrument> {
     scored.into_iter().map(|(_, i)| i.clone()).collect()
 }
 
+/// Abbreviations of measures that reports also use to mark a score's kind ("SS 7" for a
+/// scaled score, "T 63" for a T score): beside a Hebrew name they are not the measure.
+const SCORE_MARKER_ABBRS: &[&str] = &["SS", "T", "IQ", "SD", "Z"];
+
 /// Byte ranges of the sentences of a text, split as [`check_scores`] splits them.
 fn sentence_spans(text: &str) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
@@ -1340,11 +1344,24 @@ pub fn find_score_mentions(text: &str) -> Vec<ScoreMention> {
             .map(|(n, _)| n)
             .collect();
         for (ns, ne, v) in score_number_spans(sentence) {
+            // An abbreviation that is also how a score is marked ("SS 7", "T 63"), right
+            // before the number: a Hebrew name before it names the measure ("בקוביות SS 7").
+            let marker = |s: usize, e: usize, m: &Measure| {
+                SCORE_MARKER_ABBRS.contains(&m.abbr.as_str())
+                    && sentence.get(s..e) == Some(m.abbr.as_str())
+                    && sentence.get(e..ns).is_some_and(|gap| gap.trim().is_empty())
+            };
             // The nearest mention before the number; after a score word, the one after it.
             let before = named_here
                 .iter()
-                .filter(|(_, e, _, _)| *e <= ns)
-                .max_by_key(|(_, e, _, _)| *e);
+                .filter(|(s, e, _, m)| *e <= ns && !marker(*s, *e, m))
+                .max_by_key(|(_, e, _, _)| *e)
+                .or_else(|| {
+                    named_here
+                        .iter()
+                        .filter(|(_, e, _, _)| *e <= ns)
+                        .max_by_key(|(_, e, _, _)| *e)
+                });
             // After it only as "ציון 7 בקוביות": a number before any name ("בן 6, קוביות")
             // is something else.
             let said_score = words
@@ -1760,6 +1777,30 @@ mod tests {
             notes: String::new(),
         };
         assert!(sheet_bands(&asrs).unwrap().is_empty());
+    }
+
+    /// "SS" marks a scaled score as often as it names Symbol Search: beside a Hebrew name the
+    /// name is the measure; alone it is still the subtest.
+    #[test]
+    fn a_score_marker_beside_a_hebrew_name_does_not_take_the_score() {
+        let got = |t: &str| -> Vec<(String, f64)> {
+            find_score_mentions(t)
+                .into_iter()
+                .map(|m| (m.measure, m.value))
+                .collect()
+        };
+        assert_eq!(
+            got("בקוביות SS 7, נמוך מהצפוי."),
+            vec![("block_design".to_owned(), 7.0)]
+        );
+        assert_eq!(
+            got("במטריצות T 13 ובזיכרון תמונות SS 9."),
+            vec![
+                ("matrix".to_owned(), 13.0),
+                ("picture_memory".to_owned(), 9.0)
+            ]
+        );
+        assert_eq!(got("SS 7 בלבד."), vec![("symbol_search".to_owned(), 7.0)]);
     }
 
     #[test]
