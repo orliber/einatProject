@@ -59,11 +59,13 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
   const [logo, setLogo] = useState<LogoView | null>(null);
   const [original, setOriginal] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** The report's details could not be read: said in the report part, which is empty without them. */
+  const [reportError, setReportError] = useState<string | null>(null);
   const [textSize, setTextSize] = useState(readTextSize);
   const [theme, setTheme] = useState(readTheme);
 
   useEffect(() => {
-    ipc.reportSettings().then(setReport).catch((e) => setError(fail(e as never)));
+    ipc.reportSettings().then(setReport).catch((e) => setReportError(fail(e as never)));
     ipc.reportTemplate().then(setTemplate).catch(() => setTemplate(null));
     ipc.reportLogo().then(setLogo).catch(() => setLogo(null));
   }, [fail]);
@@ -220,6 +222,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
             </>
           )}
 
+          {pane === "report" && !report && <ErrorLine error={reportError} />}
           {pane === "report" && report && (
             <>
               <section className="card setting" aria-labelledby="s-report">
