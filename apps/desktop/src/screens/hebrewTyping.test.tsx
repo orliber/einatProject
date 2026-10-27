@@ -4,6 +4,7 @@
 // e2e/hebrew-typing.spec.ts. Every name and text is invented.
 import { act, configure, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { Profiler } from "react";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { App } from "../App";
 import { FakeCore } from "../web/fakeCore";
@@ -38,8 +39,24 @@ async function openApp() {
   await core.handle("set_review_always", { on: false });
   mockIPC((cmd, args) => core.handle(cmd, args));
   const user = userEvent.setup({ keyboardMap, delay: null });
-  render(<App />);
-  return { user };
+  // Every render of anything in the app is one commit here: the cause of F1(a) was a screen
+  // re-rendered on every key, which stalled a Hebrew keyboard in WebView2.
+  const commits = { n: 0 };
+  render(<Profiler id="app" onRender={() => { commits.n += 1; }}><App /></Profiler>);
+  return { user, commits };
+}
+
+/** At most this many renders of the app while a whole word is typed (the box turning non-empty,
+ *  or edited, may each re-render the screen once); never one per key. */
+const RENDERS_PER_WORD = 2;
+
+/** Type `word` (keys of the Hebrew layout, or IME composition) and return how many times the app
+ *  rendered meanwhile. Nothing else may be pending: any report of the box is flushed first. */
+async function rendersWhile(commits: { n: number }, type: () => Promise<void> | void): Promise<number> {
+  await pause();
+  const before = commits.n;
+  await type();
+  return commits.n - before;
 }
 
 async function openReport(user: ReturnType<typeof userEvent.setup>) {
@@ -83,7 +100,7 @@ function recordKeys(box: HTMLElement): string[] {
 
 describe("Hebrew typing in the editors (F1a, L6)", () => {
   it("the report's paragraph editor: every key of the Hebrew layout lands, in order, through a re-render", async () => {
-    const { user } = await openApp();
+    const { user, commits } = await openApp();
     const page = await openReport(user);
     await user.click(within(page).getByText(/הופנה לאבחון פסיכולוגי-התפתחותי על ידי הוריו/));
     const box = await screen.findByRole("textbox", { name: /עריכת פסקה בסעיף/ }) as HTMLTextAreaElement;
@@ -91,7 +108,8 @@ describe("Hebrew typing in the editors (F1a, L6)", () => {
     const heard = recordKeys(box);
     box.setSelectionRange(start.length, start.length);
 
-    await user.keyboard(keys(" הילד בנה מגדל"));
+    // Fourteen keys, and the page around the box renders at most twice: not once per key.
+    expect(await rendersWhile(commits, () => user.keyboard(keys(" הילד בנה מגדל")))).toBeLessThanOrEqual(RENDERS_PER_WORD);
     expect(heard.slice(0, 3)).toEqual(["Space: ", "KeyV:ה", "KeyH:י"]);
     // The screen hears the text, and re-renders; the box keeps it and the caret.
     await pause();
@@ -119,14 +137,14 @@ describe("Hebrew typing in the editors (F1a, L6)", () => {
   });
 
   it("the report's paragraph editor: a word through IME composition, at the end and in the middle", async () => {
-    const { user } = await openApp();
+    const { user, commits } = await openApp();
     const page = await openReport(user);
     await user.click(within(page).getByText(/הופנה לאבחון פסיכולוגי-התפתחותי על ידי הוריו/));
     const box = await screen.findByRole("textbox", { name: /עריכת פסקה בסעיף/ }) as HTMLTextAreaElement;
     const start = box.value;
     box.setSelectionRange(start.length, start.length);
 
-    compose(box, " שוב");
+    expect(await rendersWhile(commits, () => compose(box, " שוב"))).toBeLessThanOrEqual(RENDERS_PER_WORD);
     expect(box).toHaveValue(`${start} שוב`);
     await pause();
     box.setSelectionRange(0, 0);
@@ -139,20 +157,19 @@ describe("Hebrew typing in the editors (F1a, L6)", () => {
   });
 
   it("a new paragraph of her own takes Hebrew keys and composition alike", async () => {
-    const { user } = await openApp();
+    const { user, commits } = await openApp();
     const page = await openReport(user);
     await user.click(within(page).getAllByRole("button", { name: "לכתוב בעצמי" })[0] as HTMLElement);
     const box = await screen.findByRole("textbox", { name: /פסקה חדשה בסעיף/ }) as HTMLTextAreaElement;
     await user.keyboard(keys("הילדה משחקת"));
     compose(box, " בחצר");
-    await pause();
-    await user.keyboard(keys(" עם חברות."));
+    expect(await rendersWhile(commits, () => user.keyboard(keys(" עם חברות.")))).toBeLessThanOrEqual(RENDERS_PER_WORD);
     expect(box).toHaveValue("הילדה משחקת בחצר עם חברות.");
     expect(box.selectionStart).toBe(box.value.length);
   });
 
   it("the material's text box keeps every letter while the dialog re-renders around it", async () => {
-    const { user } = await openApp();
+    const { user, commits } = await openApp();
     await user.click(await screen.findByRole("button", { name: /בתיק של נועם$/ }));
     await user.click((await screen.findAllByRole("button", { name: /חומרים/ }))[0] as HTMLElement);
     await user.click(await screen.findByRole("button", { name: "הוספה לאבחונים קודמים" }));
@@ -164,17 +181,17 @@ describe("Hebrew typing in the editors (F1a, L6)", () => {
     await user.keyboard(keys(text.slice(0, 20)));
     await pause();
     compose(box, text.slice(20, 26));
-    await user.keyboard(keys(text.slice(26)));
+    expect(await rendersWhile(commits, () => user.keyboard(keys(text.slice(26))))).toBeLessThanOrEqual(RENDERS_PER_WORD);
     expect(box).toHaveValue(text);
     expect(box.selectionStart).toBe(text.length);
   });
 
   it("the consultation: Enter while composing commits the word and does not send; Enter after it sends", async () => {
-    const { user } = await openApp();
+    const { user, commits } = await openApp();
     await user.click((await screen.findAllByRole("button", { name: "התייעצות" }))[0] as HTMLElement);
     const box = await screen.findByLabelText(/^שאלה ל-/) as HTMLTextAreaElement;
     await user.click(box);
-    await user.keyboard(keys("איך לנסח בעדינות"));
+    expect(await rendersWhile(commits, () => user.keyboard(keys("איך לנסח בעדינות")))).toBeLessThanOrEqual(RENDERS_PER_WORD);
     compose(box, " להורים");
     // The Enter an IME takes for itself arrives with isComposing (and key code 229 on Windows).
     fireEvent.compositionStart(box, { data: "" });

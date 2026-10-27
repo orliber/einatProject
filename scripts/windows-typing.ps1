@@ -354,6 +354,10 @@ $vk = @{
     [char]'צ' = 0x4D; [char]'ת' = 0xBC; [char]'ץ' = 0xBE; [char]' ' = 0x20
 }
 $phrase = " הילדה בנתה מגדל גבוה מקוביות וצחקה כשהוא נפל ואז בנתה אותו שוב עם חברה"
+# A letter missing from the table would be pressed as key 0 (nothing): refuse it before typing.
+foreach ($c in $phrase.ToCharArray()) {
+    if (-not $vk.ContainsKey($c)) { throw "no key for '$c' in the Hebrew layout table" }
+}
 $started = Get-Date
 foreach ($c in $phrase.ToCharArray()) {
     [Keys]::Key([uint16]$vk[$c])
