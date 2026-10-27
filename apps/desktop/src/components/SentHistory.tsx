@@ -2,12 +2,14 @@
 // what was hidden in it, and the exact text that left. The check after the fact that stands in
 // for showing each request first. Everything is plain text; nothing here sends anything.
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 // The institute template holds every section key of the old one too (D-066).
 import structure from "../../../../templates/institute-v1.json";
 import { useApp } from "../App";
 import { ipc } from "../ipc/client";
+import type { SentCursor } from "../ipc/generated/SentCursor";
 import type { SentItem } from "../ipc/generated/SentItem";
+import type { SentPage } from "../ipc/generated/SentPage";
 import { heDateTime } from "./Backup";
 import { Dialog, displayTag, ErrorLine, Spinner } from "./ui";
 import "./SentHistory.css";
@@ -80,11 +82,17 @@ export function SentHistoryDialog(props: { caseId?: string; place?: string; onCl
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<string | null>(null);
   const caseId = props.caseId ?? null;
-  const list = useQuery({
+  // A page at a time (D-123): a year of requests is not read, searched and drawn at once.
+  const list = useInfiniteQuery({
     queryKey: ["sent", caseId, place ?? null, query],
-    queryFn: () => ipc.sentHistory(caseId, place ?? null, query),
+    queryFn: ({ pageParam }) => ipc.sentHistory(caseId, place ?? null, query, pageParam),
+    initialPageParam: null as SentCursor | null,
+    getNextPageParam: (last: SentPage) => last.next,
   });
-  const items = list.data ?? [];
+  const pages = list.data?.pages ?? [];
+  const items = pages.flatMap((p) => p.items);
+  // A search stops after so many requests read; where it got to, when nothing was found yet.
+  const readTo = pages[pages.length - 1]?.next?.at;
   const where = place ? `"${placeLabel(place)}"` : caseId ? "בתיק הזה" : "בכל התיקים";
   return (
     <Dialog wide title="מה יצא מהמחשב" onClose={props.onClose}
@@ -119,10 +127,18 @@ export function SentHistoryDialog(props: { caseId?: string; place?: string; onCl
               {open === item.id && <SentDetail item={item} />}
             </li>
           ))}
-          {list.data && items.length === 0 && (
+          {list.data && items.length === 0 && !list.hasNextPage && (
             <li className="muted">{query ? `"${query}" לא מופיע בשום בקשה שיצאה.` : "עוד לא יצאה שום בקשה."}</li>
           )}
+          {list.data && items.length === 0 && readTo !== undefined && (
+            <li className="muted">{`"${query}" לא נמצא בבקשות מאז ${heDateTime(readTo)}.`}</li>
+          )}
         </ol>
+        {list.hasNextPage && (
+          <button type="button" className="btn align-start" disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
+            {list.isFetchingNextPage ? "טוען…" : query ? "להמשיך לחפש בבקשות ישנות יותר" : "בקשות ישנות יותר"}
+          </button>
+        )}
         {list.isLoading && <Spinner />}
         <ErrorLine error={list.error ? fail(list.error as never) : null} />
       </div>

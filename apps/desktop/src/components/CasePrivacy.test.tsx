@@ -57,7 +57,7 @@ describe("CasePrivacyCard", () => {
   });
 
   it("opens what left the computer for this case", async () => {
-    mockIPC((cmd) => (cmd === "sent_history" ? [] : null));
+    mockIPC((cmd) => (cmd === "sent_history" ? { items: [], next: null } : null));
     const user = userEvent.setup();
     render(
       <Wrap>

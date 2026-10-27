@@ -30,7 +30,7 @@ describe("SentHistoryDialog", () => {
     mockIPC((cmd, args) => {
       if (cmd === "sent_history") {
         asked.push(args);
-        return [item()];
+        return { items: [item()], next: null };
       }
       if (cmd === "sent_text") {
         return {
@@ -44,7 +44,8 @@ describe("SentHistoryDialog", () => {
     render(<Wrap><SentHistoryDialog onClose={vi.fn()} /></Wrap>);
     expect(await screen.findByText("TEST-0002")).toBeInTheDocument();
     expect(screen.getByText("הוסתר פרט אחד")).toBeInTheDocument();
-    expect(asked[0]).toEqual({ caseId: null, place: null, query: "" });
+    expect(asked[0]).toEqual({ caseId: null, place: null, query: "", before: null });
+    expect(screen.queryByRole("button", { name: "בקשות ישנות יותר" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "הטקסט שיצא" }));
     expect(await screen.findByText("[הילד] מתקשה במעברים.")).toBeInTheDocument();
@@ -54,7 +55,7 @@ describe("SentHistoryDialog", () => {
 
   it("a search for a hidden word says it did not leave", async () => {
     mockIPC((cmd, args) => {
-      if (cmd === "sent_history") return (args as { query: string }).query ? [item({ hidden_match: true })] : [];
+      if (cmd === "sent_history") return { items: (args as { query: string }).query ? [item({ hidden_match: true })] : [], next: null };
       return null;
     });
     const user = userEvent.setup();
@@ -67,7 +68,7 @@ describe("SentHistoryDialog", () => {
 
   it("a kept text that no longer matches its hash says so", async () => {
     mockIPC((cmd) => {
-      if (cmd === "sent_history") return [item()];
+      if (cmd === "sent_history") return { items: [item()], next: null };
       if (cmd === "sent_text") return { item: item(), hash_ok: false, exact: "{}", parts: [] };
       return null;
     });
@@ -75,6 +76,47 @@ describe("SentHistoryDialog", () => {
     render(<Wrap><SentHistoryDialog caseId="c1" onClose={vi.fn()} /></Wrap>);
     await user.click(await screen.findByRole("button", { name: "הטקסט שיצא" }));
     expect(await screen.findByText(/לא תואם את הטביעה/)).toBeInTheDocument();
+  });
+
+  it("reads a page at a time, and older requests on asking", async () => {
+    const asked: unknown[] = [];
+    mockIPC((cmd, args) => {
+      if (cmd === "sent_history") {
+        asked.push(args);
+        return (args as { before: unknown }).before
+          ? { items: [item({ id: "t2", case_code: "TEST-0003" })], next: null }
+          : { items: [item()], next: { at: 1_760_000_000, id: "t1" } };
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    render(<Wrap><SentHistoryDialog onClose={vi.fn()} /></Wrap>);
+    expect(await screen.findByText("TEST-0002")).toBeInTheDocument();
+    expect(screen.queryByText("TEST-0003")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "בקשות ישנות יותר" }));
+    expect(await screen.findByText("TEST-0003")).toBeInTheDocument();
+    expect(screen.getByText("TEST-0002")).toBeInTheDocument();
+    expect(asked[1]).toEqual({ caseId: null, place: null, query: "", before: { at: 1_760_000_000, id: "t1" } });
+    expect(screen.queryByRole("button", { name: "בקשות ישנות יותר" })).not.toBeInTheDocument();
+  });
+
+  it("a search that read as far as one page reads says where it got to, and goes on on asking", async () => {
+    mockIPC((cmd, args) => {
+      if (cmd !== "sent_history") return null;
+      const a = args as { query: string; before: unknown };
+      if (!a.query) return { items: [item()], next: null };
+      return a.before ? { items: [item({ id: "t9" })], next: null } : { items: [], next: { at: 1_760_000_000, id: "t5" } };
+    });
+    const user = userEvent.setup();
+    render(<Wrap><SentHistoryDialog caseId="c1" onClose={vi.fn()} /></Wrap>);
+    await screen.findByRole("button", { name: "הטקסט שיצא" });
+    await user.type(screen.getByLabelText("חיפוש בבקשות"), "מעברים");
+    await user.click(screen.getByRole("button", { name: "חיפוש" }));
+    expect(await screen.findByText(/"מעברים" לא נמצא בבקשות מאז/)).toBeInTheDocument();
+    expect(screen.queryByText(/לא מופיע בשום בקשה/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "להמשיך לחפש בבקשות ישנות יותר" }));
+    expect(await screen.findByRole("button", { name: "הטקסט שיצא" })).toBeInTheDocument();
+    expect(screen.queryByText(/לא נמצא בבקשות מאז/)).not.toBeInTheDocument();
   });
 
   it("names what each request was for in her words", () => {

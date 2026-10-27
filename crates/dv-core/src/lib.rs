@@ -91,7 +91,9 @@ pub fn original_too_large() -> CoreError {
 pub use dv_vault::crypto::sha256_hex;
 pub use dv_vault::BACKUP_EXTENSION;
 pub use followup::FollowUpView;
-pub use history::{HiddenWord, SentItem, SentPart, SentText};
+pub use history::{
+    HiddenWord, SentCursor, SentItem, SentPage, SentPart, SentText, SENT_PAGE, SENT_SCAN,
+};
 pub use instruments::{InstrumentApproval, InstrumentStatus};
 pub use jobs::{
     BackupRun, BackupTask, DocumentRead, DrillJob, Drilled, ExportJob, Exported, ReadJob,

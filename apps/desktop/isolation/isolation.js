@@ -149,6 +149,7 @@ const ALLOWED = new Set([
   "update_interpretation",
   "delete_interpretation",
   "sent_history",
+  "sent_count",
   "sent_text",
   "set_api_key",
   "set_auto_backup",

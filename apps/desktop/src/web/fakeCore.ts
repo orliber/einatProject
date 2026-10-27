@@ -47,7 +47,9 @@ import { compareSheets, comparisonText, formatSheet, instruments } from "./score
 import * as R from "./routing";
 import { PROVIDERS, providerOf } from "../providers";
 import type { SortResult } from "../ipc/generated/SortResult";
+import type { SentCursor } from "../ipc/generated/SentCursor";
 import type { SentItem } from "../ipc/generated/SentItem";
+import type { SentPage } from "../ipc/generated/SentPage";
 import type { SentText } from "../ipc/generated/SentText";
 
 type Args = Record<string, unknown>;
@@ -695,14 +697,19 @@ export class FakeCore {
     return { id: s.id, case_id: s.caseId, case_code: c.meta.code, place: s.place, at: s.at, ai: "", demo: true, sha256: "0".repeat(64), bytes: new TextEncoder().encode(s.text).length, hidden, hidden_match: false };
   }
 
-  private sentHistory(caseId: string | null, place: string | null, query: string): SentItem[] {
+  private sentHistory(caseId: string | null, place: string | null, query: string, before: SentCursor | null): SentPage {
     const q = query.trim();
-    return [...this.sentLog].reverse().flatMap((s) => {
+    const all = [...this.sentLog].reverse().flatMap((s) => {
       if ((caseId && s.caseId !== caseId) || (place && s.place !== place)) return [];
       const item = this.sentItem(s);
       if (!q || s.text.includes(q)) return [item];
       return item.hidden.some((h) => h.word.includes(q)) ? [{ ...item, hidden_match: true }] : [];
     });
+    // Pages of 50, like the core (D-123); the demo has no search budget to keep.
+    const from = before ? all.findIndex((i) => i.id === before.id) + 1 : 0;
+    const items = all.slice(from, from + 50);
+    const last = items[items.length - 1];
+    return { items, next: last && from + 50 < all.length ? { at: last.at, id: last.id } : null };
   }
 
   private sentText(caseId: string, id: string): SentText {
@@ -1605,7 +1612,10 @@ export class FakeCore {
         return { entries: page, more: false, last_seq: page.at(-1)?.seq ?? null, intact: true, reviewed_at: this.reviewedAt };
       }
       case "sent_history":
-        return this.sentHistory(a.caseId ? String(a.caseId) : null, a.place ? String(a.place) : null, String(a.query ?? ""));
+        return this.sentHistory(a.caseId ? String(a.caseId) : null, a.place ? String(a.place) : null, String(a.query ?? ""), (a.before as SentCursor | null) ?? null);
+      case "sent_count":
+        // Every request here is a demo answer, which never left.
+        return 0;
       case "sent_text":
         return this.sentText(String(a.caseId), String(a.id));
       case "mark_activity_reviewed":

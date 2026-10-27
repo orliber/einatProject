@@ -10,18 +10,26 @@ pub(crate) async fn activity(
     with_core(&state, move |c| c.activity(before)).await
 }
 
-/// "מה יצא מהמחשב": the requests kept with a case (one, or all), newest first.
+/// "מה יצא מהמחשב": one page of the requests kept with a case (one, or all), newest first,
+/// from `before` on (D-123).
 #[tauri::command]
 pub(crate) async fn sent_history(
     state: tauri::State<'_, AppState>,
     case_id: Option<String>,
     place: Option<String>,
     query: String,
-) -> Res<Vec<SentItem>> {
+    before: Option<SentCursor>,
+) -> Res<SentPage> {
     with_core(&state, move |c| {
-        c.sent_history(case_id.as_deref(), place.as_deref(), &query)
+        c.sent_history(case_id.as_deref(), place.as_deref(), &query, before)
     })
     .await
+}
+
+/// How many requests left since `since` (seconds), of every case.
+#[tauri::command]
+pub(crate) async fn sent_count(state: tauri::State<'_, AppState>, since: i64) -> Res<u32> {
+    with_core(&state, move |c| c.sent_count(since)).await
 }
 
 /// One request in full, as it left.

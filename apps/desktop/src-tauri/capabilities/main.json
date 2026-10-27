@@ -154,6 +154,7 @@
     "allow-print-page",
     "allow-activity",
     "allow-sent-history",
+    "allow-sent-count",
     "allow-sent-text",
     "allow-mark-activity-reviewed",
     "allow-retention-due",
