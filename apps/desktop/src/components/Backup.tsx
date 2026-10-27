@@ -154,7 +154,7 @@ export function CheckBackupDialog({ staged, onClose }: { staged: StagedBackup; o
       {result ? (
         <div className="stack backup-result" role="status">
           <p className={result.integrity_ok ? "backup-ok" : "error"}>
-            {result.integrity_ok ? "✓ הגיבוי נפתח ותקין." : "הגיבוי נפתח, אבל בדיקת השלמות מצאה בעיה. כדאי לגבות מחדש."}
+            {result.integrity_ok ? "✓ הגיבוי נפתח ותקין." : "הגיבוי נפתח, אבל בדיקת השלמות מצאה בו חריגה. גיבוי חדש לא יסיר אותה, לכן כדאי לא למחוק גיבויים ישנים יותר ולספר לאור."}
           </p>
           <p>נמצאו בו {result.cases === 1 ? "תיק אחד" : `${result.cases} תיקים`} (כולל סל המחזור), מ-{heDateTime(result.created_at)}.</p>
           <p className="hint">העותק שנפתח לבדיקה כבר נמחק. הכספת עצמה לא השתנתה.</p>

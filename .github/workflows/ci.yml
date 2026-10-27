@@ -559,8 +559,17 @@ jobs:
           [ "$(stat -f %z "$up/before.dmg")" = "$size" ] || fail "the disk image of $v is not the size the notice signs"
           echo "$sha  $up/before.dmg" | shasum -a 256 -c - || fail "the disk image of $v is not the one the notice signs"
           now="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
-          [ "$v" = "$now" ] && echo "::notice::the version before is $v, the same number as this build: the update is checked as a reinstall over it"
-          { echo "version=$v"; echo "cdhash=$cdhash"; echo "tag=v$v"; echo "dir=$up"; } >> "$GITHUB_OUTPUT"
+          # Same number (main after a release, before the next bump), an older one, or a newer
+          # one (a branch from before a release: this build rightly refuses a vault that one
+          # opened, D-104, so it is only installed and started).
+          older="$(printf '%s\n%s\n' "$v" "$now" | sort -t. -k1,1n -k2,2n -k3,3n | head -n1)"
+          if [ "$v" = "$now" ]; then mode=same
+          elif [ "$older" = "$v" ]; then mode=update
+          else
+            mode=newer
+            echo "::notice::the published version $v is newer than this build ($now): it is installed and started, and nothing more"
+          fi
+          { echo "version=$v"; echo "cdhash=$cdhash"; echo "tag=v$v"; echo "dir=$up"; echo "mode=$mode"; } >> "$GITHUB_OUTPUT"
       # The version before, from its own release tag: the code installed copies run now.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -570,6 +579,7 @@ jobs:
       - name: "Update from the version before: installed, and it starts"
         env:
           UP: ${{ steps.before.outputs.dir }}
+          MODE: ${{ steps.before.outputs.mode }}
           CDHASH: ${{ steps.before.outputs.cdhash }}
         run: |
           fail() { echo "::error::$*"; exit 1; }
@@ -589,13 +599,29 @@ jobs:
           bundle="$(ls -d "$UP/Applications"/*.app)"
           echo "DV_UPDATE_BUNDLE=$bundle" >> "$GITHUB_ENV"
           scripts/ci/app-starts.sh "$bundle"
+          # Its updater installs this image unless it refuses one with its own number (D-105,
+          # in every version since): then there is no update to make, and this build opens the
+          # vault it made as it is.
+          install=false
+          if [ "$MODE" = update ]; then install=true
+          elif [ "$MODE" = same ]; then
+            if grep -q refuse_downgrade before/crates/dv-core/src/update.rs; then
+              echo "::notice::the published version has this build's number and installs only a newer one: no update to install; this build opens the vault it made"
+            else
+              install=true
+              echo "::notice::the published version has this build's number: the update is checked as a reinstall over it"
+            fi
+          fi
+          echo "DV_UPDATE_INSTALL=$install" >> "$GITHUB_ENV"
       - name: "Update from the version before: its vault, bound to the Keychain"
+        if: steps.before.outputs.mode != 'newer'
         env:
           UP: ${{ steps.before.outputs.dir }}
         run: |
           cp crates/dv-core/tests/mac_update.rs before/crates/dv-core/tests/mac_update.rs
           DV_UPDATE_VAULT="$UP/vault" cargo test --release --manifest-path before/Cargo.toml -p dv-core --test mac_update -- --ignored --exact create
       - name: "Update from the version before: it installs this image"
+        if: env.DV_UPDATE_INSTALL == 'true'
         env:
           UP: ${{ steps.before.outputs.dir }}
         run: |
@@ -613,10 +639,11 @@ jobs:
           codesign --verify --deep --strict -R "=cdhash H\"$cdhash\"" "$DV_UPDATE_BUNDLE" || fail "after the update the app is not this build's"
           [ ! -e "$DV_UPDATE_BUNDLE.new" ] || fail "the update left its copy beside the app"
       - name: "Update from the version before: the new app starts and opens her vault"
+        if: steps.before.outputs.mode != 'newer'
         env:
           UP: ${{ steps.before.outputs.dir }}
         run: |
-          scripts/ci/app-starts.sh "$DV_UPDATE_BUNDLE"
+          if [ "$DV_UPDATE_INSTALL" = true ]; then scripts/ci/app-starts.sh "$DV_UPDATE_BUNDLE"; fi
           v="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
           DV_UPDATE_VAULT="$UP/vault" DV_UPDATE_VERSION="$v" \
             cargo test --release -p dv-core --test mac_update -- --ignored --exact open

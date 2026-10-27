@@ -35,6 +35,31 @@ fn since_last_text(failed: u32) -> Option<String> {
     }
 }
 
+/// What the check at opening found, in her words, or `None` when the vault passed it. A header
+/// changed from outside is never signed again (D-104), so this stays until Or looks at it; a
+/// new backup does not clear it.
+fn integrity_he(found: &dv_vault::IntegrityReport) -> Option<String> {
+    let mut parts = Vec::new();
+    if !found.header_ok {
+        parts.push(crate::activity::integrity_reason_he(
+            "vault header was modified",
+        ));
+    }
+    if !found.audit_ok {
+        parts.push(
+            found
+                .detail
+                .as_deref()
+                .filter(|d| !d.is_empty())
+                .map_or_else(
+                    || "יומן הפעולות לא שלם".to_owned(),
+                    crate::activity::integrity_reason_he,
+                ),
+        );
+    }
+    (!parts.is_empty()).then(|| format!("{}. כדאי לספר לאור.", parts.join(". ")))
+}
+
 impl Core {
     /// `dir` is the vault folder (the shell passes the OS local-app-data folder).
     #[must_use]
@@ -223,9 +248,7 @@ impl Core {
                     .filter(|p| key_name(*p).is_some_and(|k| v.secret(k).ok().flatten().is_some()))
                     .map(|p| p.id().to_owned())
                     .collect(),
-                (!v.integrity().audit_ok || !v.integrity().header_ok)
-                    .then(|| v.integrity().detail.clone().unwrap_or_default())
-                    .or_else(|| self.rollback_warning.clone()),
+                integrity_he(v.integrity()).or_else(|| self.rollback_warning.clone()),
             ),
             None => (true, Vec::new(), None),
         };
