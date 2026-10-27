@@ -145,16 +145,3 @@ export function SentHistoryDialog(props: { caseId?: string; place?: string; onCl
     </Dialog>
   );
 }
-
-/** Settings → פרטיות: the history of every case. */
-export function SentHistorySettings() {
-  const [open, setOpen] = useState(false);
-  return (
-    <section className="card setting" aria-labelledby="s-sent">
-      <h2 id="s-sent">מה יצא מהמחשב</h2>
-      <p className="muted small">כל בקשה שיצאה עם טקסט מתיק: מתי, בשביל מה, מה הוסתר בה, והטקסט המדויק. אפשר לחפש בה.</p>
-      <button type="button" className="btn align-start" onClick={() => setOpen(true)}>פתיחת ההיסטוריה</button>
-      {open && <SentHistoryDialog onClose={() => setOpen(false)} />}
-    </section>
-  );
-}

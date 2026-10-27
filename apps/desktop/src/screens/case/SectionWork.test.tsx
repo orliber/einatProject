@@ -10,6 +10,7 @@ import { appApi, CaseHost, Host, serve, type Override } from "../../test/host";
 import type { FakeCore } from "../../web/fakeCore";
 import { DRAFT_FROM_APPROVED, DRAFT_FROM_SOURCES } from "./instructions";
 import { SectionWork } from "./SectionWork";
+import { Dialog } from "../../components/ui";
 
 configure({ asyncUtilTimeout: 8000 });
 vi.setConfig({ testTimeout: 30_000 });
@@ -140,6 +141,16 @@ describe("a draft waiting for her", () => {
     const next = within(draft).getByRole("button", { name: /^לסעיף הבא: / });
     await user.click(next);
     expect(app.go).toHaveBeenCalledWith(expect.objectContaining({ name: "case", id: caseId }));
+  });
+
+  it("Ctrl+Shift+Enter is ignored while a dialog is open (regression)", async () => {
+    const { user, calls } = await withDraft();
+    const gone = render(<Dialog title="חלון אחר" onClose={vi.fn()}><p>x</p></Dialog>);
+    await user.keyboard("{Control>}{Shift>}{Enter}{/Shift}{/Control}");
+    expect(calls.some((c) => c.cmd === "approve_section")).toBe(false);
+    gone.unmount();
+    await user.keyboard("{Control>}{Shift>}{Enter}{/Shift}{/Control}");
+    await waitFor(() => expect(calls.some((c) => c.cmd === "approve_section")).toBe(true));
   });
 
   it("“אישור כל הטיוטה” approves it too", async () => {

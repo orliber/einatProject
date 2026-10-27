@@ -4,7 +4,7 @@ import { useApp } from "../../App";
 import { ipc, type CaseDetail, type ChatView, type ParagraphCheck, type SectionResult } from "../../ipc/client";
 import { useQuery } from "@tanstack/react-query";
 import { VerdictNote } from "../../components/VerdictNote";
-import { ErrorLine, SendIcon, Spinner, WarnIcon } from "../../components/ui";
+import { ErrorLine, SendIcon, Spinner, WarnIcon, dialogOpen } from "../../components/ui";
 import { ProgressLine, timed, WaitLine } from "../../components/Progress";
 import { Why } from "../../components/Why";
 import { Similar } from "../../components/Similar";
@@ -19,7 +19,7 @@ import { DsmSeverityPanel } from "../../components/DsmSeverity";
 import { OwnSectionPanel } from "../../components/OwnSection";
 import { SectionLibraryPanel } from "../../components/SectionLibrary";
 import { MarkedText, StyleHintView, applyMark } from "./StyleHintView";
-import { isCombo, KEYS } from "../../shortcuts";
+import { isCombo, isTyping, KEYS } from "../../shortcuts";
 import type { CaseApi } from "../CaseScreen";
 import "./SectionWork.css";
 import { useAi } from "../../ai";
@@ -264,6 +264,8 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
     if (!canApproveAll) return;
     const onKey = (e: KeyboardEvent) => {
       if (!isCombo(e, KEYS.approveDraft)) return;
+      // Not under a dialog (the review, for one), and not while she types in a field.
+      if (dialogOpen() || isTyping(e.target)) return;
       e.preventDefault();
       approveAll.current();
     };

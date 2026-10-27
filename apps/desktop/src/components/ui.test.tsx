@@ -1,5 +1,6 @@
 // Shared pieces: filter text is shown as text, errors offer the next step, dialogs trap the
 // keyboard's attention. All names are invented.
+import { useState } from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AppContext, type AppApi } from "../App";
@@ -294,5 +295,71 @@ describe("Dialog", () => {
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(screen.getByRole("button", { name: "שמירה" })).toBeInTheDocument();
+  });
+
+  it("focus goes back to the button that opened it when it closes", async () => {
+    const user = userEvent.setup();
+    function Host() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>פתיחה</button>
+          {open && <Dialog title="d" onClose={() => setOpen(false)}><p>x</p></Dialog>}
+        </>
+      );
+    }
+    render(<Host />);
+    const opener = screen.getByRole("button", { name: "פתיחה" });
+    opener.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("dialog")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(opener).toHaveFocus();
+  });
+
+  it("Tab and Shift+Tab stay inside the dialog", async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <button type="button">בחוץ</button>
+        <Dialog title="d" onClose={vi.fn()} footer={<button type="button">אחרון</button>}>
+          <input aria-label="ראשון" />
+        </Dialog>
+      </>,
+    );
+    // From the frame, Tab lands on the first control (×); Shift+Tab from there wraps to the last.
+    await user.keyboard("{Tab}");
+    expect(screen.getByRole("button", { name: "סגירה" })).toHaveFocus();
+    await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(screen.getByRole("button", { name: "אחרון" })).toHaveFocus();
+    await user.keyboard("{Tab}");
+    expect(screen.getByRole("button", { name: "סגירה" })).toHaveFocus();
+    await user.keyboard("{Tab}");
+    expect(screen.getByLabelText("ראשון")).toHaveFocus();
+    await user.keyboard("{Tab}{Tab}");
+    expect(screen.getByRole("button", { name: "סגירה" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "בחוץ" })).not.toHaveFocus();
+  });
+
+  it("Escape closes only the dialog on top; the one beneath stays (regression)", async () => {
+    const user = userEvent.setup();
+    const closeOuter = vi.fn();
+    function Host() {
+      const [inner, setInner] = useState(true);
+      return (
+        <Dialog title="חיצוני" onClose={closeOuter}>
+          <p>x</p>
+          {inner && <Dialog title="פנימי" onClose={() => setInner(false)}><p>y</p></Dialog>}
+        </Dialog>
+      );
+    }
+    render(<Host />);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "פנימי" })).toBeNull();
+    expect(closeOuter).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "חיצוני" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(closeOuter).toHaveBeenCalledTimes(1);
   });
 });
