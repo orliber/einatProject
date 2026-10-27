@@ -166,7 +166,11 @@ export function SectionWork({ api, section }: { api: CaseApi; section: Section }
           async (result) => {
             went = true;
             setLast(result);
-            // Only the request that was sent is cleared, not one she typed meanwhile.
+            // Only the request that was sent is cleared, not one she typed meanwhile. The box
+            // itself is read: an answer that comes before typing has paused long enough to be
+            // reported (the demo answers at once) would find the kept copy still empty.
+            const box = messageBox.current;
+            if (box?.value() === instruction) box.set("");
             setMessage((m) => (m === instruction ? "" : m));
             await Promise.all([reload(), loadChat()]);
             if (result.demo) notify("מצב הדגמה: התשובה נבנתה במחשב, בלי שליחה.");
