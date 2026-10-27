@@ -17,6 +17,7 @@ pub mod hello;
 pub mod password;
 pub mod recovery;
 mod store;
+pub mod version;
 
 pub use audit::{AuditEntry, AuditEvent};
 pub use header::VaultHeader;
@@ -43,6 +44,10 @@ pub enum VaultError {
     RecoveryKeyInvalid,
     #[error("password does not meet the policy: {0:?}")]
     Policy(PolicyViolation),
+    /// A newer version of the program opened this vault (D-104): this one does not open it
+    /// and writes nothing to it. Holds that version when it can be shown (else empty).
+    #[error("the vault was opened by a newer version of the program ({0})")]
+    NewerVersion(String),
     #[error("a vault already exists here")]
     AlreadyExists,
     #[error("not found")]

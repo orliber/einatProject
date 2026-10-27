@@ -58,7 +58,8 @@ pub fn replace_foreign_tags(
     // The regex copies the text between matches itself, so no offset is cut by hand.
     let out = re.replace_all(text, |caps: &regex::Captures<'_>| {
         let tag = caps.get(0).map_or("", |m| m.as_str());
-        if tag_allowed(tag, case_tags) {
+        // Her kept words (D-126) stay in her stored paragraph; they are never sent.
+        if tag_allowed(tag, case_tags) || crate::masks::is_kept_words_tag(tag) {
             tag.to_owned()
         } else {
             changed = true;
@@ -286,7 +287,12 @@ pub fn clear(req: &GateRequest<'_>) -> Result<ClearedPayload, Blocked> {
                 text.get(f.start..f.end).map(str::to_owned),
             ));
         }
-        match patterns::find(text, req.ctx.today) {
+        // The case's tags and generic ones blanked, so the number inside a tag
+        // ("[מספר_זהות_1] מרץ") is not read as a date. A "[חסר: …]" note or a score is read.
+        let blanked = patterns::blank_tags(text, |t| {
+            req.case_tags.contains(t) || crate::masks::is_generic_tag(t)
+        });
+        match patterns::find(&blanked, req.ctx.today) {
             Ok(hits) => {
                 for h in hits {
                     reasons.push(reason(

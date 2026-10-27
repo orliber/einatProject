@@ -419,3 +419,36 @@ button.crumb:hover:not([aria-current="page"]) {
     font-size: var(--text-2xl);
   }
 }
+
+/* D-113: a folder row is quieter than a case: no button beside it, its name opens it. */
+.folder-name {
+  display: block;
+  max-width: 100%;
+  /* WCAG 2.5.8: at least 24px to aim at, though the whole row opens it too. */
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: 600 var(--text-md) / 28px var(--font-ui);
+  text-align: start;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.folder-row:hover .folder-name {
+  text-decoration: underline;
+}
+.folder-name:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.folder-row .row-icon {
+  width: 30px;
+  height: 30px;
+}
+.folder-row td {
+  padding-block: 9px;
+}

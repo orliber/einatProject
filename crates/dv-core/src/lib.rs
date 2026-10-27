@@ -25,12 +25,14 @@ mod intake;
 mod library;
 pub mod name_model;
 mod own;
+mod prepare;
 use name_model::NameHints;
 mod jobs;
 mod layers;
 mod readiness;
 mod report_check;
 mod retention;
+mod safety_net;
 mod seal;
 mod security;
 mod send;
@@ -73,9 +75,25 @@ pub use backup::{
 pub(crate) use dates::today;
 pub use dv_ai::{StyleItem, StyleKind, StyleOrigin, StyleProfile};
 pub use dv_export::MAX_LOGO_BYTES;
+
+/// The largest file "check the original" reads: the same cap as any document she brings in
+/// (`dv_ingest::MAX_INPUT_BYTES`, 25 MiB), refused before it is read (D-120).
+pub const MAX_ORIGINAL_BYTES: usize = dv_ingest::MAX_INPUT_BYTES;
+
+/// Why a file is too large for "check the original": no report she exported is that big.
+#[must_use]
+pub fn original_too_large() -> CoreError {
+    CoreError::Refused(
+        "הקובץ גדול מ-25MB, ולכן הוא לא דוח שהופק כאן. בוחרים את קובץ ה-PDF או ה-Word שהופק."
+            .to_owned(),
+    )
+}
+pub use dv_vault::crypto::sha256_hex;
 pub use dv_vault::BACKUP_EXTENSION;
 pub use followup::FollowUpView;
-pub use history::{HiddenWord, SentItem, SentPart, SentText};
+pub use history::{
+    HiddenWord, SentCursor, SentItem, SentPage, SentPart, SentText, SENT_PAGE, SENT_SCAN,
+};
 pub use instruments::{InstrumentApproval, InstrumentStatus};
 pub use jobs::{
     BackupRun, BackupTask, DocumentRead, DrillJob, Drilled, ExportJob, Exported, ReadJob,
@@ -85,9 +103,11 @@ pub use layers::SecurityLayer;
 pub use library::TRASH_DAYS;
 pub use name_model::{HintJob, HintsRead};
 pub use own::SectionModeView;
+pub use prepare::{run_requests, Landed, RequestJob, RequestRun};
 pub use readiness::{Readiness, ReadinessItem};
 pub use report_check::{ReportCheckNote, ReportCheckResult, ReportCheckSetting};
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
+pub use safety_net::{days_ago, NetPart, NetState, SafetyNet};
 pub use security::{SecurityItem, SecurityStatus};
 pub use style::{
     FitMonth, InterpretationResult, InterpretationView, LibraryLine, OwnSectionHelp,
@@ -158,11 +178,12 @@ const MODEL_KEY: &str = "model";
 const ZDR_PREFIX: &str = "zdr/";
 const LOCK_KEY: &str = "lock_minutes";
 const FIRST_USE_KEY: &str = "first_use_day";
-/// When the printed recovery kit was last checked (D-076).
+/// When the printed recovery kit was last checked (D-076). No longer written (D-103); still
+/// hidden from her log, where older vaults have it.
 const KIT_CHECKED_KEY: &str = "recovery_kit_checked_at";
-/// "Show me every request before it is sent" (round 26). On until she turns it off: the
-/// review screen stays the default until Einat confirms turning it off (D-062). The key of the
-/// earlier "only when suspicious" choice is not read.
+/// "Show me every request before it is sent" (round 26). Off unless she turns it on: Einat
+/// confirmed off as the default on 15.10.2026 (D-062). The key of the earlier "only when
+/// suspicious" choice is not read.
 const REVIEW_KEY: &str = "review_always";
 const SCREEN_KEY: &str = "screen_protection";
 /// How long Claude may think (see `Core::model_for`).
@@ -319,11 +340,11 @@ impl CoreError {
             CoreError::Locked => ("locked", "הכספת נעולה. יש לפתוח אותה מחדש.".to_owned()),
             CoreError::Vault(VaultError::WrongSecret) => (
                 "wrong_secret",
-                "הסיסמה או ערכת השחזור לא נכונות.".to_owned(),
+                "הסיסמה לא נכונה.".to_owned(),
             ),
             CoreError::Vault(VaultError::OtherComputer) => (
                 "other_computer",
-                "הסיסמה פותחת את הכספת רק במחשב ובחשבון המשתמש שבהם היא נקבעה. בעותק של תיקיית הכספת, וגם באותו מחשב אחרי התקנה מחדש של מערכת ההפעלה או איפוס החשבון, נכנסים כאן עם ערכת השחזור, ואחר כך בוחרים סיסמה בהגדרות כדי שתעבוד גם כאן. אם המחשב הקודם אבד, אפשר גם לשחזר את הגיבוי עם הסיסמה.".to_owned(),
+                "הסיסמה פותחת את הכספת רק במחשב ובחשבון המשתמש שבהם היא נקבעה, וכאן היא עוד לא נפתחת. אם זה התחיל אחרי שהותקנה גרסה ישנה יותר של התוכנה, מתקינים שוב את הגרסה החדשה. אם המחשב הוחלף או שמערכת ההפעלה הותקנה מחדש, משחזרים את הגיבוי עם הסיסמה, ואור יכול לעזור.".to_owned(),
             ),
             CoreError::Vault(VaultError::Busy) => (
                 "busy",
@@ -346,6 +367,15 @@ impl CoreError {
             CoreError::Vault(VaultError::AlreadyExists) => {
                 ("exists", "כבר קיימת כספת במחשב הזה.".to_owned())
             }
+            CoreError::Vault(VaultError::NewerVersion(v)) => {
+                ("newer_version", update::newer_version_he(v))
+            }
+            // Said by its kind, never by its text: an operating system's or a library's
+            // wording can name the file, and with it her user name or a case code (D-120).
+            CoreError::Vault(VaultError::Io(e)) => {
+                details.push(io_detail(e));
+                ("vault", io_he(e.kind()).to_owned())
+            }
             CoreError::Vault(e) => {
                 details.push(e.to_string());
                 ("vault", TECHNICAL_HE.to_owned())
@@ -360,8 +390,14 @@ impl CoreError {
                 "backoff",
                 format!("יותר מדי ניסיונות. אפשר לנסות שוב בעוד {s} שניות."),
             ),
-            CoreError::Egress(e) => ("egress", egress_he(e, ai)),
-            CoreError::Ai(e) => ("ai", format!("התשובה של {ai} לא תקינה: {e}")),
+            CoreError::Egress(e) => {
+                details.extend(egress_details(e));
+                ("egress", egress_he(e, ai))
+            }
+            CoreError::Ai(e) => {
+                details.push(e.to_string());
+                ("ai", ai_he(e, ai))
+            }
             CoreError::Update(e) => ("update", update::update_he(e)),
             CoreError::Internal(e) => {
                 details.push(e.clone());
@@ -371,7 +407,8 @@ impl CoreError {
         UiError {
             code: code.to_owned(),
             message,
-            details,
+            // The details go into the bug report she copies for Or: never a path (D-120).
+            details: details.iter().map(|d| without_paths(d)).collect(),
             action: self.action(),
         }
     }
@@ -387,7 +424,8 @@ impl CoreError {
                 | VaultError::Busy
                 | VaultError::RecoveryKeyInvalid
                 | VaultError::Policy(_)
-                | VaultError::AlreadyExists,
+                | VaultError::AlreadyExists
+                | VaultError::NewerVersion(_),
             )
             | CoreError::NotFound(_)
             | CoreError::Refused(_) => ErrorAction::Dismiss,
@@ -418,16 +456,69 @@ fn egress_action(e: &EgressError) -> ErrorAction {
         EgressError::Stopped => ErrorAction::settings("security"),
         // The service's certificate is from an authority this version is not pinned to.
         EgressError::Pinned => ErrorAction::settings("about"),
+        // The account is paid for and the key chosen in Settings (D-121).
+        EgressError::Billing(_) | EgressError::Forbidden(_) => ErrorAction::settings("ai"),
+        // The models offered are fixed in the program: a retired one needs a new version.
+        EgressError::ModelGone(_) => ErrorAction::settings("about"),
         EgressError::RateLimited => ErrorAction::Retry { after_seconds: 60 },
-        EgressError::Offline | EgressError::Unavailable(_) => ErrorAction::retry(),
+        EgressError::CircuitOpen(s) => ErrorAction::Retry {
+            after_seconds: u32::try_from(*s).unwrap_or(u32::MAX),
+        },
+        EgressError::Offline | EgressError::Unavailable(_) | EgressError::Overloaded => {
+            ErrorAction::retry()
+        }
         // A timeout or a conflict passes by itself; any other refusal comes back the same.
         EgressError::Rejected(408 | 409, _) => ErrorAction::retry(),
         EgressError::Rejected(..)
+        | EgressError::InvalidRequest(_)
         | EgressError::Policy(_)
         | EgressError::Tls
         | EgressError::Protocol(_) => ErrorAction::Report,
         EgressError::TooLarge | EgressError::DailyLimit => ErrorAction::Dismiss,
     }
+}
+
+/// A file that could not be read or written, by the shell: shown by its kind, never its path.
+#[must_use]
+pub fn file_error(e: std::io::Error) -> CoreError {
+    CoreError::Vault(VaultError::Io(e))
+}
+
+/// An io error for the bug report: its kind and the system's number, nothing it says.
+fn io_detail(e: &std::io::Error) -> String {
+    match e.raw_os_error() {
+        Some(n) => format!("file error: {:?} (os error {n})", e.kind()),
+        None => format!("file error: {:?}", e.kind()),
+    }
+}
+
+/// What she is told about a file that could not be read or written, by its kind.
+fn io_he(kind: std::io::ErrorKind) -> &'static str {
+    use std::io::ErrorKind as K;
+    match kind {
+        K::StorageFull | K::QuotaExceeded => {
+            "אין מספיק מקום בדיסק. מפנים מקום ומנסים שוב. שום דבר לא נשלח והחומרים שמורים."
+        }
+        K::PermissionDenied | K::ReadOnlyFilesystem => {
+            "אין הרשאה לכתוב בתיקייה או לקרוא את הקובץ. ייתכן שהקובץ פתוח בתוכנה אחרת, או שאנטי-וירוס חוסם. אפשר לנסות שוב."
+        }
+        K::NotFound => "הקובץ או התיקייה לא נמצאו. אם זה דיסק נייד, כדאי לבדוק שהוא מחובר.",
+        _ => TECHNICAL_HE,
+    }
+}
+
+/// A detail with any path cut off: from the first word that holds a path separator, the
+/// rest is dropped (a path may hold spaces, so what follows it is not kept either).
+fn without_paths(detail: &str) -> String {
+    let mut kept = Vec::new();
+    for word in detail.split(' ') {
+        if word.contains(['/', '\\']) {
+            kept.push("[נתיב הוסר]");
+            break;
+        }
+        kept.push(word);
+    }
+    kept.join(" ")
 }
 
 /// One calm sentence for failures only the developer can read; the raw text rides in
@@ -458,7 +549,68 @@ fn egress_he(e: &EgressError, ai: &str) -> String {
             .to_owned(),
         EgressError::TooLarge => "הבקשה גדולה מדי. כדאי לשלוח פחות חומרים בבת אחת.".to_owned(),
         EgressError::DailyLimit => "הגעת למכסת הבקשות היומית. אפשר להמשיך מחר.".to_owned(),
-        other => format!("שגיאה בחיבור ל-{ai}: {other}"),
+        EgressError::Overloaded => format!(
+            "{ai} עמוס מאוד כרגע. החומרים שמורים, ואפשר לנסות שוב בעוד כמה דקות."
+        ),
+        EgressError::Unavailable(_) => format!(
+            "יש תקלה זמנית אצל {ai}. החומרים שמורים, ואפשר לנסות שוב בעוד כמה דקות."
+        ),
+        EgressError::CircuitOpen(s) => format!(
+            "{ai} נכשל כמה פעמים ברצף, ולכן התוכנה עוצרת לרגע את השליחה אליו. שום דבר לא נשלח הפעם. אפשר לנסות שוב בעוד {s} שניות."
+        ),
+        EgressError::Billing(_) => format!(
+            "נגמרה היתרה בחשבון ה-API של {ai}, או שיש בעיה בפרטי התשלום. צריך להוסיף קרדיט בחשבון אצל {ai}, ואז לנסות שוב (בהגדרות כתוב איזה מפתח מוגדר)."
+        ),
+        EgressError::Forbidden(_) => format!(
+            "המפתח תקין, אבל אין לו הרשאה לבקשה הזו אצל {ai} (למשל לדגם שנבחר). כדאי לבדוק את המפתח ואת הדגם בהגדרות."
+        ),
+        EgressError::ModelGone(_) => format!(
+            "הדגם שנבחר כבר לא זמין אצל {ai}. צריך לעדכן את התוכנה (בהגדרות, באודות), או לבחור דגם אחר בהגדרות."
+        ),
+        EgressError::InvalidRequest(_) | EgressError::Rejected(..) => format!(
+            "{ai} דחה את הבקשה. החומרים שמורים. אם זה חוזר, אפשר להעתיק את הפרטים ולשלוח לאור."
+        ),
+        EgressError::Protocol(_) => format!(
+            "התשובה של {ai} הגיעה חלקית או בצורה לא צפויה, ולכן לא נשמרה. אפשר לבקש שוב. אם זה חוזר, אפשר להעתיק את הפרטים ולשלוח לאור."
+        ),
+        EgressError::Policy(_) => {
+            "הבקשה נעצרה במחשב לפני השליחה, כי לא עמדה בכללי הפרטיות של התוכנה. שום דבר לא נשלח. אפשר להעתיק את הפרטים ולשלוח לאור."
+                .to_owned()
+        }
+    }
+}
+
+/// The technical words behind an egress failure, for the "copy details" button only: the
+/// status, and the service's own message (English, and never sent anywhere; D-121).
+fn egress_details(e: &EgressError) -> Option<String> {
+    match e {
+        EgressError::Unavailable(_)
+        | EgressError::Overloaded
+        | EgressError::CircuitOpen(_)
+        | EgressError::Billing(_)
+        | EgressError::Forbidden(_)
+        | EgressError::ModelGone(_)
+        | EgressError::InvalidRequest(_)
+        | EgressError::Rejected(..)
+        | EgressError::Protocol(_)
+        | EgressError::Policy(_) => Some(e.to_string()),
+        _ => None,
+    }
+}
+
+/// An answer that came back and could not be used, in her words; the parser's own words go to
+/// the details (D-121).
+fn ai_he(e: &dv_ai::AiError, ai: &str) -> String {
+    match e {
+        dv_ai::AiError::Refused(_) => {
+            format!("{ai} סירב לענות על הבקשה הזו. אפשר לנסח אותה אחרת ולבקש שוב.")
+        }
+        dv_ai::AiError::Truncated => format!(
+            "התשובה של {ai} נקטעה כי הייתה ארוכה מדי, ולכן לא נשמרה. אפשר לבקש פחות בבת אחת."
+        ),
+        dv_ai::AiError::Format(_) => {
+            format!("התשובה של {ai} הגיעה בצורה לא צפויה, ולכן לא נשמרה. אפשר לבקש שוב.")
+        }
     }
 }
 
@@ -705,6 +857,12 @@ pub struct Core {
     rollback_warning: Option<String>,
     /// Counts the locks. An approval taken out before a lock never comes back after it.
     session: u64,
+    /// Moves whenever the approvals waiting are dropped (a lock, an answer that changes what
+    /// a request holds): a request filtered before it never lands after it (D-109).
+    pending_epoch: u64,
+    /// Approvals dropped because their material changed, by id, with the line said when she
+    /// tries to send one (memory only; cleared on lock).
+    withdrawn: HashMap<String, &'static str>,
     /// Where the optional name model is downloaded (D-053); `None` keeps it off.
     models_dir: Option<PathBuf>,
     /// The name model, started on first use or right after unlock while it is on, and
@@ -762,6 +920,24 @@ struct PrivacyData {
     masks: dv_privacy::MaskBook,
 }
 
+/// The keyed hash of a word: the open vault's, or a copy of its key that a job filters with
+/// away from the core's lock (F2, D-109).
+trait TokenHash {
+    fn token_hmac(&self, token: &str) -> String;
+}
+
+impl TokenHash for Vault {
+    fn token_hmac(&self, token: &str) -> String {
+        Vault::token_hmac(self, token)
+    }
+}
+
+impl TokenHash for dv_vault::TokenHasher {
+    fn token_hmac(&self, token: &str) -> String {
+        dv_vault::TokenHasher::token_hmac(self, token)
+    }
+}
+
 /// A [`PrivacyData`]'s word lookups against the open vault's keyed hash, kept alive while a
 /// [`PrivacyContext`] borrows them. See [`PrivacyData::lookups`].
 struct CaseLookups<'a, A, N, P> {
@@ -772,11 +948,51 @@ struct CaseLookups<'a, A, N, P> {
 }
 
 impl PrivacyData {
+    /// What the filter hides with, as the vault holds it now (no settling of stale tags).
+    fn read(v: &Vault, case_id: &str) -> Result<Self, CoreError> {
+        Ok(PrivacyData {
+            case_id: case_id.to_owned(),
+            identities: v.all_identities()?,
+            practitioner: v.practitioner()?.names,
+            allow: v.not_a_name_hmacs(case_id)?.into_iter().collect(),
+            is_name: v.is_name_hmacs(case_id)?.into_iter().collect(),
+            past: style::past_name_hmacs(v)?,
+            masks: dv_privacy::MaskBook::new(if case_id.is_empty() {
+                Vec::new()
+            } else {
+                v.masks(case_id)?
+            }),
+        })
+    }
+
+    /// A digest of everything the filter and the gate decide by, but the mask book: the
+    /// names of every case, hers, "not a name", "a name in a word" and the past reports'
+    /// names. A request filtered away from the lock lands only while it is unchanged (D-109).
+    fn fingerprint(&self) -> Result<String, CoreError> {
+        let mut identities: Vec<&dv_domain::Identity> = self.identities.iter().collect();
+        identities.sort_by(|a, b| (&a.case_id, &a.id).cmp(&(&b.case_id, &b.id)));
+        fn sorted(set: &HashSet<String>) -> Vec<&String> {
+            let mut v: Vec<&String> = set.iter().collect();
+            v.sort();
+            v
+        }
+        let bytes = serde_json::to_vec(&(
+            &self.case_id,
+            identities,
+            &self.practitioner,
+            sorted(&self.allow),
+            sorted(&self.is_name),
+            sorted(&self.past),
+        ))
+        .map_err(|e| CoreError::Internal(e.to_string()))?;
+        Ok(dv_vault::crypto::sha256_hex(&bytes))
+    }
+
     /// The lookups every case context uses: "not a name", "a name in a word", and her past
     /// reports' names, each by keyed hash of the normalized token.
-    fn lookups<'a>(
+    fn lookups<'a, H: TokenHash>(
         &'a self,
-        v: &'a Vault,
+        v: &'a H,
     ) -> CaseLookups<
         'a,
         impl Fn(&str) -> bool + 'a,

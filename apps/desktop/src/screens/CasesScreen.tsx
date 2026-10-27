@@ -5,7 +5,7 @@ import { useMemo, useState, type DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
 import { BackupReminder } from "../components/Backup";
-import { RetentionNotice } from "../components/RetentionNotice";
+import { OldExportsNotice, RetentionNotice } from "../components/RetentionNotice";
 import { TopBar } from "../components/TopBar";
 import { NewCaseDialog } from "../components/NewCaseDialog";
 import { ageOf } from "../components/AgeField";
@@ -183,6 +183,12 @@ export function CasesScreen() {
   const countIn = (id: string) => {
     const ids = descendants(allFolders, id);
     return allCases.filter((c) => c.folder_id && ids.has(c.folder_id)).length;
+  };
+  /** When a case inside a folder (at any depth) last changed: the folder's "עודכן"; `null` when empty. */
+  const lastIn = (id: string): number | null => {
+    const ids = descendants(allFolders, id);
+    const times = allCases.filter((c) => c.folder_id && ids.has(c.folder_id)).map((c) => c.updated_at);
+    return times.length ? Math.max(...times) : null;
   };
   const parentOf = current ? (byId.get(current)?.parent_id ?? null) : null;
 
@@ -368,6 +374,7 @@ export function CasesScreen() {
         )}
         <BackupReminder />
         <RetentionNotice />
+        <OldExportsNotice />
         <ErrorLine error={error ?? (cases.error ? fail(cases.error as unknown as UiError) : null)}
           retry={!error && cases.error ? () => void qc.invalidateQueries({ queryKey: ["cases"] }) : undefined} />
 
@@ -396,20 +403,29 @@ export function CasesScreen() {
                 <button type="button" className="btn tree-toggle" aria-expanded={treeOpen} onClick={() => setTreeOpen(!treeOpen)}>
                   <FolderIcon size={16} /> תיקיות
                 </button>
-                <button type="button" className="btn btn-icon up" aria-label="לתיקייה שמעל" disabled={inTrash ? false : current === null}
-                  onClick={() => (inTrash ? setFolderId(remembered.folder) : setFolderId(parentOf))}>↑</button>
-                <nav className="crumbs" aria-label="מיקום">
-                  <button type="button" className={dropOn === "top" ? "crumb drop" : "crumb"} aria-current={!inTrash && !current ? "page" : undefined}
-                    onClick={() => setFolderId(null)} {...dropProps(null)}>תיקים</button>
-                  {!inTrash && path.map((f) => (
-                    <span key={f.id} className="crumb-wrap">
-                      <span className="crumb-sep" aria-hidden="true">›</span>
-                      <button type="button" className={dropOn === f.id ? "crumb drop" : "crumb"} aria-current={f.id === current ? "page" : undefined}
-                        onClick={() => setFolderId(f.id)} {...dropProps(f.id)}>{f.name}</button>
-                    </span>
-                  ))}
-                  {inTrash && <span className="crumb-wrap"><span className="crumb-sep" aria-hidden="true">›</span><span className="crumb" aria-current="page">סל המחזור</span></span>}
-                </nav>
+                {/* D-113: at the top the tab, the tree and the path all said "תיקים"; the path
+                    shows only inside a folder or the bin, where it says something. */}
+                {(inTrash || current !== null) && (
+                  <button type="button" className="btn btn-icon up" aria-label="לתיקייה שמעל"
+                    onClick={() => (inTrash ? setFolderId(remembered.folder) : setFolderId(parentOf))}>↑</button>
+                )}
+                {inTrash || current !== null ? (
+                  <nav className="crumbs" aria-label="מיקום">
+                    <button type="button" className={dropOn === "top" ? "crumb drop" : "crumb"}
+                      onClick={() => setFolderId(null)} {...dropProps(null)}>תיקים</button>
+                    {!inTrash && path.map((f) => (
+                      <span key={f.id} className="crumb-wrap">
+                        <span className="crumb-sep" aria-hidden="true">›</span>
+                        <button type="button" className={dropOn === f.id ? "crumb drop" : "crumb"} aria-current={f.id === current ? "page" : undefined}
+                          onClick={() => setFolderId(f.id)} {...dropProps(f.id)}>{f.name}</button>
+                      </span>
+                    ))}
+                    {inTrash && <span className="crumb-wrap"><span className="crumb-sep" aria-hidden="true">›</span><span className="crumb" aria-current="page">סל המחזור</span></span>}
+                  </nav>
+                ) : (
+                  // Holds the place of the path, so the search and the buttons do not move.
+                  <span className="crumbs" aria-hidden="true" />
+                )}
                 <input className="input search" type="search" placeholder="חיפוש בכל התיקים" aria-label="חיפוש תיקים"
                   value={query} onChange={(e) => { setQuery(e.target.value); setInTrash(false); }} />
                 {!inTrash && (
@@ -456,28 +472,33 @@ export function CasesScreen() {
                           {shownFolders.map((f) => {
                             const n = countIn(f.id);
                             const sub = allFolders.filter((x) => x.parent_id === f.id).map((x) => x.name);
+                            const last = lastIn(f.id);
                             return (
                               <tr key={f.id} data-folder={f.id} className={dropOn === f.id ? "folder-row drop" : "folder-row"} onClick={() => setFolderId(f.id)} draggable
                                 onDragStart={onDragStart({ folder: f.id })} {...dropProps(f.id)}>
                                 <td>
                                   <div className="name-cell">
                                     <span className="row-icon folder-icon"><FolderIcon size={18} /></span>
-                                    <div>
-                                      <div className="case-name">{f.name}</div>
+                                    <div className="min0">
+                                      {/* D-113: the row opens the folder; this is its one stop on the
+                                          keyboard (Tab, then Enter), with no "פתיחה" button beside it.
+                                          Draggable itself: WebKit (the Mac app) may not start a drag
+                                          from inside a button; its dragstart bubbles to the row's. */}
+                                      <button type="button" className="case-name folder-name" aria-label={`פתיחת התיקייה ${f.name}`} draggable
+                                        onClick={(e) => { e.stopPropagation(); setFolderId(f.id); }}>{f.name}</button>
                                       <div className="small muted">
-                                        תיקייה · {n === 0 ? "ריקה" : n === 1 ? "תיק אחד" : `${n} תיקים`}
+                                        {n === 0 ? "ריקה" : n === 1 ? "תיק אחד" : `${n} תיקים`}
                                         {q && f.parent_id ? ` · ${pathOf(f.parent_id)}` : ""}
+                                        {last !== null && <span className="when-inline"> · {updated(last)}</span>}
                                       </div>
                                     </div>
                                   </div>
                                 </td>
                                 <td><span className="small muted">{sub.length ? `בפנים: ${sub.join(", ")}` : ""}</span></td>
-                                <td className="col-when" />
+                                {/* The last change to a case inside it; nothing for an empty folder. */}
+                                <td className="small muted col-when">{last !== null ? updated(last) : ""}</td>
                                 <td>
                                   <div className="row-actions">
-                                    <button type="button" className="btn" onClick={(e) => { e.stopPropagation(); setFolderId(f.id); }}>
-                                      פתיחה<span className="visually-hidden"> של התיקייה {f.name}</span>
-                                    </button>
                                     <ActionsMenu items={folderItems(f)} label={`פעולות על התיקייה ${f.name}`} />
                                   </div>
                                 </td>
@@ -513,7 +534,8 @@ export function CasesScreen() {
                                 <td className="small muted col-when">{updated(c.updated_at)}</td>
                                 <td>
                                   <div className="row-actions">
-                                    <button type="button" className={s.view === "report" ? "btn btn-primary" : "btn"}
+                                    {/* D-113: one prominent button in the list, on the case she is continuing. */}
+                                    <button type="button" className={c.id === resume?.id ? "btn btn-primary" : "btn"}
                                       onClick={(e) => { e.stopPropagation(); open(); }}>
                                       {s.button}<span className="visually-hidden"> בתיק של {caseName(c)}</span>
                                     </button>

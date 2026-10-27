@@ -212,6 +212,9 @@ pub const MAIN_MIGRATIONS: &[&str] = &[
     // history grows (deep review 3.5). How long the text itself is kept waits for the legal
     // review (P-07), so nothing is deleted.
     "CREATE INDEX transmissions_case ON transmissions(case_id, created_at);",
+    // v12: "what left the computer" across every case is read a page at a time, newest first
+    // (D-123); an index in that order instead of sorting a year of requests for each page.
+    "CREATE INDEX transmissions_time ON transmissions(created_at, id);",
 ];
 
 pub const IDENTITY_MIGRATIONS: &[&str] = &[
@@ -303,6 +306,7 @@ mod tests {
                 "319cc0d373ae4523",
                 "942e02ced273dca6",
                 "860fa1cbe9c35c6b",
+                "bc893c8e985ecbd1",
             ],
         ),
         ("identity", &["98e79c9e2d976424", "59aa5787b56ebc78"]),

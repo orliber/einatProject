@@ -6,8 +6,7 @@
 //! date), and a tag carries nothing but its kind and a running number. The originals stay in
 //! the vault, encrypted with the case; nothing of them goes out.
 
-use std::cell::RefCell;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, PoisonError};
 
 pub use dv_domain::MaskEntry;
 use regex::Regex;
@@ -30,6 +29,30 @@ pub const MASK_BASES: &[&str] = &[
     // A name the gate refused in text the filter never saw (round 25's fix loop).
     "שם",
 ];
+
+/// The base of a kept-words tag (D-126): words of hers the outgoing filter leaves out or
+/// generalizes, stored in a paragraph of hers under a number. Not a mask base: such a tag is
+/// never sent and never trusted in text from anywhere else. Every filter reads it as plain
+/// words ("(מילים_1)"), the gate refuses it, and the answer scan points it out. Only her own
+/// paragraph is put back as she wrote it before it is filtered ([`her_text_to_send`]).
+///
+/// [`her_text_to_send`]: crate::restore::her_text_to_send
+pub const KEPT_WORDS: &str = "מילים";
+
+/// How every kept-words tag starts.
+pub(crate) const KEPT_WORDS_OPEN: &str = "[מילים_";
+
+/// `[מילים_N]`, the form of a kept-words tag (D-126).
+#[must_use]
+pub fn is_kept_words_tag(tag: &str) -> bool {
+    tag.strip_prefix(KEPT_WORDS_OPEN)
+        .and_then(|t| t.strip_suffix(']'))
+        .is_some_and(|n| {
+            (1..=4).contains(&n.len())
+                && n.bytes().all(|b| b.is_ascii_digit())
+                && !n.starts_with('0')
+        })
+}
 
 /// The kind of a fixed generic tag the filter writes, or `None` for any other text.
 #[must_use]
@@ -77,11 +100,20 @@ pub fn is_generic_tag(tag: &str) -> bool {
 
 /// The case's book while one request is built: what the vault keeps, and what this request
 /// adds. Filtering several texts of one request with one book gives one tag to the same words
-/// in all of them.
+/// in all of them. Requests of one case filtered side by side share their new tags through
+/// [`MaskBook::sibling`], so two of them never give one number to different words (D-109).
 #[derive(Debug, Default)]
 pub struct MaskBook {
-    entries: RefCell<Vec<MaskEntry>>,
+    /// The kept entries first, then every tag given since by this book or a sibling.
+    entries: Arc<Mutex<Vec<MaskEntry>>>,
     kept: usize,
+    /// The tags beyond the kept ones that this request gave or used, in that order.
+    mine: Mutex<Vec<String>>,
+}
+
+/// A lock whose holder panicked still holds whole entries: a push is the only change.
+fn held<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 impl MaskBook {
@@ -89,8 +121,21 @@ impl MaskBook {
     pub fn new(kept: Vec<MaskEntry>) -> Self {
         let n = kept.len();
         Self {
-            entries: RefCell::new(kept),
+            entries: Arc::new(Mutex::new(kept)),
             kept: n,
+            mine: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// A book for another request of the same case, filtered at the same time: the same kept
+    /// entries, and every new tag either one gives is the other's too. What each one adds is
+    /// still its own ([`MaskBook::added`]).
+    #[must_use]
+    pub fn sibling(&self) -> Self {
+        Self {
+            entries: Arc::clone(&self.entries),
+            kept: self.kept,
+            mine: Mutex::new(Vec::new()),
         }
     }
 
@@ -98,50 +143,125 @@ impl MaskBook {
     #[must_use]
     pub fn tag_for(&self, base: &str, original: &str) -> String {
         let norm = normalize(original);
-        let mut entries = self.entries.borrow_mut();
-        if let Some(e) = entries
+        let mut entries = held(&self.entries);
+        let found = entries
             .iter()
-            .find(|e| e.kind == base && normalize(&e.original) == norm)
-        {
-            return e.tag.clone();
+            .position(|e| e.kind == base && normalize(&e.original) == norm);
+        let (index, tag) = match found.and_then(|i| entries.get(i).map(|e| (i, e.tag.clone()))) {
+            Some(known) => known,
+            None => {
+                let prefix = format!("[{base}_");
+                let next = entries
+                    .iter()
+                    .filter_map(|e| {
+                        e.tag
+                            .strip_prefix(&prefix)?
+                            .strip_suffix(']')?
+                            .parse::<u32>()
+                            .ok()
+                    })
+                    .max()
+                    .unwrap_or(0)
+                    .saturating_add(1);
+                let tag = format!("{prefix}{next}]");
+                entries.push(MaskEntry {
+                    tag: tag.clone(),
+                    kind: base.to_owned(),
+                    original: original.to_owned(),
+                });
+                (entries.len().saturating_sub(1), tag)
+            }
+        };
+        if index >= self.kept {
+            let mut mine = held(&self.mine);
+            if !mine.contains(&tag) {
+                mine.push(tag.clone());
+            }
         }
-        let prefix = format!("[{base}_");
-        let next = entries
-            .iter()
-            .filter_map(|e| {
-                e.tag
-                    .strip_prefix(&prefix)?
-                    .strip_suffix(']')?
-                    .parse::<u32>()
-                    .ok()
-            })
-            .max()
-            .unwrap_or(0)
-            .saturating_add(1);
-        let tag = format!("{prefix}{next}]");
-        entries.push(MaskEntry {
-            tag: tag.clone(),
-            kind: base.to_owned(),
-            original: original.to_owned(),
-        });
         tag
+    }
+
+    /// The kept-words tag of exactly these words (D-126), as she wrote them: niqqud, spacing
+    /// and quotes included, so restoring gives back the very same text.
+    #[must_use]
+    pub fn kept_words_tag(&self, original: &str) -> String {
+        let mut entries = held(&self.entries);
+        let found = entries
+            .iter()
+            .position(|e| e.kind == KEPT_WORDS && e.original == original);
+        let (index, tag) = match found.and_then(|i| entries.get(i).map(|e| (i, e.tag.clone()))) {
+            Some(known) => known,
+            None => {
+                let prefix = format!("[{KEPT_WORDS}_");
+                let next = entries
+                    .iter()
+                    .filter_map(|e| {
+                        e.tag
+                            .strip_prefix(&prefix)?
+                            .strip_suffix(']')?
+                            .parse::<u32>()
+                            .ok()
+                    })
+                    .max()
+                    .unwrap_or(0)
+                    .saturating_add(1);
+                let tag = format!("{prefix}{next}]");
+                entries.push(MaskEntry {
+                    tag: tag.clone(),
+                    kind: KEPT_WORDS.to_owned(),
+                    original: original.to_owned(),
+                });
+                (entries.len().saturating_sub(1), tag)
+            }
+        };
+        // Like any other tag: what this request gave or used is kept with the case.
+        if index >= self.kept {
+            let mut mine = held(&self.mine);
+            if !mine.contains(&tag) {
+                mine.push(tag.clone());
+            }
+        }
+        tag
+    }
+
+    /// The words a kept-words tag stands for, if the book has it.
+    #[must_use]
+    pub fn kept_words_original(&self, tag: &str) -> Option<String> {
+        held(&self.entries)
+            .iter()
+            .find(|e| e.kind == KEPT_WORDS && e.tag == tag)
+            .map(|e| e.original.clone())
+    }
+
+    /// The words a numbered tag of any kind stands for, if the book has it.
+    #[must_use]
+    pub fn original(&self, tag: &str) -> Option<String> {
+        held(&self.entries)
+            .iter()
+            .find(|e| e.tag == tag)
+            .map(|e| e.original.clone())
     }
 
     /// What this request added, to keep with the case.
     #[must_use]
     pub fn added(&self) -> Vec<MaskEntry> {
-        self.entries
-            .borrow()
+        let entries = held(&self.entries);
+        held(&self.mine)
             .iter()
-            .skip(self.kept)
-            .cloned()
+            .filter_map(|t| entries.iter().find(|e| &e.tag == t).cloned())
             .collect()
     }
 
-    /// Every entry, kept and added.
+    /// Every entry, kept and added by this request.
     #[must_use]
     pub fn entries(&self) -> Vec<MaskEntry> {
-        self.entries.borrow().clone()
+        let mut out: Vec<MaskEntry> = held(&self.entries)
+            .iter()
+            .take(self.kept)
+            .cloned()
+            .collect();
+        out.extend(self.added());
+        out
     }
 }
 
@@ -162,6 +282,48 @@ mod tests {
         assert_eq!(book.tag_for("תאריך", "1.1.2021"), "[תאריך_5]");
         let added: Vec<String> = book.added().into_iter().map(|e| e.tag).collect();
         assert_eq!(added, ["[תאריך_5]", "[מספר_1]"]);
+    }
+
+    #[test]
+    fn siblings_never_give_one_number_to_different_words() {
+        let kept = vec![MaskEntry {
+            tag: "[תאריך_1]".into(),
+            kind: "תאריך".into(),
+            original: "12.3.2020".into(),
+        }];
+        let a = MaskBook::new(kept);
+        let b = a.sibling();
+        assert_eq!(a.tag_for("תאריך", "1.1.2021"), "[תאריך_2]");
+        assert_eq!(b.tag_for("תאריך", "5.5.2022"), "[תאריך_3]");
+        // The same words in the sibling: the tag the other one gave.
+        assert_eq!(b.tag_for("תאריך", "1.1.2021"), "[תאריך_2]");
+        assert_eq!(b.tag_for("תאריך", "12.3.2020"), "[תאריך_1]");
+        let tags =
+            |book: &MaskBook| -> Vec<String> { book.added().into_iter().map(|e| e.tag).collect() };
+        assert_eq!(tags(&a), ["[תאריך_2]"]);
+        assert_eq!(tags(&b), ["[תאריך_3]", "[תאריך_2]"]);
+        // Each request's own book: the kept entries and what it used, not the other's.
+        let own: Vec<String> = a.entries().into_iter().map(|e| e.tag).collect();
+        assert_eq!(own, ["[תאריך_1]", "[תאריך_2]"]);
+    }
+
+    #[test]
+    fn kept_words_given_by_a_sibling_are_kept_with_the_case() {
+        let a = MaskBook::new(Vec::new());
+        let b = a.sibling();
+        let tag = b.kept_words_tag("\"זרזירים\"");
+        assert_eq!(tag, "[מילים_1]");
+        // The same words in the other book: the same tag, and each book keeps it.
+        assert_eq!(a.kept_words_tag("\"זרזירים\""), tag);
+        assert_eq!(b.kept_words_tag("\"דרורים\""), "[מילים_2]");
+        let tags =
+            |book: &MaskBook| -> Vec<String> { book.added().into_iter().map(|e| e.tag).collect() };
+        assert_eq!(tags(&a), ["[מילים_1]"]);
+        assert_eq!(tags(&b), ["[מילים_1]", "[מילים_2]"]);
+        assert_eq!(
+            b.kept_words_original("[מילים_2]").as_deref(),
+            Some("\"דרורים\"")
+        );
     }
 
     #[test]

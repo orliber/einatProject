@@ -4,6 +4,7 @@ import type { Commands } from "./generated/commands";
 import { rememberReplay } from "../errors";
 import { listen } from "@tauri-apps/api/event";
 import type { ActivityPage } from "./generated/ActivityPage";
+import type { SentCursor } from "./generated/SentCursor";
 import type { AppStatus } from "./generated/AppStatus";
 import type { RetentionItem } from "./generated/RetentionItem";
 import type { BackupCheckView } from "./generated/BackupCheckView";
@@ -50,6 +51,8 @@ import type { Role } from "./generated/Role";
 import type { ScoreSheet } from "./generated/ScoreSheet";
 import type { UsageSummary } from "./generated/UsageSummary";
 import type { Readiness } from "./generated/Readiness";
+import type { SafetyNet } from "./generated/SafetyNet";
+import type { NetPart } from "./generated/NetPart";
 import type { SecurityItem } from "./generated/SecurityItem";
 import type { SecurityLayer } from "./generated/SecurityLayer";
 import type { SecurityStatus } from "./generated/SecurityStatus";
@@ -85,6 +88,8 @@ import type { StyleSuggestion } from "./generated/StyleSuggestion";
 
 /** The largest logo the core takes (`dv_export::MAX_LOGO_BYTES`). */
 export const LOGO_MAX_BYTES = 1024 * 1024;
+/** The largest file "check the original" reads (`dv_core::MAX_ORIGINAL_BYTES`, 25 MiB). */
+export const ORIGINAL_MAX_BYTES = 25 * 1024 * 1024;
 
 /** Every failure reaches the UI as a UiError with a Hebrew message and its next step (F6). */
 export function asUiError(e: unknown): UiError {
@@ -180,6 +185,8 @@ export const ipc = {
   exportSecurityPdf: () => call("export_security_pdf"),
   setSendStopped: (stopped: boolean) => call("set_send_stopped", { stopped }),
   confirmReadiness: (key: string, done: boolean) => call("confirm_readiness", { key, done }),
+  /** "The safety net" (D-107): Google sign-in if the password is forgotten, and a recent backup. */
+  safetyNet: () => call("safety_net"),
   /** Settings → המבחנים: every instrument with her answer (D-098). */
   instrumentApprovals: () => call("instrument_approvals"),
   setInstrumentStatus: (key: string, status: InstrumentStatus) => call("set_instrument_status", { key, status }),
@@ -362,8 +369,12 @@ export const ipc = {
   /** EX-3: a print-only PDF (cannot be changed; opens without a password, D-081). */
   exportPdf: (caseId: string, password: string | null, parents: ParentsOptions | null = null) =>
     call("export_pdf", { caseId, password, parents }),
-  /** When this vault exported exactly this PDF, or `null` (changed, or not made here). */
+  /** When this vault exported exactly this file (PDF, Word or letter), or `null` (changed, or not made here). */
   checkOriginal: async (file: File): Promise<number | null> => {
+    // Refused before the file is read, the way the core refuses it (25 MB, D-120).
+    if (file.size > ORIGINAL_MAX_BYTES) {
+      throw { code: "refused", message: "הקובץ גדול מ-25MB, ולכן הוא לא דוח שהופק כאן. בוחרים את קובץ ה-PDF או ה-Word שהופק.", details: [], action: { kind: "dismiss" } } satisfies UiError;
+    }
     const bytes = new Uint8Array(await file.arrayBuffer());
     return await call("check_original", bytes);
   },
@@ -373,7 +384,8 @@ export const ipc = {
   letter: (caseId: string, audience: "parents" | "school") => call("letter", { caseId, audience }),
   exportLetter: (caseId: string, audience: "parents" | "school", password: string | null) =>
     call("export_letter", { caseId, audience, password }),
-  /** The file password to the clipboard: out of history and cloud sync, cleared after N seconds (returned). */
+  /** A secret to the clipboard: out of history and cloud sync (and on a Mac out of Universal
+   *  Clipboard), cleared after N seconds (returned: 60, or 20 on a Mac). */
   copySecret: (text: string) => call("copy_secret", { text }),
 
   /** The system's print window (the macOS webview ignores `window.print()`). */
@@ -382,10 +394,17 @@ export const ipc = {
   // Activity log (metadata only; cases named on this computer) and retention reminders.
   activity: (before: number | null) => call("activity", { before }),
   markActivityReviewed: () => run("mark_activity_reviewed"),
-  /** "מה יצא מהמחשב": the requests kept with a case (or every case), newest first. */
-  sentHistory: (caseId: string | null, place: string | null, query: string) => call("sent_history", { caseId, place, query }),
+  /** "מה יצא מהמחשב": one page of the requests kept with a case (or every case), newest first, from `before` on. */
+  sentHistory: (caseId: string | null, place: string | null, query: string, before: SentCursor | null) =>
+    call("sent_history", { caseId, place, query, before }),
+  /** How many requests left since `since` (seconds), of every case: counted, not read. */
+  sentCount: (since: number) => call("sent_count", { since }),
   sentText: (caseId: string, id: string) => call("sent_text", { caseId, id }),
   retentionDue: () => call("retention_due"),
+  /** Files an older version saved in the app's own folder (D-120): their number only. */
+  oldExports: () => call("old_exports"),
+  /** That folder in the system's file window, to move or delete what is there. */
+  openOldExports: () => run("open_old_exports"),
   keepCaseLonger: (caseId: string, years: number) => run("keep_case_longer", { caseId, years }),
 
   /** `current` is the password, or the recovery kit when the password was forgotten. */
@@ -393,6 +412,9 @@ export const ipc = {
     run("change_password", { current, withRecovery, newPassword }),
   newRecoveryKit: (current: string, withRecovery: boolean) =>
     call("new_recovery_kit", { current, withRecovery }),
+  /** The kit she has stops opening the vault; no new one is shown (D-103). */
+  retireRecoveryKit: (current: string, withRecovery: boolean) =>
+    call("retire_recovery_kit", { current, withRecovery }),
 
   /** Forgot the password → sign in with Google (D-041). Readable while locked. */
   googleStatus: () => call("google_status"),
@@ -484,6 +506,8 @@ export type {
   UpdateView,
   UsageSummary,
   Readiness,
+  SafetyNet,
+  NetPart,
   SecurityItem,
   SecurityLayer,
   SecurityStatus,

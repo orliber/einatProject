@@ -22,27 +22,103 @@ pub(crate) fn free_path(dir: &std::path::Path, file_name: &str) -> PathBuf {
     path
 }
 
-/// Downloads, else Documents, else the home folder, else the app's own folder. A folder that
-/// a cloud service syncs (Documents moved to OneDrive, say) is skipped: the report holds the
-/// real names and would be uploaded on its own.
-pub(crate) fn export_dir(app: &tauri::AppHandle) -> Result<PathBuf, UiError> {
+/// Downloads, else Documents, else the home folder. A folder that a cloud service syncs
+/// (Documents moved to OneDrive, say) is skipped: the report holds the real names and would be
+/// uploaded on its own. When none of them can take it, she chooses the folder herself, told
+/// why; never a hidden folder of the app's own, where a report would stay unseen (D-120).
+pub(crate) async fn export_dir(app: &tauri::AppHandle) -> Result<PathBuf, UiError> {
     let paths = app.path();
-    [
-        paths.download_dir(),
-        paths.document_dir(),
-        paths.home_dir(),
-        paths.app_local_data_dir().map(|d| d.join("exports")),
-    ]
-    .into_iter()
-    .flatten()
-    .filter(|d| dv_core::cloud_synced_folder(d).is_none())
-    .find(|d| std::fs::create_dir_all(d).is_ok())
-    .ok_or_else(|| UiError {
-        code: "no_folder".to_owned(),
-        message: "לא נמצאה תיקייה לשמירת הדוח (הורדות או מסמכים).".to_owned(),
-        details: Vec::new(),
-        action: dv_core::ErrorAction::Report,
+    let usual = usual_export_dir([paths.download_dir(), paths.document_dir(), paths.home_dir()]);
+    if let Some(dir) = usual {
+        return Ok(dir);
+    }
+    let chosen = file_dialog::pick_folder(app, EXPORT_FOLDER_TITLE).await;
+    chosen_export_dir(chosen).map_err(|e| e.to_ui())
+}
+
+/// Said in the folder window when no usual folder can take the file.
+const EXPORT_FOLDER_TITLE: &str =
+    "תיקיית ההורדות והמסמכים לא זמינות, או שהן מסונכרנות לענן. בוחרים תיקייה לשמירת הקובץ";
+
+/// The first usual folder that is not synced to the cloud and can be made.
+fn usual_export_dir<E>(
+    candidates: impl IntoIterator<Item = Result<PathBuf, E>>,
+) -> Option<PathBuf> {
+    candidates
+        .into_iter()
+        .flatten()
+        .filter(|d| dv_core::cloud_synced_folder(d).is_none())
+        .find(|d| std::fs::create_dir_all(d).is_ok())
+}
+
+/// The folder she chose for an export: not synced to the cloud, and there.
+fn chosen_export_dir(chosen: Option<PathBuf>) -> Result<PathBuf, CoreError> {
+    let Some(dir) = chosen else {
+        return Err(CoreError::Refused(
+            "לא נבחרה תיקייה, ולכן הקובץ לא נשמר. אפשר להפיק שוב ולבחור תיקייה.".to_owned(),
+        ));
+    };
+    if dv_core::cloud_synced_folder(&dir).is_some() {
+        return Err(CoreError::Refused(
+            "התיקייה שנבחרה מסונכרנת לענן, והדוח היה עולה אליו לבד. בוחרים תיקייה אחרת, למשל בדיסק נייד."
+                .to_owned(),
+        ));
+    }
+    if !dir.is_dir() {
+        return Err(CoreError::Refused(
+            "התיקייה שנבחרה לא נמצאה. אפשר להפיק שוב ולבחור תיקייה אחרת.".to_owned(),
+        ));
+    }
+    Ok(dir)
+}
+
+/// The app's own folder where versions before D-120 saved a report when no usual folder could
+/// take it. Nothing is written there any more; what is left is shown to her, never deleted.
+fn old_exports_dir(state: &AppState) -> Option<PathBuf> {
+    state.dir.parent().map(|d| d.join("exports"))
+}
+
+/// How many files an older version left in that folder: only the number, never their names.
+fn count_files(dir: &std::path::Path) -> u32 {
+    std::fs::read_dir(dir).map_or(0, |entries| {
+        let files = entries
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+            .count();
+        u32::try_from(files).unwrap_or(u32::MAX)
     })
+}
+
+/// Files an older version saved in the app's own folder (D-120): she is told, so reports with
+/// real names do not stay there forgotten.
+#[tauri::command]
+pub(crate) fn old_exports(state: tauri::State<'_, AppState>) -> u32 {
+    old_exports_dir(&state).map_or(0, |d| count_files(&d))
+}
+
+/// Open that folder in the system's file window, so she can move or delete what is there.
+/// The folder is the app's own; nothing from the window chooses it.
+#[tauri::command]
+pub(crate) fn open_old_exports(state: tauri::State<'_, AppState>) -> Res<()> {
+    let dir = old_exports_dir(&state)
+        .filter(|d| d.is_dir())
+        .ok_or_else(|| CoreError::Refused("התיקייה כבר לא קיימת.".to_owned()).to_ui())?;
+    let opened = if cfg!(windows) {
+        let explorer = std::env::var_os("SystemRoot").map_or_else(
+            || PathBuf::from("explorer.exe"),
+            |root| PathBuf::from(root).join("explorer.exe"),
+        );
+        std::process::Command::new(explorer).arg(&dir).spawn()
+    } else if cfg!(target_os = "macos") {
+        std::process::Command::new("/usr/bin/open")
+            .arg(&dir)
+            .spawn()
+    } else {
+        std::process::Command::new("xdg-open").arg(&dir).spawn()
+    };
+    opened
+        .map(|_| ())
+        .map_err(|_| CoreError::Refused("חלון התיקייה לא נפתח. אפשר לנסות שוב.".to_owned()).to_ui())
 }
 
 /// Write the report into the Downloads folder and return where it was saved. With `parents`,
@@ -55,7 +131,7 @@ pub(crate) async fn export_report(
     password: Option<String>,
     parents: Option<ParentsOptions>,
 ) -> Res<String> {
-    let dir = export_dir(&app)?;
+    let dir = export_dir(&app).await?;
     let password = password
         .filter(|p| !p.is_empty())
         .map(zeroize::Zeroizing::new);
@@ -76,7 +152,7 @@ pub(crate) async fn export_report(
 async fn save_export(dir: PathBuf, file_name: String, bytes: Vec<u8>) -> Res<String> {
     tauri::async_runtime::spawn_blocking(move || {
         let path = free_path(&dir, &file_name);
-        std::fs::write(&path, bytes).map_err(|e| CoreError::Internal(e.to_string()).to_ui())?;
+        std::fs::write(&path, bytes).map_err(|e| dv_core::file_error(e).to_ui())?;
         Ok(path.display().to_string())
     })
     .await
@@ -92,7 +168,7 @@ pub(crate) async fn export_pdf(
     password: Option<String>,
     parents: Option<ParentsOptions>,
 ) -> Res<String> {
-    let dir = export_dir(&app)?;
+    let dir = export_dir(&app).await?;
     let password = password
         .filter(|p| !p.is_empty())
         .map(zeroize::Zeroizing::new);
@@ -117,12 +193,14 @@ pub(crate) async fn export_security_pdf(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Res<String> {
-    let dir = export_dir(&app)?;
+    let dir = export_dir(&app).await?;
     let bytes = with_core(&state, |c| c.security_layers_pdf()).await?;
     save_export(dir, "שכבות ההגנה.pdf".to_owned(), bytes).await
 }
 
-/// Whether a PDF is one this vault exported, unchanged: when it was made, or `None`.
+/// Whether a file is one this vault exported, unchanged: when it was made, or `None`. A file
+/// over the cap is refused before it is copied; the hash is made with the core free, and only
+/// the fingerprint goes to the core (D-120).
 #[tauri::command]
 pub(crate) async fn check_original(
     state: tauri::State<'_, AppState>,
@@ -131,8 +209,14 @@ pub(crate) async fn check_original(
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err(internal("body"));
     };
+    if bytes.len() > dv_core::MAX_ORIGINAL_BYTES {
+        return Err(dv_core::original_too_large().to_ui());
+    }
     let bytes = bytes.clone();
-    with_core(&state, move |c| c.check_original(&bytes)).await
+    let sha256 = tauri::async_runtime::spawn_blocking(move || dv_core::sha256_hex(&bytes))
+        .await
+        .map_err(|_| internal("task"))?;
+    with_core(&state, move |c| c.check_original_hash(&sha256)).await
 }
 
 /// EX-4: a short letter to the parents or the school, from the approved report.
@@ -159,6 +243,8 @@ pub(crate) async fn letter(
 }
 
 /// The letter into the same folder as the report, under a name without the child's name.
+/// Rendered, encrypted and written with the core free, and recorded with its fingerprint,
+/// like the report (D-120).
 #[tauri::command]
 pub(crate) async fn export_letter(
     app: tauri::AppHandle,
@@ -167,22 +253,78 @@ pub(crate) async fn export_letter(
     audience: String,
     password: Option<String>,
 ) -> Res<String> {
-    let dir = export_dir(&app)?;
-    with_core(&state, move |c| {
-        let check = c.check_export(&case_id)?;
-        let bytes = c.export_letter(
-            &case_id,
-            &audience,
-            password.as_deref().filter(|p| !p.is_empty()),
-        )?;
-        let who = if audience == "school" {
-            "צוות"
-        } else {
-            "הורים"
-        };
-        let path = free_path(&dir, &format!("מכתב-{who}-{}", check.file_name));
-        std::fs::write(&path, bytes).map_err(|e| CoreError::Internal(e.to_string()))?;
-        Ok(path.display().to_string())
-    })
-    .await
+    let dir = export_dir(&app).await?;
+    let password = password
+        .filter(|p| !p.is_empty())
+        .map(zeroize::Zeroizing::new);
+    let who = if audience == "school" {
+        "צוות"
+    } else {
+        "הורים"
+    };
+    let (bytes, check) = off_lock(
+        &state,
+        move |c| {
+            c.begin_export_letter(&case_id, &audience, password.as_deref().map(String::as_str))
+        },
+        |job| job.run(),
+        |c, exported| c.finish_export(exported),
+    )
+    .await?;
+    save_export(dir, format!("מכתב-{who}-{}", check.file_name), bytes).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fresh folder of this test's own under the system's temporary folder.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("dv-export-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn old_exports_are_counted_by_number_only() {
+        let dir = scratch("old");
+        assert_eq!(count_files(&dir.join("exports")), 0);
+        std::fs::create_dir_all(dir.join("exports").join("תת-תיקייה")).unwrap();
+        std::fs::write(dir.join("exports").join("דוח אבחון TEST-0042.docx"), b"x").unwrap();
+        std::fs::write(dir.join("exports").join("מכתב.docx"), b"y").unwrap();
+        assert_eq!(count_files(&dir.join("exports")), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_usual_folder_is_taken_when_one_is_there() {
+        let dir = scratch("usual");
+        let missing: Result<PathBuf, ()> = Err(());
+        let got = usual_export_dir([missing, Ok(dir.join("הורדות"))]);
+        assert_eq!(got, Some(dir.join("הורדות")));
+        assert!(dir.join("הורדות").is_dir());
+        // A synced one is passed over.
+        let synced = dir.join("OneDrive").join("מסמכים");
+        assert_eq!(usual_export_dir([Ok::<_, ()>(synced)]), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn no_usual_folder_means_she_chooses_and_nothing_hidden_is_used() {
+        let none: [Result<PathBuf, ()>; 2] = [Err(()), Err(())];
+        assert_eq!(usual_export_dir(none), None);
+        // Cancelled: refused with a sentence, nothing saved anywhere.
+        let e = chosen_export_dir(None).unwrap_err().to_ui();
+        assert_eq!(e.code, "refused");
+        assert!(e.message.contains("לא נשמר"), "{}", e.message);
+        // A folder synced to the cloud is refused, even when it is there.
+        let dir = scratch("chosen");
+        let synced = dir.join("Dropbox");
+        std::fs::create_dir_all(&synced).unwrap();
+        let e = chosen_export_dir(Some(synced)).unwrap_err().to_ui();
+        assert!(e.message.contains("לענן"), "{}", e.message);
+        assert_eq!(chosen_export_dir(Some(dir.clone())).unwrap(), dir);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

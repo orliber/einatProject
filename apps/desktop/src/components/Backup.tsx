@@ -6,6 +6,7 @@ import { useApp } from "../App";
 import { ipc, type AppStatus, type BackupCheckView, type StagedBackup } from "../ipc/client";
 import { Dialog, ErrorLine, CloseIcon } from "./ui";
 import { timed, WaitLine } from "./Progress";
+import { daysAgo } from "../i18n/he";
 import "./Backup.css";
 
 /** Automatic backups kept on the drive (dv-core `AUTO_KEEP`). */
@@ -16,19 +17,12 @@ export function heDateTime(unix: number): string {
   return `${d.toLocaleDateString("he-IL")}, ${d.toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
-export function daysAgo(days: number): string {
-  if (days <= 0) return "היום";
-  if (days === 1) return "אתמול";
-  if (days === 2) return "שלשום";
-  return `לפני ${days} ימים`;
-}
-
 export function useBackupStatus() {
   return useQuery({ queryKey: ["backup"], queryFn: ipc.backupStatus });
 }
 
 /** "Back up now": the "Save as" window, then the result in a toast. */
-function useWriteBackup() {
+export function useWriteBackup() {
   const { notify, fail } = useApp();
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
@@ -40,7 +34,8 @@ function useWriteBackup() {
       const done = await ipc.writeBackup();
       if (done) {
         notify(`הגיבוי נשמר מוצפן: ${done.path}`);
-        await qc.invalidateQueries({ queryKey: ["backup"] });
+        // The safety net follows the backup status; "ready for real cases" counts it too.
+        await Promise.all([qc.invalidateQueries({ queryKey: ["backup"] }), qc.invalidateQueries({ queryKey: ["readiness"] })]);
       }
     } catch (e) {
       setError(fail(e as never));
@@ -82,13 +77,13 @@ export function BackupSettings() {
   return (
     <section className="card setting" aria-labelledby="s-backup">
       <h2 id="s-backup">גיבוי</h2>
-      <p className="muted small">קובץ מוצפן אחד, לדיסק נייד (לא לענן). נפתח בסיסמה או בערכת השחזור של יום הגיבוי.</p>
+      <p className="muted small">קובץ מוצפן אחד, לדיסק נייד (לא לענן). נפתח בסיסמה של יום הגיבוי, בכל מחשב.</p>
       {s && (
         <ul className="sec-list backup-facts">
           <li>
             <span className={s.due ? "chip chip-warn" : "chip chip-ok"}>{s.last_at === null ? "אין" : s.due ? "לחדש" : "עדכני"}</span>
             {s.last_at === null ? "עוד לא נעשה גיבוי." : `הגיבוי האחרון: ${daysAgo(s.days_since ?? 0)} (${heDateTime(s.last_at)}).`}
-            {s.secret_changed && s.last_at !== null && <span className="hint">הסיסמה או ערכת השחזור הוחלפו מאז, והגיבוי הזה נפתח רק בקודמות.</span>}
+            {s.secret_changed && s.last_at !== null && <span className="hint">הסיסמה הוחלפה מאז, והגיבוי הזה נפתח רק בסיסמה הקודמת.</span>}
           </li>
           <li>
             <span className={s.last_check_at === null ? "chip chip-sand" : "chip chip-ok"}>{s.last_check_at === null ? "לא נבדק" : "נבדק"}</span>
@@ -154,7 +149,7 @@ export function CheckBackupDialog({ staged, onClose }: { staged: StagedBackup; o
       {result ? (
         <div className="stack backup-result" role="status">
           <p className={result.integrity_ok ? "backup-ok" : "error"}>
-            {result.integrity_ok ? "✓ הגיבוי נפתח ותקין." : "הגיבוי נפתח, אבל בדיקת השלמות מצאה בעיה. כדאי לגבות מחדש."}
+            {result.integrity_ok ? "✓ הגיבוי נפתח ותקין." : "הגיבוי נפתח, אבל בדיקת השלמות מצאה בו חריגה. גיבוי חדש לא יסיר אותה, לכן כדאי לא למחוק גיבויים ישנים יותר ולספר לאור."}
           </p>
           <p>נמצאו בו {result.cases === 1 ? "תיק אחד" : `${result.cases} תיקים`} (כולל סל המחזור), מ-{heDateTime(result.created_at)}.</p>
           <p className="hint">העותק שנפתח לבדיקה כבר נמחק. הכספת עצמה לא השתנתה.</p>
@@ -178,8 +173,7 @@ export function CheckBackupDialog({ staged, onClose }: { staged: StagedBackup; o
   );
 }
 
-/** Days before the line comes back, and how long "×" puts it away. */
-const REMIND_AFTER_DAYS = 14;
+/** How long "×" puts the line away. */
 const SNOOZE_DAYS = 7;
 const SNOOZE_KEY = "dv.backupSnoozedAt";
 
@@ -193,8 +187,9 @@ function snoozedUntil(): number {
 
 /**
  * A quiet line on the cases screen, only now and then: when there has never been a backup,
- * two weeks after the last one, or after a password / kit change (always, the old backup no
- * longer opens with the new secret). "×" puts it away for a week.
+ * a week after the last one, or after a password / kit change (always, the old backup no
+ * longer opens with the new secret): the core's `due`, the same rule as the safety net
+ * (D-107). "×" puts it away for a week.
  */
 export function BackupReminder() {
   const { go } = useApp();
@@ -202,8 +197,7 @@ export function BackupReminder() {
   const { write, busy, error } = useWriteBackup();
   const [hidden, setHidden] = useState(() => Date.now() < snoozedUntil());
   const s = status.data;
-  const due = s && (s.secret_changed || s.last_at === null || (s.days_since ?? 0) >= REMIND_AFTER_DAYS);
-  if (!s || !due || !s.has_cases || (hidden && !s.secret_changed)) return null;
+  if (!s || !s.due || !s.has_cases || (hidden && !s.secret_changed)) return null;
   const snooze = () => {
     try {
       localStorage.setItem(SNOOZE_KEY, String(Date.now()));
@@ -216,7 +210,7 @@ export function BackupReminder() {
     <div className="backup-reminder" role="status">
       <span className="grow">
         {s.last_at === null ? "עוד לא נעשה גיבוי לכספת."
-          : s.secret_changed ? "הסיסמה או ערכת השחזור הוחלפו אחרי הגיבוי האחרון."
+          : s.secret_changed ? "הסיסמה הוחלפה אחרי הגיבוי האחרון."
           : `הגיבוי האחרון היה ${daysAgo(s.days_since ?? 0)}.`}
         {" "}גיבוי לדיסק נייד שומר על העבודה אם המחשב יתקלקל או ייגנב.
       </span>
@@ -256,7 +250,8 @@ export function RestoreFromBackup({ onRestored, onBack }: { onRestored: (s: AppS
       setSecret("");
       onRestored(status);
     } catch (err) {
-      setError((err as { message?: string }).message ?? "השחזור נכשל.");
+      const e = err as { code?: string; message?: string };
+      setError(mode === "recovery" && e.code === "wrong_secret" ? "ערכת השחזור לא נכונה. כדאי לבדוק שגיאות הקלדה." : e.message ?? "השחזור נכשל.");
       setSecret("");
       setBusy(false);
     }
@@ -265,7 +260,7 @@ export function RestoreFromBackup({ onRestored, onBack }: { onRestored: (s: AppS
   return (
     <div className="setup-col stack">
       <h1>שחזור מגיבוי</h1>
-      <p className="lede">במחשב חדש, או אחרי תקלה: בוחרים את קובץ הגיבוי (בדרך כלל בדיסק הנייד), ופותחים אותו בסיסמה או בערכת השחזור שהיו ביום הגיבוי.</p>
+      <p className="lede">במחשב חדש, או אחרי תקלה: בוחרים את קובץ הגיבוי (בדרך כלל בדיסק הנייד), ופותחים אותו בסיסמה שהייתה ביום הגיבוי.</p>
       {!staged ? (
         <>
           <button type="button" className="btn btn-primary btn-big" onClick={() => void choose()}>בחירת קובץ הגיבוי…</button>
@@ -284,8 +279,9 @@ export function RestoreFromBackup({ onRestored, onBack }: { onRestored: (s: AppS
               dir={mode === "recovery" ? "ltr" : undefined} autoComplete="off" autoFocus placeholder={mode === "recovery" ? "7K3M-Q9WD-…" : undefined}
               value={secret} onChange={(e) => setSecret(e.target.value)} />
           </div>
-          <button type="button" className="link-btn align-start" onClick={() => { setMode(mode === "password" ? "recovery" : "password"); setSecret(""); setError(null); }}>
-            {mode === "password" ? "הסיסמה נשכחה? פתיחה עם ערכת השחזור" : "פתיחה עם הסיסמה"}
+          {/* The kit is a last resort (D-103): a small link, not the way in. */}
+          <button type="button" className={mode === "password" ? "link-btn small muted align-start" : "link-btn align-start"} onClick={() => { setMode(mode === "password" ? "recovery" : "password"); setSecret(""); setError(null); }}>
+            {mode === "password" ? "יש לי ערכת שחזור מודפסת" : "פתיחה עם הסיסמה"}
           </button>
           <ErrorLine error={error} />
           {busy && <WaitLine task="restore" label="פותחת את הגיבוי, בודקת שהוא שלם ומשחזרת" />}

@@ -17,11 +17,13 @@ use std::collections::HashMap;
 
 use common::*;
 use dv_domain::{Identity, PRACTITIONER_TAG};
-use dv_privacy::restore::{remaining_tags, restore, scan_model_output};
+use dv_privacy::restore::{
+    her_text_to_send, remaining_tags, restore, restore_hers, scan_model_output,
+};
 use dv_privacy::text::{normalize, prefix_splits, tokenize};
 use dv_privacy::{
-    clear, filter, filter_split, filter_split_with_hints, filter_with_hints, AutoKind, GateRequest,
-    NameHint, PrivacyContext,
+    clear, filter, filter_split, filter_split_with_hints, filter_to_keep, filter_with_hints,
+    AutoKind, GateRequest, Mark, MaskBook, NameHint, PrivacyContext,
 };
 use proptest::prelude::*;
 
@@ -56,6 +58,20 @@ const FILLER: &[&str] = &[
     ")",
     "\"",
     "\n",
+    // Quotes, gershayim, geresh, maqaf, dashes and other marks a report has around words.
+    "״",
+    "׳",
+    "'",
+    "-",
+    "־",
+    "–",
+    ";",
+    "…",
+    "\"מתקשה\"",
+    "״שוב״",
+    "(בשקט)",
+    "רב-תחומי",
+    "דו־לשוני",
 ];
 
 const PREFIXES: &[&str] = &[
@@ -80,12 +96,22 @@ fn parts() -> impl Strategy<Value = Vec<(usize, usize, bool)>> {
     prop::collection::vec((0usize..64, 0usize..64, prop::bool::weighted(0.35)), 1..14)
 }
 
+/// The filter's outcome generalized something (left a word out, or a date became relative
+/// time): what goes out is meant to differ from what she wrote there, by design.
+fn generalized(out: &dv_privacy::FilterOutcome) -> bool {
+    out.tagged_segments
+        .iter()
+        .any(|s| s.mark == Some(Mark::Relative))
+}
+
 proptest! {
     #![proptest_config(ProptestConfig { cases: 96, ..ProptestConfig::default() })]
 
     /// Declared names with any prefix in any surrounding text: every name becomes its tag
-    /// with the prefix kept outside it, nothing else changes, and restoring the tags gives
-    /// back exactly the original text, byte for byte.
+    /// with the prefix kept outside it, and restoring the tags gives back exactly the
+    /// original text, byte for byte, unless the outgoing filter generalized something (a
+    /// quoted word after "לגן" may be the kindergarten's name, and is left out); kept as her
+    /// own words (D-126), the text always comes back whole.
     #[test]
     fn filter_then_restore_is_the_identity(p in parts()) {
         let ids = identities();
@@ -96,8 +122,17 @@ proptest! {
         }
         prop_assert!(out.auto_hidden.is_empty(), "{:?}", out.auto_hidden);
         assert_segments_consistent(&text, &out);
-        prop_assert_eq!(restore(&out.tagged, &ids, None, &[]), text);
+        if !generalized(&out) {
+            prop_assert_eq!(restore(&out.tagged, &ids, None, &[]), text.clone());
+        }
         prop_assert!(gate_text(&out.tagged, &ids, CASE).is_ok(), "dead end on {}", out.tagged);
+        let book = MaskBook::default();
+        let c = PrivacyContext { masks: Some(&book), ..ctx(&ids, CASE) };
+        let kept = filter_to_keep(&text, &c, &[]).unwrap();
+        prop_assert_eq!(restore_hers(&kept.tagged, &ids, None, &book.entries()), text);
+        // Sent again, the kept text goes out as the text itself would.
+        let sent = her_text_to_send(&kept.tagged, &ids, None, &book.entries());
+        prop_assert_eq!(filter(&sent, &c).unwrap().tagged, filter(&sentence(&p), &c).unwrap().tagged);
     }
 
     /// The same text filtered twice gives the same outcome, and filtering the filter's own
@@ -111,8 +146,15 @@ proptest! {
         let b = filter(&text, &c).unwrap();
         prop_assert_eq!(&a, &b);
         let again = filter(&a.tagged, &c).unwrap();
-        prop_assert_eq!(&again.tagged, &a.tagged);
-        prop_assert!(again.auto_hidden.is_empty(), "{:?}", again.auto_hidden);
+        if generalized(&a) {
+            // A name left out brings the next word up to the institution word (`לגן ״שוב״
+            // "מתקשה"` goes out `לגן "מתקשה"`), which the second time reads as the name: more
+            // is hidden then, never less.
+            prop_assert!(gate_text(&again.tagged, &ids, CASE).is_ok(), "{}", again.tagged);
+        } else {
+            prop_assert_eq!(&again.tagged, &a.tagged);
+            prop_assert!(again.auto_hidden.is_empty(), "{:?}", again.auto_hidden);
+        }
     }
 
     /// One person, one tag; two people, two tags. Every occurrence of a declared name (any
@@ -409,6 +451,14 @@ fn a_tag_after_an_institution_word_and_a_quote_stays_whole() {
         let out = filter(text, &c).unwrap();
         assert_eq!(out.tagged, text);
     }
+    // After the closing quote a tag leaves the quoted name as on the first filtering, and
+    // "המוסד" (what a recurring name became) is not a name.
+    for (text, out) in [
+        ("הגיע לגן \"ניצנים\" [ילד] שוב", "הגיע לגן [ילד] שוב"),
+        ("הגיע לגן \"המוסד\" שוב", "הגיע לגן \"המוסד\" שוב"),
+    ] {
+        assert_eq!(filter(text, &c).unwrap().tagged, out);
+    }
     // A tag inside the quotes is never part of an institution's name, wherever it sits.
     for text in [
         "הגיע לגן \" מתקשה [ילד] \" שוב",
@@ -604,4 +654,241 @@ proptest! {
         let _ = scan_model_output(&text, &tags, &ids);
         let _ = restore(&out.tagged, &ids, Some("x"), &[]);
     }
+}
+
+/// Found by `her_kept_words_come_back_exactly` at 20,000 cases: the mask book gives one tag to
+/// the same number however it is written (a point inside it is dropped when it is read), so
+/// her second copy, with the point, came back as the first. A numbered tag is kept in her
+/// paragraph only for the very words it stands for; anything else keeps her words.
+#[test]
+fn the_same_number_written_twice_ways_comes_back_as_she_wrote_each() {
+    let ids = identities();
+    let text = "מספר 000000018 ושוב 0000\u{5B0}00018 בתיק";
+    let book = MaskBook::default();
+    let c = PrivacyContext {
+        masks: Some(&book),
+        ..ctx(&ids, CASE)
+    };
+    let kept = filter_to_keep(text, &c, &[]).unwrap();
+    assert!(!kept.tagged.contains("00018"), "{}", kept.tagged);
+    assert_eq!(
+        restore_hers(&kept.tagged, &ids, None, &book.entries()),
+        text
+    );
+}
+
+/// Found by `filter_then_restore_is_the_identity` on main (dc51787): `לגן " מתקשה "` came back
+/// as `לגן "`. Not the restore step: after an institution word a quoted word may be the
+/// kindergarten's name ("לגן \"ניצנים\""), and the outgoing filter leaves it out, as decided
+/// (round 30: nothing to put back). The closing quote after a space stayed behind, and her
+/// own paragraphs were stored as that outgoing text, so the report lost the name too.
+#[test]
+fn a_quoted_word_after_an_institution_word_is_left_out_but_kept_for_her() {
+    let ids = identities();
+    let text = sentence(&[(7, 0, false), (27, 0, false), (0, 0, false), (27, 0, false)]);
+    assert_eq!(text, "לגן \" מתקשה \"");
+    // Out: left out with both quotes, nothing dangling.
+    for (text, out) in [
+        (text.as_str(), "לגן"),
+        ("לגן \" מתקשה \" שוב", "לגן שוב"),
+        ("לגן \"מתקשה\" שוב", "לגן שוב"),
+        ("בגן ״ניצנים״ שוב", "בגן שוב"),
+    ] {
+        assert_eq!(
+            filter(text, &ctx(&ids, CASE)).unwrap().tagged,
+            out,
+            "{text}"
+        );
+    }
+    // Kept: exactly as she wrote it, and sent again it goes out the same way.
+    let book = MaskBook::default();
+    let c = PrivacyContext {
+        masks: Some(&book),
+        ..ctx(&ids, CASE)
+    };
+    let kept = filter_to_keep(&text, &c, &[]).unwrap();
+    assert_eq!(kept.tagged, "לגן[מילים_1]");
+    assert_eq!(
+        restore_hers(&kept.tagged, &ids, None, &book.entries()),
+        text
+    );
+    // Shown as anyone else's text, the tag stays a tag (second review of D-126).
+    assert_eq!(
+        restore(&kept.tagged, &ids, None, &book.entries()),
+        kept.tagged
+    );
+    let sent = her_text_to_send(&kept.tagged, &ids, None, &book.entries());
+    assert_eq!(filter(&sent, &c).unwrap().tagged, "לגן");
+    // Anywhere else (an answer, a material) the tag is plain words, and the gate refuses it.
+    assert_eq!(filter(&kept.tagged, &c).unwrap().tagged, "לגן(מילים_1)");
+    assert!(gate_text(&kept.tagged, &ids, CASE).is_err());
+    // Without the case's book there is nowhere to keep the words: refused, not lost.
+    assert!(filter_to_keep(&text, &ctx(&ids, CASE), &[]).is_err());
+}
+
+/// `name` as a word of `text`, with or without a prefix (two pieces glued into one word,
+/// "גן" and "ועם", are not "נועם").
+fn has_word(text: &str, name: &str) -> bool {
+    let name = normalize(name);
+    tokenize(text)
+        .iter()
+        .any(|t| prefix_splits(&t.norm).iter().any(|(_, rest)| *rest == name))
+}
+
+/// Pieces of her own writing: declared names with a prefix, ordinary words and marks, the
+/// context words that send the filter into its rules (institutions, dates, titles, quotes,
+/// gershayim, maqaf), identifiers, and odd characters; after a space or glued.
+fn her_text(pieces: &[(u8, usize, usize, bool)], idn: &str, phone: &str) -> String {
+    let mut out = String::new();
+    for &(kind, a, b, glued) in pieces {
+        let name = kind % 6 == 0;
+        // A name stands as a word of its own: glued to a mark it is still hidden, and
+        // restored as it is declared, not as it was spelled.
+        if !out.is_empty() && (name || !glued || out.ends_with(' ')) {
+            out.push(' ');
+        }
+        match kind % 6 {
+            0 => {
+                out.push_str(PREFIXES[b % PREFIXES.len()]);
+                out.push_str(CASE_NAMES[a % CASE_NAMES.len()].0);
+                out.push(' ');
+            }
+            1 => out.push_str(FILLER[b % FILLER.len()]),
+            2 | 3 => {
+                let w = CONTEXT_WORDS[b % CONTEXT_WORDS.len()];
+                // Square brackets around words that are not a tag become round ones, by
+                // design (a forged tag never passes): not part of this property.
+                if !w.contains(['[', ']']) {
+                    out.push_str(w);
+                }
+            }
+            4 => out.push_str(if a % 2 == 0 { idn } else { phone }),
+            _ => out.push_str(ODD[b % ODD.len()]),
+        }
+    }
+    out
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
+
+    /// What she writes and keeps (an edited or her own paragraph, D-126) comes back exactly
+    /// as she wrote it, whatever is around the words; no declared name and no identifier is
+    /// in the stored text; and sent again, the stored text goes out exactly as the text
+    /// itself would, with no kept-words tag in it.
+    #[test]
+    fn her_kept_words_come_back_exactly(
+        pieces in prop::collection::vec((any::<u8>(), 0usize..64, 0usize..64, prop::bool::weighted(0.3)), 1..24),
+        idn in 10_000_000u32..99_999_999,
+    ) {
+        let ids = identities();
+        let idn = valid_id(&idn.to_string());
+        let phone = mobile(4, "1234567");
+        let text = her_text(&pieces, &idn, &phone);
+        let book = MaskBook::default();
+        let c = PrivacyContext { masks: Some(&book), ..ctx(&ids, CASE) };
+        let kept = filter_to_keep(&text, &c, &[]).unwrap();
+        prop_assert_eq!(restore_hers(&kept.tagged, &ids, None, &book.entries()), text.clone(), "stored {:?}", kept.tagged);
+        for (name, _) in CASE_NAMES {
+            prop_assert!(!has_word(&kept.tagged, name), "{name} stored in {:?}", kept.tagged);
+        }
+        prop_assert!(!digits(&kept.tagged).contains(&digits(&idn)), "{:?}", kept.tagged);
+        prop_assert!(!digits(&kept.tagged).contains(&digits(&phone)), "{:?}", kept.tagged);
+        let case_ids: Vec<Identity> = ids.iter().filter(|i| i.case_id == CASE).cloned().collect();
+        let sent = her_text_to_send(&kept.tagged, &case_ids, None, &book.entries());
+        let again = filter(&sent, &c).unwrap();
+        prop_assert!(!again.tagged.contains("[מילים_"), "{:?}", again.tagged);
+        for (name, _) in CASE_NAMES {
+            prop_assert!(!has_word(&again.tagged, name), "{name} sent in {:?}", again.tagged);
+        }
+        prop_assert!(!digits(&again.tagged).contains(&digits(&idn)), "{:?}", again.tagged);
+        // With words kept, it goes out exactly as the text itself would: restored whole
+        // first. (With only tags in it, it is read as any tagged draft sent again, where a tag
+        // can count differently from the name it stands for; the checks above still hold.)
+        if kept.tagged.contains("[מילים_") {
+            prop_assert_eq!(&again.tagged, &filter(&text, &c).unwrap().tagged);
+        }
+        // Storing never makes a dead end: what the gate clears sent directly, it clears
+        // stored and sent again. (The other way a stored text can hide more: "March" before a
+        // tag reads as a date. A name the filter found has a tag the case keeps only in
+        // dv-core.)
+        if again.auto_hidden.is_empty() {
+            let direct = filter(&text, &c).unwrap().tagged;
+            if gate_text(&direct, &ids, CASE).is_ok() {
+                prop_assert!(
+                    gate_text(&again.tagged, &ids, CASE).is_ok(),
+                    "{:?} / {:?}", again.tagged, direct
+                );
+            }
+        }
+        // The stored text read as any other text (an answer, a material): a kept-words tag
+        // is plain words, never her words put back, and the gate refuses the tag itself.
+        let other = filter(&kept.tagged, &c).unwrap();
+        prop_assert!(!other.tagged.contains("[מילים_"), "{:?}", other.tagged);
+        for e in book.entries().iter().filter(|e| e.kind == dv_privacy::KEPT_WORDS) {
+            prop_assert!(gate_text(&e.tag, &ids, CASE).is_err());
+        }
+    }
+}
+
+/// A stored draft sent again: a tag after "משפחת" was read as the family's name and cut
+/// (`משפחת [ילד]` went out as `משפחת [[משפחה_1]]`). Found by `her_kept_words_come_back_exactly`.
+/// A "[חסר: …]" note holds words of its own and is still read.
+#[test]
+fn a_tag_after_a_family_word_stays_whole() {
+    let ids = identities();
+    let c = ctx(&ids, CASE);
+    for text in [
+        "משפחת [ילד] הגיעה",
+        "למשפחת [אם] יש",
+        "משפחת [תאריך_2]",
+        "משפחת ו[ילד] הגיעה",
+    ] {
+        assert_eq!(filter(text, &c).unwrap().tagged, text);
+    }
+    for text in ["[חסר: משפחת ברקוביץ] הגיעה", "משפחת ברקוביץ[ת.ז.] הגיעה"]
+    {
+        let out = filter(text, &c).unwrap().tagged;
+        assert!(!out.contains("ברקוביץ"), "{out}");
+    }
+}
+
+/// A spaced dash after two declared names is a pause, not a double surname: "מתקשה" in
+/// `נועם אביטל - מתקשה` was hidden as one. Found by `filter_then_restore_is_the_identity`
+/// with the dashes added to its words.
+#[test]
+fn a_spaced_dash_after_declared_names_is_a_pause() {
+    let ids = identities();
+    let c = ctx(&ids, CASE);
+    let out = filter("נועם אביטל - מתקשה במעברים", &c).unwrap();
+    assert_eq!(out.tagged, "[ילד] [גננת] - מתקשה במעברים");
+    assert!(out.auto_hidden.is_empty(), "{:?}", out.auto_hidden);
+    // A name with a tight hyphen is still hidden, and so is a found surname's second part.
+    let out = filter("דנה כהן-לוי ודנה כהן - טגסט", &c).unwrap();
+    for word in ["כהן", "לוי", "טגסט"] {
+        assert!(!out.tagged.contains(word), "{}", out.tagged);
+    }
+}
+
+/// The number inside a numbered tag was read as a day before a month: a stored answer with
+/// `[מספר_זהות_1] מרץ` went out as `[מספר_זהות_לפני כ-7 חודשים`, and the gate refused it as a
+/// date. Found by `her_kept_words_come_back_exactly`. A date next to a tag is still a date, and
+/// a "[חסר: …]" note is still read.
+#[test]
+fn the_number_inside_a_tag_is_never_part_of_a_date() {
+    let ids = identities();
+    let c = ctx(&ids, CASE);
+    for text in ["[מספר_זהות_1] מרץ [ילד]", "[תאריך_2] במאי", "[ילד] 3 במרץ"]
+    {
+        let out = filter(text, &c).unwrap().tagged;
+        assert!(gate_text(&out, &ids, CASE).is_ok(), "{out}");
+        assert!(out.starts_with('['), "{out}");
+    }
+    assert_eq!(
+        filter("[מספר_זהות_1] מרץ [ילד]", &c).unwrap().tagged,
+        "[מספר_זהות_1] מרץ [ילד]"
+    );
+    assert!(!filter("[ילד] 3 במרץ", &c).unwrap().tagged.contains('3'));
+    assert!(gate_text("[ילד] 12.3.2020", &ids, CASE).is_err());
+    assert!(gate_text("[חסר: 12.3.2020]", &ids, CASE).is_err());
 }

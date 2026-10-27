@@ -159,6 +159,37 @@ describe("main screens", () => {
     expect(screen.getByRole("complementary", { name: "תוכן הדוח" })).toBeInTheDocument();
   });
 
+  it("material not sorted yet is a clear alert above the writing, with what to do (D-114)", async () => {
+    const { user, calls } = await openApp();
+    await openCase(user);
+    const contents = screen.getByRole("complementary", { name: "תוכן הדוח" });
+    const alert = within(contents).getByText(/חומרים עוד לא מוינו לסעיפים|חומר אחד עוד לא מוין לסעיפים/).closest(".contents-alert") as HTMLElement;
+    expect(alert).toHaveTextContent("חומר שלא מוין לא נכנס לטיוטות.");
+    // Above "write the empty ones", not in small print under it.
+    const write = within(contents).getByRole("button", { name: /^✦ לכתוב את/ });
+    expect(alert.compareDocumentPosition(write) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await user.click(within(alert).getByRole("button", { name: "למיין את החומרים" }));
+    expect(await screen.findByRole("dialog", { name: "לפני שליחה ל-Claude" })).toHaveTextContent("מיון החומרים לסעיפים");
+    expect(calls).toContain("prepare_sort");
+  });
+
+  it("without consent, the alert sends her to record it instead of sorting (D-114)", async () => {
+    const { user, core, calls } = await openApp();
+    const noam = ((await core.handle("list_cases", {})) as CaseSummary[]).find((c) => c.child_name === "נועם");
+    if (!noam) throw new Error("no case");
+    const detail = (await core.handle("case_detail", { caseId: noam.id })) as CaseDetail;
+    await core.handle("update_case", { caseId: noam.id, meta: { ...detail.meta, consent: null } });
+    // Without consent the case opens on its materials; the contents are on the writing stage.
+    await user.click(await screen.findByRole("button", { name: /בתיק של נועם$/ }));
+    await user.click(within(await screen.findByRole("navigation", { name: "שלבי התיק" })).getByRole("button", { name: /כתיבה/ }));
+    const alert = within(screen.getByRole("complementary", { name: "תוכן הדוח" })).getByRole("status");
+    expect(within(alert).queryByRole("button", { name: "למיין את החומרים" })).toBeNull();
+    expect(alert).toHaveTextContent("קודם רושמים את הסכמת ההורים");
+    await user.click(within(alert).getByRole("button", { name: "רישום ההסכמה" }));
+    await vi.waitFor(() => expect(screen.queryByRole("complementary", { name: "תוכן הדוח" })).toBeNull());
+    expect(calls).not.toContain("prepare_sort");
+  });
+
   it("the report page passes the accessibility check", async () => {
     const { user, view } = await openApp();
     await openCase(user);

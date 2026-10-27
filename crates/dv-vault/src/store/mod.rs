@@ -22,13 +22,15 @@ use crate::db::{migrate, open_encrypted, AUDIT_MIGRATIONS, IDENTITY_MIGRATIONS, 
 use crate::header::{unwrap_mk, wrap_mk, KeySlot, VaultHeader, FORMAT, HEADER_FILE};
 use crate::hello;
 use crate::password::{self, Argon2Params};
-use crate::{recovery, VaultError};
+use crate::{recovery, version, VaultError};
 
 mod backup;
 mod slots;
 mod style;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod version_tests;
 pub use backup::{
     drill_backup, peek_backup, BackupCheck, BackupInfo, BackupJob, BackupPeek, BackupWritten,
     WrittenBackup, BACKUP_EXTENSION,
@@ -81,6 +83,59 @@ pub struct DraftVersion {
 const MAIN_DB: &str = "main.db";
 const IDENTITY_DB: &str = "identity.db";
 const AUDIT_DB: &str = "audit.db";
+const DB_FILES: [&str; 3] = [MAIN_DB, IDENTITY_DB, AUDIT_DB];
+
+/// True when a database in `dir` (or its write-ahead log) holds data.
+fn databases_hold_data(dir: &Path) -> bool {
+    DB_FILES
+        .iter()
+        .any(|name| holds_data(&dir.join(name)) || holds_data(&dir.join(format!("{name}-wal"))))
+}
+
+/// Flush a folder's entries (files created, renamed or removed in it) to the disk. Not done on
+/// Windows: there it needs a folder handle opened for writing with backup semantics, and
+/// `FlushFileBuffers` on a folder is not documented for NTFS (SQLite does not do it either).
+/// NTFS journals a rename in order with the other changes to its metadata, so a rename that
+/// survives a power cut comes with those before it.
+pub(super) fn sync_dir(dir: &Path) -> Result<(), VaultError> {
+    #[cfg(unix)]
+    fs::File::open(dir)?.sync_all()?;
+    #[cfg(not(unix))]
+    let _ = dir;
+    Ok(())
+}
+
+/// Remove what a setup or a restore cut short left in `dir`: the header, the databases and
+/// their `-wal`/`-shm`. Only for a folder whose databases hold no data, or that a restore is
+/// about to fill (D-124).
+pub(super) fn clear_leftovers(dir: &Path) -> Result<(), VaultError> {
+    let names = DB_FILES
+        .iter()
+        .flat_map(|name| ["", "-wal", "-shm"].map(|suffix| format!("{name}{suffix}")));
+    // The header first: a stop halfway never leaves it next to a database.
+    for leftover in [HEADER_FILE.to_owned()].into_iter().chain(names) {
+        match fs::remove_file(dir.join(&leftover)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+            _ => {}
+        }
+    }
+    sync_dir(dir)
+}
+
+/// True when the file at `path` holds anything: its first page is there and not all zeros.
+/// A file that cannot be read counts as holding data (fail-closed: it is never replaced).
+fn holds_data(path: &Path) -> bool {
+    use std::io::Read;
+    let file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) => return e.kind() != std::io::ErrorKind::NotFound,
+    };
+    let mut page = Vec::with_capacity(4096);
+    match file.take(4096).read_to_end(&mut page) {
+        Ok(_) => page.iter().any(|&b| b != 0),
+        Err(_) => true,
+    }
+}
 
 fn token_hmac(key: &Key32, token: &str) -> String {
     hex(&hmac_sha256(
@@ -263,6 +318,38 @@ fn password_master_key(
 /// Where the unbound password slot is kept for the backups, sealed inside the vault (D-076).
 const BACKUP_SLOT_SECRET: &str = "password_slot_for_backups";
 
+/// Where the newest version that opened the vault is kept, sealed inside it (D-104).
+const APP_VERSION_SECRET: &str = "app_version";
+
+/// The version sealed in the main database (D-104), read before the vault is built and before
+/// any migration. `None` for a vault no version recorded itself in yet (one from before the
+/// table of secrets has no table at all).
+fn sealed_app_version(main: &Connection, key: &Key32) -> Result<Option<String>, VaultError> {
+    let tables: i64 = main.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'secrets'",
+        [],
+        |r| r.get(0),
+    )?;
+    if tables == 0 {
+        return Ok(None);
+    }
+    let row: Option<Vec<u8>> = main
+        .query_row(
+            "SELECT value_enc FROM secrets WHERE key = ?1",
+            [APP_VERSION_SECRET],
+            |r| r.get(0),
+        )
+        .optional()?;
+    row.map(|sealed| {
+        open_string(
+            key,
+            &aad("secrets", "value", APP_VERSION_SECRET, ""),
+            &sealed,
+        )
+    })
+    .transpose()
+}
+
 /// A password slot bound to this computer, from the stretched password.
 pub(crate) fn bound_slot(
     stretched: &[u8; 32],
@@ -382,9 +469,29 @@ fn enum_from<T: DeserializeOwned>(text: &str) -> Result<T, VaultError> {
 }
 
 impl Vault {
+    /// A vault is its header and a database that holds data. A header alone, next to missing,
+    /// empty or zeroed databases (a setup or a restore cut short by a power cut), is not a
+    /// vault: nothing could open it, and a new setup or a restore may replace it (D-124).
     #[must_use]
     pub fn exists(dir: &Path) -> bool {
-        dir.join(HEADER_FILE).exists()
+        dir.join(HEADER_FILE).exists() && databases_hold_data(dir)
+    }
+
+    /// Databases that hold data with no header next to them: a restore cut short after the
+    /// databases were moved in and before the header (D-124). Only that restore, run again,
+    /// may go over them; a new vault never does, nor writes a header next to them.
+    #[must_use]
+    pub fn has_databases_without_header(dir: &Path) -> bool {
+        !dir.join(HEADER_FILE).exists() && databases_hold_data(dir)
+    }
+
+    /// The header of the vault in `dir`, to open it. A header with no databases is refused,
+    /// rather than opened into new, empty ones (D-124).
+    fn existing_header(dir: &Path) -> Result<VaultHeader, VaultError> {
+        if !Self::exists(dir) {
+            return Err(VaultError::NotFound);
+        }
+        VaultHeader::read(dir)
     }
 
     /// Create a new vault. Returns it unlocked, with the recovery key to print.
@@ -404,7 +511,15 @@ impl Vault {
         if Self::exists(dir) {
             return Err(VaultError::AlreadyExists);
         }
+        if Self::has_databases_without_header(dir) {
+            return Err(VaultError::Refused(
+                "vault databases without a header: restore the backup again".to_owned(),
+            ));
+        }
         fs::create_dir_all(dir)?;
+        // A header alone, next to empty or zeroed databases: they would not open with the new
+        // keys (D-124).
+        clear_leftovers(dir)?;
         let vault_id = random_id()?;
         let mk = Key32::random()?;
         let salt = random_array::<32>()?;
@@ -432,6 +547,7 @@ impl Vault {
                 },
             ],
             audit_anchor: None,
+            app_version: None,
             mac: None,
         };
         let keys = Keys::derive(&mk)?;
@@ -483,7 +599,7 @@ impl Vault {
         password: &str,
         computer: Option<&Key32>,
     ) -> Result<Self, VaultError> {
-        let header = VaultHeader::read(dir)?;
+        let header = Self::existing_header(dir)?;
         let (mk, stretched) = password_master_key(&header, password, computer)?;
         let mut vault = Self::open_with(dir, header, &mk)?;
         vault.record(
@@ -559,8 +675,7 @@ impl Vault {
                 *slot = bound.clone();
             }
         }
-        self.header.sign(&self.keys.header)?;
-        self.header.write(&self.dir)?;
+        self.save_header()?;
         self.record(AuditEvent::PasswordBound, None, &serde_json::json!({}))
     }
 
@@ -632,12 +747,16 @@ impl Vault {
                 *slot = kept.clone();
             }
         }
-        header.sign(&self.keys.header)?;
+        // A header that failed its check is not signed for the backup either: restored, it
+        // still fails.
+        if self.integrity.header_ok {
+            header.sign(&self.keys.header)?;
+        }
         serde_json::to_vec_pretty(&header).map_err(|e| VaultError::Corrupt(e.to_string()))
     }
 
     pub fn unlock_with_recovery(dir: &Path, typed: &str) -> Result<Self, VaultError> {
-        let header = VaultHeader::read(dir)?;
+        let header = Self::existing_header(dir)?;
         let mk = master_key(&header, Secret::Recovery(typed))?;
         let mut vault = Self::open_with(dir, header, &mk)?;
         vault.record(
@@ -655,7 +774,7 @@ impl Vault {
         drive: &Key32,
         computer: &Key32,
     ) -> Result<Self, VaultError> {
-        let header = VaultHeader::read(dir)?;
+        let header = Self::existing_header(dir)?;
         let mk = master_key(&header, Secret::Google { drive, computer })?;
         let mut vault = Self::open_with(dir, header, &mk)?;
         vault.record(
@@ -681,8 +800,7 @@ impl Vault {
         self.header
             .slots
             .retain(|s| !matches!(s, KeySlot::WindowsHello { .. }));
-        self.header.sign(&self.keys.header)?;
-        self.header.write(&self.dir)?;
+        self.save_header()?;
         hello::delete_key_pair(&credential);
         self.record(AuditEvent::WindowsHelloOff, None, &serde_json::json!({}))
     }
@@ -729,8 +847,7 @@ impl Vault {
             .slots
             .retain(|s| !matches!(s, KeySlot::Google { .. }));
         self.header.slots.push(slot);
-        self.header.sign(&self.keys.header)?;
-        self.header.write(&self.dir)?;
+        self.save_header()?;
         self.record(AuditEvent::GoogleRecoveryOn, None, &serde_json::json!({}))
     }
 
@@ -744,16 +861,23 @@ impl Vault {
         self.header
             .slots
             .retain(|s| !matches!(s, KeySlot::Google { .. }));
-        self.header.sign(&self.keys.header)?;
-        self.header.write(&self.dir)?;
+        self.save_header()?;
         self.record(AuditEvent::GoogleRecoveryOff, None, &serde_json::json!({}))
     }
 
     fn open_with(dir: &Path, mut header: VaultHeader, mk: &Key32) -> Result<Self, VaultError> {
         let keys = Keys::derive(mk)?;
-        backup::remove_stale_scratch(dir);
         let header_ok = header.verify(&keys.header).is_ok();
+        // D-104: a vault a newer version opened is refused before anything is written to it:
+        // by the header (also checked as it was read), and by the version sealed in the main
+        // database, which cannot be edited. A newer version that only migrated the databases
+        // and then failed to open did not record itself: the version before still opens the
+        // vault (migrations only add, R7).
+        version::refuse_newer(header.app_version.as_deref(), version::APP_VERSION)?;
         let main = open_encrypted(&dir.join(MAIN_DB), &keys.db_main)?;
+        let sealed_version = sealed_app_version(&main, &keys.settings)?;
+        version::refuse_newer(sealed_version.as_deref(), version::APP_VERSION)?;
+        backup::remove_stale_scratch(dir);
         migrate(&main, MAIN_MIGRATIONS)?;
         let identity = open_encrypted(&dir.join(IDENTITY_DB), &keys.db_identity)?;
         migrate(&identity, IDENTITY_MIGRATIONS)?;
@@ -765,8 +889,12 @@ impl Vault {
                 ChainStatus::Intact { .. } => (true, None),
                 ChainStatus::AnchorLagging { head } => {
                     header.audit_anchor = Some(head);
-                    header.sign(&keys.header)?;
-                    header.write(dir)?;
+                    // Never signed again when it failed its check (the warning below writes
+                    // it, with the signature it came with).
+                    if header_ok {
+                        header.sign(&keys.header)?;
+                        header.write(dir)?;
+                    }
                     (true, None)
                 }
                 ChainStatus::Broken { reason } => (false, Some(reason)),
@@ -793,7 +921,61 @@ impl Vault {
                 &serde_json::json!({ "reason": reason }),
             )?;
         }
+        vault.record_app_version(sealed_version.as_deref())?;
         Ok(vault)
+    }
+
+    /// The newest version of the program that opened this vault (D-104), as the header says
+    /// while it is locked. Unauthenticated until the vault opens: it only decides what the
+    /// lock screen says. `None` for a vault no version recorded itself in yet.
+    pub fn opened_by(dir: &Path) -> Result<Option<String>, VaultError> {
+        Ok(VaultHeader::read(dir)?.app_version)
+    }
+
+    /// While the vault is locked: `Some(version)` when a newer version of the program opened
+    /// it and this one will not (D-104); the version is empty when it cannot be shown. Read
+    /// from the header alone, so the lock screen says so before anything is typed.
+    #[must_use]
+    pub fn opened_by_newer(dir: &Path) -> Option<String> {
+        match VaultHeader::read(dir) {
+            Err(VaultError::NewerVersion(v)) => Some(v),
+            _ => None,
+        }
+    }
+
+    /// The version recorded in the open vault's header.
+    #[must_use]
+    pub fn app_version(&self) -> Option<&str> {
+        self.header.app_version.as_deref()
+    }
+
+    /// Record this version as the newest that opened the vault, when it is newer than the one
+    /// recorded (never lower, D-104): sealed in the main database, and in the header when the
+    /// header is the one this vault signed (a header changed by someone else is never signed
+    /// again here). A header from before D-104 moves to the format that records it.
+    fn record_app_version(&mut self, sealed: Option<&str>) -> Result<(), VaultError> {
+        let current = version::APP_VERSION;
+        if version::should_record(sealed, current) {
+            let value = seal_str(
+                &self.keys.settings,
+                &aad("secrets", "value", APP_VERSION_SECRET, ""),
+                current,
+            )?;
+            self.main.execute(
+                "INSERT INTO secrets (key, value_enc) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value_enc = excluded.value_enc",
+                params![APP_VERSION_SECRET, value],
+            )?;
+        }
+        if self.integrity.header_ok
+            && (version::should_record(self.header.app_version.as_deref(), current)
+                || self.header.format < FORMAT)
+        {
+            self.header.app_version = Some(current.to_owned());
+            self.header.format = FORMAT;
+            self.header.sign(&self.keys.header)?;
+            self.header.write(&self.dir)?;
+        }
+        Ok(())
     }
 
     #[must_use]
@@ -909,7 +1091,17 @@ impl Vault {
             meta,
         )?;
         self.header.audit_anchor = Some(anchor);
-        self.header.sign(&self.keys.header)?;
+        self.save_header()
+    }
+
+    /// Write the header. Signed again only when it is the header this vault signed: one that
+    /// failed its check at opening is written with the signature it came with, so it fails
+    /// again at every opening and the warning stays. Nothing here ever makes a changed header
+    /// pass (D-104, review of #153).
+    pub(crate) fn save_header(&mut self) -> Result<(), VaultError> {
+        if self.integrity.header_ok {
+            self.header.sign(&self.keys.header)?;
+        }
         self.header.write(&self.dir)
     }
 
@@ -1250,6 +1442,17 @@ impl Vault {
                 })
             })
             .collect()
+    }
+
+    /// Whether the case is in the recycle bin. A case that is not in the vault at all is an
+    /// error, never "not in the bin".
+    pub fn case_in_trash(&self, case_id: &str) -> Result<bool, VaultError> {
+        self.case_key(case_id)?;
+        Ok(self.main.query_row(
+            "SELECT deleted_at IS NOT NULL FROM cases WHERE id = ?1",
+            [case_id],
+            |r| r.get(0),
+        )?)
     }
 
     /// Into the recycle bin: nothing is erased yet, and the case can be restored.
@@ -2850,23 +3053,156 @@ impl Vault {
             })?
             .collect::<Result<_, _>>()?;
         rows.into_iter()
-            .map(
-                |(id, section_key, created_at, payload_sha256, model, payload)| {
-                    Ok(Transmission {
-                        payload_tagged: open_string(
-                            &key,
-                            &aad("transmissions", "payload", &id, case_id),
-                            &payload,
-                        )?,
-                        case_id: case_id.to_owned(),
-                        id,
-                        section_key,
-                        created_at,
-                        payload_sha256,
-                        model,
-                    })
-                },
-            )
+            .map(|row| open_transmission(&key, case_id, row))
             .collect()
     }
+
+    /// One kept request of a case, or none.
+    pub fn transmission(
+        &self,
+        case_id: &str,
+        id: &str,
+    ) -> Result<Option<Transmission>, VaultError> {
+        let row: Option<TransmissionRow> = self
+            .main
+            .query_row(
+                "SELECT id, section_key, created_at, payload_sha256, model, payload_tagged_enc FROM transmissions
+                 WHERE case_id = ?1 AND id = ?2",
+                [case_id, id],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                    ))
+                },
+            )
+            .optional()?;
+        row.map(|row| open_transmission(&self.case_key(case_id)?, case_id, row))
+            .transpose()
+    }
+
+    /// How many requests left since `since` (not a demo answer, which never left), of every
+    /// case not in the recycle bin. Counted in SQL: nothing is opened (D-123).
+    pub fn transmissions_since(&self, since: i64) -> Result<u32, VaultError> {
+        let n: i64 = self.main.query_row(
+            "SELECT COUNT(*) FROM transmissions t JOIN cases c ON c.id = t.case_id
+             WHERE c.deleted_at IS NULL AND t.model <> 'demo' AND t.created_at >= ?1",
+            [since],
+            |r| r.get(0),
+        )?;
+        Ok(u32::try_from(n).unwrap_or(u32::MAX))
+    }
+
+    /// One page of "what left the computer" (D-123): kept requests newest first (by time, then
+    /// id), only those older than `before`, of one case or of every case not in the recycle
+    /// bin, of one place or all. The narrowing is done here in SQL, so only the rows of the
+    /// page are opened, each case's key unwrapped once.
+    pub fn transmissions_newest(
+        &self,
+        case_id: Option<&str>,
+        place: Option<&str>,
+        before: Option<(i64, &str)>,
+        limit: u32,
+    ) -> Result<Vec<Transmission>, VaultError> {
+        let (filter, mut args) = transmissions_filter(case_id, place, before);
+        let sql = format!(
+            "SELECT t.case_id, t.id, t.section_key, t.created_at, t.payload_sha256, t.model, t.payload_tagged_enc
+             FROM transmissions t {filter} ORDER BY t.created_at DESC, t.id DESC LIMIT ?"
+        );
+        args.push(rusqlite::types::Value::Integer(i64::from(limit)));
+        let mut stmt = self.main.prepare(&sql)?;
+        let rows: Vec<(String, TransmissionRow)> = stmt
+            .query_map(rusqlite::params_from_iter(args), |r| {
+                Ok((
+                    r.get(0)?,
+                    (
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                    ),
+                ))
+            })?
+            .collect::<Result<_, _>>()?;
+        let mut keys: std::collections::HashMap<String, Key32> = std::collections::HashMap::new();
+        let mut out = Vec::with_capacity(rows.len());
+        for (case, row) in rows {
+            let key = match keys.entry(case.clone()) {
+                std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+                std::collections::hash_map::Entry::Vacant(e) => e.insert(self.case_key(&case)?),
+            };
+            out.push(open_transmission(key, &case, row)?);
+        }
+        Ok(out)
+    }
+
+    /// Whether [`Self::transmissions_newest`] has anything older than `before`: read from the
+    /// index, nothing opened.
+    pub fn transmissions_older(
+        &self,
+        case_id: Option<&str>,
+        place: Option<&str>,
+        before: (i64, &str),
+    ) -> Result<bool, VaultError> {
+        let (filter, args) = transmissions_filter(case_id, place, Some(before));
+        let sql = format!("SELECT EXISTS (SELECT 1 FROM transmissions t {filter})");
+        Ok(self
+            .main
+            .query_row(&sql, rusqlite::params_from_iter(args), |r| r.get(0))?)
+    }
+}
+
+/// The narrowing of "what left the computer", as SQL: fixed text only, every value bound.
+/// The keyset is a row value, so SQLite walks the index from `before` instead of sorting.
+fn transmissions_filter(
+    case_id: Option<&str>,
+    place: Option<&str>,
+    before: Option<(i64, &str)>,
+) -> (String, Vec<rusqlite::types::Value>) {
+    use rusqlite::types::Value as Sql;
+    let mut sql = String::new();
+    let mut args: Vec<Sql> = Vec::new();
+    match case_id {
+        Some(c) => {
+            sql.push_str("WHERE t.case_id = ?");
+            args.push(Sql::Text(c.to_owned()));
+        }
+        None => sql.push_str("JOIN cases c ON c.id = t.case_id WHERE c.deleted_at IS NULL"),
+    }
+    if let Some(p) = place {
+        sql.push_str(" AND t.section_key = ?");
+        args.push(Sql::Text(p.to_owned()));
+    }
+    if let Some((at, id)) = before {
+        sql.push_str(" AND (t.created_at, t.id) < (?, ?)");
+        args.extend([Sql::Integer(at), Sql::Text(id.to_owned())]);
+    }
+    (sql, args)
+}
+
+/// A kept request's row, opened with its case's key.
+fn open_transmission(
+    key: &Key32,
+    case_id: &str,
+    (id, section_key, created_at, payload_sha256, model, payload): TransmissionRow,
+) -> Result<Transmission, VaultError> {
+    Ok(Transmission {
+        payload_tagged: open_string(
+            key,
+            &aad("transmissions", "payload", &id, case_id),
+            &payload,
+        )?,
+        case_id: case_id.to_owned(),
+        id,
+        section_key,
+        created_at,
+        payload_sha256,
+        model,
+    })
 }

@@ -158,20 +158,7 @@ impl Core {
                 self.settled = Some((case_id.to_owned(), self.vault_ref()?.change_counts()));
             }
         }
-        let v = self.vault_ref()?;
-        Ok(PrivacyData {
-            case_id: case_id.to_owned(),
-            identities: v.all_identities()?,
-            practitioner: v.practitioner()?.names,
-            allow: v.not_a_name_hmacs(case_id)?.into_iter().collect(),
-            is_name: v.is_name_hmacs(case_id)?.into_iter().collect(),
-            past: style::past_name_hmacs(v)?,
-            masks: dv_privacy::MaskBook::new(if case_id.is_empty() {
-                Vec::new()
-            } else {
-                v.masks(case_id)?
-            }),
-        })
+        PrivacyData::read(self.vault_ref()?, case_id)
     }
 
     /// A tag in the case's stored text that no longer belongs to the case (a name she brought
@@ -257,6 +244,26 @@ impl Core {
         }
         self.vault_mut()?.add_found_names(case_id, &found)?;
         self.filter_hinted(case_id, text, &hints)
+    }
+
+    /// Her own words, to store as a paragraph of the case (D-126): the new names are kept as
+    /// in [`Self::learn`], and what the outgoing filter would leave out or turn into relative
+    /// time (a kindergarten's name, a date) is kept in the case's mask book, so the paragraph
+    /// shows and exports exactly as she wrote it. Returns the text to store.
+    pub(crate) fn learn_to_keep(&mut self, case_id: &str, text: &str) -> Result<String, CoreError> {
+        self.learn(case_id, text)?;
+        let hints = self.name_hints(case_id, text);
+        let data = self.privacy_data(case_id)?;
+        let (tagged, added) = {
+            let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
+            let lookups = data.lookups(v);
+            let ctx = lookups.masked_context();
+            let out = dv_privacy::filter_to_keep(text, &ctx, &hints)
+                .map_err(|e| CoreError::Internal(e.to_string()))?;
+            (out.tagged, data.masks.added())
+        };
+        self.vault_mut()?.add_masks(case_id, &added)?;
+        Ok(tagged)
     }
 
     /// Scanned text (OCR) can misread a name by one letter ("אלוו" for "אלון"). Call this for

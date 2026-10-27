@@ -12,6 +12,7 @@ import { VerifySettings } from "../components/VerifySettings";
 import { ReportCheckSettings } from "../components/ReportCheck";
 import { NameModelSettings } from "../components/NameModelSettings";
 import { ReadinessSettings } from "../components/ReadinessSettings";
+import { SafetyNet } from "../components/SafetyNet";
 import { InstrumentSettings } from "../components/InstrumentSettings";
 import { SecuritySettings } from "../components/SecuritySettings";
 import { PrivacyStatus } from "../components/PrivacyStatus";
@@ -58,11 +59,13 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
   const [logo, setLogo] = useState<LogoView | null>(null);
   const [original, setOriginal] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** The report's details could not be read: said in the report part, which is empty without them. */
+  const [reportError, setReportError] = useState<string | null>(null);
   const [textSize, setTextSize] = useState(readTextSize);
   const [theme, setTheme] = useState(readTheme);
 
   useEffect(() => {
-    ipc.reportSettings().then(setReport).catch((e) => setError(fail(e as never)));
+    ipc.reportSettings().then(setReport).catch((e) => setReportError(fail(e as never)));
     ipc.reportTemplate().then(setTemplate).catch(() => setTemplate(null));
     ipc.reportLogo().then(setLogo).catch(() => setLogo(null));
   }, [fail]);
@@ -96,6 +99,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
 
           {pane === "general" && (
             <>
+              <SafetyNet />
               <ReadinessSettings />
               <section className="card setting" aria-labelledby="s-general">
                 <h2 id="s-general">תצוגה ופרטים</h2>
@@ -218,6 +222,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
             </>
           )}
 
+          {pane === "report" && !report && <ErrorLine error={reportError} />}
           {pane === "report" && report && (
             <>
               <section className="card setting" aria-labelledby="s-report">
@@ -304,11 +309,11 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                 </div>
               </section>
               <section className="card setting" aria-labelledby="s-original">
-                <h2 id="s-original">בדיקת מקוריות של PDF</h2>
-                <Row label="האם הקובץ שונה מאז שהופק?" hint="לקובץ PDF שהופק כאן.">
+                <h2 id="s-original">בדיקת מקוריות של קובץ</h2>
+                <Row label="האם הקובץ שונה מאז שהופק?" hint="לקובץ PDF או Word שהופק כאן, דוח או מכתב.">
                   <label className="btn btn-small">
-                    בחירת PDF
-                    <input type="file" accept=".pdf" hidden
+                    בחירת קובץ
+                    <input type="file" accept=".pdf,.docx" hidden
                       onChange={(e) => {
                         const f = e.target.files?.[0];
                         e.target.value = "";
@@ -335,6 +340,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
 
           {pane === "security" && (
             <>
+              <SafetyNet />
               <SecuritySettings />
               <PasswordSettings />
             </>

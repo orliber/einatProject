@@ -20,7 +20,10 @@ pub(crate) async fn prepare_verify(
     section_key: String,
 ) -> Res<Prepared> {
     warm_names(&state, &case_id, Vec::new()).await;
-    with_core(&state, move |c| c.prepare_verify(&case_id, &section_key)).await
+    prepare_off_lock(&state, move |c| {
+        c.begin_prepare_verify(&case_id, &section_key)
+    })
+    .await
 }
 
 /// Same path as `send_section`: out of the core's lock, then the verdicts.
@@ -62,7 +65,7 @@ pub(crate) async fn prepare_report_check(
         .await
         .unwrap_or_default();
     warm_names(&state, &case_id, drafts).await;
-    with_core(&state, move |c| c.prepare_report_check(&case_id)).await
+    prepare_off_lock(&state, move |c| c.begin_prepare_report_check(&case_id)).await
 }
 
 /// Same path as `send_verify`: out of the core's lock, then the notes.

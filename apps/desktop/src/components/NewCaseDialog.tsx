@@ -9,6 +9,7 @@ import type { Role } from "../ipc/generated/Role";
 import { CloseIcon, Dialog, ErrorLine } from "./ui";
 import "./NewCaseDialog.css";
 import { useAi } from "../ai";
+import { consentToSave } from "../consentForm";
 
 export interface PersonRow {
   id: string | null;
@@ -140,7 +141,7 @@ export function NewCaseDialog({ onClose, onCreated, folderId = null }: { onClose
           child_gender: gender,
           current_section: null,
           retention_until: null,
-          consent: consent ? { given_on: consentDate, form_version: "v1", given_by: consentBy.trim() || "ההורים" } : null,
+          consent: consentToSave(null, consent, consentDate, consentBy),
         },
         toIdentityInputs(rows),
       );

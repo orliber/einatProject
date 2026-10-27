@@ -314,6 +314,15 @@ fn valid(kept: &[KeptHint], text: &str) -> bool {
 #[derive(Debug, Default, Clone)]
 pub(crate) struct NameHints(HashMap<String, Vec<NameHint>>);
 
+/// Keyed by the whole text of each material: wiped when the request is done with them.
+impl Drop for NameHints {
+    fn drop(&mut self) {
+        for (mut text, _) in self.0.drain() {
+            zeroize::Zeroize::zeroize(&mut text);
+        }
+    }
+}
+
 impl NameHints {
     fn of(&self, text: &str) -> &[NameHint] {
         self.0.get(text).map_or(&[], Vec::as_slice)

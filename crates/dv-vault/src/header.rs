@@ -12,10 +12,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::crypto::{hex, hmac_sha256, hmac_verify, open, seal, unhex, Key32};
 use crate::password::Argon2Params;
-use crate::VaultError;
+use crate::{version, VaultError};
 
 pub const HEADER_FILE: &str = "vault.header";
-pub const FORMAT: u32 = 1;
+/// The header format this version writes. 2 (D-104): the vault records the newest version
+/// that opened it. Programs from before D-104 read only 1, so they refuse a vault a version
+/// with D-104 opened (as "damaged", before writing anything), instead of opening it and
+/// working on what a newer version wrote. Format 1 is still read, and becomes 2 the first time
+/// the vault opens here.
+pub const FORMAT: u32 = 2;
 
 /// One way to unlock the vault. New unlock methods (Windows Hello, Touch ID, FIDO2)
 /// are new variants; existing vaults keep working.
@@ -71,6 +76,10 @@ pub struct VaultHeader {
     pub created_at: i64,
     pub slots: Vec<KeySlot>,
     pub audit_anchor: Option<AuditAnchor>,
+    /// The newest version of the program that opened the vault (D-104). Left out of the file
+    /// until one records itself, so a header from before reads and signs exactly as it did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_version: Option<String>,
     /// HMAC over the header with this field set to `None`.
     pub mac: Option<String>,
 }
@@ -136,11 +145,32 @@ impl VaultHeader {
         Self::parse(&fs::read(dir.join(HEADER_FILE))?)
     }
 
-    /// A header from its file bytes (also as kept inside a backup).
+    /// A header from its file bytes (also as kept inside a backup). A header a newer version
+    /// of the program recorded itself in is refused here (D-104), before anything else is
+    /// read from it, so even a format this version does not know says "a newer version".
     pub fn parse(bytes: &[u8]) -> Result<Self, VaultError> {
+        Self::parse_for(bytes, version::APP_VERSION)
+    }
+
+    /// [`VaultHeader::parse`] by the program at version `current`.
+    pub(crate) fn parse_for(bytes: &[u8], current: &str) -> Result<Self, VaultError> {
+        /// Only the version, from a header of any shape.
+        #[derive(Deserialize)]
+        struct Opened {
+            #[serde(default)]
+            app_version: Option<serde_json::Value>,
+        }
+        if let Ok(opened) = serde_json::from_slice::<Opened>(bytes) {
+            match opened.app_version {
+                None | Some(serde_json::Value::Null) => {}
+                Some(serde_json::Value::String(v)) => version::refuse_newer(Some(&v), current)?,
+                // Not a version this program writes: fail closed.
+                Some(_) => return Err(VaultError::NewerVersion(String::new())),
+            }
+        }
         let header: Self =
             serde_json::from_slice(bytes).map_err(|e| VaultError::Corrupt(e.to_string()))?;
-        if header.format != FORMAT {
+        if !(1..=FORMAT).contains(&header.format) {
             return Err(VaultError::Corrupt(format!(
                 "unsupported vault format {}",
                 header.format

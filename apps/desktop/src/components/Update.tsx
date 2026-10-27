@@ -207,6 +207,61 @@ export function LockScreenUpdate() {
   );
 }
 
+/**
+ * D-104: a newer version opened the vault, so this one does not open it and changes nothing in
+ * it. Shown on the lock screen instead of the password: what to do, and the new version itself
+ * (the same signed update as everywhere, or the releases page where this computer does not
+ * install by itself). Never the kit: nothing is wrong with the password or the vault.
+ */
+export function NewerVaultNotice({ version }: { version: string }) {
+  const update = useFoundUpdate();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [none, setNone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function install() {
+    if (update?.can_install) {
+      setOpen(true);
+      return;
+    }
+    setBusy(true);
+    setNone(false);
+    setError(null);
+    try {
+      const v = await timed("check", checkNow(), "update");
+      if (v?.can_install) setOpen(true);
+      else setNone(true);
+    } catch (e) {
+      setError((e as UiError).message ?? "הבדיקה לא הצליחה. אפשר לנסות שוב, או להוריד מדף הגרסאות.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function releases() {
+    setError(null);
+    ipc.openReleasesPage().catch((e: { message?: string }) => setError(e.message ?? "הדף לא נפתח."));
+  }
+
+  return (
+    <div className="lock-form newer-vault" role="alert">
+      <div className="lock-note">
+        <p><strong>הכספת נפתחה בגרסה חדשה יותר{version ? ` (${version})` : ""}. צריך להתקין את הגרסה החדשה.</strong></p>
+        <p>הכספת והתיקים לא נפגעו, והגרסה הזו לא משנה בהם כלום. לא צריך את ערכת השחזור.</p>
+      </div>
+      {busy && <WaitLine task="check" speed="update" label="בודקת ב-GitHub מה הגרסה החדשה" />}
+      {none && <p className="hint" role="status">כאן הגרסה החדשה לא מותקנת לבד. מורידים אותה מדף הגרסאות ומתקינים.</p>}
+      <ErrorLine error={error} />
+      <button type="button" className="btn btn-primary" autoFocus disabled={busy} onClick={() => void install()}>
+        {busy ? <><Spinner /> בודקת…</> : update?.can_install ? `להתקנת גרסה ${update.version}` : "להתקנת הגרסה החדשה"}
+      </button>
+      <button type="button" className="link-btn" onClick={releases}>לדף הגרסאות (נפתח בדפדפן)</button>
+      {open && update && <UpdateDialog update={update} onClose={() => setOpen(false)} />}
+    </div>
+  );
+}
+
 /** Settings: the version, a check now, and whether to check by itself. */
 export function UpdateSettings() {
   const { fail } = useApp();

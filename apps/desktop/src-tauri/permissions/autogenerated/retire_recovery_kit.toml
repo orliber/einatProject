@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-retire-recovery-kit"
+description = "Enables the retire_recovery_kit command without any pre-configured scope."
+commands.allow = ["retire_recovery_kit"]
+
+[[permission]]
+identifier = "deny-retire-recovery-kit"
+description = "Denies the retire_recovery_kit command without any pre-configured scope."
+commands.deny = ["retire_recovery_kit"]

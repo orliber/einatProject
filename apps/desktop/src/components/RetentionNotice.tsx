@@ -60,3 +60,33 @@ export function RetentionNotice() {
     </div>
   );
 }
+
+/** Reports an older version saved in the app's own folder, when no usual folder could take
+ *  them (D-120). Nothing is saved there any more, and nothing there is deleted for her: she is
+ *  told while files remain, and opens the folder to move or delete them. */
+export function OldExportsNotice() {
+  const { fail } = useApp();
+  const count = useQuery({ queryKey: ["old-exports"], queryFn: ipc.oldExports });
+  const [hidden, setHidden] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const n = count.data ?? 0;
+  if (!n || hidden) return null;
+  async function open() {
+    setError(null);
+    try {
+      await ipc.openOldExports();
+    } catch (e) {
+      setError(fail(e as never));
+    }
+  }
+  return (
+    <div className="backup-reminder" role="status">
+      <span className="grow">
+        {n === 1 ? "קובץ אחד שהופק" : `${n} קבצים שהופקו`} בגרסה קודמת {n === 1 ? "נשמר" : "נשמרו"} בתיקייה פנימית של התוכנה, כי תיקיית ההורדות לא הייתה זמינה. אולי יש בהם שמות אמיתיים. כדאי להעביר אותם למקום שלך או למחוק. התוכנה לא מוחקת אותם לבד.
+      </span>
+      {error && <span className="error small">{error}</span>}
+      <button type="button" className="btn btn-small" onClick={() => void open()}>פתיחת התיקייה</button>
+      <button type="button" className="link-btn small" onClick={() => setHidden(true)}>לא עכשיו</button>
+    </div>
+  );
+}

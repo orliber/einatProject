@@ -5,14 +5,14 @@ import { ipc, type AppStatus } from "../ipc/client";
 import { CoreStatus } from "../components/CoreStatus";
 import { ErrorLine, LockIcon } from "../components/ui";
 import { GoogleRecoverForm } from "../components/GoogleRecovery";
-import { LockScreenUpdate } from "../components/Update";
+import { LockScreenUpdate, NewerVaultNotice } from "../components/Update";
 import { timed, WaitLine } from "../components/Progress";
 import "./LockScreen.css";
 
 export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnlocked?: (s: AppStatus) => void }) {
   const [mode, setMode] = useState<"password" | "recovery" | "google" | "forgot">("password");
-  // Forgot the password: Google first when it is on for this computer (D-041). When it is off,
-  // a short note says to use the kit now, and where Google is turned on for next time (D-096).
+  // Forgot the password: Google when it is on for this computer (D-041). The printed kit is no
+  // longer offered (D-103): only a small link stays, for a kit made later under "מתקדם".
   const [google, setGoogle] = useState<{ on: boolean; available: boolean }>({ on: false, available: false });
   useEffect(() => {
     ipc.googleStatus()
@@ -25,6 +25,11 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
   const show = (m: typeof mode) => { setMode(m); setSecret(""); setError(null); };
   // The vault did not open for a reason that is not the password (R7): often a new version.
   const [broken, setBroken] = useState(false);
+  // The password was refused because this computer is not the one it was set on.
+  const [elsewhere, setElsewhere] = useState(false);
+  // A newer version opened the vault (D-104): no password, no kit, the new version instead.
+  const [newerFound, setNewerFound] = useState<string | null>(null);
+  const newer = status?.newer_version ?? newerFound;
   const [version, setVersion] = useState<string | null>(null);
   useEffect(() => {
     ipc.ping().then((p) => setVersion(p.core_version)).catch(() => setVersion(null));
@@ -74,11 +79,15 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
         setNow(Date.now());
         setWaitUntil(Date.now() + seconds * 1000);
       } else if (e.code === "other_computer" && mode === "password") {
-        // Not a forgotten password: here only the kit opens it. The form turns to the kit,
-        // and the message says why (review of stage 5, U3).
-        setMode("recovery");
+        // Not a forgotten password: the message says what opens it here (D-103), and the small
+        // kit link stays below for a kit made under "מתקדם".
         setSecret("");
-        setError(e.message ?? "במחשב הזה נכנסים עם ערכת השחזור.");
+        setError(e.message ?? "הסיסמה פותחת את הכספת רק במחשב שבו היא נקבעה.");
+        setElsewhere(true);
+      } else if (e.code === "newer_version") {
+        setNewerFound("");
+      } else if (e.code === "wrong_secret" && mode === "recovery") {
+        setError("ערכת השחזור לא נכונה. כדאי לבדוק שגיאות הקלדה.");
       } else {
         setError(e.message ?? "הפתיחה נכשלה.");
         setBroken(e.code === "vault" || e.code === "internal");
@@ -100,12 +109,12 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
             <p>{he.lock.lockedAfterIdle(status?.lock_minutes ?? 10)}</p>
           )}
         </div>
-        {mode === "google" ? (
+        {newer !== null ? (
+          <NewerVaultNotice version={newer} />
+        ) : mode === "google" ? (
           <>
             <GoogleRecoverForm onUnlocked={onUnlocked} onBack={() => show("password")} />
-            <button type="button" className="link-btn" onClick={() => show("recovery")}>
-              יש לי את ערכת השחזור המודפסת
-            </button>
+            <KitLink onKit={() => show("recovery")} />
           </>
         ) : mode === "forgot" ? (
           <ForgotPassword googleAvailable={google.available} onKit={() => show("recovery")} onBack={() => show("password")} />
@@ -130,6 +139,7 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
           <button type="button" className="link-btn" onClick={() => show(mode === "password" ? (google.on ? "google" : "forgot") : "password")}>
             {mode === "password" ? "שכחתי את הסיסמה" : "חזרה לפתיחה עם סיסמה"}
           </button>
+          {mode === "password" && elsewhere && <KitLink onKit={() => show("recovery")} />}
         </form>
         )}
         <div className="lock-foot">
@@ -144,21 +154,31 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
 }
 
 /**
- * Forgot the password, Google sign-in not on: two lines. The printed kit opens it now; Google
- * is turned on in the settings, once inside, for next time (D-096).
+ * Forgot the password, Google sign-in not on here (D-103): said plainly. The password cannot be
+ * reset from here; Or can help. A kit made under "מתקדם" still opens it, by the small link.
  */
 function ForgotPassword({ googleAvailable, onKit, onBack }: { googleAvailable: boolean; onKit: () => void; onBack: () => void }) {
   return (
     <div className="lock-form">
       <div className="lock-note" role="note">
-        <p><strong>עכשיו:</strong> פותחים עם ערכת השחזור המודפסת, ובוחרים סיסמה חדשה בפנים.</p>
+        <p>
+          {googleAvailable ? <strong>הכניסה עם גוגל לא מופעלת במחשב הזה,</strong> : <strong>בגרסה הזו,</strong>}
+          {" "}אי אפשר לבחור סיסמה חדשה מכאן. כדאי לנסות שוב בנחת, ואם לא, לפנות לאור.
+        </p>
         {googleAvailable && (
           <p><strong>לפעם הבאה:</strong> אחרי הכניסה מפעילים כניסה עם גוגל, בהגדרות ← סיסמה ואבטחה.</p>
         )}
       </div>
-      <button type="button" className="btn btn-primary" autoFocus onClick={onKit}>פתיחה עם ערכת השחזור</button>
-      <button type="button" className="link-btn" onClick={onBack}>חזרה לפתיחה עם סיסמה</button>
+      <button type="button" className="btn btn-primary" autoFocus onClick={onBack}>חזרה לפתיחה עם סיסמה</button>
+      <KitLink onKit={onKit} />
     </div>
+  );
+}
+
+/** The last resort (D-103): a kit made under "מתקדם" in the settings. Small, never the way in. */
+function KitLink({ onKit }: { onKit: () => void }) {
+  return (
+    <button type="button" className="link-btn small muted" onClick={onKit}>יש לי ערכת שחזור מודפסת</button>
   );
 }
 

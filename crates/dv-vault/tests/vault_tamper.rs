@@ -315,7 +315,7 @@ fn a_header_of_an_unknown_format_is_refused_without_writing() {
     let (dir, vault, _) = new_vault();
     vault.lock().unwrap();
     let mut header = header_json(dir.path());
-    header["format"] = 2.into();
+    header["format"] = 3.into();
     write_header_json(dir.path(), &header);
     let before = snapshot(dir.path());
     assert!(matches!(
@@ -441,7 +441,7 @@ fn a_backup_of_another_version_or_with_extra_bytes_is_refused() {
     assert!(matches!(restore(&version), Err(VaultError::Corrupt(_))));
     assert!(peek_backup(&version).is_err());
 
-    let newer = with_header(&bytes, |h| h["format"] = 2.into());
+    let newer = with_header(&bytes, |h| h["format"] = 3.into());
     assert!(matches!(restore(&newer), Err(VaultError::Corrupt(m)) if m.contains("format")));
     assert!(peek_backup(&newer).is_err());
 

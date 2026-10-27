@@ -6,16 +6,83 @@ use super::*;
 /// long is taken as lost, so the vault can never stay unopenable.
 const SECRET_WORK_STALE: Duration = Duration::from_secs(120);
 
-/// Wrong passwords or kits typed since the last opening, kept across a restart of the program
-/// (a number only; the vault is locked, so it cannot hold it). Read and removed at the next
-/// opening, which then says so (L4).
+/// Wrong passwords or kits typed since the last opening, and the second (Unix time) before
+/// which no new try is taken, kept across a restart of the program (D-122): closing and
+/// opening the program does not shorten the wait. The vault is locked, so it cannot hold
+/// them. Read and removed at the next opening, which then says so (L4).
+///
+/// Not sealed with a MAC: the only key there is before the vault opens is public (the
+/// header's salt), so anyone who can edit this file could also sign it, or delete it, or copy
+/// the vault and guess offline with no wait at all. What stops guessing is Argon2id and the
+/// password rules (THREAT_MODEL V-1); this file only slows guessing through the program. A
+/// file the program did not write (it writes one line, whole, by a rename) is taken as the
+/// longest wait (fail-closed).
 const FAILURES_FILE: &str = "unlock.failures";
 
-fn failures_on_disk(dir: &Path) -> u32 {
-    std::fs::read_to_string(dir.join(FAILURES_FILE))
-        .ok()
-        .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(0)
+/// The longest wait after wrong secrets, also after a restart or a clock moved back, so she
+/// can never lock herself out for longer.
+const MAX_WAIT: Duration = Duration::from_secs(60);
+const MAX_WAIT_SECS: i64 = 60;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Failures {
+    count: u32,
+    /// Unix seconds before which no try is taken.
+    not_before: Option<i64>,
+}
+
+/// What the file says: `count` (the program before D-122) or `count not_before`. No file is
+/// no failures; anything else is the longest wait, from now.
+fn failures_on_disk(dir: &Path) -> Failures {
+    let text = match std::fs::read_to_string(dir.join(FAILURES_FILE)) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Failures {
+                count: 0,
+                not_before: None,
+            }
+        }
+        Err(_) => String::new(),
+    };
+    let mut parts = text.split_whitespace();
+    let count = parts.next().and_then(|c| c.parse::<u32>().ok());
+    let not_before = parts.next().map(str::parse::<i64>);
+    match (count, not_before, parts.next()) {
+        (Some(count), None, None) => Failures {
+            count,
+            not_before: None,
+        },
+        (Some(count), Some(Ok(t)), None) => Failures {
+            count,
+            not_before: Some(t),
+        },
+        _ => Failures {
+            count: 0,
+            not_before: Some(crate::dates::unix_now().saturating_add(MAX_WAIT_SECS)),
+        },
+    }
+}
+
+/// One line, written whole: to a file beside it, then renamed over it.
+fn write_failures(dir: &Path, f: Failures) {
+    let line = match f.not_before {
+        Some(t) => format!("{} {t}", f.count),
+        None => f.count.to_string(),
+    };
+    let tmp = dir.join(format!("{FAILURES_FILE}.tmp"));
+    if std::fs::write(&tmp, line).is_ok() {
+        let _ = std::fs::rename(&tmp, dir.join(FAILURES_FILE));
+    }
+}
+
+/// The wait the file asks for, from now: never more than [`MAX_WAIT`] (a clock moved back, or
+/// a file from elsewhere, cannot lock her out).
+fn wait_on_disk(dir: &Path) -> Option<Instant> {
+    let left = failures_on_disk(dir)
+        .not_before?
+        .saturating_sub(crate::dates::unix_now());
+    let left = Duration::from_secs(u64::try_from(left).ok()?.min(MAX_WAIT.as_secs()));
+    (!left.is_zero()).then(|| Instant::now() + left)
 }
 
 /// Wrong tries this long before the opening that worked are taken as her own typos.
@@ -33,6 +100,31 @@ fn since_last_text(failed: u32) -> Option<String> {
             "מאז הכניסה הקודמת היו {n} ניסיונות כניסה שנכשלו. אם זו לא את, כדאי להחליף סיסמה."
         )),
     }
+}
+
+/// What the check at opening found, in her words, or `None` when the vault passed it. A header
+/// changed from outside is never signed again (D-104), so this stays until Or looks at it; a
+/// new backup does not clear it.
+fn integrity_he(found: &dv_vault::IntegrityReport) -> Option<String> {
+    let mut parts = Vec::new();
+    if !found.header_ok {
+        parts.push(crate::activity::integrity_reason_he(
+            "vault header was modified",
+        ));
+    }
+    if !found.audit_ok {
+        parts.push(
+            found
+                .detail
+                .as_deref()
+                .filter(|d| !d.is_empty())
+                .map_or_else(
+                    || "יומן הפעולות לא שלם".to_owned(),
+                    crate::activity::integrity_reason_he,
+                ),
+        );
+    }
+    (!parts.is_empty()).then(|| format!("{}. כדאי לספר לאור.", parts.join(". ")))
 }
 
 impl Core {
@@ -53,7 +145,8 @@ impl Core {
             last_tick: None,
             failed_unlocks: 0,
             failure_times: Vec::new(),
-            not_before: None,
+            // A wait from before a restart still holds (D-122).
+            not_before: wait_on_disk(dir),
             secret_work: None,
             secret_ticket: 0,
             cancel: jobs::Cancel::default(),
@@ -69,6 +162,8 @@ impl Core {
             seal_dir: seal::default_dir(),
             rollback_warning: None,
             session: 0,
+            pending_epoch: 0,
+            withdrawn: HashMap::new(),
             models_dir: None,
             ner: None,
             ner_exe: None,
@@ -223,9 +318,7 @@ impl Core {
                     .filter(|p| key_name(*p).is_some_and(|k| v.secret(k).ok().flatten().is_some()))
                     .map(|p| p.id().to_owned())
                     .collect(),
-                (!v.integrity().audit_ok || !v.integrity().header_ok)
-                    .then(|| v.integrity().detail.clone().unwrap_or_default())
-                    .or_else(|| self.rollback_warning.clone()),
+                integrity_he(v.integrity()).or_else(|| self.rollback_warning.clone()),
             ),
             None => (true, Vec::new(), None),
         };
@@ -251,6 +344,21 @@ impl Core {
                 .as_ref()
                 .is_none_or(|v| v.setting(SCREEN_KEY).ok().flatten().as_deref() != Some("0")),
             since_last: self.since_last.clone(),
+            newer_version: self
+                .vault
+                .is_none()
+                .then(|| Vault::opened_by_newer(&self.dir))
+                .flatten(),
+        }
+    }
+
+    /// D-104: a vault a newer version of the program opened is not opened by this one. Said
+    /// before anything is asked of the computer (the key kept here) or written (the count of
+    /// wrong tries): it is not a wrong password, and never a reason for the kit.
+    pub(crate) fn refuse_newer_vault(&self) -> Result<(), CoreError> {
+        match Vault::opened_by_newer(&self.dir) {
+            Some(v) => Err(VaultError::NewerVersion(v).into()),
+            None => Ok(()),
         }
     }
 
@@ -282,6 +390,13 @@ impl Core {
         self.refuse_cloud()?;
         // Not while a restore writes the same folder (or an unlock reads it).
         self.refuse_secret_work_running()?;
+        // A restore cut short between the databases and the header (D-124): a new vault would
+        // write its header over her data. Only the restore, run again, goes there.
+        if Vault::has_databases_without_header(&self.dir) {
+            return Err(CoreError::Refused(
+                "בתיקיית הכספת נמצאו קבצים של כספת בלי הכותרת שפותחת אותם, כנראה משחזור שנקטע. כדי לא לדרוס אותם לא נוצרת כספת חדשה: אפשר לשחזר שוב מהגיבוי.".to_owned(),
+            ));
+        }
         let params = self.argon.unwrap_or_else(Argon2Params::calibrate);
         // Bound to this computer from the start where a key can be sealed here (D-076).
         let key = if Vault::exists(&self.dir) {
@@ -361,6 +476,7 @@ impl Core {
                     .filter(|t| t.elapsed() < OWN_TYPOS)
                     .count();
                 let failed = failures_on_disk(&self.dir)
+                    .count
                     .max(self.failed_unlocks)
                     .saturating_sub(u32::try_from(own).unwrap_or(u32::MAX));
                 self.failure_times.clear();
@@ -415,34 +531,31 @@ impl Core {
                 if matches!(e, VaultError::WrongSecret | VaultError::RecoveryKeyInvalid) {
                     self.failed_unlocks += 1;
                     self.failure_times.push(Instant::now());
-                    let wait = 2u64.saturating_pow(self.failed_unlocks.min(6)).min(60);
+                    // Every try since the last opening counts, also those before a restart.
+                    let count = failures_on_disk(&self.dir).count.saturating_add(1);
+                    let wait = 2u64
+                        .saturating_pow(count.max(self.failed_unlocks).min(6))
+                        .min(MAX_WAIT.as_secs());
                     self.not_before = Some(Instant::now() + Duration::from_secs(wait));
-                    let on_disk = failures_on_disk(&self.dir).saturating_add(1);
-                    let _ = std::fs::write(self.dir.join(FAILURES_FILE), on_disk.to_string());
+                    let until = crate::dates::unix_now()
+                        .saturating_add(i64::try_from(wait).unwrap_or(i64::MAX));
+                    write_failures(
+                        &self.dir,
+                        Failures {
+                            count,
+                            not_before: Some(until),
+                        },
+                    );
                 }
                 Err(e.into())
             }
         }
     }
 
-    /// True when `typed` opens the vault: at creation, after a new kit, and when she checks
-    /// the printed page in settings (D-076: on another computer the kit is the way in, so
-    /// the security page asks for a check once a year). The day of the check is kept.
+    /// True when `typed` opens the vault: after a new kit, and when she checks the printed page
+    /// under "מתקדם" in settings (D-103).
     pub fn confirm_recovery_key(&mut self, typed: &str) -> Result<bool, CoreError> {
-        let ok = self.vault_ref()?.check_recovery_key(typed);
-        if ok {
-            self.vault_mut()?
-                .set_setting(KIT_CHECKED_KEY, &crate::dates::unix_now().to_string())?;
-        }
-        Ok(ok)
-    }
-
-    /// When the printed kit was last typed and opened the vault.
-    pub(crate) fn kit_checked_at(&self) -> Option<i64> {
-        self.vault
-            .as_ref()
-            .and_then(|v| v.setting(KIT_CHECKED_KEY).ok().flatten())
-            .and_then(|s| s.parse().ok())
+        Ok(self.vault_ref()?.check_recovery_key(typed))
     }
 
     /// Wipe keys, pending approvals and consultation history from memory.
@@ -452,7 +565,7 @@ impl Core {
 
     pub(crate) fn lock_because(&mut self, reason: Option<&str>) {
         self.keep_unsaved();
-        self.pending.clear();
+        self.drop_pending();
         self.session = self.session.wrapping_add(1);
         self.cancel.set();
         self.cancel = jobs::Cancel::default();

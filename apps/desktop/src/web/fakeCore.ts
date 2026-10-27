@@ -4,6 +4,9 @@
 import type { ActivityEntry } from "../ipc/generated/ActivityEntry";
 import type { AppStatus } from "../ipc/generated/AppStatus";
 import type { BackupStatus } from "../ipc/generated/BackupStatus";
+import type { GoogleStatus } from "../ipc/generated/GoogleStatus";
+import type { NetPart } from "../ipc/generated/NetPart";
+import type { SafetyNet } from "../ipc/generated/SafetyNet";
 import type { DriveBackupStatus } from "../ipc/generated/DriveBackupStatus";
 import type { DriveCleanupResult } from "../ipc/generated/DriveCleanupResult";
 import type { StagedBackup } from "../ipc/generated/StagedBackup";
@@ -34,7 +37,7 @@ import type { AutoHidden } from "../ipc/generated/AutoHidden";
 import type { IdentitySource } from "../ipc/generated/IdentitySource";
 import type { SuspectDecision } from "../ipc/generated/SuspectDecision";
 import type { UiError } from "../ipc/generated/UiError";
-import { kindLabel } from "../i18n/he";
+import { daysAgo, kindLabel } from "../i18n/he";
 import institute from "../../../../templates/institute-v1.json";
 import structure from "../../../../templates/report_structure.json";
 import { readDocx } from "./docx";
@@ -44,7 +47,9 @@ import { compareSheets, comparisonText, formatSheet, instruments } from "./score
 import * as R from "./routing";
 import { PROVIDERS, providerOf } from "../providers";
 import type { SortResult } from "../ipc/generated/SortResult";
+import type { SentCursor } from "../ipc/generated/SentCursor";
 import type { SentItem } from "../ipc/generated/SentItem";
+import type { SentPage } from "../ipc/generated/SentPage";
 import type { SentText } from "../ipc/generated/SentText";
 
 type Args = Record<string, unknown>;
@@ -175,8 +180,11 @@ export class FakeCore {
   private unlocked = false;
   /** `?setup` in the address opens the first-run screens (for the demo page's pictures). */
   private vaultExists = typeof location === "undefined" || !location.search.includes("setup");
+  /** `?newer=0.9.2` in the address: the vault was opened by a newer version (D-104). */
+  private newerVersion = typeof location === "undefined" ? null : new URLSearchParams(location.search).get("newer");
   // Nine days ago, so the preview shows the weekly reminder (D-024).
-  private lastBackupAt: number | null = Math.floor(Date.now() / 1000) - 9 * 86_400;
+  // Two days ago: recent by the core's week (D-107), so the demo opens without a backup reminder.
+  private lastBackupAt: number | null = Math.floor(Date.now() / 1000) - 2 * 86_400;
   private lastCheckAt: number | null = null;
   private secretChanged = false;
   private googleOn = false;
@@ -229,7 +237,25 @@ export class FakeCore {
   private sampleId: string | null = null;
   private folderList: Folder[] = [];
   private pending = new Map<string, Pending>();
+  /** Approvals dropped because their material changed, with the line said at the send. */
+  private withdrawn = new Set<string>();
   private style = new FakeStyle();
+
+  /** An approval that is gone: why, in one line (like the core). */
+  private expired(id: string): never {
+    if (this.withdrawn.has(id)) fail("refused", "החומר השתנה אחרי שהבקשה הוכנה, ולכן היא לא נשלחה. צריך להכין אותה מחדש.");
+    return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
+  }
+
+  /** A material of the case changed or was deleted: nothing prepared with it goes. */
+  private withdrawFor(caseId: string) {
+    for (const [id, p] of this.pending) {
+      if (p.caseId === caseId) {
+        this.pending.delete(id);
+        this.withdrawn.add(id);
+      }
+    }
+  }
 
   constructor() {
     // `?cases=empty` and `?cases=many` (V2): the edges of the cases screen, for the tests.
@@ -473,6 +499,7 @@ export class FakeCore {
       vault_exists: this.vaultExists, unlocked: this.unlocked, disk_encryption: "on", cloud_synced_folder: null, fips_active: true,
       demo_mode: true, model: this.model, provider: providerOf(this.model).id, ai_name: this.ai, keys: [], speed: this.speed, integrity_warning: null, lock_minutes: this.lockMinutes, idle_lock_in: this.unlocked ? this.lockMinutes * 60 : null,
       practitioner: this.practitioner, review_always: this.reviewAlways, screen_protection: !this.unlocked || this.screenProtection, since_last: this.unlocked ? this.sinceLast : null,
+      ...(this.newerVersion !== null && !this.unlocked ? { newer_version: this.newerVersion } : {}),
     };
   }
 
@@ -670,14 +697,19 @@ export class FakeCore {
     return { id: s.id, case_id: s.caseId, case_code: c.meta.code, place: s.place, at: s.at, ai: "", demo: true, sha256: "0".repeat(64), bytes: new TextEncoder().encode(s.text).length, hidden, hidden_match: false };
   }
 
-  private sentHistory(caseId: string | null, place: string | null, query: string): SentItem[] {
+  private sentHistory(caseId: string | null, place: string | null, query: string, before: SentCursor | null): SentPage {
     const q = query.trim();
-    return [...this.sentLog].reverse().flatMap((s) => {
+    const all = [...this.sentLog].reverse().flatMap((s) => {
       if ((caseId && s.caseId !== caseId) || (place && s.place !== place)) return [];
       const item = this.sentItem(s);
       if (!q || s.text.includes(q)) return [item];
       return item.hidden.some((h) => h.word.includes(q)) ? [{ ...item, hidden_match: true }] : [];
     });
+    // Pages of 50, like the core (D-123); the demo has no search budget to keep.
+    const from = before ? all.findIndex((i) => i.id === before.id) + 1 : 0;
+    const items = all.slice(from, from + 50);
+    const last = items[items.length - 1];
+    return { items, next: last && from + 50 < all.length ? { at: last.at, id: last.id } : null };
   }
 
   private sentText(caseId: string, id: string): SentText {
@@ -811,7 +843,7 @@ export class FakeCore {
   // ------------------------------------------------------------------ the IPC surface
   async handle(cmd: string, args: unknown, options?: { headers?: Record<string, string> }): Promise<unknown> {
     const a = (args ?? {}) as Args;
-    if (!["plugin:event|listen", "plugin:event|unlisten", "ping", "recent_crashes", "app_status", "unlock", "unlock_with_recovery", "create_vault", "confirm_recovery_key", "google_status", "google_recover", "google_cancel", "choose_backup", "restore_backup", "forget_backup"].includes(cmd) && !this.unlocked) {
+    if (!["plugin:event|listen", "plugin:event|unlisten", "ping", "recent_crashes", "app_status", "unlock", "unlock_with_recovery", "create_vault", "confirm_recovery_key", "google_status", "google_recover", "google_cancel", "choose_backup", "restore_backup", "forget_backup", "check_update", "prepare_update", "install_update", "open_releases_page"].includes(cmd) && !this.unlocked) {
       fail("locked", "הכספת נעולה. יש לפתוח אותה מחדש.");
     }
     if (FakeStyle.handles(cmd)) return this.style.handle(cmd, a, args, options?.headers ?? {}, this.allPeople(), this.practitioner);
@@ -829,13 +861,14 @@ export class FakeCore {
         return this.status();
       case "unlock":
       case "unlock_with_recovery":
+        if (this.newerVersion !== null) fail("newer_version", `הכספת נפתחה בגרסה חדשה יותר (${this.newerVersion}). צריך להתקין את הגרסה החדשה. הכספת והתיקים לא נפגעו, ולא צריך את ערכת השחזור.`);
         this.unlocked = true;
         this.logActivity("unlock", "access", cmd === "unlock" ? "כניסה" : "כניסה עם ערכת השחזור", cmd !== "unlock");
         return this.status();
       case "create_vault":
         this.vaultExists = true;
         this.unlocked = true;
-        return { recovery_key: "DEMO-PREV-IEWX-KEYS-ONLY-4TST" };
+        return null;
       case "confirm_recovery_key":
         return true;
       case "touch":
@@ -849,7 +882,7 @@ export class FakeCore {
         if (cmd === "set_send_stopped") this.sendStopped = Boolean(a.stopped);
         const ok = (key: string, state = "ok", detail: string | null = null) => ({ key, state, detail });
         return {
-          items: [ok("encrypted"), ok("computer_bound"), ok("recovery_kit", "ok", "0"), ok("fips", "info"), ok("disk"), ok("cloud_folder"), ok("log_integrity"),
+          items: [ok("encrypted"), ok("computer_bound"), ok("forgot_password", "ok"), ok("fips", "info"), ok("disk"), ok("cloud_folder"), ok("log_integrity"),
             ok("auto_lock", "ok", "10"), ok("screen"), ok("send", this.sendStopped ? "warn" : "ok"), ok("isolation"), ok("memory")],
           send_stopped: this.sendStopped, daily_limit: 400, max_request_kb: 2048,
           layers: FAKE_LAYERS.map(([key, title, now]) => ({
@@ -858,7 +891,7 @@ export class FakeCore {
           })),
           yours: [
             { key: "disk", title: "הצפנת הדיסק (BitLocker)", what: "מצפינה את כל המחשב.", against: "גניבה של המחשב.", state: "ok", now: "פעילה." },
-            { key: "recovery_kit", title: "ערכת השחזור המודפסת", what: "פותחת את הכספת במחשב אחר.", against: "אובדן של כל התיקים.", state: "ok", now: "נבדקה היום." },
+            { key: "forgot_password", title: "כניסה עם גוגל כששוכחים סיסמה", what: "פותחת את הכספת במחשב הזה עם חשבון הגוגל שלך.", against: "סיסמה שנשכחה, ואיתה כל התיקים.", state: "ok", now: "מופעלת." },
           ],
         };
       }
@@ -875,7 +908,7 @@ export class FakeCore {
         const items = [...manual,
           { key: "score_tables", done: tables, checked_by_program: true, confirmed_at: null },
           { key: "api_key", done: false, checked_by_program: true, confirmed_at: null },
-          { key: "backup", done: false, checked_by_program: true, confirmed_at: null },
+          { key: "backup", done: !((await this.handle("backup_status", {})) as BackupStatus).due, checked_by_program: true, confirmed_at: null },
           { key: "disk", done: true, checked_by_program: true, confirmed_at: null }];
         return { items, all_done: false };
       }
@@ -898,7 +931,7 @@ export class FakeCore {
         return this.prepareVerify(this.find(a.caseId), String(a.sectionKey));
       case "send_verify": {
         const p = this.pending.get(String(a.approvalId));
-        if (p?.type !== "verify") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
+        if (p?.type !== "verify") return this.expired(String(a.approvalId));
         this.pending.delete(String(a.approvalId));
         await new Promise((r) => setTimeout(r, 900));
         // Like the demo check: only numbers that no source has are found; nothing is "supported".
@@ -912,12 +945,13 @@ export class FakeCore {
         return { on: this.reportCheckOn, cents_per_check: 15 };
       case "set_report_check":
         this.reportCheckOn = Boolean(a.on);
+        if (!this.reportCheckOn) for (const [id, p] of this.pending) if (p.type === "report_check") this.pending.delete(id);
         return null;
       case "prepare_report_check":
         return this.prepareReportCheck(this.find(a.caseId));
       case "send_report_check": {
         const p = this.pending.get(String(a.approvalId));
-        if (p?.type !== "report_check") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
+        if (p?.type !== "report_check") return this.expired(String(a.approvalId));
         this.pending.delete(String(a.approvalId));
         this.keepSent(p.caseId, "report_check", p.texts.join("\n\n"));
         await new Promise((r) => setTimeout(r, 900));
@@ -1061,7 +1095,7 @@ export class FakeCore {
       case "purge_case": {
         const c = this.find(a.caseId);
         if (c.deletedAt === null) fail("refused", "אפשר למחוק לצמיתות רק תיק שנמצא בסל המחזור.");
-        if (!String(a.password ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
+        if (!String(a.password ?? "")) fail("wrong_secret", "הסיסמה לא נכונה.");
         this.cases = this.cases.filter((x) => x.id !== c.id);
         return null;
       }
@@ -1104,7 +1138,7 @@ export class FakeCore {
         return null;
       }
       case "copy_secret":
-        // The app does this natively (out of clipboard history, cleared after 60 s).
+        // The app does this natively (out of clipboard history, cleared after 60 s, 20 s on a Mac).
         await navigator.clipboard.writeText(String(a.text ?? "")).catch(() => undefined);
         return 60;
       case "find_name_matches":
@@ -1172,6 +1206,7 @@ export class FakeCore {
       case "update_input": {
         const c = this.find(a.caseId);
         const i = c.inputs.find((x) => x.id === a.inputId) ?? fail("not_found", "החומר לא נמצא");
+        if (i.title !== String(a.title) || i.content !== String(a.content)) this.withdrawFor(c.id);
         i.title = String(a.title);
         if (i.content !== String(a.content)) {
           const r = this.routingOf(c, i.id);
@@ -1183,7 +1218,10 @@ export class FakeCore {
       case "delete_input": {
         const c = this.find(a.caseId);
         const gone = c.inputs.find((i) => i.id === a.inputId);
-        if (gone) this.removedInput = { caseId: String(a.caseId), input: gone, at: c.inputs.indexOf(gone) };
+        if (gone) {
+          this.removedInput = { caseId: String(a.caseId), input: gone, at: c.inputs.indexOf(gone) };
+          this.withdrawFor(c.id);
+        }
         c.inputs = c.inputs.filter((i) => i.id !== a.inputId);
         return null;
       }
@@ -1288,7 +1326,7 @@ export class FakeCore {
       }
       case "send_section": {
         const p = this.pending.get(String(a.approvalId));
-        if (p?.type !== "section") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
+        if (p?.type !== "section") return this.expired(String(a.approvalId));
         this.pending.delete(String(a.approvalId));
         await new Promise((r) => setTimeout(r, 2500));
         const c = this.find(p.caseId);
@@ -1300,7 +1338,7 @@ export class FakeCore {
         return this.prepareSort(this.find(a.caseId));
       case "send_sort": {
         const p = this.pending.get(String(a.approvalId));
-        if (p?.type !== "sort") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
+        if (p?.type !== "sort") return this.expired(String(a.approvalId));
         this.pending.delete(String(a.approvalId));
         await new Promise((r) => setTimeout(r, 700));
         return this.sendSort(p);
@@ -1388,7 +1426,7 @@ export class FakeCore {
       }
       case "send_consult": {
         const p = this.pending.get(String(a.approvalId));
-        if (p?.type !== "consult") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
+        if (p?.type !== "consult") return this.expired(String(a.approvalId));
         this.pending.delete(String(a.approvalId));
         await new Promise((r) => setTimeout(r, 1400));
         // Shaped like a real answer (headings, bold, a list), so the layout of answers is seen in the demo.
@@ -1471,12 +1509,12 @@ export class FakeCore {
         return { file_name: `גיבוי כספת האבחון ${day}.vaultbak`, created_at: at, same_vault: this.unlocked ? true : null } satisfies StagedBackup;
       }
       case "check_backup":
-        if (!String(a.password ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
+        if (!String(a.password ?? "")) fail("wrong_secret", "הסיסמה לא נכונה.");
         this.lastCheckAt = now();
         this.logActivity("backup_checked", "security", `תרגול שחזור: הגיבוי נפתח ותקין (${this.cases.length === 1 ? "תיק אחד" : `${this.cases.length} תיקים`})`);
         return { created_at: this.lastBackupAt ?? now(), cases: this.cases.length, integrity_ok: true };
       case "restore_backup":
-        if (!String(a.password ?? a.recoveryKey ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
+        if (!String(a.password ?? a.recoveryKey ?? "")) fail("wrong_secret", "הסיסמה לא נכונה.");
         this.vaultExists = true;
         this.unlocked = true;
         return this.status();
@@ -1486,7 +1524,8 @@ export class FakeCore {
         return 0;
       case "check_update":
         return {
-          version: "0.2.0", current: "0.1.0", published: "2026-10-01", size_mb: 14, can_install: true,
+          ...(this.newerVersion ? { version: this.newerVersion, current: "0.8.1" } : { version: "0.2.0", current: "0.1.0" }),
+          published: "2026-10-01", size_mb: 14, can_install: true,
           notes: ["כפתור ה-+ בחומרים מעלה גם קבצי Word ו-PDF", "זיהוי שמות חזק יותר לפני שליחה", "הדוח נכתב מול העיניים"],
         };
       case "prepare_update":
@@ -1496,7 +1535,7 @@ export class FakeCore {
       case "install_update":
         return fail("update", "בתצוגה המקדימה לא מתקינים. בתוכנה עצמה העדכון יורד, נבדק מול החתימה ומותקן.");
       case "change_password":
-        if (!String(a.current ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
+        if (!String(a.current ?? "")) fail("wrong_secret", "הסיסמה לא נכונה.");
         if (String(a.newPassword ?? "").length < 12) fail("weak_password", "הסיסמה קצרה או נפוצה מדי. מומלץ משפט של כמה מילים (12 תווים לפחות).");
         this.secretChanged = true;
         this.logActivity("password_changed", "security", "הסיסמה הוחלפה");
@@ -1518,6 +1557,25 @@ export class FakeCore {
         return null;
       case "google_cancel":
         return null;
+      // As the core (D-107): made from the two statuses, the same words.
+      case "safety_net": {
+        const g = (await this.handle("google_status", {})) as GoogleStatus;
+        const b = (await this.handle("backup_status", {})) as BackupStatus;
+        const google: NetPart = !g.available
+          ? { state: "unavailable", text: "כניסה עם גוגל לא זמינה במחשב הזה", hint: "אם הסיסמה תישכח, אין כאן כניסה עם גוגל. כדאי לשמור את הסיסמה במקום בטוח." }
+          : g.on ? { state: "ok", text: "כניסה עם גוגל", hint: null }
+            : g.needs_setup_here
+              ? { state: "missing", text: "כניסה עם גוגל לא מחוברת במחשב הזה", hint: "היא הופעלה במחשב אחר. מחברים אותה שוב כאן, וכך אפשר להיכנס גם אם הסיסמה תישכח." }
+              : { state: "missing", text: "כניסה עם גוגל כבויה", hint: "מפעילים אותה פעם אחת, וכך אפשר להיכנס ולבחור סיסמה חדשה גם אם הסיסמה תישכח." };
+        const backup: NetPart = b.days_since === null
+          ? { state: "missing", text: "אין עדיין גיבוי", hint: "גיבוי מוצפן על דיסק נפרד שומר את התיקים אם המחשב יתקלקל או ילך לאיבוד." }
+          : b.secret_changed
+            ? { state: "missing", text: "הסיסמה הוחלפה אחרי הגיבוי האחרון", hint: "הגיבוי הקודם נפתח רק בסיסמה הישנה. כדאי לגבות עכשיו." }
+            : b.due
+              ? { state: "missing", text: `הגיבוי האחרון ${daysAgo(b.days_since)}`, hint: "גיבוי נחשב עדכני עד 7 ימים. כדאי לגבות עכשיו." }
+              : { state: "ok", text: `גיבוי מ${daysAgo(b.days_since)}`, hint: null };
+        return { google, backup, ok: google.state === "ok" && backup.state === "ok" } satisfies SafetyNet;
+      }
       case "drive_backup_status":
         return { available: true, connected: this.googleOn, on: this.driveOn, last_at: this.driveOn ? this.driveLastAt : null, problem: null, cleanup_pending: false, copies_left: false } satisfies DriveBackupStatus;
       case "drive_backup_turn_on":
@@ -1539,17 +1597,25 @@ export class FakeCore {
         this.logActivity("unlock", "access", "כניסה עם חשבון הגוגל (הסיסמה נשכחה) ובחירת סיסמה חדשה", true);
         return this.status();
       case "new_recovery_kit":
-        if (!String(a.current ?? "")) fail("wrong_secret", "הסיסמה או ערכת השחזור לא נכונות.");
+        if (!String(a.current ?? "")) fail("wrong_secret", "הסיסמה לא נכונה.");
         this.secretChanged = true;
-        this.logActivity("recovery_key_rotated", "security", "נוצרה ערכת שחזור חדשה");
+        this.logActivity("recovery_key_rotated", "security", "ערכת השחזור הוחלפה");
         return { recovery_key: "DEMO-NEWK-ITXX-ONLY-PREV-IEW7" };
+      case "retire_recovery_kit":
+        if (!String(a.current ?? "")) fail("wrong_secret", "הסיסמה לא נכונה.");
+        this.secretChanged = true;
+        this.logActivity("recovery_key_rotated", "security", "ערכת השחזור הוחלפה");
+        return null;
       case "activity": {
         const before = typeof a.before === "number" ? a.before : Infinity;
         const page = [...this.activityLog].reverse().filter((e) => e.seq < before).slice(0, 50);
         return { entries: page, more: false, last_seq: page.at(-1)?.seq ?? null, intact: true, reviewed_at: this.reviewedAt };
       }
       case "sent_history":
-        return this.sentHistory(a.caseId ? String(a.caseId) : null, a.place ? String(a.place) : null, String(a.query ?? ""));
+        return this.sentHistory(a.caseId ? String(a.caseId) : null, a.place ? String(a.place) : null, String(a.query ?? ""), (a.before as SentCursor | null) ?? null);
+      case "sent_count":
+        // Every request here is a demo answer, which never left.
+        return 0;
       case "sent_text":
         return this.sentText(String(a.caseId), String(a.id));
       case "mark_activity_reviewed":
@@ -1558,6 +1624,10 @@ export class FakeCore {
         return null;
       case "retention_due":
         return [];
+      case "old_exports":
+        return 0;
+      case "open_old_exports":
+        return null;
       case "keep_case_longer": {
         const c = this.find(a.caseId);
         c.meta = { ...c.meta, retention_until: `${new Date().getFullYear() + Number(a.years ?? 1)}-${new Date().toISOString().slice(5, 10)}` };

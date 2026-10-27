@@ -259,7 +259,7 @@ impl Core {
         // The comparison with an earlier assessment is text: written again without its scores.
         self.refresh_comparisons()?;
         // A request prepared before the answer may hold its scores: prepared again.
-        self.pending.clear();
+        self.drop_pending();
         self.instrument_approvals()
     }
 }

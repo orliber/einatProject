@@ -58,6 +58,13 @@ pub(crate) fn is_mark(c: char) -> bool {
                 // they must not split it: "נו\u{200B}עם" reads as "נועם".
                 | '\u{00AD}'
                 | '\u{034F}'
+                // Combining marks of the other scripts (accents, overlays): one inside a
+                // number split it, and part of an ID went out ("0000\u{301}00018").
+                | '\u{0300}'..='\u{036F}'
+                | '\u{1AB0}'..='\u{1AFF}'
+                | '\u{1DC0}'..='\u{1DFF}'
+                | '\u{20D0}'..='\u{20FF}'
+                | '\u{FE20}'..='\u{FE2F}'
                 | '\u{200B}'..='\u{200F}'
                 | '\u{202A}'..='\u{202E}'
                 | '\u{2060}'..='\u{2064}'

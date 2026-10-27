@@ -201,11 +201,12 @@ fn an_edit_after_the_review_never_rides_on_the_earlier_approval() {
     )
     .unwrap();
 
-    // The earlier approval sends what she reviewed, byte for byte, and not the new text.
-    core.send_section(&first).unwrap();
-    let sent = fake.sent.lock().unwrap().last().cloned().unwrap();
-    assert_eq!(sha256_hex(sent.as_bytes()), first);
-    assert!(!sent.contains("לוח מעברים"), "{sent}");
+    // The earlier approval does not go (she may have taken a sentence out), and says why.
+    let Err(CoreError::Refused(why)) = core.send_section(&first) else {
+        panic!("a request prepared with the old text was sent");
+    };
+    assert!(why.contains("החומר השתנה"), "{why}");
+    assert!(fake.sent.lock().unwrap().is_empty());
 
     // The new text needs a new review, with a new approval of its own.
     let second = approval(&mut core, &case);
@@ -431,8 +432,9 @@ fn every_command_refuses_while_the_vault_is_locked() {
         ("consultations", Box::new(|k| k.consultations().map(drop))),
         (
             "sent_history",
-            Box::new(|k| k.sent_history(None, None, "").map(drop)),
+            Box::new(|k| k.sent_history(None, None, "", None).map(drop)),
         ),
+        ("sent_count", Box::new(|k| k.sent_count(0).map(drop))),
         (
             "sent_text",
             Box::new(move |k| k.sent_text(c, "x").map(drop)),
@@ -760,7 +762,107 @@ fn a_failed_restore_leaves_no_vault_behind_and_keeps_the_file_for_another_try() 
     assert!(!Vault::exists(broken.path()));
 }
 
+/// D-124: a restore cut short after the databases and before the header. A new vault is not
+/// made over them (its header would sit next to her data and never open); restoring again is.
+#[test]
+fn a_new_vault_is_not_made_over_databases_left_without_a_header() {
+    let (_dir, mut core, case) = setup(None);
+    let drive = tempfile::tempdir().unwrap();
+    let done = core.write_backup(&drive.path().join("b")).unwrap();
+    let bytes = std::fs::read(&done.path).unwrap();
+
+    let fresh = tempfile::tempdir().unwrap();
+    let mut other = Core::for_tests(fresh.path(), None);
+    other
+        .stage_backup(bytes.clone(), "b.vaultbak".into())
+        .unwrap();
+    other.restore_staged_backup(Some(PASSWORD), None).unwrap();
+    other.lock();
+    std::fs::remove_file(fresh.path().join("vault.header")).unwrap();
+    let main = std::fs::read(fresh.path().join("main.db")).unwrap();
+
+    let mut again = Core::for_tests(fresh.path(), None);
+    assert!(!again.status().vault_exists);
+    match again.create_vault("סיסמה אחרת וארוכה מאוד") {
+        Err(CoreError::Refused(why)) => assert!(why.contains("לשחזר שוב מהגיבוי")),
+        other => panic!("expected a refusal, got {:?}", other.map(|_| ())),
+    }
+    assert!(
+        !fresh.path().join("vault.header").exists(),
+        "no header was written"
+    );
+    assert_eq!(std::fs::read(fresh.path().join("main.db")).unwrap(), main);
+    again.stage_backup(bytes, "b.vaultbak".into()).unwrap();
+    again.restore_staged_backup(Some(PASSWORD), None).unwrap();
+    assert!(again.case_detail(&case).is_ok());
+}
+
 // ------------------------------------------------------------ readiness
+
+/// This version has no Google sign-in (not Windows, or built without the registration).
+struct NoGoogle;
+
+impl crate::google::ComputerKeys for NoGoogle {
+    fn available(&self) -> bool {
+        false
+    }
+    fn exists(&self, _: &Path) -> bool {
+        false
+    }
+    fn load(&self, _: &Path) -> Result<dv_vault::crypto::Key32, VaultError> {
+        Err(VaultError::NotFound)
+    }
+    fn load_or_create(&self, _: &Path) -> Result<dv_vault::crypto::Key32, VaultError> {
+        Err(VaultError::NotFound)
+    }
+    fn remove(&self, _: &Path) {}
+}
+
+#[test]
+fn the_safety_net_and_readiness_agree_on_what_a_recent_backup_is() {
+    let (_dir, mut core, _case) = setup(None);
+    let backup_done = |core: &mut Core| {
+        core.readiness()
+            .unwrap()
+            .items
+            .into_iter()
+            .find(|i| i.key == "backup")
+            .unwrap()
+            .done
+    };
+    let net = core.safety_net(&NoGoogle).unwrap();
+    assert_eq!(net.google.state, crate::NetState::Unavailable);
+    assert_eq!(net.backup.text, "אין עדיין גיבוי");
+    assert_eq!(net.backup.state, crate::NetState::Missing);
+    assert!(!net.ok && !backup_done(&mut core));
+
+    let drive = tempfile::tempdir().unwrap();
+    core.write_backup(&drive.path().join("b")).unwrap();
+    let net = core.safety_net(&NoGoogle).unwrap();
+    assert_eq!(net.backup.text, "גיבוי מהיום");
+    assert_eq!(net.backup.state, crate::NetState::Ok);
+    assert!(backup_done(&mut core));
+    assert!(!net.ok, "without Google sign-in the net is never whole");
+
+    // Eight days ago: a reminder is due, so neither counts it (it was two weeks before D-107).
+    let eight_days_ago = crate::dates::unix_now() - 8 * dv_domain::dates::DAY_SECS;
+    core.vault_mut()
+        .unwrap()
+        .set_setting("backup_last_at", &eight_days_ago.to_string())
+        .unwrap();
+    let net = core.safety_net(&NoGoogle).unwrap();
+    assert_eq!(net.backup.text, "הגיבוי האחרון לפני 8 ימים");
+    assert_eq!(net.backup.state, crate::NetState::Missing);
+    assert!(!backup_done(&mut core));
+
+    core.write_backup(&drive.path().join("c")).unwrap();
+    core.change_password(PASSWORD, false, "חתול כחול ישן על הספה")
+        .unwrap();
+    let net = core.safety_net(&NoGoogle).unwrap();
+    assert_eq!(net.backup.text, "הסיסמה הוחלפה אחרי הגיבוי האחרון");
+    assert_eq!(net.backup.state, crate::NetState::Missing);
+    assert!(!backup_done(&mut core));
+}
 
 #[test]
 fn readiness_follows_what_the_program_checks_and_keeps_what_she_confirmed() {
@@ -982,6 +1084,49 @@ fn an_older_copy_of_the_vault_put_back_is_pointed_out_once() {
     core.lock();
     core.unlock(PASSWORD).unwrap();
     assert_eq!(core.status().integrity_warning, None);
+}
+
+/// A header changed from outside: she is told in Hebrew, at every opening, also after a new
+/// backup (it is never signed again, D-104), and the activity log says it in Hebrew too.
+#[test]
+fn a_changed_header_is_said_in_her_words_and_stays() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut core = Core::for_tests(dir.path(), None);
+    core.create_vault(PASSWORD).unwrap();
+    core.lock();
+    let path = dir.path().join("vault.header");
+    let mut header: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    header["created_at"] = json!(1);
+    std::fs::write(&path, serde_json::to_vec_pretty(&header).unwrap()).unwrap();
+
+    let in_hebrew = |w: &str| {
+        assert!(!w.bytes().any(|b| b.is_ascii_alphabetic()), "{w}");
+        assert!(w.contains("שונה מחוץ לתוכנה"), "{w}");
+    };
+    core.unlock(PASSWORD).unwrap();
+    let warning = core
+        .status()
+        .integrity_warning
+        .expect("the change is pointed out");
+    in_hebrew(&warning);
+    assert!(warning.ends_with("כדאי לספר לאור."), "{warning}");
+    let drive = tempfile::tempdir().unwrap();
+    core.write_backup(&drive.path().join("b")).unwrap();
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    in_hebrew(
+        &core
+            .status()
+            .integrity_warning
+            .expect("still, after a new backup"),
+    );
+    let page = core.activity(None).unwrap();
+    let said = page
+        .entries
+        .iter()
+        .find(|e| e.event == "integrity_warning")
+        .expect("in the activity log");
+    in_hebrew(&said.text);
 }
 
 // ------------------------------------------------------------ the activity log

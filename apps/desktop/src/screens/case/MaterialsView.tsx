@@ -110,6 +110,7 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
 
   /** A score table entered here opens as a table again; any other material opens as text. */
   async function edit(i: CaseInput) {
+    setError(null);
     if (i.kind === "test_scores") {
       try {
         const sheet = await ipc.scoreSheet(caseId, i.id);
@@ -122,6 +123,7 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
   }
 
   async function remove(i: CaseInput) {
+    setError(null);
     try {
       await ipc.deleteInput(caseId, i.id);
       setSelected(null);
@@ -193,7 +195,8 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
           <button type="button" className={detail.meta.consent ? "btn btn-primary btn-big" : "btn btn-big"} onClick={onWrite}>לכתיבת הדוח ←</button>
         )}
       </div>
-      <ErrorLine error={error} />
+      {/* With a material's window open, its failure is said in the window, not behind it. */}
+      {!input && <ErrorLine error={error} />}
       {autoSaved && (
         <div className="note-sand row" role="status">
           <span className="grow">"{autoSaved.title}" נשמר בתיק.</span>
@@ -271,6 +274,7 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
                 <button type="button" className="btn btn-small" onClick={() => void edit(input)}>עריכה</button>
                 <button type="button" className="btn btn-small" onClick={() => void remove(input)}>מחיקה</button>
               </div>
+              <ErrorLine error={error} />
               {route?.left_out && (
                 <p className="material-feeds small warn-text" role="note">{route.left_out}</p>
               )}

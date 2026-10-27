@@ -6,3 +6,12 @@
 # everyone who runs the test benefits from these saved cases.
 cc 5441eddd7eea510c386dddf3f8e807270d7d25cedd6566a4b8091745765854bb # shrinks to prefix = "מה", name = "מיכל", before = [], after = []
 cc 137ffa41b02b2b44c9cc744dcac2a1a2db9de768e7001214d42835b4d11316bd # shrinks to words = ["אבא", "גיל", "נועם"], prefixes = ["", "ו", "", "", "", "", "", "", "", ""], allow = []
+cc 8c20e36f2267806b5e81552c3085e10e0628fc935fc120736bb3b919b6f736fc # shrinks to hebrew = false, month = 0, prefix = 0, dot = false, order = 3, sep = 1, day = 1, year = 2015, short = false, context = 0
+cc 54563da2788ad2ca52f59b2bb55faf7f94031e1bdefb6c4d24d4fe74e799cafe # shrinks to hebrew = false, month = 12, prefix = 0, dot = true, order = 5, sep = 5, day = 1, year = 2015, short = false, context = 0
+cc 0c53141f818749c5189e1cc88acc8e8e29277542dd2295edaaa43d5929908060 # shrinks to hebrew = true, month = 0, prefix = 0, dot = false, order = 3, sep = 0, day = 1, year = 2015, short = true, context = 0
+cc 2d3d710ca313772e033ae08f8fa4735992db247bd89d45805ccd6e2b395bb465 # shrinks to hebrew = true, month = 41, prefix = 3, dot = false, order = 2, sep = 0, day = 1, year = 2015, short = false, context = 0
+cc b31b5adef735c74f5cfc500cf95c8ac4bd48da62dc2ae09a9b2e2eec8ac06848 # shrinks to hebrew = true, month = 0, prefix = 3, dot = false, order = 2, sep = 0, day = 1, year = 2015, short = true, context = 0
+cc b1c2395bfe0220e4f597d13706c8899562acdba7d61d8252ac66f566d1bfdd31 # shrinks to hebrew = true, month = 19, prefix = 0, dot = false, order = 0, sep = 0, day = 1, year = 2015, short = false, context = 0
+cc e82d88dd32aca63c9161317c55669eab84e9edaa7721fff2b481a59d5264f878 # shrinks to hebrew = true, month = 45, prefix = 2, dot = false, order = 2, sep = 0, day = 1, year = 2015, short = false, context = 0
+cc e479c3462041231ad1f70b307c0a39654e1d640b2c8a3c49ae54e904e4ac91fe # shrinks to hebrew = true, month = 0, prefix = 0, dot = false, order = 3, sep = 0, day = 10, year = 2015, short = true, context = 0
+cc d6208b6cc92878d99d1eeca4f158746439b571c9573d0f3e0c1935810349dbef # shrinks to hebrew = true, month = 51, prefix = 0, dot = false, order = 0, sep = 0, day = 20, year = 2015, short = true, context = 0

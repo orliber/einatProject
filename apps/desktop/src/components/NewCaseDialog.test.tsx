@@ -9,6 +9,7 @@ import { status } from "../test/fixtures";
 import { a11yViolations } from "../test/a11y";
 import { NewCaseDialog, toIdentityInputs } from "./NewCaseDialog";
 import { todayIso } from "./DateField";
+import { CONSENT_FORM_VERSION } from "../consentForm";
 
 function api(): AppApi {
   return { status: status(), go: vi.fn(), refresh: vi.fn(async () => undefined), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn(async () => undefined) };
@@ -93,7 +94,7 @@ describe("NewCaseDialog", () => {
         child_gender: "female",
         current_section: null,
         retention_until: null,
-        consent: { given_on: todayIso(), form_version: "v1", given_by: "האם" },
+        consent: { given_on: todayIso(), form_version: CONSENT_FORM_VERSION, given_by: "האם" },
       },
       identities: [
         { id: null, role: "child", value: "נועה", aliases: ["נועי", "נועל׳ה"] },

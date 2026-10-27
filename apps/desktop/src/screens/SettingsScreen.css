@@ -244,41 +244,97 @@
   color: var(--warn-ink);
 }
 
+/* "Ready for real cases" (D-108): a counter on top, then one card per item: its mark, its
+   name and one line, and its button on the same line. */
+.ready-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.ready-count {
+  font-weight: 700;
+  color: var(--warn-ink);
+}
+.ready-count.ok {
+  color: var(--ok);
+}
+.ready-meter {
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  margin: -8px 0 0;
+  border: 0;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--sand-strong);
+}
+.ready-meter::-webkit-progress-bar {
+  background: var(--sand-strong);
+}
+.ready-meter::-webkit-progress-value {
+  background: var(--ok);
+  border-radius: 3px;
+}
+.ready-meter::-moz-progress-bar {
+  background: var(--ok);
+  border-radius: 3px;
+}
 .ready-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  gap: 12px;
-}
-.ready-list li {
   display: flex;
-  gap: 10px;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 8px;
 }
-.ready-list input[type="checkbox"] {
-  margin-top: 4px;
+.ready-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.ready-item.todo {
+  border-color: var(--warn-line);
+  background: var(--warn-paper);
 }
 .ready-mark {
-  width: 18px;
-  text-align: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: var(--text-sm);
   font-weight: 700;
-}
-.ready-list li.ok .ready-mark {
+  background: var(--ok-soft);
   color: var(--ok);
 }
-.ready-list li.todo .ready-mark {
-  color: var(--warn-ink);
+.ready-item.todo .ready-mark {
+  background: var(--warn-ink);
+  color: var(--surface);
 }
-.ready-list .link-small {
-  border: 0;
-  background: transparent;
-  padding: 0;
-  color: var(--primary);
-  font: 600 var(--text-sm) var(--font-body);
-  opacity: 1;
-  text-decoration: underline;
-  cursor: pointer;
+.ready-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ready-label {
+  font-weight: 600;
+}
+.ready-item .link-btn {
+  font-size: var(--text-sm);
+}
+.ready-item .btn,
+.ready-item .link-btn {
+  flex: none;
+  white-space: nowrap;
 }
 /* Settings → המבחנים (round 59): one row per instrument, its table folded under it. */
 .instrument-list {
@@ -321,4 +377,14 @@
   padding-inline-start: 20px;
   font-size: var(--text-sm);
   color: var(--ink-soft);
+}
+
+/* The printed kit, folded under "מתקדם" (D-103). */
+.setting.advanced > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+.setting.advanced[open] > summary {
+  margin-bottom: 8px;
 }

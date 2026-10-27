@@ -90,7 +90,7 @@ pub(crate) async fn prepare_sort(
     case_id: String,
 ) -> Res<Prepared> {
     warm_names(&state, &case_id, Vec::new()).await;
-    with_core(&state, move |c| c.prepare_sort(&case_id)).await
+    prepare_off_lock(&state, move |c| c.begin_prepare_sort(&case_id)).await
 }
 
 #[tauri::command]

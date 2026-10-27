@@ -1,7 +1,7 @@
 // The IPC layer: the only module that talks to the Rust core. Tauri's `invoke` is replaced by a
 // mock, so these tests check exactly what crosses the bridge and how failures come back.
 import { invoke } from "@tauri-apps/api/core";
-import { asUiError, ipc } from "./client";
+import { asUiError, ipc, ORIGINAL_MAX_BYTES } from "./client";
 import { forgetFailures, replayFor } from "../errors";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -140,6 +140,23 @@ describe("ipc", () => {
     await expect(ipc.checkOriginal(file("a.pdf", [1]))).rejects.toMatchObject({ code: "refused" });
     mocked.mockRejectedValueOnce(new Error("x"));
     await expect(ipc.setReportTemplate(file("t.docx", [1]))).rejects.toMatchObject({ code: "internal" });
+  });
+
+  it("a file too large to be a report is refused before it is read or sent (D-120)", async () => {
+    const big = new File([new Uint8Array([1])], "גדול.pdf");
+    Object.defineProperty(big, "size", { value: ORIGINAL_MAX_BYTES + 1 });
+    const read = vi.fn();
+    Object.defineProperty(big, "arrayBuffer", { value: read });
+    const calls = mocked.mock.calls.length;
+    await expect(ipc.checkOriginal(big)).rejects.toMatchObject({ code: "refused", action: { kind: "dismiss" } });
+    expect(read).not.toHaveBeenCalled();
+    expect(mocked.mock.calls.length).toBe(calls);
+    // At the cap it goes, as bytes only.
+    const ok = file("דוח.docx", [4, 5]);
+    Object.defineProperty(ok, "size", { value: ORIGINAL_MAX_BYTES });
+    mocked.mockResolvedValueOnce(null);
+    await expect(ipc.checkOriginal(ok)).resolves.toBeNull();
+    expect(mocked.mock.lastCall?.[0]).toBe("check_original");
   });
 
   it("the Word template goes as bytes, with no file name or path", async () => {

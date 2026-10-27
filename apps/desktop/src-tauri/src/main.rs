@@ -22,10 +22,10 @@ use dv_core::{
     ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
     ExportCheck, ImportPreview, InterpretationResult, InterpretationView, LogoView, NameMatch,
     ParagraphVersionView, ParagraphView, ParentsOptions, Prepared, Readiness, ReportCheckResult,
-    ReportCheckSetting, ReportSettings, RetentionItem, SectionResult, SecurityStatus, SentItem,
-    SentText, SortResult, StagedBackup, StyleAnalysisResult, StyleImportPreview, StyleOverview,
-    StyleProfileView, StyleSourceView, SuspectDecision, TemplateView, UiError, UnsavedEdit,
-    UsageSummary, VerifyResult,
+    ReportCheckSetting, ReportSettings, RetentionItem, SectionResult, SecurityStatus, SentCursor,
+    SentPage, SentText, SortResult, StagedBackup, StyleAnalysisResult, StyleImportPreview,
+    StyleOverview, StyleProfileView, StyleSourceView, SuspectDecision, TemplateView, UiError,
+    UnsavedEdit, UsageSummary, VerifyResult,
 };
 use dv_domain::{
     CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind, Role,
@@ -108,7 +108,7 @@ where
     let core = Arc::clone(&state.core);
     tauri::async_runtime::spawn_blocking(move || {
         let mut c = core.lock().map_err(|_| internal("lock"))?;
-        // Errors name the AI she chose ("שגיאה בחיבור ל-Gemini").
+        // Errors name the AI she chose ("Gemini עמוס מאוד כרגע").
         f(&mut c).map_err(|e| e.to_ui_for(c.ai_name()))
     })
     .await
@@ -134,6 +134,26 @@ where
         .await
         .map_err(|_| internal("task"))?;
     with_core(state, move |c| finish(c, done)).await
+}
+
+/// A request prepared away from the core (D-109): read under the lock, filtered and cleared
+/// on a worker while every other command goes on (typing is saved, the timer ticks), and
+/// landed under the lock, where alone it becomes an approval. Begun again when what the filter
+/// decides by changed in between. A worker that panicked lands nothing.
+async fn prepare_off_lock(
+    state: &AppState,
+    begin: impl FnOnce(&mut Core) -> Result<dv_core::RequestJob, CoreError> + Send + 'static,
+) -> Res<dv_core::Prepared> {
+    let mut job = with_core(state, begin).await?;
+    loop {
+        let ran = tauri::async_runtime::spawn_blocking(move || job.run())
+            .await
+            .map_err(|_| internal("task"))?;
+        match with_core(state, move |c| c.finish_request(ran)).await? {
+            dv_core::Landed::Ready(p) => return Ok(p),
+            dv_core::Landed::Again(next) => job = *next,
+        }
+    }
 }
 
 /// Let the name model read a case's new texts (and `extra`) while the core is free (F2),
@@ -294,6 +314,10 @@ fn main() {
             // The window learns of a lock, of the last minute before it and of a backup from
             // an event, so it never has to ask the core on a timer while she types (F3).
             let events = app.handle().clone();
+            let backup_events = app.handle().clone();
+            let auto_backup = AutoBackup::start(Arc::clone(&core), move || {
+                let _ = backup_events.emit(CORE_EVENT, CoreEvent::BackedUp);
+            });
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(15));
                 // Read the clock before waiting for the core: a long command holding it must not
@@ -314,31 +338,10 @@ fn main() {
                         locked = timer.lock().is_ok_and(|mut c| c.lock_with_computer());
                     }
                 }
-                // A backup that is due goes by itself to the drive of the last one, if it is
-                // connected (see `Core::auto_backup`). A failure waits and is shown nowhere: the
-                // backup reminder stays until a backup is made.
-                // Only the snapshot holds the core; writing to the drive and reading it back
-                // run with the core free (F2).
-                let mut backed_up = false;
+                // A backup that is due goes by itself to the drive of the last one, on its
+                // own worker: the timer never waits for a slow drive (D-119).
                 if !locked {
-                    let task = timer
-                        .lock()
-                        .ok()
-                        .and_then(|mut c| c.begin_auto_backup().ok().flatten());
-                    if let Some(task) = task {
-                        let run = task.run();
-                        let mut upload = None;
-                        if let Ok(mut c) = timer.lock() {
-                            let (done, up) = c.finish_backup_for_drive(run);
-                            backed_up = done.is_ok();
-                            upload = up;
-                        }
-                        // The encrypted copy in her Drive, when on (D-099), on its own thread:
-                        // this timer also locks the vault and must not wait for a slow line.
-                        if let Some(up) = upload {
-                            commands::upload_in_background(Arc::clone(&timer), up);
-                        }
-                    }
+                    auto_backup.nudge();
                 }
                 // A cleanup still owed at Google after turning the Drive copy off (D-099):
                 // tried again after an unlock and then every 15 minutes, with the core free.
@@ -356,8 +359,6 @@ fn main() {
                 }
                 let event = if locked {
                     Some(CoreEvent::Locked)
-                } else if backed_up {
-                    Some(CoreEvent::BackedUp)
                 } else {
                     idle_in
                         .filter(|s| *s <= IDLE_EVENT_SECONDS)
@@ -390,6 +391,7 @@ fn main() {
             touch,
             readiness,
             confirm_readiness,
+            safety_net,
             instrument_approvals,
             set_instrument_status,
             security_status,
@@ -518,18 +520,22 @@ fn main() {
             export_report,
             export_pdf,
             check_original,
+            old_exports,
+            open_old_exports,
             prepare_letter,
             letter,
             export_letter,
             print_page,
             activity,
             sent_history,
+            sent_count,
             sent_text,
             mark_activity_reviewed,
             retention_due,
             keep_case_longer,
             change_password,
             new_recovery_kit,
+            retire_recovery_kit,
             google_status,
             google_cancel,
             google_turn_on,

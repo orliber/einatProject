@@ -67,10 +67,9 @@ impl Core {
         };
         items.push(auto("score_tables", tables));
         items.push(auto("api_key", api_key));
-        items.push(auto(
-            "backup",
-            !backup.secret_changed && backup.days_since.is_some_and(|d| d <= 14),
-        ));
+        // The same rule as the backup reminder and the safety net: newer than a week, made
+        // with the current password (D-107; it was two weeks before).
+        items.push(auto("backup", !backup.due));
         items.push(auto("disk", disk_on));
         let all_done = items.iter().all(|i| i.done);
         Ok(Readiness { items, all_done })

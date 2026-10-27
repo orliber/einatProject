@@ -70,11 +70,13 @@ pub(crate) async fn set_screen_protection(
 }
 
 #[tauri::command]
-pub(crate) async fn create_vault(
-    state: tauri::State<'_, AppState>,
-    password: String,
-) -> Res<CreatedVault> {
-    with_core(&state, move |c| c.create_vault(&password)).await
+pub(crate) async fn create_vault(state: tauri::State<'_, AppState>, password: String) -> Res<()> {
+    let password = zeroize::Zeroizing::new(password);
+    // The vault still gets a kit slot, but its key never reaches the window: there is no
+    // printed kit in the first run (D-103). One can be made later in the settings.
+    let created = with_core(&state, move |c| c.create_vault(&password)).await?;
+    drop(zeroize::Zeroizing::new(created.recovery_key));
+    Ok(())
 }
 
 #[tauri::command]

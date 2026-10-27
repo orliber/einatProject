@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { AppContext, type AppApi } from "../App";
 import { status } from "../test/fixtures";
 import { ReadinessSettings } from "./ReadinessSettings";
+import { SafetyNet } from "./SafetyNet";
 import { InstrumentSettings } from "./InstrumentSettings";
 import { instruments } from "../web/scores";
 import { UsageSettings } from "./UsageSettings";
@@ -28,24 +29,115 @@ function wrap(children: ReactNode) {
   );
 }
 
-describe("ready for real cases", () => {
-  it("says what is missing, and a confirmation goes to the core", async () => {
+describe("ready for real cases (D-108)", () => {
+  it("counts what is ready, and a confirmation goes to the core", async () => {
     const calls: [string, unknown][] = [];
-    const item = (key: string, done: boolean, auto = false) => ({ key, done, checked_by_program: auto, confirmed_at: null });
+    const item = (key: string, done: boolean, auto = false) => ({ key, done, checked_by_program: auto, confirmed_at: done && !auto ? 1_790_000_000 : null });
+    let zdr = false;
     mockIPC((cmd, args) => {
       calls.push([cmd, args]);
-      const zdr = cmd === "confirm_readiness";
+      if (cmd === "confirm_readiness") zdr = (args as { done: boolean }).done;
       return {
         items: [item("zdr", zdr), item("consent_form", false), item("backup", false, true), item("disk", true, true)],
         all_done: false,
       };
     });
     render(wrap(<ReadinessSettings />));
-    expect(await screen.findByText(/חסרים 3 פריטים/)).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText(/ZDR/));
+    expect(await screen.findByText("1 מתוך 4 מוכנים")).toBeInTheDocument();
+    // One card per item, each with its own one line.
+    const cards = screen.getAllByRole("listitem");
+    expect(cards).toHaveLength(4);
+    expect(within(cards[0] as HTMLElement).getByText(/נוסח הבקשה ל-Anthropic/)).toBeInTheDocument();
+    // What the program checks has no button when it is fine, and a named way to fix it when not.
+    expect(within(cards[3] as HTMLElement).queryByRole("button")).toBeNull();
+    expect(within(cards[2] as HTMLElement).getByRole("button", { name: "לגיבוי" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /^אישרתי: .*ZDR/ }));
     await vi.waitFor(() => expect(calls.some(([c]) => c === "confirm_readiness")).toBe(true));
     expect(calls.find(([c]) => c === "confirm_readiness")?.[1]).toMatchObject({ key: "zdr", done: true });
-    expect(await screen.findByText(/חסרים 2 פריטים/)).toBeInTheDocument();
+    expect(await screen.findByText("2 מתוך 4 מוכנים")).toBeInTheDocument();
+    expect(screen.getByText(/^אישרת ב-/)).toBeInTheDocument();
+
+    // And taken back the same way.
+    fireEvent.click(screen.getByRole("button", { name: /^ביטול האישור: .*ZDR/ }));
+    expect(await screen.findByText("1 מתוך 4 מוכנים")).toBeInTheDocument();
+    expect(calls.filter(([c]) => c === "confirm_readiness").at(-1)?.[1]).toMatchObject({ key: "zdr", done: false });
+  });
+
+  it("says so when everything is ready", async () => {
+    mockIPC(() => ({ items: [{ key: "disk", done: true, checked_by_program: true, confirmed_at: null }], all_done: true }));
+    render(wrap(<ReadinessSettings />));
+    expect(await screen.findByText("1 מתוך 1 מוכנים")).toBeInTheDocument();
+    expect(screen.getByText("הכל מוכן.")).toBeInTheDocument();
+  });
+});
+
+describe("the safety net (D-107)", () => {
+  const google = { available: true, on: false, needs_setup_here: false };
+  const backup = { last_at: null, days_since: null, due: true, secret_changed: false, last_check_at: null, has_cases: true, auto: true };
+
+  it("a missing part turns the row red, with its own button", async () => {
+    const calls: string[] = [];
+    let made = false;
+    mockIPC((cmd) => {
+      calls.push(cmd);
+      if (cmd === "google_status") return google;
+      if (cmd === "backup_status") return backup;
+      if (cmd === "write_backup") { made = true; return { path: "E:\\גיבוי.vaultbak", bytes: 1, created_at: 1 }; }
+      if (cmd === "safety_net") {
+        return {
+          google: { state: "missing", text: "כניסה עם גוגל כבויה", hint: "מפעילים אותה פעם אחת." },
+          backup: made
+            ? { state: "ok", text: "גיבוי מהיום", hint: null }
+            : { state: "missing", text: "אין עדיין גיבוי", hint: "גיבוי מוצפן על דיסק נפרד." },
+          ok: false,
+        };
+      }
+      return null;
+    });
+    render(wrap(<SafetyNet />));
+    const net = await screen.findByRole("region", { name: "רשת הביטחון" });
+    expect(net).toHaveClass("missing");
+    expect(net).toHaveTextContent("אם תשכחי את הסיסמה: כניסה עם גוגל כבויה! (חסר) · אין עדיין גיבוי! (חסר)");
+    expect(within(net).getByRole("button", { name: "להפעיל כניסה עם גוגל" })).toBeInTheDocument();
+    fireEvent.click(within(net).getByRole("button", { name: "לגבות עכשיו" }));
+    // The backup refreshes its status, and the row is made again from it.
+    expect(await within(net).findByText("גיבוי מהיום")).toBeInTheDocument();
+    expect(within(net).queryByRole("button", { name: "לגבות עכשיו" })).toBeNull();
+    expect(calls).toContain("write_backup");
+  });
+
+  it("where Google cannot work, the row is amber and says so, with nothing to press", async () => {
+    mockIPC((cmd) => {
+      if (cmd === "google_status") return { ...google, available: false };
+      if (cmd === "backup_status") return { ...backup, days_since: 1, due: false };
+      return {
+        google: { state: "unavailable", text: "כניסה עם גוגל לא זמינה במחשב הזה", hint: "אם הסיסמה תישכח, אין כאן כניסה עם גוגל." },
+        backup: { state: "ok", text: "גיבוי מאתמול", hint: null },
+        ok: false,
+      };
+    });
+    render(wrap(<SafetyNet />));
+    const net = await screen.findByRole("region", { name: "רשת הביטחון" });
+    expect(net).toHaveClass("partial");
+    expect(net).not.toHaveClass("ok");
+    expect(net).toHaveTextContent("כניסה עם גוגל לא זמינה במחשב הזה! (לא זמין)");
+    expect(within(net).getByText(/אין כאן כניסה עם גוגל/)).toBeInTheDocument();
+    expect(within(net).queryByRole("button")).toBeNull();
+  });
+
+  it("all there: one green line, no buttons", async () => {
+    mockIPC((cmd) => {
+      if (cmd === "google_status") return { ...google, on: true };
+      if (cmd === "backup_status") return { ...backup, days_since: 2, due: false };
+      return { google: { state: "ok", text: "כניסה עם גוגל", hint: null }, backup: { state: "ok", text: "גיבוי מלפני יומיים", hint: null }, ok: true };
+    });
+    render(wrap(<SafetyNet />));
+    const net = await screen.findByRole("region", { name: "רשת הביטחון" });
+    expect(net).toHaveClass("ok");
+    expect(net).toHaveTextContent("אם תשכחי את הסיסמה: כניסה עם גוגל✓ (תקין) · גיבוי מלפני יומיים✓ (תקין)");
+    expect(within(net).queryByRole("button")).toBeNull();
   });
 });
 
@@ -63,7 +155,7 @@ describe("her approval of the score tables (D-098)", () => {
     );
     expect(await screen.findByText(/ענית על הטבלאות של כל אחד מהמבחנים/)).toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "לתיקון" }));
+    fireEvent.click(screen.getByRole("button", { name: "למבחנים" }));
     expect(go).toHaveBeenCalledWith({ name: "settings", pane: "tests" });
   });
 

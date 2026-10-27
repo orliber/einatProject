@@ -105,7 +105,10 @@ fn only_the_approved_sections_go_out_through_the_gate_and_the_send_is_recorded()
     assert_eq!(kept.len(), 1);
     assert_eq!(kept[0].section_key, "report_check");
     assert_eq!(&kept[0].payload_tagged, body);
-    let history = core.sent_history(Some(&case), None, "").unwrap();
+    let history = core
+        .sent_history(Some(&case), None, "", None)
+        .unwrap()
+        .items;
     assert_eq!(history[0].place, "report_check");
     // The approval is one use only, and only for this kind of request.
     assert!(matches!(

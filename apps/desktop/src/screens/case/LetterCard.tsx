@@ -95,8 +95,8 @@ export function LetterCard({ api }: { api: CaseApi }) {
         גרסה קצרה מהדוח המאושר. למסגרת החינוכית: רק ההמלצות.
       </span>
       <div className="row" role="radiogroup" aria-label="למי המכתב">
-        <label className="row small"><input type="radio" checked={audience === "parents"} onChange={() => setAudience("parents")} /> להורים</label>
-        <label className="row small"><input type="radio" checked={audience === "school"} onChange={() => setAudience("school")} /> לצוות החינוכי</label>
+        <label className="row small"><input type="radio" name="letter-audience" checked={audience === "parents"} onChange={() => setAudience("parents")} /> להורים</label>
+        <label className="row small"><input type="radio" name="letter-audience" checked={audience === "school"} onChange={() => setAudience("school")} /> לצוות החינוכי</label>
       </div>
       {/* One recommendation she unmarked shows too, so it can be marked again. */}
       {(recommendations.length > 1 || recommendations.some((r) => !isPicked(r.id))) && (
@@ -111,7 +111,11 @@ export function LetterCard({ api }: { api: CaseApi }) {
           {recommendations.every((r) => !isPicked(r.id)) && <span className="small muted">לא סימנת אף המלצה, אז המכתב ייכתב בלי המלצות.</span>}
         </fieldset>
       )}
-      <input className="input" placeholder="מה עוד חשוב שיהיה במכתב? (לא חובה)" value={note} onChange={(e) => setNote(e.target.value)} />
+      {/* A label that stays while she types (a placeholder alone goes as the first letter does). */}
+      <div className="field">
+        <label htmlFor="letter-note" className="small">מה עוד חשוב שיהיה במכתב? (לא חובה)</label>
+        <input id="letter-note" className="input" value={note} onChange={(e) => setNote(e.target.value)} />
+      </div>
       <button type="button" className="btn" disabled={busy}
         onClick={() => void act(async () => {
           setStage("prepare");
@@ -129,7 +133,7 @@ export function LetterCard({ api }: { api: CaseApi }) {
       {paragraphs.map((p) =>
         editing?.id === p.id ? (
           <div key={p.id} className="stack" style={{ gap: 6 }}>
-            <LocalText key={p.id} ref={editBox} className="textarea serif" rows={4} autoFocus initial={editing.text} onLive={holdLive}
+            <LocalText key={p.id} ref={editBox} className="textarea serif" rows={4} autoFocus initial={editing.text} onLive={holdLive} aria-label="עריכת הפסקה"
               onText={(text) => setEditing((e) => (e?.id === p.id ? { ...e, text } : e))} />
             <div className="row">
               <button type="button" className="btn btn-primary btn-small"

@@ -12,7 +12,6 @@
 //! its estimated cost is shown first.
 
 use super::*;
-use crate::drafts::CLOSING_SECTIONS;
 
 /// "1" when she turned the check on. Absent or anything else: off.
 const REPORT_CHECK_KEY: &str = "report_check_stage";
@@ -66,6 +65,13 @@ impl Core {
     pub fn set_report_check(&mut self, on: bool) -> Result<(), CoreError> {
         self.vault_mut()?
             .set_setting(REPORT_CHECK_KEY, if on { "1" } else { "0" })?;
+        // Turned off: a check waiting to be sent does not go, and one still being filtered
+        // lands as begun again, where it stops.
+        if !on {
+            self.pending
+                .retain(|_, p| p.kind.send_kind() != SendKind::ReportCheck);
+            self.restart_prepares();
+        }
         Ok(())
     }
 
@@ -94,109 +100,11 @@ impl Core {
                 v.drafts(case_id, &s.key)?
                     .into_iter()
                     .filter(|d| d.status == DraftStatus::Approved)
-                    .map(|d| d.text_tagged),
+                    .map(|d| crate::drafts::paragraph_to_send(v, case_id, &d))
+                    .collect::<Result<Vec<_>, _>>()?,
             );
         }
         Ok(out)
-    }
-
-    /// Build the one request that reads the approved report as a whole.
-    pub fn prepare_report_check(&mut self, case_id: &str) -> Result<Prepared, CoreError> {
-        self.prepare_report_check_once(case_id, false)
-    }
-
-    fn prepare_report_check_once(
-        &mut self,
-        case_id: &str,
-        learned: bool,
-    ) -> Result<Prepared, CoreError> {
-        if !self.report_check_on()? {
-            return Err(CoreError::Needs(
-                "בדיקת הדוח כולו כבויה. אפשר להפעיל אותה בהגדרות.".to_owned(),
-                ErrorAction::settings("ai"),
-            ));
-        }
-        let structure = structure_for(self.vault_ref()?, case_id)?;
-        let model = self.model_for(Task::Draft)?;
-        let data = self.privacy_data(case_id)?;
-        // The approved drafts are not materials: the name model reads them as well, each one
-        // as it is filtered below.
-        let approved = self.report_check_texts(case_id)?;
-        let extra: Vec<&str> = approved.iter().map(String::as_str).collect();
-        let hints = self.case_hints(case_id, &extra)?;
-        let demo_mode = self.demo_mode()?;
-
-        let (input, review, keys) = {
-            let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
-            if v.case_meta(case_id)?.consent.is_none() {
-                return Err(CoreError::ConsentMissing);
-            }
-            let lookups = data.lookups(v);
-            let ctx = lookups.masked_context();
-            let mut review = Review::default();
-            let mut sections = Vec::new();
-            let mut keys = Vec::new();
-            let mut waiting = Vec::new();
-            // The report's sections only: never a letter, never the signature, never a
-            // material, a conversation or a draft not approved.
-            for s in structure.sections().filter(|s| s.key != "signature") {
-                let drafts = v.drafts(case_id, &s.key)?;
-                // A new draft waiting for her: the report is not approved yet. A proposed
-                // rewrite of an approved paragraph leaves the approved one standing.
-                if drafts
-                    .iter()
-                    .any(|d| d.status == DraftStatus::Proposed && d.replaces.is_none())
-                {
-                    waiting.push(s.title.clone());
-                }
-                // Each draft filtered by itself, with the name model's reading of that draft.
-                let mut text = Vec::new();
-                for d in drafts
-                    .into_iter()
-                    .filter(|d| d.status == DraftStatus::Approved)
-                {
-                    let out = hints
-                        .filter(&d.text_tagged, &ctx)
-                        .map_err(|e| CoreError::Internal(e.to_string()))?;
-                    review.add(format!("סעיף מאושר · {}", s.title), &out);
-                    text.push(out.tagged);
-                }
-                if text.is_empty() {
-                    continue;
-                }
-                sections.push(dv_ai::ReportCheckSection {
-                    title: model_title(s, &ctx)?,
-                    text_tagged: text.join("\n"),
-                    closing: CLOSING_SECTIONS.contains(&s.key.as_str()),
-                });
-                keys.push(s.key.clone());
-            }
-            if !waiting.is_empty() {
-                return Err(CoreError::Refused(format!(
-                    "הדוח נבדק כולו אחרי שכל הטיוטות אושרו. עוד מחכות לאישור: {}.",
-                    waiting.join(", ")
-                )));
-            }
-            if sections.len() < 2 {
-                return Err(CoreError::Refused(
-                    "בדיקת הדוח כולו משווה בין סעיפים, וצריך לפחות שני סעיפים מאושרים.".to_owned(),
-                ));
-            }
-            (dv_ai::ReportCheckInput { sections }, review, keys)
-        };
-
-        let nonce = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
-        let (body, ids) = dv_ai::build_report_check_request(&model, &input, &nonce);
-        let mut prepared = review.into_case_prepared(demo_mode, &data);
-        let kind = PendingKind::ReportCheck {
-            case_id: case_id.to_owned(),
-            section_keys: keys,
-            ids,
-        };
-        if self.gate(&data, &body, kind, &mut prepared, !learned)? {
-            return self.prepare_report_check_once(case_id, true);
-        }
-        Ok(prepared)
     }
 
     /// Send exactly what was approved and read the notes (the shell sends off the lock, with

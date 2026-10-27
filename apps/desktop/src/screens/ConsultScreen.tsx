@@ -36,6 +36,11 @@ function clock(at: number): string {
   return new Date(at * 1000).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" });
 }
 
+/** When the protected clipboard lets go of a copy (the app says how long: 20 s on a Mac). */
+function clearsIn(seconds: number): string {
+  return seconds === 60 ? "יימחק מהלוח בעוד דקה" : `יימחק מהלוח בעוד ${seconds} שניות`;
+}
+
 /** Days between `at` and today, by the calendar (0 = today). */
 function daysAgo(at: number): number {
   const d = new Date(at * 1000);
@@ -116,7 +121,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   // By the box's emptiness, which flips at the first key: typing without a pause is held too.
   const typed = !messageEmpty ? message : (review?.text ?? null);
   const holdLive = useHoldUnsaved(scope, `שאלה בשיחה עם ${ai}`, typed, "consult");
-  const [copied, setCopied] = useState<number | null>(null);
+  const [copied, setCopied] = useState<{ i: number; seconds: number } | null>(null);
   const [deleting, setDeleting] = useState<ConsultationSummary | null>(null);
   const [error, setError] = useKept<string | null>("consult:error", null);
   // A line of the question the check left out (D-082): said under the answer.
@@ -237,15 +242,17 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
 
   async function copy(i: number, text: string) {
     // Answers about a case may hold names: only the protected clipboard (out of clipboard
-    // history, cleared after a minute). No fallback to the ordinary one. The marks stay out.
+    // history, cleared after a minute, 20 seconds on a Mac). No fallback to the ordinary one.
+    // The marks stay out.
+    let seconds: number;
     try {
-      await ipc.copySecret(plainText(text));
+      seconds = await ipc.copySecret(plainText(text));
     } catch (err) {
       setError(fail(err as never));
       return;
     }
-    setCopied(i);
-    window.setTimeout(() => setCopied((c) => (c === i ? null : c)), 2000);
+    setCopied({ i, seconds });
+    window.setTimeout(() => setCopied((c) => (c?.i === i ? null : c)), 4000);
   }
 
   const locked = conversation !== null; // An open conversation stays with its case.
@@ -348,7 +355,8 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
                     </div>
                     <span className="chat-meta">
                       {ai} · {clock(t.at)}
-                      <button type="button" className="link-btn chat-copy" onClick={() => void copy(i, t.text)}>{copied === i ? "הועתק ✓" : "העתקה"}</button>
+                      <button type="button" className="link-btn chat-copy" onClick={() => void copy(i, t.text)}>{copied?.i === i ? "הועתק ✓" : "העתקה"}</button>
+                      {copied?.i === i && <span className="chat-copy-note" role="status">{clearsIn(copied.seconds)}</span>}
                     </span>
                   </div>
                 </div>
