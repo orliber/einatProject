@@ -1189,12 +1189,26 @@ fn scratch_folders_left_by_a_crash_are_removed_at_unlock() {
     fs::create_dir(&stale).unwrap();
     fs::write(stale.join("main.db"), b"encrypted copy").unwrap();
     // Left by a crash yesterday.
-    fs::File::open(&stale)
-        .unwrap()
-        .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(86_400))
-        .unwrap();
+    set_dir_modified(
+        &stale,
+        std::time::SystemTime::now() - std::time::Duration::from_secs(86_400),
+    );
     let _vault = Vault::unlock_with_password(dir.path(), PASSWORD).unwrap();
     assert!(!stale.exists());
+}
+
+/// Give a folder an older modification time. A folder's handle is opened with backup
+/// semantics on Windows (a plain open of a folder is refused there).
+fn set_dir_modified(dir: &std::path::Path, when: std::time::SystemTime) {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        options.custom_flags(FILE_FLAG_BACKUP_SEMANTICS);
+    }
+    options.open(dir).unwrap().set_modified(when).unwrap();
 }
 
 /// A backup job that is still pending when the vault is opened again (the computer slept
