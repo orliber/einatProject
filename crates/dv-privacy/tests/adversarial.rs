@@ -1411,6 +1411,24 @@ fn numbers_split_by_any_dash_or_space_never_go_out() {
     ] {
         cases.push((text.to_owned(), "000000018"));
     }
+    // A phone with two or three marks between its groups (review of D-130).
+    // Built here, so no phone is written out in the source (the pre-commit scan).
+    let (a, b) = ("123", "4567");
+    for text in [
+        format!("טלפון 050 - {a} - {b}"),
+        format!("050  {a}  {b}"),
+        format!("052 - {a} - 45 - 67"),
+        format!("נייד: 050 - {a}4 - 567"),
+        format!("טל' 03 - {a} - {b}"),
+        format!("+972 - 50 - {a} - {b}"),
+        format!("(050) - {a} - {b}"),
+    ] {
+        cases.push((text, "1234567"));
+    }
+    // Not a date the date rule takes, so still the ID.
+    cases.push(("ת.ז 0.0.0000 018".to_owned(), "000000018"));
+    // The label after it, with a date after the label.
+    cases.push(("000 000 01 8 ת.ז. 12.3.2020".to_owned(), "000000018"));
     for (text, secret) in cases {
         let out = filter(&text, &ctx_for(&ids, &[], CASE)).unwrap();
         assert!(
@@ -1433,6 +1451,10 @@ fn numbers_split_by_any_dash_or_space_never_go_out() {
         "ציונים 100–112–125",
         "תזונה: 112 104 106",
         "ציונים 100 - 112 - 125",
+        // A label after the row that is not its own (review of D-130).
+        "ציונים 100 112 125. ת.ז לא נמסרה",
+        "ציונים 100 112 125 (ת.ז בתיק)",
+        "ציונים 08 10 12 14 9",
     ] {
         let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
         assert_eq!(out.tagged, text);
@@ -1448,10 +1470,62 @@ fn numbers_split_by_any_dash_or_space_never_go_out() {
             "ת.ז בתיק. נבדק 12.3.2020 10:15",
             "ת.ז בתיק. נבדק לפני כ-7 שנים 10:15",
         ),
+        (
+            "ת.ז בתיק. נבדק 12.3.20 10:15",
+            "ת.ז בתיק. נבדק לפני כ-7 שנים 10:15",
+        ),
+        (
+            "ציונים 100 112 125, ת.ז של הילד 000000018",
+            "ציונים 100 112 125, ת.ז של הילד [ת.ז.]",
+        ),
     ] {
         let filtered = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
         assert_eq!(filtered.tagged, out);
         assert!(gate_with(&filtered.tagged, &ids, CASE).cleared, "{out}");
+    }
+}
+
+/// A declared name with a mark glued after it never goes out: "נועם' הלך" was read as an
+/// abbreviation ("ספט'") and went out whole, cleared by the gate (review of D-130).
+#[test]
+fn a_declared_name_with_any_mark_after_it_never_goes_out() {
+    let ids = identities();
+    for name in ["נועם", "רותם", "מאיה", "עידו"] {
+        for mark in [
+            "'", "\u{05F3}", "\u{2019}", "\"", "\u{05F4}", "\u{201D}", ".", ",", "!", "?", ":",
+            ";", ")", "-", "…",
+        ] {
+            for context in ["{} הלך הביתה", "אמרתי ל{} שזה בסדר", "{} 2020"] {
+                let text = context.replace("{}", &format!("{name}{mark}"));
+                let out = filter(&text, &ctx_for(&ids, &[], CASE)).unwrap();
+                assert!(
+                    !normalize(&out.tagged).contains(&normalize(name)),
+                    "{text:?} → {}",
+                    out.tagged
+                );
+                let o = send(&text, CASE);
+                assert!(o.leaked.is_empty(), "{text:?} leaked {:?}", o.leaked);
+                assert!(
+                    !gate_with(&text, &ids, CASE).cleared,
+                    "{text:?} cleared by the gate"
+                );
+            }
+        }
+    }
+    // A child named טל: "טל'" with a geresh is her name, except as the abbreviation of a
+    // phone number right before one.
+    let mut with_tal = identities();
+    with_tal.push(id(CASE, Role::Brother, "[אח_1]", "טל", &[]));
+    let tal = |text: &str| filter(text, &ctx_for(&with_tal, &[], CASE)).unwrap().tagged;
+    assert_eq!(tal("טל' הלך הביתה"), "[אח_1]' הלך הביתה");
+    // Built here, so no phone is written out in the source (the pre-commit scan).
+    let (a, b) = ("123", "4567");
+    for text in [
+        format!("טל' 03-{a}{b}"),
+        format!("טל' הגן: 08-{a}{b}"),
+        format!("טל': 050-{a}{b}"),
+    ] {
+        assert!(tal(&text).starts_with("טל'"), "{text:?} → {}", tal(&text));
     }
 }
 

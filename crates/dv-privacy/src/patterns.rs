@@ -267,6 +267,33 @@ fn hyphen(c: char) -> bool {
     )
 }
 
+/// Seven digits in groups of two or more, each group up to three marks of [`GROUP_SEP`]
+/// from the next: every way to split the subscriber part of a phone.
+fn seven_digits_in_groups() -> String {
+    fn splits(left: usize, groups: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) {
+        if left == 0 {
+            out.push(groups.clone());
+        }
+        for size in 2..=left {
+            groups.push(size);
+            splits(left - size, groups, out);
+            groups.pop();
+        }
+    }
+    let mut all = Vec::new();
+    splits(7, &mut Vec::new(), &mut all);
+    all.iter()
+        .map(|groups| {
+            groups
+                .iter()
+                .map(|n| format!(r"\d{{{n}}}"))
+                .collect::<Vec<_>>()
+                .join(&format!("[{GROUP_SEP}]{{1,3}}"))
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
 struct Compiled {
     email: Regex,
     url: Regex,
@@ -301,12 +328,16 @@ static COMPILED: LazyLock<Result<Compiled, regex::Error>> = LazyLock::new(|| {
         // Unicode hyphens ("000־000־018" went out whole): a hyphen, never a dash, so a score
         // range ("100–115") is read as before.
         digit_run: Regex::new(r"\+?\d(?:[\-./\x{05BE}\x{2010}\x{2011}]?\d)+")?,
-        // A phone typed in groups. Between them a space (also a non-breaking one), a hyphen or
-        // any dash ("054‑1234567" with a non-breaking hyphen, "054–1234567"); the area code
-        // may be in parentheses ("(054) 123-4567", "(03)1234567"), and then it is part of it.
+        // A phone typed in groups. Between them up to three spaces (also non-breaking ones),
+        // hyphens, dashes or marks ("054‑1234567" with a non-breaking hyphen, "050 - 123 -
+        // 4567" went out whole, review of D-130); the area code may be in parentheses ("(054)
+        // 123-4567", "(03)1234567"), and then it is part of it. The seven digits after it in
+        // groups of two or more ("052 - 123 - 45 - 67"), so a row of two-digit scores after a
+        // zero is never one.
         spaced_phone: Regex::new(&format!(
-            r"(?:(?:\+972[{s}]?|0)(?:5\d|[2-4]|[89]|7\d)[{s}]|(?:\+972\s?)?\(\s?0?(?:5\d|[2-4]|[89]|7\d)\s?\)[{s}]?)\d{{3}}[{s}]?\d{{4}}",
-            s = GROUP_SEP
+            r"(?:(?:\+972[{s}]{{0,3}}|0)(?:5\d|[2-4]|[89]|7\d)[{s}]{{1,3}}|(?:\+972\s?)?\(\s?0?(?:5\d|[2-4]|[89]|7\d)\s?\)[{s}]{{0,3}})(?:{seven})",
+            s = GROUP_SEP,
+            seven = seven_digits_in_groups()
         ))?,
         // ID numbers typed in groups ("000 000 018", "0000-0001-8"), with up to three
         // separators between them ("000 - 000 - 018", "000, 000, 018" went out whole, fourth
@@ -436,8 +467,8 @@ const ID_LABELS: [&str; 6] = ["ת.ז", "ת\"ז", "ת״ז", "זהות", "ID", "מ
 /// "תז" and not "תזונה", "id" and not "idea".
 const ID_LABEL_WORDS: [&str; 3] = ["תז", "מז", "id"];
 
-/// Where the first ID label in this text ends.
-fn label_end(near: &str) -> Option<usize> {
+/// Where the first ID label in this text starts and ends.
+fn label_span(near: &str) -> Option<(usize, usize)> {
     let mut words = Vec::new();
     let mut from = None;
     for (i, c) in near
@@ -455,20 +486,22 @@ fn label_end(near: &str) -> Option<usize> {
     }
     let labels = ID_LABELS
         .iter()
-        .filter_map(|l| near.find(l).map(|i| i + l.len()));
-    let label_words = words.into_iter().filter_map(|(f, t)| {
+        .filter_map(|l| near.find(l).map(|i| (i, i + l.len())));
+    let label_words = words.into_iter().filter(|&(f, t)| {
         near.get(f..t)
-            .filter(|w| ID_LABEL_WORDS.iter().any(|l| w.eq_ignore_ascii_case(l)))
-            .map(|_| t)
+            .is_some_and(|w| ID_LABEL_WORDS.iter().any(|l| w.eq_ignore_ascii_case(l)))
     });
     labels.chain(label_words).min()
 }
 
-/// An ID label within twenty characters before the number, or after it ("00 00 00 01 8
-/// ת.ז", "000 000 01 8 (מספר זהות)" went out whole, fourth review of D-128). After it, only
-/// when no number of its own follows the label: in "ציונים 100 112 125, ת.ז 000000018" the
-/// label is the next number's, also once that number is a tag ("ת.ז [ת.ז.]", blanked to
-/// `x` for reading). Text around that cannot be read (never expected) counts as a label.
+/// An ID label within twenty characters before the number, or right after it ("00 00 00 01
+/// 8 ת.ז", "000 000 01 8 (מספר זהות)" went out whole, fourth review of D-128). After it, only
+/// when the label closes the number's own phrase: nothing but spaces, a bracket or "מספר"
+/// before the label (a comma or a period starts another clause), and after it a closing
+/// bracket, a mark, the line's end, or a number too short to be an ID. "ציונים 100 112 125. ת.ז לא נמסרה", "(ת.ז
+/// בתיק)" and ", ת.ז 000000018" (the next number's label, also once that number is a tag,
+/// blanked to `x` for reading) keep the scores (review of D-130). Text around that cannot be
+/// read (never expected) counts as a label.
 fn id_label_near(text: &str, start: usize, end: usize) -> bool {
     let before = text.get(..start).and_then(|b| {
         let from = b.char_indices().rev().nth(20).map_or(0, |(i, _)| i);
@@ -479,15 +512,34 @@ fn id_label_near(text: &str, start: usize, end: usize) -> bool {
         a.get(..to)
     });
     let labelled_after = |a: &str| {
-        label_end(a).is_some_and(|i| {
-            text.get(end + i..).is_none_or(|rest| {
-                !rest
-                    .trim_start_matches(|c: char| !c.is_alphanumeric() && c != '[')
-                    .starts_with(|c: char| c.is_ascii_digit() || matches!(c, 'x' | '['))
-            })
+        label_span(a).is_some_and(|(from, to)| {
+            let gap_ok = a.get(..from).is_none_or(|gap| {
+                gap.replace("מספר", "")
+                    .chars()
+                    .all(|c| c.is_whitespace() || matches!(c, '(' | '['))
+            });
+            let closes = text.get(end + to..).is_none_or(|rest| {
+                let rest = rest
+                    .trim_start_matches(['.', '"', '\'', '\u{05F3}', '\u{05F4}'])
+                    .trim_start_matches([' ', '\t']);
+                // A date or a short number after it is not an ID of its own ("000 000 01 8
+                // ת.ז. 12.3.2020"); nine digits or a tag are.
+                let own_number = rest
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit() || matches!(c, '.' | '/' | '-'))
+                    .filter(char::is_ascii_digit)
+                    .count();
+                rest.chars().next().is_none_or(|c| {
+                    matches!(
+                        c,
+                        ')' | ']' | ',' | '.' | ';' | ':' | '!' | '?' | '\n' | '\r'
+                    ) || (c.is_ascii_digit() && own_number < 9)
+                })
+            });
+            gap_ok && closes
         })
     };
-    before.is_none_or(|b| label_end(b).is_some()) || after.is_none_or(labelled_after)
+    before.is_none_or(|b| label_span(b).is_some()) || after.is_none_or(labelled_after)
 }
 
 // Both read "no character" where `i` is not a boundary (never expected: it ends or starts a
@@ -1121,10 +1173,20 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
     for m in c.labelled_digits.find_iter(text) {
         // A full date in them is a date ("ת.ז בתיק. נבדק 12.3.2020 10:15" lost the date and
         // left ":15"): the date rule hides its digits whole, so no ID is left either.
-        let dated = c
-            .num_date
-            .captures_iter(m.as_str())
-            .any(|caps| caps.get(3).is_some_and(|y| y.len() == 4));
+        // Only a date the date rule takes (a real day, a year of two or four digits: "12.3.20
+        // 10:15" too, review of D-130): "0.0.0000 018" is no date, and stays an ID.
+        let dated = c.num_date.captures_iter(m.as_str()).any(|caps| {
+            let part = |k: usize| caps.get(k).and_then(|g| g.as_str().parse::<u32>().ok());
+            let bounded = caps
+                .get(0)
+                .is_some_and(|g| digit_bounded(text, m.start() + g.start(), m.start() + g.end()));
+            match (part(1), part(2), caps.get(3)) {
+                (Some(d), Some(mo), Some(y)) if bounded => {
+                    expand_year(y.as_str(), today).is_some_and(|y| valid_ymd(y, mo, d))
+                }
+                _ => false,
+            }
+        });
         if !dated
             && id_label_near(text, m.start(), m.end())
             && digit_bounded(text, m.start(), m.end())
