@@ -299,6 +299,14 @@ fn host_allowed(url: &reqwest::Url) -> bool {
     url.scheme() == "https" && url.host_str().is_some_and(|h| UPDATE_HOSTS.contains(&h))
 }
 
+/// How long one transfer of at most `bytes` may take, for a slow line: two minutes, and a
+/// second for every 25 KB (a 150 MB installer gets 1h 42m), at most four hours. The read is
+/// still bounded by `max` bytes, whatever the time.
+#[must_use]
+pub(crate) fn transfer_timeout(bytes: u64) -> Duration {
+    Duration::from_secs((120 + bytes / 25_000).min(4 * 60 * 60))
+}
+
 impl GitHubFetch {
     pub fn new() -> Result<Self, UpdateError> {
         let policy = reqwest::redirect::Policy::custom(|attempt| {
@@ -313,7 +321,10 @@ impl GitHubFetch {
             .https_only(true)
             .no_proxy()
             .redirect(policy)
-            .timeout(Duration::from_secs(600))
+            // No timeout for the whole client: each request gets one from its size
+            // (`transfer_timeout`), so a slow line does not fail a large installer every time
+            // from its first byte.
+            .timeout(None)
             .connect_timeout(Duration::from_secs(20))
             .user_agent("diagnostic-vault-update")
             .build()
@@ -332,6 +343,7 @@ impl Fetch for GitHubFetch {
         let resp = self
             .client
             .get(parsed)
+            .timeout(transfer_timeout(max))
             .send()
             .map_err(|_| UpdateError::Offline)?;
         if !host_allowed(resp.url()) {
@@ -526,6 +538,22 @@ mod tests {
         assert!(!ok("https://github.com.evil.example/x"));
         assert!(!ok("https://api.anthropic.com/v1/messages"));
         assert!(GitHubFetch::new().is_ok());
+    }
+
+    #[test]
+    fn a_transfer_gets_time_by_its_size_and_never_more_than_four_hours() {
+        assert_eq!(transfer_timeout(0), Duration::from_secs(120));
+        assert_eq!(transfer_timeout(MAX_NOTICE), Duration::from_secs(122));
+        assert_eq!(
+            transfer_timeout(150 * 1024 * 1024),
+            Duration::from_secs(120 + 150 * 1024 * 1024 / 25_000)
+        );
+        assert_eq!(transfer_timeout(u64::MAX), Duration::from_secs(4 * 60 * 60));
+        // The largest installer allowed reaches the cap only below 29 KB/s.
+        assert_eq!(
+            transfer_timeout(MAX_INSTALLER),
+            Duration::from_secs(4 * 60 * 60)
+        );
     }
 
     #[test]

@@ -236,7 +236,9 @@ impl HuggingFaceFetch {
             .https_only(true)
             .no_proxy()
             .redirect(policy)
-            .timeout(Duration::from_secs(3600))
+            // Each file's request gets a timeout from its pinned size (`transfer_timeout`):
+            // the 735 MB model on a slow line is not cut off and begun again every hour.
+            .timeout(None)
             .connect_timeout(Duration::from_secs(20))
             .user_agent("diagnostic-vault-model")
             .build()
@@ -261,6 +263,7 @@ impl ModelFetch for HuggingFaceFetch {
         let resp = self
             .client
             .get(parsed)
+            .timeout(crate::update::transfer_timeout(max))
             .send()
             .map_err(|_| ModelError::Offline)?;
         if !host_allowed(resp.url()) {
