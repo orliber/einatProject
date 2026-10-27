@@ -431,8 +431,9 @@ fn every_command_refuses_while_the_vault_is_locked() {
         ("consultations", Box::new(|k| k.consultations().map(drop))),
         (
             "sent_history",
-            Box::new(|k| k.sent_history(None, None, "").map(drop)),
+            Box::new(|k| k.sent_history(None, None, "", None).map(drop)),
         ),
+        ("sent_count", Box::new(|k| k.sent_count(0).map(drop))),
         (
             "sent_text",
             Box::new(move |k| k.sent_text(c, "x").map(drop)),

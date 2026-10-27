@@ -149,6 +149,7 @@ fn main() {
             "print_page",
             "activity",
             "sent_history",
+            "sent_count",
             "sent_text",
             "mark_activity_reviewed",
             "retention_due",

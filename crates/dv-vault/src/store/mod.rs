@@ -2850,23 +2850,156 @@ impl Vault {
             })?
             .collect::<Result<_, _>>()?;
         rows.into_iter()
-            .map(
-                |(id, section_key, created_at, payload_sha256, model, payload)| {
-                    Ok(Transmission {
-                        payload_tagged: open_string(
-                            &key,
-                            &aad("transmissions", "payload", &id, case_id),
-                            &payload,
-                        )?,
-                        case_id: case_id.to_owned(),
-                        id,
-                        section_key,
-                        created_at,
-                        payload_sha256,
-                        model,
-                    })
-                },
-            )
+            .map(|row| open_transmission(&key, case_id, row))
             .collect()
     }
+
+    /// One kept request of a case, or none.
+    pub fn transmission(
+        &self,
+        case_id: &str,
+        id: &str,
+    ) -> Result<Option<Transmission>, VaultError> {
+        let row: Option<TransmissionRow> = self
+            .main
+            .query_row(
+                "SELECT id, section_key, created_at, payload_sha256, model, payload_tagged_enc FROM transmissions
+                 WHERE case_id = ?1 AND id = ?2",
+                [case_id, id],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                    ))
+                },
+            )
+            .optional()?;
+        row.map(|row| open_transmission(&self.case_key(case_id)?, case_id, row))
+            .transpose()
+    }
+
+    /// How many requests left since `since` (not a demo answer, which never left), of every
+    /// case not in the recycle bin. Counted in SQL: nothing is opened (D-123).
+    pub fn transmissions_since(&self, since: i64) -> Result<u32, VaultError> {
+        let n: i64 = self.main.query_row(
+            "SELECT COUNT(*) FROM transmissions t JOIN cases c ON c.id = t.case_id
+             WHERE c.deleted_at IS NULL AND t.model <> 'demo' AND t.created_at >= ?1",
+            [since],
+            |r| r.get(0),
+        )?;
+        Ok(u32::try_from(n).unwrap_or(u32::MAX))
+    }
+
+    /// One page of "what left the computer" (D-123): kept requests newest first (by time, then
+    /// id), only those older than `before`, of one case or of every case not in the recycle
+    /// bin, of one place or all. The narrowing is done here in SQL, so only the rows of the
+    /// page are opened, each case's key unwrapped once.
+    pub fn transmissions_newest(
+        &self,
+        case_id: Option<&str>,
+        place: Option<&str>,
+        before: Option<(i64, &str)>,
+        limit: u32,
+    ) -> Result<Vec<Transmission>, VaultError> {
+        let (filter, mut args) = transmissions_filter(case_id, place, before);
+        let sql = format!(
+            "SELECT t.case_id, t.id, t.section_key, t.created_at, t.payload_sha256, t.model, t.payload_tagged_enc
+             FROM transmissions t {filter} ORDER BY t.created_at DESC, t.id DESC LIMIT ?"
+        );
+        args.push(rusqlite::types::Value::Integer(i64::from(limit)));
+        let mut stmt = self.main.prepare(&sql)?;
+        let rows: Vec<(String, TransmissionRow)> = stmt
+            .query_map(rusqlite::params_from_iter(args), |r| {
+                Ok((
+                    r.get(0)?,
+                    (
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                    ),
+                ))
+            })?
+            .collect::<Result<_, _>>()?;
+        let mut keys: std::collections::HashMap<String, Key32> = std::collections::HashMap::new();
+        let mut out = Vec::with_capacity(rows.len());
+        for (case, row) in rows {
+            let key = match keys.entry(case.clone()) {
+                std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+                std::collections::hash_map::Entry::Vacant(e) => e.insert(self.case_key(&case)?),
+            };
+            out.push(open_transmission(key, &case, row)?);
+        }
+        Ok(out)
+    }
+
+    /// Whether [`Self::transmissions_newest`] has anything older than `before`: read from the
+    /// index, nothing opened.
+    pub fn transmissions_older(
+        &self,
+        case_id: Option<&str>,
+        place: Option<&str>,
+        before: (i64, &str),
+    ) -> Result<bool, VaultError> {
+        let (filter, args) = transmissions_filter(case_id, place, Some(before));
+        let sql = format!("SELECT EXISTS (SELECT 1 FROM transmissions t {filter})");
+        Ok(self
+            .main
+            .query_row(&sql, rusqlite::params_from_iter(args), |r| r.get(0))?)
+    }
+}
+
+/// The narrowing of "what left the computer", as SQL: fixed text only, every value bound.
+/// The keyset is a row value, so SQLite walks the index from `before` instead of sorting.
+fn transmissions_filter(
+    case_id: Option<&str>,
+    place: Option<&str>,
+    before: Option<(i64, &str)>,
+) -> (String, Vec<rusqlite::types::Value>) {
+    use rusqlite::types::Value as Sql;
+    let mut sql = String::new();
+    let mut args: Vec<Sql> = Vec::new();
+    match case_id {
+        Some(c) => {
+            sql.push_str("WHERE t.case_id = ?");
+            args.push(Sql::Text(c.to_owned()));
+        }
+        None => sql.push_str("JOIN cases c ON c.id = t.case_id WHERE c.deleted_at IS NULL"),
+    }
+    if let Some(p) = place {
+        sql.push_str(" AND t.section_key = ?");
+        args.push(Sql::Text(p.to_owned()));
+    }
+    if let Some((at, id)) = before {
+        sql.push_str(" AND (t.created_at, t.id) < (?, ?)");
+        args.extend([Sql::Integer(at), Sql::Text(id.to_owned())]);
+    }
+    (sql, args)
+}
+
+/// A kept request's row, opened with its case's key.
+fn open_transmission(
+    key: &Key32,
+    case_id: &str,
+    (id, section_key, created_at, payload_sha256, model, payload): TransmissionRow,
+) -> Result<Transmission, VaultError> {
+    Ok(Transmission {
+        payload_tagged: open_string(
+            key,
+            &aad("transmissions", "payload", &id, case_id),
+            &payload,
+        )?,
+        case_id: case_id.to_owned(),
+        id,
+        section_key,
+        created_at,
+        payload_sha256,
+        model,
+    })
 }

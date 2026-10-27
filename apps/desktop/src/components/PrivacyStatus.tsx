@@ -6,18 +6,19 @@ import { useQuery } from "@tanstack/react-query";
 import { ipc } from "../ipc/client";
 import { SentHistoryDialog } from "./SentHistory";
 
-/** Requests since the first of this month, by the computer's calendar. */
-export function thisMonth(ats: number[], now = Date.now()): number {
+/** The first of this month, by the computer's calendar, in seconds. */
+export function monthStart(now = Date.now()): number {
   const d = new Date(now);
-  const start = new Date(d.getFullYear(), d.getMonth(), 1).getTime() / 1000;
-  return ats.filter((at) => at >= start).length;
+  return new Date(d.getFullYear(), d.getMonth(), 1).getTime() / 1000;
 }
 
 export function PrivacyStatus() {
-  const sent = useQuery({ queryKey: ["sent", null, null, ""], queryFn: () => ipc.sentHistory(null, null, "") });
+  // Counted in the vault, not by reading the whole history (D-123).
+  const since = monthStart();
+  const sent = useQuery({ queryKey: ["sent-count", since], queryFn: () => ipc.sentCount(since) });
   const security = useQuery({ queryKey: ["security"], queryFn: () => ipc.securityStatus() });
   const [open, setOpen] = useState(false);
-  const n = sent.data ? thisMonth(sent.data.filter((i) => !i.demo).map((i) => i.at)) : null;
+  const n = sent.data ?? null;
   const layersOk = security.data ? security.data.items.every((i) => i.state !== "warn") : null;
   const count = n === null ? "" : n === 0 ? "שום בקשה לא יצאה החודש." : n === 1 ? "בקשה אחת יצאה החודש, אחרי הסתרה." : `${n} בקשות יצאו החודש, כולן אחרי הסתרה.`;
   const layers = layersOk === null ? "" : layersOk ? " שכבות ההגנה נבדקו בפתיחת הכספת, כולן תקינות." : " אחת משכבות ההגנה מבקשת מבט (הגדרות ← סיסמה ואבטחה).";

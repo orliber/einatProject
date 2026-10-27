@@ -75,7 +75,9 @@ pub use dv_ai::{StyleItem, StyleKind, StyleOrigin, StyleProfile};
 pub use dv_export::MAX_LOGO_BYTES;
 pub use dv_vault::BACKUP_EXTENSION;
 pub use followup::FollowUpView;
-pub use history::{HiddenWord, SentItem, SentPart, SentText};
+pub use history::{
+    HiddenWord, SentCursor, SentItem, SentPage, SentPart, SentText, SENT_PAGE, SENT_SCAN,
+};
 pub use instruments::{InstrumentApproval, InstrumentStatus};
 pub use jobs::{
     BackupRun, BackupTask, DocumentRead, DrillJob, Drilled, ExportJob, Exported, ReadJob,

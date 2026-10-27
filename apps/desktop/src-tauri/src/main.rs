@@ -22,10 +22,10 @@ use dv_core::{
     ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
     ExportCheck, ImportPreview, InterpretationResult, InterpretationView, LogoView, NameMatch,
     ParagraphVersionView, ParagraphView, ParentsOptions, Prepared, Readiness, ReportCheckResult,
-    ReportCheckSetting, ReportSettings, RetentionItem, SectionResult, SecurityStatus, SentItem,
-    SentText, SortResult, StagedBackup, StyleAnalysisResult, StyleImportPreview, StyleOverview,
-    StyleProfileView, StyleSourceView, SuspectDecision, TemplateView, UiError, UnsavedEdit,
-    UsageSummary, VerifyResult,
+    ReportCheckSetting, ReportSettings, RetentionItem, SectionResult, SecurityStatus, SentCursor,
+    SentPage, SentText, SortResult, StagedBackup, StyleAnalysisResult, StyleImportPreview,
+    StyleOverview, StyleProfileView, StyleSourceView, SuspectDecision, TemplateView, UiError,
+    UnsavedEdit, UsageSummary, VerifyResult,
 };
 use dv_domain::{
     CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind, Role,
@@ -524,6 +524,7 @@ fn main() {
             print_page,
             activity,
             sent_history,
+            sent_count,
             sent_text,
             mark_activity_reviewed,
             retention_due,

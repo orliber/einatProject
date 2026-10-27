@@ -4,6 +4,7 @@ import type { Commands } from "./generated/commands";
 import { rememberReplay } from "../errors";
 import { listen } from "@tauri-apps/api/event";
 import type { ActivityPage } from "./generated/ActivityPage";
+import type { SentCursor } from "./generated/SentCursor";
 import type { AppStatus } from "./generated/AppStatus";
 import type { RetentionItem } from "./generated/RetentionItem";
 import type { BackupCheckView } from "./generated/BackupCheckView";
@@ -382,8 +383,11 @@ export const ipc = {
   // Activity log (metadata only; cases named on this computer) and retention reminders.
   activity: (before: number | null) => call("activity", { before }),
   markActivityReviewed: () => run("mark_activity_reviewed"),
-  /** "מה יצא מהמחשב": the requests kept with a case (or every case), newest first. */
-  sentHistory: (caseId: string | null, place: string | null, query: string) => call("sent_history", { caseId, place, query }),
+  /** "מה יצא מהמחשב": one page of the requests kept with a case (or every case), newest first, from `before` on. */
+  sentHistory: (caseId: string | null, place: string | null, query: string, before: SentCursor | null) =>
+    call("sent_history", { caseId, place, query, before }),
+  /** How many requests left since `since` (seconds), of every case: counted, not read. */
+  sentCount: (since: number) => call("sent_count", { since }),
   sentText: (caseId: string, id: string) => call("sent_text", { caseId, id }),
   retentionDue: () => call("retention_due"),
   keepCaseLonger: (caseId: string, years: number) => run("keep_case_longer", { caseId, years }),
