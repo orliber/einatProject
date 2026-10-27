@@ -185,43 +185,49 @@ impl MaskBook {
     /// and quotes included, so restoring gives back the very same text.
     #[must_use]
     pub fn kept_words_tag(&self, original: &str) -> String {
-        if let Some(e) = self
-            .entries
-            .borrow()
+        let mut entries = held(&self.entries);
+        let found = entries
             .iter()
-            .find(|e| e.kind == KEPT_WORDS && e.original == original)
-        {
-            return e.tag.clone();
+            .position(|e| e.kind == KEPT_WORDS && e.original == original);
+        let (index, tag) = match found.and_then(|i| entries.get(i).map(|e| (i, e.tag.clone()))) {
+            Some(known) => known,
+            None => {
+                let prefix = format!("[{KEPT_WORDS}_");
+                let next = entries
+                    .iter()
+                    .filter_map(|e| {
+                        e.tag
+                            .strip_prefix(&prefix)?
+                            .strip_suffix(']')?
+                            .parse::<u32>()
+                            .ok()
+                    })
+                    .max()
+                    .unwrap_or(0)
+                    .saturating_add(1);
+                let tag = format!("{prefix}{next}]");
+                entries.push(MaskEntry {
+                    tag: tag.clone(),
+                    kind: KEPT_WORDS.to_owned(),
+                    original: original.to_owned(),
+                });
+                (entries.len().saturating_sub(1), tag)
+            }
+        };
+        // Like any other tag: what this request gave or used is kept with the case.
+        if index >= self.kept {
+            let mut mine = held(&self.mine);
+            if !mine.contains(&tag) {
+                mine.push(tag.clone());
+            }
         }
-        let prefix = format!("[{KEPT_WORDS}_");
-        let next = self
-            .entries
-            .borrow()
-            .iter()
-            .filter_map(|e| {
-                e.tag
-                    .strip_prefix(&prefix)?
-                    .strip_suffix(']')?
-                    .parse::<u32>()
-                    .ok()
-            })
-            .max()
-            .unwrap_or(0)
-            .saturating_add(1);
-        let tag = format!("{prefix}{next}]");
-        self.entries.borrow_mut().push(MaskEntry {
-            tag: tag.clone(),
-            kind: KEPT_WORDS.to_owned(),
-            original: original.to_owned(),
-        });
         tag
     }
 
     /// The words a kept-words tag stands for, if the book has it.
     #[must_use]
     pub fn kept_words_original(&self, tag: &str) -> Option<String> {
-        self.entries
-            .borrow()
+        held(&self.entries)
             .iter()
             .find(|e| e.kind == KEPT_WORDS && e.tag == tag)
             .map(|e| e.original.clone())
@@ -230,8 +236,7 @@ impl MaskBook {
     /// The words a numbered tag of any kind stands for, if the book has it.
     #[must_use]
     pub fn original(&self, tag: &str) -> Option<String> {
-        self.entries
-            .borrow()
+        held(&self.entries)
             .iter()
             .find(|e| e.tag == tag)
             .map(|e| e.original.clone())
@@ -300,6 +305,25 @@ mod tests {
         // Each request's own book: the kept entries and what it used, not the other's.
         let own: Vec<String> = a.entries().into_iter().map(|e| e.tag).collect();
         assert_eq!(own, ["[תאריך_1]", "[תאריך_2]"]);
+    }
+
+    #[test]
+    fn kept_words_given_by_a_sibling_are_kept_with_the_case() {
+        let a = MaskBook::new(Vec::new());
+        let b = a.sibling();
+        let tag = b.kept_words_tag("\"זרזירים\"");
+        assert_eq!(tag, "[מילים_1]");
+        // The same words in the other book: the same tag, and each book keeps it.
+        assert_eq!(a.kept_words_tag("\"זרזירים\""), tag);
+        assert_eq!(b.kept_words_tag("\"דרורים\""), "[מילים_2]");
+        let tags =
+            |book: &MaskBook| -> Vec<String> { book.added().into_iter().map(|e| e.tag).collect() };
+        assert_eq!(tags(&a), ["[מילים_1]"]);
+        assert_eq!(tags(&b), ["[מילים_1]", "[מילים_2]"]);
+        assert_eq!(
+            b.kept_words_original("[מילים_2]").as_deref(),
+            Some("\"דרורים\"")
+        );
     }
 
     #[test]
