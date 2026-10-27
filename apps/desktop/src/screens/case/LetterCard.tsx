@@ -129,7 +129,7 @@ export function LetterCard({ api }: { api: CaseApi }) {
       {paragraphs.map((p) =>
         editing?.id === p.id ? (
           <div key={p.id} className="stack" style={{ gap: 6 }}>
-            <LocalText key={p.id} ref={editBox} className="textarea serif" rows={4} autoFocus initial={editing.text} onLive={holdLive}
+            <LocalText key={p.id} ref={editBox} className="textarea serif" rows={4} autoFocus initial={editing.text} onLive={holdLive} aria-label="עריכת הפסקה"
               onText={(text) => setEditing((e) => (e?.id === p.id ? { ...e, text } : e))} />
             <div className="row">
               <button type="button" className="btn btn-primary btn-small"

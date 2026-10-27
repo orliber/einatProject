@@ -151,7 +151,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
                       editing?.id === p.id ? (
                         <div key={p.id} className="stack" style={{ gap: 6 }}>
                           <span className="small muted">{section.title}</span>
-                          <LocalText key={p.id} ref={editBox} className="textarea serif" rows={4} autoFocus initial={editing.text} onLive={holdLive}
+                          <LocalText key={p.id} ref={editBox} className="textarea serif" rows={4} autoFocus initial={editing.text} onLive={holdLive} aria-label="השלמת הפסקה"
                             onText={(text) => setEditing((e) => (e?.id === p.id ? { ...e, text } : e))} />
                           <div className="row">
                             <button type="button" className="btn btn-primary btn-small" onClick={() => void save()}>שמירה</button>
