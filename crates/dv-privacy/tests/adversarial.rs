@@ -1358,7 +1358,7 @@ fn numbers_split_by_any_dash_or_space_never_go_out() {
     let spaces = [
         '\u{00A0}', '\u{2009}', '\u{202F}', '\u{3000}', '\u{2007}', '\u{2002}', ' ',
     ];
-    let marks = ['\'', '\u{05F3}', ','];
+    let marks = ['\'', '\u{05F3}', ',', ':', ';', '_'];
     let mut cases = Vec::new();
     for sep in dashes.iter().chain(&spaces).chain(&marks) {
         let s = sep.to_string();
@@ -1372,6 +1372,17 @@ fn numbers_split_by_any_dash_or_space_never_go_out() {
         // Without a label too: joined by a dash, nine digits are an ID.
         let s = sep.to_string();
         cases.push((join(&["000", &s, "000", &s, "018 נמסר"]), "000000018"));
+    }
+    // After an ID label, nine digits in groups of any size, or with a mark inside one
+    // (third review of D-126).
+    for text in [
+        "ת.ז 00 00 00 01 8 נמסר",
+        "ת.ז 000 000 01 8 נמסר",
+        "ת\"ז: 0 00 000 018",
+        "ת.ז 0.0.0.0.0.0.0.1.8",
+        "ת.ז 0000\u{301}00018",
+    ] {
+        cases.push((text.to_owned(), "000000018"));
     }
     for (text, secret) in cases {
         let out = filter(&text, &ctx_for(&ids, &[], CASE)).unwrap();
@@ -1388,7 +1399,12 @@ fn numbers_split_by_any_dash_or_space_never_go_out() {
         );
     }
     // A row of scores typed with plain spaces or commas is still a row of scores.
-    for text in ["ציונים: 112 104 106", "ציונים: 112,104,106", "טווח 100–115"] {
+    for text in [
+        "ציונים: 112 104 106",
+        "ציונים: 112,104,106",
+        "טווח 100–115",
+        "ציונים 100–112–125",
+    ] {
         let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
         assert_eq!(out.tagged, text);
     }

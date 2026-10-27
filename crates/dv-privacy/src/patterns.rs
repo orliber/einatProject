@@ -204,10 +204,11 @@ const HEBREW_CAL_MONTHS: &[&str] = &[
 /// What may stand between the groups of an ID, a phone, a card or an account number typed in
 /// parts, for every rule that reads one (one class, so no rule is left with fewer): any space
 /// (also a non-breaking, thin or ideographic one), a hyphen, the maqaf, every dash and minus,
-/// the other scripts' hyphens, and an apostrophe, a geresh or a comma. Any of them went out
-/// whole between the groups of an ID (the second review of D-126). A plain number with a
+/// the other scripts' hyphens, an apostrophe, a geresh, a comma, a colon, a semicolon and an
+/// underscore. Any of them went out whole between the groups of an ID (the second and third
+/// reviews of D-126). A plain number with a
 /// dash ("100–115", a score range) is read by `digit_run`, which keeps to hyphens.
-const GROUP_SEP: &str = r"\s\-\x{05BE}\x{2010}-\x{2015}\x{2212}\x{FE58}\x{FE63}\x{FF0D}\x{058A}\x{1806}\x{2043}\x{2E17}\x{2E3A}\x{2E3B}\x{30FC}'\x{05F3}\x{2019},";
+const GROUP_SEP: &str = r"\s\-\x{05BE}\x{2010}-\x{2015}\x{2212}\x{FE58}\x{FE63}\x{FF0D}\x{058A}\x{1806}\x{2043}\x{2E17}\x{2E3A}\x{2E3B}\x{30FC}'\x{05F3}\x{2019},:;_";
 
 /// One character of [`GROUP_SEP`].
 fn group_sep(c: char) -> bool {
@@ -231,7 +232,28 @@ fn group_sep(c: char) -> bool {
                     | '\u{05F3}'
                     | '\u{2019}'
                     | ','
+                    | ':'
+                    | ';'
+                    | '_'
         )
+}
+
+/// A hyphen of any script, as opposed to a dash or a space: groups joined by one are one
+/// number. Between groups joined by anything else ("100–115–120", a row of scores) nine
+/// digits are an ID only with the check digit or a label.
+fn hyphen(c: char) -> bool {
+    matches!(
+        c,
+        '-' | '\u{05BE}'
+            | '\u{2010}'
+            | '\u{2011}'
+            | '\u{FE63}'
+            | '\u{FF0D}'
+            | '\u{058A}'
+            | '\u{1806}'
+            | '\u{2043}'
+            | '\u{2E17}'
+    )
 }
 
 struct Compiled {
@@ -242,6 +264,7 @@ struct Compiled {
     spaced_phone: Regex,
     spaced_id: Regex,
     single_digits: Regex,
+    labelled_digits: Regex,
     num_date: Regex,
     year: Regex,
     address: Regex,
@@ -281,6 +304,9 @@ static COMPILED: LazyLock<Result<Compiled, regex::Error>> = LazyLock::new(|| {
         ))?,
         // Nine or ten digits one at a time, each followed by one separator.
         single_digits: Regex::new(&format!(r"\d(?:[{GROUP_SEP}]\d){{8,9}}"))?,
+        // Nine digits in groups of any size, each at most one separator (or a period) from the
+        // next: after an ID label, an ID however it was typed ("ת.ז 00 00 00 01 8").
+        labelled_digits: Regex::new(&format!(r"\d(?:[{GROUP_SEP}.]?\d){{8}}"))?,
         // Bank accounts (IBAN) and card numbers typed in groups of four.
         iban: Regex::new(&format!(
             r"(?i)\bIL\d{{2}}(?:[{GROUP_SEP}]?\d{{1,4}}){{3,6}}"
@@ -829,10 +855,11 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
                 before.get(from..)
             })
             .is_none_or(|near| ID_LABELS.iter().any(|l| near.contains(l)));
-        // A row of scores is typed with plain spaces or commas.
+        // A row of scores is typed with spaces, commas or dashes ("100–115–120").
         let spaced = m
             .as_str()
-            .contains([' ', ',', '\'', '\u{05F3}', '\u{2019}']);
+            .chars()
+            .any(|ch| !ch.is_ascii_digit() && !hyphen(ch));
         if digits.len() == 9
             && (!spaced || is_valid_israeli_id(&digits) || labelled)
             && digit_bounded(text, m.start(), m.end())
@@ -870,6 +897,27 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
         };
         if alone {
             push(&mut hits, m.start(), m.end(), kind, fixed(kind));
+        }
+    }
+    // Nine digits right after an ID label are the ID, in groups of any size: "ת.ז 00 00 00 01
+    // 8" and "ת.ז 000 000 01 8" went out whole (third review of D-126).
+    for m in c.labelled_digits.find_iter(text) {
+        // Text before that cannot be read (never expected) counts as a label.
+        let labelled = text
+            .get(..m.start())
+            .and_then(|before| {
+                let from = before.char_indices().rev().nth(20).map_or(0, |(i, _)| i);
+                before.get(from..)
+            })
+            .is_none_or(|near| ID_LABELS.iter().any(|l| near.contains(l)));
+        if labelled && digit_bounded(text, m.start(), m.end()) {
+            push(
+                &mut hits,
+                m.start(),
+                m.end(),
+                PatternKind::IdNumber,
+                fixed(PatternKind::IdNumber),
+            );
         }
     }
     // Numeric dates first, so "14.9.2025" becomes a date and not a generic number.
