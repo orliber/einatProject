@@ -205,16 +205,22 @@ export function UpdateDialog({ update, onClose }: { update: UpdateView; onClose:
   const isReady = useUpdateReady();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** A Mac whose Applications folder cannot be written: the verified image was opened in
+   *  Finder, and she finishes by hand. Guidance, not a failure: nothing to try again. */
+  const [byHand, setByHand] = useState<string | null>(null);
 
   async function install() {
     setBusy(true);
     setError(null);
+    setByHand(null);
     try {
       // What she was typing reaches the core first, as before a lock by hand: the install locks.
       await holdNow();
       await ipc.installUpdate();
     } catch (e) {
-      setError(fail(e as never));
+      const u = e as UiError;
+      if (u.code === "update_by_hand") setByHand(u.message);
+      else setError(fail(u));
       setBusy(false);
     }
   }
@@ -254,6 +260,7 @@ export function UpdateDialog({ update, onClose }: { update: UpdateView; onClose:
         ) : (
           <p className="muted small">במחשב הזה העדכון לא מותקן לבד. מתקינים את הגרסה החדשה מהקישור ששלח אור.</p>
         )}
+        {byHand && <p className="hint" role="status">{byHand}</p>}
         <ErrorLine error={error} />
       </div>
     </Dialog>

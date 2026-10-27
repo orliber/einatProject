@@ -207,6 +207,36 @@ describe("the window of a new version", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("on a Mac where the folder cannot be written, the message is guidance: no error, no retry, and the window still closes", async () => {
+    const onClose = vi.fn();
+    const text = "הגרסה החדשה נפתחה ב-Finder. גוררים את התוכנה לתיקיית Applications ומפעילים מחדש.";
+    const { user } = await show(<UpdateDialog update={UPDATE} onClose={onClose} />, (cmd) => {
+      if (cmd === "install_update") throw { code: "update_by_hand", message: text, details: [], action: { kind: "dismiss" } };
+      return undefined;
+    });
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "לעדכן עכשיו" }));
+    expect(await within(dialog).findByRole("status")).toHaveTextContent(text);
+    expect(within(dialog).queryByRole("alert")).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: /לנסות שוב/ })).toBeNull();
+    expect(within(dialog).getByRole("button", { name: "אחר כך" })).toBeEnabled();
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("a locked vault after the install started goes through fail(), which returns to the lock screen", async () => {
+    const fail = vi.fn((e: { message: string }) => e.message);
+    const served = await serve((cmd) => {
+      if (cmd === "install_update") throw { code: "locked", message: "הכספת ננעלה.", details: [], action: { kind: "unlock" } };
+      return undefined;
+    });
+    const user = userEvent.setup();
+    render(<Host app={appApi({ fail })}><UpdateDialog update={UPDATE} onClose={vi.fn()} /></Host>);
+    await user.click(screen.getByRole("button", { name: "לעדכן עכשיו" }));
+    await waitFor(() => expect(fail).toHaveBeenCalledWith(expect.objectContaining({ code: "locked" })));
+    expect(served.calls.some((c) => c.cmd === "install_update")).toBe(true);
+  });
+
   it("where the program does not install by itself, it says where the new version comes from", async () => {
     const onClose = vi.fn();
     const { user } = await show(<UpdateDialog update={{ ...UPDATE, can_install: false }} onClose={onClose} />);
