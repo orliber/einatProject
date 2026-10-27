@@ -6,6 +6,7 @@ import { useApp } from "../App";
 import { ipc, type AppStatus, type BackupCheckView, type StagedBackup } from "../ipc/client";
 import { Dialog, ErrorLine, CloseIcon } from "./ui";
 import { timed, WaitLine } from "./Progress";
+import { daysAgo } from "../i18n/he";
 import "./Backup.css";
 
 /** Automatic backups kept on the drive (dv-core `AUTO_KEEP`). */
@@ -16,19 +17,12 @@ export function heDateTime(unix: number): string {
   return `${d.toLocaleDateString("he-IL")}, ${d.toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
-export function daysAgo(days: number): string {
-  if (days <= 0) return "היום";
-  if (days === 1) return "אתמול";
-  if (days === 2) return "שלשום";
-  return `לפני ${days} ימים`;
-}
-
 export function useBackupStatus() {
   return useQuery({ queryKey: ["backup"], queryFn: ipc.backupStatus });
 }
 
 /** "Back up now": the "Save as" window, then the result in a toast. */
-function useWriteBackup() {
+export function useWriteBackup() {
   const { notify, fail } = useApp();
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
@@ -40,7 +34,8 @@ function useWriteBackup() {
       const done = await ipc.writeBackup();
       if (done) {
         notify(`הגיבוי נשמר מוצפן: ${done.path}`);
-        await qc.invalidateQueries({ queryKey: ["backup"] });
+        // The safety net follows the backup status; "ready for real cases" counts it too.
+        await Promise.all([qc.invalidateQueries({ queryKey: ["backup"] }), qc.invalidateQueries({ queryKey: ["readiness"] })]);
       }
     } catch (e) {
       setError(fail(e as never));
@@ -178,8 +173,7 @@ export function CheckBackupDialog({ staged, onClose }: { staged: StagedBackup; o
   );
 }
 
-/** Days before the line comes back, and how long "×" puts it away. */
-const REMIND_AFTER_DAYS = 14;
+/** How long "×" puts the line away. */
 const SNOOZE_DAYS = 7;
 const SNOOZE_KEY = "dv.backupSnoozedAt";
 
@@ -193,8 +187,9 @@ function snoozedUntil(): number {
 
 /**
  * A quiet line on the cases screen, only now and then: when there has never been a backup,
- * two weeks after the last one, or after a password / kit change (always, the old backup no
- * longer opens with the new secret). "×" puts it away for a week.
+ * a week after the last one, or after a password / kit change (always, the old backup no
+ * longer opens with the new secret): the core's `due`, the same rule as the safety net
+ * (D-107). "×" puts it away for a week.
  */
 export function BackupReminder() {
   const { go } = useApp();
@@ -202,8 +197,7 @@ export function BackupReminder() {
   const { write, busy, error } = useWriteBackup();
   const [hidden, setHidden] = useState(() => Date.now() < snoozedUntil());
   const s = status.data;
-  const due = s && (s.secret_changed || s.last_at === null || (s.days_since ?? 0) >= REMIND_AFTER_DAYS);
-  if (!s || !due || !s.has_cases || (hidden && !s.secret_changed)) return null;
+  if (!s || !s.due || !s.has_cases || (hidden && !s.secret_changed)) return null;
   const snooze = () => {
     try {
       localStorage.setItem(SNOOZE_KEY, String(Date.now()));

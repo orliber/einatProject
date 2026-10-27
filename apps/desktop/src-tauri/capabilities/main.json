@@ -17,6 +17,7 @@
     "allow-touch",
     "allow-readiness",
     "allow-confirm-readiness",
+    "allow-safety-net",
     "allow-instrument-approvals",
     "allow-set-instrument-status",
     "allow-security-status",

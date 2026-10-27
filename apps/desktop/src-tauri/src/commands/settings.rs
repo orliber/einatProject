@@ -17,6 +17,13 @@ pub(crate) async fn confirm_readiness(
     with_core(&state, move |c| c.confirm_readiness(&key, done)).await
 }
 
+/// "The safety net" (D-107): sign-in with Google if the password is forgotten, and a recent
+/// backup. Made from the two statuses, never from anything about a case.
+#[tauri::command]
+pub(crate) async fn safety_net(state: tauri::State<'_, AppState>) -> Res<dv_core::SafetyNet> {
+    with_core(&state, |c| c.safety_net(&dv_core::google::WindowsAccount)).await
+}
+
 /// Settings → המבחנים: every instrument with her answer (D-098).
 #[tauri::command]
 pub(crate) async fn instrument_approvals(

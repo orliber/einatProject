@@ -762,6 +762,71 @@ fn a_failed_restore_leaves_no_vault_behind_and_keeps_the_file_for_another_try() 
 
 // ------------------------------------------------------------ readiness
 
+/// This version has no Google sign-in (not Windows, or built without the registration).
+struct NoGoogle;
+
+impl crate::google::ComputerKeys for NoGoogle {
+    fn available(&self) -> bool {
+        false
+    }
+    fn exists(&self, _: &Path) -> bool {
+        false
+    }
+    fn load(&self, _: &Path) -> Result<dv_vault::crypto::Key32, VaultError> {
+        Err(VaultError::NotFound)
+    }
+    fn load_or_create(&self, _: &Path) -> Result<dv_vault::crypto::Key32, VaultError> {
+        Err(VaultError::NotFound)
+    }
+    fn remove(&self, _: &Path) {}
+}
+
+#[test]
+fn the_safety_net_and_readiness_agree_on_what_a_recent_backup_is() {
+    let (_dir, mut core, _case) = setup(None);
+    let backup_done = |core: &mut Core| {
+        core.readiness()
+            .unwrap()
+            .items
+            .into_iter()
+            .find(|i| i.key == "backup")
+            .unwrap()
+            .done
+    };
+    let net = core.safety_net(&NoGoogle).unwrap();
+    assert_eq!(net.google.state, crate::NetState::Unavailable);
+    assert_eq!(net.backup.text, "אין עדיין גיבוי");
+    assert_eq!(net.backup.state, crate::NetState::Missing);
+    assert!(!net.ok && !backup_done(&mut core));
+
+    let drive = tempfile::tempdir().unwrap();
+    core.write_backup(&drive.path().join("b")).unwrap();
+    let net = core.safety_net(&NoGoogle).unwrap();
+    assert_eq!(net.backup.text, "גיבוי מהיום");
+    assert_eq!(net.backup.state, crate::NetState::Ok);
+    assert!(backup_done(&mut core));
+    assert!(!net.ok, "without Google sign-in the net is never whole");
+
+    // Eight days ago: a reminder is due, so neither counts it (it was two weeks before D-107).
+    let eight_days_ago = crate::dates::unix_now() - 8 * dv_domain::dates::DAY_SECS;
+    core.vault_mut()
+        .unwrap()
+        .set_setting("backup_last_at", &eight_days_ago.to_string())
+        .unwrap();
+    let net = core.safety_net(&NoGoogle).unwrap();
+    assert_eq!(net.backup.text, "הגיבוי האחרון לפני 8 ימים");
+    assert_eq!(net.backup.state, crate::NetState::Missing);
+    assert!(!backup_done(&mut core));
+
+    core.write_backup(&drive.path().join("c")).unwrap();
+    core.change_password(PASSWORD, false, "חתול כחול ישן על הספה")
+        .unwrap();
+    let net = core.safety_net(&NoGoogle).unwrap();
+    assert_eq!(net.backup.text, "הסיסמה הוחלפה אחרי הגיבוי האחרון");
+    assert_eq!(net.backup.state, crate::NetState::Missing);
+    assert!(!backup_done(&mut core));
+}
+
 #[test]
 fn readiness_follows_what_the_program_checks_and_keeps_what_she_confirmed() {
     let (_dir, mut core, _case) = setup(None);

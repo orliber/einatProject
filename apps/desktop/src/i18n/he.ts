@@ -7,6 +7,17 @@ export const STALE_EDIT = "הפסקה השתנתה בזמן שהעורך היה 
 /** The same, where the screen has no "גרסאות קודמות" button (letters, the finish screen). */
 export const STALE_EDIT_KEPT = "הפסקה השתנתה בזמן שהעורך היה פתוח. הנוסח שלך נשמר, והנוסח האחר נשמר כגרסה קודמת של הפסקה.";
 
+/**
+ * How long ago, in her words. The same words as the core's `days_ago` (dv-core
+ * `safety_net.rs`, D-107), so the backup pane and the safety net never say it two ways.
+ */
+export function daysAgo(days: number): string {
+  if (days <= 0) return "היום";
+  if (days === 1) return "אתמול";
+  if (days === 2) return "לפני יומיים";
+  return `לפני ${days} ימים`;
+}
+
 export const he = {
   appName: "כספת האבחון",
   encrypted: "מוצפן, שמור במחשב הזה",

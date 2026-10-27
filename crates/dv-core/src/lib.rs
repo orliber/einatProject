@@ -31,6 +31,7 @@ mod layers;
 mod readiness;
 mod report_check;
 mod retention;
+mod safety_net;
 mod seal;
 mod security;
 mod send;
@@ -88,6 +89,7 @@ pub use own::SectionModeView;
 pub use readiness::{Readiness, ReadinessItem};
 pub use report_check::{ReportCheckNote, ReportCheckResult, ReportCheckSetting};
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
+pub use safety_net::{days_ago, NetPart, NetState, SafetyNet};
 pub use security::{SecurityItem, SecurityStatus};
 pub use style::{
     FitMonth, InterpretationResult, InterpretationView, LibraryLine, OwnSectionHelp,
