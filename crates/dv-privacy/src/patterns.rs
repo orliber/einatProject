@@ -381,7 +381,7 @@ pub(crate) fn blank_tags<'t>(text: &'t str, blank: impl Fn(&str) -> bool) -> Cow
 /// Not glued to other digits (so "2021" inside "120215" is not a year).
 fn digit_bounded(text: &str, start: usize, end: usize) -> bool {
     // A period counts only as a decimal point, after a digit ("3.14159"): after a word or
-    // a label ("ת.ז.123456782", "שוב.123456782") the number stands on its own, and was
+    // a label ("ת.ז.000000018", "שוב.000000018") the number stands on its own, and was
     // let through whole.
     let decimal = || {
         text.get(..start)
