@@ -727,9 +727,11 @@ impl Vault {
         if !self.password_bound() {
             return Ok(fs::read(self.dir.join(HEADER_FILE))?);
         }
-        let kept: KeySlot = from_json(&self.secret(BACKUP_SLOT_SECRET)?.ok_or(
-            VaultError::Integrity("the password slot for backups is missing"),
-        )?)?;
+        let kept: KeySlot = from_json(
+            &self
+                .secret(BACKUP_SLOT_SECRET)?
+                .ok_or(VaultError::BackupSlotStale)?,
+        )?;
         let (salt, params, _, _) = password_slot(&self.header)?;
         let fits = matches!(
             &kept,
@@ -737,9 +739,7 @@ impl Vault {
                 if crate::crypto::unhex(s).ok().as_deref() == Some(salt.as_slice()) && *p == params
         );
         if !fits {
-            return Err(VaultError::Integrity(
-                "the password slot for backups does not match the password",
-            ));
+            return Err(VaultError::BackupSlotStale);
         }
         let mut header = self.header.clone();
         for slot in &mut header.slots {

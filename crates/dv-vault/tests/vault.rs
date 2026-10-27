@@ -1136,6 +1136,51 @@ fn a_backup_just_written_is_read_back_and_opened_without_the_password() {
     ));
 }
 
+/// A vault bound to this computer whose kept (unbound) password slot does not match the live
+/// one (a password change cut short), opened with the recovery kit: no backup is written, the
+/// refusal says why (`BackupSlotStale`), and an opening with the password makes the slot again.
+#[test]
+fn a_bound_vault_opened_with_the_kit_says_why_it_cannot_back_up_until_a_password_unlock() {
+    let dir = tempfile::tempdir().unwrap();
+    let computer = dv_vault::crypto::Key32::random().unwrap();
+    let created =
+        Vault::create_here(dir.path(), PASSWORD, Argon2Params::TEST, Some(&computer)).unwrap();
+    let recovery = created.recovery_key.to_string();
+    let mut vault = created.vault;
+    noam(&mut vault);
+    assert!(vault.password_bound());
+    // The kept slot of another password (the shape `keep_backup_slot` writes).
+    let stale = serde_json::json!({
+        "kind": "password",
+        "salt": "11".repeat(32),
+        "params": {"m_kib": 64, "t": 1, "p": 1},
+        "wrapped_mk": "00"
+    });
+    vault
+        .set_secret("password_slot_for_backups", &stale.to_string())
+        .unwrap();
+    vault.lock().unwrap();
+
+    let mut by_kit = Vault::unlock_with_recovery(dir.path(), &recovery).unwrap();
+    assert!(matches!(
+        by_kit.begin_backup(),
+        Err(VaultError::BackupSlotStale)
+    ));
+    drop(by_kit);
+
+    let mut by_pw =
+        Vault::unlock_with_password_here(dir.path(), PASSWORD, Some(&computer)).unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let done = by_pw
+        .begin_backup()
+        .unwrap()
+        .write(&out.path().join("b.vaultbak"))
+        .unwrap()
+        .verify()
+        .unwrap();
+    assert_eq!(done.cases, 1);
+}
+
 #[test]
 fn scratch_folders_left_by_a_crash_are_removed_at_unlock() {
     let (dir, vault, _) = new_vault();
