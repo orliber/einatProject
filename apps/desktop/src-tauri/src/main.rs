@@ -108,7 +108,7 @@ where
     let core = Arc::clone(&state.core);
     tauri::async_runtime::spawn_blocking(move || {
         let mut c = core.lock().map_err(|_| internal("lock"))?;
-        // Errors name the AI she chose ("שגיאה בחיבור ל-Gemini").
+        // Errors name the AI she chose ("Gemini עמוס מאוד כרגע").
         f(&mut c).map_err(|e| e.to_ui_for(c.ai_name()))
     })
     .await

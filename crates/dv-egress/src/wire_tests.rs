@@ -63,7 +63,9 @@ fn aimed_at_listener(client: reqwest::blocking::Client) -> (TcpListener, Anthrop
         client,
         api_key: Zeroizing::new("sk-ant-test-not-real".to_owned()),
         url: format!("https://127.0.0.1:{port}/v1/messages"),
-        limit: Mutex::new(RateLimit::per_minute(1_000)),
+        // Its own limit and breaker, so tests running side by side do not share them.
+        limit: Box::leak(Box::new(Mutex::new(RateLimit::per_minute(1_000)))),
+        breaker: Box::leak(Box::default()),
     };
     (listener, t)
 }
@@ -156,6 +158,26 @@ fn an_oversized_request_opens_no_connection() {
     let (listener, t) = aimed_at_listener(short_client());
     assert_eq!(t.send(&payload), Err(EgressError::TooLarge));
     assert!(nothing_connected(&listener));
+}
+
+#[test]
+fn an_open_breaker_opens_no_connection_and_says_how_long() {
+    let (listener, mut t) = aimed_at_listener(short_client());
+    let mut open = crate::Breaker::default();
+    for _ in 0..crate::BREAKER_FAILURES {
+        open.record(crate::Health::Busy, std::time::Instant::now());
+    }
+    t.breaker = Box::leak(Box::new(Mutex::new(open)));
+    let payload = cleared(&ok_body()).unwrap();
+    let got = t.send_streaming(&payload, &|_| {});
+    assert!(
+        matches!(got, Err(EgressError::CircuitOpen(s)) if (1..=60).contains(&s)),
+        "{got:?}"
+    );
+    assert!(
+        nothing_connected(&listener),
+        "an open breaker let a request out"
+    );
 }
 
 #[test]

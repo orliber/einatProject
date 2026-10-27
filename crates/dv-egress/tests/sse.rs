@@ -259,12 +259,20 @@ fn error_events_map_to_the_retry_rules() {
         );
         whole(s.as_bytes()).0
     };
-    assert_eq!(err("overloaded_error"), Err(EgressError::Unavailable(529)));
+    assert_eq!(err("overloaded_error"), Err(EgressError::Overloaded));
     assert_eq!(err("api_error"), Err(EgressError::Unavailable(500)));
     assert_eq!(err("rate_limit_error"), Err(EgressError::RateLimited));
     assert_eq!(
         err("invalid_request_error"),
-        Err(EgressError::Rejected(400, "m".to_owned()))
+        Err(EgressError::InvalidRequest("m".to_owned()))
+    );
+    assert_eq!(
+        err("not_found_error"),
+        Err(EgressError::ModelGone("m".to_owned()))
+    );
+    assert_eq!(
+        err("billing_error"),
+        Err(EgressError::Billing("m".to_owned()))
     );
     // An error after a complete answer still wins: the answer is not used.
     let mut ev = events(&["מילה".to_owned()], &[]);
@@ -274,7 +282,7 @@ fn error_events_map_to_the_retry_rules() {
     );
     assert_eq!(
         whole(stream(&ev).as_bytes()).0,
-        Err(EgressError::Unavailable(529))
+        Err(EgressError::Overloaded)
     );
 }
 

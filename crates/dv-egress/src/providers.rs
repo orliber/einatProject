@@ -482,7 +482,7 @@ pub struct ProviderTransport {
     provider: Provider,
     client: reqwest::blocking::Client,
     api_key: Zeroizing<String>,
-    limit: Mutex<RateLimit>,
+    limit: &'static Mutex<RateLimit>,
 }
 
 impl std::fmt::Debug for ProviderTransport {
@@ -509,7 +509,7 @@ impl ProviderTransport {
                 build_client()?
             },
             api_key: Zeroizing::new(api_key.trim().to_owned()),
-            limit: Mutex::new(RateLimit::per_minute(20)),
+            limit: &crate::MINUTE_LIMIT,
         })
     }
 
@@ -540,36 +540,50 @@ impl ProviderTransport {
             })?;
         let status = resp.status().as_u16();
         let text = crate::read_answer(resp)?;
-        let parsed = serde_json::from_str::<Value>(&text);
-        let message = parsed
-            .as_ref()
-            .ok()
-            .and_then(|v| {
-                v.pointer("/error/message")
-                    .and_then(Value::as_str)
-                    .or_else(|| v.get("error").and_then(Value::as_str))
-                    .or_else(|| v.get("message").and_then(Value::as_str))
-                    .map(str::to_owned)
-            })
-            .unwrap_or_default();
-        match status {
-            200 => {
-                let v = parsed.map_err(|e| EgressError::Protocol(e.to_string()))?;
-                match self.provider {
-                    Provider::OpenAi | Provider::Mistral => from_openai(model, &v),
-                    Provider::Local => from_local(model, &v),
-                    _ => from_gemini(model, &v),
-                }
-            }
-            // Ollama answers a model that is not installed with 404.
-            404 if self.provider == Provider::Local => Err(EgressError::LocalUnavailable),
-            401 | 403 => Err(EgressError::Unauthorized),
-            // Gemini answers a wrong key with 400.
-            400 if message.contains("API key") => Err(EgressError::Unauthorized),
-            429 => Err(EgressError::RateLimited),
-            500..=599 => Err(EgressError::Unavailable(status)),
-            _ => Err(EgressError::Rejected(status, message)),
+        if status != 200 {
+            return Err(status_error(self.provider, status, &text));
         }
+        let v = serde_json::from_str::<Value>(&text)
+            .map_err(|e| EgressError::Protocol(e.to_string()))?;
+        match self.provider {
+            Provider::OpenAi | Provider::Mistral => from_openai(model, &v),
+            Provider::Local => from_local(model, &v),
+            _ => from_gemini(model, &v),
+        }
+    }
+}
+
+/// What an error answer of another provider means. Its own words go only into the variant,
+/// for the details (D-121).
+fn status_error(provider: Provider, status: u16, text: &str) -> EgressError {
+    let parsed = serde_json::from_str::<Value>(text).ok();
+    let message = parsed
+        .as_ref()
+        .and_then(|v| {
+            v.pointer("/error/message")
+                .and_then(Value::as_str)
+                .or_else(|| v.get("error").and_then(Value::as_str))
+                .or_else(|| v.get("message").and_then(Value::as_str))
+                .map(str::to_owned)
+        })
+        .unwrap_or_default();
+    let code = parsed
+        .as_ref()
+        .and_then(|v| v.pointer("/error/code"))
+        .and_then(Value::as_str);
+    match status {
+        // Ollama answers a model that is not installed with 404.
+        404 if provider == Provider::Local => EgressError::LocalUnavailable,
+        401 | 403 => EgressError::Unauthorized,
+        // Gemini answers a wrong key with 400.
+        400 if message.contains("API key") => EgressError::Unauthorized,
+        // OpenAI's empty account is a 429 with its own code, not a rate limit.
+        402 => EgressError::Billing(message),
+        429 if code == Some("insufficient_quota") => EgressError::Billing(message),
+        404 => EgressError::ModelGone(message),
+        429 => EgressError::RateLimited,
+        500..=599 => EgressError::Unavailable(status),
+        _ => EgressError::Rejected(status, message),
     }
 }
 
@@ -900,6 +914,52 @@ mod tests {
         let mut b = section_body("gpt-5-1");
         b["system"] = json!([{"type": "document", "source": {"type": "file", "file_id": "f"}}]);
         assert!(canonical(&b, Provider::OpenAi).is_err(), "only text blocks");
+    }
+
+    /// D-121: other providers' error answers, by their real shapes.
+    #[test]
+    fn other_providers_error_answers_become_their_own_variants() {
+        let quota = r#"{"error":{"message":"You exceeded your current quota","type":"insufficient_quota","code":"insufficient_quota"}}"#;
+        let slow = r#"{"error":{"message":"Rate limit reached","code":"rate_limit_exceeded"}}"#;
+        let gone = r#"{"error":{"message":"The model `gpt-old` does not exist","code":"model_not_found"}}"#;
+        let key = r#"{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT"}}"#;
+        let cases = [
+            (
+                Provider::OpenAi,
+                429,
+                quota,
+                EgressError::Billing("You exceeded your current quota".into()),
+            ),
+            (Provider::OpenAi, 429, slow, EgressError::RateLimited),
+            (
+                Provider::OpenAi,
+                404,
+                gone,
+                EgressError::ModelGone("The model `gpt-old` does not exist".into()),
+            ),
+            (Provider::Gemini, 400, key, EgressError::Unauthorized),
+            (
+                Provider::Mistral,
+                402,
+                "",
+                EgressError::Billing(String::new()),
+            ),
+            (Provider::Local, 404, "", EgressError::LocalUnavailable),
+            (Provider::Gemini, 503, "", EgressError::Unavailable(503)),
+            (
+                Provider::OpenAi,
+                400,
+                r#"{"error":{"message":"bad"}}"#,
+                EgressError::Rejected(400, "bad".into()),
+            ),
+        ];
+        for (provider, status, text, want) in cases {
+            assert_eq!(
+                status_error(provider, status, text),
+                want,
+                "{provider:?} {status}"
+            );
+        }
     }
 
     #[test]

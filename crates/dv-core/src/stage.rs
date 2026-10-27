@@ -156,7 +156,8 @@ impl Core {
 /// A failure that can come after the request reached the service: an answer it gave (a key
 /// refused, too many requests, busy, refused, an answer that could not be read) or a
 /// connection lost on the way. A refusal on this computer (the rules, no key, the emergency
-/// stop, the size, the daily limit, the secure connection, a local model) sent nothing.
+/// stop, the size, the daily limit, an open breaker, the secure connection, a local model)
+/// sent nothing.
 fn may_have_left(e: &CoreError) -> bool {
     matches!(
         e,
@@ -164,6 +165,11 @@ fn may_have_left(e: &CoreError) -> bool {
             EgressError::Unauthorized
                 | EgressError::RateLimited
                 | EgressError::Unavailable(_)
+                | EgressError::Overloaded
+                | EgressError::Billing(_)
+                | EgressError::Forbidden(_)
+                | EgressError::ModelGone(_)
+                | EgressError::InvalidRequest(_)
                 | EgressError::Rejected(..)
                 | EgressError::Protocol(_)
                 | EgressError::Offline

@@ -363,8 +363,14 @@ impl CoreError {
                 "backoff",
                 format!("יותר מדי ניסיונות. אפשר לנסות שוב בעוד {s} שניות."),
             ),
-            CoreError::Egress(e) => ("egress", egress_he(e, ai)),
-            CoreError::Ai(e) => ("ai", format!("התשובה של {ai} לא תקינה: {e}")),
+            CoreError::Egress(e) => {
+                details.extend(egress_details(e));
+                ("egress", egress_he(e, ai))
+            }
+            CoreError::Ai(e) => {
+                details.push(e.to_string());
+                ("ai", ai_he(e, ai))
+            }
             CoreError::Update(e) => ("update", update::update_he(e)),
             CoreError::Internal(e) => {
                 details.push(e.clone());
@@ -421,11 +427,21 @@ fn egress_action(e: &EgressError) -> ErrorAction {
         EgressError::Stopped => ErrorAction::settings("security"),
         // The service's certificate is from an authority this version is not pinned to.
         EgressError::Pinned => ErrorAction::settings("about"),
+        // The account is paid for and the key chosen in Settings (D-121).
+        EgressError::Billing(_) | EgressError::Forbidden(_) => ErrorAction::settings("ai"),
+        // The models offered are fixed in the program: a retired one needs a new version.
+        EgressError::ModelGone(_) => ErrorAction::settings("about"),
         EgressError::RateLimited => ErrorAction::Retry { after_seconds: 60 },
-        EgressError::Offline | EgressError::Unavailable(_) => ErrorAction::retry(),
+        EgressError::CircuitOpen(s) => ErrorAction::Retry {
+            after_seconds: u32::try_from(*s).unwrap_or(u32::MAX),
+        },
+        EgressError::Offline | EgressError::Unavailable(_) | EgressError::Overloaded => {
+            ErrorAction::retry()
+        }
         // A timeout or a conflict passes by itself; any other refusal comes back the same.
         EgressError::Rejected(408 | 409, _) => ErrorAction::retry(),
         EgressError::Rejected(..)
+        | EgressError::InvalidRequest(_)
         | EgressError::Policy(_)
         | EgressError::Tls
         | EgressError::Protocol(_) => ErrorAction::Report,
@@ -461,7 +477,68 @@ fn egress_he(e: &EgressError, ai: &str) -> String {
             .to_owned(),
         EgressError::TooLarge => "הבקשה גדולה מדי. כדאי לשלוח פחות חומרים בבת אחת.".to_owned(),
         EgressError::DailyLimit => "הגעת למכסת הבקשות היומית. אפשר להמשיך מחר.".to_owned(),
-        other => format!("שגיאה בחיבור ל-{ai}: {other}"),
+        EgressError::Overloaded => format!(
+            "{ai} עמוס מאוד כרגע. החומרים שמורים, ואפשר לנסות שוב בעוד כמה דקות."
+        ),
+        EgressError::Unavailable(_) => format!(
+            "יש תקלה זמנית אצל {ai}. החומרים שמורים, ואפשר לנסות שוב בעוד כמה דקות."
+        ),
+        EgressError::CircuitOpen(s) => format!(
+            "{ai} נכשל כמה פעמים ברצף, ולכן התוכנה עוצרת לרגע את השליחה אליו. שום דבר לא נשלח הפעם. אפשר לנסות שוב בעוד {s} שניות."
+        ),
+        EgressError::Billing(_) => format!(
+            "נגמרה היתרה בחשבון ה-API של {ai}, או שיש בעיה בפרטי התשלום. צריך להוסיף קרדיט בחשבון אצל {ai}, ואז לנסות שוב (בהגדרות כתוב איזה מפתח מוגדר)."
+        ),
+        EgressError::Forbidden(_) => format!(
+            "המפתח תקין, אבל אין לו הרשאה לבקשה הזו אצל {ai} (למשל לדגם שנבחר). כדאי לבדוק את המפתח ואת הדגם בהגדרות."
+        ),
+        EgressError::ModelGone(_) => format!(
+            "הדגם שנבחר כבר לא זמין אצל {ai}. צריך לעדכן את התוכנה (בהגדרות, באודות), או לבחור דגם אחר בהגדרות."
+        ),
+        EgressError::InvalidRequest(_) | EgressError::Rejected(..) => format!(
+            "{ai} דחה את הבקשה. החומרים שמורים. אם זה חוזר, אפשר להעתיק את הפרטים ולשלוח לאור."
+        ),
+        EgressError::Protocol(_) => format!(
+            "התשובה של {ai} הגיעה חלקית או בצורה לא צפויה, ולכן לא נשמרה. אפשר לבקש שוב. אם זה חוזר, אפשר להעתיק את הפרטים ולשלוח לאור."
+        ),
+        EgressError::Policy(_) => {
+            "הבקשה נעצרה במחשב לפני השליחה, כי לא עמדה בכללי הפרטיות של התוכנה. שום דבר לא נשלח. אפשר להעתיק את הפרטים ולשלוח לאור."
+                .to_owned()
+        }
+    }
+}
+
+/// The technical words behind an egress failure, for the "copy details" button only: the
+/// status, and the service's own message (English, and never sent anywhere; D-121).
+fn egress_details(e: &EgressError) -> Option<String> {
+    match e {
+        EgressError::Unavailable(_)
+        | EgressError::Overloaded
+        | EgressError::CircuitOpen(_)
+        | EgressError::Billing(_)
+        | EgressError::Forbidden(_)
+        | EgressError::ModelGone(_)
+        | EgressError::InvalidRequest(_)
+        | EgressError::Rejected(..)
+        | EgressError::Protocol(_)
+        | EgressError::Policy(_) => Some(e.to_string()),
+        _ => None,
+    }
+}
+
+/// An answer that came back and could not be used, in her words; the parser's own words go to
+/// the details (D-121).
+fn ai_he(e: &dv_ai::AiError, ai: &str) -> String {
+    match e {
+        dv_ai::AiError::Refused(_) => {
+            format!("{ai} סירב לענות על הבקשה הזו. אפשר לנסח אותה אחרת ולבקש שוב.")
+        }
+        dv_ai::AiError::Truncated => format!(
+            "התשובה של {ai} נקטעה כי הייתה ארוכה מדי, ולכן לא נשמרה. אפשר לבקש פחות בבת אחת."
+        ),
+        dv_ai::AiError::Format(_) => {
+            format!("התשובה של {ai} הגיעה בצורה לא צפויה, ולכן לא נשמרה. אפשר לבקש שוב.")
+        }
     }
 }
 

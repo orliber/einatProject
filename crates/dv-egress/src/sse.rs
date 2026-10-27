@@ -122,22 +122,12 @@ pub fn assemble(reader: impl BufRead, progress: &dyn Fn(u32)) -> Result<Value, E
             }
             "message_stop" => *done = true,
             "error" => {
-                let kind = ev
-                    .pointer("/error/type")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                return Err(match kind {
-                    "overloaded_error" => EgressError::Unavailable(529),
-                    "rate_limit_error" => EgressError::RateLimited,
-                    "api_error" => EgressError::Unavailable(500),
-                    _ => EgressError::Rejected(
-                        400,
-                        ev.pointer("/error/message")
-                            .and_then(Value::as_str)
-                            .unwrap_or("")
-                            .to_owned(),
-                    ),
-                });
+                let field = |p: &str| ev.pointer(p).and_then(Value::as_str).unwrap_or("");
+                return Err(crate::anthropic_kind(
+                    field("/error/type"),
+                    400,
+                    field("/error/message").to_owned(),
+                ));
             }
             _ => {} // "ping" and anything new
         }
@@ -294,7 +284,7 @@ mod tests {
         ]);
         assert_eq!(
             assemble(s.as_bytes(), &|_| {}),
-            Err(EgressError::Unavailable(529))
+            Err(EgressError::Overloaded)
         );
         let s = stream(&[
             json!({"type": "message_start", "message": {"content": [], "usage": {}}}),

@@ -6,16 +6,83 @@ use super::*;
 /// long is taken as lost, so the vault can never stay unopenable.
 const SECRET_WORK_STALE: Duration = Duration::from_secs(120);
 
-/// Wrong passwords or kits typed since the last opening, kept across a restart of the program
-/// (a number only; the vault is locked, so it cannot hold it). Read and removed at the next
-/// opening, which then says so (L4).
+/// Wrong passwords or kits typed since the last opening, and the second (Unix time) before
+/// which no new try is taken, kept across a restart of the program (D-122): closing and
+/// opening the program does not shorten the wait. The vault is locked, so it cannot hold
+/// them. Read and removed at the next opening, which then says so (L4).
+///
+/// Not sealed with a MAC: the only key there is before the vault opens is public (the
+/// header's salt), so anyone who can edit this file could also sign it, or delete it, or copy
+/// the vault and guess offline with no wait at all. What stops guessing is Argon2id and the
+/// password rules (THREAT_MODEL V-1); this file only slows guessing through the program. A
+/// file the program did not write (it writes one line, whole, by a rename) is taken as the
+/// longest wait (fail-closed).
 const FAILURES_FILE: &str = "unlock.failures";
 
-fn failures_on_disk(dir: &Path) -> u32 {
-    std::fs::read_to_string(dir.join(FAILURES_FILE))
-        .ok()
-        .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(0)
+/// The longest wait after wrong secrets, also after a restart or a clock moved back, so she
+/// can never lock herself out for longer.
+const MAX_WAIT: Duration = Duration::from_secs(60);
+const MAX_WAIT_SECS: i64 = 60;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Failures {
+    count: u32,
+    /// Unix seconds before which no try is taken.
+    not_before: Option<i64>,
+}
+
+/// What the file says: `count` (the program before D-122) or `count not_before`. No file is
+/// no failures; anything else is the longest wait, from now.
+fn failures_on_disk(dir: &Path) -> Failures {
+    let text = match std::fs::read_to_string(dir.join(FAILURES_FILE)) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Failures {
+                count: 0,
+                not_before: None,
+            }
+        }
+        Err(_) => String::new(),
+    };
+    let mut parts = text.split_whitespace();
+    let count = parts.next().and_then(|c| c.parse::<u32>().ok());
+    let not_before = parts.next().map(str::parse::<i64>);
+    match (count, not_before, parts.next()) {
+        (Some(count), None, None) => Failures {
+            count,
+            not_before: None,
+        },
+        (Some(count), Some(Ok(t)), None) => Failures {
+            count,
+            not_before: Some(t),
+        },
+        _ => Failures {
+            count: 0,
+            not_before: Some(crate::dates::unix_now().saturating_add(MAX_WAIT_SECS)),
+        },
+    }
+}
+
+/// One line, written whole: to a file beside it, then renamed over it.
+fn write_failures(dir: &Path, f: Failures) {
+    let line = match f.not_before {
+        Some(t) => format!("{} {t}", f.count),
+        None => f.count.to_string(),
+    };
+    let tmp = dir.join(format!("{FAILURES_FILE}.tmp"));
+    if std::fs::write(&tmp, line).is_ok() {
+        let _ = std::fs::rename(&tmp, dir.join(FAILURES_FILE));
+    }
+}
+
+/// The wait the file asks for, from now: never more than [`MAX_WAIT`] (a clock moved back, or
+/// a file from elsewhere, cannot lock her out).
+fn wait_on_disk(dir: &Path) -> Option<Instant> {
+    let left = failures_on_disk(dir)
+        .not_before?
+        .saturating_sub(crate::dates::unix_now());
+    let left = Duration::from_secs(u64::try_from(left).ok()?.min(MAX_WAIT.as_secs()));
+    (!left.is_zero()).then(|| Instant::now() + left)
 }
 
 /// Wrong tries this long before the opening that worked are taken as her own typos.
@@ -53,7 +120,8 @@ impl Core {
             last_tick: None,
             failed_unlocks: 0,
             failure_times: Vec::new(),
-            not_before: None,
+            // A wait from before a restart still holds (D-122).
+            not_before: wait_on_disk(dir),
             secret_work: None,
             secret_ticket: 0,
             cancel: jobs::Cancel::default(),
@@ -361,6 +429,7 @@ impl Core {
                     .filter(|t| t.elapsed() < OWN_TYPOS)
                     .count();
                 let failed = failures_on_disk(&self.dir)
+                    .count
                     .max(self.failed_unlocks)
                     .saturating_sub(u32::try_from(own).unwrap_or(u32::MAX));
                 self.failure_times.clear();
@@ -415,10 +484,21 @@ impl Core {
                 if matches!(e, VaultError::WrongSecret | VaultError::RecoveryKeyInvalid) {
                     self.failed_unlocks += 1;
                     self.failure_times.push(Instant::now());
-                    let wait = 2u64.saturating_pow(self.failed_unlocks.min(6)).min(60);
+                    // Every try since the last opening counts, also those before a restart.
+                    let count = failures_on_disk(&self.dir).count.saturating_add(1);
+                    let wait = 2u64
+                        .saturating_pow(count.max(self.failed_unlocks).min(6))
+                        .min(MAX_WAIT.as_secs());
                     self.not_before = Some(Instant::now() + Duration::from_secs(wait));
-                    let on_disk = failures_on_disk(&self.dir).saturating_add(1);
-                    let _ = std::fs::write(self.dir.join(FAILURES_FILE), on_disk.to_string());
+                    let until = crate::dates::unix_now()
+                        .saturating_add(i64::try_from(wait).unwrap_or(i64::MAX));
+                    write_failures(
+                        &self.dir,
+                        Failures {
+                            count,
+                            not_before: Some(until),
+                        },
+                    );
                 }
                 Err(e.into())
             }
