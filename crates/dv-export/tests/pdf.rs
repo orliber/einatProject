@@ -142,7 +142,8 @@ fn report_text_never_becomes_pdf_operators() {
         t.contains("Tj ET BT /F1 72 Tf"),
         "operators not drawn as text:\n{t}"
     );
-    assert!(t.contains("/JS"), "{t}");
+    // The slash sits beside the brackets (a right-to-left paragraph), the name is a word.
+    assert!(t.contains("JS/") || t.contains("/JS"), "{t}");
 }
 
 /// A long report flows over several pages, each numbered "page n of N" with the right N.
