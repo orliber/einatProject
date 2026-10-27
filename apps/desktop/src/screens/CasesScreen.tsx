@@ -5,7 +5,7 @@ import { useMemo, useState, type DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
 import { BackupReminder } from "../components/Backup";
-import { RetentionNotice } from "../components/RetentionNotice";
+import { OldExportsNotice, RetentionNotice } from "../components/RetentionNotice";
 import { TopBar } from "../components/TopBar";
 import { NewCaseDialog } from "../components/NewCaseDialog";
 import { ageOf } from "../components/AgeField";
@@ -374,6 +374,7 @@ export function CasesScreen() {
         )}
         <BackupReminder />
         <RetentionNotice />
+        <OldExportsNotice />
         <ErrorLine error={error ?? (cases.error ? fail(cases.error as unknown as UiError) : null)}
           retry={!error && cases.error ? () => void qc.invalidateQueries({ queryKey: ["cases"] }) : undefined} />
 

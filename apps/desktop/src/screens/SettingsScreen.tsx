@@ -306,11 +306,11 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
                 </div>
               </section>
               <section className="card setting" aria-labelledby="s-original">
-                <h2 id="s-original">בדיקת מקוריות של PDF</h2>
-                <Row label="האם הקובץ שונה מאז שהופק?" hint="לקובץ PDF שהופק כאן.">
+                <h2 id="s-original">בדיקת מקוריות של קובץ</h2>
+                <Row label="האם הקובץ שונה מאז שהופק?" hint="לקובץ PDF או Word שהופק כאן, דוח או מכתב.">
                   <label className="btn btn-small">
-                    בחירת PDF
-                    <input type="file" accept=".pdf" hidden
+                    בחירת קובץ
+                    <input type="file" accept=".pdf,.docx" hidden
                       onChange={(e) => {
                         const f = e.target.files?.[0];
                         e.target.value = "";

@@ -112,6 +112,8 @@
     "allow-delete-consultation",
     "allow-change-role",
     "allow-check-original",
+    "allow-old-exports",
+    "allow-open-old-exports",
     "allow-clear-report-template",
     "allow-export-letter",
     "allow-export-pdf",

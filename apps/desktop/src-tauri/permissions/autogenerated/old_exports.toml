@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-old-exports"
+description = "Enables the old_exports command without any pre-configured scope."
+commands.allow = ["old_exports"]
+
+[[permission]]
+identifier = "deny-old-exports"
+description = "Denies the old_exports command without any pre-configured scope."
+commands.deny = ["old_exports"]

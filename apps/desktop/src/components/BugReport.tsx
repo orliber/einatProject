@@ -30,6 +30,20 @@ export function screenName(route: Route | undefined): string {
   return route.name === "case" ? `${SCREENS.case} (לשונית ${route.view})` : SCREENS[route.name];
 }
 
+/** A detail with any path cut off, as the core cuts it (D-120): from the first word that holds
+ *  a path separator, the rest is dropped. Here too, for what the window itself threw. */
+export function withoutPaths(detail: string): string {
+  const kept: string[] = [];
+  for (const word of detail.split(" ")) {
+    if (/[/\\]/.test(word)) {
+      kept.push("[נתיב הוסר]");
+      break;
+    }
+    kept.push(word);
+  }
+  return kept.join(" ");
+}
+
 /** The text she sees, may edit, and copies. Plain text only. */
 export function bugReportText(f: BugFacts): string {
   const lines = [
@@ -45,7 +59,7 @@ export function bugReportText(f: BugFacts): string {
   }
   if (f.failure) {
     lines.push(`קוד שגיאה: ${f.failure.code}`);
-    if (f.failure.details.length) lines.push("פרטים:", ...f.failure.details);
+    if (f.failure.details.length) lines.push("פרטים:", ...f.failure.details.map(withoutPaths));
   } else {
     lines.push("קוד שגיאה: אין");
   }

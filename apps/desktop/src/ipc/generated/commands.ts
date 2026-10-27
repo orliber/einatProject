@@ -149,6 +149,8 @@ export type Commands = {
   name_model_progress: { args: undefined; returns: [number, number] | null };
   name_model_status: { args: undefined; returns: NameModelView };
   new_recovery_kit: { args: { current: string; withRecovery: boolean }; returns: CreatedVault };
+  old_exports: { args: undefined; returns: number };
+  open_old_exports: { args: undefined; returns: null };
   open_releases_page: { args: undefined; returns: null };
   own_section_help: { args: { sectionKey: string }; returns: OwnSectionHelp };
   paragraph_sources: { args: { caseId: string; draftId: string }; returns: Array<SourceExcerpt> };

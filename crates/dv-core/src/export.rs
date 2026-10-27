@@ -3,10 +3,25 @@
 use super::*;
 
 impl Core {
-    /// Whether a PDF is exactly one this vault exported (its fingerprint is in the audit log):
+    /// Whether a file is exactly one this vault exported (its fingerprint is in the audit log):
     /// when, or `None` for a file that was changed or not made here.
     pub fn check_original(&mut self, bytes: &[u8]) -> Result<Option<i64>, CoreError> {
-        let sha256 = dv_vault::crypto::sha256_hex(bytes);
+        if bytes.len() > MAX_ORIGINAL_BYTES {
+            return Err(original_too_large());
+        }
+        self.check_original_hash(&dv_vault::crypto::sha256_hex(bytes))
+    }
+
+    /// As [`Core::check_original`], from the file's SHA-256 (lowercase hex), hashed by the
+    /// shell with the core free: only the fingerprint comes in under the lock (D-120).
+    pub fn check_original_hash(&mut self, sha256: &str) -> Result<Option<i64>, CoreError> {
+        if sha256.len() != 64
+            || !sha256
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(CoreError::Internal("fingerprint".to_owned()));
+        }
         let needle = format!("\"sha256\":\"{sha256}\"");
         Ok(self
             .vault_ref()?
@@ -71,23 +86,38 @@ impl Core {
         audience: &str,
         password: Option<&str>,
     ) -> Result<Vec<u8>, CoreError> {
+        let job = self.begin_export_letter(case_id, audience, password)?;
+        self.finish_export(job.run()).map(|(b, _)| b)
+    }
+
+    /// The letter's document, checked: no tag left in place of a name, no square-bracket
+    /// mark. With the report's check, whose file name the letter's name is made from.
+    pub(crate) fn letter_doc(
+        &mut self,
+        case_id: &str,
+        audience: &str,
+    ) -> Result<(Letter, dv_export::Report, ExportCheck), CoreError> {
         let letter = Letter::from_audience(audience)?;
         let settings = self.report_settings()?;
-        let (report, _) = self.build_report(case_id)?;
+        let (mut report, check) = self.build_report(case_id)?;
         let paragraphs: Vec<String> = self
             .letter(case_id, audience)?
             .into_iter()
             .filter(|p| p.status == DraftStatus::Approved)
             .map(|p| p.text)
             .collect();
+        let info = std::mem::take(&mut report.info);
+        let signature = std::mem::take(&mut report.signature);
+        // Only the lines at the top and the signature are taken from the report.
+        report.wipe();
         if paragraphs.is_empty() {
             return Err(CoreError::Refused(
                 "עוד אין במכתב פסקה מאושרת. מאשרים את הפסקאות, ואז מפיקים את הקובץ.".to_owned(),
             ));
         }
-        let doc = dv_export::Report {
+        let mut doc = dv_export::Report {
             title: letter.file_title().to_owned(),
-            info: report.info,
+            info,
             parts: vec![dv_export::ReportPart {
                 title: String::new(),
                 sections: vec![dv_export::ReportSection {
@@ -96,7 +126,7 @@ impl Core {
                 }],
             }],
             tables: Vec::new(),
-            signature: report.signature,
+            signature,
             confidentiality: settings.confidentiality,
             font: settings.font,
             logo: self.logo()?,
@@ -104,43 +134,29 @@ impl Core {
         };
         let identities = self.vault_ref()?.identities(case_id)?;
         let known: HashSet<String> = identities.iter().map(|i| i.tag.clone()).collect();
-        for p in doc
+        let tag_left = doc
             .parts
             .iter()
             .flat_map(|part| &part.sections)
             .flat_map(|s| &s.paragraphs)
-        {
-            if dv_privacy::restore::remaining_tags(p)
-                .iter()
-                .any(|t| known.contains(t))
-            {
-                return Err(CoreError::Refused(
-                    "נשארה במכתב תגית במקום שם. פותחים את הפסקה ומתקנים.".to_owned(),
-                ));
-            }
-        }
-        if let Some(l) = dv_export::leftover_placeholders(&doc).into_iter().next() {
-            return Err(CoreError::Refused(format!(
-                "נשאר במכתב סימון בסוגריים מרובעים: {l}"
-            )));
-        }
-        let docx = self.render_docx(&doc)?;
-        let out = match password {
-            Some(pw) => dv_export::encrypt(&docx, pw).map_err(|e| match e {
-                dv_export::ExportError::WeakPassword => CoreError::Refused(format!(
-                    "סיסמה לקובץ צריכה להיות באורך {} תווים לפחות.",
-                    dv_export::MIN_PASSWORD_CHARS
-                )),
-                other => CoreError::Internal(other.to_string()),
-            })?,
-            None => docx,
+            .any(|p| {
+                dv_privacy::restore::remaining_tags(p)
+                    .iter()
+                    .any(|t| known.contains(t))
+            });
+        let refused = if tag_left {
+            Some("נשארה במכתב תגית במקום שם. פותחים את הפסקה ומתקנים.".to_owned())
+        } else {
+            dv_export::leftover_placeholders(&doc)
+                .into_iter()
+                .next()
+                .map(|l| format!("נשאר במכתב סימון בסוגריים מרובעים: {l}"))
         };
-        self.vault_mut()?.record(
-            AuditEvent::Export,
-            Some(case_id),
-            &serde_json::json!({ "protected": password.is_some(), "letter": letter.key() }),
-        )?;
-        Ok(out)
+        if let Some(why) = refused {
+            doc.wipe();
+            return Err(CoreError::Refused(why));
+        }
+        Ok((letter, doc, check))
     }
 
     pub fn report_settings(&mut self) -> Result<ReportSettings, CoreError> {
@@ -343,18 +359,6 @@ impl Core {
             )),
             _ => Ok(None),
         }
-    }
-
-    /// The Word file: in her template when she has one.
-    pub(crate) fn render_docx(&mut self, report: &dv_export::Report) -> Result<Vec<u8>, CoreError> {
-        let out = match self.template_bytes()? {
-            Some(t) => dv_export::render_with_template(report, &t),
-            None => dv_export::render(report),
-        };
-        out.map_err(|e| match e {
-            dv_export::ExportError::Template(m) => CoreError::Refused(m),
-            other => CoreError::Internal(other.to_string()),
-        })
     }
 
     /// The report with real names, from approved paragraphs only, and what stops the export.

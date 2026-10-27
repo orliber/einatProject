@@ -83,6 +83,8 @@ const ALLOWED = new Set([
   "import_document",
   "import_style_source",
   "install_update",
+  "old_exports",
+  "open_old_exports",
   "open_releases_page",
   "keep_case_longer",
   "letter",

@@ -331,6 +331,49 @@ fn ai_failures_are_told_in_hebrew_with_the_service_words_only_in_the_details() {
 }
 
 #[test]
+fn error_details_never_carry_a_path() {
+    // A real one: tempfile names the folder in its error ("… at path …").
+    let missing = std::env::temp_dir()
+        .join("אין-תיקייה-כזו")
+        .join("TEST-0042 בדוי");
+    let io = tempfile::NamedTempFile::new_in(&missing).unwrap_err();
+    assert!(io.to_string().contains("TEST-0042"), "{io}");
+    let cases = [
+        CoreError::Vault(VaultError::Io(io)),
+        file_error(std::fs::read(missing.join("x.docx")).unwrap_err()),
+        file_error(std::io::Error::other(
+            r"C:\Users\Fictional User\Downloads\דוח.docx",
+        )),
+        CoreError::Vault(VaultError::Corrupt(
+            "bad page in /home/einat/.local/share/vault/TEST-0042 בדוי.db".into(),
+        )),
+        CoreError::Internal(r#"failed: "C:\Users\Fictional User\AppData\x" at line 3"#.into()),
+        CoreError::Vault(VaultError::Refused("D:\\גיבוי\\TEST-0042".into())),
+    ];
+    for e in cases {
+        let ui = e.to_ui();
+        for d in &ui.details {
+            assert!(!d.contains(['/', '\\']), "{e:?} → {d}");
+            assert!(!d.contains("TEST-0042") && !d.contains("Fictional"), "{d}");
+        }
+        assert!(!ui.message.contains(['/', '\\']), "{}", ui.message);
+    }
+    // An io error says its kind, in Hebrew where she can act on it.
+    let full = file_error(std::io::Error::from(std::io::ErrorKind::StorageFull)).to_ui();
+    assert!(full.message.contains("מקום"), "{}", full.message);
+    assert_eq!(full.details, vec!["file error: StorageFull".to_owned()]);
+    let gone = file_error(std::io::Error::from_raw_os_error(2)).to_ui();
+    assert!(gone.message.contains("לא נמצאו"), "{}", gone.message);
+    assert_eq!(
+        gone.details,
+        vec!["file error: NotFound (os error 2)".to_owned()]
+    );
+    // Text without a path is kept whole.
+    let kept = CoreError::Internal("sentence count changed".into()).to_ui();
+    assert_eq!(kept.details, vec!["sentence count changed".to_owned()]);
+}
+
+#[test]
 fn ping_reports_versions() {
     let p = ping();
     assert_eq!(p.ipc_version, IPC_VERSION);
