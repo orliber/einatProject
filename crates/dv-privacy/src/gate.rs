@@ -58,7 +58,8 @@ pub fn replace_foreign_tags(
     // The regex copies the text between matches itself, so no offset is cut by hand.
     let out = re.replace_all(text, |caps: &regex::Captures<'_>| {
         let tag = caps.get(0).map_or("", |m| m.as_str());
-        if tag_allowed(tag, case_tags) {
+        // Her kept words (D-126) stay in her stored paragraph; they are never sent.
+        if tag_allowed(tag, case_tags) || crate::masks::is_kept_words_tag(tag) {
             tag.to_owned()
         } else {
             changed = true;

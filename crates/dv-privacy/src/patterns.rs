@@ -230,21 +230,25 @@ static COMPILED: LazyLock<Result<Compiled, regex::Error>> = LazyLock::new(|| {
         )?,
         ip: Regex::new(r"\d{1,3}(?:\.\d{1,3}){3}")?,
         // Digits joined by at most one - / . between them (IDs, phones, file numbers). No spaces,
-        // so score lists such as "12 13 9" are never merged.
-        digit_run: Regex::new(r"\+?\d(?:[\-./]?\d)+")?,
+        // so score lists such as "12 13 9" are never merged. A hyphen is also the maqaf and the
+        // Unicode hyphens ("000־000־018" went out whole): a hyphen, never a dash, so a score
+        // range ("100–115") is read as before.
+        digit_run: Regex::new(r"\+?\d(?:[\-./\x{05BE}\x{2010}\x{2011}]?\d)+")?,
         // A phone typed in groups. Between them a space (also a non-breaking one), a hyphen or
         // any dash ("054‑1234567" with a non-breaking hyphen, "054–1234567"); the area code
         // may be in parentheses ("(054) 123-4567", "(03)1234567"), and then it is part of it.
         spaced_phone: Regex::new(
-            r"(?:(?:\+972[\s\-‐-―−]?|0)(?:5\d|[2-4]|[89]|7\d)[\s\-‐-―−]|(?:\+972\s?)?\(\s?0?(?:5\d|[2-4]|[89]|7\d)\s?\)[\s\-‐-―−]?)\d{3}[\s\-‐-―−]?\d{4}",
+            r"(?:(?:\+972[\s\-‐-―−\x{05BE}]?|0)(?:5\d|[2-4]|[89]|7\d)[\s\-‐-―−\x{05BE}]|(?:\+972\s?)?\(\s?0?(?:5\d|[2-4]|[89]|7\d)\s?\)[\s\-‐-―−\x{05BE}]?)\d{3}[\s\-‐-―−\x{05BE}]?\d{4}",
         )?,
         // ID numbers typed in groups ("000 000 018", "0000-0001-8").
-        spaced_id: Regex::new(r"\d{3,4}[\s\-]\d{3,4}[\s\-]\d{1,3}")?,
+        spaced_id: Regex::new(
+            r"\d{3,4}[\s\-\x{05BE}\x{2010}\x{2011}]\d{3,4}[\s\-\x{05BE}\x{2010}\x{2011}]\d{1,3}",
+        )?,
         // Nine or ten digits one at a time, each followed by one space or hyphen.
-        single_digits: Regex::new(r"\d(?:[ \-]\d){8,9}")?,
+        single_digits: Regex::new(r"\d(?:[ \-\x{05BE}\x{2010}\x{2011}]\d){8,9}")?,
         // Bank accounts (IBAN) and card numbers typed in groups of four.
-        iban: Regex::new(r"(?i)\bIL\d{2}(?:[ \-]?\d{1,4}){3,6}")?,
-        card: Regex::new(r"\d{4}(?:[ \-]\d{4}){2,3}")?,
+        iban: Regex::new(r"(?i)\bIL\d{2}(?:[ \-\x{05BE}\x{2010}\x{2011}]?\d{1,4}){3,6}")?,
+        card: Regex::new(r"\d{4}(?:[ \-\x{05BE}\x{2010}\x{2011}]\d{4}){2,3}")?,
         num_date: Regex::new(r"(\d{1,2})[./](\d{1,2})(?:[./](\d{4}|\d{2}))?")?,
         year: Regex::new(r"(19[5-9]\d|20[0-4]\d)")?,
         address: Regex::new(
@@ -811,10 +815,10 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
         // run and as a label before it: the run is hidden.
         let before = text
             .get(..m.start())
-            .map(|b| b.trim_end_matches([' ', '-']));
+            .map(|b| b.trim_end_matches([' ', '-', '\u{05BE}']));
         let after = text
             .get(m.end()..)
-            .map(|a| a.trim_start_matches([' ', '-']));
+            .map(|a| a.trim_start_matches([' ', '-', '\u{05BE}']));
         let alone = !before.is_some_and(|b| b.ends_with(|ch: char| ch.is_ascii_digit()))
             && !after.is_some_and(|a| a.starts_with(|ch: char| ch.is_ascii_digit()));
         let labelled = before
@@ -861,12 +865,8 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
             );
         }
     }
-    for m in c.digit_run.find_iter(text) {
-        let digits: String = m.as_str().chars().filter(char::is_ascii_digit).collect();
-        if digits.len() < 5 || !digit_bounded(text, m.start(), m.end()) {
-            continue;
-        }
-        let kind = if is_valid_israeli_id(&digits) || digits.len() == 9 {
+    let run_kind = |digits: &str| {
+        if is_valid_israeli_id(digits) || digits.len() == 9 {
             PatternKind::IdNumber
         } else if (digits.starts_with('0') && (9..=10).contains(&digits.len()))
             || digits.starts_with("972")
@@ -874,8 +874,32 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
             PatternKind::Phone
         } else {
             PatternKind::Number
-        };
+        }
+    };
+    for m in c.digit_run.find_iter(text) {
+        let digits: String = m.as_str().chars().filter(char::is_ascii_digit).collect();
+        if digits.len() < 5 || !digit_bounded(text, m.start(), m.end()) {
+            continue;
+        }
+        let kind = run_kind(&digits);
         push(&mut hits, m.start(), m.end(), kind, fixed(kind));
+        // A date already took the end of the run ("000000018-3.9.2026"): an ID or a phone in
+        // a part of it between hyphens is still hidden (it went out whole).
+        let mut at = m.start();
+        for part in m.as_str().split(['-', '\u{05BE}', '\u{2010}', '\u{2011}']) {
+            let (start, end) = (at, at + part.len());
+            // The joiner after this part, in bytes.
+            at = end
+                + text
+                    .get(end..)
+                    .and_then(|r| r.chars().next())
+                    .map_or(0, char::len_utf8);
+            let digits: String = part.chars().filter(char::is_ascii_digit).collect();
+            if digits.len() >= 9 && part.bytes().all(|b| b.is_ascii_digit()) {
+                let kind = run_kind(&digits);
+                push(&mut hits, start, end, kind, fixed(kind));
+            }
+        }
     }
     month_dates(text, today, c, &mut hits);
     for m in c.year.find_iter(text) {

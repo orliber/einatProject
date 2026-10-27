@@ -89,7 +89,8 @@ impl Core {
                         .into_iter()
                         .filter(|d| d.status == DraftStatus::Approved)
                     {
-                        lines.push(format!("{}: {}", model_title(s, &ctx)?, d.text_tagged));
+                        let text = crate::drafts::paragraph_to_send(v, c, &d)?;
+                        lines.push(format!("{}: {text}", model_title(s, &ctx)?));
                     }
                 }
                 if !lines.is_empty() {

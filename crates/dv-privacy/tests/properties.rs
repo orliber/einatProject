@@ -17,7 +17,7 @@ use std::collections::HashMap;
 
 use common::*;
 use dv_domain::{Identity, PRACTITIONER_TAG};
-use dv_privacy::restore::{remaining_tags, restore, scan_model_output};
+use dv_privacy::restore::{her_text_to_send, remaining_tags, restore, scan_model_output};
 use dv_privacy::text::{normalize, prefix_splits, tokenize};
 use dv_privacy::{
     clear, filter, filter_split, filter_split_with_hints, filter_to_keep, filter_with_hints,
@@ -129,7 +129,8 @@ proptest! {
         let kept = filter_to_keep(&text, &c, &[]).unwrap();
         prop_assert_eq!(restore(&kept.tagged, &ids, None, &book.entries()), text);
         // Sent again, the kept text goes out as the text itself would.
-        prop_assert_eq!(filter(&kept.tagged, &c).unwrap().tagged, filter(&sentence(&p), &c).unwrap().tagged);
+        let sent = her_text_to_send(&kept.tagged, &ids, None, &book.entries());
+        prop_assert_eq!(filter(&sent, &c).unwrap().tagged, filter(&sentence(&p), &c).unwrap().tagged);
     }
 
     /// The same text filtered twice gives the same outcome, and filtering the filter's own
@@ -685,7 +686,11 @@ fn a_quoted_word_after_an_institution_word_is_left_out_but_kept_for_her() {
     let kept = filter_to_keep(&text, &c, &[]).unwrap();
     assert_eq!(kept.tagged, "לגן[מילים_1]");
     assert_eq!(restore(&kept.tagged, &ids, None, &book.entries()), text);
-    assert_eq!(filter(&kept.tagged, &c).unwrap().tagged, "לגן");
+    let sent = her_text_to_send(&kept.tagged, &ids, None, &book.entries());
+    assert_eq!(filter(&sent, &c).unwrap().tagged, "לגן");
+    // Anywhere else (an answer, a material) the tag is plain words, and the gate refuses it.
+    assert_eq!(filter(&kept.tagged, &c).unwrap().tagged, "לגן(מילים_1)");
+    assert!(gate_text(&kept.tagged, &ids, CASE).is_err());
     // Without the case's book there is nowhere to keep the words: refused, not lost.
     assert!(filter_to_keep(&text, &ctx(&ids, CASE), &[]).is_err());
 }
@@ -758,7 +763,9 @@ proptest! {
         }
         prop_assert!(!digits(&kept.tagged).contains(&digits(&idn)), "{:?}", kept.tagged);
         prop_assert!(!digits(&kept.tagged).contains(&digits(&phone)), "{:?}", kept.tagged);
-        let again = filter(&kept.tagged, &c).unwrap();
+        let case_ids: Vec<Identity> = ids.iter().filter(|i| i.case_id == CASE).cloned().collect();
+        let sent = her_text_to_send(&kept.tagged, &case_ids, None, &book.entries());
+        let again = filter(&sent, &c).unwrap();
         prop_assert!(!again.tagged.contains("[מילים_"), "{:?}", again.tagged);
         for (name, _) in CASE_NAMES {
             prop_assert!(!has_word(&again.tagged, name), "{name} sent in {:?}", again.tagged);
@@ -770,23 +777,25 @@ proptest! {
         if kept.tagged.contains("[מילים_") {
             prop_assert_eq!(&again.tagged, &filter(&text, &c).unwrap().tagged);
         }
-        // Stored and sent again, the gate says what it says of the text sent directly. (A
-        // name the filter found has a tag the case keeps only in dv-core.)
+        // Storing never makes a dead end: what the gate clears sent directly, it clears
+        // stored and sent again. (The other way a stored text can hide more: "March" before a
+        // tag reads as a date. A name the filter found has a tag the case keeps only in
+        // dv-core.)
         if again.auto_hidden.is_empty() {
             let direct = filter(&text, &c).unwrap().tagged;
-            prop_assert_eq!(
-                gate_text(&again.tagged, &ids, CASE).is_ok(),
-                gate_text(&direct, &ids, CASE).is_ok(),
-                "{:?} / {:?}", again.tagged, direct
-            );
-        }
-        // Without the book (a path that never puts words back) a kept-words tag goes out as
-        // it is: a number, which the gate lets through, never her words.
-        let bare = filter(&kept.tagged, &ctx(&ids, CASE)).unwrap();
-        for e in book.entries() {
-            if bare.tagged.contains(&e.tag) {
-                prop_assert!(gate_text(&e.tag, &ids, CASE).is_ok());
+            if gate_text(&direct, &ids, CASE).is_ok() {
+                prop_assert!(
+                    gate_text(&again.tagged, &ids, CASE).is_ok(),
+                    "{:?} / {:?}", again.tagged, direct
+                );
             }
+        }
+        // The stored text read as any other text (an answer, a material): a kept-words tag
+        // is plain words, never her words put back, and the gate refuses the tag itself.
+        let other = filter(&kept.tagged, &c).unwrap();
+        prop_assert!(!other.tagged.contains("[מילים_"), "{:?}", other.tagged);
+        for e in book.entries().iter().filter(|e| e.kind == dv_privacy::KEPT_WORDS) {
+            prop_assert!(gate_text(&e.tag, &ids, CASE).is_err());
         }
     }
 }
@@ -801,7 +810,6 @@ fn a_tag_after_a_family_word_stays_whole() {
     for text in [
         "משפחת [ילד] הגיעה",
         "למשפחת [אם] יש",
-        "משפחת [מילים_1] הגיעה",
         "משפחת [תאריך_2]",
         "משפחת ו[ילד] הגיעה",
     ] {

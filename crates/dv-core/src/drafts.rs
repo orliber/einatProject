@@ -389,3 +389,23 @@ impl Core {
 
     // ------------------------------------------------------------ AI: prepare → approve → send
 }
+
+/// A stored paragraph as it goes into a request (D-126): hers back as she wrote it, so the
+/// filter reads her words in their own context and hides exactly what it hid when she wrote
+/// them; Claude's as stored. A kept-words tag anywhere else is never put back: the filter
+/// reads it as plain words and the gate refuses it.
+pub(crate) fn paragraph_to_send(
+    v: &Vault,
+    case_id: &str,
+    d: &dv_domain::DraftParagraph,
+) -> Result<String, CoreError> {
+    if d.author != Author::User {
+        return Ok(d.text_tagged.clone());
+    }
+    Ok(dv_privacy::restore::her_text_to_send(
+        &d.text_tagged,
+        &v.identities(case_id)?,
+        v.practitioner()?.names.first().map(String::as_str),
+        &v.masks(case_id)?,
+    ))
+}

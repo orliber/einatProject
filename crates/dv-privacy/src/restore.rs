@@ -38,6 +38,27 @@ pub fn restore(
     .into_owned()
 }
 
+/// Her own stored paragraph (D-126) back as she wrote it, to be filtered again before it is
+/// sent: the filter then reads her words in their own context, as when she typed them, and
+/// hides exactly what it hid then. Only for a paragraph she wrote or edited, whose kept-words
+/// tags came from [`crate::filter_to_keep`]: in any other text (an answer, a material, a
+/// message) such a tag is never put back, since out of its place a kept word loses the rule
+/// that hid it. Text without a kept-words tag is returned as stored. `identities`,
+/// `practitioner` and `masks` are the case's, as for [`restore`].
+#[must_use]
+pub fn her_text_to_send(
+    stored: &str,
+    identities: &[Identity],
+    practitioner: Option<&str>,
+    masks: &[MaskEntry],
+) -> String {
+    if stored.contains(crate::masks::KEPT_WORDS_OPEN) {
+        restore(stored, identities, practitioner, masks)
+    } else {
+        stored.to_owned()
+    }
+}
+
 /// Identity-like tags left in text (everything but `[חסר: …]` notes).
 #[must_use]
 pub fn remaining_tags(text: &str) -> Vec<String> {

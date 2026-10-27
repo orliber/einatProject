@@ -29,16 +29,31 @@ pub const MASK_BASES: &[&str] = &[
     "בית_חולים",
     // A name the gate refused in text the filter never saw (round 25's fix loop).
     "שם",
-    // Her own words the outgoing filter leaves out or generalizes, kept in a stored text of
-    // hers (D-126). Put back before every request, so the model never sees one.
-    KEPT_WORDS,
 ];
 
-/// The base of a kept-words tag (D-126): words of hers stored under a number, never sent.
+/// The base of a kept-words tag (D-126): words of hers the outgoing filter leaves out or
+/// generalizes, stored in a paragraph of hers under a number. Not a mask base: such a tag is
+/// never sent and never trusted in text from anywhere else. Every filter reads it as plain
+/// words ("(מילים_1)"), the gate refuses it, and the answer scan points it out. Only her own
+/// paragraph is put back as she wrote it before it is filtered ([`her_text_to_send`]).
+///
+/// [`her_text_to_send`]: crate::restore::her_text_to_send
 pub const KEPT_WORDS: &str = "מילים";
 
 /// How every kept-words tag starts.
 pub(crate) const KEPT_WORDS_OPEN: &str = "[מילים_";
+
+/// `[מילים_N]`, the form of a kept-words tag (D-126).
+#[must_use]
+pub fn is_kept_words_tag(tag: &str) -> bool {
+    tag.strip_prefix(KEPT_WORDS_OPEN)
+        .and_then(|t| t.strip_suffix(']'))
+        .is_some_and(|n| {
+            (1..=4).contains(&n.len())
+                && n.bytes().all(|b| b.is_ascii_digit())
+                && !n.starts_with('0')
+        })
+}
 
 /// The kind of a fixed generic tag the filter writes, or `None` for any other text.
 #[must_use]

@@ -1999,6 +1999,15 @@ fn her_edit_keeps_every_word_and_the_request_still_hides_them() {
         assert!(!out.contains(kept), "{kept} went out: {out}");
     }
     assert!(out.contains("בגן") && out.contains("ובבית ספר"), "{out}");
+    // Her kept words come back only in her own paragraph: the same tag in what she asks
+    // (or in anything not hers) is plain words, never the kindergarten's name.
+    let planted = core
+        .prepare_section(&case, "kindergarten", "כתבי על [מילים_1] ועל [מילים_2]")
+        .unwrap();
+    let out = outgoing(&planted);
+    for kept in ["ניצנים", "אופק", "3.9.2026", "[מילים_"] {
+        assert!(!out.contains(kept), "{kept} went out: {out}");
+    }
     // The report shows her words.
     assert!(
         para(&mut core).text.contains("בגן \"ניצנים\" מאז 3.9.2026"),

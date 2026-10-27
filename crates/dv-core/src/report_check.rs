@@ -94,7 +94,8 @@ impl Core {
                 v.drafts(case_id, &s.key)?
                     .into_iter()
                     .filter(|d| d.status == DraftStatus::Approved)
-                    .map(|d| d.text_tagged),
+                    .map(|d| crate::drafts::paragraph_to_send(v, case_id, &d))
+                    .collect::<Result<Vec<_>, _>>()?,
             );
         }
         Ok(out)
@@ -156,7 +157,7 @@ impl Core {
                     .filter(|d| d.status == DraftStatus::Approved)
                 {
                     let out = hints
-                        .filter(&d.text_tagged, &ctx)
+                        .filter(&crate::drafts::paragraph_to_send(v, case_id, &d)?, &ctx)
                         .map_err(|e| CoreError::Internal(e.to_string()))?;
                     review.add(format!("סעיף מאושר · {}", s.title), &out);
                     text.push(out.tagged);

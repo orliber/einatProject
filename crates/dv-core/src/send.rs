@@ -255,8 +255,8 @@ impl Core {
                         .drafts(case_id, &s.key)?
                         .into_iter()
                         .filter(|d| d.status == DraftStatus::Approved && marked(&s.key, &d.id))
-                        .map(|d| d.text_tagged)
-                        .collect();
+                        .map(|d| crate::drafts::paragraph_to_send(v, case_id, &d))
+                        .collect::<Result<_, _>>()?;
                     if !text.is_empty() {
                         let out = run(&text.join("\n"))?;
                         review.add(format!("סעיף מאושר · {}", s.title), &out);
@@ -284,7 +284,7 @@ impl Core {
                 .filter(|_| !points)
                 .filter(|d| matches!(d.status, DraftStatus::Proposed | DraftStatus::Approved))
             {
-                let out = run(&d.text_tagged)?;
+                let out = run(&crate::drafts::paragraph_to_send(v, case_id, &d)?)?;
                 review.add("הטיוטה הנוכחית".to_owned(), &out);
                 current.push(out.tagged);
             }

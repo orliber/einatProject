@@ -1836,7 +1836,7 @@ pub fn filter_with_hints(
     ctx: &PrivacyContext<'_>,
     hints: &[NameHint],
 ) -> Result<FilterOutcome, PrivacyError> {
-    let text = &plain_brackets(&expand_kept_words(text, ctx), ctx);
+    let text = &plain_brackets(text, ctx);
     let (mut reps, suspects) = analyze(text, ctx, hints)?;
     number_masks(text, ctx, &mut reps)?;
     assemble(text, &reps, &suspects)
@@ -1846,9 +1846,9 @@ pub fn filter_with_hints(
 /// exactly as [`filter_with_hints`] hides them, but nothing is left out or generalized. What
 /// the outgoing filter would leave out (a kindergarten's name) or turn into relative time (a
 /// date) is kept under a numbered tag of the case's mask book (`[מילים_3]`), so restoring
-/// gives back exactly what she wrote. The tag carries only a number. When the text is sent,
-/// the outgoing filter restores it first and filters it as it always does, so the model sees
-/// exactly the text it would have seen had she typed it then.
+/// gives back exactly what she wrote. The tag carries only a number. Before her paragraph is
+/// sent, the caller restores it whole ([`crate::restore::her_text_to_send`]) and filters it as
+/// any text, so the model sees exactly the text it would have seen had she typed it then.
 ///
 /// Fails closed without the mask book: the words would have nowhere to be kept.
 pub fn filter_to_keep(
@@ -1861,7 +1861,7 @@ pub fn filter_to_keep(
             "keeping her words needs the case's mask book".to_owned(),
         ));
     };
-    let text = &plain_brackets(&expand_kept_words(text, ctx), ctx);
+    let text = &plain_brackets(text, ctx);
     let (mut reps, suspects) = analyze(text, ctx, hints)?;
     number_masks(text, ctx, &mut reps)?;
     for r in &mut reps {
@@ -1883,32 +1883,6 @@ pub fn filter_to_keep(
         }
     }
     assemble(text, &reps, &suspects)
-}
-
-/// A stored text of hers (D-126) back as she wrote it, so the outgoing filter reads it as on
-/// the first time and hides exactly what it would have hidden then: a text with a kept-words
-/// tag is restored whole (this case's names, the practitioner, the book), not only those
-/// tags, since a name read next to a tag can count differently ("נועם מספרת…" is a person
-/// telling, "[ילד] מספרת…" was not). Only with the case's book; a tag the book does not have
-/// stays as it is (it carries only a number).
-fn expand_kept_words<'t>(text: &'t str, ctx: &PrivacyContext<'_>) -> std::borrow::Cow<'t, str> {
-    match ctx.masks {
-        Some(book) if text.contains(crate::masks::KEPT_WORDS_OPEN) => {
-            let case: Vec<Identity> = ctx
-                .identities
-                .iter()
-                .filter(|i| i.case_id == ctx.case_id)
-                .cloned()
-                .collect();
-            std::borrow::Cow::Owned(crate::restore::restore(
-                text,
-                &case,
-                ctx.practitioner.first().map(String::as_str),
-                &book.entries(),
-            ))
-        }
-        _ => std::borrow::Cow::Borrowed(text),
-    }
 }
 
 /// With the case's mask book, each fixed tag of a kind (`[תאריך]`) becomes the numbered tag of
@@ -1976,16 +1950,10 @@ pub fn filter_split_with_hints(
     ranges: &[Range<usize>],
     hints: &[NameHint],
 ) -> Result<(FilterOutcome, Option<Vec<FilterOutcome>>), PrivacyError> {
-    let expanded = expand_kept_words(text, ctx);
-    // Kept words put back moved every offset after them: the ranges no longer fit.
-    let moved = matches!(expanded, std::borrow::Cow::Owned(ref e) if e != text);
-    let text = &plain_brackets(&expanded, ctx);
+    let text = &plain_brackets(text, ctx);
     let (mut reps, suspects) = analyze(text, ctx, hints)?;
     number_masks(text, ctx, &mut reps)?;
     let whole = assemble(text, &reps, &suspects)?;
-    if moved {
-        return Ok((whole, None));
-    }
     let mut parts = Vec::with_capacity(ranges.len());
     for r in ranges {
         let Some(piece) = text.get(r.clone()) else {

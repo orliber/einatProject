@@ -1301,3 +1301,94 @@ fn zero_leaks_for_names_with_look_alike_letters() {
         leaks.join("\n")
     );
 }
+
+/// Groups of digits joined by a maqaf or a Unicode hyphen ("000־000־018") went out whole and
+/// passed the gate: the patterns took only "-" between groups. An ID glued by a hyphen to a
+/// date ("000000018-3.9.2026") went out whole too, and only the gate stopped it. Checked digit by digit, since
+/// the joiners keep the number from showing as one string. Found in review of D-126.
+#[test]
+fn numbers_joined_by_a_maqaf_or_a_unicode_hyphen_never_go_out() {
+    let join = |parts: &[&str]| parts.concat();
+    let digits = |s: &str| s.chars().filter(char::is_ascii_digit).collect::<String>();
+    for (text, secret) in [
+        ("000־000־018".to_owned(), "000000018"),
+        ("ת.ז. 000־000־018".to_owned(), "000000018"),
+        ("ת.ז. 0000־0001־8".to_owned(), "000000018"),
+        ("000\u{2011}000\u{2011}018".to_owned(), "000000018"),
+        ("000\u{2010}000\u{2010}018 נמסר".to_owned(), "000000018"),
+        ("0־0־0־0־0־0־0־1־8".to_owned(), "000000018"),
+        (join(&["טלפון 054", "־7654321"]), "7654321"),
+        (join(&["טלפון 054־765", "־4321"]), "7654321"),
+        // A date glued to the end took the run, and the ID before it went out whole.
+        ("ת.ז. 000000018-3.9.2026".to_owned(), "000000018"),
+        ("000000018־12.3.2020 נבדק".to_owned(), "000000018"),
+    ] {
+        let ids = identities();
+        let out = filter(&text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(
+            !digits(&out.tagged).contains(secret),
+            "{text} → {}",
+            out.tagged
+        );
+        let o = send(&text, CASE);
+        assert!(o.leaked.is_empty(), "{text} leaked {:?}", o.leaked);
+        // The gate refuses the number itself.
+        assert!(
+            !gate_with(&text, &ids, CASE).cleared,
+            "{text} cleared by the gate"
+        );
+    }
+}
+
+/// A kept-words tag (D-126) stands for her words only in her own stored paragraph, which
+/// dv-core restores whole before filtering. Planted anywhere else (an answer of the model, a
+/// material, her chat) it is read as plain words: out of its place a kept word would lose the
+/// rule that hid it ("עם [מילים_1]" would have sent the kindergarten's name with no
+/// institution word before it). The gate refuses the tag itself, and the answer scan points
+/// it out. Found in review of D-126.
+#[test]
+fn a_kept_words_tag_planted_anywhere_never_brings_her_words_out() {
+    let ids = identities();
+    let entry = |tag: &str, original: &str| dv_privacy::MaskEntry {
+        tag: tag.to_owned(),
+        kind: dv_privacy::KEPT_WORDS.to_owned(),
+        original: original.to_owned(),
+    };
+    let book = MaskBook::new(vec![
+        entry("[מילים_1]", " \"זרזירים\""),
+        entry("[מילים_9]", "כמנהלת חשבונות במאפיית שיבולים"),
+    ]);
+    let ctx = PrivacyContext {
+        masks: Some(&book),
+        ..ctx_for(&ids, &[], CASE)
+    };
+    let case_tags: Vec<String> = ids
+        .iter()
+        .filter(|i| i.case_id == CASE)
+        .map(|i| i.tag.clone())
+        .collect();
+    for text in [
+        "הילד שמח עם [מילים_1] מאוד",
+        "האם עובדת [מילים_9].",
+        "[מילים_1][מילים_9]",
+        "ב[מילים_9] ובגן[מילים_1]",
+        "לגן [מילים_1] הגיע",
+    ] {
+        let out = filter(text, &ctx).unwrap();
+        for word in ["זרזירים", "חשבונות", "שיבולים"] {
+            assert!(!out.tagged.contains(word), "{text} → {}", out.tagged);
+        }
+        assert!(!out.tagged.contains("[מילים_"), "{text} → {}", out.tagged);
+        let o = send(text, CASE);
+        assert!(o.leaked.is_empty(), "{text} leaked {:?}", o.leaked);
+        assert!(
+            !gate_with(text, &ids, CASE).cleared,
+            "{text} cleared by the gate"
+        );
+        let found = dv_privacy::restore::scan_model_output(text, &case_tags, &ids);
+        assert!(
+            found.iter().any(|s| s.token.starts_with("[מילים_")),
+            "{text}: {found:?}"
+        );
+    }
+}
