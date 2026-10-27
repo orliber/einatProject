@@ -152,6 +152,15 @@ jobs:
         run: New-Item -ItemType Directory -Force apps/desktop/src-tauri/ocr/tessdata | Out-Null
       - run: cargo clippy -p dv-desktop --features fips -- -D warnings
       - run: cargo test --release -p dv-desktop --features fips
+      # D-117: typing Hebrew (keys of the Hebrew layout, and IME composition) into the editors,
+      # in Microsoft Edge as Windows has it: the engine of WebView2. Nothing is downloaded.
+      - name: Hebrew typing in Edge on Windows
+        working-directory: apps/desktop
+        env:
+          DV_E2E_EDGE: "1"
+        run: |
+          pnpm build:preview
+          pnpm exec playwright test --project=edge
 
   macos:
     name: macOS – the vault, documents, updates and the shell, as released
