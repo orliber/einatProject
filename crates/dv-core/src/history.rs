@@ -131,8 +131,8 @@ pub struct SentPage {
 pub const SENT_PAGE: usize = 50;
 /// Requests read (opened and searched) for one page at most.
 pub const SENT_SCAN: usize = 500;
-/// Requests opened from the vault at a time while a page fills.
-const SENT_BATCH: u32 = 100;
+/// Requests opened from the vault at a time while a searched page fills.
+const SENT_BATCH: usize = 100;
 
 /// What each tag of a case stands for on the computer.
 struct CaseWords {
@@ -229,9 +229,13 @@ impl Core {
         let mut cursor = before;
         let mut read = 0;
         loop {
-            let want = u32::try_from(SENT_SCAN - read)
-                .unwrap_or(SENT_BATCH)
-                .min(SENT_BATCH);
+            // Without a search every request read is shown: read only what fills the page.
+            let room = if q.is_empty() {
+                SENT_PAGE - items.len()
+            } else {
+                SENT_BATCH
+            };
+            let want = u32::try_from((SENT_SCAN - read).min(room)).unwrap_or(u32::MAX);
             let batch = v.transmissions_newest(
                 case_id,
                 place,

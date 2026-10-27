@@ -9,7 +9,7 @@ import { SentHistoryDialog } from "./SentHistory";
 /** The first of this month, by the computer's calendar, in seconds. */
 export function monthStart(now = Date.now()): number {
   const d = new Date(now);
-  return new Date(d.getFullYear(), d.getMonth(), 1).getTime() / 1000;
+  return Math.floor(new Date(d.getFullYear(), d.getMonth(), 1).getTime() / 1000);
 }
 
 export function PrivacyStatus() {
