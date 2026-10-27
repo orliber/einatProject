@@ -14,8 +14,8 @@ use crate::masks::TAG_RE;
 use crate::matcher::{quote_bytes, quote_opened, strip_quote_tail};
 use crate::patterns;
 use crate::pipeline::{
-    arabic_identity_matches, declared_reads_as_word, identity_index, other_case_word, past_name,
-    reads_as_word, PrivacyContext, Target,
+    arabic_identity_matches, declared_inside, declared_reads_as_word, identity_index,
+    other_case_word, past_name, reads_as_word, PrivacyContext, Target,
 };
 use crate::text::{normalize, prefix_splits, tokenize, Token};
 
@@ -180,30 +180,27 @@ pub(crate) struct Finding {
 pub(crate) fn name_findings(text: &str, ctx: &PrivacyContext<'_>) -> Vec<Finding> {
     let tokens = tokenize(text);
     let mut out = Vec::new();
-    for m in identity_index(ctx).find(text, &tokens) {
-        // "שני ההורים", "בגיל 3": the same certain readings the pipeline leaves as words.
-        if declared_reads_as_word(text, &tokens, m.first_token, m.last_token, m.prefix) {
-            continue;
-        }
-        // Another case's name read as the word it also is, as the pipeline reads it.
-        if matches!(&m.payload, Target::Identity { case_id, .. } if *case_id != ctx.case_id)
-            && other_case_word(text, &tokens, ctx, m.first_token, m.last_token, m.prefix)
+    // The text as the pipeline reads it, and once more with every bidirectional control as
+    // a word break (D-131): a name is refused on either view.
+    let views: Vec<Vec<Token>> = if crate::text::has_bidi_control(text) {
+        vec![tokens.clone(), crate::text::tokenize_split_bidi(text)]
+    } else {
+        vec![tokens.clone()]
+    };
+    for view in &views {
+        declared_findings(text, view, ctx, &mut out);
+    }
+    // A declared name inside a longer word, as the pipeline hides it ("עידוש", "נועם1").
+    for t in &tokens {
+        if declared_inside(ctx, &t.norm).is_some()
+            && !out.iter().any(|f| f.start < t.end && t.start < f.end)
         {
-            continue;
+            out.push(Finding {
+                start: t.start,
+                end: t.end,
+                code: "identity",
+            });
         }
-        // An ordinary word the psychologist confirmed ("שאלון" when a child is "אלון").
-        // A token the match does not point at is no confirmed word: the finding stands.
-        let confirmed_word = |whole: &Token| {
-            LEXICON.common_words.contains(&whole.norm) && (ctx.allowlisted)(&whole.norm)
-        };
-        if m.prefix > 0 && tokens.get(m.first_token).is_some_and(confirmed_word) {
-            continue;
-        }
-        out.push(Finding {
-            start: m.start,
-            end: m.end,
-            code: "identity",
-        });
     }
     for (start, end, _) in arabic_identity_matches(text, &tokens, ctx) {
         out.push(Finding {
@@ -247,6 +244,44 @@ pub(crate) fn name_findings(text: &str, ctx: &PrivacyContext<'_>) -> Vec<Finding
         }
     }
     out
+}
+
+/// The declared names found on one view of the text, with the readings the pipeline leaves
+/// as words skipped. A span already found (on the other view) is not added again.
+fn declared_findings(
+    text: &str,
+    tokens: &[Token],
+    ctx: &PrivacyContext<'_>,
+    out: &mut Vec<Finding>,
+) {
+    for m in identity_index(ctx).find(text, tokens) {
+        if out.iter().any(|f| f.start < m.end && m.start < f.end) {
+            continue;
+        }
+        // "שני ההורים", "בגיל 3": the same certain readings the pipeline leaves as words.
+        if declared_reads_as_word(text, tokens, m.first_token, m.last_token, m.prefix) {
+            continue;
+        }
+        // Another case's name read as the word it also is, as the pipeline reads it.
+        if matches!(&m.payload, Target::Identity { case_id, .. } if *case_id != ctx.case_id)
+            && other_case_word(text, tokens, ctx, m.first_token, m.last_token, m.prefix)
+        {
+            continue;
+        }
+        // An ordinary word the psychologist confirmed ("שאלון" when a child is "אלון").
+        // A token the match does not point at is no confirmed word: the finding stands.
+        let confirmed_word = |whole: &Token| {
+            LEXICON.common_words.contains(&whole.norm) && (ctx.allowlisted)(&whole.norm)
+        };
+        if m.prefix > 0 && tokens.get(m.first_token).is_some_and(confirmed_word) {
+            continue;
+        }
+        out.push(Finding {
+            start: m.start,
+            end: m.end,
+            code: "identity",
+        });
+    }
 }
 
 /// Scan the whole request. Any finding blocks; there is no override in code.

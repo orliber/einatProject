@@ -725,17 +725,13 @@ fn tags_keep_prefixes_and_restore_puts_names_back() {
         masks: None,
     };
     let out = filter("מיכל סיפרה שנועם עבר לכפר ורדים עם ד\"ר שטרן", &ctx).unwrap();
-    assert_eq!(
-        out.tagged,
-        "[גננת] סיפרה ש[ילד] עבר ל[יישוב] עם ד\"ר [רופא_1]"
-    );
+    // The title before part of a titled identity goes into its tag (D-131), so the name
+    // comes back once.
+    assert_eq!(out.tagged, "[גננת] סיפרה ש[ילד] עבר ל[יישוב] עם [רופא_1]");
     assert!(out.hidden.iter().any(|h| h.contains("הילד")));
     let case_ids: Vec<Identity> = ids.into_iter().filter(|i| i.case_id == CASE).collect();
     let back = dv_privacy::restore::restore(&out.tagged, &case_ids, None, &[]);
-    assert_eq!(
-        back,
-        "מיכל סיפרה שנועם עבר לכפר ורדים עם ד\"ר ד\"ר אבנר שטרן"
-    );
+    assert_eq!(back, "מיכל סיפרה שנועם עבר לכפר ורדים עם ד\"ר אבנר שטרן");
     assert!(dv_privacy::restore::remaining_tags(&back).is_empty());
 }
 
@@ -2043,4 +2039,312 @@ fn digit_left(tagged: &str) -> bool {
         }
     }
     out.contains(|c: char| c.is_ascii_digit())
+}
+
+// ------------------------------------------------------------------ D-131: the review of 0.9.1
+
+/// A bidirectional control (a direction mark, an embedding, an isolate) between two words
+/// glued them into one token, so a declared name next to one passed the filter and the gate:
+/// "נועם\u{200F}הלך" went out whole. Now the text is read both ways, and a name inside a word
+/// ("נו\u{200E}עם") is still the name.
+#[test]
+fn a_direction_mark_between_a_name_and_the_next_word_never_lets_it_out() {
+    let controls = [
+        '\u{200E}', '\u{200F}', '\u{202A}', '\u{202B}', '\u{202C}', '\u{202D}', '\u{202E}',
+        '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}', '\u{061C}',
+    ];
+    let ids = identities();
+    for z in controls {
+        for (text, name) in [
+            (format!("נועם{z}הלך לגן."), "נועם"),
+            (format!("הלך{z}נועם לגן."), "נועם"),
+            (format!("{z}נועם{z}הלך{z}לגן"), "נועם"),
+            (format!("Noam{z}walked home."), "noam"),
+            (format!("מיכל{z}הגננת סיפרה."), "מיכל"),
+            (format!("גן{z}הדקל"), "הדקל"),
+            (format!("כפר{z}ורדים"), "ורדים"),
+            (format!("ד\"ר{z}שטרן"), "שטרן"),
+            (format!("נו{z}עם הלך לגן."), "נועם"),
+        ] {
+            let out = filter(&text, &ctx_for(&ids, &[], CASE)).unwrap();
+            assert!(
+                !normalize(&out.tagged).contains(&normalize(name)),
+                "{text:?} → {:?}",
+                out.tagged
+            );
+            let o = send(&text, CASE);
+            assert!(o.leaked.is_empty(), "{text:?} leaked {:?}", o.leaked);
+            assert!(o.cleared, "{text:?} is a dead end");
+            assert!(
+                !gate_with(&text, &ids, CASE).cleared,
+                "{text:?} cleared raw by the gate"
+            );
+        }
+    }
+}
+
+/// Characters that show nothing and were not read as marks: a variation selector (U+FE0F
+/// comes with every emoji keyboard), a tag character, an interlinear mark, a Hangul filler.
+/// Inside a name or a number each one split it, and it went out whole.
+#[test]
+fn more_invisible_characters_inside_a_name_or_a_number_never_let_it_out() {
+    let invisible = [
+        '\u{FE00}',
+        '\u{FE0E}',
+        '\u{FE0F}',
+        '\u{180E}',
+        '\u{061C}',
+        '\u{E0001}',
+        '\u{E0100}',
+        '\u{FFF9}',
+        '\u{FFFA}',
+        '\u{FFFB}',
+        '\u{1D173}',
+        '\u{206A}',
+        '\u{206F}',
+        '\u{3164}',
+        '\u{115F}',
+        '\u{1160}',
+        '\u{FFA0}',
+    ];
+    let ids = identities();
+    let strip = |s: &str| -> String { s.chars().filter(|c| !invisible.contains(c)).collect() };
+    for z in invisible {
+        for (text, secret) in [
+            (format!("נו{z}עם הלך לגן."), "נועם"),
+            (format!("{z}נועם הלך."), "נועם"),
+            (format!("נועם{z} הלך."), "נועם"),
+            (format!("No{z}am walked."), "noam"),
+            (format!("גן הד{z}קל"), "הדקל"),
+            (format!("כפר ור{z}דים"), "ורדים"),
+            (format!("ל{z}נועם יש אח."), "נועם"),
+            (format!("ת.ז. 0000{z}00018"), "000000018"),
+            (format!("000{z}000{z}018"), "000000018"),
+        ] {
+            let out = filter(&text, &ctx_for(&ids, &[], CASE)).unwrap();
+            let kept = normalize(&strip(&out.tagged));
+            assert!(
+                !kept.contains(&normalize(secret)),
+                "{text:?} → {:?}",
+                out.tagged
+            );
+            let o = send(&text, CASE);
+            assert!(o.leaked.is_empty(), "{text:?} leaked {:?}", o.leaked);
+            assert!(
+                !gate_with(&text, &ids, CASE).cleared,
+                "{text:?} cleared raw by the gate"
+            );
+        }
+    }
+}
+
+/// A declared name inside a longer word: a diminutive ("עידוש", "מאיהלה"), a glued digit or
+/// Latin letter ("נועם1", "noam123"), the possessive typed in Hebrew ("נועם'ס"), a plural
+/// ("שטרנים"), a typo ("ננועם"). Each went out whole. The whole word is hidden, under the
+/// name's tag, and the gate refuses it raw. Everyday words that merely hold a name stay.
+#[test]
+fn a_declared_name_inside_a_longer_word_is_hidden_whole() {
+    let ids = identities();
+    for (text, name) in [
+        ("עידוש לא רצה לצאת.", "עידו"),
+        ("מיכלוש סיפרה.", "מיכל"),
+        ("מאיהלה בכתה.", "מאיה"),
+        ("נועמוש הגיע.", "נועם"),
+        ("נועם'ס", "נועם"),
+        ("הציור של נועם'ס.", "נועם"),
+        ("נועם1 הגיע.", "נועם"),
+        ("קובץ noam123.docx", "noam"),
+        ("נועםabc", "נועם"),
+        ("ננועם הגיע.", "נועם"),
+        ("נועםם הגיע.", "נועם"),
+        ("שטרנים", "שטרן"),
+        ("השטרנים הגיעו.", "שטרן"),
+        ("מיכל׳ל", "מיכל"),
+        ("מתגוררים בכפרורדים.", "ורדים"),
+        ("נועם%20מיכל", "מיכל"),
+    ] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(
+            !normalize(&out.tagged).contains(&normalize(name)),
+            "{text:?} → {:?}",
+            out.tagged
+        );
+        let o = send(text, CASE);
+        assert!(o.leaked.is_empty(), "{text:?} leaked {:?}", o.leaked);
+        assert!(o.cleared, "{text:?} is a dead end");
+        assert!(
+            !gate_with(text, &ids, CASE).cleared,
+            "{text:?} cleared raw by the gate"
+        );
+    }
+    // The diminutive is listed as a name inside a word, so "להחזיר" can keep it.
+    let out = filter("עידוש לא רצה לצאת.", &ctx_for(&ids, &[], CASE)).unwrap();
+    assert!(
+        out.auto_hidden
+            .iter()
+            .any(|a| a.token == "עידוש" && a.kind == AutoKind::DeclaredInWord && a.tag == "[אב]"),
+        "{:?}",
+        out.auto_hidden
+    );
+    // Everyday words that hold a name are words ("עידוד" holds "עידו", "שאלון" holds the
+    // other case's "אלון"), and a short name ("דנה", the practitioner) sits in many words.
+    // A name that only starts a longer word ("קוגניטיבי" starts with a surname "קוגן") is
+    // that word, and a name of three letters and a geresh ("ג'וד") is not held by "ג'ודו".
+    let mut more = ids.clone();
+    more.push(id(OTHER, Role::Father, "[אב]", "יוסי קוגן", &[]));
+    more.push(id(OTHER, Role::Brother, "[אח_1]", "ג'וד", &[]));
+    // A word the filter once took for a name ("Core", kept from the card) is held by a
+    // longer word only after digits, not after a letter.
+    let mut core = id(OTHER, Role::Other, "[אדם_2]", "Core", &[]);
+    core.source = dv_domain::IdentitySource::Auto;
+    more.push(core);
+    for text in [
+        "עידוד חיובי עוזר לו.",
+        "השאלון הוחזר מלא.",
+        "בשאלון ההורים דווח על קושי.",
+        "עץ האלון בחצר.",
+        "ההתקדמות נבדקה.",
+        "פרופיל קוגניטיבי תקין, יכולות קוגניטיביות טובות.",
+        "שחייה וג'ודו מתאימים לו.",
+    ] {
+        let out = filter(text, &ctx_for(&more, &[], CASE)).unwrap();
+        assert_eq!(out.tagged, text, "an ordinary word was hidden");
+        assert!(gate_with(text, &more, CASE).cleared, "{text:?} refused");
+    }
+    let out = filter("Core Language Score: 108", &ctx_for(&more, &[], CASE)).unwrap();
+    assert!(
+        out.tagged.ends_with(" Language Score: 108"),
+        "{:?}",
+        out.tagged
+    );
+    // An address whose local part holds a name is hidden whole, not the word alone with the
+    // rest of the address left beside its tag.
+    for text in [
+        "כתבו אל noamk19@example.com בבוקר.",
+        "המייל שלה rotemf@example.org נשמר.",
+    ] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(
+            !out.tagged.contains("example.") && !out.tagged.contains('@'),
+            "{text:?} → {:?}",
+            out.tagged
+        );
+        let o = send(text, CASE);
+        assert!(
+            o.leaked.is_empty() && o.cleared,
+            "{text:?}: leaked {:?}, cleared {}",
+            o.leaked,
+            o.cleared
+        );
+    }
+}
+
+/// A note for something missing has one form. Anything else that begins with "[חסר" is a
+/// tag the gate refuses: "[חסרנועם]" passed as a note, with the name inside it.
+#[test]
+fn only_a_well_formed_missing_note_passes_the_gate() {
+    let ids = identities();
+    for text in [
+        "[חסרנועם]",
+        "[חסר\u{200F}נועם]",
+        "[חסר\u{200B}נועם]",
+        "[חסר:נועם]",
+        "[חסר: נועם]",
+        "[חסר נועם]",
+        "[חסר-נועם]",
+        "[חסר: ]",
+        "[חסר:]",
+        "[חסרה: גיל]",
+    ] {
+        let o = gate_with(text, &ids, CASE);
+        assert!(!o.cleared, "{text:?} cleared");
+    }
+    for text in ["[ילד] הלך [חסר: גיל ההליכה].", "[ילד] הלך [חסר]."] {
+        assert!(gate_with(text, &ids, CASE).cleared, "{text:?} refused");
+    }
+    assert!(dv_privacy::is_missing_note("[חסר: גיל ההליכה]"));
+    assert!(dv_privacy::is_missing_note("[חסר]"));
+    assert!(!dv_privacy::is_missing_note("[חסרנועם]"));
+    assert!(!dv_privacy::is_missing_note("[חסר: ]"));
+}
+
+/// After "ד\"ר" and a first name, the next word is a surname only when it is no everyday
+/// word: "ד\"ר אבנר בדק את הילד" hid the verb as a second doctor.
+#[test]
+fn a_verb_after_a_titled_first_name_stays_a_word() {
+    let ids = identities();
+    let ctx = ctx_for(&ids, &[], CASE);
+    for (text, word) in [
+        ("ד\"ר אבנר בדק את הילד.", "בדק"),
+        ("ד\"ר אבנר המליץ על טיפול.", "המליץ"),
+        ("ד\"ר אבנר אמר שהכול תקין.", "אמר"),
+        ("ד\"ר אבנר ציין קושי.", "ציין"),
+    ] {
+        let out = filter(text, &ctx).unwrap();
+        assert!(out.tagged.contains(word), "{text:?} → {:?}", out.tagged);
+        assert!(
+            !out.tagged.contains("[רופא_2]"),
+            "{text:?} → {:?}",
+            out.tagged
+        );
+        assert!(!out.tagged.contains("אבנר"), "{text:?} → {:?}", out.tagged);
+    }
+    // A surname after the first name is still hidden.
+    let out = filter("ד\"ר אבנר ברקוביץ בדק.", &ctx).unwrap();
+    assert!(!out.tagged.contains("ברקוביץ"), "{:?}", out.tagged);
+}
+
+/// Part of a titled identity with its title before it ("ד\"ר שטרן" for "ד\"ר אבנר שטרן")
+/// is one tag with the title, so the name comes back once: not "ד\"ר ד\"ר אבנר שטרן".
+#[test]
+fn a_titled_identity_restores_without_a_doubled_title() {
+    let ids = identities();
+    let case_ids: Vec<Identity> = ids.iter().filter(|i| i.case_id == CASE).cloned().collect();
+    let ctx = ctx_for(&ids, &[], CASE);
+    for (text, want) in [
+        ("ד\"ר שטרן בדק.", "ד\"ר אבנר שטרן בדק."),
+        ("ד״ר שטרן בדק.", "ד\"ר אבנר שטרן בדק."),
+        ("דר' שטרן בדק.", "ד\"ר אבנר שטרן בדק."),
+        ("ד\"ר אבנר שטרן בדק.", "ד\"ר אבנר שטרן בדק."),
+        ("אבנר שטרן בדק.", "ד\"ר אבנר שטרן בדק."),
+        ("הגיע אל ד\"ר שטרן.", "הגיע אל ד\"ר אבנר שטרן."),
+    ] {
+        let out = filter(text, &ctx).unwrap();
+        let back = dv_privacy::restore::restore(&out.tagged, &case_ids, None, &[]);
+        assert_eq!(back, want, "{text:?} → {:?}", out.tagged);
+        assert!(
+            gate_with(&out.tagged, &ids, CASE).cleared,
+            "{:?}",
+            out.tagged
+        );
+    }
+}
+
+/// A place of two consonants declared in Hebrew ("כפר כנא") is found in Arabic script too.
+#[test]
+fn a_short_place_name_declared_in_hebrew_is_hidden_in_arabic_script() {
+    let ids = vec![
+        id("ar", Role::Child, "[ילד]", "מוחמד", &[]),
+        id("ar", Role::Town, "[יישוב]", "כפר כנא", &[]),
+    ];
+    let ctx = ctx_for(&ids, &[], "ar");
+    // "كفر" is a generic place word, like "כפר", and stays; the name is hidden.
+    for text in ["يسكن في كفر كنا.", "كفر كنا", "في كنا"] {
+        let out = filter(text, &ctx).unwrap();
+        assert!(!out.tagged.contains("كنا"), "{text:?} → {:?}", out.tagged);
+        assert!(
+            out.tagged.contains("[יישוב]"),
+            "{text:?} → {:?}",
+            out.tagged
+        );
+    }
+    // Two consonants match a token of three letters or more only: "كن" is a word.
+    let out = filter("كن هادئا.", &ctx).unwrap();
+    assert_eq!(out.tagged, "كن هادئا.");
+    // The generic word for a kindergarten or a town is never a name on its own.
+    for text in ["ذهب إلى الروضة.", "في المدرسة كل يوم.", "قرية صغيرة."]
+    {
+        let out = filter(text, &ctx).unwrap();
+        assert_eq!(out.tagged, text, "a generic Arabic word was hidden");
+    }
 }
