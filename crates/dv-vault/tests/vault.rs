@@ -1626,3 +1626,16 @@ fn the_mask_book_is_sealed_keeps_each_tag_and_goes_with_the_case() {
     vault.delete_case(&case).unwrap();
     assert!(matches!(vault.masks(&case), Err(VaultError::NotFound)));
 }
+
+/// The password's key derivation wipes its working memory (the `zeroize` feature of argon2):
+/// without it, the blocks and the initial hash stay in freed memory after every opening, and
+/// a memory dump lets a guess be checked without the memory-hard work.
+#[test]
+fn the_key_derivation_is_built_to_wipe_its_memory() {
+    let manifest = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).unwrap();
+    let argon2 = manifest
+        .lines()
+        .find(|l| l.starts_with("argon2 ="))
+        .expect("the argon2 dependency");
+    assert!(argon2.contains("\"zeroize\""), "{argon2}");
+}
