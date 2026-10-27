@@ -2,13 +2,14 @@
 // the window of a new version (now, later, a download that fails, a computer that does not
 // install by itself), the chip in the top bar, and the daily check that she can turn off.
 // The versions and notes are invented.
-import { configure, render, screen, waitFor, within } from "@testing-library/react";
+import { configure, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import type { UpdateView } from "../ipc/client";
 import { a11yViolations } from "../test/a11y";
 import { appApi, Host, serve, type Override } from "../test/host";
-import { checkNow, LockScreenUpdate, UpdateChip, UpdateDialog, UpdateSettings } from "./Update";
+import { checkNow, LockScreenUpdate, UpdateChip, UpdateDialog, UpdateSettings, versionAtLeast } from "./Update";
+import { forgetHold, useHoldUnsaved } from "./Unsaved";
 
 configure({ asyncUtilTimeout: 5000 });
 
@@ -20,7 +21,14 @@ beforeEach(async () => {
   await checkNow();
   localStorage.removeItem("dv.updateCheckedAt");
   localStorage.removeItem("dv.updateAuto");
+  localStorage.removeItem("dv.updateFound");
 });
+
+/** The module as it starts after a reload (at a lock) or a restart: with what is in storage. */
+async function freshModule() {
+  vi.resetModules();
+  return import("./Update");
+}
 
 async function show(node: React.ReactNode, over?: Override) {
   const served = await serve(over);
@@ -96,6 +104,56 @@ describe("the daily check and the chip", () => {
     expect(view.container).toBeEmptyDOMElement();
   });
 
+  it("a version found is remembered: after a reload the chip is back without a new check, and the installer is fetched again (regression)", async () => {
+    await show(<UpdateChip />, (cmd) => (cmd === "check_update" ? UPDATE : undefined));
+    await screen.findByRole("button", { name: /יש גרסה חדשה|גרסה חדשה מוכנה/ });
+    expect(JSON.parse(localStorage.getItem("dv.updateFound") ?? "null")).toEqual(UPDATE);
+    localStorage.setItem("dv.updateCheckedAt", String(Date.now()));
+    const fresh = await freshModule();
+    const { calls } = await show(<fresh.UpdateChip />, (cmd) => (cmd === "check_update" ? UPDATE : cmd === "ping" ? { ipc_version: 1, core_version: "0.9.2", build_commit: "t", fips_active: false, platform: "windows", slowest_key_check_ms: 0, key_check_wait_ms: 0 } : undefined));
+    expect(await screen.findByRole("button", { name: /גרסה חדשה מוכנה/ })).toBeInTheDocument();
+    expect(calls.some((c) => c.cmd === "check_update")).toBe(false);
+    expect(calls.filter((c) => c.cmd === "prepare_update")).toHaveLength(1);
+    vi.resetModules();
+  });
+
+  it("a remembered version that is already running (after the install) is forgotten (regression)", async () => {
+    localStorage.setItem("dv.updateFound", JSON.stringify(UPDATE));
+    localStorage.setItem("dv.updateCheckedAt", String(Date.now()));
+    const fresh = await freshModule();
+    const { calls, view } = await show(<fresh.UpdateChip />, (cmd) => (cmd === "ping" ? { ipc_version: 1, core_version: "0.9.3", build_commit: "t", fips_active: false, platform: "windows", slowest_key_check_ms: 0, key_check_wait_ms: 0 } : undefined));
+    await waitFor(() => expect(calls.some((c) => c.cmd === "ping")).toBe(true));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(view.container).toBeEmptyDOMElement();
+    expect(localStorage.getItem("dv.updateFound")).toBeNull();
+    expect(calls.some((c) => c.cmd === "prepare_update")).toBe(false);
+    vi.resetModules();
+  });
+
+  it("a check that finds nothing newer forgets the remembered version; a broken entry is dropped", async () => {
+    localStorage.setItem("dv.updateFound", '{"version": 7}');
+    const fresh = await freshModule();
+    const { view } = await show(<fresh.UpdateChip />, (cmd) => (cmd === "check_update" ? null : undefined));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(view.container).toBeEmptyDOMElement();
+    expect(localStorage.getItem("dv.updateFound")).toBeNull();
+    vi.resetModules();
+    mockIPC((cmd) => (cmd === "check_update" ? UPDATE : undefined));
+    await checkNow();
+    expect(localStorage.getItem("dv.updateFound")).not.toBeNull();
+    mockIPC((cmd) => (cmd === "check_update" ? null : undefined));
+    await checkNow();
+    expect(localStorage.getItem("dv.updateFound")).toBeNull();
+  });
+
+  it("compares versions by number", () => {
+    expect(versionAtLeast("0.9.3", "0.9.3")).toBe(true);
+    expect(versionAtLeast("0.9.10", "0.9.3")).toBe(true);
+    expect(versionAtLeast("0.9.2", "0.9.3")).toBe(false);
+    expect(versionAtLeast("1.0.0-beta", "0.9.3")).toBe(true);
+    expect(versionAtLeast("v0.10.0", "0.9.3")).toBe(true);
+  });
+
   it("on the lock screen, only a version that installs here is offered", async () => {
     const { view } = await show(<LockScreenUpdate />, (cmd) => (cmd === "check_update" ? { ...UPDATE, can_install: false } : undefined));
     await new Promise((r) => setTimeout(r, 50));
@@ -121,6 +179,18 @@ describe("the window of a new version", () => {
     expect(within(dialog).queryByRole("button", { name: "סגירה" })).toBeNull();
     await user.keyboard("{Escape}");
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("what she is typing reaches the core before the install starts, as before a lock (regression)", async () => {
+    const { user, calls } = await show(<UpdateDialog update={UPDATE} onClose={vi.fn()} />, (cmd) => (cmd === "install_update" ? new Promise(() => undefined) : undefined));
+    const held = renderHook(() => useHoldUnsaved("c1", "פסקה משלי", "טקסט בדוי באמצע הקלדה"));
+    await user.click(screen.getByRole("button", { name: "לעדכן עכשיו" }));
+    await waitFor(() => expect(calls.some((c) => c.cmd === "install_update")).toBe(true));
+    const cmds = calls.map((c) => c.cmd);
+    expect(cmds.indexOf("hold_unsaved")).toBeGreaterThanOrEqual(0);
+    expect(cmds.indexOf("hold_unsaved")).toBeLessThan(cmds.indexOf("install_update"));
+    held.unmount();
+    forgetHold();
   });
 
   it("a download that fails says why, and she can try again or leave it for later", async () => {

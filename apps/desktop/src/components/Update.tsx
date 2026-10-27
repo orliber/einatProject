@@ -5,6 +5,7 @@ import { ipc, type UpdateView } from "../ipc/client";
 import { Dialog, ErrorLine, Spinner, SparkIcon } from "./ui";
 import { Switch } from "./Switch";
 import { timed, WaitLine } from "./Progress";
+import { holdNow } from "./Unsaved";
 import "./Update.css";
 
 /**
@@ -16,11 +17,66 @@ import "./Update.css";
 
 const CHECKED_KEY = "dv.updateCheckedAt";
 const AUTO_KEY = "dv.updateAuto";
+/** The version found, as the releases page described it (nothing from the vault): the chip
+ *  comes back after the reload at a lock and after a restart, until a check finds nothing
+ *  newer or the running version has caught up. */
+const FOUND_KEY = "dv.updateFound";
 const DAY_MS = 86_400_000;
 /** While the program stays open for days, the daily check still comes around. */
 const LOOK_AGAIN_MS = 3_600_000;
 
-let found: UpdateView | null = null;
+function read(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function write(key: string, value: string | null) {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    // Private storage off: checked again next time.
+  }
+}
+
+/** The stored version, only when it has the shape the core gives (a stale or edited entry is dropped). */
+function restoreFound(): UpdateView | null {
+  const raw = read(FOUND_KEY);
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as Partial<UpdateView> | null;
+    if (
+      v && typeof v === "object" && typeof v.version === "string" && typeof v.current === "string" &&
+      typeof v.published === "string" && typeof v.size_mb === "number" && typeof v.can_install === "boolean" &&
+      Array.isArray(v.notes) && v.notes.every((n) => typeof n === "string")
+    ) {
+      return { version: v.version, current: v.current, published: v.published, notes: v.notes, size_mb: v.size_mb, can_install: v.can_install };
+    }
+  } catch {
+    // Not what was written: forgotten.
+  }
+  write(FOUND_KEY, null);
+  return null;
+}
+
+/** "0.9.3" against "0.9.10", by number; what follows a dash is ignored. */
+export function versionAtLeast(running: string, wanted: string): boolean {
+  const parts = (v: string) => v.replace(/^v/, "").split("-")[0]?.split(".").map((n) => Number.parseInt(n, 10) || 0) ?? [];
+  const a = parts(running);
+  const b = parts(wanted);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    if (x !== y) return x > y;
+  }
+  return true;
+}
+
+let found: UpdateView | null = restoreFound();
+/** A version remembered from before the reload: the running version is asked once, in case it is already this one. */
+let unverified = found !== null;
 /** The installer of `found` is on disk, verified, waiting for her click. */
 let ready = false;
 let preparing = false;
@@ -31,26 +87,13 @@ function notify() {
 function setFound(v: UpdateView | null) {
   if (v?.version !== found?.version) ready = false;
   found = v;
+  unverified = false;
+  write(FOUND_KEY, v ? JSON.stringify(v) : null);
   notify();
 }
 function subscribe(l: () => void) {
   listeners.add(l);
   return () => listeners.delete(l);
-}
-
-function read(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-function write(key: string, value: string) {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // Private storage off: checked again next time.
-  }
 }
 
 export function autoCheckOn(): boolean {
@@ -77,9 +120,29 @@ function prepareInBackground() {
 export async function checkNow(): Promise<UpdateView | null> {
   const v = await ipc.checkUpdate();
   write(CHECKED_KEY, String(Date.now()));
-  setFound(v);
+  // Nothing newer than what runs: nothing to offer (and nothing remembered).
+  const newer = v && !versionAtLeast(v.current, v.version) ? v : null;
+  setFound(newer);
   prepareInBackground();
-  return v;
+  return newer;
+}
+
+/** A version remembered from before the reload is dropped when this is already it (the update
+ *  was installed, or she installed it by hand); otherwise its installer is fetched again. */
+async function verifyRemembered(): Promise<void> {
+  if (!unverified || !found) return;
+  unverified = false;
+  const remembered = found;
+  try {
+    const { core_version } = await ipc.ping();
+    if (found === remembered && versionAtLeast(core_version, remembered.version)) {
+      setFound(null);
+      return;
+    }
+  } catch {
+    // The version could not be asked: the remembered one is offered as it was.
+  }
+  prepareInBackground();
 }
 
 /**
@@ -90,6 +153,11 @@ export async function checkNow(): Promise<UpdateView | null> {
 export function useDailyUpdateCheck() {
   useEffect(() => {
     const look = () => {
+      if (unverified) {
+        // First the remembered version; the daily check follows once that is settled.
+        void verifyRemembered().then(look);
+        return;
+      }
       if (!autoCheckOn()) return;
       if (found) {
         prepareInBackground();
@@ -142,6 +210,8 @@ export function UpdateDialog({ update, onClose }: { update: UpdateView; onClose:
     setBusy(true);
     setError(null);
     try {
+      // What she was typing reaches the core first, as before a lock by hand: the install locks.
+      await holdNow();
       await ipc.installUpdate();
     } catch (e) {
       setError(fail(e as never));
