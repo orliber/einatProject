@@ -31,6 +31,27 @@ const INTERNAL_SETTINGS: &[&str] = &[
     REVIEWED_KEY,
 ];
 
+/// Her words for a reason the vault's integrity check gives. The vault keeps the reason in
+/// English, in the log; she sees it in Hebrew, on the cases screen and in the activity log.
+pub(crate) fn integrity_reason_he(reason: &str) -> String {
+    let he = match reason {
+        "vault header was modified" => "קובץ הפרטים של הכספת שונה מחוץ לתוכנה",
+        "log does not match the header" => "יומן הפעולות לא מתאים לפרטי הכספת",
+        "log was truncated or rolled back" => {
+            "חסרות רשומות בסוף יומן הפעולות, או שהוחזר יומן ישן יותר"
+        }
+        r if r.starts_with("entry ") && r.ends_with(" is missing") => "חסרה רשומה ביומן הפעולות",
+        r if r.starts_with("entry ") && r.ends_with(" is not linked to the previous one") => {
+            "רשומה ביומן הפעולות לא מחוברת לרשומה שלפניה"
+        }
+        r if r.starts_with("entry ") && r.ends_with(" was modified") => "רשומה ביומן הפעולות שונתה",
+        r if r.starts_with("recycle bin: ") => "תיק בסל המחזור לא נמחק בזמן, ויימחק בפתיחה הבאה",
+        // Already hers (the older copy of the vault, said in Hebrew where it is found).
+        other => return other.to_owned(),
+    };
+    he.to_owned()
+}
+
 /// `(kind, text, warn)`, or `None` for an entry that only repeats another one.
 fn describe(
     event: &str,
@@ -249,7 +270,10 @@ fn describe(
         "settings_changed" => ("security", "הגדרה עודכנה".to_owned(), false),
         "integrity_warning" => (
             "security",
-            format!("בדיקת השלמות מצאה חריגה: {}", text("reason")),
+            format!(
+                "בדיקת השלמות מצאה חריגה: {}",
+                integrity_reason_he(text("reason"))
+            ),
             true,
         ),
         "audit_reviewed" => ("security", "היומן נבדק".to_owned(), false),
@@ -340,6 +364,27 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every reason the vault's integrity check gives (dv-vault `audit::verify` and the header
+    /// check) is said to her in Hebrew.
+    #[test]
+    fn every_integrity_reason_reads_as_hebrew() {
+        for reason in [
+            "vault header was modified",
+            "log does not match the header",
+            "log was truncated or rolled back",
+            "entry 7 is missing",
+            "entry 7 is not linked to the previous one",
+            "entry 7 was modified",
+            "recycle bin: disk full",
+        ] {
+            let he = integrity_reason_he(reason);
+            assert!(
+                !he.bytes().any(|b| b.is_ascii_alphanumeric()),
+                "{reason} → {he}"
+            );
+        }
+    }
 
     #[test]
     fn every_known_event_reads_as_hebrew() {

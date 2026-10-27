@@ -70,6 +70,8 @@ pub(crate) async fn install_update(
     if !dv_core::update::still_intact(&file) {
         return Err(internal("the installer changed after it was checked"));
     }
+    // Never an older version, nor this one again (D-104).
+    dv_core::update::refuse_downgrade(&file).map_err(|e| e.to_ui())?;
     state.clipboard.clear_now();
     with_core(&state, |c| {
         c.lock();

@@ -1084,6 +1084,49 @@ fn an_older_copy_of_the_vault_put_back_is_pointed_out_once() {
     assert_eq!(core.status().integrity_warning, None);
 }
 
+/// A header changed from outside: she is told in Hebrew, at every opening, also after a new
+/// backup (it is never signed again, D-104), and the activity log says it in Hebrew too.
+#[test]
+fn a_changed_header_is_said_in_her_words_and_stays() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut core = Core::for_tests(dir.path(), None);
+    core.create_vault(PASSWORD).unwrap();
+    core.lock();
+    let path = dir.path().join("vault.header");
+    let mut header: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    header["created_at"] = json!(1);
+    std::fs::write(&path, serde_json::to_vec_pretty(&header).unwrap()).unwrap();
+
+    let in_hebrew = |w: &str| {
+        assert!(!w.bytes().any(|b| b.is_ascii_alphabetic()), "{w}");
+        assert!(w.contains("שונה מחוץ לתוכנה"), "{w}");
+    };
+    core.unlock(PASSWORD).unwrap();
+    let warning = core
+        .status()
+        .integrity_warning
+        .expect("the change is pointed out");
+    in_hebrew(&warning);
+    assert!(warning.ends_with("כדאי לספר לאור."), "{warning}");
+    let drive = tempfile::tempdir().unwrap();
+    core.write_backup(&drive.path().join("b")).unwrap();
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    in_hebrew(
+        &core
+            .status()
+            .integrity_warning
+            .expect("still, after a new backup"),
+    );
+    let page = core.activity(None).unwrap();
+    let said = page
+        .entries
+        .iter()
+        .find(|e| e.event == "integrity_warning")
+        .expect("in the activity log");
+    in_hebrew(&said.text);
+}
+
 // ------------------------------------------------------------ the activity log
 
 /// A made-up name, different on every run, so no fixed list can hide a leak.

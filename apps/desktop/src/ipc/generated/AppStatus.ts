@@ -51,4 +51,10 @@ screen_protection: boolean,
  * Said once after opening, when there is something to say: wrong passwords typed since
  * the last opening (L4).
  */
-since_last: string | null, };
+since_last: string | null, 
+/**
+ * While the vault is locked: a newer version of the program opened it, and this one does
+ * not (D-104). The version, or empty when it cannot be shown. The lock screen says to
+ * install the new version instead of asking for the password.
+ */
+newer_version?: string, };

@@ -5,7 +5,7 @@ import { ipc, type AppStatus } from "../ipc/client";
 import { CoreStatus } from "../components/CoreStatus";
 import { ErrorLine, LockIcon } from "../components/ui";
 import { GoogleRecoverForm } from "../components/GoogleRecovery";
-import { LockScreenUpdate } from "../components/Update";
+import { LockScreenUpdate, NewerVaultNotice } from "../components/Update";
 import { timed, WaitLine } from "../components/Progress";
 import "./LockScreen.css";
 
@@ -27,6 +27,9 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
   const [broken, setBroken] = useState(false);
   // The password was refused because this computer is not the one it was set on.
   const [elsewhere, setElsewhere] = useState(false);
+  // A newer version opened the vault (D-104): no password, no kit, the new version instead.
+  const [newerFound, setNewerFound] = useState<string | null>(null);
+  const newer = status?.newer_version ?? newerFound;
   const [version, setVersion] = useState<string | null>(null);
   useEffect(() => {
     ipc.ping().then((p) => setVersion(p.core_version)).catch(() => setVersion(null));
@@ -81,6 +84,8 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
         setSecret("");
         setError(e.message ?? "הסיסמה פותחת את הכספת רק במחשב שבו היא נקבעה.");
         setElsewhere(true);
+      } else if (e.code === "newer_version") {
+        setNewerFound("");
       } else if (e.code === "wrong_secret" && mode === "recovery") {
         setError("ערכת השחזור לא נכונה. כדאי לבדוק שגיאות הקלדה.");
       } else {
@@ -104,7 +109,9 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
             <p>{he.lock.lockedAfterIdle(status?.lock_minutes ?? 10)}</p>
           )}
         </div>
-        {mode === "google" ? (
+        {newer !== null ? (
+          <NewerVaultNotice version={newer} />
+        ) : mode === "google" ? (
           <>
             <GoogleRecoverForm onUnlocked={onUnlocked} onBack={() => show("password")} />
             <KitLink onKit={() => show("recovery")} />

@@ -326,6 +326,7 @@ impl Core {
                 "הכספת כבר פתוחה. את הסיסמה אפשר להחליף בהגדרות, בלי גוגל.",
             ));
         }
+        self.refuse_newer_vault()?;
         let computer = keys.load(&self.dir)?;
         // The new password's key here first: if it cannot be made, nothing is opened.
         let (here, aside) = self.new_password_key()?;
