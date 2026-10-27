@@ -2955,6 +2955,26 @@ fn analyze(
     for hit in
         patterns::find(&blanked, ctx.today).map_err(|e| PrivacyError::Internal(e.to_string()))?
     {
+        // A month the name rules took for a name ("1 יוני 2015", "ביולי 2020") is the date's
+        // (D-128): the whole date is hidden instead, so neither the day nor the year is left
+        // beside it. Only when nothing else is in the way, so the name is never dropped
+        // without the date that hides it.
+        let month_suspect = |s: &SuspectSpan| {
+            s.known.is_none()
+                && hit.start <= s.start
+                && s.end <= hit.end
+                && span_text(text, s.start, s.end)
+                    .is_ok_and(|w| patterns::month_word(&normalize(w)).is_some())
+        };
+        if hit.kind == patterns::PatternKind::Date
+            && !overlaps(hit.start, hit.end, &reps, &[])
+            && suspects
+                .iter()
+                .filter(|s| hit.start < s.end && s.start < hit.end)
+                .all(month_suspect)
+        {
+            suspects.retain(|s| !month_suspect(s));
+        }
         if !overlaps(hit.start, hit.end, &reps, &suspects) {
             reps.push(Replacement {
                 start: hit.start,

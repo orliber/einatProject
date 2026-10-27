@@ -1462,3 +1462,179 @@ fn a_kept_words_tag_planted_anywhere_never_brings_her_words_out() {
         );
     }
 }
+
+/// Every way a month is named, for the date tests below (D-128).
+const HE_MONTH_NAMES: &[&str] = &[
+    "ינואר",
+    "פברואר",
+    "מרץ",
+    "מרס",
+    "אפריל",
+    "מאי",
+    "יוני",
+    "יולי",
+    "אוגוסט",
+    "ספטמבר",
+    "אוקטובר",
+    "נובמבר",
+    "דצמבר",
+];
+const EN_MONTH_NAMES: &[&str] = &[
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Sept",
+    "Oct",
+    "Nov",
+    "Dec",
+];
+
+/// A month's name as a word of `text`, alone or with a Hebrew prefix ("במרץ", "לינואר").
+fn month_name_in(text: &str) -> Option<String> {
+    dv_privacy::text::tokenize(text).into_iter().find_map(|t| {
+        let named = dv_privacy::text::prefix_splits(&t.norm)
+            .iter()
+            .any(|(_, w)| {
+                HE_MONTH_NAMES.iter().any(|m| normalize(m) == *w)
+                    || EN_MONTH_NAMES.iter().any(|m| normalize(m) == *w)
+            });
+        named.then_some(t.norm)
+    })
+}
+
+/// The filter's outcome for one date phrase inside `context`: one generalized date, no month
+/// name and no year left, and the gate clears it (no dead end).
+fn check_one_date(context: &str, phrase: &str, year: &str) -> Result<(), String> {
+    let ids = identities();
+    let text = context.replace("{}", phrase);
+    let out = filter(&text, &ctx_for(&ids, &[], CASE)).unwrap();
+    if let Some(m) = month_name_in(&out.tagged) {
+        return Err(format!(
+            "{text:?} → {:?}: the month {m} was left",
+            out.tagged
+        ));
+    }
+    if out.tagged.contains(year) {
+        return Err(format!("{text:?} → {:?}: the year was left", out.tagged));
+    }
+    if !gate_with(&out.tagged, &ids, CASE).cleared {
+        return Err(format!("{text:?} → {:?}: the gate refused it", out.tagged));
+    }
+    let o = send(&text, CASE);
+    if !o.leaked.is_empty() {
+        return Err(format!("{text:?} leaked {:?}", o.leaked));
+    }
+    Ok(())
+}
+
+/// A date with a month name comes out as one generalized date, the way a numeric one does,
+/// with nothing of it beside it. "March 12.3.2020" went out as "March לפני כ-7 שנים" and the
+/// gate refused it: Einat could not send the paragraph and did not know why (D-128).
+#[test]
+fn dates_with_a_month_name_come_out_whole_and_generalized() {
+    for (phrase, year) in [
+        ("12 במרץ 2020", "2020"),
+        ("ב-12 במרץ 2020", "2020"),
+        ("במרץ 2020", "2020"),
+        ("March 12.3.2020", "2020"),
+        ("12.3.2020 March", "2020"),
+        ("12 March 2020", "2020"),
+        ("Mar. 2020", "2020"),
+        ("מרץ 20", "20"),
+        ("12 במרץ 20", "20"),
+        ("12 במרץ, 2020", "2020"),
+        ("12.3.2020 (מרץ)", "2020"),
+        ("March 3, 2025", "2025"),
+        ("March 3rd, 2025", "2025"),
+        ("on 12th March 2020", "2020"),
+        ("2020 March", "2020"),
+        ("בשנת 2020 במרץ", "2020"),
+        ("12/מרץ/2020", "2020"),
+        ("12-במרץ-2020", "2020"),
+        ("ינואר-2020", "2020"),
+        ("Jan '20", "20"),
+        ("מרץ ’20", "20"),
+        ("SEPT 2021", "2021"),
+        ("3 במרס 2025", "2025"),
+        ("31 בפברואר 2020", "2020"),
+    ] {
+        if let Err(e) = check_one_date("נבדק {} בבוקר", phrase, year) {
+            panic!("{e}");
+        }
+    }
+    // A month alone, in a word that is also an everyday one, stays ("energetically"). One
+    // that is only a month ("בינואר") is hidden as before.
+    let ids = identities();
+    for text in ["נבדק במרץ בבוקר", "עבד במרץ רב", "ילד מלא מרץ ושמחה"]
+    {
+        assert_eq!(
+            filter(text, &ctx_for(&ids, &[], CASE)).unwrap().tagged,
+            text
+        );
+    }
+    // A range keeps both its ends, each generalized.
+    let out = filter("בין מרץ 2020 למאי 2021", &ctx_for(&ids, &[], CASE)).unwrap();
+    assert!(month_name_in(&out.tagged).is_none(), "{}", out.tagged);
+    assert_eq!(out.tagged.matches("לפני").count(), 2, "{}", out.tagged);
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 300, ..ProptestConfig::default() })]
+
+    /// Month names × separators × orders × contexts (D-128): one generalized date, no month
+    /// name and no year beside it, cleared by the gate, nothing leaked.
+    #[test]
+    fn every_month_name_with_any_separator_and_order_is_one_generalized_date(
+        hebrew in any::<bool>(),
+        month in 0usize..64,
+        prefix in 0usize..4,
+        dot in any::<bool>(),
+        order in 0usize..6,
+        sep in 0usize..6,
+        day in 1u32..=28,
+        year in 2015u32..=2025,
+        short in any::<bool>(),
+        context in 0usize..4,
+    ) {
+        let seps = [" ", "-", "/", ".", ", ", " - "];
+        let s = seps[sep];
+        let m = if hebrew {
+            let name = HE_MONTH_NAMES[month % HE_MONTH_NAMES.len()];
+            format!("{}{name}", ["", "ב", "ל", "ב-"][prefix])
+        } else {
+            let name = EN_MONTH_NAMES[month % EN_MONTH_NAMES.len()];
+            let dot = if dot && name.len() <= 4 { "." } else { "" };
+            format!("{name}{dot}")
+        };
+        let y = if short { format!("{:02}", year % 100) } else { year.to_string() };
+        let d = day.to_string();
+        let phrase = match order {
+            0 => [d.as_str(), &m, &y].join(s),
+            1 => [m.as_str(), &y].join(s),
+            2 => [y.as_str(), &m].join(s),
+            3 => [m.as_str(), &d, &y].join(s),
+            4 => format!("{d}.{}.{y}{s}{m}", (month % 12) + 1),
+            _ => format!("{m}{s}{d}.{}.{y}", (month % 12) + 1),
+        };
+        let contexts = ["נבדק {} בבוקר", "{}", "בתאריך {}, הגיע עם אמו.", "(נבדק {})"];
+        let r = check_one_date(contexts[context], &phrase, &y);
+        prop_assert!(r.is_ok(), "{}", r.unwrap_err());
+    }
+}
