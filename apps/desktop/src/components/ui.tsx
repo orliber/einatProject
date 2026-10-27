@@ -102,7 +102,7 @@ const openDialogs: HTMLElement[] = [];
 function topDialog(): HTMLElement | undefined {
   for (let i = openDialogs.length - 1; i >= 0; i--) {
     const d = openDialogs[i];
-    if (!openDialogs.some((o) => o !== d && d.contains(o))) return d;
+    if (d && !openDialogs.some((o) => o !== d && d.contains(o))) return d;
   }
   return undefined;
 }
@@ -126,8 +126,8 @@ function trapTab(frame: HTMLElement, e: KeyboardEvent) {
     frame.focus();
     return;
   }
-  const first = items[0];
-  const last = items[items.length - 1];
+  const first = items[0] as HTMLElement;
+  const last = items[items.length - 1] as HTMLElement;
   const active = document.activeElement;
   const inside = active instanceof HTMLElement && frame.contains(active) && active !== frame;
   if (e.shiftKey) {
