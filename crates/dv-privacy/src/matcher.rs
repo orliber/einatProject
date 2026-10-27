@@ -60,7 +60,11 @@ impl<T: Clone> PhraseIndex<T> {
             // end of the last word)
             let mut best: Option<(usize, usize, usize, T, usize)> = None;
             for (prefix, head) in prefix_splits(&tok.norm) {
-                let opened = quote_opened(text, tok, prefix);
+                // A declared name or a place is tried without a final geresh even with no
+                // quote before it: "נועם' הלך" went out whole (review of D-130). Not "טל'"
+                // before a number, the phone it abbreviates ("טל' 03-…").
+                let opened =
+                    quote_opened(text, tok, prefix) || !phone_abbreviation(text, tok, &head);
                 let (bare, quoted) = strip_quote_tail(&head, opened);
                 let keys = std::iter::once((head.as_str(), false))
                     .chain((quoted > 0).then_some((bare, true)));
@@ -150,6 +154,29 @@ pub(crate) fn strip_quote_tail(norm: &str, opened: bool) -> (&str, usize) {
         Some(bare) if opened => (bare, 1),
         _ => (norm, 0),
     }
+}
+
+/// "טל'" before a number (or a phone already hidden, a tag, blanked to `x` for reading)
+/// abbreviates "טלפון": "טל' 03-…", "טל': [טלפון]", and with a word or two and a colon
+/// before the number ("טל' הגן: 08-…", "טל' נייד: …"). Text after it that cannot be
+/// read (never expected) is no number: the word is then tried as a name.
+fn phone_abbreviation(text: &str, tok: &Token, head: &str) -> bool {
+    let number = |s: &str| {
+        s.trim_start_matches(|c: char| c.is_whitespace() || c == ':')
+            .starts_with(|c: char| c.is_ascii_digit() || matches!(c, '+' | '(' | '[' | 'x'))
+    };
+    head == "טל'"
+        && text.get(tok.end..).is_some_and(|rest| {
+            let line = rest.split('\n').next().unwrap_or(rest);
+            number(line)
+                || line.split_once(':').is_some_and(|(words, after)| {
+                    words.split_whitespace().count() <= 2
+                        && words
+                            .chars()
+                            .all(|c| c.is_whitespace() || c.is_alphabetic())
+                        && number(after)
+                })
+        })
 }
 
 /// A quote opens right before the word: before the token, or between its prefix letters and

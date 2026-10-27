@@ -23,3 +23,4 @@ cc d436bdf49b64f89a2797af1d703b25f53bd3c01a260669deec96a6f4b8cea51e # shrinks to
 cc 953d06e9f198f10d32c740a3384263c47ec2ab535859fad32c5b9f23972c51fd # shrinks to pieces = [(68, 0, 31, false), (32, 0, 51, false), (2, 0, 31, false)], idn = 10000000
 cc f98a36056ffe9ff344f706349f7cc3cb82456d45eef1bc068b22abdb1a6f960d # shrinks to pieces = [(142, 0, 0, false), (38, 0, 33, true), (140, 0, 52, true), (0, 0, 0, false)], idn = 10000000
 cc 4d4ef755279276ae3efd6d5efaadb85a3b6f2ff534929b4c7182a9acc1da8873 # shrinks to pieces = [(154, 19, 0, false), (178, 2, 0, true), (214, 43, 0, false), (83, 0, 4, true), (70, 62, 0, true)], idn = 10000000
+cc 87f4479dc1fe74808fe2e41a6a91154c140ad38631372029c507a2d96400afe9 # shrinks to pieces = [(68, 0, 9, false), (152, 0, 16, false), (166, 19, 0, false), (92, 0, 30, false)], idn = 10000000

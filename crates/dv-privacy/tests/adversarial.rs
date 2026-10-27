@@ -959,6 +959,19 @@ fn filtering_tagged_text_again_keeps_every_word() {
             again.auto_hidden
         );
     }
+    // A kindergarten's name never takes part of a tag after it: "גן_1] מרץ" was read as
+    // the first of March, and the gate refused it (D-130).
+    for tagged in ["גן ע\"ש [טלפון_1] מרץ", "בגן של [מספר_זהות_1] מרץ"]
+    {
+        let again = filter(tagged, &ctx).unwrap();
+        let tag = &tagged[tagged.find('[').unwrap()..=tagged.find(']').unwrap()];
+        assert!(again.tagged.contains(tag), "{tagged} → {}", again.tagged);
+        assert!(
+            gate_with(&again.tagged, &ids, CASE).cleared,
+            "{tagged} → {}",
+            again.tagged
+        );
+    }
 }
 
 /// Stage 3: a new name is hidden under a tag that says who it is, keeps that tag in every
@@ -1381,9 +1394,41 @@ fn numbers_split_by_any_dash_or_space_never_go_out() {
         "ת\"ז: 0 00 000 018",
         "ת.ז 0.0.0.0.0.0.0.1.8",
         "ת.ז 0000\u{301}00018",
+        // Fourth review of D-128: two or three marks between the groups, the label after
+        // the number, and the labels "תז", "מ.ז" and "id".
+        "000 - 000 - 018 נמסר",
+        "000  000  018 נמסר",
+        "000, 000, 018 נמסר",
+        "ת.ז 000 - 000 - 018",
+        "ת.ז 00  00  00  01  8",
+        "ת.ז 000, 000, 018",
+        "00 00 00 01 8 ת.ז",
+        "000 000 01 8 (מספר זהות)",
+        "תז 00 00 00 01 8",
+        "מ.ז. 00 00 00 01 8",
+        "id 00 00 00 01 8",
+        "ID: 00 00 00 01 8",
     ] {
         cases.push((text.to_owned(), "000000018"));
     }
+    // A phone with two or three marks between its groups (review of D-130).
+    // Built here, so no phone is written out in the source (the pre-commit scan).
+    let (a, b) = ("123", "4567");
+    for text in [
+        format!("טלפון 050 - {a} - {b}"),
+        format!("050  {a}  {b}"),
+        format!("052 - {a} - 45 - 67"),
+        format!("נייד: 050 - {a}4 - 567"),
+        format!("טל' 03 - {a} - {b}"),
+        format!("+972 - 50 - {a} - {b}"),
+        format!("(050) - {a} - {b}"),
+    ] {
+        cases.push((text, "1234567"));
+    }
+    // Not a date the date rule takes, so still the ID.
+    cases.push(("ת.ז 0.0.0000 018".to_owned(), "000000018"));
+    // The label after it, with a date after the label.
+    cases.push(("000 000 01 8 ת.ז. 12.3.2020".to_owned(), "000000018"));
     for (text, secret) in cases {
         let out = filter(&text, &ctx_for(&ids, &[], CASE)).unwrap();
         assert!(
@@ -1404,9 +1449,83 @@ fn numbers_split_by_any_dash_or_space_never_go_out() {
         "ציונים: 112,104,106",
         "טווח 100–115",
         "ציונים 100–112–125",
+        "תזונה: 112 104 106",
+        "ציונים 100 - 112 - 125",
+        // A label after the row that is not its own (review of D-130).
+        "ציונים 100 112 125. ת.ז לא נמסרה",
+        "ציונים 100 112 125 (ת.ז בתיק)",
+        "ציונים 08 10 12 14 9",
     ] {
         let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
         assert_eq!(out.tagged, text);
+    }
+    // A label after a row of scores is the next number's, also once that number is a tag;
+    // and a date and an hour after a label are a date and an hour (fourth review of D-128).
+    for (text, out) in [
+        (
+            "ציונים 100 112 125, ת.ז 000000018",
+            "ציונים 100 112 125, ת.ז [ת.ז.]",
+        ),
+        (
+            "ת.ז בתיק. נבדק 12.3.2020 10:15",
+            "ת.ז בתיק. נבדק לפני כ-7 שנים 10:15",
+        ),
+        (
+            "ת.ז בתיק. נבדק 12.3.20 10:15",
+            "ת.ז בתיק. נבדק לפני כ-7 שנים 10:15",
+        ),
+        (
+            "ציונים 100 112 125, ת.ז של הילד 000000018",
+            "ציונים 100 112 125, ת.ז של הילד [ת.ז.]",
+        ),
+    ] {
+        let filtered = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert_eq!(filtered.tagged, out);
+        assert!(gate_with(&filtered.tagged, &ids, CASE).cleared, "{out}");
+    }
+}
+
+/// A declared name with a mark glued after it never goes out: "נועם' הלך" was read as an
+/// abbreviation ("ספט'") and went out whole, cleared by the gate (review of D-130).
+#[test]
+fn a_declared_name_with_any_mark_after_it_never_goes_out() {
+    let ids = identities();
+    for name in ["נועם", "רותם", "מאיה", "עידו"] {
+        for mark in [
+            "'", "\u{05F3}", "\u{2019}", "\"", "\u{05F4}", "\u{201D}", ".", ",", "!", "?", ":",
+            ";", ")", "-", "…",
+        ] {
+            for context in ["{} הלך הביתה", "אמרתי ל{} שזה בסדר", "{} 2020"] {
+                let text = context.replace("{}", &format!("{name}{mark}"));
+                let out = filter(&text, &ctx_for(&ids, &[], CASE)).unwrap();
+                assert!(
+                    !normalize(&out.tagged).contains(&normalize(name)),
+                    "{text:?} → {}",
+                    out.tagged
+                );
+                let o = send(&text, CASE);
+                assert!(o.leaked.is_empty(), "{text:?} leaked {:?}", o.leaked);
+                assert!(
+                    !gate_with(&text, &ids, CASE).cleared,
+                    "{text:?} cleared by the gate"
+                );
+            }
+        }
+    }
+    // A child named טל: "טל'" with a geresh is her name, except as the abbreviation of a
+    // phone number right before one.
+    let mut with_tal = identities();
+    with_tal.push(id(CASE, Role::Brother, "[אח_1]", "טל", &[]));
+    let tal = |text: &str| filter(text, &ctx_for(&with_tal, &[], CASE)).unwrap().tagged;
+    assert_eq!(tal("טל' הלך הביתה"), "[אח_1]' הלך הביתה");
+    // Built here, so no phone is written out in the source (the pre-commit scan).
+    let (a, b) = ("123", "4567");
+    for text in [
+        format!("טל' 03-{a}{b}"),
+        format!("טל' הגן: 08-{a}{b}"),
+        format!("טל': 050-{a}{b}"),
+    ] {
+        assert!(tal(&text).starts_with("טל'"), "{text:?} → {}", tal(&text));
     }
 }
 
@@ -1672,6 +1791,81 @@ fn dates_with_a_month_name_come_out_whole_and_generalized() {
             panic!("{e}");
         }
     }
+    // Fourth review of D-128: the day beside her name is hidden too, and a word glued to
+    // her name ("ממאי", "from May") is her name, not a date.
+    for text in [
+        "נבדקה מאי 3, 2020 בבוקר",
+        "נבדקה יוני 15 2020 בבוקר",
+        "נבדקה מאי (3) 2020 בבוקר",
+    ] {
+        let out = filter(text, &ctx_for(&with_may, &[], CASE)).unwrap();
+        // Nothing but the tags and the generalized year carries a digit.
+        let mut rest = out.tagged.replace("לפני כ-6 שנים", "");
+        while let (Some(a), Some(b)) = (rest.find('['), rest.find(']')) {
+            if b < a {
+                break;
+            }
+            rest.replace_range(a..=b, "");
+        }
+        assert!(
+            !rest.contains(|c: char| c.is_ascii_digit()),
+            "{text:?} → {}",
+            out.tagged
+        );
+        assert!(
+            gate_with(&out.tagged, &with_may, CASE).cleared,
+            "{}",
+            out.tagged
+        );
+    }
+    for (text, out) in [
+        ("קיבלנו מידע ממאי", "קיבלנו מידע מ[אחות_2]"),
+        ("ביוני", "ב[אח_1]"),
+    ] {
+        assert_eq!(
+            filter(text, &ctx_for(&with_may, &[], CASE)).unwrap().tagged,
+            out
+        );
+    }
+}
+
+/// A Hebrew-calendar month with a day in digits, and no year or a short one, is a date:
+/// "15 בתשרי" went out unchanged (fourth review of D-128). Bare, the month may be a name
+/// ("סיון"), and it is not taken into the date next to it: she is asked about, or hidden as
+/// a person, never lost in a date.
+#[test]
+fn hebrew_calendar_dates_with_a_day_in_digits_are_hidden_whole() {
+    let ids = identities();
+    for text in [
+        "נבדק 15 בתשרי בבוקר",
+        "נבדק 15 בטבת בבוקר",
+        "נבדק 15 בתשרי 20 בבוקר",
+        "נבדק בתשרי 20 בבוקר",
+        "נבדק 3 ב-אדר 2024 בבוקר",
+        "נבדק בסיון 2020",
+    ] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(
+            !out.tagged.contains(|c: char| c.is_ascii_digit()),
+            "{text:?} → {}",
+            out.tagged
+        );
+        assert!(out.tagged.contains("[תאריך]"), "{text:?} → {}", out.tagged);
+        assert!(gate_with(&out.tagged, &ids, CASE).cleared, "{}", out.tagged);
+        let o = send(text, CASE);
+        assert!(o.leaked.is_empty() && o.cleared, "{text:?}");
+    }
+    for text in ["פגישה עם סיון 12.3.2020", "פגישה עם סיוון 12.3.2020"] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(
+            out.hidden.iter().any(|h| h == "שם אחר"),
+            "{text:?} → {}",
+            out.tagged
+        );
+        assert!(out.tagged.contains("לפני כ-7 שנים"), "{}", out.tagged);
+        let o = send(text, CASE);
+        assert!(o.leaked.is_empty() && o.cleared, "{text:?}");
+    }
 }
 
 proptest! {
@@ -1723,5 +1917,130 @@ proptest! {
             check_one_date(contexts[context], &phrase, &y)
         };
         prop_assert!(r.is_ok(), "{}", r.unwrap_err());
+        // No day of it left either, beside a sister's name too (fourth review of D-128).
+        let ids = if day % 2 == 0 {
+            let mut ids = identities();
+            ids.push(id(CASE, Role::Sister, "[אחות_2]", "מאי", &[]));
+            ids.push(id(CASE, Role::Brother, "[אח_1]", "יוני", &[]));
+            ids
+        } else {
+            identities()
+        };
+        let text = contexts[context].replace("{}", &phrase);
+        let out = filter(&text, &ctx_for(&ids, &[], CASE)).unwrap();
+        prop_assert!(!digit_left(&out.tagged), "{text:?} → {}", out.tagged);
     }
+
+    /// A Hebrew-calendar month with "in", a day in digits and no year, a short one or a full
+    /// one (fourth review of D-128): one hidden date, no digit and no month left.
+    #[test]
+    fn hebrew_calendar_months_with_a_day_are_one_hidden_date(
+        month in 0usize..HEBREW_CAL_NAMES.len(),
+        apart in any::<bool>(),
+        day in 1u32..=30,
+        year in 0usize..3,
+        context in 0usize..3,
+    ) {
+        let m = HEBREW_CAL_NAMES[month];
+        let y = ["", " 20", " 2021"][year];
+        let phrase = format!("{day} {}{m}{y}", if apart { "ב-" } else { "ב" });
+        let text = ["נבדק {} בבוקר", "{}", "(נבדק {})"][context].replace("{}", &phrase);
+        let ids = identities();
+        let out = filter(&text, &ctx_for(&ids, &[], CASE)).unwrap();
+        prop_assert!(!digit_left(&out.tagged), "{text:?} → {}", out.tagged);
+        prop_assert!(!out.tagged.contains(m), "{text:?} → {}", out.tagged);
+        prop_assert!(gate_with(&out.tagged, &ids, CASE).cleared, "{}", out.tagged);
+        let o = send(&text, CASE);
+        prop_assert!(o.leaked.is_empty() && o.cleared, "{text:?}");
+    }
+
+    /// An ID in groups of any size, with one to three marks between them, next to a label
+    /// before or after it; or, with no label, in groups of three or four (fourth review of
+    /// D-128). Never out, and the gate refuses it in the clear.
+    #[test]
+    fn an_id_in_groups_with_any_marks_and_a_label_never_goes_out(
+        cuts in proptest::collection::vec(any::<bool>(), 8),
+        marks in proptest::collection::vec((0usize..10, 1usize..=3), 8),
+        label in 0usize..8,
+        after in any::<bool>(),
+        shape in 0usize..4,
+    ) {
+        let pool = [" ", "-", "\u{2013}", ",", ":", ";", "_", "\u{00A0}", "'", "."];
+        let digits: Vec<char> = "000000018".chars().collect();
+        let labels = ["ת.ז", "ת\"ז", "תז", "מ.ז.", "מספר זהות", "id", "ID", ""];
+        let labelled = !labels[label].is_empty();
+        // Where the groups end: anywhere with a label, else 3/4-3/4-1..3.
+        let ends: Vec<bool> = if labelled {
+            cuts
+        } else {
+            let sizes = [[3, 3, 3], [4, 4, 1], [3, 4, 2], [4, 3, 2]][shape];
+            let mut ends = vec![false; 8];
+            ends[sizes[0] - 1] = true;
+            ends[sizes[0] + sizes[1] - 1] = true;
+            ends
+        };
+        let mut number = String::new();
+        for (i, d) in digits.iter().enumerate() {
+            number.push(*d);
+            if i < 8 && ends[i] {
+                let (k, n) = marks[i];
+                // Without a label, a period joins a date, not an ID.
+                let k = if labelled { k } else { k % 9 };
+                number.push_str(&pool[k].repeat(n));
+            }
+        }
+        let text = match (labelled, after) {
+            (false, _) => format!("נמסר {number} בתיק"),
+            (true, false) => format!("{} {number} נמסר", labels[label]),
+            (true, true) => format!("נמסר {number} ({})", labels[label]),
+        };
+        let ids = identities();
+        let out = filter(&text, &ctx_for(&ids, &[], CASE)).unwrap();
+        let left: String = out.tagged.chars().filter(char::is_ascii_digit).collect();
+        prop_assert!(!left.contains("000000018"), "{text:?} → {}", out.tagged);
+        let o = send(&text, CASE);
+        prop_assert!(o.leaked.is_empty(), "{text:?} leaked {:?}", o.leaked);
+        prop_assert!(!gate_with(&text, &ids, CASE).cleared, "{text:?} cleared by the gate");
+    }
+}
+
+/// The months of the Hebrew calendar, as she writes them.
+const HEBREW_CAL_NAMES: &[&str] = &[
+    "תשרי",
+    "חשוון",
+    "חשון",
+    "כסלו",
+    "טבת",
+    "שבט",
+    "אדר",
+    "ניסן",
+    "אייר",
+    "סיוון",
+    "סיון",
+    "תמוז",
+    "אב",
+    "אלול",
+];
+
+/// A digit in the filtered text outside the tags and the generalized times ("לפני כ-6
+/// שנים"): a piece of a date left beside it.
+fn digit_left(tagged: &str) -> bool {
+    let mut rest = tagged.to_owned();
+    while let (Some(a), Some(b)) = (rest.find('['), rest.find(']')) {
+        if b < a {
+            break;
+        }
+        rest.replace_range(a..=b, "");
+    }
+    let mut out = String::new();
+    let mut chars = rest.chars().peekable();
+    while let Some(c) = chars.next() {
+        out.push(c);
+        if out.ends_with("כ-") {
+            while chars.peek().is_some_and(char::is_ascii_digit) {
+                chars.next();
+            }
+        }
+    }
+    out.contains(|c: char| c.is_ascii_digit())
 }

@@ -3016,21 +3016,29 @@ fn analyze(
             .iter()
             .filter(|h| h.kind == patterns::PatternKind::Date)
         {
-            let mut names: Vec<&(usize, usize)> = month_named
-                .iter()
-                .filter(|(s, e)| hit.start < *e && *s < hit.end)
-                .collect();
-            if names.is_empty() {
+            let within = |s: usize, e: usize| hit.start < e && s < hit.end;
+            if !month_named.iter().any(|&(s, e)| within(s, e)) {
                 continue;
             }
-            names.sort();
+            // The date without what is already hidden or in question in it: the names, and
+            // the year the first reading took ("מאי 3, 2020" left the "3" when the piece
+            // " 3, 2020" was skipped whole for the year in it, fourth review of D-128).
+            let mut taken: Vec<(usize, usize)> = month_named
+                .iter()
+                .copied()
+                .chain(reps.iter().map(|r| (r.start, r.end)))
+                .chain(suspects.iter().map(|s| (s.start, s.end)))
+                .chain(more.iter().map(|r: &Replacement| (r.start, r.end)))
+                .filter(|&(s, e)| within(s, e))
+                .collect();
+            taken.sort_unstable();
             let mut pieces = Vec::new();
             let mut pos = hit.start;
-            for (s, e) in names {
-                if *s > pos {
-                    pieces.push((pos, *s));
+            for (s, e) in taken {
+                if s > pos {
+                    pieces.push((pos, s));
                 }
-                pos = pos.max(*e);
+                pos = pos.max(e);
             }
             if pos < hit.end {
                 pieces.push((pos, hit.end));
@@ -3046,7 +3054,11 @@ fn analyze(
                         .len();
                 let body = piece.trim_matches(|c: char| !c.is_alphanumeric());
                 let (start, end) = (s + lead, s + lead + body.len());
-                if !body.is_empty()
+                // Only a day or a year: "ממאי" (from a sister named מאי) leaves the letter
+                // "מ", which is no part of a date, and hiding it read "[תאריך][אחות_2]".
+                let dated = body.chars().any(|c| c.is_ascii_digit())
+                    || piece.contains(['\'', '"', '\u{05F3}', '\u{05F4}']);
+                if dated
                     && !overlaps(start, end, &reps, &suspects)
                     && !overlaps(start, end, &more, &[])
                 {
@@ -3072,8 +3084,23 @@ fn analyze(
     }
     // Names of kindergartens and schools: only the name is left out ("בגן השקד שבשכונה" →
     // "בגן שבשכונה"), so the sentence still reads and nothing needs to come back.
-    for r in institution_names(text, &tokens)? {
-        if !overlaps(r.start, r.end, &reps, &suspects) {
+    // A name never takes part of a tag already in the text: "גן ע\"ש [טלפון_1] מרץ" (a
+    // stored paragraph sent again) lost 'ע"ש [טלפון' and went out as "גן_1] מרץ", read as
+    // the first of March (found by the long property runs of D-130). The name ends before the tag.
+    let tags = protected_tags(text, ctx);
+    for mut r in institution_names(text, &tokens)? {
+        if let Some(cut) = tags
+            .iter()
+            .filter(|t| t.start < r.end && r.start < t.end)
+            .map(|t| t.start)
+            .min()
+        {
+            let kept = text
+                .get(r.start..cut.max(r.start))
+                .map_or(0, |n| n.trim_end().len());
+            r.end = r.start + kept;
+        }
+        if r.start < r.end && !overlaps(r.start, r.end, &reps, &suspects) {
             reps.push(r);
         }
     }
