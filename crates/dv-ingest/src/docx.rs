@@ -151,6 +151,7 @@ fn paragraphs(xml: &str) -> Result<PartText, IngestError> {
     let mut in_text = false;
     let mut skip_depth = 0u32; // inside mc:Fallback, w:del, w:instrText…
     let mut in_run_props = false;
+    let mut in_para_props = false;
     let mut run_hidden = false;
     let mut deleted = false;
     let mut hidden = false;
@@ -186,6 +187,7 @@ fn paragraphs(xml: &str) -> Result<PartText, IngestError> {
                     }
                     "tc" => cell_depth += 1,
                     "rPr" => in_run_props = true,
+                    "pPr" => in_para_props = true,
                     "vanish" | "specVanish" if in_run_props => run_hidden = on(&e),
                     "t" => in_text = true,
                     _ => {}
@@ -197,7 +199,8 @@ fn paragraphs(xml: &str) -> Result<PartText, IngestError> {
                 }
                 match e.local_name().as_ref() {
                     "vanish" | "specVanish" if in_run_props => run_hidden = on(&e),
-                    "ta" if !in_run_props => out.push('\t'),
+                    // A tab character in a run; `w:pPr/w:tabs/w:tab` only defines a tab stop.
+                    "tab" if !in_run_props && !in_para_props => out.push('\t'),
                     "br" | "cr" => out.push('\n'),
                     "noBreakHyphen" => out.push('-'),
                     _ => {}
@@ -211,6 +214,7 @@ fn paragraphs(xml: &str) -> Result<PartText, IngestError> {
                 match e.local_name().as_ref() {
                     "t" => in_text = false,
                     "rPr" => in_run_props = false,
+                    "pPr" => in_para_props = false,
                     // Inside a table a row is one line: cells are separated by tabs.
                     "p" if cell_depth > 0 => out.push(' '),
                     "p" => out.push('\n'),
@@ -367,6 +371,17 @@ pub(crate) mod tests {
             ]
         );
         assert_eq!(out.warnings.len(), 4, "{:?}", out.warnings);
+    }
+
+    /// A tab in a run becomes a tab (so "קוביות<tab>9" stays two words); a tab stop in the
+    /// paragraph's properties is only a definition and emits nothing.
+    #[test]
+    fn a_tab_in_a_run_is_kept_and_a_tab_stop_is_not() {
+        let body = "<w:p><w:pPr><w:tabs><w:tab w:val=\"left\" w:pos=\"2000\"/></w:tabs></w:pPr>\
+             <w:r><w:t>קוביות</w:t></w:r><w:r><w:tab/></w:r><w:r><w:t>9</w:t></w:r></w:p>";
+        let bytes = build(&[("word/document.xml", document(body))]);
+        let out = crate::extract(&bytes, "a.docx").unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(out.body, "קוביות\t9");
     }
 
     #[test]
