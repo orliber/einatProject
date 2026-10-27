@@ -47,7 +47,7 @@ impl PatternKind {
         crate::masks::mask_base(self.fixed_replacement()).unwrap_or("מספר")
     }
 
-    fn fixed_replacement(self) -> &'static str {
+    pub(crate) fn fixed_replacement(self) -> &'static str {
         match self {
             PatternKind::IdNumber => "[ת.ז.]",
             PatternKind::Phone => "[טלפון]",
@@ -89,6 +89,17 @@ const HE_MONTHS: &[(&str, u32, bool)] = &[
     ("אוקטובר", 10, false),
     ("נובמבר", 11, false),
     ("דצמבר", 12, false),
+    // Short forms, with the geresh, and the other spelling of March.
+    ("ינו'", 1, false),
+    ("פבר'", 2, false),
+    ("מארס", 3, false),
+    ("אפר'", 4, false),
+    ("אוג'", 8, false),
+    ("ספט'", 9, false),
+    ("אוק'", 10, false),
+    ("אוקט'", 10, false),
+    ("נוב'", 11, false),
+    ("דצמ'", 12, false),
 ];
 const EN_MONTHS: &[(&str, u32)] = &[
     ("january", 1),
@@ -521,6 +532,11 @@ fn push(
 /// A day of a Hebrew month in letters, 1–30, largest letter first ("ה", "טו", "כ\"ט"):
 /// "שם" and "של" are words.
 fn hebrew_day(raw: &str) -> bool {
+    hebrew_day_value(raw).is_some()
+}
+
+/// The day a Hebrew numeral stands for ("י\"ב" → 12), as [`hebrew_day`] reads it.
+fn hebrew_day_value(raw: &str) -> Option<u32> {
     let mut total = 0;
     let mut last = u32::MAX;
     for ch in raw
@@ -532,15 +548,15 @@ fn hebrew_day(raw: &str) -> bool {
             'י' => 10,
             'כ' | 'ך' => 20,
             'ל' => 30,
-            _ => return false,
+            _ => return None,
         };
         if value > last {
-            return false;
+            return None;
         }
         last = value;
         total += value;
     }
-    (1..=30).contains(&total)
+    Some(total).filter(|t| (1..=30).contains(t))
 }
 
 /// The month a word names: a Gregorian month in Hebrew, with a prefix or without ("במרץ",
@@ -556,6 +572,18 @@ pub(crate) fn month_word(norm: &str) -> Option<u32> {
                 .map(|(_, n, _)| *n)
         })
         .or_else(|| EN_MONTHS.iter().find(|(m, _)| *m == norm).map(|(_, n)| *n))
+        .or_else(|| hebrew_calendar_month(norm).then_some(0))
+}
+
+/// A month of the Hebrew calendar ("בתשרי", "כסלו"), bare or after "ב" only: never with the
+/// article ("שם האב" is the father). "אב" alone is the father far more often than the month,
+/// so next to a date it is not taken into it ("3.9.2026, אב ואם נכחו").
+fn hebrew_calendar_month(norm: &str) -> bool {
+    prefix_splits(norm).iter().any(|(p, w)| {
+        (*p == 0 || (*p == 1 && norm.starts_with('ב')))
+            && !norm_eq("אב", w)
+            && HEBREW_CAL_MONTHS.iter().any(|m| norm_eq(m, w))
+    })
 }
 
 /// A day of the month as a word: "12", or in English with its ending ("12th", "3rd").
@@ -569,20 +597,23 @@ fn day_word(norm: &str) -> Option<u32> {
 
 fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>) {
     let tokens = tokenize(text);
-    let num = |i: usize| tokens.get(i).and_then(|t| t.norm.parse::<u32>().ok());
-    let day = |i: usize| tokens.get(i).and_then(|t| day_word(&t.norm));
+    let raw = |i: usize| tokens.get(i).and_then(|t| text.get(t.start..t.end));
+    let norm = |i: usize| tokens.get(i).map_or("", |t| t.norm.as_str());
+    let num = |i: usize| norm(i).parse::<u32>().ok();
+    let is_month = |i: usize| month_word(norm(i)).is_some();
+    // A day as a word: "12", "12th", or a Hebrew numeral with its geresh or gershayim
+    // ("י\"ב", "ה'"); a bare pair of letters is a word ("גב").
+    let day = |i: usize| {
+        day_word(norm(i)).or_else(|| {
+            raw(i)
+                .filter(|r| r.contains(['\'', '"', '׳', '״']) && c.hebrew_numeral.is_match(r))
+                .and_then(hebrew_day_value)
+        })
+    };
     let full_year = |i: usize| {
         num(i)
             .filter(|y| (1900..=2100).contains(y))
             .and_then(|y| i32::try_from(y).ok())
-    };
-    // "מרץ 20", "12 במרץ 20": two digits after a month in Hebrew, or after a day and a
-    // month, are the year (in English "March 20" is the 20th).
-    let short_year = |i: usize| {
-        tokens
-            .get(i)
-            .filter(|t| t.norm.len() == 2 && t.norm.bytes().all(|b| b.is_ascii_digit()))
-            .and_then(|t| expand_year(&t.norm, today))
     };
     // "Jan '20", "מרץ ’20": a year with its century cut off.
     let cut_year = |i: usize| {
@@ -591,10 +622,20 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
                 .is_some_and(|b| b.ends_with(['\'', '\u{2019}', '\u{05F3}']))
         })
     };
+    // "מרץ 20", "12 במרץ 20": two digits after a month are the year, unless a month or
+    // another number comes right after them ("12 במרץ – 15 באפריל 2020" is the 15th of
+    // April, "ינואר 10 15" the 10th of January 2015).
+    let short_year = |i: usize| {
+        tokens
+            .get(i)
+            .filter(|t| t.norm.len() == 2 && t.norm.bytes().all(|b| b.is_ascii_digit()))
+            .filter(|_| !is_month(i + 1) && num(i + 1).is_none())
+            .and_then(|t| expand_year(&t.norm, today))
+    };
     for (i, tok) in tokens.iter().enumerate() {
         let splits = prefix_splits(&tok.norm);
-        // "15 ב-ינואר": a prefix written apart with a hyphen stands between the day and the
-        // month.
+        // The word before the month that may be its day: past a prefix written apart with a
+        // hyphen ("15 ב-ינואר") and past "of" ("12th of March").
         let prev = i.checked_sub(1).map(|j| {
             let apart = tokens.get(j).is_some_and(|p| {
                 crate::text::is_valid_prefix(&p.norm)
@@ -602,15 +643,18 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
                         .get(p.end..tok.start)
                         .is_some_and(|g| matches!(g, "-" | "\u{05BE}"))
             });
-            if apart {
+            if apart || norm(j) == "of" {
                 j.saturating_sub(1)
             } else {
                 j
             }
         });
         let day_before = prev.filter(|&j| j < i).and_then(day);
-        let year_after =
-            full_year(i + 1).or_else(|| cut_year(i + 1).then(|| short_year(i + 1)).flatten());
+        // "2020-Mar-12", "2020 אפריל": the year before the month.
+        let year_before = i
+            .checked_sub(1)
+            .filter(|_| day_before.is_none())
+            .and_then(full_year);
 
         let gregorian = splits.iter().find_map(|(p, w)| {
             HE_MONTHS
@@ -627,42 +671,64 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
             (*p == 0 || (*p == 1 && tok.norm.starts_with('ב')))
                 && HEBREW_CAL_MONTHS.iter().any(|m| norm_eq(m, w))
         });
-
         let (month, ambiguous) = match (gregorian, english) {
             (Some((_, m, amb)), _) => (Some(m), amb),
             (None, Some(m)) => (Some(m), m == 5),
             (None, None) => (None, true),
         };
-        let year_after = year_after.or_else(|| {
-            (gregorian.is_some() || (english.is_some() && day_before.is_some()))
-                .then(|| short_year(i + 1))
-                .flatten()
-        });
-        let start_tok = match (day_before, prev) {
-            (Some(_), Some(j)) => j,
-            _ => i,
-        };
-        let mut end_tok = if year_after.is_some() { i + 1 } else { i };
         // "ביוני", "ממאי": May–July with "in" or "from" glued on are months; were the word
         // the name יוני or יולי, hiding it is right too. Not "במרץ" ("energetically").
         let glued_month = gregorian.is_some_and(|(p, m, _)| {
             p == 1 && (5..=7).contains(&m) && tok.norm.starts_with(['ב', 'מ'])
         });
         if let Some(m) = month {
-            let (mut day_of, mut year_of) = (day_before, year_after);
-            if day_before.is_none() && !cut_year(i + 1) {
-                if let Some(d) = day(i + 1) {
-                    // "March 3", "March 3rd, 2025", "March 3, 25"; in Hebrew only with the
-                    // year after it ("ינואר 1 2015"), since "מרץ 20" is March 2020.
-                    let year = full_year(i + 2).or_else(|| short_year(i + 2));
-                    if english.is_some() || year.is_some() {
+            let mut start_tok = match (day_before, prev) {
+                (Some(_), Some(j)) => j,
+                _ => i,
+            };
+            let mut end_tok = i;
+            let (mut day_of, mut year_of) = (day_before, None);
+            if let Some(y) = full_year(i + 1).or_else(|| {
+                (cut_year(i + 1)
+                    || (year_before.is_none()
+                        && (gregorian.is_some() || (english.is_some() && day_before.is_some()))))
+                .then(|| short_year(i + 1))
+                .flatten()
+            }) {
+                year_of = Some(y);
+                end_tok = i + 1;
+            } else if day_before.is_none() && !cut_year(i + 1) {
+                // "March 3", "March the 12th, 2020", "March 3, 25"; in Hebrew only with the
+                // year after it ("ינואר 1 2015"), since "מרץ 20" is March 2020.
+                let n = if english.is_some() && norm(i + 1) == "the" {
+                    i + 2
+                } else {
+                    i + 1
+                };
+                if let Some(d) = day(n) {
+                    let year = full_year(n + 1).or_else(|| short_year(n + 1));
+                    if english.is_some() || year.is_some() || year_before.is_some() {
                         day_of = Some(d);
                         year_of = year;
-                        end_tok = if year.is_some() { i + 2 } else { i + 1 };
+                        end_tok = if year.is_some() { n + 1 } else { n };
                     }
                 }
             }
+            if year_of.is_none() {
+                if let Some(y) = year_before {
+                    year_of = Some(y);
+                    start_tok = i.saturating_sub(1);
+                }
+            }
             if ambiguous && day_of.is_none() && year_of.is_none() && !glued_month {
+                continue;
+            }
+            // "may" is a verb too ("She may 3 times refuse"): as a month, with a year, or
+            // written "May" with a day.
+            let may_verb = english == Some(5)
+                && year_of.is_none()
+                && !raw(i).is_some_and(|r| r.starts_with('M'));
+            if may_verb {
                 continue;
             }
             let replacement = match (day_of, year_of) {
@@ -695,14 +761,31 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
                 text.get(t.start..t.end)
                     .is_none_or(|raw| c.hebrew_numeral.is_match(raw) && hebrew_day(raw))
             });
-            let year_tok = tokens.get(i + 1).filter(|t| {
-                text.get(t.start..t.end)
-                    .is_none_or(|raw| c.hebrew_year.is_match(raw))
+            // A day in digits ("15 בתשרי 2020"), only with the year after it.
+            let digits_before = i
+                .checked_sub(1)
+                .filter(|&j| num(j).is_some_and(|d| (1..=30).contains(&d)))
+                .and_then(|j| tokens.get(j));
+            // "אדר ב' 2024": the second Adar.
+            let after = if norm_eq("אדר", tok.norm.trim_start_matches('ב'))
+                && raw(i + 1).is_some_and(|r| matches!(r, "א'" | "ב'" | "א׳" | "ב׳"))
+            {
+                i + 2
+            } else {
+                i + 1
+            };
+            // A Hebrew year ("תשפ\"ה") or a Gregorian one ("בכסלו 2021").
+            let year_tok = tokens.get(after).filter(|t| {
+                full_year(after).is_some()
+                    || text
+                        .get(t.start..t.end)
+                        .is_none_or(|raw| c.hebrew_year.is_match(raw))
             });
-            if numeral_before.is_none() && year_tok.is_none() {
+            let before = numeral_before.or(digits_before.filter(|_| year_tok.is_some()));
+            if before.is_none() && year_tok.is_none() {
                 continue;
             }
-            let start = numeral_before.map_or(tok.start, |t| t.start);
+            let start = before.map_or(tok.start, |t| t.start);
             let end = year_tok.map_or(tok.end, |t| t.end);
             push(
                 hits,
@@ -1157,6 +1240,18 @@ fn join_month_names(text: &str, hits: &mut Vec<PatternHit>) {
     let fixed = |r: &str| {
         r == PatternKind::Date.fixed_replacement() || r == PatternKind::Year.fixed_replacement()
     };
+    // A year written out in the hit ("2020"): its generalization knows the year.
+    let has_year = |h: &PatternHit| {
+        h.kind == PatternKind::Year
+            || tokens.iter().any(|t| {
+                h.start <= t.start
+                    && t.end <= h.end
+                    && t.norm.len() == 4
+                    && t.norm
+                        .parse::<u32>()
+                        .is_ok_and(|y| (1900..=2100).contains(&y))
+            })
+    };
     // Each pass takes one word or joins two hits; a text has fewer passes than words.
     for _ in 0..=words.len() {
         let mut changed = false;
@@ -1195,13 +1290,20 @@ fn join_month_names(text: &str, hits: &mut Vec<PatternHit>) {
                         let Some(o) = hits.get(j).filter(|o| dated(o.kind)).cloned() else {
                             continue;
                         };
-                        if has_month(&h) == has_month(&o) {
+                        // Two dates, each with its own month or its own year, stay two.
+                        if has_month(&h) == has_month(&o) || (has_year(&h) && has_year(&o)) {
                             continue;
                         }
-                        // The more exact generalization stays: a relative time over a fixed
-                        // tag, a date over a year.
-                        let rank =
-                            |x: &PatternHit| (!fixed(&x.replacement), x.kind == PatternKind::Date);
+                        // The more exact generalization stays: one that knows the year
+                        // ("ב-12.3 במרץ 2020" is 2020, not this year), a relative time over a
+                        // fixed tag, a date over a year.
+                        let rank = |x: &PatternHit| {
+                            (
+                                has_year(x),
+                                !fixed(&x.replacement),
+                                x.kind == PatternKind::Date,
+                            )
+                        };
                         let replacement = if rank(&o) > rank(&h) {
                             o.replacement.clone()
                         } else {
@@ -1225,7 +1327,33 @@ fn join_month_names(text: &str, hits: &mut Vec<PatternHit>) {
             }
         }
         if !changed {
-            return;
+            break;
+        }
+    }
+    // A parenthesis the date opened or closed goes with it: "12 במרץ (2020)" left ")" behind,
+    // "(12 במרץ) 2020" left "(".
+    for k in 0..hits.len() {
+        let Some(h) = hits.get(k).filter(|h| h.kind == PatternKind::Date) else {
+            continue;
+        };
+        let Some(inside) = text.get(h.start..h.end) else {
+            continue;
+        };
+        let (opens, closes) = (inside.matches('(').count(), inside.matches(')').count());
+        let (start, end) =
+            if opens > closes && text.get(h.end..).is_some_and(|r| r.starts_with(')')) {
+                (h.start, h.end.saturating_add(1))
+            } else if closes > opens && text.get(..h.start).is_some_and(|b| b.ends_with('(')) {
+                (h.start.saturating_sub(1), h.end)
+            } else {
+                continue;
+            };
+        let free = hits
+            .iter()
+            .enumerate()
+            .all(|(j, o)| j == k || o.end <= start || end <= o.start);
+        if let Some(h) = hits.get_mut(k).filter(|_| free) {
+            (h.start, h.end) = (start, end);
         }
     }
 }

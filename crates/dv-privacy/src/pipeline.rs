@@ -2951,7 +2951,25 @@ fn analyze(
     }
     // Layer 4: patterns, read with the tags already in the text blanked: "[מספר_זהות_1] מרץ"
     // was read as "1 במרץ" and cut the tag.
-    let blanked = patterns::blank_tags(text, |t| protected_tag(t, ctx));
+    // The words already replaced (a declared person, the practitioner) are blanked too: a
+    // sister named "מאי" next to a date ("12.5.2020 (מאי)") is not its month, and a date
+    // joined over her name was dropped whole and reached the gate (D-128, third review).
+    let unblanked = patterns::blank_tags(text, |t| protected_tag(t, ctx));
+    let mut blanked = unblanked.clone().into_owned();
+    // The people whose name is also a month ("מאי", "יוני").
+    let month_named: Vec<(usize, usize)> = reps
+        .iter()
+        .filter(|r| {
+            span_text(text, r.start, r.end)
+                .is_ok_and(|w| patterns::month_word(&normalize(w)).is_some())
+        })
+        .map(|r| (r.start, r.end))
+        .collect();
+    for r in &reps {
+        if let Some(len) = blanked.get(r.start..r.end).map(str::len) {
+            blanked.replace_range(r.start..r.end, &"x".repeat(len));
+        }
+    }
     for hit in
         patterns::find(&blanked, ctx.today).map_err(|e| PrivacyError::Internal(e.to_string()))?
     {
@@ -2985,6 +3003,65 @@ fn analyze(
                 declared: false,
             });
         }
+    }
+    // Read again with those names in place: where one of them stands in a date as its month
+    // ("20 מאי 15", a sister named מאי), the rest of that date is hidden too, so no day or
+    // year of it is left beside her name. The strict reading: it may be her name, it may be
+    // the month.
+    if !month_named.is_empty() {
+        let found = patterns::find(&unblanked, ctx.today)
+            .map_err(|e| PrivacyError::Internal(e.to_string()))?;
+        let mut more = Vec::new();
+        for hit in found
+            .iter()
+            .filter(|h| h.kind == patterns::PatternKind::Date)
+        {
+            let mut names: Vec<&(usize, usize)> = month_named
+                .iter()
+                .filter(|(s, e)| hit.start < *e && *s < hit.end)
+                .collect();
+            if names.is_empty() {
+                continue;
+            }
+            names.sort();
+            let mut pieces = Vec::new();
+            let mut pos = hit.start;
+            for (s, e) in names {
+                if *s > pos {
+                    pieces.push((pos, *s));
+                }
+                pos = pos.max(*e);
+            }
+            if pos < hit.end {
+                pieces.push((pos, hit.end));
+            }
+            for (s, e) in pieces {
+                let Ok(piece) = span_text(text, s, e) else {
+                    continue;
+                };
+                // Without the spaces and marks around it.
+                let lead = piece.len()
+                    - piece
+                        .trim_start_matches(|c: char| !c.is_alphanumeric())
+                        .len();
+                let body = piece.trim_matches(|c: char| !c.is_alphanumeric());
+                let (start, end) = (s + lead, s + lead + body.len());
+                if !body.is_empty()
+                    && !overlaps(start, end, &reps, &suspects)
+                    && !overlaps(start, end, &more, &[])
+                {
+                    more.push(Replacement {
+                        start,
+                        end,
+                        relative: false,
+                        out: patterns::PatternKind::Date.fixed_replacement().to_owned(),
+                        label: patterns::PatternKind::Date.label_he().to_owned(),
+                        declared: false,
+                    });
+                }
+            }
+        }
+        reps.extend(more);
     }
     // An address field: whatever follows "כתובת:" on its line is the address, with or without
     // the word "רחוב" ("כתובת: מסדה 33, חיפה").

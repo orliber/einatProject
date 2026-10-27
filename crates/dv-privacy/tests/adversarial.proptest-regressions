@@ -13,3 +13,5 @@ cc 2d3d710ca313772e033ae08f8fa4735992db247bd89d45805ccd6e2b395bb465 # shrinks to
 cc b31b5adef735c74f5cfc500cf95c8ac4bd48da62dc2ae09a9b2e2eec8ac06848 # shrinks to hebrew = true, month = 0, prefix = 3, dot = false, order = 2, sep = 0, day = 1, year = 2015, short = true, context = 0
 cc b1c2395bfe0220e4f597d13706c8899562acdba7d61d8252ac66f566d1bfdd31 # shrinks to hebrew = true, month = 19, prefix = 0, dot = false, order = 0, sep = 0, day = 1, year = 2015, short = false, context = 0
 cc e82d88dd32aca63c9161317c55669eab84e9edaa7721fff2b481a59d5264f878 # shrinks to hebrew = true, month = 45, prefix = 2, dot = false, order = 2, sep = 0, day = 1, year = 2015, short = false, context = 0
+cc e479c3462041231ad1f70b307c0a39654e1d640b2c8a3c49ae54e904e4ac91fe # shrinks to hebrew = true, month = 0, prefix = 0, dot = false, order = 3, sep = 0, day = 10, year = 2015, short = true, context = 0
+cc d6208b6cc92878d99d1eeca4f158746439b571c9573d0f3e0c1935810349dbef # shrinks to hebrew = true, month = 51, prefix = 0, dot = false, order = 0, sep = 0, day = 20, year = 2015, short = true, context = 0

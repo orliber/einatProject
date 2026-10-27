@@ -1478,6 +1478,16 @@ const HE_MONTH_NAMES: &[&str] = &[
     "אוקטובר",
     "נובמבר",
     "דצמבר",
+    "ינו'",
+    "פבר'",
+    "מארס",
+    "אפר'",
+    "אוג'",
+    "ספט'",
+    "אוק'",
+    "אוקט'",
+    "נוב'",
+    "דצמ'",
 ];
 const EN_MONTH_NAMES: &[&str] = &[
     "January",
@@ -1522,9 +1532,23 @@ fn month_name_in(text: &str) -> Option<String> {
 /// The filter's outcome for one date phrase inside `context`: one generalized date, no month
 /// name and no year left, and the gate clears it (no dead end).
 fn check_one_date(context: &str, phrase: &str, year: &str) -> Result<(), String> {
-    let ids = identities();
+    check_one_date_with(&identities(), context, phrase, year)?;
+    let o = send(&context.replace("{}", phrase), CASE);
+    if !o.leaked.is_empty() {
+        return Err(format!("{phrase:?} leaked {:?}", o.leaked));
+    }
+    Ok(())
+}
+
+/// [`check_one_date`] with the case's people `ids` (a sister named like a month).
+fn check_one_date_with(
+    ids: &[Identity],
+    context: &str,
+    phrase: &str,
+    year: &str,
+) -> Result<(), String> {
     let text = context.replace("{}", phrase);
-    let out = filter(&text, &ctx_for(&ids, &[], CASE)).unwrap();
+    let out = filter(&text, &ctx_for(ids, &[], CASE)).unwrap();
     if let Some(m) = month_name_in(&out.tagged) {
         return Err(format!(
             "{text:?} → {:?}: the month {m} was left",
@@ -1534,12 +1558,8 @@ fn check_one_date(context: &str, phrase: &str, year: &str) -> Result<(), String>
     if out.tagged.contains(year) {
         return Err(format!("{text:?} → {:?}: the year was left", out.tagged));
     }
-    if !gate_with(&out.tagged, &ids, CASE).cleared {
+    if !gate_with(&out.tagged, ids, CASE).cleared {
         return Err(format!("{text:?} → {:?}: the gate refused it", out.tagged));
-    }
-    let o = send(&text, CASE);
-    if !o.leaked.is_empty() {
-        return Err(format!("{text:?} leaked {:?}", o.leaked));
     }
     Ok(())
 }
@@ -1574,6 +1594,26 @@ fn dates_with_a_month_name_come_out_whole_and_generalized() {
         ("SEPT 2021", "2021"),
         ("3 במרס 2025", "2025"),
         ("31 בפברואר 2020", "2020"),
+        // Third review.
+        ("12th of March 2020", "2020"),
+        ("the 12th of March, 2020", "2020"),
+        ("March the 12th, 2020", "2020"),
+        ("י\"ב במרץ 2020", "2020"),
+        ("ט\"ו בספטמבר 2021", "2021"),
+        ("15 בתשרי 2020", "2020"),
+        ("אדר ב' 2024", "2024"),
+        ("בכסלו 2021", "2021"),
+        ("ספט' 20", "20"),
+        ("אוג' 2020", "2020"),
+        ("אוקט' 2020", "2020"),
+        ("פבר' 2020", "2020"),
+        ("12 בספט' 2020", "2020"),
+        ("מארס 2020", "2020"),
+        ("ב-12.3 במרץ 2020", "2020"),
+        ("2020-Mar-12", "2020"),
+        ("2020 אפריל 85", "2020"),
+        ("12 במרץ (2020)", "2020"),
+        ("(12 במרץ) 2020", "2020"),
     ] {
         if let Err(e) = check_one_date("נבדק {} בבוקר", phrase, year) {
             panic!("{e}");
@@ -1590,9 +1630,48 @@ fn dates_with_a_month_name_come_out_whole_and_generalized() {
         );
     }
     // A range keeps both its ends, each generalized.
-    let out = filter("בין מרץ 2020 למאי 2021", &ctx_for(&ids, &[], CASE)).unwrap();
-    assert!(month_name_in(&out.tagged).is_none(), "{}", out.tagged);
-    assert_eq!(out.tagged.matches("לפני").count(), 2, "{}", out.tagged);
+    for text in ["בין מרץ 2020 למאי 2021", "12 במרץ – 15 באפריל 2020"] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(month_name_in(&out.tagged).is_none(), "{}", out.tagged);
+        assert_eq!(out.tagged.matches("לפני").count(), 2, "{}", out.tagged);
+    }
+    // The exact generalization: the year written out wins, a short year is not the next
+    // date's day, an age is not a year.
+    for (text, out) in [
+        ("ב-12.3 במרץ 2020", "ב-לפני כ-6 שנים"),
+        ("2020-Mar-12", "לפני כ-7 שנים"),
+        ("2020 אפריל 85", "לפני כ-6 שנים 85"),
+    ] {
+        assert_eq!(filter(text, &ctx_for(&ids, &[], CASE)).unwrap().tagged, out);
+    }
+    // "may" the verb.
+    for text in ["She may 3 times a week refuse", "It may rain"] {
+        assert_eq!(
+            filter(text, &ctx_for(&ids, &[], CASE)).unwrap().tagged,
+            text
+        );
+    }
+    // A sister named like a month: her name is hers, and the date next to it is still one
+    // generalized date that the gate clears (third review of D-128).
+    let mut with_may = identities();
+    with_may.push(id(CASE, Role::Sister, "[אחות_2]", "מאי", &[]));
+    with_may.push(id(CASE, Role::Brother, "[אח_1]", "יוני", &[]));
+    for phrase in [
+        "12.5.2020 (מאי)",
+        "2020 מאי",
+        "מאי 2020 הגיעה",
+        "ביוני 2015",
+        "3.9.2020 יוני",
+    ] {
+        let year = if phrase.contains("2015") {
+            "2015"
+        } else {
+            "2020"
+        };
+        if let Err(e) = check_one_date_with(&with_may, "נבדקה {} בבוקר", phrase, year) {
+            panic!("{e}");
+        }
+    }
 }
 
 proptest! {
@@ -1634,7 +1713,15 @@ proptest! {
             _ => format!("{m}{s}{d}.{}.{y}", (month % 12) + 1),
         };
         let contexts = ["נבדק {} בבוקר", "{}", "בתאריך {}, הגיע עם אמו.", "(נבדק {})"];
-        let r = check_one_date(contexts[context], &phrase, &y);
+        // Every other case has a sister and a brother named like months.
+        let r = if day % 2 == 0 {
+            let mut ids = identities();
+            ids.push(id(CASE, Role::Sister, "[אחות_2]", "מאי", &[]));
+            ids.push(id(CASE, Role::Brother, "[אח_1]", "יוני", &[]));
+            check_one_date_with(&ids, contexts[context], &phrase, &y)
+        } else {
+            check_one_date(contexts[context], &phrase, &y)
+        };
         prop_assert!(r.is_ok(), "{}", r.unwrap_err());
     }
 }
