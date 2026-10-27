@@ -67,6 +67,16 @@ describe("FakeCore review screens", () => {
     for (const name of NAMES) expect(out).not.toContain(name);
   });
 
+  it("a material edited after the review cancels the request, and the send says why", async () => {
+    const core = new FakeCore();
+    const caseId = await newCase(core);
+    const input = (await core.handle("add_input", { caseId, kind: "intake", title: "אינטייק", content: "יונתן הופנה לאבחון." })) as { id: string };
+    const p = (await core.handle("prepare_section", { caseId, sectionKey: "background", instruction: "" })) as Prepared;
+    await core.handle("update_input", { caseId, inputId: input.id, title: "אינטייק", content: "הופנה לאבחון." });
+    const err = await core.handle("send_section", { approvalId: p.approval_id }).then(() => null, (e: UiError) => e);
+    expect(err?.message).toContain("החומר השתנה");
+  });
+
   it("without recorded consent nothing is prepared (fail-closed)", async () => {
     const core = new FakeCore();
     const caseId = await newCase(core, false);

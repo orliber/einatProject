@@ -123,7 +123,10 @@ impl Core {
             .pending
             .get(approval_id)
             .filter(|p| p.kind.send_kind() == kind)
-            .ok_or_else(|| CoreError::NotFound("האישור פג. יש להכין את הבקשה מחדש.".to_owned()))?;
+            .ok_or_else(|| match self.withdrawn.get(approval_id) {
+                Some(why) => CoreError::Refused((*why).to_owned()),
+                None => CoreError::NotFound("האישור פג. יש להכין את הבקשה מחדש.".to_owned()),
+            })?;
         let model = serde_json::from_slice::<Value>(pending.payload.body())
             .ok()
             .and_then(|b| b.get("model")?.as_str().map(str::to_owned))

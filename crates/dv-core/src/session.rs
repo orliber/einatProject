@@ -70,6 +70,7 @@ impl Core {
             rollback_warning: None,
             session: 0,
             pending_epoch: 0,
+            withdrawn: HashMap::new(),
             models_dir: None,
             ner: None,
             ner_exe: None,

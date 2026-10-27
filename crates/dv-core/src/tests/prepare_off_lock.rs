@@ -612,3 +612,52 @@ fn a_batch_whose_workers_all_panicked_ends_with_an_error_not_a_panic() {
     assert!(matches!(run_requests(jobs), Err(CoreError::Internal(_))));
     assert!(core.pending.is_empty());
 }
+
+#[test]
+fn the_report_check_turned_off_in_the_middle_or_while_it_waits_sends_nothing() {
+    let (_dir, mut core, case) = setup(None);
+    approved_report(&mut core, &case);
+    // Waiting to be sent when she turns it off: dropped.
+    let p = core.prepare_report_check(&case).unwrap();
+    assert!(p.approval_id.is_some());
+    core.set_report_check(false).unwrap();
+    assert!(core.pending.is_empty());
+    // Still being filtered when she turns it off: never lands.
+    core.set_report_check(true).unwrap();
+    let job = core.begin_prepare_report_check(&case).unwrap();
+    let ran = job.run();
+    core.set_report_check(false).unwrap();
+    assert!(matches!(
+        core.finish_request(ran),
+        Err(CoreError::Needs(_, ErrorAction::Settings { .. }))
+    ));
+    assert!(core.pending.is_empty());
+}
+
+#[test]
+fn a_sentence_taken_out_of_a_material_after_the_review_never_goes() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let kindergarten = core
+        .vault_ref()
+        .unwrap()
+        .inputs(&case)
+        .unwrap()
+        .into_iter()
+        .find(|i| i.kind == InputKind::Kindergarten)
+        .unwrap();
+    let p = core
+        .prepare_section(&case, "kindergarten", "תנסח פסקה")
+        .unwrap();
+    let id = p.approval_id.unwrap();
+    assert!(payload(&core, &id).contains("בבכי"));
+    core.update_input(
+        &case,
+        &kindergarten.id,
+        &kindergarten.title,
+        "שירה סיפרה כי אלון מתקשה במעברים בין פעילויות.",
+    )
+    .unwrap();
+    assert!(matches!(core.send_section(&id), Err(CoreError::Refused(_))));
+    assert!(fake.sent.lock().unwrap().is_empty());
+}

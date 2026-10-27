@@ -710,6 +710,9 @@ pub struct Core {
     /// Moves whenever the approvals waiting are dropped (a lock, an answer that changes what
     /// a request holds): a request filtered before it never lands after it (D-109).
     pending_epoch: u64,
+    /// Approvals dropped because their material changed, by id, with the line said when she
+    /// tries to send one (memory only; cleared on lock).
+    withdrawn: HashMap<String, &'static str>,
     /// Where the optional name model is downloaded (D-053); `None` keeps it off.
     models_dir: Option<PathBuf>,
     /// The name model, started on first use or right after unlock while it is on, and

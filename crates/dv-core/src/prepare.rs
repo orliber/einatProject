@@ -21,7 +21,7 @@
 //! name", the past reports' names) or a numbered tag another request gave first: the request
 //! is prepared again from the start, as if it had begun after the change. So is one whose
 //! material was changed or deleted, whose case went to the recycle bin, or whose section she took
-//! to write herself; the last three drop the approvals waiting for the case too.
+//! to write herself; each drops the approvals waiting for the case too.
 
 use std::sync::Mutex;
 
@@ -850,13 +850,29 @@ impl Core {
     /// request still being filtered then never lands either.
     pub(crate) fn drop_pending(&mut self) {
         self.pending.clear();
+        self.withdrawn.clear();
         self.pending_epoch = self.pending_epoch.wrapping_add(1);
     }
 
-    /// Something a request still being filtered was read from changed (a material): it lands
-    /// as begun again. The approvals waiting stay, each the bytes she reviewed.
+    /// A request still being filtered lands as begun again; the approvals waiting stay.
     pub(crate) fn restart_prepares(&mut self) {
         self.pending_epoch = self.pending_epoch.wrapping_add(1);
+    }
+
+    /// A material of the case changed or was deleted: a request prepared with it does not go
+    /// (she may have taken a sentence out), waiting or still being filtered. Sending one that
+    /// was waiting says why, in one line, and she prepares it again from the new text.
+    pub(crate) fn withdraw_for_material(&mut self, case_id: &str) {
+        let gone: Vec<String> = self
+            .pending
+            .iter()
+            .filter(|(_, p)| p.kind.case() == Some(case_id) || p.payload.case_id() == case_id)
+            .map(|(id, _)| id.clone())
+            .collect();
+        self.forget_pending(case_id);
+        for id in gone {
+            self.withdrawn.insert(id, MATERIAL_CHANGED);
+        }
     }
 
     /// Build the request for one section and everything the review screen needs.
@@ -1744,6 +1760,10 @@ impl Core {
         })
     }
 }
+
+/// Said when she sends a request whose material changed after it was prepared.
+pub(crate) const MATERIAL_CHANGED: &str =
+    "החומר השתנה אחרי שהבקשה הוכנה, ולכן היא לא נשלחה. צריך להכין אותה מחדש.";
 
 /// The request each section of "write the empty sections" is sent with.
 const FULL_DRAFT_INSTRUCTION: &str = "כתוב/י טיוטה לסעיף מתוך המקורות, עם מקור לכל פסקה.";

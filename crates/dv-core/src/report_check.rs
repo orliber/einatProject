@@ -65,6 +65,13 @@ impl Core {
     pub fn set_report_check(&mut self, on: bool) -> Result<(), CoreError> {
         self.vault_mut()?
             .set_setting(REPORT_CHECK_KEY, if on { "1" } else { "0" })?;
+        // Turned off: a check waiting to be sent does not go, and one still being filtered
+        // lands as begun again, where it stops.
+        if !on {
+            self.pending
+                .retain(|_, p| p.kind.send_kind() != SendKind::ReportCheck);
+            self.restart_prepares();
+        }
         Ok(())
     }
 
