@@ -143,59 +143,116 @@ fn mirror(c: char) -> char {
     }
 }
 
+/// A bracket ends a left-to-right span, so "(FSIQ) 102" keeps each parenthesis on its own
+/// side (the Unicode algorithm gives such neutrals the paragraph's direction).
+fn is_bracket(c: char) -> bool {
+    matches!(c, '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | '«' | '»')
+}
+
+/// A sign or unit that stays with the digit beside it ("79%", "-3", "₪40").
+fn is_terminator(c: char) -> bool {
+    matches!(c, '%' | '°' | '₪' | '$' | '+' | '−' | '-')
+}
+
+/// A Hebrew point or accent: drawn on the letter before it, so it stays after that letter.
+fn is_mark(c: char) -> bool {
+    matches!(c, '\u{0591}'..='\u{05C7}')
+        && !matches!(c, '\u{05BE}' | '\u{05C0}' | '\u{05C3}' | '\u{05C6}')
+}
+
 /// One line of a right-to-left paragraph in the order it is drawn, left to right.
 fn visual(line: &str) -> String {
     let chars: Vec<char> = line.chars().collect();
     // Spans that keep their own (left-to-right) order: from a Latin letter or digit to the
-    // last one before the next Hebrew letter.
+    // last one before the next Hebrew letter or bracket, with a sign before the first digit
+    // and a unit after the last one.
     let mut ltr = vec![false; chars.len()];
     let mut i = 0;
     while let Some(&c) = chars.get(i) {
         if is_ltr(c) {
-            // The span runs to its last Latin letter or digit before the next Hebrew letter.
             let len = chars
                 .iter()
                 .skip(i)
-                .take_while(|c| !is_rtl(**c))
+                .take_while(|c| !is_rtl(**c) && !is_bracket(**c))
                 .enumerate()
                 .filter(|(_, c)| is_ltr(**c))
                 .last()
                 .map_or(1, |(j, _)| j + 1);
-            for flag in ltr.iter_mut().skip(i).take(len) {
+            let mut end = i + len;
+            let at = |k: Option<usize>| k.and_then(|k| chars.get(k)).copied();
+            // "-3" at the start, after a space or after a bracket: the sign is the number's
+            // (after a letter, "ו-5", the hyphen is the word's).
+            let signed = c.is_ascii_digit()
+                && at(i.checked_sub(1)).is_some_and(is_terminator)
+                && at(i.checked_sub(2)).is_none_or(|b| b.is_whitespace() || is_bracket(b));
+            let start = if signed { i.saturating_sub(1) } else { i };
+            // "79%": the unit after the last digit.
+            if at(end.checked_sub(1)).is_some_and(|d| d.is_ascii_digit())
+                && at(Some(end)).is_some_and(|u| is_terminator(u) && u != '-')
+            {
+                end += 1;
+            }
+            for flag in ltr.iter_mut().take(end).skip(start) {
                 *flag = true;
             }
-            i += len;
+            i = end;
         } else {
             i += 1;
         }
     }
     // Drawn from the end: a left-to-right span keeps its order, everything else is reversed
-    // one character at a time (and mirrored).
+    // one letter at a time (its points stay after it) and mirrored.
     let marked: Vec<(char, bool)> = chars.iter().copied().zip(ltr).collect();
     let mut out: Vec<char> = Vec::with_capacity(chars.len());
     for run in marked.chunk_by(|a, b| a.1 == b.1).rev() {
         if run.first().is_some_and(|(_, keep)| *keep) {
             out.extend(run.iter().map(|(c, _)| *c));
         } else {
-            out.extend(run.iter().rev().map(|(c, _)| mirror(*c)));
+            for letter in run.chunk_by(|_, b| is_mark(b.0)).rev() {
+                out.extend(letter.iter().map(|(c, _)| mirror(*c)));
+            }
         }
     }
     out.into_iter().collect()
+}
+
+/// A word wider than `max` cut into pieces that fit (a letter keeps its points); a word
+/// that fits is one piece. Nothing is drawn past the margin.
+fn pieces(font: &Font<'_>, word: &str, size: f32, max: f32) -> Vec<String> {
+    if font.width(word, size) <= max {
+        return vec![word.to_owned()];
+    }
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    for c in word.chars() {
+        let next = font.width(&cur, size) + font.advance(c) * size / 1000.0;
+        if !cur.is_empty() && !is_mark(c) && next > max {
+            out.push(std::mem::take(&mut cur));
+        }
+        cur.push(c);
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
 }
 
 /// Logical lines that fit in `max` points.
 fn wrap(font: &Font<'_>, text: &str, size: f32, max: f32) -> Vec<String> {
     let mut lines = Vec::new();
     let mut cur = String::new();
-    for word in text.split_whitespace() {
+    for word in text
+        .split_whitespace()
+        .flat_map(|w| pieces(font, w, size, max))
+    {
         let candidate = if cur.is_empty() {
-            word.to_owned()
+            word.clone()
         } else {
             format!("{cur} {word}")
         };
         if !cur.is_empty() && font.width(&candidate, size) > max {
             lines.push(std::mem::take(&mut cur));
-            cur = word.to_owned();
+            cur = word;
         } else {
             cur = candidate;
         }
@@ -1118,6 +1175,59 @@ mod tests {
         assert_eq!(visual("WISC-V מלא"), "אלמ WISC-V");
         assert_eq!(visual("הבנה מילולית (VCI)"), "(VCI) תילולימ הנבה");
         assert_eq!(visual("FSIQ = 102 בטווח"), "חווטב FSIQ = 102");
+    }
+
+    /// A bracket ends a Latin span, so "(FSIQ) 102" keeps both parentheses; a sign or unit
+    /// stays with its number; a hyphen after a Hebrew letter stays with the word.
+    #[test]
+    fn brackets_signs_and_units_sit_where_a_reader_expects() {
+        assert_eq!(visual("ציון מלא (FSIQ) 102"), "102 (FSIQ) אלמ ןויצ");
+        assert_eq!(
+            visual("הבנה מילולית (VCI) 112, אחוזון 79"),
+            "79 ןוזוחא ,112 (VCI) תילולימ הנבה"
+        );
+        assert_eq!(visual("FSIQ (102)"), "(102) FSIQ");
+        assert_eq!(visual("אחוזון 79%"), "79% ןוזוחא");
+        assert_eq!(visual("הפרש -3 נקודות"), "תודוקנ -3 שרפה");
+        assert_eq!(visual("(-3)"), "(-3)");
+        assert_eq!(visual("ו-5 ילדים"), "םידלי 5-ו");
+        assert_eq!(visual("טווח 85–99"), "85–99 חווט");
+    }
+
+    /// Points and accents are drawn on the letter before them: they stay after it when the
+    /// line is reversed, while a maqaf is a letter of its own.
+    #[test]
+    fn nikud_stays_on_its_letter() {
+        assert_eq!(visual("שָׁלוֹם"), "םוֹלשָׁ");
+        assert_eq!(visual("בֵּית־סֵפֶר"), "רפֶסֵ־תיבֵּ");
+        assert_eq!(visual("בָּ 5"), "5 בָּ");
+    }
+
+    /// A word wider than the line is cut into pieces that fit, with its points kept on their
+    /// letters, so nothing is drawn past the margin (also inside a table cell).
+    #[test]
+    fn an_over_long_word_is_cut_to_the_width() {
+        let Some(data) = system_font() else {
+            eprintln!("no Hebrew font on this computer; skipped");
+            return;
+        };
+        let font = Font::load(&data).unwrap_or_else(|e| panic!("{e}"));
+        let long = "א".repeat(200);
+        let text = format!("מילה {long}ָ סוף");
+        let lines = wrap(&font, &text, 12.0, 100.0);
+        assert!(lines.len() > 3, "{lines:?}");
+        for l in &lines {
+            assert!(font.width(l, 12.0) <= 100.0, "{l}");
+        }
+        let joined: String = lines.join("").replace(' ', "");
+        assert_eq!(joined, text.replace(' ', ""), "nothing lost");
+        assert!(
+            lines.iter().any(|l| l.contains("אָ"))
+                && !lines.iter().any(|l| l.starts_with('\u{05B8}')),
+            "the point stays on its letter: {lines:?}"
+        );
+        // A short word is one line, and so is a word that just fits.
+        assert_eq!(wrap(&font, "שלום", 12.0, 100.0), vec!["שלום".to_owned()]);
     }
 
     #[test]

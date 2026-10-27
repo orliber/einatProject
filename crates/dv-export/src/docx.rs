@@ -180,7 +180,7 @@ fn run_props(size: u32, bold: bool, color: Option<&str>, font: Option<&str>) -> 
     let c = color
         .map(|c| format!("<w:color w:val=\"{c}\"/>"))
         .unwrap_or_default();
-    format!("<w:rPr>{f}{b}{c}<w:sz w:val=\"{size}\"/><w:szCs w:val=\"{size}\"/><w:lang w:val=\"he-IL\" w:bidi=\"he-IL\"/></w:rPr>")
+    format!("<w:rPr>{f}{b}{c}<w:sz w:val=\"{size}\"/><w:szCs w:val=\"{size}\"/><w:lang w:val=\"en-US\" w:bidi=\"he-IL\"/></w:rPr>")
 }
 
 /// Thin table borders; `inside_v` false leaves the bar cells of a chart without lines.

@@ -10,16 +10,51 @@ pub(crate) async fn check_export(
     with_core(&state, move |c| c.check_export(&case_id)).await
 }
 
-/// A free name in the folder: "name.docx", "name (2).docx", …
-pub(crate) fn free_path(dir: &std::path::Path, file_name: &str) -> PathBuf {
+/// A new file under a free name in the folder: "name.docx", "name (2).docx", … The file is
+/// created, not only named, so a file that appears in between is never overwritten.
+pub(crate) fn create_free(
+    dir: &std::path::Path,
+    file_name: &str,
+) -> std::io::Result<(PathBuf, std::fs::File)> {
     let (stem, ext) = file_name.rsplit_once('.').unwrap_or((file_name, "docx"));
-    let mut path = dir.join(file_name);
-    let mut n = 2;
-    while path.exists() {
-        path = dir.join(format!("{stem} ({n}).{ext}"));
-        n += 1;
+    for n in 1..10_000u32 {
+        let path = if n == 1 {
+            dir.join(file_name)
+        } else {
+            dir.join(format!("{stem} ({n}).{ext}"))
+        };
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(file) => return Ok((path, file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e),
+        }
     }
-    path
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "no free name",
+    ))
+}
+
+/// Write `bytes` into a new file under a free name and return its path. A write that fails
+/// leaves no half-written file behind.
+pub(crate) fn write_new(
+    dir: &std::path::Path,
+    file_name: &str,
+    bytes: &[u8],
+) -> std::io::Result<PathBuf> {
+    use std::io::Write as _;
+    let (path, mut file) = create_free(dir, file_name)?;
+    let written = file.write_all(bytes).and_then(|()| file.sync_all());
+    drop(file);
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&path);
+        return Err(e);
+    }
+    Ok(path)
 }
 
 /// Downloads, else Documents, else the home folder. A folder that a cloud service syncs
@@ -151,8 +186,8 @@ pub(crate) async fn export_report(
 /// Write an exported file into `dir` under a free name, off the core.
 async fn save_export(dir: PathBuf, file_name: String, bytes: Vec<u8>) -> Res<String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let path = free_path(&dir, &file_name);
-        std::fs::write(&path, bytes).map_err(|e| dv_core::file_error(e).to_ui())?;
+        let path =
+            write_new(&dir, &file_name, &bytes).map_err(|e| dv_core::file_error(e).to_ui())?;
         Ok(path.display().to_string())
     })
     .await
@@ -284,6 +319,31 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// An existing file is never overwritten: the second export of the same name gets "(2)",
+    /// and the file is created in the same step that takes the name.
+    #[test]
+    fn a_new_file_is_created_beside_an_existing_one() {
+        let dir = scratch("free");
+        let first = write_new(&dir, "דוח אבחון TEST-1.docx", b"one").unwrap();
+        let second = write_new(&dir, "דוח אבחון TEST-1.docx", b"two").unwrap();
+        assert_eq!(first, dir.join("דוח אבחון TEST-1.docx"));
+        assert_eq!(second, dir.join("דוח אבחון TEST-1 (2).docx"));
+        assert_eq!(std::fs::read(&first).unwrap(), b"one");
+        assert_eq!(std::fs::read(&second).unwrap(), b"two");
+        assert_eq!(
+            write_new(&dir, "שכבות", b"x").unwrap(),
+            dir.join("שכבות"),
+            "a name without an extension"
+        );
+        assert_eq!(
+            write_new(&dir, "שכבות", b"y").unwrap(),
+            dir.join("שכבות (2).docx")
+        );
+        // A folder that is not there: an error, and nothing written anywhere.
+        assert!(write_new(&dir.join("אין"), "a.docx", b"x").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

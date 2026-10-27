@@ -454,6 +454,42 @@ fn references(sect: &str) -> Result<Vec<(bool, String, String)>, ExportError> {
     Ok(out)
 }
 
+/// `xml` without its `w:rsid*` attributes: Word's edit-session ids, which tie a file to the
+/// sessions (and so the computer) it was edited in. Only inside tags; her text stays as it is.
+fn without_rsids(xml: &str) -> String {
+    const KEY: &str = " w:rsid";
+    let mut out = String::with_capacity(xml.len());
+    let mut rest = xml;
+    while let Some(at) = rest.find(KEY) {
+        let Some((before, from)) = rest.split_at_checked(at) else {
+            break;
+        };
+        out.push_str(before);
+        let in_tag = out.rfind('<') > out.rfind('>');
+        // ` w:rsidR="00A1B2C3"`: the name, `="`, the value, `"`.
+        let name_len = from.get(KEY.len()..).map_or(0, |n| {
+            n.chars().take_while(char::is_ascii_alphabetic).count()
+        });
+        let attr_len = from
+            .get(KEY.len() + name_len..)
+            .and_then(|v| v.strip_prefix("=\""))
+            .and_then(|v| v.find('"'))
+            .map(|close| KEY.len() + name_len + 2 + close + 1);
+        match (in_tag, attr_len.and_then(|l| from.split_at_checked(l))) {
+            (true, Some((_, after))) => rest = after,
+            _ => {
+                let Some((head, after)) = from.split_at_checked(KEY.len()) else {
+                    break;
+                };
+                out.push_str(head);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// The section properties without the header and footer references to `ids`.
 fn drop_references(sect: &str, ids: &[&String]) -> String {
     let mut out = String::with_capacity(sect.len());
@@ -716,7 +752,7 @@ fn build(report: &Report, template: &[u8]) -> Result<Built, ExportError> {
         .filter(|(_, _, id)| target_of(id).is_none())
         .map(|(_, _, id)| id)
         .collect();
-    sect = drop_references(&sect, &dangling);
+    sect = without_rsids(&drop_references(&sect, &dangling));
 
     // Styles: hers where the name matches, ours (without a font: hers is used) where not.
     let mut layout = Layout {
@@ -785,8 +821,10 @@ fn build(report: &Report, template: &[u8]) -> Result<Built, ExportError> {
                 if i == m {
                     new_body.push_str(&report_xml);
                 } else {
-                    // Her paragraph whole, or no document at all.
-                    new_body.push_str(inner.get(c.start..c.end).ok_or_else(|| bad("body"))?);
+                    // Her paragraph whole (less its edit-session ids), or no document at all.
+                    new_body.push_str(&without_rsids(
+                        inner.get(c.start..c.end).ok_or_else(|| bad("body"))?,
+                    ));
                 }
             }
         }
@@ -971,6 +1009,8 @@ mod tests {
             !settings.contains("attachedTemplate") && !settings.contains("rsid"),
             "{settings}"
         );
+        // Her paragraphs and section carry edit-session ids in the fixture: none is left.
+        assert!(!doc.contains("rsid"), "{doc}");
         assert!(
             settings.contains("removePersonalInformation")
                 && settings.contains("evenAndOddHeaders")
@@ -1058,6 +1098,19 @@ mod tests {
         );
         let open = "<w:sectPr>אבג<w:headerReference r:id=\"rId7\" דוח";
         assert_eq!(drop_references(open, &[&gone]), open);
+    }
+
+    /// Edit-session ids go from the tags; the same letters in her text stay, and a value that
+    /// never closes is kept as it is.
+    #[test]
+    fn edit_session_ids_are_stripped_from_tags_only() {
+        let xml = "<w:p w:rsidR=\"00A1B2C3\" w:rsidRDefault=\"00D4E5F6\"><w:pPr><w:bidi/></w:pPr><w:r w:rsidRPr=\"00A1B2C3\"><w:t>שלום w:rsidR=\"בתוך\" הטקסט</w:t></w:r></w:p>";
+        assert_eq!(
+            without_rsids(xml),
+            "<w:p><w:pPr><w:bidi/></w:pPr><w:r><w:t>שלום w:rsidR=\"בתוך\" הטקסט</w:t></w:r></w:p>"
+        );
+        let open = "<w:p w:rsidR=\"00A1 שלום";
+        assert_eq!(without_rsids(open), open);
     }
 
     /// The page width less the margins, with Hebrew before the tags; a value that is not a
