@@ -7,6 +7,7 @@ import type { Prepared } from "./ipc/client";
 /** Why a request did not go, in her words. The gate's details (which may quote a name) stay
  *  off the screen: only its messages. */
 export function notSentMessage(prepared: Prepared): string {
-  const reasons = [...new Set(prepared.blocked.map((b) => b.message))];
+  // A reason that ends its own sentence does not get a second period after it.
+  const reasons = [...new Set(prepared.blocked.map((b) => b.message.trim().replace(/\.+$/, "")))];
   return `הבקשה לא נשלחה${reasons.length ? `: ${reasons.join(" · ")}` : ""}. אפשר לנסות שוב.`;
 }

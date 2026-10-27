@@ -49,7 +49,9 @@ async function openSection(key: string, over?: Override, setup?: (core: FakeCore
 }
 
 const asked = (calls: { cmd: string; args: Record<string, unknown> }[]) => calls.filter((c) => c.cmd === "prepare_section").map((c) => c.args);
-const proposedCount = (draft: HTMLElement) => draft.querySelectorAll("article.para.pending").length;
+/** The paragraphs still waiting for her, each with its "ממתינה לאישור" badge. */
+const waiting = (draft: HTMLElement) => within(draft).queryAllByRole("article").filter((a) => within(a).queryByText(/ממתינה לאישור$/));
+const proposedCount = (draft: HTMLElement) => waiting(draft).length;
 
 describe("an empty section", () => {
   it("says what it is written from and offers a first draft or her own paragraph; passes the accessibility check", async () => {
@@ -113,7 +115,7 @@ describe("a draft waiting for her", () => {
   it("passes the accessibility check, with the paragraph's own buttons", async () => {
     const { draft, view } = await withDraft();
     expect(within(draft).getByText("טיוטה של Claude מחכה לאישורך")).toBeInTheDocument();
-    const first = draft.querySelector("article.para.pending") as HTMLElement;
+    const first = waiting(draft)[0] as HTMLElement;
     expect(within(first).getByText("הצעה של Claude · ממתינה לאישור")).toBeInTheDocument();
     for (const name of ["אישור", "ניסוח מחדש", "עריכה", "הסרה"]) expect(within(first).getByRole("button", { name })).toBeEnabled();
     expect(await a11yViolations(view.container)).toEqual([]);
@@ -122,7 +124,7 @@ describe("a draft waiting for her", () => {
   it("one paragraph is approved on its own; the rest still wait", async () => {
     const { draft, user, calls } = await withDraft();
     const before = proposedCount(draft);
-    const first = draft.querySelector("article.para.pending") as HTMLElement;
+    const first = waiting(draft)[0] as HTMLElement;
     await user.click(within(first).getByRole("button", { name: "אישור" }));
     await waitFor(() => expect(proposedCount(draft)).toBe(before - 1));
     expect(calls.some((c) => c.cmd === "approve_paragraph")).toBe(true);
@@ -148,7 +150,7 @@ describe("a draft waiting for her", () => {
 
   it("a paragraph is edited, then saved and approved together; Cancel changes nothing", async () => {
     const { draft, user, calls } = await withDraft();
-    const first = draft.querySelector("article.para.pending") as HTMLElement;
+    const first = waiting(draft)[0] as HTMLElement;
     await user.click(within(first).getByRole("button", { name: "עריכה" }));
     const box = within(first).getByRole("textbox", { name: "עריכת הפסקה" });
     expect(box).toHaveFocus();
@@ -171,7 +173,7 @@ describe("a draft waiting for her", () => {
   it("“הסרה” takes a paragraph out of the draft", async () => {
     const { draft, user, calls } = await withDraft();
     const before = proposedCount(draft);
-    await user.click(within(draft.querySelector("article.para.pending") as HTMLElement).getByRole("button", { name: "הסרה" }));
+    await user.click(within(waiting(draft)[0] as HTMLElement).getByRole("button", { name: "הסרה" }));
     await waitFor(() => expect(proposedCount(draft)).toBe(before - 1));
     expect(calls.some((c) => c.cmd === "reject_paragraph")).toBe(true);
   });
@@ -205,6 +207,28 @@ describe("a draft waiting for her", () => {
     // Past the pause after typing, too: the sent request does not come back.
     await new Promise((r) => setTimeout(r, 1000));
     expect(box).toHaveValue("");
+  });
+
+  it("what she types while a request is on its way stays in the box after the answer", async () => {
+    let release: () => void = () => undefined;
+    const answered = new Promise<void>((r) => (release = r));
+    const { user, calls } = await withDraft(async (cmd) => {
+      if (cmd !== "send_section") return undefined;
+      await answered;
+      return { paragraphs: [], questions: [], missing: [], contradictions: [], demo: true };
+    });
+    const chat = screen.getByRole("region", { name: "שיחה על הסעיף" });
+    const box = within(chat).getByLabelText("הודעה ל-Claude");
+    await user.type(box, "לקצר את הפסקה השנייה");
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    await waitFor(() => expect(calls.some((c) => c.cmd === "send_section")).toBe(true));
+    await user.clear(box);
+    await user.type(box, "ואחר כך להדגיש את המעברים");
+    release();
+    await waitFor(() => expect(within(chat).queryByText("כותב…")).toBeNull());
+    // Past the pause after typing, too.
+    await new Promise((r) => setTimeout(r, 1000));
+    expect(box).toHaveValue("ואחר כך להדגיש את המעברים");
   });
 
   it("a quick request sends its fixed wording", async () => {
@@ -269,7 +293,7 @@ describe("when a step fails", () => {
       return undefined;
     }, (core, caseId) => draftIn(core, caseId, "kindergarten"));
     const before = proposedCount(draft);
-    await user.click(within(draft.querySelector("article.para.pending") as HTMLElement).getByRole("button", { name: "אישור" }));
+    await user.click(within(waiting(draft)[0] as HTMLElement).getByRole("button", { name: "אישור" }));
     expect(await within(draft).findByRole("alert")).toHaveTextContent("האישור לא נשמר.");
     expect(proposedCount(draft)).toBe(before);
   });

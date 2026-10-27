@@ -127,6 +127,7 @@ describe("the short letter", () => {
     const { user, calls } = await openLetter();
     const parents = screen.getByRole("radio", { name: "להורים" });
     const school = screen.getByRole("radio", { name: "לצוות החינוכי" });
+    // Load-bearing: jsdom (and user-event) group radios only by a shared name, as browsers do.
     expect(parents).toHaveAttribute("name", school.getAttribute("name") ?? "");
     parents.focus();
     await user.keyboard("{ArrowDown}");
@@ -183,7 +184,7 @@ describe("the short letter", () => {
     const refused = prepared({ approval_id: null, blocked: [{ code: "trap", message: "נשאר בטקסט שם שלא הוסתר.", detail: null }] });
     const { user, calls } = await openLetter((cmd) => (cmd === "prepare_letter" ? refused : undefined));
     await user.click(screen.getByRole("button", { name: "ניסוח המכתב" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("הבקשה לא נשלחה: נשאר בטקסט שם שלא הוסתר.. אפשר לנסות שוב.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("הבקשה לא נשלחה: נשאר בטקסט שם שלא הוסתר. אפשר לנסות שוב.");
     expect(calls.some((c) => c.cmd === "send_section")).toBe(false);
     expect(screen.getByRole("button", { name: "ניסוח המכתב" })).toBeEnabled();
   });

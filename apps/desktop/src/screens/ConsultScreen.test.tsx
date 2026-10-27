@@ -114,7 +114,7 @@ describe("the consultation screen", () => {
     const refused = prepared({ approval_id: null, blocked: [{ code: "trap", message: "נמצא בטקסט פרט מזהה שלא הוסתר.", detail: null }] });
     const { user, box, calls } = await openConsult((cmd) => (cmd === "prepare_consult" ? refused : undefined));
     await user.type(box, "שאלה שלא יצאה{Enter}");
-    expect(await screen.findByRole("alert")).toHaveTextContent("הבקשה לא נשלחה: נמצא בטקסט פרט מזהה שלא הוסתר.. אפשר לנסות שוב.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("הבקשה לא נשלחה: נמצא בטקסט פרט מזהה שלא הוסתר. אפשר לנסות שוב.");
     expect(box).toHaveValue("שאלה שלא יצאה");
     expect(within(chat()).queryByText("ממתינה לשליחה…")).toBeNull();
     expect(calls.some((c) => c.cmd === "send_consult")).toBe(false);
