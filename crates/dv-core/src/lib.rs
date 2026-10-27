@@ -96,8 +96,8 @@ pub use history::{
 };
 pub use instruments::{InstrumentApproval, InstrumentStatus};
 pub use jobs::{
-    BackupRun, BackupTask, DocumentRead, DrillJob, Drilled, ExportJob, Exported, ReadJob,
-    RestoreJob, Restored, SlotJob, SlotMade, UnlockJob, Unlocked,
+    BackupRun, BackupTask, DocumentRead, DrillJob, Drilled, ExportJob, Exported, PasswordCheckJob,
+    PasswordChecked, ReadJob, RestoreJob, Restored, SlotJob, SlotMade, UnlockJob, Unlocked,
 };
 pub use layers::SecurityLayer;
 pub use library::TRASH_DAYS;

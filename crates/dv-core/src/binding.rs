@@ -198,12 +198,6 @@ impl Core {
         let _ = self.computer_seal.promote_next(&self.dir);
     }
 
-    /// Check the password on this computer without opening the vault again.
-    pub(crate) fn verify_password_here(&self, password: &str) -> Result<(), VaultError> {
-        let key = self.password_key_here()?;
-        Vault::verify_password_here(&self.dir, password, key.as_ref())
-    }
-
     /// The security page's line: bound to this computer (ok), nothing here to bind to
     /// (info), not bound although it could be (warn; it binds at the next opening with the
     /// password), or bound to another computer (`elsewhere`: she came in with the kit, and

@@ -236,17 +236,28 @@ impl Core {
         }
     }
 
-    /// Turning it on, step 1 (under the lock): check the password before her browser opens,
-    /// and return the vault id the Drive file is named after.
+    /// Turning it on, step 1: check the password before her browser opens, away from the
+    /// lock (F2: `begin`, the job's `run`, then `finish`, which returns the vault id the
+    /// Drive file is named after).
+    pub fn begin_google_turn_on_check(
+        &mut self,
+        password: &str,
+    ) -> Result<crate::PasswordCheckJob, CoreError> {
+        self.begin_password_check(password)
+    }
+
+    pub fn finish_google_turn_on_check(
+        &mut self,
+        checked: crate::PasswordChecked,
+    ) -> Result<String, CoreError> {
+        self.finish_password_check(checked)?;
+        Ok(self.vault_ref()?.vault_id().to_owned())
+    }
+
+    /// The three steps in a row (tests, callers that hold no lock).
     pub fn google_turn_on_check(&mut self, password: &str) -> Result<String, CoreError> {
-        self.check_backoff()?;
-        let vault = self.vault_ref()?;
-        let id = vault.vault_id().to_owned();
-        if let Err(e) = self.verify_password_here(password) {
-            self.count_failure(&e);
-            return Err(e.into());
-        }
-        Ok(id)
+        let job = self.begin_google_turn_on_check(password)?;
+        self.finish_google_turn_on_check(job.run())
     }
 
     /// Turning it on, step 3 (under the lock, after the key is in her Drive): write the slot.

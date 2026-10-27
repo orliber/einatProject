@@ -431,7 +431,11 @@ fn a_slow_windows_while_open_is_not_a_wrong_password_nor_another_computer() {
         (item.state.as_str(), item.detail.as_deref()),
         ("info", Some("busy"))
     );
+    // The check runs away from the lock, as an opening: late once, it is asked again; late
+    // twice, it says to try again.
     *slow.1.lock().unwrap() = 1;
+    assert!(core.google_turn_on_check(PASSWORD).is_ok());
+    *slow.1.lock().unwrap() = 2;
     let e = core.google_turn_on_check(PASSWORD).unwrap_err();
     assert!(matches!(e, CoreError::Vault(VaultError::Busy)));
     assert!(core.check_backoff().is_ok(), "not a guess: no waiting time");
