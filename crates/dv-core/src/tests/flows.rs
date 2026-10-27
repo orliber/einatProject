@@ -1448,6 +1448,54 @@ fn the_emergency_stop_works_while_locked_and_shows_on_the_security_screen() {
     );
 }
 
+/// An answer that comes back after the vault was locked and opened again, or after its case
+/// went to the recycle bin, is not written: it lands only in the session and the case it was
+/// approved in. What left the computer is in the history either way.
+#[test]
+fn an_answer_lands_only_in_the_session_and_case_it_was_approved_in() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let logged_before = sends_logged(&mut core);
+
+    // Locked and opened again while the answer was on its way (the computer slept and woke).
+    let id = approval(&mut core, &case);
+    let out = core.begin_send(&id, SendKind::Section).unwrap();
+    let response = out.transmit();
+    assert!(response.is_ok());
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    let err = core.finish_section(out, response).unwrap_err();
+    assert!(
+        matches!(err, CoreError::Needs(_, ErrorAction::Unlock)),
+        "{err:?}"
+    );
+    assert!(
+        core.chat(&case, "kindergarten").unwrap().is_empty(),
+        "nothing stored"
+    );
+    assert_eq!(sends_logged(&mut core), logged_before + 1, "but it left");
+
+    // The case went to the recycle bin while the answer was on its way.
+    let id = approval(&mut core, &case);
+    let out = core.begin_send(&id, SendKind::Section).unwrap();
+    let response = out.transmit();
+    core.delete_case(&case).unwrap();
+    assert!(matches!(
+        core.finish_section(out, response),
+        Err(CoreError::Refused(_))
+    ));
+    core.restore_case(&case).unwrap();
+    assert!(core.chat(&case, "kindergarten").unwrap().is_empty());
+    assert_eq!(sends_logged(&mut core), logged_before + 2);
+
+    // Without a lock or a deletion in between, it lands.
+    let id = approval(&mut core, &case);
+    let out = core.begin_send(&id, SendKind::Section).unwrap();
+    let response = out.transmit();
+    core.finish_section(out, response).unwrap();
+    assert!(!core.chat(&case, "kindergarten").unwrap().is_empty());
+}
+
 #[test]
 fn a_lock_while_a_request_is_on_its_way_does_not_bring_its_approval_back() {
     // A send that failed after the vault locked put its approval back in memory, so it

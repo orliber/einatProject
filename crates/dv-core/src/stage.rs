@@ -122,6 +122,17 @@ impl Core {
         };
         self.note_usage(&out.pending.payload, &response, demo);
         self.record_sent(&out, demo)?;
+        // Recorded as sent in any case (it left); applied only in the session it was approved
+        // in (a lock in between ends it, as for every other job), and only to a case that is
+        // still at work: one in the recycle bin takes nothing new.
+        self.same_session(out.session)?;
+        if let Some(case_id) = out.pending.kind.case() {
+            if self.vault_ref()?.case_in_trash(case_id)? {
+                return Err(CoreError::Refused(
+                    "התיק הועבר לסל המחזור בינתיים, והתשובה לא נשמרה בו.".to_owned(),
+                ));
+            }
+        }
         let Outgoing { pending, model, .. } = out;
         let Pending { kind, .. } = pending;
         let mut response = response;
