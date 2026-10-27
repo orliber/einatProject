@@ -95,7 +95,9 @@ impl Core {
     /// 2. a failure is not a send: the approval stays for a retry;
     /// 3. the answer counts toward the month (numbers only);
     /// 4. the request is recorded (the exact bytes with the case, and the log) before
-    ///    anything about the reply can fail.
+    ///    anything about the reply can fail;
+    /// 5. a kept-words tag in the answer ("[מילים_1]", D-126) is written as plain words: the
+    ///    model never saw one, and one it wrote must never stand for her words.
     pub(crate) fn receive(
         &mut self,
         out: Outgoing,
@@ -122,6 +124,8 @@ impl Core {
         self.record_sent(&out, demo)?;
         let Outgoing { pending, model, .. } = out;
         let Pending { kind, .. } = pending;
+        let mut response = response;
+        plain_kept_words_in(&mut response);
         Ok(Received {
             kind,
             response,
@@ -150,6 +154,20 @@ impl Core {
         }
         v.record(AuditEvent::Send, case_id, &details)?;
         Ok(())
+    }
+}
+
+/// Every text of an answer, wherever it sits in it, with its kept-words tags made plain.
+fn plain_kept_words_in(value: &mut Value) {
+    match value {
+        Value::String(s) => {
+            if let std::borrow::Cow::Owned(plain) = dv_privacy::restore::plain_kept_words(s) {
+                *s = plain;
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(plain_kept_words_in),
+        Value::Object(fields) => fields.values_mut().for_each(plain_kept_words_in),
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
     }
 }
 

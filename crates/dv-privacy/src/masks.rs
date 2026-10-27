@@ -197,6 +197,16 @@ impl MaskBook {
             .map(|e| e.original.clone())
     }
 
+    /// The words a numbered tag of any kind stands for, if the book has it.
+    #[must_use]
+    pub fn original(&self, tag: &str) -> Option<String> {
+        self.entries
+            .borrow()
+            .iter()
+            .find(|e| e.tag == tag)
+            .map(|e| e.original.clone())
+    }
+
     /// What this request added, to keep with the case.
     #[must_use]
     pub fn added(&self) -> Vec<MaskEntry> {

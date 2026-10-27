@@ -112,7 +112,13 @@ impl Core {
                     .map(|d| ParagraphView {
                         has_versions: with_versions.contains(&d.id),
                         id: d.id,
-                        text: restore(&d.text_tagged, &identities, practitioner.as_deref(), &masks),
+                        text: shown_paragraph(
+                            &d.text_tagged,
+                            d.author,
+                            &identities,
+                            practitioner.as_deref(),
+                            &masks,
+                        ),
                         status: d.status,
                         by_ai: d.author == Author::Ai,
                         sources: d
@@ -315,8 +321,13 @@ impl Core {
                         let identities = v.identities(case_id)?;
                         let masks = v.masks(case_id)?;
                         let practitioner = v.practitioner()?.names.first().cloned();
-                        let now =
-                            restore(&d.text_tagged, &identities, practitioner.as_deref(), &masks);
+                        let now = shown_paragraph(
+                            &d.text_tagged,
+                            d.author,
+                            &identities,
+                            practitioner.as_deref(),
+                            &masks,
+                        );
                         now.trim() != seen.trim()
                     }
                 }
@@ -342,7 +353,13 @@ impl Core {
                 id: d.id,
                 saved_at: d.saved_at,
                 by_ai: d.author == Author::Ai,
-                text: restore(&d.text_tagged, &identities, practitioner.as_deref(), &masks),
+                text: shown_paragraph(
+                    &d.text_tagged,
+                    d.author,
+                    &identities,
+                    practitioner.as_deref(),
+                    &masks,
+                ),
             })
             .collect())
     }
@@ -388,6 +405,22 @@ impl Core {
     }
 
     // ------------------------------------------------------------ AI: prepare → approve → send
+}
+
+/// A stored paragraph (or an earlier wording of one) as she sees it and exports it: hers with
+/// her kept words as she wrote them (D-126), Claude's with every other tag put back.
+pub(crate) fn shown_paragraph(
+    text_tagged: &str,
+    author: Author,
+    identities: &[dv_domain::Identity],
+    practitioner: Option<&str>,
+    masks: &[dv_domain::MaskEntry],
+) -> String {
+    if author == Author::User {
+        dv_privacy::restore::restore_hers(text_tagged, identities, practitioner, masks)
+    } else {
+        restore(text_tagged, identities, practitioner, masks)
+    }
 }
 
 /// A stored paragraph as it goes into a request (D-126): hers back as she wrote it, so the

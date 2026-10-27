@@ -2015,3 +2015,75 @@ fn her_edit_keeps_every_word_and_the_request_still_hides_them() {
         para(&mut core).text
     );
 }
+
+/// The second review of D-126: a kept-words tag the model writes (the numbers run from 1, so
+/// one is easy to guess) never shows her words, and so cannot bring them out after she edits
+/// the paragraph it is in. Every answer goes through the same road back (`receive`): a
+/// section, a consultation, the check of the report.
+#[test]
+fn a_kept_words_tag_the_model_writes_never_shows_or_sends_her_words() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    core.add_own_paragraph(&case, "kindergarten", "אלון לומד בגן \"זרזירים\" ומתקשה.")
+        .unwrap();
+    let first = core
+        .prepare_section(&case, "kindergarten", "שפר/י את הניסוח")
+        .unwrap();
+    assert!(!outgoing(&first).contains("זרזירים"));
+
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({
+        "reply": "הנה טיוטה עם [מילים_1].",
+        "paragraphs": [
+            { "text": "[ילד] שמח מאוד עם [מילים_1] בכל יום.", "source_refs": ["S1"] }
+        ],
+        "questions": ["האם [מילים_1] נכון?"], "missing": [], "contradictions": []
+    })));
+    let r = core.send_section(&first.approval_id.unwrap()).unwrap();
+    let shown = serde_json::to_string(&r).unwrap();
+    assert!(!shown.contains("זרזירים"), "{shown}");
+    let section = core
+        .case_detail(&case)
+        .unwrap()
+        .sections
+        .into_iter()
+        .find(|s| s.key == "kindergarten")
+        .unwrap();
+    let theirs = section.paragraphs.iter().find(|p| p.by_ai).unwrap();
+    assert!(!theirs.text.contains("זרזירים"), "{}", theirs.text);
+    // Her own paragraph still shows her words.
+    assert!(section
+        .paragraphs
+        .iter()
+        .any(|p| !p.by_ai && p.text.contains("בגן \"זרזירים\"")));
+
+    // She edits the model's paragraph as shown; it is hers now, and the next request still
+    // carries neither the kindergarten's name nor a kept-words tag.
+    let (id, text) = (theirs.id.clone(), format!("{} ", theirs.text));
+    core.edit_paragraph(&case, &id, &text).unwrap();
+    *fake.answer.lock().unwrap() = None;
+    let next = core
+        .prepare_section(&case, "kindergarten", "שפר/י את הניסוח")
+        .unwrap();
+    assert!(next.approval_id.is_some(), "{:?}", next.blocked);
+    let out = outgoing(&next);
+    for kept in ["זרזירים", "[מילים_"] {
+        assert!(!out.contains(kept), "{kept} went out: {out}");
+    }
+    core.send_section(&next.approval_id.unwrap()).unwrap();
+    let sent = fake.sent.lock().unwrap().last().cloned().unwrap();
+    assert!(!sent.contains("זרזירים"), "{sent}");
+
+    // A consultation's answer, shown and kept.
+    *fake.answer.lock().unwrap() = Some(json!({
+        "stop_reason": "end_turn",
+        "content": [{ "type": "text", "text": "כדאי לכתוב על [מילים_1] ועל [מילים_2]." }]
+    }));
+    let p = core
+        .prepare_consult(Some(&case), None, "איך לנסח את הפסקה על הגן?")
+        .unwrap();
+    let answer = core.send_consult(&p.approval_id.unwrap()).unwrap();
+    assert!(!answer.answer.contains("זרזירים"), "{}", answer.answer);
+    assert!(!answer.answer.contains("[מילים_"), "{}", answer.answer);
+    let kept = core.consultation(&answer.conversation_id).unwrap();
+    assert!(kept.turns.iter().all(|t| !t.text.contains("זרזירים")));
+}

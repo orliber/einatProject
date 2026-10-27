@@ -201,6 +201,39 @@ const HEBREW_CAL_MONTHS: &[&str] = &[
     "אלול",
 ];
 
+/// What may stand between the groups of an ID, a phone, a card or an account number typed in
+/// parts, for every rule that reads one (one class, so no rule is left with fewer): any space
+/// (also a non-breaking, thin or ideographic one), a hyphen, the maqaf, every dash and minus,
+/// the other scripts' hyphens, and an apostrophe, a geresh or a comma. Any of them went out
+/// whole between the groups of an ID (the second review of D-126). A plain number with a
+/// dash ("100–115", a score range) is read by `digit_run`, which keeps to hyphens.
+const GROUP_SEP: &str = r"\s\-\x{05BE}\x{2010}-\x{2015}\x{2212}\x{FE58}\x{FE63}\x{FF0D}\x{058A}\x{1806}\x{2043}\x{2E17}\x{2E3A}\x{2E3B}\x{30FC}'\x{05F3}\x{2019},";
+
+/// One character of [`GROUP_SEP`].
+fn group_sep(c: char) -> bool {
+    c.is_whitespace()
+        || matches!(
+            c,
+            '-' | '\u{05BE}' | '\u{2010}'
+                ..='\u{2015}'
+                    | '\u{2212}'
+                    | '\u{FE58}'
+                    | '\u{FE63}'
+                    | '\u{FF0D}'
+                    | '\u{058A}'
+                    | '\u{1806}'
+                    | '\u{2043}'
+                    | '\u{2E17}'
+                    | '\u{2E3A}'
+                    | '\u{2E3B}'
+                    | '\u{30FC}'
+                    | '\''
+                    | '\u{05F3}'
+                    | '\u{2019}'
+                    | ','
+        )
+}
+
 struct Compiled {
     email: Regex,
     url: Regex,
@@ -237,18 +270,22 @@ static COMPILED: LazyLock<Result<Compiled, regex::Error>> = LazyLock::new(|| {
         // A phone typed in groups. Between them a space (also a non-breaking one), a hyphen or
         // any dash ("054‑1234567" with a non-breaking hyphen, "054–1234567"); the area code
         // may be in parentheses ("(054) 123-4567", "(03)1234567"), and then it is part of it.
-        spaced_phone: Regex::new(
-            r"(?:(?:\+972[\s\-‐-―−\x{05BE}]?|0)(?:5\d|[2-4]|[89]|7\d)[\s\-‐-―−\x{05BE}]|(?:\+972\s?)?\(\s?0?(?:5\d|[2-4]|[89]|7\d)\s?\)[\s\-‐-―−\x{05BE}]?)\d{3}[\s\-‐-―−\x{05BE}]?\d{4}",
-        )?,
+        spaced_phone: Regex::new(&format!(
+            r"(?:(?:\+972[{s}]?|0)(?:5\d|[2-4]|[89]|7\d)[{s}]|(?:\+972\s?)?\(\s?0?(?:5\d|[2-4]|[89]|7\d)\s?\)[{s}]?)\d{{3}}[{s}]?\d{{4}}",
+            s = GROUP_SEP
+        ))?,
         // ID numbers typed in groups ("000 000 018", "0000-0001-8").
-        spaced_id: Regex::new(
-            r"\d{3,4}[\s\-\x{05BE}\x{2010}\x{2011}]\d{3,4}[\s\-\x{05BE}\x{2010}\x{2011}]\d{1,3}",
-        )?,
-        // Nine or ten digits one at a time, each followed by one space or hyphen.
-        single_digits: Regex::new(r"\d(?:[ \-\x{05BE}\x{2010}\x{2011}]\d){8,9}")?,
+        spaced_id: Regex::new(&format!(
+            r"\d{{3,4}}[{s}]\d{{3,4}}[{s}]\d{{1,3}}",
+            s = GROUP_SEP
+        ))?,
+        // Nine or ten digits one at a time, each followed by one separator.
+        single_digits: Regex::new(&format!(r"\d(?:[{GROUP_SEP}]\d){{8,9}}"))?,
         // Bank accounts (IBAN) and card numbers typed in groups of four.
-        iban: Regex::new(r"(?i)\bIL\d{2}(?:[ \-\x{05BE}\x{2010}\x{2011}]?\d{1,4}){3,6}")?,
-        card: Regex::new(r"\d{4}(?:[ \-\x{05BE}\x{2010}\x{2011}]\d{4}){2,3}")?,
+        iban: Regex::new(&format!(
+            r"(?i)\bIL\d{{2}}(?:[{GROUP_SEP}]?\d{{1,4}}){{3,6}}"
+        ))?,
+        card: Regex::new(&format!(r"\d{{4}}(?:[{GROUP_SEP}]\d{{4}}){{2,3}}"))?,
         num_date: Regex::new(r"(\d{1,2})[./](\d{1,2})(?:[./](\d{4}|\d{2}))?")?,
         year: Regex::new(r"(19[5-9]\d|20[0-4]\d)")?,
         address: Regex::new(
@@ -792,7 +829,10 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
                 before.get(from..)
             })
             .is_none_or(|near| ID_LABELS.iter().any(|l| near.contains(l)));
-        let spaced = m.as_str().contains(' ');
+        // A row of scores is typed with plain spaces or commas.
+        let spaced = m
+            .as_str()
+            .contains([' ', ',', '\'', '\u{05F3}', '\u{2019}']);
         if digits.len() == 9
             && (!spaced || is_valid_israeli_id(&digits) || labelled)
             && digit_bounded(text, m.start(), m.end())
@@ -813,12 +853,8 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
         let digits: String = m.as_str().chars().filter(char::is_ascii_digit).collect();
         // Text around that cannot be read (never expected) is taken as no digit next to the
         // run and as a label before it: the run is hidden.
-        let before = text
-            .get(..m.start())
-            .map(|b| b.trim_end_matches([' ', '-', '\u{05BE}']));
-        let after = text
-            .get(m.end()..)
-            .map(|a| a.trim_start_matches([' ', '-', '\u{05BE}']));
+        let before = text.get(..m.start()).map(|b| b.trim_end_matches(group_sep));
+        let after = text.get(m.end()..).map(|a| a.trim_start_matches(group_sep));
         let alone = !before.is_some_and(|b| b.ends_with(|ch: char| ch.is_ascii_digit()))
             && !after.is_some_and(|a| a.starts_with(|ch: char| ch.is_ascii_digit()));
         let labelled = before
@@ -883,10 +919,14 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
         }
         let kind = run_kind(&digits);
         push(&mut hits, m.start(), m.end(), kind, fixed(kind));
-        // A date already took the end of the run ("000000018-3.9.2026"): an ID or a phone in
-        // a part of it between hyphens is still hidden (it went out whole).
+        // A date already took the end of the run ("000000018-3.9.2026") or its start
+        // ("3.9.2026/000000018"): an ID or a phone in a part of it between joiners is still
+        // hidden (it went out whole).
         let mut at = m.start();
-        for part in m.as_str().split(['-', '\u{05BE}', '\u{2010}', '\u{2011}']) {
+        for part in m
+            .as_str()
+            .split(['-', '.', '/', '\u{05BE}', '\u{2010}', '\u{2011}'])
+        {
             let (start, end) = (at, at + part.len());
             // The joiner after this part, in bytes.
             at = end

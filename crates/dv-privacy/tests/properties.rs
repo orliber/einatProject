@@ -17,7 +17,9 @@ use std::collections::HashMap;
 
 use common::*;
 use dv_domain::{Identity, PRACTITIONER_TAG};
-use dv_privacy::restore::{her_text_to_send, remaining_tags, restore, scan_model_output};
+use dv_privacy::restore::{
+    her_text_to_send, remaining_tags, restore, restore_hers, scan_model_output,
+};
 use dv_privacy::text::{normalize, prefix_splits, tokenize};
 use dv_privacy::{
     clear, filter, filter_split, filter_split_with_hints, filter_to_keep, filter_with_hints,
@@ -127,7 +129,7 @@ proptest! {
         let book = MaskBook::default();
         let c = PrivacyContext { masks: Some(&book), ..ctx(&ids, CASE) };
         let kept = filter_to_keep(&text, &c, &[]).unwrap();
-        prop_assert_eq!(restore(&kept.tagged, &ids, None, &book.entries()), text);
+        prop_assert_eq!(restore_hers(&kept.tagged, &ids, None, &book.entries()), text);
         // Sent again, the kept text goes out as the text itself would.
         let sent = her_text_to_send(&kept.tagged, &ids, None, &book.entries());
         prop_assert_eq!(filter(&sent, &c).unwrap().tagged, filter(&sentence(&p), &c).unwrap().tagged);
@@ -654,6 +656,27 @@ proptest! {
     }
 }
 
+/// Found by `her_kept_words_come_back_exactly` at 20,000 cases: the mask book gives one tag to
+/// the same number however it is written (a point inside it is dropped when it is read), so
+/// her second copy, with the point, came back as the first. A numbered tag is kept in her
+/// paragraph only for the very words it stands for; anything else keeps her words.
+#[test]
+fn the_same_number_written_twice_ways_comes_back_as_she_wrote_each() {
+    let ids = identities();
+    let text = "מספר 000000018 ושוב 0000\u{5B0}00018 בתיק";
+    let book = MaskBook::default();
+    let c = PrivacyContext {
+        masks: Some(&book),
+        ..ctx(&ids, CASE)
+    };
+    let kept = filter_to_keep(text, &c, &[]).unwrap();
+    assert!(!kept.tagged.contains("00018"), "{}", kept.tagged);
+    assert_eq!(
+        restore_hers(&kept.tagged, &ids, None, &book.entries()),
+        text
+    );
+}
+
 /// Found by `filter_then_restore_is_the_identity` on main (dc51787): `לגן " מתקשה "` came back
 /// as `לגן "`. Not the restore step: after an institution word a quoted word may be the
 /// kindergarten's name ("לגן \"ניצנים\""), and the outgoing filter leaves it out, as decided
@@ -685,7 +708,15 @@ fn a_quoted_word_after_an_institution_word_is_left_out_but_kept_for_her() {
     };
     let kept = filter_to_keep(&text, &c, &[]).unwrap();
     assert_eq!(kept.tagged, "לגן[מילים_1]");
-    assert_eq!(restore(&kept.tagged, &ids, None, &book.entries()), text);
+    assert_eq!(
+        restore_hers(&kept.tagged, &ids, None, &book.entries()),
+        text
+    );
+    // Shown as anyone else's text, the tag stays a tag (second review of D-126).
+    assert_eq!(
+        restore(&kept.tagged, &ids, None, &book.entries()),
+        kept.tagged
+    );
     let sent = her_text_to_send(&kept.tagged, &ids, None, &book.entries());
     assert_eq!(filter(&sent, &c).unwrap().tagged, "לגן");
     // Anywhere else (an answer, a material) the tag is plain words, and the gate refuses it.
@@ -757,7 +788,7 @@ proptest! {
         let book = MaskBook::default();
         let c = PrivacyContext { masks: Some(&book), ..ctx(&ids, CASE) };
         let kept = filter_to_keep(&text, &c, &[]).unwrap();
-        prop_assert_eq!(restore(&kept.tagged, &ids, None, &book.entries()), text.clone(), "stored {:?}", kept.tagged);
+        prop_assert_eq!(restore_hers(&kept.tagged, &ids, None, &book.entries()), text.clone(), "stored {:?}", kept.tagged);
         for (name, _) in CASE_NAMES {
             prop_assert!(!has_word(&kept.tagged, name), "{name} stored in {:?}", kept.tagged);
         }

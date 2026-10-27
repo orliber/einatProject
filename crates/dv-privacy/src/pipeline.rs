@@ -1867,10 +1867,13 @@ pub fn filter_to_keep(
     for r in &mut reps {
         // A tag that restores to exactly these words stays: a person of this case as
         // declared, the practitioner's first name (what restoring writes), or a numbered tag
-        // of the book. Anything else (left out, relative time, a generic tag, a name spelled
-        // otherwise, "Noam" or "נעם" for "נועם") keeps her words under a number.
+        // of the book kept for these very words. Anything else (left out, relative time, a
+        // generic tag, a name spelled otherwise, "Noam" or "נעם" for "נועם", a number the book
+        // keeps as written elsewhere, with a point or a space more) keeps her words under a
+        // number.
         let words = span_text(text, r.start, r.end)?;
-        let restorable = crate::masks::is_mask_tag(&r.out)
+        let restorable = (crate::masks::is_mask_tag(&r.out)
+            && book.original(&r.out).is_some_and(|o| o == words))
             || (r.out == PRACTITIONER_TAG && ctx.practitioner.first().is_some_and(|p| p == words))
             || ctx
                 .identities

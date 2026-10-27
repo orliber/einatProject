@@ -1322,6 +1322,8 @@ fn numbers_joined_by_a_maqaf_or_a_unicode_hyphen_never_go_out() {
         // A date glued to the end took the run, and the ID before it went out whole.
         ("ת.ז. 000000018-3.9.2026".to_owned(), "000000018"),
         ("000000018־12.3.2020 נבדק".to_owned(), "000000018"),
+        ("נבדק 3.9.2026/000000018".to_owned(), "000000018"),
+        ("נבדק 3.9.2026.000000018".to_owned(), "000000018"),
     ] {
         let ids = identities();
         let out = filter(&text, &ctx_for(&ids, &[], CASE)).unwrap();
@@ -1337,6 +1339,58 @@ fn numbers_joined_by_a_maqaf_or_a_unicode_hyphen_never_go_out() {
             !gate_with(&text, &ids, CASE).cleared,
             "{text} cleared by the gate"
         );
+    }
+}
+
+/// Every separator a document or a keyboard may put between the groups of an ID or a phone:
+/// the dashes, the minus, other scripts' hyphens, the spaces that do not break, and an
+/// apostrophe, a geresh or a comma. All of them went out whole and the gate cleared them
+/// (second review of D-126). The filter hides each, and the gate refuses each on its own.
+#[test]
+fn numbers_split_by_any_dash_or_space_never_go_out() {
+    let join = |parts: &[&str]| parts.concat();
+    let digits = |s: &str| s.chars().filter(char::is_ascii_digit).collect::<String>();
+    let ids = identities();
+    let dashes = [
+        '\u{2012}', '\u{2013}', '\u{2014}', '\u{2015}', '\u{2212}', '\u{FE58}', '\u{058A}',
+        '\u{2043}', '\u{2E3A}', '\u{30FC}', '\u{FE63}', '\u{2E17}',
+    ];
+    let spaces = [
+        '\u{00A0}', '\u{2009}', '\u{202F}', '\u{3000}', '\u{2007}', '\u{2002}', ' ',
+    ];
+    let marks = ['\'', '\u{05F3}', ','];
+    let mut cases = Vec::new();
+    for sep in dashes.iter().chain(&spaces).chain(&marks) {
+        let s = sep.to_string();
+        cases.push((join(&["ת.ז. 000", &s, "000", &s, "018 נמסר"]), "000000018"));
+        cases.push((join(&["ת.ז. 0000", &s, "0001", &s, "8 נמסר"]), "000000018"));
+        let single: Vec<String> = "000000018".chars().map(String::from).collect();
+        cases.push((join(&["מספר ", &single.join(&s), " נמסר"]), "000000018"));
+        cases.push((join(&["טלפון 054", &s, "765", &s, "4321"]), "7654321"));
+    }
+    for sep in dashes {
+        // Without a label too: joined by a dash, nine digits are an ID.
+        let s = sep.to_string();
+        cases.push((join(&["000", &s, "000", &s, "018 נמסר"]), "000000018"));
+    }
+    for (text, secret) in cases {
+        let out = filter(&text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(
+            !digits(&out.tagged).contains(secret),
+            "{text:?} → {}",
+            out.tagged
+        );
+        let o = send(&text, CASE);
+        assert!(o.leaked.is_empty(), "{text:?} leaked {:?}", o.leaked);
+        assert!(
+            !gate_with(&text, &ids, CASE).cleared,
+            "{text:?} cleared by the gate"
+        );
+    }
+    // A row of scores typed with plain spaces or commas is still a row of scores.
+    for text in ["ציונים: 112 104 106", "ציונים: 112,104,106", "טווח 100–115"] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert_eq!(out.tagged, text);
     }
 }
 
