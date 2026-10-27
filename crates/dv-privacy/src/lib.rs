@@ -23,7 +23,8 @@ pub use gate::{
     GENERIC_TAGS,
 };
 pub use masks::{
-    is_generic_tag, is_kept_words_tag, is_mask_tag, MaskBook, MaskEntry, KEPT_WORDS, MASK_BASES,
+    is_generic_tag, is_kept_words_tag, is_mask_tag, is_missing_note, MaskBook, MaskEntry,
+    KEPT_WORDS, MASK_BASES,
 };
 pub use misread::{ocr_misreads, Misread};
 pub use pipeline::{

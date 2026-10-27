@@ -562,12 +562,14 @@ pub(crate) fn arabic_identity_matches(
         return Vec::new();
     }
     let mut declared: Vec<(String, Target)> = Vec::new();
-    let mut add = |name: &str, target: Target| {
+    // A place ("כפר כנא", "ג'סר") is matched from two consonants (D-132): its words are
+    // short, and the Arabic token must then be three letters or more. People from three.
+    let mut add = |name: &str, target: Target, floor: usize| {
         for w in normalize(name).split(' ') {
             if is_title(w) || is_generic(w) {
                 continue;
             }
-            if let Some(k) = consonants(w, false).filter(|k| k.chars().count() >= 3) {
+            if let Some(k) = consonants(w, false).filter(|k| k.chars().count() >= floor) {
                 declared.push((k, target.clone()));
             }
         }
@@ -584,15 +586,51 @@ pub(crate) fn arabic_identity_matches(
             tag: identity.tag.clone(),
             role: identity.role,
         };
+        let floor = match identity.role {
+            Role::Kindergarten | Role::School | Role::Town | Role::Institution => 2,
+            _ => 3,
+        };
         for name in std::iter::once(&identity.value).chain(identity.aliases.iter()) {
-            add(name, target.clone());
+            add(name, target.clone(), floor);
         }
     }
     for name in ctx.practitioner {
-        add(name, Target::Practitioner);
+        add(name, Target::Practitioner, 3);
     }
+    // The generic words of a place in Arabic ("روضة", "مدرسة", "كفر"): never a name on
+    // their own, as `is_generic` reads their Hebrew counterparts.
+    const ARABIC_GENERIC: &[&str] = &[
+        "روضة",
+        "روضه",
+        "حضانة",
+        "حضانه",
+        "مدرسة",
+        "مدرسه",
+        "بستان",
+        "قرية",
+        "قريه",
+        "مدينة",
+        "مدينه",
+        "بلدة",
+        "بلده",
+        "كفر",
+        "بيت",
+        "مستشفى",
+        "عيادة",
+        "عياده",
+        "مركز",
+        "شارع",
+        "حي",
+        "جامعة",
+        "جامعه",
+        "مؤسسة",
+        "مؤسسه",
+    ];
     let mut out = Vec::new();
-    for t in tokens.iter().filter(|t| arabic(t)) {
+    for t in tokens
+        .iter()
+        .filter(|t| arabic(t) && t.norm.chars().count() >= 3)
+    {
         // Prefixes: "و", "ال", "ب", "ل", "ك", "ف" and their combinations.
         let chars: Vec<char> = t.norm.chars().collect();
         for skip in 0..chars.len().min(4) {
@@ -605,6 +643,9 @@ pub(crate) fn arabic_identity_matches(
                 continue;
             }
             let rest: String = chars.iter().skip(skip).collect();
+            if ARABIC_GENERIC.contains(&rest.as_str()) {
+                break;
+            }
             let Some(k) = consonants(&rest, true) else {
                 continue;
             };
@@ -1267,6 +1308,11 @@ fn name_run_suspects(
             {
                 break;
             }
+            // The second word after a first name is a surname only if it is no everyday
+            // word: "ד\"ר אבנר בדק" hid the verb as a second doctor (D-132).
+            if j > i + 1 && (word_bucket(&t.norm) >= EVERYDAY || inflects(&t.norm)) {
+                break;
+            }
             push(t.start, t.end, "שם אחרי תואר", out)?;
             // A second word only after a first name ("ד\"ר אבנר שטרן", not "ד\"ר כהן המליץ").
             match tokens.get(j + 1) {
@@ -1918,7 +1964,7 @@ fn plain_brackets(text: &str, ctx: &PrivacyContext<'_>) -> String {
     };
     let known = |t: &str| {
         crate::masks::is_generic_tag(t)
-            || t.starts_with("[חסר")
+            || crate::masks::is_missing_note(t)
             || dv_domain::is_score_tag(t)
             || ctx.identities.iter().any(|i| i.tag == t)
     };
@@ -2830,12 +2876,39 @@ fn analyze(
     let mut suspects: Vec<SuspectSpan> = Vec::new();
 
     // Layer 2: declared identities (every case; another case's name is a suspect, not a tag).
-    for m in identity_index(ctx).find(text, &tokens) {
-        if declared_reads_as_word(text, &tokens, m.first_token, m.last_token, m.prefix) {
+    declared_matches(text, &tokens, ctx, &mut reps, &mut suspects)?;
+    // The same text with every bidirectional control as a word break (D-132): a name a
+    // direction mark glued to the next word ("נועם\u{200F}הלך") is found this way.
+    if crate::text::has_bidi_control(text) {
+        let split = crate::text::tokenize_split_bidi(text);
+        declared_matches(text, &split, ctx, &mut reps, &mut suspects)?;
+    }
+    // A declared name inside a longer word ("עידוש", "נועם1", "מיכלוש", D-132): the whole
+    // word is hidden, as "שאלון" is, and listed so "להחזיר" can keep it.
+    declared_inside_tokens(text, &tokens, ctx, &mut reps, &mut suspects)?;
+    absorb_titles(text, &tokens, ctx, &mut reps);
+    declared_arabic(text, &tokens, ctx, &mut reps, &mut suspects)?;
+    layer_4_and_on(text, &tokens, ctx, hints, reps, suspects)
+}
+
+/// Every declared name matched on `tokens` (one view of the text), as a replacement of this
+/// case, a suspect of another case, or the word it also is; a span already taken is skipped.
+fn declared_matches(
+    text: &str,
+    tokens: &[Token],
+    ctx: &PrivacyContext<'_>,
+    reps: &mut Vec<Replacement>,
+    suspects: &mut Vec<SuspectSpan>,
+) -> Result<(), PrivacyError> {
+    for m in identity_index(ctx).find(text, tokens) {
+        if overlaps(m.start, m.end, reps, suspects) {
+            continue;
+        }
+        if declared_reads_as_word(text, tokens, m.first_token, m.last_token, m.prefix) {
             continue;
         }
         if matches!(&m.payload, Target::Identity { case_id, .. } if *case_id != ctx.case_id)
-            && other_case_word(text, &tokens, ctx, m.first_token, m.last_token, m.prefix)
+            && other_case_word(text, tokens, ctx, m.first_token, m.last_token, m.prefix)
         {
             continue;
         }
@@ -2857,7 +2930,7 @@ fn analyze(
                         suspect: Suspect {
                             token: span_text(text, whole.start, whole.end)?.to_owned(),
                             kind: SuspectKind::AmbiguousWord,
-                            message: "שם מהתיק בתוך מילה".to_owned(),
+                            message: INSIDE_THIS_CASE.to_owned(),
                             suggested_role: Role::Other,
                         },
                         known: Some(tag.clone()),
@@ -2872,7 +2945,7 @@ fn analyze(
                     suspect: Suspect {
                         token: span_text(text, whole.start, whole.end)?.to_owned(),
                         kind: SuspectKind::OtherCaseIdentity,
-                        message: "שם מתיק אחר בתוך מילה".to_owned(),
+                        message: INSIDE_OTHER_CASE.to_owned(),
                         suggested_role: Role::Other,
                     },
                     known: None,
@@ -2912,9 +2985,218 @@ fn analyze(
             }),
         }
     }
-    // Layer 2, Arabic script: a declared name spelled in Arabic ("روضة جسر").
-    for (start, end, target) in arabic_identity_matches(text, &tokens, ctx) {
-        if overlaps(start, end, &reps, &suspects) {
+    Ok(())
+}
+
+/// Shortest declared name the containment rule reads: shorter names ("דנה", "לוי") sit
+/// inside too many ordinary words.
+const INSIDE_MIN_LETTERS: usize = 4;
+/// What the card says of a word that holds a name of this case, of another case, or of
+/// the practitioner (D-132). A pattern that holds such a word is hidden whole instead.
+const INSIDE_THIS_CASE: &str = "שם מהתיק בתוך מילה";
+const INSIDE_OTHER_CASE: &str = "שם מתיק אחר בתוך מילה";
+const INSIDE_PRACTITIONER: &str = "שם המאבחנת בתוך מילה";
+
+fn inside_word_suspect(s: &SuspectSpan) -> bool {
+    s.suspect.message == INSIDE_THIS_CASE || s.suspect.message == INSIDE_OTHER_CASE
+}
+
+/// The declared name a whole word holds inside it, when the word is no everyday word and
+/// no name by itself: "עידוש", "נועם1", "מיכלוש", "שטרנים", "noam123" (D-132). Only words
+/// of four letters or more that are not everyday words themselves ("הילה" is a word), of
+/// this case first. The pipeline hides the whole word, and the gate refuses it, by this one
+/// function, so what leaves the filter passes the gate.
+pub(crate) fn declared_inside(ctx: &PrivacyContext<'_>, norm: &str) -> Option<Target> {
+    // An everyday word, also with prefix letters before it ("ובשאלון" is ו + ב + "שאלון")
+    // and with an ending after it ("שאלונים", "שאלוני"): the word, not the name.
+    let everyday = |w: &str| LEXICON.common_words.contains(w) || word_bucket(w) >= EVERYDAY;
+    let stems = |w: &str| {
+        let mut out = vec![w.to_owned()];
+        for ending in [
+            "ימ", "ות", "יות", "י", "ה", "ת", "נו", "כמ", "יו", "יה", "ו", "ית",
+        ] {
+            if let Some(stem) = w.strip_suffix(ending) {
+                if stem.chars().count() >= 3 {
+                    out.push(stem.to_owned());
+                }
+            }
+        }
+        out
+    };
+    // Letters, not marks or punctuation: "ג'וד" is three letters, "ג'ודו" is judo.
+    let letters = |w: &str| w.chars().filter(|c| c.is_alphabetic()).count();
+    if letters(norm) < INSIDE_MIN_LETTERS
+        || prefix_splits(norm)
+            .iter()
+            .any(|(_, h)| stems(h).iter().any(|s| everyday(s)))
+        || (ctx.allowlisted)(norm)
+    {
+        return None;
+    }
+    // A name she typed is a name also where it is a word ("מיכל", "עידו"): "מיכלוש" holds
+    // it. A name the filter found by its context is held only when it is no word, as
+    // `found_word` reads it.
+    // The name starts the word after its prefix letters ("עידוש", "ולנועמים", "נועם'ס",
+    // "noam123") or ends it ("ננועם", "123noam"): a name in the middle of a rarer word
+    // ("התיאורים" holds "אורי") is that word.
+    let at_edge = |w: &str, typed: bool| {
+        // Before a name that ends the word: digits, a letter or two of a typo (only for a
+        // name she typed: "Score" ends in an English word the filter once took for a
+        // name), or a generic place word ("בכפרורדים"), not the body of a longer word
+        // ("מסולסלים" ends in "סלים").
+        let short_before = |before: &str| {
+            before.chars().count() <= 3 && (typed || before.chars().all(|c| !c.is_alphabetic()))
+                || prefix_splits(before).iter().any(|(_, h)| is_generic(h))
+        };
+        // After a name that starts the word: an ending, a typo, "'ס", or glued digits and
+        // letters of another script ("noam123", "נועם2019"), not the body of a longer word
+        // ("קוגניטיבי" starts with "קוגן").
+        let short_after = |after: &str| {
+            after.chars().count() <= 3
+                || after.chars().all(|c| {
+                    !c.is_alphabetic()
+                        || c.is_ascii_alphabetic() != w.chars().any(|n| n.is_ascii_alphabetic())
+                })
+        };
+        norm.strip_suffix(w).is_some_and(short_before)
+            || prefix_splits(norm)
+                .iter()
+                .any(|(_, h)| h.strip_prefix(w).is_some_and(short_after))
+    };
+    let holds = |name: &str, typed: bool| {
+        normalize(name).split(' ').any(|w| {
+            letters(w) >= INSIDE_MIN_LETTERS
+                && !is_title(w)
+                && !is_generic(w)
+                && (typed || !everyday_name(w))
+                && norm != w
+                && at_edge(w, typed)
+        })
+    };
+    let mut ordered: Vec<&Identity> = ctx
+        .identities
+        .iter()
+        .filter(|i| i.case_id == ctx.case_id)
+        .collect();
+    ordered.extend(ctx.identities.iter().filter(|i| i.case_id != ctx.case_id));
+    for identity in ordered {
+        let typed = identity.source == IdentitySource::Manual;
+        if std::iter::once(&identity.value)
+            .chain(identity.aliases.iter())
+            .any(|n| holds(n, typed))
+        {
+            return Some(Target::Identity {
+                case_id: identity.case_id.clone(),
+                tag: identity.tag.clone(),
+                role: identity.role,
+            });
+        }
+    }
+    ctx.practitioner
+        .iter()
+        .any(|n| holds(n, true))
+        .then_some(Target::Practitioner)
+}
+
+/// Every word that holds a declared name ([`declared_inside`]): hidden whole, under the
+/// name's tag for this case (listed as a name inside a word, with "להחזיר"), as another
+/// case's name otherwise.
+fn declared_inside_tokens(
+    text: &str,
+    tokens: &[Token],
+    ctx: &PrivacyContext<'_>,
+    reps: &mut Vec<Replacement>,
+    suspects: &mut Vec<SuspectSpan>,
+) -> Result<(), PrivacyError> {
+    for tok in tokens {
+        if overlaps(tok.start, tok.end, reps, suspects) {
+            continue;
+        }
+        let Some(target) = declared_inside(ctx, &tok.norm) else {
+            continue;
+        };
+        let token = span_text(text, tok.start, tok.end)?.to_owned();
+        match target {
+            Target::Identity { case_id, tag, .. } if case_id == ctx.case_id => {
+                suspects.push(SuspectSpan {
+                    start: tok.start,
+                    end: tok.end,
+                    suspect: Suspect {
+                        token,
+                        kind: SuspectKind::AmbiguousWord,
+                        message: INSIDE_THIS_CASE.to_owned(),
+                        suggested_role: Role::Other,
+                    },
+                    known: Some(tag),
+                });
+            }
+            Target::Identity { .. } => suspects.push(SuspectSpan {
+                start: tok.start,
+                end: tok.end,
+                suspect: Suspect {
+                    token,
+                    kind: SuspectKind::OtherCaseIdentity,
+                    message: INSIDE_OTHER_CASE.to_owned(),
+                    suggested_role: Role::Other,
+                },
+                known: None,
+            }),
+            Target::Practitioner => reps.push(Replacement {
+                start: tok.start,
+                end: tok.end,
+                out: PRACTITIONER_TAG.to_owned(),
+                label: INSIDE_PRACTITIONER.to_owned(),
+                relative: false,
+                declared: true,
+            }),
+        }
+    }
+    Ok(())
+}
+
+/// A title right before part of a titled identity joins the replacement: "ד\"ר שטרן" for
+/// "ד\"ר אבנר שטרן" is all "[רופא_1]", so the name comes back once, not "ד\"ר ד\"ר אבנר
+/// שטרן" (D-132). Only when the identity's own name starts with a title, and the matched
+/// words do not already include it.
+fn absorb_titles(text: &str, tokens: &[Token], ctx: &PrivacyContext<'_>, reps: &mut [Replacement]) {
+    for r in reps.iter_mut().filter(|r| r.declared) {
+        let titled = ctx.identities.iter().any(|i| {
+            i.case_id == ctx.case_id
+                && i.tag == r.out
+                && normalize(&i.value).split(' ').next().is_some_and(is_title)
+        });
+        if !titled
+            || text
+                .get(r.start..r.end)
+                .is_some_and(|m| tokenize(m).first().is_some_and(|t| is_title(&t.norm)))
+        {
+            continue;
+        }
+        let before = tokens
+            .iter()
+            .rev()
+            .find(|t| t.end <= r.start)
+            .filter(|t| is_title(&t.norm))
+            .filter(|t| {
+                text.get(t.end..r.start)
+                    .is_some_and(|g| g.chars().all(|c| c == ' ' || c == '\u{00A0}'))
+            });
+        if let Some(t) = before {
+            r.start = t.start;
+        }
+    }
+}
+
+/// Layer 2, Arabic script: a declared name spelled in Arabic ("روضة جسر").
+fn declared_arabic(
+    text: &str,
+    tokens: &[Token],
+    ctx: &PrivacyContext<'_>,
+    reps: &mut Vec<Replacement>,
+    suspects: &mut Vec<SuspectSpan>,
+) -> Result<(), PrivacyError> {
+    for (start, end, target) in arabic_identity_matches(text, tokens, ctx) {
+        if overlaps(start, end, reps, suspects) {
             continue;
         }
         match target {
@@ -2949,6 +3231,18 @@ fn analyze(
             }),
         }
     }
+    Ok(())
+}
+
+/// Layers 4 and on (patterns, the lexicons, hints, auto-hiding), on what layer 2 left.
+fn layer_4_and_on(
+    text: &str,
+    tokens: &[Token],
+    ctx: &PrivacyContext<'_>,
+    hints: &[NameHint],
+    mut reps: Vec<Replacement>,
+    mut suspects: Vec<SuspectSpan>,
+) -> Result<(Vec<Replacement>, Vec<AutoSpan>), PrivacyError> {
     // Layer 4: patterns, read with the tags already in the text blanked: "[מספר_זהות_1] מרץ"
     // was read as "1 במרץ" and cut the tag.
     // The words already replaced (a declared person, the practitioner) are blanked too: a
@@ -2992,6 +3286,23 @@ fn analyze(
                 .all(month_suspect)
         {
             suspects.retain(|s| !month_suspect(s));
+        }
+        // A pattern that holds a word with a name inside it ("svetak19@example.com", with
+        // "sveta" declared) is hidden whole: the word alone would leave the rest of the
+        // address beside its tag, and the gate would refuse it (D-132).
+        let within = |s: usize, e: usize| hit.start <= s && e <= hit.end;
+        let touching = |s: usize, e: usize| hit.start < e && s < hit.end;
+        if suspects
+            .iter()
+            .filter(|s| touching(s.start, s.end))
+            .all(|s| inside_word_suspect(s) && within(s.start, s.end))
+            && reps
+                .iter()
+                .filter(|r| touching(r.start, r.end))
+                .all(|r| r.label == INSIDE_PRACTITIONER && within(r.start, r.end))
+        {
+            suspects.retain(|s| !touching(s.start, s.end));
+            reps.retain(|r| !touching(r.start, r.end));
         }
         if !overlaps(hit.start, hit.end, &reps, &suspects) {
             reps.push(Replacement {
@@ -3088,7 +3399,7 @@ fn analyze(
     // stored paragraph sent again) lost 'ע"ש [טלפון' and went out as "גן_1] מרץ", read as
     // the first of March (found by the long property runs of D-130). The name ends before the tag.
     let tags = protected_tags(text, ctx);
-    for mut r in institution_names(text, &tokens)? {
+    for mut r in institution_names(text, tokens)? {
         if let Some(cut) = tags
             .iter()
             .filter(|t| t.start < r.end && r.start < t.end)
@@ -3105,9 +3416,9 @@ fn analyze(
         }
     }
     // Places from the lexicon (localities, hospitals) are hidden automatically.
-    for m in LEXICON.places.find(text, &tokens) {
+    for m in LEXICON.places.find(text, tokens) {
         if m.first_token == m.last_token
-            && place_reads_as_word(text, &tokens, m.first_token, m.prefix)
+            && place_reads_as_word(text, tokens, m.first_token, m.prefix)
         {
             continue;
         }
@@ -3127,24 +3438,24 @@ fn analyze(
         }
     }
     // Where a child was born or came from ("נולד בחרקוב"), when it is not an everyday word.
-    for r in context::origin_places(text, &tokens, &reps, &suspects)? {
+    for r in context::origin_places(text, tokens, &reps, &suspects)? {
         reps.push(r);
     }
     // Layers 3, 5, 6: suspects on what is left.
-    suspects.extend(find_suspects(text, &tokens, ctx, &reps)?);
+    suspects.extend(find_suspects(text, tokens, ctx, &reps)?);
     // Names that are also words, in a context that leaves no other reading (D-049).
-    let strong = context::strong_names(text, &tokens, ctx.allowlisted, &reps, &suspects)?;
+    let strong = context::strong_names(text, tokens, ctx.allowlisted, &reps, &suspects)?;
     suspects.extend(strong);
     // Layer 5b: what a local name model reads as a person, where no rule decided (stage 5).
-    let hinted = hint_suspects(text, &tokens, ctx, hints, &reps, &suspects)?;
+    let hinted = hint_suspects(text, tokens, ctx, hints, &reps, &suspects)?;
     suspects.extend(hinted);
     // A name found once is the same name elsewhere in the text ("קוראים לה נוגה" … "נוגה
     // צחקה").
-    let again = recurring_names(text, &tokens, ctx, &reps, &suspects)?;
+    let again = recurring_names(text, tokens, ctx, &reps, &suspects)?;
     suspects.extend(again);
 
     // Nothing is asked any more: every suspect is hidden, and the card lists it.
-    let mut autos = auto_hide(text, &tokens, ctx, &suspects, &mut reps)?;
+    let mut autos = auto_hide(text, tokens, ctx, &suspects, &mut reps)?;
     autos.extend(declared_auto(ctx, &reps));
 
     // A fixed point with the gate (D-050): what would go out is checked by the gate's own name
@@ -3176,7 +3487,7 @@ fn analyze(
         if extra.is_empty() {
             break;
         }
-        autos.extend(auto_hide(text, &tokens, ctx, &extra, &mut reps)?);
+        autos.extend(auto_hide(text, tokens, ctx, &extra, &mut reps)?);
     }
 
     reps.sort_by_key(|r| r.start);
