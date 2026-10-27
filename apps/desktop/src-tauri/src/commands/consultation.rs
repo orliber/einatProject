@@ -15,8 +15,8 @@ pub(crate) async fn prepare_consult(
         vec![message.clone()],
     )
     .await;
-    with_core(&state, move |c| {
-        c.prepare_consult(case_id.as_deref(), conversation_id.as_deref(), &message)
+    prepare_off_lock(&state, move |c| {
+        c.begin_prepare_consult(case_id.as_deref(), conversation_id.as_deref(), &message)
     })
     .await
 }

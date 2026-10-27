@@ -201,11 +201,12 @@ fn an_edit_after_the_review_never_rides_on_the_earlier_approval() {
     )
     .unwrap();
 
-    // The earlier approval sends what she reviewed, byte for byte, and not the new text.
-    core.send_section(&first).unwrap();
-    let sent = fake.sent.lock().unwrap().last().cloned().unwrap();
-    assert_eq!(sha256_hex(sent.as_bytes()), first);
-    assert!(!sent.contains("לוח מעברים"), "{sent}");
+    // The earlier approval does not go (she may have taken a sentence out), and says why.
+    let Err(CoreError::Refused(why)) = core.send_section(&first) else {
+        panic!("a request prepared with the old text was sent");
+    };
+    assert!(why.contains("החומר השתנה"), "{why}");
+    assert!(fake.sent.lock().unwrap().is_empty());
 
     // The new text needs a new review, with a new approval of its own.
     let second = approval(&mut core, &case);

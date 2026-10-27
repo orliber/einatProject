@@ -235,7 +235,25 @@ export class FakeCore {
   private sampleId: string | null = null;
   private folderList: Folder[] = [];
   private pending = new Map<string, Pending>();
+  /** Approvals dropped because their material changed, with the line said at the send. */
+  private withdrawn = new Set<string>();
   private style = new FakeStyle();
+
+  /** An approval that is gone: why, in one line (like the core). */
+  private expired(id: string): never {
+    if (this.withdrawn.has(id)) fail("refused", "החומר השתנה אחרי שהבקשה הוכנה, ולכן היא לא נשלחה. צריך להכין אותה מחדש.");
+    return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
+  }
+
+  /** A material of the case changed or was deleted: nothing prepared with it goes. */
+  private withdrawFor(caseId: string) {
+    for (const [id, p] of this.pending) {
+      if (p.caseId === caseId) {
+        this.pending.delete(id);
+        this.withdrawn.add(id);
+      }
+    }
+  }
 
   constructor() {
     // `?cases=empty` and `?cases=many` (V2): the edges of the cases screen, for the tests.
@@ -906,7 +924,7 @@ export class FakeCore {
         return this.prepareVerify(this.find(a.caseId), String(a.sectionKey));
       case "send_verify": {
         const p = this.pending.get(String(a.approvalId));
-        if (p?.type !== "verify") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
+        if (p?.type !== "verify") return this.expired(String(a.approvalId));
         this.pending.delete(String(a.approvalId));
         await new Promise((r) => setTimeout(r, 900));
         // Like the demo check: only numbers that no source has are found; nothing is "supported".
@@ -920,12 +938,13 @@ export class FakeCore {
         return { on: this.reportCheckOn, cents_per_check: 15 };
       case "set_report_check":
         this.reportCheckOn = Boolean(a.on);
+        if (!this.reportCheckOn) for (const [id, p] of this.pending) if (p.type === "report_check") this.pending.delete(id);
         return null;
       case "prepare_report_check":
         return this.prepareReportCheck(this.find(a.caseId));
       case "send_report_check": {
         const p = this.pending.get(String(a.approvalId));
-        if (p?.type !== "report_check") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
+        if (p?.type !== "report_check") return this.expired(String(a.approvalId));
         this.pending.delete(String(a.approvalId));
         this.keepSent(p.caseId, "report_check", p.texts.join("\n\n"));
         await new Promise((r) => setTimeout(r, 900));
@@ -1180,6 +1199,7 @@ export class FakeCore {
       case "update_input": {
         const c = this.find(a.caseId);
         const i = c.inputs.find((x) => x.id === a.inputId) ?? fail("not_found", "החומר לא נמצא");
+        if (i.title !== String(a.title) || i.content !== String(a.content)) this.withdrawFor(c.id);
         i.title = String(a.title);
         if (i.content !== String(a.content)) {
           const r = this.routingOf(c, i.id);
@@ -1191,7 +1211,10 @@ export class FakeCore {
       case "delete_input": {
         const c = this.find(a.caseId);
         const gone = c.inputs.find((i) => i.id === a.inputId);
-        if (gone) this.removedInput = { caseId: String(a.caseId), input: gone, at: c.inputs.indexOf(gone) };
+        if (gone) {
+          this.removedInput = { caseId: String(a.caseId), input: gone, at: c.inputs.indexOf(gone) };
+          this.withdrawFor(c.id);
+        }
         c.inputs = c.inputs.filter((i) => i.id !== a.inputId);
         return null;
       }
@@ -1296,7 +1319,7 @@ export class FakeCore {
       }
       case "send_section": {
         const p = this.pending.get(String(a.approvalId));
-        if (p?.type !== "section") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
+        if (p?.type !== "section") return this.expired(String(a.approvalId));
         this.pending.delete(String(a.approvalId));
         await new Promise((r) => setTimeout(r, 2500));
         const c = this.find(p.caseId);
@@ -1308,7 +1331,7 @@ export class FakeCore {
         return this.prepareSort(this.find(a.caseId));
       case "send_sort": {
         const p = this.pending.get(String(a.approvalId));
-        if (p?.type !== "sort") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
+        if (p?.type !== "sort") return this.expired(String(a.approvalId));
         this.pending.delete(String(a.approvalId));
         await new Promise((r) => setTimeout(r, 700));
         return this.sendSort(p);
@@ -1396,7 +1419,7 @@ export class FakeCore {
       }
       case "send_consult": {
         const p = this.pending.get(String(a.approvalId));
-        if (p?.type !== "consult") return fail("refused", "האישור לא תקף. יש להכין את השליחה מחדש.");
+        if (p?.type !== "consult") return this.expired(String(a.approvalId));
         this.pending.delete(String(a.approvalId));
         await new Promise((r) => setTimeout(r, 1400));
         // Shaped like a real answer (headings, bold, a list), so the layout of answers is seen in the demo.

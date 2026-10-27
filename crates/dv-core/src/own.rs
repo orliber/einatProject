@@ -70,6 +70,11 @@ impl Core {
         };
         self.vault_mut()?
             .set_setting(&format!("{MODE_PREFIX}{section_key}"), value)?;
+        // Nothing of a case is sent for a section she writes herself: a request for it,
+        // waiting or still being filtered, in any case, does not go.
+        if mode == SectionMode::Own {
+            self.drop_pending();
+        }
         Ok(())
     }
 }

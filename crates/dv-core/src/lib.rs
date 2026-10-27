@@ -25,6 +25,7 @@ mod intake;
 mod library;
 pub mod name_model;
 mod own;
+mod prepare;
 use name_model::NameHints;
 mod jobs;
 mod layers;
@@ -100,6 +101,7 @@ pub use layers::SecurityLayer;
 pub use library::TRASH_DAYS;
 pub use name_model::{HintJob, HintsRead};
 pub use own::SectionModeView;
+pub use prepare::{run_requests, Landed, RequestJob, RequestRun};
 pub use readiness::{Readiness, ReadinessItem};
 pub use report_check::{ReportCheckNote, ReportCheckResult, ReportCheckSetting};
 pub use retention::{KEEP_UNTIL_AGE, KEEP_YEARS_AFTER_LAST_CHANGE};
@@ -853,6 +855,12 @@ pub struct Core {
     rollback_warning: Option<String>,
     /// Counts the locks. An approval taken out before a lock never comes back after it.
     session: u64,
+    /// Moves whenever the approvals waiting are dropped (a lock, an answer that changes what
+    /// a request holds): a request filtered before it never lands after it (D-109).
+    pending_epoch: u64,
+    /// Approvals dropped because their material changed, by id, with the line said when she
+    /// tries to send one (memory only; cleared on lock).
+    withdrawn: HashMap<String, &'static str>,
     /// Where the optional name model is downloaded (D-053); `None` keeps it off.
     models_dir: Option<PathBuf>,
     /// The name model, started on first use or right after unlock while it is on, and
@@ -910,6 +918,24 @@ struct PrivacyData {
     masks: dv_privacy::MaskBook,
 }
 
+/// The keyed hash of a word: the open vault's, or a copy of its key that a job filters with
+/// away from the core's lock (F2, D-109).
+trait TokenHash {
+    fn token_hmac(&self, token: &str) -> String;
+}
+
+impl TokenHash for Vault {
+    fn token_hmac(&self, token: &str) -> String {
+        Vault::token_hmac(self, token)
+    }
+}
+
+impl TokenHash for dv_vault::TokenHasher {
+    fn token_hmac(&self, token: &str) -> String {
+        dv_vault::TokenHasher::token_hmac(self, token)
+    }
+}
+
 /// A [`PrivacyData`]'s word lookups against the open vault's keyed hash, kept alive while a
 /// [`PrivacyContext`] borrows them. See [`PrivacyData::lookups`].
 struct CaseLookups<'a, A, N, P> {
@@ -920,11 +946,51 @@ struct CaseLookups<'a, A, N, P> {
 }
 
 impl PrivacyData {
+    /// What the filter hides with, as the vault holds it now (no settling of stale tags).
+    fn read(v: &Vault, case_id: &str) -> Result<Self, CoreError> {
+        Ok(PrivacyData {
+            case_id: case_id.to_owned(),
+            identities: v.all_identities()?,
+            practitioner: v.practitioner()?.names,
+            allow: v.not_a_name_hmacs(case_id)?.into_iter().collect(),
+            is_name: v.is_name_hmacs(case_id)?.into_iter().collect(),
+            past: style::past_name_hmacs(v)?,
+            masks: dv_privacy::MaskBook::new(if case_id.is_empty() {
+                Vec::new()
+            } else {
+                v.masks(case_id)?
+            }),
+        })
+    }
+
+    /// A digest of everything the filter and the gate decide by, but the mask book: the
+    /// names of every case, hers, "not a name", "a name in a word" and the past reports'
+    /// names. A request filtered away from the lock lands only while it is unchanged (D-109).
+    fn fingerprint(&self) -> Result<String, CoreError> {
+        let mut identities: Vec<&dv_domain::Identity> = self.identities.iter().collect();
+        identities.sort_by(|a, b| (&a.case_id, &a.id).cmp(&(&b.case_id, &b.id)));
+        fn sorted(set: &HashSet<String>) -> Vec<&String> {
+            let mut v: Vec<&String> = set.iter().collect();
+            v.sort();
+            v
+        }
+        let bytes = serde_json::to_vec(&(
+            &self.case_id,
+            identities,
+            &self.practitioner,
+            sorted(&self.allow),
+            sorted(&self.is_name),
+            sorted(&self.past),
+        ))
+        .map_err(|e| CoreError::Internal(e.to_string()))?;
+        Ok(dv_vault::crypto::sha256_hex(&bytes))
+    }
+
     /// The lookups every case context uses: "not a name", "a name in a word", and her past
     /// reports' names, each by keyed hash of the normalized token.
-    fn lookups<'a>(
+    fn lookups<'a, H: TokenHash>(
         &'a self,
-        v: &'a Vault,
+        v: &'a H,
     ) -> CaseLookups<
         'a,
         impl Fn(&str) -> bool + 'a,

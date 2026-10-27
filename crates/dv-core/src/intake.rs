@@ -158,20 +158,7 @@ impl Core {
                 self.settled = Some((case_id.to_owned(), self.vault_ref()?.change_counts()));
             }
         }
-        let v = self.vault_ref()?;
-        Ok(PrivacyData {
-            case_id: case_id.to_owned(),
-            identities: v.all_identities()?,
-            practitioner: v.practitioner()?.names,
-            allow: v.not_a_name_hmacs(case_id)?.into_iter().collect(),
-            is_name: v.is_name_hmacs(case_id)?.into_iter().collect(),
-            past: style::past_name_hmacs(v)?,
-            masks: dv_privacy::MaskBook::new(if case_id.is_empty() {
-                Vec::new()
-            } else {
-                v.masks(case_id)?
-            }),
-        })
+        PrivacyData::read(self.vault_ref()?, case_id)
     }
 
     /// A tag in the case's stored text that no longer belongs to the case (a name she brought

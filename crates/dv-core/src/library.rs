@@ -48,8 +48,11 @@ impl Core {
     }
 
     /// Delete = into the recycle bin. The case can be restored for 30 days.
+    /// Its requests waiting to go are dropped, and one still being filtered never lands.
     pub fn delete_case(&mut self, case_id: &str) -> Result<(), CoreError> {
-        Ok(self.vault_mut()?.trash_case(case_id)?)
+        self.vault_mut()?.trash_case(case_id)?;
+        self.forget_pending(case_id);
+        Ok(())
     }
 
     pub fn restore_case(&mut self, case_id: &str) -> Result<(), CoreError> {
