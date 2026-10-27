@@ -308,16 +308,19 @@ static COMPILED: LazyLock<Result<Compiled, regex::Error>> = LazyLock::new(|| {
             r"(?:(?:\+972[{s}]?|0)(?:5\d|[2-4]|[89]|7\d)[{s}]|(?:\+972\s?)?\(\s?0?(?:5\d|[2-4]|[89]|7\d)\s?\)[{s}]?)\d{{3}}[{s}]?\d{{4}}",
             s = GROUP_SEP
         ))?,
-        // ID numbers typed in groups ("000 000 018", "0000-0001-8").
+        // ID numbers typed in groups ("000 000 018", "0000-0001-8"), with up to three
+        // separators between them ("000 - 000 - 018", "000, 000, 018" went out whole, fourth
+        // review of D-128).
         spaced_id: Regex::new(&format!(
-            r"\d{{3,4}}[{s}]\d{{3,4}}[{s}]\d{{1,3}}",
+            r"\d{{3,4}}[{s}]{{1,3}}\d{{3,4}}[{s}]{{1,3}}\d{{1,3}}",
             s = GROUP_SEP
         ))?,
         // Nine or ten digits one at a time, each followed by one separator.
         single_digits: Regex::new(&format!(r"\d(?:[{GROUP_SEP}]\d){{8,9}}"))?,
-        // Nine digits in groups of any size, each at most one separator (or a period) from the
-        // next: after an ID label, an ID however it was typed ("ת.ז 00 00 00 01 8").
-        labelled_digits: Regex::new(&format!(r"\d(?:[{GROUP_SEP}.]?\d){{8}}"))?,
+        // Nine digits in groups of any size, each at most three separators (or periods) from
+        // the next: next to an ID label, an ID however it was typed ("ת.ז 00 00 00 01 8",
+        // "ת.ז 00  00  00  01  8").
+        labelled_digits: Regex::new(&format!(r"\d(?:[{GROUP_SEP}.]{{0,3}}\d){{8}}"))?,
         // Bank accounts (IBAN) and card numbers typed in groups of four.
         iban: Regex::new(&format!(
             r"(?i)\bIL\d{{2}}(?:[{GROUP_SEP}]?\d{{1,4}}){{3,6}}"
@@ -427,7 +430,65 @@ fn infer_year(m: u32, d: u32, today: Ymd) -> i32 {
 }
 
 /// Labels that make nine digits near them an ID number.
-const ID_LABELS: [&str; 5] = ["ת.ז", "ת\"ז", "ת״ז", "זהות", "ID"];
+const ID_LABELS: [&str; 6] = ["ת.ז", "ת\"ז", "ת״ז", "זהות", "ID", "מ.ז"];
+
+/// Labels written as a word of their own, so a longer word that holds them is not one:
+/// "תז" and not "תזונה", "id" and not "idea".
+const ID_LABEL_WORDS: [&str; 3] = ["תז", "מז", "id"];
+
+/// Where the first ID label in this text ends.
+fn label_end(near: &str) -> Option<usize> {
+    let mut words = Vec::new();
+    let mut from = None;
+    for (i, c) in near
+        .char_indices()
+        .chain(std::iter::once((near.len(), ' ')))
+    {
+        match (c.is_alphanumeric(), from) {
+            (true, None) => from = Some(i),
+            (false, Some(f)) => {
+                words.push((f, i));
+                from = None;
+            }
+            _ => {}
+        }
+    }
+    let labels = ID_LABELS
+        .iter()
+        .filter_map(|l| near.find(l).map(|i| i + l.len()));
+    let label_words = words.into_iter().filter_map(|(f, t)| {
+        near.get(f..t)
+            .filter(|w| ID_LABEL_WORDS.iter().any(|l| w.eq_ignore_ascii_case(l)))
+            .map(|_| t)
+    });
+    labels.chain(label_words).min()
+}
+
+/// An ID label within twenty characters before the number, or after it ("00 00 00 01 8
+/// ת.ז", "000 000 01 8 (מספר זהות)" went out whole, fourth review of D-128). After it, only
+/// when no number of its own follows the label: in "ציונים 100 112 125, ת.ז 000000018" the
+/// label is the next number's, also once that number is a tag ("ת.ז [ת.ז.]", blanked to
+/// `x` for reading). Text around that cannot be read (never expected) counts as a label.
+fn id_label_near(text: &str, start: usize, end: usize) -> bool {
+    let before = text.get(..start).and_then(|b| {
+        let from = b.char_indices().rev().nth(20).map_or(0, |(i, _)| i);
+        b.get(from..)
+    });
+    let after = text.get(end..).and_then(|a| {
+        let to = a.char_indices().nth(20).map_or(a.len(), |(i, _)| i);
+        a.get(..to)
+    });
+    let labelled_after = |a: &str| {
+        label_end(a).is_some_and(|i| {
+            text.get(end + i..).is_none_or(|rest| {
+                !rest
+                    .trim_start_matches(|c: char| !c.is_alphanumeric() && c != '[')
+                    .starts_with(|c: char| c.is_ascii_digit() || matches!(c, 'x' | '['))
+            })
+        })
+    };
+    before.is_none_or(|b| label_end(b).is_some()) || after.is_none_or(labelled_after)
+}
 
 // Both read "no character" where `i` is not a boundary (never expected: it ends or starts a
 // match), and `digit_bounded`, their only reader, then takes the number as standing alone.
@@ -757,13 +818,27 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
                 continue;
             }
             // A neighbour that cannot be read (never expected) is taken into the date.
-            let numeral_before = i.checked_sub(1).and_then(|j| tokens.get(j)).filter(|t| {
+            // Past "in" written apart ("3 ב-אדר 2024"), as for the other months.
+            let day_at = prev.filter(|&j| j < i);
+            let numeral_before = day_at.and_then(|j| tokens.get(j)).filter(|t| {
                 text.get(t.start..t.end)
                     .is_none_or(|raw| c.hebrew_numeral.is_match(raw) && hebrew_day(raw))
             });
-            // A day in digits ("15 בתשרי 2020"), only with the year after it.
-            let digits_before = i
-                .checked_sub(1)
+            // "בתשרי", "ב-תשרי": with "in", the month, not a name ("סיון").
+            let in_month = splits.iter().any(|(p, w)| {
+                *p == 1
+                    && tok.norm.starts_with('ב')
+                    && HEBREW_CAL_MONTHS.iter().any(|m| norm_eq(m, w))
+            }) || i.checked_sub(1).is_some_and(|j| {
+                norm(j) == "ב"
+                    && tokens.get(j).is_some_and(|p| {
+                        text.get(p.end..tok.start)
+                            .is_some_and(|g| matches!(g, "-" | "\u{05BE}"))
+                    })
+            });
+            // A day in digits: with the year after it ("15 תשרי 2020"), or before "in" the
+            // month ("15 בתשרי" went out unchanged, fourth review of D-128).
+            let digits_before = day_at
                 .filter(|&j| num(j).is_some_and(|d| (1..=30).contains(&d)))
                 .and_then(|j| tokens.get(j));
             // "אדר ב' 2024": the second Adar.
@@ -774,14 +849,18 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
             } else {
                 i + 1
             };
-            // A Hebrew year ("תשפ\"ה") or a Gregorian one ("בכסלו 2021").
+            // A Hebrew year ("תשפ\"ה") or a Gregorian one ("בכסלו 2021"), also cut short after
+            // "in" the month or a day ("בתשרי 20", "15 בתשרי 20").
+            let with_day = numeral_before.is_some() || digits_before.is_some();
             let year_tok = tokens.get(after).filter(|t| {
                 full_year(after).is_some()
+                    || ((in_month || with_day) && short_year(after).is_some())
                     || text
                         .get(t.start..t.end)
                         .is_none_or(|raw| c.hebrew_year.is_match(raw))
             });
-            let before = numeral_before.or(digits_before.filter(|_| year_tok.is_some()));
+            let before =
+                numeral_before.or(digits_before.filter(|_| year_tok.is_some() || in_month));
             if before.is_none() && year_tok.is_none() {
                 continue;
             }
@@ -996,15 +1075,8 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
     for m in c.spaced_id.find_iter(text) {
         let digits: String = m.as_str().chars().filter(char::is_ascii_digit).collect();
         // Grouped with spaces, nine digits are an ID only when they pass the check digit or
-        // follow an ID label: "112 104 106" is a row of scores.
-        // Text before that cannot be read (never expected) counts as a label.
-        let labelled = text
-            .get(..m.start())
-            .and_then(|before| {
-                let from = before.char_indices().rev().nth(20).map_or(0, |(i, _)| i);
-                before.get(from..)
-            })
-            .is_none_or(|near| ID_LABELS.iter().any(|l| near.contains(l)));
+        // an ID label is next to them: "112 104 106" is a row of scores.
+        let labelled = id_label_near(text, m.start(), m.end());
         // A row of scores is typed with spaces, commas or dashes ("100–115–120").
         let spaced = m
             .as_str()
@@ -1034,12 +1106,7 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
         let after = text.get(m.end()..).map(|a| a.trim_start_matches(group_sep));
         let alone = !before.is_some_and(|b| b.ends_with(|ch: char| ch.is_ascii_digit()))
             && !after.is_some_and(|a| a.starts_with(|ch: char| ch.is_ascii_digit()));
-        let labelled = before
-            .and_then(|b| {
-                let from = b.char_indices().rev().nth(20).map_or(0, |(i, _)| i);
-                b.get(from..)
-            })
-            .is_none_or(|near| ID_LABELS.iter().any(|l| near.contains(l)));
+        let labelled = id_label_near(text, m.start(), m.end());
         let kind = match digits.len() {
             9 if is_valid_israeli_id(&digits) || labelled => PatternKind::IdNumber,
             10 if digits.starts_with('0') && !digits.starts_with("00") => PatternKind::Phone,
@@ -1049,18 +1116,19 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
             push(&mut hits, m.start(), m.end(), kind, fixed(kind));
         }
     }
-    // Nine digits right after an ID label are the ID, in groups of any size: "ת.ז 00 00 00 01
+    // Nine digits next to an ID label are the ID, in groups of any size: "ת.ז 00 00 00 01
     // 8" and "ת.ז 000 000 01 8" went out whole (third review of D-126).
     for m in c.labelled_digits.find_iter(text) {
-        // Text before that cannot be read (never expected) counts as a label.
-        let labelled = text
-            .get(..m.start())
-            .and_then(|before| {
-                let from = before.char_indices().rev().nth(20).map_or(0, |(i, _)| i);
-                before.get(from..)
-            })
-            .is_none_or(|near| ID_LABELS.iter().any(|l| near.contains(l)));
-        if labelled && digit_bounded(text, m.start(), m.end()) {
+        // A full date in them is a date ("ת.ז בתיק. נבדק 12.3.2020 10:15" lost the date and
+        // left ":15"): the date rule hides its digits whole, so no ID is left either.
+        let dated = c
+            .num_date
+            .captures_iter(m.as_str())
+            .any(|caps| caps.get(3).is_some_and(|y| y.len() == 4));
+        if !dated
+            && id_label_near(text, m.start(), m.end())
+            && digit_bounded(text, m.start(), m.end())
+        {
             push(
                 &mut hits,
                 m.start(),
@@ -1208,8 +1276,17 @@ fn date_gap(gap: &str) -> bool {
 /// stay two. A month name alone, with nothing next to it ("במרץ"), is read as before.
 fn join_month_names(text: &str, hits: &mut Vec<PatternHit>) {
     let tokens = tokenize(text);
-    let month_at =
-        |t: &crate::text::Token| month_word(&t.norm).is_some() && !inside_tag(text, t.start, t.end);
+    // A month of the Hebrew calendar only with "in" glued on or written apart ("בסיון",
+    // "ב-סיון"): bare, it may be a name ("פגישה עם סיון 12.3.2020" hid סיון in the date, and
+    // it was never asked about, fourth review of D-128).
+    let month_at = |t: &crate::text::Token, apart_in: bool| {
+        let month = match month_word(&t.norm) {
+            Some(0) => apart_in || t.norm.starts_with('ב'),
+            Some(_) => true,
+            None => false,
+        };
+        month && !inside_tag(text, t.start, t.end)
+    };
     // The words next to a date, as spans: each word, and a prefix written apart with a
     // hyphen together with the month after it ("2015 ב-מרץ"), as one.
     let mut words: Vec<(usize, usize, bool)> = Vec::with_capacity(tokens.len());
@@ -1218,7 +1295,7 @@ fn join_month_names(text: &str, hits: &mut Vec<PatternHit>) {
         let next = tokens.get(idx + 1);
         let glued = next.filter(|n| {
             crate::text::is_valid_prefix(&t.norm)
-                && month_at(n)
+                && month_at(n, t.norm == "ב")
                 && text
                     .get(t.end..n.start)
                     .is_some_and(|g| matches!(g, "-" | "\u{05BE}"))
@@ -1227,7 +1304,7 @@ fn join_month_names(text: &str, hits: &mut Vec<PatternHit>) {
             words.push((t.start, n.end, true));
             idx += 2;
         } else {
-            words.push((t.start, t.end, month_at(t)));
+            words.push((t.start, t.end, month_at(t, false)));
             idx += 1;
         }
     }
