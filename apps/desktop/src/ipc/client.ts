@@ -392,6 +392,10 @@ export const ipc = {
   sentHistory: (caseId: string | null, place: string | null, query: string) => call("sent_history", { caseId, place, query }),
   sentText: (caseId: string, id: string) => call("sent_text", { caseId, id }),
   retentionDue: () => call("retention_due"),
+  /** Files an older version saved in the app's own folder (D-120): their number only. */
+  oldExports: () => call("old_exports"),
+  /** That folder in the system's file window, to move or delete what is there. */
+  openOldExports: () => run("open_old_exports"),
   keepCaseLonger: (caseId: string, years: number) => run("keep_case_longer", { caseId, years }),
 
   /** `current` is the password, or the recovery kit when the password was forgotten. */

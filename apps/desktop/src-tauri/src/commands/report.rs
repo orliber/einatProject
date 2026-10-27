@@ -72,6 +72,55 @@ fn chosen_export_dir(chosen: Option<PathBuf>) -> Result<PathBuf, CoreError> {
     Ok(dir)
 }
 
+/// The app's own folder where versions before D-120 saved a report when no usual folder could
+/// take it. Nothing is written there any more; what is left is shown to her, never deleted.
+fn old_exports_dir(state: &AppState) -> Option<PathBuf> {
+    state.dir.parent().map(|d| d.join("exports"))
+}
+
+/// How many files an older version left in that folder: only the number, never their names.
+fn count_files(dir: &std::path::Path) -> u32 {
+    std::fs::read_dir(dir).map_or(0, |entries| {
+        let files = entries
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+            .count();
+        u32::try_from(files).unwrap_or(u32::MAX)
+    })
+}
+
+/// Files an older version saved in the app's own folder (D-120): she is told, so reports with
+/// real names do not stay there forgotten.
+#[tauri::command]
+pub(crate) fn old_exports(state: tauri::State<'_, AppState>) -> u32 {
+    old_exports_dir(&state).map_or(0, |d| count_files(&d))
+}
+
+/// Open that folder in the system's file window, so she can move or delete what is there.
+/// The folder is the app's own; nothing from the window chooses it.
+#[tauri::command]
+pub(crate) fn open_old_exports(state: tauri::State<'_, AppState>) -> Res<()> {
+    let dir = old_exports_dir(&state)
+        .filter(|d| d.is_dir())
+        .ok_or_else(|| CoreError::Refused("התיקייה כבר לא קיימת.".to_owned()).to_ui())?;
+    let opened = if cfg!(windows) {
+        let explorer = std::env::var_os("SystemRoot").map_or_else(
+            || PathBuf::from("explorer.exe"),
+            |root| PathBuf::from(root).join("explorer.exe"),
+        );
+        std::process::Command::new(explorer).arg(&dir).spawn()
+    } else if cfg!(target_os = "macos") {
+        std::process::Command::new("/usr/bin/open")
+            .arg(&dir)
+            .spawn()
+    } else {
+        std::process::Command::new("xdg-open").arg(&dir).spawn()
+    };
+    opened
+        .map(|_| ())
+        .map_err(|_| CoreError::Refused("חלון התיקייה לא נפתח. אפשר לנסות שוב.".to_owned()).to_ui())
+}
+
 /// Write the report into the Downloads folder and return where it was saved. With `parents`,
 /// the parents' version (round 55, D-095).
 #[tauri::command]
@@ -235,6 +284,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn old_exports_are_counted_by_number_only() {
+        let dir = scratch("old");
+        assert_eq!(count_files(&dir.join("exports")), 0);
+        std::fs::create_dir_all(dir.join("exports").join("תת-תיקייה")).unwrap();
+        std::fs::write(dir.join("exports").join("דוח אבחון TEST-0042.docx"), b"x").unwrap();
+        std::fs::write(dir.join("exports").join("מכתב.docx"), b"y").unwrap();
+        assert_eq!(count_files(&dir.join("exports")), 2);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

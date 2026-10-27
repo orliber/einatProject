@@ -303,6 +303,60 @@ fn the_restore_drill_proves_the_file_and_the_password() {
     assert!(core.staged_backup.is_none());
 }
 
+/// D-119, end to end at the core: the shell's timer ticks every 15 s while the automatic
+/// backup is written on its worker. A slow drive must not stretch the gap between two ticks
+/// into "the computer slept"; the backup is still recorded when it is done.
+#[test]
+fn a_slow_auto_backup_on_its_worker_never_locks_the_vault_as_slept() {
+    use std::sync::mpsc::channel;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    let (_dir, mut core, _case) = setup(None);
+    let drive = tempfile::tempdir().unwrap();
+    core.write_backup(&drive.path().join("שלי.vaultbak"))
+        .unwrap();
+    core.mark_secret_changed().unwrap();
+    let core = Arc::new(Mutex::new(core));
+
+    // The worker, as the shell runs it: the snapshot under the lock, the slow drive with the
+    // core free (here it waits until the test says the drive is done), then the record.
+    let (drive_done, wait_for_drive) = channel::<()>();
+    let (snapshot_taken, snapshot) = channel::<()>();
+    let worker = {
+        let core = Arc::clone(&core);
+        std::thread::spawn(move || {
+            let task = core.lock().unwrap().begin_auto_backup().unwrap().unwrap();
+            snapshot_taken.send(()).unwrap();
+            wait_for_drive.recv().unwrap();
+            let run = task.run();
+            let (done, _) = core.lock().unwrap().finish_backup_for_drive(run);
+            done
+        })
+    };
+    snapshot.recv().unwrap();
+
+    // Four minutes of a slow drive: the timer goes on every 15 s, and nothing locks.
+    let t0 = SystemTime::now();
+    for n in 0..16_u64 {
+        let mut c = core.lock().unwrap();
+        assert!(!c.tick(t0 + Duration::from_secs(15 * n)), "tick {n}");
+        assert!(c.is_unlocked());
+    }
+    drive_done.send(()).unwrap();
+    let done = worker.join().unwrap().unwrap();
+    assert!(done.path.contains("גיבוי אוטומטי כספת האבחון"));
+    let mut c = core.lock().unwrap();
+    assert!(c.is_unlocked());
+    assert!(!c.backup_status().unwrap().due);
+
+    // What the timer did before, waiting for the drive itself: the next tick came the drive's
+    // time plus 15 s later, and a minute of it locked the vault as "slept".
+    let last = t0 + Duration::from_secs(15 * 15);
+    assert!(c.tick(last + Duration::from_secs(15 + 50)));
+    assert!(!c.is_unlocked());
+}
+
 #[test]
 fn a_backup_is_made_by_itself_when_the_drive_is_there() {
     let (_dir, mut core, _case) = setup(None);

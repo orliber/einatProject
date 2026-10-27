@@ -109,6 +109,8 @@ fn main() {
             "delete_consultation",
             "change_role",
             "check_original",
+            "old_exports",
+            "open_old_exports",
             "clear_report_template",
             "export_letter",
             "export_pdf",

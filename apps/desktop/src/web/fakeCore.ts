@@ -1558,6 +1558,10 @@ export class FakeCore {
         return null;
       case "retention_due":
         return [];
+      case "old_exports":
+        return 0;
+      case "open_old_exports":
+        return null;
       case "keep_case_longer": {
         const c = this.find(a.caseId);
         c.meta = { ...c.meta, retention_until: `${new Date().getFullYear() + Number(a.years ?? 1)}-${new Date().toISOString().slice(5, 10)}` };

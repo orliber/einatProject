@@ -499,6 +499,8 @@ fn main() {
             export_report,
             export_pdf,
             check_original,
+            old_exports,
+            open_old_exports,
             prepare_letter,
             letter,
             export_letter,
