@@ -1003,6 +1003,49 @@ fn databases_without_a_header_are_restored_over() {
     assert!(restored.integrity().header_ok && restored.integrity().audit_ok);
 }
 
+/// D-124: a setup over what a cut-short restore or setup left. A header next to zeroed or
+/// empty databases is cleared and the new vault opens; databases that hold data without a
+/// header are refused, and nothing is written next to them.
+#[test]
+fn a_new_vault_clears_empty_leftovers_and_refuses_databases_without_a_header() {
+    let target = tempfile::tempdir().unwrap();
+    let t = target.path();
+    fs::write(t.join("vault.header"), b"{\"format\": 1}").unwrap();
+    fs::write(t.join("main.db"), [0u8; 8192]).unwrap();
+    fs::write(t.join("identity.db"), b"").unwrap();
+    fs::write(t.join("audit.db-wal"), [0u8; 32]).unwrap();
+    fs::write(t.join("main.db-shm"), [0u8; 64]).unwrap();
+    assert!(!Vault::exists(t));
+    let created = Vault::create(t, PASSWORD, Argon2Params::TEST).unwrap();
+    drop(created);
+    let reopened = Vault::unlock_with_password(t, PASSWORD).unwrap();
+    assert!(reopened.integrity().header_ok && reopened.integrity().audit_ok);
+    drop(reopened);
+
+    // Cut between the databases and the header: only a restore goes there.
+    let (_dir, mut vault, _) = new_vault();
+    noam(&mut vault);
+    let out = tempfile::tempdir().unwrap();
+    let dest = out.path().join("backup.vaultbak");
+    vault.write_backup(&dest).unwrap();
+    let bytes = fs::read(&dest).unwrap();
+    let cut = tempfile::tempdir().unwrap();
+    let c = cut.path();
+    drop(Vault::restore_backup(&bytes, c, Secret::Password(PASSWORD)).unwrap());
+    fs::remove_file(c.join("vault.header")).unwrap();
+    let main = fs::read(c.join("main.db")).unwrap();
+    assert!(Vault::has_databases_without_header(c));
+    assert!(matches!(
+        Vault::create(c, "סיסמה אחרת וארוכה מאוד", Argon2Params::TEST),
+        Err(VaultError::Refused(_))
+    ));
+    assert!(!c.join("vault.header").exists());
+    assert_eq!(fs::read(c.join("main.db")).unwrap(), main);
+    assert!(!Vault::exists(c));
+    drop(Vault::restore_backup(&bytes, c, Secret::Password(PASSWORD)).unwrap());
+    assert!(!Vault::has_databases_without_header(c));
+}
+
 /// A database that cannot be read counts as holding data: a vault is never taken for an empty
 /// folder because a file was locked or unreadable (fail-closed).
 #[cfg(unix)]

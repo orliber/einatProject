@@ -83,6 +83,43 @@ const IDENTITY_DB: &str = "identity.db";
 const AUDIT_DB: &str = "audit.db";
 const DB_FILES: [&str; 3] = [MAIN_DB, IDENTITY_DB, AUDIT_DB];
 
+/// True when a database in `dir` (or its write-ahead log) holds data.
+fn databases_hold_data(dir: &Path) -> bool {
+    DB_FILES
+        .iter()
+        .any(|name| holds_data(&dir.join(name)) || holds_data(&dir.join(format!("{name}-wal"))))
+}
+
+/// Flush a folder's entries (files created, renamed or removed in it) to the disk. Not done on
+/// Windows: there it needs a folder handle opened for writing with backup semantics, and
+/// `FlushFileBuffers` on a folder is not documented for NTFS (SQLite does not do it either).
+/// NTFS journals a rename in order with the other changes to its metadata, so a rename that
+/// survives a power cut comes with those before it.
+pub(super) fn sync_dir(dir: &Path) -> Result<(), VaultError> {
+    #[cfg(unix)]
+    fs::File::open(dir)?.sync_all()?;
+    #[cfg(not(unix))]
+    let _ = dir;
+    Ok(())
+}
+
+/// Remove what a setup or a restore cut short left in `dir`: the header, the databases and
+/// their `-wal`/`-shm`. Only for a folder whose databases hold no data, or that a restore is
+/// about to fill (D-124).
+pub(super) fn clear_leftovers(dir: &Path) -> Result<(), VaultError> {
+    let names = DB_FILES
+        .iter()
+        .flat_map(|name| ["", "-wal", "-shm"].map(|suffix| format!("{name}{suffix}")));
+    // The header first: a stop halfway never leaves it next to a database.
+    for leftover in [HEADER_FILE.to_owned()].into_iter().chain(names) {
+        match fs::remove_file(dir.join(&leftover)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+            _ => {}
+        }
+    }
+    sync_dir(dir)
+}
+
 /// True when the file at `path` holds anything: its first page is there and not all zeros.
 /// A file that cannot be read counts as holding data (fail-closed: it is never replaced).
 fn holds_data(path: &Path) -> bool {
@@ -403,10 +440,15 @@ impl Vault {
     /// vault: nothing could open it, and a new setup or a restore may replace it (D-124).
     #[must_use]
     pub fn exists(dir: &Path) -> bool {
-        dir.join(HEADER_FILE).exists()
-            && DB_FILES.iter().any(|name| {
-                holds_data(&dir.join(name)) || holds_data(&dir.join(format!("{name}-wal")))
-            })
+        dir.join(HEADER_FILE).exists() && databases_hold_data(dir)
+    }
+
+    /// Databases that hold data with no header next to them: a restore cut short after the
+    /// databases were moved in and before the header (D-124). Only that restore, run again,
+    /// may go over them; a new vault never does, nor writes a header next to them.
+    #[must_use]
+    pub fn has_databases_without_header(dir: &Path) -> bool {
+        !dir.join(HEADER_FILE).exists() && databases_hold_data(dir)
     }
 
     /// The header of the vault in `dir`, to open it. A header with no databases is refused,
@@ -435,7 +477,15 @@ impl Vault {
         if Self::exists(dir) {
             return Err(VaultError::AlreadyExists);
         }
+        if Self::has_databases_without_header(dir) {
+            return Err(VaultError::Refused(
+                "vault databases without a header: restore the backup again".to_owned(),
+            ));
+        }
         fs::create_dir_all(dir)?;
+        // A header alone, next to empty or zeroed databases: they would not open with the new
+        // keys (D-124).
+        clear_leftovers(dir)?;
         let vault_id = random_id()?;
         let mk = Key32::random()?;
         let salt = random_array::<32>()?;

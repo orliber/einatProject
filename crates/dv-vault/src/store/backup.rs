@@ -21,7 +21,10 @@ use std::path::Path;
 use rusqlite::Connection;
 use zeroize::Zeroizing;
 
-use super::{master_key, now, Keys, Secret, Vault, AUDIT_DB, DB_FILES, IDENTITY_DB, MAIN_DB};
+use super::{
+    clear_leftovers, master_key, now, sync_dir, Keys, Secret, Vault, AUDIT_DB, DB_FILES,
+    IDENTITY_DB, MAIN_DB,
+};
 use crate::audit::AuditEvent;
 use crate::crypto::{hex, open, random_id, seal, Key32};
 use crate::db::open_encrypted;
@@ -449,22 +452,11 @@ fn check_file(
     Ok((parsed.created_at, opened?))
 }
 
-/// Flush a folder's entries (files created, renamed or removed in it) to the disk. On Windows
-/// a folder cannot be opened as a file; NTFS journals a rename in order with the other
-/// changes to its metadata, so a rename that survives a power cut comes with those before it.
-fn sync_dir(dir: &Path) -> Result<(), VaultError> {
-    #[cfg(unix)]
-    fs::File::open(dir)?.sync_all()?;
-    #[cfg(not(unix))]
-    let _ = dir;
-    Ok(())
-}
-
 /// Put a restored vault's files into `target` so that a power cut at any moment leaves either
 /// no vault there (and the restore can be run again) or the whole vault (D-124): every file is
 /// written in a staging folder inside `target` and flushed to the disk, then moved into place,
 /// the databases first and the header last. `target` holds no vault ([`Vault::exists`]), so
-/// what an earlier restore cut short left there holds no data and is removed first.
+/// what an earlier restore cut short left there is removed first.
 fn place_restored(
     target: &Path,
     files: &[(String, &[u8])],
@@ -485,17 +477,7 @@ fn place_restored(
         sync_dir(&staging)?;
         // A header left alone must go before the databases come in: next to them it would make
         // a "vault" that does not open (or opens another vault's keys over these files).
-        for leftover in DB_FILES
-            .iter()
-            .flat_map(|name| ["-wal", "-shm"].map(|suffix| format!("{name}{suffix}")))
-            .chain([HEADER_FILE.to_owned()])
-        {
-            match fs::remove_file(target.join(&leftover)) {
-                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
-                _ => {}
-            }
-        }
-        sync_dir(target)?;
+        clear_leftovers(target)?;
         for (name, _) in files {
             fs::rename(staging.join(name), target.join(name))?;
         }
