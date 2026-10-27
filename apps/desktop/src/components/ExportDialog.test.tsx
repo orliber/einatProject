@@ -86,6 +86,27 @@ describe("ExportDialog", () => {
     expect(calls.find((c) => c.cmd === "export_pdf")?.args).toMatchObject({ parents: { show_numbers: true } });
   });
 
+  it("when the check fails, the spinner stops and 'try again' runs the check again (regression)", async () => {
+    let fails = 1;
+    const calls: string[] = [];
+    mockIPC((cmd) => {
+      calls.push(cmd);
+      if (cmd === "check_export") {
+        if (fails-- > 0) return Promise.reject({ code: "io", message: "הקובץ לא נפתח", details: [], action: { kind: "retry" } });
+        return check;
+      }
+      if (cmd === "report_settings") return settings;
+      return null;
+    });
+    const user = userEvent.setup();
+    render(<AppContext.Provider value={app()}><ExportDialog api={caseApi()} onClose={vi.fn()} /></AppContext.Provider>);
+    expect(await screen.findByText("הקובץ לא נפתח")).toBeInTheDocument();
+    expect(screen.queryByText("בודקת את הדוח")).toBeNull();
+    await user.click(screen.getByRole("button", { name: /לנסות שוב/ }));
+    expect(await screen.findByText(/שם הקובץ:/)).toBeInTheDocument();
+    expect(calls.filter((c) => c === "check_export")).toHaveLength(2);
+  });
+
   it("names the parents' file as the core does", () => {
     expect(parentsFileName("דוח אבחון TEST-0002.docx")).toBe("דוח אבחון TEST-0002 - להורים.docx");
     expect(parentsFileName("דוח")).toBe("דוח - להורים");
