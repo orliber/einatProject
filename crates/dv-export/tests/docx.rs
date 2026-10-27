@@ -215,7 +215,8 @@ fn hebrew_and_right_to_left_are_preserved() {
     let settings = part(&bytes, "word/settings.xml").unwrap();
     assert!(settings.contains("w:bidi=\"he-IL\""));
     let styles = part(&bytes, "word/styles.xml").unwrap();
-    assert!(styles.contains("<w:lang w:val=\"he-IL\" w:bidi=\"he-IL\"/>"));
+    // Hebrew is the complex-script language; Latin runs ("WISC-V") are proofed as English.
+    assert!(styles.contains("<w:lang w:val=\"en-US\" w:bidi=\"he-IL\"/>"));
 }
 
 /// The child's name and the other report text are only in the document itself: not in the
