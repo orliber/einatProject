@@ -1206,7 +1206,8 @@ fn set_dir_modified(dir: &std::path::Path, when: std::time::SystemTime) {
     {
         use std::os::windows::fs::OpenOptionsExt;
         const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
-        options.custom_flags(FILE_FLAG_BACKUP_SEMANTICS);
+        // Setting a time needs write access to the folder's attributes.
+        options.write(true).custom_flags(FILE_FLAG_BACKUP_SEMANTICS);
     }
     options.open(dir).unwrap().set_modified(when).unwrap();
 }
