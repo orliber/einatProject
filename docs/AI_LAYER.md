@@ -4,7 +4,7 @@
 - אין SDK רשמי ל-Rust, ולכן זה HTTP ישיר ל-Messages API (`reqwest` + rustls, שורשי Mozilla מובנים). הצורות נלקחות מהתיעוד הרשמי, לא מהזיכרון.
 - **המודל נבחר בהגדרות מתוך רשימה לבנה** של דגמים שזמינים תחת ZDR. Covered Models (Fable, Mythos) חסומים, כי הם דורשים שמירה ל-30 יום.
 - Streaming ל-UI. Retry: עד שלושה ניסיונות (שוב אחרי 2 ואחרי 4 שניות) רק על 429, 5xx ו-overloaded; שגיאת חיבור לא נשלחת שוב מעצמה. Timeout. בדיקת `stop_reason` (כולל `refusal`) לפני קריאת התוכן.
-- יציאה רק ל-`api.anthropic.com`, endpoints `/v1/messages` ו-`/v1/messages/count_tokens`. `inference_geo: "us"`. בלי `metadata`, בלי Files/Batch/כלי שרת.
+- יציאה רק ל-`api.anthropic.com`, endpoints `/v1/messages` ו-`/v1/messages/count_tokens` (`count_tokens` מותר אבל לא ממומש ולא בשימוש, ראו `ARCHITECTURE.md` › Egress). `inference_geo: "us"`. בלי `metadata`, בלי Files/Batch/כלי שרת.
 - מקבל רק `ClearedPayload` מ-`dv-privacy::gate`, ושולח את ה-bytes שעינת אישרה, בלי סריאליזציה מחדש (קשירה ל-SHA-256).
 - **שער הסכמה:** בתיק שלא נרשמה בו הסכמת ההורים אין שליחה בכלל.
 - כל שליחה נשמרת מקומית בטבלת `transmissions` (עם תגיות, מוצפן), לצורך אחריותיות.

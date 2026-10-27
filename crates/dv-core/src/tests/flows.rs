@@ -760,6 +760,41 @@ fn a_failed_restore_leaves_no_vault_behind_and_keeps_the_file_for_another_try() 
     assert!(!Vault::exists(broken.path()));
 }
 
+/// D-124: a restore cut short after the databases and before the header. A new vault is not
+/// made over them (its header would sit next to her data and never open); restoring again is.
+#[test]
+fn a_new_vault_is_not_made_over_databases_left_without_a_header() {
+    let (_dir, mut core, case) = setup(None);
+    let drive = tempfile::tempdir().unwrap();
+    let done = core.write_backup(&drive.path().join("b")).unwrap();
+    let bytes = std::fs::read(&done.path).unwrap();
+
+    let fresh = tempfile::tempdir().unwrap();
+    let mut other = Core::for_tests(fresh.path(), None);
+    other
+        .stage_backup(bytes.clone(), "b.vaultbak".into())
+        .unwrap();
+    other.restore_staged_backup(Some(PASSWORD), None).unwrap();
+    other.lock();
+    std::fs::remove_file(fresh.path().join("vault.header")).unwrap();
+    let main = std::fs::read(fresh.path().join("main.db")).unwrap();
+
+    let mut again = Core::for_tests(fresh.path(), None);
+    assert!(!again.status().vault_exists);
+    match again.create_vault("סיסמה אחרת וארוכה מאוד") {
+        Err(CoreError::Refused(why)) => assert!(why.contains("לשחזר שוב מהגיבוי")),
+        other => panic!("expected a refusal, got {:?}", other.map(|_| ())),
+    }
+    assert!(
+        !fresh.path().join("vault.header").exists(),
+        "no header was written"
+    );
+    assert_eq!(std::fs::read(fresh.path().join("main.db")).unwrap(), main);
+    again.stage_backup(bytes, "b.vaultbak".into()).unwrap();
+    again.restore_staged_backup(Some(PASSWORD), None).unwrap();
+    assert!(again.case_detail(&case).is_ok());
+}
+
 // ------------------------------------------------------------ readiness
 
 /// This version has no Google sign-in (not Windows, or built without the registration).

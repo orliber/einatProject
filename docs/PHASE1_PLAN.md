@@ -11,7 +11,7 @@
 | 1.1 | **Rust workspace** | `Cargo.toml` (workspace), `rust-toolchain.toml` (גרסה נעולה), 8 crates ריקים (`dv-*`), `#![forbid(unsafe_code)]`, `[workspace.lints]`: clippy `-D warnings` + `pedantic` נבחרים | `cargo build`, `cargo clippy` נקיים |
 | 1.2 | **אפליקציית Tauri 2** | `apps/desktop/src-tauri`: חלון יחיד 1280×800, בלי plugins | `cargo tauri dev` פותח חלון |
 | 1.3 | **UI בסיסי ב-React + TS** | Vite, `tsc --strict`, RTL, `lang="he"`, טוקנים לצבעים ולצורות מ-`SCREENS.md`, פונטים ארוזים מקומית (OFL), מסך נעילה סטטי (דמה) לפי `Lock.dc.html`, ErrorBoundary | Vitest + Testing Library: המסך מרונדר ב-`dir="rtl"`, והכפתורים נגישים לפי role ו-label |
-| 1.4 | **IPC מוקלד** | `dv-ipc`: פקודה `ping` ⇒ `{core_version, build_commit, fips_active:false, platform}`. טיפוסי TS נוצרים עם `tauri-specta`. ה-UI מציג "הליבה מחוברת". | בדיקת יחידה ל-`ping` + בדיקה עם mock runtime של Tauri |
+| 1.4 | **IPC מוקלד** | פקודה `ping` ⇒ `{core_version, build_commit, fips_active:false, platform}`. ה-UI מציג "הליבה מחוברת". **בפועל:** אין crate בשם `dv-ipc` ואין `tauri-specta`; הפקודות ב-`apps/desktop/src-tauri`, הטיפוסים מ-`ts-rs` (`src/ipc/generated/`), והרשימה המוקלדת של הפקודות מ-`cargo xtask gen-ipc`. | בדיקת יחידה ל-`ping` + בדיקה עם mock runtime של Tauri |
 | 1.5 | **הקשחת webview** | CSP מלא (`ARCHITECTURE.md`), isolation pattern, capabilities רק ל-`ping`, `contentProtected: true`, בלי DevTools ב-release, ניווט חיצוני חסום, בלי remote URLs | בדיקה שמנתחת את `tauri.conf.json` ואת קובצי ה-capabilities, ונכשלת אם CSP נחלש או אם נוסף plugin |
 | 1.6 | **xtask: אינווריאנטים** | `cargo xtask check-invariants`: (א) ספריות רשת רק ב-`dv-egress` (דרך `cargo metadata`); (ב) `forbid(unsafe_code)` בכל crate; (ג) אין `dangerouslySetInnerHTML` ואין `eval` ב-UI; (ד) בלי plugins אסורים ב-Tauri | **בדיקות שליליות:** fixture עם `reqwest` ב-`dv-vault` ⇒ הבדיקה נכשלת |
 | 1.7 | **xtask: סורק pre-commit** | `cargo xtask scan --staged`: ת.ז. עם ספרת ביקורת תקינה, טלפון ישראלי, מייל, ארכיונים, `.docx` מחוץ ל-`templates/`, קובץ בינארי מעל 1MB, ומילות מפתח (`real_data`, `vault/`). רשימת היתר: `tests/fixtures/` (ת.ז. הבדויה `000000018`). | בדיקות יחידה לכל כלל, כולל false positive מוכר |
@@ -26,7 +26,7 @@
 |---|---|---|
 | `tauri` 2.x, `tauri-build` | המעטפת | בלי features מיותרים |
 | `serde`, `serde_json` | סריאליזציה ל-IPC | |
-| `specta`, `tauri-specta` | טיפוסי TS אוטומטיים, בלי כפילות ידנית | |
+| `ts-rs` (תוכנן: `specta`, `tauri-specta`) | טיפוסי TS אוטומטיים, בלי כפילות ידנית | בפועל `ts-rs` + `cargo xtask gen-ipc` |
 | `thiserror` | שגיאות מוקלדות | |
 | React, ReactDOM, Vite, TypeScript | UI | |
 | ESLint + `eslint-plugin-react` + `@typescript-eslint` | כללי אבטחה ל-UI | |
@@ -40,7 +40,7 @@
 | סיכון | צמצום |
 |---|---|
 | WebView2 ב-Windows | Evergreen (מתעדכן אוטומטית עם תיקוני אבטחה). בודקים שהוא קיים בהתקנה. |
-| תאימות של isolation pattern עם `tauri-specta` | בדיקה ב-1.4. אם יש בעיה, מתעדים ובוחרים חלופה באישור. |
+| תאימות של isolation pattern עם `tauri-specta` | בדיקה ב-1.4. אם יש בעיה, מתעדים ובוחרים חלופה באישור. (נסגר: נבחר `ts-rs`, שלא נוגע בזמן ריצה.) |
 | `aws-lc-rs` ב-FIPS דורש CMake, Go ו-NASM ב-build | מכינים את ה-toolchain ב-CI כבר בשלב 1, כדי ששלב 2 לא ייתקע. |
 
 ## הדגמה בסוף השלב

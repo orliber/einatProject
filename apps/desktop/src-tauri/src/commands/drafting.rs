@@ -56,7 +56,7 @@ pub(crate) async fn send_section(
 }
 
 /// Copy the Word file's password: kept out of clipboard history and cloud sync, and taken
-/// off the clipboard after 60 seconds or when the vault locks (STANDARDS 5.9).
+/// off the clipboard after 60 seconds (20 on a Mac) or when the vault locks (STANDARDS 5.9).
 #[tauri::command]
 pub(crate) async fn copy_secret(state: tauri::State<'_, AppState>, text: String) -> Res<u32> {
     let text = zeroize::Zeroizing::new(text);

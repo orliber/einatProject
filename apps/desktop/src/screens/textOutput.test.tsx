@@ -112,7 +112,19 @@ describe("consultation", () => {
     await user.click(await screen.findByRole("button", { name: "העתקה" }));
     expect(calls.find((c) => c.cmd === "copy_secret")?.args).toEqual({ text: "תשובה בדויה לשאלה." });
     expect(await screen.findByRole("button", { name: "הועתק ✓" })).toBeInTheDocument();
+    expect(screen.getByText("יימחק מהלוח בעוד דקה")).toBeInTheDocument();
     expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it("on a Mac the copy says it goes away sooner (D-125)", async () => {
+    const { user } = await openApp((cmd) => {
+      if (cmd === "send_consult") return { answer: "תשובה בדויה לשאלה.", demo: false, conversation_id: "conv-mac" };
+      if (cmd === "copy_secret") return 20;
+      return undefined;
+    });
+    await ask(user, "שאלה קצרה");
+    await user.click(await screen.findByRole("button", { name: "העתקה" }));
+    expect(await screen.findByText("יימחק מהלוח בעוד 20 שניות")).toBeInTheDocument();
   });
 
   it("if the protected clipboard fails, nothing is copied another way and she is told", async () => {

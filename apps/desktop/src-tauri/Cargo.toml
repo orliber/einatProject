@@ -35,7 +35,7 @@ dv-ingest.workspace = true
 # The name model worker (SEC2): the app binary turns into it, like the document worker.
 dv-ner.workspace = true
 dv-privacy.workspace = true
-# Copying the Word file password: out of clipboard history and cloud sync, cleared after 60 s.
+# Copying a secret: out of clipboard history and cloud sync, cleared after 60 s (20 s on a Mac).
 arboard = { version = "3.6.1", default-features = false }
 zeroize = "1.9"
 # The answer type of a request on its way (already used by every crate it talks to).
@@ -59,5 +59,10 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Diag
 # already in Cargo.lock (tempfile).
 [target.'cfg(target_os = "macos")'.dependencies]
 rustix = { version = "1", features = ["process"] }
+# A copied secret stays on this Mac (D-125): "current host only" on the general pasteboard, so
+# Universal Clipboard does not hand it to her iPhone. Safe bindings, already in Cargo.lock
+# through arboard (same versions), so nothing new is built.
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSPasteboard"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString"] }
 # The most descriptors a worker may hold, as its start sets it (one value for both sides).
 dv-sandbox.workspace = true

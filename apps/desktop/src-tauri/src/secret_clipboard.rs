@@ -1,9 +1,11 @@
 //! Copying a secret (the password of an exported Word file) to the clipboard (STANDARDS §5.9).
 //!
 //! * Kept out of clipboard history and cloud sync: Windows "clipboard history" (Win+V) and
-//!   "sync across devices", the nspasteboard convention on macOS, the KDE password hint on Linux.
-//! * Cleared after 60 seconds, and at once when the vault locks, but only if the clipboard
-//!   still holds that secret: whatever was copied since is left alone.
+//!   "sync across devices"; on macOS the nspasteboard convention and "this Mac only", so it
+//!   does not travel to her iPhone by Universal Clipboard (Handoff); the KDE password hint on
+//!   Linux.
+//! * Cleared after [`CLEAR_AFTER`] (60 seconds, 20 on a Mac), and at once when the vault locks,
+//!   but only if the clipboard still holds that secret: whatever was copied since is left alone.
 //!
 //! Done here, not in the web view: the web view may not write to the clipboard while the window
 //! is not in focus, which is exactly when the minute runs out (Einat is in Word).
@@ -14,6 +16,12 @@ use std::time::Duration;
 use arboard::Clipboard;
 use zeroize::Zeroizing;
 
+/// How long a copied secret stays on the clipboard. Shorter on a Mac (D-125): what is left
+/// there (an app that ignores the conventions above, Apple's own handling of "this Mac only")
+/// can only be narrowed in time (THREAT_MODEL R15).
+#[cfg(target_os = "macos")]
+pub const CLEAR_AFTER: Duration = Duration::from_secs(20);
+#[cfg(not(target_os = "macos"))]
 pub const CLEAR_AFTER: Duration = Duration::from_secs(60);
 
 #[derive(Default)]
@@ -91,14 +99,30 @@ fn set_private(clipboard: &mut Clipboard, secret: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// On a Mac the general pasteboard is written directly (D-125): arboard marks the copy as
+/// concealed (out of clipboard managers' history) but cannot keep it on this Mac, and without
+/// `NSPasteboardContentsCurrentHostOnly` Universal Clipboard hands it to her iPhone and iPad.
 #[cfg(target_os = "macos")]
-fn set_private(clipboard: &mut Clipboard, secret: &str) -> Result<(), String> {
-    use arboard::SetExtApple;
-    clipboard
-        .set()
-        .exclude_from_history()
-        .text(secret)
-        .map_err(|e| e.to_string())
+fn set_private(_clipboard: &mut Clipboard, secret: &str) -> Result<(), String> {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardContentsOptions};
+    use objc2_foundation::NSString;
+    let pasteboard = NSPasteboard::generalPasteboard();
+    // Empties the pasteboard and keeps what comes next on this Mac only.
+    pasteboard.prepareForNewContentsWithOptions(NSPasteboardContentsOptions::CurrentHostOnly);
+    let text = NSString::from_str(secret);
+    // NSPasteboardTypeString, and the nspasteboard.org marker for "concealed" (a password).
+    let written = pasteboard
+        .setString_forType(&text, &NSString::from_str("public.utf8-plain-text"))
+        && pasteboard.setString_forType(
+            &NSString::from_str(""),
+            &NSString::from_str("org.nspasteboard.ConcealedType"),
+        );
+    if written {
+        Ok(())
+    } else {
+        pasteboard.clearContents();
+        Err("the pasteboard refused the text".to_owned())
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -109,4 +133,29 @@ fn set_private(clipboard: &mut Clipboard, secret: &str) -> Result<(), String> {
         .exclude_from_history()
         .text(secret)
         .map_err(|e| e.to_string())
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+
+    /// On the Mac runner's own pasteboard: the copy is readable as plain text, carries the
+    /// "concealed" marker, and is taken off again (D-125).
+    #[test]
+    fn a_secret_on_the_mac_pasteboard_is_concealed_and_cleared() {
+        use objc2_app_kit::NSPasteboard;
+        use objc2_foundation::NSString;
+        let secret = "סיסמה-בדויה-לבדיקה";
+        let clipboard = SecretClipboard::default();
+        assert!(clipboard.copy(secret).is_ok());
+        let pasteboard = NSPasteboard::generalPasteboard();
+        let text = pasteboard.stringForType(&NSString::from_str("public.utf8-plain-text"));
+        assert_eq!(text.map(|t| t.to_string()).as_deref(), Some(secret));
+        assert!(pasteboard
+            .stringForType(&NSString::from_str("org.nspasteboard.ConcealedType"))
+            .is_some());
+        clipboard.clear_now();
+        let text = pasteboard.stringForType(&NSString::from_str("public.utf8-plain-text"));
+        assert_ne!(text.map(|t| t.to_string()).as_deref(), Some(secret));
+    }
 }

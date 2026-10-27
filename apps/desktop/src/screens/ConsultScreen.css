@@ -275,6 +275,10 @@
 .chat-copy {
   font-size: var(--text-sm);
 }
+.chat-copy-note {
+  margin-inline-start: 6px;
+  font-size: var(--text-sm);
+}
 .chat-typing {
   flex-direction: row;
   align-items: center;

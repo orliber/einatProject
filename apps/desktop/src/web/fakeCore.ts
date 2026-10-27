@@ -1108,7 +1108,7 @@ export class FakeCore {
         return null;
       }
       case "copy_secret":
-        // The app does this natively (out of clipboard history, cleared after 60 s).
+        // The app does this natively (out of clipboard history, cleared after 60 s, 20 s on a Mac).
         await navigator.clipboard.writeText(String(a.text ?? "")).catch(() => undefined);
         return 60;
       case "find_name_matches":

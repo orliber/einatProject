@@ -350,6 +350,13 @@ impl Core {
         self.refuse_cloud()?;
         // Not while a restore writes the same folder (or an unlock reads it).
         self.refuse_secret_work_running()?;
+        // A restore cut short between the databases and the header (D-124): a new vault would
+        // write its header over her data. Only the restore, run again, goes there.
+        if Vault::has_databases_without_header(&self.dir) {
+            return Err(CoreError::Refused(
+                "בתיקיית הכספת נמצאו קבצים של כספת בלי הכותרת שפותחת אותם, כנראה משחזור שנקטע. כדי לא לדרוס אותם לא נוצרת כספת חדשה: אפשר לשחזר שוב מהגיבוי.".to_owned(),
+            ));
+        }
         let params = self.argon.unwrap_or_else(Argon2Params::calibrate);
         // Bound to this computer from the start where a key can be sealed here (D-076).
         let key = if Vault::exists(&self.dir) {

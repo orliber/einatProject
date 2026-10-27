@@ -1342,6 +1342,8 @@ dependencies = [
  "dv-ner",
  "dv-privacy",
  "dv-sandbox",
+ "objc2-app-kit",
+ "objc2-foundation",
  "rfd",
  "rustix",
  "serde",
