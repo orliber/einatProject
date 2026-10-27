@@ -95,8 +95,8 @@ export function LetterCard({ api }: { api: CaseApi }) {
         גרסה קצרה מהדוח המאושר. למסגרת החינוכית: רק ההמלצות.
       </span>
       <div className="row" role="radiogroup" aria-label="למי המכתב">
-        <label className="row small"><input type="radio" checked={audience === "parents"} onChange={() => setAudience("parents")} /> להורים</label>
-        <label className="row small"><input type="radio" checked={audience === "school"} onChange={() => setAudience("school")} /> לצוות החינוכי</label>
+        <label className="row small"><input type="radio" name="letter-audience" checked={audience === "parents"} onChange={() => setAudience("parents")} /> להורים</label>
+        <label className="row small"><input type="radio" name="letter-audience" checked={audience === "school"} onChange={() => setAudience("school")} /> לצוות החינוכי</label>
       </div>
       {/* One recommendation she unmarked shows too, so it can be marked again. */}
       {(recommendations.length > 1 || recommendations.some((r) => !isPicked(r.id))) && (
@@ -111,7 +111,11 @@ export function LetterCard({ api }: { api: CaseApi }) {
           {recommendations.every((r) => !isPicked(r.id)) && <span className="small muted">לא סימנת אף המלצה, אז המכתב ייכתב בלי המלצות.</span>}
         </fieldset>
       )}
-      <input className="input" placeholder="מה עוד חשוב שיהיה במכתב? (לא חובה)" value={note} onChange={(e) => setNote(e.target.value)} />
+      {/* A label that stays while she types (a placeholder alone goes as the first letter does). */}
+      <div className="field">
+        <label htmlFor="letter-note" className="small">מה עוד חשוב שיהיה במכתב? (לא חובה)</label>
+        <input id="letter-note" className="input" value={note} onChange={(e) => setNote(e.target.value)} />
+      </div>
       <button type="button" className="btn" disabled={busy}
         onClick={() => void act(async () => {
           setStage("prepare");

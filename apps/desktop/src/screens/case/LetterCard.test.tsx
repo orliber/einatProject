@@ -104,7 +104,10 @@ describe("the short letter", () => {
 
   it("writes the letter with her note, then a paragraph is approved and the letter can be produced", async () => {
     const { user, calls } = await openLetter();
-    await user.type(screen.getByPlaceholderText("מה עוד חשוב שיהיה במכתב? (לא חובה)"), "בלי מונחים מקצועיים");
+    const note = screen.getByLabelText("מה עוד חשוב שיהיה במכתב? (לא חובה)");
+    await user.type(note, "בלי מונחים מקצועיים");
+    // The label stays on screen while she types.
+    expect(screen.getByText("מה עוד חשוב שיהיה במכתב? (לא חובה)")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "ניסוח המכתב" }));
     expect(await screen.findByText("פסקה בדויה ראשונה (parents).")).toBeInTheDocument();
     expect(calls.find((c) => c.cmd === "prepare_letter")?.args).toMatchObject({ audience: "parents", note: "בלי מונחים מקצועיים" });
@@ -118,6 +121,18 @@ describe("the short letter", () => {
     expect(produce).toBeEnabled();
     await user.click(produce);
     expect(await screen.findByRole("dialog", { name: "הפקת מכתב Word" })).toBeInTheDocument();
+  });
+
+  it("who the letter is for is one group of radio buttons: the arrow keys move between them", async () => {
+    const { user, calls } = await openLetter();
+    const parents = screen.getByRole("radio", { name: "להורים" });
+    const school = screen.getByRole("radio", { name: "לצוות החינוכי" });
+    expect(parents).toHaveAttribute("name", school.getAttribute("name") ?? "");
+    parents.focus();
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => expect(school).toBeChecked());
+    expect(parents).not.toBeChecked();
+    await waitFor(() => expect(calls.filter((c) => c.cmd === "letter").at(-1)?.args).toMatchObject({ audience: "school" }));
   });
 
   it("a letter to the school is asked for as such", async () => {
