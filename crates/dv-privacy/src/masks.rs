@@ -54,6 +54,19 @@ pub fn is_kept_words_tag(tag: &str) -> bool {
         })
 }
 
+/// A note for something missing, in its one form: `[חסר]`, or `[חסר: …]` with the colon,
+/// the space and words after them (D-131). "[חסרנועם]" is no note: the gate, the fix loop
+/// and the filter used to accept anything that began with "[חסר", and a name glued to it
+/// went out inside a tag.
+#[must_use]
+pub fn is_missing_note(tag: &str) -> bool {
+    tag == "[חסר]"
+        || tag
+            .strip_prefix("[חסר: ")
+            .and_then(|t| t.strip_suffix(']'))
+            .is_some_and(|words| !words.trim().is_empty() && !words.contains(['[', ']', '\n']))
+}
+
 /// The kind of a fixed generic tag the filter writes, or `None` for any other text.
 #[must_use]
 pub fn mask_base(fixed_tag: &str) -> Option<&'static str> {

@@ -39,7 +39,7 @@ pub const GENERIC_TAGS: &[&str] = &[
 fn tag_allowed(tag: &str, case_tags: &HashSet<String>) -> bool {
     case_tags.contains(tag)
         || crate::masks::is_generic_tag(tag)
-        || tag.starts_with("[חסר")
+        || crate::masks::is_missing_note(tag)
         || dv_domain::is_score_tag(tag)
 }
 

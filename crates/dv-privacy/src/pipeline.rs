@@ -1918,7 +1918,7 @@ fn plain_brackets(text: &str, ctx: &PrivacyContext<'_>) -> String {
     };
     let known = |t: &str| {
         crate::masks::is_generic_tag(t)
-            || t.starts_with("[חסר")
+            || crate::masks::is_missing_note(t)
             || dv_domain::is_score_tag(t)
             || ctx.identities.iter().any(|i| i.tag == t)
     };
