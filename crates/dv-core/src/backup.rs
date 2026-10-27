@@ -40,35 +40,71 @@ pub fn backup_file_name(now: i64) -> String {
     )
 }
 
-/// The name of an automatic backup. A date, nothing about any case.
+/// How much of the vault's id goes into the name of an automatic backup: enough to tell two
+/// vaults that back up to one drive apart (the clinic's and the home computer's), and nothing
+/// of hers (the id is random, D-131).
+const AUTO_ID_CHARS: usize = 8;
+/// A legacy automatic backup is told from a file of another vault by its header only; it is
+/// at the start of the file, far smaller than this.
+const PEEK_BYTES: u64 = 64 * 1024;
+
+fn short_id(vault_id: &str) -> String {
+    vault_id.chars().take(AUTO_ID_CHARS).collect()
+}
+
+/// The name of an automatic backup. A date and the short form of the vault's id (D-131),
+/// nothing about any case.
 #[must_use]
-pub fn auto_backup_file_name(now: i64) -> String {
+pub fn auto_backup_file_name(now: i64, vault_id: &str) -> String {
     format!(
-        "{AUTO_PREFIX}{}.{BACKUP_EXTENSION}",
-        crate::dates::iso(crate::dates::date_of(now))
+        "{AUTO_PREFIX}{} ({}).{BACKUP_EXTENSION}",
+        crate::dates::iso(crate::dates::date_of(now)),
+        short_id(vault_id)
     )
 }
 
-/// Remove the automatic backups in `dir` beyond the newest `AUTO_KEEP` (the date in the name
-/// sorts them). Files she saved herself are not touched.
-pub(crate) fn prune_auto_backups(dir: &Path) {
+/// The vault id a backup file's header names, from its first bytes only. `None` when the file
+/// is not a backup of ours.
+fn peeked_vault_id(file: &Path) -> Option<String> {
+    use std::io::Read;
+    let mut head = Vec::new();
+    std::fs::File::open(file)
+        .ok()?
+        .take(PEEK_BYTES)
+        .read_to_end(&mut head)
+        .ok()?;
+    peek_backup(&head).ok().map(|p| p.vault_id)
+}
+
+/// Remove this vault's automatic backups in `dir` beyond the newest `AUTO_KEEP` (the date in
+/// the name sorts them). Files she saved herself, and another vault's automatic backups, are
+/// not touched: a file is this vault's when its name carries the vault's short id, or, for a
+/// file named the old way (a date only, before D-131), when its header names this vault.
+pub(crate) fn prune_auto_backups(dir: &Path, vault_id: &str) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     let suffix = format!(".{BACKUP_EXTENSION}");
-    let mut ours: Vec<PathBuf> = entries
+    let tag = format!(" ({})", short_id(vault_id));
+    let mut ours: Vec<(String, PathBuf)> = entries
         .filter_map(Result::ok)
         .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
-        .filter(|e| {
-            e.file_name()
-                .to_str()
-                .is_some_and(|n| n.starts_with(AUTO_PREFIX) && n.ends_with(&suffix))
+        .filter_map(|e| {
+            let name = e.file_name();
+            let middle = name
+                .to_str()?
+                .strip_prefix(AUTO_PREFIX)?
+                .strip_suffix(&suffix)?;
+            let legacy = !middle.contains('(');
+            let this_vault = middle.ends_with(&tag)
+                || (legacy && peeked_vault_id(&e.path()).as_deref() == Some(vault_id));
+            this_vault.then(|| (middle.to_owned(), e.path()))
         })
-        .map(|e| e.path())
         .collect();
+    // By the date in the name (legacy names sort among the new ones by their date).
     ours.sort();
     let extra = ours.len().saturating_sub(AUTO_KEEP);
-    for old in ours.into_iter().take(extra) {
+    for (_, old) in ours.into_iter().take(extra) {
         let _ = std::fs::remove_file(old);
     }
 }

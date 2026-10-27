@@ -933,7 +933,8 @@ impl Core {
         let current = self.vault_ref()?.header_copy().slots == run.header.slots;
         self.backup_recorded(&run.folder, done.info.created_at, current)?;
         if run.auto {
-            crate::backup::prune_auto_backups(&run.folder);
+            let vault_id = self.vault_ref()?.vault_id().to_owned();
+            crate::backup::prune_auto_backups(&run.folder, &vault_id);
         }
         Ok(BackupDone {
             path: run.dest.display().to_string(),
@@ -959,8 +960,10 @@ impl Core {
             return Ok(None);
         };
         self.auto_backup_tried = Some(std::time::Instant::now());
+        let vault_id = self.vault_ref()?.vault_id().to_owned();
         let mut task = self.begin_backup(&dir.join(crate::backup::auto_backup_file_name(
             crate::dates::unix_now(),
+            &vault_id,
         )))?;
         task.auto = true;
         Ok(Some(task))
