@@ -551,8 +551,35 @@ fn bank_accounts_and_card_numbers_are_hidden() {
 /// Characters that show nothing on screen. Inside a name, a number or a street they used to
 /// split it, so the filter and the gate both missed what the reader (and the model) sees.
 const INVISIBLE: &[char] = &[
-    '\u{200B}', '\u{2060}', '\u{00AD}', '\u{034F}', '\u{202A}', '\u{202B}', '\u{202C}', '\u{202D}',
-    '\u{202E}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}', '\u{2061}',
+    '\u{200B}',
+    '\u{2060}',
+    '\u{00AD}',
+    '\u{034F}',
+    '\u{202A}',
+    '\u{202B}',
+    '\u{202C}',
+    '\u{202D}',
+    '\u{202E}',
+    '\u{2066}',
+    '\u{2067}',
+    '\u{2068}',
+    '\u{2069}',
+    '\u{2061}',
+    // D-131: variation selectors, tag characters, interlinear marks, format controls and
+    // the Hangul fillers, which Unicode calls letters.
+    '\u{FE00}',
+    '\u{FE0F}',
+    '\u{180E}',
+    '\u{061C}',
+    '\u{E0001}',
+    '\u{E0100}',
+    '\u{FFF9}',
+    '\u{1D173}',
+    '\u{206A}',
+    '\u{3164}',
+    '\u{115F}',
+    '\u{1160}',
+    '\u{FFA0}',
 ];
 
 #[test]

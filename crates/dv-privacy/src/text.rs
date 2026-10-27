@@ -70,11 +70,48 @@ pub(crate) fn is_mark(c: char) -> bool {
                 | '\u{2060}'..='\u{2064}'
                 | '\u{2066}'..='\u{2069}'
                 | '\u{FEFF}'
+                // More characters that show nothing (D-131): the Arabic letter mark, the
+                // Mongolian vowel separator, the deprecated format characters, the
+                // interlinear annotation marks, the musical format controls, the variation
+                // selectors (U+FE0F comes with every emoji keyboard), the tag characters and
+                // the Hangul fillers, which are letters to Unicode but blank on screen. Each
+                // of them inside a name or a number let it out whole.
+                | '\u{061C}'
+                | '\u{180E}'
+                | '\u{206A}'..='\u{206F}'
+                | '\u{FFF9}'..='\u{FFFB}'
+                | '\u{1D173}'..='\u{1D17A}'
+                | '\u{FE00}'..='\u{FE0F}'
+                | '\u{E0000}'..='\u{E007F}'
+                | '\u{E0100}'..='\u{E01EF}'
+                | '\u{115F}'
+                | '\u{1160}'
+                | '\u{3164}'
+                | '\u{FFA0}'
     )
 }
 
+/// A bidirectional control: a direction mark, an embedding, an override or an isolate. It
+/// shows nothing, and editors put it between words ("נועם\u{200F}הלך", Hebrew next to Latin),
+/// never inside one. Read as a mark it glued the words into one token, and a name in them
+/// passed the filter and the gate (D-131).
+#[must_use]
+pub fn is_bidi_control(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{061C}'
+    )
+}
+
+/// `text` holds a bidirectional control (see [`is_bidi_control`]).
+#[must_use]
+pub fn has_bidi_control(text: &str) -> bool {
+    text.chars().any(is_bidi_control)
+}
+
 fn is_word_char(c: char) -> bool {
-    is_hebrew_letter(c) || c.is_ascii_alphanumeric() || c.is_alphanumeric()
+    // A Hangul filler is a letter to Unicode and a mark here: it never starts a word.
+    (is_hebrew_letter(c) || c.is_ascii_alphanumeric() || c.is_alphanumeric()) && !is_mark(c)
 }
 
 fn is_inner_quote(c: char) -> bool {
@@ -260,9 +297,22 @@ pub struct Token {
 /// Split into words. Inner quotes stay inside a word (ד"ר, ג'ורג'); marks are skipped.
 #[must_use]
 pub fn tokenize(text: &str) -> Vec<Token> {
+    tokenize_with(text, false)
+}
+
+/// [`tokenize`], with every bidirectional control read as a word break too. The filter and
+/// the gate read a text with such a control both ways, and a name found either way is hidden
+/// or refused (D-131): "נו\u{200E}עם" is the name, and so is "נועם\u{200F}הלך".
+#[must_use]
+pub fn tokenize_split_bidi(text: &str) -> Vec<Token> {
+    tokenize_with(text, true)
+}
+
+fn tokenize_with(text: &str, split_bidi: bool) -> Vec<Token> {
     let chars: Vec<(usize, char)> = text.char_indices().collect();
     let mut tokens = Vec::new();
     let char_at = |k: usize| chars.get(k).map(|&(_, c)| c);
+    let is_mark = |c: char| is_mark(c) && !(split_bidi && is_bidi_control(c));
     let mut i = 0;
     while let Some(&(start, c)) = chars.get(i) {
         if !is_word_char(c) {
