@@ -158,7 +158,8 @@ const MODEL_KEY: &str = "model";
 const ZDR_PREFIX: &str = "zdr/";
 const LOCK_KEY: &str = "lock_minutes";
 const FIRST_USE_KEY: &str = "first_use_day";
-/// When the printed recovery kit was last checked (D-076).
+/// When the printed recovery kit was last checked (D-076). No longer written (D-103); still
+/// hidden from her log, where older vaults have it.
 const KIT_CHECKED_KEY: &str = "recovery_kit_checked_at";
 /// "Show me every request before it is sent" (round 26). Off unless she turns it on: Einat
 /// confirmed off as the default on 15.10.2026 (D-062). The key of the earlier "only when
@@ -319,11 +320,11 @@ impl CoreError {
             CoreError::Locked => ("locked", "הכספת נעולה. יש לפתוח אותה מחדש.".to_owned()),
             CoreError::Vault(VaultError::WrongSecret) => (
                 "wrong_secret",
-                "הסיסמה או ערכת השחזור לא נכונות.".to_owned(),
+                "הסיסמה לא נכונה.".to_owned(),
             ),
             CoreError::Vault(VaultError::OtherComputer) => (
                 "other_computer",
-                "הסיסמה פותחת את הכספת רק במחשב ובחשבון המשתמש שבהם היא נקבעה. בעותק של תיקיית הכספת, וגם באותו מחשב אחרי התקנה מחדש של מערכת ההפעלה או איפוס החשבון, נכנסים כאן עם ערכת השחזור, ואחר כך בוחרים סיסמה בהגדרות כדי שתעבוד גם כאן. אם המחשב הקודם אבד, אפשר גם לשחזר את הגיבוי עם הסיסמה.".to_owned(),
+                "הסיסמה פותחת את הכספת רק במחשב ובחשבון המשתמש שבהם היא נקבעה, וכאן היא עוד לא נפתחת. אם זה התחיל אחרי שהותקנה גרסה ישנה יותר של התוכנה, מתקינים שוב את הגרסה החדשה. אם המחשב הוחלף או שמערכת ההפעלה הותקנה מחדש, משחזרים את הגיבוי עם הסיסמה, ואור יכול לעזור.".to_owned(),
             ),
             CoreError::Vault(VaultError::Busy) => (
                 "busy",

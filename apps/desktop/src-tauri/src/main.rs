@@ -530,6 +530,7 @@ fn main() {
             keep_case_longer,
             change_password,
             new_recovery_kit,
+            retire_recovery_kit,
             google_status,
             google_cancel,
             google_turn_on,

@@ -17,7 +17,7 @@ fn the_page_shows_ten_layers_checked_now_and_what_depends_on_her() {
     );
     assert!(gate.now.starts_with("נבדק עכשיו"));
     let keys: Vec<_> = s.yours.iter().map(|l| l.key.as_str()).collect();
-    assert!(keys.contains(&"recovery_kit") && keys.contains(&"backup"));
+    assert!(keys.contains(&"forgot_password") && keys.contains(&"backup"));
     assert!(
         !s.send_stopped,
         "a gate that passes its check does not stop sending"

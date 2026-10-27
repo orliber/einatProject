@@ -17,8 +17,8 @@ use dv_vault::{Secret, Vault, VaultError};
 use crate::Core;
 
 /// Said once, at the opening that bound an older vault to this computer (review of stage 5,
-/// S1): from now on the kit is what opens it after Windows is reinstalled or elsewhere.
-pub(crate) const JUST_BOUND: &str = "מעכשיו הסיסמה פותחת את הכספת רק במחשב הזה ובחשבון המשתמש הזה. במחשב אחר, אחרי התקנה מחדש של מערכת ההפעלה או אחרי איפוס החשבון, נכנסים עם ערכת השחזור, ולכן כדאי לוודא שהיא אצלך: הגדרות ← סיסמה ואבטחה ← בדיקת ערכת השחזור.";
+/// S1): from now on a backup is what opens it after Windows is reinstalled or elsewhere (D-103).
+pub(crate) const JUST_BOUND: &str = "מעכשיו הסיסמה פותחת את הכספת רק במחשב הזה ובחשבון המשתמש הזה. במחשב אחר, או אחרי התקנה מחדש של מערכת ההפעלה, משחזרים את הגיבוי עם הסיסמה, ולכן כדאי שיהיה גיבוי עדכני.";
 
 /// The half of the password slot kept on this computer. Windows DPAPI or the Mac Keychain in
 /// the program; a fake in tests.

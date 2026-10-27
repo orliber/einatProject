@@ -43,7 +43,7 @@ describe("the encrypted copy in Google Drive", () => {
     expect(sw).toHaveAttribute("aria-checked", "false");
     expect(sw).toBeEnabled();
     expect(screen.getByText(/רק קובץ הגיבוי המוצפן/)).toBeInTheDocument();
-    expect(screen.getByText(/ערכת השחזור המודפסת/)).toBeInTheDocument();
+    expect(screen.getByText(/בלי הסיסמה שלך, הקובץ הזה לא שימושי/)).toBeInTheDocument();
     expect(screen.getByText(/שלושת העותקים האחרונים/)).toBeInTheDocument();
     expect(screen.getByText(/שומרת בתוך הכספת הרשאה לתיקייה הנסתרת בלבד, עד שתכבי/)).toBeInTheDocument();
     expect(calls).toEqual(["drive_backup_status"]);

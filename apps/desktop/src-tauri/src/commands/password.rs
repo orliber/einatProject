@@ -36,3 +36,22 @@ pub(crate) async fn new_recovery_kit(
     )
     .await
 }
+
+/// Stop the kit she has from opening the vault (D-103): a new kit is made and never shown.
+#[tauri::command]
+pub(crate) async fn retire_recovery_kit(
+    state: tauri::State<'_, AppState>,
+    current: String,
+    with_recovery: bool,
+) -> Res<()> {
+    let current = zeroize::Zeroizing::new(current);
+    off_lock(
+        &state,
+        move |c| {
+            c.begin_retire_recovery_kit(&current, with_recovery, &dv_core::google::WindowsAccount)
+        },
+        |job| job.run(),
+        |c, made| c.finish_retire_recovery_kit(made),
+    )
+    .await
+}

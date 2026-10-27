@@ -126,27 +126,28 @@ describe("forgot the password (D-096)", () => {
     expect(await screen.findByText(/התוכנה פועלת כראוי/)).toBeInTheDocument();
   });
 
-  it("with Google on, goes to the Google sign-in", async () => {
+  it("with Google on, goes to the Google sign-in; the kit is only a small link (D-103)", async () => {
     core({ available: true, on: true });
     render(<LockScreen />);
     await act(async () => {}); // the Google status arrives
     fireEvent.click(screen.getByRole("button", { name: "שכחתי את הסיסמה" }));
     expect(screen.getByLabelText("סיסמה חדשה")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "כניסה עם גוגל" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "יש לי את ערכת השחזור המודפסת" }));
+    fireEvent.click(screen.getByRole("button", { name: "יש לי ערכת שחזור מודפסת" }));
     expect(screen.getByLabelText("ערכת השחזור")).toBeInTheDocument();
   });
 
-  it("with Google off, says to use the kit now and where to turn Google on for next time", async () => {
+  it("with Google off, says so plainly, where to turn it on, and offers no kit button", async () => {
     core({ available: true, on: false });
     const { container } = render(<LockScreen />);
     await act(async () => {});
     fireEvent.click(screen.getByRole("button", { name: "שכחתי את הסיסמה" }));
     expect(screen.queryByLabelText("סיסמה חדשה")).toBeNull();
-    expect(screen.getByText(/פותחים עם ערכת השחזור המודפסת/)).toBeInTheDocument();
+    expect(screen.getByText(/הכניסה עם גוגל לא מופעלת במחשב הזה/)).toBeInTheDocument();
     expect(screen.getByText(/בהגדרות ← סיסמה ואבטחה/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "פתיחה עם ערכת השחזור" })).toBeNull();
     expect(await a11yViolations(container)).toEqual([]);
-    fireEvent.click(screen.getByRole("button", { name: "פתיחה עם ערכת השחזור" }));
+    fireEvent.click(screen.getByRole("button", { name: "יש לי ערכת שחזור מודפסת" }));
     expect(screen.getByLabelText("ערכת השחזור")).toHaveAttribute("type", "text");
     fireEvent.click(screen.getByRole("button", { name: "חזרה לפתיחה עם סיסמה" }));
     expect(screen.getByLabelText("סיסמה")).toHaveAttribute("type", "password");
@@ -157,7 +158,24 @@ describe("forgot the password (D-096)", () => {
     render(<LockScreen />);
     await act(async () => {});
     fireEvent.click(screen.getByRole("button", { name: "שכחתי את הסיסמה" }));
-    expect(screen.getByText(/פותחים עם ערכת השחזור המודפסת/)).toBeInTheDocument();
+    expect(screen.getByText(/אי אפשר לבחור סיסמה חדשה מכאן/)).toBeInTheDocument();
     expect(screen.queryByText(/גוגל/)).toBeNull();
+  });
+
+  it("another computer: says what opens it, stays on the password, and keeps the kit as a small link", async () => {
+    mockIPC((cmd) => {
+      if (cmd === "ping") return ping;
+      if (cmd === "google_status") return { available: true, on: false, needs_setup_here: false };
+      if (cmd === "unlock") throw { code: "other_computer", message: "הסיסמה פותחת את הכספת רק במחשב ובחשבון המשתמש שבהם היא נקבעה.", details: [] };
+      return null;
+    });
+    render(<LockScreen />);
+    await act(async () => {});
+    expect(screen.queryByRole("button", { name: "יש לי ערכת שחזור מודפסת" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("סיסמה"), { target: { value: "סיסמה בדויה לבדיקה" } });
+    fireEvent.click(screen.getByRole("button", { name: "פתיחה" }));
+    expect(await screen.findByText(/רק במחשב ובחשבון המשתמש/)).toBeInTheDocument();
+    expect(screen.getByLabelText("סיסמה")).toHaveAttribute("type", "password");
+    expect(screen.getByRole("button", { name: "יש לי ערכת שחזור מודפסת" })).toBeInTheDocument();
   });
 });

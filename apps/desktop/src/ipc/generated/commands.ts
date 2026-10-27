@@ -102,7 +102,7 @@ export type Commands = {
   create_folder: { args: { parentId: string | null; name: string }; returns: Folder };
   create_follow_up: { args: { caseId: string }; returns: string };
   create_sample_case: { args: undefined; returns: string };
-  create_vault: { args: { password: string }; returns: CreatedVault };
+  create_vault: { args: { password: string }; returns: null };
   decide_suspect: { args: { caseId: string; token: string; decision: SuspectDecision }; returns: null };
   delete_case: { args: { caseId: string }; returns: null };
   delete_consultation: { args: { id: string }; returns: null };
@@ -185,6 +185,7 @@ export type Commands = {
   restore_paragraph_version: { args: { caseId: string; draftId: string; versionId: string }; returns: null };
   restore_style_version: { args: { id: string }; returns: StyleProfileView };
   retention_due: { args: undefined; returns: Array<RetentionItem> };
+  retire_recovery_kit: { args: { current: string; withRecovery: boolean }; returns: null };
   save_scores: { args: { caseId: string; inputId: string | null; sheet: ScoreSheet }; returns: CaseInput };
   save_style_draft: { args: { profile: StyleProfile }; returns: StyleProfileView };
   save_style_source: { args: { token: string; included: Array<number>; title: string | null }; returns: StyleSourceView };

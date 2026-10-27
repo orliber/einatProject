@@ -764,6 +764,58 @@ impl Core {
         })
     }
 
+    /// Retiring the kit leaves Google and the backups as the only ways in (D-103), so it is
+    /// refused unless Google sign-in works on this computer and a backup is newer than the
+    /// last change of the password or kit. Checked before the proof, so nothing is tried.
+    pub fn retire_recovery_kit_ready(
+        &mut self,
+        keys: &dyn crate::google::ComputerKeys,
+    ) -> Result<(), CoreError> {
+        let google_on = self.google_status(keys).on;
+        self.retire_ready_given(google_on)
+    }
+
+    /// The two conditions, with whether Google works here already known (tests cannot build
+    /// a version with a Google registration, so they give it here).
+    pub(crate) fn retire_ready_given(&mut self, google_on: bool) -> Result<(), CoreError> {
+        if !google_on {
+            return Err(CoreError::Needs(
+                "קודם מפעילים כניסה עם גוגל במחשב הזה: בלי ערכה ובלי גוגל, סיסמה שנשכחה = אין דרך להיכנס."
+                    .to_owned(),
+                ErrorAction::settings("security"),
+            ));
+        }
+        let backup = self.backup_status()?;
+        if backup.last_at.is_none() || backup.secret_changed {
+            return Err(CoreError::Needs(
+                "קודם גיבוי עדכני לדיסק נייד: הוא מה שפותח את הכספת במחשב אחר.".to_owned(),
+                ErrorAction::settings("backup"),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Step 1 of retiring the kit: the conditions above, then the same work as a new kit.
+    pub fn begin_retire_recovery_kit(
+        &mut self,
+        current: &str,
+        with_recovery: bool,
+        keys: &dyn crate::google::ComputerKeys,
+    ) -> Result<SlotJob, CoreError> {
+        self.retire_recovery_kit_ready(keys)?;
+        self.begin_new_recovery_kit(current, with_recovery)
+    }
+
+    /// The kit she has stops opening the vault, and no new one is shown (D-103): the slot gets
+    /// a key nobody holds. Old backups still open with the old kit, as after a new kit.
+    pub fn finish_retire_recovery_kit(&mut self, made: SlotMade) -> Result<(), CoreError> {
+        let kit = self
+            .finish_slot(made)?
+            .ok_or_else(|| CoreError::Internal("no kit".to_owned()))?;
+        drop(kit);
+        Ok(())
+    }
+
     pub fn new_recovery_kit(
         &mut self,
         current: &str,

@@ -23,7 +23,7 @@ describe("backup", () => {
     expect(await screen.findByText("גיבוי.vaultbak")).toBeInTheDocument();
     expect(screen.getByText(/גיבוי מ-/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /ערכת השחזור/ }));
+    fireEvent.click(screen.getByRole("button", { name: "יש לי ערכת שחזור מודפסת" }));
     fireEvent.change(screen.getByLabelText(/ערכת השחזור/), { target: { value: "AAAA-BBBB" } });
     fireEvent.click(screen.getByRole("button", { name: "שחזור ופתיחה" }));
     await vi.waitFor(() => expect(restored).toHaveBeenCalled());

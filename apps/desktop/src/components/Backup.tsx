@@ -82,13 +82,13 @@ export function BackupSettings() {
   return (
     <section className="card setting" aria-labelledby="s-backup">
       <h2 id="s-backup">גיבוי</h2>
-      <p className="muted small">קובץ מוצפן אחד, לדיסק נייד (לא לענן). נפתח בסיסמה או בערכת השחזור של יום הגיבוי.</p>
+      <p className="muted small">קובץ מוצפן אחד, לדיסק נייד (לא לענן). נפתח בסיסמה של יום הגיבוי, בכל מחשב.</p>
       {s && (
         <ul className="sec-list backup-facts">
           <li>
             <span className={s.due ? "chip chip-warn" : "chip chip-ok"}>{s.last_at === null ? "אין" : s.due ? "לחדש" : "עדכני"}</span>
             {s.last_at === null ? "עוד לא נעשה גיבוי." : `הגיבוי האחרון: ${daysAgo(s.days_since ?? 0)} (${heDateTime(s.last_at)}).`}
-            {s.secret_changed && s.last_at !== null && <span className="hint">הסיסמה או ערכת השחזור הוחלפו מאז, והגיבוי הזה נפתח רק בקודמות.</span>}
+            {s.secret_changed && s.last_at !== null && <span className="hint">הסיסמה הוחלפה מאז, והגיבוי הזה נפתח רק בסיסמה הקודמת.</span>}
           </li>
           <li>
             <span className={s.last_check_at === null ? "chip chip-sand" : "chip chip-ok"}>{s.last_check_at === null ? "לא נבדק" : "נבדק"}</span>
@@ -216,7 +216,7 @@ export function BackupReminder() {
     <div className="backup-reminder" role="status">
       <span className="grow">
         {s.last_at === null ? "עוד לא נעשה גיבוי לכספת."
-          : s.secret_changed ? "הסיסמה או ערכת השחזור הוחלפו אחרי הגיבוי האחרון."
+          : s.secret_changed ? "הסיסמה הוחלפה אחרי הגיבוי האחרון."
           : `הגיבוי האחרון היה ${daysAgo(s.days_since ?? 0)}.`}
         {" "}גיבוי לדיסק נייד שומר על העבודה אם המחשב יתקלקל או ייגנב.
       </span>
@@ -256,7 +256,8 @@ export function RestoreFromBackup({ onRestored, onBack }: { onRestored: (s: AppS
       setSecret("");
       onRestored(status);
     } catch (err) {
-      setError((err as { message?: string }).message ?? "השחזור נכשל.");
+      const e = err as { code?: string; message?: string };
+      setError(mode === "recovery" && e.code === "wrong_secret" ? "ערכת השחזור לא נכונה. כדאי לבדוק שגיאות הקלדה." : e.message ?? "השחזור נכשל.");
       setSecret("");
       setBusy(false);
     }
@@ -265,7 +266,7 @@ export function RestoreFromBackup({ onRestored, onBack }: { onRestored: (s: AppS
   return (
     <div className="setup-col stack">
       <h1>שחזור מגיבוי</h1>
-      <p className="lede">במחשב חדש, או אחרי תקלה: בוחרים את קובץ הגיבוי (בדרך כלל בדיסק הנייד), ופותחים אותו בסיסמה או בערכת השחזור שהיו ביום הגיבוי.</p>
+      <p className="lede">במחשב חדש, או אחרי תקלה: בוחרים את קובץ הגיבוי (בדרך כלל בדיסק הנייד), ופותחים אותו בסיסמה שהייתה ביום הגיבוי.</p>
       {!staged ? (
         <>
           <button type="button" className="btn btn-primary btn-big" onClick={() => void choose()}>בחירת קובץ הגיבוי…</button>
@@ -284,8 +285,9 @@ export function RestoreFromBackup({ onRestored, onBack }: { onRestored: (s: AppS
               dir={mode === "recovery" ? "ltr" : undefined} autoComplete="off" autoFocus placeholder={mode === "recovery" ? "7K3M-Q9WD-…" : undefined}
               value={secret} onChange={(e) => setSecret(e.target.value)} />
           </div>
-          <button type="button" className="link-btn align-start" onClick={() => { setMode(mode === "password" ? "recovery" : "password"); setSecret(""); setError(null); }}>
-            {mode === "password" ? "הסיסמה נשכחה? פתיחה עם ערכת השחזור" : "פתיחה עם הסיסמה"}
+          {/* The kit is a last resort (D-103): a small link, not the way in. */}
+          <button type="button" className={mode === "password" ? "link-btn small muted align-start" : "link-btn align-start"} onClick={() => { setMode(mode === "password" ? "recovery" : "password"); setSecret(""); setError(null); }}>
+            {mode === "password" ? "יש לי ערכת שחזור מודפסת" : "פתיחה עם הסיסמה"}
           </button>
           <ErrorLine error={error} />
           {busy && <WaitLine task="restore" label="פותחת את הגיבוי, בודקת שהוא שלם ומשחזרת" />}

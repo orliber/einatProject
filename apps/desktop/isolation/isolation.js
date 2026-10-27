@@ -94,6 +94,7 @@ const ALLOWED = new Set([
   "name_model_progress",
   "name_model_status",
   "new_recovery_kit",
+  "retire_recovery_kit",
   "paragraph_sources",
   "paragraph_versions",
   "similar_paragraph",

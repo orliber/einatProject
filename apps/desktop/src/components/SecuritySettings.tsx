@@ -16,14 +16,15 @@ const count = (n: number) => COUNT[n] ?? String(n);
 /** Where she fixes a layer that is hers. */
 const ACTION: Record<string, { label: string; pane: "backup" } | { label: string; below: string }> = {
   backup: { label: "לגבות", pane: "backup" },
-  // The kit is checked in the password card, just below on this page.
-  recovery_kit: { label: "לבדיקת הערכה", below: "s-password" },
+  // A forgotten password is Google's (D-103): turned on in its card, just below on this page.
+  forgot_password: { label: "להפעלה", below: "s-google" },
 };
 
 function Card({ l, you }: { l: SecurityLayer; you: boolean }) {
   const { go } = useApp();
   const warn = l.state === "warn";
-  const action = you ? ACTION[l.key] : undefined;
+  // Google needs her only while it is off (D-103).
+  const action = you && (l.key !== "forgot_password" || warn) ? ACTION[l.key] : undefined;
   return (
     <li className={["layer", warn ? "warn" : l.state === "info" ? "info" : "ok", you ? "you" : ""].filter(Boolean).join(" ")}>
       <span className="layer-mark" aria-hidden="true">{you ? "את" : warn ? "!" : l.state === "info" ? "i" : "✓"}</span>

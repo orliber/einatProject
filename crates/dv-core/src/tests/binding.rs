@@ -115,7 +115,8 @@ fn a_new_vault_is_bound_to_this_computer_and_she_types_only_her_password() {
     assert!(matches!(e, CoreError::Vault(VaultError::OtherComputer)));
     let ui = e.to_ui();
     assert_eq!(ui.code, "other_computer");
-    assert!(ui.message.contains("ערכת השחזור"));
+    // What opens it here now: the newer version, or the backup with the password (D-103).
+    assert!(ui.message.contains("הגיבוי") && !ui.message.contains("ערכת השחזור"));
     assert!(
         there.unlock(PASSWORD).is_err() && there.check_backoff().is_ok(),
         "not a guess: no waiting time"
@@ -151,10 +152,11 @@ fn a_vault_from_before_is_bound_at_its_next_opening_with_no_screen() {
     let opened = core.unlock(PASSWORD).unwrap();
     assert!(opened.unlocked);
     assert_eq!(state(&mut core), "ok");
-    // Said once, with what opens it after a reinstall of Windows (review of stage 5, S1).
+    // Said once, with what opens it after a reinstall of Windows (review of stage 5, S1):
+    // the backup with the password, no longer the kit (D-103).
     let said = opened.since_last.unwrap();
     assert!(
-        said.contains("רק במחשב הזה") && said.contains("ערכת השחזור"),
+        said.contains("רק במחשב הזה") && said.contains("גיבוי"),
         "{said}"
     );
     core.lock();
@@ -225,31 +227,64 @@ fn actions_that_ask_for_the_password_take_it_on_the_bound_computer() {
 }
 
 #[test]
-fn the_printed_kit_is_checked_in_settings_and_the_security_page_says_when() {
+fn a_retired_kit_stops_opening_and_the_security_page_asks_for_google_instead() {
     let dir = tempfile::tempdir().unwrap();
     let here = Arc::new(FakeSeal::default());
     let mut core = on(dir.path(), &here);
     let kit = core.create_vault(PASSWORD).unwrap().recovery_key;
-    let kit_item = |core: &mut Core| {
-        core.security_status()
-            .items
-            .into_iter()
-            .find(|i| i.key == "recovery_kit")
-            .unwrap()
-    };
-    let before = kit_item(&mut core);
-    assert_eq!((before.state.as_str(), before.detail), ("warn", None));
-    assert!(!core.confirm_recovery_key("AAAA-BBBB-CCCC").unwrap());
-    assert_eq!(kit_item(&mut core).state, "warn");
+    // No kit on the page any more (D-103): a forgotten password is Google's.
+    let items = core.security_status().items;
+    assert!(items.iter().all(|i| i.key != "recovery_kit"));
+    let forgot = items.iter().find(|i| i.key == "forgot_password").unwrap();
+    assert!(["warn", "info"].contains(&forgot.state.as_str()));
     assert!(core.confirm_recovery_key(&kit).unwrap());
-    let after = kit_item(&mut core);
-    assert_eq!(
-        (after.state.as_str(), after.detail.as_deref()),
-        ("ok", Some("0"))
+    // Not while Google is off here: the kit would be the only way back from a forgotten
+    // password, and nothing is tried (no proof checked, the kit still opens).
+    let refused = core
+        .begin_retire_recovery_kit(PASSWORD, false, &crate::google::WindowsAccount)
+        .unwrap_err();
+    assert!(
+        matches!(refused, CoreError::Needs(ref m, _) if m.contains("גוגל")),
+        "{refused:?}"
     );
-    // An internal date, not a line of its own in her log.
+    assert!(core.confirm_recovery_key(&kit).unwrap());
+    // Retiring (the step after those checks): the kit she had no longer opens the vault,
+    // and nothing new is handed out.
+    let job = core.begin_new_recovery_kit(PASSWORD, false).unwrap();
+    core.finish_retire_recovery_kit(job.run()).unwrap();
+    assert!(!core.confirm_recovery_key(&kit).unwrap());
     let log = core.activity(None).unwrap();
-    assert!(log.entries.iter().all(|e| e.text != "הגדרה עודכנה"));
+    assert!(log.entries.iter().any(|e| e.text == "ערכת השחזור הוחלפה"));
+}
+
+#[test]
+fn retiring_the_kit_needs_a_backup_newer_than_the_last_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let drive = tempfile::tempdir().unwrap();
+    let here = Arc::new(FakeSeal::default());
+    let mut core = on(dir.path(), &here);
+    core.create_vault(PASSWORD).unwrap();
+    let needs_backup = |r: Result<(), CoreError>| matches!(r, Err(CoreError::Needs(ref m, _)) if m.contains("גיבוי עדכני"));
+    // Google off: refused whatever the backup.
+    assert!(matches!(
+        core.retire_ready_given(false),
+        Err(CoreError::Needs(ref m, _)) if m.contains("גוגל")
+    ));
+    // Google on, no backup yet.
+    assert!(needs_backup(core.retire_ready_given(true)));
+    // Google on, a backup.
+    core.write_backup(&drive.path().join("b")).unwrap();
+    core.retire_ready_given(true).unwrap();
+    // The password changed after it: that backup opens only with the old one.
+    let job = core
+        .begin_change_password(PASSWORD, false, "סיסמה חדשה וארוכה מאוד לכספת")
+        .unwrap();
+    core.finish_change_password(job.run()).unwrap();
+    assert!(needs_backup(core.retire_ready_given(true)));
+    assert!(core.retire_ready_given(false).is_err());
+    // A new backup: allowed again.
+    core.write_backup(&drive.path().join("c")).unwrap();
+    core.retire_ready_given(true).unwrap();
 }
 
 /// A computer whose key held aside is never promoted (the program closed right after the new
