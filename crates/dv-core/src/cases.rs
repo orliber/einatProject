@@ -214,11 +214,16 @@ impl Core {
             .inputs(case_id)?
             .into_iter()
             .find(|i| i.id == input_id)
-            .map(|i| i.content);
+            .map(|i| (i.title, i.content));
         self.vault_mut()?
             .update_input(case_id, input_id, title, content)?;
-        if before.as_deref() != Some(content) {
+        if before.as_ref().map(|(_, c)| c.as_str()) != Some(content) {
             self.forget_sorting(case_id, input_id)?;
+        }
+        // A request still being filtered with the old text is prepared again with the new one.
+        // One she already reviewed keeps the bytes she saw, and only those.
+        if before.as_ref().map(|(t, c)| (t.as_str(), c.as_str())) != Some((title, content)) {
+            self.restart_prepares();
         }
         self.learn_input(case_id, title, content)
     }
@@ -279,6 +284,10 @@ impl Core {
             None => v.add_input(case_id, InputKind::TestScores, &title, &text)?,
         };
         v.set_input_data(case_id, &input.id, &data)?;
+        if input_id.is_some() {
+            // As with any material changed: a request still being filtered is prepared again.
+            self.restart_prepares();
+        }
         self.learn_input(case_id, &input.title, &input.content)?;
         Ok(input)
     }
@@ -303,6 +312,8 @@ impl Core {
         let removed = self.vault_mut()?.take_input(case_id, input_id)?;
         if removed.is_some() {
             self.removed_input = removed;
+            // A request that holds the deleted material does not go.
+            self.forget_pending(case_id);
         }
         Ok(())
     }

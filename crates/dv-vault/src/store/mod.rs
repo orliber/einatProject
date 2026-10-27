@@ -1252,6 +1252,17 @@ impl Vault {
             .collect()
     }
 
+    /// Whether the case is in the recycle bin. A case that is not in the vault at all is an
+    /// error, never "not in the bin".
+    pub fn case_in_trash(&self, case_id: &str) -> Result<bool, VaultError> {
+        self.case_key(case_id)?;
+        Ok(self.main.query_row(
+            "SELECT deleted_at IS NOT NULL FROM cases WHERE id = ?1",
+            [case_id],
+            |r| r.get(0),
+        )?)
+    }
+
     /// Into the recycle bin: nothing is erased yet, and the case can be restored.
     pub fn trash_case(&mut self, case_id: &str) -> Result<(), VaultError> {
         self.case_key(case_id)?;

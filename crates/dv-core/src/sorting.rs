@@ -8,7 +8,6 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use dv_ai::{SortInput, SortMaterial, SortSection};
 use dv_domain::{
     passage_ranges, CaseInput, DocDate, Feed, InputKind, MaterialSummary, ReportSection,
     ReportStructure, Routing, Setting, Suggestion,
@@ -18,9 +17,9 @@ use dv_vault::{Vault, VaultError};
 use serde_json::Value;
 
 use crate::name_model::NameHints;
-use crate::views::{MaterialRouting, Prepared, PriorRecordView, SortResult};
+use crate::views::{MaterialRouting, PriorRecordView, SortResult};
 use crate::{
-    restore, scan_model_output, structure_for, Core, CoreError, Outgoing, PendingKind, Review,
+    restore, scan_model_output, structure_for, Core, CoreError, Outgoing, PendingKind,
     DERIVED_SECTIONS,
 };
 
@@ -74,7 +73,7 @@ pub(crate) fn routing_of(v: &Vault, case_id: &str, input_id: &str) -> Result<Rou
         .unwrap_or_default())
 }
 
-fn fingerprint(text: &str) -> u64 {
+pub(crate) fn fingerprint(text: &str) -> u64 {
     let mut h = DefaultHasher::new();
     text.hash(&mut h);
     h.finish()
@@ -338,115 +337,6 @@ impl Core {
             v.set_input_routing(case_id, input_id, &json)?;
         }
         Ok(())
-    }
-
-    /// Build the sorting request for every material not sorted yet, with its review screen.
-    pub fn prepare_sort(&mut self, case_id: &str) -> Result<Prepared, CoreError> {
-        self.prepare_sort_once(case_id, false)
-    }
-
-    fn prepare_sort_once(&mut self, case_id: &str, learned: bool) -> Result<Prepared, CoreError> {
-        let structure = structure_for(self.vault_ref()?, case_id)?;
-        let sections: Vec<SortSection> = sortable(&structure)
-            .into_iter()
-            .map(|s| SortSection {
-                key: s.key.clone(),
-                about: s.about.clone(),
-            })
-            .collect();
-        let model = self.model_for(crate::Task::Sort)?;
-        let data = self.privacy_data(case_id)?;
-        let hints = self.case_hints(case_id, &[])?;
-        let demo_mode = self.demo_mode()?;
-
-        let (input, review, rows) = {
-            let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
-            if v.case_meta(case_id)?.consent.is_none() {
-                return Err(CoreError::ConsentMissing);
-            }
-            let lookups = data.lookups(v);
-            let ctx = lookups.masked_context();
-            let internal = |e: dv_privacy::PrivacyError| CoreError::Internal(e.to_string());
-            let mut review = Review::default();
-            let mut materials = Vec::new();
-            let mut rows = Vec::new();
-            // Materials that cannot be cut into passages right now (see below), by title.
-            let mut uncut: Vec<String> = Vec::new();
-            // A score table of an instrument she does not give is not sorted (D-098).
-            for inp in crate::instruments::request_inputs(v, case_id)? {
-                let ranges = passage_ranges(&inp.content);
-                if ranges.is_empty()
-                    || !routing_of(v, case_id, &inp.id)?.needs_sorting(ranges.len())
-                {
-                    continue;
-                }
-                let (whole, parts) = hints
-                    .filter_split(&inp.content, &ctx, &ranges)
-                    .map_err(internal)?;
-                // A name across a passage edge: this material stays on the table for now.
-                let Some(parts) = parts else {
-                    uncut.push(inp.title.clone());
-                    continue;
-                };
-                let title = hints.filter(&inp.title, &ctx).map_err(internal)?;
-                let sid = format!("S{}", materials.len() + 1);
-                if title.original_segments.iter().any(|s| s.mark.is_some()) {
-                    review.add(format!("{sid} · {} · כותרת", inp.kind.label_he()), &title);
-                    review.add(format!("{sid} · {}", inp.kind.label_he()), &whole);
-                } else {
-                    review.add(
-                        format!("{sid} · {} · {}", inp.kind.label_he(), title.tagged),
-                        &whole,
-                    );
-                }
-                let passages_tagged: Vec<String> = parts.into_iter().map(|p| p.tagged).collect();
-                rows.push((
-                    inp.id.clone(),
-                    ranges.len(),
-                    fingerprint(&inp.content),
-                    passages_tagged.join("\n\n"),
-                ));
-                materials.push(SortMaterial {
-                    input_id: inp.id.clone(),
-                    kind_label: inp.kind.label_he().to_owned(),
-                    title_tagged: title.tagged,
-                    passages_tagged,
-                });
-            }
-            if materials.is_empty() {
-                // Shown only here, on this computer (titles may hold names).
-                return Err(CoreError::Refused(if uncut.is_empty() {
-                    "כל החומרים כבר ממוינים לסעיפים.".to_owned()
-                } else {
-                    format!(
-                        "אי אפשר למיין אוטומטית את: {}. שם חשוד נמשך שם על פני שתי שורות, ולכן \
-                         החומר לא נחתך לקטעים. אפשר לבחור לו סעיפים בעצמך (\"שינוי הסעיפים\").",
-                        uncut.join(", ")
-                    )
-                }));
-            }
-            (
-                SortInput {
-                    sections,
-                    materials,
-                },
-                review,
-                rows,
-            )
-        };
-
-        let nonce = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
-        let body = dv_ai::build_sort_request(&model, &input, &nonce);
-        let mut prepared = review.into_case_prepared(demo_mode, &data);
-        let kind = PendingKind::Sort {
-            case_id: case_id.to_owned(),
-            materials: rows,
-            sections: input.sections.iter().map(|s| s.key.clone()).collect(),
-        };
-        if self.gate(&data, &body, kind, &mut prepared, !learned)? {
-            return self.prepare_sort_once(case_id, true);
-        }
-        Ok(prepared)
     }
 
     /// Send exactly what was approved and store the sorting.

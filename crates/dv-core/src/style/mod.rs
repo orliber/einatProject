@@ -993,6 +993,15 @@ pub(crate) fn style_source(v: &Vault) -> Result<Option<StyleSource>, CoreError> 
 /// request away from it (D-109).
 pub(crate) struct StyleSource(StoredProfile);
 
+/// Her style items may quote her reports: wiped when the request is done with them.
+impl Drop for StyleSource {
+    fn drop(&mut self) {
+        for item in &mut self.0.profile.items {
+            zeroize::Zeroize::zeroize(&mut item.text);
+        }
+    }
+}
+
 impl StyleSource {
     /// The profile as it goes into a drafting request for `section_key`, with every item that
     /// the case's filter would change left out.

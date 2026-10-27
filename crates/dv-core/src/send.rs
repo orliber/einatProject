@@ -12,6 +12,10 @@ impl Core {
     /// A refusal the fix loop can answer (a name, a pattern, a foreign tag the filter never
     /// saw) is answered here, up to three times: the refused words are hidden in the outgoing
     /// copy and the copy goes back to the same gate (round 25). Anything else stays refused.
+    ///
+    /// The requests themselves go through the same two steps apart, the filter away from the
+    /// core's lock (`clear_request`, then `land`; `prepare.rs`); tests call them in a row here.
+    #[cfg(test)]
     pub(crate) fn gate(
         &mut self,
         data: &PrivacyData,

@@ -1,4 +1,5 @@
-//! Preparing a section's request away from the core's lock (D-109).
+//! Preparing a request away from the core's lock (D-109): a section's, the check against the
+//! sources, a consultation, the sorting of the materials and the check of the whole report.
 //!
 //! The filter reads every text that goes out with a section (its materials, the drafts, the
 //! conversation, her style and guide), about 120 ms a section on her computer, and the core
@@ -18,11 +19,14 @@
 //! approvals dropped, an error, a cancel or a panic in the worker: the result is dropped and
 //! nothing lands. A change in what the filter decides by (a name of any case, hers, "not a
 //! name", the past reports' names) or a numbered tag another request gave first: the request
-//! is prepared again from the start, as if it had begun after the change.
+//! is prepared again from the start, as if it had begun after the change. So is one whose
+//! material was changed or deleted, whose case went to the recycle bin, or whose section she took
+//! to write herself; the last three drop the approvals waiting for the case too.
 
 use std::sync::Mutex;
 
 use super::*;
+use crate::drafts::CLOSING_SECTIONS;
 use crate::send::{clear_request, filter_sources, read_sources, Cleared, SourceRead};
 use dv_domain::GrammaticalGender;
 use dv_vault::TokenHasher;
@@ -48,6 +52,53 @@ struct SectionAsk {
 impl Drop for SectionAsk {
     fn drop(&mut self) {
         self.instruction.zeroize();
+    }
+}
+
+/// A free question to the AI, optionally about a case, continuing a saved conversation or not.
+#[derive(Clone)]
+struct ConsultAsk {
+    case_id: Option<String>,
+    conversation_id: Option<String>,
+    message: String,
+}
+
+impl Drop for ConsultAsk {
+    fn drop(&mut self) {
+        self.message.zeroize();
+    }
+}
+
+/// What a request was asked for, kept to prepare it again from the start.
+#[derive(Clone)]
+enum Ask {
+    Section(SectionAsk),
+    Consult(ConsultAsk),
+    /// Sorting the case's materials into sections (D-022).
+    Sort(String),
+    /// The whole approved report, read as one (D-097).
+    ReportCheck(String),
+}
+
+impl Ask {
+    /// The case the request is about; empty for a consultation without one.
+    fn case_id(&self) -> &str {
+        match self {
+            Ask::Section(a) => &a.case_id,
+            Ask::Consult(a) => a.case_id.as_deref().unwrap_or(""),
+            Ask::Sort(c) | Ask::ReportCheck(c) => c,
+        }
+    }
+
+    /// What it is, for logs that must hold nothing of the case.
+    fn what(&self) -> &str {
+        match self {
+            Ask::Section(a) if a.check => "verify",
+            Ask::Section(a) => &a.section_key,
+            Ask::Consult(_) => "consult",
+            Ask::Sort(_) => "sort",
+            Ask::ReportCheck(_) => "report_check",
+        }
     }
 }
 
@@ -84,6 +135,13 @@ impl Drop for SectionRead {
             t.zeroize();
         }
         self.guide.zeroize();
+        self.interpretations.zeroize();
+        self.severity.zeroize();
+        self.age.zeroize();
+        for p in &mut self.patterns {
+            p.key.zeroize();
+            p.label.zeroize();
+        }
     }
 }
 
@@ -104,9 +162,69 @@ impl Drop for CheckRead {
     }
 }
 
+/// A consultation's texts as the vault holds them. Wiped when dropped.
+struct ConsultRead {
+    /// The saved conversation's turns: role, her words as she typed them, and as they went out.
+    earlier: Vec<(String, String, String)>,
+    /// The case's approved paragraphs, with the section each is in.
+    approved: Vec<(dv_domain::ReportSection, String)>,
+}
+
+impl Drop for ConsultRead {
+    fn drop(&mut self) {
+        for (_, shown, tagged) in &mut self.earlier {
+            shown.zeroize();
+            tagged.zeroize();
+        }
+        for (_, t) in &mut self.approved {
+            t.zeroize();
+        }
+    }
+}
+
+/// A material not sorted yet, as the vault holds it.
+struct SortItem {
+    id: String,
+    kind: InputKind,
+    title: String,
+    content: String,
+    /// Where its passages are, as the sorting cuts it.
+    ranges: Vec<std::ops::Range<usize>>,
+}
+
+impl Drop for SortItem {
+    fn drop(&mut self) {
+        self.title.zeroize();
+        self.content.zeroize();
+    }
+}
+
+struct SortRead {
+    sections: Vec<dv_ai::SortSection>,
+    items: Vec<SortItem>,
+}
+
+/// The approved report, section by section: each with its approved paragraphs.
+struct ReportCheckRead {
+    sections: Vec<(dv_domain::ReportSection, Vec<String>)>,
+}
+
+impl Drop for ReportCheckRead {
+    fn drop(&mut self) {
+        for (_, texts) in &mut self.sections {
+            for t in texts {
+                t.zeroize();
+            }
+        }
+    }
+}
+
 enum Texts {
     Section(Box<SectionRead>),
     Check(CheckRead),
+    Consult(ConsultRead),
+    Sort(SortRead),
+    ReportCheck(ReportCheckRead),
 }
 
 /// A section's request read under the lock, waiting to be filtered away from it.
@@ -119,7 +237,7 @@ pub struct RequestJob {
     /// The names this request found were kept, and it was built again: nothing new is kept.
     learned: bool,
     tries: u32,
-    ask: SectionAsk,
+    ask: Ask,
     data: PrivacyData,
     hasher: TokenHasher,
     hints: NameHints,
@@ -135,7 +253,7 @@ pub struct RequestJob {
 impl std::fmt::Debug for RequestJob {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RequestJob")
-            .field("section", &self.ask.section_key)
+            .field("request", &self.ask.what())
             .field("tries", &self.tries)
             .finish_non_exhaustive()
     }
@@ -149,7 +267,7 @@ pub struct RequestRun {
     fingerprint: String,
     learned: bool,
     tries: u32,
-    ask: SectionAsk,
+    ask: Ask,
     data: PrivacyData,
     pub(crate) built: Result<Built, CoreError>,
 }
@@ -157,7 +275,7 @@ pub struct RequestRun {
 impl std::fmt::Debug for RequestRun {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RequestRun")
-            .field("section", &self.ask.section_key)
+            .field("request", &self.ask.what())
             .field("ok", &self.built.is_ok())
             .finish_non_exhaustive()
     }
@@ -230,9 +348,25 @@ impl RequestJob {
         stop()?;
         let lookups = self.data.lookups(&self.hasher);
         let ctx = lookups.masked_context();
-        let (body, review, kind) = match &self.read {
-            Texts::Section(read) => build_section(self, read, &ctx, &stop)?,
-            Texts::Check(read) => build_check(self, read, &ctx, &stop)?,
+        let (body, review, mut kind) = match (&self.ask, &self.read) {
+            (Ask::Section(ask), Texts::Section(read)) => {
+                build_section(self, ask, read, &ctx, &stop)?
+            }
+            (Ask::Section(ask), Texts::Check(read)) => build_check(self, ask, read, &ctx, &stop)?,
+            (Ask::Consult(ask), Texts::Consult(read)) => {
+                build_consult(self, ask, read, &ctx, &stop)?
+            }
+            (Ask::Sort(case_id), Texts::Sort(read)) => {
+                build_sort(self, case_id, read, &ctx, &stop)?
+            }
+            (Ask::ReportCheck(case_id), Texts::ReportCheck(read)) => {
+                build_report_check(self, case_id, read, &ctx, &stop)?
+            }
+            _ => {
+                return Err(CoreError::Internal(
+                    "הבקשה והטקסטים שלה לא תואמים.".to_owned(),
+                ))
+            }
         };
         #[cfg(test)]
         #[allow(clippy::panic)]
@@ -241,6 +375,11 @@ impl RequestJob {
         }
         stop()?;
         let prepared = review.into_case_prepared(self.demo_mode, &self.data);
+        // A consultation keeps what was hidden in it, and its own book when it has no case.
+        if let PendingKind::Consult { hidden, masks, .. } = &mut kind {
+            *hidden = prepared.hidden.clone();
+            *masks = self.data.masks.entries();
+        }
         let cleared = clear_request(&self.data, &lookups, &body, &prepared, !self.learned);
         stop()?;
         Ok(Built {
@@ -281,7 +420,10 @@ pub fn run_requests(
                 })
             })
             .collect();
-        handles.into_iter().all(|h| h.join().is_ok())
+        // Every worker is joined, one that panicked included: a scope left with a panicked
+        // worker not joined panics itself.
+        let joined: Vec<bool> = handles.into_iter().map(|h| h.join().is_ok()).collect();
+        joined.iter().all(|ok| *ok)
     });
     let mut out = out.into_inner().unwrap_or_default();
     if !whole || out.len() != total {
@@ -297,11 +439,12 @@ pub fn run_requests(
 /// what the answer is stored with. Called away from the lock; `stop` ends it on a lock.
 fn build_section(
     job: &RequestJob,
+    ask: &SectionAsk,
     read: &SectionRead,
     ctx: &PrivacyContext<'_>,
     stop: &dyn Fn() -> Result<(), CoreError>,
 ) -> Result<(Value, Review, PendingKind), CoreError> {
-    let (ask, hints) = (&job.ask, &job.hints);
+    let hints = &job.hints;
     let points = ask.points;
     let run = |t: &str| {
         stop()?;
@@ -459,6 +602,7 @@ fn build_section(
 /// paragraphs, filtered. Called away from the lock; `stop` ends it on a lock.
 fn build_check(
     job: &RequestJob,
+    ask: &SectionAsk,
     read: &CheckRead,
     ctx: &PrivacyContext<'_>,
     stop: &dyn Fn() -> Result<(), CoreError>,
@@ -466,7 +610,7 @@ fn build_check(
     let mut review = Review::default();
     let (sources, _rows) = filter_sources(
         &read.sources,
-        &job.ask.section_key,
+        &ask.section_key,
         &read.trim_title,
         ctx,
         &job.hints,
@@ -491,10 +635,201 @@ fn build_check(
     let (body, _paragraph_ids, source_ids) =
         dv_ai::build_verify_request(&job.model, &input, &job.nonce);
     let kind = PendingKind::Verify {
-        case_id: job.ask.case_id.clone(),
-        section_key: job.ask.section_key.clone(),
+        case_id: ask.case_id.clone(),
+        section_key: ask.section_key.clone(),
         draft_ids,
         source_ids,
+    };
+    Ok((body, review, kind))
+}
+
+/// A consultation: her question, the conversation so far and the case's approved sections,
+/// filtered. Called away from the lock; `stop` ends it on a lock.
+fn build_consult(
+    job: &RequestJob,
+    ask: &ConsultAsk,
+    read: &ConsultRead,
+    ctx: &PrivacyContext<'_>,
+    stop: &dyn Fn() -> Result<(), CoreError>,
+) -> Result<(Value, Review, PendingKind), CoreError> {
+    let internal = |e: dv_privacy::PrivacyError| CoreError::Internal(e.to_string());
+    stop()?;
+    let msg = job.hints.filter(&ask.message, ctx).map_err(internal)?;
+    let mut review = Review::default();
+    let mut history = Vec::new();
+    for (n, (role, shown, tagged)) in read.earlier.iter().enumerate() {
+        stop()?;
+        let label = |who: &str| format!("{who} ({})", n / 2 + 1);
+        if role == "user" {
+            // Her own words: filtered again, with today's names and decisions.
+            let out = filter(shown, ctx).map_err(internal)?;
+            review.add(label("שאלה קודמת"), &out);
+            history.push(TaggedTurn {
+                role: role.clone(),
+                text_tagged: out.tagged,
+            });
+        } else {
+            // Claude's own answer goes back as it came (it only ever saw tags); shown on the
+            // review screen, without name questions about Claude's own words.
+            let out = filter(tagged, ctx).map_err(internal)?;
+            review.add_context(label("תשובה קודמת"), &out);
+            history.push(TaggedTurn {
+                role: role.clone(),
+                text_tagged: tagged.clone(),
+            });
+        }
+    }
+    review.add("השאלה שלך".to_owned(), &msg);
+    let mut case_context = None;
+    if !read.approved.is_empty() {
+        let mut lines = Vec::new();
+        for (s, text) in &read.approved {
+            lines.push(format!("{}: {}", model_title(s, ctx)?, text));
+        }
+        stop()?;
+        let mut joined = lines.join("\n");
+        for l in &mut lines {
+            l.zeroize();
+        }
+        let out = filter(&joined, ctx).map_err(internal);
+        joined.zeroize();
+        let out = out?;
+        review.add("סיכום התיק (סעיפים מאושרים)".to_owned(), &out);
+        case_context = Some(out.tagged);
+    }
+    let input = dv_ai::ConsultInput {
+        history,
+        message_tagged: msg.tagged,
+        case_context_tagged: case_context,
+    };
+    stop()?;
+    let body = dv_ai::build_consult_request(&job.model, &input, &job.nonce);
+    let kind = PendingKind::Consult {
+        case_id: ask.case_id.clone(),
+        conversation_id: ask.conversation_id.clone(),
+        message_tagged: input.message_tagged,
+        message_shown: ask.message.clone(),
+        // Filled in once the review screen is made, with the request's own book.
+        hidden: Vec::new(),
+        masks: Vec::new(),
+    };
+    Ok((body, review, kind))
+}
+
+/// Sorting: each material not sorted yet, cut into passages and filtered. Called away from the
+/// lock; `stop` ends it on a lock.
+fn build_sort(
+    job: &RequestJob,
+    case_id: &str,
+    read: &SortRead,
+    ctx: &PrivacyContext<'_>,
+    stop: &dyn Fn() -> Result<(), CoreError>,
+) -> Result<(Value, Review, PendingKind), CoreError> {
+    let internal = |e: dv_privacy::PrivacyError| CoreError::Internal(e.to_string());
+    let hints = &job.hints;
+    let mut review = Review::default();
+    let mut materials = Vec::new();
+    let mut rows = Vec::new();
+    // Materials that cannot be cut into passages right now (see below), by title.
+    let mut uncut: Vec<String> = Vec::new();
+    for inp in &read.items {
+        stop()?;
+        let (whole, parts) = hints
+            .filter_split(&inp.content, ctx, &inp.ranges)
+            .map_err(internal)?;
+        // A name across a passage edge: this material stays on the table for now.
+        let Some(parts) = parts else {
+            uncut.push(inp.title.clone());
+            continue;
+        };
+        let title = hints.filter(&inp.title, ctx).map_err(internal)?;
+        let sid = format!("S{}", materials.len() + 1);
+        if title.original_segments.iter().any(|s| s.mark.is_some()) {
+            review.add(format!("{sid} · {} · כותרת", inp.kind.label_he()), &title);
+            review.add(format!("{sid} · {}", inp.kind.label_he()), &whole);
+        } else {
+            review.add(
+                format!("{sid} · {} · {}", inp.kind.label_he(), title.tagged),
+                &whole,
+            );
+        }
+        let passages_tagged: Vec<String> = parts.into_iter().map(|p| p.tagged).collect();
+        rows.push((
+            inp.id.clone(),
+            inp.ranges.len(),
+            sorting::fingerprint(&inp.content),
+            passages_tagged.join("\n\n"),
+        ));
+        materials.push(dv_ai::SortMaterial {
+            input_id: inp.id.clone(),
+            kind_label: inp.kind.label_he().to_owned(),
+            title_tagged: title.tagged,
+            passages_tagged,
+        });
+    }
+    if materials.is_empty() {
+        // Shown only here, on this computer (titles may hold names).
+        return Err(CoreError::Refused(if uncut.is_empty() {
+            "כל החומרים כבר ממוינים לסעיפים.".to_owned()
+        } else {
+            format!(
+                "אי אפשר למיין אוטומטית את: {}. שם חשוד נמשך שם על פני שתי שורות, ולכן \
+                 החומר לא נחתך לקטעים. אפשר לבחור לו סעיפים בעצמך (\"שינוי הסעיפים\").",
+                uncut.join(", ")
+            )
+        }));
+    }
+    let input = dv_ai::SortInput {
+        sections: read.sections.clone(),
+        materials,
+    };
+    stop()?;
+    let body = dv_ai::build_sort_request(&job.model, &input, &job.nonce);
+    let kind = PendingKind::Sort {
+        case_id: case_id.to_owned(),
+        materials: rows,
+        sections: input.sections.iter().map(|s| s.key.clone()).collect(),
+    };
+    Ok((body, review, kind))
+}
+
+/// The check of the whole report: each approved paragraph filtered by itself, section by
+/// section. Called away from the lock; `stop` ends it on a lock.
+fn build_report_check(
+    job: &RequestJob,
+    case_id: &str,
+    read: &ReportCheckRead,
+    ctx: &PrivacyContext<'_>,
+    stop: &dyn Fn() -> Result<(), CoreError>,
+) -> Result<(Value, Review, PendingKind), CoreError> {
+    let mut review = Review::default();
+    let mut sections = Vec::new();
+    let mut keys = Vec::new();
+    for (s, texts) in &read.sections {
+        let mut text = Vec::new();
+        for t in texts {
+            stop()?;
+            let out = job
+                .hints
+                .filter(t, ctx)
+                .map_err(|e| CoreError::Internal(e.to_string()))?;
+            review.add(format!("סעיף מאושר · {}", s.title), &out);
+            text.push(out.tagged);
+        }
+        sections.push(dv_ai::ReportCheckSection {
+            title: model_title(s, ctx)?,
+            text_tagged: text.join("\n"),
+            closing: CLOSING_SECTIONS.contains(&s.key.as_str()),
+        });
+        keys.push(s.key.clone());
+    }
+    stop()?;
+    let input = dv_ai::ReportCheckInput { sections };
+    let (body, ids) = dv_ai::build_report_check_request(&job.model, &input, &job.nonce);
+    let kind = PendingKind::ReportCheck {
+        case_id: case_id.to_owned(),
+        section_keys: keys,
+        ids,
     };
     Ok((body, review, kind))
 }
@@ -515,6 +850,12 @@ impl Core {
     /// request still being filtered then never lands either.
     pub(crate) fn drop_pending(&mut self) {
         self.pending.clear();
+        self.pending_epoch = self.pending_epoch.wrapping_add(1);
+    }
+
+    /// Something a request still being filtered was read from changed (a material): it lands
+    /// as begun again. The approvals waiting stay, each the bytes she reviewed.
+    pub(crate) fn restart_prepares(&mut self) {
         self.pending_epoch = self.pending_epoch.wrapping_add(1);
     }
 
@@ -696,6 +1037,25 @@ impl Core {
                 Landed::Again(job) => again.push((key, *job)),
             }
         }
+        // Begun again one at a time, each with a book of its own: run side by side again,
+        // the requests of one case share one book, read now that every run of the batch landed,
+        // so they do not give one tag to two words and come back again.
+        let mut books: HashMap<String, dv_privacy::MaskBook> = HashMap::new();
+        for (_, job) in &mut again {
+            let case_id = job.data.case_id.clone();
+            if case_id.is_empty() {
+                continue;
+            }
+            job.data.masks = match books.get(&case_id) {
+                Some(book) => book.sibling(),
+                None => {
+                    let book = dv_privacy::MaskBook::new(self.vault_ref()?.masks(&case_id)?);
+                    let mine = book.sibling();
+                    books.insert(case_id, book);
+                    mine
+                }
+            };
+        }
         Ok((ready, again))
     }
 
@@ -715,11 +1075,18 @@ impl Core {
         } = ran;
         self.same_session(session)?;
         let built = built?;
-        // Consent removed meanwhile, or the case deleted: nothing lands.
-        if self.vault_ref()?.case_meta(&ask.case_id)?.consent.is_none() {
-            return Err(CoreError::ConsentMissing);
+        let case_id = ask.case_id().to_owned();
+        // Consent removed meanwhile, or the case deleted or in the recycle bin: nothing lands.
+        if !case_id.is_empty() {
+            let v = self.vault_ref()?;
+            if v.case_in_trash(&case_id)? {
+                return Err(CoreError::NotFound("התיק".to_owned()));
+            }
+            if v.case_meta(&case_id)?.consent.is_none() {
+                return Err(CoreError::ConsentMissing);
+            }
         }
-        let now = PrivacyData::read(self.vault_ref()?, &ask.case_id)?;
+        let now = PrivacyData::read(self.vault_ref()?, &case_id)?;
         let stale = epoch != self.pending_epoch
             || now.fingerprint()? != fingerprint
             || masks_taken(&now.masks.entries(), &data.masks.added());
@@ -733,7 +1100,7 @@ impl Core {
         } = built;
         match cleared {
             Cleared::Learn(found) => {
-                self.vault_mut()?.add_found_names(&ask.case_id, &found)?;
+                self.vault_mut()?.add_found_names(&case_id, &found)?;
                 self.again(ask, true, tries)
             }
             Cleared::Answered(answered) => {
@@ -745,9 +1112,14 @@ impl Core {
 
     /// The request begun again after a change. After [`MAX_TRIES`] it is filtered here,
     /// holding the core, where nothing can change in between.
-    fn again(&mut self, ask: SectionAsk, learned: bool, tries: u32) -> Result<Landed, CoreError> {
+    fn again(&mut self, ask: Ask, learned: bool, tries: u32) -> Result<Landed, CoreError> {
         let tries = tries.saturating_add(1);
-        let job = self.begin_section(ask, learned, tries, None)?;
+        let job = match ask {
+            Ask::Section(a) => self.begin_section(a, learned, tries, None)?,
+            Ask::Consult(a) => self.begin_consult(a, learned, tries)?,
+            Ask::Sort(c) => self.begin_sort(c, learned, tries)?,
+            Ask::ReportCheck(c) => self.begin_report_check(c, learned, tries)?,
+        };
         if tries >= MAX_TRIES {
             return self.finish_request(job.run());
         }
@@ -948,7 +1320,7 @@ impl Core {
             fingerprint,
             learned,
             tries,
-            ask,
+            ask: Ask::Section(ask),
             data,
             hasher,
             hints,
@@ -1067,7 +1439,299 @@ impl Core {
             fingerprint,
             learned,
             tries,
-            ask,
+            ask: Ask::Section(ask),
+            data,
+            hasher,
+            hints,
+            model,
+            demo_mode,
+            nonce,
+            read,
+            #[cfg(test)]
+            panics: false,
+        })
+    }
+}
+
+impl Core {
+    /// Free consultation, optionally about a case (then approved sections go along, filtered).
+    /// `conversation_id`: a saved conversation to continue (its earlier turns go along, as
+    /// they were sent: filtered), or `None` for a new one.
+    pub fn prepare_consult(
+        &mut self,
+        case_id: Option<&str>,
+        conversation_id: Option<&str>,
+        message: &str,
+    ) -> Result<Prepared, CoreError> {
+        let job = self.begin_prepare_consult(case_id, conversation_id, message)?;
+        self.prepare_here(job)
+    }
+
+    /// A consultation, read under the lock, for [`RequestJob::run`].
+    pub fn begin_prepare_consult(
+        &mut self,
+        case_id: Option<&str>,
+        conversation_id: Option<&str>,
+        message: &str,
+    ) -> Result<RequestJob, CoreError> {
+        self.begin_consult(
+            ConsultAsk {
+                case_id: case_id.map(str::to_owned),
+                conversation_id: conversation_id.map(str::to_owned),
+                message: message.to_owned(),
+            },
+            false,
+            0,
+        )
+    }
+
+    fn begin_consult(
+        &mut self,
+        ask: ConsultAsk,
+        learned: bool,
+        tries: u32,
+    ) -> Result<RequestJob, CoreError> {
+        // Earlier turns, as she saw them: filtered again with today's names and decisions, and
+        // shown on the review screen like everything else that leaves the computer.
+        let earlier: Vec<(String, String, String)> = match &ask.conversation_id {
+            Some(id) => {
+                let (case_of, turns) = self.stored_consultation(id)?;
+                if case_of != ask.case_id {
+                    return Err(CoreError::Refused(
+                        "השיחה הזו שייכת לתיק אחר. אפשר לפתוח שיחה חדשה.".to_owned(),
+                    ));
+                }
+                turns
+                    .into_iter()
+                    .map(|mut t| {
+                        (
+                            std::mem::take(&mut t.role),
+                            std::mem::take(&mut t.shown),
+                            std::mem::take(&mut t.tagged),
+                        )
+                    })
+                    .collect()
+            }
+            None => Vec::new(),
+        };
+        let model = self.model_for(Task::Consult)?;
+        let key = ask.case_id.clone().unwrap_or_default();
+        let data = self.privacy_data(&key)?;
+        let fingerprint = data.fingerprint()?;
+        let hints = self.case_hints(&key, &[ask.message.as_str()])?;
+        let demo_mode = self.demo_mode()?;
+        let read = {
+            let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
+            let mut approved = Vec::new();
+            if let Some(c) = &ask.case_id {
+                if v.case_meta(c)?.consent.is_none() {
+                    return Err(CoreError::ConsentMissing);
+                }
+                let structure = structure_for(v, c)?;
+                for s in structure.sections() {
+                    for d in v
+                        .drafts(c, &s.key)?
+                        .into_iter()
+                        .filter(|d| d.status == DraftStatus::Approved)
+                    {
+                        approved.push((s.clone(), d.text_tagged));
+                    }
+                }
+            }
+            Texts::Consult(ConsultRead { earlier, approved })
+        };
+        let nonce = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
+        let hasher = self.vault_ref()?.token_hasher();
+        Ok(RequestJob {
+            session: self.session,
+            epoch: self.pending_epoch,
+            cancel: self.cancel.clone(),
+            fingerprint,
+            learned,
+            tries,
+            ask: Ask::Consult(ask),
+            data,
+            hasher,
+            hints,
+            model,
+            demo_mode,
+            nonce,
+            read,
+            #[cfg(test)]
+            panics: false,
+        })
+    }
+
+    /// Sorting the case's materials into sections (D-022): everything not sorted yet, one
+    /// review screen.
+    pub fn prepare_sort(&mut self, case_id: &str) -> Result<Prepared, CoreError> {
+        let job = self.begin_prepare_sort(case_id)?;
+        self.prepare_here(job)
+    }
+
+    /// Sorting, read under the lock, for [`RequestJob::run`].
+    pub fn begin_prepare_sort(&mut self, case_id: &str) -> Result<RequestJob, CoreError> {
+        self.begin_sort(case_id.to_owned(), false, 0)
+    }
+
+    fn begin_sort(
+        &mut self,
+        case_id: String,
+        learned: bool,
+        tries: u32,
+    ) -> Result<RequestJob, CoreError> {
+        let structure = structure_for(self.vault_ref()?, &case_id)?;
+        let sections: Vec<dv_ai::SortSection> = sorting::sortable(&structure)
+            .into_iter()
+            .map(|s| dv_ai::SortSection {
+                key: s.key.clone(),
+                about: s.about.clone(),
+            })
+            .collect();
+        let model = self.model_for(Task::Sort)?;
+        let data = self.privacy_data(&case_id)?;
+        let fingerprint = data.fingerprint()?;
+        let hints = self.case_hints(&case_id, &[])?;
+        let demo_mode = self.demo_mode()?;
+        let read = {
+            let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
+            if v.case_meta(&case_id)?.consent.is_none() {
+                return Err(CoreError::ConsentMissing);
+            }
+            let mut items = Vec::new();
+            // A score table of an instrument she does not give is not sorted (D-098).
+            for inp in crate::instruments::request_inputs(v, &case_id)? {
+                let ranges = dv_domain::passage_ranges(&inp.content);
+                if ranges.is_empty()
+                    || !sorting::routing_of(v, &case_id, &inp.id)?.needs_sorting(ranges.len())
+                {
+                    continue;
+                }
+                items.push(SortItem {
+                    id: inp.id,
+                    kind: inp.kind,
+                    title: inp.title,
+                    content: inp.content,
+                    ranges,
+                });
+            }
+            if items.is_empty() {
+                return Err(CoreError::Refused(
+                    "כל החומרים כבר ממוינים לסעיפים.".to_owned(),
+                ));
+            }
+            Texts::Sort(SortRead { sections, items })
+        };
+        let nonce = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
+        let hasher = self.vault_ref()?.token_hasher();
+        Ok(RequestJob {
+            session: self.session,
+            epoch: self.pending_epoch,
+            cancel: self.cancel.clone(),
+            fingerprint,
+            learned,
+            tries,
+            ask: Ask::Sort(case_id),
+            data,
+            hasher,
+            hints,
+            model,
+            demo_mode,
+            nonce,
+            read,
+            #[cfg(test)]
+            panics: false,
+        })
+    }
+
+    /// The one request that reads the approved report as a whole (D-097).
+    pub fn prepare_report_check(&mut self, case_id: &str) -> Result<Prepared, CoreError> {
+        let job = self.begin_prepare_report_check(case_id)?;
+        self.prepare_here(job)
+    }
+
+    /// The check of the whole report, read under the lock, for [`RequestJob::run`].
+    pub fn begin_prepare_report_check(&mut self, case_id: &str) -> Result<RequestJob, CoreError> {
+        self.begin_report_check(case_id.to_owned(), false, 0)
+    }
+
+    fn begin_report_check(
+        &mut self,
+        case_id: String,
+        learned: bool,
+        tries: u32,
+    ) -> Result<RequestJob, CoreError> {
+        if !self.report_check_on()? {
+            return Err(CoreError::Needs(
+                "בדיקת הדוח כולו כבויה. אפשר להפעיל אותה בהגדרות.".to_owned(),
+                ErrorAction::settings("ai"),
+            ));
+        }
+        let structure = structure_for(self.vault_ref()?, &case_id)?;
+        let model = self.model_for(Task::Draft)?;
+        let data = self.privacy_data(&case_id)?;
+        let fingerprint = data.fingerprint()?;
+        // The approved drafts are not materials: the name model reads them as well.
+        let mut approved = self.report_check_texts(&case_id)?;
+        let extra: Vec<&str> = approved.iter().map(String::as_str).collect();
+        let hints = self.case_hints(&case_id, &extra);
+        for t in &mut approved {
+            t.zeroize();
+        }
+        let hints = hints?;
+        let demo_mode = self.demo_mode()?;
+        let read = {
+            let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
+            if v.case_meta(&case_id)?.consent.is_none() {
+                return Err(CoreError::ConsentMissing);
+            }
+            let mut sections = Vec::new();
+            let mut waiting = Vec::new();
+            // The report's sections only: never a letter, never the signature, never a
+            // material, a conversation or a draft not approved.
+            for s in structure.sections().filter(|s| s.key != "signature") {
+                let drafts = v.drafts(&case_id, &s.key)?;
+                // A new draft waiting for her: the report is not approved yet. A proposed
+                // rewrite of an approved paragraph leaves the approved one standing.
+                if drafts
+                    .iter()
+                    .any(|d| d.status == DraftStatus::Proposed && d.replaces.is_none())
+                {
+                    waiting.push(s.title.clone());
+                }
+                let text: Vec<String> = drafts
+                    .into_iter()
+                    .filter(|d| d.status == DraftStatus::Approved)
+                    .map(|d| d.text_tagged)
+                    .collect();
+                if !text.is_empty() {
+                    sections.push((s.clone(), text));
+                }
+            }
+            let read = ReportCheckRead { sections };
+            if !waiting.is_empty() {
+                return Err(CoreError::Refused(format!(
+                    "הדוח נבדק כולו אחרי שכל הטיוטות אושרו. עוד מחכות לאישור: {}.",
+                    waiting.join(", ")
+                )));
+            }
+            if read.sections.len() < 2 {
+                return Err(CoreError::Refused(
+                    "בדיקת הדוח כולו משווה בין סעיפים, וצריך לפחות שני סעיפים מאושרים.".to_owned(),
+                ));
+            }
+            Texts::ReportCheck(read)
+        };
+        let nonce = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
+        let hasher = self.vault_ref()?.token_hasher();
+        Ok(RequestJob {
+            session: self.session,
+            epoch: self.pending_epoch,
+            cancel: self.cancel.clone(),
+            fingerprint,
+            learned,
+            tries,
+            ask: Ask::ReportCheck(case_id),
             data,
             hasher,
             hints,
