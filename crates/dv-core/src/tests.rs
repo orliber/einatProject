@@ -1949,3 +1949,60 @@ fn a_consent_needs_a_real_past_date_and_a_signer() {
     meta.consent = Some(consent());
     core.update_case(&case, meta).unwrap();
 }
+
+/// Her own words come back as she wrote them (D-126). The outgoing filter leaves a
+/// kindergarten's name out and turns a date into relative time; her edited paragraph was
+/// stored that way, so the report lost the name and the date ("בגן \"ניצנים\"" came back
+/// "בגן"). Now they are kept with the case, and what goes out is still only the generalized
+/// text: no kindergarten name, no date, no kept-words tag.
+#[test]
+fn her_edit_keeps_every_word_and_the_request_still_hides_them() {
+    let (_dir, mut core, case) = setup(None);
+    let p = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap();
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    let para = |core: &mut Core| {
+        core.case_detail(&case)
+            .unwrap()
+            .sections
+            .into_iter()
+            .find(|s| s.key == "kindergarten")
+            .unwrap()
+            .paragraphs
+            .remove(0)
+    };
+    let first = para(&mut core);
+    for text in [
+        "אלון לומד בגן \"ניצנים\" ומתקשה.",
+        "אלון לומד לגן \" מתקשה \" שוב.",
+        "אלון נבדק ב-3.9.2026 במכון.",
+        "בבית ספר \"אופק\" הוא שקט.",
+        "אלון לומד בגן הדקל.",
+        "בגן \"לא רוצה\" אמר אלון, ואחר כך \"לא רוצה\" שוב.",
+    ] {
+        core.edit_paragraph(&case, &first.id, text).unwrap();
+        assert_eq!(para(&mut core).text, text);
+    }
+    core.edit_paragraph(
+        &case,
+        &first.id,
+        "אלון לומד בגן \"ניצנים\" מאז 3.9.2026, ובבית ספר \"אופק\" יהיה בשנה הבאה.",
+    )
+    .unwrap();
+    let next = core
+        .prepare_section(&case, "kindergarten", "שפר/י את הניסוח")
+        .unwrap();
+    assert!(next.approval_id.is_some(), "{:?}", next.blocked);
+    let out = outgoing(&next);
+    for kept in ["ניצנים", "אופק", "3.9.2026", "אלון", "[מילים_"] {
+        assert!(!out.contains(kept), "{kept} went out: {out}");
+    }
+    assert!(out.contains("בגן") && out.contains("ובבית ספר"), "{out}");
+    // The report shows her words.
+    assert!(
+        para(&mut core).text.contains("בגן \"ניצנים\" מאז 3.9.2026"),
+        "{}",
+        para(&mut core).text
+    );
+}

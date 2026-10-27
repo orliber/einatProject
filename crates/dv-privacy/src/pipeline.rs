@@ -1070,6 +1070,25 @@ fn starts_line(text: &str, at: usize) -> bool {
     })
 }
 
+/// The tags already in the text (a stored draft sent again): a person's tag or a generic
+/// one, numbered or not, which hold no word of their own. Not a "[חסר: …]" note or a score:
+/// they hold words, still read by every rule.
+fn protected_tags(text: &str, ctx: &PrivacyContext<'_>) -> Vec<Range<usize>> {
+    crate::masks::TAG_RE
+        .as_ref()
+        .map(|re| {
+            re.find_iter(text)
+                .filter(|m| protected_tag(m.as_str(), ctx))
+                .map(|m| m.range())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn protected_tag(tag: &str, ctx: &PrivacyContext<'_>) -> bool {
+    crate::masks::is_generic_tag(tag) || ctx.identities.iter().any(|i| i.tag == tag)
+}
+
 /// Names no lexicon can know: whatever follows a name label ("שם הילד: …"), the family name
 /// after "משפחת", and a surname right after a first name or a declared name ("נועם ברקוביץ",
 /// "דנה כהן-לוי"). Declared names are already replaced; what is left becomes a suspect.
@@ -1103,13 +1122,30 @@ fn name_run_suspects(
     let joins =
         |g: &str| !g.is_empty() && g.chars().all(|c| c == ' ' || c == '-' || c == '\u{05BE}');
     let stop = |n: &str| NAME_STOP.iter().any(|s| norm_eq(s, &n));
+    // A word inside a tag already in the text is never a name. Without this "משפחת [ילד]"
+    // became "משפחת [[משפחה_1]]".
+    let tags = protected_tags(text, ctx);
+    // Inside a tag, or a prefix glued to one ("משפחת ו[ילד]"); only prefix letters, so a
+    // word glued to a tag ("כהן[ת.ז.]") is still read.
+    let in_tag = |start: usize, end: usize| {
+        tags.iter().any(|t| {
+            (t.start < start && end < t.end)
+                || (t.start == end
+                    && text
+                        .get(start..end)
+                        .is_some_and(|p| !p.is_empty() && crate::text::is_valid_prefix(p)))
+        })
+    };
     let push = |start: usize,
                 end: usize,
                 message: &str,
                 out: &mut Vec<SuspectSpan>|
      -> Result<(), PrivacyError> {
         let token = span_text(text, start, end)?;
-        if !overlaps(start, end, reps, out) && !(ctx.allowlisted)(&normalize(token)) {
+        if !in_tag(start, end)
+            && !overlaps(start, end, reps, out)
+            && !(ctx.allowlisted)(&normalize(token))
+        {
             out.push(SuspectSpan {
                 start,
                 end,
@@ -1511,7 +1547,14 @@ fn name_run_suspects(
         if !joins(g) || !hebrew(t) || digits(t) {
             continue;
         }
-        let hyphen_after_surname = surname_at == Some(k) && g.contains(['-', '\u{05BE}']);
+        // After a declared name only a tight hyphen joins a second part ("כהן-טגסט"): a
+        // spaced dash is a pause ("נועם אביטל - מתקשה" hid "מתקשה" as a surname).
+        let declared_before = reps
+            .iter()
+            .any(|r| r.declared && r.start <= prev.start && prev.end <= r.end);
+        let hyphen_after_surname = surname_at == Some(k)
+            && g.contains(['-', '\u{05BE}'])
+            && (!declared_before || !g.contains(' '));
         let raw = span_text(text, t.start, t.end)?;
         let looks_like_surname = lex.surnames.contains(&t.norm)
             || (t.norm.chars().count() >= 4
@@ -1793,10 +1836,79 @@ pub fn filter_with_hints(
     ctx: &PrivacyContext<'_>,
     hints: &[NameHint],
 ) -> Result<FilterOutcome, PrivacyError> {
-    let text = &plain_brackets(text, ctx);
+    let text = &plain_brackets(&expand_kept_words(text, ctx), ctx);
     let (mut reps, suspects) = analyze(text, ctx, hints)?;
     number_masks(text, ctx, &mut reps)?;
     assemble(text, &reps, &suspects)
+}
+
+/// Her own words as the case keeps them (a paragraph she edited or wrote, D-126): hidden
+/// exactly as [`filter_with_hints`] hides them, but nothing is left out or generalized. What
+/// the outgoing filter would leave out (a kindergarten's name) or turn into relative time (a
+/// date) is kept under a numbered tag of the case's mask book (`[מילים_3]`), so restoring
+/// gives back exactly what she wrote. The tag carries only a number. When the text is sent,
+/// the outgoing filter restores it first and filters it as it always does, so the model sees
+/// exactly the text it would have seen had she typed it then.
+///
+/// Fails closed without the mask book: the words would have nowhere to be kept.
+pub fn filter_to_keep(
+    text: &str,
+    ctx: &PrivacyContext<'_>,
+    hints: &[NameHint],
+) -> Result<FilterOutcome, PrivacyError> {
+    let Some(book) = ctx.masks else {
+        return Err(PrivacyError::Internal(
+            "keeping her words needs the case's mask book".to_owned(),
+        ));
+    };
+    let text = &plain_brackets(&expand_kept_words(text, ctx), ctx);
+    let (mut reps, suspects) = analyze(text, ctx, hints)?;
+    number_masks(text, ctx, &mut reps)?;
+    for r in &mut reps {
+        // A tag that restores to exactly these words stays: a person of this case as
+        // declared, the practitioner's first name (what restoring writes), or a numbered tag
+        // of the book. Anything else (left out, relative time, a generic tag, a name spelled
+        // otherwise, "Noam" or "נעם" for "נועם") keeps her words under a number.
+        let words = span_text(text, r.start, r.end)?;
+        let restorable = crate::masks::is_mask_tag(&r.out)
+            || (r.out == PRACTITIONER_TAG && ctx.practitioner.first().is_some_and(|p| p == words))
+            || ctx
+                .identities
+                .iter()
+                .find(|i| i.case_id == ctx.case_id && i.tag == r.out)
+                .is_some_and(|i| i.value == words);
+        if !restorable {
+            r.out = book.kept_words_tag(words);
+            r.relative = false;
+        }
+    }
+    assemble(text, &reps, &suspects)
+}
+
+/// A stored text of hers (D-126) back as she wrote it, so the outgoing filter reads it as on
+/// the first time and hides exactly what it would have hidden then: a text with a kept-words
+/// tag is restored whole (this case's names, the practitioner, the book), not only those
+/// tags, since a name read next to a tag can count differently ("נועם מספרת…" is a person
+/// telling, "[ילד] מספרת…" was not). Only with the case's book; a tag the book does not have
+/// stays as it is (it carries only a number).
+fn expand_kept_words<'t>(text: &'t str, ctx: &PrivacyContext<'_>) -> std::borrow::Cow<'t, str> {
+    match ctx.masks {
+        Some(book) if text.contains(crate::masks::KEPT_WORDS_OPEN) => {
+            let case: Vec<Identity> = ctx
+                .identities
+                .iter()
+                .filter(|i| i.case_id == ctx.case_id)
+                .cloned()
+                .collect();
+            std::borrow::Cow::Owned(crate::restore::restore(
+                text,
+                &case,
+                ctx.practitioner.first().map(String::as_str),
+                &book.entries(),
+            ))
+        }
+        _ => std::borrow::Cow::Borrowed(text),
+    }
 }
 
 /// With the case's mask book, each fixed tag of a kind (`[תאריך]`) becomes the numbered tag of
@@ -1864,10 +1976,16 @@ pub fn filter_split_with_hints(
     ranges: &[Range<usize>],
     hints: &[NameHint],
 ) -> Result<(FilterOutcome, Option<Vec<FilterOutcome>>), PrivacyError> {
-    let text = &plain_brackets(text, ctx);
+    let expanded = expand_kept_words(text, ctx);
+    // Kept words put back moved every offset after them: the ranges no longer fit.
+    let moved = matches!(expanded, std::borrow::Cow::Owned(ref e) if e != text);
+    let text = &plain_brackets(&expanded, ctx);
     let (mut reps, suspects) = analyze(text, ctx, hints)?;
     number_masks(text, ctx, &mut reps)?;
     let whole = assemble(text, &reps, &suspects)?;
+    if moved {
+        return Ok((whole, None));
+    }
     let mut parts = Vec::with_capacity(ranges.len());
     for r in ranges {
         let Some(piece) = text.get(r.clone()) else {
@@ -2368,9 +2486,18 @@ fn institution_names(text: &str, tokens: &[Token]) -> Result<Vec<Replacement>, P
                     Some(n) => between(text, t, n)?,
                     None => span_text(text, t.end, text.len())?,
                 };
+                // "המוסד" is what a recurring name became (`לגן "המוסד"`): not a name.
+                if j == first && norm_eq(INSTITUTION_WORD, &t.norm) {
+                    break;
+                }
                 // A tag inside the quotes (a tagged draft, `לגן " [ילד] "`): not a name, as
-                // on the first filtering, where the declared name took that span.
-                if after.contains('[') {
+                // on the first filtering, where the declared name took that span. A tag after
+                // the closing quote (`לגן "ניצנים" [ילד]`) leaves the name as it is.
+                let closing = after.find(['"', '״', '“', '”', '„']);
+                if after
+                    .find('[')
+                    .is_some_and(|b| closing.is_none_or(|q| b < q))
+                {
                     break;
                 }
                 if quote(after) {
@@ -2425,13 +2552,16 @@ fn institution_names(text: &str, tokens: &[Token]) -> Result<Vec<Replacement>, P
         }
         if let Some((last, mut end)) = last {
             if opened {
-                // Take the closing quote too.
-                if let Some(c) = span_text(text, end, text.len())?
-                    .chars()
-                    .next()
+                // Take the closing quote too, also after a space (`לגן " ניצנים "`): left
+                // behind, it went out on its own (`לגן "`).
+                let rest = span_text(text, end, text.len())?;
+                let blank = rest.len() - rest.trim_start_matches([' ', '\t']).len();
+                if let Some(c) = rest
+                    .get(blank..)
+                    .and_then(|r| r.chars().next())
                     .filter(|c| ['"', '״', '“', '”'].contains(c))
                 {
-                    end += c.len_utf8();
+                    end += blank + c.len_utf8();
                 }
             }
             out.push(Replacement {
@@ -2848,8 +2978,12 @@ fn analyze(
             }),
         }
     }
-    // Layer 4: patterns.
-    for hit in patterns::find(text, ctx.today).map_err(|e| PrivacyError::Internal(e.to_string()))? {
+    // Layer 4: patterns, read with the tags already in the text blanked: "[מספר_זהות_1] מרץ"
+    // was read as "1 במרץ" and cut the tag.
+    let blanked = patterns::blank_tags(text, |t| protected_tag(t, ctx));
+    for hit in
+        patterns::find(&blanked, ctx.today).map_err(|e| PrivacyError::Internal(e.to_string()))?
+    {
         if !overlaps(hit.start, hit.end, &reps, &suspects) {
             reps.push(Replacement {
                 start: hit.start,

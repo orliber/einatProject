@@ -332,6 +332,10 @@ fn zero_leaks_for_numbers_dates_and_contact_details() {
         "ת.ז. של הילד 000000018".to_owned(),
         "ת.ז. 000 000 018".to_owned(),
         "תעודת זהות 00000001-8".to_owned(),
+        // Right after a period that is not a decimal point (D-126: was let through whole).
+        "ת.ז.000000018".to_owned(),
+        "הגיע עם האם.000000018 נבדק".to_owned(),
+        join(&["נמסר.054", "7654321"]),
         join(&["טלפון האם 054-", "7654321"]),
         join(&["הטלפון 054", "7654321 או +972-54-", "765-4321"]),
         join(&["בבית: 03-", "1234567"]),

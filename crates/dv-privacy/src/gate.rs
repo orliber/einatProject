@@ -286,7 +286,12 @@ pub fn clear(req: &GateRequest<'_>) -> Result<ClearedPayload, Blocked> {
                 text.get(f.start..f.end).map(str::to_owned),
             ));
         }
-        match patterns::find(text, req.ctx.today) {
+        // The case's tags and generic ones blanked, so the number inside a tag
+        // ("[מספר_זהות_1] מרץ") is not read as a date. A "[חסר: …]" note or a score is read.
+        let blanked = patterns::blank_tags(text, |t| {
+            req.case_tags.contains(t) || crate::masks::is_generic_tag(t)
+        });
+        match patterns::find(&blanked, req.ctx.today) {
             Ok(hits) => {
                 for h in hits {
                     reasons.push(reason(

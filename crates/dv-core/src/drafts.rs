@@ -274,7 +274,8 @@ impl Core {
             .set_draft_status(case_id, draft_id, DraftStatus::Rejected)?)
     }
 
-    /// Manual edit: the text (with real names) is stored tagged.
+    /// Manual edit: the text (with real names) is stored tagged, every other word of hers
+    /// kept (D-126).
     pub fn edit_paragraph(
         &mut self,
         case_id: &str,
@@ -285,7 +286,7 @@ impl Core {
         if text.trim().is_empty() {
             return self.reject_paragraph(case_id, draft_id);
         }
-        let tagged = self.learn(case_id, text)?.tagged;
+        let tagged = self.learn_to_keep(case_id, text)?;
         let before = style::find_draft(self.vault_ref()?, case_id, draft_id)?;
         self.vault_mut()?.edit_draft(case_id, draft_id, &tagged)?;
         self.learn_from_draft_edit(before, &tagged);
@@ -376,7 +377,7 @@ impl Core {
         text: &str,
         at: Option<Option<&str>>,
     ) -> Result<(), CoreError> {
-        let tagged = self.learn(case_id, text)?.tagged;
+        let tagged = self.learn_to_keep(case_id, text)?;
         let v = self.vault_mut()?;
         let d = v.add_draft(case_id, section_key, &tagged, Author::User, &[])?;
         v.set_draft_status(case_id, &d.id, DraftStatus::Approved)?;

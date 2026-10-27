@@ -22,12 +22,12 @@ pub use gate::{
     clear, replace_foreign_tags, tag_word, BlockReason, Blocked, ClearedPayload, GateRequest,
     GENERIC_TAGS,
 };
-pub use masks::{is_generic_tag, is_mask_tag, MaskBook, MaskEntry, MASK_BASES};
+pub use masks::{is_generic_tag, is_mask_tag, MaskBook, MaskEntry, KEPT_WORDS, MASK_BASES};
 pub use misread::{ocr_misreads, Misread};
 pub use pipeline::{
-    everyday_name, filter, filter_split, filter_split_with_hints, filter_with_hints,
-    forget_identity_index, AutoHidden, AutoKind, Checks, FilterOutcome, Mark, NameHint,
-    PrivacyContext, Segment, Suspect, SuspectKind, NAME_HINT_SURE,
+    everyday_name, filter, filter_split, filter_split_with_hints, filter_to_keep,
+    filter_with_hints, forget_identity_index, AutoHidden, AutoKind, Checks, FilterOutcome, Mark,
+    NameHint, PrivacyContext, Segment, Suspect, SuspectKind, NAME_HINT_SURE,
 };
 pub use self_check::gate_self_check;
 

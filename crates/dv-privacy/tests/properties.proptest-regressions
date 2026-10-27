@@ -5,3 +5,17 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 8287ae2a5314a79711bf2b05187e74124c1c6374eb5ba70ebc8259097b81a86f # shrinks to p = [(7, 0, false), (56, 0, false), (0, 0, true), (27, 0, false)], idn = 10000000
+cc 4b79dfde41739c77b74ee2ad5079843c387e62b324db2aa8b39b8530919247c0 # shrinks to p = [(7, 0, false), (37, 0, false)]
+cc fb98d271491c9a6a0e0ec6522bc24c8febcc3b18766f09383cfbc1d6e5f1c298 # shrinks to pieces = [(14, 0, 32, false), (0, 0, 0, false)], idn = 10000000
+cc 6915e5c91a0957cad40431bdb5c3265eaa990d01d0ebdef81448ce4f69ce2804 # shrinks to pieces = [(218, 0, 60, false), (216, 0, 0, false)], idn = 10000000
+cc ac607cb2ace8238465af10b43f9b3bd9fed1029275c1b0244e874df33a8eace4 # shrinks to p = [(0, 0, true), (17, 3, true), (32, 0, false), (0, 0, false)]
+cc faa44de04ac335cad6e214efdeb3aa65445b4626de5b67d92f12f9a343b4fceb # shrinks to pieces = [(68, 0, 31, false), (124, 0, 0, true)], idn = 10000000
+cc b673ae8bcf13d540a642e955aca07d31a2b114648ce4a17ff1d2a3229a254622 # shrinks to pieces = [(61, 0, 63, false), (34, 0, 0, true)], idn = 10000000
+cc 2a64966fb224144c5e0f6bc7fc6fa1002bab65b6f438933f305eee1763367ab2 # shrinks to pieces = [(128, 0, 13, false), (103, 0, 37, false), (178, 0, 0, false)], idn = 10000000
+cc 09c1630e2f37ceb654777bb0c8ca01d9d91a6b505bdfb8c1a1367a1064b0a338 # shrinks to p = [(7, 0, false), (37, 0, false), (37, 0, false)], idn = 10000000
+cc ff6f528a29cf8b6abb691a14a509b237bddfa4bf50d4abfe29dc3834b6ca4e8c # shrinks to p = [(49, 0, false), (37, 0, false), (17, 0, true)]
+cc 0de2e04ae00d2c0b2082b3d573ccf382a0932c7f53f97e47589bfe5ddf0182a4 # shrinks to pieces = [(14, 0, 9, false), (158, 0, 24, true)], idn = 10000000
+cc 93ee430cfffe0ccc51618bf9dd4f756ce0937ce2d1e16de1d77b6caa6dc884ce # shrinks to p = [(7, 0, false), (38, 0, false), (37, 0, false)], idn = 10000000
+cc bea9a1dcadd36cf9de02410ef39361d6e6f5866e162894d26f49b13376183890 # shrinks to pieces = [(6, 0, 0, false), (2, 0, 19, false), (218, 0, 0, false)], idn = 10000000
+cc 16944795633a52df788e60af3b3965d546de1dcb8ddaf18c46241e1d90bbb5e8 # shrinks to pieces = [(40, 0, 0, false), (20, 0, 30, false), (0, 0, 0, false), (8, 0, 32, false)], idn = 10000000
+cc b23806443d7b27bb74d5fa08b25d5e5e477d1d3359c0d2a689a9020104789a15 # shrinks to pieces = [(56, 0, 31, false), (224, 0, 52, false)], idn = 10000000

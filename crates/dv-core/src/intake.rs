@@ -259,6 +259,26 @@ impl Core {
         self.filter_hinted(case_id, text, &hints)
     }
 
+    /// Her own words, to store as a paragraph of the case (D-126): the new names are kept as
+    /// in [`Self::learn`], and what the outgoing filter would leave out or turn into relative
+    /// time (a kindergarten's name, a date) is kept in the case's mask book, so the paragraph
+    /// shows and exports exactly as she wrote it. Returns the text to store.
+    pub(crate) fn learn_to_keep(&mut self, case_id: &str, text: &str) -> Result<String, CoreError> {
+        self.learn(case_id, text)?;
+        let hints = self.name_hints(case_id, text);
+        let data = self.privacy_data(case_id)?;
+        let (tagged, added) = {
+            let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
+            let lookups = data.lookups(v);
+            let ctx = lookups.masked_context();
+            let out = dv_privacy::filter_to_keep(text, &ctx, &hints)
+                .map_err(|e| CoreError::Internal(e.to_string()))?;
+            (out.tagged, data.masks.added())
+        };
+        self.vault_mut()?.add_masks(case_id, &added)?;
+        Ok(tagged)
+    }
+
     /// Scanned text (OCR) can misread a name by one letter ("אלוו" for "אלון"). Call this for
     /// OCR-sourced text only, before the text is filtered: each misread is kept as one more
     /// spelling of that name, so every later text hides it and the gate refuses it (D-048).

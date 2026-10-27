@@ -3,6 +3,7 @@
 //! Clinical text is full of numbers that must survive (ages "בגיל 2.5", scores "(96)",
 //! score lists "12 13 9"), so every rule is written to hide identifiers without eating them.
 
+use std::borrow::Cow;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -360,9 +361,34 @@ fn char_after(text: &str, i: usize) -> Option<char> {
     text.get(i..)?.chars().next()
 }
 
+/// The text with each tag `blank` picks (one with no word of its own: a person's tag or a
+/// generic one) written over with `x`, byte for byte, so every offset still holds and the
+/// number inside a tag ("[מספר_זהות_1] מרץ") is never read as part of a date or a number
+/// next to it. A letter, not a mark, so a prefix glued to a tag stays one word with it
+/// ("ו[ילד] באב" is not "ו' באב"). A tag left as it is ("[חסר: …]") is read like any text.
+pub(crate) fn blank_tags<'t>(text: &'t str, blank: impl Fn(&str) -> bool) -> Cow<'t, str> {
+    let Some(re) = crate::masks::TAG_RE.as_ref() else {
+        return Cow::Borrowed(text);
+    };
+    let mut out: Option<String> = None;
+    for m in re.find_iter(text).filter(|m| blank(m.as_str())) {
+        out.get_or_insert_with(|| text.to_owned())
+            .replace_range(m.range(), &"x".repeat(m.len()));
+    }
+    out.map_or(Cow::Borrowed(text), Cow::Owned)
+}
+
 /// Not glued to other digits (so "2021" inside "120215" is not a year).
 fn digit_bounded(text: &str, start: usize, end: usize) -> bool {
-    !char_before(text, start).is_some_and(|c| c.is_ascii_digit() || c == '.')
+    // A period counts only as a decimal point, after a digit ("3.14159"): after a word or
+    // a label ("ת.ז.123456782", "שוב.123456782") the number stands on its own, and was
+    // let through whole.
+    let decimal = || {
+        text.get(..start)
+            .and_then(|b| b.strip_suffix('.'))
+            .is_some_and(|b| b.ends_with(|c: char| c.is_ascii_digit()))
+    };
+    !char_before(text, start).is_some_and(|c| c.is_ascii_digit() || (c == '.' && decimal()))
         && !char_after(text, end).is_some_and(|c| c.is_ascii_digit())
 }
 

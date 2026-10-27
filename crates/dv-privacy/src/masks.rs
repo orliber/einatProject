@@ -29,7 +29,16 @@ pub const MASK_BASES: &[&str] = &[
     "בית_חולים",
     // A name the gate refused in text the filter never saw (round 25's fix loop).
     "שם",
+    // Her own words the outgoing filter leaves out or generalizes, kept in a stored text of
+    // hers (D-126). Put back before every request, so the model never sees one.
+    KEPT_WORDS,
 ];
+
+/// The base of a kept-words tag (D-126): words of hers stored under a number, never sent.
+pub const KEPT_WORDS: &str = "מילים";
+
+/// How every kept-words tag starts.
+pub(crate) const KEPT_WORDS_OPEN: &str = "[מילים_";
 
 /// The kind of a fixed generic tag the filter writes, or `None` for any other text.
 #[must_use]
@@ -125,6 +134,52 @@ impl MaskBook {
             original: original.to_owned(),
         });
         tag
+    }
+
+    /// The kept-words tag of exactly these words (D-126), as she wrote them: niqqud, spacing
+    /// and quotes included, so restoring gives back the very same text.
+    #[must_use]
+    pub fn kept_words_tag(&self, original: &str) -> String {
+        if let Some(e) = self
+            .entries
+            .borrow()
+            .iter()
+            .find(|e| e.kind == KEPT_WORDS && e.original == original)
+        {
+            return e.tag.clone();
+        }
+        let prefix = format!("[{KEPT_WORDS}_");
+        let next = self
+            .entries
+            .borrow()
+            .iter()
+            .filter_map(|e| {
+                e.tag
+                    .strip_prefix(&prefix)?
+                    .strip_suffix(']')?
+                    .parse::<u32>()
+                    .ok()
+            })
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        let tag = format!("{prefix}{next}]");
+        self.entries.borrow_mut().push(MaskEntry {
+            tag: tag.clone(),
+            kind: KEPT_WORDS.to_owned(),
+            original: original.to_owned(),
+        });
+        tag
+    }
+
+    /// The words a kept-words tag stands for, if the book has it.
+    #[must_use]
+    pub fn kept_words_original(&self, tag: &str) -> Option<String> {
+        self.entries
+            .borrow()
+            .iter()
+            .find(|e| e.kind == KEPT_WORDS && e.tag == tag)
+            .map(|e| e.original.clone())
     }
 
     /// What this request added, to keep with the case.
