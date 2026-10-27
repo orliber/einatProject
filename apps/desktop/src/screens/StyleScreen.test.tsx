@@ -6,8 +6,10 @@ import type { ReactNode } from "react";
 import { AppContext, type AppApi } from "../App";
 import { StyleImportDialog } from "../components/StyleImportDialog";
 import type { StyleOverview, StyleProfileView } from "../ipc/client";
+import { a11yViolations } from "../test/a11y";
 import { prepared, status } from "../test/fixtures";
 import { chainLinks, sinceLabel, StyleScreen } from "./StyleScreen";
+import { START_STAGES } from "./style/StyleStart";
 
 function api(): AppApi {
   // Every step through the review screen: "show me every request" on (off by default; set here for the tests that read it).
@@ -443,5 +445,65 @@ describe("chainLinks (D-100)", () => {
       { label: "ניסוח", body: "{מדד} נמוך" },
     ]);
     expect(chainLinks("בלי תווית")).toEqual([{ label: "", body: "בלי תווית" }]);
+  });
+});
+
+describe("before the first report (D3 / D-112)", () => {
+  const path = () => screen.getByRole("list", { name: "ארבעת השלבים" });
+
+  it("draws the four stages in order, each with its number and its words, and starts at the first", async () => {
+    mockIPC((cmd) => (cmd === "style_overview" ? overview() : null));
+    wrap(<StyleScreen />);
+    await screen.findByRole("button", { name: /הוספת דוח ישן/ });
+    const steps = within(path()).getAllByRole("listitem");
+    expect(steps.map((li) => li.querySelector("strong")?.textContent)).toEqual([
+      "שלב 1: הדוח נכנס", "שלב 2: הדוח נקרא", "שלב 3: את מאשרת", "שלב 4: בשימוש",
+    ]);
+    // Where she stands is said in words and in aria-current, not by colour alone.
+    expect(steps[0]).toHaveAttribute("aria-current", "step");
+    expect(steps[0]).toHaveTextContent("מתחילים כאן");
+    expect(steps.slice(1).every((li) => !li.hasAttribute("aria-current"))).toBe(true);
+    // Still one heading and one action: the path explains, the button starts.
+    expect(screen.getAllByRole("heading")).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /הוספת דוח|להשתמש|לערוך|לא צריך/ })).toHaveLength(1);
+  });
+
+  it("shows a small invented example of what is learned, marked as invented, with the name hidden", async () => {
+    mockIPC((cmd) => (cmd === "style_overview" ? overview() : null));
+    wrap(<StyleScreen />);
+    await screen.findByRole("button", { name: /הוספת דוח ישן/ });
+    expect(screen.getByText("דוגמה בדויה")).toBeInTheDocument();
+    expect(path()).toHaveTextContent("[ילד]");
+    expect(path()).toHaveTextContent("עוזב משימה באמצע ← קושי בהתמדה");
+    expect(path()).toHaveTextContent("ניכר כי קיים קושי בהתמדה");
+    expect(screen.getByText(/מומלץ להוסיף 3 דוחות לפחות/)).toBeInTheDocument();
+    expect(START_STAGES).toHaveLength(4);
+  });
+
+  it("the button opens the file picker", async () => {
+    mockIPC((cmd) => (cmd === "style_overview" ? overview() : null));
+    const user = userEvent.setup();
+    const { container } = wrap(<StyleScreen />);
+    const add = await screen.findByRole("button", { name: /הוספת דוח ישן/ });
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!input) throw new Error("no file input");
+    const click = vi.spyOn(input, "click").mockImplementation(() => undefined);
+    await user.click(add);
+    expect(click).toHaveBeenCalledOnce();
+  });
+
+  it("passes the accessibility check", async () => {
+    mockIPC((cmd) => (cmd === "style_overview" ? overview() : null));
+    wrap(<StyleScreen />);
+    await screen.findByRole("button", { name: /הוספת דוח ישן/ });
+    expect(await a11yViolations(document.body)).toEqual([]);
+  });
+
+  it("goes away once a report is in: the journey takes its place", async () => {
+    mockIPC((cmd) => (cmd === "style_overview" ? overview({ sources: [source] }) : null));
+    wrap(<StyleScreen />);
+    expect(await screen.findByRole("list", { name: "המסלול" })).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "ארבעת השלבים" })).not.toBeInTheDocument();
+    expect(screen.queryByText("דוגמה בדויה")).not.toBeInTheDocument();
   });
 });
