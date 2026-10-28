@@ -144,6 +144,24 @@ pub(crate) async fn set_section_guide(
 }
 
 #[tauri::command]
+pub(crate) async fn draft_briefs(state: tauri::State<'_, AppState>) -> Res<DraftBriefs> {
+    with_core(&state, |c| c.draft_briefs()).await
+}
+
+#[tauri::command]
+pub(crate) async fn keep_draft_brief(
+    state: tauri::State<'_, AppState>,
+    section_key: String,
+    text: String,
+    keep: bool,
+) -> Res<DraftBriefs> {
+    with_core(&state, move |c| {
+        c.keep_draft_brief(&section_key, &text, keep)
+    })
+    .await
+}
+
+#[tauri::command]
 pub(crate) async fn set_practitioner(
     state: tauri::State<'_, AppState>,
     names: Vec<String>,

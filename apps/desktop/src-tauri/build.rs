@@ -31,6 +31,8 @@ fn main() {
             "set_lock_minutes",
             "set_practitioner",
             "set_section_guide",
+            "draft_briefs",
+            "keep_draft_brief",
             "section_modes",
             "set_section_mode",
             "set_review_always",

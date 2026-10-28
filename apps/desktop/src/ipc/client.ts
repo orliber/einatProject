@@ -51,6 +51,7 @@ import type { Role } from "./generated/Role";
 import type { ScoreSheet } from "./generated/ScoreSheet";
 import type { UsageSummary } from "./generated/UsageSummary";
 import type { Readiness } from "./generated/Readiness";
+import type { DraftBriefs } from "./generated/DraftBriefs";
 import type { SafetyNet } from "./generated/SafetyNet";
 import type { NetPart } from "./generated/NetPart";
 import type { SecurityItem } from "./generated/SecurityItem";
@@ -201,6 +202,9 @@ export const ipc = {
   setLockMinutes: (minutes: number) => run("set_lock_minutes", { minutes }),
   setPractitioner: (names: string[]) => run("set_practitioner", { names }),
   setSectionGuide: (sectionKey: string, text: string) => run("set_section_guide", { sectionKey, text }),
+  /** Her drafting wishes: the last five, and one kept per section (D-140). */
+  draftBriefs: () => call("draft_briefs"),
+  keepDraftBrief: (sectionKey: string, text: string, keep: boolean) => call("keep_draft_brief", { sectionKey, text, keep }),
   setReviewAlways: (on: boolean) => run("set_review_always", { on }),
   setScreenProtection: (on: boolean) => run("set_screen_protection", { on }),
   reportSettings: () => call("report_settings"),
@@ -512,6 +516,7 @@ export type {
   UpdateView,
   UsageSummary,
   Readiness,
+  DraftBriefs,
   SafetyNet,
   NetPart,
   SecurityItem,

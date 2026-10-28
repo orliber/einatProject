@@ -33,6 +33,8 @@
     "allow-set-lock-minutes",
     "allow-set-practitioner",
     "allow-set-section-guide",
+    "allow-draft-briefs",
+    "allow-keep-draft-brief",
     "allow-section-modes",
     "allow-set-section-mode",
     "allow-set-case-guide",

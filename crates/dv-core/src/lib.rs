@@ -7,6 +7,7 @@
 mod activity;
 mod backup;
 mod binding;
+mod briefs;
 mod cases;
 mod consult;
 mod consultations;
@@ -88,6 +89,7 @@ pub fn original_too_large() -> CoreError {
             .to_owned(),
     )
 }
+pub use briefs::DraftBriefs;
 pub use dv_vault::crypto::sha256_hex;
 pub use dv_vault::BACKUP_EXTENSION;
 pub use followup::FollowUpView;
