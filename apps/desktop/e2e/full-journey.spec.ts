@@ -139,7 +139,27 @@ test("a new case with consent, an intake, a WPPSI-IV table, and the review that 
   // One instrument, entered from the keyboard: the band in words and the profile beside it.
   await page.getByRole("button", { name: /ציוני מבחנים \(הזנת ציונים\)/ }).click();
   const scores = page.getByRole("region", { name: "הזנת ציונים" });
-  await expect(scores.getByRole("radio", { name: "WPPSI-IV" })).toHaveAttribute("aria-checked", "true");
+  const chosen = scores.getByRole("radio", { name: "WPPSI-IV" });
+  await expect(chosen).toHaveAttribute("aria-checked", "true");
+  // The chosen instrument stays readable under the pointer (its words never take its fill).
+  await chosen.hover();
+  const look = await chosen.evaluate((b) => ({ fg: getComputedStyle(b).color, bg: getComputedStyle(b).backgroundColor }));
+  expect(look.fg).not.toBe(look.bg);
+  // "WPPSI-IV · טיוטה" reads in order: the dot sits between the name and the word, not after it.
+  if (await chosen.locator(".inst-draft").count()) {
+    const at = await chosen.evaluate((b) => {
+      const text = (b.querySelector(".inst-draft") as HTMLElement).firstChild as Text;
+      const box = (i: number) => {
+        const range = document.createRange();
+        range.setStart(text, i);
+        range.setEnd(text, i + 1);
+        return range.getBoundingClientRect();
+      };
+      const s = text.data;
+      return { dot: box(s.indexOf("·")).right, word: box(s.indexOf("ט")).left };
+    });
+    expect(at.dot).toBeLessThanOrEqual(at.word + 0.5);
+  }
   await scores.getByLabel("מנת משכל כללית", { exact: true }).fill("96");
   await scores.getByLabel("הבנה מילולית", { exact: true }).fill("104");
   await scores.getByLabel("זיכרון עבודה", { exact: true }).fill("85");
