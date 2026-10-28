@@ -380,6 +380,26 @@ fn unknown_names_other_cases_and_near_misses_are_hidden_without_asking() {
     }
 }
 
+/// The child's first name with the surname typed as an alias, as the case form suggests: the
+/// full name goes out as one tag and comes back once ("הדר הדר" in every draft before).
+#[test]
+fn a_first_name_and_its_surname_alias_go_out_as_one_tag() {
+    let ids = vec![id("c", Role::Child, "[ילד]", "הדר", &["נחמיאס"])];
+    let ctx = ctx_for(&ids, &[], "c");
+    for s in [
+        "שם הילדה: הדר נחמיאס, בת שנתיים.",
+        "ההורים של הדר נחמיאס פנו בשל עיכוב בדיבור.",
+        "להדר נחמיאס יש אח.",
+    ] {
+        let out = filter(s, &ctx).unwrap();
+        assert!(!out.tagged.contains("[ילד] [ילד]"), "{}", out.tagged);
+        assert_eq!(out.tagged.matches("[ילד]").count(), 1, "{}", out.tagged);
+        assert!(!out.tagged.contains("נחמיאס") && !out.tagged.contains("הדר"));
+        let back = dv_privacy::restore::restore(&out.tagged, &ids, None, &[]);
+        assert!(back.contains("הדר") && !back.contains("הדר הדר"), "{back}");
+    }
+}
+
 /// A neurologist's recommendation reaches the AI as written: the medicine is no person (the
 /// real-corpus bench sent "[אדם_1] 10mg ו-[אדם_2]").
 #[test]

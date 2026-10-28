@@ -451,7 +451,23 @@ fn build_identity_index(ctx: &PrivacyContext<'_>) -> PhraseIndex<Target> {
             tag: identity.tag.clone(),
             role: identity.role,
         };
-        for name in std::iter::once(&identity.value).chain(identity.aliases.iter()) {
+        // The name with a one-word alias after it ("הדר" + "נחמיאס"): the surname as the form
+        // suggests typing it. One tag for both words, or it goes out "[ילד] [ילד]" and every
+        // draft shows it back as "הדר הדר".
+        let joined: Vec<String> = if identity.value.trim().contains(' ') {
+            Vec::new()
+        } else {
+            identity
+                .aliases
+                .iter()
+                .filter(|a| !a.trim().is_empty() && !a.trim().contains(' '))
+                .map(|a| format!("{} {}", identity.value.trim(), a.trim()))
+                .collect()
+        };
+        for name in std::iter::once(&identity.value)
+            .chain(identity.aliases.iter())
+            .chain(joined.iter())
+        {
             for phrase in name_phrases(name) {
                 if !found_word(identity, &phrase) {
                     idx.insert_words(phrase, target.clone());
