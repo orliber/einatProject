@@ -303,14 +303,71 @@ impl RateLimit {
         }
     }
 
+    #[cfg(test)]
     fn allow(&mut self) -> bool {
-        let now = Instant::now();
-        self.sent.retain(|t| now.duration_since(*t) < self.window);
+        self.take(Instant::now()).is_ok()
+    }
+
+    /// Takes a place in the window now, or says how long until the oldest place leaves it.
+    fn take(&mut self, now: Instant) -> Result<(), Duration> {
+        self.sent
+            .retain(|t| now.saturating_duration_since(*t) < self.window);
         if self.sent.len() >= self.max {
-            return false;
+            let oldest = self.sent.iter().min().copied().unwrap_or(now);
+            let free_at = oldest + self.window;
+            return Err(free_at
+                .saturating_duration_since(now)
+                .max(Duration::from_millis(1)));
         }
         self.sent.push(now);
-        true
+        Ok(())
+    }
+}
+
+/// The longest a request waits for a place in the minute window (D-141): a little more than
+/// the window itself, so an ordinary burst always gets through and a runaway loop still stops.
+pub(crate) const LIMIT_WAIT: Duration = Duration::from_secs(90);
+
+/// A request past the per-minute limit waits until the oldest one leaves the window, then goes
+/// (D-141), instead of failing at once. The lock is held only to look, never while waiting. The
+/// emergency stop ends the wait of a request to a remote service; one that cannot get a place
+/// within `LIMIT_WAIT` is refused, as before.
+pub(crate) fn wait_for_place(limit: &Mutex<RateLimit>, remote: bool) -> Result<(), EgressError> {
+    wait_for_place_with(
+        limit,
+        remote,
+        &Instant::now,
+        &std::thread::sleep,
+        &is_stopped,
+    )
+}
+
+fn wait_for_place_with(
+    limit: &Mutex<RateLimit>,
+    remote: bool,
+    now: &dyn Fn() -> Instant,
+    sleep: &dyn Fn(Duration),
+    stopped: &dyn Fn() -> bool,
+) -> Result<(), EgressError> {
+    let start = now();
+    loop {
+        if remote && stopped() {
+            return Err(EgressError::Stopped);
+        }
+        // A poisoned lock refuses, like everything here that cannot be checked.
+        let left = match limit
+            .lock()
+            .map_err(|_| EgressError::RateLimited)?
+            .take(now())
+        {
+            Ok(()) => return Ok(()),
+            Err(left) => left,
+        };
+        if now().saturating_duration_since(start) + left > LIMIT_WAIT {
+            return Err(EgressError::RateLimited);
+        }
+        // In short steps, so the emergency stop is heard while waiting.
+        sleep(left.min(Duration::from_millis(500)));
     }
 }
 
@@ -647,9 +704,7 @@ impl Transport for AnthropicTransport {
             .map_err(|e| EgressError::Policy(e.to_string()))?;
         check_policy(&body)?;
         admit(payload.body().len(), true)?;
-        if !self.limit.lock().is_ok_and(|mut l| l.allow()) {
-            return Err(EgressError::RateLimited);
-        }
+        wait_for_place(self.limit, true)?;
         retry(|| self.attempt(payload.body(), progress))
     }
 }
@@ -768,6 +823,81 @@ mod tests {
         let mut l = RateLimit::per_minute(3);
         assert!(l.allow() && l.allow() && l.allow());
         assert!(!l.allow());
+    }
+
+    /// D-141: a full window waits for the first place to free, never holding the lock meanwhile.
+    #[test]
+    fn a_full_minute_waits_for_a_place_instead_of_failing() {
+        use std::cell::Cell;
+        let t0 = Instant::now();
+        let clock = Cell::new(t0);
+        let limit = Mutex::new(RateLimit::per_minute(2));
+        {
+            let mut l = limit.lock().unwrap();
+            assert!(l.take(t0).is_ok());
+            assert!(l.take(t0 + Duration::from_secs(10)).is_ok());
+        }
+        clock.set(t0 + Duration::from_secs(30));
+        let slept = Cell::new(Duration::ZERO);
+        let r = wait_for_place_with(
+            &limit,
+            true,
+            &|| clock.get(),
+            &|d| {
+                assert!(limit.try_lock().is_ok(), "the lock is free while waiting");
+                slept.set(slept.get() + d);
+                clock.set(clock.get() + d);
+            },
+            &|| false,
+        );
+        assert_eq!(r, Ok(()));
+        // The first place left the window at 60 s: 30 s of waiting, no more.
+        assert_eq!(slept.get(), Duration::from_secs(30));
+        assert_eq!(limit.lock().unwrap().sent.len(), 2);
+    }
+
+    #[test]
+    fn a_place_too_far_off_is_refused_at_once_and_the_stop_ends_the_wait() {
+        use std::cell::Cell;
+        let t0 = Instant::now();
+        let far = Mutex::new(RateLimit {
+            window: Duration::from_secs(300),
+            max: 1,
+            sent: vec![t0],
+        });
+        let never = |_: Duration| panic!("nothing to wait for");
+        let r = wait_for_place_with(&far, true, &|| t0, &never, &|| false);
+        assert_eq!(r, Err(EgressError::RateLimited));
+
+        let clock = Cell::new(t0);
+        let stop = Cell::new(false);
+        let full = Mutex::new(RateLimit::per_minute(1));
+        full.lock().unwrap().sent.push(t0);
+        let r = wait_for_place_with(
+            &full,
+            true,
+            &|| clock.get(),
+            &|d| {
+                clock.set(clock.get() + d);
+                stop.set(true);
+            },
+            &|| stop.get(),
+        );
+        assert_eq!(r, Err(EgressError::Stopped));
+        assert_eq!(full.lock().unwrap().sent.len(), 1, "nothing was sent");
+        // A local model is not stopped by it: it waits for its place.
+        stop.set(false);
+        let r = wait_for_place_with(
+            &full,
+            false,
+            &|| clock.get(),
+            &|d| {
+                clock.set(clock.get() + d);
+                stop.set(true);
+            },
+            &|| stop.get(),
+        );
+        assert_eq!(r, Ok(()));
     }
 
     #[test]

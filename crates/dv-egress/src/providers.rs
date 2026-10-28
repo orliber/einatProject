@@ -604,9 +604,7 @@ impl Transport for ProviderTransport {
         };
         let bytes = serde_json::to_vec(&out).map_err(|e| EgressError::Protocol(e.to_string()))?;
         admit(bytes.len(), self.provider != Provider::Local)?;
-        if !self.limit.lock().is_ok_and(|mut l| l.allow()) {
-            return Err(EgressError::RateLimited);
-        }
+        crate::wait_for_place(self.limit, self.provider != Provider::Local)?;
         retry(|| self.post_once(c.model, &bytes))
     }
 }
