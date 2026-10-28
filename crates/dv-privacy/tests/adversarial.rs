@@ -368,6 +368,8 @@ fn unknown_names_other_cases_and_near_misses_are_hidden_without_asking() {
         "השם יונתן עלה בשיחה.",
         "נואם מתקשה", // near-miss spelling of the child's name
         "Yuval did not want to play.",
+        // "Adi" was on the list of English words that are not names: an Israeli child's name.
+        "Adi did not want to play.",
     ] {
         let ids = identities();
         let out = filter(s, &ctx_for(&ids, &[], CASE)).unwrap();
