@@ -125,9 +125,13 @@ pub(crate) async fn google_turn_off(
     password: String,
 ) -> Res<()> {
     let password = zeroize::Zeroizing::new(password);
-    let cleanup = with_core(&state, move |c| {
-        c.google_turn_off(&dv_core::google::WindowsAccount, &password)
-    })
+    // The password is checked away from the lock (F2), like a purge from the recycle bin.
+    let cleanup = off_lock(
+        &state,
+        move |c| c.begin_google_turn_off(&password),
+        dv_core::PasswordCheckJob::run,
+        |c, checked| c.finish_google_turn_off(&dv_core::google::WindowsAccount, checked),
+    )
     .await?;
     if let Some(cleanup) = cleanup {
         super::cleanup_in_background(Arc::clone(&state.core), cleanup);

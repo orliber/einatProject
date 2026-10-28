@@ -251,20 +251,18 @@ fn check_safe(parts: &Parts) -> Result<(), ExportError> {
     Ok(())
 }
 
-/// A top-level element of the body: its byte range and the text it holds.
+/// A top-level element of the body: its byte range and name.
 #[derive(Debug)]
 struct Child {
     start: usize,
     end: usize,
     name: String,
-    text: String,
 }
 
 fn children(body: &str) -> Result<Vec<Child>, ExportError> {
     let mut reader = Reader::from_str(body);
     let mut out: Vec<Child> = Vec::new();
     let mut depth = 0usize;
-    let mut in_t = false;
     loop {
         let before = usize::try_from(reader.buffer_position()).map_err(bad)?;
         let ev = reader.read_event().map_err(bad)?;
@@ -276,10 +274,8 @@ fn children(body: &str) -> Result<Vec<Child>, ExportError> {
                         start: before,
                         end: after,
                         name: e.name().as_ref().to_owned(),
-                        text: String::new(),
                     });
                 }
-                in_t = e.local_name().as_ref() == "t";
                 depth += 1;
             }
             Event::Empty(e) => {
@@ -288,12 +284,10 @@ fn children(body: &str) -> Result<Vec<Child>, ExportError> {
                         start: before,
                         end: after,
                         name: e.name().as_ref().to_owned(),
-                        text: String::new(),
                     });
                 }
             }
             Event::End(_) => {
-                in_t = false;
                 depth = depth.saturating_sub(1);
                 if depth == 0 {
                     if let Some(c) = out.last_mut() {
@@ -301,21 +295,56 @@ fn children(body: &str) -> Result<Vec<Child>, ExportError> {
                     }
                 }
             }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
+/// The byte range, in the body, of the paragraph that is only the marker: at the top level
+/// or inside a table cell (a letterhead laid out as a table). The first one found.
+fn marker_range(body: &str) -> Result<Option<(usize, usize)>, ExportError> {
+    let mut reader = Reader::from_str(body);
+    // The paragraphs open at this point, innermost last: where each began, and its text.
+    let mut open: Vec<(usize, String)> = Vec::new();
+    let mut in_t = false;
+    loop {
+        let before = usize::try_from(reader.buffer_position()).map_err(bad)?;
+        let ev = reader.read_event().map_err(bad)?;
+        let after = usize::try_from(reader.buffer_position()).map_err(bad)?;
+        match ev {
+            Event::Start(e) => {
+                if e.name().as_ref() == "w:p" {
+                    open.push((before, String::new()));
+                }
+                in_t = e.local_name().as_ref() == "t";
+            }
+            Event::End(e) => {
+                in_t = false;
+                if e.name().as_ref() == "w:p" {
+                    if let Some((start, text)) = open.pop() {
+                        if matches!(text.trim(), MARKER | "{{report}}") {
+                            return Ok(Some((start, after)));
+                        }
+                    }
+                }
+            }
             Event::Text(t) if in_t => {
-                if let Some(c) = out.last_mut() {
-                    c.text.push_str(&t.xml10_content());
+                if let Some((_, text)) = open.last_mut() {
+                    text.push_str(&t.xml10_content());
                 }
             }
             Event::GeneralRef(r) if in_t => {
-                if let (Some(c), Ok(Some(ch))) = (out.last_mut(), r.resolve_char_ref()) {
-                    c.text.push(ch);
+                if let (Some((_, text)), Ok(Some(ch))) = (open.last_mut(), r.resolve_char_ref()) {
+                    text.push(ch);
                 }
             }
             Event::Eof => break,
             _ => {}
         }
     }
-    Ok(out)
+    Ok(None)
 }
 
 /// `settings.xml` with only layout settings kept: no edit-session ids, no document id, no
@@ -658,9 +687,10 @@ fn build(report: &Report, template: &[u8]) -> Result<Built, ExportError> {
     if sect.is_empty() || sect.ends_with("/>") {
         sect = "<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1418\" w:right=\"1418\" w:bottom=\"1418\" w:left=\"1418\" w:header=\"709\" w:footer=\"709\" w:gutter=\"0\"/><w:bidi/></w:sectPr>".to_owned();
     }
-    let marker = content
-        .iter()
-        .position(|c| c.name == "w:p" && matches!(c.text.trim(), MARKER | "{{report}}"));
+    // The marker paragraph: at the top level, or inside a table of hers (never in the
+    // section properties, which hold no paragraph).
+    let marker =
+        marker_range(inner)?.filter(|(start, _)| sect_child.is_none_or(|s| *start < s.start));
 
     // Which of her parts stay, and the relationships that point at them.
     let mut out: Parts = parts.iter().filter(|(n, _)| kept(n)).cloned().collect();
@@ -816,12 +846,21 @@ fn build(report: &Report, template: &[u8]) -> Result<Built, ExportError> {
     let report_xml = body(report, &layout);
     let mut new_body = String::new();
     match marker {
-        Some(m) => {
-            for (i, c) in content.iter().enumerate() {
-                if i == m {
+        Some((m_start, m_end)) => {
+            for c in content {
+                // Her element whole (less its edit-session ids), or no document at all; the
+                // one holding the marker with the report in the marker's place. In a table
+                // cell the report ends with a paragraph, as a cell must.
+                if c.start <= m_start && m_end <= c.end {
+                    let before = inner.get(c.start..m_start).ok_or_else(|| bad("body"))?;
+                    let after = inner.get(m_end..c.end).ok_or_else(|| bad("body"))?;
+                    new_body.push_str(&without_rsids(before));
                     new_body.push_str(&report_xml);
+                    if !before.is_empty() && report_xml.trim_end().ends_with("</w:tbl>") {
+                        new_body.push_str("<w:p/>");
+                    }
+                    new_body.push_str(&without_rsids(after));
                 } else {
-                    // Her paragraph whole (less its edit-session ids), or no document at all.
                     new_body.push_str(&without_rsids(
                         inner.get(c.start..c.end).ok_or_else(|| bad("body"))?,
                     ));
@@ -1025,6 +1064,47 @@ mod tests {
             .contains("NUMPAGES"));
         assert!(doc.contains("rIdDvFooter"));
         assert_eq!(render_with_template(&sample(), &tpl).ok(), Some(out));
+    }
+
+    /// Her letterhead laid out as a table, the marker in a cell: the report goes into that
+    /// cell, her table stays around it, and the cell still ends with a paragraph.
+    #[test]
+    fn the_marker_inside_a_table_cell_is_found() {
+        let marker_p = "<w:p><w:pPr><w:bidi/></w:pPr><w:r><w:rPr><w:rtl/></w:rPr><w:t>{{</w:t></w:r><w:r><w:rPr><w:rtl/></w:rPr><w:t>הדוח}}</w:t></w:r></w:p>";
+        let tpl = fixture(|name, c| {
+            Some(if name == "word/document.xml" {
+                assert!(c.contains(marker_p));
+                c.replace(
+                    marker_p,
+                    &format!(
+                        "<w:tbl><w:tr><w:tc><w:p><w:r><w:t>צד</w:t></w:r></w:p></w:tc><w:tc>{marker_p}</w:tc></w:tr></w:tbl>"
+                    ),
+                )
+            } else {
+                c
+            })
+        });
+        assert!(check_template(&tpl).unwrap().has_marker);
+        let doc = part(
+            &render_with_template(&sample(), &tpl).unwrap(),
+            "word/document.xml",
+        )
+        .unwrap();
+        let open = doc.find("לכבוד ההורים").unwrap();
+        let cell = doc.find("<w:t>צד</w:t>").unwrap();
+        let report = doc.find("סיבת הפניה").unwrap();
+        let sign = doc.find("בברכה, ד\"ר בדויה").unwrap();
+        assert!(open < cell && cell < report && report < sign, "{doc}");
+        assert!(!doc.contains("הדוח}}"));
+        let table_end = doc.rfind("</w:tbl>").unwrap();
+        assert!(report < table_end, "the report is inside her table");
+        assert!(
+            doc.get(..table_end)
+                .unwrap()
+                .trim_end()
+                .ends_with("</w:p></w:tc></w:tr>"),
+            "the cell ends with a paragraph"
+        );
     }
 
     #[test]

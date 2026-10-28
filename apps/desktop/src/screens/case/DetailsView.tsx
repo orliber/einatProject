@@ -165,7 +165,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
           <CasePrivacyCard caseId={caseId} identities={detail.identities} onChanged={namesChanged} />
           <div className="card details-card stack danger-zone">
             <b>מחיקת התיק</b>
-            <p className="small muted">נשמר בסל המחזור 30 יום, ואז נמחק לצמיתות.</p>
+            <p className="small muted">נשמר בסל המחזור 30 יום, ואז נמחק לצמיתות (אחרי שנשמר גיבוי).</p>
             <button type="button" className="btn btn-danger-quiet" onClick={() => setConfirmDelete(true)}>מחיקת התיק…</button>
           </div>
         </div>

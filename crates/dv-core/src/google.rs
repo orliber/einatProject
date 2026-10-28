@@ -302,25 +302,39 @@ impl Core {
     ///
     /// Disconnecting Google also turns the encrypted backup copy off (D-099 rests on this
     /// connection): its cleanup at Google is returned, to run with the core free.
-    pub fn google_turn_off(
+    ///
+    /// The password is checked away from the lock (F2, as a purge from the recycle bin is):
+    /// `begin`, the job's `run`, then `finish`.
+    pub fn begin_google_turn_off(
+        &mut self,
+        password: &str,
+    ) -> Result<crate::PasswordCheckJob, CoreError> {
+        self.begin_password_check(password)
+    }
+
+    pub fn finish_google_turn_off(
         &mut self,
         keys: &dyn ComputerKeys,
-        password: &str,
+        checked: crate::PasswordChecked,
     ) -> Result<Option<crate::drive_backup::DriveCleanup>, CoreError> {
-        self.check_backoff()?;
+        self.finish_password_check(checked)?;
         let dir = self.dir.clone();
-        let here = self.password_key_here()?;
-        let proof = crate::binding::password_secret(password, here.as_ref());
-        let result = self.vault_mut()?.remove_google_slot(proof);
-        if let Err(e) = result {
-            self.count_failure(&e);
-            return Err(e.into());
-        }
+        self.vault_mut()?.remove_google_slot_checked()?;
         keys.remove(&dir);
         // Google is disconnected whatever happens next. If the copy could not be turned off
         // here, nothing goes up any more (an upload needs the connection too), and its switch
         // still shows it on, to turn off there.
         Ok(self.drive_backup_turn_off().unwrap_or(None))
+    }
+
+    /// The three steps in a row (tests, callers that hold no lock).
+    pub fn google_turn_off(
+        &mut self,
+        keys: &dyn ComputerKeys,
+        password: &str,
+    ) -> Result<Option<crate::drive_backup::DriveCleanup>, CoreError> {
+        let job = self.begin_google_turn_off(password)?;
+        self.finish_google_turn_off(keys, job.run())
     }
 
     /// "Forgot password", step 1 (under the lock, while locked): the new password is
@@ -532,6 +546,37 @@ mod tests {
         core.google_recover_check(&computer, NEW_PASSWORD).unwrap();
         core.google_recover_finish(&computer, &[drive], NEW_PASSWORD)
             .unwrap();
+    }
+
+    /// Turning it off checks the password away from the lock (review of #163): a wrong one
+    /// is refused and counted, a check begun before a lock removes nothing after it.
+    #[test]
+    fn turning_off_checks_the_password_away_from_the_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut core = Core::for_tests(dir.path(), None);
+        core.create_vault(PASSWORD).unwrap();
+        let computer = FakeComputer::default();
+        let drive = Key32::random().unwrap();
+        core.google_turn_on_finish(&computer, PASSWORD, &drive, "acct-1")
+            .unwrap();
+        let job = core.begin_google_turn_off("לא הסיסמה הנכונה בכלל").unwrap();
+        assert!(matches!(
+            core.finish_google_turn_off(&computer, job.run()),
+            Err(CoreError::Vault(VaultError::WrongSecret))
+        ));
+        assert_eq!(core.failed_unlocks, 1);
+        let slot = |core: &mut Core| core.vault_ref().unwrap().has_google_slot();
+        assert!(slot(&mut core));
+        core.not_before = None;
+        let job = core.begin_google_turn_off(PASSWORD).unwrap();
+        let checked = job.run();
+        core.lock();
+        core.unlock(PASSWORD).unwrap();
+        assert!(core.finish_google_turn_off(&computer, checked).is_err());
+        assert!(slot(&mut core));
+        let job = core.begin_google_turn_off(PASSWORD).unwrap();
+        core.finish_google_turn_off(&computer, job.run()).unwrap();
+        assert!(!slot(&mut core) && !computer.exists(dir.path()));
     }
 
     /// The program closed between the slot write and the promotion of the key held aside:

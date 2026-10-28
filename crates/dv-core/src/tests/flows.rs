@@ -593,7 +593,7 @@ fn retention_points_out_only_cases_past_their_date_and_erases_nothing() {
 }
 
 #[test]
-fn the_bin_erases_only_what_waited_past_thirty_days() {
+fn the_bin_erases_only_what_waited_past_thirty_days_and_is_in_a_backup() {
     let dir = tempfile::tempdir().unwrap();
     let mut core = Core::for_tests(dir.path(), None);
     core.create_vault(PASSWORD).unwrap();
@@ -612,17 +612,39 @@ fn the_bin_erases_only_what_waited_past_thirty_days() {
         .unwrap()
         .set_deleted_at_for_tests(&fresh, edge)
         .unwrap();
+    let ids = |core: &mut Core| -> Vec<String> {
+        let mut ids: Vec<String> = core
+            .list_trash()
+            .unwrap()
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        ids.sort();
+        ids
+    };
 
+    // No backup yet: the clock alone erases nothing, however long it waited.
     core.lock();
     core.unlock(PASSWORD).unwrap();
-    let trash: Vec<String> = core
-        .list_trash()
+    assert_eq!(ids(&mut core), vec![stale.clone(), fresh.clone()]);
+    // A backup written before the deletion does not hold the case as deleted either: a
+    // backup "from the past" (its time set back) counts for nothing.
+    let drive = tempfile::tempdir().unwrap();
+    core.write_backup(&drive.path().join("b")).unwrap();
+    core.vault_mut()
         .unwrap()
-        .into_iter()
-        .map(|c| c.id)
-        .collect();
+        .set_state("backup_last_at", "0")
+        .unwrap();
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(ids(&mut core), vec![stale.clone(), fresh.clone()]);
+
+    // A backup written since the deletion: what waited past thirty days goes.
+    core.write_backup(&drive.path().join("b")).unwrap();
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
     assert_eq!(
-        trash,
+        ids(&mut core),
         vec![fresh.clone()],
         "an hour short of thirty days stays"
     );
