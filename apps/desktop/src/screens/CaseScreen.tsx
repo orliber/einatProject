@@ -297,6 +297,9 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     try {
       const n = await ipc.approveCleanParagraphs(caseId, ids);
       await reload();
+      // A finished run's line ("N סעיפים מחכים לאישורך") is no longer true; one with something
+      // to fix (a failure, a check that did not run) keeps its "לנסות שוב".
+      if (runOver) forgetRun(caseId);
       const waiting = ids.length + held - n;
       notify(waiting > 0 ? `${n} פסקאות אושרו. ${waiting} מחכות לעין שלך.` : `${n} פסקאות אושרו.`);
     } catch (e) {
@@ -627,6 +630,9 @@ function Contents(props: {
   const proposed = content.flatMap((s) => s.paragraphs.filter((p) => p.status === "proposed" && !p.replaces));
   const readyIds = proposed.filter((p) => p.warnings.length === 0).map((p) => p.id);
   const held = proposed.length - readyIds.length;
+  // Counted as the line above counts them ("N טיוטות מחכות לך"): one draft per section, however
+  // many paragraphs it has; the message after the press counts the paragraphs.
+  const readyDrafts = content.filter((s) => s.paragraphs.some((p) => readyIds.includes(p.id))).length;
   const parts = Array.from(new Set(detail.sections.map((s) => s.part)));
   // Sections marked "חסר חומר" now; sorting may still give some of them material.
   const missing = empty.filter((s) => s.sortable && s.source_count === 0 && s.mode !== "self").length;
@@ -682,9 +688,9 @@ function Contents(props: {
             </button>
           </div>
         )}
-        {readyIds.length > 1 && (
+        {readyDrafts > 1 && (
           <button type="button" className="btn btn-primary" disabled={props.approvingAll} onClick={() => props.onApproveAll(readyIds, held)}>
-            ✓ לאשר את כל הטיוטות ({readyIds.length})
+            ✓ לאשר את כל הטיוטות ({readyDrafts})
           </button>
         )}
         {writable > 0 && props.onWriteAll && (

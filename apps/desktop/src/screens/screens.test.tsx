@@ -509,6 +509,19 @@ describe("writing the report", () => {
     expect(screen.queryByText(/הדוח נכתב ונבדק/)).toBeNull();
   });
 
+  it("after the whole report is written, approving every draft at once also clears the line that counted them", async () => {
+    const { user, calls } = await openApp(true, false);
+    await openCase(user);
+    await user.click(screen.getByRole("button", { name: /עוד פעולות/ }));
+    await user.click(await screen.findByRole("menuitem", { name: "כתיבת כל הדוח עם Claude" }));
+    const line = await screen.findByText(/הדוח נכתב ונבדק מול המקורות\. (\d+) סעיפים מחכים לאישורך/, {}, { timeout: 20000 });
+    const sections = Number(/(\d+) סעיפים/.exec(line.textContent ?? "")?.[1]);
+    // The button counts drafts the way the line does: one per section.
+    await user.click(screen.getByRole("button", { name: `✓ לאשר את כל הטיוטות (${sections})` }));
+    await waitFor(() => expect(calls).toContain("approve_clean_paragraphs"));
+    await waitFor(() => expect(screen.queryByText(/מחכים לאישורך/)).toBeNull());
+  });
+
   it("the run goes on after she leaves the case, and the case she comes back to shows its drafts (review of stage 6)", async () => {
     const { user } = await openApp(true, false);
     await openCase(user);
