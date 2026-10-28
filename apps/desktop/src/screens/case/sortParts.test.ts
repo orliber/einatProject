@@ -1,7 +1,8 @@
 import { mockIPC } from "@tauri-apps/api/mocks";
 import type { CaseApi } from "../CaseScreen";
 import { prepared } from "../../test/fixtures";
-import { SORT_PARALLEL, sortInParts } from "./sortParts";
+import type { Prepared } from "../../ipc/client";
+import { mergeParts, SORT_PARALLEL, sortInParts } from "./sortParts";
 
 /** A case screen whose review sends at once, like the default (no window before sending). */
 function caseApi(back: string[] = []) {
@@ -75,14 +76,25 @@ describe("reading the materials one request each (D-134)", () => {
     await expect(sortInParts(caseApi().api, { title: "מיון", label: "קורא" })).rejects.toMatchObject({ code: "egress" });
   });
 
-  it("going back from one review stops the parts after it", async () => {
+  it("shows every part in one review, sendable only when every part cleared the gate", async () => {
+    const blocked = prepared({ approval_id: null });
+    blocked.blocked = [{ code: "name", message: "שם", detail: null }];
+    const merged = mergeParts([
+      ["i0", prepared({ approval_id: "s0" })],
+      ["i1", blocked],
+    ]);
+    expect(merged.approval_id).toBeNull();
+    expect(merged.blocked).toHaveLength(1);
+    expect(mergeParts(nine as [string, Prepared][]).approval_id).toBe("s0");
+
     const sent: string[] = [];
     mockIPC(async (cmd, args) => {
       if (cmd === "prepare_sort_parts") return nine.slice(0, 3);
       if (cmd === "send_sort") sent.push((args as { approvalId: string }).approvalId);
       return one;
     });
-    await sortInParts(caseApi(["s1"]).api, { title: "מיון", label: "קורא" });
-    expect(sent).toEqual(["s0"]);
+    // She went back: nothing goes.
+    await sortInParts(caseApi(["s0"]).api, { title: "מיון", label: "קורא" });
+    expect(sent).toEqual([]);
   });
 });
