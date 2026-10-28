@@ -399,6 +399,10 @@ fn names_that_are_words_are_hidden_in_a_context_with_no_other_reading() {
         ("ביום ההולדת של ים התפוצץ בלון לידו.", " ים "),
         ("מר שמחה אוחיון, מנהל הלשכה", "אוחיון"),
         ("ארטיום נולד בחרקוב ועלה לארץ.", "חרקוב"),
+        // The commonest words, where only a name stands (the real-corpus bench).
+        ("חברים: מתרועע עם איתי מהשכונה, משחק כדורגל.", "איתי"),
+        ("בהפסקות היא משחקת בעיקר עם שרה.", "שרה"),
+        ("שמחה אוחיון הגיע לפגישה.", "אוחיון"),
     ] {
         let out = filter(s, &ctx).unwrap();
         assert!(!out.tagged.contains(name), "{name} leaked: {}", out.tagged);
@@ -409,6 +413,7 @@ fn names_that_are_words_are_hidden_in_a_context_with_no_other_reading() {
         "בבית היא לא מפסיקה לדבר, שרה, מספרת סיפורים.",
         "נולדה בשבוע 35 ונולד ברכב בדרך לבית החולים.",
         "בשמחה רבה. תודה והודיה. ההורים אמרו שהוא שמח.",
+        "שוחח איתי בעברית, ובא איתי לחדר עם שמחה רבה. שלום רב.",
     ] {
         let out = filter(s, &ctx).unwrap();
         assert_eq!(out.tagged, s, "an ordinary word was hidden");

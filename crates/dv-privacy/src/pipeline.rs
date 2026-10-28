@@ -1619,6 +1619,99 @@ fn name_run_suspects(
     Ok(())
 }
 
+/// A name that is also one of the commonest words ("איתי", "שרה", "מתן", "שמחה": the list
+/// `common_words`, otherwise never read as names) where only a name can stand: before a
+/// reporting verb or another name ("שרה סיפרה", "מתן ועידו"), "עם X" ending its clause
+/// ("משחקת בעיקר עם שרה."), and "עם איתי" anywhere: "with with-me" is not Hebrew, so it is
+/// the friend ("מתרועע עם איתי מהשכונה" let an unlisted child's name out). "שוחח איתי" and
+/// "עם שמחה רבה" stay words.
+fn common_name_in_place(text: &str, tokens: &[Token], i: usize) -> Result<bool, PrivacyError> {
+    let lex = &*LEXICON;
+    let Some(tok) = tokens.get(i) else {
+        return Ok(false);
+    };
+    if !(lex.first_names.contains(&tok.norm) || lex.word_names.contains(&tok.norm)) {
+        return Ok(false);
+    }
+    let prev = i
+        .checked_sub(1)
+        .and_then(|j| tokens.get(j))
+        .map(|t| t.norm.as_str());
+    let next = tokens.get(i + 1);
+    let with = prev.is_some_and(|p| ["עם", "ועם", "אצל", "ואצל"].iter().any(|w| norm_eq(w, p)));
+    let before_next = next.is_some_and(|n| {
+        crate::lexicon::NAME_CONTEXT_NEXT
+            .iter()
+            .any(|l| norm_eq(l, &n.norm))
+    });
+    // "שלום יעל," greets; "שלום אוחיון" is a man's name before his surname.
+    let greeting = norm_eq("שלום", &tok.norm);
+    let next_is_name = next.is_some_and(|t| {
+        let first = lex.first_names.contains(&t.norm)
+            || t.norm
+                .strip_prefix('ו')
+                .is_some_and(|h| lex.first_names.contains(h));
+        (first && !greeting) || (lex.surnames.contains(&t.norm) && !first)
+    });
+    let ends_clause = match next {
+        Some(t) => between(text, tok, t)?.contains([',', '.', ';', ')', '\n']),
+        None => true,
+    };
+    let with_me = norm_eq("איתי", &tok.norm);
+    // "לדבר, שרה, מספרת": a verb in a list of verbs, not a name before its verb.
+    Ok((!ends_clause && (before_next || next_is_name)) || (with && (ends_clause || with_me)))
+}
+
+/// The commonest words that are names, where [`common_name_in_place`] says only a name can
+/// stand and no other rule decided; a surname right after one goes with it ("שמחה אוחיון").
+fn common_names(
+    text: &str,
+    tokens: &[Token],
+    ctx: &PrivacyContext<'_>,
+    reps: &[Replacement],
+    suspects: &[SuspectSpan],
+) -> Result<Vec<SuspectSpan>, PrivacyError> {
+    let lex = &*LEXICON;
+    let tags = protected_tags(text, ctx);
+    let mut out: Vec<SuspectSpan> = Vec::new();
+    for (i, tok) in tokens.iter().enumerate() {
+        let taken = |s: usize, e: usize, out: &[SuspectSpan]| {
+            overlaps(s, e, reps, suspects)
+                || overlaps(s, e, &[], out)
+                || tags.iter().any(|t| t.start < e && s < t.end)
+        };
+        if !lex.common_words.contains(&tok.norm)
+            || (ctx.allowlisted)(&tok.norm)
+            || taken(tok.start, tok.end, &out)
+            || !common_name_in_place(text, tokens, i)?
+        {
+            continue;
+        }
+        let mut end = tok.end;
+        if let Some(n) = tokens.get(i + 1) {
+            if between(text, tok, n)? == " "
+                && lex.surnames.contains(&n.norm)
+                && !lex.common_words.contains(&n.norm)
+                && !taken(n.start, n.end, &out)
+            {
+                end = n.end;
+            }
+        }
+        out.push(SuspectSpan {
+            start: tok.start,
+            end,
+            suspect: Suspect {
+                token: span_text(text, tok.start, end)?.to_owned(),
+                kind: SuspectKind::UnknownName,
+                message: "שם שהוא גם מילה, בהקשר של שם".to_owned(),
+                suggested_role: Role::Other,
+            },
+            known: None,
+        });
+    }
+    Ok(out)
+}
+
 fn find_suspects(
     text: &str,
     tokens: &[Token],
@@ -1630,10 +1723,11 @@ fn find_suspects(
     let mut out: Vec<SuspectSpan> = Vec::new();
     name_run_suspects(text, tokens, ctx, reps, &mut out)?;
     for (i, tok) in tokens.iter().enumerate() {
-        if overlaps(tok.start, tok.end, reps, &out)
-            || (ctx.allowlisted)(&tok.norm)
-            || lex.common_words.contains(&tok.norm)
-        {
+        if overlaps(tok.start, tok.end, reps, &out) || (ctx.allowlisted)(&tok.norm) {
+            continue;
+        }
+        // The commonest words are names only where `common_names` finds them, last.
+        if lex.common_words.contains(&tok.norm) {
             continue;
         }
         let raw = span_text(text, tok.start, tok.end)?;
@@ -3446,6 +3540,9 @@ fn layer_4_and_on(
     // Names that are also words, in a context that leaves no other reading (D-049).
     let strong = context::strong_names(text, tokens, ctx.allowlisted, &reps, &suspects)?;
     suspects.extend(strong);
+    // The commonest words ("איתי", "שרה") where only a name can stand, where no rule decided.
+    let common = common_names(text, tokens, ctx, &reps, &suspects)?;
+    suspects.extend(common);
     // Layer 5b: what a local name model reads as a person, where no rule decided (stage 5).
     let hinted = hint_suspects(text, tokens, ctx, hints, &reps, &suspects)?;
     suspects.extend(hinted);
