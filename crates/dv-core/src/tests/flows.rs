@@ -1645,3 +1645,41 @@ fn an_approval_for_one_kind_of_request_is_not_sent_by_the_command_for_another() 
         1
     );
 }
+
+#[test]
+fn approving_every_clean_draft_takes_only_what_the_core_still_sees_clean_and_once() {
+    // D-139: the screen's list may be older than the case; the core decides again, and a
+    // second press finds nothing left to approve.
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let id = approval(&mut core, &case);
+    core.send_section(&id).unwrap();
+    let proposed: Vec<ParagraphView> = core
+        .case_detail(&case)
+        .unwrap()
+        .sections
+        .into_iter()
+        .flat_map(|s| s.paragraphs)
+        .filter(|p| p.status == DraftStatus::Proposed)
+        .collect();
+    assert!(!proposed.is_empty());
+    let clean = proposed
+        .iter()
+        .filter(|p| p.warnings.is_empty() && p.replaces.is_none())
+        .count();
+    let mut ids: Vec<String> = proposed.iter().map(|p| p.id.clone()).collect();
+    ids.push("no-such-draft".to_owned());
+    let n = core.approve_clean_paragraphs(&case, &ids).unwrap();
+    assert_eq!(n as usize, clean);
+    assert_eq!(core.approve_clean_paragraphs(&case, &ids).unwrap(), 0);
+    // What had a note is still waiting for her.
+    let still: usize = core
+        .case_detail(&case)
+        .unwrap()
+        .sections
+        .into_iter()
+        .flat_map(|s| s.paragraphs)
+        .filter(|p| p.status == DraftStatus::Proposed)
+        .count();
+    assert_eq!(still, proposed.len() - clean);
+}

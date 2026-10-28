@@ -144,7 +144,7 @@ impl IngestError {
             Self::Corrupt(_) => "לא הצלחתי לקרוא את הקובץ. כדאי לפתוח אותו ב-Word ולשמור שוב (קובץ ← שמירה בשם ← מסמך Word), או לשמור אותו כ-PDF ולהעלות את ה-PDF.".to_owned(),
             Self::Timeout => "קריאת הקובץ לקחה יותר מדי זמן והופסקה.".to_owned(),
             Self::Worker(_) => "רכיב הקריאה של התוכנה לא הצליח להתחיל. אפשר לנסות שוב; אם זה חוזר, \"העתקת פרטים\" ושליחה לאור.".to_owned(),
-            Self::WorkerCrashed(_) => "קריאת הקובץ נעצרה באמצע, וזו לא בעיה בקובץ. לפעמים אנטי-וירוס חוסם את רכיב הקריאה של התוכנה. אפשר לנסות שוב; אם זה חוזר, \"העתקת פרטים\" ושליחה לאור.".to_owned(),
+            Self::WorkerCrashed(_) => "רכיב הקריאה של התוכנה לא הצליח לפעול, וזו לא בעיה בקובץ. לפעמים אנטי-וירוס חוסם את רכיב הקריאה של התוכנה. אפשר לנסות שוב; אם זה חוזר, \"העתקת פרטים\" ושליחה לאור.".to_owned(),
             Self::Heif => "תמונת HEIC (מהאייפון) לא נתמכת. אפשר לשלוח אותה לעצמך כ-JPG, או לשנות במצלמה: הגדרות ← מצלמה ← תבניות ← \"הכי תואם\".".to_owned(),
             Self::TooManyPages => format!("הסריקה ארוכה מדי (עד {} עמודים). אפשר לפצל אותה לכמה קבצים.", scan::MAX_PAGES),
             Self::OcrMissing => "זה מסמך סרוק, ורכיב זיהוי הטקסט לא מותקן במחשב הזה. התקנה מחדש של כספת האבחון תוסיף אותו.".to_owned(),
@@ -154,25 +154,21 @@ impl IngestError {
 }
 
 impl IngestError {
-    /// For the bug report she copies for Or: the kind and the library's reason, ASCII only and
-    /// without anything a library quoted from the file (between quotes or backticks), so
-    /// nothing of the document goes with it (D-120, D-135).
+    /// For the bug report she copies for Or: the kind and the library's reason up to the first
+    /// quote, ASCII only; anything a library quoted from the file is left out, so nothing of
+    /// the document goes with it (D-120, D-135).
     #[must_use]
     pub fn detail(&self) -> String {
+        // Fail closed: from the first quote on, nothing more (an escaped or nested quote
+        // cannot let a piece of the file through).
         let raw = self.to_string();
-        let mut out = String::new();
-        let mut quoted: Option<char> = None;
-        for c in raw.chars() {
-            match quoted {
-                Some(q) if c == q => quoted = None,
-                Some(_) => {}
-                None if matches!(c, '`' | '"' | '\'') => {
-                    quoted = Some(c);
-                    out.push_str("<…>");
-                }
-                None if c.is_ascii() && !c.is_ascii_control() => out.push(c),
-                None => {}
-            }
+        let head = raw.split(['`', '"', '\'']).next().unwrap_or("");
+        let mut out: String = head
+            .chars()
+            .filter(|c| c.is_ascii() && !c.is_ascii_control())
+            .collect();
+        if head.len() < raw.len() {
+            out.push_str("<…>");
         }
         out.chars().take(160).collect()
     }
@@ -386,6 +382,19 @@ fn clean(text: &str) -> (String, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_detail_for_or_keeps_the_reason_and_drops_what_was_quoted_from_the_file() {
+        let e = IngestError::Corrupt(r#"invalid string "a\"Dana Cohen" at line 3"#.to_owned());
+        let d = e.detail();
+        assert!(!d.contains("Dana") && !d.contains("Cohen"), "{d}");
+        assert!(d.starts_with("corrupt: invalid string"), "{d}");
+        let e = IngestError::Corrupt("bad entity `x\\` then `Ruth`, end".to_owned());
+        assert!(!e.detail().contains("Ruth"), "{}", e.detail());
+        let hebrew = IngestError::Corrupt("שם: נועם".to_owned()).detail();
+        assert!(hebrew.is_ascii(), "{hebrew}");
+        assert!(IngestError::Corrupt("x".repeat(500)).detail().len() <= 160);
+    }
 
     #[test]
     fn detects_by_content() {

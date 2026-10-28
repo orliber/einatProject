@@ -3,7 +3,7 @@
 // the program already knows (five rows that open in place) and one line about her reports.
 // Every request goes through the same review screen as everything else that leaves the computer.
 // The parts live in `./style/`; this file holds the page and the run (O5 / D-111).
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
 import type { MenuItem } from "../components/Menu";
@@ -40,6 +40,8 @@ export function StyleScreen() {
   const qc = useQueryClient();
   const overview = useQuery({ queryKey: ["style"], queryFn: ipc.styleOverview });
   const fileInput = useRef<HTMLInputElement>(null);
+  // Whether a run is on, for `runAll`, which is called from an upload that awaited first.
+  const runningRef = useRef(false);
   const [importing, setImporting] = useState<StyleImportPreview | null>(null);
   const [reading, setReading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +54,9 @@ export function StyleScreen() {
   const [queue, setQueue] = useState<Step[]>([]);
   const [review, setReview] = useState<{ step: Step; prepared: Prepared } | null>(null);
   const [sending, setSending] = useState<{ label: string; approval: string; started: number } | null>(null);
+  useEffect(() => {
+    runningRef.current = queue.length > 0 || sending !== null;
+  }, [queue, sending]);
 
   const o = overview.data;
   const reload = () => qc.invalidateQueries({ queryKey: ["style"] });
@@ -77,8 +82,9 @@ export function StyleScreen() {
     try {
       const preview = await ipc.importStyleSource(file);
       const suggested = preview.parts.filter((x) => x.included).map((x) => x.index);
-      if (suggested.length === 0) {
-        // Nothing stood out as style: she chooses the parts herself.
+      if (suggested.length === 0 || preview.warnings.length > 0) {
+        // Nothing stood out as style, or the reading has something to tell her (a part not
+        // read, file properties to check for names): she sees the dialog and decides.
         setImporting(preview);
         return;
       }
@@ -160,6 +166,8 @@ export function StyleScreen() {
 
   /** Read every report not read yet and update the profile, from the overview as it is now. */
   async function runAll() {
+    // One run at a time: a report added while another is read waits for the button.
+    if (runningRef.current) return;
     const fresh = await qc.fetchQuery({ queryKey: ["style"], queryFn: ipc.styleOverview, staleTime: 0 });
     const todo = fresh.sources.filter((x) => !x.analyzed || (x.analysis_demo && !fresh.demo_mode));
     await next([...todo.map((source): Step => ({ kind: "analysis", source })), { kind: "profile" }]);
@@ -221,7 +229,7 @@ export function StyleScreen() {
         {o.sources.length === 0 ? (
           <StyleStart adding={reading} onAdd={() => fileInput.current?.click()} />
         ) : (
-          <Journey o={o} waiting={asks.length} analyzed={analyzed} notRead={waiting} onAdd={() => fileInput.current?.click()}
+          <Journey o={o} waiting={asks.length} analyzed={analyzed} notRead={waiting} onAdd={() => fileInput.current?.click()} adding={reading || running}
             build={buildDue ? { label: buildLabel, run: () => startBuild(false), disabled: running } : null} />
         )}
 

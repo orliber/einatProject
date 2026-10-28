@@ -79,8 +79,12 @@ fn main_part(
     budget: &mut u64,
 ) -> Result<String, IngestError> {
     let fallback = "word/document.xml".to_owned();
-    let Some(rels) = read_part(zip, "_rels/.rels", budget)? else {
-        return Ok(fallback);
+    // A pointer that cannot be read is no reason to refuse a document Word reads: the usual
+    // name is tried (only the size limit still stops the reading).
+    let rels = match read_part(zip, "_rels/.rels", budget) {
+        Ok(Some(rels)) => rels,
+        Err(IngestError::TooLarge) => return Err(IngestError::TooLarge),
+        Ok(None) | Err(_) => return Ok(fallback),
     };
     let mut reader = Reader::from_str(&rels);
     loop {
@@ -563,12 +567,20 @@ pub(crate) mod tests {
             "{:?}",
             out.warnings
         );
-        // A pointer out of the archive is never followed.
-        let evil = r#"<Relationships><Relationship Type="x/officeDocument" Target="../../etc/passwd"/></Relationships>"#;
-        assert!(extract(&build(&[
+        // A pointer out of the archive is never followed, even to a part that is there by
+        // that name: the usual body is read instead.
+        let evil = r#"<Relationships><Relationship Type="x/officeDocument" Target="../secret.xml"/></Relationships>"#;
+        let secret = body().replace(
+            "<w:body>",
+            "<w:body><w:p><w:r><w:t>SECRET</w:t></w:r></w:p>",
+        );
+        let out = extract(&build(&[
             ("_rels/.rels", evil.to_owned()),
-            ("word/document.xml", body())
+            ("../secret.xml", secret),
+            ("word/document.xml", body()),
         ]))
-        .is_ok());
+        .unwrap_or_else(|e| panic!("{e:?}"));
+        assert!(!out.body.contains("SECRET"), "{}", out.body);
+        assert!(out.body.contains("שורה בדויה מהדוח"), "{}", out.body);
     }
 }

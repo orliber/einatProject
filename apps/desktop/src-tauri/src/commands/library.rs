@@ -216,6 +216,18 @@ pub(crate) async fn approve_paragraphs(
 }
 
 #[tauri::command]
+pub(crate) async fn approve_clean_paragraphs(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    draft_ids: Vec<String>,
+) -> Res<u32> {
+    with_core(&state, move |c| {
+        c.approve_clean_paragraphs(&case_id, &draft_ids)
+    })
+    .await
+}
+
+#[tauri::command]
 pub(crate) async fn approve_paragraph(
     state: tauri::State<'_, AppState>,
     case_id: String,

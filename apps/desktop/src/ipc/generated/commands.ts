@@ -79,6 +79,7 @@ export type Commands = {
   add_input: { args: { caseId: string; kind: InputKind; title: string; content: string }; returns: CaseInput };
   add_own_paragraph: { args: { caseId: string; sectionKey: string; text: string; first: boolean | null; after: string | null }; returns: null };
   app_status: { args: undefined; returns: AppStatus };
+  approve_clean_paragraphs: { args: { caseId: string; draftIds: Array<string> }; returns: number };
   approve_paragraph: { args: { caseId: string; draftId: string }; returns: null };
   approve_paragraphs: { args: { caseId: string; draftIds: Array<string> }; returns: number };
   approve_section: { args: { caseId: string; sectionKey: string }; returns: number };

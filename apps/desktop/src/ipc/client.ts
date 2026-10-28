@@ -340,6 +340,8 @@ export const ipc = {
   approveSection: (caseId: string, sectionKey: string) => call("approve_section", { caseId, sectionKey }),
   /** The paragraphs she sees waiting, approved in one call (D-136). */
   approveParagraphs: (caseId: string, draftIds: string[]) => call("approve_paragraphs", { caseId, draftIds }),
+  /** "✓ לאשר את כל הטיוטות": only those the core still sees as clean (D-139). */
+  approveCleanParagraphs: (caseId: string, draftIds: string[]) => call("approve_clean_paragraphs", { caseId, draftIds }),
   rejectParagraph: (caseId: string, draftId: string) => run("reject_paragraph", { caseId, draftId }),
   /** `openedWith`: the text the editor showed when it opened. `true` back = the paragraph
    *  changed meanwhile; her text is saved and the other wording is kept among the versions. */

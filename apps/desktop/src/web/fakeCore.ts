@@ -1373,6 +1373,13 @@ export class FakeCore {
         waiting.forEach((d) => (d.status = "approved"));
         return waiting.length;
       }
+      case "approve_clean_paragraphs": {
+        // The preview has no notes on drafts; a new wording of an approved one is held.
+        const ids = new Set(a.draftIds as string[]);
+        const waiting = this.find(a.caseId).drafts.filter((d) => ids.has(d.id) && d.status === "proposed" && !d.replaces);
+        waiting.forEach((d) => (d.status = "approved"));
+        return waiting.length;
+      }
       case "approve_paragraphs": {
         const ids = new Set(a.draftIds as string[]);
         const waiting = this.find(a.caseId).drafts.filter((d) => ids.has(d.id) && d.status === "proposed");

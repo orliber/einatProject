@@ -97,6 +97,7 @@
     "allow-approve-paragraph",
     "allow-approve-section",
     "allow-approve-paragraphs",
+    "allow-approve-clean-paragraphs",
     "allow-create-follow-up",
     "allow-follow-up",
     "allow-add-comparison-material",

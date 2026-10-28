@@ -309,7 +309,7 @@ describe("writing the report", () => {
       await screen.findByRole("button", { name: "✓ לאשר" }, { timeout: 6000 });
     }
     await user.click(await screen.findByRole("button", { name: "✓ לאשר את כל הטיוטות (2)" }, { timeout: 6000 }));
-    await waitFor(() => expect(calls.filter((c) => c === "approve_paragraphs").length).toBe(1));
+    await waitFor(() => expect(calls.filter((c) => c === "approve_clean_paragraphs").length).toBe(1));
     await waitFor(() => expect(screen.queryByRole("button", { name: "✓ לאשר" })).toBeNull());
   });
 

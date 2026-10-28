@@ -24,12 +24,14 @@ const scrollTo = (id: string) => () => document.getElementById(id)?.scrollIntoVi
 
 /** The whole process in one strip: my reports, analysis, approval, in use. Each stage says where
  * it stands and what to do next; the current one is marked. */
-export function Journey({ o, waiting, analyzed, notRead, onAdd, build }: {
+export function Journey({ o, waiting, analyzed, notRead, onAdd, adding, build }: {
   o: StyleOverview;
   waiting: number;
   analyzed: number;
   notRead: number;
   onAdd: () => void;
+  /** A report is read or a run is on: one at a time. */
+  adding: boolean;
   build: { label: string; run: () => void; disabled: boolean } | null;
 }) {
   const n = o.sources.length;
@@ -40,7 +42,7 @@ export function Journey({ o, waiting, analyzed, notRead, onAdd, build }: {
     {
       key: "reports", title: "הדוחות שלי", figure: n === 1 ? "דוח אחד" : `${n} דוחות`,
       line: `האחרון נוסף ${sinceLabel(last)}. נשמר רק הטקסט אחרי הסתרה.`,
-      action: "+ הוספת דוח", state: "done", run: onAdd, disabled: false,
+      action: "+ הוספת דוח", state: "done", run: onAdd, disabled: adding,
     },
     {
       key: "analysis", title: "ניתוח", figure: analyzed === n ? (n === 1 ? "נותח" : "כולם נותחו") : `${analyzed} מתוך ${n} נותחו`,
