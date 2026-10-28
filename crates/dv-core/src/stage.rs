@@ -150,7 +150,13 @@ impl Core {
     /// The request as it left: the exact bytes with the case, and the log.
     fn record_sent(&mut self, out: &Outgoing, demo: bool) -> Result<(), CoreError> {
         let ai = provider_of(&out.model).display_name();
-        let (case_id, kept_as, details) = out.pending.kind.trace(demo, ai);
+        let (case_id, kept_as, mut details) = out.pending.kind.trace(demo, ai);
+        // The same bytes went out twice (D-140): the log says so; the bytes are kept once.
+        if out.again.load(std::sync::atomic::Ordering::SeqCst) {
+            if let Some(fields) = details.as_object_mut() {
+                fields.insert("sent_twice".to_owned(), Value::Bool(true));
+            }
+        }
         let v = self.vault_mut()?;
         if let (Some(case_id), Some(kept_as)) = (case_id, kept_as) {
             let payload = &out.pending.payload;

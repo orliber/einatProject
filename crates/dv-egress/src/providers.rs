@@ -303,8 +303,11 @@ pub(crate) fn to_local(c: &Canonical) -> Value {
     body
 }
 
+/// The most output a Gemini model on the list writes in one answer (thinking included).
+const GEMINI_MAX_OUTPUT: u64 = 65_536;
+
 /// `generateContent` body. Thinking tokens count toward the output limit, so it is raised by
-/// the thinking budget.
+/// the thinking budget, up to the models' own maximum.
 pub(crate) fn to_gemini(c: &Canonical) -> Value {
     let contents: Vec<Value> = c
         .turns
@@ -318,7 +321,8 @@ pub(crate) fn to_gemini(c: &Canonical) -> Value {
         .collect();
     let budget = gemini_thinking_budget(&c.effort);
     let mut config = json!({
-        "maxOutputTokens": c.max_tokens + budget,
+        // Never above what the Gemini models write at most: the request is refused past it.
+        "maxOutputTokens": (c.max_tokens + budget).min(GEMINI_MAX_OUTPUT),
         "thinkingConfig": { "thinkingBudget": budget },
     });
     if let Some(schema) = &c.schema {
@@ -716,6 +720,14 @@ mod tests {
             "application/json"
         );
         assert_eq!(out["generationConfig"]["maxOutputTokens"], 16000 + 8192);
+        // D-140: a long answer's ceiling with the thinking budget stays within the models' own.
+        let mut long = b.clone();
+        long["max_tokens"] = json!(64_000);
+        let out = to_gemini(&canonical(&long, Provider::Gemini).unwrap());
+        assert_eq!(
+            out["generationConfig"]["maxOutputTokens"],
+            GEMINI_MAX_OUTPUT
+        );
     }
 
     #[test]

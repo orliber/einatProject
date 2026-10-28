@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use ts_rs::TS;
 
 use crate::prompts::REPORT_CHECK_RULES;
-use crate::request::{base_body, data_block, set, set_schema, ModelConfig};
+use crate::request::{base_body, data_block, set, set_schema, ModelConfig, LONG_ANSWER_TOKENS};
 use crate::response::{text_of, AiError};
 
 /// One approved section as it goes out. Every text is already filtered (tagged).
@@ -85,7 +85,7 @@ pub fn build_report_check_request(
     input: &ReportCheckInput,
     nonce: &str,
 ) -> (Value, Vec<String>) {
-    let mut body = base_body(model, REPORT_CHECK_RULES, 8_000);
+    let mut body = base_body(model, REPORT_CHECK_RULES, LONG_ANSWER_TOKENS);
     let mut parts = vec!["סעיפי הדוח שאושרו, לפי הסדר:".to_owned()];
     let mut ids = Vec::new();
     for (i, s) in input.sections.iter().enumerate() {

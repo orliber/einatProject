@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::prompts::SORTING_RULES;
-use crate::request::{base_body, data_block, set, set_schema, ModelConfig};
+use crate::request::{base_body, data_block, set, set_schema, ModelConfig, SHORT_ANSWER_TOKENS};
 use crate::response::{text_of, AiError};
 
 /// A section Claude may sort into. Key and description come from the report template, never
@@ -109,7 +109,7 @@ pub const RECORD_FIELD_MAX: usize = 1_000;
 
 #[must_use]
 pub fn build_sort_request(model: &ModelConfig, input: &SortInput, nonce: &str) -> Value {
-    let mut body = base_body(model, SORTING_RULES, 12_000);
+    let mut body = base_body(model, SORTING_RULES, SHORT_ANSWER_TOKENS);
     let mut parts = vec!["סעיפי הדוח (מפתח: מה שייך לסעיף):".to_owned()];
     for s in &input.sections {
         parts.push(format!("- {}: {}", s.key, s.about));

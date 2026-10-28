@@ -269,6 +269,18 @@ const SECTION_SCHEMA: &str = r#"{
   "additionalProperties": false
 }"#;
 
+/// The output ceiling of a request whose answer is long: a section, the whole-report check, the
+/// style profile (D-140). Every request is streamed (D-035), so a long answer meets no timeout;
+/// the model's own thinking counts toward this ceiling too, and on the default model it thinks
+/// whenever it finds the task hard. An answer that reaches the ceiling is cut, and a cut answer
+/// is lost whole (a draft is one JSON object), so the ceiling stays well above any real answer.
+/// It costs nothing unless used, and the service does not count it toward its rate limits.
+/// Never above 64,000: the other companies' translation refuses more (`dv-egress::providers`).
+pub const LONG_ANSWER_TOKENS: u32 = 64_000;
+/// The same for an answer that is shorter by nature: a check of one section, the sorting of
+/// one material, a question, the analysis of one past report.
+pub const SHORT_ANSWER_TOKENS: u32 = 32_000;
+
 pub(crate) fn base_body(model: &ModelConfig, system: &str, max_tokens: u32) -> Value {
     json!({
         "model": model.model,
@@ -309,7 +321,7 @@ pub fn build_section_request(
 ) -> (Value, Vec<(String, String)>) {
     let style = input.style_profile.as_deref().unwrap_or(DEFAULT_STYLE);
     let system = format!("{DRAFTING_RULES}\n{style}\n{OUTPUT_RULES}");
-    let mut body = base_body(model, &system, 16_000);
+    let mut body = base_body(model, &system, LONG_ANSWER_TOKENS);
 
     let mut refs = Vec::new();
     let mut parts = vec![format!(
@@ -433,7 +445,7 @@ pub struct ConsultInput {
 /// Free professional consultation (plain text answer).
 #[must_use]
 pub fn build_consult_request(model: &ModelConfig, input: &ConsultInput, nonce: &str) -> Value {
-    let mut body = base_body(model, CONSULT_RULES, 8_000);
+    let mut body = base_body(model, CONSULT_RULES, SHORT_ANSWER_TOKENS);
     let mut messages: Vec<Value> = input
         .history
         .iter()
@@ -464,7 +476,7 @@ pub struct ResearchInput {
 /// Uses the basic `web_search_20250305` tool: dynamic filtering is not ZDR-eligible.
 #[must_use]
 pub fn build_research_request(model: &ModelConfig, input: &ResearchInput) -> Value {
-    let mut body = base_body(model, RESEARCH_RULES, 8_000);
+    let mut body = base_body(model, RESEARCH_RULES, SHORT_ANSWER_TOKENS);
     set(
         &mut body,
         "tools",
@@ -486,6 +498,29 @@ pub fn build_research_request(model: &ModelConfig, input: &ResearchInput) -> Val
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// D-140: room for the model's thinking and the whole answer, within what every company's
+    /// translation accepts (`dv-egress::providers` refuses more than 64,000).
+    #[test]
+    fn output_ceilings_leave_room_for_thinking_and_stay_within_every_provider() {
+        const { assert!(SHORT_ANSWER_TOKENS >= 32_000 && LONG_ANSWER_TOKENS >= SHORT_ANSWER_TOKENS) };
+        const { assert!(LONG_ANSWER_TOKENS <= 64_000) };
+        let model = ModelConfig {
+            model: DEFAULT_MODEL.to_owned(),
+            effort: "high".to_owned(),
+        };
+        let consult = build_consult_request(
+            &model,
+            &ConsultInput {
+                history: Vec::new(),
+                message_tagged: "שאלה כללית".to_owned(),
+                case_context_tagged: None,
+            },
+            "nonce",
+        );
+        assert_eq!(consult["max_tokens"], SHORT_ANSWER_TOKENS);
+        assert_eq!(consult["stream"], true);
+    }
 
     #[test]
     fn nonce_has_no_digits() {

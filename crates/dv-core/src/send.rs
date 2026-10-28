@@ -176,6 +176,7 @@ impl Core {
             api_key,
             transport: self.transport.clone(),
             session: self.session,
+            again: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
