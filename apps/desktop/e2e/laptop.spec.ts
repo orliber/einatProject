@@ -56,6 +56,33 @@ test("a long child's name leaves the stages and the actions on screen", async ({
   await expectOnScreen(page, page.getByRole("button", { name: "→ תיקים" }));
 });
 
+// Larger text on this laptop (125 %), and the largest on a desktop window (140 % of 1280):
+// the case bar fits, the name never under the stages, nothing out of the window.
+for (const [steps, zoom, width, height] of [[2, "1.25", 1093, 614], [3, "1.4", 1280, 900]] as const) {
+  test.describe(`text at ${zoom}× in a ${width}px window`, () => {
+    test.use({ viewport: { width, height } });
+
+    test("the case bar keeps the name, the stages and the actions apart", async ({ page }) => {
+      await unlock(page, PAGE);
+      for (let i = 0; i < steps; i++) await page.keyboard.press("Control+Equal");
+      await expect(page.locator("html")).toHaveCSS("zoom", zoom);
+      await expectNoSidewaysScroll(page, page.locator(".topbar"));
+      await page.getByRole("button", { name: /בתיק של נועם$/ }).click();
+      await expectNoSidewaysScroll(page, page.locator(".case-bar"));
+      const name = await page.locator(".case-child").boundingBox();
+      const stages = page.getByRole("navigation", { name: "שלבי התיק" }).getByRole("button");
+      const first = await stages.first().boundingBox();
+      if (!name || !first) throw new Error("no box");
+      expect(name.width, "the name is readable, not one letter").toBeGreaterThanOrEqual(60);
+      // Right to left: the first stage ends before the name begins, never on top of it.
+      expect(first.x + first.width, "the stages begin after the name").toBeLessThanOrEqual(name.x + 0.5);
+      for (const stage of await stages.all()) await expectOnScreen(page, stage);
+      await expectOnScreen(page, page.getByRole("button", { name: /עוד פעולות/ }));
+      await page.keyboard.press("Control+Digit0");
+    });
+  });
+}
+
 test("with larger text, a dialog keeps its close button and its foot on screen", async ({ page }) => {
   await unlock(page, PAGE);
   // Ctrl + twice: 110 %, then 125 %.

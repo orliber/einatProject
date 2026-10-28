@@ -466,7 +466,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
             </button>
           ))}
         </nav>
-        {status.demo_mode && <span className="chip chip-sand" title="לא הוגדר מפתח API בהגדרות">מצב הדגמה</span>}
+        {status.demo_mode && <span className="chip chip-sand case-demo" title="לא הוגדר מפתח API בהגדרות">מצב הדגמה</span>}
         <UpdateChip />
         {stage === 2 && (
           <button type="button" className="btn" aria-pressed={fullPage} title={fullPage ? "להחזיר את תוכן הדוח שבצד" : "להסתיר את תוכן הדוח שבצד"} onClick={() => setFullPage(!fullPage)}>

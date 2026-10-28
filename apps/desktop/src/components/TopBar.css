@@ -118,3 +118,10 @@
     display: none;
   }
 }
+/* A laptop with the largest text: the program's name steps back (its lock stays), so the
+   tabs and "נעילה" stay on screen. */
+@container (max-width: 860px) {
+  .topbar-brand-name {
+    display: none;
+  }
+}

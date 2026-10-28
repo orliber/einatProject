@@ -14,7 +14,7 @@ export function TopBar({ active }: { active: Route["name"] }) {
   );
   return (
     <header className="topbar">
-      <span className="topbar-brand"><LockIcon size={22} color="var(--primary)" /> {he.appName}</span>
+      <span className="topbar-brand"><LockIcon size={22} color="var(--primary)" /> <span className="topbar-brand-name">{he.appName}</span></span>
       <nav className="topbar-nav" aria-label="ניווט ראשי">
         {tab("cases", "תיקים", { name: "cases" })}
         {tab("consult", "התייעצות", { name: "consult" })}
