@@ -1364,6 +1364,31 @@ fn the_requests_use_the_chosen_model_and_speed() {
     }
 }
 
+/// Small jobs think little, whatever the speed chosen for drafting (D-139).
+#[test]
+fn small_jobs_think_little_and_sections_at_the_chosen_speed() {
+    let mut core = Core::for_tests(tempfile::tempdir().unwrap().keep().as_path(), None);
+    core.create_vault(PASSWORD).unwrap();
+    for (speed, section, light) in [
+        ("fast", "low", "low"),
+        ("balanced", "medium", "low"),
+        ("thorough", "high", "medium"),
+    ] {
+        core.set_speed(speed).unwrap();
+        assert_eq!(
+            core.model_for(Task::Draft).unwrap().effort,
+            section,
+            "{speed}"
+        );
+        assert_eq!(
+            core.model_for(Task::Light).unwrap().effort,
+            light,
+            "{speed}"
+        );
+        assert_eq!(core.model_for(Task::Sort).unwrap().effort, "low", "{speed}");
+    }
+}
+
 // ------------------------------------------------------------ regressions
 
 #[test]

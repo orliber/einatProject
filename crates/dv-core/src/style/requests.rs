@@ -67,7 +67,7 @@ impl Core {
         let structure =
             ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
         let keys = section_keys(&structure);
-        let model = self.model_for(Task::Draft)?;
+        let model = self.model_for(Task::Light)?;
         let demo_mode = self.demo_mode()?;
         let stored = self
             .vault_ref()?

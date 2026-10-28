@@ -1373,6 +1373,12 @@ export class FakeCore {
         waiting.forEach((d) => (d.status = "approved"));
         return waiting.length;
       }
+      case "approve_paragraphs": {
+        const ids = new Set(a.draftIds as string[]);
+        const waiting = this.find(a.caseId).drafts.filter((d) => ids.has(d.id) && d.status === "proposed");
+        waiting.forEach((d) => (d.status = "approved"));
+        return waiting.length;
+      }
       case "approve_paragraph":
       case "reject_paragraph": {
         const d = this.find(a.caseId).drafts.find((x) => x.id === a.draftId) ?? fail("not_found", "הפסקה לא נמצאה");

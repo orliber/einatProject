@@ -196,6 +196,9 @@ enum Task {
     Sort,
     Draft,
     Consult,
+    /// A small, bounded job (D-139): one paragraph worded again, the check of a draft
+    /// against its sources, one report read for its style. Deep thinking only adds minutes.
+    Light,
 }
 
 fn day_number() -> u64 {

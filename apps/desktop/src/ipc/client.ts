@@ -338,6 +338,8 @@ export const ipc = {
   addComparisonMaterial: (caseId: string) => call("add_comparison_material", { caseId }),
   /** Approve every paragraph waiting in the section; returns how many. */
   approveSection: (caseId: string, sectionKey: string) => call("approve_section", { caseId, sectionKey }),
+  /** The paragraphs she sees waiting, approved in one call (D-138). */
+  approveParagraphs: (caseId: string, draftIds: string[]) => call("approve_paragraphs", { caseId, draftIds }),
   rejectParagraph: (caseId: string, draftId: string) => run("reject_paragraph", { caseId, draftId }),
   /** `openedWith`: the text the editor showed when it opened. `true` back = the paragraph
    *  changed meanwhile; her text is saved and the other wording is kept among the versions. */
