@@ -1,7 +1,8 @@
 // Round 41: "write the whole report" as one piece of work in the background (master plan
 // 7.2). One click sorts what is not sorted yet, writes every section that has materials and no
-// text, three at a time, each showing up in the report as soon as it is in, and then checks
-// the new drafts against their sources. The screen shows one line: "the program is working,
+// text, three at a time, each showing up in the report as soon as it is in, and checks each
+// new draft against its sources as soon as it is in (D-143), beside the writing that is left.
+// The screen shows one line: "the program is working,
 // 3 of 9", with "stop". Nothing enters the report without her approval.
 //
 // The run outlives the case screen (she may go elsewhere and come back: the screen showing
@@ -127,12 +128,50 @@ export async function runWholeReport(api: CaseApi, opts: { verify: boolean; ai: 
     }
     if (stopping()) return;
 
-    // 2. Every section with materials and no text yet, three at a time.
+    // 2. Every section with materials and no text yet, three at a time. Each new draft is
+    //    checked against its sources (when the check is on) as soon as it is in (D-143), one
+    //    check at a time beside the writing, so the checks do not wait for the last section.
+    //    A section the check is not for (one written from the approved sections) is skipped. A
+    //    check that did not come back is counted as such, never as checked.
     const list: [string, Prepared][] = await ipc.prepareFullDraft(caseId);
     const busy = new Set(api.jobs.map((j) => j.section));
     const queue = list.filter(([k]) => !busy.has(k));
     set({ phase: "write", total: queue.length });
     const written: string[] = [];
+    let checked = 0;
+    let unchecked = 0;
+    let toCheck = 0;
+    const checkOne = async (key: string) => {
+      // "לעצור" or a lock: a check not sent yet is not sent.
+      if (stopping() || locked) return;
+      let ok = false;
+      try {
+        const prepared = await ipc.prepareVerify(caseId, key);
+        ok = await api.review({
+          title: `בדיקת הטיוטה של ${title(key)} מול המקורות`,
+          prepared,
+          reprepare: () => ipc.prepareVerify(caseId, key),
+          onSend: async (id) => {
+            await api.track({ label: `${opts.ai} בודק את "${title(key)}" מול המקורות`, task: "draft", approval: id }, () => ipc.sendVerify(id), (result) => {
+              // The same notes the section shows after its own check.
+              setKept<Map<string, ParagraphCheck>>(`case:${caseId}:section:${key}:checks`, new Map())(
+                new Map(result.draft_ids.map((d, i) => [d, result.checks[i]] as [string, ParagraphCheck])),
+              );
+            });
+          },
+        });
+      } catch (e) {
+        if (lockedMeanwhile(e)) {
+          locked = true;
+          return;
+        }
+      }
+      if (ok) checked += 1;
+      else unchecked += 1;
+      set({ checked, uncheckedFailed: unchecked });
+    };
+    // The checks in the order the sections came in, each after the one before.
+    let checks: Promise<void> = Promise.resolve();
     const writeOne = async ([key, first]: [string, Prepared]) => {
       // Written or being written meanwhile (by hand, or one draft at a time): not sent again.
       const now = screens.get(caseId) ?? api;
@@ -150,8 +189,14 @@ export async function runWholeReport(api: CaseApi, opts: { verify: boolean; ai: 
             await api.track({ label: `${opts.ai} כותב את "${title(key)}"`, task: "draft", section: key, approval: id }, () => ipc.sendSection(id));
           },
         });
-        if (sent) written.push(key);
-        else failedOne();
+        if (sent) {
+          written.push(key);
+          if (opts.verify && !stopping()) {
+            toCheck += 1;
+            set({ toCheck });
+            checks = checks.then(() => checkOne(key));
+          }
+        } else failedOne();
       } catch (e) {
         if (lockedMeanwhile(e)) locked = true;
         else failedOne();
@@ -163,44 +208,10 @@ export async function runWholeReport(api: CaseApi, opts: { verify: boolean; ai: 
       for (let next = queue.shift(); next && !stopping() && !locked; next = queue.shift()) await writeOne(next);
     };
     await Promise.all(Array.from({ length: Math.min(PARALLEL, queue.length) }, worker));
-    if (stopping() || locked) return;
-
-    // 3. The new drafts against their sources, once each (when the check is on). A section
-    //    the check is not for (one written from the approved sections) is skipped. A check
-    //    that did not come back is counted as such, never as checked.
-    if (opts.verify && written.length > 0) {
-      set({ phase: "check", toCheck: written.length });
-      let checked = 0;
-      let unchecked = 0;
-      for (const key of written) {
-        if (stopping()) return;
-        let ok = false;
-        try {
-          const prepared = await ipc.prepareVerify(caseId, key);
-          ok = await api.review({
-            title: `בדיקת הטיוטה של ${title(key)} מול המקורות`,
-            prepared,
-            reprepare: () => ipc.prepareVerify(caseId, key),
-            onSend: async (id) => {
-              await api.track({ label: `${opts.ai} בודק את "${title(key)}" מול המקורות`, task: "draft", approval: id }, () => ipc.sendVerify(id), (result) => {
-                // The same notes the section shows after its own check.
-                setKept<Map<string, ParagraphCheck>>(`case:${caseId}:section:${key}:checks`, new Map())(
-                  new Map(result.draft_ids.map((d, i) => [d, result.checks[i]] as [string, ParagraphCheck])),
-                );
-              });
-            },
-          });
-        } catch (e) {
-          if (lockedMeanwhile(e)) {
-            locked = true;
-            return;
-          }
-        }
-        if (ok) checked += 1;
-        else unchecked += 1;
-        set({ checked, uncheckedFailed: unchecked });
-      }
-    }
+    // 3. What is left of the checks once the writing is done. A check already sent finishes
+    //    even after "לעצור", as a section being written does.
+    if (!stopping() && !locked && checked + unchecked < toCheck) set({ phase: "check" });
+    await checks;
   } catch (e) {
     if (lockedMeanwhile(e)) locked = true;
     else set({ error: (e as UiError | undefined)?.message || "משהו השתבש." });
