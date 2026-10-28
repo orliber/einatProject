@@ -630,7 +630,7 @@ function TrashList(props: { cases: CaseSummary[]; pathOf: (id: string | null) =>
   }
   return (
     <>
-      <p className="small muted trash-note">נמחקים לצמיתות אחרי {TRASH_DAYS} יום. מחיקה מוקדמת דורשת סיסמה.</p>
+      <p className="small muted trash-note">נמחקים לצמיתות אחרי {TRASH_DAYS} יום, ורק אחרי שנשמר גיבוי. מחיקה מוקדמת דורשת סיסמה.</p>
       <table className="cases">
         <thead><tr><th>שם</th><th>נמחק</th><th className="col-go"><span className="visually-hidden">פעולות</span></th></tr></thead>
         <tbody>

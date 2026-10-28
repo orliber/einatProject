@@ -23,7 +23,7 @@ use dv_vault::crypto::Key32;
 use dv_vault::{Argon2Params, NewSlot, Secret, Vault, VaultError};
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::binding::{bound_on_disk, key_for_new_slot, key_for_opening, key_here};
+use crate::binding::{bound_on_disk, key_for_new_slot, key_for_opening, key_here, key_that_opens};
 use crate::views::{BackupCheckView, BackupDone, CreatedVault};
 use crate::{AppStatus, ComputerSeal, Core, CoreError, ErrorAction};
 
@@ -108,23 +108,11 @@ impl UnlockJob {
             Proof::Password(p) => {
                 // Unsealing the key kept here takes a moment too, so it runs in the job.
                 let bound = bound_on_disk(&self.dir);
-                let mut opened = key_for_opening(self.seal.as_ref(), &self.dir, bound)
-                    .and_then(|here| Vault::unlock_with_password_here(&self.dir, p, here.as_ref()));
                 // A new password whose key was held aside and not yet promoted (the program
                 // closed in between): that key opens it, and becomes the one in use.
-                if bound
-                    && matches!(
-                        opened,
-                        Err(VaultError::WrongSecret | VaultError::OtherComputer)
-                    )
-                {
-                    if let Ok(next) = self.seal.load_next(&self.dir) {
-                        if let Ok(v) = Vault::unlock_with_password_here(&self.dir, p, Some(&next)) {
-                            let _ = self.seal.promote_next(&self.dir);
-                            opened = Ok(v);
-                        }
-                    }
-                }
+                let opened = key_that_opens(self.seal.as_ref(), &self.dir, bound, |here| {
+                    Vault::unlock_with_password_here(&self.dir, p, here)
+                });
                 just_bound = !bound && opened.as_ref().is_ok_and(Vault::password_bound);
                 opened
             }
@@ -180,9 +168,14 @@ pub struct PasswordChecked {
 impl PasswordCheckJob {
     #[must_use]
     pub fn run(self) -> PasswordChecked {
-        // The key here as for an opening: a Windows that is only slow says to try again.
-        let result = key_for_opening(self.seal.as_ref(), &self.dir, bound_on_disk(&self.dir))
-            .and_then(|here| Vault::verify_password_here(&self.dir, &self.password, here.as_ref()));
+        // The key here as for an opening: a Windows that is only slow says to try again; a
+        // key held aside for a slot written and not yet promoted is tried too.
+        let result = key_that_opens(
+            self.seal.as_ref(),
+            &self.dir,
+            bound_on_disk(&self.dir),
+            |here| Vault::verify_password_here(&self.dir, &self.password, here),
+        );
         PasswordChecked {
             session: self.session,
             ticket: self.ticket,
@@ -209,7 +202,6 @@ impl SlotJob {
                 };
             }
         };
-        let proof = self.proof.secret(here.as_ref());
         let mut key_aside = false;
         let made = match &self.new_password {
             Some(new_password) => {
@@ -229,17 +221,21 @@ impl SlotJob {
                 };
                 fresh
                     .and_then(|fresh| {
+                        // The proof with the key in use; where none is in use, with the one
+                        // held aside, which a slot written and not promoted is bound to.
+                        let key = here.as_ref().or(fresh.as_ref());
                         NewSlot::password_here(
                             &self.header,
-                            proof,
+                            self.proof.secret(key),
                             new_password,
                             params,
-                            here.as_ref().or(fresh.as_ref()),
+                            key,
                         )
                     })
                     .map(|s| (s, None))
             }
-            None => NewSlot::recovery(&self.header, proof).map(|(s, k)| (s, Some(k))),
+            None => NewSlot::recovery(&self.header, self.proof.secret(here.as_ref()))
+                .map(|(s, k)| (s, Some(k))),
         };
         SlotMade {
             session: self.session,

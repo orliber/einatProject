@@ -834,6 +834,10 @@ pub struct Core {
     /// Wall-clock time of the shell's last timer tick (sleep detection).
     last_tick: Option<SystemTime>,
     failed_unlocks: u32,
+    /// The password's key held aside (`vault.computer.next`) is the one the slot on disk
+    /// is bound to, because promoting it failed after the slot was written: it is used
+    /// until it can be promoted (review of #163).
+    password_key_aside: std::sync::atomic::AtomicBool,
     /// When this run's wrong passwords or kits were typed: the ones just before she got in
     /// are her own typos, and the opening does not report them (review of stage 5, U5).
     failure_times: Vec<Instant>,

@@ -104,10 +104,20 @@ impl Core {
         Ok(())
     }
 
-    /// Erase what has waited in the recycle bin longer than [`TRASH_DAYS`]. Runs at unlock.
+    /// Erase what has waited in the recycle bin longer than [`TRASH_DAYS`], and only what a
+    /// backup written and read back since the deletion still holds: the clock alone never
+    /// erases a case that exists nowhere else. With no backup at all nothing is erased by
+    /// itself (the bin says so). Runs at unlock.
     pub(crate) fn purge_expired(&mut self) -> Result<(), CoreError> {
         let cutoff = unix_now() - TRASH_DAYS * dv_domain::dates::DAY_SECS;
-        let expired = self.vault_ref()?.trashed_before(cutoff)?;
+        let v = self.vault_ref()?;
+        let backed_up: Option<i64> = v
+            .setting(crate::backup::LAST_BACKUP_KEY)?
+            .and_then(|t| t.parse().ok());
+        let Some(backed_up) = backed_up else {
+            return Ok(());
+        };
+        let expired = v.trashed_before(cutoff.min(backed_up))?;
         for id in expired {
             self.vault_mut()?.delete_case(&id)?;
             self.forget_final_style(&id);

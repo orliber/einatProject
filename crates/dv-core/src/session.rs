@@ -144,6 +144,7 @@ impl Core {
             last_activity: Instant::now(),
             last_tick: None,
             failed_unlocks: 0,
+            password_key_aside: std::sync::atomic::AtomicBool::new(false),
             failure_times: Vec::new(),
             // A wait from before a restart still holds (D-122).
             not_before: wait_on_disk(dir),

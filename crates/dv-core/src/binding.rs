@@ -9,6 +9,7 @@
 //! Where nothing can keep a key for the account (Linux), the slot stays as it was.
 
 use std::path::Path;
+use std::sync::atomic::Ordering;
 
 use dv_vault::computer_key::{self, Purpose};
 use dv_vault::crypto::Key32;
@@ -117,6 +118,9 @@ pub(crate) fn bound_on_disk(dir: &Path) -> bool {
 /// [`ComputerSeal::promote_next`] once the new slot is written (review of stage 5, S5). The
 /// key in use is never replaced before that, so a slot that was not written still opens.
 ///
+/// A key already held aside is used again, never replaced: the slot on disk may be bound to
+/// it (written, then not promoted), and a second key aside would strand that slot.
+///
 /// Where a key can be kept here but this one could not be made (a locked Keychain, a dialog
 /// she cancelled, a slow answer), it is `Busy` and no slot is written: a new password is never
 /// left unbound on a computer that can bind it (review of #136).
@@ -130,10 +134,38 @@ pub(crate) fn key_for_new_slot(
     match seal.load(dir) {
         Ok(key) => Ok((Some(key), false)),
         Err(_) => seal
-            .create_next(dir)
+            .load_next(dir)
+            .or_else(|_| seal.create_next(dir))
             .map(|key| (Some(key), true))
             .map_err(|_| VaultError::Busy),
     }
+}
+
+/// The key this computer holds for a bound slot, for a proof that `opens` must accept: the
+/// key in use, else the one held aside (a slot written and then not promoted, see
+/// `Core::promote_password_key`), which is promoted once it has opened.
+pub(crate) fn key_that_opens<T>(
+    seal: &dyn ComputerSeal,
+    dir: &Path,
+    bound: bool,
+    opens: impl Fn(Option<&Key32>) -> Result<T, VaultError>,
+) -> Result<T, VaultError> {
+    let here = key_for_opening(seal, dir, bound)?;
+    let first = opens(here.as_ref());
+    if bound
+        && matches!(
+            first,
+            Err(VaultError::WrongSecret | VaultError::OtherComputer)
+        )
+    {
+        if let Ok(next) = seal.load_next(dir) {
+            if let Ok(opened) = opens(Some(&next)) {
+                let _ = seal.promote_next(dir);
+                return Ok(opened);
+            }
+        }
+    }
+    first
 }
 
 /// The key for a new vault's password slot: made here where it can be, else `Busy` (the
@@ -177,6 +209,15 @@ impl Core {
             return Ok(None);
         }
         let bound = bound_on_disk(&self.dir);
+        if self.password_key_aside.load(Ordering::Relaxed) {
+            // The slot is bound to the key held aside: promoted now if it can be, else used
+            // from where it is.
+            if seal.promote_next(&self.dir).is_ok() {
+                self.password_key_aside.store(false, Ordering::Relaxed);
+            } else if let Ok(key) = seal.load_next(&self.dir) {
+                return Ok(Some(key));
+            }
+        }
         match seal.load_in_session(&self.dir) {
             Ok(key) => Ok(Some(key)),
             Err(VaultError::Busy) if bound => Err(VaultError::Busy),
@@ -193,9 +234,24 @@ impl Core {
     }
 
     /// The key held aside for a slot that was just written becomes the one in use. If this
-    /// fails, the next opening with the password still finds it (see the unlock job).
-    pub(crate) fn promote_password_key(&self) {
-        let _ = self.computer_seal.promote_next(&self.dir);
+    /// fails (a file held by an antivirus, a full disk), it is written to the log, the key
+    /// aside stays the one used in this session (`password_key_here`, the password checks),
+    /// promoting is tried again at each use, and the next opening with the password still
+    /// finds it (see the unlock job).
+    pub(crate) fn promote_password_key(&mut self) {
+        match self.computer_seal.promote_next(&self.dir) {
+            Ok(()) => self.password_key_aside.store(false, Ordering::Relaxed),
+            Err(e) => {
+                self.password_key_aside.store(true, Ordering::Relaxed);
+                if let Some(v) = self.vault.as_mut() {
+                    let _ = v.record(
+                        dv_vault::AuditEvent::IntegrityWarning,
+                        None,
+                        &serde_json::json!({ "reason": format!("computer key not promoted: {e}") }),
+                    );
+                }
+            }
+        }
     }
 
     /// The security page's line: bound to this computer (ok), nothing here to bind to

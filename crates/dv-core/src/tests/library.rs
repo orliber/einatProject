@@ -63,11 +63,14 @@ fn a_case_left_in_the_bin_past_thirty_days_is_erased_at_unlock() {
     core.delete_case(&case).unwrap();
     core.purge_expired().unwrap();
     assert_eq!(core.list_trash().unwrap().len(), 1, "still within 30 days");
-    // Pretend it was deleted 31 days ago.
+    // Pretend it was deleted 31 days ago, and that a backup was written since (without one
+    // the bin keeps it, see `the_bin_erases_only_what_waited_past_thirty_days_and_is_in_a_backup`).
     core.vault_mut()
         .unwrap()
         .set_deleted_at_for_tests(&case, 1)
         .unwrap();
+    let drive = tempfile::tempdir().unwrap();
+    core.write_backup(&drive.path().join("b")).unwrap();
     core.lock();
     core.unlock(PASSWORD).unwrap();
     assert!(core.list_trash().unwrap().is_empty());

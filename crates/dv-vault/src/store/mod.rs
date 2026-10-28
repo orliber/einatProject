@@ -855,6 +855,13 @@ impl Vault {
     /// the slot, so the Drive key should be deleted too (the core does that).
     pub fn remove_google_slot(&mut self, current: Secret<'_>) -> Result<(), VaultError> {
         master_key(&self.header, current)?;
+        self.remove_google_slot_checked()
+    }
+
+    /// The same after the proof was checked away from the vault's lock
+    /// ([`Self::verify_password_here`] in a job, as a purge from the recycle bin is): the
+    /// caller answers for a check of this session's password, moments ago.
+    pub fn remove_google_slot_checked(&mut self) -> Result<(), VaultError> {
         if !self.has_google_slot() {
             return Ok(());
         }

@@ -340,6 +340,51 @@ fn a_new_key_waits_aside_until_its_slot_is_written_and_still_opens_after_a_crash
     assert!(again.unlock(PASSWORD).unwrap().unlocked);
 }
 
+/// Review of #163: when promoting the key held aside fails after the slot was written, the
+/// failure is in the log, the key aside is the one used for the rest of the session (a
+/// password check, a second new password), and the next opening promotes it.
+#[test]
+fn a_key_that_could_not_be_promoted_stays_in_use_and_is_logged() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = Arc::new(FakeSeal::default());
+    let mut core = on(dir.path(), &first);
+    let kit = core.create_vault(PASSWORD).unwrap().recovery_key;
+    core.lock();
+    let copy = tempfile::tempdir().unwrap();
+    copy_folder(dir.path(), copy.path());
+    let second = Arc::new(FakeSeal::default());
+    let mut there = Core::for_tests(copy.path(), None)
+        .with_computer_seal(Arc::new(NoPromote(Arc::clone(&second))) as Arc<dyn ComputerSeal>);
+    there.unlock_with_recovery(&kit).unwrap();
+    there.change_password(&kit, true, PASSWORD).unwrap();
+    assert!(second.load(copy.path()).is_err() && second.load_next(copy.path()).is_ok());
+    let log = there.activity(None).unwrap().entries;
+    assert!(
+        log.iter().any(|e| e.event == "integrity_warning" && e.warn),
+        "the failed promotion is in the log"
+    );
+    // In the same session, her password is still hers: a check of it passes (a purge, Google
+    // on), and a second new password binds to the same key aside instead of a third key.
+    let job = there.begin_password_check(PASSWORD).unwrap();
+    there.finish_password_check(job.run()).unwrap();
+    let aside = *second.load_next(copy.path()).unwrap().as_bytes();
+    there
+        .change_password(PASSWORD, false, "סיסמה שנייה ארוכה מאוד לכספת")
+        .unwrap();
+    assert_eq!(*second.load_next(copy.path()).unwrap().as_bytes(), aside);
+    there.lock();
+    drop(there);
+    // The next opening finds the key held aside, opens, and keeps it as the one in use.
+    let mut again = on(copy.path(), &second);
+    assert!(
+        again
+            .unlock("סיסמה שנייה ארוכה מאוד לכספת")
+            .unwrap()
+            .unlocked
+    );
+    assert!(second.load(copy.path()).is_ok() && second.load_next(copy.path()).is_err());
+}
+
 #[test]
 fn a_header_that_cannot_be_read_never_makes_a_new_key() {
     // Review of stage 5, S4: unreadable counts as bound, so the key here is only loaded.
