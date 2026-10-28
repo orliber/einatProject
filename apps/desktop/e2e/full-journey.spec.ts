@@ -351,7 +351,10 @@ test("what left the computer: the request is listed with the child's name hidden
   // From settings → privacy: every case.
   await page.getByRole("button", { name: "→ תיקים" }).click();
   await openSettings(page, "פרטיות");
-  await page.getByRole("region", { name: "שום שם לא יצא מהמחשב." }).getByRole("button", { name: "מה יצא מהמחשב" }).click();
+  const status = page.getByRole("region", { name: "שום שם לא יצא מהמחשב." });
+  // One line of status (round 50): shield, sentence and button side by side, not a tall column.
+  expect((await status.boundingBox())?.height).toBeLessThan(140);
+  await status.getByRole("button", { name: "מה יצא מהמחשב" }).click();
   const sent = page.getByRole("dialog", { name: "מה יצא מהמחשב" });
   await expect(sent).toBeVisible();
   const rows = sent.getByRole("list", { name: "בקשות, מהחדשה לישנה" }).getByRole("listitem");
