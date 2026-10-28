@@ -37,6 +37,9 @@ import type { AutoHidden } from "../ipc/generated/AutoHidden";
 import type { IdentitySource } from "../ipc/generated/IdentitySource";
 import type { SuspectDecision } from "../ipc/generated/SuspectDecision";
 import type { UiError } from "../ipc/generated/UiError";
+import type { CheckLine } from "../ipc/generated/CheckLine";
+import type { SystemCheck } from "../ipc/generated/SystemCheck";
+import type { SystemCheckResult } from "../ipc/generated/SystemCheckResult";
 import { daysAgo, kindLabel } from "../i18n/he";
 import institute from "../../../../templates/institute-v1.json";
 import structure from "../../../../templates/report_structure.json";
@@ -175,6 +178,42 @@ const FAKE_LAYERS: [string, string, string][] = [
   ["log", "יומן שלא ניתן לשנות", "נבדק עכשיו: היומן שלם."],
   ["updates", "עדכונים חתומים", "מפתח החתימה נמצא בתוכנה."],
 ];
+
+/** "בדיקת מערכת" in the preview (D-142): the shape of the app's answer. Nothing is read,
+ *  written or opened here; the connection line says so. */
+export function fakeSystemCheck(check: SystemCheck, sendStopped: boolean): SystemCheckResult {
+  const ok = (key: string, label: string, reason: string, detail = `${key}: ok`): CheckLine =>
+    ({ key, label, state: "ok", reason, next_step: null, detail });
+  const lines: Record<SystemCheck, CheckLine[]> = {
+    reading: [
+      ok("docx", "קריאת קובץ Word", "קובץ הבדיקה נקרא כמו שצריך ברכיב הקריאה המבודד.", "docx: ok (docx)"),
+      ok("pdf", "קריאת קובץ PDF", "קובץ הבדיקה נקרא כמו שצריך ברכיב הקריאה המבודד.", "pdf: ok (pdf)"),
+      ok("image", "קבלת תמונה של דף", "התמונה התקבלה ועברה לזיהוי הטקסט.", "image: ok (1 page image)"),
+    ],
+    ocr: [ok("ocr", "זיהוי טקסט בסריקות ובתמונות (OCR)", "רכיב זיהוי הטקסט קרא את דף הבדיקה.", "ocr: ok (100% of the sample)")],
+    folders: [
+      ok("export_folder", "שמירת דוחות", "נכתב ונמחק קובץ בדיקה קטן בתיקיית ההורדות.", "export_folder: ok (in downloads)"),
+      { key: "backup_folder", label: "שמירת גיבוי", state: "skipped", reason: "עוד לא נשמר גיבוי, ולכן אין תיקיית גיבוי לבדוק.",
+        next_step: "שומרים גיבוי ראשון בהגדרות ← גיבוי, עדיף לדיסק נייד.", detail: "backup_folder: no backup yet" },
+    ],
+    connection: [sendStopped
+      ? { key: "connection", label: "חיבור ל-Claude", state: "skipped", reason: "עצירת השליחה מופעלת, ולכן לא נפתח שום חיבור.",
+        next_step: "אחרי שמכבים את העצירה (הגדרות ← סיסמה ואבטחה) אפשר לבדוק שוב.", detail: "connection: emergency stop on, nothing opened" }
+      : { key: "connection", label: "חיבור ל-Claude", state: "skipped", reason: "בתצוגה המקדימה לא נפתח שום חיבור. בתוכנה עצמה נבדקת לחיצת יד מאובטחת בלבד, בלי שום מידע.",
+        next_step: null, detail: "connection: preview, nothing opened" }],
+    basics: [
+      { key: "api_key", label: "מפתח API", state: "warn", reason: "לא שמור מפתח, ולכן כל מה שנכתב כרגע הוא הדגמה בלבד.",
+        next_step: "מדביקים מפתח בהגדרות ← חיבור ל-AI.", detail: "api_key: absent (demo mode)" },
+      ok("model", "הדגם שנבחר", "ברשימה המותרת (אפס שמירת מידע).", "model: default, allowed"),
+      { key: "version", label: "גרסת התוכנה", state: "info", reason: "0.1.0 (browser-preview)", next_step: null, detail: "version: 0.1.0 build browser-preview" },
+      { key: "os", label: "מערכת ההפעלה", state: "skipped", reason: "לא הצלחתי לברר את הגרסה.", next_step: null, detail: "os: unknown" },
+      { key: "fips", label: "מודול ההצפנה המאושר (FIPS)", state: "info", reason: "לא פעיל בגרסה הזו: ההצפנה (AES-256) רגילה, בלי המודול המאושר.", next_step: null, detail: "fips: inactive" },
+      ok("disk", "מקום פנוי בדיסק של הכספת", "40.0 GB פנויים.", "disk: 40960 MiB free"),
+    ],
+  };
+  if (!(check in lines)) fail("internal", "בדיקה לא מוכרת.");
+  return { check, lines: lines[check] };
+}
 
 export class FakeCore {
   private unlocked = false;
@@ -1561,6 +1600,8 @@ export class FakeCore {
         return true;
       case "open_releases_page":
         return null;
+      case "system_check":
+        return fakeSystemCheck(String(a.check ?? "") as SystemCheck, this.sendStopped);
       case "install_update":
         return fail("update", "בתצוגה המקדימה לא מתקינים. בתוכנה עצמה העדכון יורד, נבדק מול החתימה ומותקן.");
       case "change_password":

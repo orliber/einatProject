@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { BugReportSettings } from "../components/BugReport";
+import { SystemCheckSettings } from "../components/SystemCheck";
 import { useApp } from "../App";
 import { ActivitySettings } from "../components/ActivityLog";
 import { BackupSettings } from "../components/Backup";
@@ -350,6 +351,7 @@ export function SettingsScreen({ pane: initial }: { pane?: SettingsPane | undefi
             <>
               <UpdateSettings />
               <ActivitySettings />
+              <SystemCheckSettings />
               <BugReportSettings />
             </>
           )}

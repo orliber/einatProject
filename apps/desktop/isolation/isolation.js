@@ -88,6 +88,7 @@ const ALLOWED = new Set([
   "old_exports",
   "open_old_exports",
   "open_releases_page",
+  "system_check",
   "keep_case_longer",
   "letter",
   "list_cases",

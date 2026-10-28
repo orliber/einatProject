@@ -41,6 +41,7 @@ mod settings;
 mod sorting;
 mod stage;
 mod style;
+mod system_check;
 mod unsaved;
 pub mod update;
 mod usage;
@@ -114,6 +115,9 @@ pub use style::{
     SectionLibrary, SimilarParagraph, SimilarReport, SkeletonView, StyleAnalysisResult,
     StyleImportPreview, StyleOverview, StylePartView, StyleProfileView, StyleSectionLabel,
     StyleSourceView, StyleSuggestion, StyleSuggestionKind, StyleVersionView,
+};
+pub use system_check::{
+    CheckLine, CheckState, ExportPlace, SystemCheck, SystemCheckJob, SystemCheckResult,
 };
 pub use unsaved::UnsavedEdit;
 pub use usage::UsageSummary;

@@ -64,6 +64,8 @@ import type { StyleProfile } from "./StyleProfile";
 import type { StyleProfileView } from "./StyleProfileView";
 import type { StyleSourceView } from "./StyleSourceView";
 import type { SuspectDecision } from "./SuspectDecision";
+import type { SystemCheck } from "./SystemCheck";
+import type { SystemCheckResult } from "./SystemCheckResult";
 import type { TemplateView } from "./TemplateView";
 import type { UnsavedEdit } from "./UnsavedEdit";
 import type { UpdateView } from "./UpdateView";
@@ -243,6 +245,7 @@ export type Commands = {
   settle_foreign_tags: { args: { caseId: string }; returns: number };
   similar_paragraph: { args: { caseId: string; draftId: string }; returns: SimilarParagraph | null };
   style_overview: { args: undefined; returns: StyleOverview };
+  system_check: { args: { check: SystemCheck }; returns: SystemCheckResult };
   take_unsaved: { args: undefined; returns: Array<UnsavedEdit> };
   touch: { args: undefined; returns: null };
   unlock: { args: { password: string }; returns: AppStatus };
