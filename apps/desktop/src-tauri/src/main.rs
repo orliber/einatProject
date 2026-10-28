@@ -20,12 +20,12 @@ use commands::*;
 use dv_core::{
     ActivityPage, AppStatus, BackupCheckView, BackupDone, BackupStatus, CaseDetail, ChatView,
     ConsultResult, ConsultationSummary, ConsultationView, Core, CoreError, CreatedVault,
-    ExportCheck, ImportPreview, InterpretationResult, InterpretationView, LogoView, NameMatch,
-    ParagraphVersionView, ParagraphView, ParentsOptions, Prepared, Readiness, ReportCheckResult,
-    ReportCheckSetting, ReportSettings, RetentionItem, SectionResult, SecurityStatus, SentCursor,
-    SentPage, SentText, SortResult, StagedBackup, StyleAnalysisResult, StyleImportPreview,
-    StyleOverview, StyleProfileView, StyleSourceView, SuspectDecision, TemplateView, UiError,
-    UnsavedEdit, UsageSummary, VerifyResult,
+    DraftBriefs, ExportCheck, ImportPreview, InterpretationResult, InterpretationView, LogoView,
+    NameMatch, ParagraphVersionView, ParagraphView, ParentsOptions, Prepared, Readiness,
+    ReportCheckResult, ReportCheckSetting, ReportSettings, RetentionItem, SectionResult,
+    SecurityStatus, SentCursor, SentPage, SentText, SortResult, StagedBackup, StyleAnalysisResult,
+    StyleImportPreview, StyleOverview, StyleProfileView, StyleSourceView, SuspectDecision,
+    TemplateView, UiError, UnsavedEdit, UsageSummary, VerifyResult,
 };
 use dv_domain::{
     CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind, Role,
@@ -60,6 +60,8 @@ async fn transmit(
     let progress = Arc::clone(&state.progress);
     let done = Arc::clone(&state.progress);
     let id = approval_id.clone();
+    // Writing the whole report takes many minutes: the laptop must not sleep meanwhile (D-141).
+    let _awake = win_platform::keep_awake();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let report = |words: u32| {
             if let Ok(mut p) = progress.lock() {
@@ -407,6 +409,8 @@ fn main() {
             set_lock_minutes,
             set_practitioner,
             set_section_guide,
+            draft_briefs,
+            keep_draft_brief,
             section_modes,
             set_section_mode,
             set_review_always,

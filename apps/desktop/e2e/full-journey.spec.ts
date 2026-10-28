@@ -238,7 +238,9 @@ test("two sections are written and approved, a paragraph is edited by hand, and 
   const gap = report.locator(".a4-gap-line").getByRole("button", { name: "✦ לנסח" }).first();
   const secondId = await gap.evaluate((b) => b.closest(".a4-section")?.id ?? "");
   expect(secondId).not.toBe(firstId);
+  // Out of focus, "✦ לנסח" opens the section's box (D-140); its own "✦ לנסח" sends.
   await gap.click();
+  await report.locator(`#${secondId}`).getByRole("button", { name: "✦ לנסח" }).click();
   await expect(approve).toBeVisible({ timeout: 20_000 });
   await expect(report.locator(".a4-section.has-pending")).toHaveAttribute("id", secondId);
   await approve.click();

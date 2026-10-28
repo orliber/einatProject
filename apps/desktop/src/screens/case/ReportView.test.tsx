@@ -83,7 +83,7 @@ describe("the report page, one section in focus", () => {
     if (!first) throw new Error("no section in focus");
     expect(page.querySelectorAll(".a4-section.is-focus")).toHaveLength(1);
     // Before the draft: what matters to her here, then "✦ לנסח".
-    const brief = within(first).getByLabelText("מה חשוב לך שייכתב כאן?");
+    const brief = await within(first).findByRole("textbox", { name: /^איך לנסח את הסעיף/ });
     // Out of focus, an empty section is one line, with no box of its own.
     expect(page.querySelectorAll(".a4-brief")).toHaveLength(1);
     await user.type(brief, "להתחיל מהקשר עם הצוות{Enter}");
@@ -102,17 +102,35 @@ describe("the report page, one section in focus", () => {
     expect(within(first).queryByRole("group", { name: "מה לשנות בטיוטה" })).toBeNull();
   });
 
+  it("the box sends a style with her words, and keeps the wish for the section when she asks (D-140)", async () => {
+    const { calls, user, page } = await openReport();
+    const first = focused(page);
+    if (!first) throw new Error("no section in focus");
+    const box = await within(first).findByRole("textbox", { name: /^איך לנסח את הסעיף/ });
+    await user.click(within(first).getByRole("button", { name: "קצר וממוקד" }));
+    expect(within(first).getByRole("button", { name: "קצר וממוקד" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(within(first).getByRole("checkbox", { name: /לזכור לסעיף הזה/ }));
+    await user.type(box, "להתחיל מהתצפית{Enter}");
+    await waitFor(() => expect(calls.some((c) => c.cmd === "prepare_section")).toBe(true));
+    const asked = calls.find((c) => c.cmd === "prepare_section")?.args as { instruction: string };
+    expect(asked.instruction).toContain("מה שחשוב לי שייכתב בסעיף: כתבי בקצרה ובממוקד. להתחיל מהתצפית");
+    const kept = calls.find((c) => c.cmd === "keep_draft_brief")?.args as { text: string; keep: boolean };
+    expect(kept).toMatchObject({ text: "להתחיל מהתצפית", keep: true });
+  });
+
   it("Enter approves the draft in focus and moves on to the next one; Ctrl+Enter opens the change", async () => {
     const { calls, user, page } = await openReport();
     // Two drafts: the section in focus, then another one written from its single line.
     const first = focused(page);
     if (!first) throw new Error("no section in focus");
-    await user.click(within(first).getByRole("button", { name: "✦ לנסח" }));
+    await user.click(await within(first).findByRole("button", { name: "✦ לנסח" }));
     await within(first).findByRole("group", { name: /^הטיוטה של/ });
     const line = page.querySelector<HTMLElement>(".a4-gap-line");
     if (!line) throw new Error("no empty section left");
     const second = line.closest<HTMLElement>(".a4-section");
     await user.click(within(line).getByRole("button", { name: "✦ לנסח" }));
+    // Out of focus it opens the section's box (D-140); the box's "✦ לנסח" sends.
+    await user.click(await within(line.closest<HTMLElement>(".a4-section") as HTMLElement).findByRole("button", { name: "✦ לנסח" }));
     await waitFor(() => expect(second).toHaveClass("is-focus"));
     await within(second as HTMLElement).findByRole("group", { name: /^הטיוטה של/ });
     // The first draft, out of focus, waits its turn, with no buttons.
@@ -140,12 +158,14 @@ describe("the report page, one section in focus", () => {
     const { calls, user, page } = await openReport();
     const first = focused(page);
     if (!first) throw new Error("no section in focus");
-    await user.click(within(first).getByRole("button", { name: "✦ לנסח" }));
+    await user.click(await within(first).findByRole("button", { name: "✦ לנסח" }));
     await within(first).findByRole("group", { name: /^הטיוטה של/ });
     const line = page.querySelector<HTMLElement>(".a4-gap-line");
     const second = line?.closest<HTMLElement>(".a4-section");
     if (!line || !second) throw new Error("no empty section left");
     await user.click(within(line).getByRole("button", { name: "✦ לנסח" }));
+    // Out of focus it opens the section's box (D-140); the box's "✦ לנסח" sends.
+    await user.click(await within(line.closest<HTMLElement>(".a4-section") as HTMLElement).findByRole("button", { name: "✦ לנסח" }));
     await within(second).findByRole("group", { name: /^הטיוטה של/ });
     const head = within(second).getByRole("heading", { level: 3 });
     head.focus();

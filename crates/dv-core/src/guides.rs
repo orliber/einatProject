@@ -82,7 +82,7 @@ fn clean(text: &str) -> Result<String, CoreError> {
 }
 
 /// A section of either template (a case from before round 28 is in the old one).
-fn known_section(key: &str) -> bool {
+pub(crate) fn known_section(key: &str) -> bool {
     [
         Some(dv_domain::DEFAULT_TEMPLATE),
         Some(dv_domain::INSTITUTE_TEMPLATE),

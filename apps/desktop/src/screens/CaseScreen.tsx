@@ -64,7 +64,7 @@ export interface CaseApi {
   track: <T>(job: { label: string; task: Task; section?: string; approval?: string }, run: () => Promise<T>, then?: (out: T) => Promise<void> | void) => Promise<T>;
   /** A draft for a section, from anywhere (the report page, the section): prepare, the
    *  review, and the writing with its progress. Resolves when it is in, or she went back. */
-  draft: (sectionKey: string, instruction?: string, replaces?: string) => Promise<boolean>;
+  draft: (sectionKey: string, instruction?: string, replaces?: string, points?: boolean) => Promise<boolean>;
 }
 
 let jobSeq = 0;
@@ -267,12 +267,13 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   }, [startReview]);
 
   const draft = useCallback(
-    async (key: string, instruction?: string, replaces?: string) => {
+    async (key: string, instruction?: string, replaces?: string, points = false) => {
       const section = detailRef.current?.sections.find((s) => s.key === key);
       const title = section?.title ?? key;
       const derivedKey = ["summary", "diagnoses", "recommendations", "dsm"].includes(key);
       const text = instruction ?? (derivedKey ? "כתבי טיוטה לסעיף מתוך הסעיפים שאושרו." : "כתבי טיוטה לסעיף מתוך המקורות, עם מקור לכל פסקה.");
-      const prepare = () => ipc.prepareSection(caseId, key, text, replaces);
+      // Her own section (round 30): only her points go, worded in her style (D-140).
+      const prepare = () => points ? ipc.prepareFromPoints(caseId, key, text) : ipc.prepareSection(caseId, key, text, replaces);
       const prepared = await timed("prepare", prepare(), "section");
       return startReview({
         title: `טיוטה לסעיף ${title}`,

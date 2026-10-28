@@ -15,6 +15,7 @@ use super::*;
 
 mod access;
 mod binding;
+mod briefs;
 mod flows;
 mod guides;
 mod history;

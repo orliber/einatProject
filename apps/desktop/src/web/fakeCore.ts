@@ -200,6 +200,9 @@ export class FakeCore {
   private practitioner = ["ד\"ר רותם בדויה"];
   /** Her own general guides (round 29), by section key. */
   private guides = new Map<string, string>();
+  /** Drafting wishes (D-140): the last five, and one kept per section. */
+  private briefs: string[] = [];
+  private sectionBriefs = new Map<string, string>();
   /** Who writes a section, as she set it in settings (round 30). */
   private modes = new Map<string, SectionMode>();
   private lockMinutes = 15;
@@ -1015,6 +1018,17 @@ export class FakeCore {
         if (this.modes.get(String(a.sectionKey)) !== "self") fail("refused", "ניסוח מהנקודות שלך הוא לסעיפים שאת כותבת בעצמך.");
         if (!String(a.points).trim()) fail("refused", "כותבים קודם את הנקודות, ואז מנסחים מהן.");
         return this.prepareSection(c, String(a.sectionKey), String(a.points), null, true);
+      }
+      case "draft_briefs":
+        return { recent: [...this.briefs], sections: Object.fromEntries(this.sectionBriefs) };
+      case "keep_draft_brief": {
+        if (!SECTIONS.some((s) => s.key === a.sectionKey)) fail("not_found", "הסעיף לא נמצא");
+        const text = String(a.text).replace(/\r\n?/g, "\n").trim();
+        if (text.length > 1000) fail("refused", "ההנחיה ארוכה מדי: עד 1000 תווים.");
+        if (text) this.briefs = [text, ...this.briefs.filter((b) => b !== text)].slice(0, 5);
+        if (a.keep && text) this.sectionBriefs.set(String(a.sectionKey), text);
+        else this.sectionBriefs.delete(String(a.sectionKey));
+        return { recent: [...this.briefs], sections: Object.fromEntries(this.sectionBriefs) };
       }
       case "set_section_guide": {
         if (!SECTIONS.some((s) => s.key === a.sectionKey)) fail("not_found", "הסעיף לא נמצא");

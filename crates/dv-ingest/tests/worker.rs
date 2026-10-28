@@ -79,6 +79,111 @@ fn the_shipped_program_reads_a_document_contained() {
     assert_eq!(out.body, "תצפית בגן: הילד משחק לבד.");
 }
 
+/// Word, a PDF and a photo through the program as installed (D-135): the reader is the app
+/// itself, started contained as it starts on her computer (on Windows in an AppContainer,
+/// from the per-user install folder), so a library it cannot load there fails here, not at
+/// hers. Every input is invented.
+#[test]
+#[ignore = "needs the built app: DV_TEST_APP_EXE"]
+fn the_shipped_program_reads_word_pdf_and_a_photo_contained() {
+    use std::io::Write;
+    let exe = std::env::var("DV_TEST_APP_EXE").expect("DV_TEST_APP_EXE");
+    let exe = Path::new(&exe);
+    let read = |name: &str, bytes: &[u8]| {
+        worker::run(exe, name, bytes, worker::DEFAULT_TIMEOUT)
+            .unwrap_or_else(|e| panic!("{name}: {e:?} ({})", e.detail()))
+    };
+
+    // Word as Word 365 saves it: the body named by the package's own pointer.
+    let mut docx = std::io::Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut docx);
+        let opts = zip::write::SimpleFileOptions::default();
+        let parts = [
+            (
+                "_rels/.rels",
+                r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document2.xml"/></Relationships>"#,
+            ),
+            (
+                "word/document2.xml",
+                r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>תצפית בגן: הילד משחק לבד.</w:t></w:r></w:p></w:body></w:document>"#,
+            ),
+        ];
+        for (name, body) in parts {
+            zip.start_file(name, opts).unwrap();
+            zip.write_all(body.as_bytes()).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+    let Outcome::Text(word) = read("report.docx", docx.get_ref()) else {
+        panic!("text expected from Word")
+    };
+    assert!(word.body.contains("הילד משחק לבד"), "{}", word.body);
+
+    // A PDF with text in it (the PDF library is loaded in the container).
+    let pdf = {
+        use pdf_extract::{Dictionary, Document, Object, Stream};
+        let mut doc = Document::with_version("1.7");
+        let mut font = Dictionary::new();
+        font.set("Type", Object::Name(b"Font".to_vec()));
+        font.set("Subtype", Object::Name(b"Type1".to_vec()));
+        font.set("BaseFont", Object::Name(b"Helvetica".to_vec()));
+        let font_id = doc.add_object(font);
+        let mut fonts = Dictionary::new();
+        fonts.set("F1", Object::Reference(font_id));
+        let mut resources = Dictionary::new();
+        resources.set("Font", Object::Dictionary(fonts));
+        // A page with a few lines (a single short line reads as a scan).
+        let content =
+            b"BT /F1 12 Tf 72 712 Td 14 TL (Evaluation summary, invented child, 2026) Tj \
+            T* (The child played alone and joined the group after a while.) Tj \
+            T* (Attention was good in short tasks and lower in long ones.) Tj ET"
+                .to_vec();
+        let content_id = doc.add_object(Stream::new(Dictionary::new(), content));
+        let pages_id = doc.new_object_id();
+        let mut page = Dictionary::new();
+        page.set("Type", Object::Name(b"Page".to_vec()));
+        page.set("Parent", Object::Reference(pages_id));
+        page.set(
+            "MediaBox",
+            Object::Array(vec![0.into(), 0.into(), 595.into(), 842.into()]),
+        );
+        page.set("Resources", Object::Dictionary(resources));
+        page.set("Contents", Object::Reference(content_id));
+        let page_id = doc.add_object(page);
+        let mut pages = Dictionary::new();
+        pages.set("Type", Object::Name(b"Pages".to_vec()));
+        pages.set("Kids", Object::Array(vec![Object::Reference(page_id)]));
+        pages.set("Count", 1);
+        doc.objects.insert(pages_id, Object::Dictionary(pages));
+        let mut catalog = Dictionary::new();
+        catalog.set("Type", Object::Name(b"Catalog".to_vec()));
+        catalog.set("Pages", Object::Reference(pages_id));
+        let catalog_id = doc.add_object(catalog);
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+        let mut out = Vec::new();
+        doc.save_to(&mut out).unwrap();
+        out
+    };
+    let Outcome::Text(text_pdf) = read("summary.pdf", &pdf) else {
+        panic!("text expected from the PDF")
+    };
+    assert!(
+        text_pdf.body.contains("Evaluation summary"),
+        "{}",
+        text_pdf.body
+    );
+
+    // A photo of a page: handed back as a page image for the OCR engine.
+    let photo =
+        std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/scan-letter.png"))
+            .unwrap();
+    let Outcome::Scan(scan) = read("page.png", &photo) else {
+        panic!("a page image expected from the photo")
+    };
+    assert_eq!(scan.images.len(), 1);
+}
+
 /// On a Mac the shipped worker refuses to run with a descriptor of the app's besides stdin,
 /// stdout and stderr: the sandbox would not stop it reading one (D-101).
 #[cfg(target_os = "macos")]

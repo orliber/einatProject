@@ -13,6 +13,7 @@ import type { ConsultResult } from "./ConsultResult";
 import type { ConsultationSummary } from "./ConsultationSummary";
 import type { ConsultationView } from "./ConsultationView";
 import type { CreatedVault } from "./CreatedVault";
+import type { DraftBriefs } from "./DraftBriefs";
 import type { DriveBackupStatus } from "./DriveBackupStatus";
 import type { DriveCleanupResult } from "./DriveCleanupResult";
 import type { ExportCheck } from "./ExportCheck";
@@ -118,6 +119,7 @@ export type Commands = {
   discard_style_upload: { args: undefined; returns: null };
   dismiss_style_suggestion: { args: { id: string }; returns: null };
   download_name_model: { args: undefined; returns: NameModelView };
+  draft_briefs: { args: undefined; returns: DraftBriefs };
   drive_backup_status: { args: undefined; returns: DriveBackupStatus };
   drive_backup_turn_off: { args: undefined; returns: DriveCleanupResult };
   drive_backup_turn_on: { args: undefined; returns: DriveBackupStatus };
@@ -142,6 +144,7 @@ export type Commands = {
   install_update: { args: undefined; returns: null };
   instrument_approvals: { args: undefined; returns: Array<InstrumentApproval> };
   keep_case_longer: { args: { caseId: string; years: number }; returns: null };
+  keep_draft_brief: { args: { sectionKey: string; text: string; keep: boolean }; returns: DraftBriefs };
   letter: { args: { caseId: string; audience: string }; returns: Array<ParagraphView> };
   list_cases: { args: undefined; returns: Array<CaseSummary> };
   list_trash: { args: undefined; returns: Array<CaseSummary> };
