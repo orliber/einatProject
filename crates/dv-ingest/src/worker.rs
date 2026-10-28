@@ -122,7 +122,17 @@ pub fn run(exe: &Path, file_name: &str, bytes: &[u8], timeout: Duration) -> Work
         .map_err(|e| IngestError::Worker(e.to_string()))?;
     if !status.success() {
         // A parser crash on a hostile or broken file ends here, not in the app.
-        return Err(IngestError::Corrupt(format!("worker exited: {status}")));
+        // `code()` is the process's exit code, on Windows the NTSTATUS (0xC0000135: a library
+        // it could not load); none when a signal ended it.
+        // 101 is a Rust panic: a parser stopped on this file, which is the file's problem.
+        return Err(match status.code() {
+            Some(101) => {
+                IngestError::Corrupt("worker exited: parser stopped on this file".to_owned())
+            }
+            code => IngestError::WorkerCrashed(
+                code.map_or(u32::MAX, |c| u32::from_ne_bytes(c.to_ne_bytes())),
+            ),
+        });
     }
     serde_json::from_slice::<WorkerResult>(&output)
         .map_err(|e| IngestError::Worker(e.to_string()))?

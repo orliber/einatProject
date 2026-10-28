@@ -321,6 +321,9 @@ pub enum CoreError {
     Ai(#[from] dv_ai::AiError),
     #[error("update: {0}")]
     Update(dv_egress::update::UpdateError),
+    /// A document that was not read: her message, and its technical reason in the details.
+    #[error("read: {0}")]
+    Read(dv_ingest::IngestError),
     #[error("internal: {0}")]
     Internal(String),
 }
@@ -403,6 +406,10 @@ impl CoreError {
                 ("ai", ai_he(e, ai))
             }
             CoreError::Update(e) => ("update", update::update_he(e)),
+            CoreError::Read(e) => {
+                details.push(format!("read: {}", e.detail()));
+                ("read", e.message_he())
+            }
             CoreError::Internal(e) => {
                 details.push(e.clone());
                 ("internal", TECHNICAL_HE.to_owned())
@@ -446,6 +453,8 @@ impl CoreError {
             // would do nothing. She asks again from the screen (a new request).
             CoreError::Ai(_) => ErrorAction::Dismiss,
             CoreError::Update(_) => ErrorAction::retry(),
+            CoreError::Read(e) if e.transient() => ErrorAction::retry(),
+            CoreError::Read(_) => ErrorAction::Report,
         }
     }
 }

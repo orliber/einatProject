@@ -53,12 +53,10 @@ fn decode_xml(buf: &[u8]) -> Result<String, IngestError> {
     let utf16 = |rest: &[u8], le: bool| {
         let units: Vec<u16> = rest
             .chunks_exact(2)
-            .map(|c| {
-                if le {
-                    u16::from_le_bytes([c[0], c[1]])
-                } else {
-                    u16::from_be_bytes([c[0], c[1]])
-                }
+            .filter_map(|c| match *c {
+                [a, b] if le => Some(u16::from_le_bytes([a, b])),
+                [a, b] => Some(u16::from_be_bytes([a, b])),
+                _ => None,
             })
             .collect();
         String::from_utf16(&units).map_err(|_| corrupt("utf-16 part does not decode"))

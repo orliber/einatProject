@@ -460,7 +460,7 @@ impl ReadJob {
                 &self.file_name,
                 &self.bytes,
             )
-            .map_err(|e| CoreError::Refused(e.message_he()))
+            .map_err(CoreError::Read)
         };
         // Locked while it was read (OCR can take long): the text goes now, not later.
         if self.cancel.is_set() {

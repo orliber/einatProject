@@ -116,6 +116,10 @@ pub enum IngestError {
     Timeout,
     #[error("worker: {0}")]
     Worker(String),
+    /// The isolated reader stopped before it answered (its exit code): an antivirus that
+    /// blocks it, a library it could not load, or a parser that crashed. Not a broken file.
+    #[error("worker stopped: {0:#x}")]
+    WorkerCrashed(u32),
     #[error("HEIC/HEIF photo")]
     Heif,
     #[error("too many scanned pages")]
@@ -137,14 +141,49 @@ impl IngestError {
             Self::Scanned => "לא נמצא בקובץ טקסט שאפשר לקרוא, גם לא בזיהוי טקסט מסריקה. אם זו סריקה, כדאי לסרוק שוב בבירור (300 dpi, דף ישר).".to_owned(),
             Self::Empty => "הקובץ ריק.".to_owned(),
             Self::Unsupported => "סוג הקובץ לא נתמך. אפשר לייבא Word (DOCX או DOC), ODT, RTF, PDF, קובץ טקסט, או תמונה של דף (JPG, PNG, TIFF).".to_owned(),
-            Self::Corrupt(_) => "לא הצלחתי לקרוא את הקובץ. ייתכן שהוא פגום.".to_owned(),
+            Self::Corrupt(_) => "לא הצלחתי לקרוא את הקובץ. כדאי לפתוח אותו ב-Word ולשמור שוב (קובץ ← שמירה בשם ← מסמך Word), או לשמור אותו כ-PDF ולהעלות את ה-PDF.".to_owned(),
             Self::Timeout => "קריאת הקובץ לקחה יותר מדי זמן והופסקה.".to_owned(),
-            Self::Worker(_) => "קריאת הקובץ נכשלה.".to_owned(),
+            Self::Worker(_) => "רכיב הקריאה של התוכנה לא הצליח להתחיל. אפשר לנסות שוב; אם זה חוזר, \"העתקת פרטים\" ושליחה לאור.".to_owned(),
+            Self::WorkerCrashed(_) => "קריאת הקובץ נעצרה באמצע, וזו לא בעיה בקובץ. לפעמים אנטי-וירוס חוסם את רכיב הקריאה של התוכנה. אפשר לנסות שוב; אם זה חוזר, \"העתקת פרטים\" ושליחה לאור.".to_owned(),
             Self::Heif => "תמונת HEIC (מהאייפון) לא נתמכת. אפשר לשלוח אותה לעצמך כ-JPG, או לשנות במצלמה: הגדרות ← מצלמה ← תבניות ← \"הכי תואם\".".to_owned(),
             Self::TooManyPages => format!("הסריקה ארוכה מדי (עד {} עמודים). אפשר לפצל אותה לכמה קבצים.", scan::MAX_PAGES),
             Self::OcrMissing => "זה מסמך סרוק, ורכיב זיהוי הטקסט לא מותקן במחשב הזה. התקנה מחדש של כספת האבחון תוסיף אותו.".to_owned(),
             Self::Ocr(_) => "זיהוי הטקסט בסריקה נכשל.".to_owned(),
         }
+    }
+}
+
+impl IngestError {
+    /// For the bug report she copies for Or: the kind and the library's reason, ASCII only and
+    /// without anything a library quoted from the file (between quotes or backticks), so
+    /// nothing of the document goes with it (D-120, D-135).
+    #[must_use]
+    pub fn detail(&self) -> String {
+        let raw = self.to_string();
+        let mut out = String::new();
+        let mut quoted: Option<char> = None;
+        for c in raw.chars() {
+            match quoted {
+                Some(q) if c == q => quoted = None,
+                Some(_) => {}
+                None if matches!(c, '`' | '"' | '\'') => {
+                    quoted = Some(c);
+                    out.push_str("<…>");
+                }
+                None if c.is_ascii() && !c.is_ascii_control() => out.push(c),
+                None => {}
+            }
+        }
+        out.chars().take(160).collect()
+    }
+
+    /// Worth trying again: the reader, not the file.
+    #[must_use]
+    pub fn transient(&self) -> bool {
+        matches!(
+            self,
+            Self::Worker(_) | Self::WorkerCrashed(_) | Self::Timeout
+        )
     }
 }
 
@@ -214,7 +253,13 @@ pub fn import(
     bytes: &[u8],
 ) -> Result<Extracted, IngestError> {
     let outcome = match worker_exe {
-        Some(exe) => worker::run(exe, file_name, bytes, worker::DEFAULT_TIMEOUT)?,
+        // A reader that stopped is started once more before she is told (D-135).
+        Some(exe) => match worker::run(exe, file_name, bytes, worker::DEFAULT_TIMEOUT) {
+            Err(IngestError::WorkerCrashed(_) | IngestError::Worker(_)) => {
+                worker::run(exe, file_name, bytes, worker::DEFAULT_TIMEOUT)?
+            }
+            other => other?,
+        },
         None => read(bytes, file_name)?,
     };
     match outcome {

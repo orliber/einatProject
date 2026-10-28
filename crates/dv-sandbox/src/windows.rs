@@ -391,6 +391,12 @@ pub(crate) fn spawn(exe: &Path, args: &[&str], policy: &Policy) -> io::Result<Co
     let sid = step("container", container_sid())?;
     let sid_text = step("container", sid_string(&sid))?;
     step("grant", grant(exe, &sid_text))?;
+    // The program's own folder too: a library next to the program (the FIPS module, the
+    // runtime) is loaded from there, and without read access the reader stops before it
+    // starts (0xC0000135), which looked like a broken file (D-135).
+    if let Some(dir) = exe.parent().filter(|d| !d.as_os_str().is_empty()) {
+        step("grant", grant(dir, &sid_text))?;
+    }
     for dir in &policy.read_dirs {
         step("grant", grant(dir, &sid_text))?;
     }
