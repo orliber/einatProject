@@ -368,6 +368,8 @@ fn unknown_names_other_cases_and_near_misses_are_hidden_without_asking() {
         "השם יונתן עלה בשיחה.",
         "נואם מתקשה", // near-miss spelling of the child's name
         "Yuval did not want to play.",
+        // "Adi" was on the list of English words that are not names: an Israeli child's name.
+        "Adi did not want to play.",
     ] {
         let ids = identities();
         let out = filter(s, &ctx_for(&ids, &[], CASE)).unwrap();
@@ -376,6 +378,36 @@ fn unknown_names_other_cases_and_near_misses_are_hidden_without_asking() {
         assert!(o.cleared, "should pass once hidden: {s}");
         assert!(o.leaked.is_empty(), "{s} leaked {:?}", o.leaked);
     }
+}
+
+/// The child's first name with the surname typed as an alias, as the case form suggests: the
+/// full name goes out as one tag and comes back once ("הדר הדר" in every draft before).
+#[test]
+fn a_first_name_and_its_surname_alias_go_out_as_one_tag() {
+    let ids = vec![id("c", Role::Child, "[ילד]", "הדר", &["נחמיאס"])];
+    let ctx = ctx_for(&ids, &[], "c");
+    for s in [
+        "שם הילדה: הדר נחמיאס, בת שנתיים.",
+        "ההורים של הדר נחמיאס פנו בשל עיכוב בדיבור.",
+        "להדר נחמיאס יש אח.",
+    ] {
+        let out = filter(s, &ctx).unwrap();
+        assert!(!out.tagged.contains("[ילד] [ילד]"), "{}", out.tagged);
+        assert_eq!(out.tagged.matches("[ילד]").count(), 1, "{}", out.tagged);
+        assert!(!out.tagged.contains("נחמיאס") && !out.tagged.contains("הדר"));
+        let back = dv_privacy::restore::restore(&out.tagged, &ids, None, &[]);
+        assert!(back.contains("הדר") && !back.contains("הדר הדר"), "{back}");
+    }
+}
+
+/// A neurologist's recommendation reaches the AI as written: the medicine is no person (the
+/// real-corpus bench sent "[אדם_1] 10mg ו-[אדם_2]").
+#[test]
+fn medicines_in_english_are_words_not_names() {
+    let ids = identities();
+    let s = "מומלץ לשקול Ritalin 10mg או Concerta, ובהמשך Methylphenidate; Melatonin לשינה.";
+    let out = filter(s, &ctx_for(&ids, &[], CASE)).unwrap();
+    assert_eq!(out.tagged, s, "a medicine was hidden");
 }
 
 #[test]
@@ -399,6 +431,10 @@ fn names_that_are_words_are_hidden_in_a_context_with_no_other_reading() {
         ("ביום ההולדת של ים התפוצץ בלון לידו.", " ים "),
         ("מר שמחה אוחיון, מנהל הלשכה", "אוחיון"),
         ("ארטיום נולד בחרקוב ועלה לארץ.", "חרקוב"),
+        // The commonest words, where only a name stands (the real-corpus bench).
+        ("חברים: מתרועע עם איתי מהשכונה, משחק כדורגל.", "איתי"),
+        ("בהפסקות היא משחקת בעיקר עם שרה.", "שרה"),
+        ("שמחה אוחיון הגיע לפגישה.", "אוחיון"),
     ] {
         let out = filter(s, &ctx).unwrap();
         assert!(!out.tagged.contains(name), "{name} leaked: {}", out.tagged);
@@ -409,6 +445,7 @@ fn names_that_are_words_are_hidden_in_a_context_with_no_other_reading() {
         "בבית היא לא מפסיקה לדבר, שרה, מספרת סיפורים.",
         "נולדה בשבוע 35 ונולד ברכב בדרך לבית החולים.",
         "בשמחה רבה. תודה והודיה. ההורים אמרו שהוא שמח.",
+        "שוחח איתי בעברית, ובא איתי לחדר עם שמחה רבה. שלום רב.",
     ] {
         let out = filter(s, &ctx).unwrap();
         assert_eq!(out.tagged, s, "an ordinary word was hidden");

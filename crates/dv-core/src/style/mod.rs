@@ -1274,8 +1274,12 @@ pub(crate) fn find_draft(
     case_id: &str,
     draft_id: &str,
 ) -> Result<Option<DraftParagraph>, CoreError> {
-    let structure =
-        ReportStructure::load_default().map_err(|e| CoreError::Internal(e.to_string()))?;
+    // The case's own report: a new case is in the institute's, whose "התחום ההתנהגותי והקשבי"
+    // the default report does not have (D-066). Looked up in the default one, its paragraphs
+    // were not found, and "✓ לאשר" left them waiting without a word.
+    let template = v.case_meta(case_id)?.template;
+    let structure = ReportStructure::for_template(template.as_deref())
+        .map_err(|e| CoreError::Internal(e.to_string()))?;
     for s in structure.sections() {
         if let Some(d) = v
             .drafts(case_id, &s.key)?
