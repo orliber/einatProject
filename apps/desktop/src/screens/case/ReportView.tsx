@@ -285,6 +285,8 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
   const qc = useQueryClient();
   const briefs = useQuery({ queryKey: ["draftBriefs"], queryFn: ipc.draftBriefs, staleTime: 60_000 });
   const keptBrief = briefs.data?.sections[s.key] ?? "";
+  // Her points for her own section, the same ones the section's page keeps (round 30).
+  const [points, setPoints] = useKept(`case:${caseId}:section:${s.key}:points`, "");
   const [sourcesChanged, setSourcesChanged] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -320,7 +322,7 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
     }
   }
 
-  async function write(instruction?: string, replaces?: string) {
+  async function write(instruction?: string, replaces?: string, points = false) {
     onPick();
     setOpen(null);
     setChanging(false);
@@ -329,7 +331,7 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
     setError(null);
     setPreparing(true);
     try {
-      await api.draft(s.key, instruction, replaces);
+      await api.draft(s.key, instruction, replaces, points);
     } catch (e) {
       setError(fail(e as never));
     } finally {
@@ -663,11 +665,31 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
       {ok.length === 0 && editing && editing.id === null && editor}
 
       {empty && !job && !editing && !preparing && (
-        mine ? (
-          <span className="a4-gap-row">
-            <button type="button" className="a4-gap" onClick={openGuide}>✦ לנסח מהנקודות שלי ←</button>
-            {focused && <button type="button" className="a4-gap a4-gap-own" onClick={() => edit(null, "", "end")}>לכתוב בעצמי</button>}
-          </span>
+        mine && focused ? (
+          <div className="a4-brief">
+            <BriefBox id={`brief-${s.key}`} title="הנקודות שלך לסעיף" chips={STYLE_CHIPS} chipsTitle="סגנון"
+              hint="כתבי בנקודות מה חשוב. רק הנקודות יוצאות, ו-Claude מנסח מהן בסגנון שלך, בלי להוסיף עובדות."
+              placeholder="למשל: הקשר עם הגננת טוב · קשה במעברים · התקדמות מאז הסתיו"
+              initial={points} sendLabel="✦ לנסח מהנקודות" busy={busy} autoFocus
+              onSend={(wish, typed) => {
+                if (!typed) return;
+                setPoints(typed);
+                // The points first, as she wrote them; a chosen style after them.
+                const style = wish.slice(0, Math.max(0, wish.length - typed.length)).trim();
+                void write(style ? `${typed}\n\n${style}` : typed, undefined, true);
+              }}
+              onCancel={() => heading.current?.focus()} />
+            <div className="row a4-brief-row">
+              <button type="button" className="link-btn" onClick={() => edit(null, "", "end")}>לכתוב בעצמי</button>
+              <span className="grow" />
+              <button type="button" className="link-small" onClick={openGuide}>דוגמאות מהדוחות שלך ←</button>
+            </div>
+          </div>
+        ) : mine ? (
+          <div className="a4-gap-line">
+            <span className="grow">הסעיף שלך: כותבים נקודות, ו-{ai} מנסח מהן.</span>
+            <button type="button" className="link-btn" disabled={busy} onClick={onPick}>✦ לנסח מהנקודות</button>
+          </div>
         ) : focused && canWrite ? (
           <div className="a4-brief">
             {briefs.data !== undefined || briefs.isError ? (

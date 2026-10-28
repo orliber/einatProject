@@ -127,10 +127,13 @@ test("the report page opens a section's guide and her own section's points", asy
   // The link opens the guide on arrival.
   await expect(page.getByText(/הנוסח של המכון|הנוסח שלך, לכל התיקים/)).toBeVisible();
   await page.getByRole("button", { name: "→ חזרה לדוח" }).click();
-  await page.getByRole("button", { name: "✦ לנסח מהנקודות שלי ←" }).first().click();
-  await expect(page.getByRole("region", { name: "הסעיף שלך" })).toBeVisible();
-  await expect(page.getByLabel("הנקודות שלך")).toBeVisible();
+  // Her own section: its points are written in the report itself, in the same box (D-140).
+  await page.getByRole("button", { name: "✦ לנסח מהנקודות" }).first().click();
+  await expect(page.getByRole("textbox", { name: /^הנקודות שלך לסעיף/ })).toBeVisible();
   await expectAccessible(page);
+  // Her examples are still on the section's page.
+  await page.getByRole("button", { name: "דוגמאות מהדוחות שלך ←" }).click();
+  await expect(page.getByRole("region", { name: "הסעיף שלך" })).toBeVisible();
 });
 
 // Round 48: the report page as the document. The section in focus asks what matters here, the
@@ -142,7 +145,7 @@ test("the report page writes and approves the section in focus with the keyboard
   await expect(report).toBeVisible();
   const section = report.locator(".a4-section.is-focus");
   await expect(section).toHaveCount(1);
-  const brief = section.getByLabel("מה חשוב לך שייכתב כאן?");
+  const brief = section.getByRole("textbox", { name: /^איך לנסח את הסעיף/ });
   await brief.fill("להתחיל מהקשר עם הצוות");
   await brief.press("Enter");
   const review = page.getByRole("dialog", { name: /^לפני שליחה ל-Claude/ });
