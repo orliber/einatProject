@@ -52,7 +52,7 @@ fips = ["dv-core/fips"]
 # The one module that calls Windows directly (`src/win_platform.rs`, D-047): working-set quota
 # for locked memory, crash reporting and whether the session is locked. Already in the tree through Tauri's WebView2 bindings.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Diagnostics_Debug", "Win32_System_ErrorReporting", "Win32_System_Memory", "Win32_System_RemoteDesktop", "Win32_System_Threading"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Diagnostics_Debug", "Win32_System_ErrorReporting", "Win32_System_Memory", "Win32_System_Power", "Win32_System_RemoteDesktop", "Win32_System_Threading"] }
 
 # macOS (D-101): no core file and enough lockable memory for the vault's pages
 # (`src/mac_platform.rs`). Safe wrappers for getrlimit/setrlimit, so no `unsafe` there;

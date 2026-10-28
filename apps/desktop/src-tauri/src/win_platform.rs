@@ -12,6 +12,10 @@
 //! * Is the computer locked (Win+L)? Asked of Windows every 15 seconds (THREAT_MODEL T2). It
 //!   used to start `tasklist.exe` each time, and a program started every 15 seconds is a likely
 //!   reason the text box she was typing in kept losing the keyboard, so it is a plain question now.
+//! * Awake while a request is on its way (D-141): writing the whole report takes many minutes,
+//!   and a laptop that went to sleep meanwhile locked the vault and lost the answers. While a
+//!   request is on its way the system is asked not to sleep; the screen may still turn off,
+//!   and Win+L still locks.
 #![allow(unsafe_code)]
 
 /// What [`harden_process`] managed to do, for the crash-free startup log in tests.
@@ -56,6 +60,75 @@ pub fn harden_process() -> Hardening {
 #[must_use]
 pub fn session_locked() -> Option<bool> {
     windows_impl::session_locked()
+}
+
+/// Held while a request to the AI is on its way: the computer does not go to sleep until the
+/// last one is dropped (D-141). Elsewhere it does nothing.
+#[derive(Debug)]
+#[must_use = "the computer may sleep as soon as this is dropped"]
+pub struct Awake(());
+
+/// The computer stays awake until the returned guard (and every other one) is dropped.
+pub fn keep_awake() -> Awake {
+    #[cfg(windows)]
+    awake::hold();
+    Awake(())
+}
+
+impl Drop for Awake {
+    fn drop(&mut self) {
+        #[cfg(windows)]
+        awake::release();
+    }
+}
+
+/// One thread holds the request for as long as any guard lives: Windows keeps a request per
+/// thread, and the threads that send come and go.
+#[cfg(windows)]
+mod awake {
+    use std::sync::mpsc::{channel, Sender};
+    use std::sync::{Mutex, PoisonError};
+
+    use windows::Win32::System::Power::{
+        SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED,
+    };
+
+    /// How many guards live, and how to tell the holding thread to let go.
+    static STATE: Mutex<(usize, Option<Sender<()>>)> = Mutex::new((0, None));
+
+    pub fn hold() {
+        let mut state = STATE.lock().unwrap_or_else(PoisonError::into_inner);
+        state.0 += 1;
+        if state.1.is_some() {
+            return;
+        }
+        let (stop, wait) = channel::<()>();
+        let started = std::thread::Builder::new()
+            .name("keep-awake".to_owned())
+            .spawn(move || {
+                // SAFETY: SetThreadExecutionState takes a flag set by value and changes only this
+                // thread's power request; it touches no memory of ours.
+                unsafe { SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED) };
+                // Until the last guard is dropped (or every sender is gone).
+                let _ = wait.recv();
+                // SAFETY: as above; this clears the request before the thread ends.
+                unsafe { SetThreadExecutionState(ES_CONTINUOUS) };
+            });
+        // No thread, no request: the send still goes, the computer may sleep as before.
+        if started.is_ok() {
+            state.1 = Some(stop);
+        }
+    }
+
+    pub fn release() {
+        let mut state = STATE.lock().unwrap_or_else(PoisonError::into_inner);
+        state.0 = state.0.saturating_sub(1);
+        if state.0 == 0 {
+            if let Some(stop) = state.1.take() {
+                let _ = stop.send(());
+            }
+        }
+    }
 }
 
 #[cfg(windows)]

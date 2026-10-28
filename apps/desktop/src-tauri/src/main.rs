@@ -60,6 +60,8 @@ async fn transmit(
     let progress = Arc::clone(&state.progress);
     let done = Arc::clone(&state.progress);
     let id = approval_id.clone();
+    // Writing the whole report takes many minutes: the laptop must not sleep meanwhile (D-141).
+    let _awake = win_platform::keep_awake();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let report = |words: u32| {
             if let Ok(mut p) = progress.lock() {
