@@ -1,4 +1,4 @@
-//! "בדיקת מערכת" (D-142): each check's classification, with stand-ins for the worker, the
+//! "בדיקת מערכת" (D-148): each check's classification, with stand-ins for the worker, the
 //! engine and the network. Nothing here opens a connection or starts the app's reader.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]

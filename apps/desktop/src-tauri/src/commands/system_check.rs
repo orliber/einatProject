@@ -1,4 +1,4 @@
-//! "בדיקת מערכת" (D-142): one self-test at a time, so the window shows each as it ends.
+//! "בדיקת מערכת" (D-148): one self-test at a time, so the window shows each as it ends.
 
 use dv_core::{ExportPlace, SystemCheck, SystemCheckResult};
 

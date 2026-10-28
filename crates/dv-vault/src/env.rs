@@ -68,7 +68,7 @@ pub fn disk_encryption() -> DiskEncryption {
     }
 }
 
-/// The version of the operating system, for "בדיקת מערכת" (D-142): `Windows 10.0.22631.0`,
+/// The version of the operating system, for "בדיקת מערכת" (D-148): `Windows 10.0.22631.0`,
 /// `macOS 14.5`, `Linux 6.8.0`. Digits and dots only after the name; `None` when unknown.
 #[must_use]
 pub fn os_version() -> Option<String> {

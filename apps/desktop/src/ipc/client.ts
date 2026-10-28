@@ -494,7 +494,7 @@ export const ipc = {
   installUpdate: () => run("install_update"),
   /** R7: the page of released versions, in her browser, to go back one version. */
   openReleasesPage: () => run("open_releases_page"),
-  /** "בדיקת מערכת" (D-142): one self-test, off the UI thread. Never sends anything from the
+  /** "בדיקת מערכת" (D-148): one self-test, off the UI thread. Never sends anything from the
    *  vault; the connection check is a TLS handshake only. */
   systemCheck: (check: SystemCheck) => call("system_check", { check }),
 };

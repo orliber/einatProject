@@ -1,4 +1,4 @@
-//! "בדיקת מערכת" (D-142): one button in Settings → עדכונים ועזרה runs safe self-tests, and
+//! "בדיקת מערכת" (D-148): one button in Settings → עדכונים ועזרה runs safe self-tests, and
 //! each line says ✓ or ✗, why in one short sentence, and what to do.
 //!
 //! 1. Reading: three files the program makes up itself (a Word file, a PDF with a few lines

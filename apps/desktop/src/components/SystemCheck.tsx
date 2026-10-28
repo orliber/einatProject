@@ -1,4 +1,4 @@
-// "בדיקת מערכת" (D-142), in Settings → עדכונים ועזרה: one button runs safe self-tests one after
+// "בדיקת מערכת" (D-148), in Settings → עדכונים ועזרה: one button runs safe self-tests one after
 // another, and each line says ✓ or ✗, why, and what to do. Nothing from a case is read, and the
 // connection check is a secure handshake only, with nothing sent. "העתקה לאור" copies a short
 // technical summary in plain ASCII: no paths, no content, no keys.

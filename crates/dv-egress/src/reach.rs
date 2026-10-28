@@ -1,4 +1,4 @@
-//! "בדיקת מערכת" (D-142): can this computer reach the AI service she chose?
+//! "בדיקת מערכת" (D-148): can this computer reach the AI service she chose?
 //!
 //! A TLS handshake and nothing more. The name of the service's host is looked up, a TCP
 //! connection is opened to it, and the program's own TLS setup (TLS 1.3, the Mozilla roots

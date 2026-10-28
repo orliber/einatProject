@@ -179,7 +179,7 @@ const FAKE_LAYERS: [string, string, string][] = [
   ["updates", "עדכונים חתומים", "מפתח החתימה נמצא בתוכנה."],
 ];
 
-/** "בדיקת מערכת" in the preview (D-142): the shape of the app's answer. Nothing is read,
+/** "בדיקת מערכת" in the preview (D-148): the shape of the app's answer. Nothing is read,
  *  written or opened here; the connection line says so. */
 export function fakeSystemCheck(check: SystemCheck, sendStopped: boolean): SystemCheckResult {
   const ok = (key: string, label: string, reason: string, detail = `${key}: ok`): CheckLine =>
