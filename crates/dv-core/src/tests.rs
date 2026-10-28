@@ -33,6 +33,7 @@ mod parents;
 mod perf_profile;
 mod prepare_off_lock;
 mod reading;
+mod real_corpus;
 mod report_check;
 mod sample_flows;
 mod sort_flows;
