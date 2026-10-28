@@ -605,6 +605,9 @@
   color: var(--ink-muted);
 }
 .contents-tag {
+  /* "חסר חומר" stays one word-pair beside a long title, never split over two lines. */
+  flex-shrink: 0;
+  white-space: nowrap;
   font-size: var(--text-xs);
   color: var(--warn-ink);
 }

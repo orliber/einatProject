@@ -67,6 +67,8 @@ for (const [steps, zoom, width, height] of [[2, "1.25", 1093, 614], [3, "1.4", 1
       for (let i = 0; i < steps; i++) await page.keyboard.press("Control+Equal");
       await expect(page.locator("html")).toHaveCSS("zoom", zoom);
       await expectNoSidewaysScroll(page, page.locator(".topbar"));
+      // The cases' table keeps its room: the folder tree folds behind "תיקיות", as in a narrow window.
+      await expect(page.getByRole("button", { name: "תיקיות", exact: true })).toBeVisible();
       await page.getByRole("button", { name: /בתיק של נועם$/ }).click();
       await expectNoSidewaysScroll(page, page.locator(".case-bar"));
       const name = await page.locator(".case-child").boundingBox();
