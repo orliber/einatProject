@@ -7,7 +7,10 @@ import { AppContext, type AppApi } from "../App";
 import type { CaseDetail, ExportCheck, ReportSettings } from "../ipc/client";
 import type { CaseApi } from "../screens/CaseScreen";
 import { status } from "../test/fixtures";
-import { ExportDialog, parentsFileName } from "./ExportDialog";
+import { ExportDialog, parentsFileName, shownFileName } from "./ExportDialog";
+
+/** The file name as said in the dialog. */
+const fileName = () => document.querySelector(".export-file-name")?.textContent;
 
 function app(): AppApi {
   return { status: status(), go: vi.fn(), refresh: vi.fn(async () => undefined), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn(async () => undefined) };
@@ -68,7 +71,7 @@ describe("ExportDialog", () => {
     expect(screen.getByText(/חזק \/ בטווח הגיל \/ קשה יותר/, { selector: "li span" })).toBeInTheDocument();
     // What the version leaves out is said, not done in silence.
     expect(screen.getByText(/2 משפטים הושמטו כי היה בהם מספר שנראה כמו ציון/)).toBeInTheDocument();
-    expect(screen.getByText(/דוח אבחון TEST-0002 - להורים\.docx/)).toBeInTheDocument();
+    expect(fileName()).toBe("דוח אבחון TEST-0002 - להורים.docx");
     expect(screen.queryByText(/טבלת הציונים תצורף כנספח/)).toBeNull();
     await user.click(screen.getByRole("button", { name: "הפקת הגרסה להורים" }));
     await screen.findByText("הגרסה להורים מוכנה");
@@ -81,6 +84,9 @@ describe("ExportDialog", () => {
     await user.click(screen.getByRole("switch", { name: "להציג ציונים בגרסה להורים" }));
     expect(screen.queryByText(/משפטים הושמטו/)).toBeNull();
     await user.click(screen.getByRole("radio", { name: /PDF/ }));
+    // The name said is the one the file gets: the PDF's, not the Word's.
+    expect(fileName()).toBe("דוח אבחון TEST-0002 - להורים.pdf");
+    expect(screen.getByRole("dialog", { name: "הפקת דוח PDF" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "הפקת הגרסה להורים" }));
     await screen.findByText("הגרסה להורים מוכנה");
     expect(calls.find((c) => c.cmd === "export_pdf")?.args).toMatchObject({ parents: { show_numbers: true } });
@@ -105,6 +111,12 @@ describe("ExportDialog", () => {
     await user.click(screen.getByRole("button", { name: /לנסות שוב/ }));
     expect(await screen.findByText(/שם הקובץ:/)).toBeInTheDocument();
     expect(calls.filter((c) => c === "check_export")).toHaveLength(2);
+  });
+
+  it("a PDF is named as the core saves it: the Word name's stem, .pdf", () => {
+    expect(shownFileName("דוח אבחון – תיק-1024.docx", false)).toBe("דוח אבחון – תיק-1024.docx");
+    expect(shownFileName("דוח אבחון – תיק-1024.docx", true)).toBe("דוח אבחון – תיק-1024.pdf");
+    expect(shownFileName("דוח", true)).toBe("דוח.pdf");
   });
 
   it("names the parents' file as the core does", () => {

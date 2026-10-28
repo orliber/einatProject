@@ -326,7 +326,7 @@ test("the finish page checks the report, and the Word, PDF and parents' versions
 
   // Word.
   await side.getByRole("button", { name: "הפקת הקובץ" }).click();
-  const dialog = page.getByRole("dialog", { name: "הפקת דוח Word" });
+  const dialog = page.getByRole("dialog", { name: /^הפקת דוח (Word|PDF)$/ });
   await expect(dialog).toBeVisible();
   await expect(dialog.locator(".checklist")).toContainText(/סעיפים עם פסקאות מאושרות/);
   await expect(dialog).toContainText("הקובץ נפתח בלי סיסמה");
