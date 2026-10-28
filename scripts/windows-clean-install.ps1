@@ -44,6 +44,14 @@ if (-not $exe) { throw "nothing was installed in $installDir" }
 Write-Host "installed $($exe.FullName)"
 if (Compare-Object $untouched (& $hash)) { throw "the installer changed the vault" }
 
+# 2b. D-135: the installed program reads Word, a PDF and a photo through its own reader,
+#     started contained (AppContainer, job object) from the per-user install folder, as on
+#     her computer. A library the reader cannot load there fails here (0xC0000135), not at hers.
+$env:DV_TEST_APP_EXE = $exe.FullName
+cargo test --release -p dv-ingest --test worker -- --ignored the_shipped_program
+if ($LASTEXITCODE -ne 0) { throw "the installed program could not read documents contained (see above)" }
+Remove-Item Env:DV_TEST_APP_EXE
+
 # 3. It starts and stays up beside the old vault, opens it, takes 500 Hebrew characters typed
 #    in its real window (F1), and writes no crash.
 $app = Start-Process -FilePath $exe.FullName -PassThru
