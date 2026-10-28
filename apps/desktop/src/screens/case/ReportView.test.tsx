@@ -133,7 +133,7 @@ describe("the report page, one section in focus", () => {
     await waitFor(() => expect(document.activeElement).toBe(firstHead));
     fireEvent.keyDown(firstHead, { key: "Enter", code: "Enter" });
     await waitFor(() => expect(screen.queryByRole("button", { name: "✓ לאשר" })).toBeNull());
-    expect(calls.filter((c) => c.cmd === "approve_paragraph").length).toBeGreaterThanOrEqual(2);
+    expect(calls.filter((c) => c.cmd === "approve_paragraphs").length).toBeGreaterThanOrEqual(2);
   });
 
   it("a held Enter approves one draft, not the whole report", async () => {
@@ -157,7 +157,7 @@ describe("the report page, one section in focus", () => {
     await waitFor(() => expect(document.activeElement).toBe(firstHead));
     for (let i = 0; i < 5; i++) fireEvent.keyDown(firstHead, { key: "Enter", code: "Enter", repeat: true });
     await new Promise((r) => setTimeout(r, 500));
-    expect(calls.filter((c) => c.cmd === "approve_paragraph").length).toBeGreaterThan(0);
+    expect(calls.filter((c) => c.cmd === "approve_paragraphs").length).toBeGreaterThan(0);
     // The first draft is still waiting for its own press.
     expect(within(first).getByRole("button", { name: "✓ לאשר" })).toBeInTheDocument();
   });

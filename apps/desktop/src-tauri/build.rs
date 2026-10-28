@@ -94,6 +94,8 @@ fn main() {
             "chat",
             "approve_paragraph",
             "approve_section",
+            "approve_paragraphs",
+            "approve_clean_paragraphs",
             "create_follow_up",
             "follow_up",
             "add_comparison_material",

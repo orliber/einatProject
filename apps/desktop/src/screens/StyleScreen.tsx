@@ -3,7 +3,7 @@
 // the program already knows (five rows that open in place) and one line about her reports.
 // Every request goes through the same review screen as everything else that leaves the computer.
 // The parts live in `./style/`; this file holds the page and the run (O5 / D-111).
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
 import type { MenuItem } from "../components/Menu";
@@ -40,6 +40,8 @@ export function StyleScreen() {
   const qc = useQueryClient();
   const overview = useQuery({ queryKey: ["style"], queryFn: ipc.styleOverview });
   const fileInput = useRef<HTMLInputElement>(null);
+  // Whether a run is on, for `runAll`, which is called from an upload that awaited first.
+  const runningRef = useRef(false);
   const [importing, setImporting] = useState<StyleImportPreview | null>(null);
   const [reading, setReading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +54,9 @@ export function StyleScreen() {
   const [queue, setQueue] = useState<Step[]>([]);
   const [review, setReview] = useState<{ step: Step; prepared: Prepared } | null>(null);
   const [sending, setSending] = useState<{ label: string; approval: string; started: number } | null>(null);
+  useEffect(() => {
+    runningRef.current = queue.length > 0 || sending !== null;
+  }, [queue, sending]);
 
   const o = overview.data;
   const reload = () => qc.invalidateQueries({ queryKey: ["style"] });
@@ -68,11 +73,24 @@ export function StyleScreen() {
     });
   };
 
+  /** One upload, and the rest runs by itself (D-138): the suggested parts are kept, the report
+   * is read for its style, and the profile is updated. The parts can still be changed from
+   * the report's row; nothing of the report leaves without passing the filter and the gate. */
   async function pick(file: File) {
     setError(null);
     setReading(true);
     try {
-      setImporting(await ipc.importStyleSource(file));
+      const preview = await ipc.importStyleSource(file);
+      const suggested = preview.parts.filter((x) => x.included).map((x) => x.index);
+      if (suggested.length === 0 || preview.warnings.length > 0) {
+        // Nothing stood out as style, or the reading has something to tell her (a part not
+        // read, file properties to check for names): she sees the dialog and decides.
+        setImporting(preview);
+        return;
+      }
+      const saved = await ipc.saveStyleSource(preview.token, suggested, null);
+      notify(`"${saved.title}" נשמר, ועכשיו נקרא ונלמד.`);
+      await runAll();
     } catch (e) {
       setError(fail(e as never));
     } finally {
@@ -129,7 +147,10 @@ export function StyleScreen() {
       } else {
         const view = await ipc.sendStyleProfile(approval);
         markReviewed(null);
-        notify(view.dropped > 0 ? `הטיוטה מוכנה. ${view.dropped} פריטים נפסלו (העתקה או פרט מזהה).` : "הטיוטה מוכנה. אפשר לאשר אחד-אחד.");
+        // The profile is used as it came (D-138): any item can be turned off or removed later
+        // in "מה למדתי", rather than approving one by one first.
+        await ipc.approveStyleDraft();
+        notify(view.dropped > 0 ? `הפרופיל עודכן. ${view.dropped} פריטים נפסלו (העתקה או פרט מזהה).` : "הפרופיל עודכן. אפשר לראות ולכבות פריטים ב\"מה למדתי\".");
       }
       recordDuration("draft", status.speed, Date.now() - started);
       setSending(null);
@@ -141,6 +162,15 @@ export function StyleScreen() {
       setQueue([]);
       await reload();
     }
+  }
+
+  /** Read every report not read yet and update the profile, from the overview as it is now. */
+  async function runAll() {
+    // One run at a time: a report added while another is read waits for the button.
+    if (runningRef.current) return;
+    const fresh = await qc.fetchQuery({ queryKey: ["style"], queryFn: ipc.styleOverview, staleTime: 0 });
+    const todo = fresh.sources.filter((x) => !x.analyzed || (x.analysis_demo && !fresh.demo_mode));
+    await next([...todo.map((source): Step => ({ kind: "analysis", source })), { kind: "profile" }]);
   }
 
   function startBuild(analyzeAll: boolean) {
@@ -188,7 +218,7 @@ export function StyleScreen() {
             התוכנה לומדת מהדוחות שלך איך את כותבת, ומה את מסיקה מכל ממצא.
             {/* Before the first report the four stages are drawn below (D-112); after it, the journey shows them. */}
             {o.sources.length > 0 && " ארבעה שלבים: הדוח נכנס, נקרא, את מאשרת, וזה משמש בכל טיוטה."}
-            {" "}שום דבר לא נכנס לשימוש לפני שאישרת אותו.
+            {" "}מעלים דוח, והשאר קורה לבד. כל פריט אפשר לכבות או למחוק ב"מה למדתי".
           </p>
           {o.demo_mode && <p className="hint">מצב הדגמה: ניתוח לדוגמה בלבד.</p>}
         </header>
@@ -199,7 +229,7 @@ export function StyleScreen() {
         {o.sources.length === 0 ? (
           <StyleStart adding={reading} onAdd={() => fileInput.current?.click()} />
         ) : (
-          <Journey o={o} waiting={asks.length} analyzed={analyzed} notRead={waiting} onAdd={() => fileInput.current?.click()}
+          <Journey o={o} waiting={asks.length} analyzed={analyzed} notRead={waiting} onAdd={() => fileInput.current?.click()} adding={reading || running}
             build={buildDue ? { label: buildLabel, run: () => startBuild(false), disabled: running } : null} />
         )}
 
@@ -224,7 +254,7 @@ export function StyleScreen() {
 
       {importing && (
         <StyleImportDialog preview={importing} sectionTitle={sectionTitle} onClose={() => setImporting(null)}
-          onSaved={(s) => { setImporting(null); notify(`"${s.title}" נשמר ב"הדוחות שלי".`); void reload(); }} />
+          onSaved={(s) => { setImporting(null); notify(`"${s.title}" נשמר, ועכשיו נקרא ונלמד.`); void runAll(); }} />
       )}
       {review && (
         <ReviewDialog title={STEP_TITLE(review.step)}

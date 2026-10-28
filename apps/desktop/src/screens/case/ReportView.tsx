@@ -376,7 +376,7 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
   async function approveAll() {
     const ids = pending.map((p) => p.id);
     if (ids.length === 0) return onNext();
-    if (await act(async () => { for (const id of ids) await ipc.approveParagraph(caseId, id); })) onNext();
+    if (await act(() => ipc.approveParagraphs(caseId, ids))) onNext();
   }
 
   function writeFromBrief() {

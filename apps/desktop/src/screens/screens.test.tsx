@@ -291,7 +291,25 @@ describe("writing the report", () => {
     await waitFor(() => expect(calls).toContain("send_section"));
     const approve = await screen.findByRole("button", { name: "✓ לאשר" }, { timeout: 6000 });
     await user.click(approve);
-    await waitFor(() => expect(calls).toContain("approve_paragraph"));
+    await waitFor(() => expect(calls).toContain("approve_paragraphs"));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "✓ לאשר" })).toBeNull());
+  });
+
+  it("every clean draft is approved with one press from the contents (D-139)", async () => {
+    const { user, calls } = await openApp();
+    const page = await openCase(user);
+    for (let i = 0; i < 2; i++) {
+      const write = within(page).getAllByRole("button", { name: "✦ לנסח" })[0];
+      if (!write) throw new Error("no empty section to write");
+      await user.click(write);
+      const review = await screen.findByRole("dialog", { name: "לפני שליחה ל-Claude" });
+      await user.click(within(review).getByRole("button", { name: /שליחה/ }));
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "לפני שליחה ל-Claude" })).toBeNull());
+      await waitFor(() => expect(calls.filter((c) => c === "send_section").length).toBe(i + 1));
+      await screen.findByRole("button", { name: "✓ לאשר" }, { timeout: 6000 });
+    }
+    await user.click(await screen.findByRole("button", { name: "✓ לאשר את כל הטיוטות (2)" }, { timeout: 6000 }));
+    await waitFor(() => expect(calls.filter((c) => c === "approve_clean_paragraphs").length).toBe(1));
     await waitFor(() => expect(screen.queryByRole("button", { name: "✓ לאשר" })).toBeNull());
   });
 

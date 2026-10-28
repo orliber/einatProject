@@ -44,7 +44,71 @@ pub(crate) fn read_part(
         return Err(IngestError::TooLarge);
     }
     *budget -= len;
-    String::from_utf8(buf).map(Some).map_err(corrupt)
+    decode_xml(&buf).map(Some)
+}
+
+/// An XML part's text: UTF-8 (with or without a byte-order mark), or UTF-16 with its mark,
+/// as some programs save a part (D-135). Anything else is not read.
+fn decode_xml(buf: &[u8]) -> Result<String, IngestError> {
+    let utf16 = |rest: &[u8], le: bool| {
+        let units: Vec<u16> = rest
+            .chunks_exact(2)
+            .filter_map(|c| match *c {
+                [a, b] if le => Some(u16::from_le_bytes([a, b])),
+                [a, b] => Some(u16::from_be_bytes([a, b])),
+                _ => None,
+            })
+            .collect();
+        String::from_utf16(&units).map_err(|_| corrupt("utf-16 part does not decode"))
+    };
+    let text = match buf {
+        [0xFF, 0xFE, rest @ ..] => utf16(rest, true)?,
+        [0xFE, 0xFF, rest @ ..] => utf16(rest, false)?,
+        _ => String::from_utf8(buf.to_vec()).map_err(|_| corrupt("part is not utf-8"))?,
+    };
+    // The declaration may still say UTF-16; the text is already decoded.
+    Ok(text.trim_start_matches('\u{FEFF}').to_owned())
+}
+
+/// Where the document's body is: the package's own pointer (`_rels/.rels`), which Word 365
+/// and Word Online set to names like `word/document2.xml` (D-135); `word/document.xml`
+/// when the pointer is missing.
+fn main_part(
+    zip: &mut Archive<'_>,
+    names: &[String],
+    budget: &mut u64,
+) -> Result<String, IngestError> {
+    let fallback = "word/document.xml".to_owned();
+    // A pointer that cannot be read is no reason to refuse a document Word reads: the usual
+    // name is tried (only the size limit still stops the reading).
+    let rels = match read_part(zip, "_rels/.rels", budget) {
+        Ok(Some(rels)) => rels,
+        Err(IngestError::TooLarge) => return Err(IngestError::TooLarge),
+        Ok(None) | Err(_) => return Ok(fallback),
+    };
+    let mut reader = Reader::from_str(&rels);
+    loop {
+        match reader.read_event() {
+            Ok(Event::Eof) | Err(_) => return Ok(fallback),
+            Ok(Event::Start(e) | Event::Empty(e)) if e.local_name().as_ref() == "Relationship" => {
+                let attr = |k: &str| {
+                    e.attributes()
+                        .flatten()
+                        .find(|a| a.key.local_name().as_ref() == k)
+                        .map(|a| a.value.to_string())
+                };
+                let is_main = attr("Type").is_some_and(|t| t.ends_with("/officeDocument"));
+                if let (true, Some(target)) = (is_main, attr("Target")) {
+                    let target = target.trim_start_matches('/').to_owned();
+                    // Only a part that is really in the archive, never a path out of it.
+                    if !target.contains("..") && names.contains(&target) {
+                        return Ok(target);
+                    }
+                }
+            }
+            Ok(_) => {}
+        }
+    }
 }
 
 pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
@@ -61,12 +125,16 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
     let mut budget = MAX_TOTAL_BYTES;
     let mut warnings = Vec::new();
 
-    let document = read_part(&mut zip, "word/document.xml", &mut budget)?
-        .ok_or_else(|| corrupt("not a Word document"))?;
+    let main = main_part(&mut zip, &names, &mut budget)?;
+    let folder = main
+        .rsplit_once('/')
+        .map_or(String::new(), |(f, _)| format!("{f}/"));
+    let document = read_part(&mut zip, &main, &mut budget)?
+        .ok_or_else(|| corrupt("not a Word document (no main part)"))?;
     let doc = paragraphs(&document)?;
     let mut body = doc.text;
-    for part in ["word/footnotes.xml", "word/endnotes.xml"] {
-        if let Some(xml) = read_part(&mut zip, part, &mut budget)? {
+    for part in ["footnotes.xml", "endnotes.xml"].map(|p| format!("{folder}{p}")) {
+        if let Some(xml) = read_part(&mut zip, &part, &mut budget)? {
             let notes = paragraphs(&xml)?.text;
             if !notes.trim().is_empty() {
                 body.push_str("\n\n");
@@ -84,7 +152,8 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
     let mut margin_parts: Vec<&String> = names
         .iter()
         .filter(|n| {
-            (n.starts_with("word/header") || n.starts_with("word/footer")) && n.ends_with(".xml")
+            (n.starts_with(&format!("{folder}header")) || n.starts_with(&format!("{folder}footer")))
+                && n.ends_with(".xml")
         })
         .collect();
     margin_parts.sort();
@@ -102,7 +171,7 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
         warnings
             .push("הכותרת העליונה/התחתונה לא יובאה (יש בה לרוב שם, ת\"ז ופרטי קשר).".to_owned());
     }
-    if names.iter().any(|n| n == "word/comments.xml") {
+    if names.iter().any(|n| n == &format!("{folder}comments.xml")) {
         warnings.push("ההערות (Comments) במסמך לא יובאו.".to_owned());
     }
 
@@ -121,8 +190,22 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
         ),
         ("docProps/app.xml", &["Company", "Manager"][..]),
     ] {
-        if let Some(xml) = read_part(&mut zip, part, &mut budget)? {
-            metadata.extend(properties(&xml, fields)?);
+        // File properties only suggest names to hide; a broken one ("A & B") does not make
+        // the document unreadable. She is told, and the body is filtered in full (D-135).
+        match read_part(&mut zip, part, &mut budget)
+            .and_then(|x| x.map(|x| properties(&x, fields)).transpose())
+        {
+            Ok(Some(found)) => metadata.extend(found),
+            Ok(None) => {}
+            Err(IngestError::TooLarge) => return Err(IngestError::TooLarge),
+            Err(_) => {
+                if !warnings.iter().any(|w| w.contains("מאפייני הקובץ")) {
+                    warnings.push(
+                        "מאפייני הקובץ (שם המחבר וכדומה) לא נקראו. כדאי לבדוק בעצמך שאין בהם שמות."
+                            .to_owned(),
+                    );
+                }
+            }
         }
     }
 
@@ -415,5 +498,89 @@ pub(crate) mod tests {
         let bytes = build(&[("word/document.xml", document(&para(&huge)))]);
         assert!(bytes.len() < crate::MAX_INPUT_BYTES);
         assert_eq!(crate::extract(&bytes, "a.docx"), Err(IngestError::TooLarge));
+    }
+
+    /// Files the way real programs save them (D-135): each one is read, with its text.
+    #[test]
+    fn word_files_as_real_programs_save_them_are_read() {
+        let body = || document(&para("שורה בדויה מהדוח"));
+        let rels = r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="/word/document2.xml"/></Relationships>"#;
+        let mut utf16 = vec![0xFF, 0xFE];
+        for u in body().encode_utf16() {
+            utf16.extend(u.to_le_bytes());
+        }
+        let raw = |name: &str, bytes: &[u8]| {
+            let mut buf = Cursor::new(Vec::new());
+            {
+                let mut zip = zip::ZipWriter::new(&mut buf);
+                let opts = zip::write::SimpleFileOptions::default();
+                zip.start_file(name, opts).unwrap_or_else(|e| panic!("{e}"));
+                zip.write_all(bytes).unwrap_or_else(|e| panic!("{e}"));
+                zip.finish().unwrap_or_else(|e| panic!("{e}"));
+            }
+            buf.into_inner()
+        };
+        let cases: Vec<(&str, Vec<u8>)> = vec![
+            (
+                "Word 365: document2.xml",
+                build(&[
+                    ("_rels/.rels", rels.to_owned()),
+                    ("word/document2.xml", body()),
+                ]),
+            ),
+            (
+                "broken company name",
+                build(&[
+                    ("word/document.xml", body()),
+                    (
+                        "docProps/app.xml",
+                        "<?xml version=\"1.0\"?><Properties><Company>A & B</Company></Properties>"
+                            .to_owned(),
+                    ),
+                ]),
+            ),
+            (
+                "byte-order mark",
+                build(&[("word/document.xml", format!("\u{FEFF}{}", body()))]),
+            ),
+            ("UTF-16 part", raw("word/document.xml", &utf16)),
+        ];
+        for (label, bytes) in cases {
+            let out = extract(&bytes).unwrap_or_else(|e| panic!("{label}: {e:?}"));
+            assert!(
+                out.body.contains("שורה בדויה מהדוח"),
+                "{label}: {}",
+                out.body
+            );
+        }
+        // The broken property is said, not silently skipped.
+        let out = extract(&build(&[
+            ("word/document.xml", body()),
+            (
+                "docProps/app.xml",
+                "<Properties><Company>A & B</Company></Properties>".to_owned(),
+            ),
+        ]))
+        .unwrap_or_else(|e| panic!("{e:?}"));
+        assert!(
+            out.warnings.iter().any(|w| w.contains("מאפייני הקובץ")),
+            "{:?}",
+            out.warnings
+        );
+        // A pointer out of the archive is never followed, even to a part that is there by
+        // that name: the usual body is read instead.
+        let evil = r#"<Relationships><Relationship Type="x/officeDocument" Target="../secret.xml"/></Relationships>"#;
+        let secret = body().replace(
+            "<w:body>",
+            "<w:body><w:p><w:r><w:t>SECRET</w:t></w:r></w:p>",
+        );
+        let out = extract(&build(&[
+            ("_rels/.rels", evil.to_owned()),
+            ("../secret.xml", secret),
+            ("word/document.xml", body()),
+        ]))
+        .unwrap_or_else(|e| panic!("{e:?}"));
+        assert!(!out.body.contains("SECRET"), "{}", out.body);
+        assert!(out.body.contains("שורה בדויה מהדוח"), "{}", out.body);
     }
 }

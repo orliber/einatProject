@@ -174,25 +174,31 @@ fn sid_string(sid: &Sid) -> io::Result<String> {
     Ok(out)
 }
 
-/// Paths already granted to the container in this run (an update replaces the program and
-/// restarts the app, so once per run is enough).
-static GRANTED: Mutex<Option<HashSet<PathBuf>>> = Mutex::new(None);
+/// Paths already granted to the container in this run, with the rights given (an update
+/// replaces the program and restarts the app, so once per run is enough).
+static GRANTED: Mutex<Option<HashSet<(PathBuf, &'static str)>>> = Mutex::new(None);
 
 /// Let the container read and run `path` (a file) or read inside it (a folder). Through the
 /// system's own `icacls`, without native calls.
 fn grant(path: &Path, sid: &str) -> io::Result<()> {
-    let mut granted = GRANTED
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let set = granted.get_or_insert_with(HashSet::new);
-    if set.contains(path) {
-        return Ok(());
-    }
     let rights = if path.is_dir() {
         "(OI)(CI)(RX)"
     } else {
         "(RX)"
     };
+    grant_rights(path, sid, rights)
+}
+
+/// Give the container exactly `rights` (icacls notation) on `path`.
+fn grant_rights(path: &Path, sid: &str, rights: &'static str) -> io::Result<()> {
+    let mut granted = GRANTED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let set = granted.get_or_insert_with(HashSet::new);
+    let key = (path.to_path_buf(), rights);
+    if set.contains(&key) {
+        return Ok(());
+    }
     let icacls = system32().join("icacls.exe");
     let status = std::process::Command::new(icacls)
         .arg(path)
@@ -205,8 +211,24 @@ fn grant(path: &Path, sid: &str) -> io::Result<()> {
     if !status.success() {
         return Err(io::Error::other(format!("icacls: {status}")));
     }
-    set.insert(path.to_path_buf());
+    set.insert(key);
     Ok(())
+}
+
+/// The libraries next to the program (`*.dll`), which the reader loads from there.
+fn libraries_next_to(dir: &Path) -> io::Result<Vec<PathBuf>> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        let is_library = path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("dll"));
+        if is_library && path.is_file() {
+            out.push(path);
+        }
+    }
+    out.sort();
+    Ok(out)
 }
 
 fn system_root() -> OsString {
@@ -391,6 +413,16 @@ pub(crate) fn spawn(exe: &Path, args: &[&str], policy: &Policy) -> io::Result<Co
     let sid = step("container", container_sid())?;
     let sid_text = step("container", sid_string(&sid))?;
     step("grant", grant(exe, &sid_text))?;
+    // The libraries next to the program (the FIPS module, the runtime) are loaded from its
+    // folder; without access the reader stops before it starts (0xC0000135), which looked
+    // like a broken file (D-135). The folder itself only to pass through, never to list or
+    // read: the program may be run from Downloads, and her files there stay closed.
+    if let Some(dir) = exe.parent().filter(|d| !d.as_os_str().is_empty()) {
+        step("grant", grant_rights(dir, &sid_text, "(X)"))?;
+        for library in step("grant", libraries_next_to(dir))? {
+            step("grant", grant(&library, &sid_text))?;
+        }
+    }
     for dir in &policy.read_dirs {
         step("grant", grant(dir, &sid_text))?;
     }

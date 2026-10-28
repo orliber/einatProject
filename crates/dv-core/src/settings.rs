@@ -100,8 +100,10 @@ impl Core {
         self.model_for(Task::Draft)
     }
 
-    /// How long Claude may think, by task and by the speed chosen in settings. Sorting only
-    /// classifies passages; drafting and consultation weigh more, and "thorough" asks for most.
+    /// How long Claude may think, by task and by the speed chosen in settings. Sorting and the
+    /// small jobs (one paragraph, a check, one report's style) think little whatever the
+    /// setting, and "thorough" deepens only them by one step (D-137); drafting and consultation
+    /// think at the chosen speed.
     pub(crate) fn model_for(&mut self, task: Task) -> Result<ModelConfig, CoreError> {
         let v = self.vault_ref()?;
         // The same model the status shows: one kept from before it left the allow-list gives
@@ -115,6 +117,8 @@ impl Core {
             .unwrap_or_else(|| DEFAULT_SPEED.to_owned());
         let effort = match (task, speed.as_str()) {
             (Task::Sort, _) | (_, "fast") => "low",
+            (Task::Light, "thorough") => "medium",
+            (Task::Light, _) => "low",
             (_, "thorough") => "high",
             _ => "medium",
         };

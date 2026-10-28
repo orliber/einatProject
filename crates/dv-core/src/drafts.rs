@@ -259,6 +259,56 @@ impl Core {
         Ok(())
     }
 
+    /// "✓ לאשר" on the report page: the paragraphs she sees waiting, in one call, learned
+    /// from once. Approving them one by one loaded and saved the style learning for each
+    /// paragraph, which made a long section slow to approve (D-136).
+    pub fn approve_paragraphs(
+        &mut self,
+        case_id: &str,
+        draft_ids: &[String],
+    ) -> Result<u32, CoreError> {
+        let mut waiting = Vec::new();
+        for id in draft_ids {
+            if let Some(d) = style::find_draft(self.vault_ref()?, case_id, id)?
+                .filter(|d| d.status == DraftStatus::Proposed)
+            {
+                waiting.push(d);
+            }
+        }
+        let v = self.vault_mut()?;
+        for d in &waiting {
+            v.set_draft_status(case_id, &d.id, DraftStatus::Approved)?;
+        }
+        self.learn_from_approval(&waiting);
+        Ok(u32::try_from(waiting.len()).unwrap_or(u32::MAX))
+    }
+
+    /// "✓ לאשר את כל הטיוטות" (D-139): of the paragraphs she saw waiting, only those still
+    /// clean as the core sees them now: no note of any kind, and not a new wording of an
+    /// approved paragraph. What the screen showed may be older than the case.
+    pub fn approve_clean_paragraphs(
+        &mut self,
+        case_id: &str,
+        draft_ids: &[String],
+    ) -> Result<u32, CoreError> {
+        let clean: std::collections::HashSet<String> = self
+            .case_detail(case_id)?
+            .sections
+            .into_iter()
+            .flat_map(|s| s.paragraphs)
+            .filter(|p| {
+                p.status == DraftStatus::Proposed && p.warnings.is_empty() && p.replaces.is_none()
+            })
+            .map(|p| p.id)
+            .collect();
+        let ids: Vec<String> = draft_ids
+            .iter()
+            .filter(|id| clean.contains(id.as_str()))
+            .cloned()
+            .collect();
+        self.approve_paragraphs(case_id, &ids)
+    }
+
     /// "אישור כל הטיוטה": every paragraph still waiting in the section, as it stands.
     pub fn approve_section(&mut self, case_id: &str, section_key: &str) -> Result<u32, CoreError> {
         let v = self.vault_mut()?;

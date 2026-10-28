@@ -196,6 +196,9 @@ enum Task {
     Sort,
     Draft,
     Consult,
+    /// A small, bounded job (D-137): one paragraph worded again, the check of a draft
+    /// against its sources, one report read for its style. Deep thinking only adds minutes.
+    Light,
 }
 
 fn day_number() -> u64 {
@@ -321,6 +324,9 @@ pub enum CoreError {
     Ai(#[from] dv_ai::AiError),
     #[error("update: {0}")]
     Update(dv_egress::update::UpdateError),
+    /// A document that was not read: her message, and its technical reason in the details.
+    #[error("read: {0}")]
+    Read(dv_ingest::IngestError),
     #[error("internal: {0}")]
     Internal(String),
 }
@@ -403,6 +409,10 @@ impl CoreError {
                 ("ai", ai_he(e, ai))
             }
             CoreError::Update(e) => ("update", update::update_he(e)),
+            CoreError::Read(e) => {
+                details.push(format!("read: {}", e.detail()));
+                ("read", e.message_he())
+            }
             CoreError::Internal(e) => {
                 details.push(e.clone());
                 ("internal", TECHNICAL_HE.to_owned())
@@ -446,6 +456,13 @@ impl CoreError {
             // would do nothing. She asks again from the screen (a new request).
             CoreError::Ai(_) => ErrorAction::Dismiss,
             CoreError::Update(_) => ErrorAction::retry(),
+            CoreError::Read(e) if e.transient() => ErrorAction::retry(),
+            // A file the reader broke on is worth a report to Or; a file she can fix herself
+            // (encrypted, too large, of a kind not read) is only told.
+            CoreError::Read(
+                dv_ingest::IngestError::Corrupt(_) | dv_ingest::IngestError::Ocr(_),
+            ) => ErrorAction::Report,
+            CoreError::Read(_) => ErrorAction::Dismiss,
         }
     }
 }

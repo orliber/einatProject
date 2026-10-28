@@ -1197,7 +1197,12 @@ impl Core {
                 "ניסוח מהנקודות שלך הוא לסעיפים שאת כותבת בעצמך.".to_owned(),
             ));
         }
-        let model = self.model_config()?;
+        // A paragraph worded again is a small job; a whole section is not (D-137).
+        let model = if ask.replaces.is_some() {
+            self.model_for(Task::Light)?
+        } else {
+            self.model_config()?
+        };
         let mut data = self.privacy_data(case_id)?;
         if let Some(book) = book {
             data.masks = book;
@@ -1413,7 +1418,7 @@ impl Core {
                     .to_owned(),
             ));
         }
-        let model = self.model_for(Task::Draft)?;
+        let model = self.model_for(Task::Light)?;
         let data = self.privacy_data(case_id)?;
         let fingerprint = data.fingerprint()?;
         let hints = self.case_hints(case_id, &[])?;

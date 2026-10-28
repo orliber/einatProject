@@ -286,6 +286,25 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     [caseId, startReview, track, reload, ai],
   );
 
+  /** D-139: every clean draft approved in one call; a draft with a note waits for her eye.
+   *  The core checks again which ones are still clean; a second press waits for the first. */
+  const [approvingAll, setApprovingAll] = useState(false);
+  const approveAll = async (ids: string[], held: number) => {
+    if (approvingAll) return;
+    setError(null);
+    setApprovingAll(true);
+    try {
+      const n = await ipc.approveCleanParagraphs(caseId, ids);
+      await reload();
+      const waiting = ids.length + held - n;
+      notify(waiting > 0 ? `${n} פסקאות אושרו. ${waiting} מחכות לעין שלך.` : `${n} פסקאות אושרו.`);
+    } catch (e) {
+      setError(fail(e as never));
+    } finally {
+      setApprovingAll(false);
+    }
+  };
+
   /** `quiet`: the reading that runs by itself after a material was added (round 31): when
    *  there is nothing to read, or it cannot be built now, it says nothing; the button stays. */
   const [preparingSort, setPreparingSort] = useState(false);
@@ -514,7 +533,8 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         {stage === 2 && !fullPage && (
           <Contents detail={detail} jobs={jobs} view={view} current={view === "report" ? focusKey : null} onOpen={(key) => toReport(key)} onWriteAll={running ? undefined : writeAll}
             onSort={running ? undefined : () => void startSort()} onConsent={() => go({ name: "case", id: caseId, view: "details" })}
-            onFinish={() => go({ name: "case", id: caseId, view: "finish" })} />
+            onFinish={() => go({ name: "case", id: caseId, view: "finish" })}
+            onApproveAll={(ids, held) => void approveAll(ids, held)} approvingAll={approvingAll} />
         )}
         <div className="work">
           {view === "materials" && <MaterialsView api={api} onWrite={() => void toWriting()} />}
@@ -585,6 +605,9 @@ function Contents(props: {
   onSort: (() => void) | undefined;
   onConsent: () => void;
   onFinish: () => void;
+  /** Every draft waiting, approved in one call: the ones with nothing to look at (D-139). */
+  onApproveAll: (ids: string[], held: number) => void;
+  approvingAll: boolean;
 }) {
   const { detail, jobs, view } = props;
   const ai = useAi();
@@ -598,6 +621,11 @@ function Contents(props: {
   const unsorted = detail.routing.filter((r) => r.needs_sorting).length;
   const fed = detail.sections.filter((s) => s.source_count > 0);
   const done = fed.length > 0 && fed.every((s) => s.approved) && waiting === 0;
+  // A new wording beside an approved paragraph, or a paragraph with a note (from the check
+  // against the sources, or a name the answer held), still waits for her eyes.
+  const proposed = content.flatMap((s) => s.paragraphs.filter((p) => p.status === "proposed" && !p.replaces));
+  const readyIds = proposed.filter((p) => p.warnings.length === 0).map((p) => p.id);
+  const held = proposed.length - readyIds.length;
   const parts = Array.from(new Set(detail.sections.map((s) => s.part)));
   // Sections marked "חסר חומר" now; sorting may still give some of them material.
   const missing = empty.filter((s) => s.sortable && s.source_count === 0 && s.mode !== "self").length;
@@ -652,6 +680,11 @@ function Contents(props: {
               {detail.meta.consent ? "למיין את החומרים" : "רישום ההסכמה"}
             </button>
           </div>
+        )}
+        {readyIds.length > 1 && (
+          <button type="button" className="btn btn-primary" disabled={props.approvingAll} onClick={() => props.onApproveAll(readyIds, held)}>
+            ✓ לאשר את כל הטיוטות ({readyIds.length})
+          </button>
         )}
         {writable > 0 && props.onWriteAll && (
           <button type="button" className="btn contents-write" onClick={props.onWriteAll}>✦ לכתוב את {writable} הריקים</button>

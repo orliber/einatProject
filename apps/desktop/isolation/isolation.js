@@ -15,6 +15,8 @@ const ALLOWED = new Set([
   "add_own_paragraph",
   "app_status",
   "approve_paragraph",
+  "approve_clean_paragraphs",
+  "approve_paragraphs",
   "approve_section",
   "approve_style_draft",
   "backup_status",
