@@ -101,6 +101,44 @@ pub(crate) async fn prepare_sort(
     prepare_off_lock(&state, move |c| c.begin_prepare_sort(&case_id)).await
 }
 
+/// Sorting one request per material not sorted yet, each filtered side by side away from the
+/// lock and landed under it, keyed by the material (D-134); they are sent side by side too.
+#[tauri::command]
+pub(crate) async fn prepare_sort_parts(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+) -> Res<Vec<(String, Prepared)>> {
+    warm_names(&state, &case_id, Vec::new()).await;
+    let mut jobs = with_core(&state, move |c| c.begin_sort_parts(&case_id)).await?;
+    let order: Vec<String> = jobs.iter().map(|(k, _)| k.clone()).collect();
+    let mut out = Vec::new();
+    while !jobs.is_empty() {
+        let runs = tauri::async_runtime::spawn_blocking(move || dv_core::run_requests(jobs))
+            .await
+            .map_err(|_| internal("task"))?
+            .map_err(|e| e.to_ui())?;
+        let (ready, again) = with_core(&state, move |c| c.finish_requests(runs)).await?;
+        out.extend(ready);
+        jobs = again;
+    }
+    out.sort_by_key(|(k, _)| order.iter().position(|o| o == k));
+    Ok(out)
+}
+
+/// One material's sorting prepared again (a part that was refused, for "לנסות שוב").
+#[tauri::command]
+pub(crate) async fn prepare_sort_one(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    input_id: String,
+) -> Res<Prepared> {
+    warm_names(&state, &case_id, Vec::new()).await;
+    prepare_off_lock(&state, move |c| {
+        c.begin_prepare_sort_one(&case_id, &input_id)
+    })
+    .await
+}
+
 #[tauri::command]
 pub(crate) async fn send_sort(
     state: tauri::State<'_, AppState>,

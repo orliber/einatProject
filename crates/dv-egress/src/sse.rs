@@ -138,7 +138,9 @@ pub fn assemble(reader: impl BufRead, progress: &dyn Fn(u32)) -> Result<Value, E
     // here a stream that reaches the limit is refused rather than read as cut short.
     let mut total: usize = 0;
     for line in reader.lines() {
-        let line = line.map_err(|_| EgressError::Offline)?;
+        let line = line.map_err(|e| {
+            EgressError::Interrupted(format!("while reading the answer ({:?})", e.kind()))
+        })?;
         total = total.saturating_add(line.len() + 1);
         if total > MAX_ANSWER_BYTES {
             return Err(too_large());
@@ -174,7 +176,9 @@ pub fn assemble(reader: impl BufRead, progress: &dyn Fn(u32)) -> Result<Value, E
     }
     let (Some(mut message), true) = (message, done) else {
         // A stream cut in the middle is not an answer.
-        return Err(EgressError::Offline);
+        return Err(EgressError::Interrupted(
+            "the answer stopped before its end".to_owned(),
+        ));
     };
     message.insert("content".to_owned(), Value::Array(blocks));
     Ok(Value::Object(message))
@@ -291,6 +295,9 @@ mod tests {
             json!({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
             json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "חצי"}}),
         ]);
-        assert_eq!(assemble(s.as_bytes(), &|_| {}), Err(EgressError::Offline));
+        assert!(matches!(
+            assemble(s.as_bytes(), &|_| {}),
+            Err(EgressError::Interrupted(_))
+        ));
     }
 }

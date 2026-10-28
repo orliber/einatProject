@@ -470,9 +470,10 @@ fn egress_action(e: &EgressError) -> ErrorAction {
         EgressError::CircuitOpen(s) => ErrorAction::Retry {
             after_seconds: u32::try_from(*s).unwrap_or(u32::MAX),
         },
-        EgressError::Offline | EgressError::Unavailable(_) | EgressError::Overloaded => {
-            ErrorAction::retry()
-        }
+        EgressError::Offline
+        | EgressError::Interrupted(_)
+        | EgressError::Unavailable(_)
+        | EgressError::Overloaded => ErrorAction::retry(),
         // A timeout or a conflict passes by itself; any other refusal comes back the same.
         EgressError::Rejected(408 | 409, _) => ErrorAction::retry(),
         EgressError::Rejected(..)
@@ -547,6 +548,10 @@ fn egress_he(e: &EgressError, ai: &str) -> String {
         EgressError::Offline => {
             format!("אין חיבור לאינטרנט. אפשר להמשיך לעבוד, ו-{ai} יחזור כשיהיה חיבור.")
         }
+        // Connected and then cut: the internet is most likely there (D-134).
+        EgressError::Interrupted(_) => format!(
+            "החיבור ל-{ai} נקטע באמצע התשובה, ולכן היא לא נשמרה. זה קורה למשל כשהמחשב נכנס לשינה או כשהרשת מתחלפת לרגע. החומרים שמורים, ואפשר לנסות שוב."
+        ),
         EgressError::LocalUnavailable => "המודל המקומי לא עונה. צריך שהתוכנה Ollama תפעל במחשב, ושהמודל שנבחר יהיה מותקן בה (בהגדרות כתוב איך)."
             .to_owned(),
         EgressError::Tls => {
@@ -596,6 +601,7 @@ fn egress_he(e: &EgressError, ai: &str) -> String {
 fn egress_details(e: &EgressError) -> Option<String> {
     match e {
         EgressError::Unavailable(_)
+        | EgressError::Interrupted(_)
         | EgressError::Overloaded
         | EgressError::CircuitOpen(_)
         | EgressError::Billing(_)

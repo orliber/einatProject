@@ -202,6 +202,7 @@ fn may_have_left(e: &CoreError) -> bool {
                 | EgressError::Rejected(..)
                 | EgressError::Protocol(_)
                 | EgressError::Offline
+                | EgressError::Interrupted(_)
         )
     )
 }

@@ -170,7 +170,7 @@ describe("main screens", () => {
     expect(alert.compareDocumentPosition(write) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await user.click(within(alert).getByRole("button", { name: "למיין את החומרים" }));
     expect(await screen.findByRole("dialog", { name: "לפני שליחה ל-Claude" })).toHaveTextContent("מיון החומרים לסעיפים");
-    expect(calls).toContain("prepare_sort");
+    expect(calls).toContain("prepare_sort_parts");
   });
 
   it("without consent, the alert sends her to record it instead of sorting (D-114)", async () => {
@@ -187,7 +187,7 @@ describe("main screens", () => {
     expect(alert).toHaveTextContent("קודם רושמים את הסכמת ההורים");
     await user.click(within(alert).getByRole("button", { name: "רישום ההסכמה" }));
     await vi.waitFor(() => expect(screen.queryByRole("complementary", { name: "תוכן הדוח" })).toBeNull());
-    expect(calls).not.toContain("prepare_sort");
+    expect(calls).not.toContain("prepare_sort_parts");
   });
 
   it("the report page passes the accessibility check", async () => {
@@ -446,7 +446,7 @@ describe("writing the report", () => {
     await user.click((screen.getAllByRole("button", { name: /חומרים/ })[0] as HTMLElement));
     const list = await screen.findByRole("region", { name: "רשימת החומרים" });
     expect(within(list).getByText(/עוד לא נקרא/)).toBeInTheDocument();
-    expect(calls).not.toContain("prepare_sort");
+    expect(calls).not.toContain("prepare_sort_parts");
     await user.click(await screen.findByRole("button", { name: "הוספה לאבחונים קודמים" }));
     await user.click(await screen.findByRole("menuitem", { name: "הדבקת טקסט" }));
     await user.type(screen.getByLabelText("כותרת"), "דוח קלינאית");
@@ -508,7 +508,7 @@ describe("writing the report", () => {
     await user.type(screen.getByLabelText("הטקסט"), "נמצא עיכוב קל בשפה.");
     await user.click(screen.getByRole("button", { name: "שמירה בתיק" }));
     await screen.findByText("נשמר בתיק.");
-    expect(calls).not.toContain("prepare_sort");
+    expect(calls).not.toContain("prepare_sort_parts");
   });
 
   it("Esc with a changed text asks first; the text is kept until she says to drop it", async () => {

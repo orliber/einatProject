@@ -322,6 +322,10 @@ export const ipc = {
   sendReportCheck: (approvalId: string) => call("send_report_check", { approvalId }),
   /** D-022: sort every material not sorted yet into sections (one review screen). */
   prepareSort: (caseId: string) => call("prepare_sort", { caseId }),
+  /** D-134: one request per material not sorted yet, keyed by the material, sent side by side. */
+  prepareSortParts: (caseId: string) => call("prepare_sort_parts", { caseId }),
+  /** One material's sorting, prepared again ("לנסות שוב" on a part). */
+  prepareSortOne: (caseId: string, inputId: string) => call("prepare_sort_one", { caseId, inputId }),
   sendSort: (approvalId: string) => call("send_sort", { approvalId }),
   /** Einat's choice of sections for one material; it always wins. */
   setInputSections: (caseId: string, inputId: string, sections: string[]) =>

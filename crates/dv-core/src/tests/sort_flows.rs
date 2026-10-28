@@ -266,3 +266,50 @@ fn passages_far_apart_are_marked_with_a_gap_the_gate_accepts() {
     let background = section_request(&mut core, &fake, &case, "background");
     assert!(background.contains("(…)") && !background.contains("מילים ראשונות"));
 }
+
+#[test]
+fn sorting_in_parts_sends_each_material_alone_and_stores_each_answer() {
+    // D-134: one request per material, keyed by it; each request holds its material only,
+    // and each answer is stored for that material only.
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let home = add_home_intake(&mut core, &case);
+
+    let parts = core.prepare_sort_parts(&case).unwrap();
+    assert_eq!(parts.len(), 3, "one request per material");
+    assert!(parts.iter().any(|(id, _)| id == &home));
+    let approvals: std::collections::HashSet<_> = parts
+        .iter()
+        .map(|(_, p)| p.approval_id.clone().expect("clears the gate"))
+        .collect();
+    assert_eq!(approvals.len(), 3, "three different payloads");
+    for (_, p) in &parts {
+        assert_eq!(p.parts.len(), 1, "one material in each review");
+    }
+
+    let (_, mine) = parts.iter().find(|(id, _)| id == &home).unwrap();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({"sections": [
+        {"section": "background", "passages": ["S1P1", "S1P2"]},
+        {"section": "parents_view", "passages": ["S1P3"]}
+    ]})));
+    let result = core.send_sort(&mine.approval_id.clone().unwrap()).unwrap();
+    assert_eq!((result.sorted, result.links), (1, 2));
+    let sent = fake.sent.lock().unwrap().last().unwrap().clone();
+    assert!(
+        sent.contains("S1P3") && !sent.contains("S2P1"),
+        "only its own material"
+    );
+    for name in ["אלון", "שירה", "רותם", "אלמוג"] {
+        assert!(!sent.contains(name), "{name} left the machine");
+    }
+
+    // The other two still wait; the sorted one is not offered again.
+    let again = core.prepare_sort_parts(&case).unwrap();
+    assert_eq!(again.len(), 2);
+    assert!(again.iter().all(|(id, _)| id != &home));
+    // One part prepared again alone holds that material only.
+    let (other, _) = &again[0];
+    let one = core.begin_prepare_sort_one(&case, other).unwrap();
+    let landed = core.finish_request(one.run()).unwrap();
+    assert!(matches!(landed, crate::Landed::Ready(ref p) if p.parts.len() == 1));
+}

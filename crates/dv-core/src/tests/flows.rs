@@ -626,7 +626,9 @@ fn the_bin_erases_only_what_waited_past_thirty_days_and_is_in_a_backup() {
     // No backup yet: the clock alone erases nothing, however long it waited.
     core.lock();
     core.unlock(PASSWORD).unwrap();
-    assert_eq!(ids(&mut core), vec![stale.clone(), fresh.clone()]);
+    let mut both = vec![stale.clone(), fresh.clone()];
+    both.sort();
+    assert_eq!(ids(&mut core), both);
     // A backup written before the deletion does not hold the case as deleted either: a
     // backup "from the past" (its time set back) counts for nothing.
     let drive = tempfile::tempdir().unwrap();
@@ -637,7 +639,7 @@ fn the_bin_erases_only_what_waited_past_thirty_days_and_is_in_a_backup() {
         .unwrap();
     core.lock();
     core.unlock(PASSWORD).unwrap();
-    assert_eq!(ids(&mut core), vec![stale.clone(), fresh.clone()]);
+    assert_eq!(ids(&mut core), both);
 
     // A backup written since the deletion: what waited past thirty days goes.
     core.write_backup(&drive.path().join("b")).unwrap();

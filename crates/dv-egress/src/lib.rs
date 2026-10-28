@@ -89,6 +89,12 @@ pub enum EgressError {
     CircuitOpen(u64),
     #[error("no connection to the AI service (the rest of the program keeps working)")]
     Offline,
+    /// The connection was made and then lost, or ran out of time, before the whole answer
+    /// came back (a computer that slept, a network that changed, a server that hung up). Not
+    /// the same as no internet; the reason (an error kind, never a path or any text of the
+    /// request) goes to "copy details".
+    #[error("the connection to the AI service was cut before the answer was complete: {0}")]
+    Interrupted(String),
     #[error("the local model does not answer (is Ollama running, with the model installed?)")]
     LocalUnavailable,
     #[error("the secure connection failed; something on this computer may be intercepting encrypted traffic")]
@@ -380,9 +386,33 @@ pub(crate) fn send_error(e: &reqwest::Error) -> EgressError {
         EgressError::Pinned
     } else if tls {
         EgressError::Tls
-    } else {
+    } else if e.is_connect() {
+        // No connection at all: no network, no name lookup, or nothing answering.
         EgressError::Offline
+    } else {
+        // Connected, and then lost or out of time: not "no internet" (D-134).
+        EgressError::Interrupted(cut_reason(e))
     }
+}
+
+/// What cut a connection, in words fit for "copy details": the stage, and the system's error
+/// kind when there is one. Never the URL, a path or anything of the request.
+pub(crate) fn cut_reason(e: &reqwest::Error) -> String {
+    let stage = if e.is_timeout() {
+        "timed out"
+    } else if e.is_body() || e.is_decode() {
+        "while reading the answer"
+    } else {
+        "while sending"
+    };
+    let mut source = std::error::Error::source(e);
+    while let Some(s) = source {
+        if let Some(io) = s.downcast_ref::<std::io::Error>() {
+            return format!("{stage} ({:?})", io.kind());
+        }
+        source = s.source();
+    }
+    stage.to_owned()
 }
 
 /// What an error answer of the Anthropic API means: its `error.type` first, its status when

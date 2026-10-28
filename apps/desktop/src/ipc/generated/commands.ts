@@ -165,6 +165,8 @@ export type Commands = {
   prepare_report_check: { args: { caseId: string }; returns: Prepared };
   prepare_section: { args: { caseId: string; sectionKey: string; instruction: string; replaces: string | null }; returns: Prepared };
   prepare_sort: { args: { caseId: string }; returns: Prepared };
+  prepare_sort_one: { args: { caseId: string; inputId: string }; returns: Prepared };
+  prepare_sort_parts: { args: { caseId: string }; returns: Array<[string, Prepared]> };
   prepare_style_analysis: { args: { sourceId: string }; returns: Prepared };
   prepare_style_profile: { args: undefined; returns: Prepared };
   prepare_update: { args: undefined; returns: boolean };

@@ -111,6 +111,8 @@ const ALLOWED = new Set([
   "prepare_letter",
   "prepare_section",
   "prepare_sort",
+  "prepare_sort_one",
+  "prepare_sort_parts",
   "prepare_style_analysis",
   "prepare_style_profile",
   "prepare_update",

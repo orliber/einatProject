@@ -10,6 +10,7 @@ import { useAi } from "../ai";
 /** How many sections are written at the same time. */
 const PARALLEL = 3;
 import { DRAFT_FROM_SOURCES as DRAFT_INSTRUCTION } from "../screens/case/instructions";
+import { sortInParts } from "../screens/case/sortParts";
 
 type RowState = "ready" | "question" | "waiting" | "writing" | "done" | "failed";
 
@@ -74,15 +75,12 @@ export function ReportRunDialog({ api, onClose }: { api: CaseApi; onClose: () =>
     setError(null);
     setPreparingSort(true);
     try {
-      const prepared = await timed("prepare", ipc.prepareSort(api.caseId), "sort").finally(() => setPreparingSort(false));
-      const sent = await api.review({
+      // D-134: one request per material, side by side.
+      const { sent } = await sortInParts(api, {
         title: "שלב 1: מיון החומרים לסעיפים",
-        prepared,
-        reprepare: () => ipc.prepareSort(api.caseId),
-        onSend: async (id) => {
-          await api.track({ label: `${ai} קורא את החומרים ומשייך קטעים לסעיפים`, task: "sort", approval: id }, () => ipc.sendSort(id), () => api.reload());
-        },
-      });
+        label: `${ai} קורא את החומרים ומשייך קטעים לסעיפים`,
+        prepared: () => setPreparingSort(false),
+      }).finally(() => setPreparingSort(false));
       if (sent) await load();
     } catch (e) {
       setError(fail(e as never));
