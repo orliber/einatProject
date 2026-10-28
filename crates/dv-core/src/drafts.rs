@@ -513,9 +513,12 @@ fn unfounded_numbers(
     inputs: &[dv_domain::CaseInput],
     body: &[&str],
 ) -> Vec<String> {
+    // The DSM section's numbers are the level she set and the codes, which have their own
+    // check (`check_dsm_severity`), not anything a material says.
     if d.author != Author::Ai
         || d.status != DraftStatus::Proposed
         || mode == dv_domain::SectionMode::Own
+        || section_key == "dsm"
     {
         return Vec::new();
     }
