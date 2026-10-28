@@ -334,7 +334,8 @@ pub fn build_style_analysis_request(
     patterns: &[dv_domain::ScorePattern],
     nonce: &str,
 ) -> Value {
-    let mut body = base_body(model, ANALYSIS_RULES, 12_000);
+    // Thinking counts toward the cap; a long report was cut short at 12,000 (as sorting was).
+    let mut body = base_body(model, ANALYSIS_RULES, 32_000);
     let mut parts = vec!["קטעים מדוח אחד, לפי סעיף:".to_owned()];
     for e in excerpts {
         parts.push(data_block(

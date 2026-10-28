@@ -107,9 +107,13 @@ fn schema(sections: &[SortSection]) -> Value {
 pub const SUMMARY_MAX: usize = 1_500;
 pub const RECORD_FIELD_MAX: usize = 1_000;
 
+/// Room for the answer and the model's thinking, which counts toward it. 12,000 was cut short
+/// on a long material (the answer then is lost whole); a cap costs nothing until it is used.
+pub const SORT_MAX_TOKENS: u32 = 32_000;
+
 #[must_use]
 pub fn build_sort_request(model: &ModelConfig, input: &SortInput, nonce: &str) -> Value {
-    let mut body = base_body(model, SORTING_RULES, 12_000);
+    let mut body = base_body(model, SORTING_RULES, SORT_MAX_TOKENS);
     let mut parts = vec!["סעיפי הדוח (מפתח: מה שייך לסעיף):".to_owned()];
     for s in &input.sections {
         parts.push(format!("- {}: {}", s.key, s.about));
@@ -341,6 +345,13 @@ mod tests {
         assert!(content.contains("- kindergarten: דיווח הצוות."));
         assert_eq!(body["system"][0]["text"], SORTING_RULES);
         assert_eq!(body["inference_geo"], "us");
+    }
+
+    #[test]
+    fn a_long_material_has_room_for_the_answer_and_the_thinking() {
+        // Cut at 12,000 on a long material, the whole answer was lost (Or, 0.9.5).
+        let body = build_sort_request(&ModelConfig::default(), &input(), "nonce");
+        assert_eq!(body["max_tokens"], 32_000);
     }
 
     #[test]
