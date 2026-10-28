@@ -20,9 +20,15 @@ const MAX_OUTPUT_BYTES: u64 = 224 * 1024 * 1024;
 
 type WorkerResult = Result<Outcome, IngestError>;
 
+/// The worker's exit code when a parser panicked on the file. Release builds abort on a panic
+/// (0xC0000409 on Windows, a signal elsewhere), which looks like a reader that could not run;
+/// the worker's own hook ends it with this code instead, so a broken file stays a broken file.
+pub const PARSER_STOPPED: i32 = 101;
+
 /// Worker side: stdin → extract → JSON on stdout. Returns the process exit code.
 #[must_use]
 pub fn worker_main() -> i32 {
+    std::panic::set_hook(Box::new(|_| std::process::exit(PARSER_STOPPED)));
     let mut input = Vec::new();
     let cap = u64::try_from(MAX_INPUT_BYTES).unwrap_or(u64::MAX) + 1024;
     if std::io::stdin()
@@ -124,9 +130,9 @@ pub fn run(exe: &Path, file_name: &str, bytes: &[u8], timeout: Duration) -> Work
         // A parser crash on a hostile or broken file ends here, not in the app.
         // `code()` is the process's exit code, on Windows the NTSTATUS (0xC0000135: a library
         // it could not load); none when a signal ended it.
-        // 101 is a Rust panic: a parser stopped on this file, which is the file's problem.
+        // A parser that panicked on this file exits with `PARSER_STOPPED`: the file's problem.
         return Err(match status.code() {
-            Some(101) => {
+            Some(PARSER_STOPPED) => {
                 IngestError::Corrupt("worker exited: parser stopped on this file".to_owned())
             }
             code => IngestError::WorkerCrashed(
