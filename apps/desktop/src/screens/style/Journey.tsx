@@ -50,7 +50,7 @@ export function Journey({ o, waiting, analyzed, notRead, onAdd, build }: {
     },
     {
       key: "approval", title: "אישור", figure: waiting === 0 ? "הכול מאושר" : waiting === 1 ? "אחד מחכה לך" : `${waiting} מחכים לך`,
-      line: "אחד-אחד: להשתמש, לערוך, או לא צריך.",
+      line: "הפרופיל נכנס לשימוש לבד. רק פרשנות של תוצאות מחכה לעין שלך.",
       action: waiting > 0 ? "לאשר עכשיו ↓" : "אין מה לאשר",
       state: waiting > 0 ? "warn" : notRead > 0 && !build ? "next" : "done", run: scrollTo("style-queue-title"), disabled: false,
     },

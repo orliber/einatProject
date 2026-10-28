@@ -157,9 +157,10 @@ test("the report page writes and approves the section in focus with the keyboard
   await expect(page.getByRole("complementary", { name: "תוכן הדוח" })).toContainText("מאושרים");
 });
 
-// Round 46: from the tab to approving one thing is two clicks, and the page stays accessible
-// while it asks. The report is invented text, made in the page.
-test("the style page asks about one thing at a time", async ({ page }) => {
+// D-138: one upload, and the report is read, learned and put in use, with no approving one
+// by one; what was learned is listed, and the page stays accessible. The report is invented
+// text, made in the page.
+test("a style report is read and learned by itself after one upload", async ({ page }) => {
   await unlock(page);
   await page.getByRole("button", { name: "הסגנון שלי", exact: true }).first().click();
   const report = "סיכום\nלסיכום, נראה כי הילד הבדוי סקרן ובעל יכולות טובות. מומלץ להמשיך במעקב.\n";
@@ -169,14 +170,15 @@ test("the style page asks about one thing at a time", async ({ page }) => {
     input.files = files.files;
     input.dispatchEvent(new Event("change", { bubbles: true }));
   }, report);
-  await page.getByRole("button", { name: "שמירת הקטעים שסומנו" }).click();
-  await page.getByRole("button", { name: /ובניית הפרופיל/ }).click();
-  const queue = page.getByRole("region", { name: "לאשר אחד-אחד" });
-  await expect(queue).toContainText(/1 מתוך \d/);
+  // In the preview every request is reviewed first: each one is sent from its review.
+  for (let i = 0; i < 2; i++) {
+    const review = page.getByRole("dialog", { name: /לפני שליחה/ });
+    if (await review.isVisible({ timeout: 5000 }).catch(() => false)) await review.getByRole("button", { name: /שליחה/ }).click();
+  }
+  await expect(page.getByText(/הפרופיל בשימוש, גרסה 1/)).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("region", { name: "לאשר אחד-אחד" })).toHaveCount(0);
   await expect(page.getByRole("list", { name: "המסלול" })).toBeVisible();
   await expectAccessible(page);
-  await queue.getByRole("button", { name: "להשתמש בזה" }).click();
-  await expect(queue).toContainText(/2 מתוך \d/);
   await page.getByRole("button", { name: /איך את כותבת/ }).click();
   await expect(page.getByRole("region", { name: "איך את כותבת" })).toBeVisible();
   await expectAccessible(page);
