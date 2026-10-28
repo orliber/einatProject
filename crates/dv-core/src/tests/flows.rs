@@ -1694,3 +1694,41 @@ fn approving_every_clean_draft_takes_only_what_the_core_still_sees_clean_and_onc
         .count();
     assert_eq!(still, proposed.len() - clean);
 }
+
+#[test]
+fn a_number_in_no_source_stays_a_note_after_a_reload_and_approve_all_holds_it_back() {
+    // D-150: found when the answer came, the note was lost on the next load, so "approve all"
+    // approved a paragraph with a score no material holds.
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let p = core
+        .prepare_section(&case, "background", "תנסח את הסעיף")
+        .unwrap();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({
+        "reply": "הנה",
+        "paragraphs": [
+            {"text": "[ילד] גדל עם הוריו.", "source_refs": ["S1"], "guide": 1},
+            {"text": "בבדיקה קיבל [ילד] ציון 143.", "source_refs": ["S1"], "guide": 1},
+        ],
+        "questions": [], "missing": [], "contradictions": [],
+    })));
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    let shown: Vec<ParagraphView> = core
+        .case_detail(&case)
+        .unwrap()
+        .sections
+        .into_iter()
+        .find(|s| s.key == "background")
+        .unwrap()
+        .paragraphs;
+    let invented = shown.iter().find(|p| p.text.contains("143")).unwrap();
+    assert!(
+        invented.warnings.iter().any(|w| w.contains("143")),
+        "{:?}",
+        invented.warnings
+    );
+    let clean = shown.iter().find(|p| !p.text.contains("143")).unwrap();
+    assert!(clean.warnings.is_empty(), "{:?}", clean.warnings);
+    let ids: Vec<String> = shown.iter().map(|p| p.id.clone()).collect();
+    assert_eq!(core.approve_clean_paragraphs(&case, &ids).unwrap(), 1);
+}
