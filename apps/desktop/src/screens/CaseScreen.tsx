@@ -286,7 +286,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     [caseId, startReview, track, reload, ai],
   );
 
-  /** D-141: every clean draft approved in one call; a draft with a note waits for her eye. */
+  /** D-139: every clean draft approved in one call; a draft with a note waits for her eye. */
   const approveAll = async (ids: string[], held: number) => {
     setError(null);
     try {
@@ -598,7 +598,7 @@ function Contents(props: {
   onSort: (() => void) | undefined;
   onConsent: () => void;
   onFinish: () => void;
-  /** Every draft waiting, approved in one call: the ones with nothing to look at (D-141). */
+  /** Every draft waiting, approved in one call: the ones with nothing to look at (D-139). */
   onApproveAll: (ids: string[], held: number) => void;
 }) {
   const { detail, jobs, view } = props;

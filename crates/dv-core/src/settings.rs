@@ -102,7 +102,7 @@ impl Core {
 
     /// How long Claude may think, by task and by the speed chosen in settings. Sorting and the
     /// small jobs (one paragraph, a check, one report's style) think little whatever the
-    /// setting, and "thorough" deepens only them by one step (D-139); drafting and consultation
+    /// setting, and "thorough" deepens only them by one step (D-137); drafting and consultation
     /// think at the chosen speed.
     pub(crate) fn model_for(&mut self, task: Task) -> Result<ModelConfig, CoreError> {
         let v = self.vault_ref()?;

@@ -261,7 +261,7 @@ impl Core {
 
     /// "✓ לאשר" on the report page: the paragraphs she sees waiting, in one call, learned
     /// from once. Approving them one by one loaded and saved the style learning for each
-    /// paragraph, which made a long section slow to approve (D-138).
+    /// paragraph, which made a long section slow to approve (D-136).
     pub fn approve_paragraphs(
         &mut self,
         case_id: &str,

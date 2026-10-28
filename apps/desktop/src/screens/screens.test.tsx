@@ -295,7 +295,7 @@ describe("writing the report", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "✓ לאשר" })).toBeNull());
   });
 
-  it("every clean draft is approved with one press from the contents (D-141)", async () => {
+  it("every clean draft is approved with one press from the contents (D-139)", async () => {
     const { user, calls } = await openApp();
     const page = await openCase(user);
     for (let i = 0; i < 2; i++) {

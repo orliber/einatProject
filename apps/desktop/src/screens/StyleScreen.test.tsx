@@ -104,7 +104,7 @@ describe("StyleScreen (round 46)", () => {
     await user.click(screen.getByRole("button", { name: /שליחה/ }));
     expect(await screen.findByText(/בניית פרופיל הסגנון ·/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /שליחה/ }));
-    // The profile is put in use as it came (D-140); items are turned off later, not approved one by one.
+    // The profile is put in use as it came (D-138); items are turned off later, not approved one by one.
     await vi.waitFor(() => expect(calls).toContain("approve_style_draft"));
     const order = calls.filter((c) => c !== "style_overview" && c !== "send_progress");
     expect(order).toEqual(["prepare_style_analysis", "send_style_analysis", "prepare_style_profile", "send_style_profile", "approve_style_draft"]);

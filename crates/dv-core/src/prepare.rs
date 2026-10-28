@@ -1197,7 +1197,7 @@ impl Core {
                 "ניסוח מהנקודות שלך הוא לסעיפים שאת כותבת בעצמך.".to_owned(),
             ));
         }
-        // A paragraph worded again is a small job; a whole section is not (D-139).
+        // A paragraph worded again is a small job; a whole section is not (D-137).
         let model = if ask.replaces.is_some() {
             self.model_for(Task::Light)?
         } else {

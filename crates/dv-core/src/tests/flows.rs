@@ -1364,7 +1364,7 @@ fn the_requests_use_the_chosen_model_and_speed() {
     }
 }
 
-/// Small jobs think little, whatever the speed chosen for drafting (D-139).
+/// Small jobs think little, whatever the speed chosen for drafting (D-137).
 #[test]
 fn small_jobs_think_little_and_sections_at_the_chosen_speed() {
     let mut core = Core::for_tests(tempfile::tempdir().unwrap().keep().as_path(), None);

@@ -68,7 +68,7 @@ export function StyleScreen() {
     });
   };
 
-  /** One upload, and the rest runs by itself (D-140): the suggested parts are kept, the report
+  /** One upload, and the rest runs by itself (D-138): the suggested parts are kept, the report
    * is read for its style, and the profile is updated. The parts can still be changed from
    * the report's row; nothing of the report leaves without passing the filter and the gate. */
   async function pick(file: File) {
@@ -141,7 +141,7 @@ export function StyleScreen() {
       } else {
         const view = await ipc.sendStyleProfile(approval);
         markReviewed(null);
-        // The profile is used as it came (D-140): any item can be turned off or removed later
+        // The profile is used as it came (D-138): any item can be turned off or removed later
         // in "מה למדתי", rather than approving one by one first.
         await ipc.approveStyleDraft();
         notify(view.dropped > 0 ? `הפרופיל עודכן. ${view.dropped} פריטים נפסלו (העתקה או פרט מזהה).` : "הפרופיל עודכן. אפשר לראות ולכבות פריטים ב\"מה למדתי\".");
