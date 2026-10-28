@@ -541,6 +541,26 @@ describe("writing the report", () => {
     await waitFor(() => expect(contents).toHaveTextContent(/טיוטות מחכות לך|טיוטה אחת מחכה לך/));
   });
 
+  it("a material added while another is read is read right after it, with no click", async () => {
+    const { user, calls } = await openApp(true, false);
+    await openCase(user);
+    await user.click((screen.getAllByRole("button", { name: /חומרים/ })[0] as HTMLElement));
+    const list = await screen.findByRole("region", { name: "רשימת החומרים" });
+    const add = async (title: string, text: string) => {
+      await user.click(await screen.findByRole("button", { name: "הוספה לאבחונים קודמים" }));
+      await user.click(await screen.findByRole("menuitem", { name: "הדבקת טקסט" }));
+      await user.type(screen.getByLabelText("כותרת"), title);
+      await user.type(screen.getByLabelText("הטקסט"), text);
+      await user.click(screen.getByRole("button", { name: "שמירה בתיק" }));
+    };
+    await add("דוח קלינאית", "נמצא עיכוב קל בשפה.");
+    // The second one comes while the first is being read.
+    await add("דוח מרפאה בעיסוק", "נמצא קושי קל במוטוריקה עדינה.");
+    await waitFor(() => expect(within(list).queryByText(/עוד לא נקרא/)).not.toBeInTheDocument(), { timeout: 8000 });
+    expect(calls.filter((c) => c === "send_sort").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByRole("dialog", { name: /לפני שליחה/ })).not.toBeInTheDocument();
+  });
+
   it("with the review screen on, nothing is read by itself", async () => {
     const { user, calls } = await openApp();
     await openCase(user);

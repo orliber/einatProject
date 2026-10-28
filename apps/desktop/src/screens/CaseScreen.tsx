@@ -333,8 +333,10 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   };
 
   // Round 31: a material added while she works is read (sorted and summed up) by itself, when
-  // requests go without the review screen. Not on opening a case: only after an addition.
-  const reading = useRef<{ count: number; busy: boolean }>({ count: -1, busy: false });
+  // requests go without the review screen. Not on opening a case: only after an addition. A
+  // material added while one reading runs (several files at once, D-147) is read right after
+  // it, so the report page has everything sorted when she gets there.
+  const reading = useRef<{ count: number; busy: boolean; again: boolean }>({ count: -1, busy: false, again: false });
   const inputCount = detail?.inputs.length ?? -1;
   const unreadNow = detail?.routing.filter((r) => r.needs_sorting).length ?? 0;
   const consented = Boolean(detail?.meta.consent);
@@ -342,11 +344,21 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     const before = reading.current.count;
     reading.current.count = inputCount;
     if (before < 0 || inputCount <= before) return;
-    if (status.review_always || !consented || unreadNow === 0 || reading.current.busy) return;
-    reading.current.busy = true;
-    void startSort(true).finally(() => {
-      reading.current.busy = false;
-    });
+    if (status.review_always || !consented || unreadNow === 0) return;
+    if (reading.current.busy) {
+      reading.current.again = true;
+      return;
+    }
+    const readAll = () => {
+      reading.current.busy = true;
+      reading.current.again = false;
+      void startSort(true).finally(() => {
+        reading.current.busy = false;
+        // What was added meanwhile; with nothing left to read the core says so quietly.
+        if (reading.current.again) readAll();
+      });
+    };
+    readAll();
     // startSort is rebuilt on every render; the count decides when this runs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inputCount]);
