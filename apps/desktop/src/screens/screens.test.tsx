@@ -494,7 +494,9 @@ describe("writing the report", () => {
     expect(await screen.findByText(/הדוח נכתב ונבדק מול המקורות\. \d+ סעיפים מחכים לאישורך/, {}, { timeout: 20000 })).toBeInTheDocument();
     expect(calls).toContain("send_section");
     expect(calls).toContain("send_verify");
-    expect(calls.indexOf("send_verify")).toBeGreaterThan(calls.lastIndexOf("send_section"));
+    // D-143: each section is checked once it is in, beside the writing that is left.
+    expect(calls.indexOf("send_verify")).toBeGreaterThan(calls.indexOf("send_section"));
+    expect(calls.filter((c) => c === "send_verify").length).toBe(calls.filter((c) => c === "send_section").length);
     await user.click(within(screen.getByText(/הדוח נכתב ונבדק/).closest(".run-line") as HTMLElement).getByRole("button", { name: "סגירה" }));
     expect(screen.queryByText(/הדוח נכתב ונבדק/)).toBeNull();
   });
