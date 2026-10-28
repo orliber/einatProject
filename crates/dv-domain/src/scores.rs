@@ -1001,6 +1001,37 @@ fn named_at<'a>(words: &'a [&'a str], name_he: &'a str) -> impl Iterator<Item = 
     })
 }
 
+/// A number that says how old or how long, not a score (D-142): after "בן", "בת" or "בגיל",
+/// or before "שנים", "חודשים" and the like ("בן 5 שנים ו-4 חודשים"). An age that is not the
+/// child's is still said, by `check_age`.
+fn age_or_span(chars: &[char], start: usize, end: usize) -> bool {
+    const BEFORE: &[&str] = &["בן", "בת", "כבן", "כבת", "גיל", "בגיל", "לגיל"];
+    const AFTER: &[&str] = &[
+        "שנים",
+        "שנה",
+        "שנות",
+        "חודשים",
+        "חודש",
+        "שבועות",
+        "שבוע",
+        "ימים",
+    ];
+    let word = |w: &str| w.trim_matches(|c: char| !c.is_alphabetic()).to_owned();
+    let before: String = chars.get(..start).unwrap_or_default().iter().collect();
+    let after: String = chars.get(end..).unwrap_or_default().iter().collect();
+    let prev = before
+        .split_whitespace()
+        .last()
+        .map(word)
+        .unwrap_or_default();
+    let next = after
+        .split_whitespace()
+        .next()
+        .map(word)
+        .unwrap_or_default();
+    BEFORE.contains(&prev.as_str()) || AFTER.contains(&next.as_str())
+}
+
 /// Numbers in a sentence that could be scores: not part of a test's name ("ADOS-2",
 /// "WPPSI-IV"), not an age or a time ("5:4"), not inside a word.
 fn score_numbers(sentence: &str) -> Vec<String> {
@@ -1026,7 +1057,11 @@ fn score_numbers(sentence: &str) -> Vec<String> {
         let glued =
             before.is_some_and(char::is_alphabetic) || after.is_some_and(char::is_alphabetic);
         let time = after == Some(':') || before == Some(':');
-        if !(in_name || glued || time) {
+        // A date ("12.3.2026") has two points; a score never has more than one (D-142).
+        let date = chars
+            .get(start..i)
+            .is_some_and(|run| run.iter().filter(|c| **c == '.').count() >= 2);
+        if !(in_name || glued || time || date || age_or_span(&chars, start, i)) {
             if let Some(run) = chars.get(start..i) {
                 out.push(run.iter().collect());
             }
@@ -2081,6 +2116,20 @@ mod tests {
         // Numbers that are not scores: a test's name, an age, a sentence with no measure.
         assert!(check_scores("הועבר WPPSI-4 ו-ADOS-2 בגיל 5:4.", &sheets).is_empty());
         assert!(check_scores("[ילד] בן 5 ומגיע לגן 3 פעמים בשבוע.", &sheets).is_empty());
+        // D-142: an age in words and a session's date beside a measure are not scores…
+        assert!(check_scores(
+            "במטריצות, בגיל 5 שנים ו-4 חודשים, ב-12.3.2026, הושג ציון ממוצע גבוה (13).",
+            &sheets
+        )
+        .is_empty());
+        assert!(check_scores("[ילד] (בן 5) הציג באוצר מילים ציון 9.", &sheets).is_empty());
+        // …and a wrong score beside them still is.
+        let w = check_scores(
+            "במטריצות, בגיל 5 שנים ו-4 חודשים, ב-12.3.2026, הושג ציון (11).",
+            &sheets,
+        );
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(w[0].contains("11"), "{w:?}");
         // Short names are ordinary words: "מידע" alone is not a measure.
         assert!(
             check_scores("נמסר מידע מ-2 מקורות.", &[wppsi(&[("information", 8.0)])]).is_empty()
