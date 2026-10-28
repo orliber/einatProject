@@ -16,6 +16,15 @@ import { useAi } from "../../ai";
 
 const ACCEPT = ".docx,.doc,.odt,.rtf,.pdf,.txt,.jpg,.jpeg,.png,.tif,.tiff,.heic,application/vnd.oasis.opendocument.text,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/rtf,text/plain,image/jpeg,image/png,image/tiff";
 
+/** What became of one file of several chosen or dropped together (D-144). */
+interface FileResult {
+  name: string;
+  text: string;
+  /** Saved at once: the line offers "ביטול". */
+  savedId?: string | undefined;
+  failed?: boolean;
+}
+
 /** The materials of a case (round 49, D-088): what is still missing, one place to drop a file,
  *  and one list of everything, newest first. `onWrite` goes on to writing (sorting first). */
 export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => void }) {
@@ -29,7 +38,12 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
   // The slot a file is being chosen for (the "+" of that slot), so it lands in its place.
   const [uploadFor, setUploadFor] = useState<InputKind | undefined>(undefined);
   const [dropOn, setDropOn] = useState<string | null>(null);
-  const [reading, setReading] = useState<{ name: string; size: string } | null>(null);
+  const [reading, setReading] = useState<{ name: string; size: string; at?: string } | null>(null);
+  /** D-144: the files of one choice or drop, a line each, as they are read. */
+  const [batch, setBatch] = useState<FileResult[] | null>(null);
+  const batchRunning = useRef(false);
+  /** Resolves when the import window of a file in a batch closes (true: it was saved). */
+  const dialogDone = useRef<((saved: boolean) => void) | null>(null);
   const [writing, setWriting] = useState<{ kind: InputKind; input?: CaseInput } | null>(null);
   // Round 54 (D-094): the score table is a view of this stage, not a window. Scores left
   // unsaved on the way to another stage open again on the way back.
@@ -65,6 +79,7 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
 
   async function readFile(file: File, kind?: InputKind) {
     setError(null);
+    setBatch(null);
     setReading({ name: file.name, size: sizeBucket(file.size) });
     try {
       const preview = await timed("read", ipc.importDocument(caseId, file), sizeBucket(file.size));
@@ -87,13 +102,75 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
     }
   }
 
+  /** D-144: several files, read one after another through the same road as one file: a file
+   *  read in full is saved at once, one that was not opens the import window and the next waits
+   *  for it, and one that could not be read says why. Each file gets its own line. */
+  async function readFiles(files: File[], kind?: InputKind) {
+    if (files.length === 1 && files[0]) return readFile(files[0], kind);
+    if (files.length === 0 || batchRunning.current) return;
+    batchRunning.current = true;
+    setError(null);
+    setAutoSaved(null);
+    const results: FileResult[] = [];
+    setBatch([]);
+    try {
+      for (const [i, file] of files.entries()) {
+        setReading({ name: file.name, size: sizeBucket(file.size), at: `${i + 1} מתוך ${files.length}` });
+        let result: FileResult;
+        try {
+          const preview = await timed("read", ipc.importDocument(caseId, file), sizeBucket(file.size));
+          const clean = preview.body.trim() !== "" && preview.left_out.length === 0 && preview.warnings.length === 0;
+          const title = preview.title.trim() || file.name;
+          if (clean) {
+            const saved = await ipc.addInput(caseId, kind ?? preview.suggested_kind, preview.title.trim(), preview.body);
+            await reload();
+            result = { name: file.name, text: `"${title}" נשמר בתיק.`, savedId: saved.id };
+          } else {
+            setReading(null);
+            const kept = await new Promise<boolean>((resolve) => {
+              dialogDone.current = resolve;
+              setImporting({ preview, kind });
+            });
+            result = { name: file.name, text: kept ? `"${title}" נשמר בתיק אחרי הבדיקה בחלון.` : "לא נשמר: החלון נסגר בלי שמירה." };
+          }
+        } catch (e) {
+          result = { name: file.name, text: `לא נקרא: ${fail(e as never)}`, failed: true };
+        }
+        results.push(result);
+        setBatch([...results]);
+      }
+    } finally {
+      setReading(null);
+      batchRunning.current = false;
+    }
+  }
+
+  /** The import window of a file in a batch closed: the next file goes on. */
+  function importClosed(saved: boolean) {
+    setImporting(null);
+    const done = dialogDone.current;
+    dialogDone.current = null;
+    done?.(saved);
+  }
+
+  async function undoBatchItem(r: FileResult) {
+    if (!r.savedId) return;
+    const id = r.savedId;
+    setBatch((b) => b?.map((x) => (x.savedId === id ? { ...x, text: "הייבוא בוטל.", savedId: undefined } : x)) ?? null);
+    try {
+      await ipc.deleteInput(caseId, id);
+      await reload();
+    } catch (e) {
+      setError(fail(e as never));
+    }
+  }
+
   function onDrop(e: DragEvent, kind?: InputKind) {
     e.preventDefault();
     e.stopPropagation();
     setDragging(false);
     setDropOn(null);
-    const file = e.dataTransfer.files[0];
-    if (file) void readFile(file, kind);
+    void readFiles(Array.from(e.dataTransfer.files), kind);
   }
 
   /** Choose a file for one slot (or for none: the kind is then suggested from the file). */
@@ -204,6 +281,21 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
           <button type="button" className="btn btn-small" onClick={() => void undoAutoSave()}>ביטול</button>
         </div>
       )}
+      {batch && batch.length > 0 && (
+        <div className="note-sand stack" role="status" aria-label="הקבצים שנבחרו">
+          <ul className="stack" style={{ gap: 4, margin: 0, paddingInlineStart: 18 }}>
+            {batch.map((r, i) => (
+              <li key={`${i}-${r.name}`} className={r.failed ? "row warn-text" : "row"}>
+                <span className="grow"><b>{r.name}</b>: {r.text}</span>
+                {r.savedId && <button type="button" className="btn btn-small" onClick={() => void undoBatchItem(r)}>ביטול</button>}
+              </li>
+            ))}
+          </ul>
+          {!reading && !importing && (
+            <button type="button" className="btn btn-small" onClick={() => setBatch(null)}>סגירה</button>
+          )}
+        </div>
+      )}
       {detail.meta.follows && <FollowUpPanel api={api} />}
       <div className="view-body materials-body">
         <ul className="needs" aria-label="מה עוד חסר">
@@ -229,11 +321,11 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
         <div className={`dropzone wide${dropOn === "any" ? " over" : ""}`} {...dropProps("any")}>
           <UploadIcon />
           {reading ? (
-            <div className="grow"><WaitLine task="read" speed={reading.size} delay={0} label={`קוראת את ${reading.name} ומסתירה פרטים מזהים`} /></div>
+            <div className="grow"><WaitLine task="read" speed={reading.size} delay={0} label={`קוראת את ${reading.name}${reading.at ? ` (${reading.at})` : ""} ומסתירה פרטים מזהים`} /></div>
           ) : (
             <span>גוררים לכאן Word, ‏PDF או ODT, או <button type="button" className="link-btn" onClick={() => chooseFile()}>בוחרים קובץ</button></span>
           )}
-          <input ref={fileRef} type="file" accept={ACCEPT} hidden aria-label="העלאת מסמך" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; const k = uploadFor; setUploadFor(undefined); if (f) void readFile(f, k); }} />
+          <input ref={fileRef} type="file" accept={ACCEPT} multiple hidden aria-label="העלאת מסמך" onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ""; const k = uploadFor; setUploadFor(undefined); void readFiles(fs, k); }} />
         </div>
 
         <section className="materials-list" aria-label="רשימת החומרים">
@@ -304,8 +396,8 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
         </Dialog>
       )}
       {importing && (
-        <ImportDialog caseId={caseId} preview={importing.preview} kind={importing.kind} onClose={() => setImporting(null)}
-          onSaved={async () => { setImporting(null); await reload(); notify("המסמך נשמר בתיק."); }} />
+        <ImportDialog caseId={caseId} preview={importing.preview} kind={importing.kind} onClose={() => importClosed(false)}
+          onSaved={async () => { importClosed(true); await reload(); notify("המסמך נשמר בתיק."); }} />
       )}
       {choosing && routeOf(choosing.id) && (
         <SectionsDialog api={api} input={choosing} route={routeOf(choosing.id) as MaterialRouting} titleOf={titleOf}

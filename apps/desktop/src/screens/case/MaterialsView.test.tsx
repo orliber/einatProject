@@ -4,7 +4,7 @@
 // with what will be hidden marked, and deleting, restoring and editing, failures included.
 // The demo core cannot read a file through the IPC mock, so the reading is answered here.
 // Every name is invented.
-import { configure, render, screen, waitFor, within } from "@testing-library/react";
+import { configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { clearKept } from "../../kept";
 import type { ImportPreview } from "../../ipc/client";
@@ -143,6 +143,60 @@ describe("the materials of a case", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(why);
     expect(calls.some((c) => c.cmd === "add_input")).toBe(false);
     expect(screen.getByRole("button", { name: "בוחרים קובץ" })).toBeInTheDocument();
+  });
+
+  it("several files chosen at once are read one after another, through the same window, each with its own line (D-144)", async () => {
+    const why = "הקובץ מוצפן בסיסמה.";
+    let n = 0;
+    const { user, calls } = await openMaterials((cmd) => {
+      if (cmd !== "import_document") return undefined;
+      n += 1;
+      if (n === 1) return read({ title: "סיכום א בדוי" });
+      if (n === 2) return read({ title: "סיכום ב בדוי", left_out: ["כותרת עליונה בדויה"] });
+      throw refused(why);
+    });
+    await user.upload(upload(), [file("א.docx"), file("ב.docx"), file("ג.docx")]);
+    // The second was not read in full: its window opens, and the third waits for it.
+    const window = await screen.findByRole("dialog", { name: "ייבוא מסמך" });
+    expect(within(window).getByText("כותרת עליונה בדויה")).toBeInTheDocument();
+    expect(calls.filter((c) => c.cmd === "import_document")).toHaveLength(2);
+    await user.click(within(window).getByRole("button", { name: "שמירה בתיק" }));
+    const lines = await screen.findByRole("status", { name: "הקבצים שנבחרו" });
+    await within(lines).findByText(/לא נקרא/);
+    const items = within(lines).getAllByRole("listitem").map((li) => li.textContent);
+    expect(items).toEqual([
+      'א.docx: "סיכום א בדוי" נשמר בתיק.ביטול',
+      'ב.docx: "סיכום ב בדוי" נשמר בתיק אחרי הבדיקה בחלון.',
+      `ג.docx: לא נקרא: ${why}`,
+    ]);
+    expect(calls.filter((c) => c.cmd === "import_document")).toHaveLength(3);
+    expect(calls.filter((c) => c.cmd === "add_input")).toHaveLength(2);
+    expect(await within(list()).findByText("6 חומרים")).toBeInTheDocument();
+
+    // The one saved at once has its own way back.
+    await user.click(within(lines).getByRole("button", { name: "ביטול" }));
+    expect(await within(list()).findByText("5 חומרים")).toBeInTheDocument();
+    expect(within(lines).getAllByRole("listitem")[0]).toHaveTextContent("א.docx: הייבוא בוטל.");
+    await user.click(within(lines).getByRole("button", { name: "סגירה" }));
+    expect(screen.queryByRole("status", { name: "הקבצים שנבחרו" })).toBeNull();
+  });
+
+  it("several files dropped together are all read, a window closed without saving keeps nothing", async () => {
+    let n = 0;
+    const { calls } = await openMaterials((cmd) => {
+      if (cmd !== "import_document") return undefined;
+      n += 1;
+      return n === 1 ? read({ left_out: ["עמוד בדוי"] }) : read({ title: "סיכום שני בדוי" });
+    });
+    const zone = screen.getByText(/גוררים לכאן/).closest(".dropzone") as HTMLElement;
+    fireEvent.drop(zone, { dataTransfer: { files: [file("א.docx"), file("ב.docx")] } });
+    const window = await screen.findByRole("dialog", { name: "ייבוא מסמך" });
+    fireEvent.click(within(window).getByRole("button", { name: "ביטול" }));
+    const lines = await screen.findByRole("status", { name: "הקבצים שנבחרו" });
+    await waitFor(() => expect(within(lines).getAllByRole("listitem")).toHaveLength(2));
+    expect(within(lines).getAllByRole("listitem")[0]).toHaveTextContent("א.docx: לא נשמר: החלון נסגר בלי שמירה.");
+    expect(within(lines).getAllByRole("listitem")[1]).toHaveTextContent('ב.docx: "סיכום שני בדוי" נשמר בתיק.');
+    expect(calls.filter((c) => c.cmd === "add_input")).toHaveLength(1);
   });
 
   it("a material opens in its window from the keyboard, with what will be hidden marked, and Escape closes it", async () => {
