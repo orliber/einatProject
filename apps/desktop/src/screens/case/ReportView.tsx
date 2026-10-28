@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useApp } from "../../App";
 import { ipc, type CaseDetail, type ReportSettings, type TemplateView } from "../../ipc/client";
 import { kindLabel, STALE_EDIT } from "../../i18n/he";
@@ -10,7 +10,6 @@ import { useHoldUnsaved } from "../../components/Unsaved";
 import { setKept, useKept } from "../../kept";
 import { guideOpenKey } from "../../components/SectionGuide";
 import { LocalText, type LocalTextHandle } from "../../components/LocalText";
-import { useRotatingPlaceholder } from "../../components/Rotating";
 import { PARAGRAPH_HINTS } from "../../i18n/suggestions";
 import { ParagraphVersions } from "../../components/ParagraphVersions";
 import { isCombo, KEYS } from "../../shortcuts";
@@ -166,7 +165,7 @@ export function pageLook(template: TemplateView | null, settingsFont: string | n
   return { style, fromTemplate };
 }
 
-const PARA_CHANGES: [string, string][] = [
+const PARA_CHANGES: readonly (readonly [string, string])[] = [
   ["לקצר", "קצרי את הפסקה הבאה ושמרי על כל הממצאים שבה."],
   ["לנסח אחרת", "נסחי מחדש את הפסקה הבאה, באותו תוכן ובלי להוסיף עובדות."],
   ["להרחיב", "הרחיבי את הפסקה הבאה, רק ממה שיש במקורות."],
@@ -182,32 +181,6 @@ export function draftRequest(sectionKey: string, brief: string): string | undefi
   if (!wish) return undefined;
   const base = DERIVED.includes(sectionKey) ? DRAFT_FROM_APPROVED : DRAFT_FROM_SOURCES;
   return `${base} מה שחשוב לי שייכתב בסעיף: ${wish}`;
-}
-
-/** "או במילים שלך" inside an open card. Its changing hint is a timer, so it lives here, in
- *  the card, and not in the section: fifteen closed cards run no timers. Enter sends. */
-function WishBox({ boxRef, hints, wish, typing, onText, onEmptyChange, onSend }: {
-  boxRef: RefObject<LocalTextHandle | null>;
-  hints: readonly string[];
-  wish: string;
-  typing: boolean;
-  onText: (text: string) => void;
-  onEmptyChange: (empty: boolean) => void;
-  onSend: () => void;
-}) {
-  const hint = useRotatingPlaceholder(hints, typing);
-  return (
-    <label className="stack small muted" style={{ gap: 4 }}>
-      או במילים שלך
-      <LocalText ref={boxRef} className="textarea" rows={2} initial={wish} placeholder={hint}
-        onText={onText} onEmptyChange={onEmptyChange}
-        onKeyDown={(e) => {
-          if (e.key !== "Enter" || e.shiftKey) return;
-          e.preventDefault();
-          onSend();
-        }} />
-    </label>
-  );
 }
 
 /** A small card next to what opened it; Escape or a click outside closes it. */
@@ -305,10 +278,6 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
   /** The paragraph whose delete button asks "למחוק?". */
   const [deleting, setDeleting] = useState<string | null>(null);
   const holdLive = useHoldUnsaved(caseId, `פסקה בסעיף "${s.title}"`, editing?.text ?? null);
-  // "In your own words" for Claude: one wish, kept while a card closes and another opens.
-  const [wish, setWish] = useState("");
-  const [wishEmpty, setWishEmpty] = useState(true);
-  const paraWish = useRef<LocalTextHandle>(null);
   // "מה חשוב לך שייכתב כאן?" (round 48): kept with the section while the vault is open, in
   // memory only, like the points of her own sections; it leaves only inside the request.
   const [brief, setBrief] = useKept(`case:${caseId}:report:${s.key}:brief`, "");
@@ -382,14 +351,6 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
     setBrief(typed);
     void ipc.keepDraftBrief(s.key, typed, keep).then((b) => qc.setQueryData(["draftBriefs"], b), () => undefined);
     void write(draftRequest(s.key, wish));
-  }
-
-  /** The wish in a box, taken out of it to be sent; `null` when there is nothing to send. */
-  function takeWish(box: RefObject<LocalTextHandle | null>): string | null {
-    const w = box.current?.value() ?? "";
-    if (!w.trim()) return null;
-    box.current?.set("");
-    return w;
   }
 
   async function save() {
@@ -495,20 +456,12 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
             )}
             {paraPop === p.id && (
               <Popover label="מה לשנות בפסקה" onClose={() => setParaPop(null)}>
-                <b>מה לשנות בפסקה הזאת?</b>
-                <div className="row wrap-row">
-                  {PARA_CHANGES.map(([label, text]) => (
-                    <button key={label} type="button" className="pill-btn"
-                      onClick={() => void write(`${text} הפסקה: "${p.text}"`, p.id)}>{label}</button>
-                  ))}
-                </div>
-                <WishBox boxRef={paraWish} hints={PARAGRAPH_HINTS} wish={wish} typing={!wishEmpty} onText={setWish} onEmptyChange={setWishEmpty}
-                  onSend={() => { const w = takeWish(paraWish); if (w !== null) void write(`${w} הפסקה: "${p.text}"`, p.id); }} />
-                <div className="a4-pop-foot">
-                  <span className="small muted grow">{p.status === "approved" ? "יופיע ליד הקיים, ויחליף אותו רק באישורך." : "יחליף את הפסקה בטיוטה."}</span>
-                  <button type="button" className="btn btn-primary btn-small" disabled={wishEmpty}
-                    onClick={() => { const w = takeWish(paraWish); if (w !== null) void write(`${w} הפסקה: "${p.text}"`, p.id); }}>שליחה</button>
-                </div>
+                <BriefBox id={`para-${p.id}`} title="מה לשנות בפסקה הזאת?" chips={PARA_CHANGES} chipsTitle="שינויים מהירים"
+                  hint="בחרי כיוון, או כתבי במילים שלך. רק הפסקה הזאת תנוסח מחדש."
+                  placeholder={PARAGRAPH_HINTS[0] ?? ""} recent={briefs.data?.recent} sendLabel="✦ לנסח מחדש" busy={busy}
+                  foot={p.status === "approved" ? "יופיע ליד הקיים, ויחליף אותו רק באישורך." : "יחליף את הפסקה בטיוטה."}
+                  onSend={(w) => { if (w.trim()) void write(`${w} הפסקה: "${p.text}"`, p.id); }}
+                  onCancel={() => setParaPop(null)} />
               </Popover>
             )}
           </span>
