@@ -58,6 +58,8 @@ function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
       await timed("rekey", ipc.changePassword(current, withRecovery, pw), "password");
       await qc.invalidateQueries({ queryKey: ["backup"] });
       await qc.invalidateQueries({ queryKey: ["security"] });
+      // The backup made before no longer opens: "ready" is read afresh, never shown from before.
+      qc.removeQueries({ queryKey: ["readiness"] });
       notify("הסיסמה הוחלפה. כדאי לגבות עכשיו: גיבויים קודמים נפתחים רק בסיסמה הקודמת.");
       onClose();
     } catch (err) {
