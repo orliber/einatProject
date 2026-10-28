@@ -464,6 +464,11 @@ describe("before the first report (D3 / D-112)", () => {
     expect(steps[0]).toHaveAttribute("aria-current", "step");
     expect(steps[0]).toHaveTextContent("מתחילים כאן");
     expect(steps.slice(1).every((li) => !li.hasAttribute("aria-current"))).toBe(true);
+    // D-138: what is learned is used at once; the path does not promise otherwise.
+    expect(steps[2]).not.toHaveTextContent("שום דבר לא נכנס לשימוש בלי האישור שלך");
+    expect(steps[2]).toHaveTextContent("לערוך, לכבות או למחוק");
+    // The lead names a place that is on the page ("מה התוכנה יודעת עלייך").
+    expect(screen.getByText(/מעלים דוח, והשאר קורה לבד/)).toHaveTextContent('ב"מה התוכנה יודעת עלייך"');
     // Still one heading and one action: the path explains, the button starts.
     expect(screen.getAllByRole("heading")).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: /הוספת דוח|להשתמש|לערוך|לא צריך/ })).toHaveLength(1);

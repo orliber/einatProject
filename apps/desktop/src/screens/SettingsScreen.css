@@ -125,8 +125,10 @@
 .narrow {
   width: 100px;
 }
-/* The privacy page opens with one line of status (round 50). */
-.privacy-status {
+/* The privacy page opens with one line of status (round 50): shield, sentence, button in a
+   row. As specific as `.settings .setting`, which would stand it in a column and stretch the
+   sentence's 280px basis into a tall empty gap. */
+.settings .privacy-status {
   flex-direction: row;
   align-items: center;
   gap: 16px;
@@ -238,10 +240,6 @@
 }
 .align-start {
   align-self: flex-start;
-}
-
-.warn-text {
-  color: var(--warn-ink);
 }
 
 /* "Ready for real cases" (D-108): a counter on top, then one card per item: its mark, its

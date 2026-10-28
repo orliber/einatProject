@@ -10,6 +10,21 @@
   font-weight: 600;
   font-size: var(--text-sm);
   min-height: 28px;
+  /* One line, never squeezed: the case's name and the stages give way, not the chip. */
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.update-chip-short {
+  display: none;
+}
+/* A narrow bar (both bars are size containers): the short words. */
+@container (max-width: 1000px) {
+  .update-chip-long {
+    display: none;
+  }
+  .update-chip-short {
+    display: inline;
+  }
 }
 .update-chip:hover {
   background: var(--surface);

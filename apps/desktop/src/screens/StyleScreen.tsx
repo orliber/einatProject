@@ -148,9 +148,9 @@ export function StyleScreen() {
         const view = await ipc.sendStyleProfile(approval);
         markReviewed(null);
         // The profile is used as it came (D-138): any item can be turned off or removed later
-        // in "מה למדתי", rather than approving one by one first.
+        // in "מה התוכנה יודעת עלייך", rather than approving one by one first.
         await ipc.approveStyleDraft();
-        notify(view.dropped > 0 ? `הפרופיל עודכן. ${view.dropped} פריטים נפסלו (העתקה או פרט מזהה).` : "הפרופיל עודכן. אפשר לראות ולכבות פריטים ב\"מה למדתי\".");
+        notify(view.dropped > 0 ? `הפרופיל עודכן. ${view.dropped} פריטים נפסלו (העתקה או פרט מזהה).` : "הפרופיל עודכן. אפשר לראות ולכבות פריטים ב\"מה התוכנה יודעת עלייך\".");
       }
       recordDuration("draft", status.speed, Date.now() - started);
       setSending(null);
@@ -218,7 +218,7 @@ export function StyleScreen() {
             התוכנה לומדת מהדוחות שלך איך את כותבת, ומה את מסיקה מכל ממצא.
             {/* Before the first report the four stages are drawn below (D-112); after it, the journey shows them. */}
             {o.sources.length > 0 && " ארבעה שלבים: הדוח נכנס, נקרא, את מאשרת, וזה משמש בכל טיוטה."}
-            {" "}מעלים דוח, והשאר קורה לבד. כל פריט אפשר לכבות או למחוק ב"מה למדתי".
+            {" "}מעלים דוח, והשאר קורה לבד. כל פריט אפשר לכבות או למחוק ב"מה התוכנה יודעת עלייך".
           </p>
           {o.demo_mode && <p className="hint">מצב הדגמה: ניתוח לדוגמה בלבד.</p>}
         </header>

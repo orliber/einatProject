@@ -102,6 +102,32 @@ describe("the report page, one section in focus", () => {
     expect(within(first).queryByRole("group", { name: "מה לשנות בטיוטה" })).toBeNull();
   });
 
+  it("a change with nothing chosen says what is missing instead of doing nothing", async () => {
+    const { calls, user, page } = await openReport();
+    const first = focused(page);
+    if (!first) throw new Error("no section in focus");
+    await user.click(await within(first).findByRole("button", { name: "✦ לנסח" }));
+    const row = await within(first).findByRole("group", { name: /^הטיוטה של/ });
+    await user.click(within(row).getByRole("button", { name: "✦ לשנות" }));
+    const change = within(first).getByRole("group", { name: "מה לשנות בטיוטה" });
+    // The foot does not promise that an empty box sends.
+    expect(within(change).queryByText(/גם בלי לכתוב כלום/)).toBeNull();
+    const sent = () => calls.filter((c) => c.cmd === "prepare_section").length;
+    const before = sent();
+    await user.click(within(change).getByRole("button", { name: "✦ לנסח מחדש" }));
+    expect(within(change).getByRole("alert")).toHaveTextContent("בחרי שינוי מהיר, או כתבי מה לשנות.");
+    const box = within(change).getByRole("textbox");
+    expect(box).toHaveFocus();
+    expect(box).toHaveAccessibleDescription("בחרי שינוי מהיר, או כתבי מה לשנות.");
+    await user.keyboard("{Enter}");
+    expect(sent()).toBe(before);
+    // A quick change is enough; the sentence goes as soon as she chooses.
+    await user.click(within(change).getByRole("button", { name: "קצר יותר" }));
+    expect(within(change).queryByRole("alert")).toBeNull();
+    await user.click(within(change).getByRole("button", { name: "✦ לנסח מחדש" }));
+    await waitFor(() => expect(sent()).toBe(before + 1));
+  });
+
   it("the box sends a style with her words, and keeps the wish for the section when she asks (D-140)", async () => {
     const { calls, user, page } = await openReport();
     const first = focused(page);

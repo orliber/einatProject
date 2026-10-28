@@ -55,7 +55,7 @@
   cursor: pointer;
   direction: ltr;
 }
-.inst:hover:not(:disabled) {
+.inst:not(.on):hover:not(:disabled) {
   border-color: var(--primary);
   color: var(--primary);
 }
@@ -257,9 +257,11 @@
 .preview-empty {
   margin-top: 14px;
 }
+/* Left to right like the name before it ("WPPSI-IV · טיוטה"): in a right-to-left run the
+   leading space and dot moved to the far end, and the word stuck to the name. */
 .inst-draft {
   unicode-bidi: isolate;
-  direction: rtl;
+  direction: ltr;
   font-weight: 400;
   opacity: 0.8;
 }
