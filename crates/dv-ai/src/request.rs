@@ -270,7 +270,7 @@ const SECTION_SCHEMA: &str = r#"{
 }"#;
 
 /// The output ceiling of a request whose answer is long: a section, the whole-report check, the
-/// style profile (D-140). Every request is streamed (D-035), so a long answer meets no timeout;
+/// style profile (D-143). Every request is streamed (D-035), so a long answer meets no timeout;
 /// the model's own thinking counts toward this ceiling too, and on the default model it thinks
 /// whenever it finds the task hard. An answer that reaches the ceiling is cut, and a cut answer
 /// is lost whole (a draft is one JSON object), so the ceiling stays well above any real answer.
@@ -499,7 +499,7 @@ pub fn build_research_request(model: &ModelConfig, input: &ResearchInput) -> Val
 mod tests {
     use super::*;
 
-    /// D-140: room for the model's thinking and the whole answer, within what every company's
+    /// D-143: room for the model's thinking and the whole answer, within what every company's
     /// translation accepts (`dv-egress::providers` refuses more than 64,000).
     #[test]
     fn output_ceilings_leave_room_for_thinking_and_stay_within_every_provider() {

@@ -309,7 +309,7 @@ fn an_answer_that_cannot_be_read_still_counts_as_sent_and_is_not_sent_again() {
         1
     );
     assert_eq!(sends_logged(&mut core), 1);
-    // Within the send it went once more, the same bytes (D-140), and the log says so.
+    // Within the send it went once more, the same bytes (D-143), and the log says so.
     let attempts = t.attempts();
     assert_eq!(attempts.len(), 2);
     assert_eq!(attempts[0], attempts[1]);

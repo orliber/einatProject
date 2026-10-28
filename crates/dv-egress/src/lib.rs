@@ -324,12 +324,12 @@ impl RateLimit {
     }
 }
 
-/// The longest a request waits for a place in the minute window (D-141): a little more than
+/// The longest a request waits for a place in the minute window (D-144): a little more than
 /// the window itself, so an ordinary burst always gets through and a runaway loop still stops.
 pub(crate) const LIMIT_WAIT: Duration = Duration::from_secs(90);
 
 /// A request past the per-minute limit waits until the oldest one leaves the window, then goes
-/// (D-141), instead of failing at once. The lock is held only to look, never while waiting. The
+/// (D-144), instead of failing at once. The lock is held only to look, never while waiting. The
 /// emergency stop ends the wait of a request to a remote service; one that cannot get a place
 /// within `LIMIT_WAIT` is refused, as before.
 pub(crate) fn wait_for_place(limit: &Mutex<RateLimit>, remote: bool) -> Result<(), EgressError> {
@@ -825,7 +825,7 @@ mod tests {
         assert!(!l.allow());
     }
 
-    /// D-141: a full window waits for the first place to free, never holding the lock meanwhile.
+    /// D-144: a full window waits for the first place to free, never holding the lock meanwhile.
     #[test]
     fn a_full_minute_waits_for_a_place_instead_of_failing() {
         use std::cell::Cell;

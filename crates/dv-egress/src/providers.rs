@@ -718,7 +718,7 @@ mod tests {
             "application/json"
         );
         assert_eq!(out["generationConfig"]["maxOutputTokens"], 16000 + 8192);
-        // D-140: a long answer's ceiling with the thinking budget stays within the models' own.
+        // D-143: a long answer's ceiling with the thinking budget stays within the models' own.
         let mut long = b.clone();
         long["max_tokens"] = json!(64_000);
         let out = to_gemini(&canonical(&long, Provider::Gemini).unwrap());

@@ -1,7 +1,7 @@
 // Round 41: "write the whole report" as one piece of work in the background (master plan
 // 7.2). One click sorts what is not sorted yet, writes every section that has materials and no
 // text, three at a time, each showing up in the report as soon as it is in, and checks each
-// new draft against its sources as soon as it is in (D-143), beside the writing that is left.
+// new draft against its sources as soon as it is in (D-146), beside the writing that is left.
 // The screen shows one line: "the program is working,
 // 3 of 9", with "stop". Nothing enters the report without her approval.
 //
@@ -129,7 +129,7 @@ export async function runWholeReport(api: CaseApi, opts: { verify: boolean; ai: 
     if (stopping()) return;
 
     // 2. Every section with materials and no text yet, three at a time. Each new draft is
-    //    checked against its sources (when the check is on) as soon as it is in (D-143), one
+    //    checked against its sources (when the check is on) as soon as it is in (D-146), one
     //    check at a time beside the writing, so the checks do not wait for the last section.
     //    A section the check is not for (one written from the approved sections) is skipped. A
     //    check that did not come back is counted as such, never as checked.

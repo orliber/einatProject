@@ -145,7 +145,7 @@ describe("the materials of a case", () => {
     expect(screen.getByRole("button", { name: "בוחרים קובץ" })).toBeInTheDocument();
   });
 
-  it("several files chosen at once are read one after another, through the same window, each with its own line (D-144)", async () => {
+  it("several files chosen at once are read one after another, through the same window, each with its own line (D-147)", async () => {
     const why = "הקובץ מוצפן בסיסמה.";
     let n = 0;
     const { user, calls } = await openMaterials((cmd) => {

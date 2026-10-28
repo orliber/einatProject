@@ -203,7 +203,7 @@ fn every_error_has_a_next_step_that_fits_it() {
             CoreError::Ai(dv_ai::AiError::Format("x".into())),
             ErrorAction::Dismiss,
         ),
-        // Cut twice (D-140): the speed she sets is what is left to change.
+        // Cut twice (D-143): the speed she sets is what is left to change.
         (
             CoreError::Ai(dv_ai::AiError::Truncated),
             ErrorAction::settings("ai"),
@@ -1073,7 +1073,7 @@ impl Transport for Answers {
     }
 }
 
-/// D-140: an answer cut at the ceiling, or JSON that does not read, is asked for once more with
+/// D-143: an answer cut at the ceiling, or JSON that does not read, is asked for once more with
 /// the same approved bytes; the second answer is used, and both count toward the month.
 #[test]
 fn a_cut_or_broken_answer_is_asked_for_once_more_with_the_same_bytes() {

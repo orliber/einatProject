@@ -71,7 +71,7 @@ describe("writing the whole report in the background", () => {
     expect(runLine(r)).toBe("הדוח נכתב ונבדק מול המקורות. 4 סעיפים מחכים לאישורך");
   });
 
-  it("checks each section as soon as it is in, beside the writing that is left, one check at a time (D-143)", async () => {
+  it("checks each section as soon as it is in, beside the writing that is left, one check at a time (D-146)", async () => {
     const events: string[] = [];
     let writing = 0;
     let most = 0;

@@ -1001,7 +1001,7 @@ fn named_at<'a>(words: &'a [&'a str], name_he: &'a str) -> impl Iterator<Item = 
     })
 }
 
-/// A number that says how old or how long, not a score (D-142): after "בן", "בת" or "בגיל",
+/// A number that says how old or how long, not a score (D-145): after "בן", "בת" or "בגיל",
 /// or before "שנים", "חודשים" and the like ("בן 5 שנים ו-4 חודשים"). An age that is not the
 /// child's is still said, by `check_age`.
 fn age_or_span(chars: &[char], start: usize, end: usize) -> bool {
@@ -1057,7 +1057,7 @@ fn score_numbers(sentence: &str) -> Vec<String> {
         let glued =
             before.is_some_and(char::is_alphabetic) || after.is_some_and(char::is_alphabetic);
         let time = after == Some(':') || before == Some(':');
-        // A date ("12.3.2026") has two points; a score never has more than one (D-142).
+        // A date ("12.3.2026") has two points; a score never has more than one (D-145).
         let date = chars
             .get(start..i)
             .is_some_and(|run| run.iter().filter(|c| **c == '.').count() >= 2);
@@ -2116,7 +2116,7 @@ mod tests {
         // Numbers that are not scores: a test's name, an age, a sentence with no measure.
         assert!(check_scores("הועבר WPPSI-4 ו-ADOS-2 בגיל 5:4.", &sheets).is_empty());
         assert!(check_scores("[ילד] בן 5 ומגיע לגן 3 פעמים בשבוע.", &sheets).is_empty());
-        // D-142: an age in words and a session's date beside a measure are not scores…
+        // D-145: an age in words and a session's date beside a measure are not scores…
         assert!(check_scores(
             "במטריצות, בגיל 5 שנים ו-4 חודשים, ב-12.3.2026, הושג ציון ממוצע גבוה (13).",
             &sheets

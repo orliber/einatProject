@@ -16,7 +16,7 @@ import { useAi } from "../../ai";
 
 const ACCEPT = ".docx,.doc,.odt,.rtf,.pdf,.txt,.jpg,.jpeg,.png,.tif,.tiff,.heic,application/vnd.oasis.opendocument.text,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/rtf,text/plain,image/jpeg,image/png,image/tiff";
 
-/** What became of one file of several chosen or dropped together (D-144). */
+/** What became of one file of several chosen or dropped together (D-147). */
 interface FileResult {
   name: string;
   text: string;
@@ -39,7 +39,7 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
   const [uploadFor, setUploadFor] = useState<InputKind | undefined>(undefined);
   const [dropOn, setDropOn] = useState<string | null>(null);
   const [reading, setReading] = useState<{ name: string; size: string; at?: string } | null>(null);
-  /** D-144: the files of one choice or drop, a line each, as they are read. */
+  /** D-147: the files of one choice or drop, a line each, as they are read. */
   const [batch, setBatch] = useState<FileResult[] | null>(null);
   const batchRunning = useRef(false);
   /** Resolves when the import window of a file in a batch closes (true: it was saved). */
@@ -102,7 +102,7 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
     }
   }
 
-  /** D-144: several files, read one after another through the same road as one file: a file
+  /** D-147: several files, read one after another through the same road as one file: a file
    *  read in full is saved at once, one that was not opens the import window and the next waits
    *  for it, and one that could not be read says why. Each file gets its own line. */
   async function readFiles(files: File[], kind?: InputKind) {

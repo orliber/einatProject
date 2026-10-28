@@ -208,7 +208,7 @@ fn parse_without_sources(
     Ok(reply)
 }
 
-/// Whether an answer that came back whole is worth one more try of the same request (D-140):
+/// Whether an answer that came back whole is worth one more try of the same request (D-143):
 /// it stopped at the output ceiling, or a request that asked for JSON got text that is not
 /// JSON. The model writes differently each time (its thinking above all), so the same request
 /// usually fits the second time. A refusal is not tried again (it would be refused again), and
@@ -313,7 +313,7 @@ mod tests {
         assert_eq!(parse_consult(&cut), Err(AiError::Truncated));
     }
 
-    /// D-140: a cut answer, and JSON that does not read, are tried once more; a refusal, a
+    /// D-143: a cut answer, and JSON that does not read, are tried once more; a refusal, a
     /// plain-text answer and JSON that reads are not.
     #[test]
     fn a_cut_or_unreadable_answer_is_worth_one_more_try() {

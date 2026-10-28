@@ -452,7 +452,7 @@ impl CoreError {
                 after_seconds: u32::try_from(*s).unwrap_or(u32::MAX),
             },
             CoreError::Egress(e) => egress_action(e),
-            // Cut twice at the ceiling (D-140): the speed setting is where it changes.
+            // Cut twice at the ceiling (D-143): the speed setting is where it changes.
             CoreError::Ai(dv_ai::AiError::Truncated) => ErrorAction::settings("ai"),
             // The answer came and was not usable; its approval is spent, so sending "again"
             // would do nothing. She asks again from the screen (a new request).
@@ -641,7 +641,7 @@ fn ai_he(e: &dv_ai::AiError, ai: &str) -> String {
         dv_ai::AiError::Refused(_) => {
             format!("{ai} סירב לענות על הבקשה הזו. אפשר לנסח אותה אחרת ולבקש שוב.")
         }
-        // Already sent twice (D-140), with room for a long answer: what is left to change is
+        // Already sent twice (D-143), with room for a long answer: what is left to change is
         // how long it thinks first, which she sets (the button opens that place).
         dv_ai::AiError::Truncated => format!(
             "התשובה של {ai} נקטעה כי הייתה ארוכה מדי, גם בניסיון נוסף, ולכן לא נשמרה. החומרים שמורים. בהגדרות אפשר לבחור \"מהיר\" ב\"מהירות התשובות\" ({ai} חושב אז פחות לפני שהוא כותב), ולבקש שוב. אפשר גם לבקש חלק מהסעיף בכל פעם."
@@ -814,7 +814,7 @@ pub struct Outgoing {
     /// The session it was approved in (`Core::session`): a lock in between ends it.
     session: u64,
     /// The approved bytes went out a second time in this send (one more try of an answer that
-    /// could not be used, D-140): said in the log.
+    /// could not be used, D-143): said in the log.
     again: std::sync::atomic::AtomicBool,
 }
 
@@ -837,7 +837,7 @@ impl Outgoing {
     /// The same, with the number of words Claude has written so far, as they arrive.
     ///
     /// An answer cut at the output ceiling, or JSON that does not read, is asked for once more
-    /// with the same approved bytes (D-140), as a busy service is (`dv-egress::retry`): the
+    /// with the same approved bytes (D-143), as a busy service is (`dv-egress::retry`): the
     /// model writes differently each time, and the approval is spent only by an answer the
     /// step can use. A larger ceiling would be bytes she did not approve, so the ceiling of the
     /// first request is already the large one. Both answers count toward the month. If the
@@ -879,7 +879,7 @@ impl Outgoing {
 }
 
 /// The token counts of an earlier answer to the same request added to `answer`'s, so the
-/// month counts what both cost (numbers only, D-140).
+/// month counts what both cost (numbers only, D-143).
 fn add_usage(answer: &mut Value, earlier: &Value) {
     let Some(before) = earlier.get("usage").and_then(Value::as_object) else {
         return;
