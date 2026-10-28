@@ -20,6 +20,17 @@ const MAX_OUTPUT_BYTES: u64 = 224 * 1024 * 1024;
 
 type WorkerResult = Result<Outcome, IngestError>;
 
+/// Windows exit codes (NTSTATUS) of a reader that could not start: a library it could not
+/// load or set up, no access to its own files, a broken image. The reader's doing, not the
+/// file's, so the reading is tried once more (D-135).
+const START_FAILURES: &[u32] = &[
+    0xC000_0135, // STATUS_DLL_NOT_FOUND
+    0xC000_0142, // STATUS_DLL_INIT_FAILED
+    0xC000_0022, // STATUS_ACCESS_DENIED
+    0xC000_007B, // STATUS_INVALID_IMAGE_FORMAT
+    0xC000_0139, // STATUS_ENTRYPOINT_NOT_FOUND
+];
+
 /// The worker's exit code when a parser panicked on the file. Release builds abort on a panic
 /// (0xC0000409 on Windows, a signal elsewhere), which looks like a reader that could not run;
 /// the worker's own hook ends it with this code instead, so a broken file stays a broken file.
@@ -130,16 +141,54 @@ pub fn run(exe: &Path, file_name: &str, bytes: &[u8], timeout: Duration) -> Work
         // A parser crash on a hostile or broken file ends here, not in the app.
         // `code()` is the process's exit code, on Windows the NTSTATUS (0xC0000135: a library
         // it could not load); none when a signal ended it.
-        // A parser that panicked on this file exits with `PARSER_STOPPED`: the file's problem.
-        return Err(match status.code() {
-            Some(PARSER_STOPPED) => {
-                IngestError::Corrupt("worker exited: parser stopped on this file".to_owned())
-            }
-            code => IngestError::WorkerCrashed(
-                code.map_or(u32::MAX, |c| u32::from_ne_bytes(c.to_ne_bytes())),
-            ),
-        });
+        return Err(exit_error(status.code()));
     }
     serde_json::from_slice::<WorkerResult>(&output)
         .map_err(|e| IngestError::Worker(e.to_string()))?
+}
+
+/// What a worker that did not end well means. `code` is the process's exit code, on Windows
+/// the NTSTATUS; none when a signal ended it.
+fn exit_error(code: Option<i32>) -> IngestError {
+    match code.map(|c| u32::from_ne_bytes(c.to_ne_bytes())) {
+        Some(c) if START_FAILURES.contains(&c) => IngestError::WorkerCrashed(c),
+        Some(c) if c == u32::from_ne_bytes(PARSER_STOPPED.to_ne_bytes()) => {
+            IngestError::Corrupt("worker exited: parser stopped on this file".to_owned())
+        }
+        // Anything else ended inside the reading (a memory ceiling, a stack overflow, a crash
+        // in a library): the file's doing, and never run a second time.
+        Some(c) => IngestError::Corrupt(format!("worker exited: {c:#x}")),
+        None => IngestError::Corrupt("worker exited: signal".to_owned()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_reader_that_could_not_start_is_tried_again() {
+        let code = |c: u32| Some(i32::from_ne_bytes(c.to_ne_bytes()));
+        for c in START_FAILURES {
+            let e = exit_error(code(*c));
+            assert_eq!(e, IngestError::WorkerCrashed(*c));
+            assert!(e.transient());
+        }
+        // A panic, an abort, a stack overflow, a memory ceiling, a signal: the file's doing.
+        for c in [
+            Some(101),
+            code(0xC000_0409),
+            code(0xC000_00FD),
+            code(0xC000_0017),
+            Some(134),
+            None,
+        ] {
+            let e = exit_error(c);
+            assert!(
+                matches!(&e, IngestError::Corrupt(m) if m.starts_with("worker exited")),
+                "{e:?}"
+            );
+            assert!(!e.transient(), "{e:?}");
+        }
+    }
 }

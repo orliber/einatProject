@@ -283,6 +283,32 @@ impl Core {
         Ok(u32::try_from(waiting.len()).unwrap_or(u32::MAX))
     }
 
+    /// "✓ לאשר את כל הטיוטות" (D-139): of the paragraphs she saw waiting, only those still
+    /// clean as the core sees them now: no note of any kind, and not a new wording of an
+    /// approved paragraph. What the screen showed may be older than the case.
+    pub fn approve_clean_paragraphs(
+        &mut self,
+        case_id: &str,
+        draft_ids: &[String],
+    ) -> Result<u32, CoreError> {
+        let clean: std::collections::HashSet<String> = self
+            .case_detail(case_id)?
+            .sections
+            .into_iter()
+            .flat_map(|s| s.paragraphs)
+            .filter(|p| {
+                p.status == DraftStatus::Proposed && p.warnings.is_empty() && p.replaces.is_none()
+            })
+            .map(|p| p.id)
+            .collect();
+        let ids: Vec<String> = draft_ids
+            .iter()
+            .filter(|id| clean.contains(id.as_str()))
+            .cloned()
+            .collect();
+        self.approve_paragraphs(case_id, &ids)
+    }
+
     /// "אישור כל הטיוטה": every paragraph still waiting in the section, as it stands.
     pub fn approve_section(&mut self, case_id: &str, section_key: &str) -> Result<u32, CoreError> {
         let v = self.vault_mut()?;
