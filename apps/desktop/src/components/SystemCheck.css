@@ -1,0 +1,122 @@
+/* "בדיקת מערכת" (D-148): one line per finding, its mark on the start side (RTL). */
+.syscheck-actions {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.syscheck-status:empty {
+  display: none;
+}
+.syscheck-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-muted);
+}
+.syscheck-meter {
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--sand-strong);
+}
+.syscheck-meter::-webkit-progress-bar {
+  background: var(--sand-strong);
+  border-radius: 3px;
+}
+.syscheck-meter::-webkit-progress-value {
+  background: var(--primary);
+  border-radius: 3px;
+}
+.syscheck-meter::-moz-progress-bar {
+  background: var(--primary);
+  border-radius: 3px;
+}
+.syscheck-done {
+  margin: 0;
+  font-weight: 700;
+  color: var(--ok);
+}
+.syscheck-done.bad {
+  color: var(--block);
+}
+.syscheck-done:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.syscheck-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.syscheck-group-title {
+  margin: 0 0 6px;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.syscheck-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.syscheck-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.syscheck-line.failed {
+  border-color: var(--block-line);
+  background: var(--block-soft);
+}
+.syscheck-line.warn {
+  border-color: var(--warn-line);
+  background: var(--warn-paper);
+}
+.syscheck-mark {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.syscheck-line.failed .syscheck-mark {
+  background: var(--block);
+  color: var(--surface);
+}
+.syscheck-line.warn .syscheck-mark {
+  background: var(--warn-ink);
+  color: var(--surface);
+}
+.syscheck-line.info .syscheck-mark,
+.syscheck-line.skipped .syscheck-mark {
+  background: var(--sand-strong);
+  color: var(--ink-muted);
+}
+.syscheck-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.syscheck-label {
+  font-weight: 600;
+}
+.syscheck-next {
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+}

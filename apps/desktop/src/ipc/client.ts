@@ -58,6 +58,10 @@ import type { SecurityItem } from "./generated/SecurityItem";
 import type { SecurityLayer } from "./generated/SecurityLayer";
 import type { SecurityStatus } from "./generated/SecurityStatus";
 import type { UnsavedEdit } from "./generated/UnsavedEdit";
+import type { CheckLine } from "./generated/CheckLine";
+import type { CheckState } from "./generated/CheckState";
+import type { SystemCheck } from "./generated/SystemCheck";
+import type { SystemCheckResult } from "./generated/SystemCheckResult";
 import type { SectionResult } from "./generated/SectionResult";
 import type { ParagraphCheck } from "./generated/ParagraphCheck";
 import type { Verdict } from "./generated/Verdict";
@@ -494,9 +498,16 @@ export const ipc = {
   installUpdate: () => run("install_update"),
   /** R7: the page of released versions, in her browser, to go back one version. */
   openReleasesPage: () => run("open_releases_page"),
+  /** "בדיקת מערכת" (D-148): one self-test, off the UI thread. Never sends anything from the
+   *  vault; the connection check is a TLS handshake only. */
+  systemCheck: (check: SystemCheck) => call("system_check", { check }),
 };
 
 export type {
+  CheckLine,
+  CheckState,
+  SystemCheck,
+  SystemCheckResult,
   FitMonth,
   Interpretation,
   InterpretationView,

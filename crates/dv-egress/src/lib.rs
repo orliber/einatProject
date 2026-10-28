@@ -21,12 +21,14 @@ pub mod google;
 pub mod name_model;
 mod pinning;
 pub mod providers;
+pub mod reach;
 pub mod sse;
 pub mod update;
 
 pub use providers::{
     transport_for, Provider, GEMINI_MODELS, LOCAL_MODELS, MISTRAL_MODELS, OPENAI_MODELS,
 };
+pub use reach::{reach_ai_service, Reach};
 
 pub const API_HOST: &str = "api.anthropic.com";
 const MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
