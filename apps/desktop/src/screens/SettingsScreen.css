@@ -242,10 +242,6 @@
   align-self: flex-start;
 }
 
-.warn-text {
-  color: var(--warn-ink);
-}
-
 /* "Ready for real cases" (D-108): a counter on top, then one card per item: its mark, its
    name and one line, and its button on the same line. */
 .ready-head {

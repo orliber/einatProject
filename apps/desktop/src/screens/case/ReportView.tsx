@@ -25,6 +25,9 @@ import { BriefBox, CHANGE_CHIPS, STYLE_CHIPS } from "./BriefBox";
 
 type Section = CaseDetail["sections"][number];
 
+/** A change needs a direction: a quick change or her own words. */
+const CHANGE_NEEDS = { what: "wish", say: "בחרי שינוי מהיר, או כתבי מה לשנות." } as const;
+
 /**
  * The report as the Word file will look, and the place to work on it: an A4 page with the
  * title, the child's details and every section in order. On the page: write a section with
@@ -460,7 +463,7 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
               <Popover label="מה לשנות בפסקה" onClose={() => setParaPop(null)}>
                 <BriefBox id={`para-${p.id}`} title="מה לשנות בפסקה הזאת?" chips={PARA_CHANGES} chipsTitle="שינויים מהירים"
                   hint="בחרי כיוון, או כתבי במילים שלך. רק הפסקה הזאת תנוסח מחדש."
-                  placeholder={PARAGRAPH_HINTS[0] ?? ""} recent={briefs.data?.recent} sendLabel="✦ לנסח מחדש" busy={busy}
+                  placeholder={PARAGRAPH_HINTS[0] ?? ""} recent={briefs.data?.recent} sendLabel="✦ לנסח מחדש" busy={busy} needs={CHANGE_NEEDS}
                   foot={p.status === "approved" ? "יופיע ליד הקיים, ויחליף אותו רק באישורך." : "יחליף את הפסקה בטיוטה."}
                   onSend={(w) => { if (w.trim()) void write(`${w} הפסקה: "${p.text}"`, p.id); }}
                   onCancel={() => setParaPop(null)} />
@@ -652,7 +655,7 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
               <BriefBox id={`change-${s.key}`} title="מה לשנות בטיוטה?" chips={CHANGE_CHIPS} chipsTitle="שינויים מהירים"
                 hint="בחרי כיוון, או כתבי במילים שלך. רק הסעיף הזה ינוסח מחדש."
                 placeholder="למשל: להוריד את המשפט על המעברים, ולהוסיף את הקשר עם הגננת"
-                recent={briefs.data?.recent} sendLabel="✦ לנסח מחדש" busy={busy}
+                recent={briefs.data?.recent} sendLabel="✦ לנסח מחדש" busy={busy} needs={CHANGE_NEEDS}
                 foot="הטיוטה החדשה תחליף את זו. מה שאישרת נשאר."
                 onSend={(w) => { if (w.trim()) void write(w); }}
                 onCancel={() => { setChanging(false); heading.current?.focus(); }} />
@@ -671,6 +674,7 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
               hint="כתבי בנקודות מה חשוב. רק הנקודות יוצאות, ו-Claude מנסח מהן בסגנון שלך, בלי להוסיף עובדות."
               placeholder="למשל: הקשר עם הגננת טוב · קשה במעברים · התקדמות מאז הסתיו"
               initial={points} sendLabel="✦ לנסח מהנקודות" busy={busy} autoFocus
+              needs={{ what: "typed", say: "כתבי קודם את הנקודות שלך. רק הן יוצאות." }}
               onSend={(wish, typed) => {
                 if (!typed) return;
                 setPoints(typed);

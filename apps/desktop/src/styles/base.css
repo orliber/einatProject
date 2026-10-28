@@ -765,3 +765,8 @@ kbd {
   border: 1px solid var(--line-strong);
 }
 .sample-guide p { margin: 0 0 8px; }
+/* A warning in words (the scores, the box before a draft, settings): in base, since the
+   screens that use it load apart. */
+.warn-text {
+  color: var(--warn-ink);
+}
