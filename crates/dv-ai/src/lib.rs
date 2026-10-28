@@ -26,11 +26,12 @@ pub use request::{
     build_consult_request, build_research_request, build_section_request, content_text,
     guide_lines, nonce_from, ConsultInput, ModelConfig, Provider, ResearchInput, SectionInput,
     TaggedInput, TaggedTurn, ALLOWED_MODELS, ANTHROPIC_MODELS, DEFAULT_MODEL, GEMINI_MODELS,
-    LOCAL_MODELS, MISTRAL_MODELS, OPENAI_MODELS, ORDER_LINE, POINTS_LINE, RESEARCH_ALLOWED_DOMAINS,
+    LOCAL_MODELS, LONG_ANSWER_TOKENS, MISTRAL_MODELS, OPENAI_MODELS, ORDER_LINE, POINTS_LINE,
+    RESEARCH_ALLOWED_DOMAINS, SHORT_ANSWER_TOKENS,
 };
 pub use response::{
     numbers_not_in, parse_consult, parse_derived_section, parse_points_section, parse_section,
-    AiError, ProposedParagraph, SectionReply,
+    worth_another_try, AiError, ProposedParagraph, SectionReply,
 };
 pub use shrink::{shrink_to_fit, Cut};
 pub use sort::{

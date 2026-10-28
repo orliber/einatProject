@@ -71,6 +71,69 @@ describe("writing the whole report in the background", () => {
     expect(runLine(r)).toBe("הדוח נכתב ונבדק מול המקורות. 4 סעיפים מחכים לאישורך");
   });
 
+  it("checks each section as soon as it is in, beside the writing that is left, one check at a time (D-146)", async () => {
+    const events: string[] = [];
+    let writing = 0;
+    let most = 0;
+    let checking = 0;
+    let mostChecks = 0;
+    mockIPC(async (cmd, args) => {
+      const a = args as Record<string, string>;
+      if (cmd === "prepare_full_draft") return four;
+      if (cmd === "send_section") {
+        writing += 1;
+        most = Math.max(most, writing);
+        // The last section takes long: the first ones are checked meanwhile.
+        await new Promise((r) => setTimeout(r, a.approvalId === "ap-d" ? 60 : 5));
+        writing -= 1;
+        events.push(`written:${a.approvalId}`);
+        return {};
+      }
+      if (cmd === "prepare_verify") return prepared({ approval_id: `v-${a.sectionKey}` });
+      if (cmd === "send_verify") {
+        checking += 1;
+        mostChecks = Math.max(mostChecks, checking);
+        events.push(`check:${a.approvalId}`);
+        await new Promise((r) => setTimeout(r, 5));
+        checking -= 1;
+        return { draft_ids: [], checks: [], demo: false };
+      }
+      return null;
+    });
+    await runWholeReport(caseApi().api, { verify: true, ai: "Claude" });
+    expect(events.indexOf("check:v-a")).toBeGreaterThan(events.indexOf("written:ap-a"));
+    expect(events.indexOf("check:v-a")).toBeLessThan(events.indexOf("written:ap-d"));
+    expect(events.filter((e) => e.startsWith("check:"))).toHaveLength(4);
+    expect(events.at(-1)).toBe("check:v-d");
+    expect([most, mostChecks]).toEqual([3, 1]);
+    const r = runOf("c1") ?? ({} as never);
+    expect([r.checked, r.toCheck, r.phase]).toEqual([4, 4, "done"]);
+  });
+
+  it("“לעצור” while a check is out: that check finishes, and no other section is checked", async () => {
+    const calls: string[] = [];
+    mockIPC(async (cmd, args) => {
+      const a = args as Record<string, string>;
+      calls.push(cmd);
+      if (cmd === "prepare_full_draft") return four.slice(0, 1).concat(four.slice(1, 2));
+      if (cmd === "send_section") {
+        await new Promise((r) => setTimeout(r, a.approvalId === "ap-b" ? 40 : 5));
+        return {};
+      }
+      if (cmd === "prepare_verify") return prepared({ approval_id: `v-${a.sectionKey}` });
+      if (cmd === "send_verify") {
+        stopRun("c1");
+        await new Promise((r) => setTimeout(r, 5));
+        return { draft_ids: [], checks: [], demo: false };
+      }
+      return null;
+    });
+    await runWholeReport(caseApi().api, { verify: true, ai: "Claude" });
+    expect(calls.filter((c) => c === "send_section")).toHaveLength(2);
+    expect(calls.filter((c) => c === "send_verify")).toHaveLength(1);
+    expect(runOf("c1")?.phase).toBe("stopped");
+  });
+
   it("stops: what is being written finishes, nothing new is sent, and nothing is checked", async () => {
     const calls: string[] = [];
     mockIPC(async (cmd) => {

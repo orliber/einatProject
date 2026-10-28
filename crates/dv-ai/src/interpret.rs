@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use ts_rs::TS;
 
-use crate::request::{base_body, data_block, set, set_schema, ModelConfig};
+use crate::request::{base_body, data_block, set, set_schema, ModelConfig, SHORT_ANSWER_TOKENS};
 use crate::response::{text_of, AiError};
 
 /// One interpretation, as kept (dv-core) and shown on her style screen.
@@ -125,7 +125,7 @@ pub fn build_interpretation_request(
     groups: &[InterpretationGroup],
     nonce: &str,
 ) -> Value {
-    let mut body = base_body(model, INTERPRETATION_RULES, 8_000);
+    let mut body = base_body(model, INTERPRETATION_RULES, SHORT_ANSWER_TOKENS);
     let mut parts = vec!["משפטים מהדוחות שלה, לפי תת-מבחן:".to_owned()];
     for g in groups {
         let lines: Vec<String> = g

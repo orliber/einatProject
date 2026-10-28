@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::prompts::SORTING_RULES;
-use crate::request::{base_body, data_block, set, set_schema, ModelConfig};
+use crate::request::{base_body, data_block, set, set_schema, ModelConfig, SHORT_ANSWER_TOKENS};
 use crate::response::{text_of, AiError};
 
 /// A section Claude may sort into. Key and description come from the report template, never
@@ -109,7 +109,7 @@ pub const RECORD_FIELD_MAX: usize = 1_000;
 
 /// Room for the answer and the model's thinking, which counts toward it. 12,000 was cut short
 /// on a long material (the answer then is lost whole); a cap costs nothing until it is used.
-pub const SORT_MAX_TOKENS: u32 = 32_000;
+pub const SORT_MAX_TOKENS: u32 = SHORT_ANSWER_TOKENS;
 
 #[must_use]
 pub fn build_sort_request(model: &ModelConfig, input: &SortInput, nonce: &str) -> Value {

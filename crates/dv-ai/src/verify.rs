@@ -8,7 +8,9 @@ use serde_json::{json, Value};
 use ts_rs::TS;
 
 use crate::prompts::VERIFY_RULES;
-use crate::request::{base_body, data_block, set, set_schema, ModelConfig, TaggedInput};
+use crate::request::{
+    base_body, data_block, set, set_schema, ModelConfig, TaggedInput, SHORT_ANSWER_TOKENS,
+};
 use crate::response::{text_of, AiError};
 
 /// What one verification request is made of. Every text is already filtered (tagged).
@@ -89,7 +91,7 @@ pub fn build_verify_request(
     input: &VerifyInput,
     nonce: &str,
 ) -> (Value, Vec<String>, Vec<String>) {
-    let mut body = base_body(model, VERIFY_RULES, 8_000);
+    let mut body = base_body(model, VERIFY_RULES, SHORT_ANSWER_TOKENS);
     let mut parts = vec![format!("סעיף: {}", input.section_title)];
     let mut source_ids = Vec::new();
     parts.push("מקורות:".to_owned());

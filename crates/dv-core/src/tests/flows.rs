@@ -309,12 +309,23 @@ fn an_answer_that_cannot_be_read_still_counts_as_sent_and_is_not_sent_again() {
         1
     );
     assert_eq!(sends_logged(&mut core), 1);
+    // Within the send it went once more, the same bytes (D-143), and the log says so.
+    let attempts = t.attempts();
+    assert_eq!(attempts.len(), 2);
+    assert_eq!(attempts[0], attempts[1]);
+    assert!(core
+        .vault_ref()
+        .unwrap()
+        .audit_entries(10_000)
+        .unwrap()
+        .iter()
+        .any(|e| e.event == "send" && e.meta.contains("\"sent_twice\":true")));
     // A retry would send the same thing again behind her back: the approval is gone.
     assert!(matches!(
         core.send_section(&id),
         Err(CoreError::NotFound(_))
     ));
-    assert_eq!(t.attempts().len(), 1);
+    assert_eq!(t.attempts().len(), 2);
     assert!(core.chat(&case, "kindergarten").unwrap().is_empty());
 }
 

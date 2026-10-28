@@ -454,6 +454,8 @@ impl CoreError {
                 after_seconds: u32::try_from(*s).unwrap_or(u32::MAX),
             },
             CoreError::Egress(e) => egress_action(e),
+            // Cut twice at the ceiling (D-143): the speed setting is where it changes.
+            CoreError::Ai(dv_ai::AiError::Truncated) => ErrorAction::settings("ai"),
             // The answer came and was not usable; its approval is spent, so sending "again"
             // would do nothing. She asks again from the screen (a new request).
             CoreError::Ai(_) => ErrorAction::Dismiss,
@@ -641,12 +643,14 @@ fn ai_he(e: &dv_ai::AiError, ai: &str) -> String {
         dv_ai::AiError::Refused(_) => {
             format!("{ai} סירב לענות על הבקשה הזו. אפשר לנסח אותה אחרת ולבקש שוב.")
         }
+        // Already sent twice (D-143), with room for a long answer: what is left to change is
+        // how long it thinks first, which she sets (the button opens that place).
         dv_ai::AiError::Truncated => format!(
-            "התשובה של {ai} נקטעה כי הייתה ארוכה מדי, ולכן לא נשמרה. אפשר לבקש פחות בבת אחת."
+            "התשובה של {ai} נקטעה כי הייתה ארוכה מדי, גם בניסיון נוסף, ולכן לא נשמרה. החומרים שמורים. בהגדרות אפשר לבחור \"מהיר\" ב\"מהירות התשובות\" ({ai} חושב אז פחות לפני שהוא כותב), ולבקש שוב. אפשר גם לבקש חלק מהסעיף בכל פעם."
         ),
-        dv_ai::AiError::Format(_) => {
-            format!("התשובה של {ai} הגיעה בצורה לא צפויה, ולכן לא נשמרה. אפשר לבקש שוב.")
-        }
+        dv_ai::AiError::Format(_) => format!(
+            "התשובה של {ai} הגיעה בצורה לא צפויה, ולכן לא נשמרה. החומרים שמורים, ואפשר לבקש שוב. אם זה חוזר, אפשר להעתיק את הפרטים ולשלוח לאור."
+        ),
     }
 }
 
@@ -811,6 +815,9 @@ pub struct Outgoing {
     transport: Option<Arc<dyn Transport>>,
     /// The session it was approved in (`Core::session`): a lock in between ends it.
     session: u64,
+    /// The approved bytes went out a second time in this send (one more try of an answer that
+    /// could not be used, D-143): said in the log.
+    again: std::sync::atomic::AtomicBool,
 }
 
 impl std::fmt::Debug for Outgoing {
@@ -830,7 +837,31 @@ impl Outgoing {
     }
 
     /// The same, with the number of words Claude has written so far, as they arrive.
+    ///
+    /// An answer cut at the output ceiling, or JSON that does not read, is asked for once more
+    /// with the same approved bytes (D-143), as a busy service is (`dv-egress::retry`): the
+    /// model writes differently each time, and the approval is spent only by an answer the
+    /// step can use. A larger ceiling would be bytes she did not approve, so the ceiling of the
+    /// first request is already the large one. Both answers count toward the month. If the
+    /// second try fails on the way, the first answer is what the step reads (and says so).
     pub fn transmit_with(&self, progress: &dyn Fn(u32)) -> Result<(Value, bool), CoreError> {
+        let first = self.send_once(progress)?;
+        let (answer, demo) = &first;
+        let sent = serde_json::from_slice::<Value>(self.pending.payload.body()).ok();
+        if *demo || !sent.is_some_and(|body| dv_ai::worth_another_try(&body, answer)) {
+            return Ok(first);
+        }
+        self.again.store(true, std::sync::atomic::Ordering::SeqCst);
+        match self.send_once(progress) {
+            Ok((mut second, demo)) => {
+                add_usage(&mut second, answer);
+                Ok((second, demo))
+            }
+            Err(_) => Ok(first),
+        }
+    }
+
+    fn send_once(&self, progress: &dyn Fn(u32)) -> Result<(Value, bool), CoreError> {
         if let Some(t) = &self.transport {
             return Ok((t.send_streaming(&self.pending.payload, progress)?, false));
         }
@@ -845,6 +876,35 @@ impl Outgoing {
                     .map_err(|e| CoreError::Internal(e.to_string()))?;
                 Ok((dv_ai::demo::respond(&body), true))
             }
+        }
+    }
+}
+
+/// The token counts of an earlier answer to the same request added to `answer`'s, so the
+/// month counts what both cost (numbers only, D-143).
+fn add_usage(answer: &mut Value, earlier: &Value) {
+    let Some(before) = earlier.get("usage").and_then(Value::as_object) else {
+        return;
+    };
+    let Some(fields) = answer.as_object_mut() else {
+        return;
+    };
+    let usage = fields
+        .entry("usage")
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    let Some(usage) = usage.as_object_mut() else {
+        return;
+    };
+    for key in [
+        "input_tokens",
+        "output_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+    ] {
+        let add = before.get(key).and_then(Value::as_u64).unwrap_or(0);
+        if add > 0 {
+            let now = usage.get(key).and_then(Value::as_u64).unwrap_or(0);
+            usage.insert(key.to_owned(), Value::from(now.saturating_add(add)));
         }
     }
 }
