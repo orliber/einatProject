@@ -44,7 +44,7 @@ describe("writing the whole report in the background", () => {
     mockIPC(async (cmd, args) => {
       calls.push(cmd);
       const a = args as Record<string, string>;
-      if (cmd === "prepare_sort") return prepared({ approval_id: "sort" });
+      if (cmd === "prepare_sort_parts") return [["i1", prepared({ approval_id: "sort" })]];
       if (cmd === "send_sort") return { assigned: 1 };
       if (cmd === "prepare_full_draft") return four;
       if (cmd === "send_section") {

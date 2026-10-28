@@ -664,9 +664,21 @@ export class FakeCore {
   }
 
   /** Sorting into sections (D-022): every material not sorted yet, one review. */
-  private prepareSort(c: Case): Prepared {
+  private unsorted(c: Case): CaseInput[] {
     if (!c.meta.consent) fail("consent_missing", `לפני שליחה ל-${this.ai} צריך לרשום בתיק את הסכמת ההורים.`);
-    const todo = c.inputs.filter((i) => R.needsSorting(this.routingOf(c, i.id), R.passages(i.content).length));
+    return c.inputs.filter((i) => R.needsSorting(this.routingOf(c, i.id), R.passages(i.content).length));
+  }
+
+  /** D-134: one request per material, keyed by it. */
+  private prepareSortParts(c: Case): [string, Prepared][] {
+    const todo = this.unsorted(c);
+    if (!todo.length) fail("refused", "כל החומרים כבר ממוינים לסעיפים.");
+    return todo.map((i) => [i.id, this.prepareSort(c, i.id)]);
+  }
+
+  /** `only`: that one material. */
+  private prepareSort(c: Case, only?: string): Prepared {
+    const todo = this.unsorted(c).filter((i) => !only || i.id === only);
     if (!todo.length) fail("refused", "כל החומרים כבר ממוינים לסעיפים.");
     const parts: ReviewPart[] = [];
     const autoHidden: AutoHidden[] = [];
@@ -1336,6 +1348,10 @@ export class FakeCore {
       }
       case "prepare_sort":
         return this.prepareSort(this.find(a.caseId));
+      case "prepare_sort_parts":
+        return this.prepareSortParts(this.find(a.caseId));
+      case "prepare_sort_one":
+        return this.prepareSort(this.find(a.caseId), String(a.inputId));
       case "send_sort": {
         const p = this.pending.get(String(a.approvalId));
         if (p?.type !== "sort") return this.expired(String(a.approvalId));

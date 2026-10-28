@@ -74,8 +74,9 @@ impl Drop for ConsultAsk {
 enum Ask {
     Section(SectionAsk),
     Consult(ConsultAsk),
-    /// Sorting the case's materials into sections (D-022).
-    Sort(String),
+    /// Sorting the case's materials into sections (D-022): one material, or (`None`) every
+    /// material not sorted yet.
+    Sort(String, Option<String>),
     /// The whole approved report, read as one (D-097).
     ReportCheck(String),
 }
@@ -86,7 +87,7 @@ impl Ask {
         match self {
             Ask::Section(a) => &a.case_id,
             Ask::Consult(a) => a.case_id.as_deref().unwrap_or(""),
-            Ask::Sort(c) | Ask::ReportCheck(c) => c,
+            Ask::Sort(c, _) | Ask::ReportCheck(c) => c,
         }
     }
 
@@ -96,7 +97,7 @@ impl Ask {
             Ask::Section(a) if a.check => "verify",
             Ask::Section(a) => &a.section_key,
             Ask::Consult(_) => "consult",
-            Ask::Sort(_) => "sort",
+            Ask::Sort(..) => "sort",
             Ask::ReportCheck(_) => "report_check",
         }
     }
@@ -356,7 +357,7 @@ impl RequestJob {
             (Ask::Consult(ask), Texts::Consult(read)) => {
                 build_consult(self, ask, read, &ctx, &stop)?
             }
-            (Ask::Sort(case_id), Texts::Sort(read)) => {
+            (Ask::Sort(case_id, _), Texts::Sort(read)) => {
                 build_sort(self, case_id, read, &ctx, &stop)?
             }
             (Ask::ReportCheck(case_id), Texts::ReportCheck(read)) => {
@@ -1133,7 +1134,7 @@ impl Core {
         let job = match ask {
             Ask::Section(a) => self.begin_section(a, learned, tries, None)?,
             Ask::Consult(a) => self.begin_consult(a, learned, tries)?,
-            Ask::Sort(c) => self.begin_sort(c, learned, tries)?,
+            Ask::Sort(c, only) => self.begin_sort(c, only, learned, tries, None)?,
             Ask::ReportCheck(c) => self.begin_report_check(c, learned, tries)?,
         };
         if tries >= MAX_TRIES {
@@ -1587,14 +1588,84 @@ impl Core {
 
     /// Sorting, read under the lock, for [`RequestJob::run`].
     pub fn begin_prepare_sort(&mut self, case_id: &str) -> Result<RequestJob, CoreError> {
-        self.begin_sort(case_id.to_owned(), false, 0)
+        self.begin_sort(case_id.to_owned(), None, false, 0, None)
+    }
+
+    /// Sorting one material alone (a part of [`Core::begin_sort_parts`] prepared again).
+    pub fn begin_prepare_sort_one(
+        &mut self,
+        case_id: &str,
+        input_id: &str,
+    ) -> Result<RequestJob, CoreError> {
+        self.begin_sort(
+            case_id.to_owned(),
+            Some(input_id.to_owned()),
+            false,
+            0,
+            None,
+        )
+    }
+
+    /// Sorting one request per material, keyed by the material (D-134). One request for all
+    /// of them answered slowly and, past about nine materials, ran past the answer's length
+    /// and was lost whole; one each is short, and they go side by side. Their mask books are
+    /// siblings, like the whole report's sections, so one date gets one tag in all of them.
+    pub fn begin_sort_parts(
+        &mut self,
+        case_id: &str,
+    ) -> Result<Vec<(String, RequestJob)>, CoreError> {
+        let ids: Vec<String> = {
+            let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
+            if v.case_meta(case_id)?.consent.is_none() {
+                return Err(CoreError::ConsentMissing);
+            }
+            let mut ids = Vec::new();
+            for inp in crate::instruments::request_inputs(v, case_id)? {
+                let count = dv_domain::passage_ranges(&inp.content).len();
+                if count > 0 && sorting::routing_of(v, case_id, &inp.id)?.needs_sorting(count) {
+                    ids.push(inp.id);
+                }
+            }
+            ids
+        };
+        if ids.is_empty() {
+            return Err(CoreError::Refused(
+                "כל החומרים כבר ממוינים לסעיפים.".to_owned(),
+            ));
+        }
+        let mut out: Vec<(String, RequestJob)> = Vec::new();
+        for id in ids {
+            let book = out.first().map(|(_, j)| j.data.masks.sibling());
+            let job = self.begin_sort(case_id.to_owned(), Some(id.clone()), false, 0, book)?;
+            out.push((id, job));
+        }
+        Ok(out)
+    }
+
+    /// [`Core::begin_sort_parts`], each part through the gate, holding the core (tests).
+    pub fn prepare_sort_parts(
+        &mut self,
+        case_id: &str,
+    ) -> Result<Vec<(String, Prepared)>, CoreError> {
+        let mut jobs = self.begin_sort_parts(case_id)?;
+        let order: Vec<String> = jobs.iter().map(|(k, _)| k.clone()).collect();
+        let mut out = Vec::new();
+        while !jobs.is_empty() {
+            let (ready, again) = self.finish_requests(run_requests(jobs)?)?;
+            out.extend(ready);
+            jobs = again;
+        }
+        out.sort_by_key(|(k, _)| order.iter().position(|o| o == k));
+        Ok(out)
     }
 
     fn begin_sort(
         &mut self,
         case_id: String,
+        only: Option<String>,
         learned: bool,
         tries: u32,
+        book: Option<dv_privacy::MaskBook>,
     ) -> Result<RequestJob, CoreError> {
         let structure = structure_for(self.vault_ref()?, &case_id)?;
         let sections: Vec<dv_ai::SortSection> = sorting::sortable(&structure)
@@ -1605,7 +1676,10 @@ impl Core {
             })
             .collect();
         let model = self.model_for(Task::Sort)?;
-        let data = self.privacy_data(&case_id)?;
+        let mut data = self.privacy_data(&case_id)?;
+        if let Some(book) = book {
+            data.masks = book;
+        }
         let fingerprint = data.fingerprint()?;
         let hints = self.case_hints(&case_id, &[])?;
         let demo_mode = self.demo_mode()?;
@@ -1617,6 +1691,9 @@ impl Core {
             let mut items = Vec::new();
             // A score table of an instrument she does not give is not sorted (D-098).
             for inp in crate::instruments::request_inputs(v, &case_id)? {
+                if only.as_ref().is_some_and(|id| *id != inp.id) {
+                    continue;
+                }
                 let ranges = dv_domain::passage_ranges(&inp.content);
                 if ranges.is_empty()
                     || !sorting::routing_of(v, &case_id, &inp.id)?.needs_sorting(ranges.len())
@@ -1647,7 +1724,7 @@ impl Core {
             fingerprint,
             learned,
             tries,
-            ask: Ask::Sort(case_id),
+            ask: Ask::Sort(case_id, only),
             data,
             hasher,
             hints,

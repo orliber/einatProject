@@ -78,6 +78,8 @@
     "allow-prepare-report-check",
     "allow-send-report-check",
     "allow-prepare-sort",
+    "allow-prepare-sort-one",
+    "allow-prepare-sort-parts",
     "allow-send-sort",
     "allow-set-input-sections",
     "allow-list-trash",

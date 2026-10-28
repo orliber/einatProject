@@ -462,6 +462,8 @@ fn main() {
             prepare_report_check,
             send_report_check,
             prepare_sort,
+            prepare_sort_one,
+            prepare_sort_parts,
             send_sort,
             set_input_sections,
             list_trash,

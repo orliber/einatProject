@@ -14,6 +14,7 @@
 import { useSyncExternalStore } from "react";
 import { ipc, type ParagraphCheck, type Prepared, type UiError } from "../../ipc/client";
 import { setKept } from "../../kept";
+import { sortInParts } from "./sortParts";
 import type { CaseApi } from "../CaseScreen";
 
 /** How many sections are written at the same time. */
@@ -121,15 +122,8 @@ export async function runWholeReport(api: CaseApi, opts: { verify: boolean; ai: 
   try {
     // 1. Sorting first, so each section gets only its passages.
     if (api.detail.routing.some((r) => r.needs_sorting)) {
-      const prepared = await ipc.prepareSort(caseId);
-      await api.review({
-        title: "מיון החומרים לסעיפים",
-        prepared,
-        reprepare: () => ipc.prepareSort(caseId),
-        onSend: async (id) => {
-          await api.track({ label: `${opts.ai} קורא את החומרים ומשייך קטעים לסעיפים`, task: "sort", approval: id }, () => ipc.sendSort(id));
-        },
-      });
+      // D-134: one request per material, side by side.
+      await sortInParts(api, { title: "מיון החומרים לסעיפים", label: `${opts.ai} קורא את החומרים ומשייך קטעים לסעיפים` });
     }
     if (stopping()) return;
 

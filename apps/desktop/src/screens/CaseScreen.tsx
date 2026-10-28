@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../App";
+import { sortInParts } from "./case/sortParts";
 import { ipc, type CaseDetail, type Prepared, type SortResult, type UiError } from "../ipc/client";
 import { ReviewDialog } from "../components/ReviewDialog";
 import { ExportDialog } from "../components/ExportDialog";
@@ -295,19 +296,13 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     if (!quiet) setError(null);
     setPreparingSort(true);
     try {
-      const prepared = await timed("prepare", ipc.prepareSort(caseId), "sort").finally(() => setPreparingSort(false));
-      if (quiet && !prepared.approval_id) return false;
-      return await startReview({
-        title: "מיון החומרים לסעיפים",
-        prepared,
-        reprepare: () => ipc.prepareSort(caseId),
-        onSend: async (id) => {
-          await track({ label: `${ai} קורא את החומרים ומשייך קטעים לסעיפים`, task: "sort", approval: id }, () => ipc.sendSort(id), async (result) => {
-            await reload();
-            notify(sortSummary(result));
-          });
-        },
-      });
+      // D-134: one request per material, side by side; the materials fill in as each lands.
+      const { sent, result } = await sortInParts(
+        { caseId, review: startReview, track, reload },
+        { title: "מיון החומרים לסעיפים", label: `${ai} קורא את החומרים ומשייך קטעים לסעיפים`, quiet, prepared: () => setPreparingSort(false) },
+      ).finally(() => setPreparingSort(false));
+      if (sent) notify(sortSummary(result));
+      return sent;
     } catch (e) {
       if (!quiet) setError(fail(e as never));
       return false;

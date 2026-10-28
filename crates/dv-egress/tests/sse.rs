@@ -183,12 +183,17 @@ fn one_event_written_over_several_data_lines_is_joined() {
 fn a_stream_without_its_end_or_its_start_is_not_an_answer() {
     let mut ev = events(&["מילה".to_owned()], &[]);
     ev.pop();
-    assert_eq!(whole(stream(&ev).as_bytes()).0, Err(EgressError::Offline));
+    let cut = || {
+        Err(EgressError::Interrupted(
+            "the answer stopped before its end".to_owned(),
+        ))
+    };
+    assert_eq!(whole(stream(&ev).as_bytes()).0, cut());
     let mut ev = events(&["מילה".to_owned()], &[]);
     ev.remove(0);
-    assert_eq!(whole(stream(&ev).as_bytes()).0, Err(EgressError::Offline));
-    assert_eq!(whole(b"").0, Err(EgressError::Offline));
-    assert_eq!(whole(b": only a comment\n\n").0, Err(EgressError::Offline));
+    assert_eq!(whole(stream(&ev).as_bytes()).0, cut());
+    assert_eq!(whole(b"").0, cut());
+    assert_eq!(whole(b": only a comment\n\n").0, cut());
 }
 
 #[test]
