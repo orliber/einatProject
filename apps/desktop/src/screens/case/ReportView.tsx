@@ -11,7 +11,7 @@ import { setKept, useKept } from "../../kept";
 import { guideOpenKey } from "../../components/SectionGuide";
 import { LocalText, type LocalTextHandle } from "../../components/LocalText";
 import { useRotatingPlaceholder } from "../../components/Rotating";
-import { DRAFT_HINTS, PARAGRAPH_HINTS } from "../../i18n/suggestions";
+import { PARAGRAPH_HINTS } from "../../i18n/suggestions";
 import { ParagraphVersions } from "../../components/ParagraphVersions";
 import { isCombo, KEYS } from "../../shortcuts";
 import { ActionsMenu, type MenuItem } from "../../components/Menu";
@@ -21,6 +21,8 @@ import type { CaseApi } from "../CaseScreen";
 import "./ReportView.css";
 import { MarkedText, StyleHintView, applyMark } from "./StyleHintView";
 import { useAi } from "../../ai";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { BriefBox, CHANGE_CHIPS, STYLE_CHIPS } from "./BriefBox";
 
 type Section = CaseDetail["sections"][number];
 
@@ -164,14 +166,6 @@ export function pageLook(template: TemplateView | null, settingsFont: string | n
   return { style, fromTemplate };
 }
 
-/** "✦ לשנות" on a draft (round 48): four quick changes, and the change in her own words. */
-const CHANGES: [string, string][] = [
-  ["קצר יותר", "קצרי את הטיוטה של הסעיף ושמרי על כל הממצאים העיקריים."],
-  ["פחות שיפוטי", "נסחי את הטיוטה של הסעיף בלשון תיאורית ופחות שיפוטית, באותו תוכן ובלי להוסיף עובדות."],
-  ["להרחיב", "הרחיבי את הטיוטה של הסעיף, בלי להוסיף עובדות שאינן במקורות."],
-  ["לבדוק מול החומרים", "בדקי את הטיוטה מול המקורות: מה חסר, מה סותר, ומה לא מבוסס, ותקני."],
-];
-
 const PARA_CHANGES: [string, string][] = [
   ["לקצר", "קצרי את הפסקה הבאה ושמרי על כל הממצאים שבה."],
   ["לנסח אחרת", "נסחי מחדש את הפסקה הבאה, באותו תוכן ובלי להוסיף עובדות."],
@@ -246,7 +240,7 @@ function Popover({ label, onClose, children }: { label: string; onClose: () => v
 function ChangePanel({ onClose, children }: { onClose: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    ref.current?.querySelector<HTMLElement>("button")?.focus();
+    ref.current?.querySelector<HTMLElement>("textarea, button")?.focus();
   }, []);
   return (
     <div ref={ref} className="a4-change" role="group" aria-label="מה לשנות בטיוטה"
@@ -315,11 +309,13 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
   const [wish, setWish] = useState("");
   const [wishEmpty, setWishEmpty] = useState(true);
   const paraWish = useRef<LocalTextHandle>(null);
-  const draftWish = useRef<LocalTextHandle>(null);
   // "מה חשוב לך שייכתב כאן?" (round 48): kept with the section while the vault is open, in
   // memory only, like the points of her own sections; it leaves only inside the request.
   const [brief, setBrief] = useKept(`case:${caseId}:report:${s.key}:brief`, "");
-  const briefBox = useRef<LocalTextHandle>(null);
+  // Her recent wishes and the ones kept per section (D-140), from the vault.
+  const qc = useQueryClient();
+  const briefs = useQuery({ queryKey: ["draftBriefs"], queryFn: ipc.draftBriefs, staleTime: 60_000 });
+  const keptBrief = briefs.data?.sections[s.key] ?? "";
   const [sourcesChanged, setSourcesChanged] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -379,10 +375,13 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
     if (await act(() => ipc.approveParagraphs(caseId, ids))) onNext();
   }
 
-  function writeFromBrief() {
-    const typed = briefBox.current?.value() ?? brief;
+  /** "✦ לנסח" from the box: the wish is kept (recent, and for the section when she asked),
+   *  then the request is prepared like every request of hers. Keeping it is a convenience:
+   *  if it fails, the draft is still written. */
+  function sendBrief(wish: string, typed: string, keep: boolean) {
     setBrief(typed);
-    void write(draftRequest(s.key, typed));
+    void ipc.keepDraftBrief(s.key, typed, keep).then((b) => qc.setQueryData(["draftBriefs"], b), () => undefined);
+    void write(draftRequest(s.key, wish));
   }
 
   /** The wish in a box, taken out of it to be sent; `null` when there is nothing to send. */
@@ -433,7 +432,7 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
       // approval is still saving does nothing, so holding Enter never approves the report.
       if (e.repeat || job || busy || settling) return;
       if (pending.length > 0) void approveAll();
-      else if (s.paragraphs.length === 0 && canWrite) briefBox.current?.focus();
+      else if (s.paragraphs.length === 0 && canWrite) document.getElementById(`brief-${s.key}`)?.focus();
       else onNext();
     }
   }
@@ -695,19 +694,14 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
           )}
           {focused && changing && !mine && (
             <ChangePanel onClose={() => { setChanging(false); heading.current?.focus(); }}>
-              <div className="row wrap-row">
-                {CHANGES.map(([label, text]) => (
-                  <button key={label} type="button" className="pill-btn" onClick={() => void write(text)}>{label}</button>
-                ))}
-              </div>
-              <WishBox boxRef={draftWish} hints={DRAFT_HINTS} wish={wish} typing={!wishEmpty} onText={setWish} onEmptyChange={setWishEmpty}
-                onSend={() => { const w = takeWish(draftWish); if (w !== null) void write(w); }} />
+              <BriefBox id={`change-${s.key}`} title="מה לשנות בטיוטה?" chips={CHANGE_CHIPS} chipsTitle="שינויים מהירים"
+                hint="בחרי כיוון, או כתבי במילים שלך. רק הסעיף הזה ינוסח מחדש."
+                placeholder="למשל: להוריד את המשפט על המעברים, ולהוסיף את הקשר עם הגננת"
+                recent={briefs.data?.recent} sendLabel="✦ לנסח מחדש" busy={busy}
+                foot="הטיוטה החדשה תחליף את זו. מה שאישרת נשאר."
+                onSend={(w) => { if (w.trim()) void write(w); }}
+                onCancel={() => { setChanging(false); heading.current?.focus(); }} />
               {brief.trim() && <span className="small muted">ביקשת לפני הניסוח: {brief.trim()}</span>}
-              <div className="a4-pop-foot">
-                <span className="small muted grow">הטיוטה החדשה תחליף את זו. מה שאישרת נשאר.</span>
-                <button type="button" className="btn btn-small" onClick={() => { setChanging(false); heading.current?.focus(); }}>סגירה</button>
-                <button type="button" className="btn btn-primary btn-small" disabled={wishEmpty} onClick={() => { const w = takeWish(draftWish); if (w !== null) void write(w); }}>שליחה</button>
-              </div>
             </ChangePanel>
           )}
         </div>
@@ -723,18 +717,15 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
           </span>
         ) : focused && canWrite ? (
           <div className="a4-brief">
-            <label className="a4-brief-label" htmlFor={`brief-${s.key}`}>מה חשוב לך שייכתב כאן?</label>
-            <LocalText ref={briefBox} id={`brief-${s.key}`} className="textarea a4-brief-text" rows={1} resize={briefRows} initial={brief}
-              placeholder="לא חובה. למשל: להתחיל מהקשר עם הצוות בגן."
-              onText={setBrief}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") { e.preventDefault(); heading.current?.focus(); return; }
-                if (e.key !== "Enter" || e.shiftKey) return;
-                e.preventDefault();
-                if (!busy) writeFromBrief();
-              }} />
+            {briefs.data !== undefined || briefs.isError ? (
+              <BriefBox id={`brief-${s.key}`} title="איך לנסח את הסעיף? (לא חובה)" chips={STYLE_CHIPS} chipsTitle="סגנון"
+                hint="כתבי מה חשוב לך, או בחרי סגנון. בלי כלום הסעיף ינוסח כמו תמיד, מתוך החומרים."
+                placeholder="למשל: להתחיל מהקשר עם הצוות בגן, ובלי מונחים מקצועיים"
+                recent={briefs.data?.recent} initial={keptBrief || brief} keep={keptBrief !== ""}
+                sendLabel="✦ לנסח" busy={busy} autoFocus
+                onSend={sendBrief} onCancel={() => heading.current?.focus()} />
+            ) : <WaitLine task="prepare" speed="section" label="פותחת את תיבת ההנחיה" />}
             <div className="row a4-brief-row">
-              <button type="button" className="btn btn-primary" disabled={busy} onClick={writeFromBrief}>✦ לנסח</button>
               <button type="button" className="link-btn" onClick={() => edit(null, "", "end")}>לכתוב בעצמי</button>
               <span className="grow" />
               <button type="button" className="link-small" onClick={openGuide}>איך לכתוב את הסעיף ←</button>
@@ -743,7 +734,7 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
         ) : canWrite ? (
           <div className="a4-gap-line">
             <span className="grow">עוד לא נכתב.{sourceNames.length ? ` יש חומר: ${sourceNames.slice(0, 2).join(", ")}${sourceNames.length > 2 ? ` ועוד ${sourceNames.length - 2}` : ""}` : ""}</span>
-            <button type="button" className="link-btn" disabled={busy} onClick={() => void write()}>✦ לנסח</button>
+            <button type="button" className="link-btn" disabled={busy} onClick={onPick}>✦ לנסח</button>
           </div>
         ) : (
           <div className="a4-gap-line">
@@ -757,12 +748,6 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
       {sentOpen && <SentHistoryDialog caseId={caseId} place={s.key} onClose={() => setSentOpen(false)} />}
     </div>
   );
-}
-
-/** "מה חשוב לך שייכתב כאן?" grows to three lines with what she types. */
-function briefRows(box: HTMLTextAreaElement) {
-  const text = box.value;
-  box.rows = Math.min(3, Math.max(1, Math.ceil(text.length / 70) + text.split("\n").length - 1));
 }
 
 /** The paragraph box grows with its text, as on the page: a line per ~70 letters and per line break. */

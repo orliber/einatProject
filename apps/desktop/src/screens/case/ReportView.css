@@ -695,3 +695,84 @@
     display: none;
   }
 }
+/* The box before every drafting request (D-140): her words, a style, her recent wishes. */
+.brief-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--primary-line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-alt);
+  font-family: var(--font-ui);
+  color: var(--ink);
+}
+.a4-change .brief-box {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.brief-box-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.brief-box-title {
+  font-size: var(--text-base);
+  font-weight: 700;
+}
+.brief-box-text {
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  padding: 10px 12px;
+  font-size: var(--text-md);
+  line-height: 1.5;
+}
+.brief-box-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.brief-box-sub {
+  font-weight: 600;
+}
+.brief-box .pill-btn {
+  min-height: 36px;
+  padding: 0 14px;
+}
+.brief-box .pill-btn.on {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
+  font-weight: 700;
+}
+.brief-box .brief-box-recent {
+  border-style: dashed;
+  border-radius: var(--radius-md);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.brief-box-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.brief-box-keep {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.brief-box-keep input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+}

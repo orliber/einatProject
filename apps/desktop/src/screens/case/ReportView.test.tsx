@@ -83,7 +83,7 @@ describe("the report page, one section in focus", () => {
     if (!first) throw new Error("no section in focus");
     expect(page.querySelectorAll(".a4-section.is-focus")).toHaveLength(1);
     // Before the draft: what matters to her here, then "✦ לנסח".
-    const brief = within(first).getByLabelText("מה חשוב לך שייכתב כאן?");
+    const brief = await within(first).findByRole("textbox", { name: /^איך לנסח את הסעיף/ });
     // Out of focus, an empty section is one line, with no box of its own.
     expect(page.querySelectorAll(".a4-brief")).toHaveLength(1);
     await user.type(brief, "להתחיל מהקשר עם הצוות{Enter}");
@@ -107,12 +107,14 @@ describe("the report page, one section in focus", () => {
     // Two drafts: the section in focus, then another one written from its single line.
     const first = focused(page);
     if (!first) throw new Error("no section in focus");
-    await user.click(within(first).getByRole("button", { name: "✦ לנסח" }));
+    await user.click(await within(first).findByRole("button", { name: "✦ לנסח" }));
     await within(first).findByRole("group", { name: /^הטיוטה של/ });
     const line = page.querySelector<HTMLElement>(".a4-gap-line");
     if (!line) throw new Error("no empty section left");
     const second = line.closest<HTMLElement>(".a4-section");
     await user.click(within(line).getByRole("button", { name: "✦ לנסח" }));
+    // Out of focus it opens the section's box (D-140); the box's "✦ לנסח" sends.
+    await user.click(await within(line.closest<HTMLElement>(".a4-section") as HTMLElement).findByRole("button", { name: "✦ לנסח" }));
     await waitFor(() => expect(second).toHaveClass("is-focus"));
     await within(second as HTMLElement).findByRole("group", { name: /^הטיוטה של/ });
     // The first draft, out of focus, waits its turn, with no buttons.
@@ -140,12 +142,14 @@ describe("the report page, one section in focus", () => {
     const { calls, user, page } = await openReport();
     const first = focused(page);
     if (!first) throw new Error("no section in focus");
-    await user.click(within(first).getByRole("button", { name: "✦ לנסח" }));
+    await user.click(await within(first).findByRole("button", { name: "✦ לנסח" }));
     await within(first).findByRole("group", { name: /^הטיוטה של/ });
     const line = page.querySelector<HTMLElement>(".a4-gap-line");
     const second = line?.closest<HTMLElement>(".a4-section");
     if (!line || !second) throw new Error("no empty section left");
     await user.click(within(line).getByRole("button", { name: "✦ לנסח" }));
+    // Out of focus it opens the section's box (D-140); the box's "✦ לנסח" sends.
+    await user.click(await within(line.closest<HTMLElement>(".a4-section") as HTMLElement).findByRole("button", { name: "✦ לנסח" }));
     await within(second).findByRole("group", { name: /^הטיוטה של/ });
     const head = within(second).getByRole("heading", { level: 3 });
     head.focus();

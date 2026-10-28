@@ -275,6 +275,16 @@ describe("main screens", () => {
   });
 });
 
+/** "✦ לנסח" on an empty section: a section out of focus opens its box first (D-140), and
+ *  the box's own "✦ לנסח" sends. */
+async function draftFrom(user: ReturnType<typeof userEvent.setup>, button: HTMLElement) {
+  const section = button.closest<HTMLElement>(".a4-section");
+  await user.click(button);
+  if (section && button.classList.contains("link-btn")) {
+    await user.click(await within(section).findByRole("button", { name: "✦ לנסח" }));
+  }
+}
+
 describe("writing the report", () => {
   it("a section is drafted only after the 'what leaves the computer' screen, then approved", async () => {
     const { user, calls } = await openApp();
@@ -299,9 +309,9 @@ describe("writing the report", () => {
     const { user, calls } = await openApp();
     const page = await openCase(user);
     for (let i = 0; i < 2; i++) {
-      const write = within(page).getAllByRole("button", { name: "✦ לנסח" })[0];
+      const write = (await within(page).findAllByRole("button", { name: "✦ לנסח" }))[0];
       if (!write) throw new Error("no empty section to write");
-      await user.click(write);
+      await draftFrom(user, write);
       const review = await screen.findByRole("dialog", { name: "לפני שליחה ל-Claude" });
       await user.click(within(review).getByRole("button", { name: /שליחה/ }));
       await waitFor(() => expect(screen.queryByRole("dialog", { name: "לפני שליחה ל-Claude" })).toBeNull());
@@ -324,12 +334,12 @@ describe("writing the report", () => {
       if (cmd === "send_section") sent.push((args as { approvalId: string }).approvalId);
       return out;
     });
-    const writes = within(page).getAllByRole("button", { name: "✦ לנסח" });
+    const writes = await within(page).findAllByRole("button", { name: "✦ לנסח" });
     const [first, second] = writes;
     if (!first || !second) throw new Error("two empty sections are needed");
-    await user.click(first);
+    await draftFrom(user, first);
     const review = await screen.findByRole("dialog", { name: "לפני שליחה ל-Claude" });
-    await user.click(second);
+    await draftFrom(user, second);
     await waitFor(() => expect(prepared).toHaveLength(2));
     // The review now shows the second request: sending it sends that one.
     await user.click(within(await screen.findByRole("dialog", { name: "לפני שליחה ל-Claude" })).getByRole("button", { name: /שליחה/ }));
