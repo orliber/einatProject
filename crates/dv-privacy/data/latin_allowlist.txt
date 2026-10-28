@@ -1,13 +1,16 @@
 # Capitalized English words that are NOT names (test titles, clinical terms).
 # Any other Capitalized Latin word is a suspect (e.g. "Noam").
+# Medicines a child's doctor names (Ritalin, Concerta...): a drug, never a person.
 A
 Abc
+Abilify
 Ability
 About
 Above
 Account
 Achenbach
 Adaptive
+Adderall
 Address
 Admin
 Ados
@@ -32,6 +35,7 @@ April
 Arabic
 Are
 Arial
+Aripiprazole
 Arithmetic
 As
 Ask
@@ -41,8 +45,10 @@ Assembly
 Assessment
 Association
 At
+Atomoxetine
 Attached
 Attachment
+Attent
 Attention
 August
 Autism
@@ -105,6 +111,7 @@ Comprehension
 Compulsive
 Concepts
 Conceptual
+Concerta
 Conduct
 Confidential
 Conners
@@ -125,6 +132,7 @@ December
 Defiant
 Deficit
 Delay
+Depalept
 Depression
 Design
 Details
@@ -153,6 +161,7 @@ Edition
 Email
 Emotional
 English
+Equasym
 Every
 Excel
 Executive
@@ -172,6 +181,8 @@ Files
 Final
 Fine
 First
+Fluoxetine
+Focalin
 Follow
 For
 Form
@@ -204,6 +215,7 @@ Google
 Grade
 Gross
 Group
+Guanfacine
 Had
 Has
 Have
@@ -238,6 +250,7 @@ Intelligence
 Internalizing
 International
 Into
+Intuniv
 Iphone
 Iq
 Is
@@ -247,13 +260,16 @@ July
 June
 Just
 Kaufman
+Keppra
 Kindergarten
+Lamictal
 Language
 Last
 Learning
 Let
 Letter
 Level
+Levetiracetam
 Like
 Link
 List
@@ -270,11 +286,14 @@ May
 Mchat
 Me
 Mean
+Medikinet
 Meet
 Meeting
+Melatonin
 Memory
 Message
 Messages
+Methylphenidate
 Microsoft
 Mild
 Mind
@@ -353,6 +372,7 @@ Print
 Private
 Processing
 Profile
+Prozac
 Psi
 Psychiatric
 Questionnaire
@@ -371,6 +391,9 @@ Request
 Requiring
 Responsiveness
 Revised
+Risperdal
+Risperidone
+Ritalin
 Rorschach
 Russian
 Samsung
@@ -399,6 +422,7 @@ Sent
 Separation
 September
 Sequencing
+Sertraline
 Severe
 Severity
 She
@@ -424,6 +448,7 @@ Srs
 Ss
 Standard
 Status
+Strattera
 Street
 Subject
 Subtest
@@ -467,12 +492,14 @@ Total
 Tourette
 Tova
 Tree
+Trileptal
 Tuesday
 Under
 Up
 Update
 Upload
 Us
+Valproate
 Vci
 Verbal
 Version
@@ -486,6 +513,7 @@ Visual
 Vmi
 Vocabulary
 Vsi
+Vyvanse
 Wais
 Was
 We
@@ -520,5 +548,6 @@ Yesterday
 You
 Your
 Youtube
+Zoloft
 Zoo
 Zoom

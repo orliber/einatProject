@@ -380,6 +380,16 @@ fn unknown_names_other_cases_and_near_misses_are_hidden_without_asking() {
     }
 }
 
+/// A neurologist's recommendation reaches the AI as written: the medicine is no person (the
+/// real-corpus bench sent "[אדם_1] 10mg ו-[אדם_2]").
+#[test]
+fn medicines_in_english_are_words_not_names() {
+    let ids = identities();
+    let s = "מומלץ לשקול Ritalin 10mg או Concerta, ובהמשך Methylphenidate; Melatonin לשינה.";
+    let out = filter(s, &ctx_for(&ids, &[], CASE)).unwrap();
+    assert_eq!(out.tagged, s, "a medicine was hidden");
+}
+
 #[test]
 fn names_that_are_words_are_hidden_in_a_context_with_no_other_reading() {
     // D-049: a name that is also an everyday word ("שירה", "ים", "הודיה") is hidden only
