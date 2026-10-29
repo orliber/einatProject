@@ -112,6 +112,12 @@ p {
   font-size: var(--text-base);
   border-radius: 9px;
 }
+/* The main action of a place is never a small target ("לעדכון", "שמירה", "✓ להחליף"): the
+   size the app's other main buttons have, with the small one's text. */
+.btn-small.btn-primary {
+  min-height: 44px;
+  padding: 0 16px;
+}
 .btn-big {
   min-height: 48px;
   padding: 0 24px;
