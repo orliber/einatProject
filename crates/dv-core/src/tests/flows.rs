@@ -1400,6 +1400,25 @@ fn small_jobs_think_little_and_sections_at_the_chosen_speed() {
     }
 }
 
+#[test]
+fn sorting_goes_to_the_quicker_model_of_the_chosen_company() {
+    // D-151: Einat waits for the sorting before she can write; placing passages needs no depth.
+    let mut core = Core::for_tests(tempfile::tempdir().unwrap().keep().as_path(), None);
+    core.create_vault(PASSWORD).unwrap();
+    for (chosen, sort) in [
+        ("claude-opus-5", "claude-sonnet-5"),
+        ("claude-opus-4-8", "claude-sonnet-5"),
+        ("gpt-5-1", "gpt-5-mini"),
+        ("gemini-2-5-pro", "gemini-2-5-flash"),
+        ("mistral-large", "mistral-medium"),
+        ("local-qwen", "local-qwen"),
+    ] {
+        core.set_model(chosen).unwrap();
+        assert_eq!(core.model_for(Task::Sort).unwrap().model, sort, "{chosen}");
+        assert_eq!(core.model_for(Task::Draft).unwrap().model, chosen);
+    }
+}
+
 // ------------------------------------------------------------ regressions
 
 #[test]

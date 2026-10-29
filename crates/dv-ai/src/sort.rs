@@ -10,7 +10,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::prompts::SORTING_RULES;
-use crate::request::{base_body, data_block, set, set_schema, ModelConfig, SHORT_ANSWER_TOKENS};
+use crate::request::{
+    base_body, data_block, set, set_schema, ModelConfig, Provider, SHORT_ANSWER_TOKENS,
+};
 use crate::response::{text_of, AiError};
 
 /// A section Claude may sort into. Key and description come from the report template, never
@@ -114,6 +116,12 @@ pub const SORT_MAX_TOKENS: u32 = SHORT_ANSWER_TOKENS;
 #[must_use]
 pub fn build_sort_request(model: &ModelConfig, input: &SortInput, nonce: &str) -> Value {
     let mut body = base_body(model, SORTING_RULES, SORT_MAX_TOKENS);
+    // D-151: placing passages is mechanical, and thinking only delays the answer. Claude's
+    // models think by default; the other companies' translation takes no thinking field
+    // (their low effort is their least).
+    if Provider::of_model(&model.model) == Some(Provider::Anthropic) {
+        set(&mut body, "thinking", json!({ "type": "disabled" }));
+    }
     let mut parts = vec!["סעיפי הדוח (מפתח: מה שייך לסעיף):".to_owned()];
     for s in &input.sections {
         parts.push(format!("- {}: {}", s.key, s.about));
@@ -352,6 +360,39 @@ mod tests {
         // Cut at 12,000 on a long material, the whole answer was lost (Or, 0.9.5).
         let body = build_sort_request(&ModelConfig::default(), &input(), "nonce");
         assert_eq!(body["max_tokens"], 32_000);
+    }
+
+    #[test]
+    fn sorting_does_not_think_on_claude_and_sends_no_thinking_field_elsewhere() {
+        // D-151: the answer starts at once. The other companies' translation refuses the field.
+        let claude = ModelConfig {
+            model: "claude-sonnet-5".to_owned(),
+            effort: "low".to_owned(),
+        };
+        let body = build_sort_request(&claude, &input(), "nonce");
+        assert_eq!(body["thinking"], json!({"type": "disabled"}));
+        for model in [
+            "gpt-5-mini",
+            "gemini-2-5-flash",
+            "mistral-medium",
+            "local-gemma",
+        ] {
+            let other = ModelConfig {
+                model: model.to_owned(),
+                effort: "low".to_owned(),
+            };
+            let body = build_sort_request(&other, &input(), "nonce");
+            assert!(body.get("thinking").is_none(), "{model}");
+        }
+    }
+
+    #[test]
+    fn the_quicker_model_of_each_company_is_on_its_own_list() {
+        for p in Provider::ALL {
+            if let Some(quick) = p.quick_model() {
+                assert_eq!(Provider::of_model(quick), Some(p), "{quick}");
+            }
+        }
     }
 
     #[test]
