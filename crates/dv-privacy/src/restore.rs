@@ -2,7 +2,7 @@
 
 use std::borrow::Cow;
 
-use dv_domain::{Identity, PRACTITIONER_TAG};
+use dv_domain::{Identity, Role, PRACTITIONER_TAG};
 
 use crate::lexicon::LEXICON;
 use crate::masks::{is_generic_tag, is_kept_words_tag, MaskEntry, KEPT_WORDS, TAG_RE};
@@ -57,7 +57,7 @@ fn put_back(
             }
         }
         if let Some(i) = identities.iter().find(|i| i.tag == tag) {
-            return i.value.clone();
+            return prose_name(i).to_owned();
         }
         masks
             .iter()
@@ -66,6 +66,23 @@ fn put_back(
             .map_or_else(|| tag.to_owned(), |m| m.original.clone())
     })
     .into_owned()
+}
+
+/// The name a tag stands for in a sentence. A child is written by first name: the tag hides
+/// the full name and each of its words alike, so "ב[ילד] שעבר" may have been "באביב שעבר"
+/// ("last spring") in a material of "אביב שחרורי", and the full name there would make a sentence
+/// no one wrote. Everyone else keeps the name as it was declared ("ד\"ר פאדי חורי"); the full
+/// name of the child stays in the report's details, which do not come from a tag.
+fn prose_name(identity: &Identity) -> &str {
+    let child = matches!(
+        identity.role,
+        Role::Child | Role::Brother | Role::Sister | Role::OtherChild
+    );
+    let value = identity.value.trim();
+    if !child {
+        return value;
+    }
+    value.split_whitespace().next().unwrap_or(value)
 }
 
 /// Every kept-words tag in text that came from outside (a model's answer) written as plain
@@ -210,7 +227,6 @@ pub fn scan_model_output(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dv_domain::Role;
 
     #[test]
     fn a_declared_name_an_identifier_or_a_foreign_tag_in_the_answer_is_pointed_out() {
@@ -235,6 +251,36 @@ mod tests {
         assert!(tokens.iter().any(|t| t.contains("1234567")), "{tokens:?}");
         assert!(tokens.contains(&"[גננת_7]"), "{tokens:?}");
         assert!(!tokens.contains(&"[מספר]") && !tokens.contains(&"[ילד]"));
+    }
+
+    #[test]
+    fn a_child_comes_back_by_first_name_and_a_doctor_by_the_name_declared() {
+        // Found on a made-up case: "באביב שעבר" ("last spring") came back as "באביב שחרורי
+        // שעבר", a sentence no one wrote.
+        let person = |role, tag: &str, value: &str| Identity {
+            id: tag.into(),
+            case_id: "c".into(),
+            role,
+            tag: tag.into(),
+            value: value.into(),
+            aliases: vec![],
+            source: dv_domain::IdentitySource::Manual,
+            reason: String::new(),
+        };
+        let ids = vec![
+            person(Role::Child, "[ילד]", " אביב שחרורי "),
+            person(Role::Sister, "[אחות]", "נגה"),
+            person(Role::Doctor, "[רופא_1]", "ד\"ר פאדי חורי"),
+        ];
+        assert_eq!(
+            restore(
+                "ב[ילד] שעבר [ילד] ו[אחות] נבדקו אצל [רופא_1].",
+                &ids,
+                None,
+                &[]
+            ),
+            "באביב שעבר אביב ונגה נבדקו אצל ד\"ר פאדי חורי."
+        );
     }
 
     #[test]
