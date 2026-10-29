@@ -936,7 +936,7 @@ export class FakeCore {
         if (cmd === "set_send_stopped") this.sendStopped = Boolean(a.stopped);
         const ok = (key: string, state = "ok", detail: string | null = null) => ({ key, state, detail });
         return {
-          items: [ok("encrypted"), ok("computer_bound"), ok("forgot_password", "ok"), ok("fips", "info"), ok("disk"), ok("cloud_folder"), ok("log_integrity"),
+          items: [ok("encrypted"), ok("computer_bound"), ok("forgot_password", this.googleOn ? "ok" : "warn"), ok("fips", "info"), ok("disk"), ok("cloud_folder"), ok("log_integrity"),
             ok("auto_lock", "ok", "10"), ok("screen"), ok("send", this.sendStopped ? "warn" : "ok"), ok("isolation"), ok("memory")],
           send_stopped: this.sendStopped, daily_limit: 400, max_request_kb: 2048,
           layers: FAKE_LAYERS.map(([key, title, now]) => ({
@@ -945,7 +945,7 @@ export class FakeCore {
           })),
           yours: [
             { key: "disk", title: "הצפנת הדיסק (BitLocker)", what: "מצפינה את כל המחשב.", against: "גניבה של המחשב.", state: "ok", now: "פעילה." },
-            { key: "forgot_password", title: "כניסה עם גוגל כששוכחים סיסמה", what: "פותחת את הכספת במחשב הזה עם חשבון הגוגל שלך.", against: "סיסמה שנשכחה, ואיתה כל התיקים.", state: "ok", now: "מופעלת." },
+            { key: "forgot_password", title: "כניסה עם גוגל כששוכחים סיסמה", what: "פותחת את הכספת במחשב הזה עם חשבון הגוגל שלך.", against: "סיסמה שנשכחה, ואיתה כל התיקים.", state: this.googleOn ? "ok" : "warn", now: this.googleOn ? "מופעלת." : "כבויה." },
           ],
         };
       }
