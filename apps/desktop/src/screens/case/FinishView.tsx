@@ -79,6 +79,10 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
   // Round 26: what is left to complete is listed, and never stops the file. The core also marks
   // a tag it could not put words back into; those sections are listed by name.
   const ready = check !== null && !blocked && !nothing;
+  // Sections that have materials and nothing approved yet: the file can go out without them,
+  // but the report is not ready, and the export dialog says so in orange too.
+  const emptyWithMaterial = check ? content.filter((s) => s.source_count > 0 && check.empty_sections.includes(s.title)) : [];
+  const complete = ready && emptyWithMaterial.length === 0;
   const markedElsewhere = (check?.to_complete ?? []).filter((t) => !toComplete.some(({ section }) => t.startsWith(`${section.title}:`)));
 
   async function save() {
@@ -99,17 +103,21 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
       <div className="finish-body">
         <section className="finish-side" aria-label="לפני שהקובץ יוצא">
           <div className="stack" style={{ gap: 4 }}>
-            <h1>{ready ? "הדוח מוכן להוצאה" : nothing ? "עוד אין מה להוציא" : "כמעט מוכן"}</h1>
+            <h1>{complete ? "הדוח מוכן להוצאה" : nothing ? "עוד אין מה להוציא" : "כמעט מוכן"}</h1>
             <span className="muted">משמאל: הדוח כמו שייצא. כאן: מה עוד לעשות.</span>
           </div>
           {!check && !error && <WaitLine task="check" label="בודקת שהדוח מוכן להוצאה" />}
           {check && (
             <ul className="finish-checks">
-              <li className={check.included_sections > 0 ? "ok" : "warn"}>
-                <span className="finish-mark" aria-hidden="true">{check.included_sections > 0 ? "✓" : "!"}</span>
+              <li className={check.included_sections > 0 && emptyWithMaterial.length === 0 ? "ok" : "warn"}>
+                <span className="finish-mark" aria-hidden="true">{check.included_sections > 0 && emptyWithMaterial.length === 0 ? "✓" : "!"}</span>
                 <span className="grow">
                   {check.included_sections > 0 ? `${check.included_sections} סעיפים מאושרים ייכנסו לקובץ.` : "עוד אין סעיף מאושר."}
-                  {check.empty_sections.length > 0 && <span className="small muted"> {check.empty_sections.length} ריקים לא ייכנסו.</span>}
+                  {emptyWithMaterial.length > 0 ? (
+                    <span> {emptyWithMaterial.length === 1 ? `לסעיף "${emptyWithMaterial[0]?.title}" יש חומרים, והוא עוד ריק.` : `ל-${emptyWithMaterial.length} סעיפים יש חומרים, והם עוד ריקים.`}</span>
+                  ) : (
+                    check.empty_sections.length > 0 && <span className="small muted"> {check.empty_sections.length} ריקים לא ייכנסו.</span>
+                  )}
                 </span>
                 <button type="button" className="link-small" onClick={() => onOpen("")}>לדוח</button>
               </li>

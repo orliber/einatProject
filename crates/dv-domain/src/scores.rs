@@ -950,16 +950,30 @@ struct Known {
 /// two words or five letters and more, as a whole word (with one prefix letter, "ובאוצר").
 /// Short names ("מידע", "הבנה", "שפה") are ordinary words too, so only their abbreviation counts.
 fn mentions(sentence: &str, measure: &Measure) -> bool {
-    let words: Vec<&str> = sentence
-        .split(|c: char| !(c.is_alphanumeric() || c == '-' || c == '"' || c == '\''))
-        .filter(|w| !w.is_empty())
-        .collect();
+    let words = sentence_words(sentence);
     if measure.abbr.chars().count() >= 2 && words.iter().any(|w| *w == measure.abbr) {
         return true;
     }
     std::iter::once(measure.name_he.as_str())
         .chain(measure.aliases.iter().map(String::as_str))
         .any(|name| named(&words, name))
+}
+
+/// Whether a sentence names `measure` in any way, short names too ("שפה (68)"). Never enough
+/// to check a sentence, only to know that a number in it is that measure's own score.
+fn mentioned_at_all(sentence: &str, measure: &Measure) -> bool {
+    let words = sentence_words(sentence);
+    (measure.abbr.chars().count() >= 2 && words.iter().any(|w| *w == measure.abbr))
+        || std::iter::once(measure.name_he.as_str())
+            .chain(measure.aliases.iter().map(String::as_str))
+            .any(|name| named_at(&words, name).next().is_some())
+}
+
+fn sentence_words(sentence: &str) -> Vec<&str> {
+    sentence
+        .split(|c: char| !(c.is_alphanumeric() || c == '-' || c == '"' || c == '\''))
+        .filter(|w| !w.is_empty())
+        .collect()
 }
 
 /// Whether `words` hold the Hebrew name `name` (see [`mentions`]).
@@ -1032,6 +1046,23 @@ fn age_or_span(chars: &[char], start: usize, end: usize) -> bool {
     BEFORE.contains(&prev.as_str()) || AFTER.contains(&next.as_str())
 }
 
+/// A number that is the distance between two scores, not a score: right after "פער של",
+/// "הפרש של" or "הבדל של" (or the word alone, "פער 29"). Found in a report's own words: "פער של
+/// 29 נקודות בין מוטורי (97) לבין שפה (68)".
+fn difference(chars: &[char], start: usize) -> bool {
+    const GAP: &[&str] = &["פער", "הפרש", "הבדל", "בפער", "בהפרש"];
+    let before: String = chars.get(..start).unwrap_or_default().iter().collect();
+    let mut words = before
+        .split_whitespace()
+        .rev()
+        .map(|w| w.trim_matches(|c: char| !c.is_alphabetic()));
+    match words.next() {
+        Some("של") => words.next().is_some_and(|w| GAP.contains(&w)),
+        Some(w) => GAP.contains(&w),
+        None => false,
+    }
+}
+
 /// Numbers in a sentence that could be scores: not part of a test's name ("ADOS-2",
 /// "WPPSI-IV"), not an age or a time ("5:4"), not inside a word.
 fn score_numbers(sentence: &str) -> Vec<String> {
@@ -1061,7 +1092,13 @@ fn score_numbers(sentence: &str) -> Vec<String> {
         let date = chars
             .get(start..i)
             .is_some_and(|run| run.iter().filter(|c| **c == '.').count() >= 2);
-        if !(in_name || glued || time || date || age_or_span(&chars, start, i)) {
+        if !(in_name
+            || glued
+            || time
+            || date
+            || age_or_span(&chars, start, i)
+            || difference(&chars, start))
+        {
             if let Some(run) = chars.get(start..i) {
                 out.push(run.iter().collect());
             }
@@ -1103,9 +1140,16 @@ pub fn check_scores(text: &str, sheets: &[ScoreSheet]) -> Vec<String> {
         if named.is_empty() {
             continue;
         }
+        // A number of another measure named in the same sentence, by its short name too, is
+        // that measure's ("בין מוטורי (97) לבין שפה (68)").
+        let also: Vec<&(Measure, Known)> = entered
+            .iter()
+            .filter(|(m, _)| mentioned_at_all(sentence, m))
+            .collect();
         for n in score_numbers(sentence) {
             let fits = named
                 .iter()
+                .chain(&also)
                 .any(|(_, k)| k.value == n || k.percentile.as_deref() == Some(n.as_str()));
             if fits {
                 continue;
@@ -2130,6 +2174,19 @@ mod tests {
         );
         assert_eq!(w.len(), 1, "{w:?}");
         assert!(w[0].contains("11"), "{w:?}");
+        // A gap between two scores is not a score, and a score beside another measure's short
+        // name is that measure's (a made-up report, 0.9.9).
+        let mut bayley = wppsi(&[("cognitive", 85.0), ("language", 68.0), ("motor", 97.0)]);
+        bayley.instrument = "bayley_4".into();
+        assert!(check_scores(
+            "פער של 29 נקודות בין מוטורי (97) לבין שפה (68), סטיית תקן אחת או יותר.",
+            std::slice::from_ref(&bayley)
+        )
+        .is_empty());
+        // …and a wrong one there still is.
+        let w = check_scores("פער של 29 נקודות בין מוטורי (79) לבין שפה (68).", &[bayley]);
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(w[0].contains("79"), "{w:?}");
         // Short names are ordinary words: "מידע" alone is not a measure.
         assert!(
             check_scores("נמסר מידע מ-2 מקורות.", &[wppsi(&[("information", 8.0)])]).is_empty()

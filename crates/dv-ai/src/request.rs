@@ -99,6 +99,20 @@ impl Provider {
         self.models().first().copied().unwrap_or(DEFAULT_MODEL)
     }
 
+    /// The quicker model of the same company, for a mechanical job (D-151: sorting materials
+    /// into sections): on the same lists, under the same rules, with the same key. A model on
+    /// this computer stays the one chosen.
+    #[must_use]
+    pub fn quick_model(self) -> Option<&'static str> {
+        match self {
+            Provider::Anthropic => Some("claude-sonnet-5"),
+            Provider::OpenAi => Some("gpt-5-mini"),
+            Provider::Gemini => Some("gemini-2-5-flash"),
+            Provider::Mistral => Some("mistral-medium"),
+            Provider::Local => None,
+        }
+    }
+
     /// The provider of an allowed model; `None` for anything off the lists.
     #[must_use]
     pub fn of_model(model: &str) -> Option<Self> {

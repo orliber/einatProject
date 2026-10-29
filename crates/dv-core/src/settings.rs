@@ -100,8 +100,8 @@ impl Core {
         self.model_for(Task::Draft)
     }
 
-    /// How long Claude may think, by task and by the speed chosen in settings. Sorting and the
-    /// small jobs (one paragraph, a check, one report's style) think little whatever the
+    /// Which model, and how long it may think, by task and by the speed chosen in settings.
+    /// Sorting and the small jobs (one paragraph, a check, one report's style) think little whatever the
     /// setting, and "thorough" deepens only them by one step (D-137); drafting and consultation
     /// think at the chosen speed.
     pub(crate) fn model_for(&mut self, task: Task) -> Result<ModelConfig, CoreError> {
@@ -121,6 +121,14 @@ impl Core {
             (Task::Light, _) => "low",
             (_, "thorough") => "high",
             _ => "medium",
+        };
+        // D-151: sorting goes to the quicker model of the same company: placing passages
+        // needs no depth, and Einat waits for it before she can write.
+        let model = match task {
+            Task::Sort => dv_ai::Provider::of_model(&model)
+                .and_then(dv_ai::Provider::quick_model)
+                .map_or(model, str::to_owned),
+            _ => model,
         };
         Ok(ModelConfig {
             model,

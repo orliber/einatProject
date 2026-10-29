@@ -49,9 +49,11 @@ const produce = () => screen.getByRole("button", { name: "הפקת הקובץ" }
 describe("the finish page", () => {
   it("ready: what goes into the file, names back in place, and the file can be made; passes the accessibility check", async () => {
     const { side, user, onExport, onOpen, view } = await openFinish();
-    expect(await within(side).findByRole("heading", { name: "הדוח מוכן להוצאה" })).toBeInTheDocument();
-    expect(within(side).getByText("2 סעיפים מאושרים ייכנסו לקובץ.")).toBeInTheDocument();
-    expect(within(side).getByText(/ריקים לא ייכנסו\./)).toBeInTheDocument();
+    // Sections with materials are still empty: the file can be made, the report is not ready.
+    // (The heading says "almost" until the check is back too: wait for the check's own line.)
+    expect(await within(side).findByText("2 סעיפים מאושרים ייכנסו לקובץ.")).toBeInTheDocument();
+    expect(within(side).getByRole("heading", { name: "כמעט מוכן" })).toBeInTheDocument();
+    expect(within(side).getByText(/יש חומרים, (והוא עוד ריק|והם עוד ריקים)\./)).toBeInTheDocument();
     expect(within(side).getByText("השמות חוזרים למקומם בקובץ.")).toBeInTheDocument();
     expect(produce()).toBeEnabled();
     await user.click(produce());
@@ -64,6 +66,16 @@ describe("the finish page", () => {
     expect(within(preview).getByRole("heading", { name: "סיבת הפניה" })).toBeInTheDocument();
     expect(within(preview).getAllByText("לא ייכנס לקובץ (אין פסקה מאושרת)").length).toBeGreaterThan(0);
     expect(await a11yViolations(view.container)).toEqual([]);
+  });
+
+  it("ready only when no section that has materials is left empty", async () => {
+    const { side } = await openFinish(async (cmd, args, core) => {
+      if (cmd !== "check_export") return undefined;
+      return { ...((await core.handle(cmd, args)) as object), empty_sections: [] };
+    });
+    expect(await within(side).findByRole("heading", { name: "הדוח מוכן להוצאה" })).toBeInTheDocument();
+    expect(within(side).queryByText(/יש חומרים/)).toBeNull();
+    expect(produce()).toBeEnabled();
   });
 
   it("the preview can be reached and scrolled from the keyboard", async () => {

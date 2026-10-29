@@ -4,7 +4,7 @@ import { groupByFolder } from "./CasePicker";
 
 const folder = (id: string, name: string, parent: string | null = null): Folder => ({ id, name, parent_id: parent, created_at: 0 });
 const kase = (id: string, child: string, folder_id: string | null): CaseSummary => ({
-  id, child_name: child, folder_id, deleted_at: null, failed_at: null, created_at: 0, updated_at: 0, approved_sections: [],
+  id, child_name: child, folder_id, deleted_at: null, failed_at: null, created_at: 0, updated_at: 0, approved_sections: [], total_sections: 16,
   meta: { code: id, age: null, child_gender: null, current_section: null, retention_until: null, consent: null },
 });
 

@@ -87,6 +87,10 @@ pub struct CaseSummary {
     #[ts(type = "number")]
     pub updated_at: i64,
     pub approved_sections: Vec<String>,
+    /// How many sections its report has, as the report counts them (its own template, the
+    /// signature aside): 15 in an older case, 16 in the institute's. Filled in by the core.
+    #[serde(default)]
+    pub total_sections: u32,
     /// The folder it sits in; `None` = the top level.
     pub folder_id: Option<String>,
     /// Set while the case is in the recycle bin (unix seconds).
