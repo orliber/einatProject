@@ -47,7 +47,8 @@ fn errors_cross_the_boundary() {
 fn broken_pdf_does_not_reach_the_app() {
     let r = worker::run(exe(), "x.pdf", b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 9 0 R >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF", worker::DEFAULT_TIMEOUT);
     assert!(
-        matches!(r, Err(IngestError::Corrupt(_) | IngestError::Scanned)),
+        // A PDF whose structure does not load is damaged: hers to save again (D-154).
+        matches!(r, Err(IngestError::Damaged(_) | IngestError::Scanned)),
         "{r:?}"
     );
 }
