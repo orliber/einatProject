@@ -566,7 +566,14 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
       // A click anywhere on a section out of focus brings it into focus, after the button it hit
       // (if any) did its work. The keyboard arriving on its heading or a paragraph does the same;
       // on a button it waits for the click, so the button is still there to take it.
-      onClick={() => { if (!focused) onPick(); }}
+      onClick={(e) => {
+        if (focused) return;
+        // What she clicked stays under the pointer while the section opens around it.
+        const anchor = e.target instanceof HTMLElement ? e.target : e.currentTarget;
+        const before = anchor.getBoundingClientRect().top;
+        onPick();
+        keepInPlace(anchor, e.currentTarget, before);
+      }}
       onFocus={(e) => { if (!focused && !(e.target instanceof HTMLButtonElement)) onPick(); }}>
       <div className="a4-heading-row">
         <h3 ref={heading} className="a4-heading" tabIndex={focused ? 0 : -1} aria-describedby={focused && pending.length ? `head-keys-${s.key}` : undefined}
@@ -756,4 +763,27 @@ function TrashIcon() {
       <path d="M9 7V4h6v3" />
     </svg>
   );
+}
+
+/** How far to scroll so a point that was at `before` (px from the top) and is now at `after`
+ *  is back where it was; nothing for a shift under a pixel. */
+export function scrollShift(before: number, after: number): number {
+  const d = after - before;
+  return Math.abs(d) < 1 ? 0 : d;
+}
+
+/** After the section clicked into focus has drawn its tools, scroll its page so what she
+ *  clicked is where it was (it moved by the height of what opened above it). Measured on the
+ *  clicked element, or on the section when that element was drawn anew. */
+function keepInPlace(anchor: HTMLElement, section: HTMLElement, before: number) {
+  const sectionBefore = section.getBoundingClientRect().top;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const shift = anchor.isConnected
+      ? scrollShift(before, anchor.getBoundingClientRect().top)
+      : scrollShift(sectionBefore, section.getBoundingClientRect().top);
+    if (!shift) return;
+    let box: HTMLElement | null = section.parentElement;
+    while (box && !(box.scrollHeight > box.clientHeight && /auto|scroll/.test(getComputedStyle(box).overflowY))) box = box.parentElement;
+    box?.scrollBy({ top: shift });
+  }));
 }

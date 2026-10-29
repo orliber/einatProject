@@ -6,7 +6,7 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import { App } from "../../App";
 import { FakeCore } from "../../web/fakeCore";
 import type { CaseDetail } from "../../ipc/client";
-import { draftRequest, firstFocus, nextWaiting } from "./ReportView";
+import { draftRequest, firstFocus, nextWaiting, scrollShift } from "./ReportView";
 import { DRAFT_FROM_APPROVED, DRAFT_FROM_SOURCES } from "./instructions";
 
 configure({ asyncUtilTimeout: 6000 });
@@ -27,6 +27,14 @@ function section(key: string, paragraphs: Partial<Section["paragraphs"][number]>
     ...extra,
   } as Section;
 }
+
+describe("a paragraph clicked out of focus stays where it was", () => {
+  it("scrolls by what it moved, and not for less than a pixel", () => {
+    expect(scrollShift(300, 352)).toBe(52);
+    expect(scrollShift(300, 260)).toBe(-40);
+    expect(scrollShift(300, 300.4)).toBe(0);
+  });
+});
 
 describe("where the focus goes", () => {
   const sections = [
