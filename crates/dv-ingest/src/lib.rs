@@ -112,6 +112,11 @@ pub enum IngestError {
     Unsupported,
     #[error("corrupt: {0}")]
     Corrupt(String),
+    /// The file itself is broken: not the archive or the PDF it says it is (cut short in a
+    /// download, a zip of something else). Hers to save again, not a fault of the reader
+    /// (D-154). The reason is for the details only.
+    #[error("damaged: {0}")]
+    Damaged(String),
     #[error("timed out")]
     Timeout,
     #[error("worker: {0}")]
@@ -141,7 +146,7 @@ impl IngestError {
             Self::Scanned => "לא נמצא בקובץ טקסט שאפשר לקרוא, גם לא בזיהוי טקסט מסריקה. אם זו סריקה, כדאי לסרוק שוב בבירור (300 dpi, דף ישר).".to_owned(),
             Self::Empty => "הקובץ ריק.".to_owned(),
             Self::Unsupported => "סוג הקובץ לא נתמך. אפשר לייבא Word (DOCX או DOC), ODT, RTF, PDF, קובץ טקסט, או תמונה של דף (JPG, PNG, TIFF).".to_owned(),
-            Self::Corrupt(_) => "לא הצלחתי לקרוא את הקובץ. כדאי לפתוח אותו ב-Word ולשמור שוב (קובץ ← שמירה בשם ← מסמך Word), או לשמור אותו כ-PDF ולהעלות את ה-PDF.".to_owned(),
+            Self::Corrupt(_) | Self::Damaged(_) => "לא הצלחתי לקרוא את הקובץ. כדאי לפתוח אותו ב-Word ולשמור שוב (קובץ ← שמירה בשם ← מסמך Word), או לשמור אותו כ-PDF ולהעלות את ה-PDF.".to_owned(),
             Self::Timeout => "קריאת הקובץ לקחה יותר מדי זמן והופסקה.".to_owned(),
             Self::Worker(_) => "רכיב הקריאה של התוכנה לא הצליח להתחיל. אפשר לנסות שוב; אם זה חוזר, \"העתקת פרטים\" ושליחה לאור.".to_owned(),
             Self::WorkerCrashed(_) => "רכיב הקריאה של התוכנה לא הצליח לפעול, וזו לא בעיה בקובץ. לפעמים אנטי-וירוס חוסם את רכיב הקריאה של התוכנה. אפשר לנסות שוב; אם זה חוזר, \"העתקת פרטים\" ושליחה לאור.".to_owned(),

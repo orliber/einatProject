@@ -19,6 +19,11 @@ pub(crate) fn corrupt(e: impl std::fmt::Display) -> IngestError {
     IngestError::Corrupt(e.to_string())
 }
 
+/// The package itself is not a Word file (D-154).
+fn damaged(e: impl std::fmt::Display) -> IngestError {
+    IngestError::Damaged(e.to_string())
+}
+
 type Archive<'a> = zip::ZipArchive<Cursor<&'a [u8]>>;
 
 /// Read one part, bounded by its own limit and by what is left of the total budget.
@@ -112,7 +117,7 @@ fn main_part(
 }
 
 pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
-    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(corrupt)?;
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(damaged)?;
     if zip.len() > MAX_ENTRIES {
         return Err(corrupt("too many entries"));
     }
@@ -130,7 +135,7 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
         .rsplit_once('/')
         .map_or(String::new(), |(f, _)| format!("{f}/"));
     let document = read_part(&mut zip, &main, &mut budget)?
-        .ok_or_else(|| corrupt("not a Word document (no main part)"))?;
+        .ok_or_else(|| damaged("not a Word document (no main part)"))?;
     let doc = paragraphs(&document)?;
     let mut body = doc.text;
     for part in ["footnotes.xml", "endnotes.xml"].map(|p| format!("{folder}{p}")) {
@@ -484,10 +489,17 @@ pub(crate) mod tests {
 
     #[test]
     fn not_a_word_document() {
+        // A zip of something else, or a Word file cut short: hers to save again (D-154).
         let bytes = build(&[("hello.txt", "x".to_owned())]);
         assert!(matches!(
             crate::extract(&bytes, "a.docx"),
-            Err(IngestError::Corrupt(_))
+            Err(IngestError::Damaged(_))
+        ));
+        let whole = build(&[("word/document.xml", document(&para("שלום")))]);
+        let cut = whole.get(..whole.len() / 2).unwrap_or_default();
+        assert!(matches!(
+            crate::extract(cut, "a.docx"),
+            Err(IngestError::Damaged(_))
         ));
     }
 
