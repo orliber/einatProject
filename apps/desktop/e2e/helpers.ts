@@ -70,6 +70,8 @@ export async function createCase(page: Page, child: string, opts: { consent?: bo
   await dialog.locator("#name-2").fill("אלון בדוי");
   if (opts.consent ?? true) await dialog.getByRole("checkbox", { name: /ההורים חתמו על הסכמה/ }).check();
   await dialog.getByRole("button", { name: "פתיחת התיק" }).click();
+  // Without consent the dialog asks once more (D-155).
+  if (!(opts.consent ?? true)) await dialog.getByRole("button", { name: "לפתוח בלי הסכמה" }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByRole("navigation", { name: "שלבי התיק" })).toBeVisible();
 }

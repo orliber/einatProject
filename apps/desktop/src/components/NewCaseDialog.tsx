@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AgeField, parseAge } from "./AgeField";
 import { DateField, todayIso } from "./DateField";
 import { useApp } from "../App";
@@ -125,13 +125,17 @@ export function NewCaseDialog({ onClose, onCreated, folderId = null }: { onClose
   ]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** D-155: opening without consent is asked once more; a case left without one waits for it. */
+  const [askConsent, setAskConsent] = useState(false);
+  const consentBox = useRef<HTMLInputElement>(null);
   const matches = useNameMatches(null, rows);
 
-  async function submit(e: FormEvent) {
+  async function submit(e: { preventDefault: () => void }, withoutConsent = false) {
     e.preventDefault();
     setError(null);
     if (!rows[0]?.value.trim()) return setError("צריך את שם הילד/ה, כדי שיוסתר בכל מקום.");
     if (consent && !consentDate) return setError("צריך את תאריך החתימה על ההסכמה (יום.חודש.שנה).");
+    if (!consent && !withoutConsent) return setAskConsent(true);
     setBusy(true);
     try {
       const id = await ipc.createCase(
@@ -188,7 +192,7 @@ export function NewCaseDialog({ onClose, onCreated, folderId = null }: { onClose
         </div>
 
         <div className="card consent">
-          <label className="row"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+          <label className="row"><input ref={consentBox} type="checkbox" checked={consent} onChange={(e) => { setConsent(e.target.checked); setAskConsent(false); }} />
             <b>ההורים חתמו על הסכמה לשימוש ב-{ai} בכתיבת הדוח</b></label>
           <p className="hint">בלי הסכמה אין שליחה ל-{ai}.</p>
           {consent && (
@@ -200,6 +204,15 @@ export function NewCaseDialog({ onClose, onCreated, folderId = null }: { onClose
               <div className="field grow">
                 <label htmlFor="cby">מי חתם (תפקיד, לא שם)</label>
                 <input id="cby" className="input" value={consentBy} onChange={(e) => setConsentBy(e.target.value)} />
+              </div>
+            </div>
+          )}
+          {askConsent && !consent && (
+            <div className="stack consent-ask" role="alert" style={{ gap: 8 }}>
+              <span className="warn-text">עוד לא סומנה הסכמת ההורים. בלי הסכמה שום דבר לא נשלח ל-{ai}. לפתוח את התיק בכל זאת?</span>
+              <div className="row wrap-row">
+                <button type="button" className="btn btn-small" onClick={() => { setAskConsent(false); consentBox.current?.focus(); }}>לסמן הסכמה</button>
+                <button type="button" className="btn btn-small" disabled={busy} onClick={(e) => { setAskConsent(false); void submit(e, true); }}>לפתוח בלי הסכמה</button>
               </div>
             </div>
           )}
