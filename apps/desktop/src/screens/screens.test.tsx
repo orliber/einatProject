@@ -511,6 +511,31 @@ describe("writing the report", () => {
     expect(screen.queryByText(/הדוח נכתב ונבדק/)).toBeNull();
   });
 
+  it("on a narrow window the case bar's side buttons are in its menu, and still work", async () => {
+    // jsdom has no layout: the bar is told it is 700px wide, as on a small laptop at 140%.
+    const real = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      constructor(private readonly cb: ResizeObserverCallback) {}
+      observe(el: Element) {
+        this.cb([{ target: el, contentRect: { width: 700 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+    try {
+      const { user } = await openApp(true, false);
+      await openCase(user);
+      const bar = document.querySelector(".case-bar") as HTMLElement;
+      await waitFor(() => expect(within(bar).queryByRole("button", { name: "חיפוש" })).toBeNull());
+      expect(within(bar).queryByRole("button", { name: "התייעצות" })).toBeNull();
+      await user.click(screen.getByRole("button", { name: /עוד פעולות/ }));
+      await user.click(await screen.findByRole("menuitem", { name: "חיפוש" }));
+      expect(await screen.findByRole("searchbox")).toBeInTheDocument();
+    } finally {
+      globalThis.ResizeObserver = real;
+    }
+  });
+
   it("after the whole report is written, approving every draft at once also clears the line that counted them", async () => {
     const { user, calls } = await openApp(true, false);
     await openCase(user);

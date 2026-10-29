@@ -194,7 +194,8 @@ fn logical(visual: &str) -> String {
 }
 
 fn load(bytes: &[u8]) -> Result<Document, IngestError> {
-    let mut doc = Document::load_mem(bytes).map_err(|e| IngestError::Corrupt(e.to_string()))?;
+    // A file whose structure does not load is not the PDF it says it is (D-154).
+    let mut doc = Document::load_mem(bytes).map_err(|e| IngestError::Damaged(e.to_string()))?;
     if doc.is_encrypted() && doc.decrypt("").is_err() {
         return Err(IngestError::Encrypted);
     }
@@ -422,6 +423,13 @@ fn pdf_string(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_that_only_starts_like_a_pdf_is_damaged_not_a_reader_fault() {
+        // D-154: "save it again" is hers to do; nothing for Or to look into.
+        let r = crate::extract(b"%PDF-1.7\nthe rest was never downloaded", "a.pdf");
+        assert!(matches!(r, Err(IngestError::Damaged(_))), "{r:?}");
+    }
 
     /// A minimal PDF built in memory: each character is placed separately, left to right,
     /// the way a producer that stores display order would place it.

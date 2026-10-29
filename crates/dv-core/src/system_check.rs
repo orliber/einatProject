@@ -682,7 +682,7 @@ fn read_failure(e: &IngestError) -> (String, &'static str) {
             "הקריאה של קובץ קטן לקחה יותר מדי זמן.".to_owned(),
             "המחשב עמוס, או שאנטי-וירוס סורק את רכיב הקריאה בכל הפעלה. סוגרים תוכנות כבדות ובודקים שוב; אם זה חוזר, מוסיפים את תיקיית התוכנה לחריגים של האנטי-וירוס.",
         ),
-        IngestError::Corrupt(_) => (
+        IngestError::Corrupt(_) | IngestError::Damaged(_) => (
             "רכיב הקריאה נעצר באמצע קובץ שידוע שהוא תקין.".to_owned(),
             REINSTALL,
         ),

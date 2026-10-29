@@ -211,6 +211,15 @@ fn every_error_has_a_next_step_that_fits_it() {
             ErrorAction::settings("ai"),
         ),
         (CoreError::Internal("x".into()), ErrorAction::Report),
+        // D-154: a damaged file is hers to save again; the reader breaking is Or's.
+        (
+            CoreError::Read(dv_ingest::IngestError::Damaged("x".into())),
+            ErrorAction::Dismiss,
+        ),
+        (
+            CoreError::Read(dv_ingest::IngestError::Corrupt("x".into())),
+            ErrorAction::Report,
+        ),
         (
             CoreError::Vault(VaultError::Corrupt("x".into())),
             ErrorAction::Report,

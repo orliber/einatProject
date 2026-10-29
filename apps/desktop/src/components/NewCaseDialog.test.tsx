@@ -110,10 +110,25 @@ describe("NewCaseDialog", () => {
     const { calls, user, dialog, onCreated } = open((cmd) => (cmd === "create_case" ? "case-8" : null));
     await user.type(dialog.querySelector("#name-0") as HTMLElement, "איתי");
     await user.click(within(dialog).getByRole("button", { name: "פתיחת התיק" }));
+    // D-155: asked once more, and nothing is created until she answers.
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("עוד לא סומנה הסכמת ההורים");
+    expect(calls.some((c) => c.cmd === "create_case")).toBe(false);
+    await user.click(within(dialog).getByRole("button", { name: "לפתוח בלי הסכמה" }));
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith("case-8"));
     const meta = calls.find((c) => c.cmd === "create_case")?.args.meta as { consent: unknown; age: unknown };
     expect(meta.consent).toBeNull();
     expect(meta.age).toBeNull();
+  });
+
+  it("asked about consent, she can go back and mark it instead", async () => {
+    const { calls, user, dialog } = open();
+    await user.type(dialog.querySelector("#name-0") as HTMLElement, "איתי");
+    await user.click(within(dialog).getByRole("button", { name: "פתיחת התיק" }));
+    await user.click(within(dialog).getByRole("button", { name: "לסמן הסכמה" }));
+    const box = within(dialog).getByRole("checkbox", { name: /ההורים חתמו על הסכמה/ });
+    expect(box).toHaveFocus();
+    expect(within(dialog).queryByText(/עוד לא סומנה הסכמת ההורים/)).toBeNull();
+    expect(calls.some((c) => c.cmd === "create_case")).toBe(false);
   });
 
   it("consent with no valid date is refused before anything is created", async () => {
@@ -135,6 +150,7 @@ describe("NewCaseDialog", () => {
     const { calls, user, dialog, onCreated } = open((cmd) => (cmd === "create_case" ? "case-9" : null), "folder-2");
     await user.type(dialog.querySelector("#name-0") as HTMLElement, "איתי");
     await user.click(within(dialog).getByRole("button", { name: "פתיחת התיק" }));
+    await user.click(within(dialog).getByRole("button", { name: "לפתוח בלי הסכמה" }));
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith("case-9"));
     expect(calls.find((c) => c.cmd === "move_case")?.args).toEqual({ caseId: "case-9", folderId: "folder-2" });
   });
@@ -146,6 +162,7 @@ describe("NewCaseDialog", () => {
     });
     await user.type(dialog.querySelector("#name-0") as HTMLElement, "איתי");
     await user.click(within(dialog).getByRole("button", { name: "פתיחת התיק" }));
+    await user.click(within(dialog).getByRole("button", { name: "לפתוח בלי הסכמה" }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("הכספת ננעלה. פותחים אותה שוב.");
     expect(onCreated).not.toHaveBeenCalled();
     expect(within(dialog).getByRole("button", { name: "פתיחת התיק" })).toBeEnabled();

@@ -466,7 +466,7 @@ impl CoreError {
             CoreError::Update(_) => ErrorAction::retry(),
             CoreError::Read(e) if e.transient() => ErrorAction::retry(),
             // A file the reader broke on is worth a report to Or; a file she can fix herself
-            // (encrypted, too large, of a kind not read) is only told.
+            // (encrypted, too large, of a kind not read, damaged: D-154) is only told.
             CoreError::Read(
                 dv_ingest::IngestError::Corrupt(_) | dv_ingest::IngestError::Ocr(_),
             ) => ErrorAction::Report,
