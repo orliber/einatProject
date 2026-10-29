@@ -7,7 +7,7 @@ function summary(over: Partial<CaseSummary> & { approved?: number; consent?: boo
   const approved = Array.from({ length: over.approved ?? 0 }, (_, i) => `s${i}`);
   return {
     id: "c1", child_name: "ילד בדוי", created_at: 0, updated_at: 0, folder_id: null, deleted_at: null, failed_at: null,
-    approved_sections: approved,
+    approved_sections: approved, total_sections: 0,
     meta: {
       code: "תיק-1", age: { years: 5, months: 4 }, child_gender: "male", current_section: null, retention_until: null,
       consent: over.consent === false ? null : { given_on: "2026-09-01", form_version: "v1", given_by: "ההורים" },
@@ -36,6 +36,17 @@ describe("caseStatus: one word, one line, three steps", () => {
     const s = caseStatus(summary({ approved: TOTAL_SECTIONS }));
     expect(s.word).toBe("מוכן להוצאה");
     expect(s.steps).toEqual(["done", "done", "now"]);
+  });
+
+  it("counts the case's own report, as the report does: 15 in an older case, signature aside", () => {
+    const older = caseStatus(summary({ approved: 2, total_sections: 15 }));
+    expect(older.detail).toBe("2 מתוך 15 סעיפים אושרו");
+    const done = summary({ total_sections: 15 });
+    done.approved_sections = [...Array.from({ length: 15 }, (_, i) => `s${i}`), "signature"];
+    expect(caseStatus(done).word).toBe("מוכן להוצאה");
+    const signed = summary({ total_sections: 15 });
+    signed.approved_sections = [...Array.from({ length: 14 }, (_, i) => `s${i}`), "signature"];
+    expect(caseStatus(signed).detail).toBe("14 מתוך 15 סעיפים אושרו");
   });
 
   it("a missing consent comes before everything else", () => {

@@ -15,7 +15,7 @@ import { greeting } from "../i18n/he";
 import { ipc, type CaseSummary, type Folder, type UiError } from "../ipc/client";
 import { ConfirmDialog, FolderIcon, FolderNameDialog, MoveDialog, PurgeDialog, descendants } from "./library/LibraryDialogs";
 import { FolderTree } from "./cases/FolderTree";
-import { caseStatus, TOTAL_SECTIONS, type CaseStatus } from "./cases/caseStatus";
+import { approvedCount, caseStatus, totalSections, type CaseStatus } from "./cases/caseStatus";
 import "./CasesScreen.css";
 import { useAi } from "../ai";
 
@@ -208,10 +208,10 @@ export function CasesScreen() {
 
   // "ד\"ר רותם בדויה" → "רותם": a title is not how anyone is greeted.
   const name = status.practitioner[0]?.split(" ").find((w) => w && !/^(ד["״']?ר|דר'|פרופ'|גב'|מר)$/.test(w));
-  const inProgress = allCases.filter((c) => c.approved_sections.length < TOTAL_SECTIONS).length;
+  const inProgress = allCases.filter((c) => approvedCount(c) < totalSections(c)).length;
   // The case she worked on last and has not finished: one click back into it.
   const resume = [...allCases]
-    .filter((c) => c.approved_sections.length < TOTAL_SECTIONS)
+    .filter((c) => approvedCount(c) < totalSections(c))
     .sort((a, b) => b.updated_at - a.updated_at)[0];
   const resumeStatus = resume ? caseStatus(resume) : null;
   const trashCount = trash.data?.length ?? 0;

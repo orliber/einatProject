@@ -6,6 +6,11 @@ import type { CaseMeta } from "./CaseMeta";
  */
 export type CaseSummary = { id: string, meta: CaseMeta, child_name: string | null, created_at: number, updated_at: number, approved_sections: Array<string>, 
 /**
+ * How many sections its report has, as the report counts them (its own template, the
+ * signature aside): 15 in an older case, 16 in the institute's. Filled in by the core.
+ */
+total_sections: number, 
+/**
  * The folder it sits in; `None` = the top level.
  */
 folder_id: string | null, 

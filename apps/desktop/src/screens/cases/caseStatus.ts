@@ -2,7 +2,18 @@
 // Pure, so the table and the "continue" strip say the same thing and a test can check it.
 import type { CaseSummary } from "../../ipc/client";
 
+/** The institute's report; the core gives each case its own count (an older case has 15). */
 export const TOTAL_SECTIONS = 16;
+
+/** How many sections the case's report has, as its table of contents counts them. */
+export function totalSections(c: CaseSummary): number {
+  return c.total_sections > 0 ? c.total_sections : TOTAL_SECTIONS;
+}
+
+/** Approved sections, as the report counts them (the signature aside). */
+export function approvedCount(c: CaseSummary): number {
+  return c.approved_sections.filter((k) => k !== "signature").length;
+}
 
 /** One of the three steps of a case: not started, in progress, or done. */
 export type Step = "empty" | "now" | "done";
@@ -25,8 +36,9 @@ export type CaseStatus = {
 };
 
 export function caseStatus(c: CaseSummary): CaseStatus {
-  const n = c.approved_sections.length;
-  const writing = `כתיבה: ${n} מתוך ${TOTAL_SECTIONS}`;
+  const n = approvedCount(c);
+  const total = totalSections(c);
+  const writing = `כתיבה: ${n} מתוך ${total}`;
   if (c.failed_at) {
     return {
       word: "השליחה נכשלה", detail: "לנסות שוב", attention: true,
@@ -42,7 +54,7 @@ export function caseStatus(c: CaseSummary): CaseStatus {
       view: "materials", button: "לפתוח",
     };
   }
-  if (n >= TOTAL_SECTIONS) {
+  if (n >= total) {
     return {
       word: "מוכן להוצאה", detail: "כל הסעיפים אושרו", attention: false,
       steps: ["done", "done", "now"], full: `חומרים: הושלמו · ${writing} · הוצאה: מחכה לך`,
@@ -51,7 +63,7 @@ export function caseStatus(c: CaseSummary): CaseStatus {
   }
   if (n > 0) {
     return {
-      word: "בכתיבה", detail: `${n} מתוך ${TOTAL_SECTIONS} סעיפים אושרו`, attention: false,
+      word: "בכתיבה", detail: `${n} מתוך ${total} סעיפים אושרו`, attention: false,
       steps: ["done", "now", "empty"], full: `חומרים: הושלמו · ${writing} · הוצאה: עוד לא`,
       view: "report", button: "להמשיך",
     };

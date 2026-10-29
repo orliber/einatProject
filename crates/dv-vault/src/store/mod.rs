@@ -1443,6 +1443,7 @@ impl Vault {
                     created_at,
                     updated_at,
                     approved_sections,
+                    total_sections: 0,
                     folder_id,
                     deleted_at,
                     failed_at: None,
