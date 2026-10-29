@@ -68,6 +68,25 @@ export interface CaseApi {
 }
 
 let jobSeq = 0;
+/** Narrower than this (a small window, larger text), the case bar's side buttons ("דף מלא",
+ *  "חיפוש", "התייעצות") move into its "⋯" menu, so nothing in the bar is cut. */
+const NARROW_BAR = 800;
+
+/** Whether the element is at most `width` wide, as it is resized (and the text zoomed). */
+function useNarrow(el: HTMLElement | null, width: number): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (w !== undefined) setNarrow(w > 0 && w <= width);
+    });
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, [el, width]);
+  return narrow;
+}
+
 /** "דף מלא", kept while the program runs. */
 let fullPageOn = false;
 /** "לנסות שוב" for a failure in the strip, by its id: memory only, so it survives leaving the
@@ -122,6 +141,9 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   /** The section in focus on the report page (round 48); `move` brings it into view. */
   const [focus, setFocus] = useState<{ key: string; at: number; move: boolean } | null>(null);
   const [searching, setSearching] = useState(false);
+  // The bar is there only once the case is read: its element, not a ref, so the watch starts then.
+  const [bar, setBar] = useState<HTMLElement | null>(null);
+  const narrowBar = useNarrow(bar, NARROW_BAR);
   const [throwing, setThrowing] = useState(false);
   // Round 42: "full page" hides the contents beside the report, for every case until she
   // turns it off (memory only).
@@ -455,6 +477,13 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     { n: 3, label: "הוצאת הדוח", view: "finish", done: false },
   ];
   const more: MenuItem[] = [
+    ...(narrowBar
+      ? [
+          ...(stage === 2 ? [{ label: fullPage ? "להחזיר את תוכן הדוח שבצד" : "דף מלא", run: () => setFullPage(!fullPage) }] : []),
+          { label: "חיפוש", run: () => setSearching(true) },
+          { label: "התייעצות", run: () => go({ name: "consult", caseId }) },
+        ]
+      : []),
     { label: "פרטים ושמות להסתרה", run: () => go({ name: "case", id: caseId, view: "details" }) },
     { label: current ? `מה יצא מהמחשב בסעיף "${current.title}"` : "מה יצא מהמחשב בתיק הזה", run: () => setSentFor(current?.key ?? "") },
     { label: `כתיבת כל הדוח עם ${ai}`, run: writeAll },
@@ -464,7 +493,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
 
   return (
     <div className="case case-v2">
-      <header className="case-bar">
+      <header className="case-bar" ref={setBar}>
         <button type="button" className="case-back" onClick={() => go({ name: "cases" })}>→ תיקים</button>
         <button type="button" className="case-id" title="פרטים ושמות להסתרה" onClick={() => go({ name: "case", id: caseId, view: "details" })}>
           <span className="case-child" title={child || detail.meta.code}>{child || detail.meta.code}</span>
@@ -483,13 +512,13 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
         </nav>
         {status.demo_mode && <span className="chip chip-sand case-demo" title="לא הוגדר מפתח API בהגדרות">מצב הדגמה</span>}
         <UpdateChip />
-        {stage === 2 && (
+        {stage === 2 && !narrowBar && (
           <button type="button" className="btn" aria-pressed={fullPage} title={fullPage ? "להחזיר את תוכן הדוח שבצד" : "להסתיר את תוכן הדוח שבצד"} onClick={() => setFullPage(!fullPage)}>
             דף מלא
           </button>
         )}
-        <button type="button" className="btn" onClick={() => setSearching(true)}>חיפוש</button>
-        <button type="button" className="btn" onClick={() => go({ name: "consult", caseId })}>התייעצות</button>
+        {!narrowBar && <button type="button" className="btn" onClick={() => setSearching(true)}>חיפוש</button>}
+        {!narrowBar && <button type="button" className="btn" onClick={() => go({ name: "consult", caseId })}>התייעצות</button>}
         <ActionsMenu items={more} label="עוד פעולות: פרטים ושמות, כתיבת כל הדוח, נעילה" />
       </header>
       <ErrorLine error={error} />
