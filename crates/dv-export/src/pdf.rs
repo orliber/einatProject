@@ -55,8 +55,13 @@ struct Font<'a> {
     face: ttf_parser::Face<'a>,
     data: &'a [u8],
     upem: f32,
-    /// Glyphs drawn, with the character each stands for (widths and copy-and-paste).
+    /// Codes drawn (a glyph id, or an alias of one), with the character each stands for
+    /// (widths and copy-and-paste).
     used: RefCell<BTreeMap<u16, char>>,
+    /// A bracket drawn mirrored in right-to-left text: its own code past the font's glyphs,
+    /// drawn with the mirror's glyph and copied as the bracket that was written. With the
+    /// mirror's own code, "(עד 42 חודשים)" was copied out of the file as ")עד 42 חודשים(".
+    aliases: RefCell<BTreeMap<char, (u16, u16)>>,
 }
 
 impl<'a> Font<'a> {
@@ -81,7 +86,40 @@ impl<'a> Font<'a> {
             face,
             data,
             used: RefCell::new(BTreeMap::new()),
+            aliases: RefCell::new(BTreeMap::new()),
         })
+    }
+
+    /// The code of `drawn` standing for `meant`: the glyph id itself, or for a mirrored
+    /// bracket an alias of it that copies as `meant` (see `aliases`).
+    fn code(&self, drawn: char, meant: char) -> u16 {
+        let gid = self.glyph(drawn);
+        if drawn == meant {
+            return gid;
+        }
+        let mut aliases = self.aliases.borrow_mut();
+        if let Some((code, _)) = aliases.get(&meant) {
+            return *code;
+        }
+        let glyphs = self.face.number_of_glyphs();
+        let Some(code) = u16::try_from(aliases.len())
+            .ok()
+            .and_then(|n| glyphs.checked_add(n))
+        else {
+            return gid;
+        };
+        aliases.insert(meant, (code, gid));
+        self.used.borrow_mut().insert(code, meant);
+        code
+    }
+
+    /// The glyph a code draws.
+    fn gid_of(&self, code: u16) -> u16 {
+        self.aliases
+            .borrow()
+            .values()
+            .find(|(c, _)| *c == code)
+            .map_or(code, |(_, g)| *g)
     }
 
     fn glyph(&self, c: char) -> u16 {
@@ -107,12 +145,13 @@ impl<'a> Font<'a> {
         s.chars().map(|c| self.advance(c)).sum::<f32>() * size / 1000.0
     }
 
-    /// The glyph ids of a visual-order string, as a hex string for `Tj`.
-    fn hex(&self, visual: &str) -> String {
+    /// The codes of a visual-order line (each character drawn, with the one it stands for),
+    /// as a hex string for `Tj`.
+    fn hex(&self, visual: &[(char, char)]) -> String {
         let mut out = String::with_capacity(visual.len() * 4 + 2);
         out.push('<');
-        for c in visual.chars() {
-            let _ = write!(out, "{:04X}", self.glyph(c));
+        for (drawn, meant) in visual {
+            let _ = write!(out, "{:04X}", self.code(*drawn, *meant));
         }
         out.push('>');
         out
@@ -161,7 +200,13 @@ fn is_mark(c: char) -> bool {
 }
 
 /// One line of a right-to-left paragraph in the order it is drawn, left to right.
+#[cfg(test)]
 fn visual(line: &str) -> String {
+    visual_pairs(line).into_iter().map(|(c, _)| c).collect()
+}
+
+/// [`visual`], each character drawn with the one it stands for (a mirrored bracket).
+fn visual_pairs(line: &str) -> Vec<(char, char)> {
     let chars: Vec<char> = line.chars().collect();
     // Spans that keep their own (left-to-right) order: from a Latin letter or digit to the
     // last one before the next Hebrew letter or bracket, with a sign before the first digit
@@ -203,17 +248,17 @@ fn visual(line: &str) -> String {
     // Drawn from the end: a left-to-right span keeps its order, everything else is reversed
     // one letter at a time (its points stay after it) and mirrored.
     let marked: Vec<(char, bool)> = chars.iter().copied().zip(ltr).collect();
-    let mut out: Vec<char> = Vec::with_capacity(chars.len());
+    let mut out: Vec<(char, char)> = Vec::with_capacity(chars.len());
     for run in marked.chunk_by(|a, b| a.1 == b.1).rev() {
         if run.first().is_some_and(|(_, keep)| *keep) {
-            out.extend(run.iter().map(|(c, _)| *c));
+            out.extend(run.iter().map(|(c, _)| (*c, *c)));
         } else {
             for letter in run.chunk_by(|_, b| is_mark(b.0)).rev() {
-                out.extend(letter.iter().map(|(c, _)| mirror(*c)));
+                out.extend(letter.iter().map(|(c, _)| (mirror(*c), *c)));
             }
         }
     }
-    out.into_iter().collect()
+    out
 }
 
 /// A word wider than `max` cut into pieces that fit (a letter keeps its points); a word
@@ -321,8 +366,8 @@ impl<'a> Pages<'a> {
         align: Align,
     ) {
         let font = self.font(bold);
-        let vis = visual(logical);
-        let w = font.width(&vis, size);
+        let vis = visual_pairs(logical);
+        let w = font.width(&vis.iter().map(|(c, _)| *c).collect::<String>(), size);
         let left = match align {
             Align::Right => x - w,
             Align::Center => x - w / 2.0,
@@ -784,14 +829,25 @@ fn embed(doc: &mut Document, font: &Font<'_>, name: &str) -> lopdf::ObjectId {
         "FontFile2" => file,
     });
     let mut widths: Vec<Object> = Vec::new();
-    for gid in font.used.borrow().keys() {
+    for code in font.used.borrow().keys() {
         let w = font
             .face
-            .glyph_hor_advance(ttf_parser::GlyphId(*gid))
+            .glyph_hor_advance(ttf_parser::GlyphId(font.gid_of(*code)))
             .map_or(0, |a| (f32::from(a) * 1000.0 / font.upem).round() as i64);
-        widths.push(i64::from(*gid).into());
+        widths.push(i64::from(*code).into());
         widths.push(vec![w.into()].into());
     }
+    // Codes are glyph ids, except a mirrored bracket's alias past the last glyph: then a map
+    // from every code to its glyph.
+    let to_gid: Object = match font.aliases.borrow().values().map(|(code, _)| *code).max() {
+        None => "Identity".into(),
+        Some(last) => {
+            let map: Vec<u8> = (0..=last)
+                .flat_map(|code| font.gid_of(code).to_be_bytes())
+                .collect();
+            doc.add_object(Stream::new(dictionary! {}, map)).into()
+        }
+    };
     let cid = doc.add_object(dictionary! {
         "Type" => "Font",
         "Subtype" => "CIDFontType2",
@@ -804,7 +860,7 @@ fn embed(doc: &mut Document, font: &Font<'_>, name: &str) -> lopdf::ObjectId {
         "FontDescriptor" => descriptor,
         "DW" => 1000,
         "W" => widths,
-        "CIDToGIDMap" => "Identity",
+        "CIDToGIDMap" => to_gid,
     });
     let cmap = doc.add_object(Stream::new(dictionary! {}, to_unicode(font)));
     doc.add_object(dictionary! {
@@ -1175,6 +1231,73 @@ mod tests {
         assert_eq!(visual("WISC-V מלא"), "אלמ WISC-V");
         assert_eq!(visual("הבנה מילולית (VCI)"), "(VCI) תילולימ הנבה");
         assert_eq!(visual("FSIQ = 102 בטווח"), "חווטב FSIQ = 102");
+    }
+
+    #[test]
+    fn a_mirrored_bracket_is_drawn_mirrored_and_copied_as_written() {
+        // Copied out of the file, "(עד 42 חודשים)" came out ")עד 42 חודשים(" (0.9.9).
+        let Some(data) = system_font() else {
+            eprintln!("no Hebrew font on this computer; skipped");
+            return;
+        };
+        let font = Font::load(&data).unwrap();
+        let vis = visual_pairs("ציון (עד 42) ו-(VCI)");
+        assert_eq!(vis.first(), Some(&('(', ')')), "{vis:?}");
+        let hex = font.hex(&vis);
+        let codes: Vec<u16> = hex
+            .trim_matches(['<', '>'])
+            .as_bytes()
+            .chunks(4)
+            .map(|c| u16::from_str_radix(std::str::from_utf8(c).unwrap(), 16).unwrap())
+            .collect();
+        let gid = |c: char| font.face.glyph_index(c).unwrap().0;
+        let used = font.used.borrow().clone();
+        // Drawn as "(", copied as ")": a code of its own, past the font's glyphs.
+        let first = codes[0];
+        assert!(first >= font.face.number_of_glyphs());
+        assert_eq!((font.gid_of(first), used[&first]), (gid('('), ')'));
+        // The same bracket again takes the same code; a Latin letter is itself.
+        let mirrored: Vec<u16> = codes
+            .iter()
+            .copied()
+            .filter(|c| *c >= font.face.number_of_glyphs())
+            .collect();
+        // Four brackets in right-to-left text, two codes.
+        assert_eq!(mirrored.len(), 4, "{vis:?}");
+        let mut distinct = mirrored.clone();
+        distinct.sort_unstable();
+        distinct.dedup();
+        assert_eq!(distinct.len(), 2);
+        assert!(codes.contains(&gid('V')));
+        assert_eq!(used[&gid('(')], '(');
+        // The file maps every code to its glyph once an alias is drawn.
+        let mut doc = Document::with_version("2.0");
+        let id = embed(&mut doc, &font, "F");
+        let descendant = doc
+            .get_dictionary(id)
+            .unwrap()
+            .get(b"DescendantFonts")
+            .unwrap()
+            .as_array()
+            .unwrap()[0]
+            .as_reference()
+            .unwrap();
+        let map = doc
+            .get_dictionary(descendant)
+            .unwrap()
+            .get(b"CIDToGIDMap")
+            .unwrap();
+        let map = doc
+            .get_object(map.as_reference().unwrap())
+            .unwrap()
+            .as_stream()
+            .unwrap();
+        let at = |code: u16| {
+            let i = usize::from(code) * 2;
+            u16::from_be_bytes([map.content[i], map.content[i + 1]])
+        };
+        assert_eq!(at(first), gid('('));
+        assert_eq!(at(gid('V')), gid('V'));
     }
 
     /// A bracket ends a Latin span, so "(FSIQ) 102" keeps both parentheses; a sign or unit
