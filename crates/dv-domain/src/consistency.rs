@@ -110,7 +110,8 @@ pub fn check_gender(text: &str, gender: Option<GrammaticalGender>) -> Vec<String
                 "כתוב «{w}», ובפרטי התיק הילד{} {right}",
                 if right == "בת" { "ה" } else { "" }
             ))
-        } else if *w == wrong_child {
+        } else if *w == wrong_child && !names_no_child(i.checked_sub(1).and_then(|p| words.get(p)))
+        {
             Some(format!(
                 "כתוב «{w}», ובפרטי התיק {}",
                 if right == "בת" {
@@ -129,6 +130,14 @@ pub fn check_gender(text: &str, gender: Option<GrammaticalGender>) -> Vec<String
         }
     }
     out
+}
+
+/// "המכון להתפתחות הילד", "שם הילד:": the words name a place or a form's field, not her.
+fn names_no_child(prev: Option<&&str>) -> bool {
+    prev.is_some_and(|p| {
+        let p = p.trim_start_matches(['ו', 'ל', 'ב']);
+        p == "התפתחות" || p == "שם"
+    })
 }
 
 /// The letters of the grades, in order.
@@ -319,6 +328,11 @@ mod tests {
             "only before an age"
         );
         assert!(check_gender("הילדה", None).is_empty());
+        // An institution's name and a form's field are no word for her (the real-corpus bench).
+        assert!(
+            check_gender("הוערכה במכון להתפתחות הילד. שם הילד: הדר.", girl).is_empty(),
+            "a name, not the child"
+        );
     }
 
     #[test]

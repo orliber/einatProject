@@ -33,7 +33,7 @@ export function composeWish(chips: readonly BriefChip[], picked: readonly string
   return [...styles, ...(own ? [own] : [])].join(" ");
 }
 
-export function BriefBox({ id, title, hint, placeholder, chips, chipsTitle, recent, initial, keep, sendLabel, foot, busy, autoFocus, onSend, onCancel }: {
+export function BriefBox({ id, title, hint, placeholder, chips, chipsTitle, recent, initial, keep, sendLabel, foot, busy, autoFocus, needs, onSend, onCancel }: {
   id: string;
   title: string;
   hint: string;
@@ -50,6 +50,9 @@ export function BriefBox({ id, title, hint, placeholder, chips, chipsTitle, rece
   foot?: string;
   busy: boolean;
   autoFocus?: boolean;
+  /** When an empty box cannot send (a change, her points): what must be there, and the
+   *  sentence said when it is not. Without it, an empty box sends (a new section, as always). */
+  needs?: { what: "wish" | "typed"; say: string } | undefined;
   /** `wish`: the whole request (styles and words); `typed`: her own words only. */
   onSend: (wish: string, typed: string, keep: boolean) => void;
   onCancel: () => void;
@@ -57,6 +60,8 @@ export function BriefBox({ id, title, hint, placeholder, chips, chipsTitle, rece
   const box = useRef<LocalTextHandle>(null);
   const [picked, setPicked] = useState<string[]>([]);
   const [keeping, setKeeping] = useState(keep ?? false);
+  /** Said under the box when Enter or the button found nothing to send. */
+  const [missing, setMissing] = useState<string | null>(null);
 
   useEffect(() => {
     if (autoFocus) box.current?.focus();
@@ -65,10 +70,20 @@ export function BriefBox({ id, title, hint, placeholder, chips, chipsTitle, rece
   const send = () => {
     if (busy) return;
     const typed = box.current?.value() ?? "";
-    onSend(composeWish(chips, picked, typed), typed.trim(), keeping);
+    const wish = composeWish(chips, picked, typed);
+    if (needs && !(needs.what === "typed" ? typed.trim() : wish.trim())) {
+      // Nothing to send: say what is missing, where she is typing, instead of doing nothing.
+      setMissing(needs.say);
+      box.current?.focus();
+      return;
+    }
+    setMissing(null);
+    onSend(wish, typed.trim(), keeping);
   };
-  const toggle = (label: string) =>
+  const toggle = (label: string) => {
+    setMissing(null);
     setPicked((p) => (p.includes(label) ? p.filter((x) => x !== label) : [...p, label]));
+  };
 
   return (
     <div className="brief-box" role="group" aria-labelledby={`${id}-title`}
@@ -78,11 +93,14 @@ export function BriefBox({ id, title, hint, placeholder, chips, chipsTitle, rece
         <span className="small muted">{hint}</span>
       </label>
       <LocalText ref={box} id={id} className="textarea brief-box-text" rows={2} resize={fitRows} initial={initial ?? ""} placeholder={placeholder}
+        aria-describedby={missing ? `${id}-missing` : undefined}
+        onEmptyChange={(empty) => { if (!empty) setMissing(null); }}
         onKeyDown={(e) => {
           if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
           e.preventDefault();
           send();
         }} />
+      {missing && <span id={`${id}-missing`} className="small warn-text" role="alert">{missing}</span>}
       <div className="brief-box-group">
         <span className="small muted brief-box-sub">{chipsTitle}</span>
         <div className="row wrap-row">
@@ -115,7 +133,7 @@ export function BriefBox({ id, title, hint, placeholder, chips, chipsTitle, rece
         <button type="button" className="btn" onClick={onCancel}>ביטול</button>
         <button type="button" className="btn btn-primary" disabled={busy} onClick={send}>{sendLabel}</button>
       </div>
-      <span className="small muted">Enter שולח, גם בלי לכתוב כלום · Shift+Enter שורה חדשה · ההנחיה עוברת את הסינון יחד עם החומרים.</span>
+      <span className="small muted">{needs ? "Enter שולח" : "Enter שולח, גם בלי לכתוב כלום"} · Shift+Enter שורה חדשה · ההנחיה עוברת את הסינון יחד עם החומרים.</span>
     </div>
   );
 }

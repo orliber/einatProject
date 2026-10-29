@@ -184,6 +184,7 @@ fn main() {
             "prepare_update",
             "install_update",
             "open_releases_page",
+            "system_check",
             "send_progress",
         ]));
     if let Err(error) = tauri_build::try_build(attributes) {

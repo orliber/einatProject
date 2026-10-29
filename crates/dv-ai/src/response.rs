@@ -208,6 +208,27 @@ fn parse_without_sources(
     Ok(reply)
 }
 
+/// Whether an answer that came back whole is worth one more try of the same request (D-143):
+/// it stopped at the output ceiling, or a request that asked for JSON got text that is not
+/// JSON. The model writes differently each time (its thinking above all), so the same request
+/// usually fits the second time. A refusal is not tried again (it would be refused again), and
+/// neither is an answer that reads as JSON: what it holds is for the step to judge.
+#[must_use]
+pub fn worth_another_try(body: &Value, response: &Value) -> bool {
+    match response["stop_reason"].as_str() {
+        Some("max_tokens") => true,
+        Some("refusal") => false,
+        _ => {
+            let wants_json = body
+                .pointer("/output_config/format/type")
+                .and_then(Value::as_str)
+                == Some("json_schema");
+            wants_json
+                && text_of(response).map_or(true, |t| serde_json::from_str::<Value>(&t).is_err())
+        }
+    }
+}
+
 /// Plain-text answer (consultation, research).
 pub fn parse_consult(response: &Value) -> Result<String, AiError> {
     text_of(response)
@@ -290,6 +311,28 @@ mod tests {
         );
         let cut = json!({"stop_reason": "max_tokens", "content": [{"type": "text", "text": "{"}]});
         assert_eq!(parse_consult(&cut), Err(AiError::Truncated));
+    }
+
+    /// D-143: a cut answer, and JSON that does not read, are tried once more; a refusal, a
+    /// plain-text answer and JSON that reads are not.
+    #[test]
+    fn a_cut_or_unreadable_answer_is_worth_one_more_try() {
+        let json_body = json!({"output_config": {"effort": "high", "format": {"type": "json_schema", "schema": {}}}});
+        let text_body = json!({"output_config": {"effort": "high"}});
+        let cut = json!({"stop_reason": "max_tokens", "content": [{"type": "text", "text": "{\"reply\": \"חצי"}]});
+        assert!(worth_another_try(&json_body, &cut));
+        assert!(worth_another_try(&text_body, &cut));
+        let broken = api("{\"reply\": \"נקטע");
+        assert!(worth_another_try(&json_body, &broken));
+        assert!(!worth_another_try(&text_body, &broken));
+        assert!(worth_another_try(
+            &json_body,
+            &json!({"stop_reason": "end_turn"})
+        ));
+        assert!(!worth_another_try(&json_body, &api("{\"reply\": \"שלם\"}")));
+        let refused =
+            json!({"stop_reason": "refusal", "stop_details": {"category": "bio"}, "content": []});
+        assert!(!worth_another_try(&json_body, &refused));
     }
 
     #[test]

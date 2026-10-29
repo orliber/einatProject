@@ -34,6 +34,7 @@ mod parents;
 mod perf_profile;
 mod prepare_off_lock;
 mod reading;
+mod real_corpus;
 mod report_check;
 mod sample_flows;
 mod sort_flows;
@@ -203,6 +204,11 @@ fn every_error_has_a_next_step_that_fits_it() {
         (
             CoreError::Ai(dv_ai::AiError::Format("x".into())),
             ErrorAction::Dismiss,
+        ),
+        // Cut twice (D-143): the speed she sets is what is left to change.
+        (
+            CoreError::Ai(dv_ai::AiError::Truncated),
+            ErrorAction::settings("ai"),
         ),
         (CoreError::Internal("x".into()), ErrorAction::Report),
         (
@@ -1047,6 +1053,89 @@ fn model_answer_with_unknown_source_and_number_is_flagged() {
     assert!(!r.paragraphs[1].warnings.is_empty(), "85 is not in S1");
     assert!(!r.paragraphs[2].warnings.is_empty(), "S9 does not exist");
     assert!(r.paragraphs[0].text.contains("אלון"));
+}
+
+/// Answers with a script, one answer per call, then like the demo; records every payload.
+#[derive(Clone, Default)]
+struct Answers {
+    script: Arc<Mutex<Vec<Value>>>,
+    sent: Arc<Mutex<Vec<Vec<u8>>>>,
+}
+
+impl Transport for Answers {
+    fn send(&self, payload: &ClearedPayload) -> Result<Value, EgressError> {
+        self.sent.lock().unwrap().push(payload.body().to_vec());
+        let mut script = self.script.lock().unwrap();
+        if script.is_empty() {
+            return Ok(dv_ai::demo::respond(
+                &serde_json::from_slice(payload.body()).unwrap(),
+            ));
+        }
+        Ok(script.remove(0))
+    }
+}
+
+/// D-143: an answer cut at the ceiling, or JSON that does not read, is asked for once more with
+/// the same approved bytes; the second answer is used, and both count toward the month.
+#[test]
+fn a_cut_or_broken_answer_is_asked_for_once_more_with_the_same_bytes() {
+    let cut = json!({
+        "stop_reason": "max_tokens",
+        "content": [{"type": "text", "text": "{\"reply\": \"הנה טיו"}],
+        "usage": {"input_tokens": 1000, "output_tokens": 64000},
+    });
+    let broken = json!({
+        "stop_reason": "end_turn",
+        "content": [{"type": "text", "text": "{\"reply\": \"הנה"}],
+        "usage": {"input_tokens": 1000, "output_tokens": 300},
+    });
+    for first in [cut.clone(), broken] {
+        let answers = Answers::default();
+        answers.script.lock().unwrap().push(first);
+        let (_dir, mut core, case) = setup(None);
+        core.transport = Some(Arc::new(answers.clone()));
+        let id = core
+            .prepare_section(&case, "kindergarten", "טיוטה")
+            .unwrap()
+            .approval_id
+            .unwrap();
+        let r = core.send_section(&id).unwrap();
+        assert!(!r.paragraphs.is_empty());
+        let sent = answers.sent.lock().unwrap().clone();
+        assert_eq!(sent.len(), 2, "one more try, no more");
+        assert_eq!(sent[0], sent[1], "the same approved bytes");
+        assert!(core.usage_summary().unwrap().input_tokens >= 1000);
+    }
+
+    // Cut twice: the step says so, with the place that changes it; nothing else is sent.
+    let answers = Answers::default();
+    answers.script.lock().unwrap().extend([cut.clone(), cut]);
+    let (_dir, mut core, case) = setup(None);
+    core.transport = Some(Arc::new(answers.clone()));
+    let id = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap()
+        .approval_id
+        .unwrap();
+    let err = core.send_section(&id).unwrap_err();
+    assert_eq!(answers.sent.lock().unwrap().len(), 2);
+    let ui = err.to_ui();
+    assert!(ui.message.contains("מהירות התשובות"), "{}", ui.message);
+    assert_eq!(ui.action, ErrorAction::settings("ai"));
+    // Both cut answers were paid for: the month counts both.
+    assert_eq!(core.usage_summary().unwrap().output_tokens, 128_000);
+
+    // An answer that reads is used as it is: one request.
+    let answers = Answers::default();
+    let (_dir, mut core, case) = setup(None);
+    core.transport = Some(Arc::new(answers.clone()));
+    let id = core
+        .prepare_section(&case, "kindergarten", "טיוטה")
+        .unwrap()
+        .approval_id
+        .unwrap();
+    core.send_section(&id).unwrap();
+    assert_eq!(answers.sent.lock().unwrap().len(), 1);
 }
 
 #[test]

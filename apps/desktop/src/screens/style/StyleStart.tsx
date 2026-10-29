@@ -35,7 +35,8 @@ export const START_STAGES: StartStage[] = [
   {
     key: "approve",
     title: "את מאשרת",
-    line: "כל דבר מחכה לך, אחד-אחד. שום דבר לא נכנס לשימוש בלי האישור שלך.",
+    // D-138: what is learned is used at once; anything can be changed, turned off or removed.
+    line: "מה שנלמד נכנס לשימוש. כל פריט אפשר לערוך, לכבות או למחוק, ומה שמחכה לך מאשרים אחד-אחד.",
     example: (
       <span className="style-path-choices">
         <span className="style-path-choice style-path-choice-yes">להשתמש בזה</span>

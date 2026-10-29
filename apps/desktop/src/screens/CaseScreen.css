@@ -414,7 +414,8 @@
   background: var(--surface-alt);
 }
 .case-child {
-  min-width: 0;
+  /* Never squeezed to one letter, at any width: the age gives way first. */
+  min-width: 6ch;
   max-width: 32ch;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -423,13 +424,19 @@
   font-weight: 700;
 }
 .case-age {
+  /* When the bar is tight, the age gives way long before the child's name. */
+  flex-shrink: 100;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--ink-muted);
   font-size: var(--text-base);
 }
 .stages {
   flex-grow: 1;
   flex-shrink: 1;
-  min-width: 0;
+  /* Never narrower than its three buttons: squeezed, they would spill over the name. */
+  min-width: max-content;
   display: flex;
   justify-content: center;
   gap: 6px;
@@ -598,6 +605,9 @@
   color: var(--ink-muted);
 }
 .contents-tag {
+  /* "חסר חומר" stays one word-pair beside a long title, never split over two lines. */
+  flex-shrink: 0;
+  white-space: nowrap;
   font-size: var(--text-xs);
   color: var(--warn-ink);
 }
@@ -674,12 +684,36 @@
     display: none;
   }
   .case-child {
-    /* Never squeezed to one letter: the stages and the age give way first. */
-    min-width: 6ch;
     max-width: 18ch;
+  }
+  /* Whatever happens to the widths, the name is cut at its own box, never drawn over the stages. */
+  .case-id {
+    overflow: hidden;
   }
   .stage {
     padding: 0 10px;
+  }
+  /* Demo mode stays in the bar of every screen outside the case. */
+  .case-demo {
+    display: none;
+  }
+}
+/* Narrower still (a laptop with larger text): the quiet parts step back, so nothing in the
+   bar overlaps. A missing consent stays in sight ("✓ הסכמה" is in the case's details), and
+   the stages keep their words, the current one marked. */
+@container (max-width: 1000px) {
+  .case-id .chip-ok,
+  .stage-dot {
+    display: none;
+  }
+  .case-bar > .btn {
+    padding: 0 12px;
+  }
+  .stages {
+    gap: 2px;
+  }
+  .stage {
+    padding: 0 8px;
   }
 }
 /* D-114: material not sorted yet, said above the writing: what it means and what to do. */

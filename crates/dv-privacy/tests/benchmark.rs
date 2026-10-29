@@ -148,6 +148,26 @@ const ITEMS: &[Item] = &[
         &["הגיעה"],
     ),
     it("undeclared", "גיל, בן 8, קורא לאט.", &["גיל"], &["קורא"]),
+    // A name that is one of the commonest words, where only a name can stand (the
+    // real-corpus bench: "עם איתי" left the machine as written).
+    it(
+        "undeclared",
+        "חברים: מתרועע עם איתי מהשכונה, משחק כדורגל בהפסקות.",
+        &["איתי"],
+        &["מתרועע", "כדורגל"],
+    ),
+    it(
+        "undeclared",
+        "בהפסקות היא משחקת בעיקר עם שרה.",
+        &["שרה"],
+        &["משחקת"],
+    ),
+    it(
+        "clean",
+        "שוחח איתי בעברית, ובסוף בא איתי לחדר ונכנס עם שמחה רבה.",
+        &[],
+        &["איתי", "שמחה"],
+    ),
     // Surnames.
     it(
         "surname",

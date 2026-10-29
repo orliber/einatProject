@@ -309,12 +309,23 @@ fn an_answer_that_cannot_be_read_still_counts_as_sent_and_is_not_sent_again() {
         1
     );
     assert_eq!(sends_logged(&mut core), 1);
+    // Within the send it went once more, the same bytes (D-143), and the log says so.
+    let attempts = t.attempts();
+    assert_eq!(attempts.len(), 2);
+    assert_eq!(attempts[0], attempts[1]);
+    assert!(core
+        .vault_ref()
+        .unwrap()
+        .audit_entries(10_000)
+        .unwrap()
+        .iter()
+        .any(|e| e.event == "send" && e.meta.contains("\"sent_twice\":true")));
     // A retry would send the same thing again behind her back: the approval is gone.
     assert!(matches!(
         core.send_section(&id),
         Err(CoreError::NotFound(_))
     ));
-    assert_eq!(t.attempts().len(), 1);
+    assert_eq!(t.attempts().len(), 2);
     assert!(core.chat(&case, "kindergarten").unwrap().is_empty());
 }
 
@@ -1682,4 +1693,42 @@ fn approving_every_clean_draft_takes_only_what_the_core_still_sees_clean_and_onc
         .filter(|p| p.status == DraftStatus::Proposed)
         .count();
     assert_eq!(still, proposed.len() - clean);
+}
+
+#[test]
+fn a_number_in_no_source_stays_a_note_after_a_reload_and_approve_all_holds_it_back() {
+    // D-150: found when the answer came, the note was lost on the next load, so "approve all"
+    // approved a paragraph with a score no material holds.
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let p = core
+        .prepare_section(&case, "background", "תנסח את הסעיף")
+        .unwrap();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({
+        "reply": "הנה",
+        "paragraphs": [
+            {"text": "[ילד] גדל עם הוריו.", "source_refs": ["S1"], "guide": 1},
+            {"text": "בבדיקה קיבל [ילד] ציון 143.", "source_refs": ["S1"], "guide": 1},
+        ],
+        "questions": [], "missing": [], "contradictions": [],
+    })));
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    let shown: Vec<ParagraphView> = core
+        .case_detail(&case)
+        .unwrap()
+        .sections
+        .into_iter()
+        .find(|s| s.key == "background")
+        .unwrap()
+        .paragraphs;
+    let invented = shown.iter().find(|p| p.text.contains("143")).unwrap();
+    assert!(
+        invented.warnings.iter().any(|w| w.contains("143")),
+        "{:?}",
+        invented.warnings
+    );
+    let clean = shown.iter().find(|p| !p.text.contains("143")).unwrap();
+    assert!(clean.warnings.is_empty(), "{:?}", clean.warnings);
+    let ids: Vec<String> = shown.iter().map(|p| p.id.clone()).collect();
+    assert_eq!(core.approve_clean_paragraphs(&case, &ids).unwrap(), 1);
 }

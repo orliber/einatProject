@@ -190,8 +190,10 @@ export function UpdateChip() {
   if (!update) return null;
   return (
     <>
-      <button type="button" className="update-chip" onClick={() => setOpen(true)}>
-        <SparkIcon /> {isReady ? "גרסה חדשה מוכנה" : "יש גרסה חדשה"}
+      {/* In a narrow bar (a laptop, or larger text) the words shorten; the name stays whole. */}
+      <button type="button" className="update-chip" aria-label={isReady ? "גרסה חדשה מוכנה" : "יש גרסה חדשה"} onClick={() => setOpen(true)}>
+        <SparkIcon /> <span className="update-chip-long">{isReady ? "גרסה חדשה מוכנה" : "יש גרסה חדשה"}</span>
+        <span className="update-chip-short" aria-hidden="true">גרסה חדשה</span>
       </button>
       {open && <UpdateDialog update={update} onClose={() => setOpen(false)} />}
     </>

@@ -13,6 +13,12 @@ export function parentsFileName(name: string): string {
   return dot < 0 ? `${name} - להורים` : `${name.slice(0, dot)} - להורים${name.slice(dot)}`;
 }
 
+/** The name as the file will be saved: a PDF takes the Word name's stem, as the core saves it. */
+export function shownFileName(name: string, pdf: boolean): string {
+  const dot = name.lastIndexOf(".");
+  return pdf ? `${dot < 0 ? name : name.slice(0, dot)}.pdf` : name;
+}
+
 /** The report, or with `letter` the short letter (EX-4), into the downloads folder. The files
  *  open without a password, as she asked (D-081); the PDF is still print-only. Beside the full
  *  report, a version for the parents (round 55, D-095): the same approved sections, a simple
@@ -81,7 +87,7 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
   }
 
   return (
-    <Dialog title={letter ? "הפקת מכתב Word" : "הפקת דוח Word"} subtitle={`${api.detail.meta.code}${child ? ` · ${child}` : ""} · רק פסקאות שאישרת נכנסות ל${letter ? "מכתב" : "דוח"}`} onClose={onClose}
+    <Dialog title={letter ? "הפקת מכתב Word" : pdf ? "הפקת דוח PDF" : "הפקת דוח Word"} subtitle={`${api.detail.meta.code}${child ? ` · ${child}` : ""} · רק פסקאות שאישרת נכנסות ל${letter ? "מכתב" : "דוח"}`} onClose={onClose}
       footer={
         <>
           <span className="grow" />
@@ -168,7 +174,7 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
           {/* D-081: the file goes out without a password, and she is told so. */}
           <span className="small muted">הקובץ נפתח בלי סיסמה: כל מי שיקבל אותו יוכל לקרוא אותו.</span>
           {check && !letter && (
-            <p className="small"><b>שם הקובץ:</b> {forParents ? parentsFileName(check.file_name) : check.file_name} <span className="muted">(בלי שם הילד) · נשמר בתיקיית ההורדות</span></p>
+            <p className="small"><b>שם הקובץ:</b> <span className="export-file-name">{shownFileName(forParents ? parentsFileName(check.file_name) : check.file_name, pdf)}</span> <span className="muted">(בלי שם הילד) · נשמר בתיקיית ההורדות</span></p>
           )}
           {blocked && (
             <button type="button" className="btn btn-small align-start" onClick={() => { onClose(); go({ name: "case", id: api.caseId, view: api.detail.sections[0]?.key ?? "materials" }); }}>לסעיפים</button>

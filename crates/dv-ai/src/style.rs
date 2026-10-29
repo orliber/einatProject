@@ -14,7 +14,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use ts_rs::TS;
 
-use crate::request::{base_body, data_block, set, set_schema, ModelConfig};
+use crate::request::{
+    base_body, data_block, set, set_schema, ModelConfig, LONG_ANSWER_TOKENS, SHORT_ANSWER_TOKENS,
+};
 use crate::response::{text_of, AiError};
 
 /// A phrase is a short expression of hers, never a sentence of content.
@@ -334,8 +336,7 @@ pub fn build_style_analysis_request(
     patterns: &[dv_domain::ScorePattern],
     nonce: &str,
 ) -> Value {
-    // Thinking counts toward the cap; a long report was cut short at 12,000 (as sorting was).
-    let mut body = base_body(model, ANALYSIS_RULES, 32_000);
+    let mut body = base_body(model, ANALYSIS_RULES, SHORT_ANSWER_TOKENS);
     let mut parts = vec!["קטעים מדוח אחד, לפי סעיף:".to_owned()];
     for e in excerpts {
         parts.push(data_block(
@@ -372,7 +373,7 @@ pub fn build_style_synthesis_request(
     analyses: &[Vec<RawStyleItem>],
     nonce: &str,
 ) -> Value {
-    let mut body = base_body(model, SYNTHESIS_RULES, 20_000);
+    let mut body = base_body(model, SYNTHESIS_RULES, LONG_ANSWER_TOKENS);
     let mut parts = vec![format!("ניתוחי סגנון של {} דוחות:", analyses.len())];
     for (n, items) in analyses.iter().enumerate() {
         let lines: Vec<String> = items

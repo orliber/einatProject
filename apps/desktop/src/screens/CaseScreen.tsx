@@ -297,6 +297,9 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     try {
       const n = await ipc.approveCleanParagraphs(caseId, ids);
       await reload();
+      // A finished run's line ("N סעיפים מחכים לאישורך") is no longer true; one with something
+      // to fix (a failure, a check that did not run) keeps its "לנסות שוב".
+      if (runOver) forgetRun(caseId);
       const waiting = ids.length + held - n;
       notify(waiting > 0 ? `${n} פסקאות אושרו. ${waiting} מחכות לעין שלך.` : `${n} פסקאות אושרו.`);
     } catch (e) {
@@ -330,8 +333,10 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   };
 
   // Round 31: a material added while she works is read (sorted and summed up) by itself, when
-  // requests go without the review screen. Not on opening a case: only after an addition.
-  const reading = useRef<{ count: number; busy: boolean }>({ count: -1, busy: false });
+  // requests go without the review screen. Not on opening a case: only after an addition. A
+  // material added while one reading runs (several files at once, D-147) is read right after
+  // it, so the report page has everything sorted when she gets there.
+  const reading = useRef<{ count: number; busy: boolean; again: boolean }>({ count: -1, busy: false, again: false });
   const inputCount = detail?.inputs.length ?? -1;
   const unreadNow = detail?.routing.filter((r) => r.needs_sorting).length ?? 0;
   const consented = Boolean(detail?.meta.consent);
@@ -339,11 +344,21 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
     const before = reading.current.count;
     reading.current.count = inputCount;
     if (before < 0 || inputCount <= before) return;
-    if (status.review_always || !consented || unreadNow === 0 || reading.current.busy) return;
-    reading.current.busy = true;
-    void startSort(true).finally(() => {
-      reading.current.busy = false;
-    });
+    if (status.review_always || !consented || unreadNow === 0) return;
+    if (reading.current.busy) {
+      reading.current.again = true;
+      return;
+    }
+    const readAll = () => {
+      reading.current.busy = true;
+      reading.current.again = false;
+      void startSort(true).finally(() => {
+        reading.current.busy = false;
+        // What was added meanwhile; with nothing left to read the core says so quietly.
+        if (reading.current.again) readAll();
+      });
+    };
+    readAll();
     // startSort is rebuilt on every render; the count decides when this runs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inputCount]);
@@ -466,7 +481,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
             </button>
           ))}
         </nav>
-        {status.demo_mode && <span className="chip chip-sand" title="לא הוגדר מפתח API בהגדרות">מצב הדגמה</span>}
+        {status.demo_mode && <span className="chip chip-sand case-demo" title="לא הוגדר מפתח API בהגדרות">מצב הדגמה</span>}
         <UpdateChip />
         {stage === 2 && (
           <button type="button" className="btn" aria-pressed={fullPage} title={fullPage ? "להחזיר את תוכן הדוח שבצד" : "להסתיר את תוכן הדוח שבצד"} onClick={() => setFullPage(!fullPage)}>
@@ -627,6 +642,9 @@ function Contents(props: {
   const proposed = content.flatMap((s) => s.paragraphs.filter((p) => p.status === "proposed" && !p.replaces));
   const readyIds = proposed.filter((p) => p.warnings.length === 0).map((p) => p.id);
   const held = proposed.length - readyIds.length;
+  // Counted as the line above counts them ("N טיוטות מחכות לך"): one draft per section, however
+  // many paragraphs it has; the message after the press counts the paragraphs.
+  const readyDrafts = content.filter((s) => s.paragraphs.some((p) => readyIds.includes(p.id))).length;
   const parts = Array.from(new Set(detail.sections.map((s) => s.part)));
   // Sections marked "חסר חומר" now; sorting may still give some of them material.
   const missing = empty.filter((s) => s.sortable && s.source_count === 0 && s.mode !== "self").length;
@@ -682,9 +700,9 @@ function Contents(props: {
             </button>
           </div>
         )}
-        {readyIds.length > 1 && (
+        {readyDrafts > 1 && (
           <button type="button" className="btn btn-primary" disabled={props.approvingAll} onClick={() => props.onApproveAll(readyIds, held)}>
-            ✓ לאשר את כל הטיוטות ({readyIds.length})
+            ✓ לאשר את כל הטיוטות ({readyDrafts})
           </button>
         )}
         {writable > 0 && props.onWriteAll && (

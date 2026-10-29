@@ -188,31 +188,25 @@ impl InputKind {
             "ד\"ר",
             "המלצות",
         ]);
-        // A score sheet is mostly numbers; a report that quotes scores is a report.
-        if score_words && (numbers * 5 > words || !report_words) {
-            InputKind::TestScores
-        } else if has(&[
+        // What the parents wrote or told (a form, a questionnaire, an e-mail from them).
+        let parents = has(&[
             "אינטייק",
             "שיחת היכרות עם ההורים",
-            "שיחה עם ההורים",
             "שאלון קליטה",
             "טופס פנייה",
             "שאלון הורים",
-        ]) || (file_name.contains("הורים") && !file_name.contains("הדרכת הורים"))
-        {
-            // What the parents wrote or told (a form, a questionnaire, an e-mail from them).
-            InputKind::Intake
-        } else if has(&[
+        ]) || (file_name.contains("הורים") && !file_name.contains("הדרכת הורים"));
+        let session = has(&[
             "סיכום מפגש",
             "סיכום פגישה",
             "תיעוד מפגש",
             "מפגש מס",
             "פגישה מס",
-        ]) {
-            InputKind::SessionNote
-        } else if has(&["תצפית"]) && !report_words {
-            InputKind::Observation
-        } else if has(&[
+            "רשמי מפגש",
+            "מפגש 1",
+            "מפגש ראשון",
+        ]);
+        let school = has(&[
             "גננת",
             "מחנכת",
             "יועצת בית הספר",
@@ -221,8 +215,28 @@ impl InputKind {
             "סייעת",
             "מעון",
             "המטפלת במעון",
-        ]) && !has(&["קלינאית", "רופא", "ד\"ר"])
+        ]);
+        // Her own notes, by the file's name ("רשמי מפגשים - …"), whatever they mention.
+        let notes_by_name = ["רשמי מפגש", "סיכום מפגש", "סיכומי מפגש"]
+            .iter()
+            .any(|w| file_name.contains(w));
+        // A score sheet is mostly numbers. A report, a teacher's questionnaire, the parents'
+        // form or her session notes that mention scores ("הציונים שלו עולים", "ב-WISC עבד
+        // ברצינות") are what they are.
+        if score_words && (numbers * 5 > words || !(report_words || parents || session || school)) {
+            InputKind::TestScores
+        } else if notes_by_name {
+            InputKind::SessionNote
+        } else if parents
+            // A teacher's letter and her own notes say "בשיחה עם ההורים" too.
+            || (has(&["שיחה עם ההורים"]) && !school && !session)
         {
+            InputKind::Intake
+        } else if session {
+            InputKind::SessionNote
+        } else if has(&["תצפית"]) && !report_words {
+            InputKind::Observation
+        } else if school && !has(&["קלינאית", "רופא", "ד\"ר"]) {
             InputKind::Kindergarten
         } else {
             // Most uploaded documents are other professionals' reports.
@@ -379,6 +393,41 @@ mod tests {
         assert_eq!(
             InputKind::guess("סיכום הדרכת הורים. המלצות", "הדרכת הורים - קלינאית.pdf"),
             InputKind::PriorReport
+        );
+        // The real-corpus bench (fabricated): a teacher's questionnaire that mentions grades,
+        // her session notes that mention the WISC or a talk with the parents, and a school
+        // counsellor's referral that mentions one.
+        assert_eq!(
+            InputKind::guess(
+                "שאלון למחנכת. בקריאה הוא איטי. בהקראה של המבחן הציונים שלו עולים.",
+                "שאלון מחנכת.docx"
+            ),
+            InputKind::Kindergarten
+        );
+        assert_eq!(
+            InputKind::guess(
+                "מפגש 1: הגיע עם אביו. ב-WISC עבד ברצינות, בצפנים עבד לאט.",
+                "רשמי מפגשים - א.txt"
+            ),
+            InputKind::SessionNote
+        );
+        assert_eq!(
+            InputKind::guess(
+                "מפגש 1: נפרדה בקלות. מפגש 3: שיחה עם ההורים על השינה.",
+                "רשמי מפגשים - ש.txt"
+            ),
+            InputKind::SessionNote
+        );
+        assert_eq!(
+            InputKind::guess(
+                "שירות ייעוץ. הוא לומד אצל המחנכת. בשיחה עם ההורים הם סיפרו על קושי דומה.",
+                "IMG_0001.jpg"
+            ),
+            InputKind::Kindergarten
+        );
+        assert_eq!(
+            InputKind::guess("שאלון הורים. הציונים שלו בבית הספר ירדו השנה.", "a.docx"),
+            InputKind::Intake
         );
     }
 }

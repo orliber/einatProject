@@ -18,7 +18,7 @@ pub const BACKUP_DAYS: i64 = 7;
 /// Far larger than a vault of text can grow; a bigger file is not a backup of ours.
 pub const MAX_BACKUP_BYTES: u64 = 1 << 30;
 pub(crate) const LAST_BACKUP_KEY: &str = "backup_last_at";
-const LAST_DIR_KEY: &str = "backup_last_dir";
+pub(crate) const LAST_DIR_KEY: &str = "backup_last_dir";
 const LAST_CHECK_KEY: &str = "backup_last_check_at";
 /// When the password or the kit last changed: backups older than this open only with the old one.
 const SECRET_CHANGED_KEY: &str = "secret_changed_at";

@@ -109,89 +109,97 @@ impl Core {
                     .remove(&s.key)
                     .unwrap_or_default()
                     .into_iter()
-                    .map(|d| ParagraphView {
-                        has_versions: with_versions.contains(&d.id),
-                        id: d.id,
-                        text: shown_paragraph(
-                            &d.text_tagged,
-                            d.author,
-                            &identities,
-                            practitioner.as_deref(),
-                            &masks,
-                        ),
-                        status: d.status,
-                        by_ai: d.author == Author::Ai,
-                        sources: d
-                            .source_refs
-                            .iter()
-                            .map(|r| {
-                                inputs.iter().find(|i| &i.id == r).map_or_else(
-                                    || r.clone(),
-                                    |i| format!("{} · {}", i.kind.label_he(), i.title),
-                                )
-                            })
-                            .collect(),
-                        // Every score in the text against the score table, each time (AI-6).
-                        // And an age that is not the child's age in the details.
-                        warnings: dv_domain::check_scores(&d.text_tagged, &sheets)
-                            .into_iter()
-                            .chain(dv_domain::check_age(&d.text_tagged, meta.age))
-                            .chain(dv_domain::check_gender(&d.text_tagged, meta.child_gender))
-                            .chain(dv_domain::check_grade(
+                    .map(|d| {
+                        let unfounded = unfounded_numbers(&d, &s.key, s.mode, &inputs, &body);
+                        ParagraphView {
+                            has_versions: with_versions.contains(&d.id),
+                            id: d.id,
+                            text: shown_paragraph(
                                 &d.text_tagged,
-                                &report
-                                    .iter()
-                                    .filter(|(_, _, t)| *t != d.text_tagged)
-                                    .map(|(_, _, t)| t.as_str())
-                                    .collect::<Vec<_>>(),
-                            ))
-                            .chain(if s.key == "recommendations" {
-                                dv_domain::check_recommendations(&d.text_tagged, &body)
-                            } else {
-                                Vec::new()
-                            })
-                            // A level in the DSM section that is not the one she set (round 43).
-                            .chain(if s.key == "dsm" {
-                                dv_domain::check_dsm_severity(
+                                d.author,
+                                &identities,
+                                practitioner.as_deref(),
+                                &masks,
+                            ),
+                            status: d.status,
+                            by_ai: d.author == Author::Ai,
+                            sources: d
+                                .source_refs
+                                .iter()
+                                .map(|r| {
+                                    inputs.iter().find(|i| &i.id == r).map_or_else(
+                                        || r.clone(),
+                                        |i| format!("{} · {}", i.kind.label_he(), i.title),
+                                    )
+                                })
+                                .collect(),
+                            // Every score in the text against the score table, each time (AI-6).
+                            // And an age that is not the child's age in the details.
+                            warnings: dv_domain::check_scores(&d.text_tagged, &sheets)
+                                .into_iter()
+                                .chain(dv_domain::check_age(&d.text_tagged, meta.age))
+                                .chain(dv_domain::check_gender(&d.text_tagged, meta.child_gender))
+                                .chain(dv_domain::check_grade(
                                     &d.text_tagged,
-                                    meta.dsm_severity.as_ref(),
-                                )
-                            } else {
-                                Vec::new()
-                            })
-                            .chain(dv_style::terms::notes(
-                                &d.text_tagged,
-                                &her_terms,
-                                &report_terms,
-                            ))
-                            .chain(interpretations.notes(&d.text_tagged))
-                            .collect(),
-                        style_note: style_model
-                            .as_ref()
-                            .filter(|_| d.author == Author::Ai && d.status == DraftStatus::Proposed)
-                            .and_then(|m| style::style_note(m, &s.key, &d.text_tagged)),
-                        style: style_model
-                            .as_ref()
-                            .filter(|_| d.author == Author::Ai && d.status == DraftStatus::Proposed)
-                            .map(|m| {
-                                let shown = |t: &str| {
-                                    restore(t, &identities, practitioner.as_deref(), &masks)
-                                };
-                                StyleHint {
-                                    fit: m.fidelity(&s.key, &d.text_tagged),
-                                    details: m.differences(&s.key, &d.text_tagged),
-                                    ask: m.closer_ask(&s.key, &d.text_tagged),
-                                    marks: habits
-                                        .marks(&d.text_tagged)
-                                        .into_iter()
-                                        .map(|k| StyleMark {
-                                            from: shown(&k.from),
-                                            to: shown(&k.to),
-                                        })
-                                        .collect(),
-                                }
-                            }),
-                        replaces: d.replaces,
+                                    &report
+                                        .iter()
+                                        .filter(|(_, _, t)| *t != d.text_tagged)
+                                        .map(|(_, _, t)| t.as_str())
+                                        .collect::<Vec<_>>(),
+                                ))
+                                .chain(if s.key == "recommendations" {
+                                    dv_domain::check_recommendations(&d.text_tagged, &body)
+                                } else {
+                                    Vec::new()
+                                })
+                                // A level in the DSM section that is not the one she set (round 43).
+                                .chain(if s.key == "dsm" {
+                                    dv_domain::check_dsm_severity(
+                                        &d.text_tagged,
+                                        meta.dsm_severity.as_ref(),
+                                    )
+                                } else {
+                                    Vec::new()
+                                })
+                                .chain(dv_style::terms::notes(
+                                    &d.text_tagged,
+                                    &her_terms,
+                                    &report_terms,
+                                ))
+                                .chain(interpretations.notes(&d.text_tagged))
+                                .chain(unfounded)
+                                .collect(),
+                            style_note: style_model
+                                .as_ref()
+                                .filter(|_| {
+                                    d.author == Author::Ai && d.status == DraftStatus::Proposed
+                                })
+                                .and_then(|m| style::style_note(m, &s.key, &d.text_tagged)),
+                            style: style_model
+                                .as_ref()
+                                .filter(|_| {
+                                    d.author == Author::Ai && d.status == DraftStatus::Proposed
+                                })
+                                .map(|m| {
+                                    let shown = |t: &str| {
+                                        restore(t, &identities, practitioner.as_deref(), &masks)
+                                    };
+                                    StyleHint {
+                                        fit: m.fidelity(&s.key, &d.text_tagged),
+                                        details: m.differences(&s.key, &d.text_tagged),
+                                        ask: m.closer_ask(&s.key, &d.text_tagged),
+                                        marks: habits
+                                            .marks(&d.text_tagged)
+                                            .into_iter()
+                                            .map(|k| StyleMark {
+                                                from: shown(&k.from),
+                                                to: shown(&k.to),
+                                            })
+                                            .collect(),
+                                    }
+                                }),
+                            replaces: d.replaces,
+                        }
                     })
                     .collect();
                 let source_count =
@@ -491,4 +499,40 @@ pub(crate) fn paragraph_to_send(
         v.practitioner()?.names.first().map(String::as_str),
         &v.masks(case_id)?,
     ))
+}
+
+/// A number the AI wrote that nothing the paragraph rests on holds (D-150): the same check as
+/// when the answer came (`dv_ai::parse_section`), made again each time like the scores, so the
+/// note is still on the page, and "approve all" still holds the paragraph back, after a reload.
+/// The materials it cites, the body of the report for a closing section; her own sections are
+/// worded from her points, which are not kept, so they are not checked here.
+fn unfounded_numbers(
+    d: &dv_domain::DraftParagraph,
+    section_key: &str,
+    mode: dv_domain::SectionMode,
+    inputs: &[dv_domain::CaseInput],
+    body: &[&str],
+) -> Vec<String> {
+    // The DSM section's numbers are the level she set and the codes, which have their own
+    // check (`check_dsm_severity`), not anything a material says.
+    if d.author != Author::Ai
+        || d.status != DraftStatus::Proposed
+        || mode == dv_domain::SectionMode::Own
+        || section_key == "dsm"
+    {
+        return Vec::new();
+    }
+    let rests_on: Vec<&str> = if DERIVED_SECTIONS.contains(&section_key) {
+        body.to_vec()
+    } else {
+        d.source_refs
+            .iter()
+            .filter_map(|r| inputs.iter().find(|i| &i.id == r))
+            .map(|i| i.content.as_str())
+            .collect()
+    };
+    dv_ai::numbers_not_in(&d.text_tagged, &rests_on)
+        .into_iter()
+        .map(|n| format!("המספר {n} לא מופיע במקורות שצוינו – לבדוק"))
+        .collect()
 }

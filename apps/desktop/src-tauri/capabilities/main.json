@@ -187,6 +187,7 @@
     "allow-prepare-update",
     "allow-install-update",
     "allow-open-releases-page",
+    "allow-system-check",
     "allow-send-progress",
     "core:event:allow-listen",
     "core:event:allow-unlisten"

@@ -504,9 +504,24 @@ describe("writing the report", () => {
     expect(await screen.findByText(/הדוח נכתב ונבדק מול המקורות\. \d+ סעיפים מחכים לאישורך/, {}, { timeout: 20000 })).toBeInTheDocument();
     expect(calls).toContain("send_section");
     expect(calls).toContain("send_verify");
-    expect(calls.indexOf("send_verify")).toBeGreaterThan(calls.lastIndexOf("send_section"));
+    // D-146: each section is checked once it is in, beside the writing that is left.
+    expect(calls.indexOf("send_verify")).toBeGreaterThan(calls.indexOf("send_section"));
+    expect(calls.filter((c) => c === "send_verify").length).toBe(calls.filter((c) => c === "send_section").length);
     await user.click(within(screen.getByText(/הדוח נכתב ונבדק/).closest(".run-line") as HTMLElement).getByRole("button", { name: "סגירה" }));
     expect(screen.queryByText(/הדוח נכתב ונבדק/)).toBeNull();
+  });
+
+  it("after the whole report is written, approving every draft at once also clears the line that counted them", async () => {
+    const { user, calls } = await openApp(true, false);
+    await openCase(user);
+    await user.click(screen.getByRole("button", { name: /עוד פעולות/ }));
+    await user.click(await screen.findByRole("menuitem", { name: "כתיבת כל הדוח עם Claude" }));
+    const line = await screen.findByText(/הדוח נכתב ונבדק מול המקורות\. (\d+) סעיפים מחכים לאישורך/, {}, { timeout: 20000 });
+    const sections = Number(/(\d+) סעיפים/.exec(line.textContent ?? "")?.[1]);
+    // The button counts drafts the way the line does: one per section.
+    await user.click(screen.getByRole("button", { name: `✓ לאשר את כל הטיוטות (${sections})` }));
+    await waitFor(() => expect(calls).toContain("approve_clean_paragraphs"));
+    await waitFor(() => expect(screen.queryByText(/מחכים לאישורך/)).toBeNull());
   });
 
   it("the run goes on after she leaves the case, and the case she comes back to shows its drafts (review of stage 6)", async () => {
@@ -524,6 +539,26 @@ describe("writing the report", () => {
     // beside the page since round 48).
     const contents = await screen.findByRole("complementary", { name: "תוכן הדוח" });
     await waitFor(() => expect(contents).toHaveTextContent(/טיוטות מחכות לך|טיוטה אחת מחכה לך/));
+  });
+
+  it("a material added while another is read is read right after it, with no click", async () => {
+    const { user, calls } = await openApp(true, false);
+    await openCase(user);
+    await user.click((screen.getAllByRole("button", { name: /חומרים/ })[0] as HTMLElement));
+    const list = await screen.findByRole("region", { name: "רשימת החומרים" });
+    const add = async (title: string, text: string) => {
+      await user.click(await screen.findByRole("button", { name: "הוספה לאבחונים קודמים" }));
+      await user.click(await screen.findByRole("menuitem", { name: "הדבקת טקסט" }));
+      await user.type(screen.getByLabelText("כותרת"), title);
+      await user.type(screen.getByLabelText("הטקסט"), text);
+      await user.click(screen.getByRole("button", { name: "שמירה בתיק" }));
+    };
+    await add("דוח קלינאית", "נמצא עיכוב קל בשפה.");
+    // The second one comes while the first is being read.
+    await add("דוח מרפאה בעיסוק", "נמצא קושי קל במוטוריקה עדינה.");
+    await waitFor(() => expect(within(list).queryByText(/עוד לא נקרא/)).not.toBeInTheDocument(), { timeout: 8000 });
+    expect(calls.filter((c) => c === "send_sort").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByRole("dialog", { name: /לפני שליחה/ })).not.toBeInTheDocument();
   });
 
   it("with the review screen on, nothing is read by itself", async () => {
