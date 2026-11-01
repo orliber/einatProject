@@ -551,7 +551,7 @@ export class FakeCore {
   }
 
   private tableFor(kind: InputKind): string[] {
-    return SORTABLE.filter((s) => s.inputs.includes(kind)).map((s) => s.key);
+    return SORTABLE.filter((s) => s.inputs.includes(kind) && R.mayFeed(kind, s.key)).map((s) => s.key);
   }
 
   private routingOf(c: Case, id: string): R.Routing {
@@ -560,7 +560,7 @@ export class FakeCore {
 
   /** What goes from one material to one section (D-022). */
   private feedOf(c: Case, i: CaseInput, section: string): R.Feed | null {
-    return R.feed(this.routingOf(c, i.id), section, this.tableFor(i.kind), R.passages(i.content).length);
+    return R.feedFor(this.routingOf(c, i.id), i.kind, section, this.tableFor(i.kind), R.passages(i.content).length);
   }
 
   /** Where each material goes (D-022), like the core computes it. */
@@ -569,13 +569,13 @@ export class FakeCore {
       const r = this.routingOf(c, i.id);
       const table = this.tableFor(i.kind);
       const count = R.passages(i.content).length;
-      const feeds = SORTABLE.map((s) => s.key).filter((k) => R.feed(r, k, table, count) !== null);
+      const feeds = SORTABLE.map((s) => s.key).filter((k) => R.feedFor(r, i.kind, k, table, count) !== null);
       const sorted = R.isSorted(r, count);
       const used = sorted ? new Set(r.suggestion?.sections.filter((x) => feeds.includes(x.section)).flatMap((x) => x.passages)).size : count;
       const read = R.readingOf(r, count);
       const date = R.documentDate(i.content);
       return {
-        input_id: i.id, feeds, suggested: sorted ? R.base(r, table, count) : [], table, sorted, needs_sorting: R.needsSorting(r, count),
+        input_id: i.id, feeds, suggested: sorted ? R.base(r, table, count).filter((k) => R.mayFeed(i.kind, k)) : [], table, sorted, needs_sorting: R.needsSorting(r, count),
         by_ai: false, added: r.added, removed: r.removed, passages: count, used_passages: used,
         summary: read ? restore(read.text, c.people, this.practitioner) : "",
         record: read?.record ? { ...read.record, date: date ? `${date[1]}/${date[0]}` : "" } : null,
@@ -640,7 +640,7 @@ export class FakeCore {
       return f.tagged;
     };
     const sources: { label: string; title?: string; text: string }[] = points ? [] : DERIVED.includes(key)
-      ? c.drafts.filter((d) => d.status === "approved" && !DERIVED.includes(d.section)).map((d) => ({ label: `סעיף מאושר · ${SECTIONS.find((s) => s.key === d.section)?.title ?? ""}`, text: restore(d.text, c.people, this.practitioner) }))
+      ? c.drafts.filter((d) => d.status === "approved" && !DERIVED.includes(d.section) && d.section !== R.PRIOR_SECTION).map((d) => ({ label: `סעיף מאושר · ${SECTIONS.find((s) => s.key === d.section)?.title ?? ""}`, text: restore(d.text, c.people, this.practitioner) }))
       : c.inputs.flatMap((i) => {
           const f = this.feedOf(c, i, section.key);
           if (f === null) return [];
@@ -1416,6 +1416,7 @@ export class FakeCore {
         const c = this.find(a.caseId);
         const i = c.inputs.find((x) => x.id === a.inputId) ?? fail("not_found", "החומר לא נמצא");
         const chosen = (a.sections as string[]).filter((k) => SORTABLE.some((s) => s.key === k));
+        if (chosen.some((k) => !R.mayFeed(i.kind, k))) fail("refused", `${kindLabel[i.kind]} נכנס רק לסעיף האבחונים והטיפולים הקודמים, כדי שהאבחון הנוכחי ייכתב נקי.`);
         c.routing.set(i.id, R.choose(this.routingOf(c, i.id), chosen, this.tableFor(i.kind), R.passages(i.content).length));
         return null;
       }

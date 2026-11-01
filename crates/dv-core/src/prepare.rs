@@ -1233,7 +1233,13 @@ impl Core {
                 // only the recommendations, never the background or the diagnoses.
                 let wanted = |key: &str| match letter {
                     Some(l) => l.written_from().contains(&key),
-                    None => key != section_key && !DERIVED_SECTIONS.contains(&key),
+                    // D-156: the summary, diagnoses, recommendations and DSM are written
+                    // from this assessment only, never from the previous ones.
+                    None => {
+                        key != section_key
+                            && !DERIVED_SECTIONS.contains(&key)
+                            && key != sorting::PRIOR_SECTION
+                    }
                 };
                 // The recommendations she left out of the letters (round 44); the rest go in.
                 let marked = |key: &str, id: &str| match (&letter, &meta.letter_left_out) {
@@ -1550,7 +1556,12 @@ impl Core {
                     return Err(CoreError::ConsentMissing);
                 }
                 let structure = structure_for(v, c)?;
-                for s in structure.sections() {
+                // D-156: a consultation about the case talks about this assessment, not the
+                // previous ones.
+                for s in structure
+                    .sections()
+                    .filter(|s| s.key != sorting::PRIOR_SECTION)
+                {
                     for d in v
                         .drafts(c, &s.key)?
                         .into_iter()

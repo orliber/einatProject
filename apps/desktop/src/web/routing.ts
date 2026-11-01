@@ -88,6 +88,25 @@ export function documentDate(text: string): [number, number] | null {
   return best;
 }
 
+export const PRIOR_SECTION = "prior_assessments";
+
+/** D-156: a previous report or a talk with a professional feeds only its own section. */
+export function onlyPrior(kind: string): boolean {
+  return kind === "prior_report" || kind === "professional";
+}
+
+export function mayFeed(kind: string, section: string): boolean {
+  return !onlyPrior(kind) || section === PRIOR_SECTION;
+}
+
+/** `feed` within D-156, like `sorting::feed_for` in the core. */
+export function feedFor(r: Routing, kind: string, section: string, table: string[], count: number): Feed | null {
+  if (!mayFeed(kind, section)) return null;
+  const f = feed(r, section, table, count);
+  if (f === null && onlyPrior(kind) && !r.removed.includes(section)) return "whole";
+  return f;
+}
+
 export function feed(r: Routing, section: string, table: string[], count: number): Feed | null {
   if (r.removed.includes(section)) return null;
   if (r.added.includes(section)) return "whole";

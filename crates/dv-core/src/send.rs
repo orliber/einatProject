@@ -474,10 +474,14 @@ pub(crate) fn read_sources(
     let mut out = Vec::new();
     for inp in inputs {
         // D-022: the table, the sorting, and Einat's choice decide what goes here.
+        // D-156: a previous report never reaches a section of the current assessment.
+        if !dv_domain::may_feed(inp.kind, section_key) {
+            continue;
+        }
         let table = sorting::table_for(structure, inp.kind);
         let count = passage_ranges(&inp.content).len();
-        let Some(feed) = sorting::routing_of(v, case_id, &inp.id)?.feed(section_key, &table, count)
-        else {
+        let routing = sorting::routing_of(v, case_id, &inp.id)?;
+        let Some(feed) = sorting::feed_for(&routing, inp.kind, section_key, &table, count) else {
             continue;
         };
         out.push(SourceRead {

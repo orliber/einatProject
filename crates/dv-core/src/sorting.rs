@@ -24,11 +24,34 @@ use crate::{
 };
 
 /// The section of previous assessments, written in an order fixed in code (round 31).
-pub(crate) const PRIOR_SECTION: &str = "prior_assessments";
+pub(crate) use dv_domain::PRIOR_SECTION;
 
 /// Materials whose reading includes a record of a previous assessment or treatment.
 fn has_record(kind: InputKind) -> bool {
-    matches!(kind, InputKind::PriorReport | InputKind::Professional)
+    dv_domain::only_prior(kind)
+}
+
+/// What goes from a material to a section (D-022), within the rule that a previous report
+/// feeds only its own section (D-156). Such a material goes to that section unless she took it
+/// out: a sorting that placed its passages elsewhere does not leave the section without it.
+pub(crate) fn feed_for(
+    routing: &Routing,
+    kind: InputKind,
+    section: &str,
+    table: &[String],
+    passage_count: usize,
+) -> Option<Feed> {
+    if !dv_domain::may_feed(kind, section) {
+        return None;
+    }
+    let feed = routing.feed(section, table, passage_count);
+    if feed.is_none()
+        && dv_domain::only_prior(kind)
+        && !routing.removed.iter().any(|s| s == section)
+    {
+        return Some(Feed::Whole);
+    }
+    feed
 }
 
 /// Where a material stands in "אבחונים וטיפולים קודמים": the setting its record names, and
@@ -60,7 +83,7 @@ pub(crate) fn sortable(structure: &ReportStructure) -> Vec<&ReportSection> {
 pub(crate) fn table_for(structure: &ReportStructure, kind: InputKind) -> Vec<String> {
     sortable(structure)
         .into_iter()
-        .filter(|s| s.inputs.contains(&kind))
+        .filter(|s| s.inputs.contains(&kind) && dv_domain::may_feed(kind, &s.key))
         .map(|s| s.key.clone())
         .collect()
 }
@@ -228,14 +251,22 @@ impl Core {
                 let count = passage_ranges(&inp.content).len();
                 // A score table of an instrument she does not give feeds nothing (D-098).
                 let left_out = crate::instruments::left_out(v, case_id, inp, &not_used)?;
-                let feeds = if left_out.is_some() {
+                let feeds: Vec<String> = if left_out.is_some() {
                     Vec::new()
                 } else {
-                    routing.feeds(&order, &table, count)
+                    order
+                        .iter()
+                        .filter(|s| feed_for(&routing, inp.kind, s, &table, count).is_some())
+                        .cloned()
+                        .collect()
                 };
                 let sorted = routing.is_sorted(count);
                 let suggested = if sorted {
-                    routing.base(&table, count)
+                    routing
+                        .base(&table, count)
+                        .into_iter()
+                        .filter(|s| dv_domain::may_feed(inp.kind, s))
+                        .collect()
                 } else {
                     Vec::new()
                 };
@@ -313,6 +344,19 @@ impl Core {
             .into_iter()
             .find(|i| i.id == input_id)
             .ok_or_else(|| CoreError::NotFound(input_id.to_owned()))?;
+        // D-156: a previous report stays in its own section, whatever is picked.
+        if let Some(bad) = sections
+            .iter()
+            .find(|s| !dv_domain::may_feed(input.kind, s))
+        {
+            let title = structure
+                .section(bad)
+                .map_or_else(|| bad.clone(), |s| s.title.clone());
+            return Err(CoreError::Refused(format!(
+                "{} נכנס רק לסעיף האבחונים והטיפולים הקודמים, כדי שהאבחון הנוכחי ייכתב נקי. אי אפשר להוסיף אותו ל\"{title}\".",
+                input.kind.label_he()
+            )));
+        }
         let mut routing = routing_of(v, case_id, input_id)?;
         let table = table_for(&structure, input.kind);
         routing.choose(sections, &table, passage_ranges(&input.content).len());

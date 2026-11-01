@@ -86,10 +86,9 @@ impl Core {
         let mut out = Vec::new();
         if DERIVED_SECTIONS.contains(&section_key.as_str()) {
             let mut candidates = Vec::new();
-            for s in structure
-                .sections()
-                .filter(|s| !DERIVED_SECTIONS.contains(&s.key.as_str()))
-            {
+            for s in structure.sections().filter(|s| {
+                !DERIVED_SECTIONS.contains(&s.key.as_str()) && s.key != sorting::PRIOR_SECTION
+            }) {
                 for d in v
                     .drafts(case_id, &s.key)?
                     .into_iter()
@@ -113,8 +112,8 @@ impl Core {
             };
             let all = passages(&input.content);
             let table = sorting::table_for(&structure, input.kind);
-            let feed = sorting::routing_of(v, case_id, &input.id)?
-                .feed(&section_key, &table, all.len())
+            let routing = sorting::routing_of(v, case_id, &input.id)?;
+            let feed = sorting::feed_for(&routing, input.kind, &section_key, &table, all.len())
                 .unwrap_or(Feed::Whole);
             let label = if input.title.trim().is_empty() {
                 input.kind.label_he().to_owned()
