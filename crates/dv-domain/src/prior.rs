@@ -7,6 +7,8 @@
 //! community, newest first) is fixed in code, never by the AI.
 
 use serde::{Deserialize, Serialize};
+
+use crate::InputKind;
 use ts_rs::TS;
 
 /// Where a previous assessment or treatment took place.
@@ -180,6 +182,24 @@ fn full_year(s: &str, short_ok: bool) -> Option<u16> {
     }
 }
 
+/// The section of previous assessments and treatments (round 31).
+pub const PRIOR_SECTION: &str = "prior_assessments";
+
+/// Materials about what was found before: a previous report, a talk with a professional.
+/// They feed only [`PRIOR_SECTION`], never the current assessment (D-156): the parents are told
+/// the assessment was made clean, without what was seen before. Nothing overrides this, not the
+/// table, the sorting, or a section she adds by hand.
+#[must_use]
+pub fn only_prior(kind: InputKind) -> bool {
+    matches!(kind, InputKind::PriorReport | InputKind::Professional)
+}
+
+/// Whether a material of `kind` may feed `section` at all (D-156).
+#[must_use]
+pub fn may_feed(kind: InputKind, section: &str) -> bool {
+    !only_prior(kind) || section == PRIOR_SECTION
+}
+
 /// The order of the records in "אבחונים וטיפולים קודמים": the institute first, then the
 /// community, then where it is not said; within each, newest first, undated last. Returns the
 /// indices of `records` in that order; equal ones keep their order.
@@ -208,6 +228,24 @@ pub fn date_text(date: DocDate) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prior_materials_feed_only_the_prior_section() {
+        for kind in [InputKind::PriorReport, InputKind::Professional] {
+            assert!(may_feed(kind, PRIOR_SECTION));
+            for section in ["cognitive", "communication", "appearance", "summary", "dsm"] {
+                assert!(!may_feed(kind, section), "{kind:?} → {section}");
+            }
+        }
+        for kind in [
+            InputKind::Intake,
+            InputKind::Observation,
+            InputKind::TestScores,
+        ] {
+            assert!(may_feed(kind, "cognitive"));
+            assert!(may_feed(kind, PRIOR_SECTION));
+        }
+    }
 
     #[test]
     fn the_date_of_a_report_is_its_latest_date_and_never_the_birth_date() {

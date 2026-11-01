@@ -23,7 +23,8 @@ pub use identity::{
 };
 pub use patterns::{pattern_keys, pattern_label, report_patterns, sheet_patterns, ScorePattern};
 pub use prior::{
-    date_text, document_date, record_order, DocDate, MaterialSummary, PriorRecord, Setting,
+    date_text, document_date, may_feed, only_prior, record_order, DocDate, MaterialSummary,
+    PriorRecord, Setting, PRIOR_SECTION,
 };
 pub use records::{
     Age, Author, CaseInput, CaseMeta, CaseSummary, ChatMessage, ChatRole, Consent, DraftParagraph,

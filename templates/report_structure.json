@@ -21,7 +21,7 @@
         { "key": "appearance", "title": "הופעה והתרשמות", "inputs": ["observation", "session_note", "free_text"], "about": "הופעה והתנהגות בחדר: פרידה מההורה, קשר עם המאבחנת, קשב ושיתוף פעולה במפגש." },
         { "key": "cognitive", "title": "פרופיל קוגניטיבי", "inputs": ["test_scores", "observation", "free_text"], "about": "ציוני מבחני אינטליגנציה, ותצפיות על חשיבה, זיכרון, קשב ומהירות עיבוד בזמן המבחן." },
         { "key": "adaptive", "title": "שאלון הסתגלות", "inputs": ["test_scores", "free_text"], "about": "תפקוד יומיומי והסתגלות לפי דיווח ההורים או הצוות (למשל ABAS), והממצאים." },
-        { "key": "communication", "title": "איכויות התקשורת", "inputs": ["observation", "session_note", "prior_report", "test_scores", "free_text"], "about": "שפה ודיבור, תקשורת חברתית, קשר עין, משחק משותף, תחומי עניין ודפוסים חוזרים." },
+        { "key": "communication", "title": "איכויות התקשורת", "inputs": ["observation", "session_note", "test_scores", "free_text"], "about": "שפה ודיבור, תקשורת חברתית, קשר עין, משחק משותף, תחומי עניין ודפוסים חוזרים." },
         { "key": "dsm", "title": "אבחנה על-פי DSM-5", "inputs": ["free_text"], "about": "ממצאים שנוגעים לקריטריונים של DSM-5." },
         { "key": "emotional", "title": "משחק ומישור רגשי", "inputs": ["observation", "session_note", "free_text"], "about": "משחק, עולם רגשי, ויסות, חרדות והתמודדות עם תסכול." }
       ]

@@ -53,7 +53,7 @@
           "guide": "פסקה על המבחן, הציון הכולל והטווח, ופער בין התחומים אם יש. אחר כך התחומים מהגבוה לנמוך: בכל תחום היכולת, ואז \"עם זאת\" הקושי, ואז \"כך לדוגמא\" מהתצפית."
         },
         {
-          "key": "communication", "title": "התחום התקשורתי", "inputs": ["observation", "session_note", "prior_report", "test_scores", "free_text"],
+          "key": "communication", "title": "התחום התקשורתי", "inputs": ["observation", "session_note", "test_scores", "free_text"],
           "about": "שפה ודיבור, תקשורת חברתית, קשר עין, משחק משותף, תחומי עניין ודפוסים חוזרים.",
           "guide": "ASRS מהגבוה לנמוך, פסקת חיבור, ואז ADOS או CARS: הציון מול החתך ושלושת התחומים."
         },

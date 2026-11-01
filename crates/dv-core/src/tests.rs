@@ -33,6 +33,7 @@ mod own;
 mod parents;
 mod perf_profile;
 mod prepare_off_lock;
+mod prior_isolation;
 mod reading;
 mod real_corpus;
 mod report_check;

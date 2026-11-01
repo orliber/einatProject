@@ -487,6 +487,9 @@ function SectionsDialog(props: { api: CaseApi; input: CaseInput; route: Material
   const { fail } = useApp();
   const ai = useAi();
   const { api, input, route } = props;
+  // D-156: a previous report feeds only its own section; the core refuses anything else.
+  const onlyPrior = input.kind === "prior_report" || input.kind === "professional";
+  const locked = (key: string) => onlyPrior && key !== "prior_assessments";
   const [chosen, setChosen] = useState<string[]>(route.feeds);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -517,6 +520,7 @@ function SectionsDialog(props: { api: CaseApi; input: CaseInput; route: Material
           ? "מסומנים הסעיפים מהמיון. הבחירה שלך קובעת."
           : "מסומנים לפי סוג החומר. הבחירה שלך קובעת."}
       </p>
+      {onlyPrior && <p className="hint">{kindLabel[input.kind]} נכנס רק לסעיף האבחונים והטיפולים הקודמים, כדי שהאבחון הנוכחי ייכתב נקי, בלי מה שנמצא קודם.</p>}
       <ErrorLine error={error} />
       <div className="sections-pick">
         {parts.map((part) => (
@@ -526,7 +530,7 @@ function SectionsDialog(props: { api: CaseApi; input: CaseInput; route: Material
               const tag = origin(s.key);
               return (
                 <label key={s.key} className="check-row">
-                  <input type="checkbox" checked={chosen.includes(s.key)}
+                  <input type="checkbox" checked={chosen.includes(s.key)} disabled={locked(s.key)}
                     onChange={(e) => setChosen(e.target.checked ? [...chosen, s.key] : chosen.filter((k) => k !== s.key))} />
                   <span className="grow">{s.title}</span>
                   {tag && <span className="chip small">{tag}</span>}
