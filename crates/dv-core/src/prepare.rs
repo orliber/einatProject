@@ -1638,7 +1638,13 @@ impl Core {
             let mut ids = Vec::new();
             for inp in crate::instruments::request_inputs(v, case_id)? {
                 let count = dv_domain::passage_ranges(&inp.content).len();
-                if count > 0 && sorting::routing_of(v, case_id, &inp.id)?.needs_sorting(count) {
+                if count > 0
+                    && sorting::needs_sorting(
+                        &sorting::routing_of(v, case_id, &inp.id)?,
+                        inp.kind,
+                        count,
+                    )
+                {
                     ids.push(inp.id);
                 }
             }
@@ -1712,7 +1718,11 @@ impl Core {
                 }
                 let ranges = dv_domain::passage_ranges(&inp.content);
                 if ranges.is_empty()
-                    || !sorting::routing_of(v, &case_id, &inp.id)?.needs_sorting(ranges.len())
+                    || !sorting::needs_sorting(
+                        &sorting::routing_of(v, &case_id, &inp.id)?,
+                        inp.kind,
+                        ranges.len(),
+                    )
                 {
                     continue;
                 }

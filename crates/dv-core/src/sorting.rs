@@ -69,6 +69,17 @@ pub(crate) fn prior_key(
     Ok((setting, dv_domain::document_date(&input.content)))
 }
 
+/// Whether a material is offered for sorting (D-022, round 31). A previous report read empty,
+/// with no summary and no record, is read again (D-157): before it, findings that came back too
+/// long were dropped and the empty reading was kept as if read.
+pub(crate) fn needs_sorting(routing: &Routing, kind: InputKind, passage_count: usize) -> bool {
+    routing.needs_sorting(passage_count)
+        || (has_record(kind)
+            && routing
+                .summary_of(passage_count)
+                .is_some_and(|s| s.text.is_empty() && s.record.is_none()))
+}
+
 /// Sections that are written from materials (not from other sections, not the signature).
 pub(crate) fn sortable(structure: &ReportStructure) -> Vec<&ReportSection> {
     structure
@@ -313,7 +324,9 @@ impl Core {
                     suggested,
                     table,
                     sorted,
-                    needs_sorting: left_out.is_none() && count > 0 && routing.needs_sorting(count),
+                    needs_sorting: left_out.is_none()
+                        && count > 0
+                        && needs_sorting(&routing, inp.kind, count),
                     added: routing.added,
                     removed: routing.removed,
                     left_out,

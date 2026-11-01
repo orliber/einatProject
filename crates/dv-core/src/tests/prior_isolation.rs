@@ -177,3 +177,35 @@ fn a_summary_too_long_to_keep_is_said_and_offered_again() {
         "a reading that was dropped is offered again"
     );
 }
+
+#[test]
+fn a_previous_report_read_empty_is_offered_again() {
+    // As earlier versions left it: findings dropped, an empty reading kept as read.
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let prior = add_prior_report(&mut core, &case);
+    let prepared = core.prepare_sort(&case).unwrap();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({
+        "sections": [{"section": "prior_assessments", "passages": ["S3P1"]}],
+        "materials": [
+            {"material": 1, "summary": "שיחה עם הגננת."},
+            {"material": 2, "summary": "אינטייק."},
+            {"material": 3, "summary": ""}
+        ]
+    })));
+    core.send_sort(&prepared.approval_id.unwrap()).unwrap();
+    let detail = core.case_detail(&case).unwrap();
+    let r = detail.routing.iter().find(|r| r.input_id == prior).unwrap();
+    assert!(
+        r.needs_sorting,
+        "an empty reading of a previous report is read again"
+    );
+    // Another material read the same way is not.
+    assert!(detail
+        .routing
+        .iter()
+        .filter(|r| r.input_id != prior)
+        .all(|r| !r.needs_sorting));
+    // And the next sorting takes it.
+    assert!(core.prepare_sort(&case).unwrap().parts.len() == 1);
+}
