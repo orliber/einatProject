@@ -45,6 +45,10 @@ pub struct ReportSection {
     /// child. One line per paragraph when it has a fixed order of paragraphs.
     #[serde(default)]
     pub guide: String,
+    /// Written one paragraph per material, in the order the materials are sent (D-158): the
+    /// background part sums up each document on its own, instead of by topic.
+    #[serde(default)]
+    pub per_source: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

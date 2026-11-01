@@ -6,11 +6,11 @@
       "key": "background",
       "title": "חלק א' – רקע",
       "sections": [
-        { "key": "referral", "title": "סיבת הפניה", "inputs": ["intake", "free_text"], "about": "מי הפנה ולמה; השאלות שההורים והגורם המפנה רוצים לברר." },
-        { "key": "background", "title": "רקע: הריון, לידה והתפתחות", "inputs": ["intake"], "about": "הריון ולידה, אבני דרך בהתפתחות, בריאות והרגלי יומיום, מבנה המשפחה." },
-        { "key": "parents_view", "title": "תיאור תפקוד והתנהגות (לפי ההורים)", "inputs": ["intake"], "about": "איך ההורים מתארים את הילד/ה בבית: התנהגות, משחק, קשרים, רגש, קשיים וחוזקות." },
-        { "key": "kindergarten", "title": "מסגרת חינוכית", "inputs": ["kindergarten"], "about": "המסגרת החינוכית: דיווח הצוות, השתלבות, למידה, קשרים עם ילדים." },
-        { "key": "prior_assessments", "title": "אבחונים וטיפולים", "inputs": ["prior_report", "professional"], "about": "אבחונים, בדיקות וטיפולים קודמים, והממצאים שלהם." }
+        { "key": "referral", "per_source": true, "title": "סיבת הפניה", "inputs": ["intake", "free_text"], "about": "מי הפנה ולמה; השאלות שההורים והגורם המפנה רוצים לברר." },
+        { "key": "background", "per_source": true, "title": "רקע: הריון, לידה והתפתחות", "inputs": ["intake"], "about": "הריון ולידה, אבני דרך בהתפתחות, בריאות והרגלי יומיום, מבנה המשפחה." },
+        { "key": "parents_view", "per_source": true, "title": "תיאור תפקוד והתנהגות (לפי ההורים)", "inputs": ["intake"], "about": "איך ההורים מתארים את הילד/ה בבית: התנהגות, משחק, קשרים, רגש, קשיים וחוזקות." },
+        { "key": "kindergarten", "per_source": true, "title": "מסגרת חינוכית", "inputs": ["kindergarten"], "about": "המסגרת החינוכית: דיווח הצוות, השתלבות, למידה, קשרים עם ילדים." },
+        { "key": "prior_assessments", "per_source": true, "title": "אבחונים וטיפולים", "inputs": ["prior_report", "professional"], "about": "אבחונים, בדיקות וטיפולים קודמים, והממצאים שלהם." }
       ]
     },
     {
