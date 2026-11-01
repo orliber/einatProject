@@ -436,6 +436,7 @@ impl Core {
             unchanged: 0,
             links: 0,
             ignored: reply.ignored,
+            too_long: 0,
             demo,
             left_out,
         };
@@ -476,12 +477,22 @@ impl Core {
                     note(format!("המספר {n} לא מופיע בחומר – לבדוק"));
                 }
             }
-            routing.summary = Some(MaterialSummary {
-                passage_count,
-                text: reading.summary,
-                record,
-                notes,
-            });
+            // D-157: a summary or record that came back too long was dropped, not cut. It is
+            // not kept as read, so the material is offered for sorting again, and the reason
+            // is shown instead of an empty summary.
+            routing.summary = if reading.too_long {
+                None
+            } else {
+                Some(MaterialSummary {
+                    passage_count,
+                    text: reading.summary,
+                    record,
+                    notes,
+                })
+            };
+            if reading.too_long {
+                result.too_long += 1;
+            }
             let placed_any = !placed.is_empty();
             if placed_any {
                 result.links += u32::try_from(placed.len()).unwrap_or(u32::MAX);

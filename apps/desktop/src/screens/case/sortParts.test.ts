@@ -28,7 +28,7 @@ function caseApi(back: string[] = []) {
 }
 
 const nine = Array.from({ length: 9 }, (_, n) => [`i${n}`, prepared({ approval_id: `s${n}` })]);
-const one = { sorted: 1, unchanged: 0, links: 2, ignored: 0, demo: false, left_out: false };
+const one = { sorted: 1, unchanged: 0, links: 2, ignored: 0, too_long: 0, demo: false, left_out: false };
 
 describe("reading the materials one request each (D-134)", () => {
   it("sends every material, at most four at a time, sums the results and reads the case as each lands", async () => {

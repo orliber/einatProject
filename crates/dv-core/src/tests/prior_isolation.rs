@@ -130,3 +130,50 @@ fn a_consultation_about_the_case_leaves_the_previous_assessments_out() {
     assert!(sent.contains("מפגש הבוקר"));
     assert!(!sent.contains(PRIOR_SECTION_CANARY));
 }
+
+// ------------------------------------------------------------ D-157: summing previous reports up
+
+#[test]
+fn a_long_previous_report_goes_whole_to_its_section() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    // Far past the 700 words at which a material sent whole is cut by key words (G4), with
+    // the findings in passages that use none of the section's words.
+    let filler: String = (1..=60)
+        .map(|n| format!("בפגישה מספר {n} הילד שיחק בקוביות וסידר אותן בשורה ארוכה על השטיח.\n\n"))
+        .collect();
+    let content = format!("סיכום אבחון פסיכו-דידקטי.\n\n{filler}{CANARY}.\n\n{filler}");
+    assert!(content.split_whitespace().count() > 1_000);
+    core.add_input(&case, InputKind::PriorReport, "דוח קודם ארוך", &content)
+        .unwrap();
+    let sent = sent_for(&mut core, &fake, &case, "prior_assessments");
+    assert!(
+        sent.contains(CANARY),
+        "the findings of a long report were cut out"
+    );
+}
+
+#[test]
+fn a_summary_too_long_to_keep_is_said_and_offered_again() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let prior = add_prior_report(&mut core, &case);
+    let prepared = core.prepare_sort(&case).unwrap();
+    let findings = "ממצא. ".repeat(1_000);
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({
+        "sections": [{"section": "prior_assessments", "passages": ["S3P1"]}],
+        "materials": [{"material": 3, "summary": "דוח קודם.", "record": {
+            "kind": "אבחון", "by": "פסיכולוגית", "setting": "community",
+            "findings": findings, "recommendations": ""
+        }}]
+    })));
+    let result = core.send_sort(&prepared.approval_id.unwrap()).unwrap();
+    assert_eq!(result.too_long, 1);
+    let detail = core.case_detail(&case).unwrap();
+    let r = detail.routing.iter().find(|r| r.input_id == prior).unwrap();
+    assert!(r.summary.is_empty() && r.record.is_none());
+    assert!(
+        r.needs_sorting,
+        "a reading that was dropped is offered again"
+    );
+}

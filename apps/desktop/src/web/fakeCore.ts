@@ -782,7 +782,7 @@ export class FakeCore {
     this.keepSent(p.caseId, "sorting", p.materials.map((m) => this.filterFor(c0, m.content).tagged).join("\n\n"));
     const c = this.find(p.caseId);
     const keys = SORTABLE.map((s) => s.key);
-    const result: SortResult = { sorted: 0, unchanged: 0, links: 0, ignored: 0, demo: true, left_out: false };
+    const result: SortResult = { sorted: 0, unchanged: 0, links: 0, ignored: 0, too_long: 0, demo: true, left_out: false };
     for (const m of p.materials) {
       const i = c.inputs.find((x) => x.id === m.id);
       if (!i || i.content !== m.content) {

@@ -105,9 +105,15 @@ fn schema(sections: &[SortSection]) -> Value {
 }
 
 /// The longest summary kept, and the longest field of a record, in characters. Longer is not
-/// a summary: it is dropped (and counted as ignored), never cut in the middle.
-pub const SUMMARY_MAX: usize = 1_500;
-pub const RECORD_FIELD_MAX: usize = 1_000;
+/// a summary: it is dropped (and counted as ignored), never cut in the middle, and the reading
+/// says so (`too_long`) so the material is offered for sorting again. The request asks for
+/// far less (800, in `SORTING_RULES`); 1,000 dropped the findings of a long previous report
+/// whole (D-157).
+pub const SUMMARY_MAX: usize = 3_000;
+pub const RECORD_FIELD_MAX: usize = 3_000;
+/// What the request asks for in the findings and the recommendations of a record.
+#[cfg(test)]
+const FINDINGS_ASKED: usize = 800;
 
 /// Room for the answer and the model's thinking, which counts toward it. 12,000 was cut short
 /// on a long material (the answer then is lost whole); a cap costs nothing until it is used.
@@ -157,6 +163,8 @@ pub fn build_sort_request(model: &ModelConfig, input: &SortInput, nonce: &str) -
 pub struct Reading {
     pub summary: String,
     pub record: Option<PriorRecord>,
+    /// The summary or the record came back too long and was dropped (D-157).
+    pub too_long: bool,
 }
 
 /// Claude's sorting, checked against what was sent.
@@ -211,7 +219,11 @@ fn bounded(text: &str, max: usize) -> Option<String> {
 }
 
 fn reading_of(raw: RawMaterial, ignored: &mut u32) -> Reading {
-    let mut drop = || *ignored = ignored.saturating_add(1);
+    let mut too_long = false;
+    let mut drop = || {
+        *ignored = ignored.saturating_add(1);
+        too_long = true;
+    };
     let summary = bounded(&raw.summary, SUMMARY_MAX).unwrap_or_else(|| {
         drop();
         String::new()
@@ -236,7 +248,11 @@ fn reading_of(raw: RawMaterial, ignored: &mut u32) -> Reading {
             recommendations,
         })
     });
-    Reading { summary, record }
+    Reading {
+        summary,
+        record,
+        too_long,
+    }
 }
 
 /// `passage_counts[i]` is how many passages material `i + 1` had in the request.
@@ -484,6 +500,7 @@ mod tests {
         // Too long: dropped, not cut. An empty record is no record.
         let second = r.readings[1].as_ref().unwrap();
         assert!(second.summary.is_empty() && second.record.is_none());
+        assert!(second.too_long && !first.too_long);
         // The second answer on material 1, material 3, material 0, a negative, a fractional
         // and a text number (the review of stage 3: none of them fails the answer), and the
         // long summary.
@@ -493,6 +510,27 @@ mod tests {
         let r = parse_sort(&api(&old), &[1], &["background".into()]).unwrap();
         assert_eq!(r.readings, vec![None]);
         assert_eq!(r.materials[0].len(), 1);
+    }
+
+    #[test]
+    fn the_request_asks_for_findings_well_within_what_is_kept() {
+        // D-157: findings a long previous report needs are kept, and the request asks for
+        // less than the limit, so a reading is not dropped for its length.
+        assert!(SORTING_RULES.contains(&format!("עד {FINDINGS_ASKED} תווים")));
+        const { assert!(FINDINGS_ASKED * 3 <= RECORD_FIELD_MAX) };
+        let findings = "ממצא. ".repeat(300);
+        assert!(findings.chars().count() > 1_000);
+        let answer = json!({
+            "sections": [],
+            "materials": [{"material": 1, "summary": "דוח קודם.", "record": {
+                "kind": "אבחון פסיכו-דידקטי", "by": "פסיכולוגית", "setting": "community",
+                "findings": findings, "recommendations": ""
+            }}]
+        });
+        let r = parse_sort(&api(&answer), &[1], &[]).unwrap();
+        let reading = r.readings[0].as_ref().unwrap();
+        assert!(!reading.too_long);
+        assert_eq!(reading.record.as_ref().unwrap().findings, findings.trim());
     }
 
     #[test]
