@@ -12,4 +12,9 @@ about: string, mode: SectionMode,
  * How the section is written, from the institute's document: general, never about a
  * child. One line per paragraph when it has a fixed order of paragraphs.
  */
-guide: string, };
+guide: string, 
+/**
+ * Written one paragraph per material, in the order the materials are sent (D-158): the
+ * background part sums up each document on its own, instead of by topic.
+ */
+per_source: boolean, };

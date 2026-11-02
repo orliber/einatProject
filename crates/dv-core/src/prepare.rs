@@ -537,8 +537,13 @@ fn build_section(
     // A first draft of the whole section is checked against the guide's lines, when it has
     // two or more; a rewrite of one paragraph or a turn on a draft is not.
     let lines = dv_ai::guide_lines(&guide_tagged);
+    // Written a paragraph per material (D-158): the guide says what to write about each one,
+    // not which paragraphs the section has, so no line is missing.
+    let per_material = (read.section.per_source || ask.section_key == sorting::PRIOR_SECTION)
+        && !points
+        && tagged_sources.len() > 1;
     let guide_lines: Vec<String> =
-        if current.is_empty() && ask.replaces.is_none() && lines.len() >= 2 {
+        if current.is_empty() && ask.replaces.is_none() && lines.len() >= 2 && !per_material {
             lines.into_iter().map(str::to_owned).collect()
         } else {
             Vec::new()
@@ -571,7 +576,10 @@ fn build_section(
         style_profile,
         guide_tagged,
         points_only: points,
-        sources_in_order: ask.section_key == sorting::PRIOR_SECTION && !points,
+        // One paragraph per material (round 31, D-158): previous assessments, and the
+        // sections of the background part.
+        sources_in_order: (read.section.per_source || ask.section_key == sorting::PRIOR_SECTION)
+            && !points,
     };
     // From her points, the numbers in the answer are checked against the points.
     let approved = if points {
@@ -1178,6 +1186,7 @@ impl Core {
                 about: String::new(),
                 mode: dv_domain::SectionMode::Ai,
                 guide: String::new(),
+                per_source: false,
             },
             None => structure
                 .section(section_key)
@@ -1638,7 +1647,13 @@ impl Core {
             let mut ids = Vec::new();
             for inp in crate::instruments::request_inputs(v, case_id)? {
                 let count = dv_domain::passage_ranges(&inp.content).len();
-                if count > 0 && sorting::routing_of(v, case_id, &inp.id)?.needs_sorting(count) {
+                if count > 0
+                    && sorting::needs_sorting(
+                        &sorting::routing_of(v, case_id, &inp.id)?,
+                        inp.kind,
+                        count,
+                    )
+                {
                     ids.push(inp.id);
                 }
             }
@@ -1712,7 +1727,11 @@ impl Core {
                 }
                 let ranges = dv_domain::passage_ranges(&inp.content);
                 if ranges.is_empty()
-                    || !sorting::routing_of(v, &case_id, &inp.id)?.needs_sorting(ranges.len())
+                    || !sorting::needs_sorting(
+                        &sorting::routing_of(v, &case_id, &inp.id)?,
+                        inp.kind,
+                        ranges.len(),
+                    )
                 {
                     continue;
                 }

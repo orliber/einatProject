@@ -304,6 +304,9 @@ pub struct SortResult {
     pub links: u32,
     /// Ids or sections in the answer that were not in the request (dropped).
     pub ignored: u32,
+    /// Materials whose summary came back too long: not kept, offered for sorting again
+    /// (D-157).
+    pub too_long: u32,
     pub demo: bool,
     /// A line of the materials was left out by the last check (D-082).
     pub left_out: bool,

@@ -8,7 +8,7 @@ import type { CaseApi } from "../CaseScreen";
 /** Requests on their way at once: under the per-minute limit of the sending side (20). */
 export const SORT_PARALLEL = 4;
 
-const empty = (): SortResult => ({ sorted: 0, unchanged: 0, links: 0, ignored: 0, demo: false, left_out: false });
+const empty = (): SortResult => ({ sorted: 0, unchanged: 0, links: 0, ignored: 0, too_long: 0, demo: false, left_out: false });
 
 /** The parts as one review: everything that leaves, one "send". It can be sent only when every
  *  part cleared the gate; its approval is the first part's (the send takes them all). */
@@ -52,6 +52,7 @@ export async function sortInParts(
     result.unchanged += r.unchanged;
     result.links += r.links;
     result.ignored += r.ignored;
+    result.too_long += r.too_long;
     result.demo ||= r.demo;
     result.left_out ||= r.left_out;
   };

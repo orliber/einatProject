@@ -520,8 +520,12 @@ pub(crate) fn filter_sources(
         let sid = format!("S{}", tagged_sources.len() + 1);
         let title = run(&inp.title)?;
         // G4: a long material sent whole goes with the passages that bear on the section.
+        // Not for previous assessments (D-157): cut by key words, a long report lost its
+        // findings, and the section is a summary of exactly those.
         let cut = match inp.feed {
-            dv_domain::Feed::Whole if inp.kind != InputKind::TestScores => {
+            dv_domain::Feed::Whole
+                if inp.kind != InputKind::TestScores && section_key != sorting::PRIOR_SECTION =>
+            {
                 sorting::trimmed(&inp.content, section_key, section_title)
             }
             _ => None,

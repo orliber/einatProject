@@ -360,10 +360,13 @@ pub fn build_section_request(
             .enumerate()
             .map(|(i, l)| format!("{}. {l}", i + 1))
             .collect();
-        parts.push(format!(
-            "ההנחיה של הפסיכולוגית לסעיף:\n{}",
-            numbered.join("\n")
-        ));
+        // A paragraph per source (D-158): the guide is what to write about each one.
+        let heading = if input.sources_in_order && input.sources.len() > 1 && !input.points_only {
+            "ההנחיה של הפסיכולוגית לסעיף, לכל מקור בפסקה שלו:"
+        } else {
+            "ההנחיה של הפסיכולוגית לסעיף:"
+        };
+        parts.push(format!("{heading}\n{}", numbered.join("\n")));
     }
     if input.points_only {
         parts.push(POINTS_LINE.to_owned());
