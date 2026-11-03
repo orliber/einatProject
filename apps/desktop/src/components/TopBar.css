@@ -1,6 +1,10 @@
-/* The bar above cases, consultation and settings (canvas "תיקים"). */
+/* The bar above cases, consultation and settings (canvas "תיקים"). It stays at the top of
+   the window while the page scrolls under it, so the tabs are always in reach. */
 .topbar {
-  height: 64px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  height: var(--topbar-height);
   flex-shrink: 0;
   padding: 0 32px;
   display: flex;
@@ -73,6 +77,14 @@
   color: var(--warn-ink);
   font-size: var(--text-sm);
   font-weight: 600;
+}
+
+:root {
+  --topbar-height: 64px;
+}
+/* A part scrolled to (a link inside the page) lands below the bar, not under it. */
+html:has(.topbar) {
+  scroll-padding-top: calc(var(--topbar-height) + 16px);
 }
 
 /* The page under the bar (cases, consultation, settings). */

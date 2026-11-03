@@ -8,7 +8,8 @@
 }
 .settings-nav {
   position: sticky;
-  top: 24px;
+  /* Below the bar of tabs, which stays at the top too. */
+  top: calc(var(--topbar-height) + 24px);
   flex: 0 0 200px;
   display: flex;
   flex-direction: column;

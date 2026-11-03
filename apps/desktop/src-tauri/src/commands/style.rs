@@ -54,6 +54,15 @@ pub(crate) async fn discard_style_upload(state: tauri::State<'_, AppState>) -> R
     .await
 }
 
+/// A past report's kept text, to read.
+#[tauri::command]
+pub(crate) async fn style_source_text(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Res<StyleSourceText> {
+    with_core(&state, move |c| c.style_source_text(&id)).await
+}
+
 #[tauri::command]
 pub(crate) async fn delete_style_source(state: tauri::State<'_, AppState>, id: String) -> Res<()> {
     with_core(&state, move |c| c.delete_style_source(&id)).await

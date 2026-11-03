@@ -550,6 +550,31 @@ fn a_drafted_paragraph_that_repeats_a_past_report_is_flagged() {
 }
 
 #[test]
+fn a_kept_report_opens_with_only_its_neutralized_text() {
+    let (_dir, mut core) = vault(None);
+    let s = upload(&mut core);
+    let t = core.style_source_text(&s.id).unwrap();
+    assert_eq!(t.source, s);
+    assert_eq!(
+        t.parts
+            .iter()
+            .map(|p| p.heading.clone())
+            .collect::<Vec<_>>(),
+        s.headings
+    );
+    assert!(t.parts.iter().all(|p| !p.text.trim().is_empty()));
+    for p in &t.parts {
+        no_secrets(&p.heading, "a kept heading");
+        no_secrets(&p.text, "a kept report");
+    }
+    core.delete_style_source(&s.id).unwrap();
+    assert!(matches!(
+        core.style_source_text(&s.id),
+        Err(CoreError::NotFound(_))
+    ));
+}
+
+#[test]
 fn deleting_and_resetting() {
     let (_dir, mut core) = vault(None);
     let s = upload(&mut core);

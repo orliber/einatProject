@@ -116,7 +116,8 @@ pub use style::{
     FitMonth, InterpretationResult, InterpretationView, LibraryLine, OwnSectionHelp,
     SectionLibrary, SimilarParagraph, SimilarReport, SkeletonView, StyleAnalysisResult,
     StyleImportPreview, StyleOverview, StylePartView, StyleProfileView, StyleSectionLabel,
-    StyleSourceView, StyleSuggestion, StyleSuggestionKind, StyleVersionView,
+    StyleSourcePart, StyleSourceText, StyleSourceView, StyleSuggestion, StyleSuggestionKind,
+    StyleVersionView,
 };
 pub use system_check::{
     CheckLine, CheckState, ExportPlace, SystemCheck, SystemCheckJob, SystemCheckResult,

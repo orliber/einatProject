@@ -136,6 +136,7 @@ fn main() {
             "save_style_source",
             "discard_style_upload",
             "delete_style_source",
+            "style_source_text",
             "prepare_style_analysis",
             "send_style_analysis",
             "prepare_style_profile",

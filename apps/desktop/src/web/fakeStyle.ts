@@ -10,6 +10,7 @@ import type { StyleOverview } from "../ipc/generated/StyleOverview";
 import type { StylePartView } from "../ipc/generated/StylePartView";
 import type { StyleProfile } from "../ipc/generated/StyleProfile";
 import type { StyleProfileView } from "../ipc/generated/StyleProfileView";
+import type { StyleSourceText } from "../ipc/generated/StyleSourceText";
 import type { StyleSourceView } from "../ipc/generated/StyleSourceView";
 import type { UiError } from "../ipc/generated/UiError";
 import structure from "../../../../templates/report_structure.json";
@@ -208,6 +209,10 @@ export class FakeStyle {
       case "discard_style_upload":
         this.staged = null;
         return null;
+      case "style_source_text": {
+        const s = this.sources.find((x) => x.id === a.id) ?? fail("not_found", "הדוח לא נמצא. ייתכן שנמחק.");
+        return { source: this.view(s), parts: s.parts.map((p) => ({ heading: p.heading, text: p.text })) } satisfies StyleSourceText;
+      }
       case "delete_style_source":
         this.sources = this.sources.filter((s) => s.id !== a.id);
         return null;

@@ -63,6 +63,7 @@ import type { StyleImportPreview } from "./StyleImportPreview";
 import type { StyleOverview } from "./StyleOverview";
 import type { StyleProfile } from "./StyleProfile";
 import type { StyleProfileView } from "./StyleProfileView";
+import type { StyleSourceText } from "./StyleSourceText";
 import type { StyleSourceView } from "./StyleSourceView";
 import type { SuspectDecision } from "./SuspectDecision";
 import type { SystemCheck } from "./SystemCheck";
@@ -248,6 +249,7 @@ export type Commands = {
   settle_foreign_tags: { args: { caseId: string }; returns: number };
   similar_paragraph: { args: { caseId: string; draftId: string }; returns: SimilarParagraph | null };
   style_overview: { args: undefined; returns: StyleOverview };
+  style_source_text: { args: { id: string }; returns: StyleSourceText };
   system_check: { args: { check: SystemCheck }; returns: SystemCheckResult };
   take_unsaved: { args: undefined; returns: Array<UnsavedEdit> };
   touch: { args: undefined; returns: null };

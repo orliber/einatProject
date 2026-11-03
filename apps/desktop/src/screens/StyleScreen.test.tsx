@@ -289,6 +289,28 @@ describe("StyleScreen (round 46)", () => {
     await user.click(within(reports).getByRole("button", { name: "לראות את הרשימה" }));
     expect(within(reports).getByText("דוח א")).toBeInTheDocument();
   });
+
+  it("a report opens to read the text that was kept, as plain text", async () => {
+    mockIPC((cmd, args) => {
+      if (cmd === "style_overview") return overview({ sources: [source] });
+      if (cmd === "style_source_text" && (args as { id: string }).id === "s1") {
+        return { source, parts: [{ heading: "סיכום", text: "[ילד] הגיע בשמחה.\n<b>לא תגית</b>" }] };
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    wrap(<StyleScreen />);
+    const reports = await screen.findByRole("region", { name: "הדוחות שלי" });
+    await user.click(within(reports).getByRole("button", { name: "לראות את הרשימה" }));
+    await user.click(within(reports).getByRole("button", { name: "דוח א" }));
+    const dialog = await screen.findByRole("dialog", { name: "דוח א" });
+    expect(await within(dialog).findByRole("heading", { name: "סיכום" })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("[ילד] הגיע בשמחה.");
+    expect(dialog).toHaveTextContent("<b>לא תגית</b>");
+    expect(dialog.querySelector("b")).toBeNull();
+    await user.click(within(dialog).getAllByRole("button", { name: "סגירה" })[0] as HTMLElement);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
 });
 
 describe("sinceLabel", () => {
