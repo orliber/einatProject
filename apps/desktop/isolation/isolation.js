@@ -61,6 +61,7 @@ const ALLOWED = new Set([
   "delete_input",
   "restore_input",
   "delete_style_source",
+  "style_source_text",
   "discard_style_draft",
   "discard_style_upload",
   "download_name_model",

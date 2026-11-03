@@ -281,6 +281,38 @@
   border-radius: var(--radius-md);
   background: var(--surface-alt);
 }
+/* Her report's name opens it to read. */
+.style-source-open {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: start;
+  cursor: pointer;
+}
+.style-source-open:hover strong {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.style-source-read {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 72ch;
+  margin-inline: auto;
+}
+.style-source-part h3 {
+  font-size: var(--text-lg);
+  margin: 0 0 6px;
+}
+.style-source-text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: var(--font-body);
+  line-height: 1.8;
+}
 
 /* ---------- the profile ---------- */
 .style-profile {

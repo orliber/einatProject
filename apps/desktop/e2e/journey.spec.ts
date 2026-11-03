@@ -187,6 +187,37 @@ test("a style report is read and learned by itself after one upload", async ({ p
   await expectAccessible(page);
 });
 
+// Her reports open to read the text that was kept; the tabs stay at the top while she scrolls.
+test("a kept style report opens to read, under tabs that stay in view", async ({ page }) => {
+  await unlock(page);
+  await page.getByRole("button", { name: "הסגנון שלי", exact: true }).first().click();
+  const report = "סיכום\nלסיכום, נראה כי הילד הבדוי סקרן ובעל יכולות טובות. מומלץ להמשיך במעקב.\n";
+  await page.locator("input[type=file]").evaluate((input: HTMLInputElement, text) => {
+    const files = new DataTransfer();
+    files.items.add(new File([text], "report.txt", { type: "text/plain" }));
+    input.files = files.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, report);
+  for (let i = 0; i < 2; i++) {
+    const review = page.getByRole("dialog", { name: /לפני שליחה/ });
+    if (await review.isVisible({ timeout: 5000 }).catch(() => false)) await review.getByRole("button", { name: /שליחה/ }).click();
+  }
+  await expect(page.getByText(/הפרופיל בשימוש, גרסה 1/)).toBeVisible({ timeout: 20_000 });
+  const reports = page.getByRole("region", { name: "הדוחות שלי" });
+  await reports.getByRole("button", { name: "לראות את הרשימה" }).click();
+  await reports.getByRole("button", { name: "report" }).click();
+  const dialog = page.getByRole("dialog", { name: "report" });
+  await expect(dialog).toContainText("סקרן ובעל יכולות טובות");
+  await expectAccessible(page);
+  await dialog.getByRole("button", { name: "סגירה" }).first().click();
+  await expect(dialog).toHaveCount(0);
+  await page.mouse.wheel(0, 4000);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(100);
+  const tabs = page.getByRole("navigation", { name: "ניווט ראשי" });
+  await expect(tabs).toBeInViewport();
+  expect((await page.locator(".topbar").boundingBox())?.y).toBe(0);
+});
+
 test("settings, consultation and writing style pages are accessible", async ({ page }) => {
   await unlock(page);
   for (const name of ["הגדרות", "התייעצות", "הסגנון שלי"]) {

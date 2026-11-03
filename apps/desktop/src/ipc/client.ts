@@ -88,6 +88,7 @@ import type { Interpretation } from "./generated/Interpretation";
 import type { InterpretationView } from "./generated/InterpretationView";
 import type { StyleProfile } from "./generated/StyleProfile";
 import type { StyleProfileView } from "./generated/StyleProfileView";
+import type { StyleSourceText } from "./generated/StyleSourceText";
 import type { StyleSourceView } from "./generated/StyleSourceView";
 import type { StyleSuggestion } from "./generated/StyleSuggestion";
 
@@ -471,6 +472,8 @@ export const ipc = {
     call("save_style_source", { token, included, title }),
   discardStyleUpload: () => run("discard_style_upload"),
   deleteStyleSource: (id: string) => run("delete_style_source", { id }),
+  /** A past report's kept text (neutralized), to read. */
+  styleSourceText: (id: string) => call("style_source_text", { id }),
   prepareStyleAnalysis: (sourceId: string) => call("prepare_style_analysis", { sourceId }),
   sendStyleAnalysis: (approvalId: string) => call("send_style_analysis", { approvalId }),
   prepareStyleProfile: () => call("prepare_style_profile"),
@@ -524,6 +527,7 @@ export type {
   StyleOverview,
   StyleProfile,
   StyleProfileView,
+  StyleSourceText,
   StyleSourceView,
   StyleSuggestion,
   UpdateView,

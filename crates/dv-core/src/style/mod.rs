@@ -120,6 +120,23 @@ pub struct StyleSourceView {
     pub analysis_inferences: u32,
 }
 
+/// A past report as kept, to read (only the neutralized text of the parts she chose).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct StyleSourceText {
+    pub source: StyleSourceView,
+    pub parts: Vec<StyleSourcePart>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct StyleSourcePart {
+    /// The heading as kept (neutralized).
+    pub heading: String,
+    /// The text as kept (neutralized). Shown as plain text only.
+    pub text: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct StyleProfileView {
@@ -1605,6 +1622,26 @@ impl Core {
                 )
             }),
         }
+    }
+
+    /// A past report's kept text, to read on the screen. Nothing leaves the vault.
+    pub fn style_source_text(&mut self, id: &str) -> Result<StyleSourceText, CoreError> {
+        let row = self
+            .vault_ref()?
+            .style_source(id)?
+            .ok_or_else(|| CoreError::NotFound("הדוח לא נמצא. ייתכן שנמחק.".to_owned()))?;
+        let stored: StoredSource = parse(&row.json)?;
+        Ok(StyleSourceText {
+            parts: stored
+                .parts
+                .iter()
+                .map(|p| StyleSourcePart {
+                    heading: p.heading.clone(),
+                    text: p.text.clone(),
+                })
+                .collect(),
+            source: Self::source_view(row.id, row.created_at, &stored),
+        })
     }
 
     /// Erase a past report. A profile already approved stays as it is until rebuilt.

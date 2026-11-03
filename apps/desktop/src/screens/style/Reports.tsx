@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ActionsMenu, type MenuItem } from "../../components/Menu";
+import { StyleSourceDialog } from "../../components/StyleSourceDialog";
 import { UploadIcon } from "../../components/ui";
 import type { StyleOverview, StyleSourceView } from "../../ipc/client";
 import { dateOf, sinceLabel } from "./labels";
@@ -15,6 +16,7 @@ export function Reports(props: {
 }) {
   const { o } = props;
   const [list, setList] = useState(false);
+  const [reading, setReading] = useState<StyleSourceView | null>(null);
   const last = Math.max(...o.sources.map((s) => s.added_at));
   const notRead = o.sources.filter((s) => !s.analyzed).length;
   return (
@@ -40,7 +42,9 @@ export function Reports(props: {
             <li key={s.id} className="style-source">
               <span className="fmt">{s.format.toUpperCase()}</span>
               <div className="stack grow" style={{ gap: 4 }}>
-                <strong>{s.title}</strong>
+                <button type="button" className="style-source-open" title="לפתוח ולקרוא את הדוח" onClick={() => setReading(s)}>
+                  <strong>{s.title}</strong>
+                </button>
                 <span className="muted small">
                   נוסף ב-{dateOf(s.added_at)} · {s.words.toLocaleString("he-IL")} מילים · {s.headings.join(" · ")}
                 </span>
@@ -60,6 +64,7 @@ export function Reports(props: {
           ))}
         </ul>
       )}
+      {reading && <StyleSourceDialog source={reading} onClose={() => setReading(null)} />}
     </section>
   );
 }

@@ -138,6 +138,7 @@
     "allow-save-style-source",
     "allow-discard-style-upload",
     "allow-delete-style-source",
+    "allow-style-source-text",
     "allow-prepare-style-analysis",
     "allow-send-style-analysis",
     "allow-prepare-style-profile",

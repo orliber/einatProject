@@ -24,8 +24,8 @@ use dv_core::{
     NameMatch, ParagraphVersionView, ParagraphView, ParentsOptions, Prepared, Readiness,
     ReportCheckResult, ReportCheckSetting, ReportSettings, RetentionItem, SectionResult,
     SecurityStatus, SentCursor, SentPage, SentText, SortResult, StagedBackup, StyleAnalysisResult,
-    StyleImportPreview, StyleOverview, StyleProfileView, StyleSourceView, SuspectDecision,
-    TemplateView, UiError, UnsavedEdit, UsageSummary, VerifyResult,
+    StyleImportPreview, StyleOverview, StyleProfileView, StyleSourceText, StyleSourceView,
+    SuspectDecision, TemplateView, UiError, UnsavedEdit, UsageSummary, VerifyResult,
 };
 use dv_domain::{
     CaseInput, CaseMeta, CaseSummary, Folder, Identity, IdentityInput, InputKind, Role,
@@ -507,6 +507,7 @@ fn main() {
             save_style_source,
             discard_style_upload,
             delete_style_source,
+            style_source_text,
             prepare_style_analysis,
             send_style_analysis,
             prepare_style_profile,
