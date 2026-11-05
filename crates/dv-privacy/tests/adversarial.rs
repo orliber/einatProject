@@ -2385,3 +2385,403 @@ fn a_short_place_name_declared_in_hebrew_is_hidden_in_arabic_script() {
         assert_eq!(out.tagged, text, "a generic Arabic word was hidden");
     }
 }
+
+/// A declared name at the edge of a longer word with digits or marks glued to it, however
+/// many ("2015נועם" went out whole after the year in it was generalized, "1נועם1" too), and a
+/// diminutive whose ending has a geresh ("נועמצ'יק") are hidden whole, and refused raw.
+#[test]
+fn a_declared_name_after_digits_or_before_a_geresh_ending_is_hidden_whole() {
+    let ids = identities();
+    for (text, name) in [
+        ("קובץ 2015נועם.pdf", "נועם"),
+        ("1נועם1 הגיע.", "נועם"),
+        ("2015noam", "noam"),
+        ("נועמצ'יק הגיע.", "נועם"),
+        ("נועמצ׳יק הגיע.", "נועם"),
+        ("רותמצ'יק", "רותם"),
+        ("מיכלצ'יק סיפרה.", "מיכל"),
+    ] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(
+            !normalize(&out.tagged).contains(&normalize(name)),
+            "{text:?} → {:?}",
+            out.tagged
+        );
+        let o = send(text, CASE);
+        assert!(o.leaked.is_empty(), "{text:?} leaked {:?}", o.leaked);
+        assert!(o.cleared, "{text:?} is a dead end");
+        assert!(
+            !gate_with(text, &ids, CASE).cleared,
+            "{text:?} cleared raw by the gate"
+        );
+    }
+    // The body of a longer word is still that word.
+    for text in [
+        "פרופיל קוגניטיבי תקין.",
+        "מסולסלים",
+        "התיאורים שלה מדויקים.",
+    ] {
+        let mut more = ids.clone();
+        more.push(id(OTHER, Role::Father, "[אב]", "יוסי קוגן", &[]));
+        more.push(id(OTHER, Role::Brother, "[אח_1]", "סלים", &[]));
+        more.push(id(OTHER, Role::Brother, "[אח_2]", "אורי", &[]));
+        let out = filter(text, &ctx_for(&more, &[], CASE)).unwrap();
+        assert_eq!(out.tagged, text, "an ordinary word was hidden");
+    }
+}
+
+/// A known surname right before a declared name, as forms and class lists write it
+/// ("גולדשטיין נועם"), is hidden like one right after it: it went out as "גולדשטיין [ילד]".
+#[test]
+fn a_surname_before_a_declared_name_is_hidden() {
+    let ids = identities();
+    for text in [
+        "גולדשטיין נועם",
+        "גולדשטיין נועם, בן 5, הופנה לאבחון.",
+        "ההורים: גולדשטיין רותם ועידו.",
+        "ברשימה: ליבוביץ נועם ואחותו.",
+        "וייס נועם",
+    ] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(
+            !out.tagged.contains("גולדשטיין")
+                && !out.tagged.contains("ליבוביץ")
+                && !out.tagged.contains("וייס"),
+            "{text:?} → {:?}",
+            out.tagged
+        );
+        let o = send(text, CASE);
+        assert!(o.leaked.is_empty(), "{text:?} leaked {:?}", o.leaked);
+        assert!(o.cleared, "{text:?} is a dead end");
+    }
+    // A verb or a greeting before the name is a word.
+    for text in ["אמר נועם שהוא עייף.", "שלום נועם, מה שלומך?"] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert_eq!(
+            out.tagged.replace("[ילד]", "נועם"),
+            text,
+            "a word before the name was hidden"
+        );
+    }
+}
+
+/// A Hebrew year with the thousands written before it ("ה'תשפ\"א"), alone or after a
+/// Hebrew-calendar date, is a year: it went out whole, also beside the hidden month.
+#[test]
+fn a_hebrew_year_with_the_thousands_before_it_is_hidden() {
+    let ids = identities();
+    for text in [
+        "ילידת ה'תשפ\"א",
+        "ילידת ה׳תשפ״א",
+        "נולד בה'תשפ\"א",
+        "שנת הלימודים ה'תשפ\"ו",
+        "נולד בג' בתשרי ה'תשפ\"א",
+        "נבדק 15 בתשרי ה'תשפ\"ו בבוקר",
+    ] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(!out.tagged.contains("תשפ"), "{text:?} → {:?}", out.tagged);
+        assert!(gate_with(&out.tagged, &ids, CASE).cleared, "{}", out.tagged);
+        let o = send(text, CASE);
+        assert!(o.leaked.is_empty() && o.cleared, "{text:?}");
+    }
+}
+
+/// A Hebrew-calendar day with "on", "and", "from" or "until" glued to its numeral ("נולד
+/// בכ\"ט באלול", "וה' באב") is part of the date: the day went out beside the hidden month
+/// ("נולד בכ\"ט [תאריך]"), or the whole date went out when it had no year.
+#[test]
+fn a_hebrew_calendar_day_with_a_glued_prefix_is_hidden_with_its_month() {
+    let ids = identities();
+    for (text, day) in [
+        ("נולד בכ\"ט באלול תשפ\"א.", "כ\"ט"),
+        ("נולד בכ\"ט באלול.", "כ\"ט"),
+        ("נולדה בי\"ב בניסן.", "י\"ב"),
+        ("נולד בט\"ו בשבט תשפ\"ב.", "ט\"ו"),
+        ("ביקרו בה' באב.", "ה'"),
+        ("נולד וה' באב חגגו.", "ה'"),
+        ("מכ\"ט באלול ועד ראש השנה.", "כ\"ט"),
+        ("נולד בג' במרץ 2020.", "ג'"),
+    ] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(!out.tagged.contains(day), "{text:?} → {:?}", out.tagged);
+        assert!(
+            !out.tagged.contains("אלול")
+                && !out.tagged.contains("ניסן")
+                && !out.tagged.contains("שבט")
+                && !out.tagged.contains("באב")
+                && !out.tagged.contains("מרץ"),
+            "{text:?} → {:?}",
+            out.tagged
+        );
+        assert!(gate_with(&out.tagged, &ids, CASE).cleared, "{}", out.tagged);
+        let o = send(text, CASE);
+        assert!(o.leaked.is_empty() && o.cleared, "{text:?}");
+    }
+    // "שם האב", "כמו האב": the father, not a date, and a bare pair of letters is a word.
+    for text in ["שם האב: שמעון", "אחיו של האב אובחן", "בגב ובאב"] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(
+            !out.tagged.contains("[תאריך]"),
+            "{text:?} → {:?}",
+            out.tagged
+        );
+    }
+}
+
+/// A surname of the lexicon joined to a name by one comma, in either order ("גולדשטיין,
+/// נועם", "נועם, גולדשטיין"), is hidden like one joined by a space.
+#[test]
+fn a_surname_joined_to_a_name_by_a_comma_is_hidden() {
+    let ids = identities();
+    for text in [
+        "גולדשטיין, נועם",
+        "גולדשטיין ,נועם",
+        "גולדשטיין,נועם",
+        "נועם, גולדשטיין",
+        "ברשימה: ליבוביץ, רותם.",
+    ] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(
+            !out.tagged.contains("גולדשטיין") && !out.tagged.contains("ליבוביץ"),
+            "{text:?} → {:?}",
+            out.tagged
+        );
+        let o = send(text, CASE);
+        assert!(o.leaked.is_empty() && o.cleared, "{text:?}: {:?}", o.leaked);
+    }
+    // Words after a comma that are no surname stay: a list of what the child does.
+    for text in ["נועם, סקרן וחייכן, שיחק.", "שלום, נועם."] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert_eq!(
+            out.tagged.replace("[ילד]", "נועם"),
+            text,
+            "a word was hidden"
+        );
+    }
+}
+
+/// Form fields that name the family or the child without "שם" ("משפחה: גולדשטיין",
+/// "ילד: גולדשטיין"), and "שם משפחה" / "שם פרטי" with a space instead of a colon, name
+/// what follows; such a field took only a known name or a rare word, so "ילד: סקרן" keeps
+/// its word.
+#[test]
+fn family_and_child_fields_name_what_follows_them() {
+    let ids = identities();
+    for text in [
+        "משפחה: גולדשטיין",
+        "ילד: גולדשטיין",
+        "ילדה: ליבוביץ",
+        "תלמיד: גולדשטיין",
+        "תלמידה: ליבוביץ\nגיל: 5",
+        "שם משפחה גולדשטיין",
+        "שם משפחה: גולדשטיין",
+        "שם פרטי נועם\nשם משפחה ליבוביץ",
+        "שם משפחה טננבאום",
+    ] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(
+            !out.tagged.contains("גולדשטיין")
+                && !out.tagged.contains("ליבוביץ")
+                && !out.tagged.contains("טננבאום"),
+            "{text:?} → {:?}",
+            out.tagged
+        );
+        let o = send(text, CASE);
+        assert!(o.leaked.is_empty() && o.cleared, "{text:?}: {:?}", o.leaked);
+    }
+    for text in [
+        "ילד: סקרן וחייכן.",
+        "משפחה: תומכת ומעורבת.",
+        "שם משפחה יהודי נפוץ.",
+        "הדרכת הורים: מתן זמן.",
+    ] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert_eq!(out.tagged, text, "a word was hidden");
+    }
+}
+
+/// A Hebrew year typed without its gershayim right after "שנת", "שנה\"ל" or "שנת
+/// הלימודים" ("שנת תשפא") is a year; anywhere else such a word is a word ("תשע" is nine).
+#[test]
+fn a_hebrew_year_without_gershayim_after_a_year_word_is_hidden() {
+    let ids = identities();
+    for text in [
+        "ילידת שנת תשפא.",
+        "שנה\"ל תשפא",
+        "שנה״ל תשפב",
+        "בשנת הלימודים תשפה התחיל גן.",
+        "שנת התשפא",
+    ] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(
+            !out.tagged.contains("תשפ") && !out.tagged.contains("תשע"),
+            "{text:?} → {:?}",
+            out.tagged
+        );
+        assert!(out.tagged.contains("[שנה]"), "{text:?} → {:?}", out.tagged);
+        let o = send(text, CASE);
+        assert!(o.leaked.is_empty() && o.cleared, "{text:?}");
+    }
+    // The number words, a new sentence after the year word, and a second space are words.
+    for text in [
+        "בת תשע שנים.",
+        "תשע נקודות מתוך עשר.",
+        "שנת לימודים תשובה",
+        "בשנת תשע נולדה.",
+        "בתחילת שנת הלימודים. תשעה חודשים לאחר מכן",
+        "לקראת שנת הלימודים תשע קבוצות",
+        "בשנת הלימודים תשעה ילדים",
+        "שנת הלימודים, תשפא",
+        "שנת  הלימודים תשפא",
+    ] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert_eq!(out.tagged, text, "a word was hidden as a year");
+    }
+}
+
+/// A numeric date typed with a comma, a space, a backslash or a bar between its parts and
+/// a four-digit year is one date: "3,9,2020" went out as "3,9,לפני כ-6 שנים".
+#[test]
+fn numeric_dates_with_unusual_separators_are_hidden_whole() {
+    let ids = identities();
+    for text in [
+        "נולד ב-3,9,2020.",
+        "נולד ב-3 9 2020.",
+        "נולד ב-3\\9\\2020.",
+        "נולד ב-3|9|2020.",
+        "תאריך לידה: 03,09,2020",
+        "תאריך לידה: 12 11 2019",
+    ] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(
+            out.tagged.contains("לפני כ-"),
+            "{text:?} → {:?}",
+            out.tagged
+        );
+        // No digit of the date is left beside the relative time.
+        let rest = out
+            .tagged
+            .replace("לפני כ-6 שנים", "")
+            .replace("לפני כ-7 שנים", "");
+        assert!(
+            !rest.contains(|c: char| c.is_ascii_digit()),
+            "{text:?} → {:?}",
+            out.tagged
+        );
+        let o = send(text, CASE);
+        assert!(o.leaked.is_empty() && o.cleared, "{text:?}");
+    }
+    // A row of scores, or mixed marks, is no date: with spaces only, the parts of a date
+    // follow a word for a date ("ציונים: 10 11 12 2020" went out as "10 לפני כ-6 שנים").
+    for (text, kept) in [
+        ("ציונים: 12 13 9 100 115", "ציונים: 12 13 9"),
+        ("מטריצות 13, קוביות 12, 2020 נבדק", "מטריצות 13, קוביות 12,"),
+        ("ציונים: 10 11 12 2020", "ציונים: 10 11 12 "),
+        ("ציוני תקן: 8 9 2015", "ציוני תקן: 8 9 "),
+        ("דומיות 11 12 2019 נבדק", "דומיות 11 12 "),
+    ] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(out.tagged.starts_with(kept), "{text:?} → {:?}", out.tagged);
+        assert!(gate_with(&out.tagged, &ids, CASE).cleared, "{}", out.tagged);
+    }
+}
+
+/// A surname of the lexicon that is also an everyday verb or adjective ("פרץ", "זכאי",
+/// "שחר", "ברק", "נגר", "לפיד", "קדוש", "כוכבי") is that word right before a declared
+/// name or after a comma behind it: "פרץ נועם בבכי" went out as "[משפחה_1] [ילד] בבכי", and
+/// dv-core would then have learned the verb as the family's name.
+#[test]
+fn a_verb_or_adjective_that_is_also_a_surname_stays_a_word_beside_a_name() {
+    let ids = identities();
+    for text in [
+        "פרץ נועם בבכי כשהאם יצאה.",
+        "זכאי נועם להתאמות.",
+        "בשיעור שחר נועם התעייף.",
+        "ברק נועם בעיניו.",
+        "לפיד נועם הואר.",
+        "קדוש נועם בעיניה.",
+        "כוכבי נועם זרחו.",
+        "נגר נועם את הקופסה.",
+        "בבדיקה נראה נועם, פרץ בבכי ונרגע.",
+        "חזר נועם, זכאי לתמיכה.",
+        "נועם, קדוש בעיני אמו.",
+    ] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert_eq!(
+            out.tagged.replace("[ילד]", "נועם"),
+            text,
+            "a word was hidden as a surname"
+        );
+        assert!(
+            out.auto_hidden
+                .iter()
+                .all(|a| !matches!(a.kind, AutoKind::Name) || a.token == "נועם"),
+            "{text:?} learned a word as a name: {:?}",
+            out.auto_hidden
+        );
+        let o = send(text, CASE);
+        assert!(o.leaked.is_empty(), "{text:?} leaked {:?}", o.leaked);
+    }
+    // A surname that is no everyday word stays hidden in both forms.
+    for text in [
+        "גולדשטיין נועם",
+        "ליבוביץ נועם ואחותו.",
+        "וייס נועם",
+        "נועם, טננבאום",
+        "טננבאום, נועם",
+    ] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(
+            !out.tagged.contains("גולדשטיין")
+                && !out.tagged.contains("ליבוביץ")
+                && !out.tagged.contains("וייס")
+                && !out.tagged.contains("טננבאום"),
+            "{text:?} → {:?}",
+            out.tagged
+        );
+    }
+}
+
+/// A "שם …" field of two words in the middle of a line, after a comma or a semicolon ("שם
+/// פרטי נועם, שם משפחה ליבוביץ"), names what follows it: the surname went out raw. A
+/// sentence that happens to hold "שם משפחה" keeps its words.
+#[test]
+fn a_name_field_after_a_comma_in_the_line_names_what_follows_it() {
+    let ids = identities();
+    for text in [
+        "שם פרטי נועם, שם משפחה ליבוביץ",
+        "שם פרטי נועם; שם משפחה ליבוביץ",
+        "שם פרטי נועם, שם משפחה: ליבוביץ",
+        "שם פרטי נועם , שם משפחה טננבאום, גיל 5",
+        "גיל 5, שם משפחה גולדשטיין",
+    ] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        assert!(
+            !out.tagged.contains("ליבוביץ")
+                && !out.tagged.contains("טננבאום")
+                && !out.tagged.contains("גולדשטיין"),
+            "{text:?} → {:?}",
+            out.tagged
+        );
+        let o = send(text, CASE);
+        assert!(o.leaked.is_empty() && o.cleared, "{text:?}: {:?}", o.leaked);
+    }
+    for text in [
+        "לדבריה, שם משפחה יהודי נפוץ.",
+        "בבית, שם משפחה גדולה גרה.",
+        "הוא אמר שם משפחה ליבוביץ.",
+    ] {
+        let out = filter(text, &ctx_for(&ids, &[], CASE)).unwrap();
+        let kept = text.replace("ליבוביץ", "[משפחה_1]");
+        assert!(
+            out.tagged == text || out.tagged == kept,
+            "{text:?} → {:?}",
+            out.tagged
+        );
+        assert!(
+            !out.tagged.contains("[משפחה_1]") || text.contains("ליבוביץ"),
+            "a word was hidden: {text:?} → {:?}",
+            out.tagged
+        );
+    }
+}

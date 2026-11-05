@@ -172,14 +172,18 @@ fn numeric_date(parts: &[String]) -> Option<DocDate> {
     Some((year, month))
 }
 
-/// A year as written: four digits from 1990 to 2099, or (in a full date) two digits as 20xx.
+/// A year as written: four digits from 1990 to 2099, or (in a full date) two digits, read as
+/// 20xx up to 49 and as 19xx from 50 (so a parent's "12/5/85" is 1985, not 2085, and falls
+/// outside the years a document can be from).
 fn full_year(s: &str, short_ok: bool) -> Option<u16> {
     let n: u16 = s.parse().ok()?;
-    match s.len() {
-        4 if (1990..=2099).contains(&n) => Some(n),
-        2 if short_ok => Some(2000 + n),
-        _ => None,
-    }
+    let year = match s.len() {
+        4 => n,
+        2 if short_ok && n < 50 => 2000 + n,
+        2 if short_ok => 1900 + n,
+        _ => return None,
+    };
+    (1990..=2099).contains(&year).then_some(year)
 }
 
 /// The section of previous assessments and treatments (round 31).
@@ -253,6 +257,14 @@ mod tests {
                       נבדק לראשונה ב-2/2023. סיכום מרץ 2024.";
         assert_eq!(document_date(report), Some((2024, 3)));
         assert_eq!(document_date("נכתב 14/11/23"), Some((2023, 11)));
+        // A two-digit year of the last century (a parent's date of birth) is not 20xx, so it
+        // never becomes the document's date.
+        assert_eq!(
+            document_date("האב יליד 12/5/85. סיכום מ-14.3.2024."),
+            Some((2024, 3))
+        );
+        assert_eq!(document_date("האם ילידת 3/7/79"), None);
+        assert_eq!(document_date("נכתב 14/03/99"), Some((1999, 3)));
         assert_eq!(document_date("בדצמבר 2022 החל טיפול"), Some((2022, 12)));
         assert_eq!(document_date("ציון 12.5 ו-3/4 מהמשימות"), None);
         assert_eq!(document_date("נולד ב-1.1.2020"), None);

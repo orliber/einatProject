@@ -118,8 +118,10 @@ const FOCUSABLE =
 
 /** Keeps Tab and Shift+Tab cycling inside the frame. */
 function trapTab(frame: HTMLElement, e: KeyboardEvent) {
+  // A hidden control (a form's unseen submit button, for Enter) is no Tab stop: wrapping to
+  // it would leave the focus where it was, or let the browser carry it out of the dialog.
   const items = Array.from(frame.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
-    (el) => el.getAttribute("aria-hidden") !== "true",
+    (el) => el.getAttribute("aria-hidden") !== "true" && el.closest("[hidden]") === null,
   );
   if (items.length === 0) {
     e.preventDefault();

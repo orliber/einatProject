@@ -559,6 +559,28 @@ pub fn instruments() -> Vec<Instrument> {
     ]
 }
 
+/// The totals of the instruments: a composite over the indexes or domains of a test (FSIQ,
+/// GAC, Vineland's ABC, Mullen's ELC) or a questionnaire's total. Never one of the indexes a
+/// gap or an order is read between.
+pub(crate) const TOTALS: [&str; 5] = ["fsiq", "gac", "abc", "elc", "total"];
+
+/// The smallest step a score of a scale is written in. Every scale here is in whole numbers
+/// (standard, scaled, v-scale and T scores; ADOS-2 raw totals and comparison score), but
+/// CARS-2 items are scored in halves. Exhaustive on purpose: a scale added later (an age
+/// equivalent in months, a growth score) must say what its step is.
+pub fn score_step(scale: ScoreScale) -> f64 {
+    match scale {
+        ScoreScale::Standard
+        | ScoreScale::Scaled
+        | ScoreScale::VScale
+        | ScoreScale::TAbility
+        | ScoreScale::TConcern
+        | ScoreScale::RawCutoff
+        | ScoreScale::Comparison => 1.0,
+        ScoreScale::Cars => 0.5,
+    }
+}
+
 /// The band a value falls in; `None` for a value outside the scale or between bands.
 #[must_use]
 pub fn classify(measure: &Measure, value: f64) -> Option<&Band> {
@@ -680,17 +702,56 @@ fn checked(sheet: &ScoreSheet) -> Result<Checked<'_>, String> {
         };
         // Written as "not inside" so that NaN, which compares false with everything, is refused.
         if !(measure.min..=measure.max).contains(&e.value) {
+            // The value as she typed it (f64's shortest round-trip), never rounded to a number
+            // she never entered (30.25 is not "30.2").
             return Err(format!(
                 "{}: הציון {} מחוץ לטווח האפשרי ({}–{})",
                 measure.name_he,
-                fmt_value(e.value),
+                e.value,
                 fmt_value(measure.min),
                 fmt_value(measure.max)
+            ));
+        }
+        // A score that is not on the scale's grid (109.5 on a composite, 29.3 on CARS-2) is
+        // not a score that can exist: refused, never written without a range.
+        let step = score_step(measure.scale);
+        if ((e.value / step).round() * step - e.value).abs() > 1e-9 {
+            return Err(format!(
+                "{}: הציון {} לא אפשרי בסולם הזה ({})",
+                measure.name_he,
+                e.value,
+                if measure.scale == ScoreScale::Cars {
+                    "ציונים בקפיצות של חצי נקודה"
+                } else {
+                    "ציונים שלמים בלבד"
+                }
             ));
         }
         out.push((measure.clone(), e));
     }
     Ok((inst, out))
+}
+
+/// The sheet's entries with their measures, without the gate of [`checked`]: a sheet an older
+/// version saved with a value `checked` now refuses (109.5 on a composite) still has every
+/// other score she entered, and each is still held against the model's text and still has its
+/// cases. An entry with no measure is left out; an unknown instrument is `None`. The gate for
+/// the text, the table and the export stays [`checked`].
+fn entries_of(sheet: &ScoreSheet) -> Option<Checked<'_>> {
+    let inst = instruments()
+        .into_iter()
+        .find(|i| i.key == sheet.instrument)?;
+    let entries = sheet
+        .entries
+        .iter()
+        .filter_map(|e| {
+            inst.measures
+                .iter()
+                .find(|x| x.key == e.measure)
+                .map(|m| (m.clone(), e))
+        })
+        .collect();
+    Some((inst, entries))
 }
 
 /// "מנת משכל כללית (FSIQ)".
@@ -890,7 +951,7 @@ pub fn format_sheet_with(sheet: &ScoreSheet, habits: SheetHabits) -> Result<Stri
         }
         if measure.scale == ScoreScale::Standard
             && measure.group == "מדדים"
-            && !matches!(measure.key.as_str(), "fsiq" | "gac")
+            && !TOTALS.contains(&measure.key.as_str())
         {
             indexes.push((measure.name_he.clone(), e.value));
         }
@@ -910,7 +971,7 @@ pub fn format_sheet_with(sheet: &ScoreSheet, habits: SheetHabits) -> Result<Stri
     // worked out here, never by the model. A total is not one of the domains it orders.
     let mut groups: Vec<(&str, Vec<(String, f64)>)> = Vec::new();
     for (measure, e) in &entries {
-        if matches!(measure.key.as_str(), "fsiq" | "gac" | "total") {
+        if TOTALS.contains(&measure.key.as_str()) {
             continue;
         }
         let row = (measure_label(measure), e.value);
@@ -1114,7 +1175,9 @@ fn score_numbers(sentence: &str) -> Vec<String> {
 pub fn check_scores(text: &str, sheets: &[ScoreSheet]) -> Vec<String> {
     let mut entered: Vec<(Measure, Known)> = Vec::new();
     for sheet in sheets {
-        let Ok((_, entries)) = checked(sheet) else {
+        // Not `checked`: one value an older version saved off the grid must not silence the
+        // check of every other score in the sheet.
+        let Some((_, entries)) = entries_of(sheet) else {
             continue;
         };
         for (measure, e) in entries {
@@ -1147,6 +1210,12 @@ pub fn check_scores(text: &str, sheets: &[ScoreSheet]) -> Vec<String> {
             .filter(|(m, _)| mentioned_at_all(sentence, m))
             .collect();
         for n in score_numbers(sentence) {
+            // A year beside a measure ("נבדק ב-2026") is never a score, so it is not held
+            // against the table. Any other number is: an impossible score the model writes
+            // ("ציון 950") is pointed out, not passed over.
+            if n.len() == 4 && n.parse::<u32>().is_ok_and(|v| (1900..=2100).contains(&v)) {
+                continue;
+            }
             let fits = named
                 .iter()
                 .chain(&also)
@@ -1557,6 +1626,9 @@ pub fn is_score_tag(tag: &str) -> bool {
     parse_score_tag(tag).is_some()
 }
 
+/// The ceiling of a score tag: no scale or percentile reaches beyond 200 (BRIEF-P's 120).
+const MAX_SCORE: f64 = 200.0;
+
 /// What a score tag holds: the value, the range label and the relative place. `None` for
 /// anything that is not a score tag (see [`is_score_tag`]).
 #[must_use]
@@ -1565,7 +1637,7 @@ pub fn parse_score_tag(tag: &str) -> Option<(f64, Option<String>, Option<Relativ
     let mut parts = inner.split(" · ");
     let value = parts.next()?.strip_prefix("תוצאה ")?;
     let v = value.parse::<f64>().ok()?;
-    if !(0.0..=200.0).contains(&v) || fmt_value(v) != value {
+    if !(0.0..=MAX_SCORE).contains(&v) || fmt_value(v) != value {
         return None;
     }
     let rest: Vec<&str> = parts.collect();
@@ -1685,10 +1757,12 @@ pub struct ScoreCases {
     pub cases: Vec<String>,
 }
 
-/// The interpretation cases each score of `sheet` fits. A sheet that does not check is none.
+/// The interpretation cases each score of `sheet` fits. A sheet of an unknown instrument is
+/// none; an entry of an unknown measure is left out (one value off the grid in a sheet an
+/// older version saved does not take the cases away from the others).
 #[must_use]
 pub fn sheet_cases(sheet: &ScoreSheet) -> Vec<ScoreCases> {
-    let Ok((inst, entries)) = checked(sheet) else {
+    let Some((inst, entries)) = entries_of(sheet) else {
         return Vec::new();
     };
     let scaled: Vec<f64> = entries
@@ -2191,6 +2265,58 @@ mod tests {
         assert!(
             check_scores("נמסר מידע מ-2 מקורות.", &[wppsi(&[("information", 8.0)])]).is_empty()
         );
+        // A year beside a measure is no score: nothing to hold against the table…
+        assert!(check_scores(
+            "ההבנה המילולית (VCI) נבדקה בספטמבר 2026 והושג ציון 95.",
+            &sheets
+        )
+        .is_empty());
+        assert!(check_scores("במטריצות, בבדיקה של 2026, 13.", &sheets).is_empty());
+        // …and a wrong score in the same sentence still is.
+        let w = check_scores(
+            "ההבנה המילולית (VCI) נבדקה בספטמבר 2026 והושג ציון 97.",
+            &sheets,
+        );
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(w[0].contains("97") && !w[0].contains("2026"), "{w:?}");
+        // An impossible score beside a measure is no year: it is pointed out, not passed over.
+        let w = check_scores("ההבנה המילולית (VCI) – ציון 950.", &sheets);
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(w[0].contains("950") && w[0].contains("95"), "{w:?}");
+    }
+
+    /// Every scale's step, so a scale added later (an age equivalent, a growth score) is
+    /// checked on its own grid and not refused as "not a whole number".
+    #[test]
+    fn every_scale_declares_its_step_and_every_table_sits_on_it() {
+        let step_of = |m: &Measure| score_step(m.scale);
+        for inst in instruments() {
+            for m in &inst.measures {
+                let step = step_of(m);
+                assert_eq!(
+                    step,
+                    if m.scale == ScoreScale::Cars {
+                        0.5
+                    } else {
+                        1.0
+                    },
+                    "{}/{}",
+                    inst.key,
+                    m.key
+                );
+                for edge in [m.min, m.max]
+                    .into_iter()
+                    .chain(m.bands.iter().flat_map(|b| [b.min, b.max]))
+                {
+                    assert!(
+                        ((edge / step).round() * step - edge).abs() < 1e-9,
+                        "{}/{}: {edge} is off the scale's step {step}",
+                        inst.key,
+                        m.key
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -2339,6 +2465,30 @@ mod tests {
         assert!(!line.contains("FSIQ"), "{line}");
         // One subtest alone is not ordered.
         assert_eq!(text.matches("מהגבוה לנמוך").count(), 1, "{text}");
+        // Nor is Vineland's composite one of its domains, nor Mullen's of its scales: a
+        // composite sits in the same group as what it sums up.
+        let vineland = ScoreSheet {
+            instrument: "vineland_3".into(),
+            module: String::new(),
+            cutoff: None,
+            entries: vec![
+                entry("abc", 92.0),
+                entry("communication", 98.0),
+                entry("daily_living", 85.0),
+                entry("socialization", 90.0),
+            ],
+            notes: String::new(),
+        };
+        let text = format_sheet(&vineland).unwrap_or_else(|e| panic!("{e}"));
+        let line = text
+            .lines()
+            .find(|l| l.contains("מהגבוה לנמוך"))
+            .unwrap_or_else(|| panic!("{text}"));
+        assert!(!line.contains("ABC"), "{line}");
+        assert!(
+            line.contains("(COM) – ציון 98") && line.ends_with("(DLS) – ציון 85"),
+            "{line}"
+        );
     }
 
     #[test]

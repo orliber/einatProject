@@ -77,7 +77,7 @@ fn corrupt(what: &str) -> VaultError {
 /// Attach `path` as the encrypted export target `dv_backup`, with the same key as the database
 /// (never a clear-text step).
 fn attach(conn: &Connection, path: &Path, key: &Key32) -> Result<(), VaultError> {
-    let target = path
+    let target = crate::db::plain_path(path)?
         .to_str()
         .ok_or_else(|| corrupt("path"))?
         .replace('\'', "''");

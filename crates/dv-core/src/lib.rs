@@ -680,7 +680,20 @@ fn score_sheets(
     Ok(out)
 }
 
-/// Today's date `(y, m, d)` in UTC, for relative dates.
+/// A consent date is today or earlier. Local time may already be tomorrow in UTC terms
+/// (Israel is ahead of UTC), so one day ahead passes too, also across the end of a month or
+/// a year (compared as days, not as `(y, m, d)` tuples, which read 1 December as later than
+/// "31 November").
+fn consent_date_ok(given: dv_domain::dates::Ymd, today: dv_domain::dates::Ymd) -> bool {
+    use dv_domain::dates::days_from_civil;
+    days_from_civil(given) <= days_from_civil(today) + 1
+}
+
+/// The child's age as the details hold it: months are 0–11, and the years are a child's.
+fn age_ok(age: dv_domain::Age) -> bool {
+    age.months <= 11 && age.years <= 24
+}
+
 /// A consent is a record the psychologist may have to show: a real, past date and who signed.
 fn check_meta(meta: &CaseMeta) -> Result<(), CoreError> {
     if meta
@@ -692,16 +705,19 @@ fn check_meta(meta: &CaseMeta) -> Result<(), CoreError> {
             "תאריך סוף תקופת השמירה לא תקין.".to_owned(),
         ));
     }
+    if meta.age.is_some_and(|a| !age_ok(a)) {
+        return Err(CoreError::Refused(
+            "הגיל לא תקין: חודשים בין 0 ל-11, ושנים עד 24.".to_owned(),
+        ));
+    }
     let Some(consent) = &meta.consent else {
         return Ok(());
     };
     let refused = |why: &str| Err(CoreError::Refused(why.to_owned()));
-    let Some((y, m, d)) = dates::parse_iso(&consent.given_on) else {
+    let Some(given) = dates::parse_iso(&consent.given_on) else {
         return refused("תאריך ההסכמה לא תקין.");
     };
-    // Local time may already be tomorrow in UTC terms (Israel is ahead of UTC).
-    let (ty, tm, td) = today();
-    if (y, m, d) > (ty, tm, td + 1) {
+    if !consent_date_ok(given, today()) {
         return refused("תאריך ההסכמה עוד לא הגיע.");
     }
     let by = consent.given_by.trim();

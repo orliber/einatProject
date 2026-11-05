@@ -28,3 +28,17 @@ describe("browser preview score text matches the core", () => {
     expect(() => one(Number.POSITIVE_INFINITY)).toThrow(/מחוץ לטווח/);
   });
 });
+
+describe("a score off its scale's grid", () => {
+  it("is refused like the core refuses it (dv_domain score_step): whole numbers, halves on CARS-2", () => {
+    const wisc = (measure: string, value: number) => () =>
+      formatSheet({ instrument: "wisc_v", module: "", cutoff: null, notes: "", entries: [{ measure, value, note: "" }] });
+    expect(wisc("information", 9.5)).toThrow("מידע: הציון 9.5 לא אפשרי בסולם הזה (ציונים שלמים בלבד)");
+    expect(wisc("fsiq", 109.5)).toThrow("לא אפשרי בסולם הזה");
+    expect(wisc("information", 9)).not.toThrow();
+    const cars = (value: number) => () =>
+      formatSheet({ instrument: "cars_2", module: "", cutoff: null, notes: "", entries: [{ measure: "total", value, note: "" }] });
+    expect(cars(32.5)).not.toThrow();
+    expect(cars(32.3)).toThrow("לא אפשרי בסולם הזה (ציונים בקפיצות של חצי נקודה)");
+  });
+});

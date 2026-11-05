@@ -1654,3 +1654,89 @@ fn the_key_derivation_is_built_to_wipe_its_memory() {
         .expect("the argon2 dependency");
     assert!(argon2.contains("\"zeroize\""), "{argon2}");
 }
+
+/// SQLite reads a file name that starts with `file:` as a URI (`?mode=memory`, `?vfs=`,
+/// `?key=`…) when the connection allows it. The vault opens its databases, and attaches the
+/// backup target, by plain path only: a folder named like a URI is a folder. Windows forbids
+/// `:` and `?` in a name, so there is no such folder there.
+#[cfg(not(windows))]
+#[test]
+fn a_folder_named_like_a_sqlite_uri_is_a_plain_folder() {
+    let tmp = tempfile::tempdir().unwrap();
+    // The only way such a name reaches SQLite at the start of the path is a relative one.
+    let was = std::env::current_dir().unwrap();
+    std::env::set_current_dir(tmp.path()).unwrap();
+    let result = std::panic::catch_unwind(|| {
+        let dir = std::path::Path::new("file:x?mode=memory");
+        fs::create_dir(dir).unwrap();
+        let created = Vault::create(dir, PASSWORD, Argon2Params::TEST).unwrap();
+        let mut vault = created.vault;
+        let case = noam(&mut vault);
+        let dest = dir.join("copy.vaultbak");
+        vault.write_backup(&dest).unwrap();
+        vault.lock().unwrap();
+        // The databases are files in that folder (not memory, not a file named "x").
+        let main = tmp.path().join("file:x?mode=memory").join("main.db");
+        assert!(main.is_file(), "{main:?}");
+        assert!(fs::metadata(&main).unwrap().len() > 0);
+        assert!(!tmp.path().join("x").exists());
+        assert!(tmp
+            .path()
+            .join("file:x?mode=memory/copy.vaultbak")
+            .is_file());
+        let vault = Vault::unlock_with_password(dir, PASSWORD).unwrap();
+        assert!(vault.list_cases().unwrap().iter().any(|c| c.id == case));
+    });
+    std::env::set_current_dir(was).unwrap();
+    result.unwrap();
+}
+
+/// Changing a person's role in the case details changes that person: one row, with the new
+/// role and a tag of the new role, not a second person next to the first (whose old tag would
+/// go on hiding the name).
+#[test]
+fn changing_a_role_keeps_one_person_not_two() {
+    let (_dir, mut vault, _) = new_vault();
+    let case = noam(&mut vault);
+    let before = vault.identities(&case).unwrap();
+    let teacher = before.iter().find(|i| i.role == Role::Teacher).unwrap();
+    assert_eq!(teacher.tag, "[גננת]");
+    let edit: Vec<IdentityInput> = before
+        .iter()
+        .map(|i| IdentityInput {
+            id: Some(i.id.clone()),
+            role: if i.id == teacher.id {
+                Role::Relative
+            } else {
+                i.role
+            },
+            value: i.value.clone(),
+            aliases: i.aliases.clone(),
+        })
+        .collect();
+    let after = vault.set_identities(&case, &edit).unwrap();
+    assert_eq!(after.len(), before.len(), "{after:?}");
+    let michal: Vec<_> = after.iter().filter(|i| i.value == "מיכל").collect();
+    assert_eq!(michal.len(), 1, "{michal:?}");
+    assert_eq!(michal[0].role, Role::Relative);
+    assert_eq!(michal[0].tag, "[קרוב_משפחה_1]");
+    assert_eq!(michal[0].id, teacher.id, "the same person");
+    assert!(!after.iter().any(|i| i.tag == "[גננת]"), "{after:?}");
+    // And back again: still one row.
+    let back: Vec<IdentityInput> = after
+        .iter()
+        .map(|i| IdentityInput {
+            id: Some(i.id.clone()),
+            role: if i.id == teacher.id {
+                Role::Teacher
+            } else {
+                i.role
+            },
+            value: i.value.clone(),
+            aliases: i.aliases.clone(),
+        })
+        .collect();
+    let again = vault.set_identities(&case, &back).unwrap();
+    assert_eq!(again.len(), before.len(), "{again:?}");
+    assert_eq!(again.iter().filter(|i| i.value == "מיכל").count(), 1);
+}
