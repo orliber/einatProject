@@ -189,6 +189,8 @@ fn a_wrong_answer_from_the_reader_is_a_failure_not_a_pass() {
                 metadata: Vec::new(),
                 warnings: Vec::new(),
                 pages: 1,
+                text_pages: Vec::new(),
+                margins: String::new(),
             })
         } else {
             Outcome::Text(dv_ingest::Extracted {

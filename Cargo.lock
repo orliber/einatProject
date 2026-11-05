@@ -1411,6 +1411,7 @@ dependencies = [
  "quick-xml",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
  "zip 9.0.5",
 ]

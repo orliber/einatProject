@@ -76,6 +76,13 @@ pub struct Scan {
     pub metadata: Vec<(String, String)>,
     pub warnings: Vec<String>,
     pub pages: u32,
+    /// A PDF whose pages are partly digital: the text of the pages that carry their own
+    /// (page number, text), read as text and not sent to the engine (D-160).
+    #[serde(default)]
+    pub text_pages: Vec<(u32, String)>,
+    /// Those pages' headers and footers, as a text PDF's.
+    #[serde(default)]
+    pub margins: String,
 }
 
 /// What a document yielded.
@@ -253,6 +260,17 @@ pub fn import(
     file_name: &str,
     bytes: &[u8],
 ) -> Result<Extracted, IngestError> {
+    import_until(worker_exe, ocr, file_name, bytes, &|| false)
+}
+
+/// [`import`], ending a scan's reading between pages once `stop` says so (the vault locked).
+pub fn import_until(
+    worker_exe: Option<&Path>,
+    ocr: Option<&ocr::Engine>,
+    file_name: &str,
+    bytes: &[u8],
+    stop: &(dyn Fn() -> bool + Sync),
+) -> Result<Extracted, IngestError> {
     let outcome = match worker_exe {
         // A reader that stopped is started once more before she is told (D-135).
         Some(exe) => match worker::run(exe, file_name, bytes, worker::DEFAULT_TIMEOUT) {
@@ -266,8 +284,13 @@ pub fn import(
     match outcome {
         Outcome::Text(out) => Ok(out),
         Outcome::Scan(scan) => {
-            let engine = ocr.ok_or(IngestError::OcrMissing)?;
-            finish(ocr::recognize(engine, scan)?)
+            match ocr {
+                Some(engine) => finish(ocr::recognize(engine, scan, stop)?),
+                // No engine here (a Mac): a mixed PDF keeps its digital pages, and says
+                // which pages were left out.
+                None if !scan.text_pages.is_empty() => finish(ocr::without_engine(scan)),
+                None => Err(IngestError::OcrMissing),
+            }
         }
     }
 }
@@ -294,11 +317,13 @@ pub fn read(bytes: &[u8], file_name: &str) -> Result<Outcome, IngestError> {
                 metadata: Vec::new(),
                 warnings: Vec::new(),
                 pages: 1,
+                text_pages: Vec::new(),
+                margins: String::new(),
             }))
         }
-        Format::Pdf => match pdf::extract(bytes) {
-            Err(IngestError::Scanned) => return pdf::scan(bytes).map(Outcome::Scan),
-            other => other?,
+        Format::Pdf => match pdf::read(bytes)? {
+            Outcome::Text(out) => out,
+            scan @ Outcome::Scan(_) => return Ok(scan),
         },
         Format::Text => {
             let (body, legacy) = decode_text(bytes, file_name).ok_or(IngestError::Unsupported)?;

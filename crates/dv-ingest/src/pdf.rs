@@ -1,4 +1,4 @@
-//! PDF with a text layer. A scanned PDF (images only) goes to OCR instead (`scan`).
+//! PDF: its text layer, page by page. A page with no text of its own goes to OCR (D-160).
 //!
 //! Producers store Hebrew in different orders (LibreOffice, Word and browsers all differ), so
 //! the text order in the file cannot be trusted. Every character's position on the page is
@@ -238,28 +238,135 @@ fn set_apart(page: &[Line]) -> Vec<(usize, usize)> {
     out
 }
 
-pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
+/// Letters on a page below which it is read as a scan (a page number or a stamp is not text).
+const PAGE_LETTERS: usize = 15;
+
+/// A PDF: its text, or, when pages have no text of their own, their images for OCR. The
+/// decision is per page (D-160): a digital cover letter in front of scanned pages keeps its
+/// text and the scanned pages are read too. A fully digital PDF never looks for images.
+pub(crate) fn read(bytes: &[u8]) -> Result<crate::Outcome, IngestError> {
     let doc = load(bytes)?;
     let mut positions = Positions::default();
     pdf_extract::output_doc(&doc, &mut positions)
         .map_err(|e| IngestError::Corrupt(e.to_string()))?;
     let pages: Vec<Vec<Line>> = positions.pages.into_iter().map(page_lines).collect();
     let count = pages.len().max(1);
-    let letters = pages
-        .iter()
-        .flatten()
-        .flat_map(|l| l.text.chars())
-        .filter(|c| c.is_alphabetic())
-        .count();
-    if letters < 40 || letters / count < 15 {
-        return Err(IngestError::Scanned);
-    }
-    let mut warnings =
-        vec!["נקרא מ-PDF: כדאי לעבור על הטקסט (טבלאות ומספרים בתוך משפטים).".to_owned()];
+    let letters_on = |page: &Vec<Line>| {
+        page.iter()
+            .flat_map(|l| l.text.chars())
+            .filter(|c| c.is_alphabetic())
+            .count()
+    };
+    let per_page: Vec<usize> = pages.iter().map(letters_on).collect();
+    let letters: usize = per_page.iter().sum();
+    let whole_text = letters >= 40 && letters / count >= PAGE_LETTERS;
+    // Page numbers as the PDF counts them (from 1), for the pages with almost no text.
+    let numbers: Vec<u32> = doc.get_pages().keys().copied().collect();
+    let number = |p: usize| {
+        numbers
+            .get(p)
+            .copied()
+            .unwrap_or_else(|| u32::try_from(p + 1).unwrap_or(u32::MAX))
+    };
+    let textless: Vec<u32> = if numbers.len() == pages.len() || pages.is_empty() {
+        let mut t: Vec<u32> = per_page
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| **n < PAGE_LETTERS)
+            .map(|(p, _)| number(p))
+            .collect();
+        // Pages the text reader did not report at all have no text either.
+        t.extend(numbers.iter().skip(pages.len()).copied());
+        t
+    } else {
+        // The page lists disagree: the whole document is read the old way.
+        if whole_text {
+            Vec::new()
+        } else {
+            numbers.clone()
+        }
+    };
 
+    let (bodies, margins) = page_bodies(&pages);
+    let (metadata, extra) = hidden_parts(&doc);
+    let page_count = u32::try_from(numbers.len().max(pages.len())).unwrap_or(u32::MAX);
+
+    let images = if textless.is_empty() {
+        (Vec::new(), Vec::new())
+    } else {
+        crate::scan::from_pdf(&doc, Some(&textless))?
+    };
+    let (images, unreadable) = images;
+    if images.is_empty() {
+        if !whole_text {
+            return Err(IngestError::Scanned);
+        }
+        let mut warnings =
+            vec!["נקרא מ-PDF: כדאי לעבור על הטקסט (טבלאות ומספרים בתוך משפטים).".to_owned()];
+        if !margins.is_empty() {
+            warnings
+                .push("שורות בשולי העמוד (כותרת עליונה/תחתונה, מספרי עמודים) לא יובאו.".to_owned());
+        }
+        warnings.extend(extra);
+        let mut body = String::new();
+        for b in &bodies {
+            body.push_str(b);
+            body.push('\n');
+        }
+        return Ok(crate::Outcome::Text(Extracted {
+            format: Format::Pdf,
+            body,
+            margins: margins.join("\n"),
+            metadata,
+            warnings,
+            pages: u32::try_from(pages.len()).unwrap_or(u32::MAX),
+            ocr: false,
+        }));
+    }
+
+    // Scanned pages: their images go to OCR; every other page keeps its own text.
+    let scanned: Vec<u32> = images.iter().map(|i| i.page).collect();
+    let text_pages: Vec<(u32, String)> = bodies
+        .iter()
+        .enumerate()
+        .map(|(p, b)| (number(p), b.trim().to_owned()))
+        .filter(|(n, b)| !b.is_empty() && !scanned.contains(n))
+        .collect();
+    let has_text: Vec<u32> = text_pages.iter().map(|(n, _)| *n).collect();
+    let missing: Vec<u32> = unreadable
+        .into_iter()
+        .filter(|n| !has_text.contains(n))
+        .collect();
+    let mut warnings = Vec::new();
+    if !text_pages.is_empty() {
+        let list: Vec<String> = has_text.iter().map(u32::to_string).collect();
+        warnings.push(format!(
+            "חלק מה-PDF דיגיטלי: עמודים {} נקראו כטקסט, והשאר זוהו מהסריקה.",
+            list.join(", ")
+        ));
+        if !margins.is_empty() {
+            warnings
+                .push("שורות בשולי העמוד (כותרת עליונה/תחתונה, מספרי עמודים) לא יובאו.".to_owned());
+        }
+    }
+    warnings.extend(crate::scan::unreadable_warning(&missing));
+    warnings.extend(extra);
+    Ok(crate::Outcome::Scan(crate::Scan {
+        format: Format::Pdf,
+        images,
+        metadata,
+        warnings,
+        pages: page_count,
+        text_pages,
+        margins: margins.join("\n"),
+    }))
+}
+
+/// Each page's body text, and the headers and footers set apart from all of them.
+fn page_bodies(pages: &[Vec<Line>]) -> (Vec<String>, Vec<String>) {
     // Headers and footers: in the margin zone, and repeated on most pages.
     let mut seen: HashMap<String, usize> = HashMap::new();
-    for page in &pages {
+    for page in pages {
         let mut keys: Vec<String> = page
             .iter()
             .filter(|l| l.in_margin_zone)
@@ -274,7 +381,7 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
     let threshold = (pages.len() * 3).div_ceil(5).max(2);
     // A one-page letter has nothing to repeat: its letterhead and footer are the lines at the
     // page's edge, set apart from the text by a wider gap than the text's own line spacing.
-    let lone: Vec<(usize, usize)> = match pages.as_slice() {
+    let lone: Vec<(usize, usize)> = match pages {
         [page] => set_apart(page),
         _ => Vec::new(),
     };
@@ -286,9 +393,10 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
                     .is_some_and(|n| *n >= threshold))
     };
 
-    let mut body = String::new();
+    let mut bodies = Vec::with_capacity(pages.len());
     let mut margins: Vec<String> = Vec::new();
     for (p, page) in pages.iter().enumerate() {
+        let mut body = String::new();
         for (i, line) in page.iter().enumerate() {
             if line.text.trim().is_empty() {
                 continue;
@@ -303,40 +411,9 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
                 body.push('\n');
             }
         }
-        body.push('\n');
+        bodies.push(body);
     }
-    if !margins.is_empty() {
-        warnings.push("שורות בשולי העמוד (כותרת עליונה/תחתונה, מספרי עמודים) לא יובאו.".to_owned());
-    }
-    let (metadata, extra) = hidden_parts(&doc);
-    warnings.extend(extra);
-    Ok(Extracted {
-        format: Format::Pdf,
-        body,
-        margins: margins.join("\n"),
-        metadata,
-        warnings,
-        pages: u32::try_from(pages.len()).unwrap_or(u32::MAX),
-        ocr: false,
-    })
-}
-
-/// A PDF without a text layer: its page images, for OCR. No readable image refuses it.
-pub(crate) fn scan(bytes: &[u8]) -> Result<crate::Scan, IngestError> {
-    let doc = load(bytes)?;
-    let (images, mut warnings) = crate::scan::from_pdf(&doc)?;
-    if images.is_empty() {
-        return Err(IngestError::Scanned);
-    }
-    let (metadata, extra) = hidden_parts(&doc);
-    warnings.extend(extra);
-    Ok(crate::Scan {
-        format: Format::Pdf,
-        images,
-        metadata,
-        warnings,
-        pages: u32::try_from(doc.get_pages().len()).unwrap_or(u32::MAX),
-    })
+    (bodies, margins)
 }
 
 /// What a PDF carries besides its pages: file properties (shown locally, and used to suggest

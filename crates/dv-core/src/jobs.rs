@@ -454,11 +454,13 @@ impl ReadJob {
         let mut extracted = if self.cancel.is_set() {
             Err(locked_meanwhile())
         } else {
-            dv_ingest::import(
+            let cancel = &self.cancel;
+            dv_ingest::import_until(
                 self.exe.as_deref(),
                 self.ocr.as_ref(),
                 &self.file_name,
                 &self.bytes,
+                &|| cancel.is_set(),
             )
             .map_err(CoreError::Read)
         };

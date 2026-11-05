@@ -9,7 +9,8 @@ import { ScoresView, scoresDraft } from "../../components/ScoresView";
 import { useHoldUnsaved } from "../../components/Unsaved";
 import { LocalText, type LocalTextHandle } from "../../components/LocalText";
 import { Dialog, ErrorLine, Segments, UploadIcon, PlusIcon } from "../../components/ui";
-import { sizeBucket, timed, WaitLine } from "../../components/Progress";
+import { WaitLine, sizeBucket } from "../../components/Progress";
+import { forgetRead, readOrBackground, retryRead, useBackgroundReads, type BackgroundRead } from "./backgroundReads";
 import type { CaseApi } from "../CaseScreen";
 import "./MaterialsView.css";
 import { useAi } from "../../ai";
@@ -34,7 +35,9 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
   // A material opens in a window when clicked; the screen itself is only the list.
   const [selected, setSelected] = useState<string | null>(null);
   const [previewed, setPreviewed] = useState<{ id: string; outcome: FilterOutcome } | null>(null);
-  const [importing, setImporting] = useState<{ preview: ImportPreview; kind?: InputKind | undefined } | null>(null);
+  /** `readId`: a file read in the background, whose line goes once it is saved (D-160). */
+  const [importing, setImporting] = useState<{ preview: ImportPreview; kind?: InputKind | undefined; readId?: number } | null>(null);
+  const background = useBackgroundReads(caseId);
   // The slot a file is being chosen for (the "+" of that slot), so it lands in its place.
   const [uploadFor, setUploadFor] = useState<InputKind | undefined>(undefined);
   const [dropOn, setDropOn] = useState<string | null>(null);
@@ -82,7 +85,14 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
     setBatch(null);
     setReading({ name: file.name, size: sizeBucket(file.size) });
     try {
-      const preview = await timed("read", ipc.importDocument(caseId, file), sizeBucket(file.size));
+      const read = await readOrBackground(caseId, file, kind);
+      // A scan, or a file that takes long: it goes on in its own line below, and the rest
+      // of the case is hers meanwhile (D-160).
+      if (read === "background") {
+        setAutoSaved(null);
+        return;
+      }
+      const { preview } = read;
       // Everything read: saved at once (encrypted, nothing leaves the computer) with "ביטול"
       // beside it. What the filter will hide is not a question (round 26); only a file that
       // was not read in full opens the window, to say what was left out.
@@ -118,7 +128,13 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
         setReading({ name: file.name, size: sizeBucket(file.size), at: `${i + 1} מתוך ${files.length}` });
         let result: FileResult;
         try {
-          const preview = await timed("read", ipc.importDocument(caseId, file), sizeBucket(file.size));
+          const read = await readOrBackground(caseId, file, kind);
+          if (read === "background") {
+            results.push({ name: file.name, text: "נקרא ברקע (בטא). כשיסתיים, יחכה לבדיקה שלך בשורה משלו." });
+            setBatch([...results]);
+            continue;
+          }
+          const { preview } = read;
           const clean = preview.body.trim() !== "" && preview.left_out.length === 0 && preview.warnings.length === 0;
           const title = preview.title.trim() || file.name;
           if (clean) {
@@ -147,6 +163,7 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
 
   /** The import window of a file in a batch closed: the next file goes on. */
   function importClosed(saved: boolean) {
+    if (saved && importing?.readId !== undefined) forgetRead(importing.readId);
     setImporting(null);
     const done = dialogDone.current;
     dialogDone.current = null;
@@ -296,6 +313,10 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
           )}
         </div>
       )}
+      {background.length > 0 && (
+        <BackgroundReads reads={background} busy={importing !== null}
+          onReview={(r) => r.preview && setImporting({ preview: r.preview, kind: r.kind, readId: r.id })} />
+      )}
       {detail.meta.follows && <FollowUpPanel api={api} />}
       <div className="view-body materials-body">
         <ul className="needs" aria-label="מה עוד חסר">
@@ -323,7 +344,7 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
           {reading ? (
             <div className="grow"><WaitLine task="read" speed={reading.size} delay={0} label={`קוראת את ${reading.name}${reading.at ? ` (${reading.at})` : ""} ומסתירה פרטים מזהים`} /></div>
           ) : (
-            <span>גוררים לכאן Word, ‏PDF או ODT, או <button type="button" className="link-btn" onClick={() => chooseFile()}>בוחרים קובץ</button></span>
+            <span>גוררים לכאן Word, ‏PDF או ODT (וגם סריקה או צילום של דף, בבטא), או <button type="button" className="link-btn" onClick={() => chooseFile()}>בוחרים קובץ</button></span>
           )}
           <input ref={fileRef} type="file" accept={ACCEPT} multiple hidden aria-label="העלאת מסמך" onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ""; const k = uploadFor; setUploadFor(undefined); void readFiles(fs, k); }} />
         </div>
@@ -408,6 +429,38 @@ export function MaterialsView({ api, onWrite }: { api: CaseApi; onWrite?: () => 
         <WriteDialog caseId={caseId} kind={writing.kind} input={writing.input} onClose={() => setWriting(null)}
           onSaved={async () => { setWriting(null); await reload(); notify("נשמר בתיק."); }} />
       )}
+    </div>
+  );
+}
+
+/** D-160: the files being read in the background, a line each, with what she can do now. */
+function BackgroundReads({ reads, busy, onReview }: { reads: BackgroundRead[]; busy: boolean; onReview: (r: BackgroundRead) => void }) {
+  const said: Record<BackgroundRead["status"], string> = {
+    waiting: "ממתין לתורו. אפשר להמשיך לעבוד בינתיים.",
+    reading: "נקרא ברקע. אפשר להמשיך לעבוד בינתיים.",
+    ready: "נקרא. מחכה לבדיקה שלך לפני שיישמר בתיק.",
+    failed: "לא נקרא",
+  };
+  return (
+    <div className="note-sand stack background-reads" role="status" aria-label="נקראים ברקע">
+      <ul className="stack" style={{ gap: 4, margin: 0, paddingInlineStart: 18 }}>
+        {reads.map((r) => (
+          <li key={r.id} className={r.status === "failed" ? "row warn-text" : "row"}>
+            <span className="grow">
+              <b>{r.name}</b> <span className="beta-badge">בטא</span>: {said[r.status]}{r.status === "failed" && r.error ? `: ${r.error}` : ""}
+            </span>
+            {r.status === "ready" && (
+              <button type="button" className="btn btn-small btn-primary" disabled={busy} onClick={() => onReview(r)}>לבדיקה ולשמירה</button>
+            )}
+            {r.status === "failed" && (
+              <button type="button" className="btn btn-small" onClick={() => retryRead(r.id)}>לנסות שוב</button>
+            )}
+            {(r.status === "ready" || r.status === "failed") && (
+              <button type="button" className="btn btn-small" onClick={() => forgetRead(r.id)}>הסרה</button>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

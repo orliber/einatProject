@@ -11,11 +11,15 @@ import type { ImportPreview } from "../../ipc/client";
 import { a11yViolations } from "../../test/a11y";
 import { appApi, CaseHost, Host, serve, type Override } from "../../test/host";
 import { MaterialsView } from "./MaterialsView";
+import { resetReads } from "./backgroundReads";
 
 configure({ asyncUtilTimeout: 5000 });
 vi.setConfig({ testTimeout: 20_000 });
 
-afterEach(() => clearKept());
+afterEach(() => {
+  clearKept();
+  resetReads();
+});
 
 const read = (over: Partial<ImportPreview> = {}): ImportPreview => ({
   file_name: "סיכום בדוי.docx", format: "docx", pages: 2, title: "  סיכום טיפול בדוי  ", suggested_kind: "prior_report",
@@ -281,5 +285,76 @@ describe("the materials of a case", () => {
     await user.click(within(pick).getByRole("button", { name: "שמירה" }));
     await waitFor(() => expect(app.notify).toHaveBeenCalledWith("הסעיפים של החומר עודכנו."));
     expect(calls.find((c) => c.cmd === "set_input_sections")?.args.sections).toEqual(["kindergarten", "appearance"]);
+  });
+
+  describe("a scan or photo is read in the background (beta, D-160)", () => {
+    const scanned = (over: Partial<ImportPreview> = {}) =>
+      read({ file_name: "צילום בדוי.png", format: "image", title: "מכתב בדוי", warnings: ["הטקסט זוהה אוטומטית מסריקה (OCR)"], ...over });
+    /** A reading that ends when the test says so. */
+    function later() {
+      let done: (p: ImportPreview) => void = () => undefined;
+      let failed: (e: unknown) => void = () => undefined;
+      const promise = new Promise<ImportPreview>((res, rej) => {
+        done = res;
+        failed = rej;
+      });
+      return { promise, done, failed };
+    }
+
+    it("gets its own line at once, leaves the rest free, and is saved only after she looks at it", async () => {
+      const reading = later();
+      const { user, calls } = await openMaterials((cmd) => (cmd === "import_document" ? reading.promise : undefined));
+      await user.upload(upload(), file("צילום בדוי.png"));
+      const line = await screen.findByRole("status", { name: "נקראים ברקע" });
+      expect(line).toHaveTextContent("צילום בדוי.png בטא: נקרא ברקע. אפשר להמשיך לעבוד בינתיים.");
+      // Nothing waits for it: another file can be chosen meanwhile.
+      expect(screen.getByRole("button", { name: "בוחרים קובץ" })).toBeInTheDocument();
+
+      reading.done(scanned());
+      await user.click(await within(line).findByRole("button", { name: "לבדיקה ולשמירה" }));
+      const window = await screen.findByRole("dialog", { name: "ייבוא מסמך" });
+      expect(calls.some((c) => c.cmd === "add_input")).toBe(false);
+      await user.click(within(window).getByRole("button", { name: "שמירה בתיק" }));
+      expect(await within(list()).findByText("5 חומרים")).toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByRole("status", { name: "נקראים ברקע" })).toBeNull());
+    });
+
+    it("a reading that failed says why, blocks nothing, and is read again on “לנסות שוב”", async () => {
+      let n = 0;
+      const { user, calls } = await openMaterials((cmd) => {
+        if (cmd !== "import_document") return undefined;
+        n += 1;
+        if (n === 1) throw refused("זיהוי הטקסט לקח יותר מדי זמן.");
+        return scanned();
+      });
+      await user.upload(upload(), file("צילום בדוי.png"));
+      const line = await screen.findByRole("status", { name: "נקראים ברקע" });
+      await within(line).findByText(/לא נקרא: זיהוי הטקסט לקח יותר מדי זמן./);
+      expect(screen.queryByRole("alert")).toBeNull();
+      await user.click(within(line).getByRole("button", { name: "לנסות שוב" }));
+      expect(await within(line).findByRole("button", { name: "לבדיקה ולשמירה" })).toBeInTheDocument();
+      expect(calls.filter((c) => c.cmd === "import_document")).toHaveLength(2);
+      await user.click(within(line).getByRole("button", { name: "הסרה" }));
+      expect(screen.queryByRole("status", { name: "נקראים ברקע" })).toBeNull();
+    });
+
+    it("scans wait for each other: the second starts when the first is read", async () => {
+      const first = later();
+      const second = later();
+      let n = 0;
+      const { user, calls } = await openMaterials((cmd) => {
+        if (cmd !== "import_document") return undefined;
+        n += 1;
+        return n === 1 ? first.promise : second.promise;
+      });
+      await user.upload(upload(), [file("א.png"), file("ב.jpg")]);
+      const line = await screen.findByRole("status", { name: "נקראים ברקע" });
+      await within(line).findByText(/ממתין לתורו/);
+      expect(calls.filter((c) => c.cmd === "import_document")).toHaveLength(1);
+      first.done(scanned({ title: "א" }));
+      await waitFor(() => expect(calls.filter((c) => c.cmd === "import_document")).toHaveLength(2));
+      second.done(scanned({ title: "ב" }));
+      await waitFor(() => expect(within(line).getAllByRole("button", { name: "לבדיקה ולשמירה" })).toHaveLength(2));
+    });
   });
 });

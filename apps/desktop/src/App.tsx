@@ -17,6 +17,7 @@ import { ShortcutsSheet, useShortcutsSheet } from "./components/ShortcutsSheet";
 import { isCombo, KEYS } from "./shortcuts";
 import { forgetFailures, rememberFailure } from "./errors";
 import { resetRuns } from "./screens/case/reportRun";
+import { resetReads } from "./screens/case/backgroundReads";
 import { clearKept } from "./kept";
 import type { SettingsPane } from "./screens/settingsPanes";
 
@@ -176,6 +177,8 @@ export function App() {
       // And "write the whole report": its line was for the vault just closed (the next step
       // offers what is still unwritten once it is open again).
       resetRuns();
+      // And the files being read in the background (D-160): their text was of that vault.
+      resetReads();
     }
     wasUnlocked.current = unlocked;
   }, [unlocked]);

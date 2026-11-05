@@ -100,6 +100,7 @@ pub fn run(exe: &Path, file_name: &str, bytes: &[u8], timeout: Duration) -> Work
         memory_mb: WORKER_MEMORY_MB,
         read_dirs: Vec::new(),
         single_thread: false,
+        working_dir: None,
     };
     let mut child = spawn_isolated(exe, &[WORKER_ARG], &policy)?;
     let (Some(mut stdin), Some(mut stdout)) = (child.take_stdin(), child.take_stdout()) else {

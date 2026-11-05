@@ -467,7 +467,10 @@ pub(crate) fn spawn(exe: &Path, args: &[&str], policy: &Policy) -> io::Result<Co
     let application = wide(exe.as_os_str());
     let mut line = command_line(exe, args)?;
     let environment = environment(policy);
-    let folder = wide(system32().as_os_str());
+    let folder = match &policy.working_dir {
+        Some(dir) => wide(dir.as_os_str()),
+        None => wide(system32().as_os_str()),
+    };
     let mut info = PROCESS_INFORMATION::default();
     // SAFETY: every string is NUL-terminated (the environment double-NUL-terminated, UTF-16 as
     // CREATE_UNICODE_ENVIRONMENT says) and outlives the call; `line` is writable as required;

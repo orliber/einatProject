@@ -152,6 +152,7 @@ impl NerWorker {
             memory_mb: WORKER_MEMORY_MB,
             read_dirs: vec![dir.to_path_buf()],
             single_thread: false,
+            working_dir: None,
         };
         // Fail closed: a model that cannot be isolated is not started.
         let mut child = dv_sandbox::spawn(exe, &[WORKER_ARG, dir_arg], &policy)
