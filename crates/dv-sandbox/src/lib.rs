@@ -53,6 +53,11 @@ pub struct Policy {
     /// Tell an OpenMP program (the OCR engine) to use one thread: its busy-waiting threads
     /// otherwise starve each other and the app (`OMP_THREAD_LIMIT=1`, the only variable added).
     pub single_thread: bool,
+    /// The process's working folder, one of [`Policy::read_dirs`] (`None`: the system's).
+    /// A program that takes its paths as narrow `argv` (the OCR engine) is given them relative
+    /// to it: a folder named in Hebrew is then never passed through the computer's code page,
+    /// which on a non-Hebrew Windows turns it into question marks (P-09, D-160).
+    pub working_dir: Option<PathBuf>,
 }
 
 impl Default for Policy {
@@ -61,6 +66,7 @@ impl Default for Policy {
             memory_mb: 1024,
             read_dirs: Vec::new(),
             single_thread: false,
+            working_dir: None,
         }
     }
 }
@@ -83,6 +89,15 @@ impl std::fmt::Debug for Child {
 
 /// Start `exe` with `args`, contained by `policy`.
 pub fn spawn(exe: &Path, args: &[&str], policy: &Policy) -> io::Result<Child> {
+    // Fail closed: a working folder it may not read is never set.
+    if let Some(dir) = &policy.working_dir {
+        if !policy.read_dirs.contains(dir) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "the working folder must be one of the folders it may read",
+            ));
+        }
+    }
     #[cfg(windows)]
     {
         Ok(Child {
@@ -97,7 +112,11 @@ pub fn spawn(exe: &Path, args: &[&str], policy: &Policy) -> io::Result<Child> {
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
-        let inner = std::process::Command::new(exe)
+        let mut command = std::process::Command::new(exe);
+        if let Some(dir) = &policy.working_dir {
+            command.current_dir(dir);
+        }
+        let inner = command
             .args(args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())

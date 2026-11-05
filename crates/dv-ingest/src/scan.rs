@@ -137,8 +137,16 @@ fn corrupt(why: &str) -> IngestError {
 
 /// The page images of a scanned PDF, page by page. Pages with no readable image are listed in
 /// the warnings, never silently dropped.
-pub(crate) fn from_pdf(doc: &Document) -> Result<(Vec<PageImage>, Vec<String>), IngestError> {
-    let pages = doc.get_pages();
+/// The page images of `only` those pages (all of them when `None`), and the pages among them
+/// with no image that can be read.
+pub(crate) fn from_pdf(
+    doc: &Document,
+    only: Option<&[u32]>,
+) -> Result<(Vec<PageImage>, Vec<u32>), IngestError> {
+    let mut pages = doc.get_pages();
+    if let Some(only) = only {
+        pages.retain(|num, _| only.contains(num));
+    }
     if pages.len() > MAX_PAGES {
         return Err(IngestError::TooManyPages);
     }
@@ -180,15 +188,18 @@ pub(crate) fn from_pdf(doc: &Document) -> Result<(Vec<PageImage>, Vec<String>), 
             unreadable.push(num);
         }
     }
-    let mut warnings = Vec::new();
-    if !unreadable.is_empty() && !out.is_empty() {
-        let list: Vec<String> = unreadable.iter().map(u32::to_string).collect();
-        warnings.push(format!(
+    Ok((out, unreadable))
+}
+
+/// The warning for pages that had neither text nor an image that can be read.
+pub(crate) fn unreadable_warning(pages: &[u32]) -> Option<String> {
+    (!pages.is_empty()).then(|| {
+        let list: Vec<String> = pages.iter().map(u32::to_string).collect();
+        format!(
             "בעמודים {} לא נמצאה תמונה שאפשר לקרוא, והם לא יובאו.",
             list.join(", ")
-        ));
-    }
-    Ok((out, warnings))
+        )
+    })
 }
 
 fn page_width(doc: &Document, page_id: pdf_extract::ObjectId) -> Option<f64> {

@@ -355,3 +355,13 @@
 .material-reading { margin: 8px 0; padding: 10px 12px; border-radius: var(--radius-md); background: var(--surface-alt); gap: 4px; }
 .material-reading p { margin: 0; }
 .reading-notes { margin: 0; padding-inline-start: 18px; background: var(--warn-soft); border-radius: var(--radius-md); }
+
+/* D-160: a file read in the background is marked as a beta feature. */
+.beta-badge {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 0.8em;
+  border: 1px solid currentColor;
+  opacity: 0.8;
+}

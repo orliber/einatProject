@@ -211,3 +211,27 @@ mod contained_on_a_mac {
         assert_eq!(out, "denied\n");
     }
 }
+
+#[test]
+fn the_working_folder_is_one_it_may_read_and_only_that() {
+    // P-09: the OCR engine is given its language data relative to its working folder.
+    let dir = tempfile::tempdir().unwrap();
+    let folder = std::fs::canonicalize(dir.path()).unwrap().join("תיקייה");
+    std::fs::create_dir(&folder).unwrap();
+    let granted = Policy {
+        read_dirs: vec![folder.clone()],
+        working_dir: Some(folder.clone()),
+        ..Policy::default()
+    };
+    assert_eq!(
+        output_of("/bin/pwd", &["-P"], &granted).trim_end(),
+        folder.to_str().unwrap()
+    );
+    // Fail closed: a working folder outside what it may read is refused before the start.
+    let outside = Policy {
+        working_dir: Some(folder),
+        ..Policy::default()
+    };
+    let err = spawn(Path::new("/bin/pwd"), &[], &outside).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+}

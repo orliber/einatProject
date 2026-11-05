@@ -197,7 +197,7 @@ pub fn spawn(exe: &Path, args: &[&str], policy: &Policy) -> io::Result<std::proc
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .env_clear()
-        .current_dir("/")
+        .current_dir(policy.working_dir.as_deref().unwrap_or(Path::new("/")))
         .spawn()
 }
 

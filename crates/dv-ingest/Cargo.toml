@@ -25,3 +25,5 @@ zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 proptest = "1"
+# Already in the lockfile (dv-core, dv-sandbox, dv-vault): a Hebrew-named install folder.
+tempfile = "3"
