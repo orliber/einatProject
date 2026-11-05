@@ -314,6 +314,8 @@ struct Compiled {
     card: Regex,
     hebrew_numeral: Regex,
     hebrew_year: Regex,
+    hebrew_year_bare: Regex,
+    odd_date: Regex,
 }
 
 static COMPILED: LazyLock<Result<Compiled, regex::Error>> = LazyLock::new(|| {
@@ -380,7 +382,15 @@ static COMPILED: LazyLock<Result<Compiled, regex::Error>> = LazyLock::new(|| {
         // A day in Hebrew letters: "ט\"ו", "כ'", "יג" – two letters, or a geresh / gershayim
         // ("כמו האב" is not a date).
         hebrew_numeral: Regex::new(r#"^(?:[א-ת]{1,2}|[א-ת]{1,2}['"׳״][א-ת]?)$"#)?,
-        hebrew_year: Regex::new(r#"^ה?תש[א-ת"'׳״]{1,4}$"#)?,
+        // Also with the thousands before it ("ה'תשפ\"א").
+        hebrew_year: Regex::new(r#"^(?:ה['׳])?ה?תש[א-ת"'׳״]{1,4}$"#)?,
+        // A year of this century without its gershayim ("תשפא", "תשע"): only right after
+        // "שנת", "שנה\"ל" or "שנת הלימודים" ("שנת תשפא" went out whole).
+        hebrew_year_bare: Regex::new(r"^ה?תש(?:[יכלמנסעפצ][א-ט]?|[א-ט])$")?,
+        // A numeric date typed with a comma, a space, a backslash or a bar between its
+        // parts, the same mark twice, with a four-digit year ("3,9,2020", "3 9 2020" went
+        // out with the day and the month beside the generalized year).
+        odd_date: Regex::new(r"(\d{1,2})([,\\| ])(\d{1,2})([,\\| ])(\d{4})")?,
     })
 });
 
@@ -583,6 +593,31 @@ fn digit_bounded(text: &str, start: usize, end: usize) -> bool {
         && !char_after(text, end).is_some_and(|c| c.is_ascii_digit())
 }
 
+/// The word right before a number names a date ("נולד ב-", "תאריך לידה:", "ביום").
+fn preceded_by_date_word(text: &str, start: usize) -> bool {
+    // Text that cannot be read (never expected) is not shown to be a date.
+    let Some(head) = text.get(..start) else {
+        return false;
+    };
+    let before = head.trim_end_matches(['-', '־', '–', ':', ' ']);
+    let last = before.split_whitespace().last().unwrap_or("");
+    [
+        "ב",
+        "בתאריך",
+        "מתאריך",
+        "תאריך",
+        "לידה",
+        "נולד",
+        "נולדה",
+        "יליד",
+        "ילידת",
+        "מיום",
+        "ביום",
+    ]
+    .iter()
+    .any(|w| norm_eq(last, &crate::text::normalize(w)))
+}
+
 /// The word right before a number makes it an age or a score, not a date ("בגיל 2.5",
 /// "אפגר 9/10"). The second end of a range follows the first ("בני 4.5–6.5").
 fn preceded_by_age_or_score(text: &str, start: usize) -> bool {
@@ -646,6 +681,21 @@ fn push(
 /// "שם" and "של" are words.
 fn hebrew_day(raw: &str) -> bool {
     hebrew_day_value(raw).is_some()
+}
+
+/// The day a Hebrew numeral written with its geresh or gershayim stands for ("י\"ב", "ה'"),
+/// also with "on", "and", "from" or "until" glued to it ("בכ\"ט באלול", "וה' באב": the day
+/// went out beside the hidden month). A bare pair of letters is a word ("גב").
+fn quoted_hebrew_day(raw: &str, numeral: &Regex) -> Option<u32> {
+    if !raw.contains(['\'', '"', '׳', '״']) {
+        return None;
+    }
+    let bare = |s: &str| numeral.is_match(s).then(|| hebrew_day_value(s)).flatten();
+    bare(raw).or_else(|| {
+        raw.strip_prefix(['ב', 'ו', 'ל', 'מ'])
+            .filter(|rest| rest.chars().count() >= 2)
+            .and_then(bare)
+    })
 }
 
 /// The day a Hebrew numeral stands for ("י\"ב" → 12), as [`hebrew_day`] reads it.
@@ -717,11 +767,7 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
     // A day as a word: "12", "12th", or a Hebrew numeral with its geresh or gershayim
     // ("י\"ב", "ה'"); a bare pair of letters is a word ("גב").
     let day = |i: usize| {
-        day_word(norm(i)).or_else(|| {
-            raw(i)
-                .filter(|r| r.contains(['\'', '"', '׳', '״']) && c.hebrew_numeral.is_match(r))
-                .and_then(hebrew_day_value)
-        })
+        day_word(norm(i)).or_else(|| raw(i).and_then(|r| quoted_hebrew_day(r, &c.hebrew_numeral)))
     };
     let full_year = |i: usize| {
         num(i)
@@ -873,8 +919,10 @@ fn month_dates(text: &str, today: Ymd, c: &Compiled, hits: &mut Vec<PatternHit>)
             // Past "in" written apart ("3 ב-אדר 2024"), as for the other months.
             let day_at = prev.filter(|&j| j < i);
             let numeral_before = day_at.and_then(|j| tokens.get(j)).filter(|t| {
-                text.get(t.start..t.end)
-                    .is_none_or(|raw| c.hebrew_numeral.is_match(raw) && hebrew_day(raw))
+                text.get(t.start..t.end).is_none_or(|raw| {
+                    (c.hebrew_numeral.is_match(raw) && hebrew_day(raw))
+                        || quoted_hebrew_day(raw, &c.hebrew_numeral).is_some()
+                })
             });
             // "בתשרי", "ב-תשרי": with "in", the month, not a name ("סיון").
             let in_month = splits.iter().any(|(p, w)| {
@@ -1200,6 +1248,43 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
             );
         }
     }
+    for caps in c.odd_date.captures_iter(text) {
+        let (Some(m), Some(d), Some(s1), Some(mo), Some(s2), Some(y)) = (
+            caps.get(0),
+            caps.get(1),
+            caps.get(2),
+            caps.get(3),
+            caps.get(4),
+            caps.get(5),
+        ) else {
+            continue;
+        };
+        if s1.as_str() != s2.as_str() || !digit_bounded(text, m.start(), m.end()) {
+            continue;
+        }
+        // Parts set apart by spaces only after a word for a date ("נולד ב-3 9 2020",
+        // "תאריך לידה: 12 11 2019"): a row of scores ends in a year too ("ציונים: 10 11 12
+        // 2020" went out as one date).
+        if s1.as_str() == " " && !preceded_by_date_word(text, m.start()) {
+            continue;
+        }
+        let (Ok(d), Ok(mo), Ok(y)) = (
+            d.as_str().parse::<u32>(),
+            mo.as_str().parse::<u32>(),
+            y.as_str().parse::<i32>(),
+        ) else {
+            continue;
+        };
+        if valid_ymd(y, mo, d) {
+            push(
+                &mut hits,
+                m.start(),
+                m.end(),
+                PatternKind::Date,
+                relative_he((y, mo, d), today),
+            );
+        }
+    }
     // Numeric dates first, so "14.9.2025" becomes a date and not a generic number.
     for caps in c.num_date.captures_iter(text) {
         let Some(m) = caps.get(0) else { continue };
@@ -1292,14 +1377,51 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
             replacement,
         );
     }
-    // A Hebrew year on its own: "תשפ\"ה", "בשנת הלימודים התשפ״ו" (not "תשע" = nine).
-    for t in crate::text::tokenize(text) {
+    // A Hebrew year on its own: "תשפ\"ה", "בשנת הלימודים התשפ״ו" (not "תשע" = nine), also
+    // with the thousands written before it ("ה'תשפ\"א" went out whole).
+    let tokens = crate::text::tokenize(text);
+    let year_word = |k: usize| {
+        tokens.get(k).is_some_and(|t| {
+            [
+                "שנת",
+                "בשנת",
+                "לשנת",
+                "משנת",
+                "שנה\"ל",
+                "בשנה\"ל",
+                "לשנה\"ל",
+            ]
+            .iter()
+            .any(|w| norm_eq(w, &t.norm))
+        })
+    };
+    for (k, t) in tokens.iter().enumerate() {
+        // After "שנת", "שנה\"ל" or "שנת הלימודים", a year without its gershayim too.
+        // Only across one plain space ("שנת הלימודים. תשעה חודשים" opens a new sentence),
+        // and never the number words "תשע" and "תשעה" ("בשנת הלימודים תשעה ילדים").
+        let plain_gap = |a: usize, b: usize| {
+            tokens
+                .get(a)
+                .zip(tokens.get(b))
+                .is_some_and(|(x, y)| text.get(x.end..y.start) == Some(" "))
+        };
+        let after_year_word = k.checked_sub(1).is_some_and(|j| {
+            plain_gap(j, k)
+                && (year_word(j)
+                    || (tokens.get(j).is_some_and(|p| norm_eq("הלימודים", &p.norm))
+                        && j.checked_sub(1)
+                            .is_some_and(|i| year_word(i) && plain_gap(i, j))))
+        });
+        let number_word = ["תשע", "תשעה"].iter().any(|w| norm_eq(w, &t.norm));
         // A word that cannot be read (never expected) is hidden as a year.
         let year_like = text.get(t.start..t.end).is_none_or(|raw| {
-            let bare = raw.trim_start_matches(['ב', 'ל', 'מ', 'ו', 'ה']);
-            bare.starts_with("תש")
+            let bare = raw
+                .trim_start_matches(['ב', 'ל', 'מ', 'ו', 'ה'])
+                .trim_start_matches(['\'', '\u{05F3}']);
+            (bare.starts_with("תש")
                 && bare.chars().filter(|c| matches!(c, '"' | '״')).count() == 1
-                && bare.chars().count() <= 6
+                && bare.chars().count() <= 6)
+                || (after_year_word && !number_word && c.hebrew_year_bare.is_match(raw))
         });
         if year_like && !hits.iter().any(|h| h.start < t.end && t.start < h.end) {
             push(

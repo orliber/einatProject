@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { AgeField, parseAge } from "./AgeField";
+import { AgeField, ageError, ageProblem, parseAge } from "./AgeField";
 import { DateField, todayIso } from "./DateField";
 import { useApp } from "../App";
 import { personRoles, roleLabel } from "../i18n/he";
 import { ipc, type IdentityInput, type NameMatch } from "../ipc/client";
 import type { GrammaticalGender } from "../ipc/generated/GrammaticalGender";
+import type { Identity } from "../ipc/generated/Identity";
 import type { Role } from "../ipc/generated/Role";
 import { CloseIcon, Dialog, ErrorLine } from "./ui";
 import "./NewCaseDialog.css";
@@ -29,6 +30,23 @@ export function toIdentityInputs(rows: PersonRow[]): IdentityInput[] {
       value: r.value.trim(),
       aliases: r.aliases.split(",").map((a) => a.trim()).filter(Boolean),
     }));
+}
+
+/** After a save: the rows as typed, with the ids the vault gave the people who had none, so
+ *  the next save changes those people instead of making them again (the vault would drop the
+ *  first and make a second, with a new id and a new tag). A person whose role was changed gets
+ *  a new id from the vault too, so a row whose id the vault no longer lists is matched again.
+ *  Matched by role and name; a row the vault did not keep (an empty name) stays without an id. */
+export function withIds(rows: PersonRow[], saved: Identity[]): PersonRow[] {
+  const kept = new Set(saved.map((s) => s.id));
+  const taken = new Set(rows.map((r) => r.id).filter((id): id is string => id !== null && kept.has(id)));
+  return rows.map((r) => {
+    if (r.id !== null && kept.has(r.id)) return r;
+    const i = saved.find((s) => !taken.has(s.id) && s.role === r.role && s.value === r.value.trim());
+    if (!i) return r;
+    taken.add(i.id);
+    return { ...r, id: i.id };
+  });
 }
 
 /** Rows of people whose names are hidden: role, name, other spellings or nicknames. */
@@ -114,7 +132,7 @@ export function NewCaseDialog({ onClose, onCreated, folderId = null }: { onClose
   const [code, setCode] = useState(`תיק-${nextCode()}`);
   const [gender, setGender] = useState<GrammaticalGender>("male");
   const [years, setYears] = useState("");
-  const [months, setMonths] = useState("0");
+  const [months, setMonths] = useState("");
   const [consent, setConsent] = useState(false);
   const [consentDate, setConsentDate] = useState(todayIso());
   const [consentBy, setConsentBy] = useState("שני ההורים");
@@ -134,6 +152,8 @@ export function NewCaseDialog({ onClose, onCreated, folderId = null }: { onClose
     e.preventDefault();
     setError(null);
     if (!rows[0]?.value.trim()) return setError("צריך את שם הילד/ה, כדי שיוסתר בכל מקום.");
+    const badAge = ageProblem(years, months);
+    if (badAge) return setError(ageError(badAge));
     if (consent && !consentDate) return setError("צריך את תאריך החתימה על ההסכמה (יום.חודש.שנה).");
     if (!consent && !withoutConsent) return setAskConsent(true);
     setBusy(true);
@@ -160,7 +180,7 @@ export function NewCaseDialog({ onClose, onCreated, folderId = null }: { onClose
 
   return (
     <Dialog title="תיק חדש" subtitle={`השמות נשמרים מוצפנים ומוסתרים לפני כל שליחה ל-${ai}.`} onClose={onClose}
-      dirty={!busy && (years !== "" || rows.some((r) => r.value.trim() !== ""))}
+      dirty={!busy && (years !== "" || months !== "" || rows.some((r) => r.value.trim() !== ""))}
       footer={
         <>
           <span className="grow" />

@@ -161,3 +161,26 @@ describe("a name the gate refused", () => {
     expect(onClose).toHaveBeenCalled();
   });
 });
+
+describe("ReviewDialog: 'show this screen before every send'", () => {
+  it("a failure to save it is said on the error line, and the box shows what the core holds (regression)", async () => {
+    mockIPC((cmd) => {
+      if (cmd === "set_review_always") throw { code: "vault", message: "ההגדרה לא נשמרה: הכספת לא זמינה כרגע.", details: [], action: { kind: "dismiss" } };
+      return null;
+    });
+    const app = api({ review_always: false });
+    const user = userEvent.setup();
+    render(
+      <AppContext.Provider value={app}>
+        <ReviewDialog title="t" caseId="c1" prepared={prepared()} reprepare={vi.fn()} onSend={vi.fn()} onClose={vi.fn()} />
+      </AppContext.Provider>,
+    );
+    const box = screen.getByRole("checkbox", { name: "להציג את המסך הזה לפני כל שליחה" });
+    expect(box).not.toBeChecked();
+    await user.click(box);
+    expect(await screen.findByRole("alert")).toHaveTextContent("ההגדרה לא נשמרה: הכספת לא זמינה כרגע.");
+    // Not left ticked as if it were saved: the status (what the core holds) is read again.
+    expect(box).not.toBeChecked();
+    expect(app.refresh).toHaveBeenCalled();
+  });
+});

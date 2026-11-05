@@ -5,9 +5,10 @@ use crate::{Age, GrammaticalGender};
 
 /// An age written in the text that is not the child's age in the case details.
 ///
-/// Reads the clinical notation (`5:4`, `5;4`) and "בן/בת 5 שנים ו-4 חודשים". A clock time
-/// ("בשעה 8:10", "9:05") is not an age, nor is anything over 18 years or 11 months. Up to a
-/// month apart is the same age (the details and the paragraph may be a few weeks apart).
+/// Reads the clinical notation (`5:4`, `5;4`) right after a word for an age ("בן 5:4", "בגיל
+/// 5;4") and "בן/בת 5 שנים ו-4 חודשים". A clock time ("בשעה 8:10", "הגיע ב-8:10", "9:05") is
+/// not an age, nor is anything over 18 years or 11 months. Up to a month apart is the same
+/// age (the details and the paragraph may be a few weeks apart).
 #[must_use]
 pub fn check_age(text: &str, age: Option<Age>) -> Vec<String> {
     let Some(age) = age else {
@@ -27,20 +28,73 @@ pub fn check_age(text: &str, age: Option<Age>) -> Vec<String> {
     out
 }
 
+/// The words an age in clinical notation follows ("בן 5:4", "בגיל 5;4", "גיל כרונולוגי 6:2").
+/// "8:10" on its own is as often a clock time, so without one of them it is not read as an age.
+const AGE_WORDS: &[&str] = &[
+    "בן",
+    "בת",
+    "כבן",
+    "כבת",
+    "גיל",
+    "בגיל",
+    "לגיל",
+    "מגיל",
+    "כגיל",
+    "כרונולוגי",
+];
+
+/// The clitic prefixes a word for an age may carry ("ובן", "שבגיל", "הגיל", "כשבת").
+const CLITICS: &[&str] = &["כש", "וש", "ו", "ש", "ה"];
+
+/// How far back a label is looked for before a colon ("גיל בעת המבחן: 4:11").
+const LABEL_WORDS: usize = 3;
+
+/// Whether `raw` is a word for an age, with or without a clitic prefix.
+fn age_word(raw: &str) -> bool {
+    let w = raw.trim_matches(|c: char| !c.is_alphanumeric());
+    AGE_WORDS.contains(&w)
+        || CLITICS.iter().any(|p| {
+            w.strip_prefix(p)
+                .is_some_and(|rest| AGE_WORDS.contains(&rest))
+        })
+}
+
+/// Whether the figure at `i` follows a word for an age: right before it ("בן 6:2", "ובת 6;2",
+/// "גיל כרונולוגי 6:2"), or, after a label's colon ("גיל האבחון: 6:2", "גיל בעת המבחן: 4:11"),
+/// "גיל"/"בגיל" within the last few words.
+fn after_age_word(words: &[&str], i: usize) -> bool {
+    let Some(prev) = i.checked_sub(1).and_then(|j| words.get(j)) else {
+        return false;
+    };
+    if age_word(prev) {
+        return true;
+    }
+    if !prev.ends_with(':') {
+        return false;
+    }
+    words
+        .get(..i)
+        .unwrap_or_default()
+        .iter()
+        .rev()
+        .take(LABEL_WORDS)
+        .any(|w| {
+            let w = w.trim_matches(|c: char| !c.is_alphanumeric());
+            let w = CLITICS.iter().find_map(|p| w.strip_prefix(p)).unwrap_or(w);
+            matches!(w, "גיל" | "בגיל")
+        })
+}
+
 fn ages_in(text: &str) -> Vec<(u8, u8)> {
     let words: Vec<&str> = text.split_whitespace().collect();
     let mut found = Vec::new();
     for (i, raw) in words.iter().enumerate() {
         let word = raw.trim_matches(|c: char| !c.is_alphanumeric() && c != ':' && c != ';');
         let word = word.trim_start_matches(|c: char| !c.is_ascii_digit());
-        // `5:4` / `5;4`, not right after "שעה" / "בשעה".
+        // `5:4` / `5;4`, only right after a word for an age (so never a clock time).
         if let Some((y, m)) = word.split_once([':', ';']) {
-            let after_hour = i
-                .checked_sub(1)
-                .and_then(|j| words.get(j))
-                .is_some_and(|prev| prev.ends_with("שעה") || prev.ends_with("השעה"));
             let clock = m.len() == 2 && m.starts_with('0');
-            if !(after_hour || clock) {
+            if after_age_word(&words, i) && !clock {
                 if let (Some(y), Some(m)) = (number(y), number(m)) {
                     if y <= 18 && m <= 11 {
                         found.push((y, m));
@@ -296,6 +350,29 @@ mod tests {
     }
 
     #[test]
+    fn a_clock_time_is_not_an_age() {
+        for text in [
+            "הגיע ב-8:10 לגן.",
+            "המפגש החל ב-8:10 והסתיים ב-9:30.",
+            "בשעה 8:10 נכנס לחדר.",
+            "משעה 7:45 בבוקר.",
+            "(8:10) הגיע.",
+            "בגיל הגן הגיע ב-8:10.",
+            "ובשעה 8:10 נכנס לחדר.",
+            "השעה 8:10.",
+        ] {
+            assert!(check_age(text, AGE).is_empty(), "{text}");
+        }
+        // The same figures after a word for an age are one.
+        assert_eq!(
+            check_age("הילד, בן 8:10, הגיע.", AGE),
+            vec!["כתוב גיל 8:10, ובפרטי התיק 5:4".to_owned()]
+        );
+        assert_eq!(check_age("(בגיל 8:10) נבדק.", AGE).len(), 1);
+        assert_eq!(check_age("כבת 6;2.", AGE).len(), 1);
+    }
+
+    #[test]
     fn another_age_is_pointed_out_once() {
         assert_eq!(
             check_age("גלעד, בן 6:2, הופנה. בגיל 6:2 הוא...", AGE),
@@ -304,6 +381,30 @@ mod tests {
         assert_eq!(
             check_age("הילד, בן 4 שנים ו-11 חודשים, שיתף פעולה.", AGE).len(),
             1
+        );
+    }
+
+    #[test]
+    fn an_age_word_with_a_prefix_or_before_a_label_is_still_one() {
+        for text in [
+            "ובן 6:2 הוא מתקשה במעברים.",
+            "ובת 6;2 היא מתקשה במעברים.",
+            "שבגיל 6:2 החל לדבר.",
+            "הגיל 6:2 תואם.",
+            "גיל כרונולוגי 6:2.",
+            "גיל כרונולוגי: 6:2",
+            "גיל האבחון: 6:2",
+            "כשבן 6:2 עבר גן.",
+        ] {
+            assert_eq!(
+                check_age(text, AGE),
+                vec!["כתוב גיל 6:2, ובפרטי התיק 5:4".to_owned()],
+                "{text}"
+            );
+        }
+        assert_eq!(
+            check_age("גיל בעת המבחן: 4:11", AGE),
+            vec!["כתוב גיל 4:11, ובפרטי התיק 5:4".to_owned()]
         );
     }
 

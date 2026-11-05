@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::sync::Once;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 use zeroize::Zeroizing;
 
 use crate::crypto::{hex, Key32};
@@ -21,7 +21,17 @@ pub fn open_encrypted(path: &Path, key: &Key32) -> Result<Connection, VaultError
         // Opening any connection runs SQLite's (and SQLCipher's) initialization to the end.
         drop(Connection::open_in_memory());
     });
-    let conn = Connection::open(path)?;
+    // A path is a path, never a `file:` URI whose query (`mode=memory`, `vfs=`, `key=`…)
+    // would change where or how the database is kept. The bundled SQLCipher is built with
+    // `SQLITE_USE_URI`, which reads every name that starts with `file:` as a URI whatever the
+    // open flags say, so the name is made absolute (it then starts with `/` or a drive) and
+    // the flags leave `SQLITE_OPEN_URI` out as well. ATTACH (the backup target) does the same.
+    let conn = Connection::open_with_flags(
+        plain_path(path)?,
+        OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_CREATE
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
     quiet_sqlcipher_log(&conn)?;
     let key_hex = Zeroizing::new(hex(key.as_bytes()));
     let statement = Zeroizing::new(format!("PRAGMA key = \"x'{}'\";", key_hex.as_str()));
@@ -39,6 +49,16 @@ pub fn open_encrypted(path: &Path, key: &Key32) -> Result<Connection, VaultError
     .map_err(|_| VaultError::WrongSecret)?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     Ok(conn)
+}
+
+/// `path` as SQLite must see it: absolute, so it can never start with `file:` and be read as
+/// a URI (see [`open_encrypted`]). The file need not exist.
+pub(crate) fn plain_path(path: &Path) -> Result<std::path::PathBuf, VaultError> {
+    let absolute = std::path::absolute(path)?;
+    if absolute.to_string_lossy().starts_with("file:") {
+        return Err(VaultError::Corrupt("database path".to_owned()));
+    }
+    Ok(absolute)
 }
 
 /// SQLCipher logs warnings to stderr by default. On Windows, with `cipher_memory_security`,
@@ -368,6 +388,19 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM from_the_future", [], |r| r.get(0))
             .unwrap_or(-1);
         assert_eq!(n, 0, "the newer table is still there");
+    }
+
+    /// A name that SQLite would read as a URI reaches it as an absolute path instead.
+    #[test]
+    fn a_database_name_is_never_a_uri() {
+        let p = plain_path(Path::new("file:x?mode=memory"))
+            .unwrap_or_else(|_| unreachable!())
+            .to_string_lossy()
+            .into_owned();
+        assert!(!p.starts_with("file:"), "{p}");
+        assert!(p.ends_with("file:x?mode=memory"), "{p}");
+        let p = plain_path(Path::new("file::memory:")).unwrap_or_else(|_| unreachable!());
+        assert!(p.is_absolute());
     }
 
     /// The Windows crash (D-038) needs SQLCipher's log to be off before memory security is on.

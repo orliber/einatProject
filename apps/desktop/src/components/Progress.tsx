@@ -31,10 +31,21 @@ const KEEP = 8;
 
 type Store = Partial<Record<string, number[]>>;
 
+/** Only what this module itself writes is read back: a record of numeric lists. Anything
+ *  else in the slot (another version, a damaged value) counts as nothing measured, so a
+ *  wait line never throws over it. */
 function load(): Store {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as Store) : {};
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    const out: Store = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (!Array.isArray(v)) continue;
+      const nums = v.filter((n): n is number => typeof n === "number" && Number.isFinite(n));
+      if (nums.length) out[k] = nums;
+    }
+    return out;
   } catch {
     return {};
   }

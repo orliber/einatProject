@@ -4,11 +4,12 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { AppContext, type AppApi } from "../App";
-import type { ScoreSheet } from "../ipc/client";
+import type { Instrument, ScoreSheet } from "../ipc/client";
+import type { Measure } from "../ipc/generated/Measure";
 import { status } from "../test/fixtures";
 import { instruments } from "../web/scores";
 import { a11yViolations } from "../test/a11y";
-import { bandOf, forgetScoreDrafts, missingOf, pasteCells, scoresDraft, ScoresView, tableOrder } from "./ScoresView";
+import { bandOf, forgetScoreDrafts, missingOf, parse, pasteCells, scoreProblem, scoresDraft, ScoresView, tableOrder } from "./ScoresView";
 
 function api(): AppApi {
   return { status: status(), go: vi.fn(), refresh: vi.fn(async () => undefined), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn(async () => undefined) };
@@ -77,6 +78,31 @@ describe("her approval of the tables (D-098)", () => {
 });
 
 describe("the score helpers", () => {
+  it("reads only a plain number, with a point or a comma, and tells a score off its grid", () => {
+    expect(parse("29,5")).toBe(29.5);
+    expect(parse("29.5")).toBe(29.5);
+    expect(parse("29,")).toBe(29);
+    // A value pasted into one cell keeps its spaces (also a no-break space from a spreadsheet).
+    expect(parse(" 5 ")).toBe(5);
+    expect(parse("12 ")).toBe(12);
+    expect(parse("12\u00a0")).toBe(12);
+    expect(parse("\u202f8")).toBe(8);
+    for (const raw of ["0x10", "1e2", "+5", "-5", "5 5", "1.2.3", "١٢", "", " ", "abc", "Infinity"]) expect(parse(raw), raw).toBeNull();
+    const scaled = wisc().measures.find((m) => m.key === "information") as Measure;
+    const standard = wisc().measures.find((m) => m.key === "fsiq") as Measure;
+    const cars = (instruments.find((i) => i.key === "cars_2") as Instrument).measures[0] as Measure;
+    expect(scoreProblem(scaled, "")).toBeNull();
+    expect(scoreProblem(scaled, "9")).toBeNull();
+    expect(scoreProblem(scaled, "9,0")).toBeNull();
+    expect(scoreProblem(scaled, "9.5")).toBe("grid");
+    expect(scoreProblem(scaled, "25")).toBe("range");
+    expect(scoreProblem(scaled, "x")).toBe("not_number");
+    expect(scoreProblem(standard, "109.5")).toBe("grid");
+    expect(scoreProblem(standard, "110")).toBeNull();
+    expect(scoreProblem(cars, "32.5")).toBeNull();
+    expect(scoreProblem(cars, "32.25")).toBe("grid");
+  });
+
   it("reads a band from the table, and a column from a spreadsheet", () => {
     const si = wisc().measures.find((m) => m.key === "similarities");
     expect(si && bandOf(si, 12)?.label).toBe("ממוצע");
@@ -112,18 +138,45 @@ describe("ScoresView", () => {
     expect(await a11yViolations(document.body)).toEqual([]);
   });
 
-  it("marks a score that cannot be with a line under its field, keeps a comma score, and saves nothing wrong", async () => {
+  it("marks a score that cannot be with a line under its field, reads a comma score, and saves nothing wrong", async () => {
     mount();
     await screen.findByRole("radio", { name: "WISC-V" });
     fireEvent.change(field("אוצר מילים"), { target: { value: "25" } });
-    fireEvent.change(field("מידע"), { target: { value: "9,5" } });
+    fireEvent.change(field("מידע"), { target: { value: "9,0" } });
     expect(field("אוצר מילים")).toHaveAttribute("aria-invalid", "true");
     expect(field("אוצר מילים")).toHaveAccessibleDescription("אפשרי 1–19");
+    // A comma is a decimal point: "9,0" is 9, a possible scaled score.
     expect(field("מידע")).toHaveAttribute("aria-invalid", "false");
     expect(screen.queryByRole("dialog")).toBeNull();
     await userEvent.setup().click(screen.getByRole("button", { name: "שמירה בתיק" }));
-    expect(screen.getByText(/יש ציונים מחוץ לטווח האפשרי/)).toBeInTheDocument();
+    expect(screen.getByText(/יש ציונים שלא אפשריים/)).toBeInTheDocument();
     expect(saved).toEqual([]);
+  });
+
+  it("a score off its scale's grid is said at entry, as the core would refuse it later (regression)", async () => {
+    mount();
+    await screen.findByRole("radio", { name: "WISC-V" });
+    // 9.5 on a scaled score, 109.5 on a standard score: not scores that can exist.
+    fireEvent.change(field("מידע"), { target: { value: "9,5" } });
+    fireEvent.change(field("מנת משכל כללית"), { target: { value: "109.5" } });
+    expect(field("מידע")).toHaveAttribute("aria-invalid", "true");
+    expect(field("מידע")).toHaveAccessibleDescription("ציונים שלמים בלבד");
+    expect(field("מנת משכל כללית")).toHaveAttribute("aria-invalid", "true");
+    expect(field("מנת משכל כללית")).toHaveAccessibleDescription("ציונים שלמים בלבד");
+    // Nothing a number reader would accept by accident is a score either.
+    fireEvent.change(field("מידע"), { target: { value: "1e1" } });
+    expect(field("מידע")).toHaveAccessibleDescription("רק מספר");
+    await userEvent.setup().click(screen.getByRole("button", { name: "שמירה בתיק" }));
+    expect(screen.getByText(/יש ציונים שלא אפשריים/)).toBeInTheDocument();
+    expect(saved).toEqual([]);
+    // CARS-2 is scored in halves: 32,5 is a score there, 32,3 is not.
+    await userEvent.setup().click(screen.getByRole("radio", { name: "CARS-2" }));
+    const carsField = await screen.findByLabelText("ציון כולל", { selector: "input" });
+    fireEvent.change(carsField, { target: { value: "32,5" } });
+    expect(carsField).toHaveAttribute("aria-invalid", "false");
+    fireEvent.change(carsField, { target: { value: "32,3" } });
+    expect(carsField).toHaveAttribute("aria-invalid", "true");
+    expect(carsField).toHaveAccessibleDescription("בקפיצות של חצי נקודה");
   });
 
   it("fills the scores in order from a pasted column, and says what did not fit", async () => {
@@ -144,6 +197,29 @@ describe("ScoresView", () => {
     fireEvent.paste(field("מחיקה"), { clipboardData: { getData: () => "10\n10\n10" } });
     expect(field("מחיקה")).toHaveValue("10");
     expect(screen.getByRole("status")).toHaveTextContent("2 ערכים לא נכנסו");
+  });
+
+  it("ADOS-2: a pasted cut-off with a space counts, and one that is not a number is marked and not saved", async () => {
+    mount();
+    await screen.findByRole("radio", { name: "ADOS-2" });
+    await userEvent.setup().click(screen.getByRole("radio", { name: "ADOS-2" }));
+    const total = await screen.findByLabelText("ציון כולל", { selector: "input" });
+    const cutoff = screen.getByLabelText("נקודת החתך לספקטרום (מהפרוטוקול)");
+    fireEvent.change(total, { target: { value: "10" } });
+    fireEvent.change(cutoff, { target: { value: "8\u00a0" } });
+    expect(cutoff).toHaveAttribute("aria-invalid", "false");
+    expect(within(total.closest("tr") as HTMLElement).getByText("בנקודת החתך או מעליה")).toBeInTheDocument();
+    fireEvent.change(cutoff, { target: { value: "8x" } });
+    expect(cutoff).toHaveAttribute("aria-invalid", "true");
+    expect(cutoff).toHaveAccessibleDescription("רק מספר");
+    expect(within(total.closest("tr") as HTMLElement).queryByText(/נקודת החתך/)).toBeNull();
+    await userEvent.setup().click(screen.getByRole("button", { name: "שמירה בתיק" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/נקודת החתך/);
+    expect(saved).toEqual([]);
+    fireEvent.change(cutoff, { target: { value: " 8" } });
+    await userEvent.setup().click(screen.getByRole("button", { name: "שמירה בתיק" }));
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0]?.cutoff).toBe(8);
   });
 
   it("says in one line what is still missing", async () => {

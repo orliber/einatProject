@@ -50,3 +50,27 @@ describe("WaitLine", () => {
     expect(screen.getByText(/0:01 · בדרך כלל כ-5 שניות/)).toBeInTheDocument();
   });
 });
+
+describe("a timing store that was damaged", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  it("never throws, and falls back to the first guess", () => {
+    // Only durations are kept here; what is read back is still checked, so a damaged value
+    // on this computer cannot take a whole screen down with it on the first wait.
+    for (const raw of ["null", "5", '"text"', "[1,2]", JSON.stringify({ "draft:balanced": 5 }), JSON.stringify({ "draft:balanced": ["a", "b"] }), JSON.stringify({ "draft:balanced": [1, null, "x"] })]) {
+      localStorage.setItem("dv.timing.v1", raw);
+      expect(() => estimateMs("draft", "balanced")).not.toThrow();
+      expect(estimateMs("draft", "balanced")).toBe(30_000);
+      expect(learned("draft", "balanced")).toBe(false);
+    }
+  });
+
+  it("keeps only the numbers of a half-damaged entry, and records over it", () => {
+    localStorage.setItem("dv.timing.v1", JSON.stringify({ "draft:balanced": [4000, "x", 6000] }));
+    expect(estimateMs("draft", "balanced")).toBe(6000);
+    recordDuration("draft", "balanced", 8000);
+    expect(estimateMs("draft", "balanced")).toBe(6000);
+    expect(JSON.parse(localStorage.getItem("dv.timing.v1") ?? "{}")).toEqual({ "draft:balanced": [4000, 6000, 8000] });
+  });
+});

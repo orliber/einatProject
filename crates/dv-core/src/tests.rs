@@ -2266,6 +2266,67 @@ fn a_consent_needs_a_real_past_date_and_a_signer() {
     core.update_case(&case, meta).unwrap();
 }
 
+/// Israel is ahead of UTC, so a consent dated "tomorrow" in UTC terms passes. Compared as
+/// `(y, m, d)` tuples, that allowance broke at the end of every month: a consent signed on
+/// 1 December at 01:00 Israel time (30 November 23:00 UTC) was refused as not yet arrived.
+#[test]
+fn a_consent_dated_tomorrow_passes_across_the_end_of_a_month_and_a_year() {
+    assert!(consent_date_ok((2026, 11, 30), (2026, 11, 30)));
+    assert!(consent_date_ok((2026, 11, 30), (2026, 11, 29)));
+    assert!(consent_date_ok((2026, 12, 1), (2026, 11, 30)), "month end");
+    assert!(consent_date_ok((2027, 1, 1), (2026, 12, 31)), "year end");
+    assert!(consent_date_ok((2028, 3, 1), (2028, 2, 29)), "leap day");
+    assert!(!consent_date_ok((2026, 12, 2), (2026, 11, 30)));
+    assert!(!consent_date_ok((2027, 1, 2), (2026, 12, 31)));
+    assert!(!consent_date_ok((2026, 11, 30), (2026, 11, 28)));
+    assert!(consent_date_ok((2026, 1, 1), (2026, 11, 30)), "the past");
+}
+
+/// The case details hold years and months; the screen keeps months to 0–11, and the core does
+/// not trust the screen.
+#[test]
+fn an_age_with_twelve_months_or_more_is_refused() {
+    let (_dir, mut core, case) = setup(None);
+    let mut meta = core.case_detail(&case).unwrap().meta;
+    for (years, months) in [(5, 12), (5, 14), (3, 255), (25, 0), (200, 0)] {
+        meta.age = Some(Age { years, months });
+        assert!(
+            matches!(
+                core.update_case(&case, meta.clone()),
+                Err(CoreError::Refused(_))
+            ),
+            "{years}:{months}"
+        );
+    }
+    for (years, months) in [(0, 0), (0, 11), (5, 11), (24, 11)] {
+        meta.age = Some(Age { years, months });
+        core.update_case(&case, meta.clone())
+            .unwrap_or_else(|e| panic!("{years}:{months}: {e}"));
+    }
+    meta.age = None;
+    core.update_case(&case, meta.clone()).unwrap();
+    meta.age = Some(Age {
+        years: 4,
+        months: 12,
+    });
+    assert!(core.create_case(meta, Vec::new()).is_err());
+}
+
+/// A lock time stored outside 1–60 minutes (another version, a hand-edited setting) is read
+/// within it: "0" would lock the vault at every call, a huge value would never lock it.
+#[test]
+fn a_stored_lock_time_is_read_within_its_bounds() {
+    let (_dir, mut core, _case) = setup(None);
+    for (stored, want) in [("0", 1), ("99999", 60), ("-5", 10), ("x", 10), ("15", 15)] {
+        core.vault_mut()
+            .unwrap()
+            .set_setting(LOCK_KEY, stored)
+            .unwrap();
+        assert_eq!(core.lock_minutes(), want, "{stored}");
+        assert!(core.status().unlocked, "{stored}: still open");
+    }
+}
+
 /// Her own words come back as she wrote them (D-126). The outgoing filter leaves a
 /// kindergarten's name out and turns a date into relative time; her edited paragraph was
 /// stored that way, so the report lost the name and the date ("בגן \"ניצנים\"" came back
