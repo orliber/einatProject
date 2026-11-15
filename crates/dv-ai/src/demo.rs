@@ -411,8 +411,9 @@ fn verify_locally(text: &str) -> Value {
 
 /// The check of the whole report in demo mode and with no AI: only what code can know. A
 /// sentence said word for word in two sections is a repetition; a number in a closing section
-/// that no body section has is "only in the summary". A contradiction needs reading, so the
-/// demo never reports one.
+/// that no body section has is "only in the summary". A contradiction needs reading, and so
+/// do the supervisor's kinds (D-169: the referral answered, a recommendation for each
+/// difficulty, a term explained), so the demo never reports one of them.
 fn report_check_locally(text: &str) -> Value {
     let body = blocks_with(text, "body_section");
     let closing = blocks_with(text, "closing_section");
@@ -707,6 +708,7 @@ mod tests {
                     "[גננת] סיפרה ש[ילד] מתקשה במעברים. בקבוצה קטנה משתתף יותר. בחצר פחות.".into(),
             }],
             approved_context: vec![],
+            key_scores_tagged: None,
             current_draft: vec![],
             history: vec![],
             instruction_tagged: "נסחי".into(),
@@ -736,15 +738,13 @@ mod tests {
             gender: None,
             sources: vec![],
             approved_context: vec![
-                (
-                    "מסגרת חינוכית".into(),
-                    "[ילד] מתקשה במעברים בגן. בקבוצה קטנה משתתף יותר.".into(),
+                crate::ApprovedSection::plain(
+                    "מסגרת חינוכית",
+                    "[ילד] מתקשה במעברים בגן. בקבוצה קטנה משתתף יותר.",
                 ),
-                (
-                    "תפקוד קוגניטיבי".into(),
-                    "אוצר מילים: 9. מטריצות: 13.".into(),
-                ),
+                crate::ApprovedSection::plain("תפקוד קוגניטיבי", "אוצר מילים: 9. מטריצות: 13."),
             ],
+            key_scores_tagged: None,
             current_draft: vec![],
             history: vec![],
             instruction_tagged: "כתבי טיוטה לסעיף מתוך הסעיפים שאושרו.".into(),
@@ -757,7 +757,7 @@ mod tests {
         let approved: Vec<String> = input
             .approved_context
             .iter()
-            .map(|(_, t)| t.clone())
+            .map(|a| a.text_tagged.clone())
             .collect();
         let reply = parse_derived_section(&respond(&body), &approved).unwrap();
         assert_eq!(reply.paragraphs.len(), 2);
@@ -774,6 +774,7 @@ mod tests {
             title: t.into(),
             text_tagged: x.into(),
             closing,
+            role: None,
         };
         let input = ReportCheckInput {
             sections: vec![

@@ -20,13 +20,14 @@ pub use interpret::{
 };
 pub use report_check::{
     build_report_check_request, parse_report_check, ReportCheckInput, ReportCheckSection,
-    ReportNote, ReportNoteKind, MAX_REPORT_NOTES,
+    ReportNote, ReportNoteKind, ReportRole, MAX_REPORT_NOTES,
 };
 pub use request::{
     build_consult_request, build_research_request, build_section_request, content_text,
-    guide_lines, nonce_from, ConsultInput, ModelConfig, Provider, ResearchInput, SectionInput,
-    TaggedInput, TaggedTurn, ALLOWED_MODELS, ANTHROPIC_MODELS, DEFAULT_MODEL, GEMINI_MODELS,
-    LOCAL_MODELS, LONG_ANSWER_TOKENS, MISTRAL_MODELS, OPENAI_MODELS, ORDER_LINE, POINTS_LINE,
+    guide_lines, nonce_from, ApprovedRole, ApprovedSection, ConsultInput, ModelConfig, Provider,
+    ResearchInput, SectionInput, TaggedInput, TaggedTurn, ALLOWED_MODELS, ANTHROPIC_MODELS,
+    DECISION_LINE, DEFAULT_MODEL, GEMINI_MODELS, KEY_SCORES_LINE, LOCAL_MODELS, LONG_ANSWER_TOKENS,
+    MISTRAL_MODELS, OPENAI_MODELS, ORDER_LINE, POINTS_LINE, REFERRAL_LINE, REFERRAL_LINE_SUMMARY,
     RESEARCH_ALLOWED_DOMAINS, SHORT_ANSWER_TOKENS,
 };
 pub use response::{

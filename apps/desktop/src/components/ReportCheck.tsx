@@ -1,6 +1,9 @@
 // The check of the whole report (G2 stage two, D-097): once every draft is approved, one
 // request with the approved sections only asks where two sections contradict each other,
-// where something is said twice, and where a finding is in the summary but not in the body.
+// where something is said twice, and where a finding is in the summary but not in the body;
+// and, as a supervisor would read it (D-169), whether the summary answers the referral, a
+// difficulty has no recommendation, a recommendation has no finding, the diagnosis differs
+// between sections, or a professional term is left unexplained.
 // Off until she turns it on in settings, where its cost is shown first. The notes are plain
 // text; they only point at a section, and nothing in the report changes.
 import { useState } from "react";
@@ -16,6 +19,11 @@ const KIND: Record<ReportNoteKind, string> = {
   contradiction: "סתירה בין סעיפים",
   repetition: "חזרה",
   summary_only: "מופיע רק בסיכום",
+  referral_unanswered: "סיבת ההפניה בלי מענה בסיכום",
+  no_recommendation: "קושי בלי המלצה",
+  unfounded_recommendation: "המלצה בלי ממצא",
+  diagnosis_mismatch: "האבחנה לא זהה בין הסעיפים",
+  unexplained_term: "מונח מקצועי בלי הסבר",
   other: "הערה",
 };
 
@@ -48,7 +56,7 @@ export function ReportCheckSettings() {
     <section className="card setting" aria-labelledby="s-report-check">
       <h2 id="s-report-check">בדיקת הדוח כולו</h2>
       <Switch id="report-check" label="לאפשר בדיקה של הדוח כולו לפני ההפקה" checked={setting.data?.on ?? false} disabled={setting.data === undefined}
-        hint={`אחרי שכל הסעיפים אושרו, ה-AI קורא את הסעיפים המאושרים בלבד ומצביע על סתירות בין סעיפים, חזרות, וממצא שמופיע בסיכום ולא בגוף הדוח. בקשה אחת לדוח, באותו סינון, בלי לשנות שום מילה. ${cost}.`}
+        hint={`אחרי שכל הסעיפים אושרו, ה-AI קורא את הסעיפים המאושרים בלבד ומצביע על סתירות בין סעיפים, חזרות, וממצא שמופיע בסיכום ולא בגוף הדוח; וגם על סיבת הפניה שהסיכום לא עונה עליה, קושי בלי המלצה, המלצה בלי ממצא, אבחנה שלא זהה בין הסעיפים, ומונח מקצועי בלי הסבר. בקשה אחת לדוח, באותו סינון, בלי לשנות שום מילה. ${cost}.`}
         onChange={(v) => (v ? setAsking(true) : void change(false))} />
       {asking && (
         <div className="note-warn stack" role="group" aria-label="לפני ההפעלה" style={{ gap: 8 }}>
@@ -120,7 +128,7 @@ export function ReportCheckItem({ api, onOpen }: { api: CaseApi; onOpen: (key: s
         {result && !busy && (
           <>
             {result.notes.length === 0 ? (
-              <span>לא נמצאו סתירות בין סעיפים, חזרות או ממצא שמופיע רק בסיכום.</span>
+              <span>לא נמצאו הערות: אין סתירות בין סעיפים, חזרות, ממצא שמופיע רק בסיכום, או פער בין סיבת ההפניה, הממצאים, האבחנה וההמלצות.</span>
             ) : (
               <span>{result.notes.length === 1 ? "הערה אחת לבדיקה:" : `${result.notes.length} הערות לבדיקה:`}</span>
             )}

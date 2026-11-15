@@ -1,8 +1,12 @@
 //! The check of the whole report (G2, stage two; AI-5): once every section is approved, one
 //! request with the approved sections only (always through the gate) asks where two sections
 //! contradict each other, where the same thing is said twice, and where a finding is in the
-//! summary but not in the body. The model only points: nothing here rewrites, approves or
-//! removes a word, and the scores are checked on the computer, not by the model.
+//! summary but not in the body; and, as a supervisor would read it (D-169), whether the
+//! summary answers the referral, whether each difficulty has a recommendation and each
+//! recommendation a finding, whether the diagnosis is the same wherever it is written, and
+//! whether a professional term is left unexplained. The model only points: nothing here
+//! rewrites, approves or removes a word, and the scores are checked on the computer, not by
+//! the model.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -11,6 +15,44 @@ use ts_rs::TS;
 use crate::prompts::REPORT_CHECK_RULES;
 use crate::request::{base_body, data_block, set, set_schema, ModelConfig, LONG_ANSWER_TOKENS};
 use crate::response::{text_of, AiError};
+
+/// The part a section has in the report, for the notes that are about one (D-169): fixed
+/// English words from the section's key, never text of the case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportRole {
+    Referral,
+    Summary,
+    Recommendations,
+    Diagnoses,
+    Dsm,
+}
+
+impl ReportRole {
+    /// The role of a section by its key in the templates; `None` for any other section.
+    #[must_use]
+    pub fn of_key(section_key: &str) -> Option<Self> {
+        Some(match section_key {
+            "referral" => Self::Referral,
+            "summary" => Self::Summary,
+            "recommendations" => Self::Recommendations,
+            "diagnoses" => Self::Diagnoses,
+            "dsm" => Self::Dsm,
+            _ => return None,
+        })
+    }
+
+    /// The word that goes out in the block's `role` attribute.
+    #[must_use]
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Referral => "referral",
+            Self::Summary => "summary",
+            Self::Recommendations => "recommendations",
+            Self::Diagnoses => "diagnoses",
+            Self::Dsm => "dsm",
+        }
+    }
+}
 
 /// One approved section as it goes out. Every text is already filtered (tagged).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,6 +63,8 @@ pub struct ReportCheckSection {
     pub text_tagged: String,
     /// A section that sums up the body (summary, diagnoses, recommendations, DSM).
     pub closing: bool,
+    /// The referral, the summary, the recommendations, the diagnoses or the DSM section.
+    pub role: Option<ReportRole>,
 }
 
 /// What one whole-report check is made of, in the order of the report.
@@ -39,7 +83,17 @@ pub enum ReportNoteKind {
     Repetition,
     /// A finding in a closing section with no ground in the body.
     SummaryOnly,
-    /// A kind the answer named that is not one of the three: still shown, never dropped.
+    /// What the referral asked is not answered in the summary (D-169).
+    ReferralUnanswered,
+    /// A difficulty described in the body with no recommendation.
+    NoRecommendation,
+    /// A recommendation with no finding behind it in the body.
+    UnfoundedRecommendation,
+    /// The DSM section, the diagnoses and the summary do not name the same diagnosis.
+    DiagnosisMismatch,
+    /// A professional term a parent would not know, never explained.
+    UnexplainedTerm,
+    /// A kind the answer named that is not one of these: still shown, never dropped.
     Other,
 }
 
@@ -65,7 +119,7 @@ const REPORT_CHECK_SCHEMA: &str = r#"{
       "items": {
         "type": "object",
         "properties": {
-          "kind": {"type": "string", "enum": ["contradiction", "repetition", "summary_only"]},
+          "kind": {"type": "string", "enum": ["contradiction", "repetition", "summary_only", "referral_unanswered", "no_recommendation", "unfounded_recommendation", "diagnosis_mismatch", "unexplained_term"]},
           "sections": {"type": "array", "items": {"type": "string"}},
           "note": {"type": "string"}
         },
@@ -95,9 +149,16 @@ pub fn build_report_check_request(
         } else {
             "body_section"
         };
+        let role = s
+            .role
+            .map(|r| format!(" role=\"{}\"", r.word()))
+            .unwrap_or_default();
         parts.push(data_block(
             nonce,
-            &format!("{attr}=\"{id}\" title=\"{}\"", s.title.replace('"', "'")),
+            &format!(
+                "{attr}=\"{id}\"{role} title=\"{}\"",
+                s.title.replace('"', "'")
+            ),
             &s.text_tagged,
         ));
         ids.push(id);
@@ -148,6 +209,11 @@ pub fn parse_report_check(response: &Value, ids: &[String]) -> Result<Vec<Report
                 "contradiction" => ReportNoteKind::Contradiction,
                 "repetition" => ReportNoteKind::Repetition,
                 "summary_only" => ReportNoteKind::SummaryOnly,
+                "referral_unanswered" => ReportNoteKind::ReferralUnanswered,
+                "no_recommendation" => ReportNoteKind::NoRecommendation,
+                "unfounded_recommendation" => ReportNoteKind::UnfoundedRecommendation,
+                "diagnosis_mismatch" => ReportNoteKind::DiagnosisMismatch,
+                "unexplained_term" => ReportNoteKind::UnexplainedTerm,
                 _ => ReportNoteKind::Other,
             };
             let mut sections: Vec<String> = Vec::new();
@@ -188,11 +254,13 @@ mod tests {
                     title: "רקע".to_owned(),
                     text_tagged: "[ילד] נולד בשבוע 40.".to_owned(),
                     closing: false,
+                    role: None,
                 },
                 ReportCheckSection {
                     title: "סיכום".to_owned(),
                     text_tagged: "[ילד] מתקשה במעברים.".to_owned(),
                     closing: true,
+                    role: ReportRole::of_key("summary"),
                 },
             ],
         }
@@ -204,10 +272,84 @@ mod tests {
         assert_eq!(sent, ids(&["R1", "R2"]));
         let text = body["messages"][0]["content"].as_str().unwrap();
         assert!(text.contains("body_section=\"R1\" title=\"רקע\""));
-        assert!(text.contains("closing_section=\"R2\" title=\"סיכום\""));
+        assert!(text.contains("closing_section=\"R2\" role=\"summary\" title=\"סיכום\""));
         assert!(text.find("נולד בשבוע").unwrap() < text.find("מתקשה במעברים").unwrap());
         let schema = body["output_config"]["format"]["schema"].to_string();
         assert!(!schema.contains("ילד") && !schema.contains("R1") && !schema.contains("רקע"));
+    }
+
+    /// D-169: each section the supervisor's notes are about says which it is, in a fixed
+    /// English word; every kind in the rules is in the schema, is read back as itself, and
+    /// has its word in the generated type.
+    #[test]
+    fn the_roles_are_fixed_words_and_every_kind_is_in_the_rules_the_schema_and_the_parser() {
+        for (key, word) in [
+            ("referral", "referral"),
+            ("summary", "summary"),
+            ("recommendations", "recommendations"),
+            ("diagnoses", "diagnoses"),
+            ("dsm", "dsm"),
+        ] {
+            assert_eq!(ReportRole::of_key(key).map(ReportRole::word), Some(word));
+            assert!(
+                REPORT_CHECK_RULES.contains(&format!("role={word}")),
+                "{word}"
+            );
+        }
+        for key in ["background", "cognitive", "signature", "", "סיכום"] {
+            assert_eq!(ReportRole::of_key(key), None, "{key}");
+        }
+        let sections = [
+            "referral",
+            "cognitive",
+            "dsm",
+            "summary",
+            "diagnoses",
+            "recommendations",
+        ]
+        .iter()
+        .map(|key| ReportCheckSection {
+            title: String::new(),
+            text_tagged: String::new(),
+            closing: !matches!(*key, "referral" | "cognitive"),
+            role: ReportRole::of_key(key),
+        })
+        .collect();
+        let (body, _) = build_report_check_request(
+            &ModelConfig::default(),
+            &ReportCheckInput { sections },
+            "n",
+        );
+        let text = body["messages"][0]["content"].as_str().unwrap();
+        assert!(text.contains("body_section=\"R1\" role=\"referral\" title"));
+        assert!(
+            text.contains("body_section=\"R2\" title"),
+            "no role for a body section"
+        );
+        assert!(text.contains("closing_section=\"R3\" role=\"dsm\""));
+        assert!(text.contains("closing_section=\"R6\" role=\"recommendations\""));
+
+        let kinds = body["output_config"]["format"]["schema"]["properties"]["notes"]["items"]
+            ["properties"]["kind"]["enum"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(kinds.len(), 8);
+        let notes: Vec<Value> = kinds
+            .iter()
+            .map(|k| json!({"kind": k, "sections": ["R1"], "note": "הערה"}))
+            .collect();
+        let out = parse_report_check(&answer(&json!(notes)), &ids(&["R1"])).unwrap();
+        assert_eq!(out.len(), 8);
+        for (note, kind) in out.iter().zip(&kinds) {
+            let kind = kind.as_str().unwrap();
+            assert_ne!(note.kind, ReportNoteKind::Other, "{kind}");
+            assert_eq!(serde_json::to_value(note.kind).unwrap(), json!(kind));
+            assert!(REPORT_CHECK_RULES.contains(&format!("- {kind}:")), "{kind}");
+        }
+        // Still only pointing, and never a judge of scores.
+        assert!(REPORT_CHECK_RULES.contains("אל תשכתב/י"));
+        assert!(REPORT_CHECK_RULES.contains("אל תפרש/י ציונים"));
     }
 
     #[test]
