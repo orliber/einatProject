@@ -668,10 +668,18 @@ impl Core {
                 texts.push(inp.content);
             }
         }
-        let mut out = HashMap::new();
-        for t in texts {
-            let h = self.name_hints(case_id, &t);
-            if !h.is_empty() {
+        let mut out: HashMap<String, Vec<NameHint>> = HashMap::new();
+        for mut t in texts {
+            // The same text twice (a draft that is also in the conversation) is read once.
+            let h = if out.contains_key(&t) {
+                Vec::new()
+            } else {
+                self.name_hints(case_id, &t)
+            };
+            if h.is_empty() {
+                // A copy not kept as a key is wiped now, like the keys when the hints go.
+                zeroize::Zeroize::zeroize(&mut t);
+            } else {
                 out.insert(t, h);
             }
         }

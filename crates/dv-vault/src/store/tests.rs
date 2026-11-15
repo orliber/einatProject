@@ -343,3 +343,59 @@ fn every_stored_blob_is_a_sealed_envelope() {
     }
     assert!(checked >= 20, "only {checked} cells checked");
 }
+
+/// VAULT-7: a new wording of an approved paragraph that she edits is approved by the edit, and
+/// takes the old wording's place as when she approves it: one approved wording, not two.
+#[test]
+fn editing_a_waiting_rewording_retires_the_paragraph_it_replaces() {
+    use dv_domain::DraftStatus;
+    let (_dir, mut vault) = new_vault();
+    let (case, _) = case_with_input(&mut vault, "TEST-R");
+    let old = vault
+        .add_draft(&case, "s", "ניסוח ראשון בדוי.", dv_domain::Author::Ai, &[])
+        .unwrap();
+    vault
+        .set_draft_status(&case, &old.id, DraftStatus::Approved)
+        .unwrap();
+    assert!(vault
+        .propose_rewording(&case, &old.id, "ניסוח שני בדוי.", &[])
+        .unwrap());
+    let new = vault
+        .drafts(&case, "s")
+        .unwrap()
+        .into_iter()
+        .find(|d| d.replaces.as_deref() == Some(old.id.as_str()))
+        .unwrap();
+    assert_eq!(new.status, DraftStatus::Proposed);
+
+    vault
+        .edit_draft(&case, &new.id, "ניסוח שני בדוי, בעריכה שלה.")
+        .unwrap();
+
+    let drafts = vault.drafts(&case, "s").unwrap();
+    let status = |id: &str| drafts.iter().find(|d| d.id == id).map(|d| d.status);
+    assert_eq!(status(&new.id), Some(DraftStatus::Approved));
+    assert_eq!(status(&old.id), Some(DraftStatus::Superseded));
+    let approved: Vec<&str> = drafts
+        .iter()
+        .filter(|d| d.status == DraftStatus::Approved)
+        .map(|d| d.text_tagged.as_str())
+        .collect();
+    assert_eq!(approved, ["ניסוח שני בדוי, בעריכה שלה."]);
+
+    // Editing a paragraph that replaces nothing leaves the others as they were.
+    let other = vault
+        .add_draft(&case, "s", "פסקה אחרת בדויה.", dv_domain::Author::Ai, &[])
+        .unwrap();
+    vault
+        .edit_draft(&case, &other.id, "פסקה אחרת, ערוכה.")
+        .unwrap();
+    let drafts = vault.drafts(&case, "s").unwrap();
+    assert_eq!(
+        drafts
+            .iter()
+            .filter(|d| d.status == DraftStatus::Approved)
+            .count(),
+        2
+    );
+}

@@ -79,11 +79,20 @@ pub(crate) struct InterpretationCheck {
 
 impl InterpretationCheck {
     pub(crate) fn new(v: &Vault, sheets: &[dv_domain::ScoreSheet]) -> Result<Self, CoreError> {
+        // Her style document is opened only when there is a score to check against.
+        if sheets.iter().all(|s| dv_domain::sheet_cases(s).is_empty()) {
+            return Ok(Self::with(&[], sheets));
+        }
+        Ok(Self::with(&local_style(v)?.interpretations, sheets))
+    }
+
+    /// With her interpretations already read ([`LoadedStyle`]).
+    pub(crate) fn with(all: &[Interpretation], sheets: &[dv_domain::ScoreSheet]) -> Self {
         let scores: Vec<dv_domain::ScoreCases> =
             sheets.iter().flat_map(dv_domain::sheet_cases).collect();
         let mut misfits = Vec::new();
         if !scores.is_empty() {
-            for i in local_style(v)?.interpretations {
+            for i in all {
                 if !i.approved || !i.enabled || i.case == dv_domain::GENERAL_CASE {
                     continue;
                 }
@@ -96,14 +105,14 @@ impl InterpretationCheck {
                 if !score.cases.contains(&i.case) {
                     misfits.push((
                         ngrams(&i.text, USED_NGRAM),
-                        i.case,
+                        i.case.clone(),
                         score.label.clone(),
                         score.band.clone(),
                     ));
                 }
             }
         }
-        Ok(Self { misfits })
+        Self { misfits }
     }
 
     /// A note for each interpretation in `text` that was written for another case.

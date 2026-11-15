@@ -28,6 +28,7 @@ mod large_case;
 mod layers;
 mod library;
 mod masks;
+mod name_hints;
 mod newer_version;
 mod notes;
 mod off_lock;

@@ -15,9 +15,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::scores::{
-    instruments, Instrument, Measure, ScoreScale, ScoreSheet, TaggedScore, TOTALS,
-};
+use crate::scores::{table, Instrument, Measure, ScoreScale, ScoreSheet, TaggedScore, TOTALS};
 
 /// A gap of this many standard points between two indexes of one test is a pattern.
 pub const INDEX_GAP: f64 = 15.0;
@@ -79,7 +77,7 @@ pub fn pattern_keys() -> Vec<String> {
     .into_iter()
     .map(str::to_owned)
     .collect();
-    for i in instruments() {
+    for i in table() {
         for m in i.measures.iter().filter(|m| is_index(m)) {
             out.push(format!("lowest_index:{}", m.key));
             out.push(format!("highest_index:{}", m.key));
@@ -114,9 +112,9 @@ pub fn pattern_label(key: &str) -> Option<String> {
         "highest_index" => "המדד הגבוה ביותר",
         _ => return None,
     };
-    let name = instruments()
-        .into_iter()
-        .flat_map(|i| i.measures)
+    let name = &table()
+        .iter()
+        .flat_map(|i| &i.measures)
         .find(|m| m.key == measure && is_index(m))?
         .name_he;
     Some(format!("{word}: {name}"))
@@ -128,7 +126,7 @@ type Score<'a> = (&'a str, &'a str, f64);
 /// The patterns in a set of scores, in a fixed order, each once. Scores of a measure that is
 /// not in the fixed tables are left out; the same measure twice keeps the first.
 fn patterns_of(scores: &[Score<'_>]) -> Vec<ScorePattern> {
-    let all = instruments();
+    let all = table();
     let mut by_instrument: BTreeMap<&str, Vec<(&Measure, f64)>> = BTreeMap::new();
     for (inst, measure, value) in scores {
         let Some(m) = all

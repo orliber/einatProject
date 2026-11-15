@@ -246,9 +246,24 @@ fn m(key: &str, name_he: &str, abbr: &str, group: &str, scale: ScoreScale) -> Me
 
 const STANDARD_NOTE: &str = "ציוני המדדים הם ציוני תקן (ממוצע 100, סטיית תקן 15); ציוני תת-המבחנים הם ציונים מותאמים (ממוצע 10, סטיית תקן 3).";
 
-/// The instruments the psychologist uses (docs/REPORT_STRUCTURE.md).
+/// The instruments the psychologist uses (docs/REPORT_STRUCTURE.md): a copy of the fixed
+/// table, for callers outside this crate.
 #[must_use]
 pub fn instruments() -> Vec<Instrument> {
+    table().to_vec()
+}
+
+/// The fixed table, built once (DOMAIN-12): the checks of a case view borrow it per sheet
+/// and per paragraph instead of building it again each time. Builds nothing that reads
+/// [`BAND_LABELS`], which is made from this table.
+static TABLE: std::sync::LazyLock<Vec<Instrument>> = std::sync::LazyLock::new(build_table);
+
+/// The fixed table, borrowed.
+pub(crate) fn table() -> &'static [Instrument] {
+    &TABLE
+}
+
+fn build_table() -> Vec<Instrument> {
     use ScoreScale::{Cars, Comparison, RawCutoff, Scaled, Standard, TAbility, TConcern, VScale};
     let mut cbcl: Vec<Measure> = [
         ("emotionally_reactive", "תגובתיות רגשית"),
@@ -688,11 +703,11 @@ fn range_of(measure: &Measure, sheet: &ScoreSheet, value: f64) -> String {
 /// The sheet's instrument and each entry with its measure, checked once for both the text sent
 /// to Claude and the Word table (so the two can never disagree).
 /// An instrument and the sheet's entries, each with its measure.
-type Checked<'a> = (Instrument, Vec<(Measure, &'a ScoreEntry)>);
+type Checked<'a> = (&'static Instrument, Vec<(&'static Measure, &'a ScoreEntry)>);
 
 fn checked(sheet: &ScoreSheet) -> Result<Checked<'_>, String> {
-    let inst = instruments()
-        .into_iter()
+    let inst = table()
+        .iter()
         .find(|i| i.key == sheet.instrument)
         .ok_or("כלי לא מוכר")?;
     let mut out = Vec::new();
@@ -727,7 +742,7 @@ fn checked(sheet: &ScoreSheet) -> Result<Checked<'_>, String> {
                 }
             ));
         }
-        out.push((measure.clone(), e));
+        out.push((measure, e));
     }
     Ok((inst, out))
 }
@@ -738,9 +753,7 @@ fn checked(sheet: &ScoreSheet) -> Result<Checked<'_>, String> {
 /// cases. An entry with no measure is left out; an unknown instrument is `None`. The gate for
 /// the text, the table and the export stays [`checked`].
 fn entries_of(sheet: &ScoreSheet) -> Option<Checked<'_>> {
-    let inst = instruments()
-        .into_iter()
-        .find(|i| i.key == sheet.instrument)?;
+    let inst = table().iter().find(|i| i.key == sheet.instrument)?;
     let entries = sheet
         .entries
         .iter()
@@ -748,7 +761,7 @@ fn entries_of(sheet: &ScoreSheet) -> Option<Checked<'_>> {
             inst.measures
                 .iter()
                 .find(|x| x.key == e.measure)
-                .map(|m| (m.clone(), e))
+                .map(|m| (m, e))
         })
         .collect();
     Some((inst, entries))
@@ -1095,7 +1108,7 @@ fn is_total(measure: &Measure) -> bool {
 /// The sheet's relative strengths and weaknesses (D-165): exactly the computation of
 /// [`sheet_cases`] (three subtests or more, [`RELATIVE_POINTS`] from their own mean). `None`
 /// when there is none.
-fn relative_line(sheet: &ScoreSheet, entries: &[(Measure, &ScoreEntry)]) -> Option<String> {
+fn relative_line(sheet: &ScoreSheet, entries: &[(&Measure, &ScoreEntry)]) -> Option<String> {
     let cases = sheet_cases(sheet);
     let (mut strong, mut weak) = (Vec::new(), Vec::new());
     let mut groups: Vec<&str> = Vec::new();
@@ -1141,7 +1154,7 @@ fn relative_line(sheet: &ScoreSheet, entries: &[(Measure, &ScoreEntry)]) -> Opti
 /// The questionnaire scales (higher = more concern) whose score falls in a band of its own
 /// table that is not the typical one (level 1 and up), with that band (D-165). Ability scales
 /// are left out: a low band there is not "elevated", and the score's line already says it.
-fn elevated_line(entries: &[(Measure, &ScoreEntry)]) -> Option<String> {
+fn elevated_line(entries: &[(&Measure, &ScoreEntry)]) -> Option<String> {
     let elevated: Vec<String> = entries
         .iter()
         .filter(|(m, _)| m.scale == ScoreScale::TConcern)
@@ -1358,7 +1371,7 @@ pub enum ScoreNoteKind {
 /// [`check_scores`], each line with its kind.
 #[must_use]
 pub fn check_scores_tagged(text: &str, sheets: &[ScoreSheet]) -> Vec<(ScoreNoteKind, String)> {
-    let mut entered: Vec<(Measure, Known)> = Vec::new();
+    let mut entered: Vec<(&Measure, Known)> = Vec::new();
     for sheet in sheets {
         // Not `checked`: one value an older version saved off the grid must not silence the
         // check of every other score in the sheet.
@@ -1367,18 +1380,18 @@ pub fn check_scores_tagged(text: &str, sheets: &[ScoreSheet]) -> Vec<(ScoreNoteK
         };
         for (measure, e) in entries {
             entered.push((
-                measure.clone(),
+                measure,
                 Known {
-                    label: measure_label(&measure),
+                    label: measure_label(measure),
                     value: fmt_value(e.value),
-                    percentile: percentile(&measure, e.value),
-                    band: classify(&measure, e.value).map(|b| b.label.clone()),
+                    percentile: percentile(measure, e.value),
+                    band: classify(measure, e.value).map(|b| b.label.clone()),
                 },
             ));
         }
     }
     // Tests whose sheet has a cut-off (ADOS-2), with it.
-    let cutoffs: Vec<(Instrument, Vec<Measure>, f64)> = sheets
+    let cutoffs: Vec<(&Instrument, Vec<&Measure>, f64)> = sheets
         .iter()
         .filter_map(|s| {
             let c = s.cutoff?;
@@ -1387,13 +1400,13 @@ pub fn check_scores_tagged(text: &str, sheets: &[ScoreSheet]) -> Vec<(ScoreNoteK
         })
         .collect();
     // The measures of the sheets without a cut-off: "ציון כולל" is CARS-2's and CBCL's too.
-    let others: Vec<Measure> = sheets
+    let others: Vec<&Measure> = sheets
         .iter()
         .filter(|s| s.cutoff.is_none())
         .filter_map(entries_of)
         .flat_map(|(_, e)| e.into_iter().map(|(m, _)| m))
         .collect();
-    let all = instruments();
+    let all = table();
     let mut out: Vec<(ScoreNoteKind, String)> = Vec::new();
     let mut push = |kind: ScoreNoteKind, line: String| {
         if !out.iter().any(|(_, l)| l == &line) {
@@ -1404,20 +1417,20 @@ pub fn check_scores_tagged(text: &str, sheets: &[ScoreSheet]) -> Vec<(ScoreNoteK
         .split(['\n', '!', '?', ';'])
         .flat_map(|s| s.split(". "))
     {
-        let named: Vec<&(Measure, Known)> = entered
+        let named: Vec<&(&Measure, Known)> = entered
             .iter()
             .filter(|(m, _)| mentions(sentence, m))
             .collect();
         // A number of another measure named in the same sentence, by its short name too, is
         // that measure's ("בין מוטורי (97) לבין שפה (68)").
-        let also: Vec<&(Measure, Known)> = entered
+        let also: Vec<&(&Measure, Known)> = entered
             .iter()
             .filter(|(m, _)| mentioned_at_all(sentence, m))
             .collect();
         // D-165: the sharper checks, each only where the sentence is about one thing.
         // The cut-off written in a sentence about a test whose sheet has one.
         let cut_written = cutoff_written(sentence);
-        let cut_entered = cutoff_about(sentence, &cutoffs, &others, &all);
+        let cut_entered = cutoff_about(sentence, &cutoffs, &others, all);
         if let (Some(n), Some((name, c))) = (&cut_written, &cut_entered) {
             if !same_number(n, &fmt_value(*c)) {
                 push(
@@ -1435,11 +1448,11 @@ pub fn check_scores_tagged(text: &str, sheets: &[ScoreSheet]) -> Vec<(ScoreNoteK
         // another): its percentile and its range, read in that clause only.
         let mut percentiles_checked: Vec<String> = Vec::new();
         for (clause, next) in clauses(sentence) {
-            let named_here: Vec<&(Measure, Known)> = entered
+            let named_here: Vec<&(&Measure, Known)> = entered
                 .iter()
                 .filter(|(m, _)| mentions(clause, m))
                 .collect();
-            let also_here: Vec<&(Measure, Known)> = entered
+            let also_here: Vec<&(&Measure, Known)> = entered
                 .iter()
                 .filter(|(m, _)| mentioned_at_all(clause, m))
                 .collect();
@@ -1512,9 +1525,9 @@ pub fn check_scores_tagged(text: &str, sheets: &[ScoreSheet]) -> Vec<(ScoreNoteK
 
 /// The one measure a sentence or clause is about, named plainly and no other named at all.
 fn sole<'a>(
-    named: &[&'a (Measure, Known)],
-    also: &[&'a (Measure, Known)],
-) -> Option<&'a (Measure, Known)> {
+    named: &[&'a (&'static Measure, Known)],
+    also: &[&'a (&'static Measure, Known)],
+) -> Option<&'a (&'static Measure, Known)> {
     match (named, also) {
         ([n], [a]) if n.0.key == a.0.key && n.1.label == a.1.label => Some(*n),
         _ => None,
@@ -1713,8 +1726,8 @@ fn instrument_named(flat: &str, inst: &Instrument) -> bool {
 /// ("הציון הכולל" is CARS-2's too). `None` otherwise, or for two with different cut-offs.
 fn cutoff_about(
     sentence: &str,
-    cutoffs: &[(Instrument, Vec<Measure>, f64)],
-    others: &[Measure],
+    cutoffs: &[(&Instrument, Vec<&Measure>, f64)],
+    others: &[&Measure],
     all: &[Instrument],
 ) -> Option<(String, f64)> {
     let flat = flat_upper(sentence);
@@ -2116,8 +2129,8 @@ fn score_number_spans(sentence: &str) -> Vec<(usize, usize, f64)> {
 /// only; the text is never sent for this.
 #[must_use]
 pub fn find_score_mentions(text: &str) -> Vec<ScoreMention> {
-    let all = instruments();
-    let candidates = named_instruments(text, &all);
+    let all = table();
+    let candidates = named_instruments(text, all);
     let mut found: Vec<(ScoreMention, ScoreScale)> = Vec::new();
     for (from, to) in sentence_spans(text) {
         let Some(sentence) = text.get(from..to) else {
@@ -2273,11 +2286,11 @@ pub fn score_tag(m: &ScoreMention) -> String {
 
 /// Every range label of the fixed tables, once.
 static BAND_LABELS: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
-    let mut out: Vec<String> = instruments()
-        .into_iter()
-        .flat_map(|i| i.measures)
-        .flat_map(|m| m.bands)
-        .map(|b| b.label)
+    let mut out: Vec<String> = table()
+        .iter()
+        .flat_map(|i| &i.measures)
+        .flat_map(|m| &m.bands)
+        .map(|b| b.label.clone())
         .collect();
     out.sort();
     out.dedup();
@@ -2390,10 +2403,10 @@ pub fn find_tagged_scores(text: &str) -> Vec<TaggedScore> {
 /// relative strength or weakness (for subtests), or the measure in general.
 #[must_use]
 pub fn interpretation_cases(instrument: &str, measure: &str) -> Vec<String> {
-    let Some(m) = instruments()
-        .into_iter()
+    let Some(m) = table()
+        .iter()
         .find(|i| i.key == instrument)
-        .and_then(|i| i.measures.into_iter().find(|m| m.key == measure))
+        .and_then(|i| i.measures.iter().find(|m| m.key == measure))
     else {
         return Vec::new();
     };
@@ -2498,7 +2511,7 @@ fn percentile_near(text: &str, start: usize, end: usize) -> bool {
 #[must_use]
 #[allow(clippy::cast_precision_loss)]
 pub fn sheet_habits<'a>(reports: impl IntoIterator<Item = &'a str>) -> SheetHabits {
-    let all = instruments();
+    let all = table();
     let scale = |inst: &str, measure: &str| {
         all.iter()
             .find(|i| i.key == inst)
@@ -2543,6 +2556,17 @@ pub fn sheet_habits<'a>(reports: impl IntoIterator<Item = &'a str>) -> SheetHabi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// DOMAIN-12: the table is built once and borrowed; the public copy is the same table,
+    /// and the range labels made from it do not build it again in a cycle.
+    #[test]
+    fn the_fixed_table_is_built_once() {
+        assert!(std::ptr::eq(table(), table()));
+        assert_eq!(instruments(), table());
+        assert!(BAND_LABELS
+            .iter()
+            .any(|l| l == &table()[0].measures[0].bands[0].label));
+    }
 
     #[test]
     fn parents_groups_come_from_the_fixed_tables() {
