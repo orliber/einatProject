@@ -637,13 +637,13 @@ fn build_section(
 /// same texts give the same query, so the same items go out turn after turn.
 fn style_query(
     sources: &[dv_ai::TaggedInput],
-    approved: &[(String, String)],
+    approved: &[dv_ai::ApprovedSection],
     instruction: &str,
 ) -> String {
     sources
         .iter()
         .map(|s| s.content_tagged.as_str())
-        .chain(approved.iter().map(|(_, t)| t.as_str()))
+        .chain(approved.iter().map(|a| a.text_tagged.as_str()))
         .chain([instruction])
         .collect::<Vec<_>>()
         .join("\n")
