@@ -14,8 +14,14 @@ pub fn cp1255(b: u8) -> Option<char> {
         0xD4..=0xD8 => char::from_u32(0x05F0 + u32::from(b - 0xD4))?,
         0x80 => '€',
         0x82 => '‚',
+        0x83 => 'ƒ',
         0x84 => '„',
         0x85 => '…',
+        0x86 => '†',
+        0x87 => '‡',
+        0x88 => 'ˆ',
+        0x89 => '‰',
+        0x8B => '‹',
         0x91 => '‘',
         0x92 => '’',
         0x93 => '“',
@@ -23,6 +29,9 @@ pub fn cp1255(b: u8) -> Option<char> {
         0x95 => '•',
         0x96 => '–',
         0x97 => '—',
+        0x98 => '˜',
+        0x99 => '™',
+        0x9B => '›',
         0xA0 => ' ',
         0xA4 => '₪',
         0xAA => '×',
@@ -92,5 +101,31 @@ mod tests {
         assert_eq!(cp1252(0x93), Some('“'));
         assert_eq!(cp1252(0xE9), Some('é'));
         assert_eq!(cp1252(0x81), None);
+    }
+
+    /// Every byte Windows-1255 defines is read, and no other.
+    #[test]
+    fn windows_1255_marks_and_undefined_bytes() {
+        for (b, c) in [
+            (0x83, 'ƒ'),
+            (0x86, '†'),
+            (0x87, '‡'),
+            (0x88, 'ˆ'),
+            (0x89, '‰'),
+            (0x8B, '‹'),
+            (0x98, '˜'),
+            (0x99, '™'),
+            (0x9B, '›'),
+        ] {
+            assert_eq!(cp1255(b), Some(c), "{b:#x}");
+        }
+        let undefined = [0x81, 0x8A, 0x9A, 0xFB, 0xFC, 0xFF]
+            .into_iter()
+            .chain(0x8C..=0x90)
+            .chain(0x9C..=0x9F)
+            .chain(0xD9..=0xDF);
+        for b in undefined {
+            assert_eq!(cp1255(b), None, "{b:#x}");
+        }
     }
 }
