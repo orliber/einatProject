@@ -59,6 +59,22 @@ export interface AppApi {
 
 export const AppContext = createContext<AppApi | null>(null);
 
+/** A notice on its way to the screen. `seq` tells two notices apart even when their words
+ *  are the same, so the second starts its own timer instead of ending with the first's. */
+export interface ToastNotice {
+  seq: number;
+  text: string;
+  action?: ToastAction | undefined;
+}
+
+let toastSeq = 0;
+
+/** The next notice: "נשמר" twice in a row is two notices, not one cut short. */
+export function toastOf(text: string, action?: ToastAction): ToastNotice {
+  toastSeq += 1;
+  return { seq: toastSeq, text, action };
+}
+
 /** Data from the core, cached while the vault is open (D-023). Cleared on every lock. */
 export const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false, staleTime: 5_000 } },
@@ -86,7 +102,7 @@ export function useApp(): AppApi {
 export function App() {
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [route, setRoute] = useState<Route>({ name: "cases" });
-  const [toast, setToast] = useState<{ text: string; action?: ToastAction | undefined } | null>(null);
+  const [toast, setToast] = useState<ToastNotice | null>(null);
   const [coreDown, setCoreDown] = useState(false);
   // Setup stays on screen until it is finished, even though the vault exists (and is
   // unlocked) as soon as it is created: the recovery kit must never be skipped.
@@ -266,17 +282,17 @@ function Shell(props: {
   route: Route;
   setRoute: (r: Route) => void;
   refresh: () => Promise<void>;
-  setToast: (t: { text: string; action?: ToastAction | undefined } | null) => void;
+  setToast: (t: ToastNotice | null) => void;
   fail: (e: UiError) => string;
   lockNow: () => Promise<void>;
   showShortcuts: () => void;
-  toast: { text: string; action?: ToastAction | undefined } | null;
+  toast: ToastNotice | null;
   sheet: { open: boolean; close: () => void };
   idleIn: number | null;
   keepWorking: () => Promise<void>;
 }) {
   const { status, route, setRoute, refresh, setToast, fail, lockNow, showShortcuts, toast, sheet, idleIn, keepWorking } = props;
-  const notify = useCallback((text: string, action?: ToastAction) => setToast({ text, action }), [setToast]);
+  const notify = useCallback((text: string, action?: ToastAction) => setToast(toastOf(text, action)), [setToast]);
   const api = useMemo<AppApi>(
     () => ({ status, route, go: setRoute, refresh, notify, fail, lockNow, showShortcuts }),
     [status, route, setRoute, refresh, notify, fail, lockNow, showShortcuts],
@@ -291,7 +307,8 @@ function Shell(props: {
         {route.name === "style" && <StyleScreen />}
         {route.name === "settings" && <SettingsScreen key={route.pane ?? ""} pane={route.pane} />}
       </Suspense>
-      {toast && <Toast text={toast.text} action={toast.action} onDone={() => setToast(null)} />}
+      {/* Keyed by notice: the same words again are a new toast with a fresh timer. */}
+      {toast && <Toast key={toast.seq} text={toast.text} action={toast.action} onDone={() => setToast(null)} />}
       <UnsavedNotice />
       {sheet.open && <ShortcutsSheet onClose={sheet.close} />}
       {idleIn != null && idleIn <= 75 && <IdleWarning seconds={idleIn} onKeep={() => void keepWorking()} />}

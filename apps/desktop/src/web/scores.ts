@@ -43,7 +43,13 @@ export function formatSheet(sheet: ScoreSheet): string {
     const m = inst.measures.find((x) => x.key === e.measure);
     if (!m) throw new Error(`מדד לא מוכר: ${e.measure}`);
     if (!(e.value >= m.min && e.value <= m.max)) {
-      throw new Error(`${m.name_he}: הציון ${fmt(e.value)} מחוץ לטווח האפשרי (${fmt(m.min)}–${fmt(m.max)})`);
+      // The value as she typed it (not rounded to one she never entered, as in the core).
+      throw new Error(`${m.name_he}: הציון ${e.value} מחוץ לטווח האפשרי (${fmt(m.min)}–${fmt(m.max)})`);
+    }
+    // As dv_domain `score_step`: a score off the scale's grid (109.5 on a composite) cannot exist.
+    const step = m.scale === "cars" ? 0.5 : 1;
+    if (Math.abs(Math.round(e.value / step) * step - e.value) > 1e-9) {
+      throw new Error(`${m.name_he}: הציון ${e.value} לא אפשרי בסולם הזה (${m.scale === "cars" ? "ציונים בקפיצות של חצי נקודה" : "ציונים שלמים בלבד"})`);
     }
     if (m.group !== group) {
       group = m.group;

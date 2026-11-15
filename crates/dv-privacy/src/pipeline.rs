@@ -1245,18 +1245,32 @@ fn name_run_suspects(
             if !run.iter().zip(words).all(|(t, w)| &t.norm == w) {
                 continue;
             }
+            let direct = matches!(*label, "לכבוד" | "בברכה" | "חתימה");
+            let name_label =
+                !direct && n >= 2 && words.first().is_some_and(|w| *w == normalize("שם"));
             // A form field starts its line (or a table cell): "הדרכת הורים: מתן זמן" is
-            // a sentence, not the field "הורים:".
-            if !starts_line(text, tok.start) {
+            // a sentence, not the field "הורים:". A "שם …" field of two words also follows
+            // a comma or a semicolon on the line ("שם פרטי נועם, שם משפחה ליבוביץ" went out
+            // with the surname).
+            let mid_line = name_label
+                && text
+                    .get(..tok.start)
+                    .is_some_and(|b| b.trim_end().ends_with([',', ';']));
+            if !starts_line(text, tok.start) && !mid_line {
                 continue;
             }
             let g = between(text, last, after)?;
-            let direct = matches!(*label, "לכבוד" | "בברכה" | "חתימה");
-            let label_ends = if direct {
-                true
-            } else {
-                g.contains(':') && !g.contains('\n')
-            };
+            // "שם משפחה גולדשטיין", "שם פרטי נועם": a label of two words that opens with
+            // "שם", one space after it and no colon, is a field too ("שם משפחה גולדשטיין"
+            // went out whole). After it, after a "שם …" field in the middle of a line, and
+            // after a one-word field that is also an ordinary word ("ילד: …", "משפחה: …"),
+            // only a known name or a rare word is taken, so "ילד: סקרן וחייכן" keeps its
+            // words.
+            let bare_name_label = name_label && g == " ";
+            let strict = bare_name_label
+                || mid_line
+                || matches!(*label, "משפחה" | "ילד" | "ילדה" | "תלמיד" | "תלמידה");
+            let label_ends = direct || (g.contains(':') && !g.contains('\n')) || bare_name_label;
             if !label_ends {
                 continue;
             }
@@ -1268,6 +1282,13 @@ fn name_run_suspects(
                     break;
                 };
                 if stop(&t.norm) || !hebrew(t) || digits(t) {
+                    break;
+                }
+                let known = lex.first_names.contains(&t.norm)
+                    || lex.surnames.contains(&t.norm)
+                    || lex.word_names.contains(&t.norm);
+                let rare = word_bucket(&t.norm) < EVERYDAY && !lex.common_words.contains(&t.norm);
+                if strict && !known && !rare {
                     break;
                 }
                 let role = prefix_splits(&t.norm)
@@ -1606,7 +1627,34 @@ fn name_run_suspects(
     for (k, (prev, t)) in tokens.iter().zip(tokens.iter().skip(1)).enumerate() {
         let i = k + 1;
         let g = between(text, prev, t)?;
-        if !joins(g) || !hebrew(t) || digits(t) {
+        // One comma, as a list or a form writes a surname beside a name ("גולדשטיין, נועם",
+        // "נועם, גולדשטיין" went out with the surname): only a surname of the lexicon then.
+        let comma = g.matches(',').count() == 1 && g.chars().all(|c| c == ' ' || c == ',');
+        if !(joins(g) || comma) || !hebrew(t) || digits(t) {
+            continue;
+        }
+        // A surname of the lexicon that is not also an everyday word with inflections of its
+        // own: "פרץ נועם בבכי", "זכאי נועם להתאמות", "נועם, זכאי לתמיכה" hid the verb or
+        // the adjective as a surname (the commonest of them, "שלום", is in `common_words`).
+        let lexicon_surname = |w: &Token| {
+            lex.surnames.contains(&w.norm)
+                && !lex.common_words.contains(&w.norm)
+                && !(word_bucket(&w.norm) >= EVERYDAY && inflects(&w.norm))
+        };
+        if comma {
+            if is_name(prev, out) && lexicon_surname(t) && !is_person_word(&t.norm) {
+                push(t.start, t.end, "נראה כמו שם משפחה", out)?;
+            }
+            if hebrew(prev)
+                && !digits(prev)
+                && lexicon_surname(prev)
+                && !is_title(&prev.norm)
+                && !is_person_word(&prev.norm)
+                && !is_role_word(&prev.norm)
+                && is_name(t, out)
+            {
+                push(prev.start, prev.end, "נראה כמו שם משפחה", out)?;
+            }
             continue;
         }
         // After a declared name only a tight hyphen joins a second part ("כהן-טגסט"): a
@@ -1630,6 +1678,20 @@ fn name_run_suspects(
         {
             push(t.start, t.end, "נראה כמו שם משפחה", out)?;
             surname_at = Some(i);
+            continue;
+        }
+        // 8b. A known surname right before a name, as forms and class lists write it
+        // ("גולדשטיין נועם" went out as "גולדשטיין [ילד]"). Only a surname of the lexicon
+        // that is no everyday word ("שלום נועם" is a greeting, "פרץ נועם בבכי" a verb), and
+        // not a word for a person ("דוד נועם" is the uncle).
+        let surname_before = hebrew(prev)
+            && !digits(prev)
+            && lexicon_surname(prev)
+            && !is_title(&prev.norm)
+            && !is_person_word(&prev.norm)
+            && !is_role_word(&prev.norm);
+        if surname_before && is_name(t, out) {
+            push(prev.start, prev.end, "נראה כמו שם משפחה", out)?;
         }
     }
     Ok(())
@@ -3150,25 +3212,31 @@ pub(crate) fn declared_inside(ctx: &PrivacyContext<'_>, norm: &str) -> Option<Ta
     // "noam123") or ends it ("ננועם", "123noam"): a name in the middle of a rarer word
     // ("התיאורים" holds "אורי") is that word.
     let at_edge = |w: &str, typed: bool| {
-        // Before a name that ends the word: digits, a letter or two of a typo (only for a
-        // name she typed: "Score" ends in an English word the filter once took for a
+        // Before a name that ends the word: digits or marks, however many ("2015נועם" went
+        // out whole after the year in it was generalized), a letter or two of a typo (only
+        // for a name she typed: "Score" ends in an English word the filter once took for a
         // name), or a generic place word ("בכפרורדים"), not the body of a longer word
         // ("מסולסלים" ends in "סלים").
         let short_before = |before: &str| {
-            before.chars().count() <= 3 && (typed || before.chars().all(|c| !c.is_alphabetic()))
+            before.chars().all(|c| !c.is_alphabetic())
+                || (typed && before.chars().count() <= 3)
                 || prefix_splits(before).iter().any(|(_, h)| is_generic(h))
         };
-        // After a name that starts the word: an ending, a typo, "'ס", or glued digits and
-        // letters of another script ("noam123", "נועם2019"), not the body of a longer word
+        // After a name that starts the word: an ending of up to three letters, a geresh in it
+        // not counted ("נועמצ'יק" went out whole), a typo, "'ס", or glued digits and letters
+        // of another script ("noam123", "נועם2019"), not the body of a longer word
         // ("קוגניטיבי" starts with "קוגן").
         let short_after = |after: &str| {
-            after.chars().count() <= 3
+            after.chars().filter(|c| c.is_alphabetic()).count() <= 3
                 || after.chars().all(|c| {
                     !c.is_alphabetic()
                         || c.is_ascii_alphabetic() != w.chars().any(|n| n.is_ascii_alphabetic())
                 })
         };
+        // Digits or marks on both sides ("1נועם1") are no part of a word either.
+        let core = norm.trim_matches(|c: char| !c.is_alphabetic());
         norm.strip_suffix(w).is_some_and(short_before)
+            || (core != norm && core == w)
             || prefix_splits(norm)
                 .iter()
                 .any(|(_, h)| h.strip_prefix(w).is_some_and(short_after))

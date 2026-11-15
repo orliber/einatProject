@@ -1922,16 +1922,18 @@ impl Vault {
                 Some(p) if p.role == input.role => {
                     (p.id.clone(), p.tag.clone(), p.source, p.reason.clone())
                 }
-                // A new role gets a new tag; where the name came from stays as it was.
-                _ => {
+                // A new role gets a new tag, on the same row (the same person, not a second
+                // one beside the first, whose old tag would go on hiding the name); where the
+                // name came from stays as it was.
+                Some(p) => {
                     let tag = assign_tag(input.role, &used);
                     used.push(tag.clone());
-                    (
-                        random_id()?,
-                        tag,
-                        previous.map_or(IdentitySource::Manual, |p| p.source),
-                        previous.map_or_else(String::new, |p| p.reason.clone()),
-                    )
+                    (p.id.clone(), tag, p.source, p.reason.clone())
+                }
+                None => {
+                    let tag = assign_tag(input.role, &used);
+                    used.push(tag.clone());
+                    (random_id()?, tag, IdentitySource::Manual, String::new())
                 }
             };
             let value_enc = seal_str(&key, &aad("identities", "value", &id, case_id), value)?;

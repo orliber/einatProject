@@ -285,8 +285,9 @@ impl Core {
             if not_used.contains(&sheet.instrument) {
                 continue;
             }
+            // The material's name in the refusal, so she knows which table to open.
             let rows: Vec<dv_export::BandRow> = dv_domain::sheet_bands(&sheet)
-                .map_err(CoreError::Refused)?
+                .map_err(|e| CoreError::Refused(format!("{}: {e}", input.title)))?
                 .into_iter()
                 .map(|b| dv_export::BandRow {
                     label: b.label,
@@ -511,9 +512,11 @@ impl Core {
             if not_used.contains(&sheet.instrument) {
                 continue;
             }
-            let (title, rows, note) = dv_domain::sheet_table(&sheet).map_err(CoreError::Refused)?;
+            // The material's name in the refusal, so she knows which table to open.
+            let (title, rows, note) = dv_domain::sheet_table(&sheet)
+                .map_err(|e| CoreError::Refused(format!("{}: {e}", input.title)))?;
             let charts = dv_domain::sheet_profiles(&sheet)
-                .map_err(CoreError::Refused)?
+                .map_err(|e| CoreError::Refused(format!("{}: {e}", input.title)))?
                 .into_iter()
                 .map(|p| dv_export::ScoreChart {
                     title: p.title,

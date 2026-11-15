@@ -15,7 +15,9 @@
 
 use std::collections::BTreeMap;
 
-use crate::scores::{instruments, Instrument, Measure, ScoreScale, ScoreSheet, TaggedScore};
+use crate::scores::{
+    instruments, Instrument, Measure, ScoreScale, ScoreSheet, TaggedScore, TOTALS,
+};
 
 /// A gap of this many standard points between two indexes of one test is a pattern.
 pub const INDEX_GAP: f64 = 15.0;
@@ -31,8 +33,6 @@ pub const SUBTEST_SCATTER: f64 = 6.0;
 pub const ADAPTIVE_GAP: f64 = 15.0;
 pub const IN_LINE: f64 = 9.0;
 
-/// The totals of a test: never one of its indexes.
-const TOTALS: [&str; 4] = ["fsiq", "gac", "abc", "elc"];
 /// Totals of a cognitive test, and of an adaptive one, for the gap between the two.
 const COGNITIVE_TOTALS: [(&str, &str); 5] = [
     ("wppsi_iv", "fsiq"),

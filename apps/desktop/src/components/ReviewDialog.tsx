@@ -58,6 +58,20 @@ export function ReviewDialog(props: {
 
   const blocked = prepared.blocked;
 
+  /** "Show this screen before every send" (advanced), saved at once. A failure is said on the
+   *  error line like any other, and the box shows what the core holds (the status after a
+   *  refresh), never what was clicked. */
+  async function setReviewAlways(on: boolean) {
+    setError(null);
+    try {
+      await ipc.setReviewAlways(on);
+    } catch (e) {
+      setError(fail(e as never));
+    } finally {
+      await refresh();
+    }
+  }
+
   /** One block, one answer: she says what the flagged word is and the request is rebuilt (F1). */
   async function decide(token: string, decision: SuspectDecision) {
     if (!props.caseId) return;
@@ -99,7 +113,7 @@ export function ReviewDialog(props: {
             {/* Shown only because she asked to see every request (advanced); off, requests go at once. */}
             <label className="row">
               <input type="checkbox" checked={status.review_always}
-                onChange={(e) => void ipc.setReviewAlways(e.target.checked).then(refresh)} />
+                onChange={(e) => void setReviewAlways(e.target.checked)} />
               להציג את המסך הזה לפני כל שליחה
             </label>
           </span>

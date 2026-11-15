@@ -7,7 +7,7 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import { AppContext, type AppApi } from "../App";
 import { status } from "../test/fixtures";
 import { a11yViolations } from "../test/a11y";
-import { NewCaseDialog, toIdentityInputs } from "./NewCaseDialog";
+import { NewCaseDialog, toIdentityInputs, withIds } from "./NewCaseDialog";
 import { todayIso } from "./DateField";
 import { CONSENT_FORM_VERSION } from "../consentForm";
 
@@ -46,6 +46,22 @@ describe("toIdentityInputs", () => {
       { id: null, role: "child", value: "נועה", aliases: ["נועי", "נועהל׳ה"] },
       { id: null, role: "teacher", value: "רינה", aliases: [] },
     ]);
+  });
+});
+
+describe("withIds", () => {
+  const saved = (id: string, role: "child" | "mother" | "teacher", value: string) =>
+    ({ id, case_id: "c1", role, tag: `[${role}]`, value, aliases: [], source: "manual" as const, reason: "" });
+  it("gives new people their ids, and a person whose role changed her new id", () => {
+    const rows = [
+      { id: "p1", role: "child" as const, value: "נועה", aliases: "" },
+      { id: "p2", role: "teacher" as const, value: " רינה ", aliases: "" },
+      { id: null, role: "mother" as const, value: "דפנה", aliases: "" },
+      { id: null, role: "mother" as const, value: "", aliases: "" },
+    ];
+    // p2 was a mother; the vault made her a teacher under p9 and no longer lists p2.
+    const out = withIds(rows, [saved("p1", "child", "נועה"), saved("p9", "teacher", "רינה"), saved("p5", "mother", "דפנה")]);
+    expect(out.map((r) => r.id)).toEqual(["p1", "p9", "p5", null]);
   });
 });
 
@@ -194,5 +210,36 @@ describe("NewCaseDialog", () => {
     await second.user.keyboard("{Escape}");
     expect(second.onClose).not.toHaveBeenCalled();
     expect(within(second.dialog).getByRole("alertdialog", { name: "לסגור בלי לשמור" })).toBeInTheDocument();
+  });
+});
+
+describe("the age typed for a new case", () => {
+  it("an impossible age is refused with a reason, never dropped quietly", async () => {
+    const { calls, user, dialog } = open();
+    await user.type(within(dialog).getAllByLabelText("שם")[0] as HTMLElement, "נועה");
+    await user.type(within(dialog).getByLabelText("שנים"), "5");
+    await user.clear(within(dialog).getByLabelText("חודשים"));
+    await user.type(within(dialog).getByLabelText("חודשים"), "13");
+    await user.click(within(dialog).getByRole("button", { name: "פתיחת התיק" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(/גיל/);
+    expect(calls.filter((c) => c.cmd === "create_case")).toHaveLength(0);
+    // Years past what a child can be are said too, not left as "no age".
+    await user.clear(within(dialog).getByLabelText("חודשים"));
+    await user.type(within(dialog).getByLabelText("חודשים"), "3");
+    await user.clear(within(dialog).getByLabelText("שנים"));
+    await user.type(within(dialog).getByLabelText("שנים"), "30");
+    expect(within(dialog).getByText("שנים: 0 עד 24")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "פתיחת התיק" }));
+    expect(calls.filter((c) => c.cmd === "create_case")).toHaveLength(0);
+  });
+
+  it("months without years are refused, not opened as a case with no age", async () => {
+    const { calls, user, dialog } = open();
+    await user.type(within(dialog).getAllByLabelText("שם")[0] as HTMLElement, "נועה");
+    await user.type(within(dialog).getByLabelText("חודשים"), "4");
+    expect(within(dialog).getByText("יש להזין שנים")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "פתיחת התיק" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("יש להזין שנים");
+    expect(calls.filter((c) => c.cmd === "create_case")).toHaveLength(0);
   });
 });

@@ -208,12 +208,16 @@ impl Core {
         core
     }
 
+    /// The idle time before the lock, within the same 1–60 minutes `set_lock_minutes` takes:
+    /// a stored value from outside that range can neither lock at every call (0) nor leave
+    /// the vault open for days.
     pub(crate) fn lock_minutes(&self) -> u32 {
         self.vault
             .as_ref()
             .and_then(|v| v.setting(LOCK_KEY).ok().flatten())
-            .and_then(|s| s.parse().ok())
+            .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(10)
+            .clamp(1, 60)
     }
 
     /// Auto-lock after inactivity, then hand out the vault.

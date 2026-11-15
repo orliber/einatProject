@@ -36,6 +36,22 @@ export function parseAge(years: string, months: string): Age | null {
   return y >= 0 && y < 25 && m >= 0 && m < 12 ? { years: y, months: m } : null;
 }
 
+/** Why what is typed is not an age, in her words; `null` when it is one, or nothing is typed.
+ *  Months without years are not "nothing typed": `parseAge` makes no age of them, and saving
+ *  that would erase the age on file. A save checks this too: a wrong age is refused and said,
+ *  never dropped quietly. */
+export function ageProblem(years: string, months: string): string | null {
+  if (months !== "" && Number(months) > 11) return "חודשים: 0 עד 11";
+  if (years !== "" && Number(years) > 24) return "שנים: 0 עד 24";
+  if (years === "" && months !== "") return "יש להזין שנים";
+  return null;
+}
+
+/** The error line for a save with a wrong age. */
+export function ageError(problem: string): string {
+  return `הגיל שהוקלד לא אפשרי (${problem}). אפשר לתקן אותו, או למחוק אותו.`;
+}
+
 /**
  * Age at assessment, typed as years and months (each with its own label, so the order can't be
  * misread in right-to-left text), or computed from a birth date. The birth date is not kept.
@@ -45,7 +61,9 @@ export function AgeField(props: { idPrefix: string; years: string; months: strin
   const [birth, setBirth] = useState("");
   const [on, setOn] = useState(todayIso());
   const age = parseAge(props.years, props.months);
-  const monthsBad = props.months !== "" && Number(props.months) > 11;
+  const problem = ageProblem(props.years, props.months);
+  const monthsBad = problem !== null && problem.startsWith("חודשים");
+  const yearsBad = problem !== null && !monthsBad;
   const computed = birth && on ? ageFrom(birth, on) : null;
   const y = `${props.idPrefix}-years`;
   const m = `${props.idPrefix}-months`;
@@ -55,8 +73,8 @@ export function AgeField(props: { idPrefix: string; years: string; months: strin
       <legend className="label">גיל בעת האבחון</legend>
       <div className="age-row">
         <span className="age-part">
-          <input id={y} className="input num age" inputMode="numeric" value={props.years}
-            onChange={(e) => props.onChange(e.target.value.replace(/\D/g, "").slice(0, 2), props.months)} />
+          <input id={y} className={yearsBad ? "input num age bad" : "input num age"} inputMode="numeric" value={props.years}
+            aria-invalid={yearsBad} onChange={(e) => props.onChange(e.target.value.replace(/\D/g, "").slice(0, 2), props.months)} />
           <label htmlFor={y}>שנים</label>
         </span>
         <span className="age-part">
@@ -65,7 +83,7 @@ export function AgeField(props: { idPrefix: string; years: string; months: strin
           <label htmlFor={m}>חודשים</label>
         </span>
         <span className="age-words" aria-live="polite">
-          {monthsBad ? <span className="error">חודשים: 0 עד 11</span> : age ? <>= {ageWords(age)} <span className="muted">({age.years}:{age.months})</span></> : null}
+          {problem ? <span className="error">{problem}</span> : age ?<>= {ageWords(age)} <span className="muted">({age.years}:{age.months})</span></> : null}
         </span>
       </div>
       {!calc ? (

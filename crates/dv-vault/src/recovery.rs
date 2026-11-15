@@ -62,11 +62,23 @@ pub fn format(key: &Key32) -> Zeroizing<String> {
     Zeroizing::new(grouped.join("-"))
 }
 
-/// Parse what the user typed. Spaces, dashes and case do not matter.
+/// A separator between groups: whitespace, or any kind of dash. The printed key has a plain
+/// hyphen-minus; a Hebrew keyboard, autocorrect or a word processor turns it into a maqaf,
+/// an en or em dash, a minus sign or a non-breaking hyphen, and the key is still hers.
+fn is_separator(c: char) -> bool {
+    c.is_whitespace()
+        || matches!(
+            c,
+            '-' | '\u{00AD}' | '\u{05BE}' | '\u{2010}'
+                ..='\u{2015}' | '\u{2212}' | '\u{FE63}' | '\u{FF0D}'
+        )
+}
+
+/// Parse what the user typed. Spaces, dashes (of any kind) and case do not matter.
 pub fn parse(typed: &str) -> Result<Key32, VaultError> {
     let symbols: Vec<u32> = typed
         .chars()
-        .filter(|c| !c.is_whitespace() && *c != '-')
+        .filter(|c| !is_separator(*c))
         .map(|c| decode_char(c).ok_or(VaultError::RecoveryKeyInvalid))
         .collect::<Result<_, _>>()?;
     if symbols.len() != KEY_CHARS + CHECK_CHARS {
@@ -160,6 +172,30 @@ mod tests {
             .replace('0', "o")
             .replace('-', " ");
         assert_eq!(parse(&printed).unwrap(), key);
+    }
+
+    #[test]
+    fn parsing_forgives_the_dashes_a_keyboard_or_a_word_processor_makes() {
+        let key = Key32::random().unwrap();
+        let printed = format(&key);
+        // En dash, em dash, Hebrew maqaf, minus sign, non-breaking hyphen, figure dash,
+        // fullwidth and small hyphen-minus: what a Hebrew keyboard, autocorrect or a PDF
+        // reader turns the printed dash into.
+        for dash in [
+            '\u{2013}', '\u{2014}', '\u{05BE}', '\u{2212}', '\u{2011}', '\u{2012}', '\u{FF0D}',
+            '\u{FE63}', '\u{2010}', '\u{2015}',
+        ] {
+            let typed = printed.replace('-', &dash.to_string());
+            assert_eq!(parse(&typed).unwrap(), key, "{dash:?}");
+        }
+        // Mixed, with spaces around some dashes and a trailing newline.
+        let mixed = printed.replacen('-', " \u{2013} ", 3) + "\n";
+        assert_eq!(parse(&mixed).unwrap(), key);
+        // A dash is a separator and nothing more: one in place of a letter is still a typo.
+        let mut chars: Vec<char> = printed.chars().collect();
+        chars[1] = '\u{2013}';
+        let short: String = chars.into_iter().collect();
+        assert!(matches!(parse(&short), Err(VaultError::RecoveryKeyInvalid)));
     }
 
     #[test]
