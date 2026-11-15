@@ -424,7 +424,7 @@ fn only_the_recent_turns_of_a_conversation_are_kept_for_the_next_request() {
     use crate::prepare::{recent_turns, HISTORY_TURNS};
     let turn = |i: usize| {
         (
-            if i % 2 == 0 {
+            if i.is_multiple_of(2) {
                 ChatRole::User
             } else {
                 ChatRole::Assistant

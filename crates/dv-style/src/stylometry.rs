@@ -943,7 +943,11 @@ mod tests {
     /// "אולם"; a word that is no linking word ("נועמי", invented) must never reach the card.
     fn rhythmic(i: usize) -> String {
         let t = ["המשחק", "השפה", "הקשב", "הציור"][i % 4];
-        let rare = if i % 5 == 0 { " אך לאט" } else { "" };
+        let rare = if i.is_multiple_of(5) {
+            " אך לאט"
+        } else {
+            ""
+        };
         format!(
             "בתחום {t} נראה כי הילד פועל בהתאם לגילו, עם זאת ניכר קושי קל במעברים{rare}. \
              בנוסף התרשמתי מילד סקרן ומשתף פעולה עם נועמי, אשר נעזר בתיווך מבוגר. \
