@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::scores::{classify, instruments, Instrument, Measure, ScoreScale, ScoreSheet};
+use crate::scores::{classify, table, Instrument, Measure, ScoreScale, ScoreSheet};
 
 /// One measure in both assessments.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -54,12 +54,12 @@ const WECHSLER: [&str; 3] = ["wppsi_iii", "wppsi_iv", "wisc_v"];
 /// WPPSI-IV and WISC-V indexes compare, but a Bayley motor score never meets a Vineland one).
 #[must_use]
 pub fn compare(before: &[ScoreSheet], after: &[ScoreSheet]) -> Vec<ComparisonRow> {
-    let all = instruments();
+    let all = table();
     let mut rows = Vec::new();
     let mut seen: Vec<(&str, &str)> = Vec::new();
     for a in after {
         for entry in &a.entries {
-            let Some((a_inst, a_m)) = measure_of(&all, a, &entry.measure) else {
+            let Some((a_inst, a_m)) = measure_of(all, a, &entry.measure) else {
                 continue;
             };
             let earlier_in = |same_instrument: bool| {
@@ -74,7 +74,7 @@ pub fn compare(before: &[ScoreSheet], after: &[ScoreSheet]) -> Vec<ComparisonRow
                     if !fits {
                         return None;
                     }
-                    let (b_inst, b_m) = measure_of(&all, b, &entry.measure)?;
+                    let (b_inst, b_m) = measure_of(all, b, &entry.measure)?;
                     let e = b.entries.iter().find(|e| e.measure == entry.measure)?;
                     (b_m.scale == a_m.scale).then_some((b_inst, b_m, e.value))
                 })
