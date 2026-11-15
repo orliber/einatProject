@@ -62,13 +62,9 @@ impl Core {
         let sheets = score_sheets(v, case_id, &inputs)?;
         let style_model = style::style_model(v)?;
         let interpretations = style::InterpretationCheck::new(v, &sheets)?;
-        let retention_default = v
-            .list_cases()?
-            .into_iter()
-            .chain(v.list_trash()?)
-            .find(|c| c.id == case_id)
-            .map(|c| retention::default_until(c.created_at, c.updated_at, c.meta.age.as_ref()))
-            .unwrap_or_default();
+        // This case's own dates: not the whole case list and recycle bin for two numbers.
+        let (created_at, updated_at) = v.case_times(case_id)?;
+        let retention_default = retention::default_until(created_at, updated_at, meta.age.as_ref());
         let sortable: Vec<&str> = sorting::sortable(&structure)
             .iter()
             .map(|s| s.key.as_str())
