@@ -340,7 +340,7 @@ fn measure(text: &str) -> Option<Measure> {
     // "עם זאת": contrast in two words.
     let im_zot = all
         .windows(2)
-        .filter(|p| matches!(p, [a, b] if a.norm.ends_with("עמ") && b.norm == "זאת"))
+        .filter(|p| matches!(p, [a, b] if crate::text::is_with_prefix(&a.norm, "עמ") && b.norm == "זאת"))
         .count() as f64;
     let commas = text.matches(',').count() as f64;
     let parens = text.matches('(').count() as f64;

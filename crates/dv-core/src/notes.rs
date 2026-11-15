@@ -160,15 +160,20 @@ impl SessionNotes {
         {
             return;
         }
-        let unanswered = self.section(case_id, section_key).unanswered;
-        self.keep_section(
-            case_id,
-            section_key,
-            SectionNotes {
-                unanswered,
-                ..notes
-            },
-        );
+        // Added to what the draft's answer said, never instead of it: a question the first
+        // answer asked is still open after one paragraph was worded again.
+        let mut kept = self.section(case_id, section_key);
+        let add = |into: &mut Vec<String>, new: Vec<String>| {
+            for line in new {
+                if !into.contains(&line) {
+                    into.push(line);
+                }
+            }
+        };
+        add(&mut kept.questions, notes.questions);
+        add(&mut kept.missing, notes.missing);
+        add(&mut kept.contradictions, notes.contradictions);
+        self.keep_section(case_id, section_key, kept);
     }
 
     pub(crate) fn section(&self, case_id: &str, section_key: &str) -> SectionNotes {
@@ -365,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    fn a_new_answer_replaces_the_sections_notes_and_a_rewording_keeps_the_guide_lines() {
+    fn a_new_answer_replaces_the_sections_notes_and_a_rewording_adds_to_them() {
         let mut notes = SessionNotes::default();
         notes.keep_section(
             "c",
@@ -379,7 +384,7 @@ mod tests {
         // A rewording that says nothing leaves the notes as they were.
         notes.keep_rewording("c", "background", SectionNotes::default());
         assert_eq!(notes.section("c", "background").questions.len(), 1);
-        // One that asks something replaces the questions and keeps the guide's lines.
+        // One that asks something adds to what was asked and keeps the guide's lines.
         notes.keep_rewording(
             "c",
             "background",
@@ -389,9 +394,19 @@ mod tests {
             },
         );
         let now = notes.section("c", "background");
-        assert!(now.questions.is_empty());
+        assert_eq!(now.questions, ["מתי התחיל?"]);
         assert_eq!(now.missing, ["גיל ההליכה"]);
         assert_eq!(now.unanswered, ["רקע משפחתי"]);
+        // The same line said again is kept once.
+        notes.keep_rewording(
+            "c",
+            "background",
+            SectionNotes {
+                missing: vec!["גיל ההליכה".to_owned()],
+                ..SectionNotes::default()
+            },
+        );
+        assert_eq!(notes.section("c", "background").missing.len(), 1);
         // A whole new draft with nothing to say: nothing is kept.
         notes.keep_section("c", "background", SectionNotes::default());
         assert_eq!(notes.section("c", "background"), SectionNotes::default());

@@ -56,7 +56,7 @@ const WECHSLER: [&str; 3] = ["wppsi_iii", "wppsi_iv", "wisc_v"];
 pub fn compare(before: &[ScoreSheet], after: &[ScoreSheet]) -> Vec<ComparisonRow> {
     let all = instruments();
     let mut rows = Vec::new();
-    let mut seen: Vec<(&str, &str)> = Vec::new();
+    let mut seen: Vec<(&str, &str, &str)> = Vec::new();
     for a in after {
         for entry in &a.entries {
             let Some((a_inst, a_m)) = measure_of(&all, a, &entry.measure) else {
@@ -65,7 +65,9 @@ pub fn compare(before: &[ScoreSheet], after: &[ScoreSheet]) -> Vec<ComparisonRow
             let earlier_in = |same_instrument: bool| {
                 before.iter().find_map(|b| {
                     let fits = if same_instrument {
-                        b.instrument == a.instrument
+                        // The same module too: ADOS-2 modules are scored differently, and a
+                        // total of module 1 is not comparable with a total of module 2.
+                        b.instrument == a.instrument && b.module == a.module
                     } else {
                         b.instrument != a.instrument
                             && WECHSLER.contains(&a.instrument.as_str())
@@ -82,7 +84,11 @@ pub fn compare(before: &[ScoreSheet], after: &[ScoreSheet]) -> Vec<ComparisonRow
             let Some((b_inst, b_m, value)) = earlier_in(true).or_else(|| earlier_in(false)) else {
                 continue;
             };
-            let id = (a.instrument.as_str(), entry.measure.as_str());
+            let id = (
+                a.instrument.as_str(),
+                a.module.as_str(),
+                entry.measure.as_str(),
+            );
             if seen.contains(&id) {
                 continue;
             }
@@ -293,5 +299,23 @@ mod tests {
         for line in text.lines() {
             assert!(!line.trim_end().ends_with("טווח:"), "{line}");
         }
+    }
+
+    #[test]
+    fn another_module_of_the_same_test_is_not_compared() {
+        let module = |m: &str, total: f64| {
+            let mut s = sheet("ados_2", &[("total", total)]);
+            s.module = m.into();
+            s
+        };
+        assert!(compare(&[module("1", 14.0)], &[module("2", 12.0)]).is_empty());
+        let rows = compare(&[module("2", 14.0)], &[module("2", 12.0)]);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        // Two sheets of the same test, one per module, each against its own earlier sheet.
+        let rows = compare(
+            &[module("1", 16.0), module("2", 14.0)],
+            &[module("1", 15.0), module("2", 12.0)],
+        );
+        assert_eq!(rows.len(), 2, "{rows:?}");
     }
 }

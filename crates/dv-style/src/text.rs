@@ -93,6 +93,15 @@ pub fn words(text: &str) -> Vec<Word> {
         .collect()
 }
 
+/// `word` itself, or with one or two prefix letters before it ("ועם", "שעם"): never another
+/// word that only ends the same way ("טעם" is not "עם").
+#[must_use]
+pub fn is_with_prefix(norm: &str, word: &str) -> bool {
+    norm.strip_suffix(word).is_some_and(|before| {
+        before.chars().count() <= 2 && before.chars().all(|c| "ושכלבמה".contains(c))
+    })
+}
+
 /// Sentences of `text`: split at `. ! ? ;` and line breaks; empty ones dropped. A mark inside a
 /// bracketed tag (`[תוצאה 7.5]`) does not end a sentence.
 #[must_use]
@@ -102,7 +111,17 @@ pub fn sentences(text: &str) -> Vec<&str> {
     let mut start = 0;
     for (i, c) in text.char_indices() {
         match c {
-            '[' => depth += 1,
+            // Only a tag that closes on its line: one stray "[" must not swallow the rest of
+            // the line into one long sentence.
+            '[' => {
+                let closes = text
+                    .get(i..)
+                    .and_then(|rest| rest.find([']', '\n']).and_then(|at| rest.get(at..)))
+                    .is_some_and(|rest| rest.starts_with(']'));
+                if closes {
+                    depth += 1;
+                }
+            }
             ']' => depth = depth.saturating_sub(1),
             '\n' => {
                 depth = 0;
@@ -273,8 +292,7 @@ pub(crate) fn connector_counts(ws: &[&Word]) -> Vec<f64> {
                 [first, second] => ws
                     .windows(2)
                     .filter(|p| {
-                        matches!(p, [a, b] if (a.norm == *first || a.norm.ends_with(first.as_str()))
-                            && b.norm == *second)
+                        matches!(p, [a, b] if is_with_prefix(&a.norm, first) && b.norm == *second)
                     })
                     .count() as f64,
                 _ => 0.0,
@@ -334,6 +352,21 @@ pub(crate) fn has(list: &HashSet<String>, norm: &str) -> bool {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    #[test]
+    fn one_stray_bracket_does_not_merge_the_rest_of_the_line() {
+        let s = sentences("הילד שיחק [בחצר. אחר כך אכל. ולבסוף נרדם.");
+        assert_eq!(s.len(), 3, "{s:?}");
+        // A tag that closes still holds its full stop.
+        let s = sentences("בקוביות [תוצאה 7.5] הצליח. אחר כך נח.");
+        assert_eq!(s.len(), 2, "{s:?}");
+    }
+
+    #[test]
+    fn a_prefixed_word_is_the_word_and_a_longer_word_is_not() {
+        assert!(is_with_prefix("עמ", "עמ") && is_with_prefix("ועמ", "עמ"));
+        assert!(!is_with_prefix("טעמ", "עמ") && !is_with_prefix("נועמ", "עמ"));
+    }
 
     #[test]
     fn words_trim_punctuation_and_keep_tags() {
