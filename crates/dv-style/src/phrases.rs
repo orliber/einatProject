@@ -219,6 +219,25 @@ mod tests {
     }
 
     #[test]
+    fn the_words_of_a_score_tag_are_never_her_phrase() {
+        // The band label is the software's wording, in every report that has the score.
+        let r: Vec<String> = (0..5)
+            .map(|i| {
+                format!(
+                    "בשאלון [תוצאה {} · רמה גבוהה של תסמינים] והמשיך בנושא {i}.",
+                    i + 3
+                )
+            })
+            .collect();
+        let parts: Vec<ReportParts<'_>> = r
+            .iter()
+            .map(|t| vec![(Some("cognitive"), t.as_str())])
+            .collect();
+        let found = mine_phrases(&parts);
+        assert!(!found.iter().any(|p| p.text.contains("גבוהה")), "{found:?}");
+    }
+
+    #[test]
     fn shorter_runs_give_way_to_the_longer_phrase() {
         let found = mine();
         assert!(!found.iter().any(|p| p.text == "להמשיך במעקב"), "{found:?}");

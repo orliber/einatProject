@@ -527,13 +527,9 @@ fn build_section(
         &instr,
     );
     // Her approved style profile (D-043), as it goes out with this case's names hidden.
-    // The items that fit this section's material best go out (D-052).
-    let query: String = tagged_sources
-        .iter()
-        .map(|s| s.content_tagged.as_str())
-        .chain([instr.tagged.as_str()])
-        .collect::<Vec<_>>()
-        .join("\n");
+    // The items that fit this section's material best go out (D-052): its sources, the
+    // approved sections it is written from (all a closing section has, C5), and her request.
+    let query = style_query(&tagged_sources, &approved_context, &instr.tagged);
     stop()?;
     let mut style_profile = read
         .style
@@ -634,6 +630,23 @@ fn build_section(
         from_points: points,
     };
     Ok((body, review, kind))
+}
+
+/// What her style items are ranked against for a section (D-052, C5): the section's filtered
+/// sources, the filtered approved sections it is written from, and her filtered request. The
+/// same texts give the same query, so the same items go out turn after turn.
+fn style_query(
+    sources: &[dv_ai::TaggedInput],
+    approved: &[(String, String)],
+    instruction: &str,
+) -> String {
+    sources
+        .iter()
+        .map(|s| s.content_tagged.as_str())
+        .chain(approved.iter().map(|(_, t)| t.as_str()))
+        .chain([instruction])
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The check against the sources (the verify stage): the section's sources and its proposed

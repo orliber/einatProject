@@ -248,8 +248,12 @@ impl Core {
         self.finish_style_profile(out, response)
     }
 
-    /// The new profile is a draft: nothing is used until she approves it. Her own rules and
-    /// the ones she accepted from her edits carry over from the approved profile.
+    /// The new profile is a draft: nothing is used until she approves it. Her decisions carry
+    /// over from the profile in use and from a draft she was going through (C1, D-166): what
+    /// she wrote, reworded, accepted or learned from her edits stays as it is; a newly learned
+    /// item like one she switched off comes switched off; one like an item she deleted, or
+    /// like the earlier wording of one she reworded, is left out. Support is at most the
+    /// number of reports analysed.
     pub fn finish_style_profile(
         &mut self,
         out: Outgoing,
@@ -269,36 +273,117 @@ impl Core {
         let (items, shape_dropped) =
             dv_ai::parse_style_synthesis(&response, &section_keys(&structure))?;
         let (kept, privacy_dropped) = self.keep_items(items)?;
-        let mut profile = StyleProfile {
-            items: Vec::new(),
-            reports,
-        };
+        let decided = self.decided_profiles()?;
+        let learning = self.learning()?;
+        let local = local_style(self.vault_ref()?)?;
+        let mut new_items = Vec::new();
         for i in kept {
-            profile.items.push(StyleItem {
+            new_items.push(StyleItem {
                 id: dv_vault::crypto::random_id()?,
                 section: i.section,
                 kind: i.kind,
                 text: i.text,
                 enabled: true,
                 origin: StyleOrigin::Reports,
-                support: i.support,
+                support: i.support.min(reports.max(1)),
                 pattern: i.pattern,
             });
         }
-        if let Some(active) = self.active_profile()? {
-            profile.items.extend(
-                active
-                    .profile
-                    .items
-                    .into_iter()
-                    .filter(|i| i.origin != StyleOrigin::Reports),
-            );
-        }
-        let stored = StoredProfile {
-            profile,
-            dropped: count(shape_dropped) + privacy_dropped,
-            demo,
-        };
+        let mut stored = carry_decisions(new_items, reports, &decided, &|item| {
+            accepted_earlier(item, &learning, &local)
+        });
+        stored.dropped = count(shape_dropped) + privacy_dropped;
+        stored.demo = demo;
         self.store_draft(&stored)
     }
+
+    /// Where her decisions are: the profile in use, then a draft she was going through (its
+    /// items, by id, over the ones in use).
+    fn decided_profiles(&mut self) -> Result<Vec<StoredProfile>, CoreError> {
+        let profiles = self.vault_ref()?.style_profiles()?;
+        let mut out = Vec::new();
+        for status in ["active", "draft"] {
+            if let Some(p) = profiles.iter().find(|p| p.status == status) {
+                out.push(parse::<StoredProfile>(&p.json)?);
+            }
+        }
+        Ok(out)
+    }
+}
+
+/// A new profile of `new_items` (learned now from `reports` reports), with her decisions in
+/// `decided` (oldest first) carried over (C1). `accepted_earlier`: an item of an older profile
+/// she accepted from what was found on her computer, stored then as learned from her reports.
+pub(super) fn carry_decisions(
+    new_items: Vec<StyleItem>,
+    reports: u32,
+    decided: &[StoredProfile],
+    accepted_earlier: &dyn Fn(&StyleItem) -> bool,
+) -> StoredProfile {
+    // Every item she decided on, the latest version of each.
+    let mut previous: Vec<StyleItem> = Vec::new();
+    let mut originals: BTreeMap<String, String> = BTreeMap::new();
+    let mut removed: Vec<RemovedItem> = Vec::new();
+    for p in decided {
+        for item in &p.profile.items {
+            previous.retain(|x| x.id != item.id);
+            previous.push(item.clone());
+        }
+        originals.extend(p.originals.clone());
+        for r in &p.removed {
+            if !removed.contains(r) {
+                removed.push(r.clone());
+            }
+        }
+    }
+    let extra = removed.len().saturating_sub(MAX_REMOVED);
+    removed.drain(..extra);
+    // Hers: kept whatever the new build says.
+    let hers: Vec<StyleItem> = previous
+        .iter()
+        .cloned()
+        .map(|mut i| {
+            if accepted_earlier(&i) {
+                i.origin = StyleOrigin::Accepted;
+            }
+            i
+        })
+        .filter(|i| i.origin != StyleOrigin::Reports)
+        .collect();
+    let switched_off: Vec<&StyleItem> = previous
+        .iter()
+        .filter(|i| i.origin == StyleOrigin::Reports && !i.enabled)
+        .collect();
+    let like = |i: &StyleItem, kind, section: Option<&str>, text: &str| {
+        same_item(i.kind, i.section.as_deref(), &i.text, kind, section, text)
+    };
+    let mut items = Vec::new();
+    for mut i in new_items {
+        let gone = removed
+            .iter()
+            .any(|r| like(&i, r.kind, r.section.as_deref(), &r.text));
+        // Her version stands for it: the same item, reworded by her or already hers.
+        let in_hers = hers.iter().any(|h| {
+            like(&i, h.kind, h.section.as_deref(), &h.text)
+                || originals
+                    .get(&h.id)
+                    .is_some_and(|o| like(&i, h.kind, h.section.as_deref(), o))
+        });
+        if gone || in_hers {
+            continue;
+        }
+        if switched_off
+            .iter()
+            .any(|d| like(&i, d.kind, d.section.as_deref(), &d.text))
+        {
+            i.enabled = false;
+        }
+        items.push(i);
+    }
+    originals.retain(|id, _| hers.iter().any(|h| h.id == *id));
+    items.extend(hers);
+    let mut stored = StoredProfile::new(StyleProfile { items, reports });
+    stored.originals = originals;
+    stored.removed = removed;
+    stored
 }

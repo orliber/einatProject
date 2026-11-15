@@ -2211,6 +2211,21 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
     body.push(Value::String(
         dv_ai::render_for_section(&profile, "cognitive", &|_| true, &[]).unwrap(),
     ));
+    // The DSM section also takes the whole report's criteria (D-166).
+    body.push(Value::String(
+        dv_ai::render_for_section(&profile, "dsm", &|_| true, &[]).unwrap(),
+    ));
+    // The rhythm card (D-166): its fixed lines, and every linking word it may name.
+    for line in dv_style::stylometry::RHYTHM_FIXED {
+        body.push(Value::String(line.to_owned()));
+    }
+    body.push(Value::String(
+        dv_style::text::CONNECTORS
+            .iter()
+            .map(|c| format!("«{c}»"))
+            .collect::<Vec<_>>()
+            .join(", "),
+    ));
     let body = Value::Array(body);
     let tags: HashSet<String> = HashSet::from(["[ילד]".to_owned()]);
     let collisions = found_for_every_child_name(|identities| {
@@ -2242,6 +2257,51 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
         })
     });
     assert!(collisions.is_empty(), "{collisions:#?}");
+}
+
+/// The rhythm card goes out as part of her profile, item by item filtered (D-166): with any
+/// figures it can hold, the filter must leave it as it is, or it would be left out. ("בדרך כלל
+/// בין 9" once read as an address.)
+#[test]
+fn the_rhythm_card_is_never_changed_by_the_filter_whatever_its_figures() {
+    let ctx = PrivacyContext {
+        case_id: "c",
+        identities: &[],
+        practitioner: &[],
+        allowlisted: &|_| false,
+        confirmed_names: &|_| false,
+        past_names: &|_| false,
+        today: (2026, 9, 28),
+        masks: None,
+    };
+    let lines = dv_style::stylometry::RHYTHM_FIXED;
+    let used = dv_style::text::CONNECTORS
+        .iter()
+        .map(|c| format!("«{c}»"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut cards = Vec::new();
+    for w in 3..=45u32 {
+        let card: Vec<String> = lines
+            .iter()
+            .map(|l| {
+                l.replace("{w}", &w.to_string())
+                    .replace("{lo}", &(w.saturating_sub(4).max(3)).to_string())
+                    .replace("{hi}", &(w + 4).to_string())
+                    .replace("{k}", &(w % 9 + 1).to_string())
+                    .replace("{h}", &(w % 16 + 1).to_string())
+                    .replace("{f}", &(w % 12 + 1).to_string())
+                    .replace("{used}", &used)
+                    .replace("{unused}", &used)
+            })
+            .collect();
+        cards.push(card.join("\n"));
+    }
+    for card in cards {
+        let out = dv_privacy::filter(&card, &ctx).unwrap();
+        assert!(out.auto_hidden.is_empty(), "{:?}", out.auto_hidden);
+        assert_eq!(out.tagged, card);
+    }
 }
 
 /// Section titles and score tables are case text: they pass the filter and the review screen,

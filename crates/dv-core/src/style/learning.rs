@@ -59,8 +59,10 @@ impl Core {
         }
     }
 
-    /// The report she finished (exported): every approved paragraph teaches the style model
-    /// at full weight, once per case. Numbers only; never blocks the export.
+    /// The report she finished (exported): every approved paragraph she wrote or edited teaches
+    /// the style model at full weight, once per case. The AI's paragraphs she approved as they
+    /// were teach nothing: they are the model's writing, and would pull her figures toward it
+    /// (C6). Numbers only; never blocks the export.
     pub(crate) fn learn_from_final(&mut self, case_id: &str) {
         let _ = self.try_learn_from_final(case_id);
     }
@@ -71,7 +73,8 @@ impl Core {
         let mut parts: Vec<(String, String)> = Vec::new();
         for section in structure.sections().filter(|s| s.key != "signature") {
             for d in v.drafts(case_id, &section.key)? {
-                if d.status == DraftStatus::Approved {
+                // An edit makes the paragraph hers (`author` user), as her own paragraphs are.
+                if d.status == DraftStatus::Approved && d.author == Author::User {
                     parts.push((section.key.clone(), d.text_tagged));
                 }
             }
@@ -133,15 +136,11 @@ impl Core {
                 .find(|s| shape_key(s) == key)
                 .ok_or_else(not_found)?;
             learning.dismissed_phrases.push(id.to_owned());
-            let verb = match shape.place {
-                dv_style::Place::Opening => "לפתוח",
-                dv_style::Place::Closing => "לסיים",
-            };
             (
                 Some(shape.section.clone()),
                 StyleKind::Rule,
-                format!("{verb} את הסעיף ב«{}…»", shape.text),
-                StyleOrigin::Reports,
+                shape_rule(shape),
+                StyleOrigin::Accepted,
                 shape.reports,
             )
         } else if let Some(norm) = id.strip_prefix(FORMULA_ID) {
@@ -155,7 +154,7 @@ impl Core {
                 f.section.clone(),
                 StyleKind::Template,
                 f.text.clone(),
-                StyleOrigin::Reports,
+                StyleOrigin::Accepted,
                 f.reports,
             )
         } else if let Some(norm) = id.strip_prefix(PHRASE_ID) {
@@ -169,7 +168,7 @@ impl Core {
                 p.section.clone(),
                 StyleKind::Phrase,
                 p.text.clone(),
-                StyleOrigin::Reports,
+                StyleOrigin::Accepted,
                 p.reports,
             )
         } else {
@@ -191,11 +190,9 @@ impl Core {
             (section, kind, text, StyleOrigin::Edits, 0)
         };
         let (section, kind, text, origin, support) = item;
-        let mut stored = self.active_profile()?.unwrap_or(StoredProfile {
-            profile: StyleProfile::default(),
-            dropped: 0,
-            demo: false,
-        });
+        let mut stored = self
+            .active_profile()?
+            .unwrap_or_else(|| StoredProfile::new(StyleProfile::default()));
         stored.profile.items.push(StyleItem {
             id: dv_vault::crypto::random_id()?,
             section,
@@ -242,6 +239,39 @@ pub(super) const PHRASE_ID: &str = "phrase:";
 pub(super) const SHAPE_ID: &str = "shape:";
 /// ...and of her fixed wordings with this (kept whole when she answers, like a shape's).
 pub(super) const FORMULA_ID: &str = "formula:";
+
+/// The rule an accepted opening or closing of hers becomes.
+pub(super) fn shape_rule(shape: &dv_style::Shape) -> String {
+    let verb = match shape.place {
+        dv_style::Place::Opening => "לפתוח",
+        dv_style::Place::Closing => "לסיים",
+    };
+    format!("{verb} את הסעיף ב«{}…»", shape.text)
+}
+
+/// An item of an older profile that is in fact one she accepted from what was found on her
+/// computer (stored then as learned from her reports): the same text as an accepted phrase,
+/// fixed wording, opening or closing (C1).
+pub(super) fn accepted_earlier(item: &StyleItem, learning: &Learning, local: &LocalStyle) -> bool {
+    if item.origin != StyleOrigin::Reports {
+        return false;
+    }
+    let answered = |id: &str| learning.dismissed_phrases.iter().any(|d| d == id);
+    match item.kind {
+        StyleKind::Phrase => local
+            .phrases
+            .iter()
+            .any(|p| p.text == item.text && answered(&p.norm)),
+        StyleKind::Template => local
+            .formulas
+            .iter()
+            .any(|f| f.text == item.text && answered(&format!("{FORMULA_ID}{}", f.norm))),
+        StyleKind::Rule => local.shapes.iter().any(|sh| {
+            shape_rule(sh) == item.text && answered(&format!("{SHAPE_ID}{}", shape_key(sh)))
+        }),
+        _ => false,
+    }
+}
 
 pub(super) fn shape_key(s: &dv_style::Shape) -> String {
     let place = match s.place {

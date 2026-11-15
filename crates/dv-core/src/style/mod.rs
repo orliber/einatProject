@@ -370,10 +370,120 @@ struct StoredProfile {
     dropped: u32,
     #[serde(default)]
     demo: bool,
+    /// Her decisions that a rebuilt profile must keep (C1, D-166): an item she reworded, by
+    /// id, with its wording before her first change, so the same item learned again gives
+    /// way to her version.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    originals: BTreeMap<String, String>,
+    /// ...and what she deleted, so it does not come back with the next build. Only the item
+    /// texts she already had in her profile; the latest [`MAX_REMOVED`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    removed: Vec<RemovedItem>,
+}
+
+impl StoredProfile {
+    fn new(profile: StyleProfile) -> Self {
+        Self {
+            profile,
+            dropped: 0,
+            demo: false,
+            originals: BTreeMap::new(),
+            removed: Vec::new(),
+        }
+    }
+}
+
+/// An item she deleted (C1): what a newly learned item is compared with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct RemovedItem {
+    section: Option<String>,
+    kind: StyleKind,
+    text: String,
+}
+
+/// How many deleted items are remembered.
+const MAX_REMOVED: usize = 300;
+
+/// Two wordings of one item (C1): the same words after normalizing (punctuation, spacing,
+/// final letters), or word sets that overlap at least [`SIMILAR_JACCARD`].
+const SIMILAR_JACCARD: f64 = 0.8;
+
+fn similar(a: &str, b: &str) -> bool {
+    let (wa, wb) = (overlap_words(a), overlap_words(b));
+    if wa.is_empty() || wb.is_empty() {
+        return false;
+    }
+    if wa == wb {
+        return true;
+    }
+    let sa: HashSet<&String> = wa.iter().collect();
+    let sb: HashSet<&String> = wb.iter().collect();
+    let common = sa.intersection(&sb).count() as f64;
+    let all = sa.union(&sb).count() as f64;
+    all > 0.0 && common / all >= SIMILAR_JACCARD
+}
+
+/// The same kind and place, and a similar wording.
+fn same_item(
+    kind: StyleKind,
+    section: Option<&str>,
+    text: &str,
+    other_kind: StyleKind,
+    other_section: Option<&str>,
+    other_text: &str,
+) -> bool {
+    kind == other_kind && section == other_section && similar(text, other_text)
 }
 
 /// What was learned from her edits (the document keeps the earlier `pairs` shape).
 type Learning = dv_style::EditModel;
+
+/// Her decisions in `profile` against the `previous` version (C1): an item learned from her
+/// reports whose wording she changed becomes [`StyleOrigin::Edited`], with its earlier wording
+/// kept in `stored.originals`; an item gone from the list is remembered in `stored.removed`.
+fn note_decisions(previous: &StyleProfile, profile: &mut StyleProfile, stored: &mut StoredProfile) {
+    for item in &mut profile.items {
+        let Some(before) = previous.items.iter().find(|p| p.id == item.id) else {
+            continue;
+        };
+        if before.text != item.text
+            && matches!(
+                item.origin,
+                StyleOrigin::Reports | StyleOrigin::Accepted | StyleOrigin::Edited
+            )
+        {
+            item.origin = StyleOrigin::Edited;
+            stored
+                .originals
+                .entry(item.id.clone())
+                .or_insert_with(|| before.text.clone());
+        }
+    }
+    for gone in previous
+        .items
+        .iter()
+        .filter(|p| !profile.items.iter().any(|i| i.id == p.id))
+    {
+        let mut texts = vec![gone.text.clone()];
+        texts.extend(stored.originals.remove(&gone.id));
+        for text in texts {
+            let r = RemovedItem {
+                section: gone.section.clone(),
+                kind: gone.kind,
+                text,
+            };
+            if !stored.removed.contains(&r) {
+                stored.removed.push(r);
+            }
+        }
+    }
+    let extra = stored.removed.len().saturating_sub(MAX_REMOVED);
+    stored.removed.drain(..extra);
+    // An item no longer in the profile has no earlier wording to keep.
+    stored
+        .originals
+        .retain(|id, _| profile.items.iter().any(|i| i.id == *id));
+}
 
 /// The local style model and the phrases of her reports, kept in one sealed secret (D-052).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -408,7 +518,15 @@ pub(crate) struct LocalStyle {
     /// What she leaves out beside scores (K12).
     #[serde(default)]
     habits: dv_domain::SheetHabits,
+    /// The way her past reports were measured ([`MEASURE_VERSION`]); an older one is measured
+    /// again when the vault opens.
+    #[serde(default)]
+    measured: u32,
 }
+
+/// The way her past reports are measured now: 1 counts a score tag as one word and counts
+/// her linking words one by one (C3, C6).
+pub(crate) const MEASURE_VERSION: u32 = 1;
 
 /// How many months of closeness figures are kept for the trend.
 const MONTHS_KEPT: usize = 12;
@@ -986,18 +1104,31 @@ pub(crate) fn style_source(v: &Vault) -> Result<Option<StyleSource>, CoreError> 
     else {
         return Ok(None);
     };
-    Ok(Some(StyleSource(parse(&active.json)?)))
+    Ok(Some(StyleSource {
+        stored: parse(&active.json)?,
+        // Numbers only (her usual figures); its card goes with the profile (C3).
+        model: local_style(v)?.model,
+    }))
 }
 
 /// Her active profile as the vault keeps it, read under the core's lock and rendered for a
-/// request away from it (D-109).
-pub(crate) struct StyleSource(StoredProfile);
+/// request away from it (D-109), with her measured figures for the rhythm card.
+pub(crate) struct StyleSource {
+    stored: StoredProfile,
+    model: dv_style::StyleModel,
+}
 
 /// Her style items may quote her reports: wiped when the request is done with them.
 impl Drop for StyleSource {
     fn drop(&mut self) {
-        for item in &mut self.0.profile.items {
+        for item in &mut self.stored.profile.items {
             zeroize::Zeroize::zeroize(&mut item.text);
+        }
+        for t in self.stored.originals.values_mut() {
+            zeroize::Zeroize::zeroize(t);
+        }
+        for r in &mut self.stored.removed {
+            zeroize::Zeroize::zeroize(&mut r.text);
         }
     }
 }
@@ -1015,16 +1146,26 @@ impl StyleSource {
         query: &str,
         patterns: &[dv_domain::ScorePattern],
     ) -> Option<String> {
-        let stored = &self.0;
+        let stored = &self.stored;
         let keep = |t: &str| clean(t, ctx);
         let focused = focus(&stored.profile, section_key, query, patterns);
-        let text = dv_ai::render_for_section(&focused, section_key, &keep, patterns)?;
-        // Learned only from her edits: her rules come on top of the default style.
-        Some(if stored.profile.reports == 0 {
-            format!("{}\n{text}", dv_ai::prompts::DEFAULT_STYLE)
-        } else {
-            text
-        })
+        let text = dv_ai::render_for_section(&focused, section_key, &keep, patterns);
+        // Her rhythm in this section (C3): numbers and fixed words, filtered like an item.
+        let card = self.model.rhythm_card(section_key).filter(|c| keep(c));
+        if text.is_none() && card.is_none() {
+            return None;
+        }
+        // Learned only from her edits (or nothing of it left for this case): her rules and
+        // her rhythm come on top of the default style.
+        let default = (stored.profile.reports == 0 || text.is_none())
+            .then_some(dv_ai::prompts::DEFAULT_STYLE);
+        Some(
+            [default.map(str::to_owned), text, card]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
     }
 }
 
@@ -1575,10 +1716,23 @@ impl Core {
         let children = child_groups(self.vault_ref()?, &ids)?;
         let mut local = local_style(self.vault_ref()?)?;
         fit_reports(&mut local, &sources, &children);
+        local.measured = MEASURE_VERSION;
         let v = self.vault_mut()?;
         v.set_secret(LOCAL_STYLE_KEY, &json(&local)?)?;
         v.set_secret(OLD_FINGERPRINT_KEY, "null")?;
         Ok(())
+    }
+
+    /// Her past reports measured again when the way they are measured changed (C3, C6). Best
+    /// effort, when the vault opens: an error only keeps the older figures.
+    pub(crate) fn refresh_style_measures(&mut self) {
+        let due = self.vault_ref().is_ok_and(|v| {
+            local_style(v).is_ok_and(|l| l.measured < MEASURE_VERSION)
+                && v.style_sources().is_ok_and(|s| !s.is_empty())
+        });
+        if due {
+            let _ = self.remeasure_style();
+        }
     }
 
     pub fn discard_style_upload(&mut self) {
@@ -1763,24 +1917,44 @@ impl Core {
     }
 
     /// Save her edits of the profile (toggles, wording, deletions, new rules) as the draft.
+    /// What she reworded and what she deleted is remembered with it, so a profile built again
+    /// from her reports keeps her decisions (C1).
     pub fn save_style_draft(
         &mut self,
         mut profile: StyleProfile,
     ) -> Result<StyleProfileView, CoreError> {
         self.check_items(&mut profile)?;
-        let current = self
-            .vault_ref()?
-            .style_profiles()?
-            .into_iter()
+        let profiles = self.vault_ref()?.style_profiles()?;
+        let draft = profiles
+            .iter()
             .find(|p| p.status == "draft")
             .map(|p| parse::<StoredProfile>(&p.json))
             .transpose()?;
-        let (dropped, demo) = current.map_or((0, false), |c| (c.dropped, c.demo));
-        self.store_draft(&StoredProfile {
-            profile,
-            dropped,
-            demo,
-        })
+        // What she changed is read against the draft she was editing, or the profile in use.
+        let from_draft = draft.is_some();
+        let previous = match draft {
+            Some(d) => Some(d),
+            None => profiles
+                .iter()
+                .find(|p| p.status == "active")
+                .map(|p| parse::<StoredProfile>(&p.json))
+                .transpose()?,
+        };
+        let mut stored = StoredProfile::new(StyleProfile {
+            items: Vec::new(),
+            reports: profile.reports,
+        });
+        if let Some(prev) = previous {
+            if from_draft {
+                stored.dropped = prev.dropped;
+                stored.demo = prev.demo;
+            }
+            stored.originals = prev.originals;
+            stored.removed = prev.removed;
+            note_decisions(&prev.profile, &mut profile, &mut stored);
+        }
+        stored.profile = profile;
+        self.store_draft(&stored)
     }
 
     /// The draft becomes the profile in use (a new version).

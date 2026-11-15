@@ -93,6 +93,8 @@ export function ProfileEditor({ view, o, kinds }: { view: StyleProfileView; o: S
                       )}
                       {item.origin === "edits" && <span className="chip chip-sand">מהתיקונים שלך</span>}
                       {item.origin === "manual" && <span className="chip chip-sand">שלך</span>}
+                      {item.origin === "edited" && <span className="chip chip-sand">בניסוח שלך</span>}
+                      {item.origin === "accepted" && <span className="chip chip-sand">אישרת</span>}
                       {item.origin === "reports" && item.support > 1 && <span className="chip">ב-{item.support} דוחות</span>}
                       <button type="button" className="btn icon-btn" aria-label="מחיקה" onClick={() => change((all) => all.filter((x) => x.id !== item.id))}><CloseIcon /></button>
                     </li>

@@ -751,7 +751,8 @@ fn phrases_that_recur_in_her_reports_are_offered_without_any_request() {
     let active = core.accept_style_suggestion(&first.id).unwrap();
     assert!(active.profile.items.iter().any(|i| i.text == first.from
         && i.kind == dv_ai::StyleKind::Phrase
-        && i.origin == dv_ai::StyleOrigin::Reports
+        // Her yes makes it hers to keep through a rebuild (D-166).
+        && i.origin == dv_ai::StyleOrigin::Accepted
         && i.section == first.section));
     assert!(
         !core
@@ -1412,7 +1413,8 @@ fn a_sentence_she_writes_the_same_way_in_three_reports_is_offered_as_her_wording
     let active = core.accept_style_suggestion(&first.id).unwrap();
     assert!(active.profile.items.iter().any(|i| i.text == first.from
         && i.kind == dv_ai::StyleKind::Template
-        && i.origin == dv_ai::StyleOrigin::Reports));
+        // Her yes makes it hers to keep through a rebuild (D-166).
+        && i.origin == dv_ai::StyleOrigin::Accepted));
     assert!(!core
         .style_overview()
         .unwrap()
@@ -1634,4 +1636,426 @@ fn her_approved_interpretations_that_fit_the_scores_go_out_and_a_misfit_is_noted
         !last_sent(&fake).contains("איך הפסיכולוגית מפרשת תוצאות"),
         "switched off"
     );
+}
+
+// ------------------------------------------------------------ D-166 (C1-C6)
+
+fn item(section: Option<&str>, kind: dv_ai::StyleKind, text: &str) -> dv_ai::StyleItem {
+    dv_ai::StyleItem {
+        id: String::new(),
+        section: section.map(str::to_owned),
+        kind,
+        text: text.into(),
+        enabled: true,
+        origin: dv_ai::StyleOrigin::Manual,
+        support: 0,
+        pattern: None,
+    }
+}
+
+/// A synthesis answer with these items (section, kind, text, support).
+fn synthesis(items: &[(&str, &str, &str, u32)]) -> Value {
+    let items: Vec<Value> = items
+        .iter()
+        .map(|(section, kind, text, support)| {
+            json!({"section": section, "kind": kind, "text": text, "support": support})
+        })
+        .collect();
+    api_json(&json!({ "items": items, "inferences": [] }))
+}
+
+fn rebuild(core: &mut Core, fake: &FakeTransport, answer: Value) -> crate::StyleProfileView {
+    *fake.answer.lock().unwrap() = Some(answer);
+    let p = core.prepare_style_profile().unwrap();
+    core.send_style_profile(&p.approval_id.unwrap()).unwrap()
+}
+
+/// C1: a profile built again keeps what she switched off, reworded and deleted.
+#[test]
+fn a_rebuilt_profile_keeps_her_decisions() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core) = vault(Some(fake.clone()));
+    upload(&mut core);
+    let s = core.style_overview().unwrap().sources.remove(0);
+    let p = core.prepare_style_analysis(&s.id).unwrap();
+    core.send_style_analysis(&p.approval_id.unwrap()).unwrap();
+    let first = [
+        ("general", "rule", "גוף נסתר וזמן הווה לאורך כל הדוח", 1),
+        ("cognitive", "rule", "הציון בא אחרי התיאור המילולי", 1),
+        (
+            "cognitive",
+            "template",
+            "הציג תפקוד {רמה} ({תוצאה}) בתחום {תחום}",
+            1,
+        ),
+        ("general", "phrase", "כך לדוגמא", 1),
+    ];
+    let draft = rebuild(&mut core, &fake, synthesis(&first));
+    assert_eq!(draft.profile.items.len(), 4);
+    core.approve_style_draft().unwrap();
+
+    // Her word: off, reworded, deleted.
+    let mut mine = core.style_overview().unwrap().active.unwrap().profile;
+    for i in &mut mine.items {
+        match i.text.as_str() {
+            "גוף נסתר וזמן הווה לאורך כל הדוח" => i.enabled = false,
+            "הציון בא אחרי התיאור המילולי" => {
+                i.text = "קודם התיאור במילים ורק אחריו הציון".into()
+            }
+            _ => {}
+        }
+    }
+    mine.items.retain(|i| i.kind != dv_ai::StyleKind::Template);
+    let saved = core.save_style_draft(mine).unwrap();
+    let edited = saved
+        .profile
+        .items
+        .iter()
+        .find(|i| i.text.starts_with("קודם התיאור"))
+        .unwrap();
+    assert_eq!(edited.origin, dv_ai::StyleOrigin::Edited);
+    core.approve_style_draft().unwrap();
+
+    // The next build learns the same items again (one with other punctuation), a new one, and
+    // reports a support above the number of reports analysed.
+    let again = rebuild(
+        &mut core,
+        &fake,
+        synthesis(&[
+            ("general", "rule", "גוף נסתר, וזמן הווה, לאורך כל הדוח.", 1),
+            ("cognitive", "rule", "הציון בא אחרי התיאור המילולי", 1),
+            (
+                "cognitive",
+                "template",
+                "הציג תפקוד {רמה} ({תוצאה}) בתחום {תחום}",
+                1,
+            ),
+            ("general", "phrase", "כך לדוגמא", 1),
+            ("summary", "rule", "הסיכום פותח בחוזקות", 7),
+        ]),
+    );
+    let find = |t: &str| again.profile.items.iter().find(|i| i.text == t);
+    let off = find("גוף נסתר, וזמן הווה, לאורך כל הדוח.").unwrap();
+    assert!(
+        !off.enabled,
+        "what she switched off comes back switched off"
+    );
+    assert!(
+        find("הציון בא אחרי התיאור המילולי").is_none(),
+        "her wording stands"
+    );
+    assert_eq!(
+        find("קודם התיאור במילים ורק אחריו הציון").unwrap().origin,
+        dv_ai::StyleOrigin::Edited
+    );
+    assert!(
+        find("הציג תפקוד {רמה} ({תוצאה}) בתחום {תחום}").is_none(),
+        "what she deleted does not come back"
+    );
+    assert!(find("כך לדוגמא").unwrap().enabled);
+    assert_eq!(
+        find("הסיכום פותח בחוזקות").unwrap().support,
+        1,
+        "at most the reports"
+    );
+}
+
+/// C1: an accepted suggestion keeps an origin of its own, and an older profile that stored it
+/// as learned from her reports still loads, and keeps it in a rebuild.
+#[test]
+fn accepted_suggestions_survive_a_rebuild_and_old_profiles_still_load() {
+    let old = json!({
+        "profile": {"items": [{"id": "a", "section": null, "kind": "phrase", "text": "כך לדוגמא",
+            "enabled": true, "origin": "reports", "support": 3}], "reports": 3},
+        "dropped": 1
+    });
+    let stored: super::StoredProfile = serde_json::from_value(old).unwrap();
+    assert!(stored.originals.is_empty() && stored.removed.is_empty());
+    let accepted = |i: &dv_ai::StyleItem| i.text == "כך לדוגמא";
+    let fresh = dv_ai::StyleItem {
+        id: "b".into(),
+        section: None,
+        kind: dv_ai::StyleKind::Rule,
+        text: "גוף נסתר".into(),
+        enabled: true,
+        origin: dv_ai::StyleOrigin::Reports,
+        support: 1,
+        pattern: None,
+    };
+    let rebuilt = super::requests::carry_decisions(vec![fresh], 4, &[stored], &accepted);
+    let kept = rebuilt
+        .profile
+        .items
+        .iter()
+        .find(|i| i.text == "כך לדוגמא")
+        .unwrap();
+    assert_eq!(kept.origin, dv_ai::StyleOrigin::Accepted);
+    assert_eq!(rebuilt.profile.items.len(), 2);
+    // The new origins read and write as words.
+    let edited: dv_ai::StyleOrigin = serde_json::from_value(json!("edited")).unwrap();
+    assert_eq!(edited, dv_ai::StyleOrigin::Edited);
+    assert_eq!(
+        serde_json::to_value(dv_ai::StyleOrigin::Accepted).unwrap(),
+        json!("accepted")
+    );
+}
+
+/// C2 and the review of D-166: a general template or example holding the name of this case's
+/// child is left out of its request (the per-item filter of every profile item), and the name
+/// never goes out; the other general items do.
+#[test]
+fn a_general_template_with_this_childs_name_is_left_out_and_the_name_never_goes_out() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core) = vault(Some(fake.clone()));
+    // Approved before the case: "אלון" is no one's name yet.
+    let profile = dv_ai::StyleProfile {
+        reports: 1,
+        items: vec![
+            item(
+                None,
+                dv_ai::StyleKind::Template,
+                "תוצאות שאלון ההורים הצביעו על {תחום}",
+            ),
+            item(
+                None,
+                dv_ai::StyleKind::Example,
+                "שאלון ההורים מולא בבית לפני המפגש.",
+            ),
+            item(
+                None,
+                dv_ai::StyleKind::Template,
+                "הילד הציג תפקוד {רמה} בתחום {תחום}",
+            ),
+            item(
+                None,
+                dv_ai::StyleKind::Example,
+                "הילדה הגיעה למפגש ונפרדה בקלות.",
+            ),
+        ],
+    };
+    core.save_style_draft(profile).unwrap();
+    core.approve_style_draft().unwrap();
+    let case_id = case(&mut core); // a child named "אלון"
+    let p = core
+        .prepare_section(&case_id, "appearance", "נסחי")
+        .unwrap();
+    assert!(p.blocked.is_empty(), "{:?}", p.blocked);
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    let body = last_sent(&fake);
+    assert!(
+        body.contains("הילד הציג תפקוד {רמה} בתחום {תחום}"),
+        "general templates go"
+    );
+    assert!(
+        body.contains("הילדה הגיעה למפגש ונפרדה בקלות."),
+        "general examples go"
+    );
+    let at = body
+        .find("אלון")
+        .map(|i| body[i.saturating_sub(120)..(i + 40).min(body.len())].to_owned());
+    assert!(at.is_none(), "the child's name never goes out: {at:?}");
+    assert!(
+        !body.contains("ההורים הצביעו"),
+        "the item is left out, not rewritten"
+    );
+    assert!(!body.contains("מולא בבית"), "and the example too");
+}
+
+/// Twenty invented paragraphs of hers in a section, with a word that is no linking word.
+fn her_paragraphs(section: &str) -> super::StoredSource {
+    let text: String = (0..20)
+        .map(|i| {
+            let t = ["המשחק", "השפה", "הקשב", "הציור"][i % 4];
+            format!(
+                "בתחום {t} נראה כי הילד פועל בהתאם לגילו, עם זאת ניכר קושי קל במעברים. \
+                 בנוסף התרשמתי מילד סקרן עם נועמי, אשר נעזר בתיווך מבוגר. \
+                 כאשר המשימה התארכה הוא ביקש הפסקה קצרה וחזר לעבודה.\n"
+            )
+        })
+        .collect();
+    super::StoredSource {
+        title: "דוח".into(),
+        format: "text".into(),
+        parts: vec![super::StoredPart {
+            section: Some(section.into()),
+            heading: String::new(),
+            text,
+        }],
+        analysis: None,
+    }
+}
+
+/// C3: her rhythm in the section goes with the drafting request, numbers and fixed words
+/// only, the same from one request to the next.
+#[test]
+fn the_rhythm_card_goes_with_the_request_and_holds_only_numbers_and_fixed_words() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core) = vault(Some(fake.clone()));
+    let case_id = case(&mut core);
+    let mut local = super::LocalStyle::default();
+    super::fit_reports(&mut local, &[her_paragraphs("appearance")], &[0]);
+    core.vault_mut()
+        .unwrap()
+        .set_secret(super::LOCAL_STYLE_KEY, &super::json(&local).unwrap())
+        .unwrap();
+    core.save_style_draft(dv_ai::StyleProfile {
+        reports: 1,
+        items: vec![item(None, dv_ai::StyleKind::Rule, "גוף נסתר וזמן הווה")],
+    })
+    .unwrap();
+    core.approve_style_draft().unwrap();
+
+    let system = |core: &mut Core| {
+        let p = core
+            .prepare_section(&case_id, "appearance", "נסחי")
+            .unwrap();
+        assert!(p.parts.iter().any(|part| part.label == "פרופיל הסגנון שלך"));
+        core.send_section(&p.approval_id.unwrap()).unwrap();
+        let body: Value = serde_json::from_str(&last_sent(&fake)).unwrap();
+        body["system"][0]["text"].as_str().unwrap().to_owned()
+    };
+    let first = system(&mut core);
+    let at = first
+        .find("הקצב שלה בסעיף הזה")
+        .unwrap_or_else(|| panic!("{first}"));
+    let card: Vec<&str> = first[at..]
+        .lines()
+        .take_while(|l| l.starts_with("הקצב") || l.starts_with("- "))
+        .collect();
+    assert!(card.len() >= 4, "{card:?}");
+    assert!(card.iter().any(|l| l.contains("«עם זאת»")), "{card:?}");
+    assert!(!first.contains("נועמי"), "no word of a report");
+    let bare = |raw: &str| -> String {
+        let kept: String = raw
+            .chars()
+            .filter(|c| !c.is_ascii_digit() && !matches!(c, '{' | '}'))
+            .collect();
+        normalize(kept.trim_matches('-'))
+    };
+    let slots = [
+        "{w}", "{lo}", "{hi}", "{k}", "{h}", "{f}", "{used}", "{unused}",
+    ];
+    let fixed: std::collections::HashSet<String> = dv_style::stylometry::RHYTHM_FIXED
+        .iter()
+        .map(|t| slots.iter().fold((*t).to_owned(), |t, s| t.replace(s, "")))
+        .chain(dv_style::text::CONNECTORS.iter().map(|c| (*c).to_owned()))
+        .flat_map(|t| dv_style::text::words(&t))
+        .map(|w| bare(&w.raw))
+        .collect();
+    for w in dv_style::text::words(&card.join("\n")) {
+        let b = bare(&w.raw);
+        assert!(b.is_empty() || fixed.contains(&b), "{} in {card:?}", w.raw);
+    }
+    // The same inputs, the same cached text.
+    assert_eq!(system(&mut core), first);
+}
+
+/// C5: a closing section has no sources; its style items are chosen by the approved sections.
+#[test]
+fn a_closing_section_chooses_its_style_items_by_the_approved_sections() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core) = vault(Some(fake.clone()));
+    let topics = [
+        "ציור",
+        "שפה",
+        "ריצה",
+        "קשב",
+        "משחק",
+        "שינה",
+        "אכילה",
+        "חברים",
+    ];
+    core.save_style_draft(dv_ai::StyleProfile {
+        reports: 1,
+        items: topics
+            .iter()
+            .map(|t| {
+                item(
+                    Some("summary"),
+                    dv_ai::StyleKind::Template,
+                    &format!("בתחום ה{t} ניכר {{רמה}}"),
+                )
+            })
+            .collect(),
+    })
+    .unwrap();
+    core.approve_style_draft().unwrap();
+    let case_id = case(&mut core);
+    let d = core
+        .vault
+        .as_mut()
+        .unwrap()
+        .add_draft(
+            &case_id,
+            "appearance",
+            "ההורים מתארים קושי בשינה ובאכילה, ובגן ניכר קושי דומה בשינה.",
+            Author::User,
+            &[],
+        )
+        .unwrap();
+    core.vault
+        .as_mut()
+        .unwrap()
+        .set_draft_status(&case_id, &d.id, dv_domain::DraftStatus::Approved)
+        .unwrap();
+    let p = core.prepare_section(&case_id, "summary", "סכמי").unwrap();
+    assert!(p.blocked.is_empty(), "{:?}", p.blocked);
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    let body = last_sent(&fake);
+    assert!(body.contains("בתחום השינה ניכר {רמה}"), "{body}");
+    assert!(body.contains("בתחום האכילה ניכר {רמה}"));
+    let sent = topics
+        .iter()
+        .filter(|t| body.contains(&format!("בתחום ה{t} ניכר")))
+        .count();
+    assert_eq!(sent, 6, "the budget");
+}
+
+/// C6: a finished report teaches her figures only through what she wrote or edited.
+#[test]
+fn a_finished_report_teaches_only_what_she_wrote_or_edited() {
+    let (_dir, mut core) = vault(None);
+    let case_id = case(&mut core);
+    let paragraph = |who: &str| {
+        format!(
+            "בתחום המשחק {who} נראה כי הילד פועל בהתאם לגילו ומשתף פעולה. \
+             במהלך המפגש ניכר קושי קל במעברים בין משימות שונות. \
+             כאשר המשימה התארכה הוא ביקש הפסקה קצרה וחזר לעבודה."
+        )
+    };
+    for (author, who) in [(Author::Ai, "א"), (Author::User, "ב")] {
+        let v = core.vault.as_mut().unwrap();
+        let d = v
+            .add_draft(&case_id, "appearance", &paragraph(who), author, &[])
+            .unwrap();
+        v.set_draft_status(&case_id, &d.id, dv_domain::DraftStatus::Approved)
+            .unwrap();
+    }
+    core.try_learn_from_final(&case_id).unwrap();
+    let local = super::local_style(core.vault_ref().unwrap()).unwrap();
+    let learned = local.model.measures().from_finals;
+    assert!(
+        (learned - 1.0).abs() < 1e-9,
+        "only her paragraph: {learned}"
+    );
+}
+
+/// C3, C6: a model measured the earlier way is measured again when the vault opens.
+#[test]
+fn her_reports_are_measured_again_when_the_measuring_changed() {
+    let (_dir, mut core) = vault(None);
+    upload(&mut core);
+    let mut local = super::local_style(core.vault_ref().unwrap()).unwrap();
+    assert_eq!(local.measured, super::MEASURE_VERSION);
+    local.measured = 0;
+    local.model = dv_style::StyleModel::default();
+    core.vault_mut()
+        .unwrap()
+        .set_secret(super::LOCAL_STYLE_KEY, &super::json(&local).unwrap())
+        .unwrap();
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    let again = super::local_style(core.vault_ref().unwrap()).unwrap();
+    assert_eq!(again.measured, super::MEASURE_VERSION);
+    assert!(again.model.paragraphs() > 0.0, "measured again");
 }

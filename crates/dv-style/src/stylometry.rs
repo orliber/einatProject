@@ -16,7 +16,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::text::{has, paragraphs, sentences, words, CONTRAST, FIRST_PERSON, FUNCTION, HEDGE};
+use crate::text::{
+    connector_counts, has, paragraphs, sentences, words, CONNECTORS, CONTRAST, FIRST_PERSON,
+    FUNCTION, HEDGE,
+};
 use crate::GENERAL;
 
 /// Features of one paragraph. The order is the order of [`FEATURES`].
@@ -134,6 +137,39 @@ const FEATURES: [Feature; N] = [
     },
 ];
 
+/// The rhythm card (C3): her usual figures in a section, said before the AI writes rather than
+/// after. Fixed lines; `{…}` takes a whole number, `{used}` and `{unused}` linking words of
+/// [`CONNECTORS`]. Nothing else goes into it, never a word of a report.
+const RHYTHM_HEADING: &str =
+    "הקצב שלה בסעיף הזה, כפי שנמדד בדוחות שלה (מספרים בלבד). כתוב/י בקצב הזה:";
+const RHYTHM_SENTENCE: &str = "- משפטים של כ-{w} מילים, רובם בין {lo} ל-{hi} מילים.";
+const RHYTHM_PARAGRAPH: &str = "- כ-{k} משפטים בפסקה.";
+const RHYTHM_HEDGE: &str = "- מילות הסתייגות כמו «נראה» ו«ניכר»: כ-{h} פעמים בכל 10 משפטים.";
+const RHYTHM_NO_HEDGE: &str = "- כמעט בלי מילות הסתייגות כמו «נראה» ו«ניכר».";
+const RHYTHM_FIRST: &str = "- גוף ראשון כמו «התרשמתי»: כ-{f} פעמים בכל 10 משפטים.";
+const RHYTHM_NO_FIRST: &str = "- כמעט בלי גוף ראשון כמו «התרשמתי».";
+const RHYTHM_USED: &str = "- מילות הקישור שהיא משתמשת בהן הכי הרבה: {used}.";
+const RHYTHM_UNUSED: &str = "- מילות קישור שהיא כמעט לא משתמשת בהן, ועדיף לא להשתמש בהן: {unused}.";
+
+/// Every fixed line of the rhythm card, for the check that fixed text holds no first name.
+pub const RHYTHM_FIXED: [&str; 9] = [
+    RHYTHM_HEADING,
+    RHYTHM_SENTENCE,
+    RHYTHM_PARAGRAPH,
+    RHYTHM_HEDGE,
+    RHYTHM_NO_HEDGE,
+    RHYTHM_FIRST,
+    RHYTHM_NO_FIRST,
+    RHYTHM_USED,
+    RHYTHM_UNUSED,
+];
+
+/// How many of her most used linking words the card names, and of the ones she avoids.
+const RHYTHM_USED_MAX: usize = 4;
+const RHYTHM_UNUSED_MAX: usize = 4;
+/// A linking word used at less than this share of her most used one is one she avoids.
+const RHYTHM_RARE_SHARE: f64 = 0.1;
+
 /// Running mean and variance (Welford), with weights.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct Moments {
@@ -191,12 +227,17 @@ pub struct Part {
     pub sections: BTreeMap<String, Vec<Moments>>,
     /// Rate per 100 words of each of [`crate::text::FUNCTION_WORDS`].
     pub function: Vec<Moments>,
+    /// Rate per 100 words of each of [`CONNECTORS`] (C3). Empty in a model measured before
+    /// they were counted, until her reports are measured again.
+    #[serde(default)]
+    pub connectors: Vec<Moments>,
 }
 
 impl Part {
     fn ensure(&mut self) {
         self.global.resize(N, Moments::default());
         self.function.resize(FUNCTION.len(), Moments::default());
+        self.connectors.resize(CONNECTORS.len(), Moments::default());
         for v in self.sections.values_mut() {
             v.resize(N, Moments::default());
         }
@@ -207,6 +248,7 @@ impl Part {
             .global
             .iter_mut()
             .chain(self.function.iter_mut())
+            .chain(self.connectors.iter_mut())
             .chain(self.sections.values_mut().flatten())
         {
             m.fade(f);
@@ -233,6 +275,7 @@ impl Part {
             global: zip(&a.global, &b.global),
             sections,
             function: zip(&a.function, &b.function),
+            connectors: zip(&a.connectors, &b.connectors),
         }
     }
 }
@@ -268,8 +311,11 @@ pub struct Measures {
     pub first_person: Option<f64>,
 }
 
+/// What one paragraph measures: its features, its function-word rates and its connector rates.
+type Measure = ([f64; N], Vec<f64>, Vec<f64>);
+
 /// The raw features of a paragraph, without Delta (which needs her figures).
-fn measure(text: &str) -> Option<([f64; N], Vec<f64>)> {
+fn measure(text: &str) -> Option<Measure> {
     let sents: Vec<Vec<crate::text::Word>> = sentences(text)
         .into_iter()
         .map(words)
@@ -314,7 +360,11 @@ fn measure(text: &str) -> Option<([f64; N], Vec<f64>)> {
         .iter()
         .map(|fw| all.iter().filter(|w| &w.norm == fw).count() as f64 * 100.0 / n_words)
         .collect();
-    Some((f, rates))
+    let connectors = connector_counts(&all)
+        .into_iter()
+        .map(|c| c * 100.0 / n_words)
+        .collect();
+    Some((f, rates, connectors))
 }
 
 /// Burrows' Delta of one paragraph's function-word rates against hers.
@@ -333,6 +383,38 @@ fn delta(rates: &[f64], function: &[Moments]) -> Option<f64> {
     (k > 0.0).then(|| sum / k)
 }
 
+/// Her most used linking words (most used first) and the ones she practically never uses (in
+/// the list's order), from their rates over all her writing. Nothing while too few paragraphs
+/// counted them (a model measured before they were counted has none).
+fn connector_habits(rates: &[Moments]) -> (Vec<&'static str>, Vec<&'static str>) {
+    let counted: Vec<(&'static str, f64)> = CONNECTORS
+        .iter()
+        .zip(rates)
+        .filter(|(_, m)| m.n >= MIN_PARAGRAPHS)
+        .map(|(w, m)| (*w, m.mean))
+        .collect();
+    if counted.len() < CONNECTORS.len() {
+        return (Vec::new(), Vec::new());
+    }
+    let mut ranked: Vec<(&'static str, f64)> =
+        counted.iter().copied().filter(|(_, r)| *r > 0.0).collect();
+    // A stable sort: equal rates keep the list's order, so the card does not change by chance.
+    ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let top = ranked.first().map_or(0.0, |(_, r)| *r);
+    let used: Vec<&'static str> = ranked
+        .iter()
+        .take(RHYTHM_USED_MAX)
+        .map(|(w, _)| *w)
+        .collect();
+    let unused: Vec<&'static str> = counted
+        .iter()
+        .filter(|(w, r)| *r < top * RHYTHM_RARE_SHARE && !used.contains(w))
+        .take(RHYTHM_UNUSED_MAX)
+        .map(|(w, _)| *w)
+        .collect();
+    (used, unused)
+}
+
 /// Measures every paragraph of `parts` into one source's figures, at full weight. Delta is
 /// taken against `against` when given, else against the parts' own function-word profile.
 fn fit<'a>(
@@ -342,8 +424,8 @@ fn fit<'a>(
     fit_weighted(parts.into_iter().map(|(s, t)| (s, t, 1.0)), against)
 }
 
-/// One measured paragraph: (section, features, function-word rates, weight).
-type Measured<'a> = (Option<&'a str>, [f64; N], Vec<f64>, f64);
+/// One measured paragraph: (section, features, function-word rates, connector rates, weight).
+type Measured<'a> = (Option<&'a str>, [f64; N], Vec<f64>, Vec<f64>, f64);
 
 fn fit_weighted<'a>(
     parts: impl IntoIterator<Item = (Option<&'a str>, &'a str, f64)>,
@@ -352,18 +434,18 @@ fn fit_weighted<'a>(
     let measured: Vec<Measured<'_>> = parts
         .into_iter()
         .flat_map(|(s, t, w)| paragraphs(t).into_iter().map(move |p| (s, p, w)))
-        .filter_map(|(s, p, w)| measure(p).map(|(f, r)| (s, f, r, w)))
+        .filter_map(|(s, p, w)| measure(p).map(|(f, r, c)| (s, f, r, c, w)))
         .collect();
     let mut part = Part::default();
-    for (s, f, r, w) in &measured {
-        add(&mut part, *s, f, r, *w);
+    for (s, f, r, c, w) in &measured {
+        add(&mut part, *s, f, r, c, *w);
     }
     // Second pass: how far each paragraph is from her function-word profile.
     let function = match against {
         Some(f) if f.iter().any(|m| m.n >= 2.0) => f.to_vec(),
         _ => part.function.clone(),
     };
-    for (s, _, r, w) in measured {
+    for (s, _, r, _, w) in measured {
         if let Some(d) = delta(&r, &function) {
             let key = s.unwrap_or(GENERAL).to_owned();
             // `add` made room for every feature, Delta among them, before this pass.
@@ -382,7 +464,14 @@ fn fit_weighted<'a>(
     part
 }
 
-fn add(part: &mut Part, section: Option<&str>, f: &[f64; N], rates: &[f64], w: f64) {
+fn add(
+    part: &mut Part,
+    section: Option<&str>,
+    f: &[f64; N],
+    rates: &[f64],
+    connectors: &[f64],
+    w: f64,
+) {
     part.ensure();
     let key = section.unwrap_or(GENERAL).to_owned();
     let sec = part
@@ -396,6 +485,9 @@ fn add(part: &mut Part, section: Option<&str>, f: &[f64; N], rates: &[f64], w: f
         s.add(*x, w);
     }
     for (m, r) in part.function.iter_mut().zip(rates) {
+        m.add(*r, w);
+    }
+    for (m, r) in part.connectors.iter_mut().zip(connectors) {
         m.add(*r, w);
     }
 }
@@ -451,7 +543,7 @@ impl StyleModel {
     /// Learn from her final wording of a paragraph in `section`.
     pub fn observe_edit(&mut self, section: &str, text: &str) {
         let combined = self.combined();
-        let Some((mut f, r)) = measure(text) else {
+        let Some((mut f, r, c)) = measure(text) else {
             return;
         };
         if let Some(d) = delta(&r, &combined.function) {
@@ -459,7 +551,7 @@ impl StyleModel {
         }
         // What she edited long ago fades, a little with every new edit (ST5).
         self.edits.fade(EDIT_FADE);
-        add(&mut self.edits, Some(section), &f, &r, EDIT_WEIGHT);
+        add(&mut self.edits, Some(section), &f, &r, &c, EDIT_WEIGHT);
     }
 
     fn combined(&self) -> Part {
@@ -518,7 +610,7 @@ impl StyleModel {
         if part.global.first().map_or(0.0, |m| m.n) < MIN_PARAGRAPHS {
             return None;
         }
-        let (mut f, rates) = measure(text)?;
+        let (mut f, rates, _) = measure(text)?;
         if f[2] < 2.0 {
             return None;
         }
@@ -543,6 +635,72 @@ impl StyleModel {
             out.push((spec, (x - mean) / sd, mean, x));
         }
         Some(out)
+    }
+
+    /// The rhythm card of `section` (C3), or `None` while that section has fewer than
+    /// [`MIN_PARAGRAPHS`] paragraphs behind it. The figures are the ones her notes compare
+    /// against (the section's, pulled toward the whole report's), rounded to whole numbers, so
+    /// the card stays the same from one request to the next until she writes more. The
+    /// linking words are counted over all her writing. Numbers and the fixed words only.
+    #[must_use]
+    pub fn rhythm_card(&self, section: &str) -> Option<String> {
+        let part = self.combined();
+        let sec = part.sections.get(section)?;
+        if sec.first().map_or(0.0, |m| m.n) < MIN_PARAGRAPHS {
+            return None;
+        }
+        let usual = |i: usize| -> Option<f64> {
+            let g = part.global.get(i)?;
+            let s = sec.get(i)?;
+            let v = (s.n * s.mean + PRIOR * g.mean) / (s.n + PRIOR);
+            v.is_finite().then_some(v)
+        };
+        let whole = |x: f64| format!("{}", x.round().max(0.0) as u64);
+        let words = usual(0)?;
+        let spread = usual(1).unwrap_or(0.0);
+        let lo = (words - spread).round().max(3.0);
+        let hi = (words + spread).round().max(lo);
+        let mut lines = vec![
+            RHYTHM_HEADING.to_owned(),
+            RHYTHM_SENTENCE
+                .replace("{w}", &whole(words))
+                .replace("{lo}", &whole(lo))
+                .replace("{hi}", &whole(hi)),
+        ];
+        if let Some(k) = usual(2) {
+            lines.push(RHYTHM_PARAGRAPH.replace("{k}", &whole(k.max(1.0))));
+        }
+        // Per sentence, said out of ten sentences.
+        if let Some(h) = usual(7) {
+            let h = (h * 10.0).round();
+            lines.push(if h < 1.0 {
+                RHYTHM_NO_HEDGE.to_owned()
+            } else {
+                RHYTHM_HEDGE.replace("{h}", &whole(h))
+            });
+        }
+        if let Some(f) = usual(8) {
+            let f = (f * 10.0).round();
+            lines.push(if f < 1.0 {
+                RHYTHM_NO_FIRST.to_owned()
+            } else {
+                RHYTHM_FIRST.replace("{f}", &whole(f))
+            });
+        }
+        let (used, unused) = connector_habits(&part.connectors);
+        let quoted = |list: &[&str]| -> String {
+            list.iter()
+                .map(|w| format!("«{w}»"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        if !used.is_empty() {
+            lines.push(RHYTHM_USED.replace("{used}", &quoted(&used)));
+            if !unused.is_empty() {
+                lines.push(RHYTHM_UNUSED.replace("{unused}", &quoted(&unused)));
+            }
+        }
+        Some(lines.join("\n"))
     }
 
     /// How many paragraphs (weighted) the model has learned from.
@@ -625,6 +783,7 @@ impl StyleModel {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+    use dv_privacy::text::normalize;
 
     /// An invented paragraph in a steady, measured voice: medium sentences, some hedging.
     fn hers(i: usize) -> String {
@@ -778,6 +937,89 @@ mod tests {
             .is_some_and(|w| w > 8.0 && w < 20.0));
         assert!(usual.hedges.is_some());
         assert_eq!(StyleModel::default().measures().words_per_sentence, None);
+    }
+
+    /// Her paragraphs in a section: "עם זאת" and "בנוסף" often, "אך" once in a while, never
+    /// "אולם"; a word that is no linking word ("נועמי", invented) must never reach the card.
+    fn rhythmic(i: usize) -> String {
+        let t = ["המשחק", "השפה", "הקשב", "הציור"][i % 4];
+        let rare = if i % 5 == 0 { " אך לאט" } else { "" };
+        format!(
+            "בתחום {t} נראה כי הילד פועל בהתאם לגילו, עם זאת ניכר קושי קל במעברים{rare}. \
+             בנוסף התרשמתי מילד סקרן ומשתף פעולה עם נועמי, אשר נעזר בתיווך מבוגר. \
+             כאשר המשימה התארכה הוא ביקש הפסקה קצרה וחזר לעבודה."
+        )
+    }
+
+    fn rhythm_model() -> StyleModel {
+        let texts: Vec<String> = (0..20).map(rhythmic).collect();
+        let mut m = StyleModel::default();
+        m.fit_reports(texts.iter().map(|t| (Some("cognitive"), t.as_str())));
+        m
+    }
+
+    #[test]
+    fn the_rhythm_card_holds_only_numbers_and_fixed_words() {
+        let card = rhythm_model().rhythm_card("cognitive").unwrap();
+        assert!(card.starts_with(RHYTHM_HEADING), "{card}");
+        assert!(card.contains("- משפטים של כ-"), "{card}");
+        assert!(
+            card.contains("«עם זאת»") && card.contains("«בנוסף»"),
+            "{card}"
+        );
+        assert!(
+            card.contains("כמעט לא משתמשת") && card.contains("«אולם»"),
+            "{card}"
+        );
+        assert!(!card.contains("נועמי"), "a word of a report never goes in");
+        // Every word of the card is a word of its fixed lines or of the fixed lists, or a
+        // number.
+        // A number stands where a line has a `{slot}` ("כ-{w}" → "כ-12").
+        let bare = |raw: &str| -> String {
+            let kept: String = raw
+                .chars()
+                .filter(|c| !c.is_ascii_digit() && !matches!(c, '{' | '}'))
+                .collect();
+            normalize(kept.trim_matches('-'))
+        };
+        let slots = [
+            "{w}", "{lo}", "{hi}", "{k}", "{h}", "{f}", "{used}", "{unused}",
+        ];
+        let fixed: std::collections::HashSet<String> = RHYTHM_FIXED
+            .iter()
+            .map(|t| slots.iter().fold((*t).to_owned(), |t, s| t.replace(s, "")))
+            .flat_map(|t| words(&t))
+            .chain(CONNECTORS.iter().flat_map(|c| words(c)))
+            .map(|w| bare(&w.raw))
+            .collect();
+        for w in words(&card) {
+            let b = bare(&w.raw);
+            assert!(b.is_empty() || fixed.contains(&b), "{} in {card}", w.raw);
+        }
+        // The same figures give the same card (the request's cached part stays the same).
+        assert_eq!(rhythm_model().rhythm_card("cognitive").unwrap(), card);
+    }
+
+    #[test]
+    fn no_rhythm_card_with_too_little_in_the_section() {
+        let m = rhythm_model();
+        assert_eq!(m.rhythm_card("summary"), None, "no paragraph of hers there");
+        let mut few = StyleModel::default();
+        let texts: Vec<String> = (0..5).map(rhythmic).collect();
+        few.fit_reports(texts.iter().map(|t| (Some("cognitive"), t.as_str())));
+        assert_eq!(few.rhythm_card("cognitive"), None);
+    }
+
+    #[test]
+    fn a_model_measured_before_connectors_were_counted_gives_a_card_without_them() {
+        let mut m = rhythm_model();
+        m.reports.connectors.clear();
+        let card = m.rhythm_card("cognitive").unwrap();
+        assert!(card.contains("- משפטים של כ-"), "{card}");
+        assert!(!card.contains("מילות הקישור"), "{card}");
+        let old = serde_json::json!({"global": [], "sections": {}, "function": []});
+        let part: Part = serde_json::from_value(old).unwrap();
+        assert!(part.connectors.is_empty());
     }
 
     #[test]
