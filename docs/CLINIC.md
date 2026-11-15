@@ -77,10 +77,14 @@ CREATE TABLE clinic_patients (
 ```
 Everything is sealed with the settings key (as `style_sources` is: it does not belong to a case),
 AAD `aad(table, "data", id, "")`. Migrations only add; each one's hash is pinned in `db.rs`.
-History is written for `visit`, `payment` and `charge` on every save, in the same transaction as
-the record. A visit that is deleted leaves a `deleted` history row. Erasing a patient removes the
-card, every record and every history row of theirs, checkpoints the write-ahead logs of both
-databases, and writes one audit event.
+History is written for `visit`, `note`, `payment` and `charge` on every save, in the same
+transaction as the record. A visit that is deleted leaves a `deleted` history row. Erasing a
+patient (D-174) is allowed only for a card where nothing happened (no visit held or charged, no
+note, no charge, no payment, voided ones included), or after the retention period of a case
+(`KEEP_YEARS_AFTER_LAST_CHANGE` since the last activity in the card and `KEEP_UNTIL_AGE`); the
+rule is a pure function in `logic.rs` and is enforced in the core. It then removes the card, every
+record and every history row of theirs, checkpoints the write-ahead logs of both databases, and
+writes one audit event. Every stored record reads with `#[serde(default)]` (D-175).
 
 ### Rules (the single place: `logic.rs`)
 Limits: a name 1–120 chars; short fields (place, title, receipt, payer, phone, email, framework,
@@ -133,6 +137,10 @@ name becomes "רב" ("שלום רב"); the date is `15.11.2026`, the time `09:30
   `update_input`: kind `Intake` for an intake visit, `Observation` for an observation, otherwise
   `SessionNote`; title `סיכום <kind> · <dd.mm.yyyy>`; content = `record` only.
 - `SavePatient` never changes `case_id`. Erasing a patient never touches the case.
+- A case that was purged leaves a `case_id` that points nowhere: every read treats it as "no case"
+  (no error), and the card offers to link or open another.
+- `CreateCase` registers every named contact as an identity of the case (not only the mother and
+  the father), so a session record sent to the case later has their names masked by the filter.
 
 ### The window
 `Route` gets `{ name: "clinic"; tab?: ClinicTab; patientId?: string }`; the top bar gets

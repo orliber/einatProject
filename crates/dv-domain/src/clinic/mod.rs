@@ -7,7 +7,10 @@
 //! Conventions of every type here:
 //! * a date is ISO `YYYY-MM-DD`, a month `YYYY-MM`; a time of day is minutes from midnight;
 //! * money is whole agorot ([`Agorot`]), never a float;
-//! * an empty `id` on a record sent to be saved means "a new one".
+//! * an empty `id` on a record sent to be saved means "a new one";
+//! * every record that is stored reads a missing field as its default and ignores a field it
+//!   does not know (`#[serde(default)]`): a row written by an earlier version still loads after
+//!   a field is added, and one written by a later version loads in the version before (R7).
 //!
 //! Nothing here is ever sent to an AI. The one way clinic text reaches a case is
 //! [`ClinicRequest::NoteToCase`], which copies the formal record of a session (never the
@@ -30,29 +33,32 @@ pub type Agorot = i32;
 // ------------------------------------------------------------------ patients
 
 /// Where a patient is on the way through the clinic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum PatientStatus {
     /// On the waiting list: asked for an assessment, nothing scheduled yet.
     Waiting,
+    #[default]
     Active,
     /// The work with the family ended; kept for the record.
     Closed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum ContactRole {
     Mother,
     Father,
     Guardian,
+    #[default]
     Other,
 }
 
 /// Someone to reach about the patient: a parent, a guardian.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(default)]
 #[ts(export)]
 pub struct Contact {
     pub role: ContactRole,
@@ -62,7 +68,8 @@ pub struct Contact {
 }
 
 /// A patient card. Kept in the identity database (it is names and phone numbers), sealed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(default)]
 #[ts(export)]
 pub struct Patient {
     pub id: String,
@@ -92,7 +99,7 @@ pub struct Patient {
 
 // ------------------------------------------------------------------ the calendar
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS, Default)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum VisitKind {
@@ -109,15 +116,17 @@ pub enum VisitKind {
     Guidance,
     /// A talk with a professional (a teacher, a therapist), a staff meeting.
     Meeting,
+    #[default]
     Other,
     /// Time she blocks for herself: writing reports, a day off. Never has a patient or a fee.
     Block,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum VisitStatus {
+    #[default]
     Planned,
     Held,
     Cancelled,
@@ -125,7 +134,8 @@ pub enum VisitStatus {
 }
 
 /// One entry in the calendar.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(default)]
 #[ts(export)]
 pub struct Visit {
     pub id: String,
@@ -177,7 +187,8 @@ pub enum Scope {
 /// (Patient's Rights Law 1996, §17; the psychologists' code of ethics, §3.14):
 /// the formal record, which the family may ask to see, and her personal note, which is hers
 /// alone and is never printed, exported or copied into a case.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(default)]
 #[ts(export)]
 pub struct SessionNote {
     pub id: String,
@@ -195,7 +206,7 @@ pub struct SessionNote {
 
 // ------------------------------------------------------------------ money
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS, Default)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum PayMethod {
@@ -205,11 +216,13 @@ pub enum PayMethod {
     Paybox,
     Check,
     Card,
+    #[default]
     Other,
 }
 
 /// Money received. Never deleted: a mistake is voided, with a reason, and stays in the diary.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(default)]
 #[ts(export)]
 pub struct Payment {
     pub id: String,
@@ -227,7 +240,8 @@ pub struct Payment {
 }
 
 /// A charge that is not a session: the assessment as a package, writing the report.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(default)]
 #[ts(export)]
 pub struct Charge {
     pub id: String,
@@ -251,7 +265,7 @@ pub struct Balance {
 
 // ------------------------------------------------------------------ follow-ups
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum TaskKind {
@@ -263,11 +277,13 @@ pub enum TaskKind {
     Payment,
     /// Check in with the family after a while.
     FollowUp,
+    #[default]
     Other,
 }
 
 /// Something to do, with or without a patient and a date.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(default)]
 #[ts(export)]
 pub struct ClinicTask {
     pub id: String,
@@ -301,6 +317,7 @@ pub struct NoteTemplate {
 
 /// How the clinic works. No personal data.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default)]
 #[ts(export)]
 pub struct ClinicSettings {
     /// The hours the calendar shows, minutes from midnight.
@@ -688,44 +705,106 @@ pub struct SavedVisits {
 #[serde(tag = "op", rename_all = "snake_case")]
 #[ts(export)]
 pub enum ClinicRequest {
-    Overview { today: Today },
+    Overview {
+        today: Today,
+    },
     /// Visits from `from` to `to`, both included.
-    Calendar { from: String, to: String },
+    Calendar {
+        from: String,
+        to: String,
+    },
     /// `repeat` only with a new visit. `scope` matters only for a visit of a series.
-    SaveVisit { visit: Visit, repeat: Option<Repeat>, scope: Scope },
+    SaveVisit {
+        visit: Visit,
+        repeat: Option<Repeat>,
+        scope: Scope,
+    },
     /// Removes a visit that is still planned. One that happened is cancelled, not removed.
-    DeleteVisit { id: String, scope: Scope },
-    Patients { today: Today },
-    PatientCard { id: String, today: Today },
-    SavePatient { patient: Patient },
+    DeleteVisit {
+        id: String,
+        scope: Scope,
+    },
+    Patients {
+        today: Today,
+    },
+    PatientCard {
+        id: String,
+        today: Today,
+    },
+    SavePatient {
+        patient: Patient,
+    },
     /// Erases the patient and everything of theirs in the clinic (never the case). `name`
     /// must be the patient's name as typed again by her.
-    ErasePatient { id: String, name: String },
-    SaveNote { note: SessionNote },
-    DeleteNote { id: String },
+    ErasePatient {
+        id: String,
+        name: String,
+    },
+    SaveNote {
+        note: SessionNote,
+    },
+    DeleteNote {
+        id: String,
+    },
     /// Copies the formal record into the patient's case as a material.
-    NoteToCase { id: String },
-    SavePayment { payment: Payment },
-    VoidPayment { id: String, reason: String },
-    SaveCharge { charge: Charge },
-    VoidCharge { id: String, reason: String },
-    Tasks { today: Today },
-    SaveTask { task: ClinicTask },
-    DeleteTask { id: String },
+    NoteToCase {
+        id: String,
+    },
+    SavePayment {
+        payment: Payment,
+    },
+    VoidPayment {
+        id: String,
+        reason: String,
+    },
+    SaveCharge {
+        charge: Charge,
+    },
+    VoidCharge {
+        id: String,
+        reason: String,
+    },
+    Tasks {
+        today: Today,
+    },
+    SaveTask {
+        task: ClinicTask,
+    },
+    DeleteTask {
+        id: String,
+    },
     /// `month`: `YYYY-MM`.
-    Diary { month: String },
-    Income { year: u16 },
-    History { record_id: String },
+    Diary {
+        month: String,
+    },
+    Income {
+        year: u16,
+    },
+    History {
+        record_id: String,
+    },
     Settings,
-    SaveSettings { settings: ClinicSettings },
+    SaveSettings {
+        settings: ClinicSettings,
+    },
     /// The text of a message to the parents, filled in, for her to copy.
-    Message { kind: MessageKind, patient_id: String, visit_id: Option<String> },
+    Message {
+        kind: MessageKind,
+        patient_id: String,
+        visit_id: Option<String>,
+    },
     /// Cases that are not linked to any patient yet.
     CaseChoices,
     /// `case_id` = `None` unlinks.
-    LinkCase { patient_id: String, case_id: Option<String> },
+    LinkCase {
+        patient_id: String,
+        case_id: Option<String>,
+    },
     /// Opens a new diagnostic case for the patient, with the child's name and age.
-    CreateCase { patient_id: String, today: Today },
+    CreateCase {
+        patient_id: String,
+        today: Today,
+    },
 }
 
 /// The answer to each [`ClinicRequest`].
