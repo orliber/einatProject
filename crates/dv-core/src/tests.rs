@@ -2287,7 +2287,7 @@ fn score_tables_and_section_titles_are_never_rewritten_silently() {
         texts.push(dv_domain::format_sheet(&sheet).unwrap());
         // The key scores of the closing sections (D-162): the same lines, under the test's name.
         texts.extend(dv_domain::key_scores(
-            &[sheet.clone()],
+            std::slice::from_ref(&sheet),
             dv_domain::SheetHabits::default(),
         ));
         // D-165: the relative and elevated lines are case text too.
