@@ -390,6 +390,59 @@ fn a_failed_upload_leaves_the_local_backup_and_says_so_quietly() {
     assert_eq!(core.drive_backup_status(&computer).unwrap().problem, None);
 }
 
+/// "חיבור מחדש" after Google withdrew the permission: the turn-on goes through while the copy
+/// is on, the new permission replaces the withdrawn one, and the next backup goes up with it.
+#[test]
+fn connecting_again_after_the_permission_was_withdrawn_takes_the_new_one() {
+    let (_dir, mut core, computer) = turned_on();
+    let out = tempfile::tempdir().unwrap();
+    // On and working: a second turn-on is refused, and a second finish changes nothing.
+    assert!(core.drive_backup_turn_on_check(&computer).is_err());
+    let tag = core.drive_account(TOKEN_ACCOUNT_KEY);
+    core.drive_backup_turn_on_finish(&computer, &tag, "1//another")
+        .unwrap();
+    assert_eq!(
+        core.drive_secret(TOKEN_SECRET)
+            .as_deref()
+            .map(String::as_str),
+        Some("1//lasting")
+    );
+
+    let (_, upload) = backup(&mut core, &out.path().join("b1"));
+    let withdrawn = FakeGoogle {
+        withdrawn: true,
+        ..FakeGoogle::default()
+    };
+    core.finish_drive_upload(upload.unwrap().run(&withdrawn, &cfg()))
+        .unwrap();
+    assert_eq!(
+        core.drive_backup_status(&computer).unwrap().problem,
+        Some(DriveProblem::Reconnect)
+    );
+    // Another account's permission never takes the place of this one's.
+    assert!(core
+        .drive_backup_turn_on_finish(&computer, "another-tag", "1//other")
+        .is_err());
+    assert_eq!(
+        core.drive_secret(TOKEN_SECRET)
+            .as_deref()
+            .map(String::as_str),
+        Some("1//lasting")
+    );
+    // The same account: kept, and the problem is gone.
+    core.drive_backup_turn_on_finish(&computer, &tag, "1//new")
+        .unwrap();
+    assert_eq!(
+        core.drive_secret(TOKEN_SECRET)
+            .as_deref()
+            .map(String::as_str),
+        Some("1//new")
+    );
+    let status = core.drive_backup_status(&computer).unwrap();
+    assert!(status.on);
+    assert_eq!(status.problem, None);
+}
+
 /// The connection could not be set up at all: the switch says so instead of "on" forever.
 #[test]
 fn an_upload_that_could_not_start_is_noted() {

@@ -1447,6 +1447,29 @@ fn a_backup_job_is_written_and_checked_away_from_the_vault() {
     fs::write(&dest, &bytes).unwrap();
     assert!(written.verify().is_err());
 
+    // Written under a `.part` name first: one that fails its check never takes the backup's
+    // name, and an earlier good backup of that name stays as it was.
+    let dest = out.path().join("kept.vaultbak");
+    vault
+        .begin_backup()
+        .unwrap()
+        .write_part(&dest)
+        .unwrap()
+        .verify()
+        .unwrap();
+    let good = fs::read(&dest).unwrap();
+    let part = out.path().join("kept.vaultbak.part");
+    assert!(!part.exists());
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let written = vault.begin_backup().unwrap().write_part(&dest).unwrap();
+    let mut bytes = fs::read(&part).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 1;
+    fs::write(&part, &bytes).unwrap();
+    assert!(written.verify().is_err());
+    assert!(!part.exists());
+    assert_eq!(fs::read(&dest).unwrap(), good);
+
     // Another backup in its place is not this one.
     let dest = out.path().join("swapped.vaultbak");
     let first = vault.begin_backup().unwrap().write(&dest).unwrap();
