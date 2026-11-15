@@ -529,7 +529,14 @@ fn build_section(
     // Her approved style profile (D-043), as it goes out with this case's names hidden.
     // The items that fit this section's material best go out (D-052): its sources, the
     // approved sections it is written from (all a closing section has, C5), and her request.
-    let query = style_query(&tagged_sources, &approved_context, &instr.tagged);
+    // Her request is part of the ranking only when it is the material itself (her points):
+    // elsewhere it changes on every turn, and a different pick of items would change the
+    // fixed part of the request that the service keeps between turns.
+    let query = style_query(
+        &tagged_sources,
+        &approved_context,
+        if points { &instr.tagged } else { "" },
+    );
     stop()?;
     let mut style_profile = read
         .style
@@ -543,8 +550,13 @@ fn build_section(
             None => text.clone(),
         });
     }
-    if let Some(text) = &style_profile {
-        review.add_context("פרופיל הסגנון שלך".to_owned(), &run(text)?);
+    // What the review screen shows is what goes out: the text after the filter, not the text
+    // before it. Each item was already left out if the filter would change it; the joined
+    // text and the interpretations go through the filter once more, and that output is sent.
+    if let Some(text) = style_profile.take() {
+        let shown = run(&text)?;
+        review.add_context("פרופיל הסגנון שלך".to_owned(), &shown);
+        style_profile = Some(shown.tagged);
     }
     // How she wants the section written (round 29), filtered like her request: the case's own
     // lines may name someone.
@@ -633,8 +645,9 @@ fn build_section(
 }
 
 /// What her style items are ranked against for a section (D-052, C5): the section's filtered
-/// sources, the filtered approved sections it is written from, and her filtered request. The
-/// same texts give the same query, so the same items go out turn after turn.
+/// sources, the filtered approved sections it is written from, and, when the section is
+/// written from her points, the points. The same texts give the same query, so the same
+/// items go out turn after turn.
 fn style_query(
     sources: &[dv_ai::TaggedInput],
     approved: &[dv_ai::ApprovedSection],
