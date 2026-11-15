@@ -1312,6 +1312,7 @@ impl Core {
             // or another closing section alone are not enough to write one.
             if derived
                 && !points
+                && letter.is_none()
                 && !approved
                     .iter()
                     .any(|(s, _)| !DERIVED_SECTIONS.contains(&s.key.as_str()))
@@ -1359,7 +1360,13 @@ impl Core {
             } else {
                 None
             };
-            let patterns = dv_domain::sheet_patterns(&sheets);
+            // The patterns choose her style items only where they did before (D-100); in the
+            // closing sections they go in the key scores block instead.
+            let patterns = if from_scores {
+                dv_domain::sheet_patterns(&sheets)
+            } else {
+                Vec::new()
+            };
             let interpretations = if from_scores {
                 style::interpretations_for_request(v, &sheets)?
             } else {

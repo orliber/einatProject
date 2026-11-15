@@ -48,8 +48,7 @@ fn sent_for(core: &mut Core, fake: &FakeTransport, case: &str, key: &str) -> Str
 fn blocks(text: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let mut rest = text;
-    while let Some(at) = rest.find("<data nonce=") {
-        let after = &rest[at..];
+    while let Some((_, after)) = rest.split_once("<data nonce=") {
         let Some((head, tail)) = after.split_once(">\n") else {
             break;
         };
@@ -442,4 +441,110 @@ fn the_report_check_names_the_role_of_each_section_it_is_about() {
         result.notes[1].kind,
         dv_ai::ReportNoteKind::NoRecommendation
     );
+}
+
+/// The child's name (declared in the case by `setup`) planted in every new field that goes out
+/// with a closing section: the approved referral (the referral-question block), her approved
+/// diagnoses (the decision block), a note on a score (the key scores block). It never leaves
+/// the machine; its tag does. 0 leaks is the merge condition.
+#[test]
+fn a_name_in_the_referral_the_diagnoses_or_a_score_note_never_leaves_with_a_closing_section() {
+    const NAME: &str = "אלון";
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    core.add_own_paragraph(&case, "kindergarten", &format!("{KINDERGARTEN}."))
+        .unwrap();
+    core.add_own_paragraph(
+        &case,
+        "referral",
+        &format!("ההורים של {NAME} פנו עקב קושי במעברים."),
+    )
+    .unwrap();
+    core.add_own_paragraph(&case, "diagnoses", &format!("אצל {NAME} נקבע {DIAGNOSES}."))
+        .unwrap();
+    core.add_own_paragraph(&case, "dsm", &format!("{DSM}, כפי שנצפה אצל {NAME}."))
+        .unwrap();
+    core.add_own_paragraph(
+        &case,
+        "recommendations",
+        &format!("{RECOMMENDATIONS} עבור {NAME}."),
+    )
+    .unwrap();
+    let mut sheet = wppsi();
+    if let Some(e) = sheet.entries.first_mut() {
+        e.note = format!("{NAME} שיתף פעולה לאורך כל המבחן");
+    }
+    core.save_scores(&case, None, &sheet).unwrap();
+
+    for key in ["summary", "dsm", "recommendations"] {
+        let sent = sent_for(&mut core, &fake, &case, key);
+        let raw = fake.sent.lock().unwrap().last().unwrap().clone();
+        assert!(!raw.contains(NAME), "{key}: the name left the machine");
+        let approved = approved_blocks(&sent);
+        let referral = approved
+            .iter()
+            .find(|(h, _)| h.contains("referral_question=\"true\""))
+            .expect("the referral block");
+        assert!(
+            referral.1.contains("[ילד]") && referral.1.contains("פנו עקב קושי"),
+            "{key}: {}",
+            referral.1
+        );
+        let decision = approved
+            .iter()
+            .find(|(h, _)| h.contains("psychologist_decision=\"true\""))
+            .expect("the decision block");
+        assert!(decision.1.contains("[ילד]"), "{key}: {}", decision.1);
+        let (_, scores) = blocks(&sent)
+            .into_iter()
+            .find(|(h, _)| h.contains(" key_scores=\"true\""))
+            .expect("the key scores block");
+        assert!(
+            scores.contains("[ילד] שיתף פעולה"),
+            "{key}: the score note went tagged: {scores}"
+        );
+        if key == "summary" {
+            for (head, body) in &approved {
+                if body.contains(DSM) || body.contains(RECOMMENDATIONS) {
+                    assert!(body.contains("[ילד]"), "{head}");
+                }
+            }
+        }
+        // The craft and the lines that name the blocks are fixed text, never the case's.
+        assert!(sent.contains(dv_ai::prompts::CRAFT_HEADING), "{key}");
+    }
+    // The review screen shows the key scores with the name already hidden.
+    let prepared = core.prepare_section(&case, "summary", "טיוטה").unwrap();
+    let part = prepared
+        .parts
+        .iter()
+        .find(|p| p.label == crate::prepare::KEY_SCORES_LABEL)
+        .unwrap();
+    let outgoing: String = part.outgoing.iter().map(|s| s.text.as_str()).collect();
+    assert!(!outgoing.contains(NAME), "{outgoing}");
+
+    // The whole-report check: its role attributes go with the sections, the name does not.
+    // What the fake answers above proposed is turned down: the check reads approved text only.
+    let proposed: Vec<String> = core
+        .case_detail(&case)
+        .unwrap()
+        .sections
+        .into_iter()
+        .flat_map(|s| s.paragraphs)
+        .filter(|p| p.status == DraftStatus::Proposed)
+        .map(|p| p.id)
+        .collect();
+    for id in proposed {
+        core.reject_paragraph(&case, &id).unwrap();
+    }
+    core.add_own_paragraph(&case, "summary", &format!("{NAME} {SUMMARY}."))
+        .unwrap();
+    core.set_report_check(true).unwrap();
+    let prepared = core.prepare_report_check(&case).unwrap();
+    let _ = core.send_report_check(&prepared.approval_id.unwrap());
+    let raw = fake.sent.lock().unwrap().last().unwrap().clone();
+    assert!(raw.contains("role=\\\"referral\\\""), "the roles went");
+    assert!(raw.contains("role=\\\"summary\\\""));
+    assert!(!raw.contains(NAME), "the name left with the report check");
+    assert!(raw.contains("[ילד]"));
 }
