@@ -11,7 +11,10 @@
 )]
 
 use dv_domain::scores::{classify, percentile, Band, Measure, ScoreScale};
-use dv_domain::{format_sheet, instruments, sheet_profiles, sheet_table, ScoreEntry, ScoreSheet};
+use dv_domain::{
+    check_scores, format_sheet, instruments, sheet_cases, sheet_profiles, sheet_table, ScoreEntry,
+    ScoreSheet,
+};
 use proptest::prelude::*;
 
 /// Every measure that has a table, with its instrument key.
@@ -243,17 +246,62 @@ fn a_score_that_cannot_exist_is_refused_not_written() {
 
 #[test]
 fn a_score_between_two_ranges_is_not_given_the_nearest_one() {
-    // Composite scores are whole numbers; 109.5 is in neither 90–109 nor 110–119.
+    // Composite scores are whole numbers; 109.5 is in neither 90–109 nor 110–119, and a
+    // sheet that holds it is refused rather than written with no range (a typo for 109 or
+    // 105 would otherwise go to the model and into the Word table as "109.5").
     let idx = measure("wppsi_iv", "vci");
     assert_eq!(classify(&idx, 109.5), None);
-    let text = format_sheet(&sheet("wppsi_iv", &[("vci", 109.5)])).unwrap();
-    let line = text.lines().find(|l| l.contains("(VCI)")).unwrap();
-    for b in &idx.bands {
+    for (inst, key, v) in [
+        ("wppsi_iv", "vci", 109.5),
+        ("wppsi_iv", "matrix", 9.5),
+        ("vineland_3", "receptive", 12.5),
+        ("mullen", "visual_reception", 49.5),
+        ("asrs", "total", 60.5),
+        ("ados_2", "comparison", 5.5),
+        ("cars_2", "total", 29.3),
+        ("cars_2", "total", 30.25),
+    ] {
+        let s = sheet(inst, &[(key, v)]);
+        let err = format_sheet(&s).expect_err(&format!("{inst}/{key} {v} was accepted"));
+        assert!(err.contains("לא אפשרי"), "{err}");
+        // The value as she typed it, never rounded to one she did not (30.25, not "30.2").
+        assert!(err.contains(&v.to_string()), "{err}");
         assert!(
-            !line.contains(b.label.as_str()),
-            "a range was guessed: {line}"
+            sheet_table(&s).is_err(),
+            "sheet_table accepted {inst}/{key} {v}"
         );
     }
+    // Half points are CARS-2's own grid.
+    assert!(format_sheet(&sheet("cars_2", &[("total", 29.5)])).is_ok());
+    assert!(format_sheet(&sheet("cars_2", &[("total", 30.0)])).is_ok());
+    let err = format_sheet(&sheet("cars_2", &[("total", 30.25)])).unwrap_err();
+    assert!(err.contains("30.25"), "{err}");
+}
+
+#[test]
+fn a_saved_sheet_with_one_impossible_score_is_still_held_against_the_text() {
+    // An older version accepted and saved 109.5. The sheet is refused for the text, the table
+    // and the export, but the scores she did enter are still checked against the model's
+    // text and still have their interpretation cases: one bad value silences nothing else.
+    let s = sheet("wppsi_iv", &[("vci", 109.5), ("matrix", 8.0)]);
+    assert!(format_sheet(&s).is_err());
+    let w = check_scores("במטריצות הושג ציון 13.", std::slice::from_ref(&s));
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert!(w[0].contains("13") && w[0].contains('8'), "{w:?}");
+    assert!(check_scores("במטריצות הושג ציון 8.", std::slice::from_ref(&s)).is_empty());
+    let cases = sheet_cases(&s);
+    assert!(cases.iter().any(|c| c.measure == "matrix"), "{cases:?}");
+    // An entry of a measure the instrument does not have is left out, not refused with the rest.
+    let s = sheet("wppsi_iv", &[("no_such", 8.0), ("matrix", 8.0)]);
+    assert_eq!(
+        check_scores("במטריצות הושג ציון 13.", std::slice::from_ref(&s)).len(),
+        1
+    );
+    assert_eq!(sheet_cases(&s).len(), 1);
+    // An unknown instrument has nothing to hold against the text.
+    let s = sheet("wppsi_v", &[("matrix", 8.0)]);
+    assert!(check_scores("במטריצות הושג ציון 13.", std::slice::from_ref(&s)).is_empty());
+    assert!(sheet_cases(&s).is_empty());
 }
 
 #[test]

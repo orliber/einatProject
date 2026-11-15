@@ -46,6 +46,11 @@ pub fn assemble(reader: impl BufRead, progress: &dyn Fn(u32)) -> Result<Value, E
                     blocks.push(Value::Null);
                     partial_json.push(String::new());
                 }
+                // A block starts once. Started again, its text and tool input so far would
+                // be joined with what follows: not an answer the API gives, so not one here.
+                if blocks.get(i).is_some_and(|b| !b.is_null()) {
+                    return Err(EgressError::Protocol(format!("block {i} started twice")));
+                }
                 if let Some(slot) = blocks.get_mut(i) {
                     *slot = block;
                 }
@@ -278,6 +283,36 @@ mod tests {
                 "{block}"
             );
         }
+    }
+
+    #[test]
+    fn a_block_started_twice_is_a_protocol_error_not_a_joined_answer() {
+        let s = stream(&[
+            json!({"type": "message_start", "message": {"content": [], "usage": {}}}),
+            json!({"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "t", "name": "f", "input": {}}}),
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "{\"a\": 1"}}),
+            json!({"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "t", "name": "f", "input": {}}}),
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "}"}}),
+            json!({"type": "content_block_stop", "index": 0}),
+            json!({"type": "message_stop"}),
+        ]);
+        assert!(matches!(
+            assemble(s.as_bytes(), &|_| {}),
+            Err(EgressError::Protocol(m)) if m.contains("twice")
+        ));
+        // The same for a text block: the first half is not quietly kept.
+        let s = stream(&[
+            json!({"type": "message_start", "message": {"content": [], "usage": {}}}),
+            json!({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "חצי"}}),
+            json!({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+            json!({"type": "content_block_stop", "index": 0}),
+            json!({"type": "message_stop"}),
+        ]);
+        assert!(matches!(
+            assemble(s.as_bytes(), &|_| {}),
+            Err(EgressError::Protocol(_))
+        ));
     }
 
     #[test]

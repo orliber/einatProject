@@ -58,7 +58,9 @@ pub fn parse_iso(text: &str) -> Option<Ymd> {
     let [y, m, d] = parts.as_slice() else {
         return None;
     };
-    if y.len() != 4 || m.len() != 2 || d.len() != 2 {
+    // Digits only: `str::parse` also takes a sign ("+9"), which is not a date.
+    let digits = |s: &str| s.bytes().all(|b| b.is_ascii_digit());
+    if y.len() != 4 || m.len() != 2 || d.len() != 2 || !(digits(y) && digits(m) && digits(d)) {
         return None;
     }
     let (y, m, d) = (
@@ -93,6 +95,10 @@ mod tests {
         assert_eq!(parse_iso("2026-09-29"), Some((2026, 9, 29)));
         assert_eq!(parse_iso("2026-02-29"), None);
         assert_eq!(parse_iso("2026-9-29"), None);
+        // A sign parses as a number, but is not part of a date.
+        assert_eq!(parse_iso("2026-+9-09"), None);
+        assert_eq!(parse_iso("2026-09-+9"), None);
+        assert_eq!(parse_iso("+202-09-09"), None);
         assert_eq!(add_years((2028, 2, 29), 7), (2035, 2, 28));
         assert_eq!(iso((2033, 9, 1)), "2033-09-01");
         for z in [-800_000, -1, 0, 11_016, 20_725, 1_000_000] {

@@ -562,7 +562,8 @@ fn text_width(sect: &str) -> usize {
         .or_else(|| num("pgMar", "end"))
         .unwrap_or(1418);
     let gutter = num("pgMar", "gutter").unwrap_or(0);
-    page.saturating_sub(left + right + gutter)
+    // Saturating throughout: a template with absurd margins must not panic the export.
+    page.saturating_sub(left.saturating_add(right).saturating_add(gutter))
         .clamp(3000, 20000)
 }
 
@@ -1203,6 +1204,27 @@ mod tests {
             "<w:sectPr><w:pgSz w:w=\"רחב\"/><w:pgMar w:right=\"1300\" w:left=\"1300\"/></w:sectPr>";
         assert_eq!(text_width(odd), 11906 - 2600);
         assert_eq!(text_width(&fixture_sect()), 9306);
+    }
+
+    #[test]
+    fn hostile_margins_do_not_overflow_the_text_width() {
+        // Margins that add up past usize: the sum must saturate, not panic (overflow checks
+        // are on in release too).
+        let huge = format!(
+            "<w:sectPr><w:pgSz w:w=\"11906\"/><w:pgMar w:left=\"{}\" w:right=\"1\" w:gutter=\"0\"/></w:sectPr>",
+            usize::MAX
+        );
+        assert_eq!(text_width(&huge), 3000);
+        let gutter = format!(
+            "<w:sectPr><w:pgSz w:w=\"11906\"/><w:pgMar w:left=\"1\" w:right=\"1\" w:gutter=\"{}\"/></w:sectPr>",
+            usize::MAX
+        );
+        assert_eq!(text_width(&gutter), 3000);
+        let wide = format!(
+            "<w:sectPr><w:pgSz w:w=\"{}\"/><w:pgMar w:left=\"1\" w:right=\"1\"/></w:sectPr>",
+            usize::MAX
+        );
+        assert_eq!(text_width(&wide), 20000);
     }
 
     fn fixture_sect() -> String {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ageFrom, ageWords, parseAge } from "./AgeField";
+import { ageFrom, ageProblem, ageWords, parseAge } from "./AgeField";
 
 describe("age at assessment", () => {
   it("counts whole months, like the test manuals", () => {
@@ -19,5 +19,15 @@ describe("age at assessment", () => {
     expect(parseAge("5", "")).toEqual({ years: 5, months: 0 });
     expect(parseAge("5", "12")).toBeNull();
     expect(parseAge("", "4")).toBeNull();
+  });
+  it("says what is wrong with a typed age, and asks for the years when only months are typed", () => {
+    expect(ageProblem("", "")).toBeNull();
+    expect(ageProblem("5", "")).toBeNull();
+    expect(ageProblem("5", "4")).toBeNull();
+    expect(ageProblem("5", "12")).toBe("חודשים: 0 עד 11");
+    expect(ageProblem("25", "0")).toBe("שנים: 0 עד 24");
+    // Months without years are not "no age": saving them as none would erase the age on file.
+    expect(ageProblem("", "4")).toBe("יש להזין שנים");
+    expect(ageProblem("", "0")).toBe("יש להזין שנים");
   });
 });

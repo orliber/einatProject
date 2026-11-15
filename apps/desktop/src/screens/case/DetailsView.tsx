@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { AgeField, parseAge } from "../../components/AgeField";
+import { AgeField, ageError, ageProblem, parseAge } from "../../components/AgeField";
 import { DateField, isoToHe, todayIso } from "../../components/DateField";
 import { useApp } from "../../App";
 import { ipc } from "../../ipc/client";
 import type { GrammaticalGender } from "../../ipc/generated/GrammaticalGender";
-import { PeopleEditor, toIdentityInputs, type PersonRow } from "../../components/NewCaseDialog";
+import { PeopleEditor, toIdentityInputs, withIds, type PersonRow } from "../../components/NewCaseDialog";
 import { Dialog, ErrorLine } from "../../components/ui";
 import type { CaseApi } from "../CaseScreen";
 import { useAi } from "../../ai";
@@ -21,7 +21,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
   const [code, setCode] = useState(m.code);
   const [gender, setGender] = useState<GrammaticalGender | null>(m.child_gender);
   const [years, setYears] = useState(m.age ? String(m.age.years) : "");
-  const [months, setMonths] = useState(m.age ? String(m.age.months) : "0");
+  const [months, setMonths] = useState(m.age ? String(m.age.months) : "");
   const [consent, setConsent] = useState(m.consent !== null);
   const [consentDate, setConsentDate] = useState(m.consent?.given_on ?? todayIso());
   const [consentBy, setConsentBy] = useState(m.consent?.given_by ?? "שני ההורים");
@@ -55,6 +55,9 @@ export function DetailsView({ api }: { api: CaseApi }) {
 
   async function save() {
     setError(null);
+    // A wrong age is refused and said: saving it as "no age" would erase the age on file.
+    const badAge = ageProblem(years, months);
+    if (badAge) return setError(ageError(badAge));
     if (consent && !consentDate) return setError("צריך את תאריך החתימה על ההסכמה (יום.חודש.שנה).");
     if (ownRetention && !retention) return setError("צריך תאריך לתזכורת השמירה (יום.חודש.שנה).");
     try {
@@ -66,7 +69,9 @@ export function DetailsView({ api }: { api: CaseApi }) {
         consent: consentToSave(m.consent, consent, consentDate, consentBy, resigned),
         retention_until: ownRetention ? retention : null,
       });
-      await ipc.setIdentities(caseId, toIdentityInputs(rows));
+      const saved = await ipc.setIdentities(caseId, toIdentityInputs(rows));
+      // The people added here now have ids: the next save changes them, not makes them again.
+      setRows((now) => withIds(now, saved));
       await reload();
       notify("פרטי התיק נשמרו.");
     } catch (e) {

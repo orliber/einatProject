@@ -4,6 +4,7 @@ import { ipc, type CaseInput, type Instrument, type ScoreSheet } from "../ipc/cl
 import type { Age } from "../ipc/generated/Age";
 import type { Band } from "../ipc/generated/Band";
 import type { Measure } from "../ipc/generated/Measure";
+import type { ScoreScale } from "../ipc/generated/ScoreScale";
 import { ageWords } from "./AgeField";
 import { PROFILE_SCALES, ScoreChart } from "./ScoreChart";
 import { ErrorLine, Spinner } from "./ui";
@@ -12,12 +13,15 @@ import { useAi } from "../ai";
 
 type Entry = { value: string; note: string };
 
-/** "29,5" and "29.5" are the same score; anything else that is not a number is not a score. */
+/** A score as written: ASCII digits, with at most one decimal point or comma ("29,5" and
+ *  "29.5" are the same score). Nothing else is a score: not "0x10", "1e2" or "+5", which
+ *  `Number()` would read as one. A separator still being typed ("29,") reads as 29. Spaces
+ *  around it, also a no-break space, are not part of it: one cell pasted from a spreadsheet
+ *  keeps them, and "12 " is visibly 12. */
 export function parse(raw: string): number | null {
-  const t = raw.trim().replace(",", ".");
-  if (!t) return null;
-  const n = Number(t);
-  return Number.isFinite(n) ? n : null;
+  const s = raw.trim();
+  if (!/^\d+(?:[.,]\d*)?$/.test(s)) return null;
+  return Number(s.replace(",", "."));
 }
 
 /** The band of a score in the measure's fixed table (deterministic, never the model). */
@@ -25,11 +29,30 @@ export function bandOf(m: Measure, v: number): Band | null {
   return m.bands.find((b) => v >= b.min && v <= b.max) ?? null;
 }
 
+/** The smallest step a score of a scale is written in (`dv_domain::score_step`): whole
+ *  numbers, but CARS-2 is scored in halves. The core refuses a score off this grid when the
+ *  sheet is formatted, so it is said here, at entry. */
+export function scoreStep(scale: ScoreScale): number {
+  return scale === "cars" ? 0.5 : 1;
+}
+
+/** What is wrong with a typed score: not a number, outside the measure's range, or not on its
+ *  scale's grid (109.5 on a standard score); `null` when it is a possible score, or nothing is typed. */
+export type ScoreProblem = "not_number" | "range" | "grid";
+
+export function scoreProblem(m: Measure, raw: string): ScoreProblem | null {
+  if (!raw.trim()) return null;
+  const v = parse(raw);
+  if (v === null) return "not_number";
+  if (v < m.min || v > m.max) return "range";
+  const step = scoreStep(m.scale);
+  if (Math.abs(Math.round(v / step) * step - v) > 1e-9) return "grid";
+  return null;
+}
+
 /** A typed score that is not a possible score of its measure. Empty is not wrong. */
 export function isBad(m: Measure, raw: string): boolean {
-  if (!raw.trim()) return false;
-  const v = parse(raw);
-  return v === null || v < m.min || v > m.max;
+  return scoreProblem(m, raw) !== null;
 }
 
 /** The measures in the order of the table: grouped as the instrument groups them (the
@@ -217,6 +240,8 @@ export function ScoresView(props: {
     instrument && props.age && ageMonths !== null && (ageMonths < instrument.min_age_months || ageMonths > instrument.max_age_months);
   const groups = instrument ? Array.from(new Set(instrument.measures.map((m) => m.group))) : [];
   const invalid = instrument?.measures.filter((m) => isBad(m, entries[m.key]?.value ?? "")) ?? [];
+  /** A cut-off typed that is not a number: marked like a score, and not saved as "no cut-off". */
+  const cutoffBad = key === "ados_2" && cutoff.trim() !== "" && parse(cutoff) === null;
   const filled = sheet?.entries.length ?? 0;
   const missing = instrument ? missingOf(instrument, entries) : [];
   const isAdos = key === "ados_2";
@@ -293,7 +318,8 @@ export function ScoresView(props: {
 
   async function save() {
     if (!sheet || filled === 0) return setError("עוד לא הוזנו ציונים.");
-    if (invalid.length) return setError("יש ציונים מחוץ לטווח האפשרי. כדאי לבדוק את השורות המסומנות.");
+    if (invalid.length) return setError("יש ציונים שלא אפשריים (מחוץ לטווח, או לא על הסולם). כדאי לבדוק את השורות המסומנות.");
+    if (cutoffBad) return setError("נקודת החתך צריכה להיות מספר. כדאי לבדוק את השדה המסומן.");
     setSaving(true);
     setError(null);
     try {
@@ -381,7 +407,10 @@ export function ScoresView(props: {
                   </div>
                   <div className="field">
                     <label htmlFor="ados-cutoff">נקודת החתך לספקטרום (מהפרוטוקול)</label>
-                    <input id="ados-cutoff" className="input num" inputMode="decimal" dir="ltr" value={cutoff} onChange={(e) => setCutoff(e.target.value)} />
+                    <input id="ados-cutoff" className={cutoffBad ? "input num bad" : "input num"} inputMode="decimal" dir="ltr" value={cutoff}
+                      aria-invalid={cutoffBad} aria-describedby={cutoffBad ? "ados-cutoff-err" : undefined}
+                      onChange={(e) => setCutoff(e.target.value)} />
+                    {cutoffBad && <span id="ados-cutoff-err" className="score-err">רק מספר</span>}
                   </div>
                 </div>
               )}
@@ -403,7 +432,8 @@ export function ScoresView(props: {
                       const e = entries[m.key];
                       const raw = e?.value ?? "";
                       const v = parse(raw);
-                      const bad = isBad(m, raw);
+                      const problem = scoreProblem(m, raw);
+                      const bad = problem !== null;
                       const band = v !== null && !bad ? bandOf(m, v) : null;
                       const id = `score-${m.key}`;
                       return (
@@ -421,7 +451,9 @@ export function ScoresView(props: {
                               onKeyDown={(ev) => next(ev, at)} onPaste={(ev) => paste(ev, at)} />
                             {bad && (
                               <span id={`${id}-err`} className="score-err">
-                                {v === null ? "רק מספר" : <>אפשרי <span dir="ltr">{m.min}–{m.max}</span></>}
+                                {problem === "not_number" ? "רק מספר"
+                                  : problem === "grid" ? (m.scale === "cars" ? "בקפיצות של חצי נקודה" : "ציונים שלמים בלבד")
+                                  : <>אפשרי <span dir="ltr">{m.min}–{m.max}</span></>}
                               </span>
                             )}
                           </td>

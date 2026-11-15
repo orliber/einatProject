@@ -363,3 +363,24 @@ describe("Dialog", () => {
     expect(closeOuter).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("Dialog focus trap and hidden controls", () => {
+  it("a hidden submit button (a form's Enter) is not a Tab stop: Shift+Tab wraps to the last visible control", async () => {
+    const user = userEvent.setup();
+    render(
+      <Dialog title="d" onClose={vi.fn()}>
+        <form>
+          <input aria-label="שדה" />
+          <button type="button">אחרון</button>
+          <button type="submit" hidden />
+        </form>
+      </Dialog>,
+    );
+    await user.keyboard("{Tab}");
+    expect(screen.getByRole("button", { name: "סגירה" })).toHaveFocus();
+    await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(screen.getByRole("button", { name: "אחרון" })).toHaveFocus();
+    await user.keyboard("{Tab}");
+    expect(screen.getByRole("button", { name: "סגירה" })).toHaveFocus();
+  });
+});
