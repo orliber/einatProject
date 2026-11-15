@@ -25,6 +25,10 @@ const DOUBLED_ON_PURPOSE: &[&str] = &[
     "זוג",
     "מילה",
     "שלב",
+    "הברה",
+    "אות",
+    "מאוד",
+    "קצת",
 ];
 
 /// Absolute words: rarely exact about a child.
@@ -44,11 +48,45 @@ const JUDGMENTAL: &[&str] = &[
     "מפגרת",
     "פיגור",
 ];
+/// Of the judgmental words, those that are also a medical or plain word for lagging behind:
+/// "פיגור בגדילה", "מפגר אחרי בני גילו". Not noted when such a word follows.
+const LAGGING: &[&str] = &["מפגר", "מפגרת", "פיגור"];
+
+/// Bidi and zero-width marks pasted from Word (RLM, LRM, embeddings, isolates, BOM, ZWSP,
+/// ZWNJ, ZWJ): invisible, so never a reason for a note.
+fn invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}'
+    )
+}
+
+/// The text without [`invisible`] marks, and without a space that removing one put right
+/// after another space.
+fn without_invisible(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut dropped = false;
+    for c in text.chars() {
+        if invisible(c) {
+            dropped = true;
+            continue;
+        }
+        if dropped && c == ' ' && out.ends_with(' ') {
+            continue;
+        }
+        dropped = false;
+        out.push(c);
+    }
+    out
+}
 
 /// Every proofreading note on a paragraph, in a fixed order, each once.
 #[must_use]
 pub fn polish_notes(text: &str) -> Vec<String> {
+    let clean = without_invisible(text);
+    let text = clean.as_str();
     let masked = mask_tags(text);
+    let outside = outside_quotes(&masked);
     let mut out: Vec<String> = Vec::new();
     let mut push = |n: String| {
         if !out.contains(&n) {
@@ -58,7 +96,8 @@ pub fn polish_notes(text: &str) -> Vec<String> {
     for n in placeholders(text) {
         push(n);
     }
-    for n in doubled_words(&masked) {
+    // A quotation is their words: "עוד עוד עוד" said by the child is not a slip.
+    for n in doubled_words(&outside) {
         push(n);
     }
     for n in spacing(&masked) {
@@ -73,7 +112,7 @@ pub fn polish_notes(text: &str) -> Vec<String> {
     if let Some(n) = unfinished(text) {
         push(n);
     }
-    for n in wording(&outside_quotes(&masked)) {
+    for n in wording(&outside) {
         push(n);
     }
     out
@@ -287,15 +326,26 @@ fn spacing(masked: &str) -> Vec<String> {
     out
 }
 
-/// Whether the `"` at `k` is the gershayim of an abbreviation, not a quotation mark: they
-/// stand before an abbreviation's last letter ("ע\"י", "צה\"ל", "מ\"מ"), or inside a word
-/// that is more than prefix letters ("דו\"חות"). After a prefix alone ("ה\"משחק\"") the
-/// mark opens a quotation.
-fn is_gershayim(chars: &[char], k: usize) -> bool {
+/// What a `"` is.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Quote {
+    /// Not a quotation mark: the gershayim of an abbreviation.
+    Gershayim,
+    /// Between two letters right after prefix letters ("ה\"משחק"): a quotation mark only if a
+    /// closing mark follows before another opens.
+    MaybeOpen,
+    /// A mark not between two letters.
+    Mark,
+}
+
+/// The kind of the `"` at `k`. Between two letters it is never a mark on its own: gershayim
+/// stand before an abbreviation's last letter ("ע\"י", "צה\"ל"), anywhere in a longer word
+/// ("דו\"חות", "מ\"כים", "רמטכ\"ל"); only after prefix letters alone may it open a quotation.
+fn quote_kind(chars: &[char], k: usize) -> Quote {
     let prev = k.checked_sub(1).and_then(|j| chars.get(j)).copied();
     let next = chars.get(k + 1).copied();
     if !(prev.is_some_and(char::is_alphabetic) && next.is_some_and(char::is_alphabetic)) {
-        return false;
+        return Quote::Mark;
     }
     let letters_after = chars
         .iter()
@@ -309,7 +359,54 @@ fn is_gershayim(chars: &[char], k: usize) -> bool {
         .rev()
         .take_while(|c| c.is_alphabetic())
         .all(|c| matches!(c, 'ו' | 'ה' | 'ב' | 'ל' | 'מ' | 'ש' | 'כ'));
-    letters_after == 1 || !only_prefix
+    if letters_after == 1 || !only_prefix {
+        Quote::Gershayim
+    } else {
+        Quote::MaybeOpen
+    }
+}
+
+/// The positions of the quotation marks of a text (`"`, and with `typographic` also “ ” „ « »),
+/// and whether a quotation is left open at the end. A mark between two letters after a prefix
+/// ("ה\"משחק") opens a quotation only when a closing mark (after a word, before a space or
+/// punctuation) follows while none is open; otherwise it is gershayim ("מ\"כים").
+fn quotation_marks(chars: &[char], typographic: bool) -> (Vec<usize>, bool) {
+    let mut marks = Vec::new();
+    let mut inside = false;
+    let mut pending: Option<usize> = None;
+    for (k, &c) in chars.iter().enumerate() {
+        let kind = match c {
+            '"' => quote_kind(chars, k),
+            '“' | '”' | '„' | '«' | '»' if typographic => Quote::Mark,
+            _ => continue,
+        };
+        match kind {
+            Quote::Gershayim => {}
+            Quote::MaybeOpen => {
+                if !inside {
+                    pending = Some(k);
+                }
+            }
+            Quote::Mark => {
+                let prev = k.checked_sub(1).and_then(|j| chars.get(j)).copied();
+                let next = chars.get(k + 1).copied();
+                let closing = prev.is_some_and(|p| !p.is_whitespace())
+                    && !next.is_some_and(char::is_alphabetic);
+                if inside {
+                    inside = false;
+                    marks.push(k);
+                } else if let (true, Some(open)) = (closing, pending) {
+                    marks.push(open);
+                    marks.push(k);
+                } else {
+                    inside = true;
+                    marks.push(k);
+                }
+                pending = None;
+            }
+        }
+    }
+    (marks, inside)
 }
 
 /// The text with what is inside quotation marks blanked out: a quotation (of a parent, of a
@@ -317,15 +414,11 @@ fn is_gershayim(chars: &[char], k: usize) -> bool {
 /// quotation marks; an unclosed quotation blanks out to the end, which only means fewer notes.
 fn outside_quotes(masked: &str) -> String {
     let chars: Vec<char> = masked.chars().collect();
+    let (marks, _) = quotation_marks(&chars, true);
     let mut inside = false;
     let mut out = String::with_capacity(masked.len());
     for (k, &c) in chars.iter().enumerate() {
-        let mark = match c {
-            '"' => !is_gershayim(&chars, k),
-            '“' | '”' | '„' | '«' | '»' => true,
-            _ => false,
-        };
-        if mark {
+        if marks.contains(&k) {
             inside = !inside;
             out.push(' ');
         } else if inside {
@@ -344,7 +437,6 @@ fn unbalanced(masked: &str) -> Vec<String> {
     let chars: Vec<char> = masked.chars().collect();
     let mut depth = 0usize;
     let mut stray_close = false;
-    let mut quotes = 0usize;
     for (k, &c) in chars.iter().enumerate() {
         match c {
             '(' => depth += 1,
@@ -370,7 +462,6 @@ fn unbalanced(masked: &str) -> Vec<String> {
                     None => stray_close = true,
                 }
             }
-            '"' if !is_gershayim(&chars, k) => quotes += 1,
             _ => {}
         }
     }
@@ -381,7 +472,7 @@ fn unbalanced(masked: &str) -> Vec<String> {
     if stray_close {
         out.push("סוגריים: נסגרו בלי שנפתחו".to_owned());
     }
-    if quotes % 2 == 1 {
+    if quotation_marks(&chars, false).1 {
         out.push("מירכאות: נפתחו ולא נסגרו".to_owned());
     }
     out
@@ -481,8 +572,16 @@ fn wording(masked: &str) -> Vec<String> {
                 out.push(absolute(&format!("{w} לא")));
             }
         }
-        if stem_of(w, JUDGMENTAL, &['ו', 'ש', 'ה']).is_some() {
-            out.push(judgmental(w));
+        if let Some(stem) = stem_of(w, JUDGMENTAL, &['ו', 'ש', 'ה']) {
+            // "פיגור בגדילה", "מפגר אחרי בני גילו": lagging behind, said of a measure.
+            let lagging = LAGGING.contains(&stem)
+                && next.is_some_and(|n| {
+                    matches!(n, "אחרי" | "אחר" | "מאחורי" | "ביחס" | "לעומת")
+                        || (n.starts_with('ב') && n.chars().count() >= 3)
+                });
+            if !lagging {
+                out.push(judgmental(w));
+            }
         }
         let suffers = stem_of(w, &["סובל", "סובלת"], &['ו', 'ש', 'ה'])
             .is_some_and(|_| next.is_some_and(|n| n.starts_with('מ')));
@@ -597,10 +696,13 @@ mod tests {
             "בשלב ה\"משחק החופשי\" שיתף פעולה לפי דו\"חות קודמים.",
             "מירכאות"
         ));
-        assert!(has(
+        // After prefix letters alone, a mark between two letters opens a quotation only when
+        // one closes after it: alone it may be gershayim ("המ\"כים"), so nothing is said.
+        assert!(!has(
             "בשלב ה\"משחק החופשי שיתף פעולה לאורך המפגש.",
             "מירכאות"
         ));
+        assert!(has("בשלב \"משחק החופשי שיתף פעולה לאורך המפגש.", "מירכאות"));
         // A list mark is not a bracket.
         assert!(!has("1) מעקב התפתחותי. 2) הדרכת הורים.", "סוגריים"));
     }
@@ -767,5 +869,88 @@ mod tests {
         ] {
             assert_eq!(polish_notes(ordinary), Vec::<String>::new(), "{ordinary}");
         }
+    }
+
+    #[test]
+    fn a_doubled_word_inside_a_quotation_is_their_words() {
+        for fine in [
+            "[ילד] חזר על המילים \"עוד עוד עוד\" לאורך המשחק.",
+            "האם סיפרה: “הוא אומר די די כל הזמן”, ולכן הוכנה תוכנית.",
+        ] {
+            assert_eq!(polish_notes(fine), Vec::<String>::new(), "{fine}");
+        }
+        // Outside the quotation it is still noted.
+        assert!(has(
+            "[ילד] חזר על המילים \"עוד\" של של המשחק.",
+            "מילה כפולה: \"של של\""
+        ));
+    }
+
+    #[test]
+    fn more_pairs_said_on_purpose() {
+        for fine in [
+            "[ילד] קרא את המילה הברה הברה, בקצב איטי.",
+            "את שמו כתב אות אות, בריכוז רב.",
+            "[ילד] היה מאוד מאוד נרגש לקראת המפגש.",
+            "בהמשך המפגש נרגע קצת קצת, ושיתף פעולה.",
+        ] {
+            assert_eq!(polish_notes(fine), Vec::<String>::new(), "{fine}");
+        }
+        assert!(has("הוא הגיע הגיע למפגש בזמן.", "\"הגיע הגיע\""));
+    }
+
+    #[test]
+    fn invisible_marks_from_word_make_no_note() {
+        for mark in [
+            '\u{200E}', '\u{200F}', '\u{202A}', '\u{202B}', '\u{202C}', '\u{202D}', '\u{202E}',
+            '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}', '\u{FEFF}', '\u{200B}', '\u{200C}',
+            '\u{200D}',
+        ] {
+            for text in [
+                format!("[ילד] שיתף פעולה לאורך כל המפגש.{mark}"),
+                format!("{mark}[ילד] שיתף פעולה לאורך כל המפגש.{mark}\n"),
+                format!("[ילד] שיתף {mark} פעולה לאורך כל המפגש."),
+                format!("[ילד] שיתף{mark} פעולה ,{mark}לאורך כל המפגש."),
+            ] {
+                let notes = polish_notes(&text);
+                assert!(
+                    !notes
+                        .iter()
+                        .any(|n| n.contains("לא מסתיימת") || n.contains("רווח כפול")),
+                    "{text:?}: {notes:?}"
+                );
+            }
+        }
+        // Without its full stop the paragraph is still noted, mark or not.
+        assert!(has(
+            "שיתף פעולה לאורך כל המפגש והתמיד\u{200F}",
+            "הפסקה לא מסתיימת בסימן פיסוק (אחרי \"והתמיד\")"
+        ));
+        // A real double space is still one.
+        assert!(has(
+            "הגיע  \u{200F}לאבחון בזמן ושיתף פעולה.",
+            "רווח כפול אחרי \"הגיע\""
+        ));
+    }
+
+    #[test]
+    fn lagging_behind_and_plural_abbreviations() {
+        for fine in [
+            "נמצא פיגור בגדילה לפי עקומות הגדילה.",
+            "דווח על פיגור בצמיחה בשנה האחרונה.",
+            "לדברי ההורים מפגר אחרי בני גילו בדיבור.",
+            "לפי דו\"חות קודמים ודברי המ\"כים, הוא לא תמיד נענה לפנייה.",
+            "לפי הדו\"חות והמ\"כים כמעט אף פעם לא ויתר.",
+        ] {
+            assert_eq!(polish_notes(fine), Vec::<String>::new(), "{fine}");
+        }
+        // Still judgmental as a label of a child, and a word after gershayim is not quoted.
+        assert!(has("אובחן בעבר עם פיגור.", "ניסוח שיפוטי: \"פיגור\""));
+        assert!(has("הוא ילד מפגר.", "ניסוח שיפוטי: \"מפגר\""));
+        assert!(has(
+            "לדברי המ\"כים הוא תמיד מסרב לשתף פעולה.",
+            "ניסוח מוחלט: \"תמיד\""
+        ));
+        assert!(has("לפי הדו\"חות הוא עצלן בבית.", "ניסוח שיפוטי: \"עצלן\""));
     }
 }
