@@ -118,6 +118,30 @@ describe("an edit open when the vault locks", () => {
     expect(screen.queryByDisplayValue("טקסט בדוי ב")).toBeNull();
   });
 
+  it("a text offered back stays held until she closes it, so a second lock keeps it", async () => {
+    const a = { case_id: "c1", place: "פסקה בתיק א", view: "report", text: "טקסט בדוי א" };
+    const b = { case_id: "c2", place: "רישום מפגש בתיק ב", view: "materials", text: "טקסט בדוי ב" };
+    const calls: unknown[] = [];
+    mockIPC((cmd, args) => {
+      if (cmd === "hold_unsaved") calls.push((args as { edits: unknown }).edits);
+      return cmd === "take_unsaved" ? [a, b] : null;
+    });
+    const api: AppApi = { status: status(), go: vi.fn(), refresh: vi.fn(), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn() };
+    render(<AppContext.Provider value={api}><UnsavedNotice /></AppContext.Provider>);
+    expect(await screen.findByDisplayValue("טקסט בדוי א")).toBeInTheDocument();
+    // Both are held, as open editors are: a lock now writes them back into the vault.
+    await act(async () => { await holdNow(); });
+    expect(calls.at(-1)).toEqual([a, b]);
+    fireEvent.click(screen.getByRole("button", { name: "הבא (עוד 1)" }));
+    await act(async () => { await holdNow(); });
+    expect(calls.at(-1)).toEqual([b]);
+    const closers = screen.getAllByRole("button", { name: "סגירה" });
+    fireEvent.click(closers[closers.length - 1] as HTMLElement);
+    await act(async () => { await holdNow(); });
+    expect(calls.at(-1)).toEqual([]);
+    forgetHold();
+  });
+
   it("Escape or going to the first case still offers the next kept text", async () => {
     mockIPC((cmd) => (cmd === "take_unsaved"
       ? [

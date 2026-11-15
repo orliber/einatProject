@@ -1002,6 +1002,26 @@ fn every_open_editor_is_kept_at_the_lock_not_only_the_last_one() {
     core.lock();
     core.unlock(PASSWORD).unwrap();
     assert_eq!(core.take_unsaved().unwrap(), both);
+    // Offered until she closes them: a second lock (or a crash) before that loses nothing.
+    assert_eq!(core.take_unsaved().unwrap(), both);
+    core.hold_unsaved(both.clone());
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(core.take_unsaved().unwrap(), both);
+    // The page had no time to hold them again before the next lock: still in the vault.
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(core.take_unsaved().unwrap(), both);
+    // She closed the first: only the second is still kept.
+    core.hold_unsaved(both[1..].to_vec());
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(core.take_unsaved().unwrap(), both[1..].to_vec());
+    // And the second: nothing is offered again, in this opening or the next.
+    core.hold_unsaved(Vec::new());
+    assert!(core.take_unsaved().unwrap().is_empty());
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
     assert!(core.take_unsaved().unwrap().is_empty());
 
     // More editors than the cap: the latest are kept.
@@ -1015,6 +1035,8 @@ fn every_open_editor_is_kept_at_the_lock_not_only_the_last_one() {
         core.take_unsaved().unwrap(),
         many[12 - crate::unsaved::MAX_EDITS..].to_vec()
     );
+
+    core.hold_unsaved(Vec::new());
 
     // A vault locked by an earlier version kept one edit, not a list: it still comes back.
     core.vault_mut()
@@ -1057,6 +1079,7 @@ fn the_latest_text_of_an_editor_is_kept_and_a_long_one_is_cut_not_lost() {
     let back = core.take_unsaved().unwrap().pop().unwrap();
     assert_eq!(back.text.chars().count(), 50_000);
     assert!(back.text.chars().all(|c| c == 'א'));
+    core.hold_unsaved(Vec::new());
 
     // A locked session takes nothing new, so nothing is offered after the next entry.
     core.lock();

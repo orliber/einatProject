@@ -108,6 +108,9 @@ function placeOf(edit: UnsavedEdit): Route {
   return { name: "case", id: edit.case_id, view: edit.view || "report" };
 }
 
+/** Owner prefix of the texts offered back after a lock, held until she closes each. */
+const OFFERED = "offered:";
+
 /** After entering: the texts that were being edited when the vault locked, one after another. */
 export function UnsavedNotice() {
   const { go } = useApp();
@@ -115,13 +118,25 @@ export function UnsavedNotice() {
   // How long the copy stays on the protected clipboard, once copied; `false` when it failed.
   const [copied, setCopied] = useState<number | false | null>(null);
   useEffect(() => {
-    // Added, not replaced: under StrictMode the effect runs twice, and the second take is empty.
-    ipc.takeUnsaved().then((list) => setKept((k) => [...k, ...(list ?? [])]), () => undefined);
+    // The core keeps them in the vault while they are held here, like an open editor: a lock
+    // (or a crash) before she closes one offers it again. Asked twice (StrictMode), the core
+    // gives the same texts, so they replace, not add.
+    ipc.takeUnsaved().then((list) => {
+      const offered = list ?? [];
+      offered.forEach((e, i) => holds.set(`${OFFERED}${i}`, e));
+      if (offered.length) schedule();
+      setKept(offered);
+    }, () => undefined);
   }, []);
   const edit = kept[0];
   if (!edit) return null;
   const next = () => {
     setCopied(null);
+    // Closed by her: let go of it, and the core takes it out of the vault.
+    for (const [k, h] of holds) {
+      if (k.startsWith(OFFERED) && h === edit) holds.delete(k);
+    }
+    schedule();
     setKept((k) => k.slice(1));
   };
   async function copy() {

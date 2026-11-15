@@ -529,7 +529,8 @@ fn an_open_edit_survives_the_lock_inside_the_vault() {
     }
     core.unlock(PASSWORD).unwrap();
     assert_eq!(core.take_unsaved().unwrap(), vec![edit(text)]);
-    // Offered once.
+    // Closed by her: not offered again.
+    core.hold_unsaved(Vec::new());
     assert!(core.take_unsaved().unwrap().is_empty());
     // Whitespace is not an edit worth keeping.
     core.hold_unsaved(vec![edit("  \n")]);

@@ -159,6 +159,7 @@ impl Core {
             style_staged: HashMap::new(),
             auto_backup_tried: None,
             unsaved: Vec::new(),
+            offered: Vec::new(),
             removed_input: None,
             seal_dir: seal::default_dir(),
             rollback_warning: None,

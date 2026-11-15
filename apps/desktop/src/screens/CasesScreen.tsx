@@ -175,7 +175,7 @@ export function CasesScreen() {
     setModalState(m);
   };
 
-  // A new list on every fetch (`dataUpdatedAt`), also when the data came back equal: what is
+  // A new list each time it is read again (`dataUpdatedAt`), also when the data came back equal: what is
   // computed from the lists below is redone whenever the core was asked again.
   const allFolders = useMemo(() => fresh(folders.data, folders.dataUpdatedAt), [folders.data, folders.dataUpdatedAt]);
   const allCases = useMemo(() => fresh(cases.data, cases.dataUpdatedAt), [cases.data, cases.dataUpdatedAt]);
