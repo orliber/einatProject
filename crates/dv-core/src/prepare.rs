@@ -121,6 +121,9 @@ struct SectionRead {
     interpretations: Option<String>,
     patterns: Vec<dv_domain::ScorePattern>,
     guide: String,
+    /// `guide` is the template's text alone (no line of hers, learned or of the case): fixed
+    /// app text, which the name model does not read.
+    guide_is_template: bool,
     severity: Option<String>,
     /// The case's key scores (D-162), for the summary, the DSM section and the recommendations.
     key_scores: Option<String>,
@@ -632,6 +635,26 @@ fn build_section(
     Ok((body, review, kind))
 }
 
+/// The texts of a section's request, besides the materials, that the name model reads: her
+/// request or points, the current draft, the conversation, the approved sections it is written
+/// from and the guide, each exactly as `build_section` filters it. Fixed app text is left out
+/// (the template's guide, the request "write the whole report" sends with no wish of hers, the
+/// severity and key-score lines): the model is slow and could find nothing there. Her style
+/// profile is not the case's and is rendered only in the job.
+fn section_name_texts<'a>(ask: &'a SectionAsk, read: &'a SectionRead) -> Vec<&'a str> {
+    let mut out: Vec<&str> = Vec::new();
+    if ask.instruction != FULL_DRAFT_INSTRUCTION {
+        out.push(&ask.instruction);
+    }
+    out.extend(read.current.iter().map(String::as_str));
+    out.extend(read.history.iter().map(|(_, t)| t.as_str()));
+    out.extend(read.approved.iter().map(|(_, t)| t.as_str()));
+    if !read.guide_is_template {
+        out.push(&read.guide);
+    }
+    out
+}
+
 /// What her style items are ranked against for a section (D-052, C5): the section's filtered
 /// sources, the filtered approved sections it is written from, and her filtered request. The
 /// same texts give the same query, so the same items go out turn after turn.
@@ -672,7 +695,10 @@ fn build_check(
     let mut draft_ids = Vec::new();
     for (id, text) in &read.paragraphs {
         stop()?;
-        let out = filter(text, ctx).map_err(|e| CoreError::Internal(e.to_string()))?;
+        let out = job
+            .hints
+            .filter(text, ctx)
+            .map_err(|e| CoreError::Internal(e.to_string()))?;
         review.add("פסקה לבדיקה".to_owned(), &out);
         paragraphs.push(out.tagged);
         draft_ids.push(id.clone());
@@ -1264,7 +1290,6 @@ impl Core {
             data.masks = book;
         }
         let fingerprint = data.fingerprint()?;
-        let hints = self.case_hints(case_id, &[])?;
         let demo_mode = self.demo_mode()?;
 
         let read = {
@@ -1390,10 +1415,12 @@ impl Core {
             } else {
                 None
             };
-            let guide = if letter.is_some() {
-                String::new()
+            let (guide, guide_is_template) = if letter.is_some() {
+                (String::new(), true)
             } else {
-                guides::guide_for(v, &meta, &section)?.text()
+                let g = guides::guide_for(v, &meta, &section)?;
+                let template = g.is_default && g.learned_from == 0 && g.case.trim().is_empty();
+                (g.text(), template)
             };
             let severity = (section.key == "dsm" && !points && letter.is_none())
                 .then(|| dv_domain::severity_request(meta.dsm_severity.as_ref()));
@@ -1409,10 +1436,20 @@ impl Core {
                 interpretations,
                 patterns,
                 guide,
+                guide_is_template,
                 severity,
                 key_scores,
                 section,
             }))
+        };
+        // The name model reads every text of the request that is hers or the case's, not only
+        // the materials (D-053): what it finds nowhere else it could not hide otherwise.
+        let hints = match &read {
+            Texts::Section(r) => {
+                let extra = section_name_texts(&ask, r);
+                self.case_hints(case_id, &extra)?
+            }
+            _ => self.case_hints(case_id, &[])?,
         };
 
         let nonce = match self
@@ -1514,7 +1551,6 @@ impl Core {
         let model = self.model_for(Task::Light)?;
         let data = self.privacy_data(case_id)?;
         let fingerprint = data.fingerprint()?;
-        let hints = self.case_hints(case_id, &[])?;
         let demo_mode = self.demo_mode()?;
         let read = {
             let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
@@ -1544,6 +1580,14 @@ impl Core {
                 sources,
                 paragraphs,
             })
+        };
+        // The proposed paragraphs are not materials: the name model reads them as well.
+        let hints = match &read {
+            Texts::Check(r) => {
+                let extra: Vec<&str> = r.paragraphs.iter().map(|(_, t)| t.as_str()).collect();
+                self.case_hints(case_id, &extra)?
+            }
+            _ => self.case_hints(case_id, &[])?,
         };
         let nonce = dv_ai::nonce_from(&dv_vault::crypto::random_array::<16>()?);
         let hasher = self.vault_ref()?.token_hasher();
