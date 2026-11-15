@@ -921,3 +921,39 @@ fn the_number_inside_a_tag_is_never_part_of_a_date() {
     assert!(gate_text("[ילד] 12.3.2020", &ids, CASE).is_err());
     assert!(gate_text("[חסר: 12.3.2020]", &ids, CASE).is_err());
 }
+
+/// A name inside a word that stands on the start of a number ("Noam12." and an identity number) dropped
+/// the whole number pattern, and the identifier went out beside the name's tag (found by the
+/// property run on CI, seed b40ae230). What the name does not cover is still hidden.
+#[test]
+fn a_number_glued_after_a_name_inside_a_word_is_still_hidden() {
+    let ids = identities();
+    let idn = valid_id("10000000");
+    let book = MaskBook::default();
+    let c = PrivacyContext {
+        masks: Some(&book),
+        ..ctx(&ids, CASE)
+    };
+    for text in [
+        format!("Noam12.{idn}"),
+        format!("Noam12.3.2020{idn}"),
+        format!("נועם12.3.2020{idn}"),
+        format!("Noam1.3.2020{idn}"),
+    ] {
+        let out = filter(&text, &c).unwrap().tagged;
+        assert!(!digits(&out).contains(&digits(&idn)), "{text} -> {out}");
+        assert!(out.starts_with("[ילד]"), "{text} -> {out}");
+        let kept = filter_to_keep(&text, &c, &[]).unwrap().tagged;
+        assert!(!digits(&kept).contains(&digits(&idn)), "{text} -> {kept}");
+        assert_eq!(restore_hers(&kept, &ids, None, &book.entries()), text);
+    }
+    // A name beside a date, with nothing glued, reads as before.
+    assert_eq!(
+        filter("Noam 12.3.2020", &c)
+            .unwrap()
+            .tagged
+            .matches("[ילד]")
+            .count(),
+        1
+    );
+}

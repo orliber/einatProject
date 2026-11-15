@@ -679,6 +679,46 @@ pub(crate) fn arabic_identity_matches(
     out
 }
 
+/// The stretches of `start..end` that no replacement and no suspect covers and that hold a
+/// digit, each cut to its first and last letter or digit.
+fn uncovered(
+    text: &str,
+    start: usize,
+    end: usize,
+    reps: &[Replacement],
+    sus: &[SuspectSpan],
+) -> Vec<(usize, usize)> {
+    let mut taken: Vec<(usize, usize)> = reps
+        .iter()
+        .map(|r| (r.start, r.end))
+        .chain(sus.iter().map(|s| (s.start, s.end)))
+        .filter(|(s, e)| *s < end && start < *e)
+        .collect();
+    taken.sort_unstable();
+    let mut free = Vec::new();
+    let mut at = start;
+    for (s, e) in taken {
+        if at < s {
+            free.push((at, s));
+        }
+        at = at.max(e);
+    }
+    if at < end {
+        free.push((at, end));
+    }
+    free.into_iter()
+        .filter_map(|(s, e)| {
+            let part = text.get(s..e)?;
+            if !part.chars().any(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            let first = part.find(|c: char| c.is_alphanumeric())?;
+            let (last, c) = part.char_indices().rfind(|(_, c)| c.is_alphanumeric())?;
+            Some((s + first, s + last + c.len_utf8()))
+        })
+        .collect()
+}
+
 fn overlaps(start: usize, end: usize, reps: &[Replacement], sus: &[SuspectSpan]) -> bool {
     reps.iter().any(|r| start < r.end && r.start < end)
         || sus.iter().any(|s| start < s.end && s.start < end)
@@ -3493,6 +3533,22 @@ fn layer_4_and_on(
                 label: hit.kind.label_he().to_owned(),
                 declared: false,
             });
+        } else {
+            // A name stands on part of the pattern ("Noam12." and an identity number: the name inside a word
+            // took "Noam12", and the number that starts at "12" was dropped whole). What the
+            // name does not cover is still an identifier or a date: every stretch of it that
+            // holds a digit is hidden under the pattern's fixed tag, so no number is left
+            // beside the name's tag.
+            for (start, end) in uncovered(text, hit.start, hit.end, &reps, &suspects) {
+                reps.push(Replacement {
+                    start,
+                    end,
+                    relative: false,
+                    out: hit.kind.fixed_replacement().to_owned(),
+                    label: hit.kind.label_he().to_owned(),
+                    declared: false,
+                });
+            }
         }
     }
     // Read again with those names in place: where one of them stands in a date as its month
