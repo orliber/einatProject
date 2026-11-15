@@ -87,7 +87,7 @@ describe("main screens", () => {
     await openCase(user);
     await user.click(screen.getByRole("button", { name: /הוצאת הדוח/ }));
     const side = await screen.findByRole("region", { name: "לפני שהקובץ יוצא" });
-    expect(await within(side).findByText("פסקה מאושרת אחת שווה מבט נוסף:")).toBeInTheDocument();
+    expect(await within(side).findByRole("button", { name: /כדאי לבדוק/ })).toHaveAttribute("aria-expanded", "true");
     expect(within(side).getByText(/כתוב 85, ובטבלה 95/)).toBeInTheDocument();
   });
 

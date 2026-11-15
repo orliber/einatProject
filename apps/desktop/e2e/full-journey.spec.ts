@@ -315,9 +315,9 @@ test("the finish page checks the report, and the Word, PDF and parents' versions
   await stage(page, /הוצאת הדוח/).click();
   await expect(stage(page, /הוצאת הדוח/)).toHaveAttribute("aria-current", "step");
   const side = page.getByRole("region", { name: "לפני שהקובץ יוצא" });
-  await expect(side.getByRole("heading", { level: 1 })).toHaveText(/הדוח מוכן להוצאה|כמעט מוכן/);
-  await expect(side.locator(".finish-checks")).toContainText(/\d+ סעיפים מאושרים ייכנסו לקובץ/);
-  await expect(side.locator(".finish-checks")).toContainText("השמות חוזרים למקומם בקובץ.");
+  await expect(side.getByRole("heading", { level: 1 })).toHaveText(/הדוח מוכן להוצאה\.|אפשר להוציא\./);
+  await expect(side.locator(".finish-file").first()).toContainText(/\d+ סעיפים מאושרים ייכנסו לקובץ/);
+  await expect(side.locator(".finish-file").first()).toContainText("השמות חוזרים למקומם בקובץ.");
   // The page beside it is the file: the name back in place, the sections as they will print.
   const preview = page.getByRole("region", { name: "תצוגה מקדימה של הקובץ" });
   await expect(preview).toContainText("נועם");
