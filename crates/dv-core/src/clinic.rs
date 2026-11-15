@@ -53,12 +53,16 @@ fn refuse<T>(text: &str) -> Result<T, CoreError> {
     Err(CoreError::Refused(text.to_owned()))
 }
 
+/// The parser's own message may quote a value of the record, so it is never passed on:
+/// an error's details can be copied into a problem report.
 fn to_json<T: Serialize>(value: &T) -> Result<String, CoreError> {
-    serde_json::to_string(value).map_err(|e| CoreError::Internal(e.to_string()))
+    serde_json::to_string(value)
+        .map_err(|_| CoreError::Internal("a clinic record could not be written".to_owned()))
 }
 
 fn from_json<T: DeserializeOwned>(json: &str) -> Result<T, CoreError> {
-    serde_json::from_str(json).map_err(|e| CoreError::Internal(e.to_string()))
+    serde_json::from_str(json)
+        .map_err(|_| CoreError::Internal("a clinic record could not be read".to_owned()))
 }
 
 fn count(n: usize) -> u32 {
@@ -367,7 +371,6 @@ impl Book {
 /// A diagnostic case as the clinic needs it.
 struct CaseInfo {
     code: String,
-    child_name: Option<String>,
     approved: u32,
     total: u32,
     in_trash: bool,
@@ -392,7 +395,9 @@ fn case_of<'a>(
     cases: &'a HashMap<String, CaseInfo>,
 ) -> Option<(&'a str, &'a CaseInfo)> {
     let id = patient.case_id.as_deref()?;
-    cases.get_key_value(id).map(|(id, case)| (id.as_str(), case))
+    cases
+        .get_key_value(id)
+        .map(|(id, case)| (id.as_str(), case))
 }
 
 /// The report's sections (approved, total) of each patient that has a case.
@@ -499,7 +504,6 @@ impl Core {
                     .count();
                 let info = CaseInfo {
                     code: case.meta.code,
-                    child_name: case.child_name,
                     approved: count(approved),
                     total: case.total_sections,
                     in_trash: case.deleted_at.is_some(),
@@ -554,8 +558,7 @@ impl Core {
             tasks: rules::task_views(&open, &names, &today.date),
             alerts,
             week_visits: rules::week_visit_count(&book.visits, &today.date),
-            month_received: rules::month_received(&book.payments, &today.date)
-                .map_err(refusal)?,
+            month_received: rules::month_received(&book.payments, &today.date).map_err(refusal)?,
             total_due: rules::total_due(&balances).map_err(refusal)?,
             waiting: status(PatientStatus::Waiting),
             active: status(PatientStatus::Active),
@@ -586,8 +589,8 @@ impl Core {
             .iter()
             .map(|patient| {
                 let mine = by_patient.get(patient.id.as_str()).unwrap_or(&empty);
-                let balance = rules::balance(&mine.visits, &mine.charges, &mine.payments)
-                    .map_err(refusal)?;
+                let balance =
+                    rules::balance(&mine.visits, &mine.charges, &mine.payments).map_err(refusal)?;
                 Ok(PatientRow {
                     patient: patient.clone(),
                     age: rules::age_on(patient.birth_date.as_deref(), &today.date),
@@ -598,7 +601,9 @@ impl Core {
                 })
             })
             .collect::<Result<Vec<_>, CoreError>>()?;
-        rows.sort_by(|a, b| (&a.patient.name, &a.patient.id).cmp(&(&b.patient.name, &b.patient.id)));
+        rows.sort_by(|a, b| {
+            (&a.patient.name, &a.patient.id).cmp(&(&b.patient.name, &b.patient.id))
+        });
         Ok(ClinicReply::Patients(rows))
     }
 
@@ -771,7 +776,10 @@ impl Core {
         }
         let mine: Vec<StoredClinicRecord> = v.clinic_of_patient(patient_id)?;
         let of_kind = |kind: &str| -> Vec<StoredClinicRecord> {
-            mine.iter().filter(|row| row.kind == kind).cloned().collect()
+            mine.iter()
+                .filter(|row| row.kind == kind)
+                .cloned()
+                .collect()
         };
         let visits: Vec<Visit> = open_all(of_kind(Visit::KIND))?;
         let charges: Vec<Charge> = open_all(of_kind(Charge::KIND))?;
@@ -802,7 +810,12 @@ impl Core {
             place: visit.map(|visit| visit.place).unwrap_or_default(),
             // What the family still owes; a family that paid ahead owes nothing.
             amount: Some(due.max(0)),
-            me: v.practitioner()?.names.into_iter().next().unwrap_or_default(),
+            me: v
+                .practitioner()?
+                .names
+                .into_iter()
+                .next()
+                .unwrap_or_default(),
         };
         Ok(ClinicReply::Text(rules::fill_message(&template, &values)))
     }
@@ -858,9 +871,7 @@ impl Core {
             if visit.patient_id != stored.patient_id {
                 let notes: Vec<SessionNote> = all(v)?;
                 if noted_of(&notes).contains(&visit.id) {
-                    return refuse(
-                        "לפגישה הזו יש סיכום, ולכן אי אפשר להעביר אותה למטופל אחר.",
-                    );
+                    return refuse("לפגישה הזו יש סיכום, ולכן אי אפשר להעביר אותה למטופל אחר.");
                 }
             }
             action = CHANGED;
@@ -930,9 +941,7 @@ impl Core {
         let notes: Vec<SessionNote> = all(v)?;
         let noted = noted_of(&notes);
         if noted.contains(id) {
-            return refuse(
-                "לפגישה הזו יש סיכום, ולכן אי אפשר למחוק אותה. אפשר לסמן אותה כמבוטלת.",
-            );
+            return refuse("לפגישה הזו יש סיכום, ולכן אי אפשר למחוק אותה. אפשר לסמן אותה כמבוטלת.");
         }
         let mut ids = vec![visit.id.clone()];
         if let (Scope::Following, Some(series)) = (scope, visit.series_id.as_deref()) {
@@ -1011,7 +1020,10 @@ impl Core {
             .max()
             .map(|at| iso(date_of(at)));
         let of_kind = |kind: &str| -> Vec<StoredClinicRecord> {
-            rows.iter().filter(|row| row.kind == kind).cloned().collect()
+            rows.iter()
+                .filter(|row| row.kind == kind)
+                .cloned()
+                .collect()
         };
         let visits: Vec<Visit> = open_all(of_kind(Visit::KIND))?;
         let notes: Vec<SessionNote> = open_all(of_kind(SessionNote::KIND))?;
@@ -1117,9 +1129,7 @@ impl Core {
             );
         }
         if note.record.trim().is_empty() {
-            return refuse(
-                "הרשומה ריקה, ואין מה להעביר לתיק. התרשומת האישית נשארת רק אצלך.",
-            );
+            return refuse("הרשומה ריקה, ואין מה להעביר לתיק. התרשומת האישית נשארת רק אצלך.");
         }
         let case_id = case_id.to_owned();
         let kind = match visit_kind {
@@ -1338,7 +1348,9 @@ impl Core {
             return refuse("למטופל הזה כבר יש תיק אבחון.");
         }
         let Some((year, month, day)) = rules::parse_date(&today.date) else {
-            return refuse("התאריך של היום לא התקבל כמו שצריך. כדאי לסגור את המסך ולפתוח אותו שוב.");
+            return refuse(
+                "התאריך של היום לא התקבל כמו שצריך. כדאי לסגור את המסך ולפתוח אותו שוב.",
+            );
         };
         let base = format!("תיק-{year:04}-{month:02}{day:02}");
         let taken = |code: &str| cases.values().any(|case| case.code == code);

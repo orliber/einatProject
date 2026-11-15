@@ -289,9 +289,9 @@ fn describe(
             format!("פרופיל הסגנון אושר (גרסה {})", number("version")),
             false,
         ),
-        "clinic_patient_added" => ("clinic", "נפתח כרטיס מטופל בקליניקה".to_owned(), false),
+        "clinic_patient_added" => ("security", "נפתח כרטיס מטופל בקליניקה".to_owned(), false),
         "clinic_patient_erased" => (
-            "clinic",
+            "security",
             match number("records") {
                 0 => "כרטיס מטופל נמחק מהקליניקה".to_owned(),
                 1 => "כרטיס מטופל נמחק מהקליניקה, ואיתו רישום אחד".to_owned(),
@@ -300,7 +300,7 @@ fn describe(
             true,
         ),
         "clinic_note_to_case" => (
-            "clinic",
+            "case",
             "סיכום פגישה מהקליניקה הועבר לחומרי התיק".to_owned(),
             false,
         ),

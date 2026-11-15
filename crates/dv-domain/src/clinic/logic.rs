@@ -2189,7 +2189,7 @@ pub fn note_history_lines(
         Some(before) if before == personal && personal.is_empty() => "תרשומת אישית: אין",
         Some(before) if before == personal => "תרשומת אישית: בלי שינוי",
         Some(_) if personal.is_empty() => "תרשומת אישית: נמחקה",
-        Some(before) if before.is_empty() => "תרשומת אישית: נכתבה",
+        Some("") => "תרשומת אישית: נכתבה",
         Some(_) => "תרשומת אישית: השתנתה",
     };
     lines.push(about_personal.to_owned());

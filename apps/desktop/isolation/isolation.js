@@ -90,6 +90,7 @@ const ALLOWED = new Set([
   "open_old_exports",
   "open_releases_page",
   "system_check",
+  "clinic",
   "keep_case_longer",
   "keep_draft_brief",
   "letter",

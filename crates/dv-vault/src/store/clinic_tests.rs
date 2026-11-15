@@ -545,7 +545,10 @@ fn a_replaced_record_keeps_its_kind_and_moves_in_the_indexes() {
     v.clinic_put("task", Some(&id), None, 0, r#"{"t":2}"#, None)
         .unwrap();
     let got = v.clinic_get(&id).unwrap().unwrap();
-    assert_eq!((got.kind.as_str(), got.patient_id, got.day), ("task", None, 0));
+    assert_eq!(
+        (got.kind.as_str(), got.patient_id, got.day),
+        ("task", None, 0)
+    );
     assert!(v.clinic_of_patient("p1").unwrap().is_empty());
     assert!(v.clinic_range("task", 10, 10).unwrap().is_empty());
     assert_eq!(v.clinic_range("task", 0, 0).unwrap().len(), 1);

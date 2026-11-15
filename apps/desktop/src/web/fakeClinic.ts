@@ -244,6 +244,8 @@ export class FakeClinic {
   private settings: ClinicSettings = defaultClinicSettings();
   /** Every saved state of a visit, a session note, a charge or a payment, oldest first, by record id. */
   private history = new Map<string, HistoryEntry[]>();
+  /** The day a record of each patient was last written (see `wrote`). */
+  private lastSaved = new Map<string, string>();
   private seq = 0;
   private seeded = false;
   private readonly host: ClinicHost;
@@ -348,7 +350,7 @@ export class FakeClinic {
   }
 
   private patient(id: string): Patient {
-    return this.patients.find((p) => p.id === id) ?? refuse("המטופל לא נמצא. ייתכן שהכרטיס נמחק.", "not_found");
+    return this.patients.find((p) => p.id === id) ?? refuse("המטופל שנבחר לא נמצא. ייתכן שהכרטיס נמחק.", "not_found");
   }
 
   private visit(id: string): Visit {
@@ -422,18 +424,30 @@ export class FakeClinic {
     ];
   }
 
-  /** The formal record as it was saved. Of the personal note only that there is one: it is
-   *  hers alone, and a history she may show someone never carries its words. */
-  private noteLines(n: SessionNote): string[] {
-    const v = n.visit_id === null ? null : (this.visits.find((x) => x.id === n.visit_id) ?? null);
+  /** A saved state of a session note (as the core's `note_history_lines`): the formal record,
+   *  line by line, and one line that says only whether the personal note was written or
+   *  changed since the state before. Its words are never here: it is hers alone (D-171). */
+  private noteLines(n: SessionNote, previous: SessionNote | null): string[] {
+    const record = n.record.split("\n").map(cleanLine).filter((line) => line !== "");
+    const personal = n.personal.trim();
+    const before = previous === null ? null : previous.personal.trim();
+    const aboutPersonal = before === null ? (personal === "" ? "אין" : "נכתבה")
+      : before === personal ? (personal === "" ? "אין" : "בלי שינוי")
+      : personal === "" ? "נמחקה"
+      : before === "" ? "נכתבה" : "השתנתה";
     return [
       ...field("מטופל", this.nameOf(n.patient_id) ?? ""),
       ...field("תאריך", formatDate(n.date)),
-      ...field("פגישה", v ? VISIT_KIND_LABEL[v.kind] : ""),
-      n.record === "" ? "רשומה: ריקה" : `רשומה: ${n.record}`,
-      ...(n.personal === "" ? [] : ["תרשומת אישית: יש"]),
-      ...(n.case_input_id !== null ? ["הועברה לחומרי התיק: כן"] : []),
+      ...(record.length === 0 ? ["רשומה: ריקה"] : ["רשומה:", ...record]),
+      `תרשומת אישית: ${aboutPersonal}`,
+      ...(n.case_input_id !== null ? ["הועבר לחומרי התיק: כן"] : []),
     ];
+  }
+
+  /** The day a record of the patient was last written, by the clock (not by the date the
+   *  record carries): a note corrected years later was active then (D-174). */
+  private wrote(patientId: string | null) {
+    if (patientId !== null) this.lastSaved.set(patientId, localToday().date);
   }
 
   // ---------------------------------------------------------------- money
@@ -512,7 +526,8 @@ export class FakeClinic {
     for (let n = 2; taken.has(code); n++) code = `${base}-${n}`;
     // Every named contact is a person of the case (not only the parents), so a record sent to
     // the case later has their names masked by its filter.
-    const roles = { mother: "mother", father: "father", guardian: "relative", other: "other" } as const;
+    // A guardian is not always a relative: the neutral role says nothing that is not known.
+    const roles = { mother: "mother", father: "father", guardian: "other", other: "other" } as const;
     const seen = new Set([p.name]);
     const people: IdentityInput[] = [];
     for (const c of p.contacts) {
@@ -540,7 +555,8 @@ export class FakeClinic {
     // Only the formal record: the personal note never leaves the clinic.
     if (n.case_input_id === null || !this.host.updateInput(c.id, n.case_input_id, title, n.record)) {
       n.case_input_id = this.host.addInput(c.id, kind, title, n.record);
-      this.keep(n.id, "changed", this.noteLines(n));
+      this.keep(n.id, "changed", this.noteLines(n, n));
+      this.wrote(p.id);
     }
     return n;
   }
@@ -602,17 +618,22 @@ export class FakeClinic {
     return old ?? saved;
   }
 
-  /** The day from which a card that holds a record may be erased (D-174): seven years after
-   *  the last thing that happened in it, or when the child turns 25, whichever is later. */
+  /** The day from which a card that holds a record may be erased (D-174, the core's
+   *  `can_erase`): seven years after the last activity in it (the latest date anything in
+   *  the card carries, and the day one of its records was last written), and not before the
+   *  child is 25 when the birth date is known, whichever is later. */
   private keptUntil(p: Patient): string {
     const dates = [
       p.created_on,
+      this.lastSaved.get(p.id) ?? "",
       ...this.visits.filter((v) => v.patient_id === p.id).map((v) => v.date),
       ...[...this.notes, ...this.payments, ...this.charges].filter((r) => r.patient_id === p.id).map((r) => r.date),
+      ...this.tasks.filter((t) => t.patient_id === p.id).flatMap((t) => [t.due ?? "", t.done_on ?? ""]),
     ].filter(isIsoDate).sort();
-    const afterLast = addYears(dates[dates.length - 1] ?? p.created_on, KEEP_YEARS_AFTER_LAST_CHANGE);
-    const adult = p.birth_date !== null && isIsoDate(p.birth_date) ? addYears(p.birth_date, KEEP_UNTIL_AGE) : afterLast;
-    return adult > afterLast ? adult : afterLast;
+    // A card whose dates cannot be read is kept as if it changed today.
+    const afterLast = addYears(dates[dates.length - 1] ?? localToday().date, KEEP_YEARS_AFTER_LAST_CHANGE);
+    const grown = p.birth_date !== null && isIsoDate(p.birth_date) ? addYears(p.birth_date, KEEP_UNTIL_AGE) : afterLast;
+    return grown > afterLast ? grown : afterLast;
   }
 
   /** Something happened in the card: a visit that was held or charged, a session note, a
@@ -624,13 +645,12 @@ export class FakeClinic {
 
   private erasePatient(id: string, typed: string) {
     const p = this.patient(id);
-    // The request carries no "today"; the core uses its own clock here, the stand-in the page's.
-    const today = localToday().date;
+    need(cleanLine(typed) === cleanLine(p.name), "השם שהוקלד לא זהה לשם שבכרטיס. כדי למחוק צריך להקליד את השם בדיוק כמו שהוא כתוב בכרטיס.");
+    // The request carries no "today": the core uses its own clock here, the stand-in the page's.
     if (this.hasRecord(id)) {
-      const until = this.keptUntil(p);
-      need(today >= until, `בכרטיס הזה יש פגישות, סיכומים או תשלומים, ורשומה כזו שומרים עד ${formatDate(until)}. עד אז אי אפשר למחוק אותו. אפשר לסגור את הכרטיס: הוא יוצא מהרשימה הפעילה ונשאר שמור בכספת.`);
+      const from = this.keptUntil(p);
+      need(localToday().date >= from, `בכרטיס הזה יש פגישות, סיכומים או רישומי כספים, ורשומה כזו צריך לשמור. אפשר לסגור את הכרטיס במקום למחוק אותו. מחיקה תהיה אפשרית החל מיום ${formatDate(from)}.`);
     }
-    need(cleanLine(typed) === p.name, "השם שהוקלד שונה משם המטופל, ולכן שום דבר לא נמחק.");
     const gone = [...this.visits, ...this.notes, ...this.payments, ...this.charges].filter((r) => r.patient_id === id).map((r) => r.id);
     for (const record of gone) this.history.delete(record);
     this.visits = this.visits.filter((v) => v.patient_id !== id);
@@ -638,6 +658,7 @@ export class FakeClinic {
     this.payments = this.payments.filter((x) => x.patient_id !== id);
     this.charges = this.charges.filter((x) => x.patient_id !== id);
     this.tasks = this.tasks.filter((t) => t.patient_id !== id);
+    this.lastSaved.delete(id);
     // The case, if there is one, is not the clinic's to erase.
     this.patients = this.patients.filter((x) => x.id !== id);
   }
@@ -776,10 +797,13 @@ export class FakeClinic {
         this.keep(w.id, "created", this.visitLines(w));
       }
       if (patient?.status === "waiting") patient.status = "active";
+      this.wrote(v.patient_id);
       return this.saved(written);
     }
-    need(repeat === null, "אפשר לקבוע חזרה רק כשקובעים פגישה חדשה.");
+    need(repeat === null, "אפשר לקבוע סדרה חוזרת רק כשקובעים פגישה חדשה.");
     const old = this.visit(v.id);
+    const noted = this.notes.some((n) => n.visit_id === old.id);
+    need(v.patient_id === old.patient_id || !noted, "לפגישה הזו יש סיכום, ולכן אי אפשר להעביר אותה למטופל אחר.");
     const written = [old];
     if (scope === "following" && old.series_id !== null) {
       const moved = daysBetween(old.date, v.date);
@@ -790,8 +814,14 @@ export class FakeClinic {
         written.push(o);
       }
     }
-    Object.assign(old, v, { series_id: old.series_id });
-    this.keep(old.id, "changed", this.visitLines(old));
+    // Which series a visit belongs to is set when the series is made. A save that changes
+    // nothing writes nothing, and the history gets no line.
+    const next: Visit = { ...v, series_id: old.series_id };
+    if (JSON.stringify(next) !== JSON.stringify(old)) {
+      Object.assign(old, next);
+      this.keep(old.id, "changed", this.visitLines(old));
+      this.wrote(old.patient_id);
+    }
     if (patient?.status === "waiting") patient.status = "active";
     return this.saved(written);
   }
@@ -806,19 +836,16 @@ export class FakeClinic {
   private deleteVisit(id: string, scope: Scope) {
     const v = this.visit(id);
     need(v.status === "planned", "אפשר למחוק רק פגישה שעדיין מתוכננת. פגישה שכבר סומנה אפשר לסמן כמבוטלת.");
+    const noted = new Set(this.notes.map((n) => n.visit_id));
+    need(!noted.has(v.id), "לפגישה הזו יש סיכום, ולכן אי אפשר למחוק אותה. אפשר לסמן אותה כמבוטלת.");
     const gone = [v];
     if (scope === "following" && v.series_id !== null) {
-      gone.push(...this.laterOfSeries(v));
+      // One of the later ones that already has a record written for it stays.
+      gone.push(...this.laterOfSeries(v).filter((o) => !noted.has(o.id)));
     }
     const ids = new Set(gone.map((g) => g.id));
     for (const g of gone) this.keep(g.id, "deleted", this.visitLines(g));
     this.visits = this.visits.filter((x) => !ids.has(x.id));
-    // A note written for a visit that is gone stays, as a note on its own.
-    for (const n of this.notes) {
-      if (n.visit_id === null || !ids.has(n.visit_id)) continue;
-      n.visit_id = null;
-      this.keep(n.id, "changed", this.noteLines(n));
-    }
   }
 
   // ---------------------------------------------------------------- notes, payments, charges, tasks
@@ -833,12 +860,12 @@ export class FakeClinic {
     atMost(note.personal, RECORD, "תרשומת אישית");
     if (note.visit_id !== null) {
       const v = this.visit(note.visit_id);
-      need(v.patient_id === p.id, "הפגישה שייכת למטופל אחר.");
-      // One note for a visit: a second one would hide the first.
-      need(!this.notes.some((n) => n.visit_id === v.id && n.id !== note.id), "לפגישה הזו כבר יש סיכום. אפשר לפתוח ולערוך אותו.");
+      need(v.patient_id === p.id, "הפגישה שנבחרה שייכת למטופל אחר.");
+      // One note for a visit: the one that exists is opened and edited.
+      need(!this.notes.some((n) => n.visit_id === v.id && n.id !== note.id), "לפגישה הזו כבר יש סיכום. אפשר לפתוח אותו ולערוך אותו.");
     }
     const old = note.id === "" ? null : this.note(note.id);
-    need(old === null || old.patient_id === p.id, "אי אפשר להעביר סיכום למטופל אחר.");
+    need(old === null || old.patient_id === p.id, "אי אפשר להעביר סיכום למטופל אחר. אפשר לכתוב סיכום חדש בכרטיס הנכון.");
     const saved: SessionNote = {
       id: old ? old.id : this.newId("note"),
       patient_id: p.id,
@@ -849,10 +876,14 @@ export class FakeClinic {
       // Set only by "להעביר לחומרי התיק".
       case_input_id: old ? old.case_input_id : null,
     };
+    const before = old ? { ...old } : null;
+    // Saved again with nothing changed: nothing is written, and the history gets no line.
+    if (before !== null && JSON.stringify(before) === JSON.stringify(saved)) return old ?? saved;
     if (old) Object.assign(old, saved);
     else this.notes.push(saved);
     // The clinical record: every saved state of it is kept (D-172).
-    this.keep(saved.id, old ? "changed" : "created", this.noteLines(saved));
+    this.keep(saved.id, old ? "changed" : "created", this.noteLines(saved, before));
+    this.wrote(p.id);
     return old ?? saved;
   }
 
@@ -860,8 +891,8 @@ export class FakeClinic {
    *  kept). Only one that holds nothing can be removed. */
   private deleteNote(id: string) {
     const n = this.note(id);
-    need(n.record.trim() === "" && n.personal.trim() === "", "סיכום שנכתב בו משהו הוא חלק מהרשומה, ולכן הוא לא נמחק. אפשר לפתוח אותו ולתקן, וכל גרסה נשמרת בהיסטוריה.");
-    this.keep(n.id, "deleted", this.noteLines(n));
+    need(n.record.trim() === "" && n.personal.trim() === "", "סיכום פגישה הוא חלק מהרשומה, ולכן לא מוחקים אותו. אפשר לערוך אותו, וכל שינוי נשמר בהיסטוריה.");
+    this.keep(n.id, "deleted", this.noteLines(n, n));
     this.notes = this.notes.filter((x) => x.id !== id);
   }
 
@@ -874,7 +905,7 @@ export class FakeClinic {
     short(cleanLine(input.payer), "מי שילם");
     long(input.note.trim(), "הערה");
     const old = input.id === "" ? null : (this.payments.find((x) => x.id === input.id) ?? refuse("התקבול לא נמצא.", "not_found"));
-    need(old === null || !old.voided, "התקבול הזה בוטל, ואי אפשר לשנות אותו. אפשר לרשום תקבול חדש.");
+    need(old === null || !old.voided, "תקבול שבוטל אי אפשר לערוך. אפשר לרשום תקבול חדש.");
     need(old === null || old.patient_id === p.id, "אי אפשר להעביר תקבול למטופל אחר. אפשר לבטל אותו ולרשום מחדש.");
     const saved: Payment = {
       id: old ? old.id : this.newId("payment"), patient_id: p.id, date: input.date.trim(), amount: input.amount, method: input.method,
@@ -883,17 +914,19 @@ export class FakeClinic {
     if (old) Object.assign(old, saved);
     else this.payments.push(saved);
     this.keep(saved.id, old ? "changed" : "created", this.paymentLines(saved));
+    this.wrote(p.id);
     return old ?? saved;
   }
 
   private voidPayment(id: string, reason: string): Payment {
     const p = this.payments.find((x) => x.id === id) ?? refuse("התקבול לא נמצא.", "not_found");
-    need(!p.voided, "התקבול הזה כבר בוטל.");
+    need(!p.voided, "התקבול הזה כבר מבוטל.");
     short(cleanLine(reason), "סיבת הביטול");
     need(cleanLine(reason) !== "", "צריך לכתוב למה הרישום מבוטל.");
     p.voided = true;
     p.void_reason = cleanLine(reason);
     this.keep(p.id, "voided", this.paymentLines(p));
+    this.wrote(p.patient_id);
     return p;
   }
 
@@ -904,23 +937,25 @@ export class FakeClinic {
     need(cleanLine(input.what) !== "", "צריך לכתוב על מה החיוב.");
     short(cleanLine(input.what), "על מה החיוב");
     const old = input.id === "" ? null : (this.charges.find((x) => x.id === input.id) ?? refuse("החיוב לא נמצא.", "not_found"));
-    need(old === null || !old.voided, "החיוב הזה בוטל, ואי אפשר לשנות אותו. אפשר לרשום חיוב חדש.");
+    need(old === null || !old.voided, "חיוב שבוטל אי אפשר לערוך. אפשר לרשום חיוב חדש.");
     need(old === null || old.patient_id === p.id, "אי אפשר להעביר חיוב למטופל אחר. אפשר לבטל אותו ולרשום מחדש.");
     const saved: Charge = { id: old ? old.id : this.newId("charge"), patient_id: p.id, date: input.date.trim(), amount: input.amount, what: cleanLine(input.what), voided: false, void_reason: "" };
     if (old) Object.assign(old, saved);
     else this.charges.push(saved);
     this.keep(saved.id, old ? "changed" : "created", this.chargeLines(saved));
+    this.wrote(p.id);
     return old ?? saved;
   }
 
   private voidCharge(id: string, reason: string): Charge {
     const c = this.charges.find((x) => x.id === id) ?? refuse("החיוב לא נמצא.", "not_found");
-    need(!c.voided, "החיוב הזה כבר בוטל.");
+    need(!c.voided, "החיוב הזה כבר מבוטל.");
     short(cleanLine(reason), "סיבת הביטול");
     need(cleanLine(reason) !== "", "צריך לכתוב למה הרישום מבוטל.");
     c.voided = true;
     c.void_reason = cleanLine(reason);
     this.keep(c.id, "voided", this.chargeLines(c));
+    this.wrote(c.patient_id);
     return c;
   }
 
@@ -940,6 +975,7 @@ export class FakeClinic {
     const saved: ClinicTask = { ...task, id: old ? old.id : this.newId("task") };
     if (old) Object.assign(old, saved);
     else this.tasks.push(saved);
+    this.wrote(saved.patient_id);
     return old ?? saved;
   }
 
@@ -1017,7 +1053,8 @@ export class FakeClinic {
       "{תאריך}": v ? formatDate(v.date) : "",
       "{שעה}": v ? formatTime(v.start) : "",
       "{מקום}": v ? v.place : "",
-      "{סכום}": plainMoney(kind === "reminder" && v ? v.fee : due),
+      // What the family still owes; a family that paid ahead owes nothing.
+      "{סכום}": plainMoney(Math.max(0, due)),
       "{שמי}": this.host.myName(),
     });
   }
@@ -1257,7 +1294,7 @@ export class FakeClinic {
     const note = (v: Visit, record: string, personal = "") => {
       const n: SessionNote = { id: this.newId("note"), patient_id: v.patient_id ?? "", visit_id: v.id, date: v.date, record, personal, case_input_id: null };
       this.notes.push(n);
-      this.keep(n.id, "created", this.noteLines(n));
+      this.keep(n.id, "created", this.noteLines(n, null));
     };
     const paid = (p: Patient, at: number, amount: number, method: PayMethod, receipt: string) => {
       const x: Payment = { id: this.newId("payment"), patient_id: p.id, date: day(at), amount, method, receipt, payer: "", note: "", voided: false, void_reason: "" };

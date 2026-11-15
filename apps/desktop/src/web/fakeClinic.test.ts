@@ -1,6 +1,6 @@
 // The preview's clinic keeps the rules of docs/CLINIC.md: balances, series, "this and the
 // following", overlaps, alerts, history, messages and the link to cases. Every name is invented.
-import { dataOf, type ReplyData, type ReplyKind } from "../ipc/clinic";
+import { clinicApi, dataOf, type ReplyData, type ReplyKind } from "../ipc/clinic";
 import type { ClinicRequest } from "../ipc/generated/ClinicRequest";
 import type { ClinicTask } from "../ipc/generated/ClinicTask";
 import type { Patient } from "../ipc/generated/Patient";
@@ -63,6 +63,27 @@ function refusal(run: () => unknown): UiError {
 
 const balanceOf = (ask: Ask, id: string) => ask({ op: "patient_card", id, today: NOW }, "card").balance;
 const alertsOf = (ask: Ask, today: Today = NOW) => ask({ op: "overview", today }, "overview").alerts;
+
+describe("the typed client", () => {
+  it("an answer of another kind is a fault to report, never a silent cast", () => {
+    const wrong = refusal(() => dataOf("overview", { kind: "done" }, "overview"));
+    expect(wrong).toMatchObject({ code: "internal", action: { kind: "report" } });
+    expect(wrong.message).toMatch(/[א-ת]/);
+    // Only fixed words of the program go into the report: the op and the two kinds.
+    expect(wrong.details).toEqual(["clinic overview: expected overview, got done"]);
+    expect(refusal(() => dataOf("settings", null as never, "settings")).details).toEqual(["clinic settings: expected settings, got nothing"]);
+    expect(dataOf("delete_task", { kind: "done" }, "done")).toBeNull();
+    expect(dataOf("message", { kind: "text", data: "שלום" }, "text")).toBe("שלום");
+  });
+
+  it("has one function for every request the clinic takes", () => {
+    expect(Object.keys(clinicApi).sort()).toEqual([
+      "calendar", "caseChoices", "createCase", "deleteNote", "deleteTask", "deleteVisit", "diary", "erasePatient", "history", "income", "linkCase",
+      "message", "noteToCase", "overview", "patientCard", "patients", "saveCharge", "saveNote", "savePatient", "savePayment", "saveSettings",
+      "saveTask", "saveVisit", "settings", "tasks", "voidCharge", "voidPayment",
+    ]);
+  });
+});
 
 describe("charges and balances", () => {
   it("a visit costs its fee when held, or when missed and charged anyway", () => {
@@ -166,6 +187,28 @@ describe("visits", () => {
     expect(ask({ op: "calendar", from: "2026-11-01", to: "2026-11-30" }, "visits").map((v) => v.visit.id)).toEqual([held.id]);
     expect(ask({ op: "history", record_id: planned.id }, "history").map((h) => h.action)).toEqual(["created", "deleted"]);
     expect(ask({ op: "history", record_id: held.id }, "history").map((h) => h.action)).toEqual(["created", "changed"]);
+  });
+
+  it("a visit that has a note is neither deleted nor moved to another patient", () => {
+    const { ask } = clinic();
+    const p = addPatient(ask);
+    const q = addPatient(ask, { name: "תמר" });
+    const made = ask({ op: "save_visit", visit: visit(p.id, { kind: "therapy" }), repeat: { every_weeks: 1, count: 4 }, scope: "one" }, "saved").visits.map((v) => v.visit);
+    const [first, second, third] = made as [Visit, Visit, Visit, Visit];
+    for (const v of [first, third]) ask({ op: "save_note", note: { id: "", patient_id: p.id, visit_id: v.id, date: v.date, record: "הכנה לפגישה", personal: "", case_input_id: null } }, "note");
+    expect(refusal(() => ask({ op: "delete_visit", id: first.id, scope: "one" }, "done")).message).toContain("יש סיכום");
+    expect(refusal(() => ask({ op: "save_visit", visit: { ...first, patient_id: q.id }, repeat: null, scope: "one" }, "saved")).message).toContain("למטופל אחר");
+    // "This and the following": the later one that has a record written for it stays.
+    ask({ op: "delete_visit", id: second.id, scope: "following" }, "done");
+    expect(ask({ op: "calendar", from: "2026-11-01", to: "2026-12-31" }, "visits").map((v) => v.visit.id)).toEqual([first.id, third.id]);
+  });
+
+  it("a save that changes nothing leaves no line in the history", () => {
+    const { ask } = clinic();
+    const p = addPatient(ask);
+    const v = addVisit(ask, p.id);
+    ask({ op: "save_visit", visit: v, repeat: null, scope: "one" }, "saved");
+    expect(ask({ op: "history", record_id: v.id }, "history").map((h) => h.action)).toEqual(["created"]);
   });
 
   it("the calendar gives the days asked for, both ends included, by time", () => {
@@ -491,7 +534,8 @@ describe("patients", () => {
     addVisit(ask, p.id, { status: "cancelled", date: "2026-11-02" });
     addVisit(ask, other.id, { date: "2026-11-16" });
     ask({ op: "save_task", task: task({ patient_id: p.id }) }, "task");
-    expect(refusal(() => ask({ op: "erase_patient", id: p.id, name: "נועמ" }, "done")).message).toContain("שום דבר לא נמחק");
+    expect(refusal(() => ask({ op: "erase_patient", id: p.id, name: "נועמ" }, "done")).message).toContain("השם שהוקלד לא זהה");
+    expect(ask({ op: "patients", today: NOW }, "patients")).toHaveLength(2);
     ask({ op: "erase_patient", id: p.id, name: " נועם " }, "done");
     expect(ask({ op: "patients", today: NOW }, "patients").map((r) => r.patient.name)).toEqual(["תמר"]);
     expect(ask({ op: "calendar", from: "2026-11-01", to: "2026-12-31" }, "visits")).toHaveLength(1);
@@ -524,26 +568,38 @@ describe("patients", () => {
   });
 
   it("after seven years since the last activity and the child's 25th birthday, the whole card goes", () => {
-    const { ask } = clinic();
-    const today = localToday().date;
-    const years = (n: number) => `${Number(today.slice(0, 4)) - n}${today.slice(4, 8)}01`;
-    // Seven years passed, but the child is not 25 yet.
-    const young = addPatient(ask, { name: "צעיר", birth_date: years(20), created_on: years(9) });
-    addVisit(ask, young.id, { status: "held", date: years(8) });
-    expect(refusal(() => ask({ op: "erase_patient", id: young.id, name: "צעיר" }, "done")).message).toContain("שומרים עד");
-    // 25 and more, but something happened three years ago.
-    const recent = addPatient(ask, { name: "קרוב", birth_date: years(30), created_on: years(9) });
-    addVisit(ask, recent.id, { status: "held", date: years(3) });
-    expect(refusal(() => ask({ op: "erase_patient", id: recent.id, name: "קרוב" }, "done")).code).toBe("refused");
-    // Both passed: everything goes, the history and the money lines too.
-    const old = addPatient(ask, { name: "ותיק", birth_date: years(30), created_on: years(9) });
-    const v = addVisit(ask, old.id, { status: "held", date: years(8) });
-    const pay = ask({ op: "save_payment", payment: payment(old.id, 60_000, years(8)) }, "payment");
-    ask({ op: "erase_patient", id: old.id, name: "ותיק" }, "done");
-    expect(ask({ op: "patients", today: NOW }, "patients").map((r) => r.patient.name)).toEqual(["צעיר", "קרוב"]);
-    expect(ask({ op: "history", record_id: v.id }, "history")).toEqual([]);
-    expect(ask({ op: "history", record_id: pay.id }, "history")).toEqual([]);
-    expect(ask({ op: "diary", month: years(8).slice(0, 7) }, "diary").days.flatMap((d) => d.lines)).toHaveLength(1);
+    // The last activity is also the day a record was last written, so the clock is moved.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(2018, 5, 1, 10, 0));
+      const { ask } = clinic();
+      // Seven years will pass, but the child will not be 25 yet.
+      const young = addPatient(ask, { name: "צעיר", birth_date: "2010-01-01", created_on: "2018-05-01" });
+      addVisit(ask, young.id, { status: "held", date: "2018-06-01" });
+      const old = addPatient(ask, { name: "ותיק", birth_date: "1999-01-01", created_on: "2018-05-01" });
+      const v = addVisit(ask, old.id, { status: "held", date: "2018-06-01" });
+      const pay = ask({ op: "save_payment", payment: payment(old.id, 60_000, "2018-06-01") }, "payment");
+      const touched = addPatient(ask, { name: "קרוב", birth_date: "1999-01-01", created_on: "2018-05-01" });
+      const tv = addVisit(ask, touched.id, { status: "held", date: "2018-06-01" });
+
+      // One day short of seven years.
+      vi.setSystemTime(new Date(2025, 4, 31, 10, 0));
+      expect(refusal(() => ask({ op: "erase_patient", id: old.id, name: "ותיק" }, "done")).message).toContain("החל מיום 01.06.2025");
+      // A record corrected now is activity now, whatever date it carries.
+      ask({ op: "save_note", note: { id: "", patient_id: touched.id, visit_id: tv.id, date: tv.date, record: "תיקון מאוחר", personal: "", case_input_id: null } }, "note");
+
+      vi.setSystemTime(new Date(2025, 5, 1, 10, 0));
+      expect(refusal(() => ask({ op: "erase_patient", id: young.id, name: "צעיר" }, "done")).message).toContain("החל מיום 01.01.2035");
+      expect(refusal(() => ask({ op: "erase_patient", id: touched.id, name: "קרוב" }, "done")).message).toContain("החל מיום 31.05.2032");
+      // Both passed: everything goes, the history and the money lines too.
+      ask({ op: "erase_patient", id: old.id, name: "ותיק" }, "done");
+      expect(ask({ op: "patients", today: NOW }, "patients").map((r) => r.patient.name)).toEqual(["צעיר", "קרוב"]);
+      expect(ask({ op: "history", record_id: v.id }, "history")).toEqual([]);
+      expect(ask({ op: "history", record_id: pay.id }, "history")).toEqual([]);
+      expect(ask({ op: "diary", month: "2018-06" }, "diary").days.flatMap((d) => d.lines)).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("the card walks the assessment step by step", () => {
@@ -577,7 +633,7 @@ describe("notes and the link to a case", () => {
   }
 
   it("keeps the record and the personal note apart, one note for a visit", () => {
-    const { ask, p, v, n } = withNote();
+    const { ask, v, n } = withNote();
     expect(n).toMatchObject({ record: "רשומה רשמית", personal: "תרשומת אישית", case_input_id: null });
     expect(refusal(() => ask({ op: "save_note", note: { ...n, id: "" } }, "note")).message).toContain("כבר יש סיכום");
     expect(refusal(() => ask({ op: "save_note", note: { ...n, record: " ", personal: "" } }, "note")).message).toContain("ריק");
@@ -590,17 +646,21 @@ describe("notes and the link to a case", () => {
     const { ask, p, n } = withNote();
     const no = refusal(() => ask({ op: "delete_note", id: n.id }, "done"));
     expect(no.code).toBe("refused");
-    expect(no.message).toContain("לא נמחק");
+    expect(no.message).toContain("לא מוחקים אותו");
     expect(ask({ op: "patient_card", id: p.id, today: NOW }, "card").notes).toHaveLength(1);
     ask({ op: "save_note", note: { ...n, record: "רשומה מתוקנת", personal: "מחשבה שלי בלבד" } }, "note");
     const h = ask({ op: "history", record_id: n.id }, "history");
     expect(h.map((e) => e.action)).toEqual(["created", "changed"]);
-    expect(h[0]?.lines).toContain("רשומה: רשומה רשמית");
-    expect(h[1]?.lines).toContain("רשומה: רשומה מתוקנת");
-    // The personal note is hers alone: the history says there is one, never what it says.
+    expect(h[0]?.lines).toEqual(["מטופל: נועם", "תאריך: 01.11.2026", "רשומה:", "רשומה רשמית", "תרשומת אישית: נכתבה"]);
+    expect(h[1]?.lines).toEqual(["מטופל: נועם", "תאריך: 01.11.2026", "רשומה:", "רשומה מתוקנת", "תרשומת אישית: השתנתה"]);
+    // The personal note is hers alone: the history says that it changed, never what it says.
     expect(JSON.stringify(h)).not.toContain("מחשבה שלי בלבד");
-    expect(JSON.stringify(h)).not.toContain("תרשומת אישית\"");
-    expect(h[1]?.lines).toContain("תרשומת אישית: יש");
+    expect(JSON.stringify(h)).not.toContain("\"תרשומת אישית\"");
+    // Saved again with nothing changed: no new line. With only the record changed: "בלי שינוי".
+    ask({ op: "save_note", note: { ...n, record: "רשומה מתוקנת", personal: "מחשבה שלי בלבד" } }, "note");
+    expect(ask({ op: "history", record_id: n.id }, "history")).toHaveLength(2);
+    ask({ op: "save_note", note: { ...n, record: "שורה ראשונה\n\nשורה שנייה", personal: "מחשבה שלי בלבד" } }, "note");
+    expect(ask({ op: "history", record_id: n.id }, "history")[2]?.lines).toEqual(["מטופל: נועם", "תאריך: 01.11.2026", "רשומה:", "שורה ראשונה", "שורה שנייה", "תרשומת אישית: בלי שינוי"]);
     expect(refusal(() => ask({ op: "delete_note", id: "nothing" }, "done")).code).toBe("not_found");
   });
 
@@ -626,7 +686,7 @@ describe("notes and the link to a case", () => {
       { role: "other", name: "", phone: "שלוחה 12", email: "" }, { role: "other", name: "דודה חנה", phone: "", email: "" },
     ] });
     ask({ op: "create_case", patient_id: p.id, today: NOW }, "case");
-    expect(seen).toEqual([{ role: "child", value: "נועם" }, { role: "mother", value: "מיכל" }, { role: "relative", value: "סבתא רבקה" }, { role: "other", value: "דודה חנה" }]);
+    expect(seen).toEqual([{ role: "child", value: "נועם" }, { role: "mother", value: "מיכל" }, { role: "other", value: "סבתא רבקה" }, { role: "other", value: "דודה חנה" }]);
   });
 
   it("only the formal record goes into the case, and going again replaces it", () => {

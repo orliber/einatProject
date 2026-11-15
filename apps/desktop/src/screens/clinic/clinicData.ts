@@ -84,6 +84,12 @@ export const useHistory = (recordId: string | null) =>
 export const useClinicSettings = () => useRead(clinicKeys.settings(), clinicApi.settings);
 export const useCaseChoices = (enabled = true) => useRead(clinicKeys.caseChoices(), clinicApi.caseChoices, { enabled });
 
+/** Reads the clinic's data again: what "לנסות שוב" does after a read that failed. */
+export function useReloadClinic(): () => void {
+  const qc = useQueryClient();
+  return useCallback(() => void qc.invalidateQueries({ queryKey: CLINIC_KEY }), [qc]);
+}
+
 /** A write: on success every clinic query is read again; a failure is remembered by the app and
  *  thrown to the caller (`mutateAsync`), whose error line shows `message`. `alsoCases`: the
  *  write changed the cases too (a case opened, a material added). */

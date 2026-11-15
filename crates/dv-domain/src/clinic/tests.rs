@@ -3644,7 +3644,8 @@ fn a_card_where_nothing_happened_can_be_erased_at_once() {
 
 #[test]
 fn anything_that_happened_keeps_the_card_voided_records_too() {
-    let cases: Vec<(&str, Box<dyn Fn(&mut Card)>)> = vec![
+    type Fill = Box<dyn Fn(&mut Card)>;
+    let cases: Vec<(&str, Fill)> = vec![
         (
             "a held visit, even one that cost nothing",
             Box::new(|c| c.visits = vec![paid_visit("v", TODAY, VisitStatus::Held, 0)]),

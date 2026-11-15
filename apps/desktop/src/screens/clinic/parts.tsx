@@ -117,7 +117,7 @@ export function Section({ title, aside, children, label }: { title: string; asid
 // ------------------------------------------------------------------ form fields
 
 /** A label over its control, with one line of help and, when there is one, what is wrong. */
-export function Field({ id, label, hint, problem, children, className }: { id: string; label: string; hint?: ReactNode; problem?: string | null; children: ReactNode; className?: string }) {
+export function Field({ id, label, hint, problem, children, className }: { id: string; label: string; hint?: ReactNode; problem?: string | null | undefined; children: ReactNode; className?: string | undefined }) {
   return (
     <div className={className ? `field ${className}` : "field"}>
       <label htmlFor={id}>{label}</label>
@@ -131,8 +131,8 @@ export function Field({ id, label, hint, problem, children, className }: { id: s
 const describedBy = (id: string, hint: unknown, problem: unknown) => [hint ? `${id}-hint` : "", problem ? `${id}-problem` : ""].filter(Boolean).join(" ") || undefined;
 
 export function TextField(props: {
-  id: string; label: string; value: string; onChange: (value: string) => void; hint?: ReactNode; problem?: string | null;
-  maxLength?: number; placeholder?: string; autoFocus?: boolean; dir?: "ltr" | "rtl"; inputMode?: "text" | "tel" | "email" | "numeric";
+  id: string; label: string; value: string; onChange: (value: string) => void; hint?: ReactNode; problem?: string | null | undefined;
+  maxLength?: number; placeholder?: string | undefined; autoFocus?: boolean; dir?: "ltr" | "rtl"; inputMode?: "text" | "tel" | "email" | "numeric";
   list?: string; className?: string;
 }) {
   return (

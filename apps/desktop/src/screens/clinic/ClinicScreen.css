@@ -1,0 +1,512 @@
+/* The clinic (beta): its page, its tabs and the shared parts of its screens (parts.tsx).
+   Colours come only from styles/tokens.css, so both themes hold. */
+.clinic {
+  gap: var(--space-4);
+}
+.clinic-beta {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--sand);
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+}
+.clinic-head {
+  align-items: center;
+}
+.clinic-discreet {
+  max-width: 460px;
+}
+
+/* ---------- tabs ---------- */
+.clinic-tabs {
+  display: flex;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+.clinic-tab {
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: var(--text-md);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.clinic-tab:hover {
+  color: var(--ink);
+}
+.clinic-tab-on {
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom-color: var(--primary);
+}
+.clinic-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+/* The panel takes the keyboard only to be scrolled; its ring would frame the whole page. */
+.clinic-panel:focus-visible {
+  outline: none;
+}
+
+/* ---------- names and money ---------- */
+.clinic-name-strong {
+  font-weight: 600;
+}
+.clinic-name-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: start;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.clinic-name-link.clinic-name-strong {
+  font-weight: 600;
+}
+.clinic-name-link:hover {
+  color: var(--primary);
+  text-decoration-color: var(--primary);
+}
+.clinic-money {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.clinic-money-owed {
+  color: var(--warn);
+  font-weight: 600;
+}
+.clinic-money-ok {
+  color: var(--ok);
+}
+.clinic-money-muted {
+  color: var(--ink-muted);
+}
+
+/* ---------- sections, lists, empty states ---------- */
+.clinic-section {
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.clinic-section-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.clinic-section-head h2 {
+  font-size: var(--text-lg);
+}
+.clinic-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.clinic-quiet {
+  margin: 0;
+}
+.clinic-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-7) var(--space-5);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  text-align: center;
+}
+.clinic-empty h3 {
+  font-size: var(--text-xl);
+}
+.clinic-empty-text {
+  max-width: 560px;
+  line-height: 1.6;
+}
+.clinic-empty-text p {
+  margin: 0;
+}
+.clinic-empty-actions {
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* ---------- a visit on a list ---------- */
+.clinic-visit {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--line);
+}
+.clinic-visit:first-child {
+  border-top: 0;
+}
+.clinic-visit-off .clinic-visit-body {
+  color: var(--ink-muted);
+}
+.clinic-visit-when {
+  flex-shrink: 0;
+  min-width: 104px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.clinic-visit-open {
+  min-height: 44px;
+  justify-content: center;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.clinic-visit-open:hover {
+  color: var(--primary);
+}
+.clinic-visit-time {
+  font-variant-numeric: tabular-nums;
+}
+.clinic-visit-body {
+  gap: var(--space-1);
+}
+.clinic-visit-head {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.clinic-visit-actions {
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* ---------- what needs her ---------- */
+.clinic-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--line);
+}
+.clinic-alert:first-child {
+  border-top: 0;
+}
+.clinic-alert-icon {
+  color: var(--warn);
+  padding-top: 3px;
+}
+.clinic-alert-body {
+  gap: var(--space-1);
+  line-height: 1.5;
+}
+.clinic-alert-head {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* ---------- tasks ---------- */
+.clinic-task {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--line);
+}
+.clinic-task:first-child {
+  border-top: 0;
+}
+.clinic-task input[type="checkbox"],
+.clinic-check input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin: 2px 0 0;
+  flex-shrink: 0;
+  accent-color: var(--primary);
+}
+.clinic-task-body {
+  gap: var(--space-1);
+}
+.clinic-task-body label {
+  font-weight: 600;
+  cursor: pointer;
+}
+.clinic-task-done label {
+  color: var(--ink-muted);
+  text-decoration: line-through;
+}
+.clinic-task-more {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.clinic-overdue {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+/* ---------- the front page ---------- */
+.clinic-today {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.clinic-today-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.clinic-greeting {
+  gap: 2px;
+}
+.clinic-greeting h2 {
+  font-size: var(--text-2xl);
+}
+.clinic-figures {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.clinic-figure {
+  width: 100%;
+  min-height: 76px;
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  font: inherit;
+  color: var(--ink);
+  text-align: start;
+  cursor: pointer;
+}
+.clinic-figure:hover {
+  border-color: var(--primary-line);
+}
+.clinic-figure-value {
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.clinic-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+.clinic-column {
+  gap: var(--space-4);
+  min-width: 0;
+}
+/* A narrow window, or a large text size (the page's width after the zoom): one column. */
+@container page (max-width: 1000px) {
+  .clinic-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .clinic-figures {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .clinic-visit {
+    flex-wrap: wrap;
+  }
+}
+
+/* ---------- forms in the clinic's dialogs ---------- */
+.clinic-form {
+  gap: var(--space-4);
+}
+.clinic-form-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.clinic-narrow {
+  width: 150px;
+}
+.clinic-narrow .input {
+  width: 100%;
+}
+.clinic-time-input {
+  width: 110px;
+  text-align: center;
+}
+.clinic-money-input {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.clinic-money-input .input {
+  width: 110px;
+  text-align: center;
+}
+.clinic-check {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-2);
+  row-gap: 2px;
+  align-items: start;
+  min-height: 32px;
+}
+.clinic-check label {
+  font-weight: 600;
+  cursor: pointer;
+}
+.clinic-check .hint {
+  grid-column: 2;
+}
+.clinic-group {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.clinic-group legend {
+  padding: 0;
+  margin-bottom: var(--space-2);
+}
+.clinic-age {
+  margin: 0;
+  align-self: flex-end;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  color: var(--ink-soft);
+}
+.clinic-contact {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.2fr) auto;
+  gap: var(--space-3);
+  align-items: end;
+}
+.clinic-contact .input,
+.clinic-contact .select {
+  width: 100%;
+}
+.clinic-add {
+  align-self: flex-start;
+}
+.clinic-picked {
+  min-height: 44px;
+  gap: var(--space-3);
+}
+.clinic-picker-list {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  max-height: 240px;
+  overflow: auto;
+}
+.clinic-picker-row {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.clinic-picker-list li:first-child .clinic-picker-row {
+  border-top: 0;
+}
+.clinic-picker-row:hover {
+  background: var(--surface-alt);
+}
+.clinic-overlap {
+  margin-bottom: var(--space-3);
+  font-size: var(--text-base);
+}
+
+/* ---------- the session note: two texts, clearly apart ---------- */
+.clinic-note-part {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.clinic-note-personal {
+  border-style: dashed;
+  border-color: var(--line-strong);
+  background: var(--surface-alt);
+}
+.clinic-note-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.clinic-note-head h3 {
+  font-size: var(--text-lg);
+}
+.clinic-note-text {
+  width: 100%;
+}
+.clinic-template {
+  flex-wrap: wrap;
+}
+.clinic-to-case {
+  display: flex;
+  font-size: var(--text-base);
+}
+
+/* ---------- history and paging ---------- */
+.clinic-history-box {
+  gap: var(--space-2);
+}
+.clinic-history {
+  gap: var(--space-3);
+}
+.clinic-history-entry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.clinic-history-lines {
+  white-space: pre-wrap;
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+  line-height: 1.6;
+}
+.clinic-pager {
+  justify-content: center;
+  gap: var(--space-3);
+  padding-top: var(--space-2);
+}
