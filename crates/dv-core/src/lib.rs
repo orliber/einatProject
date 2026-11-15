@@ -835,6 +835,9 @@ pub struct Outgoing {
     transport: Option<Arc<dyn Transport>>,
     /// The session it was approved in (`Core::session`): a lock in between ends it.
     session: u64,
+    /// `Core::pending_epoch` as it left: approvals withdrawn while it was on its way (a name
+    /// added, a material changed) move it, and a failed send is then not kept for a retry.
+    epoch: u64,
     /// The approved bytes went out a second time in this send (one more try of an answer that
     /// could not be used, D-143): said in the log.
     again: std::sync::atomic::AtomicBool,
@@ -983,6 +986,10 @@ pub struct Core {
     /// Approvals dropped because their material changed, by id, with the line said when she
     /// tries to send one (memory only; cleared on lock).
     withdrawn: HashMap<String, &'static str>,
+    /// Requests that left while the vault was locked when their answer (or failure) came
+    /// back: written into the history, the log and the month's count at the next opening.
+    /// What they hold is what was sent (filtered and cleared), kept in memory until then.
+    owed_sends: Vec<stage::OwedSend>,
     /// Where the optional name model is downloaded (D-053); `None` keeps it off.
     models_dir: Option<PathBuf>,
     /// The name model, started on first use or right after unlock while it is on, and

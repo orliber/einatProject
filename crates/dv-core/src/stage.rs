@@ -157,20 +157,95 @@ impl Core {
                 fields.insert("sent_twice".to_owned(), Value::Bool(true));
             }
         }
+        let payload = &out.pending.payload;
+        let sent = SentRecord {
+            case_id: case_id.map(str::to_owned),
+            kept_as: kept_as.map(str::to_owned),
+            sha256: payload.sha256().to_owned(),
+            model: if demo {
+                "demo".to_owned()
+            } else {
+                out.model.clone()
+            },
+            payload_text: String::from_utf8_lossy(payload.body()).into_owned(),
+            details,
+        };
+        if self.vault.is_none() {
+            // The vault locked while the request was with the AI (she walked away, the lid
+            // closed): it left all the same, and the history that stands in for reviewing each
+            // request must show it. Written at the next opening.
+            self.owe(OwedSend::Sent(sent));
+            return Ok(());
+        }
+        self.write_sent(&sent)
+    }
+
+    fn write_sent(&mut self, sent: &SentRecord) -> Result<(), CoreError> {
         let v = self.vault_mut()?;
-        if let (Some(case_id), Some(kept_as)) = (case_id, kept_as) {
-            let payload = &out.pending.payload;
-            let payload_text = String::from_utf8_lossy(payload.body()).into_owned();
+        if let (Some(case_id), Some(kept_as)) = (sent.case_id.as_deref(), sent.kept_as.as_deref()) {
             v.add_transmission(
                 case_id,
                 kept_as,
-                payload.sha256(),
-                if demo { "demo" } else { &out.model },
-                &payload_text,
+                &sent.sha256,
+                &sent.model,
+                &sent.payload_text,
             )?;
         }
-        v.record(AuditEvent::Send, case_id, &details)?;
+        v.record(AuditEvent::Send, sent.case_id.as_deref(), &sent.details)?;
         Ok(())
+    }
+
+    pub(crate) fn owe(&mut self, owed: OwedSend) {
+        // A bound, never expected to be met: a request takes minutes and a lock ends new ones.
+        if self.owed_sends.len() < OWED_MAX {
+            self.owed_sends.push(owed);
+        }
+    }
+
+    /// Right after the vault opens: what left while it was locked is written down. A case
+    /// that is gone by now (deleted for good, another vault restored) keeps its line in the
+    /// log without the bytes.
+    pub(crate) fn settle_owed_sends(&mut self) {
+        for owed in std::mem::take(&mut self.owed_sends) {
+            match owed {
+                OwedSend::Usage { key, model, tokens } => self.count_usage(&key, &model, tokens),
+                OwedSend::Sent(sent) => {
+                    if self.write_sent(&sent).is_err() {
+                        if let Ok(v) = self.vault_mut() {
+                            let _ = v.record(AuditEvent::Send, None, &sent.details);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+const OWED_MAX: usize = 64;
+
+/// A request as it left, to be written in the case's history and in the log.
+pub(crate) struct SentRecord {
+    case_id: Option<String>,
+    kept_as: Option<String>,
+    sha256: String,
+    model: String,
+    payload_text: String,
+    details: Value,
+}
+
+/// What a request that came back while the vault was locked still owes the records.
+pub(crate) enum OwedSend {
+    Sent(SentRecord),
+    Usage {
+        key: String,
+        model: String,
+        tokens: crate::usage::Tokens,
+    },
+}
+
+impl std::fmt::Debug for OwedSend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("OwedSend")
     }
 }
 

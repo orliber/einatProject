@@ -165,6 +165,7 @@ impl Core {
             session: 0,
             pending_epoch: 0,
             withdrawn: HashMap::new(),
+            owed_sends: Vec::new(),
             models_dir: None,
             ner: None,
             ner_exe: None,
@@ -508,6 +509,8 @@ impl Core {
                 self.settled = None;
                 self.vault = Some(vault);
                 self.last_activity = Instant::now();
+                // What left while the vault was locked is written down first.
+                self.settle_owed_sends();
                 // The gate and the sending rules try themselves once per opening; a failure
                 // stops sending until the program is fixed (D-078, fail-closed).
                 crate::layers::stop_if_broken(crate::layers::SelfChecks::run());

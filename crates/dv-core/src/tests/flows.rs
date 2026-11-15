@@ -1528,6 +1528,85 @@ fn the_emergency_stop_works_while_locked_and_shows_on_the_security_screen() {
     );
 }
 
+/// A request whose answer came back while the vault was still locked (she walked away, the lid
+/// closed) left the computer all the same: it was in no history, no log and no monthly count.
+#[test]
+fn a_request_that_came_back_to_a_locked_vault_is_recorded_at_the_next_opening() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let logged_before = sends_logged(&mut core);
+    let used_before = core.usage_summary().unwrap();
+
+    let id = approval(&mut core, &case);
+    let out = core.begin_send(&id, SendKind::Section).unwrap();
+    let response = out.transmit();
+    assert!(response.is_ok());
+    core.lock();
+    assert!(core.finish_section(out, response).is_err());
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(sends_logged(&mut core), logged_before + 1, "it left");
+    assert_ne!(
+        core.usage_summary().unwrap(),
+        used_before,
+        "and was counted"
+    );
+    assert!(
+        core.chat(&case, "kindergarten").unwrap().is_empty(),
+        "the answer itself is not stored"
+    );
+    // Written once: another opening adds nothing.
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(sends_logged(&mut core), logged_before + 1);
+}
+
+/// A word she marks as a name while other requests of the case wait to go (the whole report is
+/// prepared up front) is in none of them: each was filtered before the case knew it.
+#[test]
+fn a_name_she_marks_withdraws_the_requests_already_waiting() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    for decide in [
+        SuspectDecision::Hide { role: Role::Other },
+        SuspectDecision::IsName,
+    ] {
+        let id = approval(&mut core, &case);
+        core.decide_suspect(&case, "בתיה", decide).unwrap();
+        assert!(matches!(
+            core.send_section(&id),
+            Err(CoreError::NotFound(_))
+        ));
+    }
+    // Her own names are hidden in every case.
+    let id = approval(&mut core, &case);
+    core.set_practitioner(vec!["ד\"ר רותם בדויה".to_owned()])
+        .unwrap();
+    assert!(matches!(
+        core.send_section(&id),
+        Err(CoreError::NotFound(_))
+    ));
+    assert!(fake.sent.lock().unwrap().is_empty());
+}
+
+/// A send that failed is kept for another try, but not when its approval was withdrawn while
+/// it was on its way: the retry would send the bytes from before the change.
+#[test]
+fn a_failed_send_does_not_bring_back_an_approval_withdrawn_meanwhile() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let offline = || Err(CoreError::Egress(EgressError::Offline));
+    let id = approval(&mut core, &case);
+    let out = core.begin_send(&id, SendKind::Section).unwrap();
+    core.decide_suspect(&case, "בתיה", SuspectDecision::Hide { role: Role::Other })
+        .unwrap();
+    assert!(core.finish_section(out, offline()).is_err());
+    assert!(matches!(
+        core.send_section(&id),
+        Err(CoreError::NotFound(_))
+    ));
+    assert!(fake.sent.lock().unwrap().is_empty());
+}
+
 /// An answer that comes back after the vault was locked and opened again, or after its case
 /// went to the recycle bin, is not written: it lands only in the session and the case it was
 /// approved in. What left the computer is in the history either way.
