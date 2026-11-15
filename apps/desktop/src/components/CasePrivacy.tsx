@@ -56,7 +56,7 @@ export function CasePrivacyCard(props: {
                   <label className="auto-role">
                     <span className="visually-hidden">התפקיד של {words}</span>
                     <select className="select auto-select" value={foundRoles.includes(i.role) ? i.role : "other"} disabled={off}
-                      onChange={(e) => void act(i.id, () => ipc.changeRole(props.caseId, i.tag, e.target.value as Role))}>
+                      onChange={(e) => void act(`${i.id}:role`, () => ipc.changeRole(props.caseId, i.tag, e.target.value as Role))}>
                       {foundRoles.map((x) => <option key={x} value={x}>{roleLabel[x]}</option>)}
                     </select>
                   </label>

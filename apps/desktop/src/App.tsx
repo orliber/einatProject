@@ -9,7 +9,7 @@ import { ipc, onCoreEvent, type AppStatus, type UiError } from "./ipc/client";
 import { LockScreen } from "./screens/LockScreen";
 import { CasesScreen } from "./screens/CasesScreen";
 import { CaseScreen } from "./screens/CaseScreen";
-import { ErrorLine, Toast, type ToastAction } from "./components/ui";
+import { Dialog, ErrorLine, Toast, type ToastAction } from "./components/ui";
 import { IdleWarning } from "./components/IdleWarning";
 import { forgetHold, holdNow, UnsavedNotice } from "./components/Unsaved";
 import { applyTextSize, readTextSize, stepTextSize } from "./textSize";
@@ -18,6 +18,7 @@ import { isCombo, KEYS } from "./shortcuts";
 import { forgetFailures, rememberFailure } from "./errors";
 import { resetRuns } from "./screens/case/reportRun";
 import { clearKept } from "./kept";
+import { unsavedGuard } from "./leaveGuard";
 import type { SettingsPane } from "./screens/settingsPanes";
 
 // The pages she opens rarely load on their own, so the first paint and the case pages carry
@@ -293,10 +294,26 @@ function Shell(props: {
 }) {
   const { status, route, setRoute, refresh, setToast, fail, lockNow, showShortcuts, toast, sheet, idleIn, keepWorking } = props;
   const notify = useCallback((text: string, action?: ToastAction) => setToast(toastOf(text, action)), [setToast]);
+  // Where she asked to go while a screen held changes that only its button saves.
+  const [leaving, setLeaving] = useState<Route | null>(null);
+  const [savingLeave, setSavingLeave] = useState(false);
+  const go = useCallback((r: Route) => {
+    if (unsavedGuard()) setLeaving(r);
+    else setRoute(r);
+  }, [setRoute]);
   const api = useMemo<AppApi>(
-    () => ({ status, route, go: setRoute, refresh, notify, fail, lockNow, showShortcuts }),
-    [status, route, setRoute, refresh, notify, fail, lockNow, showShortcuts],
+    () => ({ status, route, go, refresh, notify, fail, lockNow, showShortcuts }),
+    [status, route, go, refresh, notify, fail, lockNow, showShortcuts],
   );
+  const saveAndLeave = async () => {
+    const to = leaving;
+    const g = unsavedGuard();
+    setSavingLeave(true);
+    const saved = g ? await g.save().catch(() => false) : true;
+    setSavingLeave(false);
+    setLeaving(null);
+    if (saved && to) setRoute(to);
+  };
   return (
     <QueryClientProvider client={queryClient}>
     <AppContext.Provider value={api}>
@@ -310,6 +327,17 @@ function Shell(props: {
       {/* Keyed by notice: the same words again are a new toast with a fresh timer. */}
       {toast && <Toast key={toast.seq} text={toast.text} action={toast.action} onDone={() => setToast(null)} />}
       <UnsavedNotice />
+      {leaving && (
+        <Dialog narrow title="יש שינויים שלא נשמרו" {...(savingLeave ? {} : { onClose: () => setLeaving(null) })}
+          footer={<>
+            <button type="button" className="btn" disabled={savingLeave} onClick={() => { const to = leaving; setLeaving(null); setRoute(to); }}>לצאת בלי לשמור</button>
+            <span className="grow" />
+            <button type="button" className="btn" disabled={savingLeave} onClick={() => setLeaving(null)}>להישאר</button>
+            <button type="button" className="btn btn-primary" disabled={savingLeave} onClick={() => void saveAndLeave()}>לשמור ולהמשיך</button>
+          </>}>
+          <p>מה ששינית בפרטי התיק עדיין לא נשמר.</p>
+        </Dialog>
+      )}
       {sheet.open && <ShortcutsSheet onClose={sheet.close} />}
       {idleIn != null && idleIn <= 75 && <IdleWarning seconds={idleIn} onKeep={() => void keepWorking()} />}
     </AppContext.Provider>

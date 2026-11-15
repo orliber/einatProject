@@ -1,7 +1,7 @@
 // The case's consent keeps the form version it was signed on (D-115): saving other details does
 // not relabel it, and only her "signed again on today's form" puts it on the current version.
 // All names are invented.
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { AppContext, type AppApi } from "../../App";
@@ -11,6 +11,7 @@ import type { CaseDetail } from "../../ipc/client";
 import type { CaseApi } from "../CaseScreen";
 import { CONSENT_FORM_VERSION } from "../../consentForm";
 import { DetailsView } from "./DetailsView";
+import { unsavedGuard } from "../../leaveGuard";
 import { isoToHe, todayIso } from "../../components/DateField";
 
 vi.setConfig({ testTimeout: 30_000 });
@@ -152,3 +153,36 @@ describe("saving the details twice", () => {
     expect(calls.filter((c) => c.cmd === "update_case")).toHaveLength(0);
   });
 });
+
+describe("the save button is the only thing that saves here", () => {
+  it("refuses to save without the child's name, which would stop hiding it", async () => {
+    const { updates, user } = await openOnOldForm();
+    await user.clear(screen.getByDisplayValue("יונתן"));
+    await user.click(screen.getByRole("button", { name: "שמירת השינויים" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("צריך את שם הילד/ה");
+    expect(updates).toHaveLength(0);
+  });
+
+  it("holds unsaved changes for the leave question, and none once saved", async () => {
+    const { updates, user } = await openOnOldForm();
+    expect(unsavedGuard()).toBeNull();
+    await user.type(screen.getByLabelText("קוד התיק"), "-ב");
+    expect(unsavedGuard()).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: "שמירת השינויים" }));
+    await waitFor(() => expect(updates).toHaveLength(1));
+    await waitFor(() => expect(unsavedGuard()).toBeNull());
+  });
+
+  it("a double click saves once", async () => {
+    const { updates, user } = await openOnOldForm();
+    void user;
+    // Two clicks with nothing between them, as a double click arrives.
+    const button = screen.getByRole("button", { name: "שמירת השינויים" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(updates.length).toBeGreaterThan(0));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(updates).toHaveLength(1);
+  });
+});
+
