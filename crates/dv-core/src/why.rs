@@ -86,8 +86,12 @@ impl Core {
         let mut out = Vec::new();
         if DERIVED_SECTIONS.contains(&section_key.as_str()) {
             let mut candidates = Vec::new();
+            // What went with it: the body of the report, and the closing sections that are
+            // its to see (D-162). Never the previous assessments (D-156).
             for s in structure.sections().filter(|s| {
-                !DERIVED_SECTIONS.contains(&s.key.as_str()) && s.key != sorting::PRIOR_SECTION
+                s.key != sorting::PRIOR_SECTION
+                    && (!DERIVED_SECTIONS.contains(&s.key.as_str())
+                        || crate::closing_passed_to(&section_key).contains(&s.key.as_str()))
             }) {
                 for d in v
                     .drafts(case_id, &s.key)?

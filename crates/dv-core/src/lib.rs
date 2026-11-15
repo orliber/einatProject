@@ -222,6 +222,29 @@ const SLEEP_GAP: Duration = Duration::from_secs(60);
 const MAX_REQUEST_BYTES: usize = 900_000;
 /// Sections written from other, already approved sections.
 const DERIVED_SECTIONS: &[&str] = &["dsm", "summary", "diagnoses", "recommendations"];
+/// The section that holds the reason for the referral: what the closing sections answer.
+const REFERRAL_SECTION: &str = "referral";
+/// Her diagnoses: the psychologist's decision, which the other closing sections use as it is.
+const DIAGNOSES_SECTION: &str = "diagnoses";
+
+/// The approved closing sections that go with another closing section (D-162), so the end of
+/// the report is written with the whole picture: her diagnoses go to the DSM section, the
+/// summary and the recommendations; the DSM section to the summary and the recommendations;
+/// the recommendations to the summary. Never a section to itself, and nothing to the
+/// diagnoses, which are hers to decide.
+fn closing_passed_to(section_key: &str) -> &'static [&'static str] {
+    match section_key {
+        "dsm" => &["diagnoses"],
+        "summary" => &["dsm", "diagnoses", "recommendations"],
+        "recommendations" => &["dsm", "diagnoses"],
+        _ => &[],
+    }
+}
+
+/// The closing sections that get the case's key scores, worked out here (D-162).
+fn gets_key_scores(section_key: &str) -> bool {
+    matches!(section_key, "summary" | "dsm" | "recommendations")
+}
 
 /// The cloud-synced folder (OneDrive, Dropbox…) that holds `path`, if any. A report with real
 /// names is not saved where it would be uploaded on its own.
@@ -692,6 +715,20 @@ fn consent_date_ok(given: dv_domain::dates::Ymd, today: dv_domain::dates::Ymd) -
 /// The child's age as the details hold it: months are 0–11, and the years are a child's.
 fn age_ok(age: dv_domain::Age) -> bool {
     age.months <= 11 && age.years <= 24
+}
+
+/// The case's key scores as they go with the closing sections (D-162): the totals, indexes
+/// and scales of every sheet, on the lines of the score material, and the patterns of the
+/// scores. Worded by the fixed tables only, leaving out what she does not write beside
+/// scores; `None` when the case has no such score.
+fn key_scores_text(
+    v: &Vault,
+    sheets: &[dv_domain::ScoreSheet],
+) -> Result<Option<String>, CoreError> {
+    if sheets.is_empty() {
+        return Ok(None);
+    }
+    Ok(dv_domain::key_scores(sheets, style::sheet_habits(v)?))
 }
 
 /// A consent is a record the psychologist may have to show: a real, past date and who signed.

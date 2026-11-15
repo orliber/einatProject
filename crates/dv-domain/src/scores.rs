@@ -903,6 +903,100 @@ pub fn sheet_bands(sheet: &ScoreSheet) -> Result<Vec<ParentBand>, String> {
         .collect())
 }
 
+/// Said under every list of scores that goes out: where the ranges come from.
+const RANGES_NOTE: &str = "הטווחים חושבו בתוכנה לפי טבלה קבועה, לא על ידי מודל השפה.";
+
+/// One score as the sheet words it ("- name: ציון 98, אחוזון 45 – ממוצע. her note"), and
+/// whether a percentile is in it. The one wording of a score that goes out: the material
+/// ([`format_sheet_with`]) and the key scores of the closing sections ([`key_scores`]).
+fn score_line(
+    measure: &Measure,
+    sheet: &ScoreSheet,
+    e: &ScoreEntry,
+    habits: SheetHabits,
+) -> (String, bool) {
+    let name = measure_label(measure);
+    let range = range_of(measure, sheet, e.value);
+    // "ציון" before the number: the privacy filter reads "29.5" alone as a date (29 May).
+    let omit = if matches!(measure.scale, ScoreScale::Scaled | ScoreScale::VScale) {
+        habits.no_subtest_percentiles
+    } else {
+        habits.no_index_percentiles
+    };
+    let percentile = percentile(measure, e.value).filter(|_| !omit);
+    let value = match &percentile {
+        Some(p) => format!("ציון {}, אחוזון {p}", fmt_value(e.value)),
+        None => format!("ציון {}", fmt_value(e.value)),
+    };
+    let note = if e.note.trim().is_empty() {
+        String::new()
+    } else {
+        format!(". {}", e.note.trim())
+    };
+    let line = if range.is_empty() {
+        format!("- {name}: {value}{note}")
+    } else {
+        format!("- {name}: {value} – {range}{note}")
+    };
+    (line, percentile.is_some())
+}
+
+/// A total, an index or a questionnaire scale: what a summary quotes. Not a subtest (a scaled
+/// score, a v-scale score, an ability T score of one scale).
+fn is_key_measure(measure: &Measure) -> bool {
+    !matches!(
+        measure.scale,
+        ScoreScale::Scaled | ScoreScale::VScale | ScoreScale::TAbility
+    )
+}
+
+/// The key scores of a case, for the sections written from the approved ones (D-162): for each
+/// sheet its totals, indexes and scales, each on the very line the score material has it on
+/// ([`format_sheet_with`]: the value, the percentile unless she leaves it out, the range from
+/// the fixed table, her note), and then the patterns of the scores ([`crate::sheet_patterns`]).
+/// Nothing is worded here that the tables do not hold. A sheet that does not pass the checks
+/// of the score table is left out; `None` when no sheet has a key score.
+#[must_use]
+pub fn key_scores(sheets: &[ScoreSheet], habits: SheetHabits) -> Option<String> {
+    let mut out = String::new();
+    for sheet in sheets {
+        let Ok((inst, entries)) = checked(sheet) else {
+            continue;
+        };
+        let lines: Vec<String> = entries
+            .iter()
+            .filter(|(measure, _)| is_key_measure(measure))
+            .map(|(measure, e)| score_line(measure, sheet, e, habits).0)
+            .collect();
+        if lines.is_empty() {
+            continue;
+        }
+        if sheet.module.trim().is_empty() {
+            out.push_str(&format!("{}:\n", inst.name));
+        } else {
+            out.push_str(&format!("{} · מודול {}:\n", inst.name, sheet.module.trim()));
+        }
+        for line in lines {
+            out.push_str(&line);
+            out.push('\n');
+        }
+    }
+    if out.is_empty() {
+        return None;
+    }
+    let patterns = crate::sheet_patterns(sheets);
+    if !patterns.is_empty() {
+        let labels: Vec<&str> = patterns.iter().map(|p| p.label.as_str()).collect();
+        out.push_str(&format!(
+            "דפוסי התוצאות, כפי שחושבו בתוכנה מהטבלאות: {}.\n",
+            labels.join(" · ")
+        ));
+    }
+    out.push_str(RANGES_NOTE);
+    out.push('\n');
+    Some(out)
+}
+
 /// The text stored as a "test scores" material: every score with its range from the table,
 /// the scale sentence, and a note on large gaps between indexes (to check in the manual).
 pub fn format_sheet(sheet: &ScoreSheet) -> Result<String, String> {
@@ -927,31 +1021,10 @@ pub fn format_sheet_with(sheet: &ScoreSheet, habits: SheetHabits) -> Result<Stri
             group.clone_from(&measure.group);
             out.push_str(&format!("{group}:\n"));
         }
-        let name = measure_label(measure);
-        let range = range_of(measure, sheet, e.value);
-        // "ציון" before the number: the privacy filter reads "29.5" alone as a date (29 May).
-        let omit = if matches!(measure.scale, ScoreScale::Scaled | ScoreScale::VScale) {
-            habits.no_subtest_percentiles
-        } else {
-            habits.no_index_percentiles
-        };
-        let value = match percentile(measure, e.value).filter(|_| !omit) {
-            Some(p) => {
-                any_percentile = true;
-                format!("ציון {}, אחוזון {p}", fmt_value(e.value))
-            }
-            None => format!("ציון {}", fmt_value(e.value)),
-        };
-        let note = if e.note.trim().is_empty() {
-            String::new()
-        } else {
-            format!(". {}", e.note.trim())
-        };
-        if range.is_empty() {
-            out.push_str(&format!("- {name}: {value}{note}\n"));
-        } else {
-            out.push_str(&format!("- {name}: {value} – {range}{note}\n"));
-        }
+        let (line, with_percentile) = score_line(measure, sheet, e, habits);
+        any_percentile |= with_percentile;
+        out.push_str(&line);
+        out.push('\n');
         if measure.scale == ScoreScale::Standard && measure.group == "מדדים" && !is_total(measure)
         {
             indexes.push((measure.name_he.clone(), e.value));
@@ -1005,7 +1078,8 @@ pub fn format_sheet_with(sheet: &ScoreSheet, habits: SheetHabits) -> Result<Stri
     if any_percentile {
         out.push_str("האחוזונים חושבו לפי העקומה הנורמלית.\n");
     }
-    out.push_str("הטווחים חושבו בתוכנה לפי טבלה קבועה, לא על ידי מודל השפה.\n");
+    out.push_str(RANGES_NOTE);
+    out.push('\n');
     if !sheet.notes.trim().is_empty() {
         out.push_str(&format!("הערות המאבחנת: {}\n", sheet.notes.trim()));
     }
@@ -3289,5 +3363,88 @@ mod tests {
         assert_eq!(p[0].bars[1], ("הבנה מילולית (VCI)".to_owned(), 112.0));
         assert_eq!((p[1].mean, p[1].bars.len()), (10.0, 1));
         assert!(sheet_profiles(&wppsi(&[])).unwrap().is_empty());
+    }
+
+    /// D-162: the closing sections get the totals and indexes on the very lines of the score
+    /// material, and the patterns of the scores; a subtest stays in its own section.
+    #[test]
+    fn the_key_scores_are_the_sheets_own_lines_for_totals_and_indexes_with_the_patterns() {
+        let entry = |measure: &str, value: f64, note: &str| ScoreEntry {
+            measure: measure.into(),
+            value,
+            note: note.into(),
+        };
+        let cognitive = ScoreSheet {
+            instrument: "wppsi_iv".into(),
+            module: String::new(),
+            cutoff: None,
+            entries: vec![
+                entry("fsiq", 98.0, "פער בין המדדים"),
+                entry("vci", 112.0, ""),
+                entry("psi", 82.0, ""),
+                entry("block_design", 13.0, ""),
+            ],
+            notes: String::new(),
+        };
+        let ados = ScoreSheet {
+            instrument: "ados_2".into(),
+            module: "2".into(),
+            cutoff: Some(8.0),
+            entries: vec![entry("total", 11.0, "")],
+            notes: String::new(),
+        };
+        let only_subtests = ScoreSheet {
+            instrument: "wisc_v".into(),
+            module: String::new(),
+            cutoff: None,
+            entries: vec![entry("matrix", 9.0, "")],
+            notes: String::new(),
+        };
+        let unknown = ScoreSheet {
+            instrument: "no_such_test".into(),
+            module: String::new(),
+            cutoff: None,
+            entries: vec![entry("fsiq", 100.0, "")],
+            notes: String::new(),
+        };
+        let sheets = [
+            cognitive.clone(),
+            ados.clone(),
+            only_subtests.clone(),
+            unknown,
+        ];
+        let text = key_scores(&sheets, SheetHabits::default()).unwrap();
+        let material = format_sheet(&cognitive).unwrap();
+        let ados_material = format_sheet(&ados).unwrap();
+        // Every score line of the block is a line of the material, word for word.
+        let lines: Vec<&str> = text.lines().filter(|l| l.starts_with("- ")).collect();
+        assert_eq!(lines.len(), 4, "{text}");
+        for line in &lines {
+            assert!(
+                material.lines().any(|m| m == *line) || ados_material.lines().any(|m| m == *line),
+                "{line}"
+            );
+        }
+        assert!(
+            text.contains("- מנת משכל כללית (FSIQ): ציון 98, אחוזון 45 – ממוצע. פער בין המדדים")
+        );
+        assert!(text.contains("WPPSI-IV:\n") && text.contains("ADOS-2 · מודול 2:\n"));
+        assert!(text.contains("בנקודת החתך או מעליה (8)"));
+        assert!(
+            !text.contains("קוביות") && !text.contains("WISC-V"),
+            "{text}"
+        );
+        assert!(!text.contains("no_such_test"));
+        assert!(text.contains("דפוסי התוצאות, כפי שחושבו בתוכנה מהטבלאות: פער של סטיית תקן"));
+        assert!(text.ends_with("לא על ידי מודל השפה.\n"));
+        // What she leaves out beside an index is left out here too.
+        let habits = SheetHabits {
+            no_subtest_percentiles: false,
+            no_index_percentiles: true,
+        };
+        let bare = key_scores(&sheets, habits).unwrap();
+        assert!(!bare.contains("אחוזון"), "{bare}");
+        assert_eq!(key_scores(&[only_subtests], SheetHabits::default()), None);
+        assert_eq!(key_scores(&[], SheetHabits::default()), None);
     }
 }

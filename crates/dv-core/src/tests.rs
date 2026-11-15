@@ -16,6 +16,7 @@ use super::*;
 mod access;
 mod binding;
 mod briefs;
+mod closing_context;
 mod flows;
 mod guides;
 mod history;
@@ -1903,6 +1904,12 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
         dv_ai::prompts::RESEARCH_RULES,
         dv_ai::prompts::SORTING_RULES,
         dv_ai::prompts::VERIFY_RULES,
+        dv_ai::prompts::REPORT_CHECK_RULES,
+        dv_ai::prompts::CRAFT_HEADING,
+        dv_ai::REFERRAL_LINE,
+        dv_ai::REFERRAL_LINE_SUMMARY,
+        dv_ai::DECISION_LINE,
+        dv_ai::KEY_SCORES_LINE,
         dv_ai::prompts::LETTER_PARENTS,
         dv_ai::prompts::LETTER_SCHOOL,
         dv_ai::prompts::LETTER_TITLE_PARENTS,
@@ -1914,8 +1921,47 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
             .into_iter()
             .filter_map(dv_ai::prompts::quick_action),
     )
+    // The craft of every kind of section (D-164): it goes out with the section's request.
+    .chain(
+        dv_ai::prompts::CRAFT_SECTIONS
+            .iter()
+            .filter_map(|key| dv_ai::prompts::section_craft(key)),
+    )
     .map(|t| Value::String(t.to_owned()))
     .collect();
+    assert!(
+        dv_ai::prompts::CRAFT_SECTIONS
+            .iter()
+            .all(|key| dv_ai::prompts::section_craft(key).is_some()),
+        "every listed section has craft lines"
+    );
+    // The check of the whole report (D-097, D-169): its frames, roles and schema.
+    body.push(
+        dv_ai::build_report_check_request(
+            &dv_ai::ModelConfig::default(),
+            &dv_ai::ReportCheckInput {
+                sections: [
+                    "referral",
+                    "cognitive",
+                    "dsm",
+                    "summary",
+                    "diagnoses",
+                    "recommendations",
+                ]
+                .into_iter()
+                .map(|key| dv_ai::ReportCheckSection {
+                    title: String::new(),
+                    text_tagged: String::new(),
+                    closing: crate::drafts::CLOSING_SECTIONS.contains(&key),
+                    role: dv_ai::ReportRole::of_key(key),
+                })
+                .collect(),
+            },
+            &dv_ai::nonce_from(&[7; 16]),
+        )
+        .0,
+    );
+
     // A whole section request as the builder writes it: every kind label, both grammatical
     // genders, the age line, the data frames, the history opener and the JSON schema.
     for gender in [GrammaticalGender::Male, GrammaticalGender::Female] {
@@ -1943,7 +1989,20 @@ fn fixed_prompt_text_never_collides_with_a_childs_name() {
             age: Some("5:4".into()),
             gender: Some(gender),
             sources,
-            approved_context: vec![(String::new(), String::new())],
+            approved_context: vec![
+                dv_ai::ApprovedSection::plain("", ""),
+                dv_ai::ApprovedSection {
+                    title: String::new(),
+                    text_tagged: String::new(),
+                    role: dv_ai::ApprovedRole::Referral,
+                },
+                dv_ai::ApprovedSection {
+                    title: String::new(),
+                    text_tagged: String::new(),
+                    role: dv_ai::ApprovedRole::Decision,
+                },
+            ],
+            key_scores_tagged: Some("-".into()),
             current_draft: vec![String::new()],
             history: vec![dv_ai::TaggedTurn {
                 role: "assistant".into(),
@@ -2226,6 +2285,11 @@ fn score_tables_and_section_titles_are_never_rewritten_silently() {
             notes: String::new(),
         };
         texts.push(dv_domain::format_sheet(&sheet).unwrap());
+        // The key scores of the closing sections (D-162): the same lines, under the test's name.
+        texts.extend(dv_domain::key_scores(
+            &[sheet.clone()],
+            dv_domain::SheetHabits::default(),
+        ));
         // D-165: the relative and elevated lines are case text too.
         let spread = ScoreSheet {
             entries: spread_entries(&inst),
@@ -2242,6 +2306,30 @@ fn score_tables_and_section_titles_are_never_rewritten_silently() {
         );
         texts.push(text);
     }
+    // The line of patterns the key scores end with, as it is written for a real gap; and the
+    // name of every pattern there can be.
+    let gap = ScoreSheet {
+        instrument: "wppsi_iv".into(),
+        module: String::new(),
+        cutoff: None,
+        entries: [("fsiq", 98.0), ("vci", 112.0), ("psi", 82.0)]
+            .into_iter()
+            .map(|(m, value)| ScoreEntry {
+                measure: m.into(),
+                value,
+                note: String::new(),
+            })
+            .collect(),
+        notes: String::new(),
+    };
+    let with_patterns = dv_domain::key_scores(&[gap], dv_domain::SheetHabits::default()).unwrap();
+    assert!(with_patterns.contains("דפוסי התוצאות"), "{with_patterns}");
+    texts.push(with_patterns);
+    texts.extend(
+        dv_domain::pattern_keys()
+            .iter()
+            .filter_map(|key| dv_domain::pattern_label(key)),
+    );
     // A word that holds the name ("שאלון" for a child "אלון") or is spelled close to it may
     // be hidden, but only as an item on the card: "להחזיר" there must bring the text back
     // exactly. Nothing may change without being listed.

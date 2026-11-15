@@ -75,7 +75,8 @@ fn section(content: &str) -> SectionInput {
         age: Some("5:4".to_owned()),
         gender: Some(GrammaticalGender::Female),
         sources: vec![source("internal-input-7f3a", content)],
-        approved_context: vec![("רקע".to_owned(), "[ילד] גדל בבית חם.".to_owned())],
+        approved_context: vec![dv_ai::ApprovedSection::plain("רקע", "[ילד] גדל בבית חם.")],
+        key_scores_tagged: None,
         current_draft: vec!["טיוטה קיימת.".to_owned()],
         history: vec![TaggedTurn {
             role: "assistant".to_owned(),
@@ -155,11 +156,13 @@ fn every_body(text: &str, nonce: &str) -> Vec<(&'static str, Value)> {
                             title: "רקע".to_owned(),
                             text_tagged: text.to_owned(),
                             closing: false,
+                            role: dv_ai::ReportRole::of_key("referral"),
                         },
                         ReportCheckSection {
                             title: "סיכום".to_owned(),
                             text_tagged: text.to_owned(),
                             closing: true,
+                            role: dv_ai::ReportRole::of_key("summary"),
                         },
                     ],
                 },

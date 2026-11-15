@@ -102,15 +102,40 @@ impl Core {
             .map(|(_, _, t)| t.as_str())
             .collect();
         let report_terms = dv_style::terms::usual(report_texts.iter().map(String::as_str), 1);
+        // What a closing section is also written from (D-162): the approved closing sections
+        // that go with it, and the key scores worked out here. A number quoted from them is
+        // a known number, here as when the answer came.
+        let approved_closing: Vec<(String, String)> = DERIVED_SECTIONS
+            .iter()
+            .flat_map(|key| {
+                shown
+                    .get(*key)
+                    .into_iter()
+                    .flatten()
+                    .filter(|d| d.status == DraftStatus::Approved)
+                    .map(|d| ((*key).to_owned(), d.text_tagged.clone()))
+            })
+            .collect();
+        let key_scores = key_scores_text(v, &sheets)?;
         let mut sections = Vec::new();
         for part in &structure.parts {
             for s in &part.sections {
+                let mut rests_on = body.clone();
+                rests_on.extend(
+                    approved_closing
+                        .iter()
+                        .filter(|(key, _)| closing_passed_to(&s.key).contains(&key.as_str()))
+                        .map(|(_, text)| text.as_str()),
+                );
+                if gets_key_scores(&s.key) {
+                    rests_on.extend(key_scores.as_deref());
+                }
                 let paragraphs: Vec<ParagraphView> = shown
                     .remove(&s.key)
                     .unwrap_or_default()
                     .into_iter()
                     .map(|d| {
-                        let unfounded = unfounded_numbers(&d, &s.key, s.mode, &inputs, &body);
+                        let unfounded = unfounded_numbers(&d, &s.key, s.mode, &inputs, &rests_on);
                         let text = shown_paragraph(
                             &d.text_tagged,
                             d.author,
@@ -514,8 +539,9 @@ pub(crate) fn paragraph_to_send(
 /// A number the AI wrote that nothing the paragraph rests on holds (D-150): the same check as
 /// when the answer came (`dv_ai::parse_section`), made again each time like the scores, so the
 /// note is still on the page, and "approve all" still holds the paragraph back, after a reload.
-/// The materials it cites, the body of the report for a closing section; her own sections are
-/// worded from her points, which are not kept, so they are not checked here.
+/// The materials it cites; for a closing section the body of the report, the closing sections
+/// that went with it and the key scores (D-162). Her own sections are worded from her points,
+/// which are not kept, so they are not checked here.
 fn unfounded_numbers(
     d: &dv_domain::DraftParagraph,
     section_key: &str,

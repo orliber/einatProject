@@ -122,6 +122,8 @@ struct SectionRead {
     patterns: Vec<dv_domain::ScorePattern>,
     guide: String,
     severity: Option<String>,
+    /// The case's key scores (D-162), for the summary, the DSM section and the recommendations.
+    key_scores: Option<String>,
 }
 
 impl Drop for SectionRead {
@@ -138,6 +140,7 @@ impl Drop for SectionRead {
         self.guide.zeroize();
         self.interpretations.zeroize();
         self.severity.zeroize();
+        self.key_scores.zeroize();
         self.age.zeroize();
         for p in &mut self.patterns {
             p.key.zeroize();
@@ -464,12 +467,34 @@ fn build_section(
         &mut review,
         stop,
     )?;
+    // In a closing section (D-162) the referral is the question the section answers, and
+    // her diagnoses are her decision; a letter gets its sections as they are.
+    let closing = DERIVED_SECTIONS.contains(&ask.section_key.as_str());
     let mut approved_context = Vec::new();
     for (s, text) in &read.approved {
         let out = run(text)?;
         review.add(format!("סעיף מאושר · {}", s.title), &out);
-        approved_context.push((fixed_title(s)?, out.tagged));
+        let role = match s.key.as_str() {
+            REFERRAL_SECTION if closing => dv_ai::ApprovedRole::Referral,
+            DIAGNOSES_SECTION if closing => dv_ai::ApprovedRole::Decision,
+            _ => dv_ai::ApprovedRole::Section,
+        };
+        approved_context.push(dv_ai::ApprovedSection {
+            title: fixed_title(s)?,
+            text_tagged: out.tagged,
+            role,
+        });
     }
+    // The key scores (D-162): worked out on the computer, filtered and shown like every
+    // other text that goes out.
+    let key_scores_tagged = match &read.key_scores {
+        Some(text) => {
+            let out = run(text)?;
+            review.add(KEY_SCORES_LABEL.to_owned(), &out);
+            Some(out.tagged)
+        }
+        None => None,
+    };
     let mut current = Vec::new();
     for t in &read.current {
         let out = run(t)?;
@@ -570,6 +595,7 @@ fn build_section(
         gender: read.gender,
         sources: tagged_sources,
         approved_context,
+        key_scores_tagged,
         current_draft: current,
         history,
         instruction_tagged: instr.tagged.clone(),
@@ -581,14 +607,17 @@ fn build_section(
         sources_in_order: (read.section.per_source || ask.section_key == sorting::PRIOR_SECTION)
             && !points,
     };
-    // From her points, the numbers in the answer are checked against the points.
+    // From her points, the numbers in the answer are checked against the points. In a closing
+    // section, against the approved sections that went and the key scores: a score quoted
+    // from them is a known number.
     let approved = if points {
         vec![instr.tagged.clone()]
     } else {
         input
             .approved_context
             .iter()
-            .map(|(_, t)| t.clone())
+            .map(|a| a.text_tagged.clone())
+            .chain(input.key_scores_tagged.clone())
             .collect::<Vec<_>>()
     };
     stop()?;
@@ -829,6 +858,8 @@ fn build_report_check(
             title: model_title(s, ctx)?,
             text_tagged: text.join("\n"),
             closing: CLOSING_SECTIONS.contains(&s.key.as_str()),
+            // Which section it is, for the supervisor's notes (D-169): a fixed word.
+            role: dv_ai::ReportRole::of_key(&s.key),
         });
         keys.push(s.key.clone());
     }
@@ -1243,11 +1274,13 @@ impl Core {
                 let wanted = |key: &str| match letter {
                     Some(l) => l.written_from().contains(&key),
                     // D-156: the summary, diagnoses, recommendations and DSM are written
-                    // from this assessment only, never from the previous ones.
+                    // from this assessment only, never from the previous ones. D-162: with
+                    // the closing sections that are theirs to see, never themselves.
                     None => {
                         key != section_key
-                            && !DERIVED_SECTIONS.contains(&key)
                             && key != sorting::PRIOR_SECTION
+                            && (!DERIVED_SECTIONS.contains(&key)
+                                || closing_passed_to(section_key).contains(&key))
                     }
                 };
                 // The recommendations she left out of the letters (round 44); the rest go in.
@@ -1275,7 +1308,15 @@ impl Core {
                     "המכתב נכתב מתוך ההמלצות שאישרת בדוח, ועוד אין המלצות מאושרות. מאשרים קודם את סעיף ההמלצות.".to_owned(),
                 ));
             }
-            if derived && !points && approved.is_empty() {
+            // The body of the report is what a closing section is written from: her diagnoses
+            // or another closing section alone are not enough to write one.
+            if derived
+                && !points
+                && letter.is_none()
+                && !approved
+                    .iter()
+                    .any(|(s, _)| !DERIVED_SECTIONS.contains(&s.key.as_str()))
+            {
                 return Err(CoreError::Refused(
                     "הסעיף הזה נכתב מתוך הסעיפים שכבר אישרת, ועוד לא אישרת אף סעיף. מאשרים קודם את הטיוטות בסעיפים האחרים, ואז חוזרים לכאן."
                         .to_owned(),
@@ -1299,15 +1340,33 @@ impl Core {
                     .map(|m| (m.role, m.text_tagged))
                     .collect()
             };
+            // The referral first (D-162): the question the closing sections answer.
+            if letter.is_none() {
+                approved.sort_by_key(|(s, _)| s.key != REFERRAL_SECTION);
+            }
             // In a section written from the scores: the patterns of this case's scores
             // (D-100), worked out here, for her inferences about them.
             let from_scores = section.inputs.contains(&InputKind::TestScores) && !points;
-            let sheets = if from_scores {
+            // The summary, the DSM section and the recommendations (D-162): the key scores.
+            let with_key_scores =
+                derived && !points && letter.is_none() && gets_key_scores(section_key);
+            let sheets = if from_scores || with_key_scores {
                 score_sheets(v, case_id, &v.inputs(case_id)?)?
             } else {
                 Vec::new()
             };
-            let patterns = dv_domain::sheet_patterns(&sheets);
+            let key_scores = if with_key_scores {
+                key_scores_text(v, &sheets)?
+            } else {
+                None
+            };
+            // The patterns choose her style items only where they did before (D-100); in the
+            // closing sections they go in the key scores block instead.
+            let patterns = if from_scores {
+                dv_domain::sheet_patterns(&sheets)
+            } else {
+                Vec::new()
+            };
             let interpretations = if from_scores {
                 style::interpretations_for_request(v, &sheets)?
             } else {
@@ -1333,6 +1392,7 @@ impl Core {
                 patterns,
                 guide,
                 severity,
+                key_scores,
                 section,
             }))
         };
@@ -1872,6 +1932,9 @@ impl Core {
         })
     }
 }
+
+/// The key scores on the review screen ("מה יוצא מהמחשב"), D-162.
+pub(crate) const KEY_SCORES_LABEL: &str = "הציונים המרכזיים · חושבו במחשב מדפי הציונים";
 
 /// Said when she sends a request whose material changed after it was prepared.
 pub(crate) const MATERIAL_CHANGED: &str =

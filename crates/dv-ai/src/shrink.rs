@@ -142,6 +142,9 @@ fn label_of(attrs: &str) -> String {
     if let Some(title) = attr(attrs, "approved_section") {
         return format!("סעיף מאושר: {title}");
     }
+    if attr(attrs, "key_scores").is_some() {
+        return "הציונים המרכזיים".to_owned();
+    }
     if attr(attrs, "current_draft").is_some() {
         return "הטיוטה הנוכחית".to_owned();
     }
@@ -182,7 +185,8 @@ mod tests {
                     content_tagged: "[ילד] משתף פעולה במשחק.\n".repeat(*n),
                 })
                 .collect(),
-            approved_context: vec![("רקע".into(), "[ילד] נולד במועד.".into())],
+            approved_context: vec![crate::ApprovedSection::plain("רקע", "[ילד] נולד במועד.")],
+            key_scores_tagged: None,
             current_draft: vec![],
             history: vec![],
             instruction_tagged: "נסח/י פסקה".into(),
