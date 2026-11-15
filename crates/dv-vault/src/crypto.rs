@@ -68,7 +68,7 @@ pub fn hex(bytes: &[u8]) -> String {
 }
 
 pub fn unhex(s: &str) -> Result<Vec<u8>, VaultError> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return Err(VaultError::Corrupt("odd-length hex".to_owned()));
     }
     (0..s.len())
