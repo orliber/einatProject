@@ -16,7 +16,7 @@ mod common;
 use std::collections::HashMap;
 
 use common::*;
-use dv_domain::{Identity, PRACTITIONER_TAG};
+use dv_domain::{Identity, Role, PRACTITIONER_TAG};
 use dv_privacy::restore::{
     her_text_to_send, remaining_tags, restore, restore_hers, scan_model_output,
 };
@@ -677,6 +677,35 @@ fn the_same_number_written_twice_ways_comes_back_as_she_wrote_each() {
     );
 }
 
+/// A child declared with a surname: restoring writes the first name only, so a tag kept in
+/// her paragraph for the full name (or for the surname alone) came back without the surname
+/// ("אביב שחרורי הופנה" as "אביב הופנה", "משפחת שחרורי" as "משפחת אביב").
+#[test]
+fn her_paragraph_keeps_the_childs_surname() {
+    let mut ids = identities();
+    ids.retain(|i| !(i.case_id == CASE && i.role == Role::Child));
+    ids.push(id(CASE, Role::Child, "[ילד]", "אביב שחרורי", &[]));
+    for text in [
+        "אביב שחרורי הופנה לאבחון",
+        "אביב הופנה לאבחון",
+        "משפחת שחרורי הגיעה לפגישה",
+    ] {
+        let book = MaskBook::default();
+        let c = PrivacyContext {
+            masks: Some(&book),
+            ..ctx(&ids, CASE)
+        };
+        let kept = filter_to_keep(text, &c, &[]).unwrap();
+        assert!(!kept.tagged.contains("שחרורי"), "{}", kept.tagged);
+        // Restoring is given the people of this case, as the core does.
+        let own: Vec<Identity> = ids.iter().filter(|i| i.case_id == CASE).cloned().collect();
+        assert_eq!(
+            restore_hers(&kept.tagged, &own, None, &book.entries()),
+            text
+        );
+    }
+}
+
 /// Found by `filter_then_restore_is_the_identity` on main (dc51787): `לגן " מתקשה "` came back
 /// as `לגן "`. Not the restore step: after an institution word a quoted word may be the
 /// kindergarten's name ("לגן \"ניצנים\""), and the outgoing filter leaves it out, as decided
@@ -891,4 +920,40 @@ fn the_number_inside_a_tag_is_never_part_of_a_date() {
     assert!(!filter("[ילד] 3 במרץ", &c).unwrap().tagged.contains('3'));
     assert!(gate_text("[ילד] 12.3.2020", &ids, CASE).is_err());
     assert!(gate_text("[חסר: 12.3.2020]", &ids, CASE).is_err());
+}
+
+/// A name inside a word that stands on the start of a number ("Noam12." and an identity number) dropped
+/// the whole number pattern, and the identifier went out beside the name's tag (found by the
+/// property run on CI, seed b40ae230). What the name does not cover is still hidden.
+#[test]
+fn a_number_glued_after_a_name_inside_a_word_is_still_hidden() {
+    let ids = identities();
+    let idn = valid_id("10000000");
+    let book = MaskBook::default();
+    let c = PrivacyContext {
+        masks: Some(&book),
+        ..ctx(&ids, CASE)
+    };
+    for text in [
+        format!("Noam12.{idn}"),
+        format!("Noam12.3.2020{idn}"),
+        format!("נועם12.3.2020{idn}"),
+        format!("Noam1.3.2020{idn}"),
+    ] {
+        let out = filter(&text, &c).unwrap().tagged;
+        assert!(!digits(&out).contains(&digits(&idn)), "{text} -> {out}");
+        assert!(out.starts_with("[ילד]"), "{text} -> {out}");
+        let kept = filter_to_keep(&text, &c, &[]).unwrap().tagged;
+        assert!(!digits(&kept).contains(&digits(&idn)), "{text} -> {kept}");
+        assert_eq!(restore_hers(&kept, &ids, None, &book.entries()), text);
+    }
+    // A name beside a date, with nothing glued, reads as before.
+    assert_eq!(
+        filter("Noam 12.3.2020", &c)
+            .unwrap()
+            .tagged
+            .matches("[ילד]")
+            .count(),
+        1
+    );
 }

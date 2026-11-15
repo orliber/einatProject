@@ -176,6 +176,7 @@ impl Core {
             api_key,
             transport: self.transport.clone(),
             session: self.session,
+            epoch: self.pending_epoch,
             again: std::sync::atomic::AtomicBool::new(false),
         })
     }
@@ -212,11 +213,22 @@ impl Core {
             .and_then(|b| b.get("model")?.as_str().map(str::to_owned))
             .unwrap_or_default();
         let key = usage::this_month_key();
+        let tokens = usage::Tokens::from_answer(answer);
+        if self.vault.is_none() {
+            // Locked while the answer was on its way: it was billed all the same, and is
+            // counted at the next opening.
+            self.owe(stage::OwedSend::Usage { key, model, tokens });
+            return;
+        }
+        self.count_usage(&key, &model, tokens);
+    }
+
+    pub(crate) fn count_usage(&mut self, key: &str, model: &str, tokens: usage::Tokens) {
         let Ok(v) = self.vault_mut() else { return };
-        let mut month = usage::Month::parse(v.setting(&key).ok().flatten().as_deref());
-        month.add(&model, usage::Tokens::from_answer(answer));
+        let mut month = usage::Month::parse(v.setting(key).ok().flatten().as_deref());
+        month.add(model, tokens);
         if let Ok(json) = serde_json::to_string(&month) {
-            let _ = v.set_state(&key, &json);
+            let _ = v.set_state(key, &json);
         }
     }
 
@@ -249,7 +261,9 @@ impl Core {
     /// A failed send is not a send: the approval stays valid for a retry. Not when the vault
     /// locked meanwhile: a lock wipes every approval, including one that was on its way out.
     pub(crate) fn restore_pending(&mut self, out: Outgoing) {
-        if self.vault.is_none() || out.session != self.session {
+        // Nor when the approvals were withdrawn while it was on its way (a person added, a
+        // material changed, consent removed): the bytes are from before the change.
+        if self.vault.is_none() || out.session != self.session || out.epoch != self.pending_epoch {
             return;
         }
         self.pending

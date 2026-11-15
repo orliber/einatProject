@@ -148,6 +148,13 @@ describe("App", () => {
     // The warning shows, and the cases screen was not mounted again (it lists once).
     expect(await screen.findByRole("alert")).toHaveTextContent("70");
     expect(listed).toBe(1);
+    // She goes back to work: the warning goes at her first key, not at the next poll.
+    idle = 600;
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "a" });
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     vi.useRealTimers();
   });
 

@@ -299,6 +299,6 @@ fn from_letters(text: &str) -> Vec<u8> {
             b - b'a'
         })
         .collect();
-    assert!(nibbles.len() % 2 == 0, "odd length");
+    assert!(nibbles.len().is_multiple_of(2), "odd length");
     nibbles.chunks(2).map(|p| (p[0] << 4) | p[1]).collect()
 }

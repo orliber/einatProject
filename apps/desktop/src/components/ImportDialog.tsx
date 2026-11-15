@@ -70,6 +70,7 @@ export function ImportDialog(props: {
             <div className="note-sand stack" style={{ gap: 4 }}>
               <b>לא נקלט מהקובץ</b>
               {p.left_out.slice(0, 6).map((l, i) => <span key={i} className="left-out-line">{l}</span>)}
+              {p.left_out.length > 6 && <span className="left-out-line">ועוד {p.left_out.length - 6} שלא נקלטו. כדאי להשוות לקובץ המקורי.</span>}
               {p.warnings.map((w, i) => <span key={`w${i}`}>{w}</span>)}
             </div>
           )}

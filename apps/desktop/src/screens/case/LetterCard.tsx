@@ -76,6 +76,15 @@ export function LetterCard({ api }: { api: CaseApi }) {
     }
   }
 
+  /** The other letter: the one on screen goes at once, so it is never shown under the wrong name
+   *  (and not while one is being written: its answer would land under the other). */
+  function choose(next: Audience) {
+    if (busy || next === audience) return;
+    setParagraphs([]);
+    setError(null);
+    setAudience(next);
+  }
+
   const approved = paragraphs.filter((p) => p.status === "approved").length;
   const recommendations = api.detail.sections.find((s) => s.key === "recommendations")?.paragraphs.filter((p) => p.status === "approved") ?? [];
   // What she left out is kept, so a recommendation approved or rewritten later is in until
@@ -95,8 +104,8 @@ export function LetterCard({ api }: { api: CaseApi }) {
         גרסה קצרה מהדוח המאושר. למסגרת החינוכית: רק ההמלצות.
       </span>
       <div className="row" role="radiogroup" aria-label="למי המכתב">
-        <label className="row small"><input type="radio" name="letter-audience" checked={audience === "parents"} onChange={() => setAudience("parents")} /> להורים</label>
-        <label className="row small"><input type="radio" name="letter-audience" checked={audience === "school"} onChange={() => setAudience("school")} /> לצוות החינוכי</label>
+        <label className="row small"><input type="radio" name="letter-audience" checked={audience === "parents"} disabled={busy} onChange={() => choose("parents")} /> להורים</label>
+        <label className="row small"><input type="radio" name="letter-audience" checked={audience === "school"} disabled={busy} onChange={() => choose("school")} /> לצוות החינוכי</label>
       </div>
       {/* One recommendation she unmarked shows too, so it can be marked again. */}
       {(recommendations.length > 1 || recommendations.some((r) => !isPicked(r.id))) && (

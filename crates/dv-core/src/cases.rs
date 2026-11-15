@@ -172,6 +172,29 @@ impl Core {
         case_id: &str,
         identities: Vec<IdentityInput>,
     ) -> Result<Vec<dv_domain::Identity>, CoreError> {
+        // The vault skips a person with no name. Here that is refused when it would take a
+        // name out of the filter without her saying so: a person she already has, saved with
+        // the name emptied, or a list that leaves the case with no child when it had one. The
+        // window refuses this too; the rule is kept here, where every caller passes.
+        let nameless = |i: &IdentityInput| i.value.trim().is_empty();
+        if identities.iter().any(|i| i.id.is_some() && nameless(i)) {
+            return Err(CoreError::Refused(
+                "שם לא יכול להישאר ריק. כדי להוציא אדם מהתיק מוחקים אותו מהרשימה.".to_owned(),
+            ));
+        }
+        let had_child = self
+            .vault_ref()?
+            .identities(case_id)?
+            .iter()
+            .any(|i| i.role == Role::Child);
+        let has_child = identities
+            .iter()
+            .any(|i| i.role == Role::Child && !nameless(i));
+        if had_child && !has_child {
+            return Err(CoreError::Refused(
+                "אי אפשר לשמור תיק בלי שם הילד: בלי השם הוא לא יוסתר בטקסטים שיוצאים.".to_owned(),
+            ));
+        }
         let saved = self.vault_mut()?.set_identities(case_id, &identities)?;
         self.forget_pending(case_id);
         Ok(saved)

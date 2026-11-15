@@ -1003,6 +1003,37 @@ fn every_open_editor_is_kept_at_the_lock_not_only_the_last_one() {
     core.lock();
     core.unlock(PASSWORD).unwrap();
     assert_eq!(core.take_unsaved().unwrap(), both);
+    // Offered until she closes them: a second lock (or a crash) before that loses nothing.
+    assert_eq!(core.take_unsaved().unwrap(), both);
+    core.hold_unsaved(both.clone());
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(core.take_unsaved().unwrap(), both);
+    // The page had no time to hold them again before the next lock: still in the vault.
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(core.take_unsaved().unwrap(), both);
+    // Another editor was held before the page held the offered ones again: all are kept.
+    let other = edit(&case, "פסקה בסעיף אחר", "טקסט חדש");
+    assert_eq!(core.take_unsaved().unwrap(), both);
+    core.unsaved = vec![other.clone()];
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(
+        core.take_unsaved().unwrap(),
+        vec![both[0].clone(), both[1].clone(), other.clone()]
+    );
+    core.hold_unsaved(both.clone());
+    // She closed the first: only the second is still kept.
+    core.hold_unsaved(both[1..].to_vec());
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(core.take_unsaved().unwrap(), both[1..].to_vec());
+    // And the second: nothing is offered again, in this opening or the next.
+    core.hold_unsaved(Vec::new());
+    assert!(core.take_unsaved().unwrap().is_empty());
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
     assert!(core.take_unsaved().unwrap().is_empty());
 
     // More editors than the cap: the latest are kept.
@@ -1016,6 +1047,8 @@ fn every_open_editor_is_kept_at_the_lock_not_only_the_last_one() {
         core.take_unsaved().unwrap(),
         many[12 - crate::unsaved::MAX_EDITS..].to_vec()
     );
+
+    core.hold_unsaved(Vec::new());
 
     // A vault locked by an earlier version kept one edit, not a list: it still comes back.
     core.vault_mut()
@@ -1058,6 +1091,7 @@ fn the_latest_text_of_an_editor_is_kept_and_a_long_one_is_cut_not_lost() {
     let back = core.take_unsaved().unwrap().pop().unwrap();
     assert_eq!(back.text.chars().count(), 50_000);
     assert!(back.text.chars().all(|c| c == 'א'));
+    core.hold_unsaved(Vec::new());
 
     // A locked session takes nothing new, so nothing is offered after the next entry.
     core.lock();
@@ -1529,6 +1563,85 @@ fn the_emergency_stop_works_while_locked_and_shows_on_the_security_screen() {
     );
 }
 
+/// A request whose answer came back while the vault was still locked (she walked away, the lid
+/// closed) left the computer all the same: it was in no history, no log and no monthly count.
+#[test]
+fn a_request_that_came_back_to_a_locked_vault_is_recorded_at_the_next_opening() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let logged_before = sends_logged(&mut core);
+    let used_before = core.usage_summary().unwrap();
+
+    let id = approval(&mut core, &case);
+    let out = core.begin_send(&id, SendKind::Section).unwrap();
+    let response = out.transmit();
+    assert!(response.is_ok());
+    core.lock();
+    assert!(core.finish_section(out, response).is_err());
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(sends_logged(&mut core), logged_before + 1, "it left");
+    assert_ne!(
+        core.usage_summary().unwrap(),
+        used_before,
+        "and was counted"
+    );
+    assert!(
+        core.chat(&case, "kindergarten").unwrap().is_empty(),
+        "the answer itself is not stored"
+    );
+    // Written once: another opening adds nothing.
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(sends_logged(&mut core), logged_before + 1);
+}
+
+/// A word she marks as a name while other requests of the case wait to go (the whole report is
+/// prepared up front) is in none of them: each was filtered before the case knew it.
+#[test]
+fn a_name_she_marks_withdraws_the_requests_already_waiting() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    for decide in [
+        SuspectDecision::Hide { role: Role::Other },
+        SuspectDecision::IsName,
+    ] {
+        let id = approval(&mut core, &case);
+        core.decide_suspect(&case, "בתיה", decide).unwrap();
+        assert!(matches!(
+            core.send_section(&id),
+            Err(CoreError::NotFound(_))
+        ));
+    }
+    // Her own names are hidden in every case.
+    let id = approval(&mut core, &case);
+    core.set_practitioner(vec!["ד\"ר רותם בדויה".to_owned()])
+        .unwrap();
+    assert!(matches!(
+        core.send_section(&id),
+        Err(CoreError::NotFound(_))
+    ));
+    assert!(fake.sent.lock().unwrap().is_empty());
+}
+
+/// A send that failed is kept for another try, but not when its approval was withdrawn while
+/// it was on its way: the retry would send the bytes from before the change.
+#[test]
+fn a_failed_send_does_not_bring_back_an_approval_withdrawn_meanwhile() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let offline = || Err(CoreError::Egress(EgressError::Offline));
+    let id = approval(&mut core, &case);
+    let out = core.begin_send(&id, SendKind::Section).unwrap();
+    core.decide_suspect(&case, "בתיה", SuspectDecision::Hide { role: Role::Other })
+        .unwrap();
+    assert!(core.finish_section(out, offline()).is_err());
+    assert!(matches!(
+        core.send_section(&id),
+        Err(CoreError::NotFound(_))
+    ));
+    assert!(fake.sent.lock().unwrap().is_empty());
+}
+
 /// An answer that comes back after the vault was locked and opened again, or after its case
 /// went to the recycle bin, is not written: it lands only in the session and the case it was
 /// approved in. What left the computer is in the history either way.
@@ -1788,4 +1901,63 @@ fn proofreading_notes_are_advice_and_never_hold_a_paragraph_back() {
     let ids: Vec<String> = shown.iter().map(|p| p.id.clone()).collect();
     assert_eq!(core.approve_clean_paragraphs(&case, &ids).unwrap(), 2);
     assert_eq!(core.check_export(&case).unwrap().polish_notes, 2);
+}
+
+// ------------------------------------------------------------ a name is never dropped silently
+
+/// The vault skips a person with no name. Saving the case's child, or anyone she already has,
+/// with the name emptied would take that name out of the filter: the core refuses it, whoever
+/// calls (the window refuses it too).
+#[test]
+fn a_save_never_empties_a_name_or_leaves_the_case_without_its_child() {
+    let (_dir, mut core, case) = setup(None);
+    let before = core.vault_ref().unwrap().identities(&case).unwrap();
+    let child = before
+        .iter()
+        .find(|i| i.role == dv_domain::Role::Child)
+        .expect("the test case has a child")
+        .clone();
+    let as_input = |i: &dv_domain::Identity| IdentityInput {
+        id: Some(i.id.clone()),
+        role: i.role,
+        value: i.value.clone(),
+        aliases: i.aliases.clone(),
+    };
+
+    // The child's name emptied, or only spaces.
+    for empty in ["", "   "] {
+        let mut list: Vec<IdentityInput> = before.iter().map(as_input).collect();
+        for i in &mut list {
+            if i.id.as_deref() == Some(child.id.as_str()) {
+                i.value = empty.to_owned();
+            }
+        }
+        assert!(matches!(
+            core.set_identities(&case, list),
+            Err(CoreError::Refused(_))
+        ));
+    }
+    // The child left out of the list altogether.
+    let without: Vec<IdentityInput> = before
+        .iter()
+        .filter(|i| i.id != child.id)
+        .map(as_input)
+        .collect();
+    assert!(matches!(
+        core.set_identities(&case, without),
+        Err(CoreError::Refused(_))
+    ));
+    // Nothing was changed by the refused saves.
+    assert_eq!(core.vault_ref().unwrap().identities(&case).unwrap(), before);
+
+    // An empty new row (no id) is only skipped, and the same list saves as before.
+    let mut list: Vec<IdentityInput> = before.iter().map(as_input).collect();
+    list.push(IdentityInput {
+        id: None,
+        role: dv_domain::Role::Teacher,
+        value: String::new(),
+        aliases: Vec::new(),
+    });
+    let saved = core.set_identities(&case, list).unwrap();
+    assert_eq!(saved.len(), before.len());
 }

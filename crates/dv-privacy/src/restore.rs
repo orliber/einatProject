@@ -73,7 +73,7 @@ fn put_back(
 /// ("last spring") in a material of "אביב שחרורי", and the full name there would make a sentence
 /// no one wrote. Everyone else keeps the name as it was declared ("ד\"ר פאדי חורי"); the full
 /// name of the child stays in the report's details, which do not come from a tag.
-fn prose_name(identity: &Identity) -> &str {
+pub(crate) fn prose_name(identity: &Identity) -> &str {
     let child = matches!(
         identity.role,
         Role::Child | Role::Brother | Role::Sister | Role::OtherChild

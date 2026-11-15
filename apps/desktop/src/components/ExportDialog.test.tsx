@@ -42,11 +42,11 @@ const settings: ReportSettings = {
   parents_opening: "להורים שלום, זה הסיכום בשפה פשוטה.",
 };
 
-function setup() {
+function setup(over: Partial<ExportCheck> = {}) {
   const calls: { cmd: string; args: Record<string, unknown> }[] = [];
   mockIPC((cmd, args) => {
     calls.push({ cmd, args: args as Record<string, unknown> });
-    if (cmd === "check_export") return check;
+    if (cmd === "check_export") return { ...check, ...over };
     if (cmd === "report_settings") return settings;
     if (cmd === "export_report" || cmd === "export_pdf") return "/בדוי/הורדות/קובץ";
     return null;
@@ -61,6 +61,19 @@ describe("ExportDialog", () => {
     await user.click(await screen.findByRole("button", { name: "הפקת הדוח" }));
     await screen.findByText("הדוח מוכן");
     expect(calls.find((c) => c.cmd === "export_report")?.args).toMatchObject({ caseId: "c1", parents: null });
+  });
+
+  it("a [חסר: …] mark left in the report is said, and the green line is not; no folder is promised", async () => {
+    setup({ to_complete: ["רקע התפתחותי: [חסר: גיל ההליכה]"] });
+    expect(await screen.findByText(/נשאר סימון אחד של \[חסר: …\] בדוח/)).toHaveTextContent("רקע התפתחותי: [חסר: גיל ההליכה]");
+    expect(screen.queryByText(/ולא נשארו תפקידים/)).toBeNull();
+    // Where the file goes is said after it is saved (it is not always the downloads folder).
+    expect(screen.queryByText(/תיקיית ההורדות/)).toBeNull();
+  });
+
+  it("with nothing left to complete the green line stays", async () => {
+    setup();
+    expect(await screen.findByText(/ולא נשארו תפקידים/)).toBeInTheDocument();
   });
 
   it("the parents' version goes without numbers by default, with her opening sentence and its own file name", async () => {

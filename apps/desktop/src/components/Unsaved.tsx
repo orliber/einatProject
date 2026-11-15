@@ -108,26 +108,43 @@ function placeOf(edit: UnsavedEdit): Route {
   return { name: "case", id: edit.case_id, view: edit.view || "report" };
 }
 
+/** Owner prefix of the texts offered back after a lock, held until she closes each. */
+const OFFERED = "offered:";
+
 /** After entering: the texts that were being edited when the vault locked, one after another. */
 export function UnsavedNotice() {
   const { go } = useApp();
   const [kept, setKept] = useState<UnsavedEdit[]>([]);
-  const [copied, setCopied] = useState(false);
+  // How long the copy stays on the protected clipboard, once copied; `false` when it failed.
+  const [copied, setCopied] = useState<number | false | null>(null);
   useEffect(() => {
-    // Added, not replaced: under StrictMode the effect runs twice, and the second take is empty.
-    ipc.takeUnsaved().then((list) => setKept((k) => [...k, ...(list ?? [])]), () => undefined);
+    // The core keeps them in the vault while they are held here, like an open editor: a lock
+    // (or a crash) before she closes one offers it again. Asked twice (StrictMode), the core
+    // gives the same texts, so they replace, not add.
+    ipc.takeUnsaved().then((list) => {
+      const offered = list ?? [];
+      offered.forEach((e, i) => holds.set(`${OFFERED}${i}`, e));
+      if (offered.length) schedule();
+      setKept(offered);
+    }, () => undefined);
   }, []);
   const edit = kept[0];
   if (!edit) return null;
   const next = () => {
-    setCopied(false);
+    setCopied(null);
+    // Closed by her: let go of it, and the core takes it out of the vault.
+    for (const [k, h] of holds) {
+      if (k.startsWith(OFFERED) && h === edit) holds.delete(k);
+    }
+    schedule();
     setKept((k) => k.slice(1));
   };
   async function copy() {
     if (!edit) return;
+    // The text may hold names: only the protected clipboard (out of the clipboard history and
+    // of cloud sync, cleared after a while), as for an answer about a case. No fallback.
     try {
-      await navigator.clipboard.writeText(edit.text);
-      setCopied(true);
+      setCopied(await ipc.copySecret(edit.text));
     } catch {
       setCopied(false);
     }
@@ -137,7 +154,7 @@ export function UnsavedNotice() {
     <Dialog title="טקסט שלא נשמר לפני הנעילה" subtitle={edit.place} onClose={next}
       footer={
         <div className="row">
-          <button type="button" className="btn btn-primary" onClick={() => void copy()}>{copied ? "הועתק" : "העתקת הטקסט"}</button>
+          <button type="button" className="btn btn-primary" onClick={() => void copy()}>{typeof copied === "number" ? "הועתק" : "העתקת הטקסט"}</button>
           <button type="button" className="btn" onClick={() => { next(); go(placeOf(edit)); }}>מעבר לתיק</button>
           <button type="button" className="btn" onClick={next}>{more > 0 ? `הבא (עוד ${more})` : "סגירה"}</button>
         </div>
@@ -146,6 +163,10 @@ export function UnsavedNotice() {
         הכספת ננעלה באמצע העריכה של הטקסט הזה, והוא נשמר בתוכה, מוצפן. אפשר להעתיק אותו ולהדביק במקום. אחרי הסגירה הוא לא יוצג שוב.
       </p>
       <textarea className="textarea serif" rows={8} readOnly value={edit.text} aria-label="הטקסט שלא נשמר" />
+      <p className="muted small" role="status">
+        {typeof copied === "number" ? `הועתק. הלוח יתנקה בעוד ${copied} שניות, אז כדאי להדביק עכשיו.`
+          : copied === false ? "ההעתקה לא הצליחה. אפשר לסמן את הטקסט ולהעתיק ביד." : ""}
+      </p>
     </Dialog>
   );
 }

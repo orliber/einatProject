@@ -9,7 +9,7 @@ import { ipc, onCoreEvent, type AppStatus, type UiError } from "./ipc/client";
 import { LockScreen } from "./screens/LockScreen";
 import { CasesScreen } from "./screens/CasesScreen";
 import { CaseScreen } from "./screens/CaseScreen";
-import { ErrorLine, Toast, type ToastAction } from "./components/ui";
+import { Dialog, ErrorLine, Toast, type ToastAction } from "./components/ui";
 import { IdleWarning } from "./components/IdleWarning";
 import { forgetHold, holdNow, UnsavedNotice } from "./components/Unsaved";
 import { applyTextSize, readTextSize, stepTextSize } from "./textSize";
@@ -18,6 +18,8 @@ import { isCombo, KEYS } from "./shortcuts";
 import { forgetFailures, rememberFailure } from "./errors";
 import { resetRuns } from "./screens/case/reportRun";
 import { clearKept } from "./kept";
+import { unsavedGuard } from "./leaveGuard";
+import { noteLockReason } from "./lockReason";
 import type { SettingsPane } from "./screens/settingsPanes";
 
 // The pages she opens rarely load on their own, so the first paint and the case pages carry
@@ -91,6 +93,8 @@ export function sameStatus(a: AppStatus | null, b: AppStatus): boolean {
 /** With events, the poll is a safety net only: the core announces a lock or the last minute.
  *  Without them (a refused grant, the preview) the poll is all there is, so it runs often. */
 export const STATUS_POLL_MS = 60_000;
+/** The idle warning shows from this many seconds before the lock. */
+const IDLE_WARNING_SECONDS = 75;
 export const STATUS_POLL_NO_EVENTS_MS = 15_000;
 
 export function useApp(): AppApi {
@@ -139,6 +143,10 @@ export function App() {
     void onCoreEvent((e) => {
       if (!alive) return;
       if (e.kind === "idle_soon") setIdleIn(e.seconds);
+      // A backup made on its own: the reminder and the settings read the backup again.
+      if (e.kind === "backed_up") {
+        for (const key of ["backup", "readiness", "drive-backup"]) void queryClient.invalidateQueries({ queryKey: [key] });
+      }
       void tick();
     }).then((unlisten) => {
       if (unlisten === null) return;
@@ -177,10 +185,17 @@ export function App() {
   // Ctrl+L (⌘L on Mac) locks at once: stepping away from the desk should take one key.
   const unlocked = status?.unlocked === true;
 
+  const warnedRef = useRef(false);
+  useEffect(() => {
+    warnedRef.current = idleIn != null && idleIn <= IDLE_WARNING_SECONDS;
+  }, [idleIn]);
+
   // Once the vault locks (by hand or when idle), reload the page: names shown on screen
   // must not stay in the page's memory. Only in the built app (tests and dev keep state).
   const wasUnlocked = useRef(false);
   useEffect(() => {
+    // The lock screen says "locked after N minutes" only when that is what happened (no case data).
+    if (wasUnlocked.current && !unlocked) noteLockReason(warnedRef.current);
     if (wasUnlocked.current && !unlocked && import.meta.env.PROD) window.location.reload();
     // Names must not stay in memory once the vault is locked.
     if (!unlocked) {
@@ -218,14 +233,17 @@ export function App() {
     let last = 0;
     const onActivity = () => {
       const now = Date.now();
-      if (now - last < 30_000) return;
+      // While the warning shows, her first key or click takes it down at once: the core is
+      // told, and the countdown is read again (it would otherwise stay up to a minute).
+      const warned = warnedRef.current;
+      if (!warned && now - last < 30_000) return;
       last = now;
-      void ipc.touch().catch(() => undefined);
+      void ipc.touch().then(() => (warned ? refresh() : undefined), () => undefined);
     };
     const events = ["keydown", "pointerdown", "wheel", "input"] as const;
     events.forEach((e) => window.addEventListener(e, onActivity, { passive: true }));
     return () => events.forEach((e) => window.removeEventListener(e, onActivity));
-  }, [unlocked]);
+  }, [unlocked, refresh]);
 
   // Ctrl + / Ctrl − / Ctrl 0 change the text size, as in a browser.
   useEffect(() => {
@@ -293,10 +311,26 @@ function Shell(props: {
 }) {
   const { status, route, setRoute, refresh, setToast, fail, lockNow, showShortcuts, toast, sheet, idleIn, keepWorking } = props;
   const notify = useCallback((text: string, action?: ToastAction) => setToast(toastOf(text, action)), [setToast]);
+  // Where she asked to go while a screen held changes that only its button saves.
+  const [leaving, setLeaving] = useState<Route | null>(null);
+  const [savingLeave, setSavingLeave] = useState(false);
+  const go = useCallback((r: Route) => {
+    if (unsavedGuard()) setLeaving(r);
+    else setRoute(r);
+  }, [setRoute]);
   const api = useMemo<AppApi>(
-    () => ({ status, route, go: setRoute, refresh, notify, fail, lockNow, showShortcuts }),
-    [status, route, setRoute, refresh, notify, fail, lockNow, showShortcuts],
+    () => ({ status, route, go, refresh, notify, fail, lockNow, showShortcuts }),
+    [status, route, go, refresh, notify, fail, lockNow, showShortcuts],
   );
+  const saveAndLeave = async () => {
+    const to = leaving;
+    const g = unsavedGuard();
+    setSavingLeave(true);
+    const saved = g ? await g.save().catch(() => false) : true;
+    setSavingLeave(false);
+    setLeaving(null);
+    if (saved && to) setRoute(to);
+  };
   return (
     <QueryClientProvider client={queryClient}>
     <AppContext.Provider value={api}>
@@ -310,8 +344,19 @@ function Shell(props: {
       {/* Keyed by notice: the same words again are a new toast with a fresh timer. */}
       {toast && <Toast key={toast.seq} text={toast.text} action={toast.action} onDone={() => setToast(null)} />}
       <UnsavedNotice />
+      {leaving && (
+        <Dialog narrow title="יש שינויים שלא נשמרו" {...(savingLeave ? {} : { onClose: () => setLeaving(null) })}
+          footer={<>
+            <button type="button" className="btn" disabled={savingLeave} onClick={() => { const to = leaving; setLeaving(null); setRoute(to); }}>לצאת בלי לשמור</button>
+            <span className="grow" />
+            <button type="button" className="btn" disabled={savingLeave} onClick={() => setLeaving(null)}>להישאר</button>
+            <button type="button" className="btn btn-primary" disabled={savingLeave} onClick={() => void saveAndLeave()}>לשמור ולהמשיך</button>
+          </>}>
+          <p>מה ששינית בפרטי התיק עדיין לא נשמר.</p>
+        </Dialog>
+      )}
       {sheet.open && <ShortcutsSheet onClose={sheet.close} />}
-      {idleIn != null && idleIn <= 75 && <IdleWarning seconds={idleIn} onKeep={() => void keepWorking()} />}
+      {idleIn != null && idleIn <= IDLE_WARNING_SECONDS && <IdleWarning seconds={idleIn} onKeep={() => void keepWorking()} />}
     </AppContext.Provider>
     </QueryClientProvider>
   );

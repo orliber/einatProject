@@ -83,3 +83,68 @@ fn state_the_program_keeps_for_itself_is_written_without_a_log_entry() {
     assert_eq!(after.len(), before + 1);
     assert_eq!(after[0].event, "settings_changed");
 }
+
+/// The case list and "every case's identities" are read in a few statements for all cases;
+/// what they return is what asking case by case returns, in the same order.
+#[test]
+fn the_batched_reads_return_what_the_case_by_case_reads_do() {
+    use dv_domain::{IdentityInput, Role};
+    let (_dir, mut vault) = new_vault();
+    let person = |role, value: &str| IdentityInput {
+        id: None,
+        role,
+        value: value.into(),
+        aliases: vec![format!("{value} כינוי")],
+    };
+    let mut ids = Vec::new();
+    for i in 0..6 {
+        let id = vault
+            .create_case(&CaseMeta {
+                code: format!("TEST-{i:04}"),
+                ..CaseMeta::default()
+            })
+            .unwrap();
+        // The child is not always the first person, and one case has no child at all.
+        let mut people = vec![person(Role::Mother, &format!("אמאבדויה{i}"))];
+        if i != 3 {
+            people.push(person(Role::Child, &format!("ילדבדוי{i}")));
+            people.push(person(Role::Child, &format!("ילדשני{i}")));
+        }
+        vault.set_identities(&id, &people).unwrap();
+        ids.push(id);
+    }
+    vault.trash_case(&ids[5]).unwrap();
+
+    let mut one_by_one = Vec::new();
+    for id in &ids {
+        one_by_one.extend(vault.identities(id).unwrap());
+    }
+    let mut all = vault.all_identities().unwrap();
+    assert_eq!(all.len(), one_by_one.len());
+    // The same cases in whatever order the vault lists them, each case's people in order.
+    for id in &ids {
+        let of_case: Vec<_> = all.iter().filter(|i| &i.case_id == id).cloned().collect();
+        assert_eq!(of_case, vault.identities(id).unwrap());
+    }
+    all.sort_by(|a, b| a.id.cmp(&b.id));
+    one_by_one.sort_by(|a, b| a.id.cmp(&b.id));
+    assert_eq!(all, one_by_one);
+
+    let list = vault.list_cases().unwrap();
+    assert_eq!(list.len(), 5);
+    for c in list.iter().chain(vault.list_trash().unwrap().iter()) {
+        let first_child = vault
+            .identities(&c.id)
+            .unwrap()
+            .into_iter()
+            .find(|i| i.role == Role::Child)
+            .map(|i| i.value);
+        assert_eq!(c.child_name, first_child, "{}", c.meta.code);
+        assert_eq!(c.meta, vault.case_meta(&c.id).unwrap());
+        assert_eq!(c.approved_sections, vault.approved_sections(&c.id).unwrap());
+        let (created, updated) = vault.case_times(&c.id).unwrap();
+        assert_eq!((c.created_at, c.updated_at), (created, updated));
+    }
+    assert_eq!(vault.list_trash().unwrap().len(), 1);
+    assert!(vault.case_times("no-such-case").is_err());
+}

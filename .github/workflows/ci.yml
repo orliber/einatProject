@@ -62,6 +62,10 @@ jobs:
         run: git diff --exit-code -- apps/desktop/src/ipc/generated
       - run: cargo xtask check-invariants
       - run: cargo xtask scan --all
+      # The speed checkers: the core's main actions on 300 invented cases, each against its
+      # time budget (the same build as the tests above, so nothing is compiled twice).
+      - name: Speed checkers (time budgets)
+        run: cargo test -p dv-core --test speed -- --ignored --nocapture
       # D-091: the version on main can always be released. Its "מה חדש" lines and the vault
       # it keeps for the next versions (F7) come in the same PR that sets the number.
       - name: The version on main can be released

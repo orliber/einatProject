@@ -35,6 +35,11 @@ struct State {
     afont: Option<i32>,
     rtl_run: bool,
     hidden: bool,
+    /// Inside a shape's skipped properties (`\shpinst`): the part of the document the shape
+    /// sits in, where the text of its text box (`\shptxt`) belongs.
+    shape_of: Option<Dest>,
+    /// This group is the text of a text box.
+    shape_text: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -178,6 +183,8 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
         afont: None,
         rtl_run: false,
         hidden: false,
+        shape_of: None,
+        shape_text: false,
     };
     let mut ansi = Page::Cp1252;
     let mut fonts: HashMap<i32, Page> = HashMap::new();
@@ -219,11 +226,23 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
                     return Err(corrupt("nesting"));
                 }
                 stack.push(st);
+                st.shape_text = false;
                 group_start = true;
                 depth_seen = true;
                 skip = 0;
             }
             b'}' => {
+                if st.shape_text {
+                    // The end of a text box's text: what follows is not on its line.
+                    push(
+                        &st,
+                        '\n',
+                        &mut body,
+                        &mut margins,
+                        &mut meta,
+                        &mut had_hidden,
+                    );
+                }
                 if st.dest == Dest::FontTable {
                     table_font = None;
                 }
@@ -295,6 +314,23 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
                 }
                 // Destinations: only as a group's first word.
                 if first {
+                    // The text of a text box sits inside the shape's skipped properties
+                    // (`{\*\shpinst … {\shptxt …}}`): it goes back to where the shape is.
+                    if word == "shptxt" {
+                        if let Some(outer) = st.shape_of.take() {
+                            st.dest = outer;
+                            st.shape_text = true;
+                            push(
+                                &st,
+                                '\n',
+                                &mut body,
+                                &mut margins,
+                                &mut meta,
+                                &mut had_hidden,
+                            );
+                            continue;
+                        }
+                    }
                     let dest = match word.as_str() {
                         "fonttbl" => Some(Dest::FontTable),
                         "header" | "headerl" | "headerr" | "headerf" | "footer" | "footerl"
@@ -318,6 +354,11 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
                         _ => None,
                     };
                     if let Some(d) = dest {
+                        // Only a shape that sits in the text itself can give text back, and
+                        // only until another skipped part starts inside it.
+                        st.shape_of = (word == "shpinst"
+                            && matches!(st.dest, Dest::Body | Dest::Margins))
+                        .then_some(st.dest);
                         // Properties only inside `{\info}`; inside any part that is not body
                         // text, nothing becomes body again.
                         st.dest = match (st.dest, d) {
@@ -350,7 +391,8 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
                         st.hidden = false;
                         st.rtl_run = false;
                     }
-                    "par" | "line" | "sect" | "page" | "row" | "column" => {
+                    // A backslash before a line end is `\par` (Mac TextEdit writes it so).
+                    "par" | "line" | "sect" | "page" | "row" | "column" | "\n" | "\r" => {
                         push(
                             &st,
                             '\n',
@@ -591,5 +633,30 @@ pub(crate) mod tests {
         let rtf = r#"{\rtf1\ansi{\field{\*\fldinst HYPERLINK "http://example.invalid"}{\fldrslt link}}\par}"#;
         let out = extract(rtf.as_bytes()).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(out.body.trim(), "link");
+    }
+
+    /// The text of a text box is part of the page; the shape's own properties are not.
+    #[test]
+    fn text_box_text_is_kept() {
+        let rtf = r"{\rtf1\ansi before{\shp{\*\shpinst\shpleft1{\sp{\sn shapeType}{\sv 202}}{\shptxt box {\b text}\par}}{\shprslt{\*\do\dobxpage old copy}}}after\par}";
+        let out = extract(rtf.as_bytes()).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(out.body.trim(), "before\nbox text\n\nafter");
+        // Inside a comment or a header nothing becomes body text.
+        let rtf = r"{\rtf1\ansi body{\*\annotation{\shp{\*\shpinst{\shptxt note}}}}{\header{\shp{\*\shpinst{\shptxt head}}}}{\*\shpinst{\pict{\shptxt pic}}}\par}";
+        let out = extract(rtf.as_bytes()).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(out.body.trim(), "body");
+        assert_eq!(out.margins.trim(), "head");
+    }
+
+    /// A backslash at the end of a line is a paragraph break (Mac TextEdit writes it so).
+    #[test]
+    fn backslash_newline_is_a_paragraph_break() {
+        for rtf in [
+            "{\\rtf1\\ansi line one\\\nline two}",
+            "{\\rtf1\\ansi line one\\\r\nline two}",
+        ] {
+            let out = extract(rtf.as_bytes()).unwrap_or_else(|e| panic!("{e}"));
+            assert_eq!(out.body.trim(), "line one\nline two");
+        }
     }
 }
