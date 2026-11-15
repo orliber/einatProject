@@ -2,8 +2,9 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { useApp } from "../../App";
 import { STALE_EDIT_KEPT } from "../../i18n/he";
 import { ipc, type ExportCheck, type ReportSettings } from "../../ipc/client";
-import type { ParagraphCheck } from "../../ipc/generated/ParagraphCheck";
-import { getKept, useKept } from "../../kept";
+import { useKept } from "../../kept";
+import { heldNotes, noteLine } from "./notes";
+import { emptyClosing } from "./closing";
 import { ageWords } from "../../components/AgeField";
 import { ErrorLine } from "../../components/ui";
 import { timed, WaitLine } from "../../components/Progress";
@@ -56,23 +57,17 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
   const toComplete = content.flatMap((s) =>
     s.paragraphs.filter((p) => p.status === "approved" && MARK.test(p.text)).map((p) => ({ section: s, p })),
   );
-  // Approved paragraphs with something worth a second look: a number unlike the score table,
-  // a word the answer scan flagged, a sentence from an old report, or what the check against
-  // the sources said in this session. None of these stops the file; she decides.
-  const flagged = content.flatMap((s) => {
-    const checks = getKept<Map<string, ParagraphCheck>>(`case:${caseId}:section:${s.key}:checks`, new Map());
-    return s.paragraphs
+  // Approved paragraphs with something worth a second look (D-161): a number unlike the score
+  // table, a word the answer's scan flagged, a sentence from an old report, or what the check
+  // against the sources said, all as the core keeps them. None of these stops the file.
+  const flagged = content.flatMap((s) =>
+    s.paragraphs
       .filter((p) => p.status === "approved")
       .flatMap((p) => {
-        const verdict = checks.get(p.id)?.verdict;
-        const notes = [
-          ...p.warnings,
-          ...(verdict === "contradicted" ? ["בבדיקה מול המקורות: סותרת את החומרים"] : []),
-          ...(verdict === "unsupported" ? ["בבדיקה מול המקורות: לא נמצא לה בסיס בחומרים"] : []),
-        ];
+        const notes = heldNotes(p).map(noteLine);
         return notes.length ? [{ section: s, p, notes }] : [];
-      });
-  });
+      }),
+  );
   // D-167: proofreading notes in approved paragraphs, by section. Advice; never stops the file.
   const polished = content
     .map((s) => ({ section: s, notes: s.paragraphs.filter((p) => p.status === "approved").flatMap((p) => p.polish) }))
@@ -86,7 +81,10 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
   // Sections that have materials and nothing approved yet: the file can go out without them,
   // but the report is not ready, and the export dialog says so in orange too.
   const emptyWithMaterial = check ? content.filter((s) => s.source_count > 0 && check.empty_sections.includes(s.title)) : [];
-  const complete = ready && emptyWithMaterial.length === 0;
+  // D-163: the summary, the diagnoses and the recommendations with nothing approved: the file
+  // can go out without them, but the report is not ready, and it is said plainly.
+  const closingEmpty = emptyClosing(content).filter((s) => !emptyWithMaterial.includes(s));
+  const complete = ready && emptyWithMaterial.length === 0 && closingEmpty.length === 0;
   const markedElsewhere = (check?.to_complete ?? []).filter((t) => !toComplete.some(({ section }) => t.startsWith(`${section.title}:`)));
 
   async function save() {
@@ -125,6 +123,16 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
                 </span>
                 <button type="button" className="link-small" onClick={() => onOpen("")}>לדוח</button>
               </li>
+              {closingEmpty.length > 0 && check.included_sections > 0 && (
+                <li className="warn">
+                  <span className="finish-mark" aria-hidden="true">!</span>
+                  <span className="grow">
+                    {closingEmpty.length === 1 ? `הסעיף "${closingEmpty[0]?.title}" עוד ריק.` : `עוד ריקים: ${closingEmpty.map((s) => s.title).join(", ")}.`}
+                    <span className="small muted"> הקובץ יכול לצאת גם בלעדיהם.</span>
+                  </span>
+                  <button type="button" className="link-small" onClick={() => onOpen(closingEmpty[0]?.key ?? "")}>לכתיבה</button>
+                </li>
+              )}
               {waiting.length > 0 && (
                 <li className="info">
                   <span className="finish-mark" aria-hidden="true">i</span>

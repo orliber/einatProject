@@ -68,14 +68,36 @@ describe("the finish page", () => {
     expect(await a11yViolations(view.container)).toEqual([]);
   });
 
-  it("ready only when no section that has materials is left empty", async () => {
+  it("ready only when no section that has materials is left empty, and the closing sections are written (D-163)", async () => {
+    const written = reshape((d) => {
+      const model = sectionOf(d, "referral").paragraphs[0] as Section["paragraphs"][number];
+      for (const key of ["summary", "diagnoses", "recommendations"]) sectionOf(d, key).paragraphs = [{ ...model, id: `${key}-1` }];
+    });
     const { side } = await openFinish(async (cmd, args, core) => {
-      if (cmd !== "check_export") return undefined;
+      if (cmd !== "check_export") return written(cmd, args, core);
       return { ...((await core.handle(cmd, args)) as object), empty_sections: [] };
     });
     expect(await within(side).findByRole("heading", { name: "הדוח מוכן להוצאה" })).toBeInTheDocument();
     expect(within(side).queryByText(/יש חומרים/)).toBeNull();
+    expect(within(side).queryByText(/עוד ריקים/)).toBeNull();
     expect(produce()).toBeEnabled();
+  });
+
+  it("empty closing sections are named, the report is not called ready, and the file can still go out (D-163)", async () => {
+    const { side, user, onOpen } = await openFinish(async (cmd, args, core) => {
+      if (cmd !== "check_export") return undefined;
+      return { ...((await core.handle(cmd, args)) as object), empty_sections: [] };
+    });
+    expect(await within(side).findByRole("heading", { name: "כמעט מוכן" })).toBeInTheDocument();
+    const line = within(side).getByText(/^עוד ריקים: /);
+    expect(line).toHaveTextContent("סיכום");
+    expect(line).toHaveTextContent("המלצות");
+    expect(line).toHaveTextContent("הקובץ יכול לצאת גם בלעדיהם.");
+    // The DSM section is written only for a child it fits: an empty one is not named.
+    expect(line).not.toHaveTextContent("DSM");
+    expect(produce()).toBeEnabled();
+    await user.click(within(line.closest("li") as HTMLElement).getByRole("button", { name: "לכתיבה" }));
+    expect(onOpen).toHaveBeenCalledWith(expect.stringMatching(/^(summary|diagnoses|recommendations)$/));
   });
 
   it("the preview can be reached and scrolled from the keyboard", async () => {
@@ -131,6 +153,21 @@ describe("the finish page", () => {
     expect(await within(side).findByText("פסקה מאושרת אחת שווה מבט נוסף:")).toBeInTheDocument();
     await user.click(within(side).getByRole("button", { name: /מספר שלא מופיע בטבלת הציונים/ }));
     expect(onOpen).toHaveBeenCalledWith("background");
+    expect(produce()).toBeEnabled();
+  });
+
+  it("what the check against the sources said about an approved paragraph comes from the core's notes (D-161)", async () => {
+    const { side } = await openFinish(reshape((d) => {
+      const p = sectionOf(d, "background").paragraphs[0] as Section["paragraphs"][number];
+      p.notes = [
+        { kind: "verify_unsupported", text: "לא נמצא לפסקה בסיס בחומרים" },
+        { kind: "polish", text: "מילה כפולה" },
+      ];
+    }));
+    expect(await within(side).findByText("פסקה מאושרת אחת שווה מבט נוסף:")).toBeInTheDocument();
+    // The proofreading is not a reason for a second look; the verdict is, in plain words.
+    const item = within(side).getByRole("button", { name: /בבדיקה מול המקורות, בלי בסיס: לא נמצא לפסקה בסיס בחומרים/ });
+    expect(item).not.toHaveTextContent("מילה כפולה");
     expect(produce()).toBeEnabled();
   });
 

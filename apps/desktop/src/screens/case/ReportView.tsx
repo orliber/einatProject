@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { useApp } from "../../App";
 import { ipc, type CaseDetail, type ReportSettings, type TemplateView } from "../../ipc/client";
 import { kindLabel, STALE_EDIT } from "../../i18n/he";
 import { ageWords } from "../../components/AgeField";
-import { ErrorLine, SparkIcon, WarnIcon } from "../../components/ui";
+import { ErrorLine, SparkIcon } from "../../components/ui";
 import { Why } from "../../components/Why";
 import { ProgressLine, WaitLine } from "../../components/Progress";
 import { useHoldUnsaved } from "../../components/Unsaved";
-import { setKept, useKept } from "../../kept";
-import { guideOpenKey } from "../../components/SectionGuide";
+import { useKept } from "../../kept";
+import { SectionGuide, guideOpenKey } from "../../components/SectionGuide";
+import { SectionLibraryPanel } from "../../components/SectionLibrary";
+import { DsmSeverityPanel } from "../../components/DsmSeverity";
 import { LocalText, type LocalTextHandle } from "../../components/LocalText";
 import { PARAGRAPH_HINTS } from "../../i18n/suggestions";
 import { ParagraphVersions } from "../../components/ParagraphVersions";
@@ -22,6 +24,8 @@ import { MarkedText, StyleHintView, applyMark } from "./StyleHintView";
 import { useAi } from "../../ai";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BriefBox, CHANGE_CHIPS, STYLE_CHIPS } from "./BriefBox";
+import { ParagraphNotes, SectionNotesFold } from "./notes";
+import { CLOSING_KEYS, ClosingFlow, closingAnchor, ownEmptyLine } from "./closing";
 
 type Section = CaseDetail["sections"][number];
 
@@ -40,7 +44,7 @@ export function ReportView({ api, current, focus, onPick }: {
   /** The section in focus (round 48): one at a time, with its buttons; the rest are the page. */
   current: string | null;
   /** A section chosen in the contents, by Alt+↓ or by Enter: it comes into view. */
-  focus?: { key: string; at: number; move: boolean } | null;
+  focus?: { key: string; at: number; move: boolean; para?: string } | null;
   /** Move the focus; `move` brings the section into view and puts the keyboard on it. */
   onPick: (key: string, move?: boolean) => void;
 }) {
@@ -63,7 +67,10 @@ export function ReportView({ api, current, focus, onPick }: {
     if (!focus?.key || !focus.move) return;
     const el = document.getElementById(`sec-${focus.key}`);
     if (!el) return;
-    el.scrollIntoView({ block: "start", behavior: "smooth" });
+    // To one paragraph of it when asked (the first one held back by "approve all", D-161).
+    const para = focus.para ? document.getElementById(`para-${focus.para}`) : null;
+    if (para) para.scrollIntoView({ block: "center", behavior: "smooth" });
+    else el.scrollIntoView({ block: "start", behavior: "smooth" });
     el.classList.add("a4-flash");
     el.querySelector<HTMLElement>(".a4-heading")?.focus({ preventScroll: true });
     const t = setTimeout(() => el.classList.remove("a4-flash"), 1600);
@@ -89,6 +96,7 @@ export function ReportView({ api, current, focus, onPick }: {
   const signature = detail.sections.find((s) => s.key === "signature");
   const signatureLines = signature?.paragraphs.filter((p) => p.status === "approved").flatMap((p) => p.text.split("\n")) ?? [];
   const supervisor = settings?.supervisor ?? [];
+  const closing = closingAnchor(content);
   const sign = [...(signatureLines.length ? signatureLines : settings?.signature ?? []), ...(supervisor.length ? ["", ...supervisor] : [])];
 
   return (
@@ -106,9 +114,13 @@ export function ReportView({ api, current, focus, onPick }: {
             <section key={part}>
               <h2 className="a4-part">{part}</h2>
               {content.filter((s) => s.part === part).map((s) => (
-                <A4Section key={s.key} api={api} section={s} focused={current === s.key}
-                  onPick={() => { if (current !== s.key) onPick(s.key); }}
-                  onNext={() => { const n = nextWaiting(content, s.key); if (n) onPick(n, true); }} />
+                <Fragment key={s.key}>
+                  {/* D-163: the closing sections in order, where the closing part begins. */}
+                  {s.key === closing && <ClosingFlow api={api} current={current} onPick={onPick} />}
+                  <A4Section api={api} section={s} focused={current === s.key}
+                    onPick={() => { if (current !== s.key) onPick(s.key); }}
+                    onNext={() => { const n = nextWaiting(content, s.key); if (n) onPick(n, true); }} />
+                </Fragment>
               ))}
             </section>
           ))}
@@ -175,7 +187,7 @@ const PARA_CHANGES: readonly (readonly [string, string])[] = [
   ["לפשט להורים", "נסחי את הפסקה הבאה בשפה פשוטה וברורה להורים, באותו תוכן."],
 ];
 
-const DERIVED = ["summary", "diagnoses", "recommendations", "dsm"];
+const DERIVED = CLOSING_KEYS;
 
 /** The request for a first draft, with what she wrote in "מה חשוב לך שייכתב כאן?" (round 48).
  *  It goes the way every request of hers goes: prepared, through the gate, then sent. */
@@ -375,11 +387,27 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
     });
   }
 
+  // D-168: the section's guide opens here, on the page, for the section in focus (the same
+  // open state the section's own page keeps). Her own section's points and examples are
+  // still on its page.
+  const [guideOpen, setGuideOpen] = useKept(guideOpenKey(caseId, s.key), false);
+  const toSectionPage = () => go({ name: "case", id: caseId, view: s.key });
   const openGuide = () => {
-    // Her points are at the top of her section; elsewhere the guide opens on arrival.
-    if (!mine) setKept(guideOpenKey(caseId, s.key), false)(true);
-    go({ name: "case", id: caseId, view: s.key });
+    if (mine) toSectionPage();
+    else setGuideOpen(!guideOpen);
   };
+  // D-168: the DSM level she set, in one line; open until she sets one, because the draft
+  // is written with no level until then.
+  const severity = detail.meta.dsm_severity;
+  const severitySet = severity?.social != null || severity?.restricted != null;
+  const [severityOpen, setSeverityOpen] = useState(!severitySet);
+  // D-168: her diagnoses and recommendations from her past reports. On the diagnoses section
+  // the list leads, open, before any drafting: the psychologist diagnoses, not the AI.
+  const hasLibrary = s.key === "diagnoses" || s.key === "recommendations";
+  const library = focused && hasLibrary && !job && (
+    <SectionLibraryPanel caseId={caseId} sectionKey={s.key} present={s.paragraphs.map((p) => p.text)}
+      lead={s.key === "diagnoses" && s.paragraphs.length === 0} onAdded={reload} />
+  );
 
   /** Keys on the section's heading (round 48): Enter approves the draft and moves on to the
    *  next one, Ctrl+Enter opens "✦ לשנות", Esc closes it. */
@@ -408,7 +436,7 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
     editing?.id === p.id ? (
       <div key={p.id}>{editor}</div>
     ) : (
-      <div key={p.id} className={`a4-para${p.status === "proposed" ? " is-proposed" : ""}${paraPop === p.id || deleting === p.id || history === p.id ? " is-active" : ""}`}>
+      <div key={p.id} id={`para-${p.id}`} className={`a4-para${p.status === "proposed" ? " is-proposed" : ""}${paraPop === p.id || deleting === p.id || history === p.id ? " is-active" : ""}`}>
         <p className={p.by_ai ? "a4-p a4-editable" : "a4-p a4-editable a4-own"} tabIndex={0} title={focused ? note ?? "לחיצה לעריכה" : "לחיצה לבחירת הסעיף"}
           aria-label={`${p.status === "proposed" ? "טיוטה שממתינה לאישור" : "פסקה"}${p.by_ai ? " (AI)" : ""}: ${p.text}`}
           aria-describedby={`keys-${s.key}`}
@@ -420,9 +448,9 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
           onKeyDown={(e) => paraKey(e, p)}>
           <MarkedText text={p.text} marks={p.status === "proposed" && focused ? p.style?.marks ?? [] : []} />
         </p>
-        {p.warnings.map((w, i) => (
-          <div key={i} className="note-warn small"><WarnIcon /><span>{w}</span></div>
-        ))}
+        {/* D-161: everything there is to look at, in one folded line (a number unlike the
+            score table, a name in the answer or a contradiction keeps a small mark on it). */}
+        <ParagraphNotes paragraph={p} />
         {p.polish.length > 0 && (
           // D-167: proofreading, folded into one quiet line that opens on a click; advice for
           // the finish, never a warning and never a block. Nothing at all when there is none.
@@ -560,10 +588,12 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
 
   // Everything else the section can do, behind one "⋯" (round 48).
   const menu: MenuItem[] = [
-    mine ? { label: "הנקודות שלך לסעיף", run: openGuide } : { label: "איך לכתוב את הסעיף", run: openGuide },
+    mine ? { label: "הנקודות שלך לסעיף", run: openGuide } : { label: guideOpen ? "לסגור את ההנחיה לסעיף" : "איך לכתוב את הסעיף", run: openGuide },
     ...(s.sortable && !mine ? [{ label: "מאיזה חומרים לכתוב", run: () => setOpen("sources") }] : []),
     { label: "+ פסקה משלי בסוף הסעיף", run: () => edit(null, "", "end"), disabled: editing !== null },
     { label: "מה יצא מהמחשב בשביל הסעיף", run: () => setSentOpen(true) },
+    // The section's own page (its conversation, the check against the sources) stays one click away.
+    ...(mine ? [] : [{ label: "עמוד הסעיף", run: toSectionPage }]),
     ...(pending.length > 0 ? [{ label: "הסרת הטיוטה", danger: true, run: () => void act(async () => { for (const p of pending) await ipc.rejectParagraph(caseId, p.id); }) }] : []),
   ];
   const empty = s.paragraphs.length === 0;
@@ -645,6 +675,22 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
         </div>
       )}
 
+      {/* D-168: for the section in focus only, each folded into one quiet line. */}
+      {focused && !mine && guideOpen && (
+        <div className="a4-panel">
+          <SectionGuide caseId={caseId} sectionKey={s.key} guide={s.guide} isDefault={s.guide_is_default}
+            learnedFrom={s.guide_learned_from} caseGuide={s.case_guide} onSaved={reload} />
+        </div>
+      )}
+      {focused && s.key === "dsm" && (
+        <details className="a4-fold" open={severityOpen} onToggle={(e) => setSeverityOpen(e.currentTarget.open)}>
+          <summary>רמת החומרה: {severityWords(severity)}</summary>
+          {!severitySet && <span className="small muted">עד שתקבעי דרגה, הטיוטה של הסעיף נכתבת בלי דרגה.</span>}
+          <DsmSeverityPanel caseId={caseId} severity={severity} onSaved={reload} />
+        </details>
+      )}
+      {s.key === "diagnoses" && library && <div className="a4-panel">{library}</div>}
+
       {ok.length > 0 && slot("first")}
       {ok.map((p, i) => [para(p), slot(i === ok.length - 1 ? "end" : p.id)])}
 
@@ -682,6 +728,10 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
 
       {ok.length === 0 && editing && editing.id === null && editor}
 
+      {s.key !== "diagnoses" && library && <div className="a4-panel">{library}</div>}
+      {/* D-161: what the last answer said about the section, for the section in focus only. */}
+      {focused && !job && <SectionNotesFold notes={s.notes} ai={ai} />}
+
       {empty && !job && !editing && !preparing && (
         mine && focused ? (
           <div className="a4-brief">
@@ -716,9 +766,11 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
                 hint="כתבי מה חשוב לך, או בחרי סגנון. בלי כלום הסעיף ינוסח כמו תמיד, מתוך החומרים."
                 placeholder="למשל: להתחיל מהקשר עם הצוות בגן, ובלי מונחים מקצועיים"
                 recent={briefs.data?.recent} initial={keptBrief || brief} keep={keptBrief !== ""}
-                sendLabel="✦ לנסח" busy={busy} autoFocus
+                sendLabel="✦ לנסח" busy={busy} autoFocus={s.key !== "diagnoses"}
                 onSend={sendBrief} onCancel={() => heading.current?.focus()} />
             ) : <WaitLine task="prepare" speed="section" label="פותחת את תיבת ההנחיה" />}
+            {/* D-163: a closing section drafted now cannot reflect her own sections still empty. */}
+            {DERIVED.includes(s.key) && ownEmptyLine(detail.sections) && <span className="small muted a4-own-empty">{ownEmptyLine(detail.sections)}</span>}
             <div className="row a4-brief-row">
               <button type="button" className="link-btn" onClick={() => edit(null, "", "end")}>לכתוב בעצמי</button>
               <span className="grow" />
@@ -742,6 +794,15 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
       {sentOpen && <SentHistoryDialog caseId={caseId} place={s.key} onClose={() => setSentOpen(false)} />}
     </div>
   );
+}
+
+/** The DSM level in a few words: each domain's, or that none was set. */
+export function severityWords(severity: { social: number | null; restricted: number | null } | null | undefined): string {
+  const social = severity?.social ?? null;
+  const restricted = severity?.restricted ?? null;
+  if (social === null && restricted === null) return "לא נקבעה";
+  const level = (n: number | null) => (n === null ? "לא נקבעה" : `דרגה ${n}`);
+  return `תקשורת חברתית: ${level(social)} · התנהגות חוזרת: ${level(restricted)}`;
 }
 
 /** The paragraph box grows with its text, as on the page: a line per ~70 letters and per line break. */

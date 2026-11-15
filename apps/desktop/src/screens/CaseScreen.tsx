@@ -17,6 +17,8 @@ import { SectionWork } from "./case/SectionWork";
 import { DetailsView } from "./case/DetailsView";
 import { SentHistoryDialog } from "../components/SentHistory";
 import { ReportView, firstFocus } from "./case/ReportView";
+import { isClean } from "./case/notes";
+import { emptyClosing } from "./case/closing";
 import { FinishView } from "./case/FinishView";
 import { isCombo, isTyping, KEYS, MOD } from "../shortcuts";
 import { useKept } from "../kept";
@@ -117,6 +119,13 @@ export function sortSummary(r: SortResult): string {
   return `${lead}${what} לסעיפים. אפשר לשנות בכרטיס החומר.${rest}${left}${long}`;
 }
 
+/** After "approve all": how many went into the report, and how many wait for her eye. */
+export function approvedLine(approved: number, held: number): string {
+  const went = approved === 1 ? "אושרה פסקה אחת" : `אושרו ${approved} פסקאות`;
+  if (held === 0) return went;
+  return `${went} · ${held === 1 ? "אחת נשארה" : `${held} נשארו`} לבדיקה שלך`;
+}
+
 type SectionState = "approved" | "pending" | "empty";
 
 function sectionState(s: CaseDetail["sections"][number]): SectionState {
@@ -143,7 +152,7 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   /** "מה יצא מהמחשב": open for one section (its key), or the whole case (""). */
   const [sentFor, setSentFor] = useState<string | null>(null);
   /** The section in focus on the report page (round 48); `move` brings it into view. */
-  const [focus, setFocus] = useState<{ key: string; at: number; move: boolean } | null>(null);
+  const [focus, setFocus] = useState<{ key: string; at: number; move: boolean; para?: string } | null>(null);
   const [searching, setSearching] = useState(false);
   // The bar is there only once the case is read: its element, not a ref, so the watch starts then.
   const [bar, setBar] = useState<HTMLElement | null>(null);
@@ -316,7 +325,11 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   /** D-139: every clean draft approved in one call; a draft with a note waits for her eye.
    *  The core checks again which ones are still clean; a second press waits for the first. */
   const [approvingAll, setApprovingAll] = useState(false);
-  const approveAll = async (ids: string[], held: number) => {
+  /** After "approve all" (D-161): how many went in, and the drafts she saw that were held
+   *  back; which of them still wait is read from the case as it is now. */
+  const [approvedAll, setApprovedAll] = useState<{ approved: number; seen: string[] } | null>(null);
+  const approveAll = async (ids: string[], heldIds: string[]) => {
+    const held = heldIds.length;
     if (approvingAll) return;
     setError(null);
     setApprovingAll(true);
@@ -327,7 +340,9 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
       // to fix (a failure, a check that did not run) keeps its "לנסות שוב".
       if (runOver) forgetRun(caseId);
       const waiting = ids.length + held - n;
-      notify(waiting > 0 ? `${n} פסקאות אושרו. ${waiting} מחכות לעין שלך.` : `${n} פסקאות אושרו.`);
+      setApprovedAll({ approved: n, seen: [...ids, ...heldIds] });
+      // With the contents hidden ("דף מלא") the line has no place: said where she is.
+      if (fullPage) notify(approvedLine(n, waiting));
     } catch (e) {
       setError(fail(e as never));
     } finally {
@@ -435,14 +450,18 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
   // What "write the whole report" writes: sections from materials with nothing written yet.
   const undrafted = fed.filter((s) => s.sortable && s.paragraphs.length === 0);
   const hasMaterials = detail.inputs.length > 0;
+  // D-163: the summary, the diagnoses and the recommendations are part of a finished report;
+  // while one is empty the writing is not done (the file can still go out without it).
+  const closingEmpty = emptyClosing(detail.sections);
+  const closingNames = closingEmpty.map((s) => s.title).join(", ");
   const pendingCount = pending.reduce((n, s) => n + s.paragraphs.filter((p) => p.status === "proposed").length, 0);
   const child = detail.identities.find((i) => i.role === "child")?.value ?? "";
   const age = ageOf(detail.meta.age, detail.meta.child_gender);
   const current = detail.sections.find((s) => s.key === view);
   // Three stages: materials, writing (the report page and each section), taking the report out.
   const stage = view === "materials" ? 1 : view === "finish" ? 3 : view === "details" ? 0 : 2;
-  const toReport = (key?: string) => {
-    if (key) setFocus({ key, at: Date.now(), move: true });
+  const toReport = (key?: string, para?: string) => {
+    if (key) setFocus({ key, at: Date.now(), move: true, ...(para ? { para } : {}) });
     go({ name: "case", id: caseId, view: "report" });
   };
   const toWriting = async () => {
@@ -470,14 +489,16 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
               : undrafted.length > 0
                 ? { title: `${undrafted.length} סעיפים עם חומר עוד לא נכתבו`, note: "", action: `✦ לכתוב את ${undrafted.length} הסעיפים`, run: writeAll, sends: true }
                 : fed.length > 0 && fed.every((s) => s.approved)
-                  ? { title: "כל הסעיפים שיש להם חומר אושרו", note: "", action: "להוצאת הדוח ←", run: () => go({ name: "case", id: caseId, view: "finish" }) }
+                  ? closingEmpty.length > 0
+                    ? { title: `הסעיפים שיש להם חומר אושרו. נשאר לכתוב: ${closingNames}`, note: "אפשר גם להוציא את הדוח בלעדיהם, משלב הוצאת הדוח.", action: `ל"${closingEmpty[0]?.title ?? ""}" ←`, run: () => toReport(closingEmpty[0]?.key) }
+                    : { title: "כל הסעיפים שיש להם חומר אושרו", note: "", action: "להוצאת הדוח ←", run: () => go({ name: "case", id: caseId, view: "finish" }) }
                   : null;
   // A section shows its own job, and so does the report page; the rest run in the strip.
   // While the whole report is written, its one line stands for its requests.
   const elsewhere = running ? [] : jobs.filter((j) => !j.section || (j.section !== view && view !== "report"));
   const stages: { n: number; label: string; view: string; done: boolean }[] = [
     { n: 1, label: "חומרים", view: "materials", done: hasMaterials && unsorted === 0 },
-    { n: 2, label: "כתיבה", view: "report", done: fed.length > 0 && fed.every((s) => s.approved) && pendingCount === 0 },
+    { n: 2, label: "כתיבה", view: "report", done: fed.length > 0 && fed.every((s) => s.approved) && pendingCount === 0 && closingEmpty.length === 0 },
     { n: 3, label: "הוצאת הדוח", view: "finish", done: false },
   ];
   const more: MenuItem[] = [
@@ -583,7 +604,8 @@ export function CaseScreen({ caseId, view }: { caseId: string; view: string }) {
           <Contents detail={detail} jobs={jobs} view={view} current={view === "report" ? focusKey : null} onOpen={(key) => toReport(key)} onWriteAll={running ? undefined : writeAll}
             onSort={running ? undefined : () => void startSort()} onConsent={() => go({ name: "case", id: caseId, view: "details" })}
             onFinish={() => go({ name: "case", id: caseId, view: "finish" })}
-            onApproveAll={(ids, held) => void approveAll(ids, held)} approvingAll={approvingAll} />
+            onApproveAll={(ids, held) => void approveAll(ids, held)} approvingAll={approvingAll}
+            approvedAll={approvedAll} onOpenParagraph={(key, para) => toReport(key, para)} />
         )}
         <div className="work">
           {view === "materials" && <MaterialsView api={api} onWrite={() => void toWriting()} />}
@@ -655,8 +677,12 @@ function Contents(props: {
   onConsent: () => void;
   onFinish: () => void;
   /** Every draft waiting, approved in one call: the ones with nothing to look at (D-139). */
-  onApproveAll: (ids: string[], held: number) => void;
+  onApproveAll: (ids: string[], held: string[]) => void;
   approvingAll: boolean;
+  /** What the last "approve all" did (D-161): said in one quiet line under the button. */
+  approvedAll: { approved: number; seen: string[] } | null;
+  /** To a paragraph on the report page. */
+  onOpenParagraph: (key: string, para: string) => void;
 }) {
   const { detail, jobs, view } = props;
   const ai = useAi();
@@ -670,11 +696,19 @@ function Contents(props: {
   const unsorted = detail.routing.filter((r) => r.needs_sorting).length;
   const fed = detail.sections.filter((s) => s.source_count > 0);
   const done = fed.length > 0 && fed.every((s) => s.approved) && waiting === 0;
+  // D-163: with the body approved, the closing sections still empty are named; the way to
+  // the file stays open.
+  const closingEmpty = done ? emptyClosing(detail.sections) : [];
   // A new wording beside an approved paragraph, or a paragraph with a note (from the check
   // against the sources, or a name the answer held), still waits for her eyes.
   const proposed = content.flatMap((s) => s.paragraphs.filter((p) => p.status === "proposed" && !p.replaces));
-  const readyIds = proposed.filter((p) => p.warnings.length === 0).map((p) => p.id);
-  const held = proposed.length - readyIds.length;
+  // D-161: anything to look at holds a draft back: a warning, what the answer's scan found,
+  // a verdict of the check against the sources. Proofreading does not.
+  const readyIds = proposed.filter(isClean).map((p) => p.id);
+  const heldIds = proposed.filter((p) => !isClean(p)).map((p) => p.id);
+  // Of the drafts the last "approve all" saw, the ones still waiting, in the report's order.
+  const seen = new Set(props.approvedAll?.seen ?? []);
+  const stillHeld = content.flatMap((s) => s.paragraphs.filter((p) => p.status === "proposed" && seen.has(p.id)).map((p) => ({ key: s.key, id: p.id })));
   // Counted as the line above counts them ("N טיוטות מחכות לך"): one draft per section, however
   // many paragraphs it has; the message after the press counts the paragraphs.
   const readyDrafts = content.filter((s) => s.paragraphs.some((p) => readyIds.includes(p.id))).length;
@@ -734,14 +768,27 @@ function Contents(props: {
           </div>
         )}
         {readyDrafts > 1 && (
-          <button type="button" className="btn btn-primary" disabled={props.approvingAll} onClick={() => props.onApproveAll(readyIds, held)}>
+          <button type="button" className="btn btn-primary" disabled={props.approvingAll} onClick={() => props.onApproveAll(readyIds, heldIds)}>
             ✓ לאשר את כל הטיוטות ({readyDrafts})
           </button>
+        )}
+        {props.approvedAll && (
+          stillHeld[0] ? (
+            <button type="button" className="contents-approved" title="לפסקה הראשונה שנשארה לבדיקה"
+              onClick={() => { const first = stillHeld[0]; if (first) props.onOpenParagraph(first.key, first.id); }}>
+              {approvedLine(props.approvedAll.approved, stillHeld.length)} ←
+            </button>
+          ) : <span className="contents-approved" role="status">{approvedLine(props.approvedAll.approved, 0)}</span>
         )}
         {writable > 0 && props.onWriteAll && (
           <button type="button" className="btn contents-write" onClick={props.onWriteAll}>✦ לכתוב את {writable} הריקים</button>
         )}
-        {done && <button type="button" className="btn btn-primary" onClick={props.onFinish}>להוצאת הדוח ←</button>}
+        {closingEmpty[0] && (
+          <button type="button" className="contents-approved" onClick={() => props.onOpen(closingEmpty[0]?.key ?? "")}>
+            נשאר לכתוב: {closingEmpty.map((s) => s.title).join(", ")} ←
+          </button>
+        )}
+        {done && <button type="button" className={closingEmpty.length ? "btn" : "btn btn-primary"} onClick={props.onFinish}>להוצאת הדוח ←</button>}
         <p className="contents-keys">
           <span><kbd>Enter</kbd> לאשר ולעבור הלאה</span>
           <span><kbd>{MOD}+Enter</kbd> לשנות</span>
