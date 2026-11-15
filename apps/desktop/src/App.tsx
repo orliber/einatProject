@@ -92,6 +92,8 @@ export function sameStatus(a: AppStatus | null, b: AppStatus): boolean {
 /** With events, the poll is a safety net only: the core announces a lock or the last minute.
  *  Without them (a refused grant, the preview) the poll is all there is, so it runs often. */
 export const STATUS_POLL_MS = 60_000;
+/** The idle warning shows from this many seconds before the lock. */
+const IDLE_WARNING_SECONDS = 75;
 export const STATUS_POLL_NO_EVENTS_MS = 15_000;
 
 export function useApp(): AppApi {
@@ -140,6 +142,10 @@ export function App() {
     void onCoreEvent((e) => {
       if (!alive) return;
       if (e.kind === "idle_soon") setIdleIn(e.seconds);
+      // A backup made on its own: the reminder and the settings read the backup again.
+      if (e.kind === "backed_up") {
+        for (const key of ["backup", "readiness", "drive-backup"]) void queryClient.invalidateQueries({ queryKey: [key] });
+      }
       void tick();
     }).then((unlisten) => {
       if (unlisten === null) return;
@@ -212,6 +218,10 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [unlocked, lockNow]);
 
+  const warnedRef = useRef(false);
+  useEffect(() => {
+    warnedRef.current = idleIn != null && idleIn <= IDLE_WARNING_SECONDS;
+  }, [idleIn]);
   // Typing a long paragraph never calls the core, so the window reports activity itself
   // (at most every 30 seconds): the idle lock must not throw away work in progress.
   useEffect(() => {
@@ -219,14 +229,17 @@ export function App() {
     let last = 0;
     const onActivity = () => {
       const now = Date.now();
-      if (now - last < 30_000) return;
+      // While the warning shows, her first key or click takes it down at once: the core is
+      // told, and the countdown is read again (it would otherwise stay up to a minute).
+      const warned = warnedRef.current;
+      if (!warned && now - last < 30_000) return;
       last = now;
-      void ipc.touch().catch(() => undefined);
+      void ipc.touch().then(() => (warned ? refresh() : undefined), () => undefined);
     };
     const events = ["keydown", "pointerdown", "wheel", "input"] as const;
     events.forEach((e) => window.addEventListener(e, onActivity, { passive: true }));
     return () => events.forEach((e) => window.removeEventListener(e, onActivity));
-  }, [unlocked]);
+  }, [unlocked, refresh]);
 
   // Ctrl + / Ctrl − / Ctrl 0 change the text size, as in a browser.
   useEffect(() => {
@@ -339,7 +352,7 @@ function Shell(props: {
         </Dialog>
       )}
       {sheet.open && <ShortcutsSheet onClose={sheet.close} />}
-      {idleIn != null && idleIn <= 75 && <IdleWarning seconds={idleIn} onKeep={() => void keepWorking()} />}
+      {idleIn != null && idleIn <= IDLE_WARNING_SECONDS && <IdleWarning seconds={idleIn} onKeep={() => void keepWorking()} />}
     </AppContext.Provider>
     </QueryClientProvider>
   );
