@@ -1,5 +1,6 @@
 //! The unlocked vault. Dropping it closes the databases and wipes every key.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -462,6 +463,25 @@ fn from_json<T: DeserializeOwned>(text: &str) -> Result<T, VaultError> {
     serde_json::from_str(text).map_err(|e| VaultError::Corrupt(e.to_string()))
 }
 
+/// One identity row, opened with its case's key.
+fn open_identity(key: &Key32, case_id: &str, row: IdentityRow) -> Result<Identity, VaultError> {
+    let (id, role, tag, value, aliases, source, reason) = row;
+    Ok(Identity {
+        value: open_string(key, &aad("identities", "value", &id, case_id), &value)?,
+        aliases: from_json(&open_string(
+            key,
+            &aad("identities", "aliases", &id, case_id),
+            &aliases,
+        )?)?,
+        role: enum_from(&role)?,
+        case_id: case_id.to_owned(),
+        id,
+        tag,
+        source: enum_from(&source)?,
+        reason,
+    })
+}
+
 fn enum_str<T: Serialize>(value: &T) -> Result<String, VaultError> {
     Ok(to_json(value)?.trim_matches('"').to_owned())
 }
@@ -603,7 +623,7 @@ impl Vault {
     ) -> Result<Self, VaultError> {
         let header = Self::existing_header(dir)?;
         let (mk, stretched) = password_master_key(&header, password, computer)?;
-        let mut vault = Self::open_with(dir, header, &mk)?;
+        let mut vault = Self::open_existing(dir, header, &mk)?;
         vault.record(
             AuditEvent::Unlock,
             None,
@@ -760,7 +780,7 @@ impl Vault {
     pub fn unlock_with_recovery(dir: &Path, typed: &str) -> Result<Self, VaultError> {
         let header = Self::existing_header(dir)?;
         let mk = master_key(&header, Secret::Recovery(typed))?;
-        let mut vault = Self::open_with(dir, header, &mk)?;
+        let mut vault = Self::open_existing(dir, header, &mk)?;
         vault.record(
             AuditEvent::Unlock,
             None,
@@ -778,7 +798,7 @@ impl Vault {
     ) -> Result<Self, VaultError> {
         let header = Self::existing_header(dir)?;
         let mk = master_key(&header, Secret::Google { drive, computer })?;
-        let mut vault = Self::open_with(dir, header, &mk)?;
+        let mut vault = Self::open_existing(dir, header, &mk)?;
         vault.record(
             AuditEvent::Unlock,
             None,
@@ -872,6 +892,24 @@ impl Vault {
             .retain(|s| !matches!(s, KeySlot::Google { .. }));
         self.save_header()?;
         self.record(AuditEvent::GoogleRecoveryOff, None, &serde_json::json!({}))
+    }
+
+    /// Opens a vault that exists, with a master key its secret already unwrapped. Each of the
+    /// three databases must be there and hold data: a missing or zeroed one is refused, not
+    /// made again empty (an empty identity database would open a vault with no names to hide).
+    /// One that does not open with this vault's key is damaged or from another vault, and is
+    /// said so, not as a wrong password.
+    fn open_existing(dir: &Path, header: VaultHeader, mk: &Key32) -> Result<Self, VaultError> {
+        for name in DB_FILES {
+            let wal = dir.join(format!("{name}-wal"));
+            if !holds_data(&dir.join(name)) && !holds_data(&wal) {
+                return Err(VaultError::DatabaseDamaged(name));
+            }
+        }
+        Self::open_with(dir, header, mk).map_err(|e| match e {
+            VaultError::WrongSecret => VaultError::DatabaseDamaged("key"),
+            other => other,
+        })
     }
 
     fn open_with(dir: &Path, mut header: VaultHeader, mk: &Key32) -> Result<Self, VaultError> {
@@ -1333,10 +1371,15 @@ impl Vault {
             )
             .optional()?
             .ok_or(VaultError::NotFound)?;
+        self.open_case_key(case_id, &wrapped)
+    }
+
+    /// A case's key from its sealed form in the `cases` row.
+    fn open_case_key(&self, case_id: &str, wrapped: &[u8]) -> Result<Key32, VaultError> {
         let raw = open(
             &self.keys.case_wrap,
             &aad("cases", "key", case_id, case_id),
-            &wrapped,
+            wrapped,
         )?;
         let bytes: [u8; 32] = raw
             .as_slice()
@@ -1417,41 +1460,90 @@ impl Vault {
         self.summaries(true)
     }
 
+    /// Three statements whatever the number of cases (the rows, each case's child, the approved
+    /// sections), not five for every case: the list is read on every visit to the case screen.
     fn summaries(&self, trashed: bool) -> Result<Vec<CaseSummary>, VaultError> {
         let sql = if trashed {
-            "SELECT id, created_at, updated_at, folder_id, deleted_at FROM cases WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC"
+            "SELECT id, created_at, updated_at, folder_id, deleted_at, wrapped_case_key, meta_enc FROM cases WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC"
         } else {
-            "SELECT id, created_at, updated_at, folder_id, deleted_at FROM cases WHERE deleted_at IS NULL ORDER BY updated_at DESC"
+            "SELECT id, created_at, updated_at, folder_id, deleted_at, wrapped_case_key, meta_enc FROM cases WHERE deleted_at IS NULL ORDER BY updated_at DESC"
         };
         let mut stmt = self.main.prepare(sql)?;
-        let rows: Vec<SummaryRow> = stmt
+        let rows: Vec<(SummaryRow, Vec<u8>, Vec<u8>)> = stmt
             .query_map([], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                Ok((
+                    (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?),
+                    r.get(5)?,
+                    r.get(6)?,
+                ))
             })?
             .collect::<Result<_, _>>()?;
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Each case's first child, sealed: opened below with that case's key.
+        let mut children: HashMap<String, (String, Vec<u8>)> = HashMap::new();
+        let mut stmt = self.identity.prepare(
+            "SELECT case_id, id, value_enc FROM identities WHERE role = ?1 ORDER BY rowid",
+        )?;
+        let found = stmt.query_map([enum_str(&Role::Child)?], |r| {
+            Ok((r.get::<_, String>(0)?, r.get(1)?, r.get(2)?))
+        })?;
+        for row in found {
+            let (case_id, id, value) = row?;
+            children.entry(case_id).or_insert((id, value));
+        }
+        let mut approved: HashMap<String, Vec<String>> = HashMap::new();
+        let mut stmt = self.main.prepare(
+            "SELECT DISTINCT case_id, section_key FROM drafts WHERE status = 'approved' ORDER BY section_key",
+        )?;
+        let found = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get(1)?)))?;
+        for row in found {
+            let (case_id, section) = row?;
+            approved.entry(case_id).or_default().push(section);
+        }
         rows.into_iter()
-            .map(|(id, created_at, updated_at, folder_id, deleted_at)| {
-                let meta = self.case_meta(&id)?;
-                let child_name = self
-                    .identities(&id)?
-                    .into_iter()
-                    .find(|i| i.role == Role::Child)
-                    .map(|i| i.value);
-                let approved_sections = self.approved_sections(&id)?;
-                Ok(CaseSummary {
-                    id,
-                    meta,
-                    child_name,
-                    created_at,
-                    updated_at,
-                    approved_sections,
-                    total_sections: 0,
-                    folder_id,
-                    deleted_at,
-                    failed_at: None,
-                })
-            })
+            .map(
+                |((id, created_at, updated_at, folder_id, deleted_at), wrapped, meta_enc)| {
+                    let key = self.open_case_key(&id, &wrapped)?;
+                    let meta = from_json(&open_string(
+                        &key,
+                        &aad("cases", "meta", &id, &id),
+                        &meta_enc,
+                    )?)?;
+                    let child_name = children
+                        .remove(&id)
+                        .map(|(identity, value)| {
+                            open_string(&key, &aad("identities", "value", &identity, &id), &value)
+                        })
+                        .transpose()?;
+                    Ok(CaseSummary {
+                        approved_sections: approved.remove(&id).unwrap_or_default(),
+                        id,
+                        meta,
+                        child_name,
+                        created_at,
+                        updated_at,
+                        total_sections: 0,
+                        folder_id,
+                        deleted_at,
+                        failed_at: None,
+                    })
+                },
+            )
             .collect()
+    }
+
+    /// One case's dates (created, last changed), without reading any other case.
+    pub fn case_times(&self, case_id: &str) -> Result<(i64, i64), VaultError> {
+        self.main
+            .query_row(
+                "SELECT created_at, updated_at FROM cases WHERE id = ?1",
+                [case_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?
+            .ok_or(VaultError::NotFound)
     }
 
     /// Whether the case is in the recycle bin. A case that is not in the vault at all is an
@@ -1855,34 +1947,64 @@ impl Vault {
             })?
             .collect::<Result<_, _>>()?;
         rows.into_iter()
-            .map(|(id, role, tag, value, aliases, source, reason)| {
-                Ok(Identity {
-                    value: open_string(&key, &aad("identities", "value", &id, case_id), &value)?,
-                    aliases: from_json(&open_string(
-                        &key,
-                        &aad("identities", "aliases", &id, case_id),
-                        &aliases,
-                    )?)?,
-                    role: enum_from(&role)?,
-                    case_id: case_id.to_owned(),
-                    id,
-                    tag,
-                    source: enum_from(&source)?,
-                    reason,
-                })
-            })
+            .map(|row| open_identity(&key, case_id, row))
             .collect()
     }
 
-    /// Identities of every case: the gate scans outgoing text against all of them.
+    /// Identities of every case: the gate scans outgoing text against all of them. Three
+    /// statements whatever the number of cases, and the same list, in the same order, as
+    /// asking case by case.
     pub fn all_identities(&self) -> Result<Vec<Identity>, VaultError> {
         let mut stmt = self.main.prepare("SELECT id FROM cases")?;
         let ids: Vec<String> = stmt
             .query_map([], |r| r.get(0))?
             .collect::<Result<_, _>>()?;
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut keys: HashMap<String, Key32> = HashMap::with_capacity(ids.len());
+        let mut stmt = self
+            .main
+            .prepare("SELECT id, wrapped_case_key FROM cases")?;
+        let wrapped = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))
+        })?;
+        for row in wrapped {
+            let (id, wrapped) = row?;
+            let key = self.open_case_key(&id, &wrapped)?;
+            keys.insert(id, key);
+        }
+        let mut by_case: HashMap<String, Vec<Identity>> = HashMap::new();
+        let mut stmt = self.identity.prepare(
+            "SELECT case_id, id, role, tag, value_enc, aliases_enc, source, reason FROM identities
+             ORDER BY rowid",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                (
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                    r.get(7)?,
+                ),
+            ))
+        })?;
+        for row in rows {
+            let (case_id, row): (String, IdentityRow) = row?;
+            // An identity of a case that is gone is not read, as before.
+            let Some(key) = keys.get(&case_id) else {
+                continue;
+            };
+            let identity = open_identity(key, &case_id, row)?;
+            by_case.entry(case_id).or_default().push(identity);
+        }
         let mut all = Vec::new();
         for id in ids {
-            all.extend(self.identities(&id)?);
+            all.extend(by_case.remove(&id).unwrap_or_default());
         }
         Ok(all)
     }

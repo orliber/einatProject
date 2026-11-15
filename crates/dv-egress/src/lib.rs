@@ -414,24 +414,61 @@ pub(crate) fn build_client() -> Result<reqwest::blocking::Client, EgressError> {
 }
 
 /// Send once, and again after 2 s and then 4 s while the server is busy (5xx, overloaded) or
-/// asks to slow down (429): three tries at most. Any other answer, or error (an open breaker
-/// among them), is returned as is.
+/// asks to slow down (429): three tries at most. Any other answer or error is returned as is.
+///
+/// A try after the first one that this computer itself refuses (the emergency stop switched on
+/// during the wait, or the breaker opened by this very request) is not made, and the answer of
+/// the try before it is returned: the request did go out, and the result must say so.
 pub(crate) fn retry(
+    once: impl FnMut() -> Result<Value, EgressError>,
+) -> Result<Value, EgressError> {
+    retry_with(once, &std::thread::sleep, &is_stopped)
+}
+
+/// How long one step of the wait between tries is: the emergency stop ends the wait this fast.
+const RETRY_STEP: Duration = Duration::from_millis(100);
+
+fn retry_with(
     mut once: impl FnMut() -> Result<Value, EgressError>,
+    sleep: &dyn Fn(Duration),
+    stopped: &dyn Fn() -> bool,
 ) -> Result<Value, EgressError> {
     let mut delay = Duration::from_secs(2);
     let mut attempt = 0;
+    // What the service answered to the try before this one.
+    let mut said: Option<EgressError> = None;
     loop {
-        match once() {
-            Err(
-                EgressError::Unavailable(_) | EgressError::Overloaded | EgressError::RateLimited,
-            ) if attempt < 2 => {
-                std::thread::sleep(delay);
-                delay *= 2;
-                attempt += 1;
+        let busy = match (once(), said.take()) {
+            // Refused here, so nothing more went out: what the service said last stands.
+            (Err(EgressError::CircuitOpen(_) | EgressError::Stopped), Some(before)) => {
+                return Err(before)
             }
-            other => return other,
+            (
+                Err(
+                    e @ (EgressError::Unavailable(_)
+                    | EgressError::Overloaded
+                    | EgressError::RateLimited),
+                ),
+                _,
+            ) if attempt < 2 => e,
+            (other, _) => return other,
+        };
+        // The wait, in short steps: while the stop is on, no request leaves the machine.
+        let mut left = delay;
+        while !left.is_zero() {
+            if stopped() {
+                return Err(busy);
+            }
+            let step = left.min(RETRY_STEP);
+            sleep(step);
+            left -= step;
         }
+        if stopped() {
+            return Err(busy);
+        }
+        delay *= 2;
+        attempt += 1;
+        said = Some(busy);
     }
 }
 
@@ -723,6 +760,67 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn the_stop_switched_on_during_the_wait_ends_the_retries() {
+        use std::cell::Cell;
+        let calls = Cell::new(0);
+        let slept = Cell::new(Duration::ZERO);
+        let out = retry_with(
+            || {
+                calls.set(calls.get() + 1);
+                Err(EgressError::Overloaded)
+            },
+            &|d| slept.set(slept.get() + d),
+            // Switched on half a second into the first wait.
+            &|| slept.get() >= Duration::from_millis(500),
+        );
+        // The one request that went out is what the result tells of; no second one left.
+        assert_eq!(out, Err(EgressError::Overloaded));
+        assert_eq!(calls.get(), 1);
+        assert!(slept.get() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn a_retry_the_breaker_refuses_reports_what_the_service_said() {
+        use std::cell::Cell;
+        let calls = Cell::new(0);
+        let out = retry_with(
+            || {
+                calls.set(calls.get() + 1);
+                if calls.get() < 3 {
+                    Err(EgressError::Overloaded)
+                } else {
+                    Err(EgressError::CircuitOpen(56))
+                }
+            },
+            &|_| {},
+            &|| false,
+        );
+        assert_eq!(out, Err(EgressError::Overloaded));
+        assert_eq!(calls.get(), 3);
+        // A breaker that refuses the first try sent nothing, and says so.
+        let first = retry_with(|| Err(EgressError::CircuitOpen(5)), &|_| {}, &|| false);
+        assert_eq!(first, Err(EgressError::CircuitOpen(5)));
+    }
+
+    #[test]
+    fn three_busy_tries_wait_two_then_four_seconds() {
+        use std::cell::Cell;
+        let calls = Cell::new(0);
+        let slept = Cell::new(Duration::ZERO);
+        let out = retry_with(
+            || {
+                calls.set(calls.get() + 1);
+                Err(EgressError::RateLimited)
+            },
+            &|d| slept.set(slept.get() + d),
+            &|| false,
+        );
+        assert_eq!(out, Err(EgressError::RateLimited));
+        assert_eq!(calls.get(), 3);
+        assert_eq!(slept.get(), Duration::from_secs(6));
+    }
     use serde_json::json;
 
     fn ok_body() -> Value {

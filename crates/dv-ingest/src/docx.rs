@@ -134,8 +134,19 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
     let folder = main
         .rsplit_once('/')
         .map_or(String::new(), |(f, _)| format!("{f}/"));
-    let document = read_part(&mut zip, &main, &mut budget)?
-        .ok_or_else(|| damaged("not a Word document (no main part)"))?;
+    // A spreadsheet or a presentation is the same kind of package, with another main part:
+    // "open it in Word and save again" cannot help, so it is said to be unsupported.
+    let other_office = |n: &str| n.starts_with("xl/") || n.starts_with("ppt/");
+    if other_office(&main) {
+        return Err(IngestError::Unsupported);
+    }
+    let document = read_part(&mut zip, &main, &mut budget)?.ok_or_else(|| {
+        if names.iter().any(|n| other_office(n)) {
+            IngestError::Unsupported
+        } else {
+            damaged("not a Word document (no main part)")
+        }
+    })?;
     let doc = paragraphs(&document)?;
     let mut body = doc.text;
     for part in ["footnotes.xml", "endnotes.xml"].map(|p| format!("{folder}{p}")) {
@@ -259,7 +270,9 @@ fn paragraphs(xml: &str) -> Result<PartText, IngestError> {
                 }
                 match name {
                     "Fallback" | "instrText" | "delInstrText" => skip_depth = 1,
-                    "del" | "delText" => {
+                    // A tracked move leaves the text at its old place too (`w:moveFrom`, in
+                    // ordinary `w:t` runs): only the new place (`w:moveTo`) is read.
+                    "del" | "delText" | "moveFrom" => {
                         deleted = true;
                         skip_depth = 1;
                     }
@@ -329,14 +342,7 @@ fn paragraphs(xml: &str) -> Result<PartText, IngestError> {
                 if let Some(c) = r.resolve_char_ref().map_err(corrupt)? {
                     out.push(c);
                 } else {
-                    out.push_str(match r.xml10_content().as_ref() {
-                        "amp" => "&",
-                        "lt" => "<",
-                        "gt" => ">",
-                        "quot" => "\"",
-                        "apos" => "'",
-                        _ => "",
-                    });
+                    out.push_str(entity(r.xml10_content().as_ref()));
                 }
             }
             _ => {}
@@ -361,6 +367,9 @@ fn on(e: &quick_xml::events::BytesStart<'_>) -> bool {
 pub(crate) fn properties(xml: &str, fields: &[&str]) -> Result<Vec<(String, String)>, IngestError> {
     let mut reader = Reader::from_str(xml);
     let mut current: Option<String> = None;
+    // One value per element: an escaped character ("A &amp; B") arrives as its own event
+    // between two pieces of text.
+    let mut value = String::new();
     let mut out = Vec::new();
     loop {
         match reader.read_event().map_err(corrupt)? {
@@ -368,20 +377,41 @@ pub(crate) fn properties(xml: &str, fields: &[&str]) -> Result<Vec<(String, Stri
             Event::Start(e) => {
                 let local = e.local_name().as_ref().to_owned();
                 current = fields.contains(&local.as_str()).then_some(local);
+                value.clear();
             }
-            Event::Text(t) => {
-                if let Some(field) = &current {
-                    let v = t.xml10_content().trim().to_owned();
-                    if !v.is_empty() {
-                        out.push((field.clone(), v));
-                    }
+            Event::Text(t) if current.is_some() => value.push_str(&t.xml10_content()),
+            Event::GeneralRef(r) if current.is_some() => {
+                if let Some(c) = r.resolve_char_ref().map_err(corrupt)? {
+                    value.push(c);
+                } else {
+                    value.push_str(entity(r.xml10_content().as_ref()));
                 }
             }
-            Event::End(_) => current = None,
+            Event::End(_) => {
+                if let Some(field) = current.take() {
+                    let v = value.trim();
+                    if !v.is_empty() {
+                        out.push((field, v.to_owned()));
+                    }
+                }
+                value.clear();
+            }
             _ => {}
         }
     }
     Ok(out)
+}
+
+/// The five named characters of XML; any other name is nothing.
+fn entity(name: &str) -> &'static str {
+    match name {
+        "amp" => "&",
+        "lt" => "<",
+        "gt" => ">",
+        "quot" => "\"",
+        "apos" => "'",
+        _ => "",
+    }
 }
 
 #[cfg(test)]
@@ -501,6 +531,58 @@ pub(crate) mod tests {
             crate::extract(cut, "a.docx"),
             Err(IngestError::Damaged(_))
         ));
+    }
+
+    /// Text moved with Track Changes on is read once, at its new place, and she is told.
+    #[test]
+    fn moved_text_is_read_once() {
+        let body = "<w:p><w:r><w:t>פתיחה</w:t></w:r></w:p>\
+             <w:p><w:moveFromRangeStart w:id=\"1\" w:name=\"move1\"/><w:moveFrom w:id=\"2\"><w:r><w:t>משפט שעבר מקום</w:t></w:r></w:moveFrom><w:moveFromRangeEnd w:id=\"1\"/></w:p>\
+             <w:p><w:r><w:t>אמצע</w:t></w:r></w:p>\
+             <w:p><w:moveToRangeStart w:id=\"3\" w:name=\"move1\"/><w:moveTo w:id=\"4\"><w:r><w:t>משפט שעבר מקום</w:t></w:r></w:moveTo><w:moveToRangeEnd w:id=\"3\"/></w:p>";
+        let bytes = build(&[("word/document.xml", document(body))]);
+        let out = crate::extract(&bytes, "a.docx").unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(out.body, "פתיחה\n\nאמצע\nמשפט שעבר מקום");
+        assert!(
+            out.warnings.iter().any(|w| w.contains("שינויים במעקב")),
+            "{:?}",
+            out.warnings
+        );
+    }
+
+    /// A property with an escaped character is one value, with the character.
+    #[test]
+    fn a_property_with_an_escaped_character_is_one_value() {
+        let xml = "<Properties><Company>A &amp; B &#1488;</Company><Manager> </Manager><Other>x</Other></Properties>";
+        assert_eq!(
+            properties(xml, &["Company", "Manager"]).unwrap_or_else(|e| panic!("{e:?}")),
+            vec![("Company".to_owned(), "A & B א".to_owned())]
+        );
+    }
+
+    /// A spreadsheet or a presentation is not a Word file to "save again": it is not supported.
+    #[test]
+    fn excel_and_powerpoint_are_unsupported() {
+        for part in ["xl/workbook.xml", "ppt/presentation.xml"] {
+            // With the package's pointer (as Excel and PowerPoint save) and without it.
+            let rels = format!(
+                "<Relationships><Relationship Type=\"x/officeDocument\" Target=\"{part}\"/></Relationships>"
+            );
+            let content = "<x><t>12</t></x>".to_owned();
+            for bytes in [
+                build(&[("_rels/.rels", rels), (part, content.clone())]),
+                build(&[
+                    ("[Content_Types].xml", "<Types/>".to_owned()),
+                    (part, content),
+                ]),
+            ] {
+                assert_eq!(
+                    crate::extract(&bytes, "a.docx"),
+                    Err(IngestError::Unsupported),
+                    "{part}"
+                );
+            }
+        }
     }
 
     #[test]

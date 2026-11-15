@@ -132,7 +132,9 @@
   font-family: var(--font-display);
   font-size: 21px;
   line-height: 1.8;
-  color: var(--paper-ink);
+  /* On the app's own surface, so the app's ink: the page ink is for the white page only, and
+     was black on the dark theme's dark card. */
+  color: var(--ink);
   overflow-wrap: anywhere;
 }
 .style-quote q {

@@ -133,13 +133,26 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
     let clx = table
         .get(fc_clx..fc_clx.saturating_add(lcb_clx))
         .ok_or_else(|| corrupt("piece table"))?;
-    let units = characters(&word, clx)?;
+    // fcPlcfBtePapx / lcbPlcfBtePapx: the 14th pair. Where the paragraph properties are.
+    let ttp = row_mark_ends(&word, &table, fc_lcb + 13 * 8);
+    let (units, rows) = characters(&word, clx, &ttp)?;
+    // Believed only when every mark they point at is a cell mark; otherwise (and for a file
+    // without them) the rows are guessed, as before.
+    let rows =
+        (!rows.is_empty() && rows.iter().all(|cp| units.get(*cp) == Some(&7))).then_some(rows);
 
     // Split by part, in storage order. A part longer than what is left takes the rest.
     let mut rest: &[u16] = &units;
+    let mut at = 0usize;
     let mut take = |n: usize| {
         let (part, after) = rest.split_at_checked(n).unwrap_or((rest, &[]));
         rest = after;
+        let part = Part {
+            units: part,
+            start: at,
+            rows: rows.as_deref(),
+        };
+        at += part.units.len();
         part
     };
     let text = take(parts.text);
@@ -151,17 +164,17 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
     let text_boxes = take(parts.text_boxes);
     let header_boxes = take(parts.header_text_boxes);
 
-    let mut body = render(text);
+    let mut body = render(&text);
     for extra in [footnotes, endnotes, text_boxes] {
-        let t = render(extra);
+        let t = render(&extra);
         if !t.trim().is_empty() {
             body.push('\n');
             body.push_str(&t);
         }
     }
-    let mut margins = render(headers);
+    let mut margins = render(&headers);
     margins.push('\n');
-    margins.push_str(&render(header_boxes));
+    margins.push_str(&render(&header_boxes));
 
     let mut warnings = vec!["נקרא מקובץ Word ישן (‎.doc): כדאי לעבור על הטקסט.".to_owned()];
     if parts.comments > 0 {
@@ -181,8 +194,122 @@ pub(crate) fn extract(bytes: &[u8]) -> Result<Extracted, IngestError> {
     })
 }
 
-/// All characters of the document, in character-position order, as UTF-16 units.
-fn characters(word: &[u8], clx: &[u8]) -> Result<Vec<u16>, IngestError> {
+/// The size of a page of paragraph properties (PapxFkp) in the `WordDocument` stream.
+const FKP: usize = 512;
+
+/// sprmPFTtp: the paragraph is the mark that ends a table row.
+const SPRM_P_F_TTP: u16 = 0x2417;
+
+/// Where each end-of-row paragraph of a table ends, as offsets in the `WordDocument` stream,
+/// sorted. A cell mark and a row mark are the same character (0x07), so an empty cell looks
+/// exactly like the end of a row; only the paragraph properties (sprmPFTtp) tell them apart.
+///
+/// Read leniently: properties that are missing or do not parse give no row ends, and the
+/// rows are then guessed from the text. They never make the document unreadable.
+fn row_mark_ends(word: &[u8], table: &[u8], pair_at: usize) -> Vec<u32> {
+    let mut ends = Vec::new();
+    let (Ok(fc), Ok(lcb)) = (usize_at(word, pair_at), usize_at(word, pair_at + 4)) else {
+        return ends;
+    };
+    // PlcBtePapx: (n + 1) offsets, then n page numbers.
+    let Some(plc) = table.get(fc..fc.saturating_add(lcb)) else {
+        return ends;
+    };
+    if plc.len() < 12 || (plc.len() - 4) % 8 != 0 {
+        return ends;
+    }
+    let n = (plc.len() - 4) / 8;
+    // Each page is listed once: more entries than pages is a hostile file.
+    if n > word.len() / FKP + 1 {
+        return ends;
+    }
+    for k in 0..n {
+        let Ok(pn) = usize_at(plc, (n + 1) * 4 + k * 4) else {
+            return Vec::new();
+        };
+        let start = (pn & 0x003F_FFFF).saturating_mul(FKP);
+        let Some(page) = word.get(start..start.saturating_add(FKP)) else {
+            return Vec::new();
+        };
+        let paras = usize::from(page.last().copied().unwrap_or(0));
+        for i in 0..paras {
+            // BxPap: where this paragraph's properties are in the page (in words), then 12
+            // bytes of layout.
+            let Some(&offset) = page.get((paras + 1) * 4 + i * 13) else {
+                return Vec::new();
+            };
+            if offset == 0 {
+                continue;
+            }
+            let at = usize::from(offset) * 2;
+            // PapxInFkp: a size (in words, in one of two forms), a style index, the sprms.
+            let size = match (page.get(at), page.get(at + 1)) {
+                (Some(0), Some(&cb)) => Some((at + 2, usize::from(cb) * 2)),
+                (Some(&cb), _) => Some((at + 1, usize::from(cb) * 2 - 1)),
+                _ => None,
+            };
+            let grpprl = size.and_then(|(from, len)| page.get(from..from + len));
+            let Some(grpprl) = grpprl.and_then(|g| g.get(2..)) else {
+                return Vec::new();
+            };
+            if ends_table_row(grpprl) {
+                if let Ok(end) = u32_at(page, (i + 1) * 4) {
+                    ends.push(end);
+                }
+            }
+        }
+    }
+    ends.sort_unstable();
+    ends.dedup();
+    ends
+}
+
+/// Whether a paragraph's list of properties (sprms) says it is an end-of-row mark. The list
+/// is walked sprm by sprm; one that does not fit ends the walk.
+fn ends_table_row(grpprl: &[u8]) -> bool {
+    let mut rest = grpprl;
+    let mut ttp = false;
+    while let Ok(sprm) = u16_at(rest, 0) {
+        let operand = rest.get(2..).unwrap_or_default();
+        // The top three bits give the operand's size; 6 is "the size is in the operand".
+        let len = match sprm >> 13 {
+            0 | 1 => 1,
+            2 | 4 | 5 => 2,
+            3 => 4,
+            7 => 3,
+            _ => match (sprm, operand) {
+                // sprmTDefTable: a two-byte size that counts one more than what follows it.
+                (0xD608, _) => match u16_at(operand, 0) {
+                    Ok(cb) => 1 + usize::from(cb),
+                    Err(_) => break,
+                },
+                // sprmPChgTabs, long form: tabs to delete (4 bytes each), tabs to add (3).
+                (0xC615, [255, del, ..]) => {
+                    let del = usize::from(*del);
+                    match operand.get(2 + del * 4) {
+                        Some(add) => 3 + del * 4 + usize::from(*add) * 3,
+                        None => break,
+                    }
+                }
+                (_, [cb, ..]) => 1 + usize::from(*cb),
+                _ => break,
+            },
+        };
+        let Some(value) = operand.get(..len) else {
+            break;
+        };
+        if sprm == SPRM_P_F_TTP {
+            ttp = value.first().is_some_and(|v| *v != 0);
+        }
+        rest = operand.get(len..).unwrap_or_default();
+    }
+    ttp
+}
+
+/// All characters of the document, in character-position order, as UTF-16 units; and the
+/// positions of the characters that end a table row (those that end at one of `ttp`, the
+/// sorted stream offsets from [`row_mark_ends`]).
+fn characters(word: &[u8], clx: &[u8], ttp: &[u32]) -> Result<(Vec<u16>, Vec<usize>), IngestError> {
     // Skip Prc entries (formatting), find the Pcdt (the piece table).
     let mut i = 0usize;
     let plc = loop {
@@ -209,6 +336,7 @@ fn characters(word: &[u8], clx: &[u8]) -> Result<Vec<u16>, IngestError> {
         return Err(corrupt("piece table"));
     }
     let mut out: Vec<u16> = Vec::new();
+    let mut rows: Vec<usize> = Vec::new();
     let budget = word.len();
     for k in 0..n {
         let cp_start = usize_at(plc, k * 4)?;
@@ -223,6 +351,23 @@ fn characters(word: &[u8], clx: &[u8]) -> Result<Vec<u16>, IngestError> {
         let fc = u32_at(plc, pcd + 2)?;
         let compressed = fc & 0x4000_0000 != 0;
         let fc = usize::try_from(fc & 0x3FFF_FFFF).map_err(|_| corrupt("size"))?;
+        // The row marks in this piece: a character that ends at one of the offsets.
+        let (start, unit) = if compressed { (fc / 2, 1) } else { (fc, 2) };
+        let from = ttp.partition_point(|end| usize::try_from(*end).is_ok_and(|e| e <= start));
+        for end in ttp.iter().skip(from) {
+            let Some(offset) = usize::try_from(*end)
+                .ok()
+                .and_then(|e| e.checked_sub(start))
+            else {
+                break;
+            };
+            if offset > count.saturating_mul(unit) {
+                break;
+            }
+            if offset % unit == 0 {
+                rows.push(out.len() + offset / unit - 1);
+            }
+        }
         if compressed {
             let start = fc / 2;
             let bytes = word
@@ -244,16 +389,29 @@ fn characters(word: &[u8], clx: &[u8]) -> Result<Vec<u16>, IngestError> {
             );
         }
     }
-    Ok(out)
+    rows.sort_unstable();
+    Ok((out, rows))
+}
+
+/// One part of the document (body, footnotes, headers…): its characters, where it starts in
+/// the document, and the positions of the end-of-row marks when the file's paragraph
+/// properties gave them.
+struct Part<'a> {
+    units: &'a [u16],
+    start: usize,
+    rows: Option<&'a [usize]>,
 }
 
 /// Word's special characters → text. Field codes are dropped, field results kept.
-fn render(units: &[u16]) -> String {
+fn render(part: &Part<'_>) -> String {
     let mut out = String::new();
     // For each open field: whether its instruction part is still running.
     let mut fields: Vec<bool> = Vec::new();
     let mut last_cell = false;
-    for c in char::decode_utf16(units.iter().copied()) {
+    let mut at = part.start;
+    for c in char::decode_utf16(part.units.iter().copied()) {
+        let cp = at;
+        at += c.as_ref().map_or(1, |c| c.len_utf16());
         let c = c.unwrap_or('\u{FFFD}');
         match c {
             '\u{13}' => {
@@ -278,7 +436,14 @@ fn render(units: &[u16]) -> String {
         let cell = c == '\u{07}';
         match c {
             '\r' | '\u{0B}' | '\u{0C}' | '\u{0E}' => out.push('\n'),
-            // A cell ends with 0x07; two in a row end the table row.
+            // A cell ends with 0x07, and so does the row, after its last cell. The file's
+            // paragraph properties say which one is the row's; an empty cell is not.
+            '\u{07}' if part.rows.is_some_and(|r| r.binary_search(&cp).is_ok()) => {
+                out.truncate(out.trim_end_matches('\t').len());
+                out.push('\n');
+            }
+            '\u{07}' if part.rows.is_some() => out.push('\t'),
+            // Without them: two in a row end the table row (a guess; an empty cell breaks it).
             '\u{07}' if last_cell => {
                 if out.ends_with('\t') {
                     out.pop();
@@ -298,12 +463,19 @@ fn render(units: &[u16]) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing)]
 pub(crate) mod tests {
     use super::*;
     use std::io::Write;
 
     /// A minimal Word 97 file holding `text` (UTF-16) as one piece, with `header` after it.
     pub(crate) fn build(text: &str, header: &str, flags: u16) -> Vec<u8> {
+        build_rows(text, header, flags, &[])
+    }
+
+    /// The same, with paragraph properties that mark the characters at `row_ends` (positions
+    /// in `text`) as the end-of-row marks of a table, the way Word stores them.
+    fn build_rows(text: &str, header: &str, flags: u16, row_ends: &[usize]) -> Vec<u8> {
         let units: Vec<u16> = text.encode_utf16().chain(header.encode_utf16()).collect();
         let text_len = text.encode_utf16().count();
         let header_len = header.encode_utf16().count();
@@ -330,6 +502,33 @@ pub(crate) mod tests {
         for u in &units {
             word.extend_from_slice(&u.to_le_bytes());
         }
+        // One page of paragraph properties (PapxFkp): for each row mark, a plain paragraph
+        // up to it and a one-character paragraph with sprmPFInTable and sprmPFTtp.
+        let mut bte = Vec::new();
+        if !row_ends.is_empty() {
+            word.resize(word.len().next_multiple_of(512), 0);
+            let page = u32::try_from(word.len() / 512).unwrap_or(0);
+            let fc = |cp: usize| u32::try_from(fc_text + cp * 2).unwrap_or(0);
+            let mut fkp = vec![0u8; 512];
+            let mut bounds = vec![fc(0)];
+            for e in row_ends {
+                bounds.extend([fc(*e), fc(e + 1)]);
+            }
+            let paras = bounds.len() - 1;
+            for (i, b) in bounds.iter().enumerate() {
+                fkp[i * 4..i * 4 + 4].copy_from_slice(&b.to_le_bytes());
+            }
+            let papx = [0u8, 4, 0, 0, 0x16, 0x24, 1, 0x17, 0x24, 1];
+            fkp[500..510].copy_from_slice(&papx);
+            for i in (1..paras).step_by(2) {
+                fkp[(paras + 1) * 4 + i * 13] = 250;
+            }
+            fkp[511] = u8::try_from(paras).unwrap_or(0);
+            word.extend_from_slice(&fkp);
+            bte.extend_from_slice(&fc(0).to_le_bytes());
+            bte.extend_from_slice(&fc(units.len()).to_le_bytes());
+            bte.extend_from_slice(&page.to_le_bytes());
+        }
 
         // Table stream: a Clx with one piece covering all characters.
         let total = u32::try_from(units.len()).unwrap_or(0);
@@ -345,6 +544,11 @@ pub(crate) mod tests {
         let at = fc_lcb_at + 33 * 8;
         word[at..at + 4].copy_from_slice(&0u32.to_le_bytes());
         word[at + 4..at + 8].copy_from_slice(&u32::try_from(clx.len()).unwrap_or(0).to_le_bytes());
+        // PlcfBtePapx, after the Clx in the table stream.
+        let at = fc_lcb_at + 13 * 8;
+        word[at..at + 4].copy_from_slice(&u32::try_from(clx.len()).unwrap_or(0).to_le_bytes());
+        word[at + 4..at + 8].copy_from_slice(&u32::try_from(bte.len()).unwrap_or(0).to_le_bytes());
+        clx.extend_from_slice(&bte);
 
         let mut cfb =
             cfb::CompoundFile::create(Cursor::new(Vec::new())).unwrap_or_else(|e| panic!("{e}"));
@@ -365,6 +569,28 @@ pub(crate) mod tests {
         assert_eq!(out.body, "נועם משחק לבד בחצר.\nקישור בגן\nא\tב\nסוף");
         assert_eq!(out.margins, "מרפאה בדויה");
         assert!(!out.body.contains("HYPERLINK"));
+    }
+
+    /// An empty cell is two cell marks in a row, exactly like the end of a row: only the
+    /// paragraph properties tell them apart.
+    #[test]
+    fn an_empty_table_cell_does_not_end_the_row() {
+        // קוביות | (empty) | 9, then אוצר | טוב | (empty), then a line after the table.
+        let text = "מבחנים\rקוביות\u{07}\u{07}9\u{07}\u{07}אוצר\u{07}טוב\u{07}\u{07}\u{07}סוף\r";
+        let marks: Vec<usize> = text
+            .encode_utf16()
+            .enumerate()
+            .filter(|(_, u)| *u == 7)
+            .map(|(i, _)| i)
+            .collect();
+        let row_ends = [marks[3], marks[7]];
+        let bytes = build_rows(text, "", 0, &row_ends);
+        let out = crate::extract(&bytes, "old.doc").unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(out.body, "מבחנים\nקוביות\t\t9\nאוצר\tטוב\nסוף");
+        // Properties that point at something that is not a cell mark are not believed.
+        let bytes = build_rows(text, "", 0, &[marks[3], 2]);
+        let out = crate::extract(&bytes, "old.doc").unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(out.body, "מבחנים\nקוביות\n9\nאוצר\tטוב\n\tסוף");
     }
 
     #[test]

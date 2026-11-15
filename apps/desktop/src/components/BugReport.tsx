@@ -84,7 +84,9 @@ export function BugReportDialog({ failure, onClose }: { failure: BugFacts["failu
       ipc.recentCrashes().catch(() => [] as string[]),
     ]).then(([p, crashes]) => {
       if (!live) return;
-      setText(bugReportText({
+      // Written once: the screen behind redraws (the status poll), and what she took out of
+      // the text must not come back.
+      setText((had) => had ?? bugReportText({
         version: p?.core_version ?? "לא ידוע",
         commit: p?.build_commit ?? "לא ידוע",
         platform: p?.platform ?? "לא ידוע",

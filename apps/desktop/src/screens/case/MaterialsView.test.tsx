@@ -7,6 +7,7 @@
 import { configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { clearKept } from "../../kept";
+import { holdNow } from "../../components/Unsaved";
 import type { ImportPreview } from "../../ipc/client";
 import { a11yViolations } from "../../test/a11y";
 import { appApi, CaseHost, Host, serve, type Override } from "../../test/host";
@@ -268,6 +269,34 @@ describe("the materials of a case", () => {
     await waitFor(() => expect(app.notify).toHaveBeenCalledWith("נשמר בתיק."));
     expect(calls.filter((c) => c.cmd === "update_input").at(-1)?.args).toMatchObject({ title: "שיחה שנייה עם הגננת" });
     expect(await within(list()).findByText("שיחה שנייה עם הגננת")).toBeInTheDocument();
+  });
+
+  it("a session note that was saved, or closed on purpose, is not held as unsaved for the next lock", async () => {
+    const { user, app, calls } = await openMaterials();
+    const held = () => calls.filter((c) => c.cmd === "hold_unsaved").at(-1)?.args.edits as unknown[] | undefined;
+    const openNote = async () => {
+      await user.click(screen.getByRole("button", { name: "הוספה לתצפית ומפגשים" }));
+      await user.click(await screen.findByRole("menuitem", { name: "רישום מפגש" }));
+    };
+    await openNote();
+    let editor = await screen.findByRole("dialog", { name: "רישום מפגש" });
+    await user.type(within(editor).getByLabelText("הטקסט"), "רישום בדוי של מפגש.");
+    await holdNow();
+    expect(held()).toHaveLength(1);
+    await user.click(within(editor).getByRole("button", { name: "שמירה בתיק" }));
+    await waitFor(() => expect(app.notify).toHaveBeenCalledWith("נשמר בתיק."));
+    await holdNow();
+    expect(held()).toEqual([]);
+    // And one she closed on purpose (Escape, then "close without saving").
+    await openNote();
+    editor = await screen.findByRole("dialog", { name: "רישום מפגש" });
+    await user.type(within(editor).getByLabelText("הטקסט"), "רישום בדוי אחר.");
+    await holdNow();
+    expect(held()).toHaveLength(1);
+    await user.keyboard("{Escape}");
+    await user.click(await screen.findByRole("button", { name: /בלי לשמור/ }));
+    await holdNow();
+    expect(held()).toEqual([]);
   });
 
   it("the sections a material feeds are hers to change", async () => {

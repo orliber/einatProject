@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use pdf_extract::{Document, MediaBox, OutputDev, OutputError, Transform};
+use pdf_extract::{Document, MediaBox, Object, OutputDev, OutputError, Transform};
 
 use crate::{rtl, Extracted, Format, IngestError};
 
@@ -371,11 +371,33 @@ fn hidden_parts(doc: &Document) -> (Vec<(String, String)>, Vec<String>) {
         }
     }
     let mut warnings = Vec::new();
+    // A link (an address in the letterhead, a table of contents) is an annotation too, and
+    // nobody added it. The warning is left out only when everything on the page is surely a
+    // link; anything that cannot be read as one counts as a comment.
+    let only_links = |annots: &Object| {
+        let resolve = |o: &Object| doc.dereference(o).ok().map(|(_, o)| o.clone());
+        resolve(annots)
+            .and_then(|a| a.as_array().ok().cloned())
+            .is_some_and(|list| {
+                !list.is_empty()
+                    && list.iter().all(|a| {
+                        resolve(a)
+                            .and_then(|a| {
+                                a.as_dict()
+                                    .ok()
+                                    .and_then(|d| d.get(b"Subtype").ok())
+                                    .and_then(|s| s.as_name().ok())
+                                    .map(|s| s == b"Link")
+                            })
+                            .unwrap_or(false)
+                    })
+            })
+    };
     let annotated = doc.get_pages().values().any(|id| {
         doc.get_dictionary(*id)
             .ok()
             .and_then(|p| p.get(b"Annots").ok())
-            .is_some()
+            .is_some_and(|annots| !only_links(annots))
     });
     if annotated {
         warnings.push("הערות או סימונים שנוספו ל-PDF לא יובאו.".to_owned());
@@ -624,5 +646,60 @@ mod tests {
     fn image_only_pdf_is_scanned() {
         let bytes = tiny_pdf(&[vec![(700.0, "א")]]);
         assert_eq!(crate::extract(&bytes, "s.pdf"), Err(IngestError::Scanned));
+    }
+
+    /// A link (an e-mail or web address, a table of contents) is not a comment: no warning.
+    /// A note or a highlight is, and so is anything that cannot be told apart.
+    #[test]
+    fn links_are_not_comments() {
+        use pdf_extract::{Dictionary, Object};
+        let annot = |subtype: &str| {
+            let mut d = Dictionary::new();
+            d.set("Type", Object::Name(b"Annot".to_vec()));
+            d.set("Subtype", Object::Name(subtype.as_bytes().to_vec()));
+            d
+        };
+        let warned = |annots: Vec<Dictionary>, by_reference: bool| {
+            let bytes = tiny_pdf(&[vec![
+                (720.0, "תוליעפ ןיב םירבעמב השק"),
+                (706.0, "הנטק הצובקב רתוי ףתתשמ"),
+                (692.0, "תוליעפ ןיב םירבעמב השק"),
+            ]]);
+            let mut doc = Document::load_mem(&bytes).unwrap_or_else(|e| panic!("{e}"));
+            let list: Vec<Object> = annots
+                .into_iter()
+                .map(|d| {
+                    if by_reference {
+                        Object::Reference(doc.add_object(d))
+                    } else {
+                        Object::Dictionary(d)
+                    }
+                })
+                .collect();
+            let list = if by_reference {
+                Object::Reference(doc.add_object(Object::Array(list)))
+            } else {
+                Object::Array(list)
+            };
+            let page = *doc
+                .get_pages()
+                .values()
+                .next()
+                .unwrap_or_else(|| panic!("no page"));
+            if let Ok(p) = doc.get_dictionary_mut(page) {
+                p.set("Annots", list);
+            }
+            let mut out = Vec::new();
+            doc.save_to(&mut out).unwrap_or_else(|e| panic!("{e}"));
+            let got = crate::extract(&out, "p.pdf").unwrap_or_else(|e| panic!("{e}"));
+            got.warnings.iter().any(|w| w.contains("הערות"))
+        };
+        for by_reference in [false, true] {
+            assert!(!warned(vec![annot("Link"), annot("Link")], by_reference));
+            assert!(warned(vec![annot("Link"), annot("Text")], by_reference));
+            assert!(warned(vec![annot("Highlight")], by_reference));
+            // No subtype: not known to be a link.
+            assert!(warned(vec![Dictionary::new()], by_reference));
+        }
     }
 }

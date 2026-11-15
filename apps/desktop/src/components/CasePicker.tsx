@@ -35,8 +35,8 @@ export function CasePicker(props: { id: string; value: string; onChange: (id: st
   const groups = groupByFolder(cases.data ?? [], folders.data ?? []);
   return (
     <select id={props.id} className="select" value={props.value} onChange={(e) => props.onChange(e.target.value)}>
-      {groups.map((g) => (
-        <optgroup key={g.label} label={g.label}>
+      {groups.map((g, gi) => (
+        <optgroup key={`${gi}:${g.label}`} label={g.label}>
           {g.cases.map((c) => (
             <option key={c.id} value={c.id}>{c.child_name ? `${c.child_name} · ` : ""}{c.meta.code}</option>
           ))}

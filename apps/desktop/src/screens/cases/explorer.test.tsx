@@ -5,8 +5,9 @@ import userEvent from "@testing-library/user-event";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { App } from "../../App";
 import { FakeCore } from "../../web/fakeCore";
-import { casesShown, readDrag } from "../CasesScreen";
-import type { CaseSummary } from "../../ipc/client";
+import { status } from "../../test/fixtures";
+import { casesShown, folderStats, goesIn, inWorkLine, readDrag } from "../CasesScreen";
+import type { CaseSummary, Folder } from "../../ipc/client";
 
 configure({ asyncUtilTimeout: 5000 });
 vi.setConfig({ testTimeout: 30_000 });
@@ -231,5 +232,74 @@ describe("the case explorer", () => {
     await user.type(screen.getByLabelText("שם התיקייה"), " אבחונים פרטיים ");
     await user.click(screen.getByRole("button", { name: "שמירה" }));
     expect(await within(screen.getByRole("dialog")).findByText(/כבר יש כאן תיקייה בשם/)).toBeInTheDocument();
+  });
+
+  it("counts and dates every folder in one pass, with the cases of its subfolders", () => {
+    const folder = (id: string, parent: string | null) => ({ id, parent_id: parent, name: id }) as unknown as Folder;
+    const at = (id: string, f: string | null, updated: number) => ({ ...summary(id, f), updated_at: updated });
+    const stats = folderStats([folder("a", null), folder("b", "a"), folder("c", null)], [at("1", "b", 10), at("2", "a", 30), at("3", null, 99), at("4", "gone", 5)]);
+    expect(stats.get("a")).toEqual({ count: 2, last: 30 });
+    expect(stats.get("b")).toEqual({ count: 1, last: 10 });
+    expect(stats.get("c")).toBeUndefined();
+  });
+
+  it("says one, none and many in Hebrew", () => {
+    expect(inWorkLine(0)).toBe("אין תיקים בעבודה.");
+    expect(inWorkLine(1)).toBe("תיק אחד בעבודה.");
+    expect(inWorkLine(4)).toBe("4 תיקים בעבודה.");
+    expect(goesIn(0)).toBe("יימחק בקרוב");
+    expect(goesIn(1)).toBe("יימחק מחר");
+    expect(goesIn(2)).toBe("יימחק בעוד יומיים");
+    expect(goesIn(12)).toBe("יימחק בעוד 12 ימים");
+  });
+
+  it("a refusal does not stay on the screen once something else worked", async () => {
+    const { user, core } = await openList();
+    let refuse = true;
+    mockIPC((cmd, args) => {
+      if (cmd === "create_follow_up" && refuse) throw { code: "refused", message: "אי אפשר לפתוח מעקב עכשיו." };
+      return core.handle(cmd, args);
+    });
+    const followUp = async () => {
+      await user.click(screen.getByRole("button", { name: "פעולות על התיק של נועם" }));
+      await user.click(await screen.findByRole("menuitem", { name: /אבחון מעקב/ }));
+    };
+    await followUp();
+    expect(await screen.findByText("אי אפשר לפתוח מעקב עכשיו.")).toBeInTheDocument();
+    // Something else that works: the old refusal does not stay beside it.
+    await user.click(screen.getByRole("button", { name: "פעולות על התיק של נועם" }));
+    await user.click(await screen.findByRole("menuitem", { name: "העברה לסל המחזור" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "העברה לסל המחזור" }));
+    await vi.waitFor(() => expect(screen.queryByText("אי אפשר לפתוח מעקב עכשיו.")).toBeNull());
+    refuse = false;
+  });
+});
+
+describe("the list with no case in it", () => {
+  const binned = { ...summary("נועם", null), child_name: "נועם", deleted_at: Math.floor(Date.now() / 1000) - 86_400, updated_at: 1, meta: { code: "ת-1" } } as unknown as CaseSummary;
+  function open(reply: (cmd: string) => unknown) {
+    mockIPC((cmd) => {
+      if (cmd === "app_status") return status({ vault_exists: true, unlocked: true });
+      const r = reply(cmd);
+      return r === undefined ? null : r;
+    });
+    render(<App />);
+    return userEvent.setup();
+  }
+
+  it("keeps the recycle bin in reach when the only case was deleted", async () => {
+    const user = open((cmd) => (cmd === "list_cases" || cmd === "folders" ? [] : cmd === "list_trash" ? [binned] : undefined));
+    await user.click(await screen.findByRole("button", { name: /סל המחזור/ }));
+    expect(await screen.findByRole("button", { name: "שחזור" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "התיק הראשון" })).toBeNull();
+  });
+
+  it("says so when the sample case could not be made", async () => {
+    const user = open((cmd) => {
+      if (cmd === "create_sample_case") throw { code: "internal", message: "התיק לדוגמה לא נוצר." };
+      return cmd === "list_cases" || cmd === "folders" || cmd === "list_trash" ? [] : undefined;
+    });
+    await user.click(await screen.findByRole("button", { name: "לנסות קודם על תיק לדוגמה" }));
+    expect(await screen.findByText("התיק לדוגמה לא נוצר.")).toBeInTheDocument();
   });
 });

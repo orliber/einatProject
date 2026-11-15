@@ -251,6 +251,9 @@ pub struct BackupJob {
 pub struct WrittenBackup {
     job: BackupJob,
     path: std::path::PathBuf,
+    /// Set while the file still waits under its `.part` name ([`BackupJob::write_part`]): the
+    /// name it takes once it is known to open.
+    takes_name: Option<std::path::PathBuf>,
 }
 
 /// A backup written and opened again from where it went: ready to be recorded.
@@ -392,6 +395,31 @@ impl BackupJob {
         Ok(WrittenBackup {
             job: self,
             path: dest.to_path_buf(),
+            takes_name: None,
+        })
+    }
+
+    /// Seal the file if it is not yet, and write it next to `dest` under a `.part` name. It
+    /// takes the name `dest` only in [`WrittenBackup::verify`], once it was read back and
+    /// opened: a backup that does not open never stands under a backup's name, and never
+    /// replaces an earlier good one of the same name.
+    pub fn write_part(self, dest: &Path) -> Result<WrittenBackup, VaultError> {
+        let this = self.seal()?;
+        let part = dest.with_extension(format!("{BACKUP_EXTENSION}.part"));
+        let written = (|| -> Result<(), VaultError> {
+            let mut f = fs::File::create(&part)?;
+            f.write_all(&this.file)?;
+            f.sync_all()?;
+            Ok(())
+        })();
+        if written.is_err() {
+            let _ = fs::remove_file(&part);
+        }
+        written?;
+        Ok(WrittenBackup {
+            job: this,
+            path: part,
+            takes_name: Some(dest.to_path_buf()),
         })
     }
 }
@@ -407,6 +435,20 @@ impl WrittenBackup {
     /// As [`WrittenBackup::verify`], and also hand back the bytes that were read back from the
     /// disk and opened: the encrypted copy that goes to her Drive is exactly this (D-099).
     pub fn verify_keeping_file(self) -> Result<(BackupWritten, Vec<u8>), VaultError> {
+        let Some(dest) = self.takes_name.clone() else {
+            return self.read_back();
+        };
+        let part = self.path.clone();
+        let checked = self
+            .read_back()
+            .and_then(|done| fs::rename(&part, &dest).map(|()| done).map_err(Into::into));
+        if checked.is_err() {
+            let _ = fs::remove_file(&part);
+        }
+        checked
+    }
+
+    fn read_back(self) -> Result<(BackupWritten, Vec<u8>), VaultError> {
         let job = &self.job;
         let bytes = fs::read(&self.path)?;
         let (created_at, cases) = check_file(&bytes, &job.vault_id, &job.keys, &job.dir)?;

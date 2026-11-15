@@ -68,6 +68,11 @@ pub enum VaultError {
     Crypto(&'static str),
     #[error("vault data is corrupt: {0}")]
     Corrupt(String),
+    /// The secret was right (it unwrapped the master key), and a database of the vault is
+    /// missing, empty, or does not open with this vault's key. Never said as a wrong password,
+    /// and never opened into a new, empty database. Holds the file's fixed name.
+    #[error("a vault database is missing or damaged: {0}")]
+    DatabaseDamaged(&'static str),
     #[error("storage error: {0}")]
     Db(#[from] rusqlite::Error),
     #[error("file error: {0}")]

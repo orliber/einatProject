@@ -1,6 +1,7 @@
 import { PREVIEW } from "../web/mode";
 import { useEffect, useState, type FormEvent } from "react";
 import { he } from "../i18n/he";
+import { lockWasIdle } from "../lockReason";
 import { ipc, type AppStatus } from "../ipc/client";
 import { CoreStatus } from "../components/CoreStatus";
 import { ErrorLine, LockIcon } from "../components/ui";
@@ -106,7 +107,7 @@ export function LockScreen({ status, onUnlocked }: { status?: AppStatus; onUnloc
           {PREVIEW ? (
             <p className="preview-hint" role="note">זו הדמיה בדפדפן, עם תיקים בדויים: מקלידים כל סיסמה ולוחצים פתיחה.</p>
           ) : (
-            <p>{he.lock.lockedAfterIdle(status?.lock_minutes ?? 10)}</p>
+            <p>{(lockWasIdle() ? he.lock.lockedAfterIdle : he.lock.locked)(status?.lock_minutes ?? 10)}</p>
           )}
         </div>
         {newer !== null ? (
