@@ -288,7 +288,8 @@ export class FakeCore {
   private clinic = new FakeClinic({
     cases: () => this.cases.map((c) => {
       const s = this.summary(c);
-      return { id: c.id, code: c.meta.code, childName: s.child_name, approved: s.approved_sections.length, total: s.total_sections, inTrash: c.deletedAt !== null };
+      // Approved sections as the report counts them (the signature aside), like the core and caseStatus.ts.
+      return { id: c.id, code: c.meta.code, childName: s.child_name, approved: s.approved_sections.filter((k) => k !== "signature").length, total: s.total_sections, inTrash: c.deletedAt !== null };
     }),
     createCase: (meta, identities) => this.newCase(meta, identities).id,
     addInput: (caseId, kind, title, content) => this.addInput(this.find(caseId), kind, title, content).id,

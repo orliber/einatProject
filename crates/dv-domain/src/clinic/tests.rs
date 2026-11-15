@@ -309,6 +309,121 @@ fn no_age_without_a_usable_birth_date() {
     assert_eq!(age_on(Some("2020-07-20"), "היום"), None);
 }
 
+// ------------------------------------------------------------------ the birth date
+
+#[test]
+fn a_birth_date_may_be_older_than_the_clinic() {
+    assert_eq!(parse_birth_date("1900-01-01"), Some((1900, 1, 1)));
+    assert_eq!(parse_birth_date("1987-03-09"), Some((1987, 3, 9)));
+    assert_eq!(parse_birth_date("1999-12-31"), Some((1999, 12, 31)));
+    assert_eq!(parse_birth_date("2000-01-01"), Some((2000, 1, 1)));
+    assert_eq!(parse_birth_date("2020-07-20"), Some((2020, 7, 20)));
+    // Leap days as the calendar has them: 1996 had one, 1900 and 1999 did not.
+    assert_eq!(parse_birth_date("1996-02-29"), Some((1996, 2, 29)));
+    assert_eq!(parse_birth_date("1900-02-29"), None);
+    assert_eq!(parse_birth_date("1999-02-29"), None);
+    // Before 1900, after the last year a date may have, and anything that is not a date.
+    for bad in [
+        "1899-12-31",
+        "0001-01-01",
+        "2201-01-01",
+        "1987-13-01",
+        "1987-00-10",
+        "1987-04-31",
+        "1987-04-00",
+        "1987-3-09",
+        "87-03-09",
+        "1987/03/09",
+        "1987-03-09 ",
+        "+987-03-09",
+        "1987-+3-09",
+        "1987-03--9",
+        "19870309",
+        "אתמול",
+        "",
+    ] {
+        assert_eq!(parse_birth_date(bad), None, "{bad:?}");
+    }
+}
+
+#[test]
+fn every_other_date_keeps_its_years() {
+    // Only the birth date reaches back before 2000.
+    assert_eq!(parse_date("1999-12-31"), None);
+    assert_eq!(day_number("1987-03-09"), None);
+    let mut p = patient("p1", "תמר");
+    p.birth_date = Some("1987-03-09".to_owned());
+    assert!(validate_patient(&p).is_ok());
+    p.waiting_since = Some("1999-12-31".to_owned());
+    refusal(validate_patient(&p));
+    p.waiting_since = None;
+    p.created_on = "1999-12-31".to_owned();
+    refusal(validate_patient(&p));
+    refusal(validate_payment(&payment("pay", "1999-12-31", 10_000)));
+    refusal(validate_charge(&charge("c", "1999-12-31", 10_000)));
+}
+
+#[test]
+fn a_patient_born_before_2000_can_be_saved() {
+    let mut p = patient("p1", "תמר");
+    for birth in ["1900-01-01", "1968-10-02", "1999-12-31", "2000-01-01"] {
+        p.birth_date = Some(birth.to_owned());
+        assert!(validate_patient(&p).is_ok(), "{birth}");
+        // Storing the card clean leaves the date as it is.
+        assert_eq!(
+            normalize_patient(p.clone()).birth_date.as_deref(),
+            Some(birth)
+        );
+    }
+    p.birth_date = Some("1899-12-31".to_owned());
+    let text = refusal(validate_patient(&p));
+    assert!(text.contains("1900"), "{text}");
+    p.birth_date = Some("1987-02-30".to_owned());
+    refusal(validate_patient(&p));
+}
+
+#[test]
+fn a_birth_date_is_not_after_today_when_today_is_known() {
+    assert!(validate_birth_date("1987-03-09", Some(TODAY)).is_ok());
+    assert!(validate_birth_date("2026-11-14", Some(TODAY)).is_ok());
+    // Born today is a birth date.
+    assert!(validate_birth_date(TODAY, Some(TODAY)).is_ok());
+    let text = refusal(validate_birth_date("2026-11-16", Some(TODAY)));
+    assert!(text.contains("עוד לא הגיע"), "{text}");
+    refusal(validate_birth_date("2031-01-01", Some(TODAY)));
+    // Without a day to compare with (none given, or one that is not a date) only the date
+    // itself is checked.
+    assert!(validate_birth_date("2026-11-16", None).is_ok());
+    assert!(validate_birth_date("2026-11-16", Some("היום")).is_ok());
+    // What is not a birth date is refused whatever the day.
+    for today in [None, Some(TODAY)] {
+        refusal(validate_birth_date("1899-12-31", today));
+        refusal(validate_birth_date("2020-02-30", today));
+        refusal(validate_birth_date("", today));
+    }
+}
+
+#[test]
+fn age_of_a_patient_born_before_2000() {
+    let age = |birth: &str, on: &str| age_on(Some(birth), on);
+    let is = |years, months| Some(Age { years, months });
+    assert_eq!(age("1999-12-31", TODAY), is(26, 10));
+    assert_eq!(age("1987-03-09", TODAY), is(39, 8));
+    assert_eq!(age("1987-11-15", TODAY), is(39, 0));
+    assert_eq!(age("1987-11-16", TODAY), is(38, 11));
+    assert_eq!(age("1900-01-01", TODAY), is(126, 10));
+    // Born on a leap day of the last century.
+    assert_eq!(age("1996-02-29", "2026-02-27"), is(29, 11));
+    assert_eq!(age("1996-02-29", "2026-02-28"), is(30, 0));
+    // The most an age holds is 255 years; past it there is no age, not a wrong one.
+    assert_eq!(age("1900-01-01", "2155-12-31"), is(255, 11));
+    assert_eq!(age("1900-01-01", "2156-01-01"), None);
+    assert_eq!(age("1900-01-01", "2200-12-31"), None);
+    // Before 1900 it is not a birth date, and "today" is never one of those years.
+    assert_eq!(age("1899-12-31", TODAY), None);
+    assert_eq!(age("1987-03-09", "1999-12-31"), None);
+}
+
 // ------------------------------------------------------------------ normalizing
 
 #[test]
@@ -3197,6 +3312,22 @@ proptest! {
     }
 
     #[test]
+    fn age_of_a_birth_before_2000_grows_with_the_days(birth in -25_567_i64..10_957, on in 10_957_i64..60_000) {
+        // 1900-01-01 is day -25,567; 2000-01-01 is day 10,957.
+        let born = crate::dates::iso(crate::dates::civil_from_days(birth));
+        prop_assert_eq!(parse_birth_date(&born).map(crate::dates::days_from_civil), Some(birth));
+        prop_assert!(validate_birth_date(&born, None).is_ok());
+        let today = date_of_day(on).unwrap();
+        prop_assert!(validate_birth_date(&born, Some(&today)).is_ok());
+        let lived = on - birth;
+        let age = age_on(Some(&born), &today).unwrap();
+        prop_assert!(age.months < 12);
+        let months = i64::from(age.years) * 12 + i64::from(age.months);
+        prop_assert!(months * 28 <= lived, "{born} {today} {age:?}");
+        prop_assert!(lived < (months + 1) * 31 + 1, "{born} {today} {age:?}");
+    }
+
+    #[test]
     fn a_series_has_its_count_and_its_spacing(
         day in 10_957_i64..80_000,
         every_weeks in MIN_EVERY_WEEKS..=MAX_EVERY_WEEKS,
@@ -3709,6 +3840,31 @@ fn anything_that_happened_keeps_the_card_voided_records_too() {
         // Born 2020-07-20: 25 on 2045-07-20, later than seven years from today.
         assert!(text.contains("20.07.2045"), "{what}: {text}");
     }
+}
+
+#[test]
+fn a_birth_date_before_2000_still_counts_for_the_retention_period() {
+    // Born in 2024: kept until 25, long after seven years from the last activity.
+    let mut card = Card::new();
+    card.visits = vec![paid_visit("v", TODAY, VisitStatus::Held, 40_000)];
+    card.patient.birth_date = Some("2024-03-01".to_owned());
+    let text = refusal(card.erase(TODAY, None));
+    assert!(text.contains("01.03.2049"), "{text}");
+    // An adult (born before 2000) passed 25 long ago: seven years after the last activity.
+    card.patient.birth_date = Some("1987-03-09".to_owned());
+    let text = refusal(card.erase(TODAY, None));
+    assert!(text.contains("15.11.2033"), "{text}");
+    refusal(card.erase("2033-11-14", None));
+    card.erase("2033-11-15", None).unwrap();
+    // Born at the end of 1999: 25 on 31.12.2024, already behind.
+    card.patient.birth_date = Some("1999-12-31".to_owned());
+    card.erase("2033-11-15", None).unwrap();
+    // Turning 25 after the seven years: the birthday decides.
+    card.patient.birth_date = Some("1999-12-31".to_owned());
+    card.visits = vec![paid_visit("v", "2016-06-01", VisitStatus::Held, 40_000)];
+    card.patient.created_on = "2016-05-01".to_owned();
+    refusal(card.erase("2024-12-30", None));
+    card.erase("2024-12-31", None).unwrap();
 }
 
 #[test]

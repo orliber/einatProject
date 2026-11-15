@@ -161,6 +161,51 @@ pub fn parse_date(text: &str) -> Option<Ymd> {
     }
 }
 
+/// The first year a birth date may carry. Every other date of the clinic is one of its own
+/// days (2000 onward, as `dates::parse_iso` has it); a birth date is older than the clinic:
+/// an older sibling, or an adult child whose parent came to consult.
+pub const BIRTH_YEAR_MIN: i32 = 1900;
+
+/// A birth date: an ISO date, as strictly as [`parse_date`], from [`BIRTH_YEAR_MIN`] on.
+#[must_use]
+pub fn parse_birth_date(text: &str) -> Option<Ymd> {
+    if let Some(date) = parse_date(text) {
+        return Some(date);
+    }
+    let bytes = text.as_bytes();
+    let shaped = bytes.len() == 10
+        && bytes.iter().enumerate().all(|(i, b)| {
+            if i == 4 || i == 7 {
+                *b == b'-'
+            } else {
+                b.is_ascii_digit()
+            }
+        });
+    if !shaped {
+        return None;
+    }
+    let y = text.get(0..4)?.parse::<i32>().ok()?;
+    let m = text.get(5..7)?.parse::<u32>().ok()?;
+    let d = text.get(8..10)?.parse::<u32>().ok()?;
+    // From 2000 on `parse_date` has already answered; here only the years before it.
+    ((BIRTH_YEAR_MIN..2000).contains(&y) && (1..=days_in_month(y, m)).contains(&d))
+        .then_some((y, m, d))
+}
+
+/// A birth date she can save: a real date from [`BIRTH_YEAR_MIN`] on, and not after `today`
+/// when the caller knows the day (a `today` that is not a date is "not known").
+pub fn validate_birth_date(birth: &str, today: Option<&str>) -> Result<(), DomainError> {
+    let Some(born) = parse_birth_date(birth) else {
+        return refuse(format!(
+            "צריך לכתוב תאריך לידה תקין, משנת {BIRTH_YEAR_MIN} ואילך."
+        ));
+    };
+    if today.and_then(parse_date).is_some_and(|now| born > now) {
+        return refuse("תאריך הלידה עוד לא הגיע. כדאי לבדוק את השנה שנכתבה.");
+    }
+    Ok(())
+}
+
 /// Days since 1970-01-01 of an ISO date.
 #[must_use]
 pub fn day_number(date: &str) -> Option<i64> {
@@ -269,11 +314,11 @@ pub fn month_of(date: &str) -> Option<String> {
     parse_date(date).map(|(y, m, _)| format!("{y:04}-{m:02}"))
 }
 
-/// The child's age on `today`. `None` when the birth date is missing, not a date, in the
-/// future, or the age does not fit.
+/// The patient's age on `today`. `None` when the birth date is missing, not a birth date
+/// ([`parse_birth_date`]), in the future, or the age does not fit the [`Age`] type.
 #[must_use]
 pub fn age_on(birth_date: Option<&str>, today: &str) -> Option<Age> {
-    let (by, bm, bd) = parse_date(birth_date?)?;
+    let (by, bm, bd) = parse_birth_date(birth_date?)?;
     let (ty, tm, td) = parse_date(today)?;
     if (by, bm, bd) > (ty, tm, td) {
         return None;
@@ -401,7 +446,9 @@ pub fn validate_patient(patient: &Patient) -> Result<(), DomainError> {
     }
     at_most(patient.name.trim(), NAME_MAX, "שם")?;
     if let Some(birth) = &patient.birth_date {
-        real_date(birth, "תאריך לידה")?;
+        // The day is not known here: a card carries no "today". A caller that has one asks
+        // `validate_birth_date` itself.
+        validate_birth_date(birth, None)?;
     }
     if patient.contacts.len() > MAX_CONTACTS {
         return refuse(format!("אפשר לשמור עד {MAX_CONTACTS} אנשי קשר למטופל."));
@@ -1603,7 +1650,7 @@ pub fn can_erase(
         .patient
         .birth_date
         .as_deref()
-        .and_then(parse_date)
+        .and_then(parse_birth_date)
         .map(|birth| add_years(birth, keep_until_age));
     let from = grown.map_or(after_last, |grown| grown.max(after_last));
     if now >= from {

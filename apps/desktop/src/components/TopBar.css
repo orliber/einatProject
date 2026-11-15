@@ -130,10 +130,20 @@
     display: none;
   }
 }
-/* A laptop with the largest text: the program's name steps back (its lock stays), so the
-   tabs and "נעילה" stay on screen. */
-@container (max-width: 800px) {
+/* A laptop with larger text: the program's name steps back (its lock stays), so the tabs
+   (five, with "קליניקה") and "נעילה" stay on screen. */
+@container (max-width: 960px) {
   .topbar-brand-name {
     display: none;
+  }
+}
+/* The largest text on a laptop: the tabs sit closer. */
+@container (max-width: 800px) {
+  .topbar-link {
+    padding: 0 6px;
+  }
+  .topbar-beta {
+    margin-inline-start: 4px;
+    padding: 1px 5px;
   }
 }

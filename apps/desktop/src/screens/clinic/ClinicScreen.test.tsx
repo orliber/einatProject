@@ -77,16 +77,15 @@ describe("the clinic's page", () => {
     expect(await a11yViolations(view.container)).toEqual([]);
   });
 
-  it("switches tabs by click, and each tab that is still being built says so", async () => {
+  it("switches tabs by click, and the address follows", async () => {
     const { user, went } = await openClinic();
-    for (const [label, id, title] of [
-      ["יומן", "calendar", "היומן בבנייה"], ["מטופלים", "patients", "רשימת המטופלים בבנייה"], ["המתנה", "waiting", "רשימת ההמתנה בבנייה"],
-      ["מעקבים", "tasks", "המעקבים בבנייה"], ["כספים", "money", "הכספים בבנייה"], ["הגדרות", "settings", "הגדרות הקליניקה בבנייה"],
+    for (const [label, id] of [
+      ["יומן", "calendar"], ["מטופלים", "patients"], ["המתנה", "waiting"],
+      ["מעקבים", "tasks"], ["כספים", "money"], ["הגדרות", "settings"],
     ] as const) {
       await user.click(tab(label));
       expect(tab(label)).toHaveAttribute("aria-selected", "true");
       expect(screen.getByRole("tabpanel")).toHaveAccessibleName(label);
-      expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
       expect(went[went.length - 1]).toEqual({ name: "clinic", tab: id });
     }
     await user.click(tab("היום"));
@@ -119,15 +118,14 @@ describe("the clinic's page", () => {
   it("opens on the tab and the patient the route names", async () => {
     const { user, went } = await openClinic({ name: "clinic", tab: "money" });
     expect(tab("כספים")).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("heading", { name: "הכספים בבנייה" })).toBeInTheDocument();
+    expect(await screen.findByText(/אינה רשומה ברשות המסים/)).toBeInTheDocument();
     // A patient's card is a page of the patients tab.
     await user.click(tab("היום"));
     await user.click(await within(todays()).findByRole("button", { name: "תמר" }));
     expect(went[went.length - 1]).toMatchObject({ name: "clinic", tab: "patients" });
     expect((went[went.length - 1] as { patientId?: string }).patientId).toMatch(/^patient-/);
     expect(tab("מטופלים")).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("heading", { name: "כרטיס המטופל בבנייה" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "חזרה לרשימת המטופלים" }));
+    await user.click(await screen.findByRole("button", { name: "חזרה לרשימת המטופלים" }));
     expect(went[went.length - 1]).toEqual({ name: "clinic", tab: "patients" });
   });
 });
