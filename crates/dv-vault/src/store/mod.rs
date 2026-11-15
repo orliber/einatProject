@@ -2857,14 +2857,25 @@ impl Vault {
     ) -> Result<(), VaultError> {
         let key = self.case_key(case_id)?;
         self.keep_version(case_id, draft_id, Some(text_tagged))?;
-        let changed = self.main.execute(
+        let sealed = seal_str(&key, &aad("drafts", "text", draft_id, case_id), text_tagged)?;
+        let tx = self.main.unchecked_transaction()?;
+        let changed = tx.execute(
             "UPDATE drafts SET text_tagged_enc = ?1, author = 'user', status = 'approved', approved_at = ?2
              WHERE id = ?3 AND case_id = ?4",
-            params![seal_str(&key, &aad("drafts", "text", draft_id, case_id), text_tagged)?, now(), draft_id, case_id],
+            params![sealed, now(), draft_id, case_id],
         )?;
         if changed == 0 {
             return Err(VaultError::NotFound);
         }
+        // Approved by the edit: a new wording takes the old one's place, as in
+        // `set_draft_status` (VAULT-7), so the section never holds both.
+        tx.execute(
+            "UPDATE drafts SET status = 'superseded'
+             WHERE case_id = ?1 AND status = 'approved'
+               AND id = (SELECT replaces FROM drafts WHERE id = ?2 AND case_id = ?1)",
+            params![case_id, draft_id],
+        )?;
+        tx.commit()?;
         self.touch(case_id)
     }
 
