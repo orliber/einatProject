@@ -27,7 +27,7 @@ describe("browser preview score text matches the core", () => {
         { measure: "fsiq", value: 98, note: "" },
       ],
     });
-    expect(wppsi).toContain("חוזקות וחולשות יחסיות, ביחס לממוצע האישי בתת-מבחנים שבטבלה (הפרש של 3 נקודות ומעלה), חושבו בתוכנה. חוזקה יחסית: מטריצות (MR) – ציון 13. חולשה יחסית: קוביות (BD) – ציון 6\n");
+    expect(wppsi).toContain("חוזקות וחולשות יחסיות לפי כלל אצבע, שחושב בתוכנה: הפרש של 3 נקודות ומעלה מהממוצע של הציונים בתת-מבחנים שהוזנו בטבלה. מובהקות ההפרש נבדקת לפי טבלאות מדריך המבחן. חוזקה יחסית: מטריצות (MR) – ציון 13. חולשה יחסית: קוביות (BD) – ציון 6\n");
     const brief = formatSheet({
       instrument: "brief_p", module: "", cutoff: null, notes: "",
       entries: [

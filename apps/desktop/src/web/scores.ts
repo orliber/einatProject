@@ -105,7 +105,7 @@ export function formatSheet(sheet: ScoreSheet): string {
     if (strong.length || weak.length) {
       const parts = [...(strong.length ? [`חוזקה יחסית: ${strong.join("; ")}`] : []), ...(weak.length ? [`חולשה יחסית: ${weak.join("; ")}`] : [])];
       const subGroups = Array.from(new Set(sub.map((c) => c.m.group)));
-      out += `חוזקות וחולשות יחסיות, ביחס לממוצע האישי ב${subGroups.join(" וב")} שבטבלה (הפרש של 3 נקודות ומעלה), חושבו בתוכנה. ${parts.join(". ")}\n`;
+      out += `חוזקות וחולשות יחסיות לפי כלל אצבע, שחושב בתוכנה: הפרש של 3 נקודות ומעלה מהממוצע של הציונים ב${subGroups.join(" וב")} שהוזנו בטבלה. מובהקות ההפרש נבדקת לפי טבלאות מדריך המבחן. ${parts.join(". ")}\n`;
     }
   }
   const elevated = checked

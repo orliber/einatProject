@@ -1131,7 +1131,7 @@ fn relative_line(sheet: &ScoreSheet, entries: &[(Measure, &ScoreEntry)]) -> Opti
         ));
     }
     Some(format!(
-        "חוזקות וחולשות יחסיות, ביחס לממוצע האישי ב{} שבטבלה (הפרש של {} נקודות ומעלה), חושבו בתוכנה. {}\n",
+        "חוזקות וחולשות יחסיות לפי כלל אצבע, שחושב בתוכנה: הפרש של {1} נקודות ומעלה מהממוצע של הציונים ב{0} שהוזנו בטבלה. מובהקות ההפרש נבדקת לפי טבלאות מדריך המבחן. {2}\n",
         groups.join(" וב"),
         fmt_value(RELATIVE_POINTS),
         parts.join(". ")
@@ -1363,6 +1363,14 @@ pub fn check_scores(text: &str, sheets: &[ScoreSheet]) -> Vec<String> {
             Some((inst, entries.into_iter().map(|(m, _)| m).collect(), c))
         })
         .collect();
+    // The measures of the sheets without a cut-off: "ציון כולל" is CARS-2's and CBCL's too.
+    let others: Vec<Measure> = sheets
+        .iter()
+        .filter(|s| s.cutoff.is_none())
+        .filter_map(entries_of)
+        .flat_map(|(_, e)| e.into_iter().map(|(m, _)| m))
+        .collect();
+    let all = instruments();
     let mut out = Vec::new();
     let mut push = |line: String| {
         if !out.contains(&line) {
@@ -1386,7 +1394,7 @@ pub fn check_scores(text: &str, sheets: &[ScoreSheet]) -> Vec<String> {
         // D-165: the sharper checks, each only where the sentence is about one thing.
         // The cut-off written in a sentence about a test whose sheet has one.
         let cut_written = cutoff_written(sentence);
-        let cut_entered = cutoff_about(sentence, &cutoffs);
+        let cut_entered = cutoff_about(sentence, &cutoffs, &others, &all);
         if let (Some(n), Some((name, c))) = (&cut_written, &cut_entered) {
             if !same_number(n, &fmt_value(*c)) {
                 push(format!(
@@ -1395,24 +1403,35 @@ pub fn check_scores(text: &str, sheets: &[ScoreSheet]) -> Vec<String> {
                 ));
             }
         }
-        // Exactly one measure named, and named plainly: its percentile and its range.
-        let one = match (named.as_slice(), also.as_slice()) {
-            ([n], [a]) if n.0.key == a.0.key && n.1.label == a.1.label => Some(*n),
-            _ => None,
-        };
+        let one = sole(&named, &also);
         let percentiles = percentiles_written(sentence);
-        if let Some((m, k)) = one {
+        // Exactly one measure named, and named plainly, in a clause ("..., בעוד ש..." starts
+        // another): its percentile and its range, read in that clause only.
+        let mut percentiles_checked: Vec<String> = Vec::new();
+        for (clause, next) in clauses(sentence) {
+            let named_here: Vec<&(Measure, Known)> = entered
+                .iter()
+                .filter(|(m, _)| mentions(clause, m))
+                .collect();
+            let also_here: Vec<&(Measure, Known)> = entered
+                .iter()
+                .filter(|(m, _)| mentioned_at_all(clause, m))
+                .collect();
+            let Some((m, k)) = sole(&named_here, &also_here) else {
+                continue;
+            };
             if let Some(p) = &k.percentile {
-                for n in &percentiles {
-                    if !same_number(n, p) {
+                for n in percentiles_written(clause) {
+                    if !same_number(&n, p) {
                         push(format!(
                             "כתוב אחוזון {n} ליד {} ({}), ולפי החישוב: אחוזון {p}",
                             m.name_he, k.value
                         ));
                     }
+                    percentiles_checked.push(n);
                 }
             }
-            if let Some(line) = band_word_note(sentence, m, k) {
+            if let Some(line) = band_word_note(clause, next, m, k) {
                 push(line);
             }
         }
@@ -1420,11 +1439,14 @@ pub fn check_scores(text: &str, sheets: &[ScoreSheet]) -> Vec<String> {
             continue;
         }
         for n in score_numbers(sentence) {
-            // The cut-off and a percentile beside one measure had their own check above.
-            if cut_entered.is_some() && cut_written.as_ref() == Some(&n) {
+            // The cut-off and a percentile beside one measure had their own check above. A
+            // number written as a cut-off is never a score, whichever test it is about.
+            if cut_written.as_ref() == Some(&n) {
                 continue;
             }
-            if one.is_some_and(|(_, k)| k.percentile.is_some()) && percentiles.contains(&n) {
+            if percentiles_checked.contains(&n)
+                || one.is_some_and(|(_, k)| k.percentile.is_some()) && percentiles.contains(&n)
+            {
                 continue;
             }
             // A year beside a measure ("נבדק ב-2026") is never a score, so it is not held
@@ -1456,6 +1478,47 @@ pub fn check_scores(text: &str, sheets: &[ScoreSheet]) -> Vec<String> {
     out
 }
 
+/// The one measure a sentence or clause is about, named plainly and no other named at all.
+fn sole<'a>(
+    named: &[&'a (Measure, Known)],
+    also: &[&'a (Measure, Known)],
+) -> Option<&'a (Measure, Known)> {
+    match (named, also) {
+        ([n], [a]) if n.0.key == a.0.key && n.1.label == a.1.label => Some(*n),
+        _ => None,
+    }
+}
+
+/// Whole words that start a new clause about something else: "ציון 88, בעוד ששאר היכולות
+/// בטווח הממוצע". The band-word and percentile checks read each clause on its own.
+const CLAUSE_WORDS: &[&str] = &[
+    "בעוד",
+    "ובעוד",
+    "ואילו",
+    "לעומת",
+    "ולעומת",
+    "בעודו",
+    "בעודה",
+];
+
+/// A sentence split before each of [`CLAUSE_WORDS`], each clause with the word that starts the
+/// next one (so a label right before "לעומת" is still read as a comparison).
+fn clauses(sentence: &str) -> Vec<(&str, Option<&str>)> {
+    let cuts: Vec<(usize, &str)> = word_spans(sentence)
+        .into_iter()
+        .filter(|(s, _, w)| *s > 0 && CLAUSE_WORDS.contains(w))
+        .map(|(s, _, w)| (s, w))
+        .collect();
+    let mut out = Vec::new();
+    let mut start = 0;
+    for (at, word) in &cuts {
+        out.push((sentence.get(start..*at).unwrap_or_default(), Some(*word)));
+        start = *at;
+    }
+    out.push((sentence.get(start..).unwrap_or_default(), None));
+    out
+}
+
 /// Two numbers as written ("37", "0.4", ">99.9") that are the same number.
 fn same_number(a: &str, b: &str) -> bool {
     let num = |s: &str| s.trim_start_matches(['<', '>']).parse::<f64>().ok();
@@ -1481,7 +1544,11 @@ fn with_prefixes(word: &str, stem: &str) -> bool {
 fn leading_number(rest: &str) -> Option<String> {
     let rest =
         rest.trim_start_matches(|c: char| c.is_whitespace() || matches!(c, '(' | ':' | '–' | '='));
-    let rest = rest.strip_prefix("ה-").unwrap_or(rest);
+    // "ה-37", "ה־37" (maqaf).
+    let rest = ["ה-", "ה\u{05be}"]
+        .iter()
+        .find_map(|p| rest.strip_prefix(p))
+        .unwrap_or(rest);
     let sign: String = rest
         .chars()
         .take_while(|c| matches!(c, '<' | '>'))
@@ -1587,23 +1654,62 @@ fn cutoff_written(sentence: &str) -> Option<String> {
     None
 }
 
-/// The test a sentence is about, among those with a cut-off, and that cut-off: the sentence
-/// names the test ("ADOS") or one of its entered scores. `None` when it is about none, or
-/// about two with different cut-offs.
+/// A text upper-cased with spaces and dashes as "-", to find a test's name in it.
+fn flat_upper(text: &str) -> String {
+    text.to_ascii_uppercase()
+        .chars()
+        .map(|c| if c == ' ' || c == '–' { '-' } else { c })
+        .collect()
+}
+
+/// Whether `flat` (see [`flat_upper`]) names the test: its name ("ADOS-2"), its family of four
+/// letters or more ("ADOS"), or its key ("ADOS_2").
+fn instrument_named(flat: &str, inst: &Instrument) -> bool {
+    let name = inst.name.to_ascii_uppercase().replace(' ', "-");
+    let family = name.split(['-', '(']).next().unwrap_or_default();
+    let key = inst.key.to_ascii_uppercase();
+    flat.contains(&name)
+        || (family.chars().count() >= 4 && flat.contains(family))
+        || flat.contains(&key)
+        || flat.contains(&key.replace('_', "-"))
+}
+
+/// The test a sentence is about, among those with a cut-off, and that cut-off. A sentence
+/// that names tests is about the named ones only, and only when every test it names has a
+/// cut-off sheet; a sentence that names none is about the one cut-off sheet of the case, when
+/// there is exactly one, the sentence names one of its scores, and none of another sheet's
+/// ("הציון הכולל" is CARS-2's too). `None` otherwise, or for two with different cut-offs.
 fn cutoff_about(
     sentence: &str,
     cutoffs: &[(Instrument, Vec<Measure>, f64)],
+    others: &[Measure],
+    all: &[Instrument],
 ) -> Option<(String, f64)> {
-    let upper = sentence.to_uppercase();
-    let about: Vec<(String, f64)> = cutoffs
-        .iter()
-        .filter(|(inst, measures, _)| {
-            let family = inst.name.split(['-', ' ']).next().unwrap_or_default();
-            (family.chars().count() >= 4 && upper.contains(&family.to_uppercase()))
-                || measures.iter().any(|m| mentioned_at_all(sentence, m))
-        })
-        .map(|(inst, _, c)| (inst.name.clone(), *c))
-        .collect();
+    let flat = flat_upper(sentence);
+    let named: Vec<&Instrument> = all.iter().filter(|i| instrument_named(&flat, i)).collect();
+    let about: Vec<(String, f64)> = if named.is_empty() {
+        match cutoffs {
+            [(inst, measures, c)]
+                if measures.iter().any(|m| mentioned_at_all(sentence, m))
+                    && !others.iter().any(|m| mentioned_at_all(sentence, m)) =>
+            {
+                vec![(inst.name.clone(), *c)]
+            }
+            _ => Vec::new(),
+        }
+    } else {
+        if named
+            .iter()
+            .any(|n| !cutoffs.iter().any(|(i, _, _)| i.key == n.key))
+        {
+            return None;
+        }
+        cutoffs
+            .iter()
+            .filter(|(i, _, _)| named.iter().any(|n| n.key == i.key))
+            .map(|(inst, _, c)| (inst.name.clone(), *c))
+            .collect()
+    };
     match about.as_slice() {
         [first, rest @ ..] if rest.iter().all(|(_, c)| (c - first.1).abs() < 1e-9) => {
             Some(first.clone())
@@ -1626,32 +1732,98 @@ const NOT_A_RANGE_BEFORE: &[&str] = &[
     "לעומת",
     "יותר",
     "פחות",
+    // "ביחס לממוצע", "בהשוואה לממוצע", "יחסית לממוצע": the sheet's own wording for a
+    // relative strength.
+    "ביחס",
+    "וביחס",
+    "בהשוואה",
+    "ובהשוואה",
+    "השוואה",
+    "יחסית",
+    "בניגוד",
+    "מעבר",
 ];
 /// Words after a range label that make it a comparison: "גבוה יחסית", "ממוצע של".
-const NOT_A_RANGE_AFTER: &[&str] = &["יחסית", "יותר", "של", "מאשר", "לעומת", "ביחס"];
+const NOT_A_RANGE_AFTER: &[&str] = &[
+    "יחסית",
+    "יותר",
+    "של",
+    "מאשר",
+    "לעומת",
+    "ולעומת",
+    "ביחס",
+    "בהשוואה",
+];
 
-/// A range label of the measure's own table written in a sentence about that one measure and
-/// its score, other than the score's range in the table (D-165): one line, or `None`. Only
-/// when exactly one label is written, read longest first ("ממוצע נמוך" is not "ממוצע"), with
-/// the common prefixes ("בטווח הממוצע", "ולממוצע"); a label in a comparison ("גבוה מהצפוי",
-/// "מתחת לממוצע") is not one.
-fn band_word_note(sentence: &str, m: &Measure, k: &Known) -> Option<String> {
+/// A label word and its feminine and plural forms ("ממוצע", "ממוצעת", "ממוצעים"; "נמוך",
+/// "נמוכה"): the same range word.
+fn label_forms(word: &str) -> Vec<String> {
+    let mut chars: Vec<char> = word.chars().collect();
+    let mut out = vec![word.to_owned()];
+    let Some(last) = chars.last_mut() else {
+        return out;
+    };
+    *last = match *last {
+        'ך' => 'כ',
+        'ם' => 'מ',
+        'ן' => 'נ',
+        'ף' => 'פ',
+        'ץ' => 'צ',
+        c => c,
+    };
+    let base: String = chars.into_iter().collect();
+    out.extend(["ה", "ת", "ים", "ות"].iter().map(|s| format!("{base}{s}")));
+    out
+}
+
+/// The words of a label or a sentence, a hyphen or a maqaf between two words being a space
+/// ("ממוצע-נמוך", "ממוצע־נמוך" is "ממוצע נמוך").
+fn label_words(text: &str) -> Vec<&str> {
+    sentence_words(text)
+        .into_iter()
+        .flat_map(|w| w.split('-'))
+        .filter(|w| !w.is_empty())
+        .collect()
+}
+
+/// Range words that give a direction: a label that adds one to the written one ("ממוצע" for
+/// "ממוצע נמוך") says another range, one that adds only a degree ("גבוה" for "גבוה מאוד",
+/// "נמוך" for "נמוך במידה מתונה") says the same range more briefly.
+const DIRECTION_WORDS: &[&str] = &["נמוך", "גבוה", "ממוצע", "גבולי", "תקין", "מוגבר"];
+
+/// Whether `written` is a shorter wording of `band`: the band's words start with the written
+/// ones and what follows only says how much.
+fn shorter_wording(written: &str, band: &str) -> bool {
+    let (w, b) = (label_words(written), label_words(band));
+    b.len() > w.len()
+        && b.iter().zip(&w).all(|(x, y)| x == y)
+        && b.iter().skip(w.len()).all(|x| !DIRECTION_WORDS.contains(x))
+}
+
+/// A range label of the measure's own table written in a sentence (or clause) about that one
+/// measure and its score, other than the score's range in the table (D-165): one line, or
+/// `None`. Only when exactly one label is written, read longest first ("ממוצע נמוך" is not
+/// "ממוצע"), in any of its forms ("ממוצעת", "ממוצע-נמוך"), with the common prefixes ("בטווח
+/// הממוצע", "ולממוצע"); a label in a comparison ("גבוה מהצפוי", "מתחת לממוצע", "ביחס
+/// לממוצע") is not one, nor a shorter wording of the right one ("גבוה" for "גבוה מאוד").
+/// `next` is the word that starts the next clause, if any.
+fn band_word_note(sentence: &str, next: Option<&str>, m: &Measure, k: &Known) -> Option<String> {
     let band = k.band.as_deref()?;
     if !score_numbers(sentence).contains(&k.value) {
         return None;
     }
-    let words = sentence_words(sentence);
+    let words = label_words(sentence);
     let mut labels: Vec<&str> = m.bands.iter().map(|b| b.label.as_str()).collect();
     labels.sort_by_key(|l| {
         (
-            std::cmp::Reverse(l.split_whitespace().count()),
+            std::cmp::Reverse(label_words(l).len()),
             std::cmp::Reverse(l.chars().count()),
         )
     });
     let mut taken = vec![false; words.len()];
     let mut found: Vec<&str> = Vec::new();
     for label in labels {
-        let parts: Vec<&str> = label.split_whitespace().collect();
+        let parts: Vec<Vec<String>> = label_words(label).into_iter().map(label_forms).collect();
         let n = parts.len();
         if n == 0 {
             continue;
@@ -1666,12 +1838,14 @@ fn band_word_note(sentence: &str, m: &Measure, k: &Known) -> Option<String> {
             {
                 continue;
             }
-            let fits = win.iter().zip(&parts).enumerate().all(|(j, (w, p))| {
-                if j == 0 {
-                    *w == *p || with_prefixes(w, p) && !w.starts_with('מ')
-                } else {
-                    *w == *p || w.strip_prefix('ה') == Some(*p)
-                }
+            let fits = win.iter().zip(&parts).enumerate().all(|(j, (w, forms))| {
+                forms.iter().any(|p| {
+                    if j == 0 {
+                        *w == p || with_prefixes(w, p) && !w.starts_with('מ')
+                    } else {
+                        *w == p || w.strip_prefix('ה') == Some(p.as_str())
+                    }
+                })
             });
             if !fits {
                 continue;
@@ -1682,7 +1856,7 @@ fn band_word_note(sentence: &str, m: &Measure, k: &Known) -> Option<String> {
             // A negation up to three words before ("לא בטווח הממוצע"), a comparison right
             // before or after.
             let before = start.checked_sub(1).and_then(|j| words.get(j)).copied();
-            let after = words.get(start + n).copied();
+            let after = words.get(start + n).copied().or(next);
             let negated = words
                 .get(start.saturating_sub(3)..start)
                 .is_some_and(|w| w.iter().any(|w| NEGATIONS.contains(w)));
@@ -1698,7 +1872,7 @@ fn band_word_note(sentence: &str, m: &Measure, k: &Known) -> Option<String> {
         }
     }
     match found.as_slice() {
-        [written] if *written != band => Some(format!(
+        [written] if *written != band && !shorter_wording(written, band) => Some(format!(
             "כתוב \"{written}\" ליד {} ({}), ולפי הטבלה: {band}",
             m.name_he, k.value
         )),
@@ -1760,11 +1934,7 @@ fn taggable(scale: ScoreScale) -> bool {
 /// The instruments a text names, best first: the exact name ("WPPSI-IV") before its family
 /// ("WPPSI"). All of them when it names none.
 fn named_instruments(text: &str, all: &[Instrument]) -> Vec<Instrument> {
-    let flat: String = text
-        .to_ascii_uppercase()
-        .chars()
-        .map(|c| if c == ' ' || c == '–' { '-' } else { c })
-        .collect();
+    let flat = flat_upper(text);
     let mut scored: Vec<(u8, &Instrument)> = all
         .iter()
         .map(|i| {
@@ -2878,6 +3048,166 @@ mod tests {
     }
 
     #[test]
+    fn a_comparison_with_the_mean_is_not_a_range() {
+        let sheets = [wppsi(&[("vci", 88.0), ("psi", 112.0)])];
+        // Still a range: the hit stays.
+        assert_eq!(
+            check_scores("הבנה מילולית (88) בטווח הממוצע.", &sheets).len(),
+            1
+        );
+        // The sheet's own wording for a relative place, and other comparisons: nothing.
+        for fine in [
+            "הבנה מילולית (88) נמוכה ביחס לממוצע של תת-המבחנים.",
+            "הבנה מילולית (88) בולטת בהשוואה לממוצע האישי.",
+            "הבנה מילולית (88) נמוכה יחסית לממוצע.",
+            "הבנה מילולית (88) מתחת לממוצע.",
+            "הבנה מילולית (88) רחוקה מהממוצע.",
+            "מהירות עיבוד (112) מעל הממוצע.",
+            "מהירות עיבוד (112) וביחס לממוצע בולטת.",
+        ] {
+            assert!(check_scores(fine, &sheets).is_empty(), "{fine}");
+        }
+    }
+
+    #[test]
+    fn a_range_in_another_clause_is_about_something_else() {
+        let sheets = [wppsi(&[("vci", 88.0), ("matrix", 13.0)])];
+        // The hit in the measure's own clause stays.
+        let w = check_scores(
+            "הבנה מילולית (88) בטווח הממוצע, בעוד ששאר היכולות גבוהות.",
+            &sheets,
+        );
+        assert_eq!(
+            w,
+            vec!["כתוב \"ממוצע\" ליד הבנה מילולית (88), ולפי הטבלה: ממוצע נמוך".to_owned()]
+        );
+        for fine in [
+            "בהבנה מילולית (VCI) התקבל ציון 88, בעוד ששאר היכולות בטווח הממוצע.",
+            "בהבנה מילולית (VCI) התקבל ציון 88, ואילו שאר היכולות בטווח הממוצע.",
+            "בהבנה מילולית (VCI) התקבל ציון 88 לעומת יכולות בטווח הממוצע בתחומים אחרים.",
+            "בהבנה מילולית (VCI) התקבל ציון 88; שאר היכולות בטווח הממוצע.",
+            "בהבנה מילולית (VCI) התקבל ציון 88\nשאר היכולות בטווח הממוצע.",
+        ] {
+            assert!(check_scores(fine, &sheets).is_empty(), "{fine}");
+        }
+        // A percentile: read in the measure's clause only.
+        let sheets = [wppsi(&[("vci", 95.0)])];
+        assert_eq!(
+            check_scores("הבנה מילולית 95 באחוזון 40, בעוד ש...", &sheets),
+            vec!["כתוב אחוזון 40 ליד הבנה מילולית (95), ולפי החישוב: אחוזון 37".to_owned()]
+        );
+        assert!(check_scores(
+            "הבנה מילולית 95, בעוד שבני גילו באחוזון 50 בממוצע.",
+            &sheets
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn a_shorter_wording_of_the_right_range_is_not_another_range() {
+        let sheets = [wppsi(&[("fsiq", 135.0), ("vci", 88.0)])];
+        for fine in [
+            "מנת משכל כללית (135) בטווח הגבוה.",
+            "מנת משכל כללית (135) גבוה במיוחד.",
+            "מנת משכל כללית (135) בטווח הגבוה מאוד.",
+        ] {
+            assert!(check_scores(fine, &sheets).is_empty(), "{fine}");
+        }
+        // Another range is still noted, and "ממוצע" is not a shorter "ממוצע נמוך".
+        assert_eq!(
+            check_scores("מנת משכל כללית (135) בטווח הממוצע.", &sheets),
+            vec!["כתוב \"ממוצע\" ליד מנת משכל כללית (135), ולפי הטבלה: גבוה מאוד".to_owned()]
+        );
+        assert_eq!(
+            check_scores("הבנה מילולית (88) בטווח הממוצע.", &sheets).len(),
+            1
+        );
+        assert!(shorter_wording("גבוה", "גבוה מאוד"));
+        assert!(shorter_wording("נמוך", "נמוך במידה מתונה"));
+        assert!(!shorter_wording("ממוצע", "ממוצע נמוך"));
+        assert!(!shorter_wording("גבוה", "ממוצע גבוה"));
+    }
+
+    #[test]
+    fn range_words_in_their_forms_and_with_a_hyphen() {
+        let sheets = [wppsi(&[("vci", 88.0), ("matrix", 13.0), ("psi", 100.0)])];
+        // The right range, in another form: nothing.
+        for fine in [
+            "הבנה מילולית (88) ממוצע-נמוך.",
+            "הבנה מילולית (88) ממוצע\u{05be}נמוך.",
+            "הבנה מילולית (88) בטווח הממוצע־הנמוך.",
+            "יכולת מהירות עיבוד (100) ממוצעת.",
+            "הבנה מילולית (88) ממוצעת-נמוכה.",
+        ] {
+            assert!(check_scores(fine, &sheets).is_empty(), "{fine}");
+        }
+        // Another range, in another form: noted as the table's label.
+        assert_eq!(
+            check_scores("הבנה מילולית (88) ממוצעת.", &sheets),
+            vec!["כתוב \"ממוצע\" ליד הבנה מילולית (88), ולפי הטבלה: ממוצע נמוך".to_owned()]
+        );
+        let w = check_scores("במטריצות (13) הושג ציון ממוצע-נמוך.", &sheets);
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(w[0].contains("\"ממוצע נמוך\""), "{w:?}");
+        // A percentile after "ה־" with a maqaf, or "ה-".
+        let sheets = [wppsi(&[("vci", 95.0)])];
+        assert!(check_scores("הבנה מילולית (VCI) 95, באחוזון ה\u{05be}37.", &sheets).is_empty());
+        assert_eq!(
+            check_scores("הבנה מילולית (VCI) 95, באחוזון ה\u{05be}40.", &sheets),
+            vec!["כתוב אחוזון 40 ליד הבנה מילולית (95), ולפי החישוב: אחוזון 37".to_owned()]
+        );
+        assert_eq!(
+            check_scores("הבנה מילולית (VCI) 95, באחוזון ה-40.", &sheets).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_cutoff_is_held_against_the_test_the_sentence_is_about() {
+        let sheet = |instrument: &str, cutoff: Option<f64>, total: f64| ScoreSheet {
+            instrument: instrument.into(),
+            module: "1".into(),
+            cutoff,
+            entries: vec![ScoreEntry {
+                measure: "total".into(),
+                value: total,
+                note: String::new(),
+            }],
+            notes: String::new(),
+        };
+        let ados = sheet("ados_2", Some(11.0), 14.0);
+        let cars = sheet("cars_2", None, 32.0);
+        let both = [ados.clone(), cars];
+        // ADOS named: its cut-off.
+        assert_eq!(
+            check_scores("ב-ADOS-2 הציון הכולל (14) מעל נקודת החתך (12).", &both),
+            vec!["כתוב נקודת חתך 12, ובטבלת הציונים של ADOS-2: 11".to_owned()]
+        );
+        assert!(check_scores("ב-ADOS-2 הציון הכולל (14) מעל נקודת החתך (11).", &both).is_empty());
+        // CARS-2 named, or "הציון הכולל" of both sheets with no test named: nothing.
+        for fine in [
+            "ב-CARS-2 הציון הכולל (32) מעל נקודת החתך (30).",
+            "הציון הכולל (32) מעל נקודת החתך (30).",
+            "ב-ADOS-2 וב-CARS-2 נקודת החתך היא 30.",
+        ] {
+            assert!(check_scores(fine, &both).is_empty(), "{fine}");
+        }
+        // One cut-off sheet and no other: the unnamed total is its own.
+        assert_eq!(
+            check_scores(
+                "הציון הכולל (14) מעל נקודת החתך (12).",
+                std::slice::from_ref(&ados)
+            )
+            .len(),
+            1
+        );
+        // Another test named, even without its sheet: nothing.
+        assert!(
+            check_scores("ב-CARS-2 נקודת החתך היא 30.", std::slice::from_ref(&ados)).is_empty()
+        );
+    }
+
+    #[test]
     fn the_sheet_gives_relative_places_and_elevated_scales() {
         let text = format_sheet(&wppsi(&[
             ("block_design", 6.0),
@@ -2893,11 +3223,19 @@ mod tests {
         // The same line as the browser preview's (apps/desktop/src/web/scores.test.ts).
         assert_eq!(
             line,
-            "חוזקות וחולשות יחסיות, ביחס לממוצע האישי בתת-מבחנים שבטבלה (הפרש של 3 נקודות ומעלה), \
-             חושבו בתוכנה. חוזקה יחסית: מטריצות (MR) – ציון 13. חולשה יחסית: קוביות (BD) – ציון 6"
+            "חוזקות וחולשות יחסיות לפי כלל אצבע, שחושב בתוכנה: הפרש של 3 נקודות ומעלה מהממוצע \
+             של הציונים בתת-מבחנים שהוזנו בטבלה. מובהקות ההפרש נבדקת לפי טבלאות מדריך המבחן. \
+             חוזקה יחסית: מטריצות (MR) – ציון 13. חולשה יחסית: קוביות (BD) – ציון 6"
         );
-        assert!(line.contains("ביחס לממוצע האישי בתת-מבחנים"), "{line}");
+        // It says plainly what it is: a rule of thumb of the software, over the subtests she
+        // entered, not the manual's significance tables.
+        assert!(line.contains("כלל אצבע, שחושב בתוכנה"), "{line}");
+        assert!(
+            line.contains("מהממוצע של הציונים בתת-מבחנים שהוזנו בטבלה"),
+            "{line}"
+        );
         assert!(line.contains("הפרש של 3 נקודות ומעלה"), "{line}");
+        assert!(line.contains("לפי טבלאות מדריך המבחן"), "{line}");
         assert!(
             line.contains("חוזקה יחסית: מטריצות (MR) – ציון 13"),
             "{line}"
