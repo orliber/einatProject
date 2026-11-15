@@ -350,7 +350,11 @@ fn database_files_cannot_be_swapped_between_vaults_or_roles() {
 
     let original_main = fs::read(dir_a.path().join("main.db")).unwrap();
     fs::copy(dir_b.path().join("main.db"), dir_a.path().join("main.db")).unwrap();
-    assert!(Vault::unlock_with_password(dir_a.path(), PASSWORD).is_err());
+    // The password was right: this is a damaged vault, never "wrong password".
+    assert!(matches!(
+        Vault::unlock_with_password(dir_a.path(), PASSWORD),
+        Err(VaultError::DatabaseDamaged(_))
+    ));
 
     fs::write(dir_a.path().join("main.db"), &original_main).unwrap();
     fs::copy(
@@ -358,10 +362,60 @@ fn database_files_cannot_be_swapped_between_vaults_or_roles() {
         dir_a.path().join("main.db"),
     )
     .unwrap();
-    assert!(Vault::unlock_with_password(dir_a.path(), PASSWORD).is_err());
+    assert!(matches!(
+        Vault::unlock_with_password(dir_a.path(), PASSWORD),
+        Err(VaultError::DatabaseDamaged(_))
+    ));
 
     fs::write(dir_a.path().join("main.db"), &original_main).unwrap();
     assert!(Vault::unlock_with_password(dir_a.path(), PASSWORD).is_ok());
+}
+
+/// A database that is gone, or zeroed, is not made again empty: with an empty identity
+/// database the vault would open with no names to hide.
+#[test]
+fn a_missing_or_zeroed_database_is_refused_not_recreated() {
+    for name in ["identity.db", "audit.db", "main.db"] {
+        let (dir, vault, recovery) = new_vault();
+        vault.lock().unwrap();
+        for suffix in ["-wal", "-shm"] {
+            let _ = fs::remove_file(dir.path().join(format!("{name}{suffix}")));
+        }
+        let path = dir.path().join(name);
+        let original = fs::read(&path).unwrap();
+
+        fs::remove_file(&path).unwrap();
+        assert!(
+            matches!(
+                Vault::unlock_with_password(dir.path(), PASSWORD),
+                Err(VaultError::DatabaseDamaged(n)) if n == name
+            ),
+            "{name}"
+        );
+        assert!(
+            matches!(
+                Vault::unlock_with_recovery(dir.path(), &recovery),
+                Err(VaultError::DatabaseDamaged(_))
+            ),
+            "{name}"
+        );
+        assert!(!path.exists(), "{name} was made again");
+
+        fs::write(&path, vec![0u8; original.len()]).unwrap();
+        assert!(
+            matches!(
+                Vault::unlock_with_password(dir.path(), PASSWORD),
+                Err(VaultError::DatabaseDamaged(_))
+            ),
+            "{name} zeroed"
+        );
+
+        fs::write(&path, &original).unwrap();
+        assert!(
+            Vault::unlock_with_password(dir.path(), PASSWORD).is_ok(),
+            "{name}"
+        );
+    }
 }
 
 /// Locking records why, in one log entry, and the chain stays intact across the lock.

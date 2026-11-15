@@ -601,7 +601,7 @@ impl Vault {
     ) -> Result<Self, VaultError> {
         let header = Self::existing_header(dir)?;
         let (mk, stretched) = password_master_key(&header, password, computer)?;
-        let mut vault = Self::open_with(dir, header, &mk)?;
+        let mut vault = Self::open_existing(dir, header, &mk)?;
         vault.record(
             AuditEvent::Unlock,
             None,
@@ -758,7 +758,7 @@ impl Vault {
     pub fn unlock_with_recovery(dir: &Path, typed: &str) -> Result<Self, VaultError> {
         let header = Self::existing_header(dir)?;
         let mk = master_key(&header, Secret::Recovery(typed))?;
-        let mut vault = Self::open_with(dir, header, &mk)?;
+        let mut vault = Self::open_existing(dir, header, &mk)?;
         vault.record(
             AuditEvent::Unlock,
             None,
@@ -776,7 +776,7 @@ impl Vault {
     ) -> Result<Self, VaultError> {
         let header = Self::existing_header(dir)?;
         let mk = master_key(&header, Secret::Google { drive, computer })?;
-        let mut vault = Self::open_with(dir, header, &mk)?;
+        let mut vault = Self::open_existing(dir, header, &mk)?;
         vault.record(
             AuditEvent::Unlock,
             None,
@@ -870,6 +870,24 @@ impl Vault {
             .retain(|s| !matches!(s, KeySlot::Google { .. }));
         self.save_header()?;
         self.record(AuditEvent::GoogleRecoveryOff, None, &serde_json::json!({}))
+    }
+
+    /// Opens a vault that exists, with a master key its secret already unwrapped. Each of the
+    /// three databases must be there and hold data: a missing or zeroed one is refused, not
+    /// made again empty (an empty identity database would open a vault with no names to hide).
+    /// One that does not open with this vault's key is damaged or from another vault, and is
+    /// said so, not as a wrong password.
+    fn open_existing(dir: &Path, header: VaultHeader, mk: &Key32) -> Result<Self, VaultError> {
+        for name in DB_FILES {
+            let wal = dir.join(format!("{name}-wal"));
+            if !holds_data(&dir.join(name)) && !holds_data(&wal) {
+                return Err(VaultError::DatabaseDamaged(name));
+            }
+        }
+        Self::open_with(dir, header, mk).map_err(|e| match e {
+            VaultError::WrongSecret => VaultError::DatabaseDamaged("key"),
+            other => other,
+        })
     }
 
     fn open_with(dir: &Path, mut header: VaultHeader, mk: &Key32) -> Result<Self, VaultError> {

@@ -392,6 +392,13 @@ impl CoreError {
                 details.push(io_detail(e));
                 ("vault", io_he(e.kind()).to_owned())
             }
+            CoreError::Vault(e @ VaultError::DatabaseDamaged(_)) => {
+                details.push(e.to_string());
+                (
+                    "vault_damaged",
+                    "אחד מקובצי הכספת חסר או פגום, ולכן היא לא נפתחת. הסיסמה נכונה, ושום דבר לא נמחק. אפשר לשחזר מהגיבוי האחרון, או להעתיק את הפרטים ולשלוח לאור.".to_owned(),
+                )
+            }
             CoreError::Vault(e) => {
                 details.push(e.to_string());
                 ("vault", TECHNICAL_HE.to_owned())
