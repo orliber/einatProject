@@ -16,7 +16,7 @@ mod common;
 use std::collections::HashMap;
 
 use common::*;
-use dv_domain::{Identity, PRACTITIONER_TAG};
+use dv_domain::{Identity, Role, PRACTITIONER_TAG};
 use dv_privacy::restore::{
     her_text_to_send, remaining_tags, restore, restore_hers, scan_model_output,
 };
@@ -675,6 +675,35 @@ fn the_same_number_written_twice_ways_comes_back_as_she_wrote_each() {
         restore_hers(&kept.tagged, &ids, None, &book.entries()),
         text
     );
+}
+
+/// A child declared with a surname: restoring writes the first name only, so a tag kept in
+/// her paragraph for the full name (or for the surname alone) came back without the surname
+/// ("אביב שחרורי הופנה" as "אביב הופנה", "משפחת שחרורי" as "משפחת אביב").
+#[test]
+fn her_paragraph_keeps_the_childs_surname() {
+    let mut ids = identities();
+    ids.retain(|i| !(i.case_id == CASE && i.role == Role::Child));
+    ids.push(id(CASE, Role::Child, "[ילד]", "אביב שחרורי", &[]));
+    for text in [
+        "אביב שחרורי הופנה לאבחון",
+        "אביב הופנה לאבחון",
+        "משפחת שחרורי הגיעה לפגישה",
+    ] {
+        let book = MaskBook::default();
+        let c = PrivacyContext {
+            masks: Some(&book),
+            ..ctx(&ids, CASE)
+        };
+        let kept = filter_to_keep(text, &c, &[]).unwrap();
+        assert!(!kept.tagged.contains("שחרורי"), "{}", kept.tagged);
+        // Restoring is given the people of this case, as the core does.
+        let own: Vec<Identity> = ids.iter().filter(|i| i.case_id == CASE).cloned().collect();
+        assert_eq!(
+            restore_hers(&kept.tagged, &own, None, &book.entries()),
+            text
+        );
+    }
 }
 
 /// Found by `filter_then_restore_is_the_identity` on main (dc51787): `לגן " מתקשה "` came back

@@ -2097,7 +2097,9 @@ pub fn filter_to_keep(
                 .identities
                 .iter()
                 .find(|i| i.case_id == ctx.case_id && i.tag == r.out)
-                .is_some_and(|i| i.value == words);
+                // What restoring writes for this person: the first name only for a child, so
+                // the full name or the surname alone is kept as her words, not as the tag.
+                .is_some_and(|i| crate::restore::prose_name(i) == words);
         if !restorable {
             r.out = book.kept_words_tag(words);
             r.relative = false;
