@@ -23,8 +23,10 @@ impl Core {
             )?;
             self.opened_cases.insert(case_id.to_owned());
         }
+        // Her learned style, opened and parsed once for the whole view (PERF-5).
+        let style = style::LoadedStyle::load(self.vault_ref()?)?;
         // What she usually changes in the AI's wording (ST9); only with the profile on.
-        let habits = if style::style_model(self.vault_ref()?)?.is_some() {
+        let habits = if style.model().is_some() {
             self.style_habits().unwrap_or_default()
         } else {
             dv_style::EditModel::default()
@@ -63,8 +65,8 @@ impl Core {
             .filter_map(|k| with_record.get(k).map(|i| i.id.clone()))
             .collect();
         let sheets = score_sheets(v, case_id, &inputs)?;
-        let style_model = style::style_model(v)?;
-        let interpretations = style::InterpretationCheck::new(v, &sheets)?;
+        let style_model = style.model();
+        let interpretations = style::InterpretationCheck::with(style.interpretations(), &sheets);
         // This case's own dates: not the whole case list and recycle bin for two numbers.
         let (created_at, updated_at) = v.case_times(case_id)?;
         let retention_default = retention::default_until(created_at, updated_at, meta.age.as_ref());
@@ -74,7 +76,7 @@ impl Core {
             .collect();
         let with_versions = v.drafts_with_versions(case_id)?;
         // One name for one thing (ST10): hers from her past reports, else the report's own.
-        let her_terms = style::style_terms(v)?;
+        let her_terms = style.terms();
         // Each section's paragraphs are read (and decrypted) once, for the checks across the
         // report and for the view (deep review 3.6).
         let mut shown: std::collections::HashMap<String, Vec<dv_domain::DraftParagraph>> =
@@ -216,7 +218,7 @@ impl Core {
                         }
                         notes.extend(tag(
                             NoteKind::Term,
-                            dv_style::terms::notes(&d.text_tagged, &her_terms, &report_terms),
+                            dv_style::terms::notes(&d.text_tagged, her_terms, &report_terms),
                         ));
                         notes.extend(tag(
                             NoteKind::Interpretation,
@@ -253,13 +255,11 @@ impl Core {
                                 .collect(),
                             warnings,
                             style_note: style_model
-                                .as_ref()
                                 .filter(|_| {
                                     d.author == Author::Ai && d.status == DraftStatus::Proposed
                                 })
                                 .and_then(|m| style::style_note(m, &s.key, &d.text_tagged)),
                             style: style_model
-                                .as_ref()
                                 .filter(|_| {
                                     d.author == Author::Ai && d.status == DraftStatus::Proposed
                                 })
@@ -289,7 +289,7 @@ impl Core {
                     u32::try_from(routing.iter().filter(|r| r.feeds.contains(&s.key)).count())
                         .unwrap_or(0);
                 let approved = paragraphs.iter().any(|p| p.status == DraftStatus::Approved);
-                let guide = guides::guide_for(v, &meta, s)?;
+                let guide = guides::guide_with(v, &meta, s, Some(&style))?;
                 sections.push(SectionView {
                     key: s.key.clone(),
                     title: s.title.clone(),

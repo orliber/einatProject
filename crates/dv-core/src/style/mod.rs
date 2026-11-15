@@ -1274,17 +1274,48 @@ fn final_key(v: &Vault, case_id: &str) -> String {
     v.token_hmac(&format!("final|{case_id}"))
 }
 
-/// Her style model for the case screens, or `None` when the profile is switched off.
-pub(crate) fn style_model(v: &Vault) -> Result<Option<dv_style::StyleModel>, CoreError> {
-    if v.setting(PROFILE_OFF_KEY)?.as_deref() == Some("1") {
-        return Ok(None);
-    }
-    Ok(Some(local_style(v)?.model))
+/// Her learned style as one case view reads it: the sealed document opened and parsed once,
+/// for every section of the view (PERF-5), not once per section.
+pub(crate) struct LoadedStyle {
+    /// The profile is switched off: no model and no learned order.
+    off: bool,
+    local: LocalStyle,
 }
 
-/// Her usual name for terms that have several, learned from her past reports (ST10).
-pub(crate) fn style_terms(v: &Vault) -> Result<BTreeMap<String, String>, CoreError> {
-    Ok(local_style(v)?.terms)
+impl LoadedStyle {
+    pub(crate) fn load(v: &Vault) -> Result<Self, CoreError> {
+        Ok(Self {
+            off: v.setting(PROFILE_OFF_KEY)?.as_deref() == Some("1"),
+            local: local_style(v)?,
+        })
+    }
+
+    /// Her style model for the case screens, or `None` when the profile is switched off.
+    pub(crate) fn model(&self) -> Option<&dv_style::StyleModel> {
+        (!self.off).then_some(&self.local.model)
+    }
+
+    /// Her usual name for terms that have several, learned from her past reports (ST10).
+    pub(crate) fn terms(&self) -> &BTreeMap<String, String> {
+        &self.local.terms
+    }
+
+    /// Her learned order of `section` for a case with `age`, unless the profile is off.
+    pub(crate) fn skeleton(
+        &self,
+        section: &str,
+        age: Option<dv_domain::Age>,
+    ) -> Option<dv_style::Skeleton> {
+        if self.off {
+            return None;
+        }
+        let band = age.map(|a| dv_style::AgeBand::of_years(a.years));
+        dv_style::skeleton_for(&self.local.skeletons, section, band).cloned()
+    }
+
+    pub(crate) fn interpretations(&self) -> &[dv_ai::Interpretation] {
+        &self.local.interpretations
+    }
 }
 
 /// A gentle note on a drafted paragraph in `section` that reads unlike her, or `None`.
@@ -1397,8 +1428,7 @@ pub(crate) fn style_skeleton(
     if v.setting(PROFILE_OFF_KEY)?.as_deref() == Some("1") {
         return Ok(None);
     }
-    let band = age.map(|a| dv_style::AgeBand::of_years(a.years));
-    Ok(dv_style::skeleton_for(&local_style(v)?.skeletons, section, band).cloned())
+    Ok(LoadedStyle::load(v)?.skeleton(section, age))
 }
 
 /// What she leaves out beside scores (K12), unless the profile is switched off.
