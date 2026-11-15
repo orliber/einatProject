@@ -36,6 +36,7 @@ pub fn run(root: &Path) -> Vec<String> {
             "--test",
             "speed",
             "--",
+            "--ignored",
             "--nocapture",
         ])
         .status();

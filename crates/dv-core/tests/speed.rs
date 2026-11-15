@@ -1,6 +1,7 @@
 //! Speed checkers: the main actions on a vault of a working size, each against a time budget.
 //!
-//! The budgets are about ten times what a debug build takes on a four-core machine, so a slow
+//! Not part of the plain `cargo test`: it measures wall-clock time, so it runs on purpose
+//! (`cargo xtask speed`, also a step of CI on Linux). The budgets are about ten times what a debug build takes on a four-core machine, so a slow
 //! CI runner passes, and an action that went back to reading every case one by one (the case
 //! list was 58 ms and opening a case 36 ms before the reads were batched; now 6 and 3) or
 //! became several times slower does not. The printed table is the real
@@ -78,6 +79,7 @@ fn best_of(runs: usize, mut action: impl FnMut()) -> Duration {
 }
 
 #[test]
+#[ignore = "wall-clock budgets: run with `cargo xtask speed` (a busy machine must not fail a release run)"]
 fn the_main_actions_stay_inside_their_time_budgets() {
     let dir = tempfile::tempdir().unwrap();
     let built = Instant::now();

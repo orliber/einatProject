@@ -79,10 +79,19 @@ impl Core {
 
     /// Before the vault closes: keep every open edit inside it.
     pub(crate) fn keep_unsaved(&mut self) {
-        let edits = std::mem::take(&mut self.unsaved);
-        // What was offered and is still on screen is among `edits` (the page holds it); if the
-        // page had no time to say so, what the vault holds stays as it is.
-        self.offered.clear();
+        let mut edits = std::mem::take(&mut self.unsaved);
+        // What was offered and is still on screen is among `edits` (the page holds it). If the
+        // page had no time to say so, while another editor was already held, the offered texts
+        // go in before it: the list written below replaces what the vault holds.
+        let mut offered = std::mem::take(&mut self.offered);
+        offered.retain(|o| !edits.contains(o));
+        if !offered.is_empty() {
+            offered.append(&mut edits);
+            edits = offered;
+            if edits.len() > MAX_EDITS {
+                edits.drain(..edits.len() - MAX_EDITS);
+            }
+        }
         let Some(v) = self.vault.as_mut() else {
             return;
         };

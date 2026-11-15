@@ -413,7 +413,7 @@ pub fn is_valid_israeli_id(digits: &str) -> bool {
             }
         })
         .sum();
-    sum % 10 == 0
+    sum.is_multiple_of(10)
 }
 
 /// "לפני כשבועיים", "לפני כ-3 חודשים", "בעוד כחודש"… relative to `today`.
@@ -663,8 +663,11 @@ fn preceded_by_age_or_score(text: &str, start: usize) -> bool {
 }
 
 /// What follows a number makes it a measure or a count, not a day and a month: a unit
-/// ("17.2 ק"ג", "9.5 שעות") or what was counted ("8/10 פריטים", "1.5 סטיות תקן"). Such a
+/// ("17.2 ק"ג", "98.5 ס"מ") or what was counted ("8/10 פריטים", "1.5 סטיות תקן"). Such a
 /// number was sent as a made-up time ("משקל לפני כ-7 חודשים ק"ג").
+///
+/// Words of time (שנה, חודש, ימים, שעה…) are not in the list: a date is followed by them as
+/// well ("ב-14.9 שעה לפני", "מאז 1.9 שנה"), and on a doubt the number is hidden.
 fn followed_by_unit(text: &str, end: usize) -> bool {
     // Text that cannot be read (never expected) is not shown to be a measure: the date stays.
     let Some(tail) = text.get(end..) else {
@@ -698,16 +701,6 @@ fn followed_by_unit(text: &str, end: usize) -> bool {
         "ק\"מ",
         "ליטר",
         "מ\"ל",
-        "שנים",
-        "שנה",
-        "חודשים",
-        "חודש",
-        "שבועות",
-        "ימים",
-        "שעות",
-        "שעה",
-        "דקות",
-        "שניות",
         "סטיות",
         "סטיית",
         "פריטים",
@@ -1792,7 +1785,6 @@ mod tests {
             "ענה נכון על 8/10 פריטים",
             "נמוך ב-1.5 סטיות תקן מהממוצע",
             "ביצע 4/5 משימות",
-            "ישן 9.5 שעות בלילה",
             "הצליח ב-3/4 מהמקרים",
             "גובה 98.5 ס\"מ",
         ] {
@@ -1801,6 +1793,16 @@ mod tests {
         // With no unit after it, it is still read as a date; with a year, always.
         assert_eq!(kinds("נבדק ב-3.2.2026 שעות ספורות")[0].1, PatternKind::Date);
         assert_eq!(kinds("ב-14.9 לא רצה לצאת לחצר").len(), 1);
+        // A word of time after the number proves nothing: a date is followed by one too.
+        for text in [
+            "ב-14.9 שעה לפני הארוחה בכה",
+            "מאז 1.9 שנה שלמה במסגרת",
+            "ב-3.5 ימים ספורים אחרי המעבר",
+            "ישן 9.5 שעות בלילה",
+        ] {
+            assert_eq!(kinds(text).len(), 1, "{text}");
+            assert_eq!(kinds(text)[0].1, PatternKind::Date, "{text}");
+        }
     }
 
     /// "בדרך כלל … 3" was hidden as a street address ("דרך" opened the pattern).

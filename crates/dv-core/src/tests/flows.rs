@@ -1012,6 +1012,17 @@ fn every_open_editor_is_kept_at_the_lock_not_only_the_last_one() {
     core.lock();
     core.unlock(PASSWORD).unwrap();
     assert_eq!(core.take_unsaved().unwrap(), both);
+    // Another editor was held before the page held the offered ones again: all are kept.
+    let other = edit(&case, "פסקה בסעיף אחר", "טקסט חדש");
+    assert_eq!(core.take_unsaved().unwrap(), both);
+    core.unsaved = vec![other.clone()];
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(
+        core.take_unsaved().unwrap(),
+        vec![both[0].clone(), both[1].clone(), other.clone()]
+    );
+    core.hold_unsaved(both.clone());
     // She closed the first: only the second is still kept.
     core.hold_unsaved(both[1..].to_vec());
     core.lock();
@@ -1852,4 +1863,63 @@ fn a_number_in_no_source_stays_a_note_after_a_reload_and_approve_all_holds_it_ba
     assert!(clean.warnings.is_empty(), "{:?}", clean.warnings);
     let ids: Vec<String> = shown.iter().map(|p| p.id.clone()).collect();
     assert_eq!(core.approve_clean_paragraphs(&case, &ids).unwrap(), 1);
+}
+
+// ------------------------------------------------------------ a name is never dropped silently
+
+/// The vault skips a person with no name. Saving the case's child, or anyone she already has,
+/// with the name emptied would take that name out of the filter: the core refuses it, whoever
+/// calls (the window refuses it too).
+#[test]
+fn a_save_never_empties_a_name_or_leaves_the_case_without_its_child() {
+    let (_dir, mut core, case) = setup(None);
+    let before = core.vault_ref().unwrap().identities(&case).unwrap();
+    let child = before
+        .iter()
+        .find(|i| i.role == dv_domain::Role::Child)
+        .expect("the test case has a child")
+        .clone();
+    let as_input = |i: &dv_domain::Identity| IdentityInput {
+        id: Some(i.id.clone()),
+        role: i.role,
+        value: i.value.clone(),
+        aliases: i.aliases.clone(),
+    };
+
+    // The child's name emptied, or only spaces.
+    for empty in ["", "   "] {
+        let mut list: Vec<IdentityInput> = before.iter().map(as_input).collect();
+        for i in &mut list {
+            if i.id.as_deref() == Some(child.id.as_str()) {
+                i.value = empty.to_owned();
+            }
+        }
+        assert!(matches!(
+            core.set_identities(&case, list),
+            Err(CoreError::Refused(_))
+        ));
+    }
+    // The child left out of the list altogether.
+    let without: Vec<IdentityInput> = before
+        .iter()
+        .filter(|i| i.id != child.id)
+        .map(as_input)
+        .collect();
+    assert!(matches!(
+        core.set_identities(&case, without),
+        Err(CoreError::Refused(_))
+    ));
+    // Nothing was changed by the refused saves.
+    assert_eq!(core.vault_ref().unwrap().identities(&case).unwrap(), before);
+
+    // An empty new row (no id) is only skipped, and the same list saves as before.
+    let mut list: Vec<IdentityInput> = before.iter().map(as_input).collect();
+    list.push(IdentityInput {
+        id: None,
+        role: dv_domain::Role::Teacher,
+        value: String::new(),
+        aliases: Vec::new(),
+    });
+    let saved = core.set_identities(&case, list).unwrap();
+    assert_eq!(saved.len(), before.len());
 }

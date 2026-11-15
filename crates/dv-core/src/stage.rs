@@ -233,6 +233,14 @@ pub(crate) struct SentRecord {
     details: Value,
 }
 
+/// The text that went out is wiped from memory when the record is written, or given up (the
+/// program closed before the next opening).
+impl Drop for SentRecord {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.payload_text);
+    }
+}
+
 /// What a request that came back while the vault was locked still owes the records.
 pub(crate) enum OwedSend {
     Sent(SentRecord),
