@@ -166,4 +166,24 @@ describe("an edit open when the vault locks", () => {
       unmount();
     }
   });
+
+  it("copies the kept text with the protected clipboard only", async () => {
+    const copies: unknown[] = [];
+    const ordinary = vi.fn();
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: ordinary }, configurable: true });
+    mockIPC((cmd, args) => {
+      if (cmd === "take_unsaved") return [{ case_id: "c1", place: "פסקה", view: "report", text: "טקסט בדוי עם שם בדוי" }];
+      if (cmd === "copy_secret") {
+        copies.push((args as { text: string }).text);
+        return 60;
+      }
+      return null;
+    });
+    const api: AppApi = { status: status(), go: vi.fn(), refresh: vi.fn(), notify: vi.fn(), fail: (e) => e.message, lockNow: vi.fn() };
+    render(<AppContext.Provider value={api}><UnsavedNotice /></AppContext.Provider>);
+    fireEvent.click(await screen.findByRole("button", { name: "העתקת הטקסט" }));
+    expect(await screen.findByText(/הלוח יתנקה בעוד 60 שניות/)).toBeInTheDocument();
+    expect(copies).toEqual(["טקסט בדוי עם שם בדוי"]);
+    expect(ordinary).not.toHaveBeenCalled();
+  });
 });

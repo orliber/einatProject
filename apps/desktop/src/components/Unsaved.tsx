@@ -112,7 +112,8 @@ function placeOf(edit: UnsavedEdit): Route {
 export function UnsavedNotice() {
   const { go } = useApp();
   const [kept, setKept] = useState<UnsavedEdit[]>([]);
-  const [copied, setCopied] = useState(false);
+  // How long the copy stays on the protected clipboard, once copied; `false` when it failed.
+  const [copied, setCopied] = useState<number | false | null>(null);
   useEffect(() => {
     // Added, not replaced: under StrictMode the effect runs twice, and the second take is empty.
     ipc.takeUnsaved().then((list) => setKept((k) => [...k, ...(list ?? [])]), () => undefined);
@@ -120,14 +121,15 @@ export function UnsavedNotice() {
   const edit = kept[0];
   if (!edit) return null;
   const next = () => {
-    setCopied(false);
+    setCopied(null);
     setKept((k) => k.slice(1));
   };
   async function copy() {
     if (!edit) return;
+    // The text may hold names: only the protected clipboard (out of the clipboard history and
+    // of cloud sync, cleared after a while), as for an answer about a case. No fallback.
     try {
-      await navigator.clipboard.writeText(edit.text);
-      setCopied(true);
+      setCopied(await ipc.copySecret(edit.text));
     } catch {
       setCopied(false);
     }
@@ -137,7 +139,7 @@ export function UnsavedNotice() {
     <Dialog title="טקסט שלא נשמר לפני הנעילה" subtitle={edit.place} onClose={next}
       footer={
         <div className="row">
-          <button type="button" className="btn btn-primary" onClick={() => void copy()}>{copied ? "הועתק" : "העתקת הטקסט"}</button>
+          <button type="button" className="btn btn-primary" onClick={() => void copy()}>{typeof copied === "number" ? "הועתק" : "העתקת הטקסט"}</button>
           <button type="button" className="btn" onClick={() => { next(); go(placeOf(edit)); }}>מעבר לתיק</button>
           <button type="button" className="btn" onClick={next}>{more > 0 ? `הבא (עוד ${more})` : "סגירה"}</button>
         </div>
@@ -146,6 +148,10 @@ export function UnsavedNotice() {
         הכספת ננעלה באמצע העריכה של הטקסט הזה, והוא נשמר בתוכה, מוצפן. אפשר להעתיק אותו ולהדביק במקום. אחרי הסגירה הוא לא יוצג שוב.
       </p>
       <textarea className="textarea serif" rows={8} readOnly value={edit.text} aria-label="הטקסט שלא נשמר" />
+      <p className="muted small" role="status">
+        {typeof copied === "number" ? `הועתק. הלוח יתנקה בעוד ${copied} שניות, אז כדאי להדביק עכשיו.`
+          : copied === false ? "ההעתקה לא הצליחה. אפשר לסמן את הטקסט ולהעתיק ביד." : ""}
+      </p>
     </Dialog>
   );
 }

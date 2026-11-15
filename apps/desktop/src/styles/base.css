@@ -202,6 +202,18 @@ select.select {
   color: var(--ink-muted);
   line-height: 1.6;
 }
+.error-line {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.error-line > .error {
+  align-self: stretch;
+}
+.error-actions:empty {
+  display: none;
+}
 .error {
   margin: 0;
   color: var(--block);
@@ -450,7 +462,9 @@ select.select {
   border: 0;
   border-radius: var(--radius-sm);
   background: var(--side-active);
-  color: var(--on-primary);
+  /* The toast is dark in both themes: its own light text, not the ink for a primary button
+     (near black in the dark theme). */
+  color: var(--side-text);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -461,6 +475,9 @@ select.select {
   outline-color: var(--side-ok);
 }
 .spinner {
+  /* A span: without this its width and height do nothing outside a flex row. */
+  display: inline-block;
+  vertical-align: middle;
   width: 16px;
   height: 16px;
   border-radius: 50%;
