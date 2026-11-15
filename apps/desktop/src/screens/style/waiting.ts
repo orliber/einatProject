@@ -31,12 +31,13 @@ const sameItem = (a: StyleItem, b: StyleItem) => a.kind === b.kind && a.section 
 
 /** Everything that waits for her yes, in one line: the draft's new items, then what was learned
  * from her edits, then how she interprets scores. An item the profile in use already holds is
- * not asked about again. */
+ * not asked about again, nor one a new build switched off because she switched it off before
+ * (a fresh item always comes switched on, D-166). */
 export function waitingFor(o: StyleOverview, reviewed: string[]): Waiting[] {
   const out: Waiting[] = [];
   if (o.draft) {
     const known = (o.active?.profile.items ?? []).filter((i) => i.enabled);
-    const fresh = o.draft.profile.items.filter((i) => !reviewed.includes(i.id) && !known.some((k) => sameItem(k, i)));
+    const fresh = o.draft.profile.items.filter((i) => i.enabled && !reviewed.includes(i.id) && !known.some((k) => sameItem(k, i)));
     if (fresh.length > 0) out.push(...fresh.map((item): Waiting => ({ kind: "item", key: `item:${item.id}`, item })));
     else out.push({ kind: "draft", key: `draft:${o.draft.id}`, items: o.draft.profile.items.filter((i) => i.enabled).length });
   }

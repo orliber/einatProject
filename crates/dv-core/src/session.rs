@@ -507,6 +507,9 @@ impl Core {
                 // The gate and the sending rules try themselves once per opening; a failure
                 // stops sending until the program is fixed (D-078, fail-closed).
                 crate::layers::stop_if_broken(crate::layers::SelfChecks::run());
+                // Her past reports measured again when the measuring changed (C3, C6). Only
+                // numbers; best effort, never keeps the vault from opening.
+                self.refresh_style_measures();
                 if purge {
                     // Best effort: a case that fails to erase now is tried again next time, and
                     // never keeps the vault from opening.

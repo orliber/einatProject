@@ -99,6 +99,23 @@ pub enum StyleOrigin {
     Edits,
     /// Written by her.
     Manual,
+    /// Found on her computer in her past reports (a phrase, an opening or closing, a fixed
+    /// wording) and added by her yes (D-166). Older profiles hold these as `Reports`.
+    Accepted,
+    /// Learned from her reports and reworded by her (D-166): her wording now.
+    Edited,
+}
+
+impl StyleOrigin {
+    /// What she wrote or corrected herself: it goes first in a request (C4) and a rebuilt
+    /// profile always keeps it (C1).
+    #[must_use]
+    pub fn is_hers(self) -> bool {
+        matches!(
+            self,
+            StyleOrigin::Manual | StyleOrigin::Edits | StyleOrigin::Edited
+        )
+    }
 }
 
 /// One item of the profile. `section`: a template section key, or `None` for the whole report.
@@ -613,9 +630,41 @@ pub fn parse_style_synthesis(
     )
 }
 
+/// The most items of a kind that go into one request for each scope (the section, the whole
+/// report), after the priority order (C4). Phrases, templates, examples and inferences are
+/// budgeted before this, by how well they fit the case (dv-core).
+const RENDER_CAP: [(StyleKind, usize); 4] = [
+    (StyleKind::Rule, 12),
+    (StyleKind::Avoid, 8),
+    (StyleKind::Argument, 6),
+    (StyleKind::Integration, 6),
+];
+
+/// The opening line of the profile in a request.
+pub const PROFILE_HEADER: &str = "פרופיל הסגנון של הפסיכולוגית, כפי שנבנה מהדוחות שלה ונבדק על ידה. כתוב/י בסגנון הזה, בלי להעתיק תוכן.";
+/// How every list of the profile is ordered (C4).
+pub const PROFILE_ORDER_LINE: &str = "בכל רשימה, קודם מה שהיא כתבה או תיקנה בעצמה, אחר כך מה שחוזר ברוב הדוחות שלה, ואחר כך השאר. כשפריטים סותרים, הקודם קובע.";
+
+/// Where an item stands in the priority order (C4): hers first, then what most of her reports
+/// share, then the rest.
+fn tier(item: &StyleItem, reports: u32) -> u8 {
+    if item.origin.is_hers() {
+        0
+    } else if reports > 0 && item.support.saturating_mul(2) > reports {
+        1
+    } else {
+        2
+    }
+}
+
 /// The profile as it goes into a drafting request for one section: the whole-report items
 /// and that section's own. Only enabled items; `keep` drops any that must not go out with this
 /// case (dv-core: an item the gate would stop). `None` when nothing is left.
+///
+/// Every list is in the priority order of [`PROFILE_ORDER_LINE`] (within a tier, the items
+/// seen in more reports first, then the profile's order), and the kinds that are not budgeted
+/// by fit are capped ([`RENDER_CAP`]). The same profile gives the same text: nothing that
+/// changes from one turn to the next goes in, so the request's cached part stays the same.
 ///
 /// `patterns`: the patterns of this case's scores ([`dv_domain::sheet_patterns`]), for the
 /// inferences about them; an inference about a pattern the case does not have stays out.
@@ -627,7 +676,7 @@ pub fn render_for_section(
     patterns: &[dv_domain::ScorePattern],
 ) -> Option<String> {
     let pick = |section: Option<&str>, kind: StyleKind| -> Vec<&str> {
-        profile
+        let mut items: Vec<&StyleItem> = profile
             .items
             .iter()
             .filter(|i| i.enabled && i.kind == kind && i.section.as_deref() == section)
@@ -635,14 +684,16 @@ pub fn render_for_section(
                 Some(p) => patterns.iter().any(|x| x.key == *p),
                 None => true,
             })
-            .map(|i| i.text.as_str())
-            .filter(|t| keep(t))
-            .collect()
+            .filter(|i| keep(&i.text))
+            .collect();
+        // A stable sort: the profile's order among equals.
+        items.sort_by_key(|i| (tier(i, profile.reports), std::cmp::Reverse(i.support)));
+        if let Some((_, cap)) = RENDER_CAP.iter().find(|(k, _)| *k == kind) {
+            items.truncate(*cap);
+        }
+        items.into_iter().map(|i| i.text.as_str()).collect()
     };
-    let mut out = vec![
-        "פרופיל הסגנון של הפסיכולוגית, כפי שנבנה מהדוחות שלה ונבדק על ידה. כתוב/י בסגנון הזה, בלי להעתיק תוכן."
-            .to_owned(),
-    ];
+    let mut out = vec![PROFILE_HEADER.to_owned(), PROFILE_ORDER_LINE.to_owned()];
     let list = |out: &mut Vec<String>, title: &str, items: &[&str]| {
         if !items.is_empty() {
             out.push(title.to_owned());
@@ -692,15 +743,26 @@ pub fn render_for_section(
         "איך היא מחברת בין כלים ובין סעיפים:",
         &integration,
     );
+    // How she words a criterion: the section's own, and in the DSM section also the ones she
+    // placed under the whole report (C2).
+    let mut criteria = pick(here, StyleKind::Criterion);
+    if section_key == DSM_SECTION {
+        criteria.extend(pick(None, StyleKind::Criterion));
+    }
     list(
         &mut out,
         "איך היא מנסחת קריטריון של DSM-5 (רק לממצאים שיש במקורות):",
-        &pick(here, StyleKind::Criterion),
+        &criteria,
     );
+    // The section's templates, then the whole report's (C2).
+    let templates: Vec<&str> = pick(here, StyleKind::Template)
+        .into_iter()
+        .chain(pick(None, StyleKind::Template))
+        .collect();
     list(
         &mut out,
         "תבניות משפט (במקום הסוגריים המסולסלים בא רק מידע מהמקורות):",
-        &pick(here, StyleKind::Template),
+        &templates,
     );
     // From a finding to a conclusion (D-100): the section's chains and the whole report's,
     // the ones about this case's score patterns among them.
@@ -725,7 +787,11 @@ pub fn render_for_section(
         }
         out.extend(inferences.iter().map(|t| format!("- {t}")));
     }
-    let examples = pick(here, StyleKind::Example);
+    // The section's examples, then the whole report's (C2).
+    let examples: Vec<&str> = pick(here, StyleKind::Example)
+        .into_iter()
+        .chain(pick(None, StyleKind::Example))
+        .collect();
     if !examples.is_empty() {
         out.push(
             "דוגמאות בדויות לסגנון בלבד. הילד בדוגמאות בדוי: אין להעתיק מהן פרטים, ממצאים או מספרים."
@@ -737,6 +803,9 @@ pub fn render_for_section(
     }
     (out.len() > before).then(|| out.join("\n"))
 }
+
+/// The template key of the DSM-5 section: the whole report's criterion items go there (C2).
+const DSM_SECTION: &str = "dsm";
 
 #[cfg(test)]
 mod tests {
@@ -999,6 +1068,160 @@ mod tests {
         );
         let text = synthesis["messages"][0]["content"].as_str().unwrap();
         assert!(text.contains("cognitive | inference | pattern=index_gap | בתוצאות (פער)"));
+    }
+
+    fn it(
+        section: Option<&str>,
+        kind: StyleKind,
+        text: &str,
+        origin: StyleOrigin,
+        support: u32,
+    ) -> StyleItem {
+        StyleItem {
+            id: text.into(),
+            section: section.map(str::to_owned),
+            kind,
+            text: text.into(),
+            enabled: true,
+            origin,
+            support,
+            pattern: None,
+        }
+    }
+
+    #[test]
+    fn general_templates_and_examples_reach_every_section_and_general_criteria_the_dsm() {
+        let profile = StyleProfile {
+            reports: 4,
+            items: vec![
+                it(
+                    Some("cognitive"),
+                    StyleKind::Template,
+                    "בסעיף {רמה}",
+                    StyleOrigin::Reports,
+                    2,
+                ),
+                it(
+                    None,
+                    StyleKind::Template,
+                    "בכל הדוח {תחום}",
+                    StyleOrigin::Reports,
+                    2,
+                ),
+                it(
+                    None,
+                    StyleKind::Example,
+                    "דוגמה כללית בדויה.",
+                    StyleOrigin::Reports,
+                    2,
+                ),
+                it(
+                    None,
+                    StyleKind::Criterion,
+                    "קריטריון ואחריו סוג הממצא",
+                    StyleOrigin::Reports,
+                    2,
+                ),
+            ],
+        };
+        let cognitive = render_for_section(&profile, "cognitive", &|_| true, &[]).unwrap();
+        let at = |t: &str| cognitive.find(t).unwrap();
+        assert!(
+            at("- בסעיף {רמה}") < at("- בכל הדוח {תחום}"),
+            "the section's first"
+        );
+        assert!(cognitive.contains("<style_example>\nדוגמה כללית בדויה.\n</style_example>"));
+        assert!(
+            !cognitive.contains("קריטריון ואחריו"),
+            "criteria only in the DSM section"
+        );
+        let dsm = render_for_section(&profile, "dsm", &|_| true, &[]).unwrap();
+        assert!(dsm.contains("- קריטריון ואחריו סוג הממצא"));
+        assert!(dsm.contains("- בכל הדוח {תחום}"));
+        // `keep` drops a general template like any other item.
+        let kept =
+            render_for_section(&profile, "cognitive", &|t| !t.contains("בכל הדוח"), &[]).unwrap();
+        assert!(!kept.contains("בכל הדוח"));
+    }
+
+    #[test]
+    fn hers_come_first_then_what_most_reports_share_and_the_unbudgeted_kinds_are_capped() {
+        let mut items = vec![
+            it(
+                None,
+                StyleKind::Rule,
+                "כלל מדוח אחד",
+                StyleOrigin::Reports,
+                1,
+            ),
+            it(
+                None,
+                StyleKind::Rule,
+                "כלל מרוב הדוחות",
+                StyleOrigin::Reports,
+                4,
+            ),
+            it(
+                None,
+                StyleKind::Rule,
+                "כלל שהיא כתבה",
+                StyleOrigin::Manual,
+                0,
+            ),
+            it(
+                None,
+                StyleKind::Rule,
+                "כלל שהיא ניסחה מחדש",
+                StyleOrigin::Edited,
+                2,
+            ),
+            it(
+                None,
+                StyleKind::Rule,
+                "כלל שאישרה מהדוחות",
+                StyleOrigin::Accepted,
+                3,
+            ),
+        ];
+        items.extend((0..20).map(|n| {
+            it(
+                None,
+                StyleKind::Avoid,
+                &format!("להימנע {}", "א".repeat(n + 1)),
+                StyleOrigin::Reports,
+                1,
+            )
+        }));
+        items.push(it(
+            None,
+            StyleKind::Avoid,
+            "להימנע שלה",
+            StyleOrigin::Edits,
+            0,
+        ));
+        let profile = StyleProfile { reports: 5, items };
+        let text = render_for_section(&profile, "summary", &|_| true, &[]).unwrap();
+        assert!(text.contains(PROFILE_ORDER_LINE));
+        let rules: Vec<&str> = text.lines().filter(|l| l.starts_with("- כלל")).collect();
+        assert_eq!(
+            rules,
+            [
+                // Hers, the one seen in more reports first.
+                "- כלל שהיא ניסחה מחדש",
+                "- כלל שהיא כתבה",
+                "- כלל מרוב הדוחות",
+                "- כלל שאישרה מהדוחות",
+                "- כלל מדוח אחד"
+            ]
+        );
+        let avoids: Vec<&str> = text.lines().filter(|l| l.starts_with("- להימנע")).collect();
+        assert_eq!(avoids.len(), 8, "capped");
+        assert_eq!(avoids[0], "- להימנע שלה", "hers survive the cap");
+        // The same profile gives the same text.
+        assert_eq!(
+            render_for_section(&profile, "summary", &|_| true, &[]).unwrap(),
+            text
+        );
     }
 
     #[test]
