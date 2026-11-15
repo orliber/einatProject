@@ -149,15 +149,18 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
               {check.polish_notes > 0 && polished.length > 0 && (
                 <li className="info">
                   <span className="finish-mark" aria-hidden="true">i</span>
-                  <div className="grow stack" style={{ gap: 6 }}>
-                    <span>{check.polish_notes === 1 ? "הגהה: הערת ניסוח אחת" : `הגהה: ${check.polish_notes} הערות ניסוח`}</span>
-                    {polished.map(({ section, notes }) => (
-                      <button key={section.key} type="button" className="complete-item" onClick={() => onOpen(section.key)}>
-                        <span className="small muted">{section.title}</span>
-                        <span className="small">{notes.join(" · ")}</span>
-                      </button>
-                    ))}
-                  </div>
+                  {/* One line with the count; the notes, by section, open on a click. */}
+                  <details className="grow finish-polish">
+                    <summary>{check.polish_notes === 1 ? "הגהה: הערת ניסוח אחת" : `הגהה: ${check.polish_notes} הערות ניסוח`}</summary>
+                    <div className="stack" style={{ gap: 6, marginTop: 6 }}>
+                      {polished.map(({ section, notes }) => (
+                        <button key={section.key} type="button" className="complete-item" onClick={() => onOpen(section.key)}>
+                          <span className="small muted">{section.title}</span>
+                          <span className="small">{notes.join(" · ")}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </details>
                 </li>
               )}
               <ReportCheckItem api={api} onOpen={onOpen} />

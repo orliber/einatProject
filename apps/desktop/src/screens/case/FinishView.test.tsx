@@ -145,7 +145,13 @@ describe("the finish page", () => {
     const line = await within(side).findByText("הגהה: 2 הערות ניסוח");
     const item = line.closest("li") as HTMLElement;
     expect(item).toHaveClass("info");
-    await user.click(within(item).getByRole("button", { name: /מילה כפולה: "של של" · רווח כפול/ }));
+    // One folded line: the notes open on a click.
+    expect(line.tagName).toBe("SUMMARY");
+    const notes = within(item).getByRole("button", { name: /מילה כפולה: "של של" · רווח כפול/ });
+    expect(notes).not.toBeVisible();
+    await user.click(line);
+    expect(notes).toBeVisible();
+    await user.click(notes);
     expect(onOpen).toHaveBeenCalledWith("background");
     expect(produce()).toBeEnabled();
     // Not a warning: the "second look" list stays away.

@@ -73,7 +73,7 @@ pub fn polish_notes(text: &str) -> Vec<String> {
     if let Some(n) = unfinished(text) {
         push(n);
     }
-    for n in wording(&masked) {
+    for n in wording(&outside_quotes(&masked)) {
         push(n);
     }
     out
@@ -287,6 +287,56 @@ fn spacing(masked: &str) -> Vec<String> {
     out
 }
 
+/// Whether the `"` at `k` is the gershayim of an abbreviation, not a quotation mark: they
+/// stand before an abbreviation's last letter ("ע\"י", "צה\"ל", "מ\"מ"), or inside a word
+/// that is more than prefix letters ("דו\"חות"). After a prefix alone ("ה\"משחק\"") the
+/// mark opens a quotation.
+fn is_gershayim(chars: &[char], k: usize) -> bool {
+    let prev = k.checked_sub(1).and_then(|j| chars.get(j)).copied();
+    let next = chars.get(k + 1).copied();
+    if !(prev.is_some_and(char::is_alphabetic) && next.is_some_and(char::is_alphabetic)) {
+        return false;
+    }
+    let letters_after = chars
+        .iter()
+        .skip(k + 1)
+        .take_while(|c| c.is_alphabetic())
+        .count();
+    let only_prefix = chars
+        .get(..k)
+        .unwrap_or_default()
+        .iter()
+        .rev()
+        .take_while(|c| c.is_alphabetic())
+        .all(|c| matches!(c, 'ו' | 'ה' | 'ב' | 'ל' | 'מ' | 'ש' | 'כ'));
+    letters_after == 1 || !only_prefix
+}
+
+/// The text with what is inside quotation marks blanked out: a quotation (of a parent, of a
+/// teacher, of the child) is their words, not the report's wording. Gershayim are not
+/// quotation marks; an unclosed quotation blanks out to the end, which only means fewer notes.
+fn outside_quotes(masked: &str) -> String {
+    let chars: Vec<char> = masked.chars().collect();
+    let mut inside = false;
+    let mut out = String::with_capacity(masked.len());
+    for (k, &c) in chars.iter().enumerate() {
+        let mark = match c {
+            '"' => !is_gershayim(&chars, k),
+            '“' | '”' | '„' | '«' | '»' => true,
+            _ => false,
+        };
+        if mark {
+            inside = !inside;
+            out.push(' ');
+        } else if inside {
+            out.push(if c == '\n' { '\n' } else { ' ' });
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// Brackets and quotation marks that do not close. A list mark ("1)", "א)") is not a
 /// bracket, and a quote between two letters is the gershayim of an abbreviation ("ע\"י",
 /// "ד\"ר"), not a quotation mark.
@@ -296,8 +346,6 @@ fn unbalanced(masked: &str) -> Vec<String> {
     let mut stray_close = false;
     let mut quotes = 0usize;
     for (k, &c) in chars.iter().enumerate() {
-        let prev = k.checked_sub(1).and_then(|j| chars.get(j)).copied();
-        let next = chars.get(k + 1).copied();
         match c {
             '(' => depth += 1,
             ')' => {
@@ -322,33 +370,7 @@ fn unbalanced(masked: &str) -> Vec<String> {
                     None => stray_close = true,
                 }
             }
-            '"' => {
-                // Gershayim stand before an abbreviation's last letter ("ע\"י", "צה\"ל"), or
-                // inside a word that is more than prefix letters ("דו\"חות"). After a prefix
-                // alone ("ה\"משחק\"") the mark opens a quotation.
-                let letters_before: Vec<char> = chars
-                    .get(..k)
-                    .unwrap_or_default()
-                    .iter()
-                    .rev()
-                    .take_while(|c| c.is_alphabetic())
-                    .copied()
-                    .collect();
-                let letters_after = chars
-                    .iter()
-                    .skip(k + 1)
-                    .take_while(|c| c.is_alphabetic())
-                    .count();
-                let only_prefix = letters_before
-                    .iter()
-                    .all(|c| matches!(c, 'ו' | 'ה' | 'ב' | 'ל' | 'מ' | 'ש' | 'כ'));
-                let gershayim = prev.is_some_and(char::is_alphabetic)
-                    && next.is_some_and(char::is_alphabetic)
-                    && (letters_after == 1 || !only_prefix);
-                if !gershayim {
-                    quotes += 1;
-                }
-            }
+            '"' if !is_gershayim(&chars, k) => quotes += 1,
             _ => {}
         }
     }
@@ -407,6 +429,16 @@ fn long_sentences(masked: &str) -> Vec<String> {
 fn unfinished(text: &str) -> Option<String> {
     let t = text.trim();
     if t.contains('\n') || t.split_whitespace().count() < 4 {
+        return None;
+    }
+    // A list item ("- ...", "• ...", "1. ...", "א) ...") is not a paragraph of prose.
+    let first = t.split_whitespace().next().unwrap_or_default();
+    let mark = first.strip_suffix(['.', ')']).unwrap_or("");
+    let list_item = matches!(first, "-" | "–" | "•" | "*")
+        || (!mark.is_empty()
+            && mark.chars().count() <= 2
+            && (mark.chars().all(|c| c.is_ascii_digit()) || mark.chars().all(is_hebrew)));
+    if list_item {
         return None;
     }
     let last = t.chars().next_back()?;
@@ -612,6 +644,9 @@ mod tests {
         // A short line or a list is not a paragraph of prose.
         assert!(!has("המלצות לגן", "לא מסתיימת"));
         assert!(!has("1. מעקב התפתחותי\n2. הדרכת הורים", "לא מסתיימת"));
+        assert!(!has("- הבנה מילולית (VCI): 112, אחוזון 79", "לא מסתיימת"));
+        assert!(!has("2. הדרכת הורים בנושא מעברים בבית", "לא מסתיימת"));
+        assert!(!has("ב) הכנה מראש לכל מעבר בגן", "לא מסתיימת"));
     }
 
     #[test]
@@ -670,6 +705,67 @@ mod tests {
             for q in quoted {
                 assert!(q.split_whitespace().count() <= 3, "{n}");
             }
+        }
+    }
+    #[test]
+    fn hebrew_pairs_said_on_purpose_are_not_doubled_words() {
+        for fine in [
+            "[ילד] נכנס לחדר לאט לאט, ובהמשך התקרב לשולחן.",
+            "ההורים מתארים התמודדות יום יום עם מעברים בבוקר.",
+            "את הקוביות הניח אחד אחד, בריכוז ובסבלנות.",
+        ] {
+            assert_eq!(polish_notes(fine), Vec::<String>::new(), "{fine}");
+        }
+    }
+
+    #[test]
+    fn a_quotation_is_their_words_not_the_reports_wording() {
+        // A parent's words in quotation marks: not the report's judgment.
+        for quoted in [
+            "לדברי האם: \"הוא עצלן ותמיד מפונק בבית\".",
+            "הגננת כתבה כי \"הוא אף פעם לא מסיים משימה\", ובכל זאת התמיד במפגש.",
+            "האב סיפר: “הוא סובל מכל רעש”, ולכן הוכנו אוזניות.",
+        ] {
+            assert_eq!(polish_notes(quoted), Vec::<String>::new(), "{quoted}");
+        }
+        // The same words outside the quotation are noted, and gershayim before a quotation do
+        // not open one.
+        assert!(has("לדברי האם הוא עצלן בבית.", "ניסוח שיפוטי: \"עצלן\""));
+        assert!(has(
+            "לדברי ד\"ר לוי, הוא תמיד מסרב לשתף פעולה.",
+            "ניסוח מוחלט: \"תמיד\""
+        ));
+    }
+
+    #[test]
+    fn gershayim_in_abbreviations_make_no_note() {
+        for fine in [
+            "[ילד] נבדק בעבר ע\"י ד\"ר לוי, והופנה להמשך מעקב.",
+            "במפגש נכחה מ\"מ הגננת, ושיתפה בתצפית מהגן.",
+            "לפי דו\"חות קודמים ולפי המלצת ד\"ר כהן, הוחלט על מעקב.",
+        ] {
+            assert_eq!(polish_notes(fine), Vec::<String>::new(), "{fine}");
+        }
+    }
+
+    #[test]
+    fn a_list_is_counted_by_words_but_an_ordinary_paragraph_is_not_long() {
+        // A long list in one sentence is still a long sentence: counted by words, commas or not.
+        let items = vec!["משחק בקוביות"; 24].join(", ");
+        assert!(has(&format!("בתצפית נצפו: {items}."), "משפט ארוך"));
+        // Ordinary report paragraphs, as she writes them: no note at all.
+        for ordinary in [
+            "[ילד], בן 5 ו-4 חודשים, הופנה לאבחון פסיכולוגי התפתחותי בשל קשיים במעברים בין \
+             פעילויות בגן ובשל שאלת ההורים לגבי התפתחות השפה. לדברי ההורים, הוא ילד סקרן \
+             ואוהב לבנות מגדלים, ובבית משחק בעיקר לבד או עם אחותו הגדולה.",
+            "במבחן WPPSI-IV הושגה מנת משכל כללית ([תוצאה 98 · ממוצע]), אחוזון 45. בהבנה \
+             מילולית ([תוצאה 104 · ממוצע]) ובחשיבה פלואידית ([תוצאה 91 · ממוצע]) תפקד בטווח \
+             הממוצע, ובמהירות עיבוד ([תוצאה 82 · ממוצע נמוך]) נמצא קושי יחסי.",
+            "מומלץ על הדרכת הורים, על ליווי של צוות הגן בהכנה מראש לכל מעבר בסדר היום, ועל \
+             המשך מעקב התפתחותי בעוד כשנה, כולל הערכה חוזרת של השפה, של הקשב ושל הוויסות \
+             הרגשי, בשיתוף עם הצוות החינוכי ועם קלינאית התקשורת שמלווה את [ילד] כיום.",
+        ] {
+            assert_eq!(polish_notes(ordinary), Vec::<String>::new(), "{ordinary}");
         }
     }
 }

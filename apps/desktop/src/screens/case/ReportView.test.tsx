@@ -89,8 +89,8 @@ async function openReport(reshape?: (d: CaseDetail) => void) {
 const focused = (page: HTMLElement) => page.querySelector<HTMLElement>(".a4-section.is-focus");
 
 describe("proofreading under a paragraph (D-167)", () => {
-  it("shows the notes quietly, under a heading, apart from the warnings", async () => {
-    const { page } = await openReport((d) => {
+  it("folds the notes into one quiet line that opens on a click, apart from the warnings", async () => {
+    const { page, user } = await openReport((d) => {
       const p = d.sections.flatMap((s) => s.paragraphs).find((x) => x.status === "approved");
       if (p) {
         p.polish = ["מילה כפולה: \"של של\"", "הפסקה לא מסתיימת בסימן פיסוק (אחרי \"בגן\")"];
@@ -98,13 +98,21 @@ describe("proofreading under a paragraph (D-167)", () => {
       }
     });
     const note = await within(page).findByRole("note", { name: "הגהה" });
+    expect(note.tagName).toBe("DETAILS");
     expect(note).toHaveClass("note-polish");
     expect(note).not.toHaveClass("note-warn");
-    expect(within(note).getByText("הגהה")).toBeInTheDocument();
+    // Folded: one line with the count, the notes themselves not shown.
+    expect(note).not.toHaveAttribute("open");
+    const line = within(note).getByText("הגהה · 2");
+    expect(line.tagName).toBe("SUMMARY");
+    expect(within(note).queryByText("מילה כפולה: \"של של\"")).not.toBeVisible();
+    await user.click(line);
+    expect(note).toHaveAttribute("open");
     expect(within(note).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
       "מילה כפולה: \"של של\"",
       "הפסקה לא מסתיימת בסימן פיסוק (אחרי \"בגן\")",
     ]);
+    expect(within(note).getByText("מילה כפולה: \"של של\"")).toBeVisible();
     // Plain text: nothing in a note is read as markup.
     expect(note.querySelector("b, i, a, script")).toBeNull();
   });

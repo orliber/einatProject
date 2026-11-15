@@ -424,11 +424,12 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
           <div key={i} className="note-warn small"><WarnIcon /><span>{w}</span></div>
         ))}
         {p.polish.length > 0 && (
-          // D-167: proofreading, quieter than a warning; advice for the finish, never a block.
-          <div className="note-polish small" role="note" aria-label="הגהה">
-            <span className="note-polish-head">הגהה</span>
+          // D-167: proofreading, folded into one quiet line that opens on a click; advice for
+          // the finish, never a warning and never a block. Nothing at all when there is none.
+          <details className="note-polish small" role="note" aria-label="הגהה">
+            <summary>הגהה · {p.polish.length}</summary>
             <ul>{p.polish.map((n, i) => <li key={i}>{n}</li>)}</ul>
-          </div>
+          </details>
         )}
         {focused && p.status === "proposed" && p.style && !mine && (
           <StyleHintView hint={p.style} busy={busy}
