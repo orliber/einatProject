@@ -781,3 +781,31 @@
   border: 0;
   background: none;
 }
+
+/* D-167: proofreading notes under a paragraph, folded into one quiet line by default. */
+.note-polish {
+  color: var(--ink-muted);
+}
+.note-polish > summary {
+  cursor: pointer;
+  width: fit-content;
+  padding: 2px 0;
+  list-style: none;
+}
+.note-polish > summary::-webkit-details-marker {
+  display: none;
+}
+.note-polish > summary:hover,
+.note-polish[open] > summary {
+  color: var(--ink-soft);
+}
+.note-polish ul {
+  margin: 2px 0 0;
+  padding: 2px 10px;
+  list-style: none;
+  border-inline-start: 2px solid var(--line);
+  color: var(--ink-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}

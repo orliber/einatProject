@@ -33,4 +33,9 @@ parents_left_out: number,
 /**
  * Rows of the parents' charts (0: no chart, only questionnaires or no tables).
  */
-parents_chart_rows: number, };
+parents_chart_rows: number, 
+/**
+ * Proofreading notes (D-167) in the approved paragraphs that go into the file: advice,
+ * never a block.
+ */
+polish_notes: number, };

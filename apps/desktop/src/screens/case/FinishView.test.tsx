@@ -134,6 +134,36 @@ describe("the finish page", () => {
     expect(produce()).toBeEnabled();
   });
 
+  it("proofreading notes are counted and listed by section, and never stop the file", async () => {
+    const polish = reshape((d) => {
+      (sectionOf(d, "background").paragraphs[0] as Section["paragraphs"][number]).polish = ["מילה כפולה: \"של של\"", "רווח כפול אחרי \"בגן\""];
+    });
+    const { side, user, onOpen } = await openFinish(async (cmd, args, core) => {
+      if (cmd === "check_export") return { ...((await core.handle(cmd, args)) as object), polish_notes: 2 };
+      return polish(cmd, args, core);
+    });
+    const line = await within(side).findByText("הגהה: 2 הערות ניסוח");
+    const item = line.closest("li") as HTMLElement;
+    expect(item).toHaveClass("info");
+    // One folded line: the notes open on a click.
+    expect(line.tagName).toBe("SUMMARY");
+    const notes = within(item).getByRole("button", { name: /מילה כפולה: "של של" · רווח כפול/ });
+    expect(notes).not.toBeVisible();
+    await user.click(line);
+    expect(notes).toBeVisible();
+    await user.click(notes);
+    expect(onOpen).toHaveBeenCalledWith("background");
+    expect(produce()).toBeEnabled();
+    // Not a warning: the "second look" list stays away.
+    expect(within(side).queryByText(/שווה מבט נוסף/)).toBeNull();
+  });
+
+  it("no proofreading line when there is nothing to note", async () => {
+    const { side } = await openFinish();
+    await within(side).findByText("2 סעיפים מאושרים ייכנסו לקובץ.");
+    expect(within(side).queryByText(/^הגהה:/)).toBeNull();
+  });
+
   it("a place marked to complete is completed right here; the file goes out either way", async () => {
     const { side, user, calls, view, caseId } = await openFinish(undefined, {
       caseOf: async (c, noam) => {

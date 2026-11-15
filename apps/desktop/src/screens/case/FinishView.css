@@ -126,3 +126,9 @@
 .letter-pick span {
   white-space: pre-wrap;
 }
+
+/* D-167: the proofreading line, folded; the notes open on a click. */
+.finish-polish > summary {
+  cursor: pointer;
+  width: fit-content;
+}

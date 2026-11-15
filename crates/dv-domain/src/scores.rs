@@ -909,6 +909,9 @@ pub fn format_sheet(sheet: &ScoreSheet) -> Result<String, String> {
     format_sheet_with(sheet, SheetHabits::default())
 }
 
+/// A group of the sheet on one scale, and its (label, score) rows, for the order line.
+type OrderGroup<'a> = (&'a str, ScoreScale, Vec<(String, f64)>);
+
 /// [`format_sheet`], leaving out what she does not write beside scores (K12).
 pub fn format_sheet_with(sheet: &ScoreSheet, habits: SheetHabits) -> Result<String, String> {
     let (inst, entries) = checked(sheet)?;
@@ -949,9 +952,7 @@ pub fn format_sheet_with(sheet: &ScoreSheet, habits: SheetHabits) -> Result<Stri
         } else {
             out.push_str(&format!("- {name}: {value} – {range}{note}\n"));
         }
-        if measure.scale == ScoreScale::Standard
-            && measure.group == "מדדים"
-            && !TOTALS.contains(&measure.key.as_str())
+        if measure.scale == ScoreScale::Standard && measure.group == "מדדים" && !is_total(measure)
         {
             indexes.push((measure.name_he.clone(), e.value));
         }
@@ -960,7 +961,7 @@ pub fn format_sheet_with(sheet: &ScoreSheet, habits: SheetHabits) -> Result<Stri
         indexes.iter().max_by(|a, b| a.1.total_cmp(&b.1)),
         indexes.iter().min_by(|a, b| a.1.total_cmp(&b.1)),
     ) {
-        if hi.1 - lo.1 >= 15.0 {
+        if hi.1 - lo.1 >= crate::patterns::INDEX_GAP {
             out.push_str(&format!(
                 "פער של {} נקודות בין {} ({}) לבין {} ({}), סטיית תקן אחת או יותר. מובהקות הפער נבדקת לפי טבלאות המבחן.\n",
                 fmt_value(hi.1 - lo.1), hi.0, fmt_value(hi.1), lo.0, fmt_value(lo.1)
@@ -968,25 +969,36 @@ pub fn format_sheet_with(sheet: &ScoreSheet, habits: SheetHabits) -> Result<Stri
         }
     }
     // The order the report gives them in (the institute's: from the highest to the lowest),
-    // worked out here, never by the model. A total is not one of the domains it orders.
-    let mut groups: Vec<(&str, Vec<(String, f64)>)> = Vec::new();
+    // worked out here, never by the model. A total or composite is not one of the domains it
+    // orders, and only scores on one scale are ordered together (D-165): raw scores of
+    // different domains (ADOS-2 SA and RRB) have no common scale at all.
+    let mut groups: Vec<OrderGroup<'_>> = Vec::new();
     for (measure, e) in &entries {
-        if TOTALS.contains(&measure.key.as_str()) {
+        if is_total(measure) || measure.scale == ScoreScale::RawCutoff {
             continue;
         }
         let row = (measure_label(measure), e.value);
-        match groups.iter_mut().find(|(g, _)| *g == measure.group) {
-            Some((_, rows)) => rows.push(row),
-            None => groups.push((&measure.group, vec![row])),
+        match groups
+            .iter_mut()
+            .find(|(g, s, _)| *g == measure.group && *s == measure.scale)
+        {
+            Some((_, _, rows)) => rows.push(row),
+            None => groups.push((&measure.group, measure.scale, vec![row])),
         }
     }
-    for (group, mut rows) in groups.into_iter().filter(|(_, r)| r.len() >= 2) {
+    for (group, _, mut rows) in groups.into_iter().filter(|(_, _, r)| r.len() >= 2) {
         rows.sort_by(|a, b| b.1.total_cmp(&a.1));
         let order: Vec<String> = rows
             .iter()
             .map(|(name, v)| format!("{name} – ציון {}", fmt_value(*v)))
             .collect();
         out.push_str(&format!("{group} מהגבוה לנמוך: {}\n", order.join("; ")));
+    }
+    if let Some(line) = relative_line(sheet, &entries) {
+        out.push_str(&line);
+    }
+    if let Some(line) = elevated_line(&entries) {
+        out.push_str(&line);
     }
     out.push_str(&inst.scale_note_he);
     out.push('\n');
@@ -1000,11 +1012,87 @@ pub fn format_sheet_with(sheet: &ScoreSheet, habits: SheetHabits) -> Result<Stri
     Ok(out)
 }
 
+/// A total or composite of a test (FSIQ, GAC, Vineland ABC, Mullen ELC, a questionnaire's
+/// total, BRIEF-P GEC): never one of the domains it sums up.
+fn is_total(measure: &Measure) -> bool {
+    TOTALS.contains(&measure.key.as_str()) || measure.key == "gec"
+}
+
+/// The sheet's relative strengths and weaknesses (D-165): exactly the computation of
+/// [`sheet_cases`] (three subtests or more, [`RELATIVE_POINTS`] from their own mean). `None`
+/// when there is none.
+fn relative_line(sheet: &ScoreSheet, entries: &[(Measure, &ScoreEntry)]) -> Option<String> {
+    let cases = sheet_cases(sheet);
+    let (mut strong, mut weak) = (Vec::new(), Vec::new());
+    let mut groups: Vec<&str> = Vec::new();
+    for ((m, e), c) in entries.iter().zip(&cases) {
+        if matches!(m.scale, ScoreScale::Scaled | ScoreScale::VScale)
+            && !groups.contains(&m.group.as_str())
+        {
+            groups.push(&m.group);
+        }
+        let item = format!("{} – ציון {}", measure_label(m), fmt_value(e.value));
+        if c.cases.iter().any(|x| x == Relative::Strength.label_he()) {
+            strong.push(item);
+        } else if c.cases.iter().any(|x| x == Relative::Weakness.label_he()) {
+            weak.push(item);
+        }
+    }
+    if strong.is_empty() && weak.is_empty() {
+        return None;
+    }
+    let mut parts = Vec::new();
+    if !strong.is_empty() {
+        parts.push(format!(
+            "{}: {}",
+            Relative::Strength.label_he(),
+            strong.join("; ")
+        ));
+    }
+    if !weak.is_empty() {
+        parts.push(format!(
+            "{}: {}",
+            Relative::Weakness.label_he(),
+            weak.join("; ")
+        ));
+    }
+    Some(format!(
+        "חוזקות וחולשות יחסיות, ביחס לממוצע האישי ב{} שבטבלה (הפרש של {} נקודות ומעלה), חושבו בתוכנה. {}\n",
+        groups.join(" וב"),
+        fmt_value(RELATIVE_POINTS),
+        parts.join(". ")
+    ))
+}
+
+/// The questionnaire scales (higher = more concern) whose score falls in a band of its own
+/// table that is not the typical one (level 1 and up), with that band (D-165). Ability scales
+/// are left out: a low band there is not "elevated", and the score's line already says it.
+fn elevated_line(entries: &[(Measure, &ScoreEntry)]) -> Option<String> {
+    let elevated: Vec<String> = entries
+        .iter()
+        .filter(|(m, _)| m.scale == ScoreScale::TConcern)
+        .filter_map(|(m, e)| {
+            classify(m, e.value).filter(|b| b.level >= 1).map(|b| {
+                format!(
+                    "{} – ציון {}, {}",
+                    measure_label(m),
+                    fmt_value(e.value),
+                    b.label
+                )
+            })
+        })
+        .collect();
+    (!elevated.is_empty())
+        .then(|| format!("סולמות בטווח חריג לפי הטבלה: {}\n", elevated.join("; ")))
+}
+
 /// What one entered score may be written as: its value, and its percentile when it has one.
 struct Known {
     label: String,
     value: String,
     percentile: Option<String>,
+    /// The score's range in the measure's own table.
+    band: Option<String>,
 }
 
 /// Where a measure is named in a sentence: by its abbreviation ("VCI"), or by a Hebrew name of
@@ -1187,11 +1275,26 @@ pub fn check_scores(text: &str, sheets: &[ScoreSheet]) -> Vec<String> {
                     label: measure_label(&measure),
                     value: fmt_value(e.value),
                     percentile: percentile(&measure, e.value),
+                    band: classify(&measure, e.value).map(|b| b.label.clone()),
                 },
             ));
         }
     }
+    // Tests whose sheet has a cut-off (ADOS-2), with it.
+    let cutoffs: Vec<(Instrument, Vec<Measure>, f64)> = sheets
+        .iter()
+        .filter_map(|s| {
+            let c = s.cutoff?;
+            let (inst, entries) = checked(s).ok()?;
+            Some((inst, entries.into_iter().map(|(m, _)| m).collect(), c))
+        })
+        .collect();
     let mut out = Vec::new();
+    let mut push = |line: String| {
+        if !out.contains(&line) {
+            out.push(line);
+        }
+    };
     for sentence in text
         .split(['\n', '!', '?', ';'])
         .flat_map(|s| s.split(". "))
@@ -1200,16 +1303,56 @@ pub fn check_scores(text: &str, sheets: &[ScoreSheet]) -> Vec<String> {
             .iter()
             .filter(|(m, _)| mentions(sentence, m))
             .collect();
-        if named.is_empty() {
-            continue;
-        }
         // A number of another measure named in the same sentence, by its short name too, is
         // that measure's ("בין מוטורי (97) לבין שפה (68)").
         let also: Vec<&(Measure, Known)> = entered
             .iter()
             .filter(|(m, _)| mentioned_at_all(sentence, m))
             .collect();
+        // D-165: the sharper checks, each only where the sentence is about one thing.
+        // The cut-off written in a sentence about a test whose sheet has one.
+        let cut_written = cutoff_written(sentence);
+        let cut_entered = cutoff_about(sentence, &cutoffs);
+        if let (Some(n), Some((name, c))) = (&cut_written, &cut_entered) {
+            if !same_number(n, &fmt_value(*c)) {
+                push(format!(
+                    "כתוב נקודת חתך {n}, ובטבלת הציונים של {name}: {}",
+                    fmt_value(*c)
+                ));
+            }
+        }
+        // Exactly one measure named, and named plainly: its percentile and its range.
+        let one = match (named.as_slice(), also.as_slice()) {
+            ([n], [a]) if n.0.key == a.0.key && n.1.label == a.1.label => Some(*n),
+            _ => None,
+        };
+        let percentiles = percentiles_written(sentence);
+        if let Some((m, k)) = one {
+            if let Some(p) = &k.percentile {
+                for n in &percentiles {
+                    if !same_number(n, p) {
+                        push(format!(
+                            "כתוב אחוזון {n} ליד {} ({}), ולפי החישוב: אחוזון {p}",
+                            m.name_he, k.value
+                        ));
+                    }
+                }
+            }
+            if let Some(line) = band_word_note(sentence, m, k) {
+                push(line);
+            }
+        }
+        if named.is_empty() {
+            continue;
+        }
         for n in score_numbers(sentence) {
+            // The cut-off and a percentile beside one measure had their own check above.
+            if cut_entered.is_some() && cut_written.as_ref() == Some(&n) {
+                continue;
+            }
+            if one.is_some_and(|(_, k)| k.percentile.is_some()) && percentiles.contains(&n) {
+                continue;
+            }
             // A year beside a measure ("נבדק ב-2026") is never a score, so it is not held
             // against the table. Any other number is: an impossible score the model writes
             // ("ציון 950") is pointed out, not passed over.
@@ -1230,16 +1373,263 @@ pub fn check_scores(text: &str, sheets: &[ScoreSheet]) -> Vec<String> {
                     None => format!("{} {}", k.label, k.value),
                 })
                 .collect();
-            let line = format!(
+            push(format!(
                 "המספר {n} לא תואם את טבלת הציונים: {} – לבדוק",
                 entered.join(", ")
-            );
-            if !out.contains(&line) {
-                out.push(line);
-            }
+            ));
         }
     }
     out
+}
+
+/// Two numbers as written ("37", "0.4", ">99.9") that are the same number.
+fn same_number(a: &str, b: &str) -> bool {
+    let num = |s: &str| s.trim_start_matches(['<', '>']).parse::<f64>().ok();
+    match (num(a), num(b)) {
+        (Some(x), Some(y)) => (x - y).abs() < 1e-9,
+        _ => a == b,
+    }
+}
+
+/// Whether `word` is `stem` with at most two of the common prefix letters before it
+/// ("באחוזון", "ובאחוזון", "לנקודת").
+fn with_prefixes(word: &str, stem: &str) -> bool {
+    word.strip_suffix(stem).is_some_and(|pre| {
+        pre.chars().count() <= 2
+            && pre
+                .chars()
+                .all(|c| matches!(c, 'ו' | 'ב' | 'ה' | 'ל' | 'מ'))
+    })
+}
+
+/// The number at the start of `rest`, after spaces, an opening bracket or a dash: "37",
+/// "0.4", "<0.1". `None` when something else comes first.
+fn leading_number(rest: &str) -> Option<String> {
+    let rest =
+        rest.trim_start_matches(|c: char| c.is_whitespace() || matches!(c, '(' | ':' | '–' | '='));
+    let rest = rest.strip_prefix("ה-").unwrap_or(rest);
+    let sign: String = rest
+        .chars()
+        .take_while(|c| matches!(c, '<' | '>'))
+        .collect();
+    let body = rest.get(sign.len()..)?;
+    let chars: Vec<char> = body.chars().collect();
+    let mut n = String::new();
+    let mut i = 0;
+    while let Some(c) = chars.get(i) {
+        let decimal = *c == '.'
+            && !n.is_empty()
+            && !n.contains('.')
+            && chars.get(i + 1).is_some_and(char::is_ascii_digit);
+        if c.is_ascii_digit() || decimal {
+            n.push(*c);
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    // "5:4" is an age or a time, "12.3.2026" a date.
+    let after = chars.get(i).copied();
+    let date_or_time = matches!(after, Some(':' | '/' | '.'))
+        && chars.get(i + 1).is_some_and(char::is_ascii_digit);
+    if n.is_empty() || date_or_time {
+        return None;
+    }
+    if after.is_some_and(char::is_alphabetic) {
+        return None;
+    }
+    Some(format!("{sign}{n}"))
+}
+
+/// Every number written right after the word "אחוזון" ("אחוזון 37", "באחוזון ה-37").
+fn percentiles_written(sentence: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while let Some(i) = sentence
+        .get(at..)
+        .and_then(|s| s.find("אחוזון"))
+        .map(|i| at + i)
+    {
+        let end = i + "אחוזון".len();
+        at = end;
+        let start = sentence
+            .get(..i)
+            .and_then(|b| {
+                b.char_indices()
+                    .rev()
+                    .find(|(_, c)| !c.is_alphabetic())
+                    .map(|(j, c)| j + c.len_utf8())
+            })
+            .unwrap_or(0);
+        let word = sentence.get(start..end).unwrap_or_default();
+        if !with_prefixes(word, "אחוזון") {
+            continue;
+        }
+        let rest = sentence.get(end..).unwrap_or_default();
+        if rest.starts_with(char::is_alphabetic) {
+            continue; // "אחוזונים"
+        }
+        if let Some(n) = leading_number(rest) {
+            out.push(n);
+        }
+    }
+    out
+}
+
+/// The number written right after "נקודת החתך" or "נקודת חתך" (also "של", "היא" or "עומדת
+/// על" between them). `None` when the words go on otherwise ("נקודת החתך למודול 1").
+fn cutoff_written(sentence: &str) -> Option<String> {
+    for phrase in ["נקודת החתך", "נקודת חתך"] {
+        let Some(i) = sentence.find(phrase) else {
+            continue;
+        };
+        let start = sentence
+            .get(..i)
+            .and_then(|b| b.rfind(char::is_whitespace))
+            .map_or(0, |j| j + 1);
+        let word = sentence.get(start..i + "נקודת".len()).unwrap_or_default();
+        if !with_prefixes(word, "נקודת") {
+            continue;
+        }
+        let mut rest = sentence.get(i + phrase.len()..).unwrap_or_default();
+        if rest.starts_with(char::is_alphabetic) {
+            continue;
+        }
+        // Small words that may come between the phrase and its number.
+        for _ in 0..3 {
+            let trimmed = rest.trim_start_matches(|c: char| {
+                c.is_whitespace() || matches!(c, '(' | ':' | '–' | '=')
+            });
+            let skip = ["של ", "היא ", "הוא ", "עומדת ", "על "]
+                .iter()
+                .find_map(|w| trimmed.strip_prefix(w));
+            match skip {
+                Some(r) => rest = r,
+                None => break,
+            }
+        }
+        return leading_number(rest);
+    }
+    None
+}
+
+/// The test a sentence is about, among those with a cut-off, and that cut-off: the sentence
+/// names the test ("ADOS") or one of its entered scores. `None` when it is about none, or
+/// about two with different cut-offs.
+fn cutoff_about(
+    sentence: &str,
+    cutoffs: &[(Instrument, Vec<Measure>, f64)],
+) -> Option<(String, f64)> {
+    let upper = sentence.to_uppercase();
+    let about: Vec<(String, f64)> = cutoffs
+        .iter()
+        .filter(|(inst, measures, _)| {
+            let family = inst.name.split(['-', ' ']).next().unwrap_or_default();
+            (family.chars().count() >= 4 && upper.contains(&family.to_uppercase()))
+                || measures.iter().any(|m| mentioned_at_all(sentence, m))
+        })
+        .map(|(inst, _, c)| (inst.name.clone(), *c))
+        .collect();
+    match about.as_slice() {
+        [first, rest @ ..] if rest.iter().all(|(_, c)| (c - first.1).abs() < 1e-9) => {
+            Some(first.clone())
+        }
+        _ => None,
+    }
+}
+
+/// Words that negate a range label a few words after them: "לא בטווח הממוצע".
+const NEGATIONS: &[&str] = &["לא", "ולא", "אינו", "אינה", "אינם", "אינן", "אין"];
+/// Words right before a range label that make it a comparison: "מתחת לממוצע".
+const NOT_A_RANGE_BEFORE: &[&str] = &[
+    "מתחת",
+    "מעל",
+    "סביב",
+    "קרוב",
+    "קרובה",
+    "בגבול",
+    "גבול",
+    "לעומת",
+    "יותר",
+    "פחות",
+];
+/// Words after a range label that make it a comparison: "גבוה יחסית", "ממוצע של".
+const NOT_A_RANGE_AFTER: &[&str] = &["יחסית", "יותר", "של", "מאשר", "לעומת", "ביחס"];
+
+/// A range label of the measure's own table written in a sentence about that one measure and
+/// its score, other than the score's range in the table (D-165): one line, or `None`. Only
+/// when exactly one label is written, read longest first ("ממוצע נמוך" is not "ממוצע"), with
+/// the common prefixes ("בטווח הממוצע", "ולממוצע"); a label in a comparison ("גבוה מהצפוי",
+/// "מתחת לממוצע") is not one.
+fn band_word_note(sentence: &str, m: &Measure, k: &Known) -> Option<String> {
+    let band = k.band.as_deref()?;
+    if !score_numbers(sentence).contains(&k.value) {
+        return None;
+    }
+    let words = sentence_words(sentence);
+    let mut labels: Vec<&str> = m.bands.iter().map(|b| b.label.as_str()).collect();
+    labels.sort_by_key(|l| {
+        (
+            std::cmp::Reverse(l.split_whitespace().count()),
+            std::cmp::Reverse(l.chars().count()),
+        )
+    });
+    let mut taken = vec![false; words.len()];
+    let mut found: Vec<&str> = Vec::new();
+    for label in labels {
+        let parts: Vec<&str> = label.split_whitespace().collect();
+        let n = parts.len();
+        if n == 0 {
+            continue;
+        }
+        for start in 0..words.len().saturating_sub(n - 1) {
+            let Some(win) = words.get(start..start + n) else {
+                continue;
+            };
+            if taken
+                .get(start..start + n)
+                .is_some_and(|t| t.iter().any(|x| *x))
+            {
+                continue;
+            }
+            let fits = win.iter().zip(&parts).enumerate().all(|(j, (w, p))| {
+                if j == 0 {
+                    *w == *p || with_prefixes(w, p) && !w.starts_with('מ')
+                } else {
+                    *w == *p || w.strip_prefix('ה') == Some(*p)
+                }
+            });
+            if !fits {
+                continue;
+            }
+            for t in taken.iter_mut().skip(start).take(n) {
+                *t = true;
+            }
+            // A negation up to three words before ("לא בטווח הממוצע"), a comparison right
+            // before or after.
+            let before = start.checked_sub(1).and_then(|j| words.get(j)).copied();
+            let after = words.get(start + n).copied();
+            let negated = words
+                .get(start.saturating_sub(3)..start)
+                .is_some_and(|w| w.iter().any(|w| NEGATIONS.contains(w)));
+            let comparison = negated
+                || before.is_some_and(|b| NOT_A_RANGE_BEFORE.contains(&b))
+                || after.is_some_and(|a| {
+                    NOT_A_RANGE_AFTER.contains(&a)
+                        || (a.starts_with('מ') && !a.chars().all(|c| c.is_ascii_digit()))
+                });
+            if !comparison && !found.contains(&label) {
+                found.push(label);
+            }
+        }
+    }
+    match found.as_slice() {
+        [written] if *written != band => Some(format!(
+            "כתוב \"{written}\" ליד {} ({}), ולפי הטבלה: {band}",
+            m.name_he, k.value
+        )),
+        _ => None,
+    }
 }
 
 // ------------------------------------------------------------ scores in a past report (round 32)
@@ -2317,6 +2707,250 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_range_word_unlike_the_table_is_noted() {
+        let sheets = [wppsi(&[("vci", 88.0), ("matrix", 13.0), ("psi", 112.0)])];
+        let w = check_scores("הבנה מילולית (88) בטווח הממוצע.", &sheets);
+        assert_eq!(
+            w,
+            vec!["כתוב \"ממוצע\" ליד הבנה מילולית (88), ולפי הטבלה: ממוצע נמוך".to_owned()]
+        );
+        // With prefixes, and the longest label first: "הממוצע הגבוה" is not "ממוצע".
+        let w = check_scores("במטריצות (13) הושג ציון בטווח הממוצע הנמוך.", &sheets);
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(
+            w[0].contains("\"ממוצע נמוך\"") && w[0].ends_with("ממוצע גבוה"),
+            "{w:?}"
+        );
+        assert!(check_scores("במטריצות (13) הושג ציון בטווח הממוצע הגבוה.", &sheets).is_empty());
+        assert!(check_scores("הבנה מילולית (VCI): ממוצע נמוך (88).", &sheets).is_empty());
+        // Comparisons and negations are not a range.
+        for fine in [
+            "הבנה מילולית (88) מתחת לממוצע הכללי.",
+            "הבנה מילולית (88) נמוכה מהממוצע של תת-המבחנים.",
+            "הבנה מילולית (88) לא בטווח הממוצע.",
+            "מהירות עיבוד (112) גבוה יחסית לשאר.",
+        ] {
+            assert!(check_scores(fine, &sheets).is_empty(), "{fine}");
+        }
+        // Two measures in one sentence, two labels, no score, or no sheet: nothing.
+        assert!(check_scores(
+            "הבנה מילולית (88) ומהירות עיבוד (112) בטווח הממוצע.",
+            &sheets
+        )
+        .is_empty());
+        assert!(check_scores("הבנה מילולית (88) בין ממוצע לממוצע גבוה.", &sheets).is_empty());
+        assert!(check_scores("ההבנה המילולית בטווח הממוצע.", &sheets).is_empty());
+        assert!(check_scores("הבנה מילולית (88) בטווח הממוצע.", &[]).is_empty());
+    }
+
+    #[test]
+    fn a_percentile_unlike_the_computed_one_is_noted() {
+        let sheets = [wppsi(&[("vci", 95.0), ("matrix", 13.0)])];
+        assert!(check_scores("הבנה מילולית (VCI) 95, אחוזון 37.", &sheets).is_empty());
+        assert!(check_scores("הבנה מילולית (VCI) 95, באחוזון ה-37.", &sheets).is_empty());
+        let w = check_scores("הבנה מילולית (VCI) 95, אחוזון 40.", &sheets);
+        assert_eq!(
+            w,
+            vec!["כתוב אחוזון 40 ליד הבנה מילולית (95), ולפי החישוב: אחוזון 37".to_owned()]
+        );
+        // The score itself in place of the percentile.
+        let w = check_scores("הבנה מילולית 95 (אחוזון 95).", &sheets);
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(
+            w[0].contains("אחוזון 95") && w[0].ends_with("אחוזון 37"),
+            "{w:?}"
+        );
+        // Two measures: the general check only (40 is neither one's).
+        let w = check_scores("הבנה מילולית 95 ומטריצות 13, אחוזון 40.", &sheets);
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(w[0].starts_with("המספר 40"), "{w:?}");
+        assert!(check_scores("הבנה מילולית 95, אחוזון 40.", &[]).is_empty());
+    }
+
+    #[test]
+    fn a_cutoff_unlike_the_sheets_is_noted() {
+        let ados = ScoreSheet {
+            instrument: "ados_2".into(),
+            module: "1".into(),
+            cutoff: Some(11.0),
+            entries: vec![ScoreEntry {
+                measure: "total".into(),
+                value: 14.0,
+                note: String::new(),
+            }],
+            notes: String::new(),
+        };
+        let sheets = std::slice::from_ref(&ados);
+        // The right cut-off is not "a number unlike the table" either.
+        assert!(check_scores("הציון הכולל (14) מעל נקודת החתך (11).", sheets).is_empty());
+        assert!(check_scores("ב-ADOS-2 נקודת החתך היא 11.", sheets).is_empty());
+        let w = check_scores("הציון הכולל (14) מעל נקודת החתך (12).", sheets);
+        assert_eq!(
+            w,
+            vec!["כתוב נקודת חתך 12, ובטבלת הציונים של ADOS-2: 11".to_owned()]
+        );
+        assert_eq!(check_scores("ב-ADOS נקודת חתך של 10.", sheets).len(), 1);
+        // The module's number is not the cut-off; another test or no cut-off: nothing.
+        assert!(check_scores("ב-ADOS-2 נקודת החתך למודול 1 נמוכה.", sheets).is_empty());
+        assert!(check_scores("בשאלון אחר נקודת החתך היא 60.", sheets).is_empty());
+        let no_cut = ScoreSheet {
+            cutoff: None,
+            ..ados.clone()
+        };
+        assert!(check_scores("ב-ADOS-2 נקודת החתך היא 12.", &[no_cut]).is_empty());
+    }
+
+    #[test]
+    fn the_sheet_gives_relative_places_and_elevated_scales() {
+        let text = format_sheet(&wppsi(&[
+            ("block_design", 6.0),
+            ("matrix", 13.0),
+            ("information", 10.0),
+            ("fsiq", 98.0),
+        ]))
+        .unwrap_or_else(|e| panic!("{e}"));
+        let line = text
+            .lines()
+            .find(|l| l.starts_with("חוזקות וחולשות יחסיות"))
+            .unwrap_or_else(|| panic!("{text}"));
+        // The same line as the browser preview's (apps/desktop/src/web/scores.test.ts).
+        assert_eq!(
+            line,
+            "חוזקות וחולשות יחסיות, ביחס לממוצע האישי בתת-מבחנים שבטבלה (הפרש של 3 נקודות ומעלה), \
+             חושבו בתוכנה. חוזקה יחסית: מטריצות (MR) – ציון 13. חולשה יחסית: קוביות (BD) – ציון 6"
+        );
+        assert!(line.contains("ביחס לממוצע האישי בתת-מבחנים"), "{line}");
+        assert!(line.contains("הפרש של 3 נקודות ומעלה"), "{line}");
+        assert!(
+            line.contains("חוזקה יחסית: מטריצות (MR) – ציון 13"),
+            "{line}"
+        );
+        assert!(line.contains("חולשה יחסית: קוביות (BD) – ציון 6"), "{line}");
+        assert!(!line.contains("מידע (IN)"), "{line}");
+        // Two subtests are not enough, and an even profile has none.
+        let two = format_sheet(&wppsi(&[("block_design", 6.0), ("matrix", 13.0)])).unwrap();
+        assert!(!two.contains("יחסיות"), "{two}");
+        let even = format_sheet(&wppsi(&[
+            ("block_design", 9.0),
+            ("matrix", 10.0),
+            ("information", 11.0),
+        ]))
+        .unwrap();
+        assert!(!even.contains("יחסיות"), "{even}");
+
+        let brief = ScoreSheet {
+            instrument: "brief_p".into(),
+            module: String::new(),
+            cutoff: None,
+            entries: [
+                ("inhibit", 66.0),
+                ("shift", 61.0),
+                ("emotional_control", 50.0),
+            ]
+            .iter()
+            .map(|(k, v)| ScoreEntry {
+                measure: (*k).into(),
+                value: *v,
+                note: String::new(),
+            })
+            .collect(),
+            notes: String::new(),
+        };
+        let text = format_sheet(&brief).unwrap();
+        assert!(
+            text.contains(
+                "סולמות בטווח חריג לפי הטבלה: עכבה (INH) – ציון 66, מוגבר באופן מובהק קלינית; \
+                 גמישות (SHF) – ציון 61, מוגבר במידה קלה\n"
+            ),
+            "{text}"
+        );
+        // Ability scales never have an "elevated" line, even with low scores.
+        let low = format_sheet(&wppsi(&[("vci", 70.0), ("psi", 72.0)])).unwrap();
+        assert!(!low.contains("בטווח חריג"), "{low}");
+        // Every questionnaire table says which band is the typical one: level 0 only.
+        for inst in instruments() {
+            for m in inst
+                .measures
+                .iter()
+                .filter(|m| m.scale == ScoreScale::TConcern)
+            {
+                for b in &m.bands {
+                    assert_eq!(
+                        b.level == 0,
+                        b.label == "בטווח התקין",
+                        "{}/{}",
+                        inst.key,
+                        m.key
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn composites_and_other_scales_are_not_ordered_with_the_domains() {
+        let vineland = ScoreSheet {
+            instrument: "vineland_3".into(),
+            module: String::new(),
+            cutoff: None,
+            entries: [
+                ("abc", 80.0),
+                ("communication", 75.0),
+                ("socialization", 90.0),
+            ]
+            .iter()
+            .map(|(k, v)| ScoreEntry {
+                measure: (*k).into(),
+                value: *v,
+                note: String::new(),
+            })
+            .collect(),
+            notes: String::new(),
+        };
+        let text = format_sheet(&vineland).unwrap();
+        let line = text.lines().find(|l| l.contains("מהגבוה לנמוך")).unwrap();
+        assert!(!line.contains("ABC"), "{line}");
+        assert!(line.contains("SOC") && line.contains("COM"), "{line}");
+        let ados = ScoreSheet {
+            instrument: "ados_2".into(),
+            module: "1".into(),
+            cutoff: Some(11.0),
+            entries: [
+                ("social_affect", 10.0),
+                ("rrb", 4.0),
+                ("total", 14.0),
+                ("comparison", 7.0),
+            ]
+            .iter()
+            .map(|(k, v)| ScoreEntry {
+                measure: (*k).into(),
+                value: *v,
+                note: String::new(),
+            })
+            .collect(),
+            notes: String::new(),
+        };
+        let text = format_sheet(&ados).unwrap();
+        assert!(!text.contains("מהגבוה לנמוך"), "{text}");
+        let mut brief = ScoreSheet {
+            instrument: "brief_p".into(),
+            ..ados
+        };
+        brief.cutoff = None;
+        brief.entries = [("isci", 70.0), ("fi", 55.0), ("gec", 66.0)]
+            .iter()
+            .map(|(k, v)| ScoreEntry {
+                measure: (*k).into(),
+                value: *v,
+                note: String::new(),
+            })
+            .collect();
+        let text = format_sheet(&brief).unwrap();
+        let line = text.lines().find(|l| l.contains("מהגבוה לנמוך")).unwrap();
+        assert!(!line.contains("GEC") && line.contains("ISCI"), "{line}");
     }
 
     #[test]

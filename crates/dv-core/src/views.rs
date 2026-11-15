@@ -136,6 +136,10 @@ pub struct ParagraphView {
     /// Human-readable sources ("S2 · דוח קודם · אבחון נוירו-התפתחותי").
     pub sources: Vec<String>,
     pub warnings: Vec<String>,
+    /// Proofreading notes (D-167): a doubled word, spacing, a long sentence, absolute
+    /// wording. Advice for the finish, never part of `warnings`, never a block.
+    #[serde(default)]
+    pub polish: Vec<String>,
     /// A new wording of this approved paragraph (its id), waiting for her approval.
     pub replaces: Option<String>,
     /// Earlier wordings are kept and can be brought back (D-046).
@@ -470,6 +474,10 @@ pub struct ExportCheck {
     /// Rows of the parents' charts (0: no chart, only questionnaires or no tables).
     #[serde(default)]
     pub parents_chart_rows: u32,
+    /// Proofreading notes (D-167) in the approved paragraphs that go into the file: advice,
+    /// never a block.
+    #[serde(default)]
+    pub polish_notes: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

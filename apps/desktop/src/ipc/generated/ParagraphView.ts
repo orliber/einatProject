@@ -11,6 +11,11 @@ export type ParagraphView = { id: string, text: string, status: DraftStatus, by_
  */
 sources: Array<string>, warnings: Array<string>, 
 /**
+ * Proofreading notes (D-167): a doubled word, spacing, a long sentence, absolute
+ * wording. Advice for the finish, never part of `warnings`, never a block.
+ */
+polish: Array<string>, 
+/**
  * A new wording of this approved paragraph (its id), waiting for her approval.
  */
 replaces: string | null, 

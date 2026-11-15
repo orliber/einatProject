@@ -19,7 +19,7 @@ function section(key: string, paragraphs: Partial<Section["paragraphs"][number]>
     key,
     title: key,
     part: "א",
-    paragraphs: paragraphs.map((p, i) => ({ id: `${key}-${i}`, text: "טקסט בדוי", status: "approved", by_ai: true, sources: [], warnings: [], replaces: null, has_versions: false, style_note: null, style: null, ...p })),
+    paragraphs: paragraphs.map((p, i) => ({ id: `${key}-${i}`, text: "טקסט בדוי", status: "approved", by_ai: true, sources: [], warnings: [], polish: [], replaces: null, has_versions: false, style_note: null, style: null, ...p })),
     approved: paragraphs.some((p) => (p.status ?? "approved") === "approved"),
     source_count: 1,
     sortable: true,
@@ -66,14 +66,18 @@ describe("where the focus goes", () => {
   });
 });
 
-async function openReport() {
+async function openReport(reshape?: (d: CaseDetail) => void) {
   const core = new FakeCore();
   await core.handle("unlock", { password: "x" });
   await core.handle("set_review_always", { on: false });
   const calls: { cmd: string; args: Record<string, unknown> }[] = [];
-  mockIPC((cmd, args) => {
+  mockIPC(async (cmd, args) => {
     calls.push({ cmd, args: (args ?? {}) as Record<string, unknown> });
-    return core.handle(cmd, args);
+    const out = await core.handle(cmd, args);
+    if (cmd !== "case_detail" || !reshape) return out;
+    const d = structuredClone(out as CaseDetail);
+    reshape(d);
+    return d;
   });
   const user = userEvent.setup();
   render(<App />);
@@ -83,6 +87,42 @@ async function openReport() {
 }
 
 const focused = (page: HTMLElement) => page.querySelector<HTMLElement>(".a4-section.is-focus");
+
+describe("proofreading under a paragraph (D-167)", () => {
+  it("folds the notes into one quiet line that opens on a click, apart from the warnings", async () => {
+    const { page, user } = await openReport((d) => {
+      const p = d.sections.flatMap((s) => s.paragraphs).find((x) => x.status === "approved");
+      if (p) {
+        p.polish = ["מילה כפולה: \"של של\"", "הפסקה לא מסתיימת בסימן פיסוק (אחרי \"בגן\")"];
+        p.warnings = [];
+      }
+    });
+    const note = await within(page).findByRole("note", { name: "הגהה" });
+    expect(note.tagName).toBe("DETAILS");
+    expect(note).toHaveClass("note-polish");
+    expect(note).not.toHaveClass("note-warn");
+    // Folded: one line with the count, the notes themselves not shown.
+    expect(note).not.toHaveAttribute("open");
+    const line = within(note).getByText("הגהה · 2");
+    expect(line.tagName).toBe("SUMMARY");
+    expect(within(note).queryByText("מילה כפולה: \"של של\"")).not.toBeVisible();
+    await user.click(line);
+    expect(note).toHaveAttribute("open");
+    expect(within(note).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "מילה כפולה: \"של של\"",
+      "הפסקה לא מסתיימת בסימן פיסוק (אחרי \"בגן\")",
+    ]);
+    expect(within(note).getByText("מילה כפולה: \"של של\"")).toBeVisible();
+    // Plain text: nothing in a note is read as markup.
+    expect(note.querySelector("b, i, a, script")).toBeNull();
+  });
+
+  it("a paragraph with no notes has no proofreading block", async () => {
+    const { page } = await openReport();
+    await within(page).findAllByText(/./);
+    expect(within(page).queryByRole("note", { name: "הגהה" })).toBeNull();
+  });
+});
 
 describe("the report page, one section in focus", () => {
   it("only the section in focus has buttons; the brief goes with its first draft", async () => {

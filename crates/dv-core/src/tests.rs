@@ -1771,7 +1771,14 @@ fn every_instrument_sheet_passes_the_filter_without_questions() {
             entries,
             notes: String::new(),
         };
-        let text = dv_domain::format_sheet(&sheet).unwrap();
+        // With the scores spread (D-165): the lines of relative strengths and weaknesses
+        // and of scales in an elevated range go out unchanged too.
+        let spread = ScoreSheet {
+            entries: spread_entries(&inst),
+            ..sheet.clone()
+        };
+        let text =
+            dv_domain::format_sheet(&sheet).unwrap() + &dv_domain::format_sheet(&spread).unwrap();
         let outcome = core.preview_filter(&case, &text).unwrap();
         assert_eq!(
             outcome.tagged, text,
@@ -1791,6 +1798,20 @@ fn every_instrument_sheet_passes_the_filter_without_questions() {
             outcome.hidden
         );
     }
+}
+
+/// Every measure of an instrument, at the top and the bottom of its scale in turn: a sheet
+/// with relative strengths and weaknesses and with scales in an elevated range (D-165).
+fn spread_entries(inst: &dv_domain::Instrument) -> Vec<dv_domain::ScoreEntry> {
+    inst.measures
+        .iter()
+        .enumerate()
+        .map(|(i, m)| dv_domain::ScoreEntry {
+            measure: m.key.clone(),
+            value: if i % 2 == 0 { m.max } else { m.min },
+            note: String::new(),
+        })
+        .collect()
 }
 
 #[test]
@@ -2205,6 +2226,21 @@ fn score_tables_and_section_titles_are_never_rewritten_silently() {
             notes: String::new(),
         };
         texts.push(dv_domain::format_sheet(&sheet).unwrap());
+        // D-165: the relative and elevated lines are case text too.
+        let spread = ScoreSheet {
+            entries: spread_entries(&inst),
+            ..sheet
+        };
+        let text = dv_domain::format_sheet(&spread).unwrap();
+        assert!(
+            !matches!(inst.key.as_str(), "wppsi_iv" | "wisc_v") || text.contains("חוזקה יחסית"),
+            "{text}"
+        );
+        assert!(
+            inst.key != "brief_p" || text.contains("סולמות בטווח חריג"),
+            "{text}"
+        );
+        texts.push(text);
     }
     // A word that holds the name ("שאלון" for a child "אלון") or is spelled close to it may
     // be hidden, but only as an item on the card: "להחזיר" there must bring the text back

@@ -423,6 +423,14 @@ function A4Section({ api, section: s, focused, onPick, onNext }: {
         {p.warnings.map((w, i) => (
           <div key={i} className="note-warn small"><WarnIcon /><span>{w}</span></div>
         ))}
+        {p.polish.length > 0 && (
+          // D-167: proofreading, folded into one quiet line that opens on a click; advice for
+          // the finish, never a warning and never a block. Nothing at all when there is none.
+          <details className="note-polish small" role="note" aria-label="הגהה">
+            <summary>הגהה · {p.polish.length}</summary>
+            <ul>{p.polish.map((n, i) => <li key={i}>{n}</li>)}</ul>
+          </details>
+        )}
         {focused && p.status === "proposed" && p.style && !mine && (
           <StyleHintView hint={p.style} busy={busy}
             onCloser={(how) => void write(`נסחי מחדש את הפסקה הבאה כך שתישמע כמו הכתיבה שלי: ${how}. באותו תוכן ובלי להוסיף עובדות: "${p.text}"`, p.id)}

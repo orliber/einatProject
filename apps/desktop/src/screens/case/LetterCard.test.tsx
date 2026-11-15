@@ -17,7 +17,7 @@ vi.setConfig({ testTimeout: 30_000 });
 afterEach(() => clearKept());
 
 const para = (id: string, text: string, status: ParagraphView["status"] = "proposed"): ParagraphView => ({
-  id, text, status, by_ai: true, sources: [], warnings: [], replaces: null, has_versions: false, style_note: null, style: null,
+  id, text, status, by_ai: true, sources: [], warnings: [], polish: [], replaces: null, has_versions: false, style_note: null, style: null,
 });
 
 const RECS = ["המלצה בדויה: ליווי של מטפלת רגשית בגן.", "המלצה בדויה: הכנה מראש לכל מעבר בסדר היום."];
