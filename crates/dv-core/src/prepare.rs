@@ -1047,6 +1047,9 @@ impl Core {
                 .flat_map(|r| r.feeds)
                 .collect()
         };
+        // The wish she kept "for this section in future reports" (D-140) goes with the run's
+        // request exactly as it goes with a draft she asks for herself (D-163).
+        let wishes = self.draft_briefs()?.sections;
         let mut out: Vec<(String, RequestJob)> = Vec::new();
         for s in structure
             .sections()
@@ -1064,7 +1067,7 @@ impl Core {
                     SectionAsk {
                         case_id: case_id.to_owned(),
                         section_key: s.key.clone(),
-                        instruction: FULL_DRAFT_INSTRUCTION.to_owned(),
+                        instruction: full_draft_instruction(wishes.get(&s.key).map(String::as_str)),
                         replaces: None,
                         points: false,
                         check: false,
@@ -1335,10 +1338,12 @@ impl Core {
             let history: Vec<(ChatRole, String)> = if points {
                 Vec::new()
             } else {
-                v.messages(case_id, section_key)?
-                    .into_iter()
-                    .map(|m| (m.role, m.text_tagged))
-                    .collect()
+                recent_turns(
+                    v.messages(case_id, section_key)?
+                        .into_iter()
+                        .map(|m| (m.role, m.text_tagged))
+                        .collect(),
+                )
             };
             // The referral first (D-162): the question the closing sections answer.
             if letter.is_none() {
@@ -1942,3 +1947,39 @@ pub(crate) const MATERIAL_CHANGED: &str =
 
 /// The request each section of "write the empty sections" is sent with.
 const FULL_DRAFT_INSTRUCTION: &str = "כתוב/י טיוטה לסעיף מתוך המקורות, עם מקור לכל פסקה.";
+
+/// What comes before her wish in a drafting request (the report page writes the same words
+/// when she drafts one section herself).
+pub(crate) const WISH_LEAD: &str = "מה שחשוב לי שייכתב בסעיף:";
+
+/// The request "write the whole report" sends for a section: the fixed one, and after it the
+/// wish she kept for the section, when there is one (D-163).
+pub(crate) fn full_draft_instruction(wish: Option<&str>) -> String {
+    match wish.map(str::trim).filter(|w| !w.is_empty()) {
+        Some(w) => format!("{FULL_DRAFT_INSTRUCTION} {WISH_LEAD} {w}"),
+        None => FULL_DRAFT_INSTRUCTION.to_owned(),
+    }
+}
+
+/// How many turns of a section's conversation go out again with its next request (D-163):
+/// the last three exchanges. The draft as it stands goes with every request anyway, so the
+/// older turns only repeat what the page already holds.
+pub(crate) const HISTORY_TURNS: usize = 6;
+
+/// The most recent turns of a section's conversation, beginning with one of hers. The older
+/// ones stay in the vault and are not sent again.
+pub(crate) fn recent_turns(mut all: Vec<(ChatRole, String)>) -> Vec<(ChatRole, String)> {
+    let from = all.len().saturating_sub(HISTORY_TURNS);
+    let mut recent = all.split_off(from);
+    if recent
+        .first()
+        .is_some_and(|(role, _)| *role != ChatRole::User)
+    {
+        let mut answer = recent.remove(0);
+        zeroize::Zeroize::zeroize(&mut answer.1);
+    }
+    for (_, text) in &mut all {
+        zeroize::Zeroize::zeroize(text);
+    }
+    recent
+}

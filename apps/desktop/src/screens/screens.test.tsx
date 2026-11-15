@@ -121,9 +121,9 @@ describe("main screens", () => {
         sections: d.sections.map((s) => s.key !== "kindergarten" ? s : {
           ...s,
           paragraphs: [
-            { id: "p-ok", text: "פסקה מאושרת שבה הילד מפגין סקרנות.", status: "approved", by_ai: true, sources: [], warnings: [], polish: [], replaces: null, has_versions: false, style_note: null, style },
-            { id: "p-new", text: "בגן הילד מפגין עניין במשחק.", status: "proposed", by_ai: true, sources: [], warnings: [], polish: [], replaces: null, has_versions: false, style_note: null, style },
-            { id: "p-plain", text: "פסקה בלי ציון.", status: "proposed", by_ai: true, sources: [], warnings: [], polish: [], replaces: null, has_versions: false, style_note: null, style: null },
+            { id: "p-ok", text: "פסקה מאושרת שבה הילד מפגין סקרנות.", status: "approved", by_ai: true, sources: [], warnings: [], polish: [], notes: [], replaces: null, has_versions: false, style_note: null, style },
+            { id: "p-new", text: "בגן הילד מפגין עניין במשחק.", status: "proposed", by_ai: true, sources: [], warnings: [], polish: [], notes: [], replaces: null, has_versions: false, style_note: null, style },
+            { id: "p-plain", text: "פסקה בלי ציון.", status: "proposed", by_ai: true, sources: [], warnings: [], polish: [], notes: [], replaces: null, has_versions: false, style_note: null, style: null },
           ],
         }),
       };

@@ -29,6 +29,7 @@ mod layers;
 mod library;
 mod masks;
 mod newer_version;
+mod notes;
 mod off_lock;
 mod own;
 mod parents;

@@ -1695,7 +1695,7 @@ fn approving_every_clean_draft_takes_only_what_the_core_still_sees_clean_and_onc
     assert!(!proposed.is_empty());
     let clean = proposed
         .iter()
-        .filter(|p| p.warnings.is_empty() && p.replaces.is_none())
+        .filter(|p| p.notes.iter().all(|n| n.kind == NoteKind::Polish) && p.replaces.is_none())
         .count();
     let mut ids: Vec<String> = proposed.iter().map(|p| p.id.clone()).collect();
     ids.push("no-such-draft".to_owned());

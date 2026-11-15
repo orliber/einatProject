@@ -1335,6 +1335,29 @@ fn score_numbers(sentence: &str) -> Vec<String> {
 /// measures' scores or percentiles gets one line: what is written and what was entered.
 #[must_use]
 pub fn check_scores(text: &str, sheets: &[ScoreSheet]) -> Vec<String> {
+    check_scores_tagged(text, sheets)
+        .into_iter()
+        .map(|(_, line)| line)
+        .collect()
+}
+
+/// What a line of [`check_scores`] is about, said where the line is made (D-161), so the
+/// page can word and weigh each kind without reading the sentence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScoreNoteKind {
+    /// A number beside a measure that is not its score in the table.
+    Mismatch,
+    /// A range word that is not the table's range for the score.
+    BandWord,
+    /// A percentile that is not the computed one.
+    Percentile,
+    /// A cut-off that is not the sheet's.
+    Cutoff,
+}
+
+/// [`check_scores`], each line with its kind.
+#[must_use]
+pub fn check_scores_tagged(text: &str, sheets: &[ScoreSheet]) -> Vec<(ScoreNoteKind, String)> {
     let mut entered: Vec<(Measure, Known)> = Vec::new();
     for sheet in sheets {
         // Not `checked`: one value an older version saved off the grid must not silence the
@@ -1363,10 +1386,10 @@ pub fn check_scores(text: &str, sheets: &[ScoreSheet]) -> Vec<String> {
             Some((inst, entries.into_iter().map(|(m, _)| m).collect(), c))
         })
         .collect();
-    let mut out = Vec::new();
-    let mut push = |line: String| {
-        if !out.contains(&line) {
-            out.push(line);
+    let mut out: Vec<(ScoreNoteKind, String)> = Vec::new();
+    let mut push = |kind: ScoreNoteKind, line: String| {
+        if !out.iter().any(|(_, l)| l == &line) {
+            out.push((kind, line));
         }
     };
     for sentence in text
@@ -1389,10 +1412,13 @@ pub fn check_scores(text: &str, sheets: &[ScoreSheet]) -> Vec<String> {
         let cut_entered = cutoff_about(sentence, &cutoffs);
         if let (Some(n), Some((name, c))) = (&cut_written, &cut_entered) {
             if !same_number(n, &fmt_value(*c)) {
-                push(format!(
-                    "כתוב נקודת חתך {n}, ובטבלת הציונים של {name}: {}",
-                    fmt_value(*c)
-                ));
+                push(
+                    ScoreNoteKind::Cutoff,
+                    format!(
+                        "כתוב נקודת חתך {n}, ובטבלת הציונים של {name}: {}",
+                        fmt_value(*c)
+                    ),
+                );
             }
         }
         // Exactly one measure named, and named plainly: its percentile and its range.
@@ -1405,15 +1431,18 @@ pub fn check_scores(text: &str, sheets: &[ScoreSheet]) -> Vec<String> {
             if let Some(p) = &k.percentile {
                 for n in &percentiles {
                     if !same_number(n, p) {
-                        push(format!(
-                            "כתוב אחוזון {n} ליד {} ({}), ולפי החישוב: אחוזון {p}",
-                            m.name_he, k.value
-                        ));
+                        push(
+                            ScoreNoteKind::Percentile,
+                            format!(
+                                "כתוב אחוזון {n} ליד {} ({}), ולפי החישוב: אחוזון {p}",
+                                m.name_he, k.value
+                            ),
+                        );
                     }
                 }
             }
             if let Some(line) = band_word_note(sentence, m, k) {
-                push(line);
+                push(ScoreNoteKind::BandWord, line);
             }
         }
         if named.is_empty() {
@@ -1447,10 +1476,13 @@ pub fn check_scores(text: &str, sheets: &[ScoreSheet]) -> Vec<String> {
                     None => format!("{} {}", k.label, k.value),
                 })
                 .collect();
-            push(format!(
-                "המספר {n} לא תואם את טבלת הציונים: {} – לבדוק",
-                entered.join(", ")
-            ));
+            push(
+                ScoreNoteKind::Mismatch,
+                format!(
+                    "המספר {n} לא תואם את טבלת הציונים: {} – לבדוק",
+                    entered.join(", ")
+                ),
+            );
         }
     }
     out
@@ -2842,6 +2874,52 @@ mod tests {
         assert_eq!(w.len(), 1, "{w:?}");
         assert!(w[0].starts_with("המספר 40"), "{w:?}");
         assert!(check_scores("הבנה מילולית 95, אחוזון 40.", &[]).is_empty());
+    }
+
+    #[test]
+    fn each_line_of_the_score_check_says_what_it_is_about() {
+        // D-161: the kind is given where the line is made, never read back from its words.
+        let sheets = [wppsi(&[("vci", 95.0), ("matrix", 13.0)])];
+        let kinds = |text: &str, sheets: &[ScoreSheet]| -> Vec<ScoreNoteKind> {
+            let tagged = check_scores_tagged(text, sheets);
+            // The plain check is the same lines in the same order.
+            assert_eq!(
+                tagged.iter().map(|(_, l)| l.clone()).collect::<Vec<_>>(),
+                check_scores(text, sheets)
+            );
+            tagged.into_iter().map(|(k, _)| k).collect()
+        };
+        assert_eq!(
+            kinds("הבנה מילולית (VCI) 95, אחוזון 40.", &sheets),
+            [ScoreNoteKind::Percentile]
+        );
+        assert_eq!(
+            kinds("הבנה מילולית (95) בטווח הממוצע הגבוה.", &sheets),
+            [ScoreNoteKind::BandWord]
+        );
+        assert_eq!(
+            kinds("הבנה מילולית 95 ומטריצות 13, אחוזון 40.", &sheets),
+            [ScoreNoteKind::Mismatch]
+        );
+        let ados = ScoreSheet {
+            instrument: "ados_2".into(),
+            module: "1".into(),
+            cutoff: Some(11.0),
+            entries: vec![ScoreEntry {
+                measure: "total".into(),
+                value: 14.0,
+                note: String::new(),
+            }],
+            notes: String::new(),
+        };
+        assert_eq!(
+            kinds(
+                "הציון הכולל (14) מעל נקודת החתך (12).",
+                std::slice::from_ref(&ados)
+            ),
+            [ScoreNoteKind::Cutoff]
+        );
+        assert!(kinds("הבנה מילולית (VCI) 95, אחוזון 37.", &sheets).is_empty());
     }
 
     #[test]

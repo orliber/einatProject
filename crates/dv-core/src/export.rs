@@ -81,6 +81,7 @@ impl Core {
                 warnings: Vec::new(),
                 // The report's proofreading (D-167) is for its sections, not the letters.
                 polish: Vec::new(),
+                notes: Vec::new(),
                 replaces: d.replaces,
             })
             .collect())

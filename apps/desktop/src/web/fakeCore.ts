@@ -606,7 +606,7 @@ export class FakeCore {
           key: s.key, title: s.title, part: s.part,
           source_count: routing.filter((r) => r.feeds.includes(s.key)).length,
           sortable: SORTABLE.some((x) => x.key === s.key),
-          paragraphs: drafts.map((d) => ({ id: d.id, text: restore(d.text, c.people, this.practitioner), status: d.status, by_ai: d.byAi, sources: d.sources, warnings: [], polish: [], replaces: d.replaces ?? null, has_versions: versionsOf(c.drafts, d).length > 0, style_note: null, style: fakeStyleHint(d) })),
+          paragraphs: drafts.map((d) => ({ id: d.id, text: restore(d.text, c.people, this.practitioner), status: d.status, by_ai: d.byAi, sources: d.sources, warnings: [], polish: [], notes: [], replaces: d.replaces ?? null, has_versions: versionsOf(c.drafts, d).length > 0, style_note: null, style: fakeStyleHint(d) })),
           approved: drafts.some((d) => d.status === "approved"),
           // The fake's cases are in the old template, where every section is drafted unless she
           // changed it in settings (round 30).
@@ -615,6 +615,9 @@ export class FakeCore {
           guide_is_default: !this.guides.has(s.key),
           guide_learned_from: 0,
           case_guide: c.meta.guides?.[s.key] ?? "",
+          // D-161: the preview drafts from the materials word for word and asks nothing, so
+          // there is nothing to say beside a section (the core keeps these for the session).
+          notes: { questions: [], missing: [], contradictions: [], unanswered: [] },
         };
       }),
     };

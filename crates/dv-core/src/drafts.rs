@@ -30,7 +30,10 @@ impl Core {
             dv_style::EditModel::default()
         };
         let sample = self.is_sample(case_id)?;
-        let v = self.vault_ref()?;
+        // The vault and the session's notes side by side (two fields of the core).
+        self.vault_ref()?;
+        let v = self.vault.as_ref().ok_or(CoreError::Locked)?;
+        let kept = &self.notes;
         let meta = v.case_meta(case_id)?;
         let identities = v.identities(case_id)?;
         let masks = v.masks(case_id)?;
@@ -117,6 +120,9 @@ impl Core {
             })
             .collect();
         let key_scores = key_scores_text(v, &sheets)?;
+        // Every paragraph on the page as she sees it, for the notes kept about it (D-161).
+        let mut on_page: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
         let mut sections = Vec::new();
         for part in &structure.parts {
             for s in &part.sections {
@@ -151,11 +157,92 @@ impl Core {
                         } else {
                             dv_domain::polish_notes(&text)
                         };
+                        // Every score in the text against the score table, each time (AI-6).
+                        // And an age that is not the child's age in the details. Each line
+                        // with what it is about, said where it is made (D-161).
+                        let tag = |kind: NoteKind, lines: Vec<String>| {
+                            lines
+                                .into_iter()
+                                .map(move |l| ParagraphNote::new(kind, l))
+                                .collect::<Vec<_>>()
+                        };
+                        let mut notes: Vec<ParagraphNote> =
+                            dv_domain::check_scores_tagged(&d.text_tagged, &sheets)
+                                .into_iter()
+                                .map(|(kind, line)| {
+                                    let kind = match kind {
+                                        dv_domain::ScoreNoteKind::Mismatch => {
+                                            NoteKind::ScoreMismatch
+                                        }
+                                        dv_domain::ScoreNoteKind::BandWord => NoteKind::BandWord,
+                                        dv_domain::ScoreNoteKind::Percentile => {
+                                            NoteKind::Percentile
+                                        }
+                                        dv_domain::ScoreNoteKind::Cutoff => NoteKind::Cutoff,
+                                    };
+                                    ParagraphNote::new(kind, line)
+                                })
+                                .collect();
+                        notes.extend(tag(
+                            NoteKind::Age,
+                            dv_domain::check_age(&d.text_tagged, meta.age),
+                        ));
+                        notes.extend(tag(
+                            NoteKind::Gender,
+                            dv_domain::check_gender(&d.text_tagged, meta.child_gender),
+                        ));
+                        notes.extend(tag(
+                            NoteKind::Grade,
+                            dv_domain::check_grade(
+                                &d.text_tagged,
+                                &report
+                                    .iter()
+                                    .filter(|(_, _, t)| *t != d.text_tagged)
+                                    .map(|(_, _, t)| t.as_str())
+                                    .collect::<Vec<_>>(),
+                            ),
+                        ));
+                        if s.key == "recommendations" {
+                            notes.extend(tag(
+                                NoteKind::RecommendationBasis,
+                                dv_domain::check_recommendations(&d.text_tagged, &body),
+                            ));
+                        }
+                        // A level in the DSM section that is not the one she set (round 43).
+                        if s.key == "dsm" {
+                            notes.extend(tag(
+                                NoteKind::DsmSeverity,
+                                dv_domain::check_dsm_severity(
+                                    &d.text_tagged,
+                                    meta.dsm_severity.as_ref(),
+                                ),
+                            ));
+                        }
+                        notes.extend(tag(
+                            NoteKind::Term,
+                            dv_style::terms::notes(&d.text_tagged, &her_terms, &report_terms),
+                        ));
+                        notes.extend(tag(
+                            NoteKind::Interpretation,
+                            interpretations.notes(&d.text_tagged),
+                        ));
+                        notes.extend(tag(NoteKind::NumberNotInSources, unfounded));
+                        let warnings: Vec<String> = notes.iter().map(|n| n.text.clone()).collect();
+                        // What the answer and the check against the sources said about this
+                        // wording (D-161), then the proofreading. Nothing is said twice.
+                        for n in kept.of_paragraph(&d.id, &text) {
+                            if !notes.contains(&n) {
+                                notes.push(n);
+                            }
+                        }
+                        notes.extend(tag(NoteKind::Polish, polish.clone()));
+                        on_page.insert(d.id.clone(), text.clone());
                         ParagraphView {
                             has_versions: with_versions.contains(&d.id),
                             id: d.id,
                             text,
                             polish,
+                            notes,
                             status: d.status,
                             by_ai: d.author == Author::Ai,
                             sources: d
@@ -168,42 +255,7 @@ impl Core {
                                     )
                                 })
                                 .collect(),
-                            // Every score in the text against the score table, each time (AI-6).
-                            // And an age that is not the child's age in the details.
-                            warnings: dv_domain::check_scores(&d.text_tagged, &sheets)
-                                .into_iter()
-                                .chain(dv_domain::check_age(&d.text_tagged, meta.age))
-                                .chain(dv_domain::check_gender(&d.text_tagged, meta.child_gender))
-                                .chain(dv_domain::check_grade(
-                                    &d.text_tagged,
-                                    &report
-                                        .iter()
-                                        .filter(|(_, _, t)| *t != d.text_tagged)
-                                        .map(|(_, _, t)| t.as_str())
-                                        .collect::<Vec<_>>(),
-                                ))
-                                .chain(if s.key == "recommendations" {
-                                    dv_domain::check_recommendations(&d.text_tagged, &body)
-                                } else {
-                                    Vec::new()
-                                })
-                                // A level in the DSM section that is not the one she set (round 43).
-                                .chain(if s.key == "dsm" {
-                                    dv_domain::check_dsm_severity(
-                                        &d.text_tagged,
-                                        meta.dsm_severity.as_ref(),
-                                    )
-                                } else {
-                                    Vec::new()
-                                })
-                                .chain(dv_style::terms::notes(
-                                    &d.text_tagged,
-                                    &her_terms,
-                                    &report_terms,
-                                ))
-                                .chain(interpretations.notes(&d.text_tagged))
-                                .chain(unfounded)
-                                .collect(),
+                            warnings,
                             style_note: style_model
                                 .as_ref()
                                 .filter(|_| {
@@ -255,9 +307,12 @@ impl Core {
                     guide_is_default: guide.is_default,
                     guide_learned_from: guide.learned_from,
                     case_guide: guide.case,
+                    notes: kept.section(case_id, &s.key),
                 });
             }
         }
+        // Notes about a wording that is gone are dropped with it.
+        self.notes.prune(case_id, &on_page);
         Ok(CaseDetail {
             id: case_id.to_owned(),
             meta,
@@ -327,8 +382,10 @@ impl Core {
     }
 
     /// "✓ לאשר את כל הטיוטות" (D-139): of the paragraphs she saw waiting, only those still
-    /// clean as the core sees them now: no note of any kind, and not a new wording of an
-    /// approved paragraph. What the screen showed may be older than the case.
+    /// clean as the core sees them now: no note but proofreading (D-161: a warning, what the
+    /// answer's scan found, a verdict of the check against the sources that is not
+    /// "supported"), and not a new wording of an approved paragraph. What the screen showed
+    /// may be older than the case.
     pub fn approve_clean_paragraphs(
         &mut self,
         case_id: &str,
@@ -340,7 +397,9 @@ impl Core {
             .into_iter()
             .flat_map(|s| s.paragraphs)
             .filter(|p| {
-                p.status == DraftStatus::Proposed && p.warnings.is_empty() && p.replaces.is_none()
+                p.status == DraftStatus::Proposed
+                    && p.notes.iter().all(|n| n.kind == NoteKind::Polish)
+                    && p.replaces.is_none()
             })
             .map(|p| p.id)
             .collect();

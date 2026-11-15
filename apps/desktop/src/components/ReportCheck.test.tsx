@@ -23,7 +23,7 @@ function wrap(children: ReactNode, notify = vi.fn()) {
 }
 
 const paragraph = (id: string, status: ParagraphView["status"]): ParagraphView => ({
-  id, text: `פסקה ${id}`, status, by_ai: false, sources: [], warnings: [], polish: [], replaces: null, has_versions: false, style_note: null, style: null,
+  id, text: `פסקה ${id}`, status, by_ai: false, sources: [], warnings: [], polish: [], notes: [], replaces: null, has_versions: false, style_note: null, style: null,
 });
 const section = (key: string, title: string, paragraphs: ParagraphView[]) =>
   ({ key, title, part: "חלק", paragraphs }) as unknown as SectionView;
