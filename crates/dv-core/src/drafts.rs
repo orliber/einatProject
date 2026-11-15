@@ -111,16 +111,26 @@ impl Core {
                     .into_iter()
                     .map(|d| {
                         let unfounded = unfounded_numbers(&d, &s.key, s.mode, &inputs, &body);
+                        let text = shown_paragraph(
+                            &d.text_tagged,
+                            d.author,
+                            &identities,
+                            practitioner.as_deref(),
+                            &masks,
+                        );
+                        // Proofreading (D-167), of the text as she sees it: advice for the
+                        // finish, never a warning, so it holds nothing back. Not the signature,
+                        // whose lines are a name and titles.
+                        let polish = if s.key == "signature" {
+                            Vec::new()
+                        } else {
+                            dv_domain::polish_notes(&text)
+                        };
                         ParagraphView {
                             has_versions: with_versions.contains(&d.id),
                             id: d.id,
-                            text: shown_paragraph(
-                                &d.text_tagged,
-                                d.author,
-                                &identities,
-                                practitioner.as_deref(),
-                                &masks,
-                            ),
+                            text,
+                            polish,
                             status: d.status,
                             by_ai: d.author == Author::Ai,
                             sources: d

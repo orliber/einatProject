@@ -32,7 +32,7 @@ pub const ADAPTIVE_GAP: f64 = 15.0;
 pub const IN_LINE: f64 = 9.0;
 
 /// The totals of a test: never one of its indexes.
-const TOTALS: [&str; 4] = ["fsiq", "gac", "abc", "elc"];
+pub(crate) const TOTALS: [&str; 4] = ["fsiq", "gac", "abc", "elc"];
 /// Totals of a cognitive test, and of an adaptive one, for the gap between the two.
 const COGNITIVE_TOTALS: [(&str, &str); 5] = [
     ("wppsi_iv", "fsiq"),

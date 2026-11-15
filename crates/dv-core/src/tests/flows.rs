@@ -1751,3 +1751,40 @@ fn a_number_in_no_source_stays_a_note_after_a_reload_and_approve_all_holds_it_ba
     let ids: Vec<String> = shown.iter().map(|p| p.id.clone()).collect();
     assert_eq!(core.approve_clean_paragraphs(&case, &ids).unwrap(), 1);
 }
+
+#[test]
+fn proofreading_notes_are_advice_and_never_hold_a_paragraph_back() {
+    // D-167: a doubled word and a missing full stop are noted under the paragraph and counted
+    // at the finish, but they are not warnings, and "approve all clean" still takes it.
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let p = core
+        .prepare_section(&case, "background", "תנסח את הסעיף")
+        .unwrap();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({
+        "reply": "הנה",
+        "paragraphs": [
+            {"text": "[ילד] גדל עם הוריו בבית בעיר.", "source_refs": ["S1"], "guide": 1},
+            {"text": "[ילד] הלך הלך לגן עם הוריו בבוקר", "source_refs": ["S1"], "guide": 1},
+        ],
+        "questions": [], "missing": [], "contradictions": [],
+    })));
+    core.send_section(&p.approval_id.unwrap()).unwrap();
+    let shown: Vec<ParagraphView> = core
+        .case_detail(&case)
+        .unwrap()
+        .sections
+        .into_iter()
+        .find(|s| s.key == "background")
+        .unwrap()
+        .paragraphs;
+    let rough = shown.iter().find(|p| p.text.contains("הלך הלך")).unwrap();
+    assert_eq!(rough.polish.len(), 2, "{:?}", rough.polish);
+    assert!(rough.polish.iter().any(|n| n.contains("\"הלך הלך\"")));
+    assert!(rough.warnings.is_empty(), "{:?}", rough.warnings);
+    let smooth = shown.iter().find(|p| !p.text.contains("הלך הלך")).unwrap();
+    assert!(smooth.polish.is_empty(), "{:?}", smooth.polish);
+    let ids: Vec<String> = shown.iter().map(|p| p.id.clone()).collect();
+    assert_eq!(core.approve_clean_paragraphs(&case, &ids).unwrap(), 2);
+    assert_eq!(core.check_export(&case).unwrap().polish_notes, 2);
+}

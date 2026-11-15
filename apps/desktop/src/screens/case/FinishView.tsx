@@ -73,6 +73,10 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
         return notes.length ? [{ section: s, p, notes }] : [];
       });
   });
+  // D-167: proofreading notes in approved paragraphs, by section. Advice; never stops the file.
+  const polished = content
+    .map((s) => ({ section: s, notes: s.paragraphs.filter((p) => p.status === "approved").flatMap((p) => p.polish) }))
+    .filter(({ notes }) => notes.length > 0);
   const child = detail.identities.find((i) => i.role === "child")?.value ?? "";
   const blocked = (check?.blocking.length ?? 0) > 0;
   const nothing = check !== null && check.included_sections === 0;
@@ -137,6 +141,20 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
                       <button key={p.id} type="button" className="complete-item" onClick={() => onOpen(section.key)}>
                         <span className="small muted">{section.title} · {notes.join(" · ")}</span>
                         <span className="serif">{p.text.length > 140 ? `${p.text.slice(0, 140)}…` : p.text}</span>
+                      </button>
+                    ))}
+                  </div>
+                </li>
+              )}
+              {check.polish_notes > 0 && polished.length > 0 && (
+                <li className="info">
+                  <span className="finish-mark" aria-hidden="true">i</span>
+                  <div className="grow stack" style={{ gap: 6 }}>
+                    <span>{check.polish_notes === 1 ? "הגהה: הערת ניסוח אחת" : `הגהה: ${check.polish_notes} הערות ניסוח`}</span>
+                    {polished.map(({ section, notes }) => (
+                      <button key={section.key} type="button" className="complete-item" onClick={() => onOpen(section.key)}>
+                        <span className="small muted">{section.title}</span>
+                        <span className="small">{notes.join(" · ")}</span>
                       </button>
                     ))}
                   </div>

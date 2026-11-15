@@ -34,7 +34,7 @@ function caseApi(): CaseApi {
 
 const check: ExportCheck = {
   blocking: [], to_complete: [], empty_sections: [], included_sections: 3, score_tables: 1,
-  file_name: "דוח אבחון TEST-0002.docx", parents_left_out: 2, parents_chart_rows: 4,
+  file_name: "דוח אבחון TEST-0002.docx", parents_left_out: 2, parents_chart_rows: 4, polish_notes: 0,
 };
 
 const settings: ReportSettings = {

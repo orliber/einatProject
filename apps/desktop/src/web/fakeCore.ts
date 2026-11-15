@@ -606,7 +606,7 @@ export class FakeCore {
           key: s.key, title: s.title, part: s.part,
           source_count: routing.filter((r) => r.feeds.includes(s.key)).length,
           sortable: SORTABLE.some((x) => x.key === s.key),
-          paragraphs: drafts.map((d) => ({ id: d.id, text: restore(d.text, c.people, this.practitioner), status: d.status, by_ai: d.byAi, sources: d.sources, warnings: [], replaces: d.replaces ?? null, has_versions: versionsOf(c.drafts, d).length > 0, style_note: null, style: fakeStyleHint(d) })),
+          paragraphs: drafts.map((d) => ({ id: d.id, text: restore(d.text, c.people, this.practitioner), status: d.status, by_ai: d.byAi, sources: d.sources, warnings: [], polish: [], replaces: d.replaces ?? null, has_versions: versionsOf(c.drafts, d).length > 0, style_note: null, style: fakeStyleHint(d) })),
           approved: drafts.some((d) => d.status === "approved"),
           // The fake's cases are in the old template, where every section is drafted unless she
           // changed it in settings (round 30).
@@ -1549,7 +1549,7 @@ export class FakeCore {
         return {
           blocking: [], to_complete: missing, empty_sections: d.sections.filter((s) => !s.approved).map((s) => s.title),
           included_sections: d.sections.filter((s) => s.approved).length, score_tables: c.sheets.size, file_name: `דוח אבחון – ${c.meta.code}.docx`,
-          parents_left_out: 0, parents_chart_rows: c.sheets.size > 0 ? 3 : 0,
+          parents_left_out: 0, parents_chart_rows: c.sheets.size > 0 ? 3 : 0, polish_notes: 0,
         } satisfies ExportCheck;
       }
       case "letter":

@@ -8,6 +8,9 @@ import tables from "./instruments.json";
 
 export const instruments = tables as Instrument[];
 
+/** Totals and composites, never one of the domains they sum up (as dv_domain's `is_total`). */
+const TOTALS = ["fsiq", "gac", "abc", "elc", "total", "gec"];
+
 function fmt(v: number): string {
   return Number.isInteger(v) ? String(v) : v.toFixed(1);
 }
@@ -37,7 +40,8 @@ export function formatSheet(sheet: ScoreSheet): string {
   if (sheet.module.trim()) out += `מודול: ${sheet.module.trim()}\n`;
   let group = "";
   const indexes: [string, number][] = [];
-  const groups = new Map<string, [string, number][]>();
+  const groups = new Map<string, { group: string; rows: [string, number][] }>();
+  const checked: { m: Measure; v: number; name: string }[] = [];
   let anyPercentile = false;
   for (const e of sheet.entries) {
     const m = inst.measures.find((x) => x.key === e.measure);
@@ -63,8 +67,13 @@ export function formatSheet(sheet: ScoreSheet): string {
     const value = p ? `ציון ${fmt(e.value)}, אחוזון ${p}` : `ציון ${fmt(e.value)}`;
     const note = e.note.trim() ? `. ${e.note.trim()}` : "";
     out += range ? `- ${name}: ${value} – ${range}${note}\n` : `- ${name}: ${value}${note}\n`;
-    if (m.scale === "standard" && m.group === "מדדים" && m.key !== "fsiq" && m.key !== "gac") indexes.push([m.name_he, e.value]);
-    if (!["fsiq", "gac", "total"].includes(m.key)) groups.set(m.group, [...(groups.get(m.group) ?? []), [name, e.value]]);
+    checked.push({ m, v: e.value, name });
+    if (m.scale === "standard" && m.group === "מדדים" && !TOTALS.includes(m.key)) indexes.push([m.name_he, e.value]);
+    // D-165: no total or composite, no raw scores, and one scale to a list.
+    if (!TOTALS.includes(m.key) && m.scale !== "raw_cutoff") {
+      const key = `${m.group}|${m.scale}`;
+      groups.set(key, { group: m.group, rows: [...(groups.get(key)?.rows ?? []), [name, e.value]] });
+    }
   }
   if (indexes.length > 1) {
     const hi = indexes.reduce((a, b) => (b[1] > a[1] ? b : a));
@@ -74,11 +83,32 @@ export function formatSheet(sheet: ScoreSheet): string {
     }
   }
   // As in dv_domain::format_sheet: the order from the highest to the lowest, worked out here.
-  for (const [g, rows] of groups) {
+  for (const { group: g, rows } of groups.values()) {
     if (rows.length < 2) continue;
     const order = [...rows].sort((a, b) => b[1] - a[1]).map(([n, v]) => `${n} – ציון ${fmt(v)}`);
     out += `${g} מהגבוה לנמוך: ${order.join("; ")}\n`;
   }
+  // As in dv_domain: relative strengths and weaknesses (three subtests or more, 3 points from
+  // their mean), and questionnaire scales outside the typical band of their table.
+  const sub = checked.filter((c) => c.m.scale === "scaled" || c.m.scale === "v_scale");
+  if (sub.length >= 3) {
+    const mean = sub.reduce((a, c) => a + c.v, 0) / sub.length;
+    const item = (c: (typeof sub)[number]) => `${c.name} – ציון ${fmt(c.v)}`;
+    const strong = sub.filter((c) => c.v - mean >= 3).map(item);
+    const weak = sub.filter((c) => mean - c.v >= 3).map(item);
+    if (strong.length || weak.length) {
+      const parts = [...(strong.length ? [`חוזקה יחסית: ${strong.join("; ")}`] : []), ...(weak.length ? [`חולשה יחסית: ${weak.join("; ")}`] : [])];
+      const subGroups = Array.from(new Set(sub.map((c) => c.m.group)));
+      out += `חוזקות וחולשות יחסיות, ביחס לממוצע האישי ב${subGroups.join(" וב")} שבטבלה (הפרש של 3 נקודות ומעלה), חושבו בתוכנה. ${parts.join(". ")}\n`;
+    }
+  }
+  const elevated = checked
+    .filter((c) => c.m.scale === "t_concern")
+    .flatMap((c) => {
+      const b = c.m.bands.find((x) => c.v >= x.min && c.v <= x.max);
+      return b && b.level >= 1 ? [`${c.name} – ציון ${fmt(c.v)}, ${b.label}`] : [];
+    });
+  if (elevated.length) out += `סולמות בטווח חריג לפי הטבלה: ${elevated.join("; ")}\n`;
   out += `${inst.scale_note_he}\n`;
   if (anyPercentile) out += "האחוזונים חושבו לפי העקומה הנורמלית.\n";
   out += "הטווחים חושבו בתוכנה לפי טבלה קבועה, לא על ידי מודל השפה.\n";
