@@ -22,7 +22,7 @@ export function placeLabel(place: string): string {
   if (place === "consult") return "שאלה מתוך התיק";
   if (place === "report_check") return "בדיקת הדוח כולו";
   if (place === "letter_parents") return "מכתב להורים";
-  if (place === "letter_school") return "מכתב לבית הספר";
+  if (place === "letter_school") return "מכתב לצוות החינוכי";
   return SECTION_TITLES.get(place) ?? place;
 }
 

@@ -124,6 +124,8 @@ describe("SentHistoryDialog", () => {
     expect(placeLabel("consult")).toBe("שאלה מתוך התיק");
     expect(placeLabel("report_check")).toBe("בדיקת הדוח כולו");
     expect(placeLabel("letter_parents")).toBe("מכתב להורים");
+    // The same name as on the letter card (most of her children are in a gan, not a school).
+    expect(placeLabel("letter_school")).toBe("מכתב לצוות החינוכי");
     expect(placeLabel("kindergarten")).not.toBe("kindergarten");
   });
 });

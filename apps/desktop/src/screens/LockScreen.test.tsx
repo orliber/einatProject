@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { LockScreen } from "./LockScreen";
+import { noteLockReason } from "../lockReason";
 import { a11yViolations } from "../test/a11y";
 
 describe("LockScreen", () => {
@@ -10,6 +11,20 @@ describe("LockScreen", () => {
     expect(screen.getByRole("heading", { name: "כספת האבחון" })).toBeInTheDocument();
     expect(screen.getByLabelText("סיסמה")).toHaveAttribute("type", "password");
     expect(screen.getByRole("button", { name: "פתיחה" })).toBeInTheDocument();
+  });
+
+  it("says the vault is locked, and that it locked when idle only after an idle lock", () => {
+    mockIPC(() => ({ ipc_version: 1, core_version: "0.1.0", build_commit: "test", fips_active: false, platform: "linux" }));
+    const first = render(<LockScreen />);
+    expect(screen.getByText(/הכספת נעולה\. היא ננעלת לבד אחרי 10 דקות ללא פעילות/)).toBeInTheDocument();
+    first.unmount();
+    noteLockReason(true);
+    const idle = render(<LockScreen />);
+    expect(screen.getByText("הכספת ננעלה אחרי 10 דקות ללא פעילות.")).toBeInTheDocument();
+    idle.unmount();
+    noteLockReason(false);
+    render(<LockScreen />);
+    expect(screen.getByText(/הכספת נעולה\./)).toBeInTheDocument();
   });
 
   it("shows that the secure core is connected after ping succeeds", async () => {

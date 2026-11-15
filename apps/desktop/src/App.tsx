@@ -19,6 +19,7 @@ import { forgetFailures, rememberFailure } from "./errors";
 import { resetRuns } from "./screens/case/reportRun";
 import { clearKept } from "./kept";
 import { unsavedGuard } from "./leaveGuard";
+import { noteLockReason } from "./lockReason";
 import type { SettingsPane } from "./screens/settingsPanes";
 
 // The pages she opens rarely load on their own, so the first paint and the case pages carry
@@ -184,10 +185,17 @@ export function App() {
   // Ctrl+L (⌘L on Mac) locks at once: stepping away from the desk should take one key.
   const unlocked = status?.unlocked === true;
 
+  const warnedRef = useRef(false);
+  useEffect(() => {
+    warnedRef.current = idleIn != null && idleIn <= IDLE_WARNING_SECONDS;
+  }, [idleIn]);
+
   // Once the vault locks (by hand or when idle), reload the page: names shown on screen
   // must not stay in the page's memory. Only in the built app (tests and dev keep state).
   const wasUnlocked = useRef(false);
   useEffect(() => {
+    // The lock screen says "locked after N minutes" only when that is what happened (no case data).
+    if (wasUnlocked.current && !unlocked) noteLockReason(warnedRef.current);
     if (wasUnlocked.current && !unlocked && import.meta.env.PROD) window.location.reload();
     // Names must not stay in memory once the vault is locked.
     if (!unlocked) {
@@ -218,10 +226,6 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [unlocked, lockNow]);
 
-  const warnedRef = useRef(false);
-  useEffect(() => {
-    warnedRef.current = idleIn != null && idleIn <= IDLE_WARNING_SECONDS;
-  }, [idleIn]);
   // Typing a long paragraph never calls the core, so the window reports activity itself
   // (at most every 30 seconds): the idle lock must not throw away work in progress.
   useEffect(() => {
