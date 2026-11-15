@@ -25,6 +25,7 @@ use crate::password::{self, Argon2Params};
 use crate::{recovery, version, VaultError};
 
 mod backup;
+mod clinic;
 mod slots;
 mod style;
 #[cfg(test)]
@@ -35,6 +36,7 @@ pub use backup::{
     drill_backup, peek_backup, BackupCheck, BackupInfo, BackupJob, BackupPeek, BackupWritten,
     WrittenBackup, BACKUP_EXTENSION,
 };
+pub use clinic::{StoredClinicHistory, StoredClinicRecord};
 pub use slots::NewSlot;
 pub use style::{StoredStyleProfile, StoredStyleSource};
 

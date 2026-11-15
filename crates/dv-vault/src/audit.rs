@@ -60,6 +60,13 @@ pub enum AuditEvent {
     DriveBackupUploaded,
     DriveBackupFailed,
     DriveBackupCleanup,
+    /// A patient card was added to the clinic. No meta: the card names no one here.
+    ClinicPatientAdded,
+    /// A patient was erased from the clinic with every record and history row of theirs.
+    /// Meta: how many records went (a number only).
+    ClinicPatientErased,
+    /// A clinic note was copied into a case (no text, no names).
+    ClinicNoteToCase,
 }
 
 impl AuditEvent {
@@ -103,6 +110,9 @@ impl AuditEvent {
             AuditEvent::DriveBackupUploaded => "drive_backup_uploaded",
             AuditEvent::DriveBackupFailed => "drive_backup_failed",
             AuditEvent::DriveBackupCleanup => "drive_backup_cleanup",
+            AuditEvent::ClinicPatientAdded => "clinic_patient_added",
+            AuditEvent::ClinicPatientErased => "clinic_patient_erased",
+            AuditEvent::ClinicNoteToCase => "clinic_note_to_case",
         }
     }
 }

@@ -215,6 +215,28 @@ pub const MAIN_MIGRATIONS: &[&str] = &[
     // v12: "what left the computer" across every case is read a page at a time, newest first
     // (D-123); an index in that order instead of sorting a year of requests for each page.
     "CREATE INDEX transmissions_time ON transmissions(created_at, id);",
+    // v13: the clinic (beta). Records and their history are sealed with the settings key (they
+    // belong to no case); `kind` and `day` stay in the clear only to index by them, and
+    // `patient_id` is a random id. The contents are the caller's own JSON.
+    "CREATE TABLE clinic_records (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        patient_id TEXT,
+        day INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        data_enc BLOB NOT NULL
+     );
+     CREATE INDEX clinic_records_kind_day ON clinic_records(kind, day);
+     CREATE INDEX clinic_records_patient ON clinic_records(patient_id, kind);
+     CREATE TABLE clinic_history (
+        id TEXT PRIMARY KEY,
+        record_id TEXT NOT NULL,
+        patient_id TEXT,
+        saved_at INTEGER NOT NULL,
+        action TEXT NOT NULL,
+        data_enc BLOB NOT NULL
+     );
+     CREATE INDEX clinic_history_record ON clinic_history(record_id, saved_at);",
 ];
 
 pub const IDENTITY_MIGRATIONS: &[&str] = &[
@@ -246,6 +268,14 @@ pub const IDENTITY_MIGRATIONS: &[&str] = &[
     // (`metadata`), with the reason shown next to them.
     "ALTER TABLE identities ADD COLUMN source TEXT NOT NULL DEFAULT 'manual';
      ALTER TABLE identities ADD COLUMN reason TEXT NOT NULL DEFAULT '';",
+    // v3: the clinic's patient cards (beta), sealed with the settings key. They live here, with
+    // the other names, so a backup or an erase treats them as identities.
+    "CREATE TABLE clinic_patients (
+        id TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        data_enc BLOB NOT NULL
+     );",
 ];
 
 pub const AUDIT_MIGRATIONS: &[&str] = &[
@@ -307,9 +337,13 @@ mod tests {
                 "942e02ced273dca6",
                 "860fa1cbe9c35c6b",
                 "bc893c8e985ecbd1",
+                "9aee726964b4112a",
             ],
         ),
-        ("identity", &["98e79c9e2d976424", "59aa5787b56ebc78"]),
+        (
+            "identity",
+            &["98e79c9e2d976424", "59aa5787b56ebc78", "92d645e9aece5a85"],
+        ),
         ("audit", &["922ed57e6a2659e3"]),
     ];
 
