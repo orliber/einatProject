@@ -734,3 +734,20 @@
   font-size: var(--text-base);
   color: var(--warn-ink);
 }
+/* D-161: what "approve all" did, in one quiet line; a click goes to the first one held back. */
+.contents-approved {
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: start;
+  font: inherit;
+  font-size: var(--text-xs);
+  color: var(--ink-muted);
+}
+button.contents-approved {
+  cursor: pointer;
+  color: var(--ink-soft);
+}
+button.contents-approved:hover {
+  text-decoration: underline;
+}

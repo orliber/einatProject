@@ -19,7 +19,7 @@ function section(key: string, paragraphs: Partial<Section["paragraphs"][number]>
     key,
     title: key,
     part: "א",
-    paragraphs: paragraphs.map((p, i) => ({ id: `${key}-${i}`, text: "טקסט בדוי", status: "approved", by_ai: true, sources: [], warnings: [], polish: [], replaces: null, has_versions: false, style_note: null, style: null, ...p })),
+    paragraphs: paragraphs.map((p, i) => ({ id: `${key}-${i}`, text: "טקסט בדוי", status: "approved", by_ai: true, sources: [], warnings: [], polish: [], notes: [], replaces: null, has_versions: false, style_note: null, style: null, ...p })),
     approved: paragraphs.some((p) => (p.status ?? "approved") === "approved"),
     source_count: 1,
     sortable: true,

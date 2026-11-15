@@ -198,7 +198,7 @@ fn work(dir: &Path, version: &str) {
     other
         .restore_staged_backup(Some(PASSWORD), None)
         .unwrap_or_else(|e| panic!("{version}: restore: {e:?}"));
-    let now = core.case_detail(&case).unwrap();
+    let now = from_the_vault(core.case_detail(&case).unwrap());
     assert_eq!(
         other.case_detail(&case).unwrap(),
         now,

@@ -731,7 +731,8 @@ fn a_backup_restores_the_same_cases_settings_and_bin() {
 
     assert_eq!(other.list_cases().unwrap(), before_cases);
     for d in &before {
-        assert_eq!(&other.case_detail(&d.id).unwrap(), d);
+        // What the session said about the drafts stays with the session (D-161).
+        assert_eq!(other.case_detail(&d.id).unwrap(), from_the_vault(d.clone()));
     }
     assert_eq!(other.chat(&case, "kindergarten").unwrap(), before_chat);
     assert_eq!(other.folders().unwrap(), before_folders);
@@ -1695,7 +1696,7 @@ fn approving_every_clean_draft_takes_only_what_the_core_still_sees_clean_and_onc
     assert!(!proposed.is_empty());
     let clean = proposed
         .iter()
-        .filter(|p| p.warnings.is_empty() && p.replaces.is_none())
+        .filter(|p| p.notes.iter().all(|n| n.kind == NoteKind::Polish) && p.replaces.is_none())
         .count();
     let mut ids: Vec<String> = proposed.iter().map(|p| p.id.clone()).collect();
     ids.push("no-such-draft".to_owned());

@@ -25,6 +25,7 @@ mod instruments;
 mod intake;
 mod library;
 pub mod name_model;
+mod notes;
 mod own;
 mod prepare;
 use name_model::NameHints;
@@ -105,6 +106,7 @@ pub use jobs::{
 pub use layers::SecurityLayer;
 pub use library::TRASH_DAYS;
 pub use name_model::{HintJob, HintsRead};
+pub use notes::{NoteKind, ParagraphNote, SectionNotes};
 pub use own::SectionModeView;
 pub use prepare::{run_requests, Landed, RequestJob, RequestRun};
 pub use readiness::{Readiness, ReadinessItem};
@@ -1043,6 +1045,9 @@ pub struct Core {
     memory_lock: Option<bool>,
     /// The cases opened this session, so each opening is logged once (L3; dropped on lock).
     opened_cases: HashSet<String>,
+    /// What the answers and the checks against the sources said this session (D-161):
+    /// memory only, wiped on lock.
+    notes: notes::SessionNotes,
     /// What this opening has to say about the time since the last one (L4; dropped on lock).
     since_last: Option<String>,
     /// Moves when the Drive copy turns on or off (D-099): an upload or a cleanup begun before

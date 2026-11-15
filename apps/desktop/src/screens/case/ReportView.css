@@ -809,3 +809,141 @@
   flex-direction: column;
   gap: 2px;
 }
+
+/* D-161: what there is to look at under a paragraph, and what the answer said about the
+   section: one quiet line each, opening on a click. */
+.note-fold {
+  color: var(--ink-muted);
+}
+.note-fold > summary {
+  cursor: pointer;
+  width: fit-content;
+  padding: 2px 0;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.note-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.note-fold > summary:hover,
+.note-fold[open] > summary {
+  color: var(--ink-soft);
+}
+.note-fold.is-blocking > summary {
+  color: var(--warn-ink, var(--ink-soft));
+}
+.note-fold ul {
+  margin: 2px 0 0;
+  padding: 2px 10px;
+  list-style: none;
+  border-inline-start: 2px solid var(--line);
+  color: var(--ink-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.note-section {
+  margin-top: 6px;
+}
+.note-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+/* D-163: the closing sections in order, one compact strip where the closing part begins. */
+.closing-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+}
+.closing-flow-title {
+  font-size: var(--text-xs);
+  color: var(--ink-muted);
+}
+.closing-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.closing-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.closing-n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  font-size: var(--text-xs);
+}
+.closing-label {
+  font-weight: 700;
+}
+.closing-state {
+  color: var(--ink-muted);
+  font-size: var(--text-xs);
+}
+.closing-step.st-later {
+  color: var(--ink-muted);
+}
+.closing-step.st-later .closing-label {
+  font-weight: 400;
+}
+@media print {
+  .closing-flow {
+    display: none;
+  }
+}
+
+/* D-168: the guide, the DSM level and her past reports' lines, on the page for the section in
+   focus: each a quiet line that opens. In the app's own font, not the report's. */
+.a4-panel,
+.a4-fold {
+  margin: 4px 0 8px;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+}
+.a4-panel .section-library {
+  margin: 0;
+}
+.a4-panel .section-library > summary,
+.a4-fold > summary {
+  cursor: pointer;
+  width: fit-content;
+  padding: 2px 0;
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+.a4-panel .section-library[open] > summary,
+.a4-fold[open] > summary,
+.a4-panel .section-library > summary:hover,
+.a4-fold > summary:hover {
+  color: var(--ink-soft);
+}
+.a4-fold .dsm-severity {
+  margin-top: 6px;
+}
+@media print {
+  .a4-panel,
+  .a4-fold {
+    display: none;
+  }
+}

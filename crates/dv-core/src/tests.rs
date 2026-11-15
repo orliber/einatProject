@@ -29,6 +29,7 @@ mod layers;
 mod library;
 mod masks;
 mod newer_version;
+mod notes;
 mod off_lock;
 mod own;
 mod parents;
@@ -68,6 +69,20 @@ impl Transport for FakeTransport {
         let parsed: Value = serde_json::from_str(&body).unwrap();
         Ok(dv_ai::demo::respond(&parsed))
     }
+}
+
+/// A case as the vault alone tells it: without what the open session keeps about the drafts
+/// (D-161), which a restored or reopened vault does not have.
+fn from_the_vault(mut d: CaseDetail) -> CaseDetail {
+    for s in &mut d.sections {
+        s.notes = SectionNotes::default();
+        for p in &mut s.paragraphs {
+            let warnings = p.warnings.clone();
+            p.notes
+                .retain(|n| n.kind == NoteKind::Polish || warnings.contains(&n.text));
+        }
+    }
+    d
 }
 
 fn api_json(v: &Value) -> Value {

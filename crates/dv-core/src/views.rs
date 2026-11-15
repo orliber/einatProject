@@ -140,6 +140,11 @@ pub struct ParagraphView {
     /// wording. Advice for the finish, never part of `warnings`, never a block.
     #[serde(default)]
     pub polish: Vec<String>,
+    /// Everything there is to say about the paragraph, each with its kind (D-161): the
+    /// `warnings`, what was found when its answer came, the verdict of the check against the
+    /// sources, and the proofreading. Any kind but `polish` holds it out of "approve all".
+    #[serde(default)]
+    pub notes: Vec<crate::ParagraphNote>,
     /// A new wording of this approved paragraph (its id), waiting for her approval.
     pub replaces: Option<String>,
     /// Earlier wordings are kept and can be brought back (D-046).
@@ -217,6 +222,10 @@ pub struct SectionView {
     pub guide_learned_from: u32,
     /// The lines added for this case only.
     pub case_guide: String,
+    /// What the last answer for the section said beside its paragraphs (D-161): its
+    /// questions, what is missing or contradicting, the guide's lines left unanswered.
+    #[serde(default)]
+    pub notes: crate::SectionNotes,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

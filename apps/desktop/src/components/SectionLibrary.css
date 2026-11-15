@@ -4,3 +4,5 @@
 .library-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .library-similar { margin: 0; padding: 8px 12px; border-inline-start: 3px solid var(--line); white-space: pre-wrap; }
 .library-similar p { margin: 4px 0 0; }
+.library-line { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+.library-line.is-added { cursor: default; color: var(--ink-muted); }

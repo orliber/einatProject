@@ -174,6 +174,7 @@ impl Core {
             computer_seal: Arc::new(WindowsSeal),
             memory_lock: None,
             opened_cases: HashSet::new(),
+            notes: notes::SessionNotes::default(),
             since_last: None,
             drive_generation: Arc::default(),
             drive_cleanup_at: None,
@@ -587,6 +588,8 @@ impl Core {
         self.settled = None;
         self.section_nonces.clear();
         self.opened_cases.clear();
+        // What the answers said about the drafts (D-161) holds words of the case.
+        self.notes.wipe();
         self.since_last = None;
         // A cleanup owed at Google is tried again soon after the next unlock.
         self.drive_cleanup_at = None;

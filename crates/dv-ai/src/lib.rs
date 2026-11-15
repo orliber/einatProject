@@ -32,7 +32,7 @@ pub use request::{
 };
 pub use response::{
     numbers_not_in, parse_consult, parse_derived_section, parse_points_section, parse_section,
-    worth_another_try, AiError, ProposedParagraph, SectionReply,
+    worth_another_try, AiError, ProposedParagraph, SectionReply, WarningKind,
 };
 pub use shrink::{shrink_to_fit, Cut};
 pub use sort::{

@@ -124,9 +124,9 @@ test("the report page opens a section's guide and her own section's points", asy
   await expect(page.getByRole("article", { name: "הדוח, כמו בקובץ" })).toBeVisible();
   // The guide is beside the brief of the section in focus (round 48).
   await page.getByRole("button", { name: "איך לכתוב את הסעיף ←" }).click();
-  // The link opens the guide on arrival.
+  // D-168: the guide opens here, on the report page, under the section in focus.
   await expect(page.getByText(/הנוסח של המכון|הנוסח שלך, לכל התיקים/)).toBeVisible();
-  await page.getByRole("button", { name: "→ חזרה לדוח" }).click();
+  await expect(page.getByRole("article", { name: "הדוח, כמו בקובץ" })).toBeVisible();
   // Her own section: its points are written in the report itself, in the same box (D-140).
   await page.getByRole("button", { name: "✦ לנסח מהנקודות" }).first().click();
   await expect(page.getByRole("textbox", { name: /^הנקודות שלך לסעיף/ })).toBeVisible();
