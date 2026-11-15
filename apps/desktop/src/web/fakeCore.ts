@@ -46,6 +46,8 @@ import structure from "../../../../templates/report_structure.json";
 import { readDocx } from "./docx";
 import { filter, restore, type Person } from "./filter";
 import { FakeStyle } from "./fakeStyle";
+import { FakeClinic } from "./fakeClinic";
+import type { ClinicRequest } from "../ipc/generated/ClinicRequest";
 import { compareSheets, comparisonText, formatSheet, instruments } from "./scores";
 import * as R from "./routing";
 import { PROVIDERS, providerOf } from "../providers";
@@ -282,6 +284,31 @@ export class FakeCore {
   /** Approvals dropped because their material changed, with the line said at the send. */
   private withdrawn = new Set<string>();
   private style = new FakeStyle();
+  /** The clinic (beta, D-170) has its own stand-in; these are its few doors to the cases. */
+  private clinic = new FakeClinic({
+    cases: () => this.cases.map((c) => {
+      const s = this.summary(c);
+      return { id: c.id, code: c.meta.code, childName: s.child_name, approved: s.approved_sections.length, total: s.total_sections, inTrash: c.deletedAt !== null };
+    }),
+    createCase: (meta, identities) => this.newCase(meta, identities).id,
+    addInput: (caseId, kind, title, content) => this.addInput(this.find(caseId), kind, title, content).id,
+    updateInput: (caseId, inputId, title, content) => {
+      const c = this.find(caseId);
+      const i = c.inputs.find((x) => x.id === inputId);
+      if (!i) return false;
+      // As `update_input`: what was prepared with the old text does not go.
+      this.withdrawFor(c.id);
+      if (i.content !== content) {
+        const r = this.routingOf(c, i.id);
+        c.routing.set(i.id, { added: r.added, removed: r.removed });
+      }
+      i.title = title;
+      i.content = content;
+      c.updated = now();
+      return true;
+    },
+    myName: () => this.practitioner[0] ?? "",
+  });
 
   /** An approval that is gone: why, in one line (like the core). */
   private expired(id: string): never {
@@ -1147,6 +1174,8 @@ export class FakeCore {
       case "clear_report_logo":
         this.logo = null;
         return null;
+      case "clinic":
+        return this.clinic.answer(a.request as ClinicRequest);
       case "list_cases":
         return this.cases.filter((c) => c.deletedAt === null).map((c) => this.summary(c));
       case "list_trash":
