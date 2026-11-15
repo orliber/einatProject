@@ -136,6 +136,16 @@ describe("the short letter", () => {
     await waitFor(() => expect(calls.filter((c) => c.cmd === "letter").at(-1)?.args).toMatchObject({ audience: "school" }));
   });
 
+  it("while a letter is being written the other one cannot be chosen, and choosing clears the one on screen", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    const { user } = await openLetter((cmd) => (cmd === "send_section" ? gate.then(() => undefined) : undefined));
+    await user.click(screen.getByRole("button", { name: "ניסוח המכתב" }));
+    await waitFor(() => expect(screen.getByRole("radio", { name: "לצוות החינוכי" })).toBeDisabled());
+    release();
+    await waitFor(() => expect(screen.getByRole("radio", { name: "לצוות החינוכי" })).toBeEnabled());
+  });
+
   it("a letter to the school is asked for as such", async () => {
     const { user, calls } = await openLetter();
     await user.click(screen.getByRole("radio", { name: "לצוות החינוכי" }));

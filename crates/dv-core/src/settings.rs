@@ -63,6 +63,8 @@ impl Core {
             .collect();
         self.vault_mut()?
             .set_practitioner(&dv_vault::Practitioner { names })?;
+        // Her names are hidden in every case: no request prepared before the change goes out.
+        self.drop_pending();
         Ok(())
     }
 

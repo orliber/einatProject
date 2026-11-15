@@ -300,7 +300,9 @@ impl BackupTask {
         job: dv_vault::BackupJob,
         dest: &Path,
     ) -> Result<(dv_vault::BackupWritten, Vec<u8>), CoreError> {
-        job.write(dest)
+        // Under a `.part` name until it is read back and opens: a backup that failed its check
+        // is not left under a backup's name, nor over an earlier good one.
+        job.write_part(dest)
             .map_err(|_| {
                 CoreError::Needs(
                     "לא הצלחתי לכתוב את הגיבוי לתיקייה שנבחרה. אם זה דיסק נייד, כדאי לבדוק שהוא \

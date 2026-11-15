@@ -362,7 +362,7 @@ static COMPILED: LazyLock<Result<Compiled, regex::Error>> = LazyLock::new(|| {
         num_date: Regex::new(r"(\d{1,2})[./](\d{1,2})(?:[./](\d{4}|\d{2}))?")?,
         year: Regex::new(r"(19[5-9]\d|20[0-4]\d)")?,
         address: Regex::new(
-            r#"(?:רחוב|רח'|שדרות|שד'|דרך|סמטת|כיכר|ככר)\s+[א-ת"'׳״\-]+(?:\s+[א-ת"'׳״\-]+){0,2}\s*\d{1,4}"#,
+            r#"(?:רחוב|רח['׳’‘]|שדרות|שד['׳’‘]|דרך|סמטת|כיכר|ככר)\s+[א-ת"'׳״\-]+(?:\s+[א-ת"'׳״\-]+){0,2}\s*\d{1,4}"#,
         )?,
         settlement: Regex::new(
             r"(?:קיבוץ|מושב|מושבה|שכונת|בשכונת|לשכונת|משכונת)\s+[א-ת\-]+(?:\s+[א-ת\-]+)?",
@@ -373,11 +373,13 @@ static COMPILED: LazyLock<Result<Compiled, regex::Error>> = LazyLock::new(|| {
         )?,
         // A street named without a house number ("ברחוב התשבי"); kept only when the name is
         // not an everyday word ("ברחוב הראשי").
-        street_bare: Regex::new(r#"(?:רחוב|ברחוב|לרחוב|מרחוב|ברח'|רח')\s+([א-ת"'׳״\-]+)"#)?,
+        street_bare: Regex::new(
+            r#"(?:רחוב|ברחוב|לרחוב|מרחוב|ברח['׳’‘]|רח['׳’‘])\s+([א-ת"'׳״\-]+)"#,
+        )?,
         // Short numbers that a label marks as an identifier: a medical license ("מ.ר. 4471"),
         // a file, a membership or a passport number.
         labeled_number: Regex::new(
-            r#"(?:מ\.ר\.?|מ"ר|מ״ר|(?:מס'|מס׳|מספר)\s*(?:רישיון|רשיון|רישום|תיק|חבר|תלמיד|פנייה|הפניה|דרכון)|(?:רישיון|רשיון|תיק|דרכון)\s*(?:מס'|מס׳|מספר))\s*:?\s*(\d(?:[\d\-/]{0,12}\d)?)"#,
+            r#"(?:מ\.ר\.?|מ"ר|מ״ר|(?:מס['׳’‘]|מספר)\s*(?:רישיון|רשיון|רישום|תיק|חבר|תלמיד|פנייה|הפניה|דרכון)|(?:רישיון|רשיון|תיק|דרכון)\s*(?:מס['׳’‘]|מספר))\s*:?\s*(\d(?:[\d\-/]{0,12}\d)?)"#,
         )?,
         // A day in Hebrew letters: "ט\"ו", "כ'", "יג" – two letters, or a geresh / gershayim
         // ("כמו האב" is not a date).
@@ -411,7 +413,7 @@ pub fn is_valid_israeli_id(digits: &str) -> bool {
             }
         })
         .sum();
-    sum % 10 == 0
+    sum.is_multiple_of(10)
 }
 
 /// "לפני כשבועיים", "לפני כ-3 חודשים", "בעוד כחודש"… relative to `today`.
@@ -658,6 +660,80 @@ fn preceded_by_age_or_score(text: &str, start: usize) -> bool {
     ]
     .iter()
     .any(|w| last.ends_with(w))
+}
+
+/// What follows a number makes it a measure or a count, not a day and a month: a unit
+/// ("17.2 ק"ג", "98.5 ס"מ") or what was counted ("8/10 פריטים", "1.5 סטיות תקן"). Such a
+/// number was sent as a made-up time ("משקל לפני כ-7 חודשים ק"ג").
+///
+/// Words of time (שנה, חודש, ימים, שעה…) are not in the list: a date is followed by them as
+/// well ("ב-14.9 שעה לפני", "מאז 1.9 שנה"), and on a doubt the number is hidden.
+fn followed_by_unit(text: &str, end: usize) -> bool {
+    // Text that cannot be read (never expected) is not shown to be a measure: the date stays.
+    let Some(tail) = text.get(end..) else {
+        return false;
+    };
+    let tail = tail.trim_start_matches(' ');
+    if tail.starts_with('%') {
+        return true;
+    }
+    let word: String = tail
+        .chars()
+        .take_while(|c| !c.is_whitespace() && !matches!(c, ',' | '.' | ';' | ':' | ')' | '('))
+        .map(|c| {
+            if matches!(c, '״' | '”' | '“') {
+                '"'
+            } else {
+                c
+            }
+        })
+        .collect();
+    [
+        "ק\"ג",
+        "קג",
+        "ק\"ג.",
+        "גרם",
+        "גר'",
+        "ס\"מ",
+        "סמ",
+        "מ\"מ",
+        "מטר",
+        "ק\"מ",
+        "ליטר",
+        "מ\"ל",
+        "סטיות",
+        "סטיית",
+        "פריטים",
+        "משימות",
+        "נקודות",
+        "מהמקרים",
+        "מהפעמים",
+        "מהפריטים",
+        "מהמשימות",
+        "אחוז",
+        "אחוזים",
+        "מתוך",
+        "פעמים",
+        "מילים",
+        "שאלות",
+        "תשובות",
+        "ניסיונות",
+        "מעלות",
+        "הברות",
+        "צעדים",
+        "קוביות",
+    ]
+    .contains(&word.as_str())
+}
+
+/// "בדרך כלל": the commonest "דרך" in a report, never a street.
+fn usually(text: &str, start: usize, matched: &str) -> bool {
+    matched.starts_with("דרך")
+        && matched
+            .trim_start_matches("דרך")
+            .trim_start()
+            .starts_with("כלל")
+        && text.get(..start).is_some_and(|h| h.ends_with('ב'))
 }
 
 fn push(
@@ -1079,6 +1155,9 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
         }
     }
     for m in c.address.find_iter(text) {
+        if usually(text, m.start(), m.as_str()) {
+            continue;
+        }
         push(
             &mut hits,
             m.start(),
@@ -1290,7 +1369,8 @@ fn find_plain(text: &str, today: Ymd) -> Result<Vec<PatternHit>, regex::Error> {
         let Some(m) = caps.get(0) else { continue };
         // An age or a score never carries a year: "בגיל 2.5" is not a date, "בגיל 2.5.2020" is.
         if !digit_bounded(text, m.start(), m.end())
-            || (caps.get(3).is_none() && preceded_by_age_or_score(text, m.start()))
+            || (caps.get(3).is_none()
+                && (preceded_by_age_or_score(text, m.start()) || followed_by_unit(text, m.end())))
         {
             continue;
         }
@@ -1693,6 +1773,72 @@ mod tests {
         assert!(kinds("טווח ממוצע 85–115, ציון 92")
             .iter()
             .all(|h| h.1 != PatternKind::Phone));
+    }
+
+    /// A weight, a count out of a total and a distance in standard deviations were read as
+    /// a day and a month and sent as a made-up time ("משקל לפני כ-7 חודשים ק"ג").
+    #[test]
+    fn a_measure_with_its_unit_is_not_a_date() {
+        for text in [
+            "משקל 17.2 ק\"ג",
+            "משקל לידה 3.2 ק״ג",
+            "ענה נכון על 8/10 פריטים",
+            "נמוך ב-1.5 סטיות תקן מהממוצע",
+            "ביצע 4/5 משימות",
+            "הצליח ב-3/4 מהמקרים",
+            "גובה 98.5 ס\"מ",
+        ] {
+            assert!(kinds(text).is_empty(), "{text}: {:?}", kinds(text));
+        }
+        // With no unit after it, it is still read as a date; with a year, always.
+        assert_eq!(kinds("נבדק ב-3.2.2026 שעות ספורות")[0].1, PatternKind::Date);
+        assert_eq!(kinds("ב-14.9 לא רצה לצאת לחצר").len(), 1);
+        // A word of time after the number proves nothing: a date is followed by one too.
+        for text in [
+            "ב-14.9 שעה לפני הארוחה בכה",
+            "מאז 1.9 שנה שלמה במסגרת",
+            "ב-3.5 ימים ספורים אחרי המעבר",
+            "ישן 9.5 שעות בלילה",
+        ] {
+            assert_eq!(kinds(text).len(), 1, "{text}");
+            assert_eq!(kinds(text)[0].1, PatternKind::Date, "{text}");
+        }
+    }
+
+    /// "בדרך כלל … 3" was hidden as a street address ("דרך" opened the pattern).
+    #[test]
+    fn usually_is_not_a_street() {
+        assert!(kinds("בדרך כלל משחק עם 2 ילדים").is_empty());
+        assert!(kinds("בדרך כלל ישן 10 שעות").is_empty());
+        assert_eq!(kinds("גרים בדרך השלום 5")[0].1, PatternKind::Address);
+        assert_eq!(kinds("ברחוב הרצל 15")[0].1, PatternKind::Address);
+    }
+
+    /// The abbreviation's geresh as Word and a phone type it (’ and ׳) left the street and the
+    /// house number, and a short labelled number, in the text.
+    #[test]
+    fn an_abbreviation_with_any_geresh_is_read() {
+        for q in ['\'', '׳', '’', '‘'] {
+            let street = format!("המשפחה מתגוררת ברח{q} הגפן 15 בחיפה");
+            assert!(
+                kinds(&street)
+                    .iter()
+                    .any(|h| h.1 == PatternKind::Address && h.0.contains("15")),
+                "{street}: {:?}",
+                kinds(&street)
+            );
+            let avenue = format!("שד{q} הנשיא 12");
+            assert!(
+                kinds(&avenue).iter().any(|h| h.1 == PatternKind::Address),
+                "{avenue}"
+            );
+            let file = format!("תיק מס{q} 31");
+            assert!(
+                kinds(&file).iter().any(|h| h.0.contains("31")),
+                "{file}: {:?}",
+                kinds(&file)
+            );
+        }
     }
 
     #[test]

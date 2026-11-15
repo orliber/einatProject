@@ -369,7 +369,7 @@ fn hex(bytes: &[u8]) -> Zeroizing<String> {
 
 fn unhex(text: &str) -> Result<Zeroizing<Vec<u8>>, VaultError> {
     let bad = || VaultError::Crypto("the key kept for this computer is not readable");
-    if text.len() % 2 != 0 {
+    if !text.len().is_multiple_of(2) {
         return Err(bad());
     }
     let mut out = Zeroizing::new(Vec::with_capacity(text.len() / 2));

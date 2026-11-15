@@ -52,15 +52,19 @@ impl Core {
         mut cases: Vec<CaseSummary>,
     ) -> Result<Vec<CaseSummary>, CoreError> {
         let failed = self.failed_sends()?;
+        // The report's structure is read once for each template, not once for each case.
+        let mut counts: HashMap<Option<String>, u32> = HashMap::new();
         for c in &mut cases {
             c.failed_at = failed.get(&c.id).copied();
             // The same count as the report's table of contents, so the list and the report
             // agree ("2 מתוך 15").
-            c.total_sections = dv_domain::ReportStructure::for_template(c.meta.template.as_deref())
-                .map(|s| s.sections().filter(|s| s.key != "signature").count())
-                .ok()
-                .and_then(|n| u32::try_from(n).ok())
-                .unwrap_or_default();
+            c.total_sections = *counts.entry(c.meta.template.clone()).or_insert_with(|| {
+                dv_domain::ReportStructure::for_template(c.meta.template.as_deref())
+                    .map(|s| s.sections().filter(|s| s.key != "signature").count())
+                    .ok()
+                    .and_then(|n| u32::try_from(n).ok())
+                    .unwrap_or_default()
+            });
         }
         Ok(cases)
     }

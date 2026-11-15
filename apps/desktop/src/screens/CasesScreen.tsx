@@ -43,7 +43,50 @@ function updated(ts: number): string {
   const yesterday = new Date(today);
   yesterday.setDate(today.getDate() - 1);
   if (d.toDateString() === yesterday.toDateString()) return "אתמול";
-  return d.toLocaleDateString("he-IL", { day: "numeric", month: "numeric" });
+  // Another year is said: a case from last November is not "20.11" beside this month's.
+  return d.getFullYear() === today.getFullYear()
+    ? d.toLocaleDateString("he-IL", { day: "numeric", month: "numeric" })
+    : d.toLocaleDateString("he-IL", { day: "numeric", month: "numeric", year: "numeric" });
+}
+
+/** "3 תיקים בעבודה", in Hebrew for one and for none too. */
+export function inWorkLine(n: number): string {
+  return n === 0 ? "אין תיקים בעבודה." : n === 1 ? "תיק אחד בעבודה." : `${n} תיקים בעבודה.`;
+}
+
+/** When a case in the bin goes for good. At 0 it waits only for a backup, so no number is promised. */
+export function goesIn(days: number): string {
+  return days <= 0 ? "יימחק בקרוב" : days === 1 ? "יימחק מחר" : days === 2 ? "יימחק בעוד יומיים" : `יימחק בעוד ${days} ימים`;
+}
+
+/**
+ * For every folder: how many cases are inside it at any depth, and when one of them last changed.
+ * One pass over the cases (each walks up its folders), instead of a walk of the whole tree per row.
+ */
+export function folderStats(folders: Folder[], cases: CaseSummary[]): Map<string, { count: number; last: number }> {
+  const parent = new Map(folders.map((f) => [f.id, f.parent_id ?? null]));
+  const stats = new Map<string, { count: number; last: number }>();
+  for (const c of cases) {
+    // `hops` ends a loop in the tree, which the core refuses but a damaged vault could hold.
+    for (let id = c.folder_id ?? null, hops = 0; id && parent.has(id) && hops <= folders.length; id = parent.get(id) ?? null, hops++) {
+      const s = stats.get(id);
+      if (s) {
+        s.count += 1;
+        s.last = Math.max(s.last, c.updated_at);
+      } else {
+        stats.set(id, { count: 1, last: c.updated_at });
+      }
+    }
+  }
+  return stats;
+}
+
+const HEBREW = new Intl.Collator("he");
+
+/** A copy of a fetched list; `fetchedAt` only says which fetch it is. */
+function fresh<T>(list: T[] | null | undefined, fetchedAt: number): T[] {
+  void fetchedAt;
+  return [...(list ?? [])];
 }
 
 type Modal =
@@ -123,12 +166,19 @@ export function CasesScreen() {
   const [sort, setSortState] = useState<Sort>(remembered.sort);
   const [treeOpen, setTreeOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [modal, setModal] = useState<Modal | null>(null);
+  const [modal, setModalState] = useState<Modal | null>(null);
   const [dropOn, setDropOn] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // A new action (its window opens) starts clean: an older refusal does not stay beside it.
+  const setModal = (m: Modal | null) => {
+    if (m) setError(null);
+    setModalState(m);
+  };
 
-  const allFolders = useMemo(() => folders.data ?? [], [folders.data]);
-  const allCases = useMemo(() => cases.data ?? [], [cases.data]);
+  // A new list each time it is read again (`dataUpdatedAt`), also when the data came back equal: what is
+  // computed from the lists below is redone whenever the core was asked again.
+  const allFolders = useMemo(() => fresh(folders.data, folders.dataUpdatedAt), [folders.data, folders.dataUpdatedAt]);
+  const allCases = useMemo(() => fresh(cases.data, cases.dataUpdatedAt), [cases.data, cases.dataUpdatedAt]);
   // A folder that no longer exists (deleted elsewhere): back to the top.
   const current = folderId && allFolders.some((f) => f.id === folderId) ? folderId : null;
   // In a narrow window the tree folds away after a pick; focus goes to the button that reopens it.
@@ -154,7 +204,7 @@ export function CasesScreen() {
   const sample = useMutation({
     mutationFn: ipc.createSampleCase,
     onSuccess: (id) => { void refreshAll(); go({ name: "case", id, view: "materials" }); },
-    onError: (e: UiError) => fail(e),
+    onError: (e: UiError) => setError(fail(e)),
   });
   const act = useMutation({
     mutationFn: (f: () => Promise<unknown>) => f(),
@@ -162,16 +212,20 @@ export function CasesScreen() {
     onError: (e: unknown) => setError(fail(e as UiError)),
   });
   /** Runs an action and refreshes the list; resolves `false` when it failed (the error is already shown). */
-  const run = (f: () => Promise<unknown>, done?: string): Promise<boolean> =>
-    act.mutateAsync(f).then(
+  const run = (f: () => Promise<unknown>, done?: string): Promise<boolean> => {
+    // An older refusal does not stay beside a new try, and the same refusal is said again.
+    setError(null);
+    return act.mutateAsync(f).then(
       () => {
         if (done) notify(done);
         return true;
       },
       () => false,
     );
+  };
 
-  const byId = new Map(allFolders.map((f) => [f.id, f]));
+  const byId = useMemo(() => new Map(allFolders.map((f) => [f.id, f])), [allFolders]);
+  const stats = useMemo(() => folderStats(allFolders, allCases), [allFolders, allCases]);
   const path: Folder[] = [];
   for (let f = current ? byId.get(current) : undefined; f; f = f.parent_id ? byId.get(f.parent_id) : undefined) path.unshift(f);
   const pathOf = (id: string | null): string => {
@@ -180,39 +234,38 @@ export function CasesScreen() {
     return names.join(" › ");
   };
   /** Cases inside a folder, at any depth. */
-  const countIn = (id: string) => {
-    const ids = descendants(allFolders, id);
-    return allCases.filter((c) => c.folder_id && ids.has(c.folder_id)).length;
-  };
+  const countIn = (id: string) => stats.get(id)?.count ?? 0;
   /** When a case inside a folder (at any depth) last changed: the folder's "עודכן"; `null` when empty. */
-  const lastIn = (id: string): number | null => {
-    const ids = descendants(allFolders, id);
-    const times = allCases.filter((c) => c.folder_id && ids.has(c.folder_id)).map((c) => c.updated_at);
-    return times.length ? Math.max(...times) : null;
-  };
+  const lastIn = (id: string): number | null => stats.get(id)?.last ?? null;
   const parentOf = current ? (byId.get(current)?.parent_id ?? null) : null;
 
   const q = query.trim().toLowerCase();
-  const matches = (c: CaseSummary) => (c.child_name ?? "").toLowerCase().includes(q) || c.meta.code.toLowerCase().includes(q);
-  const shownFolders = q ? allFolders.filter((f) => f.name.toLowerCase().includes(q)) : allFolders.filter((f) => f.parent_id === current);
-  // A new array (filter), so sorting it below never touches the query's own data.
-  const shownCases = casesShown(allCases, current, q ? matches : null);
-  shownFolders.sort((a, b) => a.name.localeCompare(b.name, "he"));
-  const statusOf = new Map(shownCases.map((c) => [c.id, caseStatus(c)]));
+  // Filtered and sorted once per change of the list, the folder, the search or the sort: a drag
+  // over the rows or a notice re-renders the screen without redoing this.
+  const { shownFolders, shownCases, statusOf } = useMemo(() => {
+    const matches = (c: CaseSummary) => (c.child_name ?? "").toLowerCase().includes(q) || c.meta.code.toLowerCase().includes(q);
+    const shownFolders = q ? allFolders.filter((f) => f.name.toLowerCase().includes(q)) : allFolders.filter((f) => f.parent_id === current);
+    // A new array (filter), so sorting it below never touches the query's own data.
+    const shownCases = casesShown(allCases, current, q ? matches : null);
+    shownFolders.sort((a, b) => HEBREW.compare(a.name, b.name));
+    const statusOf = new Map(shownCases.map((c) => [c.id, caseStatus(c)]));
+    const st = (c: CaseSummary) => statusOf.get(c.id) ?? caseStatus(c);
+    const rank = (s: CaseStatus) => (s.attention ? 0 : s.steps[2] === "now" ? 1 : s.steps[1] === "now" ? 2 : 3);
+    shownCases.sort((a, b) =>
+      sort === "name" ? HEBREW.compare(a.child_name ?? a.meta.code, b.child_name ?? b.meta.code)
+        : sort === "status" ? rank(st(a)) - rank(st(b)) || b.updated_at - a.updated_at
+          : b.updated_at - a.updated_at);
+    return { shownFolders, shownCases, statusOf };
+  }, [allCases, allFolders, current, q, sort]);
   const st = (c: CaseSummary) => statusOf.get(c.id) ?? caseStatus(c);
-  const rank = (s: CaseStatus) => (s.attention ? 0 : s.steps[2] === "now" ? 1 : s.steps[1] === "now" ? 2 : 3);
-  shownCases.sort((a, b) =>
-    sort === "name" ? (a.child_name ?? a.meta.code).localeCompare(b.child_name ?? b.meta.code, "he")
-      : sort === "status" ? rank(st(a)) - rank(st(b)) || b.updated_at - a.updated_at
-        : b.updated_at - a.updated_at);
 
   // "ד\"ר רותם בדויה" → "רותם": a title is not how anyone is greeted.
   const name = status.practitioner[0]?.split(" ").find((w) => w && !/^(ד["״']?ר|דר'|פרופ'|גב'|מר)$/.test(w));
-  const inProgress = allCases.filter((c) => approvedCount(c) < totalSections(c)).length;
   // The case she worked on last and has not finished: one click back into it.
-  const resume = [...allCases]
-    .filter((c) => approvedCount(c) < totalSections(c))
-    .sort((a, b) => b.updated_at - a.updated_at)[0];
+  const { inProgress, resume } = useMemo(() => {
+    const open = allCases.filter((c) => approvedCount(c) < totalSections(c));
+    return { inProgress: open.length, resume: [...open].sort((a, b) => b.updated_at - a.updated_at)[0] };
+  }, [allCases]);
   const resumeStatus = resume ? caseStatus(resume) : null;
   const trashCount = trash.data?.length ?? 0;
 
@@ -223,6 +276,7 @@ export function CasesScreen() {
   const moveCase = async (c: CaseSummary, to: string | null) => {
     const from = c.folder_id ?? null;
     if (from === to) return;
+    setError(null);
     await ipc.moveCase(c.id, to);
     await refreshAll();
     notify(`התיק של ${caseName(c)} הועבר ל${placeName(to)}.`, { label: "ביטול", run: () => void run(() => ipc.moveCase(c.id, from), "ההעברה בוטלה.") });
@@ -232,6 +286,7 @@ export function CasesScreen() {
   const moveFolder = async (f: Folder, to: string | null) => {
     const from = f.parent_id ?? null;
     if (from === to || !folderFits(f, to)) return;
+    setError(null);
     await ipc.moveFolder(f.id, to);
     await refreshAll();
     notify(`התיקייה "${f.name}" הועברה ל${placeName(to)}.`, { label: "ביטול", run: () => void run(() => ipc.moveFolder(f.id, from), "ההעברה בוטלה.") });
@@ -322,6 +377,7 @@ export function CasesScreen() {
   };
   /** D-029: a new case for the follow-up, with the same names; it opens on its details. */
   async function followUp(c: CaseSummary) {
+    setError(null);
     try {
       const id = await ipc.createFollowUp(c.id);
       await refreshAll();
@@ -332,7 +388,10 @@ export function CasesScreen() {
     }
   }
 
-  const noCasesYet = allCases.length === 0 && allFolders.length === 0 && !!cases.data;
+  // The first-case card stands in for the whole explorer, the only way into the recycle bin. So it
+  // shows only once all three lists arrived and all are empty: a deleted last case stays reachable.
+  const noCasesYet = !!cases.data && folders.isFetched && trash.isFetched
+    && allCases.length === 0 && allFolders.length === 0 && trashCount === 0;
   const emptyHere = !!cases.data && !noCasesYet && shownCases.length === 0 && shownFolders.length === 0;
 
   return (
@@ -342,7 +401,7 @@ export function CasesScreen() {
         <div className="page-head">
           <div className="stack" style={{ gap: 4 }}>
             <h1>{greeting()}{name ? `, ${name}` : ""}</h1>
-            <p className="muted">{cases.data ? (allCases.length ? `${inProgress} תיקים בעבודה.` : "עוד אין תיקים") : " "}</p>
+            <p className="muted">{cases.data ? (allCases.length ? inWorkLine(inProgress) : "עוד אין תיקים") : " "}</p>
           </div>
           <div className="row head-actions">
             <button type="button" className="btn btn-primary btn-big" onClick={() => setCreating(true)}>+ תיק חדש</button>
@@ -640,7 +699,7 @@ function TrashList(props: { cases: CaseSummary[]; pathOf: (id: string | null) =>
                 <div className="case-name serif">{c.child_name ?? "ללא שם"}</div>
                 <div className="small muted">{[c.meta.code, c.folder_id && props.pathOf(c.folder_id) ? `היה ב: ${props.pathOf(c.folder_id)}` : ""].filter(Boolean).join(" · ")}</div>
               </td>
-              <td className="small">{c.deleted_at ? updated(c.deleted_at) : ""} · יימחק בעוד {daysLeft(c)} ימים</td>
+              <td className="small">{c.deleted_at ? updated(c.deleted_at) : ""} · {goesIn(daysLeft(c))}</td>
               <td>
                 <div className="row-actions">
                   <button type="button" className="btn btn-primary" onClick={() => props.onRestore(c)}>שחזור</button>

@@ -49,4 +49,17 @@ describe("ImportDialog", () => {
     expect(text).toHaveTextContent("הגננת רינת סיפרה שהוא משחק עם חן.");
     expect(screen.getByRole("button", { name: "שמירה בתיק" })).toBeEnabled();
   });
+
+  it("more than six things left out: the rest are counted, not dropped silently", () => {
+    mockIPC(() => null);
+    const left_out = Array.from({ length: 8 }, (_, i) => `תמונה בדויה ${i + 1} לא נקראה`);
+    render(
+      <AppContext.Provider value={api()}>
+        <ImportDialog caseId="c1" preview={{ ...preview(), left_out }} onClose={vi.fn()} onSaved={vi.fn(async () => undefined)} />
+      </AppContext.Provider>,
+    );
+    expect(screen.getByText("תמונה בדויה 6 לא נקראה")).toBeInTheDocument();
+    expect(screen.queryByText("תמונה בדויה 7 לא נקראה")).toBeNull();
+    expect(screen.getByText(/ועוד 2 שלא נקלטו/)).toBeInTheDocument();
+  });
 });

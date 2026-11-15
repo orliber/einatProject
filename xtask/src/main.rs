@@ -7,6 +7,8 @@
 //! * `cargo xtask update-keygen [--next]` / `update-notice …` / `update-key-backup …` /
 //!   `update-key-restore …` – signed updates (D-033): the key pair on the developer's
 //!   computer, the notice signed there or in the release workflow (D-091).
+//! * `cargo xtask speed` – the speed checkers: the core's main actions against their time
+//!   budgets on a vault of 300 invented cases, and the size of the built page (`speed.rs`).
 //! * `cargo xtask gen-ipc` – the TypeScript of every command, from the shell (`ipc.rs`).
 //! * `cargo xtask ci [--e2e] [--rust|--ui]` – the CI checks, on this computer, in one command.
 //! * `cargo xtask check-parsers` / `sbom <out.json>` / `self-audit [--full]` – the supply
@@ -22,6 +24,7 @@ mod ipc;
 mod israeli_id;
 mod release;
 mod scan;
+mod speed;
 mod supply;
 
 use std::io::Write;
@@ -80,6 +83,7 @@ fn main() -> ExitCode {
             Ok(problems) => report("parser pins", &problems),
             Err(e) => report("parser pins", &[format!("could not run: {e}")]),
         },
+        Some("speed") => report("speed", &speed::run(&root)),
         Some("gen-ipc") => done("gen-ipc", ipc::write(&root)),
         Some("sbom") => done("sbom", supply::sbom(&root, &args[1..])),
         Some("self-audit") => report("self-audit", &supply::self_audit(&root, &args[1..])),
@@ -90,7 +94,7 @@ fn main() -> ExitCode {
         Some("update-notice") => done("update-notice", release::notice(&root, &args[1..])),
         _ => report(
             "usage",
-            &["cargo xtask check-invariants | cargo xtask scan [--staged|--all] | cargo xtask ci [--e2e] [--rust|--ui]".to_owned()],
+            &["cargo xtask check-invariants | cargo xtask scan [--staged|--all] | cargo xtask ci [--e2e] [--rust|--ui] | cargo xtask speed".to_owned()],
         ),
     }
 }

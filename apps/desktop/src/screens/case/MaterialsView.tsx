@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
+import { flushSync } from "react-dom";
 import { useApp } from "../../App";
 import { kindLabel, kindOrder } from "../../i18n/he";
 import { ipc, type CaseInput, type FollowUpView, type ImportPreview, type InputKind, type MaterialRouting, type PriorRecordView, type ScoreSheet, type Setting } from "../../ipc/client";
@@ -558,7 +559,11 @@ function WriteDialog(props: { caseId: string; kind: InputKind; input?: CaseInput
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   // A long session note must survive Escape and the automatic lock.
-  const holdLive = useHoldUnsaved(props.caseId, title.trim() || kindLabel[kind], changed && !empty ? content : null, "materials");
+  // Saved, or closed on purpose: the text is let go before the window goes, so the next lock
+  // does not offer it back as "not saved".
+  const [done, setDone] = useState(false);
+  const holdLive = useHoldUnsaved(props.caseId, title.trim() || kindLabel[kind], !done && changed && !empty ? content : null, "materials");
+  const letGo = () => flushSync(() => setDone(true));
 
   async function save() {
     // What is in the box now, not the debounced copy.
@@ -568,9 +573,11 @@ function WriteDialog(props: { caseId: string; kind: InputKind; input?: CaseInput
     try {
       if (props.input) {
         await ipc.updateInput(props.caseId, props.input.id, title.trim(), text);
+        letGo();
         await props.onSaved(props.input.id);
       } else {
         const saved = await ipc.addInput(props.caseId, kind, title.trim(), text);
+        letGo();
         await props.onSaved(saved.id);
       }
     } catch (e) {
@@ -582,7 +589,7 @@ function WriteDialog(props: { caseId: string; kind: InputKind; input?: CaseInput
   return (
     <Dialog title={props.input ? "עריכת חומר" : kind === "session_note" ? "רישום מפגש" : "הוספת טקסט"}
       subtitle="אפשר לכתוב עם שמות. הם מוסתרים לפני כל שליחה."
-      onClose={props.onClose} dirty={!saving && changed && !empty}
+      onClose={() => { letGo(); props.onClose(); }} dirty={!saving && changed && !empty}
       footer={<><span className="grow" /><button type="button" className="btn" onClick={props.onClose}>ביטול</button><button type="button" className="btn btn-primary" disabled={saving} onClick={() => void save()}>שמירה בתיק</button></>}>
       <div className="stack">
         {!props.input && (

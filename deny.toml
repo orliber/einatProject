@@ -62,6 +62,15 @@ allow = [
   "CDLA-Permissive-2.0",
 ]
 
+# D-180: the SQLCipher source that libsqlite3-sys builds (RUSTSEC-2026-0459 is fixed only
+# from the release that takes it from this crate). "blessing" is SQLite's public-domain
+# dedication, the same code that was built before from inside libsqlite3-sys; WTFPL covers
+# the libtomcrypt sources that ship in the crate and are not compiled here (the provider is
+# OpenSSL). Allowed for this crate only, not as a license in general.
+[[licenses.exceptions]]
+crate = "sqlcipher-src"
+allow = ["blessing", "WTFPL"]
+
 [licenses.private]
 ignore = true
 

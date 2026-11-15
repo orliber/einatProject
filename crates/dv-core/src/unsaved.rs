@@ -3,7 +3,7 @@
 //!
 //! While she edits, the page hands the text to the core, which keeps it in memory only. When
 //! the vault locks, the text is written into the vault (encrypted) just before it closes, and
-//! the next time she enters it is offered back once. Nothing goes to disk outside the vault:
+//! the next time she enters it is offered back, until she closes it. Nothing goes to disk outside the vault:
 //! the page itself is reloaded on lock and remembers nothing.
 
 use serde::{Deserialize, Serialize};
@@ -52,12 +52,46 @@ impl Core {
         if kept.len() > MAX_EDITS {
             kept.drain(..kept.len() - MAX_EDITS);
         }
+        // A text that was offered back and is no longer held was closed by her: only now it
+        // leaves the vault. Until then a second lock, or a crash, offers it again.
+        if !self.offered.is_empty() {
+            let still: Vec<UnsavedEdit> = self
+                .offered
+                .iter()
+                .filter(|o| kept.contains(o))
+                .cloned()
+                .collect();
+            if still.len() != self.offered.len() {
+                let stored = if still.is_empty() {
+                    String::new()
+                } else {
+                    serde_json::to_string(&still).unwrap_or_default()
+                };
+                if let Some(v) = self.vault.as_mut() {
+                    if v.set_state(UNSAVED_KEY, &stored).is_ok() {
+                        self.offered = still;
+                    }
+                }
+            }
+        }
         self.unsaved = kept;
     }
 
     /// Before the vault closes: keep every open edit inside it.
     pub(crate) fn keep_unsaved(&mut self) {
-        let edits = std::mem::take(&mut self.unsaved);
+        let mut edits = std::mem::take(&mut self.unsaved);
+        // What was offered and is still on screen is among `edits` (the page holds it). If the
+        // page had no time to say so, while another editor was already held, the offered texts
+        // go in before it: the list written below replaces what the vault holds.
+        let mut offered = std::mem::take(&mut self.offered);
+        offered.retain(|o| !edits.contains(o));
+        if !offered.is_empty() {
+            offered.append(&mut edits);
+            edits = offered;
+            if edits.len() > MAX_EDITS {
+                edits.drain(..edits.len() - MAX_EDITS);
+            }
+        }
         let Some(v) = self.vault.as_mut() else {
             return;
         };
@@ -69,19 +103,30 @@ impl Core {
         }
     }
 
-    /// After entering: the edits kept at the last lock, offered once. A vault kept by an
-    /// earlier version holds one edit, not a list.
+    /// After entering: the edits kept at the last lock. They stay in the vault while the page
+    /// shows them (it holds each like an open editor), and leave it when she closes them
+    /// (`hold_unsaved` without them). A vault kept by an earlier version holds one edit, not
+    /// a list.
     pub fn take_unsaved(&mut self) -> Result<Vec<UnsavedEdit>, CoreError> {
+        if !self.offered.is_empty() {
+            // Asked again in the same opening (the page was drawn twice): the same texts.
+            return Ok(self.offered.clone());
+        }
         let v = self.vault_mut()?;
         let Some(stored) = v.setting(UNSAVED_KEY)?.filter(|s| !s.is_empty()) else {
             return Ok(Vec::new());
         };
-        v.set_state(UNSAVED_KEY, "")?;
-        if let Ok(list) = serde_json::from_str::<Vec<UnsavedEdit>>(&stored) {
-            return Ok(list);
+        let list = match serde_json::from_str::<Vec<UnsavedEdit>>(&stored) {
+            Ok(list) => list,
+            Err(_) => serde_json::from_str::<UnsavedEdit>(&stored)
+                .into_iter()
+                .collect(),
+        };
+        if list.is_empty() {
+            // Nothing readable: not kept for ever.
+            v.set_state(UNSAVED_KEY, "")?;
         }
-        Ok(serde_json::from_str::<UnsavedEdit>(&stored)
-            .into_iter()
-            .collect())
+        self.offered = list.clone();
+        Ok(list)
     }
 }

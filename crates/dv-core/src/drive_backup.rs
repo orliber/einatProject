@@ -642,7 +642,8 @@ impl Core {
         keys: &dyn ComputerKeys,
     ) -> Result<DriveTurnOn, CoreError> {
         let vault_id = self.vault_ref()?.vault_id().to_owned();
-        if self.drive_backup_on() {
+        // On, with a permission Google withdrew: connecting again is what she is asked to do.
+        if self.drive_backup_on() && !self.drive_needs_reconnect() {
             return Err(refused("העותק בגוגל דרייב כבר דלוק."));
         }
         if !self.google_status(keys).on {
@@ -665,6 +666,16 @@ impl Core {
             keep_grant: self.drive_keeps_grant(),
             owed,
         })
+    }
+
+    /// The copy is on, and the last upload found the permission withdrawn at Google.
+    fn drive_needs_reconnect(&self) -> bool {
+        self.vault
+            .as_ref()
+            .and_then(|v| v.setting(PROBLEM_KEY).ok().flatten())
+            .as_deref()
+            .and_then(DriveProblem::parse)
+            == Some(DriveProblem::Reconnect)
     }
 
     /// A cleanup owed on another account than `tag` keeps its place until it is done.
@@ -693,8 +704,14 @@ impl Core {
             return Err(CoreError::Internal("an empty permission".to_owned()));
         }
         self.vault_ref()?;
-        if self.drive_backup_on() {
+        // On already (two turn-ons at once): the one kept stays. Not when the one kept was
+        // withdrawn at Google: the new permission takes its place, for the same account only.
+        let reconnect = self.drive_backup_on() && self.drive_needs_reconnect();
+        if self.drive_backup_on() && !reconnect {
             return Ok(());
+        }
+        if reconnect && self.drive_account(TOKEN_ACCOUNT_KEY) != tag {
+            return Err(not_connected());
         }
         let (_, connected) = Vault::google_slot(&self.dir)?;
         if connected.as_deref() != Some(tag) || !keys.exists(&self.dir) {

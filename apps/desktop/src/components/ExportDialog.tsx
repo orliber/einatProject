@@ -148,7 +148,18 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
                 </li>
               )}
               {!blocked ? (
-                <li className="ok"><span aria-hidden="true">✓</span><span>השמות חזרו, ולא נשארו תפקידים או "חסר מידע"</span></li>
+                check.to_complete.length > 0 ? (
+                  // The file goes out with these marks in it as they are: say so, not the opposite.
+                  <li className="warn">
+                    <span aria-hidden="true">!</span>
+                    <span>
+                      {check.to_complete.length === 1 ? "נשאר סימון אחד של [חסר: …] בדוח, והוא ייכנס לקובץ כמו שהוא" : `נשארו ${check.to_complete.length} סימונים של [חסר: …] בדוח, והם ייכנסו לקובץ כמו שהם`}
+                      : {check.to_complete.join(" · ")}
+                    </span>
+                  </li>
+                ) : (
+                  <li className="ok"><span aria-hidden="true">✓</span><span>השמות חזרו, ולא נשארו תפקידים או "חסר מידע"</span></li>
+                )
               ) : (
                 check.blocking.map((b, i) => <li key={i} className="bad"><span aria-hidden="true">!</span><span>{b}</span></li>)
               )}
@@ -174,7 +185,7 @@ export function ExportDialog({ api, onClose, letter }: { api: CaseApi; onClose: 
           {/* D-081: the file goes out without a password, and she is told so. */}
           <span className="small muted">הקובץ נפתח בלי סיסמה: כל מי שיקבל אותו יוכל לקרוא אותו.</span>
           {check && !letter && (
-            <p className="small"><b>שם הקובץ:</b> <span className="export-file-name">{shownFileName(forParents ? parentsFileName(check.file_name) : check.file_name, pdf)}</span> <span className="muted">(בלי שם הילד) · נשמר בתיקיית ההורדות</span></p>
+            <p className="small"><b>שם הקובץ:</b> <span className="export-file-name">{shownFileName(forParents ? parentsFileName(check.file_name) : check.file_name, pdf)}</span> <span className="muted">(בלי שם הילד)</span></p>
           )}
           {blocked && (
             <button type="button" className="btn btn-small align-start" onClick={() => { onClose(); go({ name: "case", id: api.caseId, view: api.detail.sections[0]?.key ?? "materials" }); }}>לסעיפים</button>

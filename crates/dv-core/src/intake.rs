@@ -447,6 +447,10 @@ impl Core {
         if person.source != IdentitySource::Manual {
             v.confirm_identity(case_id, &person.id)?;
         }
+        // A spelling was added to a person: a request prepared before it does not go out.
+        if !known && !token.trim().is_empty() {
+            self.forget_pending(case_id);
+        }
         Ok(())
     }
 
@@ -467,7 +471,10 @@ impl Core {
                 aliases: i.aliases,
             })
             .collect();
-        Ok(v.set_identities(case_id, &ids)?)
+        let saved = v.set_identities(case_id, &ids)?;
+        // The person's tag changed: a request prepared with the old one does not go out.
+        self.forget_pending(case_id);
+        Ok(saved)
     }
 
     pub fn decide_suspect(
@@ -476,6 +483,7 @@ impl Core {
         token: &str,
         decision: SuspectDecision,
     ) -> Result<(), CoreError> {
+        let hides = !matches!(decision, SuspectDecision::NotAName);
         let v = self.vault_mut()?;
         match decision {
             SuspectDecision::Hide { role } => {
@@ -500,6 +508,11 @@ impl Core {
             SuspectDecision::IsName => v.mark_is_name(case_id, &normalize(token))?,
             // Per case: a word that is ordinary here may be a name in another case.
             SuspectDecision::NotAName => v.mark_not_a_name(Some(case_id), &normalize(token))?,
+        }
+        // A word she just marked as a name is in none of the requests already waiting to go
+        // (the whole report is prepared up front): each was filtered before the case knew it.
+        if hides {
+            self.forget_pending(case_id);
         }
         Ok(())
     }

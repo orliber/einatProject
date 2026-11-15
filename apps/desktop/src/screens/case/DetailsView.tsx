@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AgeField, ageError, ageProblem, parseAge } from "../../components/AgeField";
 import { DateField, isoToHe, todayIso } from "../../components/DateField";
 import { useApp } from "../../App";
@@ -10,6 +10,7 @@ import type { CaseApi } from "../CaseScreen";
 import { useAi } from "../../ai";
 import { CasePrivacyCard } from "../../components/CasePrivacy";
 import type { Identity } from "../../ipc/generated/Identity";
+import { setLeaveGuard } from "../../leaveGuard";
 import { CONSENT_FORM_VERSION, consentToSave, olderFormNote } from "../../consentForm";
 
 /** The case's details, consent and the names hidden before every send. */
@@ -38,28 +39,52 @@ export function DetailsView({ api }: { api: CaseApi }) {
     return r.some((x) => x.role === "child") ? r : [{ id: null, role: "child", value: "", aliases: "" }, ...r];
   });
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // Set at once, before the screen is drawn again: the second click of a double click finds it.
+  const working = useRef(false);
+
+  // What the fields hold, to tell a change from what was last saved (or what she opened).
+  const fieldsWith = (people: PersonRow[]) => JSON.stringify([code, gender, years, months, consent, consentDate, consentBy, resigned,
+    ownRetention, retention, people.map((r) => [r.role, r.value, r.aliases])]);
+  const fields = fieldsWith(rows);
+  const [savedFields, setSavedFields] = useState(fields);
+  const dirty = fields !== savedFields;
 
   /** After a change on the privacy card: what the vault now holds, keeping what she is typing.
    *  A name brought back leaves the list; a confirmed one is hers; a new role shows. */
   async function namesChanged(fresh: Identity[]) {
-    setRows((now) => now.flatMap((r) => {
+    const next = rows.flatMap((r): PersonRow[] => {
       if (r.id === null) return [r];
       const i = fresh.find((x) => x.id === r.id);
       if (!i) return [];
       return [i.source === "manual" ? { id: r.id, role: i.role, value: r.value, aliases: r.aliases } : { ...r, role: i.role }];
-    }));
+    });
+    setRows(next);
+    // The card saved this itself: it is not a change waiting for the save button.
+    if (!dirty) setSavedFields(fieldsWith(next));
     await reload();
   }
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [typed, setTyped] = useState("");
 
-  async function save() {
+  /** Saves; `false` when it did not (the reason is on the screen). */
+  async function save(): Promise<boolean> {
+    if (working.current) return false;
     setError(null);
+    const refuse = (why: string) => {
+      setError(why);
+      return false;
+    };
     // A wrong age is refused and said: saving it as "no age" would erase the age on file.
     const badAge = ageProblem(years, months);
-    if (badAge) return setError(ageError(badAge));
-    if (consent && !consentDate) return setError("צריך את תאריך החתימה על ההסכמה (יום.חודש.שנה).");
-    if (ownRetention && !retention) return setError("צריך תאריך לתזכורת השמירה (יום.חודש.שנה).");
+    if (badAge) return refuse(ageError(badAge));
+    if (consent && !consentDate) return refuse("צריך את תאריך החתימה על ההסכמה (יום.חודש.שנה).");
+    if (ownRetention && !retention) return refuse("צריך תאריך לתזכורת השמירה (יום.חודש.שנה).");
+    // As in a new case: without the child's name the vault drops the child, and the name is no longer hidden.
+    const hadChild = detail.identities.some((i) => i.role === "child");
+    if (hadChild && !rows.find((r) => r.role === "child")?.value.trim()) return refuse("צריך את שם הילד/ה, כדי שיוסתר בכל מקום.");
+    working.current = true;
+    setBusy(true);
     try {
       await ipc.updateCase(caseId, {
         ...m,
@@ -72,22 +97,43 @@ export function DetailsView({ api }: { api: CaseApi }) {
       const saved = await ipc.setIdentities(caseId, toIdentityInputs(rows));
       // The people added here now have ids: the next save changes them, not makes them again.
       setRows((now) => withIds(now, saved));
+      setSavedFields(fields);
       await reload();
       notify("פרטי התיק נשמרו.");
+      return true;
     } catch (e) {
       setError(fail(e as never));
+      return false;
+    } finally {
+      working.current = false;
+      setBusy(false);
     }
   }
+  // Leaving with changes asks first (the stage buttons, "→ תיקים", the top bar).
+  const guard = useRef({ dirty, save });
+  useEffect(() => {
+    guard.current = { dirty, save };
+  });
+  useEffect(() => setLeaveGuard({ dirty: () => guard.current.dirty, save: () => guard.current.save() }), []);
 
   async function remove() {
+    if (working.current) return;
+    working.current = true;
+    setBusy(true);
     try {
       await ipc.deleteCase(caseId);
       notify("התיק הועבר לסל המחזור (30 יום לשחזור).");
+      // The case is gone: nothing here is left to save.
+      guard.current = { dirty: false, save };
       go({ name: "cases" });
     } catch (e) {
       setError(fail(e as never));
+      working.current = false;
+      setBusy(false);
     }
   }
+  // An empty code cannot be typed back; the word stands in for it.
+  const deleteWord = m.code.trim() || "מחיקה";
 
   return (
     <div className="view">
@@ -96,7 +142,7 @@ export function DetailsView({ api }: { api: CaseApi }) {
           <h1>פרטי התיק ושמות להסתרה</h1>
           <p className="muted small">כל שם כאן מוחלף בתפקיד לפני שליחה, גם עם תחיליות וכתיב שונה.</p>
         </div>
-        <button type="button" className="btn btn-primary btn-big" onClick={() => void save()}>שמירת השינויים</button>
+        <button type="button" className="btn btn-primary btn-big" disabled={busy} onClick={() => void save()}>שמירת השינויים</button>
       </div>
       <div className="view-body details">
         <div className="card details-card stack grow names-card">
@@ -179,10 +225,10 @@ export function DetailsView({ api }: { api: CaseApi }) {
       {confirmDelete && (
         <Dialog narrow title="מחיקת התיק" onClose={() => setConfirmDelete(false)}
           footer={<><span className="grow" /><button type="button" className="btn" onClick={() => setConfirmDelete(false)}>ביטול</button>
-            <button type="button" className="btn btn-danger" disabled={typed.trim() !== m.code.trim()} onClick={() => void remove()}>מחיקה</button></>}>
+            <button type="button" className="btn btn-danger" disabled={busy || typed.trim() !== deleteWord} onClick={() => void remove()}>מחיקה</button></>}>
           <div className="stack">
-            <p>כדי לוודא, הקלידי את קוד התיק: <b>{m.code}</b></p>
-            <label className="visually-hidden" htmlFor="del-code">קוד התיק</label>
+            <p>{m.code.trim() ? "כדי לוודא, הקלידי את קוד התיק: " : "כדי לוודא, הקלידי את המילה: "}<b>{deleteWord}</b></p>
+            <label className="visually-hidden" htmlFor="del-code">{m.code.trim() ? "קוד התיק" : "המילה מחיקה"}</label>
             <input id="del-code" className="input" value={typed} onChange={(e) => setTyped(e.target.value)} autoFocus />
           </div>
         </Dialog>
