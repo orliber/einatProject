@@ -80,29 +80,24 @@ describe("the check of the whole report", () => {
   it("is not in the finish screen while it is off", async () => {
     mockIPC((cmd) => (cmd === "report_check_setting" ? { on: false, cents_per_check: 15 } : null));
     const api = caseApi([section("background", "רקע", [paragraph("p1", "approved")]), section("summary", "סיכום", [paragraph("p2", "approved")])]);
-    const { container } = wrap(<ul><ReportCheckItem api={api} onOpen={vi.fn()} /></ul>);
+    const { container } = wrap(<ReportCheckItem api={api} />);
     await new Promise((r) => setTimeout(r, 20));
-    expect(container.querySelector("li")).toBeNull();
+    expect(container).toBeEmptyDOMElement();
   });
 
   it("waits for every draft to be approved", async () => {
     mockIPC((cmd) => (cmd === "report_check_setting" ? { on: true, cents_per_check: 15 } : null));
     const api = caseApi([section("background", "רקע", [paragraph("p1", "approved")]), section("cognitive", "קוגניטיבי", [paragraph("p2", "proposed")])]);
-    wrap(<ul><ReportCheckItem api={api} onOpen={vi.fn()} /></ul>);
+    wrap(<ReportCheckItem api={api} />);
     expect(await screen.findByText(/עוד מחכות: קוגניטיבי/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "לבדוק את הדוח כולו" })).toBeDisabled();
   });
 
-  it("lists the notes as text, each opening its section", async () => {
+  it("runs one request and says how many notes went to the finish page's list", async () => {
     const result: ReportCheckResult = {
       notes: [
         { kind: "summary_only", sections: ["summary"], note: "<b>סקרנות</b> מופיעה רק בסיכום" },
         { kind: "other", sections: [], note: "שורה לא נשלחה" },
-        { kind: "referral_unanswered", sections: ["summary"], note: "הסיכום לא מתייחס לקושי בפרידה" },
-        { kind: "no_recommendation", sections: ["background"], note: "אין המלצה לקושי בשינה" },
-        { kind: "unfounded_recommendation", sections: [], note: "המלצה לריפוי בעיסוק בלי ממצא" },
-        { kind: "diagnosis_mismatch", sections: ["summary"], note: "האבחנה בסיכום שונה" },
-        { kind: "unexplained_term", sections: ["background"], note: "המונח לא מוסבר" },
       ],
       checked: ["background", "summary"],
       demo: false,
@@ -115,24 +110,12 @@ describe("the check of the whole report", () => {
       if (cmd === "send_report_check") return result;
       return null;
     });
-    const onOpen = vi.fn();
     const api = caseApi([section("background", "רקע", [paragraph("p1", "approved")]), section("summary", "סיכום", [paragraph("p2", "approved")])]);
-    wrap(<ul><ReportCheckItem api={api} onOpen={onOpen} /></ul>);
+    wrap(<ReportCheckItem api={api} />);
     fireEvent.click(await screen.findByRole("button", { name: "לבדוק את הדוח כולו" }));
-    const jump = await screen.findByRole("button", { name: /מופיע רק בסיכום · סיכום/ });
-    // Plain text: the model's words are never markup.
-    expect(jump).toHaveTextContent("<b>סקרנות</b> מופיעה רק בסיכום");
-    expect(jump.querySelector("b")).toBeNull();
-    fireEvent.click(jump);
-    expect(onOpen).toHaveBeenCalledWith("summary");
-    // The supervisor's kinds (D-169), each under its own name.
-    expect(screen.getByRole("button", { name: /סיבת ההפניה בלי מענה בסיכום · סיכום/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /קושי בלי המלצה · רקע/ })).toBeInTheDocument();
-    expect(screen.getByText("המלצה בלי ממצא")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /האבחנה לא זהה בין הסעיפים · סיכום/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /מונח מקצועי בלי הסבר · רקע/ })).toBeInTheDocument();
-    // A note with no section is shown, without a place to jump to.
-    expect(screen.getByText("שורה לא נשלחה").closest("button")).toBeNull();
+    // The notes themselves are cards in the finish page (FinishView.test.tsx).
+    expect(await screen.findByText(/נמצאו 2 הערות\. הן ברשימה "כדאי לבדוק"\./)).toBeInTheDocument();
+    expect(screen.getByText(/שום דבר בדוח לא השתנה, וההחלטה שלך\./)).toBeInTheDocument();
     expect(calls).toEqual(expect.arrayContaining(["prepare_report_check", "send_report_check"]));
     expect(screen.getByRole("button", { name: "לבדוק שוב" })).toBeEnabled();
   });

@@ -74,9 +74,11 @@ async function openReport(reshape?: (d: CaseDetail) => void) {
   mockIPC(async (cmd, args) => {
     calls.push({ cmd, args: (args ?? {}) as Record<string, unknown> });
     const out = await core.handle(cmd, args);
-    if (cmd !== "case_detail" || !reshape) return out;
+    if (cmd !== "case_detail") return out;
     const d = structuredClone(out as CaseDetail);
-    reshape(d);
+    // These tests give their own notes: the demo case's own ones are taken off first.
+    for (const x of d.sections.flatMap((s) => s.paragraphs)) Object.assign(x, { notes: [], polish: [] });
+    reshape?.(d);
     return d;
   });
   const user = userEvent.setup();

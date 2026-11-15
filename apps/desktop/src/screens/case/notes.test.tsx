@@ -29,6 +29,8 @@ async function openReport(reshape: (d: CaseDetail, core: FakeCore) => void, answ
     const out = await core.handle(cmd, args);
     if (cmd !== "case_detail") return out;
     const d = structuredClone(out as CaseDetail);
+    // These tests give their own notes: the demo case's own ones are taken off first.
+    for (const x of d.sections.flatMap((s) => s.paragraphs)) Object.assign(x, { notes: [], polish: [] });
     reshape(d, core);
     return d;
   });

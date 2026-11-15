@@ -16,6 +16,8 @@ import type { CaseMeta } from "../ipc/generated/CaseMeta";
 import type { CaseSummary } from "../ipc/generated/CaseSummary";
 import type { ChatView } from "../ipc/generated/ChatView";
 import type { DraftStatus } from "../ipc/generated/DraftStatus";
+import type { NoteKind } from "../ipc/generated/NoteKind";
+import type { ParagraphNote } from "../ipc/generated/ParagraphNote";
 import type { ExportCheck } from "../ipc/generated/ExportCheck";
 import type { Identity } from "../ipc/generated/Identity";
 import type { IdentityInput } from "../ipc/generated/IdentityInput";
@@ -69,6 +71,20 @@ interface Draft {
   replaces?: string;
   /** Earlier wordings, newest first (D-046). */
   versions?: { id: string; at: number; byAi: boolean; text: string }[];
+  /** The demo's notes (D-161): each stays while the words it is about are in the paragraph. */
+  notes?: DemoNote[];
+}
+
+interface DemoNote {
+  kind: NoteKind;
+  text: string;
+  /** The words the note is about, as she reads them. */
+  about: string;
+}
+
+/** The notes that still hold for the paragraph as it reads now. */
+function notesOf(d: Draft, shown: string): ParagraphNote[] {
+  return (d.notes ?? []).filter((n) => shown.includes(n.about)).map(({ kind, text }) => ({ kind, text }));
 }
 
 /** Keep the paragraph's wording before it changes in place (D-046). */
@@ -387,6 +403,24 @@ export class FakeCore {
     ] as const) {
       a.drafts.push({ id: newId("d"), section, text, status: "approved", byAi: true, sources: ["S1 · אינטייק הורים · אינטייק עם ההורים"] });
     }
+    // D-161: a few notes on approved paragraphs, as the core words them, so the finish page
+    // has something to show. Each goes away once the words it is about are changed.
+    const background = a.drafts[a.drafts.length - 1];
+    if (background) {
+      background.notes = [
+        { kind: "verify_unsupported", text: "בחומרים לא כתוב שאבני הדרך הושגו \"בטווח התקין\", רק מתי הלך ומתי אמר מילים ראשונות.", about: "בטווח התקין" },
+        { kind: "past_report_overlap", text: "חוזר מילה במילה על קטע מדוח ישן («ההריון והלידה היו תקינים»). כדאי לנסח מחדש.", about: "ההריון והלידה היו תקינים" },
+      ];
+    }
+    a.drafts.push({
+      id: newId("d"), section: "cognitive", status: "approved", byAi: true, sources: ["S4 · ציוני מבחנים · ציוני WPPSI-IV"],
+      text: "במבחן WPPSI-IV התקבל ציון כולל של של 102, בטווח הממוצע. מדד ההבנה המילולית היה 115, ומדד מהירות העיבוד היה 86: [ילד] תמיד עבד לאט ובדייקנות.",
+      notes: [
+        { kind: "score_mismatch", text: "המספר 115 לא תואם את טבלת הציונים: הבנה מילולית 112 – לבדוק", about: "115" },
+        { kind: "polish", text: "מילה כפולה: \"של של\"", about: "של של" },
+        { kind: "polish", text: "ניסוח מוחלט: \"תמיד\" – כדאי לשקול אם זה מדויק", about: "תמיד" },
+      ],
+    });
 
     const b = this.newCase(
       { code: "תיק-1025", age: { years: 4, months: 2 }, child_gender: "female", current_section: null, retention_until: null,
@@ -606,7 +640,11 @@ export class FakeCore {
           key: s.key, title: s.title, part: s.part,
           source_count: routing.filter((r) => r.feeds.includes(s.key)).length,
           sortable: SORTABLE.some((x) => x.key === s.key),
-          paragraphs: drafts.map((d) => ({ id: d.id, text: restore(d.text, c.people, this.practitioner), status: d.status, by_ai: d.byAi, sources: d.sources, warnings: [], polish: [], notes: [], replaces: d.replaces ?? null, has_versions: versionsOf(c.drafts, d).length > 0, style_note: null, style: fakeStyleHint(d) })),
+          paragraphs: drafts.map((d) => {
+            const text = restore(d.text, c.people, this.practitioner);
+            const notes = notesOf(d, text);
+            return { id: d.id, text, status: d.status, by_ai: d.byAi, sources: d.sources, warnings: [], polish: notes.filter((n) => n.kind === "polish").map((n) => n.text), notes, replaces: d.replaces ?? null, has_versions: versionsOf(c.drafts, d).length > 0, style_note: null, style: fakeStyleHint(d) };
+          }),
           approved: drafts.some((d) => d.status === "approved"),
           // The fake's cases are in the old template, where every section is drafted unless she
           // changed it in settings (round 30).
@@ -1552,7 +1590,8 @@ export class FakeCore {
         return {
           blocking: [], to_complete: missing, empty_sections: d.sections.filter((s) => !s.approved).map((s) => s.title),
           included_sections: d.sections.filter((s) => s.approved).length, score_tables: c.sheets.size, file_name: `דוח אבחון – ${c.meta.code}.docx`,
-          parents_left_out: 0, parents_chart_rows: c.sheets.size > 0 ? 3 : 0, polish_notes: 0,
+          parents_left_out: 0, parents_chart_rows: c.sheets.size > 0 ? 3 : 0,
+          polish_notes: d.sections.reduce((n, s) => n + s.paragraphs.filter((p) => p.status === "approved").reduce((m, p) => m + p.polish.length, 0), 0),
         } satisfies ExportCheck;
       }
       case "letter":
