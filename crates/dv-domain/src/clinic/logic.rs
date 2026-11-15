@@ -16,7 +16,9 @@ use super::{
     Patient, PatientStatus, PayMethod, Payment, ProcessStep, Repeat, SessionNote, StepState,
     TaskKind, TaskView, Today, Visit, VisitKind, VisitStatus, VisitView, VisitWhen,
 };
-use crate::dates::{civil_from_days, days_from_civil, days_in_month, iso, parse_iso, Ymd};
+use crate::dates::{
+    add_years, civil_from_days, days_from_civil, days_in_month, iso, parse_iso, Ymd,
+};
 use crate::records::Age;
 use crate::DomainError;
 
@@ -1052,6 +1054,16 @@ pub fn note_case_title(kind: VisitKind, date: &str) -> String {
     format!("סיכום {} · {}", kind_label(kind), display_date(date))
 }
 
+/// The title of the case material for a note: the kind of its visit, or "a talk" for a note
+/// that stands on its own (a phone call).
+#[must_use]
+pub fn note_case_title_for(kind: Option<VisitKind>, date: &str) -> String {
+    match kind {
+        Some(kind) => note_case_title(kind, date),
+        None => format!("סיכום שיחה · {}", display_date(date)),
+    }
+}
+
 // ------------------------------------------------------------------ alerts
 
 /// Everything the alerts of one patient are computed from. The slices may hold other
@@ -1528,6 +1540,80 @@ pub fn clinic_alerts(
     }
     sort_alerts(&mut alerts);
     alerts
+}
+
+// ------------------------------------------------------------------ erasing a patient
+
+/// Whether a patient card may be erased (D-174). A card where nothing happened (no visit
+/// that was held or charged, no note, no charge and no payment, voided ones included) goes
+/// at once: a typing mistake, a double card. Any other card is a record that has to be
+/// kept, and goes only after the retention period: `keep_years` after the last activity in
+/// the card, and not before the child is `keep_until_age` when the birth date is known,
+/// whichever is later.
+///
+/// The last activity is the latest date anything in the card carries (the day it was
+/// opened, every visit, note, charge, payment and task) and `last_saved`, the day one of its
+/// records was last written, when the caller knows it: a record corrected years later was
+/// active then. The slices may hold other patients' records too.
+///
+/// The refusal says the card can be closed instead, and from which day it can be erased.
+pub fn can_erase(
+    records: &PatientRecords<'_>,
+    today: &str,
+    last_saved: Option<&str>,
+    keep_years: i32,
+    keep_until_age: i32,
+) -> Result<(), DomainError> {
+    let id = records.patient.id.as_str();
+    let visits = || {
+        records
+            .visits
+            .iter()
+            .filter(|v| v.patient_id.as_deref() == Some(id))
+    };
+    let notes = || records.notes.iter().filter(|n| n.patient_id == id);
+    let charges = || records.charges.iter().filter(|c| c.patient_id == id);
+    let payments = || records.payments.iter().filter(|p| p.patient_id == id);
+    let happened = visits().any(|v| v.status == VisitStatus::Held || visit_charge(v) > 0)
+        || notes().next().is_some()
+        || charges().next().is_some()
+        || payments().next().is_some();
+    if !happened {
+        return Ok(());
+    }
+    let Some(now) = parse_date(today) else {
+        return refuse("התאריך של היום לא התקבל כמו שצריך, ולכן אי אפשר למחוק עכשיו.");
+    };
+    let tasks = records
+        .tasks
+        .iter()
+        .filter(|t| t.patient_id.as_deref() == Some(id));
+    let last = std::iter::once(records.patient.created_on.as_str())
+        .chain(last_saved)
+        .chain(visits().map(|v| v.date.as_str()))
+        .chain(notes().map(|n| n.date.as_str()))
+        .chain(charges().map(|c| c.date.as_str()))
+        .chain(payments().map(|p| p.date.as_str()))
+        .chain(tasks.flat_map(|t| t.due.iter().chain(t.done_on.iter()).map(String::as_str)))
+        .filter_map(parse_date)
+        .max();
+    // A card whose dates cannot be read is kept as if it changed today.
+    let after_last = add_years(last.unwrap_or(now), keep_years);
+    let grown = records
+        .patient
+        .birth_date
+        .as_deref()
+        .and_then(parse_date)
+        .map(|birth| add_years(birth, keep_until_age));
+    let from = grown.map_or(after_last, |grown| grown.max(after_last));
+    if now >= from {
+        return Ok(());
+    }
+    refuse(format!(
+        "בכרטיס הזה יש פגישות, סיכומים או רישומי כספים, ורשומה כזו צריך לשמור. \
+         אפשר לסגור את הכרטיס במקום למחוק אותו. מחיקה תהיה אפשרית החל מיום {}.",
+        display_date(&iso(from))
+    ))
 }
 
 // ------------------------------------------------------------------ the assessment process
@@ -2068,6 +2154,48 @@ pub fn charge_history_lines(charge: &Charge, patient_name: &str) -> Vec<String> 
     lines.push(format!("סכום: {} ₪", money(charge.amount)));
     push_field(&mut lines, "על מה", &charge.what);
     push_voided(&mut lines, charge.voided, &charge.void_reason);
+    lines
+}
+
+/// A saved state of a session note in her words: the formal record, line by line, and one
+/// line that says only whether the personal note was written or changed since `previous`
+/// (the state saved before this one; `None` for the first). The personal note's own text is
+/// never among the lines: it is hers alone (D-171).
+#[must_use]
+pub fn note_history_lines(
+    note: &SessionNote,
+    patient_name: &str,
+    previous: Option<&SessionNote>,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    push_field(&mut lines, "מטופל", patient_name);
+    push_field(&mut lines, "תאריך", &display_date(&note.date));
+    let record: Vec<String> = note
+        .record
+        .lines()
+        .map(clean_line)
+        .filter(|line| !line.is_empty())
+        .collect();
+    if record.is_empty() {
+        lines.push("רשומה: ריקה".to_owned());
+    } else {
+        lines.push("רשומה:".to_owned());
+        lines.extend(record);
+    }
+    let personal = note.personal.trim();
+    let about_personal = match previous.map(|p| p.personal.trim()) {
+        None if personal.is_empty() => "תרשומת אישית: אין",
+        None => "תרשומת אישית: נכתבה",
+        Some(before) if before == personal && personal.is_empty() => "תרשומת אישית: אין",
+        Some(before) if before == personal => "תרשומת אישית: בלי שינוי",
+        Some(_) if personal.is_empty() => "תרשומת אישית: נמחקה",
+        Some(before) if before.is_empty() => "תרשומת אישית: נכתבה",
+        Some(_) => "תרשומת אישית: השתנתה",
+    };
+    lines.push(about_personal.to_owned());
+    if note.case_input_id.is_some() {
+        lines.push("הועבר לחומרי התיק: כן".to_owned());
+    }
     lines
 }
 

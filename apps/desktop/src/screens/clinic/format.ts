@@ -198,17 +198,20 @@ export function today(now: Date = new Date()): Today {
 }
 
 // ------------------------------------------------------------------ Hebrew labels
+// The same words the core uses (crates/dv-domain/src/clinic/logic.rs: kind_label, status_label,
+// method_label, task_kind_label, patient_status_label, contact_role_label): a history line or
+// an alert written there reads like the screen beside it.
 
 export const VISIT_KIND_LABEL: Record<VisitKind, string> = {
   intake: "פגישת היכרות",
   assessment: "מפגש אבחון",
   observation: "תצפית",
   feedback: "שיחת משוב",
-  therapy: "טיפול",
+  therapy: "פגישת טיפול",
   guidance: "הדרכת הורים",
-  meeting: "שיחה עם גורם מקצועי",
+  meeting: "פגישה מקצועית",
   other: "פגישה אחרת",
-  block: "חסימת זמן",
+  block: "זמן שמור",
 };
 
 /** The kinds in the order she meets them in an assessment; the block last. */
@@ -218,7 +221,7 @@ export const VISIT_STATUS_LABEL: Record<VisitStatus, string> = {
   planned: "מתוכננת",
   held: "התקיימה",
   cancelled: "בוטלה",
-  no_show: "לא הגיע/ה",
+  no_show: "לא הגיעו",
 };
 
 export const PAY_METHOD_LABEL: Record<PayMethod, string> = {
@@ -231,7 +234,8 @@ export const PAY_METHOD_LABEL: Record<PayMethod, string> = {
   other: "אחר",
 };
 
-export const PAY_METHODS: PayMethod[] = ["transfer", "bit", "paybox", "cash", "check", "card", "other"];
+/** In the order the core lists them (`PAY_METHODS` in logic.rs). */
+export const PAY_METHODS: PayMethod[] = ["cash", "transfer", "bit", "paybox", "check", "card", "other"];
 
 export const TASK_KIND_LABEL: Record<TaskKind, string> = {
   call: "שיחת טלפון",
@@ -255,7 +259,7 @@ export const CONTACT_ROLE_LABEL: Record<ContactRole, string> = {
   mother: "אמא",
   father: "אבא",
   guardian: "אפוטרופוס",
-  other: "איש קשר אחר",
+  other: "אחר",
 };
 
 export const CONTACT_ROLES: ContactRole[] = ["mother", "father", "guardian", "other"];
@@ -274,4 +278,20 @@ export const ALERT_KIND_LABEL: Record<AlertKind, string> = {
 /** What the calendar calls a visit: her own words when she gave some, else the kind's name. */
 export function visitTitle(visit: { kind: VisitKind; title: string }): string {
   return visit.title.trim() || VISIT_KIND_LABEL[visit.kind];
+}
+
+/** "נועם לדוגמה" → "נ. ל.": what discreet mode shows in place of a name, when a family in the
+ *  room may see the screen. At most three words are kept. */
+export function initials(name: string): string {
+  const letters = name.split(/\s+/).filter(Boolean).slice(0, 3).map((word) => `${Array.from(word)[0] ?? ""}.`);
+  return letters.join(" ");
+}
+
+/** "בוקר טוב", "צהריים טובים", "ערב טוב" or "לילה טוב", by the minute of her day. */
+export function greeting(minute: number): string {
+  if (minute < 5 * 60) return "לילה טוב";
+  if (minute < 12 * 60) return "בוקר טוב";
+  if (minute < 17 * 60) return "צהריים טובים";
+  if (minute < 22 * 60) return "ערב טוב";
+  return "לילה טוב";
 }

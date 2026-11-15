@@ -3482,3 +3482,533 @@ proptest! {
         }
     }
 }
+
+// ------------------------------------------------------------------ the history of a note
+
+#[test]
+fn a_notes_history_shows_the_record_and_never_the_personal_text() {
+    let first = SessionNote {
+        record: "הילד שיתף פעולה.\n\n  עבד   בריכוז. ".to_owned(),
+        personal: "מחשבה-פרטית-בדויה".to_owned(),
+        ..note("n1", Some("v1"), TODAY)
+    };
+    let lines = note_history_lines(&first, "נועם", None);
+    assert_eq!(
+        lines,
+        [
+            "מטופל: נועם",
+            "תאריך: 15.11.2026",
+            "רשומה:",
+            "הילד שיתף פעולה.",
+            "עבד בריכוז.",
+            "תרשומת אישית: נכתבה",
+        ]
+    );
+
+    let same_personal = SessionNote {
+        record: "נוסח מתוקן.".to_owned(),
+        ..first.clone()
+    };
+    let changed_personal = SessionNote {
+        personal: "מחשבה-אחרת-בדויה".to_owned(),
+        ..first.clone()
+    };
+    let no_personal = SessionNote {
+        personal: String::new(),
+        ..first.clone()
+    };
+    let sent = SessionNote {
+        case_input_id: Some("i1".to_owned()),
+        ..no_personal.clone()
+    };
+    let last = |note: &SessionNote, before: Option<&SessionNote>| {
+        let lines = note_history_lines(note, "נועם", before);
+        for line in &lines {
+            assert!(!line.contains("בדויה"), "the personal text in: {line}");
+            assert_hebrew_sentence(line);
+        }
+        lines.last().cloned().unwrap()
+    };
+    assert_eq!(
+        last(&same_personal, Some(&first)),
+        "תרשומת אישית: בלי שינוי"
+    );
+    assert_eq!(
+        last(&changed_personal, Some(&first)),
+        "תרשומת אישית: השתנתה"
+    );
+    assert_eq!(last(&no_personal, Some(&first)), "תרשומת אישית: נמחקה");
+    assert_eq!(last(&first, Some(&no_personal)), "תרשומת אישית: נכתבה");
+    assert_eq!(last(&no_personal, Some(&no_personal)), "תרשומת אישית: אין");
+    assert_eq!(last(&no_personal, None), "תרשומת אישית: אין");
+    assert_eq!(last(&sent, Some(&no_personal)), "הועבר לחומרי התיק: כן");
+    // Exactly one line speaks of the personal note, whatever happened to it.
+    for (state, before) in [
+        (&first, None),
+        (&changed_personal, Some(&first)),
+        (&sent, Some(&first)),
+    ] {
+        let about = note_history_lines(state, "", before)
+            .iter()
+            .filter(|l| l.contains("תרשומת אישית"))
+            .count();
+        assert_eq!(about, 1);
+    }
+
+    let empty_record = SessionNote {
+        record: String::new(),
+        ..first
+    };
+    assert!(note_history_lines(&empty_record, "", None).contains(&"רשומה: ריקה".to_owned()));
+}
+
+#[test]
+fn a_note_on_its_own_has_a_title_for_the_case_too() {
+    assert_eq!(
+        note_case_title_for(Some(VisitKind::Intake), TODAY),
+        note_case_title(VisitKind::Intake, TODAY)
+    );
+    assert_eq!(note_case_title_for(None, TODAY), "סיכום שיחה · 15.11.2026");
+}
+
+// ------------------------------------------------------------------ erasing a patient (D-174)
+
+const KEEP_YEARS: i32 = 7;
+const KEEP_AGE: i32 = 25;
+
+struct Card {
+    patient: Patient,
+    visits: Vec<Visit>,
+    notes: Vec<SessionNote>,
+    charges: Vec<Charge>,
+    payments: Vec<Payment>,
+    tasks: Vec<ClinicTask>,
+}
+
+impl Card {
+    fn new() -> Self {
+        Self {
+            patient: patient("p1", "נועם"),
+            visits: Vec::new(),
+            notes: Vec::new(),
+            charges: Vec::new(),
+            payments: Vec::new(),
+            tasks: Vec::new(),
+        }
+    }
+
+    fn erase(&self, today: &str, last_saved: Option<&str>) -> Result<(), DomainError> {
+        let records = PatientRecords {
+            patient: &self.patient,
+            visits: &self.visits,
+            notes: &self.notes,
+            charges: &self.charges,
+            payments: &self.payments,
+            tasks: &self.tasks,
+            report: None,
+        };
+        can_erase(&records, today, last_saved, KEEP_YEARS, KEEP_AGE)
+    }
+}
+
+#[test]
+fn a_card_where_nothing_happened_can_be_erased_at_once() {
+    let mut card = Card::new();
+    card.erase(TODAY, None).unwrap();
+    // Plans, a cancellation that is not charged, a missed visit that is not charged and a
+    // task are not something that happened.
+    card.visits = vec![
+        paid_visit("v1", "2026-11-20", VisitStatus::Planned, 40_000),
+        paid_visit("v2", "2026-11-10", VisitStatus::Cancelled, 40_000),
+        paid_visit("v3", "2026-11-11", VisitStatus::NoShow, 40_000),
+    ];
+    card.tasks = vec![task("t1", Some("p1"), Some(TODAY))];
+    card.erase(TODAY, Some(TODAY)).unwrap();
+    // Even a date that cannot be read does not stand in the way of an empty card.
+    card.erase("היום", None).unwrap();
+    // Another patient's records are not this card's.
+    card.payments = vec![Payment {
+        patient_id: "p2".to_owned(),
+        ..payment("pay", TODAY, 10_000)
+    }];
+    card.notes = vec![SessionNote {
+        patient_id: "p2".to_owned(),
+        ..note("n", None, TODAY)
+    }];
+    card.visits.push(Visit {
+        patient_id: Some("p2".to_owned()),
+        ..paid_visit("v4", TODAY, VisitStatus::Held, 40_000)
+    });
+    card.erase(TODAY, None).unwrap();
+}
+
+#[test]
+fn anything_that_happened_keeps_the_card_voided_records_too() {
+    let cases: Vec<(&str, Box<dyn Fn(&mut Card)>)> = vec![
+        (
+            "a held visit, even one that cost nothing",
+            Box::new(|c| c.visits = vec![paid_visit("v", TODAY, VisitStatus::Held, 0)]),
+        ),
+        (
+            "a cancelled visit that is charged",
+            Box::new(|c| {
+                c.visits = vec![Visit {
+                    charge_missed: true,
+                    ..paid_visit("v", TODAY, VisitStatus::Cancelled, 40_000)
+                }];
+            }),
+        ),
+        (
+            "a missed visit that is charged",
+            Box::new(|c| {
+                c.visits = vec![Visit {
+                    charge_missed: true,
+                    ..paid_visit("v", TODAY, VisitStatus::NoShow, 40_000)
+                }];
+            }),
+        ),
+        (
+            "a note",
+            Box::new(|c| c.notes = vec![note("n", None, TODAY)]),
+        ),
+        (
+            "a charge",
+            Box::new(|c| c.charges = vec![charge("c", TODAY, 10_000)]),
+        ),
+        (
+            "a voided charge",
+            Box::new(|c| {
+                c.charges = vec![Charge {
+                    voided: true,
+                    void_reason: "טעות".to_owned(),
+                    ..charge("c", TODAY, 10_000)
+                }];
+            }),
+        ),
+        (
+            "a payment",
+            Box::new(|c| c.payments = vec![payment("p", TODAY, 10_000)]),
+        ),
+        (
+            "a voided payment",
+            Box::new(|c| {
+                c.payments = vec![Payment {
+                    voided: true,
+                    void_reason: "טעות".to_owned(),
+                    ..payment("p", TODAY, 10_000)
+                }];
+            }),
+        ),
+    ];
+    for (what, fill) in cases {
+        let mut card = Card::new();
+        fill(&mut card);
+        let text = refusal(card.erase(TODAY, None));
+        assert!(text.contains("לסגור את הכרטיס"), "{what}: {text}");
+        // Born 2020-07-20: 25 on 2045-07-20, later than seven years from today.
+        assert!(text.contains("20.07.2045"), "{what}: {text}");
+    }
+}
+
+#[test]
+fn a_card_can_be_erased_once_the_retention_period_has_passed() {
+    let mut card = Card::new();
+    card.patient.birth_date = None;
+    card.patient.created_on = "2026-09-01".to_owned();
+    card.visits = vec![paid_visit("v", "2026-11-15", VisitStatus::Held, 40_000)];
+    // No birth date: seven years after the last activity.
+    assert!(refusal(card.erase("2033-11-14", None)).contains("15.11.2033"));
+    card.erase("2033-11-15", None).unwrap();
+    card.erase("2040-01-01", None).unwrap();
+
+    // The last activity is the latest date anything in the card carries.
+    card.payments = vec![payment("p", "2027-02-01", 40_000)];
+    assert!(refusal(card.erase("2033-11-15", None)).contains("01.02.2034"));
+    card.tasks = vec![ClinicTask {
+        done_on: Some("2027-03-10".to_owned()),
+        ..task("t", Some("p1"), Some("2027-03-01"))
+    }];
+    assert!(refusal(card.erase("2034-02-01", None)).contains("10.03.2034"));
+    // A record corrected later was active on the day it was written.
+    assert!(refusal(card.erase("2034-03-10", Some("2030-06-30"))).contains("30.06.2037"));
+    card.erase("2037-06-30", Some("2030-06-30")).unwrap();
+    // A saved day that cannot be read is not counted, and does not break the rule.
+    card.erase("2034-03-10", Some("לא תאריך")).unwrap();
+
+    // A known birth date: not before the child is 25, when that is later.
+    card.patient.birth_date = Some("2020-07-20".to_owned());
+    assert!(refusal(card.erase("2045-07-19", None)).contains("20.07.2045"));
+    card.erase("2045-07-20", None).unwrap();
+    // An older child: seven years after the last activity is the later of the two.
+    card.patient.birth_date = Some("2005-01-01".to_owned());
+    assert!(refusal(card.erase("2034-03-09", None)).contains("10.03.2034"));
+    card.erase("2034-03-10", None).unwrap();
+    // Born on a leap day: 25 on the last day of that February.
+    card.patient.birth_date = Some("2024-02-29".to_owned());
+    assert!(refusal(card.erase("2049-02-27", None)).contains("28.02.2049"));
+    card.erase("2049-02-28", None).unwrap();
+
+    // Today itself has to be a date when something happened in the card.
+    refusal(card.erase("מחר", None));
+}
+
+// ------------------------------------------------------------------ earlier shapes (D-175)
+
+#[test]
+fn a_record_saved_in_an_earlier_shape_still_loads() {
+    // Every field missing, and one this version does not know.
+    let bare = r#"{"added_in_a_later_version":{"x":[1,2]}}"#;
+    assert_eq!(
+        serde_json::from_str::<Patient>(bare).unwrap(),
+        Patient::default()
+    );
+    assert_eq!(
+        serde_json::from_str::<Contact>(bare).unwrap(),
+        Contact::default()
+    );
+    assert_eq!(
+        serde_json::from_str::<Visit>(bare).unwrap(),
+        Visit::default()
+    );
+    assert_eq!(
+        serde_json::from_str::<SessionNote>(bare).unwrap(),
+        SessionNote::default()
+    );
+    assert_eq!(
+        serde_json::from_str::<Payment>(bare).unwrap(),
+        Payment::default()
+    );
+    assert_eq!(
+        serde_json::from_str::<Charge>(bare).unwrap(),
+        Charge::default()
+    );
+    assert_eq!(
+        serde_json::from_str::<ClinicTask>(bare).unwrap(),
+        ClinicTask::default()
+    );
+    assert_eq!(
+        serde_json::from_str::<ClinicSettings>(bare).unwrap(),
+        ClinicSettings::default()
+    );
+    assert_eq!(
+        serde_json::from_str::<Patient>("{}").unwrap(),
+        Patient::default()
+    );
+
+    // The defaults a missing field takes are the ones the rules expect.
+    let visit = Visit::default();
+    assert_eq!(visit.status, VisitStatus::Planned);
+    assert_eq!((visit.fee, visit.charge_missed), (0, false));
+    assert_eq!(Patient::default().status, PatientStatus::Active);
+    assert!(!Payment::default().voided && !Charge::default().voided);
+}
+
+#[test]
+fn a_record_with_some_fields_keeps_them_and_defaults_the_rest() {
+    let patient: Patient = serde_json::from_str(
+        r#"{"id":"p1","name":"נועם","contacts":[{"name":"דנה","nickname":"דני"}],"shoe_size":30}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        patient,
+        Patient {
+            id: "p1".to_owned(),
+            name: "נועם".to_owned(),
+            contacts: vec![Contact {
+                name: "דנה".to_owned(),
+                ..Contact::default()
+            }],
+            ..Patient::default()
+        }
+    );
+    let visit: Visit =
+        serde_json::from_str(r#"{"id":"v1","kind":"assessment","date":"2026-11-15","start":540}"#)
+            .unwrap();
+    assert_eq!(
+        (visit.kind, visit.start, visit.minutes, visit.status),
+        (VisitKind::Assessment, 540, 0, VisitStatus::Planned)
+    );
+    let note: SessionNote =
+        serde_json::from_str(r#"{"patient_id":"p1","record":"רשומה","mood":"טוב"}"#).unwrap();
+    assert_eq!(
+        (note.record.as_str(), note.personal.as_str(), note.visit_id),
+        ("רשומה", "", None)
+    );
+    let payment: Payment = serde_json::from_str(r#"{"amount":45000,"currency":"ILS"}"#).unwrap();
+    assert_eq!(
+        (payment.amount, payment.method, payment.voided),
+        (45_000, PayMethod::Other, false)
+    );
+    let charge: Charge = serde_json::from_str(r#"{"amount":1,"what":"דוח"}"#).unwrap();
+    assert_eq!((charge.amount, charge.what.as_str()), (1, "דוח"));
+    let task: ClinicTask = serde_json::from_str(r#"{"title":"להתקשר","priority":3}"#).unwrap();
+    assert_eq!((task.kind, task.done_on), (TaskKind::Other, None));
+    // Settings saved before a field existed take that field's default, not an empty one.
+    let settings: ClinicSettings =
+        serde_json::from_str(r#"{"report_days":30,"theme":"dark"}"#).unwrap();
+    let defaults = ClinicSettings::default();
+    assert_eq!(settings.report_days, 30);
+    assert_eq!(settings.defaults, defaults.defaults);
+    assert_eq!(settings.reminder_text, defaults.reminder_text);
+    validate_settings(&settings).unwrap();
+
+    // What is written today reads back as it is.
+    let full = patient_full();
+    let json = serde_json::to_string(&full).unwrap();
+    assert_eq!(serde_json::from_str::<Patient>(&json).unwrap(), full);
+}
+
+fn patient_full() -> Patient {
+    Patient {
+        gender: Some(crate::records::GrammaticalGender::Female),
+        waiting_since: Some("2026-09-01".to_owned()),
+        urgent: true,
+        session_fee: Some(45_000),
+        case_id: Some("c1".to_owned()),
+        status: PatientStatus::Waiting,
+        ..patient("p1", "תמר")
+    }
+}
+
+// ------------------------------------------------------------------ recurrence: the edges
+
+#[test]
+fn following_after_a_later_visit_was_moved_by_hand() {
+    let mut series = vec![
+        series_visit("a", "2026-11-01", VisitStatus::Planned),
+        series_visit("b", "2026-11-08", VisitStatus::Planned),
+        series_visit("c", "2026-11-15", VisitStatus::Planned),
+        series_visit("d", "2026-11-22", VisitStatus::Planned),
+    ];
+    // She moved the third one by itself: two days later, to the afternoon.
+    series[2].date = "2026-11-17".to_owned();
+    series[2].start = 900;
+    let previous = series[0].clone();
+    let edited = Visit {
+        date: "2026-11-02".to_owned(), // one day later
+        start: 630,
+        ..previous.clone()
+    };
+    let later = apply_following(&edited, &previous, &series).unwrap();
+    let moved: Vec<(&str, &str, u16)> = later
+        .iter()
+        .map(|v| (v.id.as_str(), v.date.as_str(), v.start))
+        .collect();
+    // Each one moves by the same day from where it stands (her own move is kept), and all
+    // of them take the new hour.
+    assert_eq!(
+        moved,
+        [
+            ("b", "2026-11-09", 630),
+            ("c", "2026-11-18", 630),
+            ("d", "2026-11-23", 630),
+        ]
+    );
+
+    // A visit she moved to before the edited one is no longer "later", and stays.
+    series[3].date = "2026-10-30".to_owned();
+    let later = apply_following(&edited, &previous, &series).unwrap();
+    let ids: Vec<&str> = later.iter().map(|v| v.id.as_str()).collect();
+    assert_eq!(ids, ["b", "c"]);
+}
+
+#[test]
+fn following_leaves_a_visit_that_was_already_held_as_it_was() {
+    let series = vec![
+        series_visit("a", "2026-11-01", VisitStatus::Planned),
+        series_visit("b", "2026-11-08", VisitStatus::Held),
+        series_visit("c", "2026-11-15", VisitStatus::NoShow),
+        series_visit("d", "2026-11-22", VisitStatus::Planned),
+    ];
+    let previous = series[0].clone();
+    let edited = Visit {
+        fee: 50_000,
+        minutes: 45,
+        ..previous.clone()
+    };
+    let later = apply_following(&edited, &previous, &series).unwrap();
+    assert_eq!(later.len(), 1);
+    assert_eq!(
+        (later[0].id.as_str(), later[0].fee, later[0].minutes),
+        ("d", 50_000, 45)
+    );
+    // The edited one itself being held changes nothing for the later ones.
+    let held = Visit {
+        status: VisitStatus::Held,
+        ..edited
+    };
+    assert_eq!(apply_following(&held, &previous, &series).unwrap(), later);
+}
+
+#[test]
+fn following_moves_across_a_month_end_and_a_year_end() {
+    let series = vec![
+        series_visit("a", "2027-01-25", VisitStatus::Planned),
+        series_visit("b", "2027-02-22", VisitStatus::Planned),
+        series_visit("c", "2027-12-27", VisitStatus::Planned),
+        // 2028 is a leap year.
+        series_visit("d", "2028-02-23", VisitStatus::Planned),
+    ];
+    let previous = series[0].clone();
+    let edited = Visit {
+        date: "2027-02-01".to_owned(), // a week later, into the next month
+        ..previous.clone()
+    };
+    let dates: Vec<String> = apply_following(&edited, &previous, &series)
+        .unwrap()
+        .into_iter()
+        .map(|v| v.date)
+        .collect();
+    assert_eq!(dates, ["2027-03-01", "2028-01-03", "2028-03-01"]);
+
+    // And backwards, into the year before.
+    let series = vec![
+        series_visit("a", "2027-01-04", VisitStatus::Planned),
+        series_visit("b", "2027-01-05", VisitStatus::Planned),
+    ];
+    let edited = Visit {
+        date: "2026-12-28".to_owned(),
+        ..series[0].clone()
+    };
+    let later = apply_following(&edited, &series[0], &series).unwrap();
+    assert_eq!(later[0].date, "2026-12-29");
+}
+
+#[test]
+fn a_four_oclock_visit_stays_at_four_across_the_clock_changes() {
+    // Israel moves the clock on Friday 2027-03-26 and on Sunday 2027-10-24. A visit is a
+    // date and minutes from midnight, so a series that crosses either day keeps its hour.
+    for (first, across) in [("2027-03-19", "2027-03-26"), ("2027-10-17", "2027-10-24")] {
+        let dates = series_dates(
+            first,
+            Repeat {
+                every_weeks: 1,
+                count: 4,
+            },
+        )
+        .unwrap();
+        assert_eq!(dates[1], across);
+        let series: Vec<Visit> = dates
+            .iter()
+            .enumerate()
+            .map(|(n, date)| Visit {
+                start: 16 * 60,
+                ..series_visit(&format!("v{n}"), date, VisitStatus::Planned)
+            })
+            .collect();
+        for (n, v) in series.iter().enumerate() {
+            assert_eq!(display_time(v.start), "16:00");
+            assert_eq!(days_between(first, &v.date), Some(7 * n as i64));
+            assert_eq!(weekday(&v.date), weekday(first));
+        }
+        // Moving the series by a day keeps the hour on both sides of the change too.
+        let edited = Visit {
+            date: add_days(first, 1).unwrap(),
+            ..series[0].clone()
+        };
+        let later = apply_following(&edited, &series[0], &series).unwrap();
+        assert_eq!(later.len(), 3);
+        assert!(later.iter().all(|v| v.start == 16 * 60 && v.minutes == 60));
+        assert_eq!(later[0].date, add_days(across, 1).unwrap());
+    }
+}

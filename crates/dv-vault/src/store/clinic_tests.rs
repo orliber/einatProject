@@ -389,7 +389,7 @@ fn erasing_a_patient_removes_theirs_and_nothing_else() {
     let block = put(&mut v, "visit", None, 5, "{}");
     // A record of p1 deleted earlier leaves history that the erase must take too.
     let gone = v
-        .clinic_put("charge", None, Some(&p1), 6, "{}", None)
+        .clinic_put("visit", None, Some(&p1), 6, "{}", None)
         .unwrap();
     v.clinic_delete(&gone, true).unwrap();
     v.erase_clinic_patient(&p1).unwrap();
@@ -467,4 +467,134 @@ fn clinic_data_survives_a_backup_and_restore() {
         Some(r#"{"n":"תמר"}"#)
     );
     assert!(r.audit_intact().unwrap());
+}
+
+#[test]
+fn a_payment_a_charge_and_the_settings_are_never_removed_one_by_one() {
+    let (_d, mut v) = new_vault();
+    let pay = put(&mut v, "payment", Some("p1"), 1, "{}");
+    let charge = put(&mut v, "charge", Some("p1"), 1, "{}");
+    let settings = put(&mut v, "settings", None, 0, "{}");
+    let visit = put(&mut v, "visit", Some("p1"), 1, "{}");
+    for id in [&pay, &charge, &settings] {
+        assert!(matches!(
+            v.clinic_delete(id, true),
+            Err(VaultError::Refused(_))
+        ));
+        assert!(v.clinic_get(id).unwrap().is_some());
+    }
+    // One of them in a list keeps the whole list.
+    let r = v.clinic_delete_many(&[visit.clone(), pay.clone()], true);
+    assert!(matches!(r, Err(VaultError::Refused(_))));
+    assert!(v.clinic_get(&visit).unwrap().is_some());
+    assert!(v.clinic_history_counts().unwrap().is_empty());
+    for kind in ["visit", "note", "task"] {
+        let id = put(&mut v, kind, None, 1, "{}");
+        v.clinic_delete(&id, false).unwrap();
+        assert!(v.clinic_get(&id).unwrap().is_none());
+    }
+}
+
+#[test]
+fn the_same_id_twice_in_one_delete_removes_nothing() {
+    let (_d, mut v) = new_vault();
+    let a = put(&mut v, "visit", None, 1, "{}");
+    let r = v.clinic_delete_many(&[a.clone(), a.clone()], true);
+    assert!(matches!(r, Err(VaultError::NotFound)));
+    assert!(v.clinic_get(&a).unwrap().is_some());
+    assert!(v.clinic_history(&a).unwrap().is_empty());
+}
+
+#[test]
+fn erasing_takes_the_history_a_record_had_under_another_card() {
+    let (_d, mut v) = new_vault();
+    let p1 = v.save_clinic_patient(None, r#"{"n":"אורי"}"#).unwrap();
+    let p2 = v.save_clinic_patient(None, r#"{"n":"נועה"}"#).unwrap();
+    // Written for p2 by mistake, then moved to p1: its first history row carries p2.
+    let moved = v
+        .clinic_put("payment", None, Some(&p2), 1, r#"{"a":1}"#, Some("created"))
+        .unwrap();
+    v.clinic_put(
+        "payment",
+        Some(&moved),
+        Some(&p1),
+        1,
+        r#"{"a":2}"#,
+        Some("changed"),
+    )
+    .unwrap();
+    let stays = v
+        .clinic_put("payment", None, Some(&p2), 2, "{}", Some("created"))
+        .unwrap();
+    v.erase_clinic_patient(&p1).unwrap();
+    assert!(v.clinic_get(&moved).unwrap().is_none());
+    assert!(v.clinic_history(&moved).unwrap().is_empty());
+    assert_eq!(v.clinic_history(&stays).unwrap().len(), 1);
+    assert_eq!(v.clinic_of_patient(&p2).unwrap().len(), 1);
+    let rows: i64 = v
+        .main
+        .query_row("SELECT COUNT(*) FROM clinic_history", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(rows, 1);
+}
+
+#[test]
+fn a_replaced_record_keeps_its_kind_and_moves_in_the_indexes() {
+    let (_d, mut v) = new_vault();
+    let id = put(&mut v, "task", Some("p1"), 10, r#"{"t":1}"#);
+    v.clinic_put("task", Some(&id), None, 0, r#"{"t":2}"#, None)
+        .unwrap();
+    let got = v.clinic_get(&id).unwrap().unwrap();
+    assert_eq!((got.kind.as_str(), got.patient_id, got.day), ("task", None, 0));
+    assert!(v.clinic_of_patient("p1").unwrap().is_empty());
+    assert!(v.clinic_range("task", 10, 10).unwrap().is_empty());
+    assert_eq!(v.clinic_range("task", 0, 0).unwrap().len(), 1);
+    // No history was asked for: none was written.
+    assert!(v.clinic_history_counts().unwrap().is_empty());
+}
+
+#[test]
+fn an_empty_list_writes_and_removes_nothing() {
+    let (_d, mut v) = new_vault();
+    assert!(v
+        .clinic_put_many("visit", &[], Some("created"))
+        .unwrap()
+        .is_empty());
+    v.clinic_delete_many(&[], true).unwrap();
+    assert!(v.clinic_kind("visit").unwrap().is_empty());
+    assert!(v.clinic_history_counts().unwrap().is_empty());
+}
+
+#[test]
+fn nothing_of_the_clinic_is_readable_in_the_files() {
+    let (dir, mut v) = new_vault();
+    let p = v
+        .save_clinic_patient(None, r#"{"n":"שם-בדוי-לבדיקה"}"#)
+        .unwrap();
+    let id = v
+        .clinic_put(
+            "note",
+            None,
+            Some(&p),
+            3,
+            r#"{"text":"תוכן-בדוי-לבדיקה"}"#,
+            Some("created"),
+        )
+        .unwrap();
+    v.clinic_delete(&id, true).unwrap();
+    v.lock().unwrap();
+    for entry in std::fs::read_dir(dir.path()).unwrap() {
+        let path = entry.unwrap().path();
+        if !path.is_file() {
+            continue;
+        }
+        let bytes = std::fs::read(&path).unwrap();
+        for needle in ["שם-בדוי-לבדיקה", "תוכן-בדוי-לבדיקה"] {
+            let needle = needle.as_bytes();
+            assert!(
+                !bytes.windows(needle.len()).any(|w| w == needle),
+                "{path:?}"
+            );
+        }
+    }
 }

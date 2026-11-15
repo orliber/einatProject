@@ -289,6 +289,21 @@ fn describe(
             format!("פרופיל הסגנון אושר (גרסה {})", number("version")),
             false,
         ),
+        "clinic_patient_added" => ("clinic", "נפתח כרטיס מטופל בקליניקה".to_owned(), false),
+        "clinic_patient_erased" => (
+            "clinic",
+            match number("records") {
+                0 => "כרטיס מטופל נמחק מהקליניקה".to_owned(),
+                1 => "כרטיס מטופל נמחק מהקליניקה, ואיתו רישום אחד".to_owned(),
+                n => format!("כרטיס מטופל נמחק מהקליניקה, ואיתו {n} רישומים"),
+            },
+            true,
+        ),
+        "clinic_note_to_case" => (
+            "clinic",
+            "סיכום פגישה מהקליניקה הועבר לחומרי התיק".to_owned(),
+            false,
+        ),
         other => ("security", other.to_owned(), false),
     })
 }
@@ -425,6 +440,9 @@ mod tests {
             "style_source_added",
             "style_source_deleted",
             "style_profile_approved",
+            "clinic_patient_added",
+            "clinic_patient_erased",
+            "clinic_note_to_case",
         ] {
             let (_, text, _) = describe(event, &Value::Null, structure.as_ref()).unwrap();
             assert!(!text.contains('_'), "{event} → {text}");

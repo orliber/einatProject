@@ -180,6 +180,16 @@ describe("visits", () => {
   });
 });
 
+describe("the calendar's range", () => {
+  it("two real dates in order, at most a hundred days", () => {
+    const { ask } = clinic();
+    expect(ask({ op: "calendar", from: "2026-11-01", to: "2027-02-08" }, "visits")).toEqual([]);
+    for (const [from, to] of [["2026-11-01", "2027-02-09"], ["2026-11-02", "2026-11-01"], ["2026-11-31", "2026-12-01"], ["", ""]] as const) {
+      expect(refusal(() => ask({ op: "calendar", from, to }, "visits")).code, `${from}..${to}`).toBe("refused");
+    }
+  });
+});
+
 describe("a repeating series", () => {
   function series(ask: Ask, patientId: string, every = 1, count = 4) {
     return ask({ op: "save_visit", visit: visit(patientId, { kind: "therapy", minutes: 50, fee: 38_000 }), repeat: { every_weeks: every, count }, scope: "one" }, "saved").visits.map((v) => v.visit);
@@ -340,7 +350,7 @@ describe("alerts", () => {
     const debt = () => alertsOf(ask).filter((a) => a.kind === "debt");
     expect(debt()).toHaveLength(1);
     expect(debt()[0]).toMatchObject({ since: "2026-10-01", patient_id: p.id });
-    expect(debt()[0]?.text).toContain("1,050 ₪");
+    expect(debt()[0]?.text).toBe("יתרה פתוחה של 1050 ₪, מאז 01.10.2026.");
     // The payment covers the old session; what is left is ten days old.
     ask({ op: "save_payment", payment: payment(p.id, 45_000) }, "payment");
     expect(debt()).toEqual([]);
@@ -434,10 +444,13 @@ describe("patients", () => {
     const bad: Partial<Patient>[] = [
       { name: "  " }, { name: "א".repeat(121) }, { birth_date: "2021-13-01" }, { session_fee: -1 },
       { contacts: Array.from({ length: 7 }, () => ({ role: "other" as const, name: "איש קשר", phone: "", email: "" })) },
-      { contacts: [{ role: "mother", name: "", phone: "", email: "" }] }, { reason: "א".repeat(4001) },
+      { reason: "א".repeat(4001) }, { created_on: "" }, { waiting_since: "אתמול" },
     ];
     for (const over of bad) expect(refusal(() => addPatient(ask, over)).code, JSON.stringify(over).slice(0, 40)).toBe("refused");
-    expect(addPatient(ask, { name: "  נועם  " }).name).toBe("נועם");
+    // Stored on one line with single spaces; an empty row of the contacts form is dropped.
+    const saved = addPatient(ask, { name: "  נועם   לדוגמה  ", contacts: [{ role: "mother", name: " מיכל ", phone: "", email: "" }, { role: "other", name: " ", phone: "", email: "" }] });
+    expect(saved.name).toBe("נועם לדוגמה");
+    expect(saved.contacts).toEqual([{ role: "mother", name: "מיכל", phone: "", email: "" }]);
   });
 
   it("saving a card never changes its case or the day it was opened", () => {
@@ -465,25 +478,72 @@ describe("patients", () => {
     const rows = ask({ op: "patients", today: NOW }, "patients");
     expect(rows.map((r) => r.patient.name)).toEqual(["אביב", "נועם"]);
     expect(rows[0]).toMatchObject({ age: null, next_visit: null, last_visit: null, due: 0, open_tasks: 0 });
-    // Today's visit ended at ten; the next one is the feedback.
-    expect(rows[1]).toMatchObject({ age: { years: 5, months: 5 }, next_visit: { date: "2026-11-18", kind: "feedback" }, last_visit: "2026-11-01", due: 60_000, open_tasks: 1 });
+    // Today's visit ended at ten and is not marked yet: it is still the next one, until she marks it.
+    expect(rows[1]).toMatchObject({ age: { years: 5, months: 5 }, next_visit: { date: DAY, start: 540, kind: "assessment" }, last_visit: "2026-11-01", due: 60_000, open_tasks: 1 });
   });
 
-  it("erasing needs the name typed again, and takes everything of the patient with it", () => {
+  it("a card where nothing happened is erased at once, with the name typed again (D-174)", () => {
     const { ask } = clinic();
     const p = addPatient(ask);
     const other = addPatient(ask, { name: "תמר" });
-    const v = addVisit(ask, p.id, { status: "held" });
+    // Scheduled, cancelled without a charge, and a task: nothing happened yet.
+    const v = addVisit(ask, p.id, { date: addDays(localToday().date, 3) });
+    addVisit(ask, p.id, { status: "cancelled", date: "2026-11-02" });
     addVisit(ask, other.id, { date: "2026-11-16" });
-    ask({ op: "save_payment", payment: payment(p.id, 100) }, "payment");
     ask({ op: "save_task", task: task({ patient_id: p.id }) }, "task");
     expect(refusal(() => ask({ op: "erase_patient", id: p.id, name: "נועמ" }, "done")).message).toContain("שום דבר לא נמחק");
     ask({ op: "erase_patient", id: p.id, name: " נועם " }, "done");
     expect(ask({ op: "patients", today: NOW }, "patients").map((r) => r.patient.name)).toEqual(["תמר"]);
-    expect(ask({ op: "calendar", from: "2026-01-01", to: "2026-12-31" }, "visits")).toHaveLength(1);
+    expect(ask({ op: "calendar", from: "2026-11-01", to: "2026-12-31" }, "visits")).toHaveLength(1);
     expect(ask({ op: "history", record_id: v.id }, "history")).toEqual([]);
     expect(ask({ op: "tasks", today: NOW }, "tasks")).toEqual([]);
     expect(refusal(() => ask({ op: "patient_card", id: p.id, today: NOW }, "card")).code).toBe("not_found");
+  });
+
+  it("a card that holds a record is closed, not erased, until its retention period has passed (D-174)", () => {
+    const today = localToday().date;
+    const happened: ((ask: Ask, id: string) => void)[] = [
+      (ask, id) => addVisit(ask, id, { status: "held", date: today }),
+      (ask, id) => addVisit(ask, id, { status: "no_show", charge_missed: true, date: today }),
+      (ask, id) => ask({ op: "save_note", note: { id: "", patient_id: id, visit_id: null, date: today, record: "שיחת טלפון", personal: "", case_input_id: null } }, "note"),
+      (ask, id) => ask({ op: "save_charge", charge: { id: "", patient_id: id, date: today, amount: 100, what: "דוח", voided: false, void_reason: "" } }, "charge"),
+      // A voided payment is still a line of the income diary.
+      (ask, id) => ask({ op: "void_payment", id: ask({ op: "save_payment", payment: payment(id, 100, today) }, "payment").id, reason: "טעות" }, "payment"),
+    ];
+    for (const what of happened) {
+      const { ask } = clinic();
+      const p = addPatient(ask);
+      what(ask, p.id);
+      const no = refusal(() => ask({ op: "erase_patient", id: p.id, name: "נועם" }, "done"));
+      expect(no.code).toBe("refused");
+      expect(no.message).toContain("לסגור את הכרטיס");
+      expect(ask({ op: "patients", today: NOW }, "patients")).toHaveLength(1);
+      // Closing is what the screen offers instead; everything stays.
+      expect(ask({ op: "save_patient", patient: { ...p, status: "closed" } }, "patient").status).toBe("closed");
+    }
+  });
+
+  it("after seven years since the last activity and the child's 25th birthday, the whole card goes", () => {
+    const { ask } = clinic();
+    const today = localToday().date;
+    const years = (n: number) => `${Number(today.slice(0, 4)) - n}${today.slice(4, 8)}01`;
+    // Seven years passed, but the child is not 25 yet.
+    const young = addPatient(ask, { name: "צעיר", birth_date: years(20), created_on: years(9) });
+    addVisit(ask, young.id, { status: "held", date: years(8) });
+    expect(refusal(() => ask({ op: "erase_patient", id: young.id, name: "צעיר" }, "done")).message).toContain("שומרים עד");
+    // 25 and more, but something happened three years ago.
+    const recent = addPatient(ask, { name: "קרוב", birth_date: years(30), created_on: years(9) });
+    addVisit(ask, recent.id, { status: "held", date: years(3) });
+    expect(refusal(() => ask({ op: "erase_patient", id: recent.id, name: "קרוב" }, "done")).code).toBe("refused");
+    // Both passed: everything goes, the history and the money lines too.
+    const old = addPatient(ask, { name: "ותיק", birth_date: years(30), created_on: years(9) });
+    const v = addVisit(ask, old.id, { status: "held", date: years(8) });
+    const pay = ask({ op: "save_payment", payment: payment(old.id, 60_000, years(8)) }, "payment");
+    ask({ op: "erase_patient", id: old.id, name: "ותיק" }, "done");
+    expect(ask({ op: "patients", today: NOW }, "patients").map((r) => r.patient.name)).toEqual(["צעיר", "קרוב"]);
+    expect(ask({ op: "history", record_id: v.id }, "history")).toEqual([]);
+    expect(ask({ op: "history", record_id: pay.id }, "history")).toEqual([]);
+    expect(ask({ op: "diary", month: years(8).slice(0, 7) }, "diary").days.flatMap((d) => d.lines)).toHaveLength(1);
   });
 
   it("the card walks the assessment step by step", () => {
@@ -495,10 +555,13 @@ describe("patients", () => {
     addVisit(ask, p.id, { status: "held", date: "2026-11-08" });
     addVisit(ask, p.id, { date: "2026-11-22" });
     addVisit(ask, p.id, { kind: "observation", date: "2026-11-23" });
-    expect(steps()).toEqual([["intake", "done"], ["sessions", "now"], ["observation", "todo"], ["report", "todo"], ["feedback", "todo"], ["payment", "todo"]]);
+    // More than one step can be under way: sessions are running, the observation is set, money is owed.
+    expect(steps()).toEqual([["intake", "done"], ["sessions", "now"], ["observation", "now"], ["report", "todo"], ["feedback", "todo"], ["payment", "now"]]);
     const card = ask({ op: "patient_card", id: p.id, today: NOW }, "card");
     expect(card.process.find((s) => s.key === "sessions")?.detail).toBe("1 מתוך 2 התקיימו");
-    expect(card.process.find((s) => s.key === "payment")?.detail).toContain("1,050 ₪");
+    expect(card.process.find((s) => s.key === "observation")?.detail).toBe("נקבעה ליום 23.11.2026");
+    expect(card.process.find((s) => s.key === "report")).toMatchObject({ label: "כתיבת הדוח", detail: "עוד לא נפתח תיק לדוח" });
+    expect(card.process.find((s) => s.key === "payment")?.detail).toBe("נותרו 1050 ₪ לתשלום");
     // Newest first.
     expect(card.visits.map((v) => v.visit.date)).toEqual(["2026-11-23", "2026-11-22", "2026-11-08", "2026-11-01"]);
   });
@@ -519,8 +582,26 @@ describe("notes and the link to a case", () => {
     expect(refusal(() => ask({ op: "save_note", note: { ...n, id: "" } }, "note")).message).toContain("כבר יש סיכום");
     expect(refusal(() => ask({ op: "save_note", note: { ...n, record: " ", personal: "" } }, "note")).message).toContain("ריק");
     expect(ask({ op: "calendar", from: v.date, to: v.date }, "visits")[0]?.has_note).toBe(true);
-    ask({ op: "delete_note", id: n.id }, "done");
-    expect(ask({ op: "patient_card", id: p.id, today: NOW }, "card").notes).toEqual([]);
+    // Stored trimmed, as the core stores it.
+    expect(ask({ op: "save_note", note: { ...n, record: "  רשומה רשמית \n" } }, "note").record).toBe("רשומה רשמית");
+  });
+
+  it("a note that has text is never deleted; it is corrected, and every state of it is kept", () => {
+    const { ask, p, n } = withNote();
+    const no = refusal(() => ask({ op: "delete_note", id: n.id }, "done"));
+    expect(no.code).toBe("refused");
+    expect(no.message).toContain("לא נמחק");
+    expect(ask({ op: "patient_card", id: p.id, today: NOW }, "card").notes).toHaveLength(1);
+    ask({ op: "save_note", note: { ...n, record: "רשומה מתוקנת", personal: "מחשבה שלי בלבד" } }, "note");
+    const h = ask({ op: "history", record_id: n.id }, "history");
+    expect(h.map((e) => e.action)).toEqual(["created", "changed"]);
+    expect(h[0]?.lines).toContain("רשומה: רשומה רשמית");
+    expect(h[1]?.lines).toContain("רשומה: רשומה מתוקנת");
+    // The personal note is hers alone: the history says there is one, never what it says.
+    expect(JSON.stringify(h)).not.toContain("מחשבה שלי בלבד");
+    expect(JSON.stringify(h)).not.toContain("תרשומת אישית\"");
+    expect(h[1]?.lines).toContain("תרשומת אישית: יש");
+    expect(refusal(() => ask({ op: "delete_note", id: "nothing" }, "done")).code).toBe("not_found");
   });
 
   it("opens a case with the child's name, age and parents, and a code of today", () => {
@@ -533,6 +614,19 @@ describe("notes and the link to a case", () => {
     // The same day again, for another child: the code is not taken twice.
     const q = addPatient(ask, { name: "תמר" });
     expect(ask({ op: "create_case", patient_id: q.id, today: NOW }, "case").code).toBe("תיק-2026-1115-2");
+  });
+
+  it("every named contact becomes a person of the case, so the filter masks them later", () => {
+    const made = clinic();
+    const seen: { role: string; value: string }[] = [];
+    const host = { ...made.host, createCase: (meta: Parameters<typeof made.host.createCase>[0], people: Parameters<typeof made.host.createCase>[1]) => { seen.push(...people.map((x) => ({ role: x.role, value: x.value }))); return made.host.createCase(meta, people); } };
+    const { ask } = clinic(host);
+    const p = addPatient(ask, { contacts: [
+      { role: "mother", name: "מיכל", phone: "", email: "" }, { role: "guardian", name: "סבתא רבקה", phone: "", email: "" },
+      { role: "other", name: "", phone: "שלוחה 12", email: "" }, { role: "other", name: "דודה חנה", phone: "", email: "" },
+    ] });
+    ask({ op: "create_case", patient_id: p.id, today: NOW }, "case");
+    expect(seen).toEqual([{ role: "child", value: "נועם" }, { role: "mother", value: "מיכל" }, { role: "relative", value: "סבתא רבקה" }, { role: "other", value: "דודה חנה" }]);
   });
 
   it("only the formal record goes into the case, and going again replaces it", () => {
@@ -600,9 +694,10 @@ describe("the diary, income and history", () => {
     expect(first?.lines.map((l) => l.voided)).toEqual([false, false, false, false, true]);
     expect(first).toMatchObject({ charged: 225_000, received: 60_000 });
     expect(first?.lines[3]).toMatchObject({ record_id: pay.id, received: 60_000, method: "bit", receipt: "1001", changed: false });
-    expect(first?.lines[4]).toMatchObject({ received: 0, note: "הוקלד בטעות", changed: true });
+    // A voided line is shown with its amount and counted nowhere.
+    expect(first?.lines[4]).toMatchObject({ received: 99_000, note: "בוטל: הוקלד בטעות", changed: true });
     expect(d).toMatchObject({ charged: 225_000, received: 90_000, missing_receipts: 1 });
-    expect(d.by_method).toEqual([{ method: "bit", amount: 60_000 }, { method: "cash", amount: 30_000 }]);
+    expect(d.by_method).toEqual([{ method: "cash", amount: 30_000 }, { method: "bit", amount: 60_000 }]);
     expect(refusal(() => ask({ op: "diary", month: "2026-13" }, "diary")).code).toBe("refused");
   });
 
@@ -633,15 +728,16 @@ describe("the diary, income and history", () => {
     ask({ op: "save_visit", visit: { ...v, start: 600, status: "cancelled", status_note: "מחלה" }, repeat: null, scope: "one" }, "saved");
     const h = ask({ op: "history", record_id: v.id }, "history");
     expect(h.map((e) => e.action)).toEqual(["created", "changed", "changed"]);
-    expect(h[0]?.lines.join("\n")).toContain("09:00–10:30");
-    expect(h[1]?.lines.join("\n")).toContain("10:00–11:30");
-    expect(h[2]?.lines.join("\n")).toContain("בוטלה (מחלה)");
+    expect(h[0]?.lines).toEqual(["מטופל: נועם", "סוג: מפגש אבחון", "תאריך: 15.11.2026", "שעה: 09:00", "משך: 90 דקות", "מקום: הקליניקה", "מצב: מתוכננת", "מחיר: 600 ₪"]);
+    expect(h[1]?.lines).toContain("שעה: 10:00");
+    expect(h[2]?.lines).toEqual(expect.arrayContaining(["מצב: בוטלה", "מה קרה: מחלה"]));
     const pay = ask({ op: "save_payment", payment: payment(p.id, 45_000) }, "payment");
     ask({ op: "save_payment", payment: { ...pay, amount: 45_050 } }, "payment");
     ask({ op: "void_payment", id: pay.id, reason: "טעות" }, "payment");
     const ph = ask({ op: "history", record_id: pay.id }, "history");
     expect(ph.map((e) => e.action)).toEqual(["created", "changed", "voided"]);
-    expect(ph[1]?.lines[0]).toContain("450.50 ₪");
+    expect(ph[1]?.lines).toContain("סכום: 450.50 ₪");
+    expect(ph[2]?.lines).toEqual(expect.arrayContaining(["בוטל: כן", "סיבת הביטול: טעות"]));
     expect(ask({ op: "history", record_id: "nothing" }, "history")).toEqual([]);
   });
 });
@@ -651,6 +747,11 @@ describe("messages and settings", () => {
     const values = { "{הורה}": "מיכל", "{ילד}": "נועם", "{יום}": "ראשון", "{תאריך}": "15.11.2026", "{שעה}": "09:30", "{מקום}": "הקליניקה", "{סכום}": "450", "{שמי}": "רותם" };
     expect(fillMessage("שלום {הורה} ({הורה}), {ילד} ביום {יום} {תאריך} {שעה} ב{מקום}: {סכום} ₪. {שמי}", values))
       .toBe("שלום מיכל (מיכל), נועם ביום ראשון 15.11.2026 09:30 בהקליניקה: 450 ₪. רותם");
+  });
+
+  it("fills in one pass: a value is never read again as a placeholder, and other braces stay", () => {
+    const values = { "{הורה}": "{ילד}", "{ילד}": "נועם", "{יום}": "", "{תאריך}": "", "{שעה}": "", "{מקום}": "", "{סכום}": "", "{שמי}": "" };
+    expect(fillMessage("שלום {הורה}, {משהו} {{ילד}", values)).toBe("שלום {ילד}, {משהו} {נועם");
   });
 
   it("a reminder of a visit, and “שלום רב” when no parent is named", () => {
@@ -685,13 +786,15 @@ describe("messages and settings", () => {
     expect(s.defaults.every((d) => d.fee === 0)).toBe(true);
     expect(s.note_templates).toHaveLength(4);
 
-    const saved = ask({ op: "save_settings", settings: { ...s, places: [" הקליניקה ", "שיחת וידאו"], debt_days: 45 } }, "settings");
+    // Stored tidy: places on one line, the empty and the repeated ones dropped; working days in order, once each.
+    const saved = ask({ op: "save_settings", settings: { ...s, places: [" הקליניקה ", "שיחת  וידאו", "", "הקליניקה"], work_days: [3, 0, 3], debt_days: 45 } }, "settings");
     expect(saved.places).toEqual(["הקליניקה", "שיחת וידאו"]);
+    expect(saved.work_days).toEqual([0, 3]);
     expect(ask({ op: "settings" }, "settings").debt_days).toBe(45);
     const bad = [
-      { day_start: 1200, day_end: 480 }, { work_days: [0, 0] }, { work_days: [7] }, { defaults: s.defaults.slice(1) },
-      { places: Array.from({ length: 13 }, (_, i) => `מקום ${i}`) }, { places: [""] }, { reminder_text: "א".repeat(1001) },
-      { note_templates: Array.from({ length: 21 }, (_, i) => ({ name: `תבנית ${i}`, text: "" })) }, { report_days: 0 },
+      { day_start: 1200, day_end: 480 }, { work_days: [] }, { work_days: [7] }, { defaults: s.defaults.slice(1) },
+      { places: Array.from({ length: 13 }, (_, i) => `מקום ${i}`) }, { reminder_text: "א".repeat(1001) },
+      { note_templates: Array.from({ length: 21 }, (_, i) => ({ name: `תבנית ${i}`, text: "" })) }, { note_templates: [{ name: " ", text: "" }] },
       { defaults: s.defaults.map((d) => (d.kind === "block" ? { ...d, fee: 100 } : d)) },
     ];
     for (const over of bad) expect(refusal(() => ask({ op: "save_settings", settings: { ...s, ...over } }, "settings")).code, Object.keys(over).join()).toBe("refused");

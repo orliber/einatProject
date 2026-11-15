@@ -1,7 +1,7 @@
 // Money, dates and times as the clinic shows and reads them, and a Hebrew word for every value.
 import {
   addDays, ALERT_KIND_LABEL, CONTACT_ROLE_LABEL, dayName, daysBetween, formatDate, formatDateLong, formatDateShort, formatLength,
-  formatMoney, formatMonth, formatSpan, formatTime, isIsoDate, moneyInput, monthOf, monthRange, parseMoney, parseTime,
+  formatMoney, formatMonth, formatSpan, formatTime, greeting, initials, isIsoDate, moneyInput, monthOf, monthRange, parseMoney, parseTime,
   PATIENT_STATUS_LABEL, PAY_METHOD_LABEL, PAY_METHODS, TASK_KIND_LABEL, TASK_KINDS, today, VISIT_KIND_LABEL, VISIT_KINDS,
   VISIT_STATUS_LABEL, visitTitle, weekday, weekRange,
 } from "./format";
@@ -137,9 +137,35 @@ describe("labels", () => {
   it("the words mean what the spec means", () => {
     expect(VISIT_KIND_LABEL.intake).toBe("פגישת היכרות");
     expect(VISIT_KIND_LABEL.feedback).toBe("שיחת משוב");
-    expect(VISIT_KIND_LABEL.block).toBe("חסימת זמן");
+    expect(VISIT_KIND_LABEL.block).toBe("זמן שמור");
     expect(VISIT_STATUS_LABEL.held).toBe("התקיימה");
-    expect(VISIT_STATUS_LABEL.no_show).toBe("לא הגיע/ה");
+    expect(VISIT_STATUS_LABEL.no_show).toBe("לא הגיעו");
+  });
+
+  it("the words are the core's own (logic.rs: kind_label, status_label, method_label, task_kind_label, patient_status_label, contact_role_label)", () => {
+    expect(VISIT_KIND_LABEL).toEqual({
+      intake: "פגישת היכרות", assessment: "מפגש אבחון", observation: "תצפית", feedback: "שיחת משוב", therapy: "פגישת טיפול",
+      guidance: "הדרכת הורים", meeting: "פגישה מקצועית", other: "פגישה אחרת", block: "זמן שמור",
+    });
+    expect(VISIT_STATUS_LABEL).toEqual({ planned: "מתוכננת", held: "התקיימה", cancelled: "בוטלה", no_show: "לא הגיעו" });
+    expect(PAY_METHOD_LABEL).toEqual({ cash: "מזומן", transfer: "העברה בנקאית", bit: "ביט", paybox: "פייבוקס", check: "צ'ק", card: "כרטיס אשראי", other: "אחר" });
+    expect(TASK_KIND_LABEL).toEqual({ call: "שיחת טלפון", questionnaire: "שאלון", document: "מסמך", report: "דוח", payment: "תשלום", follow_up: "מעקב", other: "אחר" });
+    expect(PATIENT_STATUS_LABEL).toEqual({ waiting: "ברשימת ההמתנה", active: "בתהליך", closed: "הסתיים" });
+    expect(CONTACT_ROLE_LABEL).toEqual({ mother: "אמא", father: "אבא", guardian: "אפוטרופוס", other: "אחר" });
+    // And in the core's order.
+    expect(VISIT_KINDS).toEqual(["intake", "assessment", "observation", "feedback", "therapy", "guidance", "meeting", "other", "block"]);
+    expect(PAY_METHODS).toEqual(["cash", "transfer", "bit", "paybox", "check", "card", "other"]);
+  });
+
+  it("discreet mode shows initials, never the name", () => {
+    expect(initials("נועם לדוגמה")).toBe("נ. ל.");
+    expect(initials("  תמר ")).toBe("ת.");
+    expect(initials("אבי בן דוד הכהן")).toBe("א. ב. ד.");
+    expect(initials("")).toBe("");
+  });
+
+  it("greets by the hour", () => {
+    expect([0, 5 * 60, 11 * 60 + 59, 12 * 60, 17 * 60, 22 * 60].map(greeting)).toEqual(["לילה טוב", "בוקר טוב", "בוקר טוב", "צהריים טובים", "ערב טוב", "לילה טוב"]);
   });
 
   it("a visit is called by her own words when she gave some", () => {

@@ -31,6 +31,9 @@ pub struct StoredClinicHistory {
 
 const KINDS: [&str; 6] = ["visit", "note", "payment", "charge", "task", "settings"];
 const ACTIONS: [&str; 4] = ["created", "changed", "voided", "deleted"];
+/// What may be removed one record at a time. A payment and a charge are voided, never removed
+/// (D-172), and the settings record is only replaced: those go only with their patient.
+const REMOVABLE: [&str; 3] = ["visit", "note", "task"];
 /// The one settings record has a fixed id.
 const SETTINGS_ID: &str = "settings";
 
@@ -266,8 +269,8 @@ impl Vault {
         self.clinic_delete_many(&[id.to_owned()], history)
     }
 
-    /// Several records in one transaction: all erased or none. A missing one is `NotFound`
-    /// and nothing is erased.
+    /// Several records in one transaction: all erased or none. A missing one is `NotFound`,
+    /// a payment, a charge or the settings record is refused, and nothing is erased.
     pub fn clinic_delete_many(&mut self, ids: &[String], history: bool) -> Result<(), VaultError> {
         let key = &self.keys.settings;
         let tx = self.main.unchecked_transaction()?;
@@ -280,6 +283,12 @@ impl Vault {
                 )
                 .optional()?
                 .ok_or(VaultError::NotFound)?;
+            if !REMOVABLE.contains(&row.1.as_str()) {
+                return Err(VaultError::Refused(format!(
+                    "a clinic {} is never removed",
+                    row.1
+                )));
+            }
             if history {
                 let rec = open_record(key, row)?;
                 history_row(
@@ -424,8 +433,14 @@ impl Vault {
         }
         // The records first: if the card's removal fails, the erase can be asked again.
         let tx = self.main.unchecked_transaction()?;
+        // The history of their records first, by record: a row written while the record still
+        // belonged to another card carries that card's id, and would be left behind.
+        tx.execute(
+            "DELETE FROM clinic_history WHERE patient_id = ?1
+             OR record_id IN (SELECT id FROM clinic_records WHERE patient_id = ?1)",
+            [id],
+        )?;
         let records = tx.execute("DELETE FROM clinic_records WHERE patient_id = ?1", [id])?;
-        tx.execute("DELETE FROM clinic_history WHERE patient_id = ?1", [id])?;
         tx.commit()?;
         self.identity
             .execute("DELETE FROM clinic_patients WHERE id = ?1", [id])?;

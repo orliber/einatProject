@@ -1,6 +1,7 @@
 // Browser preview and tests only: an in-memory stand-in for the clinic (docs/CLINIC.md), with
-// the same rules the core keeps: validation, series, overlaps, charges and balances, alerts,
-// the assessment process, the diary, income, history and the messages. Every patient, phone
+// the same rules the core keeps (crates/dv-domain/src/clinic/logic.rs): validation, series,
+// overlaps, charges and balances, alerts, the assessment process, the diary, income, history
+// and the messages, and what may be erased (D-174). Every patient, phone
 // and text here is invented; nothing is stored and nothing leaves the page.
 import type { Age } from "../ipc/generated/Age";
 import type { Alert } from "../ipc/generated/Alert";
@@ -42,9 +43,8 @@ import type { VisitKind } from "../ipc/generated/VisitKind";
 import type { VisitStatus } from "../ipc/generated/VisitStatus";
 import type { VisitView } from "../ipc/generated/VisitView";
 import {
-  addDays, CONTACT_ROLE_LABEL, dayName, daysBetween, formatDate, formatDateLong, formatDateShort, formatMoney, formatSpan,
-  formatTime, isIsoDate, MAX_AGOROT, moneyNumber, monthOf, monthRange, PAY_METHOD_LABEL, PAY_METHODS, today as localToday,
-  VISIT_KIND_LABEL, VISIT_KINDS, VISIT_STATUS_LABEL, visitTitle, weekRange,
+  addDays, CONTACT_ROLE_LABEL, dayName, daysBetween, formatDate, formatTime, isIsoDate, MAX_AGOROT, moneyNumber, monthOf, monthRange,
+  PAY_METHOD_LABEL, PAY_METHODS, today as localToday, VISIT_KIND_LABEL, VISIT_KINDS, VISIT_STATUS_LABEL, weekRange,
 } from "../screens/clinic/format";
 
 // ------------------------------------------------------------------ the link to cases
@@ -114,6 +114,7 @@ function need(ok: boolean, message: string): asserts ok {
   if (!ok) refuse(message);
 }
 
+const NAME = 120;
 const SHORT = 200;
 const LONG = 4_000;
 const RECORD = 20_000;
@@ -125,10 +126,24 @@ const TEMPLATE = 5_000;
 
 /** Length as she counts it: letters, not UTF-16 units. */
 const chars = (s: string) => Array.from(s).length;
-const short = (s: string, what: string) => need(chars(s) <= SHORT, `${what}: עד ${SHORT} תווים.`);
-const long = (s: string, what: string) => need(chars(s) <= LONG, `${what}: עד 4,000 תווים.`);
+const atMost = (s: string, max: number, field: string) => need(chars(s) <= max, `יש יותר מדי טקסט בשדה "${field}". אפשר לכתוב עד ${max} תווים.`);
+const short = (s: string, field: string) => atMost(s, SHORT, field);
+const long = (s: string, field: string) => atMost(s, LONG, field);
+const realDate = (s: string, field: string) => need(isIsoDate(s), `צריך לבחור תאריך תקין בשדה "${field}".`);
+/** One line, single spaces: what a name, a phone or a place is stored as. */
+const cleanLine = (s: string) => s.split(/\s+/).filter(Boolean).join(" ");
+const blankToNull = (s: string | null) => (s === null || s.trim() === "" ? null : s.trim());
 const whole = (n: unknown, min: number, max: number): n is number => typeof n === "number" && Number.isInteger(n) && n >= min && n <= max;
 const copy = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+
+/** How long a card is kept before it may be erased (D-174): the rule of a case (`retention.rs`). */
+export const KEEP_YEARS_AFTER_LAST_CHANGE = 7;
+export const KEEP_UNTIL_AGE = 25;
+/** The calendar gives at most this many days in one answer. */
+const MAX_RANGE_DAYS = 100;
+const NO_NOTE_DAYS = 60;
+const FEEDBACK_SOON_DAYS = 7;
+const NO_NEXT_VISIT_DAYS = 14;
 
 /** The kinds of session that need a record once they were held. */
 const NOTE_KINDS: VisitKind[] = ["intake", "assessment", "observation", "feedback", "therapy", "guidance"];
@@ -159,24 +174,35 @@ export function defaultClinicSettings(): ClinicSettings {
   };
 }
 
-/** Age on `on` of a child born on `birth`; `null` when the dates are out of order. */
-function ageOn(birth: string | null, on: string): Age | null {
-  if (!birth || !isIsoDate(birth) || !isIsoDate(on)) return null;
-  const [by = 0, bm = 0, bd = 0] = birth.split("-").map(Number);
-  const [oy = 0, om = 0, od = 0] = on.split("-").map(Number);
+const ymd = (iso: string) => iso.split("-").map(Number) as [number, number, number];
+const daysInMonth = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+
+/** Age on `on` of a child born on `birth`; `null` without a birth date, or when it is still ahead. */
+export function ageOn(birth: string | null, on: string): Age | null {
+  if (!birth || !isIsoDate(birth) || !isIsoDate(on) || birth > on) return null;
+  const [by, bm, bd] = ymd(birth);
+  const [oy, om, od] = ymd(on);
   let months = (oy - by) * 12 + (om - bm);
-  if (od < bd) months -= 1;
-  return months < 0 ? null : { years: Math.floor(months / 12), months: months % 12 };
+  // A month is complete on the birth day, or on the month's last day when it is shorter.
+  if (od < Math.min(bd, daysInMonth(oy, om))) months -= 1;
+  const years = Math.floor(months / 12);
+  return years > 255 ? null : { years, months: months % 12 };
+}
+
+/** The same day `years` later (29.2 becomes 28.2 in a year that has none). */
+function addYears(iso: string, years: number): string {
+  const [y, m, d] = ymd(iso);
+  const day = Math.min(d, daysInMonth(y + years, m));
+  return `${y + years}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 const byDateTime = (a: Visit, b: Visit) => a.date.localeCompare(b.date) || a.start - b.start || a.id.localeCompare(b.id);
 
 /** What a visit costs the family: its fee when it was held, or when it was missed and she
- *  charges anyway; nothing otherwise. A block never costs. */
+ *  charges anyway; nothing otherwise (a block has no fee to begin with). */
 export function visitCharge(v: Visit): number {
-  if (v.kind === "block") return 0;
-  if (v.status === "held") return v.fee;
-  return (v.status === "cancelled" || v.status === "no_show") && v.charge_missed ? v.fee : 0;
+  const charged = v.status === "held" || ((v.status === "cancelled" || v.status === "no_show") && v.charge_missed);
+  return charged ? Math.max(0, v.fee) : 0;
 }
 
 /** Two visits overlap when neither is cancelled, they are on the same date and their times meet. */
@@ -185,10 +211,26 @@ export function visitsOverlap(a: Visit, b: Visit): boolean {
   return a.start < b.start + b.minutes && b.start < a.start + a.minutes;
 }
 
-/** A message text with its placeholders filled in. */
+/** A message text with its placeholders filled in. One pass: a value is never read again as a
+ *  placeholder, and anything else in braces stays as she typed it. */
 export function fillMessage(text: string, values: Record<(typeof PLACEHOLDERS)[number], string>): string {
-  return PLACEHOLDERS.reduce((out, key) => out.split(key).join(values[key]), text);
+  let out = "";
+  let rest = text;
+  for (let at = rest.indexOf("{"); at >= 0; at = rest.indexOf("{")) {
+    out += rest.slice(0, at);
+    rest = rest.slice(at);
+    const known = PLACEHOLDERS.find((p) => rest.startsWith(p));
+    out += known ? values[known] : "{";
+    rest = rest.slice(known ? known.length : 1);
+  }
+  return out + rest;
 }
+
+/** "label: value" when the value says something. */
+const field = (label: string, value: string): string[] => (cleanLine(value) === "" ? [] : [`${label}: ${cleanLine(value)}`]);
+const voidedLines = (voided: boolean, reason: string): string[] => (voided ? ["בוטל: כן", ...field("סיבת הביטול", reason)] : []);
+/** Agorot as the core writes them in a sentence: "450", "450.50", no thousands mark. */
+const plainMoney = (agorot: number) => moneyNumber(agorot).replace(/,/g, "");
 
 // ------------------------------------------------------------------ the clinic
 
@@ -200,7 +242,7 @@ export class FakeClinic {
   private charges: Charge[] = [];
   private tasks: ClinicTask[] = [];
   private settings: ClinicSettings = defaultClinicSettings();
-  /** Every saved state of a visit, a charge or a payment, oldest first, by record id. */
+  /** Every saved state of a visit, a session note, a charge or a payment, oldest first, by record id. */
   private history = new Map<string, HistoryEntry[]>();
   private seq = 0;
   private seeded = false;
@@ -231,7 +273,9 @@ export class FakeClinic {
       case "overview":
         return { kind: "overview", data: this.overview(this.today(r.today)) };
       case "calendar":
-        need(isIsoDate(r.from) && isIsoDate(r.to), "טווח התאריכים לא תקין.");
+        need(isIsoDate(r.from) && isIsoDate(r.to), "צריך לבחור תאריכים תקינים ליומן.");
+        need(r.to >= r.from, "תאריך הסיום ביומן צריך להיות אחרי תאריך ההתחלה.");
+        need(daysBetween(r.from, r.to) < MAX_RANGE_DAYS, `אפשר להציג ביומן עד ${MAX_RANGE_DAYS} ימים בבת אחת.`);
         return { kind: "visits", data: this.visits.filter((v) => v.date >= r.from && v.date <= r.to).sort(byDateTime).map((v) => this.view(v)) };
       case "save_visit":
         return { kind: "saved", data: this.saveVisit(r.visit, r.repeat, r.scope) };
@@ -250,8 +294,7 @@ export class FakeClinic {
       case "save_note":
         return { kind: "note", data: this.saveNote(r.note) };
       case "delete_note":
-        this.note(r.id);
-        this.notes = this.notes.filter((n) => n.id !== r.id);
+        this.deleteNote(r.id);
         return { kind: "done" };
       case "note_to_case":
         return { kind: "note", data: this.noteToCase(r.id) };
@@ -300,7 +343,7 @@ export class FakeClinic {
   }
 
   private today(t: Today): Today {
-    need(isIsoDate(t.date) && whole(t.minute, 0, 1439), "התאריך של היום לא תקין.");
+    need(isIsoDate(t.date) && whole(t.minute, 0, 1439), "התאריך של היום לא התקבל כמו שצריך. כדאי לסגור את המסך ולפתוח אותו שוב.");
     return t;
   }
 
@@ -335,37 +378,61 @@ export class FakeClinic {
     this.history.set(recordId, entries);
   }
 
+  // A saved state in her words, a line for each field that says something (as the core's
+  // `visit_history_lines`, `payment_history_lines` and `charge_history_lines`).
+
   private visitLines(v: Visit): string[] {
-    const name = this.nameOf(v.patient_id);
     return [
-      v.title.trim() ? `${VISIT_KIND_LABEL[v.kind]} · ${v.title.trim()}` : VISIT_KIND_LABEL[v.kind],
-      ...(name ? [`מטופל: ${name}`] : []),
-      `מועד: ${formatDateLong(v.date)}, ${formatSpan(v.start, v.minutes)}`,
-      ...(v.place ? [`מקום: ${v.place}`] : []),
-      `מצב: ${VISIT_STATUS_LABEL[v.status]}${v.status_note ? ` (${v.status_note})` : ""}`,
-      ...(v.kind === "block" ? [] : [`מחיר: ${formatMoney(v.fee)}${v.charge_missed ? " · מחויבת למרות שלא התקיימה" : ""}`]),
-      ...(v.note ? [`הערה: ${v.note}`] : []),
+      ...field("מטופל", this.nameOf(v.patient_id) ?? ""),
+      ...field("סוג", VISIT_KIND_LABEL[v.kind]),
+      ...field("כותרת", v.title),
+      ...field("תאריך", formatDate(v.date)),
+      ...field("שעה", formatTime(v.start)),
+      `משך: ${v.minutes} דקות`,
+      ...field("מקום", v.place),
+      ...field("מצב", VISIT_STATUS_LABEL[v.status]),
+      ...field("מה קרה", v.status_note),
+      ...(v.kind === "block" ? [] : [v.fee === 0 ? "מחיר: ללא חיוב" : `מחיר: ${plainMoney(v.fee)} ₪`]),
+      ...(v.charge_missed ? ["חיוב גם אם לא התקיימה: כן"] : []),
+      ...(v.series_id !== null ? ["פגישה חוזרת: כן"] : []),
+      ...field("הערה", v.note),
     ];
   }
 
   private paymentLines(p: Payment): string[] {
     return [
-      `תקבול: ${formatMoney(p.amount)} · ${PAY_METHOD_LABEL[p.method]}`,
-      `מטופל: ${this.nameOf(p.patient_id) ?? ""}`,
-      `תאריך: ${formatDate(p.date)}`,
-      ...(p.receipt ? [`מספר קבלה: ${p.receipt}`] : []),
-      ...(p.payer ? [`שילם: ${p.payer}`] : []),
-      ...(p.note ? [`הערה: ${p.note}`] : []),
-      ...(p.voided ? [`בוטל: ${p.void_reason}`] : []),
+      ...field("מטופל", this.nameOf(p.patient_id) ?? ""),
+      ...field("תאריך", formatDate(p.date)),
+      `סכום: ${plainMoney(p.amount)} ₪`,
+      ...field("אמצעי תשלום", PAY_METHOD_LABEL[p.method]),
+      ...field("מספר קבלה", p.receipt),
+      ...field("מי שילם", p.payer),
+      ...field("הערה", p.note),
+      ...voidedLines(p.voided, p.void_reason),
     ];
   }
 
   private chargeLines(c: Charge): string[] {
     return [
-      `חיוב: ${formatMoney(c.amount)} · ${c.what}`,
-      `מטופל: ${this.nameOf(c.patient_id) ?? ""}`,
-      `תאריך: ${formatDate(c.date)}`,
-      ...(c.voided ? [`בוטל: ${c.void_reason}`] : []),
+      ...field("מטופל", this.nameOf(c.patient_id) ?? ""),
+      ...field("תאריך", formatDate(c.date)),
+      `סכום: ${plainMoney(c.amount)} ₪`,
+      ...field("על מה", c.what),
+      ...voidedLines(c.voided, c.void_reason),
+    ];
+  }
+
+  /** The formal record as it was saved. Of the personal note only that there is one: it is
+   *  hers alone, and a history she may show someone never carries its words. */
+  private noteLines(n: SessionNote): string[] {
+    const v = n.visit_id === null ? null : (this.visits.find((x) => x.id === n.visit_id) ?? null);
+    return [
+      ...field("מטופל", this.nameOf(n.patient_id) ?? ""),
+      ...field("תאריך", formatDate(n.date)),
+      ...field("פגישה", v ? VISIT_KIND_LABEL[v.kind] : ""),
+      n.record === "" ? "רשומה: ריקה" : `רשומה: ${n.record}`,
+      ...(n.personal === "" ? [] : ["תרשומת אישית: יש"]),
+      ...(n.case_input_id !== null ? ["הועברה לחומרי התיק: כן"] : []),
     ];
   }
 
@@ -405,8 +472,15 @@ export class FakeClinic {
     return c ? { id: c.id, code: c.code, approved: c.approved, total: c.total, in_trash: c.inTrash } : null;
   }
 
-  private reportFinished(p: Patient): boolean {
+  /** The report's sections as the alerts and the process read them; `null`: no case. */
+  private reportOf(p: Patient): { approved: number; total: number } | null {
     const c = this.caseOf(p);
+    return c === null ? null : { approved: c.approved, total: c.total };
+  }
+
+  /** Every section approved; a report with no sections at all is not a finished one. */
+  private reportFinished(p: Patient): boolean {
+    const c = this.reportOf(p);
     return c !== null && c.total > 0 && c.approved >= c.total;
   }
 
@@ -436,13 +510,19 @@ export class FakeClinic {
     const base = `תיק-${y}-${m}${d}`;
     let code = base;
     for (let n = 2; taken.has(code); n++) code = `${base}-${n}`;
-    const parent = (role: "mother" | "father"): IdentityInput[] => {
-      const name = p.contacts.find((c) => c.role === role && c.name.trim())?.name.trim();
-      return name ? [{ id: null, role, value: name, aliases: [] }] : [];
-    };
+    // Every named contact is a person of the case (not only the parents), so a record sent to
+    // the case later has their names masked by its filter.
+    const roles = { mother: "mother", father: "father", guardian: "relative", other: "other" } as const;
+    const seen = new Set([p.name]);
+    const people: IdentityInput[] = [];
+    for (const c of p.contacts) {
+      if (c.name === "" || seen.has(c.name)) continue;
+      seen.add(c.name);
+      people.push({ id: null, role: roles[c.role], value: c.name, aliases: [] });
+    }
     p.case_id = this.host.createCase(
       { code, age: ageOn(p.birth_date, today.date), child_gender: p.gender, current_section: null, retention_until: null, consent: null },
-      [{ id: null, role: "child", value: p.name, aliases: [] }, ...parent("mother"), ...parent("father")],
+      [{ id: null, role: "child", value: p.name, aliases: [] }, ...people],
     );
     return this.caseLink(p) ?? refuse("התיק לא נפתח. אפשר לנסות שוב.");
   }
@@ -460,52 +540,57 @@ export class FakeClinic {
     // Only the formal record: the personal note never leaves the clinic.
     if (n.case_input_id === null || !this.host.updateInput(c.id, n.case_input_id, title, n.record)) {
       n.case_input_id = this.host.addInput(c.id, kind, title, n.record);
+      this.keep(n.id, "changed", this.noteLines(n));
     }
     return n;
   }
 
   // ---------------------------------------------------------------- patients
 
-  private checkedContact(c: Contact): Contact {
-    const out: Contact = { role: c.role, name: c.name.trim(), phone: c.phone.trim(), email: c.email.trim() };
-    need(out.role in CONTACT_ROLE_LABEL, "סוג איש הקשר לא מוכר.");
-    need(out.name !== "" || out.phone !== "" || out.email !== "", "איש קשר ריק. אפשר למלא שם או טלפון, או להסיר אותו.");
-    short(out.name, "שם איש הקשר");
-    short(out.phone, "טלפון");
-    short(out.email, "דואר אלקטרוני");
-    return out;
-  }
-
   private savePatient(input: Patient): Patient {
-    const name = input.name.trim();
-    need(name !== "", "צריך את שם הילד/ה.");
-    need(chars(name) <= 120, "השם ארוך מדי: עד 120 תווים.");
-    need(input.birth_date === null || isIsoDate(input.birth_date), "תאריך הלידה לא תקין.");
-    need(input.gender === null || input.gender === "male" || input.gender === "female", "המין לא מוכר.");
-    need(input.contacts.length <= MAX_CONTACTS, `אפשר לשמור עד ${MAX_CONTACTS} אנשי קשר.`);
-    short(input.framework.trim(), "המסגרת החינוכית");
-    short(input.referred_by.trim(), "הגורם המפנה");
-    long(input.reason, "סיבת הפנייה");
-    long(input.notes, "ההערות");
+    const name = cleanLine(input.name);
+    need(name !== "", "צריך לכתוב את שם הילד או הילדה.");
+    atMost(name, NAME, "שם");
+    const birth = blankToNull(input.birth_date);
+    if (birth !== null) realDate(birth, "תאריך לידה");
+    need(input.gender === null || input.gender === "male" || input.gender === "female", "המין שנבחר לא מוכר.");
+    // A contact with nothing in it is dropped, not refused: an empty row of the form.
+    const contacts = input.contacts
+      .map((c): Contact => ({ role: c.role, name: cleanLine(c.name), phone: cleanLine(c.phone), email: c.email.trim() }))
+      .filter((c) => c.name !== "" || c.phone !== "" || c.email !== "");
+    need(contacts.length <= MAX_CONTACTS, `אפשר לשמור עד ${MAX_CONTACTS} אנשי קשר למטופל.`);
+    for (const c of contacts) {
+      need(c.role in CONTACT_ROLE_LABEL, "סוג איש הקשר לא מוכר.");
+      atMost(c.name, NAME, "שם איש הקשר");
+      short(c.phone, "טלפון");
+      short(c.email, "מייל");
+    }
+    const framework = cleanLine(input.framework);
+    const referredBy = cleanLine(input.referred_by);
+    short(framework, "מסגרת חינוכית");
+    short(referredBy, "גורם מפנה");
+    long(input.reason.trim(), "סיבת הפנייה");
+    long(input.notes.trim(), "הערות");
     need(["waiting", "active", "closed"].includes(input.status), "המצב של המטופל לא מוכר.");
-    need(input.waiting_since === null || isIsoDate(input.waiting_since), "התאריך של תחילת ההמתנה לא תקין.");
-    need(input.session_fee === null || whole(input.session_fee, 0, MAX_AGOROT), "המחיר לפגישה צריך להיות בין 0 ל-100,000 ₪.");
+    const waitingSince = blankToNull(input.waiting_since);
+    if (waitingSince !== null) realDate(waitingSince, "ממתינים מאז");
+    need(input.session_fee === null || whole(input.session_fee, 0, MAX_AGOROT), "מחיר הפגישה צריך להיות בין 0 ל-100,000 ₪.");
     const old = input.id === "" ? null : this.patient(input.id);
-    need(old !== null || isIsoDate(input.created_on), "תאריך פתיחת הכרטיס לא תקין.");
-    const created = old ? old.created_on : input.created_on;
+    const created = old ? old.created_on : input.created_on.trim();
+    realDate(created, "תאריך פתיחת הכרטיס");
     const saved: Patient = {
       id: old ? old.id : this.newId("patient"),
       name,
-      birth_date: input.birth_date,
+      birth_date: birth,
       gender: input.gender,
-      contacts: input.contacts.map((c) => this.checkedContact(c)),
-      framework: input.framework.trim(),
-      referred_by: input.referred_by.trim(),
+      contacts,
+      framework,
+      referred_by: referredBy,
       reason: input.reason.trim(),
       notes: input.notes.trim(),
       status: input.status,
       // A family on the list has a day it joined: the day the card was opened, unless she said otherwise.
-      waiting_since: input.waiting_since ?? (input.status === "waiting" ? created : null),
+      waiting_since: waitingSince ?? (input.status === "waiting" ? created : null),
       urgent: input.urgent === true,
       session_fee: input.session_fee,
       // Saving the card never touches the link to the case, and never moves the day it was opened.
@@ -517,10 +602,36 @@ export class FakeClinic {
     return old ?? saved;
   }
 
+  /** The day from which a card that holds a record may be erased (D-174): seven years after
+   *  the last thing that happened in it, or when the child turns 25, whichever is later. */
+  private keptUntil(p: Patient): string {
+    const dates = [
+      p.created_on,
+      ...this.visits.filter((v) => v.patient_id === p.id).map((v) => v.date),
+      ...[...this.notes, ...this.payments, ...this.charges].filter((r) => r.patient_id === p.id).map((r) => r.date),
+    ].filter(isIsoDate).sort();
+    const afterLast = addYears(dates[dates.length - 1] ?? p.created_on, KEEP_YEARS_AFTER_LAST_CHANGE);
+    const adult = p.birth_date !== null && isIsoDate(p.birth_date) ? addYears(p.birth_date, KEEP_UNTIL_AGE) : afterLast;
+    return adult > afterLast ? adult : afterLast;
+  }
+
+  /** Something happened in the card: a visit that was held or charged, a session note, a
+   *  charge or a payment (a voided one too: it is part of the income diary). */
+  private hasRecord(id: string): boolean {
+    return this.visits.some((v) => v.patient_id === id && (v.status === "held" || visitCharge(v) > 0))
+      || [...this.notes, ...this.payments, ...this.charges].some((r) => r.patient_id === id);
+  }
+
   private erasePatient(id: string, typed: string) {
     const p = this.patient(id);
-    need(typed.trim() === p.name, "השם שהוקלד שונה משם המטופל, ולכן שום דבר לא נמחק.");
-    const gone = [...this.visits, ...this.payments, ...this.charges].filter((r) => r.patient_id === id).map((r) => r.id);
+    // The request carries no "today"; the core uses its own clock here, the stand-in the page's.
+    const today = localToday().date;
+    if (this.hasRecord(id)) {
+      const until = this.keptUntil(p);
+      need(today >= until, `בכרטיס הזה יש פגישות, סיכומים או תשלומים, ורשומה כזו שומרים עד ${formatDate(until)}. עד אז אי אפשר למחוק אותו. אפשר לסגור את הכרטיס: הוא יוצא מהרשימה הפעילה ונשאר שמור בכספת.`);
+    }
+    need(cleanLine(typed) === p.name, "השם שהוקלד שונה משם המטופל, ולכן שום דבר לא נמחק.");
+    const gone = [...this.visits, ...this.notes, ...this.payments, ...this.charges].filter((r) => r.patient_id === id).map((r) => r.id);
     for (const record of gone) this.history.delete(record);
     this.visits = this.visits.filter((v) => v.patient_id !== id);
     this.notes = this.notes.filter((n) => n.patient_id !== id);
@@ -531,21 +642,20 @@ export class FakeClinic {
     this.patients = this.patients.filter((x) => x.id !== id);
   }
 
+  /** The next planned visit from today on (one earlier today is still "next" until it is marked). */
   private nextVisit(patientId: string, today: Today): Visit | undefined {
-    return this.visits
-      .filter((v) => v.patient_id === patientId && v.status === "planned" && (v.date > today.date || (v.date === today.date && v.start + v.minutes > today.minute)))
-      .sort(byDateTime)[0];
+    return this.visits.filter((v) => v.patient_id === patientId && v.status === "planned" && v.date >= today.date).sort(byDateTime)[0];
   }
 
   private rows(today: Today): PatientRow[] {
-    return [...this.patients].sort((a, b) => a.name.localeCompare(b.name, "he")).map((p): PatientRow => {
+    return [...this.patients].sort((a, b) => a.name.localeCompare(b.name, "he") || a.id.localeCompare(b.id)).map((p): PatientRow => {
       const next = this.nextVisit(p.id, today);
-      const held = this.visits.filter((v) => v.patient_id === p.id && v.status === "held").sort(byDateTime);
+      const held = this.visits.filter((v) => v.patient_id === p.id && v.status === "held").map((v) => v.date).sort();
       return {
         patient: p,
         age: ageOn(p.birth_date, today.date),
         next_visit: next ? { date: next.date, start: next.start, kind: next.kind } : null,
-        last_visit: held[held.length - 1]?.date ?? null,
+        last_visit: held[held.length - 1] ?? null,
         due: this.balance(p.id).due,
         open_tasks: this.tasks.filter((t) => t.patient_id === p.id && t.done_on === null).length,
       };
@@ -561,72 +671,80 @@ export class FakeClinic {
       notes: this.notes.filter((n) => n.patient_id === p.id).sort(newest),
       payments: this.payments.filter((x) => x.patient_id === p.id).sort(newest),
       charges: this.charges.filter((x) => x.patient_id === p.id).sort(newest),
-      tasks: this.tasks.filter((t) => t.patient_id === p.id),
+      tasks: this.orderedTasks().filter((t) => t.patient_id === p.id),
       balance: this.balance(p.id),
-      process: this.process(p, today),
+      process: this.process(p),
       case: this.caseLink(p),
       alerts: this.alerts(today).filter((a) => a.patient_id === p.id),
     };
   }
 
-  /** The assessment, step by step: what is behind her, the step she is at, and what is ahead. */
-  private process(p: Patient, today: Today): ProcessStep[] {
-    const of = (kind: VisitKind) => this.visits.filter((v) => v.patient_id === p.id && v.kind === kind && v.status !== "cancelled" && v.status !== "no_show").sort(byDateTime);
-    const held = (list: Visit[]) => list.filter((v) => v.status === "held");
-    const ahead = (list: Visit[]) => list.filter((v) => v.status === "planned" && v.date >= today.date);
-    const single = (list: Visit[], none: string): { done: boolean; detail: string } => {
-      const last = held(list).pop();
-      if (last) return { done: true, detail: `התקיימה ב-${formatDate(last.date)}` };
-      const next = ahead(list)[0];
-      return { done: false, detail: next ? `נקבעה ל-${formatDate(next.date)}` : none };
+  /** The assessment, step by step (as the core's `process`): each step done, under way or
+   *  still to do. When none is under way, the first one still to do is what comes next. */
+  private process(p: Patient): ProcessStep[] {
+    const mine = this.visits.filter((v) => v.patient_id === p.id);
+    const dates = (kind: VisitKind, status: VisitStatus) => mine.filter((v) => v.kind === kind && v.status === status).map((v) => v.date).sort();
+    const step = (key: string, label: string, state: ProcessStep["state"], detail: string): ProcessStep => ({ key, label, state, detail });
+    // A step that is one meeting: done once held, under way once planned.
+    const meeting = (key: string, label: string, kind: VisitKind): ProcessStep => {
+      const held = dates(kind, "held").pop();
+      if (held) return step(key, label, "done", `התקיימה ביום ${formatDate(held)}`);
+      const planned = dates(kind, "planned")[0];
+      return planned ? step(key, label, "now", `נקבעה ליום ${formatDate(planned)}`) : step(key, label, "todo", "עוד לא נקבעה");
     };
-    const sessions = of("assessment");
-    const observation = of("observation");
-    const c = this.caseOf(p);
-    const balance = this.balance(p.id);
-    const steps: { key: string; label: string; done: boolean; detail: string }[] = [
-      { key: "intake", label: "פגישת היכרות", ...single(of("intake"), "עוד לא נקבעה") },
-      {
-        key: "sessions", label: "מפגשי אבחון",
-        done: held(sessions).length > 0 && ahead(sessions).length === 0,
-        detail: sessions.length === 0 ? "עוד לא נקבעו מפגשים" : `${held(sessions).length} מתוך ${sessions.length} התקיימו`,
-      },
-      ...(observation.length > 0 ? [{ key: "observation", label: "תצפית", ...single(observation, "עוד לא נקבעה") }] : []),
-      {
-        key: "report", label: "הדוח",
-        done: this.reportFinished(p),
-        detail: c === null ? "עוד לא נפתח תיק אבחון" : c.inTrash ? "תיק האבחון בסל המחזור" : `הדוח: ${c.approved} מתוך ${c.total} סעיפים`,
-      },
-      { key: "feedback", label: "שיחת משוב", ...single(of("feedback"), "עוד לא נקבעה") },
-      {
-        key: "payment", label: "תשלום",
-        done: balance.charged > 0 && balance.due <= 0,
-        detail: balance.charged === 0 ? "עוד לא נרשם חיוב" : balance.due > 0 ? `נותרו לתשלום ${formatMoney(balance.due)}` : "שולם במלואו",
-      },
-    ];
-    const now = steps.findIndex((s) => !s.done);
-    return steps.map((s, i) => ({ key: s.key, label: s.label, state: s.done ? "done" : i === now ? "now" : "todo", detail: s.detail }));
+    const held = dates("assessment", "held").length;
+    const planned = dates("assessment", "planned");
+    const sessions = held === 0 && planned.length === 0 ? step("sessions", "מפגשי אבחון", "todo", "עוד לא נקבעו מפגשים")
+      : held === 0 ? step("sessions", "מפגשי אבחון", "now", `המפגש הראשון נקבע ליום ${formatDate(planned[0] ?? "")}`)
+      : planned.length === 0 ? step("sessions", "מפגשי אבחון", "done", held === 1 ? "מפגש אחד התקיים" : `${held} מפגשים התקיימו`)
+      : step("sessions", "מפגשי אבחון", "now", `${held} מתוך ${held + planned.length} התקיימו`);
+    const steps = [meeting("intake", "פגישת היכרות", "intake"), sessions];
+    if (mine.some((v) => v.kind === "observation" && v.status !== "cancelled")) {
+      const observation = meeting("observation", "תצפית", "observation");
+      // It exists and was neither held nor is planned: the family did not come.
+      steps.push(observation.state === "todo" ? { ...observation, detail: "לא התקיימה" } : observation);
+    }
+    const c = this.reportOf(p);
+    steps.push(step("report", "כתיבת הדוח",
+      this.reportFinished(p) ? "done" : sessions.state === "done" || (c !== null && c.approved > 0) ? "now" : "todo",
+      c === null ? "עוד לא נפתח תיק לדוח" : `הדוח: ${c.approved} מתוך ${c.total} סעיפים`));
+    steps.push(meeting("feedback", "שיחת משוב", "feedback"));
+    const { charged, paid, due } = this.balance(p.id);
+    steps.push(charged === 0 && paid === 0 ? step("payment", "תשלום", "todo", "עוד לא נרשם חיוב")
+      : due > 0 ? step("payment", "תשלום", "now", `נותרו ${plainMoney(due)} ₪ לתשלום`)
+      : due < 0 ? step("payment", "תשלום", "done", `שולם, ויש יתרת זכות של ${plainMoney(-due)} ₪`)
+      : step("payment", "תשלום", "done", "שולם במלואו"));
+    if (!steps.some((x) => x.state === "now")) {
+      const next = steps.find((x) => x.state === "todo");
+      if (next) next.state = "now";
+    }
+    return steps;
   }
 
   // ---------------------------------------------------------------- visits
 
+  /** The visit as it is stored, checked in the core's order (`normalize_visit`, `validate_visit`). */
   private checkedVisit(input: Visit): Visit {
-    const v: Visit = { ...input, title: input.title.trim(), place: input.place.trim(), status_note: input.status_note.trim(), note: input.note.trim() };
+    const v: Visit = {
+      ...input, patient_id: blankToNull(input.patient_id), title: cleanLine(input.title), date: input.date.trim(), place: cleanLine(input.place),
+      status_note: cleanLine(input.status_note), series_id: blankToNull(input.series_id), note: input.note.trim(),
+    };
     need(VISIT_KINDS.includes(v.kind), "סוג הפגישה לא מוכר.");
     need(["planned", "held", "cancelled", "no_show"].includes(v.status), "מצב הפגישה לא מוכר.");
-    need(isIsoDate(v.date), "תאריך הפגישה לא תקין.");
-    need(whole(v.minutes, 5, 720), "אורך הפגישה צריך להיות בין 5 דקות ל-12 שעות.");
-    need(whole(v.start, 0, 1439) && v.start + v.minutes <= 1440, "הפגישה צריכה להתחיל ולהסתיים באותו יום.");
-    need(whole(v.fee, 0, MAX_AGOROT), "המחיר צריך להיות בין 0 ל-100,000 ₪.");
-    short(v.title, "הכותרת");
-    short(v.place, "המקום");
-    short(v.status_note, "הסיבה");
-    long(v.note, "ההערה");
     if (v.kind === "block") {
-      need(v.patient_id === null && v.fee === 0, "חסימת זמן היא בלי מטופל ובלי מחיר.");
+      need(v.patient_id === null, "זמן שמור הוא בלי מטופל. כדי לקבוע פגישה עם מטופל צריך לבחור סוג פגישה אחר.");
+      need(v.fee === 0, "לזמן שמור אין מחיר.");
     } else {
       need(v.patient_id !== null && this.patients.some((p) => p.id === v.patient_id), "צריך לבחור מטופל לפגישה.");
     }
+    realDate(v.date, "תאריך");
+    need(whole(v.minutes, 5, 720), "משך הפגישה צריך להיות בין 5 דקות ל-12 שעות.");
+    need(whole(v.start, 0, 1439) && v.start + v.minutes <= 1440, "הפגישה צריכה להסתיים עד חצות. אפשר לקצר אותה או להקדים את שעת ההתחלה.");
+    need(whole(v.fee, 0, MAX_AGOROT), "מחיר הפגישה צריך להיות בין 0 ל-100,000 ₪.");
+    short(v.title, "כותרת");
+    short(v.place, "מקום");
+    short(v.status_note, "מה קרה");
+    long(v.note, "הערה");
     // "Charged anyway" has a meaning only for a session that did not take place.
     if (v.status !== "cancelled" && v.status !== "no_show") v.charge_missed = false;
     return v;
@@ -646,8 +764,8 @@ export class FakeClinic {
       let dates = [v.date];
       let series: string | null = null;
       if (repeat !== null) {
-        need(whole(repeat.every_weeks, 1, 8), "פגישה חוזרת: כל שבוע עד כל 8 שבועות.");
-        need(whole(repeat.count, 2, 52), "פגישה חוזרת: בין 2 ל-52 פגישות.");
+        need(whole(repeat.every_weeks, 1, 8), "פגישה חוזרת יכולה לחזור כל שבוע ועד כל 8 שבועות.");
+        need(whole(repeat.count, 2, 52), "סדרה של פגישות חוזרות היא בין 2 ל-52 פגישות.");
         dates = Array.from({ length: repeat.count }, (_, i) => addDays(v.date, 7 * repeat.every_weeks * i));
         series = this.newId("series");
       }
@@ -662,13 +780,11 @@ export class FakeClinic {
     }
     need(repeat === null, "אפשר לקבוע חזרה רק כשקובעים פגישה חדשה.");
     const old = this.visit(v.id);
-    need((old.kind === "block") === (v.kind === "block"), "אי אפשר להפוך פגישה לחסימת זמן או להפך. אפשר למחוק אותה ולקבוע מחדש.");
     const written = [old];
     if (scope === "following" && old.series_id !== null) {
       const moved = daysBetween(old.date, v.date);
-      const later = this.visits.filter((o) => o.series_id === old.series_id && o.id !== old.id && o.status === "planned" && o.date > old.date);
-      for (const o of later) {
-        // What a series shares; the status of each visit stays its own.
+      for (const o of this.laterOfSeries(old)) {
+        // What a series shares; the status and the patient of each visit stay its own.
         Object.assign(o, { kind: v.kind, title: v.title, start: v.start, minutes: v.minutes, place: v.place, fee: v.fee, note: v.note, date: addDays(o.date, moved) });
         this.keep(o.id, "changed", this.visitLines(o));
         written.push(o);
@@ -680,64 +796,89 @@ export class FakeClinic {
     return this.saved(written);
   }
 
+  /** The visits of the same series that come after this one and are still planned. */
+  private laterOfSeries(v: Visit): Visit[] {
+    return this.visits
+      .filter((o) => o.series_id === v.series_id && o.id !== v.id && o.status === "planned" && (o.date > v.date || (o.date === v.date && o.start > v.start)))
+      .sort(byDateTime);
+  }
+
   private deleteVisit(id: string, scope: Scope) {
     const v = this.visit(id);
-    need(v.status === "planned", "אפשר למחוק רק פגישה מתוכננת. פגישה שהתקיימה או בוטלה נשארת ביומן.");
+    need(v.status === "planned", "אפשר למחוק רק פגישה שעדיין מתוכננת. פגישה שכבר סומנה אפשר לסמן כמבוטלת.");
     const gone = [v];
     if (scope === "following" && v.series_id !== null) {
-      gone.push(...this.visits.filter((o) => o.series_id === v.series_id && o.id !== v.id && o.status === "planned" && o.date > v.date));
+      gone.push(...this.laterOfSeries(v));
     }
     const ids = new Set(gone.map((g) => g.id));
     for (const g of gone) this.keep(g.id, "deleted", this.visitLines(g));
     this.visits = this.visits.filter((x) => !ids.has(x.id));
     // A note written for a visit that is gone stays, as a note on its own.
-    for (const n of this.notes) if (n.visit_id !== null && ids.has(n.visit_id)) n.visit_id = null;
+    for (const n of this.notes) {
+      if (n.visit_id === null || !ids.has(n.visit_id)) continue;
+      n.visit_id = null;
+      this.keep(n.id, "changed", this.noteLines(n));
+    }
   }
 
   // ---------------------------------------------------------------- notes, payments, charges, tasks
 
   private saveNote(input: SessionNote): SessionNote {
+    need(input.patient_id.trim() !== "", "צריך לבחור מטופל.");
     const p = this.patient(input.patient_id);
-    need(isIsoDate(input.date), "תאריך הסיכום לא תקין.");
-    need(chars(input.record) <= RECORD, "הרשומה ארוכה מדי: עד 20,000 תווים.");
-    need(chars(input.personal) <= RECORD, "התרשומת האישית ארוכה מדי: עד 20,000 תווים.");
-    need(input.record.trim() !== "" || input.personal.trim() !== "", "הסיכום ריק. אפשר לכתוב רשומה, תרשומת אישית, או שתיהן.");
-    if (input.visit_id !== null) {
-      const v = this.visit(input.visit_id);
+    const note = { ...input, visit_id: blankToNull(input.visit_id), date: input.date.trim(), record: input.record.trim(), personal: input.personal.trim() };
+    realDate(note.date, "תאריך");
+    need(note.record !== "" || note.personal !== "", "הסיכום ריק. צריך לכתוב משהו ברשומה או בתרשומת האישית.");
+    atMost(note.record, RECORD, "רשומה");
+    atMost(note.personal, RECORD, "תרשומת אישית");
+    if (note.visit_id !== null) {
+      const v = this.visit(note.visit_id);
       need(v.patient_id === p.id, "הפגישה שייכת למטופל אחר.");
-      need(!this.notes.some((n) => n.visit_id === v.id && n.id !== input.id), "לפגישה הזו כבר יש סיכום. אפשר לפתוח ולערוך אותו.");
+      // One note for a visit: a second one would hide the first.
+      need(!this.notes.some((n) => n.visit_id === v.id && n.id !== note.id), "לפגישה הזו כבר יש סיכום. אפשר לפתוח ולערוך אותו.");
     }
-    const old = input.id === "" ? null : this.note(input.id);
+    const old = note.id === "" ? null : this.note(note.id);
     need(old === null || old.patient_id === p.id, "אי אפשר להעביר סיכום למטופל אחר.");
     const saved: SessionNote = {
       id: old ? old.id : this.newId("note"),
       patient_id: p.id,
-      visit_id: input.visit_id,
-      date: input.date,
-      record: input.record,
-      personal: input.personal,
+      visit_id: note.visit_id,
+      date: note.date,
+      record: note.record,
+      personal: note.personal,
       // Set only by "להעביר לחומרי התיק".
       case_input_id: old ? old.case_input_id : null,
     };
     if (old) Object.assign(old, saved);
     else this.notes.push(saved);
+    // The clinical record: every saved state of it is kept (D-172).
+    this.keep(saved.id, old ? "changed" : "created", this.noteLines(saved));
     return old ?? saved;
+  }
+
+  /** A note that has text is part of the record and stays (she can correct it; every state is
+   *  kept). Only one that holds nothing can be removed. */
+  private deleteNote(id: string) {
+    const n = this.note(id);
+    need(n.record.trim() === "" && n.personal.trim() === "", "סיכום שנכתב בו משהו הוא חלק מהרשומה, ולכן הוא לא נמחק. אפשר לפתוח אותו ולתקן, וכל גרסה נשמרת בהיסטוריה.");
+    this.keep(n.id, "deleted", this.noteLines(n));
+    this.notes = this.notes.filter((x) => x.id !== id);
   }
 
   private savePayment(input: Payment): Payment {
     const p = this.patient(input.patient_id);
-    need(isIsoDate(input.date), "תאריך התקבול לא תקין.");
+    realDate(input.date.trim(), "תאריך");
     need(whole(input.amount, 1, MAX_AGOROT), "הסכום צריך להיות גדול מאפס, ועד 100,000 ₪.");
     need(input.method in PAY_METHOD_LABEL, "אמצעי התשלום לא מוכר.");
-    short(input.receipt.trim(), "מספר הקבלה");
-    short(input.payer.trim(), "מי שילם");
-    long(input.note, "ההערה");
+    short(cleanLine(input.receipt), "מספר קבלה");
+    short(cleanLine(input.payer), "מי שילם");
+    long(input.note.trim(), "הערה");
     const old = input.id === "" ? null : (this.payments.find((x) => x.id === input.id) ?? refuse("התקבול לא נמצא.", "not_found"));
     need(old === null || !old.voided, "התקבול הזה בוטל, ואי אפשר לשנות אותו. אפשר לרשום תקבול חדש.");
     need(old === null || old.patient_id === p.id, "אי אפשר להעביר תקבול למטופל אחר. אפשר לבטל אותו ולרשום מחדש.");
     const saved: Payment = {
-      id: old ? old.id : this.newId("payment"), patient_id: p.id, date: input.date, amount: input.amount, method: input.method,
-      receipt: input.receipt.trim(), payer: input.payer.trim(), note: input.note.trim(), voided: false, void_reason: "",
+      id: old ? old.id : this.newId("payment"), patient_id: p.id, date: input.date.trim(), amount: input.amount, method: input.method,
+      receipt: cleanLine(input.receipt), payer: cleanLine(input.payer), note: input.note.trim(), voided: false, void_reason: "",
     };
     if (old) Object.assign(old, saved);
     else this.payments.push(saved);
@@ -748,24 +889,24 @@ export class FakeClinic {
   private voidPayment(id: string, reason: string): Payment {
     const p = this.payments.find((x) => x.id === id) ?? refuse("התקבול לא נמצא.", "not_found");
     need(!p.voided, "התקבול הזה כבר בוטל.");
-    need(reason.trim() !== "", "צריך לכתוב למה התקבול מבוטל. הוא נשאר ביומן עם הסיבה.");
-    short(reason.trim(), "סיבת הביטול");
+    short(cleanLine(reason), "סיבת הביטול");
+    need(cleanLine(reason) !== "", "צריך לכתוב למה הרישום מבוטל.");
     p.voided = true;
-    p.void_reason = reason.trim();
+    p.void_reason = cleanLine(reason);
     this.keep(p.id, "voided", this.paymentLines(p));
     return p;
   }
 
   private saveCharge(input: Charge): Charge {
     const p = this.patient(input.patient_id);
-    need(isIsoDate(input.date), "תאריך החיוב לא תקין.");
+    realDate(input.date.trim(), "תאריך");
     need(whole(input.amount, 1, MAX_AGOROT), "הסכום צריך להיות גדול מאפס, ועד 100,000 ₪.");
-    need(input.what.trim() !== "", "צריך לכתוב על מה החיוב.");
-    short(input.what.trim(), "על מה החיוב");
+    need(cleanLine(input.what) !== "", "צריך לכתוב על מה החיוב.");
+    short(cleanLine(input.what), "על מה החיוב");
     const old = input.id === "" ? null : (this.charges.find((x) => x.id === input.id) ?? refuse("החיוב לא נמצא.", "not_found"));
     need(old === null || !old.voided, "החיוב הזה בוטל, ואי אפשר לשנות אותו. אפשר לרשום חיוב חדש.");
     need(old === null || old.patient_id === p.id, "אי אפשר להעביר חיוב למטופל אחר. אפשר לבטל אותו ולרשום מחדש.");
-    const saved: Charge = { id: old ? old.id : this.newId("charge"), patient_id: p.id, date: input.date, amount: input.amount, what: input.what.trim(), voided: false, void_reason: "" };
+    const saved: Charge = { id: old ? old.id : this.newId("charge"), patient_id: p.id, date: input.date.trim(), amount: input.amount, what: cleanLine(input.what), voided: false, void_reason: "" };
     if (old) Object.assign(old, saved);
     else this.charges.push(saved);
     this.keep(saved.id, old ? "changed" : "created", this.chargeLines(saved));
@@ -775,67 +916,88 @@ export class FakeClinic {
   private voidCharge(id: string, reason: string): Charge {
     const c = this.charges.find((x) => x.id === id) ?? refuse("החיוב לא נמצא.", "not_found");
     need(!c.voided, "החיוב הזה כבר בוטל.");
-    need(reason.trim() !== "", "צריך לכתוב למה החיוב מבוטל. הוא נשאר ביומן עם הסיבה.");
-    short(reason.trim(), "סיבת הביטול");
+    short(cleanLine(reason), "סיבת הביטול");
+    need(cleanLine(reason) !== "", "צריך לכתוב למה הרישום מבוטל.");
     c.voided = true;
-    c.void_reason = reason.trim();
+    c.void_reason = cleanLine(reason);
     this.keep(c.id, "voided", this.chargeLines(c));
     return c;
   }
 
   private saveTask(input: ClinicTask): ClinicTask {
-    need(input.title.trim() !== "", "צריך לכתוב מה המשימה.");
-    short(input.title.trim(), "המשימה");
-    long(input.note, "ההערה");
-    need(input.due === null || isIsoDate(input.due), "התאריך של המשימה לא תקין.");
-    need(input.done_on === null || isIsoDate(input.done_on), "התאריך שבו המשימה בוצעה לא תקין.");
-    need(["call", "questionnaire", "document", "report", "payment", "follow_up", "other"].includes(input.kind), "סוג המשימה לא מוכר.");
-    if (input.patient_id !== null) this.patient(input.patient_id);
-    const old = input.id === "" ? null : (this.tasks.find((t) => t.id === input.id) ?? refuse("המשימה לא נמצאה. ייתכן שכבר נמחקה.", "not_found"));
-    const saved: ClinicTask = { ...input, id: old ? old.id : this.newId("task"), title: input.title.trim(), note: input.note.trim() };
+    const task: ClinicTask = {
+      ...input, patient_id: blankToNull(input.patient_id), title: cleanLine(input.title), due: blankToNull(input.due),
+      done_on: blankToNull(input.done_on), note: input.note.trim(),
+    };
+    need(task.title !== "", "צריך לכתוב מה המשימה.");
+    short(task.title, "משימה");
+    if (task.due !== null) realDate(task.due, "תאריך יעד");
+    if (task.done_on !== null) realDate(task.done_on, "תאריך ביצוע");
+    long(task.note, "הערה");
+    need(["call", "questionnaire", "document", "report", "payment", "follow_up", "other"].includes(task.kind), "סוג המשימה לא מוכר.");
+    if (task.patient_id !== null) this.patient(task.patient_id);
+    const old = task.id === "" ? null : (this.tasks.find((t) => t.id === task.id) ?? refuse("המשימה לא נמצאה. ייתכן שכבר נמחקה.", "not_found"));
+    const saved: ClinicTask = { ...task, id: old ? old.id : this.newId("task") };
     if (old) Object.assign(old, saved);
     else this.tasks.push(saved);
     return old ?? saved;
   }
 
-  /** Open tasks: the overdue first, then by date, then the undated. With `openOnly` off, the
-   *  done ones follow, the newest first. */
+  /** The open tasks by date (so the overdue come first) and the undated after them; then the
+   *  ones that were done, the latest first (as the core's `task_order`). */
+  private orderedTasks(): ClinicTask[] {
+    const text = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+    return [...this.tasks].sort((a, b) => {
+      const open = Number(a.done_on !== null) - Number(b.done_on !== null);
+      if (open !== 0) return open;
+      const byDate = a.done_on !== null && b.done_on !== null ? text(b.done_on, a.done_on)
+        : a.due !== null && b.due !== null ? text(a.due, b.due)
+        : a.due !== null ? -1 : b.due !== null ? 1 : 0;
+      return byDate || text(a.title, b.title) || text(a.id, b.id);
+    });
+  }
+
   private taskViews(today: Today, openOnly: boolean): TaskView[] {
-    const view = (t: ClinicTask): TaskView => ({ task: t, patient_name: this.nameOf(t.patient_id), overdue: t.done_on === null && t.due !== null && t.due < today.date });
-    const open = this.tasks.filter((t) => t.done_on === null).map(view).sort((a, b) =>
-      Number(b.overdue) - Number(a.overdue) || (a.task.due ?? "9999").localeCompare(b.task.due ?? "9999"));
-    if (openOnly) return open;
-    const done = this.tasks.filter((t) => t.done_on !== null).map(view).sort((a, b) => (b.task.done_on ?? "").localeCompare(a.task.done_on ?? ""));
-    return [...open, ...done];
+    return this.orderedTasks()
+      .filter((t) => !openOnly || t.done_on === null)
+      .map((t): TaskView => ({ task: t, patient_name: this.nameOf(t.patient_id), overdue: t.done_on === null && t.due !== null && t.due < today.date }));
   }
 
   // ---------------------------------------------------------------- settings
 
-  private checkedSettings(s: ClinicSettings): ClinicSettings {
-    need(whole(s.day_start, 0, 1439) && whole(s.day_end, 1, 1440) && s.day_start < s.day_end, "שעות היומן: שעת ההתחלה צריכה להיות לפני שעת הסיום.");
-    need(s.work_days.every((d) => whole(d, 0, 6)) && new Set(s.work_days).size === s.work_days.length, "ימי העבודה לא תקינים.");
-    need(s.defaults.length === VISIT_KINDS.length && VISIT_KINDS.every((k) => s.defaults.filter((d) => d.kind === k).length === 1), "צריך ברירת מחדל אחת לכל סוג פגישה.");
+  /** The settings as they are stored, checked (the core's `normalize_settings` and `validate_settings`). */
+  private checkedSettings(given: ClinicSettings): ClinicSettings {
+    const places: string[] = [];
+    for (const place of given.places.map(cleanLine)) if (place !== "" && !places.includes(place)) places.push(place);
+    const s: ClinicSettings = {
+      ...given,
+      work_days: [...new Set(given.work_days)].sort((a, b) => a - b),
+      places,
+      reminder_text: given.reminder_text.trim(),
+      payment_text: given.payment_text.trim(),
+      note_templates: given.note_templates.map((t) => ({ name: cleanLine(t.name), text: t.text })),
+    };
+    need(whole(s.day_start, 0, 1439) && whole(s.day_end, 1, 1440) && s.day_start < s.day_end, "שעת הסיום של היום ביומן צריכה להיות אחרי שעת ההתחלה, ועד חצות.");
+    need(s.work_days.length > 0, "צריך לבחור לפחות יום עבודה אחד.");
+    need(s.work_days.every((d) => whole(d, 0, 6)), "ימי העבודה לא נשמרו כמו שצריך. כדאי לסמן אותם מחדש.");
+    need(s.defaults.length === VISIT_KINDS.length && VISIT_KINDS.every((k) => s.defaults.filter((d) => d.kind === k).length === 1), "לכל סוג פגישה צריכה להיות שורה אחת של משך ומחיר.");
     for (const d of s.defaults) {
-      need(whole(d.minutes, 5, 720), `${VISIT_KIND_LABEL[d.kind]}: אורך בין 5 דקות ל-12 שעות.`);
-      need(whole(d.fee, 0, MAX_AGOROT), `${VISIT_KIND_LABEL[d.kind]}: מחיר בין 0 ל-100,000 ₪.`);
-      need(d.kind !== "block" || d.fee === 0, "לחסימת זמן אין מחיר.");
+      need(whole(d.minutes, 5, 720), "משך הפגישה צריך להיות בין 5 דקות ל-12 שעות.");
+      need(whole(d.fee, 0, MAX_AGOROT), "מחיר הפגישה צריך להיות בין 0 ל-100,000 ₪.");
+      need(d.kind !== "block" || d.fee === 0, "לזמן שמור אין מחיר.");
     }
-    const places = s.places.map((p) => p.trim());
-    need(places.length <= MAX_PLACES, `אפשר לשמור עד ${MAX_PLACES} מקומות.`);
-    need(places.every((p) => p !== ""), "יש מקום בלי שם. אפשר למלא או להסיר אותו.");
-    places.forEach((p) => short(p, "שם המקום"));
-    need(chars(s.reminder_text) <= MESSAGE, "נוסח התזכורת ארוך מדי: עד 1,000 תווים.");
-    need(chars(s.payment_text) <= MESSAGE, "נוסח הודעת התשלום ארוך מדי: עד 1,000 תווים.");
-    need(s.note_templates.length <= MAX_TEMPLATES, `אפשר לשמור עד ${MAX_TEMPLATES} תבניות סיכום.`);
+    need(s.places.length <= MAX_PLACES, `אפשר לשמור עד ${MAX_PLACES} מקומות.`);
+    s.places.forEach((place) => short(place, "מקום"));
+    atMost(s.reminder_text, MESSAGE, "נוסח התזכורת");
+    atMost(s.payment_text, MESSAGE, "נוסח הודעת התשלום");
+    need(s.note_templates.length <= MAX_TEMPLATES, `אפשר לשמור עד ${MAX_TEMPLATES} תבניות לסיכום.`);
     for (const t of s.note_templates) {
-      need(t.name.trim() !== "", "יש תבנית סיכום בלי שם.");
-      short(t.name.trim(), "שם התבנית");
-      need(chars(t.text) <= TEMPLATE, "תבנית סיכום ארוכה מדי: עד 5,000 תווים.");
+      need(t.name !== "", "צריך לתת שם לכל תבנית של סיכום.");
+      short(t.name, "שם התבנית");
+      atMost(t.text, TEMPLATE, "תבנית לסיכום");
     }
-    need(whole(s.report_days, 1, 365), "ימים עד הדוח: בין 1 ל-365.");
-    need(whole(s.debt_days, 1, 365), "ימים עד שחוב מוצג: בין 1 ל-365.");
-    need(whole(s.waiting_weeks, 1, 104), "שבועות המתנה: בין 1 ל-104.");
-    return { ...s, places, note_templates: s.note_templates.map((t) => ({ name: t.name.trim(), text: t.text })) };
+    need(whole(s.report_days, 0, 65_535) && whole(s.debt_days, 0, 65_535) && whole(s.waiting_weeks, 0, 65_535), "מספר הימים או השבועות לא תקין.");
+    return s;
   }
 
   // ---------------------------------------------------------------- messages
@@ -849,78 +1011,94 @@ export class FakeClinic {
     else need(due > 0, "אין יתרה לתשלום, ולכן אין מה לשלוח.");
     return fillMessage(kind === "reminder" ? this.settings.reminder_text : this.settings.payment_text, {
       // No name of a parent on the card: "שלום רב".
-      "{הורה}": p.contacts.find((c) => c.name.trim())?.name.trim() ?? "רב",
+      "{הורה}": p.contacts.map((c) => cleanLine(c.name)).find((name) => name !== "") ?? "רב",
       "{ילד}": p.name,
       "{יום}": v ? dayName(v.date) : "",
       "{תאריך}": v ? formatDate(v.date) : "",
       "{שעה}": v ? formatTime(v.start) : "",
       "{מקום}": v ? v.place : "",
-      "{סכום}": moneyNumber(kind === "reminder" && v ? v.fee : due),
+      "{סכום}": plainMoney(kind === "reminder" && v ? v.fee : due),
       "{שמי}": this.host.myName(),
     });
   }
 
   // ---------------------------------------------------------------- alerts
 
+  /** What needs her, computed on every read (as the core's `clinic_alerts`): the sentences
+   *  never carry the patient's name, which the screen shows beside them. */
   private alerts(today: Today): Alert[] {
     const out: Alert[] = [];
     const s = this.settings;
     const add = (kind: Alert["kind"], p: Patient | null, text: string, since: string, ids: { visit?: string; task?: string } = {}) =>
       out.push({ kind, patient_id: p?.id ?? null, patient_name: p?.name ?? null, visit_id: ids.visit ?? null, task_id: ids.task ?? null, text, since });
-    const who = (id: string | null) => this.patients.find((p) => p.id === id) ?? null;
-
-    for (const v of this.visits) {
-      if (v.kind === "block") continue;
-      const p = who(v.patient_id);
-      const over = v.date < today.date || (v.date === today.date && v.start + v.minutes <= today.minute);
-      if (v.status === "planned" && over) {
-        add("unmarked", p, `הפגישה מיום ${formatDateShort(v.date)} בשעה ${formatTime(v.start)} (${visitTitle(v)}) עדיין מסומנת כמתוכננת. אפשר לסמן מה קרה בה.`, v.date, { visit: v.id });
-      }
-      const age = daysBetween(v.date, today.date);
-      if (v.status === "held" && NOTE_KINDS.includes(v.kind) && age >= 0 && age <= 60 && !this.notes.some((n) => n.visit_id === v.id)) {
-        add("no_note", p, `ל${VISIT_KIND_LABEL[v.kind]} מיום ${formatDateShort(v.date)} עדיין אין סיכום.`, v.date, { visit: v.id });
-      }
-      const ahead = daysBetween(today.date, v.date);
-      if (v.kind === "feedback" && v.status === "planned" && ahead >= 0 && ahead <= 7 && p && !this.reportFinished(p)) {
-        add("feedback_soon", p, `שיחת המשוב נקבעה ל${formatDateLong(v.date)}, והדוח עדיין לא גמור.`, v.date, { visit: v.id });
-      }
-    }
+    const reportWords = (p: Patient) => {
+      const c = this.reportOf(p);
+      return c === null ? "עדיין לא נפתח תיק לדוח" : `הדוח עדיין לא גמור (${c.approved} מתוך ${c.total} סעיפים)`;
+    };
+    const weeksWords = (weeks: number) => (weeks === 1 ? "שבוע" : weeks === 2 ? "שבועיים" : `${weeks} שבועות`);
+    const noted = new Set(this.notes.map((n) => n.visit_id));
 
     for (const p of this.patients) {
-      const mine = this.visits.filter((v) => v.patient_id === p.id).sort(byDateTime);
-      const balance = this.balance(p.id);
-      const since = balance.due > 0 ? this.owedSince(p.id) : null;
-      if (since !== null && daysBetween(since, today.date) >= s.debt_days) {
-        add("debt", p, `יתרה של ${formatMoney(balance.due)} פתוחה מאז ${formatDate(since)}.`, since);
+      const mine = this.visits.filter((v) => v.patient_id === p.id);
+      const dates = (kind: VisitKind, status: VisitStatus) => mine.filter((v) => v.kind === kind && v.status === status).map((v) => v.date).sort();
+
+      for (const v of mine) {
+        const when = `${formatDate(v.date)} בשעה ${formatTime(v.start)}`;
+        if (v.status === "planned" && v.kind !== "block") {
+          if (v.date < today.date || (v.date === today.date && v.start + v.minutes <= today.minute)) {
+            add("unmarked", p, `הפגישה מיום ${when} עדיין מסומנת כמתוכננת. אפשר לסמן אם התקיימה.`, v.date, { visit: v.id });
+          }
+          const ahead = daysBetween(today.date, v.date);
+          if (v.kind === "feedback" && ahead >= 0 && ahead <= FEEDBACK_SOON_DAYS && !this.reportFinished(p)) {
+            add("feedback_soon", p, `שיחת המשוב נקבעה ליום ${when}, ו${reportWords(p)}.`, v.date, { visit: v.id });
+          }
+        }
+        const age = daysBetween(v.date, today.date);
+        if (v.status === "held" && NOTE_KINDS.includes(v.kind) && age >= 0 && age <= NO_NOTE_DAYS && !noted.has(v.id)) {
+          add("no_note", p, `עדיין אין סיכום ל${VISIT_KIND_LABEL[v.kind]} מיום ${formatDate(v.date)}.`, v.date, { visit: v.id });
+        }
       }
-      if (p.status === "waiting" && p.waiting_since !== null) {
-        const weeks = Math.floor(daysBetween(p.waiting_since, today.date) / 7);
-        if (weeks >= s.waiting_weeks) add("waiting", p, `ברשימת ההמתנה כבר ${weeks} שבועות.`, p.waiting_since);
+
+      const due = this.balance(p.id).due;
+      const oldest = due > 0 ? this.owedSince(p.id) : null;
+      if (oldest !== null && daysBetween(oldest, today.date) >= s.debt_days) {
+        add("debt", p, `יתרה פתוחה של ${plainMoney(due)} ₪, מאז ${formatDate(oldest)}.`, oldest);
       }
-      if (p.status !== "active") continue;
-      const held = (kind: VisitKind) => mine.filter((v) => v.kind === kind && v.status === "held");
-      const lastAssessment = held("assessment").pop();
-      const moreAhead = mine.some((v) => v.kind === "assessment" && v.status === "planned" && v.date >= today.date);
-      if (lastAssessment && !moreAhead && held("feedback").length === 0 && addDays(lastAssessment.date, s.report_days) < today.date && !this.reportFinished(p)) {
-        add("report_due", p, `מפגש האבחון האחרון היה ב-${formatDate(lastAssessment.date)}, והדוח עדיין לא גמור.`, lastAssessment.date);
+
+      if (p.status === "waiting") {
+        // A card without the day it joined the list waits since the day it was opened.
+        const since = p.waiting_since !== null && isIsoDate(p.waiting_since) ? p.waiting_since : p.created_on;
+        const days = daysBetween(since, today.date);
+        if (isIsoDate(since) && days >= 7 * s.waiting_weeks) {
+          add("waiting", p, days >= 7 ? `ברשימת ההמתנה כבר ${weeksWords(Math.floor(days / 7))}, מאז ${formatDate(since)}.` : `ברשימת ההמתנה מאז ${formatDate(since)}.`, since);
+        }
       }
-      const past = mine.filter((v) => v.date < today.date);
-      const last = past[past.length - 1];
-      const planned = mine.some((v) => v.status === "planned" && v.date >= today.date);
-      const openTask = this.tasks.some((t) => t.patient_id === p.id && t.done_on === null);
-      const closedWell = held("feedback").length > 0 && balance.due <= 0;
-      if (last && !planned && !openTask && daysBetween(last.date, today.date) > 14 && !closedWell) {
-        add("no_next_visit", p, `הפגישה האחרונה הייתה ב-${formatDate(last.date)}, ואין פגישה או משימה להמשך.`, last.date);
+
+      if (p.status === "active") {
+        const lastAssessment = dates("assessment", "held").pop();
+        const moreAhead = dates("assessment", "planned").some((date) => date >= today.date);
+        const feedbackHeld = dates("feedback", "held").length > 0;
+        if (lastAssessment && !this.reportFinished(p) && !moreAhead && !feedbackHeld && addDays(lastAssessment, s.report_days) < today.date) {
+          add("report_due", p, `מפגש האבחון האחרון היה ביום ${formatDate(lastAssessment)}, ו${reportWords(p)}.`, lastAssessment);
+        }
+        const last = mine.map((v) => v.date).filter((date) => date <= today.date).sort().pop();
+        const ahead = mine.some((v) => v.status === "planned" && v.date >= today.date);
+        const openTask = this.tasks.some((t) => t.patient_id === p.id && t.done_on === null);
+        if (last && !ahead && !openTask && !(feedbackHeld && due <= 0) && daysBetween(last, today.date) > NO_NEXT_VISIT_DAYS) {
+          add("no_next_visit", p, `הפגישה האחרונה הייתה ביום ${formatDate(last)}, ואין פגישה הבאה ביומן.`, last);
+        }
       }
     }
 
     for (const t of this.tasks) {
       if (t.done_on === null && t.due !== null && t.due < today.date) {
-        add("task_overdue", who(t.patient_id), `המשימה "${t.title}" נקבעה ל-${formatDate(t.due)} ועדיין פתוחה.`, t.due, { task: t.id });
+        add("task_overdue", this.patients.find((p) => p.id === t.patient_id) ?? null, `המשימה "${t.title}" הייתה אמורה להיעשות עד ${formatDate(t.due)}.`, t.due, { task: t.id });
       }
     }
-    // Oldest first; the sort keeps the order above among alerts of one day.
-    return out.sort((a, b) => a.since.localeCompare(b.since));
+    // Oldest first; the rest of the key only makes the order the same on every read.
+    const rank: Record<Alert["kind"], number> = { unmarked: 0, no_note: 1, task_overdue: 2, feedback_soon: 3, report_due: 4, debt: 5, no_next_visit: 6, waiting: 7 };
+    const text = (a: string | null, b: string | null) => ((a ?? "") < (b ?? "") ? -1 : (a ?? "") > (b ?? "") ? 1 : 0);
+    return out.sort((a, b) => text(a.since, b.since) || rank[a.kind] - rank[b.kind] || text(a.patient_id, b.patient_id) || text(a.visit_id, b.visit_id) || text(a.task_id, b.task_id));
   }
 
   // ---------------------------------------------------------------- the front page
@@ -928,9 +1106,11 @@ export class FakeClinic {
   private overview(today: Today): Overview {
     const on = (date: string) => this.visits.filter((v) => v.date === date).sort(byDateTime);
     const todays = on(today.date);
-    // Today has nothing left once every visit of it is over or cancelled.
-    const left = todays.some((v) => v.status !== "cancelled" && v.start + v.minutes > today.minute);
-    const nextDay = left ? null : (this.visits.filter((v) => v.date > today.date && v.status !== "cancelled").sort(byDateTime)[0]?.date ?? null);
+    // A visit with a patient that was not cancelled; time she kept for herself is not one.
+    const counts = (v: Visit) => v.kind !== "block" && v.status !== "cancelled";
+    // Today has nothing left once every visit of it has ended.
+    const left = todays.some((v) => counts(v) && v.start + v.minutes > today.minute);
+    const nextDay = left ? null : (this.visits.filter((v) => counts(v) && v.date > today.date).map((v) => v.date).sort()[0] ?? null);
     const week = weekRange(today.date);
     const month = monthOf(today.date);
     return {
@@ -940,7 +1120,7 @@ export class FakeClinic {
       next_visits: nextDay === null ? [] : on(nextDay).map((v) => this.view(v)),
       tasks: this.taskViews(today, true),
       alerts: this.alerts(today),
-      week_visits: this.visits.filter((v) => v.kind !== "block" && v.status !== "cancelled" && v.date >= week.from && v.date <= week.to).length,
+      week_visits: this.visits.filter((v) => counts(v) && v.date >= week.from && v.date <= week.to).length,
       month_received: this.payments.filter((p) => !p.voided && monthOf(p.date) === month).reduce((sum, p) => sum + p.amount, 0),
       total_due: this.patients.reduce((sum, p) => sum + Math.max(0, this.balance(p.id).due), 0),
       waiting: this.patients.filter((p) => p.status === "waiting").length,
@@ -954,31 +1134,38 @@ export class FakeClinic {
     return (this.history.get(recordId)?.length ?? 0) > 1;
   }
 
+  /** The income diary of a month (as the core's `diary_month`). A voided line is shown with
+   *  its amount and counted nowhere. */
   private diary(month: string): DiaryMonth {
-    need(/^\d{4}-(0[1-9]|1[0-2])$/.test(month), "החודש לא תקין.");
+    need(/^2[0-2]\d{2}-(0[1-9]|1[0-2])$/.test(month), "צריך לבחור חודש.");
     const { from, to } = monthRange(month);
     const inMonth = (date: string) => date >= from && date <= to;
-    const lines: { date: string; order: number; line: DiaryLine }[] = [];
-    for (const v of this.visits.filter((x) => x.patient_id !== null && inMonth(x.date)).sort(byDateTime)) {
-      lines.push({ date: v.date, order: 0, line: {
-        record_id: v.id, time: v.start, patient_name: this.nameOf(v.patient_id) ?? "", what: visitTitle(v), status: v.status,
+    const voidedNote = (note: string, voided: boolean, reason: string) => {
+      const line = cleanLine(note);
+      if (!voided) return line;
+      return line === "" ? `בוטל: ${cleanLine(reason)}` : `${line} · בוטל: ${cleanLine(reason)}`;
+    };
+    const lines: { date: string; order: number; time: number; id: string; line: DiaryLine }[] = [];
+    for (const v of this.visits.filter((x) => x.patient_id !== null && inMonth(x.date))) {
+      lines.push({ date: v.date, order: 0, time: v.start, id: v.id, line: {
+        record_id: v.id, time: v.start, patient_name: this.nameOf(v.patient_id) ?? "", what: VISIT_KIND_LABEL[v.kind], status: v.status,
         charged: visitCharge(v), received: 0, method: null, receipt: "", payer: "", note: v.status_note, voided: false, changed: this.changed(v.id),
       } });
     }
     for (const c of this.charges.filter((x) => inMonth(x.date))) {
-      lines.push({ date: c.date, order: 1, line: {
+      lines.push({ date: c.date, order: 1, time: 0, id: c.id, line: {
         record_id: c.id, time: null, patient_name: this.nameOf(c.patient_id) ?? "", what: c.what, status: null,
-        charged: c.voided ? 0 : c.amount, received: 0, method: null, receipt: "", payer: "", note: c.voided ? c.void_reason : "", voided: c.voided, changed: this.changed(c.id),
+        charged: c.amount, received: 0, method: null, receipt: "", payer: "", note: voidedNote("", c.voided, c.void_reason), voided: c.voided, changed: this.changed(c.id),
       } });
     }
     for (const p of this.payments.filter((x) => inMonth(x.date))) {
-      lines.push({ date: p.date, order: 2, line: {
+      lines.push({ date: p.date, order: 2, time: 0, id: p.id, line: {
         record_id: p.id, time: null, patient_name: this.nameOf(p.patient_id) ?? "", what: "תשלום", status: null,
-        charged: 0, received: p.voided ? 0 : p.amount, method: p.method, receipt: p.receipt, payer: p.payer, note: p.voided ? p.void_reason : p.note, voided: p.voided, changed: this.changed(p.id),
+        charged: 0, received: p.amount, method: p.method, receipt: p.receipt, payer: p.payer, note: voidedNote(p.note, p.voided, p.void_reason), voided: p.voided, changed: this.changed(p.id),
       } });
     }
-    // By date, then visits (already by time), then charges, then payments; the sort is stable.
-    lines.sort((a, b) => a.date.localeCompare(b.date) || a.order - b.order);
+    // By date, then visits by time, then charges, then payments; the id keeps the order the same on every read.
+    lines.sort((a, b) => a.date.localeCompare(b.date) || a.order - b.order || a.time - b.time || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     const days: DiaryDay[] = [];
     for (const { date, line } of lines) {
       let day = days[days.length - 1];
@@ -987,6 +1174,7 @@ export class FakeClinic {
         days.push(day);
       }
       day.lines.push(line);
+      if (line.voided) continue;
       day.charged += line.charged;
       day.received += line.received;
     }
@@ -1005,7 +1193,7 @@ export class FakeClinic {
   }
 
   private income(year: number): IncomeYear {
-    need(whole(year, 2000, 2100), "השנה לא תקינה.");
+    need(whole(year, 2000, 2200), "צריך לבחור שנה.");
     const sessions = this.visits.filter((v) => v.patient_id !== null && v.date.startsWith(`${year}-`));
     const count = (list: Visit[], status: VisitStatus) => list.filter((v) => v.status === status).length;
     const months: IncomeMonth[] = Array.from({ length: 12 }, (_, i) => {
@@ -1067,7 +1255,9 @@ export class FakeClinic {
       return v;
     };
     const note = (v: Visit, record: string, personal = "") => {
-      this.notes.push({ id: this.newId("note"), patient_id: v.patient_id ?? "", visit_id: v.id, date: v.date, record, personal, case_input_id: null });
+      const n: SessionNote = { id: this.newId("note"), patient_id: v.patient_id ?? "", visit_id: v.id, date: v.date, record, personal, case_input_id: null };
+      this.notes.push(n);
+      this.keep(n.id, "created", this.noteLines(n));
     };
     const paid = (p: Patient, at: number, amount: number, method: PayMethod, receipt: string) => {
       const x: Payment = { id: this.newId("payment"), patient_id: p.id, date: day(at), amount, method, receipt, payer: "", note: "", voided: false, void_reason: "" };
