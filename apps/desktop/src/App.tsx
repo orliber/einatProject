@@ -9,7 +9,7 @@ import { ipc, onCoreEvent, type AppStatus, type UiError } from "./ipc/client";
 import { LockScreen } from "./screens/LockScreen";
 import { CasesScreen } from "./screens/CasesScreen";
 import { CaseScreen } from "./screens/CaseScreen";
-import { Dialog, ErrorLine, Toast, type ToastAction } from "./components/ui";
+import { Dialog, dialogOpen, ErrorLine, Toast, type ToastAction } from "./components/ui";
 import { IdleWarning } from "./components/IdleWarning";
 import { forgetHold, holdNow, UnsavedNotice } from "./components/Unsaved";
 import { applyTextSize, readTextSize, stepTextSize } from "./textSize";
@@ -335,6 +335,8 @@ function Shell(props: {
         e.preventDefault();
         setDiscreet(!isDiscreet());
       } else if (isCombo(e, KEYS.reportsPart) || isCombo(e, KEYS.clinicPart)) {
+        // Not over a dialog: leaving the page would close it and lose what she typed there.
+        if (dialogOpen()) return;
         e.preventDefault();
         go(homeOf(isCombo(e, KEYS.clinicPart) ? "clinic" : "reports"));
       }

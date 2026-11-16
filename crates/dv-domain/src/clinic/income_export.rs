@@ -174,9 +174,37 @@ pub fn shekels(agorot: i64) -> String {
 }
 
 /// What the file shows of a receipt number: its digits and the separators between them,
-/// nothing else (a letter there could be part of a name). Empty when no digit is left.
+/// nothing else (a letter there could be part of a name). Empty when no digit is left, and
+/// empty when what is left could be a phone number or an ID number (fail-closed): the
+/// receipt is then counted with those that have no number, for her to fix.
 #[must_use]
 pub fn receipt_number(receipt: &str) -> String {
+    let kept = receipt_digits(receipt);
+    if could_be_personal(&kept) {
+        String::new()
+    } else {
+        kept
+    }
+}
+
+/// A run of 9 or more digits (an ID number, a phone without separators), a short group that
+/// starts with 0 followed by one of 7 digits (area code, then the number), or 9 to 10 digits
+/// in all that start with 0 (a phone written in pieces).
+fn could_be_personal(kept: &str) -> bool {
+    let groups: Vec<&str> = kept
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|g| !g.is_empty())
+        .collect();
+    let long_run = groups.iter().any(|g| g.len() >= 9);
+    let phone_parts = groups
+        .windows(2)
+        .any(|w| matches!(w, [area, rest] if area.starts_with('0') && (2..=3).contains(&area.len()) && rest.len() == 7));
+    let all: String = groups.concat();
+    let phone_in_pieces = all.starts_with('0') && (9..=10).contains(&all.len());
+    long_run || phone_parts || phone_in_pieces
+}
+
+fn receipt_digits(receipt: &str) -> String {
     let kept: String = receipt
         .chars()
         .map(|c| if c.is_whitespace() { ' ' } else { c })
@@ -710,6 +738,23 @@ mod tests {
         assert_eq!(receipt_number(""), "");
         // Digits of another script are not taken for a receipt number.
         assert_eq!(receipt_number("١٢٣"), "");
+    }
+
+    #[test]
+    fn a_receipt_that_could_be_a_phone_or_an_id_is_left_out() {
+        // Free text in the receipt field: a parent's phone, an ID number. Put together here so
+        // the repository holds no literal phone or ID number (`cargo xtask scan`).
+        let num = |parts: &[&str]| parts.concat();
+        assert_eq!(receipt_number(&num(&["שולם, אבא 05", "2-123", "4567"])), "");
+        assert_eq!(receipt_number(&num(&["05", "2123", "4567"])), "");
+        assert_eq!(receipt_number(&num(&["03 ", "123", "4567"])), "");
+        assert_eq!(receipt_number(&num(&["052 ", "123 ", "4567"])), "");
+        assert_eq!(receipt_number(&num(&["ת.ז 1234", "56782"])), "");
+        assert_eq!(receipt_number(&num(&["00000", "0018"])), "");
+        // Ordinary receipt numbers stay.
+        assert_eq!(receipt_number("2026/000123"), "2026/000123");
+        assert_eq!(receipt_number("40012"), "40012");
+        assert_eq!(receipt_number("12345678"), "12345678");
     }
 
     // -------------------------------------------------------------- what is in it

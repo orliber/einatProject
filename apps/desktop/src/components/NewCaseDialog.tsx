@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useShownName } from "../discreet";
 import { AgeField, ageError, ageProblem, parseAge } from "./AgeField";
 import { DateField, todayIso } from "./DateField";
 import { useApp } from "../App";
@@ -110,6 +111,8 @@ export function useNameMatches(caseId: string | null, rows: PersonRow[]): NameMa
 }
 
 export function NameMatches({ found }: { found: NameMatch[] }) {
+  // Another case's child is named by initials in discreet mode (D-192); what she typed stays.
+  const shown = useShownName();
   if (!found.length) return null;
   return (
     <div className="name-matches" role="status">
@@ -117,7 +120,7 @@ export function NameMatches({ found }: { found: NameMatch[] }) {
       <ul>
         {found.slice(0, 6).map((m) => (
           <li key={`${m.case_id}-${m.typed}-${m.value}`}>
-            "{m.typed}": {roleLabel[m.role]} בתיק {m.case_code}{m.child_name ? ` (${m.child_name})` : ""}{m.trashed ? ", בסל המחזור" : ""}
+            "{m.typed}": {roleLabel[m.role]} בתיק {m.case_code}{m.child_name ? ` (${shown(m.child_name)})` : ""}{m.trashed ? ", בסל המחזור" : ""}
           </li>
         ))}
       </ul>

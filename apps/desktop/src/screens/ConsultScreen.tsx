@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { useShownName } from "../discreet";
+import { useDiscreet, useShownName } from "../discreet";
 import { getKept, useKept } from "../kept";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
@@ -99,6 +99,7 @@ function Typing({ since, approval }: { since: number; approval: string | null })
 export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   const { fail, status } = useApp();
   const shown = useShownName();
+  const discreet = useDiscreet();
   const ai = useAi();
   const qc = useQueryClient();
   const cases = useQuery({ queryKey: ["cases"], queryFn: ipc.listCases });
@@ -134,11 +135,24 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   const selectedCase = caseList.find((c) => c.id === scope);
   // What the conversation is about, by its scope, never by whether the case list has it: a case
   // in the trash, or a list still loading, must not turn it into "no case data" (review of #109).
-  const savedLabel = saved.data?.find((c) => c.id === conversation)?.case_label;
+  // D-192: a case is named by the child's initials while discreet mode is on, here and in the
+  // list of earlier conversations (the core's label is "name · code").
+  const caseLabel = (caseId: string | null, label: string | null | undefined): string | null => {
+    const c = caseId ? caseList.find((k) => k.id === caseId) : undefined;
+    if (c) return c.child_name ? `${shown(c.child_name)} · ${c.meta.code}` : c.meta.code;
+    if (!label) return null;
+    const cut = label.lastIndexOf(" · ");
+    return cut > 0 ? `${shown(label.slice(0, cut))}${label.slice(cut)}` : label;
+  };
+  const savedOne = saved.data?.find((c) => c.id === conversation);
+  const savedLabel = savedOne ? caseLabel(savedOne.case_id, savedOne.case_label) : null;
   const scopeLabel = scope === null
     ? "שאלה כללית · בלי פרט מתיק"
     : selectedCase ? `על התיק של ${selectedCase.child_name ? shown(selectedCase.child_name) : selectedCase.meta.code}`
       : savedLabel ? `על התיק של ${savedLabel}` : "על תיק שכבר לא ברשימה";
+  // The title of an earlier conversation is the first line of her question, which can hold a
+  // name: in discreet mode it is "שיחה" and the date.
+  const historyTitle = (c: { title: string }) => (discreet ? "שיחה" : c.title || "שיחה");
 
   // Follow the conversation down, like any chat.
   useEffect(() => {
@@ -305,10 +319,10 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
                     {list.map((c) => (
                       <li key={c.id} className={c.id === conversation ? "on" : undefined}>
                         <button type="button" className="history-item" disabled={inFlight} onClick={() => void open(c)} aria-current={c.id === conversation ? "true" : undefined}>
-                          <span className="history-title">{c.title || "שיחה"}</span>
-                          <span className="history-meta">{c.case_label ? `על התיק של ${c.case_label}` : "שאלה כללית"}{g.id !== "yesterday" ? ` · ${when(c.updated_at)}` : ""}</span>
+                          <span className="history-title">{historyTitle(c)}</span>
+                          <span className="history-meta">{c.case_label ? `על התיק של ${caseLabel(c.case_id, c.case_label) ?? ""}` : "שאלה כללית"}{g.id !== "yesterday" ? ` · ${when(c.updated_at)}` : ""}</span>
                         </button>
-                        <button type="button" className="icon-btn history-delete" disabled={inFlight} aria-label={`מחיקת השיחה ${c.title || "שיחה"}`} onClick={() => setDeleting(c)}><CloseIcon /></button>
+                        <button type="button" className="icon-btn history-delete" disabled={inFlight} aria-label={`מחיקת השיחה ${historyTitle(c)}`} onClick={() => setDeleting(c)}><CloseIcon /></button>
                       </li>
                     ))}
                   </ul>
@@ -404,7 +418,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
       )}
       {deleting && (
         <ConfirmDialog danger title="מחיקת שיחה" action="מחיקה"
-          text={`השיחה "${deleting.title}" תימחק מהכספת. אי אפשר לשחזר אותה.`}
+          text={`השיחה "${historyTitle(deleting)}" תימחק מהכספת. אי אפשר לשחזר אותה.`}
           onClose={() => setDeleting(null)}
           onConfirm={async () => {
             await ipc.deleteConsultation(deleting.id);

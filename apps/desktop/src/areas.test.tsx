@@ -136,3 +136,33 @@ describe("keys (D-191, D-192)", () => {
     expect(screen.getByRole("switch", { name: "מצב דיסקרטי" })).toHaveAttribute("aria-checked", "false");
   });
 });
+
+describe("review fixes", () => {
+  it("in discreet mode an earlier consultation shows neither the child's name nor her question", async () => {
+    const { user } = await openApp(async (core) => {
+      const cases = (await core.handle("list_cases", {})) as { id: string; child_name: string | null }[];
+      const noam = cases.find((c) => c.child_name === "נועם")?.id ?? null;
+      (core as unknown as { convs: unknown[] }).convs.push({
+        id: "conv-test", caseId: noam, updated: Date.now(),
+        turns: [{ role: "user", text: "מה לכתוב על נועם בסיכום?", hidden: [], demo: true, at: Date.now() }],
+      });
+    });
+    await user.click(screen.getByRole("switch", { name: "מצב דיסקרטי" }));
+    await user.click(within(screen.getByRole("navigation", { name: "כתיבת הדוחות" })).getByRole("button", { name: "התייעצות" }));
+    const history = await screen.findByRole("navigation", { name: "שיחות קודמות" });
+    await waitFor(() => expect(history).toHaveTextContent("על התיק של נ."));
+    expect(history).not.toHaveTextContent("נועם");
+    await user.click(screen.getByRole("switch", { name: "מצב דיסקרטי" }));
+    await waitFor(() => expect(history).toHaveTextContent("מה לכתוב על נועם בסיכום?"));
+  });
+
+  it("Ctrl+2 does nothing while a dialog is open, so what she typed there is not lost", async () => {
+    const { user } = await openApp();
+    await user.click(screen.getByRole("button", { name: "+ תיק חדש" }));
+    const dialog = await screen.findByRole("dialog", { name: "תיק חדש" });
+    await user.type(within(dialog).getAllByRole("textbox")[0] as HTMLElement, "אורי");
+    await user.keyboard("{Control>}2{/Control}");
+    expect(screen.getByRole("dialog", { name: "תיק חדש" })).toBeInTheDocument();
+    expect(screen.queryByRole("tablist", { name: "חלקי הקליניקה" })).toBeNull();
+  });
+});
