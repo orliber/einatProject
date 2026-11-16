@@ -308,6 +308,14 @@ export class FakeCore {
       c.updated = now();
       return true;
     },
+    // The names of a patient card are names its case knows (D-177): the clinic reads the
+    // people of a case and adds the ones that are missing, through the same door as her form.
+    identities: (caseId) => this.find(caseId).people.map((p) => ({ id: p.id, role: p.role, value: p.value, aliases: [...p.aliases] })),
+    setIdentities: (caseId, list) => {
+      const c = this.find(caseId);
+      this.setPeople(c, list);
+      c.updated = now();
+    },
     myName: () => this.practitioner[0] ?? "",
   });
 

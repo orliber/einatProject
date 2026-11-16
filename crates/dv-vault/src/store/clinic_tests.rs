@@ -392,7 +392,7 @@ fn erasing_a_patient_removes_theirs_and_nothing_else() {
         .clinic_put("visit", None, Some(&p1), 6, "{}", None)
         .unwrap();
     v.clinic_delete(&gone, true).unwrap();
-    v.erase_clinic_patient(&p1).unwrap();
+    v.erase_clinic_patient(&p1, None, None).unwrap();
     assert!(v.clinic_of_patient(&p1).unwrap().is_empty());
     assert!(v.clinic_patient(&p1).unwrap().is_none());
     assert!(v.clinic_patient(&p2).unwrap().is_some());
@@ -417,7 +417,7 @@ fn erasing_a_patient_removes_theirs_and_nothing_else() {
         .iter()
         .all(|m| m == "{}"));
     assert!(matches!(
-        v.erase_clinic_patient(&p1),
+        v.erase_clinic_patient(&p1, None, None),
         Err(VaultError::NotFound)
     ));
     assert!(v.audit_intact().unwrap());
@@ -526,7 +526,7 @@ fn erasing_takes_the_history_a_record_had_under_another_card() {
     let stays = v
         .clinic_put("payment", None, Some(&p2), 2, "{}", Some("created"))
         .unwrap();
-    v.erase_clinic_patient(&p1).unwrap();
+    v.erase_clinic_patient(&p1, None, None).unwrap();
     assert!(v.clinic_get(&moved).unwrap().is_none());
     assert!(v.clinic_history(&moved).unwrap().is_empty());
     assert_eq!(v.clinic_history(&stays).unwrap().len(), 1);
@@ -600,4 +600,345 @@ fn nothing_of_the_clinic_is_readable_in_the_files() {
             );
         }
     }
+}
+
+// ------------------------------------------------------------------ the review of the beta
+
+fn set_column(v: &Vault, table: &str, column: &str, value: &str, id: &str) {
+    let changed = v
+        .main
+        .execute(
+            &format!("UPDATE {table} SET {column} = ?1 WHERE id = ?2"),
+            [value, id],
+        )
+        .unwrap();
+    assert_eq!(changed, 1);
+}
+
+/// D-177: what a row is (its kind, whose it is) is part of its seal. Someone who can write
+/// the database file cannot turn a payment into a task, or hand it to another card.
+#[test]
+fn a_record_whose_kind_or_patient_was_changed_in_the_file_does_not_open() {
+    for (column, value) in [("kind", "task"), ("patient_id", "p2")] {
+        let (_d, mut v) = new_vault();
+        let id = v
+            .clinic_put("payment", None, Some("p1"), 5, r#"{"a":1}"#, None)
+            .unwrap();
+        let other = put(&mut v, "payment", Some("p1"), 6, r#"{"a":2}"#);
+        assert_eq!(v.clinic_unreadable().unwrap(), 0);
+        set_column(&v, "clinic_records", column, value, &id);
+        assert!(v.clinic_get(&id).is_err(), "{column}");
+        // One patient's records are all read or none: nothing is decided with a row missing.
+        let patient = if column == "kind" { "p1" } else { "p2" };
+        assert!(v.clinic_of_patient(patient).is_err(), "{column}");
+        // The lists leave the row out, and it is counted.
+        let listed = |v: &Vault, kind: &str| -> Vec<String> {
+            v.clinic_kind(kind)
+                .unwrap()
+                .into_iter()
+                .map(|r| r.id)
+                .collect()
+        };
+        assert_eq!(
+            listed(&v, "payment"),
+            std::slice::from_ref(&other),
+            "{column}"
+        );
+        assert!(listed(&v, "task").is_empty());
+        assert!(v
+            .clinic_range("payment", 0, 10)
+            .unwrap()
+            .iter()
+            .all(|r| r.id != id));
+        assert_eq!(v.clinic_unreadable().unwrap(), 1);
+        // The row itself is still there, untouched.
+        let rows: i64 = v
+            .main
+            .query_row("SELECT COUNT(*) FROM clinic_records", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 2);
+    }
+}
+
+#[test]
+fn a_patient_column_set_where_there_was_none_does_not_open() {
+    let (_d, mut v) = new_vault();
+    let block = put(&mut v, "visit", None, 5, "{}");
+    set_column(&v, "clinic_records", "patient_id", "p1", &block);
+    assert!(v.clinic_get(&block).is_err());
+}
+
+#[test]
+fn a_history_row_moved_to_another_record_patient_or_action_does_not_open() {
+    for (column, value) in [
+        ("record_id", "other"),
+        ("patient_id", "p2"),
+        ("action", "created"),
+    ] {
+        let (_d, mut v) = new_vault();
+        let id = v
+            .clinic_put("payment", None, Some("p1"), 5, "{}", Some("voided"))
+            .unwrap();
+        let other = v
+            .clinic_put("payment", None, Some("p1"), 5, "{}", Some("created"))
+            .unwrap();
+        assert_eq!(v.clinic_history(&id).unwrap().len(), 1);
+        let value = if column == "record_id" {
+            other.as_str()
+        } else {
+            value
+        };
+        let changed = v
+            .main
+            .execute(
+                &format!("UPDATE clinic_history SET {column} = ?1 WHERE record_id = ?2"),
+                [value, id.as_str()],
+            )
+            .unwrap();
+        assert_eq!(changed, 1);
+        let read = if column == "record_id" { &other } else { &id };
+        assert!(v.clinic_history(read).is_err(), "{column}");
+    }
+}
+
+#[test]
+fn a_card_that_does_not_open_is_left_out_and_counted() {
+    let (_d, mut v) = new_vault();
+    let a = v.save_clinic_patient(None, r#"{"n":"אורי"}"#).unwrap();
+    let b = v.save_clinic_patient(None, r#"{"n":"נועה"}"#).unwrap();
+    // The sealed contents of one card put under the other: the seal is bound to the id.
+    let sealed: Vec<u8> = v
+        .identity
+        .query_row(
+            "SELECT data_enc FROM clinic_patients WHERE id = ?1",
+            [&a],
+            |r| r.get(0),
+        )
+        .unwrap();
+    v.identity
+        .execute(
+            "UPDATE clinic_patients SET data_enc = ?1 WHERE id = ?2",
+            rusqlite::params![sealed, b],
+        )
+        .unwrap();
+    let ids: Vec<String> = v
+        .clinic_patients()
+        .unwrap()
+        .into_iter()
+        .map(|p| p.0)
+        .collect();
+    assert_eq!(ids, [a]);
+    assert!(v.clinic_patient(&b).is_err());
+    assert_eq!(v.clinic_unreadable().unwrap(), 1);
+}
+
+/// The reviewer's case: a payment written for one card and moved to another keeps the first
+/// card's id on its older history rows. Erasing the first card leaves all of it.
+#[test]
+fn erasing_a_card_leaves_the_history_of_a_record_that_now_belongs_to_another() {
+    let (_d, mut v) = new_vault();
+    let p1 = v.save_clinic_patient(None, r#"{"n":"אורי"}"#).unwrap();
+    let p2 = v.save_clinic_patient(None, r#"{"n":"נועה"}"#).unwrap();
+    let moved = v
+        .clinic_put("payment", None, Some(&p1), 1, r#"{"a":1}"#, Some("created"))
+        .unwrap();
+    v.clinic_put(
+        "payment",
+        Some(&moved),
+        Some(&p2),
+        1,
+        r#"{"a":2}"#,
+        Some("changed"),
+    )
+    .unwrap();
+    let own = v
+        .clinic_put("visit", None, Some(&p1), 2, "{}", Some("created"))
+        .unwrap();
+    // A visit of p1 removed earlier: its rows are p1's and go with the card.
+    let gone = v
+        .clinic_put("visit", None, Some(&p1), 3, "{}", Some("created"))
+        .unwrap();
+    v.clinic_delete(&gone, true).unwrap();
+    v.erase_clinic_patient(&p1, None, None).unwrap();
+    let history = v.clinic_history(&moved).unwrap();
+    assert_eq!(
+        history.iter().map(|h| h.json.as_str()).collect::<Vec<_>>(),
+        [r#"{"a":1}"#, r#"{"a":2}"#]
+    );
+    assert_eq!(v.clinic_get(&moved).unwrap().unwrap().json, r#"{"a":2}"#);
+    assert!(v.clinic_history(&own).unwrap().is_empty());
+    assert!(v.clinic_history(&gone).unwrap().is_empty());
+    let rows: i64 = v
+        .main
+        .query_row("SELECT COUNT(*) FROM clinic_history", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(rows, 2);
+}
+
+/// D-179: what the erased records counted for is written with their removal, and the count
+/// of erased cards with the card's.
+#[test]
+fn an_erase_writes_the_tallies_it_is_given_and_they_are_sealed() {
+    let (_d, mut v) = new_vault();
+    assert!(v.clinic_get("tally").unwrap().is_none());
+    assert!(v.clinic_erased_cards().unwrap().is_none());
+    let p1 = v.save_clinic_patient(None, r#"{"n":"אורי"}"#).unwrap();
+    let p2 = v.save_clinic_patient(None, r#"{"n":"נועה"}"#).unwrap();
+    put(&mut v, "payment", Some(&p1), 4, "{}");
+    v.erase_clinic_patient(
+        &p1,
+        Some(r#"{"months":{"סכום-בדוי":1}}"#),
+        Some(r#"{"m":1}"#),
+    )
+    .unwrap();
+    let tally = v.clinic_get("tally").unwrap().unwrap();
+    assert_eq!(
+        (tally.kind.as_str(), tally.patient_id.clone(), tally.day),
+        ("tally", None, 0)
+    );
+    assert_eq!(tally.json, r#"{"months":{"סכום-בדוי":1}}"#);
+    assert_eq!(
+        v.clinic_erased_cards().unwrap().as_deref(),
+        Some(r#"{"m":1}"#)
+    );
+    // A second erase replaces both with what it is given; none given, both stay.
+    put(&mut v, "payment", Some(&p2), 4, "{}");
+    v.erase_clinic_patient(&p2, Some(r#"{"months":{}}"#), Some(r#"{"m":2}"#))
+        .unwrap();
+    assert_eq!(
+        v.clinic_get("tally").unwrap().unwrap().json,
+        r#"{"months":{}}"#
+    );
+    assert_eq!(
+        v.clinic_erased_cards().unwrap().as_deref(),
+        Some(r#"{"m":2}"#)
+    );
+    let p3 = v.save_clinic_patient(None, r#"{"n":"גיל"}"#).unwrap();
+    v.erase_clinic_patient(&p3, None, None).unwrap();
+    assert_eq!(
+        v.clinic_erased_cards().unwrap().as_deref(),
+        Some(r#"{"m":2}"#)
+    );
+    assert_eq!(v.clinic_kind("tally").unwrap().len(), 1);
+    // Sealed like every row: nothing of it is readable in the tables.
+    let needle = "סכום-בדוי".as_bytes();
+    let raw: Vec<Vec<u8>> = {
+        let mut stmt = v
+            .main
+            .prepare("SELECT data_enc FROM clinic_records")
+            .unwrap();
+        stmt.query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    };
+    assert!(raw
+        .iter()
+        .all(|bytes| !bytes.windows(needle.len()).any(|w| w == needle)));
+    // The log says how many records went, and nothing of the tallies.
+    assert_eq!(
+        audit_rows(&v, "clinic_patient_erased"),
+        [r#"{"records":1}"#, r#"{"records":1}"#, r#"{"records":0}"#]
+    );
+    assert!(v.audit_intact().unwrap());
+}
+
+#[test]
+fn the_tally_is_written_only_by_an_erase_and_never_removed() {
+    let (_d, mut v) = new_vault();
+    for id in [None, Some("tally")] {
+        let r = v.clinic_put("tally", id, None, 0, "{}", None);
+        assert!(matches!(r, Err(VaultError::Refused(_))), "{id:?}");
+    }
+    let p = v.save_clinic_patient(None, "{}").unwrap();
+    v.erase_clinic_patient(&p, Some("{}"), Some("{}")).unwrap();
+    assert!(matches!(
+        v.clinic_delete("tally", false),
+        Err(VaultError::Refused(_))
+    ));
+    assert!(v.clinic_get("tally").unwrap().is_some());
+}
+
+/// D-177: the material and the note that points to it are one write.
+#[test]
+fn a_note_goes_into_a_case_with_its_material_or_not_at_all() {
+    use dv_domain::{CaseMeta, InputKind};
+    let (_d, mut v) = new_vault();
+    let case = v.create_case(&CaseMeta::default()).unwrap();
+    let note = v
+        .clinic_put("note", None, Some("p1"), 3, r#"{"v":1}"#, Some("created"))
+        .unwrap();
+    // A note that is not there: nothing is written, the material neither.
+    let ghost = (
+        Some("ghost".to_owned()),
+        Some("p1".to_owned()),
+        3,
+        "{}".to_owned(),
+    );
+    let r = v.clinic_note_into_case(
+        &case,
+        "in-1",
+        InputKind::SessionNote,
+        "כותרת",
+        "תוכן",
+        &ghost,
+    );
+    assert!(matches!(r, Err(VaultError::NotFound)));
+    assert!(v.inputs(&case).unwrap().is_empty());
+    // A record of another kind under that id: refused, and again nothing.
+    let visit = put(&mut v, "visit", Some("p1"), 3, "{}");
+    let wrong = (Some(visit), Some("p1".to_owned()), 3, "{}".to_owned());
+    let r = v.clinic_note_into_case(
+        &case,
+        "in-1",
+        InputKind::SessionNote,
+        "כותרת",
+        "תוכן",
+        &wrong,
+    );
+    assert!(matches!(r, Err(VaultError::Refused(_))));
+    assert!(v.inputs(&case).unwrap().is_empty());
+    assert_eq!(v.clinic_get(&note).unwrap().unwrap().json, r#"{"v":1}"#);
+    // The real one: both, and the note's history says it changed.
+    let row = (
+        Some(note.clone()),
+        Some("p1".to_owned()),
+        3,
+        r#"{"v":2}"#.to_owned(),
+    );
+    v.clinic_note_into_case(&case, "in-1", InputKind::Intake, "כותרת", "תוכן", &row)
+        .unwrap();
+    let inputs = v.inputs(&case).unwrap();
+    assert_eq!(inputs.len(), 1);
+    let input = inputs.first().unwrap();
+    assert_eq!(
+        (
+            input.id.as_str(),
+            input.kind,
+            input.title.as_str(),
+            input.content.as_str()
+        ),
+        ("in-1", InputKind::Intake, "כותרת", "תוכן")
+    );
+    assert_eq!(v.clinic_get(&note).unwrap().unwrap().json, r#"{"v":2}"#);
+    let history = v.clinic_history(&note).unwrap();
+    assert_eq!(
+        history
+            .iter()
+            .map(|h| h.action.as_str())
+            .collect::<Vec<_>>(),
+        ["created", "changed"]
+    );
+    // The same material id twice: the second is refused whole, the note stays as it was.
+    let again = (
+        Some(note.clone()),
+        Some("p1".to_owned()),
+        3,
+        r#"{"v":3}"#.to_owned(),
+    );
+    assert!(v
+        .clinic_note_into_case(&case, "in-1", InputKind::Intake, "כותרת", "תוכן", &again)
+        .is_err());
+    assert_eq!(v.clinic_get(&note).unwrap().unwrap().json, r#"{"v":2}"#);
+    assert_eq!(v.inputs(&case).unwrap().len(), 1);
 }

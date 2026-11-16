@@ -3,10 +3,10 @@
 // totals, and under it who still owes. "סיכום שנתי": the twelve months of a year as a table
 // with a plain bar beside each. The page says, always, that the program is not registered
 // with the tax authority (D-172). Nothing here is exported or sent.
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { useApp } from "../../App";
 import { Segmented } from "../../components/Switch";
-import { Dialog, ErrorLine, Skeleton } from "../../components/ui";
+import { Dialog, Skeleton } from "../../components/ui";
 import { asUiError, ipc } from "../../ipc/client";
 import { clinicApi } from "../../ipc/clinic";
 import type { Alert } from "../../ipc/generated/Alert";
@@ -15,9 +15,10 @@ import type { DiaryLine } from "../../ipc/generated/DiaryLine";
 import type { DiaryMonth } from "../../ipc/generated/DiaryMonth";
 import type { IncomeYear } from "../../ipc/generated/IncomeYear";
 import type { PatientRow } from "../../ipc/generated/PatientRow";
-import { useClinicSettings, useDiary, useHistory, useIncome, useOverview, usePatients, useReloadClinic, useToday } from "./clinicData";
+import type { DiaryErased } from "../../ipc/generated/DiaryErased";
+import { useClinicSettings, useDiary, useHistory, useIncome, useOverview, usePatients, useReloadClinic, useToday, useYearErased } from "./clinicData";
 import { formatDate, formatDateLong, formatMoney, formatMonth, formatTime, monthOf, PAY_METHOD_LABEL, VISIT_KIND_LABEL } from "./format";
-import { EmptyState, HistoryEntries, Money, Pager, PatientName, Section, StatusBadge, useClinicNav, usePaged, useShownName } from "./parts";
+import { EmptyState, HistoryEntries, Money, Pager, PatientName, ReadError, Section, StatusBadge, useClinicNav, usePaged, useShownName } from "./parts";
 import "./MoneyTab.css";
 
 // ------------------------------------------------------------------ pure pieces
@@ -149,7 +150,7 @@ function DiaryView({ today }: { today: string }) {
         היומן שומר כל שינוי שנעשה בפגישות, בחיובים ובתקבולים. התוכנה אינה רשומה ברשות המסים כתוכנה לניהול יומן, ואת הקבלות מפיקים בתוכנת החשבוניות. כאן רושמים את מספר הקבלה.
       </p>
 
-      {diary.error && !d ? <ErrorLine error={diary.error.message} retry={reload} />
+      {diary.error && !d ? <ReadError error={diary.error.message} retry={reload} />
         : !d ? (
           <div className="stack" aria-busy="true">
             <Skeleton card lines={2} label="טוען את סיכום החודש" />
@@ -227,7 +228,39 @@ function MonthTotals({ diary, onlyMissing, onOnlyMissing, onBalances }: {
           )}
         <button type="button" className="link-btn" onClick={onBalances}>ליתרות הפתוחות</button>
       </div>
+      {diary.erased !== null && (
+        <ErasedLine line={diary.erased}>הסכומים האלה כלולים בסיכום החודש, כמספרים בלבד: בלי שם ובלי תאריך, ולכן הם לא מופיעים באף יום.</ErasedLine>
+      )}
     </section>
+  );
+}
+
+/** How many visits, in her words: "פגישה אחת התקיימה", "3 פגישות התקיימו". */
+const visitsThat = (count: number, one: string, many: string) => (count === 1 ? `פגישה אחת ${one}` : `${count} פגישות ${many}`);
+
+/** What the anonymous line counts, as one line of text: only the parts that are not zero. */
+export function erasedWords(line: DiaryErased): string {
+  return [
+    line.held > 0 ? visitsThat(line.held, "התקיימה", "התקיימו") : "",
+    line.cancelled > 0 ? visitsThat(line.cancelled, "בוטלה", "בוטלו") : "",
+    line.no_show > 0 ? (line.no_show === 1 ? "לפגישה אחת לא הגיעו" : `ל-${line.no_show} פגישות לא הגיעו`) : "",
+    line.charged !== 0 ? `חויב ${formatMoney(line.charged)}` : "",
+    line.received !== 0 ? `התקבל ${formatMoney(line.received)}` : "",
+  ].filter(Boolean).join(" · ");
+}
+
+/** The one anonymous line of the cards that were erased (D-179): its name as the core gives
+ *  it, what it counts, and one sentence that says what it is. Totals only: there is nothing
+ *  here to open, and no name to show. */
+function ErasedLine({ line, children }: { line: DiaryErased; children: ReactNode }) {
+  return (
+    <div className="stack clinic-erased" role="group" aria-label={line.label}>
+      <span className="row clinic-erased-head">
+        <span className="chip chip-sand">{line.label}</span>
+        <span>{erasedWords(line)}</span>
+      </span>
+      <span className="muted small">{children}</span>
+    </div>
   );
 }
 
@@ -299,10 +332,11 @@ function DayTable({ day, totals, idOf, onHistory }: { day: DiaryDay; totals: boo
 function HistoryDialog({ line, onClose }: { line: DiaryLine; onClose: () => void }) {
   const shown = useShownName();
   const history = useHistory(line.record_id);
+  const reload = useReloadClinic();
   return (
     <Dialog title="היסטוריית שינויים" subtitle={`${line.what} · ${shown(line.patient_name)}`} onClose={onClose}>
       {history.data ? <HistoryEntries entries={history.data} />
-        : history.error ? <ErrorLine error={history.error.message} />
+        : history.error ? <ReadError error={history.error.message} retry={reload} />
         : <Skeleton lines={4} label="טוען את ההיסטוריה" />}
     </Dialog>
   );
@@ -342,7 +376,7 @@ function Balances({ today, rows, error }: { today: string; rows: PatientRow[] | 
 
   return (
     <Section title="יתרות פתוחות" aside={list.length > 0 ? <span className="row clinic-balances-total"><span className="muted small">{list.length === 1 ? "משפחה אחת" : `${list.length} משפחות`}</span><Money agorot={total} tone="owed" /></span> : undefined}>
-      {error && !rows ? <ErrorLine error={error} retry={reload} />
+      {error && !rows ? <ReadError error={error} retry={reload} />
         : !rows ? <Skeleton lines={3} label="טוען את היתרות" />
         : list.length === 0 ? <p className="muted clinic-quiet">אין יתרות פתוחות. כל מה שחויב שולם.</p>
         : (
@@ -376,6 +410,7 @@ function YearView({ today }: { today: string }) {
   const thisYear = Number(today.slice(0, 4));
   const [year, setYear] = useState(thisYear);
   const income = useIncome(year);
+  const erased = useYearErased(year);
   const reload = useReloadClinic();
   const y = income.data;
   return (
@@ -386,14 +421,17 @@ function YearView({ today }: { today: string }) {
         <button type="button" className="btn btn-small" disabled={year >= LAST_YEAR} onClick={() => setYear(year + 1)}>השנה הבאה</button>
         {year !== thisYear && <button type="button" className="link-btn" onClick={() => setYear(thisYear)}>לשנה הנוכחית</button>}
       </nav>
-      {income.error && !y ? <ErrorLine error={income.error.message} retry={reload} />
+      {income.error && !y ? <ReadError error={income.error.message} retry={reload} />
         : !y ? <Skeleton card lines={8} label="טוען את סיכום השנה" />
-        : <YearTable income={y} />}
+        : <YearTable income={y} erased={erased.data ?? null} unsure={erased.error !== null && erased.data === undefined} />}
     </div>
   );
 }
 
-function YearTable({ income }: { income: IncomeYear }) {
+/** `erased`: what the cards that were erased counted for in this year, already inside the
+ *  figures of `income`; `unsure`: it could not be read, so the table cannot say which part
+ *  of its figures they are. */
+function YearTable({ income, erased, unsure }: { income: IncomeYear; erased: DiaryErased | null; unsure: boolean }) {
   const sums = useMemo(() => income.months.reduce(
     (s, m) => ({ held: s.held + m.held, cancelled: s.cancelled + m.cancelled, noShow: s.noShow + m.no_show, most: Math.max(s.most, m.received) }),
     { held: 0, cancelled: 0, noShow: 0, most: 0 },
@@ -453,6 +491,10 @@ function YearTable({ income }: { income: IncomeYear }) {
           </tfoot>
         </table>
         <p className="hint clinic-bar-legend">הפס שליד כל חודש מראה כמה התקבל בו, ביחס לחודש שבו התקבל הכי הרבה.</p>
+        {erased !== null && (
+          <ErasedLine line={erased}>המספרים האלה כלולים בסיכום השנה. הם נשארו מכרטיסים שנמחקו, בלי שם ובלי תאריך, כדי שסיכום של שנה שעברה לא ישתנה.</ErasedLine>
+        )}
+        {unsure && <p className="hint">אם נמחקו כרטיסים, מה שנשאר מהם כלול בסיכום הזה. הפירוט שלהם לא נקרא כרגע.</p>}
       </div>
 
       <div className="clinic-columns">
@@ -472,7 +514,7 @@ function YearTable({ income }: { income: IncomeYear }) {
         </Section>
         <Section title="מטופלים חדשים בשנה">
           <p className="clinic-quiet"><span className="clinic-figure-value">{income.new_patients}</span></p>
-          <p className="hint">כרטיסים שנפתחו בשנת {income.year}, כולל משפחות ברשימת ההמתנה.</p>
+          <p className="hint">כרטיסים שנפתחו בשנת {income.year}, כולל משפחות ברשימת ההמתנה, וכרטיסים שנמחקו אחרי תקופת השמירה.</p>
         </Section>
       </div>
     </>

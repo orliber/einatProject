@@ -13,7 +13,7 @@ import type { VisitKind } from "../../ipc/generated/VisitKind";
 import { useClinicSettings, useReloadClinic, useSaveSettings } from "./clinicData";
 import { defaultClinicSettings, fillPreview, PLACEHOLDERS, sampleValues } from "./clinicDefaults";
 import { formatTime, moneyInput, parseMoney, parseTime, VISIT_KIND_LABEL } from "./format";
-import { CheckField, ConfirmDialog, Section, TextAreaField, TextField, TimeField } from "./parts";
+import { CheckField, ConfirmDialog, ReadError, Section, TextAreaField, TextField, TimeField } from "./parts";
 import "./ClinicSettingsTab.css";
 
 // ------------------------------------------------------------------ the form's own shape
@@ -128,7 +128,7 @@ const same = (a: SettingsDraft, b: SettingsDraft) => JSON.stringify(a) === JSON.
 export function ClinicSettingsTab() {
   const settings = useClinicSettings();
   const reload = useReloadClinic();
-  if (settings.error && !settings.data) return <ErrorLine error={settings.error.message} retry={reload} />;
+  if (settings.error && !settings.data) return <ReadError error={settings.error.message} retry={reload} />;
   if (!settings.data) {
     return (
       <div className="stack clinic-settings" aria-busy="true">

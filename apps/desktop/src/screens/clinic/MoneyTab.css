@@ -72,6 +72,21 @@
   color: var(--ink-soft);
 }
 
+/* ---------- the one anonymous line of the cards that were erased (D-179) ---------- */
+.clinic-erased {
+  flex: 1 1 100%;
+  gap: var(--space-1);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+.clinic-erased-head {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.clinic-year .clinic-erased {
+  margin-top: var(--space-3);
+}
+
 /* ---------- the tables ---------- */
 .clinic-diary-days {
   gap: var(--space-3);

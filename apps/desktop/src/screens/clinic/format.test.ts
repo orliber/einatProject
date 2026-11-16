@@ -1,9 +1,9 @@
 // Money, dates and times as the clinic shows and reads them, and a Hebrew word for every value.
 import {
   addDays, ALERT_KIND_LABEL, CONTACT_ROLE_LABEL, dayName, daysBetween, formatDate, formatDateLong, formatDateShort, formatLength,
-  formatMoney, formatMonth, formatSpan, formatTime, greeting, initials, isIsoDate, moneyInput, monthOf, monthRange, parseMoney, parseTime,
-  PATIENT_STATUS_LABEL, PAY_METHOD_LABEL, PAY_METHODS, TASK_KIND_LABEL, TASK_KINDS, today, VISIT_KIND_LABEL, VISIT_KINDS,
-  VISIT_STATUS_LABEL, visitTitle, weekday, weekRange,
+  formatMoney, formatMonth, formatSpan, formatTime, greeting, initials, isIsoDate, leftAloneWords, moneyInput, monthOf, monthRange, optionsWith,
+  parseMoney, parseTime, PATIENT_STATUS_LABEL, PATIENT_STATUSES, PAY_METHOD_LABEL, PAY_METHODS, TASK_KIND_LABEL, TASK_KINDS, today,
+  VISIT_KIND_LABEL, VISIT_KINDS, VISIT_STATUS_LABEL, VISIT_STATUSES, visitTitle, weekday, weekRange,
 } from "./format";
 
 describe("money", () => {
@@ -129,9 +129,29 @@ describe("labels", () => {
   });
 
   it("the lists offered in a form hold every value once", () => {
-    expect([...VISIT_KINDS].sort()).toEqual(Object.keys(VISIT_KIND_LABEL).sort());
-    expect([...PAY_METHODS].sort()).toEqual(Object.keys(PAY_METHOD_LABEL).sort());
-    expect([...TASK_KINDS].sort()).toEqual(Object.keys(TASK_KIND_LABEL).sort());
+    // Every value but "unknown": that one is only ever read, never chosen (D-178).
+    const offered = (labels: object) => Object.keys(labels).filter((k) => k !== "unknown").sort();
+    expect([...VISIT_KINDS].sort()).toEqual(offered(VISIT_KIND_LABEL));
+    expect([...VISIT_STATUSES].sort()).toEqual(offered(VISIT_STATUS_LABEL));
+    expect([...PAY_METHODS].sort()).toEqual(offered(PAY_METHOD_LABEL));
+    expect([...TASK_KINDS].sort()).toEqual(offered(TASK_KIND_LABEL));
+    expect([...PATIENT_STATUSES].sort()).toEqual(offered(PATIENT_STATUS_LABEL));
+  });
+
+  it("a value of a later version has a plain word everywhere, and is offered only where it already is", () => {
+    for (const labels of [VISIT_KIND_LABEL, VISIT_STATUS_LABEL, PAY_METHOD_LABEL, TASK_KIND_LABEL, PATIENT_STATUS_LABEL, CONTACT_ROLE_LABEL]) {
+      expect(labels.unknown).toMatch(/לא מוכר/);
+    }
+    expect(ALERT_KIND_LABEL.unreadable).toBe("רישום שלא נקרא");
+    expect(optionsWith(PAY_METHODS, PAY_METHOD_LABEL, "bit").map((o) => o.value)).toEqual([...PAY_METHODS]);
+    const withUnknown = optionsWith(PAY_METHODS, PAY_METHOD_LABEL, "unknown");
+    expect(withUnknown.map((o) => o.value)).toEqual([...PAY_METHODS, "unknown"]);
+    expect(withUnknown[withUnknown.length - 1]?.label).toBe("אמצעי לא מוכר");
+  });
+
+  it("says how many visits of a series were left as they are", () => {
+    expect(leftAloneWords(1)).toBe("פגישה אחת בסדרה נשארה כמו שהיא, כי יש לה סיכום או שהיא כבר סומנה");
+    expect(leftAloneWords(3)).toBe("3 פגישות בסדרה נשארו כמו שהן, כי יש להן סיכום או שהן כבר סומנו");
   });
 
   it("the words mean what the spec means", () => {
@@ -145,13 +165,13 @@ describe("labels", () => {
   it("the words are the core's own (logic.rs: kind_label, status_label, method_label, task_kind_label, patient_status_label, contact_role_label)", () => {
     expect(VISIT_KIND_LABEL).toEqual({
       intake: "פגישת היכרות", assessment: "מפגש אבחון", observation: "תצפית", feedback: "שיחת משוב", therapy: "פגישת טיפול",
-      guidance: "הדרכת הורים", meeting: "פגישה מקצועית", other: "פגישה אחרת", block: "זמן שמור",
+      guidance: "הדרכת הורים", meeting: "פגישה מקצועית", other: "פגישה אחרת", block: "זמן שמור", unknown: "סוג לא מוכר",
     });
-    expect(VISIT_STATUS_LABEL).toEqual({ planned: "מתוכננת", held: "התקיימה", cancelled: "בוטלה", no_show: "לא הגיעו" });
-    expect(PAY_METHOD_LABEL).toEqual({ cash: "מזומן", transfer: "העברה בנקאית", bit: "ביט", paybox: "פייבוקס", check: "צ'ק", card: "כרטיס אשראי", other: "אחר" });
-    expect(TASK_KIND_LABEL).toEqual({ call: "שיחת טלפון", questionnaire: "שאלון", document: "מסמך", report: "דוח", payment: "תשלום", follow_up: "מעקב", other: "אחר" });
-    expect(PATIENT_STATUS_LABEL).toEqual({ waiting: "ברשימת ההמתנה", active: "בתהליך", closed: "הסתיים" });
-    expect(CONTACT_ROLE_LABEL).toEqual({ mother: "אמא", father: "אבא", guardian: "אפוטרופוס", other: "אחר" });
+    expect(VISIT_STATUS_LABEL).toEqual({ planned: "מתוכננת", held: "התקיימה", cancelled: "בוטלה", no_show: "לא הגיעו", unknown: "מצב לא מוכר" });
+    expect(PAY_METHOD_LABEL).toEqual({ cash: "מזומן", transfer: "העברה בנקאית", bit: "ביט", paybox: "פייבוקס", check: "צ'ק", card: "כרטיס אשראי", other: "אחר", unknown: "אמצעי לא מוכר" });
+    expect(TASK_KIND_LABEL).toEqual({ call: "שיחת טלפון", questionnaire: "שאלון", document: "מסמך", report: "דוח", payment: "תשלום", follow_up: "מעקב", other: "אחר", unknown: "סוג לא מוכר" });
+    expect(PATIENT_STATUS_LABEL).toEqual({ waiting: "ברשימת ההמתנה", active: "בתהליך", closed: "הסתיים", unknown: "מצב לא מוכר" });
+    expect(CONTACT_ROLE_LABEL).toEqual({ mother: "אמא", father: "אבא", guardian: "אפוטרופוס", other: "אחר", unknown: "קשר לא מוכר" });
     // And in the core's order.
     expect(VISIT_KINDS).toEqual(["intake", "assessment", "observation", "feedback", "therapy", "guidance", "meeting", "other", "block"]);
     expect(PAY_METHODS).toEqual(["cash", "transfer", "bit", "paybox", "check", "card", "other"]);

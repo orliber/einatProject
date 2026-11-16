@@ -305,6 +305,21 @@
   border-top: 1px solid var(--line);
 }
 
+/* What an erase removes and what it leaves, said before she confirms (D-179). */
+.pcard-erase-what {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pcard-erase-what dt {
+  font-weight: 600;
+}
+.pcard-erase-what dd {
+  margin: 0;
+  line-height: 1.6;
+}
+
 /* A narrow window, or a large text size: one column. */
 @container page (max-width: 1000px) {
   .pcard-columns {

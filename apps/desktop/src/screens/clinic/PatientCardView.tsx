@@ -31,12 +31,12 @@ import {
   useSavePayment, useSaveTask, useToday, useVoidCharge, useVoidPayment,
 } from "./clinicData";
 import {
-  CONTACT_ROLE_LABEL, formatDate, parseMoney, PATIENT_STATUS_LABEL, PAY_METHOD_LABEL, PAY_METHODS, TASK_KIND_LABEL, TASK_KINDS,
+  CONTACT_ROLE_LABEL, formatDate, optionsWith, parseMoney, PATIENT_STATUS_LABEL, PAY_METHOD_LABEL, PAY_METHODS, TASK_KIND_LABEL, TASK_KINDS,
   VISIT_KIND_LABEL, VISIT_STATUS_LABEL,
 } from "./format";
 import { NoteDialog } from "./NoteDialog";
 import {
-  AlertList, ConfirmDialog, EmptyState, Field, Money, MoneyField, moneyText, Pager, PatientName, RecordHistory, Section, SelectField,
+  AlertList, ConfirmDialog, EmptyState, Field, Money, MoneyField, moneyText, Pager, PatientName, ReadError, RecordHistory, Section, SelectField,
   TextAreaField, TextField, useDiscreet, usePaged, useShownName, VisitRow,
 } from "./parts";
 import { PatientDialog } from "./PatientDialog";
@@ -80,7 +80,7 @@ export function PatientCardView({ patientId, onBack }: { patientId: string; onBa
     return (
       <div className="stack pcard">
         {back}
-        <ErrorLine error={card.error.message} retry={reload} />
+        <ReadError error={card.error.message} retry={reload} />
       </div>
     );
   }
@@ -241,7 +241,7 @@ function CardBody({ card, today, back, onBack }: { card: PatientCard; today: str
 
       <div className="pcard-columns">
         <Section title="מה דורש אותי" aside={card.alerts.length > 0 ? <span className="chip chip-warn">{card.alerts.length}</span> : undefined}>
-          <AlertList alerts={card.alerts} onVisit={openAlertVisit} onTask={finishAlertTask} empty="אין כרגע שום דבר שמחכה בכרטיס הזה." />
+          <AlertList alerts={card.alerts} onVisit={openAlertVisit} onTask={finishAlertTask} onCard={p.id} empty="אין כרגע שום דבר שמחכה בכרטיס הזה." />
         </Section>
         <CaseBox patient={p} link={card.case} />
       </div>
@@ -411,6 +411,7 @@ function CaseBox({ patient, link }: { patient: Patient; link: CaseLink | null })
 function CasePicker({ patientId, onClose }: { patientId: string; onClose: () => void }) {
   const { notify } = useApp();
   const choices = useCaseChoices();
+  const reload = useReloadClinic();
   const linkCase = useLinkCase();
   const shown = useShownName();
   const [error, setError] = useState<string | null>(null);
@@ -433,7 +434,7 @@ function CasePicker({ patientId, onClose }: { patientId: string; onClose: () => 
   return (
     <Dialog narrow title="לקשר לתיק קיים" subtitle="תיק מקושר למטופל אחד בלבד. תיקים שבסל המחזור לא מוצעים." onClose={onClose}
       footer={<><span className="grow" /><button type="button" className="btn" onClick={onClose}>ביטול</button></>}>
-      {choices.error && !choices.data ? <ErrorLine error={choices.error.message} />
+      {choices.error && !choices.data ? <ReadError error={choices.error.message} retry={reload} />
         : !choices.data ? <Skeleton lines={3} label="טוען את התיקים" />
         : choices.data.length === 0 ? <p className="muted clinic-quiet" role="status">אין כרגע תיק שאפשר לקשר: כל התיקים כבר מקושרים למטופלים, או שעוד לא נפתח תיק.</p>
         : (
@@ -856,7 +857,7 @@ function TaskDialog({ patientId, task, onClose }: { patientId: string; task?: Cl
           onChange={(title) => set({ title })} />
         <div className="clinic-form-row">
           <SelectField<TaskKind> id="task-kind" label="סוג" value={form.kind} onChange={(kind) => set({ kind })}
-            options={TASK_KINDS.map((k) => ({ value: k, label: TASK_KIND_LABEL[k] }))} />
+            options={optionsWith(TASK_KINDS, TASK_KIND_LABEL, form.kind)} />
           <Field id="task-due" label="עד מתי (לא חובה)"><DateField id="task-due" value={form.due} onChange={(due) => set({ due })} /></Field>
         </div>
         <TextAreaField id="task-note" label="הערה (לא חובה)" value={form.note} rows={2} maxLength={4000} onChange={(note) => set({ note })} />
@@ -931,8 +932,18 @@ function EraseDialog({ patient, onClose, onErased }: { patient: Patient; onClose
       </>}>
       <div className="stack">
         <p>מחיקה מסירה את הכרטיס של <PatientName name={patient.name} strong /> וכל מה שנרשם בו, ואי אפשר לבטל אותה.</p>
+        <dl className="pcard-erase-what">
+          <div>
+            <dt>מה נמחק</dt>
+            <dd>הכרטיס ופרטי הקשר, הפגישות, סיכומי הפגישות, החיובים, התקבולים, המעקבים, וההיסטוריה של כל אלה.</dd>
+          </div>
+          <div>
+            <dt>מה נשאר</dt>
+            <dd>מספרים בלבד, בלי שם, בלי תאריך ובלי טקסט: כמה פגישות היו, כמה חויב וכמה התקבל בכל חודש. כך הסיכום השנתי ויומן ההכנסות של שנים שעברו לא משתנים. כרטיס שלא קרה בו כלום לא משאיר אחריו דבר.</dd>
+          </div>
+        </dl>
         <p className="muted">
-          אפשר למחוק רק כרטיס שעוד לא נרשם בו דבר, או כרטיס שתקופת השמירה שלו עברה. כרטיס שהיו בו פגישות, סיכומים או תשלומים סוגרים, ולא מוחקים.
+          אפשר למחוק רק כרטיס שעוד לא קרה בו דבר, או כרטיס שתקופת השמירה שלו עברה. כרטיס שהיו בו פגישות שסומנו, סיכומים או תשלומים סוגרים, ולא מוחקים.
           {patient.case_id !== null ? " תיק האבחון המקושר לא נמחק יחד עם הכרטיס." : ""}
         </p>
         <TextField id="erase-name" label="כדי למחוק, יש להקליד את שם הילד או הילדה כפי שהוא בכרטיס" value={typed} maxLength={120} autoFocus problem={problem}

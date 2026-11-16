@@ -2,10 +2,18 @@
 //! and the patient cards. Nothing here belongs to a case, so everything is sealed with the
 //! settings key. The vault knows nothing of the clinic's types: the contents are the
 //! caller's own JSON. Only `kind`, `day` and `patient_id` stay in the clear, to index by.
+//!
+//! The clear columns that say what a row is are bound into its seal (D-177): a record's
+//! `kind` and `patient_id`, a history row's `record_id`, `patient_id` and `action`. A row
+//! whose column was changed in the file does not open. The lists ([`Vault::clinic_kind`],
+//! [`Vault::clinic_range`], [`Vault::clinic_patients`]) leave such a row out, and
+//! [`Vault::clinic_unreadable`] counts them (D-178); reading one record, one patient's
+//! records or a history fails instead.
 
+use dv_domain::InputKind;
 use rusqlite::{params, Connection, OptionalExtension};
 
-use super::{aad, now, Vault};
+use super::{aad, enum_str, now, Vault};
 use crate::audit::AuditEvent;
 use crate::crypto::{open_string, random_id, seal_str, Key32};
 use crate::VaultError;
@@ -29,15 +37,46 @@ pub struct StoredClinicHistory {
     pub json: String,
 }
 
-const KINDS: [&str; 6] = ["visit", "note", "payment", "charge", "task", "settings"];
+const KINDS: [&str; 7] = [
+    "visit", "note", "payment", "charge", "task", "settings", "tally",
+];
 const ACTIONS: [&str; 4] = ["created", "changed", "voided", "deleted"];
 /// What may be removed one record at a time. A payment and a charge are voided, never removed
 /// (D-172), and the settings record is only replaced: those go only with their patient.
 const REMOVABLE: [&str; 3] = ["visit", "note", "task"];
 /// The one settings record has a fixed id.
 const SETTINGS_ID: &str = "settings";
+/// The anonymous tally of the cards that were erased (D-179): one record with a fixed id,
+/// written only by [`Vault::erase_clinic_patient`], in the transaction that removes the
+/// records it stands for.
+const TALLY: &str = "tally";
+const TALLY_ID: &str = "tally";
 
 type RecordRow = (String, String, Option<String>, i64, i64, Vec<u8>);
+type HistoryRow = (String, Option<String>, i64, String, Vec<u8>);
+/// A record to write: its id (`None`: a new one), its patient, its day and its JSON.
+pub type ClinicPut = (Option<String>, Option<String>, i64, String);
+
+/// What a record's seal is bound to besides its id: its kind and its patient (D-177).
+fn record_aad(id: &str, kind: &str, patient_id: Option<&str>) -> Vec<u8> {
+    aad(
+        "clinic_records",
+        "data",
+        id,
+        &format!("{kind}|{}", patient_id.unwrap_or_default()),
+    )
+}
+
+/// What a history row's seal is bound to besides its id: the record it belongs to, the
+/// patient and what was done (D-177).
+fn history_aad(id: &str, record_id: &str, patient_id: Option<&str>, action: &str) -> Vec<u8> {
+    aad(
+        "clinic_history",
+        "data",
+        id,
+        &format!("{record_id}|{}|{action}", patient_id.unwrap_or_default()),
+    )
+}
 
 fn check_kind(kind: &str) -> Result<(), VaultError> {
     if KINDS.contains(&kind) {
@@ -65,7 +104,7 @@ fn history_row(
     json: &str,
 ) -> Result<(), VaultError> {
     let id = random_id()?;
-    let sealed = seal_str(key, &aad("clinic_history", "data", &id, ""), json)?;
+    let sealed = seal_str(key, &history_aad(&id, record_id, patient_id, action), json)?;
     conn.execute(
         "INSERT INTO clinic_history (id, record_id, patient_id, saved_at, action, data_enc)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -76,7 +115,7 @@ fn history_row(
 
 fn open_record(key: &Key32, row: RecordRow) -> Result<StoredClinicRecord, VaultError> {
     let (id, kind, patient_id, day, updated_at, sealed) = row;
-    let json = open_string(key, &aad("clinic_records", "data", &id, ""), &sealed)?;
+    let json = open_string(key, &record_aad(&id, &kind, patient_id.as_deref()), &sealed)?;
     Ok(StoredClinicRecord {
         id,
         kind,
@@ -98,6 +137,71 @@ fn record_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RecordRow> {
         r.get(4)?,
         r.get(5)?,
     ))
+}
+
+/// Writes one record inside a transaction, with its history row when asked. Returns its id.
+fn put_row(
+    tx: &Connection,
+    key: &Key32,
+    kind: &str,
+    row: &ClinicPut,
+    history: Option<&str>,
+) -> Result<String, VaultError> {
+    let (id, patient_id, day, json) = row;
+    let patient_id = patient_id.as_deref();
+    let existing: Option<String> = match id {
+        Some(id) => tx
+            .query_row("SELECT kind FROM clinic_records WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .optional()?,
+        None => None,
+    };
+    let record_id = match (id, existing) {
+        (Some(id), Some(old_kind)) => {
+            if old_kind != kind {
+                return Err(VaultError::Refused(
+                    "a clinic record cannot change its kind".to_owned(),
+                ));
+            }
+            id.clone()
+        }
+        (Some(id), None) => {
+            if kind != "settings" || id != SETTINGS_ID {
+                return Err(VaultError::NotFound);
+            }
+            id.clone()
+        }
+        (None, _) if kind == "settings" => {
+            // The settings record is one fixed row: saving it again replaces it.
+            let present: Option<String> = tx
+                .query_row(
+                    "SELECT kind FROM clinic_records WHERE id = ?1",
+                    [SETTINGS_ID],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if present.is_some_and(|k| k != "settings") {
+                return Err(VaultError::Refused(
+                    "a clinic record cannot change its kind".to_owned(),
+                ));
+            }
+            SETTINGS_ID.to_owned()
+        }
+        (None, _) => random_id()?,
+    };
+    let sealed = seal_str(key, &record_aad(&record_id, kind, patient_id), json)?;
+    tx.execute(
+        "INSERT INTO clinic_records (id, kind, patient_id, day, updated_at, data_enc)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(id) DO UPDATE SET patient_id = ?3, day = ?4, updated_at = ?5,
+            data_enc = ?6",
+        params![record_id, kind, patient_id, day, now(), sealed],
+    )?;
+    if let Some(action) = history {
+        history_row(tx, key, &record_id, patient_id, action, json)?;
+    }
+    Ok(record_id)
 }
 
 impl Vault {
@@ -125,76 +229,73 @@ impl Vault {
     /// series). A row with no id is new; a given id replaces that record (it must exist, and
     /// be of this kind), except the settings record, which is created on first save.
     /// With `history` = Some(action), each row's JSON is also written to the history, in the
-    /// same transaction.
+    /// same transaction. The tally of erased cards is never written from here.
     pub fn clinic_put_many(
         &mut self,
         kind: &str,
-        rows: &[(Option<String>, Option<String>, i64, String)],
+        rows: &[ClinicPut],
         history: Option<&str>,
     ) -> Result<Vec<String>, VaultError> {
         check_kind(kind)?;
         check_action(history)?;
+        if kind == TALLY {
+            return Err(VaultError::Refused(
+                "the clinic tally is written only when a patient is erased".to_owned(),
+            ));
+        }
         let key = &self.keys.settings;
         let tx = self.main.unchecked_transaction()?;
         let mut ids = Vec::with_capacity(rows.len());
-        for (id, patient_id, day, json) in rows {
-            let patient_id = patient_id.as_deref();
-            let existing: Option<String> = match id {
-                Some(id) => tx
-                    .query_row("SELECT kind FROM clinic_records WHERE id = ?1", [id], |r| {
-                        r.get(0)
-                    })
-                    .optional()?,
-                None => None,
-            };
-            let record_id = match (id, existing) {
-                (Some(id), Some(old_kind)) => {
-                    if old_kind != kind {
-                        return Err(VaultError::Refused(
-                            "a clinic record cannot change its kind".to_owned(),
-                        ));
-                    }
-                    id.clone()
-                }
-                (Some(id), None) => {
-                    if kind != "settings" || id != SETTINGS_ID {
-                        return Err(VaultError::NotFound);
-                    }
-                    id.clone()
-                }
-                (None, _) if kind == "settings" => {
-                    // The settings record is one fixed row: saving it again replaces it.
-                    let present: Option<String> = tx
-                        .query_row(
-                            "SELECT kind FROM clinic_records WHERE id = ?1",
-                            [SETTINGS_ID],
-                            |r| r.get(0),
-                        )
-                        .optional()?;
-                    if present.is_some_and(|k| k != "settings") {
-                        return Err(VaultError::Refused(
-                            "a clinic record cannot change its kind".to_owned(),
-                        ));
-                    }
-                    SETTINGS_ID.to_owned()
-                }
-                (None, _) => random_id()?,
-            };
-            let sealed = seal_str(key, &aad("clinic_records", "data", &record_id, ""), json)?;
-            tx.execute(
-                "INSERT INTO clinic_records (id, kind, patient_id, day, updated_at, data_enc)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                 ON CONFLICT(id) DO UPDATE SET patient_id = ?3, day = ?4, updated_at = ?5,
-                    data_enc = ?6",
-                params![record_id, kind, patient_id, day, now(), sealed],
-            )?;
-            if let Some(action) = history {
-                history_row(&tx, key, &record_id, patient_id, action, json)?;
-            }
-            ids.push(record_id);
+        for row in rows {
+            ids.push(put_row(&tx, key, kind, row, history)?);
         }
         tx.commit()?;
         Ok(ids)
+    }
+
+    /// A session note's formal record goes into a case as a material, and the note is saved
+    /// with the material's id, in ONE transaction (D-177): either both are written or
+    /// neither, so asking again after a failure never adds the material twice. `input_id` is
+    /// the caller's new random id for the material; `note` is the note as it should be kept
+    /// (its JSON already names `input_id`), written with a `changed` history row.
+    pub fn clinic_note_into_case(
+        &mut self,
+        case_id: &str,
+        input_id: &str,
+        kind: InputKind,
+        title: &str,
+        content: &str,
+        note: &ClinicPut,
+    ) -> Result<(), VaultError> {
+        if note.0.is_none() {
+            return Err(VaultError::NotFound);
+        }
+        let case_key = self.case_key(case_id)?;
+        let key = &self.keys.settings;
+        let tx = self.main.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO inputs (id, case_id, kind, created_at, title_enc, content_enc)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                input_id,
+                case_id,
+                enum_str(&kind)?,
+                now(),
+                seal_str(&case_key, &aad("inputs", "title", input_id, case_id), title)?,
+                seal_str(
+                    &case_key,
+                    &aad("inputs", "content", input_id, case_id),
+                    content
+                )?
+            ],
+        )?;
+        tx.execute(
+            "UPDATE cases SET updated_at = ?1 WHERE id = ?2",
+            params![now(), case_id],
+        )?;
+        put_row(&tx, key, "note", note, Some("changed"))?;
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn clinic_get(&self, id: &str) -> Result<Option<StoredClinicRecord>, VaultError> {
@@ -209,23 +310,71 @@ impl Vault {
         row.map(|r| open_record(&self.keys.settings, r)).transpose()
     }
 
+    fn clinic_rows(
+        &self,
+        sql: &str,
+        args: &[&dyn rusqlite::ToSql],
+    ) -> Result<Vec<RecordRow>, VaultError> {
+        let mut stmt = self.main.prepare(sql)?;
+        let rows: Vec<RecordRow> = stmt
+            .query_map(args, record_row)?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    /// Every row asked for, or an error: for a read that must not go on with a row missing.
     fn clinic_query(
         &self,
         sql: &str,
         args: &[&dyn rusqlite::ToSql],
     ) -> Result<Vec<StoredClinicRecord>, VaultError> {
-        let mut stmt = self.main.prepare(sql)?;
-        let rows: Vec<RecordRow> = stmt
-            .query_map(args, record_row)?
-            .collect::<Result<_, _>>()?;
-        rows.into_iter()
+        self.clinic_rows(sql, args)?
+            .into_iter()
             .map(|r| open_record(&self.keys.settings, r))
             .collect()
     }
 
-    /// Every record of a kind, by day then id.
+    /// The rows that open; one that does not is left out (and counted by
+    /// [`Vault::clinic_unreadable`]), so one bad row does not take a whole screen with it.
+    fn clinic_list(
+        &self,
+        sql: &str,
+        args: &[&dyn rusqlite::ToSql],
+    ) -> Result<Vec<StoredClinicRecord>, VaultError> {
+        Ok(self
+            .clinic_rows(sql, args)?
+            .into_iter()
+            .filter_map(|r| open_record(&self.keys.settings, r).ok())
+            .collect())
+    }
+
+    /// How many clinic rows (records and patient cards) do not open: a row damaged on disk,
+    /// or one whose clear columns were changed (D-177, D-178). A number only.
+    pub fn clinic_unreadable(&self) -> Result<u32, VaultError> {
+        let key = &self.keys.settings;
+        let records = self
+            .clinic_rows(&format!("SELECT {RECORD_COLUMNS} FROM clinic_records"), &[])?
+            .into_iter()
+            .filter(|r| open_record(key, r.clone()).is_err())
+            .count();
+        let mut stmt = self
+            .identity
+            .prepare("SELECT id, data_enc FROM clinic_patients")?;
+        let cards: Vec<(String, Vec<u8>)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        let cards = cards
+            .into_iter()
+            .filter(|(id, sealed)| {
+                open_string(key, &aad("clinic_patients", "data", id, ""), sealed).is_err()
+            })
+            .count();
+        Ok(u32::try_from(records.saturating_add(cards)).unwrap_or(u32::MAX))
+    }
+
+    /// Every readable record of a kind, by day then id.
     pub fn clinic_kind(&self, kind: &str) -> Result<Vec<StoredClinicRecord>, VaultError> {
-        self.clinic_query(
+        self.clinic_list(
             &format!(
                 "SELECT {RECORD_COLUMNS} FROM clinic_records WHERE kind = ?1 ORDER BY day, id"
             ),
@@ -233,14 +382,14 @@ impl Vault {
         )
     }
 
-    /// The records of a kind from `from_day` to `to_day`, both included.
+    /// The readable records of a kind from `from_day` to `to_day`, both included.
     pub fn clinic_range(
         &self,
         kind: &str,
         from_day: i64,
         to_day: i64,
     ) -> Result<Vec<StoredClinicRecord>, VaultError> {
-        self.clinic_query(
+        self.clinic_list(
             &format!(
                 "SELECT {RECORD_COLUMNS} FROM clinic_records
                  WHERE kind = ?1 AND day >= ?2 AND day <= ?3 ORDER BY day, id"
@@ -249,7 +398,9 @@ impl Vault {
         )
     }
 
-    /// Every record of a patient, of every kind, by day then id.
+    /// Every record of a patient, of every kind, by day then id. One that does not open is
+    /// an error: what is decided from a patient's records (an erase, what the family owes)
+    /// is never decided with a row missing.
     pub fn clinic_of_patient(
         &self,
         patient_id: &str,
@@ -311,19 +462,19 @@ impl Vault {
     /// A record's earlier states, oldest first.
     pub fn clinic_history(&self, record_id: &str) -> Result<Vec<StoredClinicHistory>, VaultError> {
         let mut stmt = self.main.prepare(
-            "SELECT id, saved_at, action, data_enc FROM clinic_history
+            "SELECT id, patient_id, saved_at, action, data_enc FROM clinic_history
              WHERE record_id = ?1 ORDER BY saved_at, rowid",
         )?;
-        let rows: Vec<(String, i64, String, Vec<u8>)> = stmt
+        let rows: Vec<HistoryRow> = stmt
             .query_map([record_id], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
             })?
             .collect::<Result<_, _>>()?;
         rows.into_iter()
-            .map(|(id, saved_at, action, sealed)| {
+            .map(|(id, patient_id, saved_at, action, sealed)| {
                 let json = open_string(
                     &self.keys.settings,
-                    &aad("clinic_history", "data", &id, ""),
+                    &history_aad(&id, record_id, patient_id.as_deref(), &action),
                     &sealed,
                 )?;
                 Ok(StoredClinicHistory {
@@ -346,7 +497,8 @@ impl Vault {
         Ok(rows)
     }
 
-    /// Every patient card as `(id, json)`, oldest first.
+    /// Every patient card that opens as `(id, json)`, oldest first. One that does not is left
+    /// out and counted by [`Vault::clinic_unreadable`].
     pub fn clinic_patients(&self) -> Result<Vec<(String, String)>, VaultError> {
         let mut stmt = self
             .identity
@@ -354,16 +506,38 @@ impl Vault {
         let rows: Vec<(String, Vec<u8>)> = stmt
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<Result<_, _>>()?;
-        rows.into_iter()
-            .map(|(id, sealed)| {
+        Ok(rows
+            .into_iter()
+            .filter_map(|(id, sealed)| {
                 let json = open_string(
                     &self.keys.settings,
                     &aad("clinic_patients", "data", &id, ""),
                     &sealed,
-                )?;
-                Ok((id, json))
+                )
+                .ok()?;
+                Some((id, json))
             })
-            .collect()
+            .collect())
+    }
+
+    /// How many cards that were erased had been opened in each month, as the caller's own
+    /// JSON (D-179); `None`: no card was erased yet.
+    pub fn clinic_erased_cards(&self) -> Result<Option<String>, VaultError> {
+        let sealed: Option<Vec<u8>> = self
+            .identity
+            .query_row("SELECT data_enc FROM clinic_erased WHERE id = 1", [], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        sealed
+            .map(|s| {
+                open_string(
+                    &self.keys.settings,
+                    &aad("clinic_erased", "data", "1", ""),
+                    &s,
+                )
+            })
+            .transpose()
     }
 
     pub fn clinic_patient(&self, id: &str) -> Result<Option<String>, VaultError> {
@@ -419,9 +593,28 @@ impl Vault {
         Ok(id)
     }
 
-    /// Erase a patient: the card, every record and every history row of theirs, out of both
-    /// write-ahead logs. One audit event with the number of records (a number only).
-    pub fn erase_clinic_patient(&mut self, id: &str) -> Result<(), VaultError> {
+    /// Erase a patient: the card, every record of theirs and the history of those records,
+    /// out of both write-ahead logs. One audit event with the number of records (a number
+    /// only).
+    ///
+    /// What the erased records counted for in the summaries is not lost (D-179): `tally` is
+    /// the whole anonymous tally of the main database with these records folded in, and
+    /// `cards` the count of erased cards by the month they were opened in; both are the
+    /// caller's JSON and hold no id, name or text. Each is written in the same transaction
+    /// as the rows it stands for: the tally with the records (main database), the count
+    /// with the card (identity database). The two databases cannot share one transaction;
+    /// if the second fails, the card is left with no records, counts for itself as before,
+    /// and asking again finishes the erase without counting anything twice.
+    ///
+    /// Only history that belongs to the records being erased goes: the history of this
+    /// patient's records, and the rows left by this patient's records that were removed
+    /// earlier. A row of a record that now belongs to another card is never touched.
+    pub fn erase_clinic_patient(
+        &mut self,
+        id: &str,
+        tally: Option<&str>,
+        cards: Option<&str>,
+    ) -> Result<(), VaultError> {
         let known: Option<String> = self
             .identity
             .query_row("SELECT id FROM clinic_patients WHERE id = ?1", [id], |r| {
@@ -431,19 +624,38 @@ impl Vault {
         if known.is_none() {
             return Err(VaultError::NotFound);
         }
+        let key = &self.keys.settings;
         // The records first: if the card's removal fails, the erase can be asked again.
         let tx = self.main.unchecked_transaction()?;
-        // The history of their records first, by record: a row written while the record still
-        // belonged to another card carries that card's id, and would be left behind.
         tx.execute(
-            "DELETE FROM clinic_history WHERE patient_id = ?1
-             OR record_id IN (SELECT id FROM clinic_records WHERE patient_id = ?1)",
+            "DELETE FROM clinic_history
+             WHERE record_id IN (SELECT id FROM clinic_records WHERE patient_id = ?1)
+                OR (patient_id = ?1 AND record_id NOT IN (SELECT id FROM clinic_records))",
             [id],
         )?;
         let records = tx.execute("DELETE FROM clinic_records WHERE patient_id = ?1", [id])?;
+        if let Some(json) = tally {
+            let sealed = seal_str(key, &record_aad(TALLY_ID, TALLY, None), json)?;
+            tx.execute(
+                "INSERT INTO clinic_records (id, kind, patient_id, day, updated_at, data_enc)
+                 VALUES (?1, ?2, NULL, 0, ?3, ?4)
+                 ON CONFLICT(id) DO UPDATE SET updated_at = ?3, data_enc = ?4
+                 WHERE kind = ?2",
+                params![TALLY_ID, TALLY, now(), sealed],
+            )?;
+        }
         tx.commit()?;
-        self.identity
-            .execute("DELETE FROM clinic_patients WHERE id = ?1", [id])?;
+        let tx = self.identity.unchecked_transaction()?;
+        tx.execute("DELETE FROM clinic_patients WHERE id = ?1", [id])?;
+        if let Some(json) = cards {
+            let sealed = seal_str(key, &aad("clinic_erased", "data", "1", ""), json)?;
+            tx.execute(
+                "INSERT INTO clinic_erased (id, updated_at, data_enc) VALUES (1, ?1, ?2)
+                 ON CONFLICT(id) DO UPDATE SET updated_at = ?1, data_enc = ?2",
+                params![now(), sealed],
+            )?;
+        }
+        tx.commit()?;
         self.main
             .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
         self.identity

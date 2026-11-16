@@ -1,6 +1,11 @@
 // Scheduling a visit and editing one: who, what kind, when, where, what it costs; a repeat for
 // a new one; "only this one" or "this and the following" for a visit of a series; what
 // happened in it; removing one that is still planned; and every saved state of it.
+//
+// One dialog from the first moment to the last: while the settings and the patients are read
+// it shows the shape of the form, then the form, then (when the saved visit overlaps another)
+// the notice about it. The frame is the same element throughout, so the focus that moved into
+// it stays in it, and goes back to whatever opened it when it closes.
 import { useState } from "react";
 import { useApp } from "../../App";
 import { DateField } from "../../components/DateField";
@@ -14,11 +19,14 @@ import type { Visit } from "../../ipc/generated/Visit";
 import type { VisitKind } from "../../ipc/generated/VisitKind";
 import type { VisitStatus } from "../../ipc/generated/VisitStatus";
 import type { VisitView } from "../../ipc/generated/VisitView";
-import { useClinicSettings, useDeleteVisit, usePatients, useSaveVisit, useToday } from "./clinicData";
-import { addDays, formatDate, formatDateLong, formatTime, parseMoney, parseTime, VISIT_KIND_LABEL, VISIT_KINDS, VISIT_STATUS_LABEL } from "./format";
+import { useClinicSettings, useDeleteVisit, usePatients, useReloadClinic, useSaveVisit, useToday } from "./clinicData";
 import {
-  CheckField, ConfirmDialog, Field, MoneyField, moneyProblem, moneyText, PatientPicker, RecordHistory, SelectField, TextAreaField, TextField,
-  TimeField,
+  addDays, formatDate, formatDateLong, formatTime, leftAloneWords, optionsWith, parseMoney, parseTime, VISIT_KIND_LABEL, VISIT_KINDS,
+  VISIT_STATUS_LABEL, VISIT_STATUSES,
+} from "./format";
+import {
+  CheckField, ConfirmDialog, Field, MoneyField, moneyProblem, moneyText, PatientPicker, ReadError, RecordHistory, SelectField, TextAreaField,
+  TextField, TimeField,
 } from "./parts";
 
 /** What is already known when a new visit is opened (from a patient's card, from an hour of the calendar). */
@@ -37,7 +45,6 @@ export interface VisitDialogProps {
   onSaved?: (saved: SavedVisits) => void;
 }
 
-const STATUSES: VisitStatus[] = ["planned", "held", "cancelled", "no_show"];
 const EVERY: { value: string; label: string }[] = [
   { value: "1", label: "כל שבוע" }, { value: "2", label: "כל שבועיים" }, { value: "3", label: "כל 3 שבועות" }, { value: "4", label: "כל 4 שבועות" },
 ];
@@ -67,49 +74,42 @@ interface Form {
   scope: Scope;
 }
 
-export function VisitDialog(props: VisitDialogProps) {
-  const now = useToday();
-  const settings = useClinicSettings();
-  const patients = usePatients(now.date);
-  const title = props.view ? "פרטי הפגישה" : "פגישה חדשה";
-  if (!settings.data || !patients.data) {
-    return (
-      <Dialog title={title} onClose={props.onClose}>
-        {settings.error || patients.error
-          ? <ErrorLine error={(settings.error ?? patients.error)?.message ?? null} />
-          : <Skeleton lines={5} label="טוען את פרטי הפגישה" />}
-      </Dialog>
-    );
+/** The form as it opens: the visit as it is kept, or a new one with what is already known. */
+function firstForm(props: VisitDialogProps, settings: ClinicSettings, patients: PatientRow[], today: string): Form {
+  const existing = props.view?.visit;
+  if (existing) {
+    return {
+      kind: existing.kind, patientId: existing.patient_id, title: existing.title, date: existing.date, start: formatTime(existing.start),
+      minutes: String(existing.minutes), place: existing.place, fee: moneyText(existing.fee), note: existing.note, status: existing.status,
+      statusNote: existing.status_note, chargeMissed: existing.charge_missed, repeat: false, every: "1", count: "8", scope: "one",
+    };
   }
-  return <VisitForm {...props} title={title} settings={settings.data} patients={patients.data} today={now.date} />;
+  const kind = props.start?.kind ?? "assessment";
+  const patientId = props.start?.patientId ?? null;
+  const d = defaultsFor(settings, kind, patients.find((r) => r.patient.id === patientId));
+  return {
+    kind, patientId, title: "", date: props.start?.date ?? today, start: formatTime(props.start?.start ?? settings.day_start),
+    minutes: String(d.minutes), place: settings.places[0] ?? "", fee: moneyText(d.fee), note: "", status: "planned", statusNote: "",
+    chargeMissed: false, repeat: false, every: "1", count: "8", scope: "one",
+  };
 }
 
-function VisitForm(props: VisitDialogProps & { title: string; settings: ClinicSettings; patients: PatientRow[]; today: string }) {
-  const { view, settings, patients, onClose } = props;
+export function VisitDialog(props: VisitDialogProps) {
+  const { view, onClose } = props;
+  const now = useToday();
+  const settingsRead = useClinicSettings();
+  const patientsRead = usePatients(now.date);
+  const reload = useReloadClinic();
   const existing = view?.visit;
   const { notify } = useApp();
   const save = useSaveVisit();
   const remove = useDeleteVisit();
-  const patientOf = (id: string | null) => patients.find((r) => r.patient.id === id);
+  const title = existing ? "פרטי הפגישה" : "פגישה חדשה";
 
-  const [first] = useState<Form>(() => {
-    if (existing) {
-      return {
-        kind: existing.kind, patientId: existing.patient_id, title: existing.title, date: existing.date, start: formatTime(existing.start),
-        minutes: String(existing.minutes), place: existing.place, fee: moneyText(existing.fee), note: existing.note, status: existing.status,
-        statusNote: existing.status_note, chargeMissed: existing.charge_missed, repeat: false, every: "1", count: "8", scope: "one",
-      };
-    }
-    const kind = props.start?.kind ?? "assessment";
-    const patientId = props.start?.patientId ?? null;
-    const d = defaultsFor(settings, kind, patientOf(patientId));
-    return {
-      kind, patientId, title: "", date: props.start?.date ?? props.today, start: formatTime(props.start?.start ?? settings.day_start),
-      minutes: String(d.minutes), place: settings.places[0] ?? "", fee: moneyText(d.fee), note: "", status: "planned", statusNote: "",
-      chargeMissed: false, repeat: false, every: "1", count: "8", scope: "one",
-    };
-  });
-  const [form, setForm] = useState(first);
+  // The form starts once, when what it starts from was read; a later answer about the
+  // settings or the patients never starts it over.
+  const [opened, setOpened] = useState<Form | null>(null);
+  const [draft, setForm] = useState<Form | null>(null);
   // What she typed herself is hers: a default never overwrites it.
   const [typed, setTyped] = useState({ minutes: false, fee: false });
   const [error, setError] = useState<string | null>(null);
@@ -117,7 +117,30 @@ function VisitForm(props: VisitDialogProps & { title: string; settings: ClinicSe
   const [confirmDelete, setConfirmDelete] = useState(false);
   /** Set once the visit was saved and overlaps another: the dialog stays to say so. */
   const [overlapping, setOverlapping] = useState<SavedVisits | null>(null);
-  const set = (patch: Partial<Form>) => setForm((f) => ({ ...f, ...patch }));
+
+  if (opened === null && settingsRead.data && patientsRead.data) {
+    const start = firstForm(props, settingsRead.data, patientsRead.data, now.date);
+    setOpened(start);
+    setForm(start);
+  }
+  if (!settingsRead.data || !patientsRead.data || opened === null || draft === null) {
+    const failed = settingsRead.error ?? patientsRead.error;
+    return (
+      <Dialog title={title} onClose={onClose}>
+        {failed && (!settingsRead.data || !patientsRead.data)
+          ? <ReadError error={failed.message} retry={reload} />
+          : <Skeleton lines={5} label="טוען את פרטי הפגישה" />}
+      </Dialog>
+    );
+  }
+  // From here on everything is there; the names below keep that for the functions too.
+  const settings = settingsRead.data;
+  const patients = patientsRead.data;
+  const first = opened;
+  const form = draft;
+
+  const patientOf = (id: string | null) => patients.find((r) => r.patient.id === id);
+  const set = (patch: Partial<Form>) => setForm((f) => (f === null ? f : { ...f, ...patch }));
 
   /** The usual length and fee follow the kind and the family, for a new visit only. */
   function withDefaults(kind: VisitKind, patientId: string | null): Partial<Form> {
@@ -179,7 +202,10 @@ function VisitForm(props: VisitDialogProps & { title: string; settings: ClinicSe
         scope: inSeries ? form.scope : "one",
       });
       props.onSaved?.(saved);
-      notify(saved.visits.length > 1 ? `נשמרו ${saved.visits.length} פגישות` : "הפגישה נשמרה");
+      // A later visit of the series that has a note, or was already marked, stayed as it was
+      // (D-176): she is told how many, so she does not look for them at the new hour.
+      const alone = leftAloneWords(saved.left_alone);
+      notify(`${saved.visits.length > 1 ? `נשמרו ${saved.visits.length} פגישות` : "הפגישה נשמרה"}${alone === "" ? "" : `. ${alone}`}`);
       // Saved anyway: her calendar, her call. But she is told before the dialog goes.
       if (saved.overlapping > 0) setOverlapping(saved);
       else onClose();
@@ -212,7 +238,7 @@ function VisitForm(props: VisitDialogProps & { title: string; settings: ClinicSe
   }
 
   return (
-    <Dialog title={props.title} dirty={dirty} onClose={onClose}
+    <Dialog title={title} dirty={dirty} onClose={onClose}
       footer={<>
         {existing?.status === "planned" && (
           <button type="button" className="btn btn-danger-quiet" disabled={busy} onClick={() => setConfirmDelete(true)}>מחיקת הפגישה</button>
@@ -227,8 +253,10 @@ function VisitForm(props: VisitDialogProps & { title: string; settings: ClinicSe
         )}
 
         <SelectField id="visit-kind" label="סוג הפגישה" value={form.kind}
-          options={VISIT_KINDS.map((k) => ({ value: k, label: VISIT_KIND_LABEL[k] }))}
-          hint={block ? "זמן שמור הוא שלך בלבד: כתיבת דוחות, השתלמות, יום חופש. בלי מטופל ובלי מחיר." : undefined}
+          options={optionsWith(VISIT_KINDS, VISIT_KIND_LABEL, form.kind)}
+          hint={block ? "זמן שמור הוא שלך בלבד: כתיבת דוחות, השתלמות, יום חופש. בלי מטופל ובלי מחיר."
+            : form.kind === "unknown" ? "הסוג שנשמר לפגישה הזו לא מוכר לגרסה הזו של התוכנה. כדי לשמור שינוי צריך לבחור סוג מהרשימה, או לעדכן את התוכנה."
+            : undefined}
           onChange={(kind) => set({ kind, ...(kind === "block" ? { patientId: null } : {}), ...withDefaults(kind, kind === "block" ? null : form.patientId) })} />
 
         {!block && (
@@ -282,7 +310,7 @@ function VisitForm(props: VisitDialogProps & { title: string; settings: ClinicSe
               options={[{ value: "one", label: "רק הפגישה הזו" }, { value: "following", label: "זו וכל הבאות" }]} />
             <p className="hint">
               {form.scope === "following"
-                ? "הסוג, השעה, המשך, המקום, המחיר וההערה יעברו גם לפגישות הבאות שעוד מתוכננות, והן יזוזו באותו מספר ימים. מה שסומן בפגישה (התקיימה, בוטלה) נשאר שלה בלבד."
+                ? "הסוג, השעה, המשך, המקום, המחיר וההערה יעברו גם לפגישות הבאות שעוד מתוכננות, והן יזוזו באותו מספר ימים. פגישה שכבר יש לה סיכום, או שכבר סומנה (התקיימה, בוטלה, לא הגיעו), נשארת בדיוק כמו שהיא."
                 : "הפגישות האחרות בסדרה לא משתנות."}
             </p>
           </div>
@@ -292,7 +320,13 @@ function VisitForm(props: VisitDialogProps & { title: string; settings: ClinicSe
           <div className="field">
             <span className="label">מה קרה בפגישה</span>
             <Segmented label="מה קרה בפגישה" value={form.status} onChange={(status) => set({ status })}
-              options={STATUSES.map((s) => ({ value: s, label: VISIT_STATUS_LABEL[s] }))} />
+              options={VISIT_STATUSES.map((s) => ({ value: s, label: VISIT_STATUS_LABEL[s] }))} />
+            {form.status === "unknown" && (
+              <p className="hint">המצב שנשמר לפגישה הזו לא מוכר לגרסה הזו של התוכנה. כדי לשמור שינוי צריך לבחור מצב מהרשימה, או לעדכן את התוכנה.</p>
+            )}
+            {existing.status !== "planned" && form.status === "planned" && (
+              <p className="hint">חזרה ל"מתוכננת" היא תיקון של סימון שנעשה בטעות. היא אפשרית כל עוד לפגישה אין סיכום ולא נרשם עליה תשלום.</p>
+            )}
             {missed && (
               <>
                 <TextField id="visit-status-note" label={form.status === "cancelled" ? "למה בוטלה (לא חובה)" : "מה קרה (לא חובה)"} value={form.statusNote}

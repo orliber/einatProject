@@ -4,13 +4,13 @@
 import { useMemo, useState } from "react";
 import { useApp } from "../../App";
 import { ageOf } from "../../components/AgeField";
-import { ErrorLine, PlusIcon, Skeleton } from "../../components/ui";
+import { PlusIcon, Skeleton } from "../../components/ui";
 import { clinicApi } from "../../ipc/clinic";
 import type { Patient } from "../../ipc/generated/Patient";
 import type { PatientRow } from "../../ipc/generated/PatientRow";
 import { clinicKeys, useClinicSettings, useOptimistic, usePatients, useReloadClinic, useSavePatient, useToday } from "./clinicData";
 import { CONTACT_ROLE_LABEL, daysBetween, formatDate, isIsoDate } from "./format";
-import { ConfirmDialog, EmptyState, Pager, PatientName, usePaged, useShownName } from "./parts";
+import { ConfirmDialog, EmptyState, Pager, PatientName, ReadError, usePaged, useShownName } from "./parts";
 import { PatientDialog } from "./PatientDialog";
 import { VisitDialog } from "./VisitDialog";
 import "./WaitingTab.css";
@@ -69,7 +69,7 @@ export function WaitingTab() {
     (a) => clinicApi.savePatient({ ...a.patient, urgent: a.urgent }),
   );
 
-  if (rows.error && !rows.data) return <ErrorLine error={rows.error.message} retry={reload} />;
+  if (rows.error && !rows.data) return <ReadError error={rows.error.message} retry={reload} />;
   if (!rows.data) {
     return (
       <div className="stack waiting" aria-busy="true">

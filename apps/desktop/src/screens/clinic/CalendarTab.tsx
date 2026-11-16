@@ -7,7 +7,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { useApp } from "../../App";
 import { Segmented } from "../../components/Switch";
-import { Dialog, ErrorLine, PlusIcon, Skeleton } from "../../components/ui";
+import { Dialog, PlusIcon, Skeleton } from "../../components/ui";
 import { asUiError, ipc } from "../../ipc/client";
 import { clinicApi } from "../../ipc/clinic";
 import type { Scope } from "../../ipc/generated/Scope";
@@ -19,9 +19,12 @@ import {
   shiftAnchor, slotAt, STEP_MINUTES, suggestStart, viewRange, weekDays, type CalendarView, type Hours, type MoveBy,
 } from "./calendarLayout";
 import { useCalendar, useClinicSettings, useOptimistic, useReloadClinic, useToday } from "./clinicData";
-import { dayName, formatDateLong, formatDateShort, formatMonth, formatSpan, formatTime, monthOf, VISIT_KIND_LABEL, VISIT_STATUS_LABEL, visitTitle, weekday } from "./format";
+import {
+  dayName, formatDateLong, formatDateShort, formatMonth, formatSpan, formatTime, leftAloneWords, monthOf, VISIT_KIND_LABEL, VISIT_STATUS_LABEL,
+  visitTitle, weekday,
+} from "./format";
 import { NoteDialog } from "./NoteDialog";
-import { EmptyState, Pager, PatientName, Section, StatusBadge, usePaged, useShownName, VisitRow } from "./parts";
+import { EmptyState, Pager, PatientName, ReadError, Section, StatusBadge, usePaged, useShownName, VisitRow } from "./parts";
 import { VisitDialog, type VisitStart } from "./VisitDialog";
 import "./CalendarTab.css";
 
@@ -129,7 +132,12 @@ export function CalendarTab() {
   const move = useOptimistic<VisitView[], Move>(
     CALENDARS,
     (cached, m) => applyMove(cached, m.visit.id, m.to, m.scope),
-    (m) => clinicApi.saveVisit({ ...m.visit, date: m.to.date, start: m.to.start }, null, m.scope),
+    async (m) => {
+      const saved = await clinicApi.saveVisit({ ...m.visit, date: m.to.date, start: m.to.start }, null, m.scope);
+      // Later visits of the series that have a note, or were marked, stayed where they were (D-176).
+      const alone = leftAloneWords(saved.left_alone);
+      if (alone !== "") notify(`${alone}.`);
+    },
   );
 
   // After a move by the keyboard the visit is drawn elsewhere (another column is another
@@ -243,7 +251,7 @@ export function CalendarTab() {
   const error = calendar.error ?? settings.error;
   let body: ReactNode;
   if (error && (!views || !s)) {
-    body = <ErrorLine error={error.message} retry={reload} />;
+    body = <ReadError error={error.message} retry={reload} />;
   } else if (!views || !s) {
     body = <div aria-busy="true"><Skeleton card lines={6} label="טוען את היומן" /></div>;
   } else if (view === "month") {

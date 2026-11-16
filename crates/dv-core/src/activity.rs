@@ -304,6 +304,14 @@ fn describe(
             "סיכום פגישה מהקליניקה הועבר לחומרי התיק".to_owned(),
             false,
         ),
+        "clinic_unreadable" => (
+            "security",
+            match number("rows") {
+                1 => "רישום אחד בקליניקה לא נקרא, והוא לא מוצג במסכים".to_owned(),
+                n => format!("{n} רישומים בקליניקה לא נקראו, והם לא מוצגים במסכים"),
+            },
+            true,
+        ),
         other => ("security", other.to_owned(), false),
     })
 }
@@ -443,6 +451,7 @@ mod tests {
             "clinic_patient_added",
             "clinic_patient_erased",
             "clinic_note_to_case",
+            "clinic_unreadable",
         ] {
             let (_, text, _) = describe(event, &Value::Null, structure.as_ref()).unwrap();
             assert!(!text.contains('_'), "{event} → {text}");

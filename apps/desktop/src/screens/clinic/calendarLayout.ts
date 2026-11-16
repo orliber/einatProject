@@ -226,7 +226,8 @@ const sameSlot = (a: VisitView, b: VisitView) =>
 /**
  * The calendar's answer as it will be once a move is saved, for showing at once: the visit at
  * its new date and hour; with "this and the following", every later planned visit of its series
- * at the new hour and moved by the same number of days (the core's rule); the list by date and
+ * that has no session note, at the new hour and moved by the same number of days (the core's
+ * rule, D-176: a visit that has a note or was marked stays as it is); the list by date and
  * time again, and "overlaps" worked out anew for the days the answer holds.
  */
 export function applyMove(views: VisitView[], id: string, to: { date: string; start: number }, scope: Scope): VisitView[] {
@@ -234,7 +235,7 @@ export function applyMove(views: VisitView[], id: string, to: { date: string; st
   if (!target) return views;
   const days = (dayNumber(to.date) ?? 0) - (dayNumber(target.date) ?? 0);
   const follows = (v: VisitView) =>
-    scope === "following" && target.series_id !== null && v.visit.series_id === target.series_id && v.visit.status === "planned"
+    scope === "following" && target.series_id !== null && v.visit.series_id === target.series_id && v.visit.status === "planned" && !v.has_note
     && (v.visit.date > target.date || (v.visit.date === target.date && v.visit.start > target.start));
   const next = views.map((v) => {
     if (v.visit.id === id) return { ...v, visit: { ...v.visit, date: to.date, start: to.start } };

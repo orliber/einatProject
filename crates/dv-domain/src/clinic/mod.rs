@@ -10,7 +10,9 @@
 //! * an empty `id` on a record sent to be saved means "a new one";
 //! * every record that is stored reads a missing field as its default and ignores a field it
 //!   does not know (`#[serde(default)]`): a row written by an earlier version still loads after
-//!   a field is added, and one written by a later version loads in the version before (R7).
+//!   a field is added, and one written by a later version loads in the version before (R7);
+//! * every enum that is stored has an `Unknown` variant that any value it does not know reads
+//!   as (D-178). It is shown, and a record that carries it is never written back.
 //!
 //! Nothing here is ever sent to an AI. The one way clinic text reaches a case is
 //! [`ClinicRequest::NoteToCase`], which copies the formal record of a session (never the
@@ -43,6 +45,10 @@ pub enum PatientStatus {
     Active,
     /// The work with the family ended; kept for the record.
     Closed,
+    /// A value this version does not know (a row written by a later one, D-178). Shown as
+    /// it is, and never saved: a record that carries it is refused until she picks a value.
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
@@ -54,6 +60,10 @@ pub enum ContactRole {
     Guardian,
     #[default]
     Other,
+    /// A value this version does not know (a row written by a later one, D-178). Shown as
+    /// it is, and never saved: a record that carries it is refused until she picks a value.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Someone to reach about the patient: a parent, a guardian.
@@ -120,6 +130,10 @@ pub enum VisitKind {
     Other,
     /// Time she blocks for herself: writing reports, a day off. Never has a patient or a fee.
     Block,
+    /// A value this version does not know (a row written by a later one, D-178). Shown as
+    /// it is, and never saved: a record that carries it is refused until she picks a value.
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
@@ -131,6 +145,10 @@ pub enum VisitStatus {
     Held,
     Cancelled,
     NoShow,
+    /// A value this version does not know (a row written by a later one, D-178). Shown as
+    /// it is, and never saved: a record that carries it is refused until she picks a value.
+    #[serde(other)]
+    Unknown,
 }
 
 /// One entry in the calendar.
@@ -218,6 +236,10 @@ pub enum PayMethod {
     Card,
     #[default]
     Other,
+    /// A value this version does not know (a row written by a later one, D-178). Shown as
+    /// it is, and never saved: a record that carries it is refused until she picks a value.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Money received. Never deleted: a mistake is voided, with a reason, and stays in the diary.
@@ -279,6 +301,10 @@ pub enum TaskKind {
     FollowUp,
     #[default]
     Other,
+    /// A value this version does not know (a row written by a later one, D-178). Shown as
+    /// it is, and never saved: a record that carries it is refused until she picks a value.
+    #[serde(other)]
+    Unknown,
 }
 
 /// Something to do, with or without a patient and a date.
@@ -299,7 +325,8 @@ pub struct ClinicTask {
 // ------------------------------------------------------------------ settings
 
 /// How long a kind of visit usually is, and what it costs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(default)]
 #[ts(export)]
 pub struct KindDefault {
     pub kind: VisitKind,
@@ -308,7 +335,8 @@ pub struct KindDefault {
 }
 
 /// A skeleton for a session record.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(default)]
 #[ts(export)]
 pub struct NoteTemplate {
     pub name: String,
@@ -504,6 +532,9 @@ pub enum AlertKind {
     TaskOverdue,
     /// The feedback meeting is within a week and the report is not finished.
     FeedbackSoon,
+    /// Rows of the clinic that could not be read (D-178). They are left as they are, shown
+    /// nowhere and counted in no total; the text says how many. On the overview only.
+    Unreadable,
 }
 
 /// Something the clinic noticed by itself. Computed on every read, never stored.
@@ -620,6 +651,23 @@ pub struct DiaryMonth {
     pub by_method: Vec<MethodTotal>,
     /// Payments of the month with no receipt number.
     pub missing_receipts: u32,
+    /// What cards that were erased added to this month (D-179): one anonymous line. Its
+    /// sums are part of `charged`, `received`, `by_method` and `missing_receipts` above, and
+    /// of no day. `None`: nothing of an erased card falls in this month.
+    pub erased: Option<DiaryErased>,
+}
+
+/// The one line of a month that stands for every card that was erased: totals only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct DiaryErased {
+    /// "רשומות של כרטיסים שנמחקו".
+    pub label: String,
+    pub held: u32,
+    pub cancelled: u32,
+    pub no_show: u32,
+    pub charged: Agorot,
+    pub received: Agorot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -633,7 +681,8 @@ pub struct IncomeMonth {
     pub received: Agorot,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS, Default)]
+#[serde(default)]
 #[ts(export)]
 pub struct KindCount {
     pub kind: VisitKind,
@@ -695,6 +744,52 @@ pub struct SavedVisits {
     pub visits: Vec<VisitView>,
     /// How many of them overlap another visit.
     pub overlapping: u32,
+    /// With `Scope::Following`: later visits of the series that were left exactly as they
+    /// were, because they have a session note or are no longer planned (D-176).
+    pub left_alone: u32,
+}
+
+// ------------------------------------------------------------------ what an erased card leaves
+
+/// What one month keeps of the cards that were erased (D-179): counts and sums only, the
+/// ones the yearly summary and the income diary show. No id, no name, no date finer than
+/// the month and no free text: there is no field here that could hold one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ErasedMonth {
+    /// Visits that were held, by kind.
+    pub held: Vec<KindCount>,
+    pub cancelled: u32,
+    pub no_show: u32,
+    /// Visit charges and charges that were not voided, in agorot.
+    pub charged: i64,
+    /// Payments that were not voided, by method, in agorot.
+    pub received: Vec<ErasedMethod>,
+    /// Payments that were not voided and carried no receipt number.
+    pub missing_receipts: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ErasedMethod {
+    pub method: PayMethod,
+    pub amount: i64,
+}
+
+/// The anonymous tally of every card that was erased, by month (`YYYY-MM`). Kept sealed in
+/// the main database, next to the records it replaces.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ErasedTally {
+    pub months: std::collections::BTreeMap<String, ErasedMonth>,
+}
+
+/// How many cards that were erased had been opened in each month (`YYYY-MM`): the yearly
+/// summary's "new patients". Kept sealed in the identity database, next to the cards.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ErasedCards {
+    pub months: std::collections::BTreeMap<String, u32>,
 }
 
 // ------------------------------------------------------------------ the one command
@@ -719,7 +814,8 @@ pub enum ClinicRequest {
         repeat: Option<Repeat>,
         scope: Scope,
     },
-    /// Removes a visit that is still planned. One that happened is cancelled, not removed.
+    /// Removes a visit that is planned and was never anything else (D-176). One that
+    /// happened, or was ever marked, is cancelled, not removed.
     DeleteVisit {
         id: String,
         scope: Scope,
@@ -735,7 +831,8 @@ pub enum ClinicRequest {
         patient: Patient,
     },
     /// Erases the patient and everything of theirs in the clinic (never the case). `name`
-    /// must be the patient's name as typed again by her.
+    /// must be the patient's name as typed again by her. What the card counted for in the
+    /// summaries stays as anonymous totals (D-179).
     ErasePatient {
         id: String,
         name: String,

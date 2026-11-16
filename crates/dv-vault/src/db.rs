@@ -237,7 +237,10 @@ pub const MAIN_MIGRATIONS: &[&str] = &[
     "CREATE INDEX transmissions_time ON transmissions(created_at, id);",
     // v13: the clinic (beta). Records and their history are sealed with the settings key (they
     // belong to no case); `kind` and `day` stay in the clear only to index by them, and
-    // `patient_id` is a random id. The contents are the caller's own JSON.
+    // `patient_id` is a random id. The contents are the caller's own JSON. `kind` is one of
+    // visit, note, payment, charge, task, settings and tally (the one anonymous record of what
+    // erased cards counted for, D-179). The clear columns are bound into each row's seal
+    // (D-177).
     "CREATE TABLE clinic_records (
         id TEXT PRIMARY KEY,
         kind TEXT NOT NULL,
@@ -290,9 +293,17 @@ pub const IDENTITY_MIGRATIONS: &[&str] = &[
      ALTER TABLE identities ADD COLUMN reason TEXT NOT NULL DEFAULT '';",
     // v3: the clinic's patient cards (beta), sealed with the settings key. They live here, with
     // the other names, so a backup or an erase treats them as identities.
+    // `clinic_erased` is one sealed row: how many of the cards that were erased had been
+    // opened in each month, so the yearly summary's "new patients" never changes after an
+    // erase (D-179). Counts only, written in the transaction that removes a card.
     "CREATE TABLE clinic_patients (
         id TEXT PRIMARY KEY,
         created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        data_enc BLOB NOT NULL
+     );
+     CREATE TABLE clinic_erased (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
         updated_at INTEGER NOT NULL,
         data_enc BLOB NOT NULL
      );",
@@ -362,7 +373,7 @@ mod tests {
         ),
         (
             "identity",
-            &["98e79c9e2d976424", "59aa5787b56ebc78", "92d645e9aece5a85"],
+            &["98e79c9e2d976424", "59aa5787b56ebc78", "438410fbc529ad69"],
         ),
         ("audit", &["922ed57e6a2659e3"]),
     ];

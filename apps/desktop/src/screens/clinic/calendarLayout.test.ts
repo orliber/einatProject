@@ -278,6 +278,13 @@ describe("moving a visit", () => {
     expect(one.find((x) => x.visit.id === "w3")?.visit).toMatchObject({ date: "2026-11-22", start: 960 });
   });
 
+  it("a later visit of the series that has a session note stays where it is, as the vault leaves it (D-176)", () => {
+    const series = { series_id: "series-1" };
+    const noted = { ...view("w3", "2026-11-22", 960, series), has_note: true };
+    const after = applyMove([view("w2", "2026-11-15", 960, series), noted, view("w4", "2026-11-29", 960, series)], "w2", { date: "2026-11-16", start: 990 }, "following");
+    expect(after.map((v) => `${v.visit.id} ${v.visit.date} ${v.visit.start}`)).toEqual(["w2 2026-11-16 990", "w3 2026-11-22 960", "w4 2026-11-30 990"]);
+  });
+
   it("an answer that does not hold the visit is left as it is", () => {
     const views = [view("a", "2026-11-15", 540)];
     expect(applyMove(views, "missing", { date: "2026-11-16", start: 540 }, "one")).toBe(views);

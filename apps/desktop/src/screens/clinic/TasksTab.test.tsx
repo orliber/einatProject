@@ -80,7 +80,7 @@ describe("the follow-ups tab", () => {
     // The number beside the heading is the number of alerts; each kind says how many it has.
     expect(within(needs()).getAllByText(String(alerts.length)).length).toBeGreaterThan(0);
     for (const g of alertGroups(alerts)) {
-      const label = { unmarked: "פגישה שלא סומנה", no_note: "פגישה בלי סיכום", debt: "חוב פתוח", waiting: "המתנה ארוכה", report_due: "דוח מתעכב", no_next_visit: "אין פגישה הבאה", task_overdue: "משימה שמועדה עבר", feedback_soon: "שיחת משוב קרובה" }[g.kind];
+      const label = { unmarked: "פגישה שלא סומנה", no_note: "פגישה בלי סיכום", debt: "חוב פתוח", waiting: "המתנה ארוכה", report_due: "דוח מתעכב", no_next_visit: "אין פגישה הבאה", task_overdue: "משימה שמועדה עבר", feedback_soon: "שיחת משוב קרובה", unreadable: "רישום שלא נקרא" }[g.kind];
       const box = within(needs()).getByRole("region", { name: `${label}: ${g.alerts.length}` });
       expect(within(box).getByRole("heading", { name: label })).toBeInTheDocument();
       expect(within(box).getAllByRole("listitem").length).toBe(Math.min(4, g.alerts.length));

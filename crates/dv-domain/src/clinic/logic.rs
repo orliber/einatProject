@@ -12,9 +12,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use super::{
     Agorot, Alert, AlertKind, Balance, Charge, ClinicSettings, ClinicTask, Contact, ContactRole,
-    DiaryDay, DiaryLine, DiaryMonth, IncomeMonth, IncomeYear, KindCount, KindDefault, MethodTotal,
-    Patient, PatientStatus, PayMethod, Payment, ProcessStep, Repeat, SessionNote, StepState,
-    TaskKind, TaskView, Today, Visit, VisitKind, VisitStatus, VisitView, VisitWhen,
+    DiaryDay, DiaryErased, DiaryLine, DiaryMonth, ErasedCards, ErasedMethod, ErasedMonth,
+    ErasedTally, IncomeMonth, IncomeYear, KindCount, KindDefault, MethodTotal, Patient,
+    PatientStatus, PayMethod, Payment, ProcessStep, Repeat, SessionNote, StepState, TaskKind,
+    TaskView, Today, Visit, VisitKind, VisitStatus, VisitView, VisitWhen,
 };
 use crate::dates::{
     add_years, civil_from_days, days_from_civil, days_in_month, iso, parse_iso, Ymd,
@@ -113,6 +114,43 @@ fn amount_ok(amount: Agorot) -> Result<(), DomainError> {
         return refuse("הסכום צריך להיות גדול מאפס, ועד 100,000 ₪.");
     }
     Ok(())
+}
+
+/// A value of a later version (`Unknown`, D-178) is shown and never written back: saving
+/// is refused until she picks one this version knows.
+fn known(unknown: bool, field: &str) -> Result<(), DomainError> {
+    if unknown {
+        return refuse(format!(
+            "בשדה \"{field}\" יש ערך שהגרסה הזו של התוכנה לא מכירה. \
+             כדי לשמור צריך לבחור ערך מהרשימה, או לעדכן את התוכנה."
+        ));
+    }
+    Ok(())
+}
+
+/// A visit holds no value of a later version (D-178).
+pub fn visit_known(visit: &Visit) -> Result<(), DomainError> {
+    known(visit.kind == VisitKind::Unknown, "סוג הפגישה")?;
+    known(visit.status == VisitStatus::Unknown, "מצב הפגישה")
+}
+
+/// A payment holds no value of a later version (D-178).
+pub fn payment_known(payment: &Payment) -> Result<(), DomainError> {
+    known(payment.method == PayMethod::Unknown, "אמצעי התשלום")
+}
+
+/// A task holds no value of a later version (D-178).
+pub fn task_known(task: &ClinicTask) -> Result<(), DomainError> {
+    known(task.kind == TaskKind::Unknown, "סוג המשימה")
+}
+
+/// A card holds no value of a later version (D-178).
+pub fn patient_known(patient: &Patient) -> Result<(), DomainError> {
+    known(patient.status == PatientStatus::Unknown, "מצב הכרטיס")?;
+    patient
+        .contacts
+        .iter()
+        .try_for_each(|contact| known(contact.role == ContactRole::Unknown, "הקשר לילד"))
 }
 
 fn patient_chosen(patient_id: &str) -> Result<(), DomainError> {
@@ -440,15 +478,21 @@ pub fn normalize_settings(mut settings: ClinicSettings) -> ClinicSettings {
 
 // ------------------------------------------------------------------ validation
 
+/// The card by itself, with no "today": a birth date in the future is not refused here.
+/// The service uses [`validate_patient_on`].
 pub fn validate_patient(patient: &Patient) -> Result<(), DomainError> {
+    validate_patient_on(patient, None)
+}
+
+/// The card, on a day the caller knows: a birth date after `today` is refused.
+pub fn validate_patient_on(patient: &Patient, today: Option<&str>) -> Result<(), DomainError> {
     if blank(&patient.name) {
         return refuse("צריך לכתוב את שם הילד או הילדה.");
     }
     at_most(patient.name.trim(), NAME_MAX, "שם")?;
+    known(patient.status == PatientStatus::Unknown, "מצב הכרטיס")?;
     if let Some(birth) = &patient.birth_date {
-        // The day is not known here: a card carries no "today". A caller that has one asks
-        // `validate_birth_date` itself.
-        validate_birth_date(birth, None)?;
+        validate_birth_date(birth, today)?;
     }
     if patient.contacts.len() > MAX_CONTACTS {
         return refuse(format!("אפשר לשמור עד {MAX_CONTACTS} אנשי קשר למטופל."));
@@ -470,6 +514,7 @@ pub fn validate_patient(patient: &Patient) -> Result<(), DomainError> {
 }
 
 pub fn validate_contact(contact: &Contact) -> Result<(), DomainError> {
+    known(contact.role == ContactRole::Unknown, "הקשר לילד")?;
     if blank(&contact.name) && blank(&contact.phone) && blank(&contact.email) {
         return refuse("לאיש קשר צריך שם, טלפון או כתובת מייל.");
     }
@@ -497,6 +542,7 @@ fn length_ok(start: u16, minutes: u16) -> Result<(), DomainError> {
 
 /// The visit by itself. That the patient exists is for the service to check.
 pub fn validate_visit(visit: &Visit) -> Result<(), DomainError> {
+    visit_known(visit)?;
     let has_patient = visit.patient_id.as_deref().is_some_and(|id| !blank(id));
     if visit.kind == VisitKind::Block {
         if has_patient {
@@ -541,6 +587,7 @@ pub fn validate_note(note: &SessionNote) -> Result<(), DomainError> {
 
 pub fn validate_payment(payment: &Payment) -> Result<(), DomainError> {
     patient_chosen(&payment.patient_id)?;
+    payment_known(payment)?;
     real_date(&payment.date, "תאריך")?;
     amount_ok(payment.amount)?;
     at_most(&payment.receipt, SHORT_MAX, "מספר קבלה")?;
@@ -570,6 +617,7 @@ pub fn validate_task(task: &ClinicTask) -> Result<(), DomainError> {
         return refuse("צריך לכתוב מה המשימה.");
     }
     at_most(task.title.trim(), SHORT_MAX, "משימה")?;
+    task_known(task)?;
     if let Some(due) = &task.due {
         real_date(due, "תאריך יעד")?;
     }
@@ -670,10 +718,75 @@ pub fn validate_today(today: &Today) -> Result<(), DomainError> {
     Ok(())
 }
 
-/// Only a visit that is still planned can be removed; one that happened is cancelled.
-pub fn validate_delete(visit: &Visit) -> Result<(), DomainError> {
+/// Only a visit that is planned, and was never anything else, can be removed (D-176).
+/// `marked`: one of its saved states was not "planned" ([`ever_marked`]): it was held,
+/// cancelled or missed once, and so it stays in the diary whatever it says now.
+pub fn validate_delete(visit: &Visit, marked: bool) -> Result<(), DomainError> {
     if visit.status != VisitStatus::Planned {
         return refuse("אפשר למחוק רק פגישה שעדיין מתוכננת. פגישה שכבר סומנה אפשר לסמן כמבוטלת.");
+    }
+    if marked {
+        return refuse(
+            "הפגישה הזו כבר סומנה פעם (התקיימה, בוטלה או לא הגיעו), ולכן היא נשארת ביומן. \
+             אם היא לא תתקיים, אפשר לסמן אותה כמבוטלת.",
+        );
+    }
+    Ok(())
+}
+
+/// Whether a visit ever left "planned", by its saved states (its history, and what it says
+/// now). Such a visit is never removed and counts as something that happened in the card.
+#[must_use]
+pub fn ever_marked<'a>(states: impl IntoIterator<Item = &'a Visit>) -> bool {
+    states
+        .into_iter()
+        .any(|state| state.status != VisitStatus::Planned)
+}
+
+/// Taking a mark back (D-176): a visit that was held, cancelled or missed goes back to
+/// "planned" only as the correction of a wrong click, when nothing leans on the mark yet:
+/// it has no session note, and what the family already paid is not more than what is left
+/// charged without it. Any other change of status is always allowed; the history keeps it.
+///
+/// `stored` is the visit as it is kept; the slices are the clinic's or the patient's (only
+/// the records of the visit's patient count).
+pub fn validate_unmark(
+    stored: &Visit,
+    edited: &Visit,
+    has_note: bool,
+    visits: &[Visit],
+    charges: &[Charge],
+    payments: &[Payment],
+) -> Result<(), DomainError> {
+    if stored.status == VisitStatus::Planned || edited.status != VisitStatus::Planned {
+        return Ok(());
+    }
+    if has_note {
+        return refuse(
+            "לפגישה הזו יש סיכום, ולכן היא לא יכולה לחזור להיות \"מתוכננת\". \
+             אם היא לא התקיימה, אפשר לסמן אותה כמבוטלת ולכתוב מה קרה.",
+        );
+    }
+    let charge = i64::from(visit_charge(stored));
+    if charge == 0 {
+        return Ok(());
+    }
+    let Some(patient_id) = stored.patient_id.as_deref() else {
+        return Ok(());
+    };
+    let (charged, paid) = charged_paid(
+        visits
+            .iter()
+            .filter(|v| v.patient_id.as_deref() == Some(patient_id)),
+        charges.iter().filter(|c| c.patient_id == patient_id),
+        payments.iter().filter(|p| p.patient_id == patient_id),
+    );
+    if paid > charged.saturating_sub(charge) {
+        return refuse(
+            "על הפגישה הזו כבר נרשם תשלום, ולכן היא לא יכולה לחזור להיות \"מתוכננת\". \
+             אם היא סומנה בטעות, אפשר לסמן אותה כמבוטלת בלי חיוב ולכתוב מה קרה, \
+             או לבטל קודם את התקבול.",
+        );
     }
     Ok(())
 }
@@ -696,33 +809,52 @@ pub fn series_dates(first_date: &str, repeat: Repeat) -> Result<Vec<String>, Dom
         .collect()
 }
 
+/// What "this one and every later one" does to the later visits of a series.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Following {
+    /// The later visits as they should be saved, by date.
+    pub visits: Vec<Visit>,
+    /// Later visits of the series left exactly as they are: they have a session note, or
+    /// they are no longer planned.
+    pub left_alone: u32,
+}
+
 /// "This one and every later one" (`Scope::Following`): the later visits of the series that
-/// are still planned, as they should be saved. Each takes the edited visit's kind, title,
-/// start, minutes, place, fee and note, and moves by the number of days the edited one
-/// moved. Status, patient and everything else stay as they were.
+/// are still planned and have no session note, as they should be saved. Each takes the
+/// edited visit's kind, title, start, minutes, place, fee and note, and moves by the number
+/// of days the edited one moved. Status, patient and everything else stay as they were.
+///
+/// A later visit that has a note (`noted`: the ids of visits with one) or is not planned is
+/// never moved or altered: the note would stay on the old date, and a visit that happened
+/// is a line of the diary. They are counted in `left_alone` (D-176).
 ///
 /// `previous` is the edited visit as it is stored; `series` may hold any visits (those of
-/// another series, the edited one itself, and the ones that are not planned are skipped).
-/// The edited visit itself is not in the result. By date.
+/// another series and the edited one itself are skipped). The edited visit itself is not in
+/// the result.
 pub fn apply_following(
     edited: &Visit,
     previous: &Visit,
     series: &[Visit],
-) -> Result<Vec<Visit>, DomainError> {
+    noted: &HashSet<String>,
+) -> Result<Following, DomainError> {
     let Some(series_id) = previous.series_id.as_deref() else {
-        return Ok(Vec::new());
+        return Ok(Following::default());
     };
     let Some(shift) = days_between(&previous.date, &edited.date) else {
         return refuse("צריך לבחור תאריך תקין לפגישה.");
     };
     let was = (previous.date.as_str(), previous.start);
     let mut later = Vec::new();
+    let mut left_alone = 0_u32;
     for visit in series {
         let follows = visit.series_id.as_deref() == Some(series_id)
             && visit.id != previous.id
-            && visit.status == VisitStatus::Planned
             && (visit.date.as_str(), visit.start) > was;
         if !follows {
+            continue;
+        }
+        if visit.status != VisitStatus::Planned || noted.contains(&visit.id) {
+            left_alone = left_alone.saturating_add(1);
             continue;
         }
         let Some(date) = add_days(&visit.date, shift) else {
@@ -743,7 +875,10 @@ pub fn apply_following(
         later.push(moved);
     }
     later.sort_by(|a, b| (&a.date, a.start, &a.id).cmp(&(&b.date, b.start, &b.id)));
-    Ok(later)
+    Ok(Following {
+        visits: later,
+        left_alone,
+    })
 }
 
 fn visit_end(visit: &Visit) -> u32 {
@@ -886,7 +1021,7 @@ pub fn visit_charge(visit: &Visit) -> Agorot {
     let charged = match visit.status {
         VisitStatus::Held => true,
         VisitStatus::Cancelled | VisitStatus::NoShow => visit.charge_missed,
-        VisitStatus::Planned => false,
+        VisitStatus::Planned | VisitStatus::Unknown => false,
     };
     if charged {
         visit.fee.max(0)
@@ -1026,6 +1161,7 @@ pub fn kind_label(kind: VisitKind) -> &'static str {
         VisitKind::Meeting => "פגישה מקצועית",
         VisitKind::Other => "פגישה אחרת",
         VisitKind::Block => "זמן שמור",
+        VisitKind::Unknown => "סוג לא מוכר",
     }
 }
 
@@ -1036,6 +1172,7 @@ pub fn status_label(status: VisitStatus) -> &'static str {
         VisitStatus::Held => "התקיימה",
         VisitStatus::Cancelled => "בוטלה",
         VisitStatus::NoShow => "לא הגיעו",
+        VisitStatus::Unknown => "מצב לא מוכר",
     }
 }
 
@@ -1049,6 +1186,7 @@ pub fn method_label(method: PayMethod) -> &'static str {
         PayMethod::Check => "צ'ק",
         PayMethod::Card => "כרטיס אשראי",
         PayMethod::Other => "אחר",
+        PayMethod::Unknown => "אמצעי לא מוכר",
     }
 }
 
@@ -1062,6 +1200,7 @@ pub fn task_kind_label(kind: TaskKind) -> &'static str {
         TaskKind::Payment => "תשלום",
         TaskKind::FollowUp => "מעקב",
         TaskKind::Other => "אחר",
+        TaskKind::Unknown => "סוג לא מוכר",
     }
 }
 
@@ -1071,6 +1210,7 @@ pub fn patient_status_label(status: PatientStatus) -> &'static str {
         PatientStatus::Waiting => "ברשימת ההמתנה",
         PatientStatus::Active => "בתהליך",
         PatientStatus::Closed => "הסתיים",
+        PatientStatus::Unknown => "מצב לא מוכר",
     }
 }
 
@@ -1081,6 +1221,7 @@ pub fn contact_role_label(role: ContactRole) -> &'static str {
         ContactRole::Father => "אבא",
         ContactRole::Guardian => "אפוטרופוס",
         ContactRole::Other => "אחר",
+        ContactRole::Unknown => "קשר לא מוכר",
     }
 }
 
@@ -1186,6 +1327,7 @@ fn kind_rank(kind: AlertKind) -> u8 {
         AlertKind::Debt => 5,
         AlertKind::NoNextVisit => 6,
         AlertKind::Waiting => 7,
+        AlertKind::Unreadable => 8,
     }
 }
 
@@ -1591,9 +1733,11 @@ pub fn clinic_alerts(
 
 // ------------------------------------------------------------------ erasing a patient
 
-/// Whether a patient card may be erased (D-174). A card where nothing happened (no visit
-/// that was held or charged, no note, no charge and no payment, voided ones included) goes
-/// at once: a typing mistake, a double card. Any other card is a record that has to be
+/// Whether a patient card may be erased (D-174, D-176). A card where nothing happened (no
+/// visit that ever left "planned", no note, no charge and no payment, voided ones included)
+/// goes at once: a typing mistake, a double card. `marked` holds the ids of visits that
+/// were held, cancelled or missed at some time by their saved history ([`ever_marked`]): a
+/// visit put back to "planned" still happened. Any other card is a record that has to be
 /// kept, and goes only after the retention period: `keep_years` after the last activity in
 /// the card, and not before the child is `keep_until_age` when the birth date is known,
 /// whichever is later.
@@ -1604,8 +1748,22 @@ pub fn clinic_alerts(
 /// active then. The slices may hold other patients' records too.
 ///
 /// The refusal says the card can be closed instead, and from which day it can be erased.
+/// Whether anything happened in a card (D-174, D-176): a visit that ever left "planned"
+/// (`marked`: by its saved history), a note, a charge or a payment, voided ones included.
+#[must_use]
+pub fn card_happened(records: &PatientRecords<'_>, marked: &HashSet<String>) -> bool {
+    let id = records.patient.id.as_str();
+    records.visits.iter().any(|v| {
+        v.patient_id.as_deref() == Some(id)
+            && (v.status != VisitStatus::Planned || marked.contains(&v.id))
+    }) || records.notes.iter().any(|n| n.patient_id == id)
+        || records.charges.iter().any(|c| c.patient_id == id)
+        || records.payments.iter().any(|p| p.patient_id == id)
+}
+
 pub fn can_erase(
     records: &PatientRecords<'_>,
+    marked: &HashSet<String>,
     today: &str,
     last_saved: Option<&str>,
     keep_years: i32,
@@ -1621,11 +1779,7 @@ pub fn can_erase(
     let notes = || records.notes.iter().filter(|n| n.patient_id == id);
     let charges = || records.charges.iter().filter(|c| c.patient_id == id);
     let payments = || records.payments.iter().filter(|p| p.patient_id == id);
-    let happened = visits().any(|v| v.status == VisitStatus::Held || visit_charge(v) > 0)
-        || notes().next().is_some()
-        || charges().next().is_some()
-        || payments().next().is_some();
-    if !happened {
+    if !card_happened(records, marked) {
         return Ok(());
     }
     let Some(now) = parse_date(today) else {
@@ -1883,7 +2037,12 @@ pub fn diary_month(
             .push(((1, 0, &charge.id), line));
     }
     let mut missing_receipts = 0_u32;
-    let mut methods: Vec<(PayMethod, i64)> = PAY_METHODS.iter().map(|m| (*m, 0)).collect();
+    // A method of a later version is a total of its own, so the methods still add up.
+    let mut methods: Vec<(PayMethod, i64)> = PAY_METHODS
+        .iter()
+        .chain(std::iter::once(&PayMethod::Unknown))
+        .map(|m| (*m, 0))
+        .collect();
     for payment in payments.iter().filter(|p| in_month(&p.date)) {
         if !payment.voided {
             if blank(&payment.receipt) {
@@ -1951,6 +2110,7 @@ pub fn diary_month(
         received: to_agorot(month_received)?,
         by_method,
         missing_receipts,
+        erased: None,
     })
 }
 
@@ -2000,7 +2160,7 @@ pub fn income_year(
             }
             VisitStatus::Cancelled => sum.cancelled = sum.cancelled.saturating_add(1),
             VisitStatus::NoShow => sum.no_show = sum.no_show.saturating_add(1),
-            VisitStatus::Planned => {}
+            VisitStatus::Planned | VisitStatus::Unknown => {}
         }
         sum.charged = sum.charged.saturating_add(i64::from(visit_charge(visit)));
     }
@@ -2043,6 +2203,217 @@ pub fn income_year(
         received: to_agorot(received)?,
         new_patients: u32::try_from(new_patients).unwrap_or(u32::MAX),
         by_kind: kinds,
+    })
+}
+
+// ------------------------------------------------------------------ what an erased card leaves
+
+/// What the diary calls the line of the cards that were erased.
+pub const ERASED_LABEL: &str = "רשומות של כרטיסים שנמחקו";
+
+fn kind_total(held: &[KindCount]) -> u32 {
+    held.iter()
+        .fold(0_u32, |sum, entry| sum.saturating_add(entry.count))
+}
+
+fn method_total(received: &[ErasedMethod]) -> i64 {
+    received
+        .iter()
+        .fold(0_i64, |sum, entry| sum.saturating_add(entry.amount))
+}
+
+fn add_kind(held: &mut Vec<KindCount>, kind: VisitKind, count: u32) {
+    match held.iter_mut().find(|entry| entry.kind == kind) {
+        Some(entry) => entry.count = entry.count.saturating_add(count),
+        None => held.push(KindCount { kind, count }),
+    }
+}
+
+fn add_method(received: &mut Vec<ErasedMethod>, method: PayMethod, amount: i64) {
+    match received.iter_mut().find(|entry| entry.method == method) {
+        Some(entry) => entry.amount = entry.amount.saturating_add(amount),
+        None => received.push(ErasedMethod { method, amount }),
+    }
+}
+
+/// Folds a card that is about to be erased into the anonymous tally (D-179): exactly what
+/// [`income_year`] and [`diary_month`] count of these records, by month, and nothing else.
+/// The records are one patient's. A record whose date is not a date is counted nowhere, as
+/// in the summaries.
+pub fn fold_erased(
+    tally: &mut ErasedTally,
+    visits: &[Visit],
+    charges: &[Charge],
+    payments: &[Payment],
+) {
+    fn month<'a>(tally: &'a mut ErasedTally, date: &str) -> Option<&'a mut ErasedMonth> {
+        month_of(date).map(|key| tally.months.entry(key).or_default())
+    }
+    for visit in visits.iter().filter(|v| v.patient_id.is_some()) {
+        let charge = i64::from(visit_charge(visit));
+        // A planned visit that costs nothing is in no summary: it leaves no month behind.
+        if visit.status == VisitStatus::Planned || visit.status == VisitStatus::Unknown {
+            continue;
+        }
+        let Some(sum) = month(tally, &visit.date) else {
+            continue;
+        };
+        match visit.status {
+            VisitStatus::Held => add_kind(&mut sum.held, visit.kind, 1),
+            VisitStatus::Cancelled => sum.cancelled = sum.cancelled.saturating_add(1),
+            VisitStatus::NoShow => sum.no_show = sum.no_show.saturating_add(1),
+            VisitStatus::Planned | VisitStatus::Unknown => {}
+        }
+        sum.charged = sum.charged.saturating_add(charge);
+    }
+    for charge in charges.iter().filter(|c| !c.voided) {
+        if let Some(sum) = month(tally, &charge.date) {
+            sum.charged = sum.charged.saturating_add(i64::from(charge.amount));
+        }
+    }
+    for payment in payments.iter().filter(|p| !p.voided) {
+        if let Some(sum) = month(tally, &payment.date) {
+            add_method(&mut sum.received, payment.method, i64::from(payment.amount));
+            if blank(&payment.receipt) {
+                sum.missing_receipts = sum.missing_receipts.saturating_add(1);
+            }
+        }
+    }
+}
+
+/// Counts a card that is about to be erased among the cards opened in its month.
+pub fn fold_erased_card(cards: &mut ErasedCards, patient: &Patient) {
+    if let Some(month) = month_of(&patient.created_on) {
+        let count = cards.months.entry(month).or_default();
+        *count = count.saturating_add(1);
+    }
+}
+
+/// The yearly summary with what the erased cards counted for in it (D-179): the same
+/// figures it showed while the cards were there.
+pub fn income_with_erased(
+    mut income: IncomeYear,
+    tally: &ErasedTally,
+    cards: &ErasedCards,
+) -> Result<IncomeYear, DomainError> {
+    let (mut charged, mut received) = (0_i64, 0_i64);
+    for month in &mut income.months {
+        if let Some(erased) = tally.months.get(&month.month) {
+            month.held = month.held.saturating_add(kind_total(&erased.held));
+            month.cancelled = month.cancelled.saturating_add(erased.cancelled);
+            month.no_show = month.no_show.saturating_add(erased.no_show);
+            month.charged = to_agorot(i64::from(month.charged).saturating_add(erased.charged))?;
+            month.received = to_agorot(
+                i64::from(month.received).saturating_add(method_total(&erased.received)),
+            )?;
+            for entry in &erased.held {
+                add_kind(&mut income.by_kind, entry.kind, entry.count);
+            }
+        }
+        charged = charged.saturating_add(i64::from(month.charged));
+        received = received.saturating_add(i64::from(month.received));
+    }
+    income.charged = to_agorot(charged)?;
+    income.received = to_agorot(received)?;
+    let year = format!("{:04}-", income.year);
+    let opened = cards
+        .months
+        .iter()
+        .filter(|(month, _)| month.starts_with(&year))
+        .fold(0_u32, |sum, (_, count)| sum.saturating_add(*count));
+    income.new_patients = income.new_patients.saturating_add(opened);
+    income.by_kind.retain(|entry| entry.count > 0);
+    // The order of `income_year`: the screens' own order, then the most frequent first.
+    let place = |kind: VisitKind| VISIT_KINDS.iter().position(|k| *k == kind);
+    income
+        .by_kind
+        .sort_by_key(|entry| place(entry.kind).unwrap_or(VISIT_KINDS.len()));
+    income.by_kind.sort_by(|a, b| b.count.cmp(&a.count));
+    Ok(income)
+}
+
+/// The diary of a month with the one anonymous line of the erased cards (D-179). Its sums
+/// are added to the month's totals, to the totals by method and to the payments with no
+/// receipt; they belong to no day.
+pub fn diary_with_erased(
+    mut diary: DiaryMonth,
+    tally: &ErasedTally,
+) -> Result<DiaryMonth, DomainError> {
+    let Some(erased) = tally.months.get(&diary.month) else {
+        return Ok(diary);
+    };
+    let received = method_total(&erased.received);
+    let line = DiaryErased {
+        label: ERASED_LABEL.to_owned(),
+        held: kind_total(&erased.held),
+        cancelled: erased.cancelled,
+        no_show: erased.no_show,
+        charged: to_agorot(erased.charged)?,
+        received: to_agorot(received)?,
+    };
+    diary.charged = to_agorot(i64::from(diary.charged).saturating_add(erased.charged))?;
+    diary.received = to_agorot(i64::from(diary.received).saturating_add(received))?;
+    for entry in erased.received.iter().filter(|entry| entry.amount > 0) {
+        match diary
+            .by_method
+            .iter_mut()
+            .find(|total| total.method == entry.method)
+        {
+            Some(total) => {
+                total.amount = to_agorot(i64::from(total.amount).saturating_add(entry.amount))?;
+            }
+            None => diary.by_method.push(MethodTotal {
+                method: entry.method,
+                amount: to_agorot(entry.amount)?,
+            }),
+        }
+    }
+    // The order of `diary_month`: the order the screens list the methods in.
+    let place = |method: PayMethod| PAY_METHODS.iter().position(|m| *m == method);
+    diary
+        .by_method
+        .sort_by_key(|total| place(total.method).unwrap_or(PAY_METHODS.len()));
+    diary.missing_receipts = diary
+        .missing_receipts
+        .saturating_add(erased.missing_receipts);
+    let empty = line.held == 0
+        && line.cancelled == 0
+        && line.no_show == 0
+        && line.charged == 0
+        && line.received == 0;
+    diary.erased = (!empty).then_some(line);
+    Ok(diary)
+}
+
+/// What the erased cards received (not voided) in the month of `date`, for the overview.
+#[must_use]
+pub fn erased_received(tally: &ErasedTally, date: &str) -> i64 {
+    month_of(date)
+        .and_then(|month| tally.months.get(&month))
+        .map_or(0, |erased| method_total(&erased.received))
+}
+
+/// The alert of rows that could not be read (D-178); `None` when every row was read.
+#[must_use]
+pub fn unreadable_alert(rows: u32, today: &str) -> Option<Alert> {
+    let text = match rows {
+        0 => return None,
+        1 => "רישום אחד בקליניקה לא נקרא, ולכן הוא לא מוצג ולא נספר בסיכומים. \
+              הוא לא נמחק ולא שונה. כדאי לשחזר מגיבוי, או לפנות לתמיכה."
+            .to_owned(),
+        n => format!(
+            "{n} רישומים בקליניקה לא נקראו, ולכן הם לא מוצגים ולא נספרים בסיכומים. \
+             הם לא נמחקו ולא שונו. כדאי לשחזר מגיבוי, או לפנות לתמיכה."
+        ),
+    };
+    Some(Alert {
+        kind: AlertKind::Unreadable,
+        patient_id: None,
+        patient_name: None,
+        visit_id: None,
+        task_id: None,
+        text,
+        since: today.to_owned(),
     })
 }
 

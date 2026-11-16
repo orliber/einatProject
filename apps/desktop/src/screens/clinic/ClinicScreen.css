@@ -510,3 +510,13 @@
   gap: var(--space-3);
   padding-top: var(--space-2);
 }
+
+/* ---------- a read that failed: the way to read again stays on screen ---------- */
+.clinic-read-error {
+  gap: var(--space-2);
+}
+.clinic-read-again {
+  margin: 0;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}

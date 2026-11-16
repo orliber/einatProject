@@ -201,6 +201,11 @@ export function today(now: Date = new Date()): Today {
 // The same words the core uses (crates/dv-domain/src/clinic/logic.rs: kind_label, status_label,
 // method_label, task_kind_label, patient_status_label, contact_role_label): a history line or
 // an alert written there reads like the screen beside it.
+//
+// Every stored kind has an "unknown" member (D-178): a value written by a later version of the
+// program. It has a label, so a screen shows it plainly, and it is in none of the lists she
+// chooses from (`VISIT_KINDS`, `PAY_METHODS`, …): the core refuses to save a record that
+// carries it until she picks a value from the list.
 
 export const VISIT_KIND_LABEL: Record<VisitKind, string> = {
   intake: "פגישת היכרות",
@@ -212,6 +217,7 @@ export const VISIT_KIND_LABEL: Record<VisitKind, string> = {
   meeting: "פגישה מקצועית",
   other: "פגישה אחרת",
   block: "זמן שמור",
+  unknown: "סוג לא מוכר",
 };
 
 /** The kinds in the order she meets them in an assessment; the block last. */
@@ -222,7 +228,11 @@ export const VISIT_STATUS_LABEL: Record<VisitStatus, string> = {
   held: "התקיימה",
   cancelled: "בוטלה",
   no_show: "לא הגיעו",
+  unknown: "מצב לא מוכר",
 };
+
+/** The marks she can give a visit, in the order the dialog offers them. */
+export const VISIT_STATUSES: VisitStatus[] = ["planned", "held", "cancelled", "no_show"];
 
 export const PAY_METHOD_LABEL: Record<PayMethod, string> = {
   cash: "מזומן",
@@ -232,6 +242,7 @@ export const PAY_METHOD_LABEL: Record<PayMethod, string> = {
   check: "צ'ק",
   card: "כרטיס אשראי",
   other: "אחר",
+  unknown: "אמצעי לא מוכר",
 };
 
 /** In the order the core lists them (`PAY_METHODS` in logic.rs). */
@@ -245,6 +256,7 @@ export const TASK_KIND_LABEL: Record<TaskKind, string> = {
   payment: "תשלום",
   follow_up: "מעקב",
   other: "אחר",
+  unknown: "סוג לא מוכר",
 };
 
 export const TASK_KINDS: TaskKind[] = ["call", "questionnaire", "document", "report", "payment", "follow_up", "other"];
@@ -253,13 +265,17 @@ export const PATIENT_STATUS_LABEL: Record<PatientStatus, string> = {
   waiting: "ברשימת ההמתנה",
   active: "בתהליך",
   closed: "הסתיים",
+  unknown: "מצב לא מוכר",
 };
+
+export const PATIENT_STATUSES: PatientStatus[] = ["waiting", "active", "closed"];
 
 export const CONTACT_ROLE_LABEL: Record<ContactRole, string> = {
   mother: "אמא",
   father: "אבא",
   guardian: "אפוטרופוס",
   other: "אחר",
+  unknown: "קשר לא מוכר",
 };
 
 export const CONTACT_ROLES: ContactRole[] = ["mother", "father", "guardian", "other"];
@@ -273,7 +289,25 @@ export const ALERT_KIND_LABEL: Record<AlertKind, string> = {
   no_next_visit: "אין פגישה הבאה",
   task_overdue: "משימה שמועדה עבר",
   feedback_soon: "שיחת משוב קרובה",
+  unreadable: "רישום שלא נקרא",
 };
+
+/** The options of a select for a stored kind: the values she can choose, and, only while the
+ *  record still holds a value this version does not know, that value too (so the select shows
+ *  what is stored and never puts another value in its place by itself). */
+export function optionsWith<T extends string>(choices: readonly T[], labels: Record<T, string>, current: T): { value: T; label: string }[] {
+  const all = choices.includes(current) ? choices : [...choices, current];
+  return all.map((value) => ({ value, label: labels[value] }));
+}
+
+/** What she is told after "this and the following" left later visits of the series as they
+ *  were, because they have a session note or were already marked (D-176); "" when none were. */
+export function leftAloneWords(count: number): string {
+  if (count <= 0) return "";
+  return count === 1
+    ? "פגישה אחת בסדרה נשארה כמו שהיא, כי יש לה סיכום או שהיא כבר סומנה"
+    : `${count} פגישות בסדרה נשארו כמו שהן, כי יש להן סיכום או שהן כבר סומנו`;
+}
 
 /** What the calendar calls a visit: her own words when she gave some, else the kind's name. */
 export function visitTitle(visit: { kind: VisitKind; title: string }): string {

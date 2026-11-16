@@ -6,7 +6,8 @@ import type { ClinicSettings } from "../../ipc/generated/ClinicSettings";
 import type { VisitKind } from "../../ipc/generated/VisitKind";
 import { VISIT_KINDS } from "./format";
 
-const USUAL_MINUTES: Record<VisitKind, number> = { intake: 60, assessment: 90, observation: 60, feedback: 60, therapy: 50, guidance: 50, meeting: 30, other: 50, block: 60 };
+// "unknown" is only here because the table is by kind: it is never one of `VISIT_KINDS`.
+const USUAL_MINUTES: Record<VisitKind, number> = { intake: 60, assessment: 90, observation: 60, feedback: 60, therapy: 50, guidance: 50, meeting: 30, other: 50, block: 60, unknown: 60 };
 
 export function defaultClinicSettings(): ClinicSettings {
   return {

@@ -10,6 +10,7 @@ import { clinicApi } from "../../ipc/clinic";
 import type { Charge } from "../../ipc/generated/Charge";
 import type { ClinicSettings } from "../../ipc/generated/ClinicSettings";
 import type { ClinicTask } from "../../ipc/generated/ClinicTask";
+import type { DiaryErased } from "../../ipc/generated/DiaryErased";
 import type { Patient } from "../../ipc/generated/Patient";
 import type { Payment } from "../../ipc/generated/Payment";
 import type { Repeat } from "../../ipc/generated/Repeat";
@@ -30,6 +31,7 @@ export const clinicKeys = {
   tasks: (date: string) => ["clinic", "tasks", date] as const,
   diary: (month: string) => ["clinic", "diary", month] as const,
   income: (year: number) => ["clinic", "income", year] as const,
+  yearErased: (year: number) => ["clinic", "year-erased", year] as const,
   history: (recordId: string) => ["clinic", "history", recordId] as const,
   settings: () => ["clinic", "settings"] as const,
   caseChoices: () => ["clinic", "case-choices"] as const,
@@ -79,6 +81,24 @@ export const usePatientCard = (id: string | null, date: string) =>
 export const useTasks = (date: string) => useRead(clinicKeys.tasks(date), () => clinicApi.tasks(today()));
 export const useDiary = (month: string) => useRead(clinicKeys.diary(month), () => clinicApi.diary(month));
 export const useIncome = (year: number) => useRead(clinicKeys.income(year), () => clinicApi.income(year));
+
+/** What the cards that were erased counted for in a year (D-179): the anonymous lines of its
+ *  twelve months, added up; `null` when the year has none. The yearly summary already holds
+ *  these figures inside its own (it does not say which part of them they are), so this is
+ *  read from the months' diaries, where each month names its line. */
+export async function readYearErased(year: number): Promise<DiaryErased | null> {
+  const months = await Promise.all(Array.from({ length: 12 }, (_, i) => clinicApi.diary(`${year}-${String(i + 1).padStart(2, "0")}`)));
+  let sum: DiaryErased | null = null;
+  for (const line of months.map((m) => m.erased)) {
+    if (line === null) continue;
+    sum = sum === null ? { ...line } : {
+      label: sum.label, held: sum.held + line.held, cancelled: sum.cancelled + line.cancelled, no_show: sum.no_show + line.no_show,
+      charged: sum.charged + line.charged, received: sum.received + line.received,
+    };
+  }
+  return sum;
+}
+export const useYearErased = (year: number) => useRead(clinicKeys.yearErased(year), () => readYearErased(year));
 export const useHistory = (recordId: string | null) =>
   useRead(clinicKeys.history(recordId ?? ""), () => clinicApi.history(recordId ?? ""), { enabled: recordId !== null });
 export const useClinicSettings = () => useRead(clinicKeys.settings(), clinicApi.settings);

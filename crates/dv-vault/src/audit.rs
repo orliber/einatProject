@@ -67,6 +67,9 @@ pub enum AuditEvent {
     ClinicPatientErased,
     /// A clinic note was copied into a case (no text, no names).
     ClinicNoteToCase,
+    /// Rows of the clinic could not be read and were left out of the screens (D-178).
+    /// Meta: how many (a number only), never which or what they hold.
+    ClinicUnreadable,
 }
 
 impl AuditEvent {
@@ -113,6 +116,7 @@ impl AuditEvent {
             AuditEvent::ClinicPatientAdded => "clinic_patient_added",
             AuditEvent::ClinicPatientErased => "clinic_patient_erased",
             AuditEvent::ClinicNoteToCase => "clinic_note_to_case",
+            AuditEvent::ClinicUnreadable => "clinic_unreadable",
         }
     }
 }

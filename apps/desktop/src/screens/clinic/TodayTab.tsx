@@ -3,7 +3,7 @@
 // money through parts, quick actions that show first and roll back if the vault refuses.
 import { useState } from "react";
 import { useApp } from "../../App";
-import { ErrorLine, PlusIcon, Skeleton } from "../../components/ui";
+import { PlusIcon, Skeleton } from "../../components/ui";
 import { asUiError, ipc } from "../../ipc/client";
 import { clinicApi } from "../../ipc/clinic";
 import type { Alert } from "../../ipc/generated/Alert";
@@ -15,7 +15,7 @@ import type { VisitView } from "../../ipc/generated/VisitView";
 import { clinicKeys, useOptimistic, useOverview, useReloadClinic, useToday } from "./clinicData";
 import { formatDate, formatDateLong, formatMoney, greeting, TASK_KIND_LABEL } from "./format";
 import { NoteDialog } from "./NoteDialog";
-import { AlertList, EmptyState, PatientName, Section, useClinicNav, VisitRow } from "./parts";
+import { AlertList, EmptyState, PatientName, ReadError, Section, useClinicNav, VisitRow } from "./parts";
 import { PatientDialog } from "./PatientDialog";
 import { VisitDialog } from "./VisitDialog";
 
@@ -69,7 +69,7 @@ export function TodayTab() {
   }
 
   if (overview.error && !overview.data) {
-    return <ErrorLine error={overview.error.message} retry={reload} />;
+    return <ReadError error={overview.error.message} retry={reload} />;
   }
   if (!overview.data) {
     return (

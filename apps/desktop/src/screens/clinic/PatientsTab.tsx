@@ -5,11 +5,11 @@
 import { useMemo, useState } from "react";
 import { ageWords } from "../../components/AgeField";
 import { Segmented } from "../../components/Switch";
-import { ErrorLine, PlusIcon, Skeleton } from "../../components/ui";
+import { PlusIcon, Skeleton } from "../../components/ui";
 import type { PatientRow } from "../../ipc/generated/PatientRow";
 import { useDebounced, usePatients, useReloadClinic, useToday } from "./clinicData";
 import { CONTACT_ROLE_LABEL, formatDate, formatDateShort, formatTime, PATIENT_STATUS_LABEL, VISIT_KIND_LABEL } from "./format";
-import { EmptyState, Money, Pager, PatientName, useClinicNav, usePaged, useShownName } from "./parts";
+import { EmptyState, Money, Pager, PatientName, ReadError, useClinicNav, usePaged, useShownName } from "./parts";
 import { PatientDialog } from "./PatientDialog";
 import "./PatientsTab.css";
 
@@ -108,7 +108,7 @@ export function PatientsTab() {
   );
   const paged = usePaged(list, PAGE);
 
-  if (rows.error && !rows.data) return <ErrorLine error={rows.error.message} retry={reload} />;
+  if (rows.error && !rows.data) return <ReadError error={rows.error.message} retry={reload} />;
   if (!rows.data) {
     return (
       <div className="stack patients" aria-busy="true">

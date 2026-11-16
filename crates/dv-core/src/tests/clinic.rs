@@ -387,7 +387,10 @@ fn the_service_names_nothing_that_sends() {
         );
     }
     // The one way out of the clinic is into a case, through the core's own two functions.
-    assert!(source.contains("self.add_input(") && source.contains("self.update_input("));
+    // A record that goes for the first time is written together with the note that points to
+    // it (D-177), and learned from as `add_input` learns; a second send is `update_input`.
+    assert!(source.contains(".clinic_note_into_case(") && source.contains("self.learn_input("));
+    assert!(source.contains("self.update_input("));
 }
 
 // ------------------------------------------------------------------ patients
@@ -1995,19 +1998,18 @@ fn a_card_where_nothing_happened_is_erased_with_its_name_typed() {
     let (_dir, mut core) = open_clinic();
     let noam = new_patient(&mut core, "נועם לביא");
     let tamar = new_patient(&mut core, "תמר");
-    // Plans only: a visit ahead, one that was cancelled without a charge, and a task.
+    // Plans only: two visits ahead and a task.
     let planned = save_visit(
         &mut core,
         a_visit(&noam, VisitKind::Intake, "2026-11-20", 540),
     );
-    let cancelled = save_visit(
+    save_visit(
         &mut core,
         Visit {
             fee: 40_000,
-            ..a_visit(&noam, VisitKind::Intake, "2026-11-10", 540)
+            ..a_visit(&noam, VisitKind::Intake, "2026-11-27", 540)
         },
     );
-    mark(&mut core, &cancelled, VisitStatus::Cancelled);
     save_task(
         &mut core,
         ClinicTask {
@@ -2357,10 +2359,22 @@ fn a_case_is_linked_to_one_patient_and_can_be_unlinked() {
         ),
         "לא נמצא: המטופל"
     );
-    // The case itself was never changed by any of it.
+    // The case's materials were never changed by any of it. Its people only grew (D-177):
+    // the names of each card that was linked are names its filter knows, and stay so.
     let detail = core.case_detail(&existing).unwrap();
     assert_eq!(detail.inputs.len(), 2);
-    assert_eq!(detail.identities.len(), 2);
+    let child_of_case = detail
+        .identities
+        .iter()
+        .find(|i| i.role == Role::Child)
+        .unwrap();
+    assert_eq!(child_of_case.value, "אלון");
+    assert_eq!(child_of_case.aliases, ["נועם", "תמר"]);
+    assert!(detail
+        .identities
+        .iter()
+        .any(|i| i.role == Role::Mother && i.value == "דנה"));
+    assert_eq!(detail.identities.len(), 3);
 }
 
 #[test]
@@ -2834,4 +2848,974 @@ fn the_log_tells_of_the_clinic_in_her_words_and_names_no_one() {
         assert!(!entry.text.contains("נועם"));
         assert!(!entry.text.contains('_'), "{}", entry.text);
     }
+}
+
+// ------------------------------------------------------------------ the review of the beta
+
+fn try_save_visit(core: &mut Core, visit: Visit) -> ClinicRequest {
+    let _ = core;
+    ClinicRequest::SaveVisit {
+        visit,
+        repeat: None,
+        scope: Scope::One,
+    }
+}
+
+fn delete_visit(visit: &Visit, scope: Scope) -> ClinicRequest {
+    ClinicRequest::DeleteVisit {
+        id: visit.id.clone(),
+        scope,
+    }
+}
+
+/// D-176 (the reviewer's first finding): a visit that was held and charged, put back to
+/// "planned", could be deleted, and its card erased at once as if nothing had happened.
+#[test]
+fn a_visit_that_was_ever_marked_is_never_deleted_and_its_card_is_not_empty() {
+    let (_dir, mut core) = open_clinic();
+    let noam = new_patient(&mut core, "נועם");
+    let visit = save_visit(
+        &mut core,
+        Visit {
+            fee: 40_000,
+            ..a_visit(&noam, VisitKind::Therapy, "2026-11-10", 540)
+        },
+    );
+    let held = mark(&mut core, &visit, VisitStatus::Held);
+    assert_eq!(card(&mut core, &noam.id).balance.due, 40_000);
+    // A wrong click is corrected: no note, nothing paid. The history keeps both states.
+    let back = mark(&mut core, &held, VisitStatus::Planned);
+    assert_eq!(back.status, VisitStatus::Planned);
+    assert_eq!(card(&mut core, &noam.id).balance.due, 0);
+    assert_eq!(
+        actions(&mut core, &visit.id),
+        ["created", "changed", "changed"]
+    );
+    // It says "planned" again, and still it stays: it was held once.
+    for scope in [Scope::One, Scope::Following] {
+        let text = refused(&mut core, delete_visit(&back, scope));
+        assert!(text.contains("כבר סומנה פעם"), "{text}");
+    }
+    assert_eq!(calendar(&mut core, "2026-11-10", "2026-11-10").len(), 1);
+    // And the card is one where something happened.
+    let text = refused(&mut core, erase(&noam, "נועם"));
+    assert!(text.contains("לסגור את הכרטיס"), "{text}");
+    assert_eq!(rows(&mut core).len(), 1);
+    assert_eq!(audit_count(&mut core, "clinic_patient_erased"), 0);
+
+    // A visit that was cancelled without a charge, or missed, happened too.
+    for (name, status) in [
+        ("תמר", VisitStatus::Cancelled),
+        ("גיל", VisitStatus::NoShow),
+    ] {
+        let patient = new_patient(&mut core, name);
+        let visit = save_visit(
+            &mut core,
+            a_visit(&patient, VisitKind::Intake, "2026-11-11", 600),
+        );
+        mark(&mut core, &visit, status);
+        let text = refused(&mut core, erase(&patient, name));
+        assert!(text.contains("לסגור את הכרטיס"), "{status:?}: {text}");
+    }
+}
+
+#[test]
+fn a_mark_is_taken_back_only_while_nothing_leans_on_it() {
+    let (_dir, mut core) = open_clinic();
+    let noam = new_patient(&mut core, "נועם");
+    let priced = |date: &str| Visit {
+        fee: 40_000,
+        ..a_visit(&noam, VisitKind::Therapy, date, 540)
+    };
+    // With a session note: the note says the session happened.
+    let noted = save_visit(&mut core, priced("2026-11-03"));
+    let noted = mark(&mut core, &noted, VisitStatus::Held);
+    save_note(&mut core, a_note(&noam, Some(&noted), "התקיימה פגישה."));
+    let planned = Visit {
+        status: VisitStatus::Planned,
+        ..noted.clone()
+    };
+    let request = try_save_visit(&mut core, planned);
+    let text = refused(&mut core, request);
+    assert!(
+        text.contains("יש סיכום") && text.contains("כמבוטלת"),
+        "{text}"
+    );
+    // Paid: the money received would be left with no session behind it.
+    let paid = save_visit(&mut core, priced("2026-11-04"));
+    let paid = mark(&mut core, &paid, VisitStatus::Held);
+    let payment = save_payment(&mut core, a_payment(&noam, "2026-11-04", 80_000));
+    let planned = Visit {
+        status: VisitStatus::Planned,
+        ..paid.clone()
+    };
+    let request = try_save_visit(&mut core, planned.clone());
+    let text = refused(&mut core, request);
+    assert!(text.contains("כבר נרשם תשלום"), "{text}");
+    assert!(text.contains("לבטל קודם את התקבול"), "{text}");
+    let before = diary(&mut core, "2026-11");
+    assert_eq!((before.charged, before.received), (80_000, 80_000));
+    // Any other change of a mark is always possible, and the history keeps it.
+    let cancelled = save_visit(
+        &mut core,
+        Visit {
+            status: VisitStatus::Cancelled,
+            status_note: "סומנה בטעות".to_owned(),
+            ..paid.clone()
+        },
+    );
+    assert_eq!(cancelled.status, VisitStatus::Cancelled);
+    mark(&mut core, &cancelled, VisitStatus::Held);
+    // Once the payment is voided, the wrong click can be corrected.
+    ask(
+        &mut core,
+        ClinicRequest::VoidPayment {
+            id: payment.id,
+            reason: "נרשם בטעות".to_owned(),
+        },
+    );
+    let request = try_save_visit(&mut core, planned);
+    assert!(matches!(core.clinic(request), Ok(ClinicReply::Saved(_))));
+    // A cancelled visit that cost nothing goes back freely, and still is never deleted.
+    let free = save_visit(
+        &mut core,
+        a_visit(&noam, VisitKind::Meeting, "2026-11-05", 540),
+    );
+    let free = mark(&mut core, &free, VisitStatus::Cancelled);
+    let free = mark(&mut core, &free, VisitStatus::Planned);
+    refused(&mut core, delete_visit(&free, Scope::One));
+}
+
+#[test]
+fn deleting_the_rest_of_a_series_leaves_a_visit_that_was_ever_marked() {
+    let (_dir, mut core) = open_clinic();
+    let noam = new_patient(&mut core, "נועם");
+    let series = save_visits(
+        &mut core,
+        a_visit(&noam, VisitKind::Therapy, "2026-12-01", 540),
+        Some(Repeat {
+            every_weeks: 1,
+            count: 4,
+        }),
+        Scope::One,
+    )
+    .visits;
+    let third = series[2].visit.clone();
+    let marked = mark(&mut core, &third, VisitStatus::NoShow);
+    mark(&mut core, &marked, VisitStatus::Planned);
+    ask(&mut core, delete_visit(&series[0].visit, Scope::Following));
+    let left = calendar(&mut core, "2026-12-01", "2026-12-31");
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].visit.id, third.id);
+}
+
+/// D-177 (the reviewer's second finding): a record never moves to another card, so one
+/// card's erase or change never reaches another card's money or its history.
+#[test]
+fn a_payment_a_charge_and_a_visit_never_move_to_another_card() {
+    let (_dir, mut core) = open_clinic();
+    let noam = new_patient(&mut core, "נועם");
+    let tamar = new_patient(&mut core, "תמר");
+    let payment = save_payment(&mut core, a_payment(&noam, "2026-11-02", 10_000));
+    let text = refused(
+        &mut core,
+        ClinicRequest::SavePayment {
+            payment: Payment {
+                patient_id: tamar.id.clone(),
+                ..payment.clone()
+            },
+        },
+    );
+    assert!(
+        text.contains("אי אפשר להעביר תקבול") && text.contains("לבטל"),
+        "{text}"
+    );
+    let charge = save_charge(&mut core, a_charge(&noam, "2026-11-02", 10_000));
+    let text = refused(
+        &mut core,
+        ClinicRequest::SaveCharge {
+            charge: Charge {
+                patient_id: tamar.id.clone(),
+                ..charge.clone()
+            },
+        },
+    );
+    assert!(
+        text.contains("אי אפשר להעביר חיוב") && text.contains("לבטל"),
+        "{text}"
+    );
+    let visit = save_visit(
+        &mut core,
+        a_visit(&noam, VisitKind::Intake, "2026-11-20", 540),
+    );
+    let moved = Visit {
+        patient_id: Some(tamar.id.clone()),
+        ..visit.clone()
+    };
+    let request = try_save_visit(&mut core, moved);
+    let text = refused(&mut core, request);
+    assert!(text.contains("אי אפשר להעביר פגישה"), "{text}");
+    // Nor does a patient's visit become time she blocked for herself.
+    let blocked = Visit {
+        patient_id: None,
+        kind: VisitKind::Block,
+        ..visit.clone()
+    };
+    let request = try_save_visit(&mut core, blocked);
+    let text = refused(&mut core, request);
+    assert!(text.contains("לזמן שמור"), "{text}");
+    // Nothing moved, and nothing was written.
+    let c = card(&mut core, &noam.id);
+    assert_eq!(
+        (c.payments.len(), c.charges.len(), c.visits.len()),
+        (1, 1, 1)
+    );
+    let c = card(&mut core, &tamar.id);
+    assert_eq!(
+        (c.payments.len(), c.charges.len(), c.visits.len()),
+        (0, 0, 0)
+    );
+    for id in [&payment.id, &charge.id, &visit.id] {
+        assert_eq!(actions(&mut core, id), ["created"]);
+    }
+    // Time she blocked for herself can still become a visit with a patient.
+    let block = save_visit(
+        &mut core,
+        Visit {
+            patient_id: None,
+            ..a_visit(&noam, VisitKind::Block, "2026-11-21", 540)
+        },
+    );
+    let given = save_visit(
+        &mut core,
+        Visit {
+            patient_id: Some(tamar.id.clone()),
+            kind: VisitKind::Intake,
+            ..block
+        },
+    );
+    assert_eq!(given.patient_id.as_deref(), Some(tamar.id.as_str()));
+}
+
+fn raw_put(core: &mut Core, kind: &str, patient: &Patient, date: &str, json: &str) -> String {
+    core.vault_mut()
+        .unwrap()
+        .clinic_put(
+            kind,
+            None,
+            Some(&patient.id),
+            rules::day_number(date).unwrap(),
+            json,
+            Some("created"),
+        )
+        .unwrap()
+}
+
+/// D-178 (the reviewer's third finding): a value of a later version is shown as "unknown"
+/// and never turned into something else.
+#[test]
+fn a_value_this_version_does_not_know_is_shown_and_never_rewritten() {
+    let (_dir, mut core) = open_clinic();
+    let noam = new_patient(&mut core, "נועם");
+    let json = format!(
+        r#"{{"patient_id":"{}","date":"2026-11-02","amount":12000,"method":"crypto_coin","receipt":"7"}}"#,
+        noam.id
+    );
+    let id = raw_put(&mut core, "payment", &noam, "2026-11-02", &json);
+    let c = card(&mut core, &noam.id);
+    assert_eq!(c.payments.len(), 1);
+    assert_eq!(c.payments[0].method, PayMethod::Unknown);
+    assert_eq!(c.balance.paid, 12_000);
+    // The diary counts it, under a method of its own, so the methods still add up.
+    let month = diary(&mut core, "2026-11");
+    assert_eq!(month.received, 12_000);
+    assert_eq!(month.by_method.len(), 1);
+    assert_eq!(month.by_method[0].method, PayMethod::Unknown);
+    let lines = history(&mut core, &id).remove(0).lines;
+    assert!(
+        lines.iter().any(|l| l.contains("אמצעי לא מוכר")),
+        "{lines:?}"
+    );
+    // Nothing writes it back as it is: not a save, not a void.
+    let text = refused(
+        &mut core,
+        ClinicRequest::SavePayment {
+            payment: Payment {
+                note: "הערה".to_owned(),
+                ..c.payments[0].clone()
+            },
+        },
+    );
+    assert!(
+        text.contains("אמצעי התשלום") && text.contains("לא מכירה"),
+        "{text}"
+    );
+    let text = refused(
+        &mut core,
+        ClinicRequest::VoidPayment {
+            id: id.clone(),
+            reason: "טעות".to_owned(),
+        },
+    );
+    assert!(text.contains("לא מכירה"), "{text}");
+    let stored = core.vault_ref().unwrap().clinic_get(&id).unwrap().unwrap();
+    assert_eq!(stored.json, json);
+    // She picks a value herself: then it is saved.
+    let saved = save_payment(
+        &mut core,
+        Payment {
+            method: PayMethod::Transfer,
+            ..c.payments[0].clone()
+        },
+    );
+    assert_eq!(saved.method, PayMethod::Transfer);
+
+    // The same for a visit's kind and status, a task's kind, a card's status and a role.
+    let json = format!(
+        r#"{{"patient_id":"{}","kind":"home_visit","date":"2026-11-03","start":540,"minutes":60,"status":"postponed"}}"#,
+        noam.id
+    );
+    let visit_id = raw_put(&mut core, "visit", &noam, "2026-11-03", &json);
+    let shown = calendar(&mut core, "2026-11-03", "2026-11-03")
+        .remove(0)
+        .visit;
+    assert_eq!(shown.id, visit_id);
+    assert_eq!(
+        (shown.kind, shown.status),
+        (VisitKind::Unknown, VisitStatus::Unknown)
+    );
+    let request = try_save_visit(&mut core, shown.clone());
+    let text = refused(&mut core, request);
+    assert!(text.contains("סוג הפגישה"), "{text}");
+    let request = try_save_visit(
+        &mut core,
+        Visit {
+            kind: VisitKind::Other,
+            ..shown
+        },
+    );
+    let text = refused(&mut core, request);
+    assert!(text.contains("מצב הפגישה"), "{text}");
+    // No screen fell over any of it.
+    overview(&mut core);
+    income(&mut core, 2026);
+    rows(&mut core);
+}
+
+/// D-178: one row that cannot be read does not take the clinic with it. It is left out,
+/// counted, said on the front page and in the log (a number only), and never touched.
+#[test]
+fn a_row_that_cannot_be_read_is_left_out_counted_and_reported() {
+    const CANARY: &str = "תוכן-בדוי-שלא-נקרא";
+    let (_dir, mut core) = open_clinic();
+    let noam = new_patient(&mut core, "נועם");
+    save_payment(&mut core, a_payment(&noam, "2026-11-02", 10_000));
+    assert!(overview(&mut core)
+        .alerts
+        .iter()
+        .all(|a| a.kind != AlertKind::Unreadable));
+    assert_eq!(audit_count(&mut core, "clinic_unreadable"), 0);
+    // A payment whose amount is not a number, and a visit that is not an object at all.
+    let broken = format!(r#"{{"amount":"{CANARY}","note":"{CANARY}"}}"#);
+    let bad = raw_put(&mut core, "payment", &noam, "2026-11-03", &broken);
+    let first = overview(&mut core);
+    let alert = first
+        .alerts
+        .first()
+        .filter(|a| a.kind == AlertKind::Unreadable)
+        .unwrap();
+    hebrew(&alert.text);
+    assert!(
+        alert.text.starts_with("רישום אחד בקליניקה לא נקרא"),
+        "{}",
+        alert.text
+    );
+    assert!(alert.patient_id.is_none() && alert.patient_name.is_none());
+    assert_eq!(first.month_received, 10_000);
+    raw_put(&mut core, "visit", &noam, "2026-11-04", "[1,2]");
+    let second = overview(&mut core);
+    assert!(second.alerts[0]
+        .text
+        .starts_with("2 רישומים בקליניקה לא נקראו"));
+    overview(&mut core);
+    // Every screen works, without the rows.
+    let c = card(&mut core, &noam.id);
+    assert_eq!((c.payments.len(), c.visits.len()), (1, 0));
+    assert_eq!(diary(&mut core, "2026-11").received, 10_000);
+    assert_eq!(income(&mut core, 2026).received, 10_000);
+    assert_eq!(rows(&mut core).len(), 1);
+    assert!(calendar(&mut core, "2026-11-01", "2026-11-30").is_empty());
+    // The log: one line for each count, a number only.
+    let log = core.activity(None).unwrap();
+    let said: Vec<&str> = log
+        .entries
+        .iter()
+        .filter(|e| e.event == "clinic_unreadable")
+        .map(|e| e.text.as_str())
+        .collect();
+    assert_eq!(
+        said,
+        [
+            "2 רישומים בקליניקה לא נקראו, והם לא מוצגים במסכים",
+            "רישום אחד בקליניקה לא נקרא, והוא לא מוצג במסכים",
+        ]
+    );
+    for entry in &log.entries {
+        assert!(!entry.text.contains(CANARY) && !entry.text.contains("נועם"));
+    }
+    assert!(format!("{first:?}{second:?}").find(CANARY).is_none());
+    // The row is as it was.
+    let stored = core.vault_ref().unwrap().clinic_get(&bad).unwrap().unwrap();
+    assert_eq!(stored.json, broken);
+    // What is decided from all of a card's records is not decided without one of them.
+    assert!(matches!(
+        core.clinic(erase(&noam, "נועם")),
+        Err(CoreError::Internal(_))
+    ));
+    assert!(matches!(
+        core.clinic(ClinicRequest::Message {
+            kind: MessageKind::Payment,
+            patient_id: noam.id.clone(),
+            visit_id: None,
+        }),
+        Err(CoreError::Internal(_))
+    ));
+    assert_eq!(rows(&mut core).len(), 1);
+}
+
+#[test]
+fn settings_written_before_a_field_was_added_still_load() {
+    let (_dir, mut core) = open_clinic();
+    // A default with no fee, a template with no text, and a kind of a later version.
+    let json = r#"{"defaults":[{"kind":"intake","minutes":45},{"kind":"hologram","minutes":30}],
+                   "note_templates":[{"name":"תבנית ישנה"}]}"#;
+    core.vault_mut()
+        .unwrap()
+        .clinic_put("settings", None, None, 0, json, None)
+        .unwrap();
+    let settings = match ask(&mut core, ClinicRequest::Settings) {
+        ClinicReply::Settings(s) => s,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(settings.defaults.len(), 2);
+    assert_eq!(
+        (
+            settings.defaults[0].kind,
+            settings.defaults[0].minutes,
+            settings.defaults[0].fee
+        ),
+        (VisitKind::Intake, 45, 0)
+    );
+    assert_eq!(settings.defaults[1].kind, VisitKind::Unknown);
+    assert_eq!(settings.note_templates[0].text, "");
+    assert_eq!(settings.report_days, ClinicSettings::default().report_days);
+    overview(&mut core);
+    // Saved as they are they are refused; nothing is rewritten by itself.
+    refused(&mut core, ClinicRequest::SaveSettings { settings });
+}
+
+fn identities_of(core: &mut Core, case_id: &str) -> Vec<(Role, String, Vec<String>)> {
+    core.case_detail(case_id)
+        .unwrap()
+        .identities
+        .into_iter()
+        .map(|i| (i.role, i.value, i.aliases))
+        .collect()
+}
+
+/// D-177 (the reviewer's fourth finding, the one about privacy): the names of a card are
+/// names its case's filter knows, however the card came to the case and whenever a name
+/// was added.
+#[test]
+fn the_names_of_a_card_are_known_to_its_case_whenever_they_are_linked_or_change() {
+    let (_dir, mut core, existing) = setup(None);
+    let before = identities_of(&mut core, &existing);
+    assert!(before.iter().all(|(_, value, _)| value != "יהלי בן חיים"));
+    let family = save_patient(
+        &mut core,
+        Patient {
+            name: "יהלי בן חיים".to_owned(),
+            contacts: vec![contact(ContactRole::Mother, "סיגל בן חיים")],
+            ..child("")
+        },
+    );
+    // Linking a case she made by hand registers the child and the contact.
+    link_case(&mut core, &family, Some(&existing));
+    let linked = identities_of(&mut core, &existing);
+    assert_eq!(linked.len(), before.len() + 1);
+    // The case already had its child: the card's name is another way that child is written.
+    let child_of_case = linked
+        .iter()
+        .find(|(role, _, _)| *role == Role::Child)
+        .unwrap();
+    assert_eq!(child_of_case.1, "אלון");
+    assert_eq!(child_of_case.2, ["יהלי בן חיים"]);
+    assert!(linked.contains(&(Role::Mother, "סיגל בן חיים".to_owned(), Vec::new())));
+    // Everything the case had is as it was.
+    for known in &before {
+        assert!(linked
+            .iter()
+            .any(|now| now.0 == known.0 && now.1 == known.1));
+    }
+    // A contact added later, and a child's name that was corrected.
+    let family = save_patient(
+        &mut core,
+        Patient {
+            name: "יהלי בן-חיים".to_owned(),
+            contacts: vec![
+                contact(ContactRole::Mother, "סיגל בן חיים"),
+                contact(ContactRole::Father, "אלעד בן חיים"),
+                contact(ContactRole::Guardian, "נחמה וייס"),
+            ],
+            ..family
+        },
+    );
+    let later = identities_of(&mut core, &existing);
+    assert!(later.contains(&(Role::Father, "אלעד בן חיים".to_owned(), Vec::new())));
+    assert!(later.contains(&(Role::Other, "נחמה וייס".to_owned(), Vec::new())));
+    let child_of_case = later
+        .iter()
+        .find(|(role, _, _)| *role == Role::Child)
+        .unwrap();
+    assert_eq!(child_of_case.2, ["יהלי בן חיים", "יהלי בן-חיים"]);
+    // A contact taken off the card stays a name the case hides.
+    let family = save_patient(
+        &mut core,
+        Patient {
+            contacts: vec![contact(ContactRole::Mother, "סיגל בן חיים")],
+            ..family
+        },
+    );
+    let after = identities_of(&mut core, &existing);
+    assert_eq!(after, later);
+    // Saving again adds nothing twice.
+    save_patient(&mut core, family);
+    assert_eq!(identities_of(&mut core, &existing), later);
+}
+
+#[test]
+fn a_record_sent_to_a_hand_made_case_has_a_later_contact_hidden_by_the_filter() {
+    let (_dir, mut core, existing) = setup(None);
+    let family = save_patient(
+        &mut core,
+        Patient {
+            name: "יהלי בן חיים".to_owned(),
+            contacts: vec![contact(ContactRole::Mother, "סיגל בן חיים")],
+            ..child("")
+        },
+    );
+    link_case(&mut core, &family, Some(&existing));
+    let family = save_patient(
+        &mut core,
+        Patient {
+            contacts: vec![
+                contact(ContactRole::Mother, "סיגל בן חיים"),
+                contact(ContactRole::Other, "זהבית קורן"),
+            ],
+            ..family
+        },
+    );
+    // A name the filter would have no other reason to hide: no title, no cue before it.
+    let record =
+        "בפגישה השתתפה גם זהבית קורן. יהלי בן חיים שיתף פעולה, וסיגל בן חיים הצטרפה בסוף. \
+                  לדברי זהבית קורן יש שיפור בהתארגנות.";
+    let note = save_note(&mut core, a_note(&family, None, record));
+    // Even if the case lost the names in between (she removed them there), the send itself
+    // puts them back before the record goes.
+    let kept: Vec<IdentityInput> = core
+        .case_detail(&existing)
+        .unwrap()
+        .identities
+        .into_iter()
+        .filter(|i| i.value != "זהבית קורן")
+        .map(|i| IdentityInput {
+            id: Some(i.id),
+            role: i.role,
+            value: i.value,
+            aliases: i.aliases,
+        })
+        .collect();
+    core.set_identities(&existing, kept).unwrap();
+    assert!(identities_of(&mut core, &existing)
+        .iter()
+        .all(|(_, value, _)| value != "זהבית קורן"));
+    let sent = note_to_case(&mut core, &note);
+    assert!(identities_of(&mut core, &existing)
+        .iter()
+        .any(|(role, value, _)| *role == Role::Other && value == "זהבית קורן"));
+    let detail = core.case_detail(&existing).unwrap();
+    let material = detail
+        .inputs
+        .iter()
+        .find(|i| Some(&i.id) == sent.case_input_id.as_ref())
+        .unwrap();
+    assert_eq!(material.content, record);
+    let filtered = core.preview_filter(&existing, &material.content).unwrap();
+    for name in ["זהבית", "קורן", "יהלי", "סיגל", "בן חיים"] {
+        assert!(
+            !filtered.tagged.contains(name),
+            "{name}: {}",
+            filtered.tagged
+        );
+    }
+    assert!(filtered.tagged.contains("שיפור בהתארגנות"));
+}
+
+/// D-177 (the fifth finding): the first send writes the material and the note together, and
+/// a send asked again finds the note already pointing at its material.
+#[test]
+fn a_record_is_never_added_to_a_case_twice() {
+    let (_dir, mut core) = open_clinic();
+    let noam = new_patient(&mut core, "נועם");
+    let link = create_case(&mut core, &noam);
+    let note = save_note(&mut core, a_note(&noam, None, "שיחת טלפון עם ההורים."));
+    let sent = note_to_case(&mut core, &note);
+    let input_id = sent.case_input_id.clone().unwrap();
+    // The note as kept names the material, and the material is in the case.
+    let kept = card(&mut core, &noam.id).notes.remove(0);
+    assert_eq!(kept.case_input_id.as_deref(), Some(input_id.as_str()));
+    let inputs = core.case_detail(&link.id).unwrap().inputs;
+    assert_eq!(inputs.len(), 1);
+    assert_eq!(inputs[0].id, input_id);
+    assert_eq!(actions(&mut core, &note.id), ["created", "changed"]);
+    // Asked again, with the note as the window still has it (no material id): replaced.
+    for _ in 0..2 {
+        let again = note_to_case(&mut core, &note);
+        assert_eq!(again.case_input_id.as_deref(), Some(input_id.as_str()));
+    }
+    assert_eq!(core.case_detail(&link.id).unwrap().inputs.len(), 1);
+    assert_eq!(actions(&mut core, &note.id), ["created", "changed"]);
+}
+
+/// D-176 (the seventh finding): "this one and every later one" never moves a visit that has
+/// a session note, or one that is no longer planned.
+#[test]
+fn a_series_change_leaves_a_later_visit_with_a_note_where_it_is() {
+    let (_dir, mut core) = open_clinic();
+    let noam = new_patient(&mut core, "נועם");
+    let series = save_visits(
+        &mut core,
+        a_visit(&noam, VisitKind::Therapy, "2026-12-01", 540),
+        Some(Repeat {
+            every_weeks: 1,
+            count: 5,
+        }),
+        Scope::One,
+    );
+    assert_eq!(series.left_alone, 0);
+    let visits: Vec<Visit> = series.visits.into_iter().map(|v| v.visit).collect();
+    // The third has a note written ahead; the fourth was cancelled.
+    let noted = visits[2].clone();
+    save_note(&mut core, a_note(&noam, Some(&noted), "הכנה לפגישה."));
+    let cancelled = mark(&mut core, &visits[3], VisitStatus::Cancelled);
+    let saved = save_visits(
+        &mut core,
+        Visit {
+            date: "2026-12-02".to_owned(),
+            start: 600,
+            place: "זום".to_owned(),
+            ..visits[0].clone()
+        },
+        None,
+        Scope::Following,
+    );
+    assert_eq!(saved.left_alone, 2);
+    let moved: Vec<&str> = saved.visits.iter().map(|v| v.visit.date.as_str()).collect();
+    assert_eq!(moved, ["2026-12-02", "2026-12-09", "2026-12-30"]);
+    let all = calendar(&mut core, "2026-12-01", "2026-12-31");
+    let now_noted = all.iter().find(|v| v.visit.id == noted.id).unwrap();
+    assert_eq!(now_noted.visit, noted);
+    assert!(now_noted.has_note);
+    let now_cancelled = all.iter().find(|v| v.visit.id == cancelled.id).unwrap();
+    assert_eq!(now_cancelled.visit, cancelled);
+    assert_eq!(actions(&mut core, &noted.id), ["created"]);
+    // One visit alone says nothing was left.
+    let alone = save_visits(
+        &mut core,
+        Visit {
+            start: 660,
+            ..visits[1].clone()
+        },
+        None,
+        Scope::One,
+    );
+    assert_eq!(alone.left_alone, 0);
+}
+
+fn erase_on(core: &mut Core, patient: &Patient, day: &str) {
+    assert_eq!(
+        core.clinic_erase_on(&patient.id, &patient.name, day)
+            .unwrap(),
+        ClinicReply::Done
+    );
+}
+
+/// A family whose retention period can pass: an adult child, and everything long ago.
+fn an_old_family(core: &mut Core, name: &str) -> Patient {
+    let patient = save_patient(
+        core,
+        Patient {
+            birth_date: Some("2000-05-05".to_owned()),
+            created_on: "2026-01-20".to_owned(),
+            ..child(name)
+        },
+    );
+    let priced = |kind, date: &str, start| Visit {
+        fee: 40_000,
+        ..a_visit(&patient, kind, date, start)
+    };
+    let intake = save_visit(core, priced(VisitKind::Intake, "2026-02-03", 540));
+    mark(core, &intake, VisitStatus::Held);
+    for date in ["2026-02-10", "2026-03-03"] {
+        let visit = save_visit(core, priced(VisitKind::Assessment, date, 540));
+        mark(core, &visit, VisitStatus::Held);
+    }
+    let missed = save_visit(core, priced(VisitKind::Assessment, "2026-03-10", 540));
+    save_visit(
+        core,
+        Visit {
+            status: VisitStatus::NoShow,
+            charge_missed: true,
+            ..missed
+        },
+    );
+    let cancelled = save_visit(core, priced(VisitKind::Feedback, "2026-03-17", 540));
+    mark(core, &cancelled, VisitStatus::Cancelled);
+    save_visit(core, priced(VisitKind::Feedback, "2026-03-24", 540));
+    save_charge(core, a_charge(&patient, "2026-03-05", 150_000));
+    let wrong = save_charge(core, a_charge(&patient, "2026-03-06", 99_000));
+    ask(
+        core,
+        ClinicRequest::VoidCharge {
+            id: wrong.id,
+            reason: "נרשם פעמיים".to_owned(),
+        },
+    );
+    save_payment(core, a_payment(&patient, "2026-02-03", 40_000));
+    save_payment(
+        core,
+        Payment {
+            method: PayMethod::Transfer,
+            receipt: String::new(),
+            ..a_payment(&patient, "2026-03-05", 150_000)
+        },
+    );
+    let wrong = save_payment(core, a_payment(&patient, "2026-03-06", 77_000));
+    ask(
+        core,
+        ClinicRequest::VoidPayment {
+            id: wrong.id,
+            reason: "נרשם פעמיים".to_owned(),
+        },
+    );
+    save_note(core, a_note(&patient, Some(&intake), "פגישת היכרות."));
+    patient
+}
+
+/// D-179: erasing a card takes the names and the records, and the summaries of the years
+/// that passed stay exactly as they were.
+#[test]
+fn the_yearly_summary_and_the_diary_totals_are_the_same_after_an_erase() {
+    const DAY: &str = "2100-01-01";
+    let (_dir, mut core) = open_clinic();
+    let stays = new_patient(&mut core, "תמר");
+    let visit = save_visit(
+        &mut core,
+        Visit {
+            fee: 35_000,
+            ..a_visit(&stays, VisitKind::Therapy, "2026-03-04", 700)
+        },
+    );
+    mark(&mut core, &visit, VisitStatus::Held);
+    save_payment(&mut core, a_payment(&stays, "2026-03-04", 35_000));
+    let first = an_old_family(&mut core, "אלמוג דוידי");
+    let second = an_old_family(&mut core, "שחר אביטל");
+
+    let year_before = income(&mut core, 2026);
+    assert_eq!(year_before.new_patients, 3);
+    let months = ["2026-01", "2026-02", "2026-03", "2026-04"];
+    let diaries_before: Vec<DiaryMonth> = months.iter().map(|m| diary(&mut core, m)).collect();
+    let totals = |d: &DiaryMonth| {
+        (
+            d.charged,
+            d.received,
+            d.by_method.clone(),
+            d.missing_receipts,
+        )
+    };
+    assert!(diaries_before.iter().all(|d| d.erased.is_none()));
+
+    erase_on(&mut core, &first, DAY);
+    assert_eq!(income(&mut core, 2026), year_before);
+    erase_on(&mut core, &second, DAY);
+    let year_after = income(&mut core, 2026);
+    assert_eq!(year_after, year_before);
+    assert_eq!(income(&mut core, 2025).new_patients, 0);
+    for (month, before) in months.iter().zip(&diaries_before) {
+        let after = diary(&mut core, month);
+        assert_eq!(totals(&after), totals(before), "{month}");
+    }
+    // March: the family that stays has its lines; the two that went are one line.
+    let march = diary(&mut core, "2026-03");
+    let lines: Vec<&str> = march
+        .days
+        .iter()
+        .flat_map(|d| &d.lines)
+        .map(|l| l.patient_name.as_str())
+        .collect();
+    assert_eq!(lines, ["תמר", "תמר"]);
+    let erased = march.erased.clone().unwrap();
+    assert_eq!(erased.label, "רשומות של כרטיסים שנמחקו");
+    hebrew(&erased.label);
+    assert_eq!((erased.held, erased.cancelled, erased.no_show), (2, 2, 2));
+    assert_eq!(
+        (erased.charged, erased.received),
+        (2 * (40_000 + 40_000 + 150_000), 2 * 150_000)
+    );
+    assert_eq!(march.missing_receipts, 2);
+    // A month in which the erased cards had nothing has no such line.
+    assert!(diary(&mut core, "2026-04").erased.is_none());
+    assert!(diary(&mut core, "2026-01").erased.is_none());
+
+    // What is kept: months, counts and sums. There is no field for a name, an id or a text,
+    // and the kept JSON holds none of the erased families' words.
+    let v = core.vault_ref().unwrap();
+    let row = v.clinic_get("tally").unwrap().unwrap();
+    assert_eq!(
+        (row.kind.as_str(), row.patient_id.clone(), row.day),
+        ("tally", None, 0)
+    );
+    let tally: rules::ErasedTally = serde_json::from_str(&row.json).unwrap();
+    assert_eq!(
+        tally.months.keys().collect::<Vec<_>>(),
+        ["2026-02", "2026-03"]
+    );
+    let february = &tally.months["2026-02"];
+    assert_eq!(
+        february.held,
+        [
+            rules::KindCount {
+                kind: VisitKind::Intake,
+                count: 2
+            },
+            rules::KindCount {
+                kind: VisitKind::Assessment,
+                count: 2
+            },
+        ]
+    );
+    assert_eq!((february.cancelled, february.no_show), (0, 0));
+    assert_eq!(february.charged, 160_000);
+    assert_eq!(
+        february.received,
+        [rules::ErasedMethod {
+            method: PayMethod::Bit,
+            amount: 80_000
+        }]
+    );
+    let cards_json = v.clinic_erased_cards().unwrap().unwrap();
+    let cards: rules::ErasedCards = serde_json::from_str(&cards_json).unwrap();
+    assert_eq!(
+        cards.months.into_iter().collect::<Vec<_>>(),
+        [("2026-01".to_owned(), 2)]
+    );
+    for kept in [&row.json, &cards_json] {
+        for word in [
+            "אלמוג",
+            "דוידי",
+            "שחר",
+            "אביטל",
+            "דנה",
+            "פגישת היכרות",
+            "חבילת אבחון",
+            "נרשם פעמיים",
+            "101",
+            &first.id,
+            &second.id,
+        ] {
+            assert!(!kept.contains(word), "{word} is in {kept}");
+        }
+    }
+    // The records and the cards are gone, and the other family is whole.
+    assert!(v.clinic_of_patient(&first.id).unwrap().is_empty());
+    assert!(v.clinic_patient(&second.id).unwrap().is_none());
+    assert_eq!(rows(&mut core).len(), 1);
+    assert_eq!(card(&mut core, &stays.id).visits.len(), 1);
+    // The log: that a card went and how many records, nothing of the sums or the months.
+    let log = core.activity(None).unwrap();
+    let said: Vec<&str> = log
+        .entries
+        .iter()
+        .filter(|e| e.event == "clinic_patient_erased")
+        .map(|e| e.text.as_str())
+        .collect();
+    assert_eq!(said, ["כרטיס מטופל נמחק מהקליניקה, ואיתו 12 רישומים"; 2]);
+    assert!(log.intact);
+    // The front page counts what was received this month with the erased cards' part.
+    let march_day = Today {
+        date: "2026-03-20".to_owned(),
+        minute: 600,
+    };
+    match ask(&mut core, ClinicRequest::Overview { today: march_day }) {
+        ClinicReply::Overview(o) => assert_eq!(o.month_received, 35_000 + 2 * 150_000),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_card_where_nothing_happened_leaves_nothing_behind() {
+    let (_dir, mut core) = open_clinic();
+    let noam = new_patient(&mut core, "נועם");
+    save_visit(
+        &mut core,
+        a_visit(&noam, VisitKind::Intake, "2026-11-20", 540),
+    );
+    assert_eq!(income(&mut core, 2026).new_patients, 1);
+    ask(&mut core, erase(&noam, "נועם"));
+    // A card opened by mistake was never a new patient.
+    assert_eq!(income(&mut core, 2026).new_patients, 0);
+    let v = core.vault_ref().unwrap();
+    assert!(v.clinic_get("tally").unwrap().is_none());
+    assert!(v.clinic_erased_cards().unwrap().is_none());
+}
+
+#[test]
+fn a_birth_date_that_has_not_come_is_refused_when_a_card_is_saved() {
+    let (_dir, mut core) = open_clinic();
+    let day = |offset: i64| rules::add_days(&dates::iso(dates::today()), offset).unwrap();
+    // Her evening can be the core's next day: one day ahead is still "today" somewhere.
+    for offset in [-1, 0, 1] {
+        let saved = save_patient(
+            &mut core,
+            Patient {
+                birth_date: Some(day(offset)),
+                ..child("נועם")
+            },
+        );
+        assert_eq!(saved.birth_date, Some(day(offset)));
+    }
+    for offset in [2, 400] {
+        let text = refused(
+            &mut core,
+            ClinicRequest::SavePatient {
+                patient: Patient {
+                    birth_date: Some(day(offset)),
+                    ..child("תמר")
+                },
+            },
+        );
+        assert!(text.contains("תאריך הלידה עוד לא הגיע"), "{text}");
+    }
+    assert_eq!(rows(&mut core).len(), 3);
+    // An existing card is held to the same rule.
+    let noam = rows(&mut core).remove(0).patient;
+    refused(
+        &mut core,
+        ClinicRequest::SavePatient {
+            patient: Patient {
+                birth_date: Some(day(30)),
+                ..noam
+            },
+        },
+    );
 }

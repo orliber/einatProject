@@ -11,7 +11,7 @@ import type { ContactRole } from "../../ipc/generated/ContactRole";
 import type { Patient } from "../../ipc/generated/Patient";
 import type { PatientStatus } from "../../ipc/generated/PatientStatus";
 import { useSavePatient, useToday } from "./clinicData";
-import { CONTACT_ROLE_LABEL, CONTACT_ROLES, parseMoney, PATIENT_STATUS_LABEL } from "./format";
+import { CONTACT_ROLE_LABEL, CONTACT_ROLES, optionsWith, parseMoney, PATIENT_STATUS_LABEL } from "./format";
 import { CheckField, Field, MoneyField, moneyProblem, moneyText, SelectField, TextAreaField, TextField } from "./parts";
 
 export interface PatientDialogProps {
@@ -147,6 +147,7 @@ export function PatientDialog({ patient, waiting = false, onClose, onSaved }: Pa
             </div>
           )}
           {form.status === "closed" && <p className="hint">כרטיס שהסתיים יוצא מהרשימה הפעילה, וכל מה שנרשם בו נשאר שמור.</p>}
+          {form.status === "unknown" && <p className="hint">המצב שנשמר לכרטיס הזה לא מוכר לגרסה הזו של התוכנה. כדי לשמור צריך לבחור מצב מהרשימה, או לעדכן את התוכנה.</p>}
         </div>
 
         <fieldset className="clinic-group">
@@ -155,7 +156,7 @@ export function PatientDialog({ patient, waiting = false, onClose, onSaved }: Pa
           {form.contacts.map((c, i) => (
             <div key={i} className="clinic-contact" role="group" aria-label={`איש קשר ${i + 1}`}>
               <SelectField<ContactRole> id={`contact-${i}-role`} label="קשר" value={c.role} onChange={(role) => setContact(i, { role })}
-                options={CONTACT_ROLES.map((r) => ({ value: r, label: CONTACT_ROLE_LABEL[r] }))} />
+                options={optionsWith(CONTACT_ROLES, CONTACT_ROLE_LABEL, c.role)} />
               <TextField id={`contact-${i}-name`} label="שם" value={c.name} maxLength={120} onChange={(name) => setContact(i, { name })} />
               <TextField id={`contact-${i}-phone`} label="טלפון" value={c.phone} maxLength={200} dir="ltr" inputMode="tel" onChange={(phone) => setContact(i, { phone })} />
               <TextField id={`contact-${i}-email`} label="מייל" value={c.email} maxLength={200} dir="ltr" inputMode="email" onChange={(email) => setContact(i, { email })} />

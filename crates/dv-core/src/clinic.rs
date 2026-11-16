@@ -4,21 +4,24 @@
 //!
 //! Nothing here leaves the computer and nothing here talks to a model: this file knows the
 //! vault and the rules only. The one way clinic text reaches a case is `NoteToCase`, which
-//! hands the formal record of a session (never the personal note) to the core's own
-//! `add_input` / `update_input`, exactly as a material she adds by hand; from there the
-//! case's usual filter applies. A test reads this file and fails if a name of the network or
+//! puts the formal record of a session (never the personal note) into the case as a
+//! material, exactly as one she adds by hand (the first time written together with the note
+//! that points to it, D-177; after that through the core's own `update_input`); from there
+//! the case's usual filter applies, and the names of the card are names it knows. A test reads this file and fails if a name of the network or
 //! model crates appears in it.
 //!
 //! The records are the domain types as JSON. A record's id is the vault's: it is set on
 //! every read, so the id inside the JSON never matters.
 
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 
 use dv_domain::clinic::{
     self as rules, CaseChoice, CaseLink, Charge, ClinicReply, ClinicRequest, ClinicSettings,
-    ClinicTask, ContactRole, HistoryEntry, MessageKind, MessageValues, Overview, Patient,
-    PatientCard, PatientRecords, PatientRow, PatientStatus, Payment, Repeat, SavedVisits, Scope,
-    SessionNote, Today, Visit, VisitKind, VisitStatus, VisitView,
+    ClinicTask, ContactRole, ErasedCards, ErasedTally, HistoryEntry, MessageKind, MessageValues,
+    Overview, Patient, PatientCard, PatientRecords, PatientRow, PatientStatus, Payment, Repeat,
+    SavedVisits, Scope, SessionNote, Today, Visit, VisitKind, VisitStatus, VisitView,
 };
 use dv_domain::{CaseMeta, DomainError, IdentityInput, InputKind, Role};
 use dv_vault::{AuditEvent, StoredClinicRecord, Vault};
@@ -32,6 +35,9 @@ use crate::{Core, CoreError};
 const SETTINGS: &str = "settings";
 /// The one settings record has a fixed id.
 const SETTINGS_ID: &str = "settings";
+/// The anonymous tally of the cards that were erased (D-179): one record, a fixed id.
+const TALLY: &str = "tally";
+const TALLY_ID: &str = "tally";
 const CREATED: &str = "created";
 const CHANGED: &str = "changed";
 const VOIDED: &str = "voided";
@@ -79,6 +85,11 @@ trait Kept: Serialize + DeserializeOwned + PartialEq {
     fn patient(&self) -> Option<&str>;
     /// The record's date; `None`: it has none.
     fn date(&self) -> Option<&str>;
+    /// The record holds no value of a later version (`Unknown`, D-178): only then is it
+    /// written, so such a value is never turned into something else.
+    fn known(&self) -> Result<(), DomainError> {
+        Ok(())
+    }
 }
 
 impl Kept for Visit {
@@ -95,6 +106,9 @@ impl Kept for Visit {
     }
     fn date(&self) -> Option<&str> {
         Some(&self.date)
+    }
+    fn known(&self) -> Result<(), DomainError> {
+        rules::visit_known(self)
     }
 }
 
@@ -130,6 +144,9 @@ impl Kept for Payment {
     fn date(&self) -> Option<&str> {
         Some(&self.date)
     }
+    fn known(&self) -> Result<(), DomainError> {
+        rules::payment_known(self)
+    }
 }
 
 impl Kept for Charge {
@@ -164,6 +181,9 @@ impl Kept for ClinicTask {
     fn date(&self) -> Option<&str> {
         self.due.as_deref()
     }
+    fn known(&self) -> Result<(), DomainError> {
+        rules::task_known(self)
+    }
 }
 
 fn day_of<T: Kept>(record: &T) -> i64 {
@@ -176,18 +196,33 @@ fn open<T: Kept>(row: StoredClinicRecord) -> Result<T, CoreError> {
     Ok(record)
 }
 
+/// Every row, or an error: for what is decided from a patient's records (an erase, what the
+/// family owes), which is never decided with a row missing.
 fn open_all<T: Kept>(rows: Vec<StoredClinicRecord>) -> Result<Vec<T>, CoreError> {
     rows.into_iter().map(open).collect()
 }
 
+/// The rows that read, and how many did not (D-178). A row that does not read is left in
+/// the vault exactly as it is: it is shown nowhere, counted in no total and never rewritten.
+fn open_readable<T: Kept>(rows: Vec<StoredClinicRecord>) -> (Vec<T>, u32) {
+    let total = rows.len();
+    let read: Vec<T> = rows.into_iter().filter_map(|row| open(row).ok()).collect();
+    let skipped = count(total.saturating_sub(read.len()));
+    (read, skipped)
+}
+
+fn all_counted<T: Kept>(v: &Vault) -> Result<(Vec<T>, u32), CoreError> {
+    Ok(open_readable(v.clinic_kind(T::KIND)?))
+}
+
 fn all<T: Kept>(v: &Vault) -> Result<Vec<T>, CoreError> {
-    open_all(v.clinic_kind(T::KIND)?)
+    Ok(all_counted(v)?.0)
 }
 
 /// The records of a kind dated from `from` to `to`, both included.
 fn between<T: Kept>(v: &Vault, from: &str, to: &str) -> Result<Vec<T>, CoreError> {
     match (rules::day_number(from), rules::day_number(to)) {
-        (Some(first), Some(last)) => open_all(v.clinic_range(T::KIND, first, last)?),
+        (Some(first), Some(last)) => Ok(open_readable(v.clinic_range(T::KIND, first, last)?).0),
         _ => Ok(Vec::new()),
     }
 }
@@ -202,6 +237,7 @@ fn find<T: Kept>(v: &Vault, id: &str) -> Result<T, CoreError> {
 
 /// Writes one record, new when its id is empty, and gives it the id it is kept under.
 fn write<T: Kept>(v: &mut Vault, record: &mut T, action: Option<&str>) -> Result<(), CoreError> {
+    record.known().map_err(refusal)?;
     let json = to_json(record)?;
     let id = (!record.id().is_empty()).then(|| record.id().to_owned());
     let kept = v.clinic_put(
@@ -222,11 +258,20 @@ fn open_patient(id: String, json: &str) -> Result<Patient, CoreError> {
     Ok(patient)
 }
 
-fn patients(v: &Vault) -> Result<Vec<Patient>, CoreError> {
-    v.clinic_patients()?
+/// The cards that read, and how many did not (D-178).
+fn patients_counted(v: &Vault) -> Result<(Vec<Patient>, u32), CoreError> {
+    let rows = v.clinic_patients()?;
+    let total = rows.len();
+    let read: Vec<Patient> = rows
         .into_iter()
-        .map(|(id, json)| open_patient(id, &json))
-        .collect()
+        .filter_map(|(id, json)| open_patient(id, &json).ok())
+        .collect();
+    let skipped = count(total.saturating_sub(read.len()));
+    Ok((read, skipped))
+}
+
+fn patients(v: &Vault) -> Result<Vec<Patient>, CoreError> {
+    Ok(patients_counted(v)?.0)
 }
 
 fn patient(v: &Vault, id: &str) -> Result<Patient, CoreError> {
@@ -237,6 +282,7 @@ fn patient(v: &Vault, id: &str) -> Result<Patient, CoreError> {
 }
 
 fn write_patient(v: &mut Vault, patient: &mut Patient) -> Result<(), CoreError> {
+    rules::patient_known(patient).map_err(refusal)?;
     let json = to_json(patient)?;
     let id = (!patient.id.is_empty()).then(|| patient.id.clone());
     patient.id = v.save_clinic_patient(id.as_deref(), &json)?;
@@ -251,11 +297,109 @@ fn patient_exists(v: &Vault, id: &str) -> Result<(), CoreError> {
     Ok(())
 }
 
-fn settings(v: &Vault) -> Result<ClinicSettings, CoreError> {
-    match v.clinic_get(SETTINGS_ID)? {
-        Some(row) if row.kind == SETTINGS => from_json(&row.json),
-        _ => Ok(ClinicSettings::default()),
+/// How the clinic works, and whether the stored settings could not be read (D-178): then
+/// the defaults are shown, and the stored row stays as it is until she saves settings.
+fn settings_counted(v: &Vault) -> (ClinicSettings, u32) {
+    match v.clinic_get(SETTINGS_ID) {
+        Ok(Some(row)) if row.kind == SETTINGS => match from_json(&row.json) {
+            Ok(settings) => (settings, 0),
+            Err(_) => (ClinicSettings::default(), 1),
+        },
+        Ok(_) => (ClinicSettings::default(), 0),
+        // A row that does not open is counted by the vault's own scan.
+        Err(_) => (ClinicSettings::default(), 0),
     }
+}
+
+fn settings(v: &Vault) -> ClinicSettings {
+    settings_counted(v).0
+}
+
+/// The tally of erased cards as it must be read before it is written again: an error when
+/// it is there and does not read, so an erase never replaces it with less.
+fn tally_strict(v: &Vault) -> Result<ErasedTally, CoreError> {
+    match v.clinic_get(TALLY_ID)? {
+        Some(row) if row.kind == TALLY => from_json(&row.json),
+        _ => Ok(ErasedTally::default()),
+    }
+}
+
+fn cards_strict(v: &Vault) -> Result<ErasedCards, CoreError> {
+    match v.clinic_erased_cards()? {
+        Some(json) => from_json(&json),
+        None => Ok(ErasedCards::default()),
+    }
+}
+
+/// The tallies for a screen: one that does not read counts as a row that was not read and
+/// shows as empty, like any other row (D-178).
+fn tally(v: &Vault) -> (ErasedTally, u32) {
+    match v.clinic_get(TALLY_ID) {
+        Ok(Some(row)) if row.kind == TALLY => match from_json(&row.json) {
+            Ok(tally) => (tally, 0),
+            Err(_) => (ErasedTally::default(), 1),
+        },
+        // A row that does not open is counted by the vault's own scan.
+        _ => (ErasedTally::default(), 0),
+    }
+}
+
+fn erased_cards(v: &Vault) -> (ErasedCards, u32) {
+    match cards_strict(v) {
+        Ok(cards) => (cards, 0),
+        Err(_) => (ErasedCards::default(), 1),
+    }
+}
+
+/// The count of unreadable rows last written to the log for each vault folder, in this run:
+/// the log gets one line when the count changes, not one for every screen she opens.
+static REPORTED: LazyLock<Mutex<HashMap<PathBuf, u32>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Whether this count of unreadable rows is news for the log.
+fn unreadable_is_news(dir: &Path, rows: u32) -> bool {
+    let Ok(mut reported) = REPORTED.lock() else {
+        return rows > 0;
+    };
+    if rows == 0 {
+        reported.remove(dir);
+        return false;
+    }
+    reported.insert(dir.to_owned(), rows) != Some(rows)
+}
+
+/// The visits that ever left "planned" (D-176): by what they say now, and by every state
+/// of theirs that was saved. A state that cannot be read counts as a mark: nothing is
+/// removed on the strength of a history that cannot be checked.
+fn marked_visits(v: &Vault, visits: &[Visit]) -> Result<HashSet<String>, CoreError> {
+    let mut marked = HashSet::new();
+    for visit in visits {
+        let mut was_marked = visit.status != VisitStatus::Planned;
+        if !was_marked {
+            was_marked = v.clinic_history(&visit.id)?.iter().any(|state| {
+                from_json::<Visit>(&state.json)
+                    .map_or(true, |saved| rules::ever_marked(std::iter::once(&saved)))
+            });
+        }
+        if was_marked {
+            marked.insert(visit.id.clone());
+        }
+    }
+    Ok(marked)
+}
+
+/// The people of a card the filter of its case must know: the child, then every contact
+/// that has a name, each once.
+fn card_people(patient: &Patient) -> Vec<(Role, String)> {
+    let mut people = vec![(Role::Child, rules::clean_line(&patient.name))];
+    for contact in &patient.contacts {
+        let name = rules::clean_line(&contact.name);
+        if !people.iter().any(|(_, known)| *known == name) {
+            people.push((contact_role(contact.role), name));
+        }
+    }
+    people.retain(|(_, name)| !name.is_empty());
+    people
 }
 
 fn names_of(patients: &[Patient]) -> HashMap<String, String> {
@@ -284,6 +428,9 @@ struct Book {
     payments: Vec<Payment>,
     tasks: Vec<ClinicTask>,
     settings: ClinicSettings,
+    /// Rows that opened and hold something this version cannot read: they are in none of
+    /// the lists above (D-178). Rows that do not open at all are counted by the vault.
+    unreadable: u32,
 }
 
 /// One patient's records, picked out of the book.
@@ -297,15 +444,27 @@ struct Mine {
 }
 
 impl Book {
+    /// One row that does not read never fails the whole clinic: it is left out, and counted.
     fn load(v: &Vault) -> Result<Self, CoreError> {
+        let (patients, a) = patients_counted(v)?;
+        let (visits, b) = all_counted(v)?;
+        let (notes, c) = all_counted(v)?;
+        let (charges, d) = all_counted(v)?;
+        let (payments, e) = all_counted(v)?;
+        let (tasks, f) = all_counted(v)?;
+        let (settings, g) = settings_counted(v);
+        let unreadable = [a, b, c, d, e, f, g]
+            .into_iter()
+            .fold(0, u32::saturating_add);
         Ok(Self {
-            patients: patients(v)?,
-            visits: all(v)?,
-            notes: all(v)?,
-            charges: all(v)?,
-            payments: all(v)?,
-            tasks: all(v)?,
-            settings: settings(v)?,
+            patients,
+            visits,
+            notes,
+            charges,
+            payments,
+            tasks,
+            settings,
+            unreadable,
         })
     }
 
@@ -416,7 +575,7 @@ fn contact_role(role: ContactRole) -> Role {
         ContactRole::Mother => Role::Mother,
         ContactRole::Father => Role::Father,
         // A guardian is not always a relative: the neutral role says nothing that is not known.
-        ContactRole::Guardian | ContactRole::Other => Role::Other,
+        ContactRole::Guardian | ContactRole::Other | ContactRole::Unknown => Role::Other,
     }
 }
 
@@ -469,7 +628,7 @@ impl Core {
             ClinicRequest::Diary { month } => self.clinic_diary(&month),
             ClinicRequest::Income { year } => self.clinic_income(year),
             ClinicRequest::History { record_id } => self.clinic_history(&record_id),
-            ClinicRequest::Settings => Ok(ClinicReply::Settings(settings(self.vault_ref()?)?)),
+            ClinicRequest::Settings => Ok(ClinicReply::Settings(settings(self.vault_ref()?))),
             ClinicRequest::SaveSettings { settings } => self.clinic_save_settings(settings),
             ClinicRequest::Message {
                 kind,
@@ -530,7 +689,28 @@ impl Core {
             tasks: &book.tasks,
             reports: &reports,
         };
-        let alerts = rules::clinic_alerts(&records, today, &book.settings);
+        let mut alerts = rules::clinic_alerts(&records, today, &book.settings);
+        // Rows that were not read come first: every figure below is without them.
+        // Rows that do not open at all (damaged, or changed in the file), rows that open and
+        // hold something this version cannot read, and the two tallies of erased cards.
+        let v = self.vault_ref()?;
+        let unreadable = [book.unreadable, tally(v).1, erased_cards(v).1]
+            .into_iter()
+            .fold(v.clinic_unreadable()?, u32::saturating_add);
+        if let Some(alert) = rules::unreadable_alert(unreadable, &today.date) {
+            alerts.insert(0, alert);
+        }
+        let received =
+            i64::from(rules::month_received(&book.payments, &today.date).map_err(refusal)?)
+                .saturating_add(rules::erased_received(
+                    &tally(self.vault_ref()?).0,
+                    &today.date,
+                ));
+        let month_received = i32::try_from(received).map_err(|_| {
+            CoreError::Refused(
+                "הסכום הכולל גדול מדי לחישוב. כדאי לבדוק את הסכומים שנרשמו.".to_owned(),
+            )
+        })?;
         let balances = book
             .by_patient()
             .values()
@@ -547,7 +727,7 @@ impl Core {
         let status = |status: PatientStatus| {
             count(book.patients.iter().filter(|p| p.status == status).count())
         };
-        Ok(ClinicReply::Overview(Overview {
+        let overview = Overview {
             date: today.date.clone(),
             visits: book.views_on(&today.date),
             next_visits: next_day
@@ -558,11 +738,20 @@ impl Core {
             tasks: rules::task_views(&open, &names, &today.date),
             alerts,
             week_visits: rules::week_visit_count(&book.visits, &today.date),
-            month_received: rules::month_received(&book.payments, &today.date).map_err(refusal)?,
+            month_received,
             total_due: rules::total_due(&balances).map_err(refusal)?,
             waiting: status(PatientStatus::Waiting),
             active: status(PatientStatus::Active),
-        }))
+        };
+        // The log says once that rows were not read, and how many: never which, or what.
+        if unreadable_is_news(self.vault_ref()?.dir(), unreadable) {
+            self.vault_mut()?.record(
+                AuditEvent::ClinicUnreadable,
+                None,
+                &serde_json::json!({ "rows": unreadable }),
+            )?;
+        }
+        Ok(ClinicReply::Overview(overview))
     }
 
     fn clinic_calendar(&mut self, from: &str, to: &str) -> Result<ClinicReply, CoreError> {
@@ -694,6 +883,8 @@ impl Core {
             &changed,
         )
         .map_err(refusal)?;
+        // And the one anonymous line of the cards that were erased (D-179).
+        let diary = rules::diary_with_erased(diary, &tally(v).0).map_err(refusal)?;
         Ok(ClinicReply::Diary(diary))
     }
 
@@ -706,6 +897,9 @@ impl Core {
         let payments: Vec<Payment> = between(v, &first, &last)?;
         let income = rules::income_year(year, &visits, &charges, &payments, &patients(v)?)
             .map_err(refusal)?;
+        // What the cards that were erased counted for stays in the year (D-179).
+        let income =
+            rules::income_with_erased(income, &tally(v).0, &erased_cards(v).0).map_err(refusal)?;
         Ok(ClinicReply::Income(income))
     }
 
@@ -787,7 +981,7 @@ impl Core {
         let due = rules::balance(&visits, &charges, &payments)
             .map_err(refusal)?
             .due;
-        let settings = settings(v)?;
+        let settings = settings(v);
         let template = match kind {
             MessageKind::Reminder => {
                 if visit.is_none() {
@@ -833,6 +1027,7 @@ impl Core {
         // What is written: nothing when the save changes nothing.
         let rows: Vec<Visit>;
         let action;
+        let mut left_alone = 0_u32;
         if visit.id.is_empty() {
             // A new visit is planned, whatever was sent, and joins no series by itself.
             visit.status = VisitStatus::Planned;
@@ -868,11 +1063,50 @@ impl Core {
             if let Some(patient_id) = &visit.patient_id {
                 patient_exists(v, patient_id)?;
             }
-            if visit.patient_id != stored.patient_id {
-                let notes: Vec<SessionNote> = all(v)?;
-                if noted_of(&notes).contains(&visit.id) {
-                    return refuse("לפגישה הזו יש סיכום, ולכן אי אפשר להעביר אותה למטופל אחר.");
+            // A record never moves to another card (D-177): its history, its charge and the
+            // card's balance stay where they were written.
+            if stored.patient_id.is_some() && visit.patient_id != stored.patient_id {
+                if visit.patient_id.is_none() {
+                    return refuse(
+                        "אי אפשר להפוך פגישה של מטופל לזמן שמור. אפשר למחוק אותה (או לסמן אותה \
+                         כמבוטלת, אם היא כבר סומנה) ולשמור זמן חדש ביומן.",
+                    );
                 }
+                return refuse(
+                    "אי אפשר להעביר פגישה למטופל אחר. אם היא נקבעה בכרטיס הלא נכון, אפשר למחוק \
+                     אותה (או לסמן אותה כמבוטלת, אם היא כבר סומנה) ולקבוע פגישה חדשה בכרטיס הנכון.",
+                );
+            }
+            let notes: Vec<SessionNote> = all(v)?;
+            let noted = noted_of(&notes);
+            // Taking a mark back is the correction of a wrong click only (D-176).
+            if stored.status != VisitStatus::Planned && visit.status == VisitStatus::Planned {
+                let (visits, charges, payments) = match stored.patient_id.as_deref() {
+                    Some(patient_id) => {
+                        let mine = v.clinic_of_patient(patient_id)?;
+                        let of_kind = |kind: &str| -> Vec<StoredClinicRecord> {
+                            mine.iter()
+                                .filter(|row| row.kind == kind)
+                                .cloned()
+                                .collect()
+                        };
+                        (
+                            open_all::<Visit>(of_kind(Visit::KIND))?,
+                            open_all::<Charge>(of_kind(Charge::KIND))?,
+                            open_all::<Payment>(of_kind(Payment::KIND))?,
+                        )
+                    }
+                    None => (Vec::new(), Vec::new(), Vec::new()),
+                };
+                rules::validate_unmark(
+                    &stored,
+                    &visit,
+                    noted.contains(&stored.id),
+                    &visits,
+                    &charges,
+                    &payments,
+                )
+                .map_err(refusal)?;
             }
             action = CHANGED;
             let mut changed = Vec::new();
@@ -881,10 +1115,13 @@ impl Core {
             }
             if scope == Scope::Following && stored.series_id.is_some() {
                 let everything: Vec<Visit> = all(v)?;
-                let later =
-                    rules::apply_following(&visit, &stored, &everything).map_err(refusal)?;
+                // A later visit that has a note, or is no longer planned, is left alone.
+                let later = rules::apply_following(&visit, &stored, &everything, &noted)
+                    .map_err(refusal)?;
+                left_alone = later.left_alone;
                 changed.extend(
                     later
+                        .visits
                         .into_iter()
                         .filter(|new| everything.iter().find(|old| old.id == new.id) != Some(new)),
                 );
@@ -931,13 +1168,16 @@ impl Core {
         Ok(ClinicReply::Saved(SavedVisits {
             visits,
             overlapping,
+            left_alone,
         }))
     }
 
     fn clinic_delete_visit(&mut self, id: &str, scope: Scope) -> Result<ClinicReply, CoreError> {
         let v = self.vault_ref()?;
         let visit: Visit = find(v, id)?;
-        rules::validate_delete(&visit).map_err(refusal)?;
+        // A visit that was ever held, cancelled or missed stays, whatever it says now (D-176).
+        let marked = !marked_visits(v, std::slice::from_ref(&visit))?.is_empty();
+        rules::validate_delete(&visit, marked).map_err(refusal)?;
         let notes: Vec<SessionNote> = all(v)?;
         let noted = noted_of(&notes);
         if noted.contains(id) {
@@ -945,20 +1185,23 @@ impl Core {
         }
         let mut ids = vec![visit.id.clone()];
         if let (Scope::Following, Some(series)) = (scope, visit.series_id.as_deref()) {
-            let everything: Vec<Visit> = all(v)?;
             // The later ones of the series that are still planned; one that already has a
-            // record written for it stays.
+            // record written for it, or that was ever marked, stays.
+            let later: Vec<Visit> = all::<Visit>(v)?
+                .into_iter()
+                .filter(|other| {
+                    other.series_id.as_deref() == Some(series)
+                        && other.id != visit.id
+                        && other.status == VisitStatus::Planned
+                        && (other.date.as_str(), other.start) > (visit.date.as_str(), visit.start)
+                        && !noted.contains(&other.id)
+                })
+                .collect();
+            let marked = marked_visits(v, &later)?;
             ids.extend(
-                everything
+                later
                     .into_iter()
-                    .filter(|other| {
-                        other.series_id.as_deref() == Some(series)
-                            && other.id != visit.id
-                            && other.status == VisitStatus::Planned
-                            && (other.date.as_str(), other.start)
-                                > (visit.date.as_str(), visit.start)
-                            && !noted.contains(&other.id)
-                    })
+                    .filter(|other| !marked.contains(&other.id))
                     .map(|other| other.id),
             );
         }
@@ -995,7 +1238,18 @@ impl Core {
         if patient.status == PatientStatus::Waiting && patient.waiting_since.is_none() {
             patient.waiting_since = Some(patient.created_on.clone());
         }
-        rules::validate_patient(&patient).map_err(refusal)?;
+        // The request carries no "today", so the day is the core's own clock (UTC), as in an
+        // erase. Her local day can be one ahead of it, so a birth date is refused only from
+        // the day after the core's tomorrow.
+        let latest_birth = rules::add_days(&iso(today()), 1);
+        rules::validate_patient_on(&patient, latest_birth.as_deref()).map_err(refusal)?;
+        // The names of a card that has a case are names its filter must know (D-177), before
+        // the card itself is written: a card is never saved with a name its case does not hide.
+        if let Some(case_id) = patient.case_id.clone() {
+            if self.clinic_cases()?.contains_key(&case_id) {
+                self.clinic_sync_identities(&case_id, &patient)?;
+            }
+        }
         if stored.as_ref() != Some(&patient) {
             write_patient(self.vault_mut()?, &mut patient)?;
         }
@@ -1005,6 +1259,17 @@ impl Core {
     /// Erases a card and everything of theirs in the clinic, never the case (D-174): only a
     /// card where nothing happened, or one whose retention period has passed.
     fn clinic_erase_patient(&mut self, id: &str, name: &str) -> Result<ClinicReply, CoreError> {
+        // The retention period is counted by the core's own clock, not the window's.
+        self.clinic_erase_on(id, name, &iso(today()))
+    }
+
+    /// The erase, on a day given by the caller (the tests'; otherwise the core's clock).
+    pub(crate) fn clinic_erase_on(
+        &mut self,
+        id: &str,
+        name: &str,
+        today: &str,
+    ) -> Result<ClinicReply, CoreError> {
         let v = self.vault_ref()?;
         let patient = patient(v, id)?;
         if rules::clean_line(name) != rules::clean_line(&patient.name) {
@@ -1025,11 +1290,13 @@ impl Core {
                 .cloned()
                 .collect()
         };
+        // Every row of the card, or no erase: what is not read cannot be folded or judged.
         let visits: Vec<Visit> = open_all(of_kind(Visit::KIND))?;
         let notes: Vec<SessionNote> = open_all(of_kind(SessionNote::KIND))?;
         let charges: Vec<Charge> = open_all(of_kind(Charge::KIND))?;
         let payments: Vec<Payment> = open_all(of_kind(Payment::KIND))?;
         let tasks: Vec<ClinicTask> = open_all(of_kind(ClinicTask::KIND))?;
+        let marked = marked_visits(v, &visits)?;
         let records = PatientRecords {
             patient: &patient,
             visits: &visits,
@@ -1041,13 +1308,26 @@ impl Core {
         };
         rules::can_erase(
             &records,
-            &iso(today()),
+            &marked,
+            today,
             last_saved.as_deref(),
             KEEP_YEARS_AFTER_LAST_CHANGE,
             KEEP_UNTIL_AGE,
         )
         .map_err(refusal)?;
-        self.vault_mut()?.erase_clinic_patient(id)?;
+        // What the card counted for in the summaries stays, with nothing that says whose it
+        // was (D-179). A card where nothing happened was a mistake and leaves nothing.
+        let (tally, cards) = if rules::card_happened(&records, &marked) {
+            let mut tally = tally_strict(v)?;
+            rules::fold_erased(&mut tally, &visits, &charges, &payments);
+            let mut cards = cards_strict(v)?;
+            rules::fold_erased_card(&mut cards, &patient);
+            (Some(to_json(&tally)?), Some(to_json(&cards)?))
+        } else {
+            (None, None)
+        };
+        self.vault_mut()?
+            .erase_clinic_patient(id, tally.as_deref(), cards.as_deref())?;
         Ok(ClinicReply::Done)
     }
 
@@ -1132,6 +1412,9 @@ impl Core {
             return refuse("הרשומה ריקה, ואין מה להעביר לתיק. התרשומת האישית נשארת רק אצלך.");
         }
         let case_id = case_id.to_owned();
+        // Before the record goes: every name of the card is a name the case's filter knows
+        // (D-177). If that cannot be written, nothing goes.
+        self.clinic_sync_identities(&case_id, &patient)?;
         let kind = match visit_kind {
             Some(VisitKind::Intake) => InputKind::Intake,
             Some(VisitKind::Observation) => InputKind::Observation,
@@ -1152,9 +1435,20 @@ impl Core {
         match note.case_input_id.clone().filter(|_| sent_before) {
             Some(input_id) => self.update_input(&case_id, &input_id, &title, &record)?,
             None => {
-                let input = self.add_input(&case_id, kind, &title, &record)?;
-                note.case_input_id = Some(input.id);
-                write(self.vault_mut()?, &mut note, Some(CHANGED))?;
+                // The material and the note that points to it are written together (D-177):
+                // a failure leaves neither, so asking again never adds the record twice.
+                let input_id = dv_vault::crypto::random_id()?;
+                note.case_input_id = Some(input_id.clone());
+                let row = (
+                    Some(note.id.clone()),
+                    Some(note.patient_id.clone()),
+                    day_of(&note),
+                    to_json(&note)?,
+                );
+                self.vault_mut()?
+                    .clinic_note_into_case(&case_id, &input_id, kind, &title, &record, &row)?;
+                // As for a material she adds by hand: its new names are kept with the case.
+                self.learn_input(&case_id, &title, &record)?;
             }
         }
         self.vault_mut()?.record(
@@ -1182,6 +1476,16 @@ impl Core {
         payment.voided = false;
         payment.void_reason = String::new();
         rules::validate_payment(&payment).map_err(refusal)?;
+        // Money never moves between cards (D-177): the mistake is voided and written again.
+        if stored
+            .as_ref()
+            .is_some_and(|stored| stored.patient_id != payment.patient_id)
+        {
+            return refuse(
+                "אי אפשר להעביר תקבול למטופל אחר. אפשר לבטל את התקבול הזה, לכתוב למה, \
+                 ולרשום תקבול חדש בכרטיס הנכון.",
+            );
+        }
         patient_exists(v, &payment.patient_id)?;
         if stored.as_ref() != Some(&payment) {
             let action = if stored.is_some() { CHANGED } else { CREATED };
@@ -1217,6 +1521,15 @@ impl Core {
         charge.voided = false;
         charge.void_reason = String::new();
         rules::validate_charge(&charge).map_err(refusal)?;
+        if stored
+            .as_ref()
+            .is_some_and(|stored| stored.patient_id != charge.patient_id)
+        {
+            return refuse(
+                "אי אפשר להעביר חיוב למטופל אחר. אפשר לבטל את החיוב הזה, לכתוב למה, \
+                 ולרשום חיוב חדש בכרטיס הנכון.",
+            );
+        }
         patient_exists(v, &charge.patient_id)?;
         if stored.as_ref() != Some(&charge) {
             let action = if stored.is_some() { CHANGED } else { CREATED };
@@ -1267,7 +1580,7 @@ impl Core {
     fn clinic_save_settings(&mut self, new: ClinicSettings) -> Result<ClinicReply, CoreError> {
         let new = rules::normalize_settings(new);
         rules::validate_settings(&new).map_err(refusal)?;
-        if settings(self.vault_ref()?)? != new {
+        if settings(self.vault_ref()?) != new {
             let json = to_json(&new)?;
             self.vault_mut()?
                 .clinic_put(SETTINGS, None, None, 0, &json, None)?;
@@ -1325,12 +1638,68 @@ impl Core {
             if taken {
                 return refuse("התיק הזה כבר מקושר למטופל אחר.");
             }
+            // The child and the contacts of the card become names the case's filter knows
+            // (D-177), before the link is written: no link without them.
+            self.clinic_sync_identities(case_id, &patient)?;
         }
         if patient.case_id != case_id {
             patient.case_id = case_id;
             write_patient(self.vault_mut()?, &mut patient)?;
         }
         Ok(ClinicReply::Patient(patient))
+    }
+
+    /// Makes every name of a card (the child, each named contact) a name its case's filter
+    /// knows (D-177). Called whenever a card is linked to a case, whenever a linked card is
+    /// saved, and before a record goes to the case. Names are only ever added: one that left
+    /// the card stays known to the case, and what she set in the case herself is kept as it
+    /// is. The child's name of the card joins the case's child (as another way the name is
+    /// written) when the case already has one; a contact the case does not know is added as
+    /// a person of their role. An error here stops the caller: nothing is linked, saved or
+    /// sent with a name the filter does not know.
+    fn clinic_sync_identities(
+        &mut self,
+        case_id: &str,
+        patient: &Patient,
+    ) -> Result<(), CoreError> {
+        let mut list: Vec<IdentityInput> = self
+            .vault_ref()?
+            .identities(case_id)?
+            .into_iter()
+            .map(|known| IdentityInput {
+                id: Some(known.id),
+                role: known.role,
+                value: known.value,
+                aliases: known.aliases,
+            })
+            .collect();
+        let knows = |list: &[IdentityInput], name: &str| {
+            list.iter().any(|known| {
+                std::iter::once(&known.value)
+                    .chain(&known.aliases)
+                    .any(|written| rules::clean_line(written) == name)
+            })
+        };
+        let mut changed = false;
+        for (role, name) in card_people(patient) {
+            if knows(&list, &name) {
+                continue;
+            }
+            changed = true;
+            match list.iter_mut().find(|known| known.role == Role::Child) {
+                Some(child) if role == Role::Child => child.aliases.push(name),
+                _ => list.push(IdentityInput {
+                    id: None,
+                    role,
+                    value: name,
+                    aliases: Vec::new(),
+                }),
+            }
+        }
+        if changed {
+            self.set_identities(case_id, list)?;
+        }
+        Ok(())
     }
 
     /// Opens a diagnostic case for the patient through [`Core::create_case`], so every rule
@@ -1367,24 +1736,15 @@ impl Core {
             consent: None,
             ..CaseMeta::default()
         };
-        let mut identities = vec![IdentityInput {
-            id: None,
-            role: Role::Child,
-            value: patient.name.clone(),
-            aliases: Vec::new(),
-        }];
-        for contact in &patient.contacts {
-            let name = rules::clean_line(&contact.name);
-            if name.is_empty() || identities.iter().any(|known| known.value == name) {
-                continue;
-            }
-            identities.push(IdentityInput {
+        let identities = card_people(&patient)
+            .into_iter()
+            .map(|(role, value)| IdentityInput {
                 id: None,
-                role: contact_role(contact.role),
-                value: name,
+                role,
+                value,
                 aliases: Vec::new(),
-            });
-        }
+            })
+            .collect();
         let case_id = self.create_case(meta, identities)?;
         patient.case_id = Some(case_id.clone());
         write_patient(self.vault_mut()?, &mut patient)?;

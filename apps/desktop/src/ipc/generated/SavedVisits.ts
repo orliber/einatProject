@@ -12,4 +12,9 @@ visits: Array<VisitView>,
 /**
  * How many of them overlap another visit.
  */
-overlapping: number, };
+overlapping: number, 
+/**
+ * With `Scope::Following`: later visits of the series that were left exactly as they
+ * were, because they have a session note or are no longer planned (D-176).
+ */
+left_alone: number, };

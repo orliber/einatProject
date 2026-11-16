@@ -15,26 +15,29 @@ import type { TaskView } from "../../ipc/generated/TaskView";
 import type { Visit } from "../../ipc/generated/Visit";
 import type { VisitView } from "../../ipc/generated/VisitView";
 import { clinicKeys, useDeleteTask, useOptimistic, useOverview, useReloadClinic, useSaveTask, useTasks, useToday } from "./clinicData";
-import { ALERT_KIND_LABEL, formatDate, TASK_KIND_LABEL, TASK_KINDS, weekRange } from "./format";
+import { ALERT_KIND_LABEL, formatDate, optionsWith, TASK_KIND_LABEL, TASK_KINDS, weekRange } from "./format";
 import { NoteDialog } from "./NoteDialog";
 import {
-  AlertList, ConfirmDialog, EmptyState, Field, Pager, PatientName, PatientPicker, Section, SelectField, TextAreaField, TextField, useClinicNav, usePaged,
+  AlertList, ConfirmDialog, EmptyState, Field, Pager, PatientName, PatientPicker, ReadError, Section, SelectField, TextAreaField, TextField, useClinicNav, usePaged,
 } from "./parts";
 import { VisitDialog } from "./VisitDialog";
 import "./TasksTab.css";
 
 // ------------------------------------------------------------------ pure pieces
 
-/** The kinds of "מה דורש אותי" in the order she would deal with them: what is quick to close
- *  first, then what takes a decision. */
-const ALERT_ORDER: AlertKind[] = ["unmarked", "no_note", "task_overdue", "feedback_soon", "report_due", "debt", "no_next_visit", "waiting"];
+/** The kinds of "מה דורש אותי" in the order she would deal with them: rows that were not read
+ *  first (every figure is without them, D-178), then what is quick to close, then what takes
+ *  a decision. */
+const ALERT_ORDER: AlertKind[] = ["unreadable", "unmarked", "no_note", "task_overdue", "feedback_soon", "report_due", "debt", "no_next_visit", "waiting"];
 
 /** How many lines of a kind show before "להציג את כולן". */
 const ALERTS_SHOWN = 4;
 
 /** The alerts by kind, each kind keeping the order the clinic gave (oldest first). */
 export function alertGroups(alerts: Alert[]): { kind: AlertKind; alerts: Alert[] }[] {
-  return ALERT_ORDER
+  // A kind that is not in the order still gets its group, after the others: no alert is dropped.
+  const kinds = [...ALERT_ORDER, ...alerts.map((a) => a.kind).filter((kind) => !ALERT_ORDER.includes(kind))];
+  return [...new Set(kinds)]
     .map((kind) => ({ kind, alerts: alerts.filter((a) => a.kind === kind) }))
     .filter((g) => g.alerts.length > 0);
 }
@@ -151,7 +154,7 @@ export function TasksTab() {
   return (
     <div className="stack clinic-followups">
       <Section title="מה דורש אותי" aside={alerts && alerts.length > 0 ? <span className="chip chip-warn">{alerts.length}</span> : undefined}>
-        {overview.error && !overview.data ? <ErrorLine error={overview.error.message} retry={reload} />
+        {overview.error && !overview.data ? <ReadError error={overview.error.message} retry={reload} />
           : !alerts ? <Skeleton lines={4} label="טוען את מה שדורש טיפול" />
           : alerts.length === 0 ? <p className="muted clinic-quiet">אין כרגע שום דבר שמחכה לטיפול בקליניקה.</p>
           : (
@@ -165,7 +168,7 @@ export function TasksTab() {
       <Section title="המעקבים שלי" aside={tasks.data && grouped.openCount > 0 ? <span className="muted small">{grouped.openCount === 1 ? "מעקב פתוח אחד" : `${grouped.openCount} מעקבים פתוחים`}</span> : undefined}>
         <QuickAdd today={now.date} />
 
-        {tasks.error && !tasks.data ? <ErrorLine error={tasks.error.message} retry={reload} />
+        {tasks.error && !tasks.data ? <ReadError error={tasks.error.message} retry={reload} />
           : !tasks.data ? <Skeleton lines={5} label="טוען את המעקבים" />
           : tasks.data.length === 0 ? (
             <EmptyState title="עוד אין מעקבים">
@@ -223,7 +226,7 @@ function AlertGroup({ kind, alerts, onVisit, onTask }: {
 }) {
   const [all, setAll] = useState(false);
   const shown = all ? alerts : alerts.slice(0, ALERTS_SHOWN);
-  const label = ALERT_KIND_LABEL[kind];
+  const label = ALERT_KIND_LABEL[kind] ?? "דורש תשומת לב";
   return (
     <section className="stack clinic-need" aria-label={`${label}: ${alerts.length}`}>
       <h3 className="row clinic-group-head">
@@ -433,7 +436,8 @@ function TaskDialog({ task, onClose }: { task: ClinicTask; onClose: () => void }
       <div className="stack clinic-form">
         <TextField id="task-edit-title" label="מה המעקב" value={title} maxLength={TITLE_MAX} autoFocus onChange={setTitle} />
         <div className="clinic-form-row">
-          <SelectField<TaskKind> id="task-edit-kind" label="סוג" value={kind} options={KIND_OPTIONS} onChange={setKind} />
+          <SelectField<TaskKind> id="task-edit-kind" label="סוג" value={kind} options={optionsWith(TASK_KINDS, TASK_KIND_LABEL, kind)} onChange={setKind}
+            hint={kind === "unknown" ? "הסוג שנשמר לא מוכר לגרסה הזו של התוכנה. כדי לשמור צריך לבחור סוג מהרשימה." : undefined} />
           <Field id="task-edit-due" label="עד מתי (לא חובה)" hint="ריק: בלי תאריך.">
             <DateField id="task-edit-due" value={due} onChange={setDue} />
           </Field>

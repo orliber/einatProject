@@ -448,7 +448,7 @@ describe("the day", () => {
 
   it("the list opens a visit, and “פגישה חדשה” is for the day shown", async () => {
     const { user, row } = await openDay();
-    await user.click(within(row("איתי")).getByRole("button", { name: /^פתיחת הפגישה של איתי/ }));
+    await user.click(within(row("איתי")).getByRole("button", { name: /^11:30–12:30, פתיחת הפגישה של איתי/ }));
     const details = await visitDialog("פרטי הפגישה");
     await user.click(within(details).getByRole("button", { name: "ביטול" }));
     await user.click(screen.getByRole("button", { name: "היום הבא" }));

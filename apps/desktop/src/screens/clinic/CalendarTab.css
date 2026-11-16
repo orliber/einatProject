@@ -67,10 +67,17 @@
 /* ---------- the time grid ---------- */
 /* The grid scrolls inside itself, both ways: the page never scrolls sideways, and the names
    of the days and the hours stay in sight. */
+/* Its height. In a tall window: what is left around it (about 470px go to the top bar, the
+   beta note, the clinic's heading, the tabs, the calendar's bar, the line of the visit being
+   moved and the space under the grid), so the page itself does not scroll (measured at
+   1280x900). In a short window that would leave only the 300px floor, four and a half hours
+   on a laptop at 125% (1093x614). So there the grid takes what is left under the tabs (about
+   210px once the page is scrolled to them), up to 420px: 404px at 614px high, 08:00 to 14:00
+   in sight with the tabs and the bar. Never under 300px (850x480). */
 .cal-grid {
   display: grid;
   overflow: auto;
-  max-height: clamp(300px, calc(100vh - 330px), 960px);
+  max-height: clamp(300px, max(calc(100vh - 470px), min(calc(100vh - 210px), 420px)), 960px);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-lg);
   background: var(--surface);

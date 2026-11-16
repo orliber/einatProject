@@ -3,4 +3,4 @@
 /**
  * Where a patient is on the way through the clinic.
  */
-export type PatientStatus = "waiting" | "active" | "closed";
+export type PatientStatus = "waiting" | "active" | "closed" | "unknown";

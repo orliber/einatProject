@@ -2,14 +2,15 @@
 // look on every tab, so the tabs only arrange them. Everything shown is plain text.
 import { createContext, useContext, useId, useMemo, useState, type ReactNode } from "react";
 import { Dialog, ErrorLine, Skeleton, WarnIcon } from "../../components/ui";
+import { failureFor } from "../../errors";
 import type { Alert } from "../../ipc/generated/Alert";
 import type { HistoryEntry } from "../../ipc/generated/HistoryEntry";
 import type { VisitKind } from "../../ipc/generated/VisitKind";
 import type { VisitStatus } from "../../ipc/generated/VisitStatus";
 import type { VisitView } from "../../ipc/generated/VisitView";
-import { useDebounced, useHistory, usePatients, useToday } from "./clinicData";
+import { useDebounced, useHistory, usePatients, useReloadClinic, useToday } from "./clinicData";
 import {
-  ALERT_KIND_LABEL, formatDate, formatSpan, formatTime, initials, moneyInput, moneyNumber, parseMoney, parseTime, PATIENT_STATUS_LABEL,
+  ALERT_KIND_LABEL, formatDate, formatSpan, initials, moneyInput, moneyNumber, parseMoney, parseTime, PATIENT_STATUS_LABEL,
   VISIT_KIND_LABEL, VISIT_STATUS_LABEL,
 } from "./format";
 import type { ClinicTab } from "./tabs";
@@ -75,7 +76,8 @@ export function Money({ agorot, tone }: { agorot: number; tone?: "owed" | "ok" |
 
 // ------------------------------------------------------------------ badges
 
-const STATUS_CHIP: Record<VisitStatus, string> = { planned: "chip", held: "chip chip-ok", cancelled: "chip chip-sand", no_show: "chip chip-warn" };
+// A status this version does not know (D-178) is said plainly, in the colour of something to look at.
+const STATUS_CHIP: Record<VisitStatus, string> = { planned: "chip", held: "chip chip-ok", cancelled: "chip chip-sand", no_show: "chip chip-warn", unknown: "chip chip-warn" };
 
 export function StatusBadge({ status }: { status: VisitStatus }) {
   return <span className={STATUS_CHIP[status]}>{VISIT_STATUS_LABEL[status]}</span>;
@@ -111,6 +113,32 @@ export function Section({ title, aside, children, label }: { title: string; asid
       </header>
       {children}
     </section>
+  );
+}
+
+// ------------------------------------------------------------------ a read that failed
+
+/**
+ * A read that failed, where the screen (a tab, a list, a dialog's body) has nothing else to
+ * show: the message with the step the core chose for it, and always "לנסות שוב". The app's
+ * error line offers that button only for a failure the core marked for it; for any other
+ * one (a refusal, a fault to report, a locked vault) it would leave "הבנתי" alone, and after
+ * it an empty screen. Here the way to read again stays, whatever the failure was.
+ */
+export function ReadError({ error, retry }: { error: string; retry: () => void }) {
+  const failure = failureFor(error);
+  // The cases in which the error line shows "לנסות שוב" by itself (see `ErrorLine`).
+  const offered = failure === null || failure.action.kind === "retry" || failure.action.kind === "raise_cap";
+  return (
+    <div className="stack clinic-read-error">
+      <ErrorLine error={error} retry={retry} />
+      {!offered && (
+        <p className="row clinic-read-again">
+          <span className="muted">אפשר לקרוא את הנתונים שוב.</span>
+          <button type="button" className="btn btn-small" onClick={retry}>לנסות שוב</button>
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -256,13 +284,16 @@ export function ConfirmDialog(props: {
 /**
  * "מה דורש אותי": each alert as a line, the patient's name as a button that opens the card,
  * then the sentence the clinic wrote (which never carries the name). `onVisit` and `onTask`
- * add a step right on the line, when the tab has one to offer.
+ * add a step right on the line, when the tab has one to offer. `onCard`: the list is shown on
+ * this patient's own card, so their name is plain text there, not a link to where she is.
+ * An alert about no patient (rows that were not read, D-178) has no name at all.
  */
-export function AlertList({ alerts, onVisit, onTask, empty }: {
+export function AlertList({ alerts, onVisit, onTask, empty, onCard }: {
   alerts: Alert[];
   onVisit?: (alert: Alert, visitId: string) => void;
   onTask?: (alert: Alert, taskId: string) => void;
   empty?: ReactNode;
+  onCard?: string;
 }) {
   if (alerts.length === 0) return <p className="muted clinic-quiet">{empty ?? "אין כרגע שום דבר שמחכה."}</p>;
   return (
@@ -275,7 +306,7 @@ export function AlertList({ alerts, onVisit, onTask, empty }: {
             <span className="clinic-alert-icon"><WarnIcon /></span>
             <div className="grow stack clinic-alert-body">
               <span className="row clinic-alert-head">
-                {a.patient_id !== null && <PatientName name={a.patient_name} id={a.patient_id} strong />}
+                {a.patient_id !== null && <PatientName name={a.patient_name} id={a.patient_id === onCard ? null : a.patient_id} strong />}
                 <span className="chip chip-warn">{ALERT_KIND_LABEL[a.kind]}</span>
               </span>
               <span>{a.text}</span>
@@ -298,7 +329,9 @@ export function AlertList({ alerts, onVisit, onTask, empty }: {
 /**
  * One visit as a row: its time, who it is with (or her own title, for time she kept for
  * herself), its kind and status, where, and the quick actions the tab gives it. `onOpen`
- * makes the time a button that opens the visit.
+ * makes the time a button that opens the visit. The button's name starts with what it shows
+ * (the date, when it is shown, and the hours), so it can be asked for by what she sees, and
+ * two visits at the same hour of different days are not called the same.
  */
 export function VisitRow({ view, actions, onOpen, showDate = false }: { view: VisitView; actions?: ReactNode; onOpen?: () => void; showDate?: boolean }) {
   const v = view.visit;
@@ -306,10 +339,11 @@ export function VisitRow({ view, actions, onOpen, showDate = false }: { view: Vi
   const span = formatSpan(v.start, v.minutes);
   const who = v.kind === "block" ? (v.title || VISIT_KIND_LABEL.block) : shown(view.patient_name);
   const time = <span className="num clinic-visit-time" dir="ltr">{span}</span>;
+  const openName = `${showDate ? `${formatDate(v.date)} ` : ""}${span}, פתיחת הפגישה של ${who}`;
   return (
     <li className={v.status === "cancelled" ? "clinic-visit clinic-visit-off" : "clinic-visit"} data-status={v.status}>
       {onOpen
-        ? <button type="button" className="clinic-visit-when clinic-visit-open" aria-label={`פתיחת הפגישה של ${who} בשעה ${formatTime(v.start)}`} onClick={onOpen}>{showDate && <span>{formatDate(v.date)}</span>}{time}</button>
+        ? <button type="button" className="clinic-visit-when clinic-visit-open" aria-label={openName} onClick={onOpen}>{showDate && <span>{formatDate(v.date)}</span>}{time}</button>
         : <span className="clinic-visit-when">{showDate && <span>{formatDate(v.date)}</span>}{time}</span>}
       <div className="grow stack clinic-visit-body">
         <span className="row clinic-visit-head">
@@ -386,13 +420,14 @@ export function HistoryEntries({ entries }: { entries: HistoryEntry[] }) {
 export function RecordHistory({ recordId }: { recordId: string }) {
   const [open, setOpen] = useState(false);
   const history = useHistory(open ? recordId : null);
+  const reload = useReloadClinic();
   const panel = useId();
   return (
     <div className="stack clinic-history-box">
       <button type="button" className="link-btn" aria-expanded={open} aria-controls={panel} onClick={() => setOpen((o) => !o)}>היסטוריית שינויים</button>
       <div id={panel} hidden={!open}>
         {open && (history.data ? <HistoryEntries entries={history.data} />
-          : history.error ? <ErrorLine error={history.error.message} />
+          : history.error ? <ReadError error={history.error.message} retry={reload} />
           : <Skeleton lines={3} label="טוען את ההיסטוריה" />)}
       </div>
     </div>

@@ -9,9 +9,9 @@ import { Dialog, ErrorLine, Skeleton } from "../../components/ui";
 import type { PatientCard } from "../../ipc/generated/PatientCard";
 import type { SessionNote } from "../../ipc/generated/SessionNote";
 import type { Visit } from "../../ipc/generated/Visit";
-import { useClinicSettings, useNoteToCase, usePatientCard, useSaveNote, useToday } from "./clinicData";
+import { useClinicSettings, useNoteToCase, usePatientCard, useReloadClinic, useSaveNote, useToday } from "./clinicData";
 import { formatDate, formatTime, VISIT_KIND_LABEL } from "./format";
-import { Field, RecordHistory, useShownName } from "./parts";
+import { Field, ReadError, RecordHistory, useShownName } from "./parts";
 
 export interface NoteDialogProps {
   patientId: string;
@@ -30,11 +30,13 @@ export function NoteDialog(props: NoteDialogProps) {
   const now = useToday();
   const card = usePatientCard(props.patientId, now.date);
   const settings = useClinicSettings();
+  const reload = useReloadClinic();
   if (!card.data || !settings.data) {
+    const failed = card.error ?? settings.error;
     return (
       <Dialog title="סיכום פגישה" onClose={props.onClose}>
-        {card.error || settings.error
-          ? <ErrorLine error={(card.error ?? settings.error)?.message ?? null} />
+        {failed
+          ? <ReadError error={failed.message} retry={reload} />
           : <Skeleton lines={6} label="טוען את הסיכום" />}
       </Dialog>
     );

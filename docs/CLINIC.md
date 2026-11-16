@@ -1,6 +1,6 @@
 # ניהול קליניקה (בטא) – מפרט
 
-> החלטות: D-170 עד D-175 ב-`DECISIONS.md`, והמספרים עד D-179 שמורים למודול. המסך מסומן "בטא" בכל מקום שבו הוא מופיע.
+> החלטות: D-170 עד D-179 ב-`DECISIONS.md`. המסך מסומן "בטא" בכל מקום שבו הוא מופיע.
 
 ## מה זה ולמי
 עינת מנהלת קליניקה של אבחונים התפתחותיים. היום היומן, סיכומי הפגישות, התשלומים והמעקבים נמצאים מחוץ לתוכנה. המודול מביא אותם פנימה, לתוך הכספת המוצפנת, ומחבר אותם לתיק האבחון ולדוח.
@@ -28,15 +28,20 @@
 5. **אין נתוני אמת בריפו.** כל הדוגמאות, הבדיקות וההדמיה בדויות.
 
 ## מה נשמר, ומה אפשר למחוק
-הקליניקה היא גם רשומה רפואית וגם רישום של הכנסות, ולכן רוב מה שנכתב בה נשאר. כך זה עובד (D-172, D-174):
+הקליניקה היא גם רשומה רפואית וגם רישום של הכנסות, ולכן רוב מה שנכתב בה נשאר. כך זה עובד (D-172, D-174, D-176 עד D-179):
 
 - **תקבול וחיוב לא נמחקים אף פעם.** אם נרשמה טעות, מבטלים את השורה וכותבים למה. השורה נשארת ביומן, מסומנת כמבוטלת, ולא נספרת בסיכומים. הכספת עצמה מסרבת למחוק תקבול, חיוב או את רשומת ההגדרות, גם אם מסך כלשהו היה מבקש זאת בטעות.
-- **פגישה** אפשר למחוק רק כל עוד היא "מתוכננת". ביומן נשארת ממנה שורה שאומרת שנמחקה. פגישה שהתקיימה, בוטלה או שלא הגיעו אליה נשארת.
+- **פגישה** אפשר למחוק רק כל עוד היא "מתוכננת" ואף פעם לא הייתה משהו אחר. ביומן נשארת ממנה שורה שאומרת שנמחקה. פגישה שסומנה פעם (התקיימה, בוטלה או לא הגיעו) נשארת תמיד, גם אם הוחזרה אחר כך ל"מתוכננת": ההיסטוריה שלה זוכרת.
+- **סימון שנעשה בטעות אפשר לתקן.** פגישה שסומנה חוזרת ל"מתוכננת" רק כשאין לה סיכום, וכשמה שהמשפחה כבר שילמה לא גדול ממה שנשאר לחיוב בלי הפגישה הזו. אחרת התוכנה מסרבת ואומרת מה לעשות: לסמן כמבוטלת ולכתוב מה קרה, או לבטל קודם את התקבול. כל שינוי אחר בסימון (התקיימה, בוטלה, לא הגיעו) אפשרי תמיד, ונשמר בהיסטוריה.
+- **רישום לא עובר מכרטיס לכרטיס.** תקבול, חיוב, סיכום ופגישה שייכים לכרטיס שבו נרשמו. אם נרשמו בכרטיס הלא נכון: תקבול וחיוב מבטלים ורושמים מחדש בכרטיס הנכון, ופגישה מוחקים (או מסמנים כמבוטלת) וקובעים מחדש. כך מחיקה או שינוי של כרטיס אחד לא נוגעים בכסף או בהיסטוריה של כרטיס אחר.
+- **"זו וכל הבאות" לא מזיז פגישה שיש לה סיכום** או שכבר לא "מתוכננת". התוכנה אומרת כמה פגישות נשארו כמו שהן.
 - **סיכום פגישה הוא חלק מהרשומה.** סיכום שכתוב בו משהו לא נמחק: עורכים אותו, וכל גרסה שנשמרה נשארת ב"היסטוריית שינויים" שלו. רק סיכום שנשאר ריק לגמרי אפשר להסיר.
 - **משימה** אפשר למחוק תמיד. היא תזכורת, לא רשומה.
-- **כרטיס מטופל שלא קרה בו כלום** (אין פגישה שהתקיימה או שחויבה, אין סיכום, אין חיוב ואין תקבול, גם לא מבוטלים) נמחק מיד, אחרי הקלדת השם. זה המקרה של טעות הקלדה או של כרטיס כפול.
+- **כרטיס מטופל שלא קרה בו כלום** (אין פגישה שסומנה אי פעם, אין סיכום, אין חיוב ואין תקבול, גם לא מבוטלים) נמחק מיד, אחרי הקלדת השם. זה המקרה של טעות הקלדה או של כרטיס כפול. כרטיס כזה לא משאיר אחריו כלום, וגם לא נספר יותר כ"מטופל חדש".
 - **כרטיס שקרה בו משהו נסגר, לא נמחק.** מחיקה אפשרית רק אחרי תקופת השמירה, כמו בתיקי האבחון: 7 שנים מהפעילות האחרונה בכרטיס, ולא לפני שהילד בן 25 (כשתאריך הלידה ידוע), המאוחר מבין השניים. "הפעילות האחרונה" היא התאריך המאוחר ביותר שכתוב בכרטיס (פתיחת הכרטיס, פגישה, סיכום, חיוב, תקבול או משימה), וגם היום האחרון שבו נשמר שינוי באחת הרשומות שלו: תיקון שנעשה שנים אחר כך נחשב פעילות. עד אז התוכנה מסרבת, מסבירה, ואומרת מאיזה יום המחיקה תהיה אפשרית.
 - אחרי תקופת השמירה המחיקה מוחקת את הכרטיס, את כל הרשומות שלו ואת כל ההיסטוריה שלהן. תיק האבחון לא נמחק יחד עם הכרטיס.
+- **הסיכומים של שנים שעברו לא משתנים אחרי מחיקה.** מה שהכרטיס נספר בו (בכל חודש: כמה פגישות התקיימו ומאיזה סוג, כמה בוטלו, לכמה לא הגיעו, כמה חויב, כמה התקבל ובאיזה אמצעי, כמה תקבולים בלי מספר קבלה, ושנפתח כרטיס חדש) נשאר כמספרים בלבד, בלי שם, בלי מזהה ובלי טקסט, חתום בכספת. הסיכום השנתי ממשיך להראות את אותם מספרים, וביומן ההכנסות של החודש מופיעה שורה אחת: "רשומות של כרטיסים שנמחקו", עם הסכומים שלה. מה שלא נשאר: מי, מתי בדיוק, ועל מה.
+- **שורה שהתוכנה לא מצליחה לקרוא** (קובץ שנפגע, או שורה שנכתבה בגרסה חדשה יותר) לא מפילה את המסכים. היא נשארת בכספת כמו שהיא, לא מוצגת ולא נספרת, ובעמוד הראשי של הקליניקה כתוב כמה שורות כאלה יש. ערך שהגרסה לא מכירה (למשל אמצעי תשלום חדש) מוצג כ"לא מוכר", והתוכנה לא שומרת רישום כזה עד שבוחרים ערך מהרשימה, כדי שלא יהפוך בשקט למשהו אחר.
 
 ## The technical contract (English, for whoever writes the code)
 
@@ -59,7 +64,7 @@ empty `id` means "new". "Today" always comes from the window (`Today`), never fr
 ```sql
 CREATE TABLE clinic_records (
    id TEXT PRIMARY KEY,
-   kind TEXT NOT NULL,          -- visit | note | payment | charge | task | settings
+   kind TEXT NOT NULL,          -- visit | note | payment | charge | task | settings | tally
    patient_id TEXT,
    day INTEGER NOT NULL,        -- days since 1970-01-01 of the record's date; 0 when it has none
    updated_at INTEGER NOT NULL,
@@ -85,9 +90,36 @@ CREATE TABLE clinic_patients (
    updated_at INTEGER NOT NULL,
    data_enc BLOB NOT NULL
 );
+CREATE TABLE clinic_erased (     -- one row: erased cards by the month they were opened in (D-179)
+   id INTEGER PRIMARY KEY CHECK (id = 1),
+   updated_at INTEGER NOT NULL,
+   data_enc BLOB NOT NULL
+);
 ```
-Everything is sealed with the settings key (as `style_sources` is: it does not belong to a case),
-AAD `aad(table, "data", id, "")`. Migrations only add; each one's hash is pinned in `db.rs`.
+Everything is sealed with the settings key (as `style_sources` is: it does not belong to a case).
+The clear columns that say what a row is are bound into its seal (D-177): a record's AAD is
+`aad("clinic_records", "data", id, "<kind>|<patient_id or empty>")`, a history row's is
+`aad("clinic_history", "data", id, "<record_id>|<patient_id or empty>|<action>")`; a card and the
+`clinic_erased` row are bound to their id. A row whose `kind`, `patient_id`, `record_id` or
+`action` column was changed in the file does not open. `day`, `updated_at` and `saved_at` are not
+bound (they only index and order; the date that counts is inside the sealed JSON).
+Migrations only add; each one's hash is pinned in `db.rs`.
+
+Reading (D-178): the lists (`clinic_kind`, `clinic_range`, `clinic_patients`) leave out a row that
+does not open, and `clinic_unreadable()` counts such rows (records and cards). The core leaves out
+a row whose JSON it cannot read and counts it too. `Overview` puts one `Unreadable` alert first
+with the total, and writes one `clinic_unreadable` audit event (`{"rows": n}`, a number only) when
+the count changes in this run. Nothing rewrites or removes such a row. Reading one record, one
+patient's records (`clinic_of_patient`) or a history is strict: an erase, the payment message and
+the "ever marked" check fail instead of deciding with a row missing. Unreadable settings show as
+the defaults (and count as one row).
+
+Every stored enum (`PatientStatus`, `ContactRole`, `VisitKind`, `VisitStatus`, `PayMethod`,
+`TaskKind`) has an `Unknown` variant (`#[serde(other)]`, `"unknown"` in TypeScript) that any value
+it does not know reads as. It has a label ("… לא מוכר"), is never among the choices
+(`VISIT_KINDS`, `PAY_METHODS`), charges nothing and counts as no status. Every `validate_*` refuses
+it, and so does every write in the core (a void included): a record that carries it is not written
+until she picks a value, so the stored value is never turned into `"unknown"` or anything else.
 History is written for `visit`, `note`, `payment` and `charge` on every save, in the same
 transaction as the record (a session note is the clinical record: its changes are the ones most
 worth seeing, D-172). Tasks and the settings record have no history.
@@ -95,25 +127,47 @@ worth seeing, D-172). Tasks and the settings record have no history.
 Deleting one record at a time: the vault itself (`clinic_delete_many`) removes only a `visit`, a
 `note` or a `task`, and refuses a `payment`, a `charge` and the `settings` record whoever asks:
 a payment and a charge are voided, never removed, and the settings record is only replaced.
-Those rows go only together with their patient. On top of that the core allows a visit to be
-deleted only while it is `Planned`, and a note only while both its texts are empty (a note that
-says something is edited, with its history). A visit or a note that is deleted leaves a
+Those rows go only together with their patient. The `tally` record is written only by an erase
+and is never removed or put by hand. On top of that the core allows a visit to be deleted only
+while it is `Planned` and was never anything else by its saved history (D-176), and a note only
+while both its texts are empty (a note that says something is edited, with its history). A visit or a note that is deleted leaves a
 `deleted` history row holding its last state.
 
-Erasing a patient (D-174) is allowed only for a card where nothing happened (no visit held or
-charged, no note, no charge, no payment, voided ones included), or after the retention period
+Erasing a patient (D-174) is allowed only for a card where nothing happened (no visit that ever
+left `Planned` by its history, no note, no charge, no payment, voided ones included;
+`card_happened`), or after the retention period
 of a case: `KEEP_YEARS_AFTER_LAST_CHANGE` since the last activity in the card, and not before
 the patient is `KEEP_UNTIL_AGE` when the birth date is known, whichever is later. The rule is a
-pure function in `logic.rs`, `can_erase(records, today, last_saved, keep_years, keep_until_age)`,
+pure function in `logic.rs`, `can_erase(records, marked, today, last_saved, keep_years,
+keep_until_age)` (`marked`: ids of visits that ever left `Planned`),
 and is enforced in the core. The last activity is the latest date anything in the card carries
 (the day it was opened, every visit, note, charge and payment, a task's due and done dates) and
 `last_saved`: the day one of the card's records was last written (the newest `updated_at` of its
 rows, by the core's clock), so a record corrected years later counts as activity then. `today`
 here is the core's own clock, not the window's. The refusal says the card can be closed instead,
-and from which day it can be erased. An erase then removes the card, every record and every
-history row of theirs (payments and charges included), checkpoints the write-ahead logs of both
-databases, and writes one audit event. Every stored record reads with `#[serde(default)]`
-(D-175).
+and from which day it can be erased. An erase then removes the card, every record of theirs and
+the history of those records (payments and charges included), checkpoints the write-ahead logs
+of both databases, and writes one audit event (`{"records": n}`). Only history that belongs to
+the records being erased goes: rows of this patient's records, and rows this patient's removed
+records left; a row of a record that belongs to another card is never touched (D-177).
+
+What an erased card counted for stays (D-179). Before the erase the core folds the card into two
+anonymous tallies (`fold_erased`, `fold_erased_card`): `ErasedTally` (by month: held visits by
+kind, cancelled, no-show, charged, received by method, payments with no receipt), kept as the
+`tally` record of `main.db`, and `ErasedCards` (by month: cards opened), kept in `clinic_erased`
+of `identity.db`. Neither type has a field for an id, a name, a day or a text. Each is written in
+the same transaction as the rows it stands for: the tally with the removal of the records, the
+card count with the removal of the card. (The two databases cannot share one transaction. If the
+second fails, the card is left with no records and still counts for itself; asking again finishes
+the erase and counts nothing twice.) `Income` and `Diary` add them back (`income_with_erased`,
+`diary_with_erased`), so a year reads the same before and after; `DiaryMonth.erased` is the one
+anonymous line of a month (its sums are in the month's totals and in no day), and
+`Overview.month_received` includes it. Voided amounts are in no summary, so they are not kept. A
+card where nothing happened leaves nothing: it was a mistake, and stops counting as a new patient.
+An erase is refused when a row of the card, or a tally, cannot be read.
+
+Every stored record reads with `#[serde(default)]` (D-175), `KindDefault` and `NoteTemplate`
+included.
 
 ### Rules (the single place: `logic.rs`)
 Limits: a name 1–120 chars; short fields (place, title, receipt, payer, phone, email, framework,
@@ -124,15 +178,23 @@ note ≤ 4,000; `record` and `personal` ≤ 20,000; message texts ≤ 1,000; ≤
 2–52; dates are real ISO dates of the years 2000–2200 (`dates::parse_iso`), except the birth
 date, which has its own check (`parse_birth_date`, `validate_birth_date`): 1900 onward (an older
 sibling, a parent consulting about an adult child) and, where the caller knows today, not after
-it. `age_on` answers `None` when the age does not fit the `Age` type. A refusal is a Hebrew
+it. `SavePatient` carries no `Today`, so the core checks with its own clock
+(`validate_patient_on`): a birth date later than the day after the core's (UTC) today is refused
+(one day of slack, because her local day can be ahead of UTC). `age_on` answers `None` when the age does not fit the `Age` type. A refusal is a Hebrew
 sentence she can act on.
 
 Visits: a `Block` has no patient and no fee; every other kind needs an existing patient. A new
 visit is `Planned`. A repeat creates `count` visits `7 × every_weeks` days apart with one
 `series_id`. `Scope::Following` on a series applies kind, title, start, minutes, place, fee and
-note to this visit and every later `Planned` one of the series, and moves each by the same number
-of days this one moved; status changes apply to this one only. Only a `Planned` visit can be
-deleted. A visit's charge is its fee when `Held`, or when `Cancelled`/`NoShow` with
+note to this visit and every later `Planned` one of the series that has no session note, and
+moves each by the same number of days this one moved; status changes apply to this one only. A
+later visit that has a note or is not `Planned` is never moved or altered, and
+`SavedVisits.left_alone` says how many there were (D-176). Only a visit that is `Planned` and
+never left `Planned` by its saved history can be deleted (`validate_delete(visit, marked)`;
+"this and the following" skips the marked ones). A status goes back to `Planned` only when the
+visit has no note and the patient's payments (not voided) are not more than the charges left
+without it (`validate_unmark`); every other status change is allowed. A visit, a payment, a
+charge and a note never change their patient (a block may be given one), D-177. A visit's charge is its fee when `Held`, or when `Cancelled`/`NoShow` with
 `charge_missed`; otherwise 0. Two visits overlap when both are not cancelled, on the same date,
 and their times intersect. Saving a visit for a `Waiting` patient makes them `Active`.
 
@@ -147,6 +209,7 @@ Alerts (computed, never stored; sorted by `since`, oldest first):
 - `FeedbackSoon`: a Feedback planned within the next 7 days while the report is not finished.
 - `NoNextVisit`: active; has a past visit; nothing planned from today on; no open task; last visit more than 14 days ago; not (Feedback held and nothing owed).
 - `TaskOverdue`: an open task whose date passed.
+- `Unreadable`: rows that could not be read (D-178). Only in `Overview`, always first, no patient.
 
 Process (the card): `intake`, `sessions`, `observation` (only when one exists), `report`,
 `feedback`, `payment`; each `Done` / `Now` / `Todo` with one line of detail.
@@ -154,7 +217,7 @@ Process (the card): `intake`, `sessions`, `observation` (only when one exists), 
 Diary month: every patient visit of the month, every charge and every payment (voided ones
 shown as voided and not counted), by date, then visits by time, then charges, then payments.
 Income year: twelve months of held / cancelled / no-show counts, charged, received; new patients
-(by `created_on`); held visits by kind.
+(by `created_on`); held visits by kind. Both include what erased cards counted for (D-179).
 
 Messages: placeholders `{הורה} {ילד} {יום} {תאריך} {שעה} {מקום} {סכום} {שמי}`; a missing parent
 name becomes "רב" ("שלום רב"); the date is `15.11.2026`, the time `09:30`, the day `ראשון`.
@@ -165,9 +228,18 @@ name becomes "רב" ("שלום רב"); the date is `15.11.2026`, the time `09:30
   gender, no consent, identities: the child (`Role::Child`) and the mother and father contacts.
   The patient keeps `case_id`.
 - `LinkCase` / `CaseChoices`: a case is linked to at most one patient; a case in the recycle bin is not offered.
-- `NoteToCase`: needs a linked case that is not in the bin and a non-empty `record`. Adds (or, when
-  `case_input_id` still exists, replaces) a material through the core's own `add_input` /
-  `update_input`: kind `Intake` for an intake visit, `Observation` for an observation, otherwise
+- The names of a card are names its case's filter knows (D-177). `clinic_sync_identities` runs
+  when a card is linked (`LinkCase`), on every `SavePatient` of a card that has a case, and in
+  `NoteToCase` before the record goes; if it fails, the link, the save or the send fails. It only
+  adds: the child's name joins the case's `Role::Child` as an alias when the case has a child (a
+  new `Role::Child` otherwise), and each named contact the case does not know (by value or alias)
+  is added with their role. A name that left the card, and everything she set in the case, stays.
+- `NoteToCase`: needs a linked case that is not in the bin and a non-empty `record`. Adds a
+  material, or, when `case_input_id` still exists in the case, replaces it through the core's own
+  `update_input`. The first send writes the material and the note that points to it in one
+  transaction (`Vault::clinic_note_into_case`, with an id the core made first), then learns the
+  material's names as `add_input` does: a failure leaves neither, and asking again never adds the
+  record twice (D-177). The material: kind `Intake` for an intake visit, `Observation` for an observation, otherwise
   `SessionNote`; title `סיכום <kind> · <dd.mm.yyyy>`, and for a note with no visit (a phone
   call, or a note whose visit was removed) `סיכום שיחה · <dd.mm.yyyy>`; content = `record` only.
 - `SavePatient` never changes `case_id`. Erasing a patient never touches the case.
