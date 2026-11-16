@@ -706,6 +706,7 @@ fn build_check(
     )?;
     let mut paragraphs = Vec::new();
     let mut draft_ids = Vec::new();
+    let mut wordings = Vec::new();
     for (id, text) in &read.paragraphs {
         stop()?;
         let out = job
@@ -715,6 +716,7 @@ fn build_check(
         review.add("פסקה לבדיקה".to_owned(), &out);
         paragraphs.push(out.tagged);
         draft_ids.push(id.clone());
+        wordings.push(text.clone());
     }
     let input = dv_ai::VerifyInput {
         section_title: model_title(&read.section, ctx)?,
@@ -728,6 +730,7 @@ fn build_check(
         case_id: ask.case_id.clone(),
         section_key: ask.section_key.clone(),
         draft_ids,
+        wordings,
         source_ids,
     };
     Ok((body, review, kind))

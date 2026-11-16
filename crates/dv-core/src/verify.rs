@@ -56,6 +56,7 @@ impl Core {
             case_id,
             section_key: _,
             draft_ids,
+            wordings,
             source_ids,
         } = kind
         else {
@@ -83,11 +84,18 @@ impl Core {
         // D-161: the verdicts are kept for the session with the paragraphs, by the stored
         // wording each has now, so the report page shows them after any reload and "approve
         // all" sees them.
+        // A verdict is about the wording that was sent: a paragraph worded again or edited
+        // while the check was out was not checked, and the verdict says nothing about it.
         let mut said: Vec<(String, String, Vec<ParagraphNote>)> = Vec::new();
-        for (draft_id, c) in draft_ids.iter().zip(&checks) {
+        for ((draft_id, sent), c) in draft_ids.iter().zip(&wordings).zip(&mut checks) {
             let Some(d) = style::find_draft(v, &case_id, draft_id)? else {
                 continue;
             };
+            if d.text_tagged != *sent {
+                c.verdict = dv_ai::Verdict::Unchecked;
+                c.notes.clear();
+                continue;
+            }
             // The demo check reads for numbers only and calls everything else "partial":
             // that is "not read", not a finding, and it holds nothing back.
             let notes = if demo && c.verdict == dv_ai::Verdict::Partial {
