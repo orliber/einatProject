@@ -117,8 +117,10 @@ impl SectionNotes {
 /// What is kept for one paragraph, with the wording it was said about.
 struct Kept {
     case_id: String,
-    /// The paragraph as she saw it then.
-    shown: String,
+    /// The paragraph's stored (tagged) wording then. Not the text with the names put back:
+    /// a name she corrects, or her own name in the settings, does not change what was said
+    /// about the wording, and must not drop a note that holds the paragraph back.
+    wording: String,
     /// Found when the answer came, and not worked out again on each reading.
     answer: Vec<ParagraphNote>,
     /// The last verdict of the check against the sources that is worth a look.
@@ -127,7 +129,7 @@ struct Kept {
 
 impl Kept {
     fn wipe(&mut self) {
-        self.shown.zeroize();
+        self.wording.zeroize();
         for n in self.answer.iter_mut().chain(self.verdict.iter_mut()) {
             n.text.zeroize();
         }
@@ -189,7 +191,7 @@ impl SessionNotes {
         &mut self,
         case_id: &str,
         draft_id: &str,
-        shown: String,
+        wording: String,
         notes: Vec<ParagraphNote>,
     ) {
         self.forget(draft_id);
@@ -200,7 +202,7 @@ impl SessionNotes {
             draft_id.to_owned(),
             Kept {
                 case_id: case_id.to_owned(),
-                shown,
+                wording,
                 answer: notes,
                 verdict: Vec::new(),
             },
@@ -213,11 +215,11 @@ impl SessionNotes {
         &mut self,
         case_id: &str,
         draft_id: &str,
-        shown: String,
+        wording: String,
         notes: Vec<ParagraphNote>,
     ) {
         match self.paragraphs.get_mut(draft_id) {
-            Some(k) if k.shown == shown => {
+            Some(k) if k.wording == wording => {
                 for n in &mut k.verdict {
                     n.text.zeroize();
                 }
@@ -233,7 +235,7 @@ impl SessionNotes {
                         draft_id.to_owned(),
                         Kept {
                             case_id: case_id.to_owned(),
-                            shown,
+                            wording,
                             answer: Vec::new(),
                             verdict: notes,
                         },
@@ -243,11 +245,12 @@ impl SessionNotes {
         }
     }
 
-    /// The notes kept for the paragraph, when it still reads as it did when they were said.
-    pub(crate) fn of_paragraph(&self, draft_id: &str, shown: &str) -> Vec<ParagraphNote> {
+    /// The notes kept for the paragraph, when its stored wording is still the one they were
+    /// said about.
+    pub(crate) fn of_paragraph(&self, draft_id: &str, wording: &str) -> Vec<ParagraphNote> {
         self.paragraphs
             .get(draft_id)
-            .filter(|k| k.shown == shown)
+            .filter(|k| k.wording == wording)
             .map(|k| k.answer.iter().chain(&k.verdict).cloned().collect())
             .unwrap_or_default()
     }
@@ -259,12 +262,12 @@ impl SessionNotes {
     }
 
     /// Drop the notes of the case's paragraphs that are gone or read differently now.
-    /// `shown`: every paragraph on the page, by id, as she sees it.
-    pub(crate) fn prune(&mut self, case_id: &str, shown: &HashMap<String, String>) {
+    /// `on_page`: every paragraph on the page, by id, with its stored wording.
+    pub(crate) fn prune(&mut self, case_id: &str, on_page: &HashMap<String, String>) {
         let gone: Vec<String> = self
             .paragraphs
             .iter()
-            .filter(|(id, k)| k.case_id == case_id && shown.get(*id) != Some(&k.shown))
+            .filter(|(id, k)| k.case_id == case_id && on_page.get(*id) != Some(&k.wording))
             .map(|(id, _)| id.clone())
             .collect();
         for id in gone {

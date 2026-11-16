@@ -821,11 +821,13 @@ enum PendingKind {
         groups: Vec<dv_ai::InterpretationGroup>,
     },
     /// The check of a section's proposed paragraphs against its sources: the drafts in the
-    /// order of `P1`…, and the `S#` ids that were sent.
+    /// order of `P1`…, the stored (tagged) wording of each as it was sent, and the `S#` ids
+    /// that were sent.
     Verify {
         case_id: String,
         section_key: String,
         draft_ids: Vec<String>,
+        wordings: Vec<String>,
         source_ids: Vec<String>,
     },
     /// The check of the whole approved report (D-097): the keys of the sections sent, in the
@@ -1050,6 +1052,9 @@ pub struct Core {
     section_nonces: HashMap<(String, String), String>,
     /// The name model's hints by text, so a material is read once (dropped on lock).
     hint_cache: HashMap<String, Vec<dv_privacy::NameHint>>,
+    /// Set only inside [`Core::request_name_texts`]: `case_hints` lists the texts it would
+    /// have the model read, and reads none. The request begun meanwhile is dropped unsent.
+    name_texts: Option<Vec<String>>,
     /// The case whose stored texts were last settled against its tags, and the vault's write
     /// counts right after: while they have not moved, no text or name changed, and settling
     /// again would find nothing (dropped on lock).

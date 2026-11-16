@@ -509,3 +509,149 @@ fn a_section_request_after_twelve_turns_sends_six_and_is_smaller() {
     println!("request size with 12 turns of history: before {before} bytes, after {after} bytes");
     assert!(after < before);
 }
+
+/// The notes are kept by the stored wording, not by the text with the names put back: when
+/// she corrects the spelling of the child's name, or her own name in the settings, what the
+/// answer and the check said about the paragraph stays, and "approve all" still holds it back.
+#[test]
+fn correcting_a_name_keeps_the_notes_that_hold_a_paragraph_back() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    drafted(&mut core, &fake, &case);
+    core.set_verify_stage(true).unwrap();
+    let id = core
+        .prepare_verify(&case, "background")
+        .unwrap()
+        .approval_id
+        .unwrap();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({ "results": [
+        { "paragraph": "P1", "verdict": "contradicted", "notes": [] },
+        { "paragraph": "P2", "verdict": "supported", "notes": [] },
+        { "paragraph": "P3", "verdict": "supported", "notes": [] },
+    ]})));
+    let result = core.send_verify(&id).unwrap();
+    *fake.answer.lock().unwrap() = None;
+
+    // The same people, the child's name spelled again, and her own name changed.
+    let people: Vec<IdentityInput> = core
+        .vault_ref()
+        .unwrap()
+        .identities(&case)
+        .unwrap()
+        .into_iter()
+        .map(|i| IdentityInput {
+            id: Some(i.id),
+            role: i.role,
+            value: if i.role == Role::Child {
+                "אילון".to_owned()
+            } else {
+                i.value
+            },
+            aliases: i.aliases,
+        })
+        .collect();
+    core.set_identities(&case, people).unwrap();
+    core.set_practitioner(vec!["ד\"ר רותם אלמוג-בדויה".into()])
+        .unwrap();
+
+    let s = section(&mut core, &case, "background");
+    let of = |draft: &str| s.paragraphs.iter().find(|p| p.id == draft).unwrap();
+    let checked = of(&result.draft_ids[0]);
+    assert!(checked.text.contains("אילון"), "{}", checked.text);
+    assert!(
+        kinds(checked).contains(&NoteKind::VerifyContradicted),
+        "{:?}",
+        checked.notes
+    );
+    let uncited = s
+        .paragraphs
+        .iter()
+        .find(|p| p.text.contains("בחצר"))
+        .unwrap();
+    assert!(
+        kinds(uncited).contains(&NoteKind::NoSource),
+        "{:?}",
+        uncited.notes
+    );
+    let ids: Vec<String> = s.paragraphs.iter().map(|p| p.id.clone()).collect();
+    assert_eq!(core.approve_clean_paragraphs(&case, &ids).unwrap(), 0);
+    let s = section(&mut core, &case, "background");
+    assert!(s
+        .paragraphs
+        .iter()
+        .all(|p| p.status == DraftStatus::Proposed));
+}
+
+/// A verdict is about the wording that was sent. When a paragraph is worded again while an
+/// older check is still out, that older answer neither clears nor sets the verdict of the new
+/// wording: a "supported" about the old wording must not let the new one through approve-all.
+#[test]
+fn an_older_check_answering_late_says_nothing_about_a_new_wording() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    drafted(&mut core, &fake, &case);
+    core.set_verify_stage(true).unwrap();
+    let first = section(&mut core, &case, "background")
+        .paragraphs
+        .into_iter()
+        .find(|p| p.text.contains("נרדם"))
+        .unwrap()
+        .id;
+    // The check of the first wording goes out and has not answered yet.
+    let older = core
+        .prepare_verify(&case, "background")
+        .unwrap()
+        .approval_id
+        .unwrap();
+
+    // Meanwhile the paragraph is worded again, in place.
+    let reword = core
+        .prepare_section_replacing(&case, "background", "לנסח מחדש", Some(&first))
+        .unwrap()
+        .approval_id
+        .unwrap();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({
+        "reply": "הנה",
+        "paragraphs": [
+            {"text": "[ילד] נרדם מאוחר בערב ומתעורר בלילה.", "source_refs": ["S1"], "guide": 1},
+        ],
+        "questions": [], "missing": [], "contradictions": [],
+    })));
+    core.send_section(&reword).unwrap();
+    // The new wording is checked, and contradicts the sources.
+    let newer = core
+        .prepare_verify(&case, "background")
+        .unwrap()
+        .approval_id
+        .unwrap();
+    let all = |verdict: &str| {
+        api_json(&json!({ "results": [
+            { "paragraph": "P1", "verdict": verdict, "notes": [] },
+            { "paragraph": "P2", "verdict": verdict, "notes": [] },
+            { "paragraph": "P3", "verdict": verdict, "notes": [] },
+        ]}))
+    };
+    *fake.answer.lock().unwrap() = Some(all("contradicted"));
+    core.send_verify(&newer).unwrap();
+
+    // The check of the old wording answers last: "supported".
+    *fake.answer.lock().unwrap() = Some(all("supported"));
+    let late = core.send_verify(&older).unwrap();
+    *fake.answer.lock().unwrap() = None;
+    let at = late.draft_ids.iter().position(|d| *d == first).unwrap();
+    assert_eq!(late.checks[at].verdict, dv_ai::Verdict::Unchecked);
+
+    let s = section(&mut core, &case, "background");
+    let p = s.paragraphs.iter().find(|p| p.id == first).unwrap();
+    assert!(p.text.contains("מאוחר בערב"), "{}", p.text);
+    assert!(
+        kinds(p).contains(&NoteKind::VerifyContradicted),
+        "{:?}",
+        p.notes
+    );
+    assert_eq!(
+        core.approve_clean_paragraphs(&case, std::slice::from_ref(&first))
+            .unwrap(),
+        0
+    );
+}

@@ -9,12 +9,15 @@ pub(crate) async fn prepare_consult(
     conversation_id: Option<String>,
     message: String,
 ) -> Res<Prepared> {
-    warm_names(
-        &state,
-        case_id.as_deref().unwrap_or(""),
-        vec![message.clone()],
-    )
+    // Her question, her earlier questions and the approved paragraphs are read by the name
+    // model while the core is free (JOBS-4).
+    let (case, conversation, m) = (case_id.clone(), conversation_id.clone(), message.clone());
+    let mut texts = name_texts(&state, move |c| {
+        c.begin_prepare_consult(case.as_deref(), conversation.as_deref(), &m)
+    })
     .await;
+    texts.push(message.clone());
+    warm_names(&state, case_id.as_deref().unwrap_or(""), texts).await;
     prepare_off_lock(&state, move |c| {
         c.begin_prepare_consult(case_id.as_deref(), conversation_id.as_deref(), &message)
     })

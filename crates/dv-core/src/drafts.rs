@@ -118,7 +118,8 @@ impl Core {
             })
             .collect();
         let key_scores = key_scores_text(v, &sheets)?;
-        // Every paragraph on the page as she sees it, for the notes kept about it (D-161).
+        // Every paragraph on the page with its stored wording, for the notes kept about it
+        // (D-161). The stored wording, not the names put back: correcting a name keeps them.
         let mut on_page: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         let mut sections = Vec::new();
@@ -228,13 +229,13 @@ impl Core {
                         let warnings: Vec<String> = notes.iter().map(|n| n.text.clone()).collect();
                         // What the answer and the check against the sources said about this
                         // wording (D-161), then the proofreading. Nothing is said twice.
-                        for n in kept.of_paragraph(&d.id, &text) {
+                        for n in kept.of_paragraph(&d.id, &d.text_tagged) {
                             if !notes.contains(&n) {
                                 notes.push(n);
                             }
                         }
                         notes.extend(tag(NoteKind::Polish, polish.clone()));
-                        on_page.insert(d.id.clone(), text.clone());
+                        on_page.insert(d.id.clone(), d.text_tagged.clone());
                         ParagraphView {
                             has_versions: with_versions.contains(&d.id),
                             id: d.id,
