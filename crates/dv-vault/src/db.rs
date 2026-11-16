@@ -260,6 +260,14 @@ pub const MAIN_MIGRATIONS: &[&str] = &[
         data_enc BLOB NOT NULL
      );
      CREATE INDEX clinic_history_record ON clinic_history(record_id, saved_at);",
+    // v14: the notes beside the report (D-161, D-193): what the answers and the checks against
+    // the sources said about the case's sections and paragraphs, and the notes she left as
+    // they are. One row per case, the caller's own JSON sealed with the case key, so the
+    // notes survive a lock and go with the case; the case id is the only clear column.
+    "CREATE TABLE case_notes (
+        case_id TEXT PRIMARY KEY REFERENCES cases(id) ON DELETE CASCADE,
+        data_enc BLOB NOT NULL
+     );",
 ];
 
 pub const IDENTITY_MIGRATIONS: &[&str] = &[
@@ -372,6 +380,7 @@ mod tests {
                 "860fa1cbe9c35c6b",
                 "bc893c8e985ecbd1",
                 "9aee726964b4112a",
+                "91e0ade28762a097",
             ],
         ),
         (

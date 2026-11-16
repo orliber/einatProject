@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-note-left"
+description = "Enables the set_note_left command without any pre-configured scope."
+commands.allow = ["set_note_left"]
+
+[[permission]]
+identifier = "deny-set-note-left"
+description = "Denies the set_note_left command without any pre-configured scope."
+commands.deny = ["set_note_left"]

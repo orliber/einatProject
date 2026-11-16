@@ -1067,8 +1067,9 @@ pub struct Core {
     memory_lock: Option<bool>,
     /// The cases opened this session, so each opening is logged once (L3; dropped on lock).
     opened_cases: HashSet<String>,
-    /// What the answers and the checks against the sources said this session (D-161):
-    /// memory only, wiped on lock.
+    /// What the answers and the checks against the sources said (D-161), and the notes she
+    /// left as they are: each case's, read from its sealed row the first time this session
+    /// (D-193); this copy is wiped on lock.
     notes: notes::SessionNotes,
     /// What this opening has to say about the time since the last one (L4; dropped on lock).
     since_last: Option<String>,

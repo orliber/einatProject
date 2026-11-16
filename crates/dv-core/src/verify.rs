@@ -65,7 +65,8 @@ impl Core {
         let v = self.vault_mut()?;
         let paragraph_ids: Vec<String> = (1..=draft_ids.len()).map(|i| format!("P{i}")).collect();
         let mut checks = dv_ai::parse_verify(&response, &paragraph_ids, &source_ids)?;
-        // Notes may carry tags; she reads the names. A note is shown, never stored or sent.
+        // Notes may carry tags; she reads the names. A note is shown, and kept sealed with the
+        // case (D-193); never sent.
         let identities = v.identities(&case_id)?;
         let masks = v.masks(&case_id)?;
         let practitioner = v.practitioner()?.names.first().cloned();
@@ -81,7 +82,7 @@ impl Core {
                 });
             }
         }
-        // D-161: the verdicts are kept for the session with the paragraphs, by the stored
+        // D-161: the verdicts are kept with the paragraphs (sealed, D-193), by the stored
         // wording each has now, so the report page shows them after any reload and "approve
         // all" sees them.
         // A verdict is about the wording that was sent: a paragraph worded again or edited
@@ -105,9 +106,11 @@ impl Core {
             };
             said.push((draft_id.clone(), d.text_tagged, notes));
         }
+        let kept = self.case_notes(&case_id)?;
         for (draft_id, wording, notes) in said {
-            self.notes.keep_verdict(&case_id, &draft_id, wording, notes);
+            kept.keep_verdict(&draft_id, wording, notes);
         }
+        self.save_notes(&case_id)?;
         Ok(VerifyResult {
             draft_ids,
             checks,
