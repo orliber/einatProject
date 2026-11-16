@@ -132,8 +132,11 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
   // Kept while the vault is open: leaving and coming back finds the editor with her text.
   const [editing, setEditing] = useKept<{ id: string; text: string; original?: string; at?: GroupId } | null>(`case:${caseId}:finish:editing`, null);
   /** The notes she left as they are. Only this list reads it: the check before the file, the
-   *  export and "approve all" never do. Kept while the vault is open, never written anywhere. */
+   *  export and "approve all" never do. Kept with the case in the vault (D-193), so a lock or a
+   *  restore brings them back: the core is asked which of the notes shown now she left. */
   const [leftKeys, setLeftKeys] = useKept<string[]>(`case:${caseId}:finish:left`, []);
+  /** The core answered which notes she left (or could not say: then every note shows). */
+  const [leftAnswered, setLeftAnswered] = useState(false);
   /** A group she opened or folded herself; otherwise the first one with something in it is open. */
   const [folds, setFolds] = useState<Partial<Record<GroupId, boolean>>>({});
   const [showLeft, setShowLeft] = useState<Partial<Record<GroupId, boolean>>>({});
@@ -253,6 +256,24 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
     }];
   });
 
+  // D-193: of the notes she may leave, the ones she left, as the case keeps them. Asked again
+  // whenever the notes shown change (an edit, a new check of the whole report).
+  const leavable = JSON.stringify([...checkCards, ...polishCards].flatMap((c) => (c.type === "line" ? (c.leave ? [c.key] : []) : c.notes.map((n) => n.key))));
+  useEffect(() => {
+    const keys = JSON.parse(leavable) as string[];
+    if (keys.length === 0) return;
+    let alive = true;
+    ipc.leftNotes(caseId, keys)
+      .then((left) => alive && setLeftKeys((now) => [...now, ...left.filter((k) => !now.includes(k))]))
+      // Not known: nothing is hidden, every note shows.
+      .catch(() => undefined)
+      .finally(() => alive && setLeftAnswered(true));
+    return () => {
+      alive = false;
+    };
+  }, [caseId, leavable, setLeftKeys]);
+  const leftKnown = leftAnswered || leavable === "[]";
+
   const groups = [group("must", mustCards, leftKeys), group("check", checkCards, leftKeys), group("polish", polishCards, leftKeys)];
   const [must, toCheck] = groups;
   const firstOpen = groups.find((g) => g.count > 0)?.id ?? null;
@@ -261,12 +282,21 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
   const editorOpen = editing !== null && groups.some((g) => (editing.at ?? "check") === g.id && g.cards.some((c) => c.type === "paragraph" && c.p.id === editing.id));
   const anyCard = groups.some((g) => g.cards.length > 0);
 
-  /** Leave a note as it is. Its list stays open, also when this was the last one in it. */
-  const leave = (g: GroupId, key: string) => {
+  /** Kept with the case (D-193); a failure says so, and the note stays as she set it here. */
+  const keepLeft = (key: string, draftId: string | null, left: boolean) => {
+    ipc.setNoteLeft(caseId, draftId, key, left).catch((e: unknown) => setError(fail(e as never)));
+  };
+  /** Leave a note as it is (`draftId`: the paragraph it is about). Its list stays open, also
+   *  when this was the last one in it. */
+  const leave = (g: GroupId, key: string, draftId: string | null) => {
     setFolds((f) => ({ ...f, [g]: true }));
     setLeftKeys((keys) => (keys.includes(key) ? keys : [...keys, key]));
+    keepLeft(key, draftId, true);
   };
-  const bringBack = (key: string) => setLeftKeys((keys) => keys.filter((k) => k !== key));
+  const bringBack = (key: string) => {
+    setLeftKeys((keys) => keys.filter((k) => k !== key));
+    keepLeft(key, null, false);
+  };
 
   /** Bring the paragraph (or the section) into the middle of the preview and light it for a
    *  moment. Only the preview scrolls; the list stays where it is. */
@@ -327,7 +357,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
             <li key={n.key} className="fin-note">
               <div className="fin-title-row">
                 <b className="fin-title grow">{n.title}</b>
-                {!here && !one && <button type="button" className="fin-link" onClick={() => leave(g.id, n.key)}>בסדר, להשאיר</button>}
+                {!here && !one && <button type="button" className="fin-link" onClick={() => leave(g.id, n.key, p.id)}>בסדר, להשאיר</button>}
               </div>
               {!here && (
                 <button type="button" className="fin-quote serif" title="להראות בדוח" onClick={() => show(`p:${p.id}`)}>
@@ -342,7 +372,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
           <div className="fin-actions">
             {canFix && <button type="button" className="btn btn-small" onClick={fixHere}>לתקן כאן</button>}
             <button type="button" className="fin-link" onClick={() => onOpen(section.key)}>לעבור לסעיף</button>
-            {one && <button type="button" className="fin-link" onClick={() => leave(g.id, c.notes[0]?.key ?? "")}>בסדר, להשאיר</button>}
+            {one && <button type="button" className="fin-link" onClick={() => leave(g.id, c.notes[0]?.key ?? "", p.id)}>בסדר, להשאיר</button>}
           </div>
         )}
       </li>
@@ -365,7 +395,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
         {(c.open !== null || c.leave) && (
           <div className="fin-actions">
             {c.open !== null && <button type="button" className="fin-link" onClick={() => onOpen(c.open ?? "")}>לעבור לסעיף</button>}
-            {c.leave && <button type="button" className="fin-link" onClick={() => leave(g.id, c.key)}>בסדר, להשאיר</button>}
+            {c.leave && <button type="button" className="fin-link" onClick={() => leave(g.id, c.key, null)}>בסדר, להשאיר</button>}
           </div>
         )}
       </li>
@@ -418,11 +448,11 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
       <div className="finish-body">
         <section className="finish-side" aria-label="לפני שהקובץ יוצא">
           <div className="stack" style={{ gap: 4 }}>
-            <h1>{statusLine({ loaded: check !== null, nothing, must: must?.count ?? 0, check: toCheck?.count ?? 0, complete })}</h1>
+            <h1>{statusLine({ loaded: check !== null && leftKnown, nothing, must: must?.count ?? 0, check: toCheck?.count ?? 0, complete })}</h1>
             <span className="muted small">{anyCard ? "לחיצה על הערה מראה אותה בדוח שמשמאל." : "משמאל: הדוח כמו שייצא."}</span>
           </div>
-          {!check && !error && <WaitLine task="check" label="בודקת שהדוח מוכן להוצאה" />}
-          {check && (
+          {(!check || !leftKnown) && !error && <WaitLine task="check" label="בודקת שהדוח מוכן להוצאה" />}
+          {check && leftKnown && (
             <div className="fin-groups">
               {ready && <p className="fin-ok"><span aria-hidden="true">✓</span> אין שום דבר שעוצר את הקובץ.</p>}
               {groups.map(groupBlock)}

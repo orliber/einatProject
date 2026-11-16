@@ -154,6 +154,7 @@ export type Commands = {
   instrument_approvals: { args: undefined; returns: Array<InstrumentApproval> };
   keep_case_longer: { args: { caseId: string; years: number }; returns: null };
   keep_draft_brief: { args: { sectionKey: string; text: string; keep: boolean }; returns: DraftBriefs };
+  left_notes: { args: { caseId: string; keys: Array<string> }; returns: Array<string> };
   letter: { args: { caseId: string; audience: string }; returns: Array<ParagraphView> };
   list_cases: { args: undefined; returns: Array<CaseSummary> };
   list_trash: { args: undefined; returns: Array<CaseSummary> };
@@ -240,6 +241,7 @@ export type Commands = {
   set_model: { args: { model: string }; returns: null };
   set_monthly_cap: { args: { capUsd: number | null }; returns: null };
   set_name_model: { args: { on: boolean }; returns: NameModelView };
+  set_note_left: { args: { caseId: string; draftId: string | null; key: string; left: boolean }; returns: null };
   set_practitioner: { args: { names: Array<string> }; returns: null };
   set_report_check: { args: { on: boolean }; returns: null };
   set_report_logo: { args: Uint8Array; returns: LogoView };

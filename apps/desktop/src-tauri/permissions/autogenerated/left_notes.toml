@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-left-notes"
+description = "Enables the left_notes command without any pre-configured scope."
+commands.allow = ["left_notes"]
+
+[[permission]]
+identifier = "deny-left-notes"
+description = "Denies the left_notes command without any pre-configured scope."
+commands.deny = ["left_notes"]

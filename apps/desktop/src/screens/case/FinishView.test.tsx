@@ -268,9 +268,12 @@ describe("the finish page", () => {
     expect(produce()).toBeEnabled();
   });
 
-  it("\"fine, leave it\" takes the note off the list and the counter; it can be brought back; nothing is sent to the core", async () => {
-    const { side, user, calls } = await openFinish(written((d) => {
-      first(d, "background").notes = [
+  it("\"fine, leave it\" takes the note off the list and the counter; it can be brought back; the case keeps each choice (D-193)", async () => {
+    let about = "";
+    const { side, user, calls, caseId } = await openFinish(written((d) => {
+      const p = first(d, "background");
+      about = p.id;
+      p.notes = [
         { kind: "term", text: "כתוב «גן»; בשאר הדוח «מסגרת»" },
         { kind: "age", text: "בפסקה כתוב גיל 6, ובתיק 5" },
       ];
@@ -301,8 +304,43 @@ describe("the finish page", () => {
     expect(cardOf(within(group).getByText("מונח מקצועי"))).toBeInTheDocument();
     expect(count(check)).toBe("1");
     expect(within(group).getByRole("button", { name: "הערות שהשארת (1)" })).toBeInTheDocument();
-    // Only this list: no command went to the core for any of it.
-    expect(calls.length).toBe(sent);
+    // Each choice is kept with the case, by the paragraph it is about; nothing else went to the core.
+    const kept = calls.slice(sent);
+    expect(kept.map((c) => c.cmd)).toEqual(["set_note_left", "set_note_left", "set_note_left"]);
+    expect(kept.map((c) => c.args.left)).toEqual([true, true, false]);
+    expect(kept.every((c) => c.args.caseId === caseId)).toBe(true);
+    expect(about).not.toBe("");
+    expect(kept.slice(0, 2).map((c) => c.args.draftId)).toEqual([about, about]);
+    expect(kept[2]?.args.key).toBe(kept[0]?.args.key);
+  });
+
+  it("what she left is still left after the lock: the case keeps it, and the page asks for it (D-193)", async () => {
+    const shaped = written((d) => {
+      first(d, "background").notes = [
+        { kind: "term", text: "כתוב «גן»; בשאר הדוח «מסגרת»" },
+        { kind: "age", text: "בפסקה כתוב גיל 6, ובתיק 5" },
+      ];
+    });
+    const { side, user, view, app, caseId, onExport, onOpen } = await openFinish(shaped);
+    const check = await within(side).findByRole("button", { name: /כדאי לבדוק/ });
+    const note = within(check.closest("section") as HTMLElement).getByText("מונח מקצועי").closest("li.fin-note") as HTMLElement;
+    await user.click(within(note).getByRole("button", { name: "בסדר, להשאיר" }));
+    expect(count(check)).toBe("1");
+    // The lock: the window forgets everything of the case; the page opens again from the core.
+    view.unmount();
+    clearKept();
+    render(
+      <Host app={app}>
+        <CaseHost caseId={caseId}>{(api) => <FinishView api={api} onExport={onExport} onOpen={onOpen} />}</CaseHost>
+      </Host>,
+    );
+    const again = await screen.findByRole("region", { name: "לפני שהקובץ יוצא" });
+    const head2 = await within(again).findByRole("button", { name: /כדאי לבדוק/ });
+    const group = head2.closest("section") as HTMLElement;
+    expect(count(head2)).toBe("1");
+    expect(within(group).queryByText("מונח מקצועי")).toBeNull();
+    expect(within(group).getByText("גיל שלא תואם את פרטי התיק")).toBeInTheDocument();
+    expect(within(group).getByRole("button", { name: "הערות שהשארת (1)" })).toBeInTheDocument();
   });
 
   it("a note she left shows again once its paragraph was edited and still has it", async () => {

@@ -199,7 +199,9 @@ fn work(dir: &Path, version: &str) {
     other
         .restore_staged_backup(Some(PASSWORD), None)
         .unwrap_or_else(|e| panic!("{version}: restore: {e:?}"));
-    let now = from_the_vault(core.case_detail(&case).unwrap());
+    // With what the answer said about the new draft: it goes with the backup and outlives
+    // the lock (D-193).
+    let now = core.case_detail(&case).unwrap();
     assert_eq!(
         other.case_detail(&case).unwrap(),
         now,

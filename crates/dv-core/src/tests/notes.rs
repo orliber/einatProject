@@ -1,8 +1,9 @@
 //! D-161: no note gets lost. What an answer said beside its paragraphs, what was found in
-//! them when it came, and the verdicts of the check against the sources are kept for the
-//! open session and shown with the case; "approve all" holds back every paragraph that has
-//! something to look at. D-163: the run sends the wish she kept, and a section's request
-//! carries only the recent turns of its conversation. Fabricated data only.
+//! them when it came, and the verdicts of the check against the sources are kept with the
+//! case and shown with it; "approve all" holds back every paragraph that has something to
+//! look at. D-193: they, and the notes she left as they are, are kept sealed in the vault and
+//! come back after a lock or a restore. D-163: the run sends the wish she kept, and a
+//! section's request carries only the recent turns of its conversation. Fabricated data only.
 
 use super::*;
 
@@ -223,7 +224,7 @@ fn the_demo_check_which_reads_nothing_holds_nothing_back() {
 }
 
 #[test]
-fn notes_die_with_the_wording_they_were_about_and_with_the_lock() {
+fn notes_die_with_the_wording_they_were_about_and_outlive_the_lock() {
     let fake = FakeTransport::default();
     let (_dir, mut core, case) = setup(Some(fake.clone()));
     drafted(&mut core, &fake, &case);
@@ -252,6 +253,8 @@ fn notes_die_with_the_wording_they_were_about_and_with_the_lock() {
     core.case_detail(&case).unwrap();
     assert!(core
         .notes
+        .get(&case)
+        .unwrap()
         .of_paragraph(&named, "אלון מתעורר פעמיים בלילה.")
         .is_empty());
 
@@ -274,15 +277,17 @@ fn notes_die_with_the_wording_they_were_about_and_with_the_lock() {
         .iter()
         .any(|p| kinds(p).contains(&NoteKind::NoSource)));
 
-    // The lock wipes the session's notes; what is worked out on each reading stays.
+    // The lock wipes the session's copy; the vault's comes back as it was (D-193).
+    let before = section(&mut core, &case, "background");
     core.lock();
+    assert!(core.notes.get(&case).is_none());
     core.unlock(PASSWORD).unwrap();
-    let s = section(&mut core, &case, "background");
-    assert_eq!(s.notes, SectionNotes::default());
-    assert!(s
+    let after = section(&mut core, &case, "background");
+    assert_eq!(after, before);
+    assert!(after
         .paragraphs
         .iter()
-        .all(|p| !kinds(p).contains(&NoteKind::NoSource)));
+        .any(|p| kinds(p).contains(&NoteKind::NoSource)));
 }
 
 #[test]
@@ -654,4 +659,193 @@ fn an_older_check_answering_late_says_nothing_about_a_new_wording() {
             .unwrap(),
         0
     );
+}
+
+// ------------------------------------------------------------ D-193: kept in the vault
+
+/// What the finish page calls a note it shows about the whole report (one it may leave).
+const REPORT_NOTE: &str = r#"report:["repetition",["background"],"אותו משפט בשני מקומות."]"#;
+
+/// The drafted case with a verdict of the check against the sources, and two notes she left
+/// on the finish page: one about the paragraph that cites nothing, and one about the whole
+/// report. Returns that paragraph's id and the page's key for its note.
+fn worked_on(core: &mut Core, fake: &FakeTransport, case: &str) -> (String, String) {
+    drafted(core, fake, case);
+    core.set_verify_stage(true).unwrap();
+    let id = core
+        .prepare_verify(case, "background")
+        .unwrap()
+        .approval_id
+        .unwrap();
+    *fake.answer.lock().unwrap() = Some(api_json(&json!({ "results": [
+        { "paragraph": "P1", "verdict": "contradicted",
+          "notes": [{ "note": "[ילד] מתואר אחרת במקור", "source_refs": ["S1"] }] },
+        { "paragraph": "P2", "verdict": "supported", "notes": [] },
+        { "paragraph": "P3", "verdict": "supported", "notes": [] },
+    ]})));
+    core.send_verify(&id).unwrap();
+    *fake.answer.lock().unwrap() = None;
+    let uncited = section(core, case, "background")
+        .paragraphs
+        .into_iter()
+        .find(|p| kinds(p).contains(&NoteKind::NoSource))
+        .unwrap();
+    // As the finish page calls it: the paragraph, its words as she sees them, the note.
+    let note = uncited
+        .notes
+        .iter()
+        .find(|n| n.kind == NoteKind::NoSource)
+        .unwrap();
+    let key = json!([uncited.id, uncited.text, "no_source", note.text]).to_string();
+    core.set_note_left(case, Some(&uncited.id), &key, true)
+        .unwrap();
+    core.set_note_left(case, None, REPORT_NOTE, true).unwrap();
+    (uncited.id, key)
+}
+
+#[test]
+fn the_notes_and_the_ones_she_left_are_back_after_the_lock_exactly_as_they_were() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let (_, key) = worked_on(&mut core, &fake, &case);
+    let asked = [key.clone(), REPORT_NOTE.to_owned(), "another".to_owned()];
+    let before = core.case_detail(&case).unwrap();
+    let background = before
+        .sections
+        .iter()
+        .find(|s| s.key == "background")
+        .unwrap();
+    assert!(!background.notes.questions.is_empty());
+    assert!(background
+        .paragraphs
+        .iter()
+        .any(|p| kinds(p).contains(&NoteKind::VerifyContradicted)));
+    assert_eq!(
+        core.left_notes(&case, &asked).unwrap(),
+        [key.clone(), REPORT_NOTE.to_owned()]
+    );
+
+    core.lock();
+    assert!(
+        core.notes.get(&case).is_none(),
+        "the session's copy is wiped"
+    );
+    assert!(matches!(
+        core.left_notes(&case, &asked),
+        Err(CoreError::Locked)
+    ));
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(core.case_detail(&case).unwrap(), before);
+    assert_eq!(
+        core.left_notes(&case, &asked).unwrap(),
+        [key.clone(), REPORT_NOTE.to_owned()]
+    );
+    // "Approve all" still holds back every paragraph with something to look at.
+    let ids: Vec<String> = background.paragraphs.iter().map(|p| p.id.clone()).collect();
+    assert_eq!(core.approve_clean_paragraphs(&case, &ids).unwrap(), 0);
+    // Brought back, it stays back after the next lock too.
+    core.set_note_left(&case, None, REPORT_NOTE, false).unwrap();
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert_eq!(core.left_notes(&case, &asked).unwrap(), [key]);
+}
+
+#[test]
+fn an_edit_after_the_lock_still_drops_the_note_and_what_she_left_about_it() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let (uncited, key) = worked_on(&mut core, &fake, &case);
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    core.edit_paragraph(&case, &uncited, "אלון אוהב לשחק בחצר הגן.")
+        .unwrap();
+    let edited = |core: &mut Core| {
+        section(core, &case, "background")
+            .paragraphs
+            .into_iter()
+            .find(|p| p.id == uncited)
+            .unwrap()
+    };
+    assert!(!kinds(&edited(&mut core)).contains(&NoteKind::NoSource));
+    assert!(core
+        .left_notes(&case, std::slice::from_ref(&key))
+        .unwrap()
+        .is_empty());
+    // Gone from the vault too: the next opening does not bring them back.
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert!(!kinds(&edited(&mut core)).contains(&NoteKind::NoSource));
+    assert!(core.left_notes(&case, &[key]).unwrap().is_empty());
+    // What she left about the whole report is about no paragraph, and stays.
+    assert_eq!(
+        core.left_notes(&case, &[REPORT_NOTE.to_owned()]).unwrap(),
+        [REPORT_NOTE]
+    );
+}
+
+#[test]
+fn the_notes_and_the_ones_she_left_go_with_the_backup() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    let (_, key) = worked_on(&mut core, &fake, &case);
+    let before = core.case_detail(&case).unwrap();
+    let drive = tempfile::tempdir().unwrap();
+    let done = core.write_backup(&drive.path().join("b")).unwrap();
+    let fresh = tempfile::tempdir().unwrap();
+    let mut other = Core::for_tests(fresh.path(), None);
+    other
+        .stage_backup(std::fs::read(&done.path).unwrap(), "b.vaultbak".into())
+        .unwrap();
+    other.restore_staged_backup(Some(PASSWORD), None).unwrap();
+    assert_eq!(other.case_detail(&case).unwrap(), before);
+    assert_eq!(
+        other
+            .left_notes(&case, &[key.clone(), REPORT_NOTE.to_owned()])
+            .unwrap(),
+        [key, REPORT_NOTE.to_owned()]
+    );
+}
+
+#[test]
+fn erasing_a_case_erases_its_notes_and_so_does_the_bin() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    worked_on(&mut core, &fake, &case);
+    let rows = |core: &mut Core| {
+        core.vault_ref()
+            .unwrap()
+            .case_notes_rows_for_tests()
+            .unwrap()
+    };
+    assert_eq!(rows(&mut core), 1);
+    // In the recycle bin the case can still come back, and its notes with it.
+    core.delete_case(&case).unwrap();
+    assert_eq!(rows(&mut core), 1);
+    core.purge_case(&case, PASSWORD).unwrap();
+    assert_eq!(rows(&mut core), 0);
+    assert!(core.notes.get(&case).is_none());
+
+    // The bin's own erase, thirty days on and after a backup.
+    let other = core
+        .create_case(
+            CaseMeta {
+                code: "TEST-0193".into(),
+                ..CaseMeta::default()
+            },
+            vec![],
+        )
+        .unwrap();
+    core.set_note_left(&other, None, REPORT_NOTE, true).unwrap();
+    assert_eq!(rows(&mut core), 1);
+    core.delete_case(&other).unwrap();
+    core.vault_mut()
+        .unwrap()
+        .set_deleted_at_for_tests(&other, 1)
+        .unwrap();
+    let drive = tempfile::tempdir().unwrap();
+    core.write_backup(&drive.path().join("b")).unwrap();
+    core.lock();
+    core.unlock(PASSWORD).unwrap();
+    assert!(core.list_trash().unwrap().is_empty());
+    assert_eq!(rows(&mut core), 0);
 }

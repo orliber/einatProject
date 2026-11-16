@@ -1902,6 +1902,7 @@ impl Vault {
             "consultations",
             "name_hints",
             "masks",
+            "case_notes",
         ] {
             tx.execute(
                 &format!("DELETE FROM {table} WHERE case_id = ?1"),
@@ -3100,6 +3101,65 @@ impl Vault {
         )?;
         let rows = stmt.query_map([case_id], |r| r.get(0))?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    // ---------------------------------------------------------------- notes beside the report
+
+    /// The notes kept beside the case's report (D-193): the caller's own JSON, sealed with the
+    /// case key. `None` while there are none.
+    pub fn case_notes(&self, case_id: &str) -> Result<Option<Zeroizing<String>>, VaultError> {
+        let key = self.case_key(case_id)?;
+        let row: Option<Vec<u8>> = self
+            .main
+            .query_row(
+                "SELECT data_enc FROM case_notes WHERE case_id = ?1",
+                [case_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        row.map(|sealed| {
+            open_string(&key, &aad("case_notes", "data", case_id, case_id), &sealed)
+                .map(Zeroizing::new)
+        })
+        .transpose()
+    }
+
+    /// Keep the case's notes in place of the ones before; `None` removes the row. Not her work
+    /// on the case, so the case's "changed" time stays.
+    pub fn set_case_notes(&mut self, case_id: &str, data: Option<&str>) -> Result<(), VaultError> {
+        let key = self.case_key(case_id)?;
+        match data {
+            Some(data) => {
+                let sealed = seal_str(&key, &aad("case_notes", "data", case_id, case_id), data)?;
+                self.main.execute(
+                    "INSERT INTO case_notes (case_id, data_enc) VALUES (?1, ?2)
+                     ON CONFLICT(case_id) DO UPDATE SET data_enc = excluded.data_enc",
+                    params![case_id, sealed],
+                )?;
+            }
+            None => {
+                self.main
+                    .execute("DELETE FROM case_notes WHERE case_id = ?1", [case_id])?;
+            }
+        }
+        Ok(())
+    }
+
+    /// How many cases have notes kept (tests: an erased case leaves no row behind).
+    pub fn case_notes_rows_for_tests(&self) -> Result<i64, VaultError> {
+        Ok(self
+            .main
+            .query_row("SELECT COUNT(*) FROM case_notes", [], |r| r.get(0))?)
+    }
+
+    /// A keyed hash for the case's notes (D-193): what she left as it is is kept by it, never
+    /// by its words. Bound to the case, so the same words in two cases hash apart.
+    #[must_use]
+    pub fn note_mac(&self, case_id: &str, text: &str) -> String {
+        hex(&hmac_sha256(
+            &self.keys.index,
+            format!("case_notes|{case_id}|{text}").as_bytes(),
+        ))
     }
 
     // ---------------------------------------------------------------- transmissions

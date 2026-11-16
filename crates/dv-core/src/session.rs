@@ -593,7 +593,8 @@ impl Core {
         self.settled = None;
         self.section_nonces.clear();
         self.opened_cases.clear();
-        // What the answers said about the drafts (D-161) holds words of the case.
+        // What the answers said about the drafts (D-161) holds words of the case: the
+        // session's copy goes; the sealed one stays in the vault for the next opening (D-193).
         self.notes.wipe();
         self.since_last = None;
         // A cleanup owed at Google is tried again soon after the next unlock.

@@ -10,6 +10,32 @@ pub(crate) async fn check_export(
     with_core(&state, move |c| c.check_export(&case_id)).await
 }
 
+/// Of the notes the finish page shows (by the page's keys), the ones she left as they are
+/// (D-193).
+#[tauri::command]
+pub(crate) async fn left_notes(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    keys: Vec<String>,
+) -> Res<Vec<String>> {
+    with_core(&state, move |c| c.left_notes(&case_id, &keys)).await
+}
+
+/// "בסדר, להשאיר" (`left`) and "להחזיר" on the finish page, kept with the case (D-193).
+#[tauri::command]
+pub(crate) async fn set_note_left(
+    state: tauri::State<'_, AppState>,
+    case_id: String,
+    draft_id: Option<String>,
+    key: String,
+    left: bool,
+) -> Res<()> {
+    with_core(&state, move |c| {
+        c.set_note_left(&case_id, draft_id.as_deref(), &key, left)
+    })
+    .await
+}
+
 /// A new file under a free name in the folder: "name.docx", "name (2).docx", … The file is
 /// created, not only named, so a file that appears in between is never overwritten.
 pub(crate) fn create_free(

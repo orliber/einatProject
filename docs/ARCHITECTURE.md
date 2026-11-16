@@ -113,6 +113,7 @@ style_sources(id PK, created_at, data_enc)          -- D-043: קטעים מנו�
 style_profiles(id PK, version, status /* draft|active|retired */, created_at, data_enc)
 style_learning(id = 1, data_enc)                    -- החלפות קצרות מהתיקונים של עינת (מקומי בלבד)
 -- שלושתן חתומות במפתח ההגדרות: לא שייכות לתיק
+case_notes(case_id PK FK, data_enc)  -- D-193: ההערות ליד הדוח (D-161) ו"בסדר, להשאיר" (HMAC בלבד), שורה אחת לתיק, חתומה במפתח התיק
 kb_overrides(id PK, test, key, value, source, approved, updated_at)
 settings(key PK, value)            -- בלי מידע אישי
 ```

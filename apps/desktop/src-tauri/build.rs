@@ -157,6 +157,8 @@ fn main() {
             "accept_style_suggestion",
             "dismiss_style_suggestion",
             "check_export",
+            "left_notes",
+            "set_note_left",
             "export_report",
             "print_page",
             "activity",

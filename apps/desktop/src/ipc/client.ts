@@ -385,6 +385,11 @@ export const ipc = {
   sendConsult: (approvalId: string) => call("send_consult", { approvalId }),
 
   checkExport: (caseId: string) => call("check_export", { caseId }),
+  /** D-193: of the finish page's notes (by its keys), the ones she left as they are; kept with the case. */
+  leftNotes: (caseId: string, keys: string[]) => call("left_notes", { caseId, keys }),
+  /** D-193: "בסדר, להשאיר" (`left`) or "להחזיר". `draftId`: the paragraph the note is about, if any. */
+  setNoteLeft: (caseId: string, draftId: string | null, key: string, left: boolean) =>
+    call("set_note_left", { caseId, draftId, key, left }),
   /** With `parents`, the parents' version (round 55, D-095): built here, nothing is sent. */
   exportReport: (caseId: string, password: string | null, parents: ParentsOptions | null = null) =>
     call("export_report", { caseId, password, parents }),

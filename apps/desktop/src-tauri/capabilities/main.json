@@ -159,6 +159,8 @@
     "allow-accept-style-suggestion",
     "allow-dismiss-style-suggestion",
     "allow-check-export",
+    "allow-left-notes",
+    "allow-set-note-left",
     "allow-export-report",
     "allow-print-page",
     "allow-activity",
