@@ -474,6 +474,41 @@ describe("the finish page", () => {
     expect(within(side).getByText(/נמצאו 2 הערות\. הן ברשימה "כדאי לבדוק"\./)).toBeInTheDocument();
   });
 
+  it("notes of the check of the whole report with the same words about other sections are each their own card, and leaving one leaves only it", async () => {
+    const shaped = written();
+    const same = "אותו משפט מופיע בשני הסעיפים.";
+    const errors = vi.spyOn(console, "error");
+    try {
+      const { side, user } = await openFinish(async (cmd, args, core) => {
+        if (cmd === "report_check_setting") return { on: true, cents_per_check: 15 };
+        if (cmd === "prepare_report_check") return prepared({ approval_id: "a1" });
+        if (cmd === "send_report_check") {
+          return {
+            notes: [
+              { kind: "repetition", sections: ["referral", "background"], note: same },
+              { kind: "repetition", sections: ["kindergarten", "summary"], note: same },
+              // The very same note twice is one card.
+              { kind: "repetition", sections: ["kindergarten", "summary"], note: same },
+            ],
+            checked: ["referral", "summary"], demo: false,
+          };
+        }
+        return shaped(cmd, args, core);
+      });
+      await waitFor(() => expect(status(side)).toHaveTextContent("הדוח מוכן להוצאה."));
+      await user.click(await within(side).findByRole("button", { name: "לבדוק את הדוח כולו" }));
+      await waitFor(() => expect(within(side).getAllByText(same)).toHaveLength(2));
+      expect(count(head(side, /כדאי לבדוק/))).toBe("2");
+      const firstCard = cardOf(within(side).getAllByText(same)[0] as HTMLElement);
+      await user.click(within(firstCard).getByRole("button", { name: "בסדר, להשאיר" }));
+      expect(within(side).getAllByText(same)).toHaveLength(1);
+      expect(count(head(side, /כדאי לבדוק/))).toBe("1");
+      expect(errors.mock.calls.some((c) => String(c[0]).includes("same key"))).toBe(false);
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
   it("a check that fails says why, in Hebrew, instead of waiting forever", async () => {
     const { side } = await openFinish((cmd) => {
       if (cmd === "check_export") throw { code: "internal", message: "הבדיקה לפני ההוצאה לא הצליחה.", details: [] };

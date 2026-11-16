@@ -231,10 +231,16 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
       text: `לא ייכנסו לקובץ: ${names(waiting)}.`, open: waiting[0]?.key ?? "", leave: false,
     });
   }
-  // The check of the whole report (D-097): its notes only point at sections.
+  // The check of the whole report (D-097): its notes only point at sections. The same words can
+  // be said about other sections (the local check says every repeated pair the same way), so the
+  // sections are part of the key; the very same note twice is one card.
+  const reportKeys = new Set<string>();
   for (const n of reportCheck?.notes ?? []) {
-    const where = n.sections.map((key) => content.find((s) => s.key === key)?.title ?? key).join(" · ");
-    checkCards.push({ type: "line", key: `report:${JSON.stringify([n.kind, n.note])}`, title: REPORT_NOTE_TITLE[n.kind], where, text: n.note, open: n.sections[0] ?? null, leave: true });
+    const key = `report:${JSON.stringify([n.kind, [...n.sections].sort(), n.note])}`;
+    if (reportKeys.has(key)) continue;
+    reportKeys.add(key);
+    const where = n.sections.map((k) => content.find((s) => s.key === k)?.title ?? k).join(" · ");
+    checkCards.push({ type: "line", key, title: REPORT_NOTE_TITLE[n.kind], where, text: n.note, open: n.sections[0] ?? null, leave: true });
   }
 
   // D-167: proofreading notes in approved paragraphs. Advice; never stops the file.
