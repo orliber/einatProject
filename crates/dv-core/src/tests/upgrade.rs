@@ -75,6 +75,7 @@ fn fill(core: &mut Core) {
             note: String::new(),
         }],
         notes: String::new(),
+        basis: None,
     };
     core.save_scores(&case, None, &sheet).unwrap();
     core.add_own_paragraph(&case, "kindergarten", OWN).unwrap();

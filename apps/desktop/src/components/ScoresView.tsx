@@ -218,7 +218,7 @@ export function ScoresView(props: {
     let alive = true;
     const t = window.setTimeout(() => {
       ipc
-        .previewScores(sheet)
+        .previewScores(props.caseId, sheet)
         .then((text) => alive && setPreview({ text, error: null }))
         .catch((e: unknown) => alive && setPreview((p) => ({ text: p.text, error: (e as { message: string }).message })));
     }, 200);
@@ -226,7 +226,7 @@ export function ScoresView(props: {
       alive = false;
       window.clearTimeout(t);
     };
-  }, [sheet]);
+  }, [sheet, props.caseId]);
 
   const dirty = !saving && !done && JSON.stringify([entries, module, cutoff, notes]) !== initialEntries;
   // Unsaved scores wait in memory while she is on another stage (see `drafts`).

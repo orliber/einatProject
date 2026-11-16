@@ -9,6 +9,7 @@ mod backup;
 mod binding;
 mod briefs;
 mod cases;
+mod clinic;
 mod consult;
 mod consultations;
 mod dates;
@@ -98,7 +99,7 @@ pub use followup::FollowUpView;
 pub use history::{
     HiddenWord, SentCursor, SentItem, SentPage, SentPart, SentText, SENT_PAGE, SENT_SCAN,
 };
-pub use instruments::{InstrumentApproval, InstrumentStatus};
+pub use instruments::{CriticalValuesView, InstrumentApproval, InstrumentStatus};
 pub use jobs::{
     BackupRun, BackupTask, DocumentRead, DrillJob, Drilled, ExportJob, Exported, PasswordCheckJob,
     PasswordChecked, ReadJob, RestoreJob, Restored, SlotJob, SlotMade, UnlockJob, Unlocked,

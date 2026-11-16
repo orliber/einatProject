@@ -34,3 +34,5 @@ mod name_model;
 pub(crate) use name_model::*;
 mod system_check;
 pub(crate) use system_check::*;
+mod clinic;
+pub(crate) use clinic::*;

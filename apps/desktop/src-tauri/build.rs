@@ -19,6 +19,8 @@ fn main() {
             "safety_net",
             "instrument_approvals",
             "set_instrument_status",
+            "critical_values",
+            "set_critical_values",
             "security_status",
             "export_security_pdf",
             "set_send_stopped",
@@ -185,6 +187,7 @@ fn main() {
             "install_update",
             "open_releases_page",
             "system_check",
+            "clinic",
             "send_progress",
         ]));
     if let Err(error) = tauri_build::try_build(attributes) {

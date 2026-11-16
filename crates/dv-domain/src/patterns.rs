@@ -259,6 +259,7 @@ mod tests {
                     note: String::new(),
                 })
                 .collect(),
+            basis: None,
         }
     }
 

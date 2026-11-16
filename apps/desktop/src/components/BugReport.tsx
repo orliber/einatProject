@@ -22,6 +22,7 @@ const SCREENS: Record<Route["name"], string> = {
   case: "תיק",
   consult: "התייעצות",
   style: "הסגנון שלי",
+  clinic: "קליניקה",
   settings: "הגדרות",
 };
 

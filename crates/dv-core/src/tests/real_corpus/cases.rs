@@ -249,6 +249,7 @@ fn sheet(instrument: &str, entries: &[(&str, f64)]) -> dv_domain::ScoreSheet {
             })
             .collect(),
         notes: String::new(),
+        basis: None,
     }
 }
 

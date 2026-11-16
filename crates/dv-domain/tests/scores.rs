@@ -76,6 +76,7 @@ fn sheet(instrument: &str, entries: &[(&str, f64)]) -> ScoreSheet {
             })
             .collect(),
         notes: String::new(),
+        basis: None,
     }
 }
 

@@ -199,6 +199,7 @@ mod tests {
                 })
                 .collect(),
             notes: String::new(),
+            basis: None,
         }
     }
 

@@ -1,0 +1,452 @@
+/* The calendar: its bar, the time grid of a day and of a week, and the month.
+   Colours come only from styles/tokens.css, so both themes hold. */
+.cal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.cal .num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- the bar: view, today, back and forth, what is shown ---------- */
+.cal-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.cal-nav {
+  gap: var(--space-2);
+}
+.cal-title {
+  margin: 0;
+  font-size: var(--text-xl);
+}
+.cal-hint {
+  min-height: 24px;
+}
+.cal-ask {
+  margin: 0;
+  font-size: var(--text-md);
+}
+
+/* ---------- the line over the grid: the visit chosen for moving ---------- */
+/* Its height is kept when nothing is chosen, so choosing a visit never moves the grid
+   under the pointer. */
+.cal-move {
+  margin: 0;
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font-size: var(--text-base);
+}
+.cal-move-on {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+.cal-move-what {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-inline-end: auto;
+  font-weight: 600;
+}
+.cal-move-scope {
+  gap: var(--space-2);
+}
+
+/* ---------- the time grid ---------- */
+/* The grid scrolls inside itself, both ways: the page never scrolls sideways, and the names
+   of the days and the hours stay in sight. */
+/* Its height. In a tall window: what is left around it (about 470px go to the top bar, the
+   beta note, the clinic's heading, the tabs, the calendar's bar, the line of the visit being
+   moved and the space under the grid), so the page itself does not scroll (measured at
+   1280x900). In a short window that would leave only the 300px floor, four and a half hours
+   on a laptop at 125% (1093x614). So there the grid takes what is left under the tabs (about
+   210px once the page is scrolled to them), up to 420px: 404px at 614px high, 08:00 to 14:00
+   in sight with the tabs and the bar. Never under 300px (850x480). */
+.cal-grid {
+  display: grid;
+  overflow: auto;
+  max-height: clamp(300px, max(calc(100vh - 470px), min(calc(100vh - 210px), 420px)), 960px);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.cal-gutter {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 4;
+  background: var(--surface);
+  border-inline-end: 1px solid var(--line);
+}
+.cal-corner,
+.cal-day-head {
+  position: sticky;
+  top: 0;
+  height: 44px;
+  box-sizing: border-box;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line-strong);
+}
+.cal-corner {
+  z-index: 5;
+}
+.cal-hours {
+  position: relative;
+}
+.cal-hour {
+  position: absolute;
+  inset-inline: 0;
+  padding-top: 2px;
+  text-align: center;
+  font-size: var(--text-xs);
+  color: var(--ink-muted);
+}
+.cal-day {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-inline-start: 1px solid var(--line);
+}
+.cal-gutter + .cal-day {
+  border-inline-start: 0;
+}
+.cal-day-head {
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+}
+.cal-day-head h3 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-base);
+}
+.cal-day-name {
+  min-height: 36px;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  border: 0;
+  padding: 0 var(--space-1);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  white-space: nowrap;
+}
+button.cal-day-name {
+  align-items: center;
+  cursor: pointer;
+}
+button.cal-day-name:hover {
+  color: var(--primary);
+}
+.cal-day-add.cal-day-add {
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+}
+.cal-day-today .cal-day-head {
+  background: var(--primary-soft);
+  box-shadow: inset 0 -3px 0 var(--primary);
+}
+/* Each hour a line, each half hour a fainter one. 56px is HOUR_PX of calendarLayout.ts. */
+.cal-day-body {
+  position: relative;
+  flex-shrink: 0;
+  cursor: cell;
+  background-image: linear-gradient(to bottom, var(--line) 1px, transparent 1px), linear-gradient(to bottom, var(--sand) 1px, transparent 1px);
+  background-size: 100% 56px, 100% 28px;
+}
+.cal-day-today .cal-day-body {
+  background-color: var(--surface-alt);
+}
+.cal-day-visits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cal-now {
+  position: absolute;
+  inset-inline: 0;
+  z-index: 2;
+  height: 0;
+  border-top: 2px solid var(--warn-dot);
+  pointer-events: none;
+}
+.cal-now::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: -1px;
+  top: -5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warn-dot);
+}
+
+/* ---------- a visit on the grid ---------- */
+.cal-visit {
+  position: absolute;
+  z-index: 1;
+  box-sizing: border-box;
+  padding: 1px 2px;
+}
+.cal-visit-open {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  align-items: baseline;
+  column-gap: var(--space-2);
+  row-gap: 1px;
+  overflow: hidden;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--primary-line);
+  border-inline-start: 4px solid var(--primary);
+  border-radius: var(--radius-sm);
+  background: var(--primary-soft);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: 1.35;
+  text-align: start;
+  cursor: pointer;
+}
+.cal-visit-open:hover {
+  border-color: var(--primary);
+}
+/* The ring stays inside the visit: the grid would cut one drawn outside it. */
+.cal-visit-open:focus-visible {
+  outline-offset: -3px;
+}
+.cal-visit-short .cal-visit-open {
+  flex-wrap: nowrap;
+  padding-block: 0;
+  white-space: nowrap;
+}
+.cal-visit-time {
+  font-weight: 600;
+}
+.cal-visit-who {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.cal-visit-kind {
+  color: var(--ink-soft);
+}
+.cal-visit-chosen .cal-visit-open {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary), var(--shadow-1);
+}
+/* What happened is said by the form too: a solid edge (planned), the same in the colour of
+   "done" with its word (held), a dashed frame and a line through (cancelled), a dotted edge
+   with its word (did not come). */
+.cal-visit-held .cal-visit-open {
+  border-color: var(--line-strong);
+  border-inline-start-color: var(--ok);
+  background: var(--ok-soft);
+}
+.cal-visit-cancelled .cal-visit-open {
+  border: 1px dashed var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-muted);
+}
+.cal-visit-cancelled .cal-visit-time,
+.cal-visit-cancelled .cal-visit-who,
+.cal-visit-cancelled .cal-visit-kind {
+  text-decoration: line-through;
+}
+.cal-visit-no_show .cal-visit-open {
+  border-color: var(--warn-line);
+  border-inline-start: 4px dotted var(--warn);
+  background: var(--warn-soft);
+}
+/* Time she kept for herself: quieter than a visit. */
+.cal-visit-block .cal-visit-open {
+  border: 1px dashed var(--line-strong);
+  background: repeating-linear-gradient(135deg, var(--sand) 0 6px, var(--surface-alt) 6px 12px);
+  color: var(--ink-muted);
+}
+.cal-visit-block .cal-visit-time,
+.cal-visit-block .cal-visit-who {
+  font-weight: 500;
+}
+.cal-visit-overlap .cal-visit-open {
+  border-color: var(--warn);
+}
+/* The arrows at the corner: seen when the pointer or the keyboard is on the visit. */
+.cal-visit-move {
+  position: absolute;
+  inset-block-start: 4px;
+  inset-inline-end: 5px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  cursor: pointer;
+  opacity: 0;
+}
+.cal-visit:hover .cal-visit-move,
+.cal-visit:focus-within .cal-visit-move,
+.cal-visit-chosen .cal-visit-move {
+  opacity: 1;
+}
+.cal-visit-move:hover,
+.cal-visit-move[aria-pressed="true"] {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
+}
+.cal-visit-short .cal-visit-move {
+  inset-block-start: 2px;
+  width: 20px;
+  height: 20px;
+}
+
+/* ---------- the day: its grid beside its list ---------- */
+.cal-day-view {
+  display: grid;
+  grid-template-columns: minmax(230px, 2fr) minmax(0, 3fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+.cal-day-view .clinic-visit {
+  flex-wrap: wrap;
+}
+@container page (max-width: 720px) {
+  .cal-day-view {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------- the month ---------- */
+.cal-month-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.cal-month {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.cal-month th {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--line-strong);
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-align: start;
+}
+.cal-month-day {
+  height: 92px;
+  padding: var(--space-1);
+  border-top: 1px solid var(--line);
+  border-inline-start: 1px solid var(--line);
+  vertical-align: top;
+  cursor: pointer;
+}
+.cal-month-day:first-child {
+  border-inline-start: 0;
+}
+.cal-month-day:hover {
+  background: var(--surface-alt);
+}
+.cal-month-outside {
+  background: var(--sand);
+  color: var(--ink-muted);
+}
+.cal-month-today {
+  background: var(--primary-soft);
+  box-shadow: inset 0 3px 0 var(--primary);
+}
+.cal-month-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+}
+.cal-month-date {
+  min-width: 32px;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-1);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cal-month-date:hover {
+  color: var(--primary);
+}
+.cal-month-more {
+  padding-inline-end: var(--space-1);
+  font-weight: 600;
+}
+.cal-month-visits {
+  gap: 2px;
+}
+.cal-month-visit {
+  display: flex;
+  gap: var(--space-1);
+  overflow: hidden;
+  padding-inline-start: var(--space-1);
+  border-inline-start: 3px solid var(--primary);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.cal-month-visit .cal-visit-who {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+.cal-month-visit.cal-visit-held {
+  border-inline-start-color: var(--ok);
+}
+.cal-month-visit.cal-visit-held::after {
+  content: "✓";
+  color: var(--ok);
+  font-weight: 700;
+}
+.cal-month-visit.cal-visit-cancelled {
+  border-inline-start: 3px dashed var(--line-strong);
+  color: var(--ink-muted);
+}
+.cal-month-visit.cal-visit-no_show {
+  border-inline-start: 3px dotted var(--warn);
+  color: var(--warn);
+}
+.cal-month-visit.cal-visit-block {
+  border-inline-start: 3px dashed var(--line-strong);
+  color: var(--ink-muted);
+}

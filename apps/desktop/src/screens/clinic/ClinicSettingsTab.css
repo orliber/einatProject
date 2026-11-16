@@ -1,0 +1,157 @@
+/* The clinic's settings: one card for each subject, and the bar that saves them all.
+   Colours only from styles/tokens.css. */
+.clinic-settings {
+  gap: var(--space-4);
+}
+.clinic-kept {
+  margin: 0;
+}
+.clinic-days {
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+}
+
+/* ---------- the kinds of visits ---------- */
+.clinic-settings-scroll {
+  overflow-x: auto;
+}
+.clinic-settings-table {
+  border-collapse: collapse;
+  min-width: 420px;
+}
+.clinic-settings-table th,
+.clinic-settings-table td {
+  padding-block: var(--space-2);
+  padding-inline: 0 var(--space-5);
+  border-top: 1px solid var(--line);
+  text-align: start;
+  vertical-align: middle;
+}
+.clinic-settings-table thead th {
+  border-top: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+.clinic-settings-table tbody th {
+  font-weight: 600;
+}
+.clinic-settings-num {
+  width: 110px;
+  text-align: center;
+}
+
+/* ---------- places ---------- */
+.clinic-place {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--line);
+}
+.clinic-place:first-child {
+  border-top: 0;
+}
+.clinic-place-actions {
+  gap: var(--space-2);
+}
+.clinic-place-add {
+  align-items: flex-start;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.clinic-place-add .input {
+  width: 260px;
+  max-width: 100%;
+}
+/* On the line of the box, under the height of its label. */
+.clinic-place-go,
+.clinic-template-remove {
+  margin-top: 26px;
+}
+
+/* ---------- message texts ---------- */
+.clinic-message {
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+.clinic-message .textarea {
+  width: 100%;
+}
+.clinic-placeholders {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.clinic-placeholder {
+  min-height: 32px;
+  border: 1px solid var(--primary-line);
+  background: var(--primary-soft);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.clinic-placeholder:hover {
+  border-color: var(--primary);
+}
+.clinic-preview {
+  gap: var(--space-1);
+}
+.clinic-preview-text {
+  white-space: pre-wrap;
+  font-size: var(--text-base);
+  color: var(--ink);
+  line-height: 1.6;
+}
+
+/* ---------- note templates ---------- */
+.clinic-templates {
+  gap: var(--space-3);
+}
+.clinic-template-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-alt);
+}
+.clinic-template-item .input,
+.clinic-template-item .textarea {
+  width: 100%;
+}
+
+/* ---------- thresholds ---------- */
+.clinic-thresholds {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-5);
+}
+.clinic-threshold .input {
+  width: 110px;
+  text-align: center;
+}
+@container page (max-width: 1000px) {
+  .clinic-thresholds {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------- saving ---------- */
+.clinic-save-bar {
+  position: sticky;
+  bottom: var(--space-3);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  box-shadow: var(--shadow-1);
+}
+.clinic-save-row {
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}

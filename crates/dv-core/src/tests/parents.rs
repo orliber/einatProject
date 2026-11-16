@@ -117,6 +117,7 @@ fn the_parents_version_has_the_chart_her_sentence_and_no_numbers_by_default() {
                 entry("wmi", 84.0),
             ],
             notes: String::new(),
+            basis: None,
         },
     )
     .unwrap();
@@ -202,6 +203,7 @@ fn each_test_gets_its_own_chart_and_the_dialog_knows_what_goes() {
             })
             .collect(),
         notes: String::new(),
+        basis: None,
     };
     let check = core.check_export(&case).unwrap();
     assert_eq!(check.parents_chart_rows, 0, "no table, no chart");

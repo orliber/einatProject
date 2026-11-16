@@ -21,6 +21,7 @@ import { clearKept } from "./kept";
 import { unsavedGuard } from "./leaveGuard";
 import { noteLockReason } from "./lockReason";
 import type { SettingsPane } from "./screens/settingsPanes";
+import type { ClinicTab } from "./screens/clinic/tabs";
 
 // The pages she opens rarely load on their own, so the first paint and the case pages carry
 // only what they need; they are fetched in the background right after the vault opens.
@@ -28,8 +29,12 @@ const SetupScreen = lazy(() => import("./screens/SetupScreen").then((m) => ({ de
 const ConsultScreen = lazy(() => import("./screens/ConsultScreen").then((m) => ({ default: m.ConsultScreen })));
 const SettingsScreen = lazy(() => import("./screens/SettingsScreen").then((m) => ({ default: m.SettingsScreen })));
 const StyleScreen = lazy(() => import("./screens/StyleScreen").then((m) => ({ default: m.StyleScreen })));
+const ClinicScreen = lazy(() => import("./screens/clinic/ClinicScreen").then((m) => ({ default: m.ClinicScreen })));
 function warmRarePages() {
-  const load = () => { void import("./screens/SettingsScreen"); void import("./screens/ConsultScreen"); void import("./screens/StyleScreen"); };
+  // Not under the unit tests: an import still loading when a test file ends is torn down
+  // mid-flight and fails the run (it only saves the first open of a rare page in the app).
+  if (import.meta.env.MODE === "test") return;
+  const load = () => { void import("./screens/SettingsScreen"); void import("./screens/ConsultScreen"); void import("./screens/StyleScreen"); void import("./screens/clinic/ClinicScreen"); };
   // WebKit (the Mac) has no requestIdleCallback.
   if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(load);
   else window.setTimeout(load, 1500);
@@ -42,6 +47,7 @@ export type Route =
   | { name: "case"; id: string; view: string }
   | { name: "consult"; caseId?: string }
   | { name: "style" }
+  | { name: "clinic"; tab?: ClinicTab; patientId?: string }
   | { name: "settings"; pane?: SettingsPane };
 
 export interface AppApi {
@@ -339,6 +345,7 @@ function Shell(props: {
       <Suspense fallback={<PageLoading />}>
         {route.name === "consult" && <ConsultScreen caseId={route.caseId} />}
         {route.name === "style" && <StyleScreen />}
+        {route.name === "clinic" && <ClinicScreen tab={route.tab} patientId={route.patientId} />}
         {route.name === "settings" && <SettingsScreen key={route.pane ?? ""} pane={route.pane} />}
       </Suspense>
       {/* Keyed by notice: the same words again are a new toast with a fresh timer. */}

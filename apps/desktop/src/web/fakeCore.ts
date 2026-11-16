@@ -33,6 +33,8 @@ import type { TemplateView } from "../ipc/generated/TemplateView";
 import type { ReviewPart } from "../ipc/generated/ReviewPart";
 import type { Role } from "../ipc/generated/Role";
 import type { ScoreSheet } from "../ipc/generated/ScoreSheet";
+import type { CriticalValue } from "../ipc/generated/CriticalValue";
+import type { RelativeSet } from "../ipc/generated/RelativeSet";
 import type { SectionResult } from "../ipc/generated/SectionResult";
 import type { SectionMode } from "../ipc/generated/SectionMode";
 import type { AutoHidden } from "../ipc/generated/AutoHidden";
@@ -48,6 +50,8 @@ import structure from "../../../../templates/report_structure.json";
 import { readDocx } from "./docx";
 import { filter, restore, type Person } from "./filter";
 import { FakeStyle } from "./fakeStyle";
+import { FakeClinic } from "./fakeClinic";
+import type { ClinicRequest } from "../ipc/generated/ClinicRequest";
 import { compareSheets, comparisonText, formatSheet, instruments } from "./scores";
 import * as R from "./routing";
 import { PROVIDERS, providerOf } from "../providers";
@@ -269,6 +273,7 @@ export class FakeCore {
   private ready: Record<string, number | null> = {};
   /** Her answer for each instrument's tables (D-098); none is "awaiting". */
   private instrumentAnswers: Record<string, "approved" | "not_used"> = {};
+  private criticalValues: CriticalValue[] = [];
   private sendStopped = false;
   /** The material deleted last, for "ביטול" (forgotten on lock, as in the core). */
   private removedInput: { caseId: string; input: CaseInput; at: number } | null = null;
@@ -298,6 +303,40 @@ export class FakeCore {
   /** Approvals dropped because their material changed, with the line said at the send. */
   private withdrawn = new Set<string>();
   private style = new FakeStyle();
+  /** The clinic (beta, D-170) has its own stand-in; these are its few doors to the cases. */
+  private clinic = new FakeClinic({
+    cases: () => this.cases.map((c) => {
+      const s = this.summary(c);
+      // Approved sections as the report counts them (the signature aside), like the core and caseStatus.ts.
+      return { id: c.id, code: c.meta.code, childName: s.child_name, approved: s.approved_sections.filter((k) => k !== "signature").length, total: s.total_sections, inTrash: c.deletedAt !== null };
+    }),
+    createCase: (meta, identities) => this.newCase(meta, identities).id,
+    addInput: (caseId, kind, title, content) => this.addInput(this.find(caseId), kind, title, content).id,
+    updateInput: (caseId, inputId, title, content) => {
+      const c = this.find(caseId);
+      const i = c.inputs.find((x) => x.id === inputId);
+      if (!i) return false;
+      // As `update_input`: what was prepared with the old text does not go.
+      this.withdrawFor(c.id);
+      if (i.content !== content) {
+        const r = this.routingOf(c, i.id);
+        c.routing.set(i.id, { added: r.added, removed: r.removed });
+      }
+      i.title = title;
+      i.content = content;
+      c.updated = now();
+      return true;
+    },
+    // The names of a patient card are names its case knows (D-177): the clinic reads the
+    // people of a case and adds the ones that are missing, through the same door as her form.
+    identities: (caseId) => this.find(caseId).people.map((p) => ({ id: p.id, role: p.role, value: p.value, aliases: [...p.aliases] })),
+    setIdentities: (caseId, list) => {
+      const c = this.find(caseId);
+      this.setPeople(c, list);
+      c.updated = now();
+    },
+    myName: () => this.practitioner[0] ?? "",
+  });
 
   /** An approval that is gone: why, in one line (like the core). */
   private expired(id: string): never {
@@ -1188,6 +1227,8 @@ export class FakeCore {
       case "clear_report_logo":
         this.logo = null;
         return null;
+      case "clinic":
+        return this.clinic.answer(a.request as ClinicRequest);
       case "list_cases":
         return this.cases.filter((c) => c.deletedAt === null).map((c) => this.summary(c));
       case "list_trash":
@@ -1348,6 +1389,23 @@ export class FakeCore {
         if (a.status !== "approved" && a.status !== "not_used") return fail("refused", "אפשר לבחור \"מאושר\" או \"לא מעבירה את זה\".");
         this.instrumentAnswers[key] = a.status;
         return this.instrumentApprovals();
+      }
+      case "critical_values":
+        return { sets: RELATIVE_SETS, values: this.criticalValues };
+      case "set_critical_values": {
+        // The same checks as the core (dv_domain::check_critical_values).
+        const values = a.values as CriticalValue[];
+        for (const [i, v] of values.entries()) {
+          const set = RELATIVE_SETS.find((s) => s.key === v.set);
+          if (!set) return fail("refused", "קבוצת השוואה לא מוכרת");
+          if (!set.measures.includes(v.measure)) return fail("refused", `${set.title_he}: תת-מבחן לא מוכר`);
+          if (values.slice(0, i).some((w) => w.set === v.set && w.measure === v.measure)) return fail("refused", `${set.title_he}: תת-מבחן שהוזן פעמיים`);
+          if (!(v.value > 0 && v.value <= 9) || Math.abs(Math.round(v.value * 100) - v.value * 100) > 1e-6) {
+            return fail("refused", `${set.title_he}: ערך קריטי צריך להיות מספר בין 0 ל-9 עם עד שתי ספרות אחרי הנקודה`);
+          }
+        }
+        this.criticalValues = values;
+        return { sets: RELATIVE_SETS, values };
       }
       case "preview_scores":
         if (this.instrumentAnswers[(a.sheet as ScoreSheet).instrument] === "not_used") return fail("refused", "סימנת בהגדרות שאת לא מעבירה את המבחן הזה.");
@@ -1777,3 +1835,12 @@ function fakeStyleHint(d: { byAi: boolean; status: string; text: string }) {
     marks: d.text.includes("מפגין") ? [{ from: "מפגין", to: "מראה" }] : [],
   };
 }
+
+/** The comparison sets of relative strengths and weaknesses, as in dv_domain::relative_sets (D-190). */
+const RELATIVE_SETS: RelativeSet[] = [
+  { key: "wisc_v", instrument: "wisc_v", title_he: "WISC-V", measures: ["similarities", "vocabulary", "block_design", "visual_puzzles", "matrix", "figure_weights", "digit_span", "picture_span", "coding", "symbol_search"], min_age_months: 72, max_age_months: 203 },
+  { key: "wppsi_iv_4_7", instrument: "wppsi_iv", title_he: "WPPSI-IV, גילאי 4:0–7:7", measures: ["information", "similarities", "block_design", "object_assembly", "matrix", "picture_concepts", "picture_memory", "zoo_locations", "bug_search", "cancellation"], min_age_months: 48, max_age_months: 91 },
+  { key: "wppsi_iv_2_3", instrument: "wppsi_iv", title_he: "WPPSI-IV, גילאי 2:6–3:11", measures: ["receptive_vocabulary", "information", "block_design", "object_assembly", "picture_memory", "zoo_locations"], min_age_months: 30, max_age_months: 47 },
+  { key: "wppsi_iii_4_7", instrument: "wppsi_iii", title_he: "WPPSI-III, גילאי 4:0–7:3", measures: ["information", "vocabulary", "word_reasoning", "block_design", "matrix", "picture_concepts", "coding"], min_age_months: 48, max_age_months: 87 },
+  { key: "wppsi_iii_2_3", instrument: "wppsi_iii", title_he: "WPPSI-III, גילאי 2:6–3:11", measures: ["receptive_vocabulary", "information", "block_design", "object_assembly"], min_age_months: 30, max_age_months: 47 },
+];

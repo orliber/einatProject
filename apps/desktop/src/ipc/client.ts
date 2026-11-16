@@ -24,6 +24,7 @@ import type { DriveProblem } from "./generated/DriveProblem";
 import type { DriveCleanupResult } from "./generated/DriveCleanupResult";
 import type { NameMatch } from "./generated/NameMatch";
 import type { ChatView } from "./generated/ChatView";
+import type { ClinicRequest } from "./generated/ClinicRequest";
 import type { ConsultationSummary } from "./generated/ConsultationSummary";
 import type { ConsultationView } from "./generated/ConsultationView";
 import type { ExportCheck } from "./generated/ExportCheck";
@@ -34,6 +35,7 @@ import type { InputKind } from "./generated/InputKind";
 import type { Instrument } from "./generated/Instrument";
 import type { InstrumentApproval } from "./generated/InstrumentApproval";
 import type { InstrumentStatus } from "./generated/InstrumentStatus";
+import type { CriticalValue } from "./generated/CriticalValue";
 import type { ParagraphVersionView } from "./generated/ParagraphVersionView";
 import type { PingResponse } from "./generated/PingResponse";
 import type { Prepared } from "./generated/Prepared";
@@ -195,6 +197,10 @@ export const ipc = {
   /** Settings → המבחנים: every instrument with her answer (D-098). */
   instrumentApprovals: () => call("instrument_approvals"),
   setInstrumentStatus: (key: string, status: InstrumentStatus) => call("set_instrument_status", { key, status }),
+  /** The manual's critical values for relative strengths and weaknesses (D-190). */
+  criticalValues: () => call("critical_values"),
+  /** All of them at once; an empty list clears them. */
+  setCriticalValues: (values: CriticalValue[]) => call("set_critical_values", { values }),
   usageSummary: () => call("usage_summary"),
   /** Dollars; `null` removes the ceiling. */
   setMonthlyCap: (capUsd: number | null) => run("set_monthly_cap", { capUsd }),
@@ -266,7 +272,7 @@ export const ipc = {
   /** Undoes the last deletion of this material (until another is deleted or the vault locks). */
   restoreInput: (caseId: string, inputId: string) => run("restore_input", { caseId, inputId }),
   scoreInstruments: () => call("score_instruments"),
-  previewScores: (sheet: ScoreSheet) => call("preview_scores", { sheet }),
+  previewScores: (caseId: string | null, sheet: ScoreSheet) => call("preview_scores", { caseId, sheet }),
   /** Saves (or, with `inputId`, replaces) a score table as a "test scores" material. */
   saveScores: (caseId: string, inputId: string | null, sheet: ScoreSheet) =>
     call("save_scores", { caseId, inputId, sheet }),
@@ -403,6 +409,9 @@ export const ipc = {
   /** A secret to the clipboard: out of history and cloud sync (and on a Mac out of Universal
    *  Clipboard), cleared after N seconds (returned: 60, or 20 on a Mac). */
   copySecret: (text: string) => call("copy_secret", { text }),
+
+  /** The clinic's one command (D-170); `ipc/clinic.ts` is its typed client. */
+  clinic: (request: ClinicRequest) => call("clinic", { request }),
 
   /** The system's print window (the macOS webview ignores `window.print()`). */
   printPage: () => run("print_page"),

@@ -973,6 +973,7 @@ fn a_follow_up_takes_the_names_and_compares_the_scores() {
             })
             .collect(),
         notes: String::new(),
+        basis: None,
     };
     core.save_scores(
         &before,
@@ -1361,6 +1362,7 @@ fn written_scores_are_checked_against_the_score_table() {
             note: String::new(),
         }],
         notes: String::new(),
+        basis: None,
     };
     core.save_scores(&case, None, &sheet).unwrap();
     core.add_own_paragraph(

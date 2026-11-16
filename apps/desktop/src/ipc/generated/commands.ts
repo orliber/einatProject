@@ -9,10 +9,14 @@ import type { CaseInput } from "./CaseInput";
 import type { CaseMeta } from "./CaseMeta";
 import type { CaseSummary } from "./CaseSummary";
 import type { ChatView } from "./ChatView";
+import type { ClinicReply } from "./ClinicReply";
+import type { ClinicRequest } from "./ClinicRequest";
 import type { ConsultResult } from "./ConsultResult";
 import type { ConsultationSummary } from "./ConsultationSummary";
 import type { ConsultationView } from "./ConsultationView";
 import type { CreatedVault } from "./CreatedVault";
+import type { CriticalValue } from "./CriticalValue";
+import type { CriticalValuesView } from "./CriticalValuesView";
 import type { DraftBriefs } from "./DraftBriefs";
 import type { DriveBackupStatus } from "./DriveBackupStatus";
 import type { DriveCleanupResult } from "./DriveCleanupResult";
@@ -99,6 +103,7 @@ export type Commands = {
   choose_backup: { args: undefined; returns: StagedBackup | null };
   clear_report_logo: { args: undefined; returns: null };
   clear_report_template: { args: undefined; returns: null };
+  clinic: { args: { request: ClinicRequest }; returns: ClinicReply };
   confirm_auto_hidden: { args: { caseId: string; token: string; tag: string }; returns: null };
   confirm_readiness: { args: { key: string; done: boolean }; returns: Readiness };
   confirm_recovery_key: { args: { typed: string }; returns: boolean };
@@ -110,6 +115,7 @@ export type Commands = {
   create_follow_up: { args: { caseId: string }; returns: string };
   create_sample_case: { args: undefined; returns: string };
   create_vault: { args: { password: string }; returns: null };
+  critical_values: { args: undefined; returns: CriticalValuesView };
   decide_suspect: { args: { caseId: string; token: string; decision: SuspectDecision }; returns: null };
   delete_case: { args: { caseId: string }; returns: null };
   delete_consultation: { args: { id: string }; returns: null };
@@ -179,7 +185,7 @@ export type Commands = {
   prepare_update: { args: undefined; returns: boolean };
   prepare_verify: { args: { caseId: string; sectionKey: string }; returns: Prepared };
   preview_filter: { args: { caseId: string; text: string }; returns: FilterOutcome };
-  preview_scores: { args: { sheet: ScoreSheet }; returns: string };
+  preview_scores: { args: { caseId: string | null; sheet: ScoreSheet }; returns: string };
   print_page: { args: undefined; returns: null };
   purge_case: { args: { caseId: string; password: string }; returns: null };
   readiness: { args: undefined; returns: Readiness };
@@ -223,6 +229,7 @@ export type Commands = {
   set_api_key: { args: { provider: string; key: string; retentionAck: boolean }; returns: null };
   set_auto_backup: { args: { on: boolean }; returns: BackupStatus };
   set_case_guide: { args: { caseId: string; sectionKey: string; text: string }; returns: null };
+  set_critical_values: { args: { values: Array<CriticalValue> }; returns: CriticalValuesView };
   set_dsm_severity: { args: { caseId: string; social: number | null; restricted: number | null }; returns: null };
   set_identities: { args: { caseId: string; identities: Array<IdentityInput> }; returns: Array<Identity> };
   set_input_sections: { args: { caseId: string; inputId: string; sections: Array<string> }; returns: null };

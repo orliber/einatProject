@@ -21,6 +21,7 @@ fn sheet(instrument: &str, entries: &[(&str, f64)], note: &str) -> ScoreSheet {
             })
             .collect(),
         notes: String::new(),
+        basis: None,
     }
 }
 
@@ -304,4 +305,119 @@ fn a_saved_comparison_follows_her_answer() {
     core.set_instrument_status("wppsi_iv", InstrumentStatus::NotUsed)
         .unwrap();
     assert!(comparison(&mut core).is_none());
+}
+
+/// D-190: the manual's critical values she enters turn the relative places of a sheet to the
+/// publisher's method; a missing one keeps the labelled rule of thumb. The values here are
+/// invented for the test, not a manual's.
+#[test]
+fn critical_values_she_enters_switch_the_sheet_to_the_manuals_method() {
+    let (_dir, mut core, case) = setup(None);
+    let view = core.critical_values().unwrap();
+    assert!(view.values.is_empty());
+    assert!(view.sets.iter().any(|s| s.key == "wisc_v"));
+    let entries = [
+        ("similarities", 10.0),
+        ("vocabulary", 10.0),
+        ("block_design", 7.0),
+        ("visual_puzzles", 10.0),
+        ("matrix", 13.0),
+        ("figure_weights", 10.0),
+        ("digit_span", 10.0),
+        ("picture_span", 10.0),
+        ("coding", 10.0),
+        ("symbol_search", 10.0),
+    ];
+    let wisc = sheet("wisc_v", &entries, "");
+    let before = core.preview_scores(&wisc).unwrap();
+    assert!(before.contains("לפי כלל אצבע"), "{before}");
+
+    // A value out of range is refused, and nothing is stored.
+    let bad = vec![dv_domain::CriticalValue {
+        set: "wisc_v".into(),
+        measure: "coding".into(),
+        value: 30.0,
+    }];
+    assert!(matches!(
+        core.set_critical_values(bad),
+        Err(CoreError::Refused(_))
+    ));
+    assert!(core.critical_values().unwrap().values.is_empty());
+
+    let all: Vec<dv_domain::CriticalValue> = entries
+        .iter()
+        .map(|(m, _)| dv_domain::CriticalValue {
+            set: "wisc_v".into(),
+            measure: (*m).into(),
+            value: 2.75,
+        })
+        .collect();
+    // All but one: still the rule of thumb.
+    core.set_critical_values(all[1..].to_vec()).unwrap();
+    assert!(core.preview_scores(&wisc).unwrap().contains("לפי כלל אצבע"));
+    // Every one: the manual's method.
+    let view = core.set_critical_values(all).unwrap();
+    assert_eq!(view.values.len(), 10);
+    let after = core.preview_scores(&wisc).unwrap();
+    assert!(after.contains("לפי שיטת המדריך"), "{after}");
+    assert!(
+        after.contains("חוזקה יחסית: מטריצות (MR) – ציון 13"),
+        "{after}"
+    );
+    assert!(
+        after.contains("חולשה יחסית: קוביות (BD) – ציון 7"),
+        "{after}"
+    );
+    // Saved now: the sheet keeps the values it was computed with, so its text and the
+    // interpretation cases still agree after the settings change.
+    // The test case's child is 5:4, so a WPPSI-IV sheet of the 4:0–7:7 band.
+    let wppsi_entries = [
+        ("information", 10.0),
+        ("similarities", 10.0),
+        ("block_design", 7.0),
+        ("object_assembly", 10.0),
+        ("matrix", 13.0),
+        ("picture_concepts", 10.0),
+        ("picture_memory", 10.0),
+        ("zoo_locations", 10.0),
+        ("bug_search", 10.0),
+        ("cancellation", 10.0),
+    ];
+    let wppsi = sheet("wppsi_iv", &wppsi_entries, "");
+    // Without the age (no case), WPPSI-IV's band is not known: the rule of thumb.
+    let band_values: Vec<dv_domain::CriticalValue> = wppsi_entries
+        .iter()
+        .map(|(m, _)| dv_domain::CriticalValue {
+            set: "wppsi_iv_4_7".into(),
+            measure: (*m).into(),
+            value: 2.75,
+        })
+        .collect();
+    core.set_critical_values(band_values).unwrap();
+    assert!(core
+        .preview_scores(&wppsi)
+        .unwrap()
+        .contains("לפי כלל אצבע"));
+    assert!(core
+        .preview_scores_in(Some(&case), &wppsi)
+        .unwrap()
+        .contains("WPPSI-IV, גילאי 4:0–7:7"));
+    let saved = core.save_scores(&case, None, &wppsi).unwrap();
+    assert!(
+        saved.content.contains("לפי שיטת המדריך"),
+        "{}",
+        saved.content
+    );
+    // Cleared: a new preview is back to the rule of thumb…
+    core.set_critical_values(Vec::new()).unwrap();
+    assert!(core
+        .preview_scores_in(Some(&case), &wppsi)
+        .unwrap()
+        .contains("לפי כלל אצבע"));
+    // …while the saved sheet still says what its text says.
+    let stored = core.score_sheet(&case, &saved.id).unwrap().unwrap();
+    let cases = dv_domain::sheet_cases(&stored);
+    assert!(cases
+        .iter()
+        .any(|c| c.measure == "matrix" && c.cases.iter().any(|x| x == "חוזקה יחסית")));
 }
