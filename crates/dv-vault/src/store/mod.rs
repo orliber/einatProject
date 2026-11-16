@@ -3049,7 +3049,8 @@ impl Vault {
             .ok_or(VaultError::NotFound)?;
         let key = self.case_key(case_id)?;
         self.keep_version(case_id, draft_id, Some(&version.text_tagged))?;
-        let changed = self.main.execute(
+        let tx = self.main.unchecked_transaction()?;
+        let changed = tx.execute(
             "UPDATE drafts SET text_tagged_enc = ?1, author = ?2, status = 'approved', approved_at = ?3
              WHERE id = ?4 AND case_id = ?5 AND status IN ('approved', 'proposed')",
             params![
@@ -3063,11 +3064,20 @@ impl Vault {
         if changed == 0 {
             return Err(VaultError::NotFound);
         }
+        // Approved by the restore: a waiting rewording takes the old wording's place, as in
+        // `edit_draft` and `set_draft_status` (VAULT-7), so the section never holds both.
+        tx.execute(
+            "UPDATE drafts SET status = 'superseded'
+             WHERE case_id = ?1 AND status = 'approved'
+               AND id = (SELECT replaces FROM drafts WHERE id = ?2 AND case_id = ?1)",
+            params![case_id, draft_id],
+        )?;
         // A new wording that waited beside it would replace what she just chose.
-        self.main.execute(
+        tx.execute(
             "UPDATE drafts SET status = 'superseded' WHERE case_id = ?1 AND replaces = ?2 AND status = 'proposed'",
             params![case_id, draft_id],
         )?;
+        tx.commit()?;
         self.touch(case_id)
     }
 

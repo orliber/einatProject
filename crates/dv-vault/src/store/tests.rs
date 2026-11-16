@@ -344,6 +344,55 @@ fn every_stored_blob_is_a_sealed_envelope() {
     assert!(checked >= 20, "only {checked} cells checked");
 }
 
+/// VAULT-7: restoring an earlier wording of a waiting rewording approves it, and it takes the
+/// old wording's place as when she approves or edits it: one approved wording, not two.
+#[test]
+fn restoring_a_version_of_a_waiting_rewording_retires_the_paragraph_it_replaces() {
+    use dv_domain::DraftStatus;
+    let (_dir, mut vault) = new_vault();
+    let (case, _) = case_with_input(&mut vault, "TEST-R");
+    let old = vault
+        .add_draft(&case, "s", "ניסוח ראשון בדוי.", dv_domain::Author::Ai, &[])
+        .unwrap();
+    vault
+        .set_draft_status(&case, &old.id, DraftStatus::Approved)
+        .unwrap();
+    assert!(vault
+        .propose_rewording(&case, &old.id, "ניסוח שני בדוי.", &[])
+        .unwrap());
+    let new = vault
+        .drafts(&case, "s")
+        .unwrap()
+        .into_iter()
+        .find(|d| d.replaces.as_deref() == Some(old.id.as_str()))
+        .unwrap();
+    // Claude rewords the waiting wording in place, which keeps a version of it.
+    assert!(vault
+        .rewrite_proposal(&case, &new.id, "ניסוח שלישי בדוי.", &[])
+        .unwrap());
+    let earlier = vault
+        .draft_versions(&case, &new.id)
+        .unwrap()
+        .into_iter()
+        .find(|v| v.text_tagged == "ניסוח שני בדוי." && v.id != old.id)
+        .unwrap();
+
+    vault
+        .restore_draft_version(&case, &new.id, &earlier.id)
+        .unwrap();
+
+    let drafts = vault.drafts(&case, "s").unwrap();
+    let status = |id: &str| drafts.iter().find(|d| d.id == id).map(|d| d.status);
+    assert_eq!(status(&new.id), Some(DraftStatus::Approved));
+    assert_eq!(status(&old.id), Some(DraftStatus::Superseded));
+    let approved: Vec<&str> = drafts
+        .iter()
+        .filter(|d| d.status == DraftStatus::Approved)
+        .map(|d| d.text_tagged.as_str())
+        .collect();
+    assert_eq!(approved, ["ניסוח שני בדוי."]);
+}
+
 /// VAULT-7: a new wording of an approved paragraph that she edits is approved by the edit, and
 /// takes the old wording's place as when she approves it: one approved wording, not two.
 #[test]
