@@ -31,6 +31,9 @@ const SettingsScreen = lazy(() => import("./screens/SettingsScreen").then((m) =>
 const StyleScreen = lazy(() => import("./screens/StyleScreen").then((m) => ({ default: m.StyleScreen })));
 const ClinicScreen = lazy(() => import("./screens/clinic/ClinicScreen").then((m) => ({ default: m.ClinicScreen })));
 function warmRarePages() {
+  // Not under the unit tests: an import still loading when a test file ends is torn down
+  // mid-flight and fails the run (it only saves the first open of a rare page in the app).
+  if (import.meta.env.MODE === "test") return;
   const load = () => { void import("./screens/SettingsScreen"); void import("./screens/ConsultScreen"); void import("./screens/StyleScreen"); void import("./screens/clinic/ClinicScreen"); };
   // WebKit (the Mac) has no requestIdleCallback.
   if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(load);
