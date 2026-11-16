@@ -188,6 +188,7 @@
     "allow-install-update",
     "allow-open-releases-page",
     "allow-system-check",
+    "allow-clinic",
     "allow-send-progress",
     "core:event:allow-listen",
     "core:event:allow-unlisten"

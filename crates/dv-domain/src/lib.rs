@@ -3,6 +3,7 @@
 //! Pure data and rules: no I/O, no crypto. Every type that crosses the IPC boundary
 //! derives [`ts_rs::TS`] so the UI gets the same shapes.
 
+pub mod clinic;
 pub mod compare;
 pub mod consistency;
 pub mod dates;

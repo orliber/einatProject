@@ -1,0 +1,70 @@
+/* The waiting list. Colours come only from styles/tokens.css, so both themes hold. */
+.waiting {
+  gap: var(--space-4);
+}
+.waiting-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.waiting-title {
+  gap: 2px;
+}
+.waiting-title h2 {
+  font-size: var(--text-2xl);
+}
+.waiting-list {
+  gap: var(--space-3);
+}
+.waiting-family {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+}
+/* An urgent family is marked by its chip and by a thicker edge, not by colour alone. */
+.waiting-urgent {
+  border-inline-start: 4px solid var(--warn);
+}
+.waiting-body {
+  gap: var(--space-1);
+  line-height: 1.5;
+}
+.waiting-name {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-size: var(--text-lg);
+}
+.waiting-time {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--ink-soft);
+}
+.waiting-long {
+  color: var(--warn);
+  font-weight: 600;
+}
+.waiting-reason {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.waiting-actions {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+/* A narrow window, or a large text size: the actions go under the family, side by side. */
+@container page (max-width: 1000px) {
+  .waiting-family {
+    flex-direction: column;
+  }
+  .waiting-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}

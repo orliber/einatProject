@@ -564,6 +564,7 @@ fn main() {
             install_update,
             open_releases_page,
             system_check,
+            clinic,
             send_progress,
         ])
         .run(tauri::generate_context!());

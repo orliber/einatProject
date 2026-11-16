@@ -1,0 +1,334 @@
+/* A patient's card. Colours come only from styles/tokens.css, so both themes hold. */
+.pcard {
+  gap: var(--space-4);
+}
+.pcard .num {
+  font-variant-numeric: tabular-nums;
+}
+.pcard-back {
+  align-self: flex-start;
+  min-height: 32px;
+}
+
+/* ---------- who ---------- */
+.pcard-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+}
+.pcard-head-top {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.pcard-who {
+  gap: var(--space-2);
+  min-width: 0;
+}
+.pcard-name {
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.pcard-facts {
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.pcard-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.pcard-contacts {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.pcard-contact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 220px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+}
+.pcard-contact-who {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.pcard-phone {
+  gap: var(--space-3);
+}
+.pcard-about {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pcard-about > div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: var(--space-3);
+}
+.pcard-about dt {
+  color: var(--ink-muted);
+  font-size: var(--text-base);
+}
+.pcard-about dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+/* ---------- the way of the assessment ---------- */
+.pcard-steps {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.pcard-step {
+  flex: 1 1 150px;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.pcard-step-body {
+  gap: 2px;
+  min-width: 0;
+}
+.pcard-step-label {
+  font-weight: 600;
+}
+.pcard-step-mark {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  line-height: 1;
+}
+/* Done: a full circle with a tick. Now: a ring with a full dot, and a marked frame.
+   To come: an empty dashed ring. Form and colour say the same thing. */
+.pcard-step-done .pcard-step-mark {
+  background: var(--ok);
+  color: var(--surface);
+}
+.pcard-step-now {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+.pcard-step-now .pcard-step-mark {
+  border: 2px solid var(--primary);
+  color: var(--primary);
+}
+.pcard-step-todo .pcard-step-mark {
+  border: 2px dashed var(--line-strong);
+}
+.pcard-step-todo .pcard-step-label {
+  color: var(--ink-muted);
+}
+
+/* ---------- what needs her, and the case ---------- */
+.pcard-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+.pcard-case {
+  gap: var(--space-3);
+}
+.pcard-case-code {
+  font-weight: 600;
+}
+.pcard-case-actions {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* ---------- visits ---------- */
+.pcard-group {
+  gap: var(--space-1);
+}
+.pcard-group h3 {
+  font-size: var(--text-base);
+  color: var(--ink-muted);
+  font-weight: 600;
+}
+
+/* ---------- session notes ---------- */
+.pcard-note {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--line);
+}
+.pcard-note:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.pcard-note-head {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.pcard-note-date {
+  font-weight: 600;
+}
+.pcard-note-record {
+  gap: var(--space-1);
+  align-items: flex-start;
+}
+.pcard-note-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.pcard-note-folded {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
+}
+/* The personal note is hers alone: a frame of its own, dashed, apart from the record. */
+.pcard-personal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+}
+.pcard-personal-head {
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+/* ---------- money ---------- */
+.pcard-money-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.pcard-balance {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.pcard-balance > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+}
+.pcard-balance dt {
+  color: var(--ink-muted);
+  font-size: var(--text-base);
+}
+.pcard-balance dd {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 700;
+}
+.pcard-line {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--line);
+}
+.pcard-line:first-child {
+  border-top: 0;
+}
+.pcard-line-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.pcard-line-date {
+  flex-shrink: 0;
+  min-width: 92px;
+  font-weight: 600;
+}
+.pcard-line-what {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.pcard-line-text {
+  overflow-wrap: anywhere;
+}
+.pcard-line-amount {
+  flex-shrink: 0;
+  min-width: 96px;
+  text-align: end;
+  font-weight: 600;
+}
+.pcard-line-gap {
+  flex-shrink: 0;
+  width: 64px;
+}
+.pcard-line-voided .pcard-line-text,
+.pcard-line-voided .pcard-line-amount {
+  text-decoration: line-through;
+  color: var(--ink-muted);
+}
+
+/* ---------- erasing: quiet, at the bottom ---------- */
+.pcard-erase {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
+/* What an erase removes and what it leaves, said before she confirms (D-179). */
+.pcard-erase-what {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.pcard-erase-what dt {
+  font-weight: 600;
+}
+.pcard-erase-what dd {
+  margin: 0;
+  line-height: 1.6;
+}
+
+/* A narrow window, or a large text size: one column. */
+@container page (max-width: 1000px) {
+  .pcard-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pcard-balance {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pcard-line-row {
+    flex-wrap: wrap;
+  }
+}

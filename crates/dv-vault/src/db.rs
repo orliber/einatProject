@@ -235,6 +235,31 @@ pub const MAIN_MIGRATIONS: &[&str] = &[
     // v12: "what left the computer" across every case is read a page at a time, newest first
     // (D-123); an index in that order instead of sorting a year of requests for each page.
     "CREATE INDEX transmissions_time ON transmissions(created_at, id);",
+    // v13: the clinic (beta). Records and their history are sealed with the settings key (they
+    // belong to no case); `kind` and `day` stay in the clear only to index by them, and
+    // `patient_id` is a random id. The contents are the caller's own JSON. `kind` is one of
+    // visit, note, payment, charge, task, settings and tally (the one anonymous record of what
+    // erased cards counted for, D-179). The clear columns are bound into each row's seal
+    // (D-177).
+    "CREATE TABLE clinic_records (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        patient_id TEXT,
+        day INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        data_enc BLOB NOT NULL
+     );
+     CREATE INDEX clinic_records_kind_day ON clinic_records(kind, day);
+     CREATE INDEX clinic_records_patient ON clinic_records(patient_id, kind);
+     CREATE TABLE clinic_history (
+        id TEXT PRIMARY KEY,
+        record_id TEXT NOT NULL,
+        patient_id TEXT,
+        saved_at INTEGER NOT NULL,
+        action TEXT NOT NULL,
+        data_enc BLOB NOT NULL
+     );
+     CREATE INDEX clinic_history_record ON clinic_history(record_id, saved_at);",
 ];
 
 pub const IDENTITY_MIGRATIONS: &[&str] = &[
@@ -266,6 +291,25 @@ pub const IDENTITY_MIGRATIONS: &[&str] = &[
     // (`metadata`), with the reason shown next to them.
     "ALTER TABLE identities ADD COLUMN source TEXT NOT NULL DEFAULT 'manual';
      ALTER TABLE identities ADD COLUMN reason TEXT NOT NULL DEFAULT '';",
+    // v3: the clinic's patient cards (beta), sealed with the settings key. They live here, with
+    // the other names, so a backup or an erase treats them as identities.
+    // `clinic_erased` is one sealed row: how many of the cards that were erased had been
+    // opened in each month, so the yearly summary's "new patients" never changes after an
+    // erase (D-179). Counts only, written in the transaction that removes a card.
+    // `erase_counted` is 1 once an erase of the card has folded it into that count: set before
+    // its records go, so an erase that is asked again counts the card exactly once.
+    "CREATE TABLE clinic_patients (
+        id TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        data_enc BLOB NOT NULL,
+        erase_counted INTEGER NOT NULL DEFAULT 0
+     );
+     CREATE TABLE clinic_erased (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        updated_at INTEGER NOT NULL,
+        data_enc BLOB NOT NULL
+     );",
 ];
 
 pub const AUDIT_MIGRATIONS: &[&str] = &[
@@ -327,9 +371,13 @@ mod tests {
                 "942e02ced273dca6",
                 "860fa1cbe9c35c6b",
                 "bc893c8e985ecbd1",
+                "9aee726964b4112a",
             ],
         ),
-        ("identity", &["98e79c9e2d976424", "59aa5787b56ebc78"]),
+        (
+            "identity",
+            &["98e79c9e2d976424", "59aa5787b56ebc78", "d24703bc8c602cd6"],
+        ),
         ("audit", &["922ed57e6a2659e3"]),
     ];
 
