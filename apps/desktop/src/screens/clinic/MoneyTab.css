@@ -237,3 +237,22 @@
 .clinic-diary-table tbody th {
   overflow-wrap: anywhere;
 }
+
+/* ---------- the file for the accountant (D-194) ---------- */
+.clinic-period-bar {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.clinic-export {
+  gap: var(--space-3);
+}
+.clinic-export-period {
+  min-width: 140px;
+  text-align: center;
+  font-weight: 600;
+}
+.clinic-export-what {
+  margin: 0;
+  line-height: 1.6;
+}

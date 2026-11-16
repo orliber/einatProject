@@ -24,6 +24,7 @@
     "allow-set-critical-values",
     "allow-security-status",
     "allow-export-security-pdf",
+    "allow-export-income",
     "allow-set-send-stopped",
     "allow-usage-summary",
     "allow-set-monthly-cap",

@@ -398,6 +398,24 @@ impl Vault {
         )
     }
 
+    /// Every record of a kind from `from_day` to `to_day`, both included, or an error when
+    /// one of them does not open: for a file that leaves the vault (the income export,
+    /// D-194), which is never made with a row missing.
+    pub fn clinic_range_strict(
+        &self,
+        kind: &str,
+        from_day: i64,
+        to_day: i64,
+    ) -> Result<Vec<StoredClinicRecord>, VaultError> {
+        self.clinic_query(
+            &format!(
+                "SELECT {RECORD_COLUMNS} FROM clinic_records
+                 WHERE kind = ?1 AND day >= ?2 AND day <= ?3 ORDER BY day, id"
+            ),
+            &[&kind, &from_day, &to_day],
+        )
+    }
+
     /// Every record of a patient, of every kind, by day then id. One that does not open is
     /// an error: what is decided from a patient's records (an erase, what the family owes)
     /// is never decided with a row missing.

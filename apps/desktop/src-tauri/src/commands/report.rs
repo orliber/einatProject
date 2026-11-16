@@ -233,6 +233,20 @@ pub(crate) async fn export_security_pdf(
     save_export(dir, "שכבות ההגנה.pdf".to_owned(), bytes).await
 }
 
+/// D-194: the clinic's income diary of a month (`2026-11`) or a year (`2026`) for the
+/// accountant, as a CSV with no name, phone or id of a patient in it, into the same folder
+/// as the reports. The core makes the file and logs the period; the window never sees it.
+#[tauri::command]
+pub(crate) async fn export_income(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    period: String,
+) -> Res<String> {
+    let dir = export_dir(&app).await?;
+    let export = with_core(&state, move |c| c.clinic_income_export(&period)).await?;
+    save_export(dir, export.file_name, export.bytes).await
+}
+
 /// Whether a file is one this vault exported, unchanged: when it was made, or `None`. A file
 /// over the cap is refused before it is copied; the hash is made with the core free, and only
 /// the fingerprint goes to the core (D-120).

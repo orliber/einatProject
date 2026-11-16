@@ -40,6 +40,7 @@ const ALLOWED = new Set([
   "prepare_verify",
   "security_status",
   "export_security_pdf",
+  "export_income",
   "send_verify",
   "report_check_setting",
   "set_report_check",

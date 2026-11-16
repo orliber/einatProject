@@ -1031,6 +1031,13 @@ export class FakeCore {
       }
       case "export_security_pdf":
         return "C:\\Users\\demo\\Downloads\\שכבות ההגנה.pdf";
+      case "export_income": {
+        // As the shell answers (D-194): where the file was saved. The preview writes nothing
+        // and downloads nothing; the period is checked and the file named as the core does.
+        const file = this.clinic.exportIncome(String(a.period ?? ""));
+        this.logActivity("clinic_income_exported", "security", `יומן ההכנסות של ${file.title} יוצא לקובץ לרואה החשבון, בלי שמות`);
+        return `C:\\Users\\demo\\Downloads\\${file.fileName}`;
+      }
       case "readiness":
       case "confirm_readiness": {
         if (cmd === "confirm_readiness") this.ready[a.key as string] = a.done ? 1_790_000_000 : null;

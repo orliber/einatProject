@@ -1,6 +1,6 @@
 # ניהול קליניקה (בטא) – מפרט
 
-> החלטות: D-170 עד D-179 ב-`DECISIONS.md`. המסך מסומן "בטא" בכל מקום שבו הוא מופיע.
+> החלטות: D-170 עד D-179, ו-D-194 (ייצוא לרואה החשבון), ב-`DECISIONS.md`. המסך מסומן "בטא" בכל מקום שבו הוא מופיע.
 
 ## מה זה ולמי
 עינת מנהלת קליניקה של אבחונים התפתחותיים. היום היומן, סיכומי הפגישות, התשלומים והמעקבים נמצאים מחוץ לתוכנה. המודול מביא אותם פנימה, לתוך הכספת המוצפנת, ומחבר אותם לתיק האבחון ולדוח.
@@ -18,14 +18,15 @@
 | הודעת תשלום ב-WhatsApp עם נוסח שאפשר לערוך | יש: נוסח תזכורת ונוסח תשלום שעינת עורכת; התוכנה ממלאת ומעתיקה ללוח, ועינת מדביקה בעצמה. שום דבר לא נשלח מהתוכנה |
 | אפליקציה לנייד, ענן | אין: הכל במחשב, בכספת |
 
-ומה שהוספנו מעבר: רשימת המתנה; מעקבים ומשימות; "מה דורש אותי" שהתוכנה מזהה לבד (פגישה שלא סומנה, פגישה בלי סיכום, חוב ישן, דוח שמתעכב, משפחה שממתינה הרבה זמן, מטופל פעיל בלי פגישה הבאה, שיחת משוב קרובה כשהדוח לא גמור); מסלול האבחון של כל ילד, מפגישת ההיכרות ועד מסירת הדוח; חיבור לתיק האבחון (פתיחת תיק מכרטיס המטופל, התקדמות הדוח בכרטיס, העברת סיכום פגישה לחומרי התיק).
+ומה שהוספנו מעבר: ייצוא של התקבולים לרואה החשבון, בלי שמות (D-194); רשימת המתנה; מעקבים ומשימות; "מה דורש אותי" שהתוכנה מזהה לבד (פגישה שלא סומנה, פגישה בלי סיכום, חוב ישן, דוח שמתעכב, משפחה שממתינה הרבה זמן, מטופל פעיל בלי פגישה הבאה, שיחת משוב קרובה כשהדוח לא גמור); מסלול האבחון של כל ילד, מפגישת ההיכרות ועד מסירת הדוח; חיבור לתיק האבחון (פתיחת תיק מכרטיס המטופל, התקדמות הדוח בכרטיס, העברת סיכום פגישה לחומרי התיק).
 
 ## כללים שלא זזים
 1. **הכל בתוך הכספת.** כרטיסי המטופלים (שמות, טלפונים) ב-`identity.db`; הפגישות, הסיכומים, הכספים והמשימות ב-`main.db`. כל רשומה חתומה ב-AES-256-GCM עם AAD, כמו שאר הכספת, ונכנסת לגיבוי כמו שהיא.
 2. **שום דבר מהקליניקה לא נשלח ל-AI ולא יוצא לרשת.** אין במודול קריאה ל-`dv-egress`, ל-`dv-ai` או ל-`dv-privacy::gate`. הדרך היחידה שבה טקסט מהקליניקה מגיע לתיק היא "להעביר לחומרי התיק", שמעתיקה את הרשומה (לא את התרשומת האישית) כחומר בתיק; משם חלים הסינון והשער הרגילים.
 3. **טקסט בלבד.** כל מה שמוצג הוא טקסט, אף פעם לא HTML.
-4. **יומן האירועים** (audit) מקבל מטא-דאטה בלבד: שנוסף מטופל, שנמחק מטופל, שסיכום הועבר לתיק. בלי שמות ובלי תוכן.
+4. **יומן האירועים** (audit) מקבל מטא-דאטה בלבד: שנוסף מטופל, שנמחק מטופל, שסיכום הועבר לתיק, שיומן ההכנסות יוצא לקובץ ולאיזו תקופה. בלי שמות ובלי תוכן.
 5. **אין נתוני אמת בריפו.** כל הדוגמאות, הבדיקות וההדמיה בדויות.
+6. **קובץ שיוצא מהכספת לא נושא שם.** הקובץ היחיד שהקליניקה כותבת החוצה הוא הייצוא לרואה החשבון, ואין בו שם, טלפון, מזהה של כרטיס או טקסט שעינת כתבה, מלבד הספרות של מספר הקבלה (D-194).
 
 ## מה נשמר, ומה אפשר למחוק
 הקליניקה היא גם רשומה רפואית וגם רישום של הכנסות, ולכן רוב מה שנכתב בה נשאר. כך זה עובד (D-172, D-174, D-176 עד D-179):
@@ -43,6 +44,19 @@
 - **הסיכומים של שנים שעברו לא משתנים אחרי מחיקה.** מה שהכרטיס נספר בו (בכל חודש: כמה פגישות התקיימו ומאיזה סוג, כמה בוטלו, לכמה לא הגיעו, כמה חויב, כמה התקבל ובאיזה אמצעי, כמה תקבולים בלי מספר קבלה, ושנפתח כרטיס חדש) נשאר כמספרים בלבד, בלי שם, בלי מזהה ובלי טקסט, חתום בכספת. הסיכום השנתי ממשיך להראות את אותם מספרים, וביומן ההכנסות של החודש מופיעה שורה אחת: "רשומות של כרטיסים שנמחקו", עם הסכומים שלה. מה שלא נשאר: מי, מתי בדיוק, ועל מה.
 - **שורה שהתוכנה לא מצליחה לקרוא** (קובץ שנפגע, או שורה שנכתבה בגרסה חדשה יותר) לא מפילה את המסכים. היא נשארת בכספת כמו שהיא, לא מוצגת ולא נספרת, ובעמוד הראשי של הקליניקה כתוב כמה שורות כאלה יש. ערך שהגרסה לא מכירה (למשל אמצעי תשלום חדש) מוצג כ"לא מוכר", והתוכנה לא שומרת רישום כזה עד שבוחרים ערך מהרשימה, כדי שלא יהפוך בשקט למשהו אחר.
 
+## ייצוא לרואה החשבון (D-194)
+בלשונית "כספים", ליד היומן וליד הסיכום השנתי, יש כפתור שקט: "ייצוא לרואה החשבון". חלון קטן שואל אם לייצא חודש או שנה שלמה, ומאיזה חודש או שנה (ברירת המחדל: מה שעל המסך). בחודש שיש בו תקבולים בלי מספר קבלה, החלון אומר כמה, כדי שאפשר יהיה להשלים אותם קודם. אחרי השמירה מופיעה הודעה שאומרת איפה הקובץ נשמר.
+
+**מה יש בקובץ.** לכל תקבול בתקופה: תאריך, מספר קבלה (רק הספרות והמפרידים שלו), סכום בשקלים עם שתי ספרות אחרי הנקודה, אמצעי התשלום בעברית, ומצב: "תקין" או "בוטל". אחר כך, לכל חודש: מה התקבל לפי אמצעי תשלום, עם עמודה נפרדת ל"רשומות של כרטיסים שנמחקו" (סכומים בלבד, כמו השורה שלהן ביומן) ושורת "סך החודש"; בשנה גם "סך השנה". בסוף: כמה תקבולים בלי מספר קבלה (ברשימה, ובכרטיסים שנמחקו), וכמה בוטלו. בראש הקובץ כתוב שהתוכנה אינה רשומה ברשות המסים.
+
+**מה אין בקובץ.** שם של ילד או של הורה, טלפון, מייל, מזהה של כרטיס או של רישום, מי שילם, הערה, סיבת ביטול (היא יכולה לכלול שם), ופגישות או חיובים. תקבול שבוטל מופיע עם הסכום שלו ולא נספר בסיכומים. מספר קבלה שכתובות בו אותיות נשאר רק עם הספרות; בלי ספרות בכלל הוא נספר כ"בלי מספר קבלה".
+
+**הפורמט.** CSV לפי RFC 4180, ב-UTF-8 עם BOM ושורות CRLF, כך שהעברית נפתחת נכון ב-Excel. כל שורה באותו רוחב, ושדה עם פסיק, מירכאות או ירידת שורה מוקף במירכאות. תא שמתחיל ב-`=`, `+`, `-`, `@`, טאב או CR מקבל גרש בהתחלה, כדי שגיליון לא יריץ אותו כנוסחה. שם הקובץ הוא התקופה בלבד: `הכנסות 2026-11.csv`, `הכנסות 2026.csv`.
+
+**איפה נשמר.** כמו הדוח: בתיקיית ההורדות, ואם היא מסונכרנת לענן או לא קיימת, במסמכים או בתיקיית הבית; כשאף אחת מהן לא מתאימה, עינת בוחרת תיקייה, ותיקייה מסונכרנת לענן נדחית. התוכנה לא שולחת את הקובץ: עינת שולחת אותו בעצמה.
+
+**שלם, או לא נוצר.** אם תקבול של התקופה או הספירה של הכרטיסים שנמחקו לא נקראים מהכספת, הקובץ לא נוצר, והמסך אומר למה. ביומן האירועים נרשם שהקובץ נוצר ולאיזו תקופה (`clinic_income_exported`, `{"period":"2026-11"}`), ולא שום דבר אחר.
+
 ## The technical contract (English, for whoever writes the code)
 
 Types and the request/reply enums: `crates/dv-domain/src/clinic/mod.rs` (the source of truth; the
@@ -54,9 +68,10 @@ empty `id` means "new". "Today" always comes from the window (`Today`), never fr
 | Layer | File | Owns |
 |---|---|---|
 | rules | `crates/dv-domain/src/clinic/logic.rs` (+ `tests.rs`) | validation, recurrence dates, overlaps, charges and balances, alerts, the assessment process, the diary, income, message filling, Hebrew labels, history lines |
+| the file for the accountant | `crates/dv-domain/src/clinic/income_export.rs` (its tests inside) | the period, the CSV (D-194) |
 | storage | `crates/dv-vault/src/store/clinic.rs` | sealed opaque JSON rows, indexes, history rows, erasing a patient |
 | service | `crates/dv-core/src/clinic.rs` | `Core::clinic(ClinicRequest) -> Result<ClinicReply, CoreError>`: loads, applies the rules, saves; the link to cases |
-| shell | `apps/desktop/src-tauri/src/commands/clinic.rs` | one command, `clinic` |
+| shell | `apps/desktop/src-tauri/src/commands/clinic.rs`; `commands/report.rs` | one command, `clinic`; and `export_income`, which writes the file for the accountant beside the reports (D-194) |
 | window | `apps/desktop/src/screens/clinic/`, `apps/desktop/src/ipc/clinic.ts`, `apps/desktop/src/web/fakeClinic.ts` | the screens, the typed client, the browser-preview stand-in |
 
 ### Storage
@@ -228,6 +243,29 @@ Income year: twelve months of held / cancelled / no-show counts, charged, receiv
 Messages: placeholders `{הורה} {ילד} {יום} {תאריך} {שעה} {מקום} {סכום} {שמי}`; a missing parent
 name becomes "רב" ("שלום רב"); the date is `15.11.2026`, the time `09:30`, the day `ראשון`.
 
+### The income export (D-194)
+The one file the clinic writes out of the vault. `export_income(period)` (shell, beside
+`export_security_pdf`): `period` is `YYYY-MM` or `YYYY` of 2000–2200 (`parse_income_period`,
+anything else refused); the shell takes the folder as the report does (`export_dir`: Downloads,
+Documents, home, never one synced to the cloud, else she picks one) and writes under a free name
+(`save_export`). `Core::clinic_income_export(period)` reads only the payments of the period
+(`Vault::clinic_range_strict`: every row of the stretch or an error) and the `tally` record
+(strictly); a row that does not open or does not read refuses the export (a file for the
+accountant is never made with a row missing). It never reads a card. It writes one audit event,
+`clinic_income_exported`, meta `{"period": "<period>"}`. The window never receives the file.
+
+`income_csv(period, payments, tally)` (pure): UTF-8 with a BOM, CRLF after every record, every
+record 5 fields wide, RFC 4180 quoting, and a leading `'` on a cell that starts with `=` `+` `-`
+`@` TAB or CR. Sections: a title (`יומן הכנסות לרואה החשבון`, the period), three fixed lines
+(no names in the file; not a registered program; a voided payment is listed and not counted), a
+fourth when erased cards count in the period; `תקבולים`: date, receipt number (`receipt_number`:
+ASCII digits and `-` `/` `.` space only, trimmed; no digit → empty), amount (`shekels`: `450.00`),
+the method's label, `תקין` / `בוטל`, by date then receipt number; `סיכום לפי חודש ואמצעי תשלום`:
+for each month of the period, a line per method with anything (listed, erased cards, total) and
+`סך החודש` always; for a year, the year by method and `סך השנה`; then the counts of payments
+with no receipt number (listed, and of erased cards) and of voided ones. Payee, note, void
+reason, the card's id and every name are never read into a cell: the function is not given a card.
+
 ### The link to cases
 - `CreateCase`: a new case through `Core::create_case` (so every rule of a case holds): code
   `תיק-YYYY-MMDD` of `today` (with `-2`, `-3`… when taken), age from `birth_date` on `today`,
@@ -266,8 +304,11 @@ Data through `@tanstack/react-query` (`["clinic", …]` keys, invalidated
 after a write). Loading shows `Skeleton`; search is debounced; quick actions (marking a visit, a
 task done) update the screen first and roll back on failure; long lists render in pages.
 RTL, keyboard reachable, labelled, both colour themes (only tokens from `styles/tokens.css`).
+In כספים, "ייצוא לרואה החשבון" (beside the month and beside the year) opens a dialog that picks
+a month or a whole year and calls `ipc.exportIncome(period)` (not through `clinic`: the file goes
+from the core to the disk, and the window gets only its path, said in a toast). The browser
+preview answers with a path and the core's file name, and writes and downloads nothing.
 
 ## מה לא נכנס לבטא (ולמה)
-- ייצוא יומן ההכנסות לקובץ (לרואה החשבון): קובץ עם שמות מחוץ לכספת. ממתין להחלטה של עינת.
 - תזכורות אוטומטיות ב-SMS או ב-WhatsApp: שירות בתשלום ויציאה לרשת.
 - סנכרון עם יומן גוגל, אפליקציה לנייד, חשבוניות: ראו הטבלה למעלה.

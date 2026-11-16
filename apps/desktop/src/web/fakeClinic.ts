@@ -54,7 +54,7 @@ import type { VisitKind } from "../ipc/generated/VisitKind";
 import type { VisitStatus } from "../ipc/generated/VisitStatus";
 import type { VisitView } from "../ipc/generated/VisitView";
 import {
-  addDays, CONTACT_ROLES, dayName, daysBetween, formatDate, formatTime, isIsoDate, MAX_AGOROT, moneyNumber, monthOf, monthRange,
+  addDays, CONTACT_ROLES, dayName, daysBetween, formatDate, formatMonth, formatTime, isIsoDate, MAX_AGOROT, moneyNumber, monthOf, monthRange,
   PATIENT_STATUSES, PAY_METHOD_LABEL, PAY_METHODS, TASK_KINDS, today as localToday, VISIT_KIND_LABEL, VISIT_KINDS, VISIT_STATUS_LABEL,
   VISIT_STATUSES, weekRange,
 } from "../screens/clinic/format";
@@ -427,6 +427,16 @@ export class FakeClinic {
   /** The day by the core's own clock, which counts in UTC (`iso(today())` in the core). */
   private coreDay(): string {
     return this.clock().toISOString().slice(0, 10);
+  }
+
+  /** The income export of `period` ("2026-11" or "2026", D-194), as the core checks and
+   *  names it. The file itself is the core's (dv-domain builds it); the preview makes none. */
+  exportIncome(period: string): { fileName: string; title: string } {
+    const hit = /^(\d{4})(?:-(\d{2}))?$/.exec(period);
+    const year = Number(hit?.[1] ?? 0);
+    const month = hit?.[2] === undefined ? null : Number(hit[2]);
+    need(hit !== null && year >= 2000 && year <= 2200 && (month === null || (month >= 1 && month <= 12)), "צריך לבחור חודש או שנה לייצוא.");
+    return { fileName: `הכנסות ${period}.csv`, title: month === null ? `שנת ${year}` : formatMonth(period) };
   }
 
   /** As if `rows` rows of the vault could not be read (D-178): the front page says so first. */
