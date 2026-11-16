@@ -171,6 +171,7 @@ impl Core {
             ner: None,
             ner_exe: None,
             hint_cache: HashMap::new(),
+            name_texts: None,
             settled: None,
             section_nonces: HashMap::new(),
             computer_seal: Arc::new(WindowsSeal),

@@ -177,6 +177,20 @@ async fn warm_names(state: &AppState, case_id: &str, extra: Vec<String>) {
     .await;
 }
 
+/// What the request `begin` starts would have the name model read besides the materials
+/// (her request, the current draft, the conversation, the approved sections, the guide…),
+/// listed under the lock without the model, so [`warm_names`] reads them while the core is
+/// free and `begin` does not run the model under the lock (JOBS-4). Empty when the model is
+/// off or the listing fails: then the request reads what it needs itself, as before.
+async fn name_texts<J>(
+    state: &AppState,
+    begin: impl FnOnce(&mut Core) -> Result<J, CoreError> + Send + 'static,
+) -> Vec<String> {
+    with_core(state, move |c| Ok(c.request_name_texts(begin)))
+        .await
+        .unwrap_or_default()
+}
+
 /// Next to the vault folder, never inside it. Kept small.
 const CRASH_LOG: &str = "crash-log.txt";
 

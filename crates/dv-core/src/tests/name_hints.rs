@@ -214,3 +214,92 @@ fn the_model_reads_the_approved_paragraphs_a_consultation_sends() {
     );
     assert!(!body.contains(ONLY_THE_MODEL), "{body}");
 }
+
+/// JOBS-4: every text a request has the model read besides the materials (the current
+/// draft, the approved sections a closing section is written from, the paragraphs a check
+/// sends, her earlier questions…) can be listed without the model and read while the core is
+/// free, so beginning the request does not run the model under the core's lock.
+#[test]
+fn the_texts_a_request_reads_are_read_by_the_model_before_it_begins() {
+    let fake = FakeTransport::default();
+    let (_dir, mut core, case) = setup(Some(fake.clone()));
+    // Her paragraphs, a proposed one, and a conversation, from before she turned it on.
+    core.add_own_paragraph(
+        &case,
+        "kindergarten",
+        &format!("בגן הוא משחק בעיקר עם {ONLY_THE_MODEL} ומספר עליה בבית."),
+    )
+    .unwrap();
+    core.add_own_paragraph(&case, "background", "נרדם באיחור ומתעורר בלילה.")
+        .unwrap();
+    core.vault_mut()
+        .unwrap()
+        .add_draft(
+            &case,
+            "kindergarten",
+            "[ילד] נפרד בבכי בבוקר.",
+            dv_domain::Author::Ai,
+            &[],
+        )
+        .unwrap();
+    let asked = core
+        .prepare_consult(Some(&case), None, "איך לנסח את הפרידה בבוקר?")
+        .unwrap();
+    let conversation = core
+        .send_consult(asked.approval_id.as_deref().unwrap())
+        .unwrap()
+        .conversation_id;
+    let reads = model_on(&mut core);
+    core.set_verify_stage(true).unwrap();
+    // The materials are read first, as the shell does before every request.
+    let job = core.begin_name_hints(&case, &[]).unwrap().unwrap();
+    core.finish_name_hints(job.run());
+
+    type Begin = Box<dyn Fn(&mut Core) -> Result<RequestJob, CoreError>>;
+    let c = case.clone();
+    let conv = conversation.clone();
+    let requests: Vec<(&str, Begin)> = vec![
+        (
+            "section",
+            Box::new(move |k| k.begin_prepare_section(&c, "kindergarten", "לקצר", None)),
+        ),
+        ("summary", {
+            let c = case.clone();
+            Box::new(move |k| k.begin_prepare_section(&c, "summary", "לנסח את הסיכום", None))
+        }),
+        ("check", {
+            let c = case.clone();
+            Box::new(move |k| k.begin_prepare_verify(&c, "kindergarten"))
+        }),
+        ("consult", {
+            let c = case.clone();
+            Box::new(move |k| k.begin_prepare_consult(Some(&c), Some(&conv), "ומה עם המעברים?"))
+        }),
+    ];
+    for (what, begin) in &requests {
+        // Listed under the lock without the model.
+        let before = reads.load(Ordering::SeqCst);
+        let texts = core.request_name_texts(begin);
+        assert_eq!(reads.load(Ordering::SeqCst), before, "{what}: listed only");
+        assert!(!texts.is_empty(), "{what}");
+        // Read as the shell reads them, while the core is free.
+        if let Some(job) = core.begin_name_hints(&case, &texts).unwrap() {
+            core.finish_name_hints(job.run());
+        }
+        // Begun now, the request finds everything read: the model does not run under the lock.
+        let read_off_lock = reads.load(Ordering::SeqCst);
+        let job = begin(&mut core).unwrap();
+        assert_eq!(
+            reads.load(Ordering::SeqCst),
+            read_off_lock,
+            "{what}: the model ran under the lock"
+        );
+        drop(job);
+    }
+    // Off, nothing is listed and nothing is begun.
+    core.vault_mut()
+        .unwrap()
+        .set_setting(NAME_MODEL_KEY, "")
+        .unwrap();
+    assert!(core.request_name_texts(&requests[0].1).is_empty());
+}

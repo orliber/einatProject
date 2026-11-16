@@ -1052,6 +1052,9 @@ pub struct Core {
     section_nonces: HashMap<(String, String), String>,
     /// The name model's hints by text, so a material is read once (dropped on lock).
     hint_cache: HashMap<String, Vec<dv_privacy::NameHint>>,
+    /// Set only inside [`Core::request_name_texts`]: `case_hints` lists the texts it would
+    /// have the model read, and reads none. The request begun meanwhile is dropped unsent.
+    name_texts: Option<Vec<String>>,
     /// The case whose stored texts were last settled against its tags, and the vault's write
     /// counts right after: while they have not moved, no text or name changed, and settling
     /// again would find nothing (dropped on lock).

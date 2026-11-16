@@ -634,6 +634,26 @@ impl Core {
         }))
     }
 
+    /// The texts besides the materials that the request `begin` starts would have the name
+    /// model read (her request, the current draft, the conversation, the approved sections,
+    /// the guide, the paragraphs a check sends, her earlier questions…), so that
+    /// [`Core::begin_name_hints`] can read them while the core is free (F2, JOBS-4) instead of
+    /// `begin` reading them under the lock. The request is begun only to list them, and
+    /// dropped: nothing is prepared or sent. Empty when the model is off or `begin` fails.
+    pub fn request_name_texts<T>(
+        &mut self,
+        begin: impl FnOnce(&mut Core) -> Result<T, CoreError>,
+    ) -> Vec<String> {
+        if !self.name_model_on() {
+            return Vec::new();
+        }
+        self.name_texts = Some(Vec::new());
+        let begun = begin(self);
+        let texts = self.name_texts.take().unwrap_or_default();
+        drop(begun);
+        texts
+    }
+
     /// Keep what the job found. Dropped when the vault locked meanwhile.
     pub fn finish_name_hints(&mut self, read: HintsRead) {
         let HintsRead {
@@ -674,6 +694,10 @@ impl Core {
         extra: &[&str],
     ) -> Result<NameHints, CoreError> {
         if !self.name_model_on() {
+            return Ok(NameHints::default());
+        }
+        if let Some(list) = &mut self.name_texts {
+            list.extend(extra.iter().map(|t| (*t).to_owned()));
             return Ok(NameHints::default());
         }
         let mut texts: Vec<String> = extra.iter().map(|t| (*t).to_owned()).collect();

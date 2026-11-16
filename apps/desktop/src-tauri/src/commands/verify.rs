@@ -19,7 +19,11 @@ pub(crate) async fn prepare_verify(
     case_id: String,
     section_key: String,
 ) -> Res<Prepared> {
-    warm_names(&state, &case_id, Vec::new()).await;
+    // The proposed paragraphs the check sends are read by the name model too, while the core
+    // is free (JOBS-4).
+    let (id, key) = (case_id.clone(), section_key.clone());
+    let texts = name_texts(&state, move |c| c.begin_prepare_verify(&id, &key)).await;
+    warm_names(&state, &case_id, texts).await;
     prepare_off_lock(&state, move |c| {
         c.begin_prepare_verify(&case_id, &section_key)
     })
