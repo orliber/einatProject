@@ -80,20 +80,14 @@ impl Core {
                 });
             }
         }
-        // D-161: the verdicts are kept for the session with the paragraphs, as each reads
-        // now, so the report page shows them after any reload and "approve all" sees them.
+        // D-161: the verdicts are kept for the session with the paragraphs, by the stored
+        // wording each has now, so the report page shows them after any reload and "approve
+        // all" sees them.
         let mut said: Vec<(String, String, Vec<ParagraphNote>)> = Vec::new();
         for (draft_id, c) in draft_ids.iter().zip(&checks) {
             let Some(d) = style::find_draft(v, &case_id, draft_id)? else {
                 continue;
             };
-            let shown = crate::drafts::shown_paragraph(
-                &d.text_tagged,
-                d.author,
-                &identities,
-                practitioner.as_deref(),
-                &masks,
-            );
             // The demo check reads for numbers only and calls everything else "partial":
             // that is "not read", not a finding, and it holds nothing back.
             let notes = if demo && c.verdict == dv_ai::Verdict::Partial {
@@ -101,10 +95,10 @@ impl Core {
             } else {
                 verdict_notes(c)
             };
-            said.push((draft_id.clone(), shown, notes));
+            said.push((draft_id.clone(), d.text_tagged, notes));
         }
-        for (draft_id, shown, notes) in said {
-            self.notes.keep_verdict(&case_id, &draft_id, shown, notes);
+        for (draft_id, wording, notes) in said {
+            self.notes.keep_verdict(&case_id, &draft_id, wording, notes);
         }
         Ok(VerifyResult {
             draft_ids,
