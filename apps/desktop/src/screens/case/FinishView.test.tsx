@@ -332,6 +332,34 @@ describe("the finish page", () => {
     expect(calls.filter((c) => c.cmd === "edit_paragraph")).toHaveLength(1);
   });
 
+  it("what she is typing in the editor here is never thrown away by \"לתקן כאן\" on another card", async () => {
+    const { side, user } = await openFinish(written((d) => {
+      first(d, "background").notes = [
+        { kind: "age", text: "בפסקה כתוב גיל 6, ובתיק 5" },
+        { kind: "polish", text: "מילה כפולה: \"של של\"" },
+      ];
+      first(d, "referral").notes = [{ kind: "term", text: "כתוב «גן»; בשאר הדוח «מסגרת»" }];
+    }));
+    const check = (await within(side).findByRole("button", { name: /כדאי לבדוק/ })).closest("section") as HTMLElement;
+    const ageCard = cardOf(within(check).getByText("גיל שלא תואם את פרטי התיק"));
+    await user.click(within(ageCard).getByRole("button", { name: "לתקן כאן" }));
+    const box = within(ageCard).getByRole("textbox", { name: "תיקון הפסקה" });
+    await user.clear(box);
+    await user.type(box, "נוסח חדש ובדוי שלה.");
+    // Another paragraph's card cannot open a second editor over hers.
+    const termCard = cardOf(within(check).getByText("מונח מקצועי"));
+    expect(within(termCard).queryByRole("button", { name: "לתקן כאן" })).toBeNull();
+    // The same paragraph in the proofreading list: the editor moves there with her text.
+    await user.click(head(side, /ליטוש ניסוח/) as HTMLElement);
+    const polish = (head(side, /ליטוש ניסוח/) as HTMLElement).closest("section") as HTMLElement;
+    await user.click(within(cardOf(within(polish).getByText("מילה כפולה"))).getByRole("button", { name: "לתקן כאן" }));
+    expect(within(polish).getByRole("textbox", { name: "תיקון הפסקה" })).toHaveValue("נוסח חדש ובדוי שלה.");
+    expect(within(side).getAllByRole("textbox", { name: "תיקון הפסקה" })).toHaveLength(1);
+    // Once she is done, the other card can be fixed here again.
+    await user.click(within(polish).getByRole("button", { name: "ביטול" }));
+    expect(within(cardOf(within(check).getByText("מונח מקצועי"))).getByRole("button", { name: "לתקן כאן" })).toBeInTheDocument();
+  });
+
   it("a place marked to complete is fixed right here, through the core; the file goes out either way", async () => {
     const { side, user, calls, view, caseId } = await openFinish(reshape(bare), {
       caseOf: async (c, noam) => {

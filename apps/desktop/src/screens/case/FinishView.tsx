@@ -257,6 +257,8 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
   const [must, toCheck] = groups;
   const firstOpen = groups.find((g) => g.count > 0)?.id ?? null;
   const isOpen = (g: Group) => (editing?.at === g.id && g.cards.some((c) => c.type === "paragraph" && c.p.id === editing.id)) || (folds[g.id] ?? g.id === firstOpen);
+  /** An editor is open on a card: no other card opens one over it and loses her text. */
+  const editorOpen = editing !== null && groups.some((g) => (editing.at ?? "check") === g.id && g.cards.some((c) => c.type === "paragraph" && c.p.id === editing.id));
   const anyCard = groups.some((g) => g.cards.length > 0);
 
   /** Leave a note as it is. Its list stays open, also when this was the last one in it. */
@@ -298,6 +300,14 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
   function paragraphCard(g: Group, c: ParagraphCard): ReactNode {
     const { section, p } = c;
     const here = editing?.id === p.id && (editing.at ?? "check") === g.id;
+    // The same paragraph on another card: the editor moves here with what she typed. Another
+    // paragraph: only once her editor is closed.
+    const fixHere = () => {
+      show(`p:${p.id}`);
+      if (editing?.id === p.id) setEditing({ ...editing, text: editBox.current?.value() ?? editing.text, at: g.id });
+      else setEditing({ id: p.id, text: p.text, original: p.text, at: g.id });
+    };
+    const canFix = !editorOpen || editing?.id === p.id;
     const one = c.notes.length === 1;
     return (
       <li key={p.id} className={shown === `p:${p.id}` ? "fin-card is-shown" : "fin-card"}>
@@ -330,7 +340,7 @@ export function FinishView({ api, onExport, onOpen }: { api: CaseApi; onExport: 
         </ul>
         {!here && (
           <div className="fin-actions">
-            <button type="button" className="btn btn-small" onClick={() => { show(`p:${p.id}`); setEditing({ id: p.id, text: p.text, original: p.text, at: g.id }); }}>לתקן כאן</button>
+            {canFix && <button type="button" className="btn btn-small" onClick={fixHere}>לתקן כאן</button>}
             <button type="button" className="fin-link" onClick={() => onOpen(section.key)}>לעבור לסעיף</button>
             {one && <button type="button" className="fin-link" onClick={() => leave(g.id, c.notes[0]?.key ?? "")}>בסדר, להשאיר</button>}
           </div>
