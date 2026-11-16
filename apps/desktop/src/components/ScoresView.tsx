@@ -226,7 +226,7 @@ export function ScoresView(props: {
       alive = false;
       window.clearTimeout(t);
     };
-  }, [sheet]);
+  }, [sheet, props.caseId]);
 
   const dirty = !saving && !done && JSON.stringify([entries, module, cutoff, notes]) !== initialEntries;
   // Unsaved scores wait in memory while she is on another stage (see `drafts`).
