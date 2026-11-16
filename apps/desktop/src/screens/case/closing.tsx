@@ -112,12 +112,18 @@ export function ClosingFlow({ api, current, onPick }: { api: CaseApi; current: s
   const briefs = useQuery({ queryKey: ["draftBriefs"], queryFn: ipc.draftBriefs, staleTime: 60_000 });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** "להמשיך בכל זאת": the summary before the recommendations are approved. */
+  /** "להמשיך בכל זאת": the summary before the steps above it are done. */
   const [anyway, setAnyway] = useState(false);
+  /** "להמשיך בכל זאת": the DSM section and the recommendations before her diagnoses. */
+  const [early, setEarly] = useState(false);
   if (!showClosing(detail.sections, current)) return null;
   const steps = closingSteps(detail.sections);
   const writing = (s: Section) => api.jobs.some((j) => j.section === s.key);
   const before = (id: ClosingStep["id"]) => steps.slice(0, steps.findIndex((s) => s.id === id));
+  // She diagnoses: what comes after her diagnoses waits for them, unless she says otherwise.
+  const diagPending = steps.some((s) => s.id === "diagnoses" && s.state !== "done");
+  const recsPending = steps.some((s) => s.id === "dsm_recommendations" && s.state !== "done");
+  const laterOpen = steps.some((s) => (s.id === "dsm_recommendations" || s.id === "summary") && s.state !== "done");
 
   async function draft(sections: Section[]) {
     if (busy || sections.length === 0) return;
@@ -146,7 +152,8 @@ export function ClosingFlow({ api, current, onPick }: { api: CaseApi; current: s
           const inWork = busy || step.sections.some(writing);
           // The summary reads the recommendations (and the DSM section): it waits for them
           // unless she says otherwise.
-          const held = step.id === "summary" && !anyway && before("summary").some((s) => s.id === "dsm_recommendations" && s.state !== "done");
+          const held = step.id === "summary" && !anyway && before("summary").some((s) => (s.id === "dsm_recommendations" || s.id === "diagnoses") && s.state !== "done");
+          const heldForDiagnoses = step.id === "dsm_recommendations" && diagPending && !early;
           return (
             <li key={step.id} className={`closing-step st-${step.state}`}>
               <span className="closing-n" aria-hidden="true">{step.state === "done" ? "✓" : i + 1}</span>
@@ -159,7 +166,9 @@ export function ClosingFlow({ api, current, onPick }: { api: CaseApi; current: s
                 <button type="button" className="link-btn" onClick={() => onPick(first.key, true)}>לבחירת האבחנות</button>
               )}
               {step.id === "dsm_recommendations" && step.state !== "done" && step.state !== "waiting" && (
-                active.length > 0 ? (
+                active.length > 0 && heldForDiagnoses ? (
+                  <button type="button" className="link-btn closing-anyway" onClick={() => setEarly(true)}>להמשיך בכל זאת</button>
+                ) : active.length > 0 ? (
                   <button type="button" className="link-btn" disabled={inWork} onClick={() => void draft(active)}>
                     ✦ לנסח {active.length === 1 ? `את "${active[0]?.title ?? ""}"` : "את שניהם"}
                   </button>
@@ -176,10 +185,13 @@ export function ClosingFlow({ api, current, onPick }: { api: CaseApi; current: s
           );
         })}
       </ol>
-      {steps.some((s) => s.id === "dsm_recommendations" && s.state === "next") && steps.some((s) => s.id === "diagnoses" && s.state !== "done") && (
+      {diagPending && laterOpen && !early && !anyway && (
+        <span className="small muted">שאר סעיפי הסיום נכתבים אחרי שהאבחנות שלך מאושרות, כדי שיתבססו עליהן.</span>
+      )}
+      {diagPending && laterOpen && (early || anyway) && (
         <span className="small muted">האבחנות עוד לא אושרו: מה שינוסח עכשיו ייכתב בלעדיהן.</span>
       )}
-      {steps.some((s) => s.id === "summary" && s.state !== "done") && !anyway && steps.some((s) => s.id === "dsm_recommendations" && s.state !== "done") && (
+      {steps.some((s) => s.id === "summary" && s.state !== "done") && !anyway && recsPending && (!diagPending || early) && (
         <span className="small muted">הסיכום נכתב אחרי שההמלצות מאושרות, כדי שיכלול אותן.</span>
       )}
       {own && <span className="small muted">{own}</span>}

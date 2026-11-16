@@ -332,6 +332,34 @@ describe("the finish page", () => {
     expect(calls.filter((c) => c.cmd === "edit_paragraph")).toHaveLength(1);
   });
 
+  it("what she is typing in the editor here is never thrown away by \"לתקן כאן\" on another card", async () => {
+    const { side, user } = await openFinish(written((d) => {
+      first(d, "background").notes = [
+        { kind: "age", text: "בפסקה כתוב גיל 6, ובתיק 5" },
+        { kind: "polish", text: "מילה כפולה: \"של של\"" },
+      ];
+      first(d, "referral").notes = [{ kind: "term", text: "כתוב «גן»; בשאר הדוח «מסגרת»" }];
+    }));
+    const check = (await within(side).findByRole("button", { name: /כדאי לבדוק/ })).closest("section") as HTMLElement;
+    const ageCard = cardOf(within(check).getByText("גיל שלא תואם את פרטי התיק"));
+    await user.click(within(ageCard).getByRole("button", { name: "לתקן כאן" }));
+    const box = within(ageCard).getByRole("textbox", { name: "תיקון הפסקה" });
+    await user.clear(box);
+    await user.type(box, "נוסח חדש ובדוי שלה.");
+    // Another paragraph's card cannot open a second editor over hers.
+    const termCard = cardOf(within(check).getByText("מונח מקצועי"));
+    expect(within(termCard).queryByRole("button", { name: "לתקן כאן" })).toBeNull();
+    // The same paragraph in the proofreading list: the editor moves there with her text.
+    await user.click(head(side, /ליטוש ניסוח/) as HTMLElement);
+    const polish = (head(side, /ליטוש ניסוח/) as HTMLElement).closest("section") as HTMLElement;
+    await user.click(within(cardOf(within(polish).getByText("מילה כפולה"))).getByRole("button", { name: "לתקן כאן" }));
+    expect(within(polish).getByRole("textbox", { name: "תיקון הפסקה" })).toHaveValue("נוסח חדש ובדוי שלה.");
+    expect(within(side).getAllByRole("textbox", { name: "תיקון הפסקה" })).toHaveLength(1);
+    // Once she is done, the other card can be fixed here again.
+    await user.click(within(polish).getByRole("button", { name: "ביטול" }));
+    expect(within(cardOf(within(check).getByText("מונח מקצועי"))).getByRole("button", { name: "לתקן כאן" })).toBeInTheDocument();
+  });
+
   it("a place marked to complete is fixed right here, through the core; the file goes out either way", async () => {
     const { side, user, calls, view, caseId } = await openFinish(reshape(bare), {
       caseOf: async (c, noam) => {
@@ -472,6 +500,41 @@ describe("the finish page", () => {
     expect(within(side).queryByText("שורה בלי סעיף")).toBeNull();
     expect(count(head(side, /כדאי לבדוק/))).toBe("1");
     expect(within(side).getByText(/נמצאו 2 הערות\. הן ברשימה "כדאי לבדוק"\./)).toBeInTheDocument();
+  });
+
+  it("notes of the check of the whole report with the same words about other sections are each their own card, and leaving one leaves only it", async () => {
+    const shaped = written();
+    const same = "אותו משפט מופיע בשני הסעיפים.";
+    const errors = vi.spyOn(console, "error");
+    try {
+      const { side, user } = await openFinish(async (cmd, args, core) => {
+        if (cmd === "report_check_setting") return { on: true, cents_per_check: 15 };
+        if (cmd === "prepare_report_check") return prepared({ approval_id: "a1" });
+        if (cmd === "send_report_check") {
+          return {
+            notes: [
+              { kind: "repetition", sections: ["referral", "background"], note: same },
+              { kind: "repetition", sections: ["kindergarten", "summary"], note: same },
+              // The very same note twice is one card.
+              { kind: "repetition", sections: ["kindergarten", "summary"], note: same },
+            ],
+            checked: ["referral", "summary"], demo: false,
+          };
+        }
+        return shaped(cmd, args, core);
+      });
+      await waitFor(() => expect(status(side)).toHaveTextContent("הדוח מוכן להוצאה."));
+      await user.click(await within(side).findByRole("button", { name: "לבדוק את הדוח כולו" }));
+      await waitFor(() => expect(within(side).getAllByText(same)).toHaveLength(2));
+      expect(count(head(side, /כדאי לבדוק/))).toBe("2");
+      const firstCard = cardOf(within(side).getAllByText(same)[0] as HTMLElement);
+      await user.click(within(firstCard).getByRole("button", { name: "בסדר, להשאיר" }));
+      expect(within(side).getAllByText(same)).toHaveLength(1);
+      expect(count(head(side, /כדאי לבדוק/))).toBe("1");
+      expect(errors.mock.calls.some((c) => String(c[0]).includes("same key"))).toBe(false);
+    } finally {
+      errors.mockRestore();
+    }
   });
 
   it("a check that fails says why, in Hebrew, instead of waiting forever", async () => {
