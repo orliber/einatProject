@@ -22,7 +22,7 @@ function settingsPane(page: Page, label: string) {
 }
 
 async function openSettings(page: Page, pane: string): Promise<void> {
-  await page.getByRole("navigation", { name: "ניווט ראשי" }).getByRole("button", { name: "הגדרות" }).click();
+  await page.getByRole("button", { name: "הגדרות", exact: true }).click();
   await settingsPane(page, pane).click();
   await expect(settingsPane(page, pane)).toHaveAttribute("aria-current", "page");
 }
@@ -495,7 +495,7 @@ test("the last minute before the idle lock offers to keep working, and the lock 
   await review.click();
 
   // Into a case, then the lock from its menu.
-  await page.getByRole("navigation", { name: "ניווט ראשי" }).getByRole("button", { name: "תיקים" }).click();
+  await page.getByRole("navigation", { name: "ניווט ראשי" }).getByRole("button", { name: "כתיבת הדוחות" }).click();
   await page.getByRole("button", { name: /בתיק של נועם$/ }).click();
   await expect(page.locator(".case-child")).toContainText("נועם");
   await page.getByRole("button", { name: /^עוד פעולות/ }).click();

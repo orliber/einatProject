@@ -22,6 +22,7 @@ import { unsavedGuard } from "./leaveGuard";
 import { noteLockReason } from "./lockReason";
 import type { SettingsPane } from "./screens/settingsPanes";
 import type { ClinicTab } from "./screens/clinic/tabs";
+import { areaOf, homeOf, lastArea, rememberArea } from "./areas";
 
 // The pages she opens rarely load on their own, so the first paint and the case pages carry
 // only what they need; they are fetched in the background right after the vault opens.
@@ -111,7 +112,8 @@ export function useApp(): AppApi {
 
 export function App() {
   const [status, setStatus] = useState<AppStatus | null>(null);
-  const [route, setRoute] = useState<Route>({ name: "cases" });
+  // The program opens in the part she worked in last (D-191).
+  const [route, setRoute] = useState<Route>(() => homeOf(lastArea()));
   const [toast, setToast] = useState<ToastNotice | null>(null);
   const [coreDown, setCoreDown] = useState(false);
   // Setup stays on screen until it is finished, even though the vault exists (and is
@@ -184,7 +186,7 @@ export function App() {
     // What she was typing a moment ago reaches the core first, which keeps it as it locks.
     await holdNow();
     await ipc.lock().catch(() => undefined);
-    setRoute({ name: "cases" });
+    setRoute(homeOf(lastArea()));
     await refresh();
   }, [refresh]);
 
@@ -285,12 +287,12 @@ export function App() {
         <SetupScreen status={status}
           onCreated={() => { setInSetup(true); void refresh(); }}
           onDone={async () => { setInSetup(false); await refresh(); }}
-          onRestored={(s) => { setInSetup(false); setStatus(s); setRoute({ name: "cases" }); }} />
+          onRestored={(s) => { setInSetup(false); setStatus(s); setRoute(homeOf(lastArea())); }} />
       </Suspense>
     );
   }
   if (!status.unlocked) {
-    return <LockScreen status={status} onUnlocked={(s) => { setStatus(s); setRoute({ name: "cases" }); }} />;
+    return <LockScreen status={status} onUnlocked={(s) => { setStatus(s); setRoute(homeOf(lastArea())); }} />;
   }
 
   return (
@@ -324,6 +326,11 @@ function Shell(props: {
     if (unsavedGuard()) setLeaving(r);
     else setRoute(r);
   }, [setRoute]);
+  // The part she is in is where the program opens next time (the settings belong to neither).
+  useEffect(() => {
+    const area = areaOf(route.name);
+    if (area) rememberArea(area);
+  }, [route.name]);
   const api = useMemo<AppApi>(
     () => ({ status, route, go, refresh, notify, fail, lockNow, showShortcuts }),
     [status, route, go, refresh, notify, fail, lockNow, showShortcuts],

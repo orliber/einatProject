@@ -1,6 +1,7 @@
 // The clinic's shared building blocks: how a patient's name, an amount, a visit and an alert
 // look on every tab, so the tabs only arrange them. Everything shown is plain text.
 import { createContext, useCallback, useContext, useId, useMemo, useState, type ReactNode } from "react";
+import { useDiscreet } from "../../discreet";
 import { Dialog, ErrorLine, Skeleton, WarnIcon } from "../../components/ui";
 import { failureFor } from "../../errors";
 import type { Alert } from "../../ipc/generated/Alert";
@@ -18,12 +19,8 @@ import "./ClinicScreen.css";
 
 // ------------------------------------------------------------------ the clinic's context
 
-/** Discreet mode: on while a family in the room may see the screen. */
-export const DiscreetContext = createContext(false);
-
-export function useDiscreet(): boolean {
-  return useContext(DiscreetContext);
-}
+/** Discreet mode: one switch for the whole program, in the top bar (D-192). */
+export { useDiscreet };
 
 /** Where a clinic screen can send her: a patient's card, or another tab. Both go through the
  *  app's route, so "back" and a link from another tab land in the same place. */

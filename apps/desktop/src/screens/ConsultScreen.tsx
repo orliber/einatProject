@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useShownName } from "../discreet";
 import { getKept, useKept } from "../kept";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp } from "../App";
@@ -97,6 +98,7 @@ function Typing({ since, approval }: { since: number; approval: string | null })
 
 export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   const { fail, status } = useApp();
+  const shown = useShownName();
   const ai = useAi();
   const qc = useQueryClient();
   const cases = useQuery({ queryKey: ["cases"], queryFn: ipc.listCases });
@@ -135,7 +137,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   const savedLabel = saved.data?.find((c) => c.id === conversation)?.case_label;
   const scopeLabel = scope === null
     ? "שאלה כללית · בלי פרט מתיק"
-    : selectedCase ? `על התיק של ${selectedCase.child_name ?? selectedCase.meta.code}`
+    : selectedCase ? `על התיק של ${selectedCase.child_name ? shown(selectedCase.child_name) : selectedCase.meta.code}`
       : savedLabel ? `על התיק של ${savedLabel}` : "על תיק שכבר לא ברשימה";
 
   // Follow the conversation down, like any chat.
@@ -258,7 +260,7 @@ export function ConsultScreen({ caseId }: { caseId?: string | undefined }) {
   const locked = conversation !== null; // An open conversation stays with its case.
   // While a question is on its way, the conversation on screen must stay the same one.
   const inFlight = busy || waitingSince !== null || review !== null;
-  const title = selectedCase ? `שאלה על ${selectedCase.child_name ?? selectedCase.meta.code}` : "שאלה מקצועית";
+  const title = selectedCase ? `שאלה על ${selectedCase.child_name ? shown(selectedCase.child_name) : selectedCase.meta.code}` : "שאלה מקצועית";
 
   return (
     <div className="page page-fit">

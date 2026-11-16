@@ -10,5 +10,5 @@ export const CLINIC_TABS: { id: ClinicTab; label: string }[] = [
   { id: "waiting", label: "המתנה" },
   { id: "tasks", label: "מעקבים" },
   { id: "money", label: "כספים" },
-  { id: "settings", label: "הגדרות" },
+  { id: "settings", label: "הגדרות הקליניקה" },
 ];

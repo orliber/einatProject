@@ -18,6 +18,7 @@ import { FolderTree } from "./cases/FolderTree";
 import { approvedCount, caseStatus, totalSections, type CaseStatus } from "./cases/caseStatus";
 import "./CasesScreen.css";
 import { useAi } from "../ai";
+import { useShownName } from "../discreet";
 
 const TRASH_DAYS = 30;
 
@@ -150,6 +151,7 @@ let sinceDismissed: string | null = null;
 
 export function CasesScreen() {
   const { go, fail, status, notify } = useApp();
+  const shown = useShownName();
   const ai = useAi();
   const qc = useQueryClient();
   const cases = useQuery({ queryKey: ["cases"], queryFn: ipc.listCases });
@@ -270,7 +272,8 @@ export function CasesScreen() {
   const trashCount = trash.data?.length ?? 0;
 
   // ---------------------------------------------------------------- moving
-  const caseName = (c: CaseSummary) => c.child_name ?? c.meta.code;
+  // Discreet mode (D-192): initials in place of the child's name, in the list and in every notice.
+  const caseName = (c: CaseSummary) => (c.child_name ? shown(c.child_name) : c.meta.code);
   const placeName = (id: string | null) => (id ? `"${byId.get(id)?.name ?? ""}"` : "הרמה העליונה");
   /** Moves a case (never copies: a case has one folder), with "ביטול" on the notice. Throws when refused. */
   const moveCase = async (c: CaseSummary, to: string | null) => {
@@ -411,7 +414,7 @@ export function CasesScreen() {
           <section className="resume" aria-label="להמשיך איפה שהפסקת">
             <span className="resume-eyebrow">להמשיך איפה שהפסקת:</span>
             <span className="resume-text">
-              <strong className="serif resume-name">{resume.child_name ?? resume.meta.code}</strong>
+              <strong className="serif resume-name">{caseName(resume)}</strong>
               {" · "}{resumeStatus.word}{resumeStatus.steps[1] === "now" ? `, ${resumeStatus.detail}` : ""}
               {resume.meta.current_section ? <> · <strong>הבא:</strong> {resume.meta.current_section}</> : null}
             </span>
@@ -579,7 +582,7 @@ export function CasesScreen() {
                                     </span>
                                     <div className="min0">
                                       <div className="case-name serif">
-                                        {c.child_name ?? "ללא שם"}
+                                        {c.child_name ? shown(c.child_name) : "ללא שם"}
                                         {c.meta.follows && <span className="chip chip-sand follow-chip">מעקב</span>}
                                       </div>
                                       <div className="small muted ellipsis">
@@ -682,6 +685,7 @@ export function CasesScreen() {
 }
 
 function TrashList(props: { cases: CaseSummary[]; pathOf: (id: string | null) => string; onRestore: (c: CaseSummary) => void; onPurge: (c: CaseSummary) => void }) {
+  const shown = useShownName();
   const [now] = useState(() => Date.now() / 1000);
   const daysLeft = (c: CaseSummary) => Math.max(0, TRASH_DAYS - Math.floor((now - (c.deleted_at ?? 0)) / 86_400));
   if (!props.cases.length) {
@@ -696,7 +700,7 @@ function TrashList(props: { cases: CaseSummary[]; pathOf: (id: string | null) =>
           {props.cases.map((c) => (
             <tr key={c.id}>
               <td>
-                <div className="case-name serif">{c.child_name ?? "ללא שם"}</div>
+                <div className="case-name serif">{c.child_name ? shown(c.child_name) : "ללא שם"}</div>
                 <div className="small muted">{[c.meta.code, c.folder_id && props.pathOf(c.folder_id) ? `היה ב: ${props.pathOf(c.folder_id)}` : ""].filter(Boolean).join(" · ")}</div>
               </td>
               <td className="small">{c.deleted_at ? updated(c.deleted_at) : ""} · {goesIn(daysLeft(c))}</td>

@@ -1,11 +1,11 @@
-/* The bar above cases, consultation and settings (canvas "תיקים"). */
+/* The bar above every page outside a case (canvas "תיקים", D-191). */
 .topbar {
   height: 64px;
   flex-shrink: 0;
   padding: 0 32px;
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 16px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
@@ -26,12 +26,73 @@
   font-weight: 700;
   color: var(--ink);
 }
-.topbar-nav {
-  display: flex;
-  align-self: stretch;
+/* The program's two parts (D-191): one switch of two wide buttons, so it reads as "where am I"
+   and not as one more link. The pages of the part sit in the row under the bar. */
+.topbar-areas {
+  display: inline-flex;
   gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--sand);
+  border: 1px solid var(--line);
 }
-.topbar-link {
+.topbar-area {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+.topbar-area:hover {
+  color: var(--ink);
+}
+.topbar-area-on,
+.topbar-area-on:hover {
+  background: var(--surface);
+  color: var(--primary);
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
+}
+/* Discreet mode: a quiet button that turns sand-coloured while it is on. */
+.topbar-discreet {
+  gap: 6px;
+}
+.topbar-discreet-on {
+  background: var(--warn-soft);
+  border-color: var(--warn-line);
+  color: var(--warn-ink);
+  font-weight: 600;
+}
+.topbar-settings-on {
+  background: var(--primary-soft);
+  border-color: var(--primary-line);
+  color: var(--primary);
+}
+
+/* The row of the pages of the part she is in: quieter than the bar, under it. */
+.subbar {
+  flex-shrink: 0;
+  display: flex;
+  gap: 4px;
+  min-height: 46px;
+  padding: 0 32px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+@media (max-width: 1200px) {
+  .subbar {
+    padding: 0 16px;
+  }
+}
+.subbar-link {
   display: inline-flex;
   align-items: center;
   padding: 0 14px;
@@ -42,10 +103,11 @@
   font-size: var(--text-md);
   font-weight: 500;
 }
-.topbar-link:hover {
+.subbar-link:hover {
   color: var(--ink);
 }
-.topbar-active {
+.subbar-on,
+.subbar-on:hover {
   color: var(--ink);
   font-weight: 600;
   border-bottom-color: var(--primary);
@@ -122,25 +184,34 @@
 
 /* A laptop screen, or a larger text size (measured after the zoom): the bar keeps to one
    line. Last, so it wins over the rules above. */
-@container (max-width: 1150px) {
-  .topbar-link {
-    padding: 0 10px;
-  }
+/* The two parts, discreet mode and the lock come first: "מוצפן" steps back before them. */
+@container (max-width: 1340px) {
   .topbar-safe {
     display: none;
   }
 }
-/* A laptop with larger text: the program's name steps back (its lock stays), so the tabs
-   (five, with "קליניקה") and "נעילה" stay on screen. */
+@container (max-width: 1150px) {
+  .topbar-area {
+    padding: 0 12px;
+  }
+  .topbar-discreet-text {
+    display: none;
+  }
+}
+/* A laptop with larger text: the program's name steps back (its lock stays), so the two
+   parts and "נעילה" stay on screen. */
 @container (max-width: 960px) {
   .topbar-brand-name {
     display: none;
   }
 }
-/* The largest text on a laptop: the tabs sit closer. */
+/* The largest text on a laptop: the parts sit closer, and their icons step back. */
 @container (max-width: 800px) {
-  .topbar-link {
-    padding: 0 6px;
+  .topbar-area {
+    padding: 0 8px;
+  }
+  .topbar-area svg {
+    display: none;
   }
   .topbar-beta {
     margin-inline-start: 4px;

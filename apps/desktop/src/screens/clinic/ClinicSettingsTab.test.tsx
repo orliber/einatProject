@@ -317,7 +317,7 @@ describe("the clinic's settings", () => {
     await waitFor(() => expect(notes).toEqual(["השינויים בהגדרות הקליניקה עוד לא נשמרו. הם מחכים בלשונית \"הגדרות\"."]));
     expect(sentSettings(requests)).toHaveLength(0);
 
-    await user.click(screen.getByRole("tab", { name: "הגדרות" }));
+    await user.click(screen.getByRole("tab", { name: "הגדרות הקליניקה" }));
     await form();
     expect(screen.getByLabelText("שישי")).toBeChecked();
     expect(screen.getByLabelText("ימים עד שמצביעים על חוב")).toHaveValue("45");
@@ -330,7 +330,7 @@ describe("the clinic's settings", () => {
     expect(screen.getByLabelText("ימים עד שמצביעים על חוב")).toHaveValue("30");
     expect(saveButton()).toBeDisabled();
     await user.click(screen.getByRole("tab", { name: "מעקבים" }));
-    await user.click(screen.getByRole("tab", { name: "הגדרות" }));
+    await user.click(screen.getByRole("tab", { name: "הגדרות הקליניקה" }));
     await form();
     expect(screen.queryByText(/עוד לא נשמרו, והם כאן/)).toBeNull();
     expect(notes).toHaveLength(1);

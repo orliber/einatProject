@@ -255,9 +255,14 @@ name becomes "רב" ("שלום רב"); the date is `15.11.2026`, the time `09:30
   the father), so a session record sent to the case later has their names masked by the filter.
 
 ### The window
-`Route` gets `{ name: "clinic"; tab?: ClinicTab; patientId?: string }`; the top bar gets
-"קליניקה" with a "בטא" badge; the module is a lazy chunk. Tabs: היום · יומן · מטופלים · המתנה ·
-מעקבים · כספים · הגדרות. Data through `@tanstack/react-query` (`["clinic", …]` keys, invalidated
+`Route` gets `{ name: "clinic"; tab?: ClinicTab; patientId?: string }`; the module is a lazy chunk.
+Since D-191 the clinic is one of the program's two parts: the top bar's switch has "ניהול הקליניקה"
+with a "בטא" badge, and the clinic's tabs are the row under the bar (`components/TopBar.tsx`,
+still a tab list with arrow keys): היום · יומן · מטופלים · המתנה · מעקבים · כספים · הגדרות הקליניקה.
+Discreet mode is the program's one switch in the top bar (`src/discreet.ts`, D-192); the clinic
+reads it through `useDiscreet`/`useShownName` in `parts.tsx` as before. From a linked case, the
+case's "עוד פעולות" menu opens the card (D-195).
+Data through `@tanstack/react-query` (`["clinic", …]` keys, invalidated
 after a write). Loading shows `Skeleton`; search is debounced; quick actions (marking a visit, a
 task done) update the screen first and roll back on failure; long lists render in pages.
 RTL, keyboard reachable, labelled, both colour themes (only tokens from `styles/tokens.css`).
@@ -266,4 +271,3 @@ RTL, keyboard reachable, labelled, both colour themes (only tokens from `styles/
 - ייצוא יומן ההכנסות לקובץ (לרואה החשבון): קובץ עם שמות מחוץ לכספת. ממתין להחלטה של עינת.
 - תזכורות אוטומטיות ב-SMS או ב-WhatsApp: שירות בתשלום ויציאה לרשת.
 - סנכרון עם יומן גוגל, אפליקציה לנייד, חשבוניות: ראו הטבלה למעלה.
-- קישור מתוך מסך התיק אל כרטיס המטופל: ייכנס אחרי ששני השרשורים האחרים שנוגעים במסכי התיק יתמזגו.
